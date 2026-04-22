@@ -1,21 +1,14 @@
 /**
- * LLMClient — thin streaming client for the agent loop.
- *
+ * LLMClient — thin Anthropic-streaming client pointed at api-proxy.
  * Design reference: §5.3, §9.2.
  *
  * Phase 1b: Anthropic `/v1/messages` streaming with tool_use content
  * blocks. Parses the SSE wire format into a normalised event stream
  * consumed by Turn.execute's agent loop.
  *
- * Phase 2: Multi-provider support via `LLMProvider` interface. The
- * class now delegates streaming to a pluggable provider while keeping
- * the existing constructor and `stream()` signature fully backward
- * compatible. Use `LLMClient.fromProvider()` to create an instance
- * backed by any provider (Anthropic, OpenAI, Google).
- *
- * We do NOT use official SDKs — a zero-dep fetcher + SSE parser stays
- * honest about exactly what flows over the wire and what the loop
- * depends on.
+ * We do NOT use the official SDK — a zero-dep fetcher + SSE parser
+ * stays honest about exactly what flows over the wire and what the
+ * loop depends on.
  */
 
 import http from "node:http";
@@ -23,7 +16,6 @@ import https from "node:https";
 import { URL } from "node:url";
 import { shouldEnableThinkingByDefault, getCapability } from "../llm/modelCapabilities.js";
 import type { LLMProvider } from "../llm/LLMProvider.js";
-import { parseAnthropicSse, consumeText } from "../llm/sseUtils.js";
 
 export interface LLMClientOptions {
   apiProxyUrl: string; // e.g. http://api-proxy.clawy-system.svc.cluster.local:3001
@@ -114,10 +106,6 @@ export class LLMClient {
     LLMClientOptions;
   private readonly provider: LLMProvider | null;
 
-  /**
-   * Create an LLMClient backed by the Clawy api-proxy infrastructure.
-   * This is the original constructor — fully backward compatible.
-   */
   constructor(options: LLMClientOptions) {
     this.opts = {
       anthropicVersion: "2023-06-01",
@@ -128,23 +116,16 @@ export class LLMClient {
   }
 
   /**
-   * Create an LLMClient backed by any `LLMProvider` implementation
-   * (Anthropic direct, OpenAI, Google, or custom).
-   *
-   * ```ts
-   * import { createProvider } from "../llm/createProvider.js";
-   * const provider = createProvider({ provider: "openai", apiKey: "sk-..." });
-   * const client = LLMClient.fromProvider(provider);
-   * ```
+   * Create an LLMClient backed by a multi-provider implementation.
+   * Used in OSS mode where we talk directly to Anthropic/OpenAI/Google
+   * instead of going through api-proxy.
    */
   static fromProvider(provider: LLMProvider): LLMClient {
-    // Create with dummy options; the provider will handle everything.
     const client = new LLMClient({
       apiProxyUrl: "http://unused",
       gatewayToken: "unused",
       defaultModel: "unused",
     });
-    // Override the provider field via Object.defineProperty to bypass readonly
     (client as unknown as { provider: LLMProvider | null }).provider = provider;
     return client;
   }
@@ -153,30 +134,22 @@ export class LLMClient {
    * Stream a single completion call. Yields normalised LLMEvents
    * until the upstream server closes the stream or errors.
    *
-   * If an `LLMProvider` is set (via `fromProvider`), delegates to it.
-   * Otherwise falls back to the legacy api-proxy HTTP path.
-   *
    * The caller is responsible for accumulating tool_use input fragments
    * (via `tool_use_input_delta`) and materialising the final structured
    * input when `block_stop` arrives for that block.
    */
   async *stream(req: LLMStreamRequest): AsyncGenerator<LLMEvent, void, void> {
+    // OSS mode: delegate to multi-provider
     if (this.provider) {
       yield* this.provider.stream(req);
       return;
     }
-
-    // ── Legacy api-proxy path (backward compatible) ──
-    yield* this.streamLegacy(req);
-  }
-
-  /**
-   * Original api-proxy streaming implementation, preserved for backward
-   * compatibility with existing Clawy infrastructure deployments.
-   */
-  private async *streamLegacy(req: LLMStreamRequest): AsyncGenerator<LLMEvent, void, void> {
     const model = req.model ?? this.opts.defaultModel;
-    // T4-17: gate thinking on model capability.
+    // T4-17: gate thinking on model capability. If the caller passed
+    // an explicit thinking directive (adaptive or disabled) respect
+    // it; otherwise default to adaptive for models that support it
+    // and omit the field entirely for models that don't (e.g. Haiku),
+    // so we never send `thinking` to a model that may 400 on it.
     const thinking =
       req.thinking ??
       (shouldEnableThinkingByDefault(model)
@@ -231,4 +204,171 @@ export class LLMClient {
 
     for await (const evt of parseAnthropicSse(res)) yield evt;
   }
+}
+
+/**
+ * Consume the full body as text. Used on error paths.
+ */
+async function consumeText(res: http.IncomingMessage): Promise<string> {
+  const chunks: Buffer[] = [];
+  for await (const chunk of res) chunks.push(chunk as Buffer);
+  return Buffer.concat(chunks).toString("utf8");
+}
+
+/**
+ * Parse an Anthropic `/v1/messages` SSE stream into normalised LLMEvents.
+ *
+ * Anthropic SSE frame shape:
+ *   event: message_start
+ *   data: {...}
+ *
+ *   event: content_block_start
+ *   data: { "index": 0, "content_block": {...} }
+ *
+ *   event: content_block_delta
+ *   data: { "index": 0, "delta": { "type": "text_delta", "text": "..." } }
+ *
+ *   event: content_block_stop
+ *   data: { "index": 0 }
+ *
+ *   event: message_delta
+ *   data: { "delta": { "stop_reason": "end_turn" }, "usage": { "output_tokens": N } }
+ *
+ *   event: message_stop
+ */
+async function* parseAnthropicSse(
+  res: http.IncomingMessage,
+): AsyncGenerator<LLMEvent, void, void> {
+  let buffer = "";
+  let currentEvent = "";
+  type StopReason =
+    | "end_turn"
+    | "tool_use"
+    | "max_tokens"
+    | "stop_sequence"
+    | "refusal"
+    | "pause_turn"
+    | null;
+  let stopReason: StopReason = null;
+  let usage: LLMUsage = { inputTokens: 0, outputTokens: 0 };
+
+  for await (const chunk of res) {
+    buffer += (chunk as Buffer).toString("utf8");
+    const lines = buffer.split("\n");
+    buffer = lines.pop() ?? "";
+
+    for (const rawLine of lines) {
+      const line = rawLine.trimEnd();
+      if (line === "") {
+        currentEvent = "";
+        continue;
+      }
+      if (line.startsWith(":")) continue; // SSE comment
+      if (line.startsWith("event:")) {
+        currentEvent = line.slice(6).trim();
+        continue;
+      }
+      if (!line.startsWith("data:")) continue;
+      const dataStr = line.slice(5).trim();
+      if (!dataStr || dataStr === "[DONE]") continue;
+
+      let payload: Record<string, unknown>;
+      try {
+        payload = JSON.parse(dataStr);
+      } catch {
+        continue;
+      }
+
+      switch (currentEvent) {
+        case "message_start": {
+          const msg = (payload as { message?: { usage?: Partial<LLMUsage> } }).message;
+          const u = msg?.usage;
+          if (u) {
+            usage = {
+              inputTokens:
+                (u as { input_tokens?: number }).input_tokens ?? usage.inputTokens,
+              outputTokens:
+                (u as { output_tokens?: number }).output_tokens ?? usage.outputTokens,
+            };
+          }
+          break;
+        }
+        case "content_block_start": {
+          const idx = (payload as { index?: number }).index ?? 0;
+          const block = (payload as { content_block?: { type?: string; id?: string; name?: string } })
+            .content_block;
+          if (block?.type === "tool_use" && block.id && block.name) {
+            yield {
+              kind: "tool_use_start",
+              blockIndex: idx,
+              id: block.id,
+              name: block.name,
+            };
+          }
+          // text / thinking blocks emit their content via *_delta events
+          break;
+        }
+        case "content_block_delta": {
+          const idx = (payload as { index?: number }).index ?? 0;
+          const delta = (payload as { delta?: Record<string, unknown> }).delta;
+          if (!delta) break;
+          const t = (delta as { type?: string }).type;
+          if (t === "text_delta") {
+            const text = (delta as { text?: string }).text ?? "";
+            if (text) yield { kind: "text_delta", blockIndex: idx, delta: text };
+          } else if (t === "thinking_delta") {
+            const text = (delta as { thinking?: string }).thinking ?? "";
+            if (text) yield { kind: "thinking_delta", blockIndex: idx, delta: text };
+          } else if (t === "signature_delta") {
+            // Extended-thinking signature — Anthropic delivers the full
+            // signature as a single signature_delta at the end of the
+            // thinking block. MUST be preserved byte-identical for replay
+            // in subsequent assistant messages.
+            const sig = (delta as { signature?: string }).signature ?? "";
+            if (sig) yield { kind: "thinking_signature", blockIndex: idx, signature: sig };
+          } else if (t === "input_json_delta") {
+            const partial = (delta as { partial_json?: string }).partial_json ?? "";
+            yield { kind: "tool_use_input_delta", blockIndex: idx, partial };
+          }
+          break;
+        }
+        case "content_block_stop": {
+          const idx = (payload as { index?: number }).index ?? 0;
+          yield { kind: "block_stop", blockIndex: idx };
+          break;
+        }
+        case "message_delta": {
+          const delta = (payload as { delta?: { stop_reason?: string } }).delta;
+          if (delta?.stop_reason) {
+            stopReason = delta.stop_reason as StopReason;
+          }
+          const u = (payload as { usage?: { output_tokens?: number; input_tokens?: number } })
+            .usage;
+          if (u) {
+            if (typeof u.input_tokens === "number") usage.inputTokens = u.input_tokens;
+            if (typeof u.output_tokens === "number") usage.outputTokens = u.output_tokens;
+          }
+          break;
+        }
+        case "message_stop": {
+          yield { kind: "message_end", stopReason: stopReason ?? "end_turn", usage };
+          return;
+        }
+        case "error": {
+          const err = (payload as { error?: { type?: string; message?: string } }).error;
+          yield {
+            kind: "error",
+            code: err?.type ?? "upstream_error",
+            message: err?.message ?? "unknown",
+          };
+          return;
+        }
+        default:
+          break;
+      }
+    }
+  }
+
+  // Fallthrough — stream closed without message_stop
+  yield { kind: "message_end", stopReason: stopReason ?? null, usage };
 }

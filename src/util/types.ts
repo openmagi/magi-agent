@@ -3,7 +3,7 @@
  * Design reference: docs/plans/2026-04-19-clawy-core-agent-design.md §5.
  */
 
-export type ChannelType = "app" | "telegram" | "discord";
+export type ChannelType = "app" | "telegram" | "discord" | "internal";
 
 export interface ChannelRef {
   type: ChannelType;

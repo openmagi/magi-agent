@@ -31,6 +31,8 @@ import { HookRegistry } from "./hooks/HookRegistry.js";
 import { clearCircuitBreakerState } from "./hooks/builtin/repeatedFailureGuard.js";
 import { registerBuiltinHooks } from "./hooks/builtin/index.js";
 import { ContextEngine } from "./services/compact/ContextEngine.js";
+import { QmdManager } from "./services/memory/QmdManager.js";
+import { CompactionEngine } from "./services/memory/CompactionEngine.js";
 import { makeFileReadTool } from "./tools/FileRead.js";
 import { makeFileWriteTool } from "./tools/FileWrite.js";
 import { makeFileEditTool } from "./tools/FileEdit.js";
@@ -103,34 +105,21 @@ export interface AgentConfig {
   userId: string;
   /** OpenClaw-compatible path: /home/ocuser/.openclaw/workspace. */
   workspaceRoot: string;
-  /** Clawy Pro gateway token. Optional in OSS mode. */
   gatewayToken?: string;
-  /** Clawy Pro API proxy URL. Not used in OSS mode. */
   apiProxyUrl?: string;
-  /** Clawy Pro chat proxy URL. Not used in OSS mode. */
   chatProxyUrl?: string;
-  /** Clawy Pro Redis URL. Not used in OSS mode. */
   redisUrl?: string;
+  /** OSS mode: LLM provider selection. */
+  llmProvider?: "anthropic" | "openai" | "google";
+  llmApiKey?: string;
+  llmBaseUrl?: string;
+  agentName?: string;
+  agentInstructions?: string;
+  webhookUrl?: string;
+  webhookSecret?: string;
+  builtinHooks?: Record<string, boolean>;
   /** Default model for this bot. Overridable per-turn via smart-router. */
   model: string;
-
-  // ── OSS mode fields (populated from YAML config) ──────────────
-  /** LLM provider: anthropic, openai, or google. */
-  llmProvider?: "anthropic" | "openai" | "google";
-  /** LLM API key (from config file, not env). */
-  llmApiKey?: string;
-  /** Custom LLM base URL (e.g. local proxy). */
-  llmBaseUrl?: string;
-  /** Human-readable agent name. Default "Clawy Agent". */
-  agentName?: string;
-  /** Custom system instructions for the agent. */
-  agentInstructions?: string;
-  /** Webhook URL for outbound event delivery. */
-  webhookUrl?: string;
-  /** Webhook HMAC secret for signature verification. */
-  webhookSecret?: string;
-  /** Map of builtin hook names → enabled/disabled. */
-  builtinHooks?: Record<string, boolean>;
   telegramBotToken?: string;
   discordBotToken?: string;
   /**
@@ -199,6 +188,10 @@ export class Agent {
   readonly artifacts: ArtifactManager;
   /** Cron scheduler — post-Phase-3 OpenClaw parity. */
   readonly crons: CronScheduler;
+  /** Native hipocampus memory — qmd search index. */
+  readonly qmdManager: QmdManager;
+  /** Native hipocampus memory — compaction engine. */
+  compactionEngine!: CompactionEngine;
   /**
    * Built-in slash commands (`/compact`, `/reset`, `/status`). Ported
    * from OpenClaw so migrated bots keep the same inline UX. See
@@ -258,11 +251,23 @@ export class Agent {
 
   constructor(config: AgentConfig) {
     this.config = config;
-    this.llm = new LLMClient({
-      apiProxyUrl: config.apiProxyUrl ?? "",
-      gatewayToken: config.gatewayToken ?? "",
-      defaultModel: config.model,
-    });
+    // OSS mode: use multi-provider if llmProvider is set
+    if (config.llmProvider && config.llmApiKey) {
+      const { createProvider } = require("./llm/createProvider.js");
+      const provider = createProvider({
+        provider: config.llmProvider,
+        apiKey: config.llmApiKey,
+        baseUrl: config.llmBaseUrl,
+        defaultModel: config.model,
+      });
+      this.llm = LLMClient.fromProvider(provider);
+    } else {
+      this.llm = new LLMClient({
+        apiProxyUrl: config.apiProxyUrl ?? "",
+        gatewayToken: config.gatewayToken ?? "",
+        defaultModel: config.model,
+      });
+    }
     this.workspace = new Workspace(config.workspaceRoot);
     this.intent = new IntentClassifier(this.llm);
     this.hooks = new HookRegistry();
@@ -279,6 +284,11 @@ export class Agent {
     // below so they're available before the first turn even if no
     // crons exist yet.
     this.crons = new CronScheduler(config.workspaceRoot);
+    // Native hipocampus — qmd search. Started in start().
+    this.qmdManager = new QmdManager(
+      config.workspaceRoot,
+      (process.env.CORE_AGENT_VECTOR_SEARCH ?? "off").trim().toLowerCase() === "on",
+    );
     // Slash commands — built-in registry + reset-counter sidecar. The
     // three core commands (/compact, /reset, /status) are registered
     // right here (not in start()) so unit tests that skip start() still
@@ -494,6 +504,7 @@ export class Agent {
     // consult the tool registry for `tool.dangerous` metadata.
     const hookResult = registerBuiltinHooks(this.hooks, {
       workspaceRoot: this.config.workspaceRoot,
+      qmdManager: this.qmdManager,
       autoApprovalAgent: {
         getSessionPermissionMode: (sessionKey) => {
           const s = this.sessions.get(sessionKey);
@@ -633,6 +644,50 @@ export class Agent {
       );
     } catch (err) {
       console.warn(`[core-agent] cron hydrate failed: ${(err as Error).message}`);
+    }
+
+    // Native hipocampus memory — qmd index + compaction engine + daily cron.
+    try {
+      await this.qmdManager.start(); // fail-open
+      const compactionConfig = await CompactionEngine.loadConfig(
+        this.config.workspaceRoot,
+        this.config.model,
+      );
+      this.compactionEngine = new CompactionEngine(
+        this.config.workspaceRoot,
+        compactionConfig,
+        this.llm,
+      );
+      // Internal daily cron for compaction maintenance
+      this.crons.registerInternal({
+        name: "hipocampus-maintenance",
+        schedule: "0 3 * * *", // daily at 03:00
+        handler: async () => {
+          try {
+            const result = await this.compactionEngine.run();
+            if (result.compacted) await this.qmdManager.reindex();
+          } catch (err) {
+            console.warn(`[core-agent] hipocampus cron failed: ${(err as Error).message}`);
+          }
+        },
+      });
+      // Register compactor + flush hooks now that engine exists.
+      // These hooks were skipped in the initial registerBuiltinHooks call
+      // because compactionEngine wasn't available yet.
+      const compactorHook = (await import("./hooks/builtin/hipocampusCompactor.js")).makeHipocampusCompactorHook(
+        this.compactionEngine,
+        this.qmdManager,
+      );
+      this.hooks.register(compactorHook);
+      const flushHook = (await import("./hooks/builtin/hipocampusFlush.js")).makeHipocampusFlushHook(
+        this.config.workspaceRoot,
+      );
+      this.hooks.register(flushHook);
+      console.log(
+        `[core-agent] hipocampus: qmd=${this.qmdManager.isReady()} vector=${(process.env.CORE_AGENT_VECTOR_SEARCH ?? "off").trim().toLowerCase() === "on"} compactor+flush=registered`,
+      );
+    } catch (err) {
+      console.warn(`[core-agent] hipocampus init failed: ${(err as Error).message}`);
     }
 
     // C1 — channel adapters. Instantiated + started for each configured

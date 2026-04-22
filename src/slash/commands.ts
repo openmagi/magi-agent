@@ -11,6 +11,7 @@ import type { Session } from "../Session.js";
 import type { SseWriter } from "../transport/SseWriter.js";
 import type { SlashCommand, SlashCommandContext } from "./registry.js";
 import { ResetCounterStore } from "./resetCounters.js";
+import { flushMemory } from "../hooks/builtin/hipocampusFlush.js";
 
 /**
  * Write a synthetic assistant text response onto the `event: agent`
@@ -30,35 +31,43 @@ export function makeCompactCommand(agent: Agent): SlashCommand {
     name: "/compact",
     aliases: ["/compress"],
     description:
-      "Force an immediate compaction of the current session transcript.",
+      "Force an immediate compaction of the current session transcript + memory tree.",
     async handler(_args: string, ctx: SlashCommandContext): Promise<void> {
       const { session, sse } = ctx;
       const transcriptEntries = await session.transcript.readAll();
-      // tokenLimit=0 forces compaction regardless of current size.
-      // Errors (e.g. CompactionImpossibleError on a tiny model window)
-      // are caught so the slash command never wedges the SSE stream.
+
+      // 1. Transcript compaction (existing)
       try {
-        const boundary = await agent.contextEngine.maybeCompact(
+        await agent.contextEngine.maybeCompact(
           session,
           transcriptEntries,
           /*tokenLimit=*/ 0,
           agent.config.model,
         );
-        if (boundary) {
-          emitText(
-            sse,
-            "✅ Compaction complete. Summary boundary written.",
-          );
-        } else {
-          // Haiku failed / empty transcript — surfaced as a gentle note.
-          emitText(
-            sse,
-            "⚠️ Compaction skipped (empty transcript or summariser failure).",
-          );
-        }
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
-        emitText(sse, `⚠️ Compaction failed: ${msg}`);
+        emitText(sse, `⚠️ Transcript compaction failed: ${msg}`);
+      }
+
+      // 2. Hipocampus memory compaction (forced, no cooldown)
+      if (agent.compactionEngine && agent.qmdManager) {
+        try {
+          const result = await agent.compactionEngine.run(true);
+          if (result.compacted) {
+            await agent.qmdManager.reindex();
+            emitText(
+              sse,
+              `✅ Compaction complete — transcript + memory tree (daily=${result.stats.daily.length} weekly=${result.stats.weekly.length} monthly=${result.stats.monthly.length}).`,
+            );
+          } else {
+            emitText(sse, "✅ Transcript compacted. Memory tree: nothing to compact.");
+          }
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          emitText(sse, `✅ Transcript compacted. ⚠️ Memory tree failed: ${msg}`);
+        }
+      } else {
+        emitText(sse, "✅ Compaction complete. Summary boundary written.");
       }
     },
   };
@@ -77,6 +86,15 @@ export function makeResetCommand(
     async handler(_args: string, ctx: SlashCommandContext): Promise<void> {
       const { session, sse } = ctx;
       const ref = session.meta.channel;
+
+      // Flush memory before reset so no context is lost
+      try {
+        const transcript = await session.transcript.readAll();
+        await flushMemory(agent.config.workspaceRoot, transcript);
+      } catch {
+        // flush failure is non-fatal
+      }
+
       const next = await resetStore.bump(ref);
       // Audit — so operators can trace who triggered a reset.
       // AuditLog.append is already best-effort (swallows write errors

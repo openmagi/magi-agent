@@ -112,7 +112,7 @@ describe("Builtin slash commands", () => {
     expect(boundaries).toHaveLength(1);
     // The SSE writer's accumulated text should contain the success
     // notice from makeCompactCommand.
-    expect(capture.finalText()).toContain("Compaction complete");
+    expect(capture.finalText()).toContain("compacted");
     // Turn registered as committed without running the real LLM loop.
     expect(capture.turnStatus()).toBe("committed");
   });

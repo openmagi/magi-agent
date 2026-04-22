@@ -61,7 +61,15 @@ export interface CronRecord {
    * back-reference guards against index/array drift).
    */
   sessionKey?: string;
+  /**
+   * Internal system crons (e.g. hipocampus maintenance). Not visible
+   * to the bot via CronList tool, not deletable by the bot, always
+   * durable. Fired via dedicated handler instead of fireHandler.
+   */
+  internal?: boolean;
 }
+
+export type InternalCronHandler = () => Promise<void>;
 
 export type CronFireHandler = (cron: CronRecord) => Promise<void>;
 
@@ -78,10 +86,11 @@ const MAX_CONSECUTIVE_FAILURES_DEFAULT = 5;
 
 export class CronScheduler {
   private readonly crons = new Map<string, CronRecord>();
+  private readonly internalHandlers = new Map<string, InternalCronHandler>();
   private readonly indexPath: string;
   private ticker: ReturnType<typeof setInterval> | null = null;
   private readonly tickMs: number;
-  private readonly now: () => number;
+  readonly nowFn: () => number;
   private readonly maxConsecutiveFailures: number;
   private fireHandler: CronFireHandler | null = null;
 
@@ -91,7 +100,7 @@ export class CronScheduler {
   ) {
     this.indexPath = path.join(workspaceRoot, "core-agent", "crons", "index.json");
     this.tickMs = options.tickMs ?? 30_000;
-    this.now = options.now ?? (() => Date.now());
+    this.nowFn = options.now ?? (() => Date.now());
     this.maxConsecutiveFailures =
       options.maxConsecutiveFailures ?? MAX_CONSECUTIVE_FAILURES_DEFAULT;
   }
@@ -146,12 +155,45 @@ export class CronScheduler {
   }
 
   private async persist(): Promise<void> {
-    // Only durable crons are written to the on-disk index. Session-
-    // scoped (non-durable) crons live in memory + on Session.meta.crons
-    // and are dropped by Session.close() — persisting them would make
-    // them accidentally survive a pod restart.
-    const snapshot = [...this.crons.values()].filter((c) => c.durable);
+    // Only durable non-internal crons are written to the on-disk index.
+    // Session-scoped (non-durable) crons live in memory only. Internal
+    // crons (e.g. hipocampus maintenance) are re-registered on every
+    // Agent.start() and never persisted.
+    const snapshot = [...this.crons.values()].filter((c) => c.durable && !c.internal);
     await atomicWriteJson(this.indexPath, snapshot);
+  }
+
+  /**
+   * Register an internal system cron. Internal crons:
+   * - Are always durable (survive pod restart)
+   * - Cannot be deleted by the bot (excluded from CronDelete)
+   * - Are excluded from CronList tool output
+   * - Fire via dedicated handler instead of fireHandler
+   * - Idempotent: silently returns if already registered
+   */
+  registerInternal(opts: {
+    name: string;
+    schedule: string;
+    handler: InternalCronHandler;
+  }): void {
+    const cronId = `internal:${opts.name}`;
+    if (this.crons.has(cronId)) return;
+    const record: CronRecord = {
+      cronId,
+      botId: "",
+      userId: "",
+      expression: opts.schedule,
+      prompt: "",
+      deliveryChannel: { type: "internal" as ChannelRef["type"], channelId: "" },
+      enabled: true,
+      createdAt: this.nowFn(),
+      nextFireAt: getNextFireAt(opts.schedule, new Date(this.nowFn())).getTime(),
+      consecutiveFailures: 0,
+      durable: true,
+      internal: true,
+    };
+    this.crons.set(cronId, record);
+    this.internalHandlers.set(cronId, opts.handler);
   }
 
   /**
@@ -159,7 +201,7 @@ export class CronScheduler {
    * so tests can advance a mock clock + call tick() directly.
    */
   async tick(): Promise<void> {
-    const currentTime = this.now();
+    const currentTime = this.nowFn();
     const due: CronRecord[] = [];
     for (const c of this.crons.values()) {
       if (!c.enabled) continue;
@@ -167,10 +209,14 @@ export class CronScheduler {
     }
     for (const cron of due) {
       try {
-        if (this.fireHandler) {
+        if (cron.internal) {
+          // Internal crons use their dedicated handler
+          const handler = this.internalHandlers.get(cron.cronId);
+          if (handler) await handler();
+        } else if (this.fireHandler) {
           await this.fireHandler(cron);
         }
-        cron.lastFiredAt = this.now();
+        cron.lastFiredAt = this.nowFn();
         cron.consecutiveFailures = 0;
       } catch (err) {
         cron.consecutiveFailures += 1;
@@ -182,7 +228,7 @@ export class CronScheduler {
         );
       } finally {
         try {
-          cron.nextFireAt = getNextFireAt(cron.expression, new Date(this.now())).getTime();
+          cron.nextFireAt = getNextFireAt(cron.expression, new Date(this.nowFn())).getTime();
         } catch {
           cron.enabled = false;
         }
@@ -204,7 +250,7 @@ export class CronScheduler {
     sessionKey?: string;
   }): Promise<CronRecord> {
     // Throws if expression invalid — callers surface as tool error.
-    const nextFireAt = getNextFireAt(opts.expression, new Date(this.now())).getTime();
+    const nextFireAt = getNextFireAt(opts.expression, new Date(this.nowFn())).getTime();
     const durable = opts.durable === true;
     const record: CronRecord = {
       cronId: ulid(),
@@ -215,7 +261,7 @@ export class CronScheduler {
       deliveryChannel: { ...opts.deliveryChannel },
       ...(opts.description ? { description: opts.description } : {}),
       enabled: true,
-      createdAt: this.now(),
+      createdAt: this.nowFn(),
       nextFireAt,
       consecutiveFailures: 0,
       durable,
@@ -229,10 +275,16 @@ export class CronScheduler {
     return record;
   }
 
-  list(filter?: { enabled?: boolean }): CronRecord[] {
-    const all = [...this.crons.values()];
-    if (filter?.enabled === undefined) return all;
-    return all.filter((c) => c.enabled === filter.enabled);
+  list(filter?: { enabled?: boolean; includeInternal?: boolean }): CronRecord[] {
+    let all = [...this.crons.values()];
+    // Internal crons are hidden from bot-facing tools by default
+    if (!filter?.includeInternal) {
+      all = all.filter((c) => !c.internal);
+    }
+    if (filter?.enabled !== undefined) {
+      all = all.filter((c) => c.enabled === filter.enabled);
+    }
+    return all;
   }
 
   get(cronId: string): CronRecord | null {
@@ -252,7 +304,7 @@ export class CronScheduler {
     if (!c) throw new Error(`cron not found: ${cronId}`);
     if (patch.expression !== undefined) {
       // Recompute nextFireAt when schedule changes.
-      const nextFireAt = getNextFireAt(patch.expression, new Date(this.now())).getTime();
+      const nextFireAt = getNextFireAt(patch.expression, new Date(this.nowFn())).getTime();
       c.expression = patch.expression;
       c.nextFireAt = nextFireAt;
     }
@@ -267,6 +319,10 @@ export class CronScheduler {
   }
 
   async delete(cronId: string): Promise<boolean> {
+    const record = this.crons.get(cronId);
+    if (record?.internal) {
+      throw new Error("internal crons cannot be deleted");
+    }
     const existed = this.crons.delete(cronId);
     if (existed) await this.persist();
     return existed;

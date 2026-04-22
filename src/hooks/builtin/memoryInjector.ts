@@ -255,6 +255,11 @@ function sliceUtf8Bytes(s: string, maxBytes: number): string {
 
 export interface MemoryInjectorOptions {
   workspaceRoot?: string;
+  /** Native qmd manager — when provided, bypasses HTTP and calls qmd CLI directly. */
+  qmdManager?: {
+    isReady(): boolean;
+    search(query: string, opts?: { collection?: string; limit?: number; minScore?: number }): Promise<QmdResult[]>;
+  };
 }
 
 export function makeMemoryInjectorHook(
@@ -286,29 +291,39 @@ export function makeMemoryInjectorHook(
       const fileEnabled = await isEnabledByWorkspaceConfig(opts.workspaceRoot);
       if (!fileEnabled) return { action: "continue" };
 
-      const qmdUrl = getQmdUrl();
-      if (!qmdUrl) {
-        ctx.log("warn", "[memoryInjector] failed: QMD_URL not set");
-        return { action: "continue" };
-      }
-
       const collection = getCollection();
       const limit = getLimit();
       const minScore = getMinScore();
       const startedAt = Date.now();
 
-      const results = await searchQmd(qmdUrl, {
-        query: userText.slice(0, 4_000),
-        collection,
-        limit,
-        minScore,
-      });
+      // Try native QmdManager first (no HTTP), fall back to legacy HTTP
+      let results: QmdResult[] | null = null;
+      if (opts.qmdManager?.isReady()) {
+        try {
+          results = await opts.qmdManager.search(userText.slice(0, 4_000), {
+            collection, limit, minScore,
+          });
+        } catch {
+          results = null;
+        }
+      } else {
+        const qmdUrl = getQmdUrl();
+        if (!qmdUrl) {
+          ctx.log("warn", "[memoryInjector] no qmd source (native not ready, QMD_URL not set)");
+          return { action: "continue" };
+        }
+        results = await searchQmd(qmdUrl, {
+          query: userText.slice(0, 4_000),
+          collection,
+          limit,
+          minScore,
+        });
+      }
 
       const durationMs = Date.now() - startedAt;
 
       if (results === null) {
         ctx.log("warn", "[memoryInjector] failed: qmd unreachable or error", {
-          qmdUrl,
           collection,
           durationMs,
         });

@@ -20,6 +20,10 @@ import { subSessionIdentityHook } from "./subSessionIdentity.js";
 import { citationGateHook } from "./citationGate.js";
 import { sessionCommitmentTrackerHook } from "./sessionCommitmentTracker.js";
 import { makeHipocampusCheckpointHook } from "./hipocampusCheckpoint.js";
+import { makeHipocampusCompactorHook } from "./hipocampusCompactor.js";
+import { makeHipocampusFlushHook } from "./hipocampusFlush.js";
+import type { CompactionEngine as CompactionEngineType } from "../../services/memory/CompactionEngine.js";
+import type { QmdManager as QmdManagerType } from "../../services/memory/QmdManager.js";
 import { answerVerifierHook } from "./answerVerifier.js";
 import { makeMemoryInjectorHook } from "./memoryInjector.js";
 import { agentSelfModelHook } from "./agentSelfModel.js";
@@ -168,6 +172,10 @@ export interface RegisterBuiltinsOpts {
    * hook works against ctx.transcript fallback when omitted.
    */
   deferralBlockerAgent?: DeferralBlockerAgent;
+  /** Native hipocampus compaction engine + qmd manager. Both optional —
+   *  when omitted the compactor + flush hooks are skipped. */
+  compactionEngine?: CompactionEngineType;
+  qmdManager?: QmdManagerType;
 }
 
 export function registerBuiltinHooks(
@@ -262,7 +270,10 @@ export function registerBuiltinHooks(
     memoryInjectionEnv === "true" ||
     memoryInjectionEnv === "1";
   if (memoryInjectionEnabled) {
-    const memoryHook = makeMemoryInjectorHook({ workspaceRoot: opts.workspaceRoot });
+    const memoryHook = makeMemoryInjectorHook({
+      workspaceRoot: opts.workspaceRoot,
+      qmdManager: opts.qmdManager,
+    });
     if (maybe(memoryHook.name)) {
       registry.register(memoryHook);
       registered++;
@@ -416,6 +427,10 @@ export function registerBuiltinHooks(
     registry.register(hipoHook);
     registered++;
   }
+
+  // Native hipocampus compactor + flush are registered directly in
+  // Agent.start() after CompactionEngine is created (they require the
+  // engine instance which isn't available at registerBuiltinHooks time).
 
   // T3-12 — sealed-files integrity (OMC Port C). Env-gated (default
   // on). Registers both the beforeCommit guard and the afterCommit
