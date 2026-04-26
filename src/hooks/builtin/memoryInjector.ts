@@ -37,8 +37,9 @@ import type { LLMMessage } from "../../transport/LLMClient.js";
 
 /** Soft budget for total injected content (bytes, UTF-8). */
 const MAX_BYTES_INJECTED = 5_000;
-/** qmd HTTP call budget. */
-const QMD_TIMEOUT_MS = 2_000;
+/** qmd HTTP call budget. Raised from 2s to 5s to accommodate hybrid
+ *  (BM25 + vector) parallel search on Max/Flex bots. */
+const QMD_TIMEOUT_MS = 5_000;
 /** Default qmd collection for memory files. */
 const DEFAULT_COLLECTION = "memory";
 /** Default qmd search limit. */
@@ -259,6 +260,7 @@ export interface MemoryInjectorOptions {
   qmdManager?: {
     isReady(): boolean;
     search(query: string, opts?: { collection?: string; limit?: number; minScore?: number }): Promise<QmdResult[]>;
+    hybridSearch?(query: string, opts?: { collection?: string; limit?: number; minScore?: number }): Promise<QmdResult[]>;
   };
 }
 
@@ -296,11 +298,15 @@ export function makeMemoryInjectorHook(
       const minScore = getMinScore();
       const startedAt = Date.now();
 
-      // Try native QmdManager first (no HTTP), fall back to legacy HTTP
+      // Try native QmdManager first (no HTTP), fall back to legacy HTTP.
+      // Use hybridSearch (BM25 + vector) when available for better recall.
       let results: QmdResult[] | null = null;
       if (opts.qmdManager?.isReady()) {
         try {
-          results = await opts.qmdManager.search(userText.slice(0, 4_000), {
+          const searchFn = opts.qmdManager.hybridSearch
+            ? opts.qmdManager.hybridSearch.bind(opts.qmdManager)
+            : opts.qmdManager.search.bind(opts.qmdManager);
+          results = await searchFn(userText.slice(0, 4_000), {
             collection, limit, minScore,
           });
         } catch {

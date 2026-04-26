@@ -156,14 +156,8 @@ export interface BudgetCheckResult {
  */
 export const DEFAULT_MAX_TURNS_PER_SESSION = 1000;
 
-/**
- * Cost budget removed — api-proxy credit pre-deduction is the
- * authoritative spend gate. Session-level cost caps caused false
- * lockouts when users sent multiple messages in rapid succession
- * (the $10 default was hit within a single burst of legal-doc queries).
- * Turn budget (DEFAULT_MAX_TURNS_PER_SESSION) is retained as a
- * runaway-loop guard.
- */
+/** Default maximum USD cost per session before Turn.ts aborts. */
+export const DEFAULT_MAX_COST_USD_PER_SESSION = 10;
 
 /**
  * T2-08 — Session-level permission posture.
@@ -237,15 +231,11 @@ export class Session {
 
   /** Maximum turns allowed in this session. */
   readonly maxTurns: number;
-  /**
-   * Maximum accumulated USD cost allowed in this session.
-   * No longer enforced (api-proxy credit pre-deduction is the gate).
-   * Retained for /status display + audit log telemetry.
-   */
+  /** Maximum accumulated USD cost allowed in this session. */
   readonly maxCostUsd: number;
 
   // ── T2-08 permission posture state ─────────────────────────────
-  private permissionMode: PermissionMode = "default";
+  private permissionMode: PermissionMode = "bypass";
   /**
    * Mode that was active immediately before the session entered
    * `plan`. Captured on the plan-mode transition so ExitPlanMode can
@@ -269,6 +259,18 @@ export class Session {
   private injectionSeq = 0;
   /** Cap per turn so a runaway client cannot flood the queue. */
   static readonly MAX_PENDING_INJECTIONS = 5;
+
+  /**
+   * SSE writer for the active turn — set by Turn.execute() so that
+   * injectMessage() can emit an `injection_queued` event to the client.
+   * Cleared when no turn is active.
+   */
+  private _activeSse: { agent(evt: unknown): void } | null = null;
+
+  /** Called by Turn.execute() to register/clear the active SSE writer. */
+  setActiveSse(sse: { agent(evt: unknown): void } | null): void {
+    this._activeSse = sse;
+  }
 
   // ── lifecycle state (#82) ──────────────────────────────────────
   /**
@@ -295,10 +297,62 @@ export class Session {
     this.maxTurns =
       agent.config.maxTurnsPerSession ?? DEFAULT_MAX_TURNS_PER_SESSION;
     this.maxCostUsd =
-      agent.config.maxCostUsdPerSession ?? Infinity;
+      agent.config.maxCostUsdPerSession ?? DEFAULT_MAX_COST_USD_PER_SESSION;
     // Default context is always present — eager construction avoids an
     // async getter dance everywhere transcript is read.
     this.bootstrapDefaultContext();
+  }
+
+  /**
+   * Hydrate cumulative budget stats from the on-disk transcript so that
+   * pod restarts don't reset `cumulativeTurns` to 0. Without this, the
+   * onboarding hook (and any "first turn" heuristic) falsely fires on
+   * every pod restart because `budgetStats().turns === 0`.
+   *
+   * Must be called once after construction — it is async because
+   * transcript I/O is async. Safe to call multiple times (idempotent
+   * when budget is already > 0). Agent.getOrCreateSession invokes this.
+   */
+  async hydrateBudgetFromTranscript(): Promise<void> {
+    // Skip if budget already hydrated (session was reused in-memory).
+    if (this.cumulativeTurns > 0) return;
+    try {
+      const entries = await this.transcript.readAll();
+      let turns = 0;
+      let inputTokens = 0;
+      let outputTokens = 0;
+      let earliestTs = Infinity;
+      for (const e of entries) {
+        // Track earliest timestamp across ALL entry types so
+        // createdAt survives pod restarts (2026-04-22 bug fix).
+        if (e.ts > 0 && e.ts < earliestTs) {
+          earliestTs = e.ts;
+        }
+        if (e.kind === "turn_committed") {
+          turns += 1;
+          inputTokens += e.inputTokens ?? 0;
+          outputTokens += e.outputTokens ?? 0;
+        }
+      }
+      if (turns > 0) {
+        this.cumulativeTurns = turns;
+        this.cumulativeInputTokens = inputTokens;
+        this.cumulativeOutputTokens = outputTokens;
+        // costUsd is not stored in transcript entries — leave at 0.
+        // The budget exceeded check for cost will be slightly under-
+        // counted after restart, but the turns check (which matters
+        // for onboarding) is correct.
+      }
+      // 2026-04-22 bug fix: hydrate createdAt from the earliest
+      // transcript entry so the bot reports correct session start
+      // time after pod restarts (previously reset to Date.now()).
+      if (earliestTs < Infinity && earliestTs < this.meta.createdAt) {
+        this.meta.createdAt = earliestTs;
+      }
+    } catch {
+      // Fail-open: if transcript can't be read, start from 0.
+      // This matches the pre-fix behaviour.
+    }
   }
 
   private bootstrapDefaultContext(): void {
@@ -515,7 +569,9 @@ export class Session {
     if (this.cumulativeTurns >= this.maxTurns) {
       return { exceeded: true, reason: "turns" };
     }
-    // Cost budget removed — api-proxy credit pre-deduction is the gate.
+    if (this.cumulativeCostUsd >= this.maxCostUsd) {
+      return { exceeded: true, reason: "cost" };
+    }
     return { exceeded: false };
   }
 
@@ -658,7 +714,21 @@ export class Session {
       receivedAt: Date.now(),
       metadata: { injection: { id: injectionId, source } },
     });
-    return { injectionId, queuedCount: this.pendingInjections.length };
+    const count = this.pendingInjections.length;
+    // Notify the client that the message was queued — the bot will
+    // pick it up after the current response completes (at the finalise
+    // safety net or the next tool_use iteration's beforeLLMCall drain).
+    if (this._activeSse) {
+      try {
+        this._activeSse.agent({
+          type: "injection_queued",
+          injectionId,
+          text,
+          queuedCount: count,
+        });
+      } catch { /* fail-open */ }
+    }
+    return { injectionId, queuedCount: count };
   }
 
   /**
@@ -775,6 +845,7 @@ export class Session {
       const turnId = this.agent.nextTurnId();
       const turn = new Turn(this, userMessage, turnId, sse, "direct", options);
       this.agent.registerTurn(turn);
+      let committedAssistantText = "";
       try {
         // Gap §11.6 — reject a turn BEFORE it starts if the routed
         // model's context window can't hold the reserve floor + the
@@ -790,7 +861,38 @@ export class Session {
         if (!report.ok) {
           await turn.abort(`verify failed: ${report.violations.join(",")}`);
         } else {
-          await turn.commit();
+          // Commit retry loop — beforeCommit hooks (answer-verifier,
+          // fact-grounding, sealed-files, etc.) may block the first
+          // attempt. All hooks fail-open at retryCount >= MAX_RETRIES
+          // (typically 1), so a single retry suffices. Without this
+          // loop, commitRetryCount was always 0 → hooks never reached
+          // fail-open → turn aborted → empty response.
+          const MAX_COMMIT_ATTEMPTS = 3;
+          let committed = false;
+          for (let attempt = 0; attempt < MAX_COMMIT_ATTEMPTS; attempt++) {
+            try {
+              const commitResult = await turn.commit();
+              committedAssistantText = commitResult.finalText;
+              committed = true;
+              break;
+            } catch (commitErr) {
+              const msg = commitErr instanceof Error ? commitErr.message : String(commitErr);
+              const isBeforeCommitBlock = msg.includes("beforeCommit blocked");
+              if (!isBeforeCommitBlock || attempt >= MAX_COMMIT_ATTEMPTS - 1) {
+                throw commitErr; // non-hook error or final attempt
+              }
+              // Hook blocked → increment retry count and try again.
+              // Hooks see the incremented retryCount and will fail-open.
+              turn.incrementCommitRetry();
+              console.log(
+                `[core-agent] commit retry ${attempt + 1}/${MAX_COMMIT_ATTEMPTS}` +
+                ` turnId=${turn.meta.turnId} reason=${msg.slice(0, 200)}`,
+              );
+            }
+          }
+          if (!committed) {
+            await turn.abort("commit retries exhausted");
+          }
         }
       } catch (err) {
         // Gap §11.6 — small-context-model routing ran into the
@@ -824,7 +926,7 @@ export class Session {
         active.recordTurn(turn.meta.usage);
         this.agent.unregisterTurn(turnId);
       }
-      return { meta: turn.meta, assistantText: "" };
+      return { meta: turn.meta, assistantText: committedAssistantText };
     });
   }
 

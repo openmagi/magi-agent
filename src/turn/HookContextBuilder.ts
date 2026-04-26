@@ -20,6 +20,7 @@ export function buildHookContext(
     sessionKey: session.meta.sessionKey,
     turnId,
     llm: agent.llm,
+    agentModel: agent.config.model,
     transcript: [],
     emit: (event) => sse.agent(event),
     log: (level, msg, data) => {

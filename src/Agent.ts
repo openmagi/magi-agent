@@ -100,26 +100,81 @@ export type AgentLifecycleEvent =
       closedAt: number;
     };
 
+export type BackgroundTaskDeliveryStatus = "completed" | "failed" | "aborted";
+
+export interface BackgroundTaskDeliveryInput {
+  sessionKey: string;
+  taskId: string;
+  status: BackgroundTaskDeliveryStatus;
+  finalText?: string;
+  errorMessage?: string;
+}
+
+const MAX_BACKGROUND_DELIVERY_BYTES = 15 * 1024;
+const TRUNCATED_BACKGROUND_RESULT_MARKER = "\n\n[truncated background result]";
+
+export function formatBackgroundTaskDelivery(
+  input: BackgroundTaskDeliveryInput,
+): string | null {
+  if (input.status === "aborted") {
+    return null;
+  }
+
+  let text: string;
+  if (input.status === "completed") {
+    text = (input.finalText ?? "").trim();
+    if (text.length === 0) {
+      return null;
+    }
+  } else {
+    const msg = (input.errorMessage ?? "").trim();
+    text =
+      msg.length > 0
+        ? `Background task ${input.taskId} failed: ${msg}`
+        : `Background task ${input.taskId} failed.`;
+  }
+
+  const bytes = Buffer.byteLength(text, "utf8");
+  if (bytes <= MAX_BACKGROUND_DELIVERY_BYTES) {
+    return text;
+  }
+
+  const markerBytes = Buffer.byteLength(TRUNCATED_BACKGROUND_RESULT_MARKER, "utf8");
+  const limit = Math.max(0, MAX_BACKGROUND_DELIVERY_BYTES - markerBytes);
+  let used = 0;
+  let truncated = "";
+  for (const char of text) {
+    const charBytes = Buffer.byteLength(char, "utf8");
+    if (used + charBytes > limit) {
+      break;
+    }
+    truncated += char;
+    used += charBytes;
+  }
+  return `${truncated}${TRUNCATED_BACKGROUND_RESULT_MARKER}`;
+}
+
 export interface AgentConfig {
   botId: string;
   userId: string;
   /** OpenClaw-compatible path: /home/ocuser/.openclaw/workspace. */
   workspaceRoot: string;
-  gatewayToken?: string;
-  apiProxyUrl?: string;
+  gatewayToken: string;
+  apiProxyUrl: string;
   chatProxyUrl?: string;
   redisUrl?: string;
-  /** OSS mode: LLM provider selection. */
-  llmProvider?: "anthropic" | "openai" | "google";
-  llmApiKey?: string;
-  llmBaseUrl?: string;
-  agentName?: string;
-  agentInstructions?: string;
-  webhookUrl?: string;
-  webhookSecret?: string;
-  builtinHooks?: Record<string, boolean>;
   /** Default model for this bot. Overridable per-turn via smart-router. */
   model: string;
+  /**
+   * OSS multi-provider support. When set, `Agent.llm.stream()` delegates
+   * to this provider instead of the built-in Anthropic api-proxy client.
+   * Injected by the CLI / config layer for OpenAI, Google, etc.
+   */
+  llmProvider?: { stream(req: import("./transport/LLMClient.js").LLMStreamRequest): AsyncGenerator<import("./transport/LLMClient.js").LLMEvent, void, void> };
+  /** OSS identity — optional agent display name. */
+  agentName?: string;
+  /** OSS identity — optional custom instructions prepended to system prompt. */
+  agentInstructions?: string;
   telegramBotToken?: string;
   discordBotToken?: string;
   /**
@@ -251,23 +306,13 @@ export class Agent {
 
   constructor(config: AgentConfig) {
     this.config = config;
-    // OSS mode: use multi-provider if llmProvider is set
-    if (config.llmProvider && config.llmApiKey) {
-      const { createProvider } = require("./llm/createProvider.js");
-      const provider = createProvider({
-        provider: config.llmProvider,
-        apiKey: config.llmApiKey,
-        baseUrl: config.llmBaseUrl,
-        defaultModel: config.model,
-      });
-      this.llm = LLMClient.fromProvider(provider);
-    } else {
-      this.llm = new LLMClient({
-        apiProxyUrl: config.apiProxyUrl ?? "",
-        gatewayToken: config.gatewayToken ?? "",
-        defaultModel: config.model,
-      });
-    }
+    this.llm = config.llmProvider
+      ? LLMClient.fromProvider(config.llmProvider, config.model)
+      : new LLMClient({
+          apiProxyUrl: config.apiProxyUrl,
+          gatewayToken: config.gatewayToken,
+          defaultModel: config.model,
+        });
     this.workspace = new Workspace(config.workspaceRoot);
     this.intent = new IntentClassifier(this.llm);
     this.hooks = new HookRegistry();
@@ -327,7 +372,7 @@ export class Agent {
     this.tools.register(
       makeNotifyUserTool({
         chatProxyUrl: config.chatProxyUrl ?? "",
-        gatewayToken: config.gatewayToken ?? "",
+        gatewayToken: config.gatewayToken,
         userId: config.userId,
       }),
     );
@@ -449,6 +494,65 @@ export class Agent {
       this.disciplineCounters.set(sessionKey, c);
     }
     return c;
+  }
+
+  async deliverBackgroundTaskResult(
+    input: BackgroundTaskDeliveryInput,
+  ): Promise<boolean> {
+    const text = formatBackgroundTaskDelivery(input);
+    if (!text) {
+      return false;
+    }
+
+    const session = this.sessions.get(input.sessionKey);
+    if (!session) {
+      console.warn(
+        `[core-agent] background delivery skipped taskId=${input.taskId}: session not live sessionKey=${input.sessionKey}`,
+      );
+      return false;
+    }
+
+    const channel = session.meta.channel;
+    try {
+      if (channel.type === "app") {
+        if (!this.webAppAdapter) {
+          console.warn(
+            `[core-agent] background delivery skipped taskId=${input.taskId}: webapp adapter not configured`,
+          );
+          return false;
+        }
+        await this.webAppAdapter.send({
+          chatId: channel.channelId,
+          text,
+        });
+        return true;
+      }
+
+      if (channel.type === "telegram" || channel.type === "discord") {
+        const adapter = this.channelAdapters.find((a) => a.kind === channel.type);
+        if (!adapter) {
+          console.warn(
+            `[core-agent] background delivery skipped taskId=${input.taskId}: ${channel.type} adapter not configured`,
+          );
+          return false;
+        }
+        await adapter.send({
+          chatId: channel.channelId,
+          text,
+        });
+        return true;
+      }
+
+      console.warn(
+        `[core-agent] background delivery skipped taskId=${input.taskId}: unsupported channel=${channel.type}`,
+      );
+      return false;
+    } catch (err) {
+      console.warn(
+        `[core-agent] background delivery failed taskId=${input.taskId} channel=${channel.type}:${channel.channelId}: ${(err as Error).message}`,
+      );
+      return false;
+    }
   }
 
   /**
@@ -677,6 +781,8 @@ export class Agent {
       const compactorHook = (await import("./hooks/builtin/hipocampusCompactor.js")).makeHipocampusCompactorHook(
         this.compactionEngine,
         this.qmdManager,
+        undefined, // use default flushMemory
+        this.config.workspaceRoot,
       );
       this.hooks.register(compactorHook);
       const flushHook = (await import("./hooks/builtin/hipocampusFlush.js")).makeHipocampusFlushHook(
@@ -762,7 +868,7 @@ export class Agent {
       const adapter = factory({
         pushEndpointUrl: url,
         hmacKey: key,
-        gatewayToken: this.config.gatewayToken ?? "",
+        gatewayToken: this.config.gatewayToken,
         botId: this.config.botId,
         userId: this.config.userId,
       });
@@ -834,15 +940,15 @@ export class Agent {
    * carrying the cron prompt + fire it through the owning session on
    * the cron's deliveryChannel (NOT whatever the bot might prefer).
    *
-   * Delivery: the default SseWriter would require a live HTTP client;
-   * crons run out-of-band, so this uses a stub SseWriter (no-op)
-   * and the actual user-visible delivery is expected to flow through
-   * NotifyUser invocations inside the turn (which hit the chat-proxy
-   * push broker) or through directly writing to the app_channel
-   * message table. For the simplest viable path, the bot's prompt
-   * should tell it where to deliver; the runtime guarantees that
-   * deliveryChannel is what the bot sees in the Session.meta.channel
-   * of the turn, so any NotifyUser call inherits the right target.
+   * Delivery: the default SseWriter would require a live HTTP client,
+   * so crons run with a stub writer. After the synthetic turn commits,
+   * the runtime forwards the committed assistant text to the captured
+   * delivery channel itself:
+   *   - app → chat-proxy `/v1/bot-channels/post` (durable channel history)
+   *   - telegram/discord → native channel adapter `send()`
+   * This closes the "cron fired but nothing arrived" gap when the
+   * model simply answers normally instead of explicitly invoking a
+   * separate delivery tool.
    */
   private async fireCron(record: CronRecord): Promise<void> {
     const sessionKey = `agent:cron:${record.deliveryChannel.type}:${record.deliveryChannel.channelId}:${record.cronId}`;
@@ -850,7 +956,7 @@ export class Agent {
     const { StubSseWriter } = await import("./transport/SseWriter.js");
     const stubSse = new StubSseWriter();
     try {
-      await session.runTurn(
+      const turnResult = await session.runTurn(
         {
           text: record.prompt,
           receivedAt: Date.now(),
@@ -858,6 +964,10 @@ export class Agent {
         },
         stubSse,
       );
+      const assistantText = turnResult.assistantText.trim();
+      if (assistantText.length > 0) {
+        await this.deliverCronAssistantText(record.deliveryChannel, assistantText);
+      }
     } finally {
       // #82 — non-durable cron fire: close the synthetic session so
       // its in-memory state + pendingInjections + any session-scoped
@@ -875,6 +985,49 @@ export class Agent {
           );
         }
       }
+    }
+  }
+
+  private async deliverCronAssistantText(
+    channel: ChannelRef,
+    text: string,
+  ): Promise<void> {
+    if (channel.type === "app") {
+      if (!this.config.chatProxyUrl) {
+        console.warn("[agent] cron delivery to app channel skipped — no chatProxyUrl configured");
+        return;
+      }
+      const url = `${this.config.chatProxyUrl.replace(/\/$/, "")}/v1/bot-channels/post`;
+      const resp = await fetch(url, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${this.config.gatewayToken}`,
+        },
+        body: JSON.stringify({
+          channel: channel.channelId,
+          content: text,
+        }),
+      });
+      if (!resp.ok) {
+        const errText = await resp.text().catch(() => "");
+        throw new Error(
+          `cron app delivery failed: HTTP ${resp.status} ${errText.slice(0, 200)}`,
+        );
+      }
+      return;
+    }
+
+    if (channel.type === "telegram" || channel.type === "discord") {
+      const adapter = this.channelAdapters.find((a) => a.kind === channel.type);
+      if (!adapter) {
+        throw new Error(`cron ${channel.type} adapter not configured`);
+      }
+      await adapter.send({
+        chatId: channel.channelId,
+        text,
+      });
+      return;
     }
   }
 
@@ -944,6 +1097,9 @@ export class Agent {
       discipline: { ...this.disciplineDefault },
     };
     const session = new Session(meta, this);
+    // Hydrate budget from transcript so pod restarts don't reset
+    // cumulativeTurns to 0 (causes false "first turn" detection).
+    await session.hydrateBudgetFromTranscript();
     this.sessions.set(sessionKey, session);
     // 2026-04-21: clear circuit breaker state when a new session starts.
     // The state file is per-workspace (not per-session), so a stale trip

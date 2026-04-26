@@ -4,7 +4,7 @@
  * Extracted from `Turn.execute` (R3 refactor, 2026-04-19). Owns:
  *   • Normalised `StopReasonCase` taxonomy (T1-05)
  *   • Output-token recovery (T1-04) with
- *     `MAX_OUTPUT_TOKENS_RECOVERY_LIMIT = 15`
+ *     `MAX_OUTPUT_TOKENS_RECOVERY_LIMIT = 3`
  *   • Codex gate2 P2 fix — drop unresolved tool_use blocks before
  *     issuing a "Continue." recovery nudge
  *   • Refusal → `rule_check_violation` audit
@@ -35,12 +35,10 @@ export type StopReasonCase =
 
 /**
  * Maximum number of output-token recovery continuations per turn
- * (T1-04). Set high enough that the model can produce long agentic
- * responses (multi-tool chains, reports) without being cut short.
- * Claude Code effectively has no hard cap; we set 15 as a safety net
- * against infinite loops while allowing 15 × 8K = 120K+ output tokens.
+ * (T1-04). Mirrors Claude Code's own bounded loop so a misbehaving
+ * model can't loop on max_tokens forever.
  */
-export const MAX_OUTPUT_TOKENS_RECOVERY_LIMIT = 15;
+export const MAX_OUTPUT_TOKENS_RECOVERY_LIMIT = 3;
 
 export function classifyStopReason(
   raw: string | null | undefined,
@@ -76,6 +74,10 @@ export type StopReasonRaw =
  *                         handler has already mutated `messages` and
  *                         bumped `recoveryAttempt`. The outer loop
  *                         should rewind iter by one and continue.
+ *   - `interrupted`     → mid-turn injection aborted the stream.
+ *                         Partial blocks are pushed as assistant msg.
+ *                         Next iteration's beforeLLMCall drains the
+ *                         injection queue.
  */
 export type StopReasonDecision =
   | { kind: "finalise" }

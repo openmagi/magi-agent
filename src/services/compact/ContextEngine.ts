@@ -307,25 +307,16 @@ export class ContextEngine {
       }
     }
 
-    const messages: LLMMessage[] = [];
-
     if (lastBoundaryIdx >= 0) {
       const boundary = sorted[lastBoundaryIdx] as CompactionBoundaryEntry;
+      const postBoundary = sorted.slice(lastBoundaryIdx + 1);
+      const messages: LLMMessage[] = [];
       messages.push(renderBoundaryAsSystemMessage(boundary));
-      for (let i = lastBoundaryIdx + 1; i < sorted.length; i++) {
-        const entry = sorted[i];
-        if (!entry) continue;
-        const msg = transcriptEntryToMessage(entry);
-        if (msg) messages.push(msg);
-      }
+      messages.push(...transcriptEntriesToMessages(postBoundary));
       return messages;
     }
 
-    for (const entry of sorted) {
-      const msg = transcriptEntryToMessage(entry);
-      if (msg) messages.push(msg);
-    }
-    return messages;
+    return transcriptEntriesToMessages(sorted);
   }
 
   /**
@@ -395,15 +386,261 @@ function renderBoundaryAsSystemMessage(
   return { role: "user", content: [{ type: "text", text: content } as LLMContentBlock] };
 }
 
-function transcriptEntryToMessage(entry: TranscriptEntry): LLMMessage | null {
-  if (entry.kind === "user_message") {
-    return { role: "user", content: entry.text };
+/**
+ * Convert a flat sorted list of transcript entries into a properly
+ * alternating user/assistant message sequence for the Anthropic API.
+ *
+ * 2026-04-22 fundamental rewrite: the previous implementation only
+ * handled `user_message` and `assistant_text`, silently dropping
+ * `tool_call` and `tool_result`. This caused:
+ *   - Consecutive assistant messages (tool interactions removed)
+ *   - Consecutive user messages (tool_result gap)
+ *   - Bot responding to wrong message (context corruption)
+ *
+ * OpenClaw reference: `anthropic-transport-stream.ts` groups blocks
+ * by turn, merges tool_use into assistant messages, and batches
+ * tool_result into user messages. We replicate that here.
+ *
+ * Anthropic API contract:
+ *   - Messages MUST strictly alternate: user → assistant → user → ...
+ *   - assistant content can have: text, thinking, tool_use blocks
+ *   - user content can have: text, tool_result blocks
+ *   - Multiple tool_result blocks can be in one user message
+ */
+function transcriptEntriesToMessages(
+  entries: readonly TranscriptEntry[],
+): LLMMessage[] {
+  const messages: LLMMessage[] = [];
+
+  // Accumulator for the current message being built.
+  let pendingAssistantBlocks: LLMContentBlock[] = [];
+  let pendingToolResults: LLMContentBlock[] = [];
+
+  function flushAssistant(): void {
+    if (pendingAssistantBlocks.length === 0) return;
+    messages.push({ role: "assistant", content: [...pendingAssistantBlocks] });
+    pendingAssistantBlocks = [];
   }
-  if (entry.kind === "assistant_text") {
-    const block: LLMContentBlock = { type: "text", text: entry.text };
-    return { role: "assistant", content: [block] };
+
+  function flushToolResults(): void {
+    if (pendingToolResults.length === 0) return;
+    messages.push({ role: "user", content: [...pendingToolResults] });
+    pendingToolResults = [];
   }
-  return null;
+
+  for (const entry of entries) {
+    switch (entry.kind) {
+      case "user_message": {
+        // Flush any pending assistant/tool_result before user message
+        flushAssistant();
+        flushToolResults();
+        const iso = new Date(entry.ts).toISOString();
+        // Truncate historical user messages that contain inline file
+        // content (can be 500KB+). Replace file content blocks with a
+        // short placeholder so the LLM knows the file existed.
+        let userText = entry.text;
+        if (userText.length > 8192) {
+          userText = userText.replace(
+            /--- file content ---[\s\S]*?--- end file ---/g,
+            "[file content truncated for context — use FileRead to access]",
+          );
+        }
+        messages.push({
+          role: "user",
+          content: `[Time: ${iso}]\n${userText}`,
+        });
+        break;
+      }
+      case "assistant_text": {
+        // Flush any pending tool_results first (they must come before
+        // the next assistant message per Anthropic alternation).
+        flushToolResults();
+        // Accumulate — assistant text + tool_use blocks from the same
+        // turn will be merged into a single assistant message.
+        pendingAssistantBlocks.push({ type: "text", text: entry.text });
+        break;
+      }
+      case "tool_call": {
+        // tool_use blocks go into the assistant message alongside text.
+        // Flush tool_results first if any are pending (from a prior
+        // tool round in the same turn).
+        flushToolResults();
+        // Truncate large tool inputs in historical replay to avoid
+        // context explosion (267-turn sessions with many tool calls).
+        const inputStr = JSON.stringify(entry.input ?? {});
+        const truncatedInput = inputStr.length > 1024
+          ? JSON.parse(JSON.stringify({ _truncated: true, name: entry.name, preview: inputStr.slice(0, 512) }))
+          : entry.input;
+        pendingAssistantBlocks.push({
+          type: "tool_use",
+          id: entry.toolUseId,
+          name: entry.name,
+          input: truncatedInput,
+        });
+        break;
+      }
+      case "tool_result": {
+        // Flush the assistant message that contained the tool_use
+        // before adding tool_result (tool_results are role: "user").
+        flushAssistant();
+        // Truncate historical tool results to 2KB. Full results are
+        // only needed in the CURRENT turn (which uses the in-memory
+        // messages array, not transcript replay). Historical results
+        // just need enough context for the LLM to follow the thread.
+        const rawOutput = entry.output ?? "";
+        const MAX_TOOL_RESULT_REPLAY = 2048;
+        const content = rawOutput.length > MAX_TOOL_RESULT_REPLAY
+          ? rawOutput.slice(0, MAX_TOOL_RESULT_REPLAY) + "\n...[truncated]"
+          : rawOutput;
+        pendingToolResults.push({
+          type: "tool_result",
+          tool_use_id: entry.toolUseId,
+          content,
+          ...(entry.isError ? { is_error: true } : {}),
+        } as LLMContentBlock);
+        break;
+      }
+      // Lifecycle markers (turn_started, turn_committed, turn_aborted)
+      // are not converted to messages — they're structural only.
+      default:
+        break;
+    }
+  }
+
+  // Flush any trailing blocks
+  flushAssistant();
+  flushToolResults();
+
+  // ── Merge consecutive same-role messages ──────────────────────
+  // Aborted turns write user_message + tool_call/tool_result to
+  // transcript but NOT assistant_text (only written on commit).
+  // This creates consecutive user messages:
+  //   user("prev question")  ← from aborted turn, no assistant reply
+  //   user("current question")
+  // The model responds to the first, not the latest. OpenClaw's
+  // validateAnthropicTurns() merges consecutive same-role messages
+  // to fix this. We do the same.
+  const merged = mergeConsecutiveSameRole(messages);
+  return stripDanglingToolUses(merged);
+}
+
+/**
+ * Remove tool_use blocks from assistant messages when no matching
+ * tool_result exists in the immediately following user message.
+ * The Anthropic API returns 400 for orphaned tool_use — this happens
+ * when a turn was aborted mid-tool-execution (tool_call written to
+ * transcript but tool_result never written).
+ *
+ * OpenClaw reference: `stripDanglingAnthropicToolUses()` in
+ * `src/agents/pi-embedded-helpers/turns.ts`.
+ */
+function stripDanglingToolUses(messages: LLMMessage[]): LLMMessage[] {
+  for (let i = 0; i < messages.length; i++) {
+    const msg = messages[i]!;
+    if (msg.role !== "assistant" || !Array.isArray(msg.content)) continue;
+
+    const toolUseIds = new Set<string>();
+    for (const block of msg.content) {
+      if (block.type === "tool_use" && "id" in block) {
+        toolUseIds.add((block as { id: string }).id);
+      }
+    }
+    if (toolUseIds.size === 0) continue;
+
+    // Check if the next message has matching tool_results
+    const next = messages[i + 1];
+    const matchedIds = new Set<string>();
+    if (next && next.role === "user" && Array.isArray(next.content)) {
+      for (const block of next.content) {
+        if (block.type === "tool_result" && "tool_use_id" in block) {
+          matchedIds.add((block as { tool_use_id: string }).tool_use_id);
+        }
+      }
+    }
+
+    // Remove unmatched tool_use blocks
+    const unmatched = [...toolUseIds].filter((id) => !matchedIds.has(id));
+    if (unmatched.length === 0) continue;
+
+    const unmatchedSet = new Set(unmatched);
+    msg.content = (msg.content as LLMContentBlock[]).filter(
+      (block) => !(block.type === "tool_use" && unmatchedSet.has((block as { id: string }).id)),
+    );
+
+    // If assistant message is now empty (only had orphaned tool_use), remove it
+    if (msg.content.length === 0) {
+      messages.splice(i, 1);
+      i -= 1;
+    }
+  }
+
+  // Also strip orphaned tool_result blocks (tool_result without preceding tool_use)
+  for (let i = 0; i < messages.length; i++) {
+    const msg = messages[i]!;
+    if (msg.role !== "user" || !Array.isArray(msg.content)) continue;
+
+    const hasToolResult = msg.content.some((b) => b.type === "tool_result");
+    if (!hasToolResult) continue;
+
+    // Collect tool_use IDs from the preceding assistant message
+    const prev = messages[i - 1];
+    const prevToolIds = new Set<string>();
+    if (prev && prev.role === "assistant" && Array.isArray(prev.content)) {
+      for (const block of prev.content) {
+        if (block.type === "tool_use" && "id" in block) {
+          prevToolIds.add((block as { id: string }).id);
+        }
+      }
+    }
+
+    // Remove tool_result blocks that don't match any tool_use
+    msg.content = (msg.content as LLMContentBlock[]).filter((block) => {
+      if (block.type !== "tool_result") return true;
+      const id = (block as { tool_use_id: string }).tool_use_id;
+      return prevToolIds.has(id);
+    });
+
+    // If user message is now empty, remove it
+    if (msg.content.length === 0) {
+      messages.splice(i, 1);
+      i -= 1;
+    }
+  }
+
+  return messages;
+}
+
+/**
+ * Merge adjacent messages with the same role into a single message.
+ * Handles both string and content-block-array formats. Required by
+ * the Anthropic API which demands strict user/assistant alternation.
+ */
+function mergeConsecutiveSameRole(messages: LLMMessage[]): LLMMessage[] {
+  if (messages.length <= 1) return messages;
+  const merged: LLMMessage[] = [messages[0]!];
+  for (let i = 1; i < messages.length; i++) {
+    const curr = messages[i]!;
+    const prev = merged[merged.length - 1]!;
+    if (curr.role !== prev.role) {
+      merged.push(curr);
+      continue;
+    }
+    // Same role — merge content into prev
+    const prevBlocks = toContentBlocks(prev.content);
+    const currBlocks = toContentBlocks(curr.content);
+    prev.content = [...prevBlocks, ...currBlocks];
+  }
+  return merged;
+}
+
+/** Normalise message content to LLMContentBlock[]. */
+function toContentBlocks(
+  content: string | LLMContentBlock[],
+): LLMContentBlock[] {
+  if (typeof content === "string") {
+    return [{ type: "text", text: content } as LLMContentBlock];
+  }
+  return content;
 }
 
 function estimateTranscriptTokens(entries: readonly TranscriptEntry[]): number {

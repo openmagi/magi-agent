@@ -17,7 +17,12 @@ import { buildSystemPrompt, buildMessages } from "./turn/MessageBuilder.js";
 import { readOne as readOneStream } from "./turn/LLMStreamReader.js";
 import { dispatch as dispatchTools, type ToolDispatchResult, UnknownToolLoopError } from "./turn/ToolDispatcher.js";
 import { handle as handleStopReason } from "./turn/StopReasonHandler.js";
-import { commit as commitTurn, abort as abortTurn, type CommitPipelineContext } from "./turn/CommitPipeline.js";
+import {
+  commit as commitTurn,
+  abort as abortTurn,
+  type CommitPipelineContext,
+  type CommitResult,
+} from "./turn/CommitPipeline.js";
 import { buildToolDefs } from "./turn/ToolSelector.js";
 import { AskUserController } from "./turn/AskUserController.js";
 import { buildHookContext } from "./turn/HookContextBuilder.js";
@@ -67,7 +72,11 @@ export class Turn {
   /** Gap §11.3 unknown-tool hallucination counter — shared across every
    * dispatchTools call within this turn. */
   private unknownToolCount = 0;
-  readonly commitRetryCount = 0;
+  private _commitRetryCount = 0;
+  get commitRetryCount(): number { return this._commitRetryCount; }
+  /** Increment commit retry counter — called by Session.runTurn
+   * when beforeCommit hooks block and we retry. */
+  incrementCommitRetry(): void { this._commitRetryCount += 1; }
 
   constructor(
     readonly session: Session,
@@ -137,7 +146,11 @@ export class Turn {
     this.checkBudgetOrThrow();
     await this.appendTurnPrologue();
 
-    let systemPrompt = await buildSystemPrompt(this.session, this.meta.turnId);
+    let systemPrompt = await buildSystemPrompt(
+      this.session,
+      this.meta.turnId,
+      this.userMessage,
+    );
     let messages = await buildMessages(this.session, this.userMessage);
     // B5 — heartbeat monitor wraps this.sse so every downstream SSE
     // emission pings the silence timer. Long-running tool calls + LLM
@@ -156,6 +169,10 @@ export class Turn {
       userText: this.userMessage.text,
       planMode: this.planMode || safeGetPermissionMode(this.session) === "plan",
     });
+
+    // #86: register SSE writer so Session.injectMessage() can emit
+    // injection_queued events to the client during this turn.
+    this.session.setActiveSse(this.sse);
 
     try {
       for (let iter = 0; iter < Turn.MAX_ITERATIONS; iter++) {
@@ -177,6 +194,13 @@ export class Turn {
         }
         if (preLLM.action === "skip") break;
         ({ messages, tools: toolDefs, system: systemPrompt } = preLLM.args);
+
+        const payloadSize = JSON.stringify(messages).length + JSON.stringify(systemPrompt).length;
+        console.log(
+          `[core-agent] llm-call iter=${iter} payloadSize=${payloadSize}` +
+          ` msgCount=${messages.length} model=${this.session.agent.config.model}` +
+          ` turnId=${this.meta.turnId}`,
+        );
 
         const { blocks, stopReason, usage } = await readOneStream(
           { llm: this.session.agent.llm, model: this.session.agent.config.model, sse,
@@ -218,6 +242,20 @@ export class Turn {
         );
 
         if (decision.kind === "finalise") {
+          // #86: pending injections — if user messages arrived during
+          // the LLM response, continue to the next iteration so
+          // beforeLLMCall → midTurnInjector drains them. The bot
+          // finishes its current response naturally, then addresses
+          // the queued messages.
+          if (this.session.hasPendingInjections()) {
+            console.log(
+              `[core-agent] finalise deferred — pending injections exist` +
+              ` turnId=${this.meta.turnId} iter=${iter}`,
+            );
+            messages.push({ role: "assistant", content: blocks });
+            continue;
+          }
+
           // ── Guard 1: empty-response (no text at all) ──────────
           // Covers: thinking-only, tool_use-only, subagent delegation.
           const hasText = this.emittedAssistantBlocks.some((b) => b.type === "text");
@@ -231,6 +269,37 @@ export class Turn {
             this.forceNoThinking = true; // Force text-only output on recovery
             iter -= 1;
             continue;
+          }
+
+          // ── Guard 1b: thinking-to-text fallback ──────────────
+          // After MAX_EMPTY_RESPONSE_RETRIES, if there's still no text
+          // but thinking blocks have substantial content, extract the
+          // thinking as text and emit it as text_delta so the client
+          // sees the response DURING streaming (not just on refresh).
+          // Claude.ai never shows empty text after thinking — we match.
+          if (!hasText) {
+            const thinkingContent = this.emittedAssistantBlocks
+              .filter((b) => b.type === "thinking")
+              .map((b) => (b as { thinking: string }).thinking)
+              .join("\n")
+              .trim();
+            if (thinkingContent.length > 100) {
+              const lines = thinkingContent.split("\n");
+              let fallback = "";
+              for (let j = lines.length - 1; j >= 0 && fallback.length < 3000; j--) {
+                fallback = lines[j] + "\n" + fallback;
+              }
+              fallback = fallback.trim();
+              // Emit as text_delta so client renders it in real-time
+              sse.agent({ type: "text_delta", delta: fallback });
+              // Add to emittedAssistantBlocks so commit picks it up
+              this.emittedAssistantBlocks.push({ type: "text", text: fallback } as LLMContentBlock);
+              console.log(
+                `[core-agent] thinking-to-text fallback in execute:` +
+                ` thinkingLen=${thinkingContent.length} fallbackLen=${fallback.length}` +
+                ` turnId=${this.meta.turnId}`,
+              );
+            }
           }
 
           // ── Guard 2: truncated response (text ends mid-sentence) ──
@@ -286,12 +355,13 @@ export class Turn {
       this.emitError("iteration_limit", err);
       throw err;
     } finally {
+      this.session.setActiveSse(null);
       heartbeat.stop();
       await sessionHeartbeat.stop().catch(() => {});
     }
   }
 
-  async commit(): Promise<void> { await commitTurn(this.buildCommitCtx()); }
+  async commit(): Promise<CommitResult> { return await commitTurn(this.buildCommitCtx()); }
   async abort(reason: string): Promise<void> { await abortTurn(this.buildCommitCtx(), reason); }
 
   // ── internals ────────────────────────────────────────────────────

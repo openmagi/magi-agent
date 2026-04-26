@@ -39,7 +39,7 @@ export class QmdManager {
       // Initial index build
       await this.exec(["update"]);
       if (this.vectorEnabled) {
-        await this.exec(["embed"]);
+        await this.exec(["embed"]).catch(() => {});
       }
       this.ready = true;
     } catch {
@@ -87,12 +87,48 @@ export class QmdManager {
     }
   }
 
+  /**
+   * Hybrid search: runs BM25 + vector in parallel, merges results by
+   * path (higher score wins), returns up to `limit` results sorted by
+   * score descending. Only available when vectorEnabled — falls back to
+   * BM25-only otherwise.
+   */
+  async hybridSearch(query: string, opts?: QmdSearchOpts): Promise<QmdSearchResult[]> {
+    if (!this.ready) return [];
+    const limit = opts?.limit ?? 5;
+
+    if (!this.vectorEnabled) {
+      return this.search(query, opts);
+    }
+
+    // Run BM25 + vector in parallel — each returns up to `limit` results.
+    // We request more from each to have a larger candidate pool for merging.
+    const expandedOpts = { ...opts, limit: limit + 3 };
+    const [bm25, vector] = await Promise.all([
+      this.search(query, expandedOpts),
+      this.vectorSearch(query, expandedOpts),
+    ]);
+
+    // Merge: dedupe by path, keep higher score
+    const byPath = new Map<string, QmdSearchResult>();
+    for (const r of [...bm25, ...vector]) {
+      const existing = byPath.get(r.path);
+      if (!existing || r.score > existing.score) {
+        byPath.set(r.path, r);
+      }
+    }
+
+    return Array.from(byPath.values())
+      .sort((a, b) => b.score - a.score)
+      .slice(0, limit);
+  }
+
   async reindex(): Promise<void> {
     if (!this.ready) return;
     try {
       await this.exec(["update"]);
       if (this.vectorEnabled) {
-        await this.exec(["embed"]);
+        await this.exec(["embed"]).catch(() => {});
       }
     } catch {
       // reindex failure is non-fatal
@@ -104,19 +140,24 @@ export class QmdManager {
   }
 
   private async exec(args: string[]): Promise<{ stdout: string; stderr: string }> {
-    // Try local node_modules first, then global
-    const localBin = path.join(this.workspaceRoot, "node_modules", ".bin", "qmd");
-    try {
-      return await execFileAsync(localBin, args, {
-        cwd: this.workspaceRoot,
-        timeout: 30_000,
-      });
-    } catch {
-      // Fall back to global qmd
-      return execFileAsync("qmd", args, {
-        cwd: this.workspaceRoot,
-        timeout: 30_000,
-      });
+    const qmdBinaries = [
+      path.join(this.workspaceRoot, "node_modules", ".bin", "qmd"),
+      "/app/node_modules/.bin/qmd",
+      "qmd",
+    ];
+
+    let lastError: unknown;
+    for (const bin of qmdBinaries) {
+      try {
+        return await execFileAsync(bin, args, {
+          cwd: this.workspaceRoot,
+          timeout: 30_000,
+        });
+      } catch (error) {
+        lastError = error;
+      }
     }
+
+    throw lastError instanceof Error ? lastError : new Error("qmd unavailable");
   }
 }

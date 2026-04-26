@@ -131,6 +131,9 @@ function fakeAgent(tools: Tool[], script: MockScript): {
       spawnCalls++;
       return runChildAgentLoop(agent as never, opts);
     },
+    async deliverBackgroundTaskResult(): Promise<boolean> {
+      return false;
+    },
   };
   return { agent, llmCalls: llm.callLog, get spawnCalls() { return spawnCalls; } } as never;
 }
@@ -277,6 +280,78 @@ describe("SpawnAgent — §7.12.d", () => {
       (e): e is { type: string } => (e as { type?: unknown }).type === "spawn_started",
     );
     expect(startEvt).toBeDefined();
+  });
+
+  it("(c2) return mode retries transient child failures before surfacing to parent", async () => {
+    const { agent } = fakeAgent([], { rounds: [] }) as unknown as {
+      agent: Parameters<typeof makeSpawnAgentTool>[0] & {
+        spawnChildTurn: Parameters<typeof makeSpawnAgentTool>[0]["spawnChildTurn"];
+      };
+    };
+    let calls = 0;
+    agent.spawnChildTurn = async () => {
+      calls++;
+      if (calls < 3) {
+        return {
+          status: "error",
+          finalText: "",
+          toolCallCount: 0,
+          errorMessage: "llm upstream reset",
+        };
+      }
+      return {
+        status: "ok",
+        finalText: "recovered result",
+        toolCallCount: 0,
+      };
+    };
+    const tool = makeSpawnAgentTool(agent);
+    const { ctx, events } = makeParentCtx();
+
+    const result = await tool.execute(
+      { persona: "child", prompt: "do retryable work", deliver: "return" },
+      ctx,
+    );
+
+    expect(result.status).toBe("ok");
+    expect(calls).toBe(3);
+    const out = result.output as SpawnAgentOutput;
+    expect(out.status).toBe("ok");
+    expect(out.finalText).toBe("recovered result");
+    expect(
+      events.filter((e) => (e as { type?: unknown }).type === "spawn_retry"),
+    ).toHaveLength(2);
+  });
+
+  it("(c3) exhausted return-mode child failures surface as a tool error", async () => {
+    const { agent } = fakeAgent([], { rounds: [] }) as unknown as {
+      agent: Parameters<typeof makeSpawnAgentTool>[0] & {
+        spawnChildTurn: Parameters<typeof makeSpawnAgentTool>[0]["spawnChildTurn"];
+      };
+    };
+    let calls = 0;
+    agent.spawnChildTurn = async () => {
+      calls++;
+      return {
+        status: "error",
+        finalText: "partial child text",
+        toolCallCount: 0,
+        errorMessage: "child timeout",
+      };
+    };
+    const tool = makeSpawnAgentTool(agent);
+    const { ctx } = makeParentCtx();
+
+    const result = await tool.execute(
+      { persona: "child", prompt: "do retryable work", deliver: "return" },
+      ctx,
+    );
+
+    expect(calls).toBe(3);
+    expect(result.status).toBe("error");
+    expect(result.errorCode).toBe("spawn_failed");
+    expect(result.errorMessage).toContain("child timeout");
+    expect(result.errorMessage).toContain("Do not switch to direct execution");
   });
 
   it("(c) return mode tallies tool calls when child uses a tool", async () => {
@@ -1215,5 +1290,58 @@ describe("SpawnAgent — §7.12.d", () => {
     expect(resultEvt).toBeDefined();
     expect(resultEvt?.status).toBe("ok");
     expect(resultEvt?.finalText).toBe("bg finish");
+  });
+
+  it("(d2) deliver='background' asks the agent to deliver the completed result", async () => {
+    const parentTools: Tool[] = [];
+    const script: MockScript = {
+      rounds: [
+        [
+          { kind: "text_delta", blockIndex: 0, delta: "background result" },
+          {
+            kind: "message_end",
+            stopReason: "end_turn",
+            usage: { inputTokens: 1, outputTokens: 2 },
+          },
+        ],
+      ],
+    };
+    const { agent } = fakeAgent(parentTools, script) as unknown as {
+      agent: Parameters<typeof makeSpawnAgentTool>[0] & {
+        deliverBackgroundTaskResult?: (input: {
+          sessionKey: string;
+          taskId: string;
+          status: string;
+          finalText?: string;
+        }) => Promise<boolean>;
+      };
+    };
+    const delivered: Array<{
+      sessionKey: string;
+      taskId: string;
+      status: string;
+      finalText?: string;
+    }> = [];
+    agent.deliverBackgroundTaskResult = async (input) => {
+      delivered.push(input);
+      return true;
+    };
+    const tool = makeSpawnAgentTool(agent);
+    const { ctx } = makeParentCtx({ sessionKey: "agent:main:app:general" });
+
+    await tool.execute(
+      { persona: "bg", prompt: "work", deliver: "background" } satisfies SpawnAgentInput,
+      ctx,
+    );
+
+    await new Promise((r) => setTimeout(r, 20));
+
+    expect(delivered).toHaveLength(1);
+    expect(delivered[0]).toMatchObject({
+      sessionKey: "agent:main:app:general",
+      status: "completed",
+      finalText: "background result",
+    });
+    expect(delivered[0]!.taskId).toMatch(/^spawn_/);
   });
 });

@@ -17,6 +17,7 @@ import type {
   LLMUsage,
 } from "../transport/LLMClient.js";
 import type { SseWriter } from "../transport/SseWriter.js";
+import { RepetitionDetector } from "./RepetitionDetector.js";
 
 export type StopReasonRaw =
   | "end_turn"
@@ -52,7 +53,7 @@ export interface LLMStreamReaderResult {
  * turn (T4-18).
  */
 export interface ReadOneOptions {
-  /** Override thinking mode for this call (e.g. disable on empty-response recovery). */
+  /** Override thinking mode for this call (e.g. disable for empty-response recovery). */
   thinkingOverride?: { type: "adaptive" } | { type: "disabled" };
 }
 
@@ -95,6 +96,11 @@ export async function readOne(
 
   let stopReason: StopReasonRaw = null;
   let usage: LLMUsage = { inputTokens: 0, outputTokens: 0 };
+  let repetitionAborted = false;
+
+  // Streaming repetition detector — catches LLM text degeneration
+  // (same sentence repeating indefinitely within a single response).
+  const repetitionDetector = new RepetitionDetector();
 
   for await (const evt of stream) {
     switch (evt.kind) {
@@ -102,6 +108,22 @@ export async function readOne(
         const prev = textByIndex.get(evt.blockIndex) ?? "";
         if (prev.length === 0) blockOrder.push(evt.blockIndex);
         textByIndex.set(evt.blockIndex, prev + evt.delta);
+
+        // Check for degenerate repetition before emitting to client.
+        const repResult = repetitionDetector.feed(evt.delta);
+        if (repResult.detected) {
+          console.warn(
+            `[core-agent] REPETITION DETECTED — aborting stream.` +
+            ` pattern="${repResult.pattern}" count=${repResult.count}`,
+          );
+          deps.sse.agent({
+            type: "text_delta",
+            delta: "\n\n⚠️ [반복 감지됨 — 응답이 중단되었습니다]",
+          });
+          repetitionAborted = true;
+          break;
+        }
+
         // Emit on the structured `event: agent` channel only. The legacy
         // OpenAI-compat `choices[0].delta.content` path was previously
         // dual-emitted here as a migration aid for pre-§7.9 clients; all
@@ -170,6 +192,14 @@ export async function readOne(
         deps.onError(evt.code, new Error(evt.message));
         throw new Error(`${evt.code}: ${evt.message}`);
     }
+    // Break the stream consumption loop if repetition was detected.
+    if (repetitionAborted) break;
+  }
+
+  // If repetition was detected, force end_turn so the commit pipeline
+  // finalizes cleanly rather than attempting tool dispatch or recovery.
+  if (repetitionAborted) {
+    stopReason = "end_turn";
   }
 
   // Assemble blocks in streamed order, de-duped.

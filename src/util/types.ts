@@ -43,6 +43,12 @@ export interface ReplyToRef {
 export interface UserMessageMetadata {
   replyTo?: ReplyToRef;
   /**
+   * Per-turn system prompt addendum synthesized by an upstream relay
+   * such as chat-proxy (for example `<kb-context>` injected from
+   * selected Knowledge Base files or attachment ingest).
+   */
+  systemPromptAddendum?: string;
+  /**
    * Mid-turn injection marker (#86). Present when this message was
    * queued via POST /v1/chat/inject while another turn was already
    * streaming — the midTurnInjector hook tags the injection so

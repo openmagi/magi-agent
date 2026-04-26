@@ -15,7 +15,6 @@ import http from "node:http";
 import https from "node:https";
 import { URL } from "node:url";
 import { shouldEnableThinkingByDefault, getCapability } from "../llm/modelCapabilities.js";
-import type { LLMProvider } from "../llm/LLMProvider.js";
 
 export interface LLMClientOptions {
   apiProxyUrl: string; // e.g. http://api-proxy.clawy-system.svc.cluster.local:3001
@@ -73,6 +72,64 @@ export interface LLMUsage {
   outputTokens: number;
 }
 
+const ANTHROPIC_TOOL_ID_RE = /^[a-zA-Z0-9_-]+$/;
+
+function sanitizeToolUseId(raw: string): string {
+  if (ANTHROPIC_TOOL_ID_RE.test(raw)) return raw;
+  const sanitized = raw.replace(/[^a-zA-Z0-9_-]/g, "_");
+  return sanitized.length > 0 ? sanitized : "toolu";
+}
+
+/**
+ * Anthropic rejects tool_use ids that contain punctuation outside
+ * `[a-zA-Z0-9_-]`. Some upstream providers and synthetic paths can emit
+ * looser ids (for example `call.one` or `toolu:...`). Normalize every
+ * tool_use / tool_result id pair just before the request leaves the
+ * core-agent boundary so historical transcript quirks cannot 400 a new turn.
+ */
+export function normalizeToolUseIdsForRequest(messages: LLMMessage[]): LLMMessage[] {
+  const idMap = new Map<string, string>();
+  const used = new Set<string>();
+
+  const canonicalId = (raw: string): string => {
+    const existing = idMap.get(raw);
+    if (existing) return existing;
+
+    const base = sanitizeToolUseId(raw);
+    let candidate = base;
+    let suffix = 1;
+    while (used.has(candidate)) {
+      candidate = `${base}_${suffix}`;
+      suffix += 1;
+    }
+    idMap.set(raw, candidate);
+    used.add(candidate);
+    return candidate;
+  };
+
+  return messages.map((msg) => {
+    if (!Array.isArray(msg.content)) return msg;
+    return {
+      ...msg,
+      content: msg.content.map((block) => {
+        if (block.type === "tool_use") {
+          return {
+            ...block,
+            id: canonicalId(block.id),
+          };
+        }
+        if (block.type === "tool_result") {
+          return {
+            ...block,
+            tool_use_id: canonicalId(block.tool_use_id),
+          };
+        }
+        return block;
+      }),
+    };
+  });
+}
+
 export type LLMEvent =
   /** Accumulating text block. */
   | { kind: "text_delta"; blockIndex: number; delta: string }
@@ -101,37 +158,35 @@ export type LLMEvent =
     }
   | { kind: "error"; code: string; message: string };
 
+type ProviderLike = { stream(req: LLMStreamRequest): AsyncGenerator<LLMEvent, void, void> };
+
 export class LLMClient {
   private readonly opts: Required<Pick<LLMClientOptions, "anthropicVersion" | "timeoutMs">> &
     LLMClientOptions;
-  private readonly provider: LLMProvider | null;
+  private readonly providerOverride?: ProviderLike;
 
-  constructor(options: LLMClientOptions) {
+  constructor(options: LLMClientOptions, provider?: ProviderLike) {
     this.opts = {
       anthropicVersion: "2023-06-01",
       timeoutMs: 600_000,
       ...options,
     };
-    this.provider = null;
+    this.providerOverride = provider;
   }
 
   /**
-   * Create an LLMClient backed by a multi-provider implementation.
-   * Used in OSS mode where we talk directly to Anthropic/OpenAI/Google
-   * instead of going through api-proxy.
+   * Create an LLMClient backed by an external LLMProvider (OSS multi-provider).
+   * The provider's `stream()` replaces the built-in Anthropic api-proxy call.
    */
-  static fromProvider(provider: LLMProvider): LLMClient {
-    const client = new LLMClient({
-      apiProxyUrl: "http://unused",
-      gatewayToken: "unused",
-      defaultModel: "unused",
-    });
-    (client as unknown as { provider: LLMProvider | null }).provider = provider;
-    return client;
+  static fromProvider(provider: ProviderLike, defaultModel: string): LLMClient {
+    return new LLMClient(
+      { apiProxyUrl: "unused://provider-mode", gatewayToken: "unused", defaultModel },
+      provider,
+    );
   }
 
   /**
-   * Stream a single completion call. Yields normalised LLMEvents
+   * Stream a single `/v1/messages` call. Yields normalised LLMEvents
    * until the upstream server closes the stream or errors.
    *
    * The caller is responsible for accumulating tool_use input fragments
@@ -139,9 +194,8 @@ export class LLMClient {
    * input when `block_stop` arrives for that block.
    */
   async *stream(req: LLMStreamRequest): AsyncGenerator<LLMEvent, void, void> {
-    // OSS mode: delegate to multi-provider
-    if (this.provider) {
-      yield* this.provider.stream(req);
+    if (this.providerOverride) {
+      yield* this.providerOverride.stream(req);
       return;
     }
     const model = req.model ?? this.opts.defaultModel;
@@ -155,12 +209,13 @@ export class LLMClient {
       (shouldEnableThinkingByDefault(model)
         ? ({ type: "adaptive" } as const)
         : undefined);
+    const normalizedMessages = normalizeToolUseIdsForRequest(req.messages);
     const body = JSON.stringify({
       model,
       system: req.system,
-      messages: req.messages,
+      messages: normalizedMessages,
       tools: req.tools,
-      max_tokens: req.max_tokens ?? (thinking ? (getCapability(model)?.maxOutputTokens ?? 16_000) : (getCapability(model)?.maxOutputTokens ?? 8_192)),
+      max_tokens: req.max_tokens ?? (thinking ? (getCapability(model)?.maxOutputTokens ?? 16_000) : 4096),
       temperature: req.temperature,
       ...(thinking ? { thinking } : {}),
       stream: true,

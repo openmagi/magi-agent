@@ -250,4 +250,5 @@ describe("StopReasonHandler.handle — decision table", () => {
     expect(messages[0]?.role).toBe("user");
     expect(messages[0]?.content).toBe("Continue.");
   });
+
 });

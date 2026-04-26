@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { makeHipocampusCompactorHook, type CompactionEngine, type QmdManager } from "./hipocampusCompactor.js";
+import { makeHipocampusCompactorHook, type CompactionEngine, type QmdManager, type FlushFn } from "./hipocampusCompactor.js";
 import type { HookContext } from "../types.js";
 
 function makeCtx(sessionKey: string, overrides: Partial<HookContext> = {}): HookContext {
@@ -104,6 +104,51 @@ describe("hipocampusCompactor", () => {
       error: expect.stringContaining("compaction engine exploded"),
     }));
     expect(qmd.reindex).not.toHaveBeenCalled();
+  });
+
+  it("flushes transcript to memory before running compaction", async () => {
+    const engine = makeEngine({ compacted: true });
+    const qmd = makeQmd();
+    const callOrder: string[] = [];
+    const flush: FlushFn = vi.fn(async () => {
+      callOrder.push("flush");
+      return { flushed: 3, lastTurnId: "t-abc" };
+    });
+    engine.run = vi.fn(async () => {
+      callOrder.push("compact");
+      return { skipped: false, compacted: true };
+    });
+
+    const hook = makeHipocampusCompactorHook(engine, qmd, flush);
+    const ctx = makeCtx("session-flush");
+
+    await hook.handler({ userMessage: "hello" }, ctx);
+
+    expect(flush).toHaveBeenCalledTimes(1);
+    // flush must be called with workspaceRoot and transcript from context
+    expect(flush).toHaveBeenCalledWith(
+      expect.any(String),
+      ctx.transcript,
+    );
+    expect(engine.run).toHaveBeenCalledTimes(1);
+    // flush BEFORE compact
+    expect(callOrder).toEqual(["flush", "compact"]);
+  });
+
+  it("still runs compaction even if flush fails", async () => {
+    const engine = makeEngine({ compacted: true });
+    const qmd = makeQmd();
+    const flush: FlushFn = vi.fn(async () => {
+      throw new Error("flush exploded");
+    });
+
+    const hook = makeHipocampusCompactorHook(engine, qmd, flush);
+    const ctx = makeCtx("session-flush-fail");
+
+    await hook.handler({ userMessage: "hello" }, ctx);
+
+    expect(engine.run).toHaveBeenCalledTimes(1);
+    expect(ctx.log).toHaveBeenCalledWith("warn", expect.stringContaining("flush"), expect.anything());
   });
 
   it("skips reindex when compaction was skipped (cooldown)", async () => {

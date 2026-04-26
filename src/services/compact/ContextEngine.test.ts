@@ -90,6 +90,29 @@ function assistantEntry(
   return { kind: "assistant_text", ts, turnId, text };
 }
 
+function toolCallEntry(
+  turnId: string,
+  toolUseId: string,
+  name: string,
+  input: unknown = {},
+  ts = 3_000,
+): TranscriptEntry {
+  return { kind: "tool_call", ts, turnId, toolUseId, name, input };
+}
+
+function toolResultEntry(
+  turnId: string,
+  toolUseId: string,
+  output = "result",
+  ts = 4_000,
+): TranscriptEntry {
+  return { kind: "tool_result", ts, turnId, toolUseId, status: "ok", output };
+}
+
+function committedEntry(turnId: string, ts = 9_000): TranscriptEntry {
+  return { kind: "turn_committed", ts, turnId, inputTokens: 100, outputTokens: 50 };
+}
+
 function boundaryEntry(
   boundaryId: string,
   summaryText: string,
@@ -124,9 +147,9 @@ describe("ContextEngine.buildMessagesFromTranscript", () => {
     const messages = engine.buildMessagesFromTranscript(entries);
     expect(messages.length).toBe(3);
     expect(messages[0]?.role).toBe("user");
-    expect(messages[0]?.content).toBe("hello");
+    expect(messages[0]?.content).toContain("hello");
     expect(messages[1]?.role).toBe("assistant");
-    expect(messages[2]?.content).toBe("again");
+    expect(messages[2]?.content).toContain("again");
   });
 
   it("collapses pre-boundary entries into a single synthetic summary message", () => {
@@ -152,7 +175,7 @@ describe("ContextEngine.buildMessagesFromTranscript", () => {
     expect(summaryContent).toContain("[Compaction boundary 01HB1");
     expect(summaryContent).toContain("SUMMARY-OF-T1");
     // [1] + [2] are post-boundary entries in order.
-    expect(messages[1]?.content).toBe("new-user");
+    expect(messages[1]?.content).toContain("new-user");
     expect(messages[2]?.role).toBe("assistant");
   });
 
@@ -178,7 +201,7 @@ describe("ContextEngine.buildMessagesFromTranscript", () => {
     expect(summaryContent).toContain("SUMMARY-2");
     // Earlier summary is dropped (it was absorbed into SUMMARY-2's context).
     expect(summaryContent).not.toContain("SUMMARY-1");
-    expect(messages[1]?.content).toBe("latest-user");
+    expect(messages[1]?.content).toContain("latest-user");
   });
 });
 
@@ -387,5 +410,299 @@ describe("ContextEngine §11.6 reserve-token floor (model-aware)", () => {
     );
     expect(boundary).not.toBeNull();
     expect(transcript.appended.length).toBe(1);
+  });
+});
+
+// ── Bug fix: timestamps in LLM messages ─────────────────────────────
+
+describe("ContextEngine.buildMessagesFromTranscript — timestamps", () => {
+  it("includes [Time: ISO] prefix on user_message entries", () => {
+    const { client } = mockLLM(() => []);
+    const engine = new ContextEngine(client);
+
+    const ts = new Date("2026-04-22T10:11:00Z").getTime();
+    const entries: TranscriptEntry[] = [
+      userEntry("t1", "hello", ts),
+      assistantEntry("t1", "world", ts + 1_000),
+    ];
+
+    const messages = engine.buildMessagesFromTranscript(entries);
+    expect(messages[0]?.role).toBe("user");
+    const content = messages[0]?.content as string;
+    expect(content).toContain("[Time: 2026-04-22T10:11:00.000Z]");
+    expect(content).toContain("hello");
+  });
+
+  it("does NOT add timestamp prefix to assistant_text entries", () => {
+    const { client } = mockLLM(() => []);
+    const engine = new ContextEngine(client);
+
+    const entries: TranscriptEntry[] = [
+      userEntry("t1", "hi", 1_000),
+      assistantEntry("t1", "reply", 2_000),
+    ];
+
+    const messages = engine.buildMessagesFromTranscript(entries);
+    const assistantContent = messages[1]?.content;
+    // Assistant content is LLMContentBlock[] — text should not contain [Time:]
+    expect(Array.isArray(assistantContent)).toBe(true);
+    const textBlock = (assistantContent as Array<{ type: string; text: string }>)[0];
+    expect(textBlock?.text).toBe("reply");
+    expect(textBlock?.text).not.toContain("[Time:");
+  });
+
+  it("preserves timestamps through compaction boundary (post-boundary entries)", () => {
+    const { client } = mockLLM(() => []);
+    const engine = new ContextEngine(client);
+
+    const ts = new Date("2026-04-22T14:00:00Z").getTime();
+    const entries: TranscriptEntry[] = [
+      userEntry("t1", "old-msg", 1_000),
+      assistantEntry("t1", "old-reply", 2_000),
+      boundaryEntry("01HB1", "SUMMARY", 3_000),
+      userEntry("t2", "new-msg", ts),
+      assistantEntry("t2", "new-reply", ts + 1_000),
+    ];
+
+    const messages = engine.buildMessagesFromTranscript(entries);
+    // [0] = boundary summary, [1] = new-msg with timestamp, [2] = new-reply
+    expect(messages[1]?.role).toBe("user");
+    const content = messages[1]?.content as string;
+    expect(content).toContain("[Time: 2026-04-22T14:00:00.000Z]");
+    expect(content).toContain("new-msg");
+  });
+});
+
+// ── Bug fix: tool_call/tool_result in message reconstruction ──────────
+
+describe("ContextEngine.buildMessagesFromTranscript — tool blocks", () => {
+  it("includes tool_use in assistant message and tool_result in user message", () => {
+    const { client } = mockLLM(() => []);
+    const engine = new ContextEngine(client);
+
+    const entries: TranscriptEntry[] = [
+      userEntry("t1", "read file.txt", 1_000),
+      assistantEntry("t1", "I'll read that file.", 2_000),
+      toolCallEntry("t1", "tu_1", "FileRead", { path: "/file.txt" }, 3_000),
+      toolResultEntry("t1", "tu_1", "file contents here", 4_000),
+      assistantEntry("t1", "The file contains...", 5_000),
+      committedEntry("t1", 6_000),
+    ];
+
+    const messages = engine.buildMessagesFromTranscript(entries);
+    // Expected sequence:
+    // [0] user: "read file.txt"
+    // [1] assistant: [text "I'll read that file.", tool_use FileRead]
+    // [2] user: [tool_result]
+    // [3] assistant: [text "The file contains..."]
+    expect(messages.length).toBe(4);
+    expect(messages[0]?.role).toBe("user");
+
+    // Assistant message should have text + tool_use merged
+    expect(messages[1]?.role).toBe("assistant");
+    const assistantBlocks = messages[1]?.content as Array<{ type: string }>;
+    expect(Array.isArray(assistantBlocks)).toBe(true);
+    expect(assistantBlocks.some((b) => b.type === "text")).toBe(true);
+    expect(assistantBlocks.some((b) => b.type === "tool_use")).toBe(true);
+
+    // Tool result should be a user message
+    expect(messages[2]?.role).toBe("user");
+    const resultBlocks = messages[2]?.content as Array<{ type: string }>;
+    expect(Array.isArray(resultBlocks)).toBe(true);
+    expect(resultBlocks[0]?.type).toBe("tool_result");
+
+    // Final assistant text
+    expect(messages[3]?.role).toBe("assistant");
+  });
+
+  it("batches multiple tool_results into a single user message", () => {
+    const { client } = mockLLM(() => []);
+    const engine = new ContextEngine(client);
+
+    const entries: TranscriptEntry[] = [
+      userEntry("t1", "search for bugs", 1_000),
+      toolCallEntry("t1", "tu_1", "Grep", { pattern: "bug" }, 2_000),
+      toolCallEntry("t1", "tu_2", "Glob", { pattern: "*.ts" }, 2_001),
+      toolResultEntry("t1", "tu_1", "found bug at line 42", 3_000),
+      toolResultEntry("t1", "tu_2", "file1.ts\nfile2.ts", 3_001),
+      assistantEntry("t1", "Found the bug.", 4_000),
+      committedEntry("t1", 5_000),
+    ];
+
+    const messages = engine.buildMessagesFromTranscript(entries);
+    // [0] user: "search for bugs"
+    // [1] assistant: [tool_use Grep, tool_use Glob]
+    // [2] user: [tool_result tu_1, tool_result tu_2]
+    // [3] assistant: "Found the bug."
+    expect(messages.length).toBe(4);
+    expect(messages[1]?.role).toBe("assistant");
+    const assistantBlocks = messages[1]?.content as Array<{ type: string }>;
+    expect(assistantBlocks.filter((b) => b.type === "tool_use").length).toBe(2);
+
+    expect(messages[2]?.role).toBe("user");
+    const resultBlocks = messages[2]?.content as Array<{ type: string }>;
+    expect(resultBlocks.filter((b) => b.type === "tool_result").length).toBe(2);
+  });
+
+  it("maintains strict user/assistant alternation across multiple turns", () => {
+    const { client } = mockLLM(() => []);
+    const engine = new ContextEngine(client);
+
+    const entries: TranscriptEntry[] = [
+      // Turn 1 — simple text exchange
+      userEntry("t1", "hello", 1_000),
+      assistantEntry("t1", "hi there", 2_000),
+      committedEntry("t1", 3_000),
+      // Turn 2 — tool use
+      userEntry("t2", "read file", 4_000),
+      assistantEntry("t2", "reading...", 5_000),
+      toolCallEntry("t2", "tu_1", "FileRead", {}, 6_000),
+      toolResultEntry("t2", "tu_1", "contents", 7_000),
+      assistantEntry("t2", "done reading", 8_000),
+      committedEntry("t2", 9_000),
+    ];
+
+    const messages = engine.buildMessagesFromTranscript(entries);
+    // Verify strict alternation: no two consecutive same-role messages
+    for (let i = 1; i < messages.length; i++) {
+      expect(messages[i]?.role).not.toBe(messages[i - 1]?.role);
+    }
+  });
+
+  it("handles tool-only turn (no assistant text before tool_use)", () => {
+    const { client } = mockLLM(() => []);
+    const engine = new ContextEngine(client);
+
+    const entries: TranscriptEntry[] = [
+      userEntry("t1", "check status", 1_000),
+      toolCallEntry("t1", "tu_1", "Bash", { command: "ls" }, 2_000),
+      toolResultEntry("t1", "tu_1", "file1 file2", 3_000),
+      assistantEntry("t1", "Here are the files.", 4_000),
+      committedEntry("t1", 5_000),
+    ];
+
+    const messages = engine.buildMessagesFromTranscript(entries);
+    // [0] user: "check status"
+    // [1] assistant: [tool_use Bash]
+    // [2] user: [tool_result]
+    // [3] assistant: "Here are the files."
+    expect(messages.length).toBe(4);
+    expect(messages[0]?.role).toBe("user");
+    expect(messages[1]?.role).toBe("assistant");
+    expect(messages[2]?.role).toBe("user");
+    expect(messages[3]?.role).toBe("assistant");
+  });
+
+  it("merges consecutive user messages from aborted turns (no assistant_text)", () => {
+    const { client } = mockLLM(() => []);
+    const engine = new ContextEngine(client);
+
+    // Aborted turn: user_message written but NO assistant_text (only on commit)
+    // Next turn: user_message added
+    // Without merge: user → user (model answers first, ignores second)
+    const entries: TranscriptEntry[] = [
+      userEntry("t1", "이전 질문", 1_000),
+      // turn_aborted — no assistant_text written
+      { kind: "turn_aborted", ts: 2_000, turnId: "t1", reason: "beforeCommit blocked" },
+      userEntry("t2", "현재 질문", 3_000),
+    ];
+
+    const messages = engine.buildMessagesFromTranscript(entries);
+    // Should merge into a single user message, not two consecutive ones
+    expect(messages.length).toBe(1);
+    expect(messages[0]?.role).toBe("user");
+    // Both texts should be present
+    const content = messages[0]?.content;
+    expect(Array.isArray(content)).toBe(true);
+    const texts = (content as Array<{ type: string; text: string }>)
+      .filter((b) => b.type === "text")
+      .map((b) => b.text);
+    expect(texts.some((t) => t.includes("이전 질문"))).toBe(true);
+    expect(texts.some((t) => t.includes("현재 질문"))).toBe(true);
+  });
+
+  it("merges consecutive user messages from aborted tool turns (tool_result + user)", () => {
+    const { client } = mockLLM(() => []);
+    const engine = new ContextEngine(client);
+
+    // Aborted turn with tools: user + tool_call + tool_result + turn_aborted
+    // Then new turn: user_message
+    const entries: TranscriptEntry[] = [
+      userEntry("t1", "analyze file", 1_000),
+      toolCallEntry("t1", "tu_1", "FileRead", { path: "/x" }, 2_000),
+      toolResultEntry("t1", "tu_1", "file content", 3_000),
+      { kind: "turn_aborted", ts: 4_000, turnId: "t1", reason: "blocked" },
+      userEntry("t2", "다른 질문", 5_000),
+    ];
+
+    const messages = engine.buildMessagesFromTranscript(entries);
+    // Verify no consecutive same-role messages
+    for (let i = 1; i < messages.length; i++) {
+      expect(messages[i]?.role).not.toBe(messages[i - 1]?.role);
+    }
+    // Last message should contain "다른 질문"
+    const last = messages[messages.length - 1]!;
+    expect(last.role).toBe("user");
+    const lastContent = Array.isArray(last.content)
+      ? last.content.map((b) => (b as { text?: string }).text ?? "").join("")
+      : last.content;
+    expect(lastContent).toContain("다른 질문");
+  });
+
+  it("strips orphaned tool_use when tool_result is missing (aborted mid-execution)", () => {
+    const { client } = mockLLM(() => []);
+    const engine = new ContextEngine(client);
+
+    // Turn aborted after tool_call written but BEFORE tool_result
+    const entries: TranscriptEntry[] = [
+      userEntry("t1", "read the file", 1_000),
+      assistantEntry("t1", "reading...", 2_000),
+      toolCallEntry("t1", "tu_orphan", "FileRead", { path: "/x" }, 3_000),
+      // NO tool_result — turn was aborted mid-execution
+      { kind: "turn_aborted", ts: 4_000, turnId: "t1", reason: "timeout" },
+      userEntry("t2", "next question", 5_000),
+    ];
+
+    const messages = engine.buildMessagesFromTranscript(entries);
+    // Orphaned tool_use should be STRIPPED (Anthropic API rejects it)
+    for (const msg of messages) {
+      if (!Array.isArray(msg.content)) continue;
+      for (const block of msg.content) {
+        expect(block.type).not.toBe("tool_use");
+      }
+    }
+    // Should still have the user messages
+    const lastMsg = messages[messages.length - 1]!;
+    const content = Array.isArray(lastMsg.content)
+      ? lastMsg.content.map((b) => (b as { text?: string }).text ?? "").join("")
+      : lastMsg.content;
+    expect(content).toContain("next question");
+  });
+
+  it("keeps valid tool_use/tool_result pairs intact", () => {
+    const { client } = mockLLM(() => []);
+    const engine = new ContextEngine(client);
+
+    const entries: TranscriptEntry[] = [
+      userEntry("t1", "search", 1_000),
+      toolCallEntry("t1", "tu_1", "Grep", { pattern: "x" }, 2_000),
+      toolResultEntry("t1", "tu_1", "found it", 3_000),
+      assistantEntry("t1", "done", 4_000),
+      committedEntry("t1", 5_000),
+    ];
+
+    const messages = engine.buildMessagesFromTranscript(entries);
+    // tool_use and tool_result should both be present
+    let hasToolUse = false;
+    let hasToolResult = false;
+    for (const msg of messages) {
+      if (!Array.isArray(msg.content)) continue;
+      for (const block of msg.content) {
+        if (block.type === "tool_use") hasToolUse = true;
+        if (block.type === "tool_result") hasToolResult = true;
+      }
+    }
+    expect(hasToolUse).toBe(true);
+    expect(hasToolResult).toBe(true);
   });
 });

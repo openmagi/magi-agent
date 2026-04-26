@@ -5,6 +5,7 @@
  */
 
 import type { AgentConfig } from "../Agent.js";
+import { createProvider } from "../llm/createProvider.js";
 
 function requireEnv(name: string): string {
   const v = process.env[name];
@@ -24,8 +25,6 @@ function parseIntSafe(name: string, fallback: number): number {
   if (!raw) return fallback;
   const n = Number.parseInt(raw, 10);
   if (!Number.isFinite(n) || n <= 0 || n >= 65536) {
-    // Guard specifically against K8s service-discovery injection (e.g.
-    // "tcp://10.43.0.1:3001") — see commit 951a9082.
     console.warn(
       `[env] ${name}=${JSON.stringify(raw)} invalid, using ${fallback}`,
     );
@@ -40,9 +39,6 @@ export interface RuntimeEnv {
 }
 
 // ── OSS config-file types ───────────────────────────────────────
-// Mirrors the shape parsed from clawy-agent.yaml by src/cli/config.ts.
-// Defined here as well so RuntimeEnv has zero import-cycle risk with
-// the CLI module (which may not exist yet during parallel development).
 
 export interface ClawyAgentConfig {
   llm: {
@@ -64,39 +60,55 @@ export interface ClawyAgentConfig {
   hooks?: {
     builtin?: Record<string, boolean>;
   };
+  memory?: {
+    enabled?: boolean;
+    compaction?: boolean;
+  };
 }
+
+const DEFAULT_MODELS: Record<string, string> = {
+  anthropic: "claude-sonnet-4-6",
+  openai: "gpt-5.4",
+  google: "gemini-2.5-flash",
+};
 
 /**
  * Build a RuntimeEnv from a parsed YAML config (OSS / open-source mode).
- * Clawy Pro infrastructure fields (gatewayToken, apiProxyUrl, etc.) are
- * set to safe empty defaults — they are unused when running standalone.
+ *
+ * Creates an LLMProvider from the config and injects it into AgentConfig
+ * so the Agent uses direct provider API calls instead of api-proxy.
  */
 export function loadFromConfig(config: ClawyAgentConfig): RuntimeEnv {
+  const model = config.llm.model ?? DEFAULT_MODELS[config.llm.provider] ?? "claude-sonnet-4-6";
+
+  const provider = createProvider({
+    provider: config.llm.provider,
+    apiKey: config.llm.apiKey,
+    baseUrl: config.llm.baseUrl,
+    defaultModel: model,
+  });
+
   const agentConfig: AgentConfig = {
     botId: "local",
     userId: "local",
     workspaceRoot: config.workspace ?? "./workspace",
-    model: config.llm.model ?? "claude-sonnet-4-20250514",
+    model,
 
-    // OSS LLM fields
-    llmProvider: config.llm.provider,
-    llmApiKey: config.llm.apiKey,
-    llmBaseUrl: config.llm.baseUrl,
+    // For Anthropic direct mode, apiKey doubles as gatewayToken (same x-api-key header).
+    // For non-Anthropic, these are unused because llmProvider handles routing.
+    gatewayToken: config.llm.apiKey,
+    apiProxyUrl: config.llm.baseUrl ?? "https://api.anthropic.com",
 
-    // Identity
+    // Multi-provider: inject the OSS provider so LLMClient delegates to it
+    llmProvider: provider,
+
+    // OSS identity
     agentName: config.identity?.name ?? "Clawy Agent",
     agentInstructions: config.identity?.instructions,
 
     // Channel tokens
     telegramBotToken: config.channels?.telegram?.token,
     discordBotToken: config.channels?.discord?.token,
-
-    // Webhook
-    webhookUrl: config.channels?.webhook?.url,
-    webhookSecret: config.channels?.webhook?.secret,
-
-    // Hooks
-    builtinHooks: config.hooks?.builtin,
   };
 
   return { port: 8080, agentConfig };
@@ -113,14 +125,11 @@ export function loadRuntimeEnv(): RuntimeEnv {
       optionalEnv("CORE_AGENT_WORKSPACE") ?? "/home/ocuser/.openclaw/workspace",
     gatewayToken: requireEnv("GATEWAY_TOKEN"),
     apiProxyUrl: requireEnv("CORE_AGENT_API_PROXY_URL"),
-    chatProxyUrl: requireEnv("CORE_AGENT_CHAT_PROXY_URL"),
-    redisUrl: requireEnv("CORE_AGENT_REDIS_URL"),
+    chatProxyUrl: optionalEnv("CORE_AGENT_CHAT_PROXY_URL"),
+    redisUrl: optionalEnv("CORE_AGENT_REDIS_URL"),
     model: optionalEnv("CORE_AGENT_MODEL") ?? "claude-opus-4-6",
     telegramBotToken: optionalEnv("TELEGRAM_BOT_TOKEN"),
     discordBotToken: optionalEnv("DISCORD_BOT_TOKEN"),
-    // §7.15 — web/app outbound push via chat-proxy. Both must be set
-    // to activate the WebAppChannelAdapter; otherwise the Agent boots
-    // without web/app push (Telegram / Discord paths unaffected).
     webAppPushEndpointUrl: optionalEnv("WEBAPP_PUSH_URL"),
     webAppPushHmacKey: optionalEnv("WEBAPP_PUSH_HMAC_KEY"),
   };

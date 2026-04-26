@@ -161,6 +161,23 @@ describe("MessageBuilder.buildSystemPrompt", () => {
     const out = await buildSystemPrompt(session, "turn-no-rules");
     expect(out).not.toContain("<agent_rules>");
   });
+
+  it("appends per-turn system prompt addendum from user metadata", async () => {
+    const { session } = await makeSession({
+      identity: { identity: "I am bot" },
+    });
+    const out = await buildSystemPrompt(session, "turn-kb", {
+      text: "analyze this",
+      receivedAt: Date.now(),
+      metadata: {
+        systemPromptAddendum:
+          "<kb-context>\n[file: report.pdf]\nRevenue was up 12%.\n</kb-context>",
+      },
+    });
+    expect(out).toContain(
+      "<kb-context>\n[file: report.pdf]\nRevenue was up 12%.\n</kb-context>",
+    );
+  });
 });
 
 describe("MessageBuilder.buildMessages", () => {
@@ -255,153 +272,37 @@ describe("MessageBuilder.buildMessages", () => {
     expect(out[out.length - 1]?.content).toBe("plain text");
   });
 
-  it("includes [Attachment: ...] preamble when attachments are present", async () => {
+  it("emits mixed text + image content when imageBlocks are present", async () => {
     const { session } = await makeSession({});
     const um: UserMessage = {
-      text: "이거 보면 돼",
-      receivedAt: Date.now(),
-      attachments: [
-        {
-          kind: "file",
-          name: "report.html",
-          mimeType: "text/html",
-          sizeBytes: 116400,
-          localPath: "/workspace/telegram-downloads/report.html",
-        },
-      ],
-    };
-    const out = await buildMessages(session, um);
-    const last = out[out.length - 1]!;
-    expect(last.content).toContain('[Attachment: name="report.html"');
-    expect(last.content).toContain("type=text/html");
-    expect(last.content).toContain('path="/workspace/telegram-downloads/report.html"');
-    expect(last.content).toContain("이거 보면 돼");
-  });
-
-  it("attachment preamble appears before user text", async () => {
-    const { session } = await makeSession({});
-    const um: UserMessage = {
-      text: "분석해줘",
-      receivedAt: Date.now(),
-      attachments: [
-        { kind: "image", name: "photo.jpg", localPath: "/tmp/photo.jpg" },
-      ],
-    };
-    const out = await buildMessages(session, um);
-    const content = out[out.length - 1]!.content as string;
-    const attachIdx = content.indexOf("[Attachment:");
-    const textIdx = content.indexOf("분석해줘");
-    expect(attachIdx).toBeLessThan(textIdx);
-  });
-
-  it("handles attachment-only messages (empty text)", async () => {
-    const { session } = await makeSession({});
-    const um: UserMessage = {
-      text: "",
-      receivedAt: Date.now(),
-      attachments: [
-        { kind: "file", name: "data.pdf", localPath: "/tmp/data.pdf", mimeType: "application/pdf" },
-      ],
-    };
-    const out = await buildMessages(session, um);
-    const content = out[out.length - 1]!.content as string;
-    expect(content).toContain('[Attachment: name="data.pdf"');
-    // Should NOT have trailing empty lines or just whitespace
-    expect(content.trim()).toBe(content);
-  });
-
-  it("passes through imageBlocks from chat-proxy as Anthropic vision content array", async () => {
-    const { session } = await makeSession({});
-    const fakeBase64 = Buffer.from("test-image").toString("base64");
-    const um: UserMessage = {
-      text: "이 이미지 분석해줘",
+      text: "please inspect this",
       receivedAt: Date.now(),
       imageBlocks: [
         {
           type: "image",
-          source: { type: "base64", media_type: "image/jpeg", data: fakeBase64 },
+          source: {
+            type: "base64",
+            media_type: "image/png",
+            data: "QUJD",
+          },
         },
       ],
     };
     const out = await buildMessages(session, um);
-    const last = out[out.length - 1]!;
-    expect(last.role).toBe("user");
-    // Content should be an array (mixed content), not a string
-    expect(Array.isArray(last.content)).toBe(true);
-    const blocks = last.content as Array<{ type: string; source?: unknown; text?: string }>;
-    // Image block first, then text
-    expect(blocks[0]!.type).toBe("image");
-    expect(blocks[1]!.type).toBe("text");
-    expect(blocks[1]!.text).toBe("이 이미지 분석해줘");
-  });
-
-  it("reads image attachments from disk and creates base64 image blocks", async () => {
-    const { session } = await makeSession({});
-    // Create a temporary fake image file
-    const fsSync = await import("node:fs");
-    const tmpFile = path.join(os.tmpdir(), `test-img-${Date.now()}.jpg`);
-    fsSync.default.writeFileSync(tmpFile, Buffer.from("fake-jpeg-data"));
-    try {
-      const um: UserMessage = {
-        text: "사진 봐",
-        receivedAt: Date.now(),
-        attachments: [
-          { kind: "image", name: "photo.jpg", mimeType: "image/jpeg", localPath: tmpFile },
-        ],
-      };
-      const out = await buildMessages(session, um);
-      const last = out[out.length - 1]!;
-      expect(Array.isArray(last.content)).toBe(true);
-      const blocks = last.content as Array<{ type: string; source?: { media_type: string; data: string }; text?: string }>;
-      expect(blocks[0]!.type).toBe("image");
-      expect(blocks[0]!.source?.media_type).toBe("image/jpeg");
-      expect(blocks[0]!.source?.data).toBe(Buffer.from("fake-jpeg-data").toString("base64"));
-      expect(blocks[1]!.type).toBe("text");
-      expect(blocks[1]!.text).toBe("사진 봐");
-    } finally {
-      fsSync.default.unlinkSync(tmpFile);
-    }
-  });
-
-  it("falls back to text metadata when image file cannot be read", async () => {
-    const { session } = await makeSession({});
-    const um: UserMessage = {
-      text: "분석해줘",
-      receivedAt: Date.now(),
-      attachments: [
-        { kind: "image", name: "missing.jpg", mimeType: "image/jpeg", localPath: "/nonexistent/missing.jpg" },
-      ],
-    };
-    const out = await buildMessages(session, um);
-    const last = out[out.length - 1]!;
-    // No imageBlocks → should be plain string with [Attachment: ...] tag
-    expect(typeof last.content).toBe("string");
-    expect(last.content as string).toContain('[Attachment: name="missing.jpg"');
-  });
-
-  it("non-image attachments remain as text metadata even when imageBlocks exist", async () => {
-    const { session } = await makeSession({});
-    const fakeBase64 = Buffer.from("img").toString("base64");
-    const um: UserMessage = {
-      text: "둘 다 처리해줘",
-      receivedAt: Date.now(),
-      imageBlocks: [
+    expect(out[out.length - 1]).toEqual({
+      role: "user",
+      content: [
+        { type: "text", text: "please inspect this" },
         {
           type: "image",
-          source: { type: "base64", media_type: "image/png", data: fakeBase64 },
+          source: {
+            type: "base64",
+            media_type: "image/png",
+            data: "QUJD",
+          },
         },
       ],
-      attachments: [
-        { kind: "file", name: "doc.pdf", mimeType: "application/pdf", localPath: "/tmp/doc.pdf" },
-      ],
-    };
-    const out = await buildMessages(session, um);
-    const last = out[out.length - 1]!;
-    expect(Array.isArray(last.content)).toBe(true);
-    const blocks = last.content as Array<{ type: string; text?: string }>;
-    const textBlock = blocks.find((b) => b.type === "text");
-    expect(textBlock?.text).toContain('[Attachment: name="doc.pdf"');
-    expect(textBlock?.text).toContain("둘 다 처리해줘");
+    });
   });
 });
 

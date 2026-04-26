@@ -168,28 +168,26 @@ export class Transcript {
   }
 
   /**
-   * All entries that should be visible to the LLM for message
-   * construction.
+   * Entries up to (and including) the last completed turn — committed
+   * OR aborted. Used for session resume / LLM message construction.
    *
-   * 2026-04-21 fix: previously only `turn_committed` boundaries were
-   * recognised, so aborted turns (answer-verifier timeout, sealed-file
-   * violations, etc.) vanished from the transcript. The LLM then saw
-   * no prior conversation and "forgot" everything the user had said.
-   *
-   * The revised strategy includes ALL entries regardless of whether
-   * their owning turn was committed, aborted, or never finished (pod
-   * crash / OOM). The user saw the assistant's streamed output and
-   * expects continuity — excluding any turn from the transcript creates
-   * a conversation-history gap that confuses the model.
-   *
-   * Uncommitted trailing entries from a turn that is *currently in
-   * progress* (i.e. no boundary yet because the turn hasn't finished)
-   * are harmless: `buildMessages` is only called at the START of a new
-   * turn, and Session.runTurn holds a mutex so no two turns overlap.
-   * By the time the next turn reads the transcript, the prior turn has
-   * either committed or aborted — both are now included.
+   * 2026-04-22 bug fix: previously only looked for `turn_committed`,
+   * so sessions where every turn was aborted (e.g. factGroundingVerifier
+   * blocked commit) returned [] — causing bot amnesia. Now treats
+   * `turn_aborted` as a valid boundary too, since aborted turns were
+   * already streamed to the user via SSE text_delta.
    */
   async readCommitted(): Promise<TranscriptEntry[]> {
-    return this.readAll();
+    const all = await this.readAll();
+    let lastComplete = -1;
+    for (let i = all.length - 1; i >= 0; i--) {
+      const kind = all[i]?.kind;
+      if (kind === "turn_committed" || kind === "turn_aborted") {
+        lastComplete = i;
+        break;
+      }
+    }
+    if (lastComplete < 0) return [];
+    return all.slice(0, lastComplete + 1);
   }
 }

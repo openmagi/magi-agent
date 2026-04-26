@@ -21,6 +21,7 @@ import { QmdManager } from "./QmdManager.js";
 const WORKSPACE = "/tmp/test-workspace";
 const MEMORY_DIR = path.join(WORKSPACE, "memory");
 const LOCAL_BIN = path.join(WORKSPACE, "node_modules", ".bin", "qmd");
+const APP_BIN = "/app/node_modules/.bin/qmd";
 
 const mockExecFile = vi.mocked(execFile);
 
@@ -140,6 +141,29 @@ describe("QmdManager", () => {
 
       expect(mgr.isReady()).toBe(false);
     });
+
+    it("stays ready when only vector embedding fails", async () => {
+      mockExecFile.mockImplementation(
+        ((_bin: unknown, _args: unknown, _opts: unknown, cb: unknown) => {
+          const args = _args as string[];
+          if (args.includes("embed")) {
+            (cb as (err: Error) => void)(
+              new Error("sqlite-vec shared library unavailable"),
+            );
+            return;
+          }
+          (cb as (err: null, result: { stdout: string; stderr: string }) => void)(
+            null,
+            { stdout: "", stderr: "" },
+          );
+        }) as typeof execFile,
+      );
+
+      const mgr = new QmdManager(WORKSPACE, true);
+      await mgr.start();
+
+      expect(mgr.isReady()).toBe(true);
+    });
   });
 
   describe("search()", () => {
@@ -160,9 +184,9 @@ describe("QmdManager", () => {
       const res = await mgr.search("hello world");
 
       expect(res).toHaveLength(2);
-      expect(res[0]!.path).toBe("memory/daily/2026-04-22.md");
-      expect(res[0]!.score).toBe(0.8);
-      expect(res[1]!.context).toBe("root");
+      expect(res[0].path).toBe("memory/daily/2026-04-22.md");
+      expect(res[0].score).toBe(0.8);
+      expect(res[1].context).toBe("root");
     });
 
     it("returns [] when not ready", async () => {
@@ -254,7 +278,7 @@ describe("QmdManager", () => {
       const res = await mgr.vectorSearch("semantic query");
 
       expect(res).toHaveLength(1);
-      expect(res[0]!.score).toBe(0.9);
+      expect(res[0].score).toBe(0.9);
 
       // Verify vsearch command was used
       const vsearchCall = mockExecFile.mock.calls.find((c) => {
@@ -272,6 +296,152 @@ describe("QmdManager", () => {
       failWith("embed model unavailable");
       const res = await mgr.vectorSearch("hello");
       expect(res).toEqual([]);
+    });
+  });
+
+  describe("hybridSearch()", () => {
+    it("falls back to BM25-only when vectorEnabled=false", async () => {
+      succeedWith();
+      const mgr = new QmdManager(WORKSPACE, false);
+      await mgr.start();
+
+      const results = [{ path: "memory/daily/2026-04-22.md", content: "bm25 hit", score: 0.7 }];
+      succeedWith(JSON.stringify({ results }));
+      const res = await mgr.hybridSearch("test query");
+
+      expect(res).toHaveLength(1);
+      expect(res[0].content).toBe("bm25 hit");
+      // Should only have called "search" (BM25), not "vsearch"
+      const lastCalls = mockExecFile.mock.calls.slice(-1);
+      const args = lastCalls[0][1] as string[];
+      expect(args.includes("search")).toBe(true);
+      expect(args.includes("vsearch")).toBe(false);
+    });
+
+    it("merges BM25 + vector results, dedupes by path (higher score wins)", async () => {
+      succeedWith();
+      const mgr = new QmdManager(WORKSPACE, true);
+      await mgr.start();
+
+      // Mock: alternate between BM25 and vector responses.
+      // hybridSearch calls search() and vectorSearch() in parallel.
+      // Each internally calls exec() which tries local bin first (may fail), then global.
+      let execCount = 0;
+      mockExecFile.mockImplementation(
+        ((_bin: unknown, _args: unknown, _opts: unknown, cb: unknown) => {
+          execCount++;
+          const args = _args as string[];
+          if (args.includes("search")) {
+            (cb as (err: null, r: { stdout: string; stderr: string }) => void)(null, {
+              stdout: JSON.stringify({
+                results: [
+                  { path: "memory/a.md", content: "bm25-a", score: 0.6 },
+                  { path: "memory/b.md", content: "bm25-b", score: 0.5 },
+                ],
+              }),
+              stderr: "",
+            });
+          } else if (args.includes("vsearch")) {
+            (cb as (err: null, r: { stdout: string; stderr: string }) => void)(null, {
+              stdout: JSON.stringify({
+                results: [
+                  { path: "memory/a.md", content: "vector-a", score: 0.9 },
+                  { path: "memory/c.md", content: "vector-c", score: 0.8 },
+                ],
+              }),
+              stderr: "",
+            });
+          } else {
+            (cb as (err: null, r: { stdout: string; stderr: string }) => void)(null, {
+              stdout: "",
+              stderr: "",
+            });
+          }
+        }) as typeof execFile,
+      );
+
+      const res = await mgr.hybridSearch("test", { limit: 5 });
+
+      // a.md should have score 0.9 (vector wins over bm25 0.6)
+      // c.md score 0.8 (vector only)
+      // b.md score 0.5 (bm25 only)
+      expect(res).toHaveLength(3);
+      expect(res[0].path).toBe("memory/a.md");
+      expect(res[0].score).toBe(0.9);
+      expect(res[1].path).toBe("memory/c.md");
+      expect(res[2].path).toBe("memory/b.md");
+    });
+
+    it("respects limit after merging", async () => {
+      succeedWith();
+      const mgr = new QmdManager(WORKSPACE, true);
+      await mgr.start();
+
+      mockExecFile.mockImplementation(
+        ((_bin: unknown, _args: unknown, _opts: unknown, cb: unknown) => {
+          const args = _args as string[];
+          const results = args.includes("vsearch")
+            ? [
+                { path: "memory/v1.md", content: "v1", score: 0.95 },
+                { path: "memory/v2.md", content: "v2", score: 0.85 },
+                { path: "memory/v3.md", content: "v3", score: 0.75 },
+              ]
+            : [
+                { path: "memory/b1.md", content: "b1", score: 0.8 },
+                { path: "memory/b2.md", content: "b2", score: 0.7 },
+              ];
+          (cb as (err: null, r: { stdout: string; stderr: string }) => void)(null, {
+            stdout: JSON.stringify({ results }),
+            stderr: "",
+          });
+        }) as typeof execFile,
+      );
+
+      const res = await mgr.hybridSearch("test", { limit: 3 });
+
+      expect(res).toHaveLength(3);
+      // Top 3 by score: v1(0.95), v2(0.85), b1(0.8)
+      expect(res[0].score).toBe(0.95);
+      expect(res[1].score).toBe(0.85);
+      expect(res[2].score).toBe(0.8);
+    });
+
+    it("returns [] when not ready", async () => {
+      const mgr = new QmdManager(WORKSPACE, true);
+      const res = await mgr.hybridSearch("test");
+      expect(res).toEqual([]);
+    });
+
+    it("handles vector failure gracefully (BM25 results still returned)", async () => {
+      succeedWith();
+      const mgr = new QmdManager(WORKSPACE, true);
+      await mgr.start();
+
+      mockExecFile.mockImplementation(
+        ((_bin: unknown, _args: unknown, _opts: unknown, cb: unknown) => {
+          const args = _args as string[];
+          if (args.includes("vsearch")) {
+            (cb as (err: Error) => void)(new Error("embed model crashed"));
+          } else if (args.includes("search")) {
+            (cb as (err: null, r: { stdout: string; stderr: string }) => void)(null, {
+              stdout: JSON.stringify({
+                results: [{ path: "memory/bm25.md", content: "bm25 only", score: 0.6 }],
+              }),
+              stderr: "",
+            });
+          } else {
+            (cb as (err: null, r: { stdout: string; stderr: string }) => void)(null, {
+              stdout: "",
+              stderr: "",
+            });
+          }
+        }) as typeof execFile,
+      );
+
+      const res = await mgr.hybridSearch("test");
+      // vectorSearch returns [] on error (fail-open), BM25 results survive
+      expect(res).toHaveLength(1);
+      expect(res[0].path).toBe("memory/bm25.md");
     });
   });
 
@@ -344,8 +514,31 @@ describe("QmdManager", () => {
 
       expect(mgr.isReady()).toBe(true);
       // Verify local bin was tried first
-      const firstCall = mockExecFile.mock.calls[0]!;
+      const firstCall = mockExecFile.mock.calls[0];
       expect(firstCall[0]).toBe(LOCAL_BIN);
+    });
+
+    it("tries the image-local qmd binary before global qmd", async () => {
+      mockExecFile.mockImplementation(
+        ((_bin: unknown, _args: unknown, _opts: unknown, cb: unknown) => {
+          if (_bin === LOCAL_BIN || _bin === APP_BIN) {
+            (cb as (err: Error) => void)(new Error("ENOENT"));
+            return;
+          }
+          (cb as (err: null, result: { stdout: string; stderr: string }) => void)(
+            null,
+            { stdout: "", stderr: "" },
+          );
+        }) as typeof execFile,
+      );
+
+      const mgr = new QmdManager(WORKSPACE, false);
+      await mgr.start();
+
+      const calledBins = mockExecFile.mock.calls.map((c) => c[0]);
+      expect(calledBins).toContain(LOCAL_BIN);
+      expect(calledBins).toContain(APP_BIN);
+      expect(calledBins.indexOf(APP_BIN)).toBeLessThan(calledBins.indexOf("qmd"));
     });
   });
 });

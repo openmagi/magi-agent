@@ -156,16 +156,6 @@ export type AgentEvent =
       elapsedMs: number;
       lastEventAt: number;
     }
-  | {
-      /**
-       * NO_REPLY suppression — emitted when the LLM produces the special
-       * `NO_REPLY` token (OpenClaw convention). Tells the client to clear
-       * any streamed text for this turn so the user sees an empty bubble
-       * (or no bubble at all).
-       */
-      type: "response_clear";
-      turnId: string;
-    }
   | { type: "error"; code: string; message: string };
 
 export class SseWriter {

@@ -269,4 +269,84 @@ describe("cron wiring — non-durable session auto-close", () => {
       expect(closedEvents[0].reason).toBe("cron_complete");
     }
   });
+
+  it("fireCron posts committed assistant text to the captured app channel", async () => {
+    const { Agent } = await import("./Agent.js");
+    const agent = new Agent({
+      botId: "bot-cron",
+      userId: "user-cron",
+      workspaceRoot: "/tmp/session-close-cron-delivery-test",
+      gatewayToken: "tok",
+      apiProxyUrl: "http://localhost",
+      chatProxyUrl: "http://chat-proxy.local",
+      redisUrl: "redis://localhost",
+      model: "claude-opus-4-7",
+    });
+
+    const origGetOrCreate = agent.getOrCreateSession.bind(agent);
+    const stubRunTurn = vi.fn(async () => ({
+      meta: {
+        turnId: "t-deliver-1",
+        sessionKey: "",
+        startedAt: Date.now(),
+        declaredRoute: "direct" as const,
+        status: "committed" as const,
+        usage: { inputTokens: 0, outputTokens: 0, costUsd: 0 },
+      },
+      assistantText: "테스트 브리핑입니다.",
+    }));
+    vi.spyOn(agent, "getOrCreateSession").mockImplementation(async (key, ref) => {
+      const s = await origGetOrCreate(key, ref);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (s as any).runTurn = stubRunTurn;
+      return s;
+    });
+
+    const fetchSpy = vi.fn(async () =>
+      new Response(JSON.stringify({ status: "posted" }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = fetchSpy as typeof fetch;
+
+    const record: CronRecord = {
+      cronId: "cron-deliver",
+      botId: "bot-cron",
+      userId: "user-cron",
+      expression: "* * * * *",
+      prompt: "send briefing",
+      deliveryChannel: { type: "app", channelId: "general" },
+      enabled: true,
+      createdAt: Date.now(),
+      nextFireAt: Date.now(),
+      consecutiveFailures: 0,
+      durable: false,
+      sessionKey: "agent:cron:app:general:cron-deliver",
+    };
+
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      await (agent as any).fireCron(record);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    expect(fetchSpy).toHaveBeenCalledWith(
+      "http://chat-proxy.local/v1/bot-channels/post",
+      expect.objectContaining({
+        method: "POST",
+        headers: expect.objectContaining({
+          Authorization: "Bearer tok",
+          "Content-Type": "application/json",
+        }),
+        body: JSON.stringify({
+          channel: "general",
+          content: "테스트 브리핑입니다.",
+        }),
+      }),
+    );
+  });
 });

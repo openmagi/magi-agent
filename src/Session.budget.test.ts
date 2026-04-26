@@ -10,10 +10,11 @@
  *   - Under-budget happy path
  */
 
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import {
   Session,
   DEFAULT_MAX_TURNS_PER_SESSION,
+  DEFAULT_MAX_COST_USD_PER_SESSION,
   type SessionMeta,
 } from "./Session.js";
 import type { Agent, AgentConfig } from "./Agent.js";
@@ -22,6 +23,9 @@ import {
   computeUsd,
   MODEL_CAPABILITIES,
 } from "./llm/modelCapabilities.js";
+import fs from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 
 function makeAgent(overrides: Partial<AgentConfig> = {}): Agent {
   const config: AgentConfig = {
@@ -114,15 +118,17 @@ describe("Session budget", () => {
     expect(result.reason).toBe("turns");
   });
 
-  it("cost no longer triggers budget exceeded (api-proxy is the gate)", () => {
+  it("exceeded=true with reason=cost when cumulativeCostUsd reaches maxCostUsd", () => {
+    // maxTurns high so turns don't trip first. maxCost=1 USD, turn=0.6 × 2.
     const session = makeSession(
       makeAgent({ maxTurnsPerSession: 100, maxCostUsdPerSession: 1 }),
     );
     session.recordTurnUsage(usage(100, 100, 0.6));
+    expect(session.budgetExceeded().exceeded).toBe(false);
     session.recordTurnUsage(usage(100, 100, 0.6));
-    // Cost exceeds maxCostUsd=1, but budget check no longer enforces cost.
     const result = session.budgetExceeded();
-    expect(result.exceeded).toBe(false);
+    expect(result.exceeded).toBe(true);
+    expect(result.reason).toBe("cost");
   });
 
   it("under budget → exceeded=false, no reason", () => {
@@ -133,10 +139,10 @@ describe("Session budget", () => {
     expect(result.reason).toBeUndefined();
   });
 
-  it("defaults from AgentConfig when unset (1000 turns, Infinity cost)", () => {
+  it("defaults from AgentConfig when unset (50 turns, $10)", () => {
     const session = makeSession(makeAgent());
     expect(session.maxTurns).toBe(DEFAULT_MAX_TURNS_PER_SESSION);
-    expect(session.maxCostUsd).toBe(Infinity);
+    expect(session.maxCostUsd).toBe(DEFAULT_MAX_COST_USD_PER_SESSION);
   });
 
   it("uses AgentConfig overrides when provided", () => {
@@ -145,5 +151,139 @@ describe("Session budget", () => {
     );
     expect(session.maxTurns).toBe(7);
     expect(session.maxCostUsd).toBe(3.5);
+  });
+});
+
+describe("Session.hydrateBudgetFromTranscript", () => {
+  let tmpDir: string;
+
+  beforeEach(async () => {
+    tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "budget-hydrate-"));
+    await fs.mkdir(path.join(tmpDir, "sessions"), { recursive: true });
+  });
+
+  afterEach(async () => {
+    await fs.rm(tmpDir, { recursive: true, force: true });
+  });
+
+  function makeSessionWithDir(dir: string): Session {
+    const agent = {
+      config: {
+        botId: "bot-test",
+        userId: "user-test",
+        workspaceRoot: dir,
+        gatewayToken: "test",
+        apiProxyUrl: "http://localhost",
+        chatProxyUrl: "http://localhost",
+        redisUrl: "redis://localhost",
+        model: "claude-opus-4-7",
+      },
+      sessionsDir: path.join(dir, "sessions"),
+    } as unknown as Agent;
+    const now = Date.now();
+    return new Session(
+      {
+        sessionKey: "agent:main:app:general:1",
+        botId: "bot-test",
+        channel: { type: "app", channelId: "general" },
+        createdAt: now,
+        lastActivityAt: now,
+      },
+      agent,
+    );
+  }
+
+  it("hydrates cumulativeTurns from transcript turn_committed entries", async () => {
+    const session = makeSessionWithDir(tmpDir);
+    // Write transcript entries directly to disk to simulate a prior pod
+    const entries = [
+      { kind: "user_message", ts: 1, turnId: "t1", text: "hello" },
+      { kind: "assistant_text", ts: 2, turnId: "t1", text: "hi" },
+      { kind: "turn_committed", ts: 3, turnId: "t1", inputTokens: 100, outputTokens: 50 },
+      { kind: "user_message", ts: 4, turnId: "t2", text: "next" },
+      { kind: "assistant_text", ts: 5, turnId: "t2", text: "ok" },
+      { kind: "turn_committed", ts: 6, turnId: "t2", inputTokens: 200, outputTokens: 80 },
+      { kind: "user_message", ts: 7, turnId: "t3", text: "more" },
+      { kind: "assistant_text", ts: 8, turnId: "t3", text: "sure" },
+      { kind: "turn_committed", ts: 9, turnId: "t3", inputTokens: 150, outputTokens: 60 },
+    ];
+    const content = entries.map((e) => JSON.stringify(e)).join("\n") + "\n";
+    await fs.writeFile(session.transcript.filePath, content);
+
+    expect(session.budgetStats().turns).toBe(0);
+    await session.hydrateBudgetFromTranscript();
+    expect(session.budgetStats().turns).toBe(3);
+    expect(session.budgetStats().inputTokens).toBe(450);
+    expect(session.budgetStats().outputTokens).toBe(190);
+  });
+
+  it("is idempotent — skips if turns already > 0", async () => {
+    const session = makeSessionWithDir(tmpDir);
+    session.recordTurnUsage(usage(10, 10, 0.001));
+    // Even with transcript on disk, hydrate should skip
+    const entries = [
+      { kind: "turn_committed", ts: 1, turnId: "t1", inputTokens: 9999, outputTokens: 9999 },
+    ];
+    await fs.writeFile(
+      session.transcript.filePath,
+      entries.map((e) => JSON.stringify(e)).join("\n") + "\n",
+    );
+    await session.hydrateBudgetFromTranscript();
+    expect(session.budgetStats().turns).toBe(1); // not 1+1
+    expect(session.budgetStats().inputTokens).toBe(10); // not 9999
+  });
+
+  it("handles empty/missing transcript gracefully (stays at 0)", async () => {
+    const session = makeSessionWithDir(tmpDir);
+    await session.hydrateBudgetFromTranscript();
+    expect(session.budgetStats().turns).toBe(0);
+  });
+
+  it("hydrates meta.createdAt from earliest transcript entry ts", async () => {
+    const session = makeSessionWithDir(tmpDir);
+    const originalTs = new Date("2026-04-20T10:00:00Z").getTime();
+    // Session was created with Date.now() (simulating pod restart)
+    expect(session.meta.createdAt).toBeGreaterThan(originalTs);
+
+    const entries = [
+      { kind: "turn_started", ts: originalTs, turnId: "t1", declaredRoute: "direct" },
+      { kind: "user_message", ts: originalTs + 100, turnId: "t1", text: "hello" },
+      { kind: "assistant_text", ts: originalTs + 200, turnId: "t1", text: "hi" },
+      { kind: "turn_committed", ts: originalTs + 300, turnId: "t1", inputTokens: 100, outputTokens: 50 },
+    ];
+    await fs.writeFile(
+      session.transcript.filePath,
+      entries.map((e) => JSON.stringify(e)).join("\n") + "\n",
+    );
+
+    await session.hydrateBudgetFromTranscript();
+    // createdAt should now be the earliest entry's ts
+    expect(session.meta.createdAt).toBe(originalTs);
+  });
+
+  it("does not overwrite createdAt when transcript is empty", async () => {
+    const session = makeSessionWithDir(tmpDir);
+    const before = session.meta.createdAt;
+    await session.hydrateBudgetFromTranscript();
+    expect(session.meta.createdAt).toBe(before);
+  });
+
+  it("hydrates createdAt from aborted-only transcript", async () => {
+    const session = makeSessionWithDir(tmpDir);
+    const originalTs = new Date("2026-04-19T08:00:00Z").getTime();
+
+    const entries = [
+      { kind: "turn_started", ts: originalTs, turnId: "t1", declaredRoute: "direct" },
+      { kind: "user_message", ts: originalTs + 100, turnId: "t1", text: "msg" },
+      { kind: "assistant_text", ts: originalTs + 200, turnId: "t1", text: "reply" },
+      { kind: "turn_aborted", ts: originalTs + 300, turnId: "t1", reason: "hook blocked" },
+    ];
+    await fs.writeFile(
+      session.transcript.filePath,
+      entries.map((e) => JSON.stringify(e)).join("\n") + "\n",
+    );
+
+    await session.hydrateBudgetFromTranscript();
+    expect(session.meta.createdAt).toBe(originalTs);
   });
 });

@@ -21,7 +21,7 @@ export type GroundingVerdict = "GROUNDED" | "DISTORTED" | "FABRICATED";
 
 const MAX_RETRIES = 1;
 const DEFAULT_TIMEOUT_MS = 15_000;
-const JUDGE_MODEL = "claude-haiku-4-5-20251001";
+const JUDGE_MODEL_FALLBACK = "claude-haiku-4-5-20251001";
 
 /** Max chars per tool_result output in the judge prompt. */
 const MAX_RESULT_CHARS = 8_000;
@@ -94,6 +94,7 @@ export async function judgeGrounding(
   toolResultsSummary: string,
   assistantText: string,
   timeoutMs: number = DEFAULT_TIMEOUT_MS,
+  model?: string,
 ): Promise<GroundingVerdict> {
   const deadline = Date.now() + timeoutMs;
   const judgePrompt = [
@@ -114,7 +115,7 @@ export async function judgeGrounding(
   let output = "";
   try {
     const stream = llm.stream({
-      model: JUDGE_MODEL,
+      model: model ?? JUDGE_MODEL_FALLBACK,
       system: JUDGE_SYSTEM,
       messages: [{ role: "user", content: judgePrompt }],
       max_tokens: 8,
@@ -169,6 +170,7 @@ export async function judgeUngroundedClaims(
   llm: LLMClient,
   assistantText: string,
   timeoutMs: number = DEFAULT_TIMEOUT_MS,
+  model?: string,
 ): Promise<GroundingVerdict> {
   const deadline = Date.now() + timeoutMs;
   const prompt = [
@@ -188,7 +190,7 @@ export async function judgeUngroundedClaims(
   let output = "";
   try {
     const stream = llm.stream({
-      model: JUDGE_MODEL,
+      model: model ?? JUDGE_MODEL_FALLBACK,
       system: UNGROUNDED_JUDGE_SYSTEM,
       messages: [{ role: "user", content: prompt }],
       max_tokens: 8,
@@ -234,6 +236,7 @@ export function makeFactGroundingVerifierHook(
     point: "beforeCommit",
     priority: 82,
     blocking: true,
+    failOpen: true,
     timeoutMs: DEFAULT_TIMEOUT_MS + 1_000,
     handler: async (
       { assistantText, toolCallCount, toolReadHappened, retryCount },
@@ -265,6 +268,8 @@ export function makeFactGroundingVerifierHook(
           verdict = await judgeUngroundedClaims(
             ctx.llm,
             assistantText,
+            DEFAULT_TIMEOUT_MS,
+            ctx.agentModel,
           );
           // Only block on FABRICATED in mode B — DISTORTED doesn't
           // apply when there's nothing to distort.
@@ -296,6 +301,8 @@ export function makeFactGroundingVerifierHook(
             ctx.llm,
             summary,
             assistantText,
+            DEFAULT_TIMEOUT_MS,
+            ctx.agentModel,
           );
         }
 

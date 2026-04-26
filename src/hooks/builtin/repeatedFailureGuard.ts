@@ -36,12 +36,8 @@ import type { RegisteredHook, HookContext } from "../types.js";
 /** Rolling window in which repeated signatures count toward the trip. */
 export const CIRCUIT_WINDOW_MS = 5 * 60 * 1000;
 
-/** Cooldown applied after the breaker trips.
- * 2026-04-21: reduced from 10min to 3min. 10min is fine for CLI/IDE
- * workflows where the user sees terminal output, but in a chat UI
- * a silent 10-minute lockout reads as "bot is broken". 3min is
- * enough to break agentic retry cascades without punishing users. */
-export const CIRCUIT_COOLDOWN_MS = 3 * 60 * 1000;
+/** Cooldown applied after the breaker trips. */
+export const CIRCUIT_COOLDOWN_MS = 10 * 60 * 1000;
 
 /** Number of repeated failures within the window that trips the breaker. */
 export const CIRCUIT_THRESHOLD = 3;
@@ -65,6 +61,15 @@ export interface RepeatedFailureGuardOptions {
 
 function stateFilePath(workspaceRoot: string): string {
   return path.join(workspaceRoot, STATE_REL);
+}
+
+/** Remove the circuit-breaker state file (e.g. on session reset). */
+export async function clearCircuitBreakerState(workspaceRoot: string): Promise<void> {
+  try {
+    await fs.unlink(stateFilePath(workspaceRoot));
+  } catch {
+    // File may not exist — that's fine.
+  }
 }
 
 /**
@@ -225,24 +230,6 @@ export function makeRepeatedFailureGuardHook(
       return { action: "block", reason };
     },
   };
-}
-
-/**
- * Clear the circuit breaker state file. Called when a session resets
- * (new sessionKey) so stale trips from a prior session don't block
- * fresh user messages. Fail-safe: if the file doesn't exist or can't
- * be deleted, we silently continue — the breaker will just fail-open.
- *
- * 2026-04-21: root cause of "메시지 씹힘" — circuit breaker survived
- * session resets because the state file is per-workspace, not per-
- * session. User resets → sends new message → still blocked by old trip.
- */
-export async function clearCircuitBreakerState(workspaceRoot: string): Promise<void> {
-  try {
-    await fs.unlink(stateFilePath(workspaceRoot));
-  } catch {
-    // File doesn't exist or permission error — either way, no trip active.
-  }
 }
 
 /** Test helpers — NOT public API. */

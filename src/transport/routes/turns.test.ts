@@ -263,6 +263,66 @@ describe("HttpServer /v1/chat/completions + /v1/turns/:id/ask-response", () => {
     expect(userMsg).toBeDefined();
     expect(userMsg?.metadata).toBeUndefined();
   });
+
+  it("POST /v1/chat/completions preserves kb-context system addendum and image blocks", async () => {
+    const r = await rawRequest(
+      "POST",
+      `http://127.0.0.1:${port}/v1/chat/completions`,
+      {
+        Authorization: `Bearer ${TOKEN}`,
+        "Content-Type": "application/json",
+      },
+      JSON.stringify({
+        messages: [
+          { role: "system", content: "[Channel: general]" },
+          { role: "system", content: "[Current Time: 2026-04-24 09:00 UTC]" },
+          {
+            role: "system",
+            content:
+              "<kb-context>\n[file: report.pdf]\nRevenue was up 12%.\n</kb-context>",
+          },
+          {
+            role: "user",
+            content: [
+              { type: "text", text: "please analyze this file" },
+              {
+                type: "image_url",
+                image_url: {
+                  url: "data:image/png;base64,QUJD",
+                },
+              },
+            ],
+          },
+        ],
+      }),
+    );
+    expect(r.status).toBe(200);
+    const userMsg = capture.userMessage as
+      | {
+          text: string;
+          imageBlocks?: Array<{
+            type: "image";
+            source: { type: "base64"; media_type: string; data: string };
+          }>;
+          metadata?: { systemPromptAddendum?: unknown };
+        }
+      | undefined;
+    expect(userMsg).toBeDefined();
+    expect(userMsg?.text).toBe("please analyze this file");
+    expect(userMsg?.imageBlocks).toEqual([
+      {
+        type: "image",
+        source: {
+          type: "base64",
+          media_type: "image/png",
+          data: "QUJD",
+        },
+      },
+    ]);
+    expect(userMsg?.metadata?.systemPromptAddendum).toBe(
+      "<kb-context>\n[file: report.pdf]\nRevenue was up 12%.\n</kb-context>",
+    );
+  });
 });
 
 describe("POST /v1/chat/inject", () => {
@@ -374,155 +434,6 @@ describe("POST /v1/chat/inject", () => {
     const r = await postInject({ sessionKey: SESSION_KEY, text: "overflow" });
     expect(r.status).toBe(429);
     expect(r.body).toContain("queue_full");
-  });
-});
-
-describe("extractLastUserMessage image_url handling", () => {
-  let tmp: string;
-  let server: HttpServer;
-  let port: number;
-  let capture: { userMessage?: unknown };
-  const TOKEN = "test-bearer-token";
-
-  beforeEach(async () => {
-    tmp = await fs.mkdtemp(path.join(os.tmpdir(), "core-agent-img-"));
-    capture = {};
-    const agent = makeStubAgent(tmp, capture) as unknown as ConstructorParameters<
-      typeof HttpServer
-    >[0]["agent"];
-    server = new HttpServer({ port: 0, agent, bearerToken: TOKEN });
-    await server.start();
-    const anyServer = server as unknown as { server: http.Server };
-    const addr = anyServer.server.address();
-    port = typeof addr === "object" && addr ? addr.port : 0;
-  });
-
-  afterEach(async () => {
-    await server.stop();
-    await fs.rm(tmp, { recursive: true, force: true });
-  });
-
-  it("extracts image_url blocks from chat-proxy into imageBlocks", async () => {
-    const fakeBase64 = Buffer.from("fake-image-data").toString("base64");
-    const r = await rawRequest(
-      "POST",
-      `http://127.0.0.1:${port}/v1/chat/completions`,
-      {
-        Authorization: `Bearer ${TOKEN}`,
-        "Content-Type": "application/json",
-      },
-      JSON.stringify({
-        messages: [
-          {
-            role: "user",
-            content: [
-              { type: "text", text: "이 이미지 분석해줘" },
-              {
-                type: "image_url",
-                image_url: {
-                  url: `data:image/jpeg;base64,${fakeBase64}`,
-                },
-              },
-            ],
-          },
-        ],
-      }),
-    );
-    expect(r.status).toBe(200);
-    const userMsg = capture.userMessage as {
-      text: string;
-      imageBlocks?: Array<{
-        type: string;
-        source: { type: string; media_type: string; data: string };
-      }>;
-    };
-    expect(userMsg.text).toBe("이 이미지 분석해줘");
-    expect(userMsg.imageBlocks).toHaveLength(1);
-    expect(userMsg.imageBlocks![0]!.type).toBe("image");
-    expect(userMsg.imageBlocks![0]!.source.media_type).toBe("image/jpeg");
-    expect(userMsg.imageBlocks![0]!.source.data).toBe(fakeBase64);
-  });
-
-  it("handles multiple image_url blocks + text blocks", async () => {
-    const img1 = Buffer.from("img1").toString("base64");
-    const img2 = Buffer.from("img2").toString("base64");
-    await rawRequest(
-      "POST",
-      `http://127.0.0.1:${port}/v1/chat/completions`,
-      {
-        Authorization: `Bearer ${TOKEN}`,
-        "Content-Type": "application/json",
-      },
-      JSON.stringify({
-        messages: [
-          {
-            role: "user",
-            content: [
-              { type: "text", text: "첫 번째 텍스트" },
-              { type: "image_url", image_url: { url: `data:image/png;base64,${img1}` } },
-              { type: "text", text: "두 번째 텍스트" },
-              { type: "image_url", image_url: { url: `data:image/webp;base64,${img2}` } },
-            ],
-          },
-        ],
-      }),
-    );
-    const userMsg = capture.userMessage as {
-      text: string;
-      imageBlocks?: Array<{ source: { media_type: string } }>;
-    };
-    expect(userMsg.text).toBe("첫 번째 텍스트\n두 번째 텍스트");
-    expect(userMsg.imageBlocks).toHaveLength(2);
-    expect(userMsg.imageBlocks![0]!.source.media_type).toBe("image/png");
-    expect(userMsg.imageBlocks![1]!.source.media_type).toBe("image/webp");
-  });
-
-  it("ignores non-data image_url (e.g. http URLs)", async () => {
-    await rawRequest(
-      "POST",
-      `http://127.0.0.1:${port}/v1/chat/completions`,
-      {
-        Authorization: `Bearer ${TOKEN}`,
-        "Content-Type": "application/json",
-      },
-      JSON.stringify({
-        messages: [
-          {
-            role: "user",
-            content: [
-              { type: "text", text: "링크 이미지" },
-              { type: "image_url", image_url: { url: "https://example.com/img.jpg" } },
-            ],
-          },
-        ],
-      }),
-    );
-    const userMsg = capture.userMessage as {
-      text: string;
-      imageBlocks?: unknown[];
-    };
-    expect(userMsg.text).toBe("링크 이미지");
-    expect(userMsg.imageBlocks).toBeUndefined();
-  });
-
-  it("plain string content still works (no imageBlocks)", async () => {
-    await rawRequest(
-      "POST",
-      `http://127.0.0.1:${port}/v1/chat/completions`,
-      {
-        Authorization: `Bearer ${TOKEN}`,
-        "Content-Type": "application/json",
-      },
-      JSON.stringify({
-        messages: [{ role: "user", content: "text only" }],
-      }),
-    );
-    const userMsg = capture.userMessage as {
-      text: string;
-      imageBlocks?: unknown[];
-    };
-    expect(userMsg.text).toBe("text only");
-    expect(userMsg.imageBlocks).toBeUndefined();
   });
 });
 

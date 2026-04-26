@@ -37,12 +37,6 @@ import { StubSseWriter } from "../transport/SseWriter.js";
 import type { Workspace } from "../storage/Workspace.js";
 import { readOne } from "../turn/LLMStreamReader.js";
 import { summariseToolOutput } from "../util/toolResult.js";
-import {
-  judgeUngroundedClaims,
-  judgeGrounding,
-  parseGroundingVerdict,
-  type GroundingVerdict,
-} from "../hooks/builtin/factGroundingVerifier.js";
 
 /**
  * Cap on child loop iterations — protects against pathological loops.
@@ -173,42 +167,6 @@ export function selectChildTools(
   return out;
 }
 
-/**
- * Extract tool results from the conversation messages for Mode A
- * grounding check. Returns a summary string similar to
- * factGroundingVerifier.buildToolResultsSummary but works on the
- * ChildAgentLoop's message array instead of TranscriptEntry[].
- */
-function extractToolResultsFromMessages(
-  messages: LLMMessage[],
-): string | null {
-  const MAX_CHARS = 8_000;
-  const parts: string[] = [];
-
-  for (const msg of messages) {
-    if (msg.role !== "user" || !Array.isArray(msg.content)) continue;
-    for (const block of msg.content) {
-      if (
-        typeof block === "object" &&
-        block !== null &&
-        "type" in block &&
-        block.type === "tool_result" &&
-        "content" in block &&
-        typeof block.content === "string" &&
-        !("is_error" in block && block.is_error)
-      ) {
-        const content = block.content.slice(0, MAX_CHARS);
-        if (content.trim().length > 0) {
-          parts.push(content);
-        }
-      }
-    }
-  }
-
-  if (parts.length === 0) return null;
-  return parts.join("\n\n---\n\n").slice(0, 24_000);
-}
-
 function childSessionKey(
   parentSessionKey: string,
   persona: string,
@@ -249,33 +207,14 @@ export async function runChildAgentLoop(
     `[Persona: ${opts.persona}]`,
     `[Spawn: parent=${opts.parentTurnId} depth=${opts.parentSpawnDepth + 1}]`,
     "",
-    `## 절대 규칙 (최우선)`,
-    `답변 전에 반드시 이 순서를 따르라:`,
-    `1. Glob/Grep으로 워크스페이스에서 관련 파일 검색`,
-    `2. 찾은 파일 중 최신/가장 관련된 것을 FileRead (v2와 v3가 있으면 v3 우선)`,
-    `3. 읽은 내용 기반으로만 답변 구성`,
-    `메모리나 이전 대화만으로 답하지 마라. "기억나는데"는 없다 — 확인했거나, 모르거나.`,
-    "",
     `You are a focused sub-agent spawned by the main agent. Your task is a single discrete unit of work. Complete it and return your result succinctly.`,
-    "",
-    `## Source Citation Rule`,
-    `When your output includes specific facts from files (settings, numbers, model names, code, configs), you MUST append a references section at the end:`,
-    ``,
-    `---`,
-    `**Sources:**`,
-    `[1] file_path — brief description of what was referenced`,
-    `[2] file_path — ...`,
-    ``,
-    `In the body, mark claims with [1], [2] etc. If a claim has no source file, do NOT fabricate a reference — state that it is your assessment or general knowledge. Claims about file contents without a [ref] are treated as unverified by the parent agent.`,
   ].join("\n");
 
   const messages: LLMMessage[] = [{ role: "user", content: opts.prompt }];
 
   const assistantBlocks: LLMContentBlock[] = [];
   let toolCallCount = 0;
-  let toolReadHappened = false;
   let deferralRetryUsed = false;
-  let groundingRetryUsed = false;
   const deadline = Date.now() + opts.timeoutMs;
 
   // Merge timeout + parent abort into one signal for nested tools.
@@ -346,54 +285,6 @@ export async function runChildAgentLoop(
           });
           continue;
         }
-        // Grounding check: if the child hasn't read any files but
-        // makes specific claims, retry once with a grounding nudge.
-        // Fail-open: if Haiku errors out, let the text through.
-        // Child grounding check — gated by same env as parent hook.
-        // Default OFF (2026-04-21) — Haiku judge false-positive rate too high.
-        const childGroundingEnabled = (process.env.CORE_AGENT_FACT_GROUNDING ?? "").trim().toLowerCase();
-        const childGroundingOn = childGroundingEnabled === "on" || childGroundingEnabled === "true" || childGroundingEnabled === "1";
-        if (childGroundingOn && !groundingRetryUsed && finalText.length > 100) {
-          try {
-            let verdict: GroundingVerdict = "GROUNDED";
-            if (!toolReadHappened) {
-              verdict = await judgeUngroundedClaims(agent.llm, finalText, 10_000);
-              if (verdict === "DISTORTED") verdict = "GROUNDED";
-            } else {
-              // Mode A: extract tool results from messages for comparison
-              const toolResultSummary = extractToolResultsFromMessages(messages);
-              if (toolResultSummary) {
-                verdict = await judgeGrounding(agent.llm, toolResultSummary, finalText, 10_000);
-              }
-            }
-            if (verdict === "FABRICATED" || verdict === "DISTORTED") {
-              groundingRetryUsed = true;
-              messages.push({ role: "assistant", content: blocks });
-              messages.push({
-                role: "user",
-                content: [
-                  `[GROUNDING_CHECK:${verdict}] Your response contains claims that`,
-                  toolReadHappened
-                    ? "do not match the tool results from this session."
-                    : "reference specific file/config details without having read them.",
-                  "",
-                  "Re-read the relevant files with FileRead and correct your answer.",
-                  "Only include facts directly supported by tool output.",
-                  "If you cannot verify something, say so explicitly.",
-                ].join("\n"),
-              });
-              opts.onAgentEvent?.({
-                type: "spawn_grounding_retry",
-                taskId: opts.taskId,
-                verdict,
-                iteration: iter,
-              });
-              continue;
-            }
-          } catch {
-            // Fail-open: grounding check error → let the text through
-          }
-        }
         return {
           status: "ok",
           finalText,
@@ -430,11 +321,6 @@ export async function runChildAgentLoop(
       }
 
       toolCallCount += toolUses.length;
-      // Track read-type tools for grounding check
-      const READ_TOOL_NAMES = new Set(["FileRead", "Grep", "Glob", "Bash"]);
-      if (toolUses.some((tu) => READ_TOOL_NAMES.has(tu.name))) {
-        toolReadHappened = true;
-      }
       const results = await runChildTools({
         toolUses,
         toolsByName,

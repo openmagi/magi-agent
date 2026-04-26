@@ -270,4 +270,35 @@ describe("LLMStreamReader.readOne", () => {
     );
     expect(seen[0]?.tools).toBeUndefined();
   });
+
+  it("aborts stream on repetitive text and forces end_turn", async () => {
+    const sse = new FakeSse();
+    // Simulate degenerate LLM output: same sentence repeated many times.
+    const repeated = "사장님, KB에 직접 파일 업로드 기능이 없어요. document-reader 스킬로 업로드하는 것 같습니다. 확인하겠습니다.";
+    const events: LLMEvent[] = [];
+    // Feed the repeated sentence as many text_delta events (simulating
+    // a model that degenerates within a single response).
+    for (let i = 0; i < 10; i++) {
+      events.push({ kind: "text_delta", blockIndex: 0, delta: repeated });
+    }
+    events.push({
+      kind: "message_end",
+      stopReason: "end_turn",
+      usage: { inputTokens: 100, outputTokens: 500 },
+    });
+    const llm = makeLLM(events);
+    const out = await readOne(
+      { llm, model: "test", sse, onError: () => {} },
+      "",
+      [],
+      [],
+    );
+    // Should have aborted early — not all 10 deltas consumed.
+    expect(out.stopReason).toBe("end_turn");
+    expect(out.blocks.length).toBe(1);
+    expect(out.blocks[0]?.type).toBe("text");
+    // The last SSE event should be the repetition warning.
+    const lastAgentEvent = sse.events[sse.events.length - 1] as { type: string; delta: string };
+    expect(lastAgentEvent?.delta).toContain("반복 감지됨");
+  });
 });

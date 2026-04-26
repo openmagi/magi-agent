@@ -58,11 +58,6 @@ export class CaptureSseWriter extends SseWriter {
       case "text_delta":
         this.accumulated += event.delta;
         break;
-      case "response_clear":
-        // NO_REPLY: bot decided not to reply — clear accumulated text
-        // so dispatchInbound sees empty finalText and skips send().
-        this.accumulated = "";
-        break;
       case "turn_end":
         this.status = event.status;
         break;
@@ -120,19 +115,10 @@ export async function dispatchInbound(
     chatId: inbound.chatId,
   });
   try {
-    // Map channel attachments to UserMessage attachments
-    const attachments = inbound.attachments?.map((a) => ({
-      kind: a.kind,
-      name: a.name,
-      mimeType: a.mimeType,
-      sizeBytes: a.sizeBytes,
-      localPath: a.localPath,
-    }));
     await session.runTurn(
       {
         text: inbound.text,
         receivedAt: Date.now(),
-        ...(attachments && attachments.length > 0 ? { attachments } : {}),
         metadata: {
           source: inbound.channel,
           chatId: inbound.chatId,

@@ -34,7 +34,7 @@ import type {
   ToolResult,
   ToolRegistry as IToolRegistry,
 } from "../Tool.js";
-import type { Agent } from "../Agent.js";
+import type { Agent, BackgroundTaskDeliveryInput } from "../Agent.js";
 import type { BackgroundTaskRegistry } from "../tasks/BackgroundTaskRegistry.js";
 import { errorResult } from "../util/toolResult.js";
 import type { ArtifactMeta } from "../artifacts/ArtifactManager.js";
@@ -73,6 +73,11 @@ import {
 export const MAX_SPAWN_DEPTH = 2;
 const DEFAULT_TIMEOUT_MS = 120_000;
 const MAX_TIMEOUT_MS = 600_000;
+const RETURN_SPAWN_MAX_ATTEMPTS = (() => {
+  const raw = process.env.CORE_AGENT_RETURN_SPAWN_MAX_ATTEMPTS;
+  const parsed = raw !== undefined ? Number.parseInt(raw, 10) : NaN;
+  return Number.isFinite(parsed) && parsed >= 1 && parsed <= 5 ? parsed : 3;
+})();
 
 // Re-exports for API stability — Agent.ts + tests import these from
 // `tools/SpawnAgent.js`.
@@ -137,6 +142,8 @@ export interface SpawnAgentOutput {
   status: "ok" | "error" | "aborted" | "pending";
   finalText?: string;
   toolCallCount?: number;
+  errorMessage?: string;
+  attempts?: number;
   /**
    * Narrow handoff API for parent access to child artifacts (PRE-01).
    * Parent can `FileRead` via absolute path or `kubectl cp` if needed.
@@ -316,6 +323,21 @@ async function runTournamentAdapter(
 /** Legacy name preserved for any external importers / tests. */
 export const runTournament = runTournamentAdapter;
 
+async function deliverBackgroundResult(
+  agent: Agent,
+  input: BackgroundTaskDeliveryInput,
+): Promise<void> {
+  const deliver = (
+    agent as Partial<Pick<Agent, "deliverBackgroundTaskResult">>
+  ).deliverBackgroundTaskResult;
+  if (typeof deliver !== "function") {
+    return;
+  }
+  await deliver.call(agent, input).catch(() => {
+    /* ignore push errors */
+  });
+}
+
 /**
  * Spawn artifact handoff — PRE-01 fix for "4/5 리포트 유실".
  *
@@ -378,6 +400,149 @@ async function handOffChildArtifacts(
     artifactIds: projection.map((a) => a.artifactId),
   });
   return projection;
+}
+
+interface ReturnChildRun {
+  result: SpawnChildResult;
+  attempts: number;
+}
+
+function canRetryReturnSpawn(result: SpawnChildResult, attempt: number): boolean {
+  if (attempt >= RETURN_SPAWN_MAX_ATTEMPTS) return false;
+  if (result.status !== "error") return false;
+  // A child that already executed tools may have touched external
+  // systems or files. Let the parent decide instead of duplicating side
+  // effects automatically.
+  if (result.toolCallCount > 0) return false;
+  return true;
+}
+
+function spawnFailureMessage(args: {
+  result: SpawnChildResult;
+  attempts: number;
+  spawnDir: string;
+  handedOffArtifacts: SpawnHandoffArtifact[];
+}): string {
+  const { result, attempts, spawnDir, handedOffArtifacts } = args;
+  const reason =
+    result.errorMessage ??
+    (result.status === "aborted" ? "child aborted" : "child failed");
+  const partial = result.finalText.trim();
+  const partialText =
+    partial.length > 0
+      ? ` Partial child text: ${partial.slice(0, 500)}${partial.length > 500 ? "..." : ""}`
+      : "";
+  const artifactText =
+    handedOffArtifacts.length > 0
+      ? ` Handed-off artifacts: ${handedOffArtifacts
+          .map((a) => a.artifactId)
+          .join(", ")}.`
+      : "";
+  return [
+    `SpawnAgent failed after ${attempts} attempt${attempts === 1 ? "" : "s"}: ${reason}.`,
+    `task_status=${result.status}; tool_call_count=${result.toolCallCount}; spawn_dir=${spawnDir}.`,
+    "Do not switch to direct execution or answer from the parent agent's memory.",
+    "Retry SpawnAgent if it is safe, or ask the user before any direct fallback.",
+    `${partialText}${artifactText}`.trim(),
+  ]
+    .filter(Boolean)
+    .join(" ");
+}
+
+function spawnFailureToolResult(args: {
+  start: number;
+  taskId: string;
+  result: SpawnChildResult;
+  attempts: number;
+  artifacts: SpawnArtifacts;
+}): ToolResult<SpawnAgentOutput> {
+  const { start, taskId, result, attempts, artifacts } = args;
+  const status = result.status === "aborted" ? "aborted" : "error";
+  const errorCode = result.status === "aborted" ? "spawn_aborted" : "spawn_failed";
+  const errorMessage = spawnFailureMessage({
+    result,
+    attempts,
+    spawnDir: artifacts.spawnDir,
+    handedOffArtifacts: artifacts.handedOffArtifacts,
+  });
+  return {
+    status,
+    errorCode,
+    errorMessage,
+    output: {
+      taskId,
+      status: result.status,
+      finalText: result.finalText,
+      toolCallCount: result.toolCallCount,
+      errorMessage: result.errorMessage,
+      attempts,
+      artifacts,
+    },
+    durationMs: Date.now() - start,
+    metadata: {
+      taskId,
+      attempts,
+      childStatus: result.status,
+      toolCallCount: result.toolCallCount,
+    },
+  };
+}
+
+async function runReturnChildWithRetries(args: {
+  agent: Agent;
+  childOptions: SpawnChildOptions;
+  emit?: (event: unknown) => void;
+  stageAuditEvent: (event: string, data?: Record<string, unknown>) => void;
+}): Promise<ReturnChildRun> {
+  const { agent, childOptions, emit, stageAuditEvent } = args;
+  let attempts = 0;
+  let last: SpawnChildResult | null = null;
+
+  while (attempts < RETURN_SPAWN_MAX_ATTEMPTS) {
+    attempts++;
+    try {
+      last = await agent.spawnChildTurn(childOptions);
+    } catch (err) {
+      last = {
+        status: "error",
+        finalText: "",
+        toolCallCount: 0,
+        errorMessage: err instanceof Error ? err.message : String(err),
+      };
+    }
+
+    if (!canRetryReturnSpawn(last, attempts)) {
+      return { result: last, attempts };
+    }
+
+    const reason = last.errorMessage ?? "child failed";
+    emit?.({
+      type: "spawn_retry",
+      taskId: childOptions.taskId,
+      attempt: attempts + 1,
+      previousAttempt: attempts,
+      maxAttempts: RETURN_SPAWN_MAX_ATTEMPTS,
+      reason,
+    });
+    stageAuditEvent("spawn_retry", {
+      taskId: childOptions.taskId,
+      attempt: attempts + 1,
+      previousAttempt: attempts,
+      maxAttempts: RETURN_SPAWN_MAX_ATTEMPTS,
+      reason,
+    });
+  }
+
+  return {
+    result:
+      last ?? {
+        status: "error",
+        finalText: "",
+        toolCallCount: 0,
+        errorMessage: "spawn did not start",
+      },
+    attempts,
+  };
 }
 
 // ── Validation helpers ─────────────────────────────────────────────
@@ -597,7 +762,12 @@ export function makeSpawnAgentTool(
 
       if (input.deliver === "return") {
         try {
-          const result = await agent.spawnChildTurn(childOptions);
+          const { result, attempts } = await runReturnChildWithRetries({
+            agent,
+            childOptions,
+            emit: ctx.emitAgentEvent,
+            stageAuditEvent: (event, data) => ctx.staging.stageAuditEvent(event, data),
+          });
           // 2026-04-20 — import child-produced artifacts BEFORE counting
           // files / cleaning up so the child's artifacts/ subtree is
           // scanned while still on disk.
@@ -621,6 +791,16 @@ export function makeSpawnAgentTool(
             spawnDir,
             fileCount,
           });
+          const artifacts = { spawnDir, fileCount, handedOffArtifacts };
+          if (result.status !== "ok") {
+            return spawnFailureToolResult({
+              start,
+              taskId,
+              result,
+              attempts,
+              artifacts,
+            });
+          }
           return {
             status: "ok",
             output: {
@@ -628,7 +808,8 @@ export function makeSpawnAgentTool(
               status: result.status,
               finalText: result.finalText,
               toolCallCount: result.toolCallCount,
-              artifacts: { spawnDir, fileCount, handedOffArtifacts },
+              attempts,
+              artifacts,
             },
             durationMs: Date.now() - start,
           };
@@ -721,6 +902,12 @@ async function runBackgroundChild(args: BackgroundRunArgs): Promise<void> {
         emit,
       );
       const fileCount = await countFilesRecursive(spawnDir);
+      const mappedStatus =
+        result.status === "ok"
+          ? "completed"
+          : result.status === "aborted"
+            ? "aborted"
+            : "failed";
       emit?.({
         type: "spawn_result",
         taskId,
@@ -731,12 +918,6 @@ async function runBackgroundChild(args: BackgroundRunArgs): Promise<void> {
         ...(result.errorMessage ? { errorMessage: result.errorMessage } : {}),
       });
       if (backgroundRegistry) {
-        const mappedStatus =
-          result.status === "ok"
-            ? "completed"
-            : result.status === "aborted"
-              ? "aborted"
-              : "failed";
         await backgroundRegistry
           .attachResult(taskId, {
             status: mappedStatus,
@@ -748,6 +929,13 @@ async function runBackgroundChild(args: BackgroundRunArgs): Promise<void> {
             /* ignore persist errors */
           });
       }
+      await deliverBackgroundResult(agent, {
+        sessionKey: ctx.sessionKey,
+        taskId,
+        status: mappedStatus,
+        finalText: result.finalText,
+        ...(result.errorMessage ? { errorMessage: result.errorMessage } : {}),
+      });
     })
     .catch(async (err: unknown) => {
       const msg = err instanceof Error ? err.message : String(err);
@@ -766,6 +954,12 @@ async function runBackgroundChild(args: BackgroundRunArgs): Promise<void> {
             /* ignore */
           });
       }
+      await deliverBackgroundResult(agent, {
+        sessionKey: ctx.sessionKey,
+        taskId,
+        status: "failed",
+        errorMessage: msg,
+      });
     })
     .finally(() => {
       ctx.abortSignal.removeEventListener("abort", onParentAbortBg);

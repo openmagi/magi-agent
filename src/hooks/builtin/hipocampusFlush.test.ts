@@ -65,7 +65,7 @@ describe("hipocampusFlush", () => {
       // Check daily log was written
       const logKeys = [...deps.files.keys()].filter((k) => k.endsWith(".md") && !k.includes(".last-flushed"));
       expect(logKeys.length).toBe(1);
-      const logContent = deps.files.get(logKeys[0]!)!;
+      const logContent = deps.files.get(logKeys[0])!;
       expect(logContent).toContain("**User:** Hello");
       expect(logContent).toContain("**Assistant:** Hi there");
       expect(logContent).toContain("**User:** How are you?");

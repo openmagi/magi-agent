@@ -22,6 +22,7 @@
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, it, expect } from "vitest";
 import type { ToolContext } from "../Tool.js";
 import {
@@ -329,5 +330,64 @@ describe("SkillLoader — Phase 2b prompt-only path", () => {
     expect(tools).toEqual([]);
     expect(report.issues).toHaveLength(1);
     expect(report.issues[0]?.reason).toBe("entry_not_found");
+  });
+
+  it("(i) loads POS/Tossplace product templates with routing tags", async () => {
+    const repoRoot = path.resolve(
+      path.dirname(fileURLToPath(import.meta.url)),
+      "../../../../..",
+    );
+    const templatesDir = path.join(repoRoot, "src/lib/templates/skills");
+    const skillNames = [
+      "pos-sales",
+      "pos-menu-strategy",
+      "pos-accounting",
+      "pos-inventory",
+      "tossplace-pos",
+    ];
+    for (const skillName of skillNames) {
+      await fs.cp(
+        path.join(templatesDir, skillName),
+        path.join(skillsDir, skillName),
+        { recursive: true },
+      );
+    }
+
+    const { tools, report } = await loadSkillsFromDir({
+      skillsDir,
+      workspaceRoot,
+    });
+
+    expect(report.issues).toEqual([]);
+    expect(tools.map((t) => t.name).sort()).toEqual(skillNames.sort());
+    for (const tool of tools) {
+      expect(tool.tags).toContain("pos");
+      expect(tool.tags).toContain("tossplace");
+    }
+    expect(tools.find((t) => t.name === "pos-sales")?.tags).toEqual(
+      expect.arrayContaining(["sales", "store"]),
+    );
+  });
+
+  it("(j) keeps tagged skills inside the general fallback cap", () => {
+    const coreTool = { name: "FileRead", kind: "core" as const };
+    const untagged = Array.from({ length: 10 }, (_, i) => ({
+      name: `a-untagged-${String(i).padStart(2, "0")}`,
+      kind: "skill" as const,
+      tags: [],
+    }));
+    const posTool = {
+      name: "pos-sales",
+      kind: "skill" as const,
+      tags: ["pos", "tossplace", "sales"],
+    };
+
+    const filtered = filterToolsByIntent(
+      [coreTool, ...untagged, posTool],
+      ["general"],
+      4,
+    );
+
+    expect(filtered.map((t) => t.name)).toContain("pos-sales");
   });
 });

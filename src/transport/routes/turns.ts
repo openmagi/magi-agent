@@ -56,71 +56,123 @@ export function extractReplyTo(body: unknown): ReplyToRef | undefined {
   };
 }
 
-/**
- * Supported Anthropic vision media types. chat-proxy sends OpenAI-style
- * `image_url` blocks with `data:<mime>;base64,...` URLs — we extract the
- * mime and base64 payload and convert to Anthropic native `image` blocks.
- */
-const VISION_MEDIA_TYPES = new Set([
-  "image/jpeg",
-  "image/png",
-  "image/gif",
-  "image/webp",
-]);
-
 function extractLastUserMessage(body: unknown): UserMessage | null {
   if (!body || typeof body !== "object") return null;
   const messages = (body as { messages?: unknown }).messages;
   if (!Array.isArray(messages)) return null;
+  const systemPromptAddendum = extractSystemPromptAddendum(messages);
   for (let i = messages.length - 1; i >= 0; i--) {
     const m = messages[i] as { role?: string; content?: unknown } | undefined;
     if (!m || m.role !== "user") continue;
-
-    let text = "";
-    const imageBlocks: ImageContentBlock[] = [];
-
-    if (typeof m.content === "string") {
-      text = m.content;
-    } else if (Array.isArray(m.content)) {
-      const textParts: string[] = [];
-      for (const block of m.content) {
-        if (!block || typeof block !== "object") continue;
-        const b = block as { type?: string; text?: string; image_url?: { url?: string } };
-
-        if (b.type === "text" && typeof b.text === "string") {
-          textParts.push(b.text);
-        } else if (b.type === "image_url" && b.image_url?.url) {
-          // chat-proxy sends: { type: "image_url", image_url: { url: "data:image/jpeg;base64,..." } }
-          // Convert to Anthropic native image block
-          const dataMatch = b.image_url.url.match(
-            /^data:(image\/(?:jpeg|png|gif|webp));base64,(.+)$/,
-          );
-          if (dataMatch) {
-            const mediaType = dataMatch[1] as "image/jpeg" | "image/png" | "image/gif" | "image/webp";
-            if (VISION_MEDIA_TYPES.has(mediaType)) {
-              imageBlocks.push({
-                type: "image",
-                source: { type: "base64", media_type: mediaType, data: dataMatch[2]! },
-              });
-            }
-          }
-        }
-      }
-      text = textParts.join("\n");
-    }
-
+    const { text, imageBlocks } = extractTextAndImages(m.content);
     const replyTo = extractReplyTo(body);
-    const metadata: UserMessageMetadata | undefined = replyTo
-      ? { replyTo }
-      : undefined;
+    const metadata: UserMessageMetadata = {};
+    if (replyTo) metadata.replyTo = replyTo;
+    if (systemPromptAddendum) {
+      metadata.systemPromptAddendum = systemPromptAddendum;
+    }
     return {
       text,
       receivedAt: Date.now(),
       ...(imageBlocks.length > 0 ? { imageBlocks } : {}),
-      ...(metadata ? { metadata } : {}),
+      ...(Object.keys(metadata).length > 0 ? { metadata } : {}),
     };
   }
   return null;
+}
+
+function extractTextBlocks(content: unknown): string[] {
+  if (typeof content === "string") return [content];
+  if (!Array.isArray(content)) return [];
+  return content
+    .filter(
+      (block: unknown): block is { type: "text"; text: string } =>
+        !!block &&
+        typeof block === "object" &&
+        (block as { type?: unknown }).type === "text" &&
+        typeof (block as { text?: unknown }).text === "string",
+    )
+    .map((block) => block.text);
+}
+
+function parseImageDataUrl(url: string): ImageContentBlock | null {
+  const match = url.match(
+    /^data:(image\/(?:jpeg|png|gif|webp));base64,([A-Za-z0-9+/=]+)$/i,
+  );
+  if (!match) return null;
+  const mediaType = match[1]?.toLowerCase();
+  const data = match[2];
+  if (!mediaType || !data) return null;
+  if (
+    mediaType !== "image/jpeg" &&
+    mediaType !== "image/png" &&
+    mediaType !== "image/gif" &&
+    mediaType !== "image/webp"
+  ) {
+    return null;
+  }
+  return {
+    type: "image",
+    source: {
+      type: "base64",
+      media_type: mediaType,
+      data,
+    },
+  };
+}
+
+function extractTextAndImages(content: unknown): {
+  text: string;
+  imageBlocks: ImageContentBlock[];
+} {
+  if (typeof content === "string") {
+    return { text: content, imageBlocks: [] };
+  }
+  if (!Array.isArray(content)) {
+    return { text: "", imageBlocks: [] };
+  }
+  const textParts: string[] = [];
+  const imageBlocks: ImageContentBlock[] = [];
+  for (const block of content) {
+    if (!block || typeof block !== "object") continue;
+    const type = (block as { type?: unknown }).type;
+    if (
+      type === "text" &&
+      typeof (block as { text?: unknown }).text === "string"
+    ) {
+      textParts.push((block as { text: string }).text);
+      continue;
+    }
+    if (type !== "image_url") continue;
+    const rawUrl = (block as { image_url?: { url?: unknown } }).image_url?.url;
+    if (typeof rawUrl !== "string") continue;
+    const image = parseImageDataUrl(rawUrl);
+    if (image) imageBlocks.push(image);
+  }
+  return {
+    text: textParts.join("\n"),
+    imageBlocks,
+  };
+}
+
+function extractSystemPromptAddendum(messages: unknown[]): string | undefined {
+  const addenda = messages
+    .map((msg) => {
+      if (!msg || typeof msg !== "object") return null;
+      const role = (msg as { role?: unknown }).role;
+      if (role !== "system") return null;
+      const parts = extractTextBlocks((msg as { content?: unknown }).content)
+        .map((part) => part.trim())
+        .filter(Boolean);
+      if (parts.length === 0) return null;
+      const text = parts.join("\n");
+      if (/^\[Current Time:/.test(text)) return null;
+      if (/^\[Channel:/.test(text)) return null;
+      return text;
+    })
+    .filter((value): value is string => typeof value === "string");
+
+  return addenda.length > 0 ? addenda.join("\n\n") : undefined;
 }
 
 async function handleChatCompletions(

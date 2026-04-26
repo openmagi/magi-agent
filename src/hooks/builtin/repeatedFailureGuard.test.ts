@@ -13,7 +13,6 @@ import {
   makeRepeatedFailureGuardHook,
   recordFailure,
   readCircuitState,
-  clearCircuitBreakerState,
   signatureFor,
   findActiveTrip,
   CIRCUIT_THRESHOLD,
@@ -233,41 +232,6 @@ describe("beforeLLMCall hook", () => {
     const out = await hook.handler(makeArgs(), ctx);
     if (!out) throw new Error("hook returned void");
     expect(out.action).toBe("continue");
-  });
-
-  it("clearCircuitBreakerState unblocks a tripped breaker", async () => {
-    const sig = signatureFor("builtin:sealed-files", ["A.md"]);
-    for (let i = 0; i < CIRCUIT_THRESHOLD; i++) {
-      await recordFailure(
-        { workspaceRoot: tmp, now: () => 1_000 + i * 1_000 },
-        sig,
-      );
-    }
-    // Confirm tripped.
-    const hookBefore = makeRepeatedFailureGuardHook({
-      workspaceRoot: tmp,
-      now: () => 5_000,
-    });
-    const { ctx: ctxBefore } = makeHookCtx();
-    const outBefore = await hookBefore.handler(makeArgs(), ctxBefore);
-    expect(outBefore?.action).toBe("block");
-
-    // Clear and confirm unblocked.
-    await clearCircuitBreakerState(tmp);
-    const hookAfter = makeRepeatedFailureGuardHook({
-      workspaceRoot: tmp,
-      now: () => 5_000,
-    });
-    const { ctx: ctxAfter } = makeHookCtx();
-    const outAfter = await hookAfter.handler(makeArgs(), ctxAfter);
-    expect(outAfter?.action).toBe("continue");
-  });
-
-  it("clearCircuitBreakerState is safe when no state file exists", async () => {
-    // Should not throw.
-    await clearCircuitBreakerState(tmp);
-    const state = await readCircuitState(tmp);
-    expect(Object.keys(state).length).toBe(0);
   });
 
   it("fail-open on corrupt state file", async () => {

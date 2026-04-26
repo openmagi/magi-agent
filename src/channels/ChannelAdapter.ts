@@ -41,12 +41,11 @@ export interface InboundReplyTo {
   role: "user" | "assistant";
 }
 
-/** File attachment downloaded from the channel and saved to workspace. */
+/** Attachment downloaded by a channel adapter (e.g. Telegram photo/document). */
 export interface InboundAttachment {
   kind: "image" | "file" | "audio";
   name: string;
   mimeType?: string;
-  /** Absolute path to the downloaded file on the local filesystem. */
   localPath: string;
   sizeBytes?: number;
 }
@@ -67,7 +66,7 @@ export interface InboundMessage {
    * MessageBuilder renders the `[Reply to …]` preamble.
    */
   replyTo?: InboundReplyTo;
-  /** File attachments downloaded from the channel (Telegram documents, photos, etc). */
+  /** Downloaded file attachments (populated by channel adapters). */
   attachments?: InboundAttachment[];
   /** Original payload, retained for debug logging / hooks. */
   raw: unknown;

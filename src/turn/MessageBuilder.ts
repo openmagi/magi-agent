@@ -11,10 +11,9 @@
  * not here — this module is purely about message assembly.
  */
 
-import fs from "node:fs";
 import type { Session } from "../Session.js";
-import type { ImageContentBlock, ReplyToRef, UserMessage } from "../util/types.js";
-import type { LLMContentBlock, LLMMessage } from "../transport/LLMClient.js";
+import type { ReplyToRef, UserMessage } from "../util/types.js";
+import type { LLMMessage } from "../transport/LLMClient.js";
 import { renderIdentitySystem } from "../storage/Workspace.js";
 import { getCapability } from "../llm/modelCapabilities.js";
 
@@ -64,6 +63,7 @@ export function formatReplyPreamble(replyTo: ReplyToRef): string {
 export async function buildSystemPrompt(
   session: Session,
   turnId: string,
+  userMessage?: UserMessage,
 ): Promise<string> {
   const identity = await session.agent.workspace.loadIdentity();
   const rendered = renderIdentitySystem(identity);
@@ -86,7 +86,36 @@ export async function buildSystemPrompt(
     `[Time: ${stamp}]`,
     `[Channel: ${channelType}]`,
   ].join("\n");
-  return rendered ? `${sessionHeader}\n\n${rendered}` : sessionHeader;
+  const systemPromptAddendum =
+    typeof userMessage?.metadata?.systemPromptAddendum === "string" &&
+    userMessage.metadata.systemPromptAddendum.trim().length > 0
+      ? userMessage.metadata.systemPromptAddendum.trim()
+      : "";
+  // Thinking vs text boundary rule — prevents the model from putting
+  // substantive user-facing content inside the thinking block while
+  // only emitting a brief closing line as text. Without this, the user
+  // sees a thin response while the detailed analysis lives in thinking
+  // (which is ephemeral and not committed to transcript).
+  const thinkingBoundary = [
+    "",
+    "<output-rules>",
+    "CRITICAL: The user can only see your TEXT output, not your thinking.",
+    "",
+    "1. Your thinking block is for internal reasoning ONLY — planning, analysis, deciding what to do.",
+    "2. Everything you want the user to read MUST appear in your text response.",
+    "3. NEVER put user-facing content (answers, analysis, questions, summaries) only in thinking.",
+    "4. If your thinking contains a detailed response, you MUST reproduce the key content in your text output.",
+    "5. A text response that is just a brief closing (e.g. '궁금한 점 있으신가요?') while thinking had the full analysis is a FAILURE.",
+    "6. NEVER include raw tool output or JSON in your text response. Tool results (e.g. API responses, file contents, search results) are for YOUR reference only. Summarize the results in natural language for the user.",
+    "7. Bad example: '{\"ok\":true,\"message\":\"Document added\"}' — NEVER show this to the user.",
+    "   Good example: '문서가 성공적으로 저장되었습니다.' — natural language summary.",
+    "</output-rules>",
+  ].join("\n");
+  const base = rendered ? `${sessionHeader}\n\n${rendered}` : sessionHeader;
+  const withAddendum = systemPromptAddendum
+    ? `${base}\n\n${systemPromptAddendum}`
+    : base;
+  return `${withAddendum}\n${thinkingBoundary}`;
 }
 
 /**
@@ -132,75 +161,19 @@ export async function buildMessages(
   // `[Channel: …]` hint pattern (commit 4b3fa5e0) — both go in the
   // system/user preamble so the model sees them on every turn.
   const replyTo = userMessage.metadata?.replyTo;
-  const textParts: string[] = [];
-  if (replyTo) textParts.push(formatReplyPreamble(replyTo));
-
-  // Collect image content blocks from two sources:
-  // 1. chat-proxy image_url injection (already base64-encoded, stored in userMessage.imageBlocks)
-  // 2. Telegram/Discord channel attachments with kind="image" (need base64 encoding from disk)
-  const imageBlocks: ImageContentBlock[] = [
-    ...(userMessage.imageBlocks ?? []),
-  ];
-
-  // Process attachments: images → base64 content blocks, others → text metadata
-  if (userMessage.attachments && userMessage.attachments.length > 0) {
-    for (const att of userMessage.attachments) {
-      if (att.kind === "image" && att.localPath) {
-        // Try to read and base64-encode the image from disk
-        try {
-          const buf = fs.readFileSync(att.localPath);
-          // 10MB limit for inline base64 (same as chat-proxy IMAGE_BASE64_INJECT_LIMIT)
-          if (buf.length <= 10 * 1024 * 1024) {
-            const mime = att.mimeType ?? "image/jpeg";
-            const supportedMime =
-              mime === "image/jpeg" || mime === "image/png" ||
-              mime === "image/gif" || mime === "image/webp"
-                ? mime
-                : "image/jpeg"; // fallback for unknown image types
-            imageBlocks.push({
-              type: "image",
-              source: {
-                type: "base64",
-                media_type: supportedMime as "image/jpeg" | "image/png" | "image/gif" | "image/webp",
-                data: buf.toString("base64"),
-              },
-            });
-            continue; // skip text metadata for this attachment
-          }
-        } catch {
-          // File read failed — fall through to text metadata
-        }
-      }
-      // Non-image or failed read: text metadata so LLM knows the file exists
-      const meta = [
-        att.name && `name="${att.name}"`,
-        att.mimeType && `type=${att.mimeType}`,
-        att.sizeBytes != null && `size=${att.sizeBytes}`,
-        att.localPath && `path="${att.localPath}"`,
-      ]
-        .filter(Boolean)
-        .join(", ");
-      textParts.push(`[Attachment: ${meta}]`);
-    }
+  const userContent = replyTo
+    ? `${formatReplyPreamble(replyTo)}\n${userMessage.text}`
+    : userMessage.text;
+  if (userMessage.imageBlocks && userMessage.imageBlocks.length > 0) {
+    const content = [
+      ...(userContent
+        ? [{ type: "text" as const, text: userContent }]
+        : []),
+      ...userMessage.imageBlocks,
+    ];
+    out.push({ role: "user", content });
+    return out;
   }
-  if (userMessage.text) textParts.push(userMessage.text);
-
-  // Build the user message content: if we have image blocks, use a
-  // mixed content array (Anthropic vision format); otherwise plain string.
-  if (imageBlocks.length > 0) {
-    const contentBlocks: LLMContentBlock[] = [];
-    // Images first so the model "sees" them before reading the text
-    for (const img of imageBlocks) {
-      contentBlocks.push(img);
-    }
-    const joinedText = textParts.join("\n");
-    if (joinedText) {
-      contentBlocks.push({ type: "text", text: joinedText });
-    }
-    out.push({ role: "user", content: contentBlocks });
-  } else {
-    const userContent = textParts.join("\n");
-    out.push({ role: "user", content: userContent });
-  }
+  out.push({ role: "user", content: userContent });
   return out;
 }

@@ -220,7 +220,7 @@ describe("TelegramPoller", () => {
     expect(received[0]!.replyTo).toBeUndefined();
   });
 
-  it("skips updates without text, caption, or attachment (channel_post, edited, sticker-only)", async () => {
+  it("skips updates without a text message (channel_post, edited, etc)", async () => {
     const { fetchImpl } = makeStubFetch([
       {
         body: {
@@ -234,7 +234,7 @@ describe("TelegramPoller", () => {
                 from: { id: 9 },
                 chat: { id: 9 },
                 date: 0,
-                // no text, no caption, no document/photo — e.g. sticker-only
+                // no text field — e.g. sticker / photo-only
               },
             },
           ],
@@ -252,180 +252,6 @@ describe("TelegramPoller", () => {
     });
     await poller.pollOnce();
     expect(received).toHaveLength(0);
-  });
-
-  it("accepts a document message and downloads the file", async () => {
-    const docUpdate = {
-      update_id: 300,
-      message: {
-        message_id: 10,
-        from: { id: 42 },
-        chat: { id: 42 },
-        date: 0,
-        caption: "이거 보면 돼",
-        document: {
-          file_id: "FILEID_DOC",
-          file_unique_id: "u1",
-          file_name: "report.html",
-          mime_type: "text/html",
-          file_size: 116400,
-        },
-      },
-    };
-    const { fetchImpl } = makeStubFetch([
-      // getUpdates
-      { body: { ok: true, result: [docUpdate] } },
-      // getFile response
-      { body: { ok: true, result: { file_id: "FILEID_DOC", file_path: "documents/file_0.html" } } },
-      // file download (binary content)
-      { body: "<html>hello</html>" },
-    ]);
-    const poller = new TelegramPoller({
-      botToken: "TOK",
-      workspaceRoot,
-      fetchImpl,
-    });
-    const received: InboundMessage[] = [];
-    poller.onInboundMessage(async (m) => {
-      received.push(m);
-    });
-    await poller.pollOnce();
-
-    expect(received).toHaveLength(1);
-    const msg = received[0]!;
-    // Caption becomes text
-    expect(msg.text).toBe("이거 보면 돼");
-    // Attachment populated
-    expect(msg.attachments).toHaveLength(1);
-    expect(msg.attachments![0]!.name).toBe("report.html");
-    expect(msg.attachments![0]!.kind).toBe("file");
-    expect(msg.attachments![0]!.localPath).toContain("telegram-downloads");
-    expect(msg.attachments![0]!.localPath).toContain("report.html");
-    // File was actually written to disk
-    const content = await fs.readFile(msg.attachments![0]!.localPath!, "utf8");
-    expect(content).toContain("hello");
-  });
-
-  it("accepts a photo message (no text) and downloads highest-res version", async () => {
-    const photoUpdate = {
-      update_id: 301,
-      message: {
-        message_id: 11,
-        from: { id: 42 },
-        chat: { id: 42 },
-        date: 0,
-        photo: [
-          { file_id: "SMALL", file_unique_id: "s1", width: 90, height: 90 },
-          { file_id: "LARGE", file_unique_id: "s2", width: 800, height: 600, file_size: 50000 },
-        ],
-      },
-    };
-    const { fetchImpl, calls } = makeStubFetch([
-      { body: { ok: true, result: [photoUpdate] } },
-      { body: { ok: true, result: { file_id: "LARGE", file_path: "photos/file_1.jpg" } } },
-      { body: "JPEGDATA" },
-    ]);
-    const poller = new TelegramPoller({
-      botToken: "TOK",
-      workspaceRoot,
-      fetchImpl,
-    });
-    const received: InboundMessage[] = [];
-    poller.onInboundMessage(async (m) => {
-      received.push(m);
-    });
-    await poller.pollOnce();
-
-    expect(received).toHaveLength(1);
-    const msg = received[0]!;
-    // No text or caption — text is empty string
-    expect(msg.text).toBe("");
-    expect(msg.attachments).toHaveLength(1);
-    expect(msg.attachments![0]!.kind).toBe("image");
-    expect(msg.attachments![0]!.mimeType).toBe("image/jpeg");
-    // Should have called getFile with LARGE (highest res), not SMALL
-    const getFileCall = calls.find((c) => c.url.includes("/getFile"));
-    const getFileBody = JSON.parse(getFileCall?.init?.body as string);
-    expect(getFileBody.file_id).toBe("LARGE");
-  });
-
-  it("uses caption as text for document message without text field", async () => {
-    const update = {
-      update_id: 302,
-      message: {
-        message_id: 12,
-        from: { id: 5 },
-        chat: { id: 5 },
-        date: 0,
-        caption: "파일 보냈음 이걸로",
-        document: {
-          file_id: "F1",
-          file_unique_id: "u1",
-          file_name: "data.pdf",
-          mime_type: "application/pdf",
-        },
-      },
-    };
-    const { fetchImpl } = makeStubFetch([
-      { body: { ok: true, result: [update] } },
-      { body: { ok: true, result: { file_id: "F1", file_path: "docs/data.pdf" } } },
-      { body: "PDFBYTES" },
-    ]);
-    const poller = new TelegramPoller({
-      botToken: "T",
-      workspaceRoot,
-      fetchImpl,
-    });
-    const received: InboundMessage[] = [];
-    poller.onInboundMessage(async (m) => {
-      received.push(m);
-    });
-    await poller.pollOnce();
-
-    expect(received).toHaveLength(1);
-    expect(received[0]!.text).toBe("파일 보냈음 이걸로");
-    expect(received[0]!.attachments).toHaveLength(1);
-    expect(received[0]!.attachments![0]!.name).toBe("data.pdf");
-  });
-
-  it("still delivers the message if file download fails (non-fatal)", async () => {
-    const update = {
-      update_id: 303,
-      message: {
-        message_id: 13,
-        from: { id: 5 },
-        chat: { id: 5 },
-        date: 0,
-        caption: "이 파일 좀 봐",
-        document: {
-          file_id: "FAIL_FILE",
-          file_unique_id: "u1",
-          file_name: "broken.zip",
-        },
-      },
-    };
-    const { fetchImpl } = makeStubFetch([
-      { body: { ok: true, result: [update] } },
-      // getFile returns error
-      { body: { ok: false, description: "file too big" }, status: 400 },
-    ]);
-    const poller = new TelegramPoller({
-      botToken: "T",
-      workspaceRoot,
-      fetchImpl,
-    });
-    const received: InboundMessage[] = [];
-    poller.onInboundMessage(async (m) => {
-      received.push(m);
-    });
-    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-    await poller.pollOnce();
-    warn.mockRestore();
-
-    // Message still delivered (with caption as text) but no attachments
-    expect(received).toHaveLength(1);
-    expect(received[0]!.text).toBe("이 파일 좀 봐");
-    expect(received[0]!.attachments).toBeUndefined();
   });
 
   it("persists next offset to telegram-offset.json (last update_id + 1)", async () => {

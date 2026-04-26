@@ -36,15 +36,15 @@ const MAX_RETRIES = 1;
 
 /** Haiku deadline per §7.13.
  *
- * Bumped 3_000 → 8_000 (2026-04-20), then 8_000 → 15_000 (2026-04-21).
- * Agentic use cases (multi-tool turns, subagent spawns, pipeline
- * orchestration) regularly push Haiku cold-start + queue time past 8s,
- * especially under Fireworks burst load. 15s gives a realistic window
- * while fail-open still guarantees we never permanently block a commit.
+ * Bumped 3_000 → 8_000 → 15_000. Real-world p95 for Haiku cold-start
+ * + first-token under load regularly tripped shorter caps, turning
+ * legitimate answers into timeout aborts. Combined with `failOpen: true`
+ * on the hook registration, a slow judge never blocks a commit.
  */
 const DEFAULT_TIMEOUT_MS = 15_000;
 
-const JUDGE_MODEL = "claude-haiku-4-5-20251001";
+/** Fallback when agentModel is unavailable. */
+const JUDGE_MODEL_FALLBACK = "claude-haiku-4-5-20251001";
 
 const JUDGE_SYSTEM = [
   "You judge whether an assistant's final answer fulfils the user's request.",
@@ -66,6 +66,7 @@ export async function judgeAnswer(
   userMessage: string,
   assistantText: string,
   timeoutMs: number = DEFAULT_TIMEOUT_MS,
+  model?: string,
 ): Promise<AnswerVerdict> {
   const deadline = Date.now() + timeoutMs;
   const judgePrompt = [
@@ -79,7 +80,7 @@ export async function judgeAnswer(
   let output = "";
   try {
     const stream = llm.stream({
-      model: JUDGE_MODEL,
+      model: model ?? JUDGE_MODEL_FALLBACK,
       system: JUDGE_SYSTEM,
       messages: [{ role: "user", content: judgePrompt }],
       max_tokens: 8,
@@ -119,6 +120,7 @@ export const answerVerifierHook: RegisteredHook<"beforeCommit"> = {
   point: "beforeCommit",
   priority: 90,
   blocking: true,
+  failOpen: true,
   timeoutMs: DEFAULT_TIMEOUT_MS + 1_000,
   handler: async (
     { userMessage, assistantText, retryCount },
@@ -135,7 +137,10 @@ export const answerVerifierHook: RegisteredHook<"beforeCommit"> = {
       return { action: "continue" };
     }
 
-    const verdict = await judgeAnswer(ctx.llm, userMessage, assistantText);
+    const verdict = await judgeAnswer(
+      ctx.llm, userMessage, assistantText,
+      DEFAULT_TIMEOUT_MS, ctx.agentModel,
+    );
 
     ctx.emit({
       type: "rule_check",

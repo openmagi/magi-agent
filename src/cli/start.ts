@@ -13,27 +13,20 @@ import { Agent, type AgentConfig } from "../Agent.js";
 import { Session } from "../Session.js";
 import type { AgentEvent, SseWriter } from "../transport/SseWriter.js";
 import type { UserMessage, ChannelRef } from "../util/types.js";
+import { createProvider } from "../llm/createProvider.js";
 
 // ANSI helpers
 const BOLD = "\x1b[1m";
 const DIM = "\x1b[2m";
 const RESET = "\x1b[0m";
 const GREEN = "\x1b[32m";
-const CYAN = "\x1b[36m";
 const YELLOW = "\x1b[33m";
 
-/**
- * Minimal SseWriter that prints agent events to stdout. Only text_delta,
- * thinking_delta, tool_start/tool_end, and error events produce visible
- * output; the rest are silently consumed.
- */
 class TerminalSseWriter {
   private ended = false;
   private inThinking = false;
 
-  start(): void {
-    // no-op — no HTTP headers needed
-  }
+  start(): void {}
 
   agent(event: AgentEvent): void {
     if (this.ended) return;
@@ -41,7 +34,6 @@ class TerminalSseWriter {
     switch (event.type) {
       case "text_delta":
         if (this.inThinking) {
-          // Close the thinking block before printing regular text
           process.stdout.write(`${RESET}\n`);
           this.inThinking = false;
         }
@@ -85,19 +77,14 @@ class TerminalSseWriter {
         }
         break;
 
-      // All other event types are silently consumed.
       default:
         break;
     }
   }
 
-  legacyDelta(_content: string): void {
-    // Ignored in terminal mode — we use agent events exclusively.
-  }
+  legacyDelta(_content: string): void {}
 
-  legacyFinish(): void {
-    // no-op
-  }
+  legacyFinish(): void {}
 
   end(): void {
     if (this.ended) return;
@@ -106,16 +93,16 @@ class TerminalSseWriter {
       process.stdout.write(`${RESET}`);
       this.inThinking = false;
     }
-    // Ensure we end on a newline
     process.stdout.write("\n");
   }
 }
 
-/**
- * Build an AgentConfig from the CLI config. The CLI config is simpler
- * than the full K8s RuntimeEnv — we synthesise sensible defaults for
- * fields that only make sense in a cluster context.
- */
+const DEFAULT_MODELS: Record<string, string> = {
+  anthropic: "claude-sonnet-4-6",
+  openai: "gpt-5.4",
+  google: "gemini-2.5-flash",
+};
+
 function buildAgentConfig(
   config: ReturnType<typeof loadConfig>,
 ): AgentConfig {
@@ -123,24 +110,25 @@ function buildAgentConfig(
     ? path.resolve(config.workspace)
     : path.resolve("./workspace");
 
-  // Map provider + apiKey to the api-proxy URL format the Agent expects.
-  // In standalone mode there's no api-proxy — we set a placeholder and
-  // let the LLMClient route directly to the provider.
-  const providerBaseUrls: Record<string, string> = {
-    anthropic: config.llm.baseUrl ?? "https://api.anthropic.com",
-    openai: config.llm.baseUrl ?? "https://api.openai.com",
-    google: config.llm.baseUrl ?? "https://generativelanguage.googleapis.com",
-  };
+  const model = config.llm.model ?? DEFAULT_MODELS[config.llm.provider] ?? "claude-sonnet-4-6";
+
+  const provider = createProvider({
+    provider: config.llm.provider,
+    apiKey: config.llm.apiKey,
+    baseUrl: config.llm.baseUrl,
+    defaultModel: model,
+  });
 
   return {
     botId: "cli",
     userId: "cli-user",
     workspaceRoot: workspace,
     gatewayToken: config.llm.apiKey,
-    apiProxyUrl: providerBaseUrls[config.llm.provider] ?? "https://api.anthropic.com",
-    chatProxyUrl: "",
-    redisUrl: "",
-    model: config.llm.model,
+    apiProxyUrl: config.llm.baseUrl ?? "https://api.anthropic.com",
+    model,
+    llmProvider: provider,
+    agentName: config.identity?.name,
+    agentInstructions: config.identity?.instructions,
     telegramBotToken: config.channels?.telegram?.token,
     discordBotToken: config.channels?.discord?.token,
   };
@@ -158,15 +146,13 @@ export async function runStart(): Promise<void> {
   const agentName = config.identity?.name ?? "Clawy Agent";
   const agentConfig = buildAgentConfig(config);
 
-  // Print welcome banner
   console.log("");
   console.log(`${BOLD}${agentName}${RESET}`);
-  console.log(`${DIM}Model: ${config.llm.provider}/${config.llm.model}${RESET}`);
+  console.log(`${DIM}Model: ${config.llm.provider}/${agentConfig.model}${RESET}`);
   console.log(`${DIM}Workspace: ${agentConfig.workspaceRoot}${RESET}`);
   console.log(`${DIM}Type your message and press Enter. Ctrl+C to exit.${RESET}`);
   console.log("");
 
-  // Create agent
   const agent = new Agent(agentConfig);
   try {
     await agent.start();
@@ -175,18 +161,15 @@ export async function runStart(): Promise<void> {
     process.exit(1);
   }
 
-  // Create a persistent session
   const channelRef: ChannelRef = { type: "app", channelId: "cli" };
   const session = await agent.getOrCreateSession("cli:interactive", channelRef);
 
-  // Readline interface
   const rl = readline.createInterface({
     input: process.stdin,
     output: process.stdout,
     prompt: `${GREEN}>${RESET} `,
   });
 
-  // Graceful shutdown
   let shuttingDown = false;
   const shutdown = async (): Promise<void> => {
     if (shuttingDown) return;
@@ -213,7 +196,6 @@ export async function runStart(): Promise<void> {
       return;
     }
 
-    // Special commands
     if (text === "/exit" || text === "/quit") {
       await shutdown();
       return;
@@ -228,7 +210,7 @@ export async function runStart(): Promise<void> {
 
     try {
       writer.start();
-      console.log(""); // blank line before response
+      console.log("");
       await session.runTurn(
         userMessage,
         writer as unknown as SseWriter,
@@ -241,7 +223,7 @@ export async function runStart(): Promise<void> {
       );
     }
 
-    console.log(""); // blank line after response
+    console.log("");
     rl.prompt();
   });
 

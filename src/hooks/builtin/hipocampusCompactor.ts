@@ -1,13 +1,15 @@
 /**
  * Built-in hipocampus compactor hook — session-first-turn compaction.
  *
- * On the first turn of each session, triggers the compaction engine
- * to roll up daily → weekly → monthly → root memory logs, then
- * reindexes qmd so search stays fresh. Fail-open: errors are logged
- * but never block the turn.
+ * On the first turn of each session, flushes the transcript to daily
+ * memory logs, then triggers the compaction engine to roll up
+ * daily → weekly → monthly → root, then reindexes qmd so search
+ * stays fresh. Fail-open: errors are logged but never block the turn.
  */
 
 import type { RegisteredHook } from "../types.js";
+import type { TranscriptEntry } from "../../storage/Transcript.js";
+import { flushMemory as defaultFlushMemory } from "./hipocampusFlush.js";
 
 export interface CompactionEngine {
   run: (force?: boolean) => Promise<{ skipped?: boolean; compacted?: boolean; stats?: unknown }>;
@@ -17,9 +19,16 @@ export interface QmdManager {
   reindex: () => Promise<void>;
 }
 
+export type FlushFn = (
+  workspaceRoot: string,
+  transcript: ReadonlyArray<TranscriptEntry>,
+) => Promise<{ flushed: number; lastTurnId: string | null }>;
+
 export function makeHipocampusCompactorHook(
   engine: CompactionEngine,
   qmd: QmdManager,
+  flush: FlushFn = defaultFlushMemory,
+  workspaceRoot?: string,
 ): RegisteredHook<"beforeTurnStart"> {
   const seenSessions = new Set<string>();
 
@@ -40,6 +49,22 @@ export function makeHipocampusCompactorHook(
       }
 
       seenSessions.add(sessionKey);
+
+      // Flush transcript → memory/YYYY-MM-DD.md before compaction
+      try {
+        const wsRoot = workspaceRoot ?? "";
+        const { flushed } = await flush(wsRoot, ctx.transcript);
+        ctx.log("info", "hipocampus flush before compaction", {
+          sessionKey,
+          flushed,
+        });
+      } catch (flushErr) {
+        ctx.log("warn", "hipocampus flush before compaction failed", {
+          sessionKey,
+          error: String(flushErr),
+        });
+        // Continue — compaction can still process existing files
+      }
 
       try {
         const result = await engine.run();

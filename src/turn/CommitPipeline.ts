@@ -61,11 +61,6 @@ export interface CommitResult {
  * Commit path: beforeCommit → assistant_text append → turn_committed
  * append → phase=committed → turn_end SSE → observer hooks.
  */
-/** OpenClaw NO_REPLY convention: when the LLM's entire text output is
- * exactly "NO_REPLY" (trimmed), suppress the response — the user should
- * see an empty bubble. Used when the bot decides not to answer. */
-const NO_REPLY_RE = /^\s*NO_REPLY\s*$/;
-
 export async function commit(ctx: CommitPipelineContext): Promise<CommitResult> {
   ctx.setPhase("committing");
   // Final assistant text = concatenation of all text blocks emitted
@@ -76,11 +71,34 @@ export async function commit(ctx: CommitPipelineContext): Promise<CommitResult> 
     .map((b) => b.text)
     .join("");
 
-  // ── NO_REPLY suppression ─────────────────────────────────────
-  if (NO_REPLY_RE.test(finalText)) {
-    // Tell clients to clear any streamed text for this turn.
-    ctx.sse.agent({ type: "response_clear", turnId: ctx.turnId });
-    finalText = "";
+  // Thinking-to-text fallback — if the model put everything in thinking
+  // and produced no/minimal text (common with extended thinking + tool
+  // loops), extract the last meaningful portion of thinking as the text
+  // response. Claude.ai never shows empty text after thinking; we
+  // replicate that by falling back to thinking content.
+  if (finalText.trim().length < 50) {
+    const thinkingBlocks = ctx.emittedAssistantBlocks
+      .filter((b): b is Extract<LLMContentBlock, { type: "thinking" }> => b.type === "thinking")
+      .map((b) => b.thinking);
+    const thinkingContent = thinkingBlocks.join("\n").trim();
+    if (thinkingContent.length > 100) {
+      // Extract the last part of thinking that looks like a user-facing
+      // response (usually the model's final answer is at the end of
+      // thinking when it forgets to emit text).
+      const lines = thinkingContent.split("\n");
+      // Take last ~2000 chars as fallback response
+      let fallback = "";
+      for (let i = lines.length - 1; i >= 0 && fallback.length < 2000; i--) {
+        fallback = lines[i] + "\n" + fallback;
+      }
+      finalText = fallback.trim();
+      console.log(
+        `[core-agent] thinking-to-text fallback: thinkingLen=${thinkingContent.length}` +
+        ` extractedLen=${finalText.length} turnId=${ctx.turnId}`,
+      );
+      // Emit the fallback text to the SSE stream so the client sees it
+      ctx.sse.agent({ type: "text_delta", delta: finalText });
+    }
   }
 
   // ── beforeCommit hook ───────────────────────────────────────
@@ -189,24 +207,6 @@ export async function abort(
   ctx.rejectAllPendingAsks(reason);
   // Best-effort abort log; failure here is non-fatal.
   try {
-    // 2026-04-21: persist assistant_text even on abort. The user
-    // already saw the streamed response — if we don't record it,
-    // the next turn's buildMessagesFromTranscript won't include
-    // the prior assistant reply and the LLM "forgets" the entire
-    // conversation. Root cause of the "봇 맥락 망각" bug.
-    const finalText = ctx.emittedAssistantBlocks
-      .filter((b): b is Extract<LLMContentBlock, { type: "text" }> => b.type === "text")
-      .map((b) => b.text)
-      .join("");
-    if (finalText.length > 0) {
-      await ctx.session.transcript.append({
-        kind: "assistant_text",
-        ts: Date.now(),
-        turnId: ctx.turnId,
-        text: finalText,
-      });
-      ctx.setAssistantText(finalText);
-    }
     await ctx.session.transcript.append({
       kind: "turn_aborted",
       ts: Date.now(),

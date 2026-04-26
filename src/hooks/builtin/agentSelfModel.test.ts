@@ -100,9 +100,9 @@ describe("agentSelfModelHook", () => {
     expect(AGENT_SELF_MODEL_BLOCK).toContain("transcript");
   });
 
-  it("block includes the search-first workflow", () => {
-    expect(AGENT_SELF_MODEL_BLOCK).toContain("Always search first, then answer");
-    expect(AGENT_SELF_MODEL_BLOCK).toContain("Glob/Grep");
+  it("block includes the 'tools are your eyes' reflex", () => {
+    expect(AGENT_SELF_MODEL_BLOCK).toContain("tools are your eyes");
+    expect(AGENT_SELF_MODEL_BLOCK).toMatch(/before answering/i);
   });
 
   it("block enumerates refusal patterns in both languages", () => {

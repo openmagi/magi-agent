@@ -344,7 +344,7 @@ function makeBeforeCommitHook(opts: SealedFilesOptions): RegisteredHook<"beforeC
     priority: 70,
     blocking: true,
     timeoutMs: 5_000,
-    handler: async ({ userMessage }, ctx: HookContext) => {
+    handler: async ({ userMessage, retryCount }, ctx: HookContext) => {
       if (!isEnabledByEnv()) return { action: "continue" };
 
       const config = await readConfig(opts.workspaceRoot);
@@ -437,6 +437,17 @@ function makeBeforeCommitHook(opts: SealedFilesOptions): RegisteredHook<"beforeC
       }
 
       if (violations.length > 0) {
+        // Fail-open after retries so commit retry loop can progress.
+        // Without this, sealed-files always blocks → turn aborts → empty response.
+        const MAX_SEALED_RETRIES = 1;
+        if (retryCount >= MAX_SEALED_RETRIES) {
+          ctx.log("warn", "[sealedFiles] retry budget exhausted; failing open", {
+            turnId: ctx.turnId,
+            paths: violations,
+            retryCount,
+          });
+          return { action: "continue" };
+        }
         ctx.emit({
           type: "rule_check",
           ruleId: "sealed-files",

@@ -125,6 +125,23 @@ describe("loadConfig", () => {
     expect(config.model).toBe("claude-haiku-3");
   });
 
+  it("reads nested compaction config used by hipocampus init", async () => {
+    await writeFile(
+      join(tmpDir, "hipocampus.config.json"),
+      JSON.stringify({
+        platform: "openclaw",
+        search: { vector: true },
+        compaction: { cooldownHours: 3, rootMaxTokens: 4200 },
+      }),
+    );
+
+    const config = await CompactionEngine.loadConfig(tmpDir, "claude-opus-4-6");
+
+    expect(config.cooldownHours).toBe(3);
+    expect(config.rootMaxTokens).toBe(4200);
+    expect(config.model).toBe("claude-opus-4-6");
+  });
+
   it("merges partial config with defaults", async () => {
     await writeFile(
       join(tmpDir, "hipocampus.config.json"),
@@ -352,6 +369,43 @@ describe("compactWeekly", () => {
 
     expect(result.stats.weekly).toHaveLength(0);
   });
+
+  it("updates tentative weekly nodes even when embedded daily frontmatter contains fixed status", async () => {
+    const memDir = join(tmpDir, "memory");
+    const weeklyDir = join(memDir, "weekly");
+    await mkdir(weeklyDir, { recursive: true });
+
+    await writeFile(join(memDir, "2026-04-21.md"), "already compacted");
+    await writeFile(join(memDir, "2026-04-23.md"), "new admin bot memory");
+    await writeFile(
+      join(weeklyDir, "2026-W17.md"),
+      [
+        "---",
+        "type: weekly",
+        "status: tentative",
+        "period: 2026-W17",
+        "---",
+        "",
+        "# 2026-04-21",
+        "---",
+        "type: daily",
+        "status: fixed",
+        "period: 2026-04-21",
+        "---",
+        "",
+        "Old daily content",
+      ].join("\n"),
+    );
+
+    const llm = createMockLLM();
+    const engine = new CompactionEngine(tmpDir, defaultConfig(), llm);
+    const result = await engine.run(true);
+
+    expect(result.stats.weekly).toContain("2026-W17");
+    const weeklyContent = await readFile(join(weeklyDir, "2026-W17.md"), "utf8");
+    expect(weeklyContent).toContain("# 2026-04-23");
+    expect(weeklyContent).toContain("new admin bot memory");
+  });
 });
 
 // ─── Monthly compaction tests ───
@@ -368,9 +422,99 @@ describe("compactMonthly", () => {
 
     expect(result.stats.monthly).toHaveLength(0);
   });
+
+  it("updates tentative monthly nodes even when embedded weekly content contains fixed status", async () => {
+    const memDir = join(tmpDir, "memory");
+    const monthlyDir = join(memDir, "monthly");
+    await mkdir(monthlyDir, { recursive: true });
+
+    await writeFile(join(memDir, "2026-04-23.md"), "new April memory");
+    await writeFile(
+      join(monthlyDir, "2026-04.md"),
+      [
+        "---",
+        "type: monthly",
+        "status: tentative",
+        "period: 2026-04",
+        "---",
+        "",
+        "# 2026-W16",
+        "---",
+        "type: weekly",
+        "status: fixed",
+        "period: 2026-W16",
+        "---",
+        "",
+        "Old weekly content",
+      ].join("\n"),
+    );
+
+    const llm = createMockLLM("ROOT summary");
+    const engine = new CompactionEngine(tmpDir, defaultConfig(), llm);
+    const result = await engine.run(true);
+
+    expect(result.stats.monthly).toContain("2026-04");
+    const monthlyContent = await readFile(join(monthlyDir, "2026-04.md"), "utf8");
+    expect(monthlyContent).toContain("new April memory");
+    const rootContent = await readFile(join(memDir, "ROOT.md"), "utf8");
+    expect(rootContent).toContain("ROOT summary");
+  });
 });
 
 // ─── Stop-check chain tests ───
+
+describe("chain gate relaxation", () => {
+  it("processes existing weekly/monthly even when daily produces nothing new", async () => {
+    const memDir = join(tmpDir, "memory");
+    const dailyDir = join(memDir, "daily");
+    const weeklyDir = join(memDir, "weekly");
+    const monthlyDir = join(memDir, "monthly");
+    await mkdir(dailyDir, { recursive: true });
+    await mkdir(weeklyDir, { recursive: true });
+    await mkdir(monthlyDir, { recursive: true });
+
+    // Pre-existing daily files (already compacted, no new raw memory/*.md)
+    await writeFile(
+      join(dailyDir, "2026-03-02.md"),
+      "---\ntype: daily\nstatus: fixed\nperiod: 2026-03-02\n---\n\nMarch 2 work",
+    );
+    await writeFile(
+      join(dailyDir, "2026-03-09.md"),
+      "---\ntype: daily\nstatus: fixed\nperiod: 2026-03-09\n---\n\nMarch 9 work",
+    );
+
+    // No raw memory/*.md files — daily produces nothing new
+    // But weekly/monthly/root should still process existing dailies
+
+    const llm = createMockLLM("ROOT summary");
+    const engine = new CompactionEngine(tmpDir, defaultConfig(), llm);
+    const result = await engine.run(true);
+
+    // Weekly should have processed existing dailies
+    expect(result.stats.weekly.length).toBeGreaterThanOrEqual(1);
+    // ROOT.md should exist
+    const rootContent = await readFile(join(memDir, "ROOT.md"), "utf8");
+    expect(rootContent).toContain("ROOT summary");
+  });
+
+  it("updates ROOT.md when only monthly content exists (no new daily/weekly)", async () => {
+    const memDir = join(tmpDir, "memory");
+    const monthlyDir = join(memDir, "monthly");
+    await mkdir(monthlyDir, { recursive: true });
+
+    await writeFile(
+      join(monthlyDir, "2026-03.md"),
+      "---\ntype: monthly\nstatus: fixed\nperiod: 2026-03\n---\n\nMarch summary",
+    );
+
+    const llm = createMockLLM("Fresh root from monthly");
+    const engine = new CompactionEngine(tmpDir, defaultConfig(), llm);
+    const result = await engine.run(true);
+
+    const rootContent = await readFile(join(memDir, "ROOT.md"), "utf8");
+    expect(rootContent).toContain("Fresh root from monthly");
+  });
+});
 
 describe("stop-check chain", () => {
   it("daily empty → weekly/monthly/root all skipped", async () => {
@@ -495,5 +639,75 @@ describe("LLM summarization", () => {
 
     const dailyContent = await readFile(join(memDir, "daily", "2026-04-10.md"), "utf8");
     expect(dailyContent).toContain("Part 1 Part 2 Part 3");
+  });
+
+  it("falls back to raw content when LLM stream throws", async () => {
+    const memDir = join(tmpDir, "memory");
+    await mkdir(memDir, { recursive: true });
+    await writeFile(join(memDir, "2026-04-10.md"), generateLines(250));
+
+    const failingLLM: CompactionLLM = {
+      async *stream(): AsyncGenerator<LLMEvent> {
+        throw new Error("LLM auth failed");
+      },
+    };
+
+    const engine = new CompactionEngine(tmpDir, defaultConfig(), failingLLM);
+    const result = await engine.run(true);
+
+    // Should NOT throw — graceful degradation
+    expect(result.stats.daily).toContain("2026-04-10");
+    expect(result.compacted).toBe(true);
+
+    // Daily file should exist with raw content (fallback)
+    const dailyContent = await readFile(join(memDir, "daily", "2026-04-10.md"), "utf8");
+    expect(dailyContent).toContain("type: daily");
+    expect(dailyContent).toContain("Line 1: some content here");
+  });
+
+  it("falls back to raw content when LLM summarize rejects (timeout simulation)", async () => {
+    const memDir = join(tmpDir, "memory");
+    await mkdir(memDir, { recursive: true });
+    await writeFile(join(memDir, "2026-04-10.md"), generateLines(250));
+
+    // Simulate a timeout by rejecting immediately with the same error
+    const timeoutLLM: CompactionLLM = {
+      async *stream(): AsyncGenerator<LLMEvent> {
+        throw new Error("summarize timeout");
+      },
+    };
+
+    const engine = new CompactionEngine(tmpDir, defaultConfig(), timeoutLLM);
+    const result = await engine.run(true);
+
+    expect(result.stats.daily).toContain("2026-04-10");
+    expect(result.compacted).toBe(true);
+
+    const dailyContent = await readFile(join(memDir, "daily", "2026-04-10.md"), "utf8");
+    expect(dailyContent).toContain("Line 1: some content here");
+  });
+
+  it("allows slow summarization calls that exceed 30 seconds", async () => {
+    vi.useFakeTimers();
+    try {
+      const slowFirstCallLLM: CompactionLLM = {
+        async *stream(): AsyncGenerator<LLMEvent> {
+          await new Promise((resolve) => setTimeout(resolve, 31_000));
+          yield { kind: "text_delta", blockIndex: 0, delta: "Slow summary" };
+          yield { kind: "message_end", stopReason: "end_turn", usage: { inputTokens: 100, outputTokens: 50 } };
+        },
+      };
+
+      const engine = new CompactionEngine(tmpDir, defaultConfig(), slowFirstCallLLM);
+      const summarize = (engine as unknown as {
+        summarize(content: string, instruction: string): Promise<string>;
+      }).summarize.bind(engine);
+      const summaryPromise = summarize("large memory body", "Summarize slowly.");
+      await vi.advanceTimersByTimeAsync(31_000);
+
+      await expect(summaryPromise).resolves.toBe("Slow summary");
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

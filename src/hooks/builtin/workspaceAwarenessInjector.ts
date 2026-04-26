@@ -67,14 +67,7 @@ function isEnabled(): boolean {
 interface TopLevelEntry {
   name: string;
   isDir: boolean;
-  /** Depth-2 children for directories (subdirectory names only). */
-  children?: string[];
 }
-
-/** Max depth-2 children to show per directory. */
-const MAX_CHILDREN_PER_DIR = 15;
-/** Max total depth-2 entries across all directories. */
-const MAX_TOTAL_CHILDREN = 60;
 
 async function listTopLevel(
   workspaceRoot: string,
@@ -104,38 +97,6 @@ async function listTopLevel(
     if (a.isDir !== b.isDir) return a.isDir ? -1 : 1;
     return a.name.localeCompare(b.name);
   });
-
-  // Depth-2: list subdirectories + important files inside each
-  // top-level directory. This helps the bot discover project-specific
-  // subdirectories (wsj_pipeline/, scripts/, etc.) without needing
-  // a Glob call. Bounded by MAX_CHILDREN_PER_DIR and MAX_TOTAL_CHILDREN.
-  let totalChildren = 0;
-  for (const entry of out) {
-    if (!entry.isDir || totalChildren >= MAX_TOTAL_CHILDREN) continue;
-    try {
-      const subPath = path.join(workspaceRoot, entry.name);
-      const subDirents = await fs.readdir(subPath, { withFileTypes: true });
-      const children: string[] = [];
-      for (const sd of subDirents) {
-        if (EXCLUDED_DIR_NAMES.has(sd.name)) continue;
-        if (sd.name.startsWith(".")) continue;
-        if (children.length >= MAX_CHILDREN_PER_DIR) break;
-        if (sd.isDirectory()) {
-          children.push(`${sd.name}/`);
-        } else if (sd.isFile()) {
-          children.push(sd.name);
-        }
-      }
-      if (children.length > 0) {
-        children.sort();
-        entry.children = children;
-        totalChildren += children.length;
-      }
-    } catch {
-      // ignore unreadable subdirectory
-    }
-  }
-
   return out;
 }
 
@@ -210,17 +171,12 @@ export async function buildWorkspaceSnapshot(
   const refreshedAt = new Date(nowMs).toISOString();
   const lines: string[] = [];
   lines.push(`<workspace_snapshot refreshedAt="${refreshedAt}">`);
-  lines.push("## Workspace structure");
+  lines.push("## Top-level workspace entries");
   if (topLevel.length === 0) {
     lines.push("- (empty)");
   } else {
     for (const e of topLevel) {
       lines.push(`- ${e.name}${e.isDir ? "/" : ""}`);
-      if (e.children && e.children.length > 0) {
-        for (const child of e.children) {
-          lines.push(`  - ${child}`);
-        }
-      }
     }
   }
 

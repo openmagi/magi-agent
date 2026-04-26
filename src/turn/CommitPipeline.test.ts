@@ -176,44 +176,6 @@ describe("CommitPipeline.commit", () => {
     expect(kinds).toContain("turn_committed");
   });
 
-  it("NO_REPLY token → emits response_clear, saves empty text, no assistant_text in transcript", async () => {
-    const { ctx, sse, transcript, assistantTextRef } = await makeCtx({
-      blocks: [{ type: "text", text: "NO_REPLY" }],
-    });
-    const result = await commit(ctx);
-    expect(result.finalText).toBe("");
-    expect(assistantTextRef.value).toBe("");
-
-    // response_clear SSE event emitted before turn_end
-    const clearEvents = sse.events.filter((e) => e.type === "response_clear");
-    expect(clearEvents.length).toBe(1);
-    expect(clearEvents[0]?.turnId).toBe("turn-1");
-
-    // No assistant_text in transcript
-    const entries = await transcript.readAll();
-    const kinds = entries.map((e) => e.kind);
-    expect(kinds).not.toContain("assistant_text");
-    expect(kinds).toContain("turn_committed");
-  });
-
-  it("NO_REPLY with whitespace → still suppressed", async () => {
-    const { ctx, sse } = await makeCtx({
-      blocks: [{ type: "text", text: "  NO_REPLY  \n" }],
-    });
-    const result = await commit(ctx);
-    expect(result.finalText).toBe("");
-    expect(sse.events.some((e) => e.type === "response_clear")).toBe(true);
-  });
-
-  it("NO_REPLY inside longer text → not suppressed", async () => {
-    const { ctx, sse } = await makeCtx({
-      blocks: [{ type: "text", text: "Here is the NO_REPLY token info" }],
-    });
-    const result = await commit(ctx);
-    expect(result.finalText).toBe("Here is the NO_REPLY token info");
-    expect(sse.events.some((e) => e.type === "response_clear")).toBe(false);
-  });
-
   it("beforeCommit block → throws, no transcript commits", async () => {
     const { ctx, transcript, phases } = await makeCtx({
       blocks: [{ type: "text", text: "x" }],

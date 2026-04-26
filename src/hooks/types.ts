@@ -70,6 +70,10 @@ export interface HookContext {
   readonly emit: (event: AgentEvent) => void;
   /** Structured log (goes to audit channel — phase 2h). */
   readonly log: (level: "info" | "warn" | "error", msg: string, data?: object) => void;
+  /** The bot's configured main model (e.g. "claude-opus-4-7"). Hooks
+   * that need an LLM judge should use this instead of hardcoding a
+   * model — Haiku misjudges Korean context and Opus-quality output. */
+  readonly agentModel: string;
   /** Cancellation propagated from the turn. */
   readonly abortSignal: AbortSignal;
   /** Remaining time the hook has to return, in ms. */
@@ -227,4 +231,13 @@ export interface RegisteredHook<Point extends HookPoint = HookPoint> {
    * behaviour preserved).
    */
   if?: string;
+  /**
+   * When true, timeout or error in a blocking pre-hook is treated as
+   * `{ action: "continue" }` instead of `{ action: "block" }`. Use
+   * for advisory hooks (answer-verifier, fact-grounding) where a
+   * broken/slow judge must never block a turn.
+   *
+   * Default: false (fail-closed — legacy behaviour preserved).
+   */
+  failOpen?: boolean;
 }

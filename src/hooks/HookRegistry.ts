@@ -219,6 +219,13 @@ export class HookRegistry {
       );
       if (outcome.kind === "error" || outcome.kind === "timeout") {
         const errString = outcomeErrorString(outcome);
+        if (hook.failOpen) {
+          baseCtx.log("warn", `blocking hook ${outcome.kind} (fail-open): ${hook.name}`, {
+            point,
+            error: errString,
+          });
+          continue;
+        }
         baseCtx.log("error", `blocking hook threw: ${hook.name}`, {
           point,
           error: errString,

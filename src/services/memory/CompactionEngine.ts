@@ -46,7 +46,7 @@ export interface CompactionLLM {
 const DAILY_THRESHOLD = 200;
 const WEEKLY_THRESHOLD = 300;
 const MONTHLY_THRESHOLD = 500;
-const SUMMARIZE_TIMEOUT_MS = 30_000;
+const SUMMARIZE_TIMEOUT_MS = 120_000;
 
 const DEFAULT_CONFIG: Omit<CompactionConfig, "model"> = {
   cooldownHours: 24,
@@ -138,6 +138,23 @@ function weekToApproxMonth(week: string): string {
   return `${year}-${String(approxDate.getUTCMonth() + 1).padStart(2, "0")}`;
 }
 
+function frontmatterStatus(content: string): string | null {
+  const lines = content.split(/\r?\n/);
+  if (lines[0] !== "---") return null;
+
+  for (const line of lines.slice(1)) {
+    if (line === "---") return null;
+    const match = line.match(/^\s*status\s*:\s*["']?([A-Za-z_-]+)["']?\s*$/);
+    if (match) return match[1]!;
+  }
+
+  return null;
+}
+
+function isFixedNode(content: string): boolean {
+  return frontmatterStatus(content) === "fixed";
+}
+
 // ─── CompactionEngine ───
 
 export class CompactionEngine {
@@ -172,11 +189,22 @@ export class CompactionEngine {
     } catch {
       // no config file — use defaults
     }
+    const compactionConfig =
+      typeof fileConfig["compaction"] === "object" &&
+      fileConfig["compaction"] !== null &&
+      !Array.isArray(fileConfig["compaction"])
+        ? fileConfig["compaction"] as Record<string, unknown>
+        : {};
+    const readNumber = (key: "cooldownHours" | "rootMaxTokens", fallback: number): number => {
+      const topLevel = fileConfig[key];
+      if (typeof topLevel === "number") return topLevel;
+      const nested = compactionConfig[key];
+      if (typeof nested === "number") return nested;
+      return fallback;
+    };
     return {
-      cooldownHours: typeof fileConfig["cooldownHours"] === "number"
-        ? fileConfig["cooldownHours"] : DEFAULT_CONFIG.cooldownHours,
-      rootMaxTokens: typeof fileConfig["rootMaxTokens"] === "number"
-        ? fileConfig["rootMaxTokens"] : DEFAULT_CONFIG.rootMaxTokens,
+      cooldownHours: readNumber("cooldownHours", DEFAULT_CONFIG.cooldownHours),
+      rootMaxTokens: readNumber("rootMaxTokens", DEFAULT_CONFIG.rootMaxTokens),
       model: typeof fileConfig["model"] === "string"
         ? fileConfig["model"] : defaultModel,
     };
@@ -207,12 +235,19 @@ export class CompactionEngine {
       }
     }
 
-    // Compact each tier
+    // Compact each tier independently — existing files at any tier
+    // should always be processed even if higher tiers had nothing new.
     const dailyUpdated = await this.compactDaily(result);
-    const weeklyUpdated = dailyUpdated ? await this.compactWeekly(result) : false;
-    const monthlyUpdated = weeklyUpdated ? await this.compactMonthly(result) : false;
-    if (monthlyUpdated) {
+    const weeklyUpdated = await this.compactWeekly(result);
+    const monthlyUpdated = await this.compactMonthly(result);
+
+    // Always regenerate ROOT.md when any monthly content exists
+    if (dailyUpdated || weeklyUpdated || monthlyUpdated) {
       await this.compactRoot();
+    } else {
+      // Even with no updates, regenerate root if monthly files exist
+      // but root doesn't (e.g. first run after partial compaction)
+      await this.compactRootIfNeeded();
     }
 
     result.compacted = dailyUpdated || weeklyUpdated || monthlyUpdated;
@@ -250,25 +285,26 @@ export class CompactionEngine {
       // Skip if daily node exists and is fixed
       if (await fileExists(dailyPath)) {
         const existing = await safeReadFile(dailyPath);
-        if (existing.includes("status: fixed")) continue;
+        if (isFixedNode(existing)) continue;
       }
 
       const rawContent = await safeReadFile(rawPath);
       const rawLines = countLines(rawContent);
       if (rawLines === 0) continue;
 
+      const safeContent = scanSecrets(rawContent);
       if (rawLines <= DAILY_THRESHOLD) {
         // Below threshold — copy verbatim with secret redaction
-        const safeContent = scanSecrets(rawContent);
         const frontmatter = `---\ntype: daily\nstatus: ${status}\nperiod: ${date}\nsource-files: [memory/${date}.md]\ntopics: []\n---\n\n`;
         await writeFile(dailyPath, frontmatter + safeContent);
         updated = true;
         result.stats.daily.push(date);
       } else {
-        // Above threshold — LLM summarize
-        const summary = await this.summarize(
+        // Above threshold — LLM summarize with fallback to raw content
+        const summary = await this.safeSummarize(
           rawContent,
           `Summarize this daily log for ${date}. Preserve key decisions, actions taken, issues encountered, and important context. Be concise but complete. Output markdown.`,
+          safeContent,
         );
         const frontmatter = `---\ntype: daily\nstatus: ${status}\nperiod: ${date}\nsource-files: [memory/${date}.md]\nlines: ${rawLines}\ntopics: []\n---\n\n`;
         await writeFile(dailyPath, frontmatter + summary);
@@ -311,7 +347,7 @@ export class CompactionEngine {
       // Skip if already fixed
       if (await fileExists(weeklyPath)) {
         const existing = await safeReadFile(weeklyPath);
-        if (existing.includes("status: fixed")) continue;
+        if (isFixedNode(existing)) continue;
       }
 
       // Combine daily contents
@@ -333,10 +369,11 @@ export class CompactionEngine {
         updated = true;
         result.stats.weekly.push(week);
       } else {
-        // Above threshold — LLM summarize
-        const summary = await this.summarize(
+        // Above threshold — LLM summarize with fallback
+        const summary = await this.safeSummarize(
           combined,
           `Summarize this weekly log for ${week} (${dates[0]} to ${dates[dates.length - 1]}). Preserve key decisions, patterns, blockers, and important context. Be concise but complete. Output markdown.`,
+          combined,
         );
         const frontmatter = `---\ntype: weekly\nstatus: ${status}\nperiod: ${week}\ndates: ${dates[0]} to ${dates[dates.length - 1]}\nsource-files: [${dates.map(d => `memory/daily/${d}.md`).join(", ")}]\nlines: ${totalLines}\ntopics: []\n---\n`;
         await writeFile(weeklyPath, frontmatter + summary);
@@ -383,7 +420,7 @@ export class CompactionEngine {
       // Skip if already fixed
       if (await fileExists(monthlyPath)) {
         const existing = await safeReadFile(monthlyPath);
-        if (existing.includes("status: fixed")) continue;
+        if (isFixedNode(existing)) continue;
       }
 
       // Combine weekly contents
@@ -405,10 +442,11 @@ export class CompactionEngine {
         updated = true;
         result.stats.monthly.push(month);
       } else {
-        // Above threshold — LLM summarize
-        const summary = await this.summarize(
+        // Above threshold — LLM summarize with fallback
+        const summary = await this.safeSummarize(
           combined,
           `Summarize this monthly log for ${month}. Preserve key themes, decisions, patterns, and important context. Be concise but complete. Output markdown.`,
+          combined,
         );
         const frontmatter = `---\ntype: monthly\nstatus: ${status}\nperiod: ${month}\nweeks: [${weeks.join(", ")}]\nsource-files: [${weeks.map(w => `memory/weekly/${w}.md`).join(", ")}]\nlines: ${totalLines}\ntopics: []\n---\n`;
         await writeFile(monthlyPath, frontmatter + summary);
@@ -421,6 +459,16 @@ export class CompactionEngine {
   }
 
   // ─── Root: monthly/ → ROOT.md ───
+
+  /** Regenerate ROOT.md only if monthly content exists but ROOT.md doesn't. */
+  private async compactRootIfNeeded(): Promise<void> {
+    const rootPath = join(this.memoryDir, "ROOT.md");
+    if (await fileExists(rootPath)) return;
+    const files = await listDir(this.monthlyDir);
+    if (files.some(f => MONTH_RE.test(f))) {
+      await this.compactRoot();
+    }
+  }
 
   private async compactRoot(): Promise<void> {
     const rootPath = join(this.memoryDir, "ROOT.md");
@@ -440,8 +488,8 @@ export class CompactionEngine {
 
     if (!allContent.trim()) return;
 
-    // Generate root summary via LLM
-    const rootSummary = await this.summarize(
+    // Generate root summary via LLM (fallback: concatenated monthly content)
+    const rootSummary = await this.safeSummarize(
       allContent,
       [
         `Generate a ROOT.md memory index with these sections:`,
@@ -452,12 +500,26 @@ export class CompactionEngine {
         `Cap total output at approximately ${this.config.rootMaxTokens} tokens.`,
         `Output markdown.`,
       ].join("\n"),
+      allContent,
     );
 
     await writeFile(rootPath, rootSummary);
   }
 
   // ─── LLM Summarization ───
+
+  /**
+   * Try LLM summarization; on any error (auth, timeout, rate-limit),
+   * fall back to the provided raw content so compaction never crashes.
+   */
+  private async safeSummarize(content: string, instruction: string, fallback: string): Promise<string> {
+    try {
+      return await this.summarize(content, instruction);
+    } catch (err) {
+      console.warn(`[compaction] LLM summarize failed, using raw fallback: ${(err as Error).message}`);
+      return fallback;
+    }
+  }
 
   private async summarize(content: string, instruction: string): Promise<string> {
     const chunks: string[] = [];

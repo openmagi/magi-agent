@@ -10,6 +10,7 @@ import path from "node:path";
 import { loadConfig } from "./config.js";
 import { Agent, type AgentConfig } from "../Agent.js";
 import { HttpServer } from "../transport/HttpServer.js";
+import { createProvider } from "../llm/createProvider.js";
 
 const DIM = "\x1b[2m";
 const BOLD = "\x1b[1m";
@@ -18,6 +19,12 @@ const GREEN = "\x1b[32m";
 
 const DEFAULT_PORT = 8080;
 
+const DEFAULT_MODELS: Record<string, string> = {
+  anthropic: "claude-sonnet-4-6",
+  openai: "gpt-5.4",
+  google: "gemini-2.5-flash",
+};
+
 function buildAgentConfig(
   config: ReturnType<typeof loadConfig>,
 ): AgentConfig {
@@ -25,21 +32,25 @@ function buildAgentConfig(
     ? path.resolve(config.workspace)
     : path.resolve("./workspace");
 
-  const providerBaseUrls: Record<string, string> = {
-    anthropic: config.llm.baseUrl ?? "https://api.anthropic.com",
-    openai: config.llm.baseUrl ?? "https://api.openai.com",
-    google: config.llm.baseUrl ?? "https://generativelanguage.googleapis.com",
-  };
+  const model = config.llm.model ?? DEFAULT_MODELS[config.llm.provider] ?? "claude-sonnet-4-6";
+
+  const provider = createProvider({
+    provider: config.llm.provider,
+    apiKey: config.llm.apiKey,
+    baseUrl: config.llm.baseUrl,
+    defaultModel: model,
+  });
 
   return {
     botId: "cli-serve",
     userId: "cli-user",
     workspaceRoot: workspace,
     gatewayToken: config.llm.apiKey,
-    apiProxyUrl: providerBaseUrls[config.llm.provider] ?? "https://api.anthropic.com",
-    chatProxyUrl: "",
-    redisUrl: "",
-    model: config.llm.model,
+    apiProxyUrl: config.llm.baseUrl ?? "https://api.anthropic.com",
+    model,
+    llmProvider: provider,
+    agentName: config.identity?.name,
+    agentInstructions: config.identity?.instructions,
     telegramBotToken: config.channels?.telegram?.token,
     discordBotToken: config.channels?.discord?.token,
   };
@@ -82,11 +93,10 @@ export async function runServe(port?: number): Promise<void> {
   console.log("");
   console.log(`${BOLD}${agentName}${RESET} ${DIM}server mode${RESET}`);
   console.log(`${GREEN}Ready${RESET} on http://localhost:${listenPort}`);
-  console.log(`${DIM}Model: ${config.llm.provider}/${config.llm.model}${RESET}`);
+  console.log(`${DIM}Model: ${config.llm.provider}/${agentConfig.model}${RESET}`);
   console.log(`${DIM}Workspace: ${agentConfig.workspaceRoot}${RESET}`);
   console.log("");
 
-  // Graceful shutdown
   const shutdown = async (signal: string): Promise<void> => {
     console.log(`\n${DIM}${signal} received, shutting down...${RESET}`);
     try {

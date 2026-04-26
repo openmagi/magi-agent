@@ -294,6 +294,8 @@ async function makeFixture(
     recordTurnUsage: () => {},
     maxTurns: 50,
     maxCostUsd: 10,
+    setActiveSse: () => {},
+    hasPendingInjections: () => false,
   };
 
   const userMessage: UserMessage = {
@@ -338,8 +340,8 @@ describe("classifyStopReason", () => {
 });
 
 describe("Turn.execute() stop-reason taxonomy", () => {
-  it("MAX_OUTPUT_TOKENS_RECOVERY_LIMIT is 15 (generous for agentic flows)", () => {
-    expect(MAX_OUTPUT_TOKENS_RECOVERY_LIMIT).toBe(15);
+  it("MAX_OUTPUT_TOKENS_RECOVERY_LIMIT is 3 (CC parity)", () => {
+    expect(MAX_OUTPUT_TOKENS_RECOVERY_LIMIT).toBe(3);
   });
 
   it("end_turn → finalises with a single LLM call", async () => {
@@ -411,7 +413,9 @@ describe("Turn.execute() stop-reason taxonomy", () => {
     ).toBe(2);
   });
 
-  it("max_tokens (4×) → all four are recovered (limit=15), fifth ends normally", async () => {
+  it("max_tokens (4×) → third recovery made, fourth refused with exhausted audit", async () => {
+    // Four calls then a sentinel; if the impl made a fifth call the
+    // exhausted audit would not fire. We assert llm.calls.length=4.
     const { turn, llm, auditEvents } = await makeFixture([
       { blocks: [{ type: "text", text: "1" }], stopReason: "max_tokens" },
       { blocks: [{ type: "text", text: "2" }], stopReason: "max_tokens" },
@@ -420,16 +424,15 @@ describe("Turn.execute() stop-reason taxonomy", () => {
       { blocks: [{ type: "text", text: "!" }], stopReason: "end_turn" },
     ]);
     await turn.execute();
-    expect(llm.calls.length).toBe(5);
-    expect(turn.getRecoveryAttempt()).toBe(4);
-    const recoveries = auditEvents.filter(
-      (e) => e.event === "output_recovery",
-    );
-    expect(recoveries.length).toBe(4);
+    expect(llm.calls.length).toBe(4);
+    expect(turn.getRecoveryAttempt()).toBe(MAX_OUTPUT_TOKENS_RECOVERY_LIMIT);
     const exhausted = auditEvents.filter(
       (e) => e.event === "output_recovery_exhausted",
     );
-    expect(exhausted.length).toBe(0);
+    expect(exhausted.length).toBe(1);
+    expect(exhausted[0]?.data?.limit).toBe(MAX_OUTPUT_TOKENS_RECOVERY_LIMIT);
+    // "1" + "2" + "3" + "4" = 4 chars.
+    expect(exhausted[0]?.data?.finalLength).toBe(4);
   });
 
   it("refusal → stages rule_check_violation audit and finalises", async () => {
@@ -605,109 +608,5 @@ describe("Turn.execute() stop-reason taxonomy", () => {
     const lastMsg = secondCall.messages[secondCall.messages.length - 1];
     expect(lastMsg?.role).toBe("user");
     expect(lastMsg?.content).toBe("Continue.");
-  });
-
-  // ── Empty-response guard tests ──────────────────────────────────
-
-  it("thinking-only turn triggers empty-response recovery and gets text on retry", async () => {
-    const { turn, llm } = await makeFixture([
-      // Iter 0: thinking only, no text → empty-response guard fires
-      {
-        blocks: [
-          { type: "thinking", thinking: "deep planning for 168 seconds", signature: "sig-1" },
-        ],
-        stopReason: "end_turn",
-      },
-      // Iter 1 (recovery): model produces text this time
-      {
-        blocks: [{ type: "text", text: "Here's what I did." }],
-        stopReason: "end_turn",
-      },
-    ]);
-    await turn.execute();
-    expect(llm.calls.length).toBe(2);
-    // Second call should contain the nudge message
-    const secondCall = llm.calls[1]!;
-    const lastMsg = secondCall.messages[secondCall.messages.length - 1];
-    expect(lastMsg?.role).toBe("user");
-    expect(lastMsg?.content).toContain("didn't produce a visible text response");
-    expect(lastMsg?.content).toContain("Do NOT use thinking");
-  });
-
-  it("empty-response retries up to MAX_EMPTY_RESPONSE_RETRIES then accepts empty", async () => {
-    // Build script: N thinking-only iterations + 1 final thinking-only
-    const retries = Turn.MAX_EMPTY_RESPONSE_RETRIES; // 3
-    const script: ScriptedTurn[] = [];
-    for (let i = 0; i <= retries; i++) {
-      script.push({
-        blocks: [
-          { type: "thinking", thinking: `still thinking round ${i}`, signature: `sig-${i}` },
-        ],
-        stopReason: "end_turn",
-      });
-    }
-    const { turn, llm } = await makeFixture(script);
-    await turn.execute();
-    // 1 initial + MAX_EMPTY_RESPONSE_RETRIES recovery attempts = 4 calls total
-    expect(llm.calls.length).toBe(1 + retries);
-    // Last nudge should use the escalated message
-    const lastCall = llm.calls[retries]!;
-    const lastMsg = lastCall.messages[lastCall.messages.length - 1];
-    expect(lastMsg?.role).toBe("user");
-    expect(lastMsg?.content).toContain("still empty. The user CANNOT see your thinking");
-  });
-
-  it("tool_use-only turn (subagent spawn, no text) triggers empty-response recovery", async () => {
-    const { turn, llm } = await makeFixture(
-      [
-        // Iter 0: thinking + tool_use, no text
-        {
-          blocks: [
-            { type: "thinking", thinking: "I'll delegate this", signature: "sig-d" },
-            { type: "tool_use", id: "tu_spawn", name: "SpawnAgent", input: { task: "fetch data" } },
-          ],
-          stopReason: "tool_use",
-        },
-        // Iter 1: after tool returns, model ends with no text → empty guard
-        {
-          blocks: [
-            { type: "thinking", thinking: "subagent done", signature: "sig-e" },
-          ],
-          stopReason: "end_turn",
-        },
-        // Iter 2 (recovery): model finally produces text
-        {
-          blocks: [{ type: "text", text: "The subagent completed the task." }],
-          stopReason: "end_turn",
-        },
-      ],
-      { toolNames: ["SpawnAgent"] },
-    );
-    await turn.execute();
-    expect(llm.calls.length).toBe(3);
-  });
-
-  it("empty-response counter is independent from max_tokens recovery", async () => {
-    const { turn, llm } = await makeFixture([
-      // Iter 0: text hit max_tokens → recoveryAttempt bumped to 1
-      {
-        blocks: [{ type: "text", text: "partial " }],
-        stopReason: "max_tokens",
-      },
-      // Iter 1: recovery continues, thinking only, end_turn → empty guard should still fire
-      // because emptyResponseRetry is 0 even though recoveryAttempt is 1
-      {
-        blocks: [
-          { type: "thinking", thinking: "just thinking", signature: "sig-f" },
-        ],
-        stopReason: "end_turn",
-      },
-      // Iter 2: Wait — the first iter DID produce text ("partial "), so hasText is true.
-      // Empty guard won't fire. This test verifies the counters are independent
-      // but in this case hasText=true so it finalises normally.
-    ]);
-    await turn.execute();
-    // 2 calls: initial (max_tokens recovery) + recovery (end_turn, hasText=true from iter 0)
-    expect(llm.calls.length).toBe(2);
   });
 });
