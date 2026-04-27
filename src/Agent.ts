@@ -68,6 +68,8 @@ import { makeCronCreateTool } from "./tools/CronCreate.js";
 import { makeCronListTool } from "./tools/CronList.js";
 import { makeCronUpdateTool } from "./tools/CronUpdate.js";
 import { makeCronDeleteTool } from "./tools/CronDelete.js";
+import { makeWebFetchTool } from "./tools/WebFetch.js";
+import { makeWebSearchTool } from "./tools/WebSearch.js";
 import type { Turn } from "./Turn.js";
 import type { ChannelAdapter } from "./channels/ChannelAdapter.js";
 import { TelegramPoller } from "./channels/TelegramPoller.js";
@@ -390,6 +392,9 @@ export class Agent {
     this.tools.register(makeArtifactListTool(this.artifacts));
     this.tools.register(makeArtifactUpdateTool(this.artifacts));
     this.tools.register(makeArtifactDeleteTool(this.artifacts));
+    // Web tools — zero-dep fetch + search, Playwright-enhanced when available.
+    this.tools.register(makeWebFetchTool());
+    this.tools.register(makeWebSearchTool());
     // Cron suite. CronCreate captures the turn's source channel at
     // creation time so the LLM doesn't get to pick the target — it
     // inherits whatever channel started the turn (web / app / telegram

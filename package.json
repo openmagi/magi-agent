@@ -47,7 +47,8 @@
     "yaml": "^2.8.3"
   },
   "optionalDependencies": {
-    "@tobilu/qmd": "*"
+    "@tobilu/qmd": "*",
+    "playwright": "^1.52.0"
   },
   "devDependencies": {
     "@types/node": "^22.7.5",
