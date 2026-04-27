@@ -13,7 +13,7 @@ Think Claude Code, but open-source, multi-provider, and programmable.
 - **Programmable LLM hooks** — Insert LLM-judged checkpoints anywhere in the turn lifecycle for deterministic control
 - **Multi-provider** — Anthropic Claude, OpenAI GPT, Google Gemini natively supported
 - **27+ built-in tools** — Bash, FileRead/Write/Edit, Glob, Grep, SpawnAgent, Cron, and more
-- **Multi-channel** — Telegram, Discord, Webhook out of the box
+- **Multi-channel** — Telegram, Discord, HTTP API out of the box
 - **Built-in memory** — Hipocampus 5-level compaction for persistent cross-session context
 - **Coding discipline** — Optional TDD and git commit enforcement
 - **Child agents** — Spawn sub-agents for parallel task execution
@@ -21,9 +21,30 @@ Think Claude Code, but open-source, multi-provider, and programmable.
 ## Quick Start
 
 ```bash
+git clone https://github.com/ClawyPro/clawy-agent.git
+cd clawy-agent
+npm install
+npx tsx src/cli/index.ts init
+npx tsx src/cli/index.ts start
+```
+
+## Installation
+
+### From Source (recommended)
+
+```bash
+git clone https://github.com/ClawyPro/clawy-agent.git
+cd clawy-agent
+npm install
+```
+
+Then run commands with `npx tsx src/cli/index.ts <command>`.
+
+### From npm (coming soon)
+
+```bash
 npm install -g clawy-agent
-clawy-agent init
-clawy-agent start
+clawy-agent <command>
 ```
 
 ## Usage Modes
@@ -31,18 +52,18 @@ clawy-agent start
 ### Interactive (CLI)
 
 ```bash
-clawy-agent start
+npx tsx src/cli/index.ts start
 ```
 
 Terminal conversation mode. Like Claude Code.
 
-### Server
+### Server (Telegram / Discord / HTTP API)
 
 ```bash
-clawy-agent serve --port 8080
+npx tsx src/cli/index.ts serve --port 8080
 ```
 
-HTTP API server for platform integration.
+Starts the agent as an HTTP API server. If Telegram or Discord tokens are configured, the agent automatically connects to those channels and responds to messages.
 
 ### Programmatic
 
@@ -50,29 +71,39 @@ HTTP API server for platform integration.
 import { Agent } from 'clawy-agent'
 
 const agent = new Agent({
-  llm: { provider: 'anthropic', model: 'claude-sonnet-4-6' },
-  hooks: {
-    beforeCommit: [myQualityGate]
-  }
+  botId: 'my-agent',
+  userId: 'local',
+  workspaceRoot: './workspace',
+  model: 'claude-sonnet-4-6',
+  gatewayToken: process.env.ANTHROPIC_API_KEY!,
+  apiProxyUrl: 'https://api.anthropic.com',
 })
 
-const session = agent.createSession()
-const response = await session.run('Fix the login bug in auth.ts')
+await agent.start()
 ```
 
 ## Configuration
 
-Copy `clawy-agent.yaml.example` to `clawy-agent.yaml`:
+Run `npx tsx src/cli/index.ts init` to generate `clawy-agent.yaml` interactively, or create it manually:
 
 ```yaml
 llm:
-  provider: anthropic
+  provider: anthropic          # anthropic, openai, or google
   model: claude-sonnet-4-6
   apiKey: ${ANTHROPIC_API_KEY}
+
+channels:
+  telegram:
+    token: ${TELEGRAM_BOT_TOKEN}
+  discord:
+    token: ${DISCORD_BOT_TOKEN}
 
 hooks:
   builtin:
     factGrounding: true
+    preRefusalVerifier: true
+    workspaceAwareness: true
+    sessionResume: true
     discipline: false
 
 memory:
@@ -80,41 +111,78 @@ memory:
   compaction: true
 
 workspace: ./workspace
+
 identity:
   name: "My Agent"
   instructions: "You are a helpful coding assistant."
 ```
 
+## Telegram Bot Setup
+
+1. Create a bot via [@BotFather](https://t.me/BotFather) on Telegram
+2. Copy the bot token
+3. Add it to your config:
+
+```yaml
+channels:
+  telegram:
+    token: ${TELEGRAM_BOT_TOKEN}
+```
+
+4. Set the env var and start:
+
+```bash
+export TELEGRAM_BOT_TOKEN=123456:ABC-DEF...
+export ANTHROPIC_API_KEY=sk-ant-...
+npx tsx src/cli/index.ts serve
+```
+
+The agent will automatically start long-polling Telegram for messages and reply in the chat. Typing indicators, reply-to context, and `/reset` command are supported out of the box.
+
+## Discord Bot Setup
+
+1. Create an application at [Discord Developer Portal](https://discord.com/developers/applications)
+2. Create a bot under the application, copy the token
+3. Invite the bot to your server with the `bot` + `applications.commands` scopes
+4. Add to your config:
+
+```yaml
+channels:
+  discord:
+    token: ${DISCORD_BOT_TOKEN}
+```
+
+5. Start the agent — it connects to Discord gateway automatically. The bot responds to @mentions.
+
+## Multi-Provider LLM
+
+Switch providers by changing `llm.provider` and `llm.apiKey`:
+
+```yaml
+# Anthropic Claude
+llm:
+  provider: anthropic
+  model: claude-sonnet-4-6
+  apiKey: ${ANTHROPIC_API_KEY}
+
+# OpenAI GPT
+llm:
+  provider: openai
+  model: gpt-5.4
+  apiKey: ${OPENAI_API_KEY}
+
+# Google Gemini
+llm:
+  provider: google
+  model: gemini-2.5-flash
+  apiKey: ${GOOGLE_API_KEY}
+```
+
+All providers support streaming, tool use, and the full agentic loop. The provider layer handles format conversion automatically.
+
 ## Custom Hooks
 
 The core differentiator. Insert LLM-judged checkpoints anywhere in the turn lifecycle:
-
-```typescript
-import { defineHook } from 'clawy-agent'
-
-export default defineHook({
-  name: 'quality-gate',
-  event: 'beforeCommit',
-  priority: 80,
-
-  async handler(ctx) {
-    const judgment = await ctx.llm.quick({
-      model: 'claude-haiku-4-5',
-      prompt: `Does this response accurately answer the question?
-        Question: ${ctx.userMessage}
-        Response: ${ctx.finalText}
-        Verdict: PASS or FAIL + reason`
-    })
-
-    if (judgment.includes('FAIL')) {
-      return { action: 'retry', reason: judgment }
-    }
-    return { action: 'pass' }
-  }
-})
-```
-
-### Hook Lifecycle
 
 ```
 User message
@@ -153,17 +221,16 @@ Agent (singleton)
   │   └── Context (layered: identity + rules + memory + tools)
   ├── Tool Registry (27+ built-in)
   ├── Hook Registry (built-in + custom)
-  ├── Channel Adapters (Telegram, Discord, Webhook)
+  ├── Channel Adapters (Telegram, Discord)
   ├── Cron Scheduler
   ├── Memory (Hipocampus compaction)
   └── SpawnAgent (child agent execution)
 ```
 
-## Docker
+## Requirements
 
-```bash
-docker run -e ANTHROPIC_API_KEY=sk-... -p 8080:8080 clawy/clawy-agent
-```
+- Node.js 22+
+- An LLM API key (Anthropic, OpenAI, or Google)
 
 ## Contributing
 
