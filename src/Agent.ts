@@ -10,7 +10,13 @@
 import path from "node:path";
 import fs from "node:fs/promises";
 import { monotonicFactory } from "ulid";
-import { Session, type SessionMeta, type Discipline, personaFromSessionKey } from "./Session.js";
+import {
+  Session,
+  type SessionMeta,
+  type Discipline,
+  type PermissionMode,
+  personaFromSessionKey,
+} from "./Session.js";
 import {
   DEFAULT_DISCIPLINE,
   loadDisciplineConfig,
@@ -33,6 +39,7 @@ import { registerBuiltinHooks } from "./hooks/builtin/index.js";
 import { ContextEngine } from "./services/compact/ContextEngine.js";
 import { QmdManager } from "./services/memory/QmdManager.js";
 import { CompactionEngine } from "./services/memory/CompactionEngine.js";
+import { HipocampusService } from "./services/memory/HipocampusService.js";
 import { makeFileReadTool } from "./tools/FileRead.js";
 import { makeFileWriteTool } from "./tools/FileWrite.js";
 import { makeFileEditTool } from "./tools/FileEdit.js";
@@ -52,24 +59,34 @@ import {
   makeExitPlanModeTool,
   type PlanModeController,
 } from "./tools/ExitPlanMode.js";
+import {
+  makeEnterPlanModeTool,
+  type PlanModeEntryController,
+} from "./tools/EnterPlanMode.js";
 import { BackgroundTaskRegistry } from "./tasks/BackgroundTaskRegistry.js";
 import { makeTaskListTool } from "./tools/TaskList.js";
 import { makeTaskGetTool } from "./tools/TaskGet.js";
 import { makeTaskOutputTool } from "./tools/TaskOutput.js";
 import { makeTaskStopTool } from "./tools/TaskStop.js";
+import { PolicyKernel } from "./policy/PolicyKernel.js";
+import { DebugWorkflow } from "./debug/DebugWorkflow.js";
 import { ArtifactManager } from "./artifacts/ArtifactManager.js";
+import { OutputArtifactRegistry } from "./output/OutputArtifactRegistry.js";
 import { makeArtifactCreateTool } from "./tools/ArtifactCreate.js";
 import { makeArtifactReadTool } from "./tools/ArtifactRead.js";
 import { makeArtifactListTool } from "./tools/ArtifactList.js";
 import { makeArtifactUpdateTool } from "./tools/ArtifactUpdate.js";
 import { makeArtifactDeleteTool } from "./tools/ArtifactDelete.js";
+import { makeDocumentWriteTool } from "./tools/DocumentWrite.js";
+import { makeFileDeliverTool } from "./tools/FileDeliver.js";
+import { makeFileSendTool } from "./tools/FileSend.js";
+import { makeSpreadsheetWriteTool } from "./tools/SpreadsheetWrite.js";
+import { registerSkillRuntimeHooks } from "./tools/SkillRuntimeHooks.js";
 import { CronScheduler, type CronRecord } from "./cron/CronScheduler.js";
 import { makeCronCreateTool } from "./tools/CronCreate.js";
 import { makeCronListTool } from "./tools/CronList.js";
 import { makeCronUpdateTool } from "./tools/CronUpdate.js";
 import { makeCronDeleteTool } from "./tools/CronDelete.js";
-import { makeWebFetchTool } from "./tools/WebFetch.js";
-import { makeWebSearchTool } from "./tools/WebSearch.js";
 import type { Turn } from "./Turn.js";
 import type { ChannelAdapter } from "./channels/ChannelAdapter.js";
 import { TelegramPoller } from "./channels/TelegramPoller.js";
@@ -162,21 +179,26 @@ export interface AgentConfig {
   /** OpenClaw-compatible path: /home/ocuser/.openclaw/workspace. */
   workspaceRoot: string;
   gatewayToken: string;
+  codexAccessToken?: string;
+  codexRefreshToken?: string;
   apiProxyUrl: string;
   chatProxyUrl?: string;
   redisUrl?: string;
   /** Default model for this bot. Overridable per-turn via smart-router. */
   model: string;
-  /**
-   * OSS multi-provider support. When set, `Agent.llm.stream()` delegates
-   * to this provider instead of the built-in Anthropic api-proxy client.
-   * Injected by the CLI / config layer for OpenAI, Google, etc.
-   */
+  /** OSS multi-provider support — delegates LLM calls to this provider. */
   llmProvider?: { stream(req: import("./transport/LLMClient.js").LLMStreamRequest): AsyncGenerator<import("./transport/LLMClient.js").LLMEvent, void, void> };
   /** OSS identity — optional agent display name. */
   agentName?: string;
-  /** OSS identity — optional custom instructions prepended to system prompt. */
+  /** OSS identity — optional custom instructions. */
   agentInstructions?: string;
+  /**
+   * Initial tool-permission posture for newly-created sessions.
+   * Hosted Clawy Pro pods set "bypass" explicitly to preserve the
+   * low-friction product UX; bare Session construction defaults to
+   * "default" so hooks are active unless runtime config opts out.
+   */
+  defaultPermissionMode?: PermissionMode;
   telegramBotToken?: string;
   discordBotToken?: string;
   /**
@@ -221,7 +243,7 @@ export interface AgentConfig {
   }) => WebAppChannelAdapter;
   /**
    * Directory holding the bundled superpowers skills (one subdirectory
-   * per skill). Defaults to `<repo>/infra/docker/clawy-agent/skills/superpowers`
+   * per skill). Defaults to `<repo>/infra/docker/clawy-core-agent/skills/superpowers`
    * resolved from the module location. Tests inject a temp dir.
    * See `docs/plans/2026-04-20-superpowers-plugin-design.md`.
    */
@@ -243,12 +265,20 @@ export class Agent {
   readonly backgroundTasks: BackgroundTaskRegistry;
   /** T4-20: tiered artifact manager (L0 / L1 / L2). */
   readonly artifacts: ArtifactManager;
+  /** User-visible generated file registry for document/file outputs. */
+  readonly outputArtifacts: OutputArtifactRegistry;
   /** Cron scheduler — post-Phase-3 OpenClaw parity. */
   readonly crons: CronScheduler;
   /** Native hipocampus memory — qmd search index. */
   readonly qmdManager: QmdManager;
   /** Native hipocampus memory — compaction engine. */
   compactionEngine!: CompactionEngine;
+  /** First-class Hipocampus runtime facade. */
+  readonly hipocampus: HipocampusService;
+  /** Typed runtime policy facade. */
+  readonly policy: PolicyKernel;
+  /** Workflow-native debugging state manager. */
+  readonly debugWorkflow: DebugWorkflow;
   /**
    * Built-in slash commands (`/compact`, `/reset`, `/status`). Ported
    * from OpenClaw so migrated bots keep the same inline UX. See
@@ -313,9 +343,13 @@ export class Agent {
       : new LLMClient({
           apiProxyUrl: config.apiProxyUrl,
           gatewayToken: config.gatewayToken,
+          codexAccessToken: config.codexAccessToken,
+          codexRefreshToken: config.codexRefreshToken,
           defaultModel: config.model,
         });
     this.workspace = new Workspace(config.workspaceRoot);
+    this.policy = new PolicyKernel(this.workspace);
+    this.debugWorkflow = new DebugWorkflow();
     this.intent = new IntentClassifier(this.llm);
     this.hooks = new HookRegistry();
     this.contextEngine = new ContextEngine(this.llm);
@@ -327,6 +361,7 @@ export class Agent {
     // T4-20 — tiered artifact manager. LLMClient wired for Haiku-backed
     // L1/L2 generation; falls back to deterministic summaries if Haiku fails.
     this.artifacts = new ArtifactManager(config.workspaceRoot, this.llm);
+    this.outputArtifacts = new OutputArtifactRegistry(config.workspaceRoot);
     // Cron scheduler — hydrated + started in start(), tools registered
     // below so they're available before the first turn even if no
     // crons exist yet.
@@ -336,6 +371,12 @@ export class Agent {
       config.workspaceRoot,
       (process.env.CORE_AGENT_VECTOR_SEARCH ?? "off").trim().toLowerCase() === "on",
     );
+    this.hipocampus = new HipocampusService({
+      workspaceRoot: config.workspaceRoot,
+      defaultModel: config.model,
+      llm: this.llm,
+      qmdManager: this.qmdManager,
+    });
     // Slash commands — built-in registry + reset-counter sidecar. The
     // three core commands (/compact, /reset, /status) are registered
     // right here (not in start()) so unit tests that skip start() still
@@ -392,9 +433,25 @@ export class Agent {
     this.tools.register(makeArtifactListTool(this.artifacts));
     this.tools.register(makeArtifactUpdateTool(this.artifacts));
     this.tools.register(makeArtifactDeleteTool(this.artifacts));
-    // Web tools — zero-dep fetch + search, Playwright-enhanced when available.
-    this.tools.register(makeWebFetchTool());
-    this.tools.register(makeWebSearchTool());
+    this.tools.register(makeDocumentWriteTool(config.workspaceRoot, this.outputArtifacts));
+    this.tools.register(makeSpreadsheetWriteTool(config.workspaceRoot, this.outputArtifacts));
+    this.tools.register(
+      makeFileSendTool({
+        workspaceRoot: config.workspaceRoot,
+        binDir: path.join(config.workspaceRoot, "..", "bin"),
+        gatewayToken: config.gatewayToken,
+        botId: config.botId,
+        chatProxyUrl: config.chatProxyUrl ?? "",
+      }),
+    );
+    this.tools.register(
+      makeFileDeliverTool({
+        workspaceRoot: config.workspaceRoot,
+        outputRegistry: this.outputArtifacts,
+        chatProxyUrl: config.chatProxyUrl ?? "",
+        gatewayToken: config.gatewayToken,
+      }),
+    );
     // Cron suite. CronCreate captures the turn's source channel at
     // creation time so the LLM doesn't get to pick the target — it
     // inherits whatever channel started the turn (web / app / telegram
@@ -435,16 +492,35 @@ export class Agent {
     // §7.5 AskUserQuestion + §7.2 Plan mode.
     this.tools.register(makeAskUserQuestionTool());
     this.tools.register(
+      makeEnterPlanModeTool((turnId) => {
+        const turn = this.activeTurns.get(turnId);
+        if (!turn) return null;
+        const controller: PlanModeEntryController = {
+          enterPlanMode: (input) => turn.session.planLifecycle.enterPlanMode(input),
+        };
+        return controller;
+      }),
+    );
+    this.tools.register(
       makeExitPlanModeTool((turnId) => {
         const turn = this.activeTurns.get(turnId);
         if (!turn) return null;
         const controller: PlanModeController = {
           isPlanMode: () => turn.isPlanMode(),
-          exitPlanMode: () => turn.exitPlanMode(),
+          submitPlan: (input) => turn.session.planLifecycle.submitPlan(input),
         };
         return controller;
       }),
     );
+  }
+
+  async resolveRuntimeModel(): Promise<string> {
+    const resolver = (this.llm as {
+      resolveRuntimeModel?: (fallbackModel?: string) => Promise<string>;
+    }).resolveRuntimeModel;
+    return typeof resolver === "function"
+      ? await resolver.call(this.llm, this.config.model)
+      : this.config.model;
   }
 
   /** Session.runTurn registers the turn so the HTTP endpoint +
@@ -512,7 +588,7 @@ export class Agent {
     const session = this.sessions.get(input.sessionKey);
     if (!session) {
       console.warn(
-        `[clawy-agent] background delivery skipped taskId=${input.taskId}: session not live sessionKey=${input.sessionKey}`,
+        `[core-agent] background delivery skipped taskId=${input.taskId}: session not live sessionKey=${input.sessionKey}`,
       );
       return false;
     }
@@ -522,7 +598,7 @@ export class Agent {
       if (channel.type === "app") {
         if (!this.webAppAdapter) {
           console.warn(
-            `[clawy-agent] background delivery skipped taskId=${input.taskId}: webapp adapter not configured`,
+            `[core-agent] background delivery skipped taskId=${input.taskId}: webapp adapter not configured`,
           );
           return false;
         }
@@ -537,7 +613,7 @@ export class Agent {
         const adapter = this.channelAdapters.find((a) => a.kind === channel.type);
         if (!adapter) {
           console.warn(
-            `[clawy-agent] background delivery skipped taskId=${input.taskId}: ${channel.type} adapter not configured`,
+            `[core-agent] background delivery skipped taskId=${input.taskId}: ${channel.type} adapter not configured`,
           );
           return false;
         }
@@ -549,12 +625,12 @@ export class Agent {
       }
 
       console.warn(
-        `[clawy-agent] background delivery skipped taskId=${input.taskId}: unsupported channel=${channel.type}`,
+        `[core-agent] background delivery skipped taskId=${input.taskId}: unsupported channel=${channel.type}`,
       );
       return false;
     } catch (err) {
       console.warn(
-        `[clawy-agent] background delivery failed taskId=${input.taskId} channel=${channel.type}:${channel.channelId}: ${(err as Error).message}`,
+        `[core-agent] background delivery failed taskId=${input.taskId} channel=${channel.type}:${channel.channelId}: ${(err as Error).message}`,
       );
       return false;
     }
@@ -579,7 +655,7 @@ export class Agent {
       await this.backgroundTasks.hydrate();
     } catch (err) {
       console.warn(
-        `[clawy-agent] background-tasks hydrate failed: ${(err as Error).message}`,
+        `[core-agent] background-tasks hydrate failed: ${(err as Error).message}`,
       );
     }
 
@@ -591,12 +667,12 @@ export class Agent {
       if (cfg) {
         this.disciplineDefault = cfg;
         console.log(
-          `[clawy-agent] discipline: config loaded tdd=${cfg.tdd} git=${cfg.git} enforcement=${cfg.requireCommit}`,
+          `[core-agent] discipline: config loaded tdd=${cfg.tdd} git=${cfg.git} enforcement=${cfg.requireCommit}`,
         );
       }
     } catch (err) {
       console.warn(
-        `[clawy-agent] discipline config load failed: ${(err as Error).message}`,
+        `[core-agent] discipline config load failed: ${(err as Error).message}`,
       );
     }
 
@@ -607,13 +683,27 @@ export class Agent {
     // initialised; logs + continues if the `git` binary is missing.
     await this.maybeInitGit();
 
+    const readSessionTranscript = async (sessionKey: string) => {
+      const s = this.sessions.get(sessionKey);
+      if (!s) return null;
+      try {
+        return await s.transcript.readAll();
+      } catch {
+        return null;
+      }
+    };
+
     // Phase 2c: register built-in hooks (AEF module ports + hipocampus checkpoint).
     // T2-08 — pass a delegate wired to this Agent so the auto-approval
     // hook can look up the running session's permissionMode and
     // consult the tool registry for `tool.dangerous` metadata.
     const hookResult = registerBuiltinHooks(this.hooks, {
       workspaceRoot: this.config.workspaceRoot,
+      sessionsDir: this.sessionsDir,
+      policyKernel: this.policy,
+      debugWorkflow: this.debugWorkflow,
       qmdManager: this.qmdManager,
+      hipocampus: this.hipocampus,
       autoApprovalAgent: {
         getSessionPermissionMode: (sessionKey) => {
           const s = this.sessions.get(sessionKey);
@@ -636,6 +726,15 @@ export class Agent {
       },
       midTurnInjectorAgent: {
         getSession: (sessionKey) => this.sessions.get(sessionKey),
+      },
+      // Deterministic file delivery interceptor — Haiku-classified,
+      // bypasses the main model for "send this file" requests.
+      fileDelivery: {
+        workspaceRoot: this.config.workspaceRoot,
+        gatewayToken: this.config.gatewayToken,
+        botId: this.config.botId,
+        chatProxyUrl: this.config.chatProxyUrl ?? "",
+        telegramBotToken: this.config.telegramBotToken,
       },
       // Superpowers plan-mode auto-trigger — reads permissionMode to
       // skip the nudge when the user is already in plan mode.
@@ -661,40 +760,37 @@ export class Agent {
       // still-running turn. beforeCommit runs after all tool calls
       // have been persisted to the JSONL.
       preRefusalVerifierAgent: {
-        readSessionTranscript: async (sessionKey) => {
-          const s = this.sessions.get(sessionKey);
-          if (!s) return null;
-          try {
-            return await s.transcript.readAll();
-          } catch {
-            return null;
-          }
-        },
+        readSessionTranscript,
       },
       // Anti-hallucination hooks (priority 82 + 83) — same transcript
       // reader pattern as preRefusalVerifier. Without these delegates,
       // Mode A (tool-result grounding) and resourceExistenceChecker
       // fall back to the empty ctx.transcript and fail open.
       factGroundingAgent: {
-        readSessionTranscript: async (sessionKey) => {
-          const s = this.sessions.get(sessionKey);
-          if (!s) return null;
-          try {
-            return await s.transcript.readAll();
-          } catch {
-            return null;
-          }
-        },
+        readSessionTranscript,
       },
       resourceCheckAgent: {
-        readSessionTranscript: async (sessionKey) => {
-          const s = this.sessions.get(sessionKey);
-          if (!s) return null;
-          try {
-            return await s.transcript.readAll();
-          } catch {
-            return null;
-          }
+        readSessionTranscript,
+      },
+      // Reliability kernel gates use the same transcript-reader path
+      // so "complete/fixed/verified" claims are checked against
+      // current-turn tool calls instead of model memory.
+      completionEvidenceAgent: {
+        readSessionTranscript,
+      },
+      taskContractAgent: {
+        readSessionTranscript,
+      },
+      artifactDeliveryAgent: {
+        readSessionTranscript,
+      },
+      outputDeliveryAgent: {
+        listUndelivered: async (sessionKey, turnId) => {
+          const pending = await this.outputArtifacts.listUndelivered(sessionKey, turnId);
+          return pending.map((artifact) => ({
+            artifactId: artifact.artifactId,
+            filename: artifact.filename,
+          }));
         },
       },
       // Layer 4 (session resume) — snapshot = committed transcript +
@@ -723,21 +819,33 @@ export class Agent {
       },
     });
     console.log(
-      `[clawy-agent] hooks: builtin registered=${hookResult.registered} skipped=[${hookResult.skipped.join(",")}]`,
+      `[core-agent] hooks: builtin registered=${hookResult.registered} skipped=[${hookResult.skipped.join(",")}]`,
     );
 
     // Phase 2a: load workspace skills as first-class Tools (§9.8 P1).
     // Failure here is non-fatal — the bot still has the 6 core tools.
     const skillsDir = path.join(this.config.workspaceRoot, "skills");
     try {
-      const n = await this.tools.loadSkills(skillsDir, this.config.workspaceRoot);
+      const n = await this.tools.loadSkills(skillsDir, this.config.workspaceRoot, {
+        trustedSkillRoots: splitPathListEnv(
+          process.env.CLAWY_TRUSTED_SKILL_ROOTS ??
+            process.env.CORE_AGENT_TRUSTED_SKILL_ROOTS,
+        ),
+        trustedSkillDirs: splitPathListEnv(
+          process.env.CLAWY_TRUSTED_SKILL_DIRS ??
+            process.env.CORE_AGENT_TRUSTED_SKILL_DIRS,
+        ),
+      });
       const rpt = this.tools.skillReport();
       const issues = rpt?.issues.length ?? 0;
+      const runtimeHooks = rpt
+        ? registerSkillRuntimeHooks(this.hooks, rpt.runtimeHooks)
+        : 0;
       console.log(
-        `[clawy-agent] skills: loaded=${n} issues=${issues} from ${skillsDir}`,
+        `[core-agent] skills: loaded=${n} issues=${issues} runtimeHooks=${runtimeHooks} from ${skillsDir}`,
       );
     } catch (err) {
-      console.warn(`[clawy-agent] skill load failed: ${(err as Error).message}`);
+      console.warn(`[core-agent] skill load failed: ${(err as Error).message}`);
     }
 
     // Cron scheduler — hydrate persisted cron records then wire the
@@ -749,34 +857,25 @@ export class Agent {
       this.crons.setFireHandler((record) => this.fireCron(record));
       this.crons.start();
       console.log(
-        `[clawy-agent] crons hydrated=${this.crons.list().length} tickerStarted`,
+        `[core-agent] crons hydrated=${this.crons.list().length} tickerStarted`,
       );
     } catch (err) {
-      console.warn(`[clawy-agent] cron hydrate failed: ${(err as Error).message}`);
+      console.warn(`[core-agent] cron hydrate failed: ${(err as Error).message}`);
     }
 
     // Native hipocampus memory — qmd index + compaction engine + daily cron.
     try {
-      await this.qmdManager.start(); // fail-open
-      const compactionConfig = await CompactionEngine.loadConfig(
-        this.config.workspaceRoot,
-        this.config.model,
-      );
-      this.compactionEngine = new CompactionEngine(
-        this.config.workspaceRoot,
-        compactionConfig,
-        this.llm,
-      );
+      await this.hipocampus.start(); // fail-open
+      this.compactionEngine = this.hipocampus.getCompactionEngine() as CompactionEngine;
       // Internal daily cron for compaction maintenance
       this.crons.registerInternal({
         name: "hipocampus-maintenance",
         schedule: "0 3 * * *", // daily at 03:00
         handler: async () => {
           try {
-            const result = await this.compactionEngine.run();
-            if (result.compacted) await this.qmdManager.reindex();
+            await this.hipocampus.compact();
           } catch (err) {
-            console.warn(`[clawy-agent] hipocampus cron failed: ${(err as Error).message}`);
+            console.warn(`[core-agent] hipocampus cron failed: ${(err as Error).message}`);
           }
         },
       });
@@ -795,10 +894,10 @@ export class Agent {
       );
       this.hooks.register(flushHook);
       console.log(
-        `[clawy-agent] hipocampus: qmd=${this.qmdManager.isReady()} vector=${(process.env.CORE_AGENT_VECTOR_SEARCH ?? "off").trim().toLowerCase() === "on"} compactor+flush=registered`,
+        `[core-agent] hipocampus: qmd=${this.qmdManager.isReady()} vector=${(process.env.CORE_AGENT_VECTOR_SEARCH ?? "off").trim().toLowerCase() === "on"} compactor+flush=registered`,
       );
     } catch (err) {
-      console.warn(`[clawy-agent] hipocampus init failed: ${(err as Error).message}`);
+      console.warn(`[core-agent] hipocampus init failed: ${(err as Error).message}`);
     }
 
     // C1 — channel adapters. Instantiated + started for each configured
@@ -829,7 +928,7 @@ export class Agent {
     if (this.config.discordBotToken) {
       const factory =
         this.config.discordAdapterFactory ??
-        ((token) => new DiscordClient({ botToken: token }));
+        ((token: string) => new DiscordClient({ botToken: token, workspaceRoot: this.config.workspaceRoot }));
       adapters.push(factory(this.config.discordBotToken));
     }
     for (const adapter of adapters) {
@@ -838,17 +937,17 @@ export class Agent {
           await dispatchInbound(this, adapter, msg);
         } catch (err) {
           console.warn(
-            `[clawy-agent] ${adapter.kind} dispatch failed: ${(err as Error).message}`,
+            `[core-agent] ${adapter.kind} dispatch failed: ${(err as Error).message}`,
           );
         }
       });
       try {
         await adapter.start();
         this.channelAdapters.push(adapter);
-        console.log(`[clawy-agent] channel adapter started kind=${adapter.kind}`);
+        console.log(`[core-agent] channel adapter started kind=${adapter.kind}`);
       } catch (err) {
         console.warn(
-          `[clawy-agent] channel adapter start failed kind=${adapter.kind}: ${(err as Error).message}`,
+          `[core-agent] channel adapter start failed kind=${adapter.kind}: ${(err as Error).message}`,
         );
       }
     }
@@ -882,10 +981,10 @@ export class Agent {
       // lifecycle symmetry with Telegram/Discord.
       void adapter.start();
       this.webAppAdapter = adapter;
-      console.log(`[clawy-agent] webapp push adapter started`);
+      console.log(`[core-agent] webapp push adapter started`);
     } catch (err) {
       console.warn(
-        `[clawy-agent] webapp push adapter start failed: ${(err as Error).message}`,
+        `[core-agent] webapp push adapter start failed: ${(err as Error).message}`,
       );
     }
   }
@@ -906,12 +1005,13 @@ export class Agent {
         await this.closeSession(key, "shutdown");
       } catch (err) {
         console.warn(
-          `[clawy-agent] session close on shutdown failed sessionKey=${key}: ${(err as Error).message}`,
+          `[core-agent] session close on shutdown failed sessionKey=${key}: ${(err as Error).message}`,
         );
       }
     }
 
     this.crons.stop();
+    await this.hipocampus.stop();
     // C1 — stop all channel adapters. Each adapter is responsible for
     // aborting its own long-polls / closing gateway sockets.
     for (const adapter of this.channelAdapters.splice(0)) {
@@ -919,7 +1019,7 @@ export class Agent {
         await adapter.stop();
       } catch (err) {
         console.warn(
-          `[clawy-agent] channel adapter stop failed kind=${adapter.kind}: ${(err as Error).message}`,
+          `[core-agent] channel adapter stop failed kind=${adapter.kind}: ${(err as Error).message}`,
         );
       }
     }
@@ -930,7 +1030,7 @@ export class Agent {
         await this.webAppAdapter.stop();
       } catch (err) {
         console.warn(
-          `[clawy-agent] webapp adapter stop failed: ${(err as Error).message}`,
+          `[core-agent] webapp adapter stop failed: ${(err as Error).message}`,
         );
       }
       this.webAppAdapter = null;
@@ -986,7 +1086,7 @@ export class Agent {
           await this.closeSession(sessionKey, "cron_complete");
         } catch (err) {
           console.warn(
-            `[clawy-agent] fireCron: closeSession failed cronId=${record.cronId}: ${(err as Error).message}`,
+            `[core-agent] fireCron: closeSession failed cronId=${record.cronId}: ${(err as Error).message}`,
           );
         }
       }
@@ -999,7 +1099,7 @@ export class Agent {
   ): Promise<void> {
     if (channel.type === "app") {
       if (!this.config.chatProxyUrl) {
-        console.warn("[agent] cron delivery to app channel skipped — no chatProxyUrl configured");
+        console.warn("[clawy-agent] cron delivery to app channel skipped — no chatProxyUrl configured");
         return;
       }
       const url = `${this.config.chatProxyUrl.replace(/\/$/, "")}/v1/bot-channels/post`;
@@ -1060,7 +1160,7 @@ export class Agent {
       if (init.code !== 0) {
         this.disciplineDefault = { ...this.disciplineDefault, git: false };
         console.warn(
-          `[clawy-agent] discipline: git init failed (code=${init.code}) — disabling git half. ${init.stderr.slice(0, 200)}`,
+          `[core-agent] discipline: git init failed (code=${init.code}) — disabling git half. ${init.stderr.slice(0, 200)}`,
         );
         return;
       }
@@ -1075,12 +1175,12 @@ export class Agent {
         "clawy-bot",
       ]);
       console.log(
-        `[clawy-agent] discipline: git repo initialised at ${this.config.workspaceRoot}`,
+        `[core-agent] discipline: git repo initialised at ${this.config.workspaceRoot}`,
       );
     } catch (err) {
       this.disciplineDefault = { ...this.disciplineDefault, git: false };
       console.warn(
-        `[clawy-agent] discipline: git init threw — disabling git half: ${(err as Error).message}`,
+        `[core-agent] discipline: git init threw — disabling git half: ${(err as Error).message}`,
       );
     }
   }
@@ -1166,7 +1266,7 @@ export class Agent {
         listener(event);
       } catch (err) {
         console.warn(
-          `[clawy-agent] agent-event listener failed type=${event.type}: ${(err as Error).message}`,
+          `[core-agent] agent-event listener failed type=${event.type}: ${(err as Error).message}`,
         );
       }
     }
@@ -1200,12 +1300,20 @@ export class Agent {
   }
 }
 
+function splitPathListEnv(value: string | undefined): string[] {
+  if (!value) return [];
+  return value
+    .split(",")
+    .map((item) => item.trim())
+    .filter((item) => item.length > 0);
+}
+
 /**
  * Locate the bundled superpowers skills directory on disk. Resolution
  * order:
  *   1. `$CORE_AGENT_SUPERPOWERS_DIR` env override.
  *   2. `<cwd>/skills/superpowers` — matches the Docker WORKDIR (/app)
- *      and the repo layout (`infra/docker/clawy-agent/`).
+ *      and the repo layout (`infra/docker/clawy-core-agent/`).
  *
  * The directory may not exist in unit tests that never touch
  * superpowers — the slash handlers fail open with a short pointer

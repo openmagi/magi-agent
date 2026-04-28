@@ -15,7 +15,7 @@
  *   5. Only then run the IO op on the FD.
  *
  * Design reference:
- *   docs/plans/2026-04-19-clawy-agent-design.md §15.2
+ *   docs/plans/2026-04-19-clawy-core-agent-design.md §15.2
  */
 
 import fs from "node:fs/promises";

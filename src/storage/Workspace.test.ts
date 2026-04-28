@@ -1,12 +1,13 @@
 /**
- * Workspace unit tests — focused on agent_rules injection (USER-RULES.md).
+ * Workspace unit tests — focused on USER-RULES.md loading and keeping
+ * raw rule text out of the base identity rendering now that runtime
+ * policy injection owns the executable rendering path.
  *
  * Covers:
  *   - loadIdentity returns userRules when USER-RULES.md exists
  *   - loadIdentity returns userRules=undefined when file missing or empty
  *   - loadIdentity truncates oversized content at USER_RULES_MAX_CHARS
- *   - renderIdentitySystem appends <agent_rules> block after identity
- *   - renderIdentitySystem omits the block when userRules is empty/absent
+ *   - renderIdentitySystem never appends raw <agent_rules> blocks
  */
 
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
@@ -67,20 +68,15 @@ describe("Workspace.loadIdentity — USER-RULES.md", () => {
   });
 });
 
-describe("renderIdentitySystem — <agent_rules> block", () => {
-  it("appends <agent_rules>…</agent_rules> after identity sections", () => {
+describe("renderIdentitySystem — runtime policy handoff", () => {
+  it("does not append raw <agent_rules> blocks after identity sections", () => {
     const out = renderIdentitySystem({
       identity: "I am a bot",
       userRules: "- Always reply in Korean",
     });
     expect(out).toContain("# IDENTITY");
-    expect(out).toContain("<agent_rules>");
-    expect(out).toContain("- Always reply in Korean");
-    expect(out).toContain("</agent_rules>");
-    // Ordering: <agent_rules> must appear AFTER the identity section.
-    const identityIdx = out.indexOf("# IDENTITY");
-    const rulesIdx = out.indexOf("<agent_rules>");
-    expect(rulesIdx).toBeGreaterThan(identityIdx);
+    expect(out).not.toContain("<agent_rules>");
+    expect(out).not.toContain("Always reply in Korean");
   });
 
   it("omits the block when userRules is empty", () => {
@@ -96,8 +92,9 @@ describe("renderIdentitySystem — <agent_rules> block", () => {
     expect(out).not.toContain("<agent_rules>");
   });
 
-  it("renders <agent_rules> block on its own when identity is absent", () => {
+  it("does not render a standalone rules block when identity is absent", () => {
     const out = renderIdentitySystem({ userRules: "rule 1" });
-    expect(out).toContain("<agent_rules>\nrule 1\n</agent_rules>");
+    expect(out).not.toContain("rule 1");
+    expect(out).toBe("");
   });
 });

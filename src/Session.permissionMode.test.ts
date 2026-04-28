@@ -292,6 +292,15 @@ function makeTool(name: string, dangerous: boolean): Tool {
   } as Tool;
 }
 
+async function waitForPendingControlRequest(session: Session) {
+  for (let i = 0; i < 50; i += 1) {
+    const pending = await session.controlRequests.pending();
+    if (pending[0]) return pending[0];
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  throw new Error("timed out waiting for pending control request");
+}
+
 describe("Session permissionMode state (T2-08)", () => {
   it("default mode → exitPlanMode is a no-op, prePlanMode stays null", () => {
     const meta: SessionMeta = {
@@ -366,7 +375,7 @@ describe("Session permissionMode state (T2-08)", () => {
     expect(names).not.toContain("Bash");
   });
 
-  it("auto mode + dangerous tool → askUser fired", async () => {
+  it("auto mode + dangerous tool → durable control request approval", async () => {
     const fx = await makeFixture({
       script: [
         {
@@ -383,10 +392,15 @@ describe("Session permissionMode state (T2-08)", () => {
         { blocks: [{ type: "text", text: "done" }], stopReason: "end_turn" },
       ],
       tools: [makeTool("Bash", true)],
+      registerAutoApproval: false,
     });
     fx.session.setPermissionMode("auto");
-    await fx.turn.execute();
-    expect(fx.askCount).toBeGreaterThanOrEqual(1);
+    const execute = fx.turn.execute();
+    const request = await waitForPendingControlRequest(fx.session);
+    expect(request.kind).toBe("tool_permission");
+    await fx.session.resolveControlRequest(request.requestId, { decision: "approved" });
+    await execute;
+    expect(fx.askCount).toBe(0);
   });
 
   it("auto mode + safe tool → approved without askUser", async () => {

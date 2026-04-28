@@ -21,7 +21,6 @@ import { QmdManager } from "./QmdManager.js";
 const WORKSPACE = "/tmp/test-workspace";
 const MEMORY_DIR = path.join(WORKSPACE, "memory");
 const LOCAL_BIN = path.join(WORKSPACE, "node_modules", ".bin", "qmd");
-const APP_BIN = "/app/node_modules/.bin/qmd";
 
 const mockExecFile = vi.mocked(execFile);
 
@@ -72,6 +71,18 @@ function localFailGlobalSucceed(stdout = "", stderr = ""): void {
       }
     }) as typeof execFile,
   );
+}
+
+async function waitForCondition(
+  predicate: () => boolean,
+  timeoutMs = 200,
+): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (predicate()) return;
+    await new Promise((resolve) => setTimeout(resolve, 1));
+  }
+  throw new Error("timed out waiting for condition");
 }
 
 describe("QmdManager", () => {
@@ -140,29 +151,6 @@ describe("QmdManager", () => {
       await mgr.start();
 
       expect(mgr.isReady()).toBe(false);
-    });
-
-    it("stays ready when only vector embedding fails", async () => {
-      mockExecFile.mockImplementation(
-        ((_bin: unknown, _args: unknown, _opts: unknown, cb: unknown) => {
-          const args = _args as string[];
-          if (args.includes("embed")) {
-            (cb as (err: Error) => void)(
-              new Error("sqlite-vec shared library unavailable"),
-            );
-            return;
-          }
-          (cb as (err: null, result: { stdout: string; stderr: string }) => void)(
-            null,
-            { stdout: "", stderr: "" },
-          );
-        }) as typeof execFile,
-      );
-
-      const mgr = new QmdManager(WORKSPACE, true);
-      await mgr.start();
-
-      expect(mgr.isReady()).toBe(true);
     });
   });
 
@@ -494,6 +482,112 @@ describe("QmdManager", () => {
     });
   });
 
+  describe("backpressure", () => {
+    it("limits concurrent read/search qmd processes", async () => {
+      succeedWith();
+      const mgr = new QmdManager(WORKSPACE, false);
+      await mgr.start();
+      mockExecFile.mockClear();
+
+      let activeSearches = 0;
+      let maxActiveSearches = 0;
+      let startedSearches = 0;
+      const releases: Array<() => void> = [];
+      mockExecFile.mockImplementation(
+        ((_bin: unknown, _args: unknown, _opts: unknown, cb: unknown) => {
+          const args = _args as string[];
+          if (!args.includes("search")) {
+            (cb as (err: null, r: { stdout: string; stderr: string }) => void)(null, {
+              stdout: "",
+              stderr: "",
+            });
+            return;
+          }
+          activeSearches++;
+          startedSearches++;
+          maxActiveSearches = Math.max(maxActiveSearches, activeSearches);
+          releases.push(() => {
+            activeSearches--;
+            (cb as (err: null, r: { stdout: string; stderr: string }) => void)(null, {
+              stdout: JSON.stringify({ results: [] }),
+              stderr: "",
+            });
+          });
+        }) as typeof execFile,
+      );
+
+      const searches = [
+        mgr.search("one"),
+        mgr.search("two"),
+        mgr.search("three"),
+      ];
+
+      await waitForCondition(() => releases.length >= 2);
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      expect(maxActiveSearches).toBe(2);
+      expect(activeSearches).toBe(2);
+
+      releases.shift()?.();
+      await waitForCondition(() => startedSearches === 3);
+      expect(maxActiveSearches).toBe(2);
+
+      for (const release of releases.splice(0)) release();
+      await expect(Promise.all(searches)).resolves.toHaveLength(3);
+    });
+
+    it("waits for active reads before running reindex", async () => {
+      succeedWith();
+      const mgr = new QmdManager(WORKSPACE, false);
+      await mgr.start();
+      mockExecFile.mockClear();
+
+      let releaseSearch: (() => void) | null = null;
+      let releaseUpdate: (() => void) | null = null;
+      let updateStarted = false;
+      mockExecFile.mockImplementation(
+        ((_bin: unknown, _args: unknown, _opts: unknown, cb: unknown) => {
+          const args = _args as string[];
+          if (args.includes("search")) {
+            releaseSearch = () => {
+              (cb as (err: null, r: { stdout: string; stderr: string }) => void)(null, {
+                stdout: JSON.stringify({ results: [] }),
+                stderr: "",
+              });
+            };
+            return;
+          }
+          if (args.includes("update")) {
+            updateStarted = true;
+            releaseUpdate = () => {
+              (cb as (err: null, r: { stdout: string; stderr: string }) => void)(null, {
+                stdout: "",
+                stderr: "",
+              });
+            };
+            return;
+          }
+          (cb as (err: null, r: { stdout: string; stderr: string }) => void)(null, {
+            stdout: "",
+            stderr: "",
+          });
+        }) as typeof execFile,
+      );
+
+      const search = mgr.search("active read");
+      await waitForCondition(() => releaseSearch !== null);
+      const reindex = mgr.reindex();
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      expect(updateStarted).toBe(false);
+
+      releaseSearch?.();
+      await waitForCondition(() => updateStarted && releaseUpdate !== null);
+      releaseUpdate?.();
+
+      await expect(search).resolves.toEqual([]);
+      await expect(reindex).resolves.toBeUndefined();
+    });
+  });
+
   describe("stop()", () => {
     it("sets ready=false", async () => {
       succeedWith();
@@ -516,29 +610,6 @@ describe("QmdManager", () => {
       // Verify local bin was tried first
       const firstCall = mockExecFile.mock.calls[0];
       expect(firstCall[0]).toBe(LOCAL_BIN);
-    });
-
-    it("tries the image-local qmd binary before global qmd", async () => {
-      mockExecFile.mockImplementation(
-        ((_bin: unknown, _args: unknown, _opts: unknown, cb: unknown) => {
-          if (_bin === LOCAL_BIN || _bin === APP_BIN) {
-            (cb as (err: Error) => void)(new Error("ENOENT"));
-            return;
-          }
-          (cb as (err: null, result: { stdout: string; stderr: string }) => void)(
-            null,
-            { stdout: "", stderr: "" },
-          );
-        }) as typeof execFile,
-      );
-
-      const mgr = new QmdManager(WORKSPACE, false);
-      await mgr.start();
-
-      const calledBins = mockExecFile.mock.calls.map((c) => c[0]);
-      expect(calledBins).toContain(LOCAL_BIN);
-      expect(calledBins).toContain(APP_BIN);
-      expect(calledBins.indexOf(APP_BIN)).toBeLessThan(calledBins.indexOf("qmd"));
     });
   });
 });

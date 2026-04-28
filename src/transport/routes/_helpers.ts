@@ -1,7 +1,7 @@
 /**
  * Shared helpers for per-domain route modules under `transport/routes/`.
  *
- * The route split (R5 — 
+ * The route split (R5 — docs/plans/2026-04-19-core-agent-refactor-plan.md)
  * keeps the wire behaviour identical to the pre-split HttpServer.ts, so
  * every helper here preserves the exact status codes, response body
  * shapes, header names, and error strings used before.

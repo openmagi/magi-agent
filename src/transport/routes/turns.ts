@@ -11,6 +11,7 @@
 
 import {
   authorizeBearer,
+  parseUrl,
   readJsonBody,
   route,
   writeJson,
@@ -26,7 +27,34 @@ import type {
   UserMessage,
   UserMessageMetadata,
 } from "../../util/types.js";
+import type { ControlEvent } from "../../control/ControlEvents.js";
+import type { StructuredOutputSpec } from "../../structured/StructuredOutputContract.js";
 import type { IncomingMessage, ServerResponse } from "node:http";
+
+type ControlDecision = "approved" | "denied" | "answered";
+type ControlResponseInput = {
+  decision: ControlDecision;
+  feedback?: string;
+  updatedInput?: unknown;
+  answer?: string;
+};
+type ControlSession = {
+  controlRequests?: unknown;
+  controlEvents?: unknown;
+  getStructuredOutputContract?: () => StructuredOutputSpec | null;
+  setStructuredOutputContract?: (spec: StructuredOutputSpec | null) => void;
+  resolveControlRequest?: (
+    requestId: string,
+    input: ControlResponseInput,
+  ) => Promise<{ state: string }>;
+};
+
+const SUPPORTED_DATA_URL_IMAGE_MIME_TYPES = new Set([
+  "image/jpeg",
+  "image/png",
+  "image/gif",
+  "image/webp",
+] satisfies ImageContentBlock["source"]["media_type"][]);
 
 /**
  * Parse an optional `replyTo` descriptor off the chat/completions
@@ -56,7 +84,7 @@ export function extractReplyTo(body: unknown): ReplyToRef | undefined {
   };
 }
 
-function extractLastUserMessage(body: unknown): UserMessage | null {
+export function extractLastUserMessage(body: unknown): UserMessage | null {
   if (!body || typeof body !== "object") return null;
   const messages = (body as { messages?: unknown }).messages;
   if (!Array.isArray(messages)) return null;
@@ -103,21 +131,61 @@ function parseImageDataUrl(url: string): ImageContentBlock | null {
   const mediaType = match[1]?.toLowerCase();
   const data = match[2];
   if (!mediaType || !data) return null;
-  if (
-    mediaType !== "image/jpeg" &&
-    mediaType !== "image/png" &&
-    mediaType !== "image/gif" &&
-    mediaType !== "image/webp"
-  ) {
+  if (!SUPPORTED_DATA_URL_IMAGE_MIME_TYPES.has(mediaType as ImageContentBlock["source"]["media_type"])) {
     return null;
   }
+  const supportedMediaType = mediaType as ImageContentBlock["source"]["media_type"];
   return {
     type: "image",
     source: {
       type: "base64",
-      media_type: mediaType,
+      media_type: supportedMediaType,
       data,
     },
+  };
+}
+
+function extractStructuredOutputSpec(
+  body: unknown,
+  req: IncomingMessage,
+): StructuredOutputSpec | null {
+  const canary = req.headers["x-core-agent-structured-output-canary"];
+  if (typeof canary === "string" && canary.trim().length > 0) {
+    return {
+      schemaName: `canary_${canary.trim().toLowerCase().replace(/[^a-z0-9]+/g, "_")}`,
+      schema: {
+        type: "object",
+        required: ["ok"],
+        properties: { ok: { type: "boolean" } },
+      },
+      maxAttempts: canary.trim().toLowerCase() === "retry-exhausted" ? 1 : 3,
+    };
+  }
+
+  if (!body || typeof body !== "object") return null;
+  const responseFormat = (body as { response_format?: unknown }).response_format;
+  if (!responseFormat || typeof responseFormat !== "object") return null;
+  const obj = responseFormat as {
+    type?: unknown;
+    json_schema?: unknown;
+  };
+  if (obj.type !== "json_schema" || !obj.json_schema || typeof obj.json_schema !== "object") {
+    return null;
+  }
+  const jsonSchema = obj.json_schema as {
+    name?: unknown;
+    schema?: unknown;
+    maxAttempts?: unknown;
+  };
+  if (!jsonSchema.schema || typeof jsonSchema.schema !== "object") return null;
+  return {
+    ...(typeof jsonSchema.name === "string" && jsonSchema.name.length > 0
+      ? { schemaName: jsonSchema.name }
+      : {}),
+    schema: jsonSchema.schema as StructuredOutputSpec["schema"],
+    ...(typeof jsonSchema.maxAttempts === "number" && Number.isFinite(jsonSchema.maxAttempts)
+      ? { maxAttempts: Math.max(1, Math.floor(jsonSchema.maxAttempts)) }
+      : {}),
   };
 }
 
@@ -215,17 +283,27 @@ async function handleChatCompletions(
   const resetCounter = await ctx.agent.resetCounters.get(channel);
   const effectiveSessionKey = applyResetToSessionKey(sessionKey, resetCounter);
   const session = await ctx.agent.getOrCreateSession(effectiveSessionKey, channel);
+  const structuredOutputSpec = extractStructuredOutputSpec(body, req);
+  const previousStructuredOutputSpec =
+    structuredOutputSpec && typeof session.getStructuredOutputContract === "function"
+      ? session.getStructuredOutputContract()
+      : null;
+  if (structuredOutputSpec) {
+    if (typeof session.setStructuredOutputContract !== "function") {
+      writeJson(res, 500, { error: "structured_output_contract_unavailable" });
+      return;
+    }
+    session.setStructuredOutputContract(structuredOutputSpec);
+  }
 
   const sse = new SseWriter(res);
   sse.start();
 
-  // If the client disconnects mid-turn, surface it as an abort signal.
-  // The session mutex still holds the current turn to completion; Phase
-  // 1b will wire this to an AbortController on the Turn itself.
-  req.once("close", () => {
+  // If the client disconnects mid-turn, interrupt the live Turn so
+  // LLM streams and cooperative tools can stop spending work.
+  res.once("close", () => {
     if (!res.writableEnded) {
-      // Client went away; we can stop writing but the turn itself
-      // finishes on its own timeline.
+      session.requestInterrupt(false, "http_close");
     }
   });
 
@@ -242,6 +320,9 @@ async function handleChatCompletions(
   try {
     await session.runTurn(userMsg, sse, { planMode });
   } finally {
+    if (structuredOutputSpec && typeof session.setStructuredOutputContract === "function") {
+      session.setStructuredOutputContract(previousStructuredOutputSpec);
+    }
     sse.end();
   }
 }
@@ -286,6 +367,251 @@ async function handleAskResponse(
     return;
   }
   writeJson(res, 200, { ok: true });
+}
+
+function sessionKeyFromRequest(
+  req: IncomingMessage,
+  body?: Record<string, unknown>,
+): string | null {
+  const url = parseUrl(req.url);
+  const querySessionKey = url.searchParams.get("sessionKey");
+  const headerSessionKey =
+    (req.headers["x-core-agent-session-key"] as string | undefined) ??
+    (req.headers["x-openclaw-session-key"] as string | undefined);
+  const bodySessionKey =
+    typeof body?.sessionKey === "string" ? body.sessionKey : undefined;
+  const sessionKey = bodySessionKey ?? querySessionKey ?? headerSessionKey;
+  return sessionKey && sessionKey.length > 0 ? sessionKey : null;
+}
+
+function getSessionForControlRequest(
+  ctx: HttpServerCtx,
+  sessionKey: string,
+): ControlSession | null {
+  const withGetSession = ctx.agent as unknown as {
+    getSession?: (sessionKey: string) => unknown;
+  };
+  const direct = withGetSession.getSession?.(sessionKey);
+  if (direct) return direct as ControlSession;
+  const byList = ctx.agent
+    .listSessions()
+    .find((session) => session.meta.sessionKey === sessionKey);
+  return (byList as ControlSession | undefined) ?? null;
+}
+
+async function getOrHydrateControlSession(
+  ctx: HttpServerCtx,
+  sessionKey: string,
+  channelName: string | null,
+): Promise<ControlSession | null> {
+  const existing = getSessionForControlRequest(ctx, sessionKey);
+  if (existing) return existing;
+  const withCreate = ctx.agent as unknown as {
+    getOrCreateSession?: (sessionKey: string, channel: ChannelRef) => Promise<unknown>;
+  };
+  if (typeof withCreate.getOrCreateSession !== "function") return null;
+  return await withCreate.getOrCreateSession(sessionKey, {
+    type: "app",
+    channelId:
+      channelName ??
+      sessionKey.match(/^agent:[^:]+:[^:]+:([^:]+)/)?.[1] ??
+      "default",
+  }) as ControlSession;
+}
+
+function isControlDecision(value: unknown): value is ControlDecision {
+  return value === "approved" || value === "denied" || value === "answered";
+}
+
+function controlStoreOf(
+  session: ControlSession,
+): {
+  pending: () => Promise<Array<{ channelName?: string }>>;
+  resolve: (
+    requestId: string,
+    input: ControlResponseInput,
+  ) => Promise<{ state: string }>;
+} | null {
+  const store = session.controlRequests;
+  if (!store || typeof store !== "object") return null;
+  const candidate = store as {
+    pending?: unknown;
+    resolve?: unknown;
+  };
+  if (typeof candidate.pending !== "function" || typeof candidate.resolve !== "function") {
+    return null;
+  }
+  return store as ReturnType<typeof controlStoreOf>;
+}
+
+function controlEventsOf(
+  session: ControlSession,
+): { readSince: (seq: number) => Promise<ControlEvent[]> } | null {
+  const ledger = session.controlEvents;
+  if (!ledger || typeof ledger !== "object") return null;
+  const candidate = ledger as { readSince?: unknown };
+  if (typeof candidate.readSince !== "function") return null;
+  return ledger as { readSince: (seq: number) => Promise<ControlEvent[]> };
+}
+
+async function handleControlEventsReplay(
+  req: IncomingMessage,
+  res: ServerResponse,
+  _match: RegExpMatchArray,
+  ctx: HttpServerCtx,
+): Promise<void> {
+  if (!authorizeBearer(req, res, ctx)) return;
+  const url = parseUrl(req.url);
+  const sessionKey = sessionKeyFromRequest(req);
+  if (!sessionKey) {
+    writeJson(res, 400, { error: "missing_sessionKey" });
+    return;
+  }
+  const lastSeqRaw = url.searchParams.get("lastSeq") ?? "0";
+  const lastSeq = Number.parseInt(lastSeqRaw, 10);
+  if (!Number.isFinite(lastSeq) || lastSeq < 0) {
+    writeJson(res, 400, { error: "invalid_lastSeq" });
+    return;
+  }
+  const session = await getOrHydrateControlSession(
+    ctx,
+    sessionKey,
+    url.searchParams.get("channelName"),
+  );
+  if (!session) {
+    writeJson(res, 404, { error: "session_not_found" });
+    return;
+  }
+  const ledger = controlEventsOf(session);
+  if (!ledger) {
+    writeJson(res, 500, { error: "control_event_ledger_unavailable" });
+    return;
+  }
+
+  const events = await ledger.readSince(lastSeq);
+  const replayLastSeq = events.reduce(
+    (max, event) => Math.max(max, event.seq),
+    lastSeq,
+  );
+  const wantsSse =
+    url.searchParams.get("stream") === "1" ||
+    String(req.headers.accept ?? "").includes("text/event-stream");
+  if (!wantsSse) {
+    writeJson(res, 200, {
+      ok: true,
+      sessionKey,
+      lastSeq: replayLastSeq,
+      events,
+    });
+    return;
+  }
+
+  const sse = new SseWriter(res);
+  sse.start();
+  for (const event of events) {
+    sse.agent({ type: "control_event", seq: event.seq, event });
+  }
+  sse.agent({ type: "control_replay_complete", lastSeq: replayLastSeq });
+  sse.end();
+}
+
+async function handleControlRequestsList(
+  req: IncomingMessage,
+  res: ServerResponse,
+  _match: RegExpMatchArray,
+  ctx: HttpServerCtx,
+): Promise<void> {
+  if (!authorizeBearer(req, res, ctx)) return;
+  const sessionKey = sessionKeyFromRequest(req);
+  if (!sessionKey) {
+    writeJson(res, 400, { error: "missing_sessionKey" });
+    return;
+  }
+  const session = getSessionForControlRequest(ctx, sessionKey);
+  if (!session) {
+    writeJson(res, 404, { error: "session_not_found" });
+    return;
+  }
+  const store = controlStoreOf(session);
+  if (!store) {
+    writeJson(res, 500, { error: "control_request_store_unavailable" });
+    return;
+  }
+  const channelName = parseUrl(req.url).searchParams.get("channelName");
+  const pending = await store.pending();
+  const requests = channelName
+    ? pending.filter((request) => request.channelName === channelName)
+    : pending;
+  writeJson(res, 200, { ok: true, sessionKey, requests });
+}
+
+async function handleControlRequestResponse(
+  req: IncomingMessage,
+  res: ServerResponse,
+  match: RegExpMatchArray,
+  ctx: HttpServerCtx,
+): Promise<void> {
+  if (!authorizeBearer(req, res, ctx)) return;
+  const requestId = decodeURIComponent(match[1] as string);
+  const body = await readJsonBody(req).catch((err: Error) => {
+    writeJson(res, 400, { error: "bad_body", message: err.message });
+    return null;
+  });
+  if (body === null) return;
+  const payload = body && typeof body === "object"
+    ? (body as Record<string, unknown>)
+    : {};
+  const sessionKey = sessionKeyFromRequest(req, payload);
+  if (!sessionKey) {
+    writeJson(res, 400, { error: "missing_sessionKey" });
+    return;
+  }
+  if (!isControlDecision(payload.decision)) {
+    writeJson(res, 400, { error: "invalid_decision" });
+    return;
+  }
+  const session = getSessionForControlRequest(ctx, sessionKey);
+  if (!session) {
+    writeJson(res, 404, { error: "session_not_found" });
+    return;
+  }
+  const store = controlStoreOf(session);
+  if (!store) {
+    writeJson(res, 500, { error: "control_request_store_unavailable" });
+    return;
+  }
+
+  try {
+    const resolve = typeof session.resolveControlRequest === "function"
+      ? session.resolveControlRequest.bind(session)
+      : store.resolve.bind(store);
+    const request = await resolve(requestId, {
+      decision: payload.decision,
+      ...(typeof payload.feedback === "string"
+        ? { feedback: payload.feedback }
+        : {}),
+      ...(payload.updatedInput !== undefined
+        ? { updatedInput: payload.updatedInput }
+        : {}),
+      ...(typeof payload.answer === "string" ? { answer: payload.answer } : {}),
+    });
+    if (request.state === "timed_out") {
+      writeJson(res, 409, {
+        ok: false,
+        error: "control_request_expired",
+        request,
+      });
+      return;
+    }
+    writeJson(res, 200, { ok: true, request });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    if (/control request not found/.test(msg)) {
+      writeJson(res, 404, { error: "control_request_not_found" });
+      return;
+    }
+    writeJson(res, 500, { error: "control_request_response_failed", message: msg });
+  }
 }
 
 /**
@@ -366,12 +692,76 @@ async function handleInject(
   writeJson(res, 200, queued);
 }
 
+/**
+ * POST /v1/chat/interrupt — cooperatively stop the currently-running
+ * turn for a session. Used by the web/mobile composer ESC path so the
+ * queued follow-up can move immediately instead of waiting for the
+ * current tool chain to finish naturally.
+ */
+async function handleInterrupt(
+  req: IncomingMessage,
+  res: ServerResponse,
+  _match: RegExpMatchArray,
+  ctx: HttpServerCtx,
+): Promise<void> {
+  if (!authorizeBearer(req, res, ctx)) return;
+
+  const body = await readJsonBody(req).catch((err: Error) => {
+    writeJson(res, 400, { error: "bad_body", message: err.message });
+    return null;
+  });
+  if (body === null) return;
+
+  const payload = body as {
+    sessionKey?: unknown;
+    handoffRequested?: unknown;
+    source?: unknown;
+  };
+  if (typeof payload.sessionKey !== "string" || payload.sessionKey.length === 0) {
+    writeJson(res, 400, { error: "missing_sessionKey" });
+    return;
+  }
+
+  const session = ctx.agent.getSession(payload.sessionKey);
+  if (!session) {
+    writeJson(res, 404, { error: "session_not_found" });
+    return;
+  }
+  if (!ctx.agent.hasActiveTurnForSession(payload.sessionKey)) {
+    writeJson(res, 409, { error: "no_active_turn" });
+    return;
+  }
+
+  const source =
+    payload.source === "web" ||
+    payload.source === "mobile" ||
+    payload.source === "telegram" ||
+    payload.source === "discord" ||
+    payload.source === "api"
+      ? payload.source
+      : "api";
+  const result = session.requestInterrupt(payload.handoffRequested === true, source);
+  writeJson(res, 200, result);
+}
+
 export const turnsRoutes: RouteHandler[] = [
   route("POST", /^\/v1\/chat\/completions(?:\?.*)?$/, handleChatCompletions),
+  route("GET", /^\/v1\/control-events(?:\?.*)?$/, handleControlEventsReplay),
+  route(
+    "GET",
+    /^\/v1\/control-requests(?:\?.*)?$/,
+    handleControlRequestsList,
+  ),
+  route(
+    "POST",
+    /^\/v1\/control-requests\/([^/]+)\/response(?:\?.*)?$/,
+    handleControlRequestResponse,
+  ),
   route(
     "POST",
     /^\/v1\/turns\/([^/]+)\/ask-response$/,
     handleAskResponse,
   ),
   route("POST", /^\/v1\/chat\/inject$/, handleInject),
+  route("POST", /^\/v1\/chat\/interrupt$/, handleInterrupt),
 ];

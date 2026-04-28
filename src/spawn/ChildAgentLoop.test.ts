@@ -212,6 +212,27 @@ describe("ChildAgentLoop — loop semantics", () => {
     expect(result.toolCallCount).toBe(0);
   });
 
+  it("passes the merged child abort signal into child LLM calls", async () => {
+    const { agent, llmCalls } = fakeAgent([], {
+      rounds: [
+        [
+          {
+            kind: "message_end",
+            stopReason: "end_turn",
+            usage: { inputTokens: 1, outputTokens: 1 },
+          },
+        ],
+      ],
+    });
+    const parentAbort = new AbortController();
+    const { opts, cleanup } = await makeOpts({ abortSignal: parentAbort.signal });
+    cleanups.push(cleanup);
+
+    await runChildAgentLoop(agent, opts);
+
+    expect(llmCalls[0]?.signal).toBeInstanceOf(AbortSignal);
+  });
+
   it("dispatches tool_use and tallies toolCallCount", async () => {
     let executed = 0;
     const tool = stubTool<{ v: string }, { echoed: string }>(
@@ -258,6 +279,192 @@ describe("ChildAgentLoop — loop semantics", () => {
     expect(result.toolCallCount).toBe(1);
     expect(executed).toBe(1);
     expect(result.finalText).toBe("done");
+  });
+
+  it("runs beforeToolUse hooks and blocks child tools before execute", async () => {
+    let executed = 0;
+    const hookCalls: unknown[] = [];
+    const tool = stubTool("Blocked", async () => {
+      executed++;
+      return { status: "ok", durationMs: 0 };
+    });
+    const { agent } = fakeAgent([tool as Tool], {
+      rounds: [
+        [
+          { kind: "tool_use_start", blockIndex: 0, id: "tu_block", name: "Blocked" },
+          { kind: "tool_use_input_delta", blockIndex: 0, partial: JSON.stringify({ x: 1 }) },
+          {
+            kind: "message_end",
+            stopReason: "tool_use",
+            usage: { inputTokens: 1, outputTokens: 1 },
+          },
+        ],
+        [
+          { kind: "text_delta", blockIndex: 0, delta: "blocked handled" },
+          {
+            kind: "message_end",
+            stopReason: "end_turn",
+            usage: { inputTokens: 1, outputTokens: 1 },
+          },
+        ],
+      ],
+    });
+    agent.hooks = {
+      list: () => [],
+      runPre: async (point: string, args: unknown) => {
+        hookCalls.push({ point, args });
+        return { action: "block" as const, reason: "child boundary block" };
+      },
+      runPost: async () => {},
+    };
+    const { opts, cleanup } = await makeOpts();
+    cleanups.push(cleanup);
+
+    const result = await runChildAgentLoop(agent, opts);
+
+    expect(result.status).toBe("ok");
+    expect(result.toolCallCount).toBe(1);
+    expect(result.finalText).toBe("blocked handled");
+    expect(executed).toBe(0);
+    expect(hookCalls).toHaveLength(1);
+    expect(hookCalls[0]).toMatchObject({
+      point: "beforeToolUse",
+      args: { toolName: "Blocked", toolUseId: "tu_block", input: { x: 1 } },
+    });
+  });
+
+  it("denies security-critical child shell commands before execution", async () => {
+    let executed = 0;
+    const tool = {
+      ...stubTool("Bash", async () => {
+        executed++;
+        return { status: "ok", output: "ran", durationMs: 0 };
+      }),
+      permission: "execute" as const,
+    };
+    const { agent, llmCalls } = fakeAgent([tool as Tool], {
+      rounds: [
+        [
+          { kind: "tool_use_start", blockIndex: 0, id: "tu_1", name: "Bash" },
+          {
+            kind: "tool_use_input_delta",
+            blockIndex: 0,
+            partial: JSON.stringify({ command: 'rm -rf "$(pwd)"' }),
+          },
+          {
+            kind: "message_end",
+            stopReason: "tool_use",
+            usage: { inputTokens: 1, outputTokens: 1 },
+          },
+        ],
+        [
+          { kind: "text_delta", blockIndex: 0, delta: "blocked" },
+          {
+            kind: "message_end",
+            stopReason: "end_turn",
+            usage: { inputTokens: 1, outputTokens: 1 },
+          },
+        ],
+      ],
+    });
+    const prepared = await makeOpts();
+    cleanups.push(prepared.cleanup);
+
+    const result = await runChildAgentLoop(agent, prepared.opts);
+
+    expect(result.status).toBe("ok");
+    expect(result.toolCallCount).toBe(1);
+    expect(executed).toBe(0);
+    const retryMessages = JSON.stringify(llmCalls[1]?.messages ?? []);
+    expect(retryMessages).toContain("permission_denied");
+    expect(retryMessages).toContain("destructive rm -rf");
+  });
+
+  it("fails closed for dangerous child tools when no consent delegate is available", async () => {
+    let executed = 0;
+    const tool = {
+      ...stubTool("Danger", async () => {
+        executed++;
+        return { status: "ok" as const, durationMs: 0, output: { ok: true } };
+      }),
+      permission: "execute" as const,
+      dangerous: true,
+    };
+    const { agent, llmCalls } = fakeAgent([tool as Tool], {
+      rounds: [
+        [
+          { kind: "tool_use_start", blockIndex: 0, id: "tu_danger", name: "Danger" },
+          { kind: "tool_use_input_delta", blockIndex: 0, partial: "{}" },
+          {
+            kind: "message_end",
+            stopReason: "tool_use",
+            usage: { inputTokens: 1, outputTokens: 1 },
+          },
+        ],
+        [
+          { kind: "text_delta", blockIndex: 0, delta: "danger denied" },
+          {
+            kind: "message_end",
+            stopReason: "end_turn",
+            usage: { inputTokens: 1, outputTokens: 1 },
+          },
+        ],
+      ],
+    });
+    const { opts, cleanup } = await makeOpts();
+    cleanups.push(cleanup);
+
+    const result = await runChildAgentLoop(agent, opts);
+
+    expect(result.status).toBe("ok");
+    expect(result.finalText).toBe("danger denied");
+    expect(executed).toBe(0);
+    const retryMessages = JSON.stringify(llmCalls[1]?.messages ?? []);
+    expect(retryMessages).toContain("permission_denied");
+    expect(retryMessages).toContain("permission required for Danger");
+  });
+
+  it("asks the parent delegate when a dangerous child tool requires permission", async () => {
+    let executed = 0;
+    const tool = {
+      ...stubTool("Danger", async () => {
+        executed++;
+        return { status: "ok" as const, durationMs: 0, output: { ok: true } };
+      }),
+      permission: "execute" as const,
+      dangerous: true,
+    };
+    const { agent } = fakeAgent([tool as Tool], {
+      rounds: [
+        [
+          { kind: "tool_use_start", blockIndex: 0, id: "tu_danger", name: "Danger" },
+          { kind: "tool_use_input_delta", blockIndex: 0, partial: "{}" },
+          {
+            kind: "message_end",
+            stopReason: "tool_use",
+            usage: { inputTokens: 1, outputTokens: 1 },
+          },
+        ],
+        [
+          { kind: "text_delta", blockIndex: 0, delta: "danger approved" },
+          {
+            kind: "message_end",
+            stopReason: "end_turn",
+            usage: { inputTokens: 1, outputTokens: 1 },
+          },
+        ],
+      ],
+    });
+    const { opts, cleanup } = await makeOpts({
+      askUser: async () => ({ selectedId: "approve" }),
+    });
+    cleanups.push(cleanup);
+
+    const result = await runChildAgentLoop(agent, opts);
+
+    expect(result.status).toBe("ok");
+    expect(result.finalText).toBe("danger approved");
+    expect(executed).toBe(1);
   });
 
   it("reports unknown tool via tool_result, does not throw", async () => {

@@ -30,12 +30,27 @@ import type { Discipline } from "./Session.js";
 import { DEFAULT_DISCIPLINE } from "./discipline/config.js";
 
 function makeHookCtx(): HookContext {
+  const llm = {
+    stream: async function* (req: { system?: string; messages?: Array<{ content: Array<{ text?: string }> }> }) {
+      const text = req.messages?.[0]?.content?.[0]?.text ?? "";
+      if (req.system?.includes("skip tests")) {
+        yield { kind: "text_delta", delta: "NO" };
+        return;
+      }
+      yield {
+        kind: "text_delta",
+        delta: /implement|function|type error|git commit/i.test(text)
+          ? "coding"
+          : "other",
+      };
+    },
+  } as unknown as LLMClient;
   return {
     botId: "bot-t",
     userId: "user-t",
     sessionKey: "s-t",
     turnId: "t-t",
-    llm: {} as unknown as LLMClient,
+    llm,
     transcript: [],
     emit: () => {},
     log: () => {},

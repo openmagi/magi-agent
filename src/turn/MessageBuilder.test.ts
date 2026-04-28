@@ -27,6 +27,7 @@ import type { LLMMessage } from "../transport/LLMClient.js";
 interface ContextEngineCall {
   kind: "maybeCompact" | "buildMessagesFromTranscript";
   tokenLimit?: number;
+  model?: string;
 }
 
 async function makeSession(opts: {
@@ -34,10 +35,12 @@ async function makeSession(opts: {
   identity?: Record<string, string>;
   replayMessages?: LLMMessage[];
   channel?: { type: string; channelId: string } | null;
+  maybeCompactResult?: unknown;
 }): Promise<{
   session: Session;
   transcript: Transcript;
   contextCalls: ContextEngineCall[];
+  readCommittedCount: () => number;
 }> {
   const workspaceRoot = await fs.mkdtemp(
     path.join(os.tmpdir(), "msg-builder-"),
@@ -46,6 +49,12 @@ async function makeSession(opts: {
   await fs.mkdir(sessionsDir, { recursive: true });
 
   const transcript = new Transcript(sessionsDir, "sess-1");
+  let readCount = 0;
+  const originalReadCommitted = transcript.readCommitted.bind(transcript);
+  transcript.readCommitted = async () => {
+    readCount += 1;
+    return await originalReadCommitted();
+  };
   const contextCalls: ContextEngineCall[] = [];
 
   const replayMessages = opts.replayMessages ?? [];
@@ -55,8 +64,10 @@ async function makeSession(opts: {
       _s: Session,
       _entries: unknown[],
       tokenLimit: number,
+      model?: string,
     ) => {
-      contextCalls.push({ kind: "maybeCompact", tokenLimit });
+      contextCalls.push({ kind: "maybeCompact", tokenLimit, model });
+      return opts.maybeCompactResult ?? null;
     },
     buildMessagesFromTranscript: () => {
       contextCalls.push({ kind: "buildMessagesFromTranscript" });
@@ -84,7 +95,7 @@ async function makeSession(opts: {
     },
   } as unknown as Session;
 
-  return { session, transcript, contextCalls };
+  return { session, transcript, contextCalls, readCommittedCount: () => readCount };
 }
 
 describe("MessageBuilder.buildSystemPrompt", () => {
@@ -105,6 +116,34 @@ describe("MessageBuilder.buildSystemPrompt", () => {
     expect(out).toContain("# IDENTITY");
     expect(out).toContain("# SOUL");
     expect(out).toContain("Im Kevin");
+  });
+
+  it("renders identity blocks in stable runtime order", async () => {
+    const { session } = await makeSession({
+      identity: {
+        bootstrap: "boot",
+        soul: "soul",
+        identity: "identity",
+        user: "user",
+        agents: "agents",
+        tools: "tools",
+        userRules: "- Always answer in Korean.",
+      },
+    });
+    const out = await buildSystemPrompt(session, "turn-order");
+    const sections = [
+      "# BOOTSTRAP",
+      "# SOUL",
+      "# IDENTITY",
+      "# USER",
+      "# AGENTS",
+      "# TOOLS",
+    ];
+    const indexes = sections.map((section) => out.indexOf(section));
+    indexes.forEach((idx) => expect(idx).toBeGreaterThan(-1));
+    expect(indexes).toEqual([...indexes].sort((a, b) => a - b));
+    expect(out).not.toContain("Always answer in Korean.");
+    expect(out).not.toContain("<agent_rules>");
   });
 
   it("includes [Channel: telegram] when channel.type is telegram", async () => {
@@ -141,7 +180,7 @@ describe("MessageBuilder.buildSystemPrompt", () => {
     expect(out).toContain("[Channel: web]");
   });
 
-  it("injects <agent_rules> block when identity.userRules is populated", async () => {
+  it("does not inject raw <agent_rules> blocks when identity.userRules is populated", async () => {
     const { session } = await makeSession({
       identity: {
         identity: "I am bot",
@@ -149,12 +188,11 @@ describe("MessageBuilder.buildSystemPrompt", () => {
       },
     });
     const out = await buildSystemPrompt(session, "turn-rules");
-    expect(out).toContain("<agent_rules>");
-    expect(out).toContain("Always answer in Korean.");
-    expect(out).toContain("</agent_rules>");
+    expect(out).not.toContain("<agent_rules>");
+    expect(out).not.toContain("Always answer in Korean.");
   });
 
-  it("skips <agent_rules> block when identity.userRules is absent", async () => {
+  it("still skips <agent_rules> block when identity.userRules is absent", async () => {
     const { session } = await makeSession({
       identity: { identity: "I am bot" },
     });
@@ -166,7 +204,13 @@ describe("MessageBuilder.buildSystemPrompt", () => {
     const { session } = await makeSession({
       identity: { identity: "I am bot" },
     });
-    const out = await buildSystemPrompt(session, "turn-kb", {
+    const out = await (
+      buildSystemPrompt as unknown as (
+        session: Session,
+        turnId: string,
+        userMessage: UserMessage,
+      ) => Promise<string>
+    )(session, "turn-kb", {
       text: "analyze this",
       receivedAt: Date.now(),
       metadata: {
@@ -203,6 +247,39 @@ describe("MessageBuilder.buildMessages", () => {
     ).toBe(1);
   });
 
+  it("does not re-read committed transcript when compaction appends no boundary", async () => {
+    const { session, readCommittedCount } = await makeSession({
+      replayMessages: [{ role: "assistant", content: "prior" }],
+    });
+    const um: UserMessage = { text: "hello", receivedAt: Date.now() };
+
+    await buildMessages(session, um);
+
+    expect(readCommittedCount()).toBe(1);
+  });
+
+  it("re-reads committed transcript when compaction appends a boundary", async () => {
+    const { session, readCommittedCount } = await makeSession({
+      replayMessages: [{ role: "assistant", content: "prior" }],
+      maybeCompactResult: {
+        kind: "compaction_boundary",
+        ts: 1,
+        turnId: "sess-1",
+        boundaryId: "b1",
+        beforeTokenCount: 10,
+        afterTokenCount: 3,
+        summaryHash: "hash",
+        summaryText: "summary",
+        createdAt: 1,
+      },
+    });
+    const um: UserMessage = { text: "hello", receivedAt: Date.now() };
+
+    await buildMessages(session, um);
+
+    expect(readCommittedCount()).toBe(2);
+  });
+
   it("uses fallback 150_000 token limit for unknown model", async () => {
     const { session, contextCalls } = await makeSession({ model: "unknown" });
     const um: UserMessage = { text: "x", receivedAt: Date.now() };
@@ -224,6 +301,17 @@ describe("MessageBuilder.buildMessages", () => {
     expect(mc?.tokenLimit).toBeTypeOf("number");
     // Must be > 0 and a plausible floor-of-window figure.
     expect(mc?.tokenLimit).toBeGreaterThan(0);
+  });
+
+  it("uses the resolved turn model for compaction instead of the provisioned boot model", async () => {
+    const { session, contextCalls } = await makeSession({
+      model: "claude-opus-4-7",
+    });
+    const um: UserMessage = { text: "x", receivedAt: Date.now() };
+    await buildMessages(session, um, "openai/gpt-5.4-mini");
+    const mc = contextCalls.find((c) => c.kind === "maybeCompact");
+    expect(mc?.model).toBe("openai/gpt-5.4-mini");
+    expect(mc?.tokenLimit).toBe(96_000);
   });
 
   it("prepends [Reply to user: …] when metadata.replyTo is present", async () => {
@@ -272,33 +360,33 @@ describe("MessageBuilder.buildMessages", () => {
     expect(out[out.length - 1]?.content).toBe("plain text");
   });
 
-  it("emits mixed text + image content when imageBlocks are present", async () => {
+  it("emits a mixed Anthropic user content array when image blocks exist", async () => {
     const { session } = await makeSession({});
-    const um: UserMessage = {
-      text: "please inspect this",
-      receivedAt: Date.now(),
+    const out = await buildMessages(session, {
+      text: "Describe it",
       imageBlocks: [
         {
           type: "image",
           source: {
             type: "base64",
             media_type: "image/png",
-            data: "QUJD",
+            data: "ZmFrZQ==",
           },
         },
       ],
-    };
-    const out = await buildMessages(session, um);
-    expect(out[out.length - 1]).toEqual({
+      receivedAt: Date.now(),
+    });
+
+    expect(out.at(-1)).toEqual({
       role: "user",
       content: [
-        { type: "text", text: "please inspect this" },
+        { type: "text", text: "Describe it" },
         {
           type: "image",
           source: {
             type: "base64",
             media_type: "image/png",
-            data: "QUJD",
+            data: "ZmFrZQ==",
           },
         },
       ],

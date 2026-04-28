@@ -12,6 +12,8 @@ export function buildHookContext(
   sse: SseWriter,
   turnId: string,
   point: HookPoint,
+  agentModel = session.agent.config.model,
+  abortSignal?: AbortSignal,
 ): HookContext {
   const agent = session.agent;
   return {
@@ -20,7 +22,10 @@ export function buildHookContext(
     sessionKey: session.meta.sessionKey,
     turnId,
     llm: agent.llm,
-    agentModel: agent.config.model,
+    agentModel,
+    providerHealth: typeof agent.llm.getLastProviderHealth === "function"
+      ? agent.llm.getLastProviderHealth()
+      : null,
     transcript: [],
     emit: (event) => sse.agent(event),
     log: (level, msg, data) => {
@@ -29,7 +34,7 @@ export function buildHookContext(
       else if (level === "warn") console.warn(prefix, msg, data ?? {});
       else console.log(prefix, msg, data ?? {});
     },
-    abortSignal: new AbortController().signal,
+    abortSignal: abortSignal ?? new AbortController().signal,
     deadlineMs: 5_000,
   };
 }

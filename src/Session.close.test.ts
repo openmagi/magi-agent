@@ -98,6 +98,19 @@ describe("Session.close — in-flight abort", () => {
     expect(onAbort).toHaveBeenCalledTimes(1);
   });
 
+  it("interrupts the active turn before closing session resources", async () => {
+    const agent = makeAgent();
+    const s = makeSession(agent);
+    const requestInterrupt = vi.fn();
+    (s as unknown as { activeTurn: { requestInterrupt: typeof requestInterrupt } }).activeTurn = {
+      requestInterrupt,
+    };
+
+    await s.close("shutdown");
+
+    expect(requestInterrupt).toHaveBeenCalledWith(false, "shutdown");
+  });
+
   it("is safe when no AbortController was ever allocated", async () => {
     const agent = makeAgent();
     const s = makeSession(agent);
@@ -152,20 +165,13 @@ describe("Session.close — observability", () => {
 
 describe("Agent.closeSession", () => {
   it("returns false for unknown sessionKey", async () => {
-    // Build a real-ish Agent through a minimal stub surface — the
-    // method only needs this.sessions + error-log console. We cast to
-    // the public API and reach through.
+    // closeSession only needs the in-memory session registry for the
+    // unknown-session path. Avoid the full Agent constructor so this
+    // unit test remains deterministic under full-suite parallel load.
     const { Agent } = await import("./Agent.js");
-    const agent = new Agent({
-      botId: "bot-x",
-      userId: "user-x",
-      workspaceRoot: "/tmp/session-close-agent-test",
-      gatewayToken: "tok",
-      apiProxyUrl: "http://localhost",
-      chatProxyUrl: "http://localhost",
-      redisUrl: "redis://localhost",
-      model: "claude-opus-4-7",
-    });
+    const agent = Object.assign(Object.create(Agent.prototype), {
+      sessions: new Map<string, Session>(),
+    }) as Agent;
     const ok = await agent.closeSession("does-not-exist");
     expect(ok).toBe(false);
   });

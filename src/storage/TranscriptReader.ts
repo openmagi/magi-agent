@@ -70,6 +70,7 @@ export interface TurnSummary {
 export function summariseTurns(entries: TranscriptEntry[]): TurnSummary[] {
   const byTurn = new Map<string, TurnSummary>();
   for (const e of entries) {
+    if (!e.turnId) continue;
     const id = e.turnId;
     let s = byTurn.get(id);
     if (!s) {

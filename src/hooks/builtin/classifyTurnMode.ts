@@ -79,7 +79,7 @@ export function makeClassifyTurnModeHook(
     priority: 3, // earliest — ahead of memory-injector (5) so the
                  //            discipline prompt block can read fresh state.
     blocking: true,
-    timeoutMs: 200,
+    timeoutMs: 5_000,
     handler: async ({ messages, iteration }, ctx: HookContext) => {
       // Only classify on the first iteration of the turn (the user
       // message doesn't change within a turn).
@@ -90,8 +90,8 @@ export function makeClassifyTurnModeHook(
       const text = latestUserText(messages);
       if (!text) return { action: "continue" };
 
-      const classified = classifyTurnModeGated(text, 0.6);
-      const skip = hasSkipTddSignal(text);
+      const classified = await classifyTurnModeGated(text, ctx.llm, 0.6);
+      const skip = await hasSkipTddSignal(text, ctx.llm);
 
       let next: Discipline | null = null;
       if (classified.label === "coding") {

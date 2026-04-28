@@ -34,10 +34,11 @@ import type {
   ToolResult,
   ToolRegistry as IToolRegistry,
 } from "../Tool.js";
-import type { Agent, BackgroundTaskDeliveryInput } from "../Agent.js";
+import type { Agent } from "../Agent.js";
 import type { BackgroundTaskRegistry } from "../tasks/BackgroundTaskRegistry.js";
 import { errorResult } from "../util/toolResult.js";
 import type { ArtifactMeta } from "../artifacts/ArtifactManager.js";
+import type { PermissionMode } from "../Session.js";
 import {
   ALLOWED_TOOLS_WILDCARD,
   loadPersonaCatalog,
@@ -69,15 +70,37 @@ import {
   prepareSpawnDir as prepareSpawnDirImpl,
   randomTaskId,
 } from "../spawn/SpawnWorkspace.js";
+import {
+  createChildAgentHarness,
+  recordChildTerminal,
+} from "../spawn/ChildAgentHarness.js";
 
 export const MAX_SPAWN_DEPTH = 2;
 const DEFAULT_TIMEOUT_MS = 120_000;
 const MAX_TIMEOUT_MS = 600_000;
-const RETURN_SPAWN_MAX_ATTEMPTS = (() => {
-  const raw = process.env.CORE_AGENT_RETURN_SPAWN_MAX_ATTEMPTS;
-  const parsed = raw !== undefined ? Number.parseInt(raw, 10) : NaN;
-  return Number.isFinite(parsed) && parsed >= 1 && parsed <= 5 ? parsed : 3;
-})();
+
+/**
+ * Models available for SpawnAgent model override.
+ * Matches api-proxy PRICING dict keys (excluding local LLM models).
+ * api-proxy auto-routes to the correct provider by model name.
+ */
+export const SPAWNABLE_MODELS: readonly string[] = [
+  "claude-opus-4-7",
+  "claude-opus-4-6",
+  "claude-sonnet-4-6",
+  "claude-sonnet-4-5",
+  "claude-haiku-4-5-20251001",
+  "gpt-5-nano",
+  "gpt-5-mini",
+  "gpt-5.1",
+  "gpt-5.4",
+  "kimi-k2p6",
+  "minimax-m2p7",
+  "gemini-2.5-flash",
+  "gemini-2.5-pro",
+  "gemini-3.1-flash-lite-preview",
+  "gemini-3.1-pro-preview",
+] as const;
 
 // Re-exports for API stability — Agent.ts + tests import these from
 // `tools/SpawnAgent.js`.
@@ -98,6 +121,8 @@ export interface SpawnAgentInput {
   deliver: "return" | "background";
   timeout_ms?: number;
   metadata?: Record<string, unknown>;
+  /** Override the LLM model for this child. Must be in SPAWNABLE_MODELS. */
+  model?: string;
   /** T3-16 OMC Port A — tournament mode inputs. */
   mode?: "single" | "tournament";
   variants?: number;
@@ -142,8 +167,8 @@ export interface SpawnAgentOutput {
   status: "ok" | "error" | "aborted" | "pending";
   finalText?: string;
   toolCallCount?: number;
-  errorMessage?: string;
   attempts?: number;
+  errorMessage?: string;
   /**
    * Narrow handoff API for parent access to child artifacts (PRE-01).
    * Parent can `FileRead` via absolute path or `kubectl cp` if needed.
@@ -191,6 +216,12 @@ const INPUT_SCHEMA = {
       description: "Per-child timeout in ms (default 120000, max 600000).",
     },
     metadata: { type: "object", description: "Opaque metadata passed to the child." },
+    model: {
+      type: "string",
+      enum: SPAWNABLE_MODELS,
+      description:
+        "Override the LLM model for this child agent. Omit to use the bot's default model.",
+    },
     mode: {
       type: "string",
       enum: ["single", "tournament"],
@@ -305,13 +336,23 @@ async function runTournamentAdapter(
     },
     prepareSpawnDir,
     async runChild(prep: PreparedVariant) {
+      const lifecycle = createChildAgentHarness({
+        taskId: prep.taskId,
+        parentTurnId: ctx.turnId,
+        prompt: input.prompt,
+        emitControlEvent: ctx.emitControlEvent,
+        emitAgentEvent: ctx.emitAgentEvent,
+      });
+      await lifecycle.started();
       const childOptions: SpawnChildOptions = {
         ...baseChildOptions,
         taskId: prep.taskId,
         spawnDir: prep.spawnDir,
         spawnWorkspace: prep.spawnWorkspace,
+        lifecycle,
       };
       const childResult = await agent.spawnChildTurn(childOptions);
+      await recordChildTerminal(lifecycle, childResult);
       return { finalText: childResult.finalText };
     },
     async scoreChild(_prep, finalText) {
@@ -322,21 +363,6 @@ async function runTournamentAdapter(
 
 /** Legacy name preserved for any external importers / tests. */
 export const runTournament = runTournamentAdapter;
-
-async function deliverBackgroundResult(
-  agent: Agent,
-  input: BackgroundTaskDeliveryInput,
-): Promise<void> {
-  const deliver = (
-    agent as Partial<Pick<Agent, "deliverBackgroundTaskResult">>
-  ).deliverBackgroundTaskResult;
-  if (typeof deliver !== "function") {
-    return;
-  }
-  await deliver.call(agent, input).catch(() => {
-    /* ignore push errors */
-  });
-}
 
 /**
  * Spawn artifact handoff — PRE-01 fix for "4/5 리포트 유실".
@@ -402,147 +428,177 @@ async function handOffChildArtifacts(
   return projection;
 }
 
-interface ReturnChildRun {
+// ── Child retry helpers ────────────────────────────────────────────
+
+interface ChildRunWithRetries {
   result: SpawnChildResult;
   attempts: number;
 }
 
-function canRetryReturnSpawn(result: SpawnChildResult, attempt: number): boolean {
-  if (attempt >= RETURN_SPAWN_MAX_ATTEMPTS) return false;
-  if (result.status !== "error") return false;
-  // A child that already executed tools may have touched external
-  // systems or files. Let the parent decide instead of duplicating side
-  // effects automatically.
-  if (result.toolCallCount > 0) return false;
-  return true;
-}
-
-function spawnFailureMessage(args: {
-  result: SpawnChildResult;
-  attempts: number;
-  spawnDir: string;
-  handedOffArtifacts: SpawnHandoffArtifact[];
-}): string {
-  const { result, attempts, spawnDir, handedOffArtifacts } = args;
-  const reason =
-    result.errorMessage ??
-    (result.status === "aborted" ? "child aborted" : "child failed");
-  const partial = result.finalText.trim();
-  const partialText =
-    partial.length > 0
-      ? ` Partial child text: ${partial.slice(0, 500)}${partial.length > 500 ? "..." : ""}`
-      : "";
-  const artifactText =
-    handedOffArtifacts.length > 0
-      ? ` Handed-off artifacts: ${handedOffArtifacts
-          .map((a) => a.artifactId)
-          .join(", ")}.`
-      : "";
-  return [
-    `SpawnAgent failed after ${attempts} attempt${attempts === 1 ? "" : "s"}: ${reason}.`,
-    `task_status=${result.status}; tool_call_count=${result.toolCallCount}; spawn_dir=${spawnDir}.`,
-    "Do not switch to direct execution or answer from the parent agent's memory.",
-    "Retry SpawnAgent if it is safe, or ask the user before any direct fallback.",
-    `${partialText}${artifactText}`.trim(),
-  ]
-    .filter(Boolean)
-    .join(" ");
-}
-
-function spawnFailureToolResult(args: {
-  start: number;
+interface RunChildWithRetriesArgs {
+  agent: Agent;
+  childOptions: SpawnChildOptions;
   taskId: string;
-  result: SpawnChildResult;
-  attempts: number;
-  artifacts: SpawnArtifacts;
-}): ToolResult<SpawnAgentOutput> {
-  const { start, taskId, result, attempts, artifacts } = args;
-  const status = result.status === "aborted" ? "aborted" : "error";
-  const errorCode = result.status === "aborted" ? "spawn_aborted" : "spawn_failed";
-  const errorMessage = spawnFailureMessage({
-    result,
-    attempts,
-    spawnDir: artifacts.spawnDir,
-    handedOffArtifacts: artifacts.handedOffArtifacts,
-  });
+  deliver: SpawnAgentInput["deliver"];
+  emit?: (event: unknown) => void;
+  stageAuditEvent?: (event: string, data?: Record<string, unknown>) => void;
+}
+
+function readBoundedIntegerEnv(
+  names: string[],
+  defaultValue: number,
+  min: number,
+  max: number,
+): number {
+  for (const name of names) {
+    const raw = process.env[name];
+    if (raw === undefined) continue;
+    const parsed = Number.parseInt(raw, 10);
+    if (Number.isFinite(parsed)) {
+      return Math.min(max, Math.max(min, parsed));
+    }
+  }
+  return defaultValue;
+}
+
+function spawnMaxAttempts(): number {
+  return readBoundedIntegerEnv(
+    ["CORE_AGENT_SPAWN_MAX_ATTEMPTS", "CORE_AGENT_RETURN_SPAWN_MAX_ATTEMPTS"],
+    3,
+    1,
+    5,
+  );
+}
+
+function spawnRetryBaseDelayMs(): number {
+  return readBoundedIntegerEnv(["CORE_AGENT_SPAWN_RETRY_BASE_DELAY_MS"], 250, 0, 5_000);
+}
+
+function spawnRetryDelayMs(attempt: number): number {
+  const base = spawnRetryBaseDelayMs();
+  if (base <= 0) return 0;
+  return Math.min(5_000, base * 2 ** Math.max(0, attempt - 1));
+}
+
+function spawnErrorMessage(result: SpawnChildResult): string {
+  return result.errorMessage || result.finalText || result.status;
+}
+
+function buildSpawnFailureMessage(
+  taskId: string,
+  result: SpawnChildResult,
+  attempts: number,
+): string {
+  const verb = result.status === "aborted" ? "aborted" : "failed";
+  return `SpawnAgent task ${taskId} ${verb} after ${attempts} attempt${
+    attempts === 1 ? "" : "s"
+  }: ${spawnErrorMessage(result)}. Do not switch to direct execution or answer from parent memory. Retry SpawnAgent if duplicate side effects are safe, otherwise ask the user before doing the work directly.`;
+}
+
+function spawnFailureResult(
+  taskId: string,
+  result: SpawnChildResult,
+  attempts: number,
+  start: number,
+  artifacts?: SpawnArtifacts,
+): ToolResult<SpawnAgentOutput> {
+  const errorMessage = buildSpawnFailureMessage(taskId, result, attempts);
   return {
-    status,
-    errorCode,
+    status: result.status === "aborted" ? "aborted" : "error",
+    errorCode: result.status === "aborted" ? "spawn_aborted" : "spawn_failed",
     errorMessage,
     output: {
       taskId,
-      status: result.status,
+      status: result.status === "aborted" ? "aborted" : "error",
       finalText: result.finalText,
       toolCallCount: result.toolCallCount,
-      errorMessage: result.errorMessage,
       attempts,
-      artifacts,
+      errorMessage,
+      ...(artifacts ? { artifacts } : {}),
     },
     durationMs: Date.now() - start,
-    metadata: {
-      taskId,
-      attempts,
-      childStatus: result.status,
-      toolCallCount: result.toolCallCount,
-    },
   };
 }
 
-async function runReturnChildWithRetries(args: {
-  agent: Agent;
-  childOptions: SpawnChildOptions;
-  emit?: (event: unknown) => void;
-  stageAuditEvent: (event: string, data?: Record<string, unknown>) => void;
-}): Promise<ReturnChildRun> {
-  const { agent, childOptions, emit, stageAuditEvent } = args;
-  let attempts = 0;
-  let last: SpawnChildResult | null = null;
+async function sleepForRetry(ms: number, signal: AbortSignal): Promise<void> {
+  if (ms <= 0 || signal.aborted) return;
+  await new Promise<void>((resolve) => {
+    let timeout: ReturnType<typeof setTimeout> | undefined;
+    const done = (): void => {
+      if (timeout) clearTimeout(timeout);
+      signal.removeEventListener("abort", done);
+      resolve();
+    };
+    timeout = setTimeout(done, ms);
+    signal.addEventListener("abort", done, { once: true });
+  });
+}
 
-  while (attempts < RETURN_SPAWN_MAX_ATTEMPTS) {
+async function runChildWithRetries(
+  args: RunChildWithRetriesArgs,
+): Promise<ChildRunWithRetries> {
+  const { agent, childOptions, taskId, deliver, emit, stageAuditEvent } = args;
+  const maxAttempts = spawnMaxAttempts();
+  let attempts = 0;
+
+  for (;;) {
+    if (childOptions.abortSignal.aborted) {
+      return {
+        attempts: Math.max(1, attempts),
+        result: {
+          status: "aborted",
+          finalText: "",
+          toolCallCount: 0,
+          errorMessage: "parent aborted before child spawn could complete",
+        },
+      };
+    }
+
     attempts++;
+    let result: SpawnChildResult;
     try {
-      last = await agent.spawnChildTurn(childOptions);
+      result = await agent.spawnChildTurn(childOptions);
     } catch (err) {
-      last = {
-        status: "error",
+      result = {
+        status: childOptions.abortSignal.aborted ? "aborted" : "error",
         finalText: "",
         toolCallCount: 0,
         errorMessage: err instanceof Error ? err.message : String(err),
       };
     }
 
-    if (!canRetryReturnSpawn(last, attempts)) {
-      return { result: last, attempts };
+    const canRetry =
+      result.status === "error" &&
+      result.toolCallCount === 0 &&
+      attempts < maxAttempts &&
+      !childOptions.abortSignal.aborted;
+    if (!canRetry) {
+      return { result, attempts };
     }
 
-    const reason = last.errorMessage ?? "child failed";
-    emit?.({
+    const delayMs = spawnRetryDelayMs(attempts);
+    const retryEvent = {
       type: "spawn_retry",
-      taskId: childOptions.taskId,
-      attempt: attempts + 1,
-      previousAttempt: attempts,
-      maxAttempts: RETURN_SPAWN_MAX_ATTEMPTS,
-      reason,
+      taskId,
+      deliver,
+      attempt: attempts,
+      nextAttempt: attempts + 1,
+      maxAttempts,
+      delayMs,
+      errorMessage: spawnErrorMessage(result),
+    };
+    emit?.(retryEvent);
+    stageAuditEvent?.("spawn_retry", {
+      taskId,
+      deliver,
+      attempt: attempts,
+      nextAttempt: attempts + 1,
+      maxAttempts,
+      delayMs,
+      errorMessage: spawnErrorMessage(result),
     });
-    stageAuditEvent("spawn_retry", {
-      taskId: childOptions.taskId,
-      attempt: attempts + 1,
-      previousAttempt: attempts,
-      maxAttempts: RETURN_SPAWN_MAX_ATTEMPTS,
-      reason,
-    });
+    await sleepForRetry(delayMs, childOptions.abortSignal);
   }
-
-  return {
-    result:
-      last ?? {
-        status: "error",
-        finalText: "",
-        toolCallCount: 0,
-        errorMessage: "spawn did not start",
-      },
-    attempts,
-  };
 }
 
 // ── Validation helpers ─────────────────────────────────────────────
@@ -591,10 +647,22 @@ function validateInput(input: SpawnAgentInput): string | null {
   if (input.deliver !== "return" && input.deliver !== "background") {
     return "`deliver` must be 'return' or 'background'";
   }
+  if (input.model !== undefined && !SPAWNABLE_MODELS.includes(input.model)) {
+    return `\`model\` must be one of: ${SPAWNABLE_MODELS.join(", ")}`;
+  }
   if (input.mode === "tournament") {
     return validateTournamentInput(input);
   }
   return null;
+}
+
+function resolveParentPermissionMode(agent: Agent, sessionKey: string): PermissionMode {
+  const getSession = (agent as {
+    getSession?: (key: string) => { getPermissionMode?: () => PermissionMode } | undefined;
+  }).getSession;
+  if (!getSession) return "default";
+  const session = getSession.call(agent, sessionKey);
+  return session?.getPermissionMode ? session.getPermissionMode() : "default";
 }
 
 // ── Tool factory ───────────────────────────────────────────────────
@@ -610,7 +678,7 @@ export function makeSpawnAgentTool(
   return {
     name: "SpawnAgent",
     description:
-      "Delegate a focused sub-task to a child agent with a custom persona and filtered toolset. `deliver:\"return\"` blocks until the child finishes and returns its final text. `deliver:\"background\"` fires the child and returns a taskId immediately; completion surfaces as a spawn_result event. Spawn depth is capped at 2 — a depth-2 child cannot spawn further. Use this to keep the main agent as a meta-controller and hand heavy research/code/verification work to sub-agents. IMPORTANT: child output longer than ~500 chars should go into an ArtifactCreate (kind=report/analysis/etc.) rather than inlined in finalText — the spawn tool automatically imports any child-produced artifacts into the parent workspace and returns them on `artifacts.handedOffArtifacts`. Call ArtifactRead(artifactId) to pull full content. This prevents output loss when the child workspace is torn down.",
+      "Delegate a focused sub-task to a child agent with a custom persona and filtered toolset. `deliver:\"return\"` blocks until the child finishes and returns its final text. `deliver:\"background\"` fires the child and returns a taskId immediately; completion surfaces as a spawn_result event. Spawn depth is capped at 2 — a depth-2 child cannot spawn further. Use `model` to run the child on a different LLM (e.g. `gpt-5.4`, `gemini-3.1-pro-preview`, `kimi-k2p6`); omit to use the bot's default. IMPORTANT: child output longer than ~500 chars should go into an ArtifactCreate (kind=report/analysis/etc.) rather than inlined in finalText — the spawn tool automatically imports any child-produced artifacts into the parent workspace and returns them on `artifacts.handedOffArtifacts`. Call ArtifactRead(artifactId) to pull full content.",
     inputSchema: INPUT_SCHEMA,
     permission: "meta",
     kind: "core",
@@ -634,6 +702,14 @@ export function makeSpawnAgentTool(
       }
 
       // Hard guard (`validate()` is advisory; some runtimes skip it).
+      if (input.model !== undefined && !SPAWNABLE_MODELS.includes(input.model)) {
+        return {
+          status: "error",
+          errorCode: "bad_input",
+          errorMessage: `\`model\` must be one of: ${SPAWNABLE_MODELS.join(", ")}`,
+          durationMs: Date.now() - start,
+        };
+      }
       if (input.mode === "tournament") {
         const err = validateTournamentInput(input);
         if (err) {
@@ -682,6 +758,9 @@ export function makeSpawnAgentTool(
         botId: ctx.botId,
         workspaceRoot: ctx.workspaceRoot,
         onAgentEvent: ctx.emitAgentEvent,
+        askUser: ctx.askUser,
+        permissionMode: resolveParentPermissionMode(agent, ctx.sessionKey),
+        ...(input.model ? { modelOverride: input.model } : {}),
       };
 
       // T3-16 — tournament mode branches here. The tournament runner
@@ -749,25 +828,39 @@ export function makeSpawnAgentTool(
         persona: input.persona,
         prompt: input.prompt,
         deliver: input.deliver,
+        ...(input.model ? { model: input.model } : {}),
       });
       ctx.emitAgentEvent?.({ type: "spawn_dir_created", taskId, spawnDir });
       ctx.staging.stageAuditEvent("spawn_dir_created", { taskId, spawnDir });
+      const lifecycle = createChildAgentHarness({
+        taskId,
+        parentTurnId: ctx.turnId,
+        prompt: input.prompt,
+        emitControlEvent: ctx.emitControlEvent,
+        emitAgentEvent: ctx.emitAgentEvent,
+      });
+      await lifecycle.started();
 
       const childOptions: SpawnChildOptions = {
         ...baseChildOptions,
         spawnDir,
         spawnWorkspace,
         taskId,
+        lifecycle,
       };
 
       if (input.deliver === "return") {
         try {
-          const { result, attempts } = await runReturnChildWithRetries({
+          const childRun = await runChildWithRetries({
             agent,
             childOptions,
+            taskId,
+            deliver: input.deliver,
             emit: ctx.emitAgentEvent,
-            stageAuditEvent: (event, data) => ctx.staging.stageAuditEvent(event, data),
+            stageAuditEvent: ctx.staging.stageAuditEvent,
           });
+          const result = childRun.result;
+          await recordChildTerminal(lifecycle, result);
           // 2026-04-20 — import child-produced artifacts BEFORE counting
           // files / cleaning up so the child's artifacts/ subtree is
           // scanned while still on disk.
@@ -793,13 +886,13 @@ export function makeSpawnAgentTool(
           });
           const artifacts = { spawnDir, fileCount, handedOffArtifacts };
           if (result.status !== "ok") {
-            return spawnFailureToolResult({
-              start,
+            return spawnFailureResult(
               taskId,
               result,
-              attempts,
+              childRun.attempts,
+              start,
               artifacts,
-            });
+            );
           }
           return {
             status: "ok",
@@ -808,12 +901,14 @@ export function makeSpawnAgentTool(
               status: result.status,
               finalText: result.finalText,
               toolCallCount: result.toolCallCount,
-              attempts,
+              attempts: childRun.attempts,
               artifacts,
             },
             durationMs: Date.now() - start,
           };
         } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          await lifecycle.failed(msg);
           return errorResult(err, start);
         }
       }
@@ -889,9 +984,17 @@ async function runBackgroundChild(args: BackgroundRunArgs): Promise<void> {
     }
   }
 
-  void agent
-    .spawnChildTurn(bgChildOptions)
-    .then(async (result) => {
+  void runChildWithRetries({
+    agent,
+    childOptions: bgChildOptions,
+    taskId,
+    deliver: input.deliver,
+    emit,
+    stageAuditEvent: ctx.staging.stageAuditEvent,
+  })
+    .then(async (childRun) => {
+      const result = childRun.result;
+      await recordChildTerminal(childOptions.lifecycle, result);
       // 2026-04-20 — hand off child-produced artifacts to the parent
       // before we emit the final spawn_result so the parent sees them
       // in the event payload (not just post-hoc on `list()`).
@@ -902,43 +1005,52 @@ async function runBackgroundChild(args: BackgroundRunArgs): Promise<void> {
         emit,
       );
       const fileCount = await countFilesRecursive(spawnDir);
-      const mappedStatus =
-        result.status === "ok"
-          ? "completed"
-          : result.status === "aborted"
-            ? "aborted"
-            : "failed";
       emit?.({
         type: "spawn_result",
         taskId,
         status: result.status,
         finalText: result.finalText,
         toolCallCount: result.toolCallCount,
+        attempts: childRun.attempts,
         artifacts: { spawnDir, fileCount, handedOffArtifacts },
-        ...(result.errorMessage ? { errorMessage: result.errorMessage } : {}),
+        ...(result.status === "ok"
+          ? result.errorMessage
+            ? { errorMessage: result.errorMessage }
+            : {}
+          : {
+              errorMessage: buildSpawnFailureMessage(
+                taskId,
+                result,
+                childRun.attempts,
+              ),
+            }),
       });
       if (backgroundRegistry) {
+        const mappedStatus =
+          result.status === "ok"
+            ? "completed"
+            : result.status === "aborted"
+              ? "aborted"
+              : "failed";
+        const errorMessage =
+          result.status === "ok"
+            ? result.errorMessage
+            : buildSpawnFailureMessage(taskId, result, childRun.attempts);
         await backgroundRegistry
           .attachResult(taskId, {
             status: mappedStatus,
             resultText: result.finalText,
             toolCallCount: result.toolCallCount,
-            ...(result.errorMessage ? { error: result.errorMessage } : {}),
+            ...(errorMessage ? { error: errorMessage } : {}),
           })
           .catch(() => {
             /* ignore persist errors */
           });
       }
-      await deliverBackgroundResult(agent, {
-        sessionKey: ctx.sessionKey,
-        taskId,
-        status: mappedStatus,
-        finalText: result.finalText,
-        ...(result.errorMessage ? { errorMessage: result.errorMessage } : {}),
-      });
     })
     .catch(async (err: unknown) => {
       const msg = err instanceof Error ? err.message : String(err);
+      await childOptions.lifecycle?.failed(msg);
       emit?.({
         type: "spawn_result",
         taskId,
@@ -954,12 +1066,6 @@ async function runBackgroundChild(args: BackgroundRunArgs): Promise<void> {
             /* ignore */
           });
       }
-      await deliverBackgroundResult(agent, {
-        sessionKey: ctx.sessionKey,
-        taskId,
-        status: "failed",
-        errorMessage: msg,
-      });
     })
     .finally(() => {
       ctx.abortSignal.removeEventListener("abort", onParentAbortBg);

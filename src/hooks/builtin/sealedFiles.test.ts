@@ -146,6 +146,12 @@ describe("resolveSealedPaths", () => {
     expect(paths).not.toContain("unrelated.txt");
     expect(paths.some((p) => p.startsWith(".spawn/"))).toBe(false);
   });
+
+  it("default sealed globs include runtime identity and tool contract files", () => {
+    expect(DEFAULT_SEALED_GLOBS).toEqual(
+      expect.arrayContaining(["AGENTS.md", "TOOLS.md", "CLAUDE.md", "HEARTBEAT.md"]),
+    );
+  });
 });
 
 describe("sealedFiles hook — integration", () => {
@@ -295,7 +301,7 @@ describe("sealedFiles hook — integration", () => {
     expect(result?.action).toBe("block");
     if (result && result.action === "block") {
       expect(result.reason).toContain("[RULE:SEALED_FILES]");
-      expect(result.reason).toContain("SOUL.md");
+      expect(result.reason).not.toContain("SOUL.md");
     }
     expect(
       emitted.some(
@@ -306,6 +312,230 @@ describe("sealedFiles hook — integration", () => {
           e.detail.startsWith("sealed_files_violation"),
       ),
     ).toBe(true);
+  });
+
+  it("pre-existing sealed drift at turn start does not block a chat-only turn", async () => {
+    await writeFileP(ws, "SOUL.md", "soul v1");
+    const hooks = makeSealedFilesHooks({ workspaceRoot: ws });
+    await hooks.beforeCommit.handler(
+      {
+        assistantText: "",
+        toolCallCount: 0,
+        toolReadHappened: false,
+        userMessage: "init",
+        retryCount: 0,
+      },
+      makeCtx("turn-init").ctx,
+    );
+    await writeFileP(ws, "SOUL.md", "soul v2 from external sync");
+
+    const { ctx, emitted } = makeCtx("turn-chat");
+    await hooks.beforeTurnStart.handler({ userMessage: "hi" }, ctx);
+    const result = await hooks.beforeCommit.handler(
+      {
+        assistantText: "hello",
+        toolCallCount: 0,
+        toolReadHappened: false,
+        userMessage: "hi",
+        retryCount: 0,
+      },
+      ctx,
+    );
+
+    expect(result).toEqual({ action: "continue" });
+    expect(
+      emitted.some(
+        (e) =>
+          e.type === "rule_check" &&
+          e.ruleId === "sealed-files" &&
+          e.verdict === "ok" &&
+          typeof e.detail === "string" &&
+          e.detail.includes("sealed_files_preexisting_drift"),
+      ),
+    ).toBe(true);
+
+    await hooks.afterCommit.handler({ assistantText: "hello" }, ctx);
+    const manifest = await readManifestDirect(ws);
+    const entry = manifest?.["SOUL.md"] as { sha256: string } | undefined;
+    expect(entry?.sha256).toBeDefined();
+
+    const again = await hooks.beforeCommit.handler(
+      {
+        assistantText: "",
+        toolCallCount: 0,
+        toolReadHappened: false,
+        userMessage: "still chatting",
+        retryCount: 0,
+      },
+      makeCtx("turn-next").ctx,
+    );
+    expect(again).toEqual({ action: "continue" });
+  });
+
+  it("blocks sealed paths changed after the turn-start drift snapshot", async () => {
+    await writeFileP(ws, "SOUL.md", "soul v1");
+    const hooks = makeSealedFilesHooks({ workspaceRoot: ws });
+    await hooks.beforeCommit.handler(
+      {
+        assistantText: "",
+        toolCallCount: 0,
+        toolReadHappened: false,
+        userMessage: "init",
+        retryCount: 0,
+      },
+      makeCtx("turn-init").ctx,
+    );
+
+    await writeFileP(ws, "SOUL.md", "soul v2 before turn");
+    const { ctx } = makeCtx("turn-edit");
+    await hooks.beforeTurnStart.handler({ userMessage: "edit yourself" }, ctx);
+    await writeFileP(ws, "SOUL.md", "soul v3 during turn");
+
+    const result = await hooks.beforeCommit.handler(
+      {
+        assistantText: "updated my own SOUL",
+        toolCallCount: 1,
+        toolReadHappened: false,
+        userMessage: "edit yourself",
+        retryCount: 0,
+      },
+      ctx,
+    );
+
+    expect(result?.action).toBe("block");
+    if (result && result.action === "block") {
+      expect(result.reason).toContain("[RULE:SEALED_FILES]");
+      expect(result.reason).not.toContain("SOUL.md");
+    }
+  });
+
+  it("sealed path changed still blocks on commit retry attempts", async () => {
+    await writeFileP(ws, "SOUL.md", "soul v1");
+    const { beforeCommit } = makeSealedFilesHooks({ workspaceRoot: ws });
+    await beforeCommit.handler(
+      {
+        assistantText: "",
+        toolCallCount: 0,
+        toolReadHappened: false,
+        userMessage: "init",
+        retryCount: 0,
+      },
+      makeCtx("turn-init").ctx,
+    );
+    await writeFileP(ws, "SOUL.md", "soul v2");
+
+    const { ctx } = makeCtx("turn-retry");
+    const result = await beforeCommit.handler(
+      {
+        assistantText: "retry output",
+        toolCallCount: 1,
+        toolReadHappened: false,
+        userMessage: "retry after violation",
+        retryCount: 1,
+      },
+      ctx,
+    );
+
+    expect(result?.action).toBe("block");
+    if (result && result.action === "block") {
+      expect(result.reason).toContain("[RULE:SEALED_FILES]");
+      expect(result.reason).not.toContain("SOUL.md");
+    }
+  });
+
+  it("pre-existing sealed drift at turn start does not block a chat-only turn", async () => {
+    await writeFileP(ws, "SOUL.md", "soul v1");
+    const hooks = makeSealedFilesHooks({ workspaceRoot: ws });
+    await hooks.beforeCommit.handler(
+      {
+        assistantText: "",
+        toolCallCount: 0,
+        toolReadHappened: false,
+        userMessage: "init",
+        retryCount: 0,
+      },
+      makeCtx("turn-init").ctx,
+    );
+
+    await writeFileP(ws, "SOUL.md", "soul v2 from external sync");
+    const { ctx, emitted } = makeCtx("turn-chat");
+    await hooks.beforeTurnStart.handler({ userMessage: "hi" }, ctx);
+    const result = await hooks.beforeCommit.handler(
+      {
+        assistantText: "hello",
+        toolCallCount: 0,
+        toolReadHappened: false,
+        userMessage: "hi",
+        retryCount: 0,
+      },
+      ctx,
+    );
+
+    expect(result).toEqual({ action: "continue" });
+    expect(
+      emitted.some(
+        (e) =>
+          e.type === "rule_check" &&
+          e.ruleId === "sealed-files" &&
+          e.verdict === "ok" &&
+          typeof e.detail === "string" &&
+          e.detail.includes("sealed_files_preexisting_drift"),
+      ),
+    ).toBe(true);
+
+    await hooks.afterCommit.handler({ assistantText: "hello" }, ctx);
+    const manifest = await readManifestDirect(ws);
+    const entry = manifest?.["SOUL.md"] as { sha256: string } | undefined;
+    expect(entry?.sha256).toBeDefined();
+
+    const again = await hooks.beforeCommit.handler(
+      {
+        assistantText: "",
+        toolCallCount: 0,
+        toolReadHappened: false,
+        userMessage: "still chatting",
+        retryCount: 0,
+      },
+      makeCtx("turn-next").ctx,
+    );
+    expect(again).toEqual({ action: "continue" });
+  });
+
+  it("blocks sealed paths changed after the turn-start drift snapshot", async () => {
+    await writeFileP(ws, "SOUL.md", "soul v1");
+    const hooks = makeSealedFilesHooks({ workspaceRoot: ws });
+    await hooks.beforeCommit.handler(
+      {
+        assistantText: "",
+        toolCallCount: 0,
+        toolReadHappened: false,
+        userMessage: "init",
+        retryCount: 0,
+      },
+      makeCtx("turn-init").ctx,
+    );
+
+    await writeFileP(ws, "SOUL.md", "soul v2 before turn");
+    const { ctx } = makeCtx("turn-edit");
+    await hooks.beforeTurnStart.handler({ userMessage: "edit yourself" }, ctx);
+    await writeFileP(ws, "SOUL.md", "soul v3 during turn");
+
+    const result = await hooks.beforeCommit.handler(
+      {
+        assistantText: "updated my own SOUL",
+        toolCallCount: 1,
+        toolReadHappened: false,
+        userMessage: "edit yourself",
+        retryCount: 0,
+      },
+      ctx,
+    );
+
+    expect(result?.action).toBe("block");
+    if (result && result.action === "block") {
+      expect(result.reason).toContain("[RULE:SEALED_FILES]");
+      expect(result.reason).toContain("Sealed files changed without explicit approval");
+    }
   });
 
   // 5
@@ -450,8 +680,8 @@ describe("sealedFiles hook — integration", () => {
     );
     expect(result?.action).toBe("block");
     if (result && result.action === "block") {
-      expect(result.reason).toContain("SOUL.md");
-      expect(result.reason).toContain("skills/foo/SKILL.md");
+      expect(result.reason).not.toContain("SOUL.md");
+      expect(result.reason).not.toContain("skills/foo/SKILL.md");
     }
   });
 

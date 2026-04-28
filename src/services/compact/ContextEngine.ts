@@ -245,7 +245,7 @@ export class ContextEngine {
     const createdAt = Date.now();
     const boundary: CompactionBoundaryEntry = {
       kind: "compaction_boundary",
-      ts: createdAt,
+      ts: createdAt + 1,
       turnId: session.meta.sessionKey, // sessionKey as scope — no active turn at compaction time
       boundaryId: this.ulid(),
       beforeTokenCount: before,
@@ -254,7 +254,24 @@ export class ContextEngine {
       summaryText,
       createdAt,
     };
+    await session.transcript.append({
+      kind: "canonical_message",
+      ts: createdAt,
+      turnId: session.meta.sessionKey,
+      messageId: `cm_${boundary.boundaryId}`,
+      role: "system",
+      content: [{ type: "text", text: renderBoundaryContent(boundary) }],
+    });
     await session.transcript.append(boundary);
+    await session.controlEvents?.append({
+      type: "compaction_boundary",
+      turnId: session.meta.sessionKey,
+      boundaryId: boundary.boundaryId,
+      beforeTokenCount: before,
+      afterTokenCount: after,
+      summaryHash,
+      ts: createdAt + 2,
+    });
     return boundary;
   }
 
@@ -381,9 +398,15 @@ function sortEntries(a: TranscriptEntry, b: TranscriptEntry): number {
 function renderBoundaryAsSystemMessage(
   boundary: CompactionBoundaryEntry,
 ): LLMMessage {
+  return {
+    role: "user",
+    content: [{ type: "text", text: renderBoundaryContent(boundary) } as LLMContentBlock],
+  };
+}
+
+function renderBoundaryContent(boundary: CompactionBoundaryEntry): string {
   const iso = new Date(boundary.createdAt).toISOString();
-  const content = `[Compaction boundary ${boundary.boundaryId} @ ${iso}]\n${boundary.summaryText}`;
-  return { role: "user", content: [{ type: "text", text: content } as LLMContentBlock] };
+  return `[Compaction boundary ${boundary.boundaryId} @ ${iso}]\n${boundary.summaryText}`;
 }
 
 /**
@@ -411,6 +434,15 @@ function transcriptEntriesToMessages(
   entries: readonly TranscriptEntry[],
 ): LLMMessage[] {
   const messages: LLMMessage[] = [];
+  const canonicalAssistantTurnIds = new Set(
+    entries
+      .filter(
+        (entry): entry is Extract<TranscriptEntry, { kind: "canonical_message" }> =>
+          entry.kind === "canonical_message" && entry.role === "assistant",
+      )
+      .map((entry) => entry.turnId),
+  );
+  const canonicalAssistantConsumedToolResult = new Set<string>();
 
   // Accumulator for the current message being built.
   let pendingAssistantBlocks: LLMContentBlock[] = [];
@@ -452,6 +484,12 @@ function transcriptEntriesToMessages(
         break;
       }
       case "assistant_text": {
+        if (
+          canonicalAssistantTurnIds.has(entry.turnId) &&
+          !canonicalAssistantConsumedToolResult.has(entry.turnId)
+        ) {
+          break;
+        }
         // Flush any pending tool_results first (they must come before
         // the next assistant message per Anthropic alternation).
         flushToolResults();
@@ -461,6 +499,12 @@ function transcriptEntriesToMessages(
         break;
       }
       case "tool_call": {
+        if (
+          canonicalAssistantTurnIds.has(entry.turnId) &&
+          !canonicalAssistantConsumedToolResult.has(entry.turnId)
+        ) {
+          break;
+        }
         // tool_use blocks go into the assistant message alongside text.
         // Flush tool_results first if any are pending (from a prior
         // tool round in the same turn).
@@ -483,6 +527,9 @@ function transcriptEntriesToMessages(
         // Flush the assistant message that contained the tool_use
         // before adding tool_result (tool_results are role: "user").
         flushAssistant();
+        if (canonicalAssistantTurnIds.has(entry.turnId)) {
+          canonicalAssistantConsumedToolResult.add(entry.turnId);
+        }
         // Truncate historical tool results to 2KB. Full results are
         // only needed in the CURRENT turn (which uses the in-memory
         // messages array, not transcript replay). Historical results
@@ -498,6 +545,19 @@ function transcriptEntriesToMessages(
           content,
           ...(entry.isError ? { is_error: true } : {}),
         } as LLMContentBlock);
+        break;
+      }
+      case "canonical_message": {
+        const blocks = canonicalContentBlocks(entry.content);
+        if (blocks.length === 0) break;
+        if (entry.role === "assistant") {
+          flushToolResults();
+          pendingAssistantBlocks.push(...blocks);
+        } else {
+          flushAssistant();
+          flushToolResults();
+          messages.push({ role: "user", content: blocks });
+        }
         break;
       }
       // Lifecycle markers (turn_started, turn_committed, turn_aborted)
@@ -643,6 +703,77 @@ function toContentBlocks(
   return content;
 }
 
+function canonicalContentBlocks(content: unknown[]): LLMContentBlock[] {
+  const blocks: LLMContentBlock[] = [];
+  for (const block of content) {
+    if (!block || typeof block !== "object") continue;
+    const obj = block as Record<string, unknown>;
+    if (obj.type === "text" && typeof obj.text === "string") {
+      blocks.push({ type: "text", text: obj.text });
+      continue;
+    }
+    if (
+      obj.type === "thinking" &&
+      typeof obj.thinking === "string" &&
+      typeof obj.signature === "string"
+    ) {
+      blocks.push({
+        type: "thinking",
+        thinking: obj.thinking,
+        signature: obj.signature,
+      });
+      continue;
+    }
+    if (
+      obj.type === "tool_use" &&
+      typeof obj.id === "string" &&
+      typeof obj.name === "string"
+    ) {
+      blocks.push({
+        type: "tool_use",
+        id: obj.id,
+        name: obj.name,
+        input: obj.input,
+      });
+      continue;
+    }
+    if (obj.type === "tool_result" && typeof obj.tool_use_id === "string") {
+      const result = canonicalToolResultBlock(obj);
+      if (result) blocks.push(result);
+    }
+  }
+  return blocks;
+}
+
+function canonicalToolResultBlock(
+  obj: Record<string, unknown>,
+): LLMContentBlock | null {
+  const content = obj.content;
+  if (typeof content === "string") {
+    return {
+      type: "tool_result",
+      tool_use_id: obj.tool_use_id as string,
+      content,
+      ...(typeof obj.is_error === "boolean" ? { is_error: obj.is_error } : {}),
+    };
+  }
+  if (!Array.isArray(content)) return null;
+  const textBlocks = content
+    .map((item): { type: "text"; text: string } | null => {
+      if (!item || typeof item !== "object") return null;
+      const block = item as Record<string, unknown>;
+      if (block.type !== "text" || typeof block.text !== "string") return null;
+      return { type: "text", text: block.text };
+    })
+    .filter((item): item is { type: "text"; text: string } => item !== null);
+  return {
+    type: "tool_result",
+    tool_use_id: obj.tool_use_id as string,
+    content: textBlocks,
+    ...(typeof obj.is_error === "boolean" ? { is_error: obj.is_error } : {}),
+  };
+}
+
 function estimateTranscriptTokens(entries: readonly TranscriptEntry[]): number {
   let total = 0;
   for (const entry of entries) {
@@ -652,6 +783,8 @@ function estimateTranscriptTokens(entries: readonly TranscriptEntry[]): number {
       total += estimateTextTokens(JSON.stringify(entry.input ?? {}));
     } else if (entry.kind === "tool_result") {
       total += estimateTextTokens(entry.output ?? "");
+    } else if (entry.kind === "canonical_message") {
+      total += estimateTextTokens(JSON.stringify(entry.content));
     } else if (isCompactionBoundary(entry)) {
       total += entry.afterTokenCount;
     }

@@ -52,6 +52,8 @@ class FakeSse extends SseWriter {
 async function makeCtx(opts: {
   blocks: LLMContentBlock[];
   blockBeforeCommit?: string;
+  structuredOutputContract?: unknown;
+  commitRetryCount?: number;
 }): Promise<{
   ctx: CommitPipelineContext;
   sse: FakeSse;
@@ -60,6 +62,7 @@ async function makeCtx(opts: {
   phases: string[];
   assistantTextRef: { value: string };
   rejectedReasons: string[];
+  controlEvents: unknown[];
 }> {
   const workspaceRoot = await fs.mkdtemp(
     path.join(os.tmpdir(), "commit-pipeline-"),
@@ -73,6 +76,7 @@ async function makeCtx(opts: {
   const phases: string[] = [];
   const assistantTextRef = { value: "" };
   const rejectedReasons: string[] = [];
+  const controlEvents: unknown[] = [];
 
   const agentStub = {
     hooks: {
@@ -93,6 +97,13 @@ async function makeCtx(opts: {
     meta: { sessionKey: "sess-key" },
     transcript,
     agent: agentStub,
+    controlEvents: {
+      append: async (event: unknown) => {
+        controlEvents.push(event);
+        return event;
+      },
+    },
+    getStructuredOutputContract: () => opts.structuredOutputContract ?? null,
   } as unknown as Session;
 
   const userMessage: UserMessage = {
@@ -124,7 +135,7 @@ async function makeCtx(opts: {
     },
     meta: { usage: { inputTokens: 1, outputTokens: 2, costUsd: 0 } },
     emittedAssistantBlocks: opts.blocks,
-    commitRetryCount: 0,
+    commitRetryCount: opts.commitRetryCount ?? 0,
     setAssistantText: (text) => {
       assistantTextRef.value = text;
     },
@@ -134,7 +145,7 @@ async function makeCtx(opts: {
     getAssistantText: () => assistantTextRef.value,
   };
 
-  return { ctx, sse, transcript, hooks, phases, assistantTextRef, rejectedReasons };
+  return { ctx, sse, transcript, hooks, phases, assistantTextRef, rejectedReasons, controlEvents };
 }
 
 describe("CommitPipeline.commit", () => {
@@ -146,7 +157,10 @@ describe("CommitPipeline.commit", () => {
       ],
     });
     const result = await commit(ctx);
-    expect(result.finalText).toBe("Hello world.");
+    expect(result).toMatchObject({
+      status: "committed",
+      finalText: "Hello world.",
+    });
     expect(assistantTextRef.value).toBe("Hello world.");
 
     const entries = await transcript.readAll();
@@ -164,6 +178,7 @@ describe("CommitPipeline.commit", () => {
     const ends = sse.events.filter((e) => e.type === "turn_end");
     expect(ends.length).toBe(1);
     expect(ends[0]?.status).toBe("committed");
+    expect(ends[0]?.stopReason).toBe("end_turn");
     expect(sse.finished).toBe(1);
   });
 
@@ -176,18 +191,130 @@ describe("CommitPipeline.commit", () => {
     expect(kinds).toContain("turn_committed");
   });
 
+  it("does not convert thinking blocks into visible final text", async () => {
+    const privateThinking =
+      "private chain of thought: inspect hidden evidence and choose an answer ".repeat(4);
+    const { ctx, sse, transcript } = await makeCtx({
+      blocks: [{ type: "thinking", thinking: privateThinking, signature: "sig" }],
+    });
+
+    const result = await commit(ctx);
+
+    expect(result.finalText).not.toContain("private chain of thought");
+    expect(result.finalText).toBe("");
+    const textDeltas = sse.events.filter((e) => e.type === "text_delta");
+    expect(textDeltas).toHaveLength(0);
+    const entries = await transcript.readAll();
+    const assistantText = entries.find((e) => e.kind === "assistant_text") as
+      | { text?: string }
+      | undefined;
+    expect(assistantText).toBeUndefined();
+  });
+
+  it("strips leading route metadata from committed assistant text", async () => {
+    const { ctx, transcript } = await makeCtx({
+      blocks: [
+        {
+          type: "text",
+          text: "[META: intent=대화, domain=일상, complexity=simple, route=direct]\n\n안녕하세요!",
+        },
+      ],
+    });
+
+    const result = await commit(ctx);
+
+    expect(result.finalText).toBe("안녕하세요!");
+    const entries = await transcript.readAll();
+    const assistantText = entries.find((e) => e.kind === "assistant_text") as
+      | { text?: string }
+      | undefined;
+    expect(assistantText?.text).toBe("안녕하세요!");
+  });
+
   it("beforeCommit block → throws, no transcript commits", async () => {
     const { ctx, transcript, phases } = await makeCtx({
       blocks: [{ type: "text", text: "x" }],
       blockBeforeCommit: "citation-gate",
     });
-    await expect(commit(ctx)).rejects.toThrow(/beforeCommit blocked: citation-gate/);
+    const result = await commit(ctx);
+    expect(result).toMatchObject({
+      status: "blocked",
+      reason: "citation-gate",
+      finalText: "x",
+      retryable: true,
+    });
     const entries = await transcript.readAll();
     const kinds = entries.map((e) => e.kind);
     expect(kinds).not.toContain("assistant_text");
     expect(kinds).not.toContain("turn_committed");
     // Phase went to "committing" but not "committed".
     expect(phases).toEqual(["committing"]);
+  });
+
+  it("blocks invalid structured output before transcript commit", async () => {
+    const { ctx, transcript, controlEvents, sse } = await makeCtx({
+      blocks: [{ type: "text", text: "{\"summary\":\"ok\",\"score\":\"bad\"}" }],
+      structuredOutputContract: {
+        schemaName: "verdict",
+        schema: {
+          type: "object",
+          required: ["summary", "score"],
+          properties: {
+            summary: { type: "string" },
+            score: { type: "number" },
+          },
+        },
+      },
+    });
+
+    const result = await commit(ctx);
+
+    expect(result).toMatchObject({
+      status: "blocked",
+      retryable: true,
+      retryKind: "structured_output_invalid",
+    });
+    expect((await transcript.readAll()).map((entry) => entry.kind)).not.toContain("turn_committed");
+    expect(controlEvents).toContainEqual(
+      expect.objectContaining({
+        type: "structured_output",
+        status: "invalid",
+        schemaName: "verdict",
+      }),
+    );
+    expect(sse.events).toContainEqual(
+      expect.objectContaining({
+        type: "structured_output",
+        status: "invalid",
+      }),
+    );
+  });
+
+  it("returns structured_output_retry_exhausted when schema retries are exhausted", async () => {
+    const { ctx } = await makeCtx({
+      blocks: [{ type: "text", text: "{\"summary\":\"ok\",\"score\":\"bad\"}" }],
+      structuredOutputContract: {
+        schemaName: "verdict",
+        maxAttempts: 1,
+        schema: {
+          type: "object",
+          required: ["summary", "score"],
+          properties: {
+            summary: { type: "string" },
+            score: { type: "number" },
+          },
+        },
+      },
+    });
+
+    const result = await commit(ctx);
+
+    expect(result).toMatchObject({
+      status: "blocked",
+      retryable: false,
+      retryKind: "structured_output_invalid",
+      stopReason: "structured_output_retry_exhausted",
+    });
   });
 
   it("onTaskCheckpoint payload includes toolNames + filesChanged", async () => {
@@ -208,6 +335,19 @@ describe("CommitPipeline.commit", () => {
     expect(args.toolNames).toEqual(["FileWrite", "Grep"]);
     expect(args.filesChanged).toEqual(["a.ts"]);
     expect(args.toolCallCount).toBe(2);
+  });
+
+  it("passes current-turn file writes to beforeCommit hooks", async () => {
+    const { ctx, hooks } = await makeCtx({
+      blocks: [
+        { type: "text", text: "." },
+        { type: "tool_use", id: "tu1", name: "FileWrite", input: { path: "TOOLS.md" } },
+      ],
+    });
+    await commit(ctx);
+    const beforeCommit = hooks.find((h) => h.point === "beforeCommit");
+    const args = beforeCommit?.args as { filesChanged?: string[] };
+    expect(args.filesChanged).toEqual(["TOOLS.md"]);
   });
 });
 
@@ -233,6 +373,7 @@ describe("CommitPipeline.abort", () => {
     const ends = sse.events.filter((e) => e.type === "turn_end");
     expect(ends[0]?.status).toBe("aborted");
     expect(ends[0]?.reason).toBe("user-cancelled");
+    expect(ends[0]?.stopReason).toBe("aborted");
   });
 });
 

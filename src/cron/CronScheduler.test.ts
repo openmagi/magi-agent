@@ -17,6 +17,18 @@ describe("CronScheduler", () => {
     await fs.rm(root, { recursive: true, force: true });
   });
 
+  async function waitForCondition(
+    predicate: () => boolean,
+    timeoutMs = 200,
+  ): Promise<void> {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      if (predicate()) return;
+      await new Promise((resolve) => setTimeout(resolve, 1));
+    }
+    throw new Error("timed out waiting for condition");
+  }
+
   it("create persists cron + computes nextFireAt", async () => {
     const s = new CronScheduler(root, { now });
     const r = await s.create({
@@ -72,6 +84,35 @@ describe("CronScheduler", () => {
     expect(updated.lastFiredAt).toBe(clock);
     expect(updated.nextFireAt).toBeGreaterThan(clock);
     expect(updated.consecutiveFailures).toBe(0);
+  });
+
+  it("does not overlap ticks while a previous tick is still firing", async () => {
+    const s = new CronScheduler(root, { now });
+    const r = await s.create({
+      botId: "b1",
+      userId: "u1",
+      expression: "*/15 * * * *",
+      prompt: "probe",
+      deliveryChannel: { type: "telegram", channelId: "tg-1" },
+    });
+    let fireCount = 0;
+    const releases: Array<() => void> = [];
+    s.setFireHandler(async () => {
+      fireCount += 1;
+      await new Promise<void>((resolve) => releases.push(resolve));
+    });
+
+    clock = r.nextFireAt + 1000;
+    const firstTick = s.tick();
+    await waitForCondition(() => releases.length === 1);
+    const overlappingTick = s.tick();
+    await new Promise((resolve) => setTimeout(resolve, 5));
+
+    expect(fireCount).toBe(1);
+
+    releases.splice(0).forEach((release) => release());
+    await Promise.all([firstTick, overlappingTick]);
+    expect(fireCount).toBe(1);
   });
 
   it("handler throw increments consecutiveFailures + auto-disables", async () => {

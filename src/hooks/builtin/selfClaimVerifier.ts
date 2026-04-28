@@ -11,27 +11,43 @@
 
 import type { RegisteredHook, HookContext } from "../types.js";
 
-// Korean: claims about my prompt / config / memory / named .md file.
-const KR_SELF_CLAIM_RE =
-  /(?:제\s*(?:프롬프트|config|설정|메모리|SOUL\.md|AGENTS?\.md|TOOLS?\.md|SCRATCHPAD|WORKING|MEMORY|USER\.md)|내\s*(?:프롬프트|config|설정|메모리|소스코드|파일)|제가\s*가진\s*(?:프롬프트|설정)|Evaluator\s*프롬프트|Finalize\s*프롬프트|Actor\s*프롬프트)[^.\n]{0,80}(?:없(?:습니다|음|다|어요)|있(?:습니다|음|다|어요)|안\s*(?:들어|포함|박혀)|포함(?:되지|안)|기재(?:되지|안))/i;
-
-// English equivalent.
-const EN_SELF_CLAIM_RE =
-  /(?:my|our)\s+(?:prompt|config|system\s+prompt|configuration|workspace|SOUL\.md|agents?\.md|memory|Evaluator|Finalize|Actor)[^.\n]{0,80}(?:does\s*not|doesn't|is\s*not|isn't|has\s*no|doesn't\s*have|does\s*not\s*include|lacks)/i;
-
-// "SOUL.md 없습니다" / "MEMORY.md is empty" style outright denials.
-const NAMED_FILE_DENIAL_RE =
-  /(?:SOUL|IDENTITY|AGENTS?|TOOLS?|MEMORY|USER|SCRATCHPAD|WORKING|HEARTBEAT)\.md[^.\n]{0,40}(?:없(?:습니다|음|다)|doesn't exist|is empty)/i;
-
 /** Tools whose execution counts as "having read a workspace file". */
 const READ_TOOLS = new Set(["FileRead", "Grep", "Glob", "Bash"]);
 
-function detectSelfClaim(text: string): "kr" | "en" | "named_file" | null {
-  if (!text || text.length < 10) return null;
-  if (KR_SELF_CLAIM_RE.test(text)) return "kr";
-  if (EN_SELF_CLAIM_RE.test(text)) return "en";
-  if (NAMED_FILE_DENIAL_RE.test(text)) return "named_file";
-  return null;
+const SELF_CLAIM_CLASSIFIER_PROMPT = `Does this AI assistant response make a CLAIM about its own internal files, prompt, configuration, or memory WITHOUT evidence of having read them?
+
+SELF-CLAIM (YES):
+- "제 프롬프트에는 그런 내용이 없습니다" (my prompt doesn't have that)
+- "SOUL.md 파일이 없습니다" (SOUL.md doesn't exist)
+- "My configuration doesn't include that feature"
+- "I don't have a TOOLS.md file"
+- Any assertion about what IS or ISN'T in the bot's own workspace files
+
+NOT A SELF-CLAIM (NO):
+- Normal responses about user topics
+- "이 파일에는 그런 내용이 있습니다" — if referring to user's file, not bot's own
+- Responses that don't reference bot internals at all
+
+Reply ONLY: YES or NO`;
+
+async function detectSelfClaim(text: string, ctx?: HookContext): Promise<boolean> {
+  if (!text || text.length < 10) return false;
+  if (!ctx?.llm) return false;
+
+  try {
+    let result = "";
+    for await (const event of ctx.llm.stream({
+      model: "claude-haiku-4-5",
+      system: SELF_CLAIM_CLASSIFIER_PROMPT,
+      messages: [{ role: "user", content: [{ type: "text", text: text.slice(0, 500) }] }],
+      max_tokens: 10,
+    })) {
+      if (event.kind === "text_delta") result += event.delta;
+    }
+    return result.trim().toUpperCase().startsWith("YES");
+  } catch {
+    return false;
+  }
 }
 
 export const selfClaimVerifierHook: RegisteredHook<"beforeCommit"> = {
@@ -41,18 +57,15 @@ export const selfClaimVerifierHook: RegisteredHook<"beforeCommit"> = {
   blocking: true,
   timeoutMs: 1_000,
   handler: async ({ assistantText, toolReadHappened }, ctx: HookContext) => {
-    const claim = detectSelfClaim(assistantText);
-    if (!claim) return { action: "continue" };
+    const hasClaim = await detectSelfClaim(assistantText, ctx);
+    if (!hasClaim) return { action: "continue" };
 
-    // A workspace file-reading tool (FileRead / Grep / Glob / Bash)
-    // was used this turn → the claim is backed by evidence. Let it
-    // through but surface a rule_check event for the UI.
     if (toolReadHappened) {
       ctx.emit({
         type: "rule_check",
         ruleId: "self-claim-verifier",
         verdict: "ok",
-        detail: `self-claim kind=${claim} with tool read`,
+        detail: "self-claim with tool read",
       });
       return { action: "continue" };
     }
@@ -61,9 +74,9 @@ export const selfClaimVerifierHook: RegisteredHook<"beforeCommit"> = {
       type: "rule_check",
       ruleId: "self-claim-verifier",
       verdict: "violation",
-      detail: `self-claim kind=${claim} without file read`,
+      detail: "self-claim without file read",
     });
-    ctx.log("warn", "blocking commit: self-claim without file read", { kind: claim });
+    ctx.log("warn", "blocking commit: self-claim without file read");
 
     return {
       action: "block",

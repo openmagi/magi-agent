@@ -16,6 +16,18 @@ import {
   makeResourceExistenceCheckerHook,
   type ResourceCheckAgent,
 } from "./resourceExistenceChecker.js";
+import { makeProviderHealthVerifierHook } from "./providerHealthVerifier.js";
+import {
+  makeCompletionEvidenceGateHook,
+  type CompletionEvidenceAgent,
+} from "./completionEvidenceGate.js";
+import { makeReliabilityPromptInjectorHook } from "./reliabilityPromptInjector.js";
+import { makeOutputPurityGateHook } from "./outputPurityGate.js";
+import { makeSecretExposureGateHook } from "./secretExposureGate.js";
+import { makeTaskContractGateHook } from "./taskContractGate.js";
+import { makeTaskBoardCompletionGateHook } from "./taskBoardCompletionGate.js";
+import { makeArtifactDeliveryGateHook } from "./artifactDeliveryGate.js";
+import { makeCronDeliverySafetyHook } from "./cronDeliverySafety.js";
 import { subSessionIdentityHook } from "./subSessionIdentity.js";
 import { citationGateHook } from "./citationGate.js";
 import { sessionCommitmentTrackerHook } from "./sessionCommitmentTracker.js";
@@ -24,6 +36,7 @@ import { makeHipocampusCompactorHook } from "./hipocampusCompactor.js";
 import { makeHipocampusFlushHook } from "./hipocampusFlush.js";
 import type { CompactionEngine as CompactionEngineType } from "../../services/memory/CompactionEngine.js";
 import type { QmdManager as QmdManagerType } from "../../services/memory/QmdManager.js";
+import type { HipocampusService } from "../../services/memory/HipocampusService.js";
 import { answerVerifierHook } from "./answerVerifier.js";
 import { makeMemoryInjectorHook } from "./memoryInjector.js";
 import { agentSelfModelHook } from "./agentSelfModel.js";
@@ -36,6 +49,10 @@ import {
   makeDeferralBlockerHook,
   type DeferralBlockerAgent,
 } from "./deferralBlocker.js";
+import {
+  makeOutputDeliveryGateHook,
+  type OutputDeliveryGateAgent,
+} from "./outputDeliveryGate.js";
 import {
   makeSessionResumeHook,
   type SessionResumeAgent,
@@ -76,10 +93,24 @@ import {
 } from "./onboardingNeededCheck.js";
 import { makeTaskLifecycleHook } from "./taskLifecycle.js";
 import type { Discipline } from "../../Session.js";
+import type { PolicyKernel as PolicyKernelType } from "../../policy/PolicyKernel.js";
+import { makePolicyPromptBlockHook } from "./policyPromptBlock.js";
+import type { DebugWorkflow as DebugWorkflowType } from "../../debug/DebugWorkflow.js";
+import { makeDebugTurnClassifierHook } from "./debugTurnClassifier.js";
+import {
+  fileDeliveryInterceptor,
+  type FileDeliveryInterceptorOptions,
+} from "./fileDeliveryInterceptor.js";
+import { makeDebugInvestigationGuardHook } from "./debugInvestigationGuard.js";
+import {
+  makeDebugAfterToolCheckpointHook,
+  makeDebugCommitCheckpointHook,
+} from "./debugCheckpointRecorder.js";
 
 export interface RegisterBuiltinsOpts {
   disabled?: string[];
   workspaceRoot: string;
+  sessionsDir?: string;
   /**
    * Delegate used by the auto-approval hook (T2-08) to look up the
    * active session's permissionMode and the tool registry. Optional
@@ -157,6 +188,22 @@ export interface RegisterBuiltinsOpts {
    */
   resourceCheckAgent?: ResourceCheckAgent;
   /**
+   * Delegate used by the completion-evidence gate to read the current
+   * turn transcript and confirm success/verification claims have
+   * same-turn evidence. Optional — falls back to ctx.transcript.
+   */
+  completionEvidenceAgent?: CompletionEvidenceAgent;
+  /**
+   * Delegate used by task-contract verification enforcement. Shares
+   * the completion-evidence transcript reader shape.
+   */
+  taskContractAgent?: CompletionEvidenceAgent;
+  /**
+   * Delegate used by artifact-delivery enforcement. Shares the
+   * completion-evidence transcript reader shape.
+   */
+  artifactDeliveryAgent?: CompletionEvidenceAgent;
+  /**
    * Delegate used by the pre-refusal verifier hook (self-model Layer
    * 3) to read the session's on-disk transcript when checking whether
    * investigation tools fired this turn. Optional — when omitted the
@@ -172,10 +219,25 @@ export interface RegisterBuiltinsOpts {
    * hook works against ctx.transcript fallback when omitted.
    */
   deferralBlockerAgent?: DeferralBlockerAgent;
+  /**
+   * Delegate for the output delivery gate (priority 87). Reads the
+   * output artifact registry and blocks turn completion when the
+   * current turn created user-facing files that have not yet been
+   * delivered.
+   */
+  outputDeliveryAgent?: OutputDeliveryGateAgent;
   /** Native hipocampus compaction engine + qmd manager. Both optional —
    *  when omitted the compactor + flush hooks are skipped. */
   compactionEngine?: CompactionEngineType;
   qmdManager?: QmdManagerType;
+  hipocampus?: Pick<HipocampusService, "recall">;
+  /** Typed runtime policy facade. Optional in tests. */
+  policyKernel?: PolicyKernelType;
+  /** Workflow-native debugging state manager. Optional in tests. */
+  debugWorkflow?: DebugWorkflowType;
+  /** File delivery interceptor config. When present, enables the
+   *  deterministic Haiku-classified file delivery hook. */
+  fileDelivery?: FileDeliveryInterceptorOptions;
 }
 
 export function registerBuiltinHooks(
@@ -194,12 +256,70 @@ export function registerBuiltinHooks(
     return true;
   };
 
+  // File delivery interceptor (priority 1, runs before everything).
+  // Haiku-classified — deterministic file delivery without depending
+  // on the main model understanding "send this file" vs "summarize."
+  if (opts.fileDelivery && maybe("builtin:file-delivery-interceptor")) {
+    registry.register(fileDeliveryInterceptor(opts.fileDelivery));
+    registered++;
+  }
+
   // Agent self-model (Layer 1 meta-cognitive scaffolding). Priority 0
   // — runs first so identity/memory/discipline layer on top. Hook
   // reads CORE_AGENT_SELF_MODEL env internally (default on).
   if (maybe(agentSelfModelHook.name)) {
     registry.register(agentSelfModelHook);
     registered++;
+  }
+
+  const reliabilityPromptHook = makeReliabilityPromptInjectorHook();
+  if (maybe(reliabilityPromptHook.name)) {
+    registry.register(reliabilityPromptHook);
+    registered++;
+  }
+
+  if (opts.policyKernel) {
+    const policyPromptHook = makePolicyPromptBlockHook({
+      policy: opts.policyKernel,
+    });
+    if (maybe(policyPromptHook.name)) {
+      registry.register(policyPromptHook);
+      registered++;
+    }
+  }
+
+  if (opts.debugWorkflow) {
+    const debugTurnClassifierHook = makeDebugTurnClassifierHook({
+      workflow: opts.debugWorkflow,
+    });
+    if (maybe(debugTurnClassifierHook.name)) {
+      registry.register(debugTurnClassifierHook);
+      registered++;
+    }
+
+    const debugInvestigationGuardHook = makeDebugInvestigationGuardHook({
+      workflow: opts.debugWorkflow,
+    });
+    if (maybe(debugInvestigationGuardHook.name)) {
+      registry.register(debugInvestigationGuardHook);
+      registered++;
+    }
+
+    const debugAfterToolHook = makeDebugAfterToolCheckpointHook({
+      workflow: opts.debugWorkflow,
+    });
+    if (maybe(debugAfterToolHook.name)) {
+      registry.register(debugAfterToolHook);
+      registered++;
+    }
+
+    const debugCommitHook = makeDebugCommitCheckpointHook({
+      workflow: opts.debugWorkflow,
+    });
+    if (maybe(debugCommitHook.name)) {
+      registry.register(debugCommitHook);
+      registered++;
+    }
   }
 
   // Workspace awareness (Layer 2 meta-cognitive scaffolding). Priority
@@ -257,6 +377,26 @@ export function registerBuiltinHooks(
     registered++;
   }
 
+  const outputDeliveryGateHook = makeOutputDeliveryGateHook({
+    agent: opts.outputDeliveryAgent,
+  });
+  if (maybe(outputDeliveryGateHook.name)) {
+    registry.register(outputDeliveryGateHook);
+    registered++;
+  }
+
+  if (opts.sessionsDir) {
+    const taskBoardCompletionHook = makeTaskBoardCompletionGateHook({
+      sessionsDir: opts.sessionsDir,
+    });
+    if (maybe(taskBoardCompletionHook.name)) {
+      registry.register(taskBoardCompletionHook);
+      registered++;
+    }
+  } else {
+    skipped.push("builtin:task-board-completion-gate");
+  }
+
   // T1-01 — qmd memory injection. Env-gated so operators can disable
   // the whole hook globally (e.g. during qmd outage) without editing
   // per-bot agent.config.yaml. Runs at priority 5 (earliest
@@ -273,6 +413,7 @@ export function registerBuiltinHooks(
     const memoryHook = makeMemoryInjectorHook({
       workspaceRoot: opts.workspaceRoot,
       qmdManager: opts.qmdManager,
+      hipocampus: opts.hipocampus,
     });
     if (maybe(memoryHook.name)) {
       registry.register(memoryHook);
@@ -341,6 +482,18 @@ export function registerBuiltinHooks(
     registered++;
   }
 
+  const secretHook = makeSecretExposureGateHook();
+  if (maybe(secretHook.name)) {
+    registry.register(secretHook);
+    registered++;
+  }
+
+  const providerHealthHook = makeProviderHealthVerifierHook();
+  if (maybe(providerHealthHook.name)) {
+    registry.register(providerHealthHook);
+    registered++;
+  }
+
   // Fact grounding verifier (priority 82) — Haiku-judged gate that
   // blocks commits where tool output is distorted or fabricated in the
   // response. Env-gated (`CORE_AGENT_FACT_GROUNDING`, default on).
@@ -390,6 +543,38 @@ export function registerBuiltinHooks(
     skipped.push("builtin:resource-existence-checker");
   }
 
+  const outputPurityHook = makeOutputPurityGateHook();
+  if (maybe(outputPurityHook.name)) {
+    registry.register(outputPurityHook);
+    registered++;
+  }
+
+  const completionEvidenceHook = makeCompletionEvidenceGateHook({
+    agent: opts.completionEvidenceAgent,
+    debugWorkflow: opts.debugWorkflow,
+  });
+  if (maybe(completionEvidenceHook.name)) {
+    registry.register(completionEvidenceHook);
+    registered++;
+  }
+
+  const taskContractGateHook = makeTaskContractGateHook({
+    agent: opts.taskContractAgent,
+    debugWorkflow: opts.debugWorkflow,
+  });
+  if (maybe(taskContractGateHook.name)) {
+    registry.register(taskContractGateHook);
+    registered++;
+  }
+
+  const artifactDeliveryGateHook = makeArtifactDeliveryGateHook({
+    agent: opts.artifactDeliveryAgent,
+  });
+  if (maybe(artifactDeliveryGateHook.name)) {
+    registry.register(artifactDeliveryGateHook);
+    registered++;
+  }
+
   // Gated by CORE_AGENT_ANSWER_VERIFY env (default on). The hook
   // itself reads the env and no-ops when off, but skip registration
   // entirely if the operator listed it in disable_builtin_hooks.
@@ -433,9 +618,9 @@ export function registerBuiltinHooks(
   // engine instance which isn't available at registerBuiltinHooks time).
 
   // T3-12 — sealed-files integrity (OMC Port C). Env-gated (default
-  // on). Registers both the beforeCommit guard and the afterCommit
-  // manifest updater under the same `builtin:sealed-files` toggle in
-  // `disable_builtin_hooks`.
+  // on). Registers turn-start drift snapshotting, the beforeCommit
+  // guard, and the afterCommit manifest updater under the same
+  // `builtin:sealed-files` toggle in `disable_builtin_hooks`.
   const sealedFilesEnv = (process.env.CORE_AGENT_SEALED_FILES ?? "on").trim().toLowerCase();
   const sealedFilesEnabled =
     sealedFilesEnv === "" ||
@@ -445,9 +630,10 @@ export function registerBuiltinHooks(
   if (sealedFilesEnabled) {
     const sealed = makeSealedFilesHooks({ workspaceRoot: opts.workspaceRoot });
     if (maybe(sealed.beforeCommit.name)) {
+      registry.register(sealed.beforeTurnStart);
       registry.register(sealed.beforeCommit);
       registry.register(sealed.afterCommit);
-      registered += 2;
+      registered += 3;
     }
   } else {
     skipped.push("builtin:sealed-files");
@@ -522,6 +708,12 @@ export function registerBuiltinHooks(
     }
   } else {
     skipped.push("builtin:dangerous-patterns");
+  }
+
+  const deliverySafetyHook = makeCronDeliverySafetyHook();
+  if (maybe(deliverySafetyHook.name)) {
+    registry.register(deliverySafetyHook);
+    registered++;
   }
 
   // Coding Discipline hooks (docs/plans/2026-04-20-coding-discipline-design.md).

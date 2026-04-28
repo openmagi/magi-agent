@@ -152,6 +152,39 @@ describe("ContextEngine.buildMessagesFromTranscript", () => {
     expect(messages[2]?.content).toContain("again");
   });
 
+  it("prefers canonical assistant messages over legacy assistant/tool entries for the same turn", () => {
+    const { client } = mockLLM(() => []);
+    const engine = new ContextEngine(client);
+
+    const entries: TranscriptEntry[] = [
+      userEntry("t1", "inspect state", 1_000),
+      {
+        kind: "canonical_message",
+        ts: 1_500,
+        turnId: "t1",
+        messageId: "t1:assistant:1",
+        role: "assistant",
+        content: [
+          { type: "thinking", thinking: "private reasoning", signature: "sig" },
+          { type: "text", text: "I will inspect it." },
+          { type: "tool_use", id: "tu_1", name: "FileRead", input: { path: "state.json" } },
+        ],
+      },
+      assistantEntry("t1", "legacy duplicate text", 2_000),
+      toolCallEntry("t1", "tu_1", "FileRead", { path: "state.json" }, 3_000),
+      toolResultEntry("t1", "tu_1", "{\"ok\":true}", 4_000),
+      committedEntry("t1", 5_000),
+    ];
+
+    const messages = engine.buildMessagesFromTranscript(entries);
+    expect(messages).toHaveLength(3);
+    expect(messages[1]?.role).toBe("assistant");
+    const assistantBlocks = messages[1]?.content as Array<{ type: string; text?: string }>;
+    expect(assistantBlocks.map((block) => block.type)).toEqual(["thinking", "text", "tool_use"]);
+    expect(JSON.stringify(assistantBlocks)).not.toContain("legacy duplicate text");
+    expect(messages[2]?.role).toBe("user");
+  });
+
   it("collapses pre-boundary entries into a single synthetic summary message", () => {
     const { client } = mockLLM(() => []);
     const engine = new ContextEngine(client);
@@ -245,8 +278,12 @@ describe("ContextEngine.maybeCompact", () => {
     );
     expect(boundary!.beforeTokenCount).toBeGreaterThanOrEqual(1_000);
     expect(boundary!.afterTokenCount).toBeLessThan(boundary!.beforeTokenCount);
-    expect(transcript.appended.length).toBe(1);
-    expect(transcript.appended[0]).toBe(boundary);
+    expect(transcript.appended.length).toBe(2);
+    expect(transcript.appended[0]).toMatchObject({
+      kind: "canonical_message",
+      role: "system",
+    });
+    expect(transcript.appended[1]).toBe(boundary);
     expect(calls.length).toBe(1);
   });
 
@@ -319,7 +356,9 @@ describe("ContextEngine §11.6 reserve-token floor (model-aware)", () => {
     );
     expect(boundary).not.toBeNull();
     expect(boundary!.summaryText).toBe(summaryPayload);
-    expect(transcript.appended.length).toBe(1);
+    expect(transcript.appended.length).toBe(2);
+    expect(transcript.appended[0]?.kind).toBe("canonical_message");
+    expect(transcript.appended[1]).toBe(boundary);
   });
 
   it("throws CompactionImpossibleError (§11.6) when the routed model's window is below the min-viable budget", async () => {
@@ -409,7 +448,9 @@ describe("ContextEngine §11.6 reserve-token floor (model-aware)", () => {
       // no model arg
     );
     expect(boundary).not.toBeNull();
-    expect(transcript.appended.length).toBe(1);
+    expect(transcript.appended.length).toBe(2);
+    expect(transcript.appended[0]?.kind).toBe("canonical_message");
+    expect(transcript.appended[1]).toBe(boundary);
   });
 });
 

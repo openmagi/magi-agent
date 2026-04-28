@@ -1,26 +1,16 @@
 /**
- * Turn-mode classifier for the Coding Discipline subsystem
- * (docs/plans/2026-04-20-coding-discipline-design.md §"Session.meta.discipline").
+ * Turn-mode classifier for the Coding Discipline subsystem.
  *
- * Pure heuristic — no LLM call, no external I/O. Classifies a user
- * message into one of three buckets so the classifier hook can set
- * Session.meta.discipline.{tdd,git}:
+ * LLM-based (Haiku) — replaces the previous regex heuristic for
+ * accurate mixed-language (Korean + English) classification.
  *
- *   - `"coding"`:      TDD + git hygiene active, soft enforcement
- *   - `"exploratory"`: git hygiene only (commit checkpoints); no TDD
- *                      (prototype / throwaway scripts)
+ * Classifies a user message into:
+ *   - `"coding"`:      TDD + git hygiene active
+ *   - `"exploratory"`: git hygiene only, no TDD (prototype/throwaway)
  *   - `"other"`:       no discipline (docs, analysis, plain chat)
- *
- * Confidence is a crude 0..1 score capturing "how many positive
- * signals did we see". Callers should treat confidence < 0.6 as
- * unreliable and fall through to `other` — the caller is responsible
- * for enforcing that floor (the classifier returns the raw label +
- * confidence so tests can observe both).
- *
- * Determinism invariant: same input → same output. No hidden state.
- * No Date.now(), no Math.random(). This is load-bearing for the
- * classifier.test.ts fixture suite.
  */
+
+import type { LLMClient, LLMEvent } from "../transport/LLMClient.js";
 
 export type ModeLabel = "coding" | "exploratory" | "other";
 
@@ -29,135 +19,93 @@ export interface ModeClassification {
   confidence: number;
 }
 
-/**
- * Signals for `coding` — explicit implementation verbs, test-oriented
- * requests, code-fence presence, code-file path mentions. Regexes are
- * compiled once at module-load time; iteration order matches the
- * order below.
- */
-const CODING_SIGNALS: readonly RegExp[] = [
-  /\b(implement|refactor|fix\s+(?:a|the|this)?\s*bug|add\s+(?:a\s+)?test|debug|unit\s+test|integration\s+test|tdd)\b/i,
-  /\b(write|make|build|create)\s+(?:a\s+|the\s+|an\s+)?(?:\w+\s+){0,3}?(?:function|class|module|component|hook|endpoint|handler|route|test|spec)\b/i,
-  /\bfix(?:ing)?\b.*\b(bug|error|crash|failure|regression)\b/i,
-  /\b(type|compile|lint)\s*(?:error|issue|problem)\b/i,
-  /```[a-z]*\n/, // fenced code block
-  /\b(add|update|modify|change)\b.*\.(?:ts|tsx|js|jsx|py|rs|go|java|rb|swift|kt)\b/i,
-  /\bpull\s+request\b|\bcommit\b|\bgit\s+(?:add|commit|rebase|merge)\b/i,
-  /\b(failing\s+test|test\s+first|passing\s+tests?|red[-/]\s*green|green[-/]\s*refactor)\b/i,
-];
+const CLASSIFIER_PROMPT = `Classify this user message into exactly one category. Reply with ONLY the label, nothing else.
 
-/**
- * Signals for `exploratory` — explicit prototype / throwaway intent.
- * These override coding only when they appear alongside weaker coding
- * signals (code fences alone, or a single path mention). A strong
- * coding verb plus an exploratory hedge is still coding — people say
- * "implement a quick prototype" and mean it.
- */
-const EXPLORATORY_SIGNALS: readonly RegExp[] = [
-  /\b(let\s+me\s+try|just\s+trying|experimenting|exploring)\b/i,
-  /\b(prototype|proof[- ]of[- ]concept|poc|scratch\s*(?:pad|file)?)\b/i,
-  /\bjust\s+for\s+fun\b/i,
-  /\bquick\s+script\b|\bthrow[- ]away\b|\bthrowaway\b/i,
-  /\bsandbox(?:ing)?\b/i,
-];
+coding — The user is asking to write, fix, debug, refactor, or test code. Includes: implementing features, fixing bugs, writing tests, PR review, git operations, modifying source files.
+Examples: "이 버그 고쳐줘", "함수 작성해", "unit test 추가", "implement the API endpoint", "refactor this class"
 
-/**
- * Signals that explicitly want discipline OFF for this turn. Checked
- * by the classifier hook (not here) to short-circuit the classifier
- * output — see {@link hasSkipTddSignal}.
- */
-const SKIP_TDD_SIGNALS: readonly RegExp[] = [
-  /\bskip\s+tdd\b/i,
-  /\bno\s+tests?\b(?!\s+ran)/i, // "no tests" but not "no tests ran"
-  /\bwithout\s+tests?\b/i,
-  /\bdisable\s+discipline\b/i,
-];
+exploratory — The user is experimenting, prototyping, or trying something throwaway. NOT production code. Includes: quick scripts, proof of concept, sandbox experiments, "just trying".
+Examples: "프로토타입 빠르게 만들어보자", "just for fun, try X", "quick script to test", "sandbox this idea"
+
+other — Everything else: analysis, writing, summarizing, chat, planning, file operations, questions, KB search, document work, general tasks.
+Examples: "요약해줘", "이 파일 분석해줘", "일정 정리해", "what does this mean?", "search KB for X"
+
+If unsure between coding and other, choose other. If unsure between coding and exploratory, choose coding.`;
+
+const SKIP_TDD_PROMPT = `Does this message explicitly ask to skip tests or disable testing discipline? Reply YES or NO only.
+
+YES examples: "skip tdd", "no tests", "without tests", "테스트 없이", "TDD 건너뛰기"
+NO examples: "write a test", "fix the test", "테스트 추가해줘", anything not explicitly opting out`;
 
 /** Returns true when the user's message explicitly opts out of TDD. */
-export function hasSkipTddSignal(text: string): boolean {
-  for (const re of SKIP_TDD_SIGNALS) if (re.test(text)) return true;
-  return false;
+export async function hasSkipTddSignal(text: string, llm?: LLMClient): Promise<boolean> {
+  if (!llm) return false;
+  // Quick pre-filter: skip LLM call if no test-related words at all
+  if (!/test|tdd|테스트|skip|without|없이|건너/i.test(text)) return false;
+
+  try {
+    let result = "";
+    for await (const event of llm.stream({
+      model: "claude-haiku-4-5",
+      system: SKIP_TDD_PROMPT,
+      messages: [{ role: "user", content: [{ type: "text", text: text.slice(0, 300) }] }],
+      max_tokens: 5,
+    })) {
+      if (event.kind === "text_delta") result += event.delta;
+    }
+    return result.trim().toUpperCase().startsWith("YES");
+  } catch {
+    return false; // Fail-open: don't skip TDD on error
+  }
 }
 
 /**
- * Count how many patterns in `patterns` match `text`. Each pattern
- * contributes at most 1 hit regardless of how many times it matches
- * — we're measuring signal variety, not frequency (a user who says
- * "test" 10 times isn't 10x more likely to be coding than someone
- * who said it once + mentioned a filename).
+ * LLM-based turn mode classifier. Uses Haiku for accurate
+ * mixed-language intent classification.
  */
-function countHits(text: string, patterns: readonly RegExp[]): number {
-  let n = 0;
-  for (const re of patterns) if (re.test(text)) n++;
-  return n;
-}
-
-/**
- * Classify a user message into a mode bucket. Pure function — safe
- * to call on every turn without caching.
- *
- * Algorithm:
- *   1. Count coding + exploratory signal hits.
- *   2. Confidence for the winning label = hits / (hits_cap) where
- *      hits_cap is the number of signal patterns for that label. A
- *      message matching every coding pattern scores 1.0.
- *   3. Label selection:
- *        - 0 coding + 0 exploratory  → other, confidence 1.0 (sure)
- *        - coding > exploratory       → coding
- *        - exploratory > coding       → exploratory
- *        - tie (both > 0)             → coding (TDD is the safer default
- *                                       when a prototype turns real)
- *   4. If confidence < 0.6 (< 60% of the label's signal set matched),
- *      callers should demote to `other` — this function emits the raw
- *      label + confidence; gating is the caller's responsibility.
- */
-export function classifyTurnMode(text: string): ModeClassification {
+export async function classifyTurnMode(
+  text: string,
+  llm?: LLMClient,
+): Promise<ModeClassification> {
   const trimmed = text.trim();
   if (trimmed.length === 0) {
     return { label: "other", confidence: 1 };
   }
 
-  const codingHits = countHits(trimmed, CODING_SIGNALS);
-  const exploratoryHits = countHits(trimmed, EXPLORATORY_SIGNALS);
-
-  if (codingHits === 0 && exploratoryHits === 0) {
-    return { label: "other", confidence: 1 };
+  if (!llm) {
+    return { label: "other", confidence: 0.5 };
   }
 
-  // "Exploratory" is really "coding with a different flavour" — the
-  // presence of ANY coding verb alongside an exploratory hedge is
-  // still coding, because the exploratory signal usually modifies a
-  // coding verb ("let me try implementing X"). Only when exploratory
-  // is the dominant signal do we flip the label.
-  let label: ModeLabel;
-  if (exploratoryHits > codingHits) {
-    label = "exploratory";
-  } else {
-    // ties broken to coding — safer default (TDD is opt-out).
-    label = "coding";
-  }
+  try {
+    let result = "";
+    for await (const event of llm.stream({
+      model: "claude-haiku-4-5",
+      system: CLASSIFIER_PROMPT,
+      messages: [{ role: "user", content: [{ type: "text", text: trimmed.slice(0, 500) }] }],
+      max_tokens: 10,
+    })) {
+      if (event.kind === "text_delta") result += event.delta;
+    }
 
-  const denom =
-    label === "coding" ? CODING_SIGNALS.length : EXPLORATORY_SIGNALS.length;
-  const hits = label === "coding" ? codingHits : exploratoryHits;
-  // Boost: a single strong signal (code fence, test verb) is already
-  // meaningful, so normalise with a small floor so one hit doesn't
-  // give a 14%-ish confidence that gets demoted downstream.
-  const raw = hits / denom;
-  const boosted = Math.min(1, raw + 0.4); // floor at ~0.4 for 0 hits
-  const confidence = hits === 0 ? 0 : boosted;
-  return { label, confidence };
+    const label = result.trim().toLowerCase();
+    if (label.startsWith("coding")) return { label: "coding", confidence: 0.9 };
+    if (label.startsWith("exploratory")) return { label: "exploratory", confidence: 0.9 };
+    return { label: "other", confidence: 0.9 };
+  } catch {
+    return { label: "other", confidence: 0.5 }; // Fail-open
+  }
 }
 
 /**
- * Convenience wrapper applying the 0.6 confidence floor described in
- * the design doc. Below the floor, the label is demoted to `other`.
+ * Convenience wrapper applying the confidence floor.
+ * Below the floor, the label is demoted to `other`.
  */
-export function classifyTurnModeGated(
+export async function classifyTurnModeGated(
   text: string,
+  llm?: LLMClient,
   floor = 0.6,
-): ModeClassification {
-  const raw = classifyTurnMode(text);
+): Promise<ModeClassification> {
+  const raw = await classifyTurnMode(text, llm);
   if (raw.label === "other") return raw;
   if (raw.confidence < floor) {
     return { label: "other", confidence: raw.confidence };

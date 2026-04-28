@@ -19,6 +19,7 @@ import { spawn } from "node:child_process";
 import type { Tool, ToolContext, ToolResult } from "../Tool.js";
 import { Workspace } from "../storage/Workspace.js";
 import { errorResult } from "../util/toolResult.js";
+import { withOpenclawBinPath } from "../util/shellPath.js";
 
 export interface BashInput {
   command: string;
@@ -59,7 +60,7 @@ export function makeBashTool(workspaceRoot: string): Tool<BashInput, BashOutput>
       "Run a shell command. cwd is the workspace root by default. Output is captured and truncated at ~512 KB per stream. Prefer FileRead/FileWrite/FileEdit/Grep/Glob for file operations — this tool is for anything else.",
     inputSchema: INPUT_SCHEMA,
     permission: "execute",
-    dangerous: true,
+    dangerous: false,
     validate(input) {
       if (!input || typeof input.command !== "string" || input.command.length === 0) {
         return "`command` is required";
@@ -81,7 +82,7 @@ export function makeBashTool(workspaceRoot: string): Tool<BashInput, BashOutput>
         try {
           const child = spawn("/bin/sh", ["-c", input.command], {
             cwd,
-            env: { ...process.env, PWD: cwd },
+            env: { ...withOpenclawBinPath(process.env), PWD: cwd },
             stdio: ["ignore", "pipe", "pipe"],
           });
 

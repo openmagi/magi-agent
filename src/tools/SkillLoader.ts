@@ -43,6 +43,12 @@ import { spawn } from "node:child_process";
 import { parse as parseYaml } from "yaml";
 import type { Tool, ToolContext, ToolResult, PermissionClass } from "../Tool.js";
 import { errorResult } from "../util/toolResult.js";
+import { withOpenclawBinPath } from "../util/shellPath.js";
+import {
+  normalizeClaudeSkillHooks,
+  normalizeSkillRuntimeHooks,
+  type SkillRuntimeHookDeclaration,
+} from "./SkillRuntimeHooks.js";
 
 export interface SkillFrontmatter {
   name?: string;
@@ -56,6 +62,8 @@ export interface SkillFrontmatter {
   dangerous?: boolean;
   tags?: string[];
   timeout_ms?: number;
+  runtime_hooks?: unknown;
+  hooks?: unknown;
 }
 
 export interface SkillLoadIssue {
@@ -70,7 +78,8 @@ export interface SkillLoadIssue {
     | "missing_input_schema"
     | "description_too_long"
     | "description_not_verb"
-    | "entry_not_found";
+    | "entry_not_found"
+    | "runtime_hook_invalid";
   detail?: string;
 }
 
@@ -80,8 +89,10 @@ export interface SkillLoadReport {
     scriptBacked: boolean;
     promptOnly?: boolean;
     tags: string[];
+    runtimeHooks: number;
   }>;
   issues: SkillLoadIssue[];
+  runtimeHooks: SkillRuntimeHookDeclaration[];
 }
 
 /**
@@ -124,6 +135,15 @@ function startsWithVerb(desc: string): boolean {
   return !articles.has(first.toLowerCase());
 }
 
+async function realpathIfAvailable(p: string): Promise<string> {
+  const resolved = path.resolve(p);
+  try {
+    return await fs.realpath(resolved);
+  } catch {
+    return resolved;
+  }
+}
+
 /**
  * Build a Tool for a script-backed skill. Phase 2a dispatch: spawn
  * /bin/sh -c <entry> with the JSON input piped on stdin. Skills can
@@ -144,7 +164,7 @@ function makeScriptSkillTool(opts: {
   return {
     name: skillName,
     description: (fm.description ?? "").slice(0, 250),
-    inputSchema: fm.input_schema ?? { type: "object" },
+    inputSchema: normalizeToolInputSchema(fm.input_schema),
     permission,
     kind: "skill",
     tags: fm.tags ?? [],
@@ -176,13 +196,18 @@ function makeScriptSkillTool(opts: {
           durationMs: Date.now() - start,
         };
       }
+      const effectiveWorkspaceRoot = await realpathIfAvailable(
+        ctx.spawnWorkspace?.root ?? ctx.workspaceRoot,
+      );
 
       return new Promise<ToolResult<unknown>>((resolve) => {
         try {
           const child = spawn("/bin/sh", ["-c", resolvedEntry!], {
-            cwd: workspaceRoot,
+            cwd: effectiveWorkspaceRoot,
             env: {
-              ...process.env,
+              ...withOpenclawBinPath(process.env),
+              PWD: effectiveWorkspaceRoot,
+              CLAWY_WORKSPACE_ROOT: effectiveWorkspaceRoot,
               CLAWY_SKILL_INPUT: inputJson,
               CLAWY_SKILL_NAME: skillName,
               CLAWY_BOT_ID: ctx.botId,
@@ -270,7 +295,7 @@ function makePromptSkillTool(opts: {
   const { text, truncated } = truncatePromptBody(body);
   if (truncated) {
     console.warn(
-      `[clawy-agent] skill "${skillName}" body truncated to ${PROMPT_BODY_MAX_BYTES} bytes for prompt-only delivery`,
+      `[core-agent] skill "${skillName}" body truncated to ${PROMPT_BODY_MAX_BYTES} bytes for prompt-only delivery`,
     );
   }
 
@@ -279,10 +304,7 @@ function makePromptSkillTool(opts: {
     description: (fm.description ?? "").slice(0, 250),
     // Permissive schema — prompt-only tools take no required input. The
     // LLM may pass `{}` or any payload; we ignore it.
-    inputSchema: fm.input_schema ?? {
-      type: "object",
-      additionalProperties: true,
-    },
+    inputSchema: normalizeToolInputSchema(fm.input_schema),
     permission: fm.permission ?? "meta",
     kind: "skill",
     tags: fm.tags ?? [],
@@ -325,6 +347,37 @@ function safeJsonStringify(v: unknown): string {
   }
 }
 
+function normalizeToolInputSchema(schema: unknown): object {
+  const base =
+    schema && typeof schema === "object" && !Array.isArray(schema)
+      ? schema
+      : { type: "object", additionalProperties: true };
+  return normalizeSchemaNode(base) as object;
+}
+
+function normalizeSchemaNode(schema: unknown): unknown {
+  if (Array.isArray(schema)) {
+    return schema.map((item) => normalizeSchemaNode(item));
+  }
+  if (!schema || typeof schema !== "object") {
+    return schema;
+  }
+
+  const node: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(schema)) {
+    node[key] = normalizeSchemaNode(value);
+  }
+
+  if (node["type"] === "object" && !("properties" in node)) {
+    node["properties"] = {};
+  }
+  if (node["type"] === "array" && !("items" in node)) {
+    node["items"] = {};
+  }
+
+  return node;
+}
+
 /**
  * Parse tool output — prefer JSON so the LLM sees structured data; if
  * the script emitted plain text, wrap it in { output: "…" }.
@@ -351,9 +404,11 @@ function parseToolOutput(raw: string): unknown {
 export async function loadSkillsFromDir(opts: {
   skillsDir: string;
   workspaceRoot: string;
+  trustedSkillRoots?: readonly string[];
+  trustedSkillDirs?: readonly string[];
 }): Promise<{ tools: Tool[]; report: SkillLoadReport }> {
   const { skillsDir, workspaceRoot } = opts;
-  const report: SkillLoadReport = { loaded: [], issues: [] };
+  const report: SkillLoadReport = { loaded: [], issues: [], runtimeHooks: [] };
   const tools: Tool[] = [];
 
   let entries: string[];
@@ -416,6 +471,45 @@ export async function loadSkillsFromDir(opts: {
       });
       continue;
     }
+
+    const runtimeHookResult = normalizeSkillRuntimeHooks(
+      skillName,
+      fm.runtime_hooks,
+    );
+    const claudeHookResult = await normalizeClaudeSkillHooks({
+      skillName,
+      skillRoot: dir,
+      workspaceRoot,
+      raw: fm.hooks,
+      trustedSkillRoots: opts.trustedSkillRoots,
+      trustedSkillDirs: opts.trustedSkillDirs,
+    });
+    for (const issue of runtimeHookResult.issues) {
+      report.issues.push({
+        dir: entry,
+        skillName,
+        reason: "runtime_hook_invalid",
+        detail:
+          issue.index >= 0
+            ? `runtime_hooks[${issue.index}]: ${issue.reason}`
+            : issue.reason,
+      });
+    }
+    for (const issue of claudeHookResult.issues) {
+      report.issues.push({
+        dir: entry,
+        skillName,
+        reason: "runtime_hook_invalid",
+        detail:
+          issue.index >= 0
+            ? `hooks[${issue.index}]: ${issue.reason}`
+            : issue.reason,
+      });
+    }
+    const validRuntimeHooks = [
+      ...runtimeHookResult.hooks,
+      ...claudeHookResult.hooks,
+    ];
     // Phase 2b shape detection. Explicit `kind: prompt` always wins.
     // Otherwise infer: a skill with neither `input_schema` nor `entry`
     // is prompt-only (the 138 bundled OpenClaw-style skills). A skill
@@ -430,11 +524,13 @@ export async function loadSkillsFromDir(opts: {
     if (isPromptOnly) {
       const tool = makePromptSkillTool({ skillName, fm, body });
       tools.push(tool);
+      report.runtimeHooks.push(...validRuntimeHooks);
       report.loaded.push({
         name: skillName,
         scriptBacked: false,
         promptOnly: true,
         tags: fm.tags ?? [],
+        runtimeHooks: validRuntimeHooks.length,
       });
       continue;
     }
@@ -466,10 +562,12 @@ export async function loadSkillsFromDir(opts: {
       workspaceRoot,
     });
     tools.push(tool);
+    report.runtimeHooks.push(...validRuntimeHooks);
     report.loaded.push({
       name: skillName,
       scriptBacked: true,
       tags: fm.tags ?? [],
+      runtimeHooks: validRuntimeHooks.length,
     });
   }
 

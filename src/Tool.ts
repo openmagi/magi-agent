@@ -51,6 +51,12 @@ export interface ToolContext {
    * a circular dep on SseWriter — call sites import AgentEvent.
    */
   emitAgentEvent?(event: unknown): void;
+  /**
+   * Emit a durable control event when a tool mutates state that should
+   * survive SSE disconnects/replays. Tools keep this optional so unit
+   * tests and child runtimes can run without a ledger.
+   */
+  emitControlEvent?(event: unknown): Promise<void> | void;
   abortSignal: AbortSignal;
   /** Per-turn staging surface — tools write here, not to disk directly. */
   staging: StagingSurface;
@@ -122,7 +128,14 @@ export interface ToolRegistry {
   resolve(name: string): Tool | null;
   list(): Tool[];
   /** Loads SKILL.md files under `dir` as tools. Returns count loaded. */
-  loadSkills(dir: string): Promise<number>;
+  loadSkills(
+    dir: string,
+    workspaceRoot?: string,
+    opts?: {
+      trustedSkillRoots?: readonly string[];
+      trustedSkillDirs?: readonly string[];
+    },
+  ): Promise<number>;
 }
 
 export type ToolInput<T extends Tool> = T extends Tool<infer I, unknown>

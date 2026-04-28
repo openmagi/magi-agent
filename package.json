@@ -48,6 +48,8 @@
   },
   "optionalDependencies": {
     "@tobilu/qmd": "*",
+    "docx": "^9.0.0",
+    "exceljs": "^4.4.0",
     "playwright": "^1.52.0"
   },
   "devDependencies": {

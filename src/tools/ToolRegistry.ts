@@ -42,10 +42,19 @@ export class ToolRegistry implements IToolRegistry {
    * skill as a Tool. Returns the number of skills loaded; the detailed
    * report (including lint failures) is exposed via skillReport().
    */
-  async loadSkills(skillsDir: string, workspaceRoot?: string): Promise<number> {
+  async loadSkills(
+    skillsDir: string,
+    workspaceRoot?: string,
+    opts: {
+      trustedSkillRoots?: readonly string[];
+      trustedSkillDirs?: readonly string[];
+    } = {},
+  ): Promise<number> {
     const { tools, report } = await loadSkillsFromDir({
       skillsDir,
       workspaceRoot: workspaceRoot ?? skillsDir,
+      trustedSkillRoots: opts.trustedSkillRoots,
+      trustedSkillDirs: opts.trustedSkillDirs,
     });
     for (const t of tools) {
       // Skills can overlap with bot-native tool names — skills win on

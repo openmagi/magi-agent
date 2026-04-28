@@ -14,11 +14,14 @@
 import http from "node:http";
 import https from "node:https";
 import { URL } from "node:url";
+import type { ImageContentBlock } from "../util/types.js";
 import { shouldEnableThinkingByDefault, getCapability } from "../llm/modelCapabilities.js";
 
 export interface LLMClientOptions {
   apiProxyUrl: string; // e.g. http://api-proxy.clawy-system.svc.cluster.local:3001
   gatewayToken: string; // used as x-api-key to api-proxy
+  codexAccessToken?: string;
+  codexRefreshToken?: string;
   defaultModel: string;
   anthropicVersion?: string; // default 2023-06-01
   timeoutMs?: number; // default 600_000
@@ -28,14 +31,7 @@ export type LLMRole = "user" | "assistant";
 
 export type LLMContentBlock =
   | { type: "text"; text: string }
-  | {
-      type: "image";
-      source: {
-        type: "base64";
-        media_type: "image/jpeg" | "image/png" | "image/gif" | "image/webp";
-        data: string;
-      };
-    }
+  | ImageContentBlock
   | { type: "thinking"; thinking: string; signature: string }
   | { type: "tool_use"; id: string; name: string; input: unknown }
   | {
@@ -65,6 +61,8 @@ export interface LLMStreamRequest {
   temperature?: number;
   /** Adaptive thinking for opus-4-7 etc. Pass `{ type: "adaptive" }` to enable. */
   thinking?: { type: "adaptive" } | { type: "disabled" };
+  /** Cooperative cancellation for user interrupts / handoff. */
+  signal?: AbortSignal;
 }
 
 export interface LLMUsage {
@@ -72,7 +70,25 @@ export interface LLMUsage {
   outputTokens: number;
 }
 
+export interface ProviderHealthContext {
+  provider: string;
+  model: string;
+  state: "ok" | "watch" | "degraded" | "outage" | "unknown";
+  confidence: "low" | "medium" | "high";
+  summary: string;
+  routeReason: string;
+}
+
 const ANTHROPIC_TOOL_ID_RE = /^[a-zA-Z0-9_-]+$/;
+
+function abortReason(signal: AbortSignal): Error {
+  const reason = (signal as AbortSignal & { reason?: unknown }).reason;
+  return reason instanceof Error ? reason : new Error("llm_stream_aborted");
+}
+
+function throwIfAborted(signal?: AbortSignal): void {
+  if (signal?.aborted) throw abortReason(signal);
+}
 
 function sanitizeToolUseId(raw: string): string {
   if (ANTHROPIC_TOOL_ID_RE.test(raw)) return raw;
@@ -80,13 +96,6 @@ function sanitizeToolUseId(raw: string): string {
   return sanitized.length > 0 ? sanitized : "toolu";
 }
 
-/**
- * Anthropic rejects tool_use ids that contain punctuation outside
- * `[a-zA-Z0-9_-]`. Some upstream providers and synthetic paths can emit
- * looser ids (for example `call.one` or `toolu:...`). Normalize every
- * tool_use / tool_result id pair just before the request leaves the
- * clawy-agent boundary so historical transcript quirks cannot 400 a new turn.
- */
 export function normalizeToolUseIdsForRequest(messages: LLMMessage[]): LLMMessage[] {
   const idMap = new Map<string, string>();
   const used = new Set<string>();
@@ -164,6 +173,8 @@ export class LLMClient {
   private readonly opts: Required<Pick<LLMClientOptions, "anthropicVersion" | "timeoutMs">> &
     LLMClientOptions;
   private readonly providerOverride?: ProviderLike;
+  private runtimeModelWarningEmitted = false;
+  private lastProviderHealth: ProviderHealthContext | null = null;
 
   constructor(options: LLMClientOptions, provider?: ProviderLike) {
     this.opts = {
@@ -174,15 +185,68 @@ export class LLMClient {
     this.providerOverride = provider;
   }
 
-  /**
-   * Create an LLMClient backed by an external LLMProvider (OSS multi-provider).
-   * The provider's `stream()` replaces the built-in Anthropic api-proxy call.
-   */
   static fromProvider(provider: ProviderLike, defaultModel: string): LLMClient {
     return new LLMClient(
       { apiProxyUrl: "unused://provider-mode", gatewayToken: "unused", defaultModel },
       provider,
     );
+  }
+
+  async resolveRuntimeModel(fallbackModel = this.opts.defaultModel): Promise<string> {
+    try {
+      const url = new URL("/v1/bot-model", this.opts.apiProxyUrl);
+      const lib = url.protocol === "https:" ? https : http;
+      const reqOptions: http.RequestOptions = {
+        method: "GET",
+        protocol: url.protocol,
+        hostname: url.hostname,
+        port: url.port || (url.protocol === "https:" ? 443 : 80),
+        path: url.pathname + url.search,
+        headers: {
+          "x-api-key": this.opts.gatewayToken,
+          Accept: "application/json",
+        },
+        timeout: Math.min(this.opts.timeoutMs, 5_000),
+      };
+
+      const body = await new Promise<string>((resolve, reject) => {
+        const r = lib.request(reqOptions, (incoming) => {
+          let data = "";
+          incoming.setEncoding("utf8");
+          incoming.on("data", (chunk) => {
+            data += chunk;
+          });
+          incoming.on("end", () => {
+            if ((incoming.statusCode ?? 500) < 200 || (incoming.statusCode ?? 500) >= 300) {
+              reject(new Error(`bot model lookup returned ${incoming.statusCode}`));
+              return;
+            }
+            resolve(data);
+          });
+        });
+        r.on("timeout", () => {
+          r.destroy(new Error("bot model lookup timeout"));
+        });
+        r.on("error", reject);
+        r.end();
+      });
+
+      const parsed = JSON.parse(body) as { runtimeModel?: unknown };
+      if (typeof parsed.runtimeModel === "string" && parsed.runtimeModel.trim().length > 0) {
+        return parsed.runtimeModel.trim();
+      }
+    } catch (err) {
+      if (!this.runtimeModelWarningEmitted) {
+        const message = err instanceof Error ? err.message : String(err);
+        console.warn(`[core-agent] dynamic model lookup failed; using provisioned model: ${message}`);
+        this.runtimeModelWarningEmitted = true;
+      }
+    }
+    return fallbackModel;
+  }
+
+  getLastProviderHealth(): ProviderHealthContext | null {
+    return this.lastProviderHealth;
   }
 
   /**
@@ -198,7 +262,9 @@ export class LLMClient {
       yield* this.providerOverride.stream(req);
       return;
     }
+    throwIfAborted(req.signal);
     const model = req.model ?? this.opts.defaultModel;
+    const usesCodexOAuth = model.startsWith("openai-codex/");
     // T4-17: gate thinking on model capability. If the caller passed
     // an explicit thinking directive (adaptive or disabled) respect
     // it; otherwise default to adaptive for models that support it
@@ -235,20 +301,51 @@ export class LLMClient {
         "x-api-key": this.opts.gatewayToken,
         "anthropic-version": this.opts.anthropicVersion,
         Accept: "text/event-stream",
+        ...(usesCodexOAuth && this.opts.codexAccessToken
+          ? { "x-openai-codex-access-token": this.opts.codexAccessToken }
+          : {}),
+        ...(usesCodexOAuth && this.opts.codexRefreshToken
+          ? { "x-openai-codex-refresh-token": this.opts.codexRefreshToken }
+          : {}),
       },
       timeout: this.opts.timeoutMs,
     };
 
     const res = await new Promise<http.IncomingMessage>((resolve, reject) => {
-      const r = lib.request(reqOptions, resolve);
-      r.on("error", reject);
+      let onAbort: (() => void) | null = null;
+      const r = lib.request(reqOptions, (incoming) => {
+        if (req.signal && onAbort !== null) {
+          req.signal.removeEventListener("abort", onAbort);
+        }
+        resolve(incoming);
+      });
+      onAbort = (): void => {
+        const err = abortReason(req.signal!);
+        r.destroy(err);
+        reject(err);
+      };
+      if (req.signal) {
+        if (req.signal.aborted) {
+          onAbort();
+          return;
+        }
+        req.signal.addEventListener("abort", onAbort, { once: true });
+      }
+      r.on("error", (err) => {
+        if (req.signal && onAbort !== null) {
+          req.signal.removeEventListener("abort", onAbort);
+        }
+        reject(err);
+      });
       r.on("timeout", () => r.destroy(new Error("api-proxy timeout")));
       r.write(body);
       r.end();
     });
 
+    this.lastProviderHealth = parseProviderHealthHeaders(res.headers);
+
     if (res.statusCode && res.statusCode >= 400) {
-      const errBody = await consumeText(res);
+      const errBody = await consumeText(res, req.signal);
       yield {
         kind: "error",
         code: `http_${res.statusCode}`,
@@ -257,17 +354,82 @@ export class LLMClient {
       return;
     }
 
-    for await (const evt of parseAnthropicSse(res)) yield evt;
+    const onResponseAbort = (): void => {
+      res.destroy(abortReason(req.signal!));
+    };
+    if (req.signal) {
+      if (req.signal.aborted) throw abortReason(req.signal);
+      req.signal.addEventListener("abort", onResponseAbort, { once: true });
+    }
+    try {
+      for await (const evt of parseAnthropicSse(res)) {
+        throwIfAborted(req.signal);
+        yield evt;
+      }
+    } finally {
+      if (req.signal) {
+        req.signal.removeEventListener("abort", onResponseAbort);
+      }
+    }
   }
+}
+
+function parseProviderHealthHeaders(headers: http.IncomingHttpHeaders): ProviderHealthContext | null {
+  const provider = headerValue(headers, "x-clawy-provider-health-provider");
+  const state = headerValue(headers, "x-clawy-provider-health-state");
+  if (!provider || !state) return null;
+  return {
+    provider,
+    model: headerValue(headers, "x-clawy-provider-health-model"),
+    state: normalizeProviderHealthState(state),
+    confidence: normalizeProviderHealthConfidence(headerValue(headers, "x-clawy-provider-health-confidence")),
+    summary: headerValue(headers, "x-clawy-provider-health-summary"),
+    routeReason: headerValue(headers, "x-clawy-provider-health-route") || "primary",
+  };
+}
+
+function headerValue(headers: http.IncomingHttpHeaders, name: string): string {
+  const raw = headers[name.toLowerCase()];
+  const value = Array.isArray(raw) ? raw[0] : raw;
+  return typeof value === "string" ? value : "";
+}
+
+function normalizeProviderHealthState(value: string): ProviderHealthContext["state"] {
+  if (value === "ok" || value === "watch" || value === "degraded" || value === "outage" || value === "unknown") {
+    return value;
+  }
+  return "unknown";
+}
+
+function normalizeProviderHealthConfidence(value: string): ProviderHealthContext["confidence"] {
+  if (value === "low" || value === "medium" || value === "high") return value;
+  return "low";
 }
 
 /**
  * Consume the full body as text. Used on error paths.
  */
-async function consumeText(res: http.IncomingMessage): Promise<string> {
+async function consumeText(res: http.IncomingMessage, signal?: AbortSignal): Promise<string> {
+  const onAbort = (): void => {
+    res.destroy(abortReason(signal!));
+  };
+  if (signal) {
+    throwIfAborted(signal);
+    signal.addEventListener("abort", onAbort, { once: true });
+  }
   const chunks: Buffer[] = [];
-  for await (const chunk of res) chunks.push(chunk as Buffer);
-  return Buffer.concat(chunks).toString("utf8");
+  try {
+    for await (const chunk of res) {
+      throwIfAborted(signal);
+      chunks.push(chunk as Buffer);
+    }
+    throwIfAborted(signal);
+    return Buffer.concat(chunks).toString("utf8");
+  } finally {
+    if (signal) {
+      signal.removeEventListener("abort", onAbort);
+    }
+  }
 }
 
 /**

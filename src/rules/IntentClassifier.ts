@@ -138,14 +138,6 @@ export function filterToolsByIntent<
 
   const budget = Math.max(0, maxTotal - core.length);
   // Deterministic ordering so same inputs → same output in tests.
-  // Tagged skills carry routing metadata, so keep them ahead of legacy
-  // tagless skills when the classifier falls back to `general`; otherwise
-  // domain skills late in lexical order can be trimmed out by the cap.
-  const ranked = [...selectedSkills].sort((a, b) => {
-    const aTagged = (a.tags?.length ?? 0) > 0 ? 0 : 1;
-    const bTagged = (b.tags?.length ?? 0) > 0 ? 0 : 1;
-    if (aTagged !== bTagged) return aTagged - bTagged;
-    return a.name.localeCompare(b.name);
-  });
+  const ranked = [...selectedSkills].sort((a, b) => a.name.localeCompare(b.name));
   return [...core, ...ranked.slice(0, budget)];
 }

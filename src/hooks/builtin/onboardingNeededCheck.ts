@@ -42,12 +42,32 @@ export interface OnboardingNeededCheckOpts {
  * send in response to a prior onboarding nudge. Both English + Korean
  * idioms are covered so native Korean bots see increments too.
  */
-export const DECLINE_RE =
-  /^\s*(no\b|not now|not today|later|skip|pass|안\s?할래|안 해|나중에|싫어|괜찮)/i;
+const DECLINE_CLASSIFIER_PROMPT = `Is this user message a DECLINE or REJECTION of an onboarding/setup suggestion?
 
-export function looksLikeDecline(text: string): boolean {
+DECLINE (YES): "no", "not now", "later", "skip", "안 할래", "나중에", "싫어", "pass", "괜찮아요 됐어요"
+NOT DECLINE (NO): "괜찮아, 해볼게" (OK, let me try), "sure", "yes", "ok", "해볼까", any question, any task request
+
+Reply ONLY: YES or NO`;
+
+export async function looksLikeDecline(text: string, ctx?: HookContext): Promise<boolean> {
   if (!text) return false;
-  return DECLINE_RE.test(text);
+  if (!ctx?.llm) return false;
+  if (text.length > 200) return false; // Long messages are tasks, not declines
+
+  try {
+    let result = "";
+    for await (const event of ctx.llm.stream({
+      model: "claude-haiku-4-5",
+      system: DECLINE_CLASSIFIER_PROMPT,
+      messages: [{ role: "user", content: [{ type: "text", text: text.slice(0, 200) }] }],
+      max_tokens: 5,
+    })) {
+      if (event.kind === "text_delta") result += event.delta;
+    }
+    return result.trim().toUpperCase().startsWith("YES");
+  } catch {
+    return false;
+  }
 }
 
 export function isOnboardingSteerEnabled(env: string | undefined): boolean {
@@ -77,7 +97,7 @@ export function makeOnboardingNeededCheckHook(
     point: "beforeTurnStart",
     priority: 6,
     blocking: false,
-    timeoutMs: 100,
+    timeoutMs: 5_000,
     handler: async ({ userMessage }, ctx: HookContext) => {
       try {
         if (!isOnboardingSteerEnabled(process.env.CORE_AGENT_ONBOARDING_STEER)) {
@@ -89,7 +109,7 @@ export function makeOnboardingNeededCheckHook(
         // Decline path first — a user saying "no" should increment the
         // counter even if they've just hit the turn cap or are already
         // onboarded (defensive — keeps the counter monotonic).
-        if (looksLikeDecline(userMessage)) {
+        if (await looksLikeDecline(userMessage, ctx)) {
           const next = (session.meta.onboardingDeclines ?? 0) + 1;
           session.meta.onboardingDeclines = next;
           ctx.log("info", "[onboarding-needed-check] decline recorded", {

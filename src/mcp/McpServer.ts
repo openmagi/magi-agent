@@ -20,6 +20,7 @@
 
 import type { Agent } from "../Agent.js";
 import type { Tool, ToolContext, ToolResult } from "../Tool.js";
+import { decideRuntimePermission } from "../permissions/PermissionArbiter.js";
 import { PLAN_MODE_ALLOWED_TOOLS } from "../turn/ToolSelector.js";
 
 // ---------------------------------------------------------------------------
@@ -150,7 +151,7 @@ export class McpServer {
         tools: { listChanged: false },
       },
       serverInfo: {
-        name: "clawy-agent",
+        name: "clawy-core-agent",
         version: "0.1.0",
       },
       ...(opts.clientId ? { clientId: opts.clientId } : {}),
@@ -221,6 +222,34 @@ export class McpServer {
           `Invalid arguments: ${err}`,
         );
       }
+    }
+
+    const permission = await decideRuntimePermission({
+      mode: opts.permissionMode === "plan" ? "plan" : "default",
+      source: "mcp",
+      toolName: tool.name,
+      input: argsInput,
+      tool,
+      workspaceRoot: this.agent.config.workspaceRoot,
+    });
+    if (permission.decision === "deny") {
+      return errorResponse(
+        id,
+        JSON_RPC_INTERNAL_ERROR,
+        `Permission denied: ${permission.reason}`,
+        {
+          status: "permission_denied",
+          securityCritical: permission.securityCritical,
+        },
+      );
+    }
+    if (permission.decision === "ask") {
+      return errorResponse(
+        id,
+        JSON_RPC_INTERNAL_ERROR,
+        `Permission required: ${permission.reason}`,
+        { status: "permission_required" },
+      );
     }
 
     const ctx = this.buildToolContext(tool.name, opts);

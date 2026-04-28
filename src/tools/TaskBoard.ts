@@ -106,6 +106,12 @@ export interface TaskBoardOutput {
   iterationState?: IterationState | null;
 }
 
+export const VERIFICATION_TASK_RE = /verify|test|build|lint|qa|검증|테스트/i;
+
+export function isVerificationTask(task: Pick<TaskBoardEntry, "title" | "description">): boolean {
+  return VERIFICATION_TASK_RE.test(`${task.title}\n${task.description}`);
+}
+
 const INPUT_SCHEMA = {
   type: "object",
   properties: {
@@ -114,7 +120,8 @@ const INPUT_SCHEMA = {
       minItems: 1,
       description:
         "A batched list of board ops. Each action is one of: " +
-        "{op:'list'} | {op:'create', tasks:[...]} | {op:'update', id, patch} | {op:'complete', id}.",
+        "{op:'list'} | {op:'create', tasks:[...]} | {op:'update', id, patch} | {op:'complete', id} | " +
+        "{op:'iteration_bump', id, patch} | {op:'iteration_read', id}.",
       items: {
         type: "object",
         properties: {
@@ -129,15 +136,62 @@ const INPUT_SCHEMA = {
               "iteration_read",
             ],
           },
-          tasks: { type: "array" },
+          tasks: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: {
+                title: { type: "string" },
+                description: { type: "string" },
+                status: {
+                  type: "string",
+                  enum: ["pending", "in_progress", "completed", "cancelled"],
+                },
+                parallelGroup: { type: "string" },
+                dependsOn: {
+                  type: "array",
+                  items: { type: "string" },
+                },
+                metadata: { type: "object", additionalProperties: true },
+              },
+              required: ["title", "description"],
+              additionalProperties: true,
+            },
+          },
           id: { type: "string" },
-          patch: { type: "object" },
+          patch: {
+            type: "object",
+            properties: {
+              title: { type: "string" },
+              description: { type: "string" },
+              status: {
+                type: "string",
+                enum: ["pending", "in_progress", "completed", "cancelled"],
+              },
+              parallelGroup: { type: "string" },
+              dependsOn: {
+                type: "array",
+                items: { type: "string" },
+              },
+              metadata: { type: "object", additionalProperties: true },
+              round: { type: "number" },
+              step: { type: "string" },
+              strategy: { type: "string" },
+              attempts: { type: "number" },
+              lastScore: { type: "number" },
+              approachFamily: { type: "string" },
+              extra: { type: "object", additionalProperties: true },
+            },
+            additionalProperties: true,
+          },
         },
         required: ["op"],
+        additionalProperties: false,
       },
     },
   },
   required: ["actions"],
+  additionalProperties: false,
 } as const;
 
 export function taskFilePath(sessionsDir: string, sessionKey: string): string {
@@ -497,6 +551,20 @@ export function makeTaskBoardTool(sessionsDir: string): Tool<TaskBoardInput, Tas
               ...(t.parallelGroup ? { parallelGroup: t.parallelGroup } : {}),
               ...(t.dependsOn ? { dependsOn: t.dependsOn } : {}),
             })),
+          });
+          await ctx.emitControlEvent?.({
+            type: "task_board_snapshot",
+            turnId: ctx.turnId,
+            taskBoard: {
+              tasks: tasks.map((t) => ({
+                id: t.id,
+                title: t.title,
+                description: t.description,
+                status: t.status,
+                ...(t.parallelGroup ? { parallelGroup: t.parallelGroup } : {}),
+                ...(t.dependsOn ? { dependsOn: t.dependsOn } : {}),
+              })),
+            },
           });
         }
         const output: TaskBoardOutput = { tasks, applied };

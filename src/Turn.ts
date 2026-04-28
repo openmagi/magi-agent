@@ -9,7 +9,7 @@
 import type { Session } from "./Session.js";
 import type { UserMessage } from "./util/types.js";
 import type { SseWriter } from "./transport/SseWriter.js";
-import type { LLMContentBlock, LLMMessage, LLMUsage } from "./transport/LLMClient.js";
+import type { LLMContentBlock, LLMMessage, LLMToolDef, LLMUsage } from "./transport/LLMClient.js";
 import type { AskUserQuestionOutput } from "./Tool.js";
 import type { HookPoint } from "./hooks/types.js";
 import { computeUsd } from "./llm/modelCapabilities.js";
@@ -28,15 +28,32 @@ import { AskUserController } from "./turn/AskUserController.js";
 import { buildHookContext } from "./turn/HookContextBuilder.js";
 import { HeartbeatMonitor, wrapSseWithMonitor } from "./turn/HeartbeatMonitor.js";
 import { SessionHeartbeat } from "./turn/SessionHeartbeat.js";
-import type { TurnRoute, TurnStatus, TurnMeta, PlanResult, VerificationReport } from "./turn/types.js";
+import { RetryController } from "./turn/RetryController.js";
+import type { TurnRoute, TurnStatus, TurnMeta, TurnStopReason, PlanResult, VerificationReport } from "./turn/types.js";
 
 // Re-exports for callers + tests.
-export type { TurnRoute, TurnStatus, TurnMeta, PlanResult, VerificationReport, TurnResult } from "./turn/types.js";
+export type { TurnRoute, TurnStatus, TurnMeta, TurnStopReason, PlanResult, VerificationReport, TurnResult } from "./turn/types.js";
 export { PLAN_MODE_ALLOWED_TOOLS } from "./turn/ToolSelector.js";
 export { MAX_OUTPUT_TOKENS_RECOVERY_LIMIT, classifyStopReason, type StopReasonCase } from "./turn/StopReasonHandler.js";
 
 /** Case-insensitive `[PLAN_MODE: on]` header trigger. */
 export const PLAN_MODE_HEADER_RE = /\[PLAN_MODE:\s*on\]/i;
+
+export class TurnInterruptedError extends Error {
+  readonly handoffRequested: boolean;
+  readonly source: string;
+
+  constructor(
+    reason: "user_interrupt" | "user_interrupt_handoff",
+    handoffRequested: boolean,
+    source: string,
+  ) {
+    super(reason);
+    this.name = "TurnInterruptedError";
+    this.handoffRequested = handoffRequested;
+    this.source = source;
+  }
+}
 
 export class Turn {
   readonly meta: TurnMeta;
@@ -58,6 +75,8 @@ export class Turn {
 
   private assistantText = "";
   private emittedAssistantBlocks: LLMContentBlock[] = [];
+  private canonicalAssistantMessages: LLMContentBlock[][] = [];
+  private retryBaseMessages: LLMMessage[] = [];
   private recoveryAttempt = 0;
   /** Separate counter for empty-response recovery (thinking-only or
    * tool_use-only turns where no text block was emitted). Independent
@@ -69,6 +88,8 @@ export class Turn {
   static readonly MAX_TRUNCATION_RETRIES = 2;
   /** When true, the next LLM call disables thinking to force text output. */
   private forceNoThinking = false;
+  /** Runtime model resolved once at turn start. */
+  private runtimeModel: string | null = null;
   /** Gap §11.3 unknown-tool hallucination counter — shared across every
    * dispatchTools call within this turn. */
   private unknownToolCount = 0;
@@ -77,6 +98,43 @@ export class Turn {
   /** Increment commit retry counter — called by Session.runTurn
    * when beforeCommit hooks block and we retry. */
   incrementCommitRetry(): void { this._commitRetryCount += 1; }
+  private interruptState: {
+    handoffRequested: boolean;
+    source: string;
+    requestedAt: number;
+  } | null = null;
+  private readonly interruptController = new AbortController();
+
+  requestInterrupt(
+    handoffRequested = false,
+    source = "api",
+  ): { status: "accepted" | "noop"; handoffRequested: boolean } {
+    if (this.meta.status === "committed" || this.meta.status === "aborted") {
+      return { status: "noop", handoffRequested: false };
+    }
+    const mergedHandoff =
+      handoffRequested || this.interruptState?.handoffRequested === true;
+    this.interruptState = {
+      handoffRequested: mergedHandoff,
+      source,
+      requestedAt: Date.now(),
+    };
+    if (!this.interruptController.signal.aborted) {
+      const reason = mergedHandoff ? "user_interrupt_handoff" : "user_interrupt";
+      this.interruptController.abort(new TurnInterruptedError(reason, mergedHandoff, source));
+    }
+    this.sse.agent({
+      type: "turn_interrupted",
+      turnId: this.meta.turnId,
+      handoffRequested: mergedHandoff,
+      source,
+    });
+    return { status: "accepted", handoffRequested: mergedHandoff };
+  }
+
+  assertNotInterrupted(): void {
+    this.throwIfInterrupted();
+  }
 
   constructor(
     readonly session: Session,
@@ -130,6 +188,18 @@ export class Turn {
   /** Read-only accessor used by T1-04 test harness. */
   getRecoveryAttempt(): number { return this.recoveryAttempt; }
 
+  async resolveRuntimeModel(): Promise<string> {
+    if (!this.runtimeModel) {
+      const resolver = (this.session.agent as {
+        resolveRuntimeModel?: () => Promise<string>;
+      }).resolveRuntimeModel;
+      this.runtimeModel = typeof resolver === "function"
+        ? await resolver.call(this.session.agent)
+        : this.session.agent.config.model;
+    }
+    return this.runtimeModel;
+  }
+
   async execute(): Promise<void> {
     this.sse.agent({ type: "turn_start", turnId: this.meta.turnId, declaredRoute: this.meta.declaredRoute });
     const preStart = await this.session.agent.hooks.runPre(
@@ -144,6 +214,7 @@ export class Turn {
     }
     this.setPhase("executing");
     this.checkBudgetOrThrow();
+    const runtimeModel = await this.resolveRuntimeModel();
     await this.appendTurnPrologue();
 
     let systemPrompt = await buildSystemPrompt(
@@ -151,7 +222,7 @@ export class Turn {
       this.meta.turnId,
       this.userMessage,
     );
-    let messages = await buildMessages(this.session, this.userMessage);
+    let messages = await buildMessages(this.session, this.userMessage, runtimeModel);
     // B5 — heartbeat monitor wraps this.sse so every downstream SSE
     // emission pings the silence timer. Long-running tool calls + LLM
     // streams that go silent > 20s produce `heartbeat` events on a
@@ -176,6 +247,7 @@ export class Turn {
 
     try {
       for (let iter = 0; iter < Turn.MAX_ITERATIONS; iter++) {
+        this.throwIfInterrupted();
         heartbeat.start(iter);
         if (iter === 0) {
           await sessionHeartbeat.start(this.meta.turnId, iter).catch(() => {});
@@ -194,16 +266,18 @@ export class Turn {
         }
         if (preLLM.action === "skip") break;
         ({ messages, tools: toolDefs, system: systemPrompt } = preLLM.args);
+        this.throwIfInterrupted();
 
         const payloadSize = JSON.stringify(messages).length + JSON.stringify(systemPrompt).length;
         console.log(
-          `[clawy-agent] llm-call iter=${iter} payloadSize=${payloadSize}` +
-          ` msgCount=${messages.length} model=${this.session.agent.config.model}` +
+          `[core-agent] llm-call iter=${iter} payloadSize=${payloadSize}` +
+          ` msgCount=${messages.length} model=${runtimeModel}` +
           ` turnId=${this.meta.turnId}`,
         );
 
         const { blocks, stopReason, usage } = await readOneStream(
-          { llm: this.session.agent.llm, model: this.session.agent.config.model, sse,
+          { llm: this.session.agent.llm, model: runtimeModel, sse,
+            abortSignal: this.interruptController.signal,
             onError: (code, err) => this.emitError(code, err) },
           systemPrompt, messages, toolDefs,
           this.forceNoThinking ? { thinkingOverride: { type: "disabled" } } : undefined,
@@ -212,6 +286,8 @@ export class Turn {
         this.forceNoThinking = false;
         this.recordUsage(usage);
         this.emittedAssistantBlocks.push(...blocks);
+        this.canonicalAssistantMessages.push(blocks);
+        this.throwIfInterrupted();
 
         void this.session.agent.hooks.runPost(
           "afterLLMCall",
@@ -223,7 +299,7 @@ export class Turn {
         const stateRef = { recoveryAttempt: this.recoveryAttempt, assistantTextSoFarLen: this.assistantTextSoFarLen() };
         const decision = handleStopReason(
           { stageAuditEvent: (e, d) => this.stageAuditEvent(e, d),
-            logUnknown: (raw, t) => console.warn(`[clawy-agent] unknown stop_reason=${String(raw)} turnId=${t}`) },
+            logUnknown: (raw, t) => console.warn(`[core-agent] unknown stop_reason=${String(raw)} turnId=${t}`) },
           stateRef,
           { stopReasonRaw: stopReason, blocks, iter, turnId: this.meta.turnId, messages },
         );
@@ -234,7 +310,7 @@ export class Turn {
           .filter((b) => b.type === "text")
           .reduce((sum, b) => sum + ((b as { text: string }).text?.length ?? 0), 0);
         console.log(
-          `[clawy-agent] iter=${iter} stop=${String(stopReason)} decision=${decision.kind}` +
+          `[core-agent] iter=${iter} stop=${String(stopReason)} decision=${decision.kind}` +
           ` blocks=${blocks.length} textLen=${textLen}` +
           ` in=${usage.inputTokens} out=${usage.outputTokens}` +
           ` recovery=${this.recoveryAttempt} emptyRetry=${this.emptyResponseRetry}` +
@@ -242,6 +318,10 @@ export class Turn {
         );
 
         if (decision.kind === "finalise") {
+          if (!this.meta.stopReason) {
+            this.setStopReason(this.recoveryAttempt > 0 ? "max_tokens_recovered" : "end_turn");
+          }
+          this.throwIfInterrupted();
           // #86: pending injections — if user messages arrived during
           // the LLM response, continue to the next iteration so
           // beforeLLMCall → midTurnInjector drains them. The bot
@@ -249,9 +329,10 @@ export class Turn {
           // the queued messages.
           if (this.session.hasPendingInjections()) {
             console.log(
-              `[clawy-agent] finalise deferred — pending injections exist` +
+              `[core-agent] finalise deferred — pending injections exist` +
               ` turnId=${this.meta.turnId} iter=${iter}`,
             );
+            this.clearUserVisibleDraftForDeferredFinalise(sse, "pending_injection");
             messages.push({ role: "assistant", content: blocks });
             continue;
           }
@@ -271,37 +352,6 @@ export class Turn {
             continue;
           }
 
-          // ── Guard 1b: thinking-to-text fallback ──────────────
-          // After MAX_EMPTY_RESPONSE_RETRIES, if there's still no text
-          // but thinking blocks have substantial content, extract the
-          // thinking as text and emit it as text_delta so the client
-          // sees the response DURING streaming (not just on refresh).
-          // Claude.ai never shows empty text after thinking — we match.
-          if (!hasText) {
-            const thinkingContent = this.emittedAssistantBlocks
-              .filter((b) => b.type === "thinking")
-              .map((b) => (b as { thinking: string }).thinking)
-              .join("\n")
-              .trim();
-            if (thinkingContent.length > 100) {
-              const lines = thinkingContent.split("\n");
-              let fallback = "";
-              for (let j = lines.length - 1; j >= 0 && fallback.length < 3000; j--) {
-                fallback = lines[j] + "\n" + fallback;
-              }
-              fallback = fallback.trim();
-              // Emit as text_delta so client renders it in real-time
-              sse.agent({ type: "text_delta", delta: fallback });
-              // Add to emittedAssistantBlocks so commit picks it up
-              this.emittedAssistantBlocks.push({ type: "text", text: fallback } as LLMContentBlock);
-              console.log(
-                `[clawy-agent] thinking-to-text fallback in execute:` +
-                ` thinkingLen=${thinkingContent.length} fallbackLen=${fallback.length}` +
-                ` turnId=${this.meta.turnId}`,
-              );
-            }
-          }
-
           // ── Guard 2: truncated response (text ends mid-sentence) ──
           // The model sent end_turn but the response looks cut off.
           // This catches cases where thinking consumed most of the
@@ -318,7 +368,7 @@ export class Turn {
             // or already ends with terminal punctuation.
             if (lastText.length > 200 && !TERMINAL_RE.test(lastChar)) {
               console.log(
-                `[clawy-agent] truncation-guard fired: lastChar=${JSON.stringify(lastChar)}` +
+                `[core-agent] truncation-guard fired: lastChar=${JSON.stringify(lastChar)}` +
                 ` textLen=${lastText.length} retry=${this.truncationRecovery}`,
               );
               messages.push({ role: "assistant", content: blocks });
@@ -328,10 +378,15 @@ export class Turn {
               continue;
             }
           }
+          this.retryBaseMessages = [
+            ...messages,
+            { role: "assistant", content: blocks },
+          ];
           return;
         }
         if (decision.kind === "recover") { iter -= 1; continue; }
         // decision.kind === "run_tools"
+        this.throwIfInterrupted();
         let dispatched: ToolDispatchResult[];
         try {
           dispatched = await this.runToolsVia(sse, decision.toolUses, toolDefs);
@@ -344,15 +399,18 @@ export class Turn {
               unknownToolCount: err.unknownToolCount,
               iter,
             });
+            this.setStopReason("unknown_tool_loop");
             throw err;
           }
           throw err;
         }
+        this.throwIfInterrupted();
         this.appendToolTurn(messages, blocks, dispatched);
       }
 
       const err = new Error(`turn exceeded ${Turn.MAX_ITERATIONS} tool iterations`);
       this.emitError("iteration_limit", err);
+      this.setStopReason("iteration_limit");
       throw err;
     } finally {
       this.session.setActiveSse(null);
@@ -362,12 +420,58 @@ export class Turn {
   }
 
   async commit(): Promise<CommitResult> { return await commitTurn(this.buildCommitCtx()); }
-  async abort(reason: string): Promise<void> { await abortTurn(this.buildCommitCtx(), reason); }
+  async commitWithRetry(maxAttempts = 3): Promise<CommitResult> {
+    const controller = new RetryController({ maxAttempts });
+    for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+      const result = await this.commit();
+      if (result.status === "committed") return result;
+      if (!result.retryable) {
+        if (result.stopReason) this.setStopReason(result.stopReason);
+        throw new Error(`beforeCommit blocked: ${result.reason}`);
+      }
+
+      const decision = controller.next({
+        kind: result.retryKind ?? "before_commit_blocked",
+        reason: result.reason,
+        attempt,
+      });
+      if (decision.action === "abort") {
+        if (result.retryKind === "structured_output_invalid") {
+          this.setStopReason("structured_output_retry_exhausted");
+        }
+        throw new Error(`beforeCommit blocked: ${decision.reason}`);
+      }
+
+      await this.recordRetryEvent(result.reason, attempt, maxAttempts);
+      this.incrementCommitRetry();
+      this.sse.agent({
+        type: "retry",
+        reason: result.reason,
+        retryNo: attempt,
+      });
+      await this.resampleAfterBlockedCommit(
+        result.finalText,
+        decision.hiddenUserMessage,
+      );
+    }
+    throw new Error("commit retry attempts exhausted");
+  }
+  async abort(reason: string, stopReason: TurnStopReason = this.meta.stopReason ?? "aborted"): Promise<void> {
+    this.setStopReason(stopReason);
+    await abortTurn(this.buildCommitCtx(), reason, stopReason);
+  }
 
   // ── internals ────────────────────────────────────────────────────
 
   private hookCtx(point: HookPoint) {
-    return buildHookContext(this.session, this.sse, this.meta.turnId, point);
+    return buildHookContext(
+      this.session,
+      this.sse,
+      this.meta.turnId,
+      point,
+      this.currentModel(),
+      this.interruptController.signal,
+    );
   }
 
   private checkBudgetOrThrow(): void {
@@ -376,6 +480,7 @@ export class Turn {
     const reason = budget.reason ?? "unknown";
     const userFacing = `Session budget exceeded (${reason}). Please start a new session.`;
     this.sse.agent({ type: "text_delta", delta: userFacing });
+    this.setStopReason("budget_exceeded");
     this.session.agent.auditLog
       .append("session_budget_exceeded", this.session.meta.sessionKey, this.meta.turnId, {
         reason,
@@ -437,6 +542,7 @@ export class Turn {
         buildHookContext: (point) => this.hookCtx(point),
         stageAuditEvent: (event, data) => this.stageAuditEvent(event, data),
         askUser: (q) => this.asks.ask(q),
+        abortSignal: this.interruptController.signal,
         unknownToolCounter: {
           get: () => this.unknownToolCount,
           inc: () => ++this.unknownToolCount,
@@ -450,14 +556,160 @@ export class Turn {
     );
   }
 
+  private async resampleAfterBlockedCommit(
+    failedText: string,
+    hiddenUserMessage: string,
+  ): Promise<void> {
+    const failedBlocks = this.emittedAssistantBlocks.length > 0
+      ? [...this.emittedAssistantBlocks]
+      : [{ type: "text" as const, text: failedText }];
+    this.emittedAssistantBlocks = [];
+    this.canonicalAssistantMessages.pop();
+    this.assistantText = "";
+    this.forceNoThinking = false;
+    this.setPhase("executing");
+    this.sse.agent({ type: "response_clear" });
+
+    let systemPrompt = await buildSystemPrompt(this.session, this.meta.turnId);
+    const runtimeModel = await this.resolveRuntimeModel();
+    let messages = this.retryBaseMessages.length > 0
+      ? [...this.retryBaseMessages]
+      : await buildMessages(this.session, this.userMessage, runtimeModel);
+    if (this.retryBaseMessages.length === 0) {
+      messages.push({ role: "assistant", content: failedBlocks });
+    }
+    messages.push({ role: "user", content: hiddenUserMessage });
+    let toolDefs = await buildToolDefs({
+      session: this.session,
+      sse: this.sse,
+      turnId: this.meta.turnId,
+      userText: this.userMessage.text,
+      planMode: this.planMode || safeGetPermissionMode(this.session) === "plan",
+    });
+
+    for (let iter = 0; iter < Turn.MAX_ITERATIONS; iter += 1) {
+      const preLLM = await this.session.agent.hooks.runPre(
+        "beforeLLMCall",
+        { messages, tools: toolDefs, system: systemPrompt, iteration: iter },
+        this.hookCtx("beforeLLMCall"),
+      );
+      if (preLLM.action === "block") {
+        const reason = preLLM.reason ?? "LLM retry call blocked by hook";
+        this.sse.agent({ type: "text_delta", delta: `⚠️ ${reason}` });
+        throw new Error(`beforeLLMCall blocked: ${reason}`);
+      }
+      if (preLLM.action === "skip") return;
+      ({ messages, tools: toolDefs, system: systemPrompt } = preLLM.args);
+
+      const { blocks, stopReason, usage } = await readOneStream(
+        {
+          llm: this.session.agent.llm,
+          model: runtimeModel,
+          sse: this.sse,
+          abortSignal: this.interruptController.signal,
+          onError: (code, err) => this.emitError(code, err),
+        },
+        systemPrompt,
+        messages,
+        toolDefs as LLMToolDef[],
+        this.forceNoThinking ? { thinkingOverride: { type: "disabled" } } : undefined,
+      );
+      this.forceNoThinking = false;
+      this.recordUsage(usage);
+      this.emittedAssistantBlocks.push(...blocks);
+      this.canonicalAssistantMessages.push(blocks);
+      void this.session.agent.hooks.runPost(
+        "afterLLMCall",
+        { messages, tools: toolDefs, system: systemPrompt, iteration: iter, stopReason, assistantBlocks: blocks },
+        this.hookCtx("afterLLMCall"),
+      );
+
+      const stateRef = {
+        recoveryAttempt: this.recoveryAttempt,
+        assistantTextSoFarLen: this.assistantTextSoFarLen(),
+      };
+      const decision = handleStopReason(
+        {
+          stageAuditEvent: (e, d) => this.stageAuditEvent(e, d),
+          logUnknown: (raw, t) =>
+            console.warn(`[core-agent] unknown stop_reason=${String(raw)} turnId=${t}`),
+        },
+        stateRef,
+        { stopReasonRaw: stopReason, blocks, iter, turnId: this.meta.turnId, messages },
+      );
+      this.recoveryAttempt = stateRef.recoveryAttempt;
+
+      if (decision.kind === "finalise") {
+        this.retryBaseMessages = [
+          ...messages,
+          { role: "assistant", content: blocks },
+        ];
+        return;
+      }
+      if (decision.kind === "recover") {
+        iter -= 1;
+        continue;
+      }
+      const dispatched = await this.runToolsVia(this.sse, decision.toolUses, toolDefs);
+      this.appendToolTurn(messages, blocks, dispatched);
+    }
+    throw new Error(`turn exceeded ${Turn.MAX_ITERATIONS} retry tool iterations`);
+  }
+
+  private async recordRetryEvent(
+    reason: string,
+    attempt: number,
+    maxAttempts: number,
+  ): Promise<void> {
+    const controlEvents = (this.session as unknown as {
+      controlEvents?: {
+        append: (event: {
+          type: "retry";
+          turnId: string;
+          reason: string;
+          attempt: number;
+          maxAttempts: number;
+          visibleToUser: boolean;
+        }) => Promise<unknown>;
+      };
+    }).controlEvents;
+    if (!controlEvents) {
+      throw new Error("control event ledger unavailable for retry");
+    }
+    await controlEvents.append({
+      type: "retry",
+      turnId: this.meta.turnId,
+      reason,
+      attempt,
+      maxAttempts,
+      visibleToUser: true,
+    });
+  }
+
+  private throwIfInterrupted(): void {
+    if (!this.interruptState) return;
+    const reason = this.interruptState.handoffRequested
+      ? "user_interrupt_handoff"
+      : "user_interrupt";
+    throw new TurnInterruptedError(
+      reason,
+      this.interruptState.handoffRequested,
+      this.interruptState.source,
+    );
+  }
+
   private recordUsage(u: LLMUsage): void {
     this.meta.usage.inputTokens = Math.max(this.meta.usage.inputTokens, u.inputTokens);
     this.meta.usage.outputTokens += u.outputTokens;
     this.meta.usage.costUsd = computeUsd(
-      this.session.agent.config.model,
+      this.currentModel(),
       this.meta.usage.inputTokens,
       this.meta.usage.outputTokens,
     );
+  }
+
+  private currentModel(): string {
+    return this.runtimeModel ?? this.session.agent.config.model;
   }
 
   private buildCommitCtx(): CommitPipelineContext {
@@ -471,6 +723,7 @@ export class Turn {
       setPhase: (phase) => this.setPhase(phase),
       meta: this.meta,
       emittedAssistantBlocks: this.emittedAssistantBlocks,
+      canonicalAssistantMessages: this.canonicalAssistantMessages,
       commitRetryCount: this.commitRetryCount,
       setAssistantText: (text) => { this.assistantText = text; },
       rejectAllPendingAsks: (reason) => this.asks.rejectAll(reason),
@@ -483,9 +736,39 @@ export class Turn {
     this.sse.agent({ type: "turn_phase", turnId: this.meta.turnId, phase: next });
   }
 
+  setStopReason(reason: TurnStopReason): void {
+    this.meta.stopReason = reason;
+  }
+
   private emitError(code: string, err: unknown): void {
     const message = err instanceof Error ? err.message : String(err);
     this.sse.agent({ type: "error", code, message });
+  }
+
+  private clearUserVisibleDraftForDeferredFinalise(
+    sse: SseWriter,
+    reason: string,
+  ): void {
+    let removedTextLen = 0;
+    let removedThinkingLen = 0;
+    for (const block of this.emittedAssistantBlocks) {
+      if (block.type === "text") {
+        removedTextLen += block.text.length;
+      } else if (block.type === "thinking") {
+        removedThinkingLen += block.thinking.length;
+      }
+    }
+    if (removedTextLen === 0 && removedThinkingLen === 0) return;
+
+    this.emittedAssistantBlocks = this.emittedAssistantBlocks.filter(
+      (block) => block.type !== "text" && block.type !== "thinking",
+    );
+    sse.agent({ type: "response_clear" });
+    console.log(
+      `[core-agent] cleared deferred visible draft reason=${reason}` +
+      ` textLen=${removedTextLen} thinkingLen=${removedThinkingLen}` +
+      ` turnId=${this.meta.turnId}`,
+    );
   }
 
   /** Fire-and-forget audit event from within the turn loop (§6.G). */

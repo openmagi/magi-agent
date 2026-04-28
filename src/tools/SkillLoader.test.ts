@@ -22,7 +22,6 @@
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, it, expect } from "vitest";
 import type { ToolContext } from "../Tool.js";
 import {
@@ -30,6 +29,22 @@ import {
   PROMPT_BODY_MAX_BYTES,
 } from "./SkillLoader.js";
 import { filterToolsByIntent } from "../rules/IntentClassifier.js";
+import { Workspace } from "../storage/Workspace.js";
+
+function assertObjectSchemasDeclareProperties(schema: unknown, path = "$"): void {
+  if (!schema || typeof schema !== "object") return;
+  const node = schema as Record<string, unknown>;
+
+  if (node["type"] === "object") {
+    expect(node, `${path} is an object schema without properties`).toHaveProperty(
+      "properties",
+    );
+  }
+
+  for (const [key, value] of Object.entries(node)) {
+    assertObjectSchemasDeclareProperties(value, `${path}.${key}`);
+  }
+}
 
 function makeCtx(workspaceRoot: string): ToolContext {
   return {
@@ -107,6 +122,7 @@ describe("SkillLoader — Phase 2b prompt-only path", () => {
       scriptBacked: false,
       promptOnly: true,
     });
+    assertObjectSchemasDeclareProperties(tool.inputSchema);
   });
 
   it("(b) explicit `kind: prompt` wins even when input_schema is present", async () => {
@@ -133,6 +149,7 @@ describe("SkillLoader — Phase 2b prompt-only path", () => {
     expect(report.issues).toEqual([]);
     expect(tools).toHaveLength(1);
     expect(report.loaded[0]?.promptOnly).toBe(true);
+    assertObjectSchemasDeclareProperties(tools[0]!.inputSchema);
   });
 
   it("(c) prompt-only tool execute() returns SKILL.md body as content", async () => {
@@ -282,6 +299,51 @@ describe("SkillLoader — Phase 2b prompt-only path", () => {
     expect(loadedByName["script-one"]?.scriptBacked).toBe(true);
   });
 
+  it("script-backed skills execute with the effective child workspace cwd and env", async () => {
+    const scriptDir = path.join(skillsDir, "script-cwd");
+    await fs.mkdir(scriptDir, { recursive: true });
+    await fs.writeFile(
+      path.join(scriptDir, "SKILL.md"),
+      [
+        "---",
+        "name: script-cwd",
+        'description: "Reports the effective workspace cwd."',
+        "entry: run.sh",
+        'input_schema: { "type": "object" }',
+        "---",
+        "reference body",
+      ].join("\n"),
+      "utf8",
+    );
+    const scriptPath = path.join(scriptDir, "run.sh");
+    await fs.writeFile(
+      scriptPath,
+      [
+        "#!/bin/sh",
+        "node -e 'console.log(JSON.stringify({pwd: process.cwd(), workspace: process.env.CLAWY_WORKSPACE_ROOT, input: process.env.CLAWY_SKILL_INPUT}))'",
+      ].join("\n"),
+      "utf8",
+    );
+    await fs.chmod(scriptPath, 0o755);
+
+    const { tools } = await loadSkillsFromDir({ skillsDir, workspaceRoot });
+    const spawnRoot = path.join(workspaceRoot, ".spawn", "task-child");
+    await fs.mkdir(spawnRoot, { recursive: true });
+    const ctx: ToolContext = {
+      ...makeCtx(spawnRoot),
+      spawnWorkspace: new Workspace(spawnRoot),
+    };
+    const canonicalSpawnRoot = await fs.realpath(spawnRoot);
+
+    const res = await tools[0]!.execute({ hello: "child" }, ctx);
+
+    expect(res.status).toBe("ok");
+    const output = res.output as { pwd: string; workspace?: string; input: string };
+    expect(output.pwd).toBe(canonicalSpawnRoot);
+    expect(output.workspace).toBe(canonicalSpawnRoot);
+    expect(output.input).toBe(JSON.stringify({ hello: "child" }));
+  });
+
   it("(g) Phase 2a contract — `kind: skill` missing input_schema is rejected", async () => {
     await writeSkill(
       skillsDir,
@@ -332,62 +394,70 @@ describe("SkillLoader — Phase 2b prompt-only path", () => {
     expect(report.issues[0]?.reason).toBe("entry_not_found");
   });
 
-  it("(i) loads POS/Tossplace product templates with routing tags", async () => {
-    const repoRoot = path.resolve(
-      path.dirname(fileURLToPath(import.meta.url)),
-      "../../../../..",
+  it("(i) loads runtime_hooks from skill frontmatter into the report", async () => {
+    await writeSkill(
+      skillsDir,
+      "dangerous-runner",
+      [
+        "---",
+        "name: dangerous-runner",
+        'description: "Controls dangerous runner access."',
+        "runtime_hooks:",
+        "  - name: ask-before-bash",
+        "    point: beforeToolUse",
+        '    if: "Bash(*)"',
+        "    decision: ask",
+        '    reason: "Confirm shell access from this skill."',
+        "    priority: 44",
+        "---",
+        "body",
+      ].join("\n"),
     );
-    const templatesDir = path.join(repoRoot, "src/lib/templates/skills");
-    const skillNames = [
-      "pos-sales",
-      "pos-menu-strategy",
-      "pos-accounting",
-      "pos-inventory",
-      "tossplace-pos",
-    ];
-    for (const skillName of skillNames) {
-      await fs.cp(
-        path.join(templatesDir, skillName),
-        path.join(skillsDir, skillName),
-        { recursive: true },
-      );
-    }
 
     const { tools, report } = await loadSkillsFromDir({
       skillsDir,
       workspaceRoot,
     });
 
+    expect(tools).toHaveLength(1);
     expect(report.issues).toEqual([]);
-    expect(tools.map((t) => t.name).sort()).toEqual(skillNames.sort());
-    for (const tool of tools) {
-      expect(tool.tags).toContain("pos");
-      expect(tool.tags).toContain("tossplace");
-    }
-    expect(tools.find((t) => t.name === "pos-sales")?.tags).toEqual(
-      expect.arrayContaining(["sales", "store"]),
-    );
+    expect(report.runtimeHooks).toHaveLength(1);
+    expect(report.runtimeHooks[0]).toMatchObject({
+      skillName: "dangerous-runner",
+      name: "ask-before-bash",
+      point: "beforeToolUse",
+      if: "Bash(*)",
+      action: "permission_decision",
+      decision: "ask",
+      priority: 44,
+    });
+    expect(report.loaded[0]?.runtimeHooks).toBe(1);
   });
 
-  it("(j) keeps tagged skills inside the general fallback cap", () => {
-    const coreTool = { name: "FileRead", kind: "core" as const };
-    const untagged = Array.from({ length: 10 }, (_, i) => ({
-      name: `a-untagged-${String(i).padStart(2, "0")}`,
-      kind: "skill" as const,
-      tags: [],
-    }));
-    const posTool = {
-      name: "pos-sales",
-      kind: "skill" as const,
-      tags: ["pos", "tossplace", "sales"],
-    };
-
-    const filtered = filterToolsByIntent(
-      [coreTool, ...untagged, posTool],
-      ["general"],
-      4,
+  it("(j) reports invalid runtime_hooks without rejecting the skill", async () => {
+    await writeSkill(
+      skillsDir,
+      "bad-runtime-hook",
+      [
+        "---",
+        "name: bad-runtime-hook",
+        'description: "Keeps loading despite bad runtime hook."',
+        "runtime_hooks:",
+        "  - point: beforeToolUse",
+        "    decision: ask",
+        "---",
+        "body",
+      ].join("\n"),
     );
 
-    expect(filtered.map((t) => t.name)).toContain("pos-sales");
+    const { tools, report } = await loadSkillsFromDir({
+      skillsDir,
+      workspaceRoot,
+    });
+
+    expect(tools).toHaveLength(1);
+    expect(report.runtimeHooks).toEqual([]);
+    expect(report.issues).toHaveLength(1);
+    expect(report.issues[0]?.reason).toBe("runtime_hook_invalid");
   });
 });

@@ -3,7 +3,7 @@
  *
  * Design reference:
  * - `docs/plans/2026-04-19-core-agent-phase-3-plan.md` §3 / T1-01
- * - `docs/plans/2026-04-19-clawy-agent-design.md` §7.12.c
+ * - `docs/plans/2026-04-19-clawy-core-agent-design.md` §7.12.c
  *   (memory fencing format)
  *
  * On the first iteration of each user turn, this hook queries qmd
@@ -34,6 +34,7 @@ import path from "node:path";
 import { parse as parseYaml } from "yaml";
 import type { RegisteredHook, HookContext } from "../types.js";
 import type { LLMMessage } from "../../transport/LLMClient.js";
+import type { HipocampusService, RootMemory } from "../../services/memory/HipocampusService.js";
 
 /** Soft budget for total injected content (bytes, UTF-8). */
 const MAX_BYTES_INJECTED = 5_000;
@@ -46,6 +47,7 @@ const DEFAULT_COLLECTION = "memory";
 const DEFAULT_LIMIT = 5;
 /** Default qmd minimum score. */
 const DEFAULT_MIN_SCORE = 0.3;
+const MAX_ROOT_BYTES = 1_500;
 
 interface QmdResult {
   path: string;
@@ -243,6 +245,27 @@ export function buildMemoryFence(
   return { fence, bytes: Buffer.byteLength(fence, "utf8"), used };
 }
 
+export function buildRootMemoryFence(
+  root: RootMemory,
+  maxBytes: number = MAX_ROOT_BYTES,
+): { fence: string; bytes: number } {
+  const header = `<memory-root source="hipocampus-root" tier="L2">`;
+  const footer = `</memory-root>`;
+  const prefix = `[path: ${root.path}]\n`;
+  const overhead =
+    Buffer.byteLength(header, "utf8") +
+    Buffer.byteLength(footer, "utf8") +
+    Buffer.byteLength(prefix, "utf8") +
+    3;
+  const remaining = Math.max(0, maxBytes - overhead);
+  const content =
+    Buffer.byteLength(root.content, "utf8") <= remaining
+      ? root.content
+      : `${sliceUtf8Bytes(root.content, Math.max(0, remaining - 1))}…`;
+  const fence = `${header}\n${prefix}${content}\n${footer}`;
+  return { fence, bytes: Buffer.byteLength(fence, "utf8") };
+}
+
 /** Slice `s` to at most `maxBytes` UTF-8 bytes without splitting a
  * multi-byte codepoint. */
 function sliceUtf8Bytes(s: string, maxBytes: number): string {
@@ -262,6 +285,7 @@ export interface MemoryInjectorOptions {
     search(query: string, opts?: { collection?: string; limit?: number; minScore?: number }): Promise<QmdResult[]>;
     hybridSearch?(query: string, opts?: { collection?: string; limit?: number; minScore?: number }): Promise<QmdResult[]>;
   };
+  hipocampus?: Pick<HipocampusService, "recall">;
 }
 
 export function makeMemoryInjectorHook(
@@ -297,11 +321,25 @@ export function makeMemoryInjectorHook(
       const limit = getLimit();
       const minScore = getMinScore();
       const startedAt = Date.now();
+      let root: RootMemory | null = null;
 
       // Try native QmdManager first (no HTTP), fall back to legacy HTTP.
       // Use hybridSearch (BM25 + vector) when available for better recall.
       let results: QmdResult[] | null = null;
-      if (opts.qmdManager?.isReady()) {
+      if (opts.hipocampus) {
+        try {
+          const recall = await opts.hipocampus.recall(userText.slice(0, 4_000), {
+            collection,
+            limit,
+            minScore,
+          });
+          root = recall.root;
+          results = recall.results;
+        } catch {
+          results = null;
+          root = null;
+        }
+      } else if (opts.qmdManager?.isReady()) {
         try {
           const searchFn = opts.qmdManager.hybridSearch
             ? opts.qmdManager.hybridSearch.bind(opts.qmdManager)
@@ -336,7 +374,7 @@ export function makeMemoryInjectorHook(
         return { action: "continue" };
       }
 
-      if (results.length === 0) {
+      if (results.length === 0 && !root) {
         ctx.log("info", "[memoryInjector] no matches", {
           collection,
           durationMs,
@@ -344,10 +382,28 @@ export function makeMemoryInjectorHook(
         return { action: "continue" };
       }
 
-      const { fence, bytes, used } = buildMemoryFence(results);
-      if (fence.length === 0 || used === 0) {
+      const fences: string[] = [];
+      let bytes = 0;
+      let used = 0;
+      if (root) {
+        const rootFence = buildRootMemoryFence(root);
+        if (rootFence.fence.length > 0) {
+          fences.push(rootFence.fence);
+          bytes += rootFence.bytes;
+        }
+      }
+      if (results.length > 0) {
+        const recallFence = buildMemoryFence(results);
+        if (recallFence.fence.length > 0 && recallFence.used > 0) {
+          fences.push(recallFence.fence);
+          bytes += recallFence.bytes;
+          used += recallFence.used;
+        }
+      }
+      if (fences.length === 0) {
         return { action: "continue" };
       }
+      const fence = fences.join("\n\n");
 
       // Audit trace — use rule_check emit (the hook-accessible audit
       // pathway per citationGate / answerVerifier pattern).
@@ -361,6 +417,7 @@ export function makeMemoryInjectorHook(
       ctx.log("info", "[memoryInjector] memory_injected", {
         query: userText.slice(0, 120),
         resultCount: used,
+        rootIncluded: root !== null,
         bytesInjected: bytes,
         durationMs,
       });

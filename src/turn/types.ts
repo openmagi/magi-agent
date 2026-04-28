@@ -16,6 +16,18 @@ export type TurnStatus =
   | "committed"
   | "aborted";
 
+export type TurnStopReason =
+  | "end_turn"
+  | "max_tokens_recovered"
+  | "unknown_tool_loop"
+  | "iteration_limit"
+  | "permission_denied"
+  | "permission_timeout"
+  | "budget_exceeded"
+  | "compaction_impossible"
+  | "structured_output_retry_exhausted"
+  | "aborted";
+
 export interface TurnMeta {
   turnId: string;
   sessionKey: string;
@@ -24,6 +36,7 @@ export interface TurnMeta {
   declaredRoute: TurnRoute;
   status: TurnStatus;
   usage: TokenUsage;
+  stopReason?: TurnStopReason;
 }
 
 export interface PlanResult {
@@ -40,4 +53,5 @@ export interface VerificationReport {
 export interface TurnResult {
   meta: TurnMeta;
   assistantText: string;
+  stopReason: TurnStopReason;
 }

@@ -41,6 +41,10 @@ import {
 
 export const DEFAULT_SEALED_GLOBS: readonly string[] = [
   "SOUL.md",
+  "AGENTS.md",
+  "TOOLS.md",
+  "CLAUDE.md",
+  "HEARTBEAT.md",
   "identity.md",
   "rules.md",
   "soul.md",
@@ -71,6 +75,14 @@ interface PendingUpdate {
  * the two hooks fire in sequence on the same turn.
  */
 const PENDING_UPDATES_BY_TURN = new Map<string, PendingUpdate[]>();
+
+/**
+ * Sealed files can already differ from the manifest before a turn
+ * starts, for example after PVC restore, init-container sync, or an
+ * operator-side workspace update. Snapshot that drift so beforeCommit
+ * only blocks changes made after this turn began.
+ */
+const PREEXISTING_DRIFT_BY_TURN = new Map<string, Map<string, string>>();
 
 function isEnabledByEnv(): boolean {
   const raw = process.env.CORE_AGENT_SEALED_FILES;
@@ -333,6 +345,44 @@ async function computeDiff(
   return { changed, firstRun: manifest === null, currentHashes };
 }
 
+function makeBeforeTurnStartHook(opts: SealedFilesOptions): RegisteredHook<"beforeTurnStart"> {
+  return {
+    name: "builtin:sealed-files:beforeTurnStart",
+    point: "beforeTurnStart",
+    priority: 70,
+    blocking: false,
+    timeoutMs: 5_000,
+    handler: async (_args, ctx: HookContext) => {
+      PREEXISTING_DRIFT_BY_TURN.delete(ctx.turnId);
+      if (!isEnabledByEnv()) return { action: "continue" };
+
+      const config = await readConfig(opts.workspaceRoot);
+      const globs = resolveSealedGlobs(config);
+      const manifest = await readManifest(opts.workspaceRoot);
+      if (!manifest) return { action: "continue" };
+
+      const diff = await computeDiff(opts.workspaceRoot, globs, manifest);
+      if (diff.changed.length === 0) return { action: "continue" };
+
+      PREEXISTING_DRIFT_BY_TURN.set(
+        ctx.turnId,
+        new Map(diff.changed.map((ch) => [ch.path, ch.sha256])),
+      );
+      ctx.emit({
+        type: "rule_check",
+        ruleId: "sealed-files",
+        verdict: "ok",
+        detail: `sealed_files_preexisting_drift count=${diff.changed.length}`,
+      });
+      ctx.log("info", "[sealedFiles] pre-existing sealed drift snapshotted", {
+        turnId: ctx.turnId,
+        paths: diff.changed.map((ch) => ch.path),
+      });
+      return { action: "continue" };
+    },
+  };
+}
+
 /**
  * beforeCommit hook — computes the diff and either blocks the turn or
  * records the allowed changes for `afterCommit` to persist.
@@ -344,7 +394,7 @@ function makeBeforeCommitHook(opts: SealedFilesOptions): RegisteredHook<"beforeC
     priority: 70,
     blocking: true,
     timeoutMs: 5_000,
-    handler: async ({ userMessage, retryCount }, ctx: HookContext) => {
+    handler: async ({ userMessage }, ctx: HookContext) => {
       if (!isEnabledByEnv()) return { action: "continue" };
 
       const config = await readConfig(opts.workspaceRoot);
@@ -382,13 +432,20 @@ function makeBeforeCommitHook(opts: SealedFilesOptions): RegisteredHook<"beforeC
       const configTurnAllowlist = resolveConfigTurnAllowlist(config);
       const turnAllowed = configTurnAllowlist.includes(ctx.turnId);
       const unsealPatterns = extractUnsealPatterns(userMessage);
+      const preexistingDrift = PREEXISTING_DRIFT_BY_TURN.get(ctx.turnId);
 
       const violations: string[] = [];
       const bypassedByConfig: string[] = [];
       const bypassedByUnseal: Array<{ path: string; pattern: string }> = [];
+      const bypassedAsPreexisting: string[] = [];
       const pendingUpdates: PendingUpdate[] = [];
 
       for (const ch of diff.changed) {
+        if (preexistingDrift?.get(ch.path) === ch.sha256) {
+          bypassedAsPreexisting.push(ch.path);
+          if (ch.sha256 !== "") pendingUpdates.push({ path: ch.path, sha256: ch.sha256 });
+          continue;
+        }
         if (turnAllowed) {
           bypassedByConfig.push(ch.path);
           if (ch.sha256 !== "") pendingUpdates.push({ path: ch.path, sha256: ch.sha256 });
@@ -435,19 +492,20 @@ function makeBeforeCommitHook(opts: SealedFilesOptions): RegisteredHook<"beforeC
           pattern,
         });
       }
+      for (const p of bypassedAsPreexisting) {
+        ctx.emit({
+          type: "rule_check",
+          ruleId: "sealed-files",
+          verdict: "ok",
+          detail: `sealed_files_preexisting_drift path=${p}`,
+        });
+        ctx.log("info", "[sealedFiles] sealed_files_preexisting_drift", {
+          turnId: ctx.turnId,
+          path: p,
+        });
+      }
 
       if (violations.length > 0) {
-        // Fail-open after retries so commit retry loop can progress.
-        // Without this, sealed-files always blocks → turn aborts → empty response.
-        const MAX_SEALED_RETRIES = 1;
-        if (retryCount >= MAX_SEALED_RETRIES) {
-          ctx.log("warn", "[sealedFiles] retry budget exhausted; failing open", {
-            turnId: ctx.turnId,
-            paths: violations,
-            retryCount,
-          });
-          return { action: "continue" };
-        }
         ctx.emit({
           type: "rule_check",
           ruleId: "sealed-files",
@@ -461,6 +519,7 @@ function makeBeforeCommitHook(opts: SealedFilesOptions): RegisteredHook<"beforeC
         // Discard any pending updates — a mixed allow+violation turn
         // should not silently persist the allowed half.
         PENDING_UPDATES_BY_TURN.delete(ctx.turnId);
+        PREEXISTING_DRIFT_BY_TURN.delete(ctx.turnId);
 
         // Circuit-breaker integration: record the repeated failure so
         // a retry cascade (new turnId per attempt) hits the cooldown
@@ -498,7 +557,7 @@ function makeBeforeCommitHook(opts: SealedFilesOptions): RegisteredHook<"beforeC
 
         return {
           action: "block",
-          reason: `[RULE:SEALED_FILES] Modified: ${violations.join(", ")}. These files are sealed by agent.config.yaml → sealed_files. Revert the changes, or have the user re-issue the request with an [UNSEAL: <path>] marker for each intentionally-mutated file.${cooldownSuffix}`,
+          reason: `[RULE:SEALED_FILES] Sealed files changed without explicit approval. Revert the sealed-file edits before retrying, or ask the user for explicit [UNSEAL:<path>] approval for each intended path.${cooldownSuffix}`,
         };
       }
 
@@ -525,10 +584,11 @@ function makeAfterCommitHook(opts: SealedFilesOptions): RegisteredHook<"afterCom
     blocking: false,
     timeoutMs: 5_000,
     handler: async (_args, ctx: HookContext) => {
-      if (!isEnabledByEnv()) return;
       const pending = PENDING_UPDATES_BY_TURN.get(ctx.turnId);
-      if (!pending || pending.length === 0) return;
       PENDING_UPDATES_BY_TURN.delete(ctx.turnId);
+      PREEXISTING_DRIFT_BY_TURN.delete(ctx.turnId);
+      if (!isEnabledByEnv()) return;
+      if (!pending || pending.length === 0) return;
       const manifest = (await readManifest(opts.workspaceRoot)) ?? {};
       const now = Date.now();
       for (const upd of pending) {
@@ -551,12 +611,14 @@ function makeAfterCommitHook(opts: SealedFilesOptions): RegisteredHook<"afterCom
 }
 
 export interface SealedFilesHooks {
+  beforeTurnStart: RegisteredHook<"beforeTurnStart">;
   beforeCommit: RegisteredHook<"beforeCommit">;
   afterCommit: RegisteredHook<"afterCommit">;
 }
 
 export function makeSealedFilesHooks(opts: SealedFilesOptions): SealedFilesHooks {
   return {
+    beforeTurnStart: makeBeforeTurnStartHook(opts),
     beforeCommit: makeBeforeCommitHook(opts),
     afterCommit: makeAfterCommitHook(opts),
   };
@@ -565,7 +627,10 @@ export function makeSealedFilesHooks(opts: SealedFilesOptions): SealedFilesHooks
 /** Test helpers — NOT public API. Exported only so the unit tests can
  * poke the internal per-turn pending-updates map. */
 export const __testing = {
-  clearPending: (): void => PENDING_UPDATES_BY_TURN.clear(),
+  clearPending: (): void => {
+    PENDING_UPDATES_BY_TURN.clear();
+    PREEXISTING_DRIFT_BY_TURN.clear();
+  },
   getPending: (turnId: string): ReadonlyArray<PendingUpdate> | undefined =>
     PENDING_UPDATES_BY_TURN.get(turnId),
 };

@@ -9,7 +9,12 @@
  * moderation, enrichment) has a first-class home.
  */
 
-import type { LLMClient, LLMMessage, LLMToolDef } from "../transport/LLMClient.js";
+import type {
+  LLMClient,
+  LLMMessage,
+  LLMToolDef,
+  ProviderHealthContext,
+} from "../transport/LLMClient.js";
 import type { AgentEvent } from "../transport/SseWriter.js";
 import type { TranscriptEntry } from "../storage/Transcript.js";
 import type {
@@ -79,6 +84,28 @@ export interface HookContext {
   /** Remaining time the hook has to return, in ms. */
   readonly deadlineMs: number;
   /**
+   * Optional workflow-native debugging state manager. Populated by
+   * Agent so debug-related hooks and gates can coordinate on the same
+   * per-session/per-turn state without reparsing the transcript.
+   */
+  readonly debugWorkflow?: {
+    getTurnState(
+      sessionKey: string,
+      turnId: string,
+    ): {
+      classified: boolean;
+      investigated: boolean;
+      hypothesized: boolean;
+      patched: boolean;
+      verified: boolean;
+      warnings: string[];
+    } | null;
+  };
+  /** Deterministic provider-health metadata from the most recent API
+   * proxy response. Used by harness-level verification hooks; this is
+   * not model self-assessment. */
+  readonly providerHealth?: ProviderHealthContext | null;
+  /**
    * Optional human-in-the-loop delegate. Populated by Turn.ts for
    * phases that can reasonably interact with the user (currently
    * `beforeToolUse` only) so a hook returning
@@ -142,6 +169,12 @@ export interface HookArgs {
      * gates (§7.13) to bound retry loops.
      */
     retryCount: number;
+    /**
+     * Workspace-relative paths written by the current turn, derived
+     * from FileWrite/FileEdit tool calls. Hooks should use this to
+     * distinguish current-turn writes from pre-existing PVC drift.
+     */
+    filesChanged?: string[];
   };
   afterCommit: { assistantText: string };
   onAbort: { reason: string };

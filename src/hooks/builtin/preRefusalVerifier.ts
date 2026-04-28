@@ -33,32 +33,6 @@
 import type { RegisteredHook, HookContext } from "../types.js";
 import type { TranscriptEntry } from "../../storage/Transcript.js";
 
-/** Patterns that signal a refusal / "I don't have this" draft.
- *
- * Kept as a simple string list inside the module (YAGNI — external
- * i18n JSON lives in the design doc as a future item, not shipped
- * yet). Korean + English, case-insensitive for English.
- */
-export const REFUSAL_PATTERNS: RegExp[] = [
-  // Korean: "KB에/기억/memory ... 없 / 못 찾 / 저장되어 있지 않"
-  /(?:KB에|기억|memory).{0,40}(?:없|못\s*찾|저장되어\s*있지\s*않)/u,
-  // Korean: "저장되어 있지 않" standalone
-  /저장되어\s*있지\s*않/u,
-  // Korean: "확인 불가"
-  /확인\s*불가/u,
-  // Korean: "찾을 수 없" (common refusal)
-  /찾을\s*수\s*없/u,
-  // English: "I/we don't have/see/find/know ..."
-  /(?:\bI\b|\bwe\b)\s+(?:do\s+not|don[''`]t)\s+(?:have|see|find|know)/i,
-  // English: "cannot/can't find/locate/verify/confirm ..."
-  /(?:cannot|can[''`]t)\s+(?:find|locate|verify|confirm)/i,
-  // English: "unable to confirm/verify/find"
-  /unable\s+to\s+(?:confirm|verify|find|locate)/i,
-  // English: "no record of" / "not in (my|the) (KB|memory|records)"
-  /no\s+record\s+of/i,
-  /not\s+in\s+(?:my|the)\s+(?:kb|knowledge|memory|records?)/i,
-];
-
 /** Tool names whose presence in the turn's transcript means the bot
  * DID investigate before drafting — skips the block. */
 const INVESTIGATION_TOOLS = new Set([
@@ -71,10 +45,6 @@ const INVESTIGATION_TOOLS = new Set([
 const MAX_RETRIES = 1;
 
 export interface PreRefusalVerifierAgent {
-  /** Return all transcript entries visible to this hook — the
-   * handler filters by `ctx.turnId` itself. When the delegate isn't
-   * wired (unit tests not exercising the full transcript), returning
-   * `null` causes the hook to fall back to `ctx.transcript`. */
   readSessionTranscript(
     sessionKey: string,
   ): Promise<ReadonlyArray<TranscriptEntry> | null>;
@@ -87,13 +57,43 @@ function isEnabled(): boolean {
   return v === "" || v === "on" || v === "true" || v === "1";
 }
 
-/** Exported for tests — true if any pattern matches. */
-export function matchesRefusal(text: string): boolean {
-  if (!text) return false;
-  for (const p of REFUSAL_PATTERNS) {
-    if (p.test(text)) return true;
+const REFUSAL_CLASSIFIER_PROMPT = `You classify whether an AI assistant's response is a LAZY REFUSAL — claiming something doesn't exist or can't be found WITHOUT having actually investigated.
+
+LAZY REFUSAL (YES):
+- "KB에 해당 정보가 없습니다" (no info in KB) — without searching
+- "I don't have access to that file" — without trying to read it
+- "확인할 수 없습니다" (cannot verify) — without running any tools
+- "찾을 수 없습니다" (cannot find) — without searching
+- "저장되어 있지 않습니다" (not stored) — without checking
+
+NOT A REFUSAL (NO):
+- "검색해봤는데 결과가 없습니다" (searched but no results) — investigated first
+- "파일을 확인했는데 해당 내용이 없습니다" (checked file, content not there)
+- "I searched the KB and found no matching documents"
+- Legitimate "not found" after actual tool use
+- Normal responses without refusal language
+
+Reply ONLY: YES or NO`;
+
+/** LLM-based refusal classification. No regex fallback. */
+export async function matchesRefusal(text: string, ctx?: HookContext): Promise<boolean> {
+  if (!text || text.trim().length === 0) return false;
+  if (!ctx?.llm) return false; // No LLM = fail-open
+
+  try {
+    let result = "";
+    for await (const event of ctx.llm.stream({
+      model: "claude-haiku-4-5",
+      system: REFUSAL_CLASSIFIER_PROMPT,
+      messages: [{ role: "user", content: [{ type: "text", text: text.slice(0, 500) }] }],
+      max_tokens: 10,
+    })) {
+      if (event.kind === "text_delta") result += event.delta;
+    }
+    return result.trim().toUpperCase().startsWith("YES");
+  } catch {
+    return false; // Fail-open on LLM error
   }
-  return false;
 }
 
 /** Exported for tests — count investigation tool calls in the turn's
@@ -138,7 +138,7 @@ export function makePreRefusalVerifierHook(
           return { action: "continue" };
         }
 
-        if (!matchesRefusal(assistantText)) {
+        if (!(await matchesRefusal(assistantText, ctx))) {
           return { action: "continue" };
         }
 

@@ -32,6 +32,7 @@ export interface LLMStreamReaderDeps {
   readonly llm: LLMClient;
   readonly model: string;
   readonly sse: SseWriter;
+  readonly abortSignal?: AbortSignal;
   /**
    * Called when the stream emits an `error` event or the upstream
    * connect throws. Receives `(code, err)`; the reader then re-throws
@@ -64,6 +65,7 @@ export async function readOne(
   toolDefs: LLMToolDef[],
   options?: ReadOneOptions,
 ): Promise<LLMStreamReaderResult> {
+  throwIfAborted(deps.abortSignal);
   // Per-block accumulators — indexed by blockIndex from the SSE.
   const textByIndex = new Map<number, string>();
   // T4-18: thinking blocks must be preserved across iterations with
@@ -87,6 +89,7 @@ export async function readOne(
       system: systemPrompt || undefined,
       messages,
       tools: toolDefs.length ? toolDefs : undefined,
+      ...(deps.abortSignal ? { signal: deps.abortSignal } : {}),
       ...(options?.thinkingOverride ? { thinking: options.thinkingOverride } : {}),
     });
   } catch (err) {
@@ -103,6 +106,7 @@ export async function readOne(
   const repetitionDetector = new RepetitionDetector();
 
   for await (const evt of stream) {
+    throwIfAborted(deps.abortSignal);
     switch (evt.kind) {
       case "text_delta": {
         const prev = textByIndex.get(evt.blockIndex) ?? "";
@@ -113,7 +117,7 @@ export async function readOne(
         const repResult = repetitionDetector.feed(evt.delta);
         if (repResult.detected) {
           console.warn(
-            `[clawy-agent] REPETITION DETECTED — aborting stream.` +
+            `[core-agent] REPETITION DETECTED — aborting stream.` +
             ` pattern="${repResult.pattern}" count=${repResult.count}`,
           );
           deps.sse.agent({
@@ -194,6 +198,7 @@ export async function readOne(
     }
     // Break the stream consumption loop if repetition was detected.
     if (repetitionAborted) break;
+    throwIfAborted(deps.abortSignal);
   }
 
   // If repetition was detected, force end_turn so the commit pipeline
@@ -238,4 +243,10 @@ export async function readOne(
   }
 
   return { blocks, stopReason, usage };
+}
+
+function throwIfAborted(signal?: AbortSignal): void {
+  if (!signal?.aborted) return;
+  const reason = (signal as AbortSignal & { reason?: unknown }).reason;
+  throw reason instanceof Error ? reason : new Error("llm_stream_aborted");
 }

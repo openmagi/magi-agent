@@ -30,7 +30,7 @@ async function tmpDir(prefix: string): Promise<string> {
   return fs.mkdtemp(path.join(os.tmpdir(), prefix));
 }
 
-function makeCtx(sessionKey: string): ToolContext {
+function makeCtx(sessionKey: string, controlEvents: unknown[] = []): ToolContext {
   return {
     botId: "bot-test",
     sessionKey,
@@ -39,6 +39,9 @@ function makeCtx(sessionKey: string): ToolContext {
     abortSignal: new AbortController().signal,
     emitProgress: () => {},
     emitAgentEvent: () => {},
+    emitControlEvent: (event) => {
+      controlEvents.push(event);
+    },
     askUser: () => Promise.reject(new Error("not wired")),
     staging: {
       stageFileWrite: () => {},
@@ -149,6 +152,37 @@ describe("TaskBoard iterationState — tool ops", () => {
     // previously-set fields survive the partial patch
     expect(state2.step).toBe("research");
     expect(state2.strategy).toBe("breadth-first");
+  });
+
+  it("emits a durable task_board_snapshot on mutation", async () => {
+    const tool = makeTaskBoardTool(sessionsDir);
+    const controlEvents: unknown[] = [];
+    const ctx = makeCtx(sessionKey, controlEvents);
+
+    const res = await tool.execute(
+      {
+        actions: [
+          {
+            op: "create",
+            tasks: [{ title: "Implement feature", description: "work" }],
+          },
+        ],
+      },
+      ctx,
+    );
+
+    expect(res.status).toBe("ok");
+    expect(controlEvents).toContainEqual(
+      expect.objectContaining({
+        type: "task_board_snapshot",
+        turnId: "turn-test",
+        taskBoard: expect.objectContaining({
+          tasks: expect.arrayContaining([
+            expect.objectContaining({ title: "Implement feature" }),
+          ]),
+        }),
+      }),
+    );
   });
 
   it("iteration_read returns the current state", async () => {

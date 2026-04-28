@@ -153,7 +153,7 @@ interface Fixture {
 
 async function makeFixture(
   script: ScriptedTurn[],
-  opts: { toolNames?: string[] } = {},
+  opts: { pendingInjections?: boolean[]; toolNames?: string[] } = {},
 ): Promise<Fixture> {
   const workspaceRoot = await fs.mkdtemp(
     path.join(os.tmpdir(), "turn-stopreason-"),
@@ -278,6 +278,7 @@ async function makeFixture(
   };
 
   const transcript = new Transcript(sessionsDir, sessionMeta.sessionKey);
+  let pendingInjectionCheck = 0;
 
   const sessionStub = {
     meta: sessionMeta,
@@ -295,7 +296,8 @@ async function makeFixture(
     maxTurns: 50,
     maxCostUsd: 10,
     setActiveSse: () => {},
-    hasPendingInjections: () => false,
+    hasPendingInjections: () =>
+      opts.pendingInjections?.[pendingInjectionCheck++] ?? false,
   };
 
   const userMessage: UserMessage = {
@@ -350,10 +352,35 @@ describe("Turn.execute() stop-reason taxonomy", () => {
     ]);
     await turn.execute();
     expect(llm.calls.length).toBe(1);
+    expect(turn.meta.stopReason).toBe("end_turn");
     expect(turn.getRecoveryAttempt()).toBe(0);
     const events = auditEvents.map((e) => e.event);
     expect(events).not.toContain("output_recovery");
     expect(events).not.toContain("rule_check_violation");
+  });
+
+  it("pending injection deferral clears prior visible draft and commits only the resumed answer", async () => {
+    const { turn, llm, sse } = await makeFixture(
+      [
+        { blocks: [{ type: "text", text: "draft answer. " }], stopReason: "end_turn" },
+        { blocks: [{ type: "text", text: "resumed answer." }], stopReason: "end_turn" },
+      ],
+      { pendingInjections: [true, false] },
+    );
+
+    await turn.execute();
+    const commit = await turn.commit();
+
+    expect(llm.calls.length).toBe(2);
+    expect(commit.finalText).toBe("resumed answer.");
+    expect(
+      sse.agentEvents.some(
+        (event) =>
+          typeof event === "object" &&
+          event !== null &&
+          (event as { type?: string }).type === "response_clear",
+      ),
+    ).toBe(true);
   });
 
   it("tool_use → runs tools then terminates on end_turn", async () => {
@@ -388,6 +415,7 @@ describe("Turn.execute() stop-reason taxonomy", () => {
     ]);
     await turn.execute();
     expect(llm.calls.length).toBe(2);
+    expect(turn.meta.stopReason).toBe("max_tokens_recovered");
     expect(turn.getRecoveryAttempt()).toBe(1);
     // Recovery call must include the "Continue." nudge as the last msg.
     const secondCall = llm.calls[1]!;

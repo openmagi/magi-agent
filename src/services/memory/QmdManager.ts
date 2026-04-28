@@ -20,6 +20,10 @@ export interface QmdSearchOpts {
 export class QmdManager {
   private ready = false;
   private readonly memoryDir: string;
+  private readonly maxReadConcurrency = 2;
+  private activeReads = 0;
+  private writerActive = false;
+  private readonly queue: Array<{ kind: "read" | "write"; start: () => void }> = [];
 
   constructor(
     private readonly workspaceRoot: string,
@@ -34,13 +38,15 @@ export class QmdManager {
 
   async start(): Promise<void> {
     try {
-      // Register memory collection (silent fail if exists)
-      await this.exec(["collection", "add", this.memoryDir, "--name", "memory"]).catch(() => {});
-      // Initial index build
-      await this.exec(["update"]);
-      if (this.vectorEnabled) {
-        await this.exec(["embed"]).catch(() => {});
-      }
+      await this.withWriteSlot(async () => {
+        // Register memory collection (silent fail if exists)
+        await this.exec(["collection", "add", this.memoryDir, "--name", "memory"]).catch(() => {});
+        // Initial index build
+        await this.exec(["update"]);
+        if (this.vectorEnabled) {
+          await this.exec(["embed"]);
+        }
+      });
       this.ready = true;
     } catch {
       this.ready = false;
@@ -49,42 +55,46 @@ export class QmdManager {
 
   async search(query: string, opts?: QmdSearchOpts): Promise<QmdSearchResult[]> {
     if (!this.ready) return [];
-    const collection = opts?.collection ?? "memory";
-    const limit = opts?.limit ?? 5;
-    const minScore = opts?.minScore ?? 0.3;
-    try {
-      const { stdout } = await this.exec([
-        "search", query,
-        "--collection", collection,
-        "--limit", String(limit),
-        "--min-score", String(minScore),
-        "--json",
-      ]);
-      const parsed = JSON.parse(stdout);
-      return Array.isArray(parsed?.results) ? parsed.results : [];
-    } catch {
-      return [];
-    }
+    return this.withReadSlot(async () => {
+      const collection = opts?.collection ?? "memory";
+      const limit = opts?.limit ?? 5;
+      const minScore = opts?.minScore ?? 0.3;
+      try {
+        const { stdout } = await this.exec([
+          "search", query,
+          "--collection", collection,
+          "--limit", String(limit),
+          "--min-score", String(minScore),
+          "--json",
+        ]);
+        const parsed = JSON.parse(stdout);
+        return Array.isArray(parsed?.results) ? parsed.results : [];
+      } catch {
+        return [];
+      }
+    });
   }
 
   async vectorSearch(query: string, opts?: QmdSearchOpts): Promise<QmdSearchResult[]> {
     if (!this.ready || !this.vectorEnabled) return [];
-    const collection = opts?.collection ?? "memory";
-    const limit = opts?.limit ?? 5;
-    const minScore = opts?.minScore ?? 0.3;
-    try {
-      const { stdout } = await this.exec([
-        "vsearch", query,
-        "--collection", collection,
-        "--limit", String(limit),
-        "--min-score", String(minScore),
-        "--json",
-      ]);
-      const parsed = JSON.parse(stdout);
-      return Array.isArray(parsed?.results) ? parsed.results : [];
-    } catch {
-      return [];
-    }
+    return this.withReadSlot(async () => {
+      const collection = opts?.collection ?? "memory";
+      const limit = opts?.limit ?? 5;
+      const minScore = opts?.minScore ?? 0.3;
+      try {
+        const { stdout } = await this.exec([
+          "vsearch", query,
+          "--collection", collection,
+          "--limit", String(limit),
+          "--min-score", String(minScore),
+          "--json",
+        ]);
+        const parsed = JSON.parse(stdout);
+        return Array.isArray(parsed?.results) ? parsed.results : [];
+      } catch {
+        return [];
+      }
+    });
   }
 
   /**
@@ -126,10 +136,12 @@ export class QmdManager {
   async reindex(): Promise<void> {
     if (!this.ready) return;
     try {
-      await this.exec(["update"]);
-      if (this.vectorEnabled) {
-        await this.exec(["embed"]).catch(() => {});
-      }
+      await this.withWriteSlot(async () => {
+        await this.exec(["update"]);
+        if (this.vectorEnabled) {
+          await this.exec(["embed"]);
+        }
+      });
     } catch {
       // reindex failure is non-fatal
     }
@@ -140,24 +152,76 @@ export class QmdManager {
   }
 
   private async exec(args: string[]): Promise<{ stdout: string; stderr: string }> {
-    const qmdBinaries = [
-      path.join(this.workspaceRoot, "node_modules", ".bin", "qmd"),
-      "/app/node_modules/.bin/qmd",
-      "qmd",
-    ];
-
-    let lastError: unknown;
-    for (const bin of qmdBinaries) {
-      try {
-        return await execFileAsync(bin, args, {
-          cwd: this.workspaceRoot,
-          timeout: 30_000,
-        });
-      } catch (error) {
-        lastError = error;
-      }
+    // Try local node_modules first, then global
+    const localBin = path.join(this.workspaceRoot, "node_modules", ".bin", "qmd");
+    try {
+      return await execFileAsync(localBin, args, {
+        cwd: this.workspaceRoot,
+        timeout: 30_000,
+      });
+    } catch {
+      // Fall back to global qmd
+      return execFileAsync("qmd", args, {
+        cwd: this.workspaceRoot,
+        timeout: 30_000,
+      });
     }
+  }
 
-    throw lastError instanceof Error ? lastError : new Error("qmd unavailable");
+  private async withReadSlot<T>(fn: () => Promise<T>): Promise<T> {
+    const release = await this.acquire("read");
+    try {
+      return await fn();
+    } finally {
+      release();
+    }
+  }
+
+  private async withWriteSlot<T>(fn: () => Promise<T>): Promise<T> {
+    const release = await this.acquire("write");
+    try {
+      return await fn();
+    } finally {
+      release();
+    }
+  }
+
+  private acquire(kind: "read" | "write"): Promise<() => void> {
+    return new Promise((resolve) => {
+      const start = (): void => {
+        if (kind === "read") {
+          this.activeReads += 1;
+        } else {
+          this.writerActive = true;
+        }
+        resolve(() => {
+          if (kind === "read") {
+            this.activeReads = Math.max(0, this.activeReads - 1);
+          } else {
+            this.writerActive = false;
+          }
+          this.drainQueue();
+        });
+      };
+      this.queue.push({ kind, start });
+      this.drainQueue();
+    });
+  }
+
+  private drainQueue(): void {
+    if (this.writerActive) return;
+    while (this.queue.length > 0) {
+      const next = this.queue[0];
+      if (!next) return;
+      if (next.kind === "write") {
+        if (this.activeReads > 0) return;
+        this.queue.shift();
+        next.start();
+        return;
+      }
+      if (this.activeReads >= this.maxReadConcurrency) return;
+      this.queue.shift();
+      next.start();
+    }
   }
 }

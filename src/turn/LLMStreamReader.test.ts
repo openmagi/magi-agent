@@ -221,6 +221,7 @@ describe("LLMStreamReader.readOne", () => {
   it("passes system + tools into the underlying stream call", async () => {
     const seen: LLMStreamRequest[] = [];
     const sse = new FakeSse();
+    const controller = new AbortController();
     const llm = {
       async *stream(req: LLMStreamRequest): AsyncGenerator<LLMEvent, void, void> {
         seen.push(req);
@@ -232,7 +233,7 @@ describe("LLMStreamReader.readOne", () => {
       },
     } as unknown as LLMClient;
     await readOne(
-      { llm, model: "opus-4-7", sse, onError: () => {} },
+      { llm, model: "opus-4-7", sse, onError: () => {}, abortSignal: controller.signal },
       "SYS",
       [{ role: "user", content: "hi" }],
       [
@@ -247,6 +248,27 @@ describe("LLMStreamReader.readOne", () => {
     expect(seen[0]?.system).toBe("SYS");
     expect(seen[0]?.model).toBe("opus-4-7");
     expect(seen[0]?.tools?.length).toBe(1);
+    expect(seen[0]?.signal).toBe(controller.signal);
+  });
+
+  it("does not call the LLM when the abort signal is already aborted", async () => {
+    const sse = new FakeSse();
+    const controller = new AbortController();
+    controller.abort(new Error("user_interrupt_handoff"));
+    const llm = {
+      async *stream(_req: LLMStreamRequest): AsyncGenerator<LLMEvent, void, void> {
+        throw new Error("should not stream");
+      },
+    } as unknown as LLMClient;
+
+    await expect(
+      readOne(
+        { llm, model: "test", sse, onError: () => {}, abortSignal: controller.signal },
+        "",
+        [],
+        [],
+      ),
+    ).rejects.toThrow("user_interrupt_handoff");
   });
 
   it("omits tools field when toolDefs is empty", async () => {

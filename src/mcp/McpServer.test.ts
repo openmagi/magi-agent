@@ -58,6 +58,23 @@ function makeValidatingTool(): Tool<{ value?: unknown }, { ok: boolean }> {
   };
 }
 
+function makeBashTool(executions: unknown[]): Tool<{ command?: string }, string> {
+  return {
+    name: "Bash",
+    description: "Run a shell command.",
+    inputSchema: {
+      type: "object",
+      properties: { command: { type: "string" } },
+      required: ["command"],
+    },
+    permission: "execute",
+    async execute(input) {
+      executions.push(input);
+      return { status: "ok", output: input.command ?? "", durationMs: 1 };
+    },
+  };
+}
+
 interface FakeAgent {
   config: { botId: string; workspaceRoot: string };
   tools: { list(): Tool[] };
@@ -90,7 +107,7 @@ describe("McpServer", () => {
       };
       expect(result.protocolVersion).toBe("2025-03-26");
       expect(result.capabilities.tools.listChanged).toBe(false);
-      expect(result.serverInfo.name).toBe("clawy-agent");
+      expect(result.serverInfo.name).toBe("clawy-core-agent");
     } finally {
       await fs.rm(tmp, { recursive: true, force: true });
     }
@@ -171,6 +188,28 @@ describe("McpServer", () => {
       expect(first.type).toBe("text");
       const body = JSON.parse(first.text) as { content: string };
       expect(body.content).toBe("greetings");
+    } finally {
+      await fs.rm(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it("tools/call denies security-critical shell commands before execution", async () => {
+    const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "mcp-perm-"));
+    const executions: unknown[] = [];
+    try {
+      const agent = makeFakeAgent(tmp, [makeBashTool(executions)]);
+      const mcp = new McpServer({ agent: agent as never });
+      const res = await mcp.handle({
+        jsonrpc: "2.0",
+        id: "perm",
+        method: "tools/call",
+        params: { name: "Bash", arguments: { command: 'rm -rf "$(pwd)"' } },
+      });
+      if (!("error" in res)) throw new Error("expected error");
+      expect(res.error.code).toBe(-32603);
+      expect(res.error.message).toContain("Permission denied");
+      expect(res.error.message).toContain("destructive rm -rf");
+      expect(executions).toEqual([]);
     } finally {
       await fs.rm(tmp, { recursive: true, force: true });
     }

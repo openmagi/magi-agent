@@ -1,6 +1,6 @@
 /**
  * Shared value types used across core-agent.
- * Design reference: docs/plans/2026-04-19-clawy-agent-design.md §5.
+ * Design reference: docs/plans/2026-04-19-clawy-core-agent-design.md §5.
  */
 
 export type ChannelType = "app" | "telegram" | "discord" | "internal";
@@ -42,11 +42,6 @@ export interface ReplyToRef {
  */
 export interface UserMessageMetadata {
   replyTo?: ReplyToRef;
-  /**
-   * Per-turn system prompt addendum synthesized by an upstream relay
-   * such as chat-proxy (for example `<kb-context>` injected from
-   * selected Knowledge Base files or attachment ingest).
-   */
   systemPromptAddendum?: string;
   /**
    * Mid-turn injection marker (#86). Present when this message was

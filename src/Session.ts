@@ -10,11 +10,18 @@
  */
 
 import type { Agent } from "./Agent.js";
-import { Turn, type TurnResult } from "./Turn.js";
+import { Turn, TurnInterruptedError, type TurnResult } from "./Turn.js";
 import type { ChannelRef, TokenUsage, UserMessage } from "./util/types.js";
 import type { SseWriter } from "./transport/SseWriter.js";
 import { Transcript } from "./storage/Transcript.js";
+import { ControlEventLedger } from "./control/ControlEventLedger.js";
+import { ControlRequestStore } from "./control/ControlRequestStore.js";
+import { projectControlEvents, type ControlProjection } from "./control/ControlProjection.js";
+import { PlanLifecycle } from "./plan/PlanLifecycle.js";
+import type { ResolveControlRequestInput } from "./control/ControlRequestStore.js";
+import type { ControlRequestRecord } from "./control/ControlEvents.js";
 import { CompactionImpossibleError } from "./services/compact/ContextEngine.js";
+import type { StructuredOutputSpec } from "./structured/StructuredOutputContract.js";
 import {
   Context,
   DEFAULT_CONTEXT_ID,
@@ -156,8 +163,8 @@ export interface BudgetCheckResult {
  */
 export const DEFAULT_MAX_TURNS_PER_SESSION = 1000;
 
-/** Default maximum USD cost per session before Turn.ts aborts. */
-export const DEFAULT_MAX_COST_USD_PER_SESSION = 10;
+/** Default maximum USD cost per session before Turn.ts aborts. 0 = unlimited. */
+export const DEFAULT_MAX_COST_USD_PER_SESSION = 0;
 
 /**
  * T2-08 — Session-level permission posture.
@@ -211,6 +218,9 @@ class AsyncMutex {
 
 export class Session {
   readonly meta: SessionMeta;
+  readonly controlEvents: ControlEventLedger;
+  readonly controlRequests: ControlRequestStore;
+  readonly planLifecycle: PlanLifecycle;
   /** Legacy convenience accessor — returns the active context's
    * transcript so every pre-T4-19 call site keeps working unchanged. */
   get transcript(): Transcript {
@@ -235,7 +245,7 @@ export class Session {
   readonly maxCostUsd: number;
 
   // ── T2-08 permission posture state ─────────────────────────────
-  private permissionMode: PermissionMode = "bypass";
+  private permissionMode: PermissionMode = "default";
   /**
    * Mode that was active immediately before the session entered
    * `plan`. Captured on the plan-mode transition so ExitPlanMode can
@@ -257,6 +267,15 @@ export class Session {
    */
   private pendingInjections: UserMessage[] = [];
   private injectionSeq = 0;
+  private pendingHiddenContext: string[] = [];
+  private structuredOutputContract: StructuredOutputSpec | null = null;
+  private controlRequestWaiters = new Map<
+    string,
+    {
+      resolve: (record: ControlRequestRecord) => void;
+      cleanup: () => void;
+    }
+  >();
   /** Cap per turn so a runaway client cannot flood the queue. */
   static readonly MAX_PENDING_INJECTIONS = 5;
 
@@ -266,6 +285,7 @@ export class Session {
    * Cleared when no turn is active.
    */
   private _activeSse: { agent(evt: unknown): void } | null = null;
+  private activeTurn: Turn | null = null;
 
   /** Called by Turn.execute() to register/clear the active SSE writer. */
   setActiveSse(sse: { agent(evt: unknown): void } | null): void {
@@ -294,6 +314,7 @@ export class Session {
     readonly agent: Agent,
   ) {
     this.meta = meta;
+    this.permissionMode = agent.config.defaultPermissionMode ?? "default";
     this.maxTurns =
       agent.config.maxTurnsPerSession ?? DEFAULT_MAX_TURNS_PER_SESSION;
     this.maxCostUsd =
@@ -301,6 +322,87 @@ export class Session {
     // Default context is always present — eager construction avoids an
     // async getter dance everywhere transcript is read.
     this.bootstrapDefaultContext();
+    this.controlEvents = new ControlEventLedger({
+      rootDir: agent.sessionsDir,
+      sessionKey: meta.sessionKey,
+      transcript: this.transcript,
+    });
+    this.controlRequests = new ControlRequestStore({ ledger: this.controlEvents });
+    this.planLifecycle = new PlanLifecycle({
+      sessionKey: meta.sessionKey,
+      channelName: meta.channel.channelId,
+      controlEvents: this.controlEvents,
+      controlRequests: this.controlRequests,
+      getPermissionMode: () => this.getPermissionMode(),
+      setPermissionMode: (mode) => this.setPermissionMode(mode),
+      exitPlanMode: () => this.exitPlanMode(),
+      enqueueHiddenContext: (message) => this.enqueueHiddenContext(message),
+    });
+  }
+
+  async controlProjection(): Promise<ControlProjection> {
+    return projectControlEvents(await this.controlEvents.readAll());
+  }
+
+  async resolveControlRequest(
+    requestId: string,
+    input: ResolveControlRequestInput,
+  ) {
+    const resolved = await this.planLifecycle.resolveControlRequest(requestId, input);
+    this.notifyControlRequestWaiter(resolved);
+    return resolved;
+  }
+
+  async waitForControlRequestResolution(
+    requestId: string,
+    signal?: AbortSignal,
+  ): Promise<ControlRequestRecord> {
+    const projection = await this.controlRequests.project();
+    const existing = projection.requests[requestId];
+    if (!existing) throw new Error(`control request not found: ${requestId}`);
+    if (existing.state !== "pending") return existing;
+
+    return await new Promise<ControlRequestRecord>((resolve) => {
+      const timeoutMs = Math.max(0, existing.expiresAt - Date.now() + 25);
+      let settled = false;
+      const settle = (record: ControlRequestRecord) => {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        resolve(record);
+      };
+      const timeout = setTimeout(() => {
+        this.controlRequests
+          .resolve(requestId, { decision: "denied" })
+          .then((record) => settle(record))
+          .catch(() => settle(existing));
+      }, timeoutMs);
+      const abort = () => {
+        this.controlRequests
+          .cancel(requestId, "turn aborted while waiting for control request")
+          .then((record) => settle(record))
+          .catch(() => settle(existing));
+      };
+      const cleanup = () => {
+        clearTimeout(timeout);
+        signal?.removeEventListener("abort", abort);
+        if (this.controlRequestWaiters.get(requestId)?.resolve === settle) {
+          this.controlRequestWaiters.delete(requestId);
+        }
+      };
+      signal?.addEventListener("abort", abort, { once: true });
+      if (signal?.aborted) {
+        abort();
+        return;
+      }
+      this.controlRequestWaiters.set(requestId, { resolve: settle, cleanup });
+    });
+  }
+
+  private notifyControlRequestWaiter(record: ControlRequestRecord): void {
+    const waiter = this.controlRequestWaiters.get(record.requestId);
+    if (!waiter) return;
+    waiter.resolve(record);
   }
 
   /**
@@ -569,7 +671,7 @@ export class Session {
     if (this.cumulativeTurns >= this.maxTurns) {
       return { exceeded: true, reason: "turns" };
     }
-    if (this.cumulativeCostUsd >= this.maxCostUsd) {
+    if (this.maxCostUsd > 0 && this.cumulativeCostUsd >= this.maxCostUsd) {
       return { exceeded: true, reason: "cost" };
     }
     return { exceeded: false };
@@ -633,6 +735,16 @@ export class Session {
     if (this._closed) return;
     this._closed = true;
 
+    if (this.activeTurn) {
+      try {
+        this.activeTurn.requestInterrupt(false, reason ?? "session_close");
+      } catch (err) {
+        console.warn(
+          `[core-agent] session close: active turn interrupt failed sessionKey=${this.meta.sessionKey}: ${(err as Error).message}`,
+        );
+      }
+    }
+
     // 1. Abort any in-flight work that cooperatively listens on the
     //    session's AbortSignal. Safe when no controller was ever
     //    allocated — we just skip.
@@ -641,7 +753,7 @@ export class Session {
         this.abortController.abort();
       } catch (err) {
         console.warn(
-          `[clawy-agent] session close: abort failed sessionKey=${this.meta.sessionKey}: ${(err as Error).message}`,
+          `[core-agent] session close: abort failed sessionKey=${this.meta.sessionKey}: ${(err as Error).message}`,
         );
       }
     }
@@ -674,7 +786,7 @@ export class Session {
           await this.agent.crons.delete(cronId);
         } catch (err) {
           console.warn(
-            `[clawy-agent] session close: cron delete failed cronId=${cronId}: ${(err as Error).message}`,
+            `[core-agent] session close: cron delete failed cronId=${cronId}: ${(err as Error).message}`,
           );
         }
       }
@@ -731,6 +843,16 @@ export class Session {
     return { injectionId, queuedCount: count };
   }
 
+  requestInterrupt(
+    handoffRequested = false,
+    source = "api",
+  ): { status: "accepted" | "noop"; handoffRequested: boolean } {
+    if (!this.activeTurn) {
+      return { status: "noop", handoffRequested: false };
+    }
+    return this.activeTurn.requestInterrupt(handoffRequested, source);
+  }
+
   /**
    * Atomic drain — returns all queued injections and empties the
    * queue. Called by the midTurnInjector hook at the start of each
@@ -742,6 +864,23 @@ export class Session {
 
   hasPendingInjections(): boolean {
     return this.pendingInjections.length > 0;
+  }
+
+  enqueueHiddenContext(message: string): void {
+    if (message.trim().length === 0) return;
+    this.pendingHiddenContext.push(message);
+  }
+
+  drainPendingHiddenContext(): string[] {
+    return this.pendingHiddenContext.splice(0);
+  }
+
+  setStructuredOutputContract(spec: StructuredOutputSpec | null): void {
+    this.structuredOutputContract = spec;
+  }
+
+  getStructuredOutputContract(): StructuredOutputSpec | null {
+    return this.structuredOutputContract;
   }
 
   /** Read-only peek for diagnostics / status command. */
@@ -769,6 +908,8 @@ export class Session {
       if (slashMatch) {
         const turnId = this.agent.nextTurnId();
         const startedAt = Date.now();
+        let slashStopReason: "end_turn" | "aborted" = "end_turn";
+        let slashStatus: "committed" | "aborted" = "committed";
         sse.agent({
           type: "turn_start",
           turnId,
@@ -783,6 +924,7 @@ export class Session {
             type: "turn_end",
             turnId,
             status: "committed",
+            stopReason: "end_turn",
           });
           // Legacy OpenAI-compat terminator so chat-proxy parsers close
           // the streaming response cleanly.
@@ -794,10 +936,13 @@ export class Session {
             code: "slash_command_failed",
             message: msg,
           });
+          slashStopReason = "aborted";
+          slashStatus = "aborted";
           sse.agent({
             type: "turn_end",
             turnId,
             status: "aborted",
+            stopReason: "aborted",
             reason: msg,
           });
         }
@@ -808,10 +953,12 @@ export class Session {
             startedAt,
             endedAt: Date.now(),
             declaredRoute: "direct",
-            status: "committed",
+            status: slashStatus,
             usage: { inputTokens: 0, outputTokens: 0, costUsd: 0 },
+            stopReason: slashStopReason,
           },
           assistantText: "",
+          stopReason: slashStopReason,
         };
       }
 
@@ -844,6 +991,7 @@ export class Session {
       }
       const turnId = this.agent.nextTurnId();
       const turn = new Turn(this, userMessage, turnId, sse, "direct", options);
+      this.activeTurn = turn;
       this.agent.registerTurn(turn);
       let committedAssistantText = "";
       try {
@@ -853,48 +1001,29 @@ export class Session {
         // CompactionImpossibleError branch below so the user sees the
         // Korean "switch to a larger model" notice instead of a silent
         // compaction-loop timeout.
-        this.agent.contextEngine.assertCompactionFeasible(
-          this.agent.config.model,
-        );
+        const runtimeModel = await turn.resolveRuntimeModel();
+        this.agent.contextEngine.assertCompactionFeasible(runtimeModel);
         await turn.execute();
+        turn.assertNotInterrupted();
         const report = await turn.verify();
+        turn.assertNotInterrupted();
         if (!report.ok) {
           await turn.abort(`verify failed: ${report.violations.join(",")}`);
         } else {
-          // Commit retry loop — beforeCommit hooks (answer-verifier,
-          // fact-grounding, sealed-files, etc.) may block the first
-          // attempt. All hooks fail-open at retryCount >= MAX_RETRIES
-          // (typically 1), so a single retry suffices. Without this
-          // loop, commitRetryCount was always 0 → hooks never reached
-          // fail-open → turn aborted → empty response.
-          const MAX_COMMIT_ATTEMPTS = 3;
-          let committed = false;
-          for (let attempt = 0; attempt < MAX_COMMIT_ATTEMPTS; attempt++) {
-            try {
-              const commitResult = await turn.commit();
-              committedAssistantText = commitResult.finalText;
-              committed = true;
-              break;
-            } catch (commitErr) {
-              const msg = commitErr instanceof Error ? commitErr.message : String(commitErr);
-              const isBeforeCommitBlock = msg.includes("beforeCommit blocked");
-              if (!isBeforeCommitBlock || attempt >= MAX_COMMIT_ATTEMPTS - 1) {
-                throw commitErr; // non-hook error or final attempt
-              }
-              // Hook blocked → increment retry count and try again.
-              // Hooks see the incremented retryCount and will fail-open.
-              turn.incrementCommitRetry();
-              console.log(
-                `[clawy-agent] commit retry ${attempt + 1}/${MAX_COMMIT_ATTEMPTS}` +
-                ` turnId=${turn.meta.turnId} reason=${msg.slice(0, 200)}`,
-              );
-            }
-          }
-          if (!committed) {
-            await turn.abort("commit retries exhausted");
-          }
+          turn.assertNotInterrupted();
+          const commitResult = await turn.commitWithRetry();
+          turn.assertNotInterrupted();
+          committedAssistantText = commitResult.finalText;
         }
       } catch (err) {
+        if (err instanceof TurnInterruptedError) {
+          await turn.abort(err.message);
+          return {
+            meta: turn.meta,
+            assistantText: committedAssistantText,
+            stopReason: turn.meta.stopReason ?? "aborted",
+          };
+        }
         // Gap §11.6 — small-context-model routing ran into the
         // compaction reserve-token floor. Emit the structured
         // telemetry + a Korean user-facing text_delta so the client
@@ -913,20 +1042,25 @@ export class Session {
           // Emit on the agent channel only — see LLMStreamReader.ts for
           // the dual-emit regression context.
           sse.agent({ type: "text_delta", delta: userMsg });
-          await turn.abort(err.message);
+          await turn.abort(err.message, "compaction_impossible");
         } else {
           const msg = err instanceof Error ? err.message : String(err);
           sse.agent({ type: "error", code: "turn_failed", message: msg });
           await turn.abort(msg);
         }
       } finally {
+        this.activeTurn = null;
         // T1-06: session budget (tenant-aggregate). T4-19: also
         // per-context budget for UI stats.
         this.recordTurnUsage(turn.meta.usage);
         active.recordTurn(turn.meta.usage);
         this.agent.unregisterTurn(turnId);
       }
-      return { meta: turn.meta, assistantText: committedAssistantText };
+      return {
+        meta: turn.meta,
+        assistantText: committedAssistantText,
+        stopReason: turn.meta.stopReason ?? "aborted",
+      };
     });
   }
 

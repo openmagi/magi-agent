@@ -1,7 +1,7 @@
 /**
  * Slash-command registry — built-in `/compact`, `/reset`, `/status` and
  * any future additions. Ported from OpenClaw so bots migrated to
- * clawy-agent keep the same `/foo` UX.
+ * clawy-core-agent keep the same `/foo` UX.
  *
  * Interception point: {@link Session.runTurn} calls
  * {@link matchSlashCommand} at the top of the mutex-protected turn

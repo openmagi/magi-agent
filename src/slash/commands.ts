@@ -50,11 +50,10 @@ export function makeCompactCommand(agent: Agent): SlashCommand {
       }
 
       // 2. Hipocampus memory compaction (forced, no cooldown)
-      if (agent.compactionEngine && agent.qmdManager) {
+      if (agent.hipocampus) {
         try {
-          const result = await agent.compactionEngine.run(true);
+          const result = await agent.hipocampus.compact(true);
           if (result.compacted) {
-            await agent.qmdManager.reindex();
             emitText(
               sse,
               `✅ Compaction complete — transcript + memory tree (daily=${result.stats.daily.length} weekly=${result.stats.weekly.length} monthly=${result.stats.monthly.length}).`,

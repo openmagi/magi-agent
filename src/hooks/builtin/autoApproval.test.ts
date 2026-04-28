@@ -78,6 +78,23 @@ describe("auto-approval hook (T2-08)", () => {
     expect(result).toEqual({ action: "continue" });
   });
 
+  it("mode=default + dangerous tool → permission_decision ask", async () => {
+    const hook = makeAutoApprovalHook({
+      agent: makeAgentDelegate("default", {
+        Bash: makeTool("Bash", true),
+      }),
+    });
+    const { ctx } = makeCtx("s1");
+    const result = await hook.handler(
+      { toolName: "Bash", toolUseId: "t1", input: {} },
+      ctx,
+    );
+    expect(result).toMatchObject({
+      action: "permission_decision",
+      decision: "ask",
+    });
+  });
+
   it("mode=auto + dangerous tool → permission_decision ask", async () => {
     const hook = makeAutoApprovalHook({
       agent: makeAgentDelegate("auto", {

@@ -514,6 +514,56 @@ describe("chain gate relaxation", () => {
     const rootContent = await readFile(join(memDir, "ROOT.md"), "utf8");
     expect(rootContent).toContain("Fresh root from monthly");
   });
+
+  it("wraps generated ROOT.md with canonical Hipocampus frontmatter and sections", async () => {
+    const memDir = join(tmpDir, "memory");
+    const monthlyDir = join(memDir, "monthly");
+    await mkdir(monthlyDir, { recursive: true });
+
+    await writeFile(
+      join(monthlyDir, "2026-03.md"),
+      "---\ntype: monthly\nstatus: fixed\nperiod: 2026-03\n---\n\nMarch summary",
+    );
+
+    const llm = createMockLLM("Unstructured root summary");
+    const engine = new CompactionEngine(tmpDir, defaultConfig(), llm);
+    await engine.run(true);
+
+    const rootContent = await readFile(join(memDir, "ROOT.md"), "utf8");
+
+    expect(rootContent).toMatch(/^---\ntype: root\nstatus: tentative\nlast-updated: \d{4}-\d{2}-\d{2}\n---\n/);
+    expect(rootContent).toContain("## Active Context (recent ~7 days)");
+    expect(rootContent).toContain("## Recent Patterns");
+    expect(rootContent).toContain("## Historical Summary");
+    expect(rootContent).toContain("## Topics Index");
+  });
+
+  it("prompts root compaction to use the Hipocampus typed topic-index format", async () => {
+    const memDir = join(tmpDir, "memory");
+    const monthlyDir = join(memDir, "monthly");
+    await mkdir(monthlyDir, { recursive: true });
+
+    await writeFile(
+      join(monthlyDir, "2026-03.md"),
+      "---\ntype: monthly\nstatus: fixed\nperiod: 2026-03\n---\n\nMarch summary",
+    );
+
+    const llm = createMockLLM("## Active Context (recent ~7 days)\n- current\n");
+    const engine = new CompactionEngine(tmpDir, defaultConfig(), llm);
+    await engine.run(true);
+
+    const rootCall = llm.calls.find(c =>
+      typeof c.messages[0]?.content === "string" &&
+      c.messages[0].content.includes("Generate a ROOT.md memory index"),
+    );
+
+    expect(rootCall).toBeDefined();
+    const prompt = rootCall?.messages[0]?.content;
+    expect(prompt).toContain("type: root");
+    expect(prompt).toContain("last-updated: YYYY-MM-DD");
+    expect(prompt).toContain("topic-keyword [project]");
+    expect(prompt).toContain("No prose");
+  });
 });
 
 describe("stop-check chain", () => {

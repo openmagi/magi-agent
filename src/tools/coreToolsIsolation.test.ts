@@ -152,6 +152,23 @@ describe("core tools — ctx.spawnWorkspace isolation (T1-03b / PRE-01)", () => 
     expect(result.errorMessage).toMatch(/escapes workspace/);
   });
 
+  it("(3c) child Bash prepends /home/ocuser/.openclaw/bin to PATH for wrapper scripts", async () => {
+    const originalPath = process.env.PATH;
+    process.env.PATH = "/usr/local/bin:/usr/bin:/bin";
+    try {
+      const bash = makeBashTool(parentRoot);
+      const ws = new Workspace(spawnDir);
+      const childCtx = makeCtx({ workspaceRoot: parentRoot, spawnWorkspace: ws });
+
+      const result = await bash.execute({ command: "printf '%s' \"$PATH\"" }, childCtx);
+      expect(result.status).toBe("ok");
+      const out = result.output as BashOutput;
+      expect(out.stdout.startsWith("/home/ocuser/.openclaw/bin:")).toBe(true);
+    } finally {
+      process.env.PATH = originalPath;
+    }
+  });
+
   it("(4) child Glob never returns files outside spawnDir", async () => {
     // Plant files at parent root AND inside spawnDir.
     await fs.writeFile(path.join(parentRoot, "parent-only.txt"), "p");

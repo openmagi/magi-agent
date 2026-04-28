@@ -41,9 +41,8 @@ export interface WorkspaceIdentity {
 export const USER_RULES_MAX_CHARS = 5000;
 
 export interface WorkspaceMemory {
-  /** MEMORY.md top-level index (hipocampus ROOT equivalent). */
+  /** `memory/ROOT.md` preferred, fallback `MEMORY.md` for legacy bots. */
   rootIndex?: string;
-  /** Loaded lazily on demand — Phase 2 wires full hipocampus recall. */
 }
 
 export class Workspace {
@@ -95,7 +94,9 @@ export class Workspace {
   }
 
   async loadMemoryIndex(): Promise<WorkspaceMemory> {
-    const rootIndex = await this.readSafe("MEMORY.md");
+    const rootIndex =
+      (await this.readSafe("memory/ROOT.md")) ??
+      (await this.readSafe("MEMORY.md"));
     return { rootIndex };
   }
 
@@ -153,13 +154,5 @@ export function renderIdentitySystem(id: WorkspaceIdentity): string {
   push("USER", id.user);
   push("AGENTS", id.agents);
   push("TOOLS", id.tools);
-  // Agent Rules (user-defined, dashboard-sourced). Rendered as an XML-
-  // style `<agent_rules>` block rather than a `# USER-RULES` markdown
-  // section so the model can cleanly distinguish owner-provided
-  // behavioural rules from platform identity files. Block sits after the
-  // identity stack but before any live-state blocks a caller may append.
-  if (id.userRules && id.userRules.trim().length > 0) {
-    parts.push(`<agent_rules>\n${id.userRules.trim()}\n</agent_rules>`);
-  }
   return parts.join("\n\n---\n\n");
 }

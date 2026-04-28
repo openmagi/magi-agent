@@ -1,11 +1,7 @@
 /**
- * ExitPlanMode — used by the model to leave plan mode with a final
- * plan artifact. Emits a `plan_ready` AgentEvent, flips the Turn's
- * `planMode` flag off, and returns `{planApproved: true}`.
- *
- * The actual approval UX happens client-side; this tool only signals
- * "I'm done planning, here's the plan." Future work wires a full
- * consent workflow (§7.2 AWAITING_PLAN_APPROVAL state).
+ * ExitPlanMode — used by the model to submit a final plan artifact.
+ * Emits a durable plan approval request and keeps the session in plan
+ * mode until the user approves it.
  *
  * T2-08 — calling {@link PlanModeController.exitPlanMode} is wired
  * through the Turn instance, which in turn invokes
@@ -19,13 +15,17 @@
 
 import type { Tool, ToolContext, ToolResult } from "../Tool.js";
 import { errorResult } from "../util/toolResult.js";
+import type { SubmitPlanResult } from "../plan/PlanLifecycle.js";
 
 export interface ExitPlanModeInput {
   plan: string;
 }
 
 export interface ExitPlanModeOutput {
-  planApproved: true;
+  planApproved: false;
+  planId: string;
+  requestId: string;
+  state: "awaiting_approval";
 }
 
 const INPUT_SCHEMA = {
@@ -49,8 +49,12 @@ const INPUT_SCHEMA = {
 export interface PlanModeController {
   /** Returns true if the turn is currently in plan mode. */
   isPlanMode(): boolean;
-  /** Turn plan mode off for the rest of this turn. */
-  exitPlanMode(): void;
+  /** Persist the plan approval request without leaving plan mode. */
+  submitPlan(input: {
+    turnId: string;
+    plan: string;
+    emitAgentEvent?: (event: unknown) => void;
+  }): Promise<SubmitPlanResult>;
 }
 
 export function makeExitPlanModeTool(
@@ -91,14 +95,14 @@ export function makeExitPlanModeTool(
             durationMs: Date.now() - start,
           };
         }
-        ctx.emitAgentEvent?.({
-          type: "plan_ready",
+        const output = await controller.submitPlan({
+          turnId: ctx.turnId,
           plan: input.plan,
+          emitAgentEvent: ctx.emitAgentEvent,
         });
-        controller.exitPlanMode();
         return {
           status: "ok",
-          output: { planApproved: true },
+          output,
           durationMs: Date.now() - start,
         };
       } catch (err) {

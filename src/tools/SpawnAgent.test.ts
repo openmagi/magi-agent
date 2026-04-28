@@ -26,6 +26,7 @@ import type {
 import { Workspace } from "../storage/Workspace.js";
 import {
   MAX_SPAWN_DEPTH,
+  SPAWNABLE_MODELS,
   makeSpawnAgentTool,
   runChildAgentLoop,
   selectChildTools,
@@ -131,9 +132,6 @@ function fakeAgent(tools: Tool[], script: MockScript): {
       spawnCalls++;
       return runChildAgentLoop(agent as never, opts);
     },
-    async deliverBackgroundTaskResult(): Promise<boolean> {
-      return false;
-    },
   };
   return { agent, llmCalls: llm.callLog, get spawnCalls() { return spawnCalls; } } as never;
 }
@@ -163,6 +161,39 @@ function makeParentCtx(overrides: Partial<ToolContext> = {}): {
     ...overrides,
   };
   return { ctx, events };
+}
+
+type SpawnChildTestResult = Awaited<ReturnType<typeof runChildAgentLoop>>;
+
+async function withZeroSpawnRetryDelay<T>(fn: () => Promise<T>): Promise<T> {
+  const previous = process.env.CORE_AGENT_SPAWN_RETRY_BASE_DELAY_MS;
+  process.env.CORE_AGENT_SPAWN_RETRY_BASE_DELAY_MS = "0";
+  try {
+    return await fn();
+  } finally {
+    if (previous === undefined) {
+      delete process.env.CORE_AGENT_SPAWN_RETRY_BASE_DELAY_MS;
+    } else {
+      process.env.CORE_AGENT_SPAWN_RETRY_BASE_DELAY_MS = previous;
+    }
+  }
+}
+
+async function waitForSpawnResult(
+  events: unknown[],
+  timeoutMs = 200,
+): Promise<unknown | undefined> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const event = events.find(
+      (e): e is { type: string } => (e as { type?: unknown }).type === "spawn_result",
+    );
+    if (event) return event;
+    await new Promise((r) => setTimeout(r, 5));
+  }
+  return events.find(
+    (e): e is { type: string } => (e as { type?: unknown }).type === "spawn_result",
+  );
 }
 
 // ── Tests ──────────────────────────────────────────────────────────
@@ -263,7 +294,12 @@ describe("SpawnAgent — §7.12.d", () => {
       agent: Parameters<typeof makeSpawnAgentTool>[0];
     };
     const tool = makeSpawnAgentTool(agent);
-    const { ctx, events } = makeParentCtx();
+    const controlEvents: unknown[] = [];
+    const { ctx, events } = makeParentCtx({
+      emitControlEvent: async (event) => {
+        controlEvents.push(event);
+      },
+    });
 
     const result = await tool.execute(
       { persona: "child", prompt: "say hi", deliver: "return" },
@@ -280,78 +316,23 @@ describe("SpawnAgent — §7.12.d", () => {
       (e): e is { type: string } => (e as { type?: unknown }).type === "spawn_started",
     );
     expect(startEvt).toBeDefined();
-  });
-
-  it("(c2) return mode retries transient child failures before surfacing to parent", async () => {
-    const { agent } = fakeAgent([], { rounds: [] }) as unknown as {
-      agent: Parameters<typeof makeSpawnAgentTool>[0] & {
-        spawnChildTurn: Parameters<typeof makeSpawnAgentTool>[0]["spawnChildTurn"];
-      };
-    };
-    let calls = 0;
-    agent.spawnChildTurn = async () => {
-      calls++;
-      if (calls < 3) {
-        return {
-          status: "error",
-          finalText: "",
+    expect(controlEvents).toContainEqual(
+      expect.objectContaining({
+        type: "child_started",
+        parentTurnId: "turn_0",
+        prompt: "say hi",
+      }),
+    );
+    expect(controlEvents).toContainEqual(
+      expect.objectContaining({
+        type: "child_completed",
+        summary: {
+          status: "ok",
+          finalText: "hello from child",
           toolCallCount: 0,
-          errorMessage: "llm upstream reset",
-        };
-      }
-      return {
-        status: "ok",
-        finalText: "recovered result",
-        toolCallCount: 0,
-      };
-    };
-    const tool = makeSpawnAgentTool(agent);
-    const { ctx, events } = makeParentCtx();
-
-    const result = await tool.execute(
-      { persona: "child", prompt: "do retryable work", deliver: "return" },
-      ctx,
+        },
+      }),
     );
-
-    expect(result.status).toBe("ok");
-    expect(calls).toBe(3);
-    const out = result.output as SpawnAgentOutput;
-    expect(out.status).toBe("ok");
-    expect(out.finalText).toBe("recovered result");
-    expect(
-      events.filter((e) => (e as { type?: unknown }).type === "spawn_retry"),
-    ).toHaveLength(2);
-  });
-
-  it("(c3) exhausted return-mode child failures surface as a tool error", async () => {
-    const { agent } = fakeAgent([], { rounds: [] }) as unknown as {
-      agent: Parameters<typeof makeSpawnAgentTool>[0] & {
-        spawnChildTurn: Parameters<typeof makeSpawnAgentTool>[0]["spawnChildTurn"];
-      };
-    };
-    let calls = 0;
-    agent.spawnChildTurn = async () => {
-      calls++;
-      return {
-        status: "error",
-        finalText: "partial child text",
-        toolCallCount: 0,
-        errorMessage: "child timeout",
-      };
-    };
-    const tool = makeSpawnAgentTool(agent);
-    const { ctx } = makeParentCtx();
-
-    const result = await tool.execute(
-      { persona: "child", prompt: "do retryable work", deliver: "return" },
-      ctx,
-    );
-
-    expect(calls).toBe(3);
-    expect(result.status).toBe("error");
-    expect(result.errorCode).toBe("spawn_failed");
-    expect(result.errorMessage).toContain("child timeout");
-    expect(result.errorMessage).toContain("Do not switch to direct execution");
   });
 
   it("(c) return mode tallies tool calls when child uses a tool", async () => {
@@ -392,6 +373,127 @@ describe("SpawnAgent — §7.12.d", () => {
     const out = result.output as SpawnAgentOutput;
     expect(out.finalText).toBe("done");
     expect(out.toolCallCount).toBe(1);
+  });
+
+  it("(c2) deliver='return' retries child failures before any tool call", async () => {
+    await withZeroSpawnRetryDelay(async () => {
+      const { agent } = fakeAgent([], { rounds: [] }) as unknown as {
+        agent: Parameters<typeof makeSpawnAgentTool>[0];
+      };
+      let attempts = 0;
+      (
+        agent as unknown as {
+          spawnChildTurn: () => Promise<SpawnChildTestResult>;
+        }
+      ).spawnChildTurn = async () => {
+        attempts++;
+        if (attempts < 3) {
+          throw new Error("ECONNRESET aborted");
+        }
+        return {
+          status: "ok",
+          finalText: "recovered",
+          toolCallCount: 0,
+        };
+      };
+      const tool = makeSpawnAgentTool(agent);
+      const { ctx, events } = makeParentCtx();
+
+      const result = await tool.execute(
+        { persona: "child", prompt: "retry", deliver: "return" },
+        ctx,
+      );
+
+      expect(result.status).toBe("ok");
+      const out = result.output as SpawnAgentOutput & { attempts?: number };
+      expect(out.status).toBe("ok");
+      expect(out.finalText).toBe("recovered");
+      expect(out.attempts).toBe(3);
+      expect(attempts).toBe(3);
+      const retryEvents = events.filter(
+        (e): e is { type: string } =>
+          (e as { type?: unknown }).type === "spawn_retry",
+      );
+      expect(retryEvents).toHaveLength(2);
+    });
+  });
+
+  it("(c3) deliver='return' surfaces exhausted child failures as tool errors", async () => {
+    await withZeroSpawnRetryDelay(async () => {
+      const { agent } = fakeAgent([], { rounds: [] }) as unknown as {
+        agent: Parameters<typeof makeSpawnAgentTool>[0];
+      };
+      let attempts = 0;
+      (
+        agent as unknown as {
+          spawnChildTurn: () => Promise<SpawnChildTestResult>;
+        }
+      ).spawnChildTurn = async () => {
+        attempts++;
+        return {
+          status: "error",
+          finalText: "",
+          toolCallCount: 0,
+          errorMessage: "Error http_429: upstream provider throttled",
+        };
+      };
+      const tool = makeSpawnAgentTool(agent);
+      const { ctx, events } = makeParentCtx();
+
+      const result = await tool.execute(
+        { persona: "child", prompt: "retry", deliver: "return" },
+        ctx,
+      );
+
+      expect(attempts).toBe(3);
+      expect(result.status).toBe("error");
+      expect(result.errorCode).toBe("spawn_failed");
+      expect(result.errorMessage).toContain("failed after 3 attempts");
+      expect(result.errorMessage).toContain("Do not switch to direct execution");
+      const retryEvents = events.filter(
+        (e): e is { type: string } =>
+          (e as { type?: unknown }).type === "spawn_retry",
+      );
+      expect(retryEvents).toHaveLength(2);
+    });
+  });
+
+  it("(c4) deliver='return' does not retry after the child used tools", async () => {
+    await withZeroSpawnRetryDelay(async () => {
+      const { agent } = fakeAgent([], { rounds: [] }) as unknown as {
+        agent: Parameters<typeof makeSpawnAgentTool>[0];
+      };
+      let attempts = 0;
+      (
+        agent as unknown as {
+          spawnChildTurn: () => Promise<SpawnChildTestResult>;
+        }
+      ).spawnChildTurn = async () => {
+        attempts++;
+        return {
+          status: "error",
+          finalText: "",
+          toolCallCount: 1,
+          errorMessage: "child failed after writing a file",
+        };
+      };
+      const tool = makeSpawnAgentTool(agent);
+      const { ctx, events } = makeParentCtx();
+
+      const result = await tool.execute(
+        { persona: "child", prompt: "no duplicate side effects", deliver: "return" },
+        ctx,
+      );
+
+      expect(attempts).toBe(1);
+      expect(result.status).toBe("error");
+      expect(result.errorCode).toBe("spawn_failed");
+      const retryEvents = events.filter(
+        (e): e is { type: string } =>
+          (e as { type?: unknown }).type === "spawn_retry",
+      );
+      expect(retryEvents).toHaveLength(0);
+    });
   });
 
   // ── PRE-01 isolation tests ─────────────────────────────────────
@@ -852,18 +954,15 @@ describe("SpawnAgent — §7.12.d", () => {
         { persona: "bg", prompt: "seed", deliver: "background" },
         ctx,
       );
-      // Wait for background promise chain to settle.
-      await new Promise((r) => setTimeout(r, 40));
 
-      const resultEvt = events.find(
-        (
-          e,
-        ): e is {
-          type: string;
-          artifacts: { handedOffArtifacts: SpawnHandoffArtifact[] };
-        } => (e as { type?: unknown }).type === "spawn_result",
-      );
+      const resultEvt = (await waitForSpawnResult(events, 1000)) as
+        | {
+            type: string;
+            artifacts: { handedOffArtifacts: SpawnHandoffArtifact[] };
+          }
+        | undefined;
       expect(resultEvt).toBeDefined();
+      expect(resultEvt?.artifacts.handedOffArtifacts).toBeDefined();
       expect(resultEvt!.artifacts.handedOffArtifacts.length).toBe(1);
       expect(resultEvt!.artifacts.handedOffArtifacts[0]!.kind).toBe("note");
     });
@@ -1292,56 +1391,227 @@ describe("SpawnAgent — §7.12.d", () => {
     expect(resultEvt?.finalText).toBe("bg finish");
   });
 
-  it("(d2) deliver='background' asks the agent to deliver the completed result", async () => {
-    const parentTools: Tool[] = [];
+  // ── Model override tests ──────────────────────────────────────────
+
+  it("model override passes the specified model to LLMClient", async () => {
     const script: MockScript = {
       rounds: [
         [
-          { kind: "text_delta", blockIndex: 0, delta: "background result" },
-          {
-            kind: "message_end",
-            stopReason: "end_turn",
-            usage: { inputTokens: 1, outputTokens: 2 },
-          },
+          { kind: "text_delta", blockIndex: 0, delta: "GPT says 2" },
+          { kind: "message_end", stopReason: "end_turn", usage: { inputTokens: 10, outputTokens: 5 } },
         ],
       ],
     };
-    const { agent } = fakeAgent(parentTools, script) as unknown as {
-      agent: Parameters<typeof makeSpawnAgentTool>[0] & {
-        deliverBackgroundTaskResult?: (input: {
-          sessionKey: string;
-          taskId: string;
-          status: string;
-          finalText?: string;
-        }) => Promise<boolean>;
-      };
-    };
-    const delivered: Array<{
-      sessionKey: string;
-      taskId: string;
-      status: string;
-      finalText?: string;
-    }> = [];
-    agent.deliverBackgroundTaskResult = async (input) => {
-      delivered.push(input);
-      return true;
+    const { agent, llmCalls } = fakeAgent([], script) as unknown as {
+      agent: Parameters<typeof makeSpawnAgentTool>[0];
+      llmCalls: LLMStreamRequest[];
     };
     const tool = makeSpawnAgentTool(agent);
-    const { ctx } = makeParentCtx({ sessionKey: "agent:main:app:general" });
+    const { ctx } = makeParentCtx();
 
-    await tool.execute(
-      { persona: "bg", prompt: "work", deliver: "background" } satisfies SpawnAgentInput,
+    const result = await tool.execute(
+      {
+        persona: "calculator",
+        prompt: "1+1=?",
+        deliver: "return",
+        model: "gpt-5.4",
+      },
       ctx,
     );
 
-    await new Promise((r) => setTimeout(r, 20));
+    expect(result.status).toBe("ok");
+    expect(llmCalls.length).toBe(1);
+    expect(llmCalls[0]?.model).toBe("gpt-5.4");
+  });
 
-    expect(delivered).toHaveLength(1);
-    expect(delivered[0]).toMatchObject({
-      sessionKey: "agent:main:app:general",
-      status: "completed",
-      finalText: "background result",
+  it("omitting model uses the bot's default model", async () => {
+    const script: MockScript = {
+      rounds: [
+        [
+          { kind: "text_delta", blockIndex: 0, delta: "default" },
+          { kind: "message_end", stopReason: "end_turn", usage: { inputTokens: 10, outputTokens: 2 } },
+        ],
+      ],
+    };
+    const { agent, llmCalls } = fakeAgent([], script) as unknown as {
+      agent: Parameters<typeof makeSpawnAgentTool>[0];
+      llmCalls: LLMStreamRequest[];
+    };
+    const tool = makeSpawnAgentTool(agent);
+    const { ctx } = makeParentCtx();
+
+    await tool.execute(
+      { persona: "default-child", prompt: "go", deliver: "return" },
+      ctx,
+    );
+
+    expect(llmCalls.length).toBe(1);
+    expect(llmCalls[0]?.model).toBe("claude-opus-4-7");
+  });
+
+  it("rejects invalid model names", async () => {
+    const { agent } = fakeAgent([], { rounds: [] });
+    const tool = makeSpawnAgentTool(agent);
+    const { ctx } = makeParentCtx();
+
+    const result = await tool.execute(
+      {
+        persona: "hacker",
+        prompt: "pwn",
+        deliver: "return",
+        model: "not-a-real-model",
+      },
+      ctx,
+    );
+
+    expect(result.status).toBe("error");
+    expect(result.errorMessage).toContain("model");
+  });
+
+  it("validate() rejects unknown model names", () => {
+    const { agent } = fakeAgent([], { rounds: [] });
+    const tool = makeSpawnAgentTool(agent);
+    const err = tool.validate?.({
+      persona: "child",
+      prompt: "go",
+      deliver: "return",
+      model: "fake-model-9000",
+    } as SpawnAgentInput);
+    expect(err).toContain("model");
+  });
+
+  it("validate() accepts all SPAWNABLE_MODELS", () => {
+    const { agent } = fakeAgent([], { rounds: [] });
+    const tool = makeSpawnAgentTool(agent);
+    for (const m of SPAWNABLE_MODELS) {
+      const err = tool.validate?.({
+        persona: "child",
+        prompt: "go",
+        deliver: "return",
+        model: m,
+      } as SpawnAgentInput);
+      expect(err).toBeNull();
+    }
+  });
+
+  it("spawn_started event includes model when specified", async () => {
+    const script: MockScript = {
+      rounds: [
+        [
+          { kind: "text_delta", blockIndex: 0, delta: "done" },
+          { kind: "message_end", stopReason: "end_turn", usage: { inputTokens: 10, outputTokens: 2 } },
+        ],
+      ],
+    };
+    const { agent } = fakeAgent([], script) as unknown as {
+      agent: Parameters<typeof makeSpawnAgentTool>[0];
+    };
+    const tool = makeSpawnAgentTool(agent);
+    const { ctx, events } = makeParentCtx();
+
+    await tool.execute(
+      {
+        persona: "gemini-child",
+        prompt: "hello",
+        deliver: "return",
+        model: "gemini-3.1-pro-preview",
+      },
+      ctx,
+    );
+
+    const startEvt = events.find(
+      (e): e is { type: string; model: string } =>
+        (e as { type?: unknown }).type === "spawn_started",
+    );
+    expect(startEvt).toBeDefined();
+    expect(startEvt?.model).toBe("gemini-3.1-pro-preview");
+  });
+
+  it("modelOverride propagates through runChildAgentLoop directly", async () => {
+    const script: MockScript = {
+      rounds: [
+        [
+          { kind: "text_delta", blockIndex: 0, delta: "kimi says hi" },
+          { kind: "message_end", stopReason: "end_turn", usage: { inputTokens: 10, outputTokens: 3 } },
+        ],
+      ],
+    };
+    const { agent, llmCalls } = fakeAgent([], script) as unknown as {
+      agent: Parameters<typeof runChildAgentLoop>[0];
+      llmCalls: LLMStreamRequest[];
+    };
+    const ws = new Workspace("/tmp/spawn-model-test");
+
+    const result = await runChildAgentLoop(agent as never, {
+      parentSessionKey: "agent:main:test:1",
+      parentTurnId: "turn_0",
+      parentSpawnDepth: 0,
+      persona: "kimi-child",
+      prompt: "hello from kimi",
+      timeoutMs: 10_000,
+      abortSignal: new AbortController().signal,
+      botId: "bot_test",
+      workspaceRoot: "/tmp/ws",
+      spawnDir: "/tmp/spawn-model-test",
+      spawnWorkspace: ws,
+      taskId: "task_model_test",
+      modelOverride: "kimi-k2p6",
     });
-    expect(delivered[0]!.taskId).toMatch(/^spawn_/);
+
+    expect(result.status).toBe("ok");
+    expect(result.finalText).toBe("kimi says hi");
+    expect(llmCalls.length).toBe(1);
+    expect(llmCalls[0]?.model).toBe("kimi-k2p6");
+  });
+
+  it("(d2) deliver='background' retries child failures before emitting spawn_result", async () => {
+    await withZeroSpawnRetryDelay(async () => {
+      const { agent } = fakeAgent([], { rounds: [] }) as unknown as {
+        agent: Parameters<typeof makeSpawnAgentTool>[0];
+      };
+      let attempts = 0;
+      (
+        agent as unknown as {
+          spawnChildTurn: () => Promise<SpawnChildTestResult>;
+        }
+      ).spawnChildTurn = async () => {
+        attempts++;
+        if (attempts < 3) {
+          return {
+            status: "error",
+            finalText: "",
+            toolCallCount: 0,
+            errorMessage: "Error http_503: upstream unavailable",
+          };
+        }
+        return {
+          status: "ok",
+          finalText: "background recovered",
+          toolCallCount: 0,
+        };
+      };
+      const tool = makeSpawnAgentTool(agent);
+      const { ctx, events } = makeParentCtx();
+
+      const result = await tool.execute(
+        { persona: "bg", prompt: "retry", deliver: "background" },
+        ctx,
+      );
+
+      expect(result.status).toBe("ok");
+      const event = (await waitForSpawnResult(events)) as
+        | { status?: string; finalText?: string; attempts?: number }
+        | undefined;
+      expect(event).toBeDefined();
+      expect(event?.status).toBe("ok");
+      expect(event?.finalText).toBe("background recovered");
+      expect(event?.attempts).toBe(3);
+      expect(attempts).toBe(3);
+      const retryEvents = events.filter(
+        (e): e is { type: string } =>
+          (e as { type?: unknown }).type === "spawn_retry",
+      );
+      expect(retryEvents).toHaveLength(2);
+    });
   });
 });

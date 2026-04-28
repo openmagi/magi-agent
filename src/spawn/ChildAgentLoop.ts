@@ -9,11 +9,12 @@
  * spawn_result) reach the client, same as before.
  *
  * The child does NOT share ToolDispatcher with Turn — Turn's dispatcher
- * is tightly coupled to Session (transcript append, hook registry,
- * permission modes, audit log). Children are ephemeral (§7.12.d): no
- * session, no transcript, no hooks. The child-tool runner here is a
- * simpler direct-execute loop that still honours:
+ * is tightly coupled to Session transcript append semantics. Children
+ * are ephemeral (§7.12.d), but the child-tool runner still honours the
+ * same policy plane where it can:
  *   • allowedTools intersection (filtered at child-tool selection time)
+ *   • beforeToolUse / afterToolUse hooks when the Agent exposes them
+ *   • runtime permission decisions and parent askUser consent delegate
  *   • MAX_SPAWN_DEPTH (parent enforces at SpawnAgent.execute entry)
  *   • PRE-01 workspace isolation (ctx.workspaceRoot = spawnDir)
  *   • timeout + parent abort propagation via a merged AbortController
@@ -23,19 +24,30 @@
  *   • deadline → `{ status:"error", errorMessage:"child timeout" }`
  *   • parent abort → `{ status:"aborted" }`
  *   • `askUser` throws inside the child
- *   • child staging hooks are all no-ops (no transcript / audit / staging)
+ *   • child staging hooks are all no-ops (durable lifecycle events carry
+ *     child audit/provenance instead of parent transcript writes)
  */
 
 import type { Agent } from "../Agent.js";
-import type { Tool, ToolContext, ToolResult } from "../Tool.js";
+import type {
+  AskUserQuestionInput,
+  AskUserQuestionOutput,
+  Tool,
+  ToolContext,
+  ToolResult,
+} from "../Tool.js";
+import type { HookContext } from "../hooks/types.js";
 import type {
   LLMContentBlock,
   LLMMessage,
   LLMToolDef,
 } from "../transport/LLMClient.js";
 import { StubSseWriter } from "../transport/SseWriter.js";
+import { decideRuntimePermission } from "../permissions/PermissionArbiter.js";
+import type { ChildAgentLifecycle } from "./ChildAgentHarness.js";
 import type { Workspace } from "../storage/Workspace.js";
 import { readOne } from "../turn/LLMStreamReader.js";
+import type { PermissionMode } from "../turn/ToolDispatcher.js";
 import { summariseToolOutput } from "../util/toolResult.js";
 
 /**
@@ -86,6 +98,30 @@ export function hasTrailingDeferralNarrative(finalText: string): boolean {
   return DEFERRAL_NARRATIVE_PATTERNS.some((re) => re.test(tail));
 }
 
+export function classifyChildBashBoundary(input: unknown): { safe: boolean; reason?: string } {
+  const command = commandOf(input);
+  if (!command.trim()) return { safe: true };
+  if (/(^|[\s"'`])\.\.(?:\/|$)/.test(command)) {
+    return { safe: false, reason: "child Bash cannot reference parent directories" };
+  }
+  if (/(^|[\s"'`])\/(?:etc|proc|sys|var|tmp|home|root|Users|Volumes|private)\b/.test(command)) {
+    return { safe: false, reason: "child Bash cannot reference absolute system paths" };
+  }
+  if (/(^|[\s"'`])\/[^\s"'`]*/.test(command)) {
+    return { safe: false, reason: "child Bash cannot use absolute paths" };
+  }
+  if (/(^|[\s"'`])(?:\.env|id_rsa|id_ed25519|credentials|secrets?)(?:[\s"'`]|$)/i.test(command)) {
+    return { safe: false, reason: "child Bash cannot access secret-looking paths" };
+  }
+  if (/\brm\s+-[^\n]*r[^\n]*f|\brm\s+-[^\n]*f[^\n]*r/i.test(command)) {
+    return { safe: false, reason: "destructive rm -rf" };
+  }
+  if (/[;&|]|`|\$\(|>|<</.test(command)) {
+    return { safe: false, reason: "child Bash supports only simple single commands" };
+  }
+  return { safe: true };
+}
+
 export interface SpawnChildResult {
   status: "ok" | "error" | "aborted";
   finalText: string;
@@ -118,8 +154,16 @@ export interface SpawnChildOptions {
   /** Workspace instance rooted at `spawnDir`. */
   spawnWorkspace: Workspace;
   taskId: string;
+  /** Override the LLM model for this child (e.g. "gpt-5.4", "gemini-3.1-pro-preview"). */
+  modelOverride?: string;
   /** Called when child emits tool events — wired to the parent's SSE. */
   onAgentEvent?(event: unknown): void;
+  /** Parent turn's askUser delegate, when the child can request consent. */
+  askUser?(input: AskUserQuestionInput): Promise<AskUserQuestionOutput>;
+  /** Parent session permission mode at spawn time. */
+  permissionMode?: PermissionMode;
+  /** Durable child lifecycle recorder wired to the parent's control ledger. */
+  lifecycle?: ChildAgentLifecycle;
 }
 
 /**
@@ -184,6 +228,80 @@ function collectText(blocks: LLMContentBlock[]): string {
     .join("");
 }
 
+type ChildHookRegistry = Pick<Agent["hooks"], "list" | "runPre" | "runPost">;
+
+function getChildHookRegistry(agent: Agent): ChildHookRegistry | null {
+  const maybe = (agent as { hooks?: Partial<ChildHookRegistry> }).hooks;
+  if (
+    maybe &&
+    typeof maybe.runPre === "function" &&
+    typeof maybe.runPost === "function" &&
+    typeof maybe.list === "function"
+  ) {
+    return maybe as ChildHookRegistry;
+  }
+  return null;
+}
+
+function makeChildHookContext(
+  agent: Agent,
+  opts: SpawnChildOptions,
+  abortSignal: AbortSignal,
+  agentModel = agent.config.model,
+): HookContext {
+  return {
+    botId: opts.botId,
+    userId: agent.config.userId,
+    sessionKey: opts.parentSessionKey,
+    turnId: `${opts.parentTurnId}::spawn::${opts.taskId}`,
+    contextId: childSessionKey(opts.parentSessionKey, opts.persona, 0),
+    llm: agent.llm,
+    transcript: [],
+    emit: (event) => opts.onAgentEvent?.(event),
+    log: () => {
+      /* child hook logs stay local; rule_check events still emit */
+    },
+    agentModel,
+    abortSignal,
+    deadlineMs: 5_000,
+    ...(opts.askUser ? { askUser: opts.askUser } : {}),
+  };
+}
+
+function hasBuiltinAutoApprovalHook(hooks: ChildHookRegistry | null): boolean {
+  if (!hooks) return false;
+  try {
+    return hooks
+      .list("beforeToolUse")
+      .some((hook) => hook.name === "builtin:auto-approval");
+  } catch {
+    return false;
+  }
+}
+
+async function askDangerousChildToolConsent(
+  opts: SpawnChildOptions,
+  toolName: string,
+): Promise<string | null> {
+  if (!opts.askUser) {
+    return `[PERMISSION:NO_DELEGATE] dangerous child tool ${toolName}`;
+  }
+  try {
+    const answer = await opts.askUser({
+      question: `Spawned child requested dangerous tool ${toolName}. Allow it to proceed?`,
+      choices: [
+        { id: "approve", label: "Approve" },
+        { id: "deny", label: "Deny" },
+      ],
+    });
+    if (answer.selectedId === "approve") return null;
+    return `[PERMISSION:USER_DENIED] dangerous child tool ${toolName}`;
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return `[PERMISSION:ASK_FAILED] dangerous child tool ${toolName}: ${msg}`;
+  }
+}
+
 /**
  * Run a single mini-agent loop for a spawned child. Does NOT persist to
  * the session transcript — the child is ephemeral. Parent is responsible
@@ -211,6 +329,11 @@ export async function runChildAgentLoop(
   ].join("\n");
 
   const messages: LLMMessage[] = [{ role: "user", content: opts.prompt }];
+  const resolvedModel =
+    typeof (agent as { resolveRuntimeModel?: () => Promise<string> }).resolveRuntimeModel === "function"
+      ? await agent.resolveRuntimeModel()
+      : agent.config.model;
+  const effectiveModel = opts.modelOverride ?? resolvedModel;
 
   const assistantBlocks: LLMContentBlock[] = [];
   let toolCallCount = 0;
@@ -219,9 +342,22 @@ export async function runChildAgentLoop(
 
   // Merge timeout + parent abort into one signal for nested tools.
   const controller = new AbortController();
-  const onParentAbort = (): void => controller.abort();
-  opts.abortSignal.addEventListener("abort", onParentAbort, { once: true });
-  const timer = setTimeout(() => controller.abort(), opts.timeoutMs);
+  let abortReason: "parent" | "timeout" | null = null;
+  const onParentAbort = (): void => {
+    abortReason ??= "parent";
+    controller.abort();
+  };
+  let parentAbortListenerRegistered = false;
+  if (opts.abortSignal.aborted) {
+    onParentAbort();
+  } else {
+    opts.abortSignal.addEventListener("abort", onParentAbort, { once: true });
+    parentAbortListenerRegistered = true;
+  }
+  const timer = setTimeout(() => {
+    abortReason ??= "timeout";
+    controller.abort();
+  }, Math.max(0, opts.timeoutMs));
 
   // Stub SSE writer so LLMStreamReader's sse.agent / sse.legacyDelta
   // calls are silent — children only surface structured events
@@ -232,6 +368,16 @@ export async function runChildAgentLoop(
   try {
     for (let iter = 0; iter < CHILD_MAX_ITERATIONS; iter++) {
       if (controller.signal.aborted) {
+        if (abortReason === "timeout") {
+          await opts.lifecycle?.failed("child timeout");
+          return {
+            status: "error",
+            finalText: collectText(assistantBlocks),
+            toolCallCount,
+            errorMessage: "child timeout",
+          };
+        }
+        await opts.lifecycle?.cancelled("parent aborted");
         return {
           status: "aborted",
           finalText: collectText(assistantBlocks),
@@ -239,6 +385,7 @@ export async function runChildAgentLoop(
         };
       }
       if (Date.now() > deadline) {
+        await opts.lifecycle?.failed("child timeout");
         return {
           status: "error",
           finalText: collectText(assistantBlocks),
@@ -246,12 +393,14 @@ export async function runChildAgentLoop(
           errorMessage: "child timeout",
         };
       }
+      await opts.lifecycle?.progress(`iteration ${iter + 1}`);
 
       const { blocks, stopReason } = await readOne(
         {
           llm: agent.llm,
-          model: agent.config.model,
+          model: effectiveModel,
           sse,
+          abortSignal: controller.signal,
           onError: () => {
             /* child-side error surfaces through the thrown exception */
           },
@@ -285,11 +434,17 @@ export async function runChildAgentLoop(
           });
           continue;
         }
-        return {
+        const final = {
           status: "ok",
           finalText,
           toolCallCount,
-        };
+        } satisfies SpawnChildResult;
+        await opts.lifecycle?.completed({
+          status: final.status,
+          finalText: final.finalText,
+          toolCallCount: final.toolCallCount,
+        });
+        return final;
       }
 
       const toolUses = blocks.filter(
@@ -313,19 +468,27 @@ export async function runChildAgentLoop(
           });
           continue;
         }
-        return {
+        const final = {
           status: "ok",
           finalText,
           toolCallCount,
-        };
+        } satisfies SpawnChildResult;
+        await opts.lifecycle?.completed({
+          status: final.status,
+          finalText: final.finalText,
+          toolCallCount: final.toolCallCount,
+        });
+        return final;
       }
 
       toolCallCount += toolUses.length;
       const results = await runChildTools({
         toolUses,
         toolsByName,
+        agent,
         opts,
         abortSignal: controller.signal,
+        agentModel: effectiveModel,
       });
       messages.push({ role: "assistant", content: blocks });
       messages.push({
@@ -339,31 +502,42 @@ export async function runChildAgentLoop(
       });
     }
 
+    await opts.lifecycle?.failed(`child exceeded ${CHILD_MAX_ITERATIONS} iterations`);
     return {
       status: "error",
       finalText: collectText(assistantBlocks),
       toolCallCount,
       errorMessage: `child exceeded ${CHILD_MAX_ITERATIONS} iterations`,
     };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    await opts.lifecycle?.failed(msg);
+    throw err;
   } finally {
     clearTimeout(timer);
-    opts.abortSignal.removeEventListener("abort", onParentAbort);
+    if (parentAbortListenerRegistered) {
+      opts.abortSignal.removeEventListener("abort", onParentAbort);
+    }
   }
 }
 
 interface ChildToolRunInput {
   toolUses: Array<Extract<LLMContentBlock, { type: "tool_use" }>>;
   toolsByName: Map<string, Tool>;
+  agent: Agent;
   opts: SpawnChildOptions;
   abortSignal: AbortSignal;
+  agentModel: string;
 }
 
 async function runChildTools(
   args: ChildToolRunInput,
 ): Promise<Array<{ toolUseId: string; content: string; isError: boolean }>> {
-  const { toolUses, toolsByName, opts, abortSignal } = args;
+  const { toolUses, toolsByName, agent, opts, abortSignal, agentModel } = args;
+  const hooks = getChildHookRegistry(agent);
 
   const runs = toolUses.map(async (tu) => {
+    await opts.lifecycle?.toolRequest({ requestId: tu.id, toolName: tu.name });
     const tool = toolsByName.get(tu.name);
     if (!tool) {
       return {
@@ -371,6 +545,83 @@ async function runChildTools(
         content: `error:unknown_tool ${tu.name} not in child toolset`,
         isError: true,
       };
+    }
+
+    let effectiveInput = tu.input;
+    const bypass = opts.permissionMode === "bypass";
+    const hookCtx = makeChildHookContext(agent, opts, abortSignal, agentModel);
+    if (!bypass && hooks) {
+      const preTool = await hooks.runPre(
+        "beforeToolUse",
+        { toolName: tu.name, toolUseId: tu.id, input: tu.input },
+        hookCtx,
+      );
+      if (preTool.action === "block") {
+        return {
+          toolUseId: tu.id,
+          content: `blocked by hook: ${preTool.reason}`,
+          isError: true,
+        };
+      }
+      if (preTool.action === "continue") {
+        effectiveInput = preTool.args.input;
+      }
+    }
+
+    if (tu.name === "Bash") {
+      const boundary = classifyChildBashBoundary(effectiveInput);
+      if (!boundary.safe) {
+        await opts.lifecycle?.permissionDecision({
+          decision: "deny",
+          reason: boundary.reason,
+        });
+        return {
+          toolUseId: tu.id,
+          content: `permission_denied: ${boundary.reason ?? "child Bash boundary denied"}`,
+          isError: true,
+        };
+      }
+    }
+
+    const permission = await decideRuntimePermission({
+      mode: opts.permissionMode ?? "default",
+      source: "child-agent",
+      toolName: tu.name,
+      input: effectiveInput,
+      tool,
+      workspaceRoot: opts.spawnDir,
+    });
+    await opts.lifecycle?.permissionDecision({
+      decision: permission.decision,
+      reason: permission.reason,
+    });
+    if (permission.decision === "ask") {
+      const denied = await askDangerousChildToolConsent(opts, tu.name);
+      if (denied !== null) {
+        await opts.lifecycle?.permissionDecision({
+          decision: "deny",
+          reason: permission.reason,
+        });
+        return {
+          toolUseId: tu.id,
+          content: `permission_denied: ${permission.reason}`,
+          isError: true,
+        };
+      }
+      await opts.lifecycle?.permissionDecision({
+        decision: "allow",
+        reason: permission.reason,
+      });
+      effectiveInput = permission.proposedInput ?? effectiveInput;
+    } else if (permission.decision !== "allow") {
+      return {
+        toolUseId: tu.id,
+        content: `permission_denied: ${permission.reason}`,
+        isError: true,
+      };
+    }
+    if (permission.decision === "allow") {
+      effectiveInput = permission.updatedInput ?? effectiveInput;
     }
 
     const childCtx: ToolContext = {
@@ -387,9 +638,11 @@ async function runChildTools(
         /* child progress folded into spawn_result — no per-step SSE */
       },
       emitAgentEvent: opts.onAgentEvent,
-      askUser: async () => {
-        throw new Error("askUser not available in a spawned child");
-      },
+      askUser:
+        opts.askUser ??
+        (async () => {
+          throw new Error("askUser not available in a spawned child");
+        }),
       staging: {
         stageFileWrite: () => {
           /* children don't stage atomic writes */
@@ -407,7 +660,7 @@ async function runChildTools(
     const started = Date.now();
     let result: ToolResult;
     try {
-      result = await (tool as Tool<unknown, unknown>).execute(tu.input, childCtx);
+      result = await (tool as Tool<unknown, unknown>).execute(effectiveInput, childCtx);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       result = {
@@ -418,9 +671,29 @@ async function runChildTools(
       };
     }
 
+    if (!bypass && hooks) {
+      void hooks.runPost(
+        "afterToolUse",
+        { toolName: tu.name, toolUseId: tu.id, input: effectiveInput, result },
+        hookCtx,
+      );
+    }
+
     const content = summariseToolOutput(result);
     return { toolUseId: tu.id, content, isError: result.status !== "ok" };
   });
 
   return Promise.all(runs);
+}
+
+function commandOf(input: unknown): string {
+  if (input && typeof input === "object" && "command" in input) {
+    const command = (input as { command?: unknown }).command;
+    return typeof command === "string" ? command : "";
+  }
+  if (input && typeof input === "object" && "cmd" in input) {
+    const command = (input as { cmd?: unknown }).cmd;
+    return typeof command === "string" ? command : "";
+  }
+  return "";
 }

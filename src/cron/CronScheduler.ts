@@ -93,6 +93,7 @@ export class CronScheduler {
   readonly nowFn: () => number;
   private readonly maxConsecutiveFailures: number;
   private fireHandler: CronFireHandler | null = null;
+  private tickInProgress = false;
 
   constructor(
     private readonly workspaceRoot: string,
@@ -201,40 +202,46 @@ export class CronScheduler {
    * so tests can advance a mock clock + call tick() directly.
    */
   async tick(): Promise<void> {
-    const currentTime = this.nowFn();
-    const due: CronRecord[] = [];
-    for (const c of this.crons.values()) {
-      if (!c.enabled) continue;
-      if (c.nextFireAt <= currentTime) due.push(c);
-    }
-    for (const cron of due) {
-      try {
-        if (cron.internal) {
-          // Internal crons use their dedicated handler
-          const handler = this.internalHandlers.get(cron.cronId);
-          if (handler) await handler();
-        } else if (this.fireHandler) {
-          await this.fireHandler(cron);
-        }
-        cron.lastFiredAt = this.nowFn();
-        cron.consecutiveFailures = 0;
-      } catch (err) {
-        cron.consecutiveFailures += 1;
-        if (cron.consecutiveFailures >= this.maxConsecutiveFailures) {
-          cron.enabled = false;
-        }
-        console.warn(
-          `[cron] fire failed cronId=${cron.cronId} failures=${cron.consecutiveFailures}: ${(err as Error).message}`,
-        );
-      } finally {
+    if (this.tickInProgress) return;
+    this.tickInProgress = true;
+    try {
+      const currentTime = this.nowFn();
+      const due: CronRecord[] = [];
+      for (const c of this.crons.values()) {
+        if (!c.enabled) continue;
+        if (c.nextFireAt <= currentTime) due.push(c);
+      }
+      for (const cron of due) {
         try {
-          cron.nextFireAt = getNextFireAt(cron.expression, new Date(this.nowFn())).getTime();
-        } catch {
-          cron.enabled = false;
+          if (cron.internal) {
+            // Internal crons use their dedicated handler
+            const handler = this.internalHandlers.get(cron.cronId);
+            if (handler) await handler();
+          } else if (this.fireHandler) {
+            await this.fireHandler(cron);
+          }
+          cron.lastFiredAt = this.nowFn();
+          cron.consecutiveFailures = 0;
+        } catch (err) {
+          cron.consecutiveFailures += 1;
+          if (cron.consecutiveFailures >= this.maxConsecutiveFailures) {
+            cron.enabled = false;
+          }
+          console.warn(
+            `[cron] fire failed cronId=${cron.cronId} failures=${cron.consecutiveFailures}: ${(err as Error).message}`,
+          );
+        } finally {
+          try {
+            cron.nextFireAt = getNextFireAt(cron.expression, new Date(this.nowFn())).getTime();
+          } catch {
+            cron.enabled = false;
+          }
         }
       }
+      if (due.length > 0) await this.persist();
+    } finally {
+      this.tickInProgress = false;
     }
-    if (due.length > 0) await this.persist();
   }
 
   async create(opts: {

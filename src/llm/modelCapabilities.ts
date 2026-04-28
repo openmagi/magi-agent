@@ -17,6 +17,10 @@
  *   - Opus 4.x   → $15 in / $75 out per million tokens
  *   - Sonnet 4.x → $3  in / $15 out
  *   - Haiku 4.x  → $1  in / $5  out
+ *   - GPT-5.4 Nano → $0.20 in / $1.25 out
+ *   - GPT-5.4 Mini → $0.75 in / $4.50 out
+ *   - GPT-5.5      → $5    in / $30 out
+ *   - GPT-5.5 Pro  → $30   in / $180 out
  *
  * Unknown models fail-open: `getCapability` returns null, `computeUsd`
  * returns 0, `shouldEnableThinkingByDefault` returns false. An unknown
@@ -71,6 +75,142 @@ export const MODEL_CAPABILITIES: Record<string, ModelCapability> = {
     contextWindow: 200_000,
     inputUsdPerMtok: 1,
     outputUsdPerMtok: 5,
+  },
+  "claude-haiku-4-5": {
+    id: "claude-haiku-4-5",
+    supportsThinking: false,
+    maxOutputTokens: 8_000,
+    contextWindow: 200_000,
+    inputUsdPerMtok: 1,
+    outputUsdPerMtok: 5,
+  },
+  "anthropic/claude-opus-4-7": {
+    id: "claude-opus-4-7",
+    supportsThinking: true,
+    maxOutputTokens: 32_000,
+    contextWindow: 900_000,
+    inputUsdPerMtok: 15,
+    outputUsdPerMtok: 75,
+  },
+  "anthropic/claude-opus-4-6": {
+    id: "claude-opus-4-6",
+    supportsThinking: true,
+    maxOutputTokens: 32_000,
+    contextWindow: 200_000,
+    inputUsdPerMtok: 15,
+    outputUsdPerMtok: 75,
+  },
+  "anthropic/claude-sonnet-4-6": {
+    id: "claude-sonnet-4-6",
+    supportsThinking: true,
+    maxOutputTokens: 16_000,
+    contextWindow: 200_000,
+    inputUsdPerMtok: 3,
+    outputUsdPerMtok: 15,
+  },
+  "anthropic/claude-haiku-4-5": {
+    id: "claude-haiku-4-5",
+    supportsThinking: false,
+    maxOutputTokens: 8_000,
+    contextWindow: 200_000,
+    inputUsdPerMtok: 1,
+    outputUsdPerMtok: 5,
+  },
+  "openai/gpt-5.4-nano": {
+    id: "openai/gpt-5.4-nano",
+    supportsThinking: false,
+    maxOutputTokens: 4_096,
+    contextWindow: 128_000,
+    inputUsdPerMtok: 0.2,
+    outputUsdPerMtok: 1.25,
+  },
+  "openai/gpt-5.4-mini": {
+    id: "openai/gpt-5.4-mini",
+    supportsThinking: false,
+    maxOutputTokens: 8_192,
+    contextWindow: 128_000,
+    inputUsdPerMtok: 0.75,
+    outputUsdPerMtok: 4.5,
+  },
+  "openai/gpt-5.5": {
+    id: "openai/gpt-5.5",
+    supportsThinking: false,
+    maxOutputTokens: 128_000,
+    contextWindow: 1_000_000,
+    inputUsdPerMtok: 5,
+    outputUsdPerMtok: 30,
+  },
+  "openai/gpt-5.5-pro": {
+    id: "openai/gpt-5.5-pro",
+    supportsThinking: false,
+    maxOutputTokens: 128_000,
+    contextWindow: 1_050_000,
+    inputUsdPerMtok: 30,
+    outputUsdPerMtok: 180,
+  },
+  "openai-codex/gpt-5.5": {
+    id: "openai-codex/gpt-5.5",
+    supportsThinking: false,
+    maxOutputTokens: 128_000,
+    contextWindow: 1_000_000,
+    inputUsdPerMtok: 5,
+    outputUsdPerMtok: 30,
+  },
+  "fireworks/kimi-k2p6": {
+    id: "fireworks/kimi-k2p6",
+    supportsThinking: false,
+    maxOutputTokens: 32_768,
+    contextWindow: 262_144,
+    inputUsdPerMtok: 0.95,
+    outputUsdPerMtok: 4,
+  },
+  "fireworks/minimax-m2p7": {
+    id: "fireworks/minimax-m2p7",
+    supportsThinking: false,
+    maxOutputTokens: 8_192,
+    contextWindow: 196_608,
+    inputUsdPerMtok: 0.3,
+    outputUsdPerMtok: 1.2,
+  },
+  "google/gemini-3.1-flash-lite-preview": {
+    id: "google/gemini-3.1-flash-lite-preview",
+    supportsThinking: false,
+    maxOutputTokens: 65_536,
+    contextWindow: 1_048_576,
+    inputUsdPerMtok: 0.25,
+    outputUsdPerMtok: 1.5,
+  },
+  "google/gemini-3.1-pro-preview": {
+    id: "google/gemini-3.1-pro-preview",
+    supportsThinking: false,
+    maxOutputTokens: 65_536,
+    contextWindow: 1_048_576,
+    inputUsdPerMtok: 2,
+    outputUsdPerMtok: 12,
+  },
+  "local/gemma-fast": {
+    id: "local/gemma-fast",
+    supportsThinking: false,
+    maxOutputTokens: 8_192,
+    contextWindow: 131_072,
+    inputUsdPerMtok: 0,
+    outputUsdPerMtok: 0,
+  },
+  "local/gemma-max": {
+    id: "local/gemma-max",
+    supportsThinking: false,
+    maxOutputTokens: 8_192,
+    contextWindow: 131_072,
+    inputUsdPerMtok: 0,
+    outputUsdPerMtok: 0,
+  },
+  "local/qwen-uncensored": {
+    id: "local/qwen-uncensored",
+    supportsThinking: false,
+    maxOutputTokens: 8_192,
+    contextWindow: 131_072,
+    inputUsdPerMtok: 0,
+    outputUsdPerMtok: 0,
   },
 };
 

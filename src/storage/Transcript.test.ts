@@ -10,7 +10,7 @@
  * so aborted turns are included in the conversation history.
  */
 
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -111,5 +111,49 @@ describe("Transcript.readCommitted", () => {
     const committed = await t.readCommitted();
     // Should only include turn 1 (the trailing turn 2 entries are not yet complete)
     expect(committed.length).toBe(4);
+  });
+
+  it("serves repeated readAll calls from cache when file stats are unchanged", async () => {
+    const t = makeTranscript();
+    await writeEntries(t, [
+      { kind: "turn_started", ts: 1, turnId: "t1", declaredRoute: "direct" },
+      { kind: "user_message", ts: 2, turnId: "t1", text: "first" },
+      { kind: "turn_committed", ts: 3, turnId: "t1", inputTokens: 1, outputTokens: 1 },
+    ]);
+    const readSpy = vi.spyOn(fs, "readFile");
+
+    const first = await t.readAll();
+    const second = await t.readAll();
+
+    expect(first).toEqual(second);
+    expect(readSpy).toHaveBeenCalledTimes(1);
+    readSpy.mockRestore();
+  });
+
+  it("invalidates the readAll cache when the transcript file changes externally", async () => {
+    const t = makeTranscript();
+    await writeEntries(t, [
+      { kind: "turn_started", ts: 1, turnId: "t1", declaredRoute: "direct" },
+      { kind: "turn_committed", ts: 2, turnId: "t1", inputTokens: 1, outputTokens: 1 },
+    ]);
+    const readSpy = vi.spyOn(fs, "readFile");
+
+    await t.readAll();
+    await fs.appendFile(
+      t.filePath,
+      `${JSON.stringify({
+        kind: "control_event",
+        ts: 3,
+        seq: 1,
+        eventId: "ce_1",
+        eventType: "verification",
+      } satisfies TranscriptEntry)}\n`,
+      "utf8",
+    );
+    const refreshed = await t.readAll();
+
+    expect(refreshed).toHaveLength(3);
+    expect(readSpy).toHaveBeenCalledTimes(2);
+    readSpy.mockRestore();
   });
 });

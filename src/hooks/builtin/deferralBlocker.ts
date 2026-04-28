@@ -25,33 +25,6 @@
 import type { RegisteredHook, HookContext } from "../types.js";
 import type { TranscriptEntry } from "../../storage/Transcript.js";
 
-/**
- * Patterns matching "I'll deliver this later" promises drafted just
- * before turn end. Korean + English, case-insensitive for English.
- */
-export const DEFERRAL_PATTERNS: RegExp[] = [
-  // Korean: 완료되면 결과 보내/드리겠/전달 등
-  /완료(?:되면|하면|후에?)\s*[^.\n]{0,40}?(?:보내|드리|전달|공유|알려)/u,
-  // Korean: 결과(를?) (보내|드리|전달) (드리|겠|예정)
-  /결과(?:를|가)?\s*(?:보내|드리|전달)(?:\s*드리)?(?:겠|예정|할게)/u,
-  // Korean: 나중에 (보내|드리|알려)
-  /나중에\s*[^.\n]{0,20}?(?:보내|드리|알려|전달)/u,
-  // Korean: 분/시간 후 + 결과/리포트
-  /\d+\s*(?:분|시간)\s*(?:후|뒤)\s*[^.\n]{0,20}?(?:결과|리포트|보내|드리)/u,
-  // Korean: "조금만 기다려" / "잠시만요" + 완료 promise. Matches
-  // either the bare "잠시만요" form or the "조금만 기다려" form with
-  // an optional attached honorific particle.
-  /(?:조금만|잠시만|잠깐만)(?:요)?/u,
-  // English: "I'll (send|give|return|report|share) ... when/once"
-  /\bI[''`]?ll\s+(?:send|give|return|report|share|provide|deliver)[^.\n]{0,40}?\b(?:when|once|after|as\s+soon)/i,
-  // English: "results will be (sent|ready|available)"
-  /\bresults?\s+(?:will\s+be|are\s+coming|is\s+coming)\s+(?:sent|ready|available|shortly)/i,
-  // English: "check back"
-  /\bcheck\s+back\b/i,
-  // English: "in (a few|5|10) (minutes|seconds)"
-  /\bin\s+(?:a\s+few|\d+)\s+(?:minutes?|seconds?)\b/i,
-];
-
 /** Tool names that indicate work was actually started this turn. */
 const WORK_TOOLS = new Set([
   "SpawnAgent",
@@ -76,13 +49,43 @@ function isEnabled(): boolean {
   return v === "" || v === "on" || v === "true" || v === "1";
 }
 
-/** Exported for tests — pattern match. */
-export function matchesDeferral(text: string): boolean {
-  if (!text) return false;
-  for (const p of DEFERRAL_PATTERNS) {
-    if (p.test(text)) return true;
+const DEFERRAL_CLASSIFIER_PROMPT = `You classify whether an AI assistant's response contains a "deferral promise" — a promise to deliver results LATER instead of doing the work NOW in this turn.
+
+Deferral (YES):
+- "완료되면 결과 보내드리겠습니다" (will send when done)
+- "5분 후 리포트 드릴게요" (will give report in 5 min)
+- "I'll send the results when ready"
+- "Check back in a few minutes"
+- "나중에 알려드리겠습니다" (will let you know later)
+
+NOT deferral (NO):
+- "잠시만요, 지금 처리하겠습니다" (wait, processing now — synchronous)
+- "결과를 정리해서 바로 보내드릴게요" (organizing and sending right away)
+- "Let me run this and show you" (doing it now)
+- "잠깐만 기다려주세요" as filler while working (not a future promise)
+- Normal response without time-delayed delivery promises
+
+Reply ONLY: YES or NO`;
+
+/** LLM-based deferral classification. No regex fallback. */
+export async function matchesDeferral(text: string, ctx?: HookContext): Promise<boolean> {
+  if (!text || text.trim().length === 0) return false;
+  if (!ctx?.llm) return false; // No LLM = fail-open
+
+  try {
+    let result = "";
+    for await (const event of ctx.llm.stream({
+      model: "claude-haiku-4-5",
+      system: DEFERRAL_CLASSIFIER_PROMPT,
+      messages: [{ role: "user", content: [{ type: "text", text: text.slice(0, 500) }] }],
+      max_tokens: 10,
+    })) {
+      if (event.kind === "text_delta") result += event.delta;
+    }
+    return result.trim().toUpperCase().startsWith("YES");
+  } catch {
+    return false; // Fail-open on LLM error
   }
-  return false;
 }
 
 /** Exported for tests — count WORK_TOOLS calls in the turn's transcript. */
@@ -122,7 +125,7 @@ export function makeDeferralBlockerHook(
           return { action: "continue" };
         }
 
-        if (!matchesDeferral(assistantText)) {
+        if (!(await matchesDeferral(assistantText, ctx))) {
           return { action: "continue" };
         }
 

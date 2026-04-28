@@ -25,6 +25,9 @@ import type { Session } from "../Session.js";
 import { Transcript } from "../storage/Transcript.js";
 import { SseWriter } from "../transport/SseWriter.js";
 import type { HookContext } from "../hooks/types.js";
+import { ControlEventLedger } from "../control/ControlEventLedger.js";
+import { ControlRequestStore } from "../control/ControlRequestStore.js";
+import type { ControlRequestRecord } from "../control/ControlEvents.js";
 
 class FakeSse extends SseWriter {
   readonly events: Array<Record<string, unknown>> = [];
@@ -47,7 +50,9 @@ class FakeSse extends SseWriter {
 interface ToolRecord {
   name: string;
   calls: unknown[];
-  behaviour: "ok" | "throw" | "error-status";
+  behaviour: "ok" | "throw" | "error-status" | "transient-then-ok";
+  permission?: "read" | "write" | "execute" | "net" | "meta";
+  dangerous?: boolean;
 }
 
 interface HookRecord {
@@ -60,6 +65,7 @@ async function makeCtx(opts: {
   tools: ToolRecord[];
   permissionMode?: "default" | "plan" | "auto" | "bypass";
   blockReason?: string;
+  askUserSelectedId?: string;
 }): Promise<{
   ctx: ToolDispatchContext;
   sse: FakeSse;
@@ -67,6 +73,7 @@ async function makeCtx(opts: {
   auditEvents: Array<{ event: string; data?: Record<string, unknown> }>;
   hooks: HookRecord;
   session: Session;
+  askUserCalls: unknown[];
 }> {
   const workspaceRoot = await fs.mkdtemp(
     path.join(os.tmpdir(), "tool-dispatcher-"),
@@ -76,10 +83,18 @@ async function makeCtx(opts: {
 
   const sse = new FakeSse();
   const auditEvents: Array<{ event: string; data?: Record<string, unknown> }> = [];
+  const askUserCalls: unknown[] = [];
   const hooks: HookRecord = { calls: [] };
   if (opts.blockReason !== undefined) hooks.blockReason = opts.blockReason;
 
   const transcript = new Transcript(sessionsDir, "sess-key");
+  const controlEvents = new ControlEventLedger({
+    rootDir: sessionsDir,
+    sessionKey: "sess-key",
+    transcript,
+  });
+  const controlRequests = new ControlRequestStore({ ledger: controlEvents });
+  const waiters = new Map<string, (request: ControlRequestRecord) => void>();
 
   const toolRegistry = {
     list: () => [],
@@ -90,9 +105,17 @@ async function makeCtx(opts: {
         name: t.name,
         kind: "builtin" as const,
         description: t.name,
+        permission: t.permission ?? "read",
+        ...(t.dangerous ? { dangerous: true } : {}),
         inputSchema: { type: "object", properties: {} },
         execute: async (input: unknown) => {
           t.calls.push(input);
+          if (t.behaviour === "transient-then-ok") {
+            if (t.calls.length === 1) {
+              throw new Error("ETIMEDOUT");
+            }
+            return { status: "ok" as const, durationMs: 1, output: `${t.name}-output` };
+          }
           if (t.behaviour === "throw") {
             throw new Error("boom");
           }
@@ -144,8 +167,23 @@ async function makeCtx(opts: {
   };
 
   const session = {
-    meta: { sessionKey: "sess-key" },
+    meta: { sessionKey: "sess-key", channel: { type: "app", channelId: "general" } },
     transcript,
+    controlEvents,
+    controlRequests,
+    resolveControlRequest: async (requestId: string, input: { decision: "approved" | "denied" | "answered"; updatedInput?: unknown; feedback?: string; answer?: string }) => {
+      const resolved = await controlRequests.resolve(requestId, input);
+      waiters.get(requestId)?.(resolved);
+      return resolved;
+    },
+    waitForControlRequestResolution: async (requestId: string) => {
+      const existing = (await controlRequests.project()).requests[requestId];
+      if (!existing) throw new Error(`control request not found: ${requestId}`);
+      if (existing.state !== "pending") return existing;
+      return await new Promise<ControlRequestRecord>((resolve) => {
+        waiters.set(requestId, resolve);
+      });
+    },
     agent: agentStub,
   } as unknown as Session;
 
@@ -170,10 +208,34 @@ async function makeCtx(opts: {
     stageAuditEvent: (event, data) => {
       auditEvents.push({ event, ...(data !== undefined ? { data } : {}) });
     },
-    askUser: async () => ({}),
+    askUser: async (q) => {
+      askUserCalls.push(q);
+      return { selectedId: opts.askUserSelectedId ?? "deny" };
+    },
   };
 
-  return { ctx, sse, transcript, auditEvents, hooks, session };
+  return { ctx, sse, transcript, auditEvents, hooks, session, askUserCalls };
+}
+
+async function waitForPendingControlRequest(session: Session): Promise<ControlRequestRecord> {
+  for (let i = 0; i < 50; i += 1) {
+    const pending = await session.controlRequests.pending();
+    if (pending[0]) return pending[0];
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  throw new Error("timed out waiting for pending control request");
+}
+
+async function waitForSseEvent(
+  sse: FakeSse,
+  predicate: (event: Record<string, unknown>) => boolean,
+): Promise<Record<string, unknown>> {
+  for (let i = 0; i < 50; i += 1) {
+    const event = sse.events.find(predicate);
+    if (event) return event;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  throw new Error("timed out waiting for SSE event");
 }
 
 function tu(id: string, name: string, input: unknown = {}): Extract<LLMContentBlock, { type: "tool_use" }> {
@@ -207,6 +269,33 @@ describe("ToolDispatcher.dispatch", () => {
     expect(hooks.calls.some((c) => c.point === "afterToolUse")).toBe(true);
   });
 
+  it("bypass mode still denies security-critical shell commands before execution", async () => {
+    const tool: ToolRecord = {
+      name: "Bash",
+      calls: [],
+      behaviour: "ok",
+      permission: "execute",
+    };
+    const { ctx, hooks, sse, transcript } = await makeCtx({
+      tools: [tool],
+      permissionMode: "bypass",
+    });
+
+    const results = await dispatch(ctx, [
+      tu("tu_1", "Bash", { command: 'rm -rf "$(pwd)"' }),
+    ]);
+
+    expect(results[0]?.isError).toBe(true);
+    expect(results[0]?.content).toContain("destructive rm -rf");
+    expect(tool.calls.length).toBe(0);
+    expect(hooks.calls.some((c) => c.point === "beforeToolUse")).toBe(false);
+    const ends = sse.events.filter((e) => e.type === "tool_end");
+    expect(ends[0]?.status).toBe("permission_denied");
+    const entries = await transcript.readAll();
+    const res = entries.find((e) => e.kind === "tool_result");
+    expect((res as { status?: string }).status).toBe("permission_denied");
+  });
+
   it("hook block → permission_denied tool_end + transcript, tool NOT executed", async () => {
     const tool: ToolRecord = { name: "Bash", calls: [], behaviour: "ok" };
     const { ctx, sse, transcript } = await makeCtx({
@@ -223,6 +312,38 @@ describe("ToolDispatcher.dispatch", () => {
     const res = entries.find((e) => e.kind === "tool_result");
     expect(res).toBeDefined();
     expect((res as { status?: string }).status).toBe("permission_denied");
+  });
+
+  it("dangerous tool asks through durable control request and executes updated input", async () => {
+    const tool: ToolRecord = {
+      name: "Bash",
+      calls: [],
+      behaviour: "ok",
+      permission: "execute",
+      dangerous: true,
+    };
+    const { ctx, session, sse, transcript } = await makeCtx({ tools: [tool] });
+
+    const run = dispatch(ctx, [tu("tu_1", "Bash", { command: "npm test" })]);
+    const request = await waitForPendingControlRequest(session);
+    expect(request.kind).toBe("tool_permission");
+    expect(request.proposedInput).toEqual({ command: "npm test" });
+    await expect(waitForSseEvent(sse, (event) => event.type === "control_event")).resolves.toBeTruthy();
+
+    await session.resolveControlRequest(request.requestId, {
+      decision: "approved",
+      updatedInput: { command: "npm run lint" },
+    });
+
+    const results = await run;
+    expect(results[0]?.isError).toBe(false);
+    expect(tool.calls).toEqual([{ command: "npm run lint" }]);
+    const entries = await transcript.readAll();
+    const call = entries.find((entry) => entry.kind === "tool_call");
+    expect(call).toMatchObject({
+      kind: "tool_call",
+      input: { command: "npm run lint" },
+    });
   });
 
   it("unknown tool → unknown_tool transcript + error tool_end", async () => {
@@ -243,6 +364,47 @@ describe("ToolDispatcher.dispatch", () => {
     expect(results[0]?.isError).toBe(true);
     const ends = sse.events.filter((e) => e.type === "tool_end");
     expect(ends[0]?.status).toBe("error");
+  });
+
+  it("retries a transient failure once for safe tools", async () => {
+    const tool: ToolRecord = {
+      name: "FetchContext",
+      calls: [],
+      behaviour: "transient-then-ok",
+      permission: "read",
+    };
+    const { ctx, sse } = await makeCtx({ tools: [tool] });
+
+    const results = await dispatch(ctx, [tu("tu_1", "FetchContext")]);
+
+    expect(results[0]?.isError).toBe(false);
+    expect(tool.calls).toHaveLength(2);
+    const retries = sse.events.filter((e) => e.type === "retry");
+    expect(retries).toHaveLength(1);
+    expect(retries[0]).toMatchObject({
+      type: "retry",
+      toolUseId: "tu_1",
+      toolName: "FetchContext",
+      retryNo: 1,
+    });
+  });
+
+  it("does not auto-retry dangerous tools", async () => {
+    const tool: ToolRecord = {
+      name: "DangerousNet",
+      calls: [],
+      behaviour: "transient-then-ok",
+      permission: "net",
+      dangerous: true,
+    };
+    const { ctx, sse } = await makeCtx({ tools: [tool], permissionMode: "bypass" });
+
+    const results = await dispatch(ctx, [tu("tu_1", "DangerousNet")]);
+
+    expect(results[0]?.isError).toBe(true);
+    expect(tool.calls).toHaveLength(1);
+    const retries = sse.events.filter((e) => e.type === "retry");
+    expect(retries).toHaveLength(0);
   });
 
   it("runs multiple tool_use blocks in parallel", async () => {

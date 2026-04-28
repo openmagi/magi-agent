@@ -55,12 +55,31 @@ export interface PlanModeAutoTriggerOpts {
  * are preferable to missing a real coding request. The bot can always
  * decline the nudge and proceed without `/plan`.
  */
-export const IMPLEMENTATION_INTENT_RE =
-  /\b(build|implement|add|create|write|refactor)\b.*?\b(feature|api|endpoint|hook|service|component|module|route|handler|tool|migration|schema)\b|\b(refactor|implement)\b/i;
+const IMPLEMENTATION_CLASSIFIER_PROMPT = `Does this message ask to BUILD or IMPLEMENT something non-trivial (code feature, API, service, component)?
 
-export function matchesImplementationIntent(text: string): boolean {
+YES examples: "implement the API endpoint", "구현해줘", "함수 만들어", "add a new route handler", "refactor the auth module", "서비스 빌드해줘"
+NO examples: "explain this code", "코드 분석해줘", "what does this do", "search for X", "write a document", "요약해줘", simple questions, file operations
+
+Reply ONLY: YES or NO`;
+
+export async function matchesImplementationIntent(text: string, ctx?: HookContext): Promise<boolean> {
   if (!text) return false;
-  return IMPLEMENTATION_INTENT_RE.test(text);
+  if (!ctx?.llm) return false;
+
+  try {
+    let result = "";
+    for await (const event of ctx.llm.stream({
+      model: "claude-haiku-4-5",
+      system: IMPLEMENTATION_CLASSIFIER_PROMPT,
+      messages: [{ role: "user", content: [{ type: "text", text: text.slice(0, 300) }] }],
+      max_tokens: 10,
+    })) {
+      if (event.kind === "text_delta") result += event.delta;
+    }
+    return result.trim().toUpperCase().startsWith("YES");
+  } catch {
+    return false;
+  }
 }
 
 /** Parse the env gate. Default "on" unless explicitly disabled. */
@@ -91,7 +110,7 @@ export function makePlanModeAutoTriggerHook(
     // stable relative position in the final prompt.
     priority: 8,
     blocking: false,
-    timeoutMs: 100,
+    timeoutMs: 5_000,
     handler: async (args, ctx: HookContext) => {
       try {
         // Env gate — operators / per-bot config may disable.
@@ -110,7 +129,7 @@ export function makePlanModeAutoTriggerHook(
 
         const text = latestUserText(args.messages);
         if (!text) return { action: "continue" };
-        if (!matchesImplementationIntent(text)) return { action: "continue" };
+        if (!(await matchesImplementationIntent(text, ctx))) return { action: "continue" };
 
         ctx.log("info", "[plan-mode-auto-trigger] nudging toward /plan", {
           turnId: ctx.turnId,

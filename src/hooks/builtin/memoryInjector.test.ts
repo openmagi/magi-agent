@@ -13,6 +13,7 @@ import {
   buildMemoryFence,
   searchQmd,
 } from "./memoryInjector.js";
+import type { HipocampusService } from "../../services/memory/HipocampusService.js";
 import type { HookContext } from "../types.js";
 import type { LLMClient, LLMMessage } from "../../transport/LLMClient.js";
 import type { AgentEvent } from "../../transport/SseWriter.js";
@@ -355,6 +356,47 @@ describe("memoryInjector", () => {
       }
     } finally {
       await fs.rm(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it("injects root memory before qmd recall when hipocampus service is available", async () => {
+    const hook = makeMemoryInjectorHook({
+      hipocampus: {
+        recall: async () => ({
+          root: {
+            path: "memory/ROOT.md",
+            content: "stable root summary",
+            bytes: Buffer.byteLength("stable root summary", "utf8"),
+          },
+          results: [
+            {
+              path: "memory/daily/2026-04-25.md",
+              content: "narrow matching recall",
+              score: 0.88,
+            },
+          ],
+        }),
+      } as Pick<HipocampusService, "recall"> as never,
+    });
+    const { ctx } = makeCtx();
+
+    const result = await hook.handler(
+      {
+        messages: userMessages("what is the current state?"),
+        tools: [],
+        system: "SYS",
+        iteration: 0,
+      },
+      ctx,
+    );
+
+    expect(result).toBeDefined();
+    expect(result?.action).toBe("replace");
+    if (result && result.action === "replace") {
+      expect(result.value.system).toContain('<memory-root source="hipocampus-root" tier="L2">');
+      expect(result.value.system).toContain("stable root summary");
+      expect(result.value.system).toContain('<memory-context source="qmd" tier="L0">');
+      expect(result.value.system).toContain("narrow matching recall");
     }
   });
 });

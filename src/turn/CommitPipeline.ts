@@ -19,6 +19,10 @@ import type { SseWriter } from "../transport/SseWriter.js";
 import type { LLMContentBlock } from "../transport/LLMClient.js";
 import type { HookContext } from "../hooks/types.js";
 import type { UserMessage, TokenUsage } from "../util/types.js";
+import { StructuredOutputContract, type StructuredOutputSpec } from "../structured/StructuredOutputContract.js";
+import type { RetryBlockKind } from "./RetryController.js";
+import type { TurnStopReason } from "./types.js";
+import { stripLeadingRouteMetaTag } from "./visibleText.js";
 
 export type CommitHookPoint =
   | "beforeCommit"
@@ -40,9 +44,12 @@ export interface CommitPipelineContext {
   readonly meta: {
     usage: TokenUsage;
     endedAt?: number;
+    stopReason?: TurnStopReason;
   };
   /** All assistant blocks emitted across iterations. */
   readonly emittedAssistantBlocks: LLMContentBlock[];
+  /** Per-LLM-call assistant messages preserved for canonical replay. */
+  readonly canonicalAssistantMessages?: ReadonlyArray<ReadonlyArray<LLMContentBlock>>;
   /** Current retry count for beforeCommit hook payload. */
   readonly commitRetryCount: number;
   /** Mutate the Turn's cached assistantText on commit. */
@@ -53,9 +60,16 @@ export interface CommitPipelineContext {
   readonly getAssistantText: () => string;
 }
 
-export interface CommitResult {
-  finalText: string;
-}
+export type CommitResult =
+  | { status: "committed"; finalText: string }
+  | {
+      status: "blocked";
+      reason: string;
+      finalText: string;
+      retryable: boolean;
+      retryKind?: RetryBlockKind;
+      stopReason?: TurnStopReason;
+    };
 
 /**
  * Commit path: beforeCommit → assistant_text append → turn_committed
@@ -70,41 +84,40 @@ export async function commit(ctx: CommitPipelineContext): Promise<CommitResult> 
     .filter((b): b is Extract<LLMContentBlock, { type: "text" }> => b.type === "text")
     .map((b) => b.text)
     .join("");
+  finalText = stripLeadingRouteMetaTag(finalText);
 
-  // Thinking-to-text fallback — if the model put everything in thinking
-  // and produced no/minimal text (common with extended thinking + tool
-  // loops), extract the last meaningful portion of thinking as the text
-  // response. Claude.ai never shows empty text after thinking; we
-  // replicate that by falling back to thinking content.
-  if (finalText.trim().length < 50) {
-    const thinkingBlocks = ctx.emittedAssistantBlocks
-      .filter((b): b is Extract<LLMContentBlock, { type: "thinking" }> => b.type === "thinking")
-      .map((b) => b.thinking);
-    const thinkingContent = thinkingBlocks.join("\n").trim();
-    if (thinkingContent.length > 100) {
-      // Extract the last part of thinking that looks like a user-facing
-      // response (usually the model's final answer is at the end of
-      // thinking when it forgets to emit text).
-      const lines = thinkingContent.split("\n");
-      // Take last ~2000 chars as fallback response
-      let fallback = "";
-      for (let i = lines.length - 1; i >= 0 && fallback.length < 2000; i--) {
-        fallback = lines[i] + "\n" + fallback;
-      }
-      finalText = fallback.trim();
-      console.log(
-        `[clawy-agent] thinking-to-text fallback: thinkingLen=${thinkingContent.length}` +
-        ` extractedLen=${finalText.length} turnId=${ctx.turnId}`,
-      );
-      // Emit the fallback text to the SSE stream so the client sees it
-      ctx.sse.agent({ type: "text_delta", delta: finalText });
-    }
+  const planVerificationBlock = await planVerificationBlockReason(
+    ctx.session,
+    finalText,
+  );
+  if (planVerificationBlock) {
+    return {
+      status: "blocked",
+      reason: planVerificationBlock,
+      finalText,
+      retryable: true,
+    };
+  }
+
+  const structuredOutputBlock = await structuredOutputBlockReason(ctx, finalText);
+  if (structuredOutputBlock) {
+    return {
+      status: "blocked",
+      reason: structuredOutputBlock.reason,
+      finalText,
+      retryable: structuredOutputBlock.retryable,
+      retryKind: "structured_output_invalid",
+      ...(structuredOutputBlock.stopReason
+        ? { stopReason: structuredOutputBlock.stopReason }
+        : {}),
+    };
   }
 
   // ── beforeCommit hook ───────────────────────────────────────
   const toolCallCount = ctx.emittedAssistantBlocks.filter(
     (b) => b.type === "tool_use",
   ).length;
+  const filesChanged = collectFilesChanged(ctx.emittedAssistantBlocks);
   const toolReadHappened = ctx.emittedAssistantBlocks.some(
     (b) =>
       b.type === "tool_use" &&
@@ -119,13 +132,20 @@ export async function commit(ctx: CommitPipelineContext): Promise<CommitResult> 
       toolReadHappened,
       userMessage: ctx.userMessage.text,
       retryCount: ctx.commitRetryCount,
+      filesChanged,
     },
     ctx.buildHookContext("beforeCommit"),
   );
   if (preCommit.action === "block") {
-    throw new Error(`beforeCommit blocked: ${preCommit.reason}`);
+    return {
+      status: "blocked",
+      reason: preCommit.reason ?? "beforeCommit blocked",
+      finalText,
+      retryable: true,
+    };
   }
 
+  await appendCanonicalAssistantMessages(ctx);
   if (finalText.length > 0) {
     await ctx.session.transcript.append({
       kind: "assistant_text",
@@ -144,10 +164,14 @@ export async function commit(ctx: CommitPipelineContext): Promise<CommitResult> 
   });
   ctx.setPhase("committed");
   ctx.meta.endedAt = Date.now();
+  const stopReason = ctx.meta.stopReason ?? "end_turn";
+  ctx.meta.stopReason = stopReason;
+  await appendStopReason(ctx, stopReason);
   ctx.sse.agent({
     type: "turn_end",
     turnId: ctx.turnId,
     status: "committed",
+    stopReason,
   });
   ctx.sse.legacyFinish();
 
@@ -173,7 +197,6 @@ export async function commit(ctx: CommitPipelineContext): Promise<CommitResult> 
   const toolNames = ctx.emittedAssistantBlocks
     .filter((b): b is Extract<LLMContentBlock, { type: "tool_use" }> => b.type === "tool_use")
     .map((b) => b.name);
-  const filesChanged = collectFilesChanged(ctx.emittedAssistantBlocks);
   void ctx.session.agent.hooks.runPost(
     "onTaskCheckpoint",
     {
@@ -188,7 +211,87 @@ export async function commit(ctx: CommitPipelineContext): Promise<CommitResult> 
     ctx.buildHookContext("onTaskCheckpoint"),
   );
 
-  return { finalText };
+  return { status: "committed", finalText };
+}
+
+async function appendCanonicalAssistantMessages(ctx: CommitPipelineContext): Promise<void> {
+  const messages = (ctx.canonicalAssistantMessages ?? []).filter((blocks) => blocks.length > 0);
+  if (messages.length === 0) return;
+  const ts = Date.now();
+  for (let i = 0; i < messages.length; i += 1) {
+    await ctx.session.transcript.append({
+      kind: "canonical_message",
+      ts,
+      turnId: ctx.turnId,
+      messageId: `${ctx.turnId}:assistant:${i + 1}`,
+      role: "assistant",
+      content: JSON.parse(JSON.stringify(messages[i])) as unknown[],
+    });
+  }
+}
+
+async function planVerificationBlockReason(
+  session: Session,
+  finalText: string,
+): Promise<string | null> {
+  if (typeof session.controlProjection !== "function") return null;
+  const projection = await session.controlProjection();
+  if (projection.activePlan?.state !== "verification_pending") return null;
+  if (
+    projection.verification &&
+    typeof projection.verification === "object" &&
+    (projection.verification as { status?: unknown }).status === "passed"
+  ) {
+    return null;
+  }
+  if (declaresUnverifiedOrPartial(finalText)) return null;
+  return [
+    "approved plan is still verification_pending",
+    "Run the relevant verification command or explicitly report the result as unverified/partial.",
+  ].join(". ");
+}
+
+async function structuredOutputBlockReason(
+  ctx: CommitPipelineContext,
+  finalText: string,
+): Promise<{
+  reason: string;
+  retryable: boolean;
+  stopReason?: TurnStopReason;
+} | null> {
+  const spec = structuredOutputSpecOf(ctx.session);
+  if (!spec) return null;
+  const contract = new StructuredOutputContract(spec);
+  const assessment = await contract.assess({
+    text: finalText,
+    turnId: ctx.turnId,
+    attempt: ctx.commitRetryCount + 1,
+    emitAgentEvent: (event) => ctx.sse.agent(event),
+    emitControlEvent: async (event) => {
+      await optionalControlEvents(ctx.session)?.append(event);
+    },
+  });
+  if (assessment.ok) return null;
+  return {
+    reason: assessment.reason,
+    retryable: assessment.status !== "retry_exhausted",
+    ...(assessment.status === "retry_exhausted"
+      ? { stopReason: "structured_output_retry_exhausted" as const }
+      : {}),
+  };
+}
+
+function structuredOutputSpecOf(session: Session): StructuredOutputSpec | null {
+  const candidate = session as unknown as {
+    getStructuredOutputContract?: () => StructuredOutputSpec | null;
+    structuredOutputContract?: StructuredOutputSpec | null;
+  };
+  return candidate.getStructuredOutputContract?.() ?? candidate.structuredOutputContract ?? null;
+}
+
+function declaresUnverifiedOrPartial(text: string): boolean {
+  return /\b(unverified|not verified|partial|partially verified|unable to verify|cannot verify)\b/i.test(text) ||
+    /검증(?:하지|을)?\s*못|미검증|부분\s*검증|확인(?:하지|을)?\s*못/.test(text);
 }
 
 /**
@@ -199,9 +302,11 @@ export async function commit(ctx: CommitPipelineContext): Promise<CommitResult> 
 export async function abort(
   ctx: CommitPipelineContext,
   reason: string,
+  stopReason: TurnStopReason = "aborted",
 ): Promise<void> {
   ctx.setPhase("aborted");
   ctx.meta.endedAt = Date.now();
+  ctx.meta.stopReason = stopReason;
   // Any tools still waiting on the human must unblock so their
   // in-flight execute() promise resolves before the turn returns.
   ctx.rejectAllPendingAsks(reason);
@@ -216,10 +321,12 @@ export async function abort(
   } catch {
     /* swallow */
   }
+  await appendStopReason(ctx, stopReason);
   ctx.sse.agent({
     type: "turn_end",
     turnId: ctx.turnId,
     status: "aborted",
+    stopReason,
     reason,
   });
   ctx.sse.legacyFinish();
@@ -240,6 +347,33 @@ export async function abort(
     },
     ctx.buildHookContext("afterTurnEnd"),
   );
+}
+
+async function appendStopReason(
+  ctx: CommitPipelineContext,
+  reason: TurnStopReason,
+): Promise<void> {
+  try {
+    await optionalControlEvents(ctx.session)?.append({
+      type: "stop_reason",
+      turnId: ctx.turnId,
+      reason,
+    });
+  } catch {
+    /* control-event telemetry must not prevent turn close */
+  }
+}
+
+function optionalControlEvents(session: Session): {
+  append: (event: Parameters<Session["controlEvents"]["append"]>[0]) => Promise<unknown>;
+} | null {
+  const ledger = (session as unknown as { controlEvents?: unknown }).controlEvents;
+  if (!ledger || typeof ledger !== "object") return null;
+  const append = (ledger as { append?: unknown }).append;
+  if (typeof append !== "function") return null;
+  return ledger as {
+    append: (event: Parameters<Session["controlEvents"]["append"]>[0]) => Promise<unknown>;
+  };
 }
 
 /**

@@ -132,12 +132,13 @@ export async function buildSystemPrompt(
 export async function buildMessages(
   session: Session,
   userMessage: UserMessage,
+  model = session.agent.config.model,
 ): Promise<LLMMessage[]> {
   const committed = await session.transcript.readCommitted();
   // T4-17: model-aware context limit. Use 75% of the model's
   // contextWindow as the compaction threshold; fall back to the legacy
   // 150k constant for unknown models.
-  const cap = getCapability(session.agent.config.model);
+  const cap = getCapability(model);
   const tokenLimit = cap
     ? Math.floor(cap.contextWindow * 0.75)
     : TOKEN_LIMIT_FOR_COMPACTION;
@@ -145,16 +146,38 @@ export async function buildMessages(
   // feasibility check (throws CompactionImpossibleError when the window
   // is too small to fit summary+reserve). Without the model arg the
   // engine silently skips the floor check — see codex P2 (2026-04-20).
-  await session.agent.contextEngine.maybeCompact(
+  const boundary = await session.agent.contextEngine.maybeCompact(
     session,
     committed,
     tokenLimit,
-    session.agent.config.model,
+    model,
   );
-  // Re-read: if a boundary was appended, it now lives in the transcript
-  // and will be collapsed by the context engine.
-  const refreshed = await session.transcript.readCommitted();
+  // Re-read only when compaction appended a new boundary. Most turns do
+  // not compact; reusing the first committed snapshot avoids an extra
+  // full JSONL parse on the hot path.
+  const refreshed = boundary
+    ? await session.transcript.readCommitted()
+    : committed;
   const out = session.agent.contextEngine.buildMessagesFromTranscript(refreshed);
+  const hiddenContexts =
+    typeof session.drainPendingHiddenContext === "function"
+      ? session.drainPendingHiddenContext()
+      : [];
+  for (const hidden of hiddenContexts) {
+    out.push({
+      role: "user",
+      content: [
+        {
+          type: "text" as const,
+          text: [
+            "<runtime_control_feedback hidden=\"true\">",
+            hidden,
+            "</runtime_control_feedback>",
+          ].join("\n"),
+        },
+      ],
+    });
+  }
   // If the channel / client attached quoted-reply context, prepend a
   // `[Reply to {role}: "{preview}"]` line above the user's text so the
   // model can tell which prior message is being answered. Matches the
@@ -164,16 +187,17 @@ export async function buildMessages(
   const userContent = replyTo
     ? `${formatReplyPreamble(replyTo)}\n${userMessage.text}`
     : userMessage.text;
-  if (userMessage.imageBlocks && userMessage.imageBlocks.length > 0) {
-    const content = [
-      ...(userContent
-        ? [{ type: "text" as const, text: userContent }]
-        : []),
-      ...userMessage.imageBlocks,
-    ];
-    out.push({ role: "user", content });
-    return out;
+  const imageBlocks = userMessage.imageBlocks ?? [];
+  if (imageBlocks.length > 0) {
+    out.push({
+      role: "user",
+      content: [
+        ...(userContent.length > 0 ? [{ type: "text", text: userContent } as const] : []),
+        ...imageBlocks,
+      ],
+    });
+  } else {
+    out.push({ role: "user", content: userContent });
   }
-  out.push({ role: "user", content: userContent });
   return out;
 }

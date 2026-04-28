@@ -40,6 +40,7 @@ import type {
 
 export interface DiscordClientOptions {
   botToken: string;
+  workspaceRoot?: string;
   /** Injected for tests — defaults to a freshly-constructed Client. */
   clientFactory?: () => Client;
 }

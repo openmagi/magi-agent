@@ -77,6 +77,23 @@ export type TranscriptEntry =
       summaryHash: string;
       summaryText: string;
       createdAt: number;
+    }
+  | {
+      kind: "canonical_message";
+      ts: number;
+      turnId: string;
+      messageId: string;
+      parentId?: string;
+      role: "user" | "assistant" | "system";
+      content: unknown[];
+    }
+  | {
+      kind: "control_event";
+      ts: number;
+      turnId?: string;
+      seq: number;
+      eventId: string;
+      eventType: string;
     };
 
 /**
@@ -102,6 +119,11 @@ export interface TranscriptOptions {
 
 export class Transcript {
   readonly filePath: string;
+  private readCache: {
+    size: number;
+    mtimeMs: number;
+    entries: TranscriptEntry[];
+  } | null = null;
 
   constructor(sessionsDir: string, sessionKey: string, opts?: TranscriptOptions) {
     if (opts?.filePath) {
@@ -122,6 +144,18 @@ export class Transcript {
     await this.ensureDir();
     const line = JSON.stringify(entry) + "\n";
     await fs.appendFile(this.filePath, line, "utf8");
+    if (this.readCache) {
+      try {
+        const stat = await fs.stat(this.filePath);
+        this.readCache = {
+          size: stat.size,
+          mtimeMs: stat.mtimeMs,
+          entries: [...this.readCache.entries, entry],
+        };
+      } catch {
+        this.readCache = null;
+      }
+    }
   }
 
   /**
@@ -137,6 +171,25 @@ export class Transcript {
    * is a no-op today so no sentinel is required for existing data.
    */
   async readAll(): Promise<TranscriptEntry[]> {
+    let stat: { size: number; mtimeMs: number };
+    try {
+      const fileStat = await fs.stat(this.filePath);
+      stat = { size: fileStat.size, mtimeMs: fileStat.mtimeMs };
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === "ENOENT") {
+        this.readCache = null;
+        return [];
+      }
+      throw err;
+    }
+    if (
+      this.readCache &&
+      this.readCache.size === stat.size &&
+      this.readCache.mtimeMs === stat.mtimeMs
+    ) {
+      return [...this.readCache.entries];
+    }
+
     let txt: string;
     try {
       txt = await fs.readFile(this.filePath, "utf8");
@@ -164,7 +217,12 @@ export class Transcript {
       workspaceRoot: path.dirname(this.filePath),
       log: consoleMigrationLogger,
     });
-    return migrated.entries;
+    this.readCache = {
+      size: stat.size,
+      mtimeMs: stat.mtimeMs,
+      entries: [...migrated.entries],
+    };
+    return [...migrated.entries];
   }
 
   /**
@@ -188,6 +246,19 @@ export class Transcript {
       }
     }
     if (lastComplete < 0) return [];
-    return all.slice(0, lastComplete + 1);
+    let end = lastComplete + 1;
+    for (let i = lastComplete + 1; i < all.length; i++) {
+      const kind = all[i]?.kind;
+      if (
+        kind === "canonical_message" ||
+        kind === "compaction_boundary" ||
+        kind === "control_event"
+      ) {
+        end = i + 1;
+        continue;
+      }
+      break;
+    }
+    return all.slice(0, end);
   }
 }

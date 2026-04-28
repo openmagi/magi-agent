@@ -24,6 +24,7 @@ import path from "node:path";
 import { monotonicFactory } from "ulid";
 import { atomicWriteJson } from "../storage/atomicWrite.js";
 import type { LLMClient } from "../transport/LLMClient.js";
+import { isUnderRoot } from "../util/fsSafe.js";
 
 const ulid = monotonicFactory();
 
@@ -67,6 +68,8 @@ export interface CreateArtifactInput {
 const HAIKU_MODEL = "claude-haiku-4-5-20251001";
 const HAIKU_DEADLINE_MS = 3000;
 const MAX_INDEX_BYTES = 256 * 1024;
+const ARTIFACT_ID_RE = /^[0-9A-HJKMNP-TV-Z]{26}$/;
+const SLUG_RE = /^[a-z0-9][a-z0-9-]{0,59}$/;
 
 function slugify(title: string): string {
   return (
@@ -79,6 +82,65 @@ function slugify(title: string): string {
       .replace(/^-|-$/g, "")
       .slice(0, 60) || "untitled"
   );
+}
+
+function isValidArtifactId(id: string): boolean {
+  return ARTIFACT_ID_RE.test(id);
+}
+
+function isValidSlug(slug: string): boolean {
+  return SLUG_RE.test(slug) && !slug.includes("..");
+}
+
+async function realpathIfAvailable(p: string): Promise<string> {
+  const resolved = path.resolve(p);
+  try {
+    return await fs.realpath(resolved);
+  } catch {
+    return resolved;
+  }
+}
+
+async function resolveCopyTier(
+  args: {
+    sourceRootRaw: string;
+    sourceRootReal: string;
+    destRootRaw: string;
+    destRootReal: string;
+    sourcePath: string;
+    destPath: string;
+    required: boolean;
+  },
+): Promise<{ sourcePath: string; destPath: string } | null> {
+  const sourceResolved = path.resolve(args.sourcePath);
+  if (!isUnderRoot(sourceResolved, args.sourceRootRaw)) {
+    throw new Error(`artifact source path escapes child artifacts root: ${args.sourcePath}`);
+  }
+
+  let sourceReal: string;
+  try {
+    sourceReal = await fs.realpath(sourceResolved);
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "ENOENT" && !args.required) {
+      return null;
+    }
+    throw err;
+  }
+  if (!isUnderRoot(sourceReal, args.sourceRootReal)) {
+    throw new Error(`artifact source realpath escapes child artifacts root: ${args.sourcePath}`);
+  }
+
+  const destResolved = path.resolve(args.destPath);
+  if (!isUnderRoot(destResolved, args.destRootRaw)) {
+    throw new Error(`artifact destination path escapes parent artifacts root: ${args.destPath}`);
+  }
+  await fs.mkdir(path.dirname(destResolved), { recursive: true });
+  const destParentReal = await realpathIfAvailable(path.dirname(destResolved));
+  if (!isUnderRoot(destParentReal, args.destRootReal)) {
+    throw new Error(`artifact destination realpath escapes parent artifacts root: ${args.destPath}`);
+  }
+
+  return { sourcePath: sourceResolved, destPath: destResolved };
 }
 
 function fallbackL1(content: string): string {
@@ -326,7 +388,7 @@ export class ArtifactManager {
     childRootDir: string,
     options: { spawnTaskId: string },
   ): Promise<ArtifactMeta[]> {
-    const childArtifactsDir = path.join(childRootDir, "artifacts");
+    const childArtifactsDir = path.resolve(childRootDir, "artifacts");
     const childIndexPath = path.join(childArtifactsDir, "index.json");
 
     let rawIndex: string;
@@ -349,6 +411,10 @@ export class ArtifactManager {
 
     // Ensure parent artifacts dir exists before any copy.
     await fs.mkdir(this.artifactsDir(), { recursive: true });
+    const childArtifactsRootRaw = path.resolve(childArtifactsDir);
+    const childArtifactsRootReal = await realpathIfAvailable(childArtifactsRootRaw);
+    const parentArtifactsRootRaw = path.resolve(this.artifactsDir());
+    const parentArtifactsRootReal = await realpathIfAvailable(parentArtifactsRootRaw);
 
     const parentIndex = await this.readIndex();
     const existingIds = new Set(parentIndex.map((m) => m.artifactId));
@@ -358,6 +424,7 @@ export class ArtifactManager {
       if (!childMeta || typeof childMeta.artifactId !== "string") continue;
 
       const originalId = childMeta.artifactId;
+      if (!isValidArtifactId(originalId)) continue;
       const collided = existingIds.has(originalId);
       const targetId = collided ? ulid() : originalId;
 
@@ -365,7 +432,11 @@ export class ArtifactManager {
       const parentDir = this.dirFor(targetId);
       await fs.mkdir(parentDir, { recursive: true });
 
-      const slug = childMeta.slug || slugify(childMeta.title || "untitled");
+      const slug =
+        typeof childMeta.slug === "string" && childMeta.slug.length > 0
+          ? childMeta.slug
+          : slugify(childMeta.title || "untitled");
+      if (!isValidSlug(slug)) continue;
       const tiers: Array<{ src: string; dst: string }> = [
         {
           src: path.join(childDir, `${slug}.md`),
@@ -380,13 +451,31 @@ export class ArtifactManager {
           dst: path.join(parentDir, `${slug}.abstract.md`),
         },
       ];
-      for (const t of tiers) {
-        try {
-          await fs.copyFile(t.src, t.dst);
-        } catch (err) {
-          if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
-          // Missing sidecar (e.g., L2 absent) — best-effort, continue.
-        }
+      let resolvedTiers: Array<{ sourcePath: string; destPath: string }>;
+      try {
+        const prepared = await Promise.all(
+          tiers.map((t, i) =>
+            resolveCopyTier({
+              sourceRootRaw: childArtifactsRootRaw,
+              sourceRootReal: childArtifactsRootReal,
+              destRootRaw: parentArtifactsRootRaw,
+              destRootReal: parentArtifactsRootReal,
+              sourcePath: t.src,
+              destPath: t.dst,
+              required: i === 0,
+            }),
+          ),
+        );
+        if (!prepared[0]) continue;
+        resolvedTiers = prepared.filter(
+          (t): t is { sourcePath: string; destPath: string } => t !== null,
+        );
+      } catch {
+        continue;
+      }
+
+      for (const t of resolvedTiers) {
+        await fs.copyFile(t.sourcePath, t.destPath);
       }
 
       const relPath = path.relative(

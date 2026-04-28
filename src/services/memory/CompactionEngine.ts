@@ -53,6 +53,15 @@ const DEFAULT_CONFIG: Omit<CompactionConfig, "model"> = {
   rootMaxTokens: 3000,
 };
 
+const ROOT_SECTION_HEADINGS = [
+  "Active Context (recent ~7 days)",
+  "Recent Patterns",
+  "Historical Summary",
+  "Topics Index",
+] as const;
+
+type RootSectionHeading = typeof ROOT_SECTION_HEADINGS[number];
+
 // ─── Secret Scanner ───
 
 const SECRET_PATTERNS = [
@@ -153,6 +162,58 @@ function frontmatterStatus(content: string): string | null {
 
 function isFixedNode(content: string): boolean {
   return frontmatterStatus(content) === "fixed";
+}
+
+function stripFrontmatter(content: string): string {
+  return content.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n*/, "");
+}
+
+function canonicalRootSection(rawHeading: string): RootSectionHeading | null {
+  const heading = rawHeading.trim().toLowerCase();
+  if (heading.startsWith("active context")) return "Active Context (recent ~7 days)";
+  if (heading.startsWith("recent patterns")) return "Recent Patterns";
+  if (heading.startsWith("historical summary")) return "Historical Summary";
+  if (heading.startsWith("topics index")) return "Topics Index";
+  return null;
+}
+
+function normalizeRootSummary(content: string, today: string): string {
+  const sections: Record<RootSectionHeading, string[]> = {
+    "Active Context (recent ~7 days)": [],
+    "Recent Patterns": [],
+    "Historical Summary": [],
+    "Topics Index": [],
+  };
+  const preface: string[] = [];
+  let currentSection: RootSectionHeading | null = null;
+
+  for (const line of stripFrontmatter(content).split(/\r?\n/)) {
+    const headingMatch = line.match(/^##\s+(.+?)\s*$/);
+    const section = headingMatch ? canonicalRootSection(headingMatch[1]!) : null;
+    if (section) {
+      currentSection = section;
+      continue;
+    }
+
+    if (currentSection) {
+      sections[currentSection].push(line);
+    } else if (line.trim()) {
+      preface.push(line);
+    }
+  }
+
+  if (preface.length > 0) {
+    sections["Historical Summary"].unshift(...preface, "");
+  }
+
+  const renderedSections = ROOT_SECTION_HEADINGS
+    .map(heading => {
+      const body = sections[heading].join("\n").trim();
+      return `## ${heading}${body ? `\n${body}` : ""}`;
+    })
+    .join("\n\n");
+
+  return `---\ntype: root\nstatus: tentative\nlast-updated: ${today}\n---\n\n${renderedSections}\n`;
 }
 
 // ─── CompactionEngine ───
@@ -492,18 +553,35 @@ export class CompactionEngine {
     const rootSummary = await this.safeSummarize(
       allContent,
       [
-        `Generate a ROOT.md memory index with these sections:`,
-        `## Active Context (recent ~7 days) — bullet points of recent work`,
-        `## Recent Patterns — recurring themes and lessons learned`,
-        `## Historical Summary — month-by-month summary`,
-        `## Topics Index — categorized topic tags`,
+        `Generate a ROOT.md memory index in exactly this canonical Hipocampus shape:`,
+        `---`,
+        `type: root`,
+        `status: tentative`,
+        `last-updated: YYYY-MM-DD`,
+        `---`,
+        ``,
+        `## Active Context (recent ~7 days)`,
+        `- topic: current state, what's happening now`,
+        ``,
+        `## Recent Patterns`,
+        `- pattern: cross-cutting insight that emerged recently`,
+        ``,
+        `## Historical Summary`,
+        `- YYYY-MM~MM: high-level summary of that period`,
+        ``,
+        `## Topics Index`,
+        `- topic-keyword [project]: sub-keywords, references → knowledge/file.md`,
+        `- topic-keyword [feedback]: sub-keywords`,
+        `- topic-keyword [reference, Nd, ?]: sub-keywords`,
+        ``,
+        `Use typed topic tags: [project], [feedback], [user], or [reference].`,
+        `No prose outside those sections; keep entries keyword-dense.`,
         `Cap total output at approximately ${this.config.rootMaxTokens} tokens.`,
-        `Output markdown.`,
       ].join("\n"),
       allContent,
     );
 
-    await writeFile(rootPath, rootSummary);
+    await writeFile(rootPath, normalizeRootSummary(rootSummary, this.today));
   }
 
   // ─── LLM Summarization ───

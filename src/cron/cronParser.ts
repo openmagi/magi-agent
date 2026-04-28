@@ -1,5 +1,5 @@
 /**
- * Minimal 5-field cron parser for clawy-agent.
+ * Minimal 5-field cron parser for clawy-core-agent.
  *
  * Grammar:
  *   MINUTE HOUR DAY_OF_MONTH MONTH DAY_OF_WEEK

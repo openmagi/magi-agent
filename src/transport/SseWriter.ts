@@ -21,7 +21,10 @@
  */
 
 import type { ServerResponse } from "node:http";
-import type { TurnStatus } from "../Turn.js";
+import { safeAgentEvent } from "./safeAgentEvent.js";
+import type { TurnStatus, TurnStopReason } from "../turn/types.js";
+import type { ControlEvent } from "../control/ControlEvents.js";
+import { stripLeadingRouteMetaTag } from "../turn/visibleText.js";
 
 export type TurnRoute = "direct" | "subagent" | "pipeline";
 
@@ -30,11 +33,22 @@ export type TurnRoute = "direct" | "subagent" | "pipeline";
 export type AgentEvent =
   | { type: "turn_start"; turnId: string; declaredRoute: TurnRoute }
   | { type: "turn_phase"; turnId: string; phase: TurnStatus }
-  | { type: "turn_end"; turnId: string; status: "committed" | "aborted"; reason?: string }
+  | {
+      type: "turn_end";
+      turnId: string;
+      status: "committed" | "aborted";
+      stopReason: TurnStopReason;
+      reason?: string;
+    }
+  | { type: "control_event"; seq: number; event: ControlEvent }
+  | { type: "control_replay_complete"; lastSeq: number }
   | { type: "text_delta"; delta: string }
+  | { type: "response_clear" }
   | { type: "thinking_delta"; delta: string }
   | { type: "tool_start"; id: string; name: string; input_preview?: string }
+  | { type: "tool_progress"; id: string; label: string }
   | { type: "tool_end"; id: string; status: string; output_preview?: string; durationMs: number }
+  | { type: "context_end" }
   | {
       type: "task_board";
       tasks: Array<{
@@ -52,7 +66,25 @@ export type AgentEvent =
       verdict: "pending" | "ok" | "violation";
       detail?: string;
     }
-  | { type: "retry"; reason: string; retryNo: number }
+  | {
+      type: "retry";
+      reason: string;
+      retryNo: number;
+      toolUseId?: string;
+      toolName?: string;
+    }
+  | {
+      type: "turn_interrupted";
+      turnId: string;
+      handoffRequested: boolean;
+      source: string;
+    }
+  | {
+      type: "structured_output";
+      status: "valid" | "invalid" | "retry_exhausted";
+      schemaName?: string;
+      reason?: string;
+    }
   | {
       /** SpawnAgent (§7.12.d) — child turn launched. */
       type: "spawn_started";
@@ -69,6 +101,45 @@ export type AgentEvent =
       finalText: string;
       toolCallCount: number;
       errorMessage?: string;
+    }
+  | {
+      /** SpawnAgent child lifecycle — live mirror of durable control events. */
+      type: "child_started";
+      taskId: string;
+      parentTurnId?: string;
+      prompt?: string;
+    }
+  | {
+      type: "child_progress";
+      taskId: string;
+      detail: string;
+    }
+  | {
+      type: "child_tool_request";
+      taskId: string;
+      requestId: string;
+      toolName: string;
+    }
+  | {
+      type: "child_permission_decision";
+      taskId: string;
+      decision: "allow" | "deny" | "ask";
+      reason?: string;
+    }
+  | {
+      type: "child_cancelled";
+      taskId: string;
+      reason: string;
+    }
+  | {
+      type: "child_failed";
+      taskId: string;
+      errorMessage: string;
+    }
+  | {
+      type: "child_completed";
+      taskId: string;
+      summary?: unknown;
     }
   | {
       /** SpawnAgent tournament mode (T3-16, OMC Port A) — final ranked variants. */
@@ -92,7 +163,16 @@ export type AgentEvent =
   | {
       /** Plan mode (§7.2) — plan produced and ready for client-side approval. */
       type: "plan_ready";
+      planId?: string;
+      requestId?: string;
+      state?: "awaiting_approval";
       plan: string;
+    }
+  | {
+      /** Plan lifecycle state transition. */
+      type: "plan_lifecycle";
+      state: string;
+      previousMode?: string;
     }
   | {
       /**
@@ -142,6 +222,17 @@ export type AgentEvent =
       minViableBudgetTokens: number;
     }
   | {
+      type: "injection_queued";
+      injectionId: string;
+      text: string;
+      queuedCount: number;
+    }
+  | {
+      type: "injection_drained";
+      count: number;
+      iteration: number;
+    }
+  | {
       /**
        * B5 pipeline heartbeat — emitted by Turn.ts when an iteration
        * goes silent for > HEARTBEAT_SILENCE_MS (20s). Subsequent
@@ -160,6 +251,8 @@ export type AgentEvent =
 
 export class SseWriter {
   private ended = false;
+  private leadingTextDeltaBuffer: string | null = "";
+  private stripLeadingWhitespaceAfterMeta = false;
 
   constructor(private readonly res: ServerResponse) {}
 
@@ -179,7 +272,47 @@ export class SseWriter {
   /** Emit a structured agent event on the `agent` SSE event channel. */
   agent(event: AgentEvent): void {
     if (this.ended) return;
-    this.res.write(`event: agent\ndata: ${JSON.stringify(event)}\n\n`);
+    const visibleEvent = this.filterAgentEvent(event);
+    if (!visibleEvent) return;
+    const safeEvent = safeAgentEvent(visibleEvent);
+    if (!safeEvent) return;
+    this.res.write(`event: agent\ndata: ${JSON.stringify(safeEvent)}\n\n`);
+  }
+
+  private filterAgentEvent(event: AgentEvent): AgentEvent | null {
+    if (event.type === "turn_start" || event.type === "response_clear") {
+      this.leadingTextDeltaBuffer = "";
+      this.stripLeadingWhitespaceAfterMeta = false;
+      return event;
+    }
+    if (event.type !== "text_delta") return event;
+    const delta = this.filterLeadingTextDelta(event.delta);
+    if (delta.length === 0) return null;
+    return { ...event, delta };
+  }
+
+  private filterLeadingTextDelta(delta: string): string {
+    if (this.leadingTextDeltaBuffer === null) {
+      if (!this.stripLeadingWhitespaceAfterMeta) return delta;
+      const strippedDelta = delta.replace(/^\s+/, "");
+      this.stripLeadingWhitespaceAfterMeta = strippedDelta.length === 0;
+      return strippedDelta;
+    }
+    const next = this.leadingTextDeltaBuffer + delta;
+    const stripped = stripLeadingRouteMetaTag(next);
+    if (stripped !== next) {
+      this.leadingTextDeltaBuffer = null;
+      this.stripLeadingWhitespaceAfterMeta = true;
+      const strippedDelta = stripped.replace(/^\s+/, "");
+      this.stripLeadingWhitespaceAfterMeta = strippedDelta.length === 0;
+      return strippedDelta;
+    }
+    if (isPotentialLeadingRouteMetaPrefix(next)) {
+      this.leadingTextDeltaBuffer = next;
+      return "";
+    }
+    this.leadingTextDeltaBuffer = null;
+    return next;
   }
 
   /**
@@ -208,6 +341,14 @@ export class SseWriter {
     this.ended = true;
     this.res.end();
   }
+}
+
+function isPotentialLeadingRouteMetaPrefix(text: string): boolean {
+  const trimmed = text.trimStart();
+  if (trimmed.length === 0) return true;
+  if (/^\[META\s*:/i.test(trimmed) && !trimmed.includes("]")) return true;
+  const compact = trimmed.replace(/\s+/g, "").toUpperCase();
+  return "[META:".startsWith(compact);
 }
 
 /**

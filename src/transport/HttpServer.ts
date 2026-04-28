@@ -6,7 +6,7 @@
  * `http.createServer`. Per-domain request handlers live under
  * `transport/routes/` and are declared as `RouteHandler` entries in
  * the flat dispatch table below (R5,
- * .
+ * docs/plans/2026-04-19-core-agent-refactor-plan.md).
  *
  * Routes are walked top-to-bottom on every request; the first handler
  * whose `match()` returns a non-null value wins. Anything that falls
@@ -26,6 +26,7 @@ import { contextsRoutes } from "./routes/contexts.js";
 import { turnsRoutes } from "./routes/turns.js";
 import { mcpRoutes } from "./routes/mcp.js";
 import { heartbeatRoutes } from "./routes/heartbeat.js";
+import { parityRoutes } from "./routes/parity.js";
 
 export interface HttpServerOptions {
   port: number;
@@ -91,6 +92,7 @@ export class HttpServer {
       ...sessionRoutes,
       ...contextsRoutes,
       ...turnsRoutes,
+      ...parityRoutes,
       ...mcpRoutes,
       ...heartbeatRoutes,
     ];

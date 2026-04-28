@@ -63,60 +63,73 @@ export function extractFileReferences(text: string): string[] {
   return [...refs];
 }
 
+const CONTENT_CLAIM_CLASSIFIER_PROMPT = `Does this text make a CONTENT CLAIM about a specific file — asserting what is IN the file, not just mentioning it?
+
+CONTENT CLAIM (YES):
+- "SOUL.md에 따르면 이 규칙이 있습니다" (according to SOUL.md, this rule exists)
+- "config.ts contains the API endpoint"
+- "이 파일의 내용은..." (the content of this file is...)
+
+NOT A CONTENT CLAIM (NO):
+- Just mentioning a filename without claiming its content
+- "config.ts 파일을 수정해주세요" (please modify config.ts)
+- "I'll check SOUL.md" (intent to read, not a content claim)
+
+Reply ONLY: YES or NO`;
+
 /**
- * Check if the text makes a content claim about a specific file
- * (not just mentioning it). Content claims reference what's IN the
- * file; mentions just name the file.
+ * LLM-based check: does the text make a content claim about a specific file?
  */
-export function hasContentClaim(filename: string, text: string): boolean {
-  // Escape filename for regex
-  const escaped = filename.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+export async function hasContentClaim(filename: string, text: string, ctx?: HookContext): Promise<boolean> {
+  if (!text || !filename) return false;
+  // Quick check: filename must appear in text
+  if (!text.includes(filename) && !text.includes(filename.replace(/\.[^.]+$/, ""))) return false;
+  if (!ctx?.llm) return false;
 
-  const contentClaimPatterns: RegExp[] = [
-    // Korean: "X에 따르면/의하면/보면/나와있"
-    new RegExp(`${escaped}[^.\\n]{0,20}에\\s*(?:따르면|의하면|보면|나와)`, "u"),
-    // Korean: "X에 명시/기재/작성/설정/정의"
-    new RegExp(`${escaped}[^.\\n]{0,20}에\\s*(?:명시|기재|작성|설정|정의)`, "u"),
-    // Korean: "X의 내용/구조/설정/값"
-    new RegExp(`${escaped}[^.\\n]{0,10}(?:의\\s*)?(?:내용|구조|설정|값)(?:은|는|이|을)`, "u"),
-    // English: "X contains/says/shows/states/specifies"
-    new RegExp(`${escaped}[^.\\n]{0,20}\\b(?:contains?|says?|shows?|states?|specif)`, "i"),
-    // English: "in X, the/as stated in X/as shown in X/according to X"
-    new RegExp(`(?:according\\s+to|as\\s+(?:stated|shown|defined)\\s+in)\\s+(?:\`)?${escaped}`, "i"),
-  ];
-
-  for (const p of contentClaimPatterns) {
-    if (p.test(text)) return true;
+  try {
+    let result = "";
+    for await (const event of ctx.llm.stream({
+      model: "claude-haiku-4-5",
+      system: CONTENT_CLAIM_CLASSIFIER_PROMPT,
+      messages: [{ role: "user", content: [{ type: "text", text: `File: ${filename}\nText: ${text.slice(0, 400)}` }] }],
+      max_tokens: 10,
+    })) {
+      if (event.kind === "text_delta") result += event.delta;
+    }
+    return result.trim().toUpperCase().startsWith("YES");
+  } catch {
+    return false;
   }
-
-  return false;
 }
 
+const GENERIC_READ_CLAIM_PROMPT = `Does this text claim to have READ or CHECKED a file without naming which specific file?
+
+YES examples: "파일을 확인해보니", "다시 읽어보니", "I checked the file", "확인 결과", "문서에 따르면"
+NO examples: text that doesn't claim to have read anything, or names a specific file
+
+Reply ONLY: YES or NO`;
+
 /**
- * Detect generic "I read the file" claims that don't name a specific file.
- * Example: "파일을 다시 읽어보니", "확인해보니", "I checked the file"
+ * LLM-based: detect generic "I read the file" claims.
  */
-export function matchesGenericReadClaim(text: string): boolean {
-  const GENERIC_READ_PATTERNS: RegExp[] = [
-    // Korean: "파일을 (다시) 읽어보니/확인해보니/열어보니"
-    /파일을?\s*(?:다시\s*)?(?:읽어|확인해|열어)보니/u,
-    // Korean: "다시 읽어보니/확인해보니" (without 파일)
-    /다시\s*(?:읽어|확인해|열어)보[니면]/u,
-    // Korean: "파일에 따르면" (generic, no specific filename)
-    /(?:해당|그|이)\s*파일에\s*(?:따르면|의하면|보면)/u,
-    // Korean: "확인 결과" + specific detail claim
-    /확인\s*결과[,:]?\s*[^.]{10,}/u,
-    // Korean: "문서에 따르면" / "스크립트에 따르면"
-    /(?:문서|스크립트|설정|코드)에\s*(?:따르면|의하면|보면|명시)/u,
-    // English: "I (re-)read/checked the file"
-    /\b(?:I|i)\s+(?:re-?)?(?:read|checked|reviewed|looked at)\s+the\s+file\b/i,
-    // English: "according to the file/document/script"
-    /according\s+to\s+the\s+(?:file|document|script|config)/i,
-  ];
-  for (const p of GENERIC_READ_PATTERNS) {
-    if (p.test(text)) return true;
+export async function matchesGenericReadClaim(text: string, ctx?: HookContext): Promise<boolean> {
+  if (!text) return false;
+  if (!ctx?.llm) return false;
+
+  try {
+    let result = "";
+    for await (const event of ctx.llm.stream({
+      model: "claude-haiku-4-5",
+      system: GENERIC_READ_CLAIM_PROMPT,
+      messages: [{ role: "user", content: [{ type: "text", text: text.slice(0, 400) }] }],
+      max_tokens: 10,
+    })) {
+      if (event.kind === "text_delta") result += event.delta;
+    }
+    return result.trim().toUpperCase().startsWith("YES");
+  } catch {
+    return false;
   }
-  return false;
 }
 
 export interface ResourceCheckAgent {
@@ -208,10 +221,13 @@ export function makeResourceExistenceCheckerHook(
         const fileRefs = extractFileReferences(assistantText);
         if (fileRefs.length === 0) return { action: "continue" };
 
-        // Find files with content claims
-        const filesWithClaims = fileRefs.filter((f) =>
-          hasContentClaim(f, assistantText),
-        );
+        // Find files with content claims (async)
+        const filesWithClaims: string[] = [];
+        for (const f of fileRefs) {
+          if (await hasContentClaim(f, assistantText, ctx)) {
+            filesWithClaims.push(f);
+          }
+        }
         if (filesWithClaims.length === 0) return { action: "continue" };
 
         // Get transcript

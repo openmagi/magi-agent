@@ -276,6 +276,105 @@ describe("ArtifactManager", () => {
       expect(imported).toEqual([]);
     });
 
+    it("rejects child artifactIds that traverse out of artifact roots", async () => {
+      const childArtifactsDir = path.join(childRoot, "artifacts");
+      const escapedChildDir = path.join(childRoot, "SOUL");
+      await fs.mkdir(escapedChildDir, { recursive: true });
+      await fs.writeFile(path.join(escapedChildDir, "escape.md"), "malicious");
+      await fs.writeFile(path.join(escapedChildDir, "escape.overview.md"), "malicious");
+      await fs.writeFile(path.join(escapedChildDir, "escape.abstract.md"), "---\nkind: doc\n---");
+      await fs.mkdir(childArtifactsDir, { recursive: true });
+      await fs.writeFile(
+        path.join(childArtifactsDir, "index.json"),
+        JSON.stringify([
+          {
+            artifactId: "../SOUL",
+            kind: "doc",
+            title: "escape",
+            slug: "escape",
+            path: "artifacts/../SOUL/escape.md",
+            sizeBytes: 9,
+            createdAt: Date.now(),
+            updatedAt: Date.now(),
+          },
+        ]),
+      );
+
+      const parentMgr = new ArtifactManager(root);
+      const imported = await parentMgr.importFromDir(childRoot, { spawnTaskId: "spawn_escape" });
+
+      expect(imported).toEqual([]);
+      await expect(fs.access(path.join(root, "SOUL"))).rejects.toMatchObject({
+        code: "ENOENT",
+      });
+      expect(await parentMgr.list()).toEqual([]);
+    });
+
+    it("rejects child slugs that traverse out of an artifact directory", async () => {
+      const artifactId = "01ARZ3NDEKTSV4RRFFQ69G5FAV";
+      const childArtifactsDir = path.join(childRoot, "artifacts");
+      const childDir = path.join(childArtifactsDir, artifactId);
+      await fs.mkdir(childDir, { recursive: true });
+      await fs.writeFile(path.join(childArtifactsDir, "parent-owned.md"), "malicious");
+      await fs.writeFile(
+        path.join(childArtifactsDir, "index.json"),
+        JSON.stringify([
+          {
+            artifactId,
+            kind: "doc",
+            title: "bad slug",
+            slug: "../parent-owned",
+            path: `artifacts/${artifactId}/../parent-owned.md`,
+            sizeBytes: 9,
+            createdAt: Date.now(),
+            updatedAt: Date.now(),
+          },
+        ]),
+      );
+
+      const parentMgr = new ArtifactManager(root);
+      const imported = await parentMgr.importFromDir(childRoot, { spawnTaskId: "spawn_slug" });
+
+      expect(imported).toEqual([]);
+      await expect(
+        fs.access(path.join(root, "artifacts", "parent-owned.md")),
+      ).rejects.toMatchObject({ code: "ENOENT" });
+      expect(await parentMgr.list()).toEqual([]);
+    });
+
+    it("rejects child artifact files whose realpath escapes the child artifact root", async () => {
+      const artifactId = "01ARZ3NDEKTSV4RRFFQ69G5FAW";
+      const slug = "leak";
+      const childArtifactsDir = path.join(childRoot, "artifacts");
+      const childDir = path.join(childArtifactsDir, artifactId);
+      await fs.mkdir(childDir, { recursive: true });
+      await fs.writeFile(path.join(root, "SOUL.md"), "parent secret", "utf8");
+      await fs.symlink(path.join(root, "SOUL.md"), path.join(childDir, `${slug}.md`));
+      await fs.writeFile(path.join(childDir, `${slug}.overview.md`), "preview");
+      await fs.writeFile(path.join(childDir, `${slug}.abstract.md`), "---\nkind: doc\n---");
+      await fs.writeFile(
+        path.join(childArtifactsDir, "index.json"),
+        JSON.stringify([
+          {
+            artifactId,
+            kind: "doc",
+            title: "leak",
+            slug,
+            path: `artifacts/${artifactId}/${slug}.md`,
+            sizeBytes: 13,
+            createdAt: Date.now(),
+            updatedAt: Date.now(),
+          },
+        ]),
+      );
+
+      const parentMgr = new ArtifactManager(root);
+      const imported = await parentMgr.importFromDir(childRoot, { spawnTaskId: "spawn_link" });
+
+      expect(imported).toEqual([]);
+      expect(await parentMgr.list()).toEqual([]);
+    });
+
     it("preserves existing parent artifacts when importing", async () => {
       const parentMgr = new ArtifactManager(root, new OkStubLLM() as unknown as LLMClient);
       await parentMgr.create({ kind: "doc", title: "parent-made", content: "pm" });

@@ -6,9 +6,8 @@
  * - Audit 03 P1 + DEBT-PLAN-PERMS-01.
  *
  * Behaviour:
- *   - When `Session.getPermissionMode()` is NOT `"auto"`, the hook is
- *     a no-op (`continue`) so default / plan / bypass modes are
- *     unaffected.
+ *   - In `"default"` mode, tools declared `dangerous: true` ask for
+ *     user consent. Non-dangerous tools continue to downstream hooks.
  *   - When the session is in `auto`:
  *       * Tools declared `dangerous: true` return
  *         `{ action: "permission_decision", decision: "ask" }` so the
@@ -67,9 +66,9 @@ export function makeAutoApprovalHook(
     timeoutMs: 500,
     handler: async ({ toolName }, ctx: HookContext) => {
       const mode = opts.agent.getSessionPermissionMode(ctx.sessionKey);
-      // Not in auto mode → leave permission decision to downstream
-      // hooks (selfClaimVerifier informally, dangerous_patterns, etc).
-      if (mode !== "auto") {
+      // Plan-mode tool filtering and bypass mode are handled at the
+      // dispatcher. This hook owns default/auto consent policy only.
+      if (mode !== "auto" && mode !== "default") {
         return { action: "continue" };
       }
 
@@ -79,6 +78,9 @@ export function makeAutoApprovalHook(
       // but belt-and-suspenders: never silently approve something we
       // can't classify.
       if (!tool) {
+        if (mode === "default") {
+          return { action: "continue" };
+        }
         return {
           action: "permission_decision",
           decision: "ask",
@@ -92,6 +94,10 @@ export function makeAutoApprovalHook(
           decision: "ask",
           reason: `auto-approval: ${toolName} is dangerous — confirm before running`,
         };
+      }
+
+      if (mode === "default") {
+        return { action: "continue" };
       }
 
       return {

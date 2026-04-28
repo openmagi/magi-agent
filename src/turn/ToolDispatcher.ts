@@ -24,6 +24,11 @@ import type {
   ToolResult,
 } from "../Tool.js";
 import { buildPreview, summariseToolOutput } from "../util/toolResult.js";
+import {
+  decideRuntimePermission,
+  type PermissionDecision,
+} from "../permissions/PermissionArbiter.js";
+import { decideToolAccess } from "./ToolArbiter.js";
 
 export type PermissionMode = "default" | "plan" | "auto" | "bypass";
 
@@ -41,6 +46,8 @@ export interface ToolDispatchContext {
   readonly sse: SseWriter;
   readonly turnId: string;
   readonly permissionMode: PermissionMode;
+  /** Optional parent abort signal (e.g. user interrupt on the live turn). */
+  readonly abortSignal?: AbortSignal;
   /** Build a HookContext for the given point. */
   readonly buildHookContext: (point: "beforeToolUse" | "afterToolUse") => HookContext;
   /** Fire-and-forget audit event (mirrors Turn.stageAuditEvent). */
@@ -113,8 +120,23 @@ export async function dispatch(
   toolUses: Array<Extract<LLMContentBlock, { type: "tool_use" }>>,
 ): Promise<ToolDispatchResult[]> {
   const abortController = new AbortController();
-  const runs = toolUses.map((tu) => dispatchOne(ctx, tu, abortController));
-  const results = await Promise.all(runs);
+  if (ctx.abortSignal) {
+    if (ctx.abortSignal.aborted) {
+      abortController.abort();
+    } else {
+      ctx.abortSignal.addEventListener("abort", () => abortController.abort(), {
+        once: true,
+      });
+    }
+  }
+  const enterPlanUses = toolUses.filter((tu) => tu.name === "EnterPlanMode");
+  const otherUses = toolUses.filter((tu) => tu.name !== "EnterPlanMode");
+  const enteredResults: ToolDispatchResult[] = [];
+  for (const tu of enterPlanUses) {
+    enteredResults.push(await dispatchOne(ctx, tu, abortController));
+  }
+  const runs = otherUses.map((tu) => dispatchOne(ctx, tu, abortController));
+  const results = [...enteredResults, ...(await Promise.all(runs))];
   // Gap §11.3 — if the per-turn counter crossed the threshold during
   // this batch, tell Turn.ts to abort. Emit a user-facing text_delta
   // FIRST so the UI shows the reason before the abort propagates.
@@ -133,24 +155,72 @@ export async function dispatch(
   return results;
 }
 
+const TRANSIENT_TOOL_ERROR_RE =
+  /\b(ETIMEDOUT|ECONNRESET|EAI_AGAIN|ENOTFOUND|ECONNREFUSED|socket hang up|timeout|timed out|429|503|504|rate limit|temporarily unavailable)\b/i;
+
+function isRetrySafeTool(tool: Tool<unknown, unknown>): boolean {
+  const permission = (tool as { permission?: string }).permission;
+  const dangerous = (tool as { dangerous?: boolean }).dangerous === true;
+  return !dangerous && (permission === undefined || permission === "read" || permission === "meta");
+}
+
+function isTransientToolFailure(result: ToolResult): boolean {
+  if (result.status === "ok") return false;
+  const detail = result.errorMessage ?? result.errorCode ?? "";
+  return typeof detail === "string" && TRANSIENT_TOOL_ERROR_RE.test(detail);
+}
+
+function hasBuiltinAutoApprovalHook(ctx: ToolDispatchContext): boolean {
+  try {
+    return ctx.session.agent.hooks
+      .list("beforeToolUse")
+      .some((hook) => hook.name === "builtin:auto-approval");
+  } catch {
+    return false;
+  }
+}
+
+function shouldFallbackAskDangerousTool(
+  ctx: ToolDispatchContext,
+  tool: Tool<unknown, unknown>,
+): boolean {
+  if (ctx.permissionMode !== "default" && ctx.permissionMode !== "auto") return false;
+  if (tool.dangerous !== true) return false;
+  return !hasBuiltinAutoApprovalHook(ctx);
+}
+
+async function askDangerousToolConsent(
+  ctx: ToolDispatchContext,
+  toolName: string,
+): Promise<string | null> {
+  try {
+    const answer = await ctx.askUser({
+      question: `Tool ${toolName} is marked dangerous. Allow it to proceed?`,
+      choices: [
+        { id: "approve", label: "Approve" },
+        { id: "deny", label: "Deny" },
+      ],
+    });
+    if (answer.selectedId === "approve") return null;
+    return `[PERMISSION:USER_DENIED] dangerous tool ${toolName}`;
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return `[PERMISSION:ASK_FAILED] dangerous tool ${toolName}: ${msg}`;
+  }
+}
+
 async function dispatchOne(
   ctx: ToolDispatchContext,
   tu: Extract<LLMContentBlock, { type: "tool_use" }>,
   abortController: AbortController,
 ): Promise<ToolDispatchResult> {
-  const { session, sse, turnId, permissionMode } = ctx;
-  const registryTool = session.agent.tools.resolve(tu.name);
-  // Codex P1 (2026-04-20): enforce the exposed-tool allowlist here.
-  // A tool that resolves in the registry but wasn't advertised to the
-  // LLM this turn (plan-mode filter / intent filter / MAX_TOOLS cap)
-  // is treated as unknown — prevents post-hint escalation into hidden
-  // tools like Bash / FileWrite. When no allowlist is passed (spawn
-  // pipelines, tests) we fall back to registry-only resolution.
-  const exposed = ctx.exposedToolNames;
-  const tool =
-    registryTool && (exposed === undefined || exposed.includes(tu.name))
-      ? registryTool
-      : null;
+  const { session, sse, turnId } = ctx;
+  const permissionMode = session.getPermissionMode?.() ?? ctx.permissionMode;
+  const access = decideToolAccess({
+    registry: session.agent.tools,
+    toolName: tu.name,
+    exposedToolNames: ctx.exposedToolNames,
+  });
   const started = Date.now();
 
   // Emit tool_start with input_preview — clients render this as the
@@ -163,7 +233,7 @@ async function dispatchOne(
     input_preview: inputPreview,
   });
 
-  if (!tool) {
+  if (!access.allowed) {
     // Gap §11.3 — enrich the tool_result with the available tool list
     // so the LLM can self-correct immediately instead of retrying the
     // same typo. Also increment the per-turn unknown-tool counter so
@@ -171,23 +241,9 @@ async function dispatchOne(
     // boundary and abort the turn once the threshold is reached.
     const counter = ctx.unknownToolCounter;
     const currentCount = counter ? counter.inc() : 0;
-    // Hint is built from the EXPOSED tool set when available. Falling
-    // back to the full registry would leak hidden tool names to the
-    // LLM in plan mode or intent-filtered turns (codex P1, 2026-04-20).
-    const sourceNames =
-      ctx.exposedToolNames !== undefined
-        ? ctx.exposedToolNames
-        : session.agent.tools
-            .list()
-            .map((t) => t.name)
-            .filter((n): n is string => typeof n === "string" && n.length > 0);
-    const availableNames = Array.from(new Set(sourceNames)).sort();
-    const preview = availableNames.slice(0, 20).join(", ");
-    const suffix = availableNames.length > 20 ? `, ... (+${availableNames.length - 20} more)` : "";
-    const listText = availableNames.length > 0 ? `${preview}${suffix}` : "(none)";
-    const err = `Unknown tool: ${tu.name}. Available tools: ${listText}.`;
+    const err = access.message;
     console.warn(
-      `[clawy-agent] unknown_tool=${tu.name} turnId=${turnId} count=${currentCount}`,
+      `[core-agent] unknown_tool=${tu.name} turnId=${turnId} count=${currentCount}`,
     );
     sse.agent({
       type: "tool_end",
@@ -207,6 +263,7 @@ async function dispatchOne(
     });
     return { toolUseId: tu.id, content: err, isError: true };
   }
+  const tool = access.tool;
 
   // ── beforeToolUse hook ─────────────────────────────────────
   // Hooks may rewrite the input or block with a reason (which
@@ -263,13 +320,31 @@ async function dispatchOne(
   const effectiveInput =
     preTool.action === "continue" ? preTool.args.input : tu.input;
 
+  const permission = await decideRuntimePermission({
+    mode: permissionMode,
+    source: "turn",
+    toolName: tu.name,
+    input: effectiveInput,
+    tool,
+    workspaceRoot: session.agent.config.workspaceRoot,
+  });
+  const permissionResult = await resolvePermissionDecision(
+    ctx,
+    tu,
+    started,
+    permission,
+    effectiveInput,
+  );
+  if (permissionResult.result) return permissionResult.result;
+  const permittedInput = permissionResult.input;
+
   await session.transcript.append({
     kind: "tool_call",
     ts: Date.now(),
     turnId,
     toolUseId: tu.id,
     name: tu.name,
-    input: effectiveInput,
+    input: permittedInput,
   });
 
   const toolCtx: ToolContext = {
@@ -285,6 +360,11 @@ async function dispatchOne(
       // Tool-emitted structured events (task_board, future
       // artifact_* etc.) go onto the same SSE agent channel.
       sse.agent(event as Parameters<typeof sse.agent>[0]);
+    },
+    emitControlEvent: async (event) => {
+      await session.controlEvents?.append(
+        event as Parameters<typeof session.controlEvents.append>[0],
+      );
     },
     askUser: (q) => ctx.askUser(q),
     staging: {
@@ -309,16 +389,42 @@ async function dispatchOne(
   };
 
   let result: ToolResult;
-  try {
-    result = await (tool as Tool<unknown, unknown>).execute(effectiveInput, toolCtx);
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    result = {
-      status: "error",
-      errorCode: "tool_threw",
-      errorMessage: msg,
-      durationMs: Date.now() - started,
-    };
+  let retryNo = 0;
+  for (;;) {
+    try {
+      result = await (tool as Tool<unknown, unknown>).execute(permittedInput, toolCtx);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      result = {
+        status: "error",
+        errorCode: "tool_threw",
+        errorMessage: msg,
+        durationMs: Date.now() - started,
+      };
+    }
+    if (
+      retryNo < 1 &&
+      !abortController.signal.aborted &&
+      isRetrySafeTool(tool as Tool<unknown, unknown>) &&
+      isTransientToolFailure(result)
+    ) {
+      retryNo += 1;
+      sse.agent({
+        type: "retry",
+        reason: result.errorMessage ?? result.errorCode ?? "transient_tool_failure",
+        retryNo,
+        toolUseId: tu.id,
+        toolName: tu.name,
+      });
+      ctx.stageAuditEvent("tool_retry", {
+        toolName: tu.name,
+        toolUseId: tu.id,
+        retryNo,
+        reason: result.errorMessage ?? result.errorCode ?? "transient_tool_failure",
+      });
+      continue;
+    }
+    break;
   }
 
   const previewSource = result.output ?? result.errorMessage ?? "";
@@ -350,9 +456,110 @@ async function dispatchOne(
   // ── afterToolUse hook (observer) ───────────────────────────
   void session.agent.hooks.runPost(
     "afterToolUse",
-    { toolName: tu.name, toolUseId: tu.id, input: effectiveInput, result },
+    { toolName: tu.name, toolUseId: tu.id, input: permittedInput, result },
     ctx.buildHookContext("afterToolUse"),
   );
 
   return { toolUseId: tu.id, content, isError };
+}
+
+async function resolvePermissionDecision(
+  ctx: ToolDispatchContext,
+  tu: Extract<LLMContentBlock, { type: "tool_use" }>,
+  started: number,
+  permission: PermissionDecision,
+  effectiveInput: unknown,
+): Promise<{ result: ToolDispatchResult | null; input: unknown }> {
+  if (permission.decision === "allow") {
+    const input = permission.updatedInput ?? effectiveInput;
+    await recordPermissionDecision(ctx, tu.name, "allow", permission.reason, permission.updatedInput);
+    return { result: null, input };
+  }
+
+  if (permission.decision === "ask") {
+    await recordPermissionDecision(ctx, tu.name, "ask", permission.reason);
+    const request = await ctx.session.controlRequests.create({
+      kind: "tool_permission",
+      turnId: ctx.turnId,
+      sessionKey: ctx.session.meta.sessionKey,
+      channelName: ctx.session.meta.channel.channelId,
+      source: "turn",
+      prompt: permission.reason,
+      proposedInput: permission.proposedInput ?? effectiveInput,
+      expiresAt: Date.now() + 10 * 60_000,
+      idempotencyKey: `tool_permission:${ctx.turnId}:${tu.id}`,
+    });
+    ctx.sse.agent({
+      type: "control_event",
+      seq: 0,
+      event: {
+        type: "control_request_created",
+        request,
+      },
+    } as Parameters<typeof ctx.sse.agent>[0]);
+    const resolved = await ctx.session.waitForControlRequestResolution(request.requestId);
+    if (resolved.state === "approved") {
+      const input = resolved.updatedInput ?? resolved.proposedInput ?? effectiveInput;
+      await recordPermissionDecision(ctx, tu.name, "allow", "approved by user", input);
+      return { result: null, input };
+    }
+    const msg = resolved.state === "timed_out"
+      ? `permission denied: ${permission.reason} (request timed out)`
+      : `permission denied: ${permission.reason}`;
+    await recordPermissionDecision(ctx, tu.name, "deny", msg);
+    return { result: await permissionDeniedResult(ctx, tu, started, msg), input: effectiveInput };
+  }
+
+  const msg = `permission denied: ${permission.reason}`;
+  await recordPermissionDecision(ctx, tu.name, "deny", permission.reason);
+  return { result: await permissionDeniedResult(ctx, tu, started, msg), input: effectiveInput };
+}
+
+async function permissionDeniedResult(
+  ctx: ToolDispatchContext,
+  tu: Extract<LLMContentBlock, { type: "tool_use" }>,
+  started: number,
+  msg: string,
+): Promise<ToolDispatchResult> {
+  ctx.sse.agent({
+    type: "tool_end",
+    id: tu.id,
+    status: "permission_denied",
+    durationMs: Date.now() - started,
+    output_preview: msg,
+  });
+  await ctx.session.transcript.append({
+    kind: "tool_result",
+    ts: Date.now(),
+    turnId: ctx.turnId,
+    toolUseId: tu.id,
+    status: "permission_denied",
+    output: msg,
+    isError: true,
+  });
+  return { toolUseId: tu.id, content: msg, isError: true };
+}
+
+async function recordPermissionDecision(
+  ctx: ToolDispatchContext,
+  toolName: string,
+  decision: "allow" | "deny" | "ask",
+  reason: string,
+  updatedInput?: unknown,
+): Promise<void> {
+  try {
+    await ctx.session.controlEvents?.append({
+      type: "permission_decision",
+      turnId: ctx.turnId,
+      source: "turn",
+      toolName,
+      decision,
+      reason,
+      ...(updatedInput !== undefined ? { updatedInput } : {}),
+    });
+  } catch (err) {
+    console.warn(
+      `[core-agent] permission_decision event failed turnId=${ctx.turnId}: ${(err as Error).message}`,
+    );
+  }
 }
