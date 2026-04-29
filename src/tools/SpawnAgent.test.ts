@@ -35,6 +35,7 @@ import {
   type SpawnHandoffArtifact,
 } from "./SpawnAgent.js";
 import { ArtifactManager } from "../artifacts/ArtifactManager.js";
+import { ExecutionContractStore } from "../execution/ExecutionContract.js";
 
 // ── Mocks ──────────────────────────────────────────────────────────
 
@@ -273,6 +274,70 @@ describe("SpawnAgent — §7.12.d", () => {
     expect(firstCall).toBeDefined();
     const toolDefs = (firstCall?.tools ?? []) as LLMToolDef[];
     expect(toolDefs.map((t) => t.name)).toEqual(["Allowed"]);
+  });
+
+  it("wraps child prompts with parent execution contract work order", async () => {
+    const parentTools = [makeStubTool("Allowed")];
+    const script: MockScript = {
+      rounds: [
+        [
+          { kind: "text_delta", blockIndex: 0, delta: "contract child done" },
+          {
+            kind: "message_end",
+            stopReason: "end_turn",
+            usage: { inputTokens: 10, outputTokens: 2 },
+          },
+        ],
+      ],
+    };
+    const { agent, llmCalls } = fakeAgent(parentTools, script) as unknown as {
+      agent: Parameters<typeof makeSpawnAgentTool>[0] & {
+        getSession?: (sessionKey: string) => unknown;
+      };
+      llmCalls: LLMStreamRequest[];
+    };
+    const contract = new ExecutionContractStore({ now: () => 123 });
+    contract.startTurn({
+      userMessage: [
+        "<task_contract>",
+        "<goal>Ship OSS sync</goal>",
+        "<constraints><item>Do not touch unrelated files</item></constraints>",
+        "<acceptance_criteria><item>Focused tests pass</item></acceptance_criteria>",
+        "</task_contract>",
+      ].join("\n"),
+    });
+    agent.getSession = () => ({
+      executionContract: contract,
+      getPermissionMode: () => "default",
+    });
+    const tool = makeSpawnAgentTool(agent);
+    const { ctx } = makeParentCtx();
+
+    const result = await tool.execute(
+      {
+        persona: "child",
+        prompt: "Do the child task",
+        allowed_tools: ["Allowed"],
+        deliver: "return",
+      },
+      ctx,
+    );
+
+    expect(result.status).toBe("ok");
+    const childPrompt = llmCalls[0]?.messages[0]?.content;
+    expect(typeof childPrompt).toBe("string");
+    expect(childPrompt).toContain("<work_order>");
+    expect(childPrompt).toContain("parent_goal: Ship OSS sync");
+    expect(childPrompt).toContain("<item>Focused tests pass</item>");
+    expect(childPrompt).toContain("Do the child task");
+    expect(contract.snapshot().workOrders).toContainEqual({
+      persona: "child",
+      goal: "Ship OSS sync",
+      constraints: ["Do not touch unrelated files"],
+      acceptanceCriteria: ["Focused tests pass"],
+      allowedTools: ["Allowed"],
+      childPrompt: "Do the child task",
+    });
   });
 
   it("(c) deliver='return' returns child finalText and toolCallCount", async () => {
@@ -1424,6 +1489,37 @@ describe("SpawnAgent — §7.12.d", () => {
     expect(llmCalls[0]?.model).toBe("gpt-5.4");
   });
 
+  it("provider-prefixed OpenAI model override is accepted and canonicalized", async () => {
+    const script: MockScript = {
+      rounds: [
+        [
+          { kind: "text_delta", blockIndex: 0, delta: "GPT pro child done" },
+          { kind: "message_end", stopReason: "end_turn", usage: { inputTokens: 10, outputTokens: 5 } },
+        ],
+      ],
+    };
+    const { agent, llmCalls } = fakeAgent([], script) as unknown as {
+      agent: Parameters<typeof makeSpawnAgentTool>[0];
+      llmCalls: LLMStreamRequest[];
+    };
+    const tool = makeSpawnAgentTool(agent);
+    const { ctx } = makeParentCtx();
+
+    const result = await tool.execute(
+      {
+        persona: "calculator",
+        prompt: "1+1=?",
+        deliver: "return",
+        model: "openai/gpt-5.5-pro",
+      },
+      ctx,
+    );
+
+    expect(result.status).toBe("ok");
+    expect(llmCalls.length).toBe(1);
+    expect(llmCalls[0]?.model).toBe("gpt-5.5-pro");
+  });
+
   it("omitting model uses the bot's default model", async () => {
     const script: MockScript = {
       rounds: [
@@ -1489,6 +1585,33 @@ describe("SpawnAgent — §7.12.d", () => {
         prompt: "go",
         deliver: "return",
         model: m,
+      } as SpawnAgentInput);
+      expect(err).toBeNull();
+    }
+  });
+
+  it("validate() accepts runtime config model IDs for hosted subagent models", () => {
+    const { agent } = fakeAgent([], { rounds: [] });
+    const tool = makeSpawnAgentTool(agent);
+
+    for (const model of [
+      "anthropic/claude-opus-4-7",
+      "anthropic/claude-sonnet-4-6",
+      "anthropic/claude-haiku-4-5",
+      "fireworks/kimi-k2p6",
+      "fireworks/minimax-m2p7",
+      "openai/gpt-5.4-nano",
+      "openai/gpt-5.4-mini",
+      "openai/gpt-5.5",
+      "openai/gpt-5.5-pro",
+      "google/gemini-3.1-flash-lite-preview",
+      "google/gemini-3.1-pro-preview",
+    ]) {
+      const err = tool.validate?.({
+        persona: "child",
+        prompt: "go",
+        deliver: "return",
+        model,
       } as SpawnAgentInput);
       expect(err).toBeNull();
     }

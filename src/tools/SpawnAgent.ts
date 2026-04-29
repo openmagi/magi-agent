@@ -74,26 +74,35 @@ import {
   createChildAgentHarness,
   recordChildTerminal,
 } from "../spawn/ChildAgentHarness.js";
+import {
+  buildSpawnWorkOrderPrompt,
+  type ExecutionContractStore,
+} from "../execution/ExecutionContract.js";
 
 export const MAX_SPAWN_DEPTH = 2;
 const DEFAULT_TIMEOUT_MS = 120_000;
 const MAX_TIMEOUT_MS = 600_000;
 
 /**
- * Models available for SpawnAgent model override.
+ * Canonical models available for SpawnAgent model override.
  * Matches api-proxy PRICING dict keys (excluding local LLM models).
  * api-proxy auto-routes to the correct provider by model name.
  */
-export const SPAWNABLE_MODELS: readonly string[] = [
+const CANONICAL_SPAWNABLE_MODELS = [
   "claude-opus-4-7",
   "claude-opus-4-6",
   "claude-sonnet-4-6",
   "claude-sonnet-4-5",
+  "claude-haiku-4-5",
   "claude-haiku-4-5-20251001",
   "gpt-5-nano",
   "gpt-5-mini",
   "gpt-5.1",
   "gpt-5.4",
+  "gpt-5.4-nano",
+  "gpt-5.4-mini",
+  "gpt-5.5",
+  "gpt-5.5-pro",
   "kimi-k2p6",
   "minimax-m2p7",
   "gemini-2.5-flash",
@@ -101,6 +110,44 @@ export const SPAWNABLE_MODELS: readonly string[] = [
   "gemini-3.1-flash-lite-preview",
   "gemini-3.1-pro-preview",
 ] as const;
+
+const SPAWN_MODEL_ALIASES: Readonly<Record<string, (typeof CANONICAL_SPAWNABLE_MODELS)[number]>> = {
+  "anthropic/claude-opus-4-7": "claude-opus-4-7",
+  "anthropic/claude-opus-4-6": "claude-opus-4-6",
+  "anthropic/claude-sonnet-4-6": "claude-sonnet-4-6",
+  "anthropic/claude-sonnet-4-5": "claude-sonnet-4-5",
+  "anthropic/claude-haiku-4-5": "claude-haiku-4-5",
+  "anthropic/claude-haiku-4-5-20251001": "claude-haiku-4-5-20251001",
+  "openai/gpt-5-nano": "gpt-5-nano",
+  "openai/gpt-5-mini": "gpt-5-mini",
+  "openai/gpt-5.1": "gpt-5.1",
+  "openai/gpt-5.4": "gpt-5.4",
+  "openai/gpt-5.4-nano": "gpt-5.4-nano",
+  "openai/gpt-5.4-mini": "gpt-5.4-mini",
+  "openai/gpt-5.5": "gpt-5.5",
+  "openai/gpt-5.5-pro": "gpt-5.5-pro",
+  "fireworks/kimi-k2p6": "kimi-k2p6",
+  "fireworks/minimax-m2p7": "minimax-m2p7",
+  "google/gemini-2.5-flash": "gemini-2.5-flash",
+  "google/gemini-2.5-pro": "gemini-2.5-pro",
+  "google/gemini-3.1-flash-lite-preview": "gemini-3.1-flash-lite-preview",
+  "google/gemini-3.1-pro-preview": "gemini-3.1-pro-preview",
+};
+
+/**
+ * Models accepted in the SpawnAgent input schema. Includes provider-prefixed
+ * aliases because workspace prompts and dynamic model docs use those ids.
+ */
+export const SPAWNABLE_MODELS: readonly string[] = [
+  ...CANONICAL_SPAWNABLE_MODELS,
+  ...Object.keys(SPAWN_MODEL_ALIASES),
+] as const;
+
+function normalizeSpawnModelOverride(model: string | undefined): string | undefined | null {
+  if (model === undefined) return undefined;
+  if ((CANONICAL_SPAWNABLE_MODELS as readonly string[]).includes(model)) return model;
+  return SPAWN_MODEL_ALIASES[model] ?? null;
+}
 
 // Re-exports for API stability — Agent.ts + tests import these from
 // `tools/SpawnAgent.js`.
@@ -647,7 +694,7 @@ function validateInput(input: SpawnAgentInput): string | null {
   if (input.deliver !== "return" && input.deliver !== "background") {
     return "`deliver` must be 'return' or 'background'";
   }
-  if (input.model !== undefined && !SPAWNABLE_MODELS.includes(input.model)) {
+  if (normalizeSpawnModelOverride(input.model) === null) {
     return `\`model\` must be one of: ${SPAWNABLE_MODELS.join(", ")}`;
   }
   if (input.mode === "tournament") {
@@ -678,7 +725,7 @@ export function makeSpawnAgentTool(
   return {
     name: "SpawnAgent",
     description:
-      "Delegate a focused sub-task to a child agent with a custom persona and filtered toolset. `deliver:\"return\"` blocks until the child finishes and returns its final text. `deliver:\"background\"` fires the child and returns a taskId immediately; completion surfaces as a spawn_result event. Spawn depth is capped at 2 — a depth-2 child cannot spawn further. Use `model` to run the child on a different LLM (e.g. `gpt-5.4`, `gemini-3.1-pro-preview`, `kimi-k2p6`); omit to use the bot's default. IMPORTANT: child output longer than ~500 chars should go into an ArtifactCreate (kind=report/analysis/etc.) rather than inlined in finalText — the spawn tool automatically imports any child-produced artifacts into the parent workspace and returns them on `artifacts.handedOffArtifacts`. Call ArtifactRead(artifactId) to pull full content.",
+      "Delegate a focused sub-task to a child agent with a custom persona and filtered toolset. `deliver:\"return\"` blocks until the child finishes and returns its final text. `deliver:\"background\"` fires the child and returns a taskId immediately; completion surfaces as a spawn_result event. Spawn depth is capped at 2 — a depth-2 child cannot spawn further. Use `model` only when deliberately selecting a child model; copy an exact value from this tool schema enum or omit `model` to inherit the bot's current configured runtime model. Never invent provider/model ids from memory. Provider-prefixed config ids such as `openai/gpt-5.5-pro` are accepted when present in the enum and normalized before the child run. IMPORTANT: child output longer than ~500 chars should go into an ArtifactCreate (kind=report/analysis/etc.) rather than inlined in finalText — the spawn tool automatically imports any child-produced artifacts into the parent workspace and returns them on `artifacts.handedOffArtifacts`. Call ArtifactRead(artifactId) to pull full content.",
     inputSchema: INPUT_SCHEMA,
     permission: "meta",
     kind: "core",
@@ -702,7 +749,8 @@ export function makeSpawnAgentTool(
       }
 
       // Hard guard (`validate()` is advisory; some runtimes skip it).
-      if (input.model !== undefined && !SPAWNABLE_MODELS.includes(input.model)) {
+      const modelOverride = normalizeSpawnModelOverride(input.model);
+      if (modelOverride === null) {
         return {
           status: "error",
           errorCode: "bad_input",
@@ -741,6 +789,32 @@ export function makeSpawnAgentTool(
         },
         catalog,
       );
+      const getSession = (agent as {
+        getSession?: (sessionKey: string) => { executionContract?: ExecutionContractStore } | undefined;
+      }).getSession;
+      const parentSession = typeof getSession === "function"
+        ? getSession.call(agent, ctx.sessionKey)
+        : undefined;
+      const parentExecutionContract = parentSession?.executionContract;
+      const childPrompt = parentExecutionContract
+        ? buildSpawnWorkOrderPrompt({
+            parent: parentExecutionContract.snapshot(),
+            childPrompt: expanded.prompt,
+            persona: input.persona,
+            allowedTools: expanded.allowedTools,
+          })
+        : expanded.prompt;
+      if (parentExecutionContract) {
+        const snapshot = parentExecutionContract.snapshot();
+        parentExecutionContract.recordWorkOrder({
+          persona: input.persona,
+          goal: snapshot.taskState.goal ?? input.prompt,
+          constraints: snapshot.taskState.constraints,
+          acceptanceCriteria: snapshot.taskState.acceptanceCriteria,
+          allowedTools: expanded.allowedTools ?? [],
+          childPrompt: input.prompt,
+        });
+      }
 
       const baseChildOptions: Omit<
         SpawnChildOptions,
@@ -750,7 +824,7 @@ export function makeSpawnAgentTool(
         parentTurnId: ctx.turnId,
         parentSpawnDepth: parentDepth,
         persona: input.persona,
-        prompt: expanded.prompt,
+        prompt: childPrompt,
         allowedTools: expanded.allowedTools,
         allowedSkills: expanded.allowedSkills,
         timeoutMs,
@@ -760,7 +834,7 @@ export function makeSpawnAgentTool(
         onAgentEvent: ctx.emitAgentEvent,
         askUser: ctx.askUser,
         permissionMode: resolveParentPermissionMode(agent, ctx.sessionKey),
-        ...(input.model ? { modelOverride: input.model } : {}),
+        ...(modelOverride ? { modelOverride } : {}),
       };
 
       // T3-16 — tournament mode branches here. The tournament runner
@@ -828,7 +902,7 @@ export function makeSpawnAgentTool(
         persona: input.persona,
         prompt: input.prompt,
         deliver: input.deliver,
-        ...(input.model ? { model: input.model } : {}),
+        ...(modelOverride ? { model: modelOverride } : {}),
       });
       ctx.emitAgentEvent?.({ type: "spawn_dir_created", taskId, spawnDir });
       ctx.staging.stageAuditEvent("spawn_dir_created", { taskId, spawnDir });
