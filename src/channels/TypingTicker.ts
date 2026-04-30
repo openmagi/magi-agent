@@ -2,7 +2,7 @@
  * TypingTicker — keeps the upstream channel's "bot is typing…"
  * indicator alive for the duration of a single Turn.
  *
- * Motivation: under OpenClaw `node-host`, Telegram showed the typing
+ * Motivation: under legacy gateway `node-host`, Telegram showed the typing
  * indicator while the bot was generating a response. Core-agent's
  * TelegramPoller previously never called `sendChatAction`, so users
  * saw no activity between sending a message and receiving the reply.

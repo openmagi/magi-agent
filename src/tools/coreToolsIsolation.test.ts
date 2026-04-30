@@ -152,7 +152,7 @@ describe("core tools — ctx.spawnWorkspace isolation (T1-03b / PRE-01)", () => 
     expect(result.errorMessage).toMatch(/escapes workspace/);
   });
 
-  it("(3c) child Bash prepends /home/ocuser/.openclaw/bin to PATH for wrapper scripts", async () => {
+  it("(3c) child Bash prepends /home/ocuser/.clawy/bin to PATH for wrapper scripts", async () => {
     const originalPath = process.env.PATH;
     process.env.PATH = "/usr/local/bin:/usr/bin:/bin";
     try {
@@ -163,7 +163,7 @@ describe("core tools — ctx.spawnWorkspace isolation (T1-03b / PRE-01)", () => 
       const result = await bash.execute({ command: "printf '%s' \"$PATH\"" }, childCtx);
       expect(result.status).toBe("ok");
       const out = result.output as BashOutput;
-      expect(out.stdout.startsWith("/home/ocuser/.openclaw/bin:")).toBe(true);
+      expect(out.stdout.startsWith("/home/ocuser/.clawy/bin:")).toBe(true);
     } finally {
       process.env.PATH = originalPath;
     }

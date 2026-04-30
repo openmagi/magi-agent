@@ -1,7 +1,7 @@
 /**
  * TelegramPoller — native Telegram Bot API long-polling adapter.
  *
- * Replaces OpenClaw's `node-host` Telegram integration. Uses only
+ * Replaces legacy gateway's `node-host` Telegram integration. Uses only
  * `fetch` + `FormData` (Node 22 built-ins); no telegraf / node-telegram-bot-api
  * dependency. Long-polls `getUpdates` with `timeout=25`, persists the
  * next offset to `{workspaceRoot}/.core-agent-state/telegram-offset.json`

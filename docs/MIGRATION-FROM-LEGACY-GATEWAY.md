@@ -1,18 +1,18 @@
-# Migration Guide: OpenClaw → Clawy Agent
+# Migration Guide: Legacy Gateway → Clawy Agent
 
 > **Audience:** AI coding agents (Claude Code, Codex, etc.) assisting a user
-> who is migrating their OpenClaw bot to Clawy Agent. Read this document
+> who is migrating their legacy gateway bot to Clawy Agent. Read this document
 > fully before starting the migration.
 
 ## Overview
 
-Clawy Agent is the open-source successor to OpenClaw's gateway runtime.
-It replaces the `openclaw.json` + `node-host` + gateway architecture with
+Clawy Agent is the open-source successor to legacy runtime.
+It replaces the `legacy-gateway.json` + `node-host` + gateway architecture with
 a single TypeScript process that handles LLM calls, tool execution, channels,
 memory, and hooks natively.
 
 **What changes:**
-- `openclaw.json` → `clawy-agent.yaml`
+- `legacy-gateway.json` → `clawy-agent.yaml`
 - Gateway + node-host → single `clawy-agent serve` process
 - Brave Search API → built-in DuckDuckGo WebSearch (no API key)
 - `system.run` → `Bash` tool
@@ -33,11 +33,11 @@ memory, and hooks natively.
 
 ## Pre-Migration Checklist
 
-Before starting, gather these from the existing OpenClaw deployment:
+Before starting, gather these from the existing legacy gateway deployment:
 
 ```
 □ workspace/ directory contents (the bot's brain — AGENTS.md, IDENTITY.md, etc.)
-□ openclaw.json (for config mapping)
+□ legacy-gateway.json (for config mapping)
 □ skills/ directory contents
 □ knowledge/ directory contents
 □ Telegram bot token (from BotFather)
@@ -56,11 +56,11 @@ cd clawy-agent
 npm install
 ```
 
-### Step 2: Convert openclaw.json → clawy-agent.yaml
+### Step 2: Convert legacy-gateway.json → clawy-agent.yaml
 
-Map the OpenClaw config to Clawy Agent format:
+Map the legacy gateway config to Clawy Agent format:
 
-**OpenClaw (`openclaw.json`):**
+**legacy gateway (`legacy-gateway.json`):**
 ```json
 {
   "models": {
@@ -131,14 +131,14 @@ identity:
 
 ### Step 3: Copy Workspace Files
 
-Copy the entire workspace directory from the OpenClaw deployment:
+Copy the entire workspace directory from the legacy gateway deployment:
 
 ```bash
-# From OpenClaw pod/server:
-cp -r /path/to/openclaw/workspace ./workspace
+# From legacy gateway pod/server:
+cp -r /path/to/legacy-gateway/workspace ./workspace
 
 # Or from K8s:
-kubectl cp <namespace>/<pod>:/home/ocuser/.openclaw/workspace ./workspace
+kubectl cp <namespace>/<pod>:/home/ocuser/.clawy/workspace ./workspace
 ```
 
 The workspace structure is **fully compatible**. These files work as-is:
@@ -151,17 +151,17 @@ The workspace structure is **fully compatible**. These files work as-is:
 | `MEMORY.md` | Long-term memory | Works as-is |
 | `CLAUDE.md` | Operational details | Works as-is |
 | `HEARTBEAT.md` | Autonomous behavior | Works as-is — cron system compatible |
-| `TOOLS.md` | Tool documentation | **Review:** remove OpenClaw-specific tool refs |
+| `TOOLS.md` | Tool documentation | **Review:** remove legacy gateway-specific tool refs |
 | `SCRATCHPAD.md` | Working state | Works as-is |
 | `knowledge/` | RAG files | Works as-is — qmd indexes on startup |
 | `skills/` | Skill files | Works as-is — auto-loaded as prompt-only tools |
 
 ### Step 4: Update TOOLS.md
 
-OpenClaw's `TOOLS.md` references tools by their OpenClaw names. Update to
+legacy gateway's `TOOLS.md` references tools by their legacy gateway names. Update to
 Clawy Agent tool names:
 
-| OpenClaw Tool | Clawy Agent Tool | Notes |
+| legacy gateway Tool | Clawy Agent Tool | Notes |
 |---------------|-----------------|-------|
 | `system.run` | `Bash` | Same capability, different name |
 | `file.read` | `FileRead` | |
@@ -175,7 +175,7 @@ Clawy Agent tool names:
 | `file.glob` | `Glob` | |
 | `file.grep` | `Grep` | |
 
-**New tools not in OpenClaw:**
+**New tools not in legacy gateway:**
 - `TaskBoard` — structured task tracking visible in UI
 - `ArtifactCreate/Read/List/Update/Delete` — tiered artifact management
 - `CronCreate/List/Update/Delete` — native cron scheduling
@@ -185,13 +185,13 @@ Clawy Agent tool names:
 
 ### Step 5: Update Skills
 
-OpenClaw skills (`skills/<name>.md` or `skills/<name>/SKILL.md`) are
+legacy gateway skills (`skills/<name>.md` or `skills/<name>/SKILL.md`) are
 **compatible** with Clawy Agent. The skill loader reads the same format.
 
-However, check for OpenClaw-specific tool references inside skills:
+However, check for legacy gateway-specific tool references inside skills:
 
 ```bash
-# Find OpenClaw tool references in skills
+# Find legacy gateway tool references in skills
 grep -r "system\.run\|file\.read\|file\.write\|web_search\|web_fetch\|sessions_spawn\|rag\.search" workspace/skills/
 ```
 
@@ -199,9 +199,9 @@ Replace any found references with Clawy Agent tool names (see table above).
 
 ### Step 6: Handle Crons
 
-OpenClaw crons configured via `oc-cron-script.js` are stored differently.
+legacy gateway crons configured via `oc-cron-script.js` are stored differently.
 
-**OpenClaw:** Crons defined in `openclaw.json` or via bot commands, managed
+**legacy gateway:** Crons defined in `legacy-gateway.json` or via bot commands, managed
 by the gateway's cron scheduler.
 
 **Clawy Agent:** Crons stored in `workspace/core-agent/crons/index.json`,
@@ -251,8 +251,8 @@ After starting, check:
 ### "Bot doesn't respond on Telegram"
 
 - Check `TELEGRAM_BOT_TOKEN` is correct
-- Ensure no other process is polling the same bot token (OpenClaw must be stopped first)
-- Telegram only allows one poller per token — stop OpenClaw before starting Clawy Agent
+- Ensure no other process is polling the same bot token (legacy gateway must be stopped first)
+- Telegram only allows one poller per token — stop legacy gateway before starting Clawy Agent
 
 ### "qmd search returns empty"
 
@@ -273,9 +273,9 @@ After starting, check:
 ## Architecture Comparison
 
 ```
-OpenClaw                          Clawy Agent
+legacy gateway                          Clawy Agent
 ─────────                         ───────────
-openclaw.json                     clawy-agent.yaml
+legacy-gateway.json                     clawy-agent.yaml
 Gateway (node-host)               Agent (single process)
   ├── Telegram plugin               ├── TelegramPoller
   ├── Discord plugin                 ├── DiscordClient
@@ -295,7 +295,7 @@ External deps:                    External deps:
 
 ## What You Lose (and Alternatives)
 
-| OpenClaw Feature | Status in Clawy Agent |
+| legacy gateway Feature | Status in Clawy Agent |
 |-----------------|----------------------|
 | Smart routing (LIGHT/MEDIUM/HEAVY) | Not built-in. Single model. Custom hook possible. |
 | Brave Search | Replaced by DuckDuckGo WebSearch (no API key) |
@@ -306,7 +306,7 @@ External deps:                    External deps:
 
 ## What You Gain
 
-| Clawy Agent Feature | Not in OpenClaw |
+| Clawy Agent Feature | Not in legacy gateway |
 |---------------------|----------------|
 | 28 programmable LLM hooks | Hooks didn't exist |
 | Hipocampus 5-level compaction | Basic memory flush only |

@@ -4,7 +4,7 @@ import crypto from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { spawn } from "node:child_process";
-import { withOpenclawBinPath } from "../util/shellPath.js";
+import { withClawyBinPath } from "../util/shellPath.js";
 
 const SUPPORTED_POINTS = new Set<HookPoint>([
   "beforeToolUse",
@@ -332,7 +332,7 @@ async function runCommandHook(
     const child = spawn(command.path, [], {
       cwd: command.skillRoot,
       env: {
-        ...withOpenclawBinPath(process.env),
+        ...withClawyBinPath(process.env),
         CLAWY_SKILL_ROOT: command.skillRoot,
         CLAWY_HOOK_POINT: declaration.point,
         CLAWY_TOOL_NAME: toolName,

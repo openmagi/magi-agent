@@ -4,7 +4,7 @@
  * docs/plans/2026-04-19-core-agent-phase-3-plan.md §3 T1-02.
  *
  * Replaces the superseded "anchor-in-prompt" design (§7.12.b draft)
- * which replicated OpenClaw issue #48547 — second-pass compaction
+ * which replicated legacy gateway issue #48547 — second-pass compaction
  * absorbed the regex-detected `<compaction-handoff>` string and the
  * boundary vanished. See docs/notes/2026-04-19-cc-parity-audit-01-agent-loop.md.
  *
@@ -420,7 +420,7 @@ function renderBoundaryContent(boundary: CompactionBoundaryEntry): string {
  *   - Consecutive user messages (tool_result gap)
  *   - Bot responding to wrong message (context corruption)
  *
- * OpenClaw reference: `anthropic-transport-stream.ts` groups blocks
+ * legacy gateway reference: `anthropic-transport-stream.ts` groups blocks
  * by turn, merges tool_use into assistant messages, and batches
  * tool_result into user messages. We replicate that here.
  *
@@ -577,7 +577,7 @@ function transcriptEntriesToMessages(
   // This creates consecutive user messages:
   //   user("prev question")  ← from aborted turn, no assistant reply
   //   user("current question")
-  // The model responds to the first, not the latest. OpenClaw's
+  // The model responds to the first, not the latest. legacy gateway's
   // validateAnthropicTurns() merges consecutive same-role messages
   // to fix this. We do the same.
   const merged = mergeConsecutiveSameRole(messages);
@@ -591,7 +591,7 @@ function transcriptEntriesToMessages(
  * when a turn was aborted mid-tool-execution (tool_call written to
  * transcript but tool_result never written).
  *
- * OpenClaw reference: `stripDanglingAnthropicToolUses()` in
+ * legacy gateway reference: `stripDanglingAnthropicToolUses()` in
  * `src/agents/pi-embedded-helpers/turns.ts`.
  */
 function stripDanglingToolUses(messages: LLMMessage[]): LLMMessage[] {

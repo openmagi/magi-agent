@@ -1,13 +1,13 @@
-const OPENCLAW_BIN = "/home/ocuser/.openclaw/bin";
+const CLAWY_BIN = "/home/ocuser/.clawy/bin";
 
-export function withOpenclawBinPath(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+export function withClawyBinPath(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
   const currentPath = env.PATH ?? "";
-  if (currentPath.split(":").includes(OPENCLAW_BIN)) {
+  if (currentPath.split(":").includes(CLAWY_BIN)) {
     return env;
   }
 
   return {
     ...env,
-    PATH: currentPath ? `${OPENCLAW_BIN}:${currentPath}` : OPENCLAW_BIN,
+    PATH: currentPath ? `${CLAWY_BIN}:${currentPath}` : CLAWY_BIN,
   };
 }

@@ -13,7 +13,7 @@ const RISKY_DELIVERY_PATTERNS: readonly RegExp[] = [
   /\bapi\.telegram\.org\/bot[^/\s]+\/send(?:Message|Document|Photo|MediaGroup)\b/i,
   /\bdiscord(?:app)?\.com\/api\/webhooks\//i,
   /\bslack\.com\/api\/chat\.postMessage\b/i,
-  /\bopenclaw\s+cron\s+add\b(?=.*(?:--target|--channel|--announce|--notify))/i,
+  /\bclawy\s+cron\s+add\b(?=.*(?:--target|--channel|--announce|--notify))/i,
   /\b(?:curl|httpie|wget)\b.{0,120}\b(?:sendMessage|chat\.postMessage|webhooks)\b/i,
 ];
 

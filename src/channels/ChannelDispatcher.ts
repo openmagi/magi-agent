@@ -153,10 +153,10 @@ export async function dispatchInbound(
 }
 
 /**
- * SessionKey format — aligned with OpenClaw convention:
+ * SessionKey format — aligned with legacy gateway convention:
  *   agent:<persona>:<channelType>:<chatId>
  * Persona defaults to "main"; multi-persona bots can override at the
- * Agent level (future). Bucket suffix (OpenClaw `:<bucket>`) not
+ * Agent level (future). Bucket suffix (legacy gateway `:<bucket>`) not
  * used — core-agent scopes by chatId alone.
  */
 export function buildSessionKey(inbound: InboundMessage): string {

@@ -6,7 +6,7 @@
  * - `docs/plans/2026-04-19-clawy-core-agent-design.md` §7.12.c
  *   (identity fencing format)
  *
- * OpenClaw's SOUL.md was a bot-authored prompt convention — hackable
+ * legacy gateway's SOUL.md was a bot-authored prompt convention — hackable
  * and self-mutable. This hook implements the user-authored equivalent
  * for Clawy: the bot operator defines role / hard rules / methodology
  * in three workspace files and we prepend them to the system prompt on

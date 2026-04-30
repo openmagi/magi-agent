@@ -40,7 +40,7 @@ const USER_FACING_EXTENSIONS = new Set([
 const INTERNAL_PREFIXES = [
   ".git/",
   ".codex/",
-  ".openclaw/",
+  ".clawy/",
   "memory/",
   "sessions/",
   "skills/",

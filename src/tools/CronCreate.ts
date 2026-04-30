@@ -3,7 +3,7 @@
  * the deliveryChannel is CAPTURED FROM THE TURN'S SOURCE CHANNEL at
  * creation time (passed in by ctx via ctx.metadata.sourceChannel, set
  * by Turn). The bot does NOT pick the target channel itself — this
- * fixes the OpenClaw bug where web-created crons routinely delivered
+ * fixes the legacy gateway bug where web-created crons routinely delivered
  * to Telegram because the LLM guessed wrong.
  */
 

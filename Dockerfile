@@ -1,6 +1,6 @@
-# Clawy Core Agent — greenfield agent runtime replacing OpenClaw gateway.
+# Clawy Core Agent — standalone agent runtime.
 # See docs/plans/2026-04-19-clawy-core-agent-design.md §3.2 / §9.5.
-# Runs inside each bot pod on :8080, same as today's OpenClaw gateway.
+# Runs inside each bot pod on :8080.
 
 FROM node:22-alpine AS builder
 
@@ -34,24 +34,24 @@ COPY --from=builder /build/dist ./dist
 # which is `/app/skills/superpowers` inside the image).
 COPY skills/ ./skills/
 
-# Workspace mount point (OpenClaw-compatible path — see §9.5 table).
+# Workspace mount point.
 # `/workspace` symlink keeps legacy skills/scripts (and bot-written memory
 # files) that hardcode `/workspace/...` working — see
 # docs/notes/2026-04-20-core-agent-workspace-symlink-handoff.md.
 RUN adduser -D -h /home/ocuser ocuser && \
-    mkdir -p /home/ocuser/.openclaw/workspace && \
-    ln -s /home/ocuser/.openclaw/workspace /workspace && \
+    mkdir -p /home/ocuser/.clawy/workspace && \
+    ln -s /home/ocuser/.clawy/workspace /workspace && \
     chown -R ocuser:ocuser /home/ocuser /workspace
 
 USER ocuser
 
-# `/home/ocuser/.openclaw/bin` on PATH lets bare-name skill calls
+# `/home/ocuser/.clawy/bin` on PATH lets bare-name skill calls
 # (e.g. `kb-search.sh`, `agent-run.sh`, `integration.sh`) work the same
-# way they did under the OpenClaw gateway.
+# way they do in existing Clawy workspaces.
 ENV NODE_ENV=production \
     CORE_AGENT_PORT=8080 \
-    CORE_AGENT_WORKSPACE=/home/ocuser/.openclaw/workspace \
-    PATH=/home/ocuser/.openclaw/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+    CORE_AGENT_WORKSPACE=/home/ocuser/.clawy/workspace \
+    PATH=/home/ocuser/.clawy/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 
 EXPOSE 8080
 

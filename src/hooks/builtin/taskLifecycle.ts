@@ -116,8 +116,8 @@ function haikuEnabled(): boolean {
  *   - `/var/folders/...`    (macOS per-user tmp)
  *   - `...T/clawy-test...`  (mktemp -t style test fixtures)
  *
- * Production workspaceRoots (`/home/ocuser/.openclaw/workspace/core-agent`
- * inside the pod, `~/.openclaw/...` in dev) never match these prefixes.
+ * Production workspaceRoots (`/home/ocuser/.clawy/workspace/core-agent`
+ * inside the pod, `~/.clawy/...` in dev) never match these prefixes.
  */
 function isTestWorkspace(workspaceRoot: string): boolean {
   // Explicit `on` opt-in bypasses the guard — the unit tests use tmp

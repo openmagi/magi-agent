@@ -6,8 +6,8 @@
  * Design reference: docs/plans/2026-04-19-core-agent-refactor-plan.md
  * §2 "C1 — Native Telegram + Discord polling".
  *
- * Why this exists: OpenClaw's `node-host` sidecar owned channel I/O
- * for legacy bots. Core-agent replaces the gateway side of OpenClaw
+ * Why this exists: legacy gateway's `node-host` sidecar owned channel I/O
+ * for legacy bots. Core-agent replaces the gateway side of legacy gateway
  * but must also absorb node-host's Telegram poller + discord.js
  * client; otherwise bots migrated to core-agent go dark the moment
  * they reply through Telegram/Discord. See C1 spec for the

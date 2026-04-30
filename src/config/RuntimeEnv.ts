@@ -189,7 +189,7 @@ export function loadRuntimeEnv(): RuntimeEnv {
     botId: requireEnv("BOT_ID"),
     userId: requireEnv("USER_ID"),
     workspaceRoot:
-      optionalEnv("CORE_AGENT_WORKSPACE") ?? "/home/ocuser/.openclaw/workspace",
+      optionalEnv("CORE_AGENT_WORKSPACE") ?? "/home/ocuser/.clawy/workspace",
     gatewayToken: requireEnv("GATEWAY_TOKEN"),
     codexAccessToken: optionalEnv("CODEX_ACCESS_TOKEN"),
     codexRefreshToken: optionalEnv("CODEX_REFRESH_TOKEN"),

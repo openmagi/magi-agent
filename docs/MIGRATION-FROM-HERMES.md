@@ -140,7 +140,7 @@ identity:
   instructions: "You are a helpful assistant who speaks Korean."
 ```
 
-**Option B — Workspace `IDENTITY.md` (full OpenClaw compat):**
+**Option B — Workspace `IDENTITY.md` (full legacy gateway compat):**
 ```bash
 # Copy SOUL.md content into workspace IDENTITY.md
 cp ~/.hermes/SOUL.md ./workspace/IDENTITY.md

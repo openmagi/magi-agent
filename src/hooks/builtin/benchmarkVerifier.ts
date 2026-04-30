@@ -49,7 +49,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { parse as parseYaml } from "yaml";
 import type { RegisteredHook, HookContext } from "../types.js";
-import { withOpenclawBinPath } from "../../util/shellPath.js";
+import { withClawyBinPath } from "../../util/shellPath.js";
 
 const MAX_RETRIES = 1;
 const DEFAULT_TIMEOUT_MS = 60_000;
@@ -194,7 +194,7 @@ export function runBenchmarkCommand(
     try {
       child = spawn("/bin/sh", ["-c", command], {
         cwd,
-        env: { ...withOpenclawBinPath(process.env), PWD: cwd },
+        env: { ...withClawyBinPath(process.env), PWD: cwd },
         stdio: ["ignore", "pipe", "pipe"],
       });
     } catch (err) {

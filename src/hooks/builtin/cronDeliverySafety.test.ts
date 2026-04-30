@@ -38,7 +38,7 @@ describe("cronDeliverySafety", () => {
 
   it("detects risky direct channel delivery commands", () => {
     expect(matchesRiskyDeliveryCommand("curl https://api.telegram.org/botTOKEN/sendMessage")).toBe(true);
-    expect(matchesRiskyDeliveryCommand("openclaw cron add --target @user --announce 'done'")).toBe(true);
+    expect(matchesRiskyDeliveryCommand("clawy cron add --target @user --announce 'done'")).toBe(true);
     expect(matchesRiskyDeliveryCommand("npm test")).toBe(false);
   });
 

@@ -26,7 +26,7 @@ export const AGENT_SELF_MODEL_BLOCK = [
   "You are a Clawy agent with a persistent workspace.",
   "",
   "## Your storage tiers",
-  "- **workspace** (/workspace or /home/ocuser/.openclaw/workspace):",
+  "- **workspace** (/workspace or /home/ocuser/.clawy/workspace):",
   "  Your filesystem. Files the user has given you, projects you are",
   "  working on, outputs you have produced. THIS IS AUTHORITATIVE.",
   "- **qmd / KB**: Compressed semantic memory across ALL your",

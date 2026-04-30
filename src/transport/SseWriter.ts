@@ -5,7 +5,7 @@
  * Emits TWO interleaved streams on the same SSE body:
  *
  *  1. Legacy OpenAI-compatible `data: {...}` lines (choices[].delta.*)
- *     so chat-proxy's existing OpenClaw-era parsing pipeline keeps
+ *     so chat-proxy's existing legacy gateway-era parsing pipeline keeps
  *     working for this bot during the migration.
  *
  *  2. `event: agent\ndata: {...}` lines carrying structured
@@ -211,7 +211,7 @@ export type AgentEvent =
        * minimum viable live budget, the turn aborts with this event so
        * the UI can prompt the user to switch to a larger-window model.
        *
-       * Fields mirror OpenClaw's upstream `compaction_impossible`
+       * Fields mirror legacy gateway's upstream `compaction_impossible`
        * telemetry so dashboards can cross-check.
        */
       type: "compaction_impossible";

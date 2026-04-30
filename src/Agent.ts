@@ -179,7 +179,7 @@ export function formatBackgroundTaskDelivery(
 export interface AgentConfig {
   botId: string;
   userId: string;
-  /** OpenClaw-compatible path: /home/ocuser/.openclaw/workspace. */
+  /** legacy-compatible path: /home/ocuser/.clawy/workspace. */
   workspaceRoot: string;
   gatewayToken: string;
   codexAccessToken?: string;
@@ -280,7 +280,7 @@ export class Agent {
   readonly artifacts: ArtifactManager;
   /** User-visible generated file registry for document/file outputs. */
   readonly outputArtifacts: OutputArtifactRegistry;
-  /** Cron scheduler — post-Phase-3 OpenClaw parity. */
+  /** Cron scheduler — post-Phase-3 legacy-runtime parity. */
   readonly crons: CronScheduler;
   /** Native hipocampus memory — qmd search index. */
   readonly qmdManager: QmdManager;
@@ -294,7 +294,7 @@ export class Agent {
   readonly debugWorkflow: DebugWorkflow;
   /**
    * Built-in slash commands (`/compact`, `/reset`, `/status`). Ported
-   * from OpenClaw so migrated bots keep the same inline UX. See
+   * from legacy gateway so migrated bots keep the same inline UX. See
    * `src/slash/registry.ts`.
    */
   readonly slashCommands: SlashCommandRegistry;

@@ -19,7 +19,7 @@ import { spawn } from "node:child_process";
 import type { Tool, ToolContext, ToolResult } from "../Tool.js";
 import { Workspace } from "../storage/Workspace.js";
 import { errorResult } from "../util/toolResult.js";
-import { withOpenclawBinPath } from "../util/shellPath.js";
+import { withClawyBinPath } from "../util/shellPath.js";
 
 export interface BashInput {
   command: string;
@@ -82,7 +82,7 @@ export function makeBashTool(workspaceRoot: string): Tool<BashInput, BashOutput>
         try {
           const child = spawn("/bin/sh", ["-c", input.command], {
             cwd,
-            env: { ...withOpenclawBinPath(process.env), PWD: cwd },
+            env: { ...withClawyBinPath(process.env), PWD: cwd },
             stdio: ["ignore", "pipe", "pipe"],
           });
 

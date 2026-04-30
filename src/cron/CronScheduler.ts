@@ -1,12 +1,12 @@
 /**
- * CronScheduler — T-cron (post-Phase-3 compat with OpenClaw).
+ * CronScheduler — T-cron (post-Phase-3 compat with legacy gateway).
  *
  * In-process scheduler that fires stored crons as synthetic turns.
  * A single setInterval tick-loop (30s cadence) scans for any cron
  * whose `nextFireAt` has passed and dispatches it.
  *
- * Channel routing — the critical fix vs OpenClaw:
- *   OpenClaw routed cron output via session-recency heuristic
+ * Channel routing — the critical fix vs legacy gateway:
+ *   legacy gateway routed cron output via session-recency heuristic
  *   (active session = most-recently-updated). The LLM also chose
  *   a `--target` flag, routinely wrong (web-authored cron → Telegram
  *   delivery). In Clawy, the cron record persists the **delivery

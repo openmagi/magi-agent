@@ -20,7 +20,7 @@
  *      its context. Bodies larger than PROMPT_BODY_MAX_BYTES are
  *      truncated with a warning.
  *
- * Frontmatter schema (additive to legacy OpenClaw shape):
+ * Frontmatter schema (additive to legacy gateway shape):
  *
  *   name: string             — Tool name the model sees
  *   description: string      — 1-3 sentence, verb-first, ≤ 250 chars
@@ -43,7 +43,7 @@ import { spawn } from "node:child_process";
 import { parse as parseYaml } from "yaml";
 import type { Tool, ToolContext, ToolResult, PermissionClass } from "../Tool.js";
 import { errorResult } from "../util/toolResult.js";
-import { withOpenclawBinPath } from "../util/shellPath.js";
+import { withClawyBinPath } from "../util/shellPath.js";
 import {
   normalizeClaudeSkillHooks,
   normalizeSkillRuntimeHooks,
@@ -205,7 +205,7 @@ function makeScriptSkillTool(opts: {
           const child = spawn("/bin/sh", ["-c", resolvedEntry!], {
             cwd: effectiveWorkspaceRoot,
             env: {
-              ...withOpenclawBinPath(process.env),
+              ...withClawyBinPath(process.env),
               PWD: effectiveWorkspaceRoot,
               CLAWY_WORKSPACE_ROOT: effectiveWorkspaceRoot,
               CLAWY_SKILL_INPUT: inputJson,
@@ -512,7 +512,7 @@ export async function loadSkillsFromDir(opts: {
     ];
     // Phase 2b shape detection. Explicit `kind: prompt` always wins.
     // Otherwise infer: a skill with neither `input_schema` nor `entry`
-    // is prompt-only (the 138 bundled OpenClaw-style skills). A skill
+    // is prompt-only (the 138 bundled legacy gateway-style skills). A skill
     // declaring `kind: skill` — or implying it by having `entry` OR
     // `input_schema` — must satisfy the Phase 2a contract.
     const explicitPrompt = fm.kind === "prompt";

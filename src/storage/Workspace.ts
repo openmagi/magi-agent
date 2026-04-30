@@ -1,9 +1,9 @@
 /**
- * Workspace — reads the bot's OpenClaw-compatible workspace directory.
+ * Workspace — reads the bot's legacy-compatible workspace directory.
  * Design reference: §9.5.
  *
- * Core-agent mounts `/home/ocuser/.openclaw/workspace` — the same PVC
- * shape existing OpenClaw bots have. We read identity/memory files for
+ * Core-agent mounts `/home/ocuser/.clawy/workspace` — the same PVC
+ * shape existing legacy gateway bots have. We read identity/memory files for
  * the layered context on each turn; writes happen through
  * StagedWriteJournal (Phase 1c).
  */

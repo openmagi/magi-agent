@@ -1,5 +1,5 @@
 /**
- * HTTP ingress on :8080 — OpenClaw-gateway-compatible surface.
+ * HTTP ingress on :8080 — gateway-compatible surface.
  * Design reference: §9.6.
  *
  * This file is intentionally the thinnest possible harness around

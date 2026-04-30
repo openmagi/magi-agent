@@ -1,5 +1,5 @@
 /**
- * Per-channel reset counter store. Ported from OpenClaw's `/reset`
+ * Per-channel reset counter store. Ported from legacy gateway's `/reset`
  * mechanism: incrementing the counter changes the sessionKey namespace
  * on the NEXT inbound message, effectively starting a fresh session
  * (same chatId, new conversation).

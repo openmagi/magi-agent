@@ -1,7 +1,7 @@
 /**
  * DiscordClient — native discord.js adapter.
  *
- * Replaces OpenClaw node-host's discord integration. Uses discord.js v14
+ * Replaces legacy gateway node-host's discord integration. Uses discord.js v14
  * with the minimum gateway intents required for @mention + DM flow:
  *
  *   - Guilds           — channel cache + membership
