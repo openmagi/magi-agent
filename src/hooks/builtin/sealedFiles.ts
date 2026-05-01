@@ -459,13 +459,13 @@ function makeBeforeCommitHook(opts: SealedFilesOptions): RegisteredHook<"beforeC
           if (ch.sha256 !== "") pendingUpdates.push({ path: ch.path, sha256: ch.sha256 });
           continue;
         }
-        if (turnAllowed) {
-          bypassedByConfig.push(ch.path);
+        if (systemAllowed?.has(ch.path)) {
+          bypassedBySystem.push(ch.path);
           if (ch.sha256 !== "") pendingUpdates.push({ path: ch.path, sha256: ch.sha256 });
           continue;
         }
-        if (systemAllowed?.has(ch.path)) {
-          bypassedBySystem.push(ch.path);
+        if (turnAllowed) {
+          bypassedByConfig.push(ch.path);
           if (ch.sha256 !== "") pendingUpdates.push({ path: ch.path, sha256: ch.sha256 });
           continue;
         }
