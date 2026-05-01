@@ -27,6 +27,24 @@ const emptyPolicy: RuntimePolicySnapshot = {
 };
 
 describe("registerBuiltinHooks", () => {
+  it("registers cron meta-orchestrator hooks by default", () => {
+    const registry = new HookRegistry();
+
+    registerBuiltinHooks(registry, {
+      workspaceRoot: "/tmp/workspace",
+    });
+
+    expect(registry.list("beforeLLMCall").map((hook) => hook.name)).toContain(
+      "builtin:cron-meta-orchestrator",
+    );
+    expect(registry.list("beforeToolUse").map((hook) => hook.name)).toContain(
+      "builtin:cron-meta-orchestrator-tool-guard",
+    );
+    expect(registry.list("beforeCommit").map((hook) => hook.name)).toContain(
+      "builtin:cron-meta-orchestrator-commit-gate",
+    );
+  });
+
   it("registers user harness rule hooks when a policy kernel is available", () => {
     const registry = new HookRegistry();
 

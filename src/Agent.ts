@@ -844,6 +844,9 @@ export class Agent {
       artifactDeliveryAgent: {
         readSessionTranscript,
       },
+      cronMetaAgent: {
+        readSessionTranscript,
+      },
       resourceBoundaryAgent: {
         readSessionTranscript,
       },
@@ -1148,7 +1151,39 @@ export class Agent {
       );
       const assistantText = turnResult.assistantText.trim();
       if (assistantText.length > 0) {
-        await this.deliverCronAssistantText(record.deliveryChannel, assistantText);
+        const deliveryAuditData = {
+          cronId: record.cronId,
+          channelType: record.deliveryChannel.type,
+          channelId: record.deliveryChannel.channelId,
+          textChars: assistantText.length,
+          textBytes: Buffer.byteLength(assistantText, "utf8"),
+        };
+        await this.auditLog.append(
+          "cron_delivery_started",
+          sessionKey,
+          turnResult.meta.turnId,
+          deliveryAuditData,
+        );
+        try {
+          await this.deliverCronAssistantText(record.deliveryChannel, assistantText);
+          await this.auditLog.append(
+            "cron_delivery_succeeded",
+            sessionKey,
+            turnResult.meta.turnId,
+            deliveryAuditData,
+          );
+        } catch (err) {
+          await this.auditLog.append(
+            "cron_delivery_failed",
+            sessionKey,
+            turnResult.meta.turnId,
+            {
+              ...deliveryAuditData,
+              error: (err as Error).message,
+            },
+          );
+          throw err;
+        }
       }
     } finally {
       // #82 — non-durable cron fire: close the synthetic session so
@@ -1176,8 +1211,7 @@ export class Agent {
   ): Promise<void> {
     if (channel.type === "app") {
       if (!this.config.chatProxyUrl) {
-        console.warn("[clawy-agent] cron delivery to app channel skipped — no chatProxyUrl configured");
-        return;
+        throw new Error("cron app delivery failed: no chatProxyUrl configured");
       }
       const url = `${this.config.chatProxyUrl.replace(/\/$/, "")}/v1/bot-channels/post`;
       const resp = await fetch(url, {

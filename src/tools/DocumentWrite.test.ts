@@ -305,7 +305,7 @@ describe("DocumentWrite", () => {
     expect(bytes.subarray(0, 5).toString()).toBe("%PDF-");
   });
 
-  it("falls back to the fast pdf renderer when docx-to-pdf conversion fails", async () => {
+  it("does not fall back to the fast pdf renderer when docx-to-pdf conversion fails", async () => {
     const root = await makeRoot();
     const registry = new OutputArtifactRegistry(root);
     const tool = makeDocumentWriteTool(root, registry, {
@@ -329,13 +329,9 @@ describe("DocumentWrite", () => {
       ctx(root),
     );
 
-    expect(result.status).toBe("ok");
-    expect(result.metadata).toMatchObject({
-      documentWriteMode: "fast_fallback",
-      pdfConversionError: "libreoffice failed",
-    });
-    const bytes = await fs.readFile(path.join(root, "outputs", "exports", "fallback.pdf"));
-    expect(bytes.subarray(0, 5).toString()).toBe("%PDF-");
+    expect(result.status).toBe("error");
+    expect(result.errorMessage).toContain("DOCX to PDF conversion failed");
+    await expect(fs.access(path.join(root, "outputs", "exports", "fallback.pdf"))).rejects.toThrow();
   });
 
   it("accepts source.type as a compatibility alias for source.kind", async () => {
@@ -456,7 +452,13 @@ describe("DocumentWrite", () => {
   it("infers markdown source from a content-only object", async () => {
     const root = await makeRoot();
     const registry = new OutputArtifactRegistry(root);
-    const tool = makeDocumentWriteTool(root, registry);
+    const tool = makeDocumentWriteTool(root, registry, {
+      docxToPdfConverter: async ({ docxPath, pdfPath }) => {
+        const docx = await fs.readFile(docxPath);
+        expect(docx.subarray(0, 2).toString()).toBe("PK");
+        await fs.writeFile(pdfPath, Buffer.from("%PDF-from-docx"));
+      },
+    });
 
     const result = await tool.execute(
       {
@@ -684,10 +686,18 @@ describe("DocumentWrite", () => {
     });
   });
 
-  it("creates pdf from markdown source and registers a downloadable artifact", async () => {
+  it("creates pdf from markdown source by first creating an intermediate docx", async () => {
     const root = await makeRoot();
     const registry = new OutputArtifactRegistry(root);
-    const tool = makeDocumentWriteTool(root, registry);
+    let converterSawDocx = false;
+    const tool = makeDocumentWriteTool(root, registry, {
+      docxToPdfConverter: async ({ docxPath, pdfPath }) => {
+        const docx = await fs.readFile(docxPath);
+        expect(docx.subarray(0, 2).toString()).toBe("PK");
+        converterSawDocx = true;
+        await fs.writeFile(pdfPath, Buffer.from("%PDF-from-docx"));
+      },
+    });
 
     const result = await tool.execute(
       {
@@ -704,6 +714,12 @@ describe("DocumentWrite", () => {
     );
 
     expect(result.status).toBe("ok");
+    expect(converterSawDocx).toBe(true);
+    expect(result.metadata).toMatchObject({
+      documentWriteMode: "fast_docx_pdf",
+      agenticIntermediateFormat: "docx",
+      pdfConversionMode: "docx_to_pdf",
+    });
     const bytes = await fs.readFile(path.join(root, "outputs", "exports", "investment-report.pdf"));
     expect(bytes.subarray(0, 5).toString()).toBe("%PDF-");
 

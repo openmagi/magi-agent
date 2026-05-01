@@ -10,7 +10,6 @@ import { convertDocxToPdf, type DocxToPdfConverter } from "./document/docxToPdfD
 import { markdownToStructuredBlocks, writeDocxFromBlocks, type StructuredBlock } from "./document/docxDriver.js";
 import { renderMarkdownToHtml } from "./document/htmlDriver.js";
 import { writeHwpxFromBlocks, type HwpxTemplate } from "./document/hwpxDriver.js";
-import { writePdfFromBlocks } from "./document/pdfDriver.js";
 import {
   writeDocumentAgentically,
   type AgenticDocumentAuthorDeps,
@@ -327,6 +326,12 @@ function sourceToMarkdown(source: NormalizedDocumentSource): string {
     : structuredBlocksToMarkdown(source.blocks);
 }
 
+function sourceToStructuredBlocks(source: NormalizedDocumentSource): StructuredBlock[] {
+  return source.kind === "structured"
+    ? source.blocks
+    : markdownToStructuredBlocks(source.content);
+}
+
 async function writeDocumentFast(
   input: DocumentWriteInput,
   source: NormalizedDocumentSource,
@@ -365,10 +370,6 @@ async function writeDocumentFast(
     await writeTextFile(absPath, structuredBlocksToPlainText(source.blocks));
   } else if (input.format === "txt" && source.kind === "markdown") {
     await writeTextFile(absPath, markdownToPlainText(source.content));
-  } else if (input.format === "pdf" && source.kind === "structured") {
-    await writePdfFromBlocks(absPath, input.title, source.blocks);
-  } else if (input.format === "pdf" && source.kind === "markdown") {
-    await writePdfFromBlocks(absPath, input.title, markdownToStructuredBlocks(source.content));
   } else {
     throw new Error(`unsupported combination: ${input.format}/${source.kind}`);
   }
@@ -378,30 +379,56 @@ function messageForError(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-async function writePdfViaAgenticDocx(
+async function writePdfViaDocx(
   input: DocumentWriteInput,
   source: NormalizedDocumentSource,
   absPath: string,
   workspacePath: string,
   workspaceRoot: string,
   ctx: ToolContext,
-  agenticWriter: AgenticDocumentWriter,
+  agenticWriter: AgenticDocumentWriter | undefined,
   docxToPdfConverter: DocxToPdfConverter,
 ): Promise<Record<string, unknown>> {
   const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "document-write-pdf-docx-"));
   const docxPath = path.join(tempRoot, "intermediate.docx");
   try {
     const intermediateFilename = workspacePath.replace(/\.pdf$/i, ".docx");
-    const agenticResult = await agenticWriter({
-      format: "docx",
-      mode: input.mode,
-      title: input.title,
-      filename: intermediateFilename === workspacePath ? `${workspacePath}.docx` : intermediateFilename,
-      absPath: docxPath,
-      workspaceRoot,
-      sourceMarkdown: sourceToMarkdown(source),
-      ctx,
-    });
+    let writeMetadata: Record<string, unknown>;
+    if (agenticWriter) {
+      try {
+        const agenticResult = await agenticWriter({
+          format: "docx",
+          mode: input.mode,
+          title: input.title,
+          filename: intermediateFilename === workspacePath ? `${workspacePath}.docx` : intermediateFilename,
+          absPath: docxPath,
+          workspaceRoot,
+          sourceMarkdown: sourceToMarkdown(source),
+          ctx,
+        });
+        writeMetadata = {
+          documentWriteMode: "agentic_docx_pdf",
+          agenticIntermediateFormat: "docx",
+          agenticTurns: agenticResult.turns,
+          agenticToolCallCount: agenticResult.toolCallCount,
+          ...(agenticResult.model ? { agenticModel: agenticResult.model } : {}),
+        };
+      } catch (error) {
+        await writeDocxFromBlocks(docxPath, sourceToStructuredBlocks(source));
+        writeMetadata = {
+          documentWriteMode: "fast_docx_pdf",
+          agenticIntermediateFormat: "docx",
+          agenticError: messageForError(error),
+        };
+      }
+    } else {
+      await writeDocxFromBlocks(docxPath, sourceToStructuredBlocks(source));
+      writeMetadata = {
+        documentWriteMode: "fast_docx_pdf",
+        agenticIntermediateFormat: "docx",
+      };
+    }
+
     try {
       await docxToPdfConverter({
         docxPath,
@@ -409,15 +436,12 @@ async function writePdfViaAgenticDocx(
         abortSignal: ctx.abortSignal,
       });
     } catch (error) {
-      throw new Error(`pdf_conversion:${messageForError(error)}`);
+      await fs.rm(absPath, { force: true });
+      throw new Error(`DOCX to PDF conversion failed: ${messageForError(error)}`);
     }
     return {
-      documentWriteMode: "agentic_docx_pdf",
-      agenticIntermediateFormat: "docx",
-      agenticTurns: agenticResult.turns,
-      agenticToolCallCount: agenticResult.toolCallCount,
+      ...writeMetadata,
       pdfConversionMode: "docx_to_pdf",
-      ...(agenticResult.model ? { agenticModel: agenticResult.model } : {}),
     };
   } finally {
     await fs.rm(tempRoot, { recursive: true, force: true });
@@ -432,7 +456,7 @@ export function makeDocumentWriteTool(
   return {
     name: "DocumentWrite",
     description:
-      "Create or edit user-facing md, txt, html, pdf, docx, and hwpx documents inside the bot workspace and register the result as an output artifact. DOCX/HWPX use an agentic authoring loop when available; PDF uses agentic DOCX authoring followed by deterministic DOCX-to-PDF conversion when available. Source may be inline markdown/blocks or a workspace-relative path/blocksFile.",
+      "Create or edit user-facing md, txt, html, pdf, docx, and hwpx documents inside the bot workspace and register the result as an output artifact. DOCX/HWPX use an agentic authoring loop when available. PDF is always produced by first authoring a DOCX intermediate, then converting DOCX to PDF; conversion failure returns an error instead of direct-rendering a degraded PDF. Source may be inline markdown/blocks or a workspace-relative path/blocksFile.",
     inputSchema: INPUT_SCHEMA,
     permission: "write",
     validate(input) {
@@ -477,31 +501,17 @@ export function makeDocumentWriteTool(
         }
         const docxToPdfConverter = deps.docxToPdfConverter ?? convertDocxToPdf;
 
-        if (input.format === "pdf" && agenticWriter) {
-          try {
-            writeMetadata = await writePdfViaAgenticDocx(
-              input,
-              source,
-              absPath,
-              outputPath.workspacePath,
-              workspaceRoot,
-              ctx,
-              agenticWriter,
-              docxToPdfConverter,
-            );
-          } catch (error) {
-            const message = messageForError(error);
-            writeMetadata = message.startsWith("pdf_conversion:")
-              ? {
-                  documentWriteMode: "fast_fallback",
-                  pdfConversionError: message.slice("pdf_conversion:".length),
-                }
-              : {
-                  documentWriteMode: "fast_fallback",
-                  agenticError: message,
-                };
-            await writeDocumentFast(input, source, absPath, referencePath);
-          }
+        if (input.format === "pdf") {
+          writeMetadata = await writePdfViaDocx(
+            input,
+            source,
+            absPath,
+            outputPath.workspacePath,
+            workspaceRoot,
+            ctx,
+            agenticWriter,
+            docxToPdfConverter,
+          );
         } else if ((input.format === "docx" || input.format === "hwpx") && agenticWriter) {
           try {
             const agenticResult = await agenticWriter({

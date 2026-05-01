@@ -118,6 +118,10 @@ import {
   makeDebugAfterToolCheckpointHook,
   makeDebugCommitCheckpointHook,
 } from "./debugCheckpointRecorder.js";
+import {
+  makeCronMetaOrchestratorHooks,
+  type CronMetaOrchestratorAgent,
+} from "./cronMetaOrchestrator.js";
 
 export interface RegisterBuiltinsOpts {
   disabled?: string[];
@@ -216,6 +220,12 @@ export interface RegisterBuiltinsOpts {
    */
   artifactDeliveryAgent?: CompletionEvidenceAgent;
   /**
+   * Delegate used by cron meta-orchestrator commit gate to confirm
+   * that a scheduled parent turn actually delegated real work to
+   * SpawnAgent before claiming completion.
+   */
+  cronMetaAgent?: CronMetaOrchestratorAgent;
+  /**
    * Delegate used by the resource-boundary gate to re-scan persisted
    * current-turn tool calls at beforeCommit. This catches bypass-mode
    * sessions where beforeToolUse hooks were intentionally skipped.
@@ -251,7 +261,10 @@ export interface RegisterBuiltinsOpts {
   hipocampus?: Pick<HipocampusService, "recall">;
   /** Typed runtime policy facade. Optional in tests. */
   policyKernel?: PolicyKernelType;
-  /** Reads current-turn transcript for user harness rule evaluation. */
+  /**
+   * Delegate used by user-defined harness rules to inspect current-turn
+   * tool evidence from persisted transcript entries.
+   */
   userHarnessRuleAgent?: UserHarnessRuleAgent;
   /** Workflow-native debugging state manager. Optional in tests. */
   debugWorkflow?: DebugWorkflowType;
@@ -311,16 +324,6 @@ export function registerBuiltinHooks(
     if (maybe(policyPromptHook.name)) {
       registry.register(policyPromptHook);
       registered++;
-    }
-
-    const harnessHooks = makeUserHarnessRuleHooks({
-      policy: opts.policyKernel,
-      agent: opts.userHarnessRuleAgent,
-    });
-    if (maybe(harnessHooks.beforeCommit.name)) {
-      registry.register(harnessHooks.beforeCommit);
-      registry.register(harnessHooks.afterToolUse);
-      registered += 2;
     }
   }
 
@@ -609,6 +612,18 @@ export function registerBuiltinHooks(
     registered++;
   }
 
+  if (opts.policyKernel) {
+    const userHarnessHooks = makeUserHarnessRuleHooks({
+      policy: opts.policyKernel,
+      agent: opts.userHarnessRuleAgent,
+    });
+    if (maybe(userHarnessHooks.beforeCommit.name)) {
+      registry.register(userHarnessHooks.beforeCommit);
+      registry.register(userHarnessHooks.afterToolUse);
+      registered += 2;
+    }
+  }
+
   const resourceBoundaryHooks = makeResourceBoundaryHooks({
     agent: opts.resourceBoundaryAgent,
   });
@@ -759,6 +774,22 @@ export function registerBuiltinHooks(
     }
   } else {
     skipped.push("builtin:dangerous-patterns");
+  }
+
+  const cronMetaHooks = makeCronMetaOrchestratorHooks({
+    agent: opts.cronMetaAgent,
+  });
+  if (maybe(cronMetaHooks.beforeLLMCall.name)) {
+    registry.register(cronMetaHooks.beforeLLMCall);
+    registered++;
+  }
+  if (maybe(cronMetaHooks.beforeToolUse.name)) {
+    registry.register(cronMetaHooks.beforeToolUse);
+    registered++;
+  }
+  if (maybe(cronMetaHooks.beforeCommit.name)) {
+    registry.register(cronMetaHooks.beforeCommit);
+    registered++;
   }
 
   const deliverySafetyHook = makeCronDeliverySafetyHook();

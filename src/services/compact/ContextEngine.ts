@@ -737,6 +737,13 @@ function toContentBlocks(
 
 function canonicalContentBlocks(content: unknown[]): LLMContentBlock[] {
   const blocks: LLMContentBlock[] = [];
+  const hasUserFacingText = content.some(
+    (block) =>
+      !!block &&
+      typeof block === "object" &&
+      (block as Record<string, unknown>).type === "text" &&
+      typeof (block as Record<string, unknown>).text === "string",
+  );
   for (const block of content) {
     if (!block || typeof block !== "object") continue;
     const obj = block as Record<string, unknown>;
@@ -744,10 +751,20 @@ function canonicalContentBlocks(content: unknown[]): LLMContentBlock[] {
       blocks.push({ type: "text", text: obj.text });
       continue;
     }
+    if (
+      obj.type === "thinking" &&
+      typeof obj.thinking === "string" &&
+      typeof obj.signature === "string" &&
+      !hasUserFacingText
+    ) {
+      blocks.push({
+        type: "thinking",
+        thinking: obj.thinking,
+        signature: obj.signature,
+      });
+      continue;
+    }
     if (obj.type === "thinking" || obj.type === "redacted_thinking") {
-      // Stored thinking signatures can become invalid when replayed
-      // from old transcripts. Live in-turn replay preserves signed
-      // thinking separately; historical replay does not need it.
       continue;
     }
     if (

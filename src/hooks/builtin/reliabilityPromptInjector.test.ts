@@ -49,8 +49,21 @@ describe("reliabilityPromptInjector", () => {
 
   it("builds evidence policy for current/source-sensitive turns", () => {
     const block = buildReliabilityPolicyBlock("최신 가격을 검색하고 출처도 달아줘");
+    expect(block).toContain("product reliability and benchmark evaluation");
+    expect(block).toContain("tool/file evidence");
     expect(block).toContain("evidence-router");
     expect(block).toContain("current sources");
+  });
+
+  it("does not turn simple file understanding into evidence routing", () => {
+    const block = buildReliabilityPolicyBlock("WSJ 파이프라인 파일 뭐하는건지 알려줘");
+    expect(block).toContain("runtime-evidence-policy");
+    expect(block).not.toContain("evidence-router");
+  });
+
+  it("still builds evidence policy for document requests that need citations or verification", () => {
+    const block = buildReliabilityPolicyBlock("이 PDF 문서에서 근거를 추출하고 출처도 표시해줘");
+    expect(block).toContain("evidence-router");
   });
 
   it("injects policy into the system prompt on first iteration", async () => {
@@ -72,7 +85,7 @@ describe("reliabilityPromptInjector", () => {
     }
   });
 
-  it("continues unchanged when no reliability trigger matches", async () => {
+  it("injects the runtime evidence policy even when no conditional trigger matches", async () => {
     const hook = makeReliabilityPromptInjectorHook();
     const result = await hook.handler(
       {
@@ -83,7 +96,12 @@ describe("reliabilityPromptInjector", () => {
       },
       makeCtx(),
     );
-    expect(result).toEqual({ action: "continue" });
+    expect(result?.action).toBe("replace");
+    if (result?.action === "replace") {
+      expect(result.value.system).toContain("<runtime-evidence-policy>");
+      expect(result.value.system).toContain("product reliability and benchmark evaluation");
+      expect(result.value.system).not.toContain("evidence-router");
+    }
   });
 
   it("respects CORE_AGENT_RELIABILITY_PROMPT=off", async () => {

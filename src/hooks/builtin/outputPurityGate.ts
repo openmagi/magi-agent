@@ -35,27 +35,37 @@ NOT A LEAK (NO):
 
 Reply ONLY: YES or NO`;
 
-export async function matchesInternalReasoningLeak(text: string, ctx?: HookContext): Promise<boolean> {
+const INTERNAL_REASONING_LEAK_RE =
+  /^(?:we need(?: to)?|i should|let me think|the user (?:is asking|wants)|먼저\s+\S+\s*해야|사용자가\s+요청)/i;
+
+export function matchesInternalReasoningLeak(text: string): boolean;
+export function matchesInternalReasoningLeak(text: string, ctx: HookContext): Promise<boolean>;
+export function matchesInternalReasoningLeak(text: string, ctx?: HookContext): boolean | Promise<boolean> {
   if (!text || !text.trim()) return false;
-  if (!ctx?.llm) return false;
 
   const firstParagraph = text.trim().split(/\n\s*\n/, 1)[0] ?? text.trim();
   if (firstParagraph.length < 10) return false;
-
-  try {
-    let result = "";
-    for await (const event of ctx.llm.stream({
-      model: "claude-haiku-4-5",
-      system: PURITY_CLASSIFIER_PROMPT,
-      messages: [{ role: "user", content: [{ type: "text", text: firstParagraph.slice(0, 300) }] }],
-      max_tokens: 10,
-    })) {
-      if (event.kind === "text_delta") result += event.delta;
-    }
-    return result.trim().toUpperCase().startsWith("YES");
-  } catch {
-    return false;
+  const deterministic = INTERNAL_REASONING_LEAK_RE.test(firstParagraph);
+  if (deterministic || !ctx?.llm || typeof ctx.llm.stream !== "function") {
+    return deterministic;
   }
+
+  return (async () => {
+    try {
+      let result = "";
+      for await (const event of ctx.llm.stream({
+        model: "claude-haiku-4-5",
+        system: PURITY_CLASSIFIER_PROMPT,
+        messages: [{ role: "user", content: [{ type: "text", text: firstParagraph.slice(0, 300) }] }],
+        max_tokens: 10,
+      })) {
+        if (event.kind === "text_delta") result += event.delta;
+      }
+      return result.trim().toUpperCase().startsWith("YES");
+    } catch {
+      return deterministic;
+    }
+  })();
 }
 
 export function makeOutputPurityGateHook(): RegisteredHook<"beforeCommit"> {

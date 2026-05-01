@@ -354,5 +354,103 @@ describe("cron wiring — non-durable session auto-close", () => {
         }),
       }),
     );
+
+    const audit = await agent.auditLog.query({
+      sessionKey: record.sessionKey,
+      limit: 10,
+    });
+    expect(audit.entries.map((entry) => entry.event)).toContain(
+      "cron_delivery_started",
+    );
+    expect(audit.entries.map((entry) => entry.event)).toContain(
+      "cron_delivery_succeeded",
+    );
+    const succeeded = audit.entries.find(
+      (entry) => entry.event === "cron_delivery_succeeded",
+    );
+    expect(succeeded?.turnId).toBe("t-deliver-1");
+    expect(succeeded?.data).toMatchObject({
+      cronId: "cron-deliver",
+      channelType: "app",
+      channelId: "general",
+      textChars: "테스트 브리핑입니다.".length,
+    });
+  });
+
+  it("fireCron audits delivery failures before surfacing them", async () => {
+    const { Agent } = await import("./Agent.js");
+    const agent = new Agent({
+      botId: "bot-cron",
+      userId: "user-cron",
+      workspaceRoot: "/tmp/session-close-cron-delivery-fail-test",
+      gatewayToken: "tok",
+      apiProxyUrl: "http://localhost",
+      chatProxyUrl: "http://chat-proxy.local",
+      redisUrl: "redis://localhost",
+      model: "claude-opus-4-7",
+    });
+
+    const origGetOrCreate = agent.getOrCreateSession.bind(agent);
+    vi.spyOn(agent, "getOrCreateSession").mockImplementation(async (key, ref) => {
+      const s = await origGetOrCreate(key, ref);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (s as any).runTurn = vi.fn(async () => ({
+        meta: {
+          turnId: "t-deliver-fail",
+          sessionKey: "",
+          startedAt: Date.now(),
+          declaredRoute: "direct" as const,
+          status: "committed" as const,
+          usage: { inputTokens: 0, outputTokens: 0, costUsd: 0 },
+        },
+        assistantText: "실패해야 하는 브리핑입니다.",
+      }));
+      return s;
+    });
+
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = vi.fn(async () =>
+      new Response("upstream unavailable", { status: 503 }),
+    ) as typeof fetch;
+
+    const record: CronRecord = {
+      cronId: "cron-deliver-fail",
+      botId: "bot-cron",
+      userId: "user-cron",
+      expression: "* * * * *",
+      prompt: "send briefing",
+      deliveryChannel: { type: "app", channelId: "general" },
+      enabled: true,
+      createdAt: Date.now(),
+      nextFireAt: Date.now(),
+      consecutiveFailures: 0,
+      durable: false,
+      sessionKey: "agent:cron:app:general:cron-deliver-fail",
+    };
+
+    try {
+      await expect(
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (agent as any).fireCron(record),
+      ).rejects.toThrow(/cron app delivery failed: HTTP 503/);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+
+    const audit = await agent.auditLog.query({
+      sessionKey: record.sessionKey,
+      limit: 10,
+    });
+    const failed = audit.entries.find(
+      (entry) => entry.event === "cron_delivery_failed",
+    );
+    expect(failed?.turnId).toBe("t-deliver-fail");
+    expect(failed?.data).toMatchObject({
+      cronId: "cron-deliver-fail",
+      channelType: "app",
+      channelId: "general",
+      textChars: "실패해야 하는 브리핑입니다.".length,
+      error: expect.stringContaining("HTTP 503"),
+    });
   });
 });

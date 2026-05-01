@@ -254,6 +254,77 @@ describe("TelegramPoller", () => {
     expect(received).toHaveLength(0);
   });
 
+  it("downloads document-only messages and dispatches them as attachments", async () => {
+    const update = {
+      update_id: 210,
+      message: {
+        message_id: 3,
+        from: { id: 9 },
+        chat: { id: 9 },
+        date: 0,
+        document: {
+          file_id: "file-1",
+          file_name: "report.pdf",
+          mime_type: "application/pdf",
+          file_size: 3,
+        },
+      },
+    };
+    const calls: StubCall[] = [];
+    const fetchImpl = (async (
+      input: string | URL | Request,
+      init?: RequestInit,
+    ): Promise<Response> => {
+      const url = typeof input === "string" ? input : input.toString();
+      calls.push({ url, ...(init !== undefined ? { init } : {}) });
+      if (url.endsWith("/getUpdates")) {
+        return new Response(JSON.stringify({ ok: true, result: [update] }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+      if (url.endsWith("/getFile")) {
+        return new Response(
+          JSON.stringify({
+            ok: true,
+            result: { file_id: "file-1", file_path: "documents/report.pdf" },
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        );
+      }
+      return new Response(new Uint8Array([80, 68, 70]), { status: 200 });
+    }) as typeof fetch;
+    const poller = new TelegramPoller({
+      botToken: "T",
+      workspaceRoot,
+      fetchImpl,
+    });
+    const received: InboundMessage[] = [];
+    poller.onInboundMessage(async (m) => {
+      received.push(m);
+    });
+
+    await poller.pollOnce();
+
+    expect(received).toHaveLength(1);
+    expect(received[0]!.text).toBe("");
+    expect(received[0]!.attachments).toEqual([
+      {
+        kind: "file",
+        name: "report.pdf",
+        mimeType: "application/pdf",
+        localPath: path.join(workspaceRoot, "telegram-downloads", "report.pdf"),
+        sizeBytes: 3,
+      },
+    ]);
+    await expect(
+      fs.readFile(path.join(workspaceRoot, "telegram-downloads", "report.pdf")),
+    ).resolves.toEqual(Buffer.from([80, 68, 70]));
+    expect(calls.map((c) => c.url)).toContain(
+      "https://api.telegram.org/file/botT/documents/report.pdf",
+    );
+  });
+
   it("persists next offset to telegram-offset.json (last update_id + 1)", async () => {
     const { fetchImpl } = makeStubFetch([
       {
@@ -331,6 +402,37 @@ describe("TelegramPoller", () => {
     expect(body.text).toBe("hi there");
   });
 
+  it("send() chunks long text before posting to Telegram", async () => {
+    const longText = [
+      "뉴스 브리핑",
+      "A".repeat(1800),
+      "B".repeat(1800),
+      "C".repeat(1800),
+    ].join("\n\n");
+    const { fetchImpl, calls } = makeStubFetch([
+      { body: { ok: true, result: { message_id: 1 } } },
+      { body: { ok: true, result: { message_id: 2 } } },
+      { body: { ok: true, result: { message_id: 3 } } },
+    ]);
+    const poller = new TelegramPoller({
+      botToken: "T",
+      workspaceRoot,
+      fetchImpl,
+    });
+
+    await poller.send({ chatId: "42", text: longText });
+
+    expect(calls.length).toBeGreaterThan(1);
+    const bodies = calls.map((call) => JSON.parse(call.init?.body as string));
+    expect(bodies.map((body) => body.chat_id)).toEqual(
+      Array.from({ length: bodies.length }, () => "42"),
+    );
+    expect(bodies.map((body) => body.text).join("")).toBe(longText);
+    for (const body of bodies) {
+      expect(body.text.length).toBeLessThanOrEqual(4096);
+    }
+  });
+
   it("send() includes reply_to_message_id when threading", async () => {
     const { fetchImpl, calls } = makeStubFetch([
       { body: { ok: true, result: {} } },
@@ -343,6 +445,29 @@ describe("TelegramPoller", () => {
     await poller.send({ chatId: "1", text: "x", replyToMessageId: "55" });
     const body = JSON.parse(calls[0]!.init?.body as string);
     expect(body.reply_to_message_id).toBe(55);
+  });
+
+  it("sendDocument() uploads a workspace file with multipart form data", async () => {
+    await fs.writeFile(path.join(workspaceRoot, "out.pdf"), "PDF", "utf8");
+    const { fetchImpl, calls } = makeStubFetch([
+      { body: { ok: true, result: { message_id: 100 } } },
+    ]);
+    const poller = new TelegramPoller({
+      botToken: "DOC",
+      workspaceRoot,
+      fetchImpl,
+    });
+
+    await poller.sendDocument("42", path.join(workspaceRoot, "out.pdf"), "file");
+
+    const call = calls[0]!;
+    expect(call.url).toBe("https://api.telegram.org/botDOC/sendDocument");
+    expect(call.init?.method).toBe("POST");
+    expect(call.init?.body).toBeInstanceOf(FormData);
+    const form = call.init?.body as FormData;
+    expect(form.get("chat_id")).toBe("42");
+    expect(form.get("caption")).toBe("file");
+    expect(form.get("document")).toBeInstanceOf(Blob);
   });
 
   it("start() returns immediately without awaiting the poll loop (codex P1)", async () => {
@@ -430,6 +555,22 @@ describe("TelegramPoller", () => {
     await expect(
       poller.send({ chatId: "1", text: "x" }),
     ).rejects.toThrow(/chat not found/);
+  });
+
+  it("send() surfaces the failed chunk when Telegram rejects a long message part", async () => {
+    const { fetchImpl } = makeStubFetch([
+      { body: { ok: true, result: { message_id: 1 } } },
+      { body: { ok: false, description: "message is too long" }, status: 400 },
+    ]);
+    const poller = new TelegramPoller({
+      botToken: "T",
+      workspaceRoot,
+      fetchImpl,
+    });
+
+    await expect(
+      poller.send({ chatId: "1", text: "X".repeat(5000) }),
+    ).rejects.toThrow(/chunk 2\/2.*message is too long/);
   });
 
   it("sendTyping() POSTs sendChatAction with chat_id + action=typing", async () => {

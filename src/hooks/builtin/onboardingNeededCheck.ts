@@ -49,25 +49,35 @@ NOT DECLINE (NO): "괜찮아, 해볼게" (OK, let me try), "sure", "yes", "ok", 
 
 Reply ONLY: YES or NO`;
 
-export async function looksLikeDecline(text: string, ctx?: HookContext): Promise<boolean> {
-  if (!text) return false;
-  if (!ctx?.llm) return false;
-  if (text.length > 200) return false; // Long messages are tasks, not declines
+export const DECLINE_RE =
+  /\b(?:no|nope|nah|not now|later|skip|pass|don't|do not|stop)\b|(?:나중에|안\s*할래|싫어|괜찮(?:아|아요)?\s*됐(?:어|어요)?)/i;
 
-  try {
-    let result = "";
-    for await (const event of ctx.llm.stream({
-      model: "claude-haiku-4-5",
-      system: DECLINE_CLASSIFIER_PROMPT,
-      messages: [{ role: "user", content: [{ type: "text", text: text.slice(0, 200) }] }],
-      max_tokens: 5,
-    })) {
-      if (event.kind === "text_delta") result += event.delta;
-    }
-    return result.trim().toUpperCase().startsWith("YES");
-  } catch {
-    return false;
+export function looksLikeDecline(text: string): boolean;
+export function looksLikeDecline(text: string, ctx: HookContext): Promise<boolean>;
+export function looksLikeDecline(text: string, ctx?: HookContext): boolean | Promise<boolean> {
+  if (!text) return false;
+  if (text.length > 200) return false; // Long messages are tasks, not declines
+  const deterministic = DECLINE_RE.test(text);
+  if (deterministic || !ctx?.llm || typeof ctx.llm.stream !== "function") {
+    return deterministic;
   }
+
+  return (async () => {
+    try {
+      let result = "";
+      for await (const event of ctx.llm.stream({
+        model: "claude-haiku-4-5",
+        system: DECLINE_CLASSIFIER_PROMPT,
+        messages: [{ role: "user", content: [{ type: "text", text: text.slice(0, 200) }] }],
+        max_tokens: 5,
+      })) {
+        if (event.kind === "text_delta") result += event.delta;
+      }
+      return result.trim().toUpperCase().startsWith("YES");
+    } catch {
+      return deterministic;
+    }
+  })();
 }
 
 export function isOnboardingSteerEnabled(env: string | undefined): boolean {

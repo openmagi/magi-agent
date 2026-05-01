@@ -138,6 +138,10 @@ interface OffsetFile {
 const OFFSET_FILENAME = "telegram-offset.json";
 const STATE_DIRNAME = ".core-agent-state";
 const DOWNLOADS_DIRNAME = "telegram-downloads";
+// Telegram sendMessage hard-limits text to 4096 characters. Keep a
+// margin so Korean text, emojis, and future parse-mode changes do not
+// turn a borderline chunk into a rejected one.
+const TELEGRAM_TEXT_CHUNK_MAX_CHARS = 3500;
 
 export class TelegramPoller implements ChannelAdapter {
   readonly kind = "telegram" as const;
@@ -327,24 +331,27 @@ export class TelegramPoller implements ChannelAdapter {
   }
 
   async send(msg: OutboundMessage): Promise<void> {
-    const body: Record<string, unknown> = {
-      chat_id: msg.chatId,
-      text: msg.text,
-    };
-    if (msg.replyToMessageId) {
-      const n = Number(msg.replyToMessageId);
-      if (Number.isFinite(n)) body.reply_to_message_id = n;
-    }
-    const resp = await this.fetchImpl(`${this.baseUrl()}/sendMessage`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    });
-    const json = (await resp.json().catch(() => ({}))) as TelegramResponse<unknown>;
-    if (!resp.ok || !json.ok) {
-      throw new Error(
-        `telegram sendMessage failed: ${json.description ?? `HTTP ${resp.status}`}`,
-      );
+    const chunks = splitTelegramText(msg.text);
+    for (const [index, text] of chunks.entries()) {
+      const body: Record<string, unknown> = {
+        chat_id: msg.chatId,
+        text,
+      };
+      if (index === 0 && msg.replyToMessageId) {
+        const n = Number(msg.replyToMessageId);
+        if (Number.isFinite(n)) body.reply_to_message_id = n;
+      }
+      const resp = await this.fetchImpl(`${this.baseUrl()}/sendMessage`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const json = (await resp.json().catch(() => ({}))) as TelegramResponse<unknown>;
+      if (!resp.ok || !json.ok) {
+        throw new Error(
+          `telegram sendMessage failed chunk ${index + 1}/${chunks.length}: ${json.description ?? `HTTP ${resp.status}`}`,
+        );
+      }
     }
   }
 
@@ -634,4 +641,37 @@ function convertUpdate(update: TelegramUpdate): (InboundMessage & { _attachmentM
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function splitTelegramText(text: string): string[] {
+  if (text.length <= TELEGRAM_TEXT_CHUNK_MAX_CHARS) return [text];
+
+  const chunks: string[] = [];
+  let remaining = text;
+  while (remaining.length > TELEGRAM_TEXT_CHUNK_MAX_CHARS) {
+    const hardSlice = safeSliceUtf16(remaining, TELEGRAM_TEXT_CHUNK_MAX_CHARS);
+    const cut = findReadableCut(hardSlice) ?? hardSlice.length;
+    chunks.push(remaining.slice(0, cut));
+    remaining = remaining.slice(cut);
+  }
+  chunks.push(remaining);
+  return chunks;
+}
+
+function findReadableCut(text: string): number | null {
+  const minCut = Math.floor(TELEGRAM_TEXT_CHUNK_MAX_CHARS * 0.5);
+  for (const separator of ["\n\n", "\n", ". ", " "]) {
+    const index = text.lastIndexOf(separator);
+    if (index >= minCut) return index + separator.length;
+  }
+  return null;
+}
+
+function safeSliceUtf16(text: string, maxChars: number): string {
+  let slice = text.slice(0, maxChars);
+  const lastCode = slice.charCodeAt(slice.length - 1);
+  if (lastCode >= 0xd800 && lastCode <= 0xdbff) {
+    slice = slice.slice(0, -1);
+  }
+  return slice;
 }
