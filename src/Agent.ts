@@ -80,6 +80,7 @@ import { makeArtifactUpdateTool } from "./tools/ArtifactUpdate.js";
 import { makeArtifactDeleteTool } from "./tools/ArtifactDelete.js";
 import { makeDocumentWriteTool } from "./tools/DocumentWrite.js";
 import { makeBrowserTool } from "./tools/Browser.js";
+import { makeKnowledgeSearchTool } from "./tools/KnowledgeSearch.js";
 import { makeFileDeliverTool } from "./tools/FileDeliver.js";
 import { makeFileSendTool } from "./tools/FileSend.js";
 import { makeSpreadsheetWriteTool } from "./tools/SpreadsheetWrite.js";
@@ -468,6 +469,8 @@ export class Agent {
         },
       }),
     );
+    this.tools.register(makeKnowledgeSearchTool({ name: "knowledge-search" }));
+    this.tools.register(makeKnowledgeSearchTool({ name: "KnowledgeSearch" }));
     this.tools.register(makeBrowserTool(config.workspaceRoot));
     this.tools.register(makeSpreadsheetWriteTool(config.workspaceRoot, this.outputArtifacts));
     this.tools.register(
@@ -885,6 +888,10 @@ export class Agent {
       console.log(
         `[core-agent] skills: loaded=${n} issues=${issues} runtimeHooks=${runtimeHooks} from ${skillsDir}`,
       );
+      // Keep KB search deterministic even when a workspace ships a
+      // prompt-only skill with the same name.
+      this.tools.replace(makeKnowledgeSearchTool({ name: "knowledge-search" }));
+      this.tools.replace(makeKnowledgeSearchTool({ name: "KnowledgeSearch" }));
       // Keep native browser deterministic even when a workspace ships a
       // prompt-only skill with the same name.
       this.tools.replace(makeBrowserTool(this.config.workspaceRoot));

@@ -248,6 +248,24 @@ describe("MessageBuilder.buildMessages", () => {
     ).toBe(1);
   });
 
+  it("adds a hidden KB command contract for /kb turns", async () => {
+    const { session } = await makeSession({});
+    const um: UserMessage = {
+      text: "/kb 르챔버 매출데이터 전부 읽어줘. 자료는 Download 컬렉션에 있어",
+      receivedAt: Date.now(),
+    };
+
+    const out = await buildMessages(session, um);
+
+    expect(out.at(-2)?.role).toBe("user");
+    expect(out.at(-2)?.content).toBe(um.text);
+    expect(out.at(-1)?.role).toBe("user");
+    expect(JSON.stringify(out.at(-1)?.content)).toContain("<kb_command");
+    expect(JSON.stringify(out.at(-1)?.content)).toContain("MUST call");
+    expect(JSON.stringify(out.at(-1)?.content)).toContain("Download");
+    expect(JSON.stringify(out.at(-1)?.content)).toContain("Downloads");
+  });
+
   it("does not re-read committed transcript when compaction appends no boundary", async () => {
     const { session, readCommittedCount } = await makeSession({
       replayMessages: [{ role: "assistant", content: "prior" }],

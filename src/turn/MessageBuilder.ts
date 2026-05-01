@@ -123,6 +123,31 @@ function beginsWithToolResult(message: LLMMessage | undefined): boolean {
   );
 }
 
+function isKbCommand(text: string): boolean {
+  return /^\/kb(?:\s|$)/.test(text.trim());
+}
+
+function buildKbCommandContract(userText: string): LLMMessage {
+  const mentionsDownload =
+    /\bdownloads?\b/i.test(userText) || /download\s*컬렉션/i.test(userText);
+  const lines = [
+    "<kb_command hidden=\"true\">",
+    "The latest user message is a /kb Knowledge Base command.",
+    "You MUST call the native `knowledge-search` or `KnowledgeSearch` tool before any final answer.",
+    "Do not answer with only a plan, acknowledgement, or future-delivery promise.",
+    "For collection-wide requests, first call mode=`documents` or mode=`manifest`, then inspect relevant ready documents.",
+    "If a converted document is large or truncated, use the available summary/header rows and say what could not be inspected instead of overflowing context.",
+  ];
+  if (mentionsDownload) {
+    lines.push("If the user says `Download`, also try the canonical `Downloads` collection name.");
+  }
+  lines.push("</kb_command>");
+  return {
+    role: "user",
+    content: [{ type: "text", text: lines.join("\n") }],
+  };
+}
+
 function buildRuntimeModelIdentityText(ctx: RuntimeModelIdentityContext): string {
   const route = ctx.routeDecision;
   const answeringModel = runtimeModelLabel(ctx.effectiveModel, route?.provider);
@@ -322,6 +347,9 @@ export async function buildMessages(
     });
   } else {
     out.push({ role: "user", content: userContent });
+  }
+  if (isKbCommand(userMessage.text)) {
+    out.push(buildKbCommandContract(userMessage.text));
   }
   return out;
 }
