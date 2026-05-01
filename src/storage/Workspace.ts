@@ -11,6 +11,11 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 
+export interface WorkspaceHarnessRuleFile {
+  path: string;
+  content: string;
+}
+
 export interface WorkspaceIdentity {
   /** BOOTSTRAP.md — short identity prologue rendered first in system. */
   bootstrap?: string;
@@ -33,6 +38,12 @@ export interface WorkspaceIdentity {
    * chars by the DB layer; the reader applies the same cap defensively.
    */
   userRules?: string;
+  /**
+   * Optional user-installed harness rule Markdown files. OSS users can
+   * place a single `USER-HARNESS-RULES.md` file at the workspace root
+   * or drop downloaded packs into `harness-rules/*.md`.
+   */
+  userHarnessRules?: WorkspaceHarnessRuleFile[];
 }
 
 /**
@@ -41,6 +52,7 @@ export interface WorkspaceIdentity {
  * defensively in case the file on disk has been tampered with.
  */
 export const USER_RULES_MAX_CHARS = 5000;
+export const USER_HARNESS_RULES_MAX_CHARS = 20000;
 
 export interface WorkspaceMemory {
   /** `memory/ROOT.md` preferred, fallback `MEMORY.md` for legacy bots. */
@@ -69,8 +81,38 @@ export class Workspace {
     }
   }
 
+  private async listHarnessRuleFiles(): Promise<WorkspaceHarnessRuleFile[]> {
+    const files: WorkspaceHarnessRuleFile[] = [];
+    const add = (relPath: string, raw: string | undefined): void => {
+      if (!raw || raw.trim().length === 0) return;
+      const content =
+        raw.length > USER_HARNESS_RULES_MAX_CHARS
+          ? `${raw.slice(0, USER_HARNESS_RULES_MAX_CHARS)}\n[truncated]`
+          : raw;
+      files.push({ path: relPath, content });
+    };
+
+    add("USER-HARNESS-RULES.md", await this.readSafe("USER-HARNESS-RULES.md"));
+
+    try {
+      const entries = await fs.readdir(path.join(this.root, "harness-rules"), {
+        withFileTypes: true,
+      });
+      for (const entry of entries
+        .filter((item) => item.isFile() && item.name.endsWith(".md"))
+        .sort((a, b) => a.name.localeCompare(b.name))) {
+        const relPath = path.join("harness-rules", entry.name);
+        add(relPath, await this.readSafe(relPath));
+      }
+    } catch {
+      // Optional directory; absence is normal.
+    }
+
+    return files;
+  }
+
   async loadIdentity(): Promise<WorkspaceIdentity> {
-    const [bootstrap, soul, learning, identity, user, agents, tools, userRulesRaw] =
+    const [bootstrap, soul, learning, identity, user, agents, tools, userRulesRaw, userHarnessRules] =
       await Promise.all([
         this.readSafe("BOOTSTRAP.md"),
         this.readSafe("SOUL.md"),
@@ -80,6 +122,7 @@ export class Workspace {
         this.readSafe("AGENTS.md"),
         this.readSafe("TOOLS.md"),
         this.readSafe("USER-RULES.md"),
+        this.listHarnessRuleFiles(),
       ]);
     // Defensive cap — the DB/FE already caps at 5000 chars, but if a
     // bot's PVC is tampered with (or the file is appended to by a skill
@@ -93,7 +136,17 @@ export class Workspace {
           ? `${userRulesRaw.slice(0, USER_RULES_MAX_CHARS)}\n[truncated]`
           : userRulesRaw;
     }
-    return { bootstrap, soul, learning, identity, user, agents, tools, userRules };
+    return {
+      bootstrap,
+      soul,
+      learning,
+      identity,
+      user,
+      agents,
+      tools,
+      userRules,
+      userHarnessRules: userHarnessRules.length > 0 ? userHarnessRules : undefined,
+    };
   }
 
   async loadMemoryIndex(): Promise<WorkspaceMemory> {

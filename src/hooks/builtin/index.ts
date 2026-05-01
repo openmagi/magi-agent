@@ -96,6 +96,10 @@ import type { Discipline } from "../../Session.js";
 import type { PolicyKernel as PolicyKernelType } from "../../policy/PolicyKernel.js";
 import { makePolicyPromptBlockHook } from "./policyPromptBlock.js";
 import {
+  makeUserHarnessRuleHooks,
+  type UserHarnessRuleAgent,
+} from "./userHarnessRules.js";
+import {
   makeExecutionContractPromptHook,
   makeExecutionContractVerifierHook,
 } from "./executionContract.js";
@@ -247,6 +251,8 @@ export interface RegisterBuiltinsOpts {
   hipocampus?: Pick<HipocampusService, "recall">;
   /** Typed runtime policy facade. Optional in tests. */
   policyKernel?: PolicyKernelType;
+  /** Reads current-turn transcript for user harness rule evaluation. */
+  userHarnessRuleAgent?: UserHarnessRuleAgent;
   /** Workflow-native debugging state manager. Optional in tests. */
   debugWorkflow?: DebugWorkflowType;
   /** File delivery interceptor config. When present, enables the
@@ -305,6 +311,16 @@ export function registerBuiltinHooks(
     if (maybe(policyPromptHook.name)) {
       registry.register(policyPromptHook);
       registered++;
+    }
+
+    const harnessHooks = makeUserHarnessRuleHooks({
+      policy: opts.policyKernel,
+      agent: opts.userHarnessRuleAgent,
+    });
+    if (maybe(harnessHooks.beforeCommit.name)) {
+      registry.register(harnessHooks.beforeCommit);
+      registry.register(harnessHooks.afterToolUse);
+      registered += 2;
     }
   }
 

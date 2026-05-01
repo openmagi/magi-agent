@@ -68,6 +68,121 @@ describe("PolicyKernel", () => {
     ]);
   });
 
+  it("compiles recognized operational user rules into typed harness rules", async () => {
+    const root = await makeWorkspaceRoot(
+      [
+        "- 파일을 만들면 반드시 채팅에 첨부해줘.",
+        "- 최종 답변 전에는 요구사항을 충족했는지 한 번 더 검사해.",
+        "- 출처가 필요한 답변은 근거가 있는지 확인해.",
+      ].join("\n"),
+    );
+    const kernel = new PolicyKernel(new Workspace(root));
+
+    const snapshot = await kernel.current();
+
+    expect(snapshot.policy.harnessRules).toEqual([
+      expect.objectContaining({
+        id: "user-harness:file-delivery-after-create",
+        trigger: "beforeCommit",
+        enforcement: "block_on_fail",
+        action: { type: "require_tool", toolName: "FileDeliver" },
+      }),
+      expect.objectContaining({
+        id: "user-harness:final-answer-verifier",
+        trigger: "beforeCommit",
+        enforcement: "block_on_fail",
+        action: expect.objectContaining({ type: "llm_verifier" }),
+      }),
+      expect.objectContaining({
+        id: "user-harness:source-grounding-verifier",
+        trigger: "beforeCommit",
+        enforcement: "block_on_fail",
+        action: expect.objectContaining({ type: "llm_verifier" }),
+      }),
+    ]);
+    expect(snapshot.status.harnessDirectives).toContain(
+      "user-harness:file-delivery-after-create beforeCommit require_tool FileDeliver block_on_fail",
+    );
+    expect(snapshot.status.harnessDirectives).toContain(
+      "user-harness:final-answer-verifier beforeCommit llm_verifier block_on_fail",
+    );
+    expect(snapshot.status.harnessDirectives).toContain(
+      "user-harness:source-grounding-verifier beforeCommit llm_verifier block_on_fail",
+    );
+    expect(snapshot.status.advisoryDirectives).toEqual([]);
+  });
+
+  it("loads structured harness rules from USER-HARNESS-RULES.md", async () => {
+    const root = await makeWorkspaceRoot();
+    await fs.writeFile(
+      path.join(root, "USER-HARNESS-RULES.md"),
+      [
+        "---",
+        "id: user-harness:file-delivery-after-create",
+        "trigger: beforeCommit",
+        "condition:",
+        "  anyToolUsed:",
+        "    - DocumentWrite",
+        "    - SpreadsheetWrite",
+        "action:",
+        "  type: require_tool",
+        "  toolName: FileDeliver",
+        "enforcement: block_on_fail",
+        "timeoutMs: 2000",
+        "---",
+        "",
+        "When a document or spreadsheet is created, deliver it to the chat before claiming completion.",
+      ].join("\n"),
+      "utf8",
+    );
+    const kernel = new PolicyKernel(new Workspace(root));
+
+    const snapshot = await kernel.current();
+
+    expect(snapshot.policy.harnessRules).toEqual([
+      expect.objectContaining({
+        id: "user-harness:file-delivery-after-create",
+        sourceText: expect.stringContaining("deliver it to the chat"),
+        condition: { anyToolUsed: ["DocumentWrite", "SpreadsheetWrite"] },
+        action: { type: "require_tool", toolName: "FileDeliver" },
+      }),
+    ]);
+  });
+
+  it("loads downloaded harness rule packs from harness-rules/*.md", async () => {
+    const root = await makeWorkspaceRoot();
+    await fs.mkdir(path.join(root, "harness-rules"), { recursive: true });
+    await fs.writeFile(
+      path.join(root, "harness-rules", "final-answer-check.md"),
+      [
+        "---",
+        "id: user-harness:final-answer-verifier",
+        "trigger: beforeCommit",
+        "action:",
+        "  type: llm_verifier",
+        "enforcement: block_on_fail",
+        "timeoutMs: 8000",
+        "---",
+        "",
+        "Check whether the assistant's final answer satisfies the user's request and does not skip requested deliverables.",
+      ].join("\n"),
+      "utf8",
+    );
+    const kernel = new PolicyKernel(new Workspace(root));
+
+    const snapshot = await kernel.current();
+
+    expect(snapshot.policy.harnessRules).toEqual([
+      expect.objectContaining({
+        id: "user-harness:final-answer-verifier",
+        action: expect.objectContaining({
+          type: "llm_verifier",
+          prompt: expect.stringContaining("does not skip requested deliverables"),
+        }),
+      }),
+    ]);
+  });
+
   it("keeps unknown lines advisory and warns on conflicting language directives", async () => {
     const root = await makeWorkspaceRoot(
       [

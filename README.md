@@ -209,6 +209,48 @@ User message
 | `discipline` | off | TDD/git commit enforcement |
 | `dangerousPatterns` | on | Blocks dangerous operations |
 
+### User Harness Rules
+
+User Harness Rules are runtime checks that you install as Markdown files in the agent workspace. They are useful for rules like "when a document is created, attach it to chat before claiming completion" or "verify the final answer before committing."
+
+Quick setup:
+
+```bash
+mkdir -p ./workspace/harness-rules
+cp examples/harness-rules/file-delivery-after-create.md ./workspace/harness-rules/
+cp examples/harness-rules/final-answer-verifier.md ./workspace/harness-rules/
+npx tsx src/cli/index.ts start
+```
+
+You can also put one structured rule directly in `./workspace/USER-HARNESS-RULES.md`, or write natural-language operational rules in `./workspace/USER-RULES.md`:
+
+```markdown
+- 파일을 만들면 반드시 채팅에 첨부해줘.
+- 최종 답변 전에는 요구사항을 충족했는지 한 번 더 검사해.
+```
+
+Structured Markdown rules use YAML frontmatter:
+
+```markdown
+---
+id: user-harness:file-delivery-after-create
+trigger: beforeCommit
+condition:
+  anyToolUsed:
+    - DocumentWrite
+    - SpreadsheetWrite
+action:
+  type: require_tool
+  toolName: FileDeliver
+enforcement: block_on_fail
+timeoutMs: 2000
+---
+
+When a document or spreadsheet is created, deliver it to the chat before claiming completion.
+```
+
+Supported triggers are `beforeCommit` and `afterToolUse`. Supported actions are `require_tool`, `llm_verifier`, and `block`. Unknown natural-language lines stay advisory; only recognized patterns or structured frontmatter become executable rules. Set `CORE_AGENT_USER_HARNESS_RULES=off` to disable these checks.
+
 ## Architecture
 
 ```
