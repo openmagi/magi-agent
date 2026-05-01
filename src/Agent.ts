@@ -80,6 +80,8 @@ import { makeArtifactUpdateTool } from "./tools/ArtifactUpdate.js";
 import { makeArtifactDeleteTool } from "./tools/ArtifactDelete.js";
 import { makeDocumentWriteTool } from "./tools/DocumentWrite.js";
 import { makeBrowserTool } from "./tools/Browser.js";
+import { makeWebFetchTool } from "./tools/WebFetch.js";
+import { makeWebSearchTool } from "./tools/WebSearch.js";
 import { makeKnowledgeSearchTool } from "./tools/KnowledgeSearch.js";
 import { makeFileDeliverTool } from "./tools/FileDeliver.js";
 import { makeFileSendTool } from "./tools/FileSend.js";
@@ -472,6 +474,8 @@ export class Agent {
     this.tools.register(makeKnowledgeSearchTool({ name: "knowledge-search" }));
     this.tools.register(makeKnowledgeSearchTool({ name: "KnowledgeSearch" }));
     this.tools.register(makeBrowserTool(config.workspaceRoot));
+    this.tools.register(makeWebSearchTool());
+    this.tools.register(makeWebFetchTool());
     this.tools.register(makeSpreadsheetWriteTool(config.workspaceRoot, this.outputArtifacts));
     this.tools.register(
       makeFileSendTool({
@@ -913,6 +917,10 @@ export class Agent {
       // Keep native browser deterministic even when a workspace ships a
       // prompt-only skill with the same name.
       this.tools.replace(makeBrowserTool(this.config.workspaceRoot));
+      // Keep native web tools deterministic even when a workspace ships
+      // prompt-only skills with the same names.
+      this.tools.replace(makeWebSearchTool());
+      this.tools.replace(makeWebFetchTool());
     } catch (err) {
       console.warn(`[core-agent] skill load failed: ${(err as Error).message}`);
     }
