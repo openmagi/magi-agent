@@ -45,6 +45,19 @@ function toolUseEvents(id: string, name: string, input: object): LLMEvent[] {
   ];
 }
 
+function docxBuilderScript(childrenSource: string): string {
+  return [
+    "const fs = require('node:fs/promises');",
+    "const { Document, HeadingLevel, Packer, Paragraph, Table, TableCell, TableRow, TextRun } = require('docx');",
+    "const cell = (text) => new TableCell({ children: [new Paragraph(String(text))] });",
+    "async function main() {",
+    childrenSource,
+    "  await fs.writeFile('output.docx', await Packer.toBuffer(doc));",
+    "}",
+    "main().catch((error) => { console.error(error); process.exit(1); });",
+  ].join("\n");
+}
+
 afterEach(async () => {
   await Promise.all(
     roots.splice(0).map((root) => fs.rm(root, { recursive: true, force: true })),
@@ -62,10 +75,17 @@ describe("writeDocumentAgentically", () => {
         calls += 1;
         const events = calls === 1
           ? toolUseEvents("tu_read", "read_file", { filename: "missing.txt" })
-          : toolUseEvents("tu_write", "write_file", {
-              filename: "output.docx",
-              content: "PK agentic docx bytes",
-            });
+          : calls === 2
+            ? toolUseEvents("tu_script", "write_file", {
+                filename: "build-docx.cjs",
+                content: docxBuilderScript(
+                  "  const doc = new Document({ sections: [{ children: [new Paragraph({ text: 'Agentic Memo', heading: HeadingLevel.HEADING_1 }), new Paragraph('Use an iterative tool loop.')] }] });",
+                ),
+              })
+            : toolUseEvents("tu_build", "run_command", {
+                command: "node",
+                args: ["build-docx.cjs"],
+              });
         for (const event of events) {
           yield event;
         }
@@ -89,11 +109,11 @@ describe("writeDocumentAgentically", () => {
 
     expect(result).toMatchObject({
       mode: "agentic",
-      turns: 2,
-      toolCallCount: 2,
+      turns: 3,
+      toolCallCount: 3,
       model: "test-model",
     });
-    expect(calls).toBe(2);
+    expect(calls).toBe(3);
     expect(requests[0]?.tools?.map((tool) => tool.name)).toEqual([
       "write_file",
       "read_file",
@@ -101,7 +121,101 @@ describe("writeDocumentAgentically", () => {
     ]);
     expect(requests[0]?.thinking).toEqual({ type: "disabled" });
     expect(requests[0]?.messages[0]?.content).toContain("# Agentic Memo");
-    await expect(fs.readFile(absPath, "utf8")).resolves.toBe("PK agentic docx bytes");
+    const bytes = await fs.readFile(absPath);
+    expect(bytes.subarray(0, 2).toString()).toBe("PK");
+  });
+
+  it("keeps looping when a DOCX preserves literal markdown instead of rendered structures", async () => {
+    const root = await makeRoot();
+    const requests: LLMStreamRequest[] = [];
+    const lastMessageSnapshots: string[] = [];
+    const sourceMarkdown = [
+      "# Investment Memo",
+      "",
+      "| Metric | Value |",
+      "| --- | --- |",
+      "| **Recommendation** | **Speculative Buy** |",
+      "",
+      "---",
+      "",
+      "## Summary",
+      "",
+      "- **Revenue** growth remains strong.",
+    ].join("\n");
+    const badScript = docxBuilderScript([
+      `  const raw = ${JSON.stringify(sourceMarkdown)};`,
+      "  const doc = new Document({ sections: [{ children: [new Paragraph(raw)] }] });",
+    ].join("\n"));
+    const goodScript = docxBuilderScript([
+      "  const doc = new Document({",
+      "    sections: [{",
+      "      children: [",
+      "        new Paragraph({ text: 'Investment Memo', heading: HeadingLevel.HEADING_1 }),",
+      "        new Table({ rows: [",
+      "          new TableRow({ children: [cell('Metric'), cell('Value')] }),",
+      "          new TableRow({ children: [cell('Recommendation'), cell('Speculative Buy')] }),",
+      "        ] }),",
+      "        new Paragraph({ text: 'Summary', heading: HeadingLevel.HEADING_2 }),",
+      "        new Paragraph({ children: [new TextRun({ text: 'Revenue', bold: true }), new TextRun(' growth remains strong.')] }),",
+      "      ],",
+      "    }],",
+      "  });",
+    ].join("\n"));
+    let calls = 0;
+    const llm = {
+      stream: async function* (request: LLMStreamRequest) {
+        requests.push(request);
+        lastMessageSnapshots.push(JSON.stringify(request.messages.at(-1)?.content));
+        calls += 1;
+        const events = calls === 1
+          ? toolUseEvents("tu_bad_script", "write_file", {
+              filename: "build-docx.cjs",
+              content: badScript,
+            })
+          : calls === 2
+            ? toolUseEvents("tu_bad_build", "run_command", {
+                command: "node",
+                args: ["build-docx.cjs"],
+              })
+            : calls === 3
+              ? toolUseEvents("tu_good_script", "write_file", {
+                  filename: "build-docx.cjs",
+                  content: goodScript,
+                })
+              : toolUseEvents("tu_good_build", "run_command", {
+                  command: "node",
+                  args: ["build-docx.cjs"],
+                });
+        for (const event of events) {
+          yield event;
+        }
+      },
+    } as unknown as LLMClient;
+
+    const absPath = path.join(root, "exports", "memo.docx");
+    const result = await writeDocumentAgentically(
+      {
+        format: "docx",
+        mode: "create",
+        title: "Investment Memo",
+        filename: "exports/memo.docx",
+        absPath,
+        workspaceRoot: root,
+        sourceMarkdown,
+        ctx: ctx(root),
+      },
+      { llm, fallbackModel: "test-model", maxTurns: 5 },
+    );
+
+    expect(result).toMatchObject({
+      mode: "agentic",
+      turns: 4,
+      toolCallCount: 4,
+    });
+    expect(calls).toBe(4);
+    expect(lastMessageSnapshots[2]).toContain("raw markdown");
+    const bytes = await fs.readFile(absPath);
+    expect(bytes.subarray(0, 2).toString()).toBe("PK");
   });
 
   it("prompts hwpx edits to analyze the reference and run page guard", async () => {

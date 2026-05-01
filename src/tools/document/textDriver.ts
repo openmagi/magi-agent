@@ -12,6 +12,20 @@ export function structuredBlocksToMarkdown(blocks: StructuredBlock[]): string {
       const level = Math.max(1, Math.min(block.level ?? 1, 3));
       return `${"#".repeat(level)} ${block.text.trim()}`;
     }
+    if (block.type === "bullet") {
+      return `- ${block.text.trim()}`;
+    }
+    if (block.type === "table") {
+      return block.rows
+        .map((row, index) => [
+          `| ${row.map((cell) => cell.trim()).join(" | ")} |`,
+          ...(index === 0 ? [`| ${row.map(() => "---").join(" | ")} |`] : []),
+        ].join("\n"))
+        .join("\n");
+    }
+    if (block.type === "horizontal_rule") {
+      return "---";
+    }
     return block.text.trim();
   }).filter(Boolean);
 
@@ -64,7 +78,15 @@ export function markdownToPlainText(markdown: string): string {
 export function structuredBlocksToPlainText(blocks: StructuredBlock[]): string {
   return ensureTrailingNewline(
     blocks
-      .map((block) => block.text.trim())
+      .map((block) => {
+        if (block.type === "table") {
+          return block.rows.map((row) => row.join("\t")).join("\n");
+        }
+        if (block.type === "horizontal_rule") {
+          return "";
+        }
+        return block.text.trim();
+      })
       .filter(Boolean)
       .join("\n\n"),
   );

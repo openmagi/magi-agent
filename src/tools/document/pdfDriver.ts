@@ -80,7 +80,15 @@ function containsCjkText(text: string): boolean {
 }
 
 function blocksContainCjk(blocks: StructuredBlock[]): boolean {
-  return blocks.some((block) => containsCjkText(block.text));
+  return blocks.some((block) => {
+    if (block.type === "table") {
+      return block.rows.some((row) => row.some((cell) => containsCjkText(cell)));
+    }
+    if (block.type === "horizontal_rule") {
+      return false;
+    }
+    return containsCjkText(block.text);
+  });
 }
 
 function addParagraph(doc: PDFKit.PDFDocument, text: string, fontName: string): void {
@@ -91,7 +99,11 @@ function addParagraph(doc: PDFKit.PDFDocument, text: string, fontName: string): 
   doc.moveDown(0.8);
 }
 
-function addHeading(doc: PDFKit.PDFDocument, block: StructuredBlock, fontName: string): void {
+function addHeading(
+  doc: PDFKit.PDFDocument,
+  block: Extract<StructuredBlock, { type: "heading" }>,
+  fontName: string,
+): void {
   const level = block.level ?? 1;
   const size = level === 1 ? 20 : level === 2 ? 16 : 13;
   doc.font(fontName).fontSize(size).fillColor("black").text(block.text, {
@@ -137,6 +149,16 @@ export async function writePdfFromBlocks(
         for (const block of documentBlocks) {
           if (block.type === "heading") {
             addHeading(doc, block, fontName);
+          } else if (block.type === "table") {
+            for (const row of block.rows) {
+              addParagraph(doc, row.join("    "), fontName);
+            }
+          } else if (block.type === "bullet") {
+            addParagraph(doc, `• ${block.text}`, fontName);
+          } else if (block.type === "horizontal_rule") {
+            doc.moveDown(0.5);
+            doc.moveTo(50, doc.y).lineTo(doc.page.width - 50, doc.y).strokeColor("#D1D5DB").stroke();
+            doc.moveDown(0.8);
           } else {
             addParagraph(doc, block.text, fontName);
           }

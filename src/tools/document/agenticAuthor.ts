@@ -12,6 +12,7 @@ import type {
 } from "../../transport/LLMClient.js";
 import { StubSseWriter } from "../../transport/SseWriter.js";
 import { readOne } from "../../turn/LLMStreamReader.js";
+import { inspectDocx, validateDocxMarkdownRender } from "./docxQuality.js";
 import { HWPX_RUNTIME_ROOT, type HwpxTemplate } from "./hwpxDriver.js";
 
 const execFile = promisify(execFileCb);
@@ -349,6 +350,7 @@ export async function writeDocumentAgentically(
     const validationOptions = {
       referencePath: referenceInJob,
       sourcePath: input.format === "hwpx" ? sourcePath : undefined,
+      sourceMarkdown: input.sourceMarkdown,
       title: input.title,
     };
 
@@ -448,6 +450,7 @@ async function validateOutput(
   options: {
     referencePath?: string;
     sourcePath?: string;
+    sourceMarkdown?: string;
     title?: string;
   } = {},
 ): Promise<string | null> {
@@ -465,6 +468,14 @@ async function validateOutput(
       }
     } finally {
       await handle.close();
+    }
+
+    if (format === "docx") {
+      const markdownError = validateDocxMarkdownRender(
+        await inspectDocx(filePath),
+        options.sourceMarkdown ?? "",
+      );
+      if (markdownError) return markdownError;
     }
 
     if (format === "hwpx") {

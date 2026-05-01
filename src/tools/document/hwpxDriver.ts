@@ -156,6 +156,15 @@ function renderItems(title: string, blocks: StructuredBlock[], styles: HwpxRende
   const tableRows: string[][] = [];
 
   for (const block of normalizedBlocks(title, blocks)) {
+    if (block.type === "table") {
+      flushTableRows(items, tableRows, styles);
+      flushTableRows(items, block.rows.map((row) => [...row]), styles);
+      continue;
+    }
+    if (block.type === "horizontal_rule") {
+      flushTableRows(items, tableRows, styles);
+      continue;
+    }
     flushTableRows(items, tableRows, styles);
     const lines = normalizeBlockText(block.text);
     if (block.type === "heading") {
@@ -183,10 +192,11 @@ function renderItems(title: string, blocks: StructuredBlock[], styles: HwpxRende
 
       flushTableRows(items, tableRows, styles);
       const bullet = normalizeBulletLine(line);
+      const forcedBullet = block.type === "bullet";
       items.push({
         kind: "paragraph",
-        text: bullet ?? line,
-        style: bullet ? styles.bullet : styles.body,
+        text: forcedBullet ? `• ${line}` : bullet ?? line,
+        style: forcedBullet || bullet ? styles.bullet : styles.body,
       });
     }
   }
