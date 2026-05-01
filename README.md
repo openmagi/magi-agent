@@ -1,22 +1,122 @@
 # Clawy Agent
 
-**Autonomous task runtime with agentic interaction.**
+**Open-source runtime for personal AI agents that actually finish work.**
 
-Unlike chat-based agent frameworks that respond to one message at a time, Clawy Agent runs an agentic loop — it plans, executes tools, evaluates results, and iterates until the task is complete. You can observe, intervene, and guide at any point.
+Clawy Agent is not a prompt chain and not a chatbot wrapper. It is a durable
+agent runtime: every task runs inside an observable loop with tool execution,
+runtime checks, persistent transcripts, memory, file delivery, and user-defined
+harness rules.
 
-Think Claude Code, but open-source, multi-provider, and programmable.
+If you are tired of agents that create files but forget to send them, claim work
+is done without verification, lose context after a restart, or ignore workflow
+instructions buried in the prompt, Clawy Agent moves those behaviors out of
+vibes and into the runtime.
 
-## Features
+Think Claude Code, but open-source, multi-provider, always-on, and programmable.
 
-- **Autonomous task execution** — Agent runs a persistent loop: plan → execute → evaluate → iterate until done
-- **Agentic interaction** — Observe progress, intervene mid-turn, guide direction. Agent can ask questions back
-- **Programmable LLM hooks** — Insert LLM-judged checkpoints anywhere in the turn lifecycle for deterministic control
-- **Multi-provider** — Anthropic Claude, OpenAI GPT, Google Gemini natively supported
-- **27+ built-in tools** — Bash, FileRead/Write/Edit, Glob, Grep, SpawnAgent, Cron, and more
-- **Multi-channel** — Telegram, Discord, HTTP API out of the box
-- **Built-in memory** — Hipocampus 5-level compaction for persistent cross-session context
-- **Coding discipline** — Optional TDD and git commit enforcement
-- **Child agents** — Spawn sub-agents for parallel task execution
+## Why Clawy Agent
+
+Most agent frameworks give you a model, a tool schema, and a loop. That is not
+enough for real personal agents.
+
+Real agents need to:
+
+- keep working across long tasks, restarts, and channel reconnects
+- remember user context without stuffing the whole chat into the next prompt
+- run tools while respecting file boundaries, safety rules, and permissions
+- pause for user input without losing the turn
+- verify work before committing a final answer
+- deliver generated files back to the user instead of only writing them to disk
+- expose the control surface so operators can add rules without forking core code
+
+Clawy Agent is built around that premise. The LLM is the reasoning engine; the
+runtime is the discipline layer.
+
+## The Runtime Model
+
+Every user request becomes an atomic `Turn`. A turn can stream, think, call
+tools, receive tool results, retry failed drafts, ask the user a question, spawn
+child agents, and only then commit a final answer.
+
+```
+User message
+  -> beforeTurnStart          session resume, onboarding, memory prep
+  -> beforeLLMCall            context, identity, rules, memory, policy
+  -> LLM stream               text, thinking, tool_use
+  -> beforeToolUse            permission gates, resource checks
+  -> Tool execution           files, shell, browser, web, documents, child agents
+  -> afterToolUse             provenance, delivery, harness checks
+  -> ... repeat until ready
+  -> beforeCommit             verification, output purity, delivery gates
+  -> turn_committed           transcript, memory, artifacts, channel delivery
+```
+
+The important part: checks are not just text in the system prompt. They are
+runtime gates at the points where mistakes happen.
+
+## What Makes It Different
+
+| Capability | What it means in practice |
+| --- | --- |
+| **Agentic loop** | The agent can plan, execute tools, evaluate outputs, and continue until the job is actually complete. |
+| **Lifecycle hooks** | Add deterministic or LLM-judged checks at `beforeLLMCall`, `beforeToolUse`, `afterToolUse`, `beforeCommit`, and more. |
+| **Execution discipline** | Acceptance criteria, verification evidence, TDD/git discipline, and commit-time gates can block weak completion claims. |
+| **Replayable transcripts** | Tool calls, tool results, control events, compaction boundaries, and canonical assistant messages are persisted for restart-safe replay. |
+| **Hipocampus memory** | A layered memory system with root/daily/weekly/monthly compaction and qmd-backed recall. |
+| **User Harness Rules** | Install Markdown rules that become runtime checks, such as "deliver files before saying done." |
+| **Native delivery path** | Documents, spreadsheets, and workspace files can be generated, registered, and delivered back through supported channels. |
+| **Child agents** | Spawn background agents with bounded tools, workspace isolation, and result delivery. |
+| **Multi-channel** | Run the same runtime from CLI, HTTP, Telegram, or Discord. |
+| **Multi-provider** | Use Anthropic, OpenAI, or Google models through one runtime interface. |
+
+## Built-In Capabilities
+
+Clawy Agent ships with 30+ native tools and runtime subsystems:
+
+- **Workspace tools:** `FileRead`, `FileWrite`, `FileEdit`, `Glob`, `Grep`, `Bash`
+- **Web and browser:** `WebSearch`, `WebFetch`, `Browser`
+- **Knowledge and memory:** `KnowledgeSearch`, Hipocampus recall, qmd indexing
+- **Generated outputs:** `DocumentWrite`, `SpreadsheetWrite`, `FileDeliver`, `FileSend`
+- **Artifacts:** `ArtifactCreate`, `ArtifactRead`, `ArtifactList`, `ArtifactUpdate`, `ArtifactDelete`
+- **Delegation:** `SpawnAgent`, `TaskList`, `TaskGet`, `TaskOutput`, `TaskStop`
+- **Planning and control:** `EnterPlanMode`, `ExitPlanMode`, `AskUserQuestion`, `TaskBoard`
+- **Automation:** `CronCreate`, `CronList`, `CronUpdate`, `CronDelete`
+- **Discipline:** `CommitCheckpoint`, execution contracts, verification evidence gates
+
+Optional dependencies enable richer formats and rendering paths, including DOCX,
+PDF, HWPX, XLSX, qmd, and Playwright-backed browser work.
+
+## Architecture
+
+```
+Agent
+  |-- Session                         one conversation / channel thread
+  |   |-- Turn                        atomic agentic loop
+  |   |-- Transcript                  append-only JSONL replay log
+  |   |-- Context                     identity + rules + memory + tool state
+  |   |-- ExecutionContract           criteria + evidence + resource bindings
+  |
+  |-- ToolRegistry                    native tools + loaded skills
+  |-- HookRegistry                    runtime control plane
+  |-- OutputArtifactRegistry          generated files and delivery metadata
+  |-- BackgroundTaskRegistry          spawned child-agent work
+  |-- CronScheduler                   durable scheduled tasks
+  |-- HipocampusService               memory compaction + recall
+  |-- ChannelAdapters                 CLI, HTTP, Telegram, Discord
+```
+
+Design principles:
+
+- **Runtime over prompt vibes.** Important constraints should live in hooks,
+  gates, transcripts, and tool boundaries, not only in instructions.
+- **Durability by default.** A useful agent should survive reconnects, retries,
+  background work, and long conversations.
+- **Operator control.** Users should be able to install rules and skills without
+  patching the core runtime.
+- **Visible work.** Tool calls, progress, generated artifacts, and delivery
+  events are first-class runtime state.
+- **Fail open where ergonomic, fail closed where safety matters.** Memory recall
+  should not kill a turn; unsafe file writes and false completion claims can.
 
 ## Quick Start
 
@@ -28,9 +128,12 @@ npx tsx src/cli/index.ts init
 npx tsx src/cli/index.ts start
 ```
 
+The `init` command writes `clawy-agent.yaml`. The `start` command runs an
+interactive terminal agent against the configured workspace.
+
 ## Installation
 
-### From Source (recommended)
+### From Source
 
 ```bash
 git clone https://github.com/ClawyPro/clawy-agent.git
@@ -38,9 +141,15 @@ cd clawy-agent
 npm install
 ```
 
-Then run commands with `npx tsx src/cli/index.ts <command>`.
+Run commands with:
 
-### From npm (coming soon)
+```bash
+npx tsx src/cli/index.ts <command>
+```
+
+### From npm
+
+An npm package is planned. Until it is published, use the source install above.
 
 ```bash
 npm install -g clawy-agent
@@ -49,42 +158,44 @@ clawy-agent <command>
 
 ## Usage Modes
 
-### Interactive (CLI)
+### Interactive CLI
 
 ```bash
 npx tsx src/cli/index.ts start
 ```
 
-Terminal conversation mode. Like Claude Code.
+Terminal conversation mode for local work.
 
-### Server (Telegram / Discord / HTTP API)
+### Server
 
 ```bash
 npx tsx src/cli/index.ts serve --port 8080
 ```
 
-Starts the agent as an HTTP API server. If Telegram or Discord tokens are configured, the agent automatically connects to those channels and responds to messages.
+Starts the HTTP API server. If Telegram or Discord tokens are configured, the
+same process also connects to those channels.
 
 ### Programmatic
 
 ```typescript
-import { Agent } from 'clawy-agent'
+import { Agent } from "clawy-agent";
 
 const agent = new Agent({
-  botId: 'my-agent',
-  userId: 'local',
-  workspaceRoot: './workspace',
-  model: 'claude-sonnet-4-6',
+  botId: "my-agent",
+  userId: "local",
+  workspaceRoot: "./workspace",
+  model: "claude-sonnet-4-6",
   gatewayToken: process.env.ANTHROPIC_API_KEY!,
-  apiProxyUrl: 'https://api.anthropic.com',
-})
+  apiProxyUrl: "https://api.anthropic.com",
+});
 
-await agent.start()
+await agent.start();
 ```
 
 ## Configuration
 
-Run `npx tsx src/cli/index.ts init` to generate `clawy-agent.yaml` interactively, or create it manually:
+Run `npx tsx src/cli/index.ts init` to generate `clawy-agent.yaml`
+interactively, or create it manually:
 
 ```yaml
 llm:
@@ -117,11 +228,13 @@ identity:
   instructions: "You are a helpful coding assistant."
 ```
 
-## Telegram Bot Setup
+## Channels
 
-1. Create a bot via [@BotFather](https://t.me/BotFather) on Telegram
-2. Copy the bot token
-3. Add it to your config:
+### Telegram
+
+1. Create a bot via [@BotFather](https://t.me/BotFather).
+2. Copy the bot token.
+3. Add it to `clawy-agent.yaml`.
 
 ```yaml
 channels:
@@ -129,7 +242,7 @@ channels:
     token: ${TELEGRAM_BOT_TOKEN}
 ```
 
-4. Set the env var and start:
+Then start server mode:
 
 ```bash
 export TELEGRAM_BOT_TOKEN=123456:ABC-DEF...
@@ -137,22 +250,17 @@ export ANTHROPIC_API_KEY=sk-ant-...
 npx tsx src/cli/index.ts serve
 ```
 
-The agent will automatically start long-polling Telegram for messages and reply in the chat. Typing indicators, reply-to context, and `/reset` command are supported out of the box.
+The agent uses Telegram long polling and supports typing indicators, reply
+context, and `/reset`.
 
-## Discord Bot Setup
+### Discord
 
-1. Create an application at [Discord Developer Portal](https://discord.com/developers/applications)
-2. Create a bot under the application, copy the token
-3. Invite the bot to your server with the `bot` + `applications.commands` scopes
-4. Add to your config:
+1. Create an application at the [Discord Developer Portal](https://discord.com/developers/applications).
+2. Create a bot and copy the token.
+3. Invite it with the `bot` and `applications.commands` scopes.
+4. Add the token to config and start `serve`.
 
-```yaml
-channels:
-  discord:
-    token: ${DISCORD_BOT_TOKEN}
-```
-
-5. Start the agent — it connects to Discord gateway automatically. The bot responds to @mentions.
+The bot responds to mentions in channels where it is present.
 
 ## Multi-Provider LLM
 
@@ -178,40 +286,41 @@ llm:
   apiKey: ${GOOGLE_API_KEY}
 ```
 
-All providers support streaming, tool use, and the full agentic loop. The provider layer handles format conversion automatically.
+All providers support streaming, tool use, and the full agentic loop. The
+provider layer handles message and tool-call format conversion.
 
-## Custom Hooks
+## Hooks: The Control Plane
 
-The core differentiator. Insert LLM-judged checkpoints anywhere in the turn lifecycle:
+Hooks are the core extension point. They can inspect or modify turn state,
+inject context, approve or block tools, verify final answers, write memory, and
+emit audit events.
 
-```
-User message
-  → beforeTurnStart
-    → [agentic loop]
-      → beforeLLMCall       ← Context augmentation
-      → LLM streaming
-      → afterLLMCall        ← Response analysis
-      → beforeToolUse       ← Tool permit/deny
-      → Tool execution
-      → [loop continues...]
-    → beforeCommit          ← Quality verification
-  → afterTurnEnd            ← Memory save, cleanup
-```
+Common built-in gates include:
 
-### Built-in Hooks
+| Hook | Purpose |
+| --- | --- |
+| `factGrounding` | Reduces unsupported factual claims. |
+| `preRefusalVerifier` | Challenges unnecessary refusals before they reach the user. |
+| `workspaceAwareness` | Injects relevant filesystem context. |
+| `sessionResume` | Restores continuity when a session resumes. |
+| `discipline` | Enables TDD/git enforcement for coding tasks. |
+| `dangerousPatterns` | Blocks unsafe operations. |
+| `outputPurityGate` | Blocks leaked internal planning in final answers. |
+| `completionEvidenceGate` | Requires evidence before completion claims. |
+| `resourceBoundaryGate` | Prevents use of resources outside the task boundary. |
 
-| Hook | Default | Purpose |
-|------|---------|---------|
-| `factGrounding` | on | Hallucination prevention |
-| `preRefusalVerifier` | on | Prevents unnecessary refusals |
-| `workspaceAwareness` | on | Auto-injects filesystem context |
-| `sessionResume` | on | Seeds context on session resume |
-| `discipline` | off | TDD/git commit enforcement |
-| `dangerousPatterns` | on | Blocks dangerous operations |
+## User Harness Rules
 
-### User Harness Rules
+User Harness Rules are runtime checks installed as Markdown files in the agent
+workspace. They let an operator turn "please always do X" into an executable
+gate.
 
-User Harness Rules are runtime checks that you install as Markdown files in the agent workspace. They are useful for rules like "when a document is created, attach it to chat before claiming completion" or "verify the final answer before committing."
+Example use cases:
+
+- if a document or spreadsheet is created, deliver it before saying it is ready
+- before final answer, verify all requested acceptance criteria
+- block a response that cites a file the agent did not read this turn
+- require a tool call after a specific type of generated output
 
 Quick setup:
 
@@ -222,7 +331,8 @@ cp examples/harness-rules/final-answer-verifier.md ./workspace/harness-rules/
 npx tsx src/cli/index.ts start
 ```
 
-You can also put one structured rule directly in `./workspace/USER-HARNESS-RULES.md`, or write natural-language operational rules in `./workspace/USER-RULES.md`:
+You can also put one structured rule in `./workspace/USER-HARNESS-RULES.md`, or
+write natural-language operational rules in `./workspace/USER-RULES.md`:
 
 ```markdown
 - 파일을 만들면 반드시 채팅에 첨부해줘.
@@ -249,30 +359,20 @@ timeoutMs: 2000
 When a document or spreadsheet is created, deliver it to the chat before claiming completion.
 ```
 
-Supported triggers are `beforeCommit` and `afterToolUse`. Supported actions are `require_tool`, `llm_verifier`, and `block`. Unknown natural-language lines stay advisory; only recognized patterns or structured frontmatter become executable rules. Set `CORE_AGENT_USER_HARNESS_RULES=off` to disable these checks.
+Supported triggers are `beforeCommit` and `afterToolUse`. Supported actions are
+`require_tool`, `llm_verifier`, and `block`. Unknown natural-language lines stay
+advisory; recognized patterns and structured frontmatter become executable
+rules. Set `CORE_AGENT_USER_HARNESS_RULES=off` to disable these checks.
 
-## Architecture
+## Migration Guides
 
-```
-Agent (singleton)
-  ├── Session (per conversation)
-  │   ├── Turn (atomic agentic loop)
-  │   │   ├── LLM call → Tool dispatch → Evaluate → Repeat
-  │   │   └── Hook checkpoints at each lifecycle point
-  │   ├── Transcript (persistent history)
-  │   └── Context (layered: identity + rules + memory + tools)
-  ├── Tool Registry (27+ built-in)
-  ├── Hook Registry (built-in + custom)
-  ├── Channel Adapters (Telegram, Discord)
-  ├── Cron Scheduler
-  ├── Memory (Hipocampus compaction)
-  └── SpawnAgent (child agent execution)
-```
+- [Migration from legacy gateway](docs/MIGRATION-FROM-LEGACY-GATEWAY.md)
+- [Migration from Hermes Agent](docs/MIGRATION-FROM-HERMES.md)
 
 ## Requirements
 
 - Node.js 22+
-- An LLM API key (Anthropic, OpenAI, or Google)
+- An API key for Anthropic, OpenAI, or Google
 
 ## Contributing
 
@@ -280,4 +380,4 @@ See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## License
 
-Apache 2.0 — see [LICENSE](LICENSE).
+Apache 2.0. See [LICENSE](LICENSE).
