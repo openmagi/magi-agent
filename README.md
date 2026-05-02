@@ -1,16 +1,17 @@
 # Clawy Agent
 
-**Open-source runtime for personal AI agents that actually finish work.**
+**Open-source runtime for personal AI agents that can finish work reliably.**
 
 Clawy Agent is not a prompt chain and not a chatbot wrapper. It is a durable
 agent runtime: every task runs inside an observable loop with tool execution,
-runtime checks, persistent transcripts, memory, file delivery, and user-defined
-harness rules.
+runtime checks, persistent transcripts, memory, deterministic evidence, file
+delivery, scheduled automation, and user-defined harness rules.
 
 If you are tired of agents that create files but forget to send them, claim work
-is done without verification, lose context after a restart, or ignore workflow
+is done without verification, compute dates or totals from model intuition, lose
+context after a restart, misroute scheduled jobs, or ignore workflow
 instructions buried in the prompt, Clawy Agent moves those behaviors out of
-vibes and into the runtime.
+vibes and into runtime state.
 
 Think Claude Code, but open-source, multi-provider, always-on, and programmable.
 
@@ -25,12 +26,15 @@ Real agents need to:
 - remember user context without stuffing the whole chat into the next prompt
 - run tools while respecting file boundaries, safety rules, and permissions
 - pause for user input without losing the turn
-- verify work before committing a final answer
+- verify work, exact values, and source usage before committing a final answer
 - deliver generated files back to the user instead of only writing them to disk
+- run scheduled workflows without letting the model guess delivery channels or
+  execute worker tasks in the wrong role
 - expose the control surface so operators can add rules without forking core code
 
 Clawy Agent is built around that premise. The LLM is the reasoning engine; the
-runtime is the discipline layer.
+runtime is the discipline layer that decides what must be evidenced,
+persisted, retried, blocked, or delivered.
 
 ## The Runtime Model
 
@@ -52,19 +56,22 @@ User message
 ```
 
 The important part: checks are not just text in the system prompt. They are
-runtime gates at the points where mistakes happen.
+runtime gates at the points where mistakes happen, backed by an
+`ExecutionContract` that carries criteria, resource bindings, verification
+evidence, and deterministic evidence through the turn.
 
 ## What Makes It Different
 
 | Capability | What it means in practice |
 | --- | --- |
-| **Agentic loop** | The agent can plan, execute tools, evaluate outputs, and continue until the job is actually complete. |
+| **Atomic agentic loop** | The agent can plan, execute tools, evaluate outputs, and continue until the job is actually complete. |
 | **Lifecycle hooks** | Add deterministic or LLM-judged checks at `beforeLLMCall`, `beforeToolUse`, `afterToolUse`, `beforeCommit`, and more. |
-| **Execution discipline** | Acceptance criteria, verification evidence, TDD/git discipline, and commit-time gates can block weak completion claims. |
-| **Deterministic exactness** | Exact dates, time windows, counts, averages, sums, and comparisons can be forced through runtime evidence instead of model guesswork. |
+| **Execution contracts** | Acceptance criteria, resource bindings, used-resource provenance, verification evidence, and deterministic requirements live in runtime state. |
+| **Deterministic exactness** | Dates, time windows, counts, averages, sums, percent changes, and comparisons can be forced through runtime evidence instead of model guesswork. |
+| **Scheduled-work discipline** | Cron turns are treated as orchestration work: delivery channel is persisted, parent turns stay meta-only, worker work is delegated, and delivery safety is enforced. |
 | **Replayable transcripts** | Tool calls, tool results, control events, compaction boundaries, and canonical assistant messages are persisted for restart-safe replay. |
 | **Hipocampus memory** | A layered memory system with root/daily/weekly/monthly compaction and qmd-backed recall. |
-| **User Harness Rules** | Install Markdown rules that become runtime checks, such as "deliver files before saying done." |
+| **User Harness Rules** | Install Markdown rules that become runtime checks, including required tools, required tool input patterns, LLM verifiers, and blockers. |
 | **Native delivery path** | Documents, spreadsheets, and workspace files can be generated, registered, and delivered back through supported channels. |
 | **Child agents** | Spawn background agents with bounded tools, workspace isolation, and result delivery. |
 | **Multi-channel** | Run the same runtime from CLI, HTTP, Telegram, or Discord. |
@@ -97,13 +104,14 @@ Agent
   |   |-- Turn                        atomic agentic loop
   |   |-- Transcript                  append-only JSONL replay log
   |   |-- Context                     identity + rules + memory + tool state
-  |   |-- ExecutionContract           criteria + evidence + resource bindings
+  |   |-- ExecutionContract           criteria + resources + deterministic evidence
   |
   |-- ToolRegistry                    native tools + loaded skills
   |-- HookRegistry                    runtime control plane
+  |-- PolicyKernel                    compiled runtime policy + user harness rules
   |-- OutputArtifactRegistry          generated files and delivery metadata
   |-- BackgroundTaskRegistry          spawned child-agent work
-  |-- CronScheduler                   durable scheduled tasks
+  |-- CronScheduler                   durable scheduled tasks + channel routing
   |-- HipocampusService               memory compaction + recall
   |-- ChannelAdapters                 CLI, HTTP, Telegram, Discord
 ```
@@ -114,12 +122,90 @@ Design principles:
   gates, transcripts, and tool boundaries, not only in instructions.
 - **Durability by default.** A useful agent should survive reconnects, retries,
   background work, and long conversations.
+- **Evidence before exact claims.** Dates, counts, arithmetic, source usage, and
+  completion claims should be grounded in tool results or explicitly marked as
+  unverifiable.
 - **Operator control.** Users should be able to install rules and skills without
   patching the core runtime.
 - **Visible work.** Tool calls, progress, generated artifacts, and delivery
   events are first-class runtime state.
 - **Fail open where ergonomic, fail closed where safety matters.** Memory recall
   should not kill a turn; unsafe file writes and false completion claims can.
+
+## Reliability Architecture
+
+Clawy Agent is designed for the failure modes that show up once agents are used
+for real work, not only demos.
+
+### Execution Contracts
+
+Each turn can carry an `ExecutionContract`. The contract records:
+
+- acceptance criteria and their verification state
+- resource bindings and used-resource provenance
+- generated artifacts and delivery evidence
+- deterministic requirements and deterministic evidence
+
+Hooks and tools read and write this contract throughout the turn. That lets the
+runtime block a weak final answer because a criterion is still pending, because
+the agent cited a resource it did not use, or because a numeric/date claim was
+not backed by deterministic evidence.
+
+### Deterministic Exactness
+
+When a request asks for exact values, the runtime can classify it as requiring
+deterministic evidence. Typical triggers include date ranges, recency windows,
+counts, totals, averages, percent changes, financial values, and comparisons.
+
+The model is then expected to use native tools such as `Clock`, `DateRange`,
+`Calculation`, `FileRead`, `KnowledgeSearch`, `WebFetch`, or `WebSearch`
+instead of doing mental math. Those tools can record structured evidence on the
+execution contract. Before commit, the deterministic evidence verifier compares
+the draft answer against the recorded evidence and can force a retry when the
+answer invents or contradicts exact values.
+
+The result is not "the model was told to be careful." The runtime has a place to
+store the requirement, a place to store the evidence, and a gate that can reject
+the final answer.
+
+### Scheduled Work
+
+Cron jobs are treated as durable workflows, not delayed chat messages. When a
+cron is created, Clawy Agent captures the source delivery channel instead of
+asking the model to choose a target later. When the cron fires, the parent turn
+is constrained to meta-orchestration: inspect the schedule, delegate the actual
+work to a child agent, and summarize or deliver the result.
+
+Cron safety is enforced through several runtime pieces working together:
+
+- `CronScheduler` persists cron records and next-fire times
+- `cronMetaOrchestrator` keeps parent cron turns in the orchestration role
+- `beforeToolUse` guards prevent parent cron turns from doing worker I/O
+- `beforeCommit` checks reject cron parent answers that skipped delegation
+- `cronDeliverySafety` blocks direct or ambiguous channel delivery patterns
+- `TaskBoard` iteration state, the sweeper, and stop conditions keep long
+  scheduled loops restart-safe and bounded
+
+That is how Clawy Agent avoids the common failure where a scheduled agent
+ignores the workflow boundary, opens the wrong resource, or sends the result to
+the wrong channel.
+
+### Operator Rules And Skills
+
+Operators can extend the runtime without forking it:
+
+- Markdown harness rules compile into executable gates
+- `require_tool` ensures a tool was successfully used in the current turn
+- `require_tool_input_match` ensures a successful tool used the expected input,
+  such as a specific `WebFetch.url` or `Bash.command` pattern
+- `llm_verifier` adds scoped judgment checks where deterministic checks are not
+  enough
+- workspace `skills/` can add prompt-only or script-backed tools and can be
+  reloaded through `POST /v1/admin/skills/reload`
+
+Native tools are restored after skill loading, so a workspace skill cannot
+accidentally replace core tools such as `Browser`, `WebSearch`, `WebFetch`,
+`Clock`, `DateRange`, or `Calculation`.
 
 ## Quick Start
 
@@ -304,6 +390,8 @@ Common built-in gates include:
 | --- | --- |
 | `factGrounding` | Reduces unsupported factual claims. |
 | `preRefusalVerifier` | Challenges unnecessary refusals before they reach the user. |
+| `deterministicExactness` | Classifies exact numeric/date/count requests and records deterministic requirements. |
+| `deterministicEvidenceVerifier` | Checks final exact claims against recorded deterministic evidence. |
 | `workspaceAwareness` | Injects relevant filesystem context. |
 | `sessionResume` | Restores continuity when a session resumes. |
 | `discipline` | Enables TDD/git enforcement for coding tasks. |
@@ -311,6 +399,9 @@ Common built-in gates include:
 | `outputPurityGate` | Blocks leaked internal planning in final answers. |
 | `completionEvidenceGate` | Requires evidence before completion claims. |
 | `resourceBoundaryGate` | Prevents use of resources outside the task boundary. |
+| `cronMetaOrchestrator` | Keeps scheduled parent turns in a meta-orchestration role. |
+| `cronDeliverySafety` | Prevents ambiguous or direct channel delivery from cron worker paths. |
+| `userHarnessRules` | Enforces operator-installed Markdown rules. |
 
 ## User Harness Rules
 
