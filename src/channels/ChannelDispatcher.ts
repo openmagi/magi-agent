@@ -18,6 +18,7 @@ import type {
 } from "./ChannelAdapter.js";
 import { startTypingTicker } from "./TypingTicker.js";
 import { applyResetToSessionKey } from "../slash/resetCounters.js";
+import { normalizeUserVisibleRouteMetaTags } from "../turn/visibleText.js";
 
 /**
  * SseWriter that drops writes but captures text deltas so the
@@ -67,7 +68,7 @@ export class CaptureSseWriter extends SseWriter {
   }
 
   finalText(): string {
-    return this.accumulated;
+    return normalizeUserVisibleRouteMetaTags(this.accumulated);
   }
 
   turnStatus(): "pending" | "committed" | "aborted" {
@@ -156,10 +157,10 @@ export async function dispatchInbound(
 }
 
 /**
- * SessionKey format — aligned with legacy gateway convention:
+ * SessionKey format — aligned with legacy convention:
  *   agent:<persona>:<channelType>:<chatId>
  * Persona defaults to "main"; multi-persona bots can override at the
- * Agent level (future). Bucket suffix (legacy gateway `:<bucket>`) not
+ * Agent level (future). Bucket suffix (legacy `:<bucket>`) not
  * used — core-agent scopes by chatId alone.
  */
 export function buildSessionKey(inbound: InboundMessage): string {

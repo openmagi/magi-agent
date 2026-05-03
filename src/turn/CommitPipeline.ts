@@ -27,7 +27,7 @@ import {
 } from "../verification/VerificationEvidence.js";
 import type { RetryBlockKind } from "./RetryController.js";
 import type { TurnStopReason } from "./types.js";
-import { stripLeadingRouteMetaTag } from "./visibleText.js";
+import { normalizeUserVisibleRouteMetaTags } from "./visibleText.js";
 
 export type CommitHookPoint =
   | "beforeCommit"
@@ -89,7 +89,7 @@ export async function commit(ctx: CommitPipelineContext): Promise<CommitResult> 
     .filter((b): b is Extract<LLMContentBlock, { type: "text" }> => b.type === "text")
     .map((b) => b.text)
     .join("");
-  finalText = stripLeadingRouteMetaTag(finalText);
+  finalText = normalizeUserVisibleRouteMetaTags(finalText).replace(/^\s+/, "");
 
   const planVerificationBlock = await planVerificationBlockReason(
     ctx.session,
@@ -143,11 +143,12 @@ export async function commit(ctx: CommitPipelineContext): Promise<CommitResult> 
     ctx.buildHookContext("beforeCommit"),
   );
   if (preCommit.action === "block") {
+    const reason = preCommit.reason ?? "beforeCommit blocked";
     return {
       status: "blocked",
-      reason: preCommit.reason ?? "beforeCommit blocked",
+      reason,
       finalText,
-      retryable: true,
+      retryable: isBeforeCommitBlockRetryable(reason),
     };
   }
 
@@ -218,6 +219,14 @@ export async function commit(ctx: CommitPipelineContext): Promise<CommitResult> 
   );
 
   return { status: "committed", finalText };
+}
+
+export function isBeforeCommitBlockRetryable(reason: string): boolean {
+  const normalized = reason.trim();
+  if (/^\[RULE:SEALED_FILES\]/u.test(normalized)) return false;
+  if (/^hook:[^\s]+ threw:/iu.test(normalized)) return false;
+  if (/^hook:[^\s]+ .*?(?:timeout|timed out)/iu.test(normalized)) return false;
+  return true;
 }
 
 async function recordExecutionContractEvidence(

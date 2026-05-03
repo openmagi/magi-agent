@@ -52,6 +52,7 @@ describe("reliabilityPromptInjector", () => {
     expect(block).toContain("product reliability and benchmark evaluation");
     expect(block).toContain("tool/file evidence");
     expect(block).toContain("evidence-router");
+    expect(block).toContain("WebSearch");
     expect(block).toContain("current sources");
   });
 
@@ -64,6 +65,38 @@ describe("reliabilityPromptInjector", () => {
   it("still builds evidence policy for document requests that need citations or verification", () => {
     const block = buildReliabilityPolicyBlock("이 PDF 문서에서 근거를 추출하고 출처도 표시해줘");
     expect(block).toContain("evidence-router");
+  });
+
+  it("adds execution discipline for coding work", () => {
+    const block = buildReliabilityPolicyBlock("이 repo에서 TypeScript 빌드 에러를 고쳐줘");
+    expect(block).toContain("<execution-discipline-policy>");
+    expect(block).toContain("smallest solution");
+    expect(block).toContain("current-turn tool evidence");
+  });
+
+  it("adds execution discipline for artifact creation work", () => {
+    const block = buildReliabilityPolicyBlock("투자자 업데이트 PDF 리포트를 만들어줘");
+    expect(block).toContain("<execution-discipline-policy>");
+    expect(block).toContain("verify the produced file exists");
+  });
+
+  it("adds execution discipline for substantial analysis work", () => {
+    const block = buildReliabilityPolicyBlock("이 전략을 분석하고 대안을 비교해줘");
+    expect(block).toContain("<execution-discipline-policy>");
+    expect(block).toContain("name material assumptions");
+  });
+
+  it("does not add execution discipline to casual chat", () => {
+    const block = buildReliabilityPolicyBlock("안녕");
+    expect(block).toContain("<runtime-evidence-policy>");
+    expect(block).not.toContain("<execution-discipline-policy>");
+  });
+
+  it("keeps simple file understanding light", () => {
+    const block = buildReliabilityPolicyBlock("WSJ 파이프라인 파일 뭐하는건지 알려줘");
+    expect(block).toContain("runtime-evidence-policy");
+    expect(block).not.toContain("evidence-router");
+    expect(block).not.toContain("<execution-discipline-policy>");
   });
 
   it("injects policy into the system prompt on first iteration", async () => {
@@ -101,6 +134,23 @@ describe("reliabilityPromptInjector", () => {
       expect(result.value.system).toContain("<runtime-evidence-policy>");
       expect(result.value.system).toContain("product reliability and benchmark evaluation");
       expect(result.value.system).not.toContain("evidence-router");
+    }
+  });
+
+  it("injects execution discipline into the first LLM call for matching work", async () => {
+    const hook = makeReliabilityPromptInjectorHook();
+    const result = await hook.handler(
+      {
+        messages: userMessage("빌드 에러 고쳐줘"),
+        tools: [],
+        system: "base system",
+        iteration: 0,
+      },
+      makeCtx(),
+    );
+    expect(result?.action).toBe("replace");
+    if (result?.action === "replace") {
+      expect(result.value.system).toContain("<execution-discipline-policy>");
     }
   });
 

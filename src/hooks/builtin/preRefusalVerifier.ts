@@ -32,6 +32,7 @@
 
 import type { RegisteredHook, HookContext } from "../types.js";
 import type { TranscriptEntry } from "../../storage/Transcript.js";
+import { getOrClassifyFinalAnswerMeta } from "./turnMetaClassifier.js";
 
 /** Tool names whose presence in the turn's transcript means the bot
  * DID investigate before drafting — skips the block. */
@@ -57,43 +58,20 @@ function isEnabled(): boolean {
   return v === "" || v === "on" || v === "true" || v === "1";
 }
 
-const REFUSAL_CLASSIFIER_PROMPT = `You classify whether an AI assistant's response is a LAZY REFUSAL — claiming something doesn't exist or can't be found WITHOUT having actually investigated.
-
-LAZY REFUSAL (YES):
-- "KB에 해당 정보가 없습니다" (no info in KB) — without searching
-- "I don't have access to that file" — without trying to read it
-- "확인할 수 없습니다" (cannot verify) — without running any tools
-- "찾을 수 없습니다" (cannot find) — without searching
-- "저장되어 있지 않습니다" (not stored) — without checking
-
-NOT A REFUSAL (NO):
-- "검색해봤는데 결과가 없습니다" (searched but no results) — investigated first
-- "파일을 확인했는데 해당 내용이 없습니다" (checked file, content not there)
-- "I searched the KB and found no matching documents"
-- Legitimate "not found" after actual tool use
-- Normal responses without refusal language
-
-Reply ONLY: YES or NO`;
-
 /** LLM-based refusal classification. No regex fallback. */
-export async function matchesRefusal(text: string, ctx?: HookContext): Promise<boolean> {
+export async function matchesRefusal(
+  text: string,
+  ctx?: HookContext,
+  userMessage = "",
+): Promise<boolean> {
   if (!text || text.trim().length === 0) return false;
   if (!ctx?.llm) return false; // No LLM = fail-open
 
-  try {
-    let result = "";
-    for await (const event of ctx.llm.stream({
-      model: "claude-haiku-4-5",
-      system: REFUSAL_CLASSIFIER_PROMPT,
-      messages: [{ role: "user", content: [{ type: "text", text: text.slice(0, 500) }] }],
-      max_tokens: 10,
-    })) {
-      if (event.kind === "text_delta") result += event.delta;
-    }
-    return result.trim().toUpperCase().startsWith("YES");
-  } catch {
-    return false; // Fail-open on LLM error
-  }
+  const meta = await getOrClassifyFinalAnswerMeta(ctx, {
+    userMessage,
+    assistantText: text,
+  });
+  return meta.lazyRefusal;
 }
 
 /** Exported for tests — count investigation tool calls in the turn's
@@ -126,11 +104,12 @@ export function makePreRefusalVerifierHook(
   return {
     name: "builtin:pre-refusal-verifier",
     point: "beforeCommit",
-    // Runs BEFORE answerVerifier (90). Cheap deterministic check — no
-    // LLM call, so it can gate inexpensively before the Haiku judge.
+    // Runs BEFORE answerVerifier (90). The lazy-refusal bit comes from
+    // the shared final-answer classifier, so neighboring commit gates
+    // reuse the same cached classification instead of calling LLMs.
     priority: 85,
     blocking: true,
-    handler: async ({ assistantText, retryCount }, ctx: HookContext) => {
+    handler: async ({ assistantText, retryCount, userMessage }, ctx: HookContext) => {
       try {
         if (!isEnabled()) return { action: "continue" };
 
@@ -138,7 +117,7 @@ export function makePreRefusalVerifierHook(
           return { action: "continue" };
         }
 
-        if (!(await matchesRefusal(assistantText, ctx))) {
+        if (!(await matchesRefusal(assistantText, ctx, userMessage))) {
           return { action: "continue" };
         }
 

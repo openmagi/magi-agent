@@ -54,11 +54,14 @@ const baseArgs = {
 };
 
 describe("wrapInjection", () => {
-  it("wraps text in <user_injection> with seq + iso timestamp", () => {
+  it("wraps text in a neutral follow-up user-message tag", () => {
     const wrapped = wrapInjection(2, "hello", "2026-04-20T12:00:00.000Z");
-    expect(wrapped).toContain('<user_injection seq="2" at="2026-04-20T12:00:00.000Z">');
+    expect(wrapped).toContain(
+      '<follow_up_user_message seq="2" at="2026-04-20T12:00:00.000Z">',
+    );
     expect(wrapped).toContain("hello");
-    expect(wrapped).toContain("</user_injection>");
+    expect(wrapped).toContain("</follow_up_user_message>");
+    expect(wrapped).not.toMatch(/injection/i);
   });
 });
 
@@ -131,7 +134,8 @@ describe("makeMidTurnInjectorHook", () => {
     const injectedText = JSON.stringify(result.value.messages.slice(1));
     expect(injectedText).toContain("inject-1");
     expect(injectedText).toContain("inject-2");
-    expect(injectedText).toContain("<user_injection");
+    expect(injectedText).toContain("<follow_up_user_message");
+    expect(injectedText).not.toMatch(/user_injection|prompt injection/i);
 
     expect(drained).toHaveLength(2);
     expect(ctx.log).toHaveBeenCalledWith(

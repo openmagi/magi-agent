@@ -13,19 +13,15 @@
  *   exploratory → { tdd: false, git: true,  requireCommit: "off" }
  *   other       → no change
  *
- * Explicit user override wins: if the message contains a skip-TDD
- * verb ({@link hasSkipTddSignal}), tdd is set to false regardless of
- * the classifier result.
+ * Explicit user override wins: if the shared request meta classifier
+ * marks `skipTdd`, tdd is set to false regardless of the mode result.
  *
  * Fail-open: any delegate / lookup error → `continue`, no mutation.
  */
 
 import type { RegisteredHook, HookContext } from "../types.js";
 import type { Discipline } from "../../Session.js";
-import {
-  classifyTurnModeGated,
-  hasSkipTddSignal,
-} from "../../discipline/classifier.js";
+import { getOrClassifyRequestMeta } from "./turnMetaClassifier.js";
 
 export interface ClassifyTurnModeAgent {
   getSessionDiscipline(sessionKey: string): Discipline | null;
@@ -79,6 +75,7 @@ export function makeClassifyTurnModeHook(
     priority: 3, // earliest — ahead of memory-injector (5) so the
                  //            discipline prompt block can read fresh state.
     blocking: true,
+    failOpen: true,
     timeoutMs: 5_000,
     handler: async ({ messages, iteration }, ctx: HookContext) => {
       // Only classify on the first iteration of the turn (the user
@@ -90,11 +87,12 @@ export function makeClassifyTurnModeHook(
       const text = latestUserText(messages);
       if (!text) return { action: "continue" };
 
-      const classified = await classifyTurnModeGated(text, ctx.llm, 0.6);
-      const skip = await hasSkipTddSignal(text, ctx.llm);
+      const classified = await getOrClassifyRequestMeta(ctx, { userMessage: text });
+      const mode = classified.turnMode;
+      const skip = classified.skipTdd;
 
       let next: Discipline | null = null;
-      if (classified.label === "coding") {
+      if (mode.label === "coding" && mode.confidence >= 0.6) {
         // Kevin's A/A/A rule #1 — "hard mode only engages when the
         // `coding-agent` skill matches AND classifyTurnMode returns
         // `code`". Skill-active → promote to hard regardless of the
@@ -115,7 +113,7 @@ export function makeClassifyTurnModeHook(
           requireCommit: nextCommit,
           lastClassifiedMode: "coding",
         };
-      } else if (classified.label === "exploratory") {
+      } else if (mode.label === "exploratory" && mode.confidence >= 0.6) {
         next = {
           ...current,
           tdd: false,
@@ -134,8 +132,8 @@ export function makeClassifyTurnModeHook(
       opts.agent.setSessionDiscipline(ctx.sessionKey, next);
       ctx.log("info", "[discipline] classified", {
         turnId: ctx.turnId,
-        label: classified.label,
-        confidence: classified.confidence,
+        label: mode.label,
+        confidence: mode.confidence,
         skipTdd: skip,
       });
       return { action: "continue" };

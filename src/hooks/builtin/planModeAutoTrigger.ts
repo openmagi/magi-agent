@@ -28,6 +28,7 @@
 import type { RegisteredHook, HookContext } from "../types.js";
 import type { PermissionMode } from "../../Session.js";
 import { latestUserText } from "./classifyTurnMode.js";
+import { getOrClassifyRequestMeta } from "./turnMetaClassifier.js";
 
 export interface PlanModeAutoTriggerAgent {
   /** Returns the current permissionMode for `sessionKey`, or null when
@@ -63,7 +64,7 @@ NO examples: "explain this code", "코드 분석해줘", "what does this do", "s
 Reply ONLY: YES or NO`;
 
 const DOCUMENT_OR_FILE_OUTPUT_RE =
-  /\b(?:docx|pdf|md|markdown|hwpx|hwp|pptx|xlsx|csv|document|file|report)\b|(?:마크다운|문서|파일|보고서|리포트|첨부|전달)/i;
+  /(?:docx|pdf|md|markdown|hwpx|hwp|pptx|xlsx|csv)|\b(?:document|file|report)\b|(?:마크다운|문서|파일|보고서|리포트|첨부|전달)/i;
 const DOCUMENT_OR_FILE_ACTION_RE =
   /(?:만들|작성|생성|변환|내보내|내뱉|보내|전달|첨부|deliver|attach|export|convert|render|write|generate|create)/i;
 const CODE_IMPLEMENTATION_TARGET_RE =
@@ -145,7 +146,9 @@ export function makePlanModeAutoTriggerHook(
         const text = latestUserText(args.messages);
         if (!text) return { action: "continue" };
         if (isDocumentOrFileOperation(text)) return { action: "continue" };
-        if (!(await matchesImplementationIntent(text, ctx))) return { action: "continue" };
+        const classified = await getOrClassifyRequestMeta(ctx, { userMessage: text });
+        if (classified.documentOrFileOperation) return { action: "continue" };
+        if (!classified.implementationIntent) return { action: "continue" };
 
         ctx.log("info", "[plan-mode-auto-trigger] nudging toward /plan", {
           turnId: ctx.turnId,

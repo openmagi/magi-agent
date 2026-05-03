@@ -2,6 +2,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import type { Tool, ToolContext, ToolResult } from "../Tool.js";
 import type { OutputArtifactRegistry } from "../output/OutputArtifactRegistry.js";
+import type { ChannelRef } from "../util/types.js";
 import type {
   DeliveryStatus,
   DeliveryTarget,
@@ -39,6 +40,13 @@ export interface FileDeliverDeps {
   gatewayToken: string;
   fetchImpl?: typeof fetch;
   sleepImpl?: (ms: number) => Promise<void>;
+  getSourceChannel?: (ctx: ToolContext) => ChannelRef | null;
+  sendFile?: (
+    channel: ChannelRef,
+    filePath: string,
+    caption: string | undefined,
+    mode: "document" | "photo",
+  ) => Promise<void>;
 }
 
 const INPUT_SCHEMA = {
@@ -105,7 +113,25 @@ async function deliverToChat(
   bytes: Uint8Array,
   input: FileDeliverInput,
   ctx: ToolContext,
-): Promise<{ externalId: string; marker: string }> {
+  filePath: string,
+): Promise<{ externalId: string; marker?: string }> {
+  const sourceChannel = deps.getSourceChannel?.(ctx) ?? null;
+  if (
+    sourceChannel &&
+    deps.sendFile &&
+    (sourceChannel.type === "telegram" || sourceChannel.type === "discord")
+  ) {
+    await deps.sendFile(
+      sourceChannel,
+      filePath,
+      input.chat?.caption,
+      "document",
+    );
+    return {
+      externalId: `${sourceChannel.type}:${sourceChannel.channelId}`,
+    };
+  }
+
   const form = new FormData();
   form.append(
     "file",
@@ -194,6 +220,8 @@ async function deliverWithRetry(
   bytes: Uint8Array,
   input: FileDeliverInput,
   ctx: ToolContext,
+  trackRegistry: boolean,
+  filePath: string,
 ): Promise<{ target: DeliveryTarget; status: DeliveryStatus; externalId?: string; marker?: string; attemptCount: number }> {
   let lastError: unknown = null;
 
@@ -208,7 +236,7 @@ async function deliverWithRetry(
       );
     }
 
-    if (attempt === 1) {
+    if (attempt === 1 && trackRegistry) {
       await deps.outputRegistry.markDeliveryPending(artifact.artifactId, {
         target,
         attemptCount: 1,
@@ -218,16 +246,18 @@ async function deliverWithRetry(
     try {
       const delivered =
         target === "chat"
-          ? await deliverToChat(deps, artifact, bytes, input, ctx)
+          ? await deliverToChat(deps, artifact, bytes, input, ctx, filePath)
           : await deliverToKb(deps, artifact, bytes, input, ctx);
 
-      await deps.outputRegistry.markDeliveryResult(artifact.artifactId, {
-        target,
-        attemptCount: attempt,
-        status: "sent",
-        externalId: delivered.externalId,
-        marker: delivered.marker,
-      });
+      if (trackRegistry) {
+        await deps.outputRegistry.markDeliveryResult(artifact.artifactId, {
+          target,
+          attemptCount: attempt,
+          status: "sent",
+          externalId: delivered.externalId,
+          marker: delivered.marker,
+        });
+      }
 
       return {
         target,
@@ -244,21 +274,25 @@ async function deliverWithRetry(
       const transient = (status !== undefined && isTransientHttpStatus(status)) || isTransientError(error);
 
       if (transient && attempt < RETRY_DELAYS_MS.length) {
-        await deps.outputRegistry.markDeliveryResult(artifact.artifactId, {
-          target,
-          attemptCount: attempt,
-          status: "retrying",
-          errorMessage: error instanceof Error ? error.message : String(error),
-        });
+        if (trackRegistry) {
+          await deps.outputRegistry.markDeliveryResult(artifact.artifactId, {
+            target,
+            attemptCount: attempt,
+            status: "retrying",
+            errorMessage: error instanceof Error ? error.message : String(error),
+          });
+        }
         continue;
       }
 
-      await deps.outputRegistry.markDeliveryResult(artifact.artifactId, {
-        target,
-        attemptCount: attempt,
-        status: "failed",
-        errorMessage: error instanceof Error ? error.message : String(error),
-      });
+      if (trackRegistry) {
+        await deps.outputRegistry.markDeliveryResult(artifact.artifactId, {
+          target,
+          attemptCount: attempt,
+          status: "failed",
+          errorMessage: error instanceof Error ? error.message : String(error),
+        });
+      }
 
       throw error;
     }
@@ -289,11 +323,13 @@ export function makeFileDeliverTool(deps: FileDeliverDeps): Tool<FileDeliverInpu
       try {
         let artifact: OutputArtifactRecord;
         let bytes: Uint8Array;
+        let trackRegistry = true;
 
         if (input.path && typeof input.path === "string") {
           // Direct workspace file delivery (no artifact registration needed)
           const resolved = path.resolve(deps.workspaceRoot, input.path);
-          if (!resolved.startsWith(deps.workspaceRoot)) {
+          const rel = path.relative(deps.workspaceRoot, resolved);
+          if (rel.startsWith("..") || path.isAbsolute(rel)) {
             return errorResult(new Error("Path outside workspace"), start);
           }
           bytes = await fs.readFile(resolved);
@@ -305,7 +341,10 @@ export function makeFileDeliverTool(deps: FileDeliverDeps): Tool<FileDeliverInpu
             xls: "application/vnd.ms-excel",
             docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
             pptx: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+            hwpx: "application/hwp+zip",
+            hwp: "application/x-hwp",
             csv: "text/csv",
+            tsv: "text/tab-separated-values",
             txt: "text/plain",
             md: "text/markdown",
             html: "text/html",
@@ -314,6 +353,7 @@ export function makeFileDeliverTool(deps: FileDeliverDeps): Tool<FileDeliverInpu
             jpg: "image/jpeg",
             jpeg: "image/jpeg",
             gif: "image/gif",
+            webp: "image/webp",
             zip: "application/zip",
           };
           const mimeType = mimeMap[ext] || "application/octet-stream";
@@ -328,14 +368,21 @@ export function makeFileDeliverTool(deps: FileDeliverDeps): Tool<FileDeliverInpu
             workspacePath: input.path,
             previewKind: "none",
           } as OutputArtifactRecord;
+          trackRegistry = false;
         } else {
           artifact = await deps.outputRegistry.get(input.artifactId!);
           bytes = await readArtifactBytes(deps.workspaceRoot, artifact);
         }
 
+        const filePath = path.resolve(deps.workspaceRoot, artifact.workspacePath);
+        const rel = path.relative(deps.workspaceRoot, filePath);
+        if (rel.startsWith("..") || path.isAbsolute(rel)) {
+          return errorResult(new Error("Path outside workspace"), start);
+        }
+
         const deliveries: FileDeliverOutput["deliveries"] = [];
         for (const target of toTargets(input.target)) {
-          deliveries.push(await deliverWithRetry(target, deps, artifact, bytes, input, ctx));
+          deliveries.push(await deliverWithRetry(target, deps, artifact, bytes, input, ctx, trackRegistry, filePath));
         }
 
         return {

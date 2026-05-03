@@ -33,6 +33,10 @@ describe("FileSend", () => {
         workspaceRoot,
         getSourceChannel: () => ({ type: "discord", channelId: "chan-1" }),
         sendFile,
+        binDir: path.join(workspaceRoot, "..", "bin"),
+        gatewayToken: "gw",
+        botId: "bot-1",
+        chatProxyUrl: "http://chat-proxy",
       });
 
       const result = await tool.execute(
@@ -41,6 +45,11 @@ describe("FileSend", () => {
       );
 
       expect(result.status).toBe("ok");
+      expect(result.output).toEqual({
+        filename: "report.pdf",
+        channel: { type: "discord", channelId: "chan-1" },
+        mode: "document",
+      });
       expect(sendFile).toHaveBeenCalledWith(
         { type: "discord", channelId: "chan-1" } satisfies ChannelRef,
         path.join(workspaceRoot, "report.pdf"),
@@ -59,6 +68,10 @@ describe("FileSend", () => {
         workspaceRoot,
         getSourceChannel: () => ({ type: "telegram", channelId: "chat-1" }),
         sendFile: vi.fn(async () => {}),
+        binDir: path.join(workspaceRoot, "..", "bin"),
+        gatewayToken: "gw",
+        botId: "bot-1",
+        chatProxyUrl: "http://chat-proxy",
       });
 
       const result = await tool.execute(

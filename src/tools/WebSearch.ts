@@ -8,6 +8,8 @@
 import type { Tool, ToolResult } from "../Tool.js";
 import { errorResult } from "../util/toolResult.js";
 
+export type WebSearchToolName = "WebSearch" | "web-search" | "web_search";
+
 export interface WebSearchInput {
   query: string;
   maxResults?: number;
@@ -80,9 +82,11 @@ function parseDdgHtml(html: string): WebSearchResult[] {
   return results;
 }
 
-export function makeWebSearchTool(): Tool<WebSearchInput, WebSearchOutput> {
+export function makeWebSearchTool(
+  opts: { name?: WebSearchToolName } = {},
+): Tool<WebSearchInput, WebSearchOutput> {
   return {
-    name: "WebSearch",
+    name: opts.name ?? "WebSearch",
     description:
       "Search the web using DuckDuckGo. Returns titles, URLs, and snippets. " +
       "No API key required. Use WebFetch to read the full content of any result URL.",

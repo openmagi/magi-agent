@@ -32,6 +32,21 @@ export interface BackgroundTaskProgress {
   label: string;
 }
 
+export interface BackgroundTaskArtifactRef {
+  artifactId: string;
+  kind: string;
+  title: string;
+  slug: string;
+  l1Preview: string;
+  importedFromArtifactId?: string;
+}
+
+export interface BackgroundTaskArtifacts {
+  spawnDir: string;
+  fileCount: number;
+  handedOffArtifacts: BackgroundTaskArtifactRef[];
+}
+
 export interface BackgroundTaskRecord {
   taskId: string;
   parentTurnId: string;
@@ -43,8 +58,10 @@ export interface BackgroundTaskRecord {
   finishedAt?: number;
   resultText?: string;
   toolCallCount?: number;
+  attempts?: number;
   error?: string;
   spawnDir?: string;
+  artifacts?: BackgroundTaskArtifacts;
   progress?: BackgroundTaskProgress[];
 }
 
@@ -82,8 +99,10 @@ export type BackgroundTaskPatch = Partial<
     | "finishedAt"
     | "resultText"
     | "toolCallCount"
+    | "attempts"
     | "error"
     | "spawnDir"
+    | "artifacts"
     | "progress"
   >
 >;
@@ -92,7 +111,9 @@ export interface AttachResultInput {
   status: BackgroundTaskStatus;
   resultText?: string;
   toolCallCount?: number;
+  attempts?: number;
   error?: string;
+  artifacts?: BackgroundTaskArtifacts;
 }
 
 /**
@@ -218,7 +239,9 @@ export class BackgroundTaskRegistry {
       ...(result.toolCallCount !== undefined
         ? { toolCallCount: result.toolCallCount }
         : {}),
+      ...(result.attempts !== undefined ? { attempts: result.attempts } : {}),
       ...(result.error !== undefined ? { error: result.error } : {}),
+      ...(result.artifacts !== undefined ? { artifacts: result.artifacts } : {}),
     });
 
     // #81 — fire an inline notification for the parent session so the

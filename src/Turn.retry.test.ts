@@ -18,7 +18,7 @@ interface ScriptedTurn {
     | { type: "text"; text: string }
     | { type: "tool_use"; id: string; name: string; input: unknown }
   >;
-  stopReason: "end_turn" | "tool_use";
+  stopReason: "end_turn" | "tool_use" | "max_tokens";
 }
 
 function* scriptedEvents(turn: ScriptedTurn): Generator<LLMEvent, void, void> {
@@ -77,15 +77,46 @@ class FakeSse extends SseWriter {
   override end(): void {}
 }
 
+function visibleTextAfterLastClear(events: readonly unknown[]): string {
+  let start = 0;
+  events.forEach((event, index) => {
+    if (
+      event &&
+      typeof event === "object" &&
+      (event as { type?: unknown }).type === "response_clear"
+    ) {
+      start = index + 1;
+    }
+  });
+
+  return events
+    .slice(start)
+    .filter(
+      (event): event is { type: "text_delta"; delta: string } =>
+        !!event &&
+        typeof event === "object" &&
+        (event as { type?: unknown }).type === "text_delta" &&
+        typeof (event as { delta?: unknown }).delta === "string",
+    )
+    .map((event) => event.delta)
+    .join("");
+}
+
 async function makeFixture(script: ScriptedTurn[] = [
   { blocks: [{ type: "text", text: "Unsupported claim." }], stopReason: "end_turn" },
   { blocks: [{ type: "text", text: "Unsupported claim again." }], stopReason: "end_turn" },
   { blocks: [{ type: "text", text: "Verified answer." }], stopReason: "end_turn" },
-], opts: { structuredOutputContract?: StructuredOutputSpec; runtimeModel?: string } = {}): Promise<{
+], opts: {
+  structuredOutputContract?: StructuredOutputSpec;
+  runtimeModel?: string;
+  blockRetryPreLlm?: boolean;
+  beforeCommitBlockReason?: string;
+} = {}): Promise<{
   turn: Turn;
   llm: ScriptedLLM;
   transcript: Transcript;
   controlEvents: ControlEventLedger;
+  sse: FakeSse;
 }> {
   const workspaceRoot = await fs.mkdtemp(path.join(os.tmpdir(), "turn-retry-"));
   const sessionsDir = path.join(workspaceRoot, "core-agent", "sessions");
@@ -102,10 +133,20 @@ async function makeFixture(script: ScriptedTurn[] = [
   const hooks = {
     runPre: async (point: string, args: unknown) => {
       if (
+        opts.blockRetryPreLlm === true &&
+        point === "beforeLLMCall" &&
+        JSON.stringify(args).includes("unsupported claim")
+      ) {
+        return { action: "block" as const, reason: "retry preflight timeout" };
+      }
+      if (
         point === "beforeCommit" &&
         (args as { assistantText?: string }).assistantText?.includes("Unsupported")
       ) {
-        return { action: "block" as const, reason: "unsupported claim" };
+        return {
+          action: "block" as const,
+          reason: opts.beforeCommitBlockReason ?? "unsupported claim",
+        };
       }
       return { action: "continue" as const, args };
     },
@@ -194,18 +235,20 @@ async function makeFixture(script: ScriptedTurn[] = [
     text: "answer with evidence",
     receivedAt: Date.now(),
   };
+  const sse = new FakeSse();
 
   return {
     turn: new Turn(
       sessionStub as unknown as Session,
       userMessage,
       "turn-retry-1",
-      new FakeSse(),
+      sse,
       "direct",
     ),
     llm,
     transcript,
     controlEvents,
+    sse,
   };
 }
 
@@ -248,6 +291,67 @@ describe("Turn blocked-output retry", () => {
     });
   });
 
+  it("does not restore a verifier-blocked draft when retry preflight fails", async () => {
+    const { turn, transcript, sse } = await makeFixture(undefined, {
+      blockRetryPreLlm: true,
+    });
+
+    await turn.execute();
+    await expect(turn.commitWithRetry()).rejects.toThrow("retry preflight timeout");
+
+    const visible = visibleTextAfterLastClear(sse.agentEvents);
+    expect(visible).toContain("runtime verifier blocked");
+    expect(visible).not.toContain("Unsupported claim");
+
+    const entries = await transcript.readAll();
+    expect(entries.some((entry) => entry.kind === "assistant_text")).toBe(false);
+  });
+
+  it("does not resample when a sealed-files verifier blocks the commit", async () => {
+    const { turn, llm, transcript, controlEvents, sse } = await makeFixture(undefined, {
+      beforeCommitBlockReason:
+        "[RULE:SEALED_FILES] Sealed files changed without explicit approval.",
+    });
+
+    await turn.execute();
+    await expect(turn.commitWithRetry()).rejects.toThrow(
+      "beforeCommit blocked: [RULE:SEALED_FILES]",
+    );
+
+    expect(llm.calls).toHaveLength(1);
+    expect(
+      sse.agentEvents.some(
+        (event) =>
+          !!event &&
+          typeof event === "object" &&
+          (event as { type?: unknown }).type === "retry",
+      ),
+    ).toBe(false);
+
+    const events = await controlEvents.readByTurn("turn-retry-1");
+    expect(events.some((event) => event.type === "retry")).toBe(false);
+    expect(visibleTextAfterLastClear(sse.agentEvents)).toBe("");
+
+    const entries = await transcript.readAll();
+    expect(entries.some((entry) => entry.kind === "assistant_text")).toBe(false);
+  });
+
+  it("does not resample when a hook timeout blocks the commit", async () => {
+    const { turn, llm, transcript } = await makeFixture(undefined, {
+      beforeCommitBlockReason:
+        "hook:builtin:self-claim-verifier threw: Error: hook timeout after 5000ms",
+    });
+
+    await turn.execute();
+    await expect(turn.commitWithRetry()).rejects.toThrow(
+      "beforeCommit blocked: hook:builtin:self-claim-verifier threw: Error: hook timeout",
+    );
+
+    expect(llm.calls).toHaveLength(1);
+    const entries = await transcript.readAll();
+    expect(entries.some((entry) => entry.kind === "assistant_text")).toBe(false);
+  });
+
   it("uses the resolved turn model for normal and retry LLM calls", async () => {
     const { turn, llm } = await makeFixture(undefined, {
       runtimeModel: "openai/gpt-5.5",
@@ -286,6 +390,30 @@ describe("Turn blocked-output retry", () => {
     expect(serialized.indexOf("\"type\":\"tool_use\"")).toBeLessThan(
       serialized.indexOf("\"type\":\"tool_result\""),
     );
+  });
+
+  it("drops unresolved final tool_use before blocked-commit retry replay", async () => {
+    const { turn, llm } = await makeFixture([
+      { blocks: [{ type: "text", text: "Unsupported partial 1" }], stopReason: "max_tokens" },
+      { blocks: [{ type: "text", text: "Unsupported partial 2" }], stopReason: "max_tokens" },
+      { blocks: [{ type: "text", text: "Unsupported partial 3" }], stopReason: "max_tokens" },
+      {
+        blocks: [
+          { type: "text", text: "Unsupported final." },
+          { type: "tool_use", id: "tool_orphan", name: "Echo", input: { msg: "late" } },
+        ],
+        stopReason: "max_tokens",
+      },
+      { blocks: [{ type: "text", text: "Verified answer." }], stopReason: "end_turn" },
+    ]);
+
+    await turn.execute();
+    const result = await turn.commitWithRetry();
+
+    expect(result).toMatchObject({ status: "committed", finalText: "Verified answer." });
+    const retryMessages = JSON.stringify(llm.calls[4]?.messages ?? []);
+    expect(retryMessages).toContain("Unsupported final.");
+    expect(retryMessages).not.toContain("tool_orphan");
   });
 
   it("advances structured-output retry attempts and aborts only after exhaustion", async () => {

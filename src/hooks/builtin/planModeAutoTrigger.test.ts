@@ -13,16 +13,47 @@ import {
 import type { HookContext } from "../types.js";
 import type { LLMMessage } from "../../transport/LLMClient.js";
 import type { PermissionMode } from "../../Session.js";
+import { ExecutionContractStore } from "../../execution/ExecutionContract.js";
 
 function llmThatAnswers(answer: string): HookContext["llm"] {
   return {
-    stream: vi.fn(async function* () {
+    stream: vi.fn(async function* (request: { system?: string }) {
+      if (String(request.system ?? "").includes("runtime-control classifier")) {
+        yield {
+          kind: "text_delta" as const,
+          delta: JSON.stringify({
+            turnMode: {
+              label: answer === "YES" ? "coding" : "other",
+              confidence: 0.9,
+            },
+            skipTdd: false,
+            implementationIntent: answer === "YES",
+            documentOrFileOperation: false,
+            deterministic: {
+              requiresDeterministic: false,
+              kinds: [],
+              reason: "No deterministic requirement.",
+              suggestedTools: [],
+              acceptanceCriteria: [],
+            },
+            fileDelivery: {
+              intent: "none",
+              path: null,
+              wantsChatDelivery: false,
+              wantsKbDelivery: false,
+              wantsFileOutput: false,
+            },
+          }),
+        };
+        return;
+      }
       yield { kind: "text_delta" as const, delta: answer };
     }),
   } as unknown as HookContext["llm"];
 }
 
 function makeCtx(sessionKey = "s1", classifierAnswer = "NO"): HookContext {
+  const store = new ExecutionContractStore({ now: () => 1 });
   return {
     botId: "bot-test",
     userId: "user-test",
@@ -32,8 +63,10 @@ function makeCtx(sessionKey = "s1", classifierAnswer = "NO"): HookContext {
     transcript: [],
     emit: vi.fn(),
     log: vi.fn(),
+    agentModel: "test-model",
     abortSignal: new AbortController().signal,
     deadlineMs: 10_000,
+    executionContract: store,
   };
 }
 

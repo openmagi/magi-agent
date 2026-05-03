@@ -13,6 +13,7 @@ import type {
 import type { LLMClient } from "../../transport/LLMClient.js";
 import type { HookContext, RegisteredHook } from "../types.js";
 import { latestUserText } from "./classifyTurnMode.js";
+import { getOrClassifyRequestMeta } from "./turnMetaClassifier.js";
 
 export interface ExactnessClassifierOutput {
   requiresDeterministic: boolean;
@@ -193,14 +194,8 @@ export function makeDeterministicExactnessHook(): RegisteredHook<"beforeLLMCall"
       );
       if (alreadyRecorded) return { action: "continue" };
 
-      const classified = await classifyExactnessNeed({
-        llm: ctx.llm,
-        model: ctx.agentModel,
-        userMessage,
-        timeoutMs: Math.min(DEFAULT_TIMEOUT_MS, ctx.deadlineMs),
-        signal: ctx.abortSignal,
-      });
-      if (!classified.requiresDeterministic) return { action: "continue" };
+      const classified = await getOrClassifyRequestMeta(ctx, { userMessage });
+      if (!classified.deterministic.requiresDeterministic) return { action: "continue" };
 
       const requirementId = `det_${ctx.turnId}_${
         snapshot.taskState.deterministicRequirements.length + 1
@@ -210,16 +205,16 @@ export function makeDeterministicExactnessHook(): RegisteredHook<"beforeLLMCall"
         turnId: ctx.turnId,
         source: "llm_classifier",
         status: "active",
-        kinds: classified.kinds,
-        reason: classified.reason,
-        suggestedTools: classified.suggestedTools,
-        acceptanceCriteria: classified.acceptanceCriteria,
+        kinds: classified.deterministic.kinds,
+        reason: classified.deterministic.reason,
+        suggestedTools: classified.deterministic.suggestedTools,
+        acceptanceCriteria: classified.deterministic.acceptanceCriteria,
       });
       ctx.emit({
         type: "rule_check",
         ruleId: "deterministic-exactness-classifier",
         verdict: "violation",
-        detail: `deterministic evidence required: ${classified.kinds.join(", ")}`,
+        detail: `deterministic evidence required: ${classified.deterministic.kinds.join(", ")}`,
       });
       return { action: "continue" };
     },

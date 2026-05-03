@@ -35,13 +35,12 @@ import {
   type SpawnHandoffArtifact,
 } from "./SpawnAgent.js";
 import { ArtifactManager } from "../artifacts/ArtifactManager.js";
-import { ExecutionContractStore } from "../execution/ExecutionContract.js";
 
 // ── Mocks ──────────────────────────────────────────────────────────
 
 interface MockScript {
   /** Sequence of LLM round-trips; each yields the events for one call. */
-  rounds: LLMEvent[][];
+  rounds: Array<LLMEvent[] | Error>;
 }
 
 function mockLLMClient(script: MockScript): {
@@ -55,6 +54,7 @@ function mockLLMClient(script: MockScript): {
     const round = script.rounds[roundIdx++] ?? [
       { kind: "message_end", stopReason: "end_turn", usage: { inputTokens: 0, outputTokens: 0 } },
     ];
+    if (round instanceof Error) throw round;
     for (const evt of round) {
       yield evt;
     }
@@ -276,80 +276,6 @@ describe("SpawnAgent — §7.12.d", () => {
     expect(toolDefs.map((t) => t.name)).toEqual(["Allowed"]);
   });
 
-  it("wraps child prompts with parent execution contract work order", async () => {
-    const parentTools = [makeStubTool("Allowed")];
-    const script: MockScript = {
-      rounds: [
-        [
-          { kind: "text_delta", blockIndex: 0, delta: "contract child done" },
-          {
-            kind: "message_end",
-            stopReason: "end_turn",
-            usage: { inputTokens: 10, outputTokens: 2 },
-          },
-        ],
-      ],
-    };
-    const { agent, llmCalls } = fakeAgent(parentTools, script) as unknown as {
-      agent: Parameters<typeof makeSpawnAgentTool>[0] & {
-        getSession?: (sessionKey: string) => unknown;
-      };
-      llmCalls: LLMStreamRequest[];
-    };
-    const contract = new ExecutionContractStore({ now: () => 123 });
-    contract.startTurn({
-      userMessage: [
-        "<task_contract>",
-        "<goal>Ship OSS sync</goal>",
-        "<constraints><item>Do not touch unrelated files</item></constraints>",
-        "<acceptance_criteria><item>Focused tests pass</item></acceptance_criteria>",
-        "</task_contract>",
-      ].join("\n"),
-    });
-    agent.getSession = () => ({
-      executionContract: contract,
-      getPermissionMode: () => "default",
-    });
-    const tool = makeSpawnAgentTool(agent);
-    const { ctx } = makeParentCtx();
-
-    const result = await tool.execute(
-      {
-        persona: "child",
-        prompt: "Do the child task",
-        allowed_tools: ["Allowed"],
-        deliver: "return",
-      },
-      ctx,
-    );
-
-    expect(result.status).toBe("ok");
-    const childPrompt = llmCalls[0]?.messages[0]?.content;
-    expect(typeof childPrompt).toBe("string");
-    expect(childPrompt).toContain("<work_order>");
-    expect(childPrompt).toContain("parent_goal: Ship OSS sync");
-    expect(childPrompt).toContain("<item id=");
-    expect(childPrompt).toContain("Focused tests pass</item>");
-    expect(childPrompt).toContain("Do the child task");
-    expect(contract.snapshot().workOrders).toContainEqual(
-      expect.objectContaining({
-        persona: "child",
-        goal: "Ship OSS sync",
-        constraints: ["Do not touch unrelated files"],
-        acceptanceCriteria: ["Focused tests pass"],
-        criteria: [
-          expect.objectContaining({
-            text: "Focused tests pass",
-            status: "pending",
-            required: true,
-          }),
-        ],
-        allowedTools: ["Allowed"],
-        childPrompt: "Do the child task",
-      }),
-    );
-  });
-
   it("(c) deliver='return' returns child finalText and toolCallCount", async () => {
     const parentTools = [makeStubTool("Allowed")];
     const script: MockScript = {
@@ -377,7 +303,15 @@ describe("SpawnAgent — §7.12.d", () => {
     });
 
     const result = await tool.execute(
-      { persona: "child", prompt: "say hi", deliver: "return" },
+      {
+        persona: "child",
+        prompt: "say hi",
+        deliver: "return",
+        completion_contract: {
+          required_evidence: "none",
+          reason: "answer-only delegation",
+        },
+      },
       ctx,
     );
 
@@ -468,7 +402,7 @@ describe("SpawnAgent — §7.12.d", () => {
         return {
           status: "ok",
           finalText: "recovered",
-          toolCallCount: 0,
+          toolCallCount: 1,
         };
       };
       const tool = makeSpawnAgentTool(agent);
@@ -483,6 +417,7 @@ describe("SpawnAgent — §7.12.d", () => {
       const out = result.output as SpawnAgentOutput & { attempts?: number };
       expect(out.status).toBe("ok");
       expect(out.finalText).toBe("recovered");
+      expect(out.toolCallCount).toBe(1);
       expect(out.attempts).toBe(3);
       expect(attempts).toBe(3);
       const retryEvents = events.filter(
@@ -491,6 +426,187 @@ describe("SpawnAgent — §7.12.d", () => {
       );
       expect(retryEvents).toHaveLength(2);
     });
+  });
+
+  it("(c2a) deliver='return' retries an ok child result that violates the default completion contract", async () => {
+    await withZeroSpawnRetryDelay(async () => {
+      const { agent } = fakeAgent([], { rounds: [] }) as unknown as {
+        agent: Parameters<typeof makeSpawnAgentTool>[0];
+      };
+      let attempts = 0;
+      (
+        agent as unknown as {
+          spawnChildTurn: () => Promise<SpawnChildTestResult>;
+        }
+      ).spawnChildTurn = async () => {
+        attempts++;
+        if (attempts === 1) {
+          return {
+            status: "ok",
+            finalText: "서브에이전트가 빈 손으로 돌아왔어 (0 tool calls).",
+            toolCallCount: 0,
+          };
+        }
+        return {
+          status: "ok",
+          finalText: "chapter1_text_v4.md를 읽고 수정안을 작성했습니다.",
+          toolCallCount: 1,
+        };
+      };
+      const tool = makeSpawnAgentTool(agent);
+      const { ctx, events } = makeParentCtx();
+
+      const result = await tool.execute(
+        {
+          persona: "editor",
+          prompt: "Read chapter1_text_v4.md and write SCENE 2-5 revisions.",
+          deliver: "return",
+        },
+        ctx,
+      );
+
+      expect(result.status).toBe("ok");
+      const out = result.output as SpawnAgentOutput & { attempts?: number };
+      expect(out.finalText).toBe("chapter1_text_v4.md를 읽고 수정안을 작성했습니다.");
+      expect(out.toolCallCount).toBe(1);
+      expect(out.attempts).toBe(2);
+      expect(attempts).toBe(2);
+      const retryEvents = events.filter(
+        (e): e is { type: string; errorMessage?: string } =>
+          (e as { type?: unknown }).type === "spawn_retry",
+      );
+      expect(retryEvents).toHaveLength(1);
+      expect(retryEvents[0]?.errorMessage).toContain(
+        "completion_contract (0 tool calls)",
+      );
+    });
+  });
+
+  it("(c2b) completion_contract required_evidence='files' accepts trusted required files", async () => {
+    const tmpRoot = await fs.mkdtemp(path.join(os.tmpdir(), "spawn-files-ok-"));
+    const writer: Tool<Record<string, unknown>, { ok: boolean }> = {
+      name: "WriteChapter",
+      description: "write required chapter",
+      inputSchema: { type: "object" },
+      permission: "meta",
+      kind: "core",
+      async execute(_input, ctx) {
+        const target = path.join(ctx.workspaceRoot, "book/manuscript/01-3-pilots-fail.md");
+        await fs.mkdir(path.dirname(target), { recursive: true });
+        await fs.writeFile(target, "chapter", "utf8");
+        return { status: "ok", output: { ok: true }, durationMs: 0 };
+      },
+    };
+    const script: MockScript = {
+      rounds: [
+        [
+          { kind: "tool_use_start", blockIndex: 0, id: "tu_1", name: "WriteChapter" },
+          { kind: "tool_use_input_delta", blockIndex: 0, partial: "{}" },
+          {
+            kind: "message_end",
+            stopReason: "tool_use",
+            usage: { inputTokens: 1, outputTokens: 1 },
+          },
+        ],
+        [
+          { kind: "text_delta", blockIndex: 0, delta: "chapter complete" },
+          {
+            kind: "message_end",
+            stopReason: "end_turn",
+            usage: { inputTokens: 1, outputTokens: 1 },
+          },
+        ],
+      ],
+    };
+    const { agent } = fakeAgent([writer], script) as unknown as {
+      agent: Parameters<typeof makeSpawnAgentTool>[0];
+    };
+    const tool = makeSpawnAgentTool(agent);
+    const { ctx } = makeParentCtx({ workspaceRoot: tmpRoot });
+
+    const result = await tool.execute(
+      {
+        persona: "writer",
+        prompt: "write chapter",
+        deliver: "return",
+        completion_contract: {
+          required_evidence: "files",
+          required_files: ["book/manuscript/01-3-pilots-fail.md"],
+        },
+      } as SpawnAgentInput,
+      ctx,
+    );
+
+    expect(result.status).toBe("ok");
+    await fs.rm(tmpRoot, { recursive: true, force: true });
+  });
+
+  it("(c2c) completion_contract required_evidence='files' fails when required files are missing", async () => {
+    const tmpRoot = await fs.mkdtemp(path.join(os.tmpdir(), "spawn-files-missing-"));
+    const { agent } = fakeAgent([], {
+      rounds: [
+        [
+          { kind: "text_delta", blockIndex: 0, delta: "done" },
+          {
+            kind: "message_end",
+            stopReason: "end_turn",
+            usage: { inputTokens: 1, outputTokens: 1 },
+          },
+        ],
+      ],
+    }) as unknown as {
+      agent: Parameters<typeof makeSpawnAgentTool>[0];
+    };
+    const tool = makeSpawnAgentTool(agent);
+    const { ctx } = makeParentCtx({ workspaceRoot: tmpRoot });
+
+    const result = await tool.execute(
+      {
+        persona: "writer",
+        prompt: "claim done",
+        deliver: "return",
+        completion_contract: {
+          required_evidence: "files",
+          required_files: ["book/manuscript/01-3-pilots-fail.md"],
+        },
+      } as SpawnAgentInput,
+      ctx,
+    );
+
+    expect(result.status).toBe("error");
+    expect(result.errorMessage).toContain("missing required files");
+    await fs.rm(tmpRoot, { recursive: true, force: true });
+  });
+
+  it("(c2d) completion_contract required_evidence='text' rejects empty final text", async () => {
+    const { agent } = fakeAgent([], {
+      rounds: [
+        [
+          {
+            kind: "message_end",
+            stopReason: "end_turn",
+            usage: { inputTokens: 1, outputTokens: 0 },
+          },
+        ],
+      ],
+    }) as unknown as {
+      agent: Parameters<typeof makeSpawnAgentTool>[0];
+    };
+    const tool = makeSpawnAgentTool(agent);
+    const { ctx } = makeParentCtx();
+
+    const result = await tool.execute(
+      {
+        persona: "answerer",
+        prompt: "answer",
+        deliver: "return",
+        completion_contract: { required_evidence: "text" },
+      } as SpawnAgentInput,
+      ctx,
+    );
+
+    expect(result.status).toBe("error");
+    expect(result.errorMessage).toContain("non-empty final text");
   });
 
   it("(c3) deliver='return' surfaces exhausted child failures as tool errors", async () => {
@@ -571,9 +687,206 @@ describe("SpawnAgent — §7.12.d", () => {
     });
   });
 
+  it("(c5) preserves partial tool evidence when the child stream aborts after side effects", async () => {
+    await withZeroSpawnRetryDelay(async () => {
+      const writer: Tool<Record<string, unknown>, { ok: boolean }> = {
+        name: "WriteMarker",
+        description: "write a marker through ctx.workspaceRoot",
+        inputSchema: { type: "object" },
+        permission: "meta",
+        kind: "core",
+        async execute(_input, ctx) {
+          await fs.writeFile(path.join(ctx.workspaceRoot, "marker.txt"), "x");
+          return { status: "ok", output: { ok: true }, durationMs: 0 };
+        },
+      };
+      const script: MockScript = {
+        rounds: [
+          [
+            { kind: "tool_use_start", blockIndex: 0, id: "tu_1", name: "WriteMarker" },
+            { kind: "tool_use_input_delta", blockIndex: 0, partial: "{}" },
+            {
+              kind: "message_end",
+              stopReason: "tool_use",
+              usage: { inputTokens: 1, outputTokens: 1 },
+            },
+          ],
+          new Error("aborted"),
+        ],
+      };
+      const { agent } = fakeAgent([writer], script) as unknown as {
+        agent: Parameters<typeof makeSpawnAgentTool>[0];
+      };
+      const tool = makeSpawnAgentTool(agent);
+      const tmpRoot = await fs.mkdtemp(path.join(os.tmpdir(), "spawn-partial-"));
+      const { ctx, events } = makeParentCtx({ workspaceRoot: tmpRoot });
+
+      const result = await tool.execute(
+        { persona: "child", prompt: "write then abort", deliver: "return" },
+        ctx,
+      );
+
+      expect(result.status).toBe("error");
+      const out = result.output as SpawnAgentOutput & { attempts?: number };
+      expect(out.toolCallCount).toBe(1);
+      expect(out.attempts).toBe(1);
+      expect(out.errorMessage).toContain("aborted");
+      await expect(fs.access(path.join(tmpRoot, "marker.txt"))).resolves.toBeUndefined();
+      const retryEvents = events.filter(
+        (e): e is { type: string } =>
+          (e as { type?: unknown }).type === "spawn_retry",
+      );
+      expect(retryEvents).toHaveLength(0);
+
+      await fs.rm(tmpRoot, { recursive: true, force: true });
+    });
+  });
+
   // ── PRE-01 isolation tests ─────────────────────────────────────
 
-  describe("PRE-01 — ephemeral workspace isolation", () => {
+  describe("trusted worker workspace policy", () => {
+    it("(tw1) defaults children to trusted parent-workspace writes", async () => {
+      const tmpRoot = await fs.mkdtemp(path.join(os.tmpdir(), "spawn-trusted-"));
+      const writer: Tool<{ name: string }, { path: string }> = {
+        name: "Writer",
+        description: "stub writer that uses ctx.workspaceRoot",
+        inputSchema: { type: "object" },
+        permission: "meta",
+        kind: "core",
+        async execute(input, ctx) {
+          const target = path.join(ctx.workspaceRoot, input.name);
+          await fs.mkdir(path.dirname(target), { recursive: true });
+          await fs.writeFile(target, "trusted child output", "utf8");
+          return {
+            status: "ok",
+            output: { path: target },
+            durationMs: 1,
+          };
+        },
+      };
+      const script: MockScript = {
+        rounds: [
+          [
+            { kind: "tool_use_start", blockIndex: 0, id: "toolu_writer", name: "Writer" },
+            {
+              kind: "tool_use_input_delta",
+              blockIndex: 0,
+              partial: JSON.stringify({ name: "book/manuscript/01-3-pilots-fail.md" }),
+            },
+            {
+              kind: "message_end",
+              stopReason: "tool_use",
+              usage: { inputTokens: 1, outputTokens: 1 },
+            },
+          ],
+          [
+            { kind: "text_delta", blockIndex: 0, delta: "wrote final chapter" },
+            {
+              kind: "message_end",
+              stopReason: "end_turn",
+              usage: { inputTokens: 1, outputTokens: 1 },
+            },
+          ],
+        ],
+      };
+      const { agent } = fakeAgent([writer], script) as unknown as {
+        agent: Parameters<typeof makeSpawnAgentTool>[0];
+      };
+      const tool = makeSpawnAgentTool(agent);
+      const { ctx } = makeParentCtx({ workspaceRoot: tmpRoot });
+
+      const result = await tool.execute(
+        { persona: "writer", prompt: "write the chapter", deliver: "return" },
+        ctx,
+      );
+
+      expect(result.status).toBe("ok");
+      const out = result.output as SpawnAgentOutput;
+      expect(out.artifacts?.spawnDir.startsWith(path.join(tmpRoot, ".spawn"))).toBe(true);
+      await expect(
+        fs.readFile(path.join(tmpRoot, "book/manuscript/01-3-pilots-fail.md"), "utf8"),
+      ).resolves.toBe("trusted child output");
+      await expect(
+        fs.access(path.join(out.artifacts!.spawnDir, "book/manuscript/01-3-pilots-fail.md")),
+      ).rejects.toThrow();
+
+      await fs.rm(tmpRoot, { recursive: true, force: true });
+    });
+
+    it("(tw2) workspace_policy='isolated' keeps writes inside spawnDir", async () => {
+      const tmpRoot = await fs.mkdtemp(path.join(os.tmpdir(), "spawn-isolated-"));
+      const writer: Tool<{ name: string }, { path: string }> = {
+        name: "Writer",
+        description: "stub writer that uses ctx.workspaceRoot",
+        inputSchema: { type: "object" },
+        permission: "meta",
+        kind: "core",
+        async execute(input, ctx) {
+          const target = path.join(ctx.workspaceRoot, input.name);
+          await fs.mkdir(path.dirname(target), { recursive: true });
+          await fs.writeFile(target, "isolated child output", "utf8");
+          return {
+            status: "ok",
+            output: { path: target },
+            durationMs: 1,
+          };
+        },
+      };
+      const script: MockScript = {
+        rounds: [
+          [
+            { kind: "tool_use_start", blockIndex: 0, id: "toolu_writer", name: "Writer" },
+            {
+              kind: "tool_use_input_delta",
+              blockIndex: 0,
+              partial: JSON.stringify({ name: "book/work/isolated.md" }),
+            },
+            {
+              kind: "message_end",
+              stopReason: "tool_use",
+              usage: { inputTokens: 1, outputTokens: 1 },
+            },
+          ],
+          [
+            { kind: "text_delta", blockIndex: 0, delta: "wrote scratch" },
+            {
+              kind: "message_end",
+              stopReason: "end_turn",
+              usage: { inputTokens: 1, outputTokens: 1 },
+            },
+          ],
+        ],
+      };
+      const { agent } = fakeAgent([writer], script) as unknown as {
+        agent: Parameters<typeof makeSpawnAgentTool>[0];
+      };
+      const tool = makeSpawnAgentTool(agent);
+      const { ctx } = makeParentCtx({ workspaceRoot: tmpRoot });
+
+      const result = await tool.execute(
+        {
+          persona: "writer",
+          prompt: "write scratch",
+          deliver: "return",
+          workspace_policy: "isolated",
+        } as SpawnAgentInput,
+        ctx,
+      );
+
+      expect(result.status).toBe("ok");
+      const out = result.output as SpawnAgentOutput;
+      await expect(
+        fs.readFile(path.join(out.artifacts!.spawnDir, "book/work/isolated.md"), "utf8"),
+      ).resolves.toBe("isolated child output");
+      await expect(
+        fs.access(path.join(tmpRoot, "book/work/isolated.md")),
+      ).rejects.toThrow();
+
+      await fs.rm(tmpRoot, { recursive: true, force: true });
+    });
+  });
+
+  describe("PRE-01 — opt-in ephemeral workspace isolation", () => {
     let tmpRoot: string;
 
     beforeEach(async () => {
@@ -652,7 +965,7 @@ describe("SpawnAgent — §7.12.d", () => {
       const { ctx } = makeParentCtx({ workspaceRoot: tmpRoot });
 
       const result = await tool.execute(
-        { persona: "peeker", prompt: "peek", deliver: "return" },
+        { persona: "peeker", prompt: "peek", deliver: "return", workspace_policy: "isolated" },
         ctx,
       );
       expect(result.status).toBe("ok");
@@ -718,7 +1031,7 @@ describe("SpawnAgent — §7.12.d", () => {
       const { ctx } = makeParentCtx({ workspaceRoot: tmpRoot });
 
       const result = await tool.execute(
-        { persona: "writer", prompt: "write", deliver: "return" },
+        { persona: "writer", prompt: "write", deliver: "return", workspace_policy: "isolated" },
         ctx,
       );
       expect(result.status).toBe("ok");
@@ -752,7 +1065,13 @@ describe("SpawnAgent — §7.12.d", () => {
       const { ctx } = makeParentCtx({ workspaceRoot: tmpRoot });
 
       const result = await tool.execute(
-        { persona: "idle", prompt: "nothing", deliver: "return" },
+        {
+          persona: "idle",
+          prompt: "nothing",
+          deliver: "return",
+          workspace_policy: "isolated",
+          completion_contract: { required_evidence: "none" },
+        },
         ctx,
       );
       expect(result.status).toBe("ok");
@@ -822,7 +1141,12 @@ describe("SpawnAgent — §7.12.d", () => {
       const { ctx, events } = makeParentCtx({ workspaceRoot: tmpRoot });
 
       const result = await tool.execute(
-        { persona: "writer", prompt: "write two", deliver: "return" },
+        {
+          persona: "writer",
+          prompt: "write two",
+          deliver: "return",
+          workspace_policy: "isolated",
+        },
         ctx,
       );
       expect(result.status).toBe("ok");
@@ -926,7 +1250,7 @@ describe("SpawnAgent — §7.12.d", () => {
       const { ctx } = makeParentCtx({ workspaceRoot: tmpRoot });
 
       const result = await tool.execute(
-        { persona: "worker", prompt: "seed", deliver: "return" },
+        { persona: "worker", prompt: "seed", deliver: "return", workspace_policy: "isolated" },
         ctx,
       );
       expect(result.status).toBe("ok");
@@ -973,7 +1297,12 @@ describe("SpawnAgent — §7.12.d", () => {
       const { ctx } = makeParentCtx({ workspaceRoot: tmpRoot });
 
       const result = await tool.execute(
-        { persona: "idle", prompt: "noop", deliver: "return" },
+        {
+          persona: "idle",
+          prompt: "noop",
+          deliver: "return",
+          completion_contract: { required_evidence: "none" },
+        },
         ctx,
       );
       expect(result.status).toBe("ok");
@@ -1026,7 +1355,7 @@ describe("SpawnAgent — §7.12.d", () => {
       const { ctx, events } = makeParentCtx({ workspaceRoot: tmpRoot });
 
       await tool.execute(
-        { persona: "bg", prompt: "seed", deliver: "background" },
+        { persona: "bg", prompt: "seed", deliver: "background", workspace_policy: "isolated" },
         ctx,
       );
 
@@ -1083,7 +1412,12 @@ describe("SpawnAgent — §7.12.d", () => {
       const { ctx } = makeParentCtx({ workspaceRoot: tmpRoot });
 
       const result = await tool.execute(
-        { persona: "explore", prompt: "investigate", deliver: "return" },
+        {
+          persona: "explore",
+          prompt: "investigate",
+          deliver: "return",
+          completion_contract: { required_evidence: "none" },
+        },
         ctx,
       );
       expect(result.status).toBe("ok");
@@ -1128,6 +1462,7 @@ describe("SpawnAgent — §7.12.d", () => {
           prompt: "write something",
           allowed_tools: ["FileWrite"],
           deliver: "return",
+          completion_contract: { required_evidence: "none" },
         },
         ctx,
       );
@@ -1162,15 +1497,14 @@ describe("SpawnAgent — §7.12.d", () => {
     }
 
     it("(t1) variants=3 + haiku_rubric picks highest score", async () => {
-      // Three child rounds produce "v0", "v1", "v2"; then three scorer
-      // rounds produce "75", "60", "85" (integer-only).
+      // Each child variant is scored as soon as it completes.
       const script: MockScript = {
         rounds: [
           variantRound("v0"),
-          variantRound("v1"),
-          variantRound("v2"),
           variantRound("75"),
+          variantRound("v1"),
           variantRound("60"),
+          variantRound("v2"),
           variantRound("85"),
         ],
       };
@@ -1447,7 +1781,15 @@ describe("SpawnAgent — §7.12.d", () => {
     const { ctx, events } = makeParentCtx();
 
     const result = await tool.execute(
-      { persona: "bg", prompt: "work", deliver: "background" } satisfies SpawnAgentInput,
+      {
+        persona: "bg",
+        prompt: "work",
+        deliver: "background",
+        completion_contract: {
+          required_evidence: "none",
+          reason: "event emission test uses answer-only child",
+        },
+      } satisfies SpawnAgentInput,
       ctx,
     );
     expect(result.status).toBe("ok");
@@ -1490,6 +1832,7 @@ describe("SpawnAgent — §7.12.d", () => {
         prompt: "1+1=?",
         deliver: "return",
         model: "gpt-5.4",
+        completion_contract: { required_evidence: "none" },
       },
       ctx,
     );
@@ -1521,6 +1864,7 @@ describe("SpawnAgent — §7.12.d", () => {
         prompt: "1+1=?",
         deliver: "return",
         model: "openai/gpt-5.5-pro",
+        completion_contract: { required_evidence: "none" },
       },
       ctx,
     );
@@ -1547,7 +1891,12 @@ describe("SpawnAgent — §7.12.d", () => {
     const { ctx } = makeParentCtx();
 
     await tool.execute(
-      { persona: "default-child", prompt: "go", deliver: "return" },
+      {
+        persona: "default-child",
+        prompt: "go",
+        deliver: "return",
+        completion_contract: { required_evidence: "none" },
+      },
       ctx,
     );
 
@@ -1720,7 +2069,7 @@ describe("SpawnAgent — §7.12.d", () => {
         return {
           status: "ok",
           finalText: "background recovered",
-          toolCallCount: 0,
+          toolCallCount: 1,
         };
       };
       const tool = makeSpawnAgentTool(agent);

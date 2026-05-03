@@ -366,6 +366,42 @@ describe("Turn.execute() stop-reason taxonomy", () => {
     expect(events).not.toContain("rule_check_violation");
   });
 
+  it("injects the current routed model identity into the LLM call", async () => {
+    const decision: RouteDecision = {
+      profileId: "premium",
+      tier: "DEEP",
+      provider: "openai",
+      model: "gpt-5.5",
+      supportsTools: true,
+      supportsImages: true,
+      reason: "premium DEEP",
+      classifierUsed: true,
+      classifierModel: "claude-sonnet-4-6",
+      classifierRaw: "DEEP",
+      confidence: "classifier",
+    };
+    const { turn, llm } = await makeFixture(
+      [{ blocks: [{ type: "text", text: "hello." }], stopReason: "end_turn" }],
+      {
+        model: "clawy-smart-router/auto",
+        router: { resolve: async () => decision },
+      },
+    );
+
+    await turn.execute();
+
+    const messages = llm.calls[0]?.messages ?? [];
+    const identityContent = messages[0]?.content;
+    const identityText = Array.isArray(identityContent) && identityContent[0]?.type === "text"
+      ? identityContent[0].text
+      : "";
+    expect(identityText).toContain("<runtime_model_identity hidden=\"true\">");
+    expect(identityText).toContain("router: Premium Router");
+    expect(identityText).toContain("answering_model: openai/gpt-5.5");
+    expect(identityText).toContain("classifier_model: claude-sonnet-4-6");
+    expect(messages.at(-1)?.content).toBe("say something long please");
+  });
+
   it("pending injection deferral clears prior visible draft and commits only the resumed answer", async () => {
     const { turn, llm, sse } = await makeFixture(
       [
@@ -414,7 +450,7 @@ describe("Turn.execute() stop-reason taxonomy", () => {
         { blocks: [{ type: "text", text: "Recovered with visible text." }], stopReason: "end_turn" },
       ],
       {
-        model: "clawy-smart-router/auto",
+        model: "big-dic-router/auto",
         router: { resolve: async () => geminiDecision },
       },
     );
@@ -447,6 +483,26 @@ describe("Turn.execute() stop-reason taxonomy", () => {
     const { turn, llm } = await makeFixture([
       { blocks: [{ type: "text", text: answer }], stopReason: "end_turn" },
       { blocks: [{ type: "text", text: "이전 응답은 잘리지 않았습니다. 핵심 내용을 다시 정리드리면..." }], stopReason: "end_turn" },
+    ]);
+
+    await turn.execute();
+    const commit = await turn.commit();
+
+    expect(llm.calls.length).toBe(1);
+    expect(commit.finalText).toBe(answer);
+  });
+
+  it("does not treat a long complete answer ending with a mention as truncated", async () => {
+    const answer =
+      "테스트 진행 상태를 정리했습니다.\n\n" +
+      "현재 확인된 내용은 로그인 전 랜딩 페이지, 개인정보 안내, 로그인 패널, 동의 체크박스, " +
+      "Next.js 기반 SPA 구조입니다. 로그인 이후 흐름은 실제 계정 정보와 브라우저 세션이 필요합니다.\n\n" +
+      "요청하신 항목은 대기 상태로 두고, 계정 정보가 제공되면 질문 응답, 프로파일 생성, 딜 검토, 저장 복원, " +
+      "반응형 확인까지 이어서 진행하겠습니다.\n\n" +
+      "@donggun_jung";
+    const { turn, llm } = await makeFixture([
+      { blocks: [{ type: "text", text: answer }], stopReason: "end_turn" },
+      { blocks: [{ type: "text", text: "이전 응답은 잘리지 않았습니다." }], stopReason: "end_turn" },
     ]);
 
     await turn.execute();

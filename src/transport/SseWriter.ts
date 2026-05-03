@@ -5,7 +5,7 @@
  * Emits TWO interleaved streams on the same SSE body:
  *
  *  1. Legacy OpenAI-compatible `data: {...}` lines (choices[].delta.*)
- *     so chat-proxy's existing legacy gateway-era parsing pipeline keeps
+ *     so chat-proxy's existing legacy parsing pipeline keeps
  *     working for this bot during the migration.
  *
  *  2. `event: agent\ndata: {...}` lines carrying structured
@@ -24,7 +24,7 @@ import type { ServerResponse } from "node:http";
 import { safeAgentEvent } from "./safeAgentEvent.js";
 import type { TurnStatus, TurnStopReason } from "../turn/types.js";
 import type { ControlEvent } from "../control/ControlEvents.js";
-import { stripLeadingRouteMetaTag } from "../turn/visibleText.js";
+import { UserVisibleRouteMetaFilter } from "../turn/visibleText.js";
 
 export type TurnRoute = "direct" | "subagent" | "pipeline";
 
@@ -211,7 +211,7 @@ export type AgentEvent =
        * minimum viable live budget, the turn aborts with this event so
        * the UI can prompt the user to switch to a larger-window model.
        *
-       * Fields mirror legacy gateway's upstream `compaction_impossible`
+       * Fields mirror Open-source legacy runtime's upstream `compaction_impossible`
        * telemetry so dashboards can cross-check.
        */
       type: "compaction_impossible";
@@ -251,8 +251,7 @@ export type AgentEvent =
 
 export class SseWriter {
   private ended = false;
-  private leadingTextDeltaBuffer: string | null = "";
-  private stripLeadingWhitespaceAfterMeta = false;
+  private readonly visibleTextFilter = new UserVisibleRouteMetaFilter();
 
   constructor(private readonly res: ServerResponse) {}
 
@@ -266,53 +265,36 @@ export class SseWriter {
     });
     // Flush headers immediately so chat-proxy sees the first byte.
     // (Node auto-flushes on first write, but a comment line forces it.)
-    this.res.write(":ok\n\n");
+    this.write(":ok\n\n");
   }
 
   /** Emit a structured agent event on the `agent` SSE event channel. */
   agent(event: AgentEvent): void {
     if (this.ended) return;
-    const visibleEvent = this.filterAgentEvent(event);
-    if (!visibleEvent) return;
-    const safeEvent = safeAgentEvent(visibleEvent);
-    if (!safeEvent) return;
-    this.res.write(`event: agent\ndata: ${JSON.stringify(safeEvent)}\n\n`);
-  }
-
-  private filterAgentEvent(event: AgentEvent): AgentEvent | null {
     if (event.type === "turn_start" || event.type === "response_clear") {
-      this.leadingTextDeltaBuffer = "";
-      this.stripLeadingWhitespaceAfterMeta = false;
-      return event;
+      this.visibleTextFilter.reset();
+      this.writeAgentEvent(event);
+      return;
     }
-    if (event.type !== "text_delta") return event;
-    const delta = this.filterLeadingTextDelta(event.delta);
-    if (delta.length === 0) return null;
-    return { ...event, delta };
+    if (event.type === "text_delta") {
+      const delta = this.visibleTextFilter.filter(event.delta);
+      if (delta.length === 0) return;
+      this.writeAgentEvent({ ...event, delta });
+      return;
+    }
+    if (event.type === "turn_end") {
+      const flushed = this.visibleTextFilter.flush();
+      if (flushed.length > 0) {
+        this.writeAgentEvent({ type: "text_delta", delta: flushed });
+      }
+    }
+    this.writeAgentEvent(event);
   }
 
-  private filterLeadingTextDelta(delta: string): string {
-    if (this.leadingTextDeltaBuffer === null) {
-      if (!this.stripLeadingWhitespaceAfterMeta) return delta;
-      const strippedDelta = delta.replace(/^\s+/, "");
-      this.stripLeadingWhitespaceAfterMeta = strippedDelta.length === 0;
-      return strippedDelta;
-    }
-    const next = this.leadingTextDeltaBuffer + delta;
-    const stripped = stripLeadingRouteMetaTag(next);
-    if (stripped !== next) {
-      this.leadingTextDeltaBuffer = null;
-      this.stripLeadingWhitespaceAfterMeta = true;
-      const strippedDelta = stripped.replace(/^\s+/, "");
-      this.stripLeadingWhitespaceAfterMeta = strippedDelta.length === 0;
-      return strippedDelta;
-    }
-    if (isPotentialLeadingRouteMetaPrefix(next)) {
-      this.leadingTextDeltaBuffer = next;
-      return "";
-    }
-    this.leadingTextDeltaBuffer = null;
-    return next;
+  private writeAgentEvent(event: AgentEvent): void {
+    const safeEvent = safeAgentEvent(event);
+    if (!safeEvent) return;
+    this.write(`event: agent\ndata: ${JSON.stringify(safeEvent)}\n\n`);
   }
 
   /**
@@ -325,30 +307,41 @@ export class SseWriter {
     const payload = {
       choices: [{ index: 0, delta: { role: "assistant", content } }],
     };
-    this.res.write(`data: ${JSON.stringify(payload)}\n\n`);
+    this.write(`data: ${JSON.stringify(payload)}\n\n`);
   }
 
   /** Emit the OpenAI finish_reason + DONE marker the legacy pipeline expects. */
   legacyFinish(): void {
     if (this.ended) return;
     const stop = { choices: [{ index: 0, delta: {}, finish_reason: "stop" }] };
-    this.res.write(`data: ${JSON.stringify(stop)}\n\n`);
-    this.res.write("data: [DONE]\n\n");
+    this.write(`data: ${JSON.stringify(stop)}\n\n`);
+    this.write("data: [DONE]\n\n");
   }
 
   end(): void {
     if (this.ended) return;
     this.ended = true;
-    this.res.end();
+    if (this.res.destroyed || this.res.writableEnded) return;
+    try {
+      this.res.end();
+    } catch {
+      // Client refresh/app background can close the socket before the runtime
+      // finishes. Recovery uses chat-proxy snapshots and persisted channel rows.
+    }
   }
-}
 
-function isPotentialLeadingRouteMetaPrefix(text: string): boolean {
-  const trimmed = text.trimStart();
-  if (trimmed.length === 0) return true;
-  if (/^\[META\s*:/i.test(trimmed) && !trimmed.includes("]")) return true;
-  const compact = trimmed.replace(/\s+/g, "").toUpperCase();
-  return "[META:".startsWith(compact);
+  private write(chunk: string): void {
+    if (this.ended) return;
+    if (this.res.destroyed || this.res.writableEnded) {
+      this.ended = true;
+      return;
+    }
+    try {
+      this.res.write(chunk);
+    } catch {
+      this.ended = true;
+    }
+  }
 }
 
 /**

@@ -14,33 +14,33 @@ import { stat } from "fs/promises";
 import path from "node:path";
 import type { ChannelRef } from "../util/types.js";
 
-export type FileSendMode = "document" | "photo";
-
 export interface FileSendInput {
   path: string;
   channel?: string;
   caption?: string;
-  mode?: FileSendMode;
+  mode?: "document" | "photo";
 }
 
 export interface FileSendOutput {
-  id: string;
+  id?: string;
   filename: string;
-  marker: string;
+  marker?: string;
+  channel?: ChannelRef;
+  mode?: "document" | "photo";
 }
 
 export interface FileSendDeps {
   workspaceRoot: string;
-  binDir?: string;
-  gatewayToken?: string;
-  botId?: string;
-  chatProxyUrl?: string;
+  binDir: string;
+  gatewayToken: string;
+  botId: string;
+  chatProxyUrl: string;
   getSourceChannel?: (ctx: ToolContext) => ChannelRef | null;
   sendFile?: (
     channel: ChannelRef,
     filePath: string,
-    caption?: string,
-    mode?: FileSendMode,
+    caption: string | undefined,
+    mode: "document" | "photo",
   ) => Promise<void>;
 }
 
@@ -84,12 +84,12 @@ export function makeFileSendTool(deps: FileSendDeps): Tool<FileSendInput, FileSe
         },
         caption: {
           type: "string",
-          description: "Optional caption to include with the delivered file.",
+          description: "Optional caption for Telegram/Discord direct file delivery",
         },
         mode: {
           type: "string",
           enum: ["document", "photo"],
-          description: "Delivery mode. Defaults to document.",
+          description: "Delivery mode for Telegram/Discord. Defaults to document.",
         },
       },
       required: ["path"],
@@ -101,18 +101,15 @@ export function makeFileSendTool(deps: FileSendDeps): Tool<FileSendInput, FileSe
       if (!input?.path || typeof input.path !== "string") {
         return "`path` is required";
       }
-      if (input.mode !== undefined && input.mode !== "document" && input.mode !== "photo") {
-        return "`mode` must be document or photo";
-      }
       return null;
     },
 
     async execute(input, ctx): Promise<ToolResult<FileSendOutput>> {
       const start = Date.now();
       try {
-        const root = path.resolve(deps.workspaceRoot);
-        const resolved = path.resolve(root, input.path);
-        if (resolved !== root && !resolved.startsWith(root + path.sep)) {
+        const resolved = path.resolve(deps.workspaceRoot, input.path);
+        const rel = path.relative(deps.workspaceRoot, resolved);
+        if (rel.startsWith("..") || path.isAbsolute(rel)) {
           return {
             status: "error",
             errorCode: "path_escape",
@@ -138,27 +135,22 @@ export function makeFileSendTool(deps: FileSendDeps): Tool<FileSendInput, FileSe
           };
         }
 
-        const filename = path.basename(resolved);
         const sourceChannel = deps.getSourceChannel?.(ctx) ?? null;
-        if (sourceChannel && deps.sendFile) {
+        if (
+          sourceChannel &&
+          deps.sendFile &&
+          (sourceChannel.type === "telegram" || sourceChannel.type === "discord")
+        ) {
+          const filename = path.basename(resolved);
           const mode = input.mode ?? "document";
           await deps.sendFile(sourceChannel, resolved, input.caption, mode);
           return {
             status: "ok",
             output: {
-              id: `${sourceChannel.type}:${sourceChannel.channelId}:${filename}`,
               filename,
-              marker: `[attachment:${filename}]`,
+              channel: sourceChannel,
+              mode,
             },
-            durationMs: Date.now() - start,
-          };
-        }
-
-        if (!deps.binDir || !deps.gatewayToken || !deps.botId || deps.chatProxyUrl === undefined) {
-          return {
-            status: "error",
-            errorCode: "delivery_unavailable",
-            errorMessage: "No file delivery backend configured",
             durationMs: Date.now() - start,
           };
         }
@@ -188,6 +180,7 @@ export function makeFileSendTool(deps: FileSendDeps): Tool<FileSendInput, FileSe
         // Parse attachment ID from output
         const idMatch = stdout.match(/"id":"([^"]+)"/);
         const markerMatch = stdout.match(/\[attachment:[^\]]+\]/);
+        const filename = path.basename(resolved);
 
         if (!idMatch) {
           return {

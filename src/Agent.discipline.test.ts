@@ -25,23 +25,44 @@ import {
   makeClassifyTurnModeHook,
   type ClassifyTurnModeAgent,
 } from "./hooks/builtin/classifyTurnMode.js";
+import { HookRegistry } from "./hooks/HookRegistry.js";
 import type { HookContext } from "./hooks/types.js";
 import type { Discipline } from "./Session.js";
 import { DEFAULT_DISCIPLINE } from "./discipline/config.js";
+import { ExecutionContractStore } from "./execution/ExecutionContract.js";
 
 function makeHookCtx(): HookContext {
+  const store = new ExecutionContractStore({ now: () => 1 });
   const llm = {
     stream: async function* (req: { system?: string; messages?: Array<{ content: Array<{ text?: string }> }> }) {
       const text = req.messages?.[0]?.content?.[0]?.text ?? "";
-      if (req.system?.includes("skip tests")) {
-        yield { kind: "text_delta", delta: "NO" };
-        return;
-      }
       yield {
         kind: "text_delta",
-        delta: /implement|function|type error|git commit/i.test(text)
-          ? "coding"
-          : "other",
+        delta: JSON.stringify({
+          turnMode: {
+            label: /implement|function|type error|git commit/i.test(text)
+              ? "coding"
+              : "other",
+            confidence: 0.9,
+          },
+          skipTdd: false,
+          implementationIntent: /implement|function|type error/i.test(text),
+          documentOrFileOperation: false,
+          deterministic: {
+            requiresDeterministic: false,
+            kinds: [],
+            reason: "No deterministic requirement.",
+            suggestedTools: [],
+            acceptanceCriteria: [],
+          },
+          fileDelivery: {
+            intent: "none",
+            path: null,
+            wantsChatDelivery: false,
+            wantsKbDelivery: false,
+            wantsFileOutput: false,
+          },
+        }),
       };
     },
   } as unknown as LLMClient;
@@ -54,8 +75,10 @@ function makeHookCtx(): HookContext {
     transcript: [],
     emit: () => {},
     log: () => {},
+    agentModel: "claude-haiku",
     abortSignal: new AbortController().signal,
     deadlineMs: 5_000,
+    executionContract: store,
   };
 }
 
@@ -302,6 +325,42 @@ describe("Agent Discipline — Kevin A/A/A defaults", () => {
     expect(discipline.lastClassifiedMode).toBe("other");
     // No promotion — stays at the default off.
     expect(discipline.requireCommit).toBe(DEFAULT_DISCIPLINE.requireCommit);
+  });
+
+  it("A3: classifier timeout fails open instead of aborting the turn", async () => {
+    const discipline: Discipline = { ...DEFAULT_DISCIPLINE };
+    const classifyAgent: ClassifyTurnModeAgent = {
+      getSessionDiscipline: () => discipline,
+      setSessionDiscipline: (_k, next) => {
+        Object.assign(discipline, next);
+      },
+      isCodingAgentSkillActive: () => true,
+    };
+    const hook = makeClassifyTurnModeHook({ agent: classifyAgent });
+    hook.timeoutMs = 1;
+
+    const registry = new HookRegistry();
+    registry.register(hook);
+
+    const ctx = makeHookCtx();
+    ctx.llm = {
+      stream: async function* () {
+        await new Promise(() => undefined);
+      },
+    } as unknown as LLMClient;
+
+    const outcome = await registry.runPre(
+      "beforeLLMCall",
+      {
+        messages: [{ role: "user", content: "fix the production bug" }],
+        tools: [],
+        system: "",
+        iteration: 0,
+      },
+      ctx,
+    );
+
+    expect(outcome.action).toBe("continue");
   });
 
   it("A4: Agent wires isCodingAgentSkillActive off the tool registry", async () => {

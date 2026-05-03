@@ -16,7 +16,8 @@
  *   • beforeToolUse / afterToolUse hooks when the Agent exposes them
  *   • runtime permission decisions and parent askUser consent delegate
  *   • MAX_SPAWN_DEPTH (parent enforces at SpawnAgent.execute entry)
- *   • PRE-01 workspace isolation (ctx.workspaceRoot = spawnDir)
+ *   • trusted children use the parent workspace by default
+ *   • opt-in isolated children use PRE-01 workspace isolation
  *   • timeout + parent abort propagation via a merged AbortController
  *
  * Invariants preserved 1:1 from the inline implementation:
@@ -49,6 +50,7 @@ import type { Workspace } from "../storage/Workspace.js";
 import { readOne } from "../turn/LLMStreamReader.js";
 import type { PermissionMode } from "../turn/ToolDispatcher.js";
 import { summariseToolOutput } from "../util/toolResult.js";
+import { buildChildSystemPrompt } from "./ChildSystemPrompt.js";
 
 /**
  * Cap on child loop iterations — protects against pathological loops.
@@ -129,6 +131,18 @@ export interface SpawnChildResult {
   errorMessage?: string;
 }
 
+export type SpawnWorkspacePolicy = "trusted" | "isolated";
+
+export class SpawnChildPartialError extends Error {
+  readonly partialResult: SpawnChildResult;
+
+  constructor(message: string, partialResult: SpawnChildResult) {
+    super(message);
+    this.name = "SpawnChildPartialError";
+    this.partialResult = partialResult;
+  }
+}
+
 export interface SpawnChildOptions {
   parentSessionKey: string;
   parentTurnId: string;
@@ -140,19 +154,18 @@ export interface SpawnChildOptions {
   timeoutMs: number;
   abortSignal: AbortSignal;
   botId: string;
-  /**
-   * Parent's workspace root. Retained on the options for audit / debug
-   * context but NOT used as the child's tool context (PRE-01 fix).
-   * Child tool contexts receive `spawnDir` as their workspaceRoot.
-   */
+  /** Parent workspace root. Trusted children use this as their tool workspace. */
   workspaceRoot: string;
   /**
    * Ephemeral subdirectory for the child — `workspace/.spawn/{taskId}/`.
-   * Child tool contexts are scoped here (PRE-01).
+   * Trusted children use this as scratch/audit metadata; isolated children
+   * use it as their tool workspace.
    */
   spawnDir: string;
   /** Workspace instance rooted at `spawnDir`. */
   spawnWorkspace: Workspace;
+  /** Trusted by default; isolated preserves the legacy spawnDir sandbox. */
+  workspacePolicy?: SpawnWorkspacePolicy;
   taskId: string;
   /** Override the LLM model for this child (e.g. "gpt-5.4", "gemini-3.1-pro-preview"). */
   modelOverride?: string;
@@ -226,6 +239,18 @@ function collectText(blocks: LLMContentBlock[]): string {
     .filter((b): b is Extract<LLMContentBlock, { type: "text" }> => b.type === "text")
     .map((b) => b.text)
     .join("");
+}
+
+function childWorkspacePolicy(opts: Pick<SpawnChildOptions, "workspacePolicy">): SpawnWorkspacePolicy {
+  return opts.workspacePolicy ?? "trusted";
+}
+
+function childWorkspaceRoot(opts: SpawnChildOptions): string {
+  return childWorkspacePolicy(opts) === "isolated" ? opts.spawnDir : opts.workspaceRoot;
+}
+
+function childSpawnWorkspace(opts: SpawnChildOptions): Workspace | undefined {
+  return childWorkspacePolicy(opts) === "isolated" ? opts.spawnWorkspace : undefined;
 }
 
 type ChildHookRegistry = Pick<Agent["hooks"], "list" | "runPre" | "runPost">;
@@ -321,12 +346,15 @@ export async function runChildAgentLoop(
     input_schema: t.inputSchema,
   }));
 
-  const system = [
-    `[Persona: ${opts.persona}]`,
-    `[Spawn: parent=${opts.parentTurnId} depth=${opts.parentSpawnDepth + 1}]`,
-    "",
-    `You are a focused sub-agent spawned by the main agent. Your task is a single discrete unit of work. Complete it and return your result succinctly.`,
-  ].join("\n");
+  const system = await buildChildSystemPrompt({
+    persona: opts.persona,
+    prompt: opts.prompt,
+    parentTurnId: opts.parentTurnId,
+    parentSpawnDepth: opts.parentSpawnDepth,
+    parentWorkspaceRoot: opts.workspaceRoot,
+    spawnDir: opts.spawnDir,
+    workspacePolicy: childWorkspacePolicy(opts),
+  });
 
   const messages: LLMMessage[] = [{ role: "user", content: opts.prompt }];
   const resolvedModel =
@@ -511,8 +539,14 @@ export async function runChildAgentLoop(
     };
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
+    const partialResult: SpawnChildResult = {
+      status: controller.signal.aborted && abortReason === "parent" ? "aborted" : "error",
+      finalText: collectText(assistantBlocks),
+      toolCallCount,
+      errorMessage: msg,
+    };
     await opts.lifecycle?.failed(msg);
-    throw err;
+    throw new SpawnChildPartialError(msg, partialResult);
   } finally {
     clearTimeout(timer);
     if (parentAbortListenerRegistered) {
@@ -568,7 +602,7 @@ async function runChildTools(
       }
     }
 
-    if (tu.name === "Bash") {
+    if (tu.name === "Bash" && childWorkspacePolicy(opts) === "isolated") {
       const boundary = classifyChildBashBoundary(effectiveInput);
       if (!boundary.safe) {
         await opts.lifecycle?.permissionDecision({
@@ -589,7 +623,7 @@ async function runChildTools(
       toolName: tu.name,
       input: effectiveInput,
       tool,
-      workspaceRoot: opts.spawnDir,
+      workspaceRoot: childWorkspaceRoot(opts),
     });
     await opts.lifecycle?.permissionDecision({
       decision: permission.decision,
@@ -628,11 +662,8 @@ async function runChildTools(
       botId: opts.botId,
       sessionKey: childSessionKey(opts.parentSessionKey, opts.persona, 0),
       turnId: `${opts.parentTurnId}::spawn::${opts.taskId}`,
-      // PRE-01 (audit 02): child's workspaceRoot is the ephemeral spawnDir,
-      // NOT the parent's PVC root. Combined with `allowed_tools`, this
-      // makes the security boundary real.
-      workspaceRoot: opts.spawnDir,
-      spawnWorkspace: opts.spawnWorkspace,
+      workspaceRoot: childWorkspaceRoot(opts),
+      spawnWorkspace: childSpawnWorkspace(opts),
       abortSignal,
       emitProgress: () => {
         /* child progress folded into spawn_result — no per-step SSE */

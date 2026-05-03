@@ -137,7 +137,9 @@ describe("ChildAgentLoop lifecycle permissions", () => {
         ],
       ],
     });
-    const { ledger, opts } = await makeHarnessedOptions();
+    const { ledger, opts } = await makeHarnessedOptions({
+      workspacePolicy: "isolated",
+    });
 
     await opts.lifecycle?.started();
     const result = await runChildAgentLoop(agent as never, opts);
@@ -187,7 +189,9 @@ describe("ChildAgentLoop lifecycle permissions", () => {
         ],
       ],
     });
-    const { ledger, opts } = await makeHarnessedOptions();
+    const { ledger, opts } = await makeHarnessedOptions({
+      workspacePolicy: "isolated",
+    });
 
     await opts.lifecycle?.started();
     await runChildAgentLoop(agent as never, opts);
@@ -195,6 +199,54 @@ describe("ChildAgentLoop lifecycle permissions", () => {
     expect(executed).toBe(0);
     const events = await ledger.readAll();
     expect(events).toContainEqual(
+      expect.objectContaining({
+        type: "child_permission_decision",
+        taskId: "child-1",
+        decision: "deny",
+        reason: "child Bash cannot reference parent directories",
+      }),
+    );
+  });
+
+  it("allows trusted child Bash through the parent permission plane", async () => {
+    let executed = 0;
+    const bash = stubTool("Bash", async () => {
+      executed++;
+      return { status: "ok", output: "ran", durationMs: 0 };
+    });
+    const agent = fakeAgent([bash as Tool], {
+      rounds: [
+        [
+          { kind: "tool_use_start", blockIndex: 0, id: "tu-trusted", name: "Bash" },
+          {
+            kind: "tool_use_input_delta",
+            blockIndex: 0,
+            partial: JSON.stringify({ command: "cat ../../parent-secret.txt" }),
+          },
+          {
+            kind: "message_end",
+            stopReason: "tool_use",
+            usage: { inputTokens: 1, outputTokens: 1 },
+          },
+        ],
+        [
+          { kind: "text_delta", blockIndex: 0, delta: "ran" },
+          {
+            kind: "message_end",
+            stopReason: "end_turn",
+            usage: { inputTokens: 1, outputTokens: 1 },
+          },
+        ],
+      ],
+    });
+    const { ledger, opts } = await makeHarnessedOptions();
+
+    await opts.lifecycle?.started();
+    await runChildAgentLoop(agent as never, opts);
+
+    expect(executed).toBe(1);
+    const events = await ledger.readAll();
+    expect(events).not.toContainEqual(
       expect.objectContaining({
         type: "child_permission_decision",
         taskId: "child-1",

@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import type { HookContext } from "../types.js";
 import type { TranscriptEntry } from "../../storage/Transcript.js";
+import { ExecutionContractStore } from "../../execution/ExecutionContract.js";
 import {
   collectCreatedArtifacts,
   hasArtifactDeliveryEvidence,
@@ -8,19 +9,75 @@ import {
   makeArtifactDeliveryGateHook,
 } from "./artifactDeliveryGate.js";
 
-function makeCtx(transcript: TranscriptEntry[] = []): HookContext {
+interface MetaOptions {
+  wantsChat?: boolean;
+  wantsKb?: boolean;
+  wantsFile?: boolean;
+  claimsFileCreated?: boolean;
+  claimsChat?: boolean;
+  claimsKb?: boolean;
+  reportsFailure?: boolean;
+}
+
+function makeCtx(transcript: TranscriptEntry[] = [], meta: MetaOptions = {}): HookContext {
+  const store = new ExecutionContractStore({ now: () => 1 });
+  const llm = {
+    stream: (request: { system?: string }) =>
+      (async function* () {
+        const isRequest = String(request.system ?? "").includes("runtime-control classifier");
+        yield {
+          kind: "text_delta" as const,
+          delta: JSON.stringify(
+            isRequest
+              ? {
+                  turnMode: { label: "other", confidence: 0.9 },
+                  skipTdd: false,
+                  implementationIntent: false,
+                  documentOrFileOperation: meta.wantsFile ?? false,
+                  deterministic: {
+                    requiresDeterministic: false,
+                    kinds: [],
+                    reason: "No deterministic requirement.",
+                    suggestedTools: [],
+                    acceptanceCriteria: [],
+                  },
+                  fileDelivery: {
+                    intent: meta.wantsChat ? "deliver_existing" : "none",
+                    path: meta.wantsChat ? "report.md" : null,
+                    wantsChatDelivery: meta.wantsChat ?? false,
+                    wantsKbDelivery: meta.wantsKb ?? false,
+                    wantsFileOutput: meta.wantsFile ?? meta.wantsChat ?? meta.wantsKb ?? false,
+                  },
+                }
+              : {
+                  internalReasoningLeak: false,
+                  lazyRefusal: false,
+                  selfClaim: false,
+                  deferralPromise: false,
+                  assistantClaimsFileCreated: meta.claimsFileCreated ?? false,
+                  assistantClaimsChatDelivery: meta.claimsChat ?? false,
+                  assistantClaimsKbDelivery: meta.claimsKb ?? false,
+                  assistantReportsDeliveryFailure: meta.reportsFailure ?? false,
+                  reason: "test classifier output",
+                },
+          ),
+        };
+        yield { kind: "message_end" as const };
+      })(),
+  } as HookContext["llm"];
   return {
     botId: "bot-test",
     userId: "user-test",
     sessionKey: "session-test",
     turnId: "turn-test",
-    llm: {} as HookContext["llm"],
+    llm,
     transcript,
     emit: () => {},
     log: () => {},
     agentModel: "test-model",
     abortSignal: new AbortController().signal,
     deadlineMs: 5_000,
+    executionContract: store,
   };
 }
 
@@ -118,6 +175,60 @@ function successfulFileDeliver(
   ];
 }
 
+function successfulFileSend(): TranscriptEntry[] {
+  return [
+    {
+      kind: "tool_call",
+      ts: 3,
+      turnId: "turn-test",
+      toolUseId: "tool-send",
+      name: "FileSend",
+      input: {
+        path: "report.md",
+      },
+    },
+    {
+      kind: "tool_result",
+      ts: 4,
+      turnId: "turn-test",
+      toolUseId: "tool-send",
+      status: "ok",
+      output: JSON.stringify({
+        filename: "report.md",
+        channel: { type: "telegram", channelId: "1234" },
+        mode: "document",
+      }),
+    },
+  ];
+}
+
+function successfulWebFileSend(marker: string): TranscriptEntry[] {
+  return [
+    {
+      kind: "tool_call",
+      ts: 3,
+      turnId: "turn-test",
+      toolUseId: "tool-send",
+      name: "FileSend",
+      input: {
+        path: "report.md",
+      },
+    },
+    {
+      kind: "tool_result",
+      ts: 4,
+      turnId: "turn-test",
+      toolUseId: "tool-send",
+      status: "ok",
+      output: JSON.stringify({
+        id: "00000000-0000-4000-8000-000000000000",
+        filename: "report.md",
+        marker,
+      }),
+    },
+  ];
+}
+
 describe("artifactDeliveryGate helpers", () => {
   it("collects user-facing files created in the current turn", () => {
     const artifacts = collectCreatedArtifacts(successfulFileWrite("workspace/reports/debate-verdict.md"), "turn-test");
@@ -192,7 +303,12 @@ describe("artifactDeliveryGate hook", () => {
     const hook = makeArtifactDeliveryGateHook();
     const result = await hook.handler(
       args("파일을 생성했습니다.", "파일 KB에 저장하고 여기 채팅에도 첨부해줘"),
-      makeCtx(successfulFileWrite("workspace/duol-debate/debate-verdict.md")),
+      makeCtx(successfulFileWrite("workspace/duol-debate/debate-verdict.md"), {
+        wantsChat: true,
+        wantsKb: true,
+        wantsFile: true,
+        claimsFileCreated: true,
+      }),
     );
     expect(result?.action).toBe("block");
     if (result?.action === "block") {
@@ -208,7 +324,12 @@ describe("artifactDeliveryGate hook", () => {
         "파일을 생성하고 첨부했습니다.\n[attachment:00000000-0000-4000-8000-000000000000:debate-verdict.md]",
         "파일 여기 채팅에도 첨부해줘",
       ),
-      makeCtx(successfulFileWrite("workspace/duol-debate/debate-verdict.md")),
+      makeCtx(successfulFileWrite("workspace/duol-debate/debate-verdict.md"), {
+        wantsChat: true,
+        wantsFile: true,
+        claimsChat: true,
+        claimsFileCreated: true,
+      }),
     );
     expect(result).toEqual({ action: "continue" });
   });
@@ -217,7 +338,11 @@ describe("artifactDeliveryGate hook", () => {
     const hook = makeArtifactDeliveryGateHook();
     const result = await hook.handler(
       args("파일을 생성했습니다.", "이 리포트 KB에 저장해줘"),
-      makeCtx(successfulFileWrite("workspace/duol-debate/debate-verdict.md")),
+      makeCtx(successfulFileWrite("workspace/duol-debate/debate-verdict.md"), {
+        wantsKb: true,
+        wantsFile: true,
+        claimsFileCreated: true,
+      }),
     );
     expect(result?.action).toBe("block");
     if (result?.action === "block") {
@@ -251,7 +376,12 @@ describe("artifactDeliveryGate hook", () => {
     const hook = makeArtifactDeliveryGateHook();
     const result = await hook.handler(
       args("파일을 생성하고 KB에 저장했습니다.", "이 리포트 KB에 저장해줘"),
-      makeCtx(transcript),
+      makeCtx(transcript, {
+        wantsKb: true,
+        wantsFile: true,
+        claimsFileCreated: true,
+        claimsKb: true,
+      }),
     );
     expect(result).toEqual({ action: "continue" });
   });
@@ -264,7 +394,12 @@ describe("artifactDeliveryGate hook", () => {
     const hook = makeArtifactDeliveryGateHook();
     const result = await hook.handler(
       args("파일을 생성하고 KB에 저장했습니다.", "이 리포트 KB에 저장해줘"),
-      makeCtx(transcript),
+      makeCtx(transcript, {
+        wantsKb: true,
+        wantsFile: true,
+        claimsFileCreated: true,
+        claimsKb: true,
+      }),
     );
     expect(result).toEqual({ action: "continue" });
   });
@@ -282,7 +417,11 @@ describe("artifactDeliveryGate hook", () => {
     const hook = makeArtifactDeliveryGateHook();
     const result = await hook.handler(
       args("파일을 첨부했습니다.", "파일 첨부해줘"),
-      makeCtx(transcript),
+      makeCtx(transcript, {
+        wantsChat: true,
+        wantsFile: true,
+        claimsChat: true,
+      }),
     );
     expect(result?.action).toBe("block");
     if (result?.action === "block") {
@@ -302,7 +441,94 @@ describe("artifactDeliveryGate hook", () => {
     const hook = makeArtifactDeliveryGateHook();
     const result = await hook.handler(
       args(`파일을 생성하고 전달했습니다.\n${marker}`, "파일 KB에 저장하고 여기 채팅에도 첨부해줘"),
-      makeCtx(transcript),
+      makeCtx(transcript, {
+        wantsChat: true,
+        wantsKb: true,
+        wantsFile: true,
+        claimsChat: true,
+        claimsKb: true,
+        claimsFileCreated: true,
+      }),
+    );
+    expect(result).toEqual({ action: "continue" });
+  });
+
+  it("continues when native FileDeliver sent directly to Telegram without a marker", async () => {
+    const transcript: TranscriptEntry[] = [
+      ...successfulDocumentWrite("report.md"),
+      ...successfulFileDeliver([
+        { target: "chat", externalId: "telegram:1234" },
+      ]),
+    ];
+    const hook = makeArtifactDeliveryGateHook();
+    const result = await hook.handler(
+      args("파일을 텔레그램 채팅에 전달했습니다.", "파일 여기 채팅에도 첨부해줘"),
+      makeCtx(transcript, {
+        wantsChat: true,
+        wantsFile: true,
+        claimsChat: true,
+        claimsFileCreated: true,
+      }),
+    );
+    expect(result).toEqual({ action: "continue" });
+  });
+
+  it("blocks direct file delivery claims unless a delivery tool succeeded", async () => {
+    const hook = makeArtifactDeliveryGateHook();
+    const result = await hook.handler(
+      args("요청하신 report.md 파일을 전달했습니다.", "report.md 파일 보내줘"),
+      makeCtx([], {
+        wantsChat: true,
+        wantsFile: true,
+        claimsChat: true,
+      }),
+    );
+    expect(result?.action).toBe("block");
+    if (result?.action === "block") {
+      expect(result.reason).toContain("FileSend");
+    }
+  });
+
+  it("continues direct native file delivery claims with same-turn FileSend evidence", async () => {
+    const hook = makeArtifactDeliveryGateHook();
+    const result = await hook.handler(
+      args("요청하신 report.md 파일을 전달했습니다.", "report.md 파일 보내줘"),
+      makeCtx(successfulFileSend(), {
+        wantsChat: true,
+        wantsFile: true,
+        claimsChat: true,
+      }),
+    );
+    expect(result).toEqual({ action: "continue" });
+  });
+
+  it("blocks web FileSend delivery claims unless the returned attachment marker is in the final answer", async () => {
+    const marker = "[attachment:00000000-0000-4000-8000-000000000000:report.md]";
+    const hook = makeArtifactDeliveryGateHook();
+    const result = await hook.handler(
+      args("요청하신 report.md 파일을 전달했습니다.", "report.md 파일 보내줘"),
+      makeCtx(successfulWebFileSend(marker), {
+        wantsChat: true,
+        wantsFile: true,
+        claimsChat: true,
+      }),
+    );
+    expect(result?.action).toBe("block");
+    if (result?.action === "block") {
+      expect(result.reason).toContain(marker);
+    }
+  });
+
+  it("continues web FileSend delivery claims when the returned attachment marker is in the final answer", async () => {
+    const marker = "[attachment:00000000-0000-4000-8000-000000000000:report.md]";
+    const hook = makeArtifactDeliveryGateHook();
+    const result = await hook.handler(
+      args(`요청하신 report.md 파일을 전달했습니다.\n${marker}`, "report.md 파일 보내줘"),
+      makeCtx(successfulWebFileSend(marker), {
+        wantsChat: true,
+        wantsFile: true,
+        claimsChat: true,
+      }),
     );
     expect(result).toEqual({ action: "continue" });
   });
@@ -311,7 +537,14 @@ describe("artifactDeliveryGate hook", () => {
     const hook = makeArtifactDeliveryGateHook();
     const result = await hook.handler(
       args("`DocumentWrite`로 파일 생성 완료, `FileDeliver(target=\"both\")`로 전달 완료.", "파일 만들어서 KB와 채팅에 전달해줘", 2),
-      makeCtx([]),
+      makeCtx([], {
+        wantsChat: true,
+        wantsKb: true,
+        wantsFile: true,
+        claimsChat: true,
+        claimsKb: true,
+        claimsFileCreated: true,
+      }),
     );
     expect(result?.action).toBe("block");
     if (result?.action === "block") {
@@ -346,16 +579,62 @@ describe("artifactDeliveryGate hook", () => {
     const hook = makeArtifactDeliveryGateHook();
     const result = await hook.handler(
       args("파일을 생성하고 KB에 저장했습니다.", "파일 KB에 저장하고 여기 채팅에도 첨부해줘"),
-      makeCtx(transcript),
+      makeCtx(transcript, {
+        wantsChat: true,
+        wantsKb: true,
+        wantsFile: true,
+        claimsKb: true,
+        claimsFileCreated: true,
+      }),
     );
     expect(result?.action).toBe("block");
+  });
+
+  it("does not treat KB write evidence as chat delivery evidence", async () => {
+    const transcript: TranscriptEntry[] = [
+      {
+        kind: "tool_call",
+        ts: 1,
+        turnId: "turn-test",
+        toolUseId: "tool-1",
+        name: "Bash",
+        input: {
+          command: "cat report.md | kb-write.sh --add Reports report.md --stdin",
+        },
+      },
+      {
+        kind: "tool_result",
+        ts: 2,
+        turnId: "turn-test",
+        toolUseId: "tool-1",
+        status: "ok",
+        output: '{"ok":true}',
+      },
+    ];
+    const hook = makeArtifactDeliveryGateHook();
+    const result = await hook.handler(
+      args("report.md를 채팅에 전달했습니다.", "report.md 보내줘"),
+      makeCtx(transcript, {
+        wantsChat: true,
+        wantsFile: true,
+        claimsChat: true,
+      }),
+    );
+    expect(result?.action).toBe("block");
+    if (result?.action === "block") {
+      expect(result.reason).toContain("no successful chat delivery evidence");
+    }
   });
 
   it("fails open after one retry to avoid infinite loops", async () => {
     const hook = makeArtifactDeliveryGateHook();
     const result = await hook.handler(
       args("파일을 생성했습니다.", "파일 첨부해줘", 1),
-      makeCtx(successfulFileWrite("workspace/duol-debate/debate-verdict.md")),
+      makeCtx(successfulFileWrite("workspace/duol-debate/debate-verdict.md"), {
+        wantsChat: true,
+        wantsFile: true,
+        claimsFileCreated: true,
+      }),
     );
     expect(result).toEqual({ action: "continue" });
   });

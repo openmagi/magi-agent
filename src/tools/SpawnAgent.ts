@@ -27,6 +27,7 @@
  *     exported (SpawnAgent.test.ts reaches in for isolation tests).
  */
 
+import fs from "node:fs/promises";
 import path from "node:path";
 import type {
   Tool,
@@ -60,6 +61,7 @@ import {
   selectChildTools as selectChildToolsImpl,
   type SpawnChildOptions as SpawnChildOptionsImpl,
   type SpawnChildResult as SpawnChildResultImpl,
+  type SpawnWorkspacePolicy,
 } from "../spawn/ChildAgentLoop.js";
 import {
   scoreVariant,
@@ -167,6 +169,12 @@ export interface SpawnAgentInput {
   allowed_skills?: string[];
   deliver: "return" | "background";
   timeout_ms?: number;
+  completion_contract?: SpawnCompletionContract;
+  /**
+   * Trusted children share the parent workspace authority. Isolated is the
+   * legacy `.spawn/{taskId}` sandbox and must be requested explicitly.
+   */
+  workspace_policy?: SpawnWorkspacePolicy;
   metadata?: Record<string, unknown>;
   /** Override the LLM model for this child. Must be in SPAWNABLE_MODELS. */
   model?: string;
@@ -176,6 +184,23 @@ export interface SpawnAgentInput {
   scorer?: TournamentScorer;
   concurrency?: number;
   cleanup_losers?: boolean;
+}
+
+export type SpawnEvidenceRequirement = "tool_call" | "files" | "artifact" | "text" | "none";
+
+export interface SpawnCompletionContract {
+  /**
+   * `tool_call` means a child result is only successful if the child
+   * actually used at least one tool. Use `none` only for answer-only
+   * delegation where no tool/file/artifact evidence is expected.
+   * Default is `tool_call` because SpawnAgent is for concrete delegated work.
+   */
+  required_evidence?: SpawnEvidenceRequirement;
+  /** Workspace-relative files that must exist before the child is accepted. */
+  required_files?: string[];
+  /** Additional guard for modes that still need a visible child summary. */
+  require_non_empty_result?: boolean;
+  reason?: string;
 }
 
 /**
@@ -261,6 +286,39 @@ const INPUT_SCHEMA = {
       type: "integer",
       minimum: 1000,
       description: "Per-child timeout in ms (default 120000, max 600000).",
+    },
+    workspace_policy: {
+      type: "string",
+      enum: ["trusted", "isolated"],
+      description:
+        "Workspace authority for the child. Default 'trusted' lets the child read/write the parent workspace. 'isolated' confines file tools and Bash cwd to .spawn/{taskId}.",
+    },
+    completion_contract: {
+      type: "object",
+      description:
+        "Completion evidence contract. Default requires at least one child tool call; set required_evidence='none' only for answer-only delegation.",
+      properties: {
+        required_evidence: {
+          type: "string",
+          enum: ["tool_call", "files", "artifact", "text", "none"],
+          description:
+            "Evidence required before the child can be accepted as successful. Use files with required_files for durable workspace deliverables.",
+        },
+        required_files: {
+          type: "array",
+          items: { type: "string" },
+          description:
+            "Workspace-relative files that must exist when required_evidence='files'. Checked in parent workspace for trusted children and spawnDir for isolated children.",
+        },
+        require_non_empty_result: {
+          type: "boolean",
+          description: "When true, finalText must contain visible non-whitespace text.",
+        },
+        reason: {
+          type: "string",
+          description: "Short reason for any opt-out from tool evidence.",
+        },
+      },
     },
     metadata: { type: "object", description: "Opaque metadata passed to the child." },
     model: {
@@ -487,6 +545,7 @@ interface RunChildWithRetriesArgs {
   childOptions: SpawnChildOptions;
   taskId: string;
   deliver: SpawnAgentInput["deliver"];
+  completionContract: SpawnCompletionContract;
   emit?: (event: unknown) => void;
   stageAuditEvent?: (event: string, data?: Record<string, unknown>) => void;
 }
@@ -527,8 +586,131 @@ function spawnRetryDelayMs(attempt: number): number {
   return Math.min(5_000, base * 2 ** Math.max(0, attempt - 1));
 }
 
+function normalizeCompletionContract(input: SpawnAgentInput): SpawnCompletionContract & {
+  required_evidence: SpawnEvidenceRequirement;
+} {
+  const requiredEvidence = input.completion_contract?.required_evidence ?? "tool_call";
+  return {
+    required_evidence: requiredEvidence,
+    ...(input.completion_contract?.required_files
+      ? { required_files: input.completion_contract.required_files }
+      : {}),
+    ...(input.completion_contract?.require_non_empty_result !== undefined
+      ? { require_non_empty_result: input.completion_contract.require_non_empty_result }
+      : {}),
+    ...(input.completion_contract?.reason
+      ? { reason: input.completion_contract.reason }
+      : {}),
+  };
+}
+
 function spawnErrorMessage(result: SpawnChildResult): string {
   return result.errorMessage || result.finalText || result.status;
+}
+
+function completionContractError(
+  result: SpawnChildResult,
+  errorMessage: string,
+): SpawnChildResult {
+  return {
+    status: "error",
+    finalText: result.finalText,
+    toolCallCount: result.toolCallCount,
+    errorMessage,
+  };
+}
+
+function contractWorkspaceRoot(childOptions: SpawnChildOptionsImpl): string {
+  return childOptions.workspacePolicy === "isolated"
+    ? childOptions.spawnDir
+    : childOptions.workspaceRoot;
+}
+
+function resolveContractFile(root: string, relPath: string): string {
+  const normalised = path.normalize(relPath).replace(/^\/+/, "");
+  const full = path.resolve(root, normalised);
+  const resolvedRoot = path.resolve(root);
+  if (!full.startsWith(resolvedRoot + path.sep) && full !== resolvedRoot) {
+    throw new Error(`required file path escapes workspace: ${relPath}`);
+  }
+  return full;
+}
+
+async function missingRequiredFiles(
+  childOptions: SpawnChildOptionsImpl,
+  requiredFiles: string[],
+): Promise<string[]> {
+  const root = contractWorkspaceRoot(childOptions);
+  const missing: string[] = [];
+  for (const relPath of requiredFiles) {
+    try {
+      await fs.access(resolveContractFile(root, relPath));
+    } catch {
+      missing.push(relPath);
+    }
+  }
+  return missing;
+}
+
+async function enforceChildCompletionContract(
+  result: SpawnChildResult,
+  contract: SpawnCompletionContract,
+  childOptions: SpawnChildOptionsImpl,
+): Promise<SpawnChildResult> {
+  if (result.status !== "ok") {
+    return result;
+  }
+  if (
+    contract.require_non_empty_result === true &&
+    result.finalText.trim().length === 0
+  ) {
+    return completionContractError(
+      result,
+      "child returned empty final text but SpawnAgent completion_contract requires non-empty final text",
+    );
+  }
+
+  switch (contract.required_evidence) {
+    case "none":
+      return result;
+    case "tool_call":
+      return result.toolCallCount > 0
+        ? result
+        : completionContractError(
+            result,
+            "child returned no tool-call evidence required by SpawnAgent completion_contract (0 tool calls)",
+          );
+    case "text":
+      return result.finalText.trim().length > 0
+        ? result
+        : completionContractError(
+            result,
+            "child returned empty final text but SpawnAgent completion_contract requires non-empty final text",
+          );
+    case "files": {
+      const requiredFiles = contract.required_files ?? [];
+      const missing = await missingRequiredFiles(childOptions, requiredFiles);
+      return missing.length === 0
+        ? result
+        : completionContractError(
+            result,
+            `child missing required files for SpawnAgent completion_contract: ${missing.join(", ")}`,
+          );
+    }
+    case "artifact": {
+      const artifactFileCount = await countFilesRecursive(
+        path.join(childOptions.spawnDir, "artifacts"),
+      );
+      return artifactFileCount > 0
+        ? result
+        : completionContractError(
+            result,
+            "child produced no artifact evidence required by SpawnAgent completion_contract",
+          );
+    }
+    default:
+      return result;
+  }
 }
 
 function buildSpawnFailureMessage(
@@ -567,6 +749,32 @@ function spawnFailureResult(
   };
 }
 
+function partialChildResultFromError(err: unknown): SpawnChildResultImpl | null {
+  if (!err || typeof err !== "object" || !("partialResult" in err)) {
+    return null;
+  }
+  const partial = (err as { partialResult?: unknown }).partialResult;
+  if (!partial || typeof partial !== "object") return null;
+  const candidate = partial as Partial<SpawnChildResultImpl>;
+  if (
+    (candidate.status === "ok" ||
+      candidate.status === "error" ||
+      candidate.status === "aborted") &&
+    typeof candidate.finalText === "string" &&
+    typeof candidate.toolCallCount === "number"
+  ) {
+    return {
+      status: candidate.status,
+      finalText: candidate.finalText,
+      toolCallCount: candidate.toolCallCount,
+      ...(typeof candidate.errorMessage === "string"
+        ? { errorMessage: candidate.errorMessage }
+        : {}),
+    };
+  }
+  return null;
+}
+
 async function sleepForRetry(ms: number, signal: AbortSignal): Promise<void> {
   if (ms <= 0 || signal.aborted) return;
   await new Promise<void>((resolve) => {
@@ -584,7 +792,15 @@ async function sleepForRetry(ms: number, signal: AbortSignal): Promise<void> {
 async function runChildWithRetries(
   args: RunChildWithRetriesArgs,
 ): Promise<ChildRunWithRetries> {
-  const { agent, childOptions, taskId, deliver, emit, stageAuditEvent } = args;
+  const {
+    agent,
+    childOptions,
+    taskId,
+    deliver,
+    completionContract,
+    emit,
+    stageAuditEvent,
+  } = args;
   const maxAttempts = spawnMaxAttempts();
   let attempts = 0;
 
@@ -606,13 +822,19 @@ async function runChildWithRetries(
     try {
       result = await agent.spawnChildTurn(childOptions);
     } catch (err) {
-      result = {
-        status: childOptions.abortSignal.aborted ? "aborted" : "error",
-        finalText: "",
-        toolCallCount: 0,
-        errorMessage: err instanceof Error ? err.message : String(err),
-      };
+      result =
+        partialChildResultFromError(err) ?? {
+          status: childOptions.abortSignal.aborted ? "aborted" : "error",
+          finalText: "",
+          toolCallCount: 0,
+          errorMessage: err instanceof Error ? err.message : String(err),
+        };
     }
+    result = await enforceChildCompletionContract(
+      result,
+      completionContract,
+      childOptions,
+    );
 
     const canRetry =
       result.status === "error" &&
@@ -694,6 +916,31 @@ function validateInput(input: SpawnAgentInput): string | null {
   if (input.deliver !== "return" && input.deliver !== "background") {
     return "`deliver` must be 'return' or 'background'";
   }
+  if (
+    input.workspace_policy !== undefined &&
+    input.workspace_policy !== "trusted" &&
+    input.workspace_policy !== "isolated"
+  ) {
+    return "`workspace_policy` must be 'trusted' or 'isolated'";
+  }
+  const requiredEvidence = input.completion_contract?.required_evidence;
+  if (
+    requiredEvidence !== undefined &&
+    requiredEvidence !== "tool_call" &&
+    requiredEvidence !== "files" &&
+    requiredEvidence !== "artifact" &&
+    requiredEvidence !== "text" &&
+    requiredEvidence !== "none"
+  ) {
+    return "`completion_contract.required_evidence` must be 'tool_call', 'files', 'artifact', 'text', or 'none'";
+  }
+  if (
+    requiredEvidence === "files" &&
+    (!Array.isArray(input.completion_contract?.required_files) ||
+      input.completion_contract.required_files.length === 0)
+  ) {
+    return "`completion_contract.required_files` must be a non-empty array when required_evidence is 'files'";
+  }
   if (normalizeSpawnModelOverride(input.model) === null) {
     return `\`model\` must be one of: ${SPAWNABLE_MODELS.join(", ")}`;
   }
@@ -725,7 +972,7 @@ export function makeSpawnAgentTool(
   return {
     name: "SpawnAgent",
     description:
-      "Delegate a focused sub-task to a child agent with a custom persona and filtered toolset. `deliver:\"return\"` blocks until the child finishes and returns its final text. `deliver:\"background\"` fires the child and returns a taskId immediately; completion surfaces as a spawn_result event. Spawn depth is capped at 2 — a depth-2 child cannot spawn further. Use `model` only when deliberately selecting a child model; copy an exact value from this tool schema enum or omit `model` to inherit the bot's current configured runtime model. Never invent provider/model ids from memory. Provider-prefixed config ids such as `openai/gpt-5.5-pro` are accepted when present in the enum and normalized before the child run. IMPORTANT: child output longer than ~500 chars should go into an ArtifactCreate (kind=report/analysis/etc.) rather than inlined in finalText — the spawn tool automatically imports any child-produced artifacts into the parent workspace and returns them on `artifacts.handedOffArtifacts`. Call ArtifactRead(artifactId) to pull full content.",
+      "Delegate a focused sub-task to a child agent with a custom persona and filtered toolset. Children are trusted workers by default: they can read/write the parent workspace, and `.spawn/{taskId}` is scratch/audit storage. Set `workspace_policy:\"isolated\"` only when the task should be sandboxed to `.spawn/{taskId}`. The child does not inherit full conversation context unless you include it in `prompt`, so provide concrete inputs, required files, expected outputs, allowed tools, completion criteria, and retry/idempotency guidance. `deliver:\"return\"` blocks until the child finishes and returns final text. `deliver:\"background\"` returns a taskId immediately; completion surfaces as a spawn_result event and TaskGet record. Spawn depth is capped at 2. Use `completion_contract.required_evidence:\"files\"` plus `required_files` for durable file deliverables, `\"text\"` for answer-only work, `\"artifact\"` for artifact handoff, `\"tool_call\"` for concrete tool work, or `\"none\"` only when no evidence is expected. Use `model` only when deliberately selecting a child model; copy an exact value from this schema enum or omit `model` to inherit the bot's runtime model. Never invent provider/model ids. IMPORTANT: child output longer than ~500 chars should go into ArtifactCreate rather than finalText; child-produced artifacts are imported into the parent workspace and returned on `artifacts.handedOffArtifacts`.",
     inputSchema: INPUT_SCHEMA,
     permission: "meta",
     kind: "core",
@@ -775,6 +1022,7 @@ export function makeSpawnAgentTool(
         MAX_TIMEOUT_MS,
         Math.max(1_000, input.timeout_ms ?? DEFAULT_TIMEOUT_MS),
       );
+      const completionContract = normalizeCompletionContract(input);
 
       // T2-11 persona catalog expansion. Loaded per-call so workspace
       // overrides are picked up live; falls back to BUILTIN_PERSONAS on
@@ -833,6 +1081,7 @@ export function makeSpawnAgentTool(
         abortSignal: ctx.abortSignal,
         botId: ctx.botId,
         workspaceRoot: ctx.workspaceRoot,
+        workspacePolicy: input.workspace_policy ?? "trusted",
         onAgentEvent: ctx.emitAgentEvent,
         askUser: ctx.askUser,
         permissionMode: resolveParentPermissionMode(agent, ctx.sessionKey),
@@ -932,6 +1181,7 @@ export function makeSpawnAgentTool(
             childOptions,
             taskId,
             deliver: input.deliver,
+            completionContract,
             emit: ctx.emitAgentEvent,
             stageAuditEvent: ctx.staging.stageAuditEvent,
           });
@@ -998,6 +1248,7 @@ export function makeSpawnAgentTool(
         childOptions,
         backgroundRegistry,
         input,
+        completionContract,
       });
       return {
         status: "ok",
@@ -1018,6 +1269,7 @@ interface BackgroundRunArgs {
   childOptions: SpawnChildOptions;
   backgroundRegistry?: BackgroundTaskRegistry;
   input: SpawnAgentInput;
+  completionContract: SpawnCompletionContract;
 }
 
 /**
@@ -1030,7 +1282,16 @@ interface BackgroundRunArgs {
  * SseWriter.ended guards against post-end writes.
  */
 async function runBackgroundChild(args: BackgroundRunArgs): Promise<void> {
-  const { agent, ctx, taskId, spawnDir, childOptions, backgroundRegistry, input } = args;
+  const {
+    agent,
+    ctx,
+    taskId,
+    spawnDir,
+    childOptions,
+    backgroundRegistry,
+    input,
+    completionContract,
+  } = args;
   const emit = ctx.emitAgentEvent;
 
   const bgController = new AbortController();
@@ -1065,6 +1326,7 @@ async function runBackgroundChild(args: BackgroundRunArgs): Promise<void> {
     childOptions: bgChildOptions,
     taskId,
     deliver: input.deliver,
+    completionContract,
     emit,
     stageAuditEvent: ctx.staging.stageAuditEvent,
   })
@@ -1117,6 +1379,8 @@ async function runBackgroundChild(args: BackgroundRunArgs): Promise<void> {
             status: mappedStatus,
             resultText: result.finalText,
             toolCallCount: result.toolCallCount,
+            attempts: childRun.attempts,
+            artifacts: { spawnDir, fileCount, handedOffArtifacts },
             ...(errorMessage ? { error: errorMessage } : {}),
           })
           .catch(() => {

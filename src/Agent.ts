@@ -484,12 +484,23 @@ export class Agent {
     this.tools.register(makeKnowledgeSearchTool({ name: "knowledge-search" }));
     this.tools.register(makeKnowledgeSearchTool({ name: "KnowledgeSearch" }));
     this.tools.register(makeBrowserTool(config.workspaceRoot));
-    this.tools.register(makeWebSearchTool());
+    this.tools.register(makeWebSearchTool({ name: "web-search" }));
+    this.tools.register(makeWebSearchTool({ name: "WebSearch" }));
+    this.tools.register(makeWebSearchTool({ name: "web_search" }));
     this.tools.register(makeWebFetchTool());
     this.tools.register(makeClockTool());
     this.tools.register(makeDateRangeTool());
     this.tools.register(makeCalculationTool());
     this.tools.register(makeSpreadsheetWriteTool(config.workspaceRoot, this.outputArtifacts));
+    const getSourceChannelForTool = (ctx: { turnId: string }): ChannelRef | null =>
+      this.getSourceChannelForTool(ctx);
+    const sendFileToSourceChannel = async (
+      channel: ChannelRef,
+      filePath: string,
+      caption: string | undefined,
+      mode: "document" | "photo",
+    ): Promise<void> =>
+      this.sendFileToSourceChannel(channel, filePath, caption, mode);
     this.tools.register(
       makeFileSendTool({
         workspaceRoot: config.workspaceRoot,
@@ -497,24 +508,8 @@ export class Agent {
         gatewayToken: config.gatewayToken,
         botId: config.botId,
         chatProxyUrl: config.chatProxyUrl ?? "",
-        getSourceChannel: (ctx) => {
-          const turn = this.activeTurns.get(ctx.turnId);
-          return turn?.session.meta.channel ?? null;
-        },
-        sendFile: async (channel, filePath, caption, mode) => {
-          if (channel.type !== "telegram" && channel.type !== "discord") {
-            throw new Error(`FileSend does not support ${channel.type} channel delivery`);
-          }
-          const adapter = this.channelAdapters.find((a) => a.kind === channel.type);
-          if (!adapter) {
-            throw new Error(`FileSend ${channel.type} adapter not configured`);
-          }
-          if (mode === "photo") {
-            await adapter.sendPhoto(channel.channelId, filePath, caption);
-          } else {
-            await adapter.sendDocument(channel.channelId, filePath, caption);
-          }
-        },
+        getSourceChannel: getSourceChannelForTool,
+        sendFile: sendFileToSourceChannel,
       }),
     );
     this.tools.register(
@@ -523,6 +518,8 @@ export class Agent {
         outputRegistry: this.outputArtifacts,
         chatProxyUrl: config.chatProxyUrl ?? "",
         gatewayToken: config.gatewayToken,
+        getSourceChannel: getSourceChannelForTool,
+        sendFile: sendFileToSourceChannel,
       }),
     );
     // Cron suite. CronCreate captures the turn's source channel at
@@ -535,10 +532,7 @@ export class Agent {
         scheduler: this.crons,
         botId: config.botId,
         userId: config.userId,
-        getSourceChannel: (ctx) => {
-          const turn = this.activeTurns.get(ctx.turnId);
-          return turn?.session.meta.channel ?? null;
-        },
+        getSourceChannel: getSourceChannelForTool,
         getSession: (ctx) => {
           const turn = this.activeTurns.get(ctx.turnId);
           return turn?.session ?? null;
@@ -604,6 +598,31 @@ export class Agent {
 
   unregisterTurn(turnId: string): void {
     this.activeTurns.delete(turnId);
+  }
+
+  private getSourceChannelForTool(ctx: { turnId: string }): ChannelRef | null {
+    const turn = this.activeTurns.get(ctx.turnId);
+    return turn?.session.meta.channel ?? null;
+  }
+
+  private async sendFileToSourceChannel(
+    channel: ChannelRef,
+    filePath: string,
+    caption: string | undefined,
+    mode: "document" | "photo",
+  ): Promise<void> {
+    if (channel.type !== "telegram" && channel.type !== "discord") {
+      throw new Error(`direct file delivery unsupported for channel=${channel.type}`);
+    }
+    const adapter = this.channelAdapters.find((candidate) => candidate.kind === channel.type);
+    if (!adapter) {
+      throw new Error(`${channel.type} adapter not configured`);
+    }
+    if (mode === "photo") {
+      await adapter.sendPhoto(channel.channelId, filePath, caption);
+    } else {
+      await adapter.sendDocument(channel.channelId, filePath, caption);
+    }
   }
 
   /** Look up a live turn. Used by HttpServer's ask-response endpoint. */
@@ -808,6 +827,9 @@ export class Agent {
         botId: this.config.botId,
         chatProxyUrl: this.config.chatProxyUrl ?? "",
         telegramBotToken: this.config.telegramBotToken,
+        getSourceChannel: (ctx) => this.getSourceChannelForTool(ctx),
+        sendFile: (channel, filePath, caption, mode) =>
+          this.sendFileToSourceChannel(channel, filePath, caption, mode),
       },
       // Superpowers plan-mode auto-trigger — reads permissionMode to
       // skip the nudge when the user is already in plan mode.
@@ -1013,7 +1035,9 @@ export class Agent {
     this.tools.replace(makeKnowledgeSearchTool({ name: "knowledge-search" }));
     this.tools.replace(makeKnowledgeSearchTool({ name: "KnowledgeSearch" }));
     this.tools.replace(makeBrowserTool(this.config.workspaceRoot));
-    this.tools.replace(makeWebSearchTool());
+    this.tools.replace(makeWebSearchTool({ name: "web-search" }));
+    this.tools.replace(makeWebSearchTool({ name: "WebSearch" }));
+    this.tools.replace(makeWebSearchTool({ name: "web_search" }));
     this.tools.replace(makeWebFetchTool());
     this.tools.replace(makeClockTool());
     this.tools.replace(makeDateRangeTool());

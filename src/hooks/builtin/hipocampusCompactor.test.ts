@@ -1,5 +1,9 @@
 import { describe, it, expect, vi } from "vitest";
+import fs from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 import { makeHipocampusCompactorHook, type CompactionEngine, type QmdManager, type FlushFn } from "./hipocampusCompactor.js";
+import { makeSealedFilesHooks, __testing as sealedFilesTesting } from "./sealedFiles.js";
 import type { HookContext } from "../types.js";
 
 function makeCtx(sessionKey: string, overrides: Partial<HookContext> = {}): HookContext {
@@ -165,5 +169,42 @@ describe("hipocampusCompactor", () => {
       skipped: true,
       compacted: false,
     }));
+  });
+
+  it("updates the sealed-files manifest when compaction rewrites memory/ROOT.md", async () => {
+    sealedFilesTesting.clearPending();
+    const workspaceRoot = await fs.mkdtemp(path.join(os.tmpdir(), "hipocampus-sealed-"));
+    await fs.mkdir(path.join(workspaceRoot, "memory"), { recursive: true });
+    await fs.writeFile(path.join(workspaceRoot, "memory", "ROOT.md"), "old root\n", "utf8");
+
+    const sealed = makeSealedFilesHooks({ workspaceRoot });
+    const seedCtx = makeCtx("session-seed", { turnId: "turn-seed" });
+    await expect(
+      sealed.beforeCommit.handler({ userMessage: "seed", assistantText: "" }, seedCtx),
+    ).resolves.toMatchObject({ action: "continue" });
+
+    const engine: CompactionEngine = {
+      run: vi.fn(async () => {
+        await fs.writeFile(
+          path.join(workspaceRoot, "memory", "ROOT.md"),
+          "new compacted root\n",
+          "utf8",
+        );
+        return { skipped: false, compacted: true };
+      }),
+    };
+    const qmd = makeQmd();
+    const flush: FlushFn = vi.fn(async () => ({ flushed: 0, lastTurnId: null }));
+    const compactor = makeHipocampusCompactorHook(engine, qmd, flush, workspaceRoot);
+
+    await compactor.handler({ userMessage: "start" }, makeCtx("session-a", {
+      turnId: "turn-compactor",
+    }));
+
+    const nextTurnCtx = makeCtx("session-b", { turnId: "turn-next" });
+    await expect(
+      sealed.beforeCommit.handler({ userMessage: "normal turn", assistantText: "ok" }, nextTurnCtx),
+    ).resolves.toMatchObject({ action: "continue" });
+    expect(qmd.reindex).toHaveBeenCalledTimes(1);
   });
 });

@@ -214,7 +214,7 @@ describe("CommitPipeline.commit", () => {
     expect(assistantText).toBeUndefined();
   });
 
-  it("strips leading route metadata from committed assistant text", async () => {
+  it("keeps one leading route metadata tag in committed assistant text", async () => {
     const { ctx, transcript } = await makeCtx({
       blocks: [
         {
@@ -226,12 +226,40 @@ describe("CommitPipeline.commit", () => {
 
     const result = await commit(ctx);
 
-    expect(result.finalText).toBe("안녕하세요!");
+    expect(result.finalText).toBe(
+      "[META: intent=대화, domain=일상, complexity=simple, route=direct]\n\n안녕하세요!",
+    );
     const entries = await transcript.readAll();
     const assistantText = entries.find((e) => e.kind === "assistant_text") as
       | { text?: string }
       | undefined;
-    expect(assistantText?.text).toBe("안녕하세요!");
+    expect(assistantText?.text).toBe(
+      "[META: intent=대화, domain=일상, complexity=simple, route=direct]\n\n안녕하세요!",
+    );
+  });
+
+  it("deduplicates embedded route metadata in committed assistant text", async () => {
+    const { ctx, transcript } = await makeCtx({
+      blocks: [
+        {
+          type: "text",
+          text: "시작합니다.[META: intent=실행, domain=문서작성, complexity=complex, route=subagent][META: route=direct]직접 진행합니다.",
+        },
+      ],
+    });
+
+    const result = await commit(ctx);
+
+    expect(result.finalText).toBe(
+      "시작합니다.[META: intent=실행, domain=문서작성, complexity=complex, route=subagent]직접 진행합니다.",
+    );
+    const entries = await transcript.readAll();
+    const assistantText = entries.find((e) => e.kind === "assistant_text") as
+      | { text?: string }
+      | undefined;
+    expect(assistantText?.text).toBe(
+      "시작합니다.[META: intent=실행, domain=문서작성, complexity=complex, route=subagent]직접 진행합니다.",
+    );
   });
 
   it("beforeCommit block → throws, no transcript commits", async () => {

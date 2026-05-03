@@ -60,7 +60,7 @@ describe("hasTrailingDeferralNarrative", () => {
 });
 
 interface MockScript {
-  rounds: LLMEvent[][];
+  rounds: Array<LLMEvent[] | Error>;
 }
 
 function mockLLM(script: MockScript): {
@@ -78,6 +78,7 @@ function mockLLM(script: MockScript): {
         usage: { inputTokens: 0, outputTokens: 0 },
       },
     ];
+    if (r instanceof Error) throw r;
     for (const e of r) yield e;
   }
   return { stream, calls };
@@ -210,6 +211,53 @@ describe("ChildAgentLoop — loop semantics", () => {
     expect(result.status).toBe("ok");
     expect(result.finalText).toBe("hello world");
     expect(result.toolCallCount).toBe(0);
+  });
+
+  it("adds a trusted-worker runtime contract to the child system prompt by default", async () => {
+    const { agent, llmCalls } = fakeAgent([], {
+      rounds: [
+        [
+          {
+            kind: "message_end",
+            stopReason: "end_turn",
+            usage: { inputTokens: 1, outputTokens: 1 },
+          },
+        ],
+      ],
+    });
+    const { opts, cleanup } = await makeOpts();
+    cleanups.push(cleanup);
+
+    await runChildAgentLoop(agent, opts);
+
+    const system = String(llmCalls[0]?.system ?? "");
+    expect(system).toContain("trusted worker");
+    expect(system).toContain("same workspace authority as the parent agent");
+    expect(system).toContain(".spawn");
+    expect(system).toContain("scratch");
+  });
+
+  it("adds an isolated runtime contract when workspace_policy is isolated", async () => {
+    const { agent, llmCalls } = fakeAgent([], {
+      rounds: [
+        [
+          {
+            kind: "message_end",
+            stopReason: "end_turn",
+            usage: { inputTokens: 1, outputTokens: 1 },
+          },
+        ],
+      ],
+    });
+    const { opts, cleanup } = await makeOpts({ workspacePolicy: "isolated" });
+    cleanups.push(cleanup);
+
+    await runChildAgentLoop(agent, opts);
+
+    const system = String(llmCalls[0]?.system ?? "");
+    expect(system).toContain("isolated child worker");
+    expect(system).toContain("scoped to the .spawn");
+    expect(system).toContain("Do not assume access to parent workspace files");
   });
 
   it("passes the merged child abort signal into child LLM calls", async () => {
@@ -467,6 +515,41 @@ describe("ChildAgentLoop — loop semantics", () => {
     expect(executed).toBe(1);
   });
 
+  it("throws child partial result evidence when the LLM stream aborts after tool use", async () => {
+    const tool = stubTool<Record<string, unknown>, { ok: boolean }>(
+      "WriteMarker",
+      async (_input, ctx) => {
+        await fs.writeFile(path.join(ctx.workspaceRoot, "marker.txt"), "x");
+        return { status: "ok", output: { ok: true }, durationMs: 0 };
+      },
+    );
+    const { agent } = fakeAgent([tool as Tool], {
+      rounds: [
+        [
+          { kind: "tool_use_start", blockIndex: 0, id: "tu_1", name: "WriteMarker" },
+          { kind: "tool_use_input_delta", blockIndex: 0, partial: "{}" },
+          {
+            kind: "message_end",
+            stopReason: "tool_use",
+            usage: { inputTokens: 1, outputTokens: 1 },
+          },
+        ],
+        new Error("aborted"),
+      ],
+    });
+    const { opts, cleanup } = await makeOpts();
+    cleanups.push(cleanup);
+
+    await expect(runChildAgentLoop(agent, opts)).rejects.toMatchObject({
+      partialResult: {
+        status: "error",
+        finalText: "",
+        toolCallCount: 1,
+        errorMessage: "aborted",
+      },
+    });
+  });
+
   it("reports unknown tool via tool_result, does not throw", async () => {
     const { agent } = fakeAgent([], {
       rounds: [
@@ -546,6 +629,177 @@ describe("ChildAgentLoop — loop semantics", () => {
     expect(system).toContain("[Persona: legal-researcher]");
     // depth is incremented for the child's own frame.
     expect(system).toContain("depth=2");
+  });
+
+  it("system prompt deterministically includes runtime execution baseline", async () => {
+    const { agent, llmCalls } = fakeAgent([], {
+      rounds: [
+        [
+          {
+            kind: "message_end",
+            stopReason: "end_turn",
+            usage: { inputTokens: 0, outputTokens: 0 },
+          },
+        ],
+      ],
+    });
+    const { opts, cleanup } = await makeOpts({
+      persona: "writer",
+      prompt: "write the report",
+    });
+    cleanups.push(cleanup);
+
+    await runChildAgentLoop(agent, opts);
+
+    const system = llmCalls[0]?.system ?? "";
+    expect(system).toContain("<agent_self_model>");
+    expect(system).toContain("<runtime-evidence-policy>");
+    expect(system).toContain("<execution-discipline-policy>");
+    expect(system).toContain("smallest solution");
+    expect(system).toContain("current-turn tool evidence");
+    expect(system).toContain("<output-rules>");
+    expect(system).toContain("The user can only see your TEXT output");
+    expect(system).toContain("Do not operate as a meta-layer orchestrator");
+  });
+
+  it("respects CORE_AGENT_RELIABILITY_PROMPT=off for child reliability prompts", async () => {
+    const original = process.env.CORE_AGENT_RELIABILITY_PROMPT;
+    process.env.CORE_AGENT_RELIABILITY_PROMPT = "off";
+    try {
+      const { agent, llmCalls } = fakeAgent([], {
+        rounds: [
+          [
+            {
+              kind: "message_end",
+              stopReason: "end_turn",
+              usage: { inputTokens: 0, outputTokens: 0 },
+            },
+          ],
+        ],
+      });
+      const { opts, cleanup } = await makeOpts({
+        prompt: "빌드 에러 고쳐줘",
+      });
+      cleanups.push(cleanup);
+
+      await runChildAgentLoop(agent, opts);
+      const system = llmCalls[0]?.system ?? "";
+      expect(system).toContain("<agent_self_model>");
+      expect(system).toContain("<output-rules>");
+      expect(system).not.toContain("<runtime-evidence-policy>");
+      expect(system).not.toContain("<execution-discipline-policy>");
+    } finally {
+      if (original === undefined) {
+        delete process.env.CORE_AGENT_RELIABILITY_PROMPT;
+      } else {
+        process.env.CORE_AGENT_RELIABILITY_PROMPT = original;
+      }
+    }
+  });
+
+  it("system prompt injects child-safe workspace docs without main meta-layer identity", async () => {
+    const { agent, llmCalls } = fakeAgent([], {
+      rounds: [
+        [
+          {
+            kind: "message_end",
+            stopReason: "end_turn",
+            usage: { inputTokens: 0, outputTokens: 0 },
+          },
+        ],
+      ],
+    });
+    const { opts, cleanup } = await makeOpts({
+      persona: "executor",
+      prompt: "execute delegated task",
+    });
+    cleanups.push(cleanup);
+    await fs.mkdir(path.join(opts.workspaceRoot, "memory"), { recursive: true });
+    await Promise.all([
+      fs.writeFile(path.join(opts.workspaceRoot, "CLAUDE.md"), "claude environment rules", "utf8"),
+      fs.writeFile(
+        path.join(opts.workspaceRoot, "AGENTS.md"),
+        [
+          "<!-- hipocampus:protocol:start -->",
+          "Hipocampus runtime contract",
+          "<!-- hipocampus:protocol:end -->",
+          "",
+          "# AGENTS.md -- Meta-Layer Configuration",
+          "",
+          "## Runtime Environment",
+          "cloud runtime facts",
+          "",
+          "## Subagent Dispatch (agent-run.sh)",
+          "All complex tasks are executed via subagent. The meta layer routes.",
+          "",
+          "## File Permissions",
+          "frozen file list",
+        ].join("\n"),
+        "utf8",
+      ),
+      fs.writeFile(path.join(opts.workspaceRoot, "MEMORY.md"), "legacy memory cache", "utf8"),
+      fs.writeFile(path.join(opts.workspaceRoot, "memory", "ROOT.md"), "root memory index", "utf8"),
+      fs.writeFile(path.join(opts.workspaceRoot, "LEARNING.md"), "learning protocol", "utf8"),
+      fs.writeFile(path.join(opts.workspaceRoot, "DISCIPLINE.md"), "discipline rules", "utf8"),
+      fs.writeFile(
+        path.join(opts.workspaceRoot, "EXECUTION.md"),
+        [
+          "# EXECUTION.md",
+          "execution rules",
+          "",
+          "## Multi-Agent Orchestration",
+          "clawy-agent --agent specialist",
+        ].join("\n"),
+        "utf8",
+      ),
+      fs.writeFile(
+        path.join(opts.workspaceRoot, "EXECUTION-TOOLS.md"),
+        [
+          "# EXECUTION-TOOLS.md",
+          "execution tool rules",
+          "",
+          "## Agent Runner — Universal Subagent",
+          "Spawn subagents with any model.",
+          "",
+          "## Coding Agent — Complex Code Generation",
+          "delegate to the coding agent",
+        ].join("\n"),
+        "utf8",
+      ),
+      fs.writeFile(path.join(opts.workspaceRoot, "TOOLS.md"), "tools reference", "utf8"),
+      fs.writeFile(path.join(opts.workspaceRoot, "SOUL.md"), "MAIN META SOUL MUST NOT ENTER CHILD", "utf8"),
+      fs.writeFile(path.join(opts.workspaceRoot, "USER-RULES.md"), "- Always cite evidence", "utf8"),
+    ]);
+
+    await runChildAgentLoop(agent, opts);
+
+    const system = llmCalls[0]?.system ?? "";
+    expect(system).toContain('<subagent_workspace_context source="parent-workspace">');
+    expect(system).toContain("# CLAUDE.md");
+    expect(system).toContain("claude environment rules");
+    expect(system).toContain("# AGENTS.md");
+    expect(system).toContain("Hipocampus runtime contract");
+    expect(system).toContain("cloud runtime facts");
+    expect(system).toContain("frozen file list");
+    expect(system).toContain("# MEMORY.md");
+    expect(system).toContain("legacy memory cache");
+    expect(system).toContain("# memory/ROOT.md");
+    expect(system).toContain("root memory index");
+    expect(system).toContain("# LEARNING.md");
+    expect(system).toContain("# DISCIPLINE.md");
+    expect(system).toContain("# EXECUTION.md");
+    expect(system).toContain("execution rules");
+    expect(system).toContain("# EXECUTION-TOOLS.md");
+    expect(system).toContain("execution tool rules");
+    expect(system).toContain("<runtime_policy");
+    expect(system).toContain("citations.require_sources=true");
+    expect(system).toContain("You are the spawned child agent, not the main meta-layer agent");
+    expect(system).toContain("Do not spawn, route to, or manage further subagents");
+    expect(system).not.toContain("All complex tasks are executed via subagent");
+    expect(system).not.toContain("clawy-agent --agent specialist");
+    expect(system).not.toContain("Spawn subagents with any model");
+    expect(system).not.toContain("delegate to the coding agent");
+    expect(system).not.toContain("MAIN META SOUL MUST NOT ENTER CHILD");
   });
 
   it("parent abort yields status='aborted'", async () => {

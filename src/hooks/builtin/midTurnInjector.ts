@@ -27,18 +27,18 @@ export interface MidTurnInjectorOpts {
 
 /**
  * Format a drained injection into a synthetic user-role LLM message.
- * Wrapping with `<user_injection>` tells the LLM this is a follow-up
- * utterance received mid-turn, not the original request, so its chain
- * of thought stays grounded in the original task while incorporating
- * the new input.
+ * The model-facing wrapper deliberately avoids the word "injection":
+ * these are normal user follow-ups, and naming them as injection-like
+ * content caused models to misclassify legitimate user text as prompt
+ * injection attempts.
  */
 export function wrapInjection(index: number, text: string, receivedAtIso: string): string {
   return [
-    `<user_injection seq="${index}" at="${receivedAtIso}">`,
+    `<follow_up_user_message seq="${index}" at="${receivedAtIso}">`,
     "<!-- The user sent this message while you were already working on",
     "their previous request. Incorporate it into the rest of this turn -->",
     text,
-    "</user_injection>",
+    "</follow_up_user_message>",
   ].join("\n");
 }
 

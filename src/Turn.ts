@@ -71,7 +71,37 @@ function truncationGuardEnding(text: string): {
   ) {
     return { looksTruncated: false, lastChar };
   }
-  return { looksTruncated: true, lastChar };
+
+  const tail = trimmed.slice(-180).trim();
+  const fencedCodeTicks = trimmed.match(/```/g)?.length ?? 0;
+  if (fencedCodeTicks % 2 === 1) {
+    return { looksTruncated: true, lastChar };
+  }
+
+  // Mentions, URLs, and identifiers are common deliberate final
+  // tokens in short status reports. A bare alphanumeric last character
+  // is not enough evidence to treat an end_turn response as cut off.
+  if (
+    /(?:^|\s)@[A-Za-z0-9_]{2,}$/u.test(tail) ||
+    /https?:\/\/\S+$/iu.test(tail) ||
+    /(?:^|\s)[A-Za-z0-9_.-]+#[A-Za-z0-9_.-]+$/u.test(tail)
+  ) {
+    return { looksTruncated: false, lastChar };
+  }
+
+  const danglingPunctuationRe = /[,;:，、；：]$/u;
+  const danglingKoreanRe =
+    /(?:원인은|이유는|문제는|핵심은|다음은|경우에는|때문에|그리고|하지만|그러나|다만|또는|해야 하며|하며|으로|로|에게|에서|부터|까지|은|는|이|가|을|를)$/u;
+  const danglingEnglishRe =
+    /\b(?:because|and|or|but|with|without|the|a|an|to|of|for|from|as|by|if|when|while|where|which|that|is|are|was|were|will|can|could|should|would)$/iu;
+
+  return {
+    looksTruncated:
+      danglingPunctuationRe.test(lastChar) ||
+      danglingKoreanRe.test(tail) ||
+      danglingEnglishRe.test(tail),
+    lastChar,
+  };
 }
 
 export class TurnInterruptedError extends Error {
@@ -99,12 +129,6 @@ function normalizeAssistantReplayBlocks(blocks: LLMContentBlock[]): LLMContentBl
 
 function finalAssistantReplayBlocks(blocks: LLMContentBlock[]): LLMContentBlock[] {
   return normalizeAssistantReplayBlocks(blocks).filter((block) => block.type !== "tool_use");
-}
-
-function configuredModelForSession(session: Session): string {
-  const model = (session as unknown as { agent?: { config?: { model?: unknown } } })
-    .agent?.config?.model;
-  return typeof model === "string" && model.length > 0 ? model : "unknown";
 }
 
 export class Turn {
@@ -199,7 +223,6 @@ export class Turn {
     declaredRoute: TurnRoute = "direct",
     options: { planMode?: boolean } = {},
   ) {
-    const configuredModel = configuredModelForSession(session);
     this.meta = {
       turnId,
       sessionKey: session.meta.sessionKey,
@@ -207,8 +230,8 @@ export class Turn {
       declaredRoute,
       status: "pending",
       usage: { inputTokens: 0, outputTokens: 0, costUsd: 0 },
-      configuredModel,
-      effectiveModel: configuredModel,
+      configuredModel: session.agent.config.model,
+      effectiveModel: session.agent.config.model,
     };
     this.asks = new AskUserController(turnId, sse);
     // T2-08 — Session permission mode is authoritative.
@@ -382,6 +405,7 @@ export class Turn {
         );
 
         if (decision.kind === "finalise") {
+          const finalBlocks = this.applyFinalAssistantReplayBlocks(blocks);
           if (!this.meta.stopReason) {
             this.setStopReason(this.recoveryAttempt > 0 ? "max_tokens_recovered" : "end_turn");
           }
@@ -391,7 +415,6 @@ export class Turn {
           // beforeLLMCall → midTurnInjector drains them. The bot
           // finishes its current response naturally, then addresses
           // the queued messages.
-          const finalBlocks = finalAssistantReplayBlocks(blocks);
           if (this.session.hasPendingInjections()) {
             console.log(
               `[core-agent] finalise deferred — pending injections exist` +
@@ -539,6 +562,7 @@ export class Turn {
       if (result.status === "committed") return result;
       if (!result.retryable) {
         if (result.stopReason) this.setStopReason(result.stopReason);
+        this.clearBlockedDraftBeforeAbort(result.reason);
         throw new Error(`beforeCommit blocked: ${result.reason}`);
       }
 
@@ -551,6 +575,7 @@ export class Turn {
         if (result.retryKind === "structured_output_invalid") {
           this.setStopReason("structured_output_retry_exhausted");
         }
+        this.clearBlockedDraftBeforeAbort(decision.reason);
         throw new Error(`beforeCommit blocked: ${decision.reason}`);
       }
 
@@ -561,10 +586,27 @@ export class Turn {
         reason: result.reason,
         retryNo: attempt,
       });
-      await this.resampleAfterBlockedCommit(
-        result.finalText,
-        decision.hiddenUserMessage,
-      );
+      try {
+        await this.resampleAfterBlockedCommit(
+          result.finalText,
+          decision.hiddenUserMessage,
+        );
+      } catch (resampleErr) {
+        // The previous draft was rejected by a beforeCommit verifier.
+        // Never restore it after retry failure: doing so leaks exactly
+        // the response the verifier blocked. Show a truthful runtime
+        // failure placeholder instead; the turn will still abort below.
+        const fallbackText =
+          "A runtime verifier blocked the previous draft, but the correction attempt failed before a valid response could be produced. Please retry.";
+        console.warn(
+          `[core-agent] resample failed after blocked commit; clearing blocked draft` +
+          ` turnId=${this.meta.turnId}`,
+        );
+        this.sse.agent({ type: "response_clear" });
+        this.sse.agent({ type: "text_delta", delta: fallbackText });
+        this.emittedAssistantBlocks.push({ type: "text", text: fallbackText });
+        throw resampleErr;
+      }
     }
     throw new Error("commit retry attempts exhausted");
   }
@@ -632,6 +674,21 @@ export class Turn {
     });
   }
 
+  private applyFinalAssistantReplayBlocks(blocks: LLMContentBlock[]): LLMContentBlock[] {
+    const finalBlocks = finalAssistantReplayBlocks(blocks);
+    if (blocks.length > 0) {
+      this.emittedAssistantBlocks.splice(
+        Math.max(0, this.emittedAssistantBlocks.length - blocks.length),
+        blocks.length,
+        ...finalBlocks,
+      );
+    }
+    if (this.canonicalAssistantMessages.length > 0) {
+      this.canonicalAssistantMessages[this.canonicalAssistantMessages.length - 1] = finalBlocks;
+    }
+    return finalBlocks;
+  }
+
   private async runTools(
     toolUses: Array<Extract<LLMContentBlock, { type: "tool_use" }>>,
   ): Promise<ToolDispatchResult[]> {
@@ -672,9 +729,13 @@ export class Turn {
     failedText: string,
     hiddenUserMessage: string,
   ): Promise<void> {
-    const failedBlocks = this.emittedAssistantBlocks.length > 0
+    const rawBlocks = this.emittedAssistantBlocks.length > 0
       ? [...this.emittedAssistantBlocks]
-      : [{ type: "text" as const, text: failedText }];
+      : failedText ? [{ type: "text" as const, text: failedText }] : [];
+    // Filter out empty text blocks — Anthropic API rejects them
+    const failedBlocks = finalAssistantReplayBlocks(rawBlocks.filter(
+      (b) => b.type !== "text" || ("text" in b && (b as { text: string }).text.length > 0),
+    ));
     this.emittedAssistantBlocks = [];
     this.canonicalAssistantMessages.pop();
     this.assistantText = "";
@@ -753,7 +814,7 @@ export class Turn {
       this.recoveryAttempt = stateRef.recoveryAttempt;
 
       if (decision.kind === "finalise") {
-        const finalBlocks = finalAssistantReplayBlocks(blocks);
+        const finalBlocks = this.applyFinalAssistantReplayBlocks(blocks);
         this.retryBaseMessages = [
           ...messages,
           ...(finalBlocks.length > 0
@@ -818,7 +879,7 @@ export class Turn {
     this.meta.usage.inputTokens = Math.max(this.meta.usage.inputTokens, u.inputTokens);
     this.meta.usage.outputTokens += u.outputTokens;
     this.meta.usage.costUsd = computeUsd(
-      this.currentModel(),
+      this.meta.effectiveModel ?? this.session.agent.config.model,
       this.meta.usage.inputTokens,
       this.meta.usage.outputTokens,
     );
@@ -914,6 +975,16 @@ export class Turn {
   private emitError(code: string, err: unknown): void {
     const message = err instanceof Error ? err.message : String(err);
     this.sse.agent({ type: "error", code, message });
+  }
+
+  private clearBlockedDraftBeforeAbort(reason: string): void {
+    if (this.assistantTextSoFarLen() === 0) return;
+    this.sse.agent({ type: "response_clear" });
+    console.warn(
+      `[core-agent] cleared blocked draft before abort` +
+      ` reason=${JSON.stringify(reason.slice(0, 120))}` +
+      ` turnId=${this.meta.turnId}`,
+    );
   }
 
   private clearUserVisibleDraftForDeferredFinalise(

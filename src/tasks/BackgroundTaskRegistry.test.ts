@@ -72,6 +72,37 @@ describe("BackgroundTaskRegistry", () => {
     expect(reloaded?.status).toBe("completed");
   });
 
+  it("attachResult persists attempts and artifact inventory for TaskGet recovery", async () => {
+    const reg = new BackgroundTaskRegistry(root);
+    await reg.create({
+      taskId: "partial",
+      parentTurnId: "turn_partial",
+      sessionKey: "sess_partial",
+      persona: "writer",
+      prompt: "write",
+      spawnDir: "/workspace/.spawn/partial",
+    });
+
+    await reg.attachResult("partial", {
+      status: "failed",
+      resultText: "",
+      toolCallCount: 7,
+      attempts: 1,
+      error: "aborted",
+      artifacts: {
+        spawnDir: "/workspace/.spawn/partial",
+        fileCount: 4,
+        handedOffArtifacts: [],
+      },
+    });
+
+    const reloaded = await reg.get("partial");
+    expect(reloaded?.toolCallCount).toBe(7);
+    expect(reloaded?.attempts).toBe(1);
+    expect(reloaded?.artifacts?.fileCount).toBe(4);
+    expect(reloaded?.artifacts?.spawnDir).toBe("/workspace/.spawn/partial");
+  });
+
   it("list({status}) filters correctly and sorts newest-first", async () => {
     const reg = new BackgroundTaskRegistry(root);
     await reg.create({

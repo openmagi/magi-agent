@@ -27,6 +27,7 @@ function makeTurn(): { turn: Turn; sse: FakeSse } {
   const sse = new FakeSse();
   const session = {
     meta: { sessionKey: "agent:main:app:general" },
+    agent: { config: { model: "claude-test" } },
   } as unknown as Session;
   const userMessage: UserMessage = {
     text: "continue",

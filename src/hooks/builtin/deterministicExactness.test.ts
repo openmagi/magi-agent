@@ -103,14 +103,27 @@ describe("deterministic exactness hook", () => {
       ctx(
         store,
         JSON.stringify({
-          requiresDeterministic: true,
-          kinds: ["clock", "date_range", "calculation"],
-          reason: "The user asks for an exact recent average.",
-          suggestedTools: ["Clock", "DateRange", "Calculation"],
-          acceptanceCriteria: [
-            "Determine today's date through the Clock tool.",
-            "Compute the average through Calculation.",
-          ],
+          turnMode: { label: "other", confidence: 0.9 },
+          skipTdd: false,
+          implementationIntent: false,
+          documentOrFileOperation: false,
+          deterministic: {
+            requiresDeterministic: true,
+            kinds: ["clock", "date_range", "calculation"],
+            reason: "The user asks for an exact recent average.",
+            suggestedTools: ["Clock", "DateRange", "Calculation"],
+            acceptanceCriteria: [
+              "Determine today's date through the Clock tool.",
+              "Compute the average through Calculation.",
+            ],
+          },
+          fileDelivery: {
+            intent: "none",
+            path: null,
+            wantsChatDelivery: false,
+            wantsKbDelivery: false,
+            wantsFileOutput: false,
+          },
         }),
       ),
     );
@@ -141,10 +154,24 @@ describe("deterministic exactness hook", () => {
       ctx(
         store,
         JSON.stringify({
-          requiresDeterministic: false,
-          kinds: [],
-          reason: "Conceptual explanation.",
-          suggestedTools: [],
+          turnMode: { label: "other", confidence: 0.9 },
+          skipTdd: false,
+          implementationIntent: false,
+          documentOrFileOperation: false,
+          deterministic: {
+            requiresDeterministic: false,
+            kinds: [],
+            reason: "Conceptual explanation.",
+            suggestedTools: [],
+            acceptanceCriteria: [],
+          },
+          fileDelivery: {
+            intent: "none",
+            path: null,
+            wantsChatDelivery: false,
+            wantsKbDelivery: false,
+            wantsFileOutput: false,
+          },
         }),
       ),
     );

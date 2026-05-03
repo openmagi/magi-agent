@@ -12,6 +12,10 @@ import path from "node:path";
 import type { HookContext, RegisteredHook } from "../types.js";
 import type { TranscriptEntry } from "../../storage/Transcript.js";
 import type { CompletionEvidenceAgent } from "./completionEvidenceGate.js";
+import {
+  getOrClassifyFinalAnswerMeta,
+  getOrClassifyRequestMeta,
+} from "./turnMetaClassifier.js";
 
 const MAX_RETRIES = 1;
 
@@ -65,17 +69,6 @@ const INTERNAL_BASENAMES = new Set([
   "agent.config.yml",
 ]);
 
-const ATTACHMENT_INTENT_RE =
-  /(?:첨부|채팅에도|여기(?:에|에도)?\s*(?:올려|보내|첨부)|다운로드|미리보기|preview|download|attach|attachment|send\s+(?:the\s+)?file|upload\s+(?:the\s+)?file)/i;
-
-const KB_INTENT_RE =
-  /(?:\bKB\b|케이비|지식\s*베이스|knowledge\s*base|knowledge\s*write|KB에\s*(?:저장|넣|업로드)|지식저장|저장해)/i;
-
-const FILE_INTENT_RE =
-  /(?:파일|문서|리포트|보고서|엑셀|스프레드시트|PDF|CSV|export|file|document|report|spreadsheet|workbook)/i;
-
-const ARTIFACT_CLAIM_RE =
-  /(?:파일|문서|리포트|보고서|엑셀|스프레드시트|PDF|CSV|artifact|file|document|report|spreadsheet|workbook).{0,40}(?:생성|작성|만들|저장|준비|created|generated|wrote|saved|prepared)/i;
 const NATIVE_TOOL_CLAIM_DONE_RE =
   /(?:완료|했습니다|됐|되었습니다|생성|작성|저장|첨부|전달|delivered|sent|created|generated|saved|completed|done)/i;
 
@@ -95,6 +88,7 @@ interface NativeFileDelivery {
   target: "chat" | "kb";
   status?: string;
   marker?: string;
+  externalId?: string;
 }
 
 export interface CreatedArtifact {
@@ -139,13 +133,6 @@ function isUserFacingFile(rawPath: string): boolean {
   if (isInternalPath(rawPath)) return false;
   const ext = path.posix.extname(normalizeWorkspacePath(rawPath)).toLowerCase();
   return USER_FACING_EXTENSIONS.has(ext);
-}
-
-function classifyDeliveryIntent(userMessage: string): DeliveryIntent {
-  const wantsAttachment = ATTACHMENT_INTENT_RE.test(userMessage);
-  const wantsKb = KB_INTENT_RE.test(userMessage);
-  const wantsFile = wantsAttachment || wantsKb || FILE_INTENT_RE.test(userMessage);
-  return { wantsAttachment, wantsKb, wantsFile };
 }
 
 function isSuccessfulResult(entry: TranscriptEntry): boolean {
@@ -349,8 +336,39 @@ function nativeFileDeliveries(
         target,
         status: stringField(delivery, "status") ?? undefined,
         marker: stringField(delivery, "marker") ?? undefined,
+        externalId: stringField(delivery, "externalId") ?? undefined,
       });
     }
+  }
+
+  return deliveries;
+}
+
+function nativeFileSendDeliveries(
+  transcript: ReadonlyArray<TranscriptEntry>,
+  turnId: string,
+): NativeFileDelivery[] {
+  const successful = successfulResultsById(transcript, turnId);
+  const deliveries: NativeFileDelivery[] = [];
+
+  for (const entry of transcript) {
+    if (entry.kind !== "tool_call") continue;
+    if (entry.turnId !== turnId) continue;
+    if (entry.name !== "FileSend") continue;
+
+    const result = successful.get(entry.toolUseId);
+    if (!result) continue;
+    const output = parseOutputObject(result.output);
+    const marker = stringField(output, "marker") ?? undefined;
+    const channel = objectRecord(output?.channel);
+    const channelType = stringField(channel, "type");
+    const channelId = stringField(channel, "channelId");
+    deliveries.push({
+      target: "chat",
+      status: "sent",
+      marker,
+      externalId: channelType && channelId ? `${channelType}:${channelId}` : stringField(output, "id") ?? undefined,
+    });
   }
 
   return deliveries;
@@ -365,12 +383,22 @@ function sentNativeFileDeliveries(
   );
 }
 
+function sentChatFileDeliveries(
+  transcript: ReadonlyArray<TranscriptEntry>,
+  turnId: string,
+): NativeFileDelivery[] {
+  return [
+    ...sentNativeFileDeliveries(transcript, turnId).filter((delivery) => delivery.target === "chat"),
+    ...nativeFileSendDeliveries(transcript, turnId),
+  ];
+}
+
 function sentNativeChatMarkers(
   transcript: ReadonlyArray<TranscriptEntry>,
   turnId: string,
 ): string[] {
-  return sentNativeFileDeliveries(transcript, turnId)
-    .filter((delivery) => delivery.target === "chat" && delivery.marker)
+  return sentChatFileDeliveries(transcript, turnId)
+    .filter((delivery) => delivery.marker)
     .map((delivery) => delivery.marker as string);
 }
 
@@ -381,6 +409,32 @@ function missingNativeChatMarkers(
 ): string[] {
   return sentNativeChatMarkers(transcript, turnId).filter(
     (marker) => !assistantText.includes(marker),
+  );
+}
+
+function hasDirectChannelChatDelivery(
+  transcript: ReadonlyArray<TranscriptEntry>,
+  turnId: string,
+): boolean {
+  return sentChatFileDeliveries(transcript, turnId).some(
+    (delivery) =>
+      !delivery.marker &&
+      !!delivery.externalId &&
+      /^(?:telegram|discord):/.test(delivery.externalId),
+  );
+}
+
+function hasChatDeliveryEvidence(
+  assistantText: string,
+  transcript: ReadonlyArray<TranscriptEntry>,
+  turnId: string,
+): boolean {
+  const nativeMarkers = sentNativeChatMarkers(transcript, turnId);
+  const hasRequiredNativeMarker =
+    nativeMarkers.length === 0 || nativeMarkers.some((marker) => assistantText.includes(marker));
+  return (
+    (ATTACHMENT_MARKER_RE.test(assistantText) && hasRequiredNativeMarker) ||
+    hasDirectChannelChatDelivery(transcript, turnId)
   );
 }
 
@@ -435,13 +489,14 @@ function hasRequiredDeliveryEvidence(
   const nativeMarkers = sentNativeChatMarkers(transcript, turnId);
   const hasRequiredNativeMarker =
     nativeMarkers.length === 0 || nativeMarkers.some((marker) => assistantText.includes(marker));
+  const hasDirectChannelDelivery = hasDirectChannelChatDelivery(transcript, turnId);
   const hasKbWrite = hasKbWriteEvidence(transcript, turnId);
 
-  if (intent.wantsAttachment && (!hasAttachment || !hasRequiredNativeMarker)) return false;
+  if (intent.wantsAttachment && ((!hasAttachment && !hasDirectChannelDelivery) || !hasRequiredNativeMarker)) return false;
   if (intent.wantsKb && !hasKbWrite) return false;
   if (intent.wantsAttachment || intent.wantsKb) return true;
 
-  return (hasAttachment && hasRequiredNativeMarker) || hasKbWrite;
+  return (hasAttachment && hasRequiredNativeMarker) || hasDirectChannelDelivery || hasKbWrite;
 }
 
 function describeMissingEvidence(
@@ -455,11 +510,11 @@ function describeMissingEvidence(
   const missingMarkers = missingNativeChatMarkers(assistantText, transcript, turnId);
   const missing: string[] = [];
 
-  if (intent.wantsAttachment && (!hasAttachment || missingMarkers.length > 0)) {
+  if (intent.wantsAttachment && (!hasAttachment && !hasDirectChannelChatDelivery(transcript, turnId) || missingMarkers.length > 0)) {
     missing.push(
       missingMarkers.length > 0
         ? `returned FileDeliver marker in final answer: ${missingMarkers[0]}`
-        : "chat attachment marker from file-send.sh or FileDeliver",
+        : "chat attachment marker from file-send.sh/FileSend/FileDeliver, or direct Telegram/Discord delivery evidence",
     );
   }
   if (intent.wantsKb && !hasKbWrite) {
@@ -476,12 +531,20 @@ function describeMissingEvidence(
 
 function shouldGate(
   intent: DeliveryIntent,
-  assistantText: string,
+  finalMeta: {
+    assistantClaimsFileCreated: boolean;
+    assistantClaimsChatDelivery: boolean;
+    assistantClaimsKbDelivery: boolean;
+  },
   artifacts: ReadonlyArray<CreatedArtifact>,
 ): boolean {
   if (artifacts.length === 0) return false;
   if (intent.wantsFile) return true;
-  return ARTIFACT_CLAIM_RE.test(assistantText);
+  return (
+    finalMeta.assistantClaimsFileCreated ||
+    finalMeta.assistantClaimsChatDelivery ||
+    finalMeta.assistantClaimsKbDelivery
+  );
 }
 
 function formatArtifacts(artifacts: ReadonlyArray<CreatedArtifact>): string {
@@ -518,14 +581,26 @@ export function makeArtifactDeliveryGateHook(
     point: "beforeCommit",
     priority: 89,
     blocking: true,
-    timeoutMs: 2_000,
+    timeoutMs: 8_000,
     handler: async ({ assistantText, userMessage, retryCount }, ctx: HookContext) => {
       try {
         if (!isEnabled()) return { action: "continue" };
 
         const transcript = await readTranscript(opts, ctx);
         const artifacts = collectCreatedArtifacts(transcript, ctx.turnId);
-        const intent = classifyDeliveryIntent(userMessage);
+        const requestMeta = await getOrClassifyRequestMeta(ctx, { userMessage });
+        const finalMeta = await getOrClassifyFinalAnswerMeta(ctx, {
+          userMessage,
+          assistantText,
+        });
+        const intent: DeliveryIntent = {
+          wantsAttachment: requestMeta.fileDelivery.wantsChatDelivery,
+          wantsKb: requestMeta.fileDelivery.wantsKbDelivery,
+          wantsFile:
+            requestMeta.fileDelivery.wantsFileOutput ||
+            requestMeta.fileDelivery.wantsChatDelivery ||
+            requestMeta.fileDelivery.wantsKbDelivery,
+        };
         const unsupportedNativeClaims = nativeToolCompletionClaimsWithoutEvidence(
           assistantText,
           transcript,
@@ -552,7 +627,10 @@ export function makeArtifactDeliveryGateHook(
         }
 
         const missingDeliveredMarkers = missingNativeChatMarkers(assistantText, transcript, ctx.turnId);
-        if (missingDeliveredMarkers.length > 0 && (intent.wantsAttachment || ATTACHMENT_INTENT_RE.test(assistantText))) {
+        if (
+          missingDeliveredMarkers.length > 0 &&
+          (intent.wantsAttachment || finalMeta.assistantClaimsChatDelivery)
+        ) {
           ctx.emit({
             type: "rule_check",
             ruleId: "artifact-delivery-gate",
@@ -570,7 +648,30 @@ export function makeArtifactDeliveryGateHook(
           };
         }
 
-        if (!shouldGate(intent, assistantText, artifacts)) {
+        if (
+          finalMeta.assistantClaimsChatDelivery &&
+          !finalMeta.assistantReportsDeliveryFailure &&
+          !hasChatDeliveryEvidence(assistantText, transcript, ctx.turnId)
+        ) {
+          ctx.emit({
+            type: "rule_check",
+            ruleId: "artifact-delivery-gate",
+            verdict: "violation",
+            detail: "file delivery claim without same-turn delivery evidence",
+          });
+          return {
+            action: "block",
+            reason: [
+              "[RETRY:ARTIFACT_DELIVERY] The final answer claims a file/result was sent in chat,",
+              "but the current turn has no successful chat delivery evidence.",
+              "",
+              "Before finalising, call `FileSend` or `FileDeliver(target=\"chat\")`. For web/app, include the returned attachment marker. For Telegram/Discord direct delivery, a successful native sendDocument/sendPhoto result is enough.",
+              "If delivery is not possible, remove the delivery success claim and explicitly say it was not delivered.",
+            ].join("\n"),
+          };
+        }
+
+        if (!shouldGate(intent, finalMeta, artifacts)) {
           return { action: "continue" };
         }
 

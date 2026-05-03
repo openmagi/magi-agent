@@ -46,9 +46,9 @@ export interface UserMessageMetadata {
   /**
    * Mid-turn injection marker (#86). Present when this message was
    * queued via POST /v1/chat/inject while another turn was already
-   * streaming — the midTurnInjector hook tags the injection so
-   * MessageBuilder can wrap it in `<user_injection>` context and the
-   * LLM knows this is a follow-up rather than the original request.
+   * streaming — the midTurnInjector hook wraps it as a neutral
+   * follow-up user message so the LLM knows this is not the original
+   * request.
    */
   injection?: {
     id: string;

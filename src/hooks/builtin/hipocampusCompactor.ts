@@ -10,7 +10,10 @@
 import type { RegisteredHook } from "../types.js";
 import type { TranscriptEntry } from "../../storage/Transcript.js";
 import { flushMemory as defaultFlushMemory } from "./hipocampusFlush.js";
-import { allowSealedFileUpdateForTurn } from "./sealedFiles.js";
+import {
+  allowSealedFileUpdateForTurn,
+  recordSystemSealedFileUpdate,
+} from "./sealedFiles.js";
 
 export interface CompactionEngine {
   run: (force?: boolean) => Promise<{ skipped?: boolean; compacted?: boolean; stats?: unknown }>;
@@ -77,7 +80,25 @@ export function makeHipocampusCompactorHook(
         });
 
         if (result.compacted) {
-          allowSealedFileUpdateForTurn(ctx.turnId, "memory/ROOT.md");
+          if (workspaceRoot) {
+            try {
+              const recorded = await recordSystemSealedFileUpdate(
+                workspaceRoot,
+                "memory/ROOT.md",
+              );
+              ctx.log("info", "hipocampus sealed manifest update completed", {
+                sessionKey,
+                recorded,
+              });
+            } catch (manifestErr) {
+              ctx.log("warn", "hipocampus sealed manifest update failed", {
+                sessionKey,
+                error: String(manifestErr),
+              });
+            }
+          } else {
+            allowSealedFileUpdateForTurn(ctx.turnId, "memory/ROOT.md");
+          }
           try {
             await qmd.reindex();
             ctx.log("info", "hipocampus qmd reindex completed", { sessionKey });

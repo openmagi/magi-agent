@@ -24,6 +24,7 @@
 
 import type { RegisteredHook, HookContext } from "../types.js";
 import type { TranscriptEntry } from "../../storage/Transcript.js";
+import { getOrClassifyFinalAnswerMeta } from "./turnMetaClassifier.js";
 
 /** Tool names that indicate work was actually started this turn. */
 const WORK_TOOLS = new Set([
@@ -49,43 +50,20 @@ function isEnabled(): boolean {
   return v === "" || v === "on" || v === "true" || v === "1";
 }
 
-const DEFERRAL_CLASSIFIER_PROMPT = `You classify whether an AI assistant's response contains a "deferral promise" — a promise to deliver results LATER instead of doing the work NOW in this turn.
-
-Deferral (YES):
-- "완료되면 결과 보내드리겠습니다" (will send when done)
-- "5분 후 리포트 드릴게요" (will give report in 5 min)
-- "I'll send the results when ready"
-- "Check back in a few minutes"
-- "나중에 알려드리겠습니다" (will let you know later)
-
-NOT deferral (NO):
-- "잠시만요, 지금 처리하겠습니다" (wait, processing now — synchronous)
-- "결과를 정리해서 바로 보내드릴게요" (organizing and sending right away)
-- "Let me run this and show you" (doing it now)
-- "잠깐만 기다려주세요" as filler while working (not a future promise)
-- Normal response without time-delayed delivery promises
-
-Reply ONLY: YES or NO`;
-
 /** LLM-based deferral classification. No regex fallback. */
-export async function matchesDeferral(text: string, ctx?: HookContext): Promise<boolean> {
+export async function matchesDeferral(
+  text: string,
+  ctx?: HookContext,
+  userMessage = "",
+): Promise<boolean> {
   if (!text || text.trim().length === 0) return false;
   if (!ctx?.llm) return false; // No LLM = fail-open
 
-  try {
-    let result = "";
-    for await (const event of ctx.llm.stream({
-      model: "claude-haiku-4-5",
-      system: DEFERRAL_CLASSIFIER_PROMPT,
-      messages: [{ role: "user", content: [{ type: "text", text: text.slice(0, 500) }] }],
-      max_tokens: 10,
-    })) {
-      if (event.kind === "text_delta") result += event.delta;
-    }
-    return result.trim().toUpperCase().startsWith("YES");
-  } catch {
-    return false; // Fail-open on LLM error
-  }
+  const meta = await getOrClassifyFinalAnswerMeta(ctx, {
+    userMessage,
+    assistantText: text,
+  });
+  return meta.deferralPromise;
 }
 
 /** Exported for tests — count WORK_TOOLS calls in the turn's transcript. */
@@ -104,6 +82,107 @@ export function countWorkToolsThisTurn(
   return n;
 }
 
+function parseToolOutput(output: unknown): unknown {
+  if (typeof output !== "string" || output.trim().length === 0) return null;
+  try {
+    return JSON.parse(output);
+  } catch {
+    return null;
+  }
+}
+
+function getNestedString(obj: unknown, path: readonly string[]): string | null {
+  let cur: unknown = obj;
+  for (const key of path) {
+    if (!cur || typeof cur !== "object" || !(key in cur)) return null;
+    cur = (cur as Record<string, unknown>)[key];
+  }
+  return typeof cur === "string" && cur.length > 0 ? cur : null;
+}
+
+/**
+ * A future-delivery sentence is valid when the turn has already created
+ * a real async delivery handoff: a background SpawnAgent task plus an
+ * active CronCreate monitor for the same user channel.
+ */
+export function hasAsyncDeliveryHandoffThisTurn(
+  transcript: ReadonlyArray<{
+    kind: string;
+    turnId: string;
+    toolUseId?: string;
+    name?: string;
+    input?: unknown;
+    status?: string;
+    output?: string;
+    isError?: boolean;
+  }>,
+  turnId: string,
+): boolean {
+  const callsById = new Map<string, { name?: string; input?: unknown }>();
+  let hasBackgroundSpawn = false;
+  const createdCronIds = new Set<string>();
+  const deletedCronIds = new Set<string>();
+
+  for (const entry of transcript) {
+    if (entry.turnId !== turnId) continue;
+    if (entry.kind === "tool_call" && typeof entry.toolUseId === "string") {
+      callsById.set(entry.toolUseId, { name: entry.name, input: entry.input });
+      continue;
+    }
+    if (
+      entry.kind !== "tool_result" ||
+      typeof entry.toolUseId !== "string" ||
+      entry.status !== "ok" ||
+      entry.isError === true
+    ) {
+      continue;
+    }
+
+    const call = callsById.get(entry.toolUseId);
+    if (!call?.name) continue;
+    const parsed = parseToolOutput(entry.output);
+
+    if (call.name === "SpawnAgent") {
+      const inputDeliver =
+        call.input && typeof call.input === "object"
+          ? (call.input as Record<string, unknown>).deliver
+          : undefined;
+      const outputStatus = getNestedString(parsed, ["status"]);
+      const outputTaskId = getNestedString(parsed, ["taskId"]);
+      if (inputDeliver === "background" && outputStatus === "pending" && outputTaskId) {
+        hasBackgroundSpawn = true;
+      }
+      continue;
+    }
+
+    if (call.name === "CronCreate") {
+      const cronId = getNestedString(parsed, ["cron", "cronId"]);
+      const deliveryType = getNestedString(parsed, ["cron", "deliveryChannel", "type"]);
+      const deliveryChannelId = getNestedString(parsed, ["cron", "deliveryChannel", "channelId"]);
+      if (cronId && deliveryType && deliveryChannelId) {
+        createdCronIds.add(cronId);
+      }
+      continue;
+    }
+
+    if (call.name === "CronDelete") {
+      const deleted = parsed && typeof parsed === "object"
+        ? (parsed as Record<string, unknown>).deleted
+        : undefined;
+      const cronId = getNestedString(parsed, ["cronId"]);
+      if (deleted === true && cronId) {
+        deletedCronIds.add(cronId);
+      }
+    }
+  }
+
+  if (!hasBackgroundSpawn) return false;
+  for (const cronId of createdCronIds) {
+    if (!deletedCronIds.has(cronId)) return true;
+  }
+  return false;
+}
+
 export interface DeferralBlockerOptions {
   agent?: DeferralBlockerAgent;
 }
@@ -117,7 +196,7 @@ export function makeDeferralBlockerHook(
     // 86 — one notch after preRefusalVerifier (85), before answerVerifier (90).
     priority: 86,
     blocking: true,
-    handler: async ({ assistantText, retryCount }, ctx: HookContext) => {
+    handler: async ({ assistantText, retryCount, userMessage }, ctx: HookContext) => {
       try {
         if (!isEnabled()) return { action: "continue" };
 
@@ -125,7 +204,7 @@ export function makeDeferralBlockerHook(
           return { action: "continue" };
         }
 
-        if (!(await matchesDeferral(assistantText, ctx))) {
+        if (!(await matchesDeferral(assistantText, ctx, userMessage))) {
           return { action: "continue" };
         }
 
@@ -166,6 +245,19 @@ export function makeDeferralBlockerHook(
           }>,
           ctx.turnId,
         );
+
+        if (
+          hasAsyncDeliveryHandoffThisTurn(
+            source as Parameters<typeof hasAsyncDeliveryHandoffThisTurn>[0],
+            ctx.turnId,
+          )
+        ) {
+          ctx.log("info", "[deferral-blocker] allowing verified async delivery handoff", {
+            retryCount,
+            workCount,
+          });
+          return { action: "continue" };
+        }
 
         ctx.log("warn", "[deferral-blocker] blocking deferral promise", {
           retryCount,

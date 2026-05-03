@@ -31,7 +31,7 @@ function agentPayloads(response: CaptureResponse): unknown[] {
 }
 
 describe("SseWriter", () => {
-  it("does not stream a leading META tag to clients", () => {
+  it("streams a leading route META tag once to clients", () => {
     const { writer, response } = makeWriter();
 
     writer.agent({ type: "text_delta", delta: "[META: intent=대화, " });
@@ -46,8 +46,8 @@ describe("SseWriter", () => {
       )
       .map((event) => event.delta)
       .join("");
-    expect(text).toBe("안녕하세요!");
-    expect(text).not.toContain("[META:");
+    expect(text).toBe("[META: intent=대화, domain=일상, route=direct]\n\n안녕하세요!");
+    expect(text.match(/\[META:/g)).toHaveLength(1);
   });
 
   it("streams normal text without waiting for a META tag", () => {
@@ -65,5 +65,27 @@ describe("SseWriter", () => {
       .map((event) => event.delta)
       .join("");
     expect(text).toBe("Hello world");
+  });
+
+  it("streams only the first embedded route META tag to clients", () => {
+    const { writer, response } = makeWriter();
+
+    writer.agent({ type: "text_delta", delta: "좋아. " });
+    writer.agent({ type: "text_delta", delta: "[META: intent=실행, " });
+    writer.agent({ type: "text_delta", delta: "domain=문서작성, complexity=complex, route=subagent]" });
+    writer.agent({ type: "text_delta", delta: "[META: route=direct]바로 시작합니다." });
+
+    const text = agentPayloads(response)
+      .filter((event): event is { type: string; delta: string } =>
+        typeof event === "object" &&
+        event !== null &&
+        (event as { type?: unknown }).type === "text_delta",
+      )
+      .map((event) => event.delta)
+      .join("");
+    expect(text).toBe(
+      "좋아. [META: intent=실행, domain=문서작성, complexity=complex, route=subagent]바로 시작합니다.",
+    );
+    expect(text.match(/\[META:/g)).toHaveLength(1);
   });
 });

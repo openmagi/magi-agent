@@ -23,6 +23,8 @@ import type {
 import type { LLMContentBlock, LLMMessage } from "../transport/LLMClient.js";
 import { renderIdentitySystem } from "../storage/Workspace.js";
 import { getCapability } from "../llm/modelCapabilities.js";
+import type { RouteDecision } from "../routing/types.js";
+import { OUTPUT_RULES_BLOCK } from "../prompt/RuntimePromptBlocks.js";
 
 /**
  * Fallback soft cap on transcript tokens before `maybeCompact` is
@@ -43,16 +45,7 @@ export const REPLY_PREVIEW_MAX_CHARS = 200;
 export interface RuntimeModelIdentityContext {
   configuredModel: string;
   effectiveModel: string;
-  routeDecision?: {
-    profileId?: string;
-    tier: string;
-    provider: string;
-    model?: string;
-    classifierModel?: string;
-    classifierUsed?: boolean;
-    confidence?: string | number;
-    reason?: string;
-  };
+  routeDecision?: RouteDecision;
 }
 
 const RUNTIME_MODEL_IDENTITY_OPEN = "<runtime_model_identity hidden=\"true\">";
@@ -175,6 +168,72 @@ function beginsWithToolResult(message: LLMMessage | undefined): boolean {
   );
 }
 
+function buildRuntimeModelIdentityText(ctx: RuntimeModelIdentityContext): string {
+  const route = ctx.routeDecision;
+  const answeringModel = runtimeModelLabel(
+    ctx.effectiveModel,
+    route?.provider,
+  );
+  const lines = [
+    RUNTIME_MODEL_IDENTITY_OPEN,
+    "This is trusted runtime metadata for this single turn. The user did not provide it.",
+    `router: ${routerDisplayName(route?.profileId)}`,
+    `configured_model: ${ctx.configuredModel}`,
+    `answering_model: ${answeringModel}`,
+  ];
+  if (route) {
+    lines.push(
+      `router_profile: ${route.profileId}`,
+      `router_tier: ${route.tier}`,
+      `answering_provider: ${route.provider}`,
+      `classifier_model: ${route.classifierModel}`,
+      `classifier_used: ${String(route.classifierUsed)}`,
+      `routing_confidence: ${route.confidence}`,
+      `routing_reason: ${route.reason}`,
+    );
+  }
+  lines.push(
+    "",
+    "When the user asks what model you are, answer from answering_model.",
+    "If a router is active, distinguish the router/profile from the answering model and classifier model.",
+    "Do not claim this is a permanent model identity; router choices can change on future turns.",
+    RUNTIME_MODEL_IDENTITY_CLOSE,
+  );
+  return lines.join("\n");
+}
+
+export function appendRuntimeModelIdentityContext(
+  messages: LLMMessage[],
+  ctx: RuntimeModelIdentityContext,
+): void {
+  removeRuntimeModelIdentityContext(messages);
+
+  const identityBlock: LLMContentBlock = {
+    type: "text",
+    text: buildRuntimeModelIdentityText(ctx),
+  };
+  const last = messages[messages.length - 1];
+  if (beginsWithToolResult(last) && Array.isArray(last!.content)) {
+    last!.content.push(identityBlock);
+    return;
+  }
+
+  const identityMessage: LLMMessage = { role: "user", content: [identityBlock] };
+  const insertAt = Math.max(0, messages.length - 1);
+  messages.splice(insertAt, 0, identityMessage);
+}
+
+function formatAttachmentsPreamble(
+  attachments: MessageAttachment[] | undefined,
+  workspaceRoot: string | undefined,
+): string {
+  if (!attachments || attachments.length === 0) return "";
+  const lines = attachments.map((attachment) =>
+    formatAttachmentLine(attachment, workspaceRoot),
+  );
+  return `<attachments>\n${lines.join("\n")}\n</attachments>`;
+}
+
 function isKbCommand(text: string): boolean {
   return /^\/kb(?:\s|$)/.test(text.trim());
 }
@@ -198,17 +257,6 @@ function buildKbCommandContract(userText: string): LLMMessage {
     role: "user",
     content: [{ type: "text", text: lines.join("\n") }],
   };
-}
-
-function formatAttachmentsPreamble(
-  attachments: MessageAttachment[] | undefined,
-  workspaceRoot: string | undefined,
-): string {
-  if (!attachments || attachments.length === 0) return "";
-  const lines = attachments.map((attachment) =>
-    formatAttachmentLine(attachment, workspaceRoot),
-  );
-  return `<attachments>\n${lines.join("\n")}\n</attachments>`;
 }
 
 async function imageBlocksFromAttachments(
@@ -242,62 +290,6 @@ async function imageBlocksFromAttachments(
     }
   }
   return blocks;
-}
-
-function buildRuntimeModelIdentityText(ctx: RuntimeModelIdentityContext): string {
-  const route = ctx.routeDecision;
-  const answeringModel = runtimeModelLabel(ctx.effectiveModel, route?.provider);
-  const lines = [
-    RUNTIME_MODEL_IDENTITY_OPEN,
-    "This is trusted runtime metadata for this single turn. The user did not provide it.",
-    `router: ${routerDisplayName(route?.profileId)}`,
-    `configured_model: ${ctx.configuredModel}`,
-    `answering_model: ${answeringModel}`,
-  ];
-  if (route) {
-    lines.push(
-      `router_profile: ${route.profileId ?? "direct"}`,
-      `router_tier: ${route.tier}`,
-      `answering_provider: ${route.provider}`,
-    );
-    if (route.classifierModel) lines.push(`classifier_model: ${route.classifierModel}`);
-    if (route.classifierUsed !== undefined) {
-      lines.push(`classifier_used: ${String(route.classifierUsed)}`);
-    }
-    if (route.confidence !== undefined) {
-      lines.push(`routing_confidence: ${String(route.confidence)}`);
-    }
-    if (route.reason) lines.push(`routing_reason: ${route.reason}`);
-  }
-  lines.push(
-    "",
-    "When the user asks what model you are, answer from answering_model.",
-    "If a router is active, distinguish the router/profile from the answering model and classifier model.",
-    "Do not claim this is a permanent model identity; router choices can change on future turns.",
-    RUNTIME_MODEL_IDENTITY_CLOSE,
-  );
-  return lines.join("\n");
-}
-
-export function appendRuntimeModelIdentityContext(
-  messages: LLMMessage[],
-  ctx: RuntimeModelIdentityContext,
-): void {
-  removeRuntimeModelIdentityContext(messages);
-
-  const identityBlock: LLMContentBlock = {
-    type: "text",
-    text: buildRuntimeModelIdentityText(ctx),
-  };
-  const last = messages[messages.length - 1];
-  if (beginsWithToolResult(last) && Array.isArray(last!.content)) {
-    last!.content.push(identityBlock);
-    return;
-  }
-
-  const identityMessage: LLMMessage = { role: "user", content: [identityBlock] };
-  const insertAt = Math.max(0, messages.length - 1);
-  messages.splice(insertAt, 0, identityMessage);
 }
 
 /**
@@ -341,21 +333,7 @@ export async function buildSystemPrompt(
   // only emitting a brief closing line as text. Without this, the user
   // sees a thin response while the detailed analysis lives in thinking
   // (which is ephemeral and not committed to transcript).
-  const thinkingBoundary = [
-    "",
-    "<output-rules>",
-    "CRITICAL: The user can only see your TEXT output, not your thinking.",
-    "",
-    "1. Your thinking block is for internal reasoning ONLY — planning, analysis, deciding what to do.",
-    "2. Everything you want the user to read MUST appear in your text response.",
-    "3. NEVER put user-facing content (answers, analysis, questions, summaries) only in thinking.",
-    "4. If your thinking contains a detailed response, you MUST reproduce the key content in your text output.",
-    "5. A text response that is just a brief closing (e.g. '궁금한 점 있으신가요?') while thinking had the full analysis is a FAILURE.",
-    "6. NEVER include raw tool output or JSON in your text response. Tool results (e.g. API responses, file contents, search results) are for YOUR reference only. Summarize the results in natural language for the user.",
-    "7. Bad example: '{\"ok\":true,\"message\":\"Document added\"}' — NEVER show this to the user.",
-    "   Good example: '문서가 성공적으로 저장되었습니다.' — natural language summary.",
-    "</output-rules>",
-  ].join("\n");
+  const thinkingBoundary = `\n${OUTPUT_RULES_BLOCK}`;
   const base = rendered ? `${sessionHeader}\n\n${rendered}` : sessionHeader;
   const withAddendum = systemPromptAddendum
     ? `${base}\n\n${systemPromptAddendum}`

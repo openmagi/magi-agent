@@ -145,7 +145,12 @@ describe("BackgroundTasks — T2-10 end-to-end", () => {
 
     const ctx = makeCtx({ workspaceRoot: tmpRoot });
     const spawn = await spawnTool.execute(
-      { persona: "bg", prompt: "work", deliver: "background" } satisfies SpawnAgentInput,
+      {
+        persona: "bg",
+        prompt: "work",
+        deliver: "background",
+        completion_contract: { required_evidence: "text" },
+      } satisfies SpawnAgentInput,
       ctx,
     );
     expect(spawn.status).toBe("ok");
@@ -188,7 +193,12 @@ describe("BackgroundTasks — T2-10 end-to-end", () => {
     const ctx = makeCtx({ workspaceRoot: tmpRoot });
 
     const spawn = await spawnTool.execute(
-      { persona: "bg", prompt: "produce", deliver: "background" },
+      {
+        persona: "bg",
+        prompt: "produce",
+        deliver: "background",
+        completion_contract: { required_evidence: "text" },
+      },
       ctx,
     );
     const { taskId } = spawn.output as SpawnAgentOutput;
@@ -221,7 +231,12 @@ describe("BackgroundTasks — T2-10 end-to-end", () => {
     const ctx = makeCtx({ workspaceRoot: tmpRoot });
 
     await spawnTool.execute(
-      { persona: "bg", prompt: "a", deliver: "background" },
+      {
+        persona: "bg",
+        prompt: "a",
+        deliver: "background",
+        completion_contract: { required_evidence: "text" },
+      },
       ctx,
     );
     await sleep(30);

@@ -30,6 +30,7 @@ export type DeterministicEvidenceStatus =
   | "failed"
   | "partial"
   | "unknown";
+export type MetaClassificationSource = "llm_classifier" | "manual";
 export type UsedResourceKind =
   | "workspace_path"
   | "source_path"
@@ -114,6 +115,58 @@ export interface VerificationEvidenceRecord {
   artifactIds?: string[];
 }
 
+export interface RequestMetaClassificationResult {
+  turnMode: {
+    label: "coding" | "exploratory" | "other";
+    confidence: number;
+  };
+  skipTdd: boolean;
+  implementationIntent: boolean;
+  documentOrFileOperation: boolean;
+  deterministic: {
+    requiresDeterministic: boolean;
+    kinds: DeterministicRequirementKind[];
+    reason: string;
+    suggestedTools: string[];
+    acceptanceCriteria: string[];
+  };
+  fileDelivery: {
+    intent: "deliver_existing" | "none";
+    path: string | null;
+    wantsChatDelivery: boolean;
+    wantsKbDelivery: boolean;
+    wantsFileOutput: boolean;
+  };
+}
+
+export interface RequestMetaClassificationRecord {
+  turnId: string;
+  inputHash: string;
+  source: MetaClassificationSource;
+  result: RequestMetaClassificationResult;
+  classifiedAt: number;
+}
+
+export interface FinalAnswerMetaClassificationResult {
+  internalReasoningLeak: boolean;
+  lazyRefusal: boolean;
+  selfClaim: boolean;
+  deferralPromise: boolean;
+  assistantClaimsFileCreated: boolean;
+  assistantClaimsChatDelivery: boolean;
+  assistantClaimsKbDelivery: boolean;
+  assistantReportsDeliveryFailure: boolean;
+  reason: string;
+}
+
+export interface FinalAnswerMetaClassificationRecord {
+  turnId: string;
+  inputHash: string;
+  source: MetaClassificationSource;
+  result: FinalAnswerMetaClassificationResult;
+  classifiedAt: number;
+}
+
 export interface ExecutionTaskState {
   goal: string | null;
   constraints: string[];
@@ -129,6 +182,8 @@ export interface ExecutionTaskState {
   deterministicEvidence: DeterministicEvidenceRecord[];
   verificationMode: VerificationMode;
   verificationEvidence: VerificationEvidenceRecord[];
+  requestMetaClassifications: RequestMetaClassificationRecord[];
+  finalAnswerMetaClassifications: FinalAnswerMetaClassificationRecord[];
   artifacts: string[];
   updatedAt: number;
 }
@@ -191,6 +246,8 @@ export class ExecutionContractStore {
         deterministicEvidence: [],
         verificationMode: "none",
         verificationEvidence: [],
+        requestMetaClassifications: [],
+        finalAnswerMetaClassifications: [],
         artifacts: [],
         updatedAt: this.now(),
       },
@@ -383,6 +440,72 @@ export class ExecutionContractStore {
       deterministicEvidence,
       deterministicRequirements,
     });
+  }
+
+  recordRequestMetaClassification(
+    input: Omit<RequestMetaClassificationRecord, "classifiedAt">,
+  ): void {
+    const now = this.now();
+    const record: RequestMetaClassificationRecord = {
+      ...input,
+      classifiedAt: now,
+    };
+    const existing = this.snapshotValue.taskState.requestMetaClassifications;
+    const index = existing.findIndex(
+      (item) =>
+        item.turnId === input.turnId &&
+        item.inputHash === input.inputHash,
+    );
+    const requestMetaClassifications =
+      index === -1
+        ? [...existing, record]
+        : existing.map((item, i) => (i === index ? record : item));
+    this.patchTaskState({ requestMetaClassifications });
+  }
+
+  getRequestMetaClassification(
+    turnId: string,
+    inputHash: string,
+  ): RequestMetaClassificationResult | null {
+    const record = this.snapshotValue.taskState.requestMetaClassifications.find(
+      (item) => item.turnId === turnId && item.inputHash === inputHash,
+    );
+    return record
+      ? (JSON.parse(JSON.stringify(record.result)) as RequestMetaClassificationResult)
+      : null;
+  }
+
+  recordFinalAnswerClassification(
+    input: Omit<FinalAnswerMetaClassificationRecord, "classifiedAt">,
+  ): void {
+    const now = this.now();
+    const record: FinalAnswerMetaClassificationRecord = {
+      ...input,
+      classifiedAt: now,
+    };
+    const existing = this.snapshotValue.taskState.finalAnswerMetaClassifications;
+    const index = existing.findIndex(
+      (item) =>
+        item.turnId === input.turnId &&
+        item.inputHash === input.inputHash,
+    );
+    const finalAnswerMetaClassifications =
+      index === -1
+        ? [...existing, record]
+        : existing.map((item, i) => (i === index ? record : item));
+    this.patchTaskState({ finalAnswerMetaClassifications });
+  }
+
+  getFinalAnswerClassification(
+    turnId: string,
+    inputHash: string,
+  ): FinalAnswerMetaClassificationResult | null {
+    const record = this.snapshotValue.taskState.finalAnswerMetaClassifications.find(
+      (item) => item.turnId === turnId && item.inputHash === inputHash,
+    );
+    return record
+      ? (JSON.parse(JSON.stringify(record.result)) as FinalAnswerMetaClassificationResult)
+      : null;
   }
 
   unmetRequiredCriteria(): AcceptanceCriterion[] {

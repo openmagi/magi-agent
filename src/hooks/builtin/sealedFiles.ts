@@ -86,12 +86,45 @@ const SYSTEM_ALLOWED_UPDATES_BY_TURN = new Map<string, Set<string>>();
  */
 const PREEXISTING_DRIFT_BY_TURN = new Map<string, Map<string, string>>();
 
+function normaliseRelPath(relPath: string): string {
+  return relPath.replace(/\\/g, "/").replace(/^\.\//, "").replace(/^\/+/, "");
+}
+
 export function allowSealedFileUpdateForTurn(turnId: string, relPath: string): void {
-  const normalised = relPath.replace(/\\/g, "/").replace(/^\.\//, "").replace(/^\/+/, "");
+  const normalised = normaliseRelPath(relPath);
   if (!turnId || normalised.length === 0) return;
   const paths = SYSTEM_ALLOWED_UPDATES_BY_TURN.get(turnId) ?? new Set<string>();
   paths.add(normalised);
   SYSTEM_ALLOWED_UPDATES_BY_TURN.set(turnId, paths);
+}
+
+export async function recordSystemSealedFileUpdate(
+  workspaceRoot: string,
+  relPath: string,
+): Promise<boolean> {
+  if (!isEnabledByEnv()) return false;
+  const normalised = normaliseRelPath(relPath);
+  if (!workspaceRoot || normalised.length === 0) return false;
+
+  const config = await readConfig(workspaceRoot);
+  const globs = resolveSealedGlobs(config);
+  if (!matchesAnyGlob(normalised, globs)) return false;
+
+  const sha = await sha256OfFile(path.join(workspaceRoot, normalised));
+  if (sha === null) return false;
+
+  const manifest = await readManifest(workspaceRoot);
+  const now = Date.now();
+  if (!manifest) {
+    const diff = await computeDiff(workspaceRoot, globs, null);
+    diff.currentHashes[normalised] = { sha256: sha, updatedAt: now };
+    await writeManifestAtomic(workspaceRoot, diff.currentHashes);
+    return true;
+  }
+
+  manifest[normalised] = { sha256: sha, updatedAt: now };
+  await writeManifestAtomic(workspaceRoot, manifest);
+  return true;
 }
 
 function isEnabledByEnv(): boolean {
