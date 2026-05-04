@@ -341,6 +341,16 @@ export async function buildSystemPrompt(
   return `${withAddendum}\n${thinkingBoundary}`;
 }
 
+export function refreshRuntimeTimeHeader(
+  systemPrompt: string,
+  now = new Date(),
+): string {
+  return systemPrompt.replace(
+    /(^|\n)\[Time: [^\]\n]*\]/,
+    `$1[Time: ${now.toISOString()}]`,
+  );
+}
+
 /**
  * Rebuild the LLM messages[] from committed transcript entries plus
  * the current user message.

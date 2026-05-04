@@ -60,4 +60,16 @@ describe("registerBuiltinHooks", () => {
       "builtin:user-harness-rules-after-tool",
     );
   });
+
+  it("registers the memory continuity guard by default", () => {
+    const registry = new HookRegistry();
+
+    registerBuiltinHooks(registry, {
+      workspaceRoot: "/tmp/workspace",
+    });
+
+    expect(registry.list("beforeCommit").map((hook) => hook.name)).toContain(
+      "builtin:memory-continuity-guard",
+    );
+  });
 });

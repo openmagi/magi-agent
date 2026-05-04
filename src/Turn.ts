@@ -17,6 +17,7 @@ import {
   appendRuntimeModelIdentityContext,
   buildSystemPrompt,
   buildMessages,
+  refreshRuntimeTimeHeader,
 } from "./turn/MessageBuilder.js";
 import { readOne as readOneStream } from "./turn/LLMStreamReader.js";
 import { dispatch as dispatchTools, type ToolDispatchResult, UnknownToolLoopError } from "./turn/ToolDispatcher.js";
@@ -335,6 +336,7 @@ export class Turn {
         } else {
           sessionHeartbeat.updateIteration(iter);
         }
+        systemPrompt = refreshRuntimeTimeHeader(systemPrompt);
         const preLLM = await this.session.agent.hooks.runPre(
           "beforeLLMCall",
           { messages, tools: toolDefs, system: systemPrompt, iteration: iter },
@@ -761,6 +763,7 @@ export class Turn {
     });
 
     for (let iter = 0; iter < Turn.MAX_ITERATIONS; iter += 1) {
+      systemPrompt = refreshRuntimeTimeHeader(systemPrompt);
       const preLLM = await this.session.agent.hooks.runPre(
         "beforeLLMCall",
         { messages, tools: toolDefs, system: systemPrompt, iteration: iter },

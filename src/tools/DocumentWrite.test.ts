@@ -96,7 +96,7 @@ describe("DocumentWrite", () => {
         filename: "exports/board-update.html",
         source: {
           kind: "markdown",
-          content: "# Board Update\n\n- Revenue up\n- Burn down",
+          content: "# Board Update\n\n## Highlights\n\n**Revenue** up and *Burn* down\n\n- Revenue up\n- Burn down",
         },
       },
       ctx(root),
@@ -105,6 +105,9 @@ describe("DocumentWrite", () => {
     expect(result.status).toBe("ok");
     const html = await fs.readFile(path.join(root, "outputs", "exports", "board-update.html"), "utf8");
     expect(html).toContain("<h1>Board Update</h1>");
+    expect(html).toContain("<h2>Highlights</h2>");
+    expect(html).toContain("<strong>Revenue</strong>");
+    expect(html).toContain("<em>Burn</em>");
     expect(html).toContain("<li>Revenue up</li>");
 
     const artifact = await registry.get(result.output!.artifactId);

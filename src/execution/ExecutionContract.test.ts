@@ -180,6 +180,55 @@ describe("ExecutionContractStore", () => {
     ]);
   });
 
+  it("records memory recall metadata for the current turn", () => {
+    const store = new ExecutionContractStore({ now: () => 123 });
+    store.recordMemoryRecall({
+      turnId: "turn-1",
+      source: "qmd",
+      path: "memory/old.md",
+      continuity: "background",
+      distinctivePhrases: ["한국식 vs 일본식 이름 선택"],
+    });
+
+    expect(store.memoryRecallForTurn("turn-1")).toEqual([
+      expect.objectContaining({
+        path: "memory/old.md",
+        continuity: "background",
+        recordedAt: 123,
+      }),
+    ]);
+    expect(store.memoryRecallForTurn("other-turn")).toEqual([]);
+  });
+
+  it("replaces memory recall metadata for the same turn", () => {
+    const store = new ExecutionContractStore({ now: () => 123 });
+    store.recordMemoryRecall({
+      turnId: "turn-1",
+      source: "qmd",
+      path: "memory/old.md",
+      continuity: "background",
+      distinctivePhrases: ["한국식 vs 일본식 이름 선택"],
+    });
+    store.replaceMemoryRecallForTurn("turn-1", [
+      {
+        turnId: "turn-1",
+        source: "root",
+        path: "memory/ROOT.md",
+        continuity: "background",
+        distinctivePhrases: ["root summary"],
+      },
+    ]);
+
+    const records = store.memoryRecallForTurn("turn-1");
+    expect(records).toHaveLength(1);
+    expect(records[0]).toMatchObject({
+      source: "root",
+      path: "memory/ROOT.md",
+      distinctivePhrases: ["root summary"],
+      recordedAt: 123,
+    });
+  });
+
   it("records LLM-classified deterministic requirements as first-class state", () => {
     const store = new ExecutionContractStore({ now: () => 2000 });
 

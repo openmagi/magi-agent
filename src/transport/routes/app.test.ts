@@ -85,6 +85,7 @@ describe("HttpServer /app", () => {
     expect(res.status).toBe(200);
     expect(res.contentType).toContain("text/javascript");
     expect(res.body).toContain("createSseParser");
+    expect(res.body).toContain("loadRuntimeSnapshot");
   });
 
   it("does not allow app route path traversal", async () => {

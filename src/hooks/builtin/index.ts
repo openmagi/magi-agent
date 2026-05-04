@@ -39,6 +39,7 @@ import type { QmdManager as QmdManagerType } from "../../services/memory/QmdMana
 import type { HipocampusService } from "../../services/memory/HipocampusService.js";
 import { answerVerifierHook } from "./answerVerifier.js";
 import { makeMemoryInjectorHook } from "./memoryInjector.js";
+import { makeMemoryContinuityGuardHook } from "./memoryContinuityGuard.js";
 import { agentSelfModelHook } from "./agentSelfModel.js";
 import { makeWorkspaceAwarenessHook } from "./workspaceAwarenessInjector.js";
 import {
@@ -468,6 +469,25 @@ export function registerBuiltinHooks(
     }
   } else {
     skipped.push("builtin:memory-injector");
+  }
+
+  const memoryContinuityEnv =
+    (process.env.CORE_AGENT_MEMORY_CONTINUITY_GUARD ?? "on")
+      .trim()
+      .toLowerCase();
+  const memoryContinuityEnabled =
+    memoryContinuityEnv === "" ||
+    memoryContinuityEnv === "on" ||
+    memoryContinuityEnv === "true" ||
+    memoryContinuityEnv === "1";
+  if (memoryContinuityEnabled) {
+    const memoryContinuityHook = makeMemoryContinuityGuardHook();
+    if (maybe(memoryContinuityHook.name)) {
+      registry.register(memoryContinuityHook);
+      registered++;
+    }
+  } else {
+    skipped.push("builtin:memory-continuity-guard");
   }
 
   // Mid-turn injector (#86) — drains Session.pendingInjections at the

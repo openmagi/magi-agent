@@ -1005,7 +1005,15 @@ export class Agent {
    */
   async reloadWorkspaceSkills(): Promise<SkillReloadResult> {
     const skillsDir = path.join(this.config.workspaceRoot, "skills");
-    const loaded = await this.tools.loadSkills(skillsDir, this.config.workspaceRoot, {
+    const superpowersDir =
+      this.config.superpowersSkillsDir ?? resolveDefaultSuperpowersDir();
+    const skillRoots = [
+      { skillsDir, workspaceRoot: this.config.workspaceRoot },
+      ...(path.resolve(superpowersDir) === path.resolve(skillsDir)
+        ? []
+        : [{ skillsDir: superpowersDir, workspaceRoot: superpowersDir }]),
+    ];
+    const loaded = await this.tools.loadSkillRoots(skillRoots, {
       trustedSkillRoots: splitPathListEnv(
         process.env.CLAWY_TRUSTED_SKILL_ROOTS ??
           process.env.CORE_AGENT_TRUSTED_SKILL_ROOTS,
@@ -1026,7 +1034,7 @@ export class Agent {
     }
     this.restoreNativeToolOverrides();
     console.log(
-      `[core-agent] skills: loaded=${loaded} issues=${issues} runtimeHooks=${runtimeHooks} from ${skillsDir}`,
+      `[core-agent] skills: loaded=${loaded} issues=${issues} runtimeHooks=${runtimeHooks} from ${skillRoots.map((root) => root.skillsDir).join(",")}`,
     );
     return { loaded, issues, runtimeHooks };
   }

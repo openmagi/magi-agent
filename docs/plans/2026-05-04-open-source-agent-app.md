@@ -34,18 +34,20 @@ runtime discipline gates.
 
 The open-source app should include:
 
-- Local-first chat UI for a running Clawy Agent instance.
-- Runtime connection setup for local HTTP/SSE or a self-hosted endpoint.
+- Local-first chat UI for a running Clawy Agent instance. Initial shell: done.
+- Runtime connection setup for local HTTP/SSE or a self-hosted endpoint. Initial
+  server-token flow: done.
 - Provider configuration UI for API-key based providers and local provider
   adapters.
 - Session transcript viewer with tool calls, tool results, thinking blocks,
   background task events, delivery events, and commit checkpoints.
-- Workspace file and artifact panels.
-- Task board and child-agent task inspector.
+- Workspace file and artifact panels. Initial artifact index: done.
+- Task board and child-agent task inspector. Initial task index: done.
 - Memory inspector for Hipocampus root/daily/weekly/monthly/qmd state.
-- Cron and scheduled workflow inspector.
+- Cron and scheduled workflow inspector. Initial cron index: done.
 - User Harness Rules editor that writes Markdown rule files into the workspace.
-- Skills viewer/reload control for workspace `skills/`.
+- Skills viewer/reload control for workspace `skills/`. Initial skill state:
+  done; reload control remains future work.
 - Docker Compose starter that runs the app and agent together.
 - Clear upgrade path to Clawy Cloud for managed hosting.
 
@@ -126,19 +128,29 @@ and makes third-party apps possible.
 
 ## Runtime API Needed
 
-Before the app is useful, the runtime should expose or stabilize:
+The first read-only runtime API is now exposed under `GET /v1/app/*` and is
+bearer-token gated by the server token:
 
-- Session list/create/resume endpoints.
-- Message send endpoint with streaming SSE.
-- Transcript replay endpoint.
-- Workspace artifact/file list and download endpoints.
-- Background task list/get/output endpoints.
-- Cron list/create/update/delete endpoints.
-- Memory browse/search endpoints.
+| Endpoint | Status | Purpose |
+| --- | --- | --- |
+| `/v1/app/runtime` | shipped | Aggregate sessions, tasks, crons, artifacts, tools, and skills snapshot. |
+| `/v1/app/sessions` | shipped | Live session metadata, permission posture, and budget counters. |
+| `/v1/app/transcript?sessionKey=...` | shipped | Bounded committed transcript replay. |
+| `/v1/app/tasks` | shipped | Background child-agent task list. |
+| `/v1/app/crons` | shipped | Scheduled workflow list with internal cron visibility for operators. |
+| `/v1/app/artifacts` | shipped | Generated artifact index. |
+| `/v1/app/skills` | shipped | Skill load state, issues, and runtime skill hooks. |
+
+Remaining API work:
+
+- Session create/resume controls beyond the chat-completions session-key header.
+- Workspace file list and download endpoints.
+- Background task get/output/stop controls for the app.
+- Cron create/update/delete controls for the app.
+- Memory browse/search endpoints for Hipocampus root/daily/weekly/monthly/qmd state.
 - Harness rule list/read/write/delete endpoints.
-- Skill list/reload endpoints.
-- Provider config read/write endpoints that never leak secret values back to the
-  browser.
+- Skill reload endpoint exposure in the app.
+- Provider config read/write endpoints that never leak secret values back to the browser.
 
 Where an endpoint does not exist yet, the app plan should drive small,
 documented runtime API additions instead of coupling the app to private hosted
@@ -146,9 +158,9 @@ routes.
 
 ## Milestones
 
-Status on 2026-05-04: M0 is complete and the first M1 shell is present at
-`/app` in server mode. The shell is intentionally dependency-free and talks to
-the runtime through the documented HTTP/SSE surface.
+Status on 2026-05-04: M0 is complete, M1 has a dependency-free shell at `/app`,
+and the first M3 read-only runtime inspector is wired through documented
+`/v1/app/*` HTTP APIs.
 
 ### M0: Boundary And Marketing
 
@@ -162,11 +174,12 @@ the runtime through the documented HTTP/SSE surface.
 
 ### M1: Local Workbench
 
-- Add a minimal web app shell.
-- Connect to a local Clawy Agent HTTP/SSE endpoint.
-- Render messages, tool calls, tool results, thinking blocks, and commit events.
-- Send user messages and stream responses.
-- No auth, billing, Supabase, or hosted Clawy dependency.
+- Add a minimal web app shell. Done.
+- Connect to a local Clawy Agent HTTP/SSE endpoint. Done.
+- Send user messages and stream responses. Done.
+- Show runtime event stream. Done.
+- No auth, billing, Supabase, or hosted Clawy dependency. Done.
+- Render richer first-class message parts, thinking blocks, and tool cards.
 
 ### M2: Provider And Workspace Setup
 
@@ -179,11 +192,12 @@ the runtime through the documented HTTP/SSE surface.
 
 ### M3: Runtime Visibility
 
-- Add artifact/file panel.
-- Add background task inspector.
+- Add artifact panel. Initial index: done.
+- Add workspace file panel.
+- Add background task inspector. Initial index: done.
+- Add cron and skill inspector. Initial index: done.
 - Add execution evidence and checkpoint timeline.
-- Add delivery event visibility so users can see when generated files are only
-  written locally versus actually delivered.
+- Add delivery event visibility so users can see when generated files are only written locally versus actually delivered.
 
 ### M4: Automation And Rules
 
@@ -216,12 +230,11 @@ Before publishing the frontend:
 
 ## README Narrative
 
-The README should describe the current repo as the runtime first, then point to
-the app roadmap:
+The README should describe the current repo as the runtime first, then the app:
 
-> Clawy Agent is the open-source runtime. The next layer is Clawy Agent App: a
+> Clawy Agent is the open-source runtime. Clawy Agent App is the included
 > self-hostable workbench for running your own Codex-like personal agent app with
 > your own provider and workspace.
 
-That keeps the public promise coherent: the runtime already exists, the app is a
-planned open-source surface, and hosted Clawy Cloud remains the managed version.
+That keeps the public promise coherent: the runtime already exists, the app is
+the open-source surface, and hosted Clawy Cloud remains the managed version.

@@ -17,7 +17,7 @@
  *   7. stop_sequence / pause_turn / unknown — each handled distinctly.
  */
 
-import { describe, it, expect } from "vitest";
+import { afterEach, describe, it, expect, vi } from "vitest";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -159,6 +159,7 @@ async function makeFixture(
     toolNames?: string[];
     model?: string;
     router?: { resolve: (input: unknown) => Promise<RouteDecision> };
+    onToolExecute?: (name: string, input: unknown) => void;
   } = {},
 ): Promise<Fixture> {
   const workspaceRoot = await fs.mkdtemp(
@@ -210,6 +211,7 @@ async function makeFixture(
         description: `${t.name}`,
         inputSchema: { type: "object", properties: {} },
         execute: async (input: unknown) => {
+          opts.onToolExecute?.(t.name, input);
           t.calls.push({
             id: `${t.name}-call-${t.calls.length}`,
             input,
@@ -323,6 +325,10 @@ async function makeFixture(
 
   return { turn, llm, sse, auditEvents, toolCalls: tools, workspaceRoot };
 }
+
+afterEach(() => {
+  vi.useRealTimers();
+});
 
 // ─────────────────────────────────────────────────────────────────────
 // Tests
@@ -555,6 +561,40 @@ describe("Turn.execute() stop-reason taxonomy", () => {
     const echo = toolCalls.find((t) => t.name === "Echo");
     expect(echo?.calls.length).toBe(1);
     expect(turn.getRecoveryAttempt()).toBe(0);
+  });
+
+  it("refreshes the runtime time header before the LLM resumes after tools", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-05-03T16:03:00.000Z"));
+
+    const { turn, llm } = await makeFixture(
+      [
+        {
+          blocks: [
+            {
+              type: "tool_use",
+              id: "tool_01",
+              name: "Echo",
+              input: { msg: "status" },
+            },
+          ],
+          stopReason: "tool_use",
+        },
+        { blocks: [{ type: "text", text: "checked." }], stopReason: "end_turn" },
+      ],
+      {
+        toolNames: ["Echo"],
+        onToolExecute: () => {
+          vi.setSystemTime(new Date("2026-05-03T16:12:00.000Z"));
+        },
+      },
+    );
+
+    await turn.execute();
+
+    expect(llm.calls.length).toBe(2);
+    expect(llm.calls[0]?.system).toContain("[Time: 2026-05-03T16:03:00.000Z]");
+    expect(llm.calls[1]?.system).toContain("[Time: 2026-05-03T16:12:00.000Z]");
   });
 
   it("replays assistant text before tool_use when model streams text after tool_use", async () => {

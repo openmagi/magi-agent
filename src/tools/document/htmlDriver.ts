@@ -5,6 +5,12 @@ function escapeHtml(value: string): string {
     .replaceAll(">", "&gt;");
 }
 
+function renderInlineMarkdown(value: string): string {
+  return escapeHtml(value)
+    .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
+    .replace(/\*([^*]+)\*/g, "<em>$1</em>");
+}
+
 export function renderMarkdownToHtml(markdown: string): string {
   const lines = markdown.split(/\r?\n/);
   const html: string[] = ["<!doctype html>", "<html>", "<body>"];
@@ -18,9 +24,12 @@ export function renderMarkdownToHtml(markdown: string): string {
   };
 
   for (const line of lines) {
-    if (line.startsWith("# ")) {
+    const heading = /^(#{1,6})\s+(.+)$/.exec(line);
+    if (heading) {
+      const level = (heading[1] ?? "").length;
+      const text = heading[2] ?? "";
       closeListIfNeeded();
-      html.push(`<h1>${escapeHtml(line.slice(2))}</h1>`);
+      html.push(`<h${level}>${renderInlineMarkdown(text)}</h${level}>`);
       continue;
     }
     if (line.startsWith("- ")) {
@@ -28,7 +37,7 @@ export function renderMarkdownToHtml(markdown: string): string {
         html.push("<ul>");
         inList = true;
       }
-      html.push(`<li>${escapeHtml(line.slice(2))}</li>`);
+      html.push(`<li>${renderInlineMarkdown(line.slice(2))}</li>`);
       continue;
     }
     if (line.trim().length === 0) {
@@ -36,7 +45,7 @@ export function renderMarkdownToHtml(markdown: string): string {
       continue;
     }
     closeListIfNeeded();
-    html.push(`<p>${escapeHtml(line)}</p>`);
+    html.push(`<p>${renderInlineMarkdown(line)}</p>`);
   }
 
   closeListIfNeeded();

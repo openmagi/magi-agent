@@ -1,3 +1,5 @@
+import type { MemoryRecallRecord } from "../reliability/MemoryContinuity.js";
+
 export type VerificationMode = "none" | "sample" | "full";
 export type ExecutionControlMode = "light" | "heavy";
 export type AcceptanceCriterionStatus = "pending" | "passed" | "failed" | "waived";
@@ -184,6 +186,7 @@ export interface ExecutionTaskState {
   verificationEvidence: VerificationEvidenceRecord[];
   requestMetaClassifications: RequestMetaClassificationRecord[];
   finalAnswerMetaClassifications: FinalAnswerMetaClassificationRecord[];
+  memoryRecall: MemoryRecallRecord[];
   artifacts: string[];
   updatedAt: number;
 }
@@ -248,6 +251,7 @@ export class ExecutionContractStore {
         verificationEvidence: [],
         requestMetaClassifications: [],
         finalAnswerMetaClassifications: [],
+        memoryRecall: [],
         artifacts: [],
         updatedAt: this.now(),
       },
@@ -369,6 +373,45 @@ export class ExecutionContractStore {
     this.patchTaskState({
       usedResources: [...existing, { ...input, recordedAt: this.now() }],
     });
+  }
+
+  recordMemoryRecall(record: MemoryRecallRecord): void {
+    this.patchTaskState({
+      memoryRecall: [
+        ...this.snapshotValue.taskState.memoryRecall,
+        {
+          ...record,
+          recordedAt: record.recordedAt ?? this.now(),
+        },
+      ],
+    });
+  }
+
+  replaceMemoryRecallForTurn(
+    turnId: string,
+    records: readonly MemoryRecallRecord[],
+  ): void {
+    const retained = this.snapshotValue.taskState.memoryRecall.filter(
+      (record) => record.turnId !== turnId,
+    );
+    const now = this.now();
+    this.patchTaskState({
+      memoryRecall: [
+        ...retained,
+        ...records.map((record) => ({
+          ...record,
+          recordedAt: record.recordedAt ?? now,
+        })),
+      ],
+    });
+  }
+
+  memoryRecallForTurn(turnId: string): MemoryRecallRecord[] {
+    return JSON.parse(JSON.stringify(
+      this.snapshotValue.taskState.memoryRecall.filter(
+        (record) => record.turnId === turnId,
+      ),
+    )) as MemoryRecallRecord[];
   }
 
   recordDeterministicRequirement(

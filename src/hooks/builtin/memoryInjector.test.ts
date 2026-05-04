@@ -17,6 +17,7 @@ import type { HipocampusService } from "../../services/memory/HipocampusService.
 import type { HookContext } from "../types.js";
 import type { LLMClient, LLMMessage } from "../../transport/LLMClient.js";
 import type { AgentEvent } from "../../transport/SseWriter.js";
+import { ExecutionContractStore } from "../../execution/ExecutionContract.js";
 
 function makeLLMStub(): LLMClient {
   // No hook in this file actually calls the LLM, but HookContext
@@ -24,7 +25,7 @@ function makeLLMStub(): LLMClient {
   return {} as unknown as LLMClient;
 }
 
-function makeCtx(): {
+function makeCtx(executionContract?: ExecutionContractStore): {
   ctx: HookContext;
   emitted: AgentEvent[];
   logs: Array<{ level: string; msg: string; data?: object }>;
@@ -42,6 +43,7 @@ function makeCtx(): {
     log: (level, msg, data) => logs.push({ level, msg, data }),
     abortSignal: new AbortController().signal,
     deadlineMs: 5_000,
+    ...(executionContract ? { executionContract } : {}),
   };
   return { ctx, emitted, logs };
 }
@@ -156,9 +158,12 @@ describe("memoryInjector", () => {
       expect(result).toBeDefined();
       expect(result!.action).toBe("replace");
       if (result && result.action === "replace") {
+        expect(result.value.system).toContain('<memory-continuity-policy hidden="true">');
         expect(result.value.system).toContain('<memory-context source="qmd" tier="L0">');
         expect(result.value.system).toContain("[path: memory/2026-04-19.md]");
+        expect(result.value.system).toContain("[continuity: related]");
         expect(result.value.system).toContain("[path: memory/weekly-2026-W16.md]");
+        expect(result.value.system).toContain("[continuity: background]");
         expect(result.value.system).toContain("</memory-context>");
         // Original system prompt must be preserved.
         expect(result.value.system).toContain("SYSTEM");
@@ -316,6 +321,84 @@ describe("memoryInjector", () => {
     }
   });
 
+  it("records memory recall metadata on the execution contract", async () => {
+    process.env.QMD_URL = "http://qmd:8080";
+    const hook = makeMemoryInjectorHook();
+    const contract = new ExecutionContractStore({ now: () => 456 });
+    const { ctx } = makeCtx(contract);
+
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = makeFetchOk([
+      {
+        path: "memory/old.md",
+        content: "SYNC 한국식 vs 일본식 이름 선택을 결정해야 한다.",
+        score: 0.9,
+      },
+    ]);
+    try {
+      await hook.handler(
+        {
+          messages: userMessages("SYNC 분량 지금 어느 정도야?"),
+          tools: [],
+          system: "SYS",
+          iteration: 0,
+        },
+        ctx,
+      );
+
+      expect(contract.memoryRecallForTurn("turn-test")).toEqual([
+        expect.objectContaining({
+          turnId: "turn-test",
+          source: "qmd",
+          path: "memory/old.md",
+          continuity: "related",
+          distinctivePhrases: expect.arrayContaining(["sync 한국식 vs 일본식 이름"]),
+          recordedAt: 456,
+        }),
+      ]);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it("records metadata only for qmd recall entries that are injected", async () => {
+    process.env.QMD_URL = "http://qmd:8080";
+    const hook = makeMemoryInjectorHook();
+    const contract = new ExecutionContractStore({ now: () => 789 });
+    const { ctx } = makeCtx(contract);
+
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = makeFetchOk([
+      {
+        path: "memory/first.md",
+        content: "primary recall ".repeat(600),
+        score: 0.9,
+      },
+      {
+        path: "memory/second.md",
+        content: "secondary recall should not be tracked if it was not injected",
+        score: 0.8,
+      },
+    ]);
+    try {
+      await hook.handler(
+        {
+          messages: userMessages("what is the state?"),
+          tools: [],
+          system: "SYS",
+          iteration: 0,
+        },
+        ctx,
+      );
+
+      expect(contract.memoryRecallForTurn("turn-test").map((record) => record.path)).toEqual([
+        "memory/first.md",
+      ]);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
   it("workspace agent.config.yaml memory_injection=off overrides env on", async () => {
     process.env.QMD_URL = "http://qmd:8080";
     // Create a temp workspace with agent.config.yaml opting out.
@@ -393,9 +476,11 @@ describe("memoryInjector", () => {
     expect(result).toBeDefined();
     expect(result?.action).toBe("replace");
     if (result && result.action === "replace") {
-      expect(result.value.system).toContain('<memory-root source="hipocampus-root" tier="L2">');
+      expect(result.value.system).toContain('<memory-continuity-policy hidden="true">');
+      expect(result.value.system).toContain('<memory-root source="hipocampus-root" tier="L2" continuity="background">');
       expect(result.value.system).toContain("stable root summary");
       expect(result.value.system).toContain('<memory-context source="qmd" tier="L0">');
+      expect(result.value.system).toContain("[continuity: background]");
       expect(result.value.system).toContain("narrow matching recall");
     }
   });

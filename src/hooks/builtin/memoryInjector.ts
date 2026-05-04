@@ -35,6 +35,12 @@ import { parse as parseYaml } from "yaml";
 import type { RegisteredHook, HookContext } from "../types.js";
 import type { LLMMessage } from "../../transport/LLMClient.js";
 import type { HipocampusService, RootMemory } from "../../services/memory/HipocampusService.js";
+import {
+  classifyMemoryContinuity,
+  extractDistinctivePhrases,
+  type MemoryContinuity,
+  type MemoryRecallRecord,
+} from "../../reliability/MemoryContinuity.js";
 
 /** Soft budget for total injected content (bytes, UTF-8). */
 const MAX_BYTES_INJECTED = 5_000;
@@ -48,12 +54,21 @@ const DEFAULT_LIMIT = 5;
 /** Default qmd minimum score. */
 const DEFAULT_MIN_SCORE = 0.3;
 const MAX_ROOT_BYTES = 1_500;
+const MEMORY_CONTINUITY_POLICY = [
+  '<memory-continuity-policy hidden="true">',
+  "Recalled memory is reference material, not conversation state.",
+  "The latest user message owns the current task.",
+  "Memory marked background must not introduce an old pending question, decision, or task unless the latest user message explicitly asks to continue that topic.",
+  "Memory marked related may inform the answer, but do not let it change what the user asked for.",
+  "</memory-continuity-policy>",
+].join("\n");
 
 interface QmdResult {
   path: string;
   content: string;
   score: number;
   context?: string;
+  continuity?: MemoryContinuity;
 }
 
 interface QmdSearchResponse {
@@ -215,15 +230,16 @@ export function buildMemoryFence(
   let used = 0;
   for (const r of results) {
     if (!r || typeof r.path !== "string" || typeof r.content !== "string") continue;
-    const block = `[path: ${r.path}]\n${r.content.trim()}`;
+    const label = r.continuity ? `\n[continuity: ${r.continuity}]` : "";
+    const block = `[path: ${r.path}]${label}\n${r.content.trim()}`;
     const blockBytes = Buffer.byteLength(block, "utf8") + 2; // + "\n\n"
     if (blockBytes > remaining) {
       // Try truncating to fit remaining budget — but only if we can
       // still fit the header + some content meaningfully.
-      const minBlock = `[path: ${r.path}]\n…`;
+      const minBlock = `[path: ${r.path}]${label}\n…`;
       const minBytes = Buffer.byteLength(minBlock, "utf8") + 2;
       if (remaining < minBytes) break;
-      const prefix = `[path: ${r.path}]\n`;
+      const prefix = `[path: ${r.path}]${label}\n`;
       const prefixBytes = Buffer.byteLength(prefix, "utf8");
       const room = remaining - prefixBytes - 2 - 1; // -1 for ellipsis
       if (room <= 0) break;
@@ -247,9 +263,10 @@ export function buildMemoryFence(
 
 export function buildRootMemoryFence(
   root: RootMemory,
+  continuity: MemoryContinuity = "background",
   maxBytes: number = MAX_ROOT_BYTES,
 ): { fence: string; bytes: number } {
-  const header = `<memory-root source="hipocampus-root" tier="L2">`;
+  const header = `<memory-root source="hipocampus-root" tier="L2" continuity="${continuity}">`;
   const footer = `</memory-root>`;
   const prefix = `[path: ${root.path}]\n`;
   const overhead =
@@ -264,6 +281,42 @@ export function buildRootMemoryFence(
       : `${sliceUtf8Bytes(root.content, Math.max(0, remaining - 1))}…`;
   const fence = `${header}\n${prefix}${content}\n${footer}`;
   return { fence, bytes: Buffer.byteLength(fence, "utf8") };
+}
+
+function memoryRecordForQmdResult(
+  result: QmdResult,
+  userText: string,
+  turnId: string,
+): MemoryRecallRecord {
+  return {
+    turnId,
+    source: "qmd",
+    path: result.path,
+    continuity: classifyMemoryContinuity({
+      latestUserText: userText,
+      memoryText: result.content,
+      source: "qmd",
+    }),
+    distinctivePhrases: extractDistinctivePhrases(result.content),
+  };
+}
+
+function memoryRecordForRoot(
+  root: RootMemory,
+  userText: string,
+  turnId: string,
+): MemoryRecallRecord {
+  return {
+    turnId,
+    source: "root",
+    path: root.path,
+    continuity: classifyMemoryContinuity({
+      latestUserText: userText,
+      memoryText: root.content,
+      source: "root",
+    }),
+    distinctivePhrases: extractDistinctivePhrases(root.content),
+  };
 }
 
 /** Slice `s` to at most `maxBytes` UTF-8 bytes without splitting a
@@ -385,25 +438,39 @@ export function makeMemoryInjectorHook(
       const fences: string[] = [];
       let bytes = 0;
       let used = 0;
+      const records: MemoryRecallRecord[] = [];
       if (root) {
-        const rootFence = buildRootMemoryFence(root);
+        const rootRecord = memoryRecordForRoot(root, userText, ctx.turnId);
+        records.push(rootRecord);
+        const rootFence = buildRootMemoryFence(root, rootRecord.continuity);
         if (rootFence.fence.length > 0) {
           fences.push(rootFence.fence);
           bytes += rootFence.bytes;
         }
       }
       if (results.length > 0) {
-        const recallFence = buildMemoryFence(results);
+        const resultRecords = results.map((result) =>
+          memoryRecordForQmdResult(result, userText, ctx.turnId),
+        );
+        const enrichedResults = results.map((result, index) => ({
+          ...result,
+          continuity: resultRecords[index]?.continuity ?? "background",
+        }));
+        const recallFence = buildMemoryFence(enrichedResults);
         if (recallFence.fence.length > 0 && recallFence.used > 0) {
           fences.push(recallFence.fence);
           bytes += recallFence.bytes;
           used += recallFence.used;
+          records.push(...resultRecords.slice(0, recallFence.used));
         }
       }
       if (fences.length === 0) {
         return { action: "continue" };
       }
-      const fence = fences.join("\n\n");
+      if (records.length > 0) {
+        ctx.executionContract?.replaceMemoryRecallForTurn(ctx.turnId, records);
+      }
+      const fence = [MEMORY_CONTINUITY_POLICY, ...fences].join("\n\n");
 
       // Audit trace — use rule_check emit (the hook-accessible audit
       // pathway per citationGate / answerVerifier pattern).

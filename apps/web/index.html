@@ -46,6 +46,26 @@
               <dd id="runtime-status">Not checked</dd>
             </div>
             <div>
+              <dt>Sessions</dt>
+              <dd id="runtime-sessions">0</dd>
+            </div>
+            <div>
+              <dt>Tasks</dt>
+              <dd id="runtime-tasks">0</dd>
+            </div>
+            <div>
+              <dt>Crons</dt>
+              <dd id="runtime-crons">0</dd>
+            </div>
+            <div>
+              <dt>Artifacts</dt>
+              <dd id="runtime-artifacts">0</dd>
+            </div>
+            <div>
+              <dt>Skills</dt>
+              <dd id="runtime-skills">0</dd>
+            </div>
+            <div>
               <dt>Events</dt>
               <dd id="event-count">0</dd>
             </div>
@@ -71,9 +91,31 @@
 
         <aside class="inspector">
           <header>
-            <h2>Runtime Timeline</h2>
-            <p>Tool calls, checkpoints, delivery, and task events stream here.</p>
+            <h2>Runtime Inspector</h2>
+            <p>Live sessions, background work, scheduled jobs, artifacts, and events.</p>
           </header>
+          <div class="inspector-grid">
+            <section>
+              <h3>Sessions</h3>
+              <div id="sessions-list" class="snapshot-list"></div>
+            </section>
+            <section>
+              <h3>Tasks</h3>
+              <div id="tasks-list" class="snapshot-list"></div>
+            </section>
+            <section>
+              <h3>Crons</h3>
+              <div id="crons-list" class="snapshot-list"></div>
+            </section>
+            <section>
+              <h3>Artifacts</h3>
+              <div id="artifacts-list" class="snapshot-list"></div>
+            </section>
+            <section>
+              <h3>Skills</h3>
+              <div id="skills-list" class="snapshot-list"></div>
+            </section>
+          </div>
           <div id="events" class="events"></div>
         </aside>
       </main>

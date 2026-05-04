@@ -258,7 +258,7 @@ export function buildKnowledgeSearchArgs(input: KnowledgeSearchInput): string[] 
     case "search": {
       const query = stringValue(input.query) ?? "";
       const limit = normalizeLimit(input.limit);
-      return collection ? [collection, query, limit] : [query, limit];
+      return collection ? [collection, query, limit] : ["", query, limit];
     }
   }
 }

@@ -29,6 +29,7 @@ import { heartbeatRoutes } from "./routes/heartbeat.js";
 import { parityRoutes } from "./routes/parity.js";
 import { skillsRoutes } from "./routes/skills.js";
 import { appRoutes } from "./routes/app.js";
+import { appRuntimeRoutes } from "./routes/appRuntime.js";
 
 export interface HttpServerOptions {
   port: number;
@@ -90,6 +91,7 @@ export class HttpServer {
   private get routes(): RouteHandler[] {
     return [
       ...appRoutes,
+      ...appRuntimeRoutes,
       ...healthRoutes,
       ...complianceRoutes,
       ...sessionRoutes,

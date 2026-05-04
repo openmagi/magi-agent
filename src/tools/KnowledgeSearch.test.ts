@@ -62,6 +62,30 @@ describe("KnowledgeSearch", () => {
     expect(calls).toEqual([["Downloads", "르챔버 매출", "20"]]);
   });
 
+  it("keeps unscoped search query and limit in the correct kb-search.sh slots", async () => {
+    const root = await makeRoot();
+    const calls: string[][] = [];
+    const runner: KnowledgeSearchRunner = async (args) => {
+      calls.push(args);
+      return {
+        exitCode: 0,
+        signal: null,
+        stdout: "{\"query\":\"hipocampus memory\",\"results\":[]}",
+        stderr: "",
+        truncated: false,
+      };
+    };
+    const tool = makeKnowledgeSearchTool({ name: "KnowledgeSearch", runner });
+
+    const result = await tool.execute(
+      { mode: "search", query: "hipocampus memory", limit: 3 },
+      ctx(root),
+    );
+
+    expect(result.status).toBe("ok");
+    expect(calls[0]).toEqual(["", "hipocampus memory", "3"]);
+  });
+
   it("adds document-name matches when full-text KB search returns no rows", async () => {
     const root = await makeRoot();
     const calls: string[][] = [];

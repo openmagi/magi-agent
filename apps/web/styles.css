@@ -99,6 +99,14 @@ h2 {
   line-height: 1.2;
 }
 
+h3 {
+  margin: 0 0 8px;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.2;
+  text-transform: uppercase;
+}
+
 .brand p,
 .timeline-panel header p,
 .inspector header p {
@@ -281,6 +289,53 @@ dd {
   display: block;
 }
 
+.inspector-grid {
+  display: grid;
+  gap: 12px;
+  max-height: 46vh;
+  padding: 16px;
+  border-bottom: 1px solid var(--line);
+  overflow: auto;
+}
+
+.snapshot-list {
+  display: grid;
+  gap: 8px;
+}
+
+.snapshot-item,
+.snapshot-empty {
+  padding: 9px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  overflow-wrap: anywhere;
+}
+
+.snapshot-item strong,
+.snapshot-item span,
+.snapshot-item small {
+  display: block;
+}
+
+.snapshot-item strong {
+  color: var(--ink);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.snapshot-item span,
+.snapshot-item small,
+.snapshot-empty {
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.snapshot-item small {
+  margin-top: 2px;
+}
+
 .events {
   display: flex;
   flex-direction: column;
@@ -331,6 +386,10 @@ dd {
 
   .inspector {
     max-height: 420px;
+  }
+
+  .inspector-grid {
+    max-height: none;
   }
 }
 

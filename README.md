@@ -15,22 +15,22 @@ vibes and into runtime state.
 
 Think Claude Code, but open-source, multi-provider, always-on, and programmable.
 
-## Self-Hosted App Roadmap
+## Self-Hosted App
 
-Clawy Agent is the runtime. The next open-source layer is **Clawy Agent App**: a
-self-hostable workbench for running a Codex-like personal agent app with your
-own provider, workspace, tools, memory, schedules, and harness rules.
+Clawy Agent includes **Clawy Agent App**, a self-hostable workbench for running
+a Codex-like personal agent app with your own provider, workspace, tools,
+memory, schedules, and harness rules.
 
-The goal is to make the visible app surface open while keeping hosted Clawy
+The included `/app` shell connects to the same runtime over HTTP/SSE, streams
+turns, shows live sessions, background tasks, scheduled jobs, artifacts, loaded
+skills, and runtime events, and keeps provider secrets out of the browser by
+using a separate server token.
+
+The goal is to keep the visible app surface open while keeping hosted Clawy
 Cloud's production control plane separate: billing, fleet provisioning, managed
 credentials, production auth, hosted data contracts, and operator backoffice stay
 hosted-only. See the [open-source app plan](docs/plans/2026-05-04-open-source-agent-app.md)
 for scope, architecture, milestones, and release gates.
-
-The first app shell is included at `/app` when you run `clawy-agent serve`.
-It connects to the same local runtime over HTTP/SSE, streams turns, shows
-runtime events, and keeps provider secrets out of the browser by using a
-separate server token.
 
 ## Why Clawy Agent
 
@@ -304,6 +304,21 @@ http://localhost:8080/app
 
 Use `CLAWY_AGENT_SERVER_TOKEN` as the app's server token. Do not paste your LLM
 provider API key into the browser.
+
+The app currently uses these local read-only inspection endpoints:
+
+| Endpoint | Purpose |
+| --- | --- |
+| `GET /v1/app/runtime` | Aggregate snapshot for sessions, tasks, crons, artifacts, tools, and skills. |
+| `GET /v1/app/sessions` | Live session metadata, permission posture, and budget counters. |
+| `GET /v1/app/transcript?sessionKey=...` | Bounded committed transcript replay for a session. |
+| `GET /v1/app/tasks` | Background child-agent task list. |
+| `GET /v1/app/crons` | Scheduled workflow list, including internal runtime crons for operators. |
+| `GET /v1/app/artifacts` | Generated artifact index. |
+| `GET /v1/app/skills` | Loaded skills, skill issues, and runtime skill hooks. |
+
+These endpoints require `Authorization: Bearer $CLAWY_AGENT_SERVER_TOKEN` when
+`server.gatewayToken` is configured.
 
 ### Programmatic
 
