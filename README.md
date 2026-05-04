@@ -15,6 +15,18 @@ vibes and into runtime state.
 
 Think Claude Code, but open-source, multi-provider, always-on, and programmable.
 
+## Self-Hosted App Roadmap
+
+Clawy Agent is the runtime. The next open-source layer is **Clawy Agent App**: a
+self-hostable workbench for running a Codex-like personal agent app with your
+own provider, workspace, tools, memory, schedules, and harness rules.
+
+The goal is to make the visible app surface open while keeping hosted Clawy
+Cloud's production control plane separate: billing, fleet provisioning, managed
+credentials, production auth, hosted data contracts, and operator backoffice stay
+hosted-only. See the [open-source app plan](docs/plans/2026-05-04-open-source-agent-app.md)
+for scope, architecture, milestones, and release gates.
+
 ## Why Clawy Agent
 
 Most agent frameworks give you a model, a tool schema, and a loop. That is not
