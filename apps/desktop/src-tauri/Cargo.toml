@@ -1,0 +1,14 @@
+[package]
+name = "magi_desktop"
+version = "0.2.0"
+edition = "2021"
+
+[lib]
+name = "magi_desktop_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }

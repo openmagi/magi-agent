@@ -9,9 +9,9 @@ import { parse as parseYaml } from "yaml";
 
 export interface MagiAgentConfig {
   llm: {
-    provider: "anthropic" | "openai" | "google";
+    provider: "anthropic" | "openai" | "google" | "openai-compatible";
     model: string;
-    apiKey: string;
+    apiKey?: string;
     baseUrl?: string;
   };
   channels?: {
@@ -42,6 +42,7 @@ export interface MagiAgentConfig {
 }
 
 const CONFIG_FILENAME = "magi-agent.yaml";
+const CONFIG_PROVIDERS = ["anthropic", "openai", "google", "openai-compatible"] as const;
 
 /**
  * Recursively walk a parsed YAML object and replace every `${VAR_NAME}`
@@ -112,9 +113,9 @@ export function loadConfig(dir?: string): MagiAgentConfig {
   }
 
   const provider = llm.provider as string;
-  if (!["anthropic", "openai", "google"].includes(provider)) {
+  if (!CONFIG_PROVIDERS.includes(provider as typeof CONFIG_PROVIDERS[number])) {
     throw new Error(
-      `Invalid llm.provider "${provider}" — must be anthropic, openai, or google.`,
+      `Invalid llm.provider "${provider}" — must be anthropic, openai, google, or openai-compatible.`,
     );
   }
 
@@ -122,10 +123,25 @@ export function loadConfig(dir?: string): MagiAgentConfig {
     throw new Error(`Missing llm.model in ${configPath}.`);
   }
 
-  if (!llm.apiKey || typeof llm.apiKey !== "string") {
+  const hasApiKey =
+    typeof llm.apiKey === "string" && llm.apiKey.trim().length > 0;
+  if (provider !== "openai-compatible" && !hasApiKey) {
     throw new Error(
       `Missing llm.apiKey in ${configPath}. Set the environment variable or provide the key directly.`,
     );
+  }
+
+  if (
+    provider === "openai-compatible" &&
+    (typeof llm.baseUrl !== "string" || llm.baseUrl.trim().length === 0)
+  ) {
+    throw new Error(
+      `Missing llm.baseUrl in ${configPath}. OpenAI-compatible local providers require a base URL.`,
+    );
+  }
+
+  if (llm.baseUrl !== undefined && typeof llm.baseUrl !== "string") {
+    throw new Error(`Invalid llm.baseUrl in ${configPath}.`);
   }
 
   return resolved as unknown as MagiAgentConfig;

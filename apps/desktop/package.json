@@ -1,0 +1,15 @@
+{
+  "name": "@openmagi/magi-desktop",
+  "version": "0.2.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "check": "node scripts/check-prereqs.mjs",
+    "dev": "npm run check && tauri dev",
+    "build": "npm run check && tauri build",
+    "tauri": "tauri"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.0.0"
+  }
+}

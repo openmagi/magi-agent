@@ -23,6 +23,7 @@ const DEFAULT_MODELS: Record<string, string> = {
   anthropic: "claude-sonnet-4-6",
   openai: "gpt-5.4",
   google: "gemini-2.5-flash",
+  "openai-compatible": "llama3.1",
 };
 
 function buildAgentConfig(
@@ -40,12 +41,17 @@ function buildAgentConfig(
     baseUrl: config.llm.baseUrl,
     defaultModel: model,
   });
+  const agentGatewayToken =
+    cleanToken(config.server?.gatewayToken) ??
+    cleanToken(process.env.MAGI_AGENT_SERVER_TOKEN) ??
+    cleanToken(config.llm.apiKey) ??
+    "local-dev";
 
   return {
     botId: "cli-serve",
     userId: "cli-user",
     workspaceRoot: workspace,
-    gatewayToken: config.llm.apiKey,
+    gatewayToken: agentGatewayToken,
     apiProxyUrl: config.llm.baseUrl ?? "https://api.anthropic.com",
     model,
     llmProvider: provider,
@@ -77,7 +83,14 @@ export function resolveHttpBearerToken(
       "server.gatewayToken is configured but empty. Set MAGI_AGENT_SERVER_TOKEN or remove the server.gatewayToken field.",
     );
   }
-  return cleanToken(process.env.MAGI_AGENT_SERVER_TOKEN) ?? cleanToken(agentConfig.gatewayToken);
+  const envServerToken = cleanToken(process.env.MAGI_AGENT_SERVER_TOKEN);
+  if (envServerToken) {
+    return envServerToken;
+  }
+  if (config.llm.provider === "openai-compatible" && !cleanToken(config.llm.apiKey)) {
+    return undefined;
+  }
+  return cleanToken(agentConfig.gatewayToken);
 }
 
 export async function runServe(port?: number): Promise<void> {

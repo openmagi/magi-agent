@@ -217,7 +217,7 @@ export interface AgentConfig {
   /** Standalone direct-provider config, only used by direct mode. */
   directProviders?: Record<
     string,
-    { kind: "anthropic" | "openai-compatible"; baseUrl: string; apiKey: string }
+    { kind: "anthropic" | "openai-compatible"; baseUrl: string; apiKey?: string }
   >;
   /** OSS identity — optional agent display name. */
   agentName?: string;

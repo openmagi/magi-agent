@@ -13,7 +13,8 @@ context after a restart, misroute scheduled jobs, or ignore workflow
 instructions buried in the prompt, Magi moves those behaviors out of
 vibes and into runtime state.
 
-Think Claude Code, but open-source, multi-provider, always-on, and programmable.
+Think Claude Code, but open-source, local/self-hostable, multi-provider,
+always-on, and programmable.
 
 ## Self-Hosted App
 
@@ -28,11 +29,10 @@ for testing different providers or routers without changing the agent config,
 while keeping provider secrets out of the browser by using a separate server
 token.
 
-The web shell is installable as a desktop PWA from supported browsers, so a
-self-hosted Magi instance can run as a local desktop workbench without a native
-package. A signed Electron/Tauri-style package is intentionally kept as a
-separate packaging track so the open runtime does not inherit hosted Magi
-Cloud's download, signing, update, auth, or billing infrastructure.
+The web shell is installable as a desktop PWA from supported browsers. The repo
+also includes a minimal Tauri desktop shell under `apps/desktop` for users who
+want to build a native local workbench around the same runtime. Signed releases,
+auto-update, telemetry, hosted auth, and billing remain outside the OSS package.
 
 The goal is to keep the visible app surface open while keeping hosted Magi
 Cloud's production control plane separate: billing, fleet provisioning, managed
@@ -102,7 +102,7 @@ evidence, and deterministic evidence through the turn.
 | **Child agents** | Spawn background agents with bounded tools, workspace isolation, and result delivery. |
 | **Per-turn model control** | HTTP/app clients can pass an explicit model for a single turn while leaving the default runtime model untouched. |
 | **Multi-channel** | Run the same runtime from CLI, HTTP, Telegram, or Discord. |
-| **Multi-provider** | Use Anthropic, OpenAI, or Google models through one runtime interface. |
+| **Multi-provider and local LLMs** | Use Anthropic, OpenAI, Google, or any OpenAI-compatible local/self-hosted model endpoint through one runtime interface. |
 
 ## Built-In Capabilities
 
@@ -297,6 +297,10 @@ npx tsx src/cli/index.ts start
 The `init` command writes `magi-agent.yaml`. The `start` command runs an
 interactive terminal agent against the configured workspace.
 
+For a local model, choose `openai-compatible` during init and point it at an
+OpenAI-compatible server such as Ollama, LM Studio, vLLM, or a gateway you run
+yourself.
+
 ## Installation
 
 ### From Source
@@ -353,6 +357,27 @@ provider API key into the browser. The app sends chat turns through
 `POST /v1/chat/completions`; the optional model field is treated as a per-turn
 runtime override and `auto` falls back to the configured model.
 
+### Desktop
+
+The zero-dependency desktop path is to install `http://localhost:8080/app` as a
+PWA from your browser. For a native shell you can build yourself:
+
+```bash
+npm --prefix apps/desktop install
+npm --prefix apps/desktop run check
+npm run desktop:dev
+```
+
+To create an installer/package with Tauri:
+
+```bash
+npm run desktop:build
+```
+
+The desktop shell connects to the local runtime at `http://127.0.0.1:8080/app`.
+Provider credentials and local model configuration stay in `magi-agent.yaml`,
+not in browser-readable app state.
+
 The app currently uses these local read-only inspection endpoints:
 
 | Endpoint | Purpose |
@@ -392,7 +417,7 @@ interactively, or create it manually:
 
 ```yaml
 llm:
-  provider: anthropic          # anthropic, openai, or google
+  provider: anthropic          # anthropic, openai, google, or openai-compatible
   model: claude-sonnet-4-6
   apiKey: ${ANTHROPIC_API_KEY}
 
@@ -460,7 +485,9 @@ The bot responds to mentions in channels where it is present.
 
 ## Multi-Provider LLM
 
-Switch providers by changing `llm.provider` and `llm.apiKey`:
+Switch providers by changing `llm.provider`. Hosted providers require
+`llm.apiKey`; OpenAI-compatible local/self-hosted providers require `baseUrl`
+and may omit `apiKey` when the server runs without auth.
 
 ```yaml
 # Anthropic Claude
@@ -480,14 +507,26 @@ llm:
   provider: google
   model: gemini-2.5-flash
   apiKey: ${GOOGLE_API_KEY}
+
+# Local/self-hosted OpenAI-compatible model server
+llm:
+  provider: openai-compatible
+  model: llama3.1
+  baseUrl: http://127.0.0.1:11434/v1
+  # apiKey: ${LOCAL_LLM_API_KEY}  # optional; only set if your server requires it
 ```
 
-All providers support streaming, tool use, and the full agentic loop. The
-provider layer handles message and tool-call format conversion. HTTP and app
-clients can set `model` on a single `/v1/chat/completions` request to override
-the runtime model for that turn; omit it or send `auto` to use the configured
-model. SSE parsers preserve split UTF-8 chunks, so multilingual streams remain
-byte-safe across proxy and direct-provider modes.
+The `openai-compatible` adapter uses `/v1/chat/completions`, so it can point at
+Ollama (`http://127.0.0.1:11434/v1`), LM Studio
+(`http://127.0.0.1:1234/v1`), vLLM, llama.cpp server variants, LiteLLM, or your
+own gateway if it speaks the same streaming shape. All providers support
+streaming and the full agentic loop; tool calling works when the selected model
+and server support OpenAI-style tool calls. The provider layer handles message
+and tool-call format conversion. HTTP and app clients can set `model` on a
+single `/v1/chat/completions` request to override the runtime model for that
+turn; omit it or send `auto` to use the configured model. SSE parsers preserve
+split UTF-8 chunks, so multilingual streams remain byte-safe across proxy and
+direct-provider modes.
 
 ## Hooks: The Control Plane
 
@@ -587,7 +626,8 @@ disable these checks.
 ## Requirements
 
 - Node.js 22+
-- An API key for Anthropic, OpenAI, or Google
+- An API key for Anthropic, OpenAI, or Google, or an OpenAI-compatible local
+  model server
 
 ## Contributing
 

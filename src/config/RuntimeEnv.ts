@@ -56,6 +56,8 @@ function parseRoutingMode(model: string): RoutingMode {
 }
 
 function directProvidersFromEnv(): AgentConfig["directProviders"] {
+  const openAIBaseUrl = optionalEnv("OPENAI_BASE_URL");
+  const openAIApiKey = optionalEnv("OPENAI_API_KEY");
   return {
     ...(optionalEnv("ANTHROPIC_API_KEY")
       ? {
@@ -66,12 +68,12 @@ function directProvidersFromEnv(): AgentConfig["directProviders"] {
           },
         }
       : {}),
-    ...(optionalEnv("OPENAI_API_KEY")
+    ...(openAIApiKey || openAIBaseUrl
       ? {
           openai: {
             kind: "openai-compatible" as const,
-            baseUrl: optionalEnv("OPENAI_BASE_URL") ?? "https://api.openai.com",
-            apiKey: optionalEnv("OPENAI_API_KEY") ?? "",
+            baseUrl: openAIBaseUrl ?? "https://api.openai.com",
+            apiKey: openAIApiKey,
           },
         }
       : {}),
@@ -107,10 +109,13 @@ export interface RuntimeEnv {
 
 export interface MagiAgentConfig {
   llm: {
-    provider: "anthropic" | "openai" | "google";
-    apiKey: string;
+    provider: "anthropic" | "openai" | "google" | "openai-compatible";
+    apiKey?: string;
     model?: string;
     baseUrl?: string;
+  };
+  server?: {
+    gatewayToken?: string;
   };
   workspace?: string;
   identity?: {
@@ -135,6 +140,7 @@ const DEFAULT_MODELS: Record<string, string> = {
   anthropic: "claude-sonnet-4-6",
   openai: "gpt-5.4",
   google: "gemini-2.5-flash",
+  "openai-compatible": "llama3.1",
 };
 
 /**
@@ -159,9 +165,9 @@ export function loadFromConfig(config: MagiAgentConfig): RuntimeEnv {
     workspaceRoot: config.workspace ?? "./workspace",
     model,
 
-    // For Anthropic direct mode, apiKey doubles as gatewayToken (same x-api-key header).
-    // For non-Anthropic, these are unused because llmProvider handles routing.
-    gatewayToken: config.llm.apiKey,
+    // In OSS config mode, this token is for local app/tool transport.
+    // Keep it separate from provider credentials where possible.
+    gatewayToken: config.server?.gatewayToken ?? config.llm.apiKey ?? "local-dev",
     apiProxyUrl: config.llm.baseUrl ?? "https://api.anthropic.com",
 
     // Multi-provider: inject the OSS provider so LLMClient delegates to it

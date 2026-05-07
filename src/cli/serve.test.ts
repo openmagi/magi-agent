@@ -52,4 +52,20 @@ describe("resolveHttpBearerToken", () => {
       /server.gatewayToken/,
     );
   });
+
+  it("does not invent an HTTP bearer token for no-auth local model configs", () => {
+    const config: MagiAgentConfig = {
+      llm: {
+        provider: "openai-compatible",
+        model: "llama3.1",
+        baseUrl: "http://127.0.0.1:11434/v1",
+      },
+    };
+    const agentConfig = {
+      ...baseAgentConfig(),
+      gatewayToken: "local-dev",
+    };
+
+    expect(resolveHttpBearerToken(config, agentConfig)).toBeUndefined();
+  });
 });

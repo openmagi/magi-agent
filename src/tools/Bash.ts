@@ -39,6 +39,15 @@ export interface BashOutput {
   durationMs: number;
 }
 
+export type BashSemanticStatus = "success" | "no_match" | "different" | "failed";
+
+interface BashExitSemantics {
+  status: "ok" | "error";
+  semanticStatus: BashSemanticStatus;
+  errorCode?: string;
+  errorMessage?: string;
+}
+
 const INPUT_SCHEMA = {
   type: "object",
   properties: {
@@ -52,6 +61,35 @@ const INPUT_SCHEMA = {
 const MAX_OUTPUT_BYTES = 512 * 1024;
 const DEFAULT_TIMEOUT_MS = 120_000;
 const MAX_TIMEOUT_MS = 600_000;
+
+function commandContainsExecutable(command: string, names: readonly string[]): boolean {
+  const escaped = names.map((name) => name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+  const pattern = new RegExp(`(^|[\\s|;&()])(?:[^\\s|;&()]+/)?(${escaped.join("|")})(\\s|$)`);
+  return pattern.test(command);
+}
+
+export function interpretBashExit(
+  command: string,
+  code: number | null,
+  stderrText: string,
+): BashExitSemantics {
+  if (code === 0) {
+    return { status: "ok", semanticStatus: "success" };
+  }
+  if (code === 1 && commandContainsExecutable(command, ["grep", "egrep", "fgrep", "rg"])) {
+    return { status: "ok", semanticStatus: "no_match" };
+  }
+  if (code === 1 && commandContainsExecutable(command, ["diff", "cmp"])) {
+    return { status: "ok", semanticStatus: "different" };
+  }
+  const errorCode = code === null ? "signal" : `exit_${code}`;
+  return {
+    status: "error",
+    semanticStatus: "failed",
+    errorCode,
+    errorMessage: stderrText.slice(0, 500) || (code === null ? "terminated by signal" : `exit ${code}`),
+  };
+}
 
 export function makeBashTool(workspaceRoot: string): Tool<BashInput, BashOutput> {
   const defaultWorkspace = new Workspace(workspaceRoot);
@@ -107,8 +145,9 @@ export function makeBashTool(workspaceRoot: string): Tool<BashInput, BashOutput>
             clearTimeout(timeout);
             const stdoutText = stdout.end();
             const stderrText = stderr.end();
+            const semantics = interpretBashExit(input.command, code, stderrText);
             resolve({
-              status: code === 0 ? "ok" : "error",
+              status: semantics.status,
               output: {
                 exitCode: code,
                 signal,
@@ -117,9 +156,12 @@ export function makeBashTool(workspaceRoot: string): Tool<BashInput, BashOutput>
                 truncated: stdout.truncated || stderr.truncated,
                 durationMs: Date.now() - start,
               },
-              errorCode: code === 0 ? undefined : `exit_${code}`,
-              errorMessage: code === 0 ? undefined : stderrText.slice(0, 500) || `exit ${code}`,
+              errorCode: semantics.errorCode,
+              errorMessage: semantics.errorMessage,
               durationMs: Date.now() - start,
+              metadata: {
+                semanticStatus: semantics.semanticStatus,
+              },
             });
           });
           child.on("error", (err) => {

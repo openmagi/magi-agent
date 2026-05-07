@@ -13,7 +13,7 @@ import {
 export interface DirectProviderConfig {
   kind: "anthropic" | "openai-compatible";
   baseUrl: string;
-  apiKey: string;
+  apiKey?: string;
 }
 
 export interface DirectLLMClientOptions {
@@ -76,7 +76,7 @@ export class DirectLLMClient extends LLMClient {
       stream: true,
     });
     const headers = {
-      "x-api-key": provider.apiKey,
+      ...(provider.apiKey ? { "x-api-key": provider.apiKey } : {}),
       "anthropic-version": "2023-06-01",
       Accept: "text/event-stream",
       ...(req.thinking && req.thinking.type !== "disabled"
@@ -115,7 +115,7 @@ export class DirectLLMClient extends LLMClient {
       stream_options: { include_usage: true },
     });
     const res = await post(provider, openAICompatiblePath(key, provider.baseUrl), body, {
-      Authorization: `Bearer ${provider.apiKey}`,
+      ...(provider.apiKey ? { Authorization: `Bearer ${provider.apiKey}` } : {}),
       Accept: "text/event-stream",
     }, this.directTimeoutMs);
 

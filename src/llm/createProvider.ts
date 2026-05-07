@@ -2,8 +2,8 @@
  * createProvider — factory function for multi-provider LLM instantiation.
  *
  * Returns an `LLMProvider` for the requested backend so callers can
- * switch between Anthropic, OpenAI, and Google without importing
- * concrete classes.
+ * switch between hosted providers and OpenAI-compatible local/self-hosted
+ * servers without importing concrete classes.
  *
  * ```ts
  * const provider = createProvider({
@@ -20,13 +20,15 @@ import { AnthropicProvider } from "./providers/AnthropicProvider.js";
 import { OpenAIProvider } from "./providers/OpenAIProvider.js";
 import { GoogleProvider } from "./providers/GoogleProvider.js";
 
+export type ProviderName = "anthropic" | "openai" | "google" | "openai-compatible";
+
 /** Provider configuration passed to {@link createProvider}. */
 export interface ProviderConfig {
   /** Which LLM backend to use. */
-  provider: "anthropic" | "openai" | "google";
-  /** API key for the chosen provider. */
-  apiKey: string;
-  /** Override the provider's default base URL (e.g. for proxies or Azure). */
+  provider: ProviderName;
+  /** API key for the chosen provider. Optional for no-auth local model servers. */
+  apiKey?: string;
+  /** Override the provider's default base URL (required for openai-compatible). */
   baseUrl?: string;
   /** Default model when `LLMStreamRequest.model` is omitted. */
   defaultModel?: string;
@@ -43,7 +45,7 @@ export function createProvider(config: ProviderConfig): LLMProvider {
   switch (config.provider) {
     case "anthropic":
       return new AnthropicProvider({
-        apiKey: config.apiKey,
+        apiKey: requireApiKey(config),
         baseUrl: config.baseUrl,
         defaultModel: config.defaultModel,
         timeoutMs: config.timeoutMs,
@@ -51,7 +53,7 @@ export function createProvider(config: ProviderConfig): LLMProvider {
 
     case "openai":
       return new OpenAIProvider({
-        apiKey: config.apiKey,
+        apiKey: requireApiKey(config),
         baseUrl: config.baseUrl,
         defaultModel: config.defaultModel,
         timeoutMs: config.timeoutMs,
@@ -59,8 +61,16 @@ export function createProvider(config: ProviderConfig): LLMProvider {
 
     case "google":
       return new GoogleProvider({
-        apiKey: config.apiKey,
+        apiKey: requireApiKey(config),
         baseUrl: config.baseUrl,
+        defaultModel: config.defaultModel,
+        timeoutMs: config.timeoutMs,
+      });
+
+    case "openai-compatible":
+      return new OpenAIProvider({
+        apiKey: cleanOptional(config.apiKey),
+        baseUrl: requireBaseUrl(config),
         defaultModel: config.defaultModel,
         timeoutMs: config.timeoutMs,
       });
@@ -68,7 +78,28 @@ export function createProvider(config: ProviderConfig): LLMProvider {
     default:
       throw new Error(
         `Unknown LLM provider: "${(config as { provider: string }).provider}". ` +
-          `Supported providers: anthropic, openai, google.`,
+          `Supported providers: anthropic, openai, google, openai-compatible.`,
       );
   }
+}
+
+function cleanOptional(value: string | undefined): string | undefined {
+  const trimmed = value?.trim();
+  return trimmed && trimmed.length > 0 ? trimmed : undefined;
+}
+
+function requireApiKey(config: ProviderConfig): string {
+  const apiKey = cleanOptional(config.apiKey);
+  if (!apiKey) {
+    throw new Error(`Missing apiKey for hosted LLM provider "${config.provider}".`);
+  }
+  return apiKey;
+}
+
+function requireBaseUrl(config: ProviderConfig): string {
+  const baseUrl = cleanOptional(config.baseUrl);
+  if (!baseUrl) {
+    throw new Error("Missing baseUrl for openai-compatible LLM provider.");
+  }
+  return baseUrl;
 }

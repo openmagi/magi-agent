@@ -39,6 +39,8 @@ The open-source app should include:
   server-token flow: done.
 - Installable desktop PWA shell for the self-hosted app. Initial manifest,
   service worker, and install prompt: done.
+- Buildable native desktop shell in `apps/desktop` using Tauri. Initial local
+  runtime wrapper: done.
 - Provider configuration UI for API-key based providers and local provider
   adapters.
 - Session transcript viewer with tool calls, tool results, thinking blocks,
@@ -115,7 +117,7 @@ Pieces that should be rewritten or replaced:
 ```
 apps/web
   -> AgentConnection               local/self-hosted HTTP + SSE client
-  -> DesktopShell                  installable PWA now, native wrapper later
+  -> DesktopShell                  installable PWA + buildable Tauri wrapper
   -> ProviderSettings              BYOK/local provider adapter config
   -> ChatWorkbench                 messages, tool calls, thinking, input
   -> RuntimeTimeline               hook events, checkpoints, evidence
@@ -163,9 +165,10 @@ routes.
 
 ## Milestones
 
-Status on 2026-05-04: M0 is complete, M1 has a dependency-free shell at `/app`,
+Status on 2026-05-07: M0 is complete, M1 has a dependency-free shell at `/app`,
 the first M3 read-only runtime inspector is wired through documented
-`/v1/app/*` HTTP APIs, and the app has an installable PWA desktop shell.
+`/v1/app/*` HTTP APIs, and the app has both an installable PWA desktop shell and
+a buildable Tauri wrapper under `apps/desktop`.
 
 ### M0: Boundary And Marketing
 
@@ -184,6 +187,7 @@ the first M3 read-only runtime inspector is wired through documented
 - Send user messages and stream responses. Done.
 - Show runtime event stream. Done.
 - Install as a desktop PWA from supported browsers. Done.
+- Build a native Tauri shell around the same local runtime. Done.
 - No auth, billing, Supabase, or hosted Magi dependency. Done.
 - Render richer first-class message parts, thinking blocks, and tool cards.
 
@@ -223,9 +227,10 @@ the first M3 read-only runtime inspector is wired through documented
 
 ### M6: Native Desktop Packaging
 
-- Decide whether native packaging belongs in this monorepo or a separate
-  `magi-desktop` repository.
-- Wrap the same `/app` surface in a minimal Tauri/Electron/WebView shell.
+- Keep native packaging in this monorepo while it is only a local wrapper.
+  Initial Tauri shell: done.
+- Wrap the same `/app` surface in a minimal Tauri/Electron/WebView shell. Done
+  for Tauri.
 - Keep provider keys in the local runtime process or OS credential storage, not
   in browser-readable frontend state.
 - Add signed release, auto-update, and notarization only after the hosted-only

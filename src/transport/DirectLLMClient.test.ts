@@ -117,6 +117,42 @@ describe("DirectLLMClient", () => {
     });
   });
 
+  it("supports no-auth OpenAI-compatible local providers", async () => {
+    let authorizationHeader: string | string[] | undefined;
+    const baseUrl = await startServer((req, res) => {
+      authorizationHeader = req.headers.authorization;
+      req.resume();
+      req.on("end", () => {
+        res.writeHead(200, { "content-type": "text/event-stream" });
+        res.end([
+          'data: {"choices":[{"delta":{"content":"local"},"finish_reason":null}]}',
+          "",
+          'data: {"choices":[{"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1}}',
+          "",
+          "data: [DONE]",
+          "",
+        ].join("\n"));
+      });
+    });
+
+    const client = new DirectLLMClient({
+      providers: {
+        openai: { kind: "openai-compatible", baseUrl },
+      },
+    });
+
+    const deltas: string[] = [];
+    for await (const evt of client.stream({
+      model: "llama3.1",
+      messages: [{ role: "user", content: "hi" }],
+    })) {
+      if (evt.kind === "text_delta") deltas.push(evt.delta);
+    }
+
+    expect(authorizationHeader).toBeUndefined();
+    expect(deltas.join("")).toBe("local");
+  });
+
   it("preserves Korean text when OpenAI-compatible SSE chunks split a UTF-8 character", async () => {
     const korean = "프롬프트";
     const frame = [

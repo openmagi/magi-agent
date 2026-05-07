@@ -3,9 +3,16 @@
 
 # LLM Provider
 llm:
-  provider: anthropic          # anthropic | openai | google
+  provider: anthropic          # anthropic | openai | google | openai-compatible
   model: claude-sonnet-4-6
   apiKey: ${ANTHROPIC_API_KEY}  # Environment variable reference
+
+# Local/self-hosted model example:
+# llm:
+#   provider: openai-compatible
+#   model: llama3.1
+#   baseUrl: http://127.0.0.1:11434/v1
+#   apiKey: ${LOCAL_LLM_API_KEY}  # optional; omit for no-auth local servers
 
 # Local/self-hosted HTTP API token.
 # Use this in Magi App. Do not put your provider API key in the browser.

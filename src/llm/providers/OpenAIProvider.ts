@@ -27,9 +27,9 @@ import { httpPost, consumeText, parseGenericSse } from "../sseUtils.js";
 
 /** Configuration for the OpenAI provider. */
 export interface OpenAIProviderOptions {
-  /** OpenAI API key (sk-...). */
-  apiKey: string;
-  /** Override the base URL (e.g. for Azure OpenAI). Defaults to `https://api.openai.com`. */
+  /** OpenAI API key (sk-...). Optional for no-auth local model servers. */
+  apiKey?: string;
+  /** Override the base URL (e.g. for Azure OpenAI, Ollama, LM Studio, vLLM). Defaults to `https://api.openai.com`. */
   baseUrl?: string;
   /** Default model when `LLMStreamRequest.model` is omitted. */
   defaultModel?: string;
@@ -70,13 +70,13 @@ interface OAITool {
  * Completions API and normalises the streamed deltas into `LLMEvent`.
  */
 export class OpenAIProvider implements LLMProvider {
-  private readonly apiKey: string;
+  private readonly apiKey?: string;
   private readonly baseUrl: string;
   private readonly defaultModel: string;
   private readonly timeoutMs: number;
 
   constructor(opts: OpenAIProviderOptions) {
-    this.apiKey = opts.apiKey;
+    this.apiKey = cleanOptional(opts.apiKey);
     this.baseUrl = (opts.baseUrl ?? DEFAULT_BASE_URL).replace(/\/+$/, "");
     this.defaultModel = opts.defaultModel ?? DEFAULT_MODEL;
     this.timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
@@ -108,7 +108,7 @@ export class OpenAIProvider implements LLMProvider {
     const res = await httpPost({
       url: `${this.baseUrl}/v1/chat/completions`,
       headers: {
-        Authorization: `Bearer ${this.apiKey}`,
+        ...(this.apiKey ? { Authorization: `Bearer ${this.apiKey}` } : {}),
         Accept: "text/event-stream",
       },
       body,
@@ -243,6 +243,11 @@ export class OpenAIProvider implements LLMProvider {
     const stopReason = mapFinishReason(finishReason);
     yield { kind: "message_end", stopReason, usage };
   }
+}
+
+function cleanOptional(value: string | undefined): string | undefined {
+  const trimmed = value?.trim();
+  return trimmed && trimmed.length > 0 ? trimmed : undefined;
 }
 
 // ─── Format conversion helpers ─────────────────────────────────────

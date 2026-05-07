@@ -1,0 +1,34 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Magi",
+  "version": "0.2.0",
+  "identifier": "ai.openmagi.magi",
+  "build": {
+    "devUrl": "http://127.0.0.1:8080/app",
+    "frontendDist": "http://127.0.0.1:8080/app"
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "Magi",
+        "url": "http://127.0.0.1:8080/app",
+        "width": 1280,
+        "height": 840,
+        "minWidth": 900,
+        "minHeight": 620,
+        "resizable": true
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "category": "DeveloperTool",
+    "shortDescription": "Local desktop shell for Magi Agent",
+    "longDescription": "A local desktop shell for the open-source Magi Agent runtime and workbench."
+  }
+}

@@ -101,7 +101,13 @@ const DEFAULT_MODELS: Record<string, string> = {
   anthropic: "claude-sonnet-4-6",
   openai: "gpt-5.4",
   google: "gemini-2.5-flash",
+  "openai-compatible": "llama3.1",
 };
+
+function cleanToken(value: string | undefined): string | undefined {
+  const trimmed = value?.trim();
+  return trimmed && trimmed.length > 0 ? trimmed : undefined;
+}
 
 function buildAgentConfig(
   config: ReturnType<typeof loadConfig>,
@@ -118,12 +124,17 @@ function buildAgentConfig(
     baseUrl: config.llm.baseUrl,
     defaultModel: model,
   });
+  const agentGatewayToken =
+    cleanToken(config.server?.gatewayToken) ??
+    cleanToken(process.env.MAGI_AGENT_SERVER_TOKEN) ??
+    cleanToken(config.llm.apiKey) ??
+    "local-dev";
 
   return {
     botId: "cli",
     userId: "cli-user",
     workspaceRoot: workspace,
-    gatewayToken: config.llm.apiKey,
+    gatewayToken: agentGatewayToken,
     apiProxyUrl: config.llm.baseUrl ?? "https://api.anthropic.com",
     model,
     llmProvider: provider,
