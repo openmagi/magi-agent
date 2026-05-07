@@ -99,7 +99,10 @@ import { makeCronListTool } from "./tools/CronList.js";
 import { makeCronUpdateTool } from "./tools/CronUpdate.js";
 import { makeCronDeleteTool } from "./tools/CronDelete.js";
 import type { Turn } from "./Turn.js";
-import type { ChannelAdapter } from "./channels/ChannelAdapter.js";
+import type {
+  ChannelAdapter,
+  ChannelDeliveryReceipt,
+} from "./channels/ChannelAdapter.js";
 import { TelegramPoller } from "./channels/TelegramPoller.js";
 import { DiscordClient } from "./channels/DiscordClient.js";
 import { WebAppChannelAdapter } from "./channels/WebAppChannelAdapter.js";
@@ -505,7 +508,7 @@ export class Agent {
       filePath: string,
       caption: string | undefined,
       mode: "document" | "photo",
-    ): Promise<void> =>
+    ): Promise<ChannelDeliveryReceipt> =>
       this.sendFileToSourceChannel(channel, filePath, caption, mode);
     this.tools.register(
       makeFileSendTool({
@@ -616,7 +619,7 @@ export class Agent {
     filePath: string,
     caption: string | undefined,
     mode: "document" | "photo",
-  ): Promise<void> {
+  ): Promise<ChannelDeliveryReceipt> {
     if (channel.type !== "telegram" && channel.type !== "discord") {
       throw new Error(`direct file delivery unsupported for channel=${channel.type}`);
     }
@@ -625,10 +628,9 @@ export class Agent {
       throw new Error(`${channel.type} adapter not configured`);
     }
     if (mode === "photo") {
-      await adapter.sendPhoto(channel.channelId, filePath, caption);
-    } else {
-      await adapter.sendDocument(channel.channelId, filePath, caption);
+      return adapter.sendPhoto(channel.channelId, filePath, caption);
     }
+    return adapter.sendDocument(channel.channelId, filePath, caption);
   }
 
   /** Look up a live turn. Used by HttpServer's ask-response endpoint. */

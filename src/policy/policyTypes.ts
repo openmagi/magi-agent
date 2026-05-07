@@ -1,4 +1,5 @@
 export type SupportedLanguage = "ko" | "en" | "ja" | "zh" | "es";
+export type ResponseLanguagePolicy = SupportedLanguage | "auto";
 
 export interface ApprovalPolicy {
   explicitConsentForExternalActions: boolean;
@@ -23,7 +24,7 @@ export interface RetryPolicy {
 }
 
 export interface ResponseModePolicy {
-  language?: SupportedLanguage;
+  language?: ResponseLanguagePolicy;
   concise?: boolean;
   noProfanity?: boolean;
 }

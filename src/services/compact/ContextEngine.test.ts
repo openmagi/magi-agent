@@ -305,6 +305,52 @@ describe("ContextEngine.maybeCompact", () => {
     expect(calls[0]!.system).toContain("goal, constraints, current plan, completed steps, blockers, acceptance criteria");
   });
 
+  it("prompts the summarizer to write a next-session handoff memo", async () => {
+    const { client, calls } = mockLLM(() => [
+      { kind: "text_delta", blockIndex: 0, delta: "handoff summary" },
+      { kind: "message_end", stopReason: "end_turn", usage: { inputTokens: 100, outputTokens: 20 } },
+    ]);
+    const engine = new ContextEngine(client);
+    const { session } = fakeSession();
+
+    const entries: TranscriptEntry[] = [
+      userEntry("t1", "continue the deploy train", 1_000),
+      assistantEntry("t1", "investigated blockers", 2_000),
+    ];
+
+    await engine.maybeCompact(session, entries, /*tokenLimit*/ 1);
+
+    expect(calls.length).toBe(1);
+    const system = String(calls[0]!.system);
+    expect(system).toContain("next turn or a new session");
+    expect(system).toContain("Write the summary as a handoff memo");
+    expect(system).toContain("Current objective");
+    expect(system).toContain("Completed work");
+    expect(system).toContain("Next step");
+  });
+
+  it("keeps recent transcript tail visible to the summarizer when input is over budget", async () => {
+    const { client, calls } = mockLLM(() => [
+      { kind: "text_delta", blockIndex: 0, delta: "summary with tail" },
+      { kind: "message_end", stopReason: "end_turn", usage: { inputTokens: 100, outputTokens: 20 } },
+    ]);
+    const engine = new ContextEngine(client);
+    const { session } = fakeSession();
+
+    const entries: TranscriptEntry[] = [
+      userEntry("t1", "HEAD_MARKER original objective is deploy compaction patch", 1_000),
+      assistantEntry("t1", "middle ".repeat(40_000), 2_000),
+      userEntry("t2", "TAIL_MARKER remaining next step is open draft PR", 3_000),
+    ];
+
+    await engine.maybeCompact(session, entries, /*tokenLimit*/ 1);
+
+    const payload = String(calls[0]!.messages[0]!.content);
+    expect(payload).toContain("HEAD_MARKER");
+    expect(payload).toContain("TAIL_MARKER");
+    expect(payload).toContain("chars omitted from the middle");
+  });
+
   it("fails open (returns null, no boundary) when Haiku errors out", async () => {
     const { client } = mockLLM(() => new Error("haiku upstream down"));
     const engine = new ContextEngine(client);

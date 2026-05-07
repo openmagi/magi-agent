@@ -28,7 +28,11 @@ describe("FileSend", () => {
     const workspaceRoot = await fs.mkdtemp(path.join(os.tmpdir(), "file-send-"));
     try {
       await fs.writeFile(path.join(workspaceRoot, "report.pdf"), "PDF", "utf8");
-      const sendFile = vi.fn(async () => {});
+      const sendFile = vi.fn(async () => ({
+        provider: "discord" as const,
+        channelId: "chan-1",
+        messageId: "msg-1",
+      }));
       const tool = makeFileSendTool({
         workspaceRoot,
         getSourceChannel: () => ({ type: "discord", channelId: "chan-1" }),
@@ -49,6 +53,7 @@ describe("FileSend", () => {
         filename: "report.pdf",
         channel: { type: "discord", channelId: "chan-1" },
         mode: "document",
+        providerMessageId: "msg-1",
       });
       expect(sendFile).toHaveBeenCalledWith(
         { type: "discord", channelId: "chan-1" } satisfies ChannelRef,
@@ -67,7 +72,10 @@ describe("FileSend", () => {
       const tool = makeFileSendTool({
         workspaceRoot,
         getSourceChannel: () => ({ type: "telegram", channelId: "chat-1" }),
-        sendFile: vi.fn(async () => {}),
+        sendFile: vi.fn(async () => ({
+          provider: "telegram" as const,
+          channelId: "chat-1",
+        })),
         binDir: path.join(workspaceRoot, "..", "bin"),
         gatewayToken: "gw",
         botId: "bot-1",

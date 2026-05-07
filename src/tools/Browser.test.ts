@@ -7,6 +7,18 @@ import { makeBrowserTool, type BrowserRunner } from "./Browser.js";
 
 const roots: string[] = [];
 const resolvePublicHost = async () => [{ address: "93.184.216.34", family: 4 as const }];
+const testCdpEndpoint = "ws://browser-worker:9222/devtools?token=t";
+const testAgentSession = "magi-browser-sess-1";
+
+function connectCall(
+  cdpEndpoint = testCdpEndpoint,
+  sessionId = "sess-1",
+): { command: string; args: string[] } {
+  return {
+    command: "agent-browser",
+    args: ["--session", `magi-browser-${sessionId}`, "connect", cdpEndpoint],
+  };
+}
 
 async function makeRoot(): Promise<string> {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "browser-tool-"));
@@ -75,18 +87,14 @@ describe("Browser", () => {
     expect(snapshot.status).toBe("ok");
     expect(calls).toEqual([
       { command: "integration.sh", args: ["browser/session-create"] },
+      connectCall(),
       {
         command: "agent-browser",
-        args: [
-          "--cdp",
-          "ws://browser-worker:9222/devtools?token=t",
-          "open",
-          "https://example.com",
-        ],
+        args: ["--session", testAgentSession, "open", "https://example.com"],
       },
       {
         command: "agent-browser",
-        args: ["--cdp", "ws://browser-worker:9222/devtools?token=t", "snapshot"],
+        args: ["--session", testAgentSession, "snapshot"],
       },
     ]);
   });
@@ -115,7 +123,10 @@ describe("Browser", () => {
 
     expect(result.status).toBe("error");
     expect(result.errorCode).toBe("invalid_url");
-    expect(calls).toEqual([{ command: "integration.sh", args: ["browser/session-create"] }]);
+    expect(calls).toEqual([
+      { command: "integration.sh", args: ["browser/session-create"] },
+      connectCall(),
+    ]);
   });
 
   it("rejects local, metadata, and cluster browser URLs before running agent-browser", async () => {
@@ -157,7 +168,10 @@ describe("Browser", () => {
       expect(result.status).toBe("error");
       expect(result.errorCode).toBe("invalid_url");
     }
-    expect(calls).toEqual([{ command: "integration.sh", args: ["browser/session-create"] }]);
+    expect(calls).toEqual([
+      { command: "integration.sh", args: ["browser/session-create"] },
+      connectCall(),
+    ]);
   });
 
   it("allows public raw IP URLs with custom ports", async () => {
@@ -188,14 +202,10 @@ describe("Browser", () => {
     expect(result.status).toBe("ok");
     expect(calls).toEqual([
       { command: "integration.sh", args: ["browser/session-create"] },
+      connectCall(),
       {
         command: "agent-browser",
-        args: [
-          "--cdp",
-          "ws://browser-worker:9222/devtools?token=t",
-          "open",
-          "http://45.130.165.214:18427",
-        ],
+        args: ["--session", testAgentSession, "open", "http://45.130.165.214:18427"],
       },
     ]);
   });
@@ -236,7 +246,10 @@ describe("Browser", () => {
 
     expect(result.status).toBe("error");
     expect(result.errorCode).toBe("invalid_url");
-    expect(calls).toEqual([{ command: "integration.sh", args: ["browser/session-create"] }]);
+    expect(calls).toEqual([
+      { command: "integration.sh", args: ["browser/session-create"] },
+      connectCall(),
+    ]);
   });
 
   it("requires an active session for browser commands", async () => {
@@ -284,22 +297,200 @@ describe("Browser", () => {
 
     expect(calls).toEqual([
       { command: "integration.sh", args: ["browser/session-create"] },
-      { command: "agent-browser", args: ["--cdp", "ws://browser-worker:9222/devtools?token=t", "scrape"] },
-      { command: "agent-browser", args: ["--cdp", "ws://browser-worker:9222/devtools?token=t", "click", "@e1"] },
+      connectCall(),
+      { command: "agent-browser", args: ["--session", testAgentSession, "get", "html"] },
+      { command: "agent-browser", args: ["--session", testAgentSession, "click", "@e1"] },
       {
         command: "agent-browser",
-        args: ["--cdp", "ws://browser-worker:9222/devtools?token=t", "fill", "@e2", "hello world"],
+        args: ["--session", testAgentSession, "fill", "@e2", "hello world"],
       },
-      { command: "agent-browser", args: ["--cdp", "ws://browser-worker:9222/devtools?token=t", "scroll", "down"] },
+      { command: "agent-browser", args: ["--session", testAgentSession, "scroll", "down"] },
       {
         command: "agent-browser",
         args: [
-          "--cdp",
-          "ws://browser-worker:9222/devtools?token=t",
+          "--session",
+          testAgentSession,
           "screenshot",
           path.join(root, "screens/page.png"),
         ],
       },
+    ]);
+  });
+
+  it("normalizes snapshot refs copied from accessibility output", async () => {
+    const root = await makeRoot();
+    const calls: Array<{ command: string; args: string[] }> = [];
+    const runner: BrowserRunner = async (command, args) => {
+      calls.push({ command, args });
+      if (command === "integration.sh") {
+        return {
+          exitCode: 0,
+          signal: null,
+          stdout: JSON.stringify({
+            sessionId: "sess-1",
+            cdpEndpoint: "ws://browser-worker:9222/devtools?token=t",
+          }),
+          stderr: "",
+          truncated: false,
+        };
+      }
+      return { exitCode: 0, signal: null, stdout: "ok", stderr: "", truncated: false };
+    };
+    const tool = makeBrowserTool(root, { runner });
+    const ctx = makeCtx(root);
+
+    await tool.execute({ action: "create_session" }, ctx);
+    await tool.execute({ action: "click", selector: "[ref=e29]" }, ctx);
+    await tool.execute({
+      action: "fill",
+      selector: 'textbox "Investment scope"[ref=e24]',
+      text: "stable allocator",
+    }, ctx);
+
+    expect(calls.slice(2)).toEqual([
+      { command: "agent-browser", args: ["--session", testAgentSession, "click", "@e29"] },
+      {
+        command: "agent-browser",
+        args: ["--session", testAgentSession, "fill", "@e24", "stable allocator"],
+      },
+    ]);
+  });
+
+  it("falls back from stale snapshot refs to role and label find actions", async () => {
+    const root = await makeRoot();
+    const calls: Array<{ command: string; args: string[] }> = [];
+    const runner: BrowserRunner = async (command, args) => {
+      calls.push({ command, args });
+      if (command === "integration.sh") {
+        return {
+          exitCode: 0,
+          signal: null,
+          stdout: JSON.stringify({
+            sessionId: "sess-1",
+            cdpEndpoint: "ws://browser-worker:9222/devtools?token=t",
+          }),
+          stderr: "",
+          truncated: false,
+        };
+      }
+      if (args.includes("@e29") || args.includes("@e24")) {
+        return { exitCode: 1, signal: null, stdout: "", stderr: "Element not found", truncated: false };
+      }
+      return { exitCode: 0, signal: null, stdout: "fallback ok", stderr: "", truncated: false };
+    };
+    const tool = makeBrowserTool(root, { runner });
+    const ctx = makeCtx(root);
+
+    await tool.execute({ action: "create_session" }, ctx);
+    const click = await tool.execute({ action: "click", selector: 'button "Submit"[ref=e29]' }, ctx);
+    const fill = await tool.execute({
+      action: "fill",
+      selector: 'textbox "Investment scope"[ref=e24]',
+      text: "stable allocator",
+    }, ctx);
+
+    expect(click.status).toBe("ok");
+    expect(fill.status).toBe("ok");
+    expect(calls.slice(2)).toEqual([
+      { command: "agent-browser", args: ["--session", testAgentSession, "click", "@e29"] },
+      { command: "agent-browser", args: ["--session", testAgentSession, "wait", "@e29"] },
+      {
+        command: "agent-browser",
+        args: ["--session", testAgentSession, "find", "role", "button", "click", "Submit"],
+      },
+      {
+        command: "agent-browser",
+        args: ["--session", testAgentSession, "fill", "@e24", "stable allocator"],
+      },
+      { command: "agent-browser", args: ["--session", testAgentSession, "wait", "@e24"] },
+      {
+        command: "agent-browser",
+        args: [
+          "--session",
+          testAgentSession,
+          "find",
+          "label",
+          "Investment scope",
+          "fill",
+          "stable allocator",
+        ],
+      },
+    ]);
+  });
+
+  it("waits and retries a selector before semantic find fallback", async () => {
+    const root = await makeRoot();
+    const calls: Array<{ command: string; args: string[] }> = [];
+    let clickAttempts = 0;
+    const runner: BrowserRunner = async (command, args) => {
+      calls.push({ command, args });
+      if (command === "integration.sh") {
+        return {
+          exitCode: 0,
+          signal: null,
+          stdout: JSON.stringify({
+            sessionId: "sess-1",
+            cdpEndpoint: "ws://browser-worker:9222/devtools?token=t",
+          }),
+          stderr: "",
+          truncated: false,
+        };
+      }
+      if (args.includes("click") && args.includes("@e29")) {
+        clickAttempts += 1;
+        if (clickAttempts === 1) {
+          return { exitCode: 1, signal: null, stdout: "", stderr: "Element not found", truncated: false };
+        }
+      }
+      return { exitCode: 0, signal: null, stdout: "ok", stderr: "", truncated: false };
+    };
+    const tool = makeBrowserTool(root, { runner });
+    const ctx = makeCtx(root);
+
+    await tool.execute({ action: "create_session" }, ctx);
+    const result = await tool.execute({ action: "click", selector: 'button "Submit"[ref=e29]' }, ctx);
+
+    expect(result.status).toBe("ok");
+    expect(calls.slice(2)).toEqual([
+      { command: "agent-browser", args: ["--session", testAgentSession, "click", "@e29"] },
+      { command: "agent-browser", args: ["--session", testAgentSession, "wait", "@e29"] },
+      { command: "agent-browser", args: ["--session", testAgentSession, "click", "@e29"] },
+    ]);
+  });
+
+  it("supports coordinate and keyboard fallback actions", async () => {
+    const root = await makeRoot();
+    const calls: Array<{ command: string; args: string[] }> = [];
+    const runner: BrowserRunner = async (command, args) => {
+      calls.push({ command, args });
+      if (command === "integration.sh") {
+        return {
+          exitCode: 0,
+          signal: null,
+          stdout: JSON.stringify({
+            sessionId: "sess-1",
+            cdpEndpoint: "ws://browser-worker:9222/devtools?token=t",
+          }),
+          stderr: "",
+          truncated: false,
+        };
+      }
+      return { exitCode: 0, signal: null, stdout: "ok", stderr: "", truncated: false };
+    };
+    const tool = makeBrowserTool(root, { runner });
+    const ctx = makeCtx(root);
+
+    await tool.execute({ action: "create_session" }, ctx);
+    await tool.execute({ action: "mouse_click", x: 120, y: 240 }, ctx);
+    await tool.execute({ action: "keyboard_type", text: "hello world" }, ctx);
+    await tool.execute({ action: "press", key: "Enter" }, ctx);
+
+    expect(calls.slice(2)).toEqual([
+      { command: "agent-browser", args: ["--session", testAgentSession, "mouse", "move", "120", "240"] },
+      { command: "agent-browser", args: ["--session", testAgentSession, "mouse", "down", "left"] },
+      { command: "agent-browser", args: ["--session", testAgentSession, "mouse", "up", "left"] },
+      { command: "agent-browser", args: ["--session", testAgentSession, "keyboard", "type", "hello world"] },
+      { command: "agent-browser", args: ["--session", testAgentSession, "press", "Enter"] },
     ]);
   });
 
@@ -333,16 +524,17 @@ describe("Browser", () => {
 
     expect(timeouts).toEqual([
       { command: "integration.sh", action: "browser/session-create", timeoutMs: 30_000 },
-      { command: "agent-browser", action: "--cdp", timeoutMs: 60_000 },
-      { command: "agent-browser", action: "--cdp", timeoutMs: 60_000 },
-      { command: "agent-browser", action: "--cdp", timeoutMs: 60_000 },
-      { command: "agent-browser", action: "--cdp", timeoutMs: 120_000 },
+      { command: "agent-browser", action: "--session", timeoutMs: 30_000 },
+      { command: "agent-browser", action: "--session", timeoutMs: 60_000 },
+      { command: "agent-browser", action: "--session", timeoutMs: 60_000 },
+      { command: "agent-browser", action: "--session", timeoutMs: 60_000 },
+      { command: "agent-browser", action: "--session", timeoutMs: 120_000 },
     ]);
   });
 
   it("rejects screenshot paths that escape the workspace", async () => {
     const root = await makeRoot();
-    const runner: BrowserRunner = async (command) => {
+    const runner: BrowserRunner = async (command, args) => {
       if (command === "integration.sh") {
         return {
           exitCode: 0,
@@ -355,7 +547,10 @@ describe("Browser", () => {
           truncated: false,
         };
       }
-      throw new Error("agent-browser should not be called");
+      if (command === "agent-browser" && args.includes("connect")) {
+        return { exitCode: 0, signal: null, stdout: "connected", stderr: "", truncated: false };
+      }
+      throw new Error("agent-browser screenshot should not be called");
     };
     const tool = makeBrowserTool(root, { runner });
     const ctx = makeCtx(root);
@@ -398,6 +593,7 @@ describe("Browser", () => {
     expect(snapshot.errorCode).toBe("no_active_session");
     expect(calls).toEqual([
       { command: "integration.sh", args: ["browser/session-create"] },
+      connectCall(),
       { command: "integration.sh", args: ["browser/session-close?sessionId=sess-1"] },
     ]);
   });
@@ -436,10 +632,11 @@ describe("Browser", () => {
     expect(snapshot.status).toBe("ok");
     expect(calls).toEqual([
       { command: "integration.sh", args: ["browser/session-create"] },
+      connectCall(),
       { command: "integration.sh", args: ["browser/session-close?sessionId=sess-1"] },
       {
         command: "agent-browser",
-        args: ["--cdp", "ws://browser-worker:9222/devtools?token=t", "snapshot"],
+        args: ["--session", testAgentSession, "snapshot"],
       },
     ]);
   });
@@ -475,8 +672,10 @@ describe("Browser", () => {
     expect(replaced.output?.sessionId).toBe("sess-2");
     expect(calls).toEqual([
       { command: "integration.sh", args: ["browser/session-create"] },
+      connectCall("ws://browser-worker:9222/devtools?token=t1", "sess-1"),
       { command: "integration.sh", args: ["browser/session-close?sessionId=sess-1"] },
       { command: "integration.sh", args: ["browser/session-create"] },
+      connectCall("ws://browser-worker:9222/devtools?token=t2", "sess-2"),
     ]);
   });
 });

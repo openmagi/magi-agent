@@ -31,6 +31,7 @@ import type { SseWriter } from "../transport/SseWriter.js";
 export interface SlashCommandContext {
   session: Session;
   sse: SseWriter;
+  runtimeModelOverride?: string;
 }
 
 export interface SlashCommand {

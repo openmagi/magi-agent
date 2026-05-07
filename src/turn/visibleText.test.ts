@@ -4,6 +4,30 @@ import {
 } from "./visibleText.js";
 
 describe("visible text sanitizers", () => {
+  it("localizes common Korean route META values to English when the reply is English", () => {
+    const text = [
+      "[META: intent=실행, domain=문서작성, complexity=복잡, route=서브에이전트]",
+      "\nI will draft the memo from the source material.",
+    ].join("");
+
+    expect(normalizeUserVisibleRouteMetaTags(text)).toBe(
+      "[META: intent=execution, domain=document writing, complexity=complex, route=subagent]" +
+        "\nI will draft the memo from the source material.",
+    );
+  });
+
+  it("localizes common English route META values to Korean when the reply is Korean", () => {
+    const text = [
+      "[META: intent=execution, domain=document writing, complexity=complex, route=subagent]",
+      "\n자료를 확인한 뒤 메모 초안을 작성하겠습니다.",
+    ].join("");
+
+    expect(normalizeUserVisibleRouteMetaTags(text)).toBe(
+      "[META: intent=실행, domain=문서작성, complexity=복잡, route=서브에이전트]" +
+        "\n자료를 확인한 뒤 메모 초안을 작성하겠습니다.",
+    );
+  });
+
   it("keeps the first route META tag and removes repeated route metadata tags", () => {
     const text = [
       "[META: intent=실행, domain=문서작성, complexity=complex, route=subagent]",
@@ -14,7 +38,7 @@ describe("visible text sanitizers", () => {
     ].join("");
 
     expect(normalizeUserVisibleRouteMetaTags(text)).toBe(
-      "[META: intent=실행, domain=문서작성, complexity=complex, route=subagent]" +
+      "[META: intent=실행, domain=문서작성, complexity=복잡, route=서브에이전트]" +
         "지금 바로 시작합니다.백그라운드 에이전트 기다리느라 시간 낭비했습니다.",
     );
   });

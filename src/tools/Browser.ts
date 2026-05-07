@@ -5,6 +5,7 @@ import { isIP } from "node:net";
 import path from "node:path";
 import type { Tool, ToolContext, ToolResult } from "../Tool.js";
 import { withMagiBinPath } from "../util/shellPath.js";
+import { Utf8StreamCapture } from "../util/Utf8StreamCapture.js";
 
 type BrowserAction =
   | "create_session"
@@ -15,6 +16,9 @@ type BrowserAction =
   | "fill"
   | "scroll"
   | "screenshot"
+  | "mouse_click"
+  | "keyboard_type"
+  | "press"
   | "close_session";
 
 export interface BrowserInput {
@@ -24,6 +28,10 @@ export interface BrowserInput {
   text?: string;
   direction?: "up" | "down" | "left" | "right";
   path?: string;
+  x?: number;
+  y?: number;
+  button?: "left" | "right" | "middle";
+  key?: string;
   replaceExisting?: boolean;
   timeoutMs?: number;
 }
@@ -65,6 +73,7 @@ export type BrowserHostResolver = (hostname: string) => Promise<BrowserHostAddre
 interface BrowserSession {
   sessionId: string;
   cdpEndpoint: string;
+  agentBrowserSessionName: string;
   createdAt: number;
   lastUsedAt: number;
 }
@@ -88,12 +97,18 @@ const INPUT_SCHEMA = {
         "fill",
         "scroll",
         "screenshot",
+        "mouse_click",
+        "keyboard_type",
+        "press",
         "close_session",
       ],
       description: "Browser operation to perform.",
     },
     url: { type: "string", description: "Public HTTP(S) URL for action=open." },
-    selector: { type: "string", description: "Element selector or @ref for click/fill." },
+    selector: {
+      type: "string",
+      description: "Element selector or snapshot ref for click/fill. Prefer @e3; [ref=e3] is also accepted.",
+    },
     text: { type: "string", description: "Text for fill." },
     direction: {
       type: "string",
@@ -101,6 +116,14 @@ const INPUT_SCHEMA = {
       description: "Scroll direction.",
     },
     path: { type: "string", description: "Workspace-relative screenshot path." },
+    x: { type: "number", description: "Viewport X coordinate for mouse_click." },
+    y: { type: "number", description: "Viewport Y coordinate for mouse_click." },
+    button: {
+      type: "string",
+      enum: ["left", "right", "middle"],
+      description: "Mouse button for mouse_click. Defaults to left.",
+    },
+    key: { type: "string", description: "Key name for press, such as Enter, Tab, or Control+a." },
     replaceExisting: {
       type: "boolean",
       description: "When true, create_session replaces an existing active browser session.",
@@ -304,29 +327,18 @@ async function defaultRunner(
   cwd: string,
 ): Promise<BrowserRunResult> {
   return new Promise<BrowserRunResult>((resolve) => {
+    const env: NodeJS.ProcessEnv = { ...withMagiBinPath(process.env), PWD: cwd };
+    delete env.BROWSER_CDP_URL;
     const child = spawn(command, args, {
       cwd,
-      env: { ...withMagiBinPath(process.env), PWD: cwd },
+      env,
       stdio: ["ignore", "pipe", "pipe"],
     });
 
-    let stdout = "";
-    let stderr = "";
-    let truncated = false;
-    const capture = (chunk: Buffer, which: "stdout" | "stderr"): void => {
-      const current = which === "stdout" ? stdout : stderr;
-      if (current.length >= MAX_OUTPUT_BYTES) {
-        truncated = true;
-        return;
-      }
-      const room = MAX_OUTPUT_BYTES - current.length;
-      const piece = chunk.toString("utf8");
-      if (which === "stdout") stdout += piece.slice(0, room);
-      else stderr += piece.slice(0, room);
-      if (piece.length > room) truncated = true;
-    };
-    child.stdout.on("data", (chunk: Buffer) => capture(chunk, "stdout"));
-    child.stderr.on("data", (chunk: Buffer) => capture(chunk, "stderr"));
+    const stdout = new Utf8StreamCapture(MAX_OUTPUT_BYTES);
+    const stderr = new Utf8StreamCapture(MAX_OUTPUT_BYTES);
+    child.stdout.on("data", (chunk: Buffer) => stdout.write(chunk));
+    child.stderr.on("data", (chunk: Buffer) => stderr.write(chunk));
 
     const timeout = setTimeout(() => {
       child.kill("SIGTERM");
@@ -337,16 +349,22 @@ async function defaultRunner(
 
     child.on("close", (exitCode, signal) => {
       clearTimeout(timeout);
-      resolve({ exitCode, signal, stdout, stderr, truncated });
+      resolve({
+        exitCode,
+        signal,
+        stdout: stdout.end(),
+        stderr: stderr.end(),
+        truncated: stdout.truncated || stderr.truncated,
+      });
     });
     child.on("error", (err) => {
       clearTimeout(timeout);
       resolve({
         exitCode: 127,
         signal: null,
-        stdout,
+        stdout: stdout.end(),
         stderr: err instanceof Error ? err.message : String(err),
-        truncated,
+        truncated: stdout.truncated || stderr.truncated,
       });
     });
   });
@@ -381,6 +399,133 @@ function commandOutput(
   };
 }
 
+function agentBrowserSessionName(sessionId: string): string {
+  return `magi-browser-${sessionId.replace(/[^a-zA-Z0-9_.-]/g, "-")}`;
+}
+
+interface SnapshotSelector {
+  ref: string | null;
+  role: string | null;
+  label: string | null;
+}
+
+function parseSnapshotSelector(selector: string): SnapshotSelector {
+  const trimmed = selector.trim();
+  const refMatch = trimmed.match(/\[ref=([a-zA-Z0-9_.:-]+)\]$/);
+  const ref = refMatch?.[1] ?? null;
+  const withoutRef = refMatch ? trimmed.slice(0, refMatch.index).trim() : trimmed;
+  const roleLabelMatch = withoutRef.match(/^([a-zA-Z][\w-]*)(?:\s+"([^"]*)")?$/);
+  return {
+    ref,
+    role: roleLabelMatch?.[1] ?? null,
+    label: roleLabelMatch?.[2] ?? null,
+  };
+}
+
+function normalizeAgentBrowserSelector(selector: string): string {
+  const trimmed = selector.trim();
+  if (trimmed.startsWith("@")) return trimmed;
+
+  const parsed = parseSnapshotSelector(trimmed);
+  if (!parsed.ref) return trimmed;
+
+  const prefix = trimmed.slice(0, trimmed.lastIndexOf("[ref=")).trim();
+  const isSnapshotRoleLabel =
+    prefix.length === 0 || /^[a-zA-Z][\w-]*(?:\s+"[^"]*")?$/.test(prefix);
+  return isSnapshotRoleLabel ? `@${parsed.ref}` : trimmed;
+}
+
+function pushUniqueArgSet(target: string[][], args: string[]): void {
+  if (
+    !target.some((existing) =>
+      existing.length === args.length &&
+      existing.every((value, index) => value === args[index]),
+    )
+  ) {
+    target.push(args);
+  }
+}
+
+function buildSelectorFallbackArgs(
+  action: "click" | "fill",
+  selector: string,
+  text = "",
+): string[][] {
+  const parsed = parseSnapshotSelector(selector);
+  const label = parsed.label?.trim();
+  const role = parsed.role?.trim();
+  const fallbacks: string[][] = [];
+
+  if (action === "click") {
+    if (role) {
+      if (label) pushUniqueArgSet(fallbacks, ["find", "role", role, "click", label]);
+      else pushUniqueArgSet(fallbacks, ["find", "role", role, "click"]);
+    }
+    if (label) pushUniqueArgSet(fallbacks, ["find", "text", label, "click"]);
+    return fallbacks;
+  }
+
+  if (label) {
+    pushUniqueArgSet(fallbacks, ["find", "label", label, "fill", text]);
+    pushUniqueArgSet(fallbacks, ["find", "placeholder", label, "fill", text]);
+  }
+  if (role) pushUniqueArgSet(fallbacks, ["find", "role", role, "fill", text]);
+  return fallbacks;
+}
+
+async function runSelectorFallbacks(
+  action: "click" | "fill",
+  session: BrowserSession,
+  selector: string,
+  text: string,
+  runner: BrowserRunner,
+  ctx: ToolContext,
+  timeoutMs: number,
+  cwd: string,
+): Promise<BrowserRunResult | null> {
+  for (const fallbackArgs of buildSelectorFallbackArgs(action, selector, text)) {
+    const run = await runner(
+      "agent-browser",
+      ["--session", session.agentBrowserSessionName, ...fallbackArgs],
+      ctx,
+      timeoutMs,
+      cwd,
+    );
+    if (run.exitCode === 0) return run;
+  }
+  return null;
+}
+
+async function waitAndRetrySelectorAction(
+  action: "click" | "fill",
+  session: BrowserSession,
+  selector: string,
+  text: string,
+  runner: BrowserRunner,
+  ctx: ToolContext,
+  timeoutMs: number,
+  cwd: string,
+): Promise<BrowserRunResult | null> {
+  const waitRun = await runner(
+    "agent-browser",
+    ["--session", session.agentBrowserSessionName, "wait", selector],
+    ctx,
+    timeoutMs,
+    cwd,
+  );
+  if (waitRun.exitCode !== 0) return waitRun;
+
+  return runner(
+    "agent-browser",
+    action === "click"
+      ? ["--session", session.agentBrowserSessionName, "click", selector]
+      : ["--session", session.agentBrowserSessionName, "fill", selector, text],
+    ctx,
+    timeoutMs,
+    cwd,
+  );
+}
+
 async function closeBrowserSession(
   session: BrowserSession,
   runner: BrowserRunner,
@@ -410,6 +555,9 @@ export function validateBrowserInput(input: BrowserInput): string | null {
     "fill",
     "scroll",
     "screenshot",
+    "mouse_click",
+    "keyboard_type",
+    "press",
     "close_session",
   ].includes(input.action)) {
     return "`action` must be a supported browser operation";
@@ -425,6 +573,25 @@ export function validateBrowserInput(input: BrowserInput): string | null {
   if (input.action === "screenshot" && !stringValue(input.path)) {
     return "`path` is required for screenshot";
   }
+  if (input.action === "mouse_click") {
+    if (
+      typeof input.x !== "number" ||
+      !Number.isFinite(input.x) ||
+      typeof input.y !== "number" ||
+      !Number.isFinite(input.y)
+    ) {
+      return "`x` and `y` are required finite numbers for mouse_click";
+    }
+    if (input.button && !["left", "right", "middle"].includes(input.button)) {
+      return "`button` must be left, right, or middle for mouse_click";
+    }
+  }
+  if (input.action === "keyboard_type" && input.text === undefined) {
+    return "`text` is required for keyboard_type";
+  }
+  if (input.action === "press" && !stringValue(input.key)) {
+    return "`key` is required for press";
+  }
   return null;
 }
 
@@ -438,7 +605,7 @@ export function makeBrowserTool(
   return {
     name: "Browser",
     description:
-      "Use the centralized browser-worker through agent-browser for interactive or JS-rendered public websites. Create a session before open/snapshot/scrape/click/fill/scroll/screenshot, then close it when done.",
+      "Use the centralized browser-worker through agent-browser for interactive or JS-rendered public websites. Create a session before open/snapshot/scrape/click/fill/scroll/screenshot, then close it when done. Snapshot refs may be passed as @e3 or copied from [ref=e3].",
     inputSchema: INPUT_SCHEMA,
     permission: "net",
     dangerous: false,
@@ -499,9 +666,26 @@ export function makeBrowserTool(
         }
         const session: BrowserSession = {
           ...parsed,
+          agentBrowserSessionName: agentBrowserSessionName(parsed.sessionId),
           createdAt: Date.now(),
           lastUsedAt: Date.now(),
         };
+        const connectRun = await runner(
+          "agent-browser",
+          ["--session", session.agentBrowserSessionName, "connect", session.cdpEndpoint],
+          ctx,
+          DEFAULT_TIMEOUT_MS,
+          cwd,
+        );
+        if (connectRun.exitCode !== 0) {
+          await closeBrowserSession(session, runner, ctx, timeoutMs, cwd);
+          return errorResult(
+            "session_connect_failed",
+            connectRun.stderr || connectRun.stdout || "browser CDP connect failed",
+            start,
+            commandOutput("create_session", session, connectRun),
+          );
+        }
         sessions.set(ctx.sessionKey, session);
         return okResult({
           action: "create_session",
@@ -544,7 +728,7 @@ export function makeBrowserTool(
         }
         const run = await runner(
           "agent-browser",
-          ["--cdp", session.cdpEndpoint, "open", url],
+          ["--session", session.agentBrowserSessionName, "open", url],
           ctx,
           timeoutMs,
           cwd,
@@ -557,9 +741,13 @@ export function makeBrowserTool(
       }
 
       if (input.action === "snapshot" || input.action === "scrape") {
+        const args =
+          input.action === "scrape"
+            ? ["--session", session.agentBrowserSessionName, "get", "html"]
+            : ["--session", session.agentBrowserSessionName, "snapshot"];
         const run = await runner(
           "agent-browser",
-          ["--cdp", session.cdpEndpoint, input.action],
+          args,
           ctx,
           timeoutMs,
           cwd,
@@ -572,43 +760,69 @@ export function makeBrowserTool(
       }
 
       if (input.action === "click") {
-        const selector = stringValue(input.selector) ?? "";
+        const rawSelector = stringValue(input.selector) ?? "";
+        const selector = normalizeAgentBrowserSelector(rawSelector);
         const run = await runner(
           "agent-browser",
-          ["--cdp", session.cdpEndpoint, "click", selector],
+          ["--session", session.agentBrowserSessionName, "click", selector],
           ctx,
           timeoutMs,
           cwd,
         );
         session.lastUsedAt = Date.now();
-        const output = commandOutput("click", session, run);
-        return run.exitCode === 0
+        const retryRun = run.exitCode === 0
+          ? null
+          : await waitAndRetrySelectorAction("click", session, selector, "", runner, ctx, timeoutMs, cwd);
+        const fallbackRun = retryRun?.exitCode === 0 || run.exitCode === 0
+          ? null
+          : await runSelectorFallbacks("click", session, rawSelector, "", runner, ctx, timeoutMs, cwd);
+        const finalRun = fallbackRun ?? retryRun ?? run;
+        const output = commandOutput("click", session, finalRun);
+        return finalRun.exitCode === 0
           ? okResult(output, start)
-          : errorResult("command_failed", run.stderr || run.stdout || "browser click failed", start, output);
+          : errorResult(
+              "command_failed",
+              finalRun.stderr || finalRun.stdout || "browser click failed",
+              start,
+              output,
+            );
       }
 
       if (input.action === "fill") {
-        const selector = stringValue(input.selector) ?? "";
+        const rawSelector = stringValue(input.selector) ?? "";
+        const selector = normalizeAgentBrowserSelector(rawSelector);
         const text = input.text ?? "";
         const run = await runner(
           "agent-browser",
-          ["--cdp", session.cdpEndpoint, "fill", selector, text],
+          ["--session", session.agentBrowserSessionName, "fill", selector, text],
           ctx,
           timeoutMs,
           cwd,
         );
         session.lastUsedAt = Date.now();
-        const output = commandOutput("fill", session, run);
-        return run.exitCode === 0
+        const retryRun = run.exitCode === 0
+          ? null
+          : await waitAndRetrySelectorAction("fill", session, selector, text, runner, ctx, timeoutMs, cwd);
+        const fallbackRun = retryRun?.exitCode === 0 || run.exitCode === 0
+          ? null
+          : await runSelectorFallbacks("fill", session, rawSelector, text, runner, ctx, timeoutMs, cwd);
+        const finalRun = fallbackRun ?? retryRun ?? run;
+        const output = commandOutput("fill", session, finalRun);
+        return finalRun.exitCode === 0
           ? okResult(output, start)
-          : errorResult("command_failed", run.stderr || run.stdout || "browser fill failed", start, output);
+          : errorResult(
+              "command_failed",
+              finalRun.stderr || finalRun.stdout || "browser fill failed",
+              start,
+              output,
+            );
       }
 
       if (input.action === "scroll") {
         const direction = input.direction ?? "down";
         const run = await runner(
           "agent-browser",
-          ["--cdp", session.cdpEndpoint, "scroll", direction],
+          ["--session", session.agentBrowserSessionName, "scroll", direction],
           ctx,
           timeoutMs,
           cwd,
@@ -630,7 +844,7 @@ export function makeBrowserTool(
         await fs.mkdir(path.dirname(screenshotPath), { recursive: true });
         const run = await runner(
           "agent-browser",
-          ["--cdp", session.cdpEndpoint, "screenshot", screenshotPath],
+          ["--session", session.agentBrowserSessionName, "screenshot", screenshotPath],
           ctx,
           timeoutMs,
           cwd,
@@ -640,6 +854,86 @@ export function makeBrowserTool(
         return run.exitCode === 0
           ? okResult(output, start)
           : errorResult("command_failed", run.stderr || run.stdout || "browser screenshot failed", start, output);
+      }
+
+      if (input.action === "mouse_click") {
+        const button = input.button ?? "left";
+        const x = String(Math.trunc(input.x ?? 0));
+        const y = String(Math.trunc(input.y ?? 0));
+        const steps: string[][] = [
+          ["mouse", "move", x, y],
+          ["mouse", "down", button],
+          ["mouse", "up", button],
+        ];
+        let lastRun: BrowserRunResult | null = null;
+        for (const step of steps) {
+          lastRun = await runner(
+            "agent-browser",
+            ["--session", session.agentBrowserSessionName, ...step],
+            ctx,
+            timeoutMs,
+            cwd,
+          );
+          if (lastRun.exitCode !== 0) break;
+        }
+        session.lastUsedAt = Date.now();
+        const finalRun = lastRun ?? {
+          exitCode: 1,
+          signal: null,
+          stdout: "",
+          stderr: "browser mouse click failed",
+          truncated: false,
+        };
+        const output = commandOutput("mouse_click", session, finalRun);
+        return finalRun.exitCode === 0
+          ? okResult(output, start)
+          : errorResult(
+              "command_failed",
+              finalRun.stderr || finalRun.stdout || "browser mouse click failed",
+              start,
+              output,
+            );
+      }
+
+      if (input.action === "keyboard_type") {
+        const run = await runner(
+          "agent-browser",
+          ["--session", session.agentBrowserSessionName, "keyboard", "type", input.text ?? ""],
+          ctx,
+          timeoutMs,
+          cwd,
+        );
+        session.lastUsedAt = Date.now();
+        const output = commandOutput("keyboard_type", session, run);
+        return run.exitCode === 0
+          ? okResult(output, start)
+          : errorResult(
+              "command_failed",
+              run.stderr || run.stdout || "browser keyboard type failed",
+              start,
+              output,
+            );
+      }
+
+      if (input.action === "press") {
+        const key = stringValue(input.key) ?? "";
+        const run = await runner(
+          "agent-browser",
+          ["--session", session.agentBrowserSessionName, "press", key],
+          ctx,
+          timeoutMs,
+          cwd,
+        );
+        session.lastUsedAt = Date.now();
+        const output = commandOutput("press", session, run);
+        return run.exitCode === 0
+          ? okResult(output, start)
+          : errorResult(
+              "command_failed",
+              run.stderr || run.stdout || "browser key press failed",
+              start,
+              output,
+            );
       }
 
       return errorResult("unsupported_action", `browser action not implemented: ${input.action}`, start, {

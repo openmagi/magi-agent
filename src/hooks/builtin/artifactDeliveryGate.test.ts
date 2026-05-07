@@ -144,7 +144,12 @@ function successfulDocumentWrite(filename = "report.md"): TranscriptEntry[] {
 }
 
 function successfulFileDeliver(
-  deliveries: Array<{ target: "chat" | "kb"; marker?: string; externalId?: string }>,
+  deliveries: Array<{
+    target: "chat" | "kb";
+    marker?: string;
+    externalId?: string;
+    providerMessageId?: string;
+  }>,
 ): TranscriptEntry[] {
   return [
     {
@@ -197,6 +202,7 @@ function successfulFileSend(): TranscriptEntry[] {
         filename: "report.md",
         channel: { type: "telegram", channelId: "1234" },
         mode: "document",
+        providerMessageId: "100",
       }),
     },
   ];
@@ -453,11 +459,11 @@ describe("artifactDeliveryGate hook", () => {
     expect(result).toEqual({ action: "continue" });
   });
 
-  it("continues when native FileDeliver sent directly to Telegram without a marker", async () => {
+  it("continues when native FileDeliver sent directly to Telegram with provider receipt", async () => {
     const transcript: TranscriptEntry[] = [
       ...successfulDocumentWrite("report.md"),
       ...successfulFileDeliver([
-        { target: "chat", externalId: "telegram:1234" },
+        { target: "chat", externalId: "telegram:1234:100", providerMessageId: "100" },
       ]),
     ];
     const hook = makeArtifactDeliveryGateHook();
@@ -626,7 +632,7 @@ describe("artifactDeliveryGate hook", () => {
     }
   });
 
-  it("fails open after one retry to avoid infinite loops", async () => {
+  it("continues to block retry final answers that still claim delivery without evidence", async () => {
     const hook = makeArtifactDeliveryGateHook();
     const result = await hook.handler(
       args("파일을 생성했습니다.", "파일 첨부해줘", 1),
@@ -636,6 +642,9 @@ describe("artifactDeliveryGate hook", () => {
         claimsFileCreated: true,
       }),
     );
-    expect(result).toEqual({ action: "continue" });
+    expect(result?.action).toBe("block");
+    if (result?.action === "block") {
+      expect(result.reason).toContain("provider message receipt");
+    }
   });
 });

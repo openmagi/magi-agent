@@ -12,6 +12,7 @@ import type { Tool, ToolContext, ToolResult } from "../Tool.js";
 import { execFile } from "child_process";
 import { stat } from "fs/promises";
 import path from "node:path";
+import type { ChannelDeliveryReceipt } from "../channels/ChannelAdapter.js";
 import type { ChannelRef } from "../util/types.js";
 
 export interface FileSendInput {
@@ -27,6 +28,7 @@ export interface FileSendOutput {
   marker?: string;
   channel?: ChannelRef;
   mode?: "document" | "photo";
+  providerMessageId?: string;
 }
 
 export interface FileSendDeps {
@@ -41,7 +43,7 @@ export interface FileSendDeps {
     filePath: string,
     caption: string | undefined,
     mode: "document" | "photo",
-  ) => Promise<void>;
+  ) => Promise<ChannelDeliveryReceipt>;
 }
 
 function execScript(
@@ -143,13 +145,14 @@ export function makeFileSendTool(deps: FileSendDeps): Tool<FileSendInput, FileSe
         ) {
           const filename = path.basename(resolved);
           const mode = input.mode ?? "document";
-          await deps.sendFile(sourceChannel, resolved, input.caption, mode);
+          const receipt = await deps.sendFile(sourceChannel, resolved, input.caption, mode);
           return {
             status: "ok",
             output: {
               filename,
               channel: sourceChannel,
               mode,
+              ...(receipt.messageId ? { providerMessageId: receipt.messageId } : {}),
             },
             durationMs: Date.now() - start,
           };

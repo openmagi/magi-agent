@@ -68,6 +68,48 @@ describe("PolicyKernel", () => {
     ]);
   });
 
+  it("treats legacy generated fixed-language identity text as latest-user-language policy", async () => {
+    const root = await makeWorkspaceRoot();
+    await fs.writeFile(
+      path.join(root, "IDENTITY.md"),
+      [
+        "# Identity",
+        "",
+        "## Language",
+        "You MUST respond in Korean (한국어) at all times, regardless of what language the user writes in.",
+        "",
+      ].join("\n"),
+      "utf8",
+    );
+    const kernel = new PolicyKernel(new Workspace(root));
+
+    const snapshot = await kernel.current();
+
+    expect(snapshot.policy.responseMode.language).toBe("auto");
+    expect(snapshot.status.userDirectives).toContain("response.language=auto");
+  });
+
+  it("promotes generated auto-detect identity text into response policy", async () => {
+    const root = await makeWorkspaceRoot();
+    await fs.writeFile(
+      path.join(root, "IDENTITY.md"),
+      [
+        "# Identity",
+        "",
+        "## Language",
+        "Always reply in the same language the user writes in. If the user writes in Korean, reply in Korean. If in English, reply in English. Match the user's language exactly.",
+        "",
+      ].join("\n"),
+      "utf8",
+    );
+    const kernel = new PolicyKernel(new Workspace(root));
+
+    const snapshot = await kernel.current();
+
+    expect(snapshot.policy.responseMode.language).toBe("auto");
+    expect(snapshot.status.userDirectives).toContain("response.language=auto");
+  });
+
   it("compiles recognized operational user rules into typed harness rules", async () => {
     const root = await makeWorkspaceRoot(
       [

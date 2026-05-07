@@ -21,6 +21,7 @@ import path from "node:path";
 import { atomicWriteJson } from "../storage/atomicWrite.js";
 import type {
   ChannelAdapter,
+  ChannelDeliveryReceipt,
   InboundAttachment,
   InboundHandler,
   InboundMessage,
@@ -129,6 +130,10 @@ interface TelegramResponse<T> {
   result?: T;
   description?: string;
   error_code?: number;
+}
+
+interface TelegramSentMessage {
+  message_id?: number;
 }
 
 interface OffsetFile {
@@ -468,16 +473,16 @@ export class TelegramPoller implements ChannelAdapter {
     chatId: string,
     filePath: string,
     caption?: string,
-  ): Promise<void> {
-    await this.sendFile("sendDocument", "document", chatId, filePath, caption);
+  ): Promise<ChannelDeliveryReceipt> {
+    return this.sendFile("sendDocument", "document", chatId, filePath, caption);
   }
 
   async sendPhoto(
     chatId: string,
     filePath: string,
     caption?: string,
-  ): Promise<void> {
-    await this.sendFile("sendPhoto", "photo", chatId, filePath, caption);
+  ): Promise<ChannelDeliveryReceipt> {
+    return this.sendFile("sendPhoto", "photo", chatId, filePath, caption);
   }
 
   private async sendFile(
@@ -486,7 +491,7 @@ export class TelegramPoller implements ChannelAdapter {
     chatId: string,
     filePath: string,
     caption: string | undefined,
-  ): Promise<void> {
+  ): Promise<ChannelDeliveryReceipt> {
     const data = await fs.readFile(filePath);
     const form = new FormData();
     form.set("chat_id", chatId);
@@ -499,12 +504,19 @@ export class TelegramPoller implements ChannelAdapter {
       method: "POST",
       body: form,
     });
-    const json = (await resp.json().catch(() => ({}))) as TelegramResponse<unknown>;
+    const json = (await resp.json().catch(() => ({}))) as TelegramResponse<TelegramSentMessage>;
     if (!resp.ok || !json.ok) {
       throw new Error(
         `telegram ${endpoint} failed: ${json.description ?? `HTTP ${resp.status}`}`,
       );
     }
+    return {
+      provider: "telegram",
+      channelId: chatId,
+      ...(typeof json.result?.message_id === "number"
+        ? { messageId: String(json.result.message_id) }
+        : {}),
+    };
   }
 }
 

@@ -227,14 +227,14 @@ describe("CommitPipeline.commit", () => {
     const result = await commit(ctx);
 
     expect(result.finalText).toBe(
-      "[META: intent=대화, domain=일상, complexity=simple, route=direct]\n\n안녕하세요!",
+      "[META: intent=대화, domain=일상, complexity=단순, route=직접]\n\n안녕하세요!",
     );
     const entries = await transcript.readAll();
     const assistantText = entries.find((e) => e.kind === "assistant_text") as
       | { text?: string }
       | undefined;
     expect(assistantText?.text).toBe(
-      "[META: intent=대화, domain=일상, complexity=simple, route=direct]\n\n안녕하세요!",
+      "[META: intent=대화, domain=일상, complexity=단순, route=직접]\n\n안녕하세요!",
     );
   });
 
@@ -251,14 +251,14 @@ describe("CommitPipeline.commit", () => {
     const result = await commit(ctx);
 
     expect(result.finalText).toBe(
-      "시작합니다.[META: intent=실행, domain=문서작성, complexity=complex, route=subagent]직접 진행합니다.",
+      "시작합니다.[META: intent=실행, domain=문서작성, complexity=복잡, route=서브에이전트]직접 진행합니다.",
     );
     const entries = await transcript.readAll();
     const assistantText = entries.find((e) => e.kind === "assistant_text") as
       | { text?: string }
       | undefined;
     expect(assistantText?.text).toBe(
-      "시작합니다.[META: intent=실행, domain=문서작성, complexity=complex, route=subagent]직접 진행합니다.",
+      "시작합니다.[META: intent=실행, domain=문서작성, complexity=복잡, route=서브에이전트]직접 진행합니다.",
     );
   });
 

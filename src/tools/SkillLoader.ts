@@ -44,6 +44,7 @@ import { parse as parseYaml } from "yaml";
 import type { Tool, ToolContext, ToolResult, PermissionClass } from "../Tool.js";
 import { errorResult } from "../util/toolResult.js";
 import { withMagiBinPath } from "../util/shellPath.js";
+import { Utf8StreamCapture } from "../util/Utf8StreamCapture.js";
 import {
   normalizeClaudeSkillHooks,
   normalizeSkillRuntimeHooks,
@@ -217,21 +218,11 @@ function makeScriptSkillTool(opts: {
             stdio: ["pipe", "pipe", "pipe"],
           });
 
-          let stdout = "";
-          let stderr = "";
           const MAX_OUT = 512 * 1024;
-          let truncated = false;
-          child.stdout.on("data", (c: Buffer) => {
-            if (stdout.length >= MAX_OUT) {
-              truncated = true;
-              return;
-            }
-            stdout += c.toString("utf8").slice(0, MAX_OUT - stdout.length);
-          });
-          child.stderr.on("data", (c: Buffer) => {
-            if (stderr.length >= MAX_OUT) return;
-            stderr += c.toString("utf8").slice(0, MAX_OUT - stderr.length);
-          });
+          const stdout = new Utf8StreamCapture(MAX_OUT);
+          const stderr = new Utf8StreamCapture(MAX_OUT);
+          child.stdout.on("data", (c: Buffer) => stdout.write(c));
+          child.stderr.on("data", (c: Buffer) => stderr.write(c));
           child.stdin.on("error", () => {
             /* ignore EPIPE if script closes stdin early */
           });
@@ -248,15 +239,20 @@ function makeScriptSkillTool(opts: {
           child.on("close", (code) => {
             clearTimeout(timer);
             const ok = code === 0;
+            const stdoutText = stdout.end();
+            const stderrText = stderr.end();
             resolve({
               status: ok ? "ok" : "error",
-              output: ok ? parseToolOutput(stdout) : undefined,
+              output: ok ? parseToolOutput(stdoutText) : undefined,
               errorCode: ok ? undefined : `exit_${code}`,
               errorMessage: ok
                 ? undefined
-                : (stderr || stdout).slice(0, 500) || `exit ${code}`,
+                : (stderrText || stdoutText).slice(0, 500) || `exit ${code}`,
               durationMs: Date.now() - start,
-              metadata: { truncated, stderr: stderr.slice(0, 1024) },
+              metadata: {
+                truncated: stdout.truncated || stderr.truncated,
+                stderr: stderrText.slice(0, 1024),
+              },
             });
           });
           child.on("error", (err) => {

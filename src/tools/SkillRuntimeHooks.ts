@@ -5,6 +5,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { spawn } from "node:child_process";
 import { withMagiBinPath } from "../util/shellPath.js";
+import { Utf8StreamCapture } from "../util/Utf8StreamCapture.js";
 
 const SUPPORTED_POINTS = new Set<HookPoint>([
   "beforeToolUse",
@@ -341,17 +342,11 @@ async function runCommandHook(
       },
       stdio: ["ignore", "pipe", "pipe"],
     });
-    let stdout = "";
-    let stderr = "";
     const maxOut = 64 * 1024;
-    child.stdout.on("data", (chunk: Buffer) => {
-      if (stdout.length >= maxOut) return;
-      stdout += chunk.toString("utf8").slice(0, maxOut - stdout.length);
-    });
-    child.stderr.on("data", (chunk: Buffer) => {
-      if (stderr.length >= maxOut) return;
-      stderr += chunk.toString("utf8").slice(0, maxOut - stderr.length);
-    });
+    const stdout = new Utf8StreamCapture(maxOut);
+    const stderr = new Utf8StreamCapture(maxOut);
+    child.stdout.on("data", (chunk: Buffer) => stdout.write(chunk));
+    child.stderr.on("data", (chunk: Buffer) => stderr.write(chunk));
     const timer = setTimeout(() => {
       child.kill("SIGTERM");
       finish({
@@ -374,12 +369,12 @@ async function runCommandHook(
       clearTimeout(timer);
       if (settled) return;
       if (code === 0) {
-        finish(parseCommandHookOutput(stdout));
+        finish(parseCommandHookOutput(stdout.end()));
         return;
       }
       const reason =
         command.statusMessage ??
-        (stderr.trim() || stdout.trim() || `command exited ${String(code)}`);
+        (stderr.end().trim() || stdout.end().trim() || `command exited ${String(code)}`);
       finish({
         action: "block",
         reason: `[SKILL_RUNTIME_HOOK:${declaration.skillName}] ${reason}`,

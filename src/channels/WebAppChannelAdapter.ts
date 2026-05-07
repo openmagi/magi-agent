@@ -26,6 +26,7 @@
 
 import crypto from "node:crypto";
 import type {
+  ChannelDeliveryReceipt,
   InboundHandler,
   OutboundMessage,
 } from "./ChannelAdapter.js";
@@ -156,7 +157,7 @@ export class WebAppChannelAdapter {
     _chatId: string,
     _filePath: string,
     _caption?: string,
-  ): Promise<void> {
+  ): Promise<ChannelDeliveryReceipt> {
     // File delivery to web/app goes through the knowledge / artifact
     // path (user downloads via signed URL from the chat UI). For
     // Phase 1 push, file delivery is explicitly out of scope — throw
@@ -170,7 +171,7 @@ export class WebAppChannelAdapter {
     _chatId: string,
     _filePath: string,
     _caption?: string,
-  ): Promise<void> {
+  ): Promise<ChannelDeliveryReceipt> {
     throw new Error(
       "WebAppChannelAdapter.sendPhoto: not supported — send an image URL in send() instead",
     );

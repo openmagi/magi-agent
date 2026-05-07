@@ -922,6 +922,7 @@ export class Session {
           await slashMatch.command.handler(slashMatch.args, {
             session: this,
             sse,
+            ...(options.runtimeModelOverride ? { runtimeModelOverride: options.runtimeModelOverride } : {}),
           });
           sse.agent({
             type: "turn_end",

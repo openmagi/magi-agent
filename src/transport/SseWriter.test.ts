@@ -46,7 +46,7 @@ describe("SseWriter", () => {
       )
       .map((event) => event.delta)
       .join("");
-    expect(text).toBe("[META: intent=대화, domain=일상, route=direct]\n\n안녕하세요!");
+    expect(text).toBe("[META: intent=대화, domain=일상, route=직접]\n\n안녕하세요!");
     expect(text.match(/\[META:/g)).toHaveLength(1);
   });
 
@@ -84,7 +84,7 @@ describe("SseWriter", () => {
       .map((event) => event.delta)
       .join("");
     expect(text).toBe(
-      "좋아. [META: intent=실행, domain=문서작성, complexity=complex, route=subagent]바로 시작합니다.",
+      "좋아. [META: intent=실행, domain=문서작성, complexity=복잡, route=서브에이전트]바로 시작합니다.",
     );
     expect(text.match(/\[META:/g)).toHaveLength(1);
   });

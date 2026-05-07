@@ -192,7 +192,15 @@ describe("Builtin slash commands", () => {
     expect(out).toContain("Skills loaded:");
     expect(out).toContain("Active crons:");
     expect(out).toContain("Discipline:");
-    expect(out).toContain("Model: claude-haiku");
+    expect(out).not.toContain("Model: claude-haiku");
+
+    const overrideCapture = new CaptureSseWriter();
+    await session.runTurn(
+      { text: "/status", receivedAt: Date.now() },
+      overrideCapture,
+      { runtimeModelOverride: "claude-sonnet-4-5" },
+    );
+    expect(overrideCapture.finalText()).toContain("Model: claude-sonnet-4-5");
   });
 
   it("unknown /foo falls through to the normal Turn path", async () => {

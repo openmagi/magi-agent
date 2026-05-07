@@ -17,8 +17,6 @@ import {
   getOrClassifyRequestMeta,
 } from "./turnMetaClassifier.js";
 
-const MAX_RETRIES = 1;
-
 const ATTACHMENT_MARKER_RE = /\[attachment:[0-9a-f-]{36}:[^\]\r\n]+\]/i;
 
 const USER_FACING_EXTENSIONS = new Set([
@@ -89,6 +87,7 @@ interface NativeFileDelivery {
   status?: string;
   marker?: string;
   externalId?: string;
+  providerMessageId?: string;
 }
 
 export interface CreatedArtifact {
@@ -245,6 +244,33 @@ function artifactFromOutputTool(
   };
 }
 
+function artifactsFromSpawnAgentTool(
+  result: Extract<TranscriptEntry, { kind: "tool_result" }>,
+): CreatedArtifact[] {
+  const output = parseOutputObject(result.output);
+  const artifacts = objectRecord(output?.artifacts);
+  const handedOff = artifacts?.handedOffArtifacts;
+  if (!Array.isArray(handedOff)) return [];
+
+  const out: CreatedArtifact[] = [];
+  for (const raw of handedOff) {
+    const item = objectRecord(raw);
+    if (!item) continue;
+    const artifactId = stringField(item, "artifactId");
+    const slug = stringField(item, "slug");
+    const title = stringField(item, "title");
+    const name = title ?? (slug ? basenameForPath(slug) : artifactId ?? "artifact");
+    out.push({
+      kind: "artifact",
+      name,
+      ...(slug ? { path: slug } : {}),
+      ...(artifactId ? { artifactId } : {}),
+      toolName: "SpawnAgent",
+    });
+  }
+  return out;
+}
+
 export function collectCreatedArtifacts(
   transcript: ReadonlyArray<TranscriptEntry>,
   turnId: string,
@@ -274,6 +300,11 @@ export function collectCreatedArtifacts(
     if (entry.name === "DocumentWrite" || entry.name === "SpreadsheetWrite") {
       const artifact = artifactFromOutputTool(entry, result);
       if (artifact) artifacts.push(artifact);
+      continue;
+    }
+
+    if (entry.name === "SpawnAgent") {
+      artifacts.push(...artifactsFromSpawnAgentTool(result));
     }
   }
 
@@ -337,6 +368,7 @@ function nativeFileDeliveries(
         status: stringField(delivery, "status") ?? undefined,
         marker: stringField(delivery, "marker") ?? undefined,
         externalId: stringField(delivery, "externalId") ?? undefined,
+        providerMessageId: stringField(delivery, "providerMessageId") ?? undefined,
       });
     }
   }
@@ -368,6 +400,7 @@ function nativeFileSendDeliveries(
       status: "sent",
       marker,
       externalId: channelType && channelId ? `${channelType}:${channelId}` : stringField(output, "id") ?? undefined,
+      providerMessageId: stringField(output, "providerMessageId") ?? undefined,
     });
   }
 
@@ -420,7 +453,11 @@ function hasDirectChannelChatDelivery(
     (delivery) =>
       !delivery.marker &&
       !!delivery.externalId &&
-      /^(?:telegram|discord):/.test(delivery.externalId),
+      /^(?:telegram|discord):/.test(delivery.externalId) &&
+      (
+        !!delivery.providerMessageId ||
+        /^(?:telegram|discord):[^:]+:[^:]+/.test(delivery.externalId)
+      ),
   );
 }
 
@@ -476,7 +513,7 @@ export function hasArtifactDeliveryEvidence(
   turnId: string,
 ): boolean {
   if (ATTACHMENT_MARKER_RE.test(assistantText)) return true;
-  return hasKbWriteEvidence(transcript, turnId);
+  return hasDirectChannelChatDelivery(transcript, turnId) || hasKbWriteEvidence(transcript, turnId);
 }
 
 function hasRequiredDeliveryEvidence(
@@ -514,7 +551,7 @@ function describeMissingEvidence(
     missing.push(
       missingMarkers.length > 0
         ? `returned FileDeliver marker in final answer: ${missingMarkers[0]}`
-        : "chat attachment marker from file-send.sh/FileSend/FileDeliver, or direct Telegram/Discord delivery evidence",
+        : "chat attachment marker from file-send.sh/FileSend/FileDeliver, or direct Telegram/Discord provider message receipt",
     );
   }
   if (intent.wantsKb && !hasKbWrite) {
@@ -581,6 +618,7 @@ export function makeArtifactDeliveryGateHook(
     point: "beforeCommit",
     priority: 89,
     blocking: true,
+    failOpen: true,
     timeoutMs: 8_000,
     handler: async ({ assistantText, userMessage, retryCount }, ctx: HookContext) => {
       try {
@@ -601,6 +639,29 @@ export function makeArtifactDeliveryGateHook(
             requestMeta.fileDelivery.wantsChatDelivery ||
             requestMeta.fileDelivery.wantsKbDelivery,
         };
+        if (
+          finalMeta.assistantReportsDeliveryUnverified &&
+          !finalMeta.assistantReportsDeliveryFailure &&
+          (intent.wantsAttachment ||
+            finalMeta.assistantClaimsChatDelivery ||
+            sentChatFileDeliveries(transcript, ctx.turnId).length > 0)
+        ) {
+          ctx.emit({
+            type: "rule_check",
+            ruleId: "artifact-delivery-gate",
+            verdict: "violation",
+            detail: "final answer leaves chat attachment delivery unverified",
+          });
+          return {
+            action: "block",
+            reason: [
+              "[RETRY:ARTIFACT_DELIVERY] Do not close the turn by asking the user to verify receipt of a file attachment.",
+              "A final answer must either include the returned web/app attachment marker, cite the Telegram/Discord provider message receipt, or plainly report delivery failure without claiming success.",
+              "",
+              "Retry the final answer with the concrete delivery evidence you have. If no user-visible delivery evidence exists, remove the delivery success claim and state the actual limitation.",
+            ].join("\n"),
+          };
+        }
         const unsupportedNativeClaims = nativeToolCompletionClaimsWithoutEvidence(
           assistantText,
           transcript,
@@ -664,8 +725,16 @@ export function makeArtifactDeliveryGateHook(
             reason: [
               "[RETRY:ARTIFACT_DELIVERY] The final answer claims a file/result was sent in chat,",
               "but the current turn has no successful chat delivery evidence.",
+              ...(artifacts.length > 0
+                ? [
+                    "",
+                    "Created deliverables:",
+                    formatArtifacts(artifacts),
+                  ]
+                : []),
               "",
-              "Before finalising, call `FileSend` or `FileDeliver(target=\"chat\")`. For web/app, include the returned attachment marker. For Telegram/Discord direct delivery, a successful native sendDocument/sendPhoto result is enough.",
+              "Before finalising, call `FileSend` or `FileDeliver(target=\"chat\")`. For web/app, include the returned attachment marker.",
+              "For Telegram/Discord direct delivery, the successful result must include a provider message receipt; a synthetic channel id alone is not enough.",
               "If delivery is not possible, remove the delivery success claim and explicitly say it was not delivered.",
             ].join("\n"),
           };
@@ -681,13 +750,6 @@ export function makeArtifactDeliveryGateHook(
             ruleId: "artifact-delivery-gate",
             verdict: "ok",
             detail: "generated artifact has delivery evidence",
-          });
-          return { action: "continue" };
-        }
-
-        if (retryCount >= MAX_RETRIES) {
-          ctx.log("warn", "[artifact-delivery-gate] retry exhausted; failing open", {
-            retryCount,
           });
           return { action: "continue" };
         }
@@ -717,6 +779,7 @@ export function makeArtifactDeliveryGateHook(
             "",
             "Before finalising:",
             "1) For web/app chat delivery, call `FileDeliver(target=\"chat\")` or run `file-send.sh <path> <channel>`, then include the exact returned `[attachment:<id>:<filename>]` marker in the reply.",
+            "   For Telegram/Discord direct delivery, use the provider message receipt returned by native delivery evidence; a synthetic channel id alone is not enough.",
             "2) If the user asked for KB persistence, call `FileDeliver(target=\"kb\")`, run `kb-write.sh --add <collection> <filename> --stdin`, or use the knowledge-write integration before claiming it is saved.",
             "3) If delivery is temporarily unavailable after retrying, state that explicitly and provide the best available path/reference without claiming attachment or KB save.",
           ].join("\n"),

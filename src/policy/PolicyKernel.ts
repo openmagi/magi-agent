@@ -9,7 +9,7 @@ import type {
   RuntimePolicy,
   RuntimePolicySnapshot,
   RuntimePolicyStatus,
-  SupportedLanguage,
+  ResponseLanguagePolicy,
 } from "./policyTypes.js";
 
 const DEFAULT_POLICY: RuntimePolicy = {
@@ -63,43 +63,65 @@ function cleanRuleLine(line: string): string {
     .trim();
 }
 
-function isLanguageDirective(text: string): SupportedLanguage | null {
+function isLanguageDirective(text: string): ResponseLanguagePolicy | null {
   if (
-    /(?:always|reply|answer).*(?:korean)|(?:항상|한국어).*(?:답|응답)|한국어로\s*(?:답변|응답)/i.test(
+    /(?:same\s+language|match(?:\s+the)?\s+user(?:'s)?\s+language|auto.?detect|자동\s*감지|사용자(?:가)?\s*(?:쓴|사용한)?\s*언어|같은\s*언어)/i.test(
+      text,
+    )
+  ) {
+    return "auto";
+  }
+  if (
+    /(?:always|reply|answer|respond).*(?:korean)|(?:항상|한국어).*(?:답|응답)|한국어로\s*(?:답변|응답)/i.test(
       text,
     )
   ) {
     return "ko";
   }
   if (
-    /(?:always|reply|answer).*(?:english)|(?:항상|영어).*(?:답|응답)|영어로\s*(?:답변|응답)/i.test(
+    /(?:always|reply|answer|respond).*(?:english)|(?:항상|영어).*(?:답|응답)|영어로\s*(?:답변|응답)/i.test(
       text,
     )
   ) {
     return "en";
   }
   if (
-    /(?:always|reply|answer).*(?:japanese)|(?:항상|일본어).*(?:답|응답)|일본어로\s*(?:답변|응답)/i.test(
+    /(?:always|reply|answer|respond).*(?:japanese)|(?:항상|일본어).*(?:답|응답)|일본어로\s*(?:답변|응답)/i.test(
       text,
     )
   ) {
     return "ja";
   }
   if (
-    /(?:always|reply|answer).*(?:chinese)|(?:항상|중국어).*(?:답|응답)|중국어로\s*(?:답변|응답)/i.test(
+    /(?:always|reply|answer|respond).*(?:chinese)|(?:항상|중국어).*(?:답|응답)|중국어로\s*(?:답변|응답)/i.test(
       text,
     )
   ) {
     return "zh";
   }
   if (
-    /(?:always|reply|answer).*(?:spanish)|(?:항상|스페인어).*(?:답|응답)|스페인어로\s*(?:답변|응답)/i.test(
+    /(?:always|reply|answer|respond).*(?:spanish)|(?:항상|스페인어).*(?:답|응답)|스페인어로\s*(?:답변|응답)/i.test(
       text,
     )
   ) {
     return "es";
   }
   return null;
+}
+
+function generatedIdentityLanguageDirective(
+  identityText: string | undefined,
+): ResponseLanguagePolicy | null {
+  if (!identityText) return null;
+  const languageHeading = identityText.match(
+    /(?:^|\n)##\s+Language\b([\s\S]*?)(?:\n##\s+|\s*$)/i,
+  );
+  const languageBlock = languageHeading?.[1]?.trim();
+  if (!languageBlock) return null;
+  if (/regardless\s+of\s+what\s+language\s+the\s+user\s+writes\s+in/i.test(languageBlock)) {
+    return "auto";
+  }
+  return isLanguageDirective(languageBlock);
 }
 
 function normalizeUserRules(raw: string | undefined): string[] {
@@ -452,6 +474,10 @@ function parseUserRules(identity: WorkspaceIdentity): RuntimePolicySnapshot {
   const warnings: string[] = [];
   const advisoryDirectives: string[] = [];
   const lines = normalizeUserRules(identity.userRules);
+  const identityLanguage = generatedIdentityLanguageDirective(identity.identity);
+  if (identityLanguage) {
+    policy.responseMode.language = identityLanguage;
+  }
 
   for (const file of identity.userHarnessRules ?? []) {
     const structured = compileStructuredHarnessRule(file.path, file.content, warnings);

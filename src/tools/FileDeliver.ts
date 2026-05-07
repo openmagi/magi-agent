@@ -1,6 +1,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import type { Tool, ToolContext, ToolResult } from "../Tool.js";
+import type { ChannelDeliveryReceipt } from "../channels/ChannelAdapter.js";
 import type { OutputArtifactRegistry } from "../output/OutputArtifactRegistry.js";
 import type { ChannelRef } from "../util/types.js";
 import type {
@@ -29,6 +30,7 @@ export interface FileDeliverOutput {
     status: DeliveryStatus;
     externalId?: string;
     marker?: string;
+    providerMessageId?: string;
     attemptCount: number;
   }>;
 }
@@ -46,7 +48,7 @@ export interface FileDeliverDeps {
     filePath: string,
     caption: string | undefined,
     mode: "document" | "photo",
-  ) => Promise<void>;
+  ) => Promise<ChannelDeliveryReceipt>;
 }
 
 const INPUT_SCHEMA = {
@@ -114,21 +116,24 @@ async function deliverToChat(
   input: FileDeliverInput,
   ctx: ToolContext,
   filePath: string,
-): Promise<{ externalId: string; marker?: string }> {
+): Promise<{ externalId: string; marker?: string; providerMessageId?: string }> {
   const sourceChannel = deps.getSourceChannel?.(ctx) ?? null;
   if (
     sourceChannel &&
     deps.sendFile &&
     (sourceChannel.type === "telegram" || sourceChannel.type === "discord")
   ) {
-    await deps.sendFile(
+    const receipt = await deps.sendFile(
       sourceChannel,
       filePath,
       input.chat?.caption,
       "document",
     );
     return {
-      externalId: `${sourceChannel.type}:${sourceChannel.channelId}`,
+      externalId: receipt.messageId
+        ? `${sourceChannel.type}:${sourceChannel.channelId}:${receipt.messageId}`
+        : `${sourceChannel.type}:${sourceChannel.channelId}`,
+      ...(receipt.messageId ? { providerMessageId: receipt.messageId } : {}),
     };
   }
 
@@ -179,7 +184,7 @@ async function deliverToKb(
   bytes: Uint8Array,
   input: FileDeliverInput,
   ctx: ToolContext,
-): Promise<{ externalId: string; marker?: string }> {
+): Promise<{ externalId: string; marker?: string; providerMessageId?: string }> {
   const collection = input.kb?.collection || "artifacts";
   const response = await (deps.fetchImpl ?? fetch)(
     `${deps.chatProxyUrl.replace(/\/$/, "")}/v1/integrations/knowledge-write/upload-file`,
@@ -222,7 +227,14 @@ async function deliverWithRetry(
   ctx: ToolContext,
   trackRegistry: boolean,
   filePath: string,
-): Promise<{ target: DeliveryTarget; status: DeliveryStatus; externalId?: string; marker?: string; attemptCount: number }> {
+): Promise<{
+  target: DeliveryTarget;
+  status: DeliveryStatus;
+  externalId?: string;
+  marker?: string;
+  providerMessageId?: string;
+  attemptCount: number;
+}> {
   let lastError: unknown = null;
 
   for (let attempt = 1; attempt <= RETRY_DELAYS_MS.length; attempt += 1) {
@@ -256,6 +268,7 @@ async function deliverWithRetry(
           status: "sent",
           externalId: delivered.externalId,
           marker: delivered.marker,
+          providerMessageId: delivered.providerMessageId,
         });
       }
 
@@ -264,6 +277,7 @@ async function deliverWithRetry(
         status: "sent",
         externalId: delivered.externalId,
         marker: delivered.marker,
+        providerMessageId: delivered.providerMessageId,
         attemptCount: attempt,
       };
     } catch (error) {

@@ -21,6 +21,7 @@ import path from "node:path";
 import type { Tool, ToolContext, ToolResult } from "../Tool.js";
 import type { Discipline } from "../Session.js";
 import type { DisciplineSessionCounter } from "../hooks/builtin/disciplineHook.js";
+import { Utf8StreamCapture } from "../util/Utf8StreamCapture.js";
 
 export interface CommitCheckpointInput {
   message: string;
@@ -74,13 +75,15 @@ export async function runGit(
           process.env["GIT_COMMITTER_EMAIL"] ?? "bot@magi.local",
       },
     });
-    let stdout = "";
-    let stderr = "";
-    child.stdout.on("data", (d: Buffer) => (stdout += d.toString("utf8")));
-    child.stderr.on("data", (d: Buffer) => (stderr += d.toString("utf8")));
-    child.on("error", () => resolve({ code: 127, stdout, stderr }));
+    const stdout = new Utf8StreamCapture();
+    const stderr = new Utf8StreamCapture();
+    child.stdout.on("data", (d: Buffer) => stdout.write(d));
+    child.stderr.on("data", (d: Buffer) => stderr.write(d));
+    child.on("error", () =>
+      resolve({ code: 127, stdout: stdout.end(), stderr: stderr.end() }),
+    );
     child.on("close", (code) =>
-      resolve({ code: code ?? 1, stdout, stderr }),
+      resolve({ code: code ?? 1, stdout: stdout.end(), stderr: stderr.end() }),
     );
   });
 }

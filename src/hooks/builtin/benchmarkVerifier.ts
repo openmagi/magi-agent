@@ -50,6 +50,7 @@ import path from "node:path";
 import { parse as parseYaml } from "yaml";
 import type { RegisteredHook, HookContext } from "../types.js";
 import { withMagiBinPath } from "../../util/shellPath.js";
+import { Utf8StreamCapture } from "../../util/Utf8StreamCapture.js";
 
 const MAX_RETRIES = 1;
 const DEFAULT_TIMEOUT_MS = 60_000;
@@ -209,22 +210,10 @@ export function runBenchmarkCommand(
       return;
     }
 
-    let stdout = "";
-    let stderr = "";
-    let stdoutTruncated = false;
-    const capture = (chunk: Buffer, which: "stdout" | "stderr"): void => {
-      const cur = which === "stdout" ? stdout : stderr;
-      if (cur.length >= MAX_STDOUT_BYTES) {
-        if (which === "stdout") stdoutTruncated = true;
-        return;
-      }
-      const room = MAX_STDOUT_BYTES - cur.length;
-      const piece = chunk.toString("utf8").slice(0, room);
-      if (which === "stdout") stdout += piece;
-      else stderr += piece;
-    };
-    child.stdout?.on("data", (c: Buffer) => capture(c, "stdout"));
-    child.stderr?.on("data", (c: Buffer) => capture(c, "stderr"));
+    const stdout = new Utf8StreamCapture(MAX_STDOUT_BYTES);
+    const stderr = new Utf8StreamCapture(MAX_STDOUT_BYTES);
+    child.stdout?.on("data", (chunk: Buffer) => stdout.write(chunk));
+    child.stderr?.on("data", (chunk: Buffer) => stderr.write(chunk));
 
     const killTimer = setTimeout(() => {
       timedOut = true;
@@ -237,10 +226,12 @@ export function runBenchmarkCommand(
 
     child.on("error", (err) => {
       clearTimeout(killTimer);
+      const stdoutText = stdout.end();
+      const stderrText = stderr.end();
       finish({
         ok: false,
-        stdout,
-        stderr: stderr + `\nspawn error: ${String(err)}`,
+        stdout: stdoutText,
+        stderr: stderrText + `\nspawn error: ${String(err)}`,
         exitCode: null,
         signal: null,
         timedOut,
@@ -248,13 +239,13 @@ export function runBenchmarkCommand(
     });
     child.on("close", (code, signal) => {
       clearTimeout(killTimer);
-      if (stdoutTruncated) {
-        stderr += "\n[stdout truncated]";
-      }
+      const stdoutText = stdout.end();
+      let stderrText = stderr.end();
+      if (stdout.truncated) stderrText += "\n[stdout truncated]";
       finish({
         ok: !timedOut && code === 0,
-        stdout,
-        stderr,
+        stdout: stdoutText,
+        stderr: stderrText,
         exitCode: code,
         signal,
         timedOut,

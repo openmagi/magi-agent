@@ -20,6 +20,7 @@ import type { Tool, ToolContext, ToolResult } from "../Tool.js";
 import { Workspace } from "../storage/Workspace.js";
 import { errorResult } from "../util/toolResult.js";
 import { withMagiBinPath } from "../util/shellPath.js";
+import { Utf8StreamCapture } from "../util/Utf8StreamCapture.js";
 
 export interface BashInput {
   command: string;
@@ -86,23 +87,10 @@ export function makeBashTool(workspaceRoot: string): Tool<BashInput, BashOutput>
             stdio: ["ignore", "pipe", "pipe"],
           });
 
-          let stdout = "";
-          let stderr = "";
-          let truncated = false;
-          const capture = (chunk: Buffer, which: "stdout" | "stderr"): void => {
-            const current = which === "stdout" ? stdout : stderr;
-            if (current.length >= MAX_OUTPUT_BYTES) {
-              truncated = true;
-              return;
-            }
-            const room = MAX_OUTPUT_BYTES - current.length;
-            const piece = chunk.toString("utf8");
-            if (which === "stdout") stdout += piece.slice(0, room);
-            else stderr += piece.slice(0, room);
-            if (piece.length > room) truncated = true;
-          };
-          child.stdout.on("data", (c: Buffer) => capture(c, "stdout"));
-          child.stderr.on("data", (c: Buffer) => capture(c, "stderr"));
+          const stdout = new Utf8StreamCapture(MAX_OUTPUT_BYTES);
+          const stderr = new Utf8StreamCapture(MAX_OUTPUT_BYTES);
+          child.stdout.on("data", (c: Buffer) => stdout.write(c));
+          child.stderr.on("data", (c: Buffer) => stderr.write(c));
 
           const timeout = setTimeout(() => {
             child.kill("SIGTERM");
@@ -117,18 +105,20 @@ export function makeBashTool(workspaceRoot: string): Tool<BashInput, BashOutput>
 
           child.on("close", (code, signal) => {
             clearTimeout(timeout);
+            const stdoutText = stdout.end();
+            const stderrText = stderr.end();
             resolve({
               status: code === 0 ? "ok" : "error",
               output: {
                 exitCode: code,
                 signal,
-                stdout,
-                stderr,
-                truncated,
+                stdout: stdoutText,
+                stderr: stderrText,
+                truncated: stdout.truncated || stderr.truncated,
                 durationMs: Date.now() - start,
               },
               errorCode: code === 0 ? undefined : `exit_${code}`,
-              errorMessage: code === 0 ? undefined : stderr.slice(0, 500) || `exit ${code}`,
+              errorMessage: code === 0 ? undefined : stderrText.slice(0, 500) || `exit ${code}`,
               durationMs: Date.now() - start,
             });
           });

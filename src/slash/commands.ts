@@ -132,6 +132,7 @@ function formatStatusText(
   agent: Agent,
   session: Session,
   resetCounter: number,
+  runtimeModelOverride?: string,
 ): string {
   const budget = session.budgetStats();
   const skills = formatSkills(agent);
@@ -159,8 +160,9 @@ function formatStatusText(
     `- Skills loaded: ${skills.count} — ${skillList}`,
     `- Active crons: ${cronCount}`,
     `- Discipline: ${disciplineLine}`,
-    `- Model: ${agent.config.model}`,
   ];
+  const runtimeModel = runtimeModelOverride?.trim();
+  if (runtimeModel) lines.push(`- Model: ${runtimeModel}`);
   return lines.join("\n");
 }
 
@@ -175,7 +177,7 @@ export function makeStatusCommand(
     async handler(_args: string, ctx: SlashCommandContext): Promise<void> {
       const { session, sse } = ctx;
       const counter = await resetStore.get(session.meta.channel);
-      emitText(sse, formatStatusText(agent, session, counter));
+      emitText(sse, formatStatusText(agent, session, counter, ctx.runtimeModelOverride));
     },
   };
 }

@@ -14,6 +14,7 @@ import {
   type SocialProvider,
 } from "../social/SocialBrowserPolicy.js";
 import { withMagiBinPath } from "../util/shellPath.js";
+import { Utf8StreamCapture } from "../util/Utf8StreamCapture.js";
 
 export interface SocialBrowserOutput {
   action: SocialBrowserAction;
@@ -107,6 +108,18 @@ function normalizeMaxItems(value: unknown): number {
   return Math.max(1, Math.min(DEFAULT_SOCIAL_BROWSER_MAX_ITEMS, Math.trunc(value)));
 }
 
+function browserCommandEnv(cwd: string): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = { ...withMagiBinPath(process.env), PWD: cwd };
+  delete env.BROWSER_CDP_URL;
+  return env;
+}
+
+function agentBrowserSessionName(provider: SocialProvider, sessionId: string): string {
+  const safeProvider = provider.replace(/[^a-zA-Z0-9_.-]/g, "-");
+  const safeSessionId = sessionId.replace(/[^a-zA-Z0-9_.-]/g, "-");
+  return `magi-social-${safeProvider}-${safeSessionId}`;
+}
+
 function okResult(output: SocialBrowserOutput, start: number): ToolResult<SocialBrowserOutput> {
   return {
     status: "ok",
@@ -140,28 +153,15 @@ async function defaultRunner(
   return new Promise<SocialBrowserRunResult>((resolve) => {
     const child = spawn(command, args, {
       cwd,
-      env: { ...withMagiBinPath(process.env), PWD: cwd },
+      env: browserCommandEnv(cwd),
       stdio: ["ignore", "pipe", "pipe"],
     });
 
-    let stdout = "";
-    let stderr = "";
-    let truncated = false;
-    const capture = (chunk: Buffer, which: "stdout" | "stderr"): void => {
-      const current = which === "stdout" ? stdout : stderr;
-      if (current.length >= MAX_OUTPUT_BYTES) {
-        truncated = true;
-        return;
-      }
-      const room = MAX_OUTPUT_BYTES - current.length;
-      const piece = chunk.toString("utf8");
-      if (which === "stdout") stdout += piece.slice(0, room);
-      else stderr += piece.slice(0, room);
-      if (piece.length > room) truncated = true;
-    };
+    const stdout = new Utf8StreamCapture(MAX_OUTPUT_BYTES);
+    const stderr = new Utf8StreamCapture(MAX_OUTPUT_BYTES);
 
-    child.stdout.on("data", (chunk: Buffer) => capture(chunk, "stdout"));
-    child.stderr.on("data", (chunk: Buffer) => capture(chunk, "stderr"));
+    child.stdout.on("data", (chunk: Buffer) => stdout.write(chunk));
+    child.stderr.on("data", (chunk: Buffer) => stderr.write(chunk));
 
     const timeout = setTimeout(() => {
       child.kill("SIGTERM");
@@ -172,16 +172,22 @@ async function defaultRunner(
 
     child.on("close", (exitCode, signal) => {
       clearTimeout(timeout);
-      resolve({ exitCode, signal, stdout, stderr, truncated });
+      resolve({
+        exitCode,
+        signal,
+        stdout: stdout.end(),
+        stderr: stderr.end(),
+        truncated: stdout.truncated || stderr.truncated,
+      });
     });
     child.on("error", (err) => {
       clearTimeout(timeout);
       resolve({
         exitCode: 127,
         signal: null,
-        stdout,
+        stdout: stdout.end(),
         stderr: err instanceof Error ? err.message : String(err),
-        truncated,
+        truncated: stdout.truncated || stderr.truncated,
       });
     });
   });
@@ -316,15 +322,40 @@ export function makeSocialBrowserTool(
         });
       }
 
+      const localSessionName = agentBrowserSessionName(provider, claim.sessionId);
+      const connectRun = await runner(
+        "agent-browser",
+        ["--session", localSessionName, "connect", claim.cdpEndpoint],
+        ctx,
+        DEFAULT_TIMEOUT_MS,
+        cwd,
+      );
+      if (connectRun.exitCode !== 0) {
+        const safeRun = {
+          ...connectRun,
+          stdout: redactClaimStdout(connectRun.stdout),
+          stderr: redactClaimStdout(connectRun.stderr),
+        };
+        return errorResult(
+          "session_connect_failed",
+          safeRun.stderr || safeRun.stdout || "social browser CDP connect failed",
+          start,
+          outputFromRun(input.action, provider, safeRun, {
+            sessionId: claim.sessionId,
+            maxItems: claim.maxItems,
+          }),
+        );
+      }
+
       let args: string[];
       if (input.action === "open") {
-        args = ["--cdp", claim.cdpEndpoint, "open", input.url || ""];
+        args = ["--session", localSessionName, "open", input.url || ""];
       } else if (input.action === "snapshot") {
-        args = ["--cdp", claim.cdpEndpoint, "snapshot"];
+        args = ["--session", localSessionName, "snapshot"];
       } else if (input.action === "scrape_visible") {
-        args = ["--cdp", claim.cdpEndpoint, "scrape"];
+        args = ["--session", localSessionName, "scrape"];
       } else {
-        args = ["--cdp", claim.cdpEndpoint, "screenshot", screenshotPath || ""];
+        args = ["--session", localSessionName, "screenshot", screenshotPath || ""];
       }
 
       const run = await runner("agent-browser", args, ctx, timeoutMs, cwd);

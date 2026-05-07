@@ -1,5 +1,6 @@
 import { spawn } from "node:child_process";
 import type { Tool, ToolContext, ToolResult } from "../Tool.js";
+import { Utf8StreamCapture } from "../util/Utf8StreamCapture.js";
 import { withMagiBinPath } from "../util/shellPath.js";
 
 type KnowledgeSearchMode =
@@ -283,21 +284,8 @@ async function defaultRunner(
       stdio: ["ignore", "pipe", "pipe"],
     });
 
-    let stdout = "";
-    let stderr = "";
-    let truncated = false;
-    const capture = (chunk: Buffer, stream: "stdout" | "stderr"): void => {
-      const current = stream === "stdout" ? stdout : stderr;
-      if (current.length >= maxOutputBytes) {
-        truncated = true;
-        return;
-      }
-      const piece = chunk.toString("utf8");
-      const room = maxOutputBytes - current.length;
-      if (stream === "stdout") stdout += piece.slice(0, room);
-      else stderr += piece.slice(0, room);
-      if (piece.length > room) truncated = true;
-    };
+    const stdout = new Utf8StreamCapture(maxOutputBytes);
+    const stderr = new Utf8StreamCapture(maxOutputBytes);
 
     const timer = setTimeout(() => {
       child.kill("SIGTERM");
@@ -310,14 +298,20 @@ async function defaultRunner(
     };
     ctx.abortSignal.addEventListener("abort", abort, { once: true });
 
-    child.stdout.on("data", (chunk: Buffer) => capture(chunk, "stdout"));
-    child.stderr.on("data", (chunk: Buffer) => capture(chunk, "stderr"));
+    child.stdout.on("data", (chunk: Buffer) => stdout.write(chunk));
+    child.stderr.on("data", (chunk: Buffer) => stderr.write(chunk));
     child.on("close", (exitCode, signal) => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
       ctx.abortSignal.removeEventListener("abort", abort);
-      resolve({ exitCode, signal, stdout, stderr, truncated });
+      resolve({
+        exitCode,
+        signal,
+        stdout: stdout.end(),
+        stderr: stderr.end(),
+        truncated: stdout.truncated || stderr.truncated,
+      });
     });
     child.on("error", (error) => {
       if (settled) return;
@@ -327,9 +321,9 @@ async function defaultRunner(
       resolve({
         exitCode: null,
         signal: null,
-        stdout,
+        stdout: stdout.end(),
         stderr: error instanceof Error ? error.message : String(error),
-        truncated,
+        truncated: stdout.truncated || stderr.truncated,
       });
     });
   });

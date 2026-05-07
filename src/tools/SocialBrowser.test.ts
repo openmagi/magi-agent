@@ -73,7 +73,8 @@ describe("SocialBrowser", () => {
     expect(JSON.stringify(result)).not.toContain("ws://secret-cdp");
     expect(calls).toEqual([
       { command: "integration.sh", args: ["social-browser/claim", JSON.stringify({ provider: "x", maxItems: 20 })] },
-      { command: "agent-browser", args: ["--cdp", "ws://secret-cdp", "scrape"] },
+      { command: "agent-browser", args: ["--session", "magi-social-x-sess-1", "connect", "ws://secret-cdp"] },
+      { command: "agent-browser", args: ["--session", "magi-social-x-sess-1", "scrape"] },
     ]);
   });
 

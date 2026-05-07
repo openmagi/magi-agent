@@ -26,6 +26,7 @@ export interface DeliveryRecord {
   attemptCount: number;
   externalId?: string;
   marker?: string;
+  providerMessageId?: string;
   errorMessage?: string;
   deliveredAt?: number;
   updatedAt: number;
@@ -69,5 +70,6 @@ export interface DeliveryMutation {
   status?: DeliveryStatus;
   externalId?: string;
   marker?: string;
+  providerMessageId?: string;
   errorMessage?: string;
 }

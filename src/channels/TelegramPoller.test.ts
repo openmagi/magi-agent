@@ -458,7 +458,7 @@ describe("TelegramPoller", () => {
       fetchImpl,
     });
 
-    await poller.sendDocument("42", path.join(workspaceRoot, "out.pdf"), "file");
+    const receipt = await poller.sendDocument("42", path.join(workspaceRoot, "out.pdf"), "file");
 
     const call = calls[0]!;
     expect(call.url).toBe("https://api.telegram.org/botDOC/sendDocument");
@@ -468,6 +468,11 @@ describe("TelegramPoller", () => {
     expect(form.get("chat_id")).toBe("42");
     expect(form.get("caption")).toBe("file");
     expect(form.get("document")).toBeInstanceOf(Blob);
+    expect(receipt).toEqual({
+      provider: "telegram",
+      channelId: "42",
+      messageId: "100",
+    });
   });
 
   it("start() returns immediately without awaiting the poll loop (codex P1)", async () => {

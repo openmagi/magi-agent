@@ -198,7 +198,7 @@ describe("canonical transcript replay", () => {
     expect(resultBlocks.map((block) => block.tool_use_id)).toEqual(["tu-a", "tu-b"]);
   });
 
-  it("replays canonical thinking and tool_use blocks in assistant order", () => {
+  it("drops historical thinking blocks and replays tool_use blocks in assistant order", () => {
     const engine = new ContextEngine(llmReturningSummary("unused"));
     const entries: TranscriptEntry[] = [
       userEntry("turn-1", "run a command", 1),
@@ -226,10 +226,7 @@ describe("canonical transcript replay", () => {
       "assistant",
     ]);
     const assistantBlocks = messages[1]!.content as Array<{ type: string }>;
-    expect(assistantBlocks.map((block) => block.type)).toEqual([
-      "thinking",
-      "tool_use",
-    ]);
+    expect(assistantBlocks.map((block) => block.type)).toEqual(["tool_use"]);
   });
 
   it("resumes an aborted turn after streamed assistant text", async () => {

@@ -174,7 +174,11 @@ describe("FileDeliver", () => {
       sourceKind: "structured",
     });
 
-    const sendFile = vi.fn(async () => {});
+    const sendFile = vi.fn(async () => ({
+      provider: "telegram" as const,
+      channelId: "1234",
+      messageId: "100",
+    }));
     const tool = makeFileDeliverTool({
       workspaceRoot: root,
       outputRegistry: registry,
@@ -199,7 +203,8 @@ describe("FileDeliver", () => {
     expect(result.output?.deliveries[0]).toEqual({
       target: "chat",
       status: "sent",
-      externalId: "telegram:1234",
+      externalId: "telegram:1234:100",
+      providerMessageId: "100",
       marker: undefined,
       attemptCount: 1,
     });
@@ -215,7 +220,8 @@ describe("FileDeliver", () => {
       expect.objectContaining({
         target: "chat",
         status: "sent",
-        externalId: "telegram:1234",
+        externalId: "telegram:1234:100",
+        providerMessageId: "100",
         attemptCount: 1,
       }),
     ]);

@@ -64,6 +64,13 @@ export const RESERVE_TOKEN_CAP_FRACTION = 0.2;
 export const DEFAULT_MIN_VIABLE_BUDGET_TOKENS = 5_000;
 
 /**
+ * Max raw transcript text sent to the compaction summarizer. The input
+ * sampler keeps the early objective and the recent tail, because the
+ * latest tail usually carries the state a successor session must resume.
+ */
+const SUMMARY_INPUT_BUDGET_CHARS = 180_000;
+
+/**
  * Emitted to the SSE stream when the routed model's effective budget
  * cannot fit even a fully compacted transcript. The caller (Session)
  * translates this into an `agent_event.compaction_impossible` + a
@@ -346,18 +353,24 @@ export class ContextEngine {
   ): Promise<string | null> {
     const deadline = Date.now() + this.haikuDeadlineMs;
     const system = [
-      "You compact a conversational transcript into a compact handoff",
-      "summary for a successor assistant instance. Preserve:",
+      "You compact a conversational transcript into a handoff memo for the next turn or a new session.",
+      "A successor assistant instance will rely on this summary to continue work after compaction.",
+      "Write the summary as a handoff memo that preserves:",
       "- Active task / goal.",
       "- Preserve execution-contract state exactly when present:",
       "  goal, constraints, current plan, completed steps, blockers, acceptance criteria, verification evidence, artifacts, and remaining risks.",
       "- Decisions already made.",
       "- Open questions / pending sub-tasks.",
       "- Files, ids, and numeric values the successor needs.",
+      "Use these headings when relevant: Current objective, Current state, Completed work, Decisions, Files and IDs, Blockers or risks, Next step.",
+      "Prefer the latest concrete state over older exploration. Do not preserve dead ends unless they explain a decision or risk.",
       "Write 10-30 lines of dense prose. No preamble, no postamble.",
     ].join("\n");
 
-    const userPayload = renderEntriesForSummary(entries).slice(0, 180_000);
+    const userPayload = sampleSummaryPayload(
+      renderEntriesForSummary(entries),
+      SUMMARY_INPUT_BUDGET_CHARS,
+    );
 
     let output = "";
     try {
@@ -737,13 +750,6 @@ function toContentBlocks(
 
 function canonicalContentBlocks(content: unknown[]): LLMContentBlock[] {
   const blocks: LLMContentBlock[] = [];
-  const hasUserFacingText = content.some(
-    (block) =>
-      !!block &&
-      typeof block === "object" &&
-      (block as Record<string, unknown>).type === "text" &&
-      typeof (block as Record<string, unknown>).text === "string",
-  );
   for (const block of content) {
     if (!block || typeof block !== "object") continue;
     const obj = block as Record<string, unknown>;
@@ -751,20 +757,10 @@ function canonicalContentBlocks(content: unknown[]): LLMContentBlock[] {
       blocks.push({ type: "text", text: obj.text });
       continue;
     }
-    if (
-      obj.type === "thinking" &&
-      typeof obj.thinking === "string" &&
-      typeof obj.signature === "string" &&
-      !hasUserFacingText
-    ) {
-      blocks.push({
-        type: "thinking",
-        thinking: obj.thinking,
-        signature: obj.signature,
-      });
-      continue;
-    }
     if (obj.type === "thinking" || obj.type === "redacted_thinking") {
+      // Stored thinking signatures can become invalid when replayed
+      // from old transcripts. Live in-turn replay preserves signed
+      // thinking separately; historical replay does not need it.
       continue;
     }
     if (
@@ -861,6 +857,21 @@ function renderEntriesForSummary(entries: readonly TranscriptEntry[]): string {
     }
   }
   return lines.join("\n");
+}
+
+function sampleSummaryPayload(content: string, budgetChars: number): string {
+  if (content.length <= budgetChars) return content;
+
+  const markerReserve = 240;
+  const sampleBudget = Math.max(0, budgetChars - markerReserve);
+  const headChars = Math.floor(sampleBudget * 0.6);
+  const tailChars = sampleBudget - headChars;
+  const omittedChars = Math.max(0, content.length - headChars - tailChars);
+  const marker =
+    `\n\n[... ${omittedChars} chars omitted from the middle for compaction input budget; ` +
+    "recent tail retained below ...]\n\n";
+
+  return `${content.slice(0, headChars)}${marker}${content.slice(-tailChars)}`;
 }
 
 function sha256Hex(text: string): string {

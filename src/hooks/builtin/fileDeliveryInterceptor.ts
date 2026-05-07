@@ -16,6 +16,7 @@ import { execFile } from "child_process";
 import { stat } from "fs/promises";
 import { join, resolve, basename } from "path";
 import { getOrClassifyRequestMeta } from "./turnMetaClassifier.js";
+import type { ChannelDeliveryReceipt } from "../../channels/ChannelAdapter.js";
 import type { ChannelRef } from "../../util/types.js";
 
 // ── File delivery execution ──
@@ -53,7 +54,7 @@ export interface FileDeliveryInterceptorOptions {
     filePath: string,
     caption: string | undefined,
     mode: "document" | "photo",
-  ) => Promise<void>;
+  ) => Promise<ChannelDeliveryReceipt>;
 }
 
 export function fileDeliveryInterceptor(

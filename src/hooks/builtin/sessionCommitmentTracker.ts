@@ -12,9 +12,10 @@
 
 import type { RegisteredHook, HookContext } from "../types.js";
 import type { LLMMessage } from "../../transport/LLMClient.js";
+import { normalizeRouteValue } from "../../turn/routeMeta.js";
 
 const META_RE = /\[META:\s*([^\]]+?)\]/i;
-const ROUTE_RE = /route\s*=\s*([a-z_-]+)/i;
+const ROUTE_RE = /route\s*=\s*([^,\]]+)/i;
 const INTENT_RE = /intent\s*=\s*([^,\]]+)/i;
 const FALLBACK_PHRASE_RE =
   /(?:서브에이전트(?:가)?\s*(?:안|실패|못)|직접\s*처리(?:하|해)|직접\s*답(?:변|하)|직접\s*확인|subagent\s*failed|falling back|I['’]ll (?:just )?(?:do|handle) (?:it|this) directly)/i;
@@ -39,7 +40,8 @@ function parseMeta(text: string): Commitment | null {
   const m = META_RE.exec(text);
   if (!m) return null;
   const blob = m[1] ?? "";
-  const route = ROUTE_RE.exec(blob)?.[1] ?? null;
+  const routeRaw = ROUTE_RE.exec(blob)?.[1] ?? null;
+  const route = normalizeRouteValue(routeRaw) ?? routeRaw?.trim().toLowerCase() ?? null;
   if (!route) return null;
   const intent = INTENT_RE.exec(blob)?.[1]?.trim() ?? null;
   return { route, intent };
@@ -54,7 +56,7 @@ function findOutstandingCommitment(messages: LLMMessage[], lookback = 6): Commit
   for (const a of assistants) {
     const meta = parseMeta(textOfMessage(a));
     if (!meta) continue;
-    if (meta.route === "subagent" || meta.route === "pipeline") return meta;
+    if (meta.route === "subagent" || meta.route === "subagent->gate" || meta.route === "pipeline") return meta;
     if (meta.route === "direct") return null; // latest META wins
   }
   return null;

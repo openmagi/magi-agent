@@ -32,6 +32,7 @@ import {
 } from "discord.js";
 import type {
   ChannelAdapter,
+  ChannelDeliveryReceipt,
   InboundHandler,
   InboundMessage,
   InboundReplyTo,
@@ -145,21 +146,26 @@ export class DiscordClient implements ChannelAdapter {
     chatId: string,
     filePath: string,
     caption?: string,
-  ): Promise<void> {
+  ): Promise<ChannelDeliveryReceipt> {
     const channel = await this.fetchSendableChannel(chatId);
-    await channel.send({
+    const sent = await channel.send({
       files: [filePath],
       ...(caption ? { content: caption } : {}),
     });
+    return {
+      provider: "discord",
+      channelId: chatId,
+      ...(hasMessageId(sent) ? { messageId: sent.id } : {}),
+    };
   }
 
   async sendPhoto(
     chatId: string,
     filePath: string,
     caption?: string,
-  ): Promise<void> {
+  ): Promise<ChannelDeliveryReceipt> {
     // Discord treats images as regular attachments; re-use sendDocument.
-    await this.sendDocument(chatId, filePath, caption);
+    return this.sendDocument(chatId, filePath, caption);
   }
 
   private async fetchSendableChannel(chatId: string): Promise<SendableChannel> {
@@ -259,4 +265,12 @@ function isSendable(ch: unknown): ch is SendableChannel {
   if (!ch || typeof ch !== "object") return false;
   const maybe = ch as { send?: unknown };
   return typeof maybe.send === "function";
+}
+
+function hasMessageId(value: unknown): value is { id: string } {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    typeof (value as { id?: unknown }).id === "string"
+  );
 }

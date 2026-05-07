@@ -37,8 +37,8 @@ describe("dispatchInbound", () => {
       start: vi.fn(async () => {}),
       stop: vi.fn(async () => {}),
       onInboundMessage: vi.fn(),
-      sendDocument: vi.fn(async () => {}),
-      sendPhoto: vi.fn(async () => {}),
+      sendDocument: vi.fn(async () => ({ provider: "telegram" as const, channelId: "chat-1" })),
+      sendPhoto: vi.fn(async () => ({ provider: "telegram" as const, channelId: "chat-1" })),
     } satisfies ChannelAdapter;
     const inbound: InboundMessage = {
       channel: "telegram",
@@ -54,7 +54,7 @@ describe("dispatchInbound", () => {
     expect(adapter.send).toHaveBeenCalledWith(
       expect.objectContaining({
         text:
-          "[META: intent=실행, domain=문서작성, complexity=complex, route=subagent]\n" +
+          "[META: intent=실행, domain=문서작성, complexity=복잡, route=서브에이전트]\n" +
           "지금 바로 시작합니다.백그라운드 없이 직접 씁니다.",
       }),
     );
@@ -79,8 +79,8 @@ describe("dispatchInbound", () => {
       start: vi.fn(async () => {}),
       stop: vi.fn(async () => {}),
       onInboundMessage: vi.fn(),
-      sendDocument: vi.fn(async () => {}),
-      sendPhoto: vi.fn(async () => {}),
+      sendDocument: vi.fn(async () => ({ provider: "telegram" as const, channelId: "chat-1" })),
+      sendPhoto: vi.fn(async () => ({ provider: "telegram" as const, channelId: "chat-1" })),
     } satisfies ChannelAdapter;
     const inbound: InboundMessage = {
       channel: "telegram",

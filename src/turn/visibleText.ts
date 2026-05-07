@@ -1,12 +1,20 @@
+import {
+  inferRouteMetaLanguage,
+  isRouteMetaTag,
+  localizeRouteMetaTag,
+} from "./routeMeta.js";
+
 const ROUTE_META_TAG_RE = /\[META\s*:\s*(?=[^\]]*\b(?:intent|domain|complexity|route)\s*=)[^\]]*\]\s*/gi;
 const ROUTE_META_PREFIX = "[META:";
+const META_TAG_ONLY_RE = /^\[META\s*:[^\]]*\]/i;
 
 export function normalizeUserVisibleRouteMetaTags(text: string): string {
   let seenRouteMeta = false;
+  const language = inferRouteMetaLanguage(text.replace(ROUTE_META_TAG_RE, " "));
   return text.replace(ROUTE_META_TAG_RE, (match) => {
     if (seenRouteMeta) return "";
     seenRouteMeta = true;
-    return match;
+    return localizeMatchedRouteMeta(match, language);
   });
 }
 
@@ -14,11 +22,13 @@ export class UserVisibleRouteMetaFilter {
   private buffer = "";
   private seenRouteMeta = false;
   private stripLeadingWhitespaceAfterMeta = false;
+  private pendingFirstRouteMeta: string | null = null;
 
   reset(): void {
     this.buffer = "";
     this.seenRouteMeta = false;
     this.stripLeadingWhitespaceAfterMeta = false;
+    this.pendingFirstRouteMeta = null;
   }
 
   filter(delta: string): string {
@@ -39,6 +49,16 @@ export class UserVisibleRouteMetaFilter {
   private drain(flush: boolean): string {
     let out = "";
     for (;;) {
+      if (this.pendingFirstRouteMeta) {
+        const language = inferRouteMetaLanguage(this.buffer);
+        if (language || flush || this.buffer.trim().length > 0) {
+          out += localizeRouteMetaTag(this.pendingFirstRouteMeta, language);
+          this.pendingFirstRouteMeta = null;
+          continue;
+        }
+        return out;
+      }
+
       const start = indexOfRouteMetaStart(this.buffer);
       if (start === -1) {
         if (flush) {
@@ -74,7 +94,7 @@ export class UserVisibleRouteMetaFilter {
         const rest = this.buffer.slice(end + 1);
         if (!this.seenRouteMeta) {
           this.seenRouteMeta = true;
-          out += tag;
+          this.pendingFirstRouteMeta = tag;
           this.buffer = rest;
           this.stripLeadingWhitespaceAfterMeta = false;
           continue;
@@ -94,9 +114,10 @@ function indexOfRouteMetaStart(text: string): number {
   return text.toUpperCase().indexOf("[META");
 }
 
-function isRouteMetaTag(text: string): boolean {
-  return /^\[META\s*:[\s\S]*\]$/i.test(text) &&
-    /\b(?:intent|domain|complexity|route)\s*=/i.test(text);
+function localizeMatchedRouteMeta(match: string, language: ReturnType<typeof inferRouteMetaLanguage>): string {
+  const tag = META_TAG_ONLY_RE.exec(match)?.[0];
+  if (!tag) return match;
+  return `${localizeRouteMetaTag(tag, language)}${match.slice(tag.length)}`;
 }
 
 function trailingRouteMetaPrefixLength(text: string): number {

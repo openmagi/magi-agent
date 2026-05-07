@@ -128,7 +128,11 @@ describe("fileDeliveryInterceptor", () => {
     const workspaceRoot = await fs.mkdtemp(path.join(os.tmpdir(), "file-delivery-hook-"));
     try {
       await fs.writeFile(path.join(workspaceRoot, "report.pdf"), "PDF");
-      const sendFile = vi.fn(async () => {});
+      const sendFile = vi.fn(async () => ({
+        provider: "telegram" as const,
+        channelId: "777",
+        messageId: "100",
+      }));
       const emitted: string[] = [];
       const hook = fileDeliveryInterceptor({
         workspaceRoot,

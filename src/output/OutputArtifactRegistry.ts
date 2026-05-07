@@ -28,6 +28,9 @@ function makeDeliveryRecord(
     attemptCount: mutation.attemptCount,
     ...(mutation.externalId ? { externalId: mutation.externalId } : {}),
     ...(mutation.marker ? { marker: mutation.marker } : {}),
+    ...(mutation.providerMessageId
+      ? { providerMessageId: mutation.providerMessageId }
+      : {}),
     ...(mutation.errorMessage ? { errorMessage: mutation.errorMessage } : {}),
     ...(status === "sent"
       ? { deliveredAt: now }

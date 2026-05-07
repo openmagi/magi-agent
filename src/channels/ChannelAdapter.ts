@@ -81,6 +81,13 @@ export interface OutboundMessage {
   replyToMessageId?: string;
 }
 
+/** Provider receipt for a native chat attachment send. */
+export interface ChannelDeliveryReceipt {
+  provider: "telegram" | "discord";
+  channelId: string;
+  messageId?: string;
+}
+
 /** Handler registered by the Agent — fired once per inbound message. */
 export type InboundHandler = (msg: InboundMessage) => Promise<void>;
 
@@ -95,8 +102,16 @@ export interface ChannelAdapter {
   stop(): Promise<void>;
   onInboundMessage(handler: InboundHandler): void;
   send(msg: OutboundMessage): Promise<void>;
-  sendDocument(chatId: string, filePath: string, caption?: string): Promise<void>;
-  sendPhoto(chatId: string, filePath: string, caption?: string): Promise<void>;
+  sendDocument(
+    chatId: string,
+    filePath: string,
+    caption?: string,
+  ): Promise<ChannelDeliveryReceipt>;
+  sendPhoto(
+    chatId: string,
+    filePath: string,
+    caption?: string,
+  ): Promise<ChannelDeliveryReceipt>;
   /**
    * Fire-and-forget "user sees bot is typing" indicator.
    *

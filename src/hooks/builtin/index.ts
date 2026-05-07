@@ -108,6 +108,7 @@ import { makeTaskLifecycleHook } from "./taskLifecycle.js";
 import type { Discipline } from "../../Session.js";
 import type { PolicyKernel as PolicyKernelType } from "../../policy/PolicyKernel.js";
 import { makePolicyPromptBlockHook } from "./policyPromptBlock.js";
+import { makeResponseLanguageGateHook } from "./responseLanguageGate.js";
 import {
   makeUserHarnessRuleHooks,
   type UserHarnessRuleAgent,
@@ -685,6 +686,14 @@ export function registerBuiltinHooks(
   }
 
   if (opts.policyKernel) {
+    const responseLanguageGateHook = makeResponseLanguageGateHook({
+      policy: opts.policyKernel,
+    });
+    if (maybe(responseLanguageGateHook.name)) {
+      registry.register(responseLanguageGateHook);
+      registered++;
+    }
+
     const userHarnessHooks = makeUserHarnessRuleHooks({
       policy: opts.policyKernel,
       agent: opts.userHarnessRuleAgent,

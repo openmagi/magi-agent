@@ -61,6 +61,19 @@ describe("registerBuiltinHooks", () => {
     );
   });
 
+  it("registers the response language gate when a policy kernel is available", () => {
+    const registry = new HookRegistry();
+
+    registerBuiltinHooks(registry, {
+      workspaceRoot: "/tmp/workspace",
+      policyKernel: { current: async () => emptyPolicy },
+    });
+
+    expect(registry.list("beforeCommit").map((hook) => hook.name)).toContain(
+      "builtin:response-language-gate",
+    );
+  });
+
   it("registers the memory continuity guard by default", () => {
     const registry = new HookRegistry();
 

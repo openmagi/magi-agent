@@ -58,8 +58,12 @@ class FakeTelegramAdapter implements ChannelAdapter {
   async send(msg: OutboundMessage): Promise<void> {
     this.sent.push(msg);
   }
-  async sendDocument(): Promise<void> {}
-  async sendPhoto(): Promise<void> {}
+  async sendDocument() {
+    return { provider: "telegram" as const, channelId: "chat-1" };
+  }
+  async sendPhoto() {
+    return { provider: "telegram" as const, channelId: "chat-1" };
+  }
   async sendTyping(chatId: string): Promise<void> {
     this.typingChatIds.push(chatId);
   }
