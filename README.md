@@ -64,6 +64,24 @@ Magi moves those behaviors into runtime state. The LLM is the reasoning engine;
 the runtime is the discipline layer that decides what must be evidenced,
 persisted, retried, blocked, delegated, or delivered.
 
+## Runtime Proof
+
+The missing layer is runtime proof. Most open agents stop at output, tests, or
+human review. Magi adds runtime gates that can reject false completion before
+the final answer ships.
+
+This is a category-level comparison, not a claim that every project in a
+category has the same feature set.
+
+| Runtime check | Agent UIs | Coding agents | Agent OS / workflow tools | Magi |
+| --- | --- | --- | --- | --- |
+| **Completion evidence gate** | Usually manual review | Partial: tests and diffs | Partial: playbooks or human review | **Yes:** `completionEvidenceGate`, `codingVerificationGate`, `beforeCommit` |
+| **Deterministic fact checks** | Usually prompt-only | Usually model answer or ad hoc scripts | Not usually explicit | **Yes:** `Clock`, `DateRange`, `Calculation`, deterministic evidence verifier |
+| **Operator rules become gates** | Templates and UI settings | Config and repo instructions | Playbooks | **Yes:** Markdown User Harness Rules compiled into runtime checks |
+| **Resource-boundary proof** | Session permissions | Repo context | Workflow state | **Yes:** resource bindings, used-resource provenance, `resourceBoundaryGate` |
+| **Scheduled delivery safety** | Usually not native | Usually not native | Partial: scheduled tasks | **Yes:** `cronMetaOrchestrator`, `cronDeliverySafety`, persisted channel routing |
+| **Time-structured memory** | Session state | Repo context | Workflow state | **Yes:** Hipocampus root/daily/weekly/monthly compaction plus qmd recall |
+
 ## The Runtime Model
 
 Every user request becomes an atomic `Turn`. A turn can stream, think, call
