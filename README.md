@@ -1,65 +1,68 @@
 # Magi
 
-**Open-source runtime for personal AI agents that can finish work reliably.**
+**Build your own Codex-like personal agent app. Bring any LLM provider, any
+OpenAI-compatible local model, your own workspace, and the runtime discipline
+that keeps agents from pretending work is done.**
 
-Magi is not a prompt chain and not a chatbot wrapper. It is a durable
-agent runtime: every task runs inside an observable loop with tool execution,
-runtime checks, persistent transcripts, memory, deterministic evidence, file
-delivery, scheduled automation, and user-defined harness rules.
+Magi is an open-source agent runtime and self-hostable workbench for personal AI
+agents that do real work: use tools, write files, remember context, run
+schedules, spawn background agents, verify exact values, and deliver generated
+outputs back to the user.
 
-If you are tired of agents that create files but forget to send them, claim work
-is done without verification, compute dates or totals from model intuition, lose
-context after a restart, misroute scheduled jobs, or ignore workflow
-instructions buried in the prompt, Magi moves those behaviors out of
-vibes and into runtime state.
+It is not a prompt chain and not a thin chatbot wrapper. Every request runs
+inside an observable lifecycle with transcripts, hooks, resource boundaries,
+execution contracts, deterministic evidence, file delivery, memory, cron
+discipline, and user-installed harness rules.
 
-Think Claude Code, but open-source, local/self-hostable, multi-provider,
-always-on, and programmable.
+Run it as a terminal agent, a local HTTP runtime, a browser workbench, a PWA, or
+a Tauri desktop app. Point it at Anthropic, OpenAI, Google, Ollama, LM Studio,
+vLLM, llama.cpp server variants, LiteLLM, or your own OpenAI-compatible gateway.
 
-## Self-Hosted App
+```
+Local-first      Self-hostable      BYOK/local LLM      Desktop-buildable
+Memory-aware     Cron-ready         Tool-rich           Runtime-gated
+```
 
-Magi includes **Magi App**, a self-hostable workbench for running
-a Codex-like personal agent app with your own provider, workspace, tools,
-memory, schedules, and harness rules.
+## What You Get
 
-The included `/app` shell connects to the same runtime over HTTP/SSE, streams
-turns, shows live sessions, background tasks, scheduled jobs, artifacts, loaded
-tools, skills, and runtime events. It also supports a per-turn model override
-for testing different providers or routers without changing the agent config,
-while keeping provider secrets out of the browser by using a separate server
-token.
+- **Magi Runtime:** durable agent loop with tools, hooks, transcripts, memory,
+  execution contracts, verification evidence, and scheduled automation.
+- **Magi App:** self-hostable `/app` workbench for chat, streaming events,
+  sessions, tasks, cron jobs, artifacts, tools, skills, provider settings, and
+  Markdown harness rules.
+- **Desktop paths:** install the app as a PWA or build the included Tauri shell
+  from `apps/desktop`.
+- **Provider freedom:** use hosted API keys or no-auth local model servers
+  through one OpenAI-compatible adapter.
+- **Operator control:** add local rules and skills without forking the runtime.
 
-The web shell is installable as a desktop PWA from supported browsers. The repo
-also includes a minimal Tauri desktop shell under `apps/desktop` for users who
-want to build a native local workbench around the same runtime. Signed releases,
-auto-update, telemetry, hosted auth, and billing remain outside the OSS package.
+Hosted Magi Cloud can keep billing, fleet provisioning, managed credentials,
+production auth, hosted data contracts, telemetry, and operator backoffice.
+This repo gives users the local runtime and app surface needed to build their
+own agent stack. See the [open-source app plan](docs/plans/2026-05-04-open-source-agent-app.md)
+for scope, architecture, and release gates.
 
-The goal is to keep the visible app surface open while keeping hosted Magi
-Cloud's production control plane separate: billing, fleet provisioning, managed
-credentials, production auth, hosted data contracts, and operator backoffice stay
-hosted-only. See the [open-source app plan](docs/plans/2026-05-04-open-source-agent-app.md)
-for scope, architecture, milestones, and release gates.
-
-## Why Magi
+## Why It Exists
 
 Most agent frameworks give you a model, a tool schema, and a loop. That is not
-enough for real personal agents.
+enough once the agent has to operate for hours, resume after reconnects, manage
+files, obey workflow constraints, and make exact claims.
 
-Real agents need to:
+Magi is built for the failure modes that show up in production:
 
-- keep working across long tasks, restarts, and channel reconnects
-- remember user context without stuffing the whole chat into the next prompt
-- run tools while respecting file boundaries, safety rules, and permissions
-- pause for user input without losing the turn
-- verify work, exact values, and source usage before committing a final answer
-- deliver generated files back to the user instead of only writing them to disk
-- run scheduled workflows without letting the model guess delivery channels or
-  execute worker tasks in the wrong role
-- expose the control surface so operators can add rules without forking core code
+- agents create files but forget to deliver them
+- final answers claim success without verification
+- dates, counts, totals, and comparisons come from model intuition
+- scheduled jobs guess the wrong delivery channel
+- parent cron turns do worker I/O instead of delegating
+- spawned agents return "I'll do it next" instead of doing the work
+- resource instructions in the prompt are ignored
+- context disappears after a restart
+- local operator rules require a code fork
 
-Magi is built around that premise. The LLM is the reasoning engine; the
-runtime is the discipline layer that decides what must be evidenced,
-persisted, retried, blocked, or delivered.
+Magi moves those behaviors into runtime state. The LLM is the reasoning engine;
+the runtime is the discipline layer that decides what must be evidenced,
+persisted, retried, blocked, delegated, or delivered.
 
 ## The Runtime Model
 
@@ -286,6 +289,46 @@ accidentally replace core tools such as `Browser`, `SocialBrowser`,
 
 ## Quick Start
 
+### Self-Hosted App With Docker Compose
+
+```bash
+git clone https://github.com/openmagi/magi-agent.git
+cd magi-agent
+cp .env.example .env
+cp magi-agent.yaml.example magi-agent.yaml
+docker compose up --build
+```
+
+Open the app:
+
+```text
+http://localhost:8080/app
+```
+
+Set `MAGI_AGENT_SERVER_TOKEN` in `.env`, paste that token into Magi App, and
+keep provider keys in `.env` or your shell environment. The browser receives a
+server token only; raw LLM provider keys are not returned by config APIs.
+
+For Ollama:
+
+```bash
+ollama serve
+ollama pull llama3.1
+```
+
+Start Ollama before your first chat turn. The example `.env` and
+`magi-agent.yaml` already point the container at the host Ollama endpoint. For
+other local servers, change:
+
+```yaml
+llm:
+  provider: openai-compatible
+  model: llama3.1
+  baseUrl: http://host.docker.internal:11434/v1
+```
+
+### Source CLI
+
 ```bash
 git clone https://github.com/openmagi/magi-agent.git
 cd magi-agent
@@ -375,10 +418,11 @@ npm run desktop:build
 ```
 
 The desktop shell connects to the local runtime at `http://127.0.0.1:8080/app`.
-Provider credentials and local model configuration stay in `magi-agent.yaml`,
-not in browser-readable app state.
+The packaged launcher lets users set a different runtime URL without editing the
+Tauri config. Provider credentials and local model configuration stay in
+`magi-agent.yaml` or environment variables, not in browser-readable app state.
 
-The app currently uses these local read-only inspection endpoints:
+The app currently uses these local runtime endpoints:
 
 | Endpoint | Purpose |
 | --- | --- |
@@ -389,9 +433,17 @@ The app currently uses these local read-only inspection endpoints:
 | `GET /v1/app/crons` | Scheduled workflow list, including internal runtime crons for operators. |
 | `GET /v1/app/artifacts` | Generated artifact index. |
 | `GET /v1/app/skills` | Loaded skills, skill issues, and runtime skill hooks. |
+| `GET /v1/app/config` | Sanitized provider/runtime config with secret presence only. |
+| `PUT /v1/app/config` | Writes local config using environment variable references, never raw browser-submitted secrets. |
+| `GET /v1/app/harness-rules` | Lists Markdown harness rule files in the workspace. |
+| `GET /v1/app/harness-rules/:name` | Reads one Markdown harness rule. |
+| `PUT /v1/app/harness-rules/:name` | Writes one Markdown harness rule. |
+| `DELETE /v1/app/harness-rules/:name` | Deletes one Markdown harness rule. |
 
 These endpoints require `Authorization: Bearer $MAGI_AGENT_SERVER_TOKEN` when
-`server.gatewayToken` is configured.
+`server.gatewayToken` is configured. Config writes update `magi-agent.yaml`;
+restart the runtime for provider/model changes to take effect in the current
+process.
 
 ### Programmatic
 
@@ -420,6 +472,13 @@ llm:
   provider: anthropic          # anthropic, openai, google, or openai-compatible
   model: claude-sonnet-4-6
   apiKey: ${ANTHROPIC_API_KEY}
+  # Optional custom model metadata, useful for local/self-hosted models.
+  # capabilities:
+  #   contextWindow: 65536
+  #   maxOutputTokens: 4096
+  #   supportsThinking: false
+  #   inputUsdPerMtok: 0
+  #   outputUsdPerMtok: 0
 
 server:
   gatewayToken: ${MAGI_AGENT_SERVER_TOKEN}
@@ -514,6 +573,12 @@ llm:
   model: llama3.1
   baseUrl: http://127.0.0.1:11434/v1
   # apiKey: ${LOCAL_LLM_API_KEY}  # optional; only set if your server requires it
+  capabilities:
+    contextWindow: 65536
+    maxOutputTokens: 4096
+    supportsThinking: false
+    inputUsdPerMtok: 0
+    outputUsdPerMtok: 0
 ```
 
 The `openai-compatible` adapter uses `/v1/chat/completions`, so it can point at
@@ -527,6 +592,10 @@ single `/v1/chat/completions` request to override the runtime model for that
 turn; omit it or send `auto` to use the configured model. SSE parsers preserve
 split UTF-8 chunks, so multilingual streams remain byte-safe across proxy and
 direct-provider modes.
+
+For unknown local models, the optional `llm.capabilities` block lets operators
+declare context window, output limit, thinking support, and cost metadata so the
+runtime does not have to guess from hosted-model defaults.
 
 ## Hooks: The Control Plane
 
@@ -580,6 +649,9 @@ cp examples/harness-rules/tool-input-match.md ./workspace/harness-rules/
 npx tsx src/cli/index.ts start
 ```
 
+Magi App can also list, read, write, and delete Markdown rule files through the
+Settings panel when connected to a token-protected local runtime.
+
 You can also put one structured rule in `./workspace/USER-HARNESS-RULES.md`, or
 write natural-language operational rules in `./workspace/USER-RULES.md`:
 
@@ -626,8 +698,11 @@ disable these checks.
 ## Requirements
 
 - Node.js 22+
+- Docker Desktop or Docker Engine for the Compose self-host path
 - An API key for Anthropic, OpenAI, or Google, or an OpenAI-compatible local
   model server
+- Rust stable, Cargo, and Tauri platform prerequisites only if building the
+  native desktop shell
 
 ## Contributing
 

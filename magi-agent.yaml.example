@@ -2,17 +2,26 @@
 # Copy this file to magi-agent.yaml and fill in your values.
 
 # LLM Provider
+# Default is a local OpenAI-compatible server so Docker Compose can run without
+# a hosted provider key. Change provider/model/apiKey for Anthropic, OpenAI, or
+# Google when you want a hosted model.
 llm:
-  provider: anthropic          # anthropic | openai | google | openai-compatible
-  model: claude-sonnet-4-6
-  apiKey: ${ANTHROPIC_API_KEY}  # Environment variable reference
+  provider: openai-compatible  # anthropic | openai | google | openai-compatible
+  model: ${CORE_AGENT_MODEL}
+  baseUrl: ${OPENAI_BASE_URL}
+  apiKey: ${OPENAI_API_KEY}    # optional; leave blank for no-auth local servers
+  capabilities:
+    contextWindow: 65536
+    maxOutputTokens: 4096
+    supportsThinking: false
+    inputUsdPerMtok: 0
+    outputUsdPerMtok: 0
 
-# Local/self-hosted model example:
+# Hosted provider example:
 # llm:
-#   provider: openai-compatible
-#   model: llama3.1
-#   baseUrl: http://127.0.0.1:11434/v1
-#   apiKey: ${LOCAL_LLM_API_KEY}  # optional; omit for no-auth local servers
+#   provider: anthropic
+#   model: claude-sonnet-4-6
+#   apiKey: ${ANTHROPIC_API_KEY}
 
 # Local/self-hosted HTTP API token.
 # Use this in Magi App. Do not put your provider API key in the browser.

@@ -1,0 +1,14 @@
+.git
+.github
+node_modules
+dist
+apps/desktop/node_modules
+apps/desktop/src-tauri/target
+workspace
+memory/daily
+memory/weekly
+memory/monthly
+.env
+.env.local
+npm-debug.log
+.DS_Store

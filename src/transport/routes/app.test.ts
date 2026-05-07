@@ -77,6 +77,8 @@ describe("HttpServer /app", () => {
     expect(res.contentType).toContain("text/html");
     expect(res.body).toContain("Magi App");
     expect(res.body).toContain("model-override");
+    expect(res.body).toContain("runtime-config-form");
+    expect(res.body).toContain("harness-rule-form");
     expect(res.body).toContain("/app/app.js");
   });
 

@@ -52,6 +52,7 @@ RUN NODE_LLAMA_CPP_SKIP_DOWNLOAD=true npm ci --omit=dev && npm cache clean --for
 
 COPY --from=builder /build/dist ./dist
 COPY runtime/ ./runtime/
+COPY apps/web/ ./apps/web/
 
 # Bundled superpowers skills — see
 # docs/plans/2026-04-20-superpowers-plugin-design.md. Resolved by

@@ -8,6 +8,10 @@ import type { AgentConfig } from "../Agent.js";
 import type { PermissionMode } from "../Session.js";
 import { createProvider } from "../llm/createProvider.js";
 import { isRouterKeyword, type RoutingMode } from "../routing/types.js";
+import {
+  registerConfiguredModelCapability,
+  type ModelCapabilityOverride,
+} from "./registerConfiguredModelCapability.js";
 
 function requireEnv(name: string): string {
   const v = process.env[name];
@@ -113,6 +117,7 @@ export interface MagiAgentConfig {
     apiKey?: string;
     model?: string;
     baseUrl?: string;
+    capabilities?: ModelCapabilityOverride;
   };
   server?: {
     gatewayToken?: string;
@@ -151,6 +156,7 @@ const DEFAULT_MODELS: Record<string, string> = {
  */
 export function loadFromConfig(config: MagiAgentConfig): RuntimeEnv {
   const model = config.llm.model ?? DEFAULT_MODELS[config.llm.provider] ?? "claude-sonnet-4-6";
+  registerConfiguredModelCapability(model, config.llm.capabilities);
 
   const provider = createProvider({
     provider: config.llm.provider,

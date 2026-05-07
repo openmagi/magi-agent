@@ -132,6 +132,64 @@
               <div id="skills-list" class="snapshot-list"></div>
             </section>
           </div>
+          <section class="settings-panel">
+            <h3>Runtime Config</h3>
+            <form id="runtime-config-form" class="mini-form">
+              <label>
+                Provider
+                <select id="config-provider" name="provider">
+                  <option value="openai-compatible">OpenAI-compatible</option>
+                  <option value="anthropic">Anthropic</option>
+                  <option value="openai">OpenAI</option>
+                  <option value="google">Google</option>
+                </select>
+              </label>
+              <label>
+                Model
+                <input id="config-model" name="model" autocomplete="off" />
+              </label>
+              <label>
+                Base URL
+                <input id="config-base-url" name="baseUrl" autocomplete="url" />
+              </label>
+              <label>
+                API key env var
+                <input id="config-api-key-env" name="apiKeyEnvVar" autocomplete="off" />
+              </label>
+              <label>
+                Server token env var
+                <input id="config-server-token-env" name="serverTokenEnvVar" autocomplete="off" />
+              </label>
+              <div class="split-fields">
+                <label>
+                  Context
+                  <input id="config-context-window" name="contextWindow" inputmode="numeric" />
+                </label>
+                <label>
+                  Max output
+                  <input id="config-max-output" name="maxOutputTokens" inputmode="numeric" />
+                </label>
+              </div>
+              <button type="submit">Save Config</button>
+              <button id="load-config-button" type="button" class="secondary">Load Config</button>
+            </form>
+          </section>
+          <section class="settings-panel">
+            <h3>User Harness Rules</h3>
+            <form id="harness-rule-form" class="mini-form">
+              <label>
+                Rule file
+                <input id="harness-rule-name" name="ruleName" placeholder="file-delivery.md" autocomplete="off" />
+              </label>
+              <label>
+                Markdown
+                <textarea id="harness-rule-content" name="ruleContent" rows="8"></textarea>
+              </label>
+              <button type="submit">Save Rule</button>
+              <button id="delete-rule-button" type="button" class="secondary">Delete Rule</button>
+            </form>
+            <div id="harness-rules-list" class="snapshot-list"></div>
+          </section>
           <div id="events" class="events"></div>
         </aside>
       </main>

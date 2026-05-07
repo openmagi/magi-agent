@@ -8,15 +8,21 @@
  *   - MODEL_CAPABILITIES contains the expected ids
  */
 
-import { describe, it, expect } from "vitest";
+import { afterEach, describe, it, expect } from "vitest";
 import {
   MODEL_CAPABILITIES,
   getCapability,
   computeUsd,
+  registerModelCapability,
+  resetCustomModelCapabilitiesForTests,
   shouldEnableThinkingByDefault,
 } from "./modelCapabilities.js";
 
 describe("getCapability", () => {
+  afterEach(() => {
+    resetCustomModelCapabilitiesForTests();
+  });
+
   it("returns the full record for a known model", () => {
     const cap = getCapability("claude-opus-4-7");
     expect(cap).not.toBeNull();
@@ -66,6 +72,25 @@ describe("getCapability", () => {
       contextWindow: 131072,
     });
     expect(shouldEnableThinkingByDefault("local/gemma-fast")).toBe(false);
+  });
+
+  it("allows runtime registration of custom local model capabilities", () => {
+    registerModelCapability({
+      id: "llama3.1",
+      supportsThinking: false,
+      maxOutputTokens: 4096,
+      contextWindow: 65_536,
+      inputUsdPerMtok: 0,
+      outputUsdPerMtok: 0,
+    });
+
+    expect(getCapability("llama3.1")).toMatchObject({
+      id: "llama3.1",
+      maxOutputTokens: 4096,
+      contextWindow: 65_536,
+    });
+    expect(computeUsd("llama3.1", 1_000_000, 1_000_000)).toBe(0);
+    expect(shouldEnableThinkingByDefault("llama3.1")).toBe(false);
   });
 
   it("recognizes provider-prefixed runtime model ids used by provisioning and api-proxy", () => {

@@ -42,10 +42,13 @@ export type { HttpPostOptions } from "./sseUtils.js";
 // ── Model capabilities ──
 export {
   getCapability,
+  getRegisteredCapability,
   computeUsd,
   shouldEnableThinkingByDefault,
   getContextWindowOrDefault,
   MODEL_CAPABILITIES,
+  registerModelCapability,
+  resetCustomModelCapabilitiesForTests,
   DEFAULT_CONTEXT_WINDOW_TOKENS,
 } from "./modelCapabilities.js";
 export type { ModelCapability } from "./modelCapabilities.js";

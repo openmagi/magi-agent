@@ -17,4 +17,8 @@ describe("core-agent Dockerfile", () => {
     expect(dockerfile).toMatch(/apt-get install[\s\S]*fontconfig[\s\S]*fonts-noto-cjk/);
     expect(dockerfile).toMatch(/PATH=\/home\/ocuser\/\.magi\/bin:\/app\/node_modules\/\.bin/);
   });
+
+  it("ships the self-hosted web app inside the runtime image", () => {
+    expect(dockerfile).toMatch(/COPY apps\/web\/ \.\/apps\/web\//);
+  });
 });

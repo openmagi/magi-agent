@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { loadRuntimeEnv } from "./RuntimeEnv.js";
+import { getCapability, resetCustomModelCapabilitiesForTests } from "../llm/modelCapabilities.js";
+import { loadFromConfig, loadRuntimeEnv } from "./RuntimeEnv.js";
 
 const REQUIRED_ENV = {
   BOT_ID: "bot",
@@ -19,6 +20,7 @@ function setRequiredEnv(): void {
 describe("loadRuntimeEnv", () => {
   afterEach(() => {
     vi.unstubAllEnvs();
+    resetCustomModelCapabilitiesForTests();
   });
 
   it("preserves hosted UX by making bypass an explicit env-mode default", () => {
@@ -42,6 +44,7 @@ describe("loadRuntimeEnv", () => {
 describe("loadRuntimeEnv routing", () => {
   afterEach(() => {
     vi.unstubAllEnvs();
+    resetCustomModelCapabilitiesForTests();
   });
 
   it("defaults routing off for normal single-model bots", () => {
@@ -80,5 +83,35 @@ describe("loadRuntimeEnv routing", () => {
       baseUrl: "https://api.anthropic.com",
       apiKey: "sk-ant-test",
     });
+  });
+});
+
+describe("loadFromConfig model capabilities", () => {
+  afterEach(() => {
+    resetCustomModelCapabilitiesForTests();
+  });
+
+  it("registers local model capabilities from magi-agent.yaml config", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    loadFromConfig({
+      llm: {
+        provider: "openai-compatible",
+        model: "llama3.1",
+        baseUrl: "http://127.0.0.1:11434/v1",
+        capabilities: {
+          contextWindow: 65_536,
+          maxOutputTokens: 4096,
+          supportsThinking: false,
+          inputUsdPerMtok: 0,
+          outputUsdPerMtok: 0,
+        },
+      },
+    });
+
+    expect(getCapability("llama3.1")).toMatchObject({
+      contextWindow: 65_536,
+      maxOutputTokens: 4096,
+    });
+    expect(warn).not.toHaveBeenCalled();
   });
 });

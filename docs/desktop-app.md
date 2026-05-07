@@ -39,14 +39,15 @@ To build an installer/package:
 npm run desktop:build
 ```
 
-The default desktop shell loads:
+The default desktop launcher prompts for a runtime URL and stores it locally in
+the WebView:
 
 ```text
 http://127.0.0.1:8080/app
 ```
 
-Change `apps/desktop/src-tauri/tauri.conf.json` if you want a different local
-port or self-hosted URL.
+Use a different local port or self-hosted URL in the launcher when needed; the
+desktop build itself does not hardcode one runtime endpoint.
 
 ## Local LLMs
 
@@ -60,6 +61,10 @@ llm:
   model: llama3.1
   baseUrl: http://127.0.0.1:11434/v1
   # apiKey: ${LOCAL_LLM_API_KEY}  # optional
+  capabilities:
+    contextWindow: 65536
+    maxOutputTokens: 4096
+    supportsThinking: false
 
 server:
   gatewayToken: ${MAGI_AGENT_SERVER_TOKEN}

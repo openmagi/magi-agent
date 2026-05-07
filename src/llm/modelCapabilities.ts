@@ -214,13 +214,29 @@ export const MODEL_CAPABILITIES: Record<string, ModelCapability> = {
   },
 };
 
+const CUSTOM_MODEL_CAPABILITIES: Record<string, ModelCapability> = {};
+
+export function registerModelCapability(capability: ModelCapability): void {
+  CUSTOM_MODEL_CAPABILITIES[capability.id] = capability;
+}
+
+export function resetCustomModelCapabilitiesForTests(): void {
+  for (const key of Object.keys(CUSTOM_MODEL_CAPABILITIES)) {
+    delete CUSTOM_MODEL_CAPABILITIES[key];
+  }
+}
+
+export function getRegisteredCapability(model: string): ModelCapability | null {
+  return CUSTOM_MODEL_CAPABILITIES[model] ?? MODEL_CAPABILITIES[model] ?? null;
+}
+
 /**
  * Return the capability record for a model id, or null if unknown.
  * Unknown models are warned once per process so operators can add
  * missing entries without noise.
  */
 export function getCapability(model: string): ModelCapability | null {
-  const cap = MODEL_CAPABILITIES[model];
+  const cap = getRegisteredCapability(model);
   if (!cap) {
     warnUnknownModelOnce(model);
     return null;
@@ -251,7 +267,7 @@ export function computeUsd(
  * never send `thinking` to a model that might 400 on it.
  */
 export function shouldEnableThinkingByDefault(model: string): boolean {
-  const cap = MODEL_CAPABILITIES[model];
+  const cap = CUSTOM_MODEL_CAPABILITIES[model] ?? MODEL_CAPABILITIES[model];
   return cap?.supportsThinking ?? false;
 }
 
@@ -272,7 +288,7 @@ export const DEFAULT_CONTEXT_WINDOW_TOKENS = 200_000;
  * `getCapability` at every call site.
  */
 export function getContextWindowOrDefault(model: string): number {
-  const cap = MODEL_CAPABILITIES[model];
+  const cap = CUSTOM_MODEL_CAPABILITIES[model] ?? MODEL_CAPABILITIES[model];
   return cap?.contextWindow ?? DEFAULT_CONTEXT_WINDOW_TOKENS;
 }
 

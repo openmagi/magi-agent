@@ -40,9 +40,9 @@ The open-source app should include:
 - Installable desktop PWA shell for the self-hosted app. Initial manifest,
   service worker, and install prompt: done.
 - Buildable native desktop shell in `apps/desktop` using Tauri. Initial local
-  runtime wrapper: done.
+  runtime wrapper and runtime URL launcher: done.
 - Provider configuration UI for API-key based providers and local provider
-  adapters.
+  adapters. Initial sanitized config editor: done.
 - Session transcript viewer with tool calls, tool results, thinking blocks,
   background task events, delivery events, and commit checkpoints.
 - Workspace file and artifact panels. Initial artifact index: done.
@@ -50,9 +50,10 @@ The open-source app should include:
 - Memory inspector for Hipocampus root/daily/weekly/monthly/qmd state.
 - Cron and scheduled workflow inspector. Initial cron index: done.
 - User Harness Rules editor that writes Markdown rule files into the workspace.
+  Initial Markdown CRUD editor: done.
 - Skills viewer/reload control for workspace `skills/`. Initial skill state:
   done; reload control remains future work.
-- Docker Compose starter that runs the app and agent together.
+- Docker Compose starter that runs the app and agent together. Done.
 - Clear upgrade path to Magi Cloud for managed hosting.
 
 The app can reuse concepts and UI patterns from the hosted frontend, but should
@@ -147,6 +148,8 @@ bearer-token gated by the server token:
 | `/v1/app/crons` | shipped | Scheduled workflow list with internal cron visibility for operators. |
 | `/v1/app/artifacts` | shipped | Generated artifact index. |
 | `/v1/app/skills` | shipped | Skill load state, issues, and runtime skill hooks. |
+| `/v1/app/config` | shipped | Sanitized config read/write using environment variable references for secrets. |
+| `/v1/app/harness-rules` | shipped | Markdown harness rule list/read/write/delete in the workspace. |
 
 Remaining API work:
 
@@ -155,9 +158,8 @@ Remaining API work:
 - Background task get/output/stop controls for the app.
 - Cron create/update/delete controls for the app.
 - Memory browse/search endpoints for Hipocampus root/daily/weekly/monthly/qmd state.
-- Harness rule list/read/write/delete endpoints.
 - Skill reload endpoint exposure in the app.
-- Provider config read/write endpoints that never leak secret values back to the browser.
+- Runtime config reload/restart control after provider config writes.
 
 Where an endpoint does not exist yet, the app plan should drive small,
 documented runtime API additions instead of coupling the app to private hosted
@@ -168,7 +170,9 @@ routes.
 Status on 2026-05-07: M0 is complete, M1 has a dependency-free shell at `/app`,
 the first M3 read-only runtime inspector is wired through documented
 `/v1/app/*` HTTP APIs, and the app has both an installable PWA desktop shell and
-a buildable Tauri wrapper under `apps/desktop`.
+a buildable Tauri wrapper under `apps/desktop`. M2 has an initial sanitized
+provider/local-model config editor. M4 has an initial Markdown Harness Rules
+editor. M5 has a Docker Compose starter.
 
 ### M0: Boundary And Marketing
 
@@ -194,11 +198,12 @@ a buildable Tauri wrapper under `apps/desktop`.
 ### M2: Provider And Workspace Setup
 
 - Add first-run setup for workspace path, model provider, model name, and
-  provider credentials.
-- Store secrets locally or hand them to the runtime for storage.
-- Never echo raw secrets into browser-readable config responses.
+  provider credentials. Initial config editor: done.
+- Store secrets locally or hand them to the runtime for storage. Initial env-var
+  reference model: done.
+- Never echo raw secrets into browser-readable config responses. Done.
 - Support at least Anthropic/OpenAI/Google-compatible provider settings if the
-  runtime adapters are configured.
+  runtime adapters are configured. Done.
 
 ### M3: Runtime Visibility
 
@@ -212,14 +217,14 @@ a buildable Tauri wrapper under `apps/desktop`.
 ### M4: Automation And Rules
 
 - Add cron list/create/update/delete UI.
-- Add User Harness Rules editor backed by Markdown files.
+- Add User Harness Rules editor backed by Markdown files. Initial editor: done.
 - Add memory and qmd inspector.
 - Add skills list/reload UI.
 
 ### M5: Self-Host Bundle
 
-- Add Docker Compose for app + agent.
-- Add sample `.env.example` with non-secret placeholders.
+- Add Docker Compose for app + agent. Done.
+- Add sample `.env.example` with non-secret placeholders. Done.
 - Add production hardening notes for reverse proxy, TLS, auth, and provider key
   handling.
 - Add hosted Magi Cloud upgrade copy without making the OSS app dependent on

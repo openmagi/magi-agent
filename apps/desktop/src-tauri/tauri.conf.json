@@ -4,15 +4,14 @@
   "version": "0.2.0",
   "identifier": "ai.openmagi.magi",
   "build": {
-    "devUrl": "http://127.0.0.1:8080/app",
-    "frontendDist": "http://127.0.0.1:8080/app"
+    "frontendDist": "../launcher"
   },
   "app": {
     "windows": [
       {
         "label": "main",
         "title": "Magi",
-        "url": "http://127.0.0.1:8080/app",
+        "url": "index.html",
         "width": 1280,
         "height": 840,
         "minWidth": 900,

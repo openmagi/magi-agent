@@ -63,6 +63,39 @@ describe("loadConfig server settings", () => {
     }
   });
 
+  it("accepts model capability overrides for local providers", async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), "magi-config-"));
+    await fs.writeFile(
+      path.join(dir, "magi-agent.yaml"),
+      [
+        "llm:",
+        "  provider: openai-compatible",
+        "  model: llama3.1",
+        "  baseUrl: http://127.0.0.1:11434/v1",
+        "  capabilities:",
+        "    contextWindow: 65536",
+        "    maxOutputTokens: 4096",
+        "    supportsThinking: false",
+        "    inputUsdPerMtok: 0",
+        "    outputUsdPerMtok: 0",
+      ].join("\n"),
+      "utf8",
+    );
+
+    try {
+      const config = loadConfig(dir);
+      expect(config.llm.capabilities).toMatchObject({
+        contextWindow: 65_536,
+        maxOutputTokens: 4096,
+        supportsThinking: false,
+        inputUsdPerMtok: 0,
+        outputUsdPerMtok: 0,
+      });
+    } finally {
+      await fs.rm(dir, { recursive: true, force: true });
+    }
+  });
+
   it("requires a base URL for OpenAI-compatible local providers", async () => {
     const dir = await fs.mkdtemp(path.join(os.tmpdir(), "magi-config-"));
     await fs.writeFile(

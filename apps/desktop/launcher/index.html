@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Magi Desktop</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f4ef;
+        --ink: #1f2523;
+        --muted: #66736f;
+        --line: #d8ded8;
+        --surface: #ffffff;
+        --accent: #106b5a;
+        font-family:
+          Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
+          "Segoe UI", sans-serif;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        display: grid;
+        place-items: center;
+        min-height: 100vh;
+        margin: 0;
+        background: var(--bg);
+        color: var(--ink);
+      }
+      main {
+        width: min(560px, calc(100vw - 32px));
+        padding: 28px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: var(--surface);
+      }
+      h1 {
+        margin: 0 0 8px;
+        font-size: 24px;
+        line-height: 1.2;
+      }
+      p {
+        margin: 0 0 18px;
+        color: var(--muted);
+        line-height: 1.5;
+      }
+      label {
+        display: grid;
+        gap: 8px;
+        margin-bottom: 14px;
+        color: var(--muted);
+        font-size: 13px;
+        font-weight: 700;
+      }
+      input {
+        width: 100%;
+        min-height: 44px;
+        padding: 0 12px;
+        border: 1px solid var(--line);
+        border-radius: 6px;
+        color: var(--ink);
+        font: inherit;
+      }
+      button {
+        min-height: 42px;
+        padding: 0 16px;
+        border: 0;
+        border-radius: 6px;
+        background: var(--accent);
+        color: #fff;
+        cursor: pointer;
+        font: inherit;
+        font-weight: 800;
+      }
+      small {
+        display: block;
+        margin-top: 12px;
+        color: var(--muted);
+        line-height: 1.4;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Magi Desktop</h1>
+      <p>Connect this desktop shell to a local or self-hosted Magi runtime.</p>
+      <form id="runtime-form">
+        <label>
+          Runtime URL
+          <input id="runtime-url" autocomplete="url" />
+        </label>
+        <button type="submit">Open Workbench</button>
+      </form>
+      <small>
+        Default: http://127.0.0.1:8080/app. Start the runtime with
+        <code>magi-agent serve --port 8080</code> or Docker Compose.
+      </small>
+    </main>
+    <script>
+      const storageKey = "magi.desktop.runtimeUrl";
+      const defaultUrl = "http://127.0.0.1:8080/app";
+      const form = document.querySelector("#runtime-form");
+      const input = document.querySelector("#runtime-url");
+
+      function cleanUrl(value) {
+        const trimmed = value.trim();
+        return trimmed.length > 0 ? trimmed : defaultUrl;
+      }
+
+      input.value = localStorage.getItem(storageKey) || defaultUrl;
+      form.addEventListener("submit", (event) => {
+        event.preventDefault();
+        const url = cleanUrl(input.value);
+        localStorage.setItem(storageKey, url);
+        window.location.href = url;
+      });
+    </script>
+  </body>
+</html>

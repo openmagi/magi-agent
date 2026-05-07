@@ -29,6 +29,7 @@ body {
 
 button,
 input,
+select,
 textarea {
   font: inherit;
 }
@@ -134,6 +135,7 @@ label {
 }
 
 input,
+select,
 textarea {
   width: 100%;
   border: 1px solid var(--line);
@@ -148,6 +150,11 @@ input {
   padding: 0 10px;
 }
 
+select {
+  min-height: 38px;
+  padding: 0 10px;
+}
+
 textarea {
   min-height: 76px;
   resize: vertical;
@@ -155,6 +162,7 @@ textarea {
 }
 
 input:focus,
+select:focus,
 textarea:focus {
   border-color: var(--accent);
   box-shadow: 0 0 0 3px rgba(16, 107, 90, 0.14);
@@ -301,6 +309,40 @@ dd {
 .snapshot-list {
   display: grid;
   gap: 8px;
+}
+
+.settings-panel {
+  display: grid;
+  gap: 10px;
+  padding-top: 16px;
+  border-top: 1px solid var(--line);
+}
+
+.mini-form {
+  display: grid;
+  gap: 10px;
+}
+
+.split-fields {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.rule-button {
+  width: 100%;
+  min-height: 34px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  background: #fff;
+  color: var(--ink);
+  text-align: left;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.rule-button:hover {
+  background: var(--soft);
 }
 
 .snapshot-item,

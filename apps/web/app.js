@@ -28,6 +28,20 @@ const els = {
   runtimeTools: document.querySelector("#runtime-tools"),
   runtimeSkills: document.querySelector("#runtime-skills"),
   eventCount: document.querySelector("#event-count"),
+  runtimeConfigForm: document.querySelector("#runtime-config-form"),
+  configProvider: document.querySelector("#config-provider"),
+  configModel: document.querySelector("#config-model"),
+  configBaseUrl: document.querySelector("#config-base-url"),
+  configApiKeyEnv: document.querySelector("#config-api-key-env"),
+  configServerTokenEnv: document.querySelector("#config-server-token-env"),
+  configContextWindow: document.querySelector("#config-context-window"),
+  configMaxOutput: document.querySelector("#config-max-output"),
+  loadConfigButton: document.querySelector("#load-config-button"),
+  harnessRuleForm: document.querySelector("#harness-rule-form"),
+  harnessRuleName: document.querySelector("#harness-rule-name"),
+  harnessRuleContent: document.querySelector("#harness-rule-content"),
+  deleteRuleButton: document.querySelector("#delete-rule-button"),
+  harnessRulesList: document.querySelector("#harness-rules-list"),
   sessionLabel: document.querySelector("#session-label"),
   messages: document.querySelector("#messages"),
   events: document.querySelector("#events"),
@@ -144,6 +158,26 @@ async function getJson(path) {
   return payload;
 }
 
+async function sendJson(path, method, body) {
+  const base = normalizeAgentUrl(els.agentUrl.value);
+  const response = await fetch(`${base}${path}`, {
+    method,
+    headers: {
+      "Content-Type": "application/json",
+      ...authHeaders(),
+    },
+    body: JSON.stringify(body),
+  });
+  let payload = {};
+  try {
+    payload = await response.json();
+  } catch {
+    /* keep empty payload */
+  }
+  if (!response.ok) throw new Error(payload.error || response.statusText);
+  return payload;
+}
+
 function formatTime(ms) {
   if (typeof ms !== "number" || ms <= 0) return "";
   return new Date(ms).toLocaleString();
@@ -238,6 +272,118 @@ async function loadRuntimeSnapshot() {
   });
 }
 
+function numericValue(input) {
+  const raw = input.value.trim();
+  if (!raw) return undefined;
+  const value = Number.parseInt(raw, 10);
+  return Number.isFinite(value) && value > 0 ? value : undefined;
+}
+
+async function loadAppConfig() {
+  const payload = await getJson("/v1/app/config");
+  const config = payload.config || {};
+  const llm = config.llm || {};
+  const server = config.server || {};
+  els.configProvider.value = llm.provider || "openai-compatible";
+  els.configModel.value = llm.model || "llama3.1";
+  els.configBaseUrl.value = llm.baseUrl || "";
+  els.configApiKeyEnv.value = llm.apiKeyEnvVar || "";
+  els.configServerTokenEnv.value = server.gatewayTokenEnvVar || "MAGI_AGENT_SERVER_TOKEN";
+  els.configContextWindow.value = llm.capabilities?.contextWindow || "";
+  els.configMaxOutput.value = llm.capabilities?.maxOutputTokens || "";
+  addEvent("config_loaded", {
+    exists: payload.exists === true,
+    provider: llm.provider,
+    model: llm.model,
+    apiKeySet: llm.apiKeySet === true,
+  });
+}
+
+async function saveAppConfig() {
+  const contextWindow = numericValue(els.configContextWindow);
+  const maxOutputTokens = numericValue(els.configMaxOutput);
+  const capabilities =
+    contextWindow || maxOutputTokens
+      ? {
+          ...(contextWindow ? { contextWindow } : {}),
+          ...(maxOutputTokens ? { maxOutputTokens } : {}),
+          supportsThinking: false,
+          inputUsdPerMtok: 0,
+          outputUsdPerMtok: 0,
+        }
+      : undefined;
+  await sendJson("/v1/app/config", "PUT", {
+    llm: {
+      provider: els.configProvider.value,
+      model: els.configModel.value.trim() || "llama3.1",
+      baseUrl: els.configBaseUrl.value.trim(),
+      apiKeyEnvVar: els.configApiKeyEnv.value.trim(),
+      capabilities,
+    },
+    server: {
+      gatewayTokenEnvVar: els.configServerTokenEnv.value.trim() || "MAGI_AGENT_SERVER_TOKEN",
+    },
+    workspace: "./workspace",
+  });
+  addEvent("config_saved", {
+    provider: els.configProvider.value,
+    model: els.configModel.value.trim() || "llama3.1",
+  });
+}
+
+function renderHarnessRules(rules) {
+  els.harnessRulesList.textContent = "";
+  if (!Array.isArray(rules) || rules.length === 0) {
+    const empty = document.createElement("div");
+    empty.className = "snapshot-empty";
+    empty.textContent = "No harness rules";
+    els.harnessRulesList.appendChild(empty);
+    return;
+  }
+  for (const rule of rules) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "rule-button";
+    button.textContent = `${rule.name} (${rule.sizeBytes || 0} bytes)`;
+    button.addEventListener("click", () => {
+      void loadHarnessRule(rule.name);
+    });
+    els.harnessRulesList.appendChild(button);
+  }
+}
+
+async function loadHarnessRules() {
+  const payload = await getJson("/v1/app/harness-rules");
+  renderHarnessRules(payload.rules || []);
+  addEvent("harness_rules_loaded", { count: Array.isArray(payload.rules) ? payload.rules.length : 0 });
+}
+
+async function loadHarnessRule(name) {
+  const payload = await getJson(`/v1/app/harness-rules/${encodeURIComponent(name)}`);
+  els.harnessRuleName.value = payload.name || name;
+  els.harnessRuleContent.value = payload.content || "";
+  addEvent("harness_rule_loaded", { name: payload.name || name });
+}
+
+async function saveHarnessRule() {
+  const name = els.harnessRuleName.value.trim();
+  if (!name) throw new Error("Rule file name is required");
+  await sendJson(`/v1/app/harness-rules/${encodeURIComponent(name)}`, "PUT", {
+    content: els.harnessRuleContent.value,
+  });
+  await loadHarnessRules();
+  addEvent("harness_rule_saved", { name });
+}
+
+async function deleteHarnessRule() {
+  const name = els.harnessRuleName.value.trim();
+  if (!name) throw new Error("Rule file name is required");
+  await sendJson(`/v1/app/harness-rules/${encodeURIComponent(name)}`, "DELETE", {});
+  els.harnessRuleContent.value = "";
+  await loadHarnessRules();
+  addEvent("harness_rule_deleted", { name });
+}
+
 async function checkRuntime() {
   const base = normalizeAgentUrl(els.agentUrl.value);
   els.runtimeStatus.textContent = "Checking";
@@ -249,6 +395,8 @@ async function checkRuntime() {
     addEvent("health", payload);
     try {
       await loadRuntimeSnapshot();
+      await loadAppConfig();
+      await loadHarnessRules();
     } catch (error) {
       addEvent("runtime_snapshot_error", { message: String(error.message || error) });
     }
@@ -360,6 +508,32 @@ els.installButton.addEventListener("click", async () => {
   prompt.prompt();
   const choice = await prompt.userChoice;
   addEvent("install_prompt", { outcome: choice?.outcome || "unknown" });
+});
+
+els.loadConfigButton.addEventListener("click", () => {
+  void loadAppConfig().catch((error) =>
+    addEvent("config_error", { message: String(error.message || error) }),
+  );
+});
+
+els.runtimeConfigForm.addEventListener("submit", (event) => {
+  event.preventDefault();
+  void saveAppConfig().catch((error) =>
+    addEvent("config_error", { message: String(error.message || error) }),
+  );
+});
+
+els.harnessRuleForm.addEventListener("submit", (event) => {
+  event.preventDefault();
+  void saveHarnessRule().catch((error) =>
+    addEvent("harness_rule_error", { message: String(error.message || error) }),
+  );
+});
+
+els.deleteRuleButton.addEventListener("click", () => {
+  void deleteHarnessRule().catch((error) =>
+    addEvent("harness_rule_error", { message: String(error.message || error) }),
+  );
 });
 
 els.sessionKey.addEventListener("input", updateSessionLabel);

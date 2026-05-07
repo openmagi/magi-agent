@@ -6,6 +6,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { parse as parseYaml } from "yaml";
+import type { ModelCapabilityOverride } from "../config/registerConfiguredModelCapability.js";
 
 export interface MagiAgentConfig {
   llm: {
@@ -13,6 +14,7 @@ export interface MagiAgentConfig {
     model: string;
     apiKey?: string;
     baseUrl?: string;
+    capabilities?: ModelCapabilityOverride;
   };
   channels?: {
     telegram?: { token: string };
@@ -66,6 +68,43 @@ function resolveEnvVars(obj: unknown): unknown {
     return result;
   }
   return obj;
+}
+
+function validateCapabilityNumber(
+  capabilities: Record<string, unknown>,
+  field: keyof ModelCapabilityOverride,
+  configPath: string,
+): void {
+  const value = capabilities[field];
+  if (value === undefined) return;
+  if (typeof value !== "number" || !Number.isFinite(value) || value < 0) {
+    throw new Error(`Invalid llm.capabilities.${field} in ${configPath}.`);
+  }
+}
+
+function validateCapabilities(
+  llm: Record<string, unknown>,
+  configPath: string,
+): void {
+  if (llm.capabilities === undefined) return;
+  if (
+    !llm.capabilities ||
+    typeof llm.capabilities !== "object" ||
+    Array.isArray(llm.capabilities)
+  ) {
+    throw new Error(`Invalid llm.capabilities in ${configPath}.`);
+  }
+  const capabilities = llm.capabilities as Record<string, unknown>;
+  if (
+    capabilities.supportsThinking !== undefined &&
+    typeof capabilities.supportsThinking !== "boolean"
+  ) {
+    throw new Error(`Invalid llm.capabilities.supportsThinking in ${configPath}.`);
+  }
+  validateCapabilityNumber(capabilities, "maxOutputTokens", configPath);
+  validateCapabilityNumber(capabilities, "contextWindow", configPath);
+  validateCapabilityNumber(capabilities, "inputUsdPerMtok", configPath);
+  validateCapabilityNumber(capabilities, "outputUsdPerMtok", configPath);
 }
 
 /**
@@ -143,6 +182,8 @@ export function loadConfig(dir?: string): MagiAgentConfig {
   if (llm.baseUrl !== undefined && typeof llm.baseUrl !== "string") {
     throw new Error(`Invalid llm.baseUrl in ${configPath}.`);
   }
+
+  validateCapabilities(llm, configPath);
 
   return resolved as unknown as MagiAgentConfig;
 }

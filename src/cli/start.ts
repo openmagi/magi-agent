@@ -14,6 +14,7 @@ import { Session } from "../Session.js";
 import type { AgentEvent, SseWriter } from "../transport/SseWriter.js";
 import type { UserMessage, ChannelRef } from "../util/types.js";
 import { createProvider } from "../llm/createProvider.js";
+import { registerConfiguredModelCapability } from "../config/registerConfiguredModelCapability.js";
 
 // ANSI helpers
 const BOLD = "\x1b[1m";
@@ -117,6 +118,7 @@ function buildAgentConfig(
     : path.resolve("./workspace");
 
   const model = config.llm.model ?? DEFAULT_MODELS[config.llm.provider] ?? "claude-sonnet-4-6";
+  registerConfiguredModelCapability(model, config.llm.capabilities);
 
   const provider = createProvider({
     provider: config.llm.provider,

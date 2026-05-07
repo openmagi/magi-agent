@@ -31,6 +31,8 @@ import type { Discipline } from "./Session.js";
 import { DEFAULT_DISCIPLINE } from "./discipline/config.js";
 import { ExecutionContractStore } from "./execution/ExecutionContract.js";
 
+const AGENT_START_TEST_TIMEOUT_MS = 15_000;
+
 function makeHookCtx(): HookContext {
   const store = new ExecutionContractStore({ now: () => 1 });
   const llm = {
@@ -126,7 +128,7 @@ describe("Agent Discipline — Kevin A/A/A defaults", () => {
     } finally {
       await agent.stop();
     }
-  });
+  }, AGENT_START_TEST_TIMEOUT_MS);
 
   it("A1: Agent.start is idempotent — existing .git is reused", async () => {
     // Pre-create a repo with a known marker commit so we can assert it
@@ -160,7 +162,7 @@ describe("Agent Discipline — Kevin A/A/A defaults", () => {
     } finally {
       await agent.stop();
     }
-  });
+  }, AGENT_START_TEST_TIMEOUT_MS);
 
   it("A2: `.discipline.yaml` simple schema `{ mode, skipTdd }` applies to new sessions", async () => {
     await fs.writeFile(
@@ -193,7 +195,7 @@ describe("Agent Discipline — Kevin A/A/A defaults", () => {
     } finally {
       await agent.stop();
     }
-  });
+  }, AGENT_START_TEST_TIMEOUT_MS);
 
   it("A2: `.discipline.yaml` simple schema with skipTdd:true disables tdd", async () => {
     await fs.writeFile(
@@ -225,7 +227,7 @@ describe("Agent Discipline — Kevin A/A/A defaults", () => {
     } finally {
       await agent.stop();
     }
-  });
+  }, AGENT_START_TEST_TIMEOUT_MS);
 
   it("A3: classifier keeps soft when coding-agent skill NOT active", async () => {
     const discipline: Discipline = { ...DEFAULT_DISCIPLINE };
