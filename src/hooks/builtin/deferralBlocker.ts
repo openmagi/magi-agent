@@ -1,15 +1,16 @@
 /**
- * Deferral blocker hook — beforeCommit, priority 86.
+ * Deferral blocker hook — beforeCommit, priority 79.
  *
  * Problem (2026-04-20 admin-bot POS case): the LLM drafts an answer
  * that promises "I'll send results when done" / "완료되면 결과
  * 보내드리겠습니다" / "5분 후 결과 드릴게요" AND ends the turn, stranding
  * the user. Claude Code handles long work by running the work
- * synchronously in the same turn and returning the artefact. Clawy
+ * synchronously in the same turn and returning the artefact. Magi
  * should match that.
  *
- * Distinct from preRefusalVerifier (priority 85): that blocks refusals
- * without investigation. This blocks turn endings where the bot
+ * Runs before selfClaimVerifier (priority 80) so a slow classifier cannot
+ * abort the commit before deterministic deferral text is blocked. This
+ * blocks turn endings where the bot
  * narrates future delivery without having delivered. Fires when:
  *   1. Response text matches a deferral-promise pattern, AND
  *   2. The turn either:
@@ -193,9 +194,11 @@ export function makeDeferralBlockerHook(
   return {
     name: "builtin:deferral-blocker",
     point: "beforeCommit",
-    // 86 — one notch after preRefusalVerifier (85), before answerVerifier (90).
-    priority: 86,
+    // 79 — before selfClaimVerifier (80), so a deferral classification
+    // cannot be bypassed by a timeout in that hook.
+    priority: 79,
     blocking: true,
+    failOpen: true,
     handler: async ({ assistantText, retryCount, userMessage }, ctx: HookContext) => {
       try {
         if (!isEnabled()) return { action: "continue" };
@@ -274,7 +277,7 @@ export function makeDeferralBlockerHook(
           reason: [
             "[RETRY:DEFERRAL_BLOCKED] You drafted a response that defers",
             "delivery to a later message (\"I'll send results when done\" /",
-            "\"완료되면 결과 보내드릴게요\" / \"잠시만요\"). Clawy turns are",
+            "\"완료되면 결과 보내드릴게요\" / \"잠시만요\"). Magi turns are",
             "synchronous: complete the work in THIS turn and return the",
             "result inline, like Claude Code does. Either:",
             "  (a) Call the remaining tools (SpawnAgent, Bash, FileRead,",

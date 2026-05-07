@@ -3,12 +3,12 @@
  *
  * Design reference:
  * - `docs/plans/2026-04-19-core-agent-phase-3-plan.md` §5 / T3-17
- * - `docs/plans/2026-04-19-clawy-core-agent-design.md` §7.12.c
+ * - `docs/plans/2026-04-19-magi-core-agent-design.md` §7.12.c
  *   (identity fencing format)
  *
  * legacy gateway's SOUL.md was a bot-authored prompt convention — hackable
  * and self-mutable. This hook implements the user-authored equivalent
- * for Clawy: the bot operator defines role / hard rules / methodology
+ * for Magi: the bot operator defines role / hard rules / methodology
  * in three workspace files and we prepend them to the system prompt on
  * every first iteration of a turn.
  *

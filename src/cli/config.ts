@@ -1,5 +1,5 @@
 /**
- * Config file loader — reads clawy-agent.yaml from the working directory,
+ * Config file loader — reads magi-agent.yaml from the working directory,
  * resolves ${ENV_VAR} references, and returns a typed config object.
  */
 
@@ -7,7 +7,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { parse as parseYaml } from "yaml";
 
-export interface ClawyAgentConfig {
+export interface MagiAgentConfig {
   llm: {
     provider: "anthropic" | "openai" | "google";
     model: string;
@@ -41,7 +41,7 @@ export interface ClawyAgentConfig {
   };
 }
 
-const CONFIG_FILENAME = "clawy-agent.yaml";
+const CONFIG_FILENAME = "magi-agent.yaml";
 
 /**
  * Recursively walk a parsed YAML object and replace every `${VAR_NAME}`
@@ -68,11 +68,11 @@ function resolveEnvVars(obj: unknown): unknown {
 }
 
 /**
- * Load and parse `clawy-agent.yaml` from the given directory (defaults
+ * Load and parse `magi-agent.yaml` from the given directory (defaults
  * to `process.cwd()`). Throws with a user-friendly message if the file
  * is missing or malformed.
  */
-export function loadConfig(dir?: string): ClawyAgentConfig {
+export function loadConfig(dir?: string): MagiAgentConfig {
   const configPath = path.join(dir ?? process.cwd(), CONFIG_FILENAME);
 
   let raw: string;
@@ -82,7 +82,7 @@ export function loadConfig(dir?: string): ClawyAgentConfig {
     const code = (err as NodeJS.ErrnoException).code;
     if (code === "ENOENT") {
       throw new Error(
-        `Config file not found: ${configPath}\nRun "clawy-agent init" to create one.`,
+        `Config file not found: ${configPath}\nRun "magi-agent init" to create one.`,
       );
     }
     throw new Error(`Failed to read config: ${(err as Error).message}`);
@@ -107,7 +107,7 @@ export function loadConfig(dir?: string): ClawyAgentConfig {
   const llm = resolved.llm as Record<string, unknown> | undefined;
   if (!llm || typeof llm !== "object") {
     throw new Error(
-      `Missing "llm" section in ${configPath}. Run "clawy-agent init" to generate a valid config.`,
+      `Missing "llm" section in ${configPath}. Run "magi-agent init" to generate a valid config.`,
     );
   }
 
@@ -128,7 +128,7 @@ export function loadConfig(dir?: string): ClawyAgentConfig {
     );
   }
 
-  return resolved as unknown as ClawyAgentConfig;
+  return resolved as unknown as MagiAgentConfig;
 }
 
 /** Return the path where the config file would be written. */

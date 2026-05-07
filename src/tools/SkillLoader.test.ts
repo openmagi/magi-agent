@@ -320,7 +320,7 @@ describe("SkillLoader — Phase 2b prompt-only path", () => {
       scriptPath,
       [
         "#!/bin/sh",
-        "node -e 'console.log(JSON.stringify({pwd: process.cwd(), workspace: process.env.CLAWY_WORKSPACE_ROOT, input: process.env.CLAWY_SKILL_INPUT}))'",
+        "node -e 'console.log(JSON.stringify({pwd: process.cwd(), workspace: process.env.MAGI_WORKSPACE_ROOT, input: process.env.MAGI_SKILL_INPUT}))'",
       ].join("\n"),
       "utf8",
     );

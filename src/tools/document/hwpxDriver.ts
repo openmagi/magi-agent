@@ -316,7 +316,7 @@ async function runPython(scriptPath: string, args: string[]): Promise<void> {
 }
 
 export async function writeHwpxFromBlocks(input: WriteHwpxInput): Promise<void> {
-  const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "clawy-hwpx-"));
+  const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "magi-hwpx-"));
   const sectionPath = path.join(tempRoot, "section0.xml");
   const buildScript = path.join(HWPX_RUNTIME_ROOT, "scripts", "build_hwpx.py");
   const validateScript = path.join(HWPX_RUNTIME_ROOT, "scripts", "validate.py");

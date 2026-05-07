@@ -15,7 +15,7 @@ const MIME_TYPES: Record<string, string> = {
 
 function candidateAppRoots(): string[] {
   return [
-    ...(process.env.CLAWY_AGENT_APP_ROOT ? [process.env.CLAWY_AGENT_APP_ROOT] : []),
+    ...(process.env.MAGI_AGENT_APP_ROOT ? [process.env.MAGI_AGENT_APP_ROOT] : []),
     path.resolve(process.cwd(), "apps/web"),
     path.resolve(__dirname, "../../../apps/web"),
     path.resolve(__dirname, "../../../../apps/web"),

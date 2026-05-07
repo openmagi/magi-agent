@@ -2,8 +2,10 @@ import { describe, it, expect, vi } from "vitest";
 import {
   matchesDeferral,
   countWorkToolsThisTurn,
+  deferralBlockerHook,
   makeDeferralBlockerHook,
 } from "./deferralBlocker.js";
+import { selfClaimVerifierHook } from "./selfClaimVerifier.js";
 import type { HookContext } from "../types.js";
 import { ExecutionContractStore } from "../../execution/ExecutionContract.js";
 
@@ -47,8 +49,15 @@ describe("matchesDeferral (LLM-based)", () => {
     expect(await matchesDeferral("")).toBe(false);
   });
 
-  it("returns false when no LLM context available (fail-open)", async () => {
-    expect(await matchesDeferral("완료되면 결과 보내드리겠습니다")).toBe(false);
+  it("returns false when no LLM context is available", async () => {
+    expect(await matchesDeferral("진행 상황을 확인해 보겠습니다.")).toBe(false);
+    expect(await matchesDeferral("지금 1-3 마무리 시작할 게. 10분 내 완성할 거야.")).toBe(false);
+  });
+});
+
+describe("deferralBlocker ordering", () => {
+  it("runs before self-claim verifier so classifier timeouts cannot bypass deferral blocking", () => {
+    expect(deferralBlockerHook.priority).toBeLessThan(selfClaimVerifierHook.priority);
   });
 });
 

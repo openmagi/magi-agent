@@ -85,7 +85,7 @@ export function readBuildInfo(): BuildInfo {
   const expectedImage: ImageIdentity = {
     buildSha:
       readNonEmptyEnv("CORE_AGENT_BUILD_SHA") ??
-      readNonEmptyEnv("CLAWY_BUILD_SHA") ??
+      readNonEmptyEnv("MAGI_BUILD_SHA") ??
       readNonEmptyEnv("VERCEL_GIT_COMMIT_SHA") ??
       null,
     imageRepo: readNonEmptyEnv("CORE_AGENT_IMAGE_REPO"),

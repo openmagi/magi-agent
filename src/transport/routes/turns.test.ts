@@ -17,7 +17,7 @@ import { AuditLog } from "../../storage/AuditLog.js";
 import { ResetCounterStore } from "../../slash/resetCounters.js";
 import { ControlEventLedger } from "../../control/ControlEventLedger.js";
 import { ControlRequestStore } from "../../control/ControlRequestStore.js";
-import { extractLastUserMessage, extractReplyTo } from "./turns.js";
+import { extractLastUserMessage, extractReplyTo, extractRuntimeModelOverride } from "./turns.js";
 
 interface SseLike {
   legacyDelta(_t: string): void;
@@ -336,6 +336,26 @@ describe("HttpServer /v1/chat/completions + /v1/turns/:id/ask-response", () => {
       | undefined;
     expect(userMsg).toBeDefined();
     expect(userMsg?.metadata).toBeUndefined();
+  });
+
+  it("POST /v1/chat/completions passes explicit model override to the turn", async () => {
+    const r = await rawRequest(
+      "POST",
+      `http://127.0.0.1:${port}/v1/chat/completions`,
+      {
+        Authorization: `Bearer ${TOKEN}`,
+        "Content-Type": "application/json",
+      },
+      JSON.stringify({
+        model: "big-dic-router/auto",
+        messages: [{ role: "user", content: "use premium router here" }],
+      }),
+    );
+
+    expect(r.status).toBe(200);
+    expect(capture.runOptions).toMatchObject({
+      runtimeModelOverride: "big-dic-router/auto",
+    });
   });
 
   it("POST /v1/chat/completions preserves kb-context system addendum and image blocks", async () => {
@@ -1009,6 +1029,21 @@ describe("extractReplyTo", () => {
       messages: [],
     });
     expect(out).toEqual({ messageId: "m1", preview: "hello", role: "user" });
+  });
+});
+
+describe("extractRuntimeModelOverride", () => {
+  it("returns trimmed explicit model names", () => {
+    expect(extractRuntimeModelOverride({ model: "  openai/gpt-5.5-pro  " })).toBe(
+      "openai/gpt-5.5-pro",
+    );
+  });
+
+  it("drops empty and automatic model sentinel values", () => {
+    expect(extractRuntimeModelOverride(null)).toBeUndefined();
+    expect(extractRuntimeModelOverride({ model: "" })).toBeUndefined();
+    expect(extractRuntimeModelOverride({ model: "auto" })).toBeUndefined();
+    expect(extractRuntimeModelOverride({ model: "magi-smart-router/auto" })).toBeUndefined();
   });
 });
 

@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
 import type { AgentConfig } from "../Agent.js";
-import type { ClawyAgentConfig } from "./config.js";
+import type { MagiAgentConfig } from "./config.js";
 import { resolveHttpBearerToken } from "./serve.js";
 
-function baseConfig(): ClawyAgentConfig {
+function baseConfig(): MagiAgentConfig {
   return {
     llm: {
       provider: "anthropic",
@@ -17,7 +17,7 @@ function baseAgentConfig(): AgentConfig {
   return {
     botId: "cli-serve",
     userId: "cli-user",
-    workspaceRoot: "/tmp/clawy-agent",
+    workspaceRoot: "/tmp/magi-agent",
     gatewayToken: "provider-secret",
     apiProxyUrl: "https://api.anthropic.com",
     model: "claude-sonnet-4-6",

@@ -3,7 +3,7 @@
  *
  * Design reference:
  * - `docs/plans/2026-04-19-core-agent-phase-3-plan.md` §3 / T1-01
- * - `docs/plans/2026-04-19-clawy-core-agent-design.md` §7.12.c
+ * - `docs/plans/2026-04-19-magi-core-agent-design.md` §7.12.c
  *   (memory fencing format)
  *
  * On the first iteration of each user turn, this hook queries qmd

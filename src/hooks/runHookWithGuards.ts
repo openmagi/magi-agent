@@ -35,7 +35,7 @@ export const DEFAULT_HOOK_TIMEOUT_MS = 5_000;
  * can distinguish a timeout from an unrelated handler error without
  * relying on message regex. Never leaks out of `runHookWithGuards`.
  */
-const HOOK_TIMEOUT_SENTINEL = Symbol("clawy.hook.timeout");
+const HOOK_TIMEOUT_SENTINEL = Symbol("magi.hook.timeout");
 
 interface HookGuardOptions<Point extends HookPoint> {
   /**

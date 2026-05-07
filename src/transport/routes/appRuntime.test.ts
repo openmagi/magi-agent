@@ -229,7 +229,7 @@ describe("HttpServer /v1/app runtime routes", () => {
   let port: number;
 
   beforeEach(async () => {
-    tmp = await fs.mkdtemp(path.join(os.tmpdir(), "clawy-app-runtime-"));
+    tmp = await fs.mkdtemp(path.join(os.tmpdir(), "magi-app-runtime-"));
     const agent = makeFakeAgent(tmp) as unknown as ConstructorParameters<
       typeof HttpServer
     >[0]["agent"];

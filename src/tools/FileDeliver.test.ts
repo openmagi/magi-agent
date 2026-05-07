@@ -268,6 +268,45 @@ describe("FileDeliver", () => {
     expect((file as File).type).toBe("application/hwp+zip");
   });
 
+  it("uses text MIME types for direct source-code workspace file delivery", async () => {
+    const root = await makeRoot();
+    const registry = new OutputArtifactRegistry(root);
+    await fs.mkdir(path.join(root, "exports"), { recursive: true });
+    await fs.writeFile(path.join(root, "exports", "script_part_a.rpy"), "label start:");
+
+    const fetchImpl = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ id: "att-py" }), {
+        status: 201,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+
+    const tool = makeFileDeliverTool({
+      workspaceRoot: root,
+      outputRegistry: registry,
+      chatProxyUrl: "http://chat-proxy",
+      gatewayToken: "gw-token",
+      fetchImpl,
+      sleepImpl: async () => {},
+    });
+
+    const result = await tool.execute(
+      {
+        path: "exports/script_part_a.rpy",
+        target: "chat",
+        chat: { channel: "general" },
+      },
+      ctx(root),
+    );
+
+    expect(result.status).toBe("ok");
+    const form = fetchImpl.mock.calls[0]?.[1]?.body;
+    expect(form).toBeInstanceOf(FormData);
+    const file = (form as FormData).get("file");
+    expect(file).toBeInstanceOf(File);
+    expect((file as File).type).toBe("text/plain");
+  });
+
   it("rejects workspace file paths outside the workspace", async () => {
     const root = await makeRoot();
     const registry = new OutputArtifactRegistry(root);

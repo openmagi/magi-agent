@@ -19,9 +19,9 @@ SKILL_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 if [ -f "$SKILL_DIR/scripts/build_hwpx.py" ]; then
   HWPX_DIR="$SKILL_DIR"
 else
-  HWPX_DIR="${HWPX_DIR:-$HOME/.clawy/hwpxskill}"
+  HWPX_DIR="${HWPX_DIR:-$HOME/.magi/hwpxskill}"
 fi
-HWPX_PYLIB="${HWPX_PYLIB:-$HOME/.clawy/.pylib}"
+HWPX_PYLIB="${HWPX_PYLIB:-$HOME/.magi/.pylib}"
 ACTION="$1"
 shift 2>/dev/null || true
 
@@ -35,7 +35,7 @@ ensure_installed() {
   if [ -f "$HWPX_DIR/scripts/build_hwpx.py" ]; then
     return 0
   fi
-  HWPX_DIR="$HOME/.clawy/hwpxskill"
+  HWPX_DIR="$HOME/.magi/hwpxskill"
   if [ -f "$HWPX_DIR/scripts/build_hwpx.py" ]; then
     return 0
   fi

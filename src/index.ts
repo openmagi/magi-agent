@@ -1,10 +1,10 @@
 /**
- * clawy-agent entrypoint.
+ * magi-agent entrypoint.
  *
  * Status: Phase 0 — boots, serves /health, returns 501 elsewhere.
  *
  * Dual-mode:
- *   - Clawy Pro: BOT_ID env present → startFromEnv() (backward compat)
+ *   - Magi Cloud: BOT_ID env present → startFromEnv() (backward compat)
  *   - OSS:       CLI passes parsed config → startFromConfig()
  */
 
@@ -13,7 +13,7 @@ import { HttpServer } from "./transport/HttpServer.js";
 import {
   loadRuntimeEnv,
   loadFromConfig,
-  type ClawyAgentConfig,
+  type MagiAgentConfig,
   type RuntimeEnv,
 } from "./config/RuntimeEnv.js";
 
@@ -23,7 +23,7 @@ export type { AgentConfig } from "./Agent.js";
 export { Session } from "./Session.js";
 export type { SessionMeta } from "./Session.js";
 export { loadRuntimeEnv, loadFromConfig } from "./config/RuntimeEnv.js";
-export type { RuntimeEnv, ClawyAgentConfig } from "./config/RuntimeEnv.js";
+export type { RuntimeEnv, MagiAgentConfig } from "./config/RuntimeEnv.js";
 
 // ── Shared boot logic ───────────────────────────────────────────
 
@@ -39,17 +39,17 @@ async function boot(env: RuntimeEnv): Promise<void> {
   await http.start();
 
   console.log(
-    `[clawy-agent] botId=${env.agentConfig.botId} port=${env.port} phase=0 ready`,
+    `[magi-agent] botId=${env.agentConfig.botId} port=${env.port} phase=0 ready`,
   );
 
   const shutdown = async (signal: NodeJS.Signals): Promise<void> => {
-    console.log(`[clawy-agent] ${signal} received, shutting down`);
+    console.log(`[magi-agent] ${signal} received, shutting down`);
     try {
       await http.stop();
       await agent.stop();
       process.exit(0);
     } catch (err) {
-      console.error("[clawy-agent] shutdown error", err);
+      console.error("[magi-agent] shutdown error", err);
       process.exit(1);
     }
   };
@@ -60,14 +60,14 @@ async function boot(env: RuntimeEnv): Promise<void> {
 
 // ── Public start functions ──────────────────────────────────────
 
-/** Start from environment variables (Clawy Pro / K8s pod mode). */
+/** Start from environment variables (Magi Cloud / K8s pod mode). */
 export async function startFromEnv(): Promise<void> {
   const env = loadRuntimeEnv();
   await boot(env);
 }
 
 /** Start from a parsed YAML config object (OSS / CLI mode). */
-export async function startFromConfig(config: ClawyAgentConfig): Promise<void> {
+export async function startFromConfig(config: MagiAgentConfig): Promise<void> {
   const env = loadFromConfig(config);
   await boot(env);
 }
@@ -75,7 +75,7 @@ export async function startFromConfig(config: ClawyAgentConfig): Promise<void> {
 // ── Auto-start when BOT_ID is set (backward compat) ────────────
 if (process.env.BOT_ID) {
   startFromEnv().catch((err) => {
-    console.error("[clawy-agent] fatal startup error", err);
+    console.error("[magi-agent] fatal startup error", err);
     process.exit(1);
   });
 }

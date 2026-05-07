@@ -11,7 +11,7 @@
  * but must also absorb node-host's Telegram poller + discord.js
  * client; otherwise bots migrated to core-agent go dark the moment
  * they reply through Telegram/Discord. See C1 spec for the
- * `Clawy_Bot` 2026-04-19 rollback postmortem that motivated this.
+ * `Magi_Bot` 2026-04-19 rollback postmortem that motivated this.
  *
  * Invariant A — source channel = delivery channel (cron-routing fix,
  * see CronScheduler.ts docstring). A poller owns both "inbound

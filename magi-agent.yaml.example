@@ -1,5 +1,5 @@
-# Clawy Agent Configuration
-# Copy this file to clawy-agent.yaml and fill in your values.
+# Magi Configuration
+# Copy this file to magi-agent.yaml and fill in your values.
 
 # LLM Provider
 llm:
@@ -8,9 +8,9 @@ llm:
   apiKey: ${ANTHROPIC_API_KEY}  # Environment variable reference
 
 # Local/self-hosted HTTP API token.
-# Use this in Clawy Agent App. Do not put your provider API key in the browser.
+# Use this in Magi App. Do not put your provider API key in the browser.
 server:
-  gatewayToken: ${CLAWY_AGENT_SERVER_TOKEN}
+  gatewayToken: ${MAGI_AGENT_SERVER_TOKEN}
 
 # Channels (optional — enable the ones you need)
 # channels:
@@ -43,5 +43,5 @@ memory:
 # Workspace
 workspace: ./workspace
 identity:
-  name: "Clawy Agent"
+  name: "Magi"
   instructions: "You are a helpful coding assistant."

@@ -51,6 +51,12 @@ function grepCall(turnId: string, pattern: string, path?: string): TranscriptEnt
 }
 
 describe("extractFileReferences", () => {
+  it("registers as fail-open so verifier outages do not abort turns", () => {
+    const hook = makeResourceExistenceCheckerHook();
+
+    expect(hook.failOpen).toBe(true);
+  });
+
   it("extracts .md file references", () => {
     const refs = extractFileReferences("DAILY_RUNBOOK_v3.md 파일에 따르면 구조는 다음과 같습니다");
     expect(refs).toContain("DAILY_RUNBOOK_v3.md");

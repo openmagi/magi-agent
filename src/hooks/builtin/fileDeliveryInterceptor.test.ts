@@ -60,7 +60,7 @@ function makeHookCtx(overrides: Partial<HookContext> = {}): HookContext {
 describe("fileDeliveryInterceptor", () => {
   it("creates a registered hook with correct metadata", () => {
     const hook = fileDeliveryInterceptor({
-      workspaceRoot: "/home/clawy/.clawy/workspace",
+      workspaceRoot: "/home/magi/.magi/workspace",
     });
 
     expect(hook.name).toBe("builtin:file-delivery-interceptor");
@@ -72,7 +72,7 @@ describe("fileDeliveryInterceptor", () => {
 
   it("skips non-zero iterations", async () => {
     const hook = fileDeliveryInterceptor({
-      workspaceRoot: "/home/clawy/.clawy/workspace",
+      workspaceRoot: "/home/magi/.magi/workspace",
     });
 
     const result = await hook.handler(
@@ -90,7 +90,7 @@ describe("fileDeliveryInterceptor", () => {
 
   it("skips messages without file extensions", async () => {
     const hook = fileDeliveryInterceptor({
-      workspaceRoot: "/home/clawy/.clawy/workspace",
+      workspaceRoot: "/home/magi/.magi/workspace",
     });
 
     const result = await hook.handler(
@@ -108,7 +108,7 @@ describe("fileDeliveryInterceptor", () => {
 
   it("skips messages longer than 500 chars", async () => {
     const hook = fileDeliveryInterceptor({
-      workspaceRoot: "/home/clawy/.clawy/workspace",
+      workspaceRoot: "/home/magi/.magi/workspace",
     });
 
     const result = await hook.handler(

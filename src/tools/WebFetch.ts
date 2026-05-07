@@ -133,7 +133,7 @@ export function makeWebFetchTool(): Tool<WebFetchInput, WebFetchOutput> {
         const resp = await fetch(input.url, {
           signal: controller.signal,
           headers: {
-            "User-Agent": "ClawyAgent/1.0 (https://github.com/ClawyPro/clawy-agent)",
+            "User-Agent": "MagiAgent/1.0 (https://github.com/openmagi/magi-agent)",
             Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
           },
           redirect: "follow",

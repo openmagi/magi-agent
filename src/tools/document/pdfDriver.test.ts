@@ -56,12 +56,12 @@ describe("pdfDriver", () => {
 
     expect(configured).toEqual({
       cjkCapable: true,
-      fontName: "ClawyBody",
+      fontName: "MagiBody",
       fontPath: workingFont,
     });
     expect(registrations).toEqual([
-      { name: "ClawyBody", src: brokenFont, family: "NotoSansCJKkr-Regular" },
-      { name: "ClawyBody", src: workingFont, family: "AppleSDGothicNeo-Regular" },
+      { name: "MagiBody", src: brokenFont, family: "NotoSansCJKkr-Regular" },
+      { name: "MagiBody", src: workingFont, family: "AppleSDGothicNeo-Regular" },
     ]);
   });
 

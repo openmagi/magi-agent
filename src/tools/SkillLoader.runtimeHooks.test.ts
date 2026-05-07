@@ -41,7 +41,7 @@ async function writeManifest(
   files: Record<string, string>,
 ): Promise<void> {
   await fs.writeFile(
-    path.join(skillDir, ".clawy-skill-manifest.json"),
+    path.join(skillDir, ".magi-skill-manifest.json"),
     JSON.stringify({ version: 1, files }, null, 2),
     "utf8",
   );
@@ -140,7 +140,7 @@ describe("SkillLoader trusted runtime hooks", () => {
       "hooks/check.sh",
       [
         "#!/bin/sh",
-        'printf "%s|%s|%s|%s" "$CLAWY_SKILL_ROOT" "$CLAWY_HOOK_POINT" "$CLAWY_TOOL_NAME" "$CLAWY_TURN_ID" > "$CLAWY_SKILL_ROOT/env.out"',
+        'printf "%s|%s|%s|%s" "$MAGI_SKILL_ROOT" "$MAGI_HOOK_POINT" "$MAGI_TOOL_NAME" "$MAGI_TURN_ID" > "$MAGI_SKILL_ROOT/env.out"',
         "exit 0",
         "",
       ].join("\n"),

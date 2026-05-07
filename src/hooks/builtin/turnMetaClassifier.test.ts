@@ -21,6 +21,22 @@ function mockLlm(text: string, calls: { count: number }): LLMClient {
   } as unknown as LLMClient;
 }
 
+function slowFirstTokenLlm(
+  text: string,
+  calls: { count: number },
+  delayMs = 500,
+): LLMClient {
+  return {
+    stream: () =>
+      (async function* () {
+        calls.count += 1;
+        await new Promise((resolve) => setTimeout(resolve, delayMs));
+        yield { kind: "text_delta" as const, delta: text };
+        yield { kind: "message_end" as const };
+      })(),
+  } as unknown as LLMClient;
+}
+
 function ctx(store: ExecutionContractStore, llm: LLMClient): HookContext {
   return {
     botId: "bot",
@@ -218,6 +234,48 @@ describe("turn meta classifier caching", () => {
     });
 
     expect(result.deferralPromise).toBe(true);
+    expect(calls.count).toBe(1);
+  });
+
+  it("fails open before the hook guard when final-answer classification stalls", async () => {
+    const store = new ExecutionContractStore({ now: () => 1_000 });
+    const calls = { count: 0 };
+    const context = {
+      ...ctx(
+        store,
+        slowFirstTokenLlm(
+          JSON.stringify({
+            internalReasoningLeak: false,
+            lazyRefusal: false,
+            selfClaim: true,
+            deferralPromise: false,
+            assistantClaimsFileCreated: false,
+            assistantClaimsChatDelivery: false,
+            assistantClaimsKbDelivery: false,
+            assistantReportsDeliveryFailure: false,
+            reason: "late classifier result",
+          }),
+          calls,
+        ),
+      ),
+      deadlineMs: 100,
+    };
+
+    const promise = getOrClassifyFinalAnswerMeta(context, {
+      userMessage: "status?",
+      assistantText: "The draft is still in progress.",
+    });
+
+    const result = await Promise.race([
+      promise,
+      new Promise<"pending">((resolve) => setTimeout(resolve, 150, "pending")),
+    ]);
+
+    expect(result).not.toBe("pending");
+    expect(result).toMatchObject({
+      selfClaim: false,
+      reason: "classifier output was not valid JSON",
+    });
     expect(calls.count).toBe(1);
   });
 });

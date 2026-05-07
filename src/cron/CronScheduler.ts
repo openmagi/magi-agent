@@ -9,7 +9,7 @@
  *   legacy gateway routed cron output via session-recency heuristic
  *   (active session = most-recently-updated). The LLM also chose
  *   a `--target` flag, routinely wrong (web-authored cron → Telegram
- *   delivery). In Clawy, the cron record persists the **delivery
+ *   delivery). In Magi, the cron record persists the **delivery
  *   channel captured at creation time** (`deliveryChannel: ChannelRef`)
  *   so the runtime enforces the right target regardless of what the
  *   bot's prompt says. See CronRecord.deliveryChannel below.

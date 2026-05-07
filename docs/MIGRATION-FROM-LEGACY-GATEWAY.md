@@ -1,19 +1,19 @@
-# Migration Guide: Legacy Gateway → Clawy Agent
+# Migration Guide: Legacy Gateway → Magi
 
 > **Audience:** AI coding agents (Claude Code, Codex, etc.) assisting a user
-> who is migrating their legacy gateway bot to Clawy Agent. Read this document
+> who is migrating their legacy gateway bot to Magi. Read this document
 > fully before starting the migration.
 
 ## Overview
 
-Clawy Agent is the open-source successor to legacy runtime.
+Magi is the open-source successor to legacy runtime.
 It replaces the `legacy-gateway.json` + `node-host` + gateway architecture with
 a single TypeScript process that handles LLM calls, tool execution, channels,
 memory, and hooks natively.
 
 **What changes:**
-- `legacy-gateway.json` → `clawy-agent.yaml`
-- Gateway + node-host → single `clawy-agent serve` process
+- `legacy-gateway.json` → `magi-agent.yaml`
+- Gateway + node-host → single `magi-agent serve` process
 - Brave Search API → built-in DuckDuckGo WebSearch (no API key)
 - `system.run` → `Bash` tool
 - `file read/write` → `FileRead` / `FileWrite` / `FileEdit`
@@ -48,17 +48,17 @@ Before starting, gather these from the existing legacy gateway deployment:
 
 ## Step-by-Step Migration
 
-### Step 1: Install Clawy Agent
+### Step 1: Install Magi
 
 ```bash
-git clone https://github.com/ClawyPro/clawy-agent.git
-cd clawy-agent
+git clone https://github.com/openmagi/magi-agent.git
+cd magi-agent
 npm install
 ```
 
-### Step 2: Convert legacy-gateway.json → clawy-agent.yaml
+### Step 2: Convert legacy-gateway.json → magi-agent.yaml
 
-Map the legacy gateway config to Clawy Agent format:
+Map the legacy gateway config to Magi format:
 
 **legacy gateway (`legacy-gateway.json`):**
 ```json
@@ -90,7 +90,7 @@ Map the legacy gateway config to Clawy Agent format:
 }
 ```
 
-**Clawy Agent (`clawy-agent.yaml`):**
+**Magi (`magi-agent.yaml`):**
 ```yaml
 llm:
   provider: anthropic
@@ -125,9 +125,9 @@ identity:
 **Key differences:**
 - No Brave Search API key needed — `WebSearch` uses DuckDuckGo natively
 - No smart routing config — single model. For multi-model, use a custom hook
-- No `contextTokens` / `contextPruning` — Clawy Agent handles compaction automatically
+- No `contextTokens` / `contextPruning` — Magi handles compaction automatically
 - No `session.reset.idleMinutes` — sessions persist; user sends `/reset` to clear
-- No `gateway.auth.token` — Clawy Agent uses the LLM API key as bearer token
+- No `gateway.auth.token` — Magi uses the LLM API key as bearer token
 
 ### Step 3: Copy Workspace Files
 
@@ -138,7 +138,7 @@ Copy the entire workspace directory from the legacy gateway deployment:
 cp -r /path/to/legacy-gateway/workspace ./workspace
 
 # Or from K8s:
-kubectl cp <namespace>/<pod>:/home/ocuser/.clawy/workspace ./workspace
+kubectl cp <namespace>/<pod>:/home/ocuser/.magi/workspace ./workspace
 ```
 
 The workspace structure is **fully compatible**. These files work as-is:
@@ -159,9 +159,9 @@ The workspace structure is **fully compatible**. These files work as-is:
 ### Step 4: Update TOOLS.md
 
 legacy gateway's `TOOLS.md` references tools by their legacy gateway names. Update to
-Clawy Agent tool names:
+Magi tool names:
 
-| legacy gateway Tool | Clawy Agent Tool | Notes |
+| legacy gateway Tool | Magi Tool | Notes |
 |---------------|-----------------|-------|
 | `system.run` | `Bash` | Same capability, different name |
 | `file.read` | `FileRead` | |
@@ -171,7 +171,7 @@ Clawy Agent tool names:
 | `web_fetch` | `WebFetch` | Built-in HTML-to-text extraction |
 | `sessions_spawn` | `SpawnAgent` | Enhanced — background delivery support |
 | `rag.search` | (automatic) | qmd memory injector runs as a hook |
-| `notify` | `NotifyUser` | Requires chat-proxy (Clawy Pro only) |
+| `notify` | `NotifyUser` | Requires chat-proxy (Magi Cloud only) |
 | `file.glob` | `Glob` | |
 | `file.grep` | `Grep` | |
 
@@ -186,7 +186,7 @@ Clawy Agent tool names:
 ### Step 5: Update Skills
 
 legacy gateway skills (`skills/<name>.md` or `skills/<name>/SKILL.md`) are
-**compatible** with Clawy Agent. The skill loader reads the same format.
+**compatible** with Magi. The skill loader reads the same format.
 
 However, check for legacy gateway-specific tool references inside skills:
 
@@ -195,7 +195,7 @@ However, check for legacy gateway-specific tool references inside skills:
 grep -r "system\.run\|file\.read\|file\.write\|web_search\|web_fetch\|sessions_spawn\|rag\.search" workspace/skills/
 ```
 
-Replace any found references with Clawy Agent tool names (see table above).
+Replace any found references with Magi tool names (see table above).
 
 ### Step 6: Handle Crons
 
@@ -204,7 +204,7 @@ legacy gateway crons configured via `oc-cron-script.js` are stored differently.
 **legacy gateway:** Crons defined in `legacy-gateway.json` or via bot commands, managed
 by the gateway's cron scheduler.
 
-**Clawy Agent:** Crons stored in `workspace/core-agent/crons/index.json`,
+**Magi:** Crons stored in `workspace/core-agent/crons/index.json`,
 managed by the built-in `CronScheduler`. The bot can create crons via the
 `CronCreate` tool.
 
@@ -252,7 +252,7 @@ After starting, check:
 
 - Check `TELEGRAM_BOT_TOKEN` is correct
 - Ensure no other process is polling the same bot token (legacy gateway must be stopped first)
-- Telegram only allows one poller per token — stop legacy gateway before starting Clawy Agent
+- Telegram only allows one poller per token — stop legacy gateway before starting Magi
 
 ### "qmd search returns empty"
 
@@ -263,7 +263,7 @@ After starting, check:
 ### "Skills not loading"
 
 - Skills must be in `workspace/skills/<name>/SKILL.md` or `workspace/skills/<name>.md`
-- Check the startup log for `[clawy-agent] skills: loaded=N`
+- Check the startup log for `[magi-agent] skills: loaded=N`
 
 ### "Model not found / API error"
 
@@ -273,9 +273,9 @@ After starting, check:
 ## Architecture Comparison
 
 ```
-legacy gateway                          Clawy Agent
+legacy gateway                          Magi
 ─────────                         ───────────
-legacy-gateway.json                     clawy-agent.yaml
+legacy-gateway.json                     magi-agent.yaml
 Gateway (node-host)               Agent (single process)
   ├── Telegram plugin               ├── TelegramPoller
   ├── Discord plugin                 ├── DiscordClient
@@ -295,7 +295,7 @@ External deps:                    External deps:
 
 ## What You Lose (and Alternatives)
 
-| legacy gateway Feature | Status in Clawy Agent |
+| legacy gateway Feature | Status in Magi |
 |-----------------|----------------------|
 | Smart routing (LIGHT/MEDIUM/HEAVY) | Not built-in. Single model. Custom hook possible. |
 | Brave Search | Replaced by DuckDuckGo WebSearch (no API key) |
@@ -306,7 +306,7 @@ External deps:                    External deps:
 
 ## What You Gain
 
-| Clawy Agent Feature | Not in legacy gateway |
+| Magi Feature | Not in legacy gateway |
 |---------------------|----------------|
 | 28 programmable LLM hooks | Hooks didn't exist |
 | Hipocampus 5-level compaction | Basic memory flush only |

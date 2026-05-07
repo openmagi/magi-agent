@@ -105,7 +105,7 @@ export interface RuntimeEnv {
 
 // ── OSS config-file types ───────────────────────────────────────
 
-export interface ClawyAgentConfig {
+export interface MagiAgentConfig {
   llm: {
     provider: "anthropic" | "openai" | "google";
     apiKey: string;
@@ -143,7 +143,7 @@ const DEFAULT_MODELS: Record<string, string> = {
  * Creates an LLMProvider from the config and injects it into AgentConfig
  * so the Agent uses direct provider API calls instead of api-proxy.
  */
-export function loadFromConfig(config: ClawyAgentConfig): RuntimeEnv {
+export function loadFromConfig(config: MagiAgentConfig): RuntimeEnv {
   const model = config.llm.model ?? DEFAULT_MODELS[config.llm.provider] ?? "claude-sonnet-4-6";
 
   const provider = createProvider({
@@ -168,7 +168,7 @@ export function loadFromConfig(config: ClawyAgentConfig): RuntimeEnv {
     llmProvider: provider,
 
     // OSS identity
-    agentName: config.identity?.name ?? "Clawy Agent",
+    agentName: config.identity?.name ?? "Magi",
     agentInstructions: config.identity?.instructions,
 
     // Channel tokens
@@ -179,7 +179,7 @@ export function loadFromConfig(config: ClawyAgentConfig): RuntimeEnv {
   return { port: 8080, agentConfig };
 }
 
-/** Load RuntimeEnv from environment variables (Clawy Pro mode). */
+/** Load RuntimeEnv from environment variables (Magi Cloud mode). */
 export function loadRuntimeEnv(): RuntimeEnv {
   const port = parseIntSafe("CORE_AGENT_PORT", 8080);
   const model = optionalEnv("CORE_AGENT_MODEL") ?? "claude-opus-4-7";
@@ -189,7 +189,7 @@ export function loadRuntimeEnv(): RuntimeEnv {
     botId: requireEnv("BOT_ID"),
     userId: requireEnv("USER_ID"),
     workspaceRoot:
-      optionalEnv("CORE_AGENT_WORKSPACE") ?? "/home/ocuser/.clawy/workspace",
+      optionalEnv("CORE_AGENT_WORKSPACE") ?? "/home/ocuser/.magi/workspace",
     gatewayToken: requireEnv("GATEWAY_TOKEN"),
     codexAccessToken: optionalEnv("CODEX_ACCESS_TOKEN"),
     codexRefreshToken: optionalEnv("CODEX_REFRESH_TOKEN"),

@@ -3,13 +3,25 @@ import { Turn } from "./Turn.js";
 import type { Session } from "./Session.js";
 import type { RouteDecision } from "./routing/types.js";
 
-function makeTurn(configModel: string, router: unknown): Turn {
+function makeTurn(
+  configModel: string,
+  router: unknown,
+  options: { runtimeModelOverride?: string; dynamicModel?: string } = {},
+): Turn {
+  const agent: {
+    config: { model: string };
+    router: unknown;
+    resolveRuntimeModel?: () => Promise<string>;
+  } = {
+    config: { model: configModel },
+    router,
+  };
+  if (options.dynamicModel) {
+    agent.resolveRuntimeModel = vi.fn(async () => options.dynamicModel!);
+  }
   const session = {
     meta: { sessionKey: "sess-1" },
-    agent: {
-      config: { model: configModel },
-      router,
-    },
+    agent,
   } as unknown as Session;
   const sse = {
     agent: () => {},
@@ -19,6 +31,8 @@ function makeTurn(configModel: string, router: unknown): Turn {
     { text: "hello", receivedAt: Date.now() },
     "turn-1",
     sse as never,
+    "direct",
+    { runtimeModelOverride: options.runtimeModelOverride },
   );
 }
 
@@ -52,7 +66,7 @@ describe("Turn native routing", () => {
     const router = {
       resolve: vi.fn().mockResolvedValue(decision),
     };
-    const turn = makeTurn("clawy-smart-router/auto", router);
+    const turn = makeTurn("magi-smart-router/auto", router);
 
     const model = await (turn as unknown as {
       resolveEffectiveModel: (
@@ -65,7 +79,7 @@ describe("Turn native routing", () => {
     expect(turn.meta.effectiveModel).toBe("claude-opus-4-7");
     expect(turn.meta.routeDecision).toEqual(decision);
     expect(router.resolve).toHaveBeenCalledWith({
-      configuredModel: "clawy-smart-router/auto",
+      configuredModel: "magi-smart-router/auto",
       messages: [{ role: "user", content: "hi" }],
       hasTools: true,
       hasImages: false,
@@ -88,7 +102,7 @@ describe("Turn native routing", () => {
     const router = {
       resolve: vi.fn().mockResolvedValue(decision),
     };
-    const turn = makeTurn("clawy-smart-router/auto", router);
+    const turn = makeTurn("magi-smart-router/auto", router);
     const resolve = (turn as unknown as {
       resolveEffectiveModel: (
         messages: [{ role: "user"; content: string }],
@@ -101,5 +115,23 @@ describe("Turn native routing", () => {
 
     expect(second).toBe("claude-opus-4-7");
     expect(router.resolve).toHaveBeenCalledTimes(1);
+  });
+
+  it("uses an explicit turn model override before dynamic bot model lookup", async () => {
+    const router = {
+      resolve: vi.fn(),
+    };
+    const turn = makeTurn("magi-smart-router/auto", router, {
+      runtimeModelOverride: "openai/gpt-5.5-pro",
+      dynamicModel: "openai/gpt-5.5",
+    });
+
+    const model = await (turn as unknown as {
+      resolveEffectiveModel: (messages: [], tools: []) => Promise<string>;
+    }).resolveEffectiveModel([], []);
+
+    expect(model).toBe("openai/gpt-5.5-pro");
+    expect(turn.meta.configuredModel).toBe("openai/gpt-5.5-pro");
+    expect(router.resolve).not.toHaveBeenCalled();
   });
 });

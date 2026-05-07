@@ -65,7 +65,7 @@ export interface HookContext {
   readonly turnId: string;
   readonly contextId?: string;
   /**
-   * Scoped LLM client — same gateway token, with x-clawy-hook header
+   * Scoped LLM client — same gateway token, with x-magi-hook header
    * tagging all requests so api-proxy can attribute cost to the
    * hook. Per-turn token budget enforced (see HookRegistry).
    */

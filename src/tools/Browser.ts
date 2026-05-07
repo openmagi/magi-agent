@@ -4,7 +4,7 @@ import fs from "node:fs/promises";
 import { isIP } from "node:net";
 import path from "node:path";
 import type { Tool, ToolContext, ToolResult } from "../Tool.js";
-import { withClawyBinPath } from "../util/shellPath.js";
+import { withMagiBinPath } from "../util/shellPath.js";
 
 type BrowserAction =
   | "create_session"
@@ -306,7 +306,7 @@ async function defaultRunner(
   return new Promise<BrowserRunResult>((resolve) => {
     const child = spawn(command, args, {
       cwd,
-      env: { ...withClawyBinPath(process.env), PWD: cwd },
+      env: { ...withMagiBinPath(process.env), PWD: cwd },
       stdio: ["ignore", "pipe", "pipe"],
     });
 

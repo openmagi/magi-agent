@@ -40,7 +40,7 @@ import type {
  */
 
 export interface WebAppChannelConfig {
-  /** chat-proxy endpoint. e.g. https://chat.clawy.pro/v1/bot-push/message */
+  /** chat-proxy endpoint. e.g. https://chat.magi.local/v1/bot-push/message */
   pushEndpointUrl: string;
   /** Shared HMAC secret — must match chat-proxy's WEBAPP_PUSH_HMAC_KEY. */
   hmacKey: string;

@@ -4,6 +4,15 @@ import { DirectLLMClient } from "./DirectLLMClient.js";
 
 let server: ReturnType<typeof createServer> | null = null;
 
+function splitAtNeedleByte(value: string, needle: string, byteOffsetInNeedle: number): [Buffer, Buffer] {
+  const bytes = Buffer.from(value, "utf8");
+  const needleBytes = Buffer.from(needle, "utf8");
+  const needleStart = bytes.indexOf(needleBytes);
+  if (needleStart < 0) throw new Error(`needle not found: ${needle}`);
+  const splitAt = needleStart + byteOffsetInNeedle;
+  return [bytes.subarray(0, splitAt), bytes.subarray(splitAt)];
+}
+
 afterEach(async () => {
   if (!server) return;
   await new Promise<void>((resolve) => server?.close(() => resolve()));
@@ -106,6 +115,43 @@ describe("DirectLLMClient", () => {
       stopReason: "end_turn",
       usage: { inputTokens: 2, outputTokens: 1 },
     });
+  });
+
+  it("preserves Korean text when OpenAI-compatible SSE chunks split a UTF-8 character", async () => {
+    const korean = "프롬프트";
+    const frame = [
+      `data: ${JSON.stringify({ choices: [{ delta: { content: korean }, finish_reason: null }] })}`,
+      "",
+      `data: ${JSON.stringify({ choices: [{ delta: {}, finish_reason: "stop" }], usage: { prompt_tokens: 2, completion_tokens: 1 } })}`,
+      "",
+      "data: [DONE]",
+      "",
+    ].join("\n");
+    const [first, second] = splitAtNeedleByte(frame, "트", 1);
+    const baseUrl = await startServer((req, res) => {
+      req.resume();
+      req.on("end", () => {
+        res.writeHead(200, { "content-type": "text/event-stream" });
+        res.write(first);
+        setTimeout(() => res.end(second), 5);
+      });
+    });
+
+    const client = new DirectLLMClient({
+      providers: {
+        openai: { kind: "openai-compatible", baseUrl, apiKey: "sk-openai-test" },
+      },
+    });
+
+    const deltas: string[] = [];
+    for await (const evt of client.stream({
+      model: "gpt-5-nano",
+      messages: [{ role: "user", content: "hi" }],
+    })) {
+      if (evt.kind === "text_delta") deltas.push(evt.delta);
+    }
+
+    expect(deltas.join("")).toBe(korean);
   });
 
   it("maps OpenAI-compatible tool schemas and streamed tool calls", async () => {

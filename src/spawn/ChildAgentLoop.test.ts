@@ -14,50 +14,10 @@ import type { LLMEvent, LLMStreamRequest } from "../transport/LLMClient.js";
 import { Workspace } from "../storage/Workspace.js";
 import {
   CHILD_MAX_ITERATIONS,
-  hasTrailingDeferralNarrative,
   runChildAgentLoop,
   selectChildTools,
   type SpawnChildOptions,
 } from "./ChildAgentLoop.js";
-
-describe("hasTrailingDeferralNarrative", () => {
-  it("detects english 'Now let me write the report'", () => {
-    expect(
-      hasTrailingDeferralNarrative(
-        "Collected all data. Now let me write the report.",
-      ),
-    ).toBe(true);
-  });
-  it("detects english 'I'll now generate the analysis'", () => {
-    expect(
-      hasTrailingDeferralNarrative("I'll now generate the analysis file."),
-    ).toBe(true);
-  });
-  it("detects korean '이제 리포트 작성'", () => {
-    expect(
-      hasTrailingDeferralNarrative("데이터 수집 완료. 이제 리포트 작성하겠습니다."),
-    ).toBe(true);
-  });
-  it("detects korean '결과를 정리'", () => {
-    expect(
-      hasTrailingDeferralNarrative("분석 끝. 이제 결과를 정리합니다."),
-    ).toBe(true);
-  });
-  it("does NOT fire on already-complete plain text", () => {
-    expect(
-      hasTrailingDeferralNarrative("Here is the analysis: 아메리카노 224건, 매출 777,550원."),
-    ).toBe(false);
-  });
-  it("does NOT fire on empty string", () => {
-    expect(hasTrailingDeferralNarrative("")).toBe(false);
-  });
-  it("only inspects the trailing ~200 chars", () => {
-    // "Now let me write" buried 500+ chars before end → ignored.
-    const long =
-      "Now let me write the report. " + "Analysis details: ".repeat(50);
-    expect(hasTrailingDeferralNarrative(long)).toBe(false);
-  });
-});
 
 interface MockScript {
   rounds: Array<LLMEvent[] | Error>;
@@ -211,6 +171,104 @@ describe("ChildAgentLoop — loop semantics", () => {
     expect(result.status).toBe("ok");
     expect(result.finalText).toBe("hello world");
     expect(result.toolCallCount).toBe(0);
+  });
+
+  it("uses the LLM classifier to retry child deferral narratives", async () => {
+    let executed = 0;
+    const writer = stubTool<Record<string, unknown>, { ok: boolean }>(
+      "WritePart",
+      async (_input, ctx) => {
+        executed++;
+        await fs.writeFile(path.join(ctx.workspaceRoot, "script_part_d.rpy"), "label ch_rei_route:");
+        return { status: "ok", output: { ok: true }, durationMs: 0 };
+      },
+    );
+    const classifierTrue = JSON.stringify({
+      internalReasoningLeak: false,
+      lazyRefusal: false,
+      selfClaim: false,
+      deferralPromise: true,
+      assistantClaimsFileCreated: false,
+      assistantClaimsChatDelivery: false,
+      assistantClaimsKbDelivery: false,
+      assistantReportsDeliveryFailure: false,
+      reason: "The child says it will write the file next instead of doing it now.",
+    });
+    const classifierFalse = JSON.stringify({
+      internalReasoningLeak: false,
+      lazyRefusal: false,
+      selfClaim: false,
+      deferralPromise: false,
+      assistantClaimsFileCreated: true,
+      assistantClaimsChatDelivery: false,
+      assistantClaimsKbDelivery: false,
+      assistantReportsDeliveryFailure: false,
+      reason: "The child reports completed work.",
+    });
+    const { agent, llmCalls } = fakeAgent([writer as Tool], {
+      rounds: [
+        [
+          {
+            kind: "text_delta",
+            blockIndex: 0,
+            delta: "I read the reference files. Let me write Part D.",
+          },
+          {
+            kind: "message_end",
+            stopReason: "end_turn",
+            usage: { inputTokens: 1, outputTokens: 1 },
+          },
+        ],
+        [
+          { kind: "text_delta", blockIndex: 0, delta: classifierTrue },
+          {
+            kind: "message_end",
+            stopReason: "end_turn",
+            usage: { inputTokens: 1, outputTokens: 1 },
+          },
+        ],
+        [
+          { kind: "tool_use_start", blockIndex: 0, id: "tu_write", name: "WritePart" },
+          { kind: "tool_use_input_delta", blockIndex: 0, partial: "{}" },
+          {
+            kind: "message_end",
+            stopReason: "tool_use",
+            usage: { inputTokens: 1, outputTokens: 1 },
+          },
+        ],
+        [
+          { kind: "text_delta", blockIndex: 0, delta: "script_part_d.rpy written" },
+          {
+            kind: "message_end",
+            stopReason: "end_turn",
+            usage: { inputTokens: 1, outputTokens: 1 },
+          },
+        ],
+        [
+          { kind: "text_delta", blockIndex: 0, delta: classifierFalse },
+          {
+            kind: "message_end",
+            stopReason: "end_turn",
+            usage: { inputTokens: 1, outputTokens: 1 },
+          },
+        ],
+      ],
+    });
+    const events: unknown[] = [];
+    const { opts, cleanup } = await makeOpts({ onAgentEvent: (event) => events.push(event) });
+    cleanups.push(cleanup);
+
+    const result = await runChildAgentLoop(agent, opts);
+
+    expect(result.status).toBe("ok");
+    expect(result.finalText).toContain("script_part_d.rpy written");
+    expect(result.toolCallCount).toBe(1);
+    expect(executed).toBe(1);
+    expect(
+      events.some((event) => (event as { type?: unknown }).type === "spawn_deferral_retry"),
+    ).toBe(true);
+    expect(String(llmCalls[1]?.system ?? "")).toContain("final-answer meta classifier");
+    expect(JSON.stringify(llmCalls[1]?.messages ?? [])).toContain("Let me write Part D");
   });
 
   it("adds a trusted-worker runtime contract to the child system prompt by default", async () => {
@@ -748,7 +806,7 @@ describe("ChildAgentLoop — loop semantics", () => {
           "execution rules",
           "",
           "## Multi-Agent Orchestration",
-          "clawy-agent --agent specialist",
+          "magi-agent --agent specialist",
         ].join("\n"),
         "utf8",
       ),
@@ -796,7 +854,7 @@ describe("ChildAgentLoop — loop semantics", () => {
     expect(system).toContain("You are the spawned child agent, not the main meta-layer agent");
     expect(system).toContain("Do not spawn, route to, or manage further subagents");
     expect(system).not.toContain("All complex tasks are executed via subagent");
-    expect(system).not.toContain("clawy-agent --agent specialist");
+    expect(system).not.toContain("magi-agent --agent specialist");
     expect(system).not.toContain("Spawn subagents with any model");
     expect(system).not.toContain("delegate to the coding agent");
     expect(system).not.toContain("MAIN META SOUL MUST NOT ENTER CHILD");

@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 /**
- * clawy-agent CLI entrypoint.
+ * magi-agent CLI entrypoint.
  *
  * Commands:
- *   init              Create clawy-agent.yaml interactively
+ *   init              Create magi-agent.yaml interactively
  *   start             Interactive terminal mode
  *   serve [--port N]  HTTP API server
  *   version           Print version
@@ -20,23 +20,23 @@ const RESET = "\x1b[0m";
 
 function printHelp(): void {
   console.log(`
-${BOLD}clawy-agent${RESET} — Autonomous task runtime with agentic interaction
+${BOLD}magi-agent${RESET} — Autonomous task runtime with agentic interaction
 
 ${BOLD}Usage:${RESET}
-  clawy-agent <command> [options]
+  magi-agent <command> [options]
 
 ${BOLD}Commands:${RESET}
-  init               Create a clawy-agent.yaml config file interactively
+  init               Create a magi-agent.yaml config file interactively
   start              Start the agent in interactive terminal mode
   serve [--port N]   Start the HTTP API server (default port: 8080)
   version            Print version
 
 ${BOLD}Examples:${RESET}
-  ${DIM}$ clawy-agent init${RESET}
-  ${DIM}$ clawy-agent start${RESET}
-  ${DIM}$ clawy-agent serve --port 3000${RESET}
+  ${DIM}$ magi-agent init${RESET}
+  ${DIM}$ magi-agent start${RESET}
+  ${DIM}$ magi-agent serve --port 3000${RESET}
 
-${DIM}https://github.com/ClawyPro/clawy-agent${RESET}
+${DIM}https://github.com/openmagi/magi-agent${RESET}
 `);
 }
 
@@ -51,14 +51,14 @@ function printVersion(): void {
       const candidate = path.join(dir, "package.json");
       if (fs.existsSync(candidate)) {
         const pkg = JSON.parse(fs.readFileSync(candidate, "utf-8"));
-        console.log(`clawy-agent v${pkg.version ?? "0.0.0"}`);
+        console.log(`magi-agent v${pkg.version ?? "0.0.0"}`);
         return;
       }
       dir = path.dirname(dir);
     }
-    console.log("clawy-agent (version unknown)");
+    console.log("magi-agent (version unknown)");
   } catch {
-    console.log("clawy-agent (version unknown)");
+    console.log("magi-agent (version unknown)");
   }
 }
 
@@ -123,7 +123,7 @@ async function main(): Promise<void> {
 
     default:
       console.error(`Unknown command: "${command}"`);
-      console.error(`Run "clawy-agent --help" for usage.`);
+      console.error(`Run "magi-agent --help" for usage.`);
       process.exit(1);
   }
 }

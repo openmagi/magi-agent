@@ -88,6 +88,17 @@ export function extractReplyTo(body: unknown): ReplyToRef | undefined {
   };
 }
 
+export function extractRuntimeModelOverride(body: unknown): string | undefined {
+  if (!body || typeof body !== "object") return undefined;
+  const raw = (body as { model?: unknown }).model;
+  if (typeof raw !== "string") return undefined;
+  const model = raw.trim();
+  if (!model || model === "auto" || model === "magi-smart-router/auto") {
+    return undefined;
+  }
+  return model;
+}
+
 export function extractLastUserMessage(body: unknown): UserMessage | null {
   if (!body || typeof body !== "object") return null;
   const messages = (body as { messages?: unknown }).messages;
@@ -255,10 +266,10 @@ async function handleChatCompletions(
 ): Promise<void> {
   if (!authorizeBearer(req, res, ctx)) return;
 
-  // Session key: accept both the Clawy-native and core-agent-native headers.
+  // Session key: accept both the Magi-native and core-agent-native headers.
   const sessionKey =
     (req.headers["x-core-agent-session-key"] as string | undefined) ??
-    (req.headers["x-clawy-session-key"] as string | undefined) ??
+    (req.headers["x-magi-session-key"] as string | undefined) ??
     `agent:main:app:default:${ctx.agent.config.botId.slice(0, 8)}`;
 
   const body = await readJsonBody(req).catch((err: Error) => {
@@ -318,9 +329,13 @@ async function handleChatCompletions(
     .toLowerCase();
   const planMode =
     planHeader === "on" || planHeader === "1" || planHeader === "true";
+  const runtimeModelOverride = extractRuntimeModelOverride(body);
 
   try {
-    await session.runTurn(userMsg, sse, { planMode });
+    await session.runTurn(userMsg, sse, {
+      planMode,
+      ...(runtimeModelOverride ? { runtimeModelOverride } : {}),
+    });
   } finally {
     if (structuredOutputSpec && typeof session.setStructuredOutputContract === "function") {
       session.setStructuredOutputContract(previousStructuredOutputSpec);
@@ -379,7 +394,7 @@ function sessionKeyFromRequest(
   const querySessionKey = url.searchParams.get("sessionKey");
   const headerSessionKey =
     (req.headers["x-core-agent-session-key"] as string | undefined) ??
-    (req.headers["x-clawy-session-key"] as string | undefined);
+    (req.headers["x-magi-session-key"] as string | undefined);
   const bodySessionKey =
     typeof body?.sessionKey === "string" ? body.sessionKey : undefined;
   const sessionKey = bodySessionKey ?? querySessionKey ?? headerSessionKey;

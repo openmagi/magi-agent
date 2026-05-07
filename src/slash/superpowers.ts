@@ -6,7 +6,7 @@
  *   docs/plans/2026-04-20-superpowers-plugin-design.md
  *
  * Source skills live under
- *   infra/docker/clawy-core-agent/skills/superpowers/<name>/SKILL.md
+ *   infra/docker/magi-core-agent/skills/superpowers/<name>/SKILL.md
  *
  * The skills themselves are loaded as Phase 2b prompt-only tools by the
  * SkillLoader during Agent.start(). The slash commands here are thin

@@ -11,10 +11,10 @@ describe("core-agent Dockerfile", () => {
     expect(dockerfile).not.toMatch(/apk add/);
   });
 
-  it("keeps bot shell dependencies and Clawy bin PATH in the runtime image", () => {
+  it("keeps bot shell dependencies and Magi bin PATH in the runtime image", () => {
     expect(dockerfile).toMatch(/apt-get install[\s\S]*bash[\s\S]*curl[\s\S]*git/);
     expect(dockerfile).toMatch(/apt-get install[\s\S]*python3[\s\S]*python3-lxml/);
     expect(dockerfile).toMatch(/apt-get install[\s\S]*fontconfig[\s\S]*fonts-noto-cjk/);
-    expect(dockerfile).toMatch(/PATH=\/home\/ocuser\/\.clawy\/bin:\/app\/node_modules\/\.bin/);
+    expect(dockerfile).toMatch(/PATH=\/home\/ocuser\/\.magi\/bin:\/app\/node_modules\/\.bin/);
   });
 });

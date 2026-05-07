@@ -1,7 +1,8 @@
 const storage = {
-  agentUrl: "clawy.agent.app.agentUrl",
-  token: "clawy.agent.app.token",
-  sessionKey: "clawy.agent.app.sessionKey",
+  agentUrl: "magi.agent.app.agentUrl",
+  token: "magi.agent.app.token",
+  sessionKey: "magi.agent.app.sessionKey",
+  modelOverride: "magi.agent.app.modelOverride",
 };
 
 const state = {
@@ -14,6 +15,7 @@ const els = {
   agentUrl: document.querySelector("#agent-url"),
   token: document.querySelector("#server-token"),
   sessionKey: document.querySelector("#session-key"),
+  modelOverride: document.querySelector("#model-override"),
   planMode: document.querySelector("#plan-mode"),
   healthButton: document.querySelector("#health-button"),
   runtimeStatus: document.querySelector("#runtime-status"),
@@ -45,6 +47,7 @@ function loadSettings() {
   els.agentUrl.value = localStorage.getItem(storage.agentUrl) || window.location.origin;
   els.token.value = localStorage.getItem(storage.token) || "";
   els.sessionKey.value = localStorage.getItem(storage.sessionKey) || defaultSessionKey();
+  els.modelOverride.value = localStorage.getItem(storage.modelOverride) || "auto";
   updateSessionLabel();
 }
 
@@ -52,10 +55,12 @@ function saveSettings() {
   localStorage.setItem(storage.agentUrl, normalizeAgentUrl(els.agentUrl.value));
   localStorage.setItem(storage.token, els.token.value.trim());
   localStorage.setItem(storage.sessionKey, els.sessionKey.value.trim() || defaultSessionKey());
+  localStorage.setItem(storage.modelOverride, els.modelOverride.value.trim() || "auto");
   loadSettings();
   addEvent("connection_saved", {
     agentUrl: els.agentUrl.value,
     sessionKey: els.sessionKey.value,
+    modelOverride: els.modelOverride.value,
     tokenPresent: els.token.value.trim().length > 0,
   });
 }
@@ -297,11 +302,13 @@ function handleSseEvent(eventName, rawData) {
 
 async function sendMessage(text) {
   const base = normalizeAgentUrl(els.agentUrl.value);
+  const modelOverride = els.modelOverride.value.trim();
   const response = await fetch(`${base}/v1/chat/completions`, {
     method: "POST",
     headers: headers(),
     body: JSON.stringify({
       stream: true,
+      ...(modelOverride ? { model: modelOverride } : {}),
       messages: [{ role: "user", content: text }],
     }),
   });

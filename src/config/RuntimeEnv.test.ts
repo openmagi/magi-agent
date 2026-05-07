@@ -56,7 +56,7 @@ describe("loadRuntimeEnv routing", () => {
 
   it("defaults router keyword bots to hosted-proxy routing", () => {
     setRequiredEnv();
-    vi.stubEnv("CORE_AGENT_MODEL", "clawy-smart-router/auto");
+    vi.stubEnv("CORE_AGENT_MODEL", "magi-smart-router/auto");
 
     const env = loadRuntimeEnv();
 
@@ -66,7 +66,7 @@ describe("loadRuntimeEnv routing", () => {
 
   it("accepts explicit direct routing mode for standalone deployments", () => {
     setRequiredEnv();
-    vi.stubEnv("CORE_AGENT_MODEL", "clawy-smart-router/auto");
+    vi.stubEnv("CORE_AGENT_MODEL", "magi-smart-router/auto");
     vi.stubEnv("CORE_AGENT_ROUTING_MODE", "direct");
     vi.stubEnv("CORE_AGENT_ROUTING_PROFILE", "anthropic_only");
     vi.stubEnv("ANTHROPIC_API_KEY", "sk-ant-test");

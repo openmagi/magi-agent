@@ -32,7 +32,7 @@ function buildIdentityHint(botId: string, sessionKey: string): string {
   const parsed = parseSessionKey(sessionKey);
   const personaLine = parsed
     ? `You are running as persona \`${parsed.agent}\`${parsed.kind ? ` in ${parsed.kind}` : ""}${parsed.channelType ? ` on channel \`${parsed.channelType}\`` : ""}.`
-    : "You are running inside a Clawy bot session.";
+    : "You are running inside a Magi bot session.";
 
   return `<aef_session_identity priority="high">
 Bot ID: \`${botId}\`

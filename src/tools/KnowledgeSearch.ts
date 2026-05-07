@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import type { Tool, ToolContext, ToolResult } from "../Tool.js";
-import { withClawyBinPath } from "../util/shellPath.js";
+import { withMagiBinPath } from "../util/shellPath.js";
 
 type KnowledgeSearchMode =
   | "search"
@@ -274,11 +274,11 @@ async function defaultRunner(
     const child = spawn("kb-search.sh", args, {
       cwd,
       env: {
-        ...withClawyBinPath(process.env),
+        ...withMagiBinPath(process.env),
         PWD: cwd,
         BOT_ID: process.env.BOT_ID ?? ctx.botId,
-        CLAWY_WORKSPACE_ROOT: cwd,
-        CLAWY_BOT_ID: ctx.botId,
+        MAGI_WORKSPACE_ROOT: cwd,
+        MAGI_BOT_ID: ctx.botId,
       },
       stdio: ["ignore", "pipe", "pipe"],
     });

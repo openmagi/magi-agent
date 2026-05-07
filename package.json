@@ -1,11 +1,11 @@
 {
-  "name": "clawy-agent",
+  "name": "magi-agent",
   "version": "0.2.0",
   "description": "Autonomous task runtime with agentic interaction. Open-source, multi-provider, programmable.",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "bin": {
-    "clawy-agent": "./dist/cli/index.js"
+    "magi-agent": "./dist/cli/index.js"
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
@@ -34,11 +34,11 @@
   ],
   "repository": {
     "type": "git",
-    "url": "https://github.com/ClawyPro/clawy-agent.git"
+    "url": "https://github.com/openmagi/magi-agent.git"
   },
-  "homepage": "https://github.com/ClawyPro/clawy-agent",
+  "homepage": "https://github.com/openmagi/magi-agent",
   "bugs": {
-    "url": "https://github.com/ClawyPro/clawy-agent/issues"
+    "url": "https://github.com/openmagi/magi-agent/issues"
   },
   "license": "Apache-2.0",
   "dependencies": {

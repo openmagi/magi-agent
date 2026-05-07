@@ -1,25 +1,25 @@
-# Migration Guide: Hermes Agent → Clawy Agent
+# Migration Guide: Hermes Agent → Magi
 
 > **Audience:** AI coding agents (Claude Code, Codex, etc.) assisting a user
-> who is migrating their Hermes Agent setup to Clawy Agent. Read this
+> who is migrating their Hermes Agent setup to Magi. Read this
 > document fully before starting the migration.
 
 ## Overview
 
 Hermes Agent (by Nous Research) is a Python-based self-improving AI agent.
-Clawy Agent is a TypeScript-based autonomous task runtime. Both are
+Magi is a TypeScript-based autonomous task runtime. Both are
 open-source, self-hosted, and support Telegram/Discord — but the
 architecture, config format, and extension model differ significantly.
 
 **What changes:**
-- `~/.hermes/config.yaml` → `clawy-agent.yaml` (different schema)
+- `~/.hermes/config.yaml` → `magi-agent.yaml` (different schema)
 - `~/.hermes/SOUL.md` → `workspace/IDENTITY.md` + `identity` in YAML
 - `~/.hermes/skills/` → `workspace/skills/` (compatible SKILL.md format)
 - `~/.hermes/memory/` → `workspace/memory/` (different engine — qmd vs SQLite FTS5)
 - Python runtime → Node.js 22+ runtime
-- `hermes` CLI → `npx tsx src/cli/index.ts` (or `clawy-agent` after npm publish)
-- `hermes gateway` → `clawy-agent serve`
-- `hermes setup` → `clawy-agent init`
+- `hermes` CLI → `npx tsx src/cli/index.ts` (or `magi-agent` after npm publish)
+- `hermes gateway` → `magi-agent serve`
+- `hermes setup` → `magi-agent init`
 - Plugin hooks (4 points) → Hook registry (28 built-in, full lifecycle)
 
 **What stays conceptually the same:**
@@ -30,15 +30,15 @@ architecture, config format, and extension model differ significantly.
 - Tool-use agentic loop
 - Workspace-based state
 
-## Hermes → Clawy Mapping
+## Hermes → Magi Mapping
 
 ### Directory Structure
 
 ```
-Hermes Agent (~/.hermes/)          Clawy Agent (./workspace/)
+Hermes Agent (~/.hermes/)          Magi (./workspace/)
 ──────────────────────────         ─────────────────────────────
 SOUL.md                            IDENTITY.md (or identity: in YAML)
-config.yaml                        ../clawy-agent.yaml
+config.yaml                        ../magi-agent.yaml
 .env                               environment variables
 skills/                            skills/ (same SKILL.md format)
   └── my-skill/SKILL.md              └── my-skill/SKILL.md
@@ -88,7 +88,7 @@ skills:
     - ~/.agents/skills
 ```
 
-**Clawy Agent (`clawy-agent.yaml`):**
+**Magi (`magi-agent.yaml`):**
 ```yaml
 llm:
   provider: anthropic
@@ -121,7 +121,7 @@ identity:
 ```
 
 **Key differences:**
-- No `fallback_providers` — Clawy Agent uses a single model (multi-model routing via custom hook)
+- No `fallback_providers` — Magi uses a single model (multi-model routing via custom hook)
 - No `allowed_users` — implement via a custom `beforeTurnStart` hook if needed
 - No `require_mention` — Discord adapter responds to @mentions by default
 - No `firecrawl` — `WebSearch` (DuckDuckGo) and `WebFetch` are built-in, zero API keys
@@ -131,7 +131,7 @@ identity:
 ### SOUL.md → identity + IDENTITY.md
 
 Hermes uses `SOUL.md` as the agent's identity (first thing in system prompt).
-Clawy Agent has two options:
+Magi has two options:
 
 **Option A — YAML `identity` field (simple):**
 ```yaml
@@ -155,11 +155,11 @@ rules that supplement identity.
 
 ## Step-by-Step Migration
 
-### Step 1: Install Clawy Agent
+### Step 1: Install Magi
 
 ```bash
-git clone https://github.com/ClawyPro/clawy-agent.git
-cd clawy-agent
+git clone https://github.com/openmagi/magi-agent.git
+cd magi-agent
 npm install
 ```
 
@@ -180,7 +180,7 @@ cp -r ~/.agents/skills/* workspace/skills/ 2>/dev/null || true
 
 ### Step 3: Export Memory
 
-Hermes stores memory in SQLite (FTS5 + holographic). Clawy Agent uses
+Hermes stores memory in SQLite (FTS5 + holographic). Magi uses
 markdown files + qmd indexing. Memory must be converted:
 
 ```bash
@@ -204,9 +204,9 @@ EOF
 ```
 
 For knowledge files (RAG), copy any markdown/text documents to
-`workspace/knowledge/`. Clawy Agent's qmd will index them on startup.
+`workspace/knowledge/`. Magi's qmd will index them on startup.
 
-### Step 4: Create clawy-agent.yaml
+### Step 4: Create magi-agent.yaml
 
 ```bash
 npx tsx src/cli/index.ts init
@@ -216,7 +216,7 @@ Or create manually — see the config conversion table above.
 
 ### Step 5: Migrate Skills
 
-Hermes skills use the agentskills.io SKILL.md format. Clawy Agent reads
+Hermes skills use the agentskills.io SKILL.md format. Magi reads
 the same format. However, check for Hermes-specific tool references:
 
 ```bash
@@ -224,9 +224,9 @@ the same format. However, check for Hermes-specific tool references:
 grep -r "run_terminal\|read_file\|write_file\|search_web\|browser_action" workspace/skills/
 ```
 
-Replace with Clawy Agent tool names:
+Replace with Magi tool names:
 
-| Hermes Tool | Clawy Agent Tool |
+| Hermes Tool | Magi Tool |
 |-------------|-----------------|
 | `run_terminal` | `Bash` |
 | `read_file` | `FileRead` |
@@ -244,10 +244,10 @@ Replace with Clawy Agent tool names:
 
 ### Step 6: Handle Hermes Plugins
 
-Hermes supports plugins that register tools, hooks, and commands. Clawy
+Hermes supports plugins that register tools, hooks, and commands. Magi
 Agent has a different extension model:
 
-| Hermes Extension | Clawy Agent Equivalent |
+| Hermes Extension | Magi Equivalent |
 |-----------------|----------------------|
 | Plugin with `pre_llm_call` hook | Custom hook on `beforeLLMCall` event |
 | Plugin with `post_llm_call` hook | Custom hook on `afterLLMCall` event |
@@ -260,10 +260,10 @@ Agent has a different extension model:
 
 For programmatic extension, modify `src/Agent.ts` or create skill files.
 
-### Step 7: Stop Hermes, Start Clawy
+### Step 7: Stop Hermes, Start Magi
 
 **Important:** Telegram only allows one poller per bot token. Stop Hermes
-before starting Clawy Agent.
+before starting Magi.
 
 ```bash
 # Stop Hermes gateway
@@ -275,7 +275,7 @@ pkill -f "hermes gateway"
 export ANTHROPIC_API_KEY=sk-ant-...
 export TELEGRAM_BOT_TOKEN=123456:ABC-DEF...
 
-# Start Clawy Agent
+# Start Magi
 npx tsx src/cli/index.ts serve
 ```
 
@@ -311,11 +311,11 @@ agent will reference them.
 | Python ecosystem / plugins | TypeScript only | Rewrite plugins as hooks or tools |
 | `hermes skills install` from hub | Not available | Copy SKILL.md files to workspace/skills/ |
 | Smart model routing (LIGHT/MEDIUM/HEAVY) | Not built-in | Single model, or custom `beforeLLMCall` hook |
-| Ink TUI (terminal UI) | Basic readline REPL | `clawy-agent start` for interactive mode |
+| Ink TUI (terminal UI) | Basic readline REPL | `magi-agent start` for interactive mode |
 
 ### You Gain
 
-| Clawy Agent Feature | Not in Hermes |
+| Magi Feature | Not in Hermes |
 |---------------------|---------------|
 | 28 programmable hooks (full turn lifecycle) | Only 4 plugin hooks |
 | Anti-hallucination (factGrounding, resourceExistence, preRefusal, deferralBlocker) | No equivalent |
@@ -339,10 +339,10 @@ agent will reference them.
 ### "Skills not found"
 - Check directory structure: `workspace/skills/<name>/SKILL.md`
 - Hermes uses `~/.hermes/skills/`; copy them to `workspace/skills/`
-- Check startup log: `[clawy-agent] skills: loaded=N`
+- Check startup log: `[magi-agent] skills: loaded=N`
 
 ### "Agent doesn't remember previous conversations"
-- Expected: Hermes and Clawy Agent use different memory engines
+- Expected: Hermes and Magi use different memory engines
 - Hermes memories (SQLite FTS5/HRR) cannot be imported directly
 - The agent builds new memory via hipocampus compaction over time
 - Seed important context in `workspace/MEMORY.md` manually
@@ -353,7 +353,7 @@ agent will reference them.
 - No API key needed for either
 
 ### "Python plugin won't work"
-- Clawy Agent is TypeScript — Python plugins must be rewritten
+- Magi is TypeScript — Python plugins must be rewritten
 - Simple plugins: convert to a hook in `src/hooks/builtin/`
 - Tool plugins: convert to a tool in `src/tools/`
 - Complex plugins: wrap as a Bash script called via the `Bash` tool

@@ -1,5 +1,6 @@
 import http from "node:http";
 import https from "node:https";
+import { StringDecoder } from "node:string_decoder";
 import { URL } from "node:url";
 import {
   LLMClient,
@@ -269,9 +270,10 @@ async function* parseOpenAISse(res: http.IncomingMessage): AsyncGenerator<LLMEve
     started: boolean;
     pendingArgs: string;
   }>();
+  const decoder = new StringDecoder("utf8");
 
   for await (const chunk of res) {
-    buffer += (chunk as Buffer).toString("utf8");
+    buffer += decoder.write(chunk as Buffer);
     const frames = buffer.split("\n\n");
     buffer = frames.pop() ?? "";
 
@@ -355,6 +357,8 @@ async function* parseOpenAISse(res: http.IncomingMessage): AsyncGenerator<LLMEve
       }
     }
   }
+
+  buffer += decoder.end();
 
   if (pendingStopReason && !ended) {
     yield {

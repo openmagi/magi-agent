@@ -114,7 +114,7 @@ export function makeWebSearchTool(
           {
             signal: controller.signal,
             headers: {
-              "User-Agent": "ClawyAgent/1.0 (https://github.com/ClawyPro/clawy-agent)",
+              "User-Agent": "MagiAgent/1.0 (https://github.com/openmagi/magi-agent)",
               Accept: "text/html",
             },
           },

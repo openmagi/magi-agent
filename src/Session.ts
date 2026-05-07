@@ -894,7 +894,7 @@ export class Session {
   async runTurn(
     userMessage: UserMessage,
     sse: SseWriter,
-    options: { planMode?: boolean; contextId?: string } = {},
+    options: { planMode?: boolean; contextId?: string; runtimeModelOverride?: string } = {},
   ): Promise<TurnResult> {
     return this.mutex.run(async () => {
       this.meta.lastActivityAt = Date.now();

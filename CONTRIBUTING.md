@@ -1,12 +1,12 @@
-# Contributing to Clawy Agent
+# Contributing to Magi
 
 Thank you for your interest in contributing!
 
 ## Development Setup
 
 ```bash
-git clone https://github.com/ClawyPro/clawy-agent.git
-cd clawy-agent
+git clone https://github.com/openmagi/magi-agent.git
+cd magi-agent
 npm install
 npm run dev
 ```
@@ -38,7 +38,7 @@ npm run lint        # Type check
 
 ## Reporting Issues
 
-Use [GitHub Issues](https://github.com/ClawyPro/clawy-agent/issues). Include:
+Use [GitHub Issues](https://github.com/openmagi/magi-agent/issues). Include:
 - Steps to reproduce
 - Expected vs actual behavior
 - Node.js version and OS

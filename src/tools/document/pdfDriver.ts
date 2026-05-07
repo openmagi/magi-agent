@@ -64,9 +64,9 @@ export async function configureBodyFont(
       // PDFKit requires the PostScript face name for TTC collections. Without
       // it, Debian's Noto CJK collection opens as a collection object and text
       // rendering falls back to the standard WinAnsi fonts.
-      doc.registerFont("ClawyBody", candidate.path, candidate.collectionFace);
-      doc.font("ClawyBody");
-      return { cjkCapable: true, fontName: "ClawyBody", fontPath: candidate.path };
+      doc.registerFont("MagiBody", candidate.path, candidate.collectionFace);
+      doc.font("MagiBody");
+      return { cjkCapable: true, fontName: "MagiBody", fontPath: candidate.path };
     } catch {
       // Try the next known platform font path.
     }

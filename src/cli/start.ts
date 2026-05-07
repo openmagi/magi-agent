@@ -1,7 +1,7 @@
 /**
- * `clawy-agent start` — interactive terminal mode.
+ * `magi-agent start` — interactive terminal mode.
  *
- * Loads clawy-agent.yaml, creates an Agent + Session, then enters a
+ * Loads magi-agent.yaml, creates an Agent + Session, then enters a
  * readline loop: user types a message, the agent streams its response
  * to stdout, repeat. Ctrl+C exits gracefully.
  */
@@ -143,7 +143,7 @@ export async function runStart(): Promise<void> {
     process.exit(1);
   }
 
-  const agentName = config.identity?.name ?? "Clawy Agent";
+  const agentName = config.identity?.name ?? "Magi";
   const agentConfig = buildAgentConfig(config);
 
   console.log("");

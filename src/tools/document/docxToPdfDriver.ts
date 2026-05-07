@@ -64,7 +64,7 @@ export async function convertDocxToPdf(input: DocxToPdfInput): Promise<void> {
   await assertHeader(input.docxPath, "PK", "DOCX input");
   await fs.mkdir(path.dirname(input.pdfPath), { recursive: true });
 
-  const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "clawy-docx-pdf-"));
+  const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "magi-docx-pdf-"));
   const outDir = path.join(tempRoot, "out");
   const profileDir = path.join(tempRoot, "lo-profile");
   const expectedPdf = path.join(

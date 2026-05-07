@@ -13,12 +13,13 @@
 
 import http from "node:http";
 import https from "node:https";
+import { StringDecoder } from "node:string_decoder";
 import { URL } from "node:url";
 import type { ImageContentBlock } from "../util/types.js";
 import { shouldEnableThinkingByDefault, getCapability } from "../llm/modelCapabilities.js";
 
 export interface LLMClientOptions {
-  apiProxyUrl: string; // e.g. http://api-proxy.clawy-system.svc.cluster.local:3001
+  apiProxyUrl: string; // e.g. http://api-proxy.magi-system.svc.cluster.local:3001
   gatewayToken: string; // used as x-api-key to api-proxy
   codexAccessToken?: string;
   codexRefreshToken?: string;
@@ -318,10 +319,10 @@ export class LLMClient {
     const lib = url.protocol === "https:" ? https : http;
     const routingHeaders = req.routing
       ? {
-          "x-clawy-router-profile": req.routing.profileId,
-          "x-clawy-router-tier": req.routing.tier,
-          "x-clawy-router-provider": req.routing.provider,
-          "x-clawy-router-confidence": req.routing.confidence,
+          "x-magi-router-profile": req.routing.profileId,
+          "x-magi-router-tier": req.routing.tier,
+          "x-magi-router-provider": req.routing.provider,
+          "x-magi-router-confidence": req.routing.confidence,
         }
       : {};
     const reqOptions: http.RequestOptions = {
@@ -411,16 +412,16 @@ export class LLMClient {
 }
 
 function parseProviderHealthHeaders(headers: http.IncomingHttpHeaders): ProviderHealthContext | null {
-  const provider = headerValue(headers, "x-clawy-provider-health-provider");
-  const state = headerValue(headers, "x-clawy-provider-health-state");
+  const provider = headerValue(headers, "x-magi-provider-health-provider");
+  const state = headerValue(headers, "x-magi-provider-health-state");
   if (!provider || !state) return null;
   return {
     provider,
-    model: headerValue(headers, "x-clawy-provider-health-model"),
+    model: headerValue(headers, "x-magi-provider-health-model"),
     state: normalizeProviderHealthState(state),
-    confidence: normalizeProviderHealthConfidence(headerValue(headers, "x-clawy-provider-health-confidence")),
-    summary: headerValue(headers, "x-clawy-provider-health-summary"),
-    routeReason: headerValue(headers, "x-clawy-provider-health-route") || "primary",
+    confidence: normalizeProviderHealthConfidence(headerValue(headers, "x-magi-provider-health-confidence")),
+    summary: headerValue(headers, "x-magi-provider-health-summary"),
+    routeReason: headerValue(headers, "x-magi-provider-health-route") || "primary",
   };
 }
 
@@ -504,9 +505,10 @@ export async function* parseAnthropicSse(
     | null;
   let stopReason: StopReason = null;
   let usage: LLMUsage = { inputTokens: 0, outputTokens: 0 };
+  const decoder = new StringDecoder("utf8");
 
   for await (const chunk of res) {
-    buffer += (chunk as Buffer).toString("utf8");
+    buffer += decoder.write(chunk as Buffer);
     const lines = buffer.split("\n");
     buffer = lines.pop() ?? "";
 
@@ -621,6 +623,8 @@ export async function* parseAnthropicSse(
       }
     }
   }
+
+  buffer += decoder.end();
 
   // Fallthrough — stream closed without message_stop
   yield { kind: "message_end", stopReason: stopReason ?? null, usage };

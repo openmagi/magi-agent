@@ -151,7 +151,7 @@ export function fileDeliveryInterceptor(
               {
                 GATEWAY_TOKEN: opts.gatewayToken || "",
                 BOT_ID: opts.botId || "",
-                CHAT_PROXY_URL: opts.chatProxyUrl || "http://chat-proxy.clawy-system.svc.cluster.local:3002",
+                CHAT_PROXY_URL: opts.chatProxyUrl || "http://chat-proxy.magi-system.svc.cluster.local:3002",
               },
               30000,
             );

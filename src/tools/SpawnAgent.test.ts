@@ -50,6 +50,29 @@ function mockLLMClient(script: MockScript): {
   const callLog: LLMStreamRequest[] = [];
   let roundIdx = 0;
   async function* stream(req: LLMStreamRequest): AsyncGenerator<LLMEvent, void, void> {
+    if (String(req.system ?? "").includes("final-answer meta classifier")) {
+      yield {
+        kind: "text_delta",
+        blockIndex: 0,
+        delta: JSON.stringify({
+          internalReasoningLeak: false,
+          lazyRefusal: false,
+          selfClaim: false,
+          deferralPromise: false,
+          assistantClaimsFileCreated: false,
+          assistantClaimsChatDelivery: false,
+          assistantClaimsKbDelivery: false,
+          assistantReportsDeliveryFailure: false,
+          reason: "spawn test default classifier pass",
+        }),
+      };
+      yield {
+        kind: "message_end",
+        stopReason: "end_turn",
+        usage: { inputTokens: 0, outputTokens: 0 },
+      };
+      return;
+    }
     callLog.push(req);
     const round = script.rounds[roundIdx++] ?? [
       { kind: "message_end", stopReason: "end_turn", usage: { inputTokens: 0, outputTokens: 0 } },

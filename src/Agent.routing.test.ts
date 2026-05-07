@@ -25,7 +25,7 @@ describe("Agent native routing", () => {
 
   it("creates a router for hosted-proxy routing", () => {
     const agent = new Agent(config({
-      model: "clawy-smart-router/auto",
+      model: "magi-smart-router/auto",
       routingMode: "hosted-proxy",
       routingProfileId: "standard",
     }));
@@ -35,7 +35,7 @@ describe("Agent native routing", () => {
 
   it("uses direct provider transport in direct routing mode", () => {
     const agent = new Agent(config({
-      model: "clawy-smart-router/auto",
+      model: "magi-smart-router/auto",
       routingMode: "direct",
       directProviders: {
         openai: {

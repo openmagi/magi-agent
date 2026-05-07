@@ -1,8 +1,8 @@
-# Clawy Agent
+# Magi
 
 **Open-source runtime for personal AI agents that can finish work reliably.**
 
-Clawy Agent is not a prompt chain and not a chatbot wrapper. It is a durable
+Magi is not a prompt chain and not a chatbot wrapper. It is a durable
 agent runtime: every task runs inside an observable loop with tool execution,
 runtime checks, persistent transcripts, memory, deterministic evidence, file
 delivery, scheduled automation, and user-defined harness rules.
@@ -10,29 +10,30 @@ delivery, scheduled automation, and user-defined harness rules.
 If you are tired of agents that create files but forget to send them, claim work
 is done without verification, compute dates or totals from model intuition, lose
 context after a restart, misroute scheduled jobs, or ignore workflow
-instructions buried in the prompt, Clawy Agent moves those behaviors out of
+instructions buried in the prompt, Magi moves those behaviors out of
 vibes and into runtime state.
 
 Think Claude Code, but open-source, multi-provider, always-on, and programmable.
 
 ## Self-Hosted App
 
-Clawy Agent includes **Clawy Agent App**, a self-hostable workbench for running
+Magi includes **Magi App**, a self-hostable workbench for running
 a Codex-like personal agent app with your own provider, workspace, tools,
 memory, schedules, and harness rules.
 
 The included `/app` shell connects to the same runtime over HTTP/SSE, streams
 turns, shows live sessions, background tasks, scheduled jobs, artifacts, loaded
-skills, and runtime events, and keeps provider secrets out of the browser by
-using a separate server token.
+skills, and runtime events. It also supports a per-turn model override for
+testing different providers or routers without changing the agent config, while
+keeping provider secrets out of the browser by using a separate server token.
 
-The goal is to keep the visible app surface open while keeping hosted Clawy
+The goal is to keep the visible app surface open while keeping hosted Magi
 Cloud's production control plane separate: billing, fleet provisioning, managed
 credentials, production auth, hosted data contracts, and operator backoffice stay
 hosted-only. See the [open-source app plan](docs/plans/2026-05-04-open-source-agent-app.md)
 for scope, architecture, milestones, and release gates.
 
-## Why Clawy Agent
+## Why Magi
 
 Most agent frameworks give you a model, a tool schema, and a loop. That is not
 enough for real personal agents.
@@ -49,7 +50,7 @@ Real agents need to:
   execute worker tasks in the wrong role
 - expose the control surface so operators can add rules without forking core code
 
-Clawy Agent is built around that premise. The LLM is the reasoning engine; the
+Magi is built around that premise. The LLM is the reasoning engine; the
 runtime is the discipline layer that decides what must be evidenced,
 persisted, retried, blocked, or delivered.
 
@@ -91,18 +92,20 @@ evidence, and deterministic evidence through the turn.
 | **User Harness Rules** | Install Markdown rules that become runtime checks, including required tools, required tool input patterns, LLM verifiers, and blockers. |
 | **Native delivery path** | Documents, spreadsheets, and workspace files can be generated, registered, and delivered back through supported channels. |
 | **Child agents** | Spawn background agents with bounded tools, workspace isolation, and result delivery. |
+| **Per-turn model control** | HTTP/app clients can pass an explicit model for a single turn while leaving the default runtime model untouched. |
 | **Multi-channel** | Run the same runtime from CLI, HTTP, Telegram, or Discord. |
 | **Multi-provider** | Use Anthropic, OpenAI, or Google models through one runtime interface. |
 
 ## Built-In Capabilities
 
-Clawy Agent ships with 30+ native tools and runtime subsystems:
+Magi ships with 30+ native tools and runtime subsystems:
 
 - **Workspace tools:** `FileRead`, `FileWrite`, `FileEdit`, `Glob`, `Grep`, `Bash`
 - **Web and browser:** `WebSearch`, `WebFetch`, `Browser`, `SocialBrowser`
 - **Deterministic workbench:** `Clock`, `DateRange`, `Calculation`
 - **Knowledge and memory:** `KnowledgeSearch`, Hipocampus recall, qmd indexing
 - **Generated outputs:** `DocumentWrite`, `SpreadsheetWrite`, `FileDeliver`, `FileSend`
+- **File delivery:** registered artifacts and direct workspace files, including source files such as `.py`, `.ts`, `.js`, `.css`, `.yaml`, and `.rpy`
 - **Artifacts:** `ArtifactCreate`, `ArtifactRead`, `ArtifactList`, `ArtifactUpdate`, `ArtifactDelete`
 - **Delegation:** `SpawnAgent`, `TaskList`, `TaskGet`, `TaskOutput`, `TaskStop`
 - **Planning and control:** `EnterPlanMode`, `ExitPlanMode`, `AskUserQuestion`, `TaskBoard`
@@ -165,7 +168,7 @@ Design principles:
 
 ## Reliability Architecture
 
-Clawy Agent is designed for the failure modes that show up once agents are used
+Magi is designed for the failure modes that show up once agents are used
 for real work, not only demos.
 
 ### Execution Contracts
@@ -199,10 +202,24 @@ The result is not "the model was told to be careful." The runtime has a place to
 store the requirement, a place to store the evidence, and a gate that can reject
 the final answer.
 
+### Classifier And Deferral Discipline
+
+Magi uses lightweight meta classifiers for request shape and final-answer risk,
+but they are bounded runtime dependencies, not unbounded blocking calls. Request
+and final-answer classifiers run with hard deadlines inside hook budgets and
+fail open when unavailable. Hooks that depend on them, such as self-claim,
+resource-existence, and deferral checks, declare their own fail-open posture so
+timeouts do not strand a turn.
+
+Deferral handling is also runtime-managed. Parent turns block final answers that
+promise future delivery without a real handoff. Spawned child agents use the
+same final-answer classifier to catch "let me write that next" endings and retry
+once with a tool-use directive, instead of returning an unfinished child result.
+
 ### Scheduled Work
 
 Cron jobs are treated as durable workflows, not delayed chat messages. When a
-cron is created, Clawy Agent captures the source delivery channel instead of
+cron is created, Magi captures the source delivery channel instead of
 asking the model to choose a target later. When the cron fires, the parent turn
 is constrained to meta-orchestration: inspect the schedule, delegate the actual
 work to a child agent, and summarize or deliver the result.
@@ -217,7 +234,7 @@ Cron safety is enforced through several runtime pieces working together:
 - `TaskBoard` iteration state, the sweeper, and stop conditions keep long
   scheduled loops restart-safe and bounded
 
-That is how Clawy Agent avoids the common failure where a scheduled agent
+That is how Magi avoids the common failure where a scheduled agent
 ignores the workflow boundary, opens the wrong resource, or sends the result to
 the wrong channel.
 
@@ -241,14 +258,14 @@ accidentally replace core tools such as `Browser`, `SocialBrowser`,
 ## Quick Start
 
 ```bash
-git clone https://github.com/ClawyPro/clawy-agent.git
-cd clawy-agent
+git clone https://github.com/openmagi/magi-agent.git
+cd magi-agent
 npm install
 npx tsx src/cli/index.ts init
 npx tsx src/cli/index.ts start
 ```
 
-The `init` command writes `clawy-agent.yaml`. The `start` command runs an
+The `init` command writes `magi-agent.yaml`. The `start` command runs an
 interactive terminal agent against the configured workspace.
 
 ## Installation
@@ -256,8 +273,8 @@ interactive terminal agent against the configured workspace.
 ### From Source
 
 ```bash
-git clone https://github.com/ClawyPro/clawy-agent.git
-cd clawy-agent
+git clone https://github.com/openmagi/magi-agent.git
+cd magi-agent
 npm install
 ```
 
@@ -272,8 +289,8 @@ npx tsx src/cli/index.ts <command>
 An npm package is planned. Until it is published, use the source install above.
 
 ```bash
-npm install -g clawy-agent
-clawy-agent <command>
+npm install -g magi-agent
+magi-agent <command>
 ```
 
 ## Usage Modes
@@ -289,7 +306,7 @@ Terminal conversation mode for local work.
 ### Server
 
 ```bash
-export CLAWY_AGENT_SERVER_TOKEN=$(openssl rand -hex 24)
+export MAGI_AGENT_SERVER_TOKEN=$(openssl rand -hex 24)
 npx tsx src/cli/index.ts serve --port 8080
 ```
 
@@ -302,8 +319,10 @@ Open the self-hosted app at:
 http://localhost:8080/app
 ```
 
-Use `CLAWY_AGENT_SERVER_TOKEN` as the app's server token. Do not paste your LLM
-provider API key into the browser.
+Use `MAGI_AGENT_SERVER_TOKEN` as the app's server token. Do not paste your LLM
+provider API key into the browser. The app sends chat turns through
+`POST /v1/chat/completions`; the optional model field is treated as a per-turn
+runtime override and `auto` falls back to the configured model.
 
 The app currently uses these local read-only inspection endpoints:
 
@@ -317,13 +336,13 @@ The app currently uses these local read-only inspection endpoints:
 | `GET /v1/app/artifacts` | Generated artifact index. |
 | `GET /v1/app/skills` | Loaded skills, skill issues, and runtime skill hooks. |
 
-These endpoints require `Authorization: Bearer $CLAWY_AGENT_SERVER_TOKEN` when
+These endpoints require `Authorization: Bearer $MAGI_AGENT_SERVER_TOKEN` when
 `server.gatewayToken` is configured.
 
 ### Programmatic
 
 ```typescript
-import { Agent } from "clawy-agent";
+import { Agent } from "magi-agent";
 
 const agent = new Agent({
   botId: "my-agent",
@@ -339,7 +358,7 @@ await agent.start();
 
 ## Configuration
 
-Run `npx tsx src/cli/index.ts init` to generate `clawy-agent.yaml`
+Run `npx tsx src/cli/index.ts init` to generate `magi-agent.yaml`
 interactively, or create it manually:
 
 ```yaml
@@ -349,7 +368,7 @@ llm:
   apiKey: ${ANTHROPIC_API_KEY}
 
 server:
-  gatewayToken: ${CLAWY_AGENT_SERVER_TOKEN}
+  gatewayToken: ${MAGI_AGENT_SERVER_TOKEN}
 
 channels:
   telegram:
@@ -382,7 +401,7 @@ identity:
 
 1. Create a bot via [@BotFather](https://t.me/BotFather).
 2. Copy the bot token.
-3. Add it to `clawy-agent.yaml`.
+3. Add it to `magi-agent.yaml`.
 
 ```yaml
 channels:
@@ -435,7 +454,11 @@ llm:
 ```
 
 All providers support streaming, tool use, and the full agentic loop. The
-provider layer handles message and tool-call format conversion.
+provider layer handles message and tool-call format conversion. HTTP and app
+clients can set `model` on a single `/v1/chat/completions` request to override
+the runtime model for that turn; omit it or send `auto` to use the configured
+model. SSE parsers preserve split UTF-8 chunks, so multilingual streams remain
+byte-safe across proxy and direct-provider modes.
 
 ## Hooks: The Control Plane
 

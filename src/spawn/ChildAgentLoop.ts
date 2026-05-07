@@ -50,6 +50,7 @@ import type { Workspace } from "../storage/Workspace.js";
 import { readOne } from "../turn/LLMStreamReader.js";
 import type { PermissionMode } from "../turn/ToolDispatcher.js";
 import { summariseToolOutput } from "../util/toolResult.js";
+import { classifyFinalAnswerMeta } from "../hooks/builtin/turnMetaClassifier.js";
 import { buildChildSystemPrompt } from "./ChildSystemPrompt.js";
 
 /**
@@ -68,36 +69,56 @@ export const CHILD_MAX_ITERATIONS = (() => {
   return Number.isFinite(parsed) && parsed >= 5 && parsed <= 1000 ? parsed : 200;
 })();
 
-/**
- * Deferral narrative patterns — text the child emits just before it
- * stops without actually executing the promised action. When a non-
- * tool_use stop is preceded by one of these patterns, we re-prompt the
- * child once to FORCE the follow-through instead of returning a
- * half-finished result. Mirrors the parent-side DeferralBlocker hook.
- * Pattern-match is substring (case-insensitive).
- */
-const DEFERRAL_NARRATIVE_PATTERNS: readonly RegExp[] = [
-  /\bnow let me\b/i,
-  /\blet me now\b/i,
-  /\bi(?:'| wi)ll now\b/i,
-  /\bnext,? (?:i|let me)\b/i,
-  /\bnext step/i,
-  /\b(?:creating|writing|building|generating) (?:the|a) (?:report|file|output|analysis)/i,
-  /이제 (?:작성|분석|정리|보고|리포트)/,
-  /다음[은으로]/,
-  /결과를? (?:작성|정리|보내)/,
-  /리포트(?:를| )?(?:작성|정리)/,
-];
+const CHILD_DEFERRAL_CLASSIFIER_TIMEOUT_MS = 3_000;
+
+function childDeferralClassifierTimeoutMs(deadline: number): number {
+  const remaining = deadline - Date.now();
+  if (remaining <= 0) return 0;
+  return Math.max(250, Math.min(CHILD_DEFERRAL_CLASSIFIER_TIMEOUT_MS, remaining));
+}
 
 /**
- * Exported for tests. True when `finalText` ends with a deferral narrative
- * (text promising follow-up action immediately before the loop exits).
+ * LLM-based child deferral classification. No regex fallback.
+ * Mirrors the parent DeferralBlocker classifier but avoids requiring a
+ * full HookContext inside spawned children.
  */
-export function hasTrailingDeferralNarrative(finalText: string): boolean {
-  if (!finalText) return false;
-  // Only inspect the last ~200 chars — narrative is typically at the tail.
-  const tail = finalText.slice(-200);
-  return DEFERRAL_NARRATIVE_PATTERNS.some((re) => re.test(tail));
+export async function classifyChildDeferralNarrative(input: {
+  llm: Agent["llm"];
+  model: string;
+  prompt: string;
+  finalText: string;
+  signal: AbortSignal;
+  timeoutMs: number;
+}): Promise<boolean> {
+  if (!input.finalText.trim()) return false;
+  if (input.timeoutMs <= 0) return false;
+  const controller = new AbortController();
+  const onAbort = (): void => controller.abort(input.signal.reason);
+  if (input.signal.aborted) {
+    onAbort();
+  } else {
+    input.signal.addEventListener("abort", onAbort, { once: true });
+  }
+  const timer = setTimeout(
+    () => controller.abort(new Error("child_deferral_classifier_timeout")),
+    input.timeoutMs,
+  );
+  try {
+    const meta = await classifyFinalAnswerMeta({
+      llm: input.llm,
+      model: input.model,
+      userMessage: input.prompt,
+      assistantText: input.finalText,
+      timeoutMs: input.timeoutMs,
+      signal: controller.signal,
+    });
+    return meta.deferralPromise;
+  } catch {
+    return false;
+  } finally {
+    clearTimeout(timer);
+    input.signal.removeEventListener("abort", onAbort);
+  }
 }
 
 export function classifyChildBashBoundary(input: unknown): { safe: boolean; reason?: string } {
@@ -440,14 +461,21 @@ export async function runChildAgentLoop(
       assistantBlocks.push(...blocks);
 
       if (stopReason !== "tool_use") {
-        // DeferralBlocker for children: if the last assistant text ends
-        // with a narrative promising further action ("Now let me write
-        // the report") but the loop is stopping with no tool_use, give
-        // the child ONE chance to actually execute. Otherwise the
-        // parent sees finalText with unfulfilled promises and no
-        // artifacts. 1 retry, fail-open. Mirrors parent DeferralBlocker.
+        // LLM-based DeferralBlocker for children: if the child is
+        // stopping after promising future action, give it one chance to
+        // actually execute. Fail-open on classifier errors/timeouts.
         const finalText = collectText(assistantBlocks);
-        if (!deferralRetryUsed && hasTrailingDeferralNarrative(finalText)) {
+        if (
+          !deferralRetryUsed &&
+          (await classifyChildDeferralNarrative({
+            llm: agent.llm,
+            model: effectiveModel,
+            prompt: opts.prompt,
+            finalText,
+            signal: controller.signal,
+            timeoutMs: childDeferralClassifierTimeoutMs(deadline),
+          }))
+        ) {
           deferralRetryUsed = true;
           messages.push({ role: "assistant", content: blocks });
           messages.push({
@@ -481,7 +509,17 @@ export async function runChildAgentLoop(
       );
       if (toolUses.length === 0) {
         const finalText = collectText(assistantBlocks);
-        if (!deferralRetryUsed && hasTrailingDeferralNarrative(finalText)) {
+        if (
+          !deferralRetryUsed &&
+          (await classifyChildDeferralNarrative({
+            llm: agent.llm,
+            model: effectiveModel,
+            prompt: opts.prompt,
+            finalText,
+            signal: controller.signal,
+            timeoutMs: childDeferralClassifierTimeoutMs(deadline),
+          }))
+        ) {
           deferralRetryUsed = true;
           messages.push({ role: "assistant", content: blocks });
           messages.push({

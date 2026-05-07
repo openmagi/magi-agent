@@ -53,5 +53,5 @@ export interface RouteDecision extends RoutedModel {
 }
 
 export function isRouterKeyword(model: string): boolean {
-  return model === "clawy-smart-router/auto" || model === "big-dic-router/auto";
+  return model === "magi-smart-router/auto" || model === "big-dic-router/auto";
 }

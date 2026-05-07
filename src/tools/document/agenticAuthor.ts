@@ -327,7 +327,7 @@ export async function writeDocumentAgentically(
   input: AgenticDocumentWriterInput,
   deps: AgenticDocumentAuthorDeps,
 ): Promise<AgenticDocumentWriteResult> {
-  const jobDir = await fs.mkdtemp(path.join(os.tmpdir(), "clawy-document-author-"));
+  const jobDir = await fs.mkdtemp(path.join(os.tmpdir(), "magi-document-author-"));
   const outputName = `output.${input.format}`;
   const outputPath = path.join(jobDir, outputName);
   const nodePath = deps.nodePath ?? path.resolve(process.cwd(), "node_modules");

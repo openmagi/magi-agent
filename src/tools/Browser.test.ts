@@ -150,7 +150,7 @@ describe("Browser", () => {
       "http://[::1]:3000",
       "http://metadata.google.internal/computeMetadata/v1/",
       "http://browser-worker:3003/health",
-      "http://browser-worker.clawy-system.svc.cluster.local:3003/health",
+      "http://browser-worker.magi-system.svc.cluster.local:3003/health",
     ]) {
       const result = await tool.execute({ action: "open", url }, ctx);
 

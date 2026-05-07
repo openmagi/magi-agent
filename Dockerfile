@@ -1,5 +1,5 @@
-# Clawy Core Agent — standalone agent runtime.
-# See docs/plans/2026-04-19-clawy-core-agent-design.md §3.2 / §9.5.
+# Magi Core Agent — standalone agent runtime.
+# See docs/plans/2026-04-19-magi-core-agent-design.md §3.2 / §9.5.
 # Runs inside each bot pod on :8080.
 
 FROM node:22-bookworm-slim AS builder
@@ -64,23 +64,23 @@ COPY skills/ ./skills/
 # files) that hardcode `/workspace/...` working — see
 # docs/notes/2026-04-20-core-agent-workspace-symlink-handoff.md.
 RUN useradd --create-home --home-dir /home/ocuser --shell /bin/sh ocuser && \
-    mkdir -p /home/ocuser/.clawy/workspace && \
-    ln -s /home/ocuser/.clawy/workspace /workspace && \
+    mkdir -p /home/ocuser/.magi/workspace && \
+    ln -s /home/ocuser/.magi/workspace /workspace && \
     chown -R ocuser:ocuser /home/ocuser /workspace
 
 USER ocuser
 
-# `/home/ocuser/.clawy/bin` on PATH lets bare-name skill calls
+# `/home/ocuser/.magi/bin` on PATH lets bare-name skill calls
 # (e.g. `kb-search.sh`, `agent-run.sh`, `integration.sh`) work the same
-# way they do in existing Clawy workspaces.
+# way they do in existing Magi workspaces.
 ENV NODE_ENV=production \
     CORE_AGENT_PORT=8080 \
-    CORE_AGENT_WORKSPACE=/home/ocuser/.clawy/workspace \
+    CORE_AGENT_WORKSPACE=/home/ocuser/.magi/workspace \
     CORE_AGENT_BUILT_BUILD_SHA=${CORE_AGENT_BUILD_SHA} \
     CORE_AGENT_BUILT_IMAGE_REPO=${CORE_AGENT_IMAGE_REPO} \
     CORE_AGENT_BUILT_IMAGE_TAG=${CORE_AGENT_IMAGE_TAG} \
     CORE_AGENT_BUILT_IMAGE_DIGEST=${CORE_AGENT_EXPECTED_IMAGE_DIGEST} \
-    PATH=/home/ocuser/.clawy/bin:/app/node_modules/.bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+    PATH=/home/ocuser/.magi/bin:/app/node_modules/.bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 
 EXPOSE 8080
 

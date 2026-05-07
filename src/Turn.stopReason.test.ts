@@ -389,7 +389,7 @@ describe("Turn.execute() stop-reason taxonomy", () => {
     const { turn, llm } = await makeFixture(
       [{ blocks: [{ type: "text", text: "hello." }], stopReason: "end_turn" }],
       {
-        model: "clawy-smart-router/auto",
+        model: "magi-smart-router/auto",
         router: { resolve: async () => decision },
       },
     );

@@ -193,7 +193,7 @@ export function formatBackgroundTaskDelivery(
 export interface AgentConfig {
   botId: string;
   userId: string;
-  /** legacy-compatible path: /home/ocuser/.clawy/workspace. */
+  /** legacy-compatible path: /home/ocuser/.magi/workspace. */
   workspaceRoot: string;
   gatewayToken: string;
   codexAccessToken?: string;
@@ -220,7 +220,7 @@ export interface AgentConfig {
   agentInstructions?: string;
   /**
    * Initial tool-permission posture for newly-created sessions.
-   * Hosted Clawy Pro pods set "bypass" explicitly to preserve the
+   * Hosted Magi Cloud pods set "bypass" explicitly to preserve the
    * low-friction product UX; bare Session construction defaults to
    * "default" so hooks are active unless runtime config opts out.
    */
@@ -269,7 +269,7 @@ export interface AgentConfig {
   }) => WebAppChannelAdapter;
   /**
    * Directory holding the bundled superpowers skills (one subdirectory
-   * per skill). Defaults to `<repo>/infra/docker/clawy-core-agent/skills/superpowers`
+   * per skill). Defaults to `<repo>/infra/docker/magi-core-agent/skills/superpowers`
    * resolved from the module location. Tests inject a temp dir.
    * See `docs/plans/2026-04-20-superpowers-plugin-design.md`.
    */
@@ -1015,11 +1015,11 @@ export class Agent {
     ];
     const loaded = await this.tools.loadSkillRoots(skillRoots, {
       trustedSkillRoots: splitPathListEnv(
-        process.env.CLAWY_TRUSTED_SKILL_ROOTS ??
+        process.env.MAGI_TRUSTED_SKILL_ROOTS ??
           process.env.CORE_AGENT_TRUSTED_SKILL_ROOTS,
       ),
       trustedSkillDirs: splitPathListEnv(
-        process.env.CLAWY_TRUSTED_SKILL_DIRS ??
+        process.env.MAGI_TRUSTED_SKILL_DIRS ??
           process.env.CORE_AGENT_TRUSTED_SKILL_DIRS,
       ),
     });
@@ -1340,12 +1340,12 @@ export class Agent {
       await runGit(this.config.workspaceRoot, [
         "config",
         "user.email",
-        "bot@clawy.pro",
+        "bot@magi.local",
       ]);
       await runGit(this.config.workspaceRoot, [
         "config",
         "user.name",
-        "clawy-bot",
+        "magi-bot",
       ]);
       console.log(
         `[core-agent] discipline: git repo initialised at ${this.config.workspaceRoot}`,
@@ -1486,7 +1486,7 @@ function splitPathListEnv(value: string | undefined): string[] {
  * order:
  *   1. `$CORE_AGENT_SUPERPOWERS_DIR` env override.
  *   2. `<cwd>/skills/superpowers` — matches the Docker WORKDIR (/app)
- *      and the repo layout (`infra/docker/clawy-core-agent/`).
+ *      and the repo layout (`infra/docker/magi-core-agent/`).
  *
  * The directory may not exist in unit tests that never touch
  * superpowers — the slash handlers fail open with a short pointer

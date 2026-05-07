@@ -253,7 +253,8 @@ export function makeResourceExistenceCheckerHook(
     point: "beforeCommit",
     priority: 83,
     blocking: true,
-    timeoutMs: 2_000,
+    failOpen: true,
+    timeoutMs: 5_000,
     handler: async ({ assistantText, toolCallCount, retryCount }, ctx: HookContext) => {
       try {
         if (!isEnabled()) return { action: "continue" };

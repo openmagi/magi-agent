@@ -9,6 +9,7 @@ import type { HookContext } from "../types.js";
 
 const REQUEST_CLASSIFIER_TIMEOUT_MS = 8_000;
 const FINAL_CLASSIFIER_TIMEOUT_MS = 6_000;
+const CLASSIFIER_HOOK_DEADLINE_HEADROOM_MS = 250;
 
 const VALID_KINDS: readonly DeterministicRequirementKind[] = [
   "clock",
@@ -145,6 +146,61 @@ function stringOrNull(value: unknown, max = 500): string | null {
   return trimmed ? trimmed.slice(0, max) : null;
 }
 
+function classifierTimeoutWithinHook(maxMs: number, hookDeadlineMs: number): number {
+  const finiteDeadline = Number.isFinite(hookDeadlineMs) ? Math.max(1, hookDeadlineMs) : maxMs;
+  const headroom =
+    finiteDeadline > CLASSIFIER_HOOK_DEADLINE_HEADROOM_MS + 1
+      ? CLASSIFIER_HOOK_DEADLINE_HEADROOM_MS
+      : Math.max(1, Math.floor(finiteDeadline / 2));
+  return Math.max(1, Math.min(maxMs, finiteDeadline - headroom));
+}
+
+function makeClassifierSignal(parent?: AbortSignal): {
+  signal: AbortSignal;
+  abort: (reason: Error) => void;
+  cleanup: () => void;
+} {
+  const controller = new AbortController();
+  const abort = (reason: Error): void => {
+    if (!controller.signal.aborted) controller.abort(reason);
+  };
+  const onParentAbort = (): void => {
+    const reason = (parent as (AbortSignal & { reason?: unknown }) | undefined)?.reason;
+    abort(reason instanceof Error ? reason : new Error("classifier aborted"));
+  };
+
+  if (parent?.aborted) {
+    onParentAbort();
+  } else if (parent) {
+    parent.addEventListener("abort", onParentAbort, { once: true });
+  }
+
+  return {
+    signal: controller.signal,
+    abort,
+    cleanup: () => parent?.removeEventListener("abort", onParentAbort),
+  };
+}
+
+type TimeoutResult = { timedOut: true };
+
+async function nextWithTimeout<T>(
+  iterator: AsyncIterator<T>,
+  timeoutMs: number,
+): Promise<IteratorResult<T> | TimeoutResult> {
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  const timeout = new Promise<TimeoutResult>((resolve) => {
+    timer = setTimeout(() => resolve({ timedOut: true }), Math.max(1, timeoutMs));
+  });
+  const next = iterator.next();
+  next.catch(() => undefined);
+  try {
+    return await Promise.race([next, timeout]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
 function objectField(obj: Record<string, unknown>, key: string): Record<string, unknown> {
   const value = obj[key];
   return value && typeof value === "object" && !Array.isArray(value)
@@ -269,18 +325,43 @@ async function streamClassifier(input: {
 }): Promise<string> {
   const deadline = Date.now() + input.timeoutMs;
   let output = "";
+  let timedOut = false;
+  const classifierSignal = makeClassifierSignal(input.signal);
   const stream = input.llm.stream({
     model: input.model,
     system: input.system,
     messages: [{ role: "user", content: [{ type: "text", text: input.userText }] }],
     max_tokens: input.maxTokens,
     temperature: 0,
-    signal: input.signal,
+    signal: classifierSignal.signal,
   });
-  for await (const event of stream) {
-    if (Date.now() > deadline) break;
-    if (event.kind === "text_delta") output += event.delta;
-    if (event.kind === "message_end" || event.kind === "error") break;
+  const iterator = stream[Symbol.asyncIterator]();
+  try {
+    while (true) {
+      const remainingMs = deadline - Date.now();
+      if (remainingMs <= 0) {
+        timedOut = true;
+        break;
+      }
+
+      const next = await nextWithTimeout(iterator, remainingMs);
+      if ("timedOut" in next) {
+        timedOut = true;
+        break;
+      }
+      if (next.done) break;
+
+      const event = next.value;
+      if (event.kind === "text_delta") output += event.delta;
+      if (event.kind === "message_end" || event.kind === "error") break;
+    }
+  } finally {
+    if (timedOut) {
+      classifierSignal.abort(new Error("classifier timeout"));
+      const closePromise = iterator.return?.();
+      void closePromise?.catch(() => undefined);
+    }
+    classifierSignal.cleanup();
   }
   return output;
 }
@@ -361,7 +442,7 @@ export async function getOrClassifyRequestMeta(
     llm: ctx.llm,
     model: ctx.agentModel,
     userMessage: input.userMessage,
-    timeoutMs: Math.min(REQUEST_CLASSIFIER_TIMEOUT_MS, ctx.deadlineMs),
+    timeoutMs: classifierTimeoutWithinHook(REQUEST_CLASSIFIER_TIMEOUT_MS, ctx.deadlineMs),
     signal: ctx.abortSignal,
   });
   ctx.executionContract?.recordRequestMetaClassification({
@@ -387,7 +468,7 @@ export async function getOrClassifyFinalAnswerMeta(
     model: ctx.agentModel,
     userMessage: input.userMessage,
     assistantText: input.assistantText,
-    timeoutMs: Math.min(FINAL_CLASSIFIER_TIMEOUT_MS, ctx.deadlineMs),
+    timeoutMs: classifierTimeoutWithinHook(FINAL_CLASSIFIER_TIMEOUT_MS, ctx.deadlineMs),
     signal: ctx.abortSignal,
   });
   ctx.executionContract?.recordFinalAnswerClassification({

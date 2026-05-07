@@ -1,7 +1,7 @@
 /**
- * `clawy-agent serve` — HTTP API server mode.
+ * `magi-agent serve` — HTTP API server mode.
  *
- * Loads clawy-agent.yaml, creates an Agent + HttpServer, and starts
+ * Loads magi-agent.yaml, creates an Agent + HttpServer, and starts
  * serving on the specified port. This is the config-file-driven
  * equivalent of the env-var-based `src/index.ts` entrypoint.
  */
@@ -74,10 +74,10 @@ export function resolveHttpBearerToken(
   }
   if (hasExplicitServerToken) {
     throw new Error(
-      "server.gatewayToken is configured but empty. Set CLAWY_AGENT_SERVER_TOKEN or remove the server.gatewayToken field.",
+      "server.gatewayToken is configured but empty. Set MAGI_AGENT_SERVER_TOKEN or remove the server.gatewayToken field.",
     );
   }
-  return cleanToken(process.env.CLAWY_AGENT_SERVER_TOKEN) ?? cleanToken(agentConfig.gatewayToken);
+  return cleanToken(process.env.MAGI_AGENT_SERVER_TOKEN) ?? cleanToken(agentConfig.gatewayToken);
 }
 
 export async function runServe(port?: number): Promise<void> {
@@ -98,7 +98,7 @@ export async function runServe(port?: number): Promise<void> {
     console.error((err as Error).message);
     process.exit(1);
   }
-  const agentName = config.identity?.name ?? "Clawy Agent";
+  const agentName = config.identity?.name ?? "Magi";
 
   const agent = new Agent(agentConfig);
   try {

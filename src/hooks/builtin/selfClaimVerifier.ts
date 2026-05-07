@@ -35,6 +35,7 @@ export const selfClaimVerifierHook: RegisteredHook<"beforeCommit"> = {
   point: "beforeCommit",
   priority: 80,
   blocking: true,
+  failOpen: true,
   timeoutMs: 5_000,
   handler: async ({ assistantText, toolReadHappened, userMessage }, ctx: HookContext) => {
     const hasClaim = await detectSelfClaim(assistantText, ctx, userMessage);

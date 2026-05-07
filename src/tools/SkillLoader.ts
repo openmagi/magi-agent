@@ -43,7 +43,7 @@ import { spawn } from "node:child_process";
 import { parse as parseYaml } from "yaml";
 import type { Tool, ToolContext, ToolResult, PermissionClass } from "../Tool.js";
 import { errorResult } from "../util/toolResult.js";
-import { withClawyBinPath } from "../util/shellPath.js";
+import { withMagiBinPath } from "../util/shellPath.js";
 import {
   normalizeClaudeSkillHooks,
   normalizeSkillRuntimeHooks,
@@ -147,7 +147,7 @@ async function realpathIfAvailable(p: string): Promise<string> {
 /**
  * Build a Tool for a script-backed skill. Phase 2a dispatch: spawn
  * /bin/sh -c <entry> with the JSON input piped on stdin. Skills can
- * also read `CLAWY_SKILL_INPUT` from the environment. stdout is the
+ * also read `MAGI_SKILL_INPUT` from the environment. stdout is the
  * tool_result content; non-zero exit is treated as an error.
  */
 function makeScriptSkillTool(opts: {
@@ -205,14 +205,14 @@ function makeScriptSkillTool(opts: {
           const child = spawn("/bin/sh", ["-c", resolvedEntry!], {
             cwd: effectiveWorkspaceRoot,
             env: {
-              ...withClawyBinPath(process.env),
+              ...withMagiBinPath(process.env),
               PWD: effectiveWorkspaceRoot,
-              CLAWY_WORKSPACE_ROOT: effectiveWorkspaceRoot,
-              CLAWY_SKILL_INPUT: inputJson,
-              CLAWY_SKILL_NAME: skillName,
-              CLAWY_BOT_ID: ctx.botId,
-              CLAWY_SESSION_KEY: ctx.sessionKey,
-              CLAWY_TURN_ID: ctx.turnId,
+              MAGI_WORKSPACE_ROOT: effectiveWorkspaceRoot,
+              MAGI_SKILL_INPUT: inputJson,
+              MAGI_SKILL_NAME: skillName,
+              MAGI_BOT_ID: ctx.botId,
+              MAGI_SESSION_KEY: ctx.sessionKey,
+              MAGI_TURN_ID: ctx.turnId,
             },
             stdio: ["pipe", "pipe", "pipe"],
           });

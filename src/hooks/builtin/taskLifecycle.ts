@@ -114,10 +114,10 @@ function haikuEnabled(): boolean {
  *   - `/tmp/...`            (Linux container tests)
  *   - `/private/tmp/...`    (macOS tmp via $TMPDIR)
  *   - `/var/folders/...`    (macOS per-user tmp)
- *   - `...T/clawy-test...`  (mktemp -t style test fixtures)
+ *   - `...T/magi-test...`  (mktemp -t style test fixtures)
  *
- * Production workspaceRoots (`/home/ocuser/.clawy/workspace/core-agent`
- * inside the pod, `~/.clawy/...` in dev) never match these prefixes.
+ * Production workspaceRoots (`/home/ocuser/.magi/workspace/core-agent`
+ * inside the pod, `~/.magi/...` in dev) never match these prefixes.
  */
 function isTestWorkspace(workspaceRoot: string): boolean {
   // Explicit `on` opt-in bypasses the guard — the unit tests use tmp
@@ -134,7 +134,7 @@ function isTestWorkspace(workspaceRoot: string): boolean {
   if (p.startsWith("/private/var/folders/")) return true;
   if (p.startsWith("/var/folders/")) return true;
   // A mktemp style workspace often contains `/T/` (macOS per-user tmp root).
-  if (/\/T\/[^/]+-tmp-|clawy-test-fixture/.test(p)) return true;
+  if (/\/T\/[^/]+-tmp-|magi-test-fixture/.test(p)) return true;
   return false;
 }
 

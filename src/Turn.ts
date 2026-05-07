@@ -170,6 +170,8 @@ export class Turn {
   private emptyResponseFallbackUsed = false;
   /** Runtime model resolved once at turn start. */
   private runtimeModel: string | null = null;
+  /** Explicit per-turn model override from chat clients. */
+  private readonly runtimeModelOverride: string | null = null;
   /** Gap §11.3 unknown-tool hallucination counter — shared across every
    * dispatchTools call within this turn. */
   private unknownToolCount = 0;
@@ -222,7 +224,7 @@ export class Turn {
     turnId: string,
     readonly sse: SseWriter,
     declaredRoute: TurnRoute = "direct",
-    options: { planMode?: boolean } = {},
+    options: { planMode?: boolean; runtimeModelOverride?: string } = {},
   ) {
     this.meta = {
       turnId,
@@ -235,6 +237,10 @@ export class Turn {
       effectiveModel: session.agent.config.model,
     };
     this.asks = new AskUserController(turnId, sse);
+    this.runtimeModelOverride =
+      typeof options.runtimeModelOverride === "string" && options.runtimeModelOverride.trim().length > 0
+        ? options.runtimeModelOverride.trim()
+        : null;
     // T2-08 — Session permission mode is authoritative.
     const sessionInPlan = safeGetPermissionMode(session) === "plan";
     this.planMode =
@@ -272,12 +278,16 @@ export class Turn {
 
   async resolveRuntimeModel(): Promise<string> {
     if (!this.runtimeModel) {
-      const resolver = (this.session.agent as {
-        resolveRuntimeModel?: () => Promise<string>;
-      }).resolveRuntimeModel;
-      this.runtimeModel = typeof resolver === "function"
-        ? await resolver.call(this.session.agent)
-        : this.session.agent.config.model;
+      if (this.runtimeModelOverride) {
+        this.runtimeModel = this.runtimeModelOverride;
+      } else {
+        const resolver = (this.session.agent as {
+          resolveRuntimeModel?: () => Promise<string>;
+        }).resolveRuntimeModel;
+        this.runtimeModel = typeof resolver === "function"
+          ? await resolver.call(this.session.agent)
+          : this.session.agent.config.model;
+      }
     }
     return this.runtimeModel;
   }

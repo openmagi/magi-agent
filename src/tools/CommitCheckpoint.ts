@@ -65,13 +65,13 @@ export async function runGit(
       stdio: ["ignore", "pipe", "pipe"],
       env: {
         ...process.env,
-        GIT_AUTHOR_NAME: process.env["GIT_AUTHOR_NAME"] ?? "clawy-bot",
+        GIT_AUTHOR_NAME: process.env["GIT_AUTHOR_NAME"] ?? "magi-bot",
         GIT_AUTHOR_EMAIL:
-          process.env["GIT_AUTHOR_EMAIL"] ?? "bot@clawy.pro",
+          process.env["GIT_AUTHOR_EMAIL"] ?? "bot@magi.local",
         GIT_COMMITTER_NAME:
-          process.env["GIT_COMMITTER_NAME"] ?? "clawy-bot",
+          process.env["GIT_COMMITTER_NAME"] ?? "magi-bot",
         GIT_COMMITTER_EMAIL:
-          process.env["GIT_COMMITTER_EMAIL"] ?? "bot@clawy.pro",
+          process.env["GIT_COMMITTER_EMAIL"] ?? "bot@magi.local",
       },
     });
     let stdout = "";

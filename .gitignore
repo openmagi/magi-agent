@@ -3,7 +3,7 @@ dist/
 *.tsbuildinfo
 .env
 .env.local
-clawy-agent.yaml
+magi-agent.yaml
 workspace/
 memory/daily/
 memory/weekly/

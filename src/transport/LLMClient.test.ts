@@ -4,6 +4,15 @@ import { describe, expect, it } from "vitest";
 import type { LLMMessage } from "./LLMClient.js";
 import { LLMClient, normalizeToolUseIdsForRequest } from "./LLMClient.js";
 
+function splitAtNeedleByte(value: string, needle: string, byteOffsetInNeedle: number): [Buffer, Buffer] {
+  const bytes = Buffer.from(value, "utf8");
+  const needleBytes = Buffer.from(needle, "utf8");
+  const needleStart = bytes.indexOf(needleBytes);
+  if (needleStart < 0) throw new Error(`needle not found: ${needle}`);
+  const splitAt = needleStart + byteOffsetInNeedle;
+  return [bytes.subarray(0, splitAt), bytes.subarray(splitAt)];
+}
+
 describe("normalizeToolUseIdsForRequest", () => {
   it("normalizes invalid tool_use ids and keeps matching tool_result references aligned", () => {
     const messages: LLMMessage[] = [
@@ -265,6 +274,53 @@ describe("LLMClient.resolveRuntimeModel", () => {
   });
 });
 
+describe("LLMClient SSE UTF-8 decoding", () => {
+  it("preserves Korean text when Anthropic SSE chunks split a UTF-8 character", async () => {
+    const korean = "프롬프트";
+    const frame = [
+      "event: content_block_delta",
+      `data: ${JSON.stringify({ type: "content_block_delta", index: 0, delta: { type: "text_delta", text: korean } })}`,
+      "",
+      "event: message_delta",
+      `data: ${JSON.stringify({ type: "message_delta", delta: { stop_reason: "end_turn" }, usage: { output_tokens: 1 } })}`,
+      "",
+      "event: message_stop",
+      `data: ${JSON.stringify({ type: "message_stop" })}`,
+      "",
+    ].join("\n");
+    const [first, second] = splitAtNeedleByte(frame, "트", 1);
+    const server = http.createServer((req, res) => {
+      req.resume();
+      req.on("end", () => {
+        res.writeHead(200, { "Content-Type": "text/event-stream" });
+        res.write(first);
+        setTimeout(() => res.end(second), 5);
+      });
+    });
+
+    try {
+      await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+      const address = server.address();
+      if (!address || typeof address === "string") throw new Error("server did not bind to a TCP port");
+
+      const client = new LLMClient({
+        apiProxyUrl: `http://127.0.0.1:${address.port}`,
+        gatewayToken: "gw-token",
+        defaultModel: "claude-sonnet-4-6",
+      });
+
+      const deltas: string[] = [];
+      for await (const event of client.stream({ messages: [{ role: "user", content: "hi" }] })) {
+        if (event.kind === "text_delta") deltas.push(event.delta);
+      }
+
+      expect(deltas.join("")).toBe(korean);
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+});
+
 describe("LLMClient Codex OAuth forwarding", () => {
   it("forwards Codex OAuth headers for openai-codex models", async () => {
     let seenHeaders: http.IncomingHttpHeaders | null = null;
@@ -311,12 +367,12 @@ describe("LLMClient provider health metadata", () => {
       req.on("end", () => {
         res.writeHead(200, {
           "Content-Type": "text/event-stream",
-          "x-clawy-provider-health-provider": "openai",
-          "x-clawy-provider-health-model": "gpt-5.4-mini",
-          "x-clawy-provider-health-state": "degraded",
-          "x-clawy-provider-health-confidence": "high",
-          "x-clawy-provider-health-summary": "local-rate-limit",
-          "x-clawy-provider-health-route": "provider_health_fallback",
+          "x-magi-provider-health-provider": "openai",
+          "x-magi-provider-health-model": "gpt-5.4-mini",
+          "x-magi-provider-health-state": "degraded",
+          "x-magi-provider-health-confidence": "high",
+          "x-magi-provider-health-summary": "local-rate-limit",
+          "x-magi-provider-health-route": "provider_health_fallback",
         });
         res.end('event: message_stop\ndata: {"type":"message_stop"}\n\n');
       });

@@ -2,7 +2,7 @@
  * SkillLoader bundled-superpowers discovery test.
  *
  * Ensures the 14 skills copied into
- *   infra/docker/clawy-core-agent/skills/superpowers/
+ *   infra/docker/magi-core-agent/skills/superpowers/
  * all parse via the Phase 2b prompt-only loader (they ship with no
  * `input_schema` / `entry`, so inference should route them to
  * `kind: prompt`).

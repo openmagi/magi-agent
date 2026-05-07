@@ -1,31 +1,31 @@
-# Open-Source Clawy Agent App Plan
+# Open-Source Magi App Plan
 
 ## Goal
 
-Open-source a self-hostable frontend for Clawy Agent without publishing the
-hosted Clawy Cloud control plane.
+Open-source a self-hostable frontend for Magi without publishing the
+hosted Magi Cloud control plane.
 
 The target product is a Codex-like personal agent app that anyone can run with
 their own LLM provider, workspace, memory, schedules, tools, and harness rules.
-The hosted Clawy product can then compete on managed uptime, provisioning,
+The hosted Magi product can then compete on managed uptime, provisioning,
 credential handling, social/browser infrastructure, billing, and support rather
 than on hiding client-side UI code.
 
 ## Positioning
 
-Clawy Agent is the open-source runtime. Clawy Agent App should become the
+Magi is the open-source runtime. Magi App should become the
 open-source workbench for that runtime.
 
 Marketing frame:
 
 - Build your own personal agent app.
 - Bring your own LLM provider.
-- Run it locally, self-host it, or upgrade to managed Clawy Cloud.
+- Run it locally, self-host it, or upgrade to managed Magi Cloud.
 - Inspect the work: transcript, tools, tasks, files, memory, schedules, and
   verification evidence are visible runtime state.
 
 This should not be positioned as a plain coding-agent clone. OpenCode, Codex,
-Claude Code, and similar tools already own the terminal coding surface. Clawy's
+Claude Code, and similar tools already own the terminal coding surface. Magi's
 angle is broader: always-on personal agents with durable memory, scheduled
 workflows, multi-channel delivery, background agents, generated files, and
 runtime discipline gates.
@@ -34,7 +34,7 @@ runtime discipline gates.
 
 The open-source app should include:
 
-- Local-first chat UI for a running Clawy Agent instance. Initial shell: done.
+- Local-first chat UI for a running Magi instance. Initial shell: done.
 - Runtime connection setup for local HTTP/SSE or a self-hosted endpoint. Initial
   server-token flow: done.
 - Provider configuration UI for API-key based providers and local provider
@@ -49,11 +49,11 @@ The open-source app should include:
 - Skills viewer/reload control for workspace `skills/`. Initial skill state:
   done; reload control remains future work.
 - Docker Compose starter that runs the app and agent together.
-- Clear upgrade path to Clawy Cloud for managed hosting.
+- Clear upgrade path to Magi Cloud for managed hosting.
 
 The app can reuse concepts and UI patterns from the hosted frontend, but should
 be packaged as a separate self-hostable app surface with no default dependency
-on Clawy production services.
+on Magi production services.
 
 ## Hosted-Only Scope
 
@@ -101,7 +101,7 @@ Private hosted frontend pieces that are likely reusable after decoupling:
 Pieces that should be rewritten or replaced:
 
 - Any component that assumes Privy, Supabase, Stripe, hosted bot IDs, hosted
-  billing state, production API routes, or Clawy Cloud tenancy.
+  billing state, production API routes, or Magi Cloud tenancy.
 - Any social-browser UI that assumes the managed credential broker. The OSS app
   should expose local/session adapter configuration instead.
 - Any analytics, admin, invite, entitlement, or production growth surface.
@@ -122,7 +122,7 @@ apps/web
   -> SkillManager                  workspace skill list + reload
 ```
 
-The app should communicate with Clawy Agent through documented local APIs rather
+The app should communicate with Magi through documented local APIs rather
 than importing runtime internals directly. That keeps the frontend replaceable
 and makes third-party apps possible.
 
@@ -167,7 +167,7 @@ and the first M3 read-only runtime inspector is wired through documented
 - Keep this boundary document in the OSS repo.
 - Link it from the README.
 - Decide package layout: `apps/web` inside this repo versus a sibling
-  `clawy-app` repo. Default recommendation: start inside this repo so runtime
+  `magi-app` repo. Default recommendation: start inside this repo so runtime
   contracts and UI evolve together.
 - Add a secrets and hosted-service audit checklist before importing private UI
   code.
@@ -175,10 +175,10 @@ and the first M3 read-only runtime inspector is wired through documented
 ### M1: Local Workbench
 
 - Add a minimal web app shell. Done.
-- Connect to a local Clawy Agent HTTP/SSE endpoint. Done.
+- Connect to a local Magi HTTP/SSE endpoint. Done.
 - Send user messages and stream responses. Done.
 - Show runtime event stream. Done.
-- No auth, billing, Supabase, or hosted Clawy dependency. Done.
+- No auth, billing, Supabase, or hosted Magi dependency. Done.
 - Render richer first-class message parts, thinking blocks, and tool cards.
 
 ### M2: Provider And Workspace Setup
@@ -212,7 +212,7 @@ and the first M3 read-only runtime inspector is wired through documented
 - Add sample `.env.example` with non-secret placeholders.
 - Add production hardening notes for reverse proxy, TLS, auth, and provider key
   handling.
-- Add hosted Clawy Cloud upgrade copy without making the OSS app dependent on
+- Add hosted Magi Cloud upgrade copy without making the OSS app dependent on
   cloud services.
 
 ## Security And Release Gates
@@ -232,9 +232,9 @@ Before publishing the frontend:
 
 The README should describe the current repo as the runtime first, then the app:
 
-> Clawy Agent is the open-source runtime. Clawy Agent App is the included
+> Magi is the open-source runtime. Magi App is the included
 > self-hostable workbench for running your own Codex-like personal agent app with
 > your own provider and workspace.
 
 That keeps the public promise coherent: the runtime already exists, the app is
-the open-source surface, and hosted Clawy Cloud remains the managed version.
+the open-source surface, and hosted Magi Cloud remains the managed version.

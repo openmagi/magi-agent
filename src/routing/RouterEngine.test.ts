@@ -142,7 +142,7 @@ describe("RouterEngine", () => {
     const router = new RouterEngine({ llm, profileId: "standard" });
 
     const decision = await router.resolve({
-      configuredModel: "clawy-smart-router/auto",
+      configuredModel: "magi-smart-router/auto",
       messages: [{ role: "user", content: "HEARTBEAT status" }],
       hasTools: true,
       hasImages: false,
@@ -159,7 +159,7 @@ describe("RouterEngine", () => {
     const router = new RouterEngine({ llm, profileId: "standard" });
 
     const decision = await router.resolve({
-      configuredModel: "clawy-smart-router/auto",
+      configuredModel: "magi-smart-router/auto",
       messages: [{ role: "user", content: "Opus로 한 문장 답해줘" }],
       hasTools: false,
       hasImages: false,
@@ -175,7 +175,7 @@ describe("RouterEngine", () => {
     const router = new RouterEngine({ llm, profileId: "standard" });
 
     const decision = await router.resolve({
-      configuredModel: "clawy-smart-router/auto",
+      configuredModel: "magi-smart-router/auto",
       messages: [{ role: "user", content: "아키텍처 설계를 검토해줘" }],
       hasTools: true,
       hasImages: false,
@@ -199,7 +199,7 @@ describe("RouterEngine", () => {
     const router = new RouterEngine({ llm, profileId: "standard" });
 
     const decision = await router.resolve({
-      configuredModel: "clawy-smart-router/auto",
+      configuredModel: "magi-smart-router/auto",
       messages: [{ role: "user", content: "분석해줘" }],
       hasTools: false,
       hasImages: false,
@@ -214,7 +214,7 @@ describe("RouterEngine", () => {
     const router = new RouterEngine({ llm, profileId: "standard" });
 
     const decision = await router.resolve({
-      configuredModel: "clawy-smart-router/auto",
+      configuredModel: "magi-smart-router/auto",
       messages: [{ role: "user", content: "간단히 파일 읽어줘" }],
       hasTools: true,
       hasImages: false,
@@ -229,7 +229,7 @@ describe("RouterEngine", () => {
     const router = new RouterEngine({ llm, profileId: "standard" });
 
     const decision = await router.resolve({
-      configuredModel: "clawy-smart-router/auto",
+      configuredModel: "magi-smart-router/auto",
       messages: [
         {
           role: "user",

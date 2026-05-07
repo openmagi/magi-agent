@@ -107,7 +107,7 @@ describe("McpServer", () => {
       };
       expect(result.protocolVersion).toBe("2025-03-26");
       expect(result.capabilities.tools.listChanged).toBe(false);
-      expect(result.serverInfo.name).toBe("clawy-core-agent");
+      expect(result.serverInfo.name).toBe("magi-core-agent");
     } finally {
       await fs.rm(tmp, { recursive: true, force: true });
     }

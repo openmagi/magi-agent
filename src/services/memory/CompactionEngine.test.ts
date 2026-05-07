@@ -129,7 +129,7 @@ describe("loadConfig", () => {
     await writeFile(
       join(tmpDir, "hipocampus.config.json"),
       JSON.stringify({
-        platform: "clawy",
+        platform: "magi",
         search: { vector: true },
         compaction: { cooldownHours: 3, rootMaxTokens: 4200 },
       }),

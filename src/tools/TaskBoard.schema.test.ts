@@ -16,7 +16,7 @@ function assertArraySchemasDeclareItems(schema: unknown, path = "$"): void {
 
 describe("TaskBoard input schema", () => {
   it("declares items for every array schema exposed to upstream providers", () => {
-    const tool = makeTaskBoardTool("/tmp/clawy-taskboard-schema-test");
+    const tool = makeTaskBoardTool("/tmp/magi-taskboard-schema-test");
 
     assertArraySchemasDeclareItems(tool.inputSchema);
   });

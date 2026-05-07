@@ -37,7 +37,7 @@ function makeAdapter(overrides: Partial<WebAppChannelConfig> = {}): {
 } {
   const { fetchImpl, calls } = makeStubFetch(overrides.fetchImpl ? undefined : undefined);
   const adapter = new WebAppChannelAdapter({
-    pushEndpointUrl: "https://chat.clawy.pro/v1/bot-push/message",
+    pushEndpointUrl: "https://chat.magi.local/v1/bot-push/message",
     hmacKey: "test-key",
     gatewayToken: "gw-token",
     botId: "bot-1",
@@ -123,7 +123,7 @@ describe("WebAppChannelAdapter", () => {
       await adapter.send({ chatId: "general", text: "hello from cron" });
       expect(calls).toHaveLength(1);
       const call = calls[0]!;
-      expect(call.url).toBe("https://chat.clawy.pro/v1/bot-push/message");
+      expect(call.url).toBe("https://chat.magi.local/v1/bot-push/message");
       expect(call.init?.method).toBe("POST");
       const headers = call.init?.headers as Record<string, string>;
       expect(headers.Authorization).toBe("Bearer gw-token");
@@ -180,7 +180,7 @@ describe("WebAppChannelAdapter", () => {
       // Without a serverIdFactory the default uses Date.now() + randomBytes.
       const { fetchImpl, calls } = makeStubFetch();
       const adapter = new WebAppChannelAdapter({
-        pushEndpointUrl: "https://chat.clawy.pro/v1/bot-push/message",
+        pushEndpointUrl: "https://chat.magi.local/v1/bot-push/message",
         hmacKey: "k",
         gatewayToken: "g",
         botId: "b",

@@ -4,7 +4,7 @@ import crypto from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { spawn } from "node:child_process";
-import { withClawyBinPath } from "../util/shellPath.js";
+import { withMagiBinPath } from "../util/shellPath.js";
 
 const SUPPORTED_POINTS = new Set<HookPoint>([
   "beforeToolUse",
@@ -13,7 +13,7 @@ const SUPPORTED_POINTS = new Set<HookPoint>([
 ]);
 const SUPPORTED_DECISIONS = new Set(["approve", "deny", "ask"]);
 const SUPPORTED_ACTIONS = new Set(["block", "permission_decision"]);
-const CLAWY_SKILL_MANIFEST = ".clawy-skill-manifest.json";
+const MAGI_SKILL_MANIFEST = ".magi-skill-manifest.json";
 
 export interface RawSkillRuntimeHook {
   name?: unknown;
@@ -332,12 +332,12 @@ async function runCommandHook(
     const child = spawn(command.path, [], {
       cwd: command.skillRoot,
       env: {
-        ...withClawyBinPath(process.env),
-        CLAWY_SKILL_ROOT: command.skillRoot,
-        CLAWY_HOOK_POINT: declaration.point,
-        CLAWY_TOOL_NAME: toolName,
-        CLAWY_TURN_ID: ctx.turnId,
-        CLAWY_HOOK_ARGS: safeJsonStringify(args),
+        ...withMagiBinPath(process.env),
+        MAGI_SKILL_ROOT: command.skillRoot,
+        MAGI_HOOK_POINT: declaration.point,
+        MAGI_TOOL_NAME: toolName,
+        MAGI_TURN_ID: ctx.turnId,
+        MAGI_HOOK_ARGS: safeJsonStringify(args),
       },
       stdio: ["ignore", "pipe", "pipe"],
     });
@@ -524,7 +524,7 @@ async function verifySkillManifest(
   realSkillRoot: string,
   relFiles: readonly string[],
 ): Promise<true | string> {
-  const manifestPath = path.join(realSkillRoot, CLAWY_SKILL_MANIFEST);
+  const manifestPath = path.join(realSkillRoot, MAGI_SKILL_MANIFEST);
   let parsed: unknown;
   try {
     parsed = JSON.parse(await fs.readFile(manifestPath, "utf8"));

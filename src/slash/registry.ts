@@ -1,7 +1,7 @@
 /**
  * Slash-command registry — built-in `/compact`, `/reset`, `/status` and
  * any future additions. Ported from legacy gateway so bots migrated to
- * clawy-core-agent keep the same `/foo` UX.
+ * magi-core-agent keep the same `/foo` UX.
  *
  * Interception point: {@link Session.runTurn} calls
  * {@link matchSlashCommand} at the top of the mutex-protected turn

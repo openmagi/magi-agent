@@ -54,7 +54,7 @@ describe("HttpServer /app", () => {
   let port: number;
 
   beforeEach(async () => {
-    tmp = await fs.mkdtemp(path.join(os.tmpdir(), "clawy-app-route-"));
+    tmp = await fs.mkdtemp(path.join(os.tmpdir(), "magi-app-route-"));
     const agent = makeFakeAgent(tmp) as unknown as ConstructorParameters<
       typeof HttpServer
     >[0]["agent"];
@@ -75,7 +75,8 @@ describe("HttpServer /app", () => {
 
     expect(res.status).toBe(200);
     expect(res.contentType).toContain("text/html");
-    expect(res.body).toContain("Clawy Agent App");
+    expect(res.body).toContain("Magi App");
+    expect(res.body).toContain("model-override");
     expect(res.body).toContain("/app/app.js");
   });
 
@@ -86,6 +87,7 @@ describe("HttpServer /app", () => {
     expect(res.contentType).toContain("text/javascript");
     expect(res.body).toContain("createSseParser");
     expect(res.body).toContain("loadRuntimeSnapshot");
+    expect(res.body).toContain("modelOverride");
   });
 
   it("does not allow app route path traversal", async () => {

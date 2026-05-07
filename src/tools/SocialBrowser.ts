@@ -13,7 +13,7 @@ import {
   type SocialBrowserInput,
   type SocialProvider,
 } from "../social/SocialBrowserPolicy.js";
-import { withClawyBinPath } from "../util/shellPath.js";
+import { withMagiBinPath } from "../util/shellPath.js";
 
 export interface SocialBrowserOutput {
   action: SocialBrowserAction;
@@ -140,7 +140,7 @@ async function defaultRunner(
   return new Promise<SocialBrowserRunResult>((resolve) => {
     const child = spawn(command, args, {
       cwd,
-      env: { ...withClawyBinPath(process.env), PWD: cwd },
+      env: { ...withMagiBinPath(process.env), PWD: cwd },
       stdio: ["ignore", "pipe", "pipe"],
     });
 

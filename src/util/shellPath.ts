@@ -1,13 +1,13 @@
-const CLAWY_BIN = "/home/ocuser/.clawy/bin";
+const MAGI_BIN = "/home/ocuser/.magi/bin";
 
-export function withClawyBinPath(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+export function withMagiBinPath(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
   const currentPath = env.PATH ?? "";
-  if (currentPath.split(":").includes(CLAWY_BIN)) {
+  if (currentPath.split(":").includes(MAGI_BIN)) {
     return env;
   }
 
   return {
     ...env,
-    PATH: currentPath ? `${CLAWY_BIN}:${currentPath}` : CLAWY_BIN,
+    PATH: currentPath ? `${MAGI_BIN}:${currentPath}` : MAGI_BIN,
   };
 }

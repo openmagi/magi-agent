@@ -495,7 +495,7 @@ describe("MessageBuilder.appendRuntimeModelIdentityContext", () => {
     ];
 
     appendRuntimeModelIdentityContext(messages, {
-      configuredModel: "clawy-smart-router/auto",
+      configuredModel: "magi-smart-router/auto",
       effectiveModel: "openai/gpt-5.5",
       routeDecision: {
         profileId: "premium",
@@ -572,7 +572,7 @@ describe("MessageBuilder.appendRuntimeModelIdentityContext", () => {
     ];
 
     appendRuntimeModelIdentityContext(messages, {
-      configuredModel: "clawy-smart-router/auto",
+      configuredModel: "magi-smart-router/auto",
       effectiveModel: "openai/gpt-5.5",
     });
 
