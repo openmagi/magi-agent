@@ -31,10 +31,11 @@ interface FakeSession {
   transcript: {
     readCommitted(): Promise<unknown[]>;
   };
+  registerSessionCron(cronId: string): void;
 }
 
 interface FakeAgent {
-  config: { botId: string; workspaceRoot: string };
+  config: { botId: string; userId: string; workspaceRoot: string };
   auditLog: AuditLog;
   listSessions(): FakeSession[];
   getSession(sessionKey: string): FakeSession | undefined;
@@ -48,11 +49,17 @@ interface FakeAgent {
       tasks: Array<Record<string, unknown>>;
       nextCursor?: string;
     }>;
+    get(taskId: string): Promise<Record<string, unknown> | null>;
+    stop(taskId: string, reason?: string): Promise<boolean>;
   };
   crons: {
     list(filter?: { includeInternal?: boolean; enabled?: boolean }): Array<
       Record<string, unknown>
     >;
+    get(cronId: string): Record<string, unknown> | null;
+    create(input: Record<string, unknown>): Promise<Record<string, unknown>>;
+    update(cronId: string, patch: Record<string, unknown>): Promise<Record<string, unknown>>;
+    delete(cronId: string): Promise<boolean>;
   };
   artifacts: {
     list(filter?: { kind?: string }): Promise<Array<Record<string, unknown>>>;
@@ -65,6 +72,21 @@ interface FakeAgent {
       runtimeHooks: Array<{ name: string; point: string }>;
     };
   };
+  hipocampus: {
+    status(): Promise<Record<string, unknown>>;
+    recall(
+      query: string,
+      opts?: { limit?: number; collection?: string; minScore?: number },
+    ): Promise<{
+      root: { path: string; content: string; bytes: number } | null;
+      results: Array<{ path: string; content: string; score: number; context?: string }>;
+    }>;
+  };
+  reloadWorkspaceSkills(): Promise<{
+    loaded: Array<{ name: string; path: string }>;
+    issues: Array<{ path: string; message: string }>;
+    runtimeHooks: Array<{ name: string; point: string }>;
+  }>;
   hooks: { list(): [] };
   getActiveTurn(): undefined;
 }
@@ -113,9 +135,55 @@ function makeFakeAgent(workspaceRoot: string): FakeAgent {
         },
       ],
     },
+    registerSessionCron: (cronId) => {
+      const list = session.meta.crons ?? (session.meta.crons = []);
+      list.push(cronId);
+    },
   };
+  const tasks = [
+    {
+      taskId: "task-1",
+      sessionKey: "agent:main:app:web:default",
+      parentTurnId: "turn-parent",
+      status: "running",
+      persona: "researcher",
+      prompt: "collect market data and return the full result",
+      resultText: "market data result",
+      startedAt: 1_700_000_030_000,
+    },
+  ];
+  const crons = [
+    {
+      cronId: "cron-session",
+      botId: "bot-test",
+      userId: "user-test",
+      expression: "*/5 * * * *",
+      enabled: true,
+      durable: false,
+      internal: false,
+      createdAt: 1_700_000_000_000,
+      nextFireAt: 1_700_000_300_000,
+      consecutiveFailures: 0,
+      deliveryChannel: { type: "app", channelId: "web" },
+      prompt: "check queue",
+    },
+    {
+      cronId: "internal:hipocampus",
+      botId: "",
+      userId: "",
+      expression: "0 * * * *",
+      enabled: true,
+      durable: true,
+      internal: true,
+      createdAt: 1_700_000_000_000,
+      nextFireAt: 1_700_000_400_000,
+      consecutiveFailures: 0,
+      deliveryChannel: { type: "internal", channelId: "" },
+      prompt: "",
+    },
+  ];
   return {
-    config: { botId: "bot-test", workspaceRoot },
+    config: { botId: "bot-test", userId: "user-test", workspaceRoot },
     auditLog: new AuditLog(workspaceRoot, "bot-test"),
     listSessions: () => [session],
     getSession: (sessionKey) =>
@@ -123,43 +191,63 @@ function makeFakeAgent(workspaceRoot: string): FakeAgent {
     sessionKeyIndex: () => new Map(),
     backgroundTasks: {
       list: async (filter = {}) => ({
-        tasks: [
-          {
-            taskId: "task-1",
-            sessionKey: "agent:main:app:web:default",
-            status: "running",
-            persona: "researcher",
-            prompt: "collect market data and return the full result",
-            startedAt: 1_700_000_030_000,
-          },
-        ].filter((task) =>
+        tasks: tasks.filter((task) =>
           filter.status ? task.status === filter.status : true,
         ),
       }),
+      get: async (taskId) => tasks.find((task) => task.taskId === taskId) ?? null,
+      stop: async (taskId, reason) => {
+        const task = tasks.find((item) => item.taskId === taskId);
+        if (!task || task.status !== "running") return false;
+        task.status = "aborted";
+        task.finishedAt = 1_700_000_040_000;
+        if (reason) task.error = `stopped: ${reason}`;
+        return true;
+      },
     },
     crons: {
-      list: () => [
-        {
-          cronId: "cron-session",
-          expression: "*/5 * * * *",
+      list: (filter = {}) =>
+        crons
+          .filter((cron) => (filter.includeInternal ? true : cron.internal !== true))
+          .filter((cron) =>
+            filter.enabled === undefined ? true : cron.enabled === filter.enabled,
+          ),
+      get: (cronId) => crons.find((cron) => cron.cronId === cronId) ?? null,
+      create: async (input) => {
+        const cron = {
+          cronId: "cron-created",
+          botId: String(input.botId ?? ""),
+          userId: String(input.userId ?? ""),
+          expression: String(input.expression ?? ""),
+          prompt: String(input.prompt ?? ""),
+          description:
+            typeof input.description === "string" ? input.description : undefined,
+          deliveryChannel: input.deliveryChannel as { type: string; channelId: string },
           enabled: true,
-          durable: false,
+          durable: input.durable === true,
           internal: false,
-          nextFireAt: 1_700_000_300_000,
-          deliveryChannel: { type: "app", channelId: "web" },
-          prompt: "check queue",
-        },
-        {
-          cronId: "internal:hipocampus",
-          expression: "0 * * * *",
-          enabled: true,
-          durable: true,
-          internal: true,
-          nextFireAt: 1_700_000_400_000,
-          deliveryChannel: { type: "internal", channelId: "" },
-          prompt: "",
-        },
-      ],
+          createdAt: 1_700_000_050_000,
+          nextFireAt: 1_700_000_060_000,
+          consecutiveFailures: 0,
+          sessionKey:
+            typeof input.sessionKey === "string" ? input.sessionKey : undefined,
+        };
+        crons.push(cron);
+        return cron;
+      },
+      update: async (cronId, patch) => {
+        const cron = crons.find((item) => item.cronId === cronId);
+        if (!cron) throw new Error(`cron not found: ${cronId}`);
+        Object.assign(cron, patch);
+        return cron;
+      },
+      delete: async (cronId) => {
+        const index = crons.findIndex((cron) => cron.cronId === cronId);
+        if (index < 0) return false;
+        if (crons[index]?.internal) throw new Error("internal crons cannot be deleted");
+        crons.splice(index, 1);
+        return true;
+      },
     },
     artifacts: {
       list: async () => [
@@ -187,6 +275,41 @@ function makeFakeAgent(workspaceRoot: string): FakeAgent {
         runtimeHooks: [{ name: "skill:plan", point: "beforeTurnStart" }],
       }),
     },
+    hipocampus: {
+      status: async () => ({
+        qmdReady: true,
+        vectorEnabled: false,
+        compactionConfigured: true,
+        cooldownHours: 24,
+        rootMaxTokens: 12_000,
+        lastCompactionRun: null,
+        rootMemory: {
+          path: "memory/ROOT.md",
+          bytes: 20,
+          loaded: true,
+        },
+      }),
+      recall: async (query) => ({
+        root: {
+          path: "memory/ROOT.md",
+          content: `Root memory for ${query}`,
+          bytes: 20,
+        },
+        results: [
+          {
+            path: "memory/daily/2026-05-07.md",
+            content: "Alpha rollout note",
+            score: 0.91,
+            context: "daily",
+          },
+        ],
+      }),
+    },
+    reloadWorkspaceSkills: async () => ({
+      loaded: [{ name: "plan", path: "skills/superpowers/plan" }],
+      issues: [],
+      runtimeHooks: [{ name: "skill:plan", point: "beforeTurnStart" }],
+    }),
     hooks: { list: () => [] },
     getActiveTurn: () => undefined,
   };
@@ -195,13 +318,17 @@ function makeFakeAgent(workspaceRoot: string): FakeAgent {
 function requestJson(
   url: string,
   token?: string,
+  opts: { method?: string; body?: unknown } = {},
 ): Promise<{ status: number; body: unknown }> {
   return new Promise((resolve, reject) => {
     const req = http.request(
       url,
       {
-        method: "GET",
-        headers: token ? { Authorization: `Bearer ${token}` } : {},
+        method: opts.method ?? "GET",
+        headers: {
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          ...(opts.body !== undefined ? { "Content-Type": "application/json" } : {}),
+        },
       },
       (res) => {
         const chunks: Buffer[] = [];
@@ -219,6 +346,7 @@ function requestJson(
       },
     );
     req.on("error", reject);
+    if (opts.body !== undefined) req.write(JSON.stringify(opts.body));
     req.end();
   });
 }
@@ -230,6 +358,16 @@ describe("HttpServer /v1/app runtime routes", () => {
 
   beforeEach(async () => {
     tmp = await fs.mkdtemp(path.join(os.tmpdir(), "magi-app-runtime-"));
+    await fs.mkdir(path.join(tmp, "src"), { recursive: true });
+    await fs.writeFile(path.join(tmp, "README.md"), "# Workspace\n", "utf8");
+    await fs.writeFile(path.join(tmp, "src", "index.ts"), "export {};\n", "utf8");
+    await fs.mkdir(path.join(tmp, "memory", "daily"), { recursive: true });
+    await fs.writeFile(path.join(tmp, "memory", "ROOT.md"), "# Root\n", "utf8");
+    await fs.writeFile(
+      path.join(tmp, "memory", "daily", "2026-05-07.md"),
+      "# Daily\nAlpha rollout note\n",
+      "utf8",
+    );
     const agent = makeFakeAgent(tmp) as unknown as ConstructorParameters<
       typeof HttpServer
     >[0]["agent"];
@@ -340,5 +478,203 @@ describe("HttpServer /v1/app runtime routes", () => {
     expect(body.loaded.map((skill) => skill.name)).toEqual(["plan"]);
     expect(body.issues).toEqual([]);
     expect(body.runtimeHooks[0]?.name).toBe("skill:plan");
+  });
+
+  it("lists workspace files and reads bounded file content", async () => {
+    const list = await requestJson(
+      `http://127.0.0.1:${port}/v1/app/workspace?path=.`,
+      "local-token",
+    );
+
+    expect(list.status).toBe(200);
+    const listBody = list.body as {
+      path: string;
+      entries: Array<{ name: string; type: string; path: string }>;
+    };
+    expect(listBody.path).toBe(".");
+    expect(listBody.entries).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ name: "README.md", type: "file", path: "README.md" }),
+        expect.objectContaining({ name: "src", type: "directory", path: "src" }),
+      ]),
+    );
+
+    const file = await requestJson(
+      `http://127.0.0.1:${port}/v1/app/workspace/file?path=README.md`,
+      "local-token",
+    );
+
+    expect(file.status).toBe(200);
+    expect(file.body).toEqual(
+      expect.objectContaining({
+        ok: true,
+        path: "README.md",
+        content: "# Workspace\n",
+        truncated: false,
+      }),
+    );
+  });
+
+  it("rejects workspace path traversal", async () => {
+    const res = await requestJson(
+      `http://127.0.0.1:${port}/v1/app/workspace?path=..%2F..`,
+      "local-token",
+    );
+
+    expect(res.status).toBe(400);
+    expect(res.body).toEqual({ error: "invalid_path" });
+  });
+
+  it("lists and searches Hipocampus memory files", async () => {
+    const list = await requestJson(
+      `http://127.0.0.1:${port}/v1/app/memory`,
+      "local-token",
+    );
+
+    expect(list.status).toBe(200);
+    const listBody = list.body as {
+      status: { qmdReady: boolean };
+      files: Array<{ path: string; sizeBytes: number }>;
+    };
+    expect(listBody.status.qmdReady).toBe(true);
+    expect(listBody.files.map((file) => file.path)).toEqual(
+      expect.arrayContaining(["memory/ROOT.md", "memory/daily/2026-05-07.md"]),
+    );
+
+    const search = await requestJson(
+      `http://127.0.0.1:${port}/v1/app/memory/search?q=alpha&limit=3`,
+      "local-token",
+    );
+
+    expect(search.status).toBe(200);
+    expect(search.body).toEqual(
+      expect.objectContaining({
+        ok: true,
+        query: "alpha",
+        root: expect.objectContaining({ path: "memory/ROOT.md" }),
+        results: [
+          expect.objectContaining({
+            path: "memory/daily/2026-05-07.md",
+            score: 0.91,
+          }),
+        ],
+      }),
+    );
+  });
+
+  it("returns and stops individual background tasks", async () => {
+    const output = await requestJson(
+      `http://127.0.0.1:${port}/v1/app/tasks/task-1/output`,
+      "local-token",
+    );
+
+    expect(output.status).toBe(200);
+    expect(output.body).toEqual(
+      expect.objectContaining({
+        ok: true,
+        taskId: "task-1",
+        status: "running",
+        resultText: "market data result",
+      }),
+    );
+
+    const stopped = await requestJson(
+      `http://127.0.0.1:${port}/v1/app/tasks/task-1/stop`,
+      "local-token",
+      { method: "POST", body: { reason: "user cancelled" } },
+    );
+
+    expect(stopped.status).toBe(200);
+    expect(stopped.body).toEqual(
+      expect.objectContaining({
+        ok: true,
+        taskId: "task-1",
+        stopped: true,
+        task: expect.objectContaining({ status: "aborted" }),
+      }),
+    );
+  });
+
+  it("creates, updates, and deletes app crons", async () => {
+    const created = await requestJson(
+      `http://127.0.0.1:${port}/v1/app/crons`,
+      "local-token",
+      {
+        method: "POST",
+        body: {
+          expression: "@daily",
+          prompt: "write the daily note",
+          description: "Daily note",
+          sessionKey: "agent:main:app:web:default",
+        },
+      },
+    );
+
+    expect(created.status).toBe(200);
+    expect(created.body).toEqual(
+      expect.objectContaining({
+        ok: true,
+        cron: expect.objectContaining({
+          cronId: "cron-created",
+          deliveryChannel: { type: "app", channelId: "web" },
+          promptPreview: "write the daily note",
+        }),
+      }),
+    );
+    const sessions = await requestJson(
+      `http://127.0.0.1:${port}/v1/app/sessions`,
+      "local-token",
+    );
+    expect(
+      (sessions.body as { sessions: Array<{ crons: string[] }> }).sessions[0]?.crons,
+    ).toContain("cron-created");
+
+    const updated = await requestJson(
+      `http://127.0.0.1:${port}/v1/app/crons/cron-created`,
+      "local-token",
+      {
+        method: "PUT",
+        body: { enabled: false, description: "Paused daily note" },
+      },
+    );
+
+    expect(updated.status).toBe(200);
+    expect(updated.body).toEqual(
+      expect.objectContaining({
+        ok: true,
+        cron: expect.objectContaining({
+          cronId: "cron-created",
+          enabled: false,
+          description: "Paused daily note",
+        }),
+      }),
+    );
+
+    const deleted = await requestJson(
+      `http://127.0.0.1:${port}/v1/app/crons/cron-created`,
+      "local-token",
+      { method: "DELETE" },
+    );
+
+    expect(deleted.status).toBe(200);
+    expect(deleted.body).toEqual({ ok: true, cronId: "cron-created", deleted: true });
+  });
+
+  it("reloads workspace skills from the app auth surface", async () => {
+    const res = await requestJson(
+      `http://127.0.0.1:${port}/v1/app/skills/reload`,
+      "local-token",
+      { method: "POST" },
+    );
+
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual(
+      expect.objectContaining({
+        ok: true,
+        loaded: [{ name: "plan", path: "skills/superpowers/plan" }],
+        issues: [],
+        runtimeHooks: [{ name: "skill:plan", point: "beforeTurnStart" }],
+      }),
+    );
   });
 });

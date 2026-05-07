@@ -79,6 +79,10 @@ describe("HttpServer /app", () => {
     expect(res.body).toContain("model-override");
     expect(res.body).toContain("runtime-config-form");
     expect(res.body).toContain("harness-rule-form");
+    expect(res.body).toContain("workspace-path");
+    expect(res.body).toContain("memory-search-query");
+    expect(res.body).toContain("cron-editor-form");
+    expect(res.body).toContain("reload-skills-button");
     expect(res.body).toContain("/app/app.js");
   });
 
@@ -90,6 +94,10 @@ describe("HttpServer /app", () => {
     expect(res.body).toContain("createSseParser");
     expect(res.body).toContain("loadRuntimeSnapshot");
     expect(res.body).toContain("modelOverride");
+    expect(res.body).toContain("loadWorkspace");
+    expect(res.body).toContain("searchMemory");
+    expect(res.body).toContain("saveCron");
+    expect(res.body).toContain("reloadSkills");
   });
 
   it("serves installable app assets", async () => {

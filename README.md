@@ -448,9 +448,21 @@ The app currently uses these local runtime endpoints:
 | `GET /v1/app/sessions` | Live session metadata, permission posture, and budget counters. |
 | `GET /v1/app/transcript?sessionKey=...` | Bounded committed transcript replay for a session. |
 | `GET /v1/app/tasks` | Background child-agent task list. |
+| `GET /v1/app/tasks/:taskId` | Background task record. |
+| `GET /v1/app/tasks/:taskId/output` | Background task output/error/duration. |
+| `POST /v1/app/tasks/:taskId/stop` | Stops a running background task. |
 | `GET /v1/app/crons` | Scheduled workflow list, including internal runtime crons for operators. |
+| `POST /v1/app/crons` | Creates an app-delivered scheduled workflow. |
+| `PUT /v1/app/crons/:cronId` | Updates expression, prompt, enabled state, or description. |
+| `DELETE /v1/app/crons/:cronId` | Deletes a non-internal scheduled workflow. |
 | `GET /v1/app/artifacts` | Generated artifact index. |
 | `GET /v1/app/skills` | Loaded skills, skill issues, and runtime skill hooks. |
+| `POST /v1/app/skills/reload` | Reloads workspace skills for the running process. |
+| `GET /v1/app/workspace?path=...` | Lists files under the configured workspace root. |
+| `GET /v1/app/workspace/file?path=...` | Reads bounded text content from a workspace file. |
+| `GET /v1/app/memory` | Lists Hipocampus memory files and status. |
+| `GET /v1/app/memory/file?path=...` | Reads bounded text content from a memory file. |
+| `GET /v1/app/memory/search?q=...` | Searches Hipocampus/qmd memory. |
 | `GET /v1/app/config` | Sanitized provider/runtime config with secret presence only. |
 | `PUT /v1/app/config` | Writes local config using environment variable references, never raw browser-submitted secrets. |
 | `GET /v1/app/harness-rules` | Lists Markdown harness rule files in the workspace. |
@@ -461,7 +473,9 @@ The app currently uses these local runtime endpoints:
 These endpoints require `Authorization: Bearer $MAGI_AGENT_SERVER_TOKEN` when
 `server.gatewayToken` is configured. Config writes update `magi-agent.yaml`;
 restart the runtime for provider/model changes to take effect in the current
-process.
+process. For remote or shared deployments, read the
+[self-host hardening guide](docs/SELF-HOST-HARDENING.md) before exposing the
+runtime beyond localhost.
 
 ### Programmatic
 

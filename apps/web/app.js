@@ -28,6 +28,30 @@ const els = {
   runtimeTools: document.querySelector("#runtime-tools"),
   runtimeSkills: document.querySelector("#runtime-skills"),
   eventCount: document.querySelector("#event-count"),
+  reloadSkillsButton: document.querySelector("#reload-skills-button"),
+  workspaceForm: document.querySelector("#workspace-form"),
+  workspacePath: document.querySelector("#workspace-path"),
+  workspaceList: document.querySelector("#workspace-list"),
+  workspaceFile: document.querySelector("#workspace-file"),
+  memorySearchForm: document.querySelector("#memory-search-form"),
+  memorySearchQuery: document.querySelector("#memory-search-query"),
+  loadMemoryButton: document.querySelector("#load-memory-button"),
+  memoryList: document.querySelector("#memory-list"),
+  memoryResults: document.querySelector("#memory-results"),
+  memoryFile: document.querySelector("#memory-file"),
+  taskControlForm: document.querySelector("#task-control-form"),
+  taskControlId: document.querySelector("#task-control-id"),
+  taskOutputButton: document.querySelector("#task-output-button"),
+  taskStopButton: document.querySelector("#task-stop-button"),
+  taskOutputView: document.querySelector("#task-output-view"),
+  cronEditorForm: document.querySelector("#cron-editor-form"),
+  cronId: document.querySelector("#cron-id"),
+  cronExpression: document.querySelector("#cron-expression"),
+  cronPrompt: document.querySelector("#cron-prompt"),
+  cronDescription: document.querySelector("#cron-description"),
+  cronEnabled: document.querySelector("#cron-enabled"),
+  cronDurable: document.querySelector("#cron-durable"),
+  deleteCronButton: document.querySelector("#delete-cron-button"),
   runtimeConfigForm: document.querySelector("#runtime-config-form"),
   configProvider: document.querySelector("#config-provider"),
   configModel: document.querySelector("#config-model"),
@@ -183,7 +207,7 @@ function formatTime(ms) {
   return new Date(ms).toLocaleString();
 }
 
-function renderSnapshotList(target, items, emptyText, renderItem) {
+function renderSnapshotList(target, items, emptyText, renderItem, onSelect) {
   target.textContent = "";
   if (!Array.isArray(items) || items.length === 0) {
     const empty = document.createElement("div");
@@ -195,6 +219,17 @@ function renderSnapshotList(target, items, emptyText, renderItem) {
   for (const item of items) {
     const node = document.createElement("div");
     node.className = "snapshot-item";
+    if (onSelect) {
+      node.classList.add("clickable");
+      node.tabIndex = 0;
+      node.addEventListener("click", () => onSelect(item));
+      node.addEventListener("keydown", (event) => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          onSelect(item);
+        }
+      });
+    }
     const title = document.createElement("strong");
     const meta = document.createElement("span");
     const detail = document.createElement("small");
@@ -231,14 +266,19 @@ function renderRuntimeSnapshot(payload) {
     title: task.taskId || "task",
     meta: `${task.status || "unknown"} - ${task.persona || "agent"}`,
     detail: task.promptPreview || task.resultPreview || "No preview",
-  }));
+  }), (task) => {
+    els.taskControlId.value = task.taskId || "";
+    void loadTaskOutput().catch((error) =>
+      addEvent("task_output_error", { message: String(error.message || error) }),
+    );
+  });
   renderSnapshotList(els.cronsList, crons, "No scheduled jobs", (cron) => ({
     title: cron.cronId || "cron",
     meta: `${cron.enabled ? "enabled" : "disabled"} - ${cron.expression || "schedule"}`,
     detail: `${cron.internal ? "internal" : cron.durable ? "durable" : "session"} - next ${formatTime(
       cron.nextFireAt,
     )}`,
-  }));
+  }), (cron) => fillCronForm(cron));
   renderSnapshotList(els.artifactsList, artifacts, "No artifacts", (artifact) => ({
     title: artifact.title || artifact.artifactId || "artifact",
     meta: `${artifact.kind || "artifact"} - ${artifact.sizeBytes || 0} bytes`,
@@ -269,6 +309,209 @@ async function loadRuntimeSnapshot() {
     artifacts: payload.artifacts?.count || 0,
     tools: payload.tools?.count || 0,
     skills: payload.skills?.loadedCount || 0,
+  });
+}
+
+function renderWorkspace(entries) {
+  renderSnapshotList(
+    els.workspaceList,
+    entries,
+    "No files",
+    (entry) => ({
+      title: entry.name || entry.path || "entry",
+      meta: `${entry.type || "entry"} - ${entry.sizeBytes || 0} bytes`,
+      detail: entry.path || "",
+    }),
+    (entry) => {
+      if (entry.type === "directory") {
+        void loadWorkspace(entry.path).catch((error) =>
+          addEvent("workspace_error", { message: String(error.message || error) }),
+        );
+        return;
+      }
+      if (entry.type === "file") {
+        void loadWorkspaceFile(entry.path).catch((error) =>
+          addEvent("workspace_error", { message: String(error.message || error) }),
+        );
+      }
+    },
+  );
+}
+
+async function loadWorkspace(pathValue = els.workspacePath.value.trim() || ".") {
+  const payload = await getJson(
+    `/v1/app/workspace?path=${encodeURIComponent(pathValue)}`,
+  );
+  els.workspacePath.value = payload.path || ".";
+  renderWorkspace(payload.entries || []);
+  addEvent("workspace_loaded", {
+    path: payload.path || ".",
+    count: Array.isArray(payload.entries) ? payload.entries.length : 0,
+  });
+}
+
+async function loadWorkspaceFile(pathValue) {
+  const payload = await getJson(
+    `/v1/app/workspace/file?path=${encodeURIComponent(pathValue)}`,
+  );
+  els.workspaceFile.textContent = payload.content || "";
+  addEvent("workspace_file_loaded", {
+    path: payload.path,
+    sizeBytes: payload.sizeBytes,
+    truncated: payload.truncated === true,
+  });
+}
+
+function renderMemoryFiles(files) {
+  renderSnapshotList(
+    els.memoryList,
+    files,
+    "No memory files",
+    (file) => ({
+      title: file.path || "memory",
+      meta: `${file.sizeBytes || 0} bytes`,
+      detail: formatTime(file.mtimeMs),
+    }),
+    (file) => {
+      void loadMemoryFile(file.path).catch((error) =>
+        addEvent("memory_error", { message: String(error.message || error) }),
+      );
+    },
+  );
+}
+
+async function loadMemory() {
+  const payload = await getJson("/v1/app/memory");
+  renderMemoryFiles(payload.files || []);
+  addEvent("memory_loaded", {
+    count: Array.isArray(payload.files) ? payload.files.length : 0,
+    qmdReady: payload.status?.qmdReady === true,
+  });
+}
+
+async function loadMemoryFile(pathValue) {
+  const payload = await getJson(
+    `/v1/app/memory/file?path=${encodeURIComponent(pathValue)}`,
+  );
+  els.memoryFile.textContent = payload.content || "";
+  addEvent("memory_file_loaded", {
+    path: payload.path,
+    sizeBytes: payload.sizeBytes,
+    truncated: payload.truncated === true,
+  });
+}
+
+async function searchMemory() {
+  const query = els.memorySearchQuery.value.trim();
+  if (!query) throw new Error("Memory search query is required");
+  const payload = await getJson(
+    `/v1/app/memory/search?q=${encodeURIComponent(query)}&limit=8`,
+  );
+  renderSnapshotList(
+    els.memoryResults,
+    payload.results || [],
+    "No search results",
+    (result) => ({
+      title: result.path || "result",
+      meta: `score ${typeof result.score === "number" ? result.score.toFixed(2) : "0.00"}`,
+      detail: result.contentPreview || result.context || "",
+    }),
+    (result) => {
+      void loadMemoryFile(result.path).catch((error) =>
+        addEvent("memory_error", { message: String(error.message || error) }),
+      );
+    },
+  );
+  addEvent("memory_search", {
+    query: payload.query,
+    count: Array.isArray(payload.results) ? payload.results.length : 0,
+  });
+}
+
+function fillCronForm(cron) {
+  els.cronId.value = cron.cronId || "";
+  els.cronExpression.value = cron.expression || "";
+  els.cronPrompt.value = cron.promptPreview || "";
+  els.cronDescription.value = cron.description || "";
+  els.cronEnabled.checked = cron.enabled !== false;
+  els.cronDurable.checked = cron.durable === true;
+}
+
+async function loadTaskOutput() {
+  const taskId = els.taskControlId.value.trim();
+  if (!taskId) throw new Error("Task ID is required");
+  const payload = await getJson(
+    `/v1/app/tasks/${encodeURIComponent(taskId)}/output`,
+  );
+  els.taskOutputView.textContent = JSON.stringify(payload, null, 2);
+  addEvent("task_output_loaded", {
+    taskId: payload.taskId,
+    status: payload.status,
+  });
+}
+
+async function stopTask() {
+  const taskId = els.taskControlId.value.trim();
+  if (!taskId) throw new Error("Task ID is required");
+  const payload = await sendJson(
+    `/v1/app/tasks/${encodeURIComponent(taskId)}/stop`,
+    "POST",
+    { reason: "stopped from Magi App" },
+  );
+  els.taskOutputView.textContent = JSON.stringify(payload, null, 2);
+  await loadRuntimeSnapshot();
+  addEvent("task_stopped", {
+    taskId: payload.taskId,
+    stopped: payload.stopped === true,
+  });
+}
+
+async function saveCron() {
+  const cronId = els.cronId.value.trim();
+  const body = {
+    expression: els.cronExpression.value.trim(),
+    prompt: els.cronPrompt.value,
+    description: els.cronDescription.value.trim(),
+    sessionKey: els.sessionKey.value.trim() || defaultSessionKey(),
+    durable: els.cronDurable.checked,
+    enabled: els.cronEnabled.checked,
+  };
+  if (!body.expression || !body.prompt.trim()) {
+    throw new Error("Cron expression and prompt are required");
+  }
+  const payload = cronId
+    ? await sendJson(`/v1/app/crons/${encodeURIComponent(cronId)}`, "PUT", body)
+    : await sendJson("/v1/app/crons", "POST", body);
+  fillCronForm(payload.cron || {});
+  await loadRuntimeSnapshot();
+  addEvent("cron_saved", { cronId: payload.cron?.cronId || cronId });
+}
+
+async function deleteCron() {
+  const cronId = els.cronId.value.trim();
+  if (!cronId) throw new Error("Cron ID is required");
+  const payload = await sendJson(
+    `/v1/app/crons/${encodeURIComponent(cronId)}`,
+    "DELETE",
+    {},
+  );
+  els.cronId.value = "";
+  els.cronExpression.value = "";
+  els.cronPrompt.value = "";
+  els.cronDescription.value = "";
+  await loadRuntimeSnapshot();
+  addEvent("cron_deleted", {
+    cronId: payload.cronId || cronId,
+    deleted: payload.deleted === true,
+  });
+}
+
+async function reloadSkills() {
+  const payload = await sendJson("/v1/app/skills/reload", "POST", {});
+  await loadRuntimeSnapshot();
+  addEvent("skills_reloaded", {
+    loaded: Array.isArray(payload.loaded) ? payload.loaded.length : 0,
+    issues: Array.isArray(payload.issues) ? payload.issues.length : 0,
   });
 }
 
@@ -397,6 +640,8 @@ async function checkRuntime() {
       await loadRuntimeSnapshot();
       await loadAppConfig();
       await loadHarnessRules();
+      await loadWorkspace();
+      await loadMemory();
     } catch (error) {
       addEvent("runtime_snapshot_error", { message: String(error.message || error) });
     }
@@ -513,6 +758,64 @@ els.installButton.addEventListener("click", async () => {
 els.loadConfigButton.addEventListener("click", () => {
   void loadAppConfig().catch((error) =>
     addEvent("config_error", { message: String(error.message || error) }),
+  );
+});
+
+els.reloadSkillsButton.addEventListener("click", () => {
+  void reloadSkills().catch((error) =>
+    addEvent("skills_reload_error", { message: String(error.message || error) }),
+  );
+});
+
+els.workspaceForm.addEventListener("submit", (event) => {
+  event.preventDefault();
+  void loadWorkspace().catch((error) =>
+    addEvent("workspace_error", { message: String(error.message || error) }),
+  );
+});
+
+els.memorySearchForm.addEventListener("submit", (event) => {
+  event.preventDefault();
+  void searchMemory().catch((error) =>
+    addEvent("memory_error", { message: String(error.message || error) }),
+  );
+});
+
+els.loadMemoryButton.addEventListener("click", () => {
+  void loadMemory().catch((error) =>
+    addEvent("memory_error", { message: String(error.message || error) }),
+  );
+});
+
+els.taskControlForm.addEventListener("submit", (event) => {
+  event.preventDefault();
+  void loadTaskOutput().catch((error) =>
+    addEvent("task_output_error", { message: String(error.message || error) }),
+  );
+});
+
+els.taskOutputButton.addEventListener("click", () => {
+  void loadTaskOutput().catch((error) =>
+    addEvent("task_output_error", { message: String(error.message || error) }),
+  );
+});
+
+els.taskStopButton.addEventListener("click", () => {
+  void stopTask().catch((error) =>
+    addEvent("task_stop_error", { message: String(error.message || error) }),
+  );
+});
+
+els.cronEditorForm.addEventListener("submit", (event) => {
+  event.preventDefault();
+  void saveCron().catch((error) =>
+    addEvent("cron_error", { message: String(error.message || error) }),
+  );
+});
+
+els.deleteCronButton.addEventListener("click", () => {
+  void deleteCron().catch((error) =>
+    addEvent("cron_error", { message: String(error.message || error) }),
   );
 });
 

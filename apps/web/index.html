@@ -130,8 +130,80 @@
             <section>
               <h3>Skills</h3>
               <div id="skills-list" class="snapshot-list"></div>
+              <button id="reload-skills-button" type="button" class="secondary compact-button">Reload Skills</button>
             </section>
           </div>
+          <section class="settings-panel">
+            <h3>Workspace Files</h3>
+            <form id="workspace-form" class="mini-form">
+              <label>
+                Path
+                <input id="workspace-path" name="workspacePath" value="." autocomplete="off" />
+              </label>
+              <button type="submit">List Files</button>
+            </form>
+            <div id="workspace-list" class="snapshot-list"></div>
+            <pre id="workspace-file" class="code-view"></pre>
+          </section>
+          <section class="settings-panel">
+            <h3>Memory</h3>
+            <form id="memory-search-form" class="mini-form">
+              <label>
+                Search
+                <input id="memory-search-query" name="memorySearch" autocomplete="off" />
+              </label>
+              <button type="submit">Search Memory</button>
+              <button id="load-memory-button" type="button" class="secondary">Load Memory</button>
+            </form>
+            <div id="memory-list" class="snapshot-list"></div>
+            <div id="memory-results" class="snapshot-list"></div>
+            <pre id="memory-file" class="code-view"></pre>
+          </section>
+          <section class="settings-panel">
+            <h3>Task Controls</h3>
+            <form id="task-control-form" class="mini-form">
+              <label>
+                Task ID
+                <input id="task-control-id" name="taskId" autocomplete="off" />
+              </label>
+              <button id="task-output-button" type="button">Task Output</button>
+              <button id="task-stop-button" type="button" class="secondary">Stop Task</button>
+            </form>
+            <pre id="task-output-view" class="code-view"></pre>
+          </section>
+          <section class="settings-panel">
+            <h3>Cron Editor</h3>
+            <form id="cron-editor-form" class="mini-form">
+              <label>
+                Cron ID
+                <input id="cron-id" name="cronId" autocomplete="off" />
+              </label>
+              <label>
+                Expression
+                <input id="cron-expression" name="cronExpression" placeholder="@daily" autocomplete="off" />
+              </label>
+              <label>
+                Prompt
+                <textarea id="cron-prompt" name="cronPrompt" rows="4"></textarea>
+              </label>
+              <label>
+                Description
+                <input id="cron-description" name="cronDescription" autocomplete="off" />
+              </label>
+              <div class="split-fields">
+                <label class="check-row">
+                  <input id="cron-enabled" name="cronEnabled" type="checkbox" checked />
+                  Enabled
+                </label>
+                <label class="check-row">
+                  <input id="cron-durable" name="cronDurable" type="checkbox" />
+                  Durable
+                </label>
+              </div>
+              <button type="submit">Save Cron</button>
+              <button id="delete-cron-button" type="button" class="secondary">Delete Cron</button>
+            </form>
+          </section>
           <section class="settings-panel">
             <h3>Runtime Config</h3>
             <form id="runtime-config-form" class="mini-form">

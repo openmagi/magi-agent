@@ -291,6 +291,7 @@ dd {
 .inspector {
   border-left: 1px solid var(--line);
   background: #fbfaf6;
+  overflow: auto;
 }
 
 .inspector header {
@@ -345,6 +346,14 @@ dd {
   background: var(--soft);
 }
 
+.compact-button {
+  width: 100%;
+  min-height: 34px;
+  margin-top: 8px;
+  padding: 0 10px;
+  font-size: 12px;
+}
+
 .snapshot-item,
 .snapshot-empty {
   padding: 9px 10px;
@@ -352,6 +361,15 @@ dd {
   border-radius: 8px;
   background: var(--surface);
   overflow-wrap: anywhere;
+}
+
+.snapshot-item.clickable {
+  cursor: pointer;
+}
+
+.snapshot-item.clickable:hover {
+  border-color: rgba(16, 107, 90, 0.35);
+  background: var(--soft);
 }
 
 .snapshot-item strong,
@@ -376,6 +394,23 @@ dd {
 
 .snapshot-item small {
   margin-top: 2px;
+}
+
+.code-view {
+  max-height: 220px;
+  margin: 0;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #161b1a;
+  color: #e8f0ec;
+  font-family:
+    "SFMono-Regular", Consolas, "Liberation Mono", Menlo, ui-monospace,
+    monospace;
+  font-size: 11px;
+  line-height: 1.5;
+  overflow: auto;
+  white-space: pre-wrap;
 }
 
 .events {

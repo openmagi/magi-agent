@@ -45,14 +45,18 @@ The open-source app should include:
   adapters. Initial sanitized config editor: done.
 - Session transcript viewer with tool calls, tool results, thinking blocks,
   background task events, delivery events, and commit checkpoints.
-- Workspace file and artifact panels. Initial artifact index: done.
-- Task board and child-agent task inspector. Initial task index: done.
-- Memory inspector for Hipocampus root/daily/weekly/monthly/qmd state.
-- Cron and scheduled workflow inspector. Initial cron index: done.
+- Workspace file and artifact panels. Initial workspace browser and artifact
+  index: done.
+- Task board and child-agent task inspector. Initial task index plus
+  output/stop controls: done.
+- Memory inspector for Hipocampus root/daily/weekly/monthly/qmd state. Initial
+  file browser and qmd search: done.
+- Cron and scheduled workflow inspector. Initial cron index plus
+  create/update/delete controls: done.
 - User Harness Rules editor that writes Markdown rule files into the workspace.
   Initial Markdown CRUD editor: done.
-- Skills viewer/reload control for workspace `skills/`. Initial skill state:
-  done; reload control remains future work.
+- Skills viewer/reload control for workspace `skills/`. Initial skill state and
+  reload control: done.
 - Docker Compose starter that runs the app and agent together. Done.
 - Clear upgrade path to Magi Cloud for managed hosting.
 
@@ -145,20 +149,28 @@ bearer-token gated by the server token:
 | `/v1/app/sessions` | shipped | Live session metadata, permission posture, and budget counters. |
 | `/v1/app/transcript?sessionKey=...` | shipped | Bounded committed transcript replay. |
 | `/v1/app/tasks` | shipped | Background child-agent task list. |
+| `/v1/app/tasks/:taskId` | shipped | Individual background task record. |
+| `/v1/app/tasks/:taskId/output` | shipped | Background task output/error/duration. |
+| `/v1/app/tasks/:taskId/stop` | shipped | Background task stop control. |
 | `/v1/app/crons` | shipped | Scheduled workflow list with internal cron visibility for operators. |
+| `/v1/app/crons` `POST` | shipped | App-delivered cron creation. |
+| `/v1/app/crons/:cronId` `PUT`/`DELETE` | shipped | Non-internal cron update/delete controls. |
 | `/v1/app/artifacts` | shipped | Generated artifact index. |
 | `/v1/app/skills` | shipped | Skill load state, issues, and runtime skill hooks. |
+| `/v1/app/skills/reload` | shipped | Workspace skill reload through the app auth surface. |
+| `/v1/app/workspace` | shipped | Workspace directory listing. |
+| `/v1/app/workspace/file` | shipped | Bounded workspace file read. |
+| `/v1/app/memory` | shipped | Hipocampus memory status and file listing. |
+| `/v1/app/memory/file` | shipped | Bounded memory file read. |
+| `/v1/app/memory/search` | shipped | Hipocampus/qmd recall search. |
 | `/v1/app/config` | shipped | Sanitized config read/write using environment variable references for secrets. |
 | `/v1/app/harness-rules` | shipped | Markdown harness rule list/read/write/delete in the workspace. |
 
 Remaining API work:
 
 - Session create/resume controls beyond the chat-completions session-key header.
-- Workspace file list and download endpoints.
-- Background task get/output/stop controls for the app.
-- Cron create/update/delete controls for the app.
-- Memory browse/search endpoints for Hipocampus root/daily/weekly/monthly/qmd state.
-- Skill reload endpoint exposure in the app.
+- Binary download endpoints for large generated files.
+- Rich transcript timeline grouping for tool calls, evidence gates, and delivery events.
 - Runtime config reload/restart control after provider config writes.
 
 Where an endpoint does not exist yet, the app plan should drive small,
@@ -168,11 +180,11 @@ routes.
 ## Milestones
 
 Status on 2026-05-07: M0 is complete, M1 has a dependency-free shell at `/app`,
-the first M3 read-only runtime inspector is wired through documented
-`/v1/app/*` HTTP APIs, and the app has both an installable PWA desktop shell and
-a buildable Tauri wrapper under `apps/desktop`. M2 has an initial sanitized
-provider/local-model config editor. M4 has an initial Markdown Harness Rules
-editor. M5 has a Docker Compose starter.
+the M3 runtime inspector is wired through documented `/v1/app/*` HTTP APIs, and
+the app has both an installable PWA desktop shell and a buildable Tauri wrapper
+under `apps/desktop`. M2 has an initial sanitized provider/local-model config
+editor. M4 has Markdown Harness Rules, memory, cron, task, and skill controls.
+M5 has a Docker Compose starter plus self-host hardening notes.
 
 ### M0: Boundary And Marketing
 
@@ -208,7 +220,7 @@ editor. M5 has a Docker Compose starter.
 ### M3: Runtime Visibility
 
 - Add artifact panel. Initial index: done.
-- Add workspace file panel.
+- Add workspace file panel. Done.
 - Add background task inspector. Initial index: done.
 - Add cron and skill inspector. Initial index: done.
 - Add execution evidence and checkpoint timeline.
@@ -216,17 +228,17 @@ editor. M5 has a Docker Compose starter.
 
 ### M4: Automation And Rules
 
-- Add cron list/create/update/delete UI.
+- Add cron list/create/update/delete UI. Done.
 - Add User Harness Rules editor backed by Markdown files. Initial editor: done.
-- Add memory and qmd inspector.
-- Add skills list/reload UI.
+- Add memory and qmd inspector. Done.
+- Add skills list/reload UI. Done.
 
 ### M5: Self-Host Bundle
 
 - Add Docker Compose for app + agent. Done.
 - Add sample `.env.example` with non-secret placeholders. Done.
 - Add production hardening notes for reverse proxy, TLS, auth, and provider key
-  handling.
+  handling. Done.
 - Add hosted Magi Cloud upgrade copy without making the OSS app dependent on
   cloud services.
 
