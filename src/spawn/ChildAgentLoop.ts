@@ -52,6 +52,8 @@ import type { PermissionMode } from "../turn/ToolDispatcher.js";
 import { summariseToolOutput } from "../util/toolResult.js";
 import { classifyFinalAnswerMeta } from "../hooks/builtin/turnMetaClassifier.js";
 import { buildChildSystemPrompt } from "./ChildSystemPrompt.js";
+import type { UserMessage } from "../util/types.js";
+import type { ExecutionContractStore } from "../execution/ExecutionContract.js";
 
 /**
  * Cap on child loop iterations — protects against pathological loops.
@@ -196,6 +198,8 @@ export interface SpawnChildOptions {
   askUser?(input: AskUserQuestionInput): Promise<AskUserQuestionOutput>;
   /** Parent session permission mode at spawn time. */
   permissionMode?: PermissionMode;
+  /** Parent execution contract, propagated so child hooks/tools enforce the same runtime harness. */
+  executionContract?: ExecutionContractStore;
   /** Durable child lifecycle recorder wired to the parent's control ledger. */
   lifecycle?: ChildAgentLifecycle;
 }
@@ -310,6 +314,7 @@ function makeChildHookContext(
     agentModel,
     abortSignal,
     deadlineMs: 5_000,
+    executionContract: opts.executionContract,
     ...(opts.askUser ? { askUser: opts.askUser } : {}),
   };
 }
@@ -703,6 +708,7 @@ async function runChildTools(
       workspaceRoot: childWorkspaceRoot(opts),
       spawnWorkspace: childSpawnWorkspace(opts),
       abortSignal,
+      currentUserMessage: childUserMessage(opts),
       emitProgress: () => {
         /* child progress folded into spawn_result — no per-step SSE */
       },
@@ -724,6 +730,7 @@ async function runChildTools(
         },
       },
       spawnDepth: opts.parentSpawnDepth + 1,
+      executionContract: opts.executionContract,
     };
 
     const started = Date.now();
@@ -765,4 +772,11 @@ function commandOf(input: unknown): string {
     return typeof command === "string" ? command : "";
   }
   return "";
+}
+
+function childUserMessage(opts: SpawnChildOptions): UserMessage {
+  return {
+    text: opts.prompt,
+    receivedAt: Date.now(),
+  };
 }

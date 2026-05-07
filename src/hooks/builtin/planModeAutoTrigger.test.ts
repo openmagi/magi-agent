@@ -15,7 +15,15 @@ import type { LLMMessage } from "../../transport/LLMClient.js";
 import type { PermissionMode } from "../../Session.js";
 import { ExecutionContractStore } from "../../execution/ExecutionContract.js";
 
-function llmThatAnswers(answer: string): HookContext["llm"] {
+function llmThatAnswers(
+  answer: string,
+  planningNeed:
+    | "none"
+    | "inline"
+    | "task_board"
+    | "approval_plan"
+    | "pipeline_or_bulk" = answer === "YES" ? "approval_plan" : "none",
+): HookContext["llm"] {
   return {
     stream: vi.fn(async function* (request: { system?: string }) {
       if (String(request.system ?? "").includes("runtime-control classifier")) {
@@ -43,6 +51,19 @@ function llmThatAnswers(answer: string): HookContext["llm"] {
               wantsKbDelivery: false,
               wantsFileOutput: false,
             },
+            planning: {
+              need: planningNeed,
+              reason:
+                planningNeed === "none"
+                  ? "No planning needed."
+                  : "The request has enough scope to need runtime planning.",
+              suggestedStrategy:
+                planningNeed === "task_board"
+                  ? "Create a TaskBoard checklist before execution."
+                  : planningNeed === "approval_plan"
+                    ? "Enter plan mode and submit a plan before execution."
+                    : "Answer directly.",
+            },
           }),
         };
         return;
@@ -52,14 +73,18 @@ function llmThatAnswers(answer: string): HookContext["llm"] {
   } as unknown as HookContext["llm"];
 }
 
-function makeCtx(sessionKey = "s1", classifierAnswer = "NO"): HookContext {
+function makeCtx(
+  sessionKey = "s1",
+  classifierAnswer = "NO",
+  planningNeed?: Parameters<typeof llmThatAnswers>[1],
+): HookContext {
   const store = new ExecutionContractStore({ now: () => 1 });
   return {
     botId: "bot-test",
     userId: "user-test",
     sessionKey,
     turnId: "turn-1",
-    llm: llmThatAnswers(classifierAnswer),
+    llm: llmThatAnswers(classifierAnswer, planningNeed),
     transcript: [],
     emit: vi.fn(),
     log: vi.fn(),
@@ -75,7 +100,7 @@ function buildArgs(
   iteration = 0,
 ): {
   messages: LLMMessage[];
-  tools: [];
+  tools: Array<{ name: string; description: string; input_schema: Record<string, unknown> }>;
   system: string;
   iteration: number;
 } {
@@ -89,6 +114,19 @@ function buildArgs(
     tools: [],
     system: "you are a bot",
     iteration,
+  };
+}
+
+function buildArgsWithTools(text: string) {
+  return {
+    ...buildArgs(text),
+    tools: [
+      { name: "Bash", description: "run shell", input_schema: { type: "object" } },
+      { name: "FileWrite", description: "write file", input_schema: { type: "object" } },
+      { name: "TaskBoard", description: "task board", input_schema: { type: "object" } },
+      { name: "ExitPlanMode", description: "exit plan mode", input_schema: { type: "object" } },
+      { name: "AskUserQuestion", description: "ask user", input_schema: { type: "object" } },
+    ],
   };
 }
 
@@ -163,12 +201,51 @@ describe("makePlanModeAutoTriggerHook", () => {
     const hook = makePlanModeAutoTriggerHook({ agent: agentWith("default") });
     const result = await hook.handler(
       buildArgs("please implement a new hook for invoicing"),
-      makeCtx("s1", "YES"),
+      makeCtx("s1", "YES", "approval_plan"),
     );
     expect(result?.action).toBe("replace");
     if (result?.action !== "replace") throw new Error("expected replace");
-    expect(result.value.system).toContain("plan_mode_nudge");
+    expect(result.value.system).toContain("planning_policy");
+    expect(result.value.system).toContain("ExitPlanMode");
     expect(result.value.system).toContain("you are a bot"); // preserved
+  });
+
+  it("adds TaskBoard guidance when request meta asks for task_board planning", async () => {
+    const hook = makePlanModeAutoTriggerHook({ agent: agentWith("default") });
+    const result = await hook.handler(
+      buildArgs("리서치하고 보고서로 정리해서 파일까지 만들어줘"),
+      makeCtx("s1", "NO", "task_board"),
+    );
+
+    expect(result?.action).toBe("replace");
+    if (result?.action !== "replace") throw new Error("expected replace");
+    expect(result.value.system).toContain("planning_policy");
+    expect(result.value.system).toContain("TaskBoard");
+    expect(result.value.system).not.toContain("EnterPlanMode before using write");
+  });
+
+  it("enters plan mode and filters exposed tools for approval_plan planning", async () => {
+    const enterPlanMode = vi.fn(async () => {});
+    const hook = makePlanModeAutoTriggerHook({
+      agent: {
+        getSessionPermissionMode: () => "default",
+        enterPlanMode,
+      },
+    });
+
+    const result = await hook.handler(
+      buildArgsWithTools("프로덕션 배포 스크립트 수정하고 배포해줘"),
+      makeCtx("s1", "NO", "approval_plan"),
+    );
+
+    expect(enterPlanMode).toHaveBeenCalledWith("s1", "turn-1");
+    expect(result?.action).toBe("replace");
+    if (result?.action !== "replace") throw new Error("expected replace");
+    expect(result.value.tools.map((tool) => tool.name)).toEqual([
+      "TaskBoard",
+      "ExitPlanMode",
+      "AskUserQuestion",
+    ]);
   });
 
   it("continues silently when no implementation intent matched", async () => {
@@ -182,7 +259,7 @@ describe("makePlanModeAutoTriggerHook", () => {
 
   it("does not nudge document regeneration requests even if classifier says yes", async () => {
     const hook = makePlanModeAutoTriggerHook({ agent: agentWith("default") });
-    const ctx = makeCtx("s1", "YES");
+    const ctx = makeCtx("s1", "YES", "none");
     const result = await hook.handler(
       buildArgs(
         "아니 docx랑 pdf를 md형식 그대로 내뱉으면 어떡하냐 agentic하게 해서 이쁘게 잘 만들어야지",
@@ -190,7 +267,7 @@ describe("makePlanModeAutoTriggerHook", () => {
       ctx,
     );
     expect(result).toEqual({ action: "continue" });
-    expect(ctx.llm.stream).not.toHaveBeenCalled();
+    expect(ctx.llm.stream).toHaveBeenCalledOnce();
   });
 
   it("skips when env gate is off", async () => {

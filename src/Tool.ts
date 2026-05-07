@@ -9,6 +9,7 @@
 
 import type { Workspace } from "./storage/Workspace.js";
 import type { ExecutionContractStore } from "./execution/ExecutionContract.js";
+import type { UserMessage } from "./util/types.js";
 
 export type PermissionClass = "read" | "write" | "execute" | "net" | "meta";
 
@@ -64,6 +65,12 @@ export interface ToolContext {
   /** Active first-class execution contract for tools that produce evidence. */
   executionContract?: ExecutionContractStore;
   /**
+   * Current top-level user message for this turn. Tools that create child
+   * work can preserve selected KB, attachments, and channel-provided context
+   * instead of relying on the model to copy it into a sub-task prompt.
+   */
+  currentUserMessage?: UserMessage;
+  /**
    * Spawn depth — 0 for a top-level turn, 1 for a direct child spawned
    * via SpawnAgent, 2 for a grandchild. `MAX_SPAWN_DEPTH` enforced by
    * SpawnAgent (§7.12.d). Undefined is treated as 0.
@@ -115,6 +122,14 @@ export interface Tool<I = unknown, O = unknown> {
   outputSchema?: object;
   /** Requires user consent even if permission class allows. */
   dangerous?: boolean;
+  /**
+   * True when multiple calls to this tool can safely run alongside other
+   * concurrency-safe tools. Defaults to true for read/meta tools and false for
+   * write/execute/net tools.
+   */
+  isConcurrencySafe?: boolean;
+  /** True when the tool can mutate files, external state, or the workspace. */
+  mutatesWorkspace?: boolean;
   /** "core" tools are always loaded; "skill" tools go through intent
    * filtering (§9.8 P2/P3). Defaults to "core" when unset. */
   kind?: "core" | "skill";

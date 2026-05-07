@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import type {
   DeterministicRequirementKind,
   FinalAnswerMetaClassificationResult,
+  PlanningNeed,
   RequestMetaClassificationResult,
 } from "../../execution/ExecutionContract.js";
 import type { LLMClient } from "../../transport/LLMClient.js";
@@ -20,6 +21,14 @@ const VALID_KINDS: readonly DeterministicRequirementKind[] = [
   "comparison",
 ];
 const VALID_KIND_SET = new Set<string>(VALID_KINDS);
+const VALID_PLANNING_NEEDS: readonly PlanningNeed[] = [
+  "none",
+  "inline",
+  "task_board",
+  "approval_plan",
+  "pipeline_or_bulk",
+];
+const VALID_PLANNING_NEED_SET = new Set<string>(VALID_PLANNING_NEEDS);
 
 const REQUEST_CLASSIFIER_SYSTEM = [
   "You are a runtime-control classifier for an AI agent.",
@@ -45,6 +54,16 @@ const REQUEST_CLASSIFIER_SYSTEM = [
   '    "wantsChatDelivery": boolean,',
   '    "wantsKbDelivery": boolean,',
   '    "wantsFileOutput": boolean',
+  "  },",
+  '  "planning": {',
+  '    "need": "none" | "inline" | "task_board" | "approval_plan" | "pipeline_or_bulk",',
+  '    "reason": string,',
+  '    "suggestedStrategy": string',
+  "  },",
+  '  "goalProgress": {',
+  '    "requiresAction": boolean,',
+  '    "actionKinds": string[],',
+  '    "reason": string',
   "  }",
   "}",
   "",
@@ -58,6 +77,18 @@ const REQUEST_CLASSIFIER_SYSTEM = [
   "documentOrFileOperation is true for document/file/report/spreadsheet/export/create/convert/deliver requests.",
   "deterministic.requiresDeterministic is true for exact arithmetic, counts, dates, time windows, averages, financial metrics, database/table analytics, or exact comparisons.",
   "fileDelivery.intent is deliver_existing only when the user asks to send/attach/deliver an existing file, not to create, read, summarize, or analyze it.",
+  "planning.need:",
+  "- none: greetings, short factual answers, simple explanations, existing-file delivery, or 1-2 step work.",
+  "- inline: small multi-step work where a brief checklist is enough and no tool/state gate is needed.",
+  "- task_board: business work with multiple coordinated steps, multiple sources/files, document creation, deterministic analysis, or deliverables that should be tracked.",
+  "- approval_plan: risky or mutating work such as code/infra changes, deploys, DB/auth/billing/security changes, external sends/uploads/payments/public posts, or work requiring user approval before execution.",
+  "- pipeline_or_bulk: large repeated/batch/parallel/long-running work that should use pipeline or bulk execution.",
+  [
+    "goalProgress.requiresAction is true when the request needs the agent to make concrete progress with runtime resources, tools, or external state before answering.",
+    "Examples: browser interaction, file/document work, sending/uploading/delivering, web or KB research, coding/deploying, debugging by inspection, API/integration checks, data extraction/analysis, or workspace operations.",
+    "goalProgress.requiresAction is false for pure explanation, opinion, brainstorming, or answering from supplied context without needing tool evidence.",
+    "actionKinds should use short semantic labels such as browser_interaction, file_delivery, file_editing, research, debugging, coding, integration_check, data_analysis, communication, or other.",
+  ].join("\n"),
   "When uncertain, choose the safer non-triggering value.",
 ].join("\n");
 
@@ -76,6 +107,9 @@ const FINAL_ANSWER_CLASSIFIER_SYSTEM = [
   '  "assistantClaimsChatDelivery": boolean,',
   '  "assistantClaimsKbDelivery": boolean,',
   '  "assistantReportsDeliveryFailure": boolean,',
+  '  "assistantReportsDeliveryUnverified": boolean,',
+  '  "assistantGivesUpEarly": boolean,',
+  '  "assistantClaimsActionWithoutEvidence": boolean,',
   '  "reason": string',
   "}",
   "",
@@ -87,6 +121,15 @@ const FINAL_ANSWER_CLASSIFIER_SYSTEM = [
   "assistantClaimsChatDelivery: answer says a file/result was sent, attached, uploaded, delivered, or made available in the current chat/channel.",
   "assistantClaimsKbDelivery: answer says something was saved/uploaded/added to KB, knowledge base, memory, or a persistent document store.",
   "assistantReportsDeliveryFailure: answer plainly says delivery failed, was not possible, was not sent, or asks the user for another path instead of claiming success.",
+  "assistantReportsDeliveryUnverified: answer says delivery status is only system-side/transport-level, asks the user to confirm whether the file arrived, or says user-visible receipt/display is not verified.",
+  [
+    "assistantGivesUpEarly: answer stops short of a concrete goal after a small failed attempt, asks the user to choose a next path, or treats one recoverable tool failure as terminal while plausible alternatives remain.",
+    "Set false when the answer completed the goal, gives the requested result, or reports a hard blocker after multiple concrete attempts with evidence.",
+  ].join("\n"),
+  [
+    "assistantClaimsActionWithoutEvidence: answer claims the assistant already investigated, checked, debugged, clicked, opened, filled, ran, sent, created, uploaded, modified, or otherwise took concrete action.",
+    "This is a semantic claim detector only; runtime gates compare it against tool evidence. Set false for hypotheticals, plans, or advice that clearly does not claim an action was already performed.",
+  ].join("\n"),
   "When uncertain, choose false.",
 ].join("\n");
 
@@ -111,6 +154,11 @@ function normalizeKinds(value: unknown): DeterministicRequirementKind[] {
   return normalizeStrings(value, VALID_KINDS.length).filter(
     (kind): kind is DeterministicRequirementKind => VALID_KIND_SET.has(kind),
   );
+}
+
+function normalizePlanningNeed(value: unknown): PlanningNeed {
+  const raw = typeof value === "string" ? value.trim() : "";
+  return VALID_PLANNING_NEED_SET.has(raw) ? (raw as PlanningNeed) : "none";
 }
 
 function extractJsonObject(raw: string): Record<string, unknown> | null {
@@ -233,6 +281,16 @@ export function defaultRequestMeta(reason = "classifier unavailable"): RequestMe
       wantsKbDelivery: false,
       wantsFileOutput: false,
     },
+    planning: {
+      need: "none",
+      reason: "No runtime planning required.",
+      suggestedStrategy: "Answer directly.",
+    },
+    goalProgress: {
+      requiresAction: false,
+      actionKinds: [],
+      reason,
+    },
   };
 }
 
@@ -252,6 +310,9 @@ export function parseRequestMetaOutput(raw: string): RequestMetaClassificationRe
   const fileDelivery = objectField(parsed, "fileDelivery");
   const rawIntent = stringOrNull(fileDelivery.intent, 30);
   const intent = rawIntent === "deliver_existing" ? "deliver_existing" : "none";
+  const planning = objectField(parsed, "planning");
+  const planningNeed = normalizePlanningNeed(planning.need);
+  const goalProgress = objectField(parsed, "goalProgress");
 
   return {
     turnMode: {
@@ -279,6 +340,26 @@ export function parseRequestMetaOutput(raw: string): RequestMetaClassificationRe
       wantsKbDelivery: bool(fileDelivery.wantsKbDelivery),
       wantsFileOutput: bool(fileDelivery.wantsFileOutput),
     },
+    planning: {
+      need: planningNeed,
+      reason:
+        stringOrNull(planning.reason) ??
+        (planningNeed === "none"
+          ? "No runtime planning required."
+          : "The request needs runtime planning discipline."),
+      suggestedStrategy:
+        stringOrNull(planning.suggestedStrategy) ??
+        (planningNeed === "none" ? "Answer directly." : "Plan before executing."),
+    },
+    goalProgress: {
+      requiresAction: bool(goalProgress.requiresAction),
+      actionKinds: normalizeStrings(goalProgress.actionKinds, 8),
+      reason:
+        stringOrNull(goalProgress.reason) ??
+        (bool(goalProgress.requiresAction)
+          ? "The request requires concrete action evidence."
+          : "The request does not require concrete action evidence."),
+    },
   };
 }
 
@@ -294,6 +375,9 @@ export function defaultFinalAnswerMeta(
     assistantClaimsChatDelivery: false,
     assistantClaimsKbDelivery: false,
     assistantReportsDeliveryFailure: false,
+    assistantReportsDeliveryUnverified: false,
+    assistantGivesUpEarly: false,
+    assistantClaimsActionWithoutEvidence: false,
     reason,
   };
 }
@@ -310,6 +394,9 @@ export function parseFinalAnswerMetaOutput(raw: string): FinalAnswerMetaClassifi
     assistantClaimsChatDelivery: bool(parsed.assistantClaimsChatDelivery),
     assistantClaimsKbDelivery: bool(parsed.assistantClaimsKbDelivery),
     assistantReportsDeliveryFailure: bool(parsed.assistantReportsDeliveryFailure),
+    assistantReportsDeliveryUnverified: bool(parsed.assistantReportsDeliveryUnverified),
+    assistantGivesUpEarly: bool(parsed.assistantGivesUpEarly),
+    assistantClaimsActionWithoutEvidence: bool(parsed.assistantClaimsActionWithoutEvidence),
     reason: stringOrNull(parsed.reason) ?? "classified final answer metadata.",
   };
 }

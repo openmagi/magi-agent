@@ -51,6 +51,18 @@ import {
   type DeferralBlockerAgent,
 } from "./deferralBlocker.js";
 import {
+  makeGoalProgressGateHook,
+  type GoalProgressGateAgent,
+} from "./goalProgressGate.js";
+import {
+  makeFileEditSafetyGateHook,
+  type FileEditSafetyGateAgent,
+} from "./fileEditSafetyGate.js";
+import {
+  makeCodingVerificationGateHook,
+  type CodingVerificationGateAgent,
+} from "./codingVerificationGate.js";
+import {
   makeOutputDeliveryGateHook,
   type OutputDeliveryGateAgent,
 } from "./outputDeliveryGate.js";
@@ -251,6 +263,16 @@ export interface RegisterBuiltinsOpts {
    */
   deferralBlockerAgent?: DeferralBlockerAgent;
   /**
+   * Delegate for the goal-progress gate. Shares the transcript reader
+   * path with deferral/completion gates so it can verify current-turn
+   * tool evidence for "I tried/debugged" claims and early give-ups.
+   */
+  goalProgressGateAgent?: GoalProgressGateAgent;
+  /** Delegate for FileEdit safety: confirms same-turn FileRead evidence. */
+  fileEditSafetyAgent?: FileEditSafetyGateAgent;
+  /** Delegate for coding verification evidence checks. */
+  codingVerificationAgent?: CodingVerificationGateAgent;
+  /**
    * Delegate for the output delivery gate (priority 87). Reads the
    * output artifact registry and blocks turn completion when the
    * current turn created user-facing files that have not yet been
@@ -422,6 +444,14 @@ export function registerBuiltinHooks(
   });
   if (maybe(deferralHook.name)) {
     registry.register(deferralHook);
+    registered++;
+  }
+
+  const goalProgressHook = makeGoalProgressGateHook({
+    agent: opts.goalProgressGateAgent ?? opts.completionEvidenceAgent,
+  });
+  if (maybe(goalProgressHook.name)) {
+    registry.register(goalProgressHook);
     registered++;
   }
 
@@ -625,6 +655,14 @@ export function registerBuiltinHooks(
     registered++;
   }
 
+  const codingVerificationHook = makeCodingVerificationGateHook({
+    agent: opts.codingVerificationAgent,
+  });
+  if (maybe(codingVerificationHook.name)) {
+    registry.register(codingVerificationHook);
+    registered++;
+  }
+
   const taskContractGateHook = makeTaskContractGateHook({
     agent: opts.taskContractAgent,
     debugWorkflow: opts.debugWorkflow,
@@ -665,6 +703,15 @@ export function registerBuiltinHooks(
     registry.register(resourceBoundaryHooks.beforeToolUse);
     registry.register(resourceBoundaryHooks.beforeCommit);
     registered += 2;
+  }
+
+  const fileEditSafetyHook = makeFileEditSafetyGateHook({
+    workspaceRoot: opts.workspaceRoot,
+    agent: opts.fileEditSafetyAgent,
+  });
+  if (maybe(fileEditSafetyHook.name)) {
+    registry.register(fileEditSafetyHook);
+    registered++;
   }
 
   const artifactDeliveryGateHook = makeArtifactDeliveryGateHook({

@@ -3,7 +3,10 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#106b5a" />
     <title>Magi App</title>
+    <link rel="manifest" href="/app/manifest.webmanifest" />
+    <link rel="icon" href="/app/icon.svg" type="image/svg+xml" />
     <link rel="stylesheet" href="/app/styles.css" />
   </head>
   <body>
@@ -40,6 +43,7 @@
           </label>
           <button type="submit">Save Connection</button>
           <button id="health-button" type="button" class="secondary">Check Runtime</button>
+          <button id="install-button" type="button" class="secondary" hidden>Install App</button>
         </form>
 
         <section class="panel">
@@ -64,6 +68,10 @@
             <div>
               <dt>Artifacts</dt>
               <dd id="runtime-artifacts">0</dd>
+            </div>
+            <div>
+              <dt>Tools</dt>
+              <dd id="runtime-tools">0</dd>
             </div>
             <div>
               <dt>Skills</dt>
@@ -114,6 +122,10 @@
             <section>
               <h3>Artifacts</h3>
               <div id="artifacts-list" class="snapshot-list"></div>
+            </section>
+            <section>
+              <h3>Tools</h3>
+              <div id="tools-list" class="snapshot-list"></div>
             </section>
             <section>
               <h3>Skills</h3>

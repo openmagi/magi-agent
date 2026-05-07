@@ -90,6 +90,20 @@ describe("HttpServer /app", () => {
     expect(res.body).toContain("modelOverride");
   });
 
+  it("serves installable app assets", async () => {
+    const manifest = await requestRaw(
+      `http://127.0.0.1:${port}/app/manifest.webmanifest`,
+    );
+    const serviceWorker = await requestRaw(`http://127.0.0.1:${port}/app/sw.js`);
+
+    expect(manifest.status).toBe(200);
+    expect(manifest.contentType).toContain("application/manifest+json");
+    expect(manifest.body).toContain("Magi App");
+    expect(serviceWorker.status).toBe(200);
+    expect(serviceWorker.contentType).toContain("text/javascript");
+    expect(serviceWorker.body).toContain("magi-app-shell");
+  });
+
   it("does not allow app route path traversal", async () => {
     const res = await requestRaw(
       `http://127.0.0.1:${port}/app/%2e%2e/package.json`,

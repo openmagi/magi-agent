@@ -724,6 +724,7 @@ export class Turn {
         stageAuditEvent: (event, data) => this.stageAuditEvent(event, data),
         askUser: (q) => this.asks.ask(q),
         abortSignal: this.interruptController.signal,
+        currentUserMessage: this.userMessage,
         unknownToolCounter: {
           get: () => this.unknownToolCount,
           inc: () => ++this.unknownToolCount,

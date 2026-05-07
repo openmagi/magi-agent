@@ -80,10 +80,15 @@ import {
   buildSpawnWorkOrderPrompt,
   type ExecutionContractStore,
 } from "../execution/ExecutionContract.js";
+import type { MessageAttachment, UserMessage } from "../util/types.js";
 
 export const MAX_SPAWN_DEPTH = 2;
-const DEFAULT_TIMEOUT_MS = 120_000;
-const MAX_TIMEOUT_MS = 600_000;
+const DEFAULT_RETURN_TIMEOUT_MS = 120_000;
+const DEFAULT_BACKGROUND_TIMEOUT_MS = 3 * 60 * 60 * 1000;
+const MAX_RETURN_TIMEOUT_MS = 600_000;
+const MAX_BACKGROUND_TIMEOUT_MS = 6 * 60 * 60 * 1000;
+const PARENT_TURN_CONTEXT_TEXT_LIMIT = 24_000;
+const PARENT_TURN_CONTEXT_SYSTEM_LIMIT = 64_000;
 
 /**
  * Canonical models available for SpawnAgent model override.
@@ -285,7 +290,8 @@ const INPUT_SCHEMA = {
     timeout_ms: {
       type: "integer",
       minimum: 1000,
-      description: "Per-child timeout in ms (default 120000, max 600000).",
+      description:
+        "Per-child timeout in ms. Default is 120000 for deliver='return' and 10800000 for deliver='background'. Max is 600000 for return and 21600000 for background.",
     },
     workspace_policy: {
       type: "string",
@@ -586,6 +592,16 @@ function spawnRetryDelayMs(attempt: number): number {
   return Math.min(5_000, base * 2 ** Math.max(0, attempt - 1));
 }
 
+function isMissingRequiredFilesContractFailure(result: SpawnChildResult): boolean {
+  return (
+    result.status === "error" &&
+    typeof result.errorMessage === "string" &&
+    result.errorMessage.startsWith(
+      "child missing required files for SpawnAgent completion_contract:",
+    )
+  );
+}
+
 function normalizeCompletionContract(input: SpawnAgentInput): SpawnCompletionContract & {
   required_evidence: SpawnEvidenceRequirement;
 } {
@@ -652,6 +668,16 @@ async function missingRequiredFiles(
   return missing;
 }
 
+function activeDeterministicRequirements(
+  childOptions: SpawnChildOptionsImpl,
+): string[] {
+  const snapshot = childOptions.executionContract?.snapshot();
+  if (!snapshot) return [];
+  return snapshot.taskState.deterministicRequirements
+    .filter((requirement) => requirement.status === "active")
+    .map((requirement) => requirement.requirementId);
+}
+
 async function enforceChildCompletionContract(
   result: SpawnChildResult,
   contract: SpawnCompletionContract,
@@ -667,6 +693,16 @@ async function enforceChildCompletionContract(
     return completionContractError(
       result,
       "child returned empty final text but SpawnAgent completion_contract requires non-empty final text",
+    );
+  }
+  const missingDeterministic = activeDeterministicRequirements(childOptions);
+  if (missingDeterministic.length > 0) {
+    return completionContractError(
+      result,
+      [
+        "child returned without satisfying deterministic evidence required by the parent execution contract",
+        `active deterministic requirement(s): ${missingDeterministic.join(", ")}`,
+      ].join("; "),
     );
   }
 
@@ -838,7 +874,7 @@ async function runChildWithRetries(
 
     const canRetry =
       result.status === "error" &&
-      result.toolCallCount === 0 &&
+      (result.toolCallCount === 0 || isMissingRequiredFilesContractFailure(result)) &&
       attempts < maxAttempts &&
       !childOptions.abortSignal.aborted;
     if (!canRetry) {
@@ -950,6 +986,16 @@ function validateInput(input: SpawnAgentInput): string | null {
   return null;
 }
 
+function normalizeSpawnTimeoutMs(input: SpawnAgentInput): number {
+  const isBackground = input.deliver === "background";
+  const defaultTimeoutMs = isBackground ? DEFAULT_BACKGROUND_TIMEOUT_MS : DEFAULT_RETURN_TIMEOUT_MS;
+  const maxTimeoutMs = isBackground ? MAX_BACKGROUND_TIMEOUT_MS : MAX_RETURN_TIMEOUT_MS;
+  return Math.min(
+    maxTimeoutMs,
+    Math.max(1_000, input.timeout_ms ?? defaultTimeoutMs),
+  );
+}
+
 function resolveParentPermissionMode(agent: Agent, sessionKey: string): PermissionMode {
   const getSession = (agent as {
     getSession?: (key: string) => { getPermissionMode?: () => PermissionMode } | undefined;
@@ -957,6 +1003,71 @@ function resolveParentPermissionMode(agent: Agent, sessionKey: string): Permissi
   if (!getSession) return "default";
   const session = getSession.call(agent, sessionKey);
   return session?.getPermissionMode ? session.getPermissionMode() : "default";
+}
+
+function truncateParentTurnContext(value: string, limit: number): string {
+  if (value.length <= limit) return value;
+  return `${value.slice(0, limit).trimEnd()}\n[truncated: ${value.length - limit} chars omitted]`;
+}
+
+function renderAttachmentForChild(attachment: MessageAttachment): string {
+  const parts = [
+    attachment.kind,
+    attachment.name ? `name=${attachment.name}` : "",
+    attachment.mimeType ? `mime=${attachment.mimeType}` : "",
+    typeof attachment.sizeBytes === "number" ? `bytes=${attachment.sizeBytes}` : "",
+    attachment.localPath ? `workspace_path=${attachment.localPath}` : "",
+    attachment.url ? `url=${attachment.url}` : "",
+  ].filter((part) => part.length > 0);
+  return `- ${parts.join(" ")}`;
+}
+
+function buildParentTurnContextBlock(message?: UserMessage): string {
+  if (!message) return "";
+  const blocks: string[] = [];
+  const text = message.text.trim();
+  if (text.length > 0) {
+    blocks.push([
+      "<current_user_message>",
+      truncateParentTurnContext(text, PARENT_TURN_CONTEXT_TEXT_LIMIT),
+      "</current_user_message>",
+    ].join("\n"));
+  }
+
+  const systemPromptAddendum =
+    typeof message.metadata?.systemPromptAddendum === "string"
+      ? message.metadata.systemPromptAddendum.trim()
+      : "";
+  if (systemPromptAddendum.length > 0) {
+    blocks.push([
+      "<system_context_addendum>",
+      truncateParentTurnContext(
+        systemPromptAddendum,
+        PARENT_TURN_CONTEXT_SYSTEM_LIMIT,
+      ),
+      "</system_context_addendum>",
+    ].join("\n"));
+  }
+
+  if (message.attachments && message.attachments.length > 0) {
+    blocks.push([
+      "<attachments>",
+      ...message.attachments.map((attachment) => renderAttachmentForChild(attachment)),
+      "</attachments>",
+    ].join("\n"));
+  }
+
+  if (message.imageBlocks && message.imageBlocks.length > 0) {
+    blocks.push(`<image_blocks count="${message.imageBlocks.length}" inherited="false" />`);
+  }
+
+  if (blocks.length === 0) return "";
+  return [
+    '<parent_turn_context source="runtime-current-turn">',
+    "The parent turn included this context. Use it when the delegated prompt refers to selected files, attachments, KB context, this document, or the current request.",
+    ...blocks,
+    "</parent_turn_context>",
+  ].join("\n");
 }
 
 // ── Tool factory ───────────────────────────────────────────────────
@@ -972,7 +1083,7 @@ export function makeSpawnAgentTool(
   return {
     name: "SpawnAgent",
     description:
-      "Delegate a focused sub-task to a child agent with a custom persona and filtered toolset. Children are trusted workers by default: they can read/write the parent workspace, and `.spawn/{taskId}` is scratch/audit storage. Set `workspace_policy:\"isolated\"` only when the task should be sandboxed to `.spawn/{taskId}`. The child does not inherit full conversation context unless you include it in `prompt`, so provide concrete inputs, required files, expected outputs, allowed tools, completion criteria, and retry/idempotency guidance. `deliver:\"return\"` blocks until the child finishes and returns final text. `deliver:\"background\"` returns a taskId immediately; completion surfaces as a spawn_result event and TaskGet record. Spawn depth is capped at 2. Use `completion_contract.required_evidence:\"files\"` plus `required_files` for durable file deliverables, `\"text\"` for answer-only work, `\"artifact\"` for artifact handoff, `\"tool_call\"` for concrete tool work, or `\"none\"` only when no evidence is expected. Use `model` only when deliberately selecting a child model; copy an exact value from this schema enum or omit `model` to inherit the bot's runtime model. Never invent provider/model ids. IMPORTANT: child output longer than ~500 chars should go into ArtifactCreate rather than finalText; child-produced artifacts are imported into the parent workspace and returned on `artifacts.handedOffArtifacts`.",
+      "Delegate a focused sub-task to a child agent with a custom persona and filtered toolset. Children are trusted workers by default: they can read/write the parent workspace, and `.spawn/{taskId}` is scratch/audit storage. Set `workspace_policy:\"isolated\"` only when the task should be sandboxed to `.spawn/{taskId}`. The runtime automatically includes the current turn's selected KB/system addendum and attachment manifest in the child work order; still provide concrete task instructions, required files, expected outputs, allowed tools, completion criteria, and retry/idempotency guidance. `deliver:\"return\"` blocks until the child finishes and returns final text. `deliver:\"background\"` returns a taskId immediately; completion surfaces as a spawn_result event and TaskGet record. Use background delivery for long browser QA, research, or artifact generation; it defaults to a 3 hour timeout and accepts `timeout_ms` up to 6 hours. Spawn depth is capped at 2. Use `completion_contract.required_evidence:\"files\"` plus `required_files` for durable file deliverables, `\"text\"` for answer-only work, `\"artifact\"` for artifact handoff, `\"tool_call\"` for concrete tool work, or `\"none\"` only when no evidence is expected. Use `model` only when deliberately selecting a child model; copy an exact value from this schema enum or omit `model` to inherit the bot's runtime model. Never invent provider/model ids. IMPORTANT: child output longer than ~500 chars should go into ArtifactCreate rather than finalText; child-produced artifacts are imported into the parent workspace and returned on `artifacts.handedOffArtifacts`.",
     inputSchema: INPUT_SCHEMA,
     permission: "meta",
     kind: "core",
@@ -1018,10 +1129,7 @@ export function makeSpawnAgentTool(
       }
 
       const taskId = randomTaskId();
-      const timeoutMs = Math.min(
-        MAX_TIMEOUT_MS,
-        Math.max(1_000, input.timeout_ms ?? DEFAULT_TIMEOUT_MS),
-      );
+      const timeoutMs = normalizeSpawnTimeoutMs(input);
       const completionContract = normalizeCompletionContract(input);
 
       // T2-11 persona catalog expansion. Loaded per-call so workspace
@@ -1043,15 +1151,19 @@ export function makeSpawnAgentTool(
       const parentSession = typeof getSession === "function"
         ? getSession.call(agent, ctx.sessionKey)
         : undefined;
-      const parentExecutionContract = parentSession?.executionContract;
+      const parentExecutionContract = ctx.executionContract ?? parentSession?.executionContract;
+      const parentTurnContext = buildParentTurnContextBlock(ctx.currentUserMessage);
+      const expandedPromptWithContext = parentTurnContext
+        ? `${parentTurnContext}\n\n${expanded.prompt}`
+        : expanded.prompt;
       const childPrompt = parentExecutionContract
         ? buildSpawnWorkOrderPrompt({
             parent: parentExecutionContract.snapshot(),
-            childPrompt: expanded.prompt,
+            childPrompt: expandedPromptWithContext,
             persona: input.persona,
             allowedTools: expanded.allowedTools,
           })
-        : expanded.prompt;
+        : expandedPromptWithContext;
       if (parentExecutionContract) {
         const snapshot = parentExecutionContract.snapshot();
         parentExecutionContract.recordWorkOrder({
@@ -1085,6 +1197,7 @@ export function makeSpawnAgentTool(
         onAgentEvent: ctx.emitAgentEvent,
         askUser: ctx.askUser,
         permissionMode: resolveParentPermissionMode(agent, ctx.sessionKey),
+        executionContract: parentExecutionContract,
         ...(modelOverride ? { modelOverride } : {}),
       };
 

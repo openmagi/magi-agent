@@ -27,13 +27,17 @@
 
 import type { RegisteredHook, HookContext } from "../types.js";
 import type { PermissionMode } from "../../Session.js";
+import type { PlanningNeed, RequestMetaClassificationResult } from "../../execution/ExecutionContract.js";
 import { latestUserText } from "./classifyTurnMode.js";
 import { getOrClassifyRequestMeta } from "./turnMetaClassifier.js";
+import { PLAN_MODE_ALLOWED_TOOLS } from "../../turn/ToolSelector.js";
 
 export interface PlanModeAutoTriggerAgent {
   /** Returns the current permissionMode for `sessionKey`, or null when
    *  the session has been evicted between scheduling + dispatch. */
   getSessionPermissionMode(sessionKey: string): PermissionMode | null;
+  /** Promote the current session into native plan mode for approval-gated work. */
+  enterPlanMode?(sessionKey: string, turnId: string): Promise<void>;
 }
 
 export interface PlanModeAutoTriggerOpts {
@@ -104,16 +108,69 @@ export function isAutoTriggerEnabled(env: string | undefined): boolean {
   return v === "" || v === "on" || v === "true" || v === "1";
 }
 
-const PLAN_NUDGE_BLOCK = `
+function planningNeedFromMeta(classified: RequestMetaClassificationResult): PlanningNeed {
+  if (classified.fileDelivery.intent === "deliver_existing") return "none";
+  if (classified.planning.need !== "none") return classified.planning.need;
+  if (classified.implementationIntent && !classified.documentOrFileOperation) {
+    return "approval_plan";
+  }
+  return "none";
+}
 
-<plan_mode_nudge>
-It looks like this request involves building / implementing something
-non-trivial. Consider invoking \`/plan\` (or \`/superpowers:writing-plans\`)
-to draft a numbered implementation plan before you touch code.
-You do not have to — but if the scope is ≥ 3 steps, planning first
-tends to save rework.
-</plan_mode_nudge>
+function planningPolicyBlock(
+  need: Exclude<PlanningNeed, "none">,
+  classified: RequestMetaClassificationResult,
+): string {
+  const reason = classified.planning.reason;
+  const strategy = classified.planning.suggestedStrategy;
+  if (need === "approval_plan") {
+    return `
+
+<planning_policy need="approval_plan">
+This request requires an approved plan before execution.
+Reason: ${reason}
+Strategy: ${strategy}
+You are in native planning discipline. Use read-only tools and TaskBoard as needed.
+Call ExitPlanMode with the final plan before using write, shell, deploy, external-send, or mutating tools.
+</planning_policy>
 `.trim();
+  }
+  if (need === "task_board") {
+    return `
+
+<planning_policy need="task_board">
+This request should be tracked as work, not handled as a one-shot answer.
+Reason: ${reason}
+Strategy: ${strategy}
+Create or update a TaskBoard checklist before execution. Keep it concise, complete each item, and verify before the final answer.
+</planning_policy>
+`.trim();
+  }
+  if (need === "pipeline_or_bulk") {
+    return `
+
+<planning_policy need="pipeline_or_bulk">
+This request appears large, repeated, parallel, or long-running.
+Reason: ${reason}
+Strategy: ${strategy}
+First create a TaskBoard work breakdown. Use /pipeline or /bulk style execution only after the dependencies and acceptance checks are clear.
+</planning_policy>
+`.trim();
+  }
+  return `
+
+<planning_policy need="inline">
+This request needs a brief internal checklist before answering.
+Reason: ${reason}
+Strategy: ${strategy}
+Keep the plan short, execute it, and verify the requested deliverables before the final answer.
+</planning_policy>
+`.trim();
+}
+
+function filterPlanModeTools<T extends { name: string }>(tools: T[]): T[] {
+  return tools.filter((tool) => PLAN_MODE_ALLOWED_TOOLS.has(tool.name));
+}
 
 export function makePlanModeAutoTriggerHook(
   opts: PlanModeAutoTriggerOpts,
@@ -145,24 +202,36 @@ export function makePlanModeAutoTriggerHook(
 
         const text = latestUserText(args.messages);
         if (!text) return { action: "continue" };
-        if (isDocumentOrFileOperation(text)) return { action: "continue" };
         const classified = await getOrClassifyRequestMeta(ctx, { userMessage: text });
-        if (classified.documentOrFileOperation) return { action: "continue" };
-        if (!classified.implementationIntent) return { action: "continue" };
+        if (isDocumentOrFileOperation(text) && classified.planning.need === "none") {
+          return { action: "continue" };
+        }
+        const planningNeed = planningNeedFromMeta(classified);
+        if (planningNeed === "none") return { action: "continue" };
 
-        ctx.log("info", "[plan-mode-auto-trigger] nudging toward /plan", {
+        if (planningNeed === "approval_plan") {
+          await opts.agent.enterPlanMode?.(ctx.sessionKey, ctx.turnId);
+        }
+
+        ctx.log("info", "[plan-mode-auto-trigger] applying planning policy", {
           turnId: ctx.turnId,
+          planningNeed,
         });
 
+        const policyBlock = planningPolicyBlock(planningNeed, classified);
         const nextSystem = args.system
-          ? `${args.system}\n\n${PLAN_NUDGE_BLOCK}`
-          : PLAN_NUDGE_BLOCK;
+          ? `${args.system}\n\n${policyBlock}`
+          : policyBlock;
 
         return {
           action: "replace",
           value: {
             ...args,
             system: nextSystem,
+            tools:
+              planningNeed === "approval_plan"
+                ? filterPlanModeTools(args.tools)
+                : args.tools,
           },
         };
       } catch (err) {

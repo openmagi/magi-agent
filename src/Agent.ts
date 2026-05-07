@@ -44,7 +44,9 @@ import { HipocampusService } from "./services/memory/HipocampusService.js";
 import { makeFileReadTool } from "./tools/FileRead.js";
 import { makeFileWriteTool } from "./tools/FileWrite.js";
 import { makeFileEditTool } from "./tools/FileEdit.js";
+import { makeCodeWorkspaceTool } from "./tools/CodeWorkspace.js";
 import { makeBashTool } from "./tools/Bash.js";
+import { makeTestRunTool } from "./tools/TestRun.js";
 import { makeGlobTool } from "./tools/Glob.js";
 import { makeGrepTool } from "./tools/Grep.js";
 import { makeTaskBoardTool } from "./tools/TaskBoard.js";
@@ -447,7 +449,9 @@ export class Agent {
     this.tools.register(makeFileReadTool(config.workspaceRoot));
     this.tools.register(makeFileWriteTool(config.workspaceRoot));
     this.tools.register(makeFileEditTool(config.workspaceRoot));
+    this.tools.register(makeCodeWorkspaceTool(config.workspaceRoot));
     this.tools.register(makeBashTool(config.workspaceRoot));
+    this.tools.register(makeTestRunTool(config.workspaceRoot));
     this.tools.register(makeGlobTool(config.workspaceRoot));
     this.tools.register(makeGrepTool(config.workspaceRoot));
     this.tools.register(makeTaskBoardTool(this.sessionsDir));
@@ -840,6 +844,10 @@ export class Agent {
           const s = this.sessions.get(sessionKey);
           return s ? s.getPermissionMode() : null;
         },
+        enterPlanMode: async (sessionKey) => {
+          const s = this.sessions.get(sessionKey);
+          s?.setPermissionMode("plan");
+        },
       },
       // Superpowers onboarding nudge — reads session.meta for
       // onboarded/onboardingDeclines + budget stats.
@@ -873,6 +881,17 @@ export class Agent {
       // so "complete/fixed/verified" claims are checked against
       // current-turn tool calls instead of model memory.
       completionEvidenceAgent: {
+        readSessionTranscript,
+      },
+      fileEditSafetyAgent: {
+        readSessionTranscript,
+      },
+      codingVerificationAgent: {
+        getSessionDiscipline: (sessionKey) =>
+          this.getSessionDiscipline(sessionKey),
+        readSessionTranscript,
+      },
+      goalProgressGateAgent: {
         readSessionTranscript,
       },
       taskContractAgent: {

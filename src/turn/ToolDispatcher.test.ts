@@ -50,6 +50,8 @@ class FakeSse extends SseWriter {
 interface ToolRecord {
   name: string;
   calls: unknown[];
+  contextCalls?: unknown[];
+  onExecute?: () => Promise<void> | void;
   behaviour: "ok" | "throw" | "error-status" | "transient-then-ok";
   permission?: "read" | "write" | "execute" | "net" | "meta";
   dangerous?: boolean;
@@ -108,8 +110,10 @@ async function makeCtx(opts: {
         permission: t.permission ?? "read",
         ...(t.dangerous ? { dangerous: true } : {}),
         inputSchema: { type: "object", properties: {} },
-        execute: async (input: unknown) => {
+        execute: async (input: unknown, toolCtx: unknown) => {
           t.calls.push(input);
+          t.contextCalls?.push(toolCtx);
+          await t.onExecute?.();
           if (t.behaviour === "transient-then-ok") {
             if (t.calls.length === 1) {
               throw new Error("ETIMEDOUT");
@@ -252,6 +256,32 @@ describe("ToolDispatcher.dispatch", () => {
     expect(tool.calls).toEqual([{ x: 1 }]);
     const points = hooks.calls.map((c) => c.point);
     expect(points).toEqual(["beforeToolUse", "afterToolUse"]);
+  });
+
+  it("passes the current user message through the tool context", async () => {
+    const contextCalls: unknown[] = [];
+    const tool: ToolRecord = {
+      name: "Echo",
+      calls: [],
+      contextCalls,
+      behaviour: "ok",
+    };
+    const { ctx } = await makeCtx({ tools: [tool] });
+    const currentUserMessage = {
+      text: "서브에이전트에게 선택한 파일 기준으로 처리시켜줘",
+      receivedAt: 1_700_000_000_000,
+      metadata: {
+        systemPromptAddendum:
+          "<kb-context>\n[file: guide.md]\n이 기준으로 작업해야 한다.\n</kb-context>",
+      },
+    };
+    (ctx as typeof ctx & { currentUserMessage?: unknown }).currentUserMessage =
+      currentUserMessage;
+
+    const results = await dispatch(ctx, [tu("tu_1", "Echo", { x: 1 })]);
+
+    expect(results[0]?.isError).toBe(false);
+    expect(contextCalls[0]).toMatchObject({ currentUserMessage });
   });
 
   it("bypass mode skips beforeToolUse and emits permission_bypass audit", async () => {
@@ -415,6 +445,50 @@ describe("ToolDispatcher.dispatch", () => {
     expect(results.length).toBe(2);
     expect(a.calls.length).toBe(1);
     expect(b.calls.length).toBe(1);
+  });
+
+  it("serializes mutating tool_use blocks while keeping read-only tools concurrent", async () => {
+    let activeWrites = 0;
+    let maxActiveWrites = 0;
+    const events: string[] = [];
+    const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+    const makeWrite = (name: string): ToolRecord => ({
+      name,
+      calls: [],
+      behaviour: "ok",
+      permission: "write",
+      onExecute: async () => {
+        activeWrites += 1;
+        maxActiveWrites = Math.max(maxActiveWrites, activeWrites);
+        events.push(`${name}:start`);
+        await wait(15);
+        events.push(`${name}:end`);
+        activeWrites -= 1;
+      },
+    });
+    const writeA = makeWrite("WriteA");
+    const writeB = makeWrite("WriteB");
+    const readA: ToolRecord = { name: "ReadA", calls: [], behaviour: "ok", permission: "read" };
+    const readB: ToolRecord = { name: "ReadB", calls: [], behaviour: "ok", permission: "read" };
+    const { ctx } = await makeCtx({
+      tools: [readA, readB, writeA, writeB],
+      permissionMode: "bypass",
+    });
+
+    const results = await dispatch(ctx, [
+      tu("read_a", "ReadA"),
+      tu("read_b", "ReadB"),
+      tu("write_a", "WriteA"),
+      tu("write_b", "WriteB"),
+    ]);
+
+    expect(results.map((r) => r.isError)).toEqual([false, false, false, false]);
+    expect(readA.calls).toHaveLength(1);
+    expect(readB.calls).toHaveLength(1);
+    expect(writeA.calls).toHaveLength(1);
+    expect(writeB.calls).toHaveLength(1);
+    expect(maxActiveWrites).toBe(1);
+    expect(events).toEqual(["WriteA:start", "WriteA:end", "WriteB:start", "WriteB:end"]);
   });
 });
 

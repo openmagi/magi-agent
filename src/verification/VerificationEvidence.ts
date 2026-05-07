@@ -77,6 +77,7 @@ const EXPLICIT_VERIFIER_TOOLS = new Set([
   "Clock",
   "DateRange",
   "Calculation",
+  "TestRun",
   "DeterministicEvidenceVerifier",
 ]);
 

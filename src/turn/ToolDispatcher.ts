@@ -23,11 +23,13 @@ import type {
   ToolContext,
   ToolResult,
 } from "../Tool.js";
+import type { UserMessage } from "../util/types.js";
 import { buildPreview, summariseToolOutput } from "../util/toolResult.js";
 import {
   decideRuntimePermission,
   type PermissionDecision,
 } from "../permissions/PermissionArbiter.js";
+import { isReadOnlyTool } from "../permissions/ToolPermissionAdapters.js";
 import { decideToolAccess } from "./ToolArbiter.js";
 
 export type PermissionMode = "default" | "plan" | "auto" | "bypass";
@@ -87,6 +89,8 @@ export interface ToolDispatchContext {
    * and the hint falls back to the full registry (legacy behaviour).
    */
   readonly exposedToolNames?: readonly string[];
+  /** Current user message, including runtime-injected addendum and attachments. */
+  readonly currentUserMessage?: UserMessage;
 }
 
 export interface ToolDispatchResult {
@@ -135,8 +139,10 @@ export async function dispatch(
   for (const tu of enterPlanUses) {
     enteredResults.push(await dispatchOne(ctx, tu, abortController));
   }
-  const runs = otherUses.map((tu) => dispatchOne(ctx, tu, abortController));
-  const results = [...enteredResults, ...(await Promise.all(runs))];
+  const results = [
+    ...enteredResults,
+    ...(await dispatchInConcurrencySafeBatches(ctx, otherUses, abortController)),
+  ];
   // Gap §11.3 — if the per-turn counter crossed the threshold during
   // this batch, tell Turn.ts to abort. Emit a user-facing text_delta
   // FIRST so the UI shows the reason before the abort propagates.
@@ -153,6 +159,51 @@ export async function dispatch(
     throw new UnknownToolLoopError(counter.get());
   }
   return results;
+}
+
+async function dispatchInConcurrencySafeBatches(
+  ctx: ToolDispatchContext,
+  toolUses: Array<Extract<LLMContentBlock, { type: "tool_use" }>>,
+  abortController: AbortController,
+): Promise<ToolDispatchResult[]> {
+  const results: ToolDispatchResult[] = [];
+  let readOnlyBatch: Array<Extract<LLMContentBlock, { type: "tool_use" }>> = [];
+  const flushReadOnlyBatch = async () => {
+    if (readOnlyBatch.length === 0) return;
+    const batch = readOnlyBatch;
+    readOnlyBatch = [];
+    results.push(
+      ...(await Promise.all(batch.map((tu) => dispatchOne(ctx, tu, abortController)))),
+    );
+  };
+
+  for (const tu of toolUses) {
+    if (isConcurrencySafeToolUse(ctx, tu)) {
+      readOnlyBatch.push(tu);
+      continue;
+    }
+    await flushReadOnlyBatch();
+    results.push(await dispatchOne(ctx, tu, abortController));
+  }
+  await flushReadOnlyBatch();
+  return results;
+}
+
+function isConcurrencySafeToolUse(
+  ctx: ToolDispatchContext,
+  tu: Extract<LLMContentBlock, { type: "tool_use" }>,
+): boolean {
+  const access = decideToolAccess({
+    registry: ctx.session.agent.tools,
+    toolName: tu.name,
+    exposedToolNames: ctx.exposedToolNames,
+  });
+  if (!access.allowed) return true;
+  const tool = access.tool as Tool<unknown, unknown>;
+  if (tool.isConcurrencySafe === true) return true;
+  if (tool.isConcurrencySafe === false) return false;
+  if (tool.mutatesWorkspace === true) return false;
+  return isReadOnlyTool(tu.name, tool);
 }
 
 const TRANSIENT_TOOL_ERROR_RE =
@@ -354,6 +405,7 @@ async function dispatchOne(
     workspaceRoot: session.agent.config.workspaceRoot,
     abortSignal: abortController.signal,
     executionContract: session.executionContract,
+    ...(ctx.currentUserMessage ? { currentUserMessage: ctx.currentUserMessage } : {}),
     emitProgress: (p) => {
       sse.agent({ type: "tool_start", id: tu.id, name: p.label });
     },

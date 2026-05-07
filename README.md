@@ -23,9 +23,16 @@ memory, schedules, and harness rules.
 
 The included `/app` shell connects to the same runtime over HTTP/SSE, streams
 turns, shows live sessions, background tasks, scheduled jobs, artifacts, loaded
-skills, and runtime events. It also supports a per-turn model override for
-testing different providers or routers without changing the agent config, while
-keeping provider secrets out of the browser by using a separate server token.
+tools, skills, and runtime events. It also supports a per-turn model override
+for testing different providers or routers without changing the agent config,
+while keeping provider secrets out of the browser by using a separate server
+token.
+
+The web shell is installable as a desktop PWA from supported browsers, so a
+self-hosted Magi instance can run as a local desktop workbench without a native
+package. A signed Electron/Tauri-style package is intentionally kept as a
+separate packaging track so the open runtime does not inherit hosted Magi
+Cloud's download, signing, update, auth, or billing infrastructure.
 
 The goal is to keep the visible app surface open while keeping hosted Magi
 Cloud's production control plane separate: billing, fleet provisioning, managed
@@ -87,6 +94,7 @@ evidence, and deterministic evidence through the turn.
 | **Execution contracts** | Acceptance criteria, resource bindings, used-resource provenance, verification evidence, and deterministic requirements live in runtime state. |
 | **Deterministic exactness** | Dates, time windows, counts, averages, sums, percent changes, and comparisons can be forced through runtime evidence instead of model guesswork. |
 | **Scheduled-work discipline** | Cron turns are treated as orchestration work: delivery channel is persisted, parent turns stay meta-only, worker work is delegated, and delivery safety is enforced. |
+| **Coding work discipline** | Workspace snapshots, file-edit provenance, `TestRun` evidence, and goal-progress checks keep coding tasks from finishing on unverified claims. |
 | **Replayable transcripts** | Tool calls, tool results, control events, compaction boundaries, and canonical assistant messages are persisted for restart-safe replay. |
 | **Hipocampus memory** | A layered memory system with root/daily/weekly/monthly compaction and qmd-backed recall. |
 | **User Harness Rules** | Install Markdown rules that become runtime checks, including required tools, required tool input patterns, LLM verifiers, and blockers. |
@@ -100,7 +108,7 @@ evidence, and deterministic evidence through the turn.
 
 Magi ships with 30+ native tools and runtime subsystems:
 
-- **Workspace tools:** `FileRead`, `FileWrite`, `FileEdit`, `Glob`, `Grep`, `Bash`
+- **Workspace tools:** `FileRead`, `FileWrite`, `FileEdit`, `Glob`, `Grep`, `Bash`, `CodeWorkspace`
 - **Web and browser:** `WebSearch`, `WebFetch`, `Browser`, `SocialBrowser`
 - **Deterministic workbench:** `Clock`, `DateRange`, `Calculation`
 - **Knowledge and memory:** `KnowledgeSearch`, Hipocampus recall, qmd indexing
@@ -110,7 +118,7 @@ Magi ships with 30+ native tools and runtime subsystems:
 - **Delegation:** `SpawnAgent`, `TaskList`, `TaskGet`, `TaskOutput`, `TaskStop`
 - **Planning and control:** `EnterPlanMode`, `ExitPlanMode`, `AskUserQuestion`, `TaskBoard`
 - **Automation:** `CronCreate`, `CronList`, `CronUpdate`, `CronDelete`
-- **Discipline:** `CommitCheckpoint`, execution contracts, verification evidence gates
+- **Discipline:** `CommitCheckpoint`, `TestRun`, execution contracts, verification evidence gates, goal-progress gates
 - **Skills:** workspace `skills/` loading plus `POST /v1/admin/skills/reload`
 
 Optional dependencies enable richer formats and rendering paths, including DOCX,
@@ -201,6 +209,27 @@ answer invents or contradicts exact values.
 The result is not "the model was told to be careful." The runtime has a place to
 store the requirement, a place to store the evidence, and a gate that can reject
 the final answer.
+
+### Coding And Goal Progress
+
+Coding work uses the same runtime discipline rather than relying on a coding
+prompt. `CodeWorkspace` gives the model a bounded workspace inspector for file
+trees, file hashes, and targeted content reads. `TestRun` executes verification
+commands while capturing stdout and stderr through a byte-safe UTF-8 stream
+path, then records the command, exit code, and output as verification evidence.
+
+Before commit, `fileEditSafetyGate` checks that file edits were grounded in
+same-turn file reads or workspace evidence. `codingVerificationGate` blocks
+answers that claim code changes are ready without a same-turn verifier such as
+`TestRun`, `Bash`, or `CommitCheckpoint`. `goalProgressGate` adds a second
+final-answer check for common failure modes: reporting delivery without
+evidence, claiming action without tool support, giving up early, or leaving
+active requirements unresolved.
+
+For larger or risky requests, `planModeAutoTrigger` can classify the request as
+inline planning, task-board planning, approval-plan mode, or pipeline/bulk work.
+Approval-plan mode moves the session into native plan mode and limits tools to
+the plan-safe allowlist until the plan is approved.
 
 ### Classifier And Deferral Discipline
 
@@ -480,6 +509,10 @@ Common built-in gates include:
 | `dangerousPatterns` | Blocks unsafe operations. |
 | `outputPurityGate` | Blocks leaked internal planning in final answers. |
 | `completionEvidenceGate` | Requires evidence before completion claims. |
+| `codingVerificationGate` | Requires same-turn verification evidence for coding completion claims. |
+| `fileEditSafetyGate` | Checks that file edits are grounded in recent workspace evidence. |
+| `goalProgressGate` | Blocks final answers that skip active requirements or claim unsupported progress. |
+| `planModeAutoTrigger` | Routes complex, risky, or bulk work into the right planning posture. |
 | `resourceBoundaryGate` | Prevents use of resources outside the task boundary. |
 | `cronMetaOrchestrator` | Keeps scheduled parent turns in a meta-orchestration role. |
 | `cronDeliverySafety` | Prevents ambiguous or direct channel delivery from cron worker paths. |

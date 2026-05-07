@@ -8,6 +8,7 @@ const storage = {
 const state = {
   eventCount: 0,
   streamingMessage: null,
+  deferredInstallPrompt: null,
 };
 
 const els = {
@@ -18,11 +19,13 @@ const els = {
   modelOverride: document.querySelector("#model-override"),
   planMode: document.querySelector("#plan-mode"),
   healthButton: document.querySelector("#health-button"),
+  installButton: document.querySelector("#install-button"),
   runtimeStatus: document.querySelector("#runtime-status"),
   runtimeSessions: document.querySelector("#runtime-sessions"),
   runtimeTasks: document.querySelector("#runtime-tasks"),
   runtimeCrons: document.querySelector("#runtime-crons"),
   runtimeArtifacts: document.querySelector("#runtime-artifacts"),
+  runtimeTools: document.querySelector("#runtime-tools"),
   runtimeSkills: document.querySelector("#runtime-skills"),
   eventCount: document.querySelector("#event-count"),
   sessionLabel: document.querySelector("#session-label"),
@@ -32,6 +35,7 @@ const els = {
   tasksList: document.querySelector("#tasks-list"),
   cronsList: document.querySelector("#crons-list"),
   artifactsList: document.querySelector("#artifacts-list"),
+  toolsList: document.querySelector("#tools-list"),
   skillsList: document.querySelector("#skills-list"),
   messageForm: document.querySelector("#message-form"),
   messageInput: document.querySelector("#message-input"),
@@ -174,12 +178,14 @@ function renderRuntimeSnapshot(payload) {
   const tasks = payload.tasks?.items || [];
   const crons = payload.crons?.items || [];
   const artifacts = payload.artifacts?.items || [];
+  const tools = payload.tools?.items || [];
   const skills = payload.skills?.loaded || [];
 
   els.runtimeSessions.textContent = String(payload.sessions?.count || 0);
   els.runtimeTasks.textContent = String(payload.tasks?.count || 0);
   els.runtimeCrons.textContent = String(payload.crons?.count || 0);
   els.runtimeArtifacts.textContent = String(payload.artifacts?.count || 0);
+  els.runtimeTools.textContent = String(payload.tools?.count || 0);
   els.runtimeSkills.textContent = String(payload.skills?.loadedCount || 0);
 
   renderSnapshotList(els.sessionsList, sessions, "No live sessions", (session) => ({
@@ -204,6 +210,11 @@ function renderRuntimeSnapshot(payload) {
     meta: `${artifact.kind || "artifact"} - ${artifact.sizeBytes || 0} bytes`,
     detail: artifact.path || artifact.slug || "",
   }));
+  renderSnapshotList(els.toolsList, tools, "No tools registered", (tool) => ({
+    title: tool.name || "tool",
+    meta: `${tool.permission || "read"} - ${tool.kind || "core"}`,
+    detail: tool.dangerous ? "dangerous" : "",
+  }));
   renderSnapshotList(els.skillsList, skills, "No loaded skills", (skill) => ({
     title: skill.name || "skill",
     meta: skill.path || "loaded",
@@ -222,6 +233,7 @@ async function loadRuntimeSnapshot() {
     tasks: payload.tasks?.count || 0,
     crons: payload.crons?.count || 0,
     artifacts: payload.artifacts?.count || 0,
+    tools: payload.tools?.count || 0,
     skills: payload.skills?.loadedCount || 0,
   });
 }
@@ -340,6 +352,16 @@ els.healthButton.addEventListener("click", () => {
   void checkRuntime();
 });
 
+els.installButton.addEventListener("click", async () => {
+  const prompt = state.deferredInstallPrompt;
+  if (!prompt) return;
+  state.deferredInstallPrompt = null;
+  els.installButton.hidden = true;
+  prompt.prompt();
+  const choice = await prompt.userChoice;
+  addEvent("install_prompt", { outcome: choice?.outcome || "unknown" });
+});
+
 els.sessionKey.addEventListener("input", updateSessionLabel);
 
 els.clearButton.addEventListener("click", () => {
@@ -376,3 +398,18 @@ addEvent("app_ready", {
   agentUrl: els.agentUrl.value,
   sessionKey: els.sessionKey.value,
 });
+
+window.addEventListener("beforeinstallprompt", (event) => {
+  event.preventDefault();
+  state.deferredInstallPrompt = event;
+  els.installButton.hidden = false;
+});
+
+if ("serviceWorker" in navigator) {
+  navigator.serviceWorker
+    .register("/app/sw.js", { scope: "/app/" })
+    .then(() => addEvent("service_worker_ready", {}))
+    .catch((error) =>
+      addEvent("service_worker_error", { message: String(error.message || error) }),
+    );
+}

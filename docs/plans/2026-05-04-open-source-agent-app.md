@@ -37,6 +37,8 @@ The open-source app should include:
 - Local-first chat UI for a running Magi instance. Initial shell: done.
 - Runtime connection setup for local HTTP/SSE or a self-hosted endpoint. Initial
   server-token flow: done.
+- Installable desktop PWA shell for the self-hosted app. Initial manifest,
+  service worker, and install prompt: done.
 - Provider configuration UI for API-key based providers and local provider
   adapters.
 - Session transcript viewer with tool calls, tool results, thinking blocks,
@@ -69,6 +71,8 @@ Do not open-source these as part of the self-hosted app:
 - Hosted chat proxy, API proxy, provisioning worker, admin dashboards, growth
   analytics, and operator backoffice.
 - Managed social-browser credential broker and session claiming backend.
+- Hosted desktop download page, binary signing, auto-update channel,
+  entitlement checks, and managed desktop telemetry.
 - Secrets, production endpoints, customer data, telemetry keys, and internal
   operational runbooks.
 
@@ -111,6 +115,7 @@ Pieces that should be rewritten or replaced:
 ```
 apps/web
   -> AgentConnection               local/self-hosted HTTP + SSE client
+  -> DesktopShell                  installable PWA now, native wrapper later
   -> ProviderSettings              BYOK/local provider adapter config
   -> ChatWorkbench                 messages, tool calls, thinking, input
   -> RuntimeTimeline               hook events, checkpoints, evidence
@@ -159,8 +164,8 @@ routes.
 ## Milestones
 
 Status on 2026-05-04: M0 is complete, M1 has a dependency-free shell at `/app`,
-and the first M3 read-only runtime inspector is wired through documented
-`/v1/app/*` HTTP APIs.
+the first M3 read-only runtime inspector is wired through documented
+`/v1/app/*` HTTP APIs, and the app has an installable PWA desktop shell.
 
 ### M0: Boundary And Marketing
 
@@ -178,6 +183,7 @@ and the first M3 read-only runtime inspector is wired through documented
 - Connect to a local Magi HTTP/SSE endpoint. Done.
 - Send user messages and stream responses. Done.
 - Show runtime event stream. Done.
+- Install as a desktop PWA from supported browsers. Done.
 - No auth, billing, Supabase, or hosted Magi dependency. Done.
 - Render richer first-class message parts, thinking blocks, and tool cards.
 
@@ -214,6 +220,18 @@ and the first M3 read-only runtime inspector is wired through documented
   handling.
 - Add hosted Magi Cloud upgrade copy without making the OSS app dependent on
   cloud services.
+
+### M6: Native Desktop Packaging
+
+- Decide whether native packaging belongs in this monorepo or a separate
+  `magi-desktop` repository.
+- Wrap the same `/app` surface in a minimal Tauri/Electron/WebView shell.
+- Keep provider keys in the local runtime process or OS credential storage, not
+  in browser-readable frontend state.
+- Add signed release, auto-update, and notarization only after the hosted-only
+  infrastructure boundary is audited.
+- Keep the PWA shell as the zero-dependency desktop path even after native
+  packaging exists.
 
 ## Security And Release Gates
 

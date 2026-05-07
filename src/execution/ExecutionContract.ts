@@ -4,6 +4,12 @@ export type VerificationMode = "none" | "sample" | "full";
 export type ExecutionControlMode = "light" | "heavy";
 export type AcceptanceCriterionStatus = "pending" | "passed" | "failed" | "waived";
 export type ResourceBindingMode = "audit" | "enforce";
+export type PlanningNeed =
+  | "none"
+  | "inline"
+  | "task_board"
+  | "approval_plan"
+  | "pipeline_or_bulk";
 export type DeterministicRequirementKind =
   | "clock"
   | "date_range"
@@ -139,6 +145,16 @@ export interface RequestMetaClassificationResult {
     wantsKbDelivery: boolean;
     wantsFileOutput: boolean;
   };
+  planning: {
+    need: PlanningNeed;
+    reason: string;
+    suggestedStrategy: string;
+  };
+  goalProgress: {
+    requiresAction: boolean;
+    actionKinds: string[];
+    reason: string;
+  };
 }
 
 export interface RequestMetaClassificationRecord {
@@ -158,6 +174,9 @@ export interface FinalAnswerMetaClassificationResult {
   assistantClaimsChatDelivery: boolean;
   assistantClaimsKbDelivery: boolean;
   assistantReportsDeliveryFailure: boolean;
+  assistantReportsDeliveryUnverified: boolean;
+  assistantGivesUpEarly: boolean;
+  assistantClaimsActionWithoutEvidence: boolean;
   reason: string;
 }
 
