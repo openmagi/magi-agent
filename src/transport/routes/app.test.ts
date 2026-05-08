@@ -76,19 +76,9 @@ describe("HttpServer /app", () => {
     expect(res.status).toBe(200);
     expect(res.contentType).toContain("text/html");
     expect(res.body).toContain("Magi App");
-    expect(res.body).toContain("model-override");
-    expect(res.body).toContain("runtime-config-form");
-    expect(res.body).toContain("harness-rule-form");
-    expect(res.body).toContain("workspace-path");
-    expect(res.body).toContain("memory-search-query");
-    expect(res.body).toContain("cron-editor-form");
-    expect(res.body).toContain("reload-skills-button");
-    expect(res.body).toContain("transcript-list");
-    expect(res.body).toContain("artifact-content");
-    expect(res.body).toContain("memory-compact-button");
-    expect(res.body).toContain("config-workspace");
-    expect(res.body).toContain("config-reload-button");
+    expect(res.body).toContain('id="root"');
     expect(res.body).toContain("/app/app.js");
+    expect(res.body).toContain("/app/styles.css");
   });
 
   it("serves static app assets", async () => {
@@ -104,10 +94,11 @@ describe("HttpServer /app", () => {
     expect(res.body).toContain("saveCron");
     expect(res.body).toContain("reloadSkills");
     expect(res.body).toContain("loadTranscript");
-    expect(res.body).toContain("openArtifact");
-    expect(res.body).toContain("downloadArtifact");
+    expect(res.body).toContain("artifact-content");
     expect(res.body).toContain("compactMemory");
     expect(res.body).toContain("reloadRuntimeConfig");
+    expect(res.body).toContain("cloud-chat-shell");
+    expect(res.body).toContain("dashboard-shell");
   });
 
   it("serves installable app assets", async () => {
@@ -121,7 +112,7 @@ describe("HttpServer /app", () => {
     expect(manifest.body).toContain("Magi App");
     expect(serviceWorker.status).toBe(200);
     expect(serviceWorker.contentType).toContain("text/javascript");
-    expect(serviceWorker.body).toContain("magi-app-shell");
+    expect(serviceWorker.body).toContain("magi-app-shell-v3");
   });
 
   it("does not allow app route path traversal", async () => {

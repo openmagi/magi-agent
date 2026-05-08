@@ -8,15 +8,18 @@
     "magi-agent": "./dist/cli/index.js"
   },
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "tsc -p tsconfig.json && npm run web:build",
     "start": "node dist/index.js",
     "dev": "tsx watch src/index.ts",
     "cli": "tsx src/cli/index.ts",
+    "web:build": "vite build --config apps/web/vite.config.ts",
+    "web:check": "tsc -p apps/web/tsconfig.json --noEmit",
+    "web:dev": "vite --config apps/web/vite.config.ts --host 127.0.0.1",
     "desktop:dev": "npm --prefix apps/desktop run dev",
     "desktop:build": "npm --prefix apps/desktop run build",
     "test": "vitest run",
     "test:watch": "vitest",
-    "lint": "tsc --noEmit",
+    "lint": "tsc --noEmit && npm run web:check",
     "prepublishOnly": "npm run build"
   },
   "engines": {
@@ -58,8 +61,14 @@
   "devDependencies": {
     "@types/node": "^22.7.5",
     "@types/pdfkit": "^0.17.6",
+    "@types/react": "^19.1.9",
+    "@types/react-dom": "^19.1.7",
+    "@vitejs/plugin-react": "^5.0.3",
+    "react": "^19.1.1",
+    "react-dom": "^19.1.1",
     "tsx": "^4.19.1",
     "typescript": "^5.6.3",
+    "vite": "^7.1.7",
     "vitest": "^2.1.2"
   }
 }

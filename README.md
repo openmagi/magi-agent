@@ -85,6 +85,7 @@ Source development:
 
 ```bash
 npm install
+npm run build
 npx tsx src/cli/index.ts init
 npx tsx src/cli/index.ts serve --port 8080
 ```

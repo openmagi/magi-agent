@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 
@@ -33,6 +33,7 @@ function trackedFiles(): string[] {
     .split("\n")
     .map((line) => line.trim())
     .filter(Boolean)
+    .filter((file) => existsSync(file))
     .filter((file) => !binaryExtensions.has(path.extname(file).toLowerCase()));
 }
 

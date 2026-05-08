@@ -188,12 +188,12 @@ routes.
 
 ## Milestones
 
-Status on 2026-05-07: M0 is complete, M1 has a dependency-free shell at `/app`,
-the M3 runtime inspector is wired through documented `/v1/app/*` HTTP APIs, and
-the app has both an installable PWA desktop shell and a buildable Tauri wrapper
-under `apps/desktop`. M2 has an initial sanitized provider/local-model config
-editor. M4 has Markdown Harness Rules, memory, cron, task, and skill controls.
-M5 has a Docker Compose starter plus self-host hardening notes.
+Status on 2026-05-08: M0 is complete, M1 has a React-based cloud-parity shell at
+`/app`, the M3 runtime inspector is wired through documented `/v1/app/*` HTTP
+APIs, and the app has both an installable PWA desktop shell and a buildable Tauri
+wrapper under `apps/desktop`. M2 has an initial sanitized provider/local-model
+config editor. M4 has Markdown Harness Rules, memory, cron, task, and skill
+controls. M5 has a Docker Compose starter plus self-host hardening notes.
 
 ### M0: Boundary And Marketing
 

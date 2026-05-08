@@ -1,12 +1,12 @@
 {
   "name": "Magi App",
   "short_name": "Magi",
-  "description": "Self-hosted workbench for the Magi personal agent runtime.",
-  "start_url": "/app",
+  "description": "Self-hosted Magi agent workbench",
+  "start_url": "/app/",
   "scope": "/app/",
   "display": "standalone",
-  "background_color": "#f7f4ed",
-  "theme_color": "#106b5a",
+  "background_color": "#FAFAFA",
+  "theme_color": "#7C3AED",
   "icons": [
     {
       "src": "/app/icon.svg",

@@ -19,6 +19,7 @@ function trackedTextFiles(): string[] {
   return out
     .split("\n")
     .filter((file) => file.length > 0)
+    .filter((file) => fs.existsSync(path.join(REPO_ROOT, file)))
     .filter((file) => !file.endsWith(".png"))
     .filter((file) => !file.endsWith(".ico"))
     .filter((file) => !file.endsWith(".icns"));
