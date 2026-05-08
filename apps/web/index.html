@@ -3,24 +3,53 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <meta name="theme-color" content="#106b5a" />
+    <meta name="theme-color" content="#7C3AED" />
     <title>Magi App</title>
     <link rel="manifest" href="/app/manifest.webmanifest" />
     <link rel="icon" href="/app/icon.svg" type="image/svg+xml" />
     <link rel="stylesheet" href="/app/styles.css" />
   </head>
   <body>
-    <div class="shell">
-      <aside class="sidebar">
-        <div class="brand">
-          <span class="brand-mark">M</span>
-          <div>
-            <h1>Magi App</h1>
-            <p>Self-hosted runtime workbench</p>
+    <div class="magi-app-shell">
+      <aside class="chat-sidebar" aria-label="Magi navigation">
+        <div class="sidebar-brand">
+          <span class="brand-mark" aria-hidden="true">M</span>
+          <div class="brand-copy">
+            <h1>Magi</h1>
+            <p>Local workbench</p>
           </div>
         </div>
 
-        <form id="connection-form" class="panel">
+        <nav class="channel-list" aria-label="Workspace channels">
+          <div class="channel-group">
+            <div class="channel-group-title">General</div>
+            <button class="channel-item active" type="button">
+              <span aria-hidden="true">#</span>
+              <span>general</span>
+            </button>
+            <button class="channel-item" type="button" data-panel-target="work">
+              <span aria-hidden="true">#</span>
+              <span>runtime-proof</span>
+            </button>
+          </div>
+          <div class="channel-group">
+            <div class="channel-group-title">Workspace</div>
+            <button class="channel-item" type="button" data-panel-target="knowledge">
+              <span aria-hidden="true">#</span>
+              <span>knowledge</span>
+            </button>
+            <button class="channel-item" type="button" data-panel-target="runtime">
+              <span aria-hidden="true">#</span>
+              <span>settings</span>
+            </button>
+          </div>
+        </nav>
+
+        <form id="connection-form" class="connection-card">
+          <div class="section-heading">
+            <span>Connection</span>
+            <button id="health-button" type="button" class="ghost-button">Check</button>
+          </div>
           <label>
             Agent URL
             <input id="agent-url" name="agentUrl" autocomplete="url" />
@@ -37,22 +66,22 @@
             Model override
             <input id="model-override" name="modelOverride" placeholder="auto" autocomplete="off" />
           </label>
-          <label class="check-row">
-            <input id="plan-mode" name="planMode" type="checkbox" />
-            Plan mode
-          </label>
-          <button type="submit">Save Connection</button>
-          <button id="health-button" type="button" class="secondary">Check Runtime</button>
-          <button id="install-button" type="button" class="secondary" hidden>Install App</button>
+          <div class="connection-actions">
+            <label class="check-row">
+              <input id="plan-mode" name="planMode" type="checkbox" />
+              Plan mode
+            </label>
+            <button type="submit">Save</button>
+          </div>
+          <button id="install-button" type="button" class="secondary" hidden>Install app</button>
         </form>
 
-        <section class="panel">
-          <h2>Runtime State</h2>
-          <dl id="runtime-state">
-            <div>
-              <dt>Status</dt>
-              <dd id="runtime-status">Not checked</dd>
-            </div>
+        <section class="runtime-card">
+          <div class="section-heading">
+            <span>Runtime State</span>
+            <span id="runtime-status" class="status-pill">Not checked</span>
+          </div>
+          <dl id="runtime-state" class="metric-grid">
             <div>
               <dt>Sessions</dt>
               <dd id="runtime-sessions">0</dd>
@@ -85,246 +114,305 @@
         </section>
       </aside>
 
-      <main class="workspace">
-        <section class="timeline-panel">
-          <header>
-            <div>
-              <h2>Conversation</h2>
-              <p id="session-label">agent:local:app:web:default</p>
+      <main class="chat-workspace">
+        <header class="channel-header">
+          <div>
+            <p class="eyebrow">Local session</p>
+            <h2 id="session-label">agent:local:app:web:default</h2>
+          </div>
+          <button id="clear-button" type="button" class="ghost-button" title="Clear local view">Reset view</button>
+        </header>
+
+        <div id="messages" class="messages" aria-live="polite">
+          <section class="empty-chat">
+            <div class="empty-icon" aria-hidden="true">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M8.625 12a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Zm0 0H8.25m4.125 0a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Zm0 0H12m4.125 0a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Zm0 0h-.375M21 12c0 4.556-4.03 8.25-9 8.25a9.764 9.764 0 0 1-2.555-.337A5.972 5.972 0 0 1 5.41 20.97a5.969 5.969 0 0 1-.474-.065 4.48 4.48 0 0 0 .978-2.025c.09-.457-.133-.901-.467-1.226C3.93 16.178 3 14.189 3 12c0-4.556 4.03-8.25 9-8.25s9 3.694 9 8.25Z" />
+              </svg>
             </div>
-            <button id="clear-button" type="button" class="icon-button" title="Clear local view">Clear</button>
-          </header>
-          <div id="messages" class="messages" aria-live="polite"></div>
-          <form id="message-form" class="composer">
-            <textarea id="message-input" rows="3" placeholder="Ask the agent to do real work..."></textarea>
-            <button id="send-button" type="submit">Send</button>
-          </form>
+            <p>Start a conversation</p>
+          </section>
+        </div>
+
+        <section class="run-inspector" aria-label="Current run">
+          <div class="run-inspector-title">
+            <span class="pulse-dot" aria-hidden="true"></span>
+            <span>Run state</span>
+          </div>
+          <div class="run-inspector-actions">
+            <button id="load-transcript-button" type="button" class="ghost-button">Transcript</button>
+            <button id="load-evidence-button" type="button" class="ghost-button">Runtime proof</button>
+          </div>
         </section>
 
-        <aside class="inspector">
-          <header>
+        <form id="message-form" class="composer" data-chat-input-shell="true">
+          <div class="composer-shell">
+            <textarea id="message-input" rows="3" placeholder="Message Magi..." aria-label="Message Magi"></textarea>
+            <div class="composer-footer">
+              <span>Enter to send. Shift+Enter for a new line.</span>
+              <button id="send-button" type="submit">Send</button>
+            </div>
+          </div>
+        </form>
+      </main>
+
+      <aside class="work-dock" aria-label="Magi work dock">
+        <header class="dock-header">
+          <div>
+            <p class="eyebrow">Workbench</p>
             <h2>Runtime Inspector</h2>
-            <p>Live sessions, background work, scheduled jobs, artifacts, and events.</p>
-          </header>
-          <div class="inspector-grid">
-            <section>
-              <h3>Sessions</h3>
+          </div>
+          <button id="reload-skills-button" type="button" class="ghost-button">Reload Skills</button>
+        </header>
+
+        <div class="dock-tabs" role="tablist" aria-label="Inspector panels">
+          <button class="dock-tab active" type="button" data-panel-target="work" role="tab" aria-selected="true">Work</button>
+          <button class="dock-tab" type="button" data-panel-target="knowledge" role="tab" aria-selected="false">Knowledge</button>
+          <button class="dock-tab" type="button" data-panel-target="runtime" role="tab" aria-selected="false">Runtime</button>
+        </div>
+
+        <div class="dock-scroll">
+          <section id="panel-work" class="dock-panel active" data-panel="work" role="tabpanel">
+            <section class="dock-section">
+              <div class="section-heading"><span>Sessions</span></div>
               <div id="sessions-list" class="snapshot-list"></div>
             </section>
-            <section>
-              <h3>Tasks</h3>
+            <section class="dock-section">
+              <div class="section-heading"><span>Background tasks</span></div>
               <div id="tasks-list" class="snapshot-list"></div>
             </section>
-            <section>
-              <h3>Crons</h3>
+            <section class="dock-section">
+              <div class="section-heading"><span>Schedules</span></div>
               <div id="crons-list" class="snapshot-list"></div>
             </section>
-            <section>
-              <h3>Artifacts</h3>
+            <section class="dock-section">
+              <div class="section-heading">
+                <span>Artifacts</span>
+                <div class="inline-actions">
+                  <button id="open-artifact-button" type="button" class="ghost-button">Open</button>
+                  <button id="download-artifact-button" type="button" class="ghost-button">Download</button>
+                </div>
+              </div>
               <div id="artifacts-list" class="snapshot-list"></div>
+              <pre id="artifact-content" class="code-view"></pre>
             </section>
-            <section>
-              <h3>Tools</h3>
-              <div id="tools-list" class="snapshot-list"></div>
+            <section class="dock-section">
+              <div class="section-heading"><span>Transcript timeline</span></div>
+              <div id="transcript-list" class="snapshot-list"></div>
             </section>
-            <section>
-              <h3>Skills</h3>
-              <div id="skills-list" class="snapshot-list"></div>
-              <button id="reload-skills-button" type="button" class="secondary compact-button">Reload Skills</button>
+            <section class="dock-section">
+              <div class="section-heading"><span>Runtime proof</span></div>
+              <div id="evidence-list" class="snapshot-list"></div>
+              <pre id="evidence-detail" class="code-view"></pre>
             </section>
-          </div>
-          <section class="settings-panel">
-            <h3>Transcript Timeline</h3>
-            <button id="load-transcript-button" type="button" class="secondary compact-button">Load Transcript</button>
-            <div id="transcript-list" class="snapshot-list"></div>
+            <section class="dock-section">
+              <div class="section-heading"><span>Events</span></div>
+              <div id="events" class="events"></div>
+            </section>
           </section>
-          <section class="settings-panel">
-            <h3>Runtime Proof</h3>
-            <button id="load-evidence-button" type="button" class="secondary compact-button">Load Evidence</button>
-            <div id="evidence-list" class="snapshot-list"></div>
-            <pre id="evidence-detail" class="code-view"></pre>
-          </section>
-          <section class="settings-panel">
-            <h3>Artifact Content</h3>
-            <div class="split-fields">
-              <button id="open-artifact-button" type="button" class="secondary">Open Artifact</button>
-              <button id="download-artifact-button" type="button" class="secondary">Download Artifact</button>
-            </div>
-            <pre id="artifact-content" class="code-view"></pre>
-          </section>
-          <section class="settings-panel">
-            <h3>Workspace Files</h3>
-            <form id="workspace-form" class="mini-form">
-              <label>
-                Path
-                <input id="workspace-path" name="workspacePath" value="." autocomplete="off" />
-              </label>
-              <button type="submit">List Files</button>
-              <button id="download-workspace-button" type="button" class="secondary">Download File</button>
-            </form>
-            <div id="workspace-list" class="snapshot-list"></div>
-            <pre id="workspace-file" class="code-view"></pre>
-          </section>
-          <section class="settings-panel">
-            <h3>Memory</h3>
-            <form id="memory-search-form" class="mini-form">
-              <label>
-                Search
-                <input id="memory-search-query" name="memorySearch" autocomplete="off" />
-              </label>
-              <button type="submit">Search Memory</button>
-              <button id="load-memory-button" type="button" class="secondary">Load Memory</button>
-              <button id="memory-compact-button" type="button" class="secondary">Compact Memory</button>
-              <button id="memory-reindex-button" type="button" class="secondary">Reindex Memory</button>
-            </form>
-            <div id="memory-list" class="snapshot-list"></div>
-            <div id="memory-results" class="snapshot-list"></div>
-            <pre id="memory-file" class="code-view"></pre>
-          </section>
-          <section class="settings-panel">
-            <h3>Knowledge Base</h3>
-            <form id="knowledge-search-form" class="mini-form">
-              <div class="split-fields">
+
+          <section id="panel-knowledge" class="dock-panel" data-panel="knowledge" role="tabpanel" hidden>
+            <section class="dock-section">
+              <div class="section-heading"><span>Knowledge Base</span></div>
+              <form id="knowledge-search-form" class="mini-form">
+                <div class="split-fields">
+                  <label>
+                    Collection
+                    <input id="knowledge-collection" name="knowledgeCollection" placeholder="reports" autocomplete="off" />
+                  </label>
+                  <label>
+                    Search
+                    <input id="knowledge-query" name="knowledgeQuery" autocomplete="off" />
+                  </label>
+                </div>
+                <div class="inline-actions full">
+                  <button type="submit">Search KB</button>
+                  <button id="load-knowledge-button" type="button" class="secondary">Load KB</button>
+                </div>
+              </form>
+              <form id="knowledge-file-form" class="mini-form">
                 <label>
-                  Collection
-                  <input id="knowledge-collection" name="knowledgeCollection" placeholder="reports" autocomplete="off" />
+                  File
+                  <input id="knowledge-file-path" name="knowledgeFilePath" placeholder="reports/brief.md" autocomplete="off" />
                 </label>
+                <label>
+                  Markdown
+                  <textarea id="knowledge-file-content" name="knowledgeFileContent" rows="7"></textarea>
+                </label>
+                <button type="submit">Save KB File</button>
+              </form>
+              <div id="knowledge-collections" class="snapshot-list"></div>
+              <div id="knowledge-results" class="snapshot-list"></div>
+              <pre id="knowledge-file-view" class="code-view"></pre>
+            </section>
+
+            <section class="dock-section">
+              <div class="section-heading"><span>Workspace files</span></div>
+              <form id="workspace-form" class="mini-form">
+                <label>
+                  Path
+                  <input id="workspace-path" name="workspacePath" value="." autocomplete="off" />
+                </label>
+                <div class="inline-actions full">
+                  <button type="submit">List Files</button>
+                  <button id="download-workspace-button" type="button" class="secondary">Download File</button>
+                </div>
+              </form>
+              <div id="workspace-list" class="snapshot-list"></div>
+              <pre id="workspace-file" class="code-view"></pre>
+            </section>
+
+            <section class="dock-section">
+              <div class="section-heading"><span>Memory</span></div>
+              <form id="memory-search-form" class="mini-form">
                 <label>
                   Search
-                  <input id="knowledge-query" name="knowledgeQuery" autocomplete="off" />
+                  <input id="memory-search-query" name="memorySearch" autocomplete="off" />
                 </label>
-              </div>
-              <button type="submit">Search KB</button>
-              <button id="load-knowledge-button" type="button" class="secondary">Load KB</button>
-            </form>
-            <form id="knowledge-file-form" class="mini-form">
-              <label>
-                File
-                <input id="knowledge-file-path" name="knowledgeFilePath" placeholder="reports/brief.md" autocomplete="off" />
-              </label>
-              <label>
-                Markdown
-                <textarea id="knowledge-file-content" name="knowledgeFileContent" rows="7"></textarea>
-              </label>
-              <button type="submit">Save KB File</button>
-            </form>
-            <div id="knowledge-collections" class="snapshot-list"></div>
-            <div id="knowledge-results" class="snapshot-list"></div>
-            <pre id="knowledge-file-view" class="code-view"></pre>
-          </section>
-          <section class="settings-panel">
-            <h3>Task Controls</h3>
-            <form id="task-control-form" class="mini-form">
-              <label>
-                Task ID
-                <input id="task-control-id" name="taskId" autocomplete="off" />
-              </label>
-              <button id="task-output-button" type="button">Task Output</button>
-              <button id="task-stop-button" type="button" class="secondary">Stop Task</button>
-            </form>
-            <pre id="task-output-view" class="code-view"></pre>
-          </section>
-          <section class="settings-panel">
-            <h3>Cron Editor</h3>
-            <form id="cron-editor-form" class="mini-form">
-              <label>
-                Cron ID
-                <input id="cron-id" name="cronId" autocomplete="off" />
-              </label>
-              <label>
-                Expression
-                <input id="cron-expression" name="cronExpression" placeholder="@daily" autocomplete="off" />
-              </label>
-              <label>
-                Prompt
-                <textarea id="cron-prompt" name="cronPrompt" rows="4"></textarea>
-              </label>
-              <label>
-                Description
-                <input id="cron-description" name="cronDescription" autocomplete="off" />
-              </label>
-              <div class="split-fields">
-                <label class="check-row">
-                  <input id="cron-enabled" name="cronEnabled" type="checkbox" checked />
-                  Enabled
-                </label>
-                <label class="check-row">
-                  <input id="cron-durable" name="cronDurable" type="checkbox" />
-                  Durable
-                </label>
-              </div>
-              <button type="submit">Save Cron</button>
-              <button id="delete-cron-button" type="button" class="secondary">Delete Cron</button>
-            </form>
-          </section>
-          <section class="settings-panel">
-            <h3>Runtime Config</h3>
-            <form id="runtime-config-form" class="mini-form">
-              <label>
-                Provider
-                <select id="config-provider" name="provider">
-                  <option value="openai-compatible">OpenAI-compatible</option>
-                  <option value="anthropic">Anthropic</option>
-                  <option value="openai">OpenAI</option>
-                  <option value="google">Google</option>
-                </select>
-              </label>
-              <label>
-                Model
-                <input id="config-model" name="model" autocomplete="off" />
-              </label>
-              <label>
-                Base URL
-                <input id="config-base-url" name="baseUrl" autocomplete="url" />
-              </label>
-              <label>
-                API key env var
-                <input id="config-api-key-env" name="apiKeyEnvVar" autocomplete="off" />
-              </label>
-              <label>
-                Server token env var
-                <input id="config-server-token-env" name="serverTokenEnvVar" autocomplete="off" />
-              </label>
-              <label>
-                Workspace
-                <input id="config-workspace" name="workspace" autocomplete="off" />
-              </label>
-              <div class="split-fields">
+                <div class="inline-actions full wrap">
+                  <button type="submit">Search</button>
+                  <button id="load-memory-button" type="button" class="secondary">Load</button>
+                  <button id="memory-compact-button" type="button" class="secondary">Compact</button>
+                  <button id="memory-reindex-button" type="button" class="secondary">Reindex</button>
+                </div>
+              </form>
+              <div id="memory-list" class="snapshot-list"></div>
+              <div id="memory-results" class="snapshot-list"></div>
+              <pre id="memory-file" class="code-view"></pre>
+            </section>
+
+            <section class="dock-section">
+              <div class="section-heading"><span>User Harness Rules</span></div>
+              <form id="harness-rule-form" class="mini-form">
                 <label>
-                  Context
-                  <input id="config-context-window" name="contextWindow" inputmode="numeric" />
+                  Rule file
+                  <input id="harness-rule-name" name="ruleName" placeholder="file-delivery.md" autocomplete="off" />
                 </label>
                 <label>
-                  Max output
-                  <input id="config-max-output" name="maxOutputTokens" inputmode="numeric" />
+                  Markdown
+                  <textarea id="harness-rule-content" name="ruleContent" rows="8"></textarea>
                 </label>
-              </div>
-              <button type="submit">Save Config</button>
-              <button id="load-config-button" type="button" class="secondary">Load Config</button>
-              <button id="config-reload-button" type="button" class="secondary">Restart Status</button>
-              <button id="runtime-restart-button" type="button" class="secondary">Restart Runtime</button>
-              <p id="config-restart-status" class="status-line"></p>
-            </form>
+                <div class="inline-actions full">
+                  <button type="submit">Save Rule</button>
+                  <button id="delete-rule-button" type="button" class="secondary">Delete Rule</button>
+                </div>
+              </form>
+              <div id="harness-rules-list" class="snapshot-list"></div>
+            </section>
           </section>
-          <section class="settings-panel">
-            <h3>User Harness Rules</h3>
-            <form id="harness-rule-form" class="mini-form">
-              <label>
-                Rule file
-                <input id="harness-rule-name" name="ruleName" placeholder="file-delivery.md" autocomplete="off" />
-              </label>
-              <label>
-                Markdown
-                <textarea id="harness-rule-content" name="ruleContent" rows="8"></textarea>
-              </label>
-              <button type="submit">Save Rule</button>
-              <button id="delete-rule-button" type="button" class="secondary">Delete Rule</button>
-            </form>
-            <div id="harness-rules-list" class="snapshot-list"></div>
+
+          <section id="panel-runtime" class="dock-panel" data-panel="runtime" role="tabpanel" hidden>
+            <section class="dock-section">
+              <div class="section-heading"><span>Tools</span></div>
+              <div id="tools-list" class="snapshot-list"></div>
+            </section>
+            <section class="dock-section">
+              <div class="section-heading"><span>Skills</span></div>
+              <div id="skills-list" class="snapshot-list"></div>
+            </section>
+            <section class="dock-section">
+              <div class="section-heading"><span>Task controls</span></div>
+              <form id="task-control-form" class="mini-form">
+                <label>
+                  Task ID
+                  <input id="task-control-id" name="taskId" autocomplete="off" />
+                </label>
+                <div class="inline-actions full">
+                  <button id="task-output-button" type="button">Task Output</button>
+                  <button id="task-stop-button" type="button" class="secondary">Stop Task</button>
+                </div>
+              </form>
+              <pre id="task-output-view" class="code-view"></pre>
+            </section>
+            <section class="dock-section">
+              <div class="section-heading"><span>Cron editor</span></div>
+              <form id="cron-editor-form" class="mini-form">
+                <label>
+                  Cron ID
+                  <input id="cron-id" name="cronId" autocomplete="off" />
+                </label>
+                <label>
+                  Expression
+                  <input id="cron-expression" name="cronExpression" placeholder="@daily" autocomplete="off" />
+                </label>
+                <label>
+                  Prompt
+                  <textarea id="cron-prompt" name="cronPrompt" rows="4"></textarea>
+                </label>
+                <label>
+                  Description
+                  <input id="cron-description" name="cronDescription" autocomplete="off" />
+                </label>
+                <div class="split-fields">
+                  <label class="check-row">
+                    <input id="cron-enabled" name="cronEnabled" type="checkbox" checked />
+                    Enabled
+                  </label>
+                  <label class="check-row">
+                    <input id="cron-durable" name="cronDurable" type="checkbox" />
+                    Durable
+                  </label>
+                </div>
+                <div class="inline-actions full">
+                  <button type="submit">Save Cron</button>
+                  <button id="delete-cron-button" type="button" class="secondary">Delete Cron</button>
+                </div>
+              </form>
+            </section>
+            <section class="dock-section">
+              <div class="section-heading"><span>Runtime config</span></div>
+              <form id="runtime-config-form" class="mini-form">
+                <label>
+                  Provider
+                  <select id="config-provider" name="provider">
+                    <option value="openai-compatible">OpenAI-compatible</option>
+                    <option value="anthropic">Anthropic</option>
+                    <option value="openai">OpenAI</option>
+                    <option value="google">Google</option>
+                  </select>
+                </label>
+                <label>
+                  Model
+                  <input id="config-model" name="model" autocomplete="off" />
+                </label>
+                <label>
+                  Base URL
+                  <input id="config-base-url" name="baseUrl" autocomplete="url" />
+                </label>
+                <label>
+                  API key env var
+                  <input id="config-api-key-env" name="apiKeyEnvVar" autocomplete="off" />
+                </label>
+                <label>
+                  Server token env var
+                  <input id="config-server-token-env" name="serverTokenEnvVar" autocomplete="off" />
+                </label>
+                <label>
+                  Workspace
+                  <input id="config-workspace" name="workspace" autocomplete="off" />
+                </label>
+                <div class="split-fields">
+                  <label>
+                    Context
+                    <input id="config-context-window" name="contextWindow" inputmode="numeric" />
+                  </label>
+                  <label>
+                    Max output
+                    <input id="config-max-output" name="maxOutputTokens" inputmode="numeric" />
+                  </label>
+                </div>
+                <div class="inline-actions full wrap">
+                  <button type="submit">Save Config</button>
+                  <button id="load-config-button" type="button" class="secondary">Load</button>
+                  <button id="config-reload-button" type="button" class="secondary">Restart Status</button>
+                  <button id="runtime-restart-button" type="button" class="secondary">Restart Runtime</button>
+                </div>
+                <p id="config-restart-status" class="status-line"></p>
+              </form>
+            </section>
           </section>
-          <div id="events" class="events"></div>
-        </aside>
-      </main>
+        </div>
+      </aside>
     </div>
     <script src="/app/app.js" type="module"></script>
   </body>

@@ -10,6 +10,7 @@ const state = {
   streamingMessage: null,
   deferredInstallPrompt: null,
   selectedArtifactId: null,
+  activePanel: "work",
 };
 
 const els = {
@@ -105,6 +106,9 @@ const els = {
   messageInput: document.querySelector("#message-input"),
   sendButton: document.querySelector("#send-button"),
   clearButton: document.querySelector("#clear-button"),
+  panelButtons: Array.from(document.querySelectorAll("[data-panel-target]")),
+  dockTabs: Array.from(document.querySelectorAll(".dock-tab")),
+  dockPanels: Array.from(document.querySelectorAll(".dock-panel")),
 };
 
 function defaultSessionKey() {
@@ -142,6 +146,21 @@ function updateSessionLabel() {
   els.sessionLabel.textContent = els.sessionKey.value.trim() || defaultSessionKey();
 }
 
+function showPanel(name, { log = true } = {}) {
+  state.activePanel = name;
+  for (const panel of els.dockPanels) {
+    const active = panel.dataset.panel === name;
+    panel.hidden = !active;
+    panel.classList.toggle("active", active);
+  }
+  for (const button of els.dockTabs) {
+    const active = button.dataset.panelTarget === name;
+    button.classList.toggle("active", active);
+    button.setAttribute("aria-selected", active ? "true" : "false");
+  }
+  if (log) addEvent("panel_opened", { panel: name });
+}
+
 function headers() {
   const token = els.token.value.trim();
   return {
@@ -158,12 +177,27 @@ function authHeaders() {
 }
 
 function addMessage(role, text, extraClass = "") {
+  els.messages.querySelector(".empty-chat")?.remove();
   const node = document.createElement("div");
   node.className = `message ${role} ${extraClass}`.trim();
   node.textContent = text;
   els.messages.appendChild(node);
   node.scrollIntoView({ block: "end" });
   return node;
+}
+
+function restoreEmptyChat() {
+  els.messages.textContent = "";
+  const node = document.createElement("section");
+  node.className = "empty-chat";
+  const icon = document.createElement("div");
+  icon.className = "empty-icon";
+  icon.setAttribute("aria-hidden", "true");
+  icon.innerHTML = `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M8.625 12a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Zm0 0H8.25m4.125 0a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Zm0 0H12m4.125 0a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Zm0 0h-.375M21 12c0 4.556-4.03 8.25-9 8.25a9.764 9.764 0 0 1-2.555-.337A5.972 5.972 0 0 1 5.41 20.97a5.969 5.969 0 0 1-.474-.065 4.48 4.48 0 0 0 .978-2.025c.09-.457-.133-.901-.467-1.226C3.93 16.178 3 14.189 3 12c0-4.556 4.03-8.25 9-8.25s9 3.694 9 8.25Z" /></svg>`;
+  const title = document.createElement("p");
+  title.textContent = "Start a conversation";
+  node.append(icon, title);
+  els.messages.appendChild(node);
 }
 
 function appendAssistantText(text) {
@@ -1107,6 +1141,14 @@ els.installButton.addEventListener("click", async () => {
   addEvent("install_prompt", { outcome: choice?.outcome || "unknown" });
 });
 
+for (const button of els.panelButtons) {
+  button.addEventListener("click", () => {
+    const target = button.dataset.panelTarget;
+    if (!target) return;
+    showPanel(target);
+  });
+}
+
 els.loadConfigButton.addEventListener("click", () => {
   void loadAppConfig().catch((error) =>
     addEvent("config_error", { message: String(error.message || error) }),
@@ -1268,7 +1310,7 @@ els.deleteRuleButton.addEventListener("click", () => {
 els.sessionKey.addEventListener("input", updateSessionLabel);
 
 els.clearButton.addEventListener("click", () => {
-  els.messages.textContent = "";
+  restoreEmptyChat();
   els.events.textContent = "";
   state.eventCount = 0;
   state.streamingMessage = null;
@@ -1299,6 +1341,7 @@ els.messageForm.addEventListener("submit", async (event) => {
 });
 
 loadSettings();
+showPanel("work", { log: false });
 addEvent("app_ready", {
   agentUrl: els.agentUrl.value,
   sessionKey: els.sessionKey.value,
