@@ -184,6 +184,40 @@ describe("HttpServer /v1/app settings routes", () => {
     });
   });
 
+  it("reports unsupported runtime restart when no supervisor command is configured", async () => {
+    vi.stubEnv("MAGI_AGENT_RESTART_COMMAND", "");
+
+    const res = await requestJson(`http://127.0.0.1:${port}/v1/app/runtime/restart`, {
+      method: "POST",
+      token: "local-token",
+      body: {},
+    });
+
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({
+      ok: false,
+      restartSupported: false,
+      restartRequired: true,
+    });
+  });
+
+  it("schedules a supervisor restart command when explicitly configured", async () => {
+    vi.stubEnv("MAGI_AGENT_RESTART_COMMAND", "node -e \"process.exit(0)\"");
+
+    const res = await requestJson(`http://127.0.0.1:${port}/v1/app/runtime/restart`, {
+      method: "POST",
+      token: "local-token",
+      body: {},
+    });
+
+    expect(res.status).toBe(202);
+    expect(res.body).toMatchObject({
+      ok: true,
+      restartSupported: true,
+      scheduled: true,
+    });
+  });
+
   it("creates, lists, reads, and deletes workspace harness rules", async () => {
     const put = await requestJson(
       `http://127.0.0.1:${port}/v1/app/harness-rules/file-delivery.md`,

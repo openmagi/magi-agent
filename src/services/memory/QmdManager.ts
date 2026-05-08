@@ -1,4 +1,5 @@
 import { execFile as execFileCb } from "node:child_process";
+import fs from "node:fs/promises";
 import { promisify } from "node:util";
 import path from "node:path";
 
@@ -20,6 +21,7 @@ export interface QmdSearchOpts {
 export class QmdManager {
   private ready = false;
   private readonly memoryDir: string;
+  private readonly knowledgeDir: string;
   private readonly maxReadConcurrency = 2;
   private activeReads = 0;
   private writerActive = false;
@@ -30,6 +32,7 @@ export class QmdManager {
     private readonly vectorEnabled: boolean,
   ) {
     this.memoryDir = path.join(workspaceRoot, "memory");
+    this.knowledgeDir = path.join(workspaceRoot, "knowledge");
   }
 
   isReady(): boolean {
@@ -39,8 +42,11 @@ export class QmdManager {
   async start(): Promise<void> {
     try {
       await this.withWriteSlot(async () => {
-        // Register memory collection (silent fail if exists)
+        await fs.mkdir(this.memoryDir, { recursive: true });
+        await fs.mkdir(this.knowledgeDir, { recursive: true });
+        // Register local workspace collections (silent fail if already present)
         await this.exec(["collection", "add", this.memoryDir, "--name", "memory"]).catch(() => {});
+        await this.exec(["collection", "add", this.knowledgeDir, "--name", "knowledge"]).catch(() => {});
         // Initial index build
         await this.exec(["update"]);
         if (this.vectorEnabled) {

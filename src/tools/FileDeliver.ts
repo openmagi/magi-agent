@@ -1,4 +1,5 @@
 import fs from "node:fs/promises";
+import crypto from "node:crypto";
 import path from "node:path";
 import type { Tool, ToolContext, ToolResult } from "../Tool.js";
 import type { ChannelDeliveryReceipt } from "../channels/ChannelAdapter.js";
@@ -9,6 +10,7 @@ import type {
   DeliveryTarget,
   OutputArtifactRecord,
 } from "../output/outputTypes.js";
+import { writeLocalKnowledgeFile } from "../knowledge/LocalKnowledgeBase.js";
 import { errorResult } from "../util/toolResult.js";
 
 export interface FileDeliverInput {
@@ -102,6 +104,40 @@ function toTargets(target: FileDeliverInput["target"]): DeliveryTarget[] {
   return target === "both" ? ["chat", "kb"] : [target];
 }
 
+function safeKbFilename(filename: string, mimeType: string): string {
+  const base = path.basename(filename).replace(/[^\p{L}\p{N}._-]+/gu, "-");
+  const ext = path.extname(base).toLowerCase();
+  if ([".md", ".mdx", ".txt", ".json", ".csv", ".tsv", ".yaml", ".yml", ".html"].includes(ext)) {
+    return base || "artifact.md";
+  }
+  const stem = base.replace(/\.[^.]+$/, "") || "artifact";
+  if (mimeType.startsWith("text/") || mimeType === "application/json") {
+    return `${stem}.txt`;
+  }
+  return `${stem}.md`;
+}
+
+function bytesForLocalKb(artifact: OutputArtifactRecord, bytes: Uint8Array): string {
+  const ext = path.extname(artifact.filename).toLowerCase();
+  if (
+    artifact.mimeType.startsWith("text/") ||
+    artifact.mimeType === "application/json" ||
+    [".md", ".mdx", ".txt", ".json", ".csv", ".tsv", ".yaml", ".yml", ".html"].includes(ext)
+  ) {
+    return Buffer.from(bytes).toString("utf8");
+  }
+  return [
+    `# ${artifact.title || artifact.filename}`,
+    "",
+    "This binary artifact was delivered to the local Magi workspace KB.",
+    "",
+    `- Filename: ${artifact.filename}`,
+    `- MIME type: ${artifact.mimeType || "application/octet-stream"}`,
+    `- Workspace path: ${artifact.workspacePath}`,
+    `- Source tool: ${artifact.createdByTool || "unknown"}`,
+  ].join("\n");
+}
+
 async function readArtifactBytes(
   workspaceRoot: string,
   artifact: OutputArtifactRecord,
@@ -134,6 +170,13 @@ async function deliverToChat(
         ? `${sourceChannel.type}:${sourceChannel.channelId}:${receipt.messageId}`
         : `${sourceChannel.type}:${sourceChannel.channelId}`,
       ...(receipt.messageId ? { providerMessageId: receipt.messageId } : {}),
+    };
+  }
+
+  if (!deps.chatProxyUrl.trim()) {
+    return {
+      externalId: `workspace:${artifact.workspacePath}`,
+      marker: `[attachment:${crypto.randomUUID()}:${artifact.filename}]`,
     };
   }
 
@@ -186,6 +229,18 @@ async function deliverToKb(
   ctx: ToolContext,
 ): Promise<{ externalId: string; marker?: string; providerMessageId?: string }> {
   const collection = input.kb?.collection || "artifacts";
+  if (!deps.chatProxyUrl.trim()) {
+    const filename = safeKbFilename(artifact.filename, artifact.mimeType);
+    const written = await writeLocalKnowledgeFile(
+      deps.workspaceRoot,
+      path.posix.join(collection, filename),
+      bytesForLocalKb(artifact, bytes),
+    );
+    if (!written) {
+      throw new Error(`local KB write failed for ${collection}/${filename}`);
+    }
+    return { externalId: written.path };
+  }
   const response = await (deps.fetchImpl ?? fetch)(
     `${deps.chatProxyUrl.replace(/\/$/, "")}/v1/integrations/knowledge-write/upload-file`,
     {

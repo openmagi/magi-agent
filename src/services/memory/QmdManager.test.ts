@@ -107,6 +107,29 @@ describe("QmdManager", () => {
       expect(argSets.some((a) => a.includes("update"))).toBe(true);
     });
 
+    it("registers both memory and workspace knowledge collections", async () => {
+      succeedWith();
+      const mgr = new QmdManager(WORKSPACE, false);
+
+      await mgr.start();
+
+      const argSets = mockExecFile.mock.calls.map((c) => c[1] as string[]);
+      expect(argSets).toContainEqual([
+        "collection",
+        "add",
+        MEMORY_DIR,
+        "--name",
+        "memory",
+      ]);
+      expect(argSets).toContainEqual([
+        "collection",
+        "add",
+        path.join(WORKSPACE, "knowledge"),
+        "--name",
+        "knowledge",
+      ]);
+    });
+
     it("also runs embed when vectorEnabled=true", async () => {
       succeedWith();
       const mgr = new QmdManager(WORKSPACE, true);

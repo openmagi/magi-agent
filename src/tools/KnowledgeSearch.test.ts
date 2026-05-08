@@ -37,6 +37,69 @@ afterEach(async () => {
 });
 
 describe("KnowledgeSearch", () => {
+  it("uses the workspace knowledge directory without an external kb-search.sh", async () => {
+    const root = await makeRoot();
+    await fs.mkdir(path.join(root, "knowledge", "reports"), { recursive: true });
+    await fs.writeFile(
+      path.join(root, "knowledge", "reports", "runtime-proof.md"),
+      [
+        "# Runtime Proof",
+        "",
+        "Magi records acceptance criteria, verification evidence, and delivery state.",
+      ].join("\n"),
+      "utf8",
+    );
+    const tool = makeKnowledgeSearchTool({ name: "KnowledgeSearch" });
+
+    const result = await tool.execute(
+      { mode: "search", collection: "reports", query: "verification delivery", limit: 5 },
+      ctx(root),
+    );
+
+    expect(result.status).toBe("ok");
+    const payload = JSON.parse(result.output ?? "{}") as {
+      results: Array<{ path: string; object_key_converted: string; snippet: string }>;
+    };
+    expect(payload.results[0]).toMatchObject({
+      path: "knowledge/reports/runtime-proof.md",
+      object_key_converted: "knowledge/reports/runtime-proof.md",
+    });
+    expect(payload.results[0]?.snippet).toContain("verification evidence");
+  });
+
+  it("lists and reads local workspace knowledge documents", async () => {
+    const root = await makeRoot();
+    await fs.mkdir(path.join(root, "knowledge", "guides"), { recursive: true });
+    await fs.writeFile(
+      path.join(root, "knowledge", "guides", "local-models.md"),
+      "# Local Models\nUse Ollama or LM Studio.",
+      "utf8",
+    );
+    const tool = makeKnowledgeSearchTool({ name: "knowledge-search" });
+
+    const documents = await tool.execute(
+      { mode: "documents", collection: "guides" },
+      ctx(root),
+    );
+    expect(documents.status).toBe("ok");
+    expect(JSON.parse(documents.output ?? "{}")).toMatchObject({
+      documents: [
+        {
+          filename: "local-models.md",
+          collection: "guides",
+          object_key_converted: "knowledge/guides/local-models.md",
+        },
+      ],
+    });
+
+    const content = await tool.execute(
+      { mode: "get", objectKey: "knowledge/guides/local-models.md" },
+      ctx(root),
+    );
+    expect(content.status).toBe("ok");
+    expect(content.output).toContain("Use Ollama or LM Studio.");
+  });
+
   it("runs collection-scoped search through kb-search.sh", async () => {
     const root = await makeRoot();
     const calls: string[][] = [];

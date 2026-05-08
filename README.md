@@ -118,6 +118,7 @@ evidence, and deterministic evidence through the turn.
 | **Coding work discipline** | Workspace snapshots, file-edit provenance, `TestRun` evidence, and goal-progress checks keep coding tasks from finishing on unverified claims. |
 | **Replayable transcripts** | Tool calls, tool results, control events, compaction boundaries, and canonical assistant messages are persisted for restart-safe replay. |
 | **Hipocampus memory** | A layered memory system with root/daily/weekly/monthly compaction and qmd-backed recall. |
+| **Local workspace KB** | Open-source deployments use `workspace/knowledge` as the built-in Knowledge Base, searchable through `KnowledgeSearch` and editable from Magi App. |
 | **User Harness Rules** | Install Markdown rules that become runtime checks, including required tools, required tool input patterns, LLM verifiers, and blockers. |
 | **Native delivery path** | Documents, spreadsheets, and workspace files can be generated, registered, and delivered back through supported channels. |
 | **Child agents** | Spawn background agents with bounded tools, workspace isolation, and result delivery. |
@@ -132,7 +133,7 @@ Magi ships with 30+ native tools and runtime subsystems:
 - **Workspace tools:** `FileRead`, `FileWrite`, `FileEdit`, `Glob`, `Grep`, `Bash`, `CodeWorkspace`
 - **Web and browser:** `WebSearch`, `WebFetch`, `Browser`, `SocialBrowser`
 - **Deterministic workbench:** `Clock`, `DateRange`, `Calculation`
-- **Knowledge and memory:** `KnowledgeSearch`, Hipocampus recall, qmd indexing
+- **Knowledge and memory:** `KnowledgeSearch`, local `workspace/knowledge`, Hipocampus recall, qmd indexing
 - **Generated outputs:** `DocumentWrite`, `SpreadsheetWrite`, `FileDeliver`, `FileSend`
 - **File delivery:** registered artifacts and direct workspace files, including source files such as `.py`, `.ts`, `.js`, `.css`, `.yaml`, and `.rpy`
 - **Artifacts:** `ArtifactCreate`, `ArtifactRead`, `ArtifactList`, `ArtifactUpdate`, `ArtifactDelete`
@@ -140,7 +141,7 @@ Magi ships with 30+ native tools and runtime subsystems:
 - **Planning and control:** `EnterPlanMode`, `ExitPlanMode`, `AskUserQuestion`, `TaskBoard`
 - **Automation:** `CronCreate`, `CronList`, `CronUpdate`, `CronDelete`
 - **Discipline:** `CommitCheckpoint`, `TestRun`, execution contracts, verification evidence gates, goal-progress gates
-- **Skills:** workspace `skills/` loading plus `POST /v1/admin/skills/reload`
+- **Skills:** workspace `skills/` loading plus `POST /v1/app/skills/reload`
 
 Optional dependencies enable richer formats and rendering paths, including DOCX,
 PDF, HWPX, XLSX, qmd, and Playwright-backed browser work.
@@ -447,6 +448,7 @@ The app currently uses these local runtime endpoints:
 | `GET /v1/app/runtime` | Aggregate snapshot for sessions, tasks, crons, artifacts, tools, and skills. |
 | `GET /v1/app/sessions` | Live session metadata, permission posture, and budget counters. |
 | `GET /v1/app/transcript?sessionKey=...` | Bounded committed transcript replay for a session. |
+| `GET /v1/app/evidence?sessionKey=...` | Turn-grouped runtime proof: tools, verification evidence, delivery evidence, and generated artifacts. |
 | `GET /v1/app/tasks` | Background child-agent task list. |
 | `GET /v1/app/tasks/:taskId` | Background task record. |
 | `GET /v1/app/tasks/:taskId/output` | Background task output/error/duration. |
@@ -462,14 +464,20 @@ The app currently uses these local runtime endpoints:
 | `POST /v1/app/skills/reload` | Reloads workspace skills for the running process. |
 | `GET /v1/app/workspace?path=...` | Lists files under the configured workspace root. |
 | `GET /v1/app/workspace/file?path=...` | Reads bounded text content from a workspace file. |
+| `GET /v1/app/workspace/download?path=...` | Downloads a workspace file for local app delivery. |
 | `GET /v1/app/memory` | Lists Hipocampus memory files and status. |
 | `GET /v1/app/memory/file?path=...` | Reads bounded text content from a memory file. |
 | `GET /v1/app/memory/search?q=...` | Searches Hipocampus/qmd memory. |
 | `POST /v1/app/memory/compact` | Runs Hipocampus compaction. |
 | `POST /v1/app/memory/reindex` | Rebuilds the qmd memory index. |
+| `GET /v1/app/knowledge` | Lists local workspace KB collections and documents under `workspace/knowledge`. |
+| `GET /v1/app/knowledge/search?q=...` | Searches the local workspace KB. |
+| `GET /v1/app/knowledge/file?path=...` | Reads a bounded local KB document. |
+| `PUT /v1/app/knowledge/file` | Writes a Markdown/text KB document and triggers qmd reindex. |
 | `GET /v1/app/config` | Sanitized provider/runtime config with secret presence only. |
 | `PUT /v1/app/config` | Writes local config using environment variable references, never raw browser-submitted secrets. |
 | `POST /v1/app/config/reload` | Reports config reload support and restart-required state. |
+| `POST /v1/app/runtime/restart` | Runs `MAGI_AGENT_RESTART_COMMAND` when configured for one-click self-host restart. |
 | `GET /v1/app/harness-rules` | Lists Markdown harness rule files in the workspace. |
 | `GET /v1/app/harness-rules/:name` | Reads one Markdown harness rule. |
 | `PUT /v1/app/harness-rules/:name` | Writes one Markdown harness rule. |
@@ -478,7 +486,9 @@ The app currently uses these local runtime endpoints:
 These endpoints require `Authorization: Bearer $MAGI_AGENT_SERVER_TOKEN` when
 `server.gatewayToken` is configured. Config writes update `magi-agent.yaml`;
 restart the runtime for provider/model changes to take effect in the current
-process. For remote or shared deployments, read the
+process. To enable the Restart Runtime button, run Magi under a supervisor and
+set `MAGI_AGENT_RESTART_COMMAND`, for example
+`systemctl --user restart magi-agent`. For remote or shared deployments, read the
 [self-host hardening guide](docs/SELF-HOST-HARDENING.md) before exposing the
 runtime beyond localhost.
 
@@ -662,6 +672,33 @@ Common built-in gates include:
 | `cronMetaOrchestrator` | Keeps scheduled parent turns in a meta-orchestration role. |
 | `cronDeliverySafety` | Prevents ambiguous or direct channel delivery from cron worker paths. |
 | `userHarnessRules` | Enforces operator-installed Markdown rules. |
+
+## Local Knowledge Base
+
+Magi Cloud can attach managed knowledge systems. The open-source runtime keeps
+that surface local and inspectable: put Markdown, text, CSV, JSON, YAML, or HTML
+files under `./workspace/knowledge`.
+
+```text
+workspace/
+  knowledge/
+    reports/
+      q2-brief.md
+    runbooks/
+      deployment-checklist.md
+```
+
+`KnowledgeSearch` searches this directory by default, without requiring an
+external `kb-search.sh` service. If qmd is installed, startup also registers both
+`memory` and `knowledge` collections so reindexing covers durable memory and the
+local KB. `FileDeliver(target="kb")` writes to `workspace/knowledge` when no
+external knowledge-write endpoint is configured.
+
+Magi App exposes the same KB through the Knowledge Base panel: list collections,
+search, open files, and write new Markdown documents. For custom hosted
+deployments that still want an external KB bridge, set
+`MAGI_KB_SEARCH_COMMAND` or `CORE_AGENT_KB_SEARCH_COMMAND` to the command that
+implements the legacy `kb-search.sh` argument contract.
 
 ## User Harness Rules
 

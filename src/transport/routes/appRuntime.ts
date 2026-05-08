@@ -8,6 +8,18 @@ import type { TranscriptEntry } from "../../storage/Transcript.js";
 import type { Tool } from "../../Tool.js";
 import type { ChannelRef, ChannelType } from "../../util/types.js";
 import {
+  classifyEvidence,
+  transcriptEvidenceForTurn,
+  type EvidenceItem,
+} from "../../verification/VerificationEvidence.js";
+import {
+  listLocalKnowledgeCollections,
+  listLocalKnowledgeDocuments,
+  readLocalKnowledgeFile,
+  searchLocalKnowledge,
+  writeLocalKnowledgeFile,
+} from "../../knowledge/LocalKnowledgeBase.js";
+import {
   authorizeBearer,
   clampLimit,
   parseUrl,
@@ -121,6 +133,30 @@ function safeDownloadName(value: string): string {
   return base || "artifact.md";
 }
 
+function workspaceDownloadMimeType(filePath: string): string {
+  const ext = path.extname(filePath).toLowerCase();
+  const types: Record<string, string> = {
+    ".md": "text/markdown; charset=utf-8",
+    ".txt": "text/plain; charset=utf-8",
+    ".json": "application/json; charset=utf-8",
+    ".csv": "text/csv; charset=utf-8",
+    ".tsv": "text/tab-separated-values; charset=utf-8",
+    ".html": "text/html; charset=utf-8",
+    ".pdf": "application/pdf",
+    ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    ".pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    ".hwpx": "application/hwp+zip",
+    ".png": "image/png",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".gif": "image/gif",
+    ".webp": "image/webp",
+    ".zip": "application/zip",
+  };
+  return types[ext] ?? "application/octet-stream";
+}
+
 function taskOutputSnapshot(task: Record<string, unknown>) {
   const startedAt = typeof task.startedAt === "number" ? task.startedAt : Date.now();
   const finishedAt = typeof task.finishedAt === "number" ? task.finishedAt : Date.now();
@@ -219,6 +255,223 @@ function artifactSnapshot(artifact: ArtifactMeta) {
     ...(artifact.importedFromArtifactId
       ? { importedFromArtifactId: artifact.importedFromArtifactId }
       : {}),
+  };
+}
+
+function parseJsonRecord(text: string | undefined): Record<string, unknown> | null {
+  if (!text) return null;
+  try {
+    const parsed = JSON.parse(text) as unknown;
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? parsed as Record<string, unknown>
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+function stringValue(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim() ? value : undefined;
+}
+
+function commandFromEvidence(item: EvidenceItem): string | undefined {
+  if (!item.input || typeof item.input !== "object" || Array.isArray(item.input)) {
+    return undefined;
+  }
+  return stringValue((item.input as Record<string, unknown>).command);
+}
+
+function isSuccessfulEvidence(item: EvidenceItem): boolean {
+  if (item.isError === true) return false;
+  return !item.status || item.status === "ok" || item.status === "success" || item.status === "completed";
+}
+
+function resultForToolUse(
+  transcript: ReadonlyArray<TranscriptEntry>,
+  turnId: string,
+): Map<string, Extract<TranscriptEntry, { kind: "tool_result" }>> {
+  const out = new Map<string, Extract<TranscriptEntry, { kind: "tool_result" }>>();
+  for (const entry of transcript) {
+    if (entry.kind === "tool_result" && entry.turnId === turnId) {
+      out.set(entry.toolUseId, entry);
+    }
+  }
+  return out;
+}
+
+function deliveryEvidenceFromResult(
+  output: string | undefined,
+): Array<{
+  target?: string;
+  status?: string;
+  externalId?: string;
+  marker?: string;
+  providerMessageId?: string;
+  attemptCount?: number;
+}> {
+  const parsed = parseJsonRecord(output);
+  const deliveries = parsed?.deliveries;
+  if (!Array.isArray(deliveries)) return [];
+  return deliveries.flatMap((item) => {
+    if (!item || typeof item !== "object" || Array.isArray(item)) return [];
+    const record = item as Record<string, unknown>;
+    return [{
+      target: stringValue(record.target),
+      status: stringValue(record.status),
+      externalId: stringValue(record.externalId),
+      marker: stringValue(record.marker),
+      providerMessageId: stringValue(record.providerMessageId),
+      attemptCount:
+        typeof record.attemptCount === "number" ? record.attemptCount : undefined,
+    }];
+  });
+}
+
+function artifactEvidenceFromResult(
+  output: string | undefined,
+): {
+  artifactId?: string;
+  filename?: string;
+  workspacePath?: string;
+  path?: string;
+} | null {
+  const parsed = parseJsonRecord(output);
+  if (!parsed) return null;
+  const meta = parsed.meta && typeof parsed.meta === "object" && !Array.isArray(parsed.meta)
+    ? parsed.meta as Record<string, unknown>
+    : {};
+  const artifactId = stringValue(parsed.artifactId) ?? stringValue(meta.artifactId);
+  const filename = stringValue(parsed.filename) ?? stringValue(meta.filename);
+  const workspacePath =
+    stringValue(parsed.workspacePath) ?? stringValue(parsed.path) ?? stringValue(meta.path);
+  if (!artifactId && !filename && !workspacePath) return null;
+  return {
+    ...(artifactId ? { artifactId } : {}),
+    ...(filename ? { filename } : {}),
+    ...(workspacePath ? { workspacePath, path: workspacePath } : {}),
+  };
+}
+
+function buildEvidenceProjection(
+  transcript: ReadonlyArray<TranscriptEntry>,
+  limit: number,
+) {
+  const turnIds: string[] = [];
+  for (const entry of transcript) {
+    if (!("turnId" in entry) || !entry.turnId) continue;
+    if (!turnIds.includes(entry.turnId)) turnIds.push(entry.turnId);
+  }
+
+  return turnIds.slice(-limit).map((turnId) => {
+    const entries = transcript.filter((entry) => "turnId" in entry && entry.turnId === turnId);
+    const results = resultForToolUse(transcript, turnId);
+    const evidence = transcriptEvidenceForTurn(transcript, turnId);
+    const classification = classifyEvidence(evidence);
+    const tools: Array<{
+      name: string;
+      toolUseId: string;
+      status?: string;
+      inputPreview?: string;
+      outputPreview?: string;
+    }> = [];
+    const deliveries: ReturnType<typeof deliveryEvidenceFromResult> = [];
+    const artifacts: Array<NonNullable<ReturnType<typeof artifactEvidenceFromResult>> & { tool: string }> = [];
+
+    for (const entry of entries) {
+      if (entry.kind !== "tool_call") continue;
+      const result = results.get(entry.toolUseId);
+      tools.push({
+        name: entry.name,
+        toolUseId: entry.toolUseId,
+        ...(result?.status ? { status: result.status } : {}),
+        inputPreview: preview(entry.input, 500),
+        outputPreview: preview(result?.output, 500),
+      });
+      if (entry.name === "FileDeliver") {
+        deliveries.push(...deliveryEvidenceFromResult(result?.output));
+      }
+      if (
+        entry.name === "DocumentWrite" ||
+        entry.name === "SpreadsheetWrite" ||
+        entry.name === "ArtifactCreate" ||
+        entry.name === "ArtifactUpdate"
+      ) {
+        const artifact = artifactEvidenceFromResult(result?.output);
+        if (artifact) artifacts.push({ ...artifact, tool: entry.name });
+      }
+    }
+
+    const verification = evidence
+      .filter((item) => isSuccessfulEvidence(item) && classifyEvidence([item]).verification)
+      .map((item) => ({
+        tool: item.tool,
+        status: item.status,
+        command: commandFromEvidence(item),
+        outputPreview: preview(item.output, 500),
+      }));
+
+    return {
+      turnId,
+      startedAt: entries[0]?.ts,
+      endedAt: entries[entries.length - 1]?.ts,
+      userPreview: preview(
+        entries.find((entry) => entry.kind === "user_message") &&
+          (entries.find((entry) => entry.kind === "user_message") as Extract<TranscriptEntry, { kind: "user_message" }>).text,
+        500,
+      ),
+      assistantPreview: preview(
+        entries.filter((entry) => entry.kind === "assistant_text").at(-1) &&
+          (entries.filter((entry) => entry.kind === "assistant_text").at(-1) as Extract<TranscriptEntry, { kind: "assistant_text" }>).text,
+        500,
+      ),
+      classification,
+      tools,
+      verification,
+      deliveries,
+      artifacts,
+      committed: entries.some((entry) => entry.kind === "turn_committed"),
+      aborted: entries.some((entry) => entry.kind === "turn_aborted"),
+    };
+  });
+}
+
+function knowledgeDocumentSnapshot(document: {
+  collection: string;
+  filename: string;
+  title: string;
+  path: string;
+  objectKey: string;
+  sizeBytes: number;
+  mtimeMs: number;
+}) {
+  return {
+    collection: document.collection,
+    filename: document.filename,
+    title: document.title,
+    path: document.path,
+    objectKey: document.objectKey,
+    sizeBytes: document.sizeBytes,
+    mtimeMs: document.mtimeMs,
+  };
+}
+
+function knowledgeResultSnapshot(result: {
+  collection: string;
+  filename: string;
+  title: string;
+  path: string;
+  objectKey: string;
+  score: number;
+  snippet: string;
+}) {
+  return {
+    collection: result.collection,
+    filename: result.filename,
+    title: result.title,
+    path: result.path,
+    objectKey: result.objectKey,
+    score: result.score,
+    snippet: result.snippet,
   };
 }
 
@@ -571,6 +824,35 @@ async function handleTranscript(
   });
 }
 
+async function handleEvidence(
+  req: IncomingMessage,
+  res: ServerResponse,
+  _match: RegExpMatchArray,
+  ctx: HttpServerCtx,
+): Promise<void> {
+  if (!authorizeBearer(req, res, ctx)) return;
+  const url = parseUrl(req.url);
+  const sessionKey = url.searchParams.get("sessionKey");
+  if (!sessionKey) {
+    writeJson(res, 400, { error: "missing_session_key" });
+    return;
+  }
+  const session = ctx.agent.getSession(sessionKey);
+  if (!session) {
+    writeJson(res, 404, { error: "not_found" });
+    return;
+  }
+  const limit = clampLimit(url.searchParams.get("limit"), 1, 50, 20);
+  const transcript = await session.transcript.readCommitted();
+  const turns = buildEvidenceProjection(transcript, limit);
+  writeJson(res, 200, {
+    ok: true,
+    sessionKey,
+    count: turns.length,
+    turns,
+  });
+}
+
 async function handleTasks(
   req: IncomingMessage,
   res: ServerResponse,
@@ -739,6 +1021,42 @@ async function handleWorkspaceFile(
   }
 }
 
+async function handleWorkspaceDownload(
+  req: IncomingMessage,
+  res: ServerResponse,
+  _match: RegExpMatchArray,
+  ctx: HttpServerCtx,
+): Promise<void> {
+  if (!authorizeBearer(req, res, ctx)) return;
+  const url = parseUrl(req.url);
+  const resolved = resolveWorkspacePath(ctx, url.searchParams.get("path"));
+  if (!resolved) {
+    writeJson(res, 400, { error: "invalid_path" });
+    return;
+  }
+  try {
+    const stat = await fs.stat(resolved.full);
+    if (!stat.isFile()) {
+      writeJson(res, 400, { error: "not_file" });
+      return;
+    }
+    const body = await fs.readFile(resolved.full);
+    const filename = safeDownloadName(path.basename(resolved.rel));
+    res.writeHead(200, {
+      "Content-Type": workspaceDownloadMimeType(resolved.full),
+      "Content-Disposition": `attachment; filename="${filename}"`,
+      "Cache-Control": "no-cache",
+    });
+    res.end(body);
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") {
+      writeJson(res, 404, { error: "not_found" });
+      return;
+    }
+    throw err;
+  }
+}
+
 async function handleMemoryList(
   req: IncomingMessage,
   res: ServerResponse,
@@ -848,6 +1166,120 @@ async function handleMemoryReindex(
   if (!authorizeBearer(req, res, ctx)) return;
   await ctx.agent.hipocampus.getQmdManager().reindex();
   writeJson(res, 200, { ok: true });
+}
+
+async function handleKnowledgeList(
+  req: IncomingMessage,
+  res: ServerResponse,
+  _match: RegExpMatchArray,
+  ctx: HttpServerCtx,
+): Promise<void> {
+  if (!authorizeBearer(req, res, ctx)) return;
+  const url = parseUrl(req.url);
+  const collection = url.searchParams.get("collection")?.trim() || undefined;
+  const [collections, documents] = await Promise.all([
+    listLocalKnowledgeCollections(ctx.agent.config.workspaceRoot),
+    listLocalKnowledgeDocuments(ctx.agent.config.workspaceRoot, collection),
+  ]);
+  writeJson(res, 200, {
+    ok: true,
+    root: "knowledge",
+    collections,
+    documents: documents.map(knowledgeDocumentSnapshot),
+  });
+}
+
+async function handleKnowledgeSearch(
+  req: IncomingMessage,
+  res: ServerResponse,
+  _match: RegExpMatchArray,
+  ctx: HttpServerCtx,
+): Promise<void> {
+  if (!authorizeBearer(req, res, ctx)) return;
+  const url = parseUrl(req.url);
+  const query = (url.searchParams.get("q") ?? "").trim();
+  if (!query) {
+    writeJson(res, 400, { error: "missing_query" });
+    return;
+  }
+  const collection = url.searchParams.get("collection")?.trim() || undefined;
+  const limit = clampLimit(url.searchParams.get("limit"), 1, 50, 10);
+  const results = await searchLocalKnowledge(ctx.agent.config.workspaceRoot, query, {
+    collection,
+    limit,
+  });
+  writeJson(res, 200, {
+    ok: true,
+    query,
+    collection: collection ?? null,
+    results: results.map(knowledgeResultSnapshot),
+  });
+}
+
+async function handleKnowledgeFile(
+  req: IncomingMessage,
+  res: ServerResponse,
+  _match: RegExpMatchArray,
+  ctx: HttpServerCtx,
+): Promise<void> {
+  if (!authorizeBearer(req, res, ctx)) return;
+  const url = parseUrl(req.url);
+  const rawPath = url.searchParams.get("path");
+  if (!rawPath) {
+    writeJson(res, 400, { error: "missing_path" });
+    return;
+  }
+  const maxBytes = clampLimit(
+    url.searchParams.get("maxBytes"),
+    1,
+    MAX_FILE_READ_BYTES,
+    DEFAULT_FILE_READ_BYTES,
+  );
+  try {
+    const file = await readLocalKnowledgeFile(
+      ctx.agent.config.workspaceRoot,
+      rawPath,
+      maxBytes,
+    );
+    if (!file) {
+      writeJson(res, 400, { error: "invalid_path" });
+      return;
+    }
+    writeJson(res, 200, { ok: true, ...file });
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") {
+      writeJson(res, 404, { error: "not_found" });
+      return;
+    }
+    throw err;
+  }
+}
+
+async function handleKnowledgeFilePut(
+  req: IncomingMessage,
+  res: ServerResponse,
+  _match: RegExpMatchArray,
+  ctx: HttpServerCtx,
+): Promise<void> {
+  if (!authorizeBearer(req, res, ctx)) return;
+  const body = readObject(await readJsonBody(req));
+  const rawPath = typeof body.path === "string" ? body.path : "";
+  const content = typeof body.content === "string" ? body.content : null;
+  if (!rawPath || content === null) {
+    writeJson(res, 400, { error: "missing_knowledge_file_fields" });
+    return;
+  }
+  const written = await writeLocalKnowledgeFile(
+    ctx.agent.config.workspaceRoot,
+    rawPath,
+    content,
+  );
+  if (!written) {
+    writeJson(res, 400, { error: "invalid_path" });
+    return;
+  }
+  await ctx.agent.hipocampus.getQmdManager().reindex().catch(() => {});
+  writeJson(res, 200, { ok: true, ...written });
 }
 
 async function handleTaskGet(
@@ -1063,6 +1495,7 @@ export const appRuntimeRoutes: RouteHandler[] = [
   route("GET", /^\/v1\/app\/runtime(?:\?.*)?$/, handleRuntime),
   route("GET", /^\/v1\/app\/sessions(?:\?.*)?$/, handleSessions),
   route("GET", /^\/v1\/app\/transcript(?:\?.*)?$/, handleTranscript),
+  route("GET", /^\/v1\/app\/evidence(?:\?.*)?$/, handleEvidence),
   route("GET", /^\/v1\/app\/tasks(?:\?.*)?$/, handleTasks),
   route("GET", /^\/v1\/app\/tasks\/([^/?]+)(?:\?.*)?$/, handleTaskGet),
   route("GET", /^\/v1\/app\/tasks\/([^/?]+)\/output(?:\?.*)?$/, handleTaskOutput),
@@ -1078,9 +1511,14 @@ export const appRuntimeRoutes: RouteHandler[] = [
   route("POST", /^\/v1\/app\/skills\/reload(?:\?.*)?$/, handleSkillsReload),
   route("GET", /^\/v1\/app\/workspace(?:\?.*)?$/, handleWorkspaceList),
   route("GET", /^\/v1\/app\/workspace\/file(?:\?.*)?$/, handleWorkspaceFile),
+  route("GET", /^\/v1\/app\/workspace\/download(?:\?.*)?$/, handleWorkspaceDownload),
   route("GET", /^\/v1\/app\/memory(?:\?.*)?$/, handleMemoryList),
   route("GET", /^\/v1\/app\/memory\/file(?:\?.*)?$/, handleMemoryFile),
   route("GET", /^\/v1\/app\/memory\/search(?:\?.*)?$/, handleMemorySearch),
   route("POST", /^\/v1\/app\/memory\/compact(?:\?.*)?$/, handleMemoryCompact),
   route("POST", /^\/v1\/app\/memory\/reindex(?:\?.*)?$/, handleMemoryReindex),
+  route("GET", /^\/v1\/app\/knowledge(?:\?.*)?$/, handleKnowledgeList),
+  route("GET", /^\/v1\/app\/knowledge\/search(?:\?.*)?$/, handleKnowledgeSearch),
+  route("GET", /^\/v1\/app\/knowledge\/file(?:\?.*)?$/, handleKnowledgeFile),
+  route("PUT", /^\/v1\/app\/knowledge\/file(?:\?.*)?$/, handleKnowledgeFilePut),
 ];

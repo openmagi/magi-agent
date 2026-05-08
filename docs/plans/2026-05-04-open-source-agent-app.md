@@ -148,6 +148,7 @@ bearer-token gated by the server token:
 | `/v1/app/runtime` | shipped | Aggregate sessions, tasks, crons, artifacts, tools, and skills snapshot. |
 | `/v1/app/sessions` | shipped | Live session metadata, permission posture, and budget counters. |
 | `/v1/app/transcript?sessionKey=...` | shipped | Bounded committed transcript replay. |
+| `/v1/app/evidence?sessionKey=...` | shipped | Turn-grouped runtime proof from transcript tool/results, verification, delivery, and artifact evidence. |
 | `/v1/app/tasks` | shipped | Background child-agent task list. |
 | `/v1/app/tasks/:taskId` | shipped | Individual background task record. |
 | `/v1/app/tasks/:taskId/output` | shipped | Background task output/error/duration. |
@@ -162,20 +163,24 @@ bearer-token gated by the server token:
 | `/v1/app/skills/reload` | shipped | Workspace skill reload through the app auth surface. |
 | `/v1/app/workspace` | shipped | Workspace directory listing. |
 | `/v1/app/workspace/file` | shipped | Bounded workspace file read. |
+| `/v1/app/workspace/download` | shipped | Workspace file download for local app delivery. |
 | `/v1/app/memory` | shipped | Hipocampus memory status and file listing. |
 | `/v1/app/memory/file` | shipped | Bounded memory file read. |
 | `/v1/app/memory/search` | shipped | Hipocampus/qmd recall search. |
 | `/v1/app/memory/compact` | shipped | Hipocampus compaction trigger. |
 | `/v1/app/memory/reindex` | shipped | qmd memory reindex trigger. |
+| `/v1/app/knowledge` | shipped | Local workspace KB collection and document listing. |
+| `/v1/app/knowledge/search` | shipped | Local workspace KB search. |
+| `/v1/app/knowledge/file` | shipped | Bounded KB file read/write under `workspace/knowledge`. |
 | `/v1/app/config` | shipped | Sanitized config read/write using environment variable references for secrets. |
 | `/v1/app/config/reload` | shipped | Restart-required status for config changes. |
+| `/v1/app/runtime/restart` | shipped | Optional supervisor restart command via `MAGI_AGENT_RESTART_COMMAND`. |
 | `/v1/app/harness-rules` | shipped | Markdown harness rule list/read/write/delete in the workspace. |
 
 Remaining API work:
 
 - Session create/resume controls beyond the chat-completions session-key header.
-- Rich evidence grouping for acceptance-criterion gates and delivery events.
-- Native supervisor integration for one-click process restart.
+- Rich evidence grouping for persisted acceptance-criterion gates beyond transcript-derived runtime proof.
 
 Where an endpoint does not exist yet, the app plan should drive small,
 documented runtime API additions instead of coupling the app to private hosted

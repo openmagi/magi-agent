@@ -155,6 +155,43 @@ describe("FileDeliver", () => {
     expect(pending).toEqual([]);
   });
 
+  it("records local app chat delivery when no chat proxy is configured", async () => {
+    const root = await makeRoot();
+    const registry = new OutputArtifactRegistry(root);
+    await fs.mkdir(path.join(root, "exports"), { recursive: true });
+    await fs.writeFile(path.join(root, "exports", "local-report.md"), "# Local Report");
+
+    const fetchImpl = vi.fn();
+    const tool = makeFileDeliverTool({
+      workspaceRoot: root,
+      outputRegistry: registry,
+      chatProxyUrl: "",
+      gatewayToken: "",
+      fetchImpl,
+      sleepImpl: async () => {},
+    });
+
+    const result = await tool.execute(
+      {
+        path: "exports/local-report.md",
+        target: "chat",
+      },
+      ctx(root),
+    );
+
+    expect(result.status).toBe("ok");
+    expect(result.output?.deliveries[0]).toMatchObject({
+      target: "chat",
+      status: "sent",
+      externalId: "workspace:exports/local-report.md",
+      attemptCount: 1,
+    });
+    expect(result.output?.deliveries[0]?.marker).toMatch(
+      /^\[attachment:[0-9a-f-]{36}:local-report\.md\]$/,
+    );
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
   it("sends chat delivery directly to the current Telegram or Discord channel when available", async () => {
     const root = await makeRoot();
     const registry = new OutputArtifactRegistry(root);
@@ -450,5 +487,44 @@ describe("FileDeliver", () => {
         attemptCount: 1,
       },
     ]);
+  });
+
+  it("stores KB deliveries in workspace/knowledge when no external KB is configured", async () => {
+    const root = await makeRoot();
+    const registry = new OutputArtifactRegistry(root);
+    await fs.mkdir(path.join(root, "exports"), { recursive: true });
+    await fs.writeFile(path.join(root, "exports", "runbook.md"), "# Runbook\nLocal KB body");
+
+    const tool = makeFileDeliverTool({
+      workspaceRoot: root,
+      outputRegistry: registry,
+      chatProxyUrl: "",
+      gatewayToken: "",
+      fetchImpl: vi.fn(),
+      sleepImpl: async () => {},
+    });
+
+    const result = await tool.execute(
+      {
+        path: "exports/runbook.md",
+        target: "kb",
+        kb: { collection: "ops" },
+      },
+      ctx(root),
+    );
+
+    expect(result.status).toBe("ok");
+    expect(result.output?.deliveries).toEqual([
+      {
+        target: "kb",
+        status: "sent",
+        externalId: "knowledge/ops/runbook.md",
+        marker: undefined,
+        attemptCount: 1,
+      },
+    ]);
+    await expect(
+      fs.readFile(path.join(root, "knowledge", "ops", "runbook.md"), "utf8"),
+    ).resolves.toBe("# Runbook\nLocal KB body");
   });
 });

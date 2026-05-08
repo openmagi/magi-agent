@@ -31,12 +31,16 @@ const els = {
   eventCount: document.querySelector("#event-count"),
   loadTranscriptButton: document.querySelector("#load-transcript-button"),
   transcriptList: document.querySelector("#transcript-list"),
+  loadEvidenceButton: document.querySelector("#load-evidence-button"),
+  evidenceList: document.querySelector("#evidence-list"),
+  evidenceDetail: document.querySelector("#evidence-detail"),
   openArtifactButton: document.querySelector("#open-artifact-button"),
   downloadArtifactButton: document.querySelector("#download-artifact-button"),
   artifactContent: document.querySelector("#artifact-content"),
   reloadSkillsButton: document.querySelector("#reload-skills-button"),
   workspaceForm: document.querySelector("#workspace-form"),
   workspacePath: document.querySelector("#workspace-path"),
+  downloadWorkspaceButton: document.querySelector("#download-workspace-button"),
   workspaceList: document.querySelector("#workspace-list"),
   workspaceFile: document.querySelector("#workspace-file"),
   memorySearchForm: document.querySelector("#memory-search-form"),
@@ -47,6 +51,16 @@ const els = {
   memoryList: document.querySelector("#memory-list"),
   memoryResults: document.querySelector("#memory-results"),
   memoryFile: document.querySelector("#memory-file"),
+  knowledgeSearchForm: document.querySelector("#knowledge-search-form"),
+  knowledgeCollection: document.querySelector("#knowledge-collection"),
+  knowledgeQuery: document.querySelector("#knowledge-query"),
+  loadKnowledgeButton: document.querySelector("#load-knowledge-button"),
+  knowledgeFileForm: document.querySelector("#knowledge-file-form"),
+  knowledgeFilePath: document.querySelector("#knowledge-file-path"),
+  knowledgeFileContent: document.querySelector("#knowledge-file-content"),
+  knowledgeCollections: document.querySelector("#knowledge-collections"),
+  knowledgeResults: document.querySelector("#knowledge-results"),
+  knowledgeFileView: document.querySelector("#knowledge-file-view"),
   taskControlForm: document.querySelector("#task-control-form"),
   taskControlId: document.querySelector("#task-control-id"),
   taskOutputButton: document.querySelector("#task-output-button"),
@@ -71,6 +85,7 @@ const els = {
   configMaxOutput: document.querySelector("#config-max-output"),
   loadConfigButton: document.querySelector("#load-config-button"),
   configReloadButton: document.querySelector("#config-reload-button"),
+  runtimeRestartButton: document.querySelector("#runtime-restart-button"),
   configRestartStatus: document.querySelector("#config-restart-status"),
   harnessRuleForm: document.querySelector("#harness-rule-form"),
   harnessRuleName: document.querySelector("#harness-rule-name"),
@@ -367,6 +382,48 @@ async function loadTranscript(sessionKey = els.sessionKey.value.trim() || defaul
   });
 }
 
+function evidenceBadges(turn) {
+  const parts = [];
+  if (turn.classification?.work) parts.push("work");
+  if (turn.classification?.verification) parts.push("verified");
+  if (Array.isArray(turn.deliveries) && turn.deliveries.length > 0) {
+    const sent = turn.deliveries.filter((delivery) => delivery.status === "sent").length;
+    parts.push(`${sent}/${turn.deliveries.length} delivered`);
+  }
+  if (Array.isArray(turn.artifacts) && turn.artifacts.length > 0) {
+    parts.push(`${turn.artifacts.length} artifacts`);
+  }
+  if (turn.aborted) parts.push("aborted");
+  return parts.join(" - ") || "no evidence";
+}
+
+function renderEvidence(turns) {
+  renderSnapshotList(
+    els.evidenceList,
+    turns,
+    "No evidence turns",
+    (turn) => ({
+      title: turn.turnId || "turn",
+      meta: evidenceBadges(turn),
+      detail: turn.userPreview || turn.assistantPreview || "",
+    }),
+    (turn) => {
+      els.evidenceDetail.textContent = JSON.stringify(turn, null, 2);
+    },
+  );
+}
+
+async function loadEvidence(sessionKey = els.sessionKey.value.trim() || defaultSessionKey()) {
+  const payload = await getJson(
+    `/v1/app/evidence?sessionKey=${encodeURIComponent(sessionKey)}&limit=20`,
+  );
+  renderEvidence(payload.turns || []);
+  addEvent("evidence_loaded", {
+    sessionKey: payload.sessionKey || sessionKey,
+    count: Array.isArray(payload.turns) ? payload.turns.length : 0,
+  });
+}
+
 async function openArtifact(artifactId = state.selectedArtifactId) {
   if (!artifactId) {
     const first = els.artifactsList.querySelector(".snapshot-item strong");
@@ -459,12 +516,45 @@ async function loadWorkspaceFile(pathValue) {
   const payload = await getJson(
     `/v1/app/workspace/file?path=${encodeURIComponent(pathValue)}`,
   );
+  els.workspacePath.value = payload.path || pathValue;
   els.workspaceFile.textContent = payload.content || "";
   addEvent("workspace_file_loaded", {
     path: payload.path,
     sizeBytes: payload.sizeBytes,
     truncated: payload.truncated === true,
   });
+}
+
+async function downloadWorkspaceFile(pathValue = els.workspacePath.value.trim()) {
+  if (!pathValue || pathValue === ".") throw new Error("Workspace file path is required");
+  const base = normalizeAgentUrl(els.agentUrl.value);
+  const response = await fetch(
+    `${base}/v1/app/workspace/download?path=${encodeURIComponent(pathValue)}`,
+    { headers: authHeaders() },
+  );
+  if (!response.ok) {
+    let payload = {};
+    try {
+      payload = await response.json();
+    } catch {
+      /* keep empty payload */
+    }
+    throw new Error(payload.error || response.statusText);
+  }
+  const blob = await response.blob();
+  const filename =
+    response.headers
+      .get("Content-Disposition")
+      ?.match(/filename="([^"]+)"/)?.[1] || pathValue.split("/").pop() || "download";
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = filename;
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  URL.revokeObjectURL(url);
+  addEvent("workspace_file_downloaded", { path: pathValue, filename });
 }
 
 function renderMemoryFiles(files) {
@@ -546,6 +636,113 @@ async function reindexMemory() {
   await sendJson("/v1/app/memory/reindex", "POST", {});
   await loadMemory();
   addEvent("memory_reindexed", {});
+}
+
+function renderKnowledge(payload) {
+  renderSnapshotList(
+    els.knowledgeCollections,
+    payload.collections || [],
+    "No KB collections",
+    (collection) => ({
+      title: collection.name || "collection",
+      meta: `${collection.documentCount || 0} documents - ${collection.sizeBytes || 0} bytes`,
+      detail: collection.path || "knowledge",
+    }),
+    (collection) => {
+      els.knowledgeCollection.value = collection.name === "default" ? "" : collection.name || "";
+      void loadKnowledge().catch((error) =>
+        addEvent("knowledge_error", { message: String(error.message || error) }),
+      );
+    },
+  );
+  renderSnapshotList(
+    els.knowledgeResults,
+    payload.documents || [],
+    "No KB documents",
+    (document) => ({
+      title: document.title || document.filename || "document",
+      meta: `${document.collection || "default"} - ${document.sizeBytes || 0} bytes`,
+      detail: document.path || "",
+    }),
+    (document) => {
+      void loadKnowledgeFile(document.path).catch((error) =>
+        addEvent("knowledge_error", { message: String(error.message || error) }),
+      );
+    },
+  );
+}
+
+async function loadKnowledge() {
+  const collection = els.knowledgeCollection.value.trim();
+  const payload = await getJson(
+    `/v1/app/knowledge${collection ? `?collection=${encodeURIComponent(collection)}` : ""}`,
+  );
+  renderKnowledge(payload);
+  addEvent("knowledge_loaded", {
+    collections: Array.isArray(payload.collections) ? payload.collections.length : 0,
+    documents: Array.isArray(payload.documents) ? payload.documents.length : 0,
+  });
+}
+
+async function searchKnowledge() {
+  const query = els.knowledgeQuery.value.trim();
+  if (!query) throw new Error("KB search query is required");
+  const collection = els.knowledgeCollection.value.trim();
+  const payload = await getJson(
+    `/v1/app/knowledge/search?q=${encodeURIComponent(query)}&limit=8${
+      collection ? `&collection=${encodeURIComponent(collection)}` : ""
+    }`,
+  );
+  renderSnapshotList(
+    els.knowledgeResults,
+    payload.results || [],
+    "No KB search results",
+    (result) => ({
+      title: result.title || result.filename || "result",
+      meta: `${result.collection || "default"} - score ${result.score || 0}`,
+      detail: result.snippet || result.path || "",
+    }),
+    (result) => {
+      void loadKnowledgeFile(result.path).catch((error) =>
+        addEvent("knowledge_error", { message: String(error.message || error) }),
+      );
+    },
+  );
+  addEvent("knowledge_search", {
+    query: payload.query,
+    collection: payload.collection,
+    count: Array.isArray(payload.results) ? payload.results.length : 0,
+  });
+}
+
+async function loadKnowledgeFile(pathValue) {
+  const payload = await getJson(
+    `/v1/app/knowledge/file?path=${encodeURIComponent(pathValue)}`,
+  );
+  els.knowledgeFilePath.value = payload.path || pathValue;
+  els.knowledgeFileContent.value = payload.content || "";
+  els.knowledgeFileView.textContent = payload.content || "";
+  addEvent("knowledge_file_loaded", {
+    path: payload.path,
+    sizeBytes: payload.sizeBytes,
+    truncated: payload.truncated === true,
+  });
+}
+
+async function saveKnowledgeFile() {
+  const pathValue = els.knowledgeFilePath.value.trim();
+  if (!pathValue) throw new Error("KB file path is required");
+  const payload = await sendJson("/v1/app/knowledge/file", "PUT", {
+    path: pathValue,
+    content: els.knowledgeFileContent.value,
+  });
+  els.knowledgeFilePath.value = payload.path || pathValue;
+  els.knowledgeFileView.textContent = els.knowledgeFileContent.value;
+  await loadKnowledge();
+  addEvent("knowledge_file_saved", {
+    path: payload.path || pathValue,
+    sizeBytes: payload.sizeBytes,
+  });
 }
 
 function fillCronForm(cron) {
@@ -714,6 +911,18 @@ async function reloadRuntimeConfig() {
   });
 }
 
+async function restartRuntime() {
+  const payload = await sendJson("/v1/app/runtime/restart", "POST", {});
+  els.configRestartStatus.textContent =
+    payload.scheduled === true
+      ? "Runtime restart scheduled"
+      : payload.message || "Runtime restart command is not configured";
+  addEvent("runtime_restart", {
+    restartSupported: payload.restartSupported === true,
+    scheduled: payload.scheduled === true,
+  });
+}
+
 function renderHarnessRules(rules) {
   els.harnessRulesList.textContent = "";
   if (!Array.isArray(rules) || rules.length === 0) {
@@ -782,7 +991,9 @@ async function checkRuntime() {
       await loadHarnessRules();
       await loadWorkspace();
       await loadMemory();
+      await loadKnowledge();
       await loadTranscript();
+      await loadEvidence();
     } catch (error) {
       addEvent("runtime_snapshot_error", { message: String(error.message || error) });
     }
@@ -908,9 +1119,21 @@ els.configReloadButton.addEventListener("click", () => {
   );
 });
 
+els.runtimeRestartButton.addEventListener("click", () => {
+  void restartRuntime().catch((error) =>
+    addEvent("config_error", { message: String(error.message || error) }),
+  );
+});
+
 els.loadTranscriptButton.addEventListener("click", () => {
   void loadTranscript().catch((error) =>
     addEvent("transcript_error", { message: String(error.message || error) }),
+  );
+});
+
+els.loadEvidenceButton.addEventListener("click", () => {
+  void loadEvidence().catch((error) =>
+    addEvent("evidence_error", { message: String(error.message || error) }),
   );
 });
 
@@ -939,6 +1162,12 @@ els.workspaceForm.addEventListener("submit", (event) => {
   );
 });
 
+els.downloadWorkspaceButton.addEventListener("click", () => {
+  void downloadWorkspaceFile().catch((error) =>
+    addEvent("workspace_error", { message: String(error.message || error) }),
+  );
+});
+
 els.memorySearchForm.addEventListener("submit", (event) => {
   event.preventDefault();
   void searchMemory().catch((error) =>
@@ -961,6 +1190,26 @@ els.memoryCompactButton.addEventListener("click", () => {
 els.memoryReindexButton.addEventListener("click", () => {
   void reindexMemory().catch((error) =>
     addEvent("memory_error", { message: String(error.message || error) }),
+  );
+});
+
+els.knowledgeSearchForm.addEventListener("submit", (event) => {
+  event.preventDefault();
+  void searchKnowledge().catch((error) =>
+    addEvent("knowledge_error", { message: String(error.message || error) }),
+  );
+});
+
+els.loadKnowledgeButton.addEventListener("click", () => {
+  void loadKnowledge().catch((error) =>
+    addEvent("knowledge_error", { message: String(error.message || error) }),
+  );
+});
+
+els.knowledgeFileForm.addEventListener("submit", (event) => {
+  event.preventDefault();
+  void saveKnowledgeFile().catch((error) =>
+    addEvent("knowledge_error", { message: String(error.message || error) }),
   );
 });
 
@@ -1038,6 +1287,7 @@ els.messageForm.addEventListener("submit", async (event) => {
     await sendMessage(text);
     await loadRuntimeSnapshot();
     await loadTranscript();
+    await loadEvidence();
   } catch (error) {
     finishAssistantMessage();
     addMessage("assistant", String(error.message || error), "error");

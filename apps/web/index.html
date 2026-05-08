@@ -139,6 +139,12 @@
             <div id="transcript-list" class="snapshot-list"></div>
           </section>
           <section class="settings-panel">
+            <h3>Runtime Proof</h3>
+            <button id="load-evidence-button" type="button" class="secondary compact-button">Load Evidence</button>
+            <div id="evidence-list" class="snapshot-list"></div>
+            <pre id="evidence-detail" class="code-view"></pre>
+          </section>
+          <section class="settings-panel">
             <h3>Artifact Content</h3>
             <div class="split-fields">
               <button id="open-artifact-button" type="button" class="secondary">Open Artifact</button>
@@ -154,6 +160,7 @@
                 <input id="workspace-path" name="workspacePath" value="." autocomplete="off" />
               </label>
               <button type="submit">List Files</button>
+              <button id="download-workspace-button" type="button" class="secondary">Download File</button>
             </form>
             <div id="workspace-list" class="snapshot-list"></div>
             <pre id="workspace-file" class="code-view"></pre>
@@ -173,6 +180,37 @@
             <div id="memory-list" class="snapshot-list"></div>
             <div id="memory-results" class="snapshot-list"></div>
             <pre id="memory-file" class="code-view"></pre>
+          </section>
+          <section class="settings-panel">
+            <h3>Knowledge Base</h3>
+            <form id="knowledge-search-form" class="mini-form">
+              <div class="split-fields">
+                <label>
+                  Collection
+                  <input id="knowledge-collection" name="knowledgeCollection" placeholder="reports" autocomplete="off" />
+                </label>
+                <label>
+                  Search
+                  <input id="knowledge-query" name="knowledgeQuery" autocomplete="off" />
+                </label>
+              </div>
+              <button type="submit">Search KB</button>
+              <button id="load-knowledge-button" type="button" class="secondary">Load KB</button>
+            </form>
+            <form id="knowledge-file-form" class="mini-form">
+              <label>
+                File
+                <input id="knowledge-file-path" name="knowledgeFilePath" placeholder="reports/brief.md" autocomplete="off" />
+              </label>
+              <label>
+                Markdown
+                <textarea id="knowledge-file-content" name="knowledgeFileContent" rows="7"></textarea>
+              </label>
+              <button type="submit">Save KB File</button>
+            </form>
+            <div id="knowledge-collections" class="snapshot-list"></div>
+            <div id="knowledge-results" class="snapshot-list"></div>
+            <pre id="knowledge-file-view" class="code-view"></pre>
           </section>
           <section class="settings-panel">
             <h3>Task Controls</h3>
@@ -264,6 +302,7 @@
               <button type="submit">Save Config</button>
               <button id="load-config-button" type="button" class="secondary">Load Config</button>
               <button id="config-reload-button" type="button" class="secondary">Restart Status</button>
+              <button id="runtime-restart-button" type="button" class="secondary">Restart Runtime</button>
               <p id="config-restart-status" class="status-line"></p>
             </form>
           </section>

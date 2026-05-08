@@ -1,5 +1,6 @@
 import { spawn } from "node:child_process";
 import type { Tool, ToolContext, ToolResult } from "../Tool.js";
+import { runLocalKnowledgeCommand } from "../knowledge/LocalKnowledgeBase.js";
 import { Utf8StreamCapture } from "../util/Utf8StreamCapture.js";
 import { withMagiBinPath } from "../util/shellPath.js";
 
@@ -264,7 +265,8 @@ export function buildKnowledgeSearchArgs(input: KnowledgeSearchInput): string[] 
   }
 }
 
-async function defaultRunner(
+async function externalRunner(
+  command: string,
   args: string[],
   ctx: ToolContext,
   timeoutMs: number,
@@ -272,7 +274,7 @@ async function defaultRunner(
   const cwd = ctx.spawnWorkspace?.root ?? ctx.workspaceRoot;
   const maxOutputBytes = outputLimitForArgs(args);
   return new Promise<KnowledgeSearchRunResult>((resolve) => {
-    const child = spawn("kb-search.sh", args, {
+    const child = spawn(command, args, {
       cwd,
       env: {
         ...withMagiBinPath(process.env),
@@ -329,6 +331,20 @@ async function defaultRunner(
   });
 }
 
+async function defaultRunner(
+  args: string[],
+  ctx: ToolContext,
+  timeoutMs: number,
+): Promise<KnowledgeSearchRunResult> {
+  const externalCommand =
+    process.env.MAGI_KB_SEARCH_COMMAND?.trim() ||
+    process.env.CORE_AGENT_KB_SEARCH_COMMAND?.trim();
+  if (externalCommand) {
+    return externalRunner(externalCommand, args, ctx, timeoutMs);
+  }
+  return runLocalKnowledgeCommand(args, ctx);
+}
+
 export function makeKnowledgeSearchTool(opts: {
   name?: "knowledge-search" | "KnowledgeSearch";
   runner?: KnowledgeSearchRunner;
@@ -337,7 +353,7 @@ export function makeKnowledgeSearchTool(opts: {
   return {
     name: opts.name ?? "knowledge-search",
     description:
-      "Search and inspect the user's Personal and Org Knowledge Base through kb-search.sh. Use this for /kb, uploaded documents, collection manifests, and document-backed answers.",
+      "Search and inspect the user's local workspace Knowledge Base under workspace/knowledge. Use this for /kb, uploaded documents, collection manifests, and document-backed answers.",
     inputSchema: INPUT_SCHEMA,
     permission: "read",
     dangerous: false,

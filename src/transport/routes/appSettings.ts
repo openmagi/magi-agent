@@ -1,6 +1,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import type { IncomingMessage, ServerResponse } from "node:http";
+import { spawn } from "node:child_process";
 import { parse } from "yaml";
 import {
   authorizeBearer,
@@ -207,6 +208,46 @@ async function handleReloadConfig(
   });
 }
 
+function restartCommand(): string | null {
+  const raw =
+    process.env.MAGI_AGENT_RESTART_COMMAND?.trim() ||
+    process.env.CORE_AGENT_RESTART_COMMAND?.trim() ||
+    "";
+  return raw.length > 0 ? raw : null;
+}
+
+async function handleRuntimeRestart(
+  req: IncomingMessage,
+  res: ServerResponse,
+  _match: RegExpMatchArray,
+  ctx: HttpServerCtx,
+): Promise<void> {
+  if (!authorizeBearer(req, res, ctx)) return;
+  const command = restartCommand();
+  if (!command) {
+    writeJson(res, 200, {
+      ok: false,
+      restartSupported: false,
+      restartRequired: true,
+      message:
+        "Set MAGI_AGENT_RESTART_COMMAND to enable one-click runtime restart in self-hosted deployments.",
+    });
+    return;
+  }
+
+  const child = spawn("sh", ["-lc", command], {
+    detached: true,
+    stdio: "ignore",
+    env: process.env,
+  });
+  child.unref();
+  writeJson(res, 202, {
+    ok: true,
+    restartSupported: true,
+    scheduled: true,
+  });
+}
+
 function rulesDir(ctx: HttpServerCtx): string {
   return path.join(ctx.agent.config.workspaceRoot, "harness-rules");
 }
@@ -306,6 +347,7 @@ export const appSettingsRoutes: RouteHandler[] = [
   route("GET", /^\/v1\/app\/config(?:\?.*)?$/, handleGetConfig),
   route("PUT", /^\/v1\/app\/config(?:\?.*)?$/, handlePutConfig),
   route("POST", /^\/v1\/app\/config\/reload(?:\?.*)?$/, handleReloadConfig),
+  route("POST", /^\/v1\/app\/runtime\/restart(?:\?.*)?$/, handleRuntimeRestart),
   route("GET", /^\/v1\/app\/harness-rules(?:\?.*)?$/, handleListRules),
   route("GET", /^\/v1\/app\/harness-rules\/([^/?]+)(?:\?.*)?$/, handleGetRule),
   route("PUT", /^\/v1\/app\/harness-rules\/([^/?]+)(?:\?.*)?$/, handlePutRule),

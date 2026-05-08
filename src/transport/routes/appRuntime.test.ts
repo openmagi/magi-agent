@@ -122,6 +122,87 @@ function makeFakeAgent(workspaceRoot: string): FakeAgent {
       readCommitted: async () => [
         {
           kind: "user_message",
+          ts: 1_700_000_000_000,
+          turnId: "turn-0",
+          text: "write and deliver the report",
+        },
+        {
+          kind: "tool_call",
+          ts: 1_700_000_000_000,
+          turnId: "turn-0",
+          toolUseId: "tool-doc",
+          name: "DocumentWrite",
+          input: { filename: "report.md", title: "Report" },
+        },
+        {
+          kind: "tool_result",
+          ts: 1_700_000_000_000,
+          turnId: "turn-0",
+          toolUseId: "tool-doc",
+          status: "ok",
+          output: JSON.stringify({
+            artifactId: "artifact-output-1",
+            filename: "report.md",
+            workspacePath: "outputs/report.md",
+          }),
+        },
+        {
+          kind: "tool_call",
+          ts: 1_700_000_000_000,
+          turnId: "turn-0",
+          toolUseId: "tool-test",
+          name: "TestRun",
+          input: { command: "npm run lint" },
+        },
+        {
+          kind: "tool_result",
+          ts: 1_700_000_000_000,
+          turnId: "turn-0",
+          toolUseId: "tool-test",
+          status: "ok",
+          output: JSON.stringify({ exitCode: 0 }),
+        },
+        {
+          kind: "tool_call",
+          ts: 1_700_000_000_000,
+          turnId: "turn-0",
+          toolUseId: "tool-deliver",
+          name: "FileDeliver",
+          input: { artifactId: "artifact-output-1", target: "chat" },
+        },
+        {
+          kind: "tool_result",
+          ts: 1_700_000_000_000,
+          turnId: "turn-0",
+          toolUseId: "tool-deliver",
+          status: "ok",
+          output: JSON.stringify({
+            deliveries: [
+              {
+                target: "chat",
+                status: "sent",
+                externalId: "att-1",
+                marker: "[attachment:att-1:report.md]",
+                attemptCount: 1,
+              },
+            ],
+          }),
+        },
+        {
+          kind: "assistant_text",
+          ts: 1_700_000_000_000,
+          turnId: "turn-0",
+          text: "Report delivered. [attachment:att-1:report.md]",
+        },
+        {
+          kind: "turn_committed",
+          ts: 1_700_000_000_000,
+          turnId: "turn-0",
+          inputTokens: 20,
+          outputTokens: 10,
+        },
+        {
+          kind: "user_message",
           ts: 1_700_000_000_001,
           turnId: "turn-1",
           text: "hello",
@@ -439,6 +520,12 @@ describe("HttpServer /v1/app runtime routes", () => {
       "# Daily\nAlpha rollout note\n",
       "utf8",
     );
+    await fs.mkdir(path.join(tmp, "knowledge", "reports"), { recursive: true });
+    await fs.writeFile(
+      path.join(tmp, "knowledge", "reports", "runtime-proof.md"),
+      "# Runtime Proof\nVerification evidence and delivery state live in the runtime.\n",
+      "utf8",
+    );
     const agent = makeFakeAgent(tmp) as unknown as ConstructorParameters<
       typeof HttpServer
     >[0]["agent"];
@@ -541,6 +628,43 @@ describe("HttpServer /v1/app runtime routes", () => {
     ]);
   });
 
+  it("projects turn evidence and delivery state for runtime proof UI", async () => {
+    const res = await requestJson(
+      `http://127.0.0.1:${port}/v1/app/evidence?sessionKey=${encodeURIComponent(
+        "agent:main:app:web:default",
+      )}`,
+      "local-token",
+    );
+
+    expect(res.status).toBe(200);
+    const body = res.body as {
+      turns: Array<{
+        turnId: string;
+        classification: { work: boolean; verification: boolean };
+        tools: Array<{ name: string; status?: string }>;
+        verification: Array<{ tool: string; command?: string }>;
+        deliveries: Array<{ target: string; status: string; marker?: string }>;
+      }>;
+    };
+    const turn = body.turns.find((item) => item.turnId === "turn-0");
+    expect(turn).toMatchObject({
+      classification: { work: true, verification: true },
+      tools: [
+        { name: "DocumentWrite", status: "ok" },
+        { name: "TestRun", status: "ok" },
+        { name: "FileDeliver", status: "ok" },
+      ],
+      verification: [{ tool: "TestRun", command: "npm run lint" }],
+      deliveries: [
+        {
+          target: "chat",
+          status: "sent",
+          marker: "[attachment:att-1:report.md]",
+        },
+      ],
+    });
+  });
+
   it("returns skill load state separately for the inspector", async () => {
     const res = await requestJson(
       `http://127.0.0.1:${port}/v1/app/skills`,
@@ -591,6 +715,17 @@ describe("HttpServer /v1/app runtime routes", () => {
         truncated: false,
       }),
     );
+  });
+
+  it("downloads workspace files for local app delivery", async () => {
+    const download = await requestRaw(
+      `http://127.0.0.1:${port}/v1/app/workspace/download?path=README.md`,
+      "local-token",
+    );
+
+    expect(download.status).toBe(200);
+    expect(download.headers["content-disposition"]).toContain("README.md");
+    expect(download.body).toBe("# Workspace\n");
   });
 
   it("rejects workspace path traversal", async () => {
@@ -664,6 +799,74 @@ describe("HttpServer /v1/app runtime routes", () => {
     expect(reindex.status).toBe(200);
     expect(reindex.body).toEqual({ ok: true });
     await expect(fs.readFile(path.join(tmp, "memory", ".reindexed"), "utf8")).resolves.toBe("1");
+  });
+
+  it("lists, searches, reads, and writes local workspace knowledge files", async () => {
+    const list = await requestJson(
+      `http://127.0.0.1:${port}/v1/app/knowledge`,
+      "local-token",
+    );
+
+    expect(list.status).toBe(200);
+    expect(list.body).toEqual(
+      expect.objectContaining({
+        ok: true,
+        collections: [
+          expect.objectContaining({
+            name: "reports",
+            documentCount: 1,
+          }),
+        ],
+      }),
+    );
+
+    const search = await requestJson(
+      `http://127.0.0.1:${port}/v1/app/knowledge/search?q=${encodeURIComponent("delivery evidence")}&collection=reports`,
+      "local-token",
+    );
+    expect(search.status).toBe(200);
+    expect(search.body).toEqual(
+      expect.objectContaining({
+        ok: true,
+        results: [
+          expect.objectContaining({
+            path: "knowledge/reports/runtime-proof.md",
+          }),
+        ],
+      }),
+    );
+
+    const put = await requestJson(
+      `http://127.0.0.1:${port}/v1/app/knowledge/file`,
+      "local-token",
+      {
+        method: "PUT",
+        body: {
+          path: "notes/local-kb.md",
+          content: "# Local KB\nOpen-source Magi stores KB files in the workspace.",
+        },
+      },
+    );
+    expect(put.status).toBe(200);
+    expect(put.body).toEqual(
+      expect.objectContaining({
+        ok: true,
+        path: "knowledge/notes/local-kb.md",
+      }),
+    );
+
+    const file = await requestJson(
+      `http://127.0.0.1:${port}/v1/app/knowledge/file?path=${encodeURIComponent("knowledge/notes/local-kb.md")}`,
+      "local-token",
+    );
+    expect(file.status).toBe(200);
+    expect(file.body).toEqual(
+      expect.objectContaining({
+        ok: true,
+        path: "knowledge/notes/local-kb.md",
+        content: "# Local KB\nOpen-source Magi stores KB files in the workspace.",
+      }),
+    );
   });
 
   it("opens and downloads artifacts by id", async () => {
