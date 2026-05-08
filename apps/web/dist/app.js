@@ -12077,6 +12077,204 @@ const storage = {
   sessionKey: "magi.agent.app.sessionKey",
   modelOverride: "magi.agent.app.modelOverride"
 };
+const GROUP_LABELS = {
+  status: "Now",
+  tool: "Current steps",
+  subagent: "Helpers",
+  task: "Plan",
+  queue: "Queued messages",
+  control: "Needs input"
+};
+const SUBAGENT_NAMES = [
+  "Halley",
+  "Meitner",
+  "Kant",
+  "Noether",
+  "Turing",
+  "Curie",
+  "Hopper",
+  "Lovelace",
+  "Feynman",
+  "Franklin",
+  "Shannon",
+  "Lamarr"
+];
+const LOW_SIGNAL_TOOL_LABELS = /* @__PURE__ */ new Set(["glob", "grep", "subagentrunning", "subagenttooldecision"]);
+function initialChannelState() {
+  return {
+    streaming: false,
+    streamingText: "",
+    thinkingText: "",
+    error: null,
+    thinkingStartedAt: null,
+    turnPhase: null,
+    heartbeatElapsedMs: null,
+    pendingInjectionCount: 0,
+    activeTools: [],
+    subagents: [],
+    taskBoard: null
+  };
+}
+function formatElapsed(ms) {
+  if (!ms || ms < 1e3) return void 0;
+  return `${Math.max(1, Math.round(ms / 1e3))}s`;
+}
+function normalizeRole(role) {
+  const value = role.trim().toLowerCase();
+  if (value === "explore" || value === "explorer" || value === "research") return "explorer";
+  if (value === "review" || value === "reviewer") return "reviewer";
+  if (value === "work" || value === "worker") return "worker";
+  return value || "subagent";
+}
+function normalizeToolLabel(label) {
+  return label.replace(/[^a-z0-9]/gi, "").toLowerCase();
+}
+function shouldDisplayToolActivity(activity) {
+  return !LOW_SIGNAL_TOOL_LABELS.has(normalizeToolLabel(activity.label));
+}
+function subagentName(index) {
+  return SUBAGENT_NAMES[index % SUBAGENT_NAMES.length] ?? `Agent ${index + 1}`;
+}
+function statusFromTool(activity) {
+  if (activity.status === "running") return "running";
+  if (activity.status === "done") return "done";
+  if (activity.status === "error" || activity.status === "denied") return "error";
+  return "info";
+}
+function statusFromSubagent(activity) {
+  if (activity.status === "running") return "running";
+  if (activity.status === "waiting") return "waiting";
+  if (activity.status === "done") return "done";
+  if (activity.status === "error" || activity.status === "cancelled") return "error";
+  return "info";
+}
+function statusFromTask(task) {
+  if (task.status === "in_progress") return "running";
+  if (task.status === "completed") return "done";
+  if (task.status === "cancelled") return "error";
+  return "waiting";
+}
+function taskMeta(task) {
+  if (task.status === "in_progress") return "running";
+  if (task.status === "completed") return "done";
+  if (task.status === "cancelled") return "cancelled";
+  return "pending";
+}
+function phaseLabel(phase) {
+  switch (phase) {
+    case "pending":
+      return "Preparing";
+    case "planning":
+      return "Planning";
+    case "executing":
+      return "Running";
+    case "verifying":
+      return "Verifying";
+    case "committing":
+      return "Writing answer";
+    case "committed":
+      return "Finalizing";
+    case "aborted":
+      return "Interrupted";
+    default:
+      return "Working";
+  }
+}
+function toolPreview(activity) {
+  const label = activity.label || "Running tool";
+  const detail = activity.inputPreview || activity.outputPreview;
+  return {
+    label,
+    detail: detail ? preview(detail, 120) : void 0,
+    snippet: activity.outputPreview ? preview(activity.outputPreview, 240) : void 0
+  };
+}
+function deriveWorkConsoleRows({
+  channelState,
+  queuedMessages = [],
+  controlRequests = []
+}) {
+  const rows = [];
+  const phase = channelState.reconnecting ? "Reconnecting" : channelState.error ? "Blocked" : channelState.turnPhase ? phaseLabel(channelState.turnPhase) : channelState.streaming ? "Working" : null;
+  const elapsed = formatElapsed(channelState.heartbeatElapsedMs);
+  if (phase) {
+    rows.push({
+      id: "phase",
+      group: "status",
+      label: phase,
+      detail: elapsed ? `${elapsed} elapsed` : void 0,
+      status: channelState.error || channelState.turnPhase === "aborted" ? "error" : "running"
+    });
+  }
+  for (const [index, subagent] of (channelState.subagents ?? []).entries()) {
+    rows.push({
+      id: `subagent:${subagent.taskId}`,
+      group: "subagent",
+      label: subagentName(index),
+      detail: subagent.detail,
+      status: statusFromSubagent(subagent),
+      meta: normalizeRole(subagent.role)
+    });
+  }
+  for (const activity of channelState.activeTools ?? []) {
+    if (!shouldDisplayToolActivity(activity)) continue;
+    const duration = activity.durationMs ? formatElapsed(activity.durationMs) : void 0;
+    rows.push({
+      id: `tool:${activity.id}`,
+      group: "tool",
+      ...toolPreview(activity),
+      status: statusFromTool(activity),
+      ...duration ? { meta: duration } : {}
+    });
+  }
+  for (const task of channelState.taskBoard?.tasks ?? []) {
+    rows.push({
+      id: `task:${task.id}`,
+      group: "task",
+      label: task.title,
+      detail: task.description,
+      status: statusFromTask(task),
+      meta: taskMeta(task)
+    });
+  }
+  for (const [index, message] of queuedMessages.entries()) {
+    rows.push({
+      id: `queue:${message.id}`,
+      group: "queue",
+      label: index === 0 ? "Queued follow-up" : `Queued follow-up ${index + 1}`,
+      detail: message.content,
+      status: message.priority === "now" ? "running" : "waiting",
+      meta: message.priority === "now" ? "steering next" : "will send later"
+    });
+  }
+  for (const request of controlRequests.filter((item) => item.state === "pending")) {
+    rows.push({
+      id: `control:${request.requestId}`,
+      group: "control",
+      label: request.kind === "user_question" ? "Needs answer" : "Needs approval",
+      detail: request.prompt,
+      status: "waiting",
+      meta: request.kind.replace("_", " ")
+    });
+  }
+  if (rows.length === 0) {
+    return [
+      {
+        id: "idle",
+        group: "status",
+        label: "Idle",
+        detail: "Live agent work will appear here.",
+        status: "info"
+      }
+    ];
+  }
+  return rows;
+}
+function groupWorkRows(rows) {
+  const groups = /* @__PURE__ */ new Map();
+  for (const row of rows) groups.set(row.group, [...groups.get(row.group) ?? [], row]);
+  return Array.from(groups.entries());
+}
 function defaultSessionKey() {
   return "agent:local:app:web:default";
 }
@@ -12095,6 +12293,9 @@ function asArray(value) {
 }
 function asString(value, fallback = "") {
   return typeof value === "string" ? value : fallback;
+}
+function asNumber(value, fallback = 0) {
+  return typeof value === "number" && Number.isFinite(value) ? value : fallback;
 }
 function preview(value, max = 140) {
   const text = typeof value === "string" ? value : value == null ? "" : JSON.stringify(value);
@@ -12300,6 +12501,9 @@ function WorkDock({
   setActiveDock,
   runtime,
   events,
+  channelState,
+  queuedMessages,
+  controlRequests,
   knowledgeQuery,
   setKnowledgeQuery,
   knowledgePath,
@@ -12312,35 +12516,10 @@ function WorkDock({
   onSaveKnowledge,
   onReloadSkills
 }) {
-  const toolRows = runtime?.tasks?.items ?? [];
   const sessionRows = runtime?.sessions?.items ?? [];
   const artifactRows = runtime?.artifacts?.items ?? [];
   const cronRows = runtime?.crons?.items ?? [];
-  const helperNames = [
-    "Halley",
-    "Meitner",
-    "Kant",
-    "Noether",
-    "Turing",
-    "Curie",
-    "Hopper",
-    "Lovelace",
-    "Feynman",
-    "Franklin",
-    "Shannon",
-    "Lamarr"
-  ];
-  const helperRows = helperNames.map((name, index) => ({
-    name,
-    role: index < 6 ? "math-computer" : index < 10 ? "calculator-opus" : "calculator-gemini",
-    iteration: index === 2 ? 2 : index === 6 ? 3 : 1,
-    tone: index % 3 === 0 ? "green" : "purple"
-  }));
-  const activeTools = toolRows.length > 0 ? toolRows : [
-    { title: "Assigning helper", status: "running", detail: "Compute, verify, or inspect a bounded part of the task." },
-    { title: "TaskList", status: "running", detail: "Status: running" },
-    { title: "TaskOutput", status: "running", detail: "Waiting for results" }
-  ];
+  const workGroups = groupWorkRows(deriveWorkConsoleRows({ channelState, queuedMessages, controlRequests }));
   return /* @__PURE__ */ jsxRuntimeExports.jsxs("aside", { className: "work-dock", "aria-label": "Work", children: [
     /* @__PURE__ */ jsxRuntimeExports.jsxs("header", { className: "work-dock-header", children: [
       /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { children: [
@@ -12358,53 +12537,45 @@ function WorkDock({
         /* @__PURE__ */ jsxRuntimeExports.jsx("h3", { children: "Work in progress" }),
         /* @__PURE__ */ jsxRuntimeExports.jsx("p", { children: "Plain-language progress from the current run." })
       ] }),
-      /* @__PURE__ */ jsxRuntimeExports.jsxs("section", { className: "work-card live", children: [
+      workGroups.map(([group, rows]) => /* @__PURE__ */ jsxRuntimeExports.jsxs("section", { className: `work-card work-card-${group} ${group === "status" ? "live" : ""} ${group === "subagent" ? "helpers-card" : ""}`, children: [
         /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "work-card-title", children: [
-          /* @__PURE__ */ jsxRuntimeExports.jsx("span", { children: "NOW" }),
-          /* @__PURE__ */ jsxRuntimeExports.jsx(Pill, { tone: "purple", children: "LIVE" })
-        ] }),
-        /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "work-step running", children: [
-          /* @__PURE__ */ jsxRuntimeExports.jsx("span", {}),
-          /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { children: [
-            /* @__PURE__ */ jsxRuntimeExports.jsx("strong", { children: "Running" }),
-            /* @__PURE__ */ jsxRuntimeExports.jsx("p", { children: "Runtime is ready for a local session." })
-          ] })
-        ] })
-      ] }),
-      /* @__PURE__ */ jsxRuntimeExports.jsxs("section", { className: "work-card helpers-card", children: [
-        /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "work-card-title", children: [
-          /* @__PURE__ */ jsxRuntimeExports.jsx("span", { children: "HELPERS" }),
-          /* @__PURE__ */ jsxRuntimeExports.jsxs(Pill, { tone: "green", children: [
-            helperRows.length,
+          /* @__PURE__ */ jsxRuntimeExports.jsx("span", { children: GROUP_LABELS[group] }),
+          group === "status" && channelState.streaming && /* @__PURE__ */ jsxRuntimeExports.jsx(Pill, { tone: "purple", children: "LIVE" }),
+          group === "tool" && /* @__PURE__ */ jsxRuntimeExports.jsx(Pill, { children: rows.length }),
+          group === "subagent" && /* @__PURE__ */ jsxRuntimeExports.jsxs(Pill, { tone: "green", children: [
+            rows.length,
             " AGENTS"
-          ] })
-        ] }),
-        /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "helper-grid", children: helperRows.map((helper) => /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "helper-chip", children: [
-          /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: `helper-dot ${helper.tone}` }),
-          /* @__PURE__ */ jsxRuntimeExports.jsxs("strong", { children: [
-            helper.name,
-            " ",
-            /* @__PURE__ */ jsxRuntimeExports.jsx("em", { children: helper.role })
           ] }),
-          /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "helper-bar", children: [
-            "iteration ",
-            helper.iteration
+          group === "queue" && /* @__PURE__ */ jsxRuntimeExports.jsxs(Pill, { tone: "amber", children: [
+            rows.length,
+            " WAITING"
           ] })
-        ] }, helper.name)) })
-      ] }),
-      /* @__PURE__ */ jsxRuntimeExports.jsxs("section", { className: "work-card", children: [
-        /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "work-card-title", children: [
-          /* @__PURE__ */ jsxRuntimeExports.jsx("span", { children: "CURRENT STEPS" }),
-          /* @__PURE__ */ jsxRuntimeExports.jsx(Pill, { children: activeTools.length })
         ] }),
-        /* @__PURE__ */ jsxRuntimeExports.jsx("div", { id: "tasks-list", className: "current-step-list", children: activeTools.map((tool, index) => /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "current-step-row", children: [
-          /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "green-dot" }),
-          /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { children: [
-            /* @__PURE__ */ jsxRuntimeExports.jsx("strong", { children: asString(tool.title) || asString(tool.name) || asString(tool.taskId) || "Working in workspace" }),
-            /* @__PURE__ */ jsxRuntimeExports.jsx("p", { children: asString(tool.detail) || asString(tool.promptPreview) || asString(tool.status, "Status: running") })
-          ] })
-        ] }, `${asString(tool.taskId) || asString(tool.title) || index}`)) })
-      ] }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx(
+          "div",
+          {
+            id: group === "tool" ? "tasks-list" : void 0,
+            className: group === "subagent" ? "helper-grid" : group === "tool" ? "current-step-list" : "work-row-list",
+            children: rows.map((row) => group === "subagent" ? /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "helper-chip", "data-work-console-agent-chip": "true", "data-work-console-row-status": row.status, children: [
+              /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: `helper-dot ${row.status === "done" ? "green" : row.status === "waiting" ? "amber" : row.status === "error" ? "red" : "purple"}` }),
+              /* @__PURE__ */ jsxRuntimeExports.jsxs("strong", { children: [
+                row.label,
+                " ",
+                row.meta && /* @__PURE__ */ jsxRuntimeExports.jsx("em", { children: row.meta })
+              ] }),
+              row.detail && /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "helper-bar", children: row.detail })
+            ] }, row.id) : /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: `current-step-row work-row-${row.status}`, "data-work-console-action-row": group === "tool" ? "true" : void 0, "data-work-console-row-status": row.status, children: [
+              /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: row.status === "running" ? "purple-dot" : row.status === "error" ? "red-dot" : row.status === "waiting" ? "amber-dot" : "green-dot" }),
+              /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { children: [
+                /* @__PURE__ */ jsxRuntimeExports.jsx("strong", { children: row.label }),
+                row.meta && /* @__PURE__ */ jsxRuntimeExports.jsx("small", { children: row.meta }),
+                row.detail && /* @__PURE__ */ jsxRuntimeExports.jsx("p", { children: row.detail }),
+                row.snippet && /* @__PURE__ */ jsxRuntimeExports.jsx("pre", { children: row.snippet })
+              ] })
+            ] }, row.id))
+          }
+        )
+      ] }, group)),
       /* @__PURE__ */ jsxRuntimeExports.jsxs("section", { className: "work-card", children: [
         /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "work-card-title", children: /* @__PURE__ */ jsxRuntimeExports.jsx("span", { children: "SESSIONS" }) }),
         /* @__PURE__ */ jsxRuntimeExports.jsx(SnapshotList, { id: "sessions-list", items: sessionRows, empty: "No sessions" })
@@ -12473,13 +12644,23 @@ function ChatView({
   onReset,
   modelOverride,
   setModelOverride,
+  streamingMode,
+  setStreamingMode,
   activeDock,
   setActiveDock,
   runtime,
   events,
+  channelState,
+  queuedMessages,
+  controlRequests,
   knowledgeProps,
   onReloadSkills
 }) {
+  const activeToolCount = (channelState.activeTools ?? []).filter((tool) => tool.status === "running").length;
+  const activeSubagentCount = (channelState.subagents ?? []).filter((subagent) => subagent.status === "running" || subagent.status === "waiting").length;
+  const pendingRequests = controlRequests.filter((request) => request.state === "pending");
+  const visibleRunState = channelState.streaming || activeToolCount > 0 || activeSubagentCount > 0 || queuedMessages.length > 0 || pendingRequests.length > 0 || Boolean(channelState.taskBoard?.tasks.some((task) => task.status === "pending" || task.status === "in_progress"));
+  const currentWork = channelState.taskBoard?.tasks.find((task) => task.status === "in_progress")?.title || channelState.activeTools?.find((tool) => tool.status === "running")?.label || channelState.subagents?.find((subagent) => subagent.status === "running" || subagent.status === "waiting")?.detail || (isStreaming ? "Working on your request" : "Waiting for input");
   return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "cloud-chat-shell", "data-cloud-chat-shell": "true", children: [
     /* @__PURE__ */ jsxRuntimeExports.jsx(
       ChatSidebar,
@@ -12500,13 +12681,27 @@ function ChatView({
         /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "empty-chat-icon", children: "⌁" }),
         /* @__PURE__ */ jsxRuntimeExports.jsx("p", { children: "Start a conversation" })
       ] }) : messages.map((message) => /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: `message-bubble ${message.role} ${message.error ? "error" : ""} ${message.streaming ? "streaming" : ""}`, children: message.text }, message.id)) }),
-      /* @__PURE__ */ jsxRuntimeExports.jsxs("section", { className: "current-run-card", "aria-label": "Current run", children: [
+      visibleRunState && /* @__PURE__ */ jsxRuntimeExports.jsxs("section", { className: "current-run-card", "aria-label": "Current run", children: [
         /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "run-card-close", children: "×" }),
         /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "run-grid", children: [
           /* @__PURE__ */ jsxRuntimeExports.jsx("span", { children: "CURRENT RUN" }),
-          /* @__PURE__ */ jsxRuntimeExports.jsx("strong", { children: isStreaming ? "Running" : "Ready" }),
+          /* @__PURE__ */ jsxRuntimeExports.jsx("strong", { children: channelState.reconnecting ? "Reconnecting" : phaseLabel(channelState.turnPhase ?? null) }),
           /* @__PURE__ */ jsxRuntimeExports.jsx("span", { children: "CURRENT WORK" }),
-          /* @__PURE__ */ jsxRuntimeExports.jsx("strong", { children: isStreaming ? "Working on your request" : "Waiting for input" })
+          /* @__PURE__ */ jsxRuntimeExports.jsx("strong", { children: currentWork }),
+          activeToolCount > 0 && /* @__PURE__ */ jsxRuntimeExports.jsxs(jsxRuntimeExports.Fragment, { children: [
+            /* @__PURE__ */ jsxRuntimeExports.jsx("span", { children: "ACTIONS" }),
+            /* @__PURE__ */ jsxRuntimeExports.jsxs("strong", { children: [
+              activeToolCount,
+              " active"
+            ] })
+          ] }),
+          activeSubagentCount > 0 && /* @__PURE__ */ jsxRuntimeExports.jsxs(jsxRuntimeExports.Fragment, { children: [
+            /* @__PURE__ */ jsxRuntimeExports.jsx("span", { children: "HELPERS" }),
+            /* @__PURE__ */ jsxRuntimeExports.jsxs("strong", { children: [
+              activeSubagentCount,
+              " active"
+            ] })
+          ] })
         ] })
       ] }),
       /* @__PURE__ */ jsxRuntimeExports.jsxs(
@@ -12520,9 +12715,9 @@ function ChatView({
             onSend();
           },
           children: [
-            /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "composer-mode-row", children: [
-              /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "mode-active", children: "Queue after run" }),
-              /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", children: "Steer current run" })
+            isStreaming && /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "composer-mode-row", "aria-label": "Streaming send mode", children: [
+              /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: streamingMode === "queue" ? "mode-active" : "", onClick: () => setStreamingMode("queue"), children: "Queue after run" }),
+              /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: streamingMode === "steer" ? "mode-active" : "", onClick: () => setStreamingMode("steer"), children: "Steer current run" })
             ] }),
             /* @__PURE__ */ jsxRuntimeExports.jsx(
               "textarea",
@@ -12559,6 +12754,9 @@ function ChatView({
         setActiveDock,
         runtime,
         events,
+        channelState,
+        queuedMessages,
+        controlRequests,
         onReloadSkills,
         ...knowledgeProps
       }
@@ -12825,8 +13023,12 @@ function App() {
   const [runtime, setRuntime] = reactExports.useState(null);
   const [events, setEvents] = reactExports.useState([]);
   const [messages, setMessages] = reactExports.useState([]);
+  const [channelState, setChannelState] = reactExports.useState(() => initialChannelState());
+  const [queuedMessages, setQueuedMessages] = reactExports.useState([]);
+  const [controlRequests, setControlRequests] = reactExports.useState([]);
   const [input, setInput] = reactExports.useState("");
   const [isStreaming, setIsStreaming] = reactExports.useState(false);
+  const [streamingMode, setStreamingMode] = reactExports.useState("queue");
   const [deferredInstallPrompt, setDeferredInstallPrompt] = reactExports.useState(null);
   const [config, setConfig] = reactExports.useState({});
   const [configStatus, setConfigStatus] = reactExports.useState("");
@@ -13011,6 +13213,77 @@ function App() {
       addEvent("health_error", { message: String(error instanceof Error ? error.message : error) });
     }
   }, [addEvent, loadAppConfig, loadEvidence, loadKnowledge, loadRuntimeSnapshot, loadTranscript, loadWorkspace, normalizedBase]);
+  const upsertToolActivity = reactExports.useCallback((patch) => {
+    setChannelState((current) => {
+      const next = [...current.activeTools ?? []];
+      const index = next.findIndex((tool) => tool.id === patch.id);
+      if (index >= 0) {
+        next[index] = {
+          ...next[index],
+          ...patch,
+          label: patch.label === patch.id ? next[index].label : patch.label,
+          startedAt: next[index].startedAt
+        };
+      } else next.push(patch);
+      return { ...current, activeTools: next };
+    });
+  }, []);
+  const upsertSubagentActivity = reactExports.useCallback((patch) => {
+    setChannelState((current) => {
+      const next = [...current.subagents ?? []];
+      const index = next.findIndex((subagent) => subagent.taskId === patch.taskId);
+      if (index >= 0) next[index] = { ...next[index], ...patch };
+      else next.push(patch);
+      return { ...current, subagents: next };
+    });
+  }, []);
+  const applyControlEvent = reactExports.useCallback((event) => {
+    if (!event || typeof event !== "object") return;
+    const record = event;
+    const type = asString(record.type);
+    if (type === "control_request_created" && record.request && typeof record.request === "object") {
+      const request = record.request;
+      const requestId2 = asString(request.requestId);
+      const prompt = asString(request.prompt);
+      if (!requestId2 || !prompt) return;
+      const next = {
+        requestId: requestId2,
+        kind: request.kind === "plan_approval" || request.kind === "user_question" ? request.kind : "tool_permission",
+        state: request.state === "approved" || request.state === "denied" || request.state === "answered" || request.state === "cancelled" || request.state === "timed_out" ? request.state : "pending",
+        sessionKey: asString(request.sessionKey, sessionKey || defaultSessionKey()),
+        source: request.source === "mcp" || request.source === "child-agent" || request.source === "plan" || request.source === "system" ? request.source : "turn",
+        prompt,
+        createdAt: asNumber(request.createdAt, Date.now()),
+        expiresAt: asNumber(request.expiresAt, Date.now())
+      };
+      setControlRequests((current) => [next, ...current.filter((item) => item.requestId !== next.requestId)]);
+      return;
+    }
+    const requestId = asString(record.requestId);
+    if (!requestId) return;
+    if (type === "control_request_resolved") {
+      setControlRequests((current) => current.map((item) => item.requestId === requestId ? { ...item, state: record.decision === "answered" ? "answered" : record.decision === "approved" ? "approved" : "denied", resolvedAt: Date.now() } : item));
+    }
+    if (type === "control_request_cancelled") {
+      setControlRequests((current) => current.map((item) => item.requestId === requestId ? { ...item, state: "cancelled", resolvedAt: Date.now() } : item));
+    }
+    if (type === "control_request_timed_out") {
+      setControlRequests((current) => current.map((item) => item.requestId === requestId ? { ...item, state: "timed_out", resolvedAt: Date.now() } : item));
+    }
+  }, [sessionKey]);
+  const tasksFromPayload = reactExports.useCallback((payload) => {
+    return asArray(payload.tasks).map((task, index) => {
+      const status = task.status === "in_progress" || task.status === "completed" || task.status === "cancelled" ? task.status : "pending";
+      return {
+        id: asString(task.id, `task-${index + 1}`),
+        title: asString(task.title, asString(task.name, `Task ${index + 1}`)),
+        description: asString(task.description, asString(task.detail)),
+        status,
+        ...Array.isArray(task.dependsOn) ? { dependsOn: task.dependsOn.filter((item) => typeof item === "string") } : {},
+        ...typeof task.parallelGroup === "string" ? { parallelGroup: task.parallelGroup } : {}
+      };
+    });
+  }, []);
   const appendAssistantText = reactExports.useCallback((text) => {
     setMessages((current) => {
       const last = current[current.length - 1];
@@ -13019,9 +13292,23 @@ function App() {
       }
       return [...current, { id: nowId("assistant"), role: "assistant", text, streaming: true }];
     });
+    setChannelState((current) => ({
+      ...current,
+      streaming: true,
+      streamingText: `${current.streamingText}${text}`,
+      hasTextContent: true
+    }));
   }, []);
   const finishAssistantMessage = reactExports.useCallback(() => {
     setMessages((current) => current.map((message) => message.streaming ? { ...message, streaming: false } : message));
+    setChannelState((current) => ({
+      ...current,
+      streaming: false,
+      streamingText: "",
+      thinkingText: "",
+      thinkingStartedAt: null,
+      heartbeatElapsedMs: null
+    }));
   }, []);
   const handleSseEvent = reactExports.useCallback((eventName, rawData) => {
     if (rawData === "[DONE]") {
@@ -13039,21 +13326,151 @@ function App() {
     if (eventName === "agent") {
       const type = asString(payload.type, "agent");
       addEvent(type, payload);
+      if (type === "turn_start") {
+        setChannelState((current) => ({
+          ...current,
+          streaming: true,
+          turnPhase: "pending",
+          error: null,
+          activeTools: [],
+          subagents: [],
+          taskBoard: null,
+          heartbeatElapsedMs: null
+        }));
+      }
+      if (type === "turn_phase") {
+        const phase = payload.phase;
+        if (phase === "pending" || phase === "planning" || phase === "executing" || phase === "verifying" || phase === "committing" || phase === "committed" || phase === "aborted") {
+          setChannelState((current) => ({ ...current, turnPhase: phase }));
+        }
+      }
+      if (type === "response_clear") {
+        setMessages((current) => current.filter((message) => !message.streaming));
+        setChannelState((current) => ({ ...current, streamingText: "", hasTextContent: false }));
+      }
+      if (type === "thinking_delta" && typeof payload.delta === "string") {
+        setChannelState((current) => ({
+          ...current,
+          streaming: true,
+          thinkingText: `${current.thinkingText}${payload.delta}`,
+          thinkingStartedAt: current.thinkingStartedAt ?? Date.now()
+        }));
+      }
       if (type === "text_delta" && typeof payload.delta === "string") appendAssistantText(payload.delta);
-      if (type === "turn_end") finishAssistantMessage();
+      if (type === "tool_start") {
+        const id = asString(payload.id, nowId("tool"));
+        upsertToolActivity({
+          id,
+          label: asString(payload.name, "Running tool"),
+          status: "running",
+          startedAt: Date.now(),
+          inputPreview: asString(payload.input_preview)
+        });
+      }
+      if (type === "tool_progress") {
+        const id = asString(payload.id);
+        if (id) {
+          upsertToolActivity({
+            id,
+            label: asString(payload.label, "Running tool"),
+            status: "running",
+            startedAt: Date.now()
+          });
+        }
+      }
+      if (type === "tool_end") {
+        const id = asString(payload.id);
+        if (id) {
+          const status = payload.status === "error" || payload.status === "denied" ? payload.status : "done";
+          upsertToolActivity({
+            id,
+            label: asString(payload.name, asString(payload.label, id)),
+            status,
+            startedAt: Date.now(),
+            outputPreview: asString(payload.output_preview),
+            durationMs: asNumber(payload.durationMs)
+          });
+        }
+      }
+      if (type === "task_board") {
+        setChannelState((current) => ({
+          ...current,
+          taskBoard: { tasks: tasksFromPayload(payload), receivedAt: Date.now() }
+        }));
+      }
+      if (type === "spawn_started" || type === "child_started" || type === "background_task") {
+        const taskId = asString(payload.taskId, nowId("child"));
+        const status = payload.status === "completed" ? "done" : payload.status === "failed" || payload.status === "aborted" ? "error" : "running";
+        upsertSubagentActivity({
+          taskId,
+          role: asString(payload.persona, "worker"),
+          status,
+          detail: asString(payload.prompt, asString(payload.detail)),
+          startedAt: Date.now(),
+          updatedAt: Date.now()
+        });
+      }
+      if (type === "child_progress") {
+        const taskId = asString(payload.taskId);
+        if (taskId) {
+          upsertSubagentActivity({
+            taskId,
+            role: "worker",
+            status: "running",
+            detail: asString(payload.detail),
+            startedAt: Date.now(),
+            updatedAt: Date.now()
+          });
+        }
+      }
+      if (type === "spawn_result" || type === "child_completed" || type === "child_failed" || type === "child_cancelled") {
+        const taskId = asString(payload.taskId);
+        if (taskId) {
+          upsertSubagentActivity({
+            taskId,
+            role: "worker",
+            status: type === "child_completed" || payload.status === "ok" ? "done" : type === "child_cancelled" ? "cancelled" : "error",
+            detail: asString(payload.finalText, asString(payload.errorMessage, asString(payload.reason))),
+            startedAt: Date.now(),
+            updatedAt: Date.now()
+          });
+        }
+      }
+      if (type === "heartbeat") {
+        setChannelState((current) => ({
+          ...current,
+          heartbeatElapsedMs: asNumber(payload.elapsedMs, current.heartbeatElapsedMs ?? 0)
+        }));
+      }
+      if (type === "turn_interrupted") {
+        setChannelState((current) => ({ ...current, turnPhase: "aborted" }));
+      }
+      if (type === "control_event") {
+        applyControlEvent(payload.event);
+      }
+      if (type === "turn_end") {
+        setChannelState((current) => ({
+          ...current,
+          turnPhase: payload.status === "aborted" ? "aborted" : "committed"
+        }));
+        finishAssistantMessage();
+      }
       return;
     }
     const choices = Array.isArray(payload.choices) ? payload.choices : [];
     const delta = choices[0] && typeof choices[0] === "object" ? choices[0].delta?.content : void 0;
     if (typeof delta === "string") appendAssistantText(delta);
     if (choices[0] && typeof choices[0] === "object" && choices[0].finish_reason) finishAssistantMessage();
-  }, [addEvent, appendAssistantText, finishAssistantMessage]);
-  const sendMessage = reactExports.useCallback(async () => {
-    const text = input.trim();
-    if (!text || isStreaming) return;
+  }, [addEvent, appendAssistantText, applyControlEvent, finishAssistantMessage, tasksFromPayload, upsertSubagentActivity, upsertToolActivity]);
+  const streamTurn = reactExports.useCallback(async (text) => {
+    if (!text.trim()) return;
     saveConnection();
-    setInput("");
-    setMessages((current) => [...current, { id: nowId("user"), role: "user", text }]);
+    setMessages((current) => [...current, { id: nowId("user"), role: "user", text: text.trim() }]);
+    setChannelState({
+      ...initialChannelState(),
+      streaming: true,
+      turnPhase: "pending"
+    });
     setIsStreaming(true);
     try {
       const response = await fetch(`${normalizedBase}/v1/chat/completions`, {
@@ -13062,7 +13479,7 @@ function App() {
         body: JSON.stringify({
           stream: true,
           ...modelOverride.trim() && modelOverride.trim() !== "auto" ? { model: modelOverride.trim() } : {},
-          messages: [{ role: "user", content: text }]
+          messages: [{ role: "user", content: text.trim() }]
         })
       });
       if (!response.ok || !response.body) {
@@ -13087,7 +13504,48 @@ function App() {
     } finally {
       setIsStreaming(false);
     }
-  }, [addEvent, authHeaders, finishAssistantMessage, handleSseEvent, input, isStreaming, loadEvidence, loadRuntimeSnapshot, loadTranscript, modelOverride, normalizedBase, saveConnection]);
+  }, [addEvent, authHeaders, finishAssistantMessage, handleSseEvent, loadEvidence, loadRuntimeSnapshot, loadTranscript, modelOverride, normalizedBase, saveConnection]);
+  const sendMessage = reactExports.useCallback(async () => {
+    const text = input.trim();
+    if (!text) return;
+    setInput("");
+    if (isStreaming) {
+      if (streamingMode === "steer") {
+        try {
+          await sendJson("/v1/chat/inject", "POST", {
+            sessionKey: sessionKey.trim() || defaultSessionKey(),
+            text,
+            source: "web"
+          });
+          setMessages((current) => [...current, { id: nowId("user"), role: "user", text }]);
+          setChannelState((current) => ({
+            ...current,
+            pendingInjectionCount: (current.pendingInjectionCount ?? 0) + 1
+          }));
+          addEvent("message_injected", { sessionKey, length: text.length });
+          return;
+        } catch (error) {
+          addEvent("message_inject_failed", { message: String(error instanceof Error ? error.message : error) });
+        }
+      }
+      const queued = {
+        id: nowId("queue"),
+        content: text,
+        priority: "next",
+        queuedAt: Date.now()
+      };
+      setQueuedMessages((current) => [...current, queued].slice(0, 8));
+      addEvent("message_queued", { sessionKey, length: text.length });
+      return;
+    }
+    await streamTurn(text);
+  }, [addEvent, input, isStreaming, sendJson, sessionKey, streamTurn, streamingMode]);
+  reactExports.useEffect(() => {
+    if (isStreaming || queuedMessages.length === 0) return;
+    const [next, ...rest] = queuedMessages;
+    setQueuedMessages(rest);
+    void streamTurn(next.content);
+  }, [isStreaming, queuedMessages, streamTurn]);
   reactExports.useEffect(() => {
     addEvent("app_ready", { agentUrl, sessionKey });
     const installHandler = (event) => {
@@ -13135,13 +13593,23 @@ function App() {
         setInput,
         isStreaming,
         onSend: () => void sendMessage(),
-        onReset: () => setMessages([]),
+        onReset: () => {
+          setMessages([]);
+          setQueuedMessages([]);
+          setControlRequests([]);
+          setChannelState(initialChannelState());
+        },
         modelOverride,
         setModelOverride,
+        streamingMode,
+        setStreamingMode,
         activeDock,
         setActiveDock,
         runtime,
         events,
+        channelState,
+        queuedMessages,
+        controlRequests,
         knowledgeProps,
         onReloadSkills: () => void reloadSkills().catch((error) => addEvent("skills_reload_error", { message: String(error instanceof Error ? error.message : error) }))
       }

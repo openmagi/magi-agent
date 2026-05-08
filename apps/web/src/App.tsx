@@ -20,6 +20,87 @@ interface Message {
   error?: boolean;
 }
 
+type TurnPhase = "pending" | "planning" | "executing" | "verifying" | "committing" | "committed" | "aborted";
+type ToolActivityStatus = "running" | "done" | "error" | "denied";
+type SubagentActivityStatus = "running" | "waiting" | "done" | "error" | "cancelled";
+
+interface ToolActivity {
+  id: string;
+  label: string;
+  status: ToolActivityStatus;
+  startedAt: number;
+  inputPreview?: string;
+  outputPreview?: string;
+  durationMs?: number;
+}
+
+interface SubagentActivity {
+  taskId: string;
+  role: string;
+  status: SubagentActivityStatus;
+  detail?: string;
+  startedAt: number;
+  updatedAt: number;
+}
+
+interface TaskBoardTask {
+  id: string;
+  title: string;
+  description: string;
+  status: "pending" | "in_progress" | "completed" | "cancelled";
+  parallelGroup?: string;
+  dependsOn?: string[];
+}
+
+interface TaskBoardSnapshot {
+  tasks: TaskBoardTask[];
+  receivedAt: number;
+}
+
+interface ChannelState {
+  streaming: boolean;
+  streamingText: string;
+  thinkingText: string;
+  error: string | null;
+  hasTextContent?: boolean;
+  thinkingStartedAt?: number | null;
+  turnPhase?: TurnPhase | null;
+  heartbeatElapsedMs?: number | null;
+  pendingInjectionCount?: number;
+  activeTools?: ToolActivity[];
+  subagents?: SubagentActivity[];
+  taskBoard?: TaskBoardSnapshot | null;
+  fileProcessing?: boolean;
+  reconnecting?: boolean;
+  saveError?: string | null;
+}
+
+interface QueuedMessage {
+  id: string;
+  content: string;
+  priority?: "now" | "next" | "later";
+  queuedAt: number;
+}
+
+interface ControlRequestRecord {
+  requestId: string;
+  kind: "tool_permission" | "plan_approval" | "user_question";
+  state: "pending" | "approved" | "denied" | "answered" | "cancelled" | "timed_out";
+  sessionKey: string;
+  turnId?: string;
+  channelName?: string;
+  source: "turn" | "mcp" | "child-agent" | "plan" | "system";
+  prompt: string;
+  proposedInput?: unknown;
+  createdAt: number;
+  expiresAt: number;
+  resolvedAt?: number;
+  decision?: "approved" | "denied" | "answered";
+  feedback?: string;
+  updatedInput?: unknown;
+  answer?: string;
+}
+
 interface EventRecord {
   id: string;
   type: string;
@@ -56,6 +137,253 @@ interface AppConfig {
 interface BeforeInstallPromptEvent extends Event {
   prompt: () => Promise<void>;
   userChoice: Promise<{ outcome: string }>;
+}
+
+type WorkConsoleRowGroup = "status" | "tool" | "subagent" | "task" | "queue" | "control";
+type WorkConsoleRowStatus = "running" | "done" | "waiting" | "error" | "info";
+
+interface WorkConsoleRow {
+  id: string;
+  group: WorkConsoleRowGroup;
+  label: string;
+  detail?: string;
+  snippet?: string;
+  status: WorkConsoleRowStatus;
+  meta?: string;
+}
+
+const GROUP_LABELS: Record<WorkConsoleRowGroup, string> = {
+  status: "Now",
+  tool: "Current steps",
+  subagent: "Helpers",
+  task: "Plan",
+  queue: "Queued messages",
+  control: "Needs input",
+};
+
+const SUBAGENT_NAMES = [
+  "Halley",
+  "Meitner",
+  "Kant",
+  "Noether",
+  "Turing",
+  "Curie",
+  "Hopper",
+  "Lovelace",
+  "Feynman",
+  "Franklin",
+  "Shannon",
+  "Lamarr",
+];
+
+const LOW_SIGNAL_TOOL_LABELS = new Set(["glob", "grep", "subagentrunning", "subagenttooldecision"]);
+
+function initialChannelState(): ChannelState {
+  return {
+    streaming: false,
+    streamingText: "",
+    thinkingText: "",
+    error: null,
+    thinkingStartedAt: null,
+    turnPhase: null,
+    heartbeatElapsedMs: null,
+    pendingInjectionCount: 0,
+    activeTools: [],
+    subagents: [],
+    taskBoard: null,
+  };
+}
+
+function formatElapsed(ms?: number | null): string | undefined {
+  if (!ms || ms < 1000) return undefined;
+  return `${Math.max(1, Math.round(ms / 1000))}s`;
+}
+
+function normalizeRole(role: string): string {
+  const value = role.trim().toLowerCase();
+  if (value === "explore" || value === "explorer" || value === "research") return "explorer";
+  if (value === "review" || value === "reviewer") return "reviewer";
+  if (value === "work" || value === "worker") return "worker";
+  return value || "subagent";
+}
+
+function normalizeToolLabel(label: string): string {
+  return label.replace(/[^a-z0-9]/gi, "").toLowerCase();
+}
+
+function shouldDisplayToolActivity(activity: ToolActivity): boolean {
+  return !LOW_SIGNAL_TOOL_LABELS.has(normalizeToolLabel(activity.label));
+}
+
+function subagentName(index: number): string {
+  return SUBAGENT_NAMES[index % SUBAGENT_NAMES.length] ?? `Agent ${index + 1}`;
+}
+
+function statusFromTool(activity: ToolActivity): WorkConsoleRowStatus {
+  if (activity.status === "running") return "running";
+  if (activity.status === "done") return "done";
+  if (activity.status === "error" || activity.status === "denied") return "error";
+  return "info";
+}
+
+function statusFromSubagent(activity: SubagentActivity): WorkConsoleRowStatus {
+  if (activity.status === "running") return "running";
+  if (activity.status === "waiting") return "waiting";
+  if (activity.status === "done") return "done";
+  if (activity.status === "error" || activity.status === "cancelled") return "error";
+  return "info";
+}
+
+function statusFromTask(task: TaskBoardTask): WorkConsoleRowStatus {
+  if (task.status === "in_progress") return "running";
+  if (task.status === "completed") return "done";
+  if (task.status === "cancelled") return "error";
+  return "waiting";
+}
+
+function taskMeta(task: TaskBoardTask): string {
+  if (task.status === "in_progress") return "running";
+  if (task.status === "completed") return "done";
+  if (task.status === "cancelled") return "cancelled";
+  return "pending";
+}
+
+function phaseLabel(phase: ChannelState["turnPhase"]): string {
+  switch (phase) {
+    case "pending":
+      return "Preparing";
+    case "planning":
+      return "Planning";
+    case "executing":
+      return "Running";
+    case "verifying":
+      return "Verifying";
+    case "committing":
+      return "Writing answer";
+    case "committed":
+      return "Finalizing";
+    case "aborted":
+      return "Interrupted";
+    default:
+      return "Working";
+  }
+}
+
+function toolPreview(activity: ToolActivity): Pick<WorkConsoleRow, "label" | "detail" | "snippet"> {
+  const label = activity.label || "Running tool";
+  const detail = activity.inputPreview || activity.outputPreview;
+  return {
+    label,
+    detail: detail ? preview(detail, 120) : undefined,
+    snippet: activity.outputPreview ? preview(activity.outputPreview, 240) : undefined,
+  };
+}
+
+function deriveWorkConsoleRows({
+  channelState,
+  queuedMessages = [],
+  controlRequests = [],
+}: {
+  channelState: ChannelState;
+  queuedMessages?: QueuedMessage[];
+  controlRequests?: ControlRequestRecord[];
+}): WorkConsoleRow[] {
+  const rows: WorkConsoleRow[] = [];
+  const phase = channelState.reconnecting
+    ? "Reconnecting"
+    : channelState.error
+      ? "Blocked"
+      : channelState.turnPhase
+        ? phaseLabel(channelState.turnPhase)
+        : channelState.streaming
+          ? "Working"
+          : null;
+  const elapsed = formatElapsed(channelState.heartbeatElapsedMs);
+
+  if (phase) {
+    rows.push({
+      id: "phase",
+      group: "status",
+      label: phase,
+      detail: elapsed ? `${elapsed} elapsed` : undefined,
+      status: channelState.error || channelState.turnPhase === "aborted" ? "error" : "running",
+    });
+  }
+
+  for (const [index, subagent] of (channelState.subagents ?? []).entries()) {
+    rows.push({
+      id: `subagent:${subagent.taskId}`,
+      group: "subagent",
+      label: subagentName(index),
+      detail: subagent.detail,
+      status: statusFromSubagent(subagent),
+      meta: normalizeRole(subagent.role),
+    });
+  }
+
+  for (const activity of channelState.activeTools ?? []) {
+    if (!shouldDisplayToolActivity(activity)) continue;
+    const duration = activity.durationMs ? formatElapsed(activity.durationMs) : undefined;
+    rows.push({
+      id: `tool:${activity.id}`,
+      group: "tool",
+      ...toolPreview(activity),
+      status: statusFromTool(activity),
+      ...(duration ? { meta: duration } : {}),
+    });
+  }
+
+  for (const task of channelState.taskBoard?.tasks ?? []) {
+    rows.push({
+      id: `task:${task.id}`,
+      group: "task",
+      label: task.title,
+      detail: task.description,
+      status: statusFromTask(task),
+      meta: taskMeta(task),
+    });
+  }
+
+  for (const [index, message] of queuedMessages.entries()) {
+    rows.push({
+      id: `queue:${message.id}`,
+      group: "queue",
+      label: index === 0 ? "Queued follow-up" : `Queued follow-up ${index + 1}`,
+      detail: message.content,
+      status: message.priority === "now" ? "running" : "waiting",
+      meta: message.priority === "now" ? "steering next" : "will send later",
+    });
+  }
+
+  for (const request of controlRequests.filter((item) => item.state === "pending")) {
+    rows.push({
+      id: `control:${request.requestId}`,
+      group: "control",
+      label: request.kind === "user_question" ? "Needs answer" : "Needs approval",
+      detail: request.prompt,
+      status: "waiting",
+      meta: request.kind.replace("_", " "),
+    });
+  }
+
+  if (rows.length === 0) {
+    return [
+      {
+        id: "idle",
+        group: "status",
+        label: "Idle",
+        detail: "Live agent work will appear here.",
+        status: "info",
+      },
+    ];
+  }
+  return rows;
+}
+
+function groupWorkRows(rows: WorkConsoleRow[]): Array<[WorkConsoleRowGroup, WorkConsoleRow[]]> {
+  const groups = new Map<WorkConsoleRowGroup, WorkConsoleRow[]>();
+  for (const row of rows) groups.set(row.group, [...(groups.get(row.group) ?? []), row]);
+  return Array.from(groups.entries());
 }
 
 function defaultSessionKey(): string {
@@ -370,6 +698,9 @@ function WorkDock({
   setActiveDock,
   runtime,
   events,
+  channelState,
+  queuedMessages,
+  controlRequests,
   knowledgeQuery,
   setKnowledgeQuery,
   knowledgePath,
@@ -386,6 +717,9 @@ function WorkDock({
   setActiveDock: (view: DockView) => void;
   runtime: RuntimeSnapshot | null;
   events: EventRecord[];
+  channelState: ChannelState;
+  queuedMessages: QueuedMessage[];
+  controlRequests: ControlRequestRecord[];
   knowledgeQuery: string;
   setKnowledgeQuery: (value: string) => void;
   knowledgePath: string;
@@ -398,37 +732,10 @@ function WorkDock({
   onSaveKnowledge: () => void;
   onReloadSkills: () => void;
 }) {
-  const toolRows = runtime?.tasks?.items ?? [];
   const sessionRows = runtime?.sessions?.items ?? [];
   const artifactRows = runtime?.artifacts?.items ?? [];
   const cronRows = runtime?.crons?.items ?? [];
-  const helperNames = [
-    "Halley",
-    "Meitner",
-    "Kant",
-    "Noether",
-    "Turing",
-    "Curie",
-    "Hopper",
-    "Lovelace",
-    "Feynman",
-    "Franklin",
-    "Shannon",
-    "Lamarr",
-  ];
-  const helperRows = helperNames.map((name, index) => ({
-    name,
-    role: index < 6 ? "math-computer" : index < 10 ? "calculator-opus" : "calculator-gemini",
-    iteration: index === 2 ? 2 : index === 6 ? 3 : 1,
-    tone: index % 3 === 0 ? "green" : "purple",
-  }));
-  const activeTools = toolRows.length > 0
-    ? toolRows
-    : [
-        { title: "Assigning helper", status: "running", detail: "Compute, verify, or inspect a bounded part of the task." },
-        { title: "TaskList", status: "running", detail: "Status: running" },
-        { title: "TaskOutput", status: "running", detail: "Waiting for results" },
-      ];
+  const workGroups = groupWorkRows(deriveWorkConsoleRows({ channelState, queuedMessages, controlRequests }));
   return (
     <aside className="work-dock" aria-label="Work">
       <header className="work-dock-header">
@@ -448,51 +755,41 @@ function WorkDock({
             <h3>Work in progress</h3>
             <p>Plain-language progress from the current run.</p>
           </div>
-          <section className="work-card live">
-            <div className="work-card-title">
-              <span>NOW</span>
-              <Pill tone="purple">LIVE</Pill>
-            </div>
-            <div className="work-step running">
-              <span />
-              <div>
-                <strong>Running</strong>
-                <p>Runtime is ready for a local session.</p>
+          {workGroups.map(([group, rows]) => (
+            <section key={group} className={`work-card work-card-${group} ${group === "status" ? "live" : ""} ${group === "subagent" ? "helpers-card" : ""}`}>
+              <div className="work-card-title">
+                <span>{GROUP_LABELS[group]}</span>
+                {group === "status" && channelState.streaming && <Pill tone="purple">LIVE</Pill>}
+                {group === "tool" && <Pill>{rows.length}</Pill>}
+                {group === "subagent" && <Pill tone="green">{rows.length} AGENTS</Pill>}
+                {group === "queue" && <Pill tone="amber">{rows.length} WAITING</Pill>}
               </div>
-            </div>
-          </section>
-          <section className="work-card helpers-card">
-            <div className="work-card-title">
-              <span>HELPERS</span>
-              <Pill tone="green">{helperRows.length} AGENTS</Pill>
-            </div>
-            <div className="helper-grid">
-              {helperRows.map((helper) => (
-                <div key={helper.name} className="helper-chip">
-                  <span className={`helper-dot ${helper.tone}`} />
-                  <strong>{helper.name} <em>{helper.role}</em></strong>
-                  <div className="helper-bar">iteration {helper.iteration}</div>
-                </div>
-              ))}
-            </div>
-          </section>
-          <section className="work-card">
-            <div className="work-card-title">
-              <span>CURRENT STEPS</span>
-              <Pill>{activeTools.length}</Pill>
-            </div>
-            <div id="tasks-list" className="current-step-list">
-              {activeTools.map((tool, index) => (
-                <div key={`${asString(tool.taskId) || asString(tool.title) || index}`} className="current-step-row">
-                  <span className="green-dot" />
-                  <div>
-                    <strong>{asString(tool.title) || asString(tool.name) || asString(tool.taskId) || "Working in workspace"}</strong>
-                    <p>{asString(tool.detail) || asString(tool.promptPreview) || asString(tool.status, "Status: running")}</p>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </section>
+              <div
+                id={group === "tool" ? "tasks-list" : undefined}
+                className={group === "subagent" ? "helper-grid" : group === "tool" ? "current-step-list" : "work-row-list"}
+              >
+                {rows.map((row) => (
+                  group === "subagent" ? (
+                    <div key={row.id} className="helper-chip" data-work-console-agent-chip="true" data-work-console-row-status={row.status}>
+                      <span className={`helper-dot ${row.status === "done" ? "green" : row.status === "waiting" ? "amber" : row.status === "error" ? "red" : "purple"}`} />
+                      <strong>{row.label} {row.meta && <em>{row.meta}</em>}</strong>
+                      {row.detail && <div className="helper-bar">{row.detail}</div>}
+                    </div>
+                  ) : (
+                    <div key={row.id} className={`current-step-row work-row-${row.status}`} data-work-console-action-row={group === "tool" ? "true" : undefined} data-work-console-row-status={row.status}>
+                      <span className={row.status === "running" ? "purple-dot" : row.status === "error" ? "red-dot" : row.status === "waiting" ? "amber-dot" : "green-dot"} />
+                      <div>
+                        <strong>{row.label}</strong>
+                        {row.meta && <small>{row.meta}</small>}
+                        {row.detail && <p>{row.detail}</p>}
+                        {row.snippet && <pre>{row.snippet}</pre>}
+                      </div>
+                    </div>
+                  )
+                ))}
+              </div>
+            </section>
+          ))}
           <section className="work-card">
             <div className="work-card-title"><span>SESSIONS</span></div>
             <SnapshotList id="sessions-list" items={sessionRows} empty="No sessions" />
@@ -570,10 +867,15 @@ function ChatView({
   onReset,
   modelOverride,
   setModelOverride,
+  streamingMode,
+  setStreamingMode,
   activeDock,
   setActiveDock,
   runtime,
   events,
+  channelState,
+  queuedMessages,
+  controlRequests,
   knowledgeProps,
   onReloadSkills,
 }: {
@@ -590,13 +892,34 @@ function ChatView({
   onReset: () => void;
   modelOverride: string;
   setModelOverride: (value: string) => void;
+  streamingMode: "queue" | "steer";
+  setStreamingMode: (value: "queue" | "steer") => void;
   activeDock: DockView;
   setActiveDock: (view: DockView) => void;
   runtime: RuntimeSnapshot | null;
   events: EventRecord[];
+  channelState: ChannelState;
+  queuedMessages: QueuedMessage[];
+  controlRequests: ControlRequestRecord[];
   knowledgeProps: Pick<Parameters<typeof WorkDock>[0], "knowledgeQuery" | "setKnowledgeQuery" | "knowledgePath" | "setKnowledgePath" | "knowledgeContent" | "setKnowledgeContent" | "knowledgeItems" | "onSearchKnowledge" | "onLoadKnowledge" | "onSaveKnowledge">;
   onReloadSkills: () => void;
 }) {
+  const activeToolCount = (channelState.activeTools ?? []).filter((tool) => tool.status === "running").length;
+  const activeSubagentCount = (channelState.subagents ?? []).filter((subagent) => subagent.status === "running" || subagent.status === "waiting").length;
+  const pendingRequests = controlRequests.filter((request) => request.state === "pending");
+  const visibleRunState =
+    channelState.streaming ||
+    activeToolCount > 0 ||
+    activeSubagentCount > 0 ||
+    queuedMessages.length > 0 ||
+    pendingRequests.length > 0 ||
+    Boolean(channelState.taskBoard?.tasks.some((task) => task.status === "pending" || task.status === "in_progress"));
+  const currentWork =
+    channelState.taskBoard?.tasks.find((task) => task.status === "in_progress")?.title ||
+    channelState.activeTools?.find((tool) => tool.status === "running")?.label ||
+    channelState.subagents?.find((subagent) => subagent.status === "running" || subagent.status === "waiting")?.detail ||
+    (isStreaming ? "Working on your request" : "Waiting for input");
+
   return (
     <div className="cloud-chat-shell" data-cloud-chat-shell="true">
       <ChatSidebar
@@ -625,15 +948,29 @@ function ChatView({
             ))
           )}
         </div>
-        <section className="current-run-card" aria-label="Current run">
-          <button type="button" className="run-card-close">×</button>
-          <div className="run-grid">
-            <span>CURRENT RUN</span>
-            <strong>{isStreaming ? "Running" : "Ready"}</strong>
-            <span>CURRENT WORK</span>
-            <strong>{isStreaming ? "Working on your request" : "Waiting for input"}</strong>
-          </div>
-        </section>
+        {visibleRunState && (
+          <section className="current-run-card" aria-label="Current run">
+            <button type="button" className="run-card-close">×</button>
+            <div className="run-grid">
+              <span>CURRENT RUN</span>
+              <strong>{channelState.reconnecting ? "Reconnecting" : phaseLabel(channelState.turnPhase ?? null)}</strong>
+              <span>CURRENT WORK</span>
+              <strong>{currentWork}</strong>
+              {activeToolCount > 0 && (
+                <>
+                  <span>ACTIONS</span>
+                  <strong>{activeToolCount} active</strong>
+                </>
+              )}
+              {activeSubagentCount > 0 && (
+                <>
+                  <span>HELPERS</span>
+                  <strong>{activeSubagentCount} active</strong>
+                </>
+              )}
+            </div>
+          </section>
+        )}
         <form
           id="message-form"
           className="chat-composer"
@@ -643,10 +980,12 @@ function ChatView({
             onSend();
           }}
         >
-          <div className="composer-mode-row">
-            <button type="button" className="mode-active">Queue after run</button>
-            <button type="button">Steer current run</button>
-          </div>
+          {isStreaming && (
+            <div className="composer-mode-row" aria-label="Streaming send mode">
+              <button type="button" className={streamingMode === "queue" ? "mode-active" : ""} onClick={() => setStreamingMode("queue")}>Queue after run</button>
+              <button type="button" className={streamingMode === "steer" ? "mode-active" : ""} onClick={() => setStreamingMode("steer")}>Steer current run</button>
+            </div>
+          )}
           <textarea
             id="message-input"
             value={input}
@@ -677,6 +1016,9 @@ function ChatView({
         setActiveDock={setActiveDock}
         runtime={runtime}
         events={events}
+        channelState={channelState}
+        queuedMessages={queuedMessages}
+        controlRequests={controlRequests}
         onReloadSkills={onReloadSkills}
         {...knowledgeProps}
       />
@@ -965,8 +1307,12 @@ export function App() {
   const [runtime, setRuntime] = useState<RuntimeSnapshot | null>(null);
   const [events, setEvents] = useState<EventRecord[]>([]);
   const [messages, setMessages] = useState<Message[]>([]);
+  const [channelState, setChannelState] = useState<ChannelState>(() => initialChannelState());
+  const [queuedMessages, setQueuedMessages] = useState<QueuedMessage[]>([]);
+  const [controlRequests, setControlRequests] = useState<ControlRequestRecord[]>([]);
   const [input, setInput] = useState("");
   const [isStreaming, setIsStreaming] = useState(false);
+  const [streamingMode, setStreamingMode] = useState<"queue" | "steer">("queue");
   const [deferredInstallPrompt, setDeferredInstallPrompt] = useState<BeforeInstallPromptEvent | null>(null);
   const [config, setConfig] = useState<AppConfig>({});
   const [configStatus, setConfigStatus] = useState("");
@@ -1174,6 +1520,82 @@ export function App() {
     }
   }, [addEvent, loadAppConfig, loadEvidence, loadKnowledge, loadRuntimeSnapshot, loadTranscript, loadWorkspace, normalizedBase]);
 
+  const upsertToolActivity = useCallback((patch: ToolActivity) => {
+    setChannelState((current) => {
+      const next = [...(current.activeTools ?? [])];
+      const index = next.findIndex((tool) => tool.id === patch.id);
+      if (index >= 0) {
+        next[index] = {
+          ...next[index],
+          ...patch,
+          label: patch.label === patch.id ? next[index].label : patch.label,
+          startedAt: next[index].startedAt,
+        };
+      }
+      else next.push(patch);
+      return { ...current, activeTools: next };
+    });
+  }, []);
+
+  const upsertSubagentActivity = useCallback((patch: SubagentActivity) => {
+    setChannelState((current) => {
+      const next = [...(current.subagents ?? [])];
+      const index = next.findIndex((subagent) => subagent.taskId === patch.taskId);
+      if (index >= 0) next[index] = { ...next[index], ...patch };
+      else next.push(patch);
+      return { ...current, subagents: next };
+    });
+  }, []);
+
+  const applyControlEvent = useCallback((event: unknown) => {
+    if (!event || typeof event !== "object") return;
+    const record = event as JsonRecord;
+    const type = asString(record.type);
+    if (type === "control_request_created" && record.request && typeof record.request === "object") {
+      const request = record.request as JsonRecord;
+      const requestId = asString(request.requestId);
+      const prompt = asString(request.prompt);
+      if (!requestId || !prompt) return;
+      const next: ControlRequestRecord = {
+        requestId,
+        kind: request.kind === "plan_approval" || request.kind === "user_question" ? request.kind : "tool_permission",
+        state: request.state === "approved" || request.state === "denied" || request.state === "answered" || request.state === "cancelled" || request.state === "timed_out" ? request.state : "pending",
+        sessionKey: asString(request.sessionKey, sessionKey || defaultSessionKey()),
+        source: request.source === "mcp" || request.source === "child-agent" || request.source === "plan" || request.source === "system" ? request.source : "turn",
+        prompt,
+        createdAt: asNumber(request.createdAt, Date.now()),
+        expiresAt: asNumber(request.expiresAt, Date.now()),
+      };
+      setControlRequests((current) => [next, ...current.filter((item) => item.requestId !== next.requestId)]);
+      return;
+    }
+    const requestId = asString(record.requestId);
+    if (!requestId) return;
+    if (type === "control_request_resolved") {
+      setControlRequests((current) => current.map((item) => item.requestId === requestId ? { ...item, state: record.decision === "answered" ? "answered" : record.decision === "approved" ? "approved" : "denied", resolvedAt: Date.now() } : item));
+    }
+    if (type === "control_request_cancelled") {
+      setControlRequests((current) => current.map((item) => item.requestId === requestId ? { ...item, state: "cancelled", resolvedAt: Date.now() } : item));
+    }
+    if (type === "control_request_timed_out") {
+      setControlRequests((current) => current.map((item) => item.requestId === requestId ? { ...item, state: "timed_out", resolvedAt: Date.now() } : item));
+    }
+  }, [sessionKey]);
+
+  const tasksFromPayload = useCallback((payload: JsonRecord): TaskBoardTask[] => {
+    return asArray(payload.tasks).map((task, index): TaskBoardTask => {
+      const status = task.status === "in_progress" || task.status === "completed" || task.status === "cancelled" ? task.status : "pending";
+      return {
+        id: asString(task.id, `task-${index + 1}`),
+        title: asString(task.title, asString(task.name, `Task ${index + 1}`)),
+        description: asString(task.description, asString(task.detail)),
+        status,
+        ...(Array.isArray(task.dependsOn) ? { dependsOn: task.dependsOn.filter((item): item is string => typeof item === "string") } : {}),
+        ...(typeof task.parallelGroup === "string" ? { parallelGroup: task.parallelGroup } : {}),
+      };
+    });
+  }, []);
+
   const appendAssistantText = useCallback((text: string) => {
     setMessages((current) => {
       const last = current[current.length - 1];
@@ -1182,10 +1604,24 @@ export function App() {
       }
       return [...current, { id: nowId("assistant"), role: "assistant", text, streaming: true }];
     });
+    setChannelState((current) => ({
+      ...current,
+      streaming: true,
+      streamingText: `${current.streamingText}${text}`,
+      hasTextContent: true,
+    }));
   }, []);
 
   const finishAssistantMessage = useCallback(() => {
     setMessages((current) => current.map((message) => message.streaming ? { ...message, streaming: false } : message));
+    setChannelState((current) => ({
+      ...current,
+      streaming: false,
+      streamingText: "",
+      thinkingText: "",
+      thinkingStartedAt: null,
+      heartbeatElapsedMs: null,
+    }));
   }, []);
 
   const handleSseEvent = useCallback((eventName: string, rawData: string) => {
@@ -1204,8 +1640,135 @@ export function App() {
     if (eventName === "agent") {
       const type = asString(payload.type, "agent");
       addEvent(type, payload);
+      if (type === "turn_start") {
+        setChannelState((current) => ({
+          ...current,
+          streaming: true,
+          turnPhase: "pending",
+          error: null,
+          activeTools: [],
+          subagents: [],
+          taskBoard: null,
+          heartbeatElapsedMs: null,
+        }));
+      }
+      if (type === "turn_phase") {
+        const phase = payload.phase;
+        if (phase === "pending" || phase === "planning" || phase === "executing" || phase === "verifying" || phase === "committing" || phase === "committed" || phase === "aborted") {
+          setChannelState((current) => ({ ...current, turnPhase: phase }));
+        }
+      }
+      if (type === "response_clear") {
+        setMessages((current) => current.filter((message) => !message.streaming));
+        setChannelState((current) => ({ ...current, streamingText: "", hasTextContent: false }));
+      }
+      if (type === "thinking_delta" && typeof payload.delta === "string") {
+        setChannelState((current) => ({
+          ...current,
+          streaming: true,
+          thinkingText: `${current.thinkingText}${payload.delta as string}`,
+          thinkingStartedAt: current.thinkingStartedAt ?? Date.now(),
+        }));
+      }
       if (type === "text_delta" && typeof payload.delta === "string") appendAssistantText(payload.delta);
-      if (type === "turn_end") finishAssistantMessage();
+      if (type === "tool_start") {
+        const id = asString(payload.id, nowId("tool"));
+        upsertToolActivity({
+          id,
+          label: asString(payload.name, "Running tool"),
+          status: "running",
+          startedAt: Date.now(),
+          inputPreview: asString(payload.input_preview),
+        });
+      }
+      if (type === "tool_progress") {
+        const id = asString(payload.id);
+        if (id) {
+          upsertToolActivity({
+            id,
+            label: asString(payload.label, "Running tool"),
+            status: "running",
+            startedAt: Date.now(),
+          });
+        }
+      }
+      if (type === "tool_end") {
+        const id = asString(payload.id);
+        if (id) {
+          const status = payload.status === "error" || payload.status === "denied" ? payload.status : "done";
+          upsertToolActivity({
+            id,
+            label: asString(payload.name, asString(payload.label, id)),
+            status,
+            startedAt: Date.now(),
+            outputPreview: asString(payload.output_preview),
+            durationMs: asNumber(payload.durationMs),
+          });
+        }
+      }
+      if (type === "task_board") {
+        setChannelState((current) => ({
+          ...current,
+          taskBoard: { tasks: tasksFromPayload(payload), receivedAt: Date.now() },
+        }));
+      }
+      if (type === "spawn_started" || type === "child_started" || type === "background_task") {
+        const taskId = asString(payload.taskId, nowId("child"));
+        const status = payload.status === "completed" ? "done" : payload.status === "failed" || payload.status === "aborted" ? "error" : "running";
+        upsertSubagentActivity({
+          taskId,
+          role: asString(payload.persona, "worker"),
+          status,
+          detail: asString(payload.prompt, asString(payload.detail)),
+          startedAt: Date.now(),
+          updatedAt: Date.now(),
+        });
+      }
+      if (type === "child_progress") {
+        const taskId = asString(payload.taskId);
+        if (taskId) {
+          upsertSubagentActivity({
+            taskId,
+            role: "worker",
+            status: "running",
+            detail: asString(payload.detail),
+            startedAt: Date.now(),
+            updatedAt: Date.now(),
+          });
+        }
+      }
+      if (type === "spawn_result" || type === "child_completed" || type === "child_failed" || type === "child_cancelled") {
+        const taskId = asString(payload.taskId);
+        if (taskId) {
+          upsertSubagentActivity({
+            taskId,
+            role: "worker",
+            status: type === "child_completed" || payload.status === "ok" ? "done" : type === "child_cancelled" ? "cancelled" : "error",
+            detail: asString(payload.finalText, asString(payload.errorMessage, asString(payload.reason))),
+            startedAt: Date.now(),
+            updatedAt: Date.now(),
+          });
+        }
+      }
+      if (type === "heartbeat") {
+        setChannelState((current) => ({
+          ...current,
+          heartbeatElapsedMs: asNumber(payload.elapsedMs, current.heartbeatElapsedMs ?? 0),
+        }));
+      }
+      if (type === "turn_interrupted") {
+        setChannelState((current) => ({ ...current, turnPhase: "aborted" }));
+      }
+      if (type === "control_event") {
+        applyControlEvent(payload.event);
+      }
+      if (type === "turn_end") {
+        setChannelState((current) => ({
+          ...current,
+          turnPhase: payload.status === "aborted" ? "aborted" : "committed",
+        }));
+        finishAssistantMessage();
+      }
       return;
     }
     const choices = Array.isArray(payload.choices) ? payload.choices : [];
@@ -1214,14 +1777,17 @@ export function App() {
       : undefined;
     if (typeof delta === "string") appendAssistantText(delta);
     if (choices[0] && typeof choices[0] === "object" && (choices[0] as JsonRecord).finish_reason) finishAssistantMessage();
-  }, [addEvent, appendAssistantText, finishAssistantMessage]);
+  }, [addEvent, appendAssistantText, applyControlEvent, finishAssistantMessage, tasksFromPayload, upsertSubagentActivity, upsertToolActivity]);
 
-  const sendMessage = useCallback(async () => {
-    const text = input.trim();
-    if (!text || isStreaming) return;
+  const streamTurn = useCallback(async (text: string) => {
+    if (!text.trim()) return;
     saveConnection();
-    setInput("");
-    setMessages((current) => [...current, { id: nowId("user"), role: "user", text }]);
+    setMessages((current) => [...current, { id: nowId("user"), role: "user", text: text.trim() }]);
+    setChannelState({
+      ...initialChannelState(),
+      streaming: true,
+      turnPhase: "pending",
+    });
     setIsStreaming(true);
     try {
       const response = await fetch(`${normalizedBase}/v1/chat/completions`, {
@@ -1230,7 +1796,7 @@ export function App() {
         body: JSON.stringify({
           stream: true,
           ...(modelOverride.trim() && modelOverride.trim() !== "auto" ? { model: modelOverride.trim() } : {}),
-          messages: [{ role: "user", content: text }],
+          messages: [{ role: "user", content: text.trim() }],
         }),
       });
       if (!response.ok || !response.body) {
@@ -1255,7 +1821,52 @@ export function App() {
     } finally {
       setIsStreaming(false);
     }
-  }, [addEvent, authHeaders, finishAssistantMessage, handleSseEvent, input, isStreaming, loadEvidence, loadRuntimeSnapshot, loadTranscript, modelOverride, normalizedBase, saveConnection]);
+  }, [addEvent, authHeaders, finishAssistantMessage, handleSseEvent, loadEvidence, loadRuntimeSnapshot, loadTranscript, modelOverride, normalizedBase, saveConnection]);
+
+  const sendMessage = useCallback(async () => {
+    const text = input.trim();
+    if (!text) return;
+    setInput("");
+
+    if (isStreaming) {
+      if (streamingMode === "steer") {
+        try {
+          await sendJson("/v1/chat/inject", "POST", {
+            sessionKey: sessionKey.trim() || defaultSessionKey(),
+            text,
+            source: "web",
+          });
+          setMessages((current) => [...current, { id: nowId("user"), role: "user", text }]);
+          setChannelState((current) => ({
+            ...current,
+            pendingInjectionCount: (current.pendingInjectionCount ?? 0) + 1,
+          }));
+          addEvent("message_injected", { sessionKey, length: text.length });
+          return;
+        } catch (error) {
+          addEvent("message_inject_failed", { message: String(error instanceof Error ? error.message : error) });
+        }
+      }
+      const queued: QueuedMessage = {
+        id: nowId("queue"),
+        content: text,
+        priority: "next",
+        queuedAt: Date.now(),
+      };
+      setQueuedMessages((current) => [...current, queued].slice(0, 8));
+      addEvent("message_queued", { sessionKey, length: text.length });
+      return;
+    }
+
+    await streamTurn(text);
+  }, [addEvent, input, isStreaming, sendJson, sessionKey, streamTurn, streamingMode]);
+
+  useEffect(() => {
+    if (isStreaming || queuedMessages.length === 0) return;
+    const [next, ...rest] = queuedMessages;
+    setQueuedMessages(rest);
+    void streamTurn(next.content);
+  }, [isStreaming, queuedMessages, streamTurn]);
 
   useEffect(() => {
     addEvent("app_ready", { agentUrl, sessionKey });
@@ -1311,13 +1922,23 @@ export function App() {
         setInput={setInput}
         isStreaming={isStreaming}
         onSend={() => void sendMessage()}
-        onReset={() => setMessages([])}
+        onReset={() => {
+          setMessages([]);
+          setQueuedMessages([]);
+          setControlRequests([]);
+          setChannelState(initialChannelState());
+        }}
         modelOverride={modelOverride}
         setModelOverride={setModelOverride}
+        streamingMode={streamingMode}
+        setStreamingMode={setStreamingMode}
         activeDock={activeDock}
         setActiveDock={setActiveDock}
         runtime={runtime}
         events={events}
+        channelState={channelState}
+        queuedMessages={queuedMessages}
+        controlRequests={controlRequests}
         knowledgeProps={knowledgeProps}
         onReloadSkills={() => void reloadSkills().catch((error) => addEvent("skills_reload_error", { message: String(error instanceof Error ? error.message : error) }))}
       />

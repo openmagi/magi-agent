@@ -757,6 +757,14 @@ code {
   background: var(--primary);
 }
 
+.helper-dot.amber {
+  background: var(--amber);
+}
+
+.helper-dot.red {
+  background: var(--red);
+}
+
 .helper-chip strong {
   display: block;
   min-width: 0;
@@ -808,9 +816,40 @@ code {
   margin-top: 6px;
 }
 
+.purple-dot,
+.red-dot,
+.amber-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  margin-top: 6px;
+  border-radius: 99px;
+}
+
+.purple-dot {
+  background: var(--primary);
+  box-shadow: 0 0 0 4px rgba(124, 58, 237, 0.1);
+}
+
+.red-dot {
+  background: var(--red);
+}
+
+.amber-dot {
+  background: var(--amber);
+}
+
 .current-step-row strong {
+  display: inline-block;
   color: var(--foreground);
   font-size: 13px;
+}
+
+.current-step-row small {
+  margin-left: 7px;
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 700;
 }
 
 .current-step-row p {
@@ -818,6 +857,20 @@ code {
   color: var(--secondary);
   font-size: 12px;
   line-height: 1.45;
+}
+
+.current-step-row pre {
+  max-height: 86px;
+  overflow: auto;
+  margin-top: 7px;
+  border-radius: 8px;
+  background: rgba(15, 23, 42, 0.05);
+  color: var(--secondary);
+  font-size: 11px;
+  line-height: 1.45;
+  padding: 8px;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
 .snapshot-list {

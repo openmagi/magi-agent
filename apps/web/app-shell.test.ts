@@ -17,9 +17,16 @@ describe("Magi App shell", () => {
     expect(source).toContain('className="chat-sidebar"');
     expect(source).toContain('className="work-dock"');
     expect(source).toContain('data-chat-input-shell="true"');
+    expect(source).toContain("deriveWorkConsoleRows");
+    expect(source).toContain('type === "tool_start"');
+    expect(source).toContain('type === "task_board"');
+    expect(source).toContain('type === "child_progress"');
     expect(source).toContain("Work in progress");
     expect(source).toContain("Knowledge Base");
     expect(source).toContain("Agent Safeguards");
+    expect(source).not.toContain("math-computer");
+    expect(source).not.toContain("Assigning helper");
+    expect(source).not.toContain("TaskOutput");
   });
 
   it("carries the cloud visual system into the app stylesheet", () => {
@@ -43,5 +50,8 @@ describe("Magi App shell", () => {
     expect(js).toContain("createSseParser");
     expect(js).toContain("cloud-chat-shell");
     expect(js).toContain("runtime-config-form");
+    expect(js).toContain("deriveWorkConsoleRows");
+    expect(js).not.toContain("math-computer");
+    expect(js).not.toContain("Assigning helper");
   });
 });
