@@ -413,6 +413,13 @@ dd {
   white-space: pre-wrap;
 }
 
+.status-line {
+  min-height: 18px;
+  color: var(--warning);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
 .events {
   display: flex;
   flex-direction: column;

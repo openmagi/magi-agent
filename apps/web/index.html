@@ -134,6 +134,19 @@
             </section>
           </div>
           <section class="settings-panel">
+            <h3>Transcript Timeline</h3>
+            <button id="load-transcript-button" type="button" class="secondary compact-button">Load Transcript</button>
+            <div id="transcript-list" class="snapshot-list"></div>
+          </section>
+          <section class="settings-panel">
+            <h3>Artifact Content</h3>
+            <div class="split-fields">
+              <button id="open-artifact-button" type="button" class="secondary">Open Artifact</button>
+              <button id="download-artifact-button" type="button" class="secondary">Download Artifact</button>
+            </div>
+            <pre id="artifact-content" class="code-view"></pre>
+          </section>
+          <section class="settings-panel">
             <h3>Workspace Files</h3>
             <form id="workspace-form" class="mini-form">
               <label>
@@ -154,6 +167,8 @@
               </label>
               <button type="submit">Search Memory</button>
               <button id="load-memory-button" type="button" class="secondary">Load Memory</button>
+              <button id="memory-compact-button" type="button" class="secondary">Compact Memory</button>
+              <button id="memory-reindex-button" type="button" class="secondary">Reindex Memory</button>
             </form>
             <div id="memory-list" class="snapshot-list"></div>
             <div id="memory-results" class="snapshot-list"></div>
@@ -232,6 +247,10 @@
                 Server token env var
                 <input id="config-server-token-env" name="serverTokenEnvVar" autocomplete="off" />
               </label>
+              <label>
+                Workspace
+                <input id="config-workspace" name="workspace" autocomplete="off" />
+              </label>
               <div class="split-fields">
                 <label>
                   Context
@@ -244,6 +263,8 @@
               </div>
               <button type="submit">Save Config</button>
               <button id="load-config-button" type="button" class="secondary">Load Config</button>
+              <button id="config-reload-button" type="button" class="secondary">Restart Status</button>
+              <p id="config-restart-status" class="status-line"></p>
             </form>
           </section>
           <section class="settings-panel">

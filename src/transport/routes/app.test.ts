@@ -83,6 +83,11 @@ describe("HttpServer /app", () => {
     expect(res.body).toContain("memory-search-query");
     expect(res.body).toContain("cron-editor-form");
     expect(res.body).toContain("reload-skills-button");
+    expect(res.body).toContain("transcript-list");
+    expect(res.body).toContain("artifact-content");
+    expect(res.body).toContain("memory-compact-button");
+    expect(res.body).toContain("config-workspace");
+    expect(res.body).toContain("config-reload-button");
     expect(res.body).toContain("/app/app.js");
   });
 
@@ -98,6 +103,11 @@ describe("HttpServer /app", () => {
     expect(res.body).toContain("searchMemory");
     expect(res.body).toContain("saveCron");
     expect(res.body).toContain("reloadSkills");
+    expect(res.body).toContain("loadTranscript");
+    expect(res.body).toContain("openArtifact");
+    expect(res.body).toContain("downloadArtifact");
+    expect(res.body).toContain("compactMemory");
+    expect(res.body).toContain("reloadRuntimeConfig");
   });
 
   it("serves installable app assets", async () => {

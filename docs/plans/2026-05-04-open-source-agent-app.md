@@ -156,6 +156,8 @@ bearer-token gated by the server token:
 | `/v1/app/crons` `POST` | shipped | App-delivered cron creation. |
 | `/v1/app/crons/:cronId` `PUT`/`DELETE` | shipped | Non-internal cron update/delete controls. |
 | `/v1/app/artifacts` | shipped | Generated artifact index. |
+| `/v1/app/artifacts/:artifactId/content` | shipped | Artifact content viewer. |
+| `/v1/app/artifacts/:artifactId/download` | shipped | Artifact L0 Markdown download. |
 | `/v1/app/skills` | shipped | Skill load state, issues, and runtime skill hooks. |
 | `/v1/app/skills/reload` | shipped | Workspace skill reload through the app auth surface. |
 | `/v1/app/workspace` | shipped | Workspace directory listing. |
@@ -163,15 +165,17 @@ bearer-token gated by the server token:
 | `/v1/app/memory` | shipped | Hipocampus memory status and file listing. |
 | `/v1/app/memory/file` | shipped | Bounded memory file read. |
 | `/v1/app/memory/search` | shipped | Hipocampus/qmd recall search. |
+| `/v1/app/memory/compact` | shipped | Hipocampus compaction trigger. |
+| `/v1/app/memory/reindex` | shipped | qmd memory reindex trigger. |
 | `/v1/app/config` | shipped | Sanitized config read/write using environment variable references for secrets. |
+| `/v1/app/config/reload` | shipped | Restart-required status for config changes. |
 | `/v1/app/harness-rules` | shipped | Markdown harness rule list/read/write/delete in the workspace. |
 
 Remaining API work:
 
 - Session create/resume controls beyond the chat-completions session-key header.
-- Binary download endpoints for large generated files.
-- Rich transcript timeline grouping for tool calls, evidence gates, and delivery events.
-- Runtime config reload/restart control after provider config writes.
+- Rich evidence grouping for acceptance-criterion gates and delivery events.
+- Native supervisor integration for one-click process restart.
 
 Where an endpoint does not exist yet, the app plan should drive small,
 documented runtime API additions instead of coupling the app to private hosted
@@ -219,18 +223,19 @@ M5 has a Docker Compose starter plus self-host hardening notes.
 
 ### M3: Runtime Visibility
 
-- Add artifact panel. Initial index: done.
+- Add artifact panel. Initial index plus content/download controls: done.
 - Add workspace file panel. Done.
 - Add background task inspector. Initial index: done.
 - Add cron and skill inspector. Initial index: done.
-- Add execution evidence and checkpoint timeline.
+- Add execution evidence and checkpoint timeline. Initial transcript timeline:
+  done.
 - Add delivery event visibility so users can see when generated files are only written locally versus actually delivered.
 
 ### M4: Automation And Rules
 
 - Add cron list/create/update/delete UI. Done.
 - Add User Harness Rules editor backed by Markdown files. Initial editor: done.
-- Add memory and qmd inspector. Done.
+- Add memory and qmd inspector. Done, including compact/reindex controls.
 - Add skills list/reload UI. Done.
 
 ### M5: Self-Host Bundle

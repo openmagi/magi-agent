@@ -63,6 +63,10 @@ interface FakeAgent {
   };
   artifacts: {
     list(filter?: { kind?: string }): Promise<Array<Record<string, unknown>>>;
+    getMeta(artifactId: string): Promise<Record<string, unknown>>;
+    readL0(artifactId: string): Promise<string>;
+    readL1(artifactId: string): Promise<string>;
+    readL2(artifactId: string): Promise<string>;
   };
   tools: {
     list(): Array<{ name: string; permission: PermissionClass; kind?: string }>;
@@ -74,6 +78,8 @@ interface FakeAgent {
   };
   hipocampus: {
     status(): Promise<Record<string, unknown>>;
+    compact(force?: boolean): Promise<Record<string, unknown>>;
+    getQmdManager(): { reindex(): Promise<void> };
     recall(
       query: string,
       opts?: { limit?: number; collection?: string; minScore?: number },
@@ -165,7 +171,8 @@ function makeFakeAgent(workspaceRoot: string): FakeAgent {
       nextFireAt: 1_700_000_300_000,
       consecutiveFailures: 0,
       deliveryChannel: { type: "app", channelId: "web" },
-      prompt: "check queue",
+      prompt:
+        "check queue and write a long non-truncated operational summary with the next steps",
     },
     {
       cronId: "internal:hipocampus",
@@ -262,6 +269,31 @@ function makeFakeAgent(workspaceRoot: string): FakeAgent {
           updatedAt: 1_700_000_020_000,
         },
       ],
+      getMeta: async (artifactId) => {
+        if (artifactId !== "artifact-1") throw new Error(`artifact not found: ${artifactId}`);
+        return {
+          artifactId: "artifact-1",
+          kind: "doc",
+          title: "Plan",
+          slug: "plan",
+          path: "artifacts/artifact-1/plan.md",
+          sizeBytes: 42,
+          createdAt: 1_700_000_010_000,
+          updatedAt: 1_700_000_020_000,
+        };
+      },
+      readL0: async (artifactId) => {
+        if (artifactId !== "artifact-1") throw new Error(`artifact not found: ${artifactId}`);
+        return "# Plan\nFull artifact body\n";
+      },
+      readL1: async (artifactId) => {
+        if (artifactId !== "artifact-1") throw new Error(`artifact not found: ${artifactId}`);
+        return "Artifact overview";
+      },
+      readL2: async (artifactId) => {
+        if (artifactId !== "artifact-1") throw new Error(`artifact not found: ${artifactId}`);
+        return "---\ntitle: Plan\n---";
+      },
     },
     tools: {
       list: () => [
@@ -287,6 +319,17 @@ function makeFakeAgent(workspaceRoot: string): FakeAgent {
           path: "memory/ROOT.md",
           bytes: 20,
           loaded: true,
+        },
+      }),
+      compact: async (force = false) => ({
+        skipped: false,
+        compacted: true,
+        force,
+        stats: { daily: ["memory/daily/2026-05-07.md"], weekly: [], monthly: [] },
+      }),
+      getQmdManager: () => ({
+        reindex: async () => {
+          await fs.writeFile(path.join(workspaceRoot, "memory", ".reindexed"), "1", "utf8");
         },
       }),
       recall: async (query) => ({
@@ -351,6 +394,34 @@ function requestJson(
   });
 }
 
+function requestRaw(
+  url: string,
+  token?: string,
+): Promise<{ status: number; headers: http.IncomingHttpHeaders; body: string }> {
+  return new Promise((resolve, reject) => {
+    const req = http.request(
+      url,
+      {
+        method: "GET",
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      },
+      (res) => {
+        const chunks: Buffer[] = [];
+        res.on("data", (chunk) => chunks.push(Buffer.from(chunk)));
+        res.on("end", () => {
+          resolve({
+            status: res.statusCode ?? 0,
+            headers: res.headers,
+            body: Buffer.concat(chunks).toString("utf8"),
+          });
+        });
+      },
+    );
+    req.on("error", reject);
+    req.end();
+  });
+}
+
 describe("HttpServer /v1/app runtime routes", () => {
   let tmp: string;
   let server: HttpServer;
@@ -402,7 +473,11 @@ describe("HttpServer /v1/app runtime routes", () => {
       botId: string;
       sessions: { count: number; items: Array<{ sessionKey: string }> };
       tasks: { count: number; items: Array<{ taskId: string; promptPreview: string }> };
-      crons: { count: number; internalCount: number };
+      crons: {
+        count: number;
+        internalCount: number;
+        items: Array<{ prompt: string; promptPreview: string }>;
+      };
       artifacts: { count: number; items: Array<{ artifactId: string; title: string }> };
       tools: { count: number; skillCount: number };
       skills: { loadedCount: number; runtimeHookCount: number };
@@ -416,6 +491,9 @@ describe("HttpServer /v1/app runtime routes", () => {
     );
     expect(body.crons.count).toBe(2);
     expect(body.crons.internalCount).toBe(1);
+    expect(body.crons.items[0]?.prompt).toContain(
+      "long non-truncated operational summary",
+    );
     expect(body.artifacts.items[0]?.title).toBe("Plan");
     expect(body.tools.skillCount).toBe(1);
     expect(body.skills.loadedCount).toBe(1);
@@ -560,6 +638,58 @@ describe("HttpServer /v1/app runtime routes", () => {
         ],
       }),
     );
+  });
+
+  it("runs memory compaction and qmd reindex from the app surface", async () => {
+    const compact = await requestJson(
+      `http://127.0.0.1:${port}/v1/app/memory/compact`,
+      "local-token",
+      { method: "POST", body: { force: true } },
+    );
+
+    expect(compact.status).toBe(200);
+    expect(compact.body).toEqual(
+      expect.objectContaining({
+        ok: true,
+        result: expect.objectContaining({ compacted: true, force: true }),
+      }),
+    );
+
+    const reindex = await requestJson(
+      `http://127.0.0.1:${port}/v1/app/memory/reindex`,
+      "local-token",
+      { method: "POST" },
+    );
+
+    expect(reindex.status).toBe(200);
+    expect(reindex.body).toEqual({ ok: true });
+    await expect(fs.readFile(path.join(tmp, "memory", ".reindexed"), "utf8")).resolves.toBe("1");
+  });
+
+  it("opens and downloads artifacts by id", async () => {
+    const content = await requestJson(
+      `http://127.0.0.1:${port}/v1/app/artifacts/artifact-1/content?tier=l0`,
+      "local-token",
+    );
+
+    expect(content.status).toBe(200);
+    expect(content.body).toEqual(
+      expect.objectContaining({
+        ok: true,
+        artifact: expect.objectContaining({ artifactId: "artifact-1", title: "Plan" }),
+        tier: "l0",
+        content: "# Plan\nFull artifact body\n",
+      }),
+    );
+
+    const download = await requestRaw(
+      `http://127.0.0.1:${port}/v1/app/artifacts/artifact-1/download`,
+      "local-token",
+    );
+
+    expect(download.status).toBe(200);
+    expect(download.headers["content-disposition"]).toContain("plan.md");
+    expect(download.body).toBe("# Plan\nFull artifact body\n");
   });
 
   it("returns and stops individual background tasks", async () => {

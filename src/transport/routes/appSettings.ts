@@ -174,7 +174,37 @@ async function handlePutConfig(
   const filePath = configPath();
   await fs.mkdir(path.dirname(filePath), { recursive: true });
   await fs.writeFile(filePath, renderConfig(body), "utf8");
-  writeJson(res, 200, { ok: true, path: filePath });
+  writeJson(res, 200, {
+    ok: true,
+    path: filePath,
+    restartRequired: true,
+    liveReloadSupported: false,
+  });
+}
+
+async function handleReloadConfig(
+  req: IncomingMessage,
+  res: ServerResponse,
+  _match: RegExpMatchArray,
+  ctx: HttpServerCtx,
+): Promise<void> {
+  if (!authorizeBearer(req, res, ctx)) return;
+  const filePath = configPath();
+  let raw = "";
+  try {
+    raw = await fs.readFile(filePath, "utf8");
+  } catch {
+    writeJson(res, 404, { error: "not_found" });
+    return;
+  }
+  const sanitized = sanitizeConfig(raw, filePath);
+  writeJson(res, 200, {
+    ok: true,
+    ...sanitized,
+    restartRequired: true,
+    liveReloadSupported: false,
+    message: "Restart the runtime process for provider, model, token, or workspace changes to take effect.",
+  });
 }
 
 function rulesDir(ctx: HttpServerCtx): string {
@@ -275,6 +305,7 @@ async function handleDeleteRule(
 export const appSettingsRoutes: RouteHandler[] = [
   route("GET", /^\/v1\/app\/config(?:\?.*)?$/, handleGetConfig),
   route("PUT", /^\/v1\/app\/config(?:\?.*)?$/, handlePutConfig),
+  route("POST", /^\/v1\/app\/config\/reload(?:\?.*)?$/, handleReloadConfig),
   route("GET", /^\/v1\/app\/harness-rules(?:\?.*)?$/, handleListRules),
   route("GET", /^\/v1\/app\/harness-rules\/([^/?]+)(?:\?.*)?$/, handleGetRule),
   route("PUT", /^\/v1\/app\/harness-rules\/([^/?]+)(?:\?.*)?$/, handlePutRule),

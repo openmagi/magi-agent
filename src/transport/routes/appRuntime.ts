@@ -108,6 +108,19 @@ function readChannel(value: unknown): ChannelRef | null {
   return { type: type as ChannelType, channelId };
 }
 
+function readArtifactTier(raw: string | null): "l0" | "l1" | "l2" {
+  return raw === "l1" || raw === "l2" ? raw : "l0";
+}
+
+function safeDownloadName(value: string): string {
+  const base = value
+    .trim()
+    .replace(/[^A-Za-z0-9._-]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 80);
+  return base || "artifact.md";
+}
+
 function taskOutputSnapshot(task: Record<string, unknown>) {
   const startedAt = typeof task.startedAt === "number" ? task.startedAt : Date.now();
   const finishedAt = typeof task.finishedAt === "number" ? task.finishedAt : Date.now();
@@ -185,6 +198,7 @@ function cronSnapshot(cron: CronRecord) {
     deliveryChannel: cron.deliveryChannel,
     ...(cron.description ? { description: cron.description } : {}),
     ...(cron.sessionKey ? { sessionKey: cron.sessionKey } : {}),
+    prompt: cron.prompt,
     promptPreview: preview(cron.prompt, 240) ?? "",
   };
 }
@@ -590,6 +604,73 @@ async function handleArtifacts(
   writeJson(res, 200, { ok: true, ...artifacts });
 }
 
+async function readArtifactContent(
+  ctx: HttpServerCtx,
+  artifactId: string,
+  tier: "l0" | "l1" | "l2",
+): Promise<{ meta: ArtifactMeta; content: string }> {
+  const meta = await ctx.agent.artifacts.getMeta(artifactId);
+  const content =
+    tier === "l1"
+      ? await ctx.agent.artifacts.readL1(artifactId)
+      : tier === "l2"
+        ? await ctx.agent.artifacts.readL2(artifactId)
+        : await ctx.agent.artifacts.readL0(artifactId);
+  return { meta, content };
+}
+
+async function handleArtifactContent(
+  req: IncomingMessage,
+  res: ServerResponse,
+  match: RegExpMatchArray,
+  ctx: HttpServerCtx,
+): Promise<void> {
+  if (!authorizeBearer(req, res, ctx)) return;
+  const artifactId = decodePathPart(match[1] ?? "");
+  if (!artifactId) {
+    writeJson(res, 400, { error: "invalid_artifact_id" });
+    return;
+  }
+  const tier = readArtifactTier(parseUrl(req.url).searchParams.get("tier"));
+  try {
+    const { meta, content } = await readArtifactContent(ctx, artifactId, tier);
+    writeJson(res, 200, {
+      ok: true,
+      artifact: artifactSnapshot(meta),
+      tier,
+      content,
+    });
+  } catch {
+    writeJson(res, 404, { error: "not_found" });
+  }
+}
+
+async function handleArtifactDownload(
+  req: IncomingMessage,
+  res: ServerResponse,
+  match: RegExpMatchArray,
+  ctx: HttpServerCtx,
+): Promise<void> {
+  if (!authorizeBearer(req, res, ctx)) return;
+  const artifactId = decodePathPart(match[1] ?? "");
+  if (!artifactId) {
+    writeJson(res, 400, { error: "invalid_artifact_id" });
+    return;
+  }
+  try {
+    const { meta, content } = await readArtifactContent(ctx, artifactId, "l0");
+    const filename = safeDownloadName(`${meta.slug || meta.artifactId}.md`);
+    res.writeHead(200, {
+      "Content-Type": "text/markdown; charset=utf-8",
+      "Content-Disposition": `attachment; filename="${filename}"`,
+      "Cache-Control": "no-cache",
+    });
+    res.end(content);
+  } catch {
+    writeJson(res, 404, { error: "not_found" });
+  }
+}
+
 async function handleSkills(
   req: IncomingMessage,
   res: ServerResponse,
@@ -744,6 +825,29 @@ async function handleMemorySearch(
       ...(result.context ? { context: result.context } : {}),
     })),
   });
+}
+
+async function handleMemoryCompact(
+  req: IncomingMessage,
+  res: ServerResponse,
+  _match: RegExpMatchArray,
+  ctx: HttpServerCtx,
+): Promise<void> {
+  if (!authorizeBearer(req, res, ctx)) return;
+  const body = readObject(await readJsonBody(req));
+  const result = await ctx.agent.hipocampus.compact(body.force === true);
+  writeJson(res, 200, { ok: true, result });
+}
+
+async function handleMemoryReindex(
+  req: IncomingMessage,
+  res: ServerResponse,
+  _match: RegExpMatchArray,
+  ctx: HttpServerCtx,
+): Promise<void> {
+  if (!authorizeBearer(req, res, ctx)) return;
+  await ctx.agent.hipocampus.getQmdManager().reindex();
+  writeJson(res, 200, { ok: true });
 }
 
 async function handleTaskGet(
@@ -968,6 +1072,8 @@ export const appRuntimeRoutes: RouteHandler[] = [
   route("PUT", /^\/v1\/app\/crons\/([^/?]+)(?:\?.*)?$/, handleCronUpdate),
   route("DELETE", /^\/v1\/app\/crons\/([^/?]+)(?:\?.*)?$/, handleCronDelete),
   route("GET", /^\/v1\/app\/artifacts(?:\?.*)?$/, handleArtifacts),
+  route("GET", /^\/v1\/app\/artifacts\/([^/?]+)\/content(?:\?.*)?$/, handleArtifactContent),
+  route("GET", /^\/v1\/app\/artifacts\/([^/?]+)\/download(?:\?.*)?$/, handleArtifactDownload),
   route("GET", /^\/v1\/app\/skills(?:\?.*)?$/, handleSkills),
   route("POST", /^\/v1\/app\/skills\/reload(?:\?.*)?$/, handleSkillsReload),
   route("GET", /^\/v1\/app\/workspace(?:\?.*)?$/, handleWorkspaceList),
@@ -975,4 +1081,6 @@ export const appRuntimeRoutes: RouteHandler[] = [
   route("GET", /^\/v1\/app\/memory(?:\?.*)?$/, handleMemoryList),
   route("GET", /^\/v1\/app\/memory\/file(?:\?.*)?$/, handleMemoryFile),
   route("GET", /^\/v1\/app\/memory\/search(?:\?.*)?$/, handleMemorySearch),
+  route("POST", /^\/v1\/app\/memory\/compact(?:\?.*)?$/, handleMemoryCompact),
+  route("POST", /^\/v1\/app\/memory\/reindex(?:\?.*)?$/, handleMemoryReindex),
 ];

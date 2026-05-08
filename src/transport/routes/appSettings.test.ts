@@ -140,11 +140,12 @@ describe("HttpServer /v1/app settings routes", () => {
           },
         },
         server: { gatewayTokenEnvVar: "MAGI_AGENT_SERVER_TOKEN" },
-        workspace: "./workspace",
+        workspace: "./workspace-alt",
       },
     });
 
     expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({ ok: true, restartRequired: true });
     const written = await fs.readFile(configPath, "utf8");
     expect(written).toContain("apiKey: ${LOCAL_LLM_API_KEY}");
     expect(written).toContain("gatewayToken: ${MAGI_AGENT_SERVER_TOKEN}");
@@ -155,6 +156,30 @@ describe("HttpServer /v1/app settings routes", () => {
         model: "qwen2.5-coder:7b",
         baseUrl: "http://127.0.0.1:1234/v1",
         capabilities: { contextWindow: 131072 },
+      },
+      workspace: "./workspace-alt",
+    });
+  });
+
+  it("reports config reload/restart status without mutating raw secrets", async () => {
+    const res = await requestJson(`http://127.0.0.1:${port}/v1/app/config/reload`, {
+      method: "POST",
+      token: "local-token",
+      body: {},
+    });
+
+    expect(res.status).toBe(200);
+    expect(JSON.stringify(res.body)).not.toContain("direct-secret");
+    expect(res.body).toMatchObject({
+      ok: true,
+      restartRequired: true,
+      liveReloadSupported: false,
+      config: {
+        llm: {
+          provider: "openai-compatible",
+          model: "llama3.1",
+        },
+        workspace: "./workspace",
       },
     });
   });

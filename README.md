@@ -456,6 +456,8 @@ The app currently uses these local runtime endpoints:
 | `PUT /v1/app/crons/:cronId` | Updates expression, prompt, enabled state, or description. |
 | `DELETE /v1/app/crons/:cronId` | Deletes a non-internal scheduled workflow. |
 | `GET /v1/app/artifacts` | Generated artifact index. |
+| `GET /v1/app/artifacts/:artifactId/content?tier=l0` | Reads artifact content for the app viewer. |
+| `GET /v1/app/artifacts/:artifactId/download` | Downloads the artifact's full L0 Markdown body. |
 | `GET /v1/app/skills` | Loaded skills, skill issues, and runtime skill hooks. |
 | `POST /v1/app/skills/reload` | Reloads workspace skills for the running process. |
 | `GET /v1/app/workspace?path=...` | Lists files under the configured workspace root. |
@@ -463,8 +465,11 @@ The app currently uses these local runtime endpoints:
 | `GET /v1/app/memory` | Lists Hipocampus memory files and status. |
 | `GET /v1/app/memory/file?path=...` | Reads bounded text content from a memory file. |
 | `GET /v1/app/memory/search?q=...` | Searches Hipocampus/qmd memory. |
+| `POST /v1/app/memory/compact` | Runs Hipocampus compaction. |
+| `POST /v1/app/memory/reindex` | Rebuilds the qmd memory index. |
 | `GET /v1/app/config` | Sanitized provider/runtime config with secret presence only. |
 | `PUT /v1/app/config` | Writes local config using environment variable references, never raw browser-submitted secrets. |
+| `POST /v1/app/config/reload` | Reports config reload support and restart-required state. |
 | `GET /v1/app/harness-rules` | Lists Markdown harness rule files in the workspace. |
 | `GET /v1/app/harness-rules/:name` | Reads one Markdown harness rule. |
 | `PUT /v1/app/harness-rules/:name` | Writes one Markdown harness rule. |

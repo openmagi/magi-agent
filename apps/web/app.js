@@ -9,6 +9,7 @@ const state = {
   eventCount: 0,
   streamingMessage: null,
   deferredInstallPrompt: null,
+  selectedArtifactId: null,
 };
 
 const els = {
@@ -28,6 +29,11 @@ const els = {
   runtimeTools: document.querySelector("#runtime-tools"),
   runtimeSkills: document.querySelector("#runtime-skills"),
   eventCount: document.querySelector("#event-count"),
+  loadTranscriptButton: document.querySelector("#load-transcript-button"),
+  transcriptList: document.querySelector("#transcript-list"),
+  openArtifactButton: document.querySelector("#open-artifact-button"),
+  downloadArtifactButton: document.querySelector("#download-artifact-button"),
+  artifactContent: document.querySelector("#artifact-content"),
   reloadSkillsButton: document.querySelector("#reload-skills-button"),
   workspaceForm: document.querySelector("#workspace-form"),
   workspacePath: document.querySelector("#workspace-path"),
@@ -36,6 +42,8 @@ const els = {
   memorySearchForm: document.querySelector("#memory-search-form"),
   memorySearchQuery: document.querySelector("#memory-search-query"),
   loadMemoryButton: document.querySelector("#load-memory-button"),
+  memoryCompactButton: document.querySelector("#memory-compact-button"),
+  memoryReindexButton: document.querySelector("#memory-reindex-button"),
   memoryList: document.querySelector("#memory-list"),
   memoryResults: document.querySelector("#memory-results"),
   memoryFile: document.querySelector("#memory-file"),
@@ -58,9 +66,12 @@ const els = {
   configBaseUrl: document.querySelector("#config-base-url"),
   configApiKeyEnv: document.querySelector("#config-api-key-env"),
   configServerTokenEnv: document.querySelector("#config-server-token-env"),
+  configWorkspace: document.querySelector("#config-workspace"),
   configContextWindow: document.querySelector("#config-context-window"),
   configMaxOutput: document.querySelector("#config-max-output"),
   loadConfigButton: document.querySelector("#load-config-button"),
+  configReloadButton: document.querySelector("#config-reload-button"),
+  configRestartStatus: document.querySelector("#config-restart-status"),
   harnessRuleForm: document.querySelector("#harness-rule-form"),
   harnessRuleName: document.querySelector("#harness-rule-name"),
   harnessRuleContent: document.querySelector("#harness-rule-content"),
@@ -261,7 +272,15 @@ function renderRuntimeSnapshot(payload) {
     title: session.sessionKey || "session",
     meta: `${session.permissionMode || "default"} - ${session.channel?.type || "channel"}`,
     detail: `${session.budget?.turns || 0} turns - last ${formatTime(session.lastActivityAt)}`,
-  }));
+  }), (session) => {
+    if (session.sessionKey) {
+      els.sessionKey.value = session.sessionKey;
+      updateSessionLabel();
+      void loadTranscript(session.sessionKey).catch((error) =>
+        addEvent("transcript_error", { message: String(error.message || error) }),
+      );
+    }
+  });
   renderSnapshotList(els.tasksList, tasks, "No background tasks", (task) => ({
     title: task.taskId || "task",
     meta: `${task.status || "unknown"} - ${task.persona || "agent"}`,
@@ -283,7 +302,12 @@ function renderRuntimeSnapshot(payload) {
     title: artifact.title || artifact.artifactId || "artifact",
     meta: `${artifact.kind || "artifact"} - ${artifact.sizeBytes || 0} bytes`,
     detail: artifact.path || artifact.slug || "",
-  }));
+  }), (artifact) => {
+    state.selectedArtifactId = artifact.artifactId || null;
+    void openArtifact().catch((error) =>
+      addEvent("artifact_error", { message: String(error.message || error) }),
+    );
+  });
   renderSnapshotList(els.toolsList, tools, "No tools registered", (tool) => ({
     title: tool.name || "tool",
     meta: `${tool.permission || "read"} - ${tool.kind || "core"}`,
@@ -310,6 +334,87 @@ async function loadRuntimeSnapshot() {
     tools: payload.tools?.count || 0,
     skills: payload.skills?.loadedCount || 0,
   });
+}
+
+function renderTranscript(entries) {
+  renderSnapshotList(
+    els.transcriptList,
+    entries,
+    "No transcript entries",
+    (entry) => ({
+      title: entry.kind || "entry",
+      meta: `${entry.turnId || entry.toolUseId || entry.eventId || ""} ${formatTime(entry.ts)}`.trim(),
+      detail:
+        entry.text ||
+        entry.outputPreview ||
+        entry.inputPreview ||
+        entry.contentPreview ||
+        entry.summaryPreview ||
+        entry.reason ||
+        "",
+    }),
+  );
+}
+
+async function loadTranscript(sessionKey = els.sessionKey.value.trim() || defaultSessionKey()) {
+  const payload = await getJson(
+    `/v1/app/transcript?sessionKey=${encodeURIComponent(sessionKey)}&limit=80`,
+  );
+  renderTranscript(payload.entries || []);
+  addEvent("transcript_loaded", {
+    sessionKey: payload.sessionKey || sessionKey,
+    count: Array.isArray(payload.entries) ? payload.entries.length : 0,
+  });
+}
+
+async function openArtifact(artifactId = state.selectedArtifactId) {
+  if (!artifactId) {
+    const first = els.artifactsList.querySelector(".snapshot-item strong");
+    if (!first) throw new Error("Artifact ID is required");
+    throw new Error("Select an artifact first");
+  }
+  const payload = await getJson(
+    `/v1/app/artifacts/${encodeURIComponent(artifactId)}/content?tier=l0`,
+  );
+  state.selectedArtifactId = payload.artifact?.artifactId || artifactId;
+  els.artifactContent.textContent = payload.content || "";
+  addEvent("artifact_opened", {
+    artifactId: state.selectedArtifactId,
+    title: payload.artifact?.title,
+    sizeBytes: payload.artifact?.sizeBytes,
+  });
+}
+
+async function downloadArtifact(artifactId = state.selectedArtifactId) {
+  if (!artifactId) throw new Error("Select an artifact first");
+  const base = normalizeAgentUrl(els.agentUrl.value);
+  const response = await fetch(
+    `${base}/v1/app/artifacts/${encodeURIComponent(artifactId)}/download`,
+    { headers: authHeaders() },
+  );
+  if (!response.ok) {
+    let payload = {};
+    try {
+      payload = await response.json();
+    } catch {
+      /* keep empty payload */
+    }
+    throw new Error(payload.error || response.statusText);
+  }
+  const blob = await response.blob();
+  const filename =
+    response.headers
+      .get("Content-Disposition")
+      ?.match(/filename="([^"]+)"/)?.[1] || `${artifactId}.md`;
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = filename;
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  URL.revokeObjectURL(url);
+  addEvent("artifact_downloaded", { artifactId, filename });
 }
 
 function renderWorkspace(entries) {
@@ -428,10 +533,25 @@ async function searchMemory() {
   });
 }
 
+async function compactMemory() {
+  const payload = await sendJson("/v1/app/memory/compact", "POST", { force: true });
+  await loadMemory();
+  addEvent("memory_compacted", {
+    compacted: payload.result?.compacted === true,
+    skipped: payload.result?.skipped === true,
+  });
+}
+
+async function reindexMemory() {
+  await sendJson("/v1/app/memory/reindex", "POST", {});
+  await loadMemory();
+  addEvent("memory_reindexed", {});
+}
+
 function fillCronForm(cron) {
   els.cronId.value = cron.cronId || "";
   els.cronExpression.value = cron.expression || "";
-  els.cronPrompt.value = cron.promptPreview || "";
+  els.cronPrompt.value = cron.prompt || cron.promptPreview || "";
   els.cronDescription.value = cron.description || "";
   els.cronEnabled.checked = cron.enabled !== false;
   els.cronDurable.checked = cron.durable === true;
@@ -532,8 +652,10 @@ async function loadAppConfig() {
   els.configBaseUrl.value = llm.baseUrl || "";
   els.configApiKeyEnv.value = llm.apiKeyEnvVar || "";
   els.configServerTokenEnv.value = server.gatewayTokenEnvVar || "MAGI_AGENT_SERVER_TOKEN";
+  els.configWorkspace.value = config.workspace || "./workspace";
   els.configContextWindow.value = llm.capabilities?.contextWindow || "";
   els.configMaxOutput.value = llm.capabilities?.maxOutputTokens || "";
+  els.configRestartStatus.textContent = "";
   addEvent("config_loaded", {
     exists: payload.exists === true,
     provider: llm.provider,
@@ -555,7 +677,7 @@ async function saveAppConfig() {
           outputUsdPerMtok: 0,
         }
       : undefined;
-  await sendJson("/v1/app/config", "PUT", {
+  const payload = await sendJson("/v1/app/config", "PUT", {
     llm: {
       provider: els.configProvider.value,
       model: els.configModel.value.trim() || "llama3.1",
@@ -566,11 +688,29 @@ async function saveAppConfig() {
     server: {
       gatewayTokenEnvVar: els.configServerTokenEnv.value.trim() || "MAGI_AGENT_SERVER_TOKEN",
     },
-    workspace: "./workspace",
+    workspace: els.configWorkspace.value.trim() || "./workspace",
   });
+  els.configRestartStatus.textContent =
+    payload.restartRequired === true ? "Runtime restart required" : "";
   addEvent("config_saved", {
     provider: els.configProvider.value,
     model: els.configModel.value.trim() || "llama3.1",
+  });
+}
+
+async function reloadRuntimeConfig() {
+  const payload = await sendJson("/v1/app/config/reload", "POST", {});
+  const config = payload.config || {};
+  const llm = config.llm || {};
+  els.configRestartStatus.textContent =
+    payload.restartRequired === true
+      ? "Runtime restart required"
+      : "Runtime config is current";
+  addEvent("config_reload_status", {
+    provider: llm.provider,
+    model: llm.model,
+    liveReloadSupported: payload.liveReloadSupported === true,
+    restartRequired: payload.restartRequired === true,
   });
 }
 
@@ -642,6 +782,7 @@ async function checkRuntime() {
       await loadHarnessRules();
       await loadWorkspace();
       await loadMemory();
+      await loadTranscript();
     } catch (error) {
       addEvent("runtime_snapshot_error", { message: String(error.message || error) });
     }
@@ -761,6 +902,30 @@ els.loadConfigButton.addEventListener("click", () => {
   );
 });
 
+els.configReloadButton.addEventListener("click", () => {
+  void reloadRuntimeConfig().catch((error) =>
+    addEvent("config_error", { message: String(error.message || error) }),
+  );
+});
+
+els.loadTranscriptButton.addEventListener("click", () => {
+  void loadTranscript().catch((error) =>
+    addEvent("transcript_error", { message: String(error.message || error) }),
+  );
+});
+
+els.openArtifactButton.addEventListener("click", () => {
+  void openArtifact().catch((error) =>
+    addEvent("artifact_error", { message: String(error.message || error) }),
+  );
+});
+
+els.downloadArtifactButton.addEventListener("click", () => {
+  void downloadArtifact().catch((error) =>
+    addEvent("artifact_error", { message: String(error.message || error) }),
+  );
+});
+
 els.reloadSkillsButton.addEventListener("click", () => {
   void reloadSkills().catch((error) =>
     addEvent("skills_reload_error", { message: String(error.message || error) }),
@@ -783,6 +948,18 @@ els.memorySearchForm.addEventListener("submit", (event) => {
 
 els.loadMemoryButton.addEventListener("click", () => {
   void loadMemory().catch((error) =>
+    addEvent("memory_error", { message: String(error.message || error) }),
+  );
+});
+
+els.memoryCompactButton.addEventListener("click", () => {
+  void compactMemory().catch((error) =>
+    addEvent("memory_error", { message: String(error.message || error) }),
+  );
+});
+
+els.memoryReindexButton.addEventListener("click", () => {
+  void reindexMemory().catch((error) =>
     addEvent("memory_error", { message: String(error.message || error) }),
   );
 });
@@ -860,6 +1037,7 @@ els.messageForm.addEventListener("submit", async (event) => {
   try {
     await sendMessage(text);
     await loadRuntimeSnapshot();
+    await loadTranscript();
   } catch (error) {
     finishAssistantMessage();
     addMessage("assistant", String(error.message || error), "error");
