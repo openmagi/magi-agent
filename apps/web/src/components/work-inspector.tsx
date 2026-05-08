@@ -256,6 +256,19 @@ function parseMaybeJson(text?: string): JsonRecord | null {
   }
 }
 
+function extractJsonLikeValue(text: string, key: string): string {
+  const quoted = new RegExp(`"${key}"\\s*:\\s*"((?:\\\\.|[^"\\\\])*)"`, "i").exec(text);
+  if (quoted?.[1]) {
+    try {
+      return JSON.parse(`"${quoted[1]}"`) as string;
+    } catch {
+      return quoted[1].replace(/\\n/g, " ").replace(/\\"/g, '"');
+    }
+  }
+  const numeric = new RegExp(`"${key}"\\s*:\\s*(-?\\d+(?:\\.\\d+)?)`, "i").exec(text);
+  return numeric?.[1] ?? "";
+}
+
 function firstText(record: JsonRecord, keys: string[]): string {
   for (const key of keys) {
     const value = record[key];
@@ -267,8 +280,26 @@ function firstText(record: JsonRecord, keys: string[]): string {
 
 function summarizeToolPayload(text?: string): string | undefined {
   if (!text) return undefined;
+  const trimmed = text.trim();
   const parsed = parseMaybeJson(text);
-  if (!parsed) return preview(text, 160);
+  if (!parsed) {
+    if (trimmed.startsWith("{")) {
+      const path = extractJsonLikeValue(trimmed, "path") || extractJsonLikeValue(trimmed, "filePath") || extractJsonLikeValue(trimmed, "targetPath");
+      const command = extractJsonLikeValue(trimmed, "command") || extractJsonLikeValue(trimmed, "cmd");
+      const action = extractJsonLikeValue(trimmed, "action");
+      const result = extractJsonLikeValue(trimmed, "result") || extractJsonLikeValue(trimmed, "finalText") || extractJsonLikeValue(trimmed, "stdout");
+      const error = extractJsonLikeValue(trimmed, "error") || extractJsonLikeValue(trimmed, "errorMessage") || extractJsonLikeValue(trimmed, "message");
+      if (path) return path;
+      if (command) return `Command: ${preview(command, 140)}`;
+      if (action === "create_session") return "Opened a browser workspace.";
+      if (action === "scrape") return "Read the current browser page.";
+      if (action) return `Browser action: ${action.replace(/_/g, " ")}`;
+      if (result) return preview(result, 160);
+      if (error) return preview(error, 160);
+      return "Processed tool result.";
+    }
+    return preview(text, 160);
+  }
 
   const path = firstText(parsed, ["path", "file", "filePath", "targetPath"]);
   const command = firstText(parsed, ["command", "cmd"]);
@@ -575,7 +606,6 @@ export function WorkInspector({
       <header className="work-dock-header">
         <div>
           <p>WORK</p>
-          <h2>{activeDock === "work" ? "Work" : "Knowledge"}</h2>
         </div>
         <button className="icon-button" type="button" aria-label="Collapse">»</button>
       </header>

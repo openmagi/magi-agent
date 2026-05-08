@@ -1,5 +1,6 @@
-import { FormEvent, ReactNode, useCallback, useEffect, useMemo, useState } from "react";
+import { ReactNode, useCallback, useEffect, useMemo, useState } from "react";
 import { ChatWorkbench } from "./components/chat-workbench";
+import { WorkspaceEditorPage } from "./components/workspace-editor";
 
 const storage = {
   agentUrl: "magi.agent.app.agentUrl",
@@ -8,7 +9,7 @@ const storage = {
   modelOverride: "magi.agent.app.modelOverride",
 };
 
-type Section = "chat" | "overview" | "settings" | "usage" | "skills" | "knowledge" | "converter";
+type Section = "chat" | "overview" | "settings" | "workspace" | "usage" | "skills" | "knowledge";
 type DockView = "work" | "knowledge";
 type Role = "user" | "assistant" | "system";
 type JsonRecord = Record<string, unknown>;
@@ -141,6 +142,12 @@ interface AppConfig {
     gatewayTokenEnvVar?: string;
   };
   workspace?: string;
+}
+
+interface AppBootstrap {
+  agentUrl?: string;
+  tokenRequired?: boolean;
+  token?: string;
 }
 
 interface BeforeInstallPromptEvent extends Event {
@@ -445,6 +452,23 @@ function normalizeAgentUrl(value: string): string {
   return trimmed.length > 0 ? trimmed.replace(/\/+$/, "") : window.location.origin;
 }
 
+function isLoopbackHost(hostname: string): boolean {
+  return hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1" || hostname === "[::1]";
+}
+
+function sameLocalRuntimeUrl(left: string, right: string): boolean {
+  const normalizedLeft = normalizeAgentUrl(left);
+  const normalizedRight = normalizeAgentUrl(right);
+  if (normalizedLeft === normalizedRight) return true;
+  try {
+    const leftUrl = new URL(normalizedLeft);
+    const rightUrl = new URL(normalizedRight);
+    return isLoopbackHost(leftUrl.hostname) && isLoopbackHost(rightUrl.hostname) && leftUrl.port === rightUrl.port;
+  } catch {
+    return false;
+  }
+}
+
 function asArray(value: unknown): JsonRecord[] {
   return Array.isArray(value) ? value.filter((item): item is JsonRecord => !!item && typeof item === "object") : [];
 }
@@ -617,7 +641,7 @@ function DashboardSidebar({
 }) {
   const nav = [
     { group: "Agent", items: [["chat", "Chat"], ["overview", "Overview"], ["settings", "Settings"]] },
-    { group: "Workspace", items: [["knowledge", "Knowledge"], ["skills", "Skills"], ["converter", "Files & Memory"], ["usage", "Usage"]] },
+    { group: "Workspace", items: [["workspace", "Workspace"], ["knowledge", "Knowledge"], ["skills", "Skills"], ["usage", "Usage"]] },
   ] as const;
   return (
     <aside className="dashboard-sidebar" aria-label="Dashboard navigation">
@@ -631,7 +655,7 @@ function DashboardSidebar({
           <div key={group.group} className="nav-section">
             <div className="nav-label">{group.group}</div>
             {group.items.map(([key, label]) => {
-              const section = (["chat", "overview", "settings", "usage", "skills", "knowledge", "converter"].includes(key) ? key : "overview") as Section;
+              const section = (["chat", "overview", "settings", "usage", "skills", "knowledge", "workspace"].includes(key) ? key : "overview") as Section;
               return (
                 <button
                   key={key}
@@ -1421,6 +1445,9 @@ export function App() {
   const [memoryQuery, setMemoryQuery] = useState("");
   const [workspacePath, setWorkspacePath] = useState(".");
   const [workspaceItems, setWorkspaceItems] = useState<JsonRecord[]>([]);
+  const [selectedWorkspaceFile, setSelectedWorkspaceFile] = useState("SOUL.md");
+  const [workspaceFileContent, setWorkspaceFileContent] = useState("");
+  const [workspaceFileStatus, setWorkspaceFileStatus] = useState("");
   const [transcriptItems, setTranscriptItems] = useState<JsonRecord[]>([]);
   const [evidenceItems, setEvidenceItems] = useState<JsonRecord[]>([]);
   const [cronExpression, setCronExpression] = useState("@daily");
@@ -1435,9 +1462,11 @@ export function App() {
   const normalizedBase = useMemo(() => normalizeAgentUrl(agentUrl), [agentUrl]);
 
   const authHeaders = useCallback((json = false): HeadersInit => {
+    const storedToken = window.localStorage.getItem(storage.token)?.trim() ?? "";
+    const effectiveToken = token.trim() || storedToken;
     return {
       ...(json ? { "Content-Type": "application/json" } : {}),
-      ...(token.trim() ? { Authorization: `Bearer ${token.trim()}` } : {}),
+      ...(effectiveToken ? { Authorization: `Bearer ${effectiveToken}` } : {}),
       "X-Core-Agent-Session-Key": sessionKey.trim() || defaultSessionKey(),
       ...(planMode ? { "X-Core-Agent-Plan-Mode": "on" } : {}),
     };
@@ -1470,6 +1499,28 @@ export function App() {
     window.localStorage.setItem(storage.modelOverride, modelOverride.trim() || "auto");
     addEvent("connection_saved", { agentUrl: nextUrl, sessionKey, modelOverride });
   }, [addEvent, agentUrl, modelOverride, sessionKey, token]);
+
+  const loadAppBootstrap = useCallback(async () => {
+    const response = await fetch(`${window.location.origin}/app/bootstrap.json`, { cache: "no-store" });
+    if (!response.ok) return;
+    const payload = (await response.json().catch(() => ({}))) as AppBootstrap;
+    const bootstrapUrl = normalizeAgentUrl(asString(payload.agentUrl, window.location.origin));
+    const storedUrl = window.localStorage.getItem(storage.agentUrl);
+    const currentUrl = normalizeAgentUrl(storedUrl || agentUrl || window.location.origin);
+    const usesServedRuntime = sameLocalRuntimeUrl(currentUrl, bootstrapUrl) || sameLocalRuntimeUrl(currentUrl, window.location.origin);
+    if (!storedUrl || usesServedRuntime) {
+      setAgentUrl(bootstrapUrl);
+      window.localStorage.setItem(storage.agentUrl, bootstrapUrl);
+    }
+    if (payload.token && usesServedRuntime) {
+      setToken(payload.token);
+      window.localStorage.setItem(storage.token, payload.token);
+      addEvent("connection_bootstrapped", {
+        tokenRequired: payload.tokenRequired === true,
+        agentUrl: bootstrapUrl,
+      });
+    }
+  }, [addEvent, agentUrl]);
 
   const loadRuntimeSnapshot = useCallback(async () => {
     const payload = await getJson("/v1/app/runtime?limit=16");
@@ -1529,12 +1580,49 @@ export function App() {
     await loadKnowledge();
   }, [addEvent, knowledgeContent, knowledgePath, loadKnowledge, sendJson]);
 
-  const loadWorkspace = useCallback(async () => {
-    const payload = await getJson(`/v1/app/workspace?path=${encodeURIComponent(workspacePath || ".")}`);
-    setWorkspacePath(asString(payload.path, "."));
+  const loadWorkspaceAt = useCallback(async (nextPath?: string) => {
+    const targetPath = nextPath || workspacePath || ".";
+    const payload = await getJson(`/v1/app/workspace?path=${encodeURIComponent(targetPath)}`);
+    setWorkspacePath(asString(payload.path, targetPath));
     setWorkspaceItems(asArray(payload.entries));
-    addEvent("workspace_loaded", { count: asArray(payload.entries).length });
+    addEvent("workspace_loaded", { path: asString(payload.path, targetPath), count: asArray(payload.entries).length });
   }, [addEvent, getJson, workspacePath]);
+
+  const loadWorkspace = useCallback(async () => {
+    await loadWorkspaceAt();
+  }, [loadWorkspaceAt]);
+
+  const openWorkspaceFile = useCallback(async (pathName: string) => {
+    if (!pathName.trim()) return;
+    const payload = await getJson(`/v1/app/workspace/file?path=${encodeURIComponent(pathName.trim())}&maxBytes=1048576`);
+    const content = asString(payload.content);
+    setSelectedWorkspaceFile(asString(payload.path, pathName.trim()));
+    setWorkspaceFileContent(content);
+    setWorkspaceFileStatus(content.length === 0 ? "Loaded empty file" : "Loaded");
+    addEvent("workspace_file_loaded", { path: asString(payload.path, pathName.trim()) });
+  }, [addEvent, getJson]);
+
+  const saveWorkspaceFile = useCallback(async () => {
+    if (!selectedWorkspaceFile.trim()) throw new Error("Workspace file path is required");
+    const payload = await sendJson("/v1/app/workspace/file", "PUT", {
+      path: selectedWorkspaceFile.trim(),
+      content: workspaceFileContent,
+    });
+    setWorkspaceFileStatus("Saved");
+    addEvent("workspace_file_saved", { path: asString(payload.path, selectedWorkspaceFile.trim()) });
+    await loadWorkspaceAt(workspacePath);
+  }, [addEvent, loadWorkspaceAt, selectedWorkspaceFile, sendJson, workspaceFileContent, workspacePath]);
+
+  const selectWorkspaceItem = useCallback((item: JsonRecord) => {
+    const itemPath = asString(item.path);
+    if (!itemPath) return;
+    if (asString(item.type) === "directory") {
+      setWorkspaceFileStatus("");
+      void loadWorkspaceAt(itemPath).catch((error) => addEvent("workspace_error", { message: String(error instanceof Error ? error.message : error) }));
+      return;
+    }
+    void openWorkspaceFile(itemPath).catch((error) => addEvent("workspace_error", { message: String(error instanceof Error ? error.message : error) }));
+  }, [addEvent, loadWorkspaceAt, openWorkspaceFile]);
 
   const searchMemory = useCallback(async () => {
     if (!memoryQuery.trim()) return;
@@ -1979,7 +2067,9 @@ export function App() {
         .then(() => addEvent("service_worker_ready", {}))
         .catch((error: Error) => addEvent("service_worker_error", { message: error.message }));
     }
-    void checkRuntime();
+    void loadAppBootstrap().finally(() => {
+      void checkRuntime();
+    });
     return () => window.removeEventListener("beforeinstallprompt", installHandler);
     // Intentionally one boot pass. The latest connection settings are saved by explicit actions.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -2024,6 +2114,34 @@ export function App() {
     onSearchKnowledge: () => void searchKnowledge().catch((error) => addEvent("knowledge_error", { message: String(error instanceof Error ? error.message : error) })),
     onLoadKnowledge: () => void loadKnowledge().catch((error) => addEvent("knowledge_error", { message: String(error instanceof Error ? error.message : error) })),
     onSaveKnowledge: () => void saveKnowledge().catch((error) => addEvent("knowledge_error", { message: String(error instanceof Error ? error.message : error) })),
+  };
+
+  const workspaceProps = {
+    workspacePath,
+    setWorkspacePath,
+    workspaceItems,
+    selectedWorkspaceFile,
+    setSelectedWorkspaceFile,
+    workspaceFileContent,
+    setWorkspaceFileContent,
+    workspaceFileStatus,
+    memoryQuery,
+    setMemoryQuery,
+    cronExpression,
+    setCronExpression,
+    cronPrompt,
+    setCronPrompt,
+    onLoadWorkspace: () => void loadWorkspace().catch((error) => addEvent("workspace_error", { message: String(error instanceof Error ? error.message : error) })),
+    onOpenWorkspaceFile: (pathName: string) => void openWorkspaceFile(pathName).catch((error) => addEvent("workspace_error", { message: String(error instanceof Error ? error.message : error) })),
+    onSaveWorkspaceFile: () => void saveWorkspaceFile().catch((error) => {
+      setWorkspaceFileStatus(String(error instanceof Error ? error.message : error));
+      addEvent("workspace_error", { message: String(error instanceof Error ? error.message : error) });
+    }),
+    onSelectWorkspaceItem: selectWorkspaceItem,
+    onSearchMemory: () => void searchMemory().catch((error) => addEvent("memory_error", { message: String(error instanceof Error ? error.message : error) })),
+    onCompactMemory: () => void compactMemory().catch((error) => addEvent("memory_error", { message: String(error instanceof Error ? error.message : error) })),
+    onSaveCron: () => void saveCron().catch((error) => addEvent("cron_error", { message: String(error instanceof Error ? error.message : error) })),
+    onReloadSkills: () => void reloadSkills().catch((error) => addEvent("skills_reload_error", { message: String(error instanceof Error ? error.message : error) })),
   };
 
   if (active === "chat") {
@@ -2113,33 +2231,7 @@ export function App() {
           <SnapshotList id="tools-list" items={runtime?.tools?.items ?? []} empty="No registered tools" />
         </UtilityPage>
       )}
-      {active === "converter" && (
-        <UtilityPage title="Converter" description="Workspace files, memory, schedules, and local runtime utilities.">
-          <form id="workspace-form" onSubmit={(event: FormEvent) => { event.preventDefault(); void loadWorkspace(); }}>
-            <Field label="Workspace path">
-              <input id="workspace-path" value={workspacePath} onChange={(event) => setWorkspacePath(event.target.value)} />
-            </Field>
-            <button type="submit">List files</button>
-          </form>
-          <SnapshotList id="workspace-list" items={workspaceItems} empty="No workspace files" />
-          <form id="memory-search-form" onSubmit={(event: FormEvent) => { event.preventDefault(); void searchMemory(); }}>
-            <Field label="Search memory">
-              <input id="memory-search-query" value={memoryQuery} onChange={(event) => setMemoryQuery(event.target.value)} />
-            </Field>
-            <button type="submit">Search memory</button>
-            <button id="memory-compact-button" type="button" onClick={() => void compactMemory()}>Compact memory</button>
-          </form>
-          <form id="cron-editor-form" onSubmit={(event: FormEvent) => { event.preventDefault(); void saveCron(); }}>
-            <Field label="Expression">
-              <input id="cron-expression" value={cronExpression} onChange={(event) => setCronExpression(event.target.value)} />
-            </Field>
-            <Field label="Prompt">
-              <textarea id="cron-prompt" value={cronPrompt} onChange={(event) => setCronPrompt(event.target.value)} />
-            </Field>
-            <button type="submit">Save Cron</button>
-          </form>
-        </UtilityPage>
-      )}
+      {active === "workspace" && <WorkspaceEditorPage {...workspaceProps} />}
     </div>
   );
 }

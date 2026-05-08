@@ -101,6 +101,21 @@ describe("HttpServer /app", () => {
     expect(res.body).toContain("dashboard-shell");
   });
 
+  it("serves loopback bootstrap settings so the local app can authenticate", async () => {
+    const res = await requestRaw(`http://127.0.0.1:${port}/app/bootstrap.json`);
+
+    expect(res.status).toBe(200);
+    expect(res.contentType).toContain("application/json");
+    expect(JSON.parse(res.body)).toEqual(
+      expect.objectContaining({
+        ok: true,
+        agentUrl: `http://127.0.0.1:${port}`,
+        tokenRequired: true,
+        token: "local-token",
+      }),
+    );
+  });
+
   it("serves installable app assets", async () => {
     const manifest = await requestRaw(
       `http://127.0.0.1:${port}/app/manifest.webmanifest`,

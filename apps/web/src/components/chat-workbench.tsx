@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { phaseLabel, WorkInspector } from "./work-inspector";
 
-type Section = "chat" | "overview" | "settings" | "usage" | "skills" | "knowledge" | "converter";
+type Section = "chat" | "overview" | "settings" | "workspace" | "usage" | "skills" | "knowledge";
 type DockView = "work" | "knowledge";
 type Role = "user" | "assistant" | "system";
 type JsonRecord = Record<string, unknown>;

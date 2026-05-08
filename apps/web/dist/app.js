@@ -12094,10 +12094,10 @@ const SUBAGENT_NAMES = [
   "Lamarr"
 ];
 const LOW_SIGNAL_TOOL_LABELS = /* @__PURE__ */ new Set(["glob", "grep", "taskget", "subagentrunning", "subagenttooldecision"]);
-function asString$1(value, fallback = "") {
+function asString$2(value, fallback = "") {
   return typeof value === "string" ? value : fallback;
 }
-function asNumber$1(value, fallback = 0) {
+function asNumber$2(value, fallback = 0) {
   return typeof value === "number" && Number.isFinite(value) ? value : fallback;
 }
 function preview$1(value, max = 140) {
@@ -12181,6 +12181,18 @@ function parseMaybeJson(text) {
     return null;
   }
 }
+function extractJsonLikeValue(text, key) {
+  const quoted = new RegExp(`"${key}"\\s*:\\s*"((?:\\\\.|[^"\\\\])*)"`, "i").exec(text);
+  if (quoted?.[1]) {
+    try {
+      return JSON.parse(`"${quoted[1]}"`);
+    } catch {
+      return quoted[1].replace(/\\n/g, " ").replace(/\\"/g, '"');
+    }
+  }
+  const numeric = new RegExp(`"${key}"\\s*:\\s*(-?\\d+(?:\\.\\d+)?)`, "i").exec(text);
+  return numeric?.[1] ?? "";
+}
 function firstText(record, keys) {
   for (const key of keys) {
     const value = record[key];
@@ -12191,8 +12203,26 @@ function firstText(record, keys) {
 }
 function summarizeToolPayload(text) {
   if (!text) return void 0;
+  const trimmed = text.trim();
   const parsed = parseMaybeJson(text);
-  if (!parsed) return preview$1(text, 160);
+  if (!parsed) {
+    if (trimmed.startsWith("{")) {
+      const path2 = extractJsonLikeValue(trimmed, "path") || extractJsonLikeValue(trimmed, "filePath") || extractJsonLikeValue(trimmed, "targetPath");
+      const command2 = extractJsonLikeValue(trimmed, "command") || extractJsonLikeValue(trimmed, "cmd");
+      const action2 = extractJsonLikeValue(trimmed, "action");
+      const result = extractJsonLikeValue(trimmed, "result") || extractJsonLikeValue(trimmed, "finalText") || extractJsonLikeValue(trimmed, "stdout");
+      const error2 = extractJsonLikeValue(trimmed, "error") || extractJsonLikeValue(trimmed, "errorMessage") || extractJsonLikeValue(trimmed, "message");
+      if (path2) return path2;
+      if (command2) return `Command: ${preview$1(command2, 140)}`;
+      if (action2 === "create_session") return "Opened a browser workspace.";
+      if (action2 === "scrape") return "Read the current browser page.";
+      if (action2) return `Browser action: ${action2.replace(/_/g, " ")}`;
+      if (result) return preview$1(result, 160);
+      if (error2) return preview$1(error2, 160);
+      return "Processed tool result.";
+    }
+    return preview$1(text, 160);
+  }
   const path = firstText(parsed, ["path", "file", "filePath", "targetPath"]);
   const command = firstText(parsed, ["command", "cmd"]);
   const action = firstText(parsed, ["action"]);
@@ -12335,13 +12365,13 @@ function summarizeValue(value) {
 }
 function summarizeEventPayload(type, payload) {
   if (type === "runtime_snapshot") {
-    return `${asNumber$1(payload.sessions)} sessions, ${asNumber$1(payload.tasks)} tasks, ${asNumber$1(payload.artifacts)} artifacts`;
+    return `${asNumber$2(payload.sessions)} sessions, ${asNumber$2(payload.tasks)} tasks, ${asNumber$2(payload.artifacts)} artifacts`;
   }
   if (type === "knowledge_search") {
-    return `Searched "${asString$1(payload.query)}" and found ${asNumber$1(payload.count)} results.`;
+    return `Searched "${asString$2(payload.query)}" and found ${asNumber$2(payload.count)} results.`;
   }
   if (type === "knowledge_loaded") {
-    return `${asNumber$1(payload.documents)} documents across ${asNumber$1(payload.collections)} collections.`;
+    return `${asNumber$2(payload.documents)} documents across ${asNumber$2(payload.collections)} collections.`;
   }
   if (type === "message_queued") {
     return "Follow-up will run after the current answer finishes.";
@@ -12385,12 +12415,12 @@ function SnapshotList$1({
       className: "snapshot-row",
       onClick: () => onSelect?.(item),
       children: [
-        /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "snapshot-title", children: asString$1(item.title) || asString$1(item.name) || asString$1(item.sessionKey) || asString$1(item.taskId) || asString$1(item.cronId) || asString$1(item.path) || `item ${index + 1}` }),
-        /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "snapshot-meta", children: asString$1(item.status) || asString$1(item.kind) || asString$1(item.collection) || asString$1(item.permission) || summarizeValue(item.meta) }),
-        /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "snapshot-detail", children: asString$1(item.detail) || asString$1(item.promptPreview) || asString$1(item.resultPreview) || asString$1(item.path) || preview$1(item.contentPreview || item.inputPreview || item.outputPreview, 120) })
+        /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "snapshot-title", children: asString$2(item.title) || asString$2(item.name) || asString$2(item.sessionKey) || asString$2(item.taskId) || asString$2(item.cronId) || asString$2(item.path) || `item ${index + 1}` }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "snapshot-meta", children: asString$2(item.status) || asString$2(item.kind) || asString$2(item.collection) || asString$2(item.permission) || summarizeValue(item.meta) }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "snapshot-detail", children: asString$2(item.detail) || asString$2(item.promptPreview) || asString$2(item.resultPreview) || asString$2(item.path) || preview$1(item.contentPreview || item.inputPreview || item.outputPreview, 120) })
       ]
     },
-    `${asString$1(item.id) || asString$1(item.taskId) || asString$1(item.path) || index}`
+    `${asString$2(item.id) || asString$2(item.taskId) || asString$2(item.path) || index}`
   )) });
 }
 function Dot({ status }) {
@@ -12423,10 +12453,7 @@ function WorkInspector({
   const workGroups = groupWorkRows(deriveWorkConsoleRows({ channelState, queuedMessages, controlRequests }));
   return /* @__PURE__ */ jsxRuntimeExports.jsxs("aside", { className: "work-dock", "aria-label": "Work", children: [
     /* @__PURE__ */ jsxRuntimeExports.jsxs("header", { className: "work-dock-header", children: [
-      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { children: [
-        /* @__PURE__ */ jsxRuntimeExports.jsx("p", { children: "WORK" }),
-        /* @__PURE__ */ jsxRuntimeExports.jsx("h2", { children: activeDock === "work" ? "Work" : "Knowledge" })
-      ] }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx("div", { children: /* @__PURE__ */ jsxRuntimeExports.jsx("p", { children: "WORK" }) }),
       /* @__PURE__ */ jsxRuntimeExports.jsx("button", { className: "icon-button", type: "button", "aria-label": "Collapse", children: "»" })
     ] }),
     /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "dock-tabs", role: "tablist", "aria-label": "Right inspector", children: [
@@ -12825,6 +12852,293 @@ function ChatWorkbench({
     )
   ] });
 }
+const WORKSPACE_SECTIONS = [
+  {
+    id: "system",
+    title: "System Prompts",
+    detail: "Identity, tools, agent rules, and the files that shape every turn.",
+    shortcuts: [
+      { label: "Soul", path: "SOUL.md", kind: "file", note: "Primary agent posture" },
+      { label: "Tools", path: "TOOLS.md", kind: "file", note: "Workspace tool policy" },
+      { label: "Agents", path: "AGENTS.md", kind: "file", note: "Agent operating guide" },
+      { label: "Bootstrap", path: "BOOTSTRAP.md", kind: "file", note: "Startup instructions" },
+      { label: "Identity", path: "IDENTITY.md", kind: "file", note: "Bot identity profile" },
+      { label: "User Rules", path: "USER-RULES.md", kind: "file", note: "User-level preferences" },
+      { label: "Harness Rules", path: "USER-HARNESS-RULES.md", kind: "file", note: "Natural-language runtime gates" }
+    ]
+  },
+  {
+    id: "contracts",
+    title: "First-class Contracts",
+    detail: "Acceptance criteria, delivery expectations, and explicit completion rules.",
+    shortcuts: [
+      { label: "Execution Contract", path: "contracts/execution-contract.md", kind: "file", note: "What counts as done" },
+      { label: "Delivery Contract", path: "contracts/delivery-contract.md", kind: "file", note: "How outputs reach the user" },
+      { label: "Verification Contract", path: "contracts/verification-contract.md", kind: "file", note: "Evidence required before done" },
+      { label: "Contracts Folder", path: "contracts", kind: "directory", note: "Browse all contract files" }
+    ]
+  },
+  {
+    id: "harness",
+    title: "Harness & Hooks",
+    detail: "Runtime guardrails and custom hook notes that should be visible to operators.",
+    shortcuts: [
+      { label: "File Delivery", path: "harness-rules/file-delivery.md", kind: "file", note: "Require file delivery before claims" },
+      { label: "Final Answer", path: "harness-rules/final-answer-verifier.md", kind: "file", note: "Shape final response checks" },
+      { label: "Tool Input Match", path: "harness-rules/tool-input-match.md", kind: "file", note: "Constrain tool arguments" },
+      { label: "Before Turn Hook", path: ".magi/hooks/before-turn.md", kind: "file", note: "Local before-turn policy" },
+      { label: "Before Tool Hook", path: ".magi/hooks/before-tool.md", kind: "file", note: "Local tool-use policy" },
+      { label: "Before Commit Hook", path: ".magi/hooks/before-commit.md", kind: "file", note: "Local completion policy" },
+      { label: "Harness Folder", path: "harness-rules", kind: "directory", note: "Browse harness rules" },
+      { label: "Hooks Folder", path: ".magi/hooks", kind: "directory", note: "Browse local hook notes" }
+    ]
+  },
+  {
+    id: "memory",
+    title: "Memory Tree",
+    detail: "Hipocampus memory roots and chronological memory buckets.",
+    shortcuts: [
+      { label: "Root Memory", path: "memory/ROOT.md", kind: "file", note: "Long-lived memory index" },
+      { label: "Legacy Memory", path: "MEMORY.md", kind: "file", note: "Fallback memory file" },
+      { label: "Daily", path: "memory/daily", kind: "directory", note: "Daily memory notes" },
+      { label: "Weekly", path: "memory/weekly", kind: "directory", note: "Weekly rollups" },
+      { label: "Monthly", path: "memory/monthly", kind: "directory", note: "Monthly rollups" }
+    ]
+  },
+  {
+    id: "compaction",
+    title: "Compaction Tree",
+    detail: "Files that make memory compaction inspectable and repairable.",
+    shortcuts: [
+      { label: "Compaction State", path: "memory/.compaction-state.json", kind: "file", note: "Compaction checkpoint" },
+      { label: "Compaction Notes", path: "memory/compaction.md", kind: "file", note: "Operator notes" },
+      { label: "Daily Rollups", path: "memory/daily", kind: "directory", note: "Raw source buckets" },
+      { label: "Weekly Rollups", path: "memory/weekly", kind: "directory", note: "Intermediate summaries" },
+      { label: "Monthly Rollups", path: "memory/monthly", kind: "directory", note: "Durable summaries" }
+    ]
+  }
+];
+function asString$1(value, fallback = "") {
+  return typeof value === "string" ? value : fallback;
+}
+function asNumber$1(value, fallback = 0) {
+  return typeof value === "number" && Number.isFinite(value) ? value : fallback;
+}
+function formatBytes(value) {
+  const bytes = asNumber$1(value, 0);
+  if (bytes <= 0) return "";
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
+  return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+}
+function itemTitle(item) {
+  return asString$1(item.name) || asString$1(item.path) || "workspace item";
+}
+function itemMeta(item) {
+  const size = formatBytes(item.sizeBytes);
+  const type = asString$1(item.type, "file");
+  return size ? `${type} · ${size}` : type;
+}
+function WorkspaceEditorPage({
+  workspacePath,
+  setWorkspacePath,
+  workspaceItems,
+  selectedWorkspaceFile,
+  setSelectedWorkspaceFile,
+  workspaceFileContent,
+  setWorkspaceFileContent,
+  workspaceFileStatus,
+  memoryQuery,
+  setMemoryQuery,
+  cronExpression,
+  setCronExpression,
+  cronPrompt,
+  setCronPrompt,
+  onLoadWorkspace,
+  onOpenWorkspaceFile,
+  onSaveWorkspaceFile,
+  onSelectWorkspaceItem,
+  onSearchMemory,
+  onCompactMemory,
+  onSaveCron,
+  onReloadSkills
+}) {
+  const [activeSection, setActiveSection] = reactExports.useState("system");
+  const section = reactExports.useMemo(
+    () => WORKSPACE_SECTIONS.find((item) => item.id === activeSection) ?? WORKSPACE_SECTIONS[0],
+    [activeSection]
+  );
+  const openShortcut = (shortcut) => {
+    if (shortcut.kind === "directory") {
+      setWorkspacePath(shortcut.path);
+      onSelectWorkspaceItem({ path: shortcut.path, type: "directory" });
+      return;
+    }
+    onOpenWorkspaceFile(shortcut.path);
+  };
+  return /* @__PURE__ */ jsxRuntimeExports.jsxs("main", { className: "dashboard-content workspace-editor-page", "data-workspace-editor-page": "true", children: [
+    /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "page-title", children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsx("h1", { children: "Workspace" }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx("p", { children: "Edit the local files that define this agent: prompts, contracts, harness rules, hooks, memory, and schedules." })
+    ] }),
+    /* @__PURE__ */ jsxRuntimeExports.jsxs("section", { className: "workspace-command-center cloud-card", children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "workspace-command-copy", children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsx("span", { children: "LOCAL WORKSPACE" }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx("h2", { children: "Operator console for the bot filesystem." }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx("p", { children: "Changes are written into the bot workspace and stay available to the local runtime." })
+      ] }),
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "workspace-command-actions", children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", onClick: onReloadSkills, children: "Reload Skills" }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "secondary-button", onClick: onCompactMemory, children: "Compact Memory" })
+      ] })
+    ] }),
+    /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "workspace-editor-grid", children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("section", { className: "cloud-card workspace-browser-card", children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "workspace-tabs", role: "tablist", "aria-label": "Workspace editor sections", children: WORKSPACE_SECTIONS.map((item) => /* @__PURE__ */ jsxRuntimeExports.jsx(
+          "button",
+          {
+            type: "button",
+            className: activeSection === item.id ? "active" : "",
+            onClick: () => setActiveSection(item.id),
+            children: item.title
+          },
+          item.id
+        )) }),
+        /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "workspace-section-heading", children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { children: [
+            /* @__PURE__ */ jsxRuntimeExports.jsx("h2", { children: section.title }),
+            /* @__PURE__ */ jsxRuntimeExports.jsx("p", { children: section.detail })
+          ] }),
+          /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { children: [
+            section.shortcuts.length,
+            " paths"
+          ] })
+        ] }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "workspace-shortcuts", id: "workspace-system-files", children: section.shortcuts.map((shortcut) => /* @__PURE__ */ jsxRuntimeExports.jsxs("button", { type: "button", onClick: () => openShortcut(shortcut), children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "workspace-file-kind", children: shortcut.kind === "directory" ? "DIR" : "MD" }),
+          /* @__PURE__ */ jsxRuntimeExports.jsx("strong", { children: shortcut.label }),
+          /* @__PURE__ */ jsxRuntimeExports.jsx("small", { children: shortcut.path }),
+          /* @__PURE__ */ jsxRuntimeExports.jsx("em", { children: shortcut.note })
+        ] }, shortcut.path)) }),
+        /* @__PURE__ */ jsxRuntimeExports.jsxs(
+          "form",
+          {
+            id: "workspace-form",
+            className: "workspace-path-row",
+            onSubmit: (event) => {
+              event.preventDefault();
+              onLoadWorkspace();
+            },
+            children: [
+              /* @__PURE__ */ jsxRuntimeExports.jsxs("label", { children: [
+                /* @__PURE__ */ jsxRuntimeExports.jsx("span", { children: "Browse path" }),
+                /* @__PURE__ */ jsxRuntimeExports.jsx("input", { id: "workspace-path", value: workspacePath, onChange: (event) => setWorkspacePath(event.target.value) })
+              ] }),
+              /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "submit", children: "List files" })
+            ]
+          }
+        ),
+        /* @__PURE__ */ jsxRuntimeExports.jsx("div", { id: "workspace-list", className: "workspace-file-list", children: workspaceItems.length === 0 ? /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "workspace-empty", children: "No workspace files" }) : workspaceItems.map((item, index) => /* @__PURE__ */ jsxRuntimeExports.jsxs(
+          "button",
+          {
+            type: "button",
+            onClick: () => onSelectWorkspaceItem(item),
+            children: [
+              /* @__PURE__ */ jsxRuntimeExports.jsx("span", { children: asString$1(item.type) === "directory" ? "Folder" : "File" }),
+              /* @__PURE__ */ jsxRuntimeExports.jsx("strong", { children: itemTitle(item) }),
+              /* @__PURE__ */ jsxRuntimeExports.jsx("small", { children: itemMeta(item) })
+            ]
+          },
+          `${asString$1(item.path, itemTitle(item))}-${index}`
+        )) })
+      ] }),
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("section", { className: "cloud-card workspace-file-editor", id: "workspace-file-editor", children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "workspace-file-editor-header", children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { children: [
+            /* @__PURE__ */ jsxRuntimeExports.jsx("span", { children: "EDIT FILE" }),
+            /* @__PURE__ */ jsxRuntimeExports.jsx("h2", { children: selectedWorkspaceFile || "Select a file" })
+          ] }),
+          workspaceFileStatus && /* @__PURE__ */ jsxRuntimeExports.jsx("em", { children: workspaceFileStatus })
+        ] }),
+        /* @__PURE__ */ jsxRuntimeExports.jsxs(
+          "form",
+          {
+            onSubmit: (event) => {
+              event.preventDefault();
+              onSaveWorkspaceFile();
+            },
+            children: [
+              /* @__PURE__ */ jsxRuntimeExports.jsxs("label", { className: "workspace-editor-path", children: [
+                /* @__PURE__ */ jsxRuntimeExports.jsx("span", { children: "Path" }),
+                /* @__PURE__ */ jsxRuntimeExports.jsx("input", { value: selectedWorkspaceFile, onChange: (event) => setSelectedWorkspaceFile(event.target.value) })
+              ] }),
+              /* @__PURE__ */ jsxRuntimeExports.jsx(
+                "textarea",
+                {
+                  "aria-label": "Workspace file content",
+                  value: workspaceFileContent,
+                  onChange: (event) => setWorkspaceFileContent(event.target.value),
+                  placeholder: "# Edit this workspace file"
+                }
+              ),
+              /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "workspace-editor-actions", children: [
+                /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "secondary-button", onClick: () => onOpenWorkspaceFile(selectedWorkspaceFile), children: "Reload file" }),
+                /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "submit", children: "Save workspace file" })
+              ] })
+            ]
+          }
+        )
+      ] })
+    ] }),
+    /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "workspace-utility-grid", children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("section", { className: "cloud-card workspace-utility-card", children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsx("span", { children: "MEMORY SEARCH" }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx("h2", { children: "Find what the agent remembers." }),
+        /* @__PURE__ */ jsxRuntimeExports.jsxs(
+          "form",
+          {
+            id: "memory-search-form",
+            onSubmit: (event) => {
+              event.preventDefault();
+              onSearchMemory();
+            },
+            children: [
+              /* @__PURE__ */ jsxRuntimeExports.jsx(
+                "input",
+                {
+                  id: "memory-search-query",
+                  value: memoryQuery,
+                  onChange: (event) => setMemoryQuery(event.target.value),
+                  placeholder: "Search memory"
+                }
+              ),
+              /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "submit", children: "Search memory" })
+            ]
+          }
+        )
+      ] }),
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("section", { className: "cloud-card workspace-utility-card", children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsx("span", { children: "SCHEDULES" }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx("h2", { children: "Create durable scheduled work." }),
+        /* @__PURE__ */ jsxRuntimeExports.jsxs(
+          "form",
+          {
+            id: "cron-editor-form",
+            onSubmit: (event) => {
+              event.preventDefault();
+              onSaveCron();
+            },
+            children: [
+              /* @__PURE__ */ jsxRuntimeExports.jsx("input", { id: "cron-expression", value: cronExpression, onChange: (event) => setCronExpression(event.target.value) }),
+              /* @__PURE__ */ jsxRuntimeExports.jsx("textarea", { id: "cron-prompt", value: cronPrompt, onChange: (event) => setCronPrompt(event.target.value), placeholder: "Scheduled prompt" }),
+              /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "submit", children: "Save Cron" })
+            ]
+          }
+        )
+      ] })
+    ] })
+  ] });
+}
 const storage = {
   agentUrl: "magi.agent.app.agentUrl",
   token: "magi.agent.app.token",
@@ -12872,6 +13186,21 @@ function getStored(key, fallback) {
 function normalizeAgentUrl(value) {
   const trimmed = value.trim();
   return trimmed.length > 0 ? trimmed.replace(/\/+$/, "") : window.location.origin;
+}
+function isLoopbackHost(hostname) {
+  return hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1" || hostname === "[::1]";
+}
+function sameLocalRuntimeUrl(left, right) {
+  const normalizedLeft = normalizeAgentUrl(left);
+  const normalizedRight = normalizeAgentUrl(right);
+  if (normalizedLeft === normalizedRight) return true;
+  try {
+    const leftUrl = new URL(normalizedLeft);
+    const rightUrl = new URL(normalizedRight);
+    return isLoopbackHost(leftUrl.hostname) && isLoopbackHost(rightUrl.hostname) && leftUrl.port === rightUrl.port;
+  } catch {
+    return false;
+  }
 }
 function asArray(value) {
   return Array.isArray(value) ? value.filter((item) => !!item && typeof item === "object") : [];
@@ -12984,7 +13313,7 @@ function DashboardSidebar({
 }) {
   const nav = [
     { group: "Agent", items: [["chat", "Chat"], ["overview", "Overview"], ["settings", "Settings"]] },
-    { group: "Workspace", items: [["knowledge", "Knowledge"], ["skills", "Skills"], ["converter", "Files & Memory"], ["usage", "Usage"]] }
+    { group: "Workspace", items: [["workspace", "Workspace"], ["knowledge", "Knowledge"], ["skills", "Skills"], ["usage", "Usage"]] }
   ];
   return /* @__PURE__ */ jsxRuntimeExports.jsxs("aside", { className: "dashboard-sidebar", "aria-label": "Dashboard navigation", children: [
     /* @__PURE__ */ jsxRuntimeExports.jsx(OpenMagiLogo, {}),
@@ -12995,7 +13324,7 @@ function DashboardSidebar({
     /* @__PURE__ */ jsxRuntimeExports.jsx("nav", { className: "dashboard-nav", children: nav.map((group) => /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "nav-section", children: [
       /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "nav-label", children: group.group }),
       group.items.map(([key, label]) => {
-        const section = ["chat", "overview", "settings", "usage", "skills", "knowledge", "converter"].includes(key) ? key : "overview";
+        const section = ["chat", "overview", "settings", "usage", "skills", "knowledge", "workspace"].includes(key) ? key : "overview";
         return /* @__PURE__ */ jsxRuntimeExports.jsx(
           "button",
           {
@@ -13307,6 +13636,9 @@ function App() {
   const [memoryQuery, setMemoryQuery] = reactExports.useState("");
   const [workspacePath, setWorkspacePath] = reactExports.useState(".");
   const [workspaceItems, setWorkspaceItems] = reactExports.useState([]);
+  const [selectedWorkspaceFile, setSelectedWorkspaceFile] = reactExports.useState("SOUL.md");
+  const [workspaceFileContent, setWorkspaceFileContent] = reactExports.useState("");
+  const [workspaceFileStatus, setWorkspaceFileStatus] = reactExports.useState("");
   const [transcriptItems, setTranscriptItems] = reactExports.useState([]);
   const [evidenceItems, setEvidenceItems] = reactExports.useState([]);
   const [cronExpression, setCronExpression] = reactExports.useState("@daily");
@@ -13318,9 +13650,11 @@ function App() {
   }, []);
   const normalizedBase = reactExports.useMemo(() => normalizeAgentUrl(agentUrl), [agentUrl]);
   const authHeaders = reactExports.useCallback((json = false) => {
+    const storedToken = window.localStorage.getItem(storage.token)?.trim() ?? "";
+    const effectiveToken = token.trim() || storedToken;
     return {
       ...json ? { "Content-Type": "application/json" } : {},
-      ...token.trim() ? { Authorization: `Bearer ${token.trim()}` } : {},
+      ...effectiveToken ? { Authorization: `Bearer ${effectiveToken}` } : {},
       "X-Core-Agent-Session-Key": sessionKey.trim() || defaultSessionKey(),
       ...planMode ? { "X-Core-Agent-Plan-Mode": "on" } : {}
     };
@@ -13350,6 +13684,27 @@ function App() {
     window.localStorage.setItem(storage.modelOverride, modelOverride.trim() || "auto");
     addEvent("connection_saved", { agentUrl: nextUrl, sessionKey, modelOverride });
   }, [addEvent, agentUrl, modelOverride, sessionKey, token]);
+  const loadAppBootstrap = reactExports.useCallback(async () => {
+    const response = await fetch(`${window.location.origin}/app/bootstrap.json`, { cache: "no-store" });
+    if (!response.ok) return;
+    const payload = await response.json().catch(() => ({}));
+    const bootstrapUrl = normalizeAgentUrl(asString(payload.agentUrl, window.location.origin));
+    const storedUrl = window.localStorage.getItem(storage.agentUrl);
+    const currentUrl = normalizeAgentUrl(storedUrl || agentUrl || window.location.origin);
+    const usesServedRuntime = sameLocalRuntimeUrl(currentUrl, bootstrapUrl) || sameLocalRuntimeUrl(currentUrl, window.location.origin);
+    if (!storedUrl || usesServedRuntime) {
+      setAgentUrl(bootstrapUrl);
+      window.localStorage.setItem(storage.agentUrl, bootstrapUrl);
+    }
+    if (payload.token && usesServedRuntime) {
+      setToken(payload.token);
+      window.localStorage.setItem(storage.token, payload.token);
+      addEvent("connection_bootstrapped", {
+        tokenRequired: payload.tokenRequired === true,
+        agentUrl: bootstrapUrl
+      });
+    }
+  }, [addEvent, agentUrl]);
   const loadRuntimeSnapshot = reactExports.useCallback(async () => {
     const payload = await getJson("/v1/app/runtime?limit=16");
     setRuntime(payload);
@@ -13401,12 +13756,45 @@ function App() {
     addEvent("knowledge_file_saved", { path: asString(payload.path, knowledgePath) });
     await loadKnowledge();
   }, [addEvent, knowledgeContent, knowledgePath, loadKnowledge, sendJson]);
-  const loadWorkspace = reactExports.useCallback(async () => {
-    const payload = await getJson(`/v1/app/workspace?path=${encodeURIComponent(workspacePath || ".")}`);
-    setWorkspacePath(asString(payload.path, "."));
+  const loadWorkspaceAt = reactExports.useCallback(async (nextPath) => {
+    const targetPath = nextPath || workspacePath || ".";
+    const payload = await getJson(`/v1/app/workspace?path=${encodeURIComponent(targetPath)}`);
+    setWorkspacePath(asString(payload.path, targetPath));
     setWorkspaceItems(asArray(payload.entries));
-    addEvent("workspace_loaded", { count: asArray(payload.entries).length });
+    addEvent("workspace_loaded", { path: asString(payload.path, targetPath), count: asArray(payload.entries).length });
   }, [addEvent, getJson, workspacePath]);
+  const loadWorkspace = reactExports.useCallback(async () => {
+    await loadWorkspaceAt();
+  }, [loadWorkspaceAt]);
+  const openWorkspaceFile = reactExports.useCallback(async (pathName) => {
+    if (!pathName.trim()) return;
+    const payload = await getJson(`/v1/app/workspace/file?path=${encodeURIComponent(pathName.trim())}&maxBytes=1048576`);
+    const content = asString(payload.content);
+    setSelectedWorkspaceFile(asString(payload.path, pathName.trim()));
+    setWorkspaceFileContent(content);
+    setWorkspaceFileStatus(content.length === 0 ? "Loaded empty file" : "Loaded");
+    addEvent("workspace_file_loaded", { path: asString(payload.path, pathName.trim()) });
+  }, [addEvent, getJson]);
+  const saveWorkspaceFile = reactExports.useCallback(async () => {
+    if (!selectedWorkspaceFile.trim()) throw new Error("Workspace file path is required");
+    const payload = await sendJson("/v1/app/workspace/file", "PUT", {
+      path: selectedWorkspaceFile.trim(),
+      content: workspaceFileContent
+    });
+    setWorkspaceFileStatus("Saved");
+    addEvent("workspace_file_saved", { path: asString(payload.path, selectedWorkspaceFile.trim()) });
+    await loadWorkspaceAt(workspacePath);
+  }, [addEvent, loadWorkspaceAt, selectedWorkspaceFile, sendJson, workspaceFileContent, workspacePath]);
+  const selectWorkspaceItem = reactExports.useCallback((item) => {
+    const itemPath = asString(item.path);
+    if (!itemPath) return;
+    if (asString(item.type) === "directory") {
+      setWorkspaceFileStatus("");
+      void loadWorkspaceAt(itemPath).catch((error) => addEvent("workspace_error", { message: String(error instanceof Error ? error.message : error) }));
+      return;
+    }
+    void openWorkspaceFile(itemPath).catch((error) => addEvent("workspace_error", { message: String(error instanceof Error ? error.message : error) }));
+  }, [addEvent, loadWorkspaceAt, openWorkspaceFile]);
   const searchMemory = reactExports.useCallback(async () => {
     if (!memoryQuery.trim()) return;
     const payload = await getJson(`/v1/app/memory/search?q=${encodeURIComponent(memoryQuery.trim())}&limit=8`);
@@ -13824,7 +14212,9 @@ function App() {
     if ("serviceWorker" in navigator) {
       navigator.serviceWorker.register("/app/sw.js", { scope: "/app/" }).then(() => addEvent("service_worker_ready", {})).catch((error) => addEvent("service_worker_error", { message: error.message }));
     }
-    void checkRuntime();
+    void loadAppBootstrap().finally(() => {
+      void checkRuntime();
+    });
     return () => window.removeEventListener("beforeinstallprompt", installHandler);
   }, []);
   const installApp = reactExports.useCallback(async () => {
@@ -13864,6 +14254,33 @@ function App() {
     onSearchKnowledge: () => void searchKnowledge().catch((error) => addEvent("knowledge_error", { message: String(error instanceof Error ? error.message : error) })),
     onLoadKnowledge: () => void loadKnowledge().catch((error) => addEvent("knowledge_error", { message: String(error instanceof Error ? error.message : error) })),
     onSaveKnowledge: () => void saveKnowledge().catch((error) => addEvent("knowledge_error", { message: String(error instanceof Error ? error.message : error) }))
+  };
+  const workspaceProps = {
+    workspacePath,
+    setWorkspacePath,
+    workspaceItems,
+    selectedWorkspaceFile,
+    setSelectedWorkspaceFile,
+    workspaceFileContent,
+    setWorkspaceFileContent,
+    workspaceFileStatus,
+    memoryQuery,
+    setMemoryQuery,
+    cronExpression,
+    setCronExpression,
+    cronPrompt,
+    setCronPrompt,
+    onLoadWorkspace: () => void loadWorkspace().catch((error) => addEvent("workspace_error", { message: String(error instanceof Error ? error.message : error) })),
+    onOpenWorkspaceFile: (pathName) => void openWorkspaceFile(pathName).catch((error) => addEvent("workspace_error", { message: String(error instanceof Error ? error.message : error) })),
+    onSaveWorkspaceFile: () => void saveWorkspaceFile().catch((error) => {
+      setWorkspaceFileStatus(String(error instanceof Error ? error.message : error));
+      addEvent("workspace_error", { message: String(error instanceof Error ? error.message : error) });
+    }),
+    onSelectWorkspaceItem: selectWorkspaceItem,
+    onSearchMemory: () => void searchMemory().catch((error) => addEvent("memory_error", { message: String(error instanceof Error ? error.message : error) })),
+    onCompactMemory: () => void compactMemory().catch((error) => addEvent("memory_error", { message: String(error instanceof Error ? error.message : error) })),
+    onSaveCron: () => void saveCron().catch((error) => addEvent("cron_error", { message: String(error instanceof Error ? error.message : error) })),
+    onReloadSkills: () => void reloadSkills().catch((error) => addEvent("skills_reload_error", { message: String(error instanceof Error ? error.message : error) }))
   };
   if (active === "chat") {
     return /* @__PURE__ */ jsxRuntimeExports.jsx(
@@ -13948,32 +14365,7 @@ function App() {
       /* @__PURE__ */ jsxRuntimeExports.jsx(SnapshotList, { id: "skills-list", items: runtime?.skills?.items ?? [], empty: "No loaded skills" }),
       /* @__PURE__ */ jsxRuntimeExports.jsx(SnapshotList, { id: "tools-list", items: runtime?.tools?.items ?? [], empty: "No registered tools" })
     ] }),
-    active === "converter" && /* @__PURE__ */ jsxRuntimeExports.jsxs(UtilityPage, { title: "Converter", description: "Workspace files, memory, schedules, and local runtime utilities.", children: [
-      /* @__PURE__ */ jsxRuntimeExports.jsxs("form", { id: "workspace-form", onSubmit: (event) => {
-        event.preventDefault();
-        void loadWorkspace();
-      }, children: [
-        /* @__PURE__ */ jsxRuntimeExports.jsx(Field, { label: "Workspace path", children: /* @__PURE__ */ jsxRuntimeExports.jsx("input", { id: "workspace-path", value: workspacePath, onChange: (event) => setWorkspacePath(event.target.value) }) }),
-        /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "submit", children: "List files" })
-      ] }),
-      /* @__PURE__ */ jsxRuntimeExports.jsx(SnapshotList, { id: "workspace-list", items: workspaceItems, empty: "No workspace files" }),
-      /* @__PURE__ */ jsxRuntimeExports.jsxs("form", { id: "memory-search-form", onSubmit: (event) => {
-        event.preventDefault();
-        void searchMemory();
-      }, children: [
-        /* @__PURE__ */ jsxRuntimeExports.jsx(Field, { label: "Search memory", children: /* @__PURE__ */ jsxRuntimeExports.jsx("input", { id: "memory-search-query", value: memoryQuery, onChange: (event) => setMemoryQuery(event.target.value) }) }),
-        /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "submit", children: "Search memory" }),
-        /* @__PURE__ */ jsxRuntimeExports.jsx("button", { id: "memory-compact-button", type: "button", onClick: () => void compactMemory(), children: "Compact memory" })
-      ] }),
-      /* @__PURE__ */ jsxRuntimeExports.jsxs("form", { id: "cron-editor-form", onSubmit: (event) => {
-        event.preventDefault();
-        void saveCron();
-      }, children: [
-        /* @__PURE__ */ jsxRuntimeExports.jsx(Field, { label: "Expression", children: /* @__PURE__ */ jsxRuntimeExports.jsx("input", { id: "cron-expression", value: cronExpression, onChange: (event) => setCronExpression(event.target.value) }) }),
-        /* @__PURE__ */ jsxRuntimeExports.jsx(Field, { label: "Prompt", children: /* @__PURE__ */ jsxRuntimeExports.jsx("textarea", { id: "cron-prompt", value: cronPrompt, onChange: (event) => setCronPrompt(event.target.value) }) }),
-        /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "submit", children: "Save Cron" })
-      ] })
-    ] })
+    active === "workspace" && /* @__PURE__ */ jsxRuntimeExports.jsx(WorkspaceEditorPage, { ...workspaceProps })
   ] });
 }
 clientExports.createRoot(document.getElementById("root")).render(

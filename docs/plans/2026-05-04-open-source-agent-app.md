@@ -47,6 +47,8 @@ The open-source app should include:
   background task events, delivery events, and commit checkpoints.
 - Workspace file and artifact panels. Initial workspace browser and artifact
   index: done.
+- Cloud-parity workspace editor for system prompts, first-class contracts,
+  harness rules, local hook notes, memory tree, and compaction tree: done.
 - Task board and child-agent task inspector. Initial task index plus
   output/stop controls: done.
 - Memory inspector for Hipocampus root/daily/weekly/monthly/qmd state. Initial
@@ -163,6 +165,7 @@ bearer-token gated by the server token:
 | `/v1/app/skills/reload` | shipped | Workspace skill reload through the app auth surface. |
 | `/v1/app/workspace` | shipped | Workspace directory listing. |
 | `/v1/app/workspace/file` | shipped | Bounded workspace file read. |
+| `/v1/app/workspace/file` `PUT` | shipped | Safe workspace file write for prompts, contracts, harness rules, hook notes, memory, and compaction files. |
 | `/v1/app/workspace/download` | shipped | Workspace file download for local app delivery. |
 | `/v1/app/memory` | shipped | Hipocampus memory status and file listing. |
 | `/v1/app/memory/file` | shipped | Bounded memory file read. |
@@ -240,6 +243,8 @@ controls. M5 has a Docker Compose starter plus self-host hardening notes.
 
 - Add cron list/create/update/delete UI. Done.
 - Add User Harness Rules editor backed by Markdown files. Initial editor: done.
+- Add first-class contract, harness, hook, system-prompt, memory, and compaction
+  file editor that writes through the safe workspace file API. Done.
 - Add memory and qmd inspector. Done, including compact/reindex controls.
 - Add skills list/reload UI. Done.
 

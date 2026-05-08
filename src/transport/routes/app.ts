@@ -70,6 +70,43 @@ function writeText(res: ServerResponse, status: number, body: string): void {
   res.end(body);
 }
 
+function writeJson(res: ServerResponse, status: number, body: unknown): void {
+  res.writeHead(status, {
+    "Content-Type": "application/json; charset=utf-8",
+    "Cache-Control": "no-store",
+  });
+  res.end(JSON.stringify(body));
+}
+
+function isLoopbackAddress(address?: string): boolean {
+  if (!address) return false;
+  return address === "127.0.0.1" || address === "::1" || address === "::ffff:127.0.0.1";
+}
+
+function requestOrigin(req: IncomingMessage): string {
+  const host = req.headers.host || "localhost";
+  const forwardedProto = Array.isArray(req.headers["x-forwarded-proto"])
+    ? req.headers["x-forwarded-proto"][0]
+    : req.headers["x-forwarded-proto"];
+  const proto = forwardedProto || "http";
+  return `${proto}://${host}`;
+}
+
+async function handleBootstrap(
+  req: IncomingMessage,
+  res: ServerResponse,
+  _match: RegExpMatchArray,
+  ctx: HttpServerCtx,
+): Promise<void> {
+  const isLoopback = isLoopbackAddress(req.socket.remoteAddress);
+  writeJson(res, 200, {
+    ok: true,
+    agentUrl: requestOrigin(req),
+    tokenRequired: Boolean(ctx.bearerToken),
+    ...(isLoopback && ctx.bearerToken ? { token: ctx.bearerToken } : {}),
+  });
+}
+
 async function handleApp(
   req: IncomingMessage,
   res: ServerResponse,
@@ -106,5 +143,6 @@ async function handleApp(
 }
 
 export const appRoutes: RouteHandler[] = [
+  route("GET", /^\/app\/bootstrap\.json(?:\?.*)?$/, handleBootstrap),
   route("GET", /^\/app(?:\/[^?]*)?(?:\?.*)?$/, handleApp),
 ];

@@ -717,6 +717,64 @@ describe("HttpServer /v1/app runtime routes", () => {
     );
   });
 
+  it("writes editable workspace prompt and memory files without leaving the workspace", async () => {
+    const promptWrite = await requestJson(
+      `http://127.0.0.1:${port}/v1/app/workspace/file`,
+      "local-token",
+      {
+        method: "PUT",
+        body: {
+          path: "SOUL.md",
+          content: "# Soul\nRun as a local work agent.\n",
+        },
+      },
+    );
+
+    expect(promptWrite.status).toBe(200);
+    expect(promptWrite.body).toEqual(
+      expect.objectContaining({
+        ok: true,
+        path: "SOUL.md",
+        sizeBytes: 34,
+      }),
+    );
+    await expect(fs.readFile(path.join(tmp, "SOUL.md"), "utf8")).resolves.toBe(
+      "# Soul\nRun as a local work agent.\n",
+    );
+
+    const memoryWrite = await requestJson(
+      `http://127.0.0.1:${port}/v1/app/workspace/file`,
+      "local-token",
+      {
+        method: "PUT",
+        body: {
+          path: "memory/ROOT.md",
+          content: "# Root\nEdited from the app.\n",
+        },
+      },
+    );
+
+    expect(memoryWrite.status).toBe(200);
+    await expect(fs.readFile(path.join(tmp, "memory", "ROOT.md"), "utf8")).resolves.toBe(
+      "# Root\nEdited from the app.\n",
+    );
+
+    const escape = await requestJson(
+      `http://127.0.0.1:${port}/v1/app/workspace/file`,
+      "local-token",
+      {
+        method: "PUT",
+        body: {
+          path: "../outside.md",
+          content: "no",
+        },
+      },
+    );
+
+    expect(escape.status).toBe(400);
+    expect(escape.body).toEqual({ error: "invalid_path" });
+  });
+
   it("downloads workspace files for local app delivery", async () => {
     const download = await requestRaw(
       `http://127.0.0.1:${port}/v1/app/workspace/download?path=README.md`,

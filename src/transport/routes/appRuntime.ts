@@ -6,6 +6,7 @@ import type { CronRecord } from "../../cron/CronScheduler.js";
 import type { ArtifactMeta } from "../../artifacts/ArtifactManager.js";
 import type { TranscriptEntry } from "../../storage/Transcript.js";
 import type { Tool } from "../../Tool.js";
+import { isFsSafeEscape, isUnderRoot, writeSafe } from "../../util/fsSafe.js";
 import type { ChannelRef, ChannelType } from "../../util/types.js";
 import {
   classifyEvidence,
@@ -45,6 +46,7 @@ const CHANNEL_TYPES: readonly ChannelType[] = [
 ];
 const DEFAULT_FILE_READ_BYTES = 256 * 1024;
 const MAX_FILE_READ_BYTES = 1024 * 1024;
+const MAX_FILE_WRITE_BYTES = 1024 * 1024;
 
 function preview(value: unknown, maxChars = 400): string | undefined {
   if (value === undefined || value === null) return undefined;
@@ -550,6 +552,35 @@ async function readWorkspaceFile(
   }
 }
 
+async function writeWorkspaceFile(
+  ctx: HttpServerCtx,
+  rawPath: string | null,
+  content: string,
+) {
+  const resolved = resolveWorkspacePath(ctx, rawPath);
+  if (!resolved || resolved.rel === ".") return null;
+  const sizeBytes = Buffer.byteLength(content, "utf8");
+  if (sizeBytes > MAX_FILE_WRITE_BYTES) {
+    return { error: "file_too_large" as const };
+  }
+
+  await fs.mkdir(path.dirname(resolved.full), { recursive: true });
+  const root = path.resolve(ctx.agent.config.workspaceRoot);
+  const rootReal = await fs.realpath(root).catch(() => root);
+  const parentReal = await fs.realpath(path.dirname(resolved.full)).catch(() => null);
+  if (!parentReal || !isUnderRoot(parentReal, rootReal)) {
+    return { error: "invalid_path" as const };
+  }
+
+  await writeSafe(resolved.rel, content, ctx.agent.config.workspaceRoot);
+  const stat = await fs.stat(resolved.full);
+  return {
+    path: resolved.rel,
+    sizeBytes: stat.size,
+    mtimeMs: stat.mtimeMs,
+  };
+}
+
 async function collectMemoryFiles(ctx: HttpServerCtx) {
   const root = path.resolve(ctx.agent.config.workspaceRoot);
   const out: Array<{ path: string; sizeBytes: number; mtimeMs: number }> = [];
@@ -1015,6 +1046,45 @@ async function handleWorkspaceFile(
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code === "ENOENT") {
       writeJson(res, 404, { error: "not_found" });
+      return;
+    }
+    throw err;
+  }
+}
+
+async function handleWorkspaceFilePut(
+  req: IncomingMessage,
+  res: ServerResponse,
+  _match: RegExpMatchArray,
+  ctx: HttpServerCtx,
+): Promise<void> {
+  if (!authorizeBearer(req, res, ctx)) return;
+  const body = readObject(await readJsonBody(req));
+  const rawPath = typeof body.path === "string" ? body.path : "";
+  const content = typeof body.content === "string" ? body.content : null;
+  if (!rawPath || content === null) {
+    writeJson(res, 400, { error: "missing_workspace_file_fields" });
+    return;
+  }
+  try {
+    const written = await writeWorkspaceFile(ctx, rawPath, content);
+    if (!written) {
+      writeJson(res, 400, { error: "invalid_path" });
+      return;
+    }
+    if ("error" in written) {
+      writeJson(res, written.error === "file_too_large" ? 413 : 400, {
+        error: written.error,
+      });
+      return;
+    }
+    if (isMemoryPath(written.path)) {
+      await ctx.agent.hipocampus.getQmdManager().reindex().catch(() => {});
+    }
+    writeJson(res, 200, { ok: true, ...written });
+  } catch (err) {
+    if (isFsSafeEscape(err)) {
+      writeJson(res, 400, { error: "invalid_path" });
       return;
     }
     throw err;
@@ -1511,6 +1581,7 @@ export const appRuntimeRoutes: RouteHandler[] = [
   route("POST", /^\/v1\/app\/skills\/reload(?:\?.*)?$/, handleSkillsReload),
   route("GET", /^\/v1\/app\/workspace(?:\?.*)?$/, handleWorkspaceList),
   route("GET", /^\/v1\/app\/workspace\/file(?:\?.*)?$/, handleWorkspaceFile),
+  route("PUT", /^\/v1\/app\/workspace\/file(?:\?.*)?$/, handleWorkspaceFilePut),
   route("GET", /^\/v1\/app\/workspace\/download(?:\?.*)?$/, handleWorkspaceDownload),
   route("GET", /^\/v1\/app\/memory(?:\?.*)?$/, handleMemoryList),
   route("GET", /^\/v1\/app\/memory\/file(?:\?.*)?$/, handleMemoryFile),
