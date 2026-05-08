@@ -4,7 +4,9 @@
  *
  * Commands:
  *   init              Create magi-agent.yaml interactively
- *   start             Interactive terminal mode
+ *   chat              Interactive terminal mode
+ *   start             Backwards-compatible alias for chat
+ *   run [prompt]      One-shot terminal mode
  *   serve [--port N]  HTTP API server
  *   version           Print version
  *   (no args)         Show help
@@ -14,6 +16,7 @@
 
 import fs from "node:fs";
 import path from "node:path";
+import { CliUsageError, parseCliArgs } from "./args.js";
 const BOLD = "\x1b[1m";
 const DIM = "\x1b[2m";
 const RESET = "\x1b[0m";
@@ -27,13 +30,17 @@ ${BOLD}Usage:${RESET}
 
 ${BOLD}Commands:${RESET}
   init               Create a magi-agent.yaml config file interactively
-  start              Start the agent in interactive terminal mode
+  chat               Start the agent in interactive terminal mode
+  start              Alias for chat
+  run [prompt]       Run one prompt and print the streamed result
   serve [--port N]   Start the HTTP API server (default port: 8080)
   version            Print version
 
 ${BOLD}Examples:${RESET}
   ${DIM}$ magi-agent init${RESET}
-  ${DIM}$ magi-agent start${RESET}
+  ${DIM}$ magi-agent chat${RESET}
+  ${DIM}$ magi-agent run "summarize workspace/knowledge"${RESET}
+  ${DIM}$ cat notes.md | magi-agent run --session notes${RESET}
   ${DIM}$ magi-agent serve --port 3000${RESET}
 
 ${DIM}https://github.com/openmagi/magi-agent${RESET}
@@ -62,73 +69,50 @@ function printVersion(): void {
   }
 }
 
-function parsePort(args: string[]): number | undefined {
-  const idx = args.indexOf("--port");
-  if (idx === -1) return undefined;
-
-  const raw = args[idx + 1];
-  if (!raw) {
-    console.error("Error: --port requires a number argument.");
-    process.exit(1);
-  }
-
-  const port = Number.parseInt(raw, 10);
-  if (!Number.isFinite(port) || port <= 0 || port >= 65536) {
-    console.error(`Error: invalid port "${raw}". Must be 1-65535.`);
-    process.exit(1);
-  }
-
-  return port;
-}
-
 async function main(): Promise<void> {
-  const args = process.argv.slice(2);
-  const command = args[0];
+  const parsed = parseCliArgs(process.argv.slice(2));
 
-  switch (command) {
+  switch (parsed.command) {
     case "init": {
       const { runInit } = await import("./init.js");
       await runInit();
       break;
     }
 
-    case "start": {
+    case "chat": {
       const { runStart } = await import("./start.js");
       await runStart();
       break;
     }
 
+    case "run": {
+      const { runOneShot } = await import("./run.js");
+      await runOneShot(parsed);
+      break;
+    }
+
     case "serve": {
-      const port = parsePort(args);
       const { runServe } = await import("./serve.js");
-      await runServe(port);
+      await runServe(parsed.port);
       break;
     }
 
     case "version":
-    case "--version":
-    case "-v":
       printVersion();
       break;
 
     case "help":
-    case "--help":
-    case "-h":
       printHelp();
       break;
-
-    case undefined:
-      printHelp();
-      break;
-
-    default:
-      console.error(`Unknown command: "${command}"`);
-      console.error(`Run "magi-agent --help" for usage.`);
-      process.exit(1);
   }
 }
 
 main().catch((err) => {
+  if (err instanceof CliUsageError) {
+    console.error(err.message);
+    console.error(`Run "magi-agent --help" for usage.`);
+    process.exit(err.exitCode);
+  }
   console.error(`Fatal error: ${(err as Error).message}`);
   process.exit(1);
 });

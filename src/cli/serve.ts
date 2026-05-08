@@ -6,12 +6,10 @@
  * equivalent of the env-var-based `src/index.ts` entrypoint.
  */
 
-import path from "node:path";
 import { loadConfig } from "./config.js";
 import { Agent, type AgentConfig } from "../Agent.js";
 import { HttpServer } from "../transport/HttpServer.js";
-import { createProvider } from "../llm/createProvider.js";
-import { registerConfiguredModelCapability } from "../config/registerConfiguredModelCapability.js";
+import { buildCliAgentConfig, cleanToken } from "./agentConfig.js";
 
 const DIM = "\x1b[2m";
 const BOLD = "\x1b[1m";
@@ -19,55 +17,6 @@ const RESET = "\x1b[0m";
 const GREEN = "\x1b[32m";
 
 const DEFAULT_PORT = 8080;
-
-const DEFAULT_MODELS: Record<string, string> = {
-  anthropic: "claude-sonnet-4-6",
-  openai: "gpt-5.4",
-  google: "gemini-2.5-flash",
-  "openai-compatible": "llama3.1",
-};
-
-function buildAgentConfig(
-  config: ReturnType<typeof loadConfig>,
-): AgentConfig {
-  const workspace = config.workspace
-    ? path.resolve(config.workspace)
-    : path.resolve("./workspace");
-
-  const model = config.llm.model ?? DEFAULT_MODELS[config.llm.provider] ?? "claude-sonnet-4-6";
-  registerConfiguredModelCapability(model, config.llm.capabilities);
-
-  const provider = createProvider({
-    provider: config.llm.provider,
-    apiKey: config.llm.apiKey,
-    baseUrl: config.llm.baseUrl,
-    defaultModel: model,
-  });
-  const agentGatewayToken =
-    cleanToken(config.server?.gatewayToken) ??
-    cleanToken(process.env.MAGI_AGENT_SERVER_TOKEN) ??
-    cleanToken(config.llm.apiKey) ??
-    "local-dev";
-
-  return {
-    botId: "cli-serve",
-    userId: "cli-user",
-    workspaceRoot: workspace,
-    gatewayToken: agentGatewayToken,
-    apiProxyUrl: config.llm.baseUrl ?? "https://api.anthropic.com",
-    model,
-    llmProvider: provider,
-    agentName: config.identity?.name,
-    agentInstructions: config.identity?.instructions,
-    telegramBotToken: config.channels?.telegram?.token,
-    discordBotToken: config.channels?.discord?.token,
-  };
-}
-
-function cleanToken(value: string | undefined): string | undefined {
-  const trimmed = value?.trim();
-  return trimmed && trimmed.length > 0 ? trimmed : undefined;
-}
 
 export function resolveHttpBearerToken(
   config: ReturnType<typeof loadConfig>,
@@ -105,7 +54,7 @@ export async function runServe(port?: number): Promise<void> {
   }
 
   const listenPort = port ?? DEFAULT_PORT;
-  const agentConfig = buildAgentConfig(config);
+  const agentConfig = buildCliAgentConfig(config, { botId: "cli-serve" });
   let httpBearerToken: string | undefined;
   try {
     httpBearerToken = resolveHttpBearerToken(config, agentConfig);

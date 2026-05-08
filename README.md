@@ -18,9 +18,24 @@ docker compose up --build
 
 Open `http://localhost:8080/app` and paste the server token from `.env`.
 
+Prefer the terminal?
+
+```bash
+npm install
+npm run build
+npx tsx src/cli/index.ts init
+npx tsx src/cli/index.ts chat
+npx tsx src/cli/index.ts run "summarize workspace/knowledge"
+cat notes.md | npx tsx src/cli/index.ts run --session notes
+```
+
+After npm publishing, the same surface is available as `magi-agent chat`,
+`magi-agent run`, and `magi-agent serve`.
+
 ## Why Install It
 
 - **Codex-like app shell:** chat, workspace files, runtime inspector, knowledge, artifacts, and evidence in one local UI.
+- **CLI-native runtime:** use Magi from a browser, desktop shell, interactive terminal, one-shot command, or Unix pipe.
 - **Any model:** hosted providers, local OpenAI-compatible servers, Ollama, LM Studio, vLLM, llama.cpp, and LiteLLM.
 - **Local knowledge base:** write and search project knowledge inside `workspace/knowledge` when no external KB exists.
 - **Hipocampus memory:** time-structured memory for durable context, session resume, and compaction.
@@ -87,6 +102,8 @@ Source development:
 npm install
 npm run build
 npx tsx src/cli/index.ts init
+npx tsx src/cli/index.ts chat
+npx tsx src/cli/index.ts run "write a status update from workspace/knowledge"
 npx tsx src/cli/index.ts serve --port 8080
 ```
 
@@ -186,7 +203,7 @@ npm run build
 
 - Browser app: `http://localhost:8080/app`
 - HTTP runtime API: local `/v1/app/*` endpoints
-- CLI: `npx tsx src/cli/index.ts`
+- CLI: `magi-agent chat`, `magi-agent run`, `magi-agent serve`
 - Desktop: PWA or Tauri build
 - Channels: Telegram, Discord, webhook
 - Workspace: local files, artifacts, memory, and KB
