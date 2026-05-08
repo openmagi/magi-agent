@@ -12071,12 +12071,6 @@ function requireClient() {
   return client.exports;
 }
 var clientExports = requireClient();
-const storage = {
-  agentUrl: "magi.agent.app.agentUrl",
-  token: "magi.agent.app.token",
-  sessionKey: "magi.agent.app.sessionKey",
-  modelOverride: "magi.agent.app.modelOverride"
-};
 const GROUP_LABELS = {
   status: "Now",
   tool: "Current steps",
@@ -12099,57 +12093,48 @@ const SUBAGENT_NAMES = [
   "Shannon",
   "Lamarr"
 ];
-const LOW_SIGNAL_TOOL_LABELS = /* @__PURE__ */ new Set(["glob", "grep", "subagentrunning", "subagenttooldecision"]);
-function initialChannelState() {
-  return {
-    streaming: false,
-    streamingText: "",
-    thinkingText: "",
-    error: null,
-    thinkingStartedAt: null,
-    turnPhase: null,
-    heartbeatElapsedMs: null,
-    pendingInjectionCount: 0,
-    activeTools: [],
-    subagents: [],
-    taskBoard: null
-  };
+const LOW_SIGNAL_TOOL_LABELS = /* @__PURE__ */ new Set(["glob", "grep", "taskget", "subagentrunning", "subagenttooldecision"]);
+function asString$1(value, fallback = "") {
+  return typeof value === "string" ? value : fallback;
 }
-function defaultLocalChannels() {
-  return [
-    {
-      id: "local-general",
-      name: "general",
-      displayName: null,
-      category: "General",
-      position: 0
-    }
-  ];
+function asNumber$1(value, fallback = 0) {
+  return typeof value === "number" && Number.isFinite(value) ? value : fallback;
 }
-function groupLocalChannels(channels) {
-  const grouped = /* @__PURE__ */ new Map();
-  for (const channel of channels) {
-    const category = channel.category || "General";
-    grouped.set(category, [...grouped.get(category) ?? [], channel]);
-  }
-  return Array.from(grouped.entries()).map(([title, items]) => ({
-    title,
-    channels: [...items].sort((a, b) => a.position - b.position)
-  }));
-}
-function normalizeChannelName(value) {
-  return value.trim().toLowerCase().replace(/[^a-z0-9-_ ]/g, "").replace(/\s+/g, "-").replace(/^-+|-+$/g, "");
+function preview$1(value, max = 140) {
+  const text = typeof value === "string" ? value : value == null ? "" : String(value);
+  const collapsed = text.replace(/\s+/g, " ").trim();
+  return collapsed.length > max ? `${collapsed.slice(0, max - 3)}...` : collapsed;
 }
 function formatElapsed(ms) {
   if (!ms || ms < 1e3) return void 0;
   return `${Math.max(1, Math.round(ms / 1e3))}s`;
 }
+function phaseLabel(phase) {
+  switch (phase) {
+    case "pending":
+      return "Preparing";
+    case "planning":
+      return "Planning";
+    case "executing":
+      return "Running";
+    case "verifying":
+      return "Checking work";
+    case "committing":
+      return "Writing answer";
+    case "committed":
+      return "Finishing";
+    case "aborted":
+      return "Interrupted";
+    default:
+      return "Working";
+  }
+}
 function normalizeRole(role) {
   const value = role.trim().toLowerCase();
-  if (value === "explore" || value === "explorer" || value === "research") return "explorer";
-  if (value === "review" || value === "reviewer") return "reviewer";
+  if (value === "explore" || value === "explorer" || value === "research") return "research";
+  if (value === "review" || value === "reviewer") return "review";
   if (value === "work" || value === "worker") return "worker";
-  return value || "subagent";
+  return value || "helper";
 }
 function normalizeToolLabel(label) {
   return label.replace(/[^a-z0-9]/gi, "").toLowerCase();
@@ -12185,33 +12170,72 @@ function taskMeta(task) {
   if (task.status === "cancelled") return "cancelled";
   return "pending";
 }
-function phaseLabel(phase) {
-  switch (phase) {
-    case "pending":
-      return "Preparing";
-    case "planning":
-      return "Planning";
-    case "executing":
-      return "Running";
-    case "verifying":
-      return "Verifying";
-    case "committing":
-      return "Writing answer";
-    case "committed":
-      return "Finalizing";
-    case "aborted":
-      return "Interrupted";
-    default:
-      return "Working";
+function parseMaybeJson(text) {
+  if (!text) return null;
+  const trimmed = text.trim();
+  if (!trimmed.startsWith("{") || !trimmed.endsWith("}")) return null;
+  try {
+    const parsed = JSON.parse(trimmed);
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : null;
+  } catch {
+    return null;
   }
 }
+function firstText(record, keys) {
+  for (const key of keys) {
+    const value = record[key];
+    if (typeof value === "string" && value.trim()) return value;
+    if (typeof value === "number" && Number.isFinite(value)) return String(value);
+  }
+  return "";
+}
+function summarizeToolPayload(text) {
+  if (!text) return void 0;
+  const parsed = parseMaybeJson(text);
+  if (!parsed) return preview$1(text, 160);
+  const path = firstText(parsed, ["path", "file", "filePath", "targetPath"]);
+  const command = firstText(parsed, ["command", "cmd"]);
+  const action = firstText(parsed, ["action"]);
+  const stdout = firstText(parsed, ["stdout", "output", "result", "finalText", "content"]);
+  const prompt = firstText(parsed, ["prompt", "query", "text"]);
+  const error = firstText(parsed, ["error", "errorMessage", "message", "reason"]);
+  const operation = firstText(parsed, ["operation"]);
+  if (path && stdout) return `${path} - ${preview$1(stdout, 120)}`;
+  if (path) return path;
+  if (command) return `Command: ${preview$1(command, 140)}`;
+  if (action === "create_session") return "Opened a browser workspace.";
+  if (action === "scrape") return "Read the current browser page.";
+  if (action) return `Browser action: ${action.replace(/_/g, " ")}`;
+  if (operation) return `Calculated ${operation}${stdout ? `: ${preview$1(stdout, 80)}` : ""}`;
+  if (prompt) return preview$1(prompt, 160);
+  if (stdout) return preview$1(stdout, 160);
+  if (error) return preview$1(error, 160);
+  return "Processed tool result.";
+}
+function humanToolLabel(label, inputPreview, outputPreview) {
+  const normalized = normalizeToolLabel(label);
+  if (normalized === "fileread") return "Reviewing document";
+  if (normalized === "filewrite") return "Writing file";
+  if (normalized === "fileedit") return "Editing file";
+  if (normalized === "bash") return "Running command";
+  if (normalized === "browser") return "Using browser";
+  if (normalized === "spawnagent") return "Starting helper";
+  if (normalized === "calculation") return "Calculating";
+  if (normalized === "codeworkspace") return "Working in workspace";
+  if (normalized === "documentsend" || normalized === "filesend" || normalized === "filedeliver") return "Delivering file";
+  if (normalized === "websearch") return "Searching the web";
+  if (normalized === "knowledgesearch") return "Searching knowledge";
+  if (summarizeToolPayload(outputPreview)?.startsWith("Command:")) return "Running command";
+  if (summarizeToolPayload(inputPreview)?.includes("/")) return "Reviewing document";
+  return label.replace(/([a-z])([A-Z])/g, "$1 $2") || "Working";
+}
 function toolPreview(activity) {
-  const label = activity.label || "Running tool";
-  const detail = activity.inputPreview || activity.outputPreview;
+  const detail = summarizeToolPayload(activity.inputPreview);
+  const snippet = summarizeToolPayload(activity.outputPreview);
   return {
-    label,
-    detail: detail ? preview(detail, 120) : void 0,
-    snippet: activity.outputPreview ? preview(activity.outputPreview, 240) : void 0
+    label: humanToolLabel(activity.label, activity.inputPreview, activity.outputPreview),
+    detail,
+    snippet: snippet && snippet !== detail ? snippet : void 0
   };
 }
 function deriveWorkConsoleRows({
@@ -12236,7 +12260,7 @@ function deriveWorkConsoleRows({
       id: `subagent:${subagent.taskId}`,
       group: "subagent",
       label: subagentName(index),
-      detail: subagent.detail,
+      detail: preview$1(subagent.detail, 90),
       status: statusFromSubagent(subagent),
       meta: normalizeRole(subagent.role)
     });
@@ -12296,9 +12320,545 @@ function deriveWorkConsoleRows({
   return rows;
 }
 function groupWorkRows(rows) {
-  const groups = /* @__PURE__ */ new Map();
-  for (const row of rows) groups.set(row.group, [...groups.get(row.group) ?? [], row]);
-  return Array.from(groups.entries());
+  const order = ["status", "subagent", "tool", "task", "queue", "control"];
+  return order.map((group) => [group, rows.filter((row) => row.group === group)]).filter(([, groupRows]) => groupRows.length > 0);
+}
+function summarizeValue(value) {
+  if (typeof value === "string") return preview$1(value, 150);
+  if (typeof value === "number" || typeof value === "boolean") return String(value);
+  if (Array.isArray(value)) return `${value.length} items`;
+  if (value && typeof value === "object") {
+    const record = value;
+    return firstText(record, ["title", "name", "path", "status", "message", "summary"]) || "details updated";
+  }
+  return "";
+}
+function summarizeEventPayload(type, payload) {
+  if (type === "runtime_snapshot") {
+    return `${asNumber$1(payload.sessions)} sessions, ${asNumber$1(payload.tasks)} tasks, ${asNumber$1(payload.artifacts)} artifacts`;
+  }
+  if (type === "knowledge_search") {
+    return `Searched "${asString$1(payload.query)}" and found ${asNumber$1(payload.count)} results.`;
+  }
+  if (type === "knowledge_loaded") {
+    return `${asNumber$1(payload.documents)} documents across ${asNumber$1(payload.collections)} collections.`;
+  }
+  if (type === "message_queued") {
+    return "Follow-up will run after the current answer finishes.";
+  }
+  if (type === "message_injected") {
+    return "Instruction sent into the active run.";
+  }
+  if (type.endsWith("_error") || type === "send_error") {
+    return firstText(payload, ["message", "error", "reason"]) || "The runtime reported an error.";
+  }
+  const direct = firstText(payload, ["summary", "message", "status", "phase", "name", "path", "query"]);
+  if (direct) return preview$1(direct, 150);
+  const entries = Object.entries(payload).filter(([, value]) => value !== void 0 && value !== null && value !== "").slice(0, 3).map(([key, value]) => `${key.replace(/([a-z])([A-Z])/g, "$1 $2")}: ${summarizeValue(value)}`).filter(Boolean);
+  return entries.length > 0 ? entries.join(" · ") : "Updated runtime state.";
+}
+function displayEventType(type) {
+  return type.replace(/_/g, " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+function Pill$1({ children, tone = "neutral" }) {
+  return /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: `pill pill-${tone}`, children });
+}
+function Field$1({ label, children }) {
+  return /* @__PURE__ */ jsxRuntimeExports.jsxs("label", { className: "field", children: [
+    /* @__PURE__ */ jsxRuntimeExports.jsx("span", { children: label }),
+    children
+  ] });
+}
+function SnapshotList$1({
+  id,
+  items,
+  empty,
+  onSelect
+}) {
+  if (items.length === 0) {
+    return /* @__PURE__ */ jsxRuntimeExports.jsx("div", { id, className: "snapshot-list", children: /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "snapshot-empty", children: empty }) });
+  }
+  return /* @__PURE__ */ jsxRuntimeExports.jsx("div", { id, className: "snapshot-list", children: items.map((item, index) => /* @__PURE__ */ jsxRuntimeExports.jsxs(
+    "button",
+    {
+      type: "button",
+      className: "snapshot-row",
+      onClick: () => onSelect?.(item),
+      children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "snapshot-title", children: asString$1(item.title) || asString$1(item.name) || asString$1(item.sessionKey) || asString$1(item.taskId) || asString$1(item.cronId) || asString$1(item.path) || `item ${index + 1}` }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "snapshot-meta", children: asString$1(item.status) || asString$1(item.kind) || asString$1(item.collection) || asString$1(item.permission) || summarizeValue(item.meta) }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "snapshot-detail", children: asString$1(item.detail) || asString$1(item.promptPreview) || asString$1(item.resultPreview) || asString$1(item.path) || preview$1(item.contentPreview || item.inputPreview || item.outputPreview, 120) })
+      ]
+    },
+    `${asString$1(item.id) || asString$1(item.taskId) || asString$1(item.path) || index}`
+  )) });
+}
+function Dot({ status }) {
+  const className = status === "running" ? "purple-dot" : status === "error" ? "red-dot" : status === "waiting" ? "amber-dot" : "green-dot";
+  return /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className });
+}
+function WorkInspector({
+  activeDock,
+  setActiveDock,
+  runtime,
+  events,
+  channelState,
+  queuedMessages,
+  controlRequests,
+  knowledgeQuery,
+  setKnowledgeQuery,
+  knowledgePath,
+  setKnowledgePath,
+  knowledgeContent,
+  setKnowledgeContent,
+  knowledgeItems,
+  onSearchKnowledge,
+  onLoadKnowledge,
+  onSaveKnowledge,
+  onReloadSkills
+}) {
+  const sessionRows = runtime?.sessions?.items ?? [];
+  const artifactRows = runtime?.artifacts?.items ?? [];
+  const cronRows = runtime?.crons?.items ?? [];
+  const workGroups = groupWorkRows(deriveWorkConsoleRows({ channelState, queuedMessages, controlRequests }));
+  return /* @__PURE__ */ jsxRuntimeExports.jsxs("aside", { className: "work-dock", "aria-label": "Work", children: [
+    /* @__PURE__ */ jsxRuntimeExports.jsxs("header", { className: "work-dock-header", children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsx("p", { children: "WORK" }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx("h2", { children: activeDock === "work" ? "Work" : "Knowledge" })
+      ] }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx("button", { className: "icon-button", type: "button", "aria-label": "Collapse", children: "»" })
+    ] }),
+    /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "dock-tabs", role: "tablist", "aria-label": "Right inspector", children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsx("button", { className: activeDock === "work" ? "active" : "", type: "button", onClick: () => setActiveDock("work"), children: "Work" }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx("button", { className: activeDock === "knowledge" ? "active" : "", type: "button", onClick: () => setActiveDock("knowledge"), children: "Knowledge" })
+    ] }),
+    activeDock === "work" ? /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "dock-panel", children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "dock-intro", children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsx("h3", { children: "Work in progress" }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx("p", { children: "Plain-language progress from the current run." })
+      ] }),
+      workGroups.map(([group, rows]) => /* @__PURE__ */ jsxRuntimeExports.jsxs("section", { className: `work-card work-card-${group} ${group === "status" ? "live" : ""} ${group === "subagent" ? "helpers-card" : ""}`, children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "work-card-title", children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsx("span", { children: GROUP_LABELS[group] }),
+          group === "status" && channelState.streaming && /* @__PURE__ */ jsxRuntimeExports.jsx(Pill$1, { tone: "purple", children: "LIVE" }),
+          group === "tool" && /* @__PURE__ */ jsxRuntimeExports.jsx(Pill$1, { children: rows.length }),
+          group === "subagent" && /* @__PURE__ */ jsxRuntimeExports.jsxs(Pill$1, { tone: "green", children: [
+            rows.length,
+            " AGENTS"
+          ] }),
+          group === "queue" && /* @__PURE__ */ jsxRuntimeExports.jsxs(Pill$1, { tone: "amber", children: [
+            rows.length,
+            " WAITING"
+          ] })
+        ] }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx(
+          "div",
+          {
+            id: group === "tool" ? "tasks-list" : void 0,
+            className: group === "subagent" ? "helper-grid" : group === "tool" ? "current-step-list" : "work-row-list",
+            children: rows.map((row) => group === "subagent" ? /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "helper-chip", "data-work-console-agent-chip": "true", "data-work-console-row-status": row.status, children: [
+              /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: `helper-dot ${row.status === "done" ? "green" : row.status === "waiting" ? "amber" : row.status === "error" ? "red" : "purple"}` }),
+              /* @__PURE__ */ jsxRuntimeExports.jsxs("strong", { children: [
+                row.label,
+                " ",
+                row.meta && /* @__PURE__ */ jsxRuntimeExports.jsx("em", { children: row.meta })
+              ] }),
+              row.detail && /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "helper-bar", children: row.detail })
+            ] }, row.id) : /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: `current-step-row work-row-${row.status}`, "data-work-console-action-row": group === "tool" ? "true" : void 0, "data-work-console-row-status": row.status, children: [
+              /* @__PURE__ */ jsxRuntimeExports.jsx(Dot, { status: row.status }),
+              /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { children: [
+                /* @__PURE__ */ jsxRuntimeExports.jsx("strong", { children: row.label }),
+                row.meta && /* @__PURE__ */ jsxRuntimeExports.jsx("small", { children: row.meta }),
+                row.detail && /* @__PURE__ */ jsxRuntimeExports.jsx("p", { children: row.detail }),
+                row.snippet && /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "step-summary", children: row.snippet })
+              ] })
+            ] }, row.id))
+          }
+        )
+      ] }, group)),
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("section", { className: "work-card", children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "work-card-title", children: /* @__PURE__ */ jsxRuntimeExports.jsx("span", { children: "SESSIONS" }) }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx(SnapshotList$1, { id: "sessions-list", items: sessionRows, empty: "No sessions" })
+      ] }),
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("section", { className: "work-card", children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "work-card-title", children: /* @__PURE__ */ jsxRuntimeExports.jsx("span", { children: "SCHEDULES" }) }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx(SnapshotList$1, { id: "crons-list", items: cronRows, empty: "No schedules" })
+      ] }),
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("section", { className: "work-card", children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "work-card-title", children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsx("span", { children: "ARTIFACTS" }),
+          /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "row-actions", children: [
+            /* @__PURE__ */ jsxRuntimeExports.jsx("button", { id: "open-artifact-button", type: "button", children: "Open" }),
+            /* @__PURE__ */ jsxRuntimeExports.jsx("button", { id: "download-artifact-button", type: "button", children: "Download" })
+          ] })
+        ] }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx(SnapshotList$1, { id: "artifacts-list", items: artifactRows, empty: "No artifacts" }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx("pre", { id: "artifact-content", className: "code-view" })
+      ] }),
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("section", { className: "work-card", children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "work-card-title", children: /* @__PURE__ */ jsxRuntimeExports.jsx("span", { children: "EVENTS" }) }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx("div", { id: "events", className: "event-list", children: events.slice(0, 12).map((event) => /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "event-row", children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsx("strong", { children: displayEventType(event.type) }),
+          /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "event-summary", children: summarizeEventPayload(event.type, event.payload) })
+        ] }, event.id)) })
+      ] })
+    ] }) : /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "dock-panel", children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "dock-intro", children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsx("h3", { children: "Knowledge Base" }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx("p", { children: "Local workspace KB. No hosted Knowledge Base required." })
+      ] }),
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("form", { id: "knowledge-search-form", className: "dock-form", onSubmit: (event) => {
+        event.preventDefault();
+        onSearchKnowledge();
+      }, children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsx(Field$1, { label: "Search", children: /* @__PURE__ */ jsxRuntimeExports.jsx("input", { id: "knowledge-query", value: knowledgeQuery, onChange: (event) => setKnowledgeQuery(event.target.value), placeholder: "delivery evidence" }) }),
+        /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "row-actions full", children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "submit", children: "Search" }),
+          /* @__PURE__ */ jsxRuntimeExports.jsx("button", { id: "load-knowledge-button", type: "button", onClick: onLoadKnowledge, children: "List KB" })
+        ] })
+      ] }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx(SnapshotList$1, { id: "knowledge-results", items: knowledgeItems, empty: "No KB documents" }),
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("form", { id: "knowledge-file-form", className: "dock-form", onSubmit: (event) => {
+        event.preventDefault();
+        onSaveKnowledge();
+      }, children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsx(Field$1, { label: "Path", children: /* @__PURE__ */ jsxRuntimeExports.jsx("input", { id: "knowledge-file-path", value: knowledgePath, onChange: (event) => setKnowledgePath(event.target.value), placeholder: "reports/brief.md" }) }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx(Field$1, { label: "Markdown", children: /* @__PURE__ */ jsxRuntimeExports.jsx("textarea", { id: "knowledge-file-content", rows: 7, value: knowledgeContent, onChange: (event) => setKnowledgeContent(event.target.value) }) }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "submit", children: "Save KB document" })
+      ] }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx("button", { id: "reload-skills-button", className: "secondary-button", type: "button", onClick: onReloadSkills, children: "Reload Skills" })
+    ] })
+  ] });
+}
+function Icon$1({ name }) {
+  if (name === "refresh") {
+    return /* @__PURE__ */ jsxRuntimeExports.jsxs("svg", { viewBox: "0 0 24 24", "aria-hidden": "true", children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsx("path", { d: "M4 4v5h5M20 20v-5h-5" }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx("path", { d: "M5.6 15.5A7 7 0 0 0 18.8 18M18.4 8.5A7 7 0 0 0 5.2 6" })
+    ] });
+  }
+  if (name === "send") {
+    return /* @__PURE__ */ jsxRuntimeExports.jsxs("svg", { viewBox: "0 0 24 24", "aria-hidden": "true", children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsx("path", { d: "M12 19V5" }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx("path", { d: "m5 12 7-7 7 7" })
+    ] });
+  }
+  if (name === "attach") {
+    return /* @__PURE__ */ jsxRuntimeExports.jsx("svg", { viewBox: "0 0 24 24", "aria-hidden": "true", children: /* @__PURE__ */ jsxRuntimeExports.jsx("path", { d: "m21 11-9 9a6 6 0 0 1-8.5-8.5l9-9a4 4 0 0 1 5.7 5.7l-9 9a2 2 0 0 1-2.8-2.8l8.4-8.4" }) });
+  }
+  if (name === "settings") {
+    return /* @__PURE__ */ jsxRuntimeExports.jsxs("svg", { viewBox: "0 0 24 24", "aria-hidden": "true", children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsx("path", { d: "M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z" }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx("path", { d: "M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1-2 3.4-.2-.1a1.8 1.8 0 0 0-2.1-.3 1.8 1.8 0 0 0-1 1.6v.2h-4v-.2a1.8 1.8 0 0 0-1-1.6 1.8 1.8 0 0 0-2.1.3l-.2.1-2-3.4.1-.1A1.7 1.7 0 0 0 5.6 15a1.8 1.8 0 0 0-1.4-1.2H4v-4h.2a1.8 1.8 0 0 0 1.4-1.2 1.7 1.7 0 0 0-.3-1.9l-.1-.1 2-3.4.2.1a1.8 1.8 0 0 0 2.1.3 1.8 1.8 0 0 0 1-1.6V2h4v.2a1.8 1.8 0 0 0 1 1.6 1.8 1.8 0 0 0 2.1-.3l.2-.1 2 3.4-.1.1a1.7 1.7 0 0 0-.3 1.9 1.8 1.8 0 0 0 1.4 1.2h.2v4h-.2A1.8 1.8 0 0 0 19.4 15Z" })
+    ] });
+  }
+  if (name === "chevron") {
+    return /* @__PURE__ */ jsxRuntimeExports.jsx("svg", { viewBox: "0 0 24 24", "aria-hidden": "true", children: /* @__PURE__ */ jsxRuntimeExports.jsx("path", { d: "m9 18 6-6-6-6" }) });
+  }
+  return /* @__PURE__ */ jsxRuntimeExports.jsxs("svg", { viewBox: "0 0 24 24", "aria-hidden": "true", children: [
+    /* @__PURE__ */ jsxRuntimeExports.jsx("path", { d: "M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z" }),
+    /* @__PURE__ */ jsxRuntimeExports.jsx("path", { d: "M14 2v6h6" })
+  ] });
+}
+function defaultLocalChannels$1() {
+  return [
+    {
+      id: "local-general",
+      name: "general",
+      displayName: null,
+      category: "General",
+      position: 0
+    }
+  ];
+}
+function groupLocalChannels(channels) {
+  const grouped = /* @__PURE__ */ new Map();
+  for (const channel of channels) {
+    const category = channel.category || "General";
+    grouped.set(category, [...grouped.get(category) ?? [], channel]);
+  }
+  return Array.from(grouped.entries()).map(([title, items]) => ({
+    title,
+    channels: [...items].sort((a, b) => a.position - b.position)
+  }));
+}
+function normalizeChannelName$1(value) {
+  return value.trim().toLowerCase().replace(/[^a-z0-9-_ ]/g, "").replace(/\s+/g, "-").replace(/^-+|-+$/g, "");
+}
+function ChatSidebar({
+  channels,
+  activeChannel,
+  setActiveChannel,
+  setActive,
+  onRefresh,
+  runtimeStatus,
+  editing,
+  onToggleEdit,
+  onCancelEdit,
+  onCreateChannel
+}) {
+  const [showNewChannel, setShowNewChannel] = reactExports.useState(false);
+  const [newChannelName, setNewChannelName] = reactExports.useState("");
+  const groupedChannels = groupLocalChannels(channels.length > 0 ? channels : defaultLocalChannels$1());
+  const createChannel = () => {
+    const name = normalizeChannelName$1(newChannelName);
+    if (!name) return;
+    onCreateChannel(name);
+    setNewChannelName("");
+    setShowNewChannel(false);
+  };
+  return /* @__PURE__ */ jsxRuntimeExports.jsxs("aside", { className: "chat-sidebar", "aria-label": "Chat channels", children: [
+    /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "bot-status", children: /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsx("strong", { children: "Magi_Local" }),
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsx("i", {}),
+        " ",
+        runtimeStatus
+      ] })
+    ] }) }),
+    /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "chat-edit-row", children: [
+      editing && /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", onClick: onCancelEdit, children: "Cancel" }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", onClick: onToggleEdit, children: editing ? "Done" : "Edit" })
+    ] }),
+    /* @__PURE__ */ jsxRuntimeExports.jsxs("nav", { className: "channel-scroll", children: [
+      groupedChannels.map(({ title, channels: channelItems }) => /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "channel-group", children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "channel-group-label", children: title }),
+        channelItems.map((channel) => /* @__PURE__ */ jsxRuntimeExports.jsxs(
+          "button",
+          {
+            className: `channel-row ${activeChannel === channel.name ? "active" : ""}`,
+            type: "button",
+            onClick: () => setActiveChannel(channel.name),
+            children: [
+              /* @__PURE__ */ jsxRuntimeExports.jsx("span", { children: "#" }),
+              /* @__PURE__ */ jsxRuntimeExports.jsx("strong", { children: channel.displayName || channel.name })
+            ]
+          },
+          channel.id
+        ))
+      ] }, title)),
+      /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "channel-add-row", children: /* @__PURE__ */ jsxRuntimeExports.jsxs("button", { type: "button", onClick: () => setShowNewChannel(true), children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsx("span", { children: "+" }),
+        "Add Channel"
+      ] }) })
+    ] }),
+    /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "chat-sidebar-bottom", children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("button", { type: "button", onClick: onRefresh, children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsx(Icon$1, { name: "refresh" }),
+        " Refresh"
+      ] }),
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("button", { type: "button", onClick: () => setActive("overview"), children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsx(Icon$1, { name: "settings" }),
+        " Dashboard"
+      ] })
+    ] }),
+    showNewChannel && /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "local-modal-backdrop", onClick: () => setShowNewChannel(false), children: /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "local-modal", onClick: (event) => event.stopPropagation(), children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsx("h3", { children: "New Channel" }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx(
+        "input",
+        {
+          value: newChannelName,
+          onChange: (event) => setNewChannelName(event.target.value),
+          onKeyDown: (event) => {
+            if (event.key === "Enter") createChannel();
+            if (event.key === "Escape") setShowNewChannel(false);
+          },
+          placeholder: "Channel name",
+          autoFocus: true
+        }
+      ),
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "modal-actions", children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", onClick: () => setShowNewChannel(false), children: "Cancel" }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", onClick: createChannel, children: "Create" })
+      ] })
+    ] }) })
+  ] });
+}
+function EmptyChatIcon() {
+  return /* @__PURE__ */ jsxRuntimeExports.jsxs("svg", { viewBox: "0 0 24 24", "aria-hidden": "true", children: [
+    /* @__PURE__ */ jsxRuntimeExports.jsx("path", { d: "M7 8h10" }),
+    /* @__PURE__ */ jsxRuntimeExports.jsx("path", { d: "M7 12h7" }),
+    /* @__PURE__ */ jsxRuntimeExports.jsx("path", { d: "M5 19.5V6a3 3 0 0 1 3-3h8a3 3 0 0 1 3 3v9a3 3 0 0 1-3 3H8.5Z" })
+  ] });
+}
+function ChatWorkbench({
+  channels,
+  activeChannel,
+  setActiveChannel,
+  setActive,
+  runtimeStatus,
+  onRefresh,
+  messages,
+  input,
+  setInput,
+  isStreaming,
+  onSend,
+  onReset,
+  modelOverride,
+  setModelOverride,
+  streamingMode,
+  setStreamingMode,
+  activeDock,
+  setActiveDock,
+  runtime,
+  events,
+  channelState,
+  queuedMessages,
+  controlRequests,
+  knowledgeProps,
+  onReloadSkills,
+  editingChannels,
+  onToggleEditChannels,
+  onCancelEditChannels,
+  onCreateChannel
+}) {
+  const activeToolCount = (channelState.activeTools ?? []).filter((tool) => tool.status === "running").length;
+  const activeSubagentCount = (channelState.subagents ?? []).filter((subagent) => subagent.status === "running" || subagent.status === "waiting").length;
+  const pendingRequests = controlRequests.filter((request) => request.state === "pending");
+  const visibleRunState = channelState.streaming || activeToolCount > 0 || activeSubagentCount > 0 || queuedMessages.length > 0 || pendingRequests.length > 0 || Boolean(channelState.taskBoard?.tasks.some((task) => task.status === "pending" || task.status === "in_progress"));
+  const currentWork = channelState.taskBoard?.tasks.find((task) => task.status === "in_progress")?.title || channelState.activeTools?.find((tool) => tool.status === "running")?.label || channelState.subagents?.find((subagent) => subagent.status === "running" || subagent.status === "waiting")?.detail || (isStreaming ? "Working on your request" : "Waiting for input");
+  return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "cloud-chat-shell", "data-cloud-chat-shell": "true", children: [
+    /* @__PURE__ */ jsxRuntimeExports.jsx(
+      ChatSidebar,
+      {
+        channels,
+        activeChannel,
+        setActiveChannel,
+        setActive,
+        onRefresh,
+        runtimeStatus,
+        editing: editingChannels,
+        onToggleEdit: onToggleEditChannels,
+        onCancelEdit: onCancelEditChannels,
+        onCreateChannel
+      }
+    ),
+    /* @__PURE__ */ jsxRuntimeExports.jsxs("main", { className: "chat-main", children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("header", { className: "chat-header", children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsx("h1", { children: activeChannel }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx("button", { id: "clear-button", type: "button", onClick: onReset, children: "Reset" })
+      ] }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx("div", { id: "messages", className: "message-timeline", "aria-live": "polite", children: messages.length === 0 ? /* @__PURE__ */ jsxRuntimeExports.jsxs("section", { className: "empty-chat", children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "empty-chat-icon", children: /* @__PURE__ */ jsxRuntimeExports.jsx(EmptyChatIcon, {}) }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx("p", { children: "Start a conversation" })
+      ] }) : messages.map((message) => /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: `message-bubble ${message.role} ${message.error ? "error" : ""} ${message.streaming ? "streaming" : ""}`, children: message.text }, message.id)) }),
+      visibleRunState && /* @__PURE__ */ jsxRuntimeExports.jsxs("section", { className: "current-run-card", "aria-label": "Current run", children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "run-card-close", children: "×" }),
+        /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "run-grid", children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsx("span", { children: "CURRENT RUN" }),
+          /* @__PURE__ */ jsxRuntimeExports.jsx("strong", { children: channelState.reconnecting ? "Reconnecting" : phaseLabel(channelState.turnPhase ?? null) }),
+          /* @__PURE__ */ jsxRuntimeExports.jsx("span", { children: "CURRENT WORK" }),
+          /* @__PURE__ */ jsxRuntimeExports.jsx("strong", { children: currentWork }),
+          activeToolCount > 0 && /* @__PURE__ */ jsxRuntimeExports.jsxs(jsxRuntimeExports.Fragment, { children: [
+            /* @__PURE__ */ jsxRuntimeExports.jsx("span", { children: "ACTIONS" }),
+            /* @__PURE__ */ jsxRuntimeExports.jsxs("strong", { children: [
+              activeToolCount,
+              " active"
+            ] })
+          ] }),
+          activeSubagentCount > 0 && /* @__PURE__ */ jsxRuntimeExports.jsxs(jsxRuntimeExports.Fragment, { children: [
+            /* @__PURE__ */ jsxRuntimeExports.jsx("span", { children: "HELPERS" }),
+            /* @__PURE__ */ jsxRuntimeExports.jsxs("strong", { children: [
+              activeSubagentCount,
+              " active"
+            ] })
+          ] })
+        ] })
+      ] }),
+      /* @__PURE__ */ jsxRuntimeExports.jsxs(
+        "form",
+        {
+          id: "message-form",
+          className: "chat-composer",
+          "data-chat-input-shell": "true",
+          onSubmit: (event) => {
+            event.preventDefault();
+            onSend();
+          },
+          children: [
+            isStreaming && /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "composer-mode-row", "aria-label": "Streaming send mode", children: [
+              /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: streamingMode === "queue" ? "mode-active" : "", onClick: () => setStreamingMode("queue"), children: "Queue after run" }),
+              /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: streamingMode === "steer" ? "mode-active" : "", onClick: () => setStreamingMode("steer"), children: "Steer current run" })
+            ] }),
+            /* @__PURE__ */ jsxRuntimeExports.jsx(
+              "textarea",
+              {
+                id: "message-input",
+                value: input,
+                rows: 1,
+                placeholder: "Message...",
+                onChange: (event) => setInput(event.target.value),
+                onKeyDown: (event) => {
+                  if (event.key === "Enter" && !event.shiftKey) {
+                    event.preventDefault();
+                    onSend();
+                  }
+                }
+              }
+            ),
+            /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "composer-bottom", children: [
+              /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "attach-button", "aria-label": "Attach file", children: /* @__PURE__ */ jsxRuntimeExports.jsx(Icon$1, { name: "attach" }) }),
+              /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "model-picker", children: [
+                /* @__PURE__ */ jsxRuntimeExports.jsx("span", { children: "Custom" }),
+                /* @__PURE__ */ jsxRuntimeExports.jsx("input", { id: "model-override", value: modelOverride, onChange: (event) => setModelOverride(event.target.value), placeholder: "auto" })
+              ] }),
+              /* @__PURE__ */ jsxRuntimeExports.jsx("button", { id: "send-button", className: isStreaming ? "stop-button" : "send-button", type: "submit", children: isStreaming ? "■" : /* @__PURE__ */ jsxRuntimeExports.jsx(Icon$1, { name: "send" }) })
+            ] })
+          ]
+        }
+      )
+    ] }),
+    /* @__PURE__ */ jsxRuntimeExports.jsx(
+      WorkInspector,
+      {
+        activeDock,
+        setActiveDock,
+        runtime,
+        events,
+        channelState,
+        queuedMessages,
+        controlRequests,
+        onReloadSkills,
+        ...knowledgeProps
+      }
+    )
+  ] });
+}
+const storage = {
+  agentUrl: "magi.agent.app.agentUrl",
+  token: "magi.agent.app.token",
+  sessionKey: "magi.agent.app.sessionKey",
+  modelOverride: "magi.agent.app.modelOverride"
+};
+function initialChannelState() {
+  return {
+    streaming: false,
+    streamingText: "",
+    thinkingText: "",
+    error: null,
+    thinkingStartedAt: null,
+    turnPhase: null,
+    heartbeatElapsedMs: null,
+    pendingInjectionCount: 0,
+    activeTools: [],
+    subagents: [],
+    taskBoard: null
+  };
+}
+function defaultLocalChannels() {
+  return [
+    {
+      id: "local-general",
+      name: "general",
+      displayName: null,
+      category: "General",
+      position: 0
+    }
+  ];
+}
+function normalizeChannelName(value) {
+  return value.trim().toLowerCase().replace(/[^a-z0-9-_ ]/g, "").replace(/\s+/g, "-").replace(/^-+|-+$/g, "");
 }
 function defaultSessionKey() {
   return "agent:local:app:web:default";
@@ -12423,9 +12983,8 @@ function DashboardSidebar({
   runtimeStatus
 }) {
   const nav = [
-    { group: "Chat", items: [["chat", "Chat"], ["overview", "Overview"], ["settings", "Settings"], ["usage", "Usage"], ["skills", "Skills"], ["converter", "Converter"]] },
-    { group: "Account", items: [["knowledge", "Knowledge"], ["billing", "Billing"], ["support", "Support"], ["referral", "Referral"]] },
-    { group: "Magi", items: [["organization", "Organization"], ["members", "Members"], ["org-kb", "Organization KB"]] }
+    { group: "Agent", items: [["chat", "Chat"], ["overview", "Overview"], ["settings", "Settings"]] },
+    { group: "Workspace", items: [["knowledge", "Knowledge"], ["skills", "Skills"], ["converter", "Files & Memory"], ["usage", "Usage"]] }
   ];
   return /* @__PURE__ */ jsxRuntimeExports.jsxs("aside", { className: "dashboard-sidebar", "aria-label": "Dashboard navigation", children: [
     /* @__PURE__ */ jsxRuntimeExports.jsx(OpenMagiLogo, {}),
@@ -12455,95 +13014,6 @@ function DashboardSidebar({
     ] })
   ] });
 }
-function ChatSidebar({
-  channels,
-  activeChannel,
-  setActiveChannel,
-  setActive,
-  onRefresh,
-  runtimeStatus,
-  editing,
-  onToggleEdit,
-  onCancelEdit,
-  onCreateChannel
-}) {
-  const [showNewChannel, setShowNewChannel] = reactExports.useState(false);
-  const [newChannelName, setNewChannelName] = reactExports.useState("");
-  const groupedChannels = groupLocalChannels(channels.length > 0 ? channels : defaultLocalChannels());
-  const createChannel = () => {
-    const name = normalizeChannelName(newChannelName);
-    if (!name) return;
-    onCreateChannel(name);
-    setNewChannelName("");
-    setShowNewChannel(false);
-  };
-  return /* @__PURE__ */ jsxRuntimeExports.jsxs("aside", { className: "chat-sidebar", "aria-label": "Chat channels", children: [
-    /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "bot-status", children: /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { children: [
-      /* @__PURE__ */ jsxRuntimeExports.jsx("strong", { children: "Magi_Local" }),
-      /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { children: [
-        /* @__PURE__ */ jsxRuntimeExports.jsx("i", {}),
-        " ",
-        runtimeStatus
-      ] })
-    ] }) }),
-    /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "chat-edit-row", children: [
-      editing && /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", onClick: onCancelEdit, children: "Cancel" }),
-      /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", onClick: onToggleEdit, children: editing ? "Done" : "Edit" })
-    ] }),
-    /* @__PURE__ */ jsxRuntimeExports.jsxs("nav", { className: "channel-scroll", children: [
-      groupedChannels.map(({ title, channels: channelItems }) => /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "channel-group", children: [
-        /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "channel-group-label", children: title }),
-        channelItems.map((channel) => /* @__PURE__ */ jsxRuntimeExports.jsxs(
-          "button",
-          {
-            className: `channel-row ${activeChannel === channel.name ? "active" : ""}`,
-            type: "button",
-            onClick: () => setActiveChannel(channel.name),
-            children: [
-              /* @__PURE__ */ jsxRuntimeExports.jsx("span", { children: "#" }),
-              /* @__PURE__ */ jsxRuntimeExports.jsx("strong", { children: channel.displayName || channel.name })
-            ]
-          },
-          channel.id
-        ))
-      ] }, title)),
-      /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "channel-add-row", children: /* @__PURE__ */ jsxRuntimeExports.jsxs("button", { type: "button", onClick: () => setShowNewChannel(true), children: [
-        /* @__PURE__ */ jsxRuntimeExports.jsx("span", { children: "+" }),
-        "Add Channel"
-      ] }) })
-    ] }),
-    /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "chat-sidebar-bottom", children: [
-      /* @__PURE__ */ jsxRuntimeExports.jsxs("button", { type: "button", onClick: onRefresh, children: [
-        /* @__PURE__ */ jsxRuntimeExports.jsx(Icon, { name: "refresh" }),
-        " Refresh"
-      ] }),
-      /* @__PURE__ */ jsxRuntimeExports.jsxs("button", { type: "button", onClick: () => setActive("overview"), children: [
-        /* @__PURE__ */ jsxRuntimeExports.jsx(Icon, { name: "settings" }),
-        " Dashboard"
-      ] })
-    ] }),
-    showNewChannel && /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "local-modal-backdrop", onClick: () => setShowNewChannel(false), children: /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "local-modal", onClick: (event) => event.stopPropagation(), children: [
-      /* @__PURE__ */ jsxRuntimeExports.jsx("h3", { children: "New Channel" }),
-      /* @__PURE__ */ jsxRuntimeExports.jsx(
-        "input",
-        {
-          value: newChannelName,
-          onChange: (event) => setNewChannelName(event.target.value),
-          onKeyDown: (event) => {
-            if (event.key === "Enter") createChannel();
-            if (event.key === "Escape") setShowNewChannel(false);
-          },
-          placeholder: "Channel name",
-          autoFocus: true
-        }
-      ),
-      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "modal-actions", children: [
-        /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", onClick: () => setShowNewChannel(false), children: "Cancel" }),
-        /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", onClick: createChannel, children: "Create" })
-      ] })
-    ] }) })
-  ] });
-}
 function RuntimeMetrics({ runtime, eventCount }) {
   const rows = [
     ["Sessions", runtime?.sessions?.count ?? 0],
@@ -12558,283 +13028,6 @@ function RuntimeMetrics({ runtime, eventCount }) {
     /* @__PURE__ */ jsxRuntimeExports.jsx("dt", { children: label }),
     /* @__PURE__ */ jsxRuntimeExports.jsx("dd", { children: value })
   ] }, label)) });
-}
-function WorkDock({
-  activeDock,
-  setActiveDock,
-  runtime,
-  events,
-  channelState,
-  queuedMessages,
-  controlRequests,
-  knowledgeQuery,
-  setKnowledgeQuery,
-  knowledgePath,
-  setKnowledgePath,
-  knowledgeContent,
-  setKnowledgeContent,
-  knowledgeItems,
-  onSearchKnowledge,
-  onLoadKnowledge,
-  onSaveKnowledge,
-  onReloadSkills
-}) {
-  const sessionRows = runtime?.sessions?.items ?? [];
-  const artifactRows = runtime?.artifacts?.items ?? [];
-  const cronRows = runtime?.crons?.items ?? [];
-  const workGroups = groupWorkRows(deriveWorkConsoleRows({ channelState, queuedMessages, controlRequests }));
-  return /* @__PURE__ */ jsxRuntimeExports.jsxs("aside", { className: "work-dock", "aria-label": "Work", children: [
-    /* @__PURE__ */ jsxRuntimeExports.jsxs("header", { className: "work-dock-header", children: [
-      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { children: [
-        /* @__PURE__ */ jsxRuntimeExports.jsx("p", { children: "WORK" }),
-        /* @__PURE__ */ jsxRuntimeExports.jsx("h2", { children: activeDock === "work" ? "Work" : "Knowledge" })
-      ] }),
-      /* @__PURE__ */ jsxRuntimeExports.jsx("button", { className: "icon-button", type: "button", "aria-label": "Collapse", children: "»" })
-    ] }),
-    /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "dock-tabs", role: "tablist", "aria-label": "Right inspector", children: [
-      /* @__PURE__ */ jsxRuntimeExports.jsx("button", { className: activeDock === "work" ? "active" : "", type: "button", onClick: () => setActiveDock("work"), children: "Work" }),
-      /* @__PURE__ */ jsxRuntimeExports.jsx("button", { className: activeDock === "knowledge" ? "active" : "", type: "button", onClick: () => setActiveDock("knowledge"), children: "Knowledge" })
-    ] }),
-    activeDock === "work" ? /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "dock-panel", children: [
-      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "dock-intro", children: [
-        /* @__PURE__ */ jsxRuntimeExports.jsx("h3", { children: "Work in progress" }),
-        /* @__PURE__ */ jsxRuntimeExports.jsx("p", { children: "Plain-language progress from the current run." })
-      ] }),
-      workGroups.map(([group, rows]) => /* @__PURE__ */ jsxRuntimeExports.jsxs("section", { className: `work-card work-card-${group} ${group === "status" ? "live" : ""} ${group === "subagent" ? "helpers-card" : ""}`, children: [
-        /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "work-card-title", children: [
-          /* @__PURE__ */ jsxRuntimeExports.jsx("span", { children: GROUP_LABELS[group] }),
-          group === "status" && channelState.streaming && /* @__PURE__ */ jsxRuntimeExports.jsx(Pill, { tone: "purple", children: "LIVE" }),
-          group === "tool" && /* @__PURE__ */ jsxRuntimeExports.jsx(Pill, { children: rows.length }),
-          group === "subagent" && /* @__PURE__ */ jsxRuntimeExports.jsxs(Pill, { tone: "green", children: [
-            rows.length,
-            " AGENTS"
-          ] }),
-          group === "queue" && /* @__PURE__ */ jsxRuntimeExports.jsxs(Pill, { tone: "amber", children: [
-            rows.length,
-            " WAITING"
-          ] })
-        ] }),
-        /* @__PURE__ */ jsxRuntimeExports.jsx(
-          "div",
-          {
-            id: group === "tool" ? "tasks-list" : void 0,
-            className: group === "subagent" ? "helper-grid" : group === "tool" ? "current-step-list" : "work-row-list",
-            children: rows.map((row) => group === "subagent" ? /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "helper-chip", "data-work-console-agent-chip": "true", "data-work-console-row-status": row.status, children: [
-              /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: `helper-dot ${row.status === "done" ? "green" : row.status === "waiting" ? "amber" : row.status === "error" ? "red" : "purple"}` }),
-              /* @__PURE__ */ jsxRuntimeExports.jsxs("strong", { children: [
-                row.label,
-                " ",
-                row.meta && /* @__PURE__ */ jsxRuntimeExports.jsx("em", { children: row.meta })
-              ] }),
-              row.detail && /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "helper-bar", children: row.detail })
-            ] }, row.id) : /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: `current-step-row work-row-${row.status}`, "data-work-console-action-row": group === "tool" ? "true" : void 0, "data-work-console-row-status": row.status, children: [
-              /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: row.status === "running" ? "purple-dot" : row.status === "error" ? "red-dot" : row.status === "waiting" ? "amber-dot" : "green-dot" }),
-              /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { children: [
-                /* @__PURE__ */ jsxRuntimeExports.jsx("strong", { children: row.label }),
-                row.meta && /* @__PURE__ */ jsxRuntimeExports.jsx("small", { children: row.meta }),
-                row.detail && /* @__PURE__ */ jsxRuntimeExports.jsx("p", { children: row.detail }),
-                row.snippet && /* @__PURE__ */ jsxRuntimeExports.jsx("pre", { children: row.snippet })
-              ] })
-            ] }, row.id))
-          }
-        )
-      ] }, group)),
-      /* @__PURE__ */ jsxRuntimeExports.jsxs("section", { className: "work-card", children: [
-        /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "work-card-title", children: /* @__PURE__ */ jsxRuntimeExports.jsx("span", { children: "SESSIONS" }) }),
-        /* @__PURE__ */ jsxRuntimeExports.jsx(SnapshotList, { id: "sessions-list", items: sessionRows, empty: "No sessions" })
-      ] }),
-      /* @__PURE__ */ jsxRuntimeExports.jsxs("section", { className: "work-card", children: [
-        /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "work-card-title", children: /* @__PURE__ */ jsxRuntimeExports.jsx("span", { children: "SCHEDULES" }) }),
-        /* @__PURE__ */ jsxRuntimeExports.jsx(SnapshotList, { id: "crons-list", items: cronRows, empty: "No schedules" })
-      ] }),
-      /* @__PURE__ */ jsxRuntimeExports.jsxs("section", { className: "work-card", children: [
-        /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "work-card-title", children: [
-          /* @__PURE__ */ jsxRuntimeExports.jsx("span", { children: "ARTIFACTS" }),
-          /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "row-actions", children: [
-            /* @__PURE__ */ jsxRuntimeExports.jsx("button", { id: "open-artifact-button", type: "button", children: "Open" }),
-            /* @__PURE__ */ jsxRuntimeExports.jsx("button", { id: "download-artifact-button", type: "button", children: "Download" })
-          ] })
-        ] }),
-        /* @__PURE__ */ jsxRuntimeExports.jsx(SnapshotList, { id: "artifacts-list", items: artifactRows, empty: "No artifacts" }),
-        /* @__PURE__ */ jsxRuntimeExports.jsx("pre", { id: "artifact-content", className: "code-view" })
-      ] }),
-      /* @__PURE__ */ jsxRuntimeExports.jsxs("section", { className: "work-card", children: [
-        /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "work-card-title", children: /* @__PURE__ */ jsxRuntimeExports.jsx("span", { children: "EVENTS" }) }),
-        /* @__PURE__ */ jsxRuntimeExports.jsx("div", { id: "events", className: "event-list", children: events.slice(0, 12).map((event) => /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "event-row", children: [
-          /* @__PURE__ */ jsxRuntimeExports.jsx("strong", { children: event.type }),
-          /* @__PURE__ */ jsxRuntimeExports.jsx("pre", { children: JSON.stringify(event.payload, null, 2) })
-        ] }, event.id)) })
-      ] })
-    ] }) : /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "dock-panel", children: [
-      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "dock-intro", children: [
-        /* @__PURE__ */ jsxRuntimeExports.jsx("h3", { children: "Knowledge Base" }),
-        /* @__PURE__ */ jsxRuntimeExports.jsx("p", { children: "Local workspace KB. No hosted Knowledge Base required." })
-      ] }),
-      /* @__PURE__ */ jsxRuntimeExports.jsxs("form", { id: "knowledge-search-form", className: "dock-form", onSubmit: (event) => {
-        event.preventDefault();
-        onSearchKnowledge();
-      }, children: [
-        /* @__PURE__ */ jsxRuntimeExports.jsx(Field, { label: "Search", children: /* @__PURE__ */ jsxRuntimeExports.jsx("input", { id: "knowledge-query", value: knowledgeQuery, onChange: (event) => setKnowledgeQuery(event.target.value), placeholder: "delivery evidence" }) }),
-        /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "row-actions full", children: [
-          /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "submit", children: "Search" }),
-          /* @__PURE__ */ jsxRuntimeExports.jsx("button", { id: "load-knowledge-button", type: "button", onClick: onLoadKnowledge, children: "List KB" })
-        ] })
-      ] }),
-      /* @__PURE__ */ jsxRuntimeExports.jsx(SnapshotList, { id: "knowledge-results", items: knowledgeItems, empty: "No KB documents" }),
-      /* @__PURE__ */ jsxRuntimeExports.jsxs("form", { id: "knowledge-file-form", className: "dock-form", onSubmit: (event) => {
-        event.preventDefault();
-        onSaveKnowledge();
-      }, children: [
-        /* @__PURE__ */ jsxRuntimeExports.jsx(Field, { label: "Path", children: /* @__PURE__ */ jsxRuntimeExports.jsx("input", { id: "knowledge-file-path", value: knowledgePath, onChange: (event) => setKnowledgePath(event.target.value), placeholder: "reports/brief.md" }) }),
-        /* @__PURE__ */ jsxRuntimeExports.jsx(Field, { label: "Markdown", children: /* @__PURE__ */ jsxRuntimeExports.jsx("textarea", { id: "knowledge-file-content", rows: 7, value: knowledgeContent, onChange: (event) => setKnowledgeContent(event.target.value) }) }),
-        /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "submit", children: "Save KB document" })
-      ] }),
-      /* @__PURE__ */ jsxRuntimeExports.jsx("button", { id: "reload-skills-button", className: "secondary-button", type: "button", onClick: onReloadSkills, children: "Reload Skills" })
-    ] })
-  ] });
-}
-function ChatView({
-  channels,
-  activeChannel,
-  setActiveChannel,
-  setActive,
-  runtimeStatus,
-  onRefresh,
-  messages,
-  input,
-  setInput,
-  isStreaming,
-  onSend,
-  onReset,
-  modelOverride,
-  setModelOverride,
-  streamingMode,
-  setStreamingMode,
-  activeDock,
-  setActiveDock,
-  runtime,
-  events,
-  channelState,
-  queuedMessages,
-  controlRequests,
-  knowledgeProps,
-  onReloadSkills,
-  editingChannels,
-  onToggleEditChannels,
-  onCancelEditChannels,
-  onCreateChannel
-}) {
-  const activeToolCount = (channelState.activeTools ?? []).filter((tool) => tool.status === "running").length;
-  const activeSubagentCount = (channelState.subagents ?? []).filter((subagent) => subagent.status === "running" || subagent.status === "waiting").length;
-  const pendingRequests = controlRequests.filter((request) => request.state === "pending");
-  const visibleRunState = channelState.streaming || activeToolCount > 0 || activeSubagentCount > 0 || queuedMessages.length > 0 || pendingRequests.length > 0 || Boolean(channelState.taskBoard?.tasks.some((task) => task.status === "pending" || task.status === "in_progress"));
-  const currentWork = channelState.taskBoard?.tasks.find((task) => task.status === "in_progress")?.title || channelState.activeTools?.find((tool) => tool.status === "running")?.label || channelState.subagents?.find((subagent) => subagent.status === "running" || subagent.status === "waiting")?.detail || (isStreaming ? "Working on your request" : "Waiting for input");
-  return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "cloud-chat-shell", "data-cloud-chat-shell": "true", children: [
-    /* @__PURE__ */ jsxRuntimeExports.jsx(
-      ChatSidebar,
-      {
-        channels,
-        activeChannel,
-        setActiveChannel,
-        setActive,
-        onRefresh,
-        runtimeStatus,
-        editing: editingChannels,
-        onToggleEdit: onToggleEditChannels,
-        onCancelEdit: onCancelEditChannels,
-        onCreateChannel
-      }
-    ),
-    /* @__PURE__ */ jsxRuntimeExports.jsxs("main", { className: "chat-main", children: [
-      /* @__PURE__ */ jsxRuntimeExports.jsxs("header", { className: "chat-header", children: [
-        /* @__PURE__ */ jsxRuntimeExports.jsx("h1", { children: activeChannel }),
-        /* @__PURE__ */ jsxRuntimeExports.jsx("button", { id: "clear-button", type: "button", onClick: onReset, children: "Reset" })
-      ] }),
-      /* @__PURE__ */ jsxRuntimeExports.jsx("div", { id: "messages", className: "message-timeline", "aria-live": "polite", children: messages.length === 0 ? /* @__PURE__ */ jsxRuntimeExports.jsxs("section", { className: "empty-chat", children: [
-        /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "empty-chat-icon", children: "⌁" }),
-        /* @__PURE__ */ jsxRuntimeExports.jsx("p", { children: "Start a conversation" })
-      ] }) : messages.map((message) => /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: `message-bubble ${message.role} ${message.error ? "error" : ""} ${message.streaming ? "streaming" : ""}`, children: message.text }, message.id)) }),
-      visibleRunState && /* @__PURE__ */ jsxRuntimeExports.jsxs("section", { className: "current-run-card", "aria-label": "Current run", children: [
-        /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "run-card-close", children: "×" }),
-        /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "run-grid", children: [
-          /* @__PURE__ */ jsxRuntimeExports.jsx("span", { children: "CURRENT RUN" }),
-          /* @__PURE__ */ jsxRuntimeExports.jsx("strong", { children: channelState.reconnecting ? "Reconnecting" : phaseLabel(channelState.turnPhase ?? null) }),
-          /* @__PURE__ */ jsxRuntimeExports.jsx("span", { children: "CURRENT WORK" }),
-          /* @__PURE__ */ jsxRuntimeExports.jsx("strong", { children: currentWork }),
-          activeToolCount > 0 && /* @__PURE__ */ jsxRuntimeExports.jsxs(jsxRuntimeExports.Fragment, { children: [
-            /* @__PURE__ */ jsxRuntimeExports.jsx("span", { children: "ACTIONS" }),
-            /* @__PURE__ */ jsxRuntimeExports.jsxs("strong", { children: [
-              activeToolCount,
-              " active"
-            ] })
-          ] }),
-          activeSubagentCount > 0 && /* @__PURE__ */ jsxRuntimeExports.jsxs(jsxRuntimeExports.Fragment, { children: [
-            /* @__PURE__ */ jsxRuntimeExports.jsx("span", { children: "HELPERS" }),
-            /* @__PURE__ */ jsxRuntimeExports.jsxs("strong", { children: [
-              activeSubagentCount,
-              " active"
-            ] })
-          ] })
-        ] })
-      ] }),
-      /* @__PURE__ */ jsxRuntimeExports.jsxs(
-        "form",
-        {
-          id: "message-form",
-          className: "chat-composer",
-          "data-chat-input-shell": "true",
-          onSubmit: (event) => {
-            event.preventDefault();
-            onSend();
-          },
-          children: [
-            isStreaming && /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "composer-mode-row", "aria-label": "Streaming send mode", children: [
-              /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: streamingMode === "queue" ? "mode-active" : "", onClick: () => setStreamingMode("queue"), children: "Queue after run" }),
-              /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: streamingMode === "steer" ? "mode-active" : "", onClick: () => setStreamingMode("steer"), children: "Steer current run" })
-            ] }),
-            /* @__PURE__ */ jsxRuntimeExports.jsx(
-              "textarea",
-              {
-                id: "message-input",
-                value: input,
-                rows: 1,
-                placeholder: "Message...",
-                onChange: (event) => setInput(event.target.value),
-                onKeyDown: (event) => {
-                  if (event.key === "Enter" && !event.shiftKey) {
-                    event.preventDefault();
-                    onSend();
-                  }
-                }
-              }
-            ),
-            /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "composer-bottom", children: [
-              /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "attach-button", "aria-label": "Attach file", children: /* @__PURE__ */ jsxRuntimeExports.jsx(Icon, { name: "attach" }) }),
-              /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "model-picker", children: [
-                /* @__PURE__ */ jsxRuntimeExports.jsx("span", { children: "Custom" }),
-                /* @__PURE__ */ jsxRuntimeExports.jsx("input", { id: "model-override", value: modelOverride, onChange: (event) => setModelOverride(event.target.value), placeholder: "auto" })
-              ] }),
-              /* @__PURE__ */ jsxRuntimeExports.jsx("button", { id: "send-button", className: isStreaming ? "stop-button" : "send-button", type: "submit", children: isStreaming ? "■" : /* @__PURE__ */ jsxRuntimeExports.jsx(Icon, { name: "send" }) })
-            ] })
-          ]
-        }
-      )
-    ] }),
-    /* @__PURE__ */ jsxRuntimeExports.jsx(
-      WorkDock,
-      {
-        activeDock,
-        setActiveDock,
-        runtime,
-        events,
-        channelState,
-        queuedMessages,
-        controlRequests,
-        onReloadSkills,
-        ...knowledgeProps
-      }
-    )
-  ] });
 }
 function Overview({ runtime, eventCount }) {
   return /* @__PURE__ */ jsxRuntimeExports.jsxs("main", { className: "dashboard-content", children: [
@@ -13674,7 +13867,7 @@ function App() {
   };
   if (active === "chat") {
     return /* @__PURE__ */ jsxRuntimeExports.jsx(
-      ChatView,
+      ChatWorkbench,
       {
         channels,
         activeChannel,

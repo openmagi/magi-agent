@@ -1027,6 +1027,14 @@ code {
   font-size: 12px;
 }
 
+.event-summary,
+.step-summary {
+  margin-top: 5px;
+  color: var(--secondary);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
 .event-row pre,
 .code-view {
   max-height: 170px;

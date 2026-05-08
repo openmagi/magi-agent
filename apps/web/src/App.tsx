@@ -1,4 +1,5 @@
 import { FormEvent, ReactNode, useCallback, useEffect, useMemo, useState } from "react";
+import { ChatWorkbench } from "./components/chat-workbench";
 
 const storage = {
   agentUrl: "magi.agent.app.agentUrl",
@@ -615,9 +616,8 @@ function DashboardSidebar({
   runtimeStatus: string;
 }) {
   const nav = [
-    { group: "Chat", items: [["chat", "Chat"], ["overview", "Overview"], ["settings", "Settings"], ["usage", "Usage"], ["skills", "Skills"], ["converter", "Converter"]] },
-    { group: "Account", items: [["knowledge", "Knowledge"], ["billing", "Billing"], ["support", "Support"], ["referral", "Referral"]] },
-    { group: "Magi", items: [["organization", "Organization"], ["members", "Members"], ["org-kb", "Organization KB"]] },
+    { group: "Agent", items: [["chat", "Chat"], ["overview", "Overview"], ["settings", "Settings"]] },
+    { group: "Workspace", items: [["knowledge", "Knowledge"], ["skills", "Skills"], ["converter", "Files & Memory"], ["usage", "Usage"]] },
   ] as const;
   return (
     <aside className="dashboard-sidebar" aria-label="Dashboard navigation">
@@ -896,7 +896,7 @@ function WorkDock({
               {events.slice(0, 12).map((event) => (
                 <div key={event.id} className="event-row">
                   <strong>{event.type}</strong>
-                  <pre>{JSON.stringify(event.payload, null, 2)}</pre>
+                  <p className="event-summary">{preview(event.type, 120)}</p>
                 </div>
               ))}
             </div>
@@ -2028,7 +2028,7 @@ export function App() {
 
   if (active === "chat") {
     return (
-      <ChatView
+      <ChatWorkbench
         channels={channels}
         activeChannel={activeChannel}
         setActiveChannel={setActiveChannel}

@@ -11,13 +11,16 @@ function readAppFile(name: string): string {
 describe("Magi App shell", () => {
   it("uses the cloud chat and dashboard information architecture in React source", () => {
     const source = readAppFile(path.join("src", "App.tsx"));
+    const workbench = readAppFile(path.join("src", "components", "chat-workbench.tsx"));
+    const inspector = readAppFile(path.join("src", "components", "work-inspector.tsx"));
 
-    expect(source).toContain('className="cloud-chat-shell"');
+    expect(source).toContain("ChatWorkbench");
+    expect(workbench).toContain('className="cloud-chat-shell"');
     expect(source).toContain('className="dashboard-shell"');
-    expect(source).toContain('className="chat-sidebar"');
-    expect(source).toContain('className="work-dock"');
-    expect(source).toContain('data-chat-input-shell="true"');
-    expect(source).toContain("deriveWorkConsoleRows");
+    expect(workbench).toContain('className="chat-sidebar"');
+    expect(inspector).toContain('className="work-dock"');
+    expect(workbench).toContain('data-chat-input-shell="true"');
+    expect(inspector).toContain("deriveWorkConsoleRows");
     expect(source).toContain('type === "tool_start"');
     expect(source).toContain('type === "task_board"');
     expect(source).toContain('type === "child_progress"');
@@ -28,6 +31,25 @@ describe("Magi App shell", () => {
     expect(source).not.toContain("math-computer");
     expect(source).not.toContain("Assigning helper");
     expect(source).not.toContain("TaskOutput");
+  });
+
+  it("removes hosted-only SaaS navigation from the self-hosted workbench", () => {
+    const source = readAppFile(path.join("src", "App.tsx"));
+    const js = readAppFile(path.join("dist", "app.js"));
+    const hostedOnlyLabels = ["Billing", "Referral", "Organization", "Members", "Organization KB"];
+
+    for (const label of hostedOnlyLabels) {
+      expect(source).not.toContain(label);
+      expect(js).not.toContain(label);
+    }
+  });
+
+  it("summarizes work events instead of dumping raw JSON in the inspector", () => {
+    const inspector = readAppFile(path.join("src", "components", "work-inspector.tsx"));
+
+    expect(inspector).toContain("summarizeEventPayload");
+    expect(inspector).toContain("event-summary");
+    expect(inspector).not.toContain("JSON.stringify(event.payload");
   });
 
   it("does not seed cloud account channels into the self-hosted app", () => {
