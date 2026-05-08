@@ -21,12 +21,35 @@ describe("Magi App shell", () => {
     expect(source).toContain('type === "tool_start"');
     expect(source).toContain('type === "task_board"');
     expect(source).toContain('type === "child_progress"');
+    expect(source).toContain("defaultLocalChannels");
     expect(source).toContain("Work in progress");
     expect(source).toContain("Knowledge Base");
     expect(source).toContain("Agent Safeguards");
     expect(source).not.toContain("math-computer");
     expect(source).not.toContain("Assigning helper");
     expect(source).not.toContain("TaskOutput");
+  });
+
+  it("does not seed cloud account channels into the self-hosted app", () => {
+    const source = readAppFile(path.join("src", "App.tsx"));
+    const js = readAppFile(path.join("dist", "app.js"));
+    const forbiddenCloudChannels = [
+      "chatter",
+      "quick-notes",
+      "keepers",
+      "runtime-proof",
+      "local-kb",
+      "scheduled-work",
+      "daily-update",
+      "learning",
+    ];
+
+    expect(source).toContain('useState("general")');
+    expect(source).toContain('name: "general"');
+    for (const channel of forbiddenCloudChannels) {
+      expect(source).not.toContain(channel);
+      expect(js).not.toContain(channel);
+    }
   });
 
   it("carries the cloud visual system into the app stylesheet", () => {
@@ -38,6 +61,9 @@ describe("Magi App shell", () => {
     expect(css).toContain(".dashboard-sidebar");
     expect(css).toContain(".message-bubble.user");
     expect(css).toContain(".current-run-card");
+    expect(css).toContain("grid-template-columns: 256px minmax(0, 1fr) 320px");
+    expect(css).toContain("max-width: 768px");
+    expect(css).toContain("border-radius: 16px");
     expect(css).toContain("@media (max-width: 860px)");
   });
 

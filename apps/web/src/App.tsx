@@ -20,6 +20,14 @@ interface Message {
   error?: boolean;
 }
 
+interface AppChannel {
+  id: string;
+  name: string;
+  displayName: string | null;
+  category: string | null;
+  position: number;
+}
+
 type TurnPhase = "pending" | "planning" | "executing" | "verifying" | "committing" | "committed" | "aborted";
 type ToolActivityStatus = "running" | "done" | "error" | "denied";
 type SubagentActivityStatus = "running" | "waiting" | "done" | "error" | "cancelled";
@@ -192,6 +200,39 @@ function initialChannelState(): ChannelState {
     subagents: [],
     taskBoard: null,
   };
+}
+
+function defaultLocalChannels(): AppChannel[] {
+  return [
+    {
+      id: "local-general",
+      name: "general",
+      displayName: null,
+      category: "General",
+      position: 0,
+    },
+  ];
+}
+
+function groupLocalChannels(channels: AppChannel[]): Array<{ title: string; channels: AppChannel[] }> {
+  const grouped = new Map<string, AppChannel[]>();
+  for (const channel of channels) {
+    const category = channel.category || "General";
+    grouped.set(category, [...(grouped.get(category) ?? []), channel]);
+  }
+  return Array.from(grouped.entries()).map(([title, items]) => ({
+    title,
+    channels: [...items].sort((a, b) => a.position - b.position),
+  }));
+}
+
+function normalizeChannelName(value: string): string {
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9-_ ]/g, "")
+    .replace(/\s+/g, "-")
+    .replace(/^-+|-+$/g, "");
 }
 
 function formatElapsed(ms?: number | null): string | undefined {
@@ -457,7 +498,8 @@ function Icon({ name }: { name: "doc" | "refresh" | "send" | "attach" | "setting
   if (name === "send") {
     return (
       <svg viewBox="0 0 24 24" aria-hidden="true">
-        <path d="m5 12 14-7-5 14-3-6-6-1Z" />
+        <path d="M12 19V5" />
+        <path d="m5 12 7-7 7 7" />
       </svg>
     );
   }
@@ -613,26 +655,38 @@ function DashboardSidebar({
 }
 
 function ChatSidebar({
+  channels,
   activeChannel,
   setActiveChannel,
   setActive,
   onRefresh,
   runtimeStatus,
+  editing,
+  onToggleEdit,
+  onCancelEdit,
+  onCreateChannel,
 }: {
+  channels: AppChannel[];
   activeChannel: string;
   setActiveChannel: (channel: string) => void;
   setActive: (section: Section) => void;
   onRefresh: () => void;
   runtimeStatus: string;
+  editing: boolean;
+  onToggleEdit: () => void;
+  onCancelEdit: () => void;
+  onCreateChannel: (name: string) => void;
 }) {
-  const channels: Array<[string, string[]]> = [
-    ["General", ["general", "chatter", "quick-notes", "keepers"]],
-    ["Work", ["runtime-proof", "local-kb", "scheduled-work", "tmp"]],
-    ["Info", ["news", "daily-update"]],
-    ["Life", ["schedule"]],
-    ["Finance", ["finance"]],
-    ["Study", ["learning"]],
-  ];
+  const [showNewChannel, setShowNewChannel] = useState(false);
+  const [newChannelName, setNewChannelName] = useState("");
+  const groupedChannels = groupLocalChannels(channels.length > 0 ? channels : defaultLocalChannels());
+  const createChannel = () => {
+    const name = normalizeChannelName(newChannelName);
+    if (!name) return;
+    onCreateChannel(name);
+    setNewChannelName("");
+    setShowNewChannel(false);
+  };
   return (
     <aside className="chat-sidebar" aria-label="Chat channels">
       <div className="bot-status">
@@ -642,31 +696,58 @@ function ChatSidebar({
         </div>
       </div>
       <div className="chat-edit-row">
-        <button type="button">Edit</button>
+        {editing && <button type="button" onClick={onCancelEdit}>Cancel</button>}
+        <button type="button" onClick={onToggleEdit}>{editing ? "Done" : "Edit"}</button>
       </div>
       <nav className="channel-scroll">
-        {channels.map(([group, items]) => (
-          <div key={group} className="channel-group">
-            <div className="channel-group-label">{group}</div>
-            {items.map((channel) => (
+        {groupedChannels.map(({ title, channels: channelItems }) => (
+          <div key={title} className="channel-group">
+            <div className="channel-group-label">{title}</div>
+            {channelItems.map((channel) => (
               <button
-                key={channel}
-                className={`channel-row ${activeChannel === channel ? "active" : ""}`}
+                key={channel.id}
+                className={`channel-row ${activeChannel === channel.name ? "active" : ""}`}
                 type="button"
-                onClick={() => setActiveChannel(channel)}
+                onClick={() => setActiveChannel(channel.name)}
               >
                 <span>#</span>
-                <strong>{channel}</strong>
-                {channel === "tmp" && <i className="unread-dot" />}
+                <strong>{channel.displayName || channel.name}</strong>
               </button>
             ))}
           </div>
         ))}
+        <div className="channel-add-row">
+          <button type="button" onClick={() => setShowNewChannel(true)}>
+            <span>+</span>
+            Add Channel
+          </button>
+        </div>
       </nav>
       <div className="chat-sidebar-bottom">
         <button type="button" onClick={onRefresh}><Icon name="refresh" /> Refresh</button>
         <button type="button" onClick={() => setActive("overview")}><Icon name="settings" /> Dashboard</button>
       </div>
+      {showNewChannel && (
+        <div className="local-modal-backdrop" onClick={() => setShowNewChannel(false)}>
+          <div className="local-modal" onClick={(event) => event.stopPropagation()}>
+            <h3>New Channel</h3>
+            <input
+              value={newChannelName}
+              onChange={(event) => setNewChannelName(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") createChannel();
+                if (event.key === "Escape") setShowNewChannel(false);
+              }}
+              placeholder="Channel name"
+              autoFocus
+            />
+            <div className="modal-actions">
+              <button type="button" onClick={() => setShowNewChannel(false)}>Cancel</button>
+              <button type="button" onClick={createChannel}>Create</button>
+            </div>
+          </div>
+        </div>
+      )}
     </aside>
   );
 }
@@ -854,6 +935,7 @@ function WorkDock({
 }
 
 function ChatView({
+  channels,
   activeChannel,
   setActiveChannel,
   setActive,
@@ -878,7 +960,12 @@ function ChatView({
   controlRequests,
   knowledgeProps,
   onReloadSkills,
+  editingChannels,
+  onToggleEditChannels,
+  onCancelEditChannels,
+  onCreateChannel,
 }: {
+  channels: AppChannel[];
   activeChannel: string;
   setActiveChannel: (channel: string) => void;
   setActive: (section: Section) => void;
@@ -903,6 +990,10 @@ function ChatView({
   controlRequests: ControlRequestRecord[];
   knowledgeProps: Pick<Parameters<typeof WorkDock>[0], "knowledgeQuery" | "setKnowledgeQuery" | "knowledgePath" | "setKnowledgePath" | "knowledgeContent" | "setKnowledgeContent" | "knowledgeItems" | "onSearchKnowledge" | "onLoadKnowledge" | "onSaveKnowledge">;
   onReloadSkills: () => void;
+  editingChannels: boolean;
+  onToggleEditChannels: () => void;
+  onCancelEditChannels: () => void;
+  onCreateChannel: (name: string) => void;
 }) {
   const activeToolCount = (channelState.activeTools ?? []).filter((tool) => tool.status === "running").length;
   const activeSubagentCount = (channelState.subagents ?? []).filter((subagent) => subagent.status === "running" || subagent.status === "waiting").length;
@@ -923,11 +1014,16 @@ function ChatView({
   return (
     <div className="cloud-chat-shell" data-cloud-chat-shell="true">
       <ChatSidebar
+        channels={channels}
         activeChannel={activeChannel}
         setActiveChannel={setActiveChannel}
         setActive={setActive}
         onRefresh={onRefresh}
         runtimeStatus={runtimeStatus}
+        editing={editingChannels}
+        onToggleEdit={onToggleEditChannels}
+        onCancelEdit={onCancelEditChannels}
+        onCreateChannel={onCreateChannel}
       />
       <main className="chat-main">
         <header className="chat-header">
@@ -1296,7 +1392,9 @@ function UtilityPage({ title, description, children }: { title: string; descript
 
 export function App() {
   const [active, setActive] = useState<Section>("chat");
-  const [activeChannel, setActiveChannel] = useState("tmp");
+  const [channels, setChannels] = useState<AppChannel[]>(() => defaultLocalChannels());
+  const [activeChannel, setActiveChannel] = useState("general");
+  const [editingChannels, setEditingChannels] = useState(false);
   const [activeDock, setActiveDock] = useState<DockView>("work");
   const [agentUrl, setAgentUrl] = useState(() => getStored(storage.agentUrl, window.location.origin));
   const [token, setToken] = useState(() => getStored(storage.token, ""));
@@ -1896,6 +1994,25 @@ export function App() {
     addEvent("install_prompt", { outcome: choice.outcome });
   }, [addEvent, deferredInstallPrompt]);
 
+  const createLocalChannel = useCallback((rawName: string) => {
+    const name = normalizeChannelName(rawName);
+    if (!name) return;
+    setChannels((current) => {
+      if (current.some((channel) => channel.name === name)) return current;
+      return [
+        ...current,
+        {
+          id: `local-${name}`,
+          name,
+          displayName: null,
+          category: "General",
+          position: current.length,
+        },
+      ];
+    });
+    setActiveChannel(name);
+  }, []);
+
   const knowledgeProps = {
     knowledgeQuery,
     setKnowledgeQuery,
@@ -1912,6 +2029,7 @@ export function App() {
   if (active === "chat") {
     return (
       <ChatView
+        channels={channels}
         activeChannel={activeChannel}
         setActiveChannel={setActiveChannel}
         setActive={setActive}
@@ -1941,6 +2059,10 @@ export function App() {
         controlRequests={controlRequests}
         knowledgeProps={knowledgeProps}
         onReloadSkills={() => void reloadSkills().catch((error) => addEvent("skills_reload_error", { message: String(error instanceof Error ? error.message : error) }))}
+        editingChannels={editingChannels}
+        onToggleEditChannels={() => setEditingChannels((value) => !value)}
+        onCancelEditChannels={() => setEditingChannels(false)}
+        onCreateChannel={createLocalChannel}
       />
     );
   }

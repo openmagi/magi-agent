@@ -12115,6 +12115,31 @@ function initialChannelState() {
     taskBoard: null
   };
 }
+function defaultLocalChannels() {
+  return [
+    {
+      id: "local-general",
+      name: "general",
+      displayName: null,
+      category: "General",
+      position: 0
+    }
+  ];
+}
+function groupLocalChannels(channels) {
+  const grouped = /* @__PURE__ */ new Map();
+  for (const channel of channels) {
+    const category = channel.category || "General";
+    grouped.set(category, [...grouped.get(category) ?? [], channel]);
+  }
+  return Array.from(grouped.entries()).map(([title, items]) => ({
+    title,
+    channels: [...items].sort((a, b) => a.position - b.position)
+  }));
+}
+function normalizeChannelName(value) {
+  return value.trim().toLowerCase().replace(/[^a-z0-9-_ ]/g, "").replace(/\s+/g, "-").replace(/^-+|-+$/g, "");
+}
 function formatElapsed(ms) {
   if (!ms || ms < 1e3) return void 0;
   return `${Math.max(1, Math.round(ms / 1e3))}s`;
@@ -12328,7 +12353,10 @@ function Icon({ name }) {
     ] });
   }
   if (name === "send") {
-    return /* @__PURE__ */ jsxRuntimeExports.jsx("svg", { viewBox: "0 0 24 24", "aria-hidden": "true", children: /* @__PURE__ */ jsxRuntimeExports.jsx("path", { d: "m5 12 14-7-5 14-3-6-6-1Z" }) });
+    return /* @__PURE__ */ jsxRuntimeExports.jsxs("svg", { viewBox: "0 0 24 24", "aria-hidden": "true", children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsx("path", { d: "M12 19V5" }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx("path", { d: "m5 12 7-7 7 7" })
+    ] });
   }
   if (name === "attach") {
     return /* @__PURE__ */ jsxRuntimeExports.jsx("svg", { viewBox: "0 0 24 24", "aria-hidden": "true", children: /* @__PURE__ */ jsxRuntimeExports.jsx("path", { d: "m21 11-9 9a6 6 0 0 1-8.5-8.5l9-9a4 4 0 0 1 5.7 5.7l-9 9a2 2 0 0 1-2.8-2.8l8.4-8.4" }) });
@@ -12428,20 +12456,27 @@ function DashboardSidebar({
   ] });
 }
 function ChatSidebar({
+  channels,
   activeChannel,
   setActiveChannel,
   setActive,
   onRefresh,
-  runtimeStatus
+  runtimeStatus,
+  editing,
+  onToggleEdit,
+  onCancelEdit,
+  onCreateChannel
 }) {
-  const channels = [
-    ["General", ["general", "chatter", "quick-notes", "keepers"]],
-    ["Work", ["runtime-proof", "local-kb", "scheduled-work", "tmp"]],
-    ["Info", ["news", "daily-update"]],
-    ["Life", ["schedule"]],
-    ["Finance", ["finance"]],
-    ["Study", ["learning"]]
-  ];
+  const [showNewChannel, setShowNewChannel] = reactExports.useState(false);
+  const [newChannelName, setNewChannelName] = reactExports.useState("");
+  const groupedChannels = groupLocalChannels(channels.length > 0 ? channels : defaultLocalChannels());
+  const createChannel = () => {
+    const name = normalizeChannelName(newChannelName);
+    if (!name) return;
+    onCreateChannel(name);
+    setNewChannelName("");
+    setShowNewChannel(false);
+  };
   return /* @__PURE__ */ jsxRuntimeExports.jsxs("aside", { className: "chat-sidebar", "aria-label": "Chat channels", children: [
     /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "bot-status", children: /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { children: [
       /* @__PURE__ */ jsxRuntimeExports.jsx("strong", { children: "Magi_Local" }),
@@ -12451,24 +12486,32 @@ function ChatSidebar({
         runtimeStatus
       ] })
     ] }) }),
-    /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "chat-edit-row", children: /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", children: "Edit" }) }),
-    /* @__PURE__ */ jsxRuntimeExports.jsx("nav", { className: "channel-scroll", children: channels.map(([group, items]) => /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "channel-group", children: [
-      /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "channel-group-label", children: group }),
-      items.map((channel) => /* @__PURE__ */ jsxRuntimeExports.jsxs(
-        "button",
-        {
-          className: `channel-row ${activeChannel === channel ? "active" : ""}`,
-          type: "button",
-          onClick: () => setActiveChannel(channel),
-          children: [
-            /* @__PURE__ */ jsxRuntimeExports.jsx("span", { children: "#" }),
-            /* @__PURE__ */ jsxRuntimeExports.jsx("strong", { children: channel }),
-            channel === "tmp" && /* @__PURE__ */ jsxRuntimeExports.jsx("i", { className: "unread-dot" })
-          ]
-        },
-        channel
-      ))
-    ] }, group)) }),
+    /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "chat-edit-row", children: [
+      editing && /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", onClick: onCancelEdit, children: "Cancel" }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", onClick: onToggleEdit, children: editing ? "Done" : "Edit" })
+    ] }),
+    /* @__PURE__ */ jsxRuntimeExports.jsxs("nav", { className: "channel-scroll", children: [
+      groupedChannels.map(({ title, channels: channelItems }) => /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "channel-group", children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "channel-group-label", children: title }),
+        channelItems.map((channel) => /* @__PURE__ */ jsxRuntimeExports.jsxs(
+          "button",
+          {
+            className: `channel-row ${activeChannel === channel.name ? "active" : ""}`,
+            type: "button",
+            onClick: () => setActiveChannel(channel.name),
+            children: [
+              /* @__PURE__ */ jsxRuntimeExports.jsx("span", { children: "#" }),
+              /* @__PURE__ */ jsxRuntimeExports.jsx("strong", { children: channel.displayName || channel.name })
+            ]
+          },
+          channel.id
+        ))
+      ] }, title)),
+      /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "channel-add-row", children: /* @__PURE__ */ jsxRuntimeExports.jsxs("button", { type: "button", onClick: () => setShowNewChannel(true), children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsx("span", { children: "+" }),
+        "Add Channel"
+      ] }) })
+    ] }),
     /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "chat-sidebar-bottom", children: [
       /* @__PURE__ */ jsxRuntimeExports.jsxs("button", { type: "button", onClick: onRefresh, children: [
         /* @__PURE__ */ jsxRuntimeExports.jsx(Icon, { name: "refresh" }),
@@ -12478,7 +12521,27 @@ function ChatSidebar({
         /* @__PURE__ */ jsxRuntimeExports.jsx(Icon, { name: "settings" }),
         " Dashboard"
       ] })
-    ] })
+    ] }),
+    showNewChannel && /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "local-modal-backdrop", onClick: () => setShowNewChannel(false), children: /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "local-modal", onClick: (event) => event.stopPropagation(), children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsx("h3", { children: "New Channel" }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx(
+        "input",
+        {
+          value: newChannelName,
+          onChange: (event) => setNewChannelName(event.target.value),
+          onKeyDown: (event) => {
+            if (event.key === "Enter") createChannel();
+            if (event.key === "Escape") setShowNewChannel(false);
+          },
+          placeholder: "Channel name",
+          autoFocus: true
+        }
+      ),
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "modal-actions", children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", onClick: () => setShowNewChannel(false), children: "Cancel" }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", onClick: createChannel, children: "Create" })
+      ] })
+    ] }) })
   ] });
 }
 function RuntimeMetrics({ runtime, eventCount }) {
@@ -12631,6 +12694,7 @@ function WorkDock({
   ] });
 }
 function ChatView({
+  channels,
   activeChannel,
   setActiveChannel,
   setActive,
@@ -12654,7 +12718,11 @@ function ChatView({
   queuedMessages,
   controlRequests,
   knowledgeProps,
-  onReloadSkills
+  onReloadSkills,
+  editingChannels,
+  onToggleEditChannels,
+  onCancelEditChannels,
+  onCreateChannel
 }) {
   const activeToolCount = (channelState.activeTools ?? []).filter((tool) => tool.status === "running").length;
   const activeSubagentCount = (channelState.subagents ?? []).filter((subagent) => subagent.status === "running" || subagent.status === "waiting").length;
@@ -12665,11 +12733,16 @@ function ChatView({
     /* @__PURE__ */ jsxRuntimeExports.jsx(
       ChatSidebar,
       {
+        channels,
         activeChannel,
         setActiveChannel,
         setActive,
         onRefresh,
-        runtimeStatus
+        runtimeStatus,
+        editing: editingChannels,
+        onToggleEdit: onToggleEditChannels,
+        onCancelEdit: onCancelEditChannels,
+        onCreateChannel
       }
     ),
     /* @__PURE__ */ jsxRuntimeExports.jsxs("main", { className: "chat-main", children: [
@@ -13012,7 +13085,9 @@ function UtilityPage({ title, description, children }) {
 }
 function App() {
   const [active, setActive] = reactExports.useState("chat");
-  const [activeChannel, setActiveChannel] = reactExports.useState("tmp");
+  const [channels, setChannels] = reactExports.useState(() => defaultLocalChannels());
+  const [activeChannel, setActiveChannel] = reactExports.useState("general");
+  const [editingChannels, setEditingChannels] = reactExports.useState(false);
   const [activeDock, setActiveDock] = reactExports.useState("work");
   const [agentUrl, setAgentUrl] = reactExports.useState(() => getStored(storage.agentUrl, window.location.origin));
   const [token, setToken] = reactExports.useState(() => getStored(storage.token, ""));
@@ -13567,6 +13642,24 @@ function App() {
     const choice = await prompt.userChoice;
     addEvent("install_prompt", { outcome: choice.outcome });
   }, [addEvent, deferredInstallPrompt]);
+  const createLocalChannel = reactExports.useCallback((rawName) => {
+    const name = normalizeChannelName(rawName);
+    if (!name) return;
+    setChannels((current) => {
+      if (current.some((channel) => channel.name === name)) return current;
+      return [
+        ...current,
+        {
+          id: `local-${name}`,
+          name,
+          displayName: null,
+          category: "General",
+          position: current.length
+        }
+      ];
+    });
+    setActiveChannel(name);
+  }, []);
   const knowledgeProps = {
     knowledgeQuery,
     setKnowledgeQuery,
@@ -13583,6 +13676,7 @@ function App() {
     return /* @__PURE__ */ jsxRuntimeExports.jsx(
       ChatView,
       {
+        channels,
         activeChannel,
         setActiveChannel,
         setActive,
@@ -13611,7 +13705,11 @@ function App() {
         queuedMessages,
         controlRequests,
         knowledgeProps,
-        onReloadSkills: () => void reloadSkills().catch((error) => addEvent("skills_reload_error", { message: String(error instanceof Error ? error.message : error) }))
+        onReloadSkills: () => void reloadSkills().catch((error) => addEvent("skills_reload_error", { message: String(error instanceof Error ? error.message : error) })),
+        editingChannels,
+        onToggleEditChannels: () => setEditingChannels((value) => !value),
+        onCancelEditChannels: () => setEditingChannels(false),
+        onCreateChannel: createLocalChannel
       }
     );
   }
