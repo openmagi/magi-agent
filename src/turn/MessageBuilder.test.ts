@@ -520,6 +520,9 @@ describe("MessageBuilder.appendRuntimeModelIdentityContext", () => {
       ],
     });
     expect(messages[2]?.content).toBe("what model are you?");
+    expect(JSON.stringify(messages)).toContain("router: premium");
+    expect(JSON.stringify(messages)).not.toContain("Premium Router");
+    expect(JSON.stringify(messages)).not.toContain("Standard Router");
   });
 
   it("replaces stale runtime model identity instead of accumulating copies", () => {

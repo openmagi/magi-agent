@@ -206,7 +206,7 @@ export interface AgentConfig {
   apiProxyUrl: string;
   chatProxyUrl?: string;
   redisUrl?: string;
-  /** Default model for this bot. Overridable per-turn via smart-router. */
+  /** Default model for this bot. Can be overridden per turn by hosted deployments. */
   model: string;
   /** OSS multi-provider support — delegates LLM calls to this provider. */
   llmProvider?: { stream(req: import("./transport/LLMClient.js").LLMStreamRequest): AsyncGenerator<import("./transport/LLMClient.js").LLMEvent, void, void> };

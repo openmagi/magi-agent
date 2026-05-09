@@ -124,10 +124,7 @@ function runtimeModelLabel(model: string, provider?: string): string {
 }
 
 function routerDisplayName(profileId: string | undefined): string {
-  if (profileId === "standard") return "Standard Router";
-  if (profileId === "premium") return "Premium Router";
-  if (profileId === "anthropic_only") return "Claude Router";
-  return profileId ? `${profileId} Router` : "Direct model";
+  return profileId ?? "configured model";
 }
 
 function isRuntimeModelIdentityBlock(block: LLMContentBlock): boolean {

@@ -53,8 +53,8 @@ import type { KbCollectionWithDocs, KbDocEntry } from "@/hooks/use-kb-docs";
 const BOT_ID = "local";
 const BOT_NAME = "Magi_Local";
 const DEFAULT_CHANNEL = "general";
-const DEFAULT_MODEL = "magi_smart_routing";
-const DEFAULT_ROUTER = "big_dic";
+const DEFAULT_MODEL = "auto";
+const DEFAULT_ROUTER = "standard";
 const WORKSPACE_SCAN_LIMIT = 220;
 const EDITABLE_WORKSPACE_ROOTS = new Set([
   ".magi",
@@ -148,6 +148,13 @@ function sessionKeyForChannel(channel: string): string {
 function getStored(key: string, fallback: string): string {
   if (typeof window === "undefined") return fallback;
   return window.localStorage.getItem(key) || fallback;
+}
+
+function getConfiguredModelSelection(): string {
+  if (typeof window !== "undefined") {
+    window.localStorage.removeItem(storage.modelOverride);
+  }
+  return DEFAULT_MODEL;
 }
 
 function asString(value: unknown, fallback = ""): string {
@@ -410,9 +417,7 @@ export function App() {
       return true;
     }
   });
-  const [modelSelection, setModelSelection] = useState(() =>
-    getStored(storage.modelOverride, DEFAULT_MODEL),
-  );
+  const [modelSelection, setModelSelection] = useState(getConfiguredModelSelection);
   const [routerType, setRouterType] = useState(DEFAULT_ROUTER);
   const [isDraggingOver, setIsDraggingOver] = useState(false);
   const dragCounterRef = useRef(0);
@@ -1144,10 +1149,10 @@ export function App() {
     store.resetSession(channel, getAccessToken);
   }, [getAccessToken, store]);
 
-  const handleModelSelectionChange = useCallback((nextModel: string, nextRouter: string) => {
-    setModelSelection(nextModel);
-    setRouterType(nextRouter);
-    window.localStorage.setItem(storage.modelOverride, nextModel);
+  const handleModelSelectionChange = useCallback((_nextModel: string, _nextRouter: string) => {
+    setModelSelection(DEFAULT_MODEL);
+    setRouterType(DEFAULT_ROUTER);
+    window.localStorage.removeItem(storage.modelOverride);
   }, []);
 
   const composerAccessory = (

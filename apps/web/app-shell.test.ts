@@ -105,6 +105,30 @@ describe("Magi App shell", () => {
     expect(js).not.toContain("workspace-editor");
   });
 
+  it("does not expose hosted smart routers in the self-hosted model UI", () => {
+    const source = readAppFile(path.join("src", "App.tsx"));
+    const modelPicker = readAppFile(path.join("src", "components", "chat", "chat-model-picker.tsx"));
+    const modelOptions = readAppFile(path.join("src", "lib", "models", "model-options.ts"));
+    const js = readAppFile(path.join("dist", "app.js"));
+    const hostedRouterLabels = [
+      "Standard Router",
+      "Premium Router",
+      "Smart Routing",
+      "Open Magi Router",
+      "GPT Smart Routing",
+    ];
+
+    expect(source).toContain('const DEFAULT_MODEL = "auto"');
+    expect(modelPicker).toContain("Configured LLM");
+    expect(modelPicker).not.toContain("ROUTER_PICKER_OPTIONS");
+    expect(modelPicker).not.toContain("applyRouterPickerMode");
+    for (const label of hostedRouterLabels) {
+      expect(modelPicker).not.toContain(label);
+      expect(modelOptions).not.toContain(label);
+      expect(js).not.toContain(label);
+    }
+  });
+
   it("surfaces editable local system, contract, harness, hook, memory, and compaction files through Workspace", () => {
     const source = readAppFile(path.join("src", "App.tsx"));
     const sidePanel = readAppFile(path.join("src", "components", "chat", "kb-side-panel.tsx"));

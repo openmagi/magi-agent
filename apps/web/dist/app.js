@@ -34298,305 +34298,14 @@ const ChatInput = reactExports.forwardRef(function ChatInput2({
     }
   );
 });
-const LOCAL_LLM_MODEL_OPTIONS = [
-  {
-    value: "local_gemma_fast",
-    label: "Gemma 4 Fast (beta)",
-    description: "Fast local beta model for Max and Flex bots.",
-    runtimeModel: "local/gemma-fast",
-    upstreamModel: "gemma-fast",
-    contextWindow: 131072,
-    maxOutputTokens: 8192
-  },
-  {
-    value: "local_gemma_max",
-    label: "Gemma 4 Max (beta)",
-    description: "Larger local beta Gemma model for Max and Flex bots.",
-    runtimeModel: "local/gemma-max",
-    upstreamModel: "gemma-max",
-    contextWindow: 131072,
-    maxOutputTokens: 8192
-  },
-  {
-    value: "local_qwen_uncensored",
-    label: "Qwen 3.5 Uncensored (beta)",
-    description: "Local beta Qwen model for Max and Flex bots.",
-    runtimeModel: "local/qwen-uncensored",
-    upstreamModel: "qwen-uncensored",
-    contextWindow: 131072,
-    maxOutputTokens: 8192
-  }
-];
-new Map(
-  LOCAL_LLM_MODEL_OPTIONS.map((model) => [model.value, model])
-);
-function isLocalLlmEnabledPlan(plan) {
-  return plan === "max" || plan === "flex";
-}
-const BASE_MODEL_OPTIONS = [
-  { value: "smart_routing", label: "Smart Routing" },
-  { value: "haiku", label: "Claude Haiku 4.5" },
-  { value: "sonnet", label: "Claude Sonnet 4.5" },
-  { value: "opus", label: "Claude Opus 4.6" },
-  { value: "magi_smart_routing", label: "Open Magi Router" },
-  { value: "gpt_smart_routing", label: "GPT Smart Routing" },
-  { value: "gpt_5_nano", label: "GPT-5.4 Nano" },
-  { value: "gpt_5_mini", label: "GPT-5.4 Mini" },
-  { value: "gpt_5_5", label: "GPT-5.5" },
-  { value: "gpt_5_5_pro", label: "GPT-5.5 Pro" },
-  { value: "codex", label: "Codex (OAuth Required)" },
-  { value: "kimi_k2_5", label: "Kimi K2.6 (Fireworks AI)" },
-  { value: "minimax_m2_7", label: "MiniMax M2.7 (Fireworks AI)" },
-  { value: "gemini_3_1_flash_lite", label: "Gemini 3.1 Flash Lite (Google)" },
-  { value: "gemini_3_1_pro", label: "Gemini 3.1 Pro (Google)" }
-];
-function normalizeModelSelectionForSettings(value) {
-  if (value === "gpt_5_1") return "gpt_5_mini";
-  if (value === "gpt_5_4") return "gpt_5_5";
-  return value;
-}
-function getModelOptions(subscriptionPlan) {
-  const baseOptions = [...BASE_MODEL_OPTIONS];
-  if (!isLocalLlmEnabledPlan(subscriptionPlan)) return baseOptions;
-  return [
-    ...baseOptions,
-    ...LOCAL_LLM_MODEL_OPTIONS.map((model) => ({
-      value: model.value,
-      label: model.label
-    }))
-  ];
-}
-({
-  ...Object.fromEntries(
-    LOCAL_LLM_MODEL_OPTIONS.map((model) => [model.value, model.label])
-  )
-});
-const DEFAULT_ADVANCED_MODEL = "opus";
-const ROUTER_MODEL_SELECTIONS = /* @__PURE__ */ new Set([
-  "magi_smart_routing",
-  "smart_routing",
-  "gpt_smart_routing"
-]);
-const ROUTER_PICKER_OPTIONS = [
-  {
-    value: "standard_router",
-    label: "Standard Router",
-    description: "Cost-aware routing for everyday work."
-  },
-  {
-    value: "premium_router",
-    label: "Premium Router",
-    description: "Frontier routing for demanding work."
-  },
-  {
-    value: "advanced",
-    label: "Custom",
-    description: "Pick a specific model manually."
-  }
-];
-function getRouterPickerMode(modelSelection, routerType) {
-  if (modelSelection === "magi_smart_routing" && routerType === "big_dic") {
-    return "premium_router";
-  }
-  if (modelSelection === "magi_smart_routing" && (!routerType || routerType === "standard")) {
-    return "standard_router";
-  }
-  return "advanced";
-}
-function applyRouterPickerMode(mode, advancedModel = DEFAULT_ADVANCED_MODEL) {
-  if (mode === "standard_router") {
-    return { modelSelection: "magi_smart_routing", routerType: "standard" };
-  }
-  if (mode === "premium_router") {
-    return { modelSelection: "magi_smart_routing", routerType: "big_dic" };
-  }
-  return {
-    modelSelection: ROUTER_MODEL_SELECTIONS.has(advancedModel) ? DEFAULT_ADVANCED_MODEL : advancedModel,
-    routerType: "standard"
-  };
-}
-function ensureSelectedOption(options, value) {
-  if (options.some((option) => option.value === value)) return options;
-  return [{ value, label: value }, ...options];
-}
-function Dropdown({
-  label,
-  options,
-  value,
-  onChange,
-  disabled,
-  menuPlacement = "bottom"
-}) {
-  const [open, setOpen] = reactExports.useState(false);
-  const ref = reactExports.useRef(null);
-  reactExports.useEffect(() => {
-    if (!open) return;
-    function onClickOutside(e) {
-      if (ref.current && !ref.current.contains(e.target)) setOpen(false);
-    }
-    document.addEventListener("mousedown", onClickOutside);
-    return () => document.removeEventListener("mousedown", onClickOutside);
-  }, [open]);
-  const selected = options.find((o) => o.value === value);
-  return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { ref, className: "relative", children: [
-    /* @__PURE__ */ jsxRuntimeExports.jsxs(
-      "button",
-      {
-        type: "button",
-        "aria-label": label,
-        disabled,
-        onClick: () => setOpen((o) => !o),
-        className: "flex h-11 max-w-[13rem] cursor-pointer items-center gap-1.5 rounded-lg border border-transparent bg-white/70 px-3 text-xs font-medium text-foreground/80 outline-none transition-all duration-200 hover:bg-white focus:border-primary/30 focus:ring-2 focus:ring-primary/10 disabled:cursor-wait disabled:opacity-60 sm:h-8 sm:px-2.5",
-        children: [
-          /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "truncate", children: selected?.label ?? value }),
-          /* @__PURE__ */ jsxRuntimeExports.jsx("svg", { className: `h-3 w-3 shrink-0 text-secondary transition-transform ${open ? "rotate-180" : ""}`, viewBox: "0 0 12 12", fill: "none", children: /* @__PURE__ */ jsxRuntimeExports.jsx("path", { d: "M3 4.5L6 7.5L9 4.5", stroke: "currentColor", strokeWidth: "1.5", strokeLinecap: "round", strokeLinejoin: "round" }) })
-        ]
-      }
-    ),
-    open && /* @__PURE__ */ jsxRuntimeExports.jsx(
-      "div",
-      {
-        className: `absolute left-0 z-50 min-w-[180px] overflow-hidden rounded-xl border border-black/[0.08] bg-white/95 py-1 shadow-lg backdrop-blur-xl ${menuPlacement === "top" ? "bottom-full mb-1" : "top-full mt-1"}`,
-        children: options.map((option) => /* @__PURE__ */ jsxRuntimeExports.jsxs(
-          "button",
-          {
-            type: "button",
-            onClick: () => {
-              onChange(option.value);
-              setOpen(false);
-            },
-            className: `flex w-full cursor-pointer items-center gap-2 px-3 py-2 text-left text-xs transition-colors ${option.value === value ? "bg-primary/[0.06] font-semibold text-primary" : "text-foreground/80 hover:bg-black/[0.03]"}`,
-            children: [
-              /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: `h-1.5 w-1.5 shrink-0 rounded-full ${option.value === value ? "bg-primary" : "bg-transparent"}` }),
-              /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "truncate", children: option.label })
-            ]
-          },
-          option.value
-        ))
-      }
-    )
-  ] });
-}
-function ChatModelPicker({
-  botId,
-  modelSelection,
-  routerType,
-  apiKeyMode,
-  subscriptionPlan,
-  persistMode = "bot",
-  menuPlacement = "bottom",
-  onModelSelectionChange
-}) {
-  const authFetch = useAuthFetch();
-  const [selectedModel, setSelectedModel] = reactExports.useState(
-    () => normalizeModelSelectionForSettings(modelSelection)
-  );
-  const [currentRouterType, setCurrentRouterType] = reactExports.useState(routerType ?? "standard");
-  const [saving, setSaving] = reactExports.useState(false);
-  const [error, setError] = reactExports.useState(null);
-  const pickerMode = reactExports.useMemo(
-    () => getRouterPickerMode(selectedModel, currentRouterType),
-    [selectedModel, currentRouterType]
-  );
-  reactExports.useEffect(() => {
-    setSelectedModel(normalizeModelSelectionForSettings(modelSelection));
-    setCurrentRouterType(routerType ?? "standard");
-  }, [modelSelection, routerType]);
-  const advancedOptions = reactExports.useMemo(
-    () => ensureSelectedOption(getModelOptions(subscriptionPlan), selectedModel),
-    [selectedModel, subscriptionPlan]
-  );
-  const saveModel = reactExports.useCallback(
-    async (nextModelSelection, nextRouterType) => {
-      setError(null);
-      const prevModel = selectedModel;
-      const prevRouter = currentRouterType;
-      setSelectedModel(nextModelSelection);
-      setCurrentRouterType(nextRouterType);
-      if (persistMode === "local") {
-        onModelSelectionChange?.(nextModelSelection, nextRouterType);
-        return;
-      }
-      setSaving(true);
-      try {
-        const res = await authFetch(`/api/bots/${botId}`, {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            model_selection: nextModelSelection,
-            router_type: nextRouterType
-          })
-        });
-        const data = await res.json().catch(() => ({}));
-        if (!res.ok) {
-          throw new Error(
-            typeof data.error === "string" ? data.error : "Failed to update model"
-          );
-        }
-        const savedModel = typeof data.model_selection === "string" ? normalizeModelSelectionForSettings(data.model_selection) : nextModelSelection;
-        setSelectedModel(savedModel);
-        onModelSelectionChange?.(savedModel, nextRouterType);
-      } catch (err) {
-        setSelectedModel(prevModel);
-        setCurrentRouterType(prevRouter);
-        setError(err instanceof Error ? err.message : "Failed to update model");
-      } finally {
-        setSaving(false);
-      }
-    },
-    [authFetch, botId, onModelSelectionChange, persistMode, selectedModel, currentRouterType]
-  );
-  if (apiKeyMode !== "platform_credits") return null;
-  return /* @__PURE__ */ jsxRuntimeExports.jsxs(
+function ChatModelPicker(_props) {
+  return /* @__PURE__ */ jsxRuntimeExports.jsx(
     "div",
     {
-      className: "relative flex max-w-full flex-wrap items-center justify-end gap-1 rounded-xl border border-black/[0.06] bg-white/80 p-1 shadow-[0_1px_8px_rgba(15,23,42,0.06)] backdrop-blur",
+      className: "flex h-11 max-w-[13rem] items-center rounded-lg border border-black/[0.06] bg-white/80 px-3 text-xs font-medium text-foreground/80 shadow-[0_1px_8px_rgba(15,23,42,0.06)] backdrop-blur sm:h-8 sm:px-2.5",
       "data-chat-model-picker": "true",
-      children: [
-        /* @__PURE__ */ jsxRuntimeExports.jsx(
-          Dropdown,
-          {
-            label: "Router tier",
-            options: ROUTER_PICKER_OPTIONS,
-            value: pickerMode,
-            onChange: (mode) => {
-              const { modelSelection: nextModel, routerType: nextRouter } = applyRouterPickerMode(
-                mode,
-                selectedModel
-              );
-              void saveModel(nextModel, nextRouter);
-            },
-            disabled: saving,
-            menuPlacement
-          }
-        ),
-        pickerMode === "advanced" && /* @__PURE__ */ jsxRuntimeExports.jsx(
-          Dropdown,
-          {
-            label: "Model",
-            options: advancedOptions,
-            value: selectedModel,
-            onChange: (value) => void saveModel(value, "standard"),
-            disabled: saving,
-            menuPlacement
-          }
-        ),
-        saving && /* @__PURE__ */ jsxRuntimeExports.jsx(
-          "span",
-          {
-            className: "pointer-events-none h-3 w-3 rounded-full border border-primary/30 border-t-primary animate-spin",
-            "aria-hidden": "true"
-          }
-        ),
-        error && /* @__PURE__ */ jsxRuntimeExports.jsx(
-          "span",
-          {
-            className: "pointer-events-none absolute left-0 top-full mt-1 whitespace-nowrap rounded-md border border-red-500/15 bg-white px-2 py-1 text-[11px] text-red-500 shadow-sm",
-            role: "status",
-            children: error
-          }
-        )
-      ]
+      title: "Uses the model configured in magi-agent.yaml",
+      children: /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "truncate", children: "Configured LLM" })
     }
   );
 }
@@ -36406,8 +36115,8 @@ function detectMessageResponseLanguage(text2) {
 const BOT_ID = "local";
 const BOT_NAME = "Magi_Local";
 const DEFAULT_CHANNEL = "general";
-const DEFAULT_MODEL = "magi_smart_routing";
-const DEFAULT_ROUTER = "big_dic";
+const DEFAULT_MODEL = "auto";
+const DEFAULT_ROUTER = "standard";
 const WORKSPACE_SCAN_LIMIT = 220;
 const EDITABLE_WORKSPACE_ROOTS = /* @__PURE__ */ new Set([
   ".magi",
@@ -36459,6 +36168,12 @@ function sessionKeyForChannel(channel) {
 function getStored(key, fallback) {
   if (typeof window === "undefined") return fallback;
   return window.localStorage.getItem(key) || fallback;
+}
+function getConfiguredModelSelection() {
+  if (typeof window !== "undefined") {
+    window.localStorage.removeItem(storage.modelOverride);
+  }
+  return DEFAULT_MODEL;
 }
 function asString(value, fallback = "") {
   return typeof value === "string" ? value : fallback;
@@ -36642,9 +36357,7 @@ function App() {
       return true;
     }
   });
-  const [modelSelection, setModelSelection] = reactExports.useState(
-    () => getStored(storage.modelOverride, DEFAULT_MODEL)
-  );
+  const [modelSelection, setModelSelection] = reactExports.useState(getConfiguredModelSelection);
   const [routerType, setRouterType] = reactExports.useState(DEFAULT_ROUTER);
   const [isDraggingOver, setIsDraggingOver] = reactExports.useState(false);
   const dragCounterRef = reactExports.useRef(0);
@@ -37303,10 +37016,10 @@ function App() {
     const channel = useChatStore.getState().activeChannel || DEFAULT_CHANNEL;
     store.resetSession(channel, getAccessToken);
   }, [getAccessToken, store]);
-  const handleModelSelectionChange = reactExports.useCallback((nextModel, nextRouter) => {
-    setModelSelection(nextModel);
-    setRouterType(nextRouter);
-    window.localStorage.setItem(storage.modelOverride, nextModel);
+  const handleModelSelectionChange = reactExports.useCallback((_nextModel, _nextRouter) => {
+    setModelSelection(DEFAULT_MODEL);
+    setRouterType(DEFAULT_ROUTER);
+    window.localStorage.removeItem(storage.modelOverride);
   }, []);
   const composerAccessory = /* @__PURE__ */ jsxRuntimeExports.jsx(
     ChatModelPicker,

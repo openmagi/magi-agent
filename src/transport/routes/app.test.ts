@@ -98,6 +98,24 @@ describe("HttpServer /app", () => {
     expect(res.body).toContain("data-chat-model-picker");
   });
 
+  it("serves cloud-style dashboard deep links as the self-hosted app shell", async () => {
+    for (const pathname of [
+      "/dashboard",
+      "/dashboard/local/overview",
+      "/dashboard/local/chat",
+      "/dashboard/local/settings",
+      "/dashboard/local/pipelines/pipeline-1",
+    ]) {
+      const res = await requestRaw(`http://127.0.0.1:${port}${pathname}`);
+
+      expect(res.status).toBe(200);
+      expect(res.contentType).toContain("text/html");
+      expect(res.body).toContain("Magi App");
+      expect(res.body).toContain('id="root"');
+      expect(res.body).toContain("/app/app.js");
+    }
+  });
+
   it("serves loopback bootstrap settings so the local app can authenticate", async () => {
     const res = await requestRaw(`http://127.0.0.1:${port}/app/bootstrap.json`);
 
