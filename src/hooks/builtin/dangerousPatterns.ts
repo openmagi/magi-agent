@@ -58,6 +58,11 @@ export const DEFAULT_DANGEROUS_PATTERNS: readonly DangerousPatternRule[] = [
   { match: "sudo", scope: "bash" },
   { match: "chmod 777", scope: "bash" },
   { match: "curl.*\\|.*sh", scope: "bash", kind: "regex" },
+  { match: "\\bgit\\s+push\\b", scope: "bash", kind: "regex", action: "ask" },
+  { match: "\\bgit\\s+reset\\s+--hard\\b", scope: "bash", kind: "regex", action: "deny" },
+  { match: "\\bgit\\s+checkout\\s+--\\b", scope: "bash", kind: "regex", action: "deny" },
+  { match: "(?:^|\\s)(?:env|printenv)(?:\\s|$)", scope: "bash", kind: "regex", action: "ask" },
+  { match: "^\\.ssh", scope: "path", kind: "regex", action: "deny" },
 ];
 
 const CONFIG_REL = "agent.config.yaml";

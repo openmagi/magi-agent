@@ -53,6 +53,31 @@ function testRunTranscript(): TranscriptEntry[] {
   ];
 }
 
+function gitDiffTranscript(): TranscriptEntry[] {
+  return [
+    {
+      kind: "tool_call",
+      ts: 3,
+      turnId: "turn-1",
+      toolUseId: "diff-1",
+      name: "GitDiff",
+      input: {},
+    },
+    {
+      kind: "tool_result",
+      ts: 4,
+      turnId: "turn-1",
+      toolUseId: "diff-1",
+      status: "ok",
+      output: JSON.stringify({
+        changedFiles: ["workspace/code/app/src/app.ts"],
+        diff: "diff --git a/src/app.ts b/src/app.ts\n",
+      }),
+      isError: false,
+    },
+  ];
+}
+
 describe("coding verification gate", () => {
   it("blocks coding completions after file changes when no verification evidence exists", async () => {
     const hook = makeCodingVerificationGateHook({
@@ -80,11 +105,40 @@ describe("coding verification gate", () => {
     });
   });
 
-  it("allows coding completions when a current-turn TestRun passed", async () => {
+  it("blocks coding completions when TestRun passed but no current-turn diff evidence exists", async () => {
     const hook = makeCodingVerificationGateHook({
       agent: {
         getSessionDiscipline: () => CODING_DISCIPLINE,
         readSessionTranscript: async () => testRunTranscript(),
+      },
+    });
+
+    const out = await hook.handler(
+      {
+        assistantText: "Implemented and verified.",
+        toolCallCount: 1,
+        toolReadHappened: true,
+        userMessage: "fix the bug",
+        retryCount: 0,
+        filesChanged: ["workspace/code/app/src/app.ts"],
+      },
+      hookContext(),
+    );
+
+    expect(out).toEqual({
+      action: "block",
+      reason: expect.stringContaining("GitDiff"),
+    });
+  });
+
+  it("allows coding completions when current-turn TestRun and GitDiff evidence passed", async () => {
+    const hook = makeCodingVerificationGateHook({
+      agent: {
+        getSessionDiscipline: () => CODING_DISCIPLINE,
+        readSessionTranscript: async () => [
+          ...testRunTranscript(),
+          ...gitDiffTranscript(),
+        ],
       },
     });
 

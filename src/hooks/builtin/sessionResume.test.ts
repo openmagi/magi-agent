@@ -9,6 +9,7 @@ import path from "node:path";
 import {
   _clearSessionResumeMemo,
   buildSessionResumeBlock,
+  extractAbandonedTurn,
   extractRecentTurns,
   makeSessionResumeHook,
   type SessionResumeAgent,
@@ -17,7 +18,7 @@ import {
 import type { HookContext } from "../types.js";
 import type { TranscriptEntry } from "../../storage/Transcript.js";
 
-function makeCtx(sessionKey = "sess-1"): HookContext {
+function makeCtx(sessionKey = "sess-1", overrides: Partial<HookContext> = {}): HookContext {
   return {
     botId: "bot-test",
     userId: "user-test",
@@ -29,6 +30,7 @@ function makeCtx(sessionKey = "sess-1"): HookContext {
     log: vi.fn(),
     abortSignal: new AbortController().signal,
     deadlineMs: 10_000,
+    ...overrides,
   };
 }
 
@@ -93,6 +95,45 @@ describe("extractRecentTurns", () => {
   });
 });
 
+describe("extractAbandonedTurn", () => {
+  it("summarizes the latest uncommitted turn after a pod restart", () => {
+    const transcript: TranscriptEntry[] = [
+      { kind: "turn_started", ts: 1, turnId: "t1", declaredRoute: "direct" },
+      { kind: "user_message", ts: 2, turnId: "t1", text: "make the IC report" },
+      {
+        kind: "tool_call",
+        ts: 3,
+        turnId: "t1",
+        toolUseId: "tool-1",
+        name: "SpawnAgent",
+        input: { persona: "ic-chair", prompt: "write synthesis.md" },
+      },
+    ];
+
+    const abandoned = extractAbandonedTurn(transcript);
+
+    expect(abandoned).toMatchObject({
+      turnId: "t1",
+      user: "make the IC report",
+      toolCalls: ["SpawnAgent"],
+      committed: false,
+    });
+  });
+
+  it("ignores committed or aborted turns", () => {
+    const transcript: TranscriptEntry[] = [
+      { kind: "turn_started", ts: 1, turnId: "t1", declaredRoute: "direct" },
+      { kind: "user_message", ts: 2, turnId: "t1", text: "done" },
+      { kind: "turn_committed", ts: 3, turnId: "t1", inputTokens: 1, outputTokens: 1 },
+      { kind: "turn_started", ts: 4, turnId: "t2", declaredRoute: "direct" },
+      { kind: "user_message", ts: 5, turnId: "t2", text: "aborted" },
+      { kind: "turn_aborted", ts: 6, turnId: "t2", reason: "user_interrupt" },
+    ];
+
+    expect(extractAbandonedTurn(transcript)).toBeNull();
+  });
+});
+
 describe("buildSessionResumeBlock", () => {
   it("truncates long messages to 800 chars with ellipsis", async () => {
     const long = "x".repeat(2000);
@@ -133,6 +174,36 @@ describe("buildSessionResumeBlock", () => {
     }
   });
 
+  it("includes an abandoned prior turn even when no turn committed", async () => {
+    const root = await mkTmpWorkspace();
+    try {
+      const snapshot: SessionResumeSnapshot = {
+        transcript: [
+          { kind: "turn_started", ts: 1, turnId: "t1", declaredRoute: "direct" },
+          { kind: "user_message", ts: 2, turnId: "t1", text: "make the IC report" },
+          {
+            kind: "tool_call",
+            ts: 3,
+            turnId: "t1",
+            toolUseId: "tool-1",
+            name: "SpawnAgent",
+            input: { persona: "ic-chair", prompt: "write synthesis.md" },
+          },
+        ],
+        lastActivityAt: Date.now(),
+      };
+
+      const block = await buildSessionResumeBlock(snapshot, root);
+
+      expect(block).toContain("## Interrupted prior turn");
+      expect(block).toContain("make the IC report");
+      expect(block).toContain("SpawnAgent");
+      expect(block).toContain("did not reach turn_committed or turn_aborted");
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  });
+
   it("includes recently-modified files within 24h of last activity", async () => {
     const root = await mkTmpWorkspace();
     try {
@@ -154,6 +225,36 @@ describe("buildSessionResumeBlock", () => {
       const block = await buildSessionResumeBlock(snapshot, root);
       expect(block).toContain("fresh.md");
       expect(block).not.toContain("stale.md");
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("sessionResume incognito", () => {
+  it("does not read or append resume seed in incognito memory mode", async () => {
+    const root = await mkTmpWorkspace();
+    try {
+      const agent = {
+        getResumeSnapshot: vi.fn(async () => ({
+          transcript: [
+            { kind: "user_message", ts: 1, turnId: "t1", text: "hi" },
+            { kind: "assistant_text", ts: 2, turnId: "t1", text: "hello" },
+            { kind: "turn_committed", ts: 3, turnId: "t1", inputTokens: 1, outputTokens: 1 },
+          ],
+          lastActivityAt: Date.now(),
+        })),
+        appendResumeSeed: vi.fn(async () => undefined),
+      } satisfies SessionResumeAgent;
+      const hook = makeSessionResumeHook({ agent, workspaceRoot: root });
+
+      await hook.handler(
+        { userMessage: "continue" },
+        makeCtx("sess-incognito", { memoryMode: "incognito" }),
+      );
+
+      expect(agent.getResumeSnapshot).not.toHaveBeenCalled();
+      expect(agent.appendResumeSeed).not.toHaveBeenCalled();
     } finally {
       await fs.rm(root, { recursive: true, force: true });
     }

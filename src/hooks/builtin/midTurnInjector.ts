@@ -71,7 +71,8 @@ export function makeMidTurnInjectorHook(
     // so the injection lands close to the user-message end of the stack
     // but doesn't miss any system-prompt rewrites.
     priority: 3,
-    blocking: false,
+    blocking: true,
+    failOpen: true,
     handler: async (args, ctx: HookContext) => {
       try {
         const session = opts.agent.getSession(ctx.sessionKey);

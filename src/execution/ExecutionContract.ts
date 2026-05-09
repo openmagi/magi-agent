@@ -1,4 +1,8 @@
 import type { MemoryRecallRecord } from "../reliability/MemoryContinuity.js";
+import type {
+  LongTermMemoryPolicy,
+  SourceAuthorityRecord,
+} from "../reliability/SourceAuthority.js";
 
 export type VerificationMode = "none" | "sample" | "full";
 export type ExecutionControlMode = "light" | "heavy";
@@ -155,6 +159,25 @@ export interface RequestMetaClassificationResult {
     actionKinds: string[];
     reason: string;
   };
+  sourceAuthority: {
+    longTermMemoryPolicy: LongTermMemoryPolicy;
+    currentSourcesAuthoritative: boolean;
+    reason: string;
+  };
+  clarification: {
+    needed: boolean;
+    reason: string;
+    question: string | null;
+    choices: string[];
+    allowFreeText: boolean;
+    riskIfAssumed: string;
+  };
+  memoryMutation: {
+    intent: "none" | "redact";
+    target: string | null;
+    rawFileRedactionRequested: boolean;
+    reason: string;
+  };
 }
 
 export interface RequestMetaClassificationRecord {
@@ -177,6 +200,10 @@ export interface FinalAnswerMetaClassificationResult {
   assistantReportsDeliveryUnverified: boolean;
   assistantGivesUpEarly: boolean;
   assistantClaimsActionWithoutEvidence: boolean;
+  assistantEndsWithUnexecutedPlan: boolean;
+  assistantClaimsMemoryMutation: boolean;
+  assistantReportsMemoryMutationFailure: boolean;
+  sourceAuthorityViolation: boolean;
   reason: string;
 }
 
@@ -206,6 +233,7 @@ export interface ExecutionTaskState {
   requestMetaClassifications: RequestMetaClassificationRecord[];
   finalAnswerMetaClassifications: FinalAnswerMetaClassificationRecord[];
   memoryRecall: MemoryRecallRecord[];
+  sourceAuthority: SourceAuthorityRecord[];
   artifacts: string[];
   updatedAt: number;
 }
@@ -271,6 +299,7 @@ export class ExecutionContractStore {
         requestMetaClassifications: [],
         finalAnswerMetaClassifications: [],
         memoryRecall: [],
+        sourceAuthority: [],
         artifacts: [],
         updatedAt: this.now(),
       },
@@ -431,6 +460,33 @@ export class ExecutionContractStore {
         (record) => record.turnId === turnId,
       ),
     )) as MemoryRecallRecord[];
+  }
+
+  replaceSourceAuthorityForTurn(
+    turnId: string,
+    records: readonly SourceAuthorityRecord[],
+  ): void {
+    const retained = this.snapshotValue.taskState.sourceAuthority.filter(
+      (record) => record.turnId !== turnId,
+    );
+    const now = this.now();
+    this.patchTaskState({
+      sourceAuthority: [
+        ...retained,
+        ...records.map((record) => ({
+          ...record,
+          recordedAt: record.recordedAt ?? now,
+        })),
+      ],
+    });
+  }
+
+  sourceAuthorityForTurn(turnId: string): SourceAuthorityRecord[] {
+    return JSON.parse(JSON.stringify(
+      this.snapshotValue.taskState.sourceAuthority.filter(
+        (record) => record.turnId === turnId,
+      ),
+    )) as SourceAuthorityRecord[];
   }
 
   recordDeterministicRequirement(

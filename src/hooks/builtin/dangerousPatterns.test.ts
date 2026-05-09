@@ -240,6 +240,30 @@ describe("dangerousPatterns hook", () => {
   });
 
   it("bonus: default set has expected 7 rules", () => {
-    expect(DEFAULT_DANGEROUS_PATTERNS.length).toBe(7);
+    expect(DEFAULT_DANGEROUS_PATTERNS.length).toBe(12);
+  });
+
+  it("default rules ask before git push and deny destructive git reset", async () => {
+    const hook = makeDangerousPatternsHook({ workspaceRoot: root });
+    const { ctx } = makeCtx();
+    const push = await runHook(hook.handler, ctx, {
+      toolName: "Bash",
+      toolUseId: "git-push",
+      input: { command: "git push origin feature/runtime-execution-contract" },
+    });
+    expect(push).toMatchObject({
+      action: "permission_decision",
+      decision: "ask",
+    });
+
+    const reset = await runHook(hook.handler, ctx, {
+      toolName: "Bash",
+      toolUseId: "git-reset",
+      input: { command: "git reset --hard HEAD~1" },
+    });
+    expect(reset).toMatchObject({
+      action: "permission_decision",
+      decision: "deny",
+    });
   });
 });

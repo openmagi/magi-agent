@@ -25,6 +25,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import type { RegisteredHook, HookContext } from "../types.js";
+import { isIncognitoMemoryMode } from "../../util/memoryMode.js";
 
 /** Max entries in the recently-modified list. */
 const MAX_RECENT_FILES = 30;
@@ -237,6 +238,7 @@ export function makeWorkspaceAwarenessHook(
     blocking: false,
     handler: async (args, ctx: HookContext) => {
       try {
+        if (isIncognitoMemoryMode(ctx.memoryMode)) return { action: "continue" };
         if (!isEnabled()) return { action: "continue" };
         if (args.iteration > 0) return { action: "continue" };
         if (args.system.includes("<workspace_snapshot")) {

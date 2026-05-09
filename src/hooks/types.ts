@@ -23,6 +23,9 @@ import type {
   ToolResult,
 } from "../Tool.js";
 import type { ExecutionContractStore } from "../execution/ExecutionContract.js";
+import type { ResearchContractStore } from "../research/ResearchContract.js";
+import type { SourceLedgerStore } from "../research/SourceLedger.js";
+import type { ChannelMemoryMode, ChannelRef } from "../util/types.js";
 
 /**
  * Every hook point exposed by core-agent. Add new ones here as
@@ -64,6 +67,8 @@ export interface HookContext {
   readonly sessionKey: string;
   readonly turnId: string;
   readonly contextId?: string;
+  readonly channel?: ChannelRef;
+  readonly memoryMode?: ChannelMemoryMode;
   /**
    * Scoped LLM client — same gateway token, with x-magi-hook header
    * tagging all requests so api-proxy can attribute cost to the
@@ -113,6 +118,10 @@ export interface HookContext {
    * evidence as structured state that hooks can inspect deterministically.
    */
   readonly executionContract?: ExecutionContractStore;
+  /** Sources inspected during this session, used by research/citation gates. */
+  readonly sourceLedger?: SourceLedgerStore;
+  /** Structured research contract state for source-sensitive turns. */
+  readonly researchContract?: ResearchContractStore;
   /**
    * Optional human-in-the-loop delegate. Populated by Turn.ts for
    * phases that can reasonably interact with the user (currently

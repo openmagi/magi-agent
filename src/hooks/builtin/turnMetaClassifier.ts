@@ -5,6 +5,8 @@ import type {
   PlanningNeed,
   RequestMetaClassificationResult,
 } from "../../execution/ExecutionContract.js";
+import type { LongTermMemoryPolicy } from "../../reliability/SourceAuthority.js";
+import { buildSourceAuthorityClassifierContext } from "../../reliability/SourceAuthority.js";
 import type { LLMClient } from "../../transport/LLMClient.js";
 import type { HookContext } from "../types.js";
 
@@ -29,6 +31,12 @@ const VALID_PLANNING_NEEDS: readonly PlanningNeed[] = [
   "pipeline_or_bulk",
 ];
 const VALID_PLANNING_NEED_SET = new Set<string>(VALID_PLANNING_NEEDS);
+const VALID_MEMORY_POLICIES: readonly LongTermMemoryPolicy[] = [
+  "normal",
+  "background_only",
+  "disabled",
+];
+const VALID_MEMORY_POLICY_SET = new Set<string>(VALID_MEMORY_POLICIES);
 
 const REQUEST_CLASSIFIER_SYSTEM = [
   "You are a runtime-control classifier for an AI agent.",
@@ -64,6 +72,25 @@ const REQUEST_CLASSIFIER_SYSTEM = [
   '    "requiresAction": boolean,',
   '    "actionKinds": string[],',
   '    "reason": string',
+  "  },",
+  '  "sourceAuthority": {',
+  '    "longTermMemoryPolicy": "normal" | "background_only" | "disabled",',
+  '    "currentSourcesAuthoritative": boolean,',
+  '    "reason": string',
+  "  },",
+  '  "clarification": {',
+  '    "needed": boolean,',
+  '    "reason": string,',
+  '    "question": string | null,',
+  '    "choices": string[],',
+  '    "allowFreeText": boolean,',
+  '    "riskIfAssumed": string',
+  "  },",
+  '  "memoryMutation": {',
+  '    "intent": "none" | "redact",',
+  '    "target": string | null,',
+  '    "rawFileRedactionRequested": boolean,',
+  '    "reason": string',
   "  }",
   "}",
   "",
@@ -85,11 +112,44 @@ const REQUEST_CLASSIFIER_SYSTEM = [
   "- pipeline_or_bulk: large repeated/batch/parallel/long-running work that should use pipeline or bulk execution.",
   [
     "goalProgress.requiresAction is true when the request needs the agent to make concrete progress with runtime resources, tools, or external state before answering.",
-    "Examples: browser interaction, file/document work, sending/uploading/delivering, web or KB research, coding/deploying, debugging by inspection, API/integration checks, data extraction/analysis, or workspace operations.",
+    "Examples: browser interaction, file/document work, sending/uploading/delivering, web or KB research, coding/deploying, debugging by inspection, API/integration checks, data extraction/analysis, subagent dispatch, or workspace operations.",
+    "Set goalProgress.requiresAction=true for explicit work orders like:",
+    '- English: "Spawn 4 subagents with different SOTA LLMs, compute 1+1, cross-validate, and return the final answer as a .md file."',
+    '- Korean: "서브에이전트 4개 띄워서 각각 계산시키고 검증한 뒤 md 파일로 줘."',
+    '- English: "Open this site, click through it like a human, and report what happens."',
+    '- Korean: "사람처럼 브라우저에서 직접 클릭하고 입력하면서 테스트해봐."',
+    '- Korean: "파일 만들어서 채팅에 첨부해줘."',
     "goalProgress.requiresAction is false for pure explanation, opinion, brainstorming, or answering from supplied context without needing tool evidence.",
-    "actionKinds should use short semantic labels such as browser_interaction, file_delivery, file_editing, research, debugging, coding, integration_check, data_analysis, communication, or other.",
+    "For browser, app, web UI, or human-like GUI operation requests, include browser_interaction in actionKinds so the runtime can enforce short checkpointed tool loops.",
+    "actionKinds should use short semantic labels such as browser_interaction, file_delivery, file_editing, research, debugging, coding, integration_check, data_analysis, subagent_dispatch, communication, or other.",
   ].join("\n"),
-  "When uncertain, choose the safer non-triggering value.",
+  "When the user explicitly asks the agent to run tools, spawn subagents, create/send files, browse, inspect, compute from data, or operate on external/workspace state, set goalProgress.requiresAction=true even if the exact tool is unknown.",
+  [
+    "sourceAuthority:",
+    "- Use semantic judgment across languages, not regex or keyword matching.",
+    "- longTermMemoryPolicy=disabled only when the user explicitly says not to use prior memory/history, to ignore old context, to reset, or to answer only from the current source.",
+    "- longTermMemoryPolicy=background_only when the latest user message makes current files, selected KB, current images, or newly supplied information the basis/source of truth, but does not explicitly forbid memory.",
+    "- longTermMemoryPolicy=normal when ordinary memory continuity is allowed, including when the user explicitly asks to continue an earlier topic.",
+    "- currentSourcesAuthoritative=true when the latest request treats current-turn files, selected KB, current images, pasted data, or newly supplied facts as authoritative for the answer.",
+  ].join("\n"),
+  [
+    "clarification:",
+    "- needed=true only for non-trivial work where missing information materially changes the outcome: code changes, deploys, DB/auth/billing/security changes, document/artifact creation, multi-step analysis, external sends/uploads, deterministic data work, or other concrete tool-backed work.",
+    "- needed=false for greetings, casual chat, simple factual questions, simple explanations, simple file-understanding, and cases where a reversible/safe assumption can be stated.",
+    "- Ask one focused question. If several details are missing, combine only the critical missing decision into one concise question.",
+    "- choices should contain 2-4 short likely options when useful. Put the recommended/default option first only if it is genuinely safe.",
+    "- allowFreeText=true when the choices may not cover the user's intended answer.",
+    "- riskIfAssumed should state what would go wrong if the agent guessed.",
+  ].join("\n"),
+  [
+    "memoryMutation:",
+    "- Use semantic judgment across languages, not regex or keyword matching.",
+    "- intent=redact when the user asks the agent to delete, erase, remove, redact, forget, or stop retaining specific content from the bot's Hipocampus memory files or persistent memory.",
+    "- intent=none for ordinary discussion about memory architecture, summaries, or non-mutating questions.",
+    "- target should be the shortest user-specified phrase/entity/topic to remove when available; use null when no target is supplied.",
+    "- rawFileRedactionRequested=true when the user explicitly wants content removed from memory files, not merely ignored in the next answer.",
+  ].join("\n"),
+  "For purely conversational ambiguity, choose the safer non-triggering value.",
 ].join("\n");
 
 const FINAL_ANSWER_CLASSIFIER_SYSTEM = [
@@ -110,13 +170,25 @@ const FINAL_ANSWER_CLASSIFIER_SYSTEM = [
   '  "assistantReportsDeliveryUnverified": boolean,',
   '  "assistantGivesUpEarly": boolean,',
   '  "assistantClaimsActionWithoutEvidence": boolean,',
+  '  "assistantEndsWithUnexecutedPlan": boolean,',
+  '  "assistantClaimsMemoryMutation": boolean,',
+  '  "assistantReportsMemoryMutationFailure": boolean,',
+  '  "sourceAuthorityViolation": boolean,',
   '  "reason": string',
   "}",
   "",
   "internalReasoningLeak: answer exposes hidden planning or meta-reasoning such as what the model should do next, rather than user-facing prose.",
   "lazyRefusal: answer claims it cannot find, access, verify, or provide something without evidence of actual investigation.",
   "selfClaim: answer asserts something about the bot's own workspace, prompt, configuration, or memory.",
-  "deferralPromise: answer promises to deliver results later instead of completing or plainly failing in this turn.",
+  [
+    "deferralPromise: answer promises to start, continue, finish, complete, send, deliver, share, or update results after this message instead of completing or plainly failing in this turn.",
+    "Set deferralPromise=true for deferred-work final answers, including time promises and 'when done' promises such as:",
+    '- Korean: "지금 1-3 마무리 시작할 게. 10분 내 완성할 거야."',
+    '- Korean: "완료되면 결과 보내드리겠습니다."',
+    '- English: "I will start now and finish later."',
+    '- English: "I will send the results when done."',
+    "Set deferralPromise=false when the answer already provides the requested result, or plainly says the work cannot be completed now without promising future delivery.",
+  ].join("\n"),
   "assistantClaimsFileCreated: answer says a file/document/report/artifact was created/generated/written/saved/prepared.",
   "assistantClaimsChatDelivery: answer says a file/result was sent, attached, uploaded, delivered, or made available in the current chat/channel.",
   "assistantClaimsKbDelivery: answer says something was saved/uploaded/added to KB, knowledge base, memory, or a persistent document store.",
@@ -129,6 +201,26 @@ const FINAL_ANSWER_CLASSIFIER_SYSTEM = [
   [
     "assistantClaimsActionWithoutEvidence: answer claims the assistant already investigated, checked, debugged, clicked, opened, filled, ran, sent, created, uploaded, modified, or otherwise took concrete action.",
     "This is a semantic claim detector only; runtime gates compare it against tool evidence. Set false for hypotheticals, plans, or advice that clearly does not claim an action was already performed.",
+  ].join("\n"),
+  [
+    "assistantEndsWithUnexecutedPlan: answer ends the turn with a plan, procedure, next-step promise, or dispatch announcement instead of executing the next needed runtime action and returning the requested result.",
+    "Use semantic judgment across languages. Set true even if some preparatory work happened, when the answer's substance is 'now I will do the real work' and no result/deliverable is returned.",
+    "Set true for plan-only or dispatch-only drafts such as:",
+    '- English: "I\'ll spawn 4 subagents with different SOTA LLMs to compute 1+1, then cross-validate and deliver the result as a markdown file."',
+    '- Korean: "이제 서브에이전트를 띄우겠습니다."',
+    '- Korean: "컨텍스트 파일이 준비되었습니다. 이제 낙관 파트너와 회의 파트너를 병렬 디스패치하겠습니다."',
+    '- English: "I will start the browser review now."',
+    "These do not complete the turn because they announce the real work instead of returning the requested result or evidence-backed blocker.",
+    "Set false when the answer includes the actual requested result, reports a hard blocker with concrete evidence, or confirms a real asynchronous handoff already scheduled by tools.",
+  ].join("\n"),
+  "When the user asked for concrete runtime progress and the draft only announces future work, choose true for assistantEndsWithUnexecutedPlan rather than false.",
+  "assistantClaimsMemoryMutation: answer claims persistent memory, Hipocampus memory, remembered facts, memory files, KB-like memory, or prior remembered content was deleted, erased, removed, redacted, forgotten, or updated to no longer contain something.",
+  "assistantReportsMemoryMutationFailure: answer plainly says the requested memory deletion/redaction was not completed, the target was not found, raw deletion requires confirmation, or memory could not be modified.",
+  [
+    "sourceAuthorityViolation: use this only when a Source authority context is provided.",
+    "Set true when the draft uses long-term memory as evidence despite long_term_memory_policy=disabled, or lets recalled memory override/replace/reinterpret L0 latest user instructions or L1 current-turn sources.",
+    "Set true when the draft answers from an old memory topic instead of the current file/KB/image/source the user supplied.",
+    "Set false for passive background mentions, explicit user requests to continue prior topics, or drafts based on the latest user/current source.",
   ].join("\n"),
   "When uncertain, choose false.",
 ].join("\n");
@@ -159,6 +251,15 @@ function normalizeKinds(value: unknown): DeterministicRequirementKind[] {
 function normalizePlanningNeed(value: unknown): PlanningNeed {
   const raw = typeof value === "string" ? value.trim() : "";
   return VALID_PLANNING_NEED_SET.has(raw) ? (raw as PlanningNeed) : "none";
+}
+
+function normalizeLongTermMemoryPolicy(value: unknown): LongTermMemoryPolicy {
+  const raw = typeof value === "string" ? value.trim() : "";
+  return VALID_MEMORY_POLICY_SET.has(raw) ? (raw as LongTermMemoryPolicy) : "normal";
+}
+
+function normalizeClarificationChoices(value: unknown): string[] {
+  return normalizeStrings(value, 4).map((choice) => choice.slice(0, 80));
 }
 
 function extractJsonObject(raw: string): Record<string, unknown> | null {
@@ -291,6 +392,25 @@ export function defaultRequestMeta(reason = "classifier unavailable"): RequestMe
       actionKinds: [],
       reason,
     },
+    sourceAuthority: {
+      longTermMemoryPolicy: "normal",
+      currentSourcesAuthoritative: false,
+      reason: "No source authority override required.",
+    },
+    clarification: {
+      needed: false,
+      reason: "No clarification required.",
+      question: null,
+      choices: [],
+      allowFreeText: false,
+      riskIfAssumed: "",
+    },
+    memoryMutation: {
+      intent: "none",
+      target: null,
+      rawFileRedactionRequested: false,
+      reason,
+    },
   };
 }
 
@@ -313,6 +433,14 @@ export function parseRequestMetaOutput(raw: string): RequestMetaClassificationRe
   const planning = objectField(parsed, "planning");
   const planningNeed = normalizePlanningNeed(planning.need);
   const goalProgress = objectField(parsed, "goalProgress");
+  const sourceAuthority = objectField(parsed, "sourceAuthority");
+  const clarification = objectField(parsed, "clarification");
+  const memoryMutation = objectField(parsed, "memoryMutation");
+  const clarificationQuestion = stringOrNull(clarification.question, 500);
+  const clarificationChoices = normalizeClarificationChoices(clarification.choices);
+  const clarificationNeeded = bool(clarification.needed) && clarificationQuestion !== null;
+  const memoryMutationIntent =
+    stringOrNull(memoryMutation.intent, 30) === "redact" ? "redact" : "none";
 
   return {
     turnMode: {
@@ -360,6 +488,45 @@ export function parseRequestMetaOutput(raw: string): RequestMetaClassificationRe
           ? "The request requires concrete action evidence."
           : "The request does not require concrete action evidence."),
     },
+    sourceAuthority: {
+      longTermMemoryPolicy: normalizeLongTermMemoryPolicy(
+        sourceAuthority.longTermMemoryPolicy,
+      ),
+      currentSourcesAuthoritative: bool(sourceAuthority.currentSourcesAuthoritative),
+      reason:
+        stringOrNull(sourceAuthority.reason) ??
+        "No source authority override required.",
+    },
+    clarification: {
+      needed: clarificationNeeded,
+      reason:
+        stringOrNull(clarification.reason) ??
+        (clarificationNeeded
+          ? "Clarification is required before execution."
+          : "No clarification required."),
+      question: clarificationNeeded ? clarificationQuestion : null,
+      choices: clarificationNeeded ? clarificationChoices : [],
+      allowFreeText:
+        clarificationNeeded &&
+        (bool(clarification.allowFreeText) || clarificationChoices.length === 0),
+      riskIfAssumed: clarificationNeeded
+        ? stringOrNull(clarification.riskIfAssumed) ?? ""
+        : "",
+    },
+    memoryMutation: {
+      intent: memoryMutationIntent,
+      target:
+        memoryMutationIntent === "redact"
+          ? stringOrNull(memoryMutation.target, 1_000)
+          : null,
+      rawFileRedactionRequested:
+        memoryMutationIntent === "redact" && bool(memoryMutation.rawFileRedactionRequested),
+      reason:
+        stringOrNull(memoryMutation.reason) ??
+        (memoryMutationIntent === "redact"
+          ? "The user asked to remove content from persistent memory."
+          : "No memory mutation requested."),
+    },
   };
 }
 
@@ -378,6 +545,10 @@ export function defaultFinalAnswerMeta(
     assistantReportsDeliveryUnverified: false,
     assistantGivesUpEarly: false,
     assistantClaimsActionWithoutEvidence: false,
+    assistantEndsWithUnexecutedPlan: false,
+    assistantClaimsMemoryMutation: false,
+    assistantReportsMemoryMutationFailure: false,
+    sourceAuthorityViolation: false,
     reason,
   };
 }
@@ -397,6 +568,10 @@ export function parseFinalAnswerMetaOutput(raw: string): FinalAnswerMetaClassifi
     assistantReportsDeliveryUnverified: bool(parsed.assistantReportsDeliveryUnverified),
     assistantGivesUpEarly: bool(parsed.assistantGivesUpEarly),
     assistantClaimsActionWithoutEvidence: bool(parsed.assistantClaimsActionWithoutEvidence),
+    assistantEndsWithUnexecutedPlan: bool(parsed.assistantEndsWithUnexecutedPlan),
+    assistantClaimsMemoryMutation: bool(parsed.assistantClaimsMemoryMutation),
+    assistantReportsMemoryMutationFailure: bool(parsed.assistantReportsMemoryMutationFailure),
+    sourceAuthorityViolation: bool(parsed.sourceAuthorityViolation),
     reason: stringOrNull(parsed.reason) ?? "classified final answer metadata.",
   };
 }
@@ -488,6 +663,7 @@ export async function classifyFinalAnswerMeta(input: {
   model: string;
   userMessage: string;
   assistantText: string;
+  sourceAuthorityContext?: string;
   timeoutMs?: number;
   signal?: AbortSignal;
 }): Promise<FinalAnswerMetaClassificationResult> {
@@ -501,6 +677,13 @@ export async function classifyFinalAnswerMeta(input: {
         "User request:",
         input.userMessage.slice(0, 2_000),
         "",
+        ...(input.sourceAuthorityContext
+          ? [
+              "Source authority context:",
+              input.sourceAuthorityContext.slice(0, 2_000),
+              "",
+            ]
+          : []),
         "Draft assistant answer:",
         input.assistantText.slice(0, 4_000),
         "",
@@ -545,7 +728,22 @@ export async function getOrClassifyFinalAnswerMeta(
   ctx: HookContext,
   input: { userMessage: string; assistantText: string },
 ): Promise<FinalAnswerMetaClassificationResult> {
-  const inputHash = hashMetaInput(input.userMessage, input.assistantText);
+  const sourceAuthorityContext = buildSourceAuthorityClassifierContext({
+    records: ctx.executionContract?.sourceAuthorityForTurn(ctx.turnId) ?? [],
+    memoryPhrases: [
+      ...new Set(
+        (ctx.executionContract?.memoryRecallForTurn(ctx.turnId) ?? [])
+          .filter((record) => record.continuity === "background")
+          .flatMap((record) => record.distinctivePhrases)
+          .slice(0, 12),
+      ),
+    ],
+  });
+  const inputHash = hashMetaInput(
+    input.userMessage,
+    input.assistantText,
+    sourceAuthorityContext,
+  );
   const cached = ctx.executionContract?.getFinalAnswerClassification(ctx.turnId, inputHash);
   if (cached) return cached;
   if (!ctx.llm) return defaultFinalAnswerMeta("no LLM context");
@@ -555,6 +753,7 @@ export async function getOrClassifyFinalAnswerMeta(
     model: ctx.agentModel,
     userMessage: input.userMessage,
     assistantText: input.assistantText,
+    sourceAuthorityContext,
     timeoutMs: classifierTimeoutWithinHook(FINAL_CLASSIFIER_TIMEOUT_MS, ctx.deadlineMs),
     signal: ctx.abortSignal,
   });

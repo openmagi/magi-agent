@@ -5,7 +5,6 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import {
-  DECLINE_RE,
   ONBOARDING_NUDGE_TEXT,
   isOnboardingSteerEnabled,
   looksLikeDecline,
@@ -15,13 +14,25 @@ import {
 import type { HookContext } from "../types.js";
 import type { Session, SessionMeta } from "../../Session.js";
 
-function makeCtx(sessionKey = "s1"): HookContext {
+function makeCtx(sessionKey = "s1", classifierReply?: "YES" | "NO"): HookContext {
+  const llm = classifierReply
+    ? {
+        async *stream() {
+          yield { kind: "text_delta", delta: classifierReply, blockIndex: 0 };
+          yield {
+            kind: "message_end",
+            stopReason: "end_turn",
+            usage: { inputTokens: 1, outputTokens: 1 },
+          };
+        },
+      }
+    : {};
   return {
     botId: "bot-test",
     userId: "user-test",
     sessionKey,
     turnId: "turn-1",
-    llm: {} as never,
+    llm: llm as never,
     transcript: [],
     emit: vi.fn(),
     log: vi.fn(),
@@ -54,23 +65,21 @@ function stubSession(
 }
 
 describe("looksLikeDecline", () => {
-  it("matches common declines", () => {
-    expect(looksLikeDecline("no")).toBe(true);
-    expect(looksLikeDecline("not now")).toBe(true);
-    expect(looksLikeDecline("later")).toBe(true);
-    expect(looksLikeDecline("skip")).toBe(true);
-    expect(looksLikeDecline("나중에")).toBe(true);
-    expect(looksLikeDecline("안 할래")).toBe(true);
+  it("matches common declines through the LLM classifier", async () => {
+    const ctx = makeCtx("s1", "YES");
+    await expect(looksLikeDecline("no", ctx)).resolves.toBe(true);
+    await expect(looksLikeDecline("not now", ctx)).resolves.toBe(true);
+    await expect(looksLikeDecline("later", ctx)).resolves.toBe(true);
+    await expect(looksLikeDecline("skip", ctx)).resolves.toBe(true);
+    await expect(looksLikeDecline("나중에", ctx)).resolves.toBe(true);
+    await expect(looksLikeDecline("안 할래", ctx)).resolves.toBe(true);
   });
 
-  it("does not match affirmative text", () => {
-    expect(looksLikeDecline("yes please")).toBe(false);
-    expect(looksLikeDecline("sure")).toBe(false);
-    expect(looksLikeDecline("")).toBe(false);
-  });
-
-  it("exposes a regex", () => {
-    expect(DECLINE_RE.test("no thanks")).toBe(true);
+  it("does not match affirmative text", async () => {
+    const ctx = makeCtx("s1", "NO");
+    await expect(looksLikeDecline("yes please", ctx)).resolves.toBe(false);
+    await expect(looksLikeDecline("sure", ctx)).resolves.toBe(false);
+    await expect(looksLikeDecline("", ctx)).resolves.toBe(false);
   });
 });
 
@@ -123,7 +132,7 @@ describe("makeOnboardingNeededCheckHook", () => {
     const hook = makeOnboardingNeededCheckHook({
       agent: { getSession: () => session },
     });
-    const ctx = makeCtx();
+    const ctx = makeCtx("s1", "NO");
     const result = await hook.handler(
       { userMessage: "help me plan my day" },
       ctx,
@@ -142,7 +151,7 @@ describe("makeOnboardingNeededCheckHook", () => {
     const hook = makeOnboardingNeededCheckHook({
       agent: { getSession: () => session },
     });
-    const ctx = makeCtx();
+    const ctx = makeCtx("s1", "NO");
     const result = await hook.handler(
       { userMessage: "help me plan my day" },
       ctx,
@@ -156,7 +165,7 @@ describe("makeOnboardingNeededCheckHook", () => {
     const hook = makeOnboardingNeededCheckHook({
       agent: { getSession: () => session },
     });
-    const ctx = makeCtx();
+    const ctx = makeCtx("s1", "YES");
     const result = await hook.handler(
       { userMessage: "another request" },
       ctx,
@@ -170,7 +179,7 @@ describe("makeOnboardingNeededCheckHook", () => {
     const hook = makeOnboardingNeededCheckHook({
       agent: { getSession: () => session },
     });
-    const ctx = makeCtx();
+    const ctx = makeCtx("s1", "YES");
     const result = await hook.handler(
       { userMessage: "not now, later" },
       ctx,

@@ -14,6 +14,7 @@ import {
   allowSealedFileUpdateForTurn,
   recordSystemSealedFileUpdate,
 } from "./sealedFiles.js";
+import { isLongTermMemoryWriteDisabled } from "../../util/memoryMode.js";
 
 export interface CompactionEngine {
   run: (force?: boolean) => Promise<{ skipped?: boolean; compacted?: boolean; stats?: unknown }>;
@@ -43,6 +44,12 @@ export function makeHipocampusCompactorHook(
     blocking: false,
     timeoutMs: 30_000,
     handler: async (_args, ctx) => {
+      if (isLongTermMemoryWriteDisabled(ctx.memoryMode)) {
+        ctx.log("info", "hipocampus compactor: memory writes disabled, skipping", {
+          sessionKey: ctx.sessionKey,
+        });
+        return;
+      }
       const sessionKey = ctx.sessionKey;
 
       if (seenSessions.has(sessionKey)) {

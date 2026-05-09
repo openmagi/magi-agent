@@ -1,6 +1,8 @@
 type SafeAgentEvent = Record<string, unknown> & { type: string };
 
 const MAX_TEXT = 240;
+const MAX_TOOL_PREVIEW = 400;
+const MAX_BROWSER_FRAME_BASE64 = 1_000_000;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === "object" && !Array.isArray(value);
@@ -23,6 +25,26 @@ function maybeText(value: unknown, max = MAX_TEXT): string | undefined {
   return safe || undefined;
 }
 
+function redactPreview(value: string): string {
+  return value
+    .replace(/(Bearer\s+)[A-Za-z0-9._~+/=-]+/gi, "$1[redacted]")
+    .replace(/\bgh[pousr]_[A-Za-z0-9_]+\b/g, "[redacted]")
+    .replace(/\bsk-[A-Za-z0-9_-]+\b/g, "[redacted]")
+    .replace(
+      /((?:api[_-]?key|token|secret|password)["'\s:=]+)([^"'\s,}]+)/gi,
+      "$1[redacted]",
+    );
+}
+
+function toolPreview(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const redacted = redactPreview(value.trim());
+  if (!redacted) return undefined;
+  return redacted.length > MAX_TOOL_PREVIEW
+    ? `${redacted.slice(0, MAX_TOOL_PREVIEW - 3)}...`
+    : redacted;
+}
+
 function bool(value: unknown): boolean {
   return value === true;
 }
@@ -39,6 +61,12 @@ function stringArray(value: unknown): string[] | undefined {
   if (!Array.isArray(value)) return undefined;
   const items = value.map((item) => text(item)).filter(Boolean);
   return items.length > 0 ? items : undefined;
+}
+
+function browserFrameImage(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  if (value.length > MAX_BROWSER_FRAME_BASE64) return undefined;
+  return /^[A-Za-z0-9+/]+={0,2}$/.test(value) ? value : undefined;
 }
 
 function taskBoardTasks(value: unknown): Array<Record<string, unknown>> {
@@ -63,6 +91,44 @@ function taskBoardTasks(value: unknown): Array<Record<string, unknown>> {
     tasks.push(task);
   }
   return tasks;
+}
+
+function safeSourceRecord(value: unknown): Record<string, unknown> | null {
+  if (!isRecord(value)) return null;
+  const sourceId = maybeText(value.sourceId, 120);
+  const uri = maybeText(value.uri, 4_000);
+  if (!sourceId || !uri) return null;
+  const source: Record<string, unknown> = {
+    sourceId,
+    kind: oneOf(
+      value.kind,
+      ["web_search", "web_fetch", "browser", "kb", "file", "external_repo"] as const,
+      "web_fetch",
+    ),
+    uri,
+    inspectedAt: num(value.inspectedAt),
+  };
+  const turnId = maybeText(value.turnId, 120);
+  const toolName = maybeText(value.toolName, 120);
+  const toolUseId = maybeText(value.toolUseId, 120);
+  const title = maybeText(value.title, 500);
+  const contentHash = maybeText(value.contentHash, 160);
+  const contentType = maybeText(value.contentType, 160);
+  const trustTier = oneOf(
+    value.trustTier,
+    ["primary", "official", "secondary", "unknown"] as const,
+    "unknown",
+  );
+  const snippets = stringArray(value.snippets);
+  if (turnId) source.turnId = turnId;
+  if (toolName) source.toolName = toolName;
+  if (toolUseId) source.toolUseId = toolUseId;
+  if (title) source.title = title;
+  if (contentHash) source.contentHash = contentHash;
+  if (contentType) source.contentType = contentType;
+  if (trustTier) source.trustTier = trustTier;
+  if (snippets) source.snippets = snippets.slice(0, 5);
+  return source;
 }
 
 function askUserChoices(value: unknown): Array<Record<string, string>> {
@@ -92,6 +158,50 @@ function tournamentVariants(value: unknown): Array<Record<string, number>> {
     });
   }
   return variants;
+}
+
+function nonNegativeInt(value: unknown): number {
+  return typeof value === "number" && Number.isFinite(value)
+    ? Math.max(0, Math.floor(value))
+    : 0;
+}
+
+function patchPreviewFiles(value: unknown): Array<Record<string, unknown>> {
+  if (!Array.isArray(value)) return [];
+  const files: Array<Record<string, unknown>> = [];
+  for (const item of value.slice(0, 100)) {
+    if (!isRecord(item)) continue;
+    const filePath = maybeText(item.path, 500);
+    if (!filePath) continue;
+    const file: Record<string, unknown> = {
+      path: filePath,
+      operation: oneOf(item.operation, ["create", "update", "delete"] as const, "update"),
+      hunks: nonNegativeInt(item.hunks),
+      addedLines: nonNegativeInt(item.addedLines),
+      removedLines: nonNegativeInt(item.removedLines),
+    };
+    const oldSha256 = maybeText(item.oldSha256, 96);
+    const newSha256 = maybeText(item.newSha256, 96);
+    if (oldSha256) file.oldSha256 = oldSha256;
+    if (newSha256) file.newSha256 = newSha256;
+    files.push(file);
+  }
+  return files;
+}
+
+function safePatchPreviewRecord(value: unknown): Record<string, unknown> | undefined {
+  if (!isRecord(value)) return undefined;
+  const files = patchPreviewFiles(value.files);
+  const changedFiles = (stringArray(value.changedFiles) ?? files.map((file) => String(file.path)))
+    .slice(0, 100);
+  if (changedFiles.length === 0 && files.length === 0) return undefined;
+  return {
+    dryRun: bool(value.dryRun),
+    changedFiles,
+    createdFiles: (stringArray(value.createdFiles) ?? []).slice(0, 100),
+    deletedFiles: (stringArray(value.deletedFiles) ?? []).slice(0, 100),
+    files,
+  };
 }
 
 function safeControlRequest(value: unknown): Record<string, unknown> | null {
@@ -138,7 +248,7 @@ function safeControlProposedInput(
 ): unknown | undefined {
   if (value === undefined || value === null) return undefined;
   if (kind === "tool_permission") {
-    return undefined;
+    return safePatchApplyPermissionInput(value);
   }
   if (kind === "user_question") {
     if (!isRecord(value)) return undefined;
@@ -154,6 +264,16 @@ function safeControlProposedInput(
   return { planId, plan };
 }
 
+function safePatchApplyPermissionInput(value: unknown): unknown | undefined {
+  if (!isRecord(value) || value.toolName !== "PatchApply") return undefined;
+  const safe: Record<string, unknown> = { toolName: "PatchApply" };
+  const patchPreview = safePatchPreviewRecord(value.patchPreview);
+  if (patchPreview) safe.patchPreview = patchPreview;
+  const previewError = maybeText(value.previewError, 120);
+  if (previewError) safe.previewError = previewError;
+  return safe;
+}
+
 function safeControlEvent(value: unknown): SafeAgentEvent | null {
   if (!isRecord(value) || typeof value.type !== "string") return null;
   switch (value.type) {
@@ -164,11 +284,14 @@ function safeControlEvent(value: unknown): SafeAgentEvent | null {
     case "control_request_resolved": {
       const requestId = maybeText(value.requestId, 120);
       if (!requestId) return null;
-      return {
+      const event: SafeAgentEvent = {
         type: "control_request_resolved",
         requestId,
         decision: oneOf(value.decision, ["approved", "denied", "answered"] as const, "denied"),
       };
+      const feedback = maybeText(value.feedback, 2_000);
+      if (feedback) event.feedback = feedback;
+      return event;
     }
     case "control_request_cancelled": {
       const requestId = maybeText(value.requestId, 120);
@@ -302,25 +425,62 @@ export function safeAgentEvent(event: unknown): SafeAgentEvent | null {
       return { type: "response_clear" };
     case "thinking_delta":
       return null;
-    case "tool_start":
-      return {
+    case "tool_start": {
+      const safe: SafeAgentEvent = {
         type: "tool_start",
         id: text(event.id, "tool"),
         name: text(event.name, "tool"),
       };
+      const inputPreview = toolPreview(event.input_preview);
+      if (inputPreview) safe.input_preview = inputPreview;
+      return safe;
+    }
     case "tool_progress":
       return {
         type: "tool_progress",
         id: text(event.id, "tool"),
         label: text(event.label, "Running tool"),
       };
-    case "tool_end":
-      return {
+    case "tool_end": {
+      const safe: SafeAgentEvent = {
         type: "tool_end",
         id: text(event.id, "tool"),
         status: text(event.status, "done", 96),
         durationMs: num(event.durationMs),
       };
+      const outputPreview = toolPreview(event.output_preview);
+      if (outputPreview) safe.output_preview = outputPreview;
+      return safe;
+    }
+    case "patch_preview": {
+      const patchPreview = safePatchPreviewRecord(event);
+      if (!patchPreview) return null;
+      const safe: SafeAgentEvent = {
+        type: "patch_preview",
+        ...patchPreview,
+      };
+      const toolUseId = maybeText(event.toolUseId, 120);
+      if (toolUseId) safe.toolUseId = toolUseId;
+      return safe;
+    }
+    case "source_inspected": {
+      const source = safeSourceRecord(event.source);
+      return source ? { type: "source_inspected", source } : null;
+    }
+    case "browser_frame": {
+      const imageBase64 = browserFrameImage(event.imageBase64);
+      if (!imageBase64) return null;
+      const safe: SafeAgentEvent = {
+        type: "browser_frame",
+        action: text(event.action, "browser", 64),
+        imageBase64,
+        contentType: oneOf(event.contentType, ["image/png", "image/jpeg"] as const, "image/png"),
+        capturedAt: num(event.capturedAt, Date.now()),
+      };
+      const url = maybeText(event.url, 2_000);
+      if (url) safe.url = url;
+      return safe;
+    }
     case "context_end":
       return { type: "context_end" };
     case "task_board":
@@ -328,6 +488,32 @@ export function safeAgentEvent(event: unknown): SafeAgentEvent | null {
         type: "task_board",
         tasks: taskBoardTasks(event.tasks),
       };
+    case "mission_created": {
+      const mission = isRecord(event.mission) ? event.mission : null;
+      const id = mission ? maybeText(mission.id, 120) : null;
+      if (!mission || !id) return null;
+      return {
+        type: "mission_created",
+        mission: {
+          id,
+          title: text(mission.title, "Mission"),
+          kind: text(mission.kind, "manual", 80),
+          status: text(mission.status, "running", 80),
+        },
+      };
+    }
+    case "mission_event": {
+      const missionId = maybeText(event.missionId, 120);
+      if (!missionId) return null;
+      const safe: SafeAgentEvent = {
+        type: "mission_event",
+        missionId,
+        eventType: text(event.eventType, "heartbeat", 80),
+      };
+      const message = maybeText(event.message, 400);
+      if (message) safe.message = message;
+      return safe;
+    }
     case "rule_check": {
       const safe: SafeAgentEvent = {
         type: "rule_check",

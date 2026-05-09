@@ -1,7 +1,7 @@
 import crypto from "node:crypto";
-import type { TranscriptEntry } from "../../storage/Transcript.js";
-import { isFsSafeEscape, readSafe } from "../../util/fsSafe.js";
 import type { HookContext, RegisteredHook } from "../types.js";
+import type { TranscriptEntry } from "../../storage/Transcript.js";
+import { readSafe, isFsSafeEscape } from "../../util/fsSafe.js";
 
 export interface FileEditSafetyGateAgent {
   readSessionTranscript(

@@ -48,6 +48,15 @@ function isCodingMode(discipline: Discipline | null): boolean {
   return discipline?.lastClassifiedMode === "coding";
 }
 
+function hasCurrentTurnDiffEvidence(evidence: ReturnType<typeof transcriptEvidenceForTurn>): boolean {
+  return evidence.some(
+    (item) =>
+      item.tool === "GitDiff" &&
+      item.isError !== true &&
+      (item.status === undefined || item.status === "ok" || item.status === "success"),
+  );
+}
+
 export function makeCodingVerificationGateHook(
   opts: CodingVerificationGateOptions = {},
 ): RegisteredHook<"beforeCommit"> {
@@ -67,12 +76,13 @@ export function makeCodingVerificationGateHook(
       const transcript = await readTranscript(opts, ctx);
       const evidence = transcriptEvidenceForTurn(transcript, ctx.turnId);
       const classified = classifyEvidence(evidence);
-      if (classified.verification) {
+      const hasDiff = hasCurrentTurnDiffEvidence(evidence);
+      if (classified.verification && hasDiff) {
         ctx.emit({
           type: "rule_check",
           ruleId: "coding-verification-gate",
           verdict: "ok",
-          detail: `coding changes verified by ${classified.tools.join(", ")}`,
+          detail: `coding changes verified by ${classified.tools.join(", ")} with GitDiff evidence`,
         });
         return { action: "continue" };
       }
@@ -86,8 +96,8 @@ export function makeCodingVerificationGateHook(
       return {
         action: "block",
         reason: [
-          "[RETRY:CODING_VERIFICATION] Code files changed in this turn, but no current-turn verification evidence was found.",
-          "Run TestRun with the relevant test/build/lint/typecheck command before claiming completion.",
+          "[RETRY:CODING_VERIFICATION] Code files changed in this turn, but current-turn verification evidence is incomplete.",
+          "Run GitDiff to capture changed-file/diff evidence and TestRun with the relevant test/build/lint/typecheck command before claiming completion.",
           "If verification cannot be run, say that explicitly and report the remaining risk instead of claiming the work is complete.",
         ].join("\n"),
       };

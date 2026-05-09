@@ -75,7 +75,7 @@ describe("pdfDriver", () => {
 
     await writePdfFromBlocks(pdfPath, "한글 보고서", [
       { type: "heading", level: 1, text: "한글 보고서" },
-      { type: "paragraph", text: "내외디스틸러리 투자심사 리포트입니다." },
+      { type: "paragraph", text: "예시 프로젝트 검토 리포트입니다." },
     ]);
 
     const bytes = await fsPromises.readFile(pdfPath);

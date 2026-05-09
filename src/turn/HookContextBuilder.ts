@@ -6,6 +6,7 @@
 import type { Session } from "../Session.js";
 import type { SseWriter } from "../transport/SseWriter.js";
 import type { HookContext, HookPoint } from "../hooks/types.js";
+import { normalizeMemoryMode } from "../util/memoryMode.js";
 
 export function buildHookContext(
   session: Session,
@@ -21,9 +22,13 @@ export function buildHookContext(
     userId: agent.config.userId,
     sessionKey: session.meta.sessionKey,
     turnId,
+    channel: session.meta.channel,
+    memoryMode: normalizeMemoryMode(session.meta.channel?.memoryMode),
     llm: agent.llm,
     agentModel,
     executionContract: session.executionContract,
+    sourceLedger: session.sourceLedger,
+    researchContract: session.researchContract,
     providerHealth: typeof agent.llm.getLastProviderHealth === "function"
       ? agent.llm.getLastProviderHealth()
       : null,

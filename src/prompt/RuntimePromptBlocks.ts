@@ -61,6 +61,16 @@ export const EXECUTION_DISCIPLINE_POLICY = [
   "</execution-discipline-policy>",
 ].join("\n");
 
+export const CODING_SEMANTIC_NAVIGATION_POLICY = [
+  "<coding-semantic-navigation>",
+  "- For TypeScript/JavaScript projects, prefer `CodeIntelligence` before broad text search when changing existing code.",
+  "- Use `CodeIntelligence` action=`definition`, `references`, or `hover` to understand existing symbols before editing.",
+  "- Use `CodeIntelligence` action=`document_symbols` or `workspace_symbols` to map files and exported APIs.",
+  "- Use `CodeSymbolSearch` as the fallback when `CodeIntelligence` cannot load the project or when the code is not TypeScript/JavaScript.",
+  "- After semantic or type-affecting edits, run `CodeDiagnostics`; use `ProjectVerificationPlanner` to choose tests, lint, typecheck, or build commands.",
+  "</coding-semantic-navigation>",
+].join("\n");
+
 export const OUTPUT_RULES_BLOCK = [
   "<output-rules>",
   "CRITICAL: The user can only see your TEXT output, not your thinking.",

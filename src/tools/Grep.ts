@@ -13,6 +13,11 @@ import path from "node:path";
 import type { Tool, ToolContext, ToolResult } from "../Tool.js";
 import { Workspace } from "../storage/Workspace.js";
 import { errorResult } from "../util/toolResult.js";
+import {
+  isIncognitoMemoryMode,
+  isProtectedMemoryPath,
+  protectedMemoryError,
+} from "../util/memoryMode.js";
 
 export interface GrepInput {
   pattern: string;
@@ -69,6 +74,15 @@ export function makeGrepTool(workspaceRoot: string): Tool<GrepInput, GrepOutput>
     },
     async execute(input: GrepInput, ctx: ToolContext): Promise<ToolResult<GrepOutput>> {
       const start = Date.now();
+      const incognito = isIncognitoMemoryMode(ctx.memoryMode);
+      if (incognito && isProtectedMemoryPath(input.path)) {
+        return {
+          status: "permission_denied",
+          errorCode: "incognito_memory_blocked",
+          errorMessage: protectedMemoryError(input.path),
+          durationMs: Date.now() - start,
+        };
+      }
       const ws = ctx.spawnWorkspace ?? defaultWorkspace;
       let base: string;
       try {
@@ -78,7 +92,7 @@ export function makeGrepTool(workspaceRoot: string): Tool<GrepInput, GrepOutput>
       }
       const hasRg = await binaryExists("rg");
       return new Promise<ToolResult<GrepOutput>>((resolve) => {
-        const { binary, args } = buildArgs({ hasRg, input, base });
+        const { binary, args } = buildArgs({ hasRg, input, base, excludeMemory: incognito });
         execFile(binary, args, { maxBuffer: 10 * 1024 * 1024, timeout: 30_000 }, (err, stdout) => {
           // grep/rg return exit code 1 when no matches are found — not
           // an error.
@@ -87,7 +101,7 @@ export function makeGrepTool(workspaceRoot: string): Tool<GrepInput, GrepOutput>
             resolve(errorResult(err, start));
             return;
           }
-          const parsed = parseOutput({ stdout, input, workspaceRoot: ws.root });
+          const parsed = parseOutput({ stdout, input, workspaceRoot: ws.root, excludeMemory: incognito });
           resolve({
             status: "ok",
             output: parsed,
@@ -103,13 +117,23 @@ function buildArgs(opts: {
   hasRg: boolean;
   input: GrepInput;
   base: string;
+  excludeMemory?: boolean;
 }): { binary: string; args: string[] } {
-  const { hasRg, input, base } = opts;
+  const { hasRg, input, base, excludeMemory = false } = opts;
   if (hasRg) {
     const args = ["--no-heading", "--line-number", "--color=never"];
     if (input.caseInsensitive) args.push("-i");
     if (input.filesOnly) args.push("-l");
     if (input.glob) args.push("-g", input.glob);
+    if (excludeMemory) {
+      args.push(
+        "-g", "!memory/**",
+        "-g", "!MEMORY.md",
+        "-g", "!SCRATCHPAD.md",
+        "-g", "!WORKING.md",
+        "-g", "!TASK-QUEUE.md",
+      );
+    }
     args.push(input.pattern, base);
     return { binary: "rg", args };
   }
@@ -125,12 +149,14 @@ function parseOutput(opts: {
   stdout: string;
   input: GrepInput;
   workspaceRoot: string;
+  excludeMemory?: boolean;
 }): GrepOutput {
-  const { stdout, input, workspaceRoot } = opts;
+  const { stdout, input, workspaceRoot, excludeMemory = false } = opts;
   const lines = stdout.split("\n").filter((l) => l.length > 0);
   if (input.filesOnly) {
     const files = lines
       .map((l) => path.relative(workspaceRoot, l))
+      .filter((file) => !excludeMemory || !isProtectedMemoryPath(file))
       .slice(0, MAX_MATCHES);
     return {
       mode: "files_only",
@@ -145,6 +171,7 @@ function parseOutput(opts: {
     const second = l.indexOf(":", first + 1);
     if (first < 0 || second < 0) continue;
     const file = path.relative(workspaceRoot, l.slice(0, first));
+    if (excludeMemory && isProtectedMemoryPath(file)) continue;
     const lineNo = Number.parseInt(l.slice(first + 1, second), 10);
     const text = l.slice(second + 1);
     if (!Number.isFinite(lineNo)) continue;

@@ -109,6 +109,7 @@ export function makePreRefusalVerifierHook(
     // reuse the same cached classification instead of calling LLMs.
     priority: 85,
     blocking: true,
+    failOpen: true,
     handler: async ({ assistantText, retryCount, userMessage }, ctx: HookContext) => {
       try {
         if (!isEnabled()) return { action: "continue" };

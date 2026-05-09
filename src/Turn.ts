@@ -121,6 +121,16 @@ export class TurnInterruptedError extends Error {
   }
 }
 
+class TurnSteerResumeError extends Error {
+  readonly source: string;
+
+  constructor(source: string) {
+    super("user_steer_resume");
+    this.name = "TurnSteerResumeError";
+    this.source = source;
+  }
+}
+
 function normalizeAssistantReplayBlocks(blocks: LLMContentBlock[]): LLMContentBlock[] {
   const toolUseBlocks = blocks.filter((block) => block.type === "tool_use");
   if (toolUseBlocks.length === 0) return blocks;
@@ -186,6 +196,8 @@ export class Turn {
     requestedAt: number;
   } | null = null;
   private readonly interruptController = new AbortController();
+  private activeLlmController: AbortController | null = null;
+  private acceptingSteerInjections = false;
 
   requestInterrupt(
     handoffRequested = false,
@@ -212,6 +224,29 @@ export class Turn {
       source,
     });
     return { status: "accepted", handoffRequested: mergedHandoff };
+  }
+
+  requestSteerResume(source = "api"): { status: "accepted" | "noop" } {
+    if (this.meta.status === "committed" || this.meta.status === "aborted") {
+      return { status: "noop" };
+    }
+    if (this.interruptState) {
+      return { status: "noop" };
+    }
+    const active = this.activeLlmController;
+    if (active && !active.signal.aborted) {
+      active.abort(new TurnSteerResumeError(source));
+    }
+    return { status: "accepted" };
+  }
+
+  canAcceptSteerInjection(): boolean {
+    return (
+      this.acceptingSteerInjections &&
+      this.meta.status !== "committed" &&
+      this.meta.status !== "aborted" &&
+      !this.interruptState
+    );
   }
 
   assertNotInterrupted(): void {
@@ -339,6 +374,7 @@ export class Turn {
 
     try {
       for (let iter = 0; iter < Turn.MAX_ITERATIONS; iter++) {
+        this.acceptingSteerInjections = true;
         this.throwIfInterrupted();
         heartbeat.start(iter);
         if (iter === 0) {
@@ -374,13 +410,29 @@ export class Turn {
           ` turnId=${this.meta.turnId}`,
         );
 
-        const { blocks, stopReason, usage } = await readOneStream(
-          { llm: this.session.agent.llm, model: effectiveModel, sse,
-            abortSignal: this.interruptController.signal,
-            onError: (code, err) => this.emitError(code, err) },
-          systemPrompt, messages, toolDefs,
-          this.readOptions(),
-        );
+        const llmAbort = this.createLlmAbortSignal();
+        let blocks: LLMContentBlock[];
+        let stopReason: Awaited<ReturnType<typeof readOneStream>>["stopReason"];
+        let usage: LLMUsage;
+        try {
+          ({ blocks, stopReason, usage } = await readOneStream(
+            { llm: this.session.agent.llm, model: effectiveModel, sse,
+              abortSignal: llmAbort.signal,
+              onError: (code, err) => this.emitError(code, err) },
+            systemPrompt, messages, toolDefs,
+            this.readOptions(),
+          ));
+        } catch (err) {
+          if (err instanceof TurnSteerResumeError) {
+            this.forceNoThinking = false;
+            this.clearUserVisibleDraftForSteerResume(sse, err.source);
+            iter -= 1;
+            continue;
+          }
+          throw err;
+        } finally {
+          llmAbort.cleanup();
+        }
         // Reset after use — only applies to the single recovery call.
         this.forceNoThinking = false;
         this.recordUsage(usage);
@@ -417,6 +469,7 @@ export class Turn {
         );
 
         if (decision.kind === "finalise") {
+          this.acceptingSteerInjections = false;
           const finalBlocks = this.applyFinalAssistantReplayBlocks(blocks);
           if (!this.meta.stopReason) {
             this.setStopReason(this.recoveryAttempt > 0 ? "max_tokens_recovered" : "end_turn");
@@ -560,6 +613,7 @@ export class Turn {
       this.setStopReason("iteration_limit");
       throw err;
     } finally {
+      this.acceptingSteerInjections = false;
       this.session.setActiveSse(null);
       heartbeat.stop();
       await sessionHeartbeat.stop().catch(() => {});
@@ -603,20 +657,29 @@ export class Turn {
           result.finalText,
           decision.hiddenUserMessage,
         );
+        if (!this.hasVisibleAssistantText()) {
+          const err = new Error(
+            `blocked commit retry produced no visible response after verifier retry: ${result.reason}`,
+          );
+          this.stageAuditEvent("turn_aborted", {
+            reason: "blocked_commit_retry_empty_response",
+            verifierReason: result.reason,
+            attempt,
+          });
+          this.setStopReason("empty_response_retry_exhausted");
+          throw err;
+        }
       } catch (resampleErr) {
         // The previous draft was rejected by a beforeCommit verifier.
         // Never restore it after retry failure: doing so leaks exactly
-        // the response the verifier blocked. Show a truthful runtime
-        // failure placeholder instead; the turn will still abort below.
-        const fallbackText =
-          "A runtime verifier blocked the previous draft, but the correction attempt failed before a valid response could be produced. Please retry.";
+        // the response the verifier blocked. Do not stream a placeholder
+        // either; the terminal turn_failed event lets clients show an error
+        // state without committing a fake assistant answer.
         console.warn(
           `[core-agent] resample failed after blocked commit; clearing blocked draft` +
           ` turnId=${this.meta.turnId}`,
         );
         this.sse.agent({ type: "response_clear" });
-        this.sse.agent({ type: "text_delta", delta: fallbackText });
-        this.emittedAssistantBlocks.push({ type: "text", text: fallbackText });
         throw resampleErr;
       }
     }
@@ -847,6 +910,15 @@ export class Turn {
     throw new Error(`turn exceeded ${Turn.MAX_ITERATIONS} retry tool iterations`);
   }
 
+  private hasVisibleAssistantText(): boolean {
+    return this.emittedAssistantBlocks.some(
+      (block) =>
+        block.type === "text" &&
+        typeof block.text === "string" &&
+        block.text.trim().length > 0,
+    );
+  }
+
   private async recordRetryEvent(
     reason: string,
     attempt: number,
@@ -887,6 +959,34 @@ export class Turn {
       this.interruptState.handoffRequested,
       this.interruptState.source,
     );
+  }
+
+  private createLlmAbortSignal(): {
+    signal: AbortSignal;
+    cleanup: () => void;
+  } {
+    const controller = new AbortController();
+    const interruptSignal = this.interruptController.signal;
+    const abortFromInterrupt = () => {
+      if (!controller.signal.aborted) {
+        controller.abort(interruptSignal.reason);
+      }
+    };
+    if (interruptSignal.aborted) {
+      abortFromInterrupt();
+    } else {
+      interruptSignal.addEventListener("abort", abortFromInterrupt, { once: true });
+    }
+    this.activeLlmController = controller;
+    return {
+      signal: controller.signal,
+      cleanup: () => {
+        interruptSignal.removeEventListener("abort", abortFromInterrupt);
+        if (this.activeLlmController === controller) {
+          this.activeLlmController = null;
+        }
+      },
+    };
   }
 
   private recordUsage(u: LLMUsage): void {
@@ -1022,6 +1122,30 @@ export class Turn {
     sse.agent({ type: "response_clear" });
     console.log(
       `[core-agent] cleared deferred visible draft reason=${reason}` +
+      ` textLen=${removedTextLen} thinkingLen=${removedThinkingLen}` +
+      ` turnId=${this.meta.turnId}`,
+    );
+  }
+
+  private clearUserVisibleDraftForSteerResume(
+    sse: SseWriter,
+    source: string,
+  ): void {
+    let removedTextLen = 0;
+    let removedThinkingLen = 0;
+    for (const block of this.emittedAssistantBlocks) {
+      if (block.type === "text") {
+        removedTextLen += block.text.length;
+      } else if (block.type === "thinking") {
+        removedThinkingLen += block.thinking.length;
+      }
+    }
+    this.emittedAssistantBlocks = this.emittedAssistantBlocks.filter(
+      (block) => block.type !== "text" && block.type !== "thinking",
+    );
+    sse.agent({ type: "response_clear" });
+    console.log(
+      `[core-agent] cleared visible draft for steer resume source=${source}` +
       ` textLen=${removedTextLen} thinkingLen=${removedThinkingLen}` +
       ` turnId=${this.meta.turnId}`,
     );
