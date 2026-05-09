@@ -12089,8 +12089,24 @@ function useRouter() {
 function useParams() {
   return { botId: "local" };
 }
-function Link({ href, children, ...props }) {
-  return /* @__PURE__ */ jsxRuntimeExports.jsx("a", { href, ...props, children });
+function isModifiedEvent(event) {
+  return event.metaKey || event.altKey || event.ctrlKey || event.shiftKey;
+}
+function isLocalHref(href) {
+  return href.startsWith("/") && !href.startsWith("//");
+}
+function Link({ href, children, onClick, target, ...props }) {
+  const handleClick = (event) => {
+    onClick?.(event);
+    if (event.defaultPrevented) return;
+    if (target && target !== "_self") return;
+    if (event.button !== 0 || isModifiedEvent(event)) return;
+    if (!isLocalHref(href)) return;
+    event.preventDefault();
+    window.history.pushState({}, "", href);
+    window.dispatchEvent(new PopStateEvent("popstate"));
+  };
+  return /* @__PURE__ */ jsxRuntimeExports.jsx("a", { href, target, onClick: handleClick, ...props, children });
 }
 var reactDomExports = requireReactDom();
 function useCombinedRefs() {
@@ -30509,7 +30525,7 @@ function parseMarkers(content2) {
 function isImageMimetype(mimetype) {
   return /^image\/(jpeg|png|gif|webp)$/.test(mimetype);
 }
-function formatFileSize(bytes) {
+function formatFileSize$1(bytes) {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
@@ -34107,7 +34123,7 @@ const ChatInput = reactExports.forwardRef(function ChatInput2({
               ] }) }),
               /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex-1 min-w-0", children: [
                 /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-xs text-foreground truncate", children: pf.file.name }),
-                /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-[10px] text-secondary/50", children: formatFileSize(pf.file.size) }),
+                /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-[10px] text-secondary/50", children: formatFileSize$1(pf.file.size) }),
                 uploadStates?.[kbUploadKey(pf.file)] && (() => {
                   const state = uploadStates[kbUploadKey(pf.file)];
                   const isFailed = state?.phase === "failed";
@@ -36165,6 +36181,36 @@ function sessionKeyForChannel(channel) {
   const raw = window.localStorage.getItem(storage.sessionKey)?.trim();
   return raw || defaultSessionKey(channel);
 }
+function decodePathPart(value) {
+  if (!value) return null;
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
+}
+function isDashboardRoute(value) {
+  return value === "overview" || value === "settings" || value === "usage" || value === "skills" || value === "workspace" || value === "knowledge";
+}
+function routeFromPathname(pathname) {
+  const parts = pathname.split("/").filter(Boolean);
+  if (parts[0] !== "dashboard") return "chat";
+  const section = decodePathPart(parts[2] ?? parts[1]);
+  if (section === "chat") return "chat";
+  return isDashboardRoute(section) ? section : "overview";
+}
+function channelFromPathname(pathname) {
+  const parts = pathname.split("/").filter(Boolean);
+  if (parts[0] !== "dashboard" || parts[2] !== "chat") return null;
+  const channel = decodePathPart(parts[3]);
+  return channel ? normalizeChannelName(channel) : null;
+}
+function pathForRoute(route, channel = DEFAULT_CHANNEL) {
+  if (route === "chat") {
+    return `/dashboard/${BOT_ID}/chat/${encodeURIComponent(channel)}`;
+  }
+  return `/dashboard/${BOT_ID}/${route}`;
+}
 function getStored(key, fallback) {
   if (typeof window === "undefined") return fallback;
   return window.localStorage.getItem(key) || fallback;
@@ -36329,15 +36375,489 @@ function shouldScanWorkspaceDirectory(entryPath, depth) {
   const root2 = entryPath.split("/").filter(Boolean)[0] ?? "";
   return EDITABLE_WORKSPACE_ROOTS.has(root2);
 }
+function runtimeItemCount(snapshot, key) {
+  const section = asRecord(snapshot?.[key]);
+  const directCount = asNumber(section.count, Number.NaN);
+  if (Number.isFinite(directCount)) return directCount;
+  const loadedCount = asNumber(section.loadedCount, Number.NaN);
+  if (Number.isFinite(loadedCount)) return loadedCount;
+  return asArray(section.items).length;
+}
+function formatFileSize(bytes) {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 102.4) / 10} KB`;
+  return `${Math.round(bytes / 1024 / 102.4) / 10} MB`;
+}
+function runtimeStatusLabel(status) {
+  if (status === "active") return "active";
+  if (status === "checking") return "checking";
+  if (status === "unavailable") return "offline";
+  return "not checked";
+}
+function DashboardSidebar({
+  activeRoute,
+  runtimeStatus,
+  onNavigate,
+  onRefresh
+}) {
+  const primaryItems = [
+    { route: "chat", label: "Chat" },
+    { route: "overview", label: "Overview" },
+    { route: "settings", label: "Settings" },
+    { route: "usage", label: "Usage" },
+    { route: "skills", label: "Skills" }
+  ];
+  const workspaceItems = [
+    { route: "knowledge", label: "Knowledge" },
+    { route: "workspace", label: "Workspace" }
+  ];
+  const renderItem = ({ route, label }) => {
+    const active = route === activeRoute;
+    return /* @__PURE__ */ jsxRuntimeExports.jsx(
+      "button",
+      {
+        type: "button",
+        onClick: () => onNavigate(route),
+        className: `w-full rounded-xl px-3 py-2 text-left text-sm font-medium transition ${active ? "bg-primary/10 text-primary shadow-[inset_0_0_0_1px_rgba(124,58,237,0.12)]" : "text-secondary hover:bg-black/[0.04] hover:text-foreground"}`,
+        children: label
+      },
+      route
+    );
+  };
+  return /* @__PURE__ */ jsxRuntimeExports.jsxs("aside", { className: "hidden h-screen w-64 shrink-0 border-r border-black/[0.06] bg-gray-50/80 md:flex md:flex-col", children: [
+    /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "border-b border-black/[0.06] px-5 py-5", children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "text-base font-semibold text-foreground", children: BOT_NAME }),
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "mt-1 flex items-center gap-2 text-sm text-secondary", children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsx(
+          "span",
+          {
+            className: `h-2.5 w-2.5 rounded-full ${runtimeStatus === "active" ? "bg-emerald-400" : "bg-gray-300"}`
+          }
+        ),
+        runtimeStatusLabel(runtimeStatus)
+      ] })
+    ] }),
+    /* @__PURE__ */ jsxRuntimeExports.jsxs("nav", { className: "flex-1 overflow-y-auto px-3 py-5", children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "mb-6 space-y-1", children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "px-2 pb-2 text-[11px] font-bold uppercase tracking-[0.12em] text-secondary/60", children: "General" }),
+        primaryItems.map(renderItem)
+      ] }),
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "space-y-1", children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "px-2 pb-2 text-[11px] font-bold uppercase tracking-[0.12em] text-secondary/60", children: "Local Runtime" }),
+        workspaceItems.map(renderItem)
+      ] })
+    ] }),
+    /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "border-t border-black/[0.06] p-3 space-y-1", children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsx(
+        "button",
+        {
+          type: "button",
+          onClick: onRefresh,
+          className: "w-full rounded-lg px-2 py-1.5 text-left text-sm text-secondary transition hover:bg-black/[0.04] hover:text-foreground",
+          children: "Refresh"
+        }
+      ),
+      /* @__PURE__ */ jsxRuntimeExports.jsx(
+        "button",
+        {
+          type: "button",
+          onClick: () => onNavigate("chat"),
+          className: "w-full rounded-lg px-2 py-1.5 text-left text-sm text-secondary transition hover:bg-black/[0.04] hover:text-foreground",
+          children: "Back to chat"
+        }
+      )
+    ] })
+  ] });
+}
+function DashboardCard({
+  title,
+  children,
+  action
+}) {
+  return /* @__PURE__ */ jsxRuntimeExports.jsxs("section", { className: "rounded-2xl border border-black/[0.08] bg-white p-5 shadow-[0_12px_30px_rgba(15,23,42,0.04)]", children: [
+    /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "mb-4 flex items-center justify-between gap-3", children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsx("h2", { className: "text-base font-semibold text-foreground", children: title }),
+      action
+    ] }),
+    children
+  ] });
+}
+function MetricTile({ label, value }) {
+  return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "rounded-xl bg-gray-50 px-4 py-3", children: [
+    /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "text-xs font-medium uppercase tracking-[0.08em] text-secondary/70", children: label }),
+    /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "mt-1 text-2xl font-semibold text-foreground", children: value })
+  ] });
+}
+function OverviewDashboard({
+  runtimeSnapshot,
+  runtimeStatus,
+  kbCollections,
+  workspaceFiles,
+  onNavigate
+}) {
+  const docCount = kbCollections.reduce((sum, collection) => sum + collection.docs.length, 0);
+  return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "grid gap-5 xl:grid-cols-[minmax(0,1fr)_360px]", children: [
+    /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "space-y-5", children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsx(DashboardCard, { title: "Agent", children: /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex flex-col gap-5 sm:flex-row sm:items-start sm:justify-between", children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center gap-3", children: [
+            /* @__PURE__ */ jsxRuntimeExports.jsx(
+              "span",
+              {
+                className: `h-2.5 w-2.5 rounded-full ${runtimeStatus === "active" ? "bg-emerald-400" : "bg-gray-300"}`
+              }
+            ),
+            /* @__PURE__ */ jsxRuntimeExports.jsx("h3", { className: "text-xl font-semibold text-foreground", children: BOT_NAME })
+          ] }),
+          /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "mt-2 max-w-2xl text-sm leading-6 text-secondary", children: "Self-hosted Magi runtime with local chat, workspace knowledge, runtime proof, and editable operator files." })
+        ] }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx(
+          "button",
+          {
+            type: "button",
+            onClick: () => onNavigate("chat"),
+            className: "rounded-xl bg-primary px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-primary/90",
+            children: "Open Chat"
+          }
+        )
+      ] }) }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx(DashboardCard, { title: "Runtime", children: /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "grid gap-3 sm:grid-cols-2 lg:grid-cols-4", children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsx(MetricTile, { label: "Sessions", value: runtimeItemCount(runtimeSnapshot, "sessions") }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx(MetricTile, { label: "Tasks", value: runtimeItemCount(runtimeSnapshot, "tasks") }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx(MetricTile, { label: "Schedules", value: runtimeItemCount(runtimeSnapshot, "crons") }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx(MetricTile, { label: "Artifacts", value: runtimeItemCount(runtimeSnapshot, "artifacts") })
+      ] }) })
+    ] }),
+    /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "space-y-5", children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsx(DashboardCard, { title: "Local Assets", children: /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "grid gap-3", children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsx(MetricTile, { label: "KB Docs", value: docCount }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx(MetricTile, { label: "Workspace Files", value: workspaceFiles.length }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx(MetricTile, { label: "Skills", value: runtimeItemCount(runtimeSnapshot, "skills") })
+      ] }) }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx(DashboardCard, { title: "Next Setup", children: /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "space-y-2 text-sm text-secondary", children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", onClick: () => onNavigate("settings"), className: "block text-primary", children: "Configure local provider and connection" }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", onClick: () => onNavigate("knowledge"), className: "block text-primary", children: "Add workspace knowledge" }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", onClick: () => onNavigate("workspace"), className: "block text-primary", children: "Edit system prompts, contracts, harnesses, hooks, and memory" })
+      ] }) })
+    ] })
+  ] });
+}
+function SettingsDashboard({
+  agentUrl,
+  token,
+  runtimeStatus,
+  setAgentUrl,
+  setToken,
+  onSaveConnection,
+  onCheckRuntime
+}) {
+  return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "max-w-3xl space-y-5", children: [
+    /* @__PURE__ */ jsxRuntimeExports.jsx(DashboardCard, { title: "Model", children: /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "space-y-4", children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("label", { className: "block", children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "mb-2 block text-sm font-medium text-secondary", children: "Model" }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "rounded-xl border border-black/[0.08] bg-gray-50 px-4 py-3 text-sm font-medium text-foreground", children: "Configured LLM" })
+      ] }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-sm leading-6 text-secondary", children: "The open-source app uses the provider configured in the local runtime. Hosted smart routers and platform credit billing are intentionally not exposed." })
+    ] }) }),
+    /* @__PURE__ */ jsxRuntimeExports.jsx(
+      DashboardCard,
+      {
+        title: "Connection",
+        action: /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "rounded-full bg-primary/10 px-3 py-1 text-xs font-semibold text-primary", children: runtimeStatusLabel(runtimeStatus) }),
+        children: /* @__PURE__ */ jsxRuntimeExports.jsxs(
+          "form",
+          {
+            className: "space-y-4",
+            onSubmit: (event) => {
+              event.preventDefault();
+              onSaveConnection();
+            },
+            children: [
+              /* @__PURE__ */ jsxRuntimeExports.jsxs("label", { className: "block", children: [
+                /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "mb-2 block text-sm font-medium text-secondary", children: "Agent URL" }),
+                /* @__PURE__ */ jsxRuntimeExports.jsx(
+                  "input",
+                  {
+                    value: agentUrl,
+                    onChange: (event) => setAgentUrl(event.target.value),
+                    className: "w-full rounded-xl border border-black/[0.08] bg-white px-4 py-3 text-sm text-foreground outline-none transition focus:border-primary/40 focus:ring-4 focus:ring-primary/10"
+                  }
+                )
+              ] }),
+              /* @__PURE__ */ jsxRuntimeExports.jsxs("label", { className: "block", children: [
+                /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "mb-2 block text-sm font-medium text-secondary", children: "Server token" }),
+                /* @__PURE__ */ jsxRuntimeExports.jsx(
+                  "input",
+                  {
+                    value: token,
+                    onChange: (event) => setToken(event.target.value),
+                    type: "password",
+                    className: "w-full rounded-xl border border-black/[0.08] bg-white px-4 py-3 text-sm text-foreground outline-none transition focus:border-primary/40 focus:ring-4 focus:ring-primary/10"
+                  }
+                )
+              ] }),
+              /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex flex-wrap gap-3", children: [
+                /* @__PURE__ */ jsxRuntimeExports.jsx(
+                  "button",
+                  {
+                    type: "submit",
+                    className: "rounded-xl bg-primary px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-primary/90",
+                    children: "Save Settings"
+                  }
+                ),
+                /* @__PURE__ */ jsxRuntimeExports.jsx(
+                  "button",
+                  {
+                    type: "button",
+                    onClick: onCheckRuntime,
+                    className: "rounded-xl bg-gray-100 px-4 py-2 text-sm font-semibold text-foreground transition hover:bg-gray-200",
+                    children: "Check Runtime"
+                  }
+                )
+              ] })
+            ]
+          }
+        )
+      }
+    )
+  ] });
+}
+function KnowledgeDashboard({
+  kbCollections,
+  loading,
+  refreshing,
+  onRefresh
+}) {
+  const docs2 = kbCollections.flatMap(
+    (collection) => collection.docs.map((doc) => ({ ...doc, collectionName: collection.name }))
+  );
+  return /* @__PURE__ */ jsxRuntimeExports.jsx(
+    DashboardCard,
+    {
+      title: "Knowledge",
+      action: /* @__PURE__ */ jsxRuntimeExports.jsx(
+        "button",
+        {
+          type: "button",
+          onClick: onRefresh,
+          disabled: refreshing,
+          className: "rounded-xl bg-gray-100 px-3 py-1.5 text-sm font-semibold text-foreground transition hover:bg-gray-200 disabled:opacity-50",
+          children: refreshing ? "Refreshing..." : "Refresh"
+        }
+      ),
+      children: loading ? /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "rounded-xl border border-dashed border-black/[0.08] px-4 py-8 text-center text-sm text-secondary", children: "Loading knowledge..." }) : docs2.length === 0 ? /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "rounded-xl border border-dashed border-black/[0.08] px-4 py-8 text-center text-sm text-secondary", children: "No local KB documents yet." }) : /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "divide-y divide-black/[0.06] overflow-hidden rounded-xl border border-black/[0.08]", children: docs2.map((doc) => /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "px-4 py-3", children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "text-sm font-semibold text-foreground", children: doc.filename }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "mt-1 text-xs text-secondary", children: doc.collectionName })
+      ] }, `${doc.collectionName}:${doc.id}`)) })
+    }
+  );
+}
+function WorkspaceDashboard({
+  workspaceFiles,
+  loading,
+  refreshing,
+  onRefresh
+}) {
+  return /* @__PURE__ */ jsxRuntimeExports.jsx(
+    DashboardCard,
+    {
+      title: "Workspace",
+      action: /* @__PURE__ */ jsxRuntimeExports.jsx(
+        "button",
+        {
+          type: "button",
+          onClick: onRefresh,
+          disabled: refreshing,
+          className: "rounded-xl bg-gray-100 px-3 py-1.5 text-sm font-semibold text-foreground transition hover:bg-gray-200 disabled:opacity-50",
+          children: refreshing ? "Refreshing..." : "Refresh"
+        }
+      ),
+      children: loading ? /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "rounded-xl border border-dashed border-black/[0.08] px-4 py-8 text-center text-sm text-secondary", children: "Loading workspace..." }) : workspaceFiles.length === 0 ? /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "rounded-xl border border-dashed border-black/[0.08] px-4 py-8 text-center text-sm text-secondary", children: "No editable workspace files found." }) : /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "divide-y divide-black/[0.06] overflow-hidden rounded-xl border border-black/[0.08]", children: workspaceFiles.slice(0, 80).map((file) => /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center justify-between gap-4 px-4 py-3", children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "min-w-0", children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "truncate text-sm font-semibold text-foreground", children: file.path }),
+          file.modifiedAt && /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "mt-1 text-xs text-secondary", children: file.modifiedAt })
+        ] }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "shrink-0 text-xs text-secondary", children: formatFileSize(file.size ?? 0) })
+      ] }, file.path)) })
+    }
+  );
+}
+function SkillsDashboard({
+  skillsSnapshot,
+  loading,
+  onRefresh
+}) {
+  const loaded = asArray(skillsSnapshot?.loaded);
+  const hooks = asArray(skillsSnapshot?.runtimeHooks);
+  const issues = asArray(skillsSnapshot?.issues);
+  return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "grid gap-5 lg:grid-cols-2", children: [
+    /* @__PURE__ */ jsxRuntimeExports.jsx(
+      DashboardCard,
+      {
+        title: "Skills",
+        action: /* @__PURE__ */ jsxRuntimeExports.jsx(
+          "button",
+          {
+            type: "button",
+            onClick: onRefresh,
+            className: "rounded-xl bg-gray-100 px-3 py-1.5 text-sm font-semibold text-foreground transition hover:bg-gray-200",
+            children: "Reload"
+          }
+        ),
+        children: loading ? /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "text-sm text-secondary", children: "Loading skills..." }) : loaded.length === 0 ? /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "text-sm text-secondary", children: "No skills loaded." }) : /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "space-y-2", children: loaded.map((skill, index2) => /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "rounded-xl bg-gray-50 px-4 py-3", children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "text-sm font-semibold text-foreground", children: asString(skill.name, `skill-${index2 + 1}`) }),
+          asString(skill.path) && /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "mt-1 truncate text-xs text-secondary", children: asString(skill.path) })
+        ] }, asString(skill.name, `skill-${index2}`))) })
+      }
+    ),
+    /* @__PURE__ */ jsxRuntimeExports.jsx(DashboardCard, { title: "Runtime Hooks", children: /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "space-y-2", children: [
+      hooks.length === 0 ? /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "text-sm text-secondary", children: "No runtime hooks reported." }) : hooks.map((hook, index2) => /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "rounded-xl bg-gray-50 px-4 py-3 text-sm font-semibold text-foreground", children: asString(hook.name, `hook-${index2 + 1}`) }, asString(hook.name, `hook-${index2}`))),
+      issues.length > 0 && /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "rounded-xl bg-red-50 px-4 py-3 text-sm text-red-500", children: [
+        issues.length,
+        " skill issue",
+        issues.length === 1 ? "" : "s",
+        " reported."
+      ] })
+    ] }) })
+  ] });
+}
+function UsageDashboard({ runtimeSnapshot }) {
+  return /* @__PURE__ */ jsxRuntimeExports.jsxs(DashboardCard, { title: "Usage", children: [
+    /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "grid gap-3 sm:grid-cols-2 lg:grid-cols-4", children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsx(MetricTile, { label: "Sessions", value: runtimeItemCount(runtimeSnapshot, "sessions") }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx(MetricTile, { label: "Tasks", value: runtimeItemCount(runtimeSnapshot, "tasks") }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx(MetricTile, { label: "Tools", value: runtimeItemCount(runtimeSnapshot, "tools") }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx(MetricTile, { label: "Artifacts", value: runtimeItemCount(runtimeSnapshot, "artifacts") })
+    ] }),
+    /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "mt-5 text-sm leading-6 text-secondary", children: "Self-hosted Magi does not meter platform credits. Model usage is controlled by the local provider configuration and any provider-side billing you attach." })
+  ] });
+}
+function LocalDashboardShell({
+  route,
+  runtimeSnapshot,
+  runtimeStatus,
+  skillsSnapshot,
+  skillsLoading,
+  agentUrl,
+  token,
+  kbCollections,
+  kbLoading,
+  kbRefreshing,
+  workspaceFiles,
+  workspaceLoading,
+  workspaceRefreshing,
+  setAgentUrl,
+  setToken,
+  onNavigate,
+  onRefreshAll,
+  onRefreshKnowledge,
+  onRefreshWorkspace,
+  onRefreshSkills,
+  onSaveConnection,
+  onCheckRuntime
+}) {
+  const titles = {
+    overview: "Dashboard",
+    settings: "Settings",
+    usage: "Usage",
+    skills: "Skills",
+    workspace: "Workspace",
+    knowledge: "Knowledge"
+  };
+  return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex h-full min-w-0 flex-1 bg-background", children: [
+    /* @__PURE__ */ jsxRuntimeExports.jsx(
+      DashboardSidebar,
+      {
+        activeRoute: route,
+        runtimeStatus,
+        onNavigate,
+        onRefresh: onRefreshAll
+      }
+    ),
+    /* @__PURE__ */ jsxRuntimeExports.jsxs("main", { className: "flex min-w-0 flex-1 flex-col", children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("header", { className: "flex min-h-[64px] items-center justify-between gap-4 border-b border-black/[0.06] px-5 md:px-8", children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsx("h1", { className: "text-xl font-semibold text-foreground", children: titles[route] }),
+          /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "mt-1 text-sm text-secondary", children: "Local Magi runtime, provider, knowledge, and operator files." })
+        ] }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx(
+          "button",
+          {
+            type: "button",
+            onClick: () => onNavigate("chat"),
+            className: "rounded-xl bg-gray-100 px-4 py-2 text-sm font-semibold text-foreground transition hover:bg-gray-200",
+            children: "Open Chat"
+          }
+        )
+      ] }),
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "min-h-0 flex-1 overflow-y-auto px-5 py-6 md:px-8", children: [
+        route === "overview" && /* @__PURE__ */ jsxRuntimeExports.jsx(
+          OverviewDashboard,
+          {
+            runtimeSnapshot,
+            runtimeStatus,
+            kbCollections,
+            workspaceFiles,
+            onNavigate
+          }
+        ),
+        route === "settings" && /* @__PURE__ */ jsxRuntimeExports.jsx(
+          SettingsDashboard,
+          {
+            agentUrl,
+            token,
+            runtimeStatus,
+            setAgentUrl,
+            setToken,
+            onSaveConnection,
+            onCheckRuntime
+          }
+        ),
+        route === "usage" && /* @__PURE__ */ jsxRuntimeExports.jsx(UsageDashboard, { runtimeSnapshot }),
+        route === "skills" && /* @__PURE__ */ jsxRuntimeExports.jsx(
+          SkillsDashboard,
+          {
+            skillsSnapshot,
+            loading: skillsLoading,
+            onRefresh: onRefreshSkills
+          }
+        ),
+        route === "knowledge" && /* @__PURE__ */ jsxRuntimeExports.jsx(
+          KnowledgeDashboard,
+          {
+            kbCollections,
+            loading: kbLoading,
+            refreshing: kbRefreshing,
+            onRefresh: onRefreshKnowledge
+          }
+        ),
+        route === "workspace" && /* @__PURE__ */ jsxRuntimeExports.jsx(
+          WorkspaceDashboard,
+          {
+            workspaceFiles,
+            loading: workspaceLoading,
+            refreshing: workspaceRefreshing,
+            onRefresh: onRefreshWorkspace
+          }
+        )
+      ] })
+    ] })
+  ] });
+}
 function App() {
   const store = useChatStore();
   const chatMessagesRef = reactExports.useRef(null);
   const chatInputRef = reactExports.useRef(null);
   const sawAgentEventRef = reactExports.useRef(false);
+  const [appRoute, setAppRoute] = reactExports.useState(() => routeFromPathname(window.location.pathname));
   const [agentUrl, setAgentUrl] = reactExports.useState(() => getStored(storage.agentUrl, window.location.origin));
   const [token, setToken] = reactExports.useState(() => getStored(storage.token, ""));
   const [editing, setEditing] = reactExports.useState(false);
   const [refreshing, setRefreshing] = reactExports.useState(false);
+  const [runtimeStatus, setRuntimeStatus] = reactExports.useState("not_checked");
+  const [runtimeSnapshot, setRuntimeSnapshot] = reactExports.useState(null);
+  const [skillsSnapshot, setSkillsSnapshot] = reactExports.useState(null);
+  const [skillsLoading, setSkillsLoading] = reactExports.useState(true);
   const [sidebarOpen, setSidebarOpen] = reactExports.useState(false);
   const [customCategories, setCustomCategories] = reactExports.useState([]);
   const [selectedKbDocs, setSelectedKbDocs] = reactExports.useState([]);
@@ -36419,6 +36939,28 @@ function App() {
     },
     [authHeaders, normalizedBase]
   );
+  const refreshRuntime = reactExports.useCallback(async () => {
+    setRuntimeStatus("checking");
+    try {
+      const payload = await getJson("/v1/app/runtime");
+      setRuntimeSnapshot(payload);
+      setRuntimeStatus("active");
+    } catch {
+      setRuntimeSnapshot(null);
+      setRuntimeStatus("unavailable");
+    }
+  }, [getJson]);
+  const refreshSkills = reactExports.useCallback(async () => {
+    setSkillsLoading(true);
+    try {
+      const payload = await getJson("/v1/app/skills");
+      setSkillsSnapshot(payload);
+    } catch {
+      setSkillsSnapshot(null);
+    } finally {
+      setSkillsLoading(false);
+    }
+  }, [getJson]);
   const refreshKnowledge = reactExports.useCallback(async () => {
     setKbRefreshing(true);
     try {
@@ -36474,10 +37016,37 @@ function App() {
   const refreshChannels = reactExports.useCallback(() => {
     setRefreshing(true);
     store.setChannels(store.channels.length > 0 ? store.channels : [defaultChannel()], { botId: BOT_ID });
-    void Promise.allSettled([refreshKnowledge(), refreshWorkspace()]).finally(() => {
+    void Promise.allSettled([refreshRuntime(), refreshKnowledge(), refreshWorkspace(), refreshSkills()]).finally(() => {
       window.setTimeout(() => setRefreshing(false), 300);
     });
-  }, [refreshKnowledge, refreshWorkspace, store]);
+  }, [refreshKnowledge, refreshRuntime, refreshSkills, refreshWorkspace, store]);
+  const refreshDashboardData = reactExports.useCallback(() => {
+    setRefreshing(true);
+    void Promise.allSettled([refreshRuntime(), refreshKnowledge(), refreshWorkspace(), refreshSkills()]).finally(() => {
+      window.setTimeout(() => setRefreshing(false), 300);
+    });
+  }, [refreshKnowledge, refreshRuntime, refreshSkills, refreshWorkspace]);
+  const navigateToRoute = reactExports.useCallback(
+    (route, channel = useChatStore.getState().activeChannel || DEFAULT_CHANNEL) => {
+      if (route === "chat") {
+        store.setActiveChannel(channel);
+      }
+      window.history.pushState({}, "", pathForRoute(route, channel));
+      window.dispatchEvent(new PopStateEvent("popstate"));
+      setAppRoute(route);
+    },
+    [store]
+  );
+  const handleSaveConnection = reactExports.useCallback(() => {
+    const nextAgentUrl = normalizeAgentUrl(agentUrl);
+    const nextToken = token.trim();
+    setAgentUrl(nextAgentUrl);
+    setToken(nextToken);
+    window.localStorage.setItem(storage.agentUrl, nextAgentUrl);
+    if (nextToken) window.localStorage.setItem(storage.token, nextToken);
+    else window.localStorage.removeItem(storage.token);
+    void refreshRuntime();
+  }, [agentUrl, refreshRuntime, token]);
   reactExports.useEffect(() => {
     store.setBotId(BOT_ID);
     store.setChannels([defaultChannel()], { botId: BOT_ID });
@@ -36494,7 +37063,20 @@ function App() {
       }
     }).catch(() => {
     });
-    void Promise.allSettled([refreshKnowledge(), refreshWorkspace()]);
+    void Promise.allSettled([refreshRuntime(), refreshKnowledge(), refreshWorkspace(), refreshSkills()]);
+  }, []);
+  reactExports.useEffect(() => {
+    const syncRoute = () => {
+      const nextRoute = routeFromPathname(window.location.pathname);
+      const nextChannel = channelFromPathname(window.location.pathname);
+      setAppRoute((current) => current === nextRoute ? current : nextRoute);
+      if (nextChannel && useChatStore.getState().activeChannel !== nextChannel) {
+        useChatStore.getState().setActiveChannel(nextChannel);
+      }
+    };
+    syncRoute();
+    window.addEventListener("popstate", syncRoute);
+    return () => window.removeEventListener("popstate", syncRoute);
   }, []);
   reactExports.useEffect(() => {
     if (!channelState.streaming) setStreamingComposerMode("queue");
@@ -37034,6 +37616,35 @@ function App() {
       onModelSelectionChange: handleModelSelectionChange
     }
   );
+  if (appRoute !== "chat") {
+    return /* @__PURE__ */ jsxRuntimeExports.jsx(
+      LocalDashboardShell,
+      {
+        route: appRoute,
+        runtimeSnapshot,
+        runtimeStatus,
+        skillsSnapshot,
+        skillsLoading,
+        agentUrl,
+        token,
+        kbCollections,
+        kbLoading,
+        kbRefreshing,
+        workspaceFiles,
+        workspaceLoading,
+        workspaceRefreshing,
+        setAgentUrl,
+        setToken,
+        onNavigate: navigateToRoute,
+        onRefreshAll: refreshDashboardData,
+        onRefreshKnowledge: () => void refreshKnowledge(),
+        onRefreshWorkspace: () => void refreshWorkspace(),
+        onRefreshSkills: () => void refreshSkills(),
+        onSaveConnection: handleSaveConnection,
+        onCheckRuntime: () => void refreshRuntime()
+      }
+    );
+  }
   return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex h-full bg-background", children: [
     /* @__PURE__ */ jsxRuntimeExports.jsx(
       ChatSidebar,
@@ -37049,7 +37660,7 @@ function App() {
         customCategories,
         refreshing,
         mobileOpen: sidebarOpen,
-        onChannelSelect: (name2) => store.setActiveChannel(name2),
+        onChannelSelect: (name2) => navigateToRoute("chat", name2),
         onDeleteChannel: handleDeleteChannel,
         onCreateChannel: handleCreateChannel,
         onCreateCategory: handleCreateCategory,
@@ -37119,9 +37730,10 @@ function App() {
               }
             ),
             /* @__PURE__ */ jsxRuntimeExports.jsx(
-              "a",
+              "button",
               {
-                href: "/dashboard",
+                type: "button",
+                onClick: () => navigateToRoute("overview"),
                 className: "md:hidden p-1.5 text-secondary/60 hover:text-foreground rounded-xl hover:bg-black/[0.04] transition-all duration-200",
                 "aria-label": "Dashboard",
                 children: /* @__PURE__ */ jsxRuntimeExports.jsx("svg", { width: "18", height: "18", viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: "1.5", children: /* @__PURE__ */ jsxRuntimeExports.jsx("path", { strokeLinecap: "round", strokeLinejoin: "round", d: "M10.5 6h9.75M10.5 6a1.5 1.5 0 11-3 0m3 0a1.5 1.5 0 10-3 0M3.75 6H7.5m3 12h9.75m-9.75 0a1.5 1.5 0 01-3 0m3 0a1.5 1.5 0 00-3 0m-3.75 0H7.5m9-6h3.75m-3.75 0a1.5 1.5 0 01-3 0m3 0a1.5 1.5 0 00-3 0m-9.75 0h9.75" }) })

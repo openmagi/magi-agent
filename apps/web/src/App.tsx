@@ -5,6 +5,7 @@ import {
   useRef,
   useState,
   type DragEvent,
+  type ReactNode,
 } from "react";
 import { ChatSidebar } from "@/components/chat/chat-sidebar";
 import { ChatMessages, type ChatMessagesHandle } from "@/components/chat/chat-messages";
@@ -80,6 +81,9 @@ const storage = {
 
 type JsonRecord = Record<string, unknown>;
 type RuntimePhase = NonNullable<ChannelState["turnPhase"]>;
+type AppRoute = "chat" | "overview" | "settings" | "usage" | "skills" | "workspace" | "knowledge";
+type DashboardRoute = Exclude<AppRoute, "chat">;
+type RuntimeCheckStatus = "not_checked" | "checking" | "active" | "unavailable";
 
 interface AppBootstrap {
   agentUrl?: string;
@@ -143,6 +147,48 @@ function defaultSessionKey(channel: string): string {
 function sessionKeyForChannel(channel: string): string {
   const raw = window.localStorage.getItem(storage.sessionKey)?.trim();
   return raw || defaultSessionKey(channel);
+}
+
+function decodePathPart(value: string | undefined): string | null {
+  if (!value) return null;
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
+}
+
+function isDashboardRoute(value: string | null): value is DashboardRoute {
+  return (
+    value === "overview" ||
+    value === "settings" ||
+    value === "usage" ||
+    value === "skills" ||
+    value === "workspace" ||
+    value === "knowledge"
+  );
+}
+
+function routeFromPathname(pathname: string): AppRoute {
+  const parts = pathname.split("/").filter(Boolean);
+  if (parts[0] !== "dashboard") return "chat";
+  const section = decodePathPart(parts[2] ?? parts[1]);
+  if (section === "chat") return "chat";
+  return isDashboardRoute(section) ? section : "overview";
+}
+
+function channelFromPathname(pathname: string): string | null {
+  const parts = pathname.split("/").filter(Boolean);
+  if (parts[0] !== "dashboard" || parts[2] !== "chat") return null;
+  const channel = decodePathPart(parts[3]);
+  return channel ? normalizeChannelName(channel) : null;
+}
+
+function pathForRoute(route: AppRoute, channel = DEFAULT_CHANNEL): string {
+  if (route === "chat") {
+    return `/dashboard/${BOT_ID}/chat/${encodeURIComponent(channel)}`;
+  }
+  return `/dashboard/${BOT_ID}/${route}`;
 }
 
 function getStored(key: string, fallback: string): string {
@@ -386,15 +432,636 @@ function shouldScanWorkspaceDirectory(entryPath: string, depth: number): boolean
   return EDITABLE_WORKSPACE_ROOTS.has(root);
 }
 
+function runtimeItemCount(snapshot: JsonRecord | null, key: string): number {
+  const section = asRecord(snapshot?.[key]);
+  const directCount = asNumber(section.count, Number.NaN);
+  if (Number.isFinite(directCount)) return directCount;
+  const loadedCount = asNumber(section.loadedCount, Number.NaN);
+  if (Number.isFinite(loadedCount)) return loadedCount;
+  return asArray(section.items).length;
+}
+
+function formatFileSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 102.4) / 10} KB`;
+  return `${Math.round(bytes / 1024 / 102.4) / 10} MB`;
+}
+
+function runtimeStatusLabel(status: RuntimeCheckStatus): string {
+  if (status === "active") return "active";
+  if (status === "checking") return "checking";
+  if (status === "unavailable") return "offline";
+  return "not checked";
+}
+
+function DashboardSidebar({
+  activeRoute,
+  runtimeStatus,
+  onNavigate,
+  onRefresh,
+}: {
+  activeRoute: DashboardRoute;
+  runtimeStatus: RuntimeCheckStatus;
+  onNavigate: (route: AppRoute) => void;
+  onRefresh: () => void;
+}) {
+  const primaryItems: Array<{ route: AppRoute; label: string }> = [
+    { route: "chat", label: "Chat" },
+    { route: "overview", label: "Overview" },
+    { route: "settings", label: "Settings" },
+    { route: "usage", label: "Usage" },
+    { route: "skills", label: "Skills" },
+  ];
+  const workspaceItems: Array<{ route: AppRoute; label: string }> = [
+    { route: "knowledge", label: "Knowledge" },
+    { route: "workspace", label: "Workspace" },
+  ];
+
+  const renderItem = ({ route, label }: { route: AppRoute; label: string }) => {
+    const active = route === activeRoute;
+    return (
+      <button
+        key={route}
+        type="button"
+        onClick={() => onNavigate(route)}
+        className={`w-full rounded-xl px-3 py-2 text-left text-sm font-medium transition ${
+          active
+            ? "bg-primary/10 text-primary shadow-[inset_0_0_0_1px_rgba(124,58,237,0.12)]"
+            : "text-secondary hover:bg-black/[0.04] hover:text-foreground"
+        }`}
+      >
+        {label}
+      </button>
+    );
+  };
+
+  return (
+    <aside className="hidden h-screen w-64 shrink-0 border-r border-black/[0.06] bg-gray-50/80 md:flex md:flex-col">
+      <div className="border-b border-black/[0.06] px-5 py-5">
+        <div className="text-base font-semibold text-foreground">{BOT_NAME}</div>
+        <div className="mt-1 flex items-center gap-2 text-sm text-secondary">
+          <span
+            className={`h-2.5 w-2.5 rounded-full ${
+              runtimeStatus === "active" ? "bg-emerald-400" : "bg-gray-300"
+            }`}
+          />
+          {runtimeStatusLabel(runtimeStatus)}
+        </div>
+      </div>
+      <nav className="flex-1 overflow-y-auto px-3 py-5">
+        <div className="mb-6 space-y-1">
+          <div className="px-2 pb-2 text-[11px] font-bold uppercase tracking-[0.12em] text-secondary/60">
+            General
+          </div>
+          {primaryItems.map(renderItem)}
+        </div>
+        <div className="space-y-1">
+          <div className="px-2 pb-2 text-[11px] font-bold uppercase tracking-[0.12em] text-secondary/60">
+            Local Runtime
+          </div>
+          {workspaceItems.map(renderItem)}
+        </div>
+      </nav>
+      <div className="border-t border-black/[0.06] p-3 space-y-1">
+        <button
+          type="button"
+          onClick={onRefresh}
+          className="w-full rounded-lg px-2 py-1.5 text-left text-sm text-secondary transition hover:bg-black/[0.04] hover:text-foreground"
+        >
+          Refresh
+        </button>
+        <button
+          type="button"
+          onClick={() => onNavigate("chat")}
+          className="w-full rounded-lg px-2 py-1.5 text-left text-sm text-secondary transition hover:bg-black/[0.04] hover:text-foreground"
+        >
+          Back to chat
+        </button>
+      </div>
+    </aside>
+  );
+}
+
+function DashboardCard({
+  title,
+  children,
+  action,
+}: {
+  title: string;
+  children: ReactNode;
+  action?: ReactNode;
+}) {
+  return (
+    <section className="rounded-2xl border border-black/[0.08] bg-white p-5 shadow-[0_12px_30px_rgba(15,23,42,0.04)]">
+      <div className="mb-4 flex items-center justify-between gap-3">
+        <h2 className="text-base font-semibold text-foreground">{title}</h2>
+        {action}
+      </div>
+      {children}
+    </section>
+  );
+}
+
+function MetricTile({ label, value }: { label: string; value: string | number }) {
+  return (
+    <div className="rounded-xl bg-gray-50 px-4 py-3">
+      <div className="text-xs font-medium uppercase tracking-[0.08em] text-secondary/70">{label}</div>
+      <div className="mt-1 text-2xl font-semibold text-foreground">{value}</div>
+    </div>
+  );
+}
+
+function OverviewDashboard({
+  runtimeSnapshot,
+  runtimeStatus,
+  kbCollections,
+  workspaceFiles,
+  onNavigate,
+}: {
+  runtimeSnapshot: JsonRecord | null;
+  runtimeStatus: RuntimeCheckStatus;
+  kbCollections: KbCollectionWithDocs[];
+  workspaceFiles: WorkspaceFileEntry[];
+  onNavigate: (route: AppRoute) => void;
+}) {
+  const docCount = kbCollections.reduce((sum, collection) => sum + collection.docs.length, 0);
+  return (
+    <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_360px]">
+      <div className="space-y-5">
+        <DashboardCard title="Agent">
+          <div className="flex flex-col gap-5 sm:flex-row sm:items-start sm:justify-between">
+            <div>
+              <div className="flex items-center gap-3">
+                <span
+                  className={`h-2.5 w-2.5 rounded-full ${
+                    runtimeStatus === "active" ? "bg-emerald-400" : "bg-gray-300"
+                  }`}
+                />
+                <h3 className="text-xl font-semibold text-foreground">{BOT_NAME}</h3>
+              </div>
+              <p className="mt-2 max-w-2xl text-sm leading-6 text-secondary">
+                Self-hosted Magi runtime with local chat, workspace knowledge, runtime proof, and
+                editable operator files.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => onNavigate("chat")}
+              className="rounded-xl bg-primary px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-primary/90"
+            >
+              Open Chat
+            </button>
+          </div>
+        </DashboardCard>
+
+        <DashboardCard title="Runtime">
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            <MetricTile label="Sessions" value={runtimeItemCount(runtimeSnapshot, "sessions")} />
+            <MetricTile label="Tasks" value={runtimeItemCount(runtimeSnapshot, "tasks")} />
+            <MetricTile label="Schedules" value={runtimeItemCount(runtimeSnapshot, "crons")} />
+            <MetricTile label="Artifacts" value={runtimeItemCount(runtimeSnapshot, "artifacts")} />
+          </div>
+        </DashboardCard>
+      </div>
+
+      <div className="space-y-5">
+        <DashboardCard title="Local Assets">
+          <div className="grid gap-3">
+            <MetricTile label="KB Docs" value={docCount} />
+            <MetricTile label="Workspace Files" value={workspaceFiles.length} />
+            <MetricTile label="Skills" value={runtimeItemCount(runtimeSnapshot, "skills")} />
+          </div>
+        </DashboardCard>
+        <DashboardCard title="Next Setup">
+          <div className="space-y-2 text-sm text-secondary">
+            <button type="button" onClick={() => onNavigate("settings")} className="block text-primary">
+              Configure local provider and connection
+            </button>
+            <button type="button" onClick={() => onNavigate("knowledge")} className="block text-primary">
+              Add workspace knowledge
+            </button>
+            <button type="button" onClick={() => onNavigate("workspace")} className="block text-primary">
+              Edit system prompts, contracts, harnesses, hooks, and memory
+            </button>
+          </div>
+        </DashboardCard>
+      </div>
+    </div>
+  );
+}
+
+function SettingsDashboard({
+  agentUrl,
+  token,
+  runtimeStatus,
+  setAgentUrl,
+  setToken,
+  onSaveConnection,
+  onCheckRuntime,
+}: {
+  agentUrl: string;
+  token: string;
+  runtimeStatus: RuntimeCheckStatus;
+  setAgentUrl: (value: string) => void;
+  setToken: (value: string) => void;
+  onSaveConnection: () => void;
+  onCheckRuntime: () => void;
+}) {
+  return (
+    <div className="max-w-3xl space-y-5">
+      <DashboardCard title="Model">
+        <div className="space-y-4">
+          <label className="block">
+            <span className="mb-2 block text-sm font-medium text-secondary">Model</span>
+            <div className="rounded-xl border border-black/[0.08] bg-gray-50 px-4 py-3 text-sm font-medium text-foreground">
+              Configured LLM
+            </div>
+          </label>
+          <p className="text-sm leading-6 text-secondary">
+            The open-source app uses the provider configured in the local runtime. Hosted smart
+            routers and platform credit billing are intentionally not exposed.
+          </p>
+        </div>
+      </DashboardCard>
+
+      <DashboardCard
+        title="Connection"
+        action={
+          <span className="rounded-full bg-primary/10 px-3 py-1 text-xs font-semibold text-primary">
+            {runtimeStatusLabel(runtimeStatus)}
+          </span>
+        }
+      >
+        <form
+          className="space-y-4"
+          onSubmit={(event) => {
+            event.preventDefault();
+            onSaveConnection();
+          }}
+        >
+          <label className="block">
+            <span className="mb-2 block text-sm font-medium text-secondary">Agent URL</span>
+            <input
+              value={agentUrl}
+              onChange={(event) => setAgentUrl(event.target.value)}
+              className="w-full rounded-xl border border-black/[0.08] bg-white px-4 py-3 text-sm text-foreground outline-none transition focus:border-primary/40 focus:ring-4 focus:ring-primary/10"
+            />
+          </label>
+          <label className="block">
+            <span className="mb-2 block text-sm font-medium text-secondary">Server token</span>
+            <input
+              value={token}
+              onChange={(event) => setToken(event.target.value)}
+              type="password"
+              className="w-full rounded-xl border border-black/[0.08] bg-white px-4 py-3 text-sm text-foreground outline-none transition focus:border-primary/40 focus:ring-4 focus:ring-primary/10"
+            />
+          </label>
+          <div className="flex flex-wrap gap-3">
+            <button
+              type="submit"
+              className="rounded-xl bg-primary px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-primary/90"
+            >
+              Save Settings
+            </button>
+            <button
+              type="button"
+              onClick={onCheckRuntime}
+              className="rounded-xl bg-gray-100 px-4 py-2 text-sm font-semibold text-foreground transition hover:bg-gray-200"
+            >
+              Check Runtime
+            </button>
+          </div>
+        </form>
+      </DashboardCard>
+    </div>
+  );
+}
+
+function KnowledgeDashboard({
+  kbCollections,
+  loading,
+  refreshing,
+  onRefresh,
+}: {
+  kbCollections: KbCollectionWithDocs[];
+  loading: boolean;
+  refreshing: boolean;
+  onRefresh: () => void;
+}) {
+  const docs = kbCollections.flatMap((collection) =>
+    collection.docs.map((doc) => ({ ...doc, collectionName: collection.name })),
+  );
+  return (
+    <DashboardCard
+      title="Knowledge"
+      action={
+        <button
+          type="button"
+          onClick={onRefresh}
+          disabled={refreshing}
+          className="rounded-xl bg-gray-100 px-3 py-1.5 text-sm font-semibold text-foreground transition hover:bg-gray-200 disabled:opacity-50"
+        >
+          {refreshing ? "Refreshing..." : "Refresh"}
+        </button>
+      }
+    >
+      {loading ? (
+        <div className="rounded-xl border border-dashed border-black/[0.08] px-4 py-8 text-center text-sm text-secondary">
+          Loading knowledge...
+        </div>
+      ) : docs.length === 0 ? (
+        <div className="rounded-xl border border-dashed border-black/[0.08] px-4 py-8 text-center text-sm text-secondary">
+          No local KB documents yet.
+        </div>
+      ) : (
+        <div className="divide-y divide-black/[0.06] overflow-hidden rounded-xl border border-black/[0.08]">
+          {docs.map((doc) => (
+            <div key={`${doc.collectionName}:${doc.id}`} className="px-4 py-3">
+              <div className="text-sm font-semibold text-foreground">{doc.filename}</div>
+              <div className="mt-1 text-xs text-secondary">{doc.collectionName}</div>
+            </div>
+          ))}
+        </div>
+      )}
+    </DashboardCard>
+  );
+}
+
+function WorkspaceDashboard({
+  workspaceFiles,
+  loading,
+  refreshing,
+  onRefresh,
+}: {
+  workspaceFiles: WorkspaceFileEntry[];
+  loading: boolean;
+  refreshing: boolean;
+  onRefresh: () => void;
+}) {
+  return (
+    <DashboardCard
+      title="Workspace"
+      action={
+        <button
+          type="button"
+          onClick={onRefresh}
+          disabled={refreshing}
+          className="rounded-xl bg-gray-100 px-3 py-1.5 text-sm font-semibold text-foreground transition hover:bg-gray-200 disabled:opacity-50"
+        >
+          {refreshing ? "Refreshing..." : "Refresh"}
+        </button>
+      }
+    >
+      {loading ? (
+        <div className="rounded-xl border border-dashed border-black/[0.08] px-4 py-8 text-center text-sm text-secondary">
+          Loading workspace...
+        </div>
+      ) : workspaceFiles.length === 0 ? (
+        <div className="rounded-xl border border-dashed border-black/[0.08] px-4 py-8 text-center text-sm text-secondary">
+          No editable workspace files found.
+        </div>
+      ) : (
+        <div className="divide-y divide-black/[0.06] overflow-hidden rounded-xl border border-black/[0.08]">
+          {workspaceFiles.slice(0, 80).map((file) => (
+            <div key={file.path} className="flex items-center justify-between gap-4 px-4 py-3">
+              <div className="min-w-0">
+                <div className="truncate text-sm font-semibold text-foreground">{file.path}</div>
+                {file.modifiedAt && <div className="mt-1 text-xs text-secondary">{file.modifiedAt}</div>}
+              </div>
+              <div className="shrink-0 text-xs text-secondary">{formatFileSize(file.size ?? 0)}</div>
+            </div>
+          ))}
+        </div>
+      )}
+    </DashboardCard>
+  );
+}
+
+function SkillsDashboard({
+  skillsSnapshot,
+  loading,
+  onRefresh,
+}: {
+  skillsSnapshot: JsonRecord | null;
+  loading: boolean;
+  onRefresh: () => void;
+}) {
+  const loaded = asArray(skillsSnapshot?.loaded);
+  const hooks = asArray(skillsSnapshot?.runtimeHooks);
+  const issues = asArray(skillsSnapshot?.issues);
+  return (
+    <div className="grid gap-5 lg:grid-cols-2">
+      <DashboardCard
+        title="Skills"
+        action={
+          <button
+            type="button"
+            onClick={onRefresh}
+            className="rounded-xl bg-gray-100 px-3 py-1.5 text-sm font-semibold text-foreground transition hover:bg-gray-200"
+          >
+            Reload
+          </button>
+        }
+      >
+        {loading ? (
+          <div className="text-sm text-secondary">Loading skills...</div>
+        ) : loaded.length === 0 ? (
+          <div className="text-sm text-secondary">No skills loaded.</div>
+        ) : (
+          <div className="space-y-2">
+            {loaded.map((skill, index) => (
+              <div key={asString(skill.name, `skill-${index}`)} className="rounded-xl bg-gray-50 px-4 py-3">
+                <div className="text-sm font-semibold text-foreground">{asString(skill.name, `skill-${index + 1}`)}</div>
+                {asString(skill.path) && <div className="mt-1 truncate text-xs text-secondary">{asString(skill.path)}</div>}
+              </div>
+            ))}
+          </div>
+        )}
+      </DashboardCard>
+      <DashboardCard title="Runtime Hooks">
+        <div className="space-y-2">
+          {hooks.length === 0 ? (
+            <div className="text-sm text-secondary">No runtime hooks reported.</div>
+          ) : (
+            hooks.map((hook, index) => (
+              <div key={asString(hook.name, `hook-${index}`)} className="rounded-xl bg-gray-50 px-4 py-3 text-sm font-semibold text-foreground">
+                {asString(hook.name, `hook-${index + 1}`)}
+              </div>
+            ))
+          )}
+          {issues.length > 0 && (
+            <div className="rounded-xl bg-red-50 px-4 py-3 text-sm text-red-500">
+              {issues.length} skill issue{issues.length === 1 ? "" : "s"} reported.
+            </div>
+          )}
+        </div>
+      </DashboardCard>
+    </div>
+  );
+}
+
+function UsageDashboard({ runtimeSnapshot }: { runtimeSnapshot: JsonRecord | null }) {
+  return (
+    <DashboardCard title="Usage">
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <MetricTile label="Sessions" value={runtimeItemCount(runtimeSnapshot, "sessions")} />
+        <MetricTile label="Tasks" value={runtimeItemCount(runtimeSnapshot, "tasks")} />
+        <MetricTile label="Tools" value={runtimeItemCount(runtimeSnapshot, "tools")} />
+        <MetricTile label="Artifacts" value={runtimeItemCount(runtimeSnapshot, "artifacts")} />
+      </div>
+      <p className="mt-5 text-sm leading-6 text-secondary">
+        Self-hosted Magi does not meter platform credits. Model usage is controlled by the local
+        provider configuration and any provider-side billing you attach.
+      </p>
+    </DashboardCard>
+  );
+}
+
+function LocalDashboardShell({
+  route,
+  runtimeSnapshot,
+  runtimeStatus,
+  skillsSnapshot,
+  skillsLoading,
+  agentUrl,
+  token,
+  kbCollections,
+  kbLoading,
+  kbRefreshing,
+  workspaceFiles,
+  workspaceLoading,
+  workspaceRefreshing,
+  setAgentUrl,
+  setToken,
+  onNavigate,
+  onRefreshAll,
+  onRefreshKnowledge,
+  onRefreshWorkspace,
+  onRefreshSkills,
+  onSaveConnection,
+  onCheckRuntime,
+}: {
+  route: DashboardRoute;
+  runtimeSnapshot: JsonRecord | null;
+  runtimeStatus: RuntimeCheckStatus;
+  skillsSnapshot: JsonRecord | null;
+  skillsLoading: boolean;
+  agentUrl: string;
+  token: string;
+  kbCollections: KbCollectionWithDocs[];
+  kbLoading: boolean;
+  kbRefreshing: boolean;
+  workspaceFiles: WorkspaceFileEntry[];
+  workspaceLoading: boolean;
+  workspaceRefreshing: boolean;
+  setAgentUrl: (value: string) => void;
+  setToken: (value: string) => void;
+  onNavigate: (route: AppRoute) => void;
+  onRefreshAll: () => void;
+  onRefreshKnowledge: () => void;
+  onRefreshWorkspace: () => void;
+  onRefreshSkills: () => void;
+  onSaveConnection: () => void;
+  onCheckRuntime: () => void;
+}) {
+  const titles: Record<DashboardRoute, string> = {
+    overview: "Dashboard",
+    settings: "Settings",
+    usage: "Usage",
+    skills: "Skills",
+    workspace: "Workspace",
+    knowledge: "Knowledge",
+  };
+
+  return (
+    <div className="flex h-full min-w-0 flex-1 bg-background">
+      <DashboardSidebar
+        activeRoute={route}
+        runtimeStatus={runtimeStatus}
+        onNavigate={onNavigate}
+        onRefresh={onRefreshAll}
+      />
+      <main className="flex min-w-0 flex-1 flex-col">
+        <header className="flex min-h-[64px] items-center justify-between gap-4 border-b border-black/[0.06] px-5 md:px-8">
+          <div>
+            <h1 className="text-xl font-semibold text-foreground">{titles[route]}</h1>
+            <p className="mt-1 text-sm text-secondary">
+              Local Magi runtime, provider, knowledge, and operator files.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => onNavigate("chat")}
+            className="rounded-xl bg-gray-100 px-4 py-2 text-sm font-semibold text-foreground transition hover:bg-gray-200"
+          >
+            Open Chat
+          </button>
+        </header>
+        <div className="min-h-0 flex-1 overflow-y-auto px-5 py-6 md:px-8">
+          {route === "overview" && (
+            <OverviewDashboard
+              runtimeSnapshot={runtimeSnapshot}
+              runtimeStatus={runtimeStatus}
+              kbCollections={kbCollections}
+              workspaceFiles={workspaceFiles}
+              onNavigate={onNavigate}
+            />
+          )}
+          {route === "settings" && (
+            <SettingsDashboard
+              agentUrl={agentUrl}
+              token={token}
+              runtimeStatus={runtimeStatus}
+              setAgentUrl={setAgentUrl}
+              setToken={setToken}
+              onSaveConnection={onSaveConnection}
+              onCheckRuntime={onCheckRuntime}
+            />
+          )}
+          {route === "usage" && <UsageDashboard runtimeSnapshot={runtimeSnapshot} />}
+          {route === "skills" && (
+            <SkillsDashboard
+              skillsSnapshot={skillsSnapshot}
+              loading={skillsLoading}
+              onRefresh={onRefreshSkills}
+            />
+          )}
+          {route === "knowledge" && (
+            <KnowledgeDashboard
+              kbCollections={kbCollections}
+              loading={kbLoading}
+              refreshing={kbRefreshing}
+              onRefresh={onRefreshKnowledge}
+            />
+          )}
+          {route === "workspace" && (
+            <WorkspaceDashboard
+              workspaceFiles={workspaceFiles}
+              loading={workspaceLoading}
+              refreshing={workspaceRefreshing}
+              onRefresh={onRefreshWorkspace}
+            />
+          )}
+        </div>
+      </main>
+    </div>
+  );
+}
+
 export function App() {
   const store = useChatStore();
   const chatMessagesRef = useRef<ChatMessagesHandle>(null);
   const chatInputRef = useRef<ChatInputHandle>(null);
   const sawAgentEventRef = useRef(false);
+  const [appRoute, setAppRoute] = useState<AppRoute>(() => routeFromPathname(window.location.pathname));
   const [agentUrl, setAgentUrl] = useState(() => getStored(storage.agentUrl, window.location.origin));
   const [token, setToken] = useState(() => getStored(storage.token, ""));
   const [editing, setEditing] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const [runtimeStatus, setRuntimeStatus] = useState<RuntimeCheckStatus>("not_checked");
+  const [runtimeSnapshot, setRuntimeSnapshot] = useState<JsonRecord | null>(null);
+  const [skillsSnapshot, setSkillsSnapshot] = useState<JsonRecord | null>(null);
+  const [skillsLoading, setSkillsLoading] = useState(true);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [customCategories, setCustomCategories] = useState<string[]>([]);
   const [selectedKbDocs, setSelectedKbDocs] = useState<KbDocReference[]>([]);
@@ -486,6 +1153,30 @@ export function App() {
     [authHeaders, normalizedBase],
   );
 
+  const refreshRuntime = useCallback(async () => {
+    setRuntimeStatus("checking");
+    try {
+      const payload = await getJson("/v1/app/runtime");
+      setRuntimeSnapshot(payload);
+      setRuntimeStatus("active");
+    } catch {
+      setRuntimeSnapshot(null);
+      setRuntimeStatus("unavailable");
+    }
+  }, [getJson]);
+
+  const refreshSkills = useCallback(async () => {
+    setSkillsLoading(true);
+    try {
+      const payload = await getJson("/v1/app/skills");
+      setSkillsSnapshot(payload);
+    } catch {
+      setSkillsSnapshot(null);
+    } finally {
+      setSkillsLoading(false);
+    }
+  }, [getJson]);
+
   const refreshKnowledge = useCallback(async () => {
     setKbRefreshing(true);
     try {
@@ -547,10 +1238,40 @@ export function App() {
   const refreshChannels = useCallback(() => {
     setRefreshing(true);
     store.setChannels(store.channels.length > 0 ? store.channels : [defaultChannel()], { botId: BOT_ID });
-    void Promise.allSettled([refreshKnowledge(), refreshWorkspace()]).finally(() => {
+    void Promise.allSettled([refreshRuntime(), refreshKnowledge(), refreshWorkspace(), refreshSkills()]).finally(() => {
       window.setTimeout(() => setRefreshing(false), 300);
     });
-  }, [refreshKnowledge, refreshWorkspace, store]);
+  }, [refreshKnowledge, refreshRuntime, refreshSkills, refreshWorkspace, store]);
+
+  const refreshDashboardData = useCallback(() => {
+    setRefreshing(true);
+    void Promise.allSettled([refreshRuntime(), refreshKnowledge(), refreshWorkspace(), refreshSkills()]).finally(() => {
+      window.setTimeout(() => setRefreshing(false), 300);
+    });
+  }, [refreshKnowledge, refreshRuntime, refreshSkills, refreshWorkspace]);
+
+  const navigateToRoute = useCallback(
+    (route: AppRoute, channel = useChatStore.getState().activeChannel || DEFAULT_CHANNEL) => {
+      if (route === "chat") {
+        store.setActiveChannel(channel);
+      }
+      window.history.pushState({}, "", pathForRoute(route, channel));
+      window.dispatchEvent(new PopStateEvent("popstate"));
+      setAppRoute(route);
+    },
+    [store],
+  );
+
+  const handleSaveConnection = useCallback(() => {
+    const nextAgentUrl = normalizeAgentUrl(agentUrl);
+    const nextToken = token.trim();
+    setAgentUrl(nextAgentUrl);
+    setToken(nextToken);
+    window.localStorage.setItem(storage.agentUrl, nextAgentUrl);
+    if (nextToken) window.localStorage.setItem(storage.token, nextToken);
+    else window.localStorage.removeItem(storage.token);
+    void refreshRuntime();
+  }, [agentUrl, refreshRuntime, token]);
 
   useEffect(() => {
     store.setBotId(BOT_ID);
@@ -570,8 +1291,22 @@ export function App() {
         }
       })
       .catch(() => {});
-    void Promise.allSettled([refreshKnowledge(), refreshWorkspace()]);
+    void Promise.allSettled([refreshRuntime(), refreshKnowledge(), refreshWorkspace(), refreshSkills()]);
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    const syncRoute = () => {
+      const nextRoute = routeFromPathname(window.location.pathname);
+      const nextChannel = channelFromPathname(window.location.pathname);
+      setAppRoute((current) => (current === nextRoute ? current : nextRoute));
+      if (nextChannel && useChatStore.getState().activeChannel !== nextChannel) {
+        useChatStore.getState().setActiveChannel(nextChannel);
+      }
+    };
+    syncRoute();
+    window.addEventListener("popstate", syncRoute);
+    return () => window.removeEventListener("popstate", syncRoute);
   }, []);
 
   useEffect(() => {
@@ -1168,6 +1903,35 @@ export function App() {
     />
   );
 
+  if (appRoute !== "chat") {
+    return (
+      <LocalDashboardShell
+        route={appRoute}
+        runtimeSnapshot={runtimeSnapshot}
+        runtimeStatus={runtimeStatus}
+        skillsSnapshot={skillsSnapshot}
+        skillsLoading={skillsLoading}
+        agentUrl={agentUrl}
+        token={token}
+        kbCollections={kbCollections}
+        kbLoading={kbLoading}
+        kbRefreshing={kbRefreshing}
+        workspaceFiles={workspaceFiles}
+        workspaceLoading={workspaceLoading}
+        workspaceRefreshing={workspaceRefreshing}
+        setAgentUrl={setAgentUrl}
+        setToken={setToken}
+        onNavigate={navigateToRoute}
+        onRefreshAll={refreshDashboardData}
+        onRefreshKnowledge={() => void refreshKnowledge()}
+        onRefreshWorkspace={() => void refreshWorkspace()}
+        onRefreshSkills={() => void refreshSkills()}
+        onSaveConnection={handleSaveConnection}
+        onCheckRuntime={() => void refreshRuntime()}
+      />
+    );
+  }
+
   return (
     <div className="flex h-full bg-background">
       <ChatSidebar
@@ -1182,7 +1946,7 @@ export function App() {
         customCategories={customCategories}
         refreshing={refreshing}
         mobileOpen={sidebarOpen}
-        onChannelSelect={(name) => store.setActiveChannel(name)}
+        onChannelSelect={(name) => navigateToRoute("chat", name)}
         onDeleteChannel={handleDeleteChannel}
         onCreateChannel={handleCreateChannel}
         onCreateCategory={handleCreateCategory}
@@ -1255,15 +2019,16 @@ export function App() {
           >
             Reset
           </button>
-          <a
-            href="/dashboard"
+          <button
+            type="button"
+            onClick={() => navigateToRoute("overview")}
             className="md:hidden p-1.5 text-secondary/60 hover:text-foreground rounded-xl hover:bg-black/[0.04] transition-all duration-200"
             aria-label="Dashboard"
           >
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
               <path strokeLinecap="round" strokeLinejoin="round" d="M10.5 6h9.75M10.5 6a1.5 1.5 0 11-3 0m3 0a1.5 1.5 0 10-3 0M3.75 6H7.5m3 12h9.75m-9.75 0a1.5 1.5 0 01-3 0m3 0a1.5 1.5 0 00-3 0m-3.75 0H7.5m9-6h3.75m-3.75 0a1.5 1.5 0 01-3 0m3 0a1.5 1.5 0 00-3 0m-9.75 0h9.75" />
             </svg>
-          </a>
+          </button>
         </div>
 
         <ChatMessages

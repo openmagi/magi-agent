@@ -41,6 +41,21 @@ describe("Magi App shell", () => {
     expect(source).toContain("saveWorkspaceFile");
   });
 
+  it("routes dashboard deep links to real local dashboard pages", () => {
+    const source = readAppFile(path.join("src", "App.tsx"));
+    const linkShim = readAppFile(path.join("src", "shims", "next-link.tsx"));
+    const sidebar = readAppFile(path.join("src", "components", "chat", "chat-sidebar.tsx"));
+
+    expect(source).toContain("routeFromPathname");
+    expect(source).toContain("LocalDashboardShell");
+    expect(source).toContain('appRoute !== "chat"');
+    expect(source).toContain('window.addEventListener("popstate", syncRoute)');
+    expect(source).toContain('return `/dashboard/${BOT_ID}/${route}`');
+    expect(sidebar).toContain('`/dashboard/${currentBotId}/overview`');
+    expect(linkShim).toContain("window.history.pushState");
+    expect(linkShim).toContain('new PopStateEvent("popstate")');
+  });
+
   it("uses the copied cloud chat components and visual system", () => {
     const sidebar = readAppFile(path.join("src", "components", "chat", "chat-sidebar.tsx"));
     const input = readAppFile(path.join("src", "components", "chat", "chat-input.tsx"));
@@ -99,6 +114,7 @@ describe("Magi App shell", () => {
     expect(html).toContain("/app/styles.css");
     expect(js).toContain("createSseParser");
     expect(js).toContain("/v1/chat/completions");
+    expect(js).toContain("/dashboard/");
     expect(js).toContain("magi:rightInspectorView");
     expect(js).toContain("data-chat-model-picker");
     expect(js).not.toContain("ChatWorkbench");
