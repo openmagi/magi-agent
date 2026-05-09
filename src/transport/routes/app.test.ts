@@ -87,18 +87,15 @@ describe("HttpServer /app", () => {
     expect(res.status).toBe(200);
     expect(res.contentType).toContain("text/javascript");
     expect(res.body).toContain("createSseParser");
-    expect(res.body).toContain("loadRuntimeSnapshot");
     expect(res.body).toContain("modelOverride");
-    expect(res.body).toContain("loadWorkspace");
-    expect(res.body).toContain("searchMemory");
-    expect(res.body).toContain("saveCron");
-    expect(res.body).toContain("reloadSkills");
-    expect(res.body).toContain("loadTranscript");
-    expect(res.body).toContain("artifact-content");
-    expect(res.body).toContain("compactMemory");
-    expect(res.body).toContain("reloadRuntimeConfig");
-    expect(res.body).toContain("cloud-chat-shell");
-    expect(res.body).toContain("dashboard-shell");
+    expect(res.body).toContain("/v1/chat/completions");
+    expect(res.body).toContain("/v1/chat/inject");
+    expect(res.body).toContain("/v1/chat/interrupt");
+    expect(res.body).toContain("/v1/app/knowledge");
+    expect(res.body).toContain("/v1/app/workspace?path=");
+    expect(res.body).toContain("/v1/app/workspace/file");
+    expect(res.body).toContain("magi:rightInspectorView");
+    expect(res.body).toContain("data-chat-model-picker");
   });
 
   it("serves loopback bootstrap settings so the local app can authenticate", async () => {
