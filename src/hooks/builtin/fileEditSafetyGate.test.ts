@@ -3,8 +3,8 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import type { TranscriptEntry } from "../../storage/Transcript.js";
 import type { HookContext } from "../types.js";
+import type { TranscriptEntry } from "../../storage/Transcript.js";
 import { makeFileEditSafetyGateHook } from "./fileEditSafetyGate.js";
 
 function sha256(text: string): string {

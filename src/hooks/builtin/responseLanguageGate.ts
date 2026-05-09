@@ -47,7 +47,7 @@ type LanguageStats = {
   spanishSignal: number;
 };
 
-interface ResolvedLanguagePolicy {
+export interface ResolvedLanguagePolicy {
   original: ResponseLanguagePolicy;
   target: ResponseLanguagePolicy;
   reason: string;
@@ -60,7 +60,7 @@ function isEnabled(): boolean {
   return v === "" || v === "on" || v === "true" || v === "1";
 }
 
-function languageName(language: ResponseLanguagePolicy): string {
+export function languageName(language: ResponseLanguagePolicy): string {
   switch (language) {
     case "auto":
       return "Auto";
@@ -77,20 +77,20 @@ function languageName(language: ResponseLanguagePolicy): string {
   }
 }
 
-function languageDescription(language: ResponseLanguagePolicy): string {
+export function languageDescription(language: ResponseLanguagePolicy): string {
   switch (language) {
     case "auto":
-      return "auto - the assistant should use the user's message language as the primary answer language unless the user explicitly asks for another output language.";
+      return "auto — the assistant should use the user's message language as the primary answer language unless the user explicitly asks for another output language.";
     case "ko":
-      return "ko - Korean should be the primary explanation language.";
+      return "ko — Korean should be the primary explanation language.";
     case "en":
-      return "en - English should be the primary explanation language.";
+      return "en — English should be the primary explanation language.";
     case "ja":
-      return "ja - Japanese should be the primary explanation language.";
+      return "ja — Japanese should be the primary explanation language.";
     case "zh":
-      return "zh - Chinese should be the primary explanation language.";
+      return "zh — Chinese should be the primary explanation language.";
     case "es":
-      return "es - Spanish should be the primary explanation language.";
+      return "es — Spanish should be the primary explanation language.";
   }
 }
 
@@ -131,7 +131,7 @@ function languageStats(text: string): LanguageStats {
   return stats;
 }
 
-function detectPrimaryLanguage(text: string): SupportedLanguage | null {
+export function detectPrimaryLanguage(text: string): SupportedLanguage | null {
   const stats = languageStats(text);
   if (stats.kana >= 2) return "ja";
   if (stats.hangul >= 2 && stats.hangul >= stats.latin * 0.35) return "ko";
@@ -150,7 +150,7 @@ function detectPrimaryLanguage(text: string): SupportedLanguage | null {
   return null;
 }
 
-function detectRequestedOutputLanguage(userMessage: string): SupportedLanguage | null {
+export function detectRequestedOutputLanguage(userMessage: string): SupportedLanguage | null {
   const text = userMessage.toLowerCase();
   if (
     /(?:in|into)\s+(?:korean|한국어)|(?:korean|한국어)\s+(?:answer|reply|response|version|translation|draft)|한국어로/u.test(
@@ -190,7 +190,7 @@ function detectRequestedOutputLanguage(userMessage: string): SupportedLanguage |
   return null;
 }
 
-function resolveLanguagePolicy(
+export function resolveLanguagePolicy(
   language: ResponseLanguagePolicy,
   userMessage: string,
 ): ResolvedLanguagePolicy {

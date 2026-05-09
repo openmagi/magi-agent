@@ -18,6 +18,8 @@ import {
 } from "./turnMetaClassifier.js";
 
 const ATTACHMENT_MARKER_RE = /\[attachment:[0-9a-f-]{36}:[^\]\r\n]+\]/i;
+const ATTACHMENT_MARKER_GLOBAL_RE = /\[attachment:([0-9a-f-]{36}):[^\]\r\n]+\]/gi;
+const FILE_SEND_COMMAND_RE = /(?:^|[\s"'`(/])(?:[^\s"'`]*\/)?file-send\.sh(?:[\s"'`)]|$)/i;
 
 const USER_FACING_EXTENSIONS = new Set([
   ".md",
@@ -37,6 +39,10 @@ const USER_FACING_EXTENSIONS = new Set([
   ".docx",
   ".pptx",
   ".zip",
+  ".tar",
+  ".tgz",
+  ".gz",
+  ".rpy",
 ]);
 
 const INTERNAL_PREFIXES = [
@@ -172,6 +178,22 @@ function parseOutputObject(output: string | undefined): Record<string, unknown> 
 function stringField(source: Record<string, unknown> | null, key: string): string | null {
   const value = source?.[key];
   return typeof value === "string" && value.trim() ? value : null;
+}
+
+function attachmentMarkersInText(text: string | undefined): string[] {
+  if (!text) return [];
+  const markers: string[] = [];
+  const re = new RegExp(ATTACHMENT_MARKER_GLOBAL_RE.source, ATTACHMENT_MARKER_GLOBAL_RE.flags);
+  let match: RegExpExecArray | null;
+  while ((match = re.exec(text)) !== null) {
+    markers.push(match[0]);
+  }
+  return markers;
+}
+
+function attachmentIdFromMarker(marker: string): string | undefined {
+  const match = marker.match(/^\[attachment:([0-9a-f-]{36}):/i);
+  return match?.[1];
 }
 
 function basenameForPath(rawPath: string): string {
@@ -407,6 +429,45 @@ function nativeFileSendDeliveries(
   return deliveries;
 }
 
+function bashFileSendDeliveries(
+  transcript: ReadonlyArray<TranscriptEntry>,
+  turnId: string,
+): NativeFileDelivery[] {
+  const successful = successfulResultsById(transcript, turnId);
+  const deliveries: NativeFileDelivery[] = [];
+
+  for (const entry of transcript) {
+    if (entry.kind !== "tool_call") continue;
+    if (entry.turnId !== turnId) continue;
+    if (entry.name !== "Bash") continue;
+
+    const input = objectRecord(entry.input);
+    const command = stringField(input, "command");
+    if (!command || !FILE_SEND_COMMAND_RE.test(command)) continue;
+
+    const result = successful.get(entry.toolUseId);
+    if (!result) continue;
+
+    const output = parseOutputObject(result.output);
+    const text = [
+      stringField(output, "stdout"),
+      stringField(output, "stderr"),
+      result.output,
+    ].filter(Boolean).join("\n");
+
+    for (const marker of attachmentMarkersInText(text)) {
+      deliveries.push({
+        target: "chat",
+        status: "sent",
+        marker,
+        externalId: attachmentIdFromMarker(marker),
+      });
+    }
+  }
+
+  return deliveries;
+}
+
 function sentNativeFileDeliveries(
   transcript: ReadonlyArray<TranscriptEntry>,
   turnId: string,
@@ -423,6 +484,7 @@ function sentChatFileDeliveries(
   return [
     ...sentNativeFileDeliveries(transcript, turnId).filter((delivery) => delivery.target === "chat"),
     ...nativeFileSendDeliveries(transcript, turnId),
+    ...bashFileSendDeliveries(transcript, turnId),
   ];
 }
 

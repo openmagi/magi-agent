@@ -2,7 +2,7 @@
  * Persona catalog tests — T2-11.
  *
  * Covers:
- *  1. builtin lookup (BUILTIN_PERSONAS has the 4 baseline roles).
+ *  1. builtin lookup (BUILTIN_PERSONAS has baseline + research roles).
  *  2. yaml override merges over builtin.
  *  3. wildcard "*" allowed_tools round-trips through load + resolve.
  *  4. malformed entries fall back to builtin silently.
@@ -31,19 +31,49 @@ describe("personas/catalog", () => {
     await fs.rm(tmpRoot, { recursive: true, force: true });
   });
 
-  it("(1) BUILTIN_PERSONAS exposes the 4 baseline roles", () => {
+  it("(1) BUILTIN_PERSONAS exposes baseline and research roles", () => {
     expect(Object.keys(BUILTIN_PERSONAS).sort()).toEqual([
       "coder",
       "explore",
       "planner",
+      "research",
       "reviewer",
+      "scout",
+      "synthesis",
     ]);
     expect(BUILTIN_PERSONAS.explore?.allowed_tools).toEqual([
       "FileRead",
       "Glob",
       "Grep",
     ]);
+    expect(BUILTIN_PERSONAS.research?.allowed_tools).toEqual([
+      "WebSearch",
+      "WebFetch",
+      "Browser",
+      "KnowledgeSearch",
+      "FileRead",
+      "PackageDependencyResolve",
+      "ExternalSourceCache",
+      "ExternalSourceRead",
+      "Glob",
+      "Grep",
+      "Clock",
+      "DateRange",
+      "Calculation",
+      "ArtifactRead",
+    ]);
+    expect(BUILTIN_PERSONAS.synthesis?.allowed_tools).toEqual([]);
+    expect(BUILTIN_PERSONAS.synthesis?.completion_contract).toMatchObject({
+      required_evidence: "text",
+      require_non_empty_result: true,
+    });
+    expect(BUILTIN_PERSONAS.research?.allowed_tools).toContain("PackageDependencyResolve");
+    expect(BUILTIN_PERSONAS.scout?.allowed_tools).toContain("PackageDependencyResolve");
+    expect(BUILTIN_PERSONAS.research?.allowed_tools).toContain("ExternalSourceCache");
+    expect(BUILTIN_PERSONAS.scout?.allowed_tools).toContain("ExternalSourceCache");
+    expect(BUILTIN_PERSONAS.scout?.allowed_tools).toContain("ExternalSourceRead");
     expect(BUILTIN_PERSONAS.coder?.allowed_tools).toBe(ALLOWED_TOOLS_WILDCARD);
+    expect(BUILTIN_PERSONAS.coder?.system_prompt).toContain("CodeIntelligence");
   });
 
   it("(1) resolvePersona hits builtin by name, misses are null", async () => {
@@ -140,7 +170,10 @@ describe("personas/catalog", () => {
       "coder",
       "explore",
       "planner",
+      "research",
       "reviewer",
+      "scout",
+      "synthesis",
     ]);
   });
 

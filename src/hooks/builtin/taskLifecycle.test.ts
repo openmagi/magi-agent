@@ -157,6 +157,64 @@ describe("task-lifecycle env gate", () => {
     const files = await fs.readdir(root);
     expect(files).toHaveLength(0);
   });
+
+  it("performs no IO when memoryMode is incognito", async () => {
+    const { detect, activate, resolve } = makeTaskLifecycleHook({
+      workspaceRoot: root,
+    });
+    const ctx = makeCtx({ turnId: "t-incognito", memoryMode: "incognito" });
+
+    await detect.handler({ userMessage: "analyze the data" }, ctx);
+    await activate.handler(
+      {
+        messages: [] as LLMMessage[],
+        tools: [],
+        system: "",
+        iteration: 0,
+      },
+      ctx,
+    );
+    await resolve.handler(
+      {
+        userMessage: "analyze the data",
+        assistantText: "done",
+        status: "committed",
+      },
+      ctx,
+    );
+
+    const files = await fs.readdir(root);
+    expect(files).toHaveLength(0);
+  });
+
+  it("performs no IO when memoryMode is read_only", async () => {
+    const { detect, activate, resolve } = makeTaskLifecycleHook({
+      workspaceRoot: root,
+    });
+    const ctx = makeCtx({ turnId: "t-read-only", memoryMode: "read_only" });
+
+    await detect.handler({ userMessage: "analyze the data" }, ctx);
+    await activate.handler(
+      {
+        messages: [] as LLMMessage[],
+        tools: [],
+        system: "",
+        iteration: 0,
+      },
+      ctx,
+    );
+    await resolve.handler(
+      {
+        userMessage: "analyze the data",
+        assistantText: "done",
+        status: "committed",
+      },
+      ctx,
+    );
+
+    const files = await fs.readdir(root);
+    expect(files).toHaveLength(0);
+  });
 });
 
 describe("task-lifecycle-resolve hook", () => {

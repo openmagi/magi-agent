@@ -14,8 +14,10 @@
  */
 
 import fs from "node:fs/promises";
+import { execFile } from "node:child_process";
 import os from "node:os";
 import path from "node:path";
+import { promisify } from "node:util";
 import { afterEach, beforeEach, describe, it, expect } from "vitest";
 import type { Tool, ToolContext, ToolResult } from "../Tool.js";
 import type {
@@ -24,9 +26,12 @@ import type {
   LLMToolDef,
 } from "../transport/LLMClient.js";
 import { Workspace } from "../storage/Workspace.js";
+import { ExecutionContractStore } from "../execution/ExecutionContract.js";
+import { HookRegistry } from "../hooks/HookRegistry.js";
 import {
   MAX_SPAWN_DEPTH,
   SPAWNABLE_MODELS,
+  applyPersona,
   makeSpawnAgentTool,
   runChildAgentLoop,
   selectChildTools,
@@ -35,6 +40,10 @@ import {
   type SpawnHandoffArtifact,
 } from "./SpawnAgent.js";
 import { ArtifactManager } from "../artifacts/ArtifactManager.js";
+import { makeCalculationTool } from "./Calculation.js";
+import { BUILTIN_PERSONAS } from "../personas/catalog.js";
+
+const execFileAsync = promisify(execFile);
 
 // ── Mocks ──────────────────────────────────────────────────────────
 
@@ -50,29 +59,6 @@ function mockLLMClient(script: MockScript): {
   const callLog: LLMStreamRequest[] = [];
   let roundIdx = 0;
   async function* stream(req: LLMStreamRequest): AsyncGenerator<LLMEvent, void, void> {
-    if (String(req.system ?? "").includes("final-answer meta classifier")) {
-      yield {
-        kind: "text_delta",
-        blockIndex: 0,
-        delta: JSON.stringify({
-          internalReasoningLeak: false,
-          lazyRefusal: false,
-          selfClaim: false,
-          deferralPromise: false,
-          assistantClaimsFileCreated: false,
-          assistantClaimsChatDelivery: false,
-          assistantClaimsKbDelivery: false,
-          assistantReportsDeliveryFailure: false,
-          reason: "spawn test default classifier pass",
-        }),
-      };
-      yield {
-        kind: "message_end",
-        stopReason: "end_turn",
-        usage: { inputTokens: 0, outputTokens: 0 },
-      };
-      return;
-    }
     callLog.push(req);
     const round = script.rounds[roundIdx++] ?? [
       { kind: "message_end", stopReason: "end_turn", usage: { inputTokens: 0, outputTokens: 0 } },
@@ -199,6 +185,28 @@ async function withZeroSpawnRetryDelay<T>(fn: () => Promise<T>): Promise<T> {
       delete process.env.CORE_AGENT_SPAWN_RETRY_BASE_DELAY_MS;
     } else {
       process.env.CORE_AGENT_SPAWN_RETRY_BASE_DELAY_MS = previous;
+    }
+  }
+}
+
+async function withSpawnEnv<T>(
+  env: Record<string, string>,
+  fn: () => Promise<T>,
+): Promise<T> {
+  const previous = new Map<string, string | undefined>();
+  for (const [key, value] of Object.entries(env)) {
+    previous.set(key, process.env[key]);
+    process.env[key] = value;
+  }
+  try {
+    return await fn();
+  } finally {
+    for (const [key, value] of previous) {
+      if (value === undefined) {
+        delete process.env[key];
+      } else {
+        process.env[key] = value;
+      }
     }
   }
 }
@@ -367,6 +375,65 @@ describe("SpawnAgent — §7.12.d", () => {
     );
   });
 
+  it("(c0) includes current-turn KB and file context in the child prompt", async () => {
+    const script: MockScript = {
+      rounds: [
+        [
+          { kind: "text_delta", blockIndex: 0, delta: "used inherited context" },
+          {
+            kind: "message_end",
+            stopReason: "end_turn",
+            usage: { inputTokens: 5, outputTokens: 4 },
+          },
+        ],
+      ],
+    };
+    const { agent, llmCalls } = fakeAgent([], script) as unknown as {
+      agent: Parameters<typeof makeSpawnAgentTool>[0];
+      llmCalls: LLMStreamRequest[];
+    };
+    const tool = makeSpawnAgentTool(agent);
+    const { ctx } = makeParentCtx();
+    (ctx as typeof ctx & { currentUserMessage?: unknown }).currentUserMessage = {
+      text: "선택한 지침 파일 기준으로 서브에이전트에게 평가를 맡겨줘.",
+      receivedAt: 1_700_000_000_000,
+      metadata: {
+        systemPromptAddendum:
+          "<kb-context>\n[file: magi_kimi_v0_3_agent_tester_prompt.md]\nKimi tester guide body\n</kb-context>",
+      },
+      attachments: [
+        {
+          kind: "file",
+          name: "source.html",
+          mimeType: "text/html",
+          sizeBytes: 1234,
+          localPath: "/workspace/attachments/source.html",
+        },
+      ],
+    };
+
+    const result = await tool.execute(
+      {
+        persona: "child",
+        prompt: "Evaluate using the selected guide.",
+        deliver: "return",
+        completion_contract: {
+          required_evidence: "none",
+          reason: "prompt inspection regression",
+        },
+      },
+      ctx,
+    );
+
+    expect(result.status).toBe("ok");
+    const childRequest = JSON.stringify(llmCalls[0]?.messages ?? []);
+    expect(childRequest).toContain("<parent_turn_context");
+    expect(childRequest).toContain("선택한 지침 파일 기준");
+    expect(childRequest).toContain("magi_kimi_v0_3_agent_tester_prompt.md");
+    expect(childRequest).toContain("Kimi tester guide body");
+    expect(childRequest).toContain("source.html");
+  });
+
   it("(c) return mode tallies tool calls when child uses a tool", async () => {
     const parentTools = [makeStubTool("Allowed")];
     const script: MockScript = {
@@ -405,6 +472,190 @@ describe("SpawnAgent — §7.12.d", () => {
     const out = result.output as SpawnAgentOutput;
     expect(out.finalText).toBe("done");
     expect(out.toolCallCount).toBe(1);
+  });
+
+  it("(c1a) child LLM calls run the same beforeLLMCall hook plane with execution contract context", async () => {
+    const contract = new ExecutionContractStore({ now: () => 1_700_000_000_000 });
+    const registry = new HookRegistry();
+    registry.register({
+      name: "test:child-before-llm-contract",
+      point: "beforeLLMCall",
+      priority: 1,
+      blocking: true,
+      handler: async (args, hookCtx) => {
+        expect(hookCtx.executionContract).toBe(contract);
+        return {
+          action: "replace",
+          value: {
+            ...args,
+            system: `${args.system}\n<child_before_llm_hook_applied/>`,
+          },
+        };
+      },
+    });
+    const script: MockScript = {
+      rounds: [
+        [
+          { kind: "text_delta", blockIndex: 0, delta: "hooked" },
+          {
+            kind: "message_end",
+            stopReason: "end_turn",
+            usage: { inputTokens: 1, outputTokens: 1 },
+          },
+        ],
+      ],
+    };
+    const { agent, llmCalls } = fakeAgent([], script) as unknown as {
+      agent: Parameters<typeof makeSpawnAgentTool>[0] & {
+        hooks: HookRegistry;
+        getSession: () => { executionContract: ExecutionContractStore };
+      };
+      llmCalls: LLMStreamRequest[];
+    };
+    agent.hooks = registry;
+    agent.getSession = () => ({ executionContract: contract });
+    const tool = makeSpawnAgentTool(agent);
+    const { ctx } = makeParentCtx();
+
+    const result = await tool.execute(
+      {
+        persona: "child",
+        prompt: "say hooked",
+        deliver: "return",
+        completion_contract: { required_evidence: "none" },
+      },
+      ctx,
+    );
+
+    expect(result.status).toBe("ok");
+    expect(llmCalls[0]?.system).toContain("<child_before_llm_hook_applied/>");
+  });
+
+  it("(c1b) child Calculation records deterministic evidence against the parent execution contract", async () => {
+    const contract = new ExecutionContractStore({ now: () => 1_700_000_000_000 });
+    contract.recordDeterministicRequirement({
+      requirementId: "det_parent_sum",
+      source: "manual",
+      status: "active",
+      kinds: ["calculation"],
+      reason: "1+1 must be calculated deterministically",
+      suggestedTools: ["Calculation"],
+      acceptanceCriteria: ["The sum of 1 and 1 is computed by Calculation."],
+    });
+    const script: MockScript = {
+      rounds: [
+        [
+          {
+            kind: "tool_use_start",
+            blockIndex: 0,
+            id: "tu_calc",
+            name: "Calculation",
+          },
+          {
+            kind: "tool_use_input_delta",
+            blockIndex: 0,
+            partial: JSON.stringify({
+              operation: "sum",
+              rows: [{ value: 1 }, { value: 1 }],
+              field: "value",
+            }),
+          },
+          {
+            kind: "message_end",
+            stopReason: "tool_use",
+            usage: { inputTokens: 1, outputTokens: 1 },
+          },
+        ],
+        [
+          { kind: "text_delta", blockIndex: 0, delta: "2" },
+          {
+            kind: "message_end",
+            stopReason: "end_turn",
+            usage: { inputTokens: 1, outputTokens: 1 },
+          },
+        ],
+      ],
+    };
+    const { agent } = fakeAgent([makeCalculationTool()], script) as unknown as {
+      agent: Parameters<typeof makeSpawnAgentTool>[0] & {
+        getSession: () => { executionContract: ExecutionContractStore };
+      };
+    };
+    agent.getSession = () => ({ executionContract: contract });
+    const tool = makeSpawnAgentTool(agent);
+    const { ctx } = makeParentCtx();
+
+    const result = await tool.execute(
+      {
+        persona: "math-worker",
+        prompt: "Use deterministic arithmetic to compute 1 + 1.",
+        deliver: "return",
+        completion_contract: { required_evidence: "none" },
+      },
+      ctx,
+    );
+
+    expect(result.status).toBe("ok");
+    const out = result.output as SpawnAgentOutput;
+    expect(out.toolCallCount).toBe(1);
+    const snapshot = contract.snapshot();
+    expect(snapshot.taskState.deterministicEvidence).toHaveLength(1);
+    expect(snapshot.taskState.deterministicEvidence[0]?.toolName).toBe("Calculation");
+    expect(snapshot.taskState.deterministicRequirements[0]?.status).toBe("satisfied");
+  });
+
+  it("(c1c) child text-only completion is rejected while deterministic requirements remain active", async () => {
+    await withSpawnEnv(
+      {
+        CORE_AGENT_SPAWN_MAX_ATTEMPTS: "1",
+        CORE_AGENT_SPAWN_RETRY_BASE_DELAY_MS: "0",
+      },
+      async () => {
+        const contract = new ExecutionContractStore({ now: () => 1_700_000_000_000 });
+        contract.recordDeterministicRequirement({
+          requirementId: "det_parent_text_only_sum",
+          source: "manual",
+          status: "active",
+          kinds: ["calculation"],
+          reason: "1+1 must be calculated deterministically",
+          suggestedTools: ["Calculation"],
+          acceptanceCriteria: ["The sum of 1 and 1 is computed by Calculation."],
+        });
+        const { agent } = fakeAgent([], {
+          rounds: [
+            [
+              { kind: "text_delta", blockIndex: 0, delta: "2" },
+              {
+                kind: "message_end",
+                stopReason: "end_turn",
+                usage: { inputTokens: 1, outputTokens: 1 },
+              },
+            ],
+          ],
+        }) as unknown as {
+          agent: Parameters<typeof makeSpawnAgentTool>[0] & {
+            getSession: () => { executionContract: ExecutionContractStore };
+          };
+        };
+        agent.getSession = () => ({ executionContract: contract });
+        const tool = makeSpawnAgentTool(agent);
+        const { ctx } = makeParentCtx();
+
+        const result = await tool.execute(
+          {
+            persona: "math-worker",
+            prompt: "Compute 1 + 1.",
+            deliver: "return",
+            completion_contract: { required_evidence: "none" },
+          },
+          ctx,
+        );
+
+        expect(result.status).toBe("error");
+        expect(result.errorMessage).toContain("deterministic evidence");
+        expect(result.errorMessage).toContain("det_parent_text_only_sum");
+      },
+    );
   });
 
   it("(c2) deliver='return' retries child failures before any tool call", async () => {
@@ -599,6 +850,71 @@ describe("SpawnAgent — §7.12.d", () => {
     expect(result.status).toBe("error");
     expect(result.errorMessage).toContain("missing required files");
     await fs.rm(tmpRoot, { recursive: true, force: true });
+  });
+
+  it("(c2c2) retries missing required files even after the child used read tools", async () => {
+    await withZeroSpawnRetryDelay(async () => {
+      const tmpRoot = await fs.mkdtemp(path.join(os.tmpdir(), "spawn-files-retry-"));
+      const { agent } = fakeAgent([], { rounds: [] }) as unknown as {
+        agent: Parameters<typeof makeSpawnAgentTool>[0];
+      };
+      let attempts = 0;
+      (
+        agent as unknown as {
+          spawnChildTurn: (
+            opts: Parameters<typeof runChildAgentLoop>[1],
+          ) => Promise<SpawnChildTestResult>;
+        }
+      ).spawnChildTurn = async (opts) => {
+        attempts++;
+        if (attempts === 1) {
+          return {
+            status: "ok",
+            finalText: "I read the reference files. Let me write Part D.",
+            toolCallCount: 4,
+          };
+        }
+        const target = path.join(opts.workspaceRoot, "vn_hotel/script_part_d.rpy");
+        await fs.mkdir(path.dirname(target), { recursive: true });
+        await fs.writeFile(target, "label ch_rei_route:\n    return\n", "utf8");
+        return {
+          status: "ok",
+          finalText: "script_part_d.rpy written",
+          toolCallCount: 2,
+        };
+      };
+      const tool = makeSpawnAgentTool(agent);
+      const { ctx, events } = makeParentCtx({ workspaceRoot: tmpRoot });
+
+      const result = await tool.execute(
+        {
+          persona: "writer",
+          prompt: "write part d",
+          deliver: "return",
+          completion_contract: {
+            required_evidence: "files",
+            required_files: ["vn_hotel/script_part_d.rpy"],
+          },
+        } as SpawnAgentInput,
+        ctx,
+      );
+
+      expect(result.status).toBe("ok");
+      expect(attempts).toBe(2);
+      const out = result.output as SpawnAgentOutput & { attempts?: number };
+      expect(out.attempts).toBe(2);
+      await expect(
+        fs.readFile(path.join(tmpRoot, "vn_hotel/script_part_d.rpy"), "utf8"),
+      ).resolves.toContain("label ch_rei_route");
+      const retryEvents = events.filter(
+        (e): e is { type: string; errorMessage?: string } =>
+          (e as { type?: unknown }).type === "spawn_retry",
+      );
+      expect(retryEvents).toHaveLength(1);
+      expect(retryEvents[0]?.errorMessage).toContain("missing required files");
+
+      await fs.rm(tmpRoot, { recursive: true, force: true });
+    });
   });
 
   it("(c2d) completion_contract required_evidence='text' rejects empty final text", async () => {
@@ -904,6 +1220,160 @@ describe("SpawnAgent — §7.12.d", () => {
       await expect(
         fs.access(path.join(tmpRoot, "book/work/isolated.md")),
       ).rejects.toThrow();
+
+      await fs.rm(tmpRoot, { recursive: true, force: true });
+    });
+
+    it("(tw3) workspace_policy='git_worktree' runs the child inside a detached git worktree", async () => {
+      const tmpRoot = await fs.mkdtemp(path.join(os.tmpdir(), "spawn-git-worktree-"));
+      await execFileAsync("git", ["init", "-q"], { cwd: tmpRoot });
+      await execFileAsync("git", ["config", "user.email", "bot@example.com"], { cwd: tmpRoot });
+      await execFileAsync("git", ["config", "user.name", "Bot"], { cwd: tmpRoot });
+      await fs.writeFile(path.join(tmpRoot, "README.md"), "# repo\n");
+      await execFileAsync("git", ["add", "README.md"], { cwd: tmpRoot });
+      await execFileAsync("git", ["commit", "-m", "init", "-q"], { cwd: tmpRoot });
+
+      const writer: Tool<{ name?: string }, { wrote: string }> = {
+        name: "WriteFeature",
+        description: "writes a feature file",
+        inputSchema: { type: "object" },
+        permission: "write",
+        kind: "core",
+        async execute(_input, ctx) {
+          const target = path.join(ctx.workspaceRoot, "src/feature.ts");
+          await fs.mkdir(path.dirname(target), { recursive: true });
+          await fs.writeFile(target, "export const feature = true;\n", "utf8");
+          return { status: "ok", output: { wrote: target }, durationMs: 1 };
+        },
+      };
+      const script: MockScript = {
+        rounds: [
+          [
+            {
+              kind: "tool_use_start",
+              blockIndex: 0,
+              id: "tu_write",
+              name: "WriteFeature",
+            },
+            { kind: "tool_use_input_delta", blockIndex: 0, partial: "{}" },
+            {
+              kind: "message_end",
+              stopReason: "tool_use",
+              usage: { inputTokens: 1, outputTokens: 1 },
+            },
+          ],
+          [
+            { kind: "text_delta", blockIndex: 0, delta: "feature written" },
+            {
+              kind: "message_end",
+              stopReason: "end_turn",
+              usage: { inputTokens: 1, outputTokens: 1 },
+            },
+          ],
+        ],
+      };
+      const { agent } = fakeAgent([writer], script) as unknown as {
+        agent: Parameters<typeof makeSpawnAgentTool>[0];
+      };
+      const tool = makeSpawnAgentTool(agent);
+      const { ctx } = makeParentCtx({ workspaceRoot: tmpRoot });
+
+      const result = await tool.execute(
+        {
+          persona: "coder",
+          prompt: "write feature",
+          deliver: "return",
+          workspace_policy: "git_worktree",
+        },
+        ctx,
+      );
+
+      expect(result.status).toBe("ok");
+      const out = result.output as SpawnAgentOutput;
+      const worktreeRoot = path.join(out.artifacts!.spawnDir, "worktree");
+      await expect(
+        fs.readFile(path.join(worktreeRoot, "src/feature.ts"), "utf8"),
+      ).resolves.toBe("export const feature = true;\n");
+      await expect(fs.access(path.join(tmpRoot, "src/feature.ts"))).rejects.toBeDefined();
+      await expect(
+        execFileAsync("git", ["rev-parse", "--is-inside-work-tree"], {
+          cwd: worktreeRoot,
+        }),
+      ).resolves.toMatchObject({ stdout: "true\n" });
+
+      await fs.rm(tmpRoot, { recursive: true, force: true });
+    });
+
+    it("(tw4) defaults coder persona children to detached git worktrees in git repos", async () => {
+      const tmpRoot = await fs.mkdtemp(path.join(os.tmpdir(), "spawn-default-coder-worktree-"));
+      await execFileAsync("git", ["init", "-q"], { cwd: tmpRoot });
+      await execFileAsync("git", ["config", "user.email", "bot@example.com"], { cwd: tmpRoot });
+      await execFileAsync("git", ["config", "user.name", "Bot"], { cwd: tmpRoot });
+      await fs.writeFile(path.join(tmpRoot, "README.md"), "# repo\n");
+      await execFileAsync("git", ["add", "README.md"], { cwd: tmpRoot });
+      await execFileAsync("git", ["commit", "-m", "init", "-q"], { cwd: tmpRoot });
+
+      const writer: Tool<Record<string, never>, { wrote: string }> = {
+        name: "WriteFeature",
+        description: "writes a feature file",
+        inputSchema: { type: "object" },
+        permission: "write",
+        kind: "core",
+        async execute(_input, ctx) {
+          const target = path.join(ctx.workspaceRoot, "src/feature.ts");
+          await fs.mkdir(path.dirname(target), { recursive: true });
+          await fs.writeFile(target, "export const feature = true;\n", "utf8");
+          return { status: "ok", output: { wrote: target }, durationMs: 1 };
+        },
+      };
+      const script: MockScript = {
+        rounds: [
+          [
+            {
+              kind: "tool_use_start",
+              blockIndex: 0,
+              id: "tu_write",
+              name: "WriteFeature",
+            },
+            { kind: "tool_use_input_delta", blockIndex: 0, partial: "{}" },
+            {
+              kind: "message_end",
+              stopReason: "tool_use",
+              usage: { inputTokens: 1, outputTokens: 1 },
+            },
+          ],
+          [
+            { kind: "text_delta", blockIndex: 0, delta: "feature written" },
+            {
+              kind: "message_end",
+              stopReason: "end_turn",
+              usage: { inputTokens: 1, outputTokens: 1 },
+            },
+          ],
+        ],
+      };
+      const { agent } = fakeAgent([writer], script) as unknown as {
+        agent: Parameters<typeof makeSpawnAgentTool>[0];
+      };
+      const tool = makeSpawnAgentTool(agent);
+      const { ctx } = makeParentCtx({ workspaceRoot: tmpRoot });
+
+      const result = await tool.execute(
+        {
+          persona: "coder",
+          prompt: "write feature",
+          deliver: "return",
+        },
+        ctx,
+      );
+
+      expect(result.status).toBe("ok");
+      const out = result.output as SpawnAgentOutput;
+      const worktreeRoot = path.join(out.artifacts!.spawnDir, "worktree");
+      await expect(
+        fs.readFile(path.join(worktreeRoot, "src/feature.ts"), "utf8"),
+      ).resolves.toBe("export const feature = true;\n");
+      await expect(fs.access(path.join(tmpRoot, "src/feature.ts"))).rejects.toBeDefined();
 
       await fs.rm(tmpRoot, { recursive: true, force: true });
     });
@@ -1407,11 +1877,13 @@ describe("SpawnAgent — §7.12.d", () => {
       await fs.rm(tmpRoot, { recursive: true, force: true });
     });
 
-    it("(j) persona='explore' spawns child with only read tools", async () => {
+    it("(j) persona='explore' spawns child with read tools plus browser tools", async () => {
       const parentTools = [
         makeStubTool("FileRead"),
         makeStubTool("Glob"),
         makeStubTool("Grep"),
+        makeStubTool("Browser"),
+        makeStubTool("SocialBrowser"),
         makeStubTool("FileWrite"),
         makeStubTool("Bash"),
       ];
@@ -1447,10 +1919,184 @@ describe("SpawnAgent — §7.12.d", () => {
       expect(llmCalls.length).toBeGreaterThan(0);
       const toolDefs = (llmCalls[0]?.tools ?? []) as LLMToolDef[];
       expect(toolDefs.map((t) => t.name).sort()).toEqual([
+        "Browser",
         "FileRead",
         "Glob",
         "Grep",
+        "SocialBrowser",
       ]);
+    });
+
+    it("(j2) persona='research' spawns child with research read and net tools", async () => {
+      const parentTools = [
+        makeStubTool("WebSearch"),
+        makeStubTool("WebFetch"),
+        makeStubTool("Browser"),
+        makeStubTool("SocialBrowser"),
+        makeStubTool("KnowledgeSearch"),
+        makeStubTool("FileRead"),
+        makeStubTool("ExternalSourceRead"),
+        makeStubTool("Glob"),
+        makeStubTool("Grep"),
+        makeStubTool("Clock"),
+        makeStubTool("DateRange"),
+        makeStubTool("Calculation"),
+        makeStubTool("ArtifactRead"),
+        makeStubTool("FileWrite"),
+        makeStubTool("Bash"),
+      ];
+      const script: MockScript = {
+        rounds: [
+          [
+            { kind: "text_delta", blockIndex: 0, delta: "researched" },
+            {
+              kind: "message_end",
+              stopReason: "end_turn",
+              usage: { inputTokens: 1, outputTokens: 1 },
+            },
+          ],
+        ],
+      };
+      const { agent, llmCalls } = fakeAgent(parentTools, script) as unknown as {
+        agent: Parameters<typeof makeSpawnAgentTool>[0];
+        llmCalls: LLMStreamRequest[];
+      };
+      const tool = makeSpawnAgentTool(agent);
+      const { ctx } = makeParentCtx({ workspaceRoot: tmpRoot });
+
+      const result = await tool.execute(
+        {
+          persona: "research",
+          prompt: "research current facts",
+          deliver: "return",
+          completion_contract: { required_evidence: "none" },
+        },
+        ctx,
+      );
+
+      expect(result.status).toBe("ok");
+      const toolDefs = (llmCalls[0]?.tools ?? []) as LLMToolDef[];
+      expect(toolDefs.map((t) => t.name).sort()).toEqual([
+        "ArtifactRead",
+        "Browser",
+        "Calculation",
+        "Clock",
+        "DateRange",
+        "ExternalSourceRead",
+        "FileRead",
+        "Glob",
+        "Grep",
+        "KnowledgeSearch",
+        "SocialBrowser",
+        "WebFetch",
+        "WebSearch",
+      ]);
+    });
+
+    it("(j2b) work-capable catalog personas keep browser tools unless caller overrides allowed_tools", () => {
+      for (const persona of ["explore", "planner", "reviewer", "research", "scout"]) {
+        const expanded = applyPersona(
+          { persona, prompt: "use available browser context" },
+          BUILTIN_PERSONAS,
+        );
+        expect(expanded.allowedTools).toEqual(expect.arrayContaining(["Browser", "SocialBrowser"]));
+      }
+
+      const synthesis = applyPersona(
+        { persona: "synthesis", prompt: "compose from supplied evidence" },
+        BUILTIN_PERSONAS,
+      );
+      expect(synthesis.allowedTools).toEqual([]);
+
+      const explicit = applyPersona(
+        {
+          persona: "explore",
+          prompt: "only inspect files",
+          allowed_tools: ["FileRead"],
+        },
+        BUILTIN_PERSONAS,
+      );
+      expect(explicit.allowedTools).toEqual(["FileRead"]);
+    });
+
+    it("(j3) persona='synthesis' defaults to text evidence without tool calls", async () => {
+      const parentTools = [
+        makeStubTool("FileRead"),
+        makeStubTool("WebSearch"),
+        makeStubTool("WebFetch"),
+      ];
+      const script: MockScript = {
+        rounds: [
+          [
+            { kind: "text_delta", blockIndex: 0, delta: "synthesized answer" },
+            {
+              kind: "message_end",
+              stopReason: "end_turn",
+              usage: { inputTokens: 1, outputTokens: 1 },
+            },
+          ],
+        ],
+      };
+      const { agent, llmCalls } = fakeAgent(parentTools, script) as unknown as {
+        agent: Parameters<typeof makeSpawnAgentTool>[0];
+        llmCalls: LLMStreamRequest[];
+      };
+      const tool = makeSpawnAgentTool(agent);
+      const { ctx } = makeParentCtx({ workspaceRoot: tmpRoot });
+
+      const result = await withZeroSpawnRetryDelay(() =>
+        tool.execute(
+          {
+            persona: "synthesis",
+            prompt: "compose only from provided source ledger",
+            deliver: "return",
+          },
+          ctx,
+        ),
+      );
+
+      expect(result.status).toBe("ok");
+      const out = result.output as SpawnAgentOutput;
+      expect(out.finalText).toBe("synthesized answer");
+      expect(out.toolCallCount).toBe(0);
+      const toolDefs = (llmCalls[0]?.tools ?? []) as LLMToolDef[];
+      expect(toolDefs).toEqual([]);
+    });
+
+    it("(j4) caller completion_contract overrides synthesis persona default", async () => {
+      const parentTools = [makeStubTool("FileRead")];
+      const script: MockScript = {
+        rounds: [
+          [
+            { kind: "text_delta", blockIndex: 0, delta: "synthesized answer" },
+            {
+              kind: "message_end",
+              stopReason: "end_turn",
+              usage: { inputTokens: 1, outputTokens: 1 },
+            },
+          ],
+        ],
+      };
+      const { agent } = fakeAgent(parentTools, script) as unknown as {
+        agent: Parameters<typeof makeSpawnAgentTool>[0];
+      };
+      const tool = makeSpawnAgentTool(agent);
+      const { ctx } = makeParentCtx({ workspaceRoot: tmpRoot });
+
+      const result = await withZeroSpawnRetryDelay(() =>
+        tool.execute(
+          {
+            persona: "synthesis",
+            prompt: "compose",
+            deliver: "return",
+            completion_contract: { required_evidence: "tool_call" },
+          },
+          ctx,
+        ),
+      );
+
+      expect(result.status).toBe("error");
+      expect(result.errorMessage).toContain("tool-call evidence");
     });
 
     it("(k) caller's allowed_tools overrides preset", async () => {
@@ -1520,7 +2166,8 @@ describe("SpawnAgent — §7.12.d", () => {
     }
 
     it("(t1) variants=3 + haiku_rubric picks highest score", async () => {
-      // Each child variant is scored as soon as it completes.
+      // With concurrency=1, each variant runs and is scored before the
+      // next child starts: child0→score0→child1→score1→child2→score2.
       const script: MockScript = {
         rounds: [
           variantRound("v0"),
@@ -1833,6 +2480,40 @@ describe("SpawnAgent — §7.12.d", () => {
     expect(resultEvt?.finalText).toBe("bg finish");
   });
 
+  it("(d1) deliver='background' defaults to a long-running child timeout", async () => {
+    const { agent } = fakeAgent([], { rounds: [] }) as unknown as {
+      agent: Parameters<typeof makeSpawnAgentTool>[0] & {
+        spawnChildTurn: (
+          opts: Parameters<typeof runChildAgentLoop>[1],
+        ) => Promise<SpawnChildTestResult>;
+      };
+    };
+    let observedTimeoutMs = 0;
+    agent.spawnChildTurn = async (opts) => {
+      observedTimeoutMs = opts.timeoutMs;
+      return {
+        status: "ok",
+        finalText: "browser QA complete",
+        toolCallCount: 1,
+      };
+    };
+    const tool = makeSpawnAgentTool(agent);
+    const { ctx, events } = makeParentCtx();
+
+    const result = await tool.execute(
+      {
+        persona: "browser QA",
+        prompt: "run a 2 hour browser QA pass",
+        deliver: "background",
+      },
+      ctx,
+    );
+
+    expect(result.status).toBe("ok");
+    await waitForSpawnResult(events);
+    expect(observedTimeoutMs).toBe(3 * 60 * 60 * 1000);
+  });
+
   // ── Model override tests ──────────────────────────────────────────
 
   it("model override passes the specified model to LLMClient", async () => {
@@ -2001,6 +2682,29 @@ describe("SpawnAgent — §7.12.d", () => {
     }
   });
 
+  it("does not advertise or accept legacy Gemini 2.5 child models", () => {
+    const { agent } = fakeAgent([], { rounds: [] });
+    const tool = makeSpawnAgentTool(agent);
+    const legacyModels = [
+      "gemini-2.5-flash",
+      "gemini-2.5-pro",
+      "google/gemini-2.5-flash",
+      "google/gemini-2.5-pro",
+    ];
+
+    for (const model of legacyModels) {
+      expect(SPAWNABLE_MODELS).not.toContain(model);
+      const err = tool.validate?.({
+        persona: "child",
+        prompt: "go",
+        deliver: "return",
+        model,
+      } as SpawnAgentInput);
+      expect(err).toContain("model");
+      expect(err).not.toContain("gemini-2.5");
+    }
+  });
+
   it("spawn_started event includes model when specified", async () => {
     const script: MockScript = {
       rounds: [
@@ -2063,6 +2767,7 @@ describe("SpawnAgent — §7.12.d", () => {
       spawnWorkspace: ws,
       taskId: "task_model_test",
       modelOverride: "kimi-k2p6",
+      deferralCheck: false,
     });
 
     expect(result.status).toBe("ok");

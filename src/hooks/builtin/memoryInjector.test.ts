@@ -4,7 +4,7 @@
  * invocation so we never hit the network.
  */
 
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -25,7 +25,10 @@ function makeLLMStub(): LLMClient {
   return {} as unknown as LLMClient;
 }
 
-function makeCtx(executionContract?: ExecutionContractStore): {
+function makeCtx(
+  executionContract?: ExecutionContractStore,
+  overrides: Partial<HookContext> = {},
+): {
   ctx: HookContext;
   emitted: AgentEvent[];
   logs: Array<{ level: string; msg: string; data?: object }>;
@@ -44,6 +47,7 @@ function makeCtx(executionContract?: ExecutionContractStore): {
     abortSignal: new AbortController().signal,
     deadlineMs: 5_000,
     ...(executionContract ? { executionContract } : {}),
+    ...overrides,
   };
   return { ctx, emitted, logs };
 }
@@ -123,6 +127,69 @@ describe("memoryInjector", () => {
     );
     expect(result).toEqual({ action: "continue" });
     expect(emitted.length).toBe(0);
+  });
+
+  it("incognito memory mode → skips qmd and root memory injection", async () => {
+    process.env.QMD_URL = "http://qmd:8080";
+    const hook = makeMemoryInjectorHook();
+    const { ctx, emitted } = makeCtx(undefined, { memoryMode: "incognito" });
+    const fetchSpy = vi.fn(async () => {
+      throw new Error("qmd should not be called");
+    });
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = fetchSpy as unknown as typeof fetch;
+
+    try {
+      const result = await hook.handler(
+        {
+          messages: userMessages("Tell me about Helsinki cluster"),
+          tools: [],
+          system: "SYSTEM",
+          iteration: 0,
+        },
+        ctx,
+      );
+      expect(result).toEqual({ action: "continue" });
+      expect(fetchSpy).not.toHaveBeenCalled();
+      expect(emitted.length).toBe(0);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it("read-only memory mode → still injects recalled memory", async () => {
+    process.env.QMD_URL = "http://qmd:8080";
+    const hook = makeMemoryInjectorHook();
+    const { ctx } = makeCtx(undefined, { memoryMode: "read_only" });
+
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = makeFetchOk([
+      {
+        path: "memory/2026-05-08.md",
+        content: "The user prefers concise Korean replies.",
+        score: 0.9,
+      },
+    ]);
+
+    try {
+      const result = await hook.handler(
+        {
+          messages: userMessages("What do you remember about my style?"),
+          tools: [],
+          system: "SYSTEM",
+          iteration: 0,
+        },
+        ctx,
+      );
+      expect(result).toBeDefined();
+      expect(result!.action).toBe("replace");
+      if (result && result.action === "replace") {
+        expect(result.value.system).toContain('<memory-context source="qmd" tier="L0">');
+        expect(result.value.system).toContain("[path: memory/2026-05-08.md]");
+      }
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
   });
 
   it("qmd returns results → injected as fenced system attachment", async () => {
@@ -483,5 +550,89 @@ describe("memoryInjector", () => {
       expect(result.value.system).toContain("[continuity: background]");
       expect(result.value.system).toContain("narrow matching recall");
     }
+  });
+
+  it("skips long-term memory recall when source authority disables memory", async () => {
+    const contract = new ExecutionContractStore({ now: () => 111 });
+    contract.replaceSourceAuthorityForTurn("turn-test", [
+      {
+        turnId: "turn-test",
+        currentSourceKinds: ["attachment"],
+        longTermMemoryPolicy: "disabled",
+        classifierReason: "Latest user message says not to use prior memory.",
+      },
+    ]);
+    const hook = makeMemoryInjectorHook({
+      hipocampus: {
+        recall: async () => {
+          throw new Error("memory should not be called");
+        },
+      } as Pick<HipocampusService, "recall"> as never,
+    });
+    const { ctx, emitted } = makeCtx(contract);
+
+    const result = await hook.handler(
+      {
+        messages: userMessages("과거 메모리 참조하지 말고 이 파일 기준으로 답해"),
+        tools: [],
+        system: "SYS",
+        iteration: 0,
+      },
+      ctx,
+    );
+
+    expect(result).toEqual({ action: "continue" });
+    expect(contract.memoryRecallForTurn("turn-test")).toEqual([]);
+    expect(emitted).toContainEqual(expect.objectContaining({
+      type: "rule_check",
+      ruleId: "memory-injector",
+      verdict: "ok",
+    }));
+  });
+
+  it("forces recalled memory to background when source authority is background-only", async () => {
+    const contract = new ExecutionContractStore({ now: () => 222 });
+    contract.replaceSourceAuthorityForTurn("turn-test", [
+      {
+        turnId: "turn-test",
+        currentSourceKinds: ["selected_kb"],
+        longTermMemoryPolicy: "background_only",
+        classifierReason: "Selected KB is the current source of truth.",
+      },
+    ]);
+    const hook = makeMemoryInjectorHook({
+      hipocampus: {
+        recall: async () => ({
+          root: null,
+          results: [
+            {
+              path: "memory/daily/old.md",
+              content: "이 파일 기준으로 답했던 과거 메모리",
+              score: 0.95,
+            },
+          ],
+        }),
+      } as Pick<HipocampusService, "recall"> as never,
+    });
+    const { ctx } = makeCtx(contract);
+
+    const result = await hook.handler(
+      {
+        messages: userMessages("이 파일 기준으로 답해"),
+        tools: [],
+        system: "SYS",
+        iteration: 0,
+      },
+      ctx,
+    );
+
+    expect(result?.action).toBe("replace");
+    if (result?.action === "replace") {
+      expect(result.value.system).toContain("[continuity: background]");
+      expect(result.value.system).toContain('authority="L4"');
+    }
+    expect(contract.memoryRecallForTurn("turn-test")[0]).toMatchObject({
+      continuity: "background",
+    });
   });
 });

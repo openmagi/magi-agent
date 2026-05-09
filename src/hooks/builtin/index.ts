@@ -22,14 +22,23 @@ import {
   type CompletionEvidenceAgent,
 } from "./completionEvidenceGate.js";
 import { makeReliabilityPromptInjectorHook } from "./reliabilityPromptInjector.js";
+import {
+  makeClarificationGateHook,
+  type ClarificationGateAgent,
+} from "./clarificationGate.js";
 import { makeOutputPurityGateHook } from "./outputPurityGate.js";
 import { makeSecretExposureGateHook } from "./secretExposureGate.js";
 import { makeTaskContractGateHook } from "./taskContractGate.js";
 import { makeTaskBoardCompletionGateHook } from "./taskBoardCompletionGate.js";
 import { makeArtifactDeliveryGateHook } from "./artifactDeliveryGate.js";
+import {
+  makeCronMetaOrchestratorHooks,
+  type CronMetaOrchestratorAgent,
+} from "./cronMetaOrchestrator.js";
 import { makeCronDeliverySafetyHook } from "./cronDeliverySafety.js";
 import { subSessionIdentityHook } from "./subSessionIdentity.js";
 import { citationGateHook } from "./citationGate.js";
+import { makeClaimCitationGateHook } from "./claimCitationGate.js";
 import { sessionCommitmentTrackerHook } from "./sessionCommitmentTracker.js";
 import { makeHipocampusCheckpointHook } from "./hipocampusCheckpoint.js";
 import { makeHipocampusCompactorHook } from "./hipocampusCompactor.js";
@@ -40,6 +49,8 @@ import type { HipocampusService } from "../../services/memory/HipocampusService.
 import { answerVerifierHook } from "./answerVerifier.js";
 import { makeMemoryInjectorHook } from "./memoryInjector.js";
 import { makeMemoryContinuityGuardHook } from "./memoryContinuityGuard.js";
+import { makeSourceAuthorityPromptHook } from "./sourceAuthority.js";
+import { makeSourceAuthorityGateHook } from "./sourceAuthorityGate.js";
 import { agentSelfModelHook } from "./agentSelfModel.js";
 import { makeWorkspaceAwarenessHook } from "./workspaceAwarenessInjector.js";
 import {
@@ -54,14 +65,7 @@ import {
   makeGoalProgressGateHook,
   type GoalProgressGateAgent,
 } from "./goalProgressGate.js";
-import {
-  makeFileEditSafetyGateHook,
-  type FileEditSafetyGateAgent,
-} from "./fileEditSafetyGate.js";
-import {
-  makeCodingVerificationGateHook,
-  type CodingVerificationGateAgent,
-} from "./codingVerificationGate.js";
+import { makeInteractiveWorkControllerHooks } from "./interactiveWorkController.js";
 import {
   makeOutputDeliveryGateHook,
   type OutputDeliveryGateAgent,
@@ -120,6 +124,19 @@ import {
 import { makeDeterministicExactnessHook } from "./deterministicExactness.js";
 import { makeDeterministicEvidenceVerifierHook } from "./deterministicEvidenceVerifier.js";
 import {
+  makeFileEditSafetyGateHook,
+  type FileEditSafetyGateAgent,
+} from "./fileEditSafetyGate.js";
+import {
+  makeMemoryMutationGateHooks,
+  type MemoryMutationGateAgent,
+} from "./memoryMutationGate.js";
+import { makeGitSafetyGateHook } from "./gitSafetyGate.js";
+import {
+  makeCodingVerificationGateHook,
+  type CodingVerificationGateAgent,
+} from "./codingVerificationGate.js";
+import {
   makeResourceBoundaryHooks,
   type ResourceBoundaryAgent,
 } from "./resourceBoundaryGate.js";
@@ -134,10 +151,6 @@ import {
   makeDebugAfterToolCheckpointHook,
   makeDebugCommitCheckpointHook,
 } from "./debugCheckpointRecorder.js";
-import {
-  makeCronMetaOrchestratorHooks,
-  type CronMetaOrchestratorAgent,
-} from "./cronMetaOrchestrator.js";
 
 export interface RegisterBuiltinsOpts {
   disabled?: string[];
@@ -196,6 +209,11 @@ export interface RegisterBuiltinsOpts {
    */
   planModeAutoTriggerAgent?: PlanModeAutoTriggerAgent;
   /**
+   * Delegate used by clarification-gate to create and wait on durable
+   * user_question control requests before non-trivial ambiguous work starts.
+   */
+  clarificationGateAgent?: ClarificationGateAgent;
+  /**
    * Delegate used by the onboarding-needed-check hook
    * (docs/plans/2026-04-20-superpowers-plugin-design.md design #2).
    * Returns the live `Session` by sessionKey so the hook can read
@@ -225,6 +243,12 @@ export interface RegisterBuiltinsOpts {
    * same-turn evidence. Optional — falls back to ctx.transcript.
    */
   completionEvidenceAgent?: CompletionEvidenceAgent;
+  /** Delegate used by memory mutation gates to verify MemoryRedact evidence. */
+  memoryMutationAgent?: MemoryMutationGateAgent;
+  /** Delegate used by FileEdit prior-read/stale-edit enforcement. */
+  fileEditSafetyAgent?: FileEditSafetyGateAgent;
+  /** Delegate used by coding-mode verification enforcement. */
+  codingVerificationAgent?: CodingVerificationGateAgent;
   /**
    * Delegate used by task-contract verification enforcement. Shares
    * the completion-evidence transcript reader shape.
@@ -269,10 +293,6 @@ export interface RegisterBuiltinsOpts {
    * tool evidence for "I tried/debugged" claims and early give-ups.
    */
   goalProgressGateAgent?: GoalProgressGateAgent;
-  /** Delegate for FileEdit safety: confirms same-turn FileRead evidence. */
-  fileEditSafetyAgent?: FileEditSafetyGateAgent;
-  /** Delegate for coding verification evidence checks. */
-  codingVerificationAgent?: CodingVerificationGateAgent;
   /**
    * Delegate for the output delivery gate (priority 87). Reads the
    * output artifact registry and blocks turn completion when the
@@ -340,6 +360,12 @@ export function registerBuiltinHooks(
   const deterministicExactnessHook = makeDeterministicExactnessHook();
   if (maybe(deterministicExactnessHook.name)) {
     registry.register(deterministicExactnessHook);
+    registered++;
+  }
+
+  const sourceAuthorityPromptHook = makeSourceAuthorityPromptHook();
+  if (maybe(sourceAuthorityPromptHook.name)) {
+    registry.register(sourceAuthorityPromptHook);
     registered++;
   }
 
@@ -456,6 +482,18 @@ export function registerBuiltinHooks(
     registered++;
   }
 
+  const interactiveWorkHooks = makeInteractiveWorkControllerHooks({
+    agent: opts.goalProgressGateAgent ?? opts.completionEvidenceAgent,
+  });
+  if (maybe(interactiveWorkHooks.beforeLLMCall.name)) {
+    registry.register(interactiveWorkHooks.beforeLLMCall);
+    registered++;
+  }
+  if (maybe(interactiveWorkHooks.beforeCommit.name)) {
+    registry.register(interactiveWorkHooks.beforeCommit);
+    registered++;
+  }
+
   const outputDeliveryGateHook = makeOutputDeliveryGateHook({
     agent: opts.outputDeliveryAgent,
   });
@@ -521,6 +559,46 @@ export function registerBuiltinHooks(
     skipped.push("builtin:memory-continuity-guard");
   }
 
+  const sourceAuthorityGateEnv =
+    (process.env.CORE_AGENT_SOURCE_AUTHORITY_GATE ?? "on")
+      .trim()
+      .toLowerCase();
+  const sourceAuthorityGateEnabled =
+    sourceAuthorityGateEnv === "" ||
+    sourceAuthorityGateEnv === "on" ||
+    sourceAuthorityGateEnv === "true" ||
+    sourceAuthorityGateEnv === "1";
+  if (sourceAuthorityGateEnabled) {
+    const sourceAuthorityGateHook = makeSourceAuthorityGateHook();
+    if (maybe(sourceAuthorityGateHook.name)) {
+      registry.register(sourceAuthorityGateHook);
+      registered++;
+    }
+  } else {
+    skipped.push("builtin:source-authority-gate");
+  }
+
+  const clarificationGateEnv =
+    (process.env.CORE_AGENT_CLARIFICATION_GATE ?? "on")
+      .trim()
+      .toLowerCase();
+  const clarificationGateEnabled =
+    clarificationGateEnv === "" ||
+    clarificationGateEnv === "on" ||
+    clarificationGateEnv === "true" ||
+    clarificationGateEnv === "1";
+  if (clarificationGateEnabled && opts.clarificationGateAgent) {
+    const clarificationGateHook = makeClarificationGateHook({
+      agent: opts.clarificationGateAgent,
+    });
+    if (maybe(clarificationGateHook.name)) {
+      registry.register(clarificationGateHook);
+      registered++;
+    }
+  } else {
+    skipped.push("builtin:clarification-gate");
+  }
+
   // Mid-turn injector (#86) — drains Session.pendingInjections at the
   // start of each beforeLLMCall so injected messages are absorbed into
   // the running turn (Claude Code parity). Env-gated
@@ -570,6 +648,24 @@ export function registerBuiltinHooks(
   if (maybe(citationGateHook.name)) {
     registry.register(citationGateHook);
     registered++;
+  }
+  const claimCitationGateEnv =
+    (process.env.CORE_AGENT_CLAIM_CITATION_GATE ?? "on")
+      .trim()
+      .toLowerCase();
+  const claimCitationGateEnabled =
+    claimCitationGateEnv === "" ||
+    claimCitationGateEnv === "on" ||
+    claimCitationGateEnv === "true" ||
+    claimCitationGateEnv === "1";
+  if (claimCitationGateEnabled) {
+    const claimCitationGateHook = makeClaimCitationGateHook();
+    if (maybe(claimCitationGateHook.name)) {
+      registry.register(claimCitationGateHook);
+      registered++;
+    }
+  } else {
+    skipped.push("builtin:claim-citation-gate");
   }
   if (maybe(sessionCommitmentTrackerHook.name)) {
     registry.register(sessionCommitmentTrackerHook);
@@ -712,6 +808,22 @@ export function registerBuiltinHooks(
     registry.register(resourceBoundaryHooks.beforeToolUse);
     registry.register(resourceBoundaryHooks.beforeCommit);
     registered += 2;
+  }
+
+  const memoryMutationHooks = makeMemoryMutationGateHooks({
+    agent: opts.memoryMutationAgent,
+  });
+  if (maybe(memoryMutationHooks.beforeLLMCall.name)) {
+    registry.register(memoryMutationHooks.beforeLLMCall);
+    registry.register(memoryMutationHooks.beforeToolUse);
+    registry.register(memoryMutationHooks.beforeCommit);
+    registered += 3;
+  }
+
+  const gitSafetyHook = makeGitSafetyGateHook();
+  if (maybe(gitSafetyHook.name)) {
+    registry.register(gitSafetyHook);
+    registered++;
   }
 
   const fileEditSafetyHook = makeFileEditSafetyGateHook({

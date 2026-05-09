@@ -1,15 +1,16 @@
 /**
  * Goal progress gate — beforeCommit, priority 84.
  *
- * Covers a reliability gap not handled by completion/deferral gates: a
- * goal-oriented request can fail one tool action and then stop, or claim
- * investigation/action happened without any tool evidence. The classifier is
- * LLM-based for multilingual/general detection; this hook uses deterministic
- * transcript evidence to decide whether to retry the turn.
+ * Covers a reliability gap not handled by completion/deferral gates:
+ * a goal-oriented request can fail one tool action and then stop, or
+ * claim investigation/action happened without any tool evidence. The
+ * classifier is LLM-based for multilingual/general detection; this
+ * hook uses deterministic transcript evidence to decide whether to
+ * retry the turn.
  */
 
+import type { RegisteredHook, HookContext } from "../types.js";
 import type { TranscriptEntry } from "../../storage/Transcript.js";
-import type { HookContext, RegisteredHook } from "../types.js";
 import {
   getOrClassifyFinalAnswerMeta,
   getOrClassifyRequestMeta,
@@ -102,6 +103,9 @@ export function makeGoalProgressGateHook(
   return {
     name: "builtin:goal-progress-gate",
     point: "beforeCommit",
+    // After output-delivery (87) would make retries less clear; before
+    // resource/completion gates so the draft is redirected while the
+    // problem is still "keep trying / provide evidence".
     priority: 84,
     blocking: true,
     failOpen: true,
@@ -123,22 +127,9 @@ export function makeGoalProgressGateHook(
         });
         if (
           !finalMeta.assistantGivesUpEarly &&
-          !finalMeta.assistantClaimsActionWithoutEvidence
+          !finalMeta.assistantClaimsActionWithoutEvidence &&
+          !finalMeta.assistantEndsWithUnexecutedPlan
         ) {
-          return { action: "continue" };
-        }
-
-        if (retryCount >= MAX_RETRIES) {
-          ctx.log("warn", "[goal-progress-gate] retry budget exhausted; failing open", {
-            retryCount,
-            reason: finalMeta.reason,
-          });
-          ctx.emit({
-            type: "rule_check",
-            ruleId: "goal-progress-gate",
-            verdict: "violation",
-            detail: "retry exhausted; failing open",
-          });
           return { action: "continue" };
         }
 
@@ -168,6 +159,54 @@ export function makeGoalProgressGateHook(
               "or answer without claiming completed actions.",
             ].join("\n"),
           };
+        }
+
+        if (finalMeta.assistantEndsWithUnexecutedPlan) {
+          const retryExhausted = retryCount >= MAX_RETRIES;
+          ctx.log("warn", "[goal-progress-gate] blocking plan-only turn ending", {
+            toolCalls,
+            failedResults,
+            successfulResults,
+            retryCount,
+            retryExhausted,
+            reason: finalMeta.reason,
+          });
+          ctx.emit({
+            type: "rule_check",
+            ruleId: "goal-progress-gate",
+            verdict: "violation",
+            detail: `plan-only ending; retryExhausted=${retryExhausted} toolCalls=${toolCalls} failedResults=${failedResults} successfulResults=${successfulResults}`,
+          });
+          return {
+            action: "block",
+            reason: [
+              retryExhausted
+                ? "[RULE:GOAL_PROGRESS_EXECUTE_NEXT]"
+                : "[RETRY:GOAL_PROGRESS_EXECUTE_NEXT]",
+              "The user asked for concrete goal progress, and the draft ends",
+              "with a plan, next-step promise, or dispatch announcement instead",
+              "of executing the next needed action and returning the result.",
+              "Do not end the turn at the planning boundary. Continue now:",
+              "- Call the next required tool/subagent/action in this turn.",
+              "- Use the resulting evidence to synthesize the requested output.",
+              "- If the work cannot proceed, report the concrete hard blocker",
+              "  with evidence rather than promising future work.",
+            ].join("\n"),
+          };
+        }
+
+        if (retryCount >= MAX_RETRIES) {
+          ctx.log("warn", "[goal-progress-gate] retry budget exhausted; failing open", {
+            retryCount,
+            reason: finalMeta.reason,
+          });
+          ctx.emit({
+            type: "rule_check",
+            ruleId: "goal-progress-gate",
+            verdict: "violation",
+            detail: "retry exhausted; failing open",
+          });
+          return { action: "continue" };
         }
 
         if (

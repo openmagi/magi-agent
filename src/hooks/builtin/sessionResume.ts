@@ -28,6 +28,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import type { RegisteredHook, HookContext } from "../types.js";
 import type { TranscriptEntry } from "../../storage/Transcript.js";
+import { isIncognitoMemoryMode } from "../../util/memoryMode.js";
 
 /** Per-message character cap in the synopsis. */
 const MAX_CHARS_PER_MESSAGE = 800;
@@ -95,6 +96,16 @@ interface TurnPair {
   turnId: string;
 }
 
+export interface AbandonedTurnSummary {
+  turnId: string;
+  startedAt?: number;
+  lastEventAt?: number;
+  user?: string;
+  assistant?: string;
+  toolCalls: string[];
+  committed: false;
+}
+
 /**
  * Exported for tests — fold a transcript into at most `maxPairs` most
  * recent committed {user,assistant} turns. Only turns that have both
@@ -145,6 +156,65 @@ export function extractRecentTurns(
     return (byTurn.get(a.turnId)!.order - byTurn.get(b.turnId)!.order);
   });
   return result.slice(Math.max(0, result.length - maxPairs));
+}
+
+export function extractAbandonedTurn(
+  transcript: ReadonlyArray<TranscriptEntry>,
+): AbandonedTurnSummary | null {
+  const byTurn = new Map<string, {
+    startedAt?: number;
+    lastEventAt?: number;
+    user?: string;
+    assistant: string[];
+    toolCalls: string[];
+    complete: boolean;
+    order: number;
+  }>();
+  let order = 0;
+  for (const e of transcript) {
+    if (!("turnId" in e) || typeof e.turnId !== "string") continue;
+    const entry = byTurn.get(e.turnId) ?? {
+      assistant: [],
+      toolCalls: [],
+      complete: false,
+      order: order++,
+    };
+    if ("ts" in e && typeof e.ts === "number") {
+      entry.lastEventAt = Math.max(entry.lastEventAt ?? e.ts, e.ts);
+    }
+    if (e.kind === "turn_started") {
+      entry.startedAt = e.ts;
+    } else if (e.kind === "user_message") {
+      entry.user = e.text;
+    } else if (e.kind === "assistant_text") {
+      entry.assistant.push(e.text);
+    } else if (e.kind === "tool_call") {
+      entry.toolCalls.push(e.name);
+    } else if (e.kind === "turn_committed" || e.kind === "turn_aborted") {
+      entry.complete = true;
+    }
+    byTurn.set(e.turnId, entry);
+  }
+
+  const abandoned = [...byTurn.entries()]
+    .filter(([, entry]) => !entry.complete)
+    .sort((a, b) => b[1].order - a[1].order)[0];
+  if (!abandoned) return null;
+
+  const [turnId, entry] = abandoned;
+  if (!entry.startedAt && !entry.user && entry.toolCalls.length === 0) {
+    return null;
+  }
+
+  return {
+    turnId,
+    ...(entry.startedAt !== undefined ? { startedAt: entry.startedAt } : {}),
+    ...(entry.lastEventAt !== undefined ? { lastEventAt: entry.lastEventAt } : {}),
+    ...(entry.user ? { user: entry.user } : {}),
+    ...(entry.assistant.length > 0 ? { assistant: entry.assistant.join("\n") } : {}),
+    toolCalls: [...new Set(entry.toolCalls)].slice(0, 12),
+    committed: false,
+  };
 }
 
 async function listRecentFiles(
@@ -200,10 +270,11 @@ export async function buildSessionResumeBlock(
   workspaceRoot: string,
 ): Promise<string> {
   const turns = extractRecentTurns(snapshot.transcript, 3);
+  const abandoned = extractAbandonedTurn(snapshot.transcript);
   const cutoff = snapshot.lastActivityAt - RECENT_WINDOW_MS;
   const recentFiles = await listRecentFiles(workspaceRoot, cutoff);
 
-  if (turns.length === 0 && recentFiles.length === 0) {
+  if (turns.length === 0 && recentFiles.length === 0 && !abandoned) {
     return "";
   }
 
@@ -226,6 +297,26 @@ export async function buildSessionResumeBlock(
         );
       }
     }
+  }
+
+  if (abandoned) {
+    lines.push("");
+    lines.push("## Interrupted prior turn");
+    lines.push(
+      `Turn ${abandoned.turnId} did not reach turn_committed or turn_aborted before this resume.`,
+    );
+    if (abandoned.user) {
+      lines.push(`User: ${truncate(abandoned.user, MAX_CHARS_PER_MESSAGE)}`);
+    }
+    if (abandoned.assistant) {
+      lines.push(`Assistant draft: ${truncate(abandoned.assistant, MAX_CHARS_PER_MESSAGE)}`);
+    }
+    if (abandoned.toolCalls.length > 0) {
+      lines.push(`Tool calls before interruption: ${abandoned.toolCalls.join(", ")}`);
+    }
+    lines.push(
+      "Treat this as potentially interrupted work. If the user's new message asks why it stopped or asks to continue, inspect workspace files and transcript state before answering.",
+    );
   }
 
   lines.push("");
@@ -263,6 +354,7 @@ export function makeSessionResumeHook(
     blocking: false,
     handler: async (_args, ctx: HookContext) => {
       try {
+        if (isIncognitoMemoryMode(ctx.memoryMode)) return { action: "continue" };
         if (!isEnabled()) return { action: "continue" };
 
         // Already seeded this pod lifetime — noop.

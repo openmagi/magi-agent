@@ -14,7 +14,7 @@ import {
 } from "./workspaceAwarenessInjector.js";
 import type { HookContext } from "../types.js";
 
-function makeCtx(): HookContext {
+function makeCtx(overrides: Partial<HookContext> = {}): HookContext {
   return {
     botId: "bot-test",
     userId: "user-test",
@@ -26,6 +26,7 @@ function makeCtx(): HookContext {
     log: vi.fn(),
     abortSignal: new AbortController().signal,
     deadlineMs: 10_000,
+    ...overrides,
   };
 }
 
@@ -57,6 +58,22 @@ describe("workspaceAwarenessInjector", () => {
     });
     const result = await hook.handler(baseArgs, makeCtx());
     expect(result).toEqual({ action: "continue" });
+  });
+
+  it("does not inject workspace snapshots in incognito memory mode", async () => {
+    const root = await mkTmpWorkspace();
+    try {
+      await fs.mkdir(path.join(root, "memory"));
+      await fs.writeFile(path.join(root, "SCRATCHPAD.md"), "scratch");
+      const hook = makeWorkspaceAwarenessHook({ workspaceRoot: root });
+      const result = await hook.handler(
+        baseArgs,
+        makeCtx({ memoryMode: "incognito" }),
+      );
+      expect(result).toEqual({ action: "continue" });
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
+    }
   });
 
   it("no-ops when workspace is empty (nothing at top-level, no recent files)", async () => {

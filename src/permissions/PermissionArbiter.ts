@@ -47,6 +47,17 @@ export async function decideRuntimePermission(
   const security = securityDecision(input);
   if (security) return security;
 
+  if (input.mode === "plan" && input.toolName === "PatchApply") {
+    if (isPatchApplyDryRun(input.input)) {
+      return { decision: "allow", reason: "PatchApply dry-run is allowed in plan mode" };
+    }
+    return {
+      decision: "ask",
+      reason: "Review PatchApply changes before applying.",
+      proposedInput: input.input,
+    };
+  }
+
   if (input.mode === "plan" && !isReadOnlyTool(input.toolName, input.tool)) {
     return {
       decision: "deny",
@@ -146,6 +157,10 @@ function pathOf(input: unknown): string {
     return typeof p === "string" ? p : "";
   }
   return "";
+}
+
+function isPatchApplyDryRun(input: unknown): boolean {
+  return !!input && typeof input === "object" && (input as { dry_run?: unknown }).dry_run === true;
 }
 
 function isSecurityCriticalShellReason(reason: string | undefined): boolean {

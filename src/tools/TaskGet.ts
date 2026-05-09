@@ -20,7 +20,7 @@ export type TaskGetOutput = BackgroundTaskRecord;
 const INPUT_SCHEMA = {
   type: "object",
   properties: {
-    taskId: { type: "string", description: "taskId returned by SpawnAgent." },
+    taskId: { type: "string", description: "taskId returned by SpawnAgent or Bash runInBackground." },
   },
   required: ["taskId"],
 } as const;
@@ -31,7 +31,7 @@ export function makeTaskGetTool(
   return {
     name: "TaskGet",
     description:
-      "Return the full BackgroundTaskRecord (status, progress, result, error, attempts, toolCallCount, spawnDir, artifacts) for a previously-spawned background task. Errors with `not_found` when the taskId is unknown.",
+      "Return the full BackgroundTaskRecord (status, progress, result, error, attempts, toolCallCount, spawnDir, artifacts) for a background task. Errors with `not_found` when the taskId is unknown.",
     inputSchema: INPUT_SCHEMA,
     permission: "meta",
     kind: "core",

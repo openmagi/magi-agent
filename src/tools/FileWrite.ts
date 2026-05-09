@@ -12,6 +12,11 @@ import type { Tool, ToolContext, ToolResult } from "../Tool.js";
 import { Workspace } from "../storage/Workspace.js";
 import { errorResult } from "../util/toolResult.js";
 import { writeSafe, isFsSafeEscape } from "../util/fsSafe.js";
+import {
+  isLongTermMemoryWriteDisabled,
+  isProtectedMemoryPath,
+  protectedMemoryError,
+} from "../util/memoryMode.js";
 
 export interface FileWriteInput {
   path: string;
@@ -52,6 +57,14 @@ export function makeFileWriteTool(workspaceRoot: string): Tool<FileWriteInput, F
       ctx: ToolContext,
     ): Promise<ToolResult<FileWriteOutput>> {
       const start = Date.now();
+      if (isLongTermMemoryWriteDisabled(ctx.memoryMode) && isProtectedMemoryPath(input.path)) {
+        return {
+          status: "permission_denied",
+          errorCode: "memory_write_blocked",
+          errorMessage: protectedMemoryError(input.path),
+          durationMs: Date.now() - start,
+        };
+      }
       try {
         const ws = ctx.spawnWorkspace ?? defaultWorkspace;
         // Pre-create parent directory via Workspace.resolve — parent

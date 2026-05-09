@@ -13,8 +13,12 @@
  */
 
 import fs from "node:fs/promises";
+import { execFile } from "node:child_process";
 import path from "node:path";
+import { promisify } from "node:util";
 import { Workspace } from "../storage/Workspace.js";
+
+const execFileAsync = promisify(execFile);
 
 /** Generate a collision-resistant ephemeral spawn task id. */
 export function randomTaskId(): string {
@@ -43,6 +47,47 @@ export async function prepareSpawnDir(
   }
   const spawnWorkspace = new Workspace(spawnDir);
   return { spawnDir, spawnWorkspace };
+}
+
+/**
+ * Prepare `.spawn/{taskId}/worktree` as a detached git worktree rooted at
+ * the parent's current HEAD. The outer spawnDir remains the audit/scratch
+ * envelope; child file tools run inside the worktree.
+ */
+export async function prepareGitWorktreeSpawnDir(
+  parentWorkspaceRoot: string,
+  taskId: string,
+): Promise<{ spawnDir: string; spawnWorkspace: Workspace; worktreeDir: string }> {
+  const prepared = await prepareSpawnDir(parentWorkspaceRoot, taskId);
+  const worktreeDir = path.join(prepared.spawnDir, "worktree");
+  await execFileAsync("git", ["rev-parse", "--is-inside-work-tree"], {
+    cwd: parentWorkspaceRoot,
+  });
+  await execFileAsync("git", ["worktree", "add", "--detach", worktreeDir, "HEAD"], {
+    cwd: parentWorkspaceRoot,
+    maxBuffer: 1024 * 1024,
+  });
+  return {
+    spawnDir: prepared.spawnDir,
+    spawnWorkspace: new Workspace(worktreeDir),
+    worktreeDir,
+  };
+}
+
+export async function canPrepareGitWorktreeSpawnDir(
+  parentWorkspaceRoot: string,
+): Promise<boolean> {
+  try {
+    await execFileAsync("git", ["rev-parse", "--is-inside-work-tree"], {
+      cwd: parentWorkspaceRoot,
+    });
+    await execFileAsync("git", ["rev-parse", "--verify", "HEAD"], {
+      cwd: parentWorkspaceRoot,
+    });
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /** Recursively count regular files under `dir`. Returns 0 if absent. */

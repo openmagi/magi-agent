@@ -5,7 +5,7 @@
  * Emits TWO interleaved streams on the same SSE body:
  *
  *  1. Legacy OpenAI-compatible `data: {...}` lines (choices[].delta.*)
- *     so chat-proxy's existing legacy parsing pipeline keeps
+ *     so chat-proxy's existing Magi-era parsing pipeline keeps
  *     working for this bot during the migration.
  *
  *  2. `event: agent\ndata: {...}` lines carrying structured
@@ -22,6 +22,7 @@
 
 import type { ServerResponse } from "node:http";
 import { safeAgentEvent } from "./safeAgentEvent.js";
+import type { SourceLedgerRecord } from "../research/SourceLedger.js";
 import type { TurnStatus, TurnStopReason } from "../turn/types.js";
 import type { ControlEvent } from "../control/ControlEvents.js";
 import { UserVisibleRouteMetaFilter } from "../turn/visibleText.js";
@@ -48,6 +49,32 @@ export type AgentEvent =
   | { type: "tool_start"; id: string; name: string; input_preview?: string }
   | { type: "tool_progress"; id: string; label: string }
   | { type: "tool_end"; id: string; status: string; output_preview?: string; durationMs: number }
+  | {
+      type: "patch_preview";
+      toolUseId?: string;
+      dryRun: boolean;
+      changedFiles: string[];
+      createdFiles: string[];
+      deletedFiles: string[];
+      files: Array<{
+        path: string;
+        operation: "create" | "update" | "delete";
+        hunks: number;
+        addedLines: number;
+        removedLines: number;
+        oldSha256?: string;
+        newSha256?: string;
+      }>;
+    }
+  | { type: "source_inspected"; source: SourceLedgerRecord }
+  | {
+      type: "browser_frame";
+      action: string;
+      url?: string;
+      imageBase64: string;
+      contentType: "image/png" | "image/jpeg";
+      capturedAt: number;
+    }
   | { type: "context_end" }
   | {
       type: "task_board";
@@ -109,6 +136,23 @@ export type AgentEvent =
       persona: string;
       status: "running" | "completed" | "failed" | "aborted";
       detail?: string;
+    }
+  | {
+      /** Durable mission ledger created or linked by runtime work. */
+      type: "mission_created";
+      mission: {
+        id: string;
+        title?: string;
+        kind?: string;
+        status?: string;
+      };
+    }
+  | {
+      /** Durable mission ledger event safe for client-visible work state. */
+      type: "mission_event";
+      missionId: string;
+      eventType: string;
+      message?: string;
     }
   | {
       /** SpawnAgent child lifecycle — live mirror of durable control events. */
@@ -219,7 +263,7 @@ export type AgentEvent =
        * minimum viable live budget, the turn aborts with this event so
        * the UI can prompt the user to switch to a larger-window model.
        *
-       * Fields mirror Open-source legacy runtime's upstream `compaction_impossible`
+       * Fields mirror Magi's upstream `compaction_impossible`
        * telemetry so dashboards can cross-check.
        */
       type: "compaction_impossible";

@@ -6,6 +6,7 @@ import {
 } from "../policy/PolicyKernel.js";
 import {
   AGENT_SELF_MODEL_BLOCK,
+  CODING_SEMANTIC_NAVIGATION_POLICY,
   EXECUTION_DISCIPLINE_POLICY,
   OUTPUT_RULES_BLOCK,
   RUNTIME_EVIDENCE_POLICY,
@@ -13,6 +14,12 @@ import {
 } from "../prompt/RuntimePromptBlocks.js";
 import { Workspace } from "../storage/Workspace.js";
 import { isReliabilityPromptEnabled } from "../hooks/builtin/reliabilityPromptInjector.js";
+import {
+  isIncognitoMemoryMode,
+  isLongTermMemoryWriteDisabled,
+  isProtectedMemoryPath,
+} from "../util/memoryMode.js";
+import type { ChannelMemoryMode } from "../util/types.js";
 
 export interface ChildSystemPromptInput {
   persona: string;
@@ -21,7 +28,8 @@ export interface ChildSystemPromptInput {
   parentSpawnDepth: number;
   parentWorkspaceRoot: string;
   spawnDir: string;
-  workspacePolicy: "trusted" | "isolated";
+  workspacePolicy: "trusted" | "isolated" | "git_worktree";
+  memoryMode?: ChannelMemoryMode;
 }
 
 type ChildContextDoc = {
@@ -143,9 +151,15 @@ async function readChildContextDoc(
   }
 }
 
-async function renderChildWorkspaceContext(parentWorkspaceRoot: string): Promise<string> {
+async function renderChildWorkspaceContext(
+  parentWorkspaceRoot: string,
+  memoryMode?: ChannelMemoryMode,
+): Promise<string> {
+  const docsToInject = isIncognitoMemoryMode(memoryMode)
+    ? CHILD_CONTEXT_DOCS.filter((doc) => !isProtectedMemoryPath(doc.relPath))
+    : CHILD_CONTEXT_DOCS;
   const docs = await Promise.all(
-    CHILD_CONTEXT_DOCS.map((doc) => readChildContextDoc(parentWorkspaceRoot, doc)),
+    docsToInject.map((doc) => readChildContextDoc(parentWorkspaceRoot, doc)),
   );
   const body = docs.filter((doc): doc is string => doc !== null).join("\n\n---\n\n");
   if (!body) return "";
@@ -178,6 +192,15 @@ function renderChildRuntimeContract(input: ChildSystemPromptInput): string {
       "</subagent-runtime-contract>",
     ].join("\n");
   }
+  if (input.workspacePolicy === "git_worktree") {
+    return [
+      "<subagent-runtime-contract>",
+      "You are a coding child worker scoped to a detached git worktree for this task.",
+      "Make code changes inside the worktree workspace only. Do not edit the parent checkout directly.",
+      "Return a concise final status with changed files, verification performed, and any remaining merge risk.",
+      "</subagent-runtime-contract>",
+    ].join("\n");
+  }
   return [
     "<subagent-runtime-contract>",
     "You are a trusted worker for the same bot owner, with the same workspace authority as the parent agent.",
@@ -189,11 +212,23 @@ function renderChildRuntimeContract(input: ChildSystemPromptInput): string {
   ].join("\n");
 }
 
+function isCodingChild(input: ChildSystemPromptInput): boolean {
+  return (
+    input.workspacePolicy === "git_worktree" ||
+    /(?:^|[-_\s])(coder|coding|code|developer|engineer|implementer)(?:$|[-_\s])/i.test(
+      input.persona,
+    ) ||
+    /\b(?:code|coding|debug|bug|implement|refactor|typescript|javascript)\b/i.test(
+      input.prompt,
+    )
+  );
+}
+
 export async function buildChildSystemPrompt(
   input: ChildSystemPromptInput,
 ): Promise<string> {
   const [workspaceContext, runtimePolicy] = await Promise.all([
-    renderChildWorkspaceContext(input.parentWorkspaceRoot),
+    renderChildWorkspaceContext(input.parentWorkspaceRoot, input.memoryMode),
     renderChildRuntimePolicy(input.parentWorkspaceRoot),
   ]);
   const reliabilityBlocks = isReliabilityPromptEnabled()
@@ -209,8 +244,24 @@ export async function buildChildSystemPrompt(
     `[Persona: ${input.persona}]`,
     `[Spawn: parent=${input.parentTurnId} depth=${input.parentSpawnDepth + 1}]`,
     `[Workspace: ${input.spawnDir}]`,
+    isIncognitoMemoryMode(input.memoryMode)
+      ? [
+          '<memory_mode hidden="true">',
+          "memory_mode: incognito",
+          "Long-term memory is disabled for the parent channel. Do not read, search, summarize, or write memory/*, MEMORY.md, SCRATCHPAD.md, WORKING.md, or TASK-QUEUE.md.",
+          "</memory_mode>",
+        ].join("\n")
+      : isLongTermMemoryWriteDisabled(input.memoryMode)
+        ? [
+            '<memory_mode hidden="true">',
+            "memory_mode: read_only",
+            "Existing long-term memory may be read for context. Do not write, summarize, checkpoint, or persist this channel's conversation into memory/*, MEMORY.md, SCRATCHPAD.md, WORKING.md, or TASK-QUEUE.md.",
+            "</memory_mode>",
+          ].join("\n")
+      : "",
     renderChildRuntimeContract(input),
     "",
+    isCodingChild(input) ? CODING_SEMANTIC_NAVIGATION_POLICY : "",
     SUBAGENT_EXECUTION_BASELINE_BLOCK,
     "<subagent_role_override>",
     "You are the spawned child agent, not the main meta-layer agent.",

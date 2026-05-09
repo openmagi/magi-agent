@@ -30,6 +30,7 @@ import {
   type PermissionDecision,
 } from "../permissions/PermissionArbiter.js";
 import { isReadOnlyTool } from "../permissions/ToolPermissionAdapters.js";
+import { buildPatchApplyApprovalInput } from "../tools/PatchApply.js";
 import { decideToolAccess } from "./ToolArbiter.js";
 
 export type PermissionMode = "default" | "plan" | "auto" | "bypass";
@@ -89,7 +90,7 @@ export interface ToolDispatchContext {
    * and the hint falls back to the full registry (legacy behaviour).
    */
   readonly exposedToolNames?: readonly string[];
-  /** Current user message, including runtime-injected addendum and attachments. */
+  /** Current user message, including runtime-injected system addendum and attachments. */
   readonly currentUserMessage?: UserMessage;
 }
 
@@ -403,8 +404,11 @@ async function dispatchOne(
     sessionKey: session.meta.sessionKey,
     turnId,
     workspaceRoot: session.agent.config.workspaceRoot,
+    memoryMode: session.meta.channel?.memoryMode,
     abortSignal: abortController.signal,
+    toolUseId: tu.id,
     executionContract: session.executionContract,
+    sourceLedger: session.sourceLedger,
     ...(ctx.currentUserMessage ? { currentUserMessage: ctx.currentUserMessage } : {}),
     emitProgress: (p) => {
       sse.agent({ type: "tool_start", id: tu.id, name: p.label });
@@ -504,6 +508,7 @@ async function dispatchOne(
     status: result.status,
     output: content.slice(0, 64 * 1024),
     isError,
+    ...(result.metadata ? { metadata: result.metadata } : {}),
   });
 
   // ── afterToolUse hook (observer) ───────────────────────────
@@ -531,6 +536,12 @@ async function resolvePermissionDecision(
 
   if (permission.decision === "ask") {
     await recordPermissionDecision(ctx, tu.name, "ask", permission.reason);
+    const proposedInput = await buildPermissionProposedInput(
+      ctx,
+      tu.name,
+      permission,
+      effectiveInput,
+    );
     const request = await ctx.session.controlRequests.create({
       kind: "tool_permission",
       turnId: ctx.turnId,
@@ -538,7 +549,7 @@ async function resolvePermissionDecision(
       channelName: ctx.session.meta.channel.channelId,
       source: "turn",
       prompt: permission.reason,
-      proposedInput: permission.proposedInput ?? effectiveInput,
+      proposedInput,
       expiresAt: Date.now() + 10 * 60_000,
       idempotencyKey: `tool_permission:${ctx.turnId}:${tu.id}`,
     });
@@ -552,13 +563,15 @@ async function resolvePermissionDecision(
     } as Parameters<typeof ctx.sse.agent>[0]);
     const resolved = await ctx.session.waitForControlRequestResolution(request.requestId);
     if (resolved.state === "approved") {
-      const input = resolved.updatedInput ?? resolved.proposedInput ?? effectiveInput;
+      const input = approvedInputForTool(tu.name, resolved.updatedInput, effectiveInput);
       await recordPermissionDecision(ctx, tu.name, "allow", "approved by user", input);
       return { result: null, input };
     }
-    const msg = resolved.state === "timed_out"
-      ? `permission denied: ${permission.reason} (request timed out)`
-      : `permission denied: ${permission.reason}`;
+    const msg = permissionDeniedMessage(
+      permission.reason,
+      resolved.state,
+      resolved.feedback,
+    );
     await recordPermissionDecision(ctx, tu.name, "deny", msg);
     return { result: await permissionDeniedResult(ctx, tu, started, msg), input: effectiveInput };
   }
@@ -566,6 +579,51 @@ async function resolvePermissionDecision(
   const msg = `permission denied: ${permission.reason}`;
   await recordPermissionDecision(ctx, tu.name, "deny", permission.reason);
   return { result: await permissionDeniedResult(ctx, tu, started, msg), input: effectiveInput };
+}
+
+async function buildPermissionProposedInput(
+  ctx: ToolDispatchContext,
+  toolName: string,
+  permission: PermissionDecision,
+  effectiveInput: unknown,
+): Promise<unknown> {
+  if (toolName === "PatchApply") {
+    return await buildPatchApplyApprovalInput(
+      effectiveInput,
+      ctx.session.agent.config.workspaceRoot,
+    );
+  }
+  return permission.decision === "ask"
+    ? permission.proposedInput ?? effectiveInput
+    : effectiveInput;
+}
+
+function approvedInputForTool(
+  toolName: string,
+  updatedInput: unknown,
+  effectiveInput: unknown,
+): unknown {
+  if (toolName === "PatchApply") {
+    return isPatchApplyExecutableInput(updatedInput) ? updatedInput : effectiveInput;
+  }
+  return updatedInput ?? effectiveInput;
+}
+
+function isPatchApplyExecutableInput(value: unknown): boolean {
+  return !!value && typeof value === "object" && typeof (value as { patch?: unknown }).patch === "string";
+}
+
+function permissionDeniedMessage(
+  reason: string,
+  state: string,
+  feedback?: string,
+): string {
+  const base = state === "timed_out"
+    ? `permission denied: ${reason} (request timed out)`
+    : `permission denied: ${reason}`;
+  const trimmedFeedback = typeof feedback === "string" ? feedback.trim() : "";
+  if (!trimmedFeedback) return base;
+  return `${base}\n\nUser feedback:\n${trimmedFeedback.slice(0, 4_000)}`;
 }
 
 async function permissionDeniedResult(

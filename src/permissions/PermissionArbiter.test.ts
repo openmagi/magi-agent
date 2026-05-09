@@ -35,6 +35,23 @@ describe("PermissionArbiter", () => {
     ).resolves.toMatchObject({ decision: "deny" });
   });
 
+  it("asks for PatchApply writes in plan mode", async () => {
+    const root = await workspace();
+    await expect(
+      decideRuntimePermission({
+        mode: "plan",
+        source: "turn",
+        toolName: "PatchApply",
+        input: { patch: "--- a/a.txt\n+++ b/a.txt\n@@ -1 +1 @@\n-a\n+b\n" },
+        tool: tool("PatchApply", "write"),
+        workspaceRoot: root,
+      }),
+    ).resolves.toMatchObject({
+      decision: "ask",
+      reason: expect.stringContaining("PatchApply"),
+    });
+  });
+
   it("allows simple shell in bypass mode after security policy", async () => {
     const root = await workspace();
     await expect(

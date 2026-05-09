@@ -16,8 +16,8 @@ import { execFile } from "child_process";
 import { stat } from "fs/promises";
 import { join, resolve, basename } from "path";
 import { getOrClassifyRequestMeta } from "./turnMetaClassifier.js";
-import type { ChannelDeliveryReceipt } from "../../channels/ChannelAdapter.js";
 import type { ChannelRef } from "../../util/types.js";
+import type { ChannelDeliveryReceipt } from "../../channels/ChannelAdapter.js";
 
 // ── File delivery execution ──
 
@@ -55,6 +55,14 @@ export interface FileDeliveryInterceptorOptions {
     caption: string | undefined,
     mode: "document" | "photo",
   ) => Promise<ChannelDeliveryReceipt>;
+}
+
+function formatNativeDeliveryResult(fileName: string, channel: ChannelRef, receipt: ChannelDeliveryReceipt): string {
+  const channelLabel = channel.type === "telegram" ? "Telegram" : "Discord";
+  if (receipt.messageId) {
+    return `File "${fileName}" sent to ${channelLabel} chat with provider message id ${receipt.messageId}.`;
+  }
+  return `File "${fileName}" send was accepted by ${channelLabel}, but no provider message id was returned.`;
 }
 
 export function fileDeliveryInterceptor(
@@ -130,8 +138,8 @@ export function fileDeliveryInterceptor(
         (sourceChannel.type === "telegram" || sourceChannel.type === "discord")
       ) {
         try {
-          await opts.sendFile(sourceChannel, resolved, fileName, "document");
-          deliveryResult = `File "${fileName}" sent to ${sourceChannel.type === "telegram" ? "Telegram" : "Discord"} chat.`;
+          const receipt = await opts.sendFile(sourceChannel, resolved, fileName, "document");
+          deliveryResult = formatNativeDeliveryResult(fileName, sourceChannel, receipt);
         } catch (err) {
           deliveryResult = `${sourceChannel.type === "telegram" ? "Telegram" : "Discord"} delivery error: ${(err as Error).message}`;
         }
@@ -156,8 +164,11 @@ export function fileDeliveryInterceptor(
               },
               30000,
             );
+            const marker = stdout.match(/\[attachment:[^\]\r\n]+\]/)?.[0];
             deliveryResult = code === 0
-              ? `File "${fileName}" delivered successfully via chat attachment.`
+              ? marker
+                ? `File "${fileName}" uploaded as chat attachment marker ${marker}.`
+                : `File "${fileName}" upload was accepted by chat attachment service, but no attachment marker was returned.`
               : `File delivery failed: ${stderr || stdout}`;
           } catch (err) {
             deliveryResult = `File delivery error: ${(err as Error).message}`;
@@ -191,12 +202,12 @@ export function fileDeliveryInterceptor(
 
       ctx.emit({ type: "text_delta", delta: `📎 ${deliveryResult}\n` });
 
-      // Inject result into system prompt so LLM just confirms
+      // Inject result into system prompt so LLM just confirms the evidence.
       return {
         action: "replace",
         value: {
           ...args,
-          system: `${args.system}\n\n[SYSTEM: File delivery already completed by runtime. Result: ${deliveryResult}. Briefly confirm to the user. Do NOT re-read or summarize the file.]`,
+          system: `${args.system}\n\n[SYSTEM: Runtime attempted file delivery before the model response. Result: ${deliveryResult}. Briefly report this exact result to the user. If the result includes a provider message id or attachment marker, mention it. Do NOT ask the user to confirm receipt as a completion condition. Do NOT re-read or summarize the file.]`,
         },
       };
     },

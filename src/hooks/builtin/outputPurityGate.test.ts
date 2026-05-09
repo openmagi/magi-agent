@@ -22,6 +22,7 @@ function makeCtx(meta: { internalReasoningLeak?: boolean } = {}): HookContext {
             assistantClaimsChatDelivery: false,
             assistantClaimsKbDelivery: false,
             assistantReportsDeliveryFailure: false,
+      assistantReportsDeliveryUnverified: false,
             reason: "test classifier output",
           }),
         };

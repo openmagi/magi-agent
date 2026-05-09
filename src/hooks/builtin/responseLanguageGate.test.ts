@@ -161,7 +161,7 @@ describe("responseLanguageGate", () => {
         userMessage:
           "Spawn 4 subagents with different SOTA LLM models, calculate 1+1, and cross-validate them each other. Send me the final result in .md file.",
         assistantText:
-          "[META: intent=execution, domain=AI orchestration]\n4개의 서로 다른 SOTA 모델 서브에이전트를 병렬 디스패치합니다.",
+          "[META: intent=실행, domain=AI오케스트레이션]\n4개의 서로 다른 SOTA 모델 서브에이전트를 병렬 디스패치합니다.",
         toolCallCount: 0,
         toolReadHappened: false,
         retryCount: 0,

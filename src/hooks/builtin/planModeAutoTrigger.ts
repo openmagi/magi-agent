@@ -36,7 +36,8 @@ export interface PlanModeAutoTriggerAgent {
   /** Returns the current permissionMode for `sessionKey`, or null when
    *  the session has been evicted between scheduling + dispatch. */
   getSessionPermissionMode(sessionKey: string): PermissionMode | null;
-  /** Promote the current session into native plan mode for approval-gated work. */
+  /** Promote the current session into native plan mode when the
+   *  classifier marks the request as approval-gated planning work. */
   enterPlanMode?(sessionKey: string, turnId: string): Promise<void>;
 }
 

@@ -12,12 +12,23 @@
 import type { Agent } from "./Agent.js";
 import { Turn, TurnInterruptedError, type TurnResult } from "./Turn.js";
 import type { ChannelRef, TokenUsage, UserMessage } from "./util/types.js";
+import type { MissionChannelType } from "./missions/types.js";
+import { judgeGoalTurn } from "./goals/GoalJudge.js";
+import {
+  buildGoalContinuationMessage,
+  canContinueGoal,
+  goalLoopMaxTurns,
+  goalRequestFromMessage,
+} from "./goals/GoalLoop.js";
 import type { SseWriter } from "./transport/SseWriter.js";
 import { Transcript } from "./storage/Transcript.js";
 import { ControlEventLedger } from "./control/ControlEventLedger.js";
 import { ControlRequestStore } from "./control/ControlRequestStore.js";
 import { projectControlEvents, type ControlProjection } from "./control/ControlProjection.js";
 import { PlanLifecycle } from "./plan/PlanLifecycle.js";
+import { ExecutionContractStore } from "./execution/ExecutionContract.js";
+import { ResearchContractStore } from "./research/ResearchContract.js";
+import { SourceLedgerStore } from "./research/SourceLedger.js";
 import type { ResolveControlRequestInput } from "./control/ControlRequestStore.js";
 import type { ControlRequestRecord } from "./control/ControlEvents.js";
 import { CompactionImpossibleError } from "./services/compact/ContextEngine.js";
@@ -32,7 +43,6 @@ import {
   type ContextStats,
 } from "./Context.js";
 import { matchSlashCommand } from "./slash/registry.js";
-import { ExecutionContractStore } from "./execution/ExecutionContract.js";
 
 /**
  * Coding Discipline block (docs/plans/2026-04-20-coding-discipline-design.md).
@@ -90,7 +100,7 @@ export interface SessionMeta {
   sessionKey: string;
   botId: string;
   channel: ChannelRef;
-  /** Persona name, e.g. "main" or "변호두". Parsed from sessionKey. */
+  /** Persona name, e.g. "main" or "researcher". Parsed from sessionKey. */
   persona?: string;
   createdAt: number;
   lastActivityAt: number;
@@ -154,6 +164,32 @@ export type BudgetExceededReason = "turns" | "cost";
 export interface BudgetCheckResult {
   exceeded: boolean;
   reason?: BudgetExceededReason;
+}
+
+function goalLoopEnabled(): boolean {
+  return process.env.CORE_AGENT_GOAL_LOOP === "1";
+}
+
+function truncateGoalText(value: string, limit: number): string {
+  return value.length <= limit ? value : value.slice(0, limit - 1).trimEnd();
+}
+
+function metadataString(
+  metadata: UserMessage["metadata"] | undefined,
+  key: string,
+): string | undefined {
+  const value = metadata?.[key];
+  return typeof value === "string" && value.trim().length > 0
+    ? value.trim()
+    : undefined;
+}
+
+function metadataNumber(
+  metadata: UserMessage["metadata"] | undefined,
+  key: string,
+): number | undefined {
+  const value = metadata?.[key];
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
 }
 
 /**
@@ -223,6 +259,8 @@ export class Session {
   readonly controlRequests: ControlRequestStore;
   readonly planLifecycle: PlanLifecycle;
   readonly executionContract: ExecutionContractStore;
+  readonly sourceLedger: SourceLedgerStore;
+  readonly researchContract: ResearchContractStore;
   /** Legacy convenience accessor — returns the active context's
    * transcript so every pre-T4-19 call site keeps working unchanged. */
   get transcript(): Transcript {
@@ -331,6 +369,8 @@ export class Session {
     });
     this.controlRequests = new ControlRequestStore({ ledger: this.controlEvents });
     this.executionContract = new ExecutionContractStore();
+    this.sourceLedger = new SourceLedgerStore();
+    this.researchContract = new ResearchContractStore();
     this.planLifecycle = new PlanLifecycle({
       sessionKey: meta.sessionKey,
       channelName: meta.channel.channelId,
@@ -830,9 +870,10 @@ export class Session {
       metadata: { injection: { id: injectionId, source } },
     });
     const count = this.pendingInjections.length;
-    // Notify the client that the message was queued — the bot will
-    // pick it up after the current response completes (at the finalise
-    // safety net or the next tool_use iteration's beforeLLMCall drain).
+    // Notify the client that the message was queued. If the active turn
+    // is currently inside an LLM stream, ask it to restart at the next
+    // iteration immediately; if it is running a tool, the injector still
+    // drains at the next beforeLLMCall boundary after that tool returns.
     if (this._activeSse) {
       try {
         this._activeSse.agent({
@@ -843,6 +884,7 @@ export class Session {
         });
       } catch { /* fail-open */ }
     }
+    this.activeTurn?.requestSteerResume(source);
     return { injectionId, queuedCount: count };
   }
 
@@ -891,10 +933,263 @@ export class Session {
     return this.pendingInjections.length;
   }
 
+  private async prepareGoalLoopMessage(
+    userMessage: UserMessage,
+    sse: SseWriter,
+    turnId: string,
+    goalMode: boolean,
+  ): Promise<UserMessage> {
+    if (!goalLoopEnabled()) return userMessage;
+    const goalRequest = goalRequestFromMessage({
+      text: userMessage.text,
+      goalMode,
+    });
+    if (!goalRequest) return userMessage;
+
+    const metadata: NonNullable<UserMessage["metadata"]> = {
+      ...(userMessage.metadata ?? {}),
+      goalMode: true,
+      missionKind: "goal",
+      missionTitle: goalRequest.objective,
+      goalObjective: goalRequest.objective,
+      goalTurnsUsed: 0,
+      goalMaxTurns: goalLoopMaxTurns(),
+    };
+
+    try {
+      const mission = await this.agent.missionClient.createMission({
+        channelType: this.meta.channel.type as MissionChannelType,
+        channelId: this.meta.channel.channelId,
+        kind: "goal",
+        title: truncateGoalText(goalRequest.objective, 240),
+        summary: truncateGoalText(goalRequest.objective, 500),
+        status: "running",
+        createdBy: "user",
+        metadata: {
+          objective: goalRequest.objective,
+          sessionKey: this.meta.sessionKey,
+          turnId,
+        },
+      });
+      const run = await this.agent.missionClient.createRun(mission.id, {
+        triggerType: "user",
+        status: "running",
+        sessionKey: this.meta.sessionKey,
+        turnId,
+        metadata: { objective: goalRequest.objective },
+      });
+      metadata.missionId = mission.id;
+      if (typeof run.id === "string") metadata.missionRunId = run.id;
+      sse.agent({ type: "mission_created", mission });
+      sse.agent({
+        type: "mission_event",
+        missionId: mission.id,
+        eventType: "created",
+        message: "Goal mission started",
+      });
+    } catch (err) {
+      console.warn(
+        `[core-agent] goal mission create failed sessionKey=${this.meta.sessionKey}: ${(err as Error).message}`,
+      );
+    }
+
+    return {
+      ...userMessage,
+      text: goalRequest.text,
+      metadata,
+    };
+  }
+
+  private async prepareGoalContinuationRun(
+    userMessage: UserMessage,
+    sse: SseWriter,
+    turnId: string,
+  ): Promise<UserMessage> {
+    if (!goalLoopEnabled()) return userMessage;
+    const metadata = userMessage.metadata;
+    if (metadata?.goalContinuation !== true) return userMessage;
+    const missionId = metadataString(metadata, "missionId");
+    if (!missionId) return userMessage;
+
+    const objective = metadataString(metadata, "goalObjective") ?? userMessage.text;
+    const nextMetadata: NonNullable<UserMessage["metadata"]> = {
+      ...metadata,
+      goalMode: true,
+      missionKind: "goal",
+      missionTitle: objective,
+      goalObjective: objective,
+    };
+    try {
+      const run = await this.agent.missionClient.createRun(missionId, {
+        triggerType: "goal_continue",
+        status: "running",
+        sessionKey: this.meta.sessionKey,
+        turnId,
+        metadata: {
+          objective,
+          turnsUsed: metadataNumber(metadata, "goalTurnsUsed") ?? 0,
+        },
+      });
+      if (typeof run.id === "string") nextMetadata.missionRunId = run.id;
+      sse.agent({
+        type: "mission_event",
+        missionId,
+        eventType: "heartbeat",
+        message: "Goal continuation started",
+      });
+    } catch (err) {
+      console.warn(
+        `[core-agent] goal continuation run create failed sessionKey=${this.meta.sessionKey}: ${(err as Error).message}`,
+      );
+    }
+    return { ...userMessage, metadata: nextMetadata };
+  }
+
+  private async appendGoalMissionEvent(input: {
+    missionId: string;
+    missionRunId?: string;
+    eventType: "heartbeat" | "completed" | "blocked" | "failed";
+    message?: string;
+    payload?: Record<string, unknown>;
+  }): Promise<void> {
+    try {
+      await this.agent.missionClient.appendEvent(input.missionId, {
+        ...(input.missionRunId ? { runId: input.missionRunId } : {}),
+        actorType: "system",
+        eventType: input.eventType,
+        ...(input.message ? { message: input.message } : {}),
+        payload: input.payload ?? {},
+      });
+    } catch (err) {
+      console.warn(
+        `[core-agent] goal mission event append failed missionId=${input.missionId}: ${(err as Error).message}`,
+      );
+    }
+  }
+
+  private scheduleGoalContinuation(message: UserMessage): void {
+    const timer = setTimeout(() => {
+      void this.runGoalContinuation(message).catch((err: unknown) => {
+        console.warn(
+          `[core-agent] goal continuation failed sessionKey=${this.meta.sessionKey}: ${(err as Error).message}`,
+        );
+      });
+    }, 0);
+    timer.unref?.();
+  }
+
+  private async runGoalContinuation(message: UserMessage): Promise<void> {
+    const { StubSseWriter } = await import("./transport/SseWriter.js");
+    const result = await this.runTurn(message, new StubSseWriter());
+    const text = result.assistantText.trim();
+    if (text.length === 0) return;
+    await this.agent.deliverAssistantTextToChannel(this.meta.channel, text, "goal");
+  }
+
+  private async evaluateGoalContinuation(
+    userMessage: UserMessage,
+    assistantText: string,
+  ): Promise<void> {
+    if (!goalLoopEnabled()) return;
+    const metadata = userMessage.metadata;
+    if (metadata?.goalMode !== true) return;
+    const missionId = metadataString(metadata, "missionId");
+    const objective = metadataString(metadata, "goalObjective");
+    if (!missionId || !objective) return;
+
+    const turnsUsed = (metadataNumber(metadata, "goalTurnsUsed") ?? 0) + 1;
+    const maxTurns = metadataNumber(metadata, "goalMaxTurns") ?? goalLoopMaxTurns();
+    const missionRunId = metadataString(metadata, "missionRunId");
+    let decision;
+    try {
+      decision = await judgeGoalTurn({
+        llm: this.agent.llm,
+        model: this.agent.config.model,
+        objective,
+        userText: userMessage.text,
+        assistantText,
+      });
+    } catch (err) {
+      await this.appendGoalMissionEvent({
+        missionId,
+        missionRunId,
+        eventType: "blocked",
+        message: (err as Error).message,
+        payload: { reason: "goal_judge_failed", turnsUsed, maxTurns },
+      });
+      return;
+    }
+
+    if (decision.decision === "done") {
+      await this.appendGoalMissionEvent({
+        missionId,
+        missionRunId,
+        eventType: "completed",
+        message: decision.reason || "Goal completed",
+        payload: { turnsUsed, maxTurns },
+      });
+      return;
+    }
+
+    if (decision.decision === "blocked" || decision.decision === "needs_user") {
+      await this.appendGoalMissionEvent({
+        missionId,
+        missionRunId,
+        eventType: "blocked",
+        message: decision.reason || "Goal needs user input",
+        payload: { decision: decision.decision, turnsUsed, maxTurns },
+      });
+      return;
+    }
+
+    const state = {
+      missionId,
+      objective,
+      turnsUsed,
+      maxTurns,
+      paused: false,
+      cancelled: false,
+    };
+    if (!canContinueGoal(state)) {
+      await this.appendGoalMissionEvent({
+        missionId,
+        missionRunId,
+        eventType: "blocked",
+        message: "Goal turn budget exhausted",
+        payload: { turnsUsed, maxTurns },
+      });
+      return;
+    }
+
+    await this.appendGoalMissionEvent({
+      missionId,
+      missionRunId,
+      eventType: "heartbeat",
+      message: "Goal continuation scheduled",
+      payload: { reason: decision.reason, turnsUsed, maxTurns },
+    });
+    this.scheduleGoalContinuation(
+      buildGoalContinuationMessage({
+        objective,
+        missionId,
+        missionRunId,
+        turnsUsed,
+        maxTurns,
+        previousAssistantText: assistantText,
+        reason: decision.reason,
+      }),
+    );
+  }
+
   async runTurn(
     userMessage: UserMessage,
     sse: SseWriter,
-    options: { planMode?: boolean; contextId?: string; runtimeModelOverride?: string } = {},
+    options: {
+      planMode?: boolean;
+      contextId?: string;
+      runtimeModelOverride?: string;
+      goalMode?: boolean;
+    } = {},
   ): Promise<TurnResult> {
     return this.mutex.run(async () => {
       this.meta.lastActivityAt = Date.now();
@@ -976,7 +1271,19 @@ export class Session {
         }
       }
       await this.hydrateMetaIfNeeded();
-      this.executionContract.startTurn({ userMessage: userMessage.text });
+      const turnId = this.agent.nextTurnId();
+      const goalLoopMessage = await this.prepareGoalLoopMessage(
+        userMessage,
+        sse,
+        turnId,
+        options.goalMode === true,
+      );
+      const effectiveUserMessage = await this.prepareGoalContinuationRun(
+        goalLoopMessage,
+        sse,
+        turnId,
+      );
+      this.executionContract.startTurn({ userMessage: effectiveUserMessage.text });
       const active = this.getActiveContext();
       sse.agent({
         type: "context_activated",
@@ -990,12 +1297,11 @@ export class Session {
       // by Session.getPermissionMode().
       const planRequested =
         options.planMode === true ||
-        /\[PLAN_MODE:\s*on\]/i.test(userMessage.text);
+        /\[PLAN_MODE:\s*on\]/i.test(effectiveUserMessage.text);
       if (planRequested && this.permissionMode !== "plan") {
         this.setPermissionMode("plan");
       }
-      const turnId = this.agent.nextTurnId();
-      const turn = new Turn(this, userMessage, turnId, sse, "direct", options);
+      const turn = new Turn(this, effectiveUserMessage, turnId, sse, "direct", options);
       this.activeTurn = turn;
       this.agent.registerTurn(turn);
       let committedAssistantText = "";
@@ -1061,11 +1367,15 @@ export class Session {
         active.recordTurn(turn.meta.usage);
         this.agent.unregisterTurn(turnId);
       }
-      return {
+      const result = {
         meta: turn.meta,
         assistantText: committedAssistantText,
         stopReason: turn.meta.stopReason ?? "aborted",
       };
+      if (turn.meta.status === "committed" && committedAssistantText.trim().length > 0) {
+        void this.evaluateGoalContinuation(effectiveUserMessage, committedAssistantText);
+      }
+      return result;
     });
   }
 
@@ -1081,7 +1391,7 @@ export class Session {
 /**
  * Parse persona hint from sessionKey. Format observed today:
  *   agent:<persona>:<channel>:<channelId>:<bucket>
- * e.g. `agent:main:app:general:7`, `agent:변호두:app:legal:3`.
+ * e.g. `agent:main:app:general:7`, `agent:researcher:app:analysis:3`.
  */
 export function personaFromSessionKey(sessionKey: string): string | undefined {
   const parts = sessionKey.split(":");
