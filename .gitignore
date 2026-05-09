@@ -6,7 +6,7 @@ dist/
 .env
 .env.local
 magi-agent.yaml
-workspace/
+/workspace/
 memory/daily/
 memory/weekly/
 memory/monthly/

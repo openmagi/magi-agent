@@ -25382,8 +25382,8 @@ function wrap(middleware, callback) {
     done(null, value);
   }
 }
-const minpath = { basename, dirname, extname, join, sep: "/" };
-function basename(path2, extname2) {
+const minpath = { basename: basename$1, dirname, extname, join, sep: "/" };
+function basename$1(path2, extname2) {
   if (extname2 !== void 0 && typeof extname2 !== "string") {
     throw new TypeError('"ext" argument must be a string');
   }
@@ -34428,143 +34428,106 @@ function getKbPanelHiddenRowCount({
   }).length;
   return Math.max(totalRows - limit, 0);
 }
-const MARKDOWN_EXTENSIONS = /* @__PURE__ */ new Set(["md", "markdown"]);
 const TEXT_EXTENSIONS = /* @__PURE__ */ new Set([
-  "txt",
-  "csv",
-  "tsv",
-  "json",
-  "yaml",
-  "yml",
-  "log",
-  "xml",
-  "xhtml",
-  "py",
-  "pyw",
-  "rpy",
-  "ipynb",
-  "js",
-  "jsx",
-  "mjs",
-  "cjs",
-  "ts",
-  "tsx",
-  "mts",
-  "cts",
-  "c",
-  "h",
-  "cpp",
-  "cc",
-  "cxx",
-  "hpp",
-  "hh",
-  "hxx",
-  "java",
-  "kt",
-  "kts",
-  "swift",
-  "go",
-  "rs",
-  "rb",
-  "php",
-  "cs",
-  "sh",
-  "bash",
-  "zsh",
-  "fish",
-  "ps1",
-  "bat",
-  "cmd",
-  "sql",
-  "r",
-  "scala",
-  "sc",
-  "dart",
-  "lua",
-  "pl",
-  "pm",
-  "ex",
-  "exs",
-  "erl",
-  "hrl",
-  "fs",
-  "fsx",
-  "fsi",
-  "clj",
-  "cljs",
-  "edn",
-  "hs",
-  "lhs",
-  "elm",
-  "vue",
-  "svelte",
-  "css",
-  "scss",
-  "sass",
-  "less",
-  "toml",
-  "ini",
-  "cfg",
-  "conf",
-  "env",
-  "properties",
-  "gitignore",
-  "dockerfile",
-  "makefile",
-  "mk",
-  "cmake",
-  "gradle",
-  "proto",
-  "graphql",
-  "gql",
-  "lock",
-  "patch",
-  "diff"
+  ".cjs",
+  ".conf",
+  ".css",
+  ".csv",
+  ".env",
+  ".gitignore",
+  ".html",
+  ".js",
+  ".json",
+  ".jsonl",
+  ".jsx",
+  ".log",
+  ".md",
+  ".mdx",
+  ".mjs",
+  ".prompt",
+  ".py",
+  ".sh",
+  ".sql",
+  ".svg",
+  ".toml",
+  ".ts",
+  ".tsx",
+  ".txt",
+  ".xml",
+  ".yaml",
+  ".yml"
 ]);
-const HTML_EXTENSIONS = /* @__PURE__ */ new Set(["html", "htm"]);
-const IMAGE_EXTENSIONS = /* @__PURE__ */ new Set(["png", "jpg", "jpeg", "gif", "webp", "bmp", "ico"]);
-function extensionFor(filePath) {
-  const name2 = filePath.split("/").pop() ?? filePath;
-  const dot = name2.lastIndexOf(".");
-  return dot >= 0 ? name2.slice(dot + 1).toLowerCase() : "";
+const IMAGE_EXTENSIONS = /* @__PURE__ */ new Set([
+  ".avif",
+  ".gif",
+  ".jpeg",
+  ".jpg",
+  ".png",
+  ".webp"
+]);
+const DEFAULT_FILE_READ_BYTES = 256 * 1024;
+function normalizePath(path2) {
+  return path2.replace(/\\/g, "/").replace(/^\/+/, "");
 }
-function filenameForWorkspacePath(filePath) {
-  return filePath.split("/").filter(Boolean).pop() ?? filePath;
+function basename(path2) {
+  const parts = normalizePath(path2).split("/").filter(Boolean);
+  return parts.at(-1) || path2 || "file";
 }
-function getWorkspaceFilePreviewKind(filePath) {
-  const ext = extensionFor(filePath);
-  if (MARKDOWN_EXTENSIONS.has(ext)) return "markdown";
-  if (TEXT_EXTENSIONS.has(ext)) return "text";
-  if (HTML_EXTENSIONS.has(ext)) return "html";
-  if (IMAGE_EXTENSIONS.has(ext)) return "image";
-  if (ext === "pdf") return "pdf";
+function extensionFor(path2) {
+  const name2 = basename(path2).toLowerCase();
+  if (name2 === ".gitignore" || name2 === ".env") return name2;
+  const index2 = name2.lastIndexOf(".");
+  return index2 > 0 ? name2.slice(index2) : "";
+}
+function getWorkspaceFilePreviewKind(path2) {
+  const extension2 = extensionFor(path2);
+  if (IMAGE_EXTENSIONS.has(extension2)) return "image";
+  if (extension2 === ".pdf") return "pdf";
+  if (TEXT_EXTENSIONS.has(extension2) || extension2 === "") return "text";
   return "download";
 }
-function buildWorkspaceFileContentUrl({
-  botId,
-  path: path2,
-  mode
-}) {
-  const params = new URLSearchParams({ botId, path: path2 });
-  if (mode === "download" || mode === "inline") {
-    return `/v1/app/workspace/download?${params.toString()}`;
+function normalizeWorkspaceFileList(entries) {
+  const seen2 = /* @__PURE__ */ new Map();
+  for (const entry of entries) {
+    const path2 = normalizePath(entry.path || entry.name || "");
+    if (!path2 || path2 === ".") continue;
+    const size = typeof entry.size === "number" && Number.isFinite(entry.size) ? entry.size : typeof entry.sizeBytes === "number" && Number.isFinite(entry.sizeBytes) ? entry.sizeBytes : 0;
+    const modifiedAt = typeof entry.modifiedAt === "string" ? entry.modifiedAt : typeof entry.mtimeMs === "number" && Number.isFinite(entry.mtimeMs) ? new Date(entry.mtimeMs).toISOString() : null;
+    const extension2 = extensionFor(path2);
+    seen2.set(path2, {
+      path: path2,
+      filename: basename(path2),
+      size,
+      modifiedAt,
+      extension: extension2,
+      previewKind: entry.previewKind ?? getWorkspaceFilePreviewKind(path2)
+    });
   }
-  params.set("maxBytes", String(256 * 1024));
-  return `/v1/app/workspace/file?${params.toString()}`;
+  return Array.from(seen2.values()).sort((a, b) => a.path.localeCompare(b.path));
 }
-function normalizeWorkspaceFileList(rows) {
-  return rows.map((row) => ({
-    path: row.path,
-    filename: filenameForWorkspacePath(row.path),
-    size: row.size,
-    modifiedAt: row.modifiedAt ?? null,
-    previewKind: getWorkspaceFilePreviewKind(row.path)
-  }));
+function formatWorkspaceFileSize(size) {
+  if (!Number.isFinite(size) || size <= 0) return "0 B";
+  const units = ["B", "KB", "MB", "GB"];
+  let value = size;
+  let unitIndex = 0;
+  while (value >= 1024 && unitIndex < units.length - 1) {
+    value /= 1024;
+    unitIndex += 1;
+  }
+  const formatted = unitIndex === 0 ? String(Math.round(value)) : value.toFixed(value >= 10 ? 1 : 2);
+  return `${formatted} ${units[unitIndex]}`;
 }
-function formatWorkspaceFileSize(bytes) {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+function buildWorkspaceFileContentUrl({
+  path: path2,
+  mode = "content",
+  maxBytes = DEFAULT_FILE_READ_BYTES
+}) {
+  const endpoint = mode === "content" ? "/v1/app/workspace/file" : "/v1/app/workspace/download";
+  const params = new URLSearchParams({ path: path2 });
+  if (mode === "content") {
+    params.set("maxBytes", String(maxBytes));
+  }
+  return `${endpoint}?${params.toString()}`;
 }
 const PANEL_KEY = "magi:kbPanelExpanded";
 const PANEL_WIDTH_KEY = "magi:kbPanelWidth";
@@ -34773,8 +34736,8 @@ function KbSidePanel({
       setPreview(null);
       return;
     }
-    const downloadUrl = buildWorkspaceFileContentUrl({ botId, path: file.path, mode: "download" });
-    const inlineUrl = buildWorkspaceFileContentUrl({ botId, path: file.path, mode: "inline" });
+    const downloadUrl = buildWorkspaceFileContentUrl({ path: file.path, mode: "download" });
+    const inlineUrl = buildWorkspaceFileContentUrl({ path: file.path, mode: "inline" });
     if (file.previewKind === "image" || file.previewKind === "pdf") {
       setPreview({
         id,
@@ -35227,7 +35190,7 @@ function KbSidePanel({
           /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "ml-3 pl-2 border-l border-black/[0.05]", children: filteredWorkspaceFiles.map((file) => {
             const previewId = `workspace:${file.path}`;
             const isPreviewing = preview2?.id === previewId;
-            const downloadUrl = buildWorkspaceFileContentUrl({ botId, path: file.path, mode: "download" });
+            const downloadUrl = buildWorkspaceFileContentUrl({ path: file.path, mode: "download" });
             return /* @__PURE__ */ jsxRuntimeExports.jsxs(
               "div",
               {
