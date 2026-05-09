@@ -20,6 +20,7 @@ import {
 } from "./_helpers.js";
 import { SseWriter } from "../SseWriter.js";
 import { applyResetToSessionKey } from "../../slash/resetCounters.js";
+import { isRouterKeyword } from "../../routing/types.js";
 import type {
   ChannelRef,
   ImageContentBlock,
@@ -93,7 +94,7 @@ export function extractRuntimeModelOverride(body: unknown): string | undefined {
   const raw = (body as { model?: unknown }).model;
   if (typeof raw !== "string") return undefined;
   const model = raw.trim();
-  if (!model || model === "auto" || model === "magi-smart-router/auto") {
+  if (!model || model === "auto" || isRouterKeyword(model)) {
     return undefined;
   }
   return model;

@@ -347,15 +347,33 @@ describe("HttpServer /v1/chat/completions + /v1/turns/:id/ask-response", () => {
         "Content-Type": "application/json",
       },
       JSON.stringify({
-        model: "big-dic-router/auto",
+        model: "openai/gpt-5.5-pro",
         messages: [{ role: "user", content: "use premium router here" }],
       }),
     );
 
     expect(r.status).toBe(200);
     expect(capture.runOptions).toMatchObject({
-      runtimeModelOverride: "big-dic-router/auto",
+      runtimeModelOverride: "openai/gpt-5.5-pro",
     });
+  });
+
+  it("POST /v1/chat/completions treats router aliases as automatic local routing", async () => {
+    const r = await rawRequest(
+      "POST",
+      `http://127.0.0.1:${port}/v1/chat/completions`,
+      {
+        Authorization: `Bearer ${TOKEN}`,
+        "Content-Type": "application/json",
+      },
+      JSON.stringify({
+        model: "big-dic-router/auto",
+        messages: [{ role: "user", content: "use premium router here" }],
+      }),
+    );
+
+    expect(r.status).toBe(200);
+    expect(capture.runOptions).not.toHaveProperty("runtimeModelOverride");
   });
 
   it("POST /v1/chat/completions preserves kb-context system addendum and image blocks", async () => {
@@ -1044,6 +1062,7 @@ describe("extractRuntimeModelOverride", () => {
     expect(extractRuntimeModelOverride({ model: "" })).toBeUndefined();
     expect(extractRuntimeModelOverride({ model: "auto" })).toBeUndefined();
     expect(extractRuntimeModelOverride({ model: "magi-smart-router/auto" })).toBeUndefined();
+    expect(extractRuntimeModelOverride({ model: "big-dic-router/auto" })).toBeUndefined();
   });
 });
 
