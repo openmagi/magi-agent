@@ -339,14 +339,20 @@ function safeControlEvent(value: unknown): SafeAgentEvent | null {
           ? { reason: maybeText(value.reason, 500) }
           : {}),
       };
-    case "child_started":
-      return {
+    case "child_started": {
+      const safe: SafeAgentEvent = {
         type: "child_started",
         taskId: text(value.taskId, "task", 120),
         ...(maybeText(value.parentTurnId, 120)
           ? { parentTurnId: maybeText(value.parentTurnId, 120) }
           : {}),
       };
+      const detail = typeof value.detail === "string"
+        ? maybeText(redactPreview(value.detail))
+        : undefined;
+      if (detail) safe.detail = detail;
+      return safe;
+    }
     case "child_progress":
       return {
         type: "child_progress",
@@ -425,6 +431,24 @@ export function safeAgentEvent(event: unknown): SafeAgentEvent | null {
       return { type: "response_clear" };
     case "thinking_delta":
       return null;
+    case "llm_progress": {
+      const safe: SafeAgentEvent = {
+        type: "llm_progress",
+        turnId: text(event.turnId, "turn"),
+        iter: num(event.iter),
+        stage: oneOf(event.stage, ["started", "waiting", "completed"] as const, "waiting"),
+        label: text(event.label, "Model progress"),
+      };
+      const detail = typeof event.detail === "string"
+        ? maybeText(redactPreview(event.detail))
+        : undefined;
+      if (detail) safe.detail = detail;
+      const elapsedMs = typeof event.elapsedMs === "number" && Number.isFinite(event.elapsedMs)
+        ? Math.max(0, Math.trunc(event.elapsedMs))
+        : undefined;
+      if (elapsedMs !== undefined) safe.elapsedMs = elapsedMs;
+      return safe;
+    }
     case "tool_start": {
       const safe: SafeAgentEvent = {
         type: "tool_start",
@@ -566,13 +590,19 @@ export function safeAgentEvent(event: unknown): SafeAgentEvent | null {
         handoffRequested: bool(event.handoffRequested),
         source: text(event.source, "api", 96),
       };
-    case "spawn_started":
-      return {
+    case "spawn_started": {
+      const safe: SafeAgentEvent = {
         type: "spawn_started",
         taskId: text(event.taskId, "task"),
         persona: text(event.persona, "agent", 96),
         deliver: oneOf(event.deliver, ["return", "background"] as const, "return"),
       };
+      const detail = typeof event.detail === "string"
+        ? maybeText(redactPreview(event.detail))
+        : undefined;
+      if (detail) safe.detail = detail;
+      return safe;
+    }
     case "spawn_result":
       return {
         type: "spawn_result",

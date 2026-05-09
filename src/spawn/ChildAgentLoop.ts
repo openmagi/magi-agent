@@ -52,7 +52,7 @@ import type { Workspace } from "../storage/Workspace.js";
 import type { TranscriptEntry } from "../storage/Transcript.js";
 import { readOne } from "../turn/LLMStreamReader.js";
 import type { PermissionMode } from "../turn/ToolDispatcher.js";
-import { summariseToolOutput } from "../util/toolResult.js";
+import { buildToolInputPreview, summariseToolOutput } from "../util/toolResult.js";
 import { classifyFinalAnswerMeta } from "../hooks/builtin/turnMetaClassifier.js";
 import { buildChildSystemPrompt } from "./ChildSystemPrompt.js";
 import type { ChannelMemoryMode, UserMessage } from "../util/types.js";
@@ -582,7 +582,11 @@ export async function runChildAgentLoop(
           evidence: buildChildEvidence(childTranscript, effectiveTurnId),
         };
       }
-      await opts.lifecycle?.progress(`iteration ${iter + 1}`);
+      await opts.lifecycle?.progress(
+        iter === 0
+          ? "Thinking through delegated task"
+          : `Continuing delegated task pass ${iter + 1}`,
+      );
 
       if (hooks) {
         const preLLM = await hooks.runPre(
@@ -794,6 +798,8 @@ interface ChildToolResult {
   isError: boolean;
 }
 
+type ChildToolUse = Extract<LLMContentBlock, { type: "tool_use" }>;
+
 async function runChildTools(
   args: ChildToolRunInput,
 ): Promise<ChildToolResult[]> {
@@ -867,21 +873,76 @@ function deniedToolResult(message: string): ToolResult {
   };
 }
 
+function childToolEventId(opts: SpawnChildOptions, toolUseId: string): string {
+  return `child:${opts.taskId}:${toolUseId}`;
+}
+
+function previewChildToolOutput(result: ToolResult, fallback: string): string | undefined {
+  const previewSource = result.output ?? result.errorMessage ?? fallback;
+  if (previewSource === undefined) return undefined;
+  try {
+    const preview =
+      typeof previewSource === "string" ? previewSource : JSON.stringify(previewSource);
+    return preview.length > 400 ? `${preview.slice(0, 400)}...` : preview;
+  } catch {
+    return fallback.length > 400 ? `${fallback.slice(0, 400)}...` : fallback;
+  }
+}
+
+function emitChildToolStart(
+  opts: SpawnChildOptions,
+  tu: ChildToolUse,
+  eventId: string,
+): void {
+  opts.onAgentEvent?.({
+    type: "tool_start",
+    id: eventId,
+    name: tu.name,
+    input_preview: buildToolInputPreview(tu.name, tu.input),
+  });
+}
+
+function emitChildToolEnd(input: {
+  opts: SpawnChildOptions;
+  eventId: string;
+  startedAt: number;
+  result: ToolResult;
+  content: string;
+}): void {
+  input.opts.onAgentEvent?.({
+    type: "tool_end",
+    id: input.eventId,
+    status: input.result.status,
+    durationMs: input.result.durationMs ?? Date.now() - input.startedAt,
+    output_preview: previewChildToolOutput(input.result, input.content),
+  });
+}
+
 async function runOneChildTool(
   args: ChildToolRunInput,
-  tu: Extract<LLMContentBlock, { type: "tool_use" }>,
+  tu: ChildToolUse,
 ): Promise<ChildToolResult> {
   const { toolsByName, agent, opts, abortSignal, agentModel, childTranscript } = args;
   const hooks = getChildHookRegistry(agent);
+  const started = Date.now();
+  const eventId = childToolEventId(opts, tu.id);
 
   await opts.lifecycle?.toolRequest({ requestId: tu.id, toolName: tu.name });
+  emitChildToolStart(opts, tu, eventId);
+  const finish = (result: ToolResult, content: string): ChildToolResult => {
+    emitChildToolEnd({ opts, eventId, startedAt: started, result, content });
+    return { toolUseId: tu.id, content, isError: result.status !== "ok" };
+  };
+
   const tool = toolsByName.get(tu.name);
   if (!tool) {
-    return {
-      toolUseId: tu.id,
-      content: `error:unknown_tool ${tu.name} not in child toolset`,
-      isError: true,
-    };
+    const content = `error:unknown_tool ${tu.name} not in child toolset`;
+    return finish({
+      status: "error",
+      errorCode: "unknown_tool",
+      errorMessage: content,
+      durationMs: Date.now() - started,
+    }, content);
   }
 
   let effectiveInput = tu.input;
@@ -912,7 +973,7 @@ async function runOneChildTool(
         result,
         output: content,
       });
-      return { toolUseId: tu.id, content, isError: true };
+      return finish(result, content);
     }
     if (preTool.action === "continue") {
       effectiveInput = preTool.args.input;
@@ -936,7 +997,7 @@ async function runOneChildTool(
       result,
       output: content,
     });
-    return { toolUseId: tu.id, content, isError: true };
+    return finish(result, content);
   }
 
   if (tu.name === "Bash" && childWorkspacePolicy(opts) !== "trusted") {
@@ -957,7 +1018,7 @@ async function runOneChildTool(
         result,
         output: content,
       });
-      return { toolUseId: tu.id, content, isError: true };
+      return finish(result, content);
     }
   }
 
@@ -991,7 +1052,7 @@ async function runOneChildTool(
         result,
         output: content,
       });
-      return { toolUseId: tu.id, content, isError: true };
+      return finish(result, content);
     }
     await opts.lifecycle?.permissionDecision({
       decision: "allow",
@@ -1010,7 +1071,7 @@ async function runOneChildTool(
       result,
       output: content,
     });
-    return { toolUseId: tu.id, content, isError: true };
+    return finish(result, content);
   }
   if (permission.decision === "allow") {
     effectiveInput = permission.updatedInput ?? effectiveInput;
@@ -1025,8 +1086,12 @@ async function runOneChildTool(
     spawnWorkspace: childSpawnWorkspace(opts),
     abortSignal,
     currentUserMessage: childUserMessage(opts),
-    emitProgress: () => {
-      /* child progress folded into spawn_result — no per-step SSE */
+    emitProgress: (progress) => {
+      opts.onAgentEvent?.({
+        type: "tool_progress",
+        id: eventId,
+        label: progress.label,
+      });
     },
     emitAgentEvent: opts.onAgentEvent,
     askUser:
@@ -1049,7 +1114,6 @@ async function runOneChildTool(
     executionContract: opts.executionContract,
   };
 
-  const started = Date.now();
   let result: ToolResult;
   try {
     result = await (tool as Tool<unknown, unknown>).execute(effectiveInput, childCtx);
@@ -1081,7 +1145,7 @@ async function runOneChildTool(
     result,
     output: content,
   });
-  return { toolUseId: tu.id, content, isError: result.status !== "ok" };
+  return finish(result, content);
 }
 
 function commandOf(input: unknown): string {

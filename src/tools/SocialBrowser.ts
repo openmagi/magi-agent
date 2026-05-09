@@ -60,7 +60,7 @@ const INPUT_SCHEMA = {
     provider: {
       type: "string",
       enum: ["instagram", "ig", "x", "twitter"],
-      description: "Social provider for the existing dashboard-created session.",
+      description: "Social provider for the existing one-time chat or dashboard session.",
     },
     url: {
       type: "string",
@@ -91,6 +91,7 @@ const DEFAULT_TIMEOUT_MS = 30_000;
 const SLOW_ACTION_TIMEOUT_MS = 60_000;
 const MAX_TIMEOUT_MS = 120_000;
 const MAX_OUTPUT_BYTES = 128 * 1024;
+const SOCIAL_BROWSER_CANCEL_CHOICE_ID = "social_browser_cancel";
 
 function normalizeTimeout(timeoutMs: unknown, defaultTimeoutMs: number): number {
   if (typeof timeoutMs !== "number" || !Number.isFinite(timeoutMs)) return defaultTimeoutMs;
@@ -106,6 +107,49 @@ function timeoutForAction(action: SocialBrowserAction): number {
 function normalizeMaxItems(value: unknown): number {
   if (typeof value !== "number" || !Number.isFinite(value)) return DEFAULT_SOCIAL_BROWSER_MAX_ITEMS;
   return Math.max(1, Math.min(DEFAULT_SOCIAL_BROWSER_MAX_ITEMS, Math.trunc(value)));
+}
+
+function socialConnectChoiceId(provider: SocialProvider): string {
+  return `social_browser_connect_${provider}`;
+}
+
+function socialProviderLabel(provider: SocialProvider): string {
+  return provider === "instagram" ? "Instagram" : "X";
+}
+
+function runRequiresSocialBrowserSession(run: SocialBrowserRunResult): boolean {
+  const combined = `${run.stdout}\n${run.stderr}`;
+  if (combined.includes("social_browser_session_required")) return true;
+  try {
+    const parsed = JSON.parse(run.stdout || run.stderr || "{}");
+    return parsed?.error === "social_browser_session_required";
+  } catch {
+    return false;
+  }
+}
+
+async function askToConnectSocialBrowser(
+  ctx: ToolContext,
+  provider: SocialProvider,
+): Promise<boolean> {
+  const label = socialProviderLabel(provider);
+  const answer = await ctx.askUser({
+    question: `Connect ${label} in a one-time browser session to continue this request?`,
+    choices: [
+      {
+        id: socialConnectChoiceId(provider),
+        label: `Open ${label}`,
+        description:
+          "Starts a one-time browser session. Passwords stay in the browser session and are not sent to the bot.",
+      },
+      {
+        id: SOCIAL_BROWSER_CANCEL_CHOICE_ID,
+        label: "Cancel",
+      },
+    ],
+    allowFreeText: false,
+  });
+  return answer.selectedId === socialConnectChoiceId(provider);
 }
 
 function browserCommandEnv(cwd: string): NodeJS.ProcessEnv {
@@ -244,7 +288,7 @@ export function makeSocialBrowserTool(
   return {
     name: "SocialBrowser",
     description:
-      "Read the user's one-time Instagram/X browser session created from dashboard Integrations. Use only for visible-page reads; never ask for, store, or replay social passwords.",
+      "Read the user's one-time Instagram/X browser session created from chat or dashboard Integrations. Use only for visible-page reads; never ask for, store, or replay social passwords.",
     inputSchema: INPUT_SCHEMA,
     permission: "net",
     dangerous: false,
@@ -287,13 +331,36 @@ export function makeSocialBrowserTool(
       }
 
       const claimMaxItems = normalizeMaxItems(input.maxItems);
-      const claimRun = await runner(
+      let claimRun = await runner(
         "integration.sh",
         ["social-browser/claim", JSON.stringify({ provider, maxItems: claimMaxItems })],
         ctx,
         DEFAULT_TIMEOUT_MS,
         cwd,
       );
+      if (runRequiresSocialBrowserSession(claimRun)) {
+        const shouldRetry = await askToConnectSocialBrowser(ctx, provider);
+        if (!shouldRetry) {
+          const safeStdout = redactClaimStdout(claimRun.stdout);
+          const safeStderr = redactClaimStdout(claimRun.stderr);
+          return errorResult("session_required", "social browser session was not connected", start, {
+            action: input.action,
+            provider,
+            stdout: safeStdout,
+            stderr: safeStderr,
+            exitCode: claimRun.exitCode,
+            signal: claimRun.signal,
+            truncated: claimRun.truncated,
+          });
+        }
+        claimRun = await runner(
+          "integration.sh",
+          ["social-browser/claim", JSON.stringify({ provider, maxItems: claimMaxItems })],
+          ctx,
+          DEFAULT_TIMEOUT_MS,
+          cwd,
+        );
+      }
       if (claimRun.exitCode !== 0) {
         const safeStdout = redactClaimStdout(claimRun.stdout);
         const safeStderr = redactClaimStdout(claimRun.stderr);

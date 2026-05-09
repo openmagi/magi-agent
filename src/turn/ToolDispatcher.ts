@@ -24,7 +24,7 @@ import type {
   ToolResult,
 } from "../Tool.js";
 import type { UserMessage } from "../util/types.js";
-import { buildPreview, summariseToolOutput } from "../util/toolResult.js";
+import { buildToolInputPreview, summariseToolOutput } from "../util/toolResult.js";
 import {
   decideRuntimePermission,
   type PermissionDecision,
@@ -277,7 +277,7 @@ async function dispatchOne(
 
   // Emit tool_start with input_preview — clients render this as the
   // expandable activity card. 400 char cap keeps it light over SSE.
-  const inputPreview = buildPreview(tu.input);
+  const inputPreview = buildToolInputPreview(tu.name, tu.input);
   sse.agent({
     type: "tool_start",
     id: tu.id,

@@ -196,6 +196,64 @@ describe("ChildAgentLoop — loop semantics", () => {
     expect(llmCalls).toHaveLength(1);
   });
 
+  it("streams child tool starts and completions as live agent events", async () => {
+    const reader = stubTool<{ path: string }, string>(
+      "FileRead",
+      async (input) => ({
+        status: "ok",
+        output: `read ${input.path}`,
+        durationMs: 7,
+      }),
+    );
+    const { agent } = fakeAgent([reader], {
+      rounds: [
+        [
+          { kind: "tool_use_start", blockIndex: 0, id: "tu_read", name: "FileRead" },
+          {
+            kind: "tool_use_input_delta",
+            blockIndex: 0,
+            partial: "{\"path\":\"workspace/magi/shared-context.md\"}",
+          },
+          {
+            kind: "message_end",
+            stopReason: "tool_use",
+            usage: { inputTokens: 1, outputTokens: 1 },
+          },
+        ],
+        [
+          { kind: "text_delta", blockIndex: 0, delta: "done" },
+          {
+            kind: "message_end",
+            stopReason: "end_turn",
+            usage: { inputTokens: 1, outputTokens: 1 },
+          },
+        ],
+      ],
+    });
+    const events: Array<Record<string, unknown>> = [];
+    const { opts, cleanup } = await makeOpts({
+      onAgentEvent: (event) => events.push(event as Record<string, unknown>),
+    });
+    cleanups.push(cleanup);
+
+    await runChildAgentLoop(agent, opts);
+
+    expect(events).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        type: "tool_start",
+        id: "child:task_1:tu_read",
+        name: "FileRead",
+        input_preview: expect.stringContaining("workspace/magi/shared-context.md"),
+      }),
+      expect.objectContaining({
+        type: "tool_end",
+        id: "child:task_1:tu_read",
+        status: "ok",
+        output_preview: "read workspace/magi/shared-context.md",
+      }),
+    ]));
+  });
+
   it("uses the LLM classifier to retry child deferral narratives", async () => {
     let executed = 0;
     const writer = stubTool<Record<string, unknown>, { ok: boolean }>(

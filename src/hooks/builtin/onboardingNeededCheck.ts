@@ -82,6 +82,7 @@ export function shouldSkipNudge(session: Session): boolean {
   if (session.meta.onboarded === true) return true;
   const declines = session.meta.onboardingDeclines ?? 0;
   if (declines >= 2) return true;
+  if (typeof session.meta.resumeSeededAt === "number") return true;
   // Only fire on the very first turn of this session (proxy for
   // "first turn of pod" — a fresh pod cannot have a session with
   // committed turns).

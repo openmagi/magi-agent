@@ -38,6 +38,10 @@ describe("parseGoalJudgeResult", () => {
       llm,
       model: "judge-model",
       objective: "Ship the launch memo",
+      completionCriteria: [
+        "Final memo is written",
+        "Risks are explicitly listed",
+      ],
       userText: "Ship the launch memo",
       assistantText: "Drafted the outline.",
     });
@@ -53,5 +57,7 @@ describe("parseGoalJudgeResult", () => {
       thinking: { type: "disabled" },
     });
     expect(String(calls[0]?.system)).toContain("goal mission judge");
+    expect(JSON.stringify(calls[0]?.messages)).toContain("Completion criteria");
+    expect(JSON.stringify(calls[0]?.messages)).toContain("Final memo is written");
   });
 });

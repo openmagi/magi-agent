@@ -52,6 +52,7 @@ import { makeCodeIntelligenceTool } from "./tools/CodeIntelligence.js";
 import { makeCodeDiagnosticsTool } from "./tools/CodeDiagnostics.js";
 import { makeRepositoryMapTool } from "./tools/RepositoryMap.js";
 import { makeCodingBenchmarkTool } from "./tools/CodingBenchmark.js";
+import { makeSpawnWorktreeApplyTool } from "./tools/SpawnWorktreeApply.js";
 import { makePackageDependencyResolveTool } from "./tools/PackageDependencyResolve.js";
 import { makeExternalSourceCacheTool } from "./tools/ExternalSourceCache.js";
 import { makeExternalSourceReadTool } from "./tools/ExternalSourceRead.js";
@@ -516,6 +517,7 @@ export class Agent {
     this.tools.register(makeCodeDiagnosticsTool(config.workspaceRoot));
     this.tools.register(makeRepositoryMapTool(config.workspaceRoot));
     this.tools.register(makeCodingBenchmarkTool(config.workspaceRoot));
+    this.tools.register(makeSpawnWorktreeApplyTool(config.workspaceRoot));
     this.tools.register(makePackageDependencyResolveTool());
     this.tools.register(makeExternalSourceCacheTool());
     this.tools.register(makeExternalSourceReadTool());
@@ -1037,10 +1039,11 @@ export class Agent {
           }));
         },
       },
-      // Layer 4 (session resume) — snapshot = committed transcript +
-      // last-activity anchor; append = queue the seed as a pending
-      // injection so the midTurn injector absorbs it into the first
-      // post-resume iteration.
+      // Layer 4 (session resume) — snapshot = transcript +
+      // last-activity anchor; append = queue the seed as hidden
+      // first-iteration context. This must not use mid-turn injection:
+      // post-reprovision resume context has higher authority than a
+      // user follow-up and must be visible before the first LLM call.
       sessionResumeAgent: {
         getResumeSnapshot: async (sessionKey) => {
           const s = this.sessions.get(sessionKey);
@@ -1058,7 +1061,8 @@ export class Agent {
         appendResumeSeed: async (sessionKey, seed) => {
           const s = this.sessions.get(sessionKey);
           if (!s) return;
-          s.injectMessage(seed, "api");
+          s.meta.resumeSeededAt = Date.now();
+          s.enqueueHiddenContext(seed);
         },
       },
     });
@@ -1210,6 +1214,7 @@ export class Agent {
     this.tools.replace(makeCodeDiagnosticsTool(this.config.workspaceRoot));
     this.tools.replace(makeRepositoryMapTool(this.config.workspaceRoot));
     this.tools.replace(makeCodingBenchmarkTool(this.config.workspaceRoot));
+    this.tools.replace(makeSpawnWorktreeApplyTool(this.config.workspaceRoot));
     this.tools.replace(makeSafeCommandTool(this.config.workspaceRoot));
     this.tools.replace(makeProjectVerificationPlannerTool(this.config.workspaceRoot));
     this.tools.replace(makeGitDiffTool(this.config.workspaceRoot));

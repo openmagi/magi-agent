@@ -1,4 +1,5 @@
 import type { UserMessage } from "../util/types.js";
+import type { LLMClient } from "../transport/LLMClient.js";
 
 export interface GoalLoopState {
   missionId: string;
@@ -19,8 +20,16 @@ export interface GoalRequest {
   text: string;
 }
 
+export interface GoalSpec {
+  title: string;
+  objective: string;
+  completionCriteria: string[];
+}
+
 export interface GoalContinuationInput {
   objective: string;
+  title?: string;
+  completionCriteria?: string[];
   missionId: string;
   missionRunId?: string;
   turnsUsed: number;
@@ -47,13 +56,107 @@ export function goalRequestFromMessage(input: GoalRequestInput): GoalRequest | n
   return null;
 }
 
+function fallbackGoalTitle(raw: string): string {
+  const normalized = raw.replace(/\s+/g, " ").trim();
+  if (!normalized) return "Goal mission";
+  const sentenceEnd = normalized.search(/[.!?\n。！？]/);
+  const firstSentence = sentenceEnd > 0 ? normalized.slice(0, sentenceEnd + 1) : normalized;
+  return truncateForGoal(firstSentence, 80);
+}
+
+function stringArray(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .filter((item): item is string => typeof item === "string")
+    .map((item) => truncateForGoal(item, 160))
+    .filter(Boolean)
+    .slice(0, 6);
+}
+
+export function parseGoalSpecResult(text: string, rawRequest: string): GoalSpec {
+  const fallback: GoalSpec = {
+    title: fallbackGoalTitle(rawRequest),
+    objective: truncateForGoal(rawRequest, 500),
+    completionCriteria: ["Deliver a clear completion update for this goal."],
+  };
+  try {
+    const parsed = JSON.parse(text) as {
+      title?: unknown;
+      objective?: unknown;
+      completionCriteria?: unknown;
+    };
+    const title = typeof parsed.title === "string"
+      ? truncateForGoal(parsed.title, 80)
+      : "";
+    const objective = typeof parsed.objective === "string"
+      ? truncateForGoal(parsed.objective, 500)
+      : "";
+    const completionCriteria = stringArray(parsed.completionCriteria);
+    return {
+      title: title || fallback.title,
+      objective: objective || fallback.objective,
+      completionCriteria: completionCriteria.length > 0
+        ? completionCriteria
+        : fallback.completionCriteria,
+    };
+  } catch {
+    return fallback;
+  }
+}
+
+export async function distillGoalSpec(input: {
+  llm: Pick<LLMClient, "stream">;
+  model: string;
+  rawRequest: string;
+  timeoutMs?: number;
+}): Promise<GoalSpec> {
+  const timeoutMs = input.timeoutMs ?? 5_000;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(new Error("goal_spec_timeout")), timeoutMs);
+  let text = "";
+  try {
+    for await (const event of input.llm.stream({
+      model: input.model,
+      system: [
+        "You are a goal mission distiller.",
+        "Turn a verbose user request into compact public goal metadata.",
+        "Return only JSON with this shape:",
+        '{"title":"short title","objective":"one sentence objective","completionCriteria":["concrete done condition"]}',
+        "Rules:",
+        "- title must be <= 80 characters and must not copy the raw request.",
+        "- objective must be one concise sentence.",
+        "- completionCriteria must be concrete, user-visible conditions for judging the goal done.",
+        "- Preserve the user's language.",
+      ].join("\n"),
+      messages: [
+        {
+          role: "user",
+          content: `Raw request:\n${input.rawRequest}`,
+        },
+      ],
+      max_tokens: 512,
+      temperature: 0,
+      thinking: { type: "disabled" },
+      signal: controller.signal,
+    })) {
+      if (event.kind === "text_delta") text += event.delta;
+      if (event.kind === "error") return parseGoalSpecResult("", input.rawRequest);
+    }
+    return parseGoalSpecResult(text, input.rawRequest);
+  } catch {
+    return parseGoalSpecResult("", input.rawRequest);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 export function goalLoopMaxTurns(
   env: { CORE_AGENT_GOAL_MAX_TURNS?: string } = process.env,
 ): number {
   const raw = env.CORE_AGENT_GOAL_MAX_TURNS;
   const parsed = raw ? Number.parseInt(raw, 10) : NaN;
-  if (!Number.isFinite(parsed)) return 5;
-  return Math.max(1, Math.min(parsed, 20));
+  if (!Number.isFinite(parsed)) return 30;
+  return Math.max(1, Math.min(parsed, 50));
 }
 
 export function buildGoalContinuationMessage(
@@ -61,10 +164,16 @@ export function buildGoalContinuationMessage(
 ): UserMessage {
   const previous = truncateForGoal(input.previousAssistantText, 2000);
   const reason = truncateForGoal(input.reason, 500);
+  const criteria = (input.completionCriteria?.length
+    ? input.completionCriteria
+    : ["Deliver a clear completion update for this goal."])
+    .map((item) => `- ${truncateForGoal(item, 160)}`)
+    .join("\n");
   return {
     text: [
       "Continue working toward this goal.",
       `Goal: ${input.objective}`,
+      `Completion criteria:\n${criteria}`,
       `Reason to continue: ${reason || "The goal is not complete yet."}`,
       `Progress so far: ${previous || "(no visible assistant text)"}`,
       `Turn budget: ${input.turnsUsed}/${input.maxTurns} used.`,
@@ -75,8 +184,11 @@ export function buildGoalContinuationMessage(
       goalMode: true,
       goalContinuation: true,
       goalObjective: input.objective,
+      goalCompletionCriteria: input.completionCriteria?.length
+        ? input.completionCriteria
+        : ["Deliver a clear completion update for this goal."],
       missionKind: "goal",
-      missionTitle: input.objective,
+      missionTitle: input.title ?? input.objective,
       missionId: input.missionId,
       ...(input.missionRunId ? { missionRunId: input.missionRunId } : {}),
       goalTurnsUsed: input.turnsUsed,
@@ -91,6 +203,6 @@ export function buildGoalContinuationMessage(
 }
 
 function truncateForGoal(value: string, max: number): string {
-  const trimmed = value.trim();
+  const trimmed = value.replace(/\s+/g, " ").trim();
   return trimmed.length <= max ? trimmed : `${trimmed.slice(0, max - 3).trimEnd()}...`;
 }

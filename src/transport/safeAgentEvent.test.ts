@@ -48,17 +48,19 @@ describe("safeAgentEvent", () => {
     expect(toolEnd && "output_preview" in toolEnd ? toolEnd.output_preview.length : 0).toBeLessThanOrEqual(400);
   });
 
-  it("removes private prompt and answer text from spawn events", () => {
+  it("removes private prompt and answer text from spawn events while preserving public work detail", () => {
     expect(safeAgentEvent({
       type: "spawn_started",
       taskId: "task-1",
       persona: "reviewer",
       prompt: "private delegated prompt",
+      detail: "Task: Review the investment materials",
       deliver: "background",
     })).toEqual({
       type: "spawn_started",
       taskId: "task-1",
       persona: "reviewer",
+      detail: "Task: Review the investment materials",
       deliver: "background",
     });
 
@@ -150,6 +152,24 @@ describe("safeAgentEvent", () => {
   });
 
   it("allows safe progress, retry, interrupt, heartbeat, and drain events", () => {
+    expect(safeAgentEvent({
+      type: "llm_progress",
+      turnId: "turn-1",
+      iter: 2,
+      stage: "started",
+      label: "Thinking through next step",
+      detail: "Calling claude-opus-4-7 with token=ghp_supersecret",
+      elapsedMs: 1200,
+    })).toEqual({
+      type: "llm_progress",
+      turnId: "turn-1",
+      iter: 2,
+      stage: "started",
+      label: "Thinking through next step",
+      detail: "Calling claude-opus-4-7 with token=[redacted]",
+      elapsedMs: 1200,
+    });
+
     expect(safeAgentEvent({
       type: "tool_progress",
       id: "tool-1",
@@ -470,10 +490,12 @@ describe("safeAgentEvent", () => {
       taskId: "task-1",
       parentTurnId: "turn-1",
       prompt: "private child prompt",
+      detail: "Task: Review the investment materials",
     })).toEqual({
       type: "child_started",
       taskId: "task-1",
       parentTurnId: "turn-1",
+      detail: "Task: Review the investment materials",
     });
 
     expect(safeAgentEvent({

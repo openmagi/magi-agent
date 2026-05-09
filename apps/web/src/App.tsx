@@ -1413,6 +1413,19 @@ export function App() {
       if (type === "text_delta" && typeof payload.delta === "string") {
         appendAssistantDelta(channel, payload.delta);
       }
+      if (type === "llm_progress") {
+        const turnId = asString(payload.turnId, channel);
+        const iter = asNumber(payload.iter, 0);
+        const stage = asString(payload.stage, "waiting");
+        updateActiveTools(channel, {
+          id: `llm:${turnId}:${iter}`,
+          label: asString(payload.label, "Thinking through next step"),
+          status: stage === "completed" ? "done" : "running",
+          startedAt: Date.now(),
+          outputPreview: asString(payload.detail),
+          durationMs: asNumber(payload.elapsedMs),
+        });
+      }
       if (type === "tool_start") {
         const id = asString(payload.id, nowId("tool"));
         updateActiveTools(channel, {

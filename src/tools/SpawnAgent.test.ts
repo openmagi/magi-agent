@@ -2705,7 +2705,7 @@ describe("SpawnAgent — §7.12.d", () => {
     }
   });
 
-  it("spawn_started event includes model when specified", async () => {
+  it("spawn_started event includes model and public delegated detail when specified", async () => {
     const script: MockScript = {
       rounds: [
         [
@@ -2723,7 +2723,11 @@ describe("SpawnAgent — §7.12.d", () => {
     await tool.execute(
       {
         persona: "gemini-child",
-        prompt: "hello",
+        prompt: [
+          "You are the spawned child agent.",
+          "Task: Review the investment materials",
+          "Private context: should not be exposed as work detail",
+        ].join("\n"),
         deliver: "return",
         model: "gemini-3.1-pro-preview",
       },
@@ -2731,11 +2735,12 @@ describe("SpawnAgent — §7.12.d", () => {
     );
 
     const startEvt = events.find(
-      (e): e is { type: string; model: string } =>
+      (e): e is { type: string; model: string; detail?: string } =>
         (e as { type?: unknown }).type === "spawn_started",
     );
     expect(startEvt).toBeDefined();
     expect(startEvt?.model).toBe("gemini-3.1-pro-preview");
+    expect(startEvt?.detail).toBe("Task: Review the investment materials");
   });
 
   it("modelOverride propagates through runChildAgentLoop directly", async () => {

@@ -17,6 +17,7 @@ import { judgeGoalTurn } from "./goals/GoalJudge.js";
 import {
   buildGoalContinuationMessage,
   canContinueGoal,
+  distillGoalSpec,
   goalLoopMaxTurns,
   goalRequestFromMessage,
 } from "./goals/GoalLoop.js";
@@ -137,6 +138,13 @@ export interface SessionMeta {
    */
   onboarded?: boolean;
   onboardingDeclines?: number;
+  /**
+   * Set when the session-resume hook has queued authoritative resume
+   * context for the next LLM turn. The onboarding nudge must not fire
+   * on that same post-reprovision turn because it competes with the
+   * user's active work recovery.
+   */
+  resumeSeededAt?: number;
 }
 
 export interface SessionStats {
@@ -190,6 +198,15 @@ function metadataNumber(
 ): number | undefined {
   const value = metadata?.[key];
   return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+function metadataStringArray(
+  metadata: UserMessage["metadata"] | undefined,
+  key: string,
+): string[] {
+  const value = metadata?.[key];
+  if (!Array.isArray(value)) return [];
+  return value.filter((item): item is string => typeof item === "string" && item.trim().length > 0);
 }
 
 /**
@@ -945,13 +962,20 @@ export class Session {
       goalMode,
     });
     if (!goalRequest) return userMessage;
+    const goalSpec = await distillGoalSpec({
+      llm: this.agent.llm,
+      model: this.agent.config.model,
+      rawRequest: goalRequest.objective,
+    });
 
     const metadata: NonNullable<UserMessage["metadata"]> = {
       ...(userMessage.metadata ?? {}),
       goalMode: true,
       missionKind: "goal",
-      missionTitle: goalRequest.objective,
-      goalObjective: goalRequest.objective,
+      missionTitle: goalSpec.title,
+      goalObjective: goalSpec.objective,
+      goalCompletionCriteria: goalSpec.completionCriteria,
+      goalSourceRequest: goalRequest.objective,
       goalTurnsUsed: 0,
       goalMaxTurns: goalLoopMaxTurns(),
     };
@@ -961,12 +985,14 @@ export class Session {
         channelType: this.meta.channel.type as MissionChannelType,
         channelId: this.meta.channel.channelId,
         kind: "goal",
-        title: truncateGoalText(goalRequest.objective, 240),
-        summary: truncateGoalText(goalRequest.objective, 500),
+        title: truncateGoalText(goalSpec.title, 240),
+        summary: truncateGoalText(goalSpec.objective, 500),
         status: "running",
         createdBy: "user",
         metadata: {
-          objective: goalRequest.objective,
+          objective: goalSpec.objective,
+          sourceRequest: goalRequest.objective,
+          completionCriteria: goalSpec.completionCriteria,
           sessionKey: this.meta.sessionKey,
           turnId,
         },
@@ -976,7 +1002,7 @@ export class Session {
         status: "running",
         sessionKey: this.meta.sessionKey,
         turnId,
-        metadata: { objective: goalRequest.objective },
+        metadata: { objective: goalSpec.objective },
       });
       metadata.missionId = mission.id;
       if (typeof run.id === "string") metadata.missionRunId = run.id;
@@ -1012,12 +1038,15 @@ export class Session {
     if (!missionId) return userMessage;
 
     const objective = metadataString(metadata, "goalObjective") ?? userMessage.text;
+    const title = metadataString(metadata, "missionTitle") ?? objective;
+    const completionCriteria = metadataStringArray(metadata, "goalCompletionCriteria");
     const nextMetadata: NonNullable<UserMessage["metadata"]> = {
       ...metadata,
       goalMode: true,
       missionKind: "goal",
-      missionTitle: objective,
+      missionTitle: title,
       goalObjective: objective,
+      goalCompletionCriteria: completionCriteria,
     };
     try {
       const run = await this.agent.missionClient.createRun(missionId, {
@@ -1067,6 +1096,32 @@ export class Session {
     }
   }
 
+  private recordGoalJudgeContractEvidence(input: {
+    objective: string;
+    missionId: string;
+    decision: string;
+    reason: string;
+    turnsUsed: number;
+    maxTurns: number;
+    status: "passed" | "failed" | "partial" | "unknown";
+  }): void {
+    this.executionContract.recordVerificationEvidence({
+      source: "hook",
+      status: input.status,
+      detail:
+        input.status === "passed"
+          ? `Goal judge marked complete: ${input.reason || "Goal completed"}`
+          : `Goal judge marked ${input.decision}: ${input.reason || "Goal not complete"}`,
+      assertions: [
+        `decision=${input.decision}`,
+        `objective=${input.objective}`,
+        `turnsUsed=${input.turnsUsed}`,
+        `maxTurns=${input.maxTurns}`,
+      ],
+      resourceIds: [input.missionId],
+    });
+  }
+
   private scheduleGoalContinuation(message: UserMessage): void {
     const timer = setTimeout(() => {
       void this.runGoalContinuation(message).catch((err: unknown) => {
@@ -1096,6 +1151,8 @@ export class Session {
     const missionId = metadataString(metadata, "missionId");
     const objective = metadataString(metadata, "goalObjective");
     if (!missionId || !objective) return;
+    const title = metadataString(metadata, "missionTitle") ?? objective;
+    const completionCriteria = metadataStringArray(metadata, "goalCompletionCriteria");
 
     const turnsUsed = (metadataNumber(metadata, "goalTurnsUsed") ?? 0) + 1;
     const maxTurns = metadataNumber(metadata, "goalMaxTurns") ?? goalLoopMaxTurns();
@@ -1106,6 +1163,7 @@ export class Session {
         llm: this.agent.llm,
         model: this.agent.config.model,
         objective,
+        completionCriteria,
         userText: userMessage.text,
         assistantText,
       });
@@ -1121,6 +1179,15 @@ export class Session {
     }
 
     if (decision.decision === "done") {
+      this.recordGoalJudgeContractEvidence({
+        objective,
+        missionId,
+        decision: decision.decision,
+        reason: decision.reason,
+        turnsUsed,
+        maxTurns,
+        status: "passed",
+      });
       await this.appendGoalMissionEvent({
         missionId,
         missionRunId,
@@ -1132,6 +1199,15 @@ export class Session {
     }
 
     if (decision.decision === "blocked" || decision.decision === "needs_user") {
+      this.recordGoalJudgeContractEvidence({
+        objective,
+        missionId,
+        decision: decision.decision,
+        reason: decision.reason,
+        turnsUsed,
+        maxTurns,
+        status: "partial",
+      });
       await this.appendGoalMissionEvent({
         missionId,
         missionRunId,
@@ -1151,6 +1227,15 @@ export class Session {
       cancelled: false,
     };
     if (!canContinueGoal(state)) {
+      this.recordGoalJudgeContractEvidence({
+        objective,
+        missionId,
+        decision: "budget_exhausted",
+        reason: "Goal turn budget exhausted",
+        turnsUsed,
+        maxTurns,
+        status: "partial",
+      });
       await this.appendGoalMissionEvent({
         missionId,
         missionRunId,
@@ -1171,6 +1256,8 @@ export class Session {
     this.scheduleGoalContinuation(
       buildGoalContinuationMessage({
         objective,
+        title,
+        completionCriteria,
         missionId,
         missionRunId,
         turnsUsed,
@@ -1283,7 +1370,10 @@ export class Session {
         sse,
         turnId,
       );
-      this.executionContract.startTurn({ userMessage: effectiveUserMessage.text });
+      this.executionContract.startTurn({
+        userMessage: effectiveUserMessage.text,
+        metadata: effectiveUserMessage.metadata,
+      });
       const active = this.getActiveContext();
       sse.agent({
         type: "context_activated",

@@ -3,7 +3,7 @@
  * Pure state-machine tests — no Agent construction needed.
  */
 
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { Session } from "./Session.js";
 import type { Agent } from "./Agent.js";
 import type { SessionMeta } from "./Session.js";
@@ -34,6 +34,19 @@ describe("Session.injectMessage", () => {
     expect(result!.queuedCount).toBe(1);
     expect(s.hasPendingInjections()).toBe(true);
     expect(s.peekPendingInjectionCount()).toBe(1);
+  });
+
+  it("asks the active turn to resume the current LLM step after queueing", () => {
+    const s = makeSession();
+    const requestSteerResume = vi.fn(() => ({ status: "accepted" as const }));
+    (s as unknown as {
+      activeTurn: { requestSteerResume: typeof requestSteerResume };
+    }).activeTurn = { requestSteerResume };
+
+    const result = s.injectMessage("steer now", "web");
+
+    expect(result).not.toBeNull();
+    expect(requestSteerResume).toHaveBeenCalledWith("web");
   });
 
   it("increments injection sequence across multiple injects", () => {

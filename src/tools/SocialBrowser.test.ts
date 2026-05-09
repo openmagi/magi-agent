@@ -13,13 +13,18 @@ async function makeRoot(): Promise<string> {
   return root;
 }
 
-function makeCtx(root: string): ToolContext {
+function makeCtx(
+  root: string,
+  opts: {
+    askUser?: ToolContext["askUser"];
+  } = {},
+): ToolContext {
   return {
     botId: "bot-1",
     sessionKey: "session-1",
     turnId: "turn-1",
     workspaceRoot: root,
-    askUser: async () => ({ selectedId: "ok" }),
+    askUser: opts.askUser ?? (async () => ({ selectedId: "ok" })),
     emitProgress: () => {},
     abortSignal: AbortSignal.timeout(5_000),
     staging: {
@@ -75,6 +80,77 @@ describe("SocialBrowser", () => {
       { command: "integration.sh", args: ["social-browser/claim", JSON.stringify({ provider: "x", maxItems: 20 })] },
       { command: "agent-browser", args: ["--session", "magi-social-x-sess-1", "connect", "ws://secret-cdp"] },
       { command: "agent-browser", args: ["--session", "magi-social-x-sess-1", "scrape"] },
+    ]);
+  });
+
+  it("asks the user to connect a one-time browser session when none exists, then retries the claim", async () => {
+    const root = await makeRoot();
+    const calls: Array<{ command: string; args: string[] }> = [];
+    const questions: Array<Parameters<ToolContext["askUser"]>[0]> = [];
+    let claimAttempts = 0;
+    const runner: SocialBrowserRunner = async (command, args) => {
+      calls.push({ command, args });
+      if (command === "integration.sh") {
+        claimAttempts += 1;
+        if (claimAttempts === 1) {
+          return {
+            exitCode: 1,
+            signal: null,
+            stdout: JSON.stringify({
+              error: "social_browser_session_required",
+              provider: "instagram",
+            }),
+            stderr: "",
+            truncated: false,
+          };
+        }
+        return {
+          exitCode: 0,
+          signal: null,
+          stdout: JSON.stringify({
+            provider: "instagram",
+            sessionId: "sess-ig",
+            cdpEndpoint: "ws://secret-cdp",
+            maxItems: 4,
+          }),
+          stderr: "",
+          truncated: false,
+        };
+      }
+      return {
+        exitCode: 0,
+        signal: null,
+        stdout: "visible profile text",
+        stderr: "",
+        truncated: false,
+      };
+    };
+    const tool = makeSocialBrowserTool(root, { runner });
+
+    const result = await tool.execute(
+      { action: "scrape_visible", provider: "instagram" },
+      makeCtx(root, {
+        askUser: async (question) => {
+          questions.push(question);
+          return { selectedId: "social_browser_connect_instagram" };
+        },
+      }),
+    );
+
+    expect(result.status).toBe("ok");
+    expect(result.output?.stdout).toBe("visible profile text");
+    expect(questions).toHaveLength(1);
+    expect(questions[0]?.choices).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: "social_browser_connect_instagram" }),
+        expect.objectContaining({ id: "social_browser_cancel" }),
+      ]),
+    );
+    expect(calls).toEqual([
+      { command: "integration.sh", args: ["social-browser/claim", JSON.stringify({ provider: "instagram", maxItems: 20 })] },
+      { command: "integration.sh", args: ["social-browser/claim", JSON.stringify({ provider: "instagram", maxItems: 20 })] },
+      { command: "agent-browser", args: ["--session", "magi-social-instagram-sess-ig", "connect", "ws://secret-cdp"] },
+      { command: "agent-browser", args: ["--session", "magi-social-instagram-sess-ig", "scrape"] },
     ]);
   });
 

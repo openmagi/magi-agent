@@ -495,6 +495,9 @@ export function makeFileDeliverTool(deps: FileDeliverDeps): Tool<FileDeliverInpu
             gif: "image/gif",
             webp: "image/webp",
             zip: "application/zip",
+            gz: "application/gzip",
+            tgz: "application/gzip",
+            tar: "application/x-tar",
           };
           const mimeType = mimeMap[ext] || "application/octet-stream";
           // Ad-hoc record for delivery (not registered in output registry)

@@ -102,6 +102,9 @@ describe("shouldSkipNudge", () => {
   it("skips when session already has committed turns", () => {
     expect(shouldSkipNudge(stubSession({}, /*turns=*/ 3))).toBe(true);
   });
+  it("skips when a session-resume packet was queued for this session", () => {
+    expect(shouldSkipNudge(stubSession({ resumeSeededAt: Date.now() }))).toBe(true);
+  });
   it("does NOT skip on a fresh first-turn non-onboarded session", () => {
     expect(shouldSkipNudge(stubSession({}))).toBe(false);
   });

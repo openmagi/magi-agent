@@ -25,6 +25,25 @@ function ctx(root: string): ToolContext {
   };
 }
 
+function collectRequiredOnlyBranches(value: unknown, pathLabel = "$"): string[] {
+  if (!value || typeof value !== "object") return [];
+  if (Array.isArray(value)) {
+    return value.flatMap((item, index) =>
+      collectRequiredOnlyBranches(item, `${pathLabel}[${index}]`),
+    );
+  }
+
+  const obj = value as Record<string, unknown>;
+  const keys = Object.keys(obj);
+  const current = keys.length === 1 && Array.isArray(obj.required) ? [pathLabel] : [];
+  return [
+    ...current,
+    ...Object.entries(obj).flatMap(([key, child]) =>
+      collectRequiredOnlyBranches(child, `${pathLabel}.${key}`),
+    ),
+  ];
+}
+
 async function makeRoot(): Promise<string> {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "document-write-"));
   roots.push(root);
@@ -81,6 +100,14 @@ describe("DocumentWrite", () => {
     expect(schema).toContain("\"string\"");
     expect(schema).toContain("\"content\"");
     expect(schema).toContain("\"blocks\"");
+  });
+
+  it("does not expose required-only schema branches to OpenAI-compatible providers", async () => {
+    const root = await makeRoot();
+    const registry = new OutputArtifactRegistry(root);
+    const tool = makeDocumentWriteTool(root, registry);
+
+    expect(collectRequiredOnlyBranches(tool.inputSchema)).toEqual([]);
   });
 
   it("creates html from markdown and exposes inline preview", async () => {
