@@ -87,6 +87,14 @@ export interface ToolActivity {
   durationMs?: number;
 }
 
+export interface BrowserFrame {
+  action: string;
+  url?: string;
+  imageBase64: string;
+  contentType: "image/png" | "image/jpeg";
+  capturedAt: number;
+}
+
 export type SubagentActivityStatus = "running" | "waiting" | "done" | "error" | "cancelled";
 
 export interface SubagentActivity {
@@ -115,6 +123,8 @@ export interface ChannelState {
   pendingInjectionCount?: number;
   /** Live tool activity feed during streaming */
   activeTools?: ToolActivity[];
+  /** Latest safe browser preview frame from parent or subagent browser work. */
+  browserFrame?: BrowserFrame | null;
   /** Live spawned subagent roster during streaming. */
   subagents?: SubagentActivity[];
   /** Live TaskBoard snapshot during streaming (replaced on each emission). */

@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { useState, type KeyboardEvent, type MouseEvent } from "react";
+import { useAuthFetch } from "@/hooks/use-auth-fetch";
 import type {
   ControlRequestDecision,
   ControlRequestRecord,
@@ -41,6 +42,253 @@ function choicesOf(value: unknown): Array<{ id: string; label: string }> {
     .filter((choice): choice is { id: string; label: string } => choice !== null);
 }
 
+type SocialProvider = "instagram" | "x";
+
+interface SocialRequestInfo {
+  provider: SocialProvider;
+  connectChoiceId: string;
+  label: string;
+}
+
+interface SocialScreenshot {
+  contentType?: string;
+  imageBase64?: string;
+  url?: string;
+}
+
+const REMOTE_KEYS = new Set([
+  "Backspace",
+  "Delete",
+  "Enter",
+  "Escape",
+  "Tab",
+  "ArrowUp",
+  "ArrowDown",
+  "ArrowLeft",
+  "ArrowRight",
+  "Home",
+  "End",
+  "PageUp",
+  "PageDown",
+]);
+
+function socialRequestInfo(request: ControlRequestRecord): SocialRequestInfo | null {
+  if (request.kind !== "user_question") return null;
+  const choices = choicesOf(request.proposedInput);
+  for (const choice of choices) {
+    if (choice.id === "social_browser_connect_instagram") {
+      return { provider: "instagram", connectChoiceId: choice.id, label: "Instagram" };
+    }
+    if (choice.id === "social_browser_connect_x") {
+      return { provider: "x", connectChoiceId: choice.id, label: "X" };
+    }
+  }
+  return null;
+}
+
+function SocialBrowserRequestCard({
+  request,
+  info,
+  onRespond,
+}: {
+  request: ControlRequestRecord;
+  info: SocialRequestInfo;
+  onRespond: ControlRequestCardProps["onRespond"];
+}) {
+  const authFetch = useAuthFetch();
+  const [sessionId, setSessionId] = useState<string | null>(null);
+  const [screenshot, setScreenshot] = useState<SocialScreenshot | null>(null);
+  const [busy, setBusy] = useState<"start" | "command" | "continue" | "cancel" | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const imageSrc =
+    screenshot?.imageBase64 && screenshot.contentType
+      ? `data:${screenshot.contentType};base64,${screenshot.imageBase64}`
+      : null;
+
+  async function startSession() {
+    setBusy("start");
+    setError(null);
+    try {
+      const res = await authFetch("/api/integrations/social-browser/session", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ provider: info.provider }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setError(data.error || "Could not open the social browser.");
+        return;
+      }
+      setSessionId(data.session?.sessionId ?? null);
+      setScreenshot(data.screenshot ?? null);
+    } catch {
+      setError("Could not open the social browser.");
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function sendCommand(command: Record<string, unknown>) {
+    if (!sessionId) return;
+    setBusy("command");
+    setError(null);
+    try {
+      const res = await authFetch(
+        `/api/integrations/social-browser/session/${sessionId}/command`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(command),
+        },
+      );
+      const data = await res.json();
+      if (!res.ok) {
+        setError(data.error || "Social browser command failed.");
+        return;
+      }
+      setScreenshot({
+        contentType: data.contentType,
+        imageBase64: data.imageBase64,
+        url: data.url,
+      });
+    } catch {
+      setError("Social browser command failed.");
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  function handleScreenshotClick(event: MouseEvent<HTMLImageElement>) {
+    if (!sessionId || busy) return;
+    const target = event.currentTarget;
+    target.parentElement?.focus();
+    const rect = target.getBoundingClientRect();
+    const scaleX = target.naturalWidth / rect.width;
+    const scaleY = target.naturalHeight / rect.height;
+    void sendCommand({
+      action: "click",
+      x: Math.round((event.clientX - rect.left) * scaleX),
+      y: Math.round((event.clientY - rect.top) * scaleY),
+    });
+  }
+
+  function handleKeyDown(event: KeyboardEvent<HTMLDivElement>) {
+    if (!sessionId || busy || event.metaKey || event.ctrlKey || event.altKey) return;
+    if (event.key.length === 1) {
+      event.preventDefault();
+      void sendCommand({ action: "type", text: event.key });
+      return;
+    }
+    if (REMOTE_KEYS.has(event.key)) {
+      event.preventDefault();
+      void sendCommand({ action: "key", key: event.key });
+    }
+  }
+
+  async function respond(answer: string, busyState: "continue" | "cancel") {
+    setBusy(busyState);
+    try {
+      await onRespond(request, { decision: "answered", answer });
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  return (
+    <div className="my-3 flex justify-start">
+      <div className="w-full max-w-2xl rounded-lg border border-black/10 bg-white px-4 py-3 shadow-sm">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+          <div>
+            <div className="text-xs font-medium uppercase text-secondary/50">
+              Social browser
+            </div>
+            <div className="mt-1 text-sm font-medium text-foreground">
+              Connect {info.label}
+            </div>
+            <p className="mt-1 text-xs text-secondary">
+              Passwords stay in the browser session and are not sent to the bot.
+            </p>
+          </div>
+          <span className="rounded-md bg-black/[0.04] px-2 py-1 text-xs text-secondary/70">
+            {request.state}
+          </span>
+        </div>
+
+        {error && (
+          <div className="mt-3 rounded-md border border-red-500/20 bg-red-500/10 px-3 py-2 text-xs text-red-600">
+            {error}
+          </div>
+        )}
+
+        <div className="mt-3 flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={() => void startSession()}
+            disabled={busy !== null}
+            className="rounded-md border border-primary/20 px-3 py-2 text-sm font-medium text-primary disabled:opacity-40"
+          >
+            {sessionId ? `Restart ${info.label}` : `Open ${info.label}`}
+          </button>
+          {sessionId && (
+            <button
+              type="button"
+              onClick={() => void sendCommand({ action: "screenshot" })}
+              disabled={busy !== null}
+              className="rounded-md border border-black/10 px-3 py-2 text-sm font-medium text-secondary/80 disabled:opacity-40"
+            >
+              Refresh
+            </button>
+          )}
+        </div>
+
+        {sessionId && (
+          <div
+            tabIndex={0}
+            onKeyDown={handleKeyDown}
+            className="mt-3 overflow-hidden rounded-lg border border-black/[0.08] bg-white outline-none focus:ring-2 focus:ring-primary/20"
+          >
+            <div className="border-b border-black/[0.06] px-2.5 py-1.5 text-[11px] text-secondary">
+              {screenshot?.url || info.label}
+            </div>
+            {imageSrc ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={imageSrc}
+                alt={`${info.label} browser preview`}
+                onClick={handleScreenshotClick}
+                className="block aspect-video w-full cursor-crosshair object-contain"
+              />
+            ) : (
+              <div className="flex aspect-video items-center justify-center text-[11px] text-secondary">
+                {busy === "command" ? "..." : info.label}
+              </div>
+            )}
+          </div>
+        )}
+
+        <div className="mt-3 flex flex-wrap justify-end gap-2">
+          <button
+            type="button"
+            disabled={busy !== null}
+            onClick={() => void respond("social_browser_cancel", "cancel")}
+            className="rounded-md border border-black/10 px-3 py-2 text-sm font-medium text-secondary/80 disabled:opacity-40"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            disabled={busy !== null || !sessionId}
+            onClick={() => void respond(info.connectChoiceId, "continue")}
+            className="rounded-md bg-primary px-3 py-2 text-sm font-medium text-white disabled:opacity-40"
+          >
+            Continue after login
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function ControlRequestCard({ request, onRespond }: ControlRequestCardProps) {
   const [feedback, setFeedback] = useState("");
   const [answer, setAnswer] = useState("");
@@ -53,6 +301,17 @@ export function ControlRequestCard({ request, onRespond }: ControlRequestCardPro
   const isQuestion = request.kind === "user_question";
   const isToolPermission = request.kind === "tool_permission";
   const choices = choicesOf(request.proposedInput);
+  const socialInfo = socialRequestInfo(request);
+
+  if (pending && socialInfo) {
+    return (
+      <SocialBrowserRequestCard
+        request={request}
+        info={socialInfo}
+        onRespond={onRespond}
+      />
+    );
+  }
 
   const submit = async (decision: ControlRequestDecision) => {
     let updatedInput: unknown;

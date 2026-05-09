@@ -15969,6 +15969,7 @@ const DEFAULT_CHANNEL_STATE = {
   heartbeatElapsedMs: null,
   pendingInjectionCount: 0,
   activeTools: [],
+  browserFrame: null,
   subagents: [],
   taskBoard: null,
   fileProcessing: false
@@ -15983,6 +15984,7 @@ const RESET_LIVE_RUN_STATE = {
   heartbeatElapsedMs: null,
   pendingInjectionCount: 0,
   activeTools: [],
+  browserFrame: null,
   subagents: [],
   taskBoard: null,
   fileProcessing: false,
@@ -16036,7 +16038,7 @@ function shouldClearReconnecting(current, partial) {
   return isLiveStreamProgress(partial);
 }
 function isLiveStreamProgress(partial) {
-  return partial.hasTextContent === true || !!partial.streamingText || !!partial.thinkingText || (partial.activeTools?.length ?? 0) > 0 || (partial.subagents?.length ?? 0) > 0 || !!partial.taskBoard?.tasks.length || partial.heartbeatElapsedMs !== void 0 || (partial.pendingInjectionCount ?? 0) > 0 || partial.turnPhase !== void 0 && partial.turnPhase !== null && partial.turnPhase !== "pending";
+  return partial.hasTextContent === true || !!partial.streamingText || !!partial.thinkingText || (partial.activeTools?.length ?? 0) > 0 || !!partial.browserFrame || (partial.subagents?.length ?? 0) > 0 || !!partial.taskBoard?.tasks.length || partial.heartbeatElapsedMs !== void 0 || (partial.pendingInjectionCount ?? 0) > 0 || partial.turnPhase !== void 0 && partial.turnPhase !== null && partial.turnPhase !== "pending";
 }
 function getResetCounter(botId, channel) {
   try {
@@ -29996,11 +29998,11 @@ function plural(count, singular, pluralText) {
 function secondsBetween(startedAt, now) {
   return Math.max(0, Math.round((now - startedAt) / 1e3));
 }
-function isKorean$5(language) {
+function isKorean$6(language) {
   return language === "ko";
 }
-function t$4(language, en, ko) {
-  return isKorean$5(language) ? ko : en;
+function t$5(language, en, ko) {
+  return isKorean$6(language) ? ko : en;
 }
 function thinkingDurationLabel(seconds, language, completed) {
   if (language === "ko") return `${seconds}초 동안 작업`;
@@ -30009,36 +30011,36 @@ function thinkingDurationLabel(seconds, language, completed) {
 }
 function formatSeconds(seconds, language) {
   const rounded = Math.max(0, Math.round(seconds));
-  return isKorean$5(language) ? `${rounded}초` : `${rounded}s`;
+  return isKorean$6(language) ? `${rounded}초` : `${rounded}s`;
 }
 function describePhase(phase, language, elapsedSeconds) {
   switch (phase) {
     case "pending":
-      return { label: t$4(language, "Preparing turn", "턴 준비 중") };
+      return { label: t$5(language, "Preparing turn", "턴 준비 중") };
     case "planning":
       return {
-        label: t$4(language, "Planning next steps", "다음 단계 계획 중"),
+        label: t$5(language, "Planning next steps", "다음 단계 계획 중"),
         ...typeof elapsedSeconds === "number" ? { detail: formatSeconds(elapsedSeconds, language) } : {}
       };
     case "executing":
       return {
-        label: t$4(language, "Running current step", "현재 단계 실행 중"),
+        label: t$5(language, "Running current step", "현재 단계 실행 중"),
         ...typeof elapsedSeconds === "number" ? { detail: formatSeconds(elapsedSeconds, language) } : {}
       };
     case "verifying":
       return {
-        label: t$4(language, "Verifying results", "결과 검증 중"),
+        label: t$5(language, "Verifying results", "결과 검증 중"),
         ...typeof elapsedSeconds === "number" ? { detail: formatSeconds(elapsedSeconds, language) } : {}
       };
     case "committing":
       return {
-        label: t$4(language, "Preparing final answer", "최종 답변 준비 중"),
+        label: t$5(language, "Preparing final answer", "최종 답변 준비 중"),
         ...typeof elapsedSeconds === "number" ? { detail: formatSeconds(elapsedSeconds, language) } : {}
       };
     case "aborted":
-      return { label: t$4(language, "Stopping current turn", "현재 턴 중단 중") };
+      return { label: t$5(language, "Stopping current turn", "현재 턴 중단 중") };
     case "committed":
-      return { label: t$4(language, "Finalizing response", "답변 마무리 중") };
+      return { label: t$5(language, "Finalizing response", "답변 마무리 중") };
     default:
       return null;
   }
@@ -30066,15 +30068,15 @@ function summarizeTaskBoard(taskBoard, live, language) {
   if (!live) {
     return {
       id: "task-board",
-      label: t$4(language, "Updated task board", "작업 목록 업데이트"),
-      detail: isKorean$5(language) ? `${completed}/${total}개 완료` : `${completed}/${total} complete`,
+      label: t$5(language, "Updated task board", "작업 목록 업데이트"),
+      detail: isKorean$6(language) ? `${completed}/${total}개 완료` : `${completed}/${total} complete`,
       status: "done"
     };
   }
   return {
     id: "task-board",
-    label: active > 0 ? isKorean$5(language) ? `${active}개 작업 진행 중` : `Working on ${active} ${plural(active, "task", "tasks")}` : t$4(language, "Updated task board", "작업 목록 업데이트"),
-    detail: isKorean$5(language) ? `${completed}/${total}개 완료` : `${completed}/${total} complete`,
+    label: active > 0 ? isKorean$6(language) ? `${active}개 작업 진행 중` : `Working on ${active} ${plural(active, "task", "tasks")}` : t$5(language, "Updated task board", "작업 목록 업데이트"),
+    detail: isKorean$6(language) ? `${completed}/${total}개 완료` : `${completed}/${total} complete`,
     status: active > 0 ? "running" : "done"
   };
 }
@@ -30092,7 +30094,7 @@ function groupCompletedActivities(activities, language) {
   if (counts.command > 0) {
     rows.push({
       id: "completed-command",
-      label: isKorean$5(language) ? `${counts.command}개 명령 실행` : `Ran ${counts.command} ${plural(counts.command, "command", "commands")}`,
+      label: isKorean$6(language) ? `${counts.command}개 명령 실행` : `Ran ${counts.command} ${plural(counts.command, "command", "commands")}`,
       status: "done",
       actionCount: counts.command
     });
@@ -30100,7 +30102,7 @@ function groupCompletedActivities(activities, language) {
   if (counts.read > 0) {
     rows.push({
       id: "completed-read",
-      label: isKorean$5(language) ? `${counts.read}개 파일 읽음` : `Read ${counts.read} ${plural(counts.read, "file", "files")}`,
+      label: isKorean$6(language) ? `${counts.read}개 파일 읽음` : `Read ${counts.read} ${plural(counts.read, "file", "files")}`,
       status: "done",
       actionCount: counts.read
     });
@@ -30108,7 +30110,7 @@ function groupCompletedActivities(activities, language) {
   if (counts.knowledge > 0) {
     rows.push({
       id: "completed-knowledge",
-      label: isKorean$5(language) ? `지식 ${counts.knowledge}회 사용` : `Used knowledge ${counts.knowledge} ${plural(counts.knowledge, "time", "times")}`,
+      label: isKorean$6(language) ? `지식 ${counts.knowledge}회 사용` : `Used knowledge ${counts.knowledge} ${plural(counts.knowledge, "time", "times")}`,
       status: "done",
       actionCount: counts.knowledge
     });
@@ -30116,7 +30118,7 @@ function groupCompletedActivities(activities, language) {
   if (counts.other > 0) {
     rows.push({
       id: "completed-other",
-      label: isKorean$5(language) ? `${counts.other}개 작업 완료` : `Completed ${counts.other} ${plural(counts.other, "action", "actions")}`,
+      label: isKorean$6(language) ? `${counts.other}개 작업 완료` : `Completed ${counts.other} ${plural(counts.other, "action", "actions")}`,
       status: "done",
       actionCount: counts.other
     });
@@ -30131,7 +30133,7 @@ function deriveAgentActivityItems(input) {
   if (input.fileProcessing) {
     rows.push({
       id: "file-processing",
-      label: t$4(language, "Processing attachments", "첨부파일 처리 중"),
+      label: t$5(language, "Processing attachments", "첨부파일 처리 중"),
       status: "running"
     });
   }
@@ -30155,7 +30157,7 @@ function deriveAgentActivityItems(input) {
   } else if (!input.live && (input.thinkingDuration || input.thinkingContent)) {
     rows.push({
       id: "thought",
-      label: input.thinkingDuration ? thinkingDurationLabel(input.thinkingDuration, language, true) : t$4(language, "Work", "작업"),
+      label: input.thinkingDuration ? thinkingDurationLabel(input.thinkingDuration, language, true) : t$5(language, "Work", "작업"),
       status: "done",
       ...input.thinkingContent ? { inputPreview: input.thinkingContent.slice(-500) } : {}
     });
@@ -30163,14 +30165,14 @@ function deriveAgentActivityItems(input) {
   if (input.live && typeof input.pendingInjectionCount === "number" && input.pendingInjectionCount > 0) {
     rows.push({
       id: "pending-injections",
-      label: input.pendingInjectionCount === 1 ? t$4(language, "1 follow-up queued", "후속 메시지 1개 대기") : isKorean$5(language) ? `후속 메시지 ${input.pendingInjectionCount}개 대기` : `${input.pendingInjectionCount} follow-ups queued`,
+      label: input.pendingInjectionCount === 1 ? t$5(language, "1 follow-up queued", "후속 메시지 1개 대기") : isKorean$6(language) ? `후속 메시지 ${input.pendingInjectionCount}개 대기` : `${input.pendingInjectionCount} follow-ups queued`,
       status: "running"
     });
   }
   if (input.live && typeof input.heartbeatElapsedMs === "number" && input.heartbeatElapsedMs > 0 && !rows.some((row) => row.id === "phase-executing")) {
     rows.push({
       id: "heartbeat",
-      label: t$4(language, "Still working on current step", "현재 단계 계속 진행 중"),
+      label: t$5(language, "Still working on current step", "현재 단계 계속 진행 중"),
       detail: formatSeconds(input.heartbeatElapsedMs / 1e3, language),
       status: "running"
     });
@@ -30187,7 +30189,7 @@ function deriveAgentActivityItems(input) {
     if (status === "running") {
       explicitRows.push({
         id: activity.id,
-        label: isKorean$5(language) ? `${activity.label} 실행 중` : `Running ${activity.label}`,
+        label: isKorean$6(language) ? `${activity.label} 실행 중` : `Running ${activity.label}`,
         status: "running",
         durationMs: activity.durationMs,
         inputPreview: activity.inputPreview
@@ -30195,7 +30197,7 @@ function deriveAgentActivityItems(input) {
     } else if (status === "error") {
       explicitRows.push({
         id: activity.id,
-        label: isKorean$5(language) ? `${activity.label} 실패` : `${activity.label} failed`,
+        label: isKorean$6(language) ? `${activity.label} 실패` : `${activity.label} failed`,
         status: "error",
         durationMs: activity.durationMs,
         outputPreview: activity.outputPreview
@@ -30203,7 +30205,7 @@ function deriveAgentActivityItems(input) {
     } else if (status === "denied") {
       explicitRows.push({
         id: activity.id,
-        label: isKorean$5(language) ? `${activity.label} 거부됨` : `${activity.label} denied`,
+        label: isKorean$6(language) ? `${activity.label} 거부됨` : `${activity.label} denied`,
         status: "denied",
         durationMs: activity.durationMs
       });
@@ -30221,9 +30223,9 @@ function getAgentActivitySummary(items, language) {
   const active = items.filter((item) => item.status === "running").length;
   const total = items.reduce((sum, item) => sum + (item.actionCount ?? 1), 0);
   if (active > 0) {
-    return isKorean$5(language) ? `${total}개 작업 진행 중` : `${total} ${plural(total, "action", "actions")} in progress`;
+    return isKorean$6(language) ? `${total}개 작업 진행 중` : `${total} ${plural(total, "action", "actions")} in progress`;
   }
-  return isKorean$5(language) ? `${total}개 작업 실행` : `Ran ${total} ${plural(total, "action", "actions")}`;
+  return isKorean$6(language) ? `${total}개 작업 실행` : `Ran ${total} ${plural(total, "action", "actions")}`;
 }
 function formatActivityDuration(durationMs) {
   if (typeof durationMs !== "number") return null;
@@ -30547,6 +30549,18 @@ function parseKbContextMarker(content2) {
     refs,
     text: content2.slice(match[0].length)
   };
+}
+function buildMessageCopyText({
+  content: content2,
+  selection = ""
+}) {
+  if (selection.trim().length > 0) return selection;
+  const parsed = parseKbContextMarker(content2);
+  let text2 = parsed.text;
+  for (const marker of parseMarkers(text2)) {
+    text2 = text2.replace(marker.fullMatch, "");
+  }
+  return text2.trim();
 }
 const MAX_FILE_SIZE = 1024 * 1024 * 1024;
 const ALLOWED_MIMETYPES = /* @__PURE__ */ new Set([
@@ -31034,7 +31048,7 @@ function MessageBubble({ role, content: content2, timestamp, isStreaming, thinki
     setContextMenu(null);
     if (action === "copy") {
       const selection = typeof window !== "undefined" ? window.getSelection?.()?.toString() ?? "" : "";
-      const textToCopy = selection.trim().length > 0 ? selection : content2;
+      const textToCopy = buildMessageCopyText({ content: content2, selection });
       navigator.clipboard.writeText(textToCopy).catch(() => {
       });
     }
@@ -31264,6 +31278,16 @@ function TypingIndicator() {
     i
   )) }) }) });
 }
+function useAuthFetch() {
+  return ((input, init = {}) => {
+    const token = window.localStorage.getItem("magi.agent.app.token");
+    const headers = new Headers(init.headers);
+    if (token && !headers.has("Authorization")) {
+      headers.set("Authorization", `Bearer ${token}`);
+    }
+    return fetch(input, { ...init, headers });
+  });
+}
 function inputPreview(value) {
   if (value === void 0 || value === null) return null;
   try {
@@ -31286,6 +31310,211 @@ function choicesOf(value) {
     };
   }).filter((choice) => choice !== null);
 }
+const REMOTE_KEYS = /* @__PURE__ */ new Set([
+  "Backspace",
+  "Delete",
+  "Enter",
+  "Escape",
+  "Tab",
+  "ArrowUp",
+  "ArrowDown",
+  "ArrowLeft",
+  "ArrowRight",
+  "Home",
+  "End",
+  "PageUp",
+  "PageDown"
+]);
+function socialRequestInfo(request) {
+  if (request.kind !== "user_question") return null;
+  const choices = choicesOf(request.proposedInput);
+  for (const choice of choices) {
+    if (choice.id === "social_browser_connect_instagram") {
+      return { provider: "instagram", connectChoiceId: choice.id, label: "Instagram" };
+    }
+    if (choice.id === "social_browser_connect_x") {
+      return { provider: "x", connectChoiceId: choice.id, label: "X" };
+    }
+  }
+  return null;
+}
+function SocialBrowserRequestCard({
+  request,
+  info,
+  onRespond
+}) {
+  const authFetch = useAuthFetch();
+  const [sessionId, setSessionId] = reactExports.useState(null);
+  const [screenshot, setScreenshot] = reactExports.useState(null);
+  const [busy, setBusy] = reactExports.useState(null);
+  const [error, setError] = reactExports.useState(null);
+  const imageSrc = screenshot?.imageBase64 && screenshot.contentType ? `data:${screenshot.contentType};base64,${screenshot.imageBase64}` : null;
+  async function startSession() {
+    setBusy("start");
+    setError(null);
+    try {
+      const res = await authFetch("/api/integrations/social-browser/session", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ provider: info.provider })
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setError(data.error || "Could not open the social browser.");
+        return;
+      }
+      setSessionId(data.session?.sessionId ?? null);
+      setScreenshot(data.screenshot ?? null);
+    } catch {
+      setError("Could not open the social browser.");
+    } finally {
+      setBusy(null);
+    }
+  }
+  async function sendCommand(command) {
+    if (!sessionId) return;
+    setBusy("command");
+    setError(null);
+    try {
+      const res = await authFetch(
+        `/api/integrations/social-browser/session/${sessionId}/command`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(command)
+        }
+      );
+      const data = await res.json();
+      if (!res.ok) {
+        setError(data.error || "Social browser command failed.");
+        return;
+      }
+      setScreenshot({
+        contentType: data.contentType,
+        imageBase64: data.imageBase64,
+        url: data.url
+      });
+    } catch {
+      setError("Social browser command failed.");
+    } finally {
+      setBusy(null);
+    }
+  }
+  function handleScreenshotClick(event) {
+    if (!sessionId || busy) return;
+    const target = event.currentTarget;
+    target.parentElement?.focus();
+    const rect = target.getBoundingClientRect();
+    const scaleX = target.naturalWidth / rect.width;
+    const scaleY = target.naturalHeight / rect.height;
+    void sendCommand({
+      action: "click",
+      x: Math.round((event.clientX - rect.left) * scaleX),
+      y: Math.round((event.clientY - rect.top) * scaleY)
+    });
+  }
+  function handleKeyDown(event) {
+    if (!sessionId || busy || event.metaKey || event.ctrlKey || event.altKey) return;
+    if (event.key.length === 1) {
+      event.preventDefault();
+      void sendCommand({ action: "type", text: event.key });
+      return;
+    }
+    if (REMOTE_KEYS.has(event.key)) {
+      event.preventDefault();
+      void sendCommand({ action: "key", key: event.key });
+    }
+  }
+  async function respond(answer, busyState) {
+    setBusy(busyState);
+    try {
+      await onRespond(request, { decision: "answered", answer });
+    } finally {
+      setBusy(null);
+    }
+  }
+  return /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "my-3 flex justify-start", children: /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "w-full max-w-2xl rounded-lg border border-black/10 bg-white px-4 py-3 shadow-sm", children: [
+    /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between", children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "text-xs font-medium uppercase text-secondary/50", children: "Social browser" }),
+        /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "mt-1 text-sm font-medium text-foreground", children: [
+          "Connect ",
+          info.label
+        ] }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "mt-1 text-xs text-secondary", children: "Passwords stay in the browser session and are not sent to the bot." })
+      ] }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "rounded-md bg-black/[0.04] px-2 py-1 text-xs text-secondary/70", children: request.state })
+    ] }),
+    error && /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "mt-3 rounded-md border border-red-500/20 bg-red-500/10 px-3 py-2 text-xs text-red-600", children: error }),
+    /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "mt-3 flex flex-wrap gap-2", children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsx(
+        "button",
+        {
+          type: "button",
+          onClick: () => void startSession(),
+          disabled: busy !== null,
+          className: "rounded-md border border-primary/20 px-3 py-2 text-sm font-medium text-primary disabled:opacity-40",
+          children: sessionId ? `Restart ${info.label}` : `Open ${info.label}`
+        }
+      ),
+      sessionId && /* @__PURE__ */ jsxRuntimeExports.jsx(
+        "button",
+        {
+          type: "button",
+          onClick: () => void sendCommand({ action: "screenshot" }),
+          disabled: busy !== null,
+          className: "rounded-md border border-black/10 px-3 py-2 text-sm font-medium text-secondary/80 disabled:opacity-40",
+          children: "Refresh"
+        }
+      )
+    ] }),
+    sessionId && /* @__PURE__ */ jsxRuntimeExports.jsxs(
+      "div",
+      {
+        tabIndex: 0,
+        onKeyDown: handleKeyDown,
+        className: "mt-3 overflow-hidden rounded-lg border border-black/[0.08] bg-white outline-none focus:ring-2 focus:ring-primary/20",
+        children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "border-b border-black/[0.06] px-2.5 py-1.5 text-[11px] text-secondary", children: screenshot?.url || info.label }),
+          imageSrc ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            /* @__PURE__ */ jsxRuntimeExports.jsx(
+              "img",
+              {
+                src: imageSrc,
+                alt: `${info.label} browser preview`,
+                onClick: handleScreenshotClick,
+                className: "block aspect-video w-full cursor-crosshair object-contain"
+              }
+            )
+          ) : /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "flex aspect-video items-center justify-center text-[11px] text-secondary", children: busy === "command" ? "..." : info.label })
+        ]
+      }
+    ),
+    /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "mt-3 flex flex-wrap justify-end gap-2", children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsx(
+        "button",
+        {
+          type: "button",
+          disabled: busy !== null,
+          onClick: () => void respond("social_browser_cancel", "cancel"),
+          className: "rounded-md border border-black/10 px-3 py-2 text-sm font-medium text-secondary/80 disabled:opacity-40",
+          children: "Cancel"
+        }
+      ),
+      /* @__PURE__ */ jsxRuntimeExports.jsx(
+        "button",
+        {
+          type: "button",
+          disabled: busy !== null || !sessionId,
+          onClick: () => void respond(info.connectChoiceId, "continue"),
+          className: "rounded-md bg-primary px-3 py-2 text-sm font-medium text-white disabled:opacity-40",
+          children: "Continue after login"
+        }
+      )
+    ] })
+  ] }) });
+}
 function ControlRequestCard({ request, onRespond }) {
   const [feedback, setFeedback] = reactExports.useState("");
   const [answer, setAnswer] = reactExports.useState("");
@@ -31298,6 +31527,17 @@ function ControlRequestCard({ request, onRespond }) {
   const isQuestion = request.kind === "user_question";
   const isToolPermission = request.kind === "tool_permission";
   const choices = choicesOf(request.proposedInput);
+  const socialInfo = socialRequestInfo(request);
+  if (pending && socialInfo) {
+    return /* @__PURE__ */ jsxRuntimeExports.jsx(
+      SocialBrowserRequestCard,
+      {
+        request,
+        info: socialInfo,
+        onRespond
+      }
+    );
+  }
   const submit = async (decision) => {
     let updatedInput;
     setInputError("");
@@ -31407,8 +31647,1181 @@ function ControlRequestCard({ request, onRespond }) {
     ] })
   ] }) });
 }
+const MAX_SNIPPET_LENGTH = 240;
+const MAX_TARGET_LENGTH = 180;
+function isKorean$5(language) {
+  return language === "ko";
+}
+function localized(language, en, ko) {
+  return isKorean$5(language) ? ko : en;
+}
+const INTERNAL_STRUCTURED_KEYS = /* @__PURE__ */ new Set([
+  "artifactid",
+  "attempts",
+  "durationms",
+  "exitcode",
+  "ignoredcount",
+  "internalid",
+  "isoduration",
+  "numericcount",
+  "signal",
+  "spawndir",
+  "stderr",
+  "stdout",
+  "taskid",
+  "timestampms",
+  "toolcallcount",
+  "truncated"
+]);
+function redact(value) {
+  return value.replace(/(Bearer\s+)[A-Za-z0-9._~+/=-]+/gi, "$1[redacted]").replace(/\bgh[pousr]_[A-Za-z0-9_]+\b/g, "[redacted]").replace(/\bsk-[A-Za-z0-9_-]+\b/g, "[redacted]").replace(
+    /((?:api[_-]?key|token|secret|password)["'\s:=]+)([^"'\s,}]+)/gi,
+    "$1[redacted]"
+  );
+}
+function bounded(value, maxLength) {
+  const clean = redact(value).trim();
+  if (clean.length <= maxLength) return clean;
+  return `${clean.slice(0, Math.max(0, maxLength - 3)).trimEnd()}...`;
+}
+function normalizeTool(label) {
+  return label.replace(/[^a-z0-9]/gi, "").toLowerCase();
+}
+function parsePreviewObject(preview2) {
+  if (!preview2) return null;
+  try {
+    const parsed = JSON.parse(preview2);
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      return parsed;
+    }
+    if (typeof parsed === "string" && parsed.trim().startsWith("{")) {
+      const nested = JSON.parse(parsed);
+      if (nested && typeof nested === "object" && !Array.isArray(nested)) {
+        return nested;
+      }
+    }
+  } catch {
+    return null;
+  }
+  return null;
+}
+function parseRawJson(value) {
+  try {
+    return JSON.parse(value);
+  } catch {
+    return null;
+  }
+}
+function looksLikeStructuredDataText(value) {
+  const trimmed = value.trim();
+  if (!trimmed) return false;
+  if (trimmed.startsWith("{")) {
+    return /["'][^"']+["']\s*:/.test(trimmed);
+  }
+  if (trimmed.startsWith("[")) {
+    return /^\[\s*(?:[{\["\]])/.test(trimmed);
+  }
+  return false;
+}
+function isRawJsonText(value) {
+  const trimmed = value.trim();
+  if (!looksLikeStructuredDataText(trimmed)) return false;
+  const parsed = parseRawJson(trimmed);
+  return Boolean(parsed && typeof parsed === "object") || looksLikeStructuredDataText(trimmed);
+}
+function stringValue(object, keys2) {
+  if (!object) return void 0;
+  for (const key of keys2) {
+    const value = object[key];
+    if (typeof value === "string" && value.trim()) return value;
+  }
+  return void 0;
+}
+function displayValue(object, keys2) {
+  if (!object) return void 0;
+  for (const key of keys2) {
+    const value = object[key];
+    if (typeof value === "string" && value.trim()) return value;
+    if (typeof value === "number" || typeof value === "boolean") return String(value);
+  }
+  return void 0;
+}
+function objectValue(object, keys2) {
+  if (!object) return void 0;
+  for (const key of keys2) {
+    const value = object[key];
+    if (value && typeof value === "object" && !Array.isArray(value)) {
+      return value;
+    }
+  }
+  return void 0;
+}
+function firstPreviewText(input) {
+  return input.outputPreview || input.inputPreview;
+}
+function snippetFrom(value) {
+  if (!value) return void 0;
+  if (isRawJsonText(value)) return void 0;
+  const clean = bounded(value, MAX_SNIPPET_LENGTH);
+  return clean || void 0;
+}
+function commandOutputSnippet(value, language) {
+  if (!value) return void 0;
+  if (/permission denied|requires explicit approval|not allowed/i.test(value)) {
+    return localized(language, "Needs permission to continue", "계속하려면 권한이 필요합니다");
+  }
+  const parsed = parsePreviewObject(value);
+  const stdout = stringValue(parsed, ["stdout", "output"]);
+  const stderr = stringValue(parsed, ["stderr", "error"]);
+  return snippetFrom(stdout ?? stderr ?? value);
+}
+function pathFrom(object) {
+  return stringValue(object, [
+    "path",
+    "file_path",
+    "filepath",
+    "file",
+    "filename",
+    "workspacePath",
+    "workspace_path",
+    "target"
+  ]);
+}
+function escapeRegExp(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+function stringFromJsonLikeText(value, keys2) {
+  if (!value || !looksLikeStructuredDataText(value)) return void 0;
+  for (const key of keys2) {
+    const pattern = new RegExp(
+      `["']${escapeRegExp(key)}["']\\s*:\\s*["']([^"']{1,${MAX_TARGET_LENGTH * 2}})`,
+      "i"
+    );
+    const match = value.match(pattern);
+    if (match?.[1]?.trim()) {
+      return match[1].replace(/\\n/g, "\n").replace(/\\"/g, '"').trim();
+    }
+  }
+  return void 0;
+}
+function pathFromPreviewText(preview2) {
+  const parsed = previewObject(preview2);
+  return pathFrom(parsed) ?? stringFromJsonLikeText(preview2, [
+    "path",
+    "file_path",
+    "filepath",
+    "file",
+    "filename",
+    "workspacePath",
+    "workspace_path",
+    "target"
+  ]);
+}
+function fileKind(path2, language) {
+  const value = (path2 ?? "").split(/[?#]/, 1)[0]?.toLowerCase() ?? "";
+  if (/\.(tsx|ts|jsx|js|css|scss|html|py|rb|go|rs|java|kt|swift)$/.test(value)) {
+    return localized(language, "code file", "코드 파일");
+  }
+  if (value.endsWith(".pdf")) return localized(language, "PDF document", "PDF 문서");
+  if (value.endsWith(".docx") || value.endsWith(".doc")) return localized(language, "Word document", "Word 문서");
+  if (value.endsWith(".xlsx") || value.endsWith(".xls") || value.endsWith(".csv")) {
+    return localized(language, "spreadsheet", "스프레드시트");
+  }
+  if (value.endsWith(".md") || value.endsWith(".txt") || value.endsWith(".rst")) {
+    return localized(language, "document", "문서");
+  }
+  if (value.endsWith(".json") || value.endsWith(".yaml") || value.endsWith(".yml")) {
+    return localized(language, "data file", "데이터 파일");
+  }
+  return localized(language, "file", "파일");
+}
+function unquote(value) {
+  return value.trim().replace(/^["']|["']$/g, "");
+}
+function outputPathFromCommand(command) {
+  const outputFlag = command.match(/(?:^|\s)(?:-o|--output(?:=|\s+))\s*("[^"]+"|'[^']+'|[^\s]+)/i);
+  if (outputFlag?.[1]) return unquote(outputFlag[1]);
+  const redirect = command.match(/(?:^|\s)>\s*("[^"]+"|'[^']+'|[^\s]+)/);
+  if (redirect?.[1]) return unquote(redirect[1]);
+  return void 0;
+}
+function commandPreview(command, outputSnippet, language) {
+  const normalized = command.trim();
+  const lower = normalized.toLowerCase();
+  const outputPath = outputPathFromCommand(normalized);
+  if (/^cat\s+/.test(lower) && outputPath) {
+    return {
+      action: localized(language, "Combining document sections", "문서 섹션 병합"),
+      target: bounded(outputPath, MAX_TARGET_LENGTH),
+      ...outputSnippet ? { snippet: outputSnippet } : {}
+    };
+  }
+  if (/\b(pandoc|libreoffice|soffice|wkhtmltopdf|weasyprint|markdown-pdf)\b/.test(lower)) {
+    const target = outputPath ? bounded(outputPath, MAX_TARGET_LENGTH) : void 0;
+    return {
+      action: isKorean$5(language) ? `${fileKind(outputPath, language)} 생성` : `Creating ${fileKind(outputPath, language)}`,
+      ...target ? { target } : {},
+      ...outputSnippet ? { snippet: outputSnippet } : {}
+    };
+  }
+  if (/\b(vitest|jest|playwright|npm\s+(?:run\s+)?test|pnpm\s+(?:run\s+)?test|yarn\s+test)\b/.test(lower)) {
+    return {
+      action: localized(language, "Checking the work", "작업 확인"),
+      target: localized(language, "Running tests", "테스트 실행 중"),
+      ...outputSnippet ? { snippet: outputSnippet } : {}
+    };
+  }
+  if (/\b(eslint|npm\s+run\s+lint|pnpm\s+run\s+lint|yarn\s+lint)\b/.test(lower)) {
+    return {
+      action: localized(language, "Checking quality", "품질 확인"),
+      target: localized(language, "Running lint", "린트 실행 중"),
+      ...outputSnippet ? { snippet: outputSnippet } : {}
+    };
+  }
+  if (/\b(next\s+build|npm\s+run\s+build|pnpm\s+run\s+build|yarn\s+build)\b/.test(lower)) {
+    return {
+      action: localized(language, "Preparing app build", "앱 빌드 준비"),
+      target: localized(language, "Building the app", "앱 빌드 중"),
+      ...outputSnippet ? { snippet: outputSnippet } : {}
+    };
+  }
+  if (/\b(curl|wget|http)\b/.test(lower)) {
+    return {
+      action: localized(language, "Fetching information", "정보 가져오는 중"),
+      target: localized(language, "Running network request", "네트워크 요청 실행 중"),
+      ...outputSnippet ? { snippet: outputSnippet } : {}
+    };
+  }
+  if (/\b(mkdir|cp|mv|rm|rsync)\b/.test(lower)) {
+    return {
+      action: localized(language, "Organizing files", "파일 정리 중"),
+      target: localized(language, "Updating workspace files", "워크스페이스 파일 업데이트 중"),
+      ...outputSnippet ? { snippet: outputSnippet } : {}
+    };
+  }
+  return {
+    action: localized(language, "Working in workspace", "워크스페이스 작업 중"),
+    target: localized(language, "Running a background step", "백그라운드 단계 실행 중"),
+    ...outputSnippet ? { snippet: outputSnippet } : {}
+  };
+}
+function cleanPromptLine(line) {
+  return line.trim().replace(/^#+\s*/, "").replace(/\*\*/g, "").replace(/^[-*]\s*/, "").trim();
+}
+function promptSummary(prompt) {
+  if (!prompt) return void 0;
+  const lines = prompt.split(/\r?\n/).map(cleanPromptLine).filter(Boolean);
+  const title = lines[0];
+  if (!title) return void 0;
+  const objective = lines.slice(1).find((line) => /^(goal|objective|목표)\s*:/i.test(line));
+  return snippetFrom([title, objective].filter(Boolean).join("\n"));
+}
+function labeledLine(text2, label) {
+  const pattern = new RegExp(`^${label}\\s*:\\s*(.+)$`, "im");
+  const match = text2.match(pattern);
+  return match?.[1]?.trim() || void 0;
+}
+function humanizeHelperFinalText(text2, language) {
+  const result = labeledLine(text2, "RESULT");
+  const reasoning = labeledLine(text2, "REASONING");
+  if (result || reasoning) {
+    return snippetFrom(
+      [
+        result ? `${localized(language, "Result", "결과")}: ${result}` : void 0,
+        reasoning ? `${localized(language, "Reason", "이유")}: ${reasoning}` : void 0
+      ].filter(Boolean).join("\n")
+    );
+  }
+  const cleaned = text2.split(/\r?\n/).map((line) => line.trim()).filter((line) => line && !/^MODEL\s*:/i.test(line)).join("\n");
+  return snippetFrom(cleaned);
+}
+function helperResultPreview(outputPreview, language) {
+  const parsed = parsePreviewObject(outputPreview);
+  if (!parsed) {
+    const snippet = snippetFrom(outputPreview);
+    return snippet ? { snippet } : {};
+  }
+  const status = displayValue(parsed, ["status"])?.toLowerCase();
+  const finalText = displayValue(parsed, [
+    "finalText",
+    "final_text",
+    "summary",
+    "result",
+    "message"
+  ]);
+  const errorText = displayValue(parsed, ["error", "stderr"]);
+  if (finalText) {
+    const snippet = humanizeHelperFinalText(finalText, language);
+    return {
+      action: status && /abort|cancel|error|fail/.test(status) ? localized(language, "Helper stopped", "도우미 중단") : localized(language, "Helper reported result", "도우미 결과"),
+      ...snippet ? { snippet } : {}
+    };
+  }
+  if (errorText) {
+    const snippet = snippetFrom(errorText);
+    return {
+      action: localized(language, "Helper stopped", "도우미 중단"),
+      ...snippet ? { snippet } : {}
+    };
+  }
+  if (status && /abort|cancel|error|fail/.test(status)) {
+    return { action: localized(language, "Helper stopped", "도우미 중단") };
+  }
+  if (status === "ok" || status === "done" || status === "success") {
+    return { action: localized(language, "Helper finished", "도우미 완료") };
+  }
+  return {};
+}
+function calculationAction(operation, language) {
+  switch (operation) {
+    case "sum":
+      return localized(language, "Calculated total", "합계 계산 완료");
+    case "average":
+      return localized(language, "Calculated average", "평균 계산 완료");
+    case "count":
+      return localized(language, "Counted items", "항목 수 계산 완료");
+    case "min":
+      return localized(language, "Found minimum", "최솟값 확인");
+    case "max":
+      return localized(language, "Found maximum", "최댓값 확인");
+    case "percent_change":
+      return localized(language, "Calculated change", "변화율 계산 완료");
+    case "group_by_sum":
+      return localized(language, "Calculated grouped totals", "그룹별 합계 계산 완료");
+    default:
+      return localized(language, "Calculated result", "계산 완료");
+  }
+}
+function resultText(value) {
+  if (typeof value === "string" && value.trim()) return value.trim();
+  if (typeof value === "number" || typeof value === "boolean") return String(value);
+  if (value && typeof value === "object" && !Array.isArray(value)) {
+    const lines = Object.entries(value).slice(0, 6).map(([key, entryValue]) => `${key}: ${structuredValueText(entryValue)}`).filter((line) => !line.endsWith(": "));
+    if (lines.length === 0) return void 0;
+    return `Results:
+${lines.join("\n")}`;
+  }
+  return void 0;
+}
+function calculationPreview(outputPreview, language) {
+  const parsed = parsePreviewObject(outputPreview);
+  const output = objectValue(parsed, ["output"]) ?? parsed;
+  if (!output) return null;
+  const operation = displayValue(output, ["operation"]);
+  if (!operation && !Object.prototype.hasOwnProperty.call(output, "result")) return null;
+  const rowCount = displayValue(output, ["rowCount", "rows"]);
+  const ignoredCount = displayValue(output, ["ignoredCount"]);
+  const result = resultText(output.result);
+  const snippet = snippetFrom(
+    [
+      result ? result.startsWith("Results:") ? result : `${localized(language, "Result", "결과")}: ${result}` : void 0,
+      ignoredCount && ignoredCount !== "0" ? `${localized(language, "Ignored", "제외")}: ${ignoredCount}` : void 0
+    ].filter(Boolean).join("\n")
+  );
+  return {
+    action: calculationAction(operation, language),
+    ...rowCount ? { target: localized(language, `${rowCount} rows checked`, `${rowCount}행 확인`) } : {},
+    ...snippet ? { snippet } : {}
+  };
+}
+function previewObject(preview2) {
+  const parsed = parsePreviewObject(preview2);
+  return objectValue(parsed, ["output"]) ?? parsed;
+}
+function baseName(value) {
+  if (!value) return void 0;
+  const clean = value.split(/[?#]/, 1)[0];
+  return clean.split(/[\\/]/).filter(Boolean).pop() ?? clean;
+}
+function structuredKeyName(key) {
+  if (key === "workspacePath" || key === "workspace_path") return "Path";
+  return key.replace(/[_-]+/g, " ").replace(/([a-z])([A-Z])/g, "$1 $2").replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+function isInternalStructuredKey(key) {
+  return INTERNAL_STRUCTURED_KEYS.has(key.replace(/[_-]/g, "").toLowerCase());
+}
+function structuredValueText(value) {
+  if (typeof value === "string" && value.trim()) {
+    const trimmed = value.trim();
+    if (isRawJsonText(trimmed)) {
+      const parsed = parseRawJson(trimmed);
+      return structuredValueText(parsed);
+    }
+    return trimmed;
+  }
+  if (typeof value === "number" || typeof value === "boolean") return String(value);
+  if (Array.isArray(value)) {
+    const count = value.length;
+    return `${count} ${count === 1 ? "item" : "items"}`;
+  }
+  if (value && typeof value === "object") {
+    const scalarEntries = Object.entries(value).filter(([key]) => !isInternalStructuredKey(key)).map(([key, entryValue]) => {
+      const text2 = structuredValueText(entryValue);
+      return text2 ? `${key}: ${text2}` : void 0;
+    }).filter(Boolean);
+    if (scalarEntries.length > 0) return scalarEntries.slice(0, 3).join(", ");
+  }
+  return void 0;
+}
+function browserPreview(input) {
+  const output = previewObject(input.outputPreview) ?? previewObject(input.inputPreview);
+  if (!output) return null;
+  const action = displayValue(output, ["action", "type"]);
+  const status = displayValue(output, ["status"]);
+  const error = displayValue(output, ["error", "message"]);
+  const path2 = displayValue(output, ["path", "filename", "title", "url"]);
+  if (status && /error|fail|aborted/i.test(status)) {
+    return {
+      action: "Browser step failed",
+      ...path2 ? { target: bounded(path2, MAX_TARGET_LENGTH) } : {},
+      ...error ? { snippet: snippetFrom(error) } : {}
+    };
+  }
+  if (action === "create_session" || action === "open_session" || action === "session") {
+    return {
+      action: "Opening browser",
+      target: "Starting browser session"
+    };
+  }
+  if (action === "scrape" || action === "read" || action === "extract") {
+    return {
+      action: "Reading page",
+      ...path2 ? { target: bounded(path2, MAX_TARGET_LENGTH) } : {},
+      ...error ? { snippet: snippetFrom(error) } : {}
+    };
+  }
+  if (action === "navigate" || action === "goto" || action === "open") {
+    return {
+      action: "Opening page",
+      ...path2 ? { target: bounded(path2, MAX_TARGET_LENGTH) } : {}
+    };
+  }
+  return {
+    action: "Using browser",
+    ...path2 ? { target: bounded(path2, MAX_TARGET_LENGTH) } : {}
+  };
+}
+function browserFallbackPreview(previewText, language) {
+  const action = stringFromJsonLikeText(previewText, ["action", "type"]);
+  const path2 = stringFromJsonLikeText(previewText, ["path", "filename", "title", "url"]);
+  if (action === "create_session" || action === "open_session" || action === "session") {
+    return {
+      action: localized(language, "Opening browser", "브라우저 여는 중"),
+      target: localized(language, "Starting browser session", "브라우저 세션 시작 중")
+    };
+  }
+  if (action === "scrape" || action === "read" || action === "extract") {
+    return {
+      action: localized(language, "Reading page", "페이지 읽는 중"),
+      ...path2 ? { target: bounded(path2, MAX_TARGET_LENGTH) } : {}
+    };
+  }
+  if (action === "navigate" || action === "goto" || action === "open") {
+    return {
+      action: localized(language, "Opening page", "페이지 여는 중"),
+      ...path2 ? { target: bounded(path2, MAX_TARGET_LENGTH) } : {}
+    };
+  }
+  return {
+    action: localized(language, "Using browser", "브라우저 사용 중"),
+    target: localized(language, "Processing browser step", "브라우저 단계 처리 중")
+  };
+}
+function structuredTarget(object) {
+  if (!object) return void 0;
+  const meta = objectValue(object, ["meta", "artifact"]);
+  const directTitle = displayValue(object, ["title", "name", "filename", "query"]);
+  const metaTitle = displayValue(meta ?? null, ["title", "name", "filename"]);
+  const path2 = displayValue(object, [
+    "workspacePath",
+    "workspace_path",
+    "path",
+    "filePath",
+    "file_path",
+    "url"
+  ]);
+  return directTitle ?? metaTitle ?? baseName(path2) ?? void 0;
+}
+function structuredSnippet(object, keys2) {
+  if (!object) return void 0;
+  const lines = [];
+  for (const key of keys2) {
+    if (isInternalStructuredKey(key)) continue;
+    const value = object[key];
+    const text2 = structuredValueText(value);
+    if (!text2) continue;
+    lines.push(`${structuredKeyName(key)}: ${text2}`);
+  }
+  return snippetFrom(lines.join("\n"));
+}
+function clockPreview(outputPreview) {
+  const output = previewObject(outputPreview);
+  if (!output) return null;
+  const timezone = displayValue(output, ["timezone"]);
+  const localDate = displayValue(output, ["localDate", "date"]);
+  const localTime = displayValue(output, ["localTime", "time"]);
+  const iso = displayValue(output, ["iso"]);
+  const snippet = snippetFrom([localDate, localTime].filter(Boolean).join(" ") || iso);
+  if (!timezone && !snippet) return null;
+  return {
+    action: "Checked current time",
+    ...timezone ? { target: bounded(timezone, MAX_TARGET_LENGTH) } : {},
+    ...snippet ? { snippet } : {}
+  };
+}
+function dateRangePreview(outputPreview) {
+  const output = previewObject(outputPreview);
+  if (!output) return null;
+  const startDate = displayValue(output, ["startDate", "start"]);
+  const endDate = displayValue(output, ["endDate", "end"]);
+  const dayCount = displayValue(output, ["dayCount", "days"]);
+  const timezone = displayValue(output, ["timezone"]);
+  if (!startDate && !endDate && !dayCount) return null;
+  return {
+    action: "Calculated date range",
+    ...startDate && endDate ? { target: bounded(`${startDate} to ${endDate}`, MAX_TARGET_LENGTH) } : {},
+    ...dayCount || timezone ? {
+      snippet: snippetFrom(
+        [dayCount ? `${dayCount} days` : void 0, timezone].filter(Boolean).join(" · ")
+      )
+    } : {}
+  };
+}
+function generatedOutputAction(tool) {
+  switch (tool) {
+    case "documentwrite":
+      return "Created document";
+    case "spreadsheetwrite":
+      return "Created spreadsheet";
+    case "filedeliver":
+    case "filesend":
+      return "Prepared file";
+    case "artifactcreate":
+      return "Created artifact";
+    case "artifactread":
+      return "Read artifact";
+    case "artifactupdate":
+      return "Updated artifact";
+    case "artifactdelete":
+      return "Deleted artifact";
+    case "artifactlist":
+      return "Listed artifacts";
+    default:
+      return void 0;
+  }
+}
+function generatedOutputPreview(tool, input) {
+  const action = generatedOutputAction(tool);
+  if (!action) return null;
+  const output = previewObject(input.outputPreview) ?? previewObject(input.inputPreview);
+  if (!output) return null;
+  const meta = objectValue(output, ["meta", "artifact"]);
+  const path2 = displayValue(output, [
+    "workspacePath",
+    "workspace_path",
+    "path",
+    "filePath",
+    "file_path",
+    "url"
+  ]);
+  const title = displayValue(output, ["filename", "name", "title"]) ?? displayValue(meta ?? null, ["title", "filename", "name"]) ?? baseName(path2);
+  const kind = displayValue(meta ?? null, ["kind", "type"]) ?? displayValue(output, ["kind", "type"]);
+  const content2 = stringValue(output, ["content", "text", "summary", "message"]);
+  const snippet = snippetFrom(
+    tool === "artifactread" ? content2 : path2 && title !== path2 ? path2 : kind
+  );
+  return {
+    action,
+    ...title ? { target: bounded(title, MAX_TARGET_LENGTH) } : {},
+    ...snippet ? { snippet } : {}
+  };
+}
+function searchPreview(tool, input) {
+  const isWebSearch = tool === "websearch" || tool === "websearchtool";
+  const isKnowledgeSearch = tool === "knowledgesearch" || tool === "knowledgesearchtool";
+  if (!isWebSearch && !isKnowledgeSearch) return null;
+  const parsedInput = previewObject(input.inputPreview);
+  const parsedOutput = previewObject(input.outputPreview);
+  const query = displayValue(parsedInput, ["query", "q", "search"]);
+  const resultCount = displayValue(parsedOutput, ["count", "resultCount", "total"]) ?? (Array.isArray(parsedOutput?.results) ? String(parsedOutput.results.length) : void 0);
+  const snippet = snippetFrom(
+    [
+      resultCount ? `${resultCount} result${resultCount === "1" ? "" : "s"}` : void 0,
+      displayValue(parsedOutput, ["summary", "message"])
+    ].filter(Boolean).join("\n")
+  );
+  return {
+    action: isWebSearch ? "Searching the web" : "Searching knowledge base",
+    ...query ? { target: bounded(query, MAX_TARGET_LENGTH) } : {},
+    ...snippet ? { snippet } : {}
+  };
+}
+function taskBoardPreview(input) {
+  const output = previewObject(input.outputPreview) ?? previewObject(input.inputPreview);
+  const tasks = Array.isArray(output?.tasks) ? output.tasks : null;
+  if (!tasks) return null;
+  const taskObjects = tasks.filter(
+    (task) => Boolean(task) && typeof task === "object" && !Array.isArray(task)
+  );
+  const completed = taskObjects.filter(
+    (task) => /^(completed|done)$/i.test(displayValue(task, ["status"]) ?? "")
+  ).length;
+  const current = taskObjects.find(
+    (task) => /^(in_progress|running)$/i.test(displayValue(task, ["status"]) ?? "")
+  );
+  const currentTitle = displayValue(current ?? null, ["title", "name", "description"]);
+  return {
+    action: "Updated task list",
+    target: `${completed}/${taskObjects.length} tasks complete`,
+    ...currentTitle ? { snippet: `Now: ${bounded(currentTitle, MAX_SNIPPET_LENGTH - 5)}` } : {}
+  };
+}
+function structuredJsonPreview(label, inputPreview2, outputPreview) {
+  const object = previewObject(outputPreview) ?? previewObject(inputPreview2);
+  if (!object) return null;
+  const target = structuredTarget(object);
+  const snippet = structuredSnippet(object, [
+    "status",
+    "message",
+    "summary",
+    "result",
+    "count",
+    "rowCount",
+    "dayCount",
+    "workspacePath",
+    "path",
+    "query"
+  ]);
+  if (!target && !snippet) return null;
+  return {
+    action: label,
+    ...target ? { target: bounded(target, MAX_TARGET_LENGTH) } : {},
+    ...snippet ? { snippet } : {}
+  };
+}
+function structuredFallbackPreview(label, inputPreview2, outputPreview, language) {
+  const tool = normalizeTool(label);
+  const previewText = outputPreview || inputPreview2;
+  const path2 = pathFromPreviewText(outputPreview) ?? pathFromPreviewText(inputPreview2);
+  if (tool === "browser" || tool === "browseruse" || tool === "browserworker") {
+    return browserFallbackPreview(previewText, language);
+  }
+  if (tool === "taskget" || tool === "taskread" || tool === "taskstatus") {
+    return {
+      action: localized(language, "Checking helper progress", "도우미 진행 확인 중"),
+      target: localized(language, "Waiting for helper update", "도우미 업데이트 대기 중")
+    };
+  }
+  if (path2) {
+    return {
+      action: isKorean$5(language) ? `${fileKind(path2, language)} 검토` : `Reviewing ${fileKind(path2, language)}`,
+      target: bounded(path2, MAX_TARGET_LENGTH)
+    };
+  }
+  if (tool === "codeworkspace" || tool === "workspace" || tool === "workspacecode") {
+    return {
+      action: localized(language, "Working in workspace", "워크스페이스 작업 중"),
+      target: localized(language, "Processing workspace step", "워크스페이스 단계 처리 중")
+    };
+  }
+  return {
+    action: label,
+    target: localized(language, "Processing tool result", "도구 결과 처리 중")
+  };
+}
+function derivePublicToolPreview(input) {
+  const tool = normalizeTool(input.label);
+  const language = input.language;
+  const parsedInput = parsePreviewObject(input.inputPreview);
+  const parsedOutput = parsePreviewObject(input.outputPreview);
+  const targetPath = pathFrom(parsedInput) ?? pathFrom(parsedOutput) ?? pathFromPreviewText(input.inputPreview) ?? pathFromPreviewText(input.outputPreview);
+  const outputSnippet = snippetFrom(input.outputPreview);
+  if (tool === "fileread" || tool === "read") {
+    return {
+      action: isKorean$5(language) ? `${fileKind(targetPath, language)} 검토` : `Reviewing ${fileKind(targetPath, language)}`,
+      ...targetPath ? { target: bounded(targetPath, MAX_TARGET_LENGTH) } : {},
+      ...outputSnippet ? { snippet: outputSnippet } : {}
+    };
+  }
+  if (tool === "filewrite" || tool === "write") {
+    const content2 = stringValue(parsedInput, ["content", "text", "body"]);
+    const contentSnippet = snippetFrom(content2);
+    return {
+      action: isKorean$5(language) ? `${fileKind(targetPath, language)} 생성` : `Creating ${fileKind(targetPath, language)}`,
+      ...targetPath ? { target: bounded(targetPath, MAX_TARGET_LENGTH) } : {},
+      ...contentSnippet ? { snippet: contentSnippet } : outputSnippet ? { snippet: outputSnippet } : {}
+    };
+  }
+  if (tool === "fileedit" || tool === "edit") {
+    const oldText = snippetFrom(stringValue(parsedInput, ["old_string", "oldText", "old"]));
+    const newText = snippetFrom(stringValue(parsedInput, ["new_string", "newText", "replacement"]));
+    const editSnippet = oldText && newText ? snippetFrom(`${localized(language, "Replace", "교체")}: ${oldText} -> ${newText}`) : snippetFrom(firstPreviewText(input));
+    return {
+      action: isKorean$5(language) ? `${fileKind(targetPath, language)} 수정` : `Updating ${fileKind(targetPath, language)}`,
+      ...targetPath ? { target: bounded(targetPath, MAX_TARGET_LENGTH) } : {},
+      ...editSnippet ? { snippet: editSnippet } : {}
+    };
+  }
+  if (tool === "bash" || tool === "execcommand" || tool === "shell") {
+    const command = stringValue(parsedInput, ["command", "cmd", "script"]) ?? input.inputPreview;
+    if (!command) return null;
+    return commandPreview(command, commandOutputSnippet(input.outputPreview, language), language);
+  }
+  if (tool === "browser" || tool === "browseruse" || tool === "browserworker") {
+    const preview2 = browserPreview(input);
+    if (preview2) return preview2;
+  }
+  if (tool === "spawnagent") {
+    const prompt = stringValue(parsedInput, ["prompt", "task", "instructions", "message"]);
+    const summary = promptSummary(prompt);
+    const resultPreview = helperResultPreview(input.outputPreview, language);
+    return {
+      action: resultPreview.action ?? localized(language, "Assigning helper", "도우미 배정"),
+      ...summary ? { target: summary } : {},
+      ...resultPreview.snippet ? { snippet: resultPreview.snippet } : {}
+    };
+  }
+  if (tool === "calculation") {
+    const preview2 = calculationPreview(input.outputPreview, language);
+    if (preview2) return preview2;
+  }
+  if (tool === "clock") {
+    const preview2 = clockPreview(input.outputPreview);
+    if (preview2) return preview2;
+  }
+  if (tool === "daterange") {
+    const preview2 = dateRangePreview(input.outputPreview);
+    if (preview2) return preview2;
+  }
+  if (tool === "taskboard" || tool === "taskupdate") {
+    const preview2 = taskBoardPreview(input);
+    if (preview2) return preview2;
+  }
+  {
+    const preview2 = generatedOutputPreview(tool, input);
+    if (preview2) return preview2;
+  }
+  {
+    const preview2 = searchPreview(tool, input);
+    if (preview2) return preview2;
+  }
+  {
+    const preview2 = structuredJsonPreview(input.label, input.inputPreview, input.outputPreview);
+    if (preview2) return preview2;
+  }
+  const previewText = firstPreviewText(input);
+  const genericSnippet = snippetFrom(previewText);
+  if (!genericSnippet) {
+    const structuredObject = previewObject(input.outputPreview) ?? previewObject(input.inputPreview);
+    if (structuredObject || previewText && looksLikeStructuredDataText(previewText)) {
+      return structuredFallbackPreview(input.label, input.inputPreview, input.outputPreview, language);
+    }
+    return null;
+  }
+  return {
+    action: input.label,
+    snippet: genericSnippet
+  };
+}
+const SUBAGENT_NAMES$1 = [
+  "Halley",
+  "Meitner",
+  "Kant",
+  "Noether",
+  "Turing",
+  "Curie",
+  "Hopper",
+  "Lovelace",
+  "Feynman",
+  "Franklin",
+  "Shannon",
+  "Lamarr"
+];
+const LOW_SIGNAL_TOOL_LABELS = /* @__PURE__ */ new Set([
+  "glob",
+  "grep",
+  "subagentrunning",
+  "subagenttooldecision",
+  "taskget",
+  "taskread",
+  "taskstatus"
+]);
+const PHASE_LABELS$1 = {
+  pending: "Preparing",
+  planning: "Planning",
+  executing: "Running",
+  verifying: "Verifying",
+  committing: "Writing answer",
+  committed: "Finalizing",
+  aborted: "Interrupted"
+};
+const PHASE_LABELS_KO$1 = {
+  pending: "준비 중",
+  planning: "계획 중",
+  executing: "실행 중",
+  verifying: "검증 중",
+  committing: "답변 작성 중",
+  committed: "마무리 중",
+  aborted: "중단됨"
+};
+function isKorean$4(language) {
+  return language === "ko";
+}
+function t$4(language, en, ko) {
+  return isKorean$4(language) ? ko : en;
+}
+function formatElapsed(ms, language) {
+  if (!ms || ms < 1e3) return void 0;
+  const seconds = Math.max(1, Math.round(ms / 1e3));
+  return isKorean$4(language) ? `${seconds}초` : `${seconds}s`;
+}
+function pendingControlRequests$2(requests) {
+  return (requests ?? []).filter((request) => request.state === "pending");
+}
+function statusFromTool(activity) {
+  switch (activity.status) {
+    case "running":
+      return "running";
+    case "done":
+      return "done";
+    case "error":
+    case "denied":
+      return "error";
+    default:
+      return "info";
+  }
+}
+function statusFromSubagent(activity) {
+  switch (activity.status) {
+    case "running":
+      return "running";
+    case "waiting":
+      return "waiting";
+    case "done":
+      return "done";
+    case "error":
+    case "cancelled":
+      return "error";
+    default:
+      return "info";
+  }
+}
+function statusFromTask(task) {
+  switch (task.status) {
+    case "in_progress":
+      return "running";
+    case "completed":
+      return "done";
+    case "cancelled":
+      return "error";
+    case "pending":
+    default:
+      return "waiting";
+  }
+}
+function taskMeta(task, language) {
+  switch (task.status) {
+    case "in_progress":
+      return t$4(language, "running", "진행 중");
+    case "completed":
+      return t$4(language, "done", "완료");
+    case "cancelled":
+      return t$4(language, "cancelled", "취소됨");
+    case "pending":
+    default:
+      return t$4(language, "pending", "대기 중");
+  }
+}
+function subagentName(index2) {
+  return SUBAGENT_NAMES$1[index2 % SUBAGENT_NAMES$1.length] ?? `Agent ${index2 + 1}`;
+}
+function normalizeRole(role) {
+  const value = role.trim().toLowerCase();
+  if (value === "explore" || value === "explorer" || value === "research") return "explorer";
+  if (value === "review" || value === "reviewer") return "reviewer";
+  if (value === "work" || value === "worker") return "worker";
+  return value || "subagent";
+}
+function controlLabel(request, language) {
+  if (request.kind === "user_question") return t$4(language, "Needs answer", "답변 필요");
+  return t$4(language, "Needs approval", "승인 필요");
+}
+function controlMeta(request, language) {
+  switch (request.kind) {
+    case "plan_approval":
+      return t$4(language, "plan", "계획");
+    case "user_question":
+      return t$4(language, "question", "질문");
+    case "tool_permission":
+    default:
+      return t$4(language, "tool", "도구");
+  }
+}
+function normalizeToolLabel(label) {
+  return label.replace(/[^a-z0-9]/gi, "").toLowerCase();
+}
+function shouldDisplayToolActivity(activity) {
+  return !LOW_SIGNAL_TOOL_LABELS.has(normalizeToolLabel(activity.label));
+}
+function toolRow(activity, language) {
+  const preview2 = derivePublicToolPreview({
+    label: activity.label,
+    inputPreview: activity.inputPreview,
+    outputPreview: activity.outputPreview,
+    language
+  });
+  const duration = activity.durationMs ? formatElapsed(activity.durationMs, language) : void 0;
+  return {
+    id: `tool:${activity.id}`,
+    group: "tool",
+    label: preview2?.action ?? activity.label,
+    detail: preview2?.target,
+    snippet: preview2?.snippet,
+    status: statusFromTool(activity),
+    ...duration ? { meta: duration } : {}
+  };
+}
+function deriveWorkConsoleRows({
+  channelState,
+  queuedMessages = [],
+  controlRequests = []
+}) {
+  const rows = [];
+  const language = channelState.responseLanguage;
+  const phase = channelState.reconnecting ? t$4(language, "Reconnecting", "다시 연결 중") : channelState.error ? t$4(language, "Blocked", "차단됨") : channelState.turnPhase ? isKorean$4(language) ? PHASE_LABELS_KO$1[channelState.turnPhase] : PHASE_LABELS$1[channelState.turnPhase] : channelState.streaming ? t$4(language, "Working", "작업 중") : null;
+  const elapsed = formatElapsed(channelState.heartbeatElapsedMs, language);
+  if (phase) {
+    rows.push({
+      id: "phase",
+      group: "status",
+      label: phase,
+      detail: elapsed ? t$4(language, `${elapsed} elapsed`, `${elapsed} 경과`) : void 0,
+      status: channelState.error || channelState.turnPhase === "aborted" ? "error" : "running"
+    });
+  }
+  for (const [index2, subagent] of (channelState.subagents ?? []).entries()) {
+    rows.push({
+      id: `subagent:${subagent.taskId}`,
+      group: "subagent",
+      label: subagentName(index2),
+      detail: subagent.detail,
+      status: statusFromSubagent(subagent),
+      meta: normalizeRole(subagent.role)
+    });
+  }
+  for (const activity of channelState.activeTools ?? []) {
+    if (!shouldDisplayToolActivity(activity)) continue;
+    rows.push(toolRow(activity, language));
+  }
+  for (const task of channelState.taskBoard?.tasks ?? []) {
+    rows.push({
+      id: `task:${task.id}`,
+      group: "task",
+      label: task.title,
+      detail: task.description,
+      status: statusFromTask(task),
+      meta: taskMeta(task, language)
+    });
+  }
+  for (const [index2, message] of queuedMessages.entries()) {
+    rows.push({
+      id: `queue:${message.id}`,
+      group: "queue",
+      label: index2 === 0 ? t$4(language, "Queued follow-up", "대기 중인 후속 메시지") : t$4(language, `Queued follow-up ${index2 + 1}`, `대기 중인 후속 메시지 ${index2 + 1}`),
+      detail: message.content,
+      status: message.priority === "now" ? "running" : "waiting",
+      meta: message.priority === "now" ? t$4(language, "steering next", "다음 턴 조정") : t$4(language, "will send later", "나중에 전송")
+    });
+  }
+  for (const request of pendingControlRequests$2(controlRequests)) {
+    rows.push({
+      id: `control:${request.requestId}`,
+      group: "control",
+      label: controlLabel(request, language),
+      detail: request.prompt,
+      status: "waiting",
+      meta: controlMeta(request, language)
+    });
+  }
+  if (rows.length === 0) {
+    return [
+      {
+        id: "idle",
+        group: "status",
+        label: t$4(language, "Idle", "대기 중"),
+        detail: t$4(language, "Live agent work will appear here.", "실시간 작업 상태가 여기에 표시됩니다."),
+        status: "info"
+      }
+    ];
+  }
+  return rows;
+}
+const PHASE_LABELS = {
+  pending: "Preparing",
+  planning: "Planning",
+  executing: "Running",
+  verifying: "Verifying",
+  committing: "Writing answer",
+  committed: "Writing answer",
+  aborted: "Stopping"
+};
+const PHASE_LABELS_KO = {
+  pending: "준비 중",
+  planning: "계획 중",
+  executing: "실행 중",
+  verifying: "검증 중",
+  committing: "답변 작성 중",
+  committed: "답변 작성 중",
+  aborted: "중단 중"
+};
+function isKorean$3(language) {
+  return language === "ko";
+}
+function t$3(language, en, ko) {
+  return isKorean$3(language) ? ko : en;
+}
+function pendingControlRequests$1(requests) {
+  return (requests ?? []).filter((request) => request.state === "pending");
+}
+function activeTools(channelState) {
+  return (channelState.activeTools ?? []).filter((activity) => activity.status === "running");
+}
+function activeSubagents(channelState) {
+  return (channelState.subagents ?? []).filter(
+    (subagent) => subagent.status === "running" || subagent.status === "waiting"
+  );
+}
+function firstInProgressTask(taskBoard) {
+  return taskBoard?.tasks.find((task) => task.status === "in_progress") ?? null;
+}
+function completedLikeTaskCount(tasks) {
+  return tasks.filter((task) => task.status === "completed" || task.status === "cancelled").length;
+}
+function dependenciesSatisfied(task, tasks) {
+  if (!task.dependsOn?.length) return true;
+  const taskById = new Map(tasks.map((candidate) => [candidate.id, candidate]));
+  return task.dependsOn.every((dependencyId) => {
+    const dependency = taskById.get(dependencyId);
+    return dependency?.status === "completed" || dependency?.status === "cancelled";
+  });
+}
+function firstReadyPendingTask(taskBoard) {
+  if (!taskBoard?.tasks.length) return null;
+  return taskBoard.tasks.find(
+    (task) => task.status === "pending" && dependenciesSatisfied(task, taskBoard.tasks)
+  ) ?? taskBoard.tasks.find((task) => task.status === "pending") ?? null;
+}
+function controlRequestStatus(request, language) {
+  return request.kind === "user_question" ? t$3(language, "Needs answer", "답변 필요") : t$3(language, "Needs approval", "승인 필요");
+}
+function controlRequestNow(request, language) {
+  switch (request.kind) {
+    case "plan_approval":
+      return t$3(language, "Waiting for plan approval", "계획 승인 대기 중");
+    case "user_question":
+      return t$3(language, "Waiting for your answer", "사용자 답변 대기 중");
+    case "tool_permission":
+    default:
+      return t$3(language, "Waiting for tool permission", "도구 권한 대기 중");
+  }
+}
+function statusFrom(channelState, pendingRequests) {
+  const language = channelState.responseLanguage;
+  if (pendingRequests[0]) return controlRequestStatus(pendingRequests[0], language);
+  if (channelState.reconnecting) return t$3(language, "Reconnecting", "다시 연결 중");
+  if (channelState.turnPhase === "aborted" || channelState.error) {
+    return t$3(language, "Blocked", "차단됨");
+  }
+  if ((channelState.activeTools ?? []).some((activity) => activity.status === "error")) {
+    return t$3(language, "Blocked", "차단됨");
+  }
+  if (channelState.turnPhase === "verifying") return t$3(language, "Verifying", "검증 중");
+  if (channelState.turnPhase === "committing" || channelState.turnPhase === "committed") {
+    return t$3(language, "Writing answer", "답변 작성 중");
+  }
+  if (channelState.turnPhase === "executing" || activeTools(channelState).length > 0 || activeSubagents(channelState).length > 0 || firstInProgressTask(channelState.taskBoard)) {
+    return t$3(language, "Running", "실행 중");
+  }
+  if (channelState.turnPhase === "pending" || channelState.turnPhase === "planning") {
+    return t$3(language, "Planning", "계획 중");
+  }
+  return t$3(language, "Working", "작업 중");
+}
+function progressFrom(channelState) {
+  const language = channelState.responseLanguage;
+  const tasks = channelState.taskBoard?.tasks ?? [];
+  if (tasks.length > 0) {
+    const completed = completedLikeTaskCount(tasks);
+    return isKorean$3(language) ? `${completed}/${tasks.length}개 완료` : `${completed}/${tasks.length} tasks complete`;
+  }
+  const runningTools = activeTools(channelState);
+  const runningSubagents = activeSubagents(channelState);
+  if (runningTools.length > 0 && runningSubagents.length > 0) {
+    const count = runningTools.length + runningSubagents.length;
+    return isKorean$3(language) ? `${count}개 작업 실행 중` : `${count} actions active`;
+  }
+  if (runningTools.length > 0) {
+    return isKorean$3(language) ? `${runningTools.length}개 작업 실행 중` : `${runningTools.length} action${runningTools.length === 1 ? "" : "s"} active`;
+  }
+  if (runningSubagents.length > 0) {
+    if (isKorean$3(language)) return `${runningSubagents.length}명 백그라운드 작업 중`;
+    return `${runningSubagents.length} background agent${runningSubagents.length === 1 ? "" : "s"} active`;
+  }
+  return void 0;
+}
+function phaseLabel$1(phase, language) {
+  if (!phase) return t$3(language, "Working", "작업 중");
+  return isKorean$3(language) ? PHASE_LABELS_KO[phase] : PHASE_LABELS[phase];
+}
+function goalFrom(channelState) {
+  return firstInProgressTask(channelState.taskBoard)?.title ?? t$3(channelState.responseLanguage, "Working on your request", "요청 처리 중");
+}
+function nowFrom(channelState, pendingRequests) {
+  const language = channelState.responseLanguage;
+  if (pendingRequests[0]) return controlRequestNow(pendingRequests[0], language);
+  const task = firstInProgressTask(channelState.taskBoard);
+  if (task) return task.title;
+  const tool = activeTools(channelState)[0];
+  if (tool) return tool.label;
+  const subagent = activeSubagents(channelState)[0];
+  if (subagent) {
+    return subagent.detail || subagent.role || t$3(language, "Background agent", "백그라운드 도우미");
+  }
+  return phaseLabel$1(channelState.turnPhase ?? null, language);
+}
+function nextFrom(channelState, queuedMessages, pendingRequests) {
+  if (pendingRequests[0]) return pendingRequests[0].prompt;
+  if (queuedMessages[0]) return queuedMessages[0].content;
+  const task = firstReadyPendingTask(channelState.taskBoard);
+  if (task) return task.title;
+  if (channelState.turnPhase === "committing" || channelState.turnPhase === "committed") {
+    return t$3(channelState.responseLanguage, "Preparing final answer", "최종 답변 준비 중");
+  }
+  return void 0;
+}
+function deriveWorkStateSummary({
+  channelState,
+  queuedMessages = [],
+  controlRequests = []
+}) {
+  const pendingRequests = pendingControlRequests$1(controlRequests);
+  return {
+    title: t$3(channelState.responseLanguage, "Current Work", "현재 작업"),
+    goal: goalFrom(channelState),
+    status: statusFrom(channelState, pendingRequests),
+    progress: progressFrom(channelState),
+    now: nowFrom(channelState, pendingRequests),
+    next: nextFrom(channelState, queuedMessages, pendingRequests)
+  };
+}
 function writingAnswerLabel(language) {
   return language === "ko" ? "답변 작성 중..." : "Writing answer...";
+}
+function isKorean$2(language) {
+  return language === "ko";
+}
+function t$2(language, en, ko) {
+  return isKorean$2(language) ? ko : en;
 }
 function MessageSkeleton() {
   return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "space-y-5 py-2", children: [
@@ -31423,6 +32836,142 @@ function MessageSkeleton() {
       /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "chat-skeleton-line h-4 w-28" })
     ] }) })
   ] });
+}
+function statusDotClass(status) {
+  switch (status) {
+    case "running":
+      return "bg-[#7C3AED]";
+    case "done":
+      return "bg-emerald-500";
+    case "waiting":
+      return "bg-amber-500";
+    case "error":
+      return "bg-red-500";
+    case "info":
+    default:
+      return "bg-secondary/30";
+  }
+}
+function browserActionLabel$2(action, language) {
+  switch (action) {
+    case "open":
+      return t$2(language, "Opening page", "페이지 여는 중");
+    case "click":
+    case "mouse_click":
+      return t$2(language, "Clicking", "클릭 중");
+    case "fill":
+    case "keyboard_type":
+    case "press":
+      return t$2(language, "Typing", "입력 중");
+    case "scroll":
+      return t$2(language, "Scrolling", "스크롤 중");
+    case "screenshot":
+    case "snapshot":
+      return t$2(language, "Inspecting page", "페이지 확인 중");
+    case "scrape":
+      return t$2(language, "Reading page", "페이지 읽는 중");
+    default:
+      return t$2(language, "Using browser", "브라우저 사용 중");
+  }
+}
+function hasOpenTaskState(channelState) {
+  return !!channelState.taskBoard?.tasks.some(
+    (task) => task.status === "pending" || task.status === "in_progress"
+  );
+}
+function hasInlineRunStatus(channelState, queuedMessages, pendingRequests) {
+  const hasLiveWork = (channelState.activeTools ?? []).some((tool) => tool.status === "running") || (channelState.subagents ?? []).some(
+    (subagent) => subagent.status === "running" || subagent.status === "waiting"
+  ) || hasOpenTaskState(channelState) || !!channelState.browserFrame || queuedMessages.length > 0 || pendingRequests.length > 0 || channelState.fileProcessing || channelState.reconnecting;
+  return hasLiveWork || channelState.streaming && !channelState.streamingText;
+}
+function inlineWorkRows(channelState, queuedMessages, pendingRequests) {
+  const language = channelState.responseLanguage;
+  const rows = deriveWorkConsoleRows({
+    channelState,
+    queuedMessages,
+    controlRequests: pendingRequests
+  });
+  const selected = [];
+  selected.push(...rows.filter((row) => row.group === "control" && row.status === "waiting"));
+  if (channelState.browserFrame) {
+    selected.push({
+      id: "browser-frame",
+      group: "status",
+      label: t$2(language, "Live browser", "실시간 브라우저"),
+      detail: [
+        browserActionLabel$2(channelState.browserFrame.action, language),
+        channelState.browserFrame.url
+      ].filter(Boolean).join(" - "),
+      status: "running"
+    });
+  }
+  selected.push(...rows.filter((row) => row.group === "tool" && row.status === "running"));
+  selected.push(
+    ...rows.filter(
+      (row) => row.group === "subagent" && (row.status === "running" || row.status === "waiting")
+    )
+  );
+  selected.push(...rows.filter((row) => row.group === "task" && row.status === "running"));
+  if (selected.length === 0) {
+    selected.push(...rows.filter((row) => row.group === "status" && row.id !== "idle"));
+  }
+  if (selected.length === 0 && queuedMessages.length > 0) {
+    selected.push(...rows.filter((row) => row.group === "queue").slice(0, 1));
+  }
+  return selected.slice(0, 3);
+}
+function InlineRunStatus({
+  channelState,
+  queuedMessages,
+  pendingRequests
+}) {
+  if (!hasInlineRunStatus(channelState, queuedMessages, pendingRequests)) return null;
+  const language = channelState.responseLanguage;
+  const summary = deriveWorkStateSummary({
+    channelState,
+    queuedMessages,
+    controlRequests: pendingRequests
+  });
+  const rows = inlineWorkRows(channelState, queuedMessages, pendingRequests);
+  return /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "chat-msg-in mb-4 flex justify-start", "data-chat-inline-run-status": "true", children: /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "w-full max-w-[92%] rounded-lg border border-black/[0.08] bg-white/90 px-3 py-2.5 shadow-sm backdrop-blur sm:max-w-[82%]", children: [
+    /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex min-w-0 items-center justify-between gap-3", children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "min-w-0", children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "text-[11px] font-semibold uppercase tracking-wide text-secondary/50", children: summary.title }),
+        /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "mt-0.5 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-xs text-secondary/70", children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "font-medium text-foreground/75", children: summary.status }),
+          summary.progress && /* @__PURE__ */ jsxRuntimeExports.jsx("span", { children: summary.progress }),
+          queuedMessages.length > 0 && /* @__PURE__ */ jsxRuntimeExports.jsx("span", { children: isKorean$2(language) ? `${queuedMessages.length}개 대기` : `${queuedMessages.length} queued` })
+        ] })
+      ] }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "shrink-0 rounded-full bg-[#7C3AED]/10 px-2 py-0.5 text-[10px] font-semibold text-[#7C3AED]", children: t$2(language, "Live", "실시간") })
+    ] }),
+    rows.length > 0 && /* @__PURE__ */ jsxRuntimeExports.jsx("ul", { className: "mt-2 space-y-1", "aria-label": t$2(language, "Current work updates", "현재 작업 업데이트"), children: rows.map((row) => /* @__PURE__ */ jsxRuntimeExports.jsxs(
+      "li",
+      {
+        className: "flex min-w-0 items-start gap-2 rounded-md bg-black/[0.025] px-2 py-1.5",
+        "data-chat-inline-run-row": "true",
+        "data-chat-inline-run-row-status": row.status,
+        children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsx(
+            "span",
+            {
+              className: `mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full ${statusDotClass(row.status)}`,
+              "aria-hidden": "true"
+            }
+          ),
+          /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "min-w-0 flex-1", children: [
+            /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "flex min-w-0 items-baseline gap-2", children: [
+              /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "min-w-0 truncate text-[12px] font-medium text-foreground/80", children: row.label }),
+              row.meta && /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "shrink-0 text-[10px] text-secondary/40", children: row.meta })
+            ] }),
+            row.detail && /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "mt-0.5 block truncate text-[11.5px] leading-snug text-secondary/60", children: row.detail })
+          ] })
+        ]
+      },
+      row.id
+    )) })
+  ] }) });
 }
 const TIMESTAMP_DEDUP_WINDOW_MS = 1e4;
 const OPTIMISTIC_CONTENT_DEDUP_WINDOW_MS = 5 * 6e4;
@@ -31544,11 +33093,17 @@ const ChatMessages = reactExports.forwardRef(function ChatMessages2({ messages, 
       el.scrollTop = el.scrollHeight;
     });
   }, [allMessages.length, channelState.streamingText, channelState.thinkingText]);
-  const showTyping = channelState.streaming && !channelState.streamingText && !channelState.thinkingText && !channelState.thinkingStartedAt;
   const pendingControlRequests2 = reactExports.useMemo(
     () => (controlRequests ?? []).filter((request) => request.state === "pending"),
     [controlRequests]
   );
+  const liveQueuedMessages = queuedMessages ?? [];
+  const inlineRunVisible = hasInlineRunStatus(
+    channelState,
+    liveQueuedMessages,
+    pendingControlRequests2
+  );
+  const showTyping = channelState.streaming && !inlineRunVisible && !channelState.streamingText && !channelState.thinkingText && !channelState.thinkingStartedAt;
   const selectableCount = reactExports.useMemo(() => {
     return allMessages.filter((m) => m.role !== "system").length;
   }, [allMessages]);
@@ -31833,6 +33388,14 @@ const ChatMessages = reactExports.forwardRef(function ChatMessages2({ messages, 
                 )),
                 unanchoredMidTurnInjected.map(
                   (msg, i) => renderMessage(msg, i, mainMessages.length)
+                ),
+                /* @__PURE__ */ jsxRuntimeExports.jsx(
+                  InlineRunStatus,
+                  {
+                    channelState,
+                    queuedMessages: liveQueuedMessages,
+                    pendingRequests: pendingControlRequests2
+                  }
                 )
               ] });
             })(),
@@ -32735,16 +34298,6 @@ const ChatInput = reactExports.forwardRef(function ChatInput2({
     }
   );
 });
-function useAuthFetch() {
-  return ((input, init = {}) => {
-    const token = window.localStorage.getItem("magi.agent.app.token");
-    const headers = new Headers(init.headers);
-    if (token && !headers.has("Authorization")) {
-      headers.set("Authorization", `Bearer ${token}`);
-    }
-    return fetch(input, { ...init, headers });
-  });
-}
 const LOCAL_LLM_MODEL_OPTIONS = [
   {
     value: "local_gemma_fast",
@@ -33081,1015 +34634,6 @@ function KbContextBar({ docs: docs2, onRemove }) {
 function Image({ fill: _fill, unoptimized: _unoptimized, ...props }) {
   return /* @__PURE__ */ jsxRuntimeExports.jsx("img", { ...props });
 }
-const MAX_SNIPPET_LENGTH = 240;
-const MAX_TARGET_LENGTH = 180;
-function isKorean$4(language) {
-  return language === "ko";
-}
-function localized(language, en, ko) {
-  return isKorean$4(language) ? ko : en;
-}
-const INTERNAL_STRUCTURED_KEYS = /* @__PURE__ */ new Set([
-  "artifactid",
-  "attempts",
-  "durationms",
-  "exitcode",
-  "ignoredcount",
-  "internalid",
-  "isoduration",
-  "numericcount",
-  "signal",
-  "spawndir",
-  "stderr",
-  "stdout",
-  "taskid",
-  "timestampms",
-  "toolcallcount",
-  "truncated"
-]);
-function redact(value) {
-  return value.replace(/(Bearer\s+)[A-Za-z0-9._~+/=-]+/gi, "$1[redacted]").replace(/\bgh[pousr]_[A-Za-z0-9_]+\b/g, "[redacted]").replace(/\bsk-[A-Za-z0-9_-]+\b/g, "[redacted]").replace(
-    /((?:api[_-]?key|token|secret|password)["'\s:=]+)([^"'\s,}]+)/gi,
-    "$1[redacted]"
-  );
-}
-function bounded(value, maxLength) {
-  const clean = redact(value).trim();
-  if (clean.length <= maxLength) return clean;
-  return `${clean.slice(0, Math.max(0, maxLength - 3)).trimEnd()}...`;
-}
-function normalizeTool(label) {
-  return label.replace(/[^a-z0-9]/gi, "").toLowerCase();
-}
-function parsePreviewObject(preview2) {
-  if (!preview2) return null;
-  try {
-    const parsed = JSON.parse(preview2);
-    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
-      return parsed;
-    }
-    if (typeof parsed === "string" && parsed.trim().startsWith("{")) {
-      const nested = JSON.parse(parsed);
-      if (nested && typeof nested === "object" && !Array.isArray(nested)) {
-        return nested;
-      }
-    }
-  } catch {
-    return null;
-  }
-  return null;
-}
-function parseRawJson(value) {
-  try {
-    return JSON.parse(value);
-  } catch {
-    return null;
-  }
-}
-function looksLikeStructuredDataText(value) {
-  const trimmed = value.trim();
-  if (!trimmed) return false;
-  if (trimmed.startsWith("{")) {
-    return /["'][^"']+["']\s*:/.test(trimmed);
-  }
-  if (trimmed.startsWith("[")) {
-    return /^\[\s*(?:[{\["\]])/.test(trimmed);
-  }
-  return false;
-}
-function isRawJsonText(value) {
-  const trimmed = value.trim();
-  if (!looksLikeStructuredDataText(trimmed)) return false;
-  const parsed = parseRawJson(trimmed);
-  return Boolean(parsed && typeof parsed === "object") || looksLikeStructuredDataText(trimmed);
-}
-function stringValue(object, keys2) {
-  if (!object) return void 0;
-  for (const key of keys2) {
-    const value = object[key];
-    if (typeof value === "string" && value.trim()) return value;
-  }
-  return void 0;
-}
-function displayValue(object, keys2) {
-  if (!object) return void 0;
-  for (const key of keys2) {
-    const value = object[key];
-    if (typeof value === "string" && value.trim()) return value;
-    if (typeof value === "number" || typeof value === "boolean") return String(value);
-  }
-  return void 0;
-}
-function objectValue(object, keys2) {
-  if (!object) return void 0;
-  for (const key of keys2) {
-    const value = object[key];
-    if (value && typeof value === "object" && !Array.isArray(value)) {
-      return value;
-    }
-  }
-  return void 0;
-}
-function firstPreviewText(input) {
-  return input.outputPreview || input.inputPreview;
-}
-function snippetFrom(value) {
-  if (!value) return void 0;
-  if (isRawJsonText(value)) return void 0;
-  const clean = bounded(value, MAX_SNIPPET_LENGTH);
-  return clean || void 0;
-}
-function commandOutputSnippet(value, language) {
-  if (!value) return void 0;
-  if (/permission denied|requires explicit approval|not allowed/i.test(value)) {
-    return localized(language, "Needs permission to continue", "계속하려면 권한이 필요합니다");
-  }
-  const parsed = parsePreviewObject(value);
-  const stdout = stringValue(parsed, ["stdout", "output"]);
-  const stderr = stringValue(parsed, ["stderr", "error"]);
-  return snippetFrom(stdout ?? stderr ?? value);
-}
-function pathFrom(object) {
-  return stringValue(object, [
-    "path",
-    "file_path",
-    "filepath",
-    "file",
-    "filename",
-    "workspacePath",
-    "workspace_path",
-    "target"
-  ]);
-}
-function escapeRegExp(value) {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
-function stringFromJsonLikeText(value, keys2) {
-  if (!value || !looksLikeStructuredDataText(value)) return void 0;
-  for (const key of keys2) {
-    const pattern = new RegExp(
-      `["']${escapeRegExp(key)}["']\\s*:\\s*["']([^"']{1,${MAX_TARGET_LENGTH * 2}})`,
-      "i"
-    );
-    const match = value.match(pattern);
-    if (match?.[1]?.trim()) {
-      return match[1].replace(/\\n/g, "\n").replace(/\\"/g, '"').trim();
-    }
-  }
-  return void 0;
-}
-function pathFromPreviewText(preview2) {
-  const parsed = previewObject(preview2);
-  return pathFrom(parsed) ?? stringFromJsonLikeText(preview2, [
-    "path",
-    "file_path",
-    "filepath",
-    "file",
-    "filename",
-    "workspacePath",
-    "workspace_path",
-    "target"
-  ]);
-}
-function fileKind(path2, language) {
-  const value = (path2 ?? "").split(/[?#]/, 1)[0]?.toLowerCase() ?? "";
-  if (/\.(tsx|ts|jsx|js|css|scss|html|py|rb|go|rs|java|kt|swift)$/.test(value)) {
-    return localized(language, "code file", "코드 파일");
-  }
-  if (value.endsWith(".pdf")) return localized(language, "PDF document", "PDF 문서");
-  if (value.endsWith(".docx") || value.endsWith(".doc")) return localized(language, "Word document", "Word 문서");
-  if (value.endsWith(".xlsx") || value.endsWith(".xls") || value.endsWith(".csv")) {
-    return localized(language, "spreadsheet", "스프레드시트");
-  }
-  if (value.endsWith(".md") || value.endsWith(".txt") || value.endsWith(".rst")) {
-    return localized(language, "document", "문서");
-  }
-  if (value.endsWith(".json") || value.endsWith(".yaml") || value.endsWith(".yml")) {
-    return localized(language, "data file", "데이터 파일");
-  }
-  return localized(language, "file", "파일");
-}
-function unquote(value) {
-  return value.trim().replace(/^["']|["']$/g, "");
-}
-function outputPathFromCommand(command) {
-  const outputFlag = command.match(/(?:^|\s)(?:-o|--output(?:=|\s+))\s*("[^"]+"|'[^']+'|[^\s]+)/i);
-  if (outputFlag?.[1]) return unquote(outputFlag[1]);
-  const redirect = command.match(/(?:^|\s)>\s*("[^"]+"|'[^']+'|[^\s]+)/);
-  if (redirect?.[1]) return unquote(redirect[1]);
-  return void 0;
-}
-function commandPreview(command, outputSnippet, language) {
-  const normalized = command.trim();
-  const lower = normalized.toLowerCase();
-  const outputPath = outputPathFromCommand(normalized);
-  if (/^cat\s+/.test(lower) && outputPath) {
-    return {
-      action: localized(language, "Combining document sections", "문서 섹션 병합"),
-      target: bounded(outputPath, MAX_TARGET_LENGTH),
-      ...outputSnippet ? { snippet: outputSnippet } : {}
-    };
-  }
-  if (/\b(pandoc|libreoffice|soffice|wkhtmltopdf|weasyprint|markdown-pdf)\b/.test(lower)) {
-    const target = outputPath ? bounded(outputPath, MAX_TARGET_LENGTH) : void 0;
-    return {
-      action: isKorean$4(language) ? `${fileKind(outputPath, language)} 생성` : `Creating ${fileKind(outputPath, language)}`,
-      ...target ? { target } : {},
-      ...outputSnippet ? { snippet: outputSnippet } : {}
-    };
-  }
-  if (/\b(vitest|jest|playwright|npm\s+(?:run\s+)?test|pnpm\s+(?:run\s+)?test|yarn\s+test)\b/.test(lower)) {
-    return {
-      action: localized(language, "Checking the work", "작업 확인"),
-      target: localized(language, "Running tests", "테스트 실행 중"),
-      ...outputSnippet ? { snippet: outputSnippet } : {}
-    };
-  }
-  if (/\b(eslint|npm\s+run\s+lint|pnpm\s+run\s+lint|yarn\s+lint)\b/.test(lower)) {
-    return {
-      action: localized(language, "Checking quality", "품질 확인"),
-      target: localized(language, "Running lint", "린트 실행 중"),
-      ...outputSnippet ? { snippet: outputSnippet } : {}
-    };
-  }
-  if (/\b(next\s+build|npm\s+run\s+build|pnpm\s+run\s+build|yarn\s+build)\b/.test(lower)) {
-    return {
-      action: localized(language, "Preparing app build", "앱 빌드 준비"),
-      target: localized(language, "Building the app", "앱 빌드 중"),
-      ...outputSnippet ? { snippet: outputSnippet } : {}
-    };
-  }
-  if (/\b(curl|wget|http)\b/.test(lower)) {
-    return {
-      action: localized(language, "Fetching information", "정보 가져오는 중"),
-      target: localized(language, "Running network request", "네트워크 요청 실행 중"),
-      ...outputSnippet ? { snippet: outputSnippet } : {}
-    };
-  }
-  if (/\b(mkdir|cp|mv|rm|rsync)\b/.test(lower)) {
-    return {
-      action: localized(language, "Organizing files", "파일 정리 중"),
-      target: localized(language, "Updating workspace files", "워크스페이스 파일 업데이트 중"),
-      ...outputSnippet ? { snippet: outputSnippet } : {}
-    };
-  }
-  return {
-    action: localized(language, "Working in workspace", "워크스페이스 작업 중"),
-    target: localized(language, "Running a background step", "백그라운드 단계 실행 중"),
-    ...outputSnippet ? { snippet: outputSnippet } : {}
-  };
-}
-function cleanPromptLine(line) {
-  return line.trim().replace(/^#+\s*/, "").replace(/\*\*/g, "").replace(/^[-*]\s*/, "").trim();
-}
-function promptSummary(prompt) {
-  if (!prompt) return void 0;
-  const lines = prompt.split(/\r?\n/).map(cleanPromptLine).filter(Boolean);
-  const title = lines[0];
-  if (!title) return void 0;
-  const objective = lines.slice(1).find((line) => /^(goal|objective|목표)\s*:/i.test(line));
-  return snippetFrom([title, objective].filter(Boolean).join("\n"));
-}
-function labeledLine(text2, label) {
-  const pattern = new RegExp(`^${label}\\s*:\\s*(.+)$`, "im");
-  const match = text2.match(pattern);
-  return match?.[1]?.trim() || void 0;
-}
-function humanizeHelperFinalText(text2, language) {
-  const result = labeledLine(text2, "RESULT");
-  const reasoning = labeledLine(text2, "REASONING");
-  if (result || reasoning) {
-    return snippetFrom(
-      [
-        result ? `${localized(language, "Result", "결과")}: ${result}` : void 0,
-        reasoning ? `${localized(language, "Reason", "이유")}: ${reasoning}` : void 0
-      ].filter(Boolean).join("\n")
-    );
-  }
-  const cleaned = text2.split(/\r?\n/).map((line) => line.trim()).filter((line) => line && !/^MODEL\s*:/i.test(line)).join("\n");
-  return snippetFrom(cleaned);
-}
-function helperResultPreview(outputPreview, language) {
-  const parsed = parsePreviewObject(outputPreview);
-  if (!parsed) {
-    const snippet = snippetFrom(outputPreview);
-    return snippet ? { snippet } : {};
-  }
-  const status = displayValue(parsed, ["status"])?.toLowerCase();
-  const finalText = displayValue(parsed, [
-    "finalText",
-    "final_text",
-    "summary",
-    "result",
-    "message"
-  ]);
-  const errorText = displayValue(parsed, ["error", "stderr"]);
-  if (finalText) {
-    const snippet = humanizeHelperFinalText(finalText, language);
-    return {
-      action: status && /abort|cancel|error|fail/.test(status) ? localized(language, "Helper stopped", "도우미 중단") : localized(language, "Helper reported result", "도우미 결과"),
-      ...snippet ? { snippet } : {}
-    };
-  }
-  if (errorText) {
-    const snippet = snippetFrom(errorText);
-    return {
-      action: localized(language, "Helper stopped", "도우미 중단"),
-      ...snippet ? { snippet } : {}
-    };
-  }
-  if (status && /abort|cancel|error|fail/.test(status)) {
-    return { action: localized(language, "Helper stopped", "도우미 중단") };
-  }
-  if (status === "ok" || status === "done" || status === "success") {
-    return { action: localized(language, "Helper finished", "도우미 완료") };
-  }
-  return {};
-}
-function calculationAction(operation, language) {
-  switch (operation) {
-    case "sum":
-      return localized(language, "Calculated total", "합계 계산 완료");
-    case "average":
-      return localized(language, "Calculated average", "평균 계산 완료");
-    case "count":
-      return localized(language, "Counted items", "항목 수 계산 완료");
-    case "min":
-      return localized(language, "Found minimum", "최솟값 확인");
-    case "max":
-      return localized(language, "Found maximum", "최댓값 확인");
-    case "percent_change":
-      return localized(language, "Calculated change", "변화율 계산 완료");
-    case "group_by_sum":
-      return localized(language, "Calculated grouped totals", "그룹별 합계 계산 완료");
-    default:
-      return localized(language, "Calculated result", "계산 완료");
-  }
-}
-function resultText(value) {
-  if (typeof value === "string" && value.trim()) return value.trim();
-  if (typeof value === "number" || typeof value === "boolean") return String(value);
-  if (value && typeof value === "object" && !Array.isArray(value)) {
-    const lines = Object.entries(value).slice(0, 6).map(([key, entryValue]) => `${key}: ${structuredValueText(entryValue)}`).filter((line) => !line.endsWith(": "));
-    if (lines.length === 0) return void 0;
-    return `Results:
-${lines.join("\n")}`;
-  }
-  return void 0;
-}
-function calculationPreview(outputPreview, language) {
-  const parsed = parsePreviewObject(outputPreview);
-  const output = objectValue(parsed, ["output"]) ?? parsed;
-  if (!output) return null;
-  const operation = displayValue(output, ["operation"]);
-  if (!operation && !Object.prototype.hasOwnProperty.call(output, "result")) return null;
-  const rowCount = displayValue(output, ["rowCount", "rows"]);
-  const ignoredCount = displayValue(output, ["ignoredCount"]);
-  const result = resultText(output.result);
-  const snippet = snippetFrom(
-    [
-      result ? result.startsWith("Results:") ? result : `${localized(language, "Result", "결과")}: ${result}` : void 0,
-      ignoredCount && ignoredCount !== "0" ? `${localized(language, "Ignored", "제외")}: ${ignoredCount}` : void 0
-    ].filter(Boolean).join("\n")
-  );
-  return {
-    action: calculationAction(operation, language),
-    ...rowCount ? { target: localized(language, `${rowCount} rows checked`, `${rowCount}행 확인`) } : {},
-    ...snippet ? { snippet } : {}
-  };
-}
-function previewObject(preview2) {
-  const parsed = parsePreviewObject(preview2);
-  return objectValue(parsed, ["output"]) ?? parsed;
-}
-function baseName(value) {
-  if (!value) return void 0;
-  const clean = value.split(/[?#]/, 1)[0];
-  return clean.split(/[\\/]/).filter(Boolean).pop() ?? clean;
-}
-function structuredKeyName(key) {
-  if (key === "workspacePath" || key === "workspace_path") return "Path";
-  return key.replace(/[_-]+/g, " ").replace(/([a-z])([A-Z])/g, "$1 $2").replace(/\b\w/g, (letter) => letter.toUpperCase());
-}
-function isInternalStructuredKey(key) {
-  return INTERNAL_STRUCTURED_KEYS.has(key.replace(/[_-]/g, "").toLowerCase());
-}
-function structuredValueText(value) {
-  if (typeof value === "string" && value.trim()) {
-    const trimmed = value.trim();
-    if (isRawJsonText(trimmed)) {
-      const parsed = parseRawJson(trimmed);
-      return structuredValueText(parsed);
-    }
-    return trimmed;
-  }
-  if (typeof value === "number" || typeof value === "boolean") return String(value);
-  if (Array.isArray(value)) {
-    const count = value.length;
-    return `${count} ${count === 1 ? "item" : "items"}`;
-  }
-  if (value && typeof value === "object") {
-    const scalarEntries = Object.entries(value).filter(([key]) => !isInternalStructuredKey(key)).map(([key, entryValue]) => {
-      const text2 = structuredValueText(entryValue);
-      return text2 ? `${key}: ${text2}` : void 0;
-    }).filter(Boolean);
-    if (scalarEntries.length > 0) return scalarEntries.slice(0, 3).join(", ");
-  }
-  return void 0;
-}
-function browserPreview(input) {
-  const output = previewObject(input.outputPreview) ?? previewObject(input.inputPreview);
-  if (!output) return null;
-  const action = displayValue(output, ["action", "type"]);
-  const status = displayValue(output, ["status"]);
-  const error = displayValue(output, ["error", "message"]);
-  const path2 = displayValue(output, ["path", "filename", "title", "url"]);
-  if (status && /error|fail|aborted/i.test(status)) {
-    return {
-      action: "Browser step failed",
-      ...path2 ? { target: bounded(path2, MAX_TARGET_LENGTH) } : {},
-      ...error ? { snippet: snippetFrom(error) } : {}
-    };
-  }
-  if (action === "create_session" || action === "open_session" || action === "session") {
-    return {
-      action: "Opening browser",
-      target: "Starting browser session"
-    };
-  }
-  if (action === "scrape" || action === "read" || action === "extract") {
-    return {
-      action: "Reading page",
-      ...path2 ? { target: bounded(path2, MAX_TARGET_LENGTH) } : {},
-      ...error ? { snippet: snippetFrom(error) } : {}
-    };
-  }
-  if (action === "navigate" || action === "goto" || action === "open") {
-    return {
-      action: "Opening page",
-      ...path2 ? { target: bounded(path2, MAX_TARGET_LENGTH) } : {}
-    };
-  }
-  return {
-    action: "Using browser",
-    ...path2 ? { target: bounded(path2, MAX_TARGET_LENGTH) } : {}
-  };
-}
-function browserFallbackPreview(previewText, language) {
-  const action = stringFromJsonLikeText(previewText, ["action", "type"]);
-  const path2 = stringFromJsonLikeText(previewText, ["path", "filename", "title", "url"]);
-  if (action === "create_session" || action === "open_session" || action === "session") {
-    return {
-      action: localized(language, "Opening browser", "브라우저 여는 중"),
-      target: localized(language, "Starting browser session", "브라우저 세션 시작 중")
-    };
-  }
-  if (action === "scrape" || action === "read" || action === "extract") {
-    return {
-      action: localized(language, "Reading page", "페이지 읽는 중"),
-      ...path2 ? { target: bounded(path2, MAX_TARGET_LENGTH) } : {}
-    };
-  }
-  if (action === "navigate" || action === "goto" || action === "open") {
-    return {
-      action: localized(language, "Opening page", "페이지 여는 중"),
-      ...path2 ? { target: bounded(path2, MAX_TARGET_LENGTH) } : {}
-    };
-  }
-  return {
-    action: localized(language, "Using browser", "브라우저 사용 중"),
-    target: localized(language, "Processing browser step", "브라우저 단계 처리 중")
-  };
-}
-function structuredTarget(object) {
-  if (!object) return void 0;
-  const meta = objectValue(object, ["meta", "artifact"]);
-  const directTitle = displayValue(object, ["title", "name", "filename", "query"]);
-  const metaTitle = displayValue(meta ?? null, ["title", "name", "filename"]);
-  const path2 = displayValue(object, [
-    "workspacePath",
-    "workspace_path",
-    "path",
-    "filePath",
-    "file_path",
-    "url"
-  ]);
-  return directTitle ?? metaTitle ?? baseName(path2) ?? void 0;
-}
-function structuredSnippet(object, keys2) {
-  if (!object) return void 0;
-  const lines = [];
-  for (const key of keys2) {
-    if (isInternalStructuredKey(key)) continue;
-    const value = object[key];
-    const text2 = structuredValueText(value);
-    if (!text2) continue;
-    lines.push(`${structuredKeyName(key)}: ${text2}`);
-  }
-  return snippetFrom(lines.join("\n"));
-}
-function clockPreview(outputPreview) {
-  const output = previewObject(outputPreview);
-  if (!output) return null;
-  const timezone = displayValue(output, ["timezone"]);
-  const localDate = displayValue(output, ["localDate", "date"]);
-  const localTime = displayValue(output, ["localTime", "time"]);
-  const iso = displayValue(output, ["iso"]);
-  const snippet = snippetFrom([localDate, localTime].filter(Boolean).join(" ") || iso);
-  if (!timezone && !snippet) return null;
-  return {
-    action: "Checked current time",
-    ...timezone ? { target: bounded(timezone, MAX_TARGET_LENGTH) } : {},
-    ...snippet ? { snippet } : {}
-  };
-}
-function dateRangePreview(outputPreview) {
-  const output = previewObject(outputPreview);
-  if (!output) return null;
-  const startDate = displayValue(output, ["startDate", "start"]);
-  const endDate = displayValue(output, ["endDate", "end"]);
-  const dayCount = displayValue(output, ["dayCount", "days"]);
-  const timezone = displayValue(output, ["timezone"]);
-  if (!startDate && !endDate && !dayCount) return null;
-  return {
-    action: "Calculated date range",
-    ...startDate && endDate ? { target: bounded(`${startDate} to ${endDate}`, MAX_TARGET_LENGTH) } : {},
-    ...dayCount || timezone ? {
-      snippet: snippetFrom(
-        [dayCount ? `${dayCount} days` : void 0, timezone].filter(Boolean).join(" · ")
-      )
-    } : {}
-  };
-}
-function generatedOutputAction(tool) {
-  switch (tool) {
-    case "documentwrite":
-      return "Created document";
-    case "spreadsheetwrite":
-      return "Created spreadsheet";
-    case "filedeliver":
-    case "filesend":
-      return "Prepared file";
-    case "artifactcreate":
-      return "Created artifact";
-    case "artifactread":
-      return "Read artifact";
-    case "artifactupdate":
-      return "Updated artifact";
-    case "artifactdelete":
-      return "Deleted artifact";
-    case "artifactlist":
-      return "Listed artifacts";
-    default:
-      return void 0;
-  }
-}
-function generatedOutputPreview(tool, input) {
-  const action = generatedOutputAction(tool);
-  if (!action) return null;
-  const output = previewObject(input.outputPreview) ?? previewObject(input.inputPreview);
-  if (!output) return null;
-  const meta = objectValue(output, ["meta", "artifact"]);
-  const path2 = displayValue(output, [
-    "workspacePath",
-    "workspace_path",
-    "path",
-    "filePath",
-    "file_path",
-    "url"
-  ]);
-  const title = displayValue(output, ["filename", "name", "title"]) ?? displayValue(meta ?? null, ["title", "filename", "name"]) ?? baseName(path2);
-  const kind = displayValue(meta ?? null, ["kind", "type"]) ?? displayValue(output, ["kind", "type"]);
-  const content2 = stringValue(output, ["content", "text", "summary", "message"]);
-  const snippet = snippetFrom(
-    tool === "artifactread" ? content2 : path2 && title !== path2 ? path2 : kind
-  );
-  return {
-    action,
-    ...title ? { target: bounded(title, MAX_TARGET_LENGTH) } : {},
-    ...snippet ? { snippet } : {}
-  };
-}
-function searchPreview(tool, input) {
-  const isWebSearch = tool === "websearch" || tool === "websearchtool";
-  const isKnowledgeSearch = tool === "knowledgesearch" || tool === "knowledgesearchtool";
-  if (!isWebSearch && !isKnowledgeSearch) return null;
-  const parsedInput = previewObject(input.inputPreview);
-  const parsedOutput = previewObject(input.outputPreview);
-  const query = displayValue(parsedInput, ["query", "q", "search"]);
-  const resultCount = displayValue(parsedOutput, ["count", "resultCount", "total"]) ?? (Array.isArray(parsedOutput?.results) ? String(parsedOutput.results.length) : void 0);
-  const snippet = snippetFrom(
-    [
-      resultCount ? `${resultCount} result${resultCount === "1" ? "" : "s"}` : void 0,
-      displayValue(parsedOutput, ["summary", "message"])
-    ].filter(Boolean).join("\n")
-  );
-  return {
-    action: isWebSearch ? "Searching the web" : "Searching knowledge base",
-    ...query ? { target: bounded(query, MAX_TARGET_LENGTH) } : {},
-    ...snippet ? { snippet } : {}
-  };
-}
-function taskBoardPreview(input) {
-  const output = previewObject(input.outputPreview) ?? previewObject(input.inputPreview);
-  const tasks = Array.isArray(output?.tasks) ? output.tasks : null;
-  if (!tasks) return null;
-  const taskObjects = tasks.filter(
-    (task) => Boolean(task) && typeof task === "object" && !Array.isArray(task)
-  );
-  const completed = taskObjects.filter(
-    (task) => /^(completed|done)$/i.test(displayValue(task, ["status"]) ?? "")
-  ).length;
-  const current = taskObjects.find(
-    (task) => /^(in_progress|running)$/i.test(displayValue(task, ["status"]) ?? "")
-  );
-  const currentTitle = displayValue(current ?? null, ["title", "name", "description"]);
-  return {
-    action: "Updated task list",
-    target: `${completed}/${taskObjects.length} tasks complete`,
-    ...currentTitle ? { snippet: `Now: ${bounded(currentTitle, MAX_SNIPPET_LENGTH - 5)}` } : {}
-  };
-}
-function structuredJsonPreview(label, inputPreview2, outputPreview) {
-  const object = previewObject(outputPreview) ?? previewObject(inputPreview2);
-  if (!object) return null;
-  const target = structuredTarget(object);
-  const snippet = structuredSnippet(object, [
-    "status",
-    "message",
-    "summary",
-    "result",
-    "count",
-    "rowCount",
-    "dayCount",
-    "workspacePath",
-    "path",
-    "query"
-  ]);
-  if (!target && !snippet) return null;
-  return {
-    action: label,
-    ...target ? { target: bounded(target, MAX_TARGET_LENGTH) } : {},
-    ...snippet ? { snippet } : {}
-  };
-}
-function structuredFallbackPreview(label, inputPreview2, outputPreview, language) {
-  const tool = normalizeTool(label);
-  const previewText = outputPreview || inputPreview2;
-  const path2 = pathFromPreviewText(outputPreview) ?? pathFromPreviewText(inputPreview2);
-  if (tool === "browser" || tool === "browseruse" || tool === "browserworker") {
-    return browserFallbackPreview(previewText, language);
-  }
-  if (tool === "taskget" || tool === "taskread" || tool === "taskstatus") {
-    return {
-      action: localized(language, "Checking helper progress", "도우미 진행 확인 중"),
-      target: localized(language, "Waiting for helper update", "도우미 업데이트 대기 중")
-    };
-  }
-  if (path2) {
-    return {
-      action: isKorean$4(language) ? `${fileKind(path2, language)} 검토` : `Reviewing ${fileKind(path2, language)}`,
-      target: bounded(path2, MAX_TARGET_LENGTH)
-    };
-  }
-  if (tool === "codeworkspace" || tool === "workspace" || tool === "workspacecode") {
-    return {
-      action: localized(language, "Working in workspace", "워크스페이스 작업 중"),
-      target: localized(language, "Processing workspace step", "워크스페이스 단계 처리 중")
-    };
-  }
-  return {
-    action: label,
-    target: localized(language, "Processing tool result", "도구 결과 처리 중")
-  };
-}
-function derivePublicToolPreview(input) {
-  const tool = normalizeTool(input.label);
-  const language = input.language;
-  const parsedInput = parsePreviewObject(input.inputPreview);
-  const parsedOutput = parsePreviewObject(input.outputPreview);
-  const targetPath = pathFrom(parsedInput) ?? pathFrom(parsedOutput) ?? pathFromPreviewText(input.inputPreview) ?? pathFromPreviewText(input.outputPreview);
-  const outputSnippet = snippetFrom(input.outputPreview);
-  if (tool === "fileread" || tool === "read") {
-    return {
-      action: isKorean$4(language) ? `${fileKind(targetPath, language)} 검토` : `Reviewing ${fileKind(targetPath, language)}`,
-      ...targetPath ? { target: bounded(targetPath, MAX_TARGET_LENGTH) } : {},
-      ...outputSnippet ? { snippet: outputSnippet } : {}
-    };
-  }
-  if (tool === "filewrite" || tool === "write") {
-    const content2 = stringValue(parsedInput, ["content", "text", "body"]);
-    const contentSnippet = snippetFrom(content2);
-    return {
-      action: isKorean$4(language) ? `${fileKind(targetPath, language)} 생성` : `Creating ${fileKind(targetPath, language)}`,
-      ...targetPath ? { target: bounded(targetPath, MAX_TARGET_LENGTH) } : {},
-      ...contentSnippet ? { snippet: contentSnippet } : outputSnippet ? { snippet: outputSnippet } : {}
-    };
-  }
-  if (tool === "fileedit" || tool === "edit") {
-    const oldText = snippetFrom(stringValue(parsedInput, ["old_string", "oldText", "old"]));
-    const newText = snippetFrom(stringValue(parsedInput, ["new_string", "newText", "replacement"]));
-    const editSnippet = oldText && newText ? snippetFrom(`${localized(language, "Replace", "교체")}: ${oldText} -> ${newText}`) : snippetFrom(firstPreviewText(input));
-    return {
-      action: isKorean$4(language) ? `${fileKind(targetPath, language)} 수정` : `Updating ${fileKind(targetPath, language)}`,
-      ...targetPath ? { target: bounded(targetPath, MAX_TARGET_LENGTH) } : {},
-      ...editSnippet ? { snippet: editSnippet } : {}
-    };
-  }
-  if (tool === "bash" || tool === "execcommand" || tool === "shell") {
-    const command = stringValue(parsedInput, ["command", "cmd", "script"]) ?? input.inputPreview;
-    if (!command) return null;
-    return commandPreview(command, commandOutputSnippet(input.outputPreview, language), language);
-  }
-  if (tool === "browser" || tool === "browseruse" || tool === "browserworker") {
-    const preview2 = browserPreview(input);
-    if (preview2) return preview2;
-  }
-  if (tool === "spawnagent") {
-    const prompt = stringValue(parsedInput, ["prompt", "task", "instructions", "message"]);
-    const summary = promptSummary(prompt);
-    const resultPreview = helperResultPreview(input.outputPreview, language);
-    return {
-      action: resultPreview.action ?? localized(language, "Assigning helper", "도우미 배정"),
-      ...summary ? { target: summary } : {},
-      ...resultPreview.snippet ? { snippet: resultPreview.snippet } : {}
-    };
-  }
-  if (tool === "calculation") {
-    const preview2 = calculationPreview(input.outputPreview, language);
-    if (preview2) return preview2;
-  }
-  if (tool === "clock") {
-    const preview2 = clockPreview(input.outputPreview);
-    if (preview2) return preview2;
-  }
-  if (tool === "daterange") {
-    const preview2 = dateRangePreview(input.outputPreview);
-    if (preview2) return preview2;
-  }
-  if (tool === "taskboard" || tool === "taskupdate") {
-    const preview2 = taskBoardPreview(input);
-    if (preview2) return preview2;
-  }
-  {
-    const preview2 = generatedOutputPreview(tool, input);
-    if (preview2) return preview2;
-  }
-  {
-    const preview2 = searchPreview(tool, input);
-    if (preview2) return preview2;
-  }
-  {
-    const preview2 = structuredJsonPreview(input.label, input.inputPreview, input.outputPreview);
-    if (preview2) return preview2;
-  }
-  const previewText = firstPreviewText(input);
-  const genericSnippet = snippetFrom(previewText);
-  if (!genericSnippet) {
-    const structuredObject = previewObject(input.outputPreview) ?? previewObject(input.inputPreview);
-    if (structuredObject || previewText && looksLikeStructuredDataText(previewText)) {
-      return structuredFallbackPreview(input.label, input.inputPreview, input.outputPreview, language);
-    }
-    return null;
-  }
-  return {
-    action: input.label,
-    snippet: genericSnippet
-  };
-}
-const SUBAGENT_NAMES$1 = [
-  "Halley",
-  "Meitner",
-  "Kant",
-  "Noether",
-  "Turing",
-  "Curie",
-  "Hopper",
-  "Lovelace",
-  "Feynman",
-  "Franklin",
-  "Shannon",
-  "Lamarr"
-];
-const LOW_SIGNAL_TOOL_LABELS = /* @__PURE__ */ new Set([
-  "glob",
-  "grep",
-  "subagentrunning",
-  "subagenttooldecision",
-  "taskget",
-  "taskread",
-  "taskstatus"
-]);
-const PHASE_LABELS$1 = {
-  pending: "Preparing",
-  planning: "Planning",
-  executing: "Running",
-  verifying: "Verifying",
-  committing: "Writing answer",
-  committed: "Finalizing",
-  aborted: "Interrupted"
-};
-const PHASE_LABELS_KO$1 = {
-  pending: "준비 중",
-  planning: "계획 중",
-  executing: "실행 중",
-  verifying: "검증 중",
-  committing: "답변 작성 중",
-  committed: "마무리 중",
-  aborted: "중단됨"
-};
-function isKorean$3(language) {
-  return language === "ko";
-}
-function t$3(language, en, ko) {
-  return isKorean$3(language) ? ko : en;
-}
-function formatElapsed(ms, language) {
-  if (!ms || ms < 1e3) return void 0;
-  const seconds = Math.max(1, Math.round(ms / 1e3));
-  return isKorean$3(language) ? `${seconds}초` : `${seconds}s`;
-}
-function pendingControlRequests$2(requests) {
-  return (requests ?? []).filter((request) => request.state === "pending");
-}
-function statusFromTool(activity) {
-  switch (activity.status) {
-    case "running":
-      return "running";
-    case "done":
-      return "done";
-    case "error":
-    case "denied":
-      return "error";
-    default:
-      return "info";
-  }
-}
-function statusFromSubagent(activity) {
-  switch (activity.status) {
-    case "running":
-      return "running";
-    case "waiting":
-      return "waiting";
-    case "done":
-      return "done";
-    case "error":
-    case "cancelled":
-      return "error";
-    default:
-      return "info";
-  }
-}
-function statusFromTask(task) {
-  switch (task.status) {
-    case "in_progress":
-      return "running";
-    case "completed":
-      return "done";
-    case "cancelled":
-      return "error";
-    case "pending":
-    default:
-      return "waiting";
-  }
-}
-function taskMeta(task, language) {
-  switch (task.status) {
-    case "in_progress":
-      return t$3(language, "running", "진행 중");
-    case "completed":
-      return t$3(language, "done", "완료");
-    case "cancelled":
-      return t$3(language, "cancelled", "취소됨");
-    case "pending":
-    default:
-      return t$3(language, "pending", "대기 중");
-  }
-}
-function subagentName(index2) {
-  return SUBAGENT_NAMES$1[index2 % SUBAGENT_NAMES$1.length] ?? `Agent ${index2 + 1}`;
-}
-function normalizeRole(role) {
-  const value = role.trim().toLowerCase();
-  if (value === "explore" || value === "explorer" || value === "research") return "explorer";
-  if (value === "review" || value === "reviewer") return "reviewer";
-  if (value === "work" || value === "worker") return "worker";
-  return value || "subagent";
-}
-function controlLabel(request, language) {
-  if (request.kind === "user_question") return t$3(language, "Needs answer", "답변 필요");
-  return t$3(language, "Needs approval", "승인 필요");
-}
-function controlMeta(request, language) {
-  switch (request.kind) {
-    case "plan_approval":
-      return t$3(language, "plan", "계획");
-    case "user_question":
-      return t$3(language, "question", "질문");
-    case "tool_permission":
-    default:
-      return t$3(language, "tool", "도구");
-  }
-}
-function normalizeToolLabel(label) {
-  return label.replace(/[^a-z0-9]/gi, "").toLowerCase();
-}
-function shouldDisplayToolActivity(activity) {
-  return !LOW_SIGNAL_TOOL_LABELS.has(normalizeToolLabel(activity.label));
-}
-function toolRow(activity, language) {
-  const preview2 = derivePublicToolPreview({
-    label: activity.label,
-    inputPreview: activity.inputPreview,
-    outputPreview: activity.outputPreview,
-    language
-  });
-  const duration = activity.durationMs ? formatElapsed(activity.durationMs, language) : void 0;
-  return {
-    id: `tool:${activity.id}`,
-    group: "tool",
-    label: preview2?.action ?? activity.label,
-    detail: preview2?.target,
-    snippet: preview2?.snippet,
-    status: statusFromTool(activity),
-    ...duration ? { meta: duration } : {}
-  };
-}
-function deriveWorkConsoleRows({
-  channelState,
-  queuedMessages = [],
-  controlRequests = []
-}) {
-  const rows = [];
-  const language = channelState.responseLanguage;
-  const phase = channelState.reconnecting ? t$3(language, "Reconnecting", "다시 연결 중") : channelState.error ? t$3(language, "Blocked", "차단됨") : channelState.turnPhase ? isKorean$3(language) ? PHASE_LABELS_KO$1[channelState.turnPhase] : PHASE_LABELS$1[channelState.turnPhase] : channelState.streaming ? t$3(language, "Working", "작업 중") : null;
-  const elapsed = formatElapsed(channelState.heartbeatElapsedMs, language);
-  if (phase) {
-    rows.push({
-      id: "phase",
-      group: "status",
-      label: phase,
-      detail: elapsed ? t$3(language, `${elapsed} elapsed`, `${elapsed} 경과`) : void 0,
-      status: channelState.error || channelState.turnPhase === "aborted" ? "error" : "running"
-    });
-  }
-  for (const [index2, subagent] of (channelState.subagents ?? []).entries()) {
-    rows.push({
-      id: `subagent:${subagent.taskId}`,
-      group: "subagent",
-      label: subagentName(index2),
-      detail: subagent.detail,
-      status: statusFromSubagent(subagent),
-      meta: normalizeRole(subagent.role)
-    });
-  }
-  for (const activity of channelState.activeTools ?? []) {
-    if (!shouldDisplayToolActivity(activity)) continue;
-    rows.push(toolRow(activity, language));
-  }
-  for (const task of channelState.taskBoard?.tasks ?? []) {
-    rows.push({
-      id: `task:${task.id}`,
-      group: "task",
-      label: task.title,
-      detail: task.description,
-      status: statusFromTask(task),
-      meta: taskMeta(task, language)
-    });
-  }
-  for (const [index2, message] of queuedMessages.entries()) {
-    rows.push({
-      id: `queue:${message.id}`,
-      group: "queue",
-      label: index2 === 0 ? t$3(language, "Queued follow-up", "대기 중인 후속 메시지") : t$3(language, `Queued follow-up ${index2 + 1}`, `대기 중인 후속 메시지 ${index2 + 1}`),
-      detail: message.content,
-      status: message.priority === "now" ? "running" : "waiting",
-      meta: message.priority === "now" ? t$3(language, "steering next", "다음 턴 조정") : t$3(language, "will send later", "나중에 전송")
-    });
-  }
-  for (const request of pendingControlRequests$2(controlRequests)) {
-    rows.push({
-      id: `control:${request.requestId}`,
-      group: "control",
-      label: controlLabel(request, language),
-      detail: request.prompt,
-      status: "waiting",
-      meta: controlMeta(request, language)
-    });
-  }
-  if (rows.length === 0) {
-    return [
-      {
-        id: "idle",
-        group: "status",
-        label: t$3(language, "Idle", "대기 중"),
-        detail: t$3(language, "Live agent work will appear here.", "실시간 작업 상태가 여기에 표시됩니다."),
-        status: "info"
-      }
-    ];
-  }
-  return rows;
-}
 const GROUP_LABELS = {
   status: "Now",
   tool: "Current steps",
@@ -34106,14 +34650,14 @@ const GROUP_LABELS_KO = {
   queue: "대기 메시지",
   control: "입력 필요"
 };
-function isKorean$2(language) {
+function isKorean$1(language) {
   return language === "ko";
 }
-function t$2(language, en, ko) {
-  return isKorean$2(language) ? ko : en;
+function t$1(language, en, ko) {
+  return isKorean$1(language) ? ko : en;
 }
 function groupLabel(group, language) {
-  return isKorean$2(language) ? GROUP_LABELS_KO[group] : GROUP_LABELS[group];
+  return isKorean$1(language) ? GROUP_LABELS_KO[group] : GROUP_LABELS[group];
 }
 function statusClass(status) {
   switch (status) {
@@ -34248,6 +34792,58 @@ function WorkConsoleRowItem({ row }) {
     }
   );
 }
+function browserActionLabel$1(action, language) {
+  switch (action) {
+    case "open":
+      return t$1(language, "Opening page", "페이지 여는 중");
+    case "click":
+    case "mouse_click":
+      return t$1(language, "Clicking", "클릭 중");
+    case "fill":
+    case "keyboard_type":
+    case "press":
+      return t$1(language, "Typing", "입력 중");
+    case "scroll":
+      return t$1(language, "Scrolling", "스크롤 중");
+    case "screenshot":
+    case "snapshot":
+      return t$1(language, "Inspecting page", "페이지 확인 중");
+    case "scrape":
+      return t$1(language, "Reading page", "페이지 읽는 중");
+    default:
+      return t$1(language, "Using browser", "브라우저 사용 중");
+  }
+}
+function BrowserFramePreview({
+  frame,
+  language
+}) {
+  const imageSrc = `data:${frame.contentType};base64,${frame.imageBase64}`;
+  return /* @__PURE__ */ jsxRuntimeExports.jsxs(
+    "section",
+    {
+      className: "mb-3 overflow-hidden rounded-xl border border-black/[0.08] bg-white shadow-[0_1px_6px_rgba(15,23,42,0.06)]",
+      "data-work-console-browser-frame": "true",
+      children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex min-w-0 items-center justify-between gap-2 border-b border-black/[0.06] px-2.5 py-1.5", children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "shrink-0 text-[10px] font-semibold uppercase tracking-wide text-secondary/45", children: t$1(language, "Live browser", "실시간 브라우저") }),
+          /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "min-w-0 truncate text-[10.5px] text-secondary/55", children: [
+            browserActionLabel$1(frame.action, language),
+            frame.url ? ` · ${frame.url}` : ""
+          ] })
+        ] }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx(
+          "img",
+          {
+            src: imageSrc,
+            alt: t$1(language, "Browser preview", "브라우저 미리보기"),
+            className: "block aspect-video w-full bg-black/[0.03] object-contain"
+          }
+        )
+      ]
+    }
+  );
+}
 function WorkConsolePanel({
   channelState,
   queuedMessages = [],
@@ -34272,54 +34868,57 @@ function WorkConsolePanel({
       behavior: reduceMotion ? "auto" : "smooth"
     });
   }, [actionRows.length, lastActionId]);
-  return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex min-h-0 flex-1 flex-col", "aria-label": t$2(language, "Work in progress", "진행 중인 작업"), children: [
+  return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex min-h-0 flex-1 flex-col", "aria-label": t$1(language, "Work in progress", "진행 중인 작업"), children: [
     /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "border-b border-black/[0.06] px-3 py-2", children: [
-      /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "text-[11px] font-semibold uppercase tracking-wide text-secondary/70", children: t$2(language, "Work in progress", "진행 중인 작업") }),
-      /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "mt-1 text-[11px] leading-snug text-secondary/45", children: t$2(language, "Plain-language progress from the current run.", "현재 실행의 진행 상황입니다.") })
+      /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "text-[11px] font-semibold uppercase tracking-wide text-secondary/70", children: t$1(language, "Work in progress", "진행 중인 작업") }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "mt-1 text-[11px] leading-snug text-secondary/45", children: t$1(language, "Plain-language progress from the current run.", "현재 실행의 진행 상황입니다.") })
     ] }),
-    /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "min-h-0 flex-1 overflow-y-auto px-2 py-2", children: groups.map(([group, groupRows2]) => {
-      const isActionsGroup = group === "tool";
-      const isSubagentGroup = group === "subagent";
-      const tone = sectionTone(group);
-      const isProminentGroup = tone !== "default";
-      return /* @__PURE__ */ jsxRuntimeExports.jsxs(
-        "section",
-        {
-          className: sectionClass(group),
-          "data-work-console-group": group,
-          "data-work-console-section-tone": tone,
-          "data-work-console-section-density": isSubagentGroup ? "compact" : void 0,
-          children: [
-            /* @__PURE__ */ jsxRuntimeExports.jsxs(
-              "div",
-              {
-                className: isProminentGroup ? "mb-1.5 flex items-center justify-between px-1 text-[10px] font-semibold uppercase tracking-wide text-secondary/45" : "mb-1 px-2 text-[10px] font-semibold uppercase tracking-wide text-secondary/40",
-                children: [
-                  /* @__PURE__ */ jsxRuntimeExports.jsx("span", { children: groupLabel(group, language) }),
-                  tone === "status" && /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "rounded-full bg-[#7C3AED]/10 px-1.5 py-0.5 text-[9px] font-semibold text-[#7C3AED]", children: t$2(language, "Live", "실시간") }),
-                  tone === "actions" && /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "rounded-full bg-black/[0.04] px-1.5 py-0.5 text-[9px] font-semibold text-secondary/45", children: groupRows2.length }),
-                  tone === "agents" && /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "rounded-full bg-emerald-500/15 px-1.5 py-0.5 text-[9px] font-semibold text-emerald-700", children: isKorean$2(language) ? `${groupRows2.length}명` : `${groupRows2.length} agents` }),
-                  tone === "queue" && /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "rounded-full bg-amber-500/15 px-1.5 py-0.5 text-[9px] font-semibold text-amber-800", children: isKorean$2(language) ? `${groupRows2.length}개 대기` : `${groupRows2.length} waiting` })
-                ]
-              }
-            ),
-            /* @__PURE__ */ jsxRuntimeExports.jsx(
-              "ul",
-              {
-                ref: isActionsGroup ? actionsListRef : void 0,
-                className: isActionsGroup ? "max-h-[44vh] space-y-0.5 overflow-y-auto overscroll-contain pr-1" : isSubagentGroup ? "grid grid-cols-2 gap-1.5" : "space-y-0.5",
-                "data-work-console-actions-scroll": isActionsGroup ? "bottom" : void 0,
-                "data-work-console-agent-roster": isSubagentGroup ? "compact" : void 0,
-                "data-work-console-agent-layout": isSubagentGroup ? "grid" : void 0,
-                "aria-label": isActionsGroup ? groupLabel("tool", language) : isSubagentGroup ? groupLabel("subagent", language) : void 0,
-                children: groupRows2.map((row) => isSubagentGroup ? /* @__PURE__ */ jsxRuntimeExports.jsx(WorkConsoleAgentChip, { row }, row.id) : /* @__PURE__ */ jsxRuntimeExports.jsx(WorkConsoleRowItem, { row }, row.id))
-              }
-            )
-          ]
-        },
-        group
-      );
-    }) })
+    /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "min-h-0 flex-1 overflow-y-auto px-2 py-2", children: [
+      channelState.browserFrame && /* @__PURE__ */ jsxRuntimeExports.jsx(BrowserFramePreview, { frame: channelState.browserFrame, language }),
+      groups.map(([group, groupRows2]) => {
+        const isActionsGroup = group === "tool";
+        const isSubagentGroup = group === "subagent";
+        const tone = sectionTone(group);
+        const isProminentGroup = tone !== "default";
+        return /* @__PURE__ */ jsxRuntimeExports.jsxs(
+          "section",
+          {
+            className: sectionClass(group),
+            "data-work-console-group": group,
+            "data-work-console-section-tone": tone,
+            "data-work-console-section-density": isSubagentGroup ? "compact" : void 0,
+            children: [
+              /* @__PURE__ */ jsxRuntimeExports.jsxs(
+                "div",
+                {
+                  className: isProminentGroup ? "mb-1.5 flex items-center justify-between px-1 text-[10px] font-semibold uppercase tracking-wide text-secondary/45" : "mb-1 px-2 text-[10px] font-semibold uppercase tracking-wide text-secondary/40",
+                  children: [
+                    /* @__PURE__ */ jsxRuntimeExports.jsx("span", { children: groupLabel(group, language) }),
+                    tone === "status" && /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "rounded-full bg-[#7C3AED]/10 px-1.5 py-0.5 text-[9px] font-semibold text-[#7C3AED]", children: t$1(language, "Live", "실시간") }),
+                    tone === "actions" && /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "rounded-full bg-black/[0.04] px-1.5 py-0.5 text-[9px] font-semibold text-secondary/45", children: groupRows2.length }),
+                    tone === "agents" && /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "rounded-full bg-emerald-500/15 px-1.5 py-0.5 text-[9px] font-semibold text-emerald-700", children: isKorean$1(language) ? `${groupRows2.length}명` : `${groupRows2.length} agents` }),
+                    tone === "queue" && /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "rounded-full bg-amber-500/15 px-1.5 py-0.5 text-[9px] font-semibold text-amber-800", children: isKorean$1(language) ? `${groupRows2.length}개 대기` : `${groupRows2.length} waiting` })
+                  ]
+                }
+              ),
+              /* @__PURE__ */ jsxRuntimeExports.jsx(
+                "ul",
+                {
+                  ref: isActionsGroup ? actionsListRef : void 0,
+                  className: isActionsGroup ? "max-h-[44vh] space-y-0.5 overflow-y-auto overscroll-contain pr-1" : isSubagentGroup ? "grid grid-cols-2 gap-1.5" : "space-y-0.5",
+                  "data-work-console-actions-scroll": isActionsGroup ? "bottom" : void 0,
+                  "data-work-console-agent-roster": isSubagentGroup ? "compact" : void 0,
+                  "data-work-console-agent-layout": isSubagentGroup ? "grid" : void 0,
+                  "aria-label": isActionsGroup ? groupLabel("tool", language) : isSubagentGroup ? groupLabel("subagent", language) : void 0,
+                  children: groupRows2.map((row) => isSubagentGroup ? /* @__PURE__ */ jsxRuntimeExports.jsx(WorkConsoleAgentChip, { row }, row.id) : /* @__PURE__ */ jsxRuntimeExports.jsx(WorkConsoleRowItem, { row }, row.id))
+                }
+              )
+            ]
+          },
+          group
+        );
+      })
+    ] })
   ] });
 }
 function compareDocs(a, b) {
@@ -35389,164 +35988,6 @@ function KbSidePanel({
     ] })
   ] });
 }
-const PHASE_LABELS = {
-  pending: "Preparing",
-  planning: "Planning",
-  executing: "Running",
-  verifying: "Verifying",
-  committing: "Writing answer",
-  committed: "Writing answer",
-  aborted: "Stopping"
-};
-const PHASE_LABELS_KO = {
-  pending: "준비 중",
-  planning: "계획 중",
-  executing: "실행 중",
-  verifying: "검증 중",
-  committing: "답변 작성 중",
-  committed: "답변 작성 중",
-  aborted: "중단 중"
-};
-function isKorean$1(language) {
-  return language === "ko";
-}
-function t$1(language, en, ko) {
-  return isKorean$1(language) ? ko : en;
-}
-function pendingControlRequests$1(requests) {
-  return (requests ?? []).filter((request) => request.state === "pending");
-}
-function activeTools(channelState) {
-  return (channelState.activeTools ?? []).filter((activity) => activity.status === "running");
-}
-function activeSubagents(channelState) {
-  return (channelState.subagents ?? []).filter(
-    (subagent) => subagent.status === "running" || subagent.status === "waiting"
-  );
-}
-function firstInProgressTask(taskBoard) {
-  return taskBoard?.tasks.find((task) => task.status === "in_progress") ?? null;
-}
-function completedLikeTaskCount(tasks) {
-  return tasks.filter((task) => task.status === "completed" || task.status === "cancelled").length;
-}
-function dependenciesSatisfied(task, tasks) {
-  if (!task.dependsOn?.length) return true;
-  const taskById = new Map(tasks.map((candidate) => [candidate.id, candidate]));
-  return task.dependsOn.every((dependencyId) => {
-    const dependency = taskById.get(dependencyId);
-    return dependency?.status === "completed" || dependency?.status === "cancelled";
-  });
-}
-function firstReadyPendingTask(taskBoard) {
-  if (!taskBoard?.tasks.length) return null;
-  return taskBoard.tasks.find(
-    (task) => task.status === "pending" && dependenciesSatisfied(task, taskBoard.tasks)
-  ) ?? taskBoard.tasks.find((task) => task.status === "pending") ?? null;
-}
-function controlRequestStatus(request, language) {
-  return request.kind === "user_question" ? t$1(language, "Needs answer", "답변 필요") : t$1(language, "Needs approval", "승인 필요");
-}
-function controlRequestNow(request, language) {
-  switch (request.kind) {
-    case "plan_approval":
-      return t$1(language, "Waiting for plan approval", "계획 승인 대기 중");
-    case "user_question":
-      return t$1(language, "Waiting for your answer", "사용자 답변 대기 중");
-    case "tool_permission":
-    default:
-      return t$1(language, "Waiting for tool permission", "도구 권한 대기 중");
-  }
-}
-function statusFrom(channelState, pendingRequests) {
-  const language = channelState.responseLanguage;
-  if (pendingRequests[0]) return controlRequestStatus(pendingRequests[0], language);
-  if (channelState.reconnecting) return t$1(language, "Reconnecting", "다시 연결 중");
-  if (channelState.turnPhase === "aborted" || channelState.error) {
-    return t$1(language, "Blocked", "차단됨");
-  }
-  if ((channelState.activeTools ?? []).some((activity) => activity.status === "error")) {
-    return t$1(language, "Blocked", "차단됨");
-  }
-  if (channelState.turnPhase === "verifying") return t$1(language, "Verifying", "검증 중");
-  if (channelState.turnPhase === "committing" || channelState.turnPhase === "committed") {
-    return t$1(language, "Writing answer", "답변 작성 중");
-  }
-  if (channelState.turnPhase === "executing" || activeTools(channelState).length > 0 || activeSubagents(channelState).length > 0 || firstInProgressTask(channelState.taskBoard)) {
-    return t$1(language, "Running", "실행 중");
-  }
-  if (channelState.turnPhase === "pending" || channelState.turnPhase === "planning") {
-    return t$1(language, "Planning", "계획 중");
-  }
-  return t$1(language, "Working", "작업 중");
-}
-function progressFrom(channelState) {
-  const language = channelState.responseLanguage;
-  const tasks = channelState.taskBoard?.tasks ?? [];
-  if (tasks.length > 0) {
-    const completed = completedLikeTaskCount(tasks);
-    return isKorean$1(language) ? `${completed}/${tasks.length}개 완료` : `${completed}/${tasks.length} tasks complete`;
-  }
-  const runningTools = activeTools(channelState);
-  const runningSubagents = activeSubagents(channelState);
-  if (runningTools.length > 0 && runningSubagents.length > 0) {
-    const count = runningTools.length + runningSubagents.length;
-    return isKorean$1(language) ? `${count}개 작업 실행 중` : `${count} actions active`;
-  }
-  if (runningTools.length > 0) {
-    return isKorean$1(language) ? `${runningTools.length}개 작업 실행 중` : `${runningTools.length} action${runningTools.length === 1 ? "" : "s"} active`;
-  }
-  if (runningSubagents.length > 0) {
-    if (isKorean$1(language)) return `${runningSubagents.length}명 백그라운드 작업 중`;
-    return `${runningSubagents.length} background agent${runningSubagents.length === 1 ? "" : "s"} active`;
-  }
-  return void 0;
-}
-function phaseLabel$1(phase, language) {
-  if (!phase) return t$1(language, "Working", "작업 중");
-  return isKorean$1(language) ? PHASE_LABELS_KO[phase] : PHASE_LABELS[phase];
-}
-function goalFrom(channelState) {
-  return firstInProgressTask(channelState.taskBoard)?.title ?? t$1(channelState.responseLanguage, "Working on your request", "요청 처리 중");
-}
-function nowFrom(channelState, pendingRequests) {
-  const language = channelState.responseLanguage;
-  if (pendingRequests[0]) return controlRequestNow(pendingRequests[0], language);
-  const task = firstInProgressTask(channelState.taskBoard);
-  if (task) return task.title;
-  const tool = activeTools(channelState)[0];
-  if (tool) return tool.label;
-  const subagent = activeSubagents(channelState)[0];
-  if (subagent) {
-    return subagent.detail || subagent.role || t$1(language, "Background agent", "백그라운드 도우미");
-  }
-  return phaseLabel$1(channelState.turnPhase ?? null, language);
-}
-function nextFrom(channelState, queuedMessages, pendingRequests) {
-  if (pendingRequests[0]) return pendingRequests[0].prompt;
-  if (queuedMessages[0]) return queuedMessages[0].content;
-  const task = firstReadyPendingTask(channelState.taskBoard);
-  if (task) return task.title;
-  if (channelState.turnPhase === "committing" || channelState.turnPhase === "committed") {
-    return t$1(channelState.responseLanguage, "Preparing final answer", "최종 답변 준비 중");
-  }
-  return void 0;
-}
-function deriveWorkStateSummary({
-  channelState,
-  queuedMessages = [],
-  controlRequests = []
-}) {
-  const pendingRequests = pendingControlRequests$1(controlRequests);
-  return {
-    title: t$1(channelState.responseLanguage, "Current Work", "현재 작업"),
-    goal: goalFrom(channelState),
-    status: statusFrom(channelState, pendingRequests),
-    progress: progressFrom(channelState),
-    now: nowFrom(channelState, pendingRequests),
-    next: nextFrom(channelState, queuedMessages, pendingRequests)
-  };
-}
 function openTaskBoard(snapshot) {
   if (!snapshot?.tasks.length) return null;
   if (!snapshot.tasks.some((task) => task.status === "pending" || task.status === "in_progress")) {
@@ -35558,11 +35999,11 @@ function pendingControlRequests(requests) {
   return (requests ?? []).filter((request) => request.state === "pending");
 }
 function hasVisibleRunState(channelState, queuedMessages, pendingRequests, taskBoard, subagents) {
-  return channelState.streaming || (channelState.activeTools ?? []).length > 0 || subagents.length > 0 || queuedMessages.length > 0 || pendingRequests.length > 0 || !!taskBoard;
+  return channelState.streaming || (channelState.activeTools ?? []).length > 0 || !!channelState.browserFrame || subagents.length > 0 || queuedMessages.length > 0 || pendingRequests.length > 0 || !!taskBoard;
 }
 function runIdentity(channelState, queuedMessages, pendingRequests, taskBoard, subagents) {
   const activeTools2 = channelState.activeTools ?? [];
-  const startedAt = channelState.thinkingStartedAt ?? activeTools2[0]?.startedAt ?? subagents[0]?.startedAt ?? null;
+  const startedAt = channelState.thinkingStartedAt ?? activeTools2[0]?.startedAt ?? channelState.browserFrame?.capturedAt ?? subagents[0]?.startedAt ?? null;
   if (startedAt !== null) return `run:${startedAt}`;
   if (pendingRequests.length > 0) {
     return `controls:${pendingRequests.map((request) => request.requestId).join(",")}`;
@@ -35707,6 +36148,58 @@ function WorkStateSummaryRows({
     ] }, row.label)) })
   ] });
 }
+function browserActionLabel(action, language) {
+  switch (action) {
+    case "open":
+      return t(language, "Opening page", "페이지 여는 중");
+    case "click":
+    case "mouse_click":
+      return t(language, "Clicking", "클릭 중");
+    case "fill":
+    case "keyboard_type":
+    case "press":
+      return t(language, "Typing", "입력 중");
+    case "scroll":
+      return t(language, "Scrolling", "스크롤 중");
+    case "screenshot":
+    case "snapshot":
+      return t(language, "Inspecting page", "페이지 확인 중");
+    case "scrape":
+      return t(language, "Reading page", "페이지 읽는 중");
+    default:
+      return t(language, "Using browser", "브라우저 사용 중");
+  }
+}
+function BrowserFrameInline({
+  frame,
+  language
+}) {
+  const imageSrc = `data:${frame.contentType};base64,${frame.imageBase64}`;
+  return /* @__PURE__ */ jsxRuntimeExports.jsxs(
+    "div",
+    {
+      className: "mt-2 overflow-hidden rounded-lg border border-black/[0.08] bg-white",
+      "data-run-inspector-browser-frame": "true",
+      children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex min-w-0 items-center justify-between gap-2 border-b border-black/[0.06] px-2.5 py-1.5", children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "shrink-0 text-[10px] font-semibold uppercase tracking-wide text-secondary/45", children: t(language, "Live browser", "실시간 브라우저") }),
+          /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "min-w-0 truncate text-[10.5px] text-secondary/55", children: [
+            browserActionLabel(frame.action, language),
+            frame.url ? ` · ${frame.url}` : ""
+          ] })
+        ] }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx(
+          "img",
+          {
+            src: imageSrc,
+            alt: t(language, "Browser preview", "브라우저 미리보기"),
+            className: "block aspect-video w-full max-h-64 bg-black/[0.03] object-contain"
+          }
+        )
+      ]
+    }
+  );
+}
 function RunInspectorDock({
   channelState,
   queuedMessages = [],
@@ -35803,6 +36296,7 @@ function RunInspectorDock({
     ] }),
     /* @__PURE__ */ jsxRuntimeExports.jsx(WorkStateSummaryRows, { summary: workState, language }),
     compactDetails ? null : /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "mt-2 max-h-[min(50vh,34rem)] overflow-y-auto overscroll-contain pr-1 [scrollbar-gutter:stable]", children: [
+      channelState.browserFrame && /* @__PURE__ */ jsxRuntimeExports.jsx(BrowserFrameInline, { frame: channelState.browserFrame, language }),
       (channelState.streaming || activeTools2.length > 0) && /* @__PURE__ */ jsxRuntimeExports.jsx("div", { children: /* @__PURE__ */ jsxRuntimeExports.jsx(
         AgentActivityTimeline,
         {
@@ -35912,8 +36406,8 @@ function detectMessageResponseLanguage(text2) {
 const BOT_ID = "local";
 const BOT_NAME = "Magi_Local";
 const DEFAULT_CHANNEL = "general";
-const DEFAULT_MODEL = "auto";
-const DEFAULT_ROUTER = "standard";
+const DEFAULT_MODEL = "magi_smart_routing";
+const DEFAULT_ROUTER = "big_dic";
 const WORKSPACE_SCAN_LIMIT = 220;
 const EDITABLE_WORKSPACE_ROOTS = /* @__PURE__ */ new Set([
   ".magi",
@@ -35939,7 +36433,7 @@ function defaultChannel() {
   return {
     id: "local-general",
     name: DEFAULT_CHANNEL,
-    display_name: null,
+    display_name: "General",
     position: 0,
     category: "General",
     created_at: (/* @__PURE__ */ new Date(0)).toISOString()
@@ -36048,6 +36542,18 @@ function normalizeSubagentStatus(type, status) {
   if (type === "child_failed" || status === "failed" || status === "error") return "error";
   if (status === "waiting") return "waiting";
   return "running";
+}
+function normalizeBrowserFrame(payload) {
+  const imageBase64 = asString(payload.imageBase64);
+  if (!imageBase64) return null;
+  const contentType = payload.contentType === "image/jpeg" || payload.contentType === "image/png" ? payload.contentType : "image/png";
+  return {
+    action: asString(payload.action, "browser"),
+    imageBase64,
+    contentType,
+    capturedAt: asNumber(payload.capturedAt, Date.now()),
+    ...typeof payload.url === "string" && payload.url ? { url: payload.url } : {}
+  };
 }
 function appendToolActivity(current, patch2) {
   const next = [...current ?? []];
@@ -36342,6 +36848,7 @@ function App() {
           turnPhase: "pending",
           error: null,
           activeTools: [],
+          browserFrame: null,
           subagents: [],
           taskBoard: null,
           heartbeatElapsedMs: null
@@ -36401,6 +36908,12 @@ function App() {
             outputPreview: asString(payload.output_preview),
             durationMs: asNumber(payload.durationMs)
           });
+        }
+      }
+      if (type === "browser_frame") {
+        const browserFrame = normalizeBrowserFrame(payload);
+        if (browserFrame) {
+          store.setChannelState(channel, { browserFrame }, { botId: BOT_ID });
         }
       }
       if (type === "task_board") {
@@ -36549,6 +37062,7 @@ function App() {
         heartbeatElapsedMs: null,
         pendingInjectionCount: 0,
         activeTools: [],
+        browserFrame: null,
         subagents: [],
         taskBoard: null,
         responseLanguage: detectMessageResponseLanguage(messageText)
@@ -36794,35 +37308,19 @@ function App() {
     setRouterType(nextRouter);
     window.localStorage.setItem(storage.modelOverride, nextModel);
   }, []);
-  const handleLocalConfigUpdate = reactExports.useCallback(() => {
-    window.localStorage.setItem(storage.agentUrl, agentUrl);
-    window.localStorage.setItem(storage.token, token);
-    void Promise.allSettled([refreshKnowledge(), refreshWorkspace()]);
-  }, [agentUrl, refreshKnowledge, refreshWorkspace, token]);
-  const composerAccessory = /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex max-w-full flex-wrap items-center justify-end gap-1", children: [
-    /* @__PURE__ */ jsxRuntimeExports.jsx(
-      "button",
-      {
-        type: "button",
-        onClick: handleLocalConfigUpdate,
-        className: "hidden sm:inline-flex h-8 items-center rounded-lg px-2.5 text-xs font-medium text-secondary/70 transition-colors hover:bg-white hover:text-foreground",
-        children: "Save"
-      }
-    ),
-    /* @__PURE__ */ jsxRuntimeExports.jsx(
-      ChatModelPicker,
-      {
-        botId: BOT_ID,
-        modelSelection,
-        routerType,
-        apiKeyMode: "platform_credits",
-        subscriptionPlan: "max",
-        persistMode: "local",
-        menuPlacement: "top",
-        onModelSelectionChange: handleModelSelectionChange
-      }
-    )
-  ] });
+  const composerAccessory = /* @__PURE__ */ jsxRuntimeExports.jsx(
+    ChatModelPicker,
+    {
+      botId: BOT_ID,
+      modelSelection,
+      routerType,
+      apiKeyMode: "platform_credits",
+      subscriptionPlan: "max",
+      persistMode: "local",
+      menuPlacement: "top",
+      onModelSelectionChange: handleModelSelectionChange
+    }
+  );
   return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex h-full bg-background", children: [
     /* @__PURE__ */ jsxRuntimeExports.jsx(
       ChatSidebar,
@@ -36876,13 +37374,16 @@ function App() {
         onDragEnter: handleDragEnter,
         onDragLeave: handleDragLeave,
         children: [
-          isDraggingOver && /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "pointer-events-none absolute inset-0 z-20 flex items-center justify-center rounded-2xl border-2 border-dashed border-primary/30 bg-primary/[0.04]", children: /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "rounded-xl border border-primary/20 bg-white/90 px-5 py-3 text-sm font-medium text-primary/70 shadow-sm backdrop-blur-sm", children: "Drop files to attach" }) }),
-          /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center gap-3 border-b border-black/[0.06] px-4 py-3 md:px-6", children: [
+          isDraggingOver && /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "absolute inset-0 z-20 flex items-center justify-center bg-primary/[0.04] border-2 border-dashed border-primary/30 rounded-2xl pointer-events-none", children: /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center gap-2 text-sm text-primary/70 font-medium bg-white/90 backdrop-blur-sm px-5 py-3 rounded-xl border border-primary/20 shadow-sm", children: [
+            /* @__PURE__ */ jsxRuntimeExports.jsx("svg", { className: "w-5 h-5", viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 2, strokeLinecap: "round", strokeLinejoin: "round", children: /* @__PURE__ */ jsxRuntimeExports.jsx("path", { d: "M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" }) }),
+            "Drop files to attach"
+          ] }) }),
+          /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "px-4 md:px-6 py-3 flex items-center gap-3 border-b border-black/[0.06]", children: [
             /* @__PURE__ */ jsxRuntimeExports.jsx(
               "button",
               {
                 onClick: () => setSidebarOpen(true),
-                className: "-ml-1 rounded-xl p-1.5 text-secondary/60 transition-all duration-200 hover:bg-black/[0.04] hover:text-foreground md:hidden",
+                className: "md:hidden p-1.5 -ml-1 text-secondary/60 hover:text-foreground rounded-xl hover:bg-black/[0.04] transition-all duration-200",
                 "aria-label": "Open channels",
                 children: /* @__PURE__ */ jsxRuntimeExports.jsxs("svg", { width: "18", height: "18", viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: "2", strokeLinecap: "round", strokeLinejoin: "round", children: [
                   /* @__PURE__ */ jsxRuntimeExports.jsx("line", { x1: "3", y1: "6", x2: "21", y2: "6" }),
@@ -36891,13 +37392,26 @@ function App() {
                 ] })
               }
             ),
-            /* @__PURE__ */ jsxRuntimeExports.jsx("h1", { className: "min-w-0 flex-1 truncate text-sm font-medium text-foreground/80", children: activeChannel }),
+            /* @__PURE__ */ jsxRuntimeExports.jsx("h1", { className: "text-sm font-medium text-foreground/80 flex-1 min-w-0 truncate", children: localizeChannel(
+              activeChannel,
+              store.channels.find((channel) => channel.name === activeChannel)?.display_name ?? null,
+              "en"
+            ) }),
             /* @__PURE__ */ jsxRuntimeExports.jsx(
               "button",
               {
                 onClick: handleReset,
-                className: "rounded-lg px-2.5 py-1 text-[11px] text-secondary/50 transition-all duration-200 hover:bg-black/[0.04] hover:text-foreground/70",
+                className: "px-2.5 py-1 text-[11px] text-secondary/50 hover:text-foreground/70 rounded-lg hover:bg-black/[0.04] transition-all duration-200",
                 children: "Reset"
+              }
+            ),
+            /* @__PURE__ */ jsxRuntimeExports.jsx(
+              "a",
+              {
+                href: "/dashboard",
+                className: "md:hidden p-1.5 text-secondary/60 hover:text-foreground rounded-xl hover:bg-black/[0.04] transition-all duration-200",
+                "aria-label": "Dashboard",
+                children: /* @__PURE__ */ jsxRuntimeExports.jsx("svg", { width: "18", height: "18", viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: "1.5", children: /* @__PURE__ */ jsxRuntimeExports.jsx("path", { strokeLinecap: "round", strokeLinejoin: "round", d: "M10.5 6h9.75M10.5 6a1.5 1.5 0 11-3 0m3 0a1.5 1.5 0 10-3 0M3.75 6H7.5m3 12h9.75m-9.75 0a1.5 1.5 0 01-3 0m3 0a1.5 1.5 0 00-3 0m-3.75 0H7.5m9-6h3.75m-3.75 0a1.5 1.5 0 01-3 0m3 0a1.5 1.5 0 00-3 0m-9.75 0h9.75" }) })
               }
             )
           ] }),
