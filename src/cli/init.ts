@@ -192,7 +192,7 @@ export async function runInit(): Promise<void> {
     console.log(`  1. Start your local model server, for example: ollama serve`);
   }
   console.log(`  2. Set an app token:  export MAGI_AGENT_SERVER_TOKEN=$(openssl rand -hex 24)`);
-  console.log(`  3. Start interactive: magi-agent start`);
+  console.log(`  3. Start interactive: magi-agent chat`);
   console.log(`  4. Or run as server:  magi-agent serve --port 8080`);
   console.log("");
 }

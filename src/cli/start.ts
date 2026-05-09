@@ -12,13 +12,12 @@ import { Agent } from "../Agent.js";
 import type { SseWriter } from "../transport/SseWriter.js";
 import type { UserMessage, ChannelRef } from "../util/types.js";
 import { buildCliAgentConfig } from "./agentConfig.js";
+import { renderCliHelp, renderCliWelcome, renderPrompt } from "./terminalUi.js";
 import { TerminalSseWriter } from "./terminalWriter.js";
 
 // ANSI helpers
-const BOLD = "\x1b[1m";
 const DIM = "\x1b[2m";
 const RESET = "\x1b[0m";
-const GREEN = "\x1b[32m";
 const YELLOW = "\x1b[33m";
 
 export async function runStart(): Promise<void> {
@@ -32,13 +31,17 @@ export async function runStart(): Promise<void> {
 
   const agentName = config.identity?.name ?? "Magi";
   const agentConfig = buildCliAgentConfig(config, { botId: "cli" });
+  const sessionKey = "agent:local:cli:interactive";
 
-  console.log("");
-  console.log(`${BOLD}${agentName}${RESET}`);
-  console.log(`${DIM}Model: ${config.llm.provider}/${agentConfig.model}${RESET}`);
-  console.log(`${DIM}Workspace: ${agentConfig.workspaceRoot}${RESET}`);
-  console.log(`${DIM}Type your message and press Enter. Ctrl+C to exit.${RESET}`);
-  console.log("");
+  console.log(
+    renderCliWelcome({
+      agentName,
+      provider: config.llm.provider,
+      model: agentConfig.model,
+      workspaceRoot: agentConfig.workspaceRoot,
+      sessionKey,
+    }),
+  );
 
   const agent = new Agent(agentConfig);
   try {
@@ -49,12 +52,12 @@ export async function runStart(): Promise<void> {
   }
 
   const channelRef: ChannelRef = { type: "app", channelId: "cli" };
-  const session = await agent.getOrCreateSession("cli:interactive", channelRef);
+  const session = await agent.getOrCreateSession(sessionKey, channelRef);
 
   const rl = readline.createInterface({
     input: process.stdin,
     output: process.stdout,
-    prompt: `${GREEN}>${RESET} `,
+    prompt: renderPrompt(),
   });
 
   let shuttingDown = false;
@@ -85,6 +88,25 @@ export async function runStart(): Promise<void> {
 
     if (text === "/exit" || text === "/quit") {
       await shutdown();
+      return;
+    }
+    if (text === "/help") {
+      console.log(renderCliHelp());
+      rl.prompt();
+      return;
+    }
+    if (text === "/clear") {
+      console.clear();
+      console.log(
+        renderCliWelcome({
+          agentName,
+          provider: config.llm.provider,
+          model: agentConfig.model,
+          workspaceRoot: agentConfig.workspaceRoot,
+          sessionKey,
+        }),
+      );
+      rl.prompt();
       return;
     }
 

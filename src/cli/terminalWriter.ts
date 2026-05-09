@@ -1,12 +1,36 @@
 import type { AgentEvent } from "../transport/SseWriter.js";
 
+const BOLD = "\x1b[1m";
 const DIM = "\x1b[2m";
 const RESET = "\x1b[0m";
+const GREEN = "\x1b[32m";
 const YELLOW = "\x1b[33m";
+
+type TerminalOutput = {
+  write(chunk: string): boolean;
+};
+
+export interface TerminalSseWriterOptions {
+  output?: TerminalOutput;
+  showAssistantLabel?: boolean;
+  verboseThinking?: boolean;
+}
 
 export class TerminalSseWriter {
   private ended = false;
   private inThinking = false;
+  private thinkingCollapsed = false;
+  private assistantLabelPrinted = false;
+  private readonly output: TerminalOutput;
+  private readonly showAssistantLabel: boolean;
+  private readonly verboseThinking: boolean;
+  private readonly toolNames = new Map<string, string>();
+
+  constructor(options: TerminalSseWriterOptions = {}) {
+    this.output = options.output ?? process.stdout;
+    this.showAssistantLabel = options.showAssistantLabel ?? true;
+    this.verboseThinking = options.verboseThinking ?? false;
+  }
 
   start(): void {}
 
@@ -15,48 +39,59 @@ export class TerminalSseWriter {
 
     switch (event.type) {
       case "text_delta":
-        if (this.inThinking) {
-          process.stdout.write(`${RESET}\n`);
-          this.inThinking = false;
-        }
-        process.stdout.write(event.delta);
+        this.closeThinkingForVisibleOutput();
+        this.printAssistantLabel();
+        this.output.write(event.delta);
         break;
 
       case "thinking_delta":
-        if (!this.inThinking) {
-          process.stdout.write(`${DIM}`);
-          this.inThinking = true;
+        if (this.verboseThinking) {
+          if (!this.inThinking) {
+            this.output.write(`${DIM}∴ Thinking…\n`);
+            this.inThinking = true;
+          }
+          this.output.write(event.delta);
+          break;
         }
-        process.stdout.write(event.delta);
+        if (!this.thinkingCollapsed) {
+          this.output.write(`${DIM}∴ Thinking…${RESET}\n`);
+          this.thinkingCollapsed = true;
+        }
         break;
 
       case "tool_start":
-        if (this.inThinking) {
-          process.stdout.write(`${RESET}\n`);
-          this.inThinking = false;
-        }
-        process.stdout.write(
-          `${DIM}[tool] ${event.name}${event.input_preview ? ` ${event.input_preview}` : ""}${RESET}\n`,
+        this.closeThinkingForVisibleOutput();
+        this.toolNames.set(event.id, event.name);
+        this.output.write(
+          `${DIM}● Running ${event.name}${event.input_preview ? ` ${event.input_preview}` : ""}${RESET}\n`,
         );
+        break;
+
+      case "tool_progress":
+        this.closeThinkingForVisibleOutput();
+        this.output.write(`${DIM}│ ${event.label}${RESET}\n`);
         break;
 
       case "tool_end":
-        process.stdout.write(
-          `${DIM}[tool] ${event.id} ${event.status} (${event.durationMs}ms)${RESET}\n`,
+        this.closeThinkingForVisibleOutput();
+        this.output.write(
+          `${DIM}└ ${event.status === "ok" ? "Done" : "Finished"} ${this.toolNames.get(event.id) ?? event.id} ${event.status} (${event.durationMs}ms)${event.output_preview ? ` ${event.output_preview}` : ""}${RESET}\n`,
         );
         break;
 
+      case "response_clear":
+        this.assistantLabelPrinted = false;
+        break;
+
       case "error":
-        process.stdout.write(
+        this.closeThinkingForVisibleOutput();
+        this.output.write(
           `\n${YELLOW}Error [${event.code}]: ${event.message}${RESET}\n`,
         );
         break;
 
       case "turn_end":
-        if (this.inThinking) {
-          process.stdout.write(`${RESET}`);
-          this.inThinking = false;
-        }
+        this.closeThinkingForVisibleOutput();
         break;
 
       default:
@@ -71,10 +106,19 @@ export class TerminalSseWriter {
   end(): void {
     if (this.ended) return;
     this.ended = true;
-    if (this.inThinking) {
-      process.stdout.write(`${RESET}`);
-      this.inThinking = false;
-    }
-    process.stdout.write("\n");
+    this.closeThinkingForVisibleOutput();
+    this.output.write("\n");
+  }
+
+  private printAssistantLabel(): void {
+    if (!this.showAssistantLabel || this.assistantLabelPrinted) return;
+    this.output.write(`${GREEN}${BOLD}Magi${RESET}\n`);
+    this.assistantLabelPrinted = true;
+  }
+
+  private closeThinkingForVisibleOutput(): void {
+    if (!this.inThinking) return;
+    this.output.write(`${RESET}\n`);
+    this.inThinking = false;
   }
 }

@@ -18,19 +18,59 @@ docker compose up --build
 
 Open `http://localhost:8080/app` and paste the server token from `.env`.
 
-Prefer the terminal?
+## CLI Usage
+
+Magi also runs as a terminal-native agent. Use it when you want the local
+runtime without the browser app, or when you want to script agent work from
+shell pipelines and cron jobs.
 
 ```bash
 npm install
 npm run build
 npx tsx src/cli/index.ts init
+```
+
+Interactive chat:
+
+```bash
 npx tsx src/cli/index.ts chat
+```
+
+One-shot task:
+
+```bash
 npx tsx src/cli/index.ts run "summarize workspace/knowledge"
+```
+
+Pipe input from another command or file:
+
+```bash
 cat notes.md | npx tsx src/cli/index.ts run --session notes
+```
+
+Run against a specific model or force plan mode:
+
+```bash
+npx tsx src/cli/index.ts run --model llama3.1 --plan "draft an implementation plan"
+```
+
+Serve the local HTTP API and browser app:
+
+```bash
+npx tsx src/cli/index.ts serve --port 8080
 ```
 
 After npm publishing, the same surface is available as `magi-agent chat`,
 `magi-agent run`, and `magi-agent serve`.
+
+| Command | Use it for |
+| --- | --- |
+| `magi-agent init` | Generate `magi-agent.yaml` for hosted or local LLMs. |
+| `magi-agent chat` | Persistent interactive terminal session with Claude Code-style terminal chrome. |
+| `magi-agent run "task"` | Single task with streamed output. |
+| `magi-agent run --session name` | Reuse a named CLI session and memory context. |
+| `magi-agent run --model name --plan "task"` | Override the model for one task and start in plan mode. |
+| `magi-agent serve --port 8080` | Start the self-hosted app and HTTP runtime API. |
 
 ## Why Install It
 
