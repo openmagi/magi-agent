@@ -94,6 +94,8 @@ const SOURCE_SCHEMA = {
     },
     {
       type: "object",
+      description:
+        "Markdown/text source object. Provide exactly one of content, markdown, text, or path.",
       properties: {
         kind: { type: "string", enum: ["markdown", "text", "plain_text"] },
         type: { type: "string", enum: ["markdown", "text", "plain_text"] },
@@ -105,16 +107,12 @@ const SOURCE_SCHEMA = {
           description: "Workspace-relative markdown/text file path to read as source content.",
         },
       },
-      anyOf: [
-        { required: ["content"] },
-        { required: ["markdown"] },
-        { required: ["text"] },
-        { required: ["path"] },
-      ],
       additionalProperties: false,
     },
     {
       type: "object",
+      description:
+        "Structured document source object. Provide either blocks inline or blocksFile as a workspace-relative JSON file.",
       properties: {
         kind: { type: "string", enum: ["structured"] },
         type: { type: "string", enum: ["structured"] },
@@ -127,10 +125,6 @@ const SOURCE_SCHEMA = {
           description: "Workspace-relative JSON file containing an array of structured blocks or an object with a blocks array.",
         },
       },
-      anyOf: [
-        { required: ["blocks"] },
-        { required: ["blocksFile"] },
-      ],
       additionalProperties: false,
     },
   ],

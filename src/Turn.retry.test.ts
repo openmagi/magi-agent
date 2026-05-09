@@ -291,6 +291,25 @@ describe("Turn blocked-output retry", () => {
     });
   });
 
+  it("emits public model progress before waiting on an LLM stream", async () => {
+    const { turn, sse } = await makeFixture([
+      { blocks: [{ type: "text", text: "Verified answer." }], stopReason: "end_turn" },
+    ]);
+
+    await turn.execute();
+
+    expect(sse.agentEvents).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: "llm_progress",
+          turnId: "turn-retry-1",
+          iter: 0,
+          stage: "started",
+        }),
+      ]),
+    );
+  });
+
   it("does not leave user-visible text when retry preflight fails after clearing a blocked draft", async () => {
     const { turn, transcript, sse } = await makeFixture(undefined, {
       blockRetryPreLlm: true,

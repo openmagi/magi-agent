@@ -236,6 +236,13 @@ function cronSnapshot(cron: CronRecord) {
     deliveryChannel: cron.deliveryChannel,
     ...(cron.description ? { description: cron.description } : {}),
     ...(cron.sessionKey ? { sessionKey: cron.sessionKey } : {}),
+    ...(cron.mode ? { mode: cron.mode } : {}),
+    ...(cron.scriptPath ? { scriptPath: cron.scriptPath } : {}),
+    ...(cron.timeoutMs !== undefined ? { timeoutMs: cron.timeoutMs } : {}),
+    ...(cron.quietOnEmptyStdout !== undefined
+      ? { quietOnEmptyStdout: cron.quietOnEmptyStdout }
+      : {}),
+    ...(cron.deliveryPolicy ? { deliveryPolicy: cron.deliveryPolicy } : {}),
     prompt: cron.prompt,
     promptPreview: preview(cron.prompt, 240) ?? "",
   };
@@ -1450,6 +1457,8 @@ async function handleCronCreate(
         ? body.sessionKey.trim()
         : undefined;
     const durable = body.durable === true;
+    const mode =
+      body.mode === "script" || body.mode === "agent" ? body.mode : undefined;
     const cron = await ctx.agent.crons.create({
       botId: ctx.agent.config.botId,
       userId: ctx.agent.config.userId,
@@ -1459,6 +1468,21 @@ async function handleCronCreate(
       durable,
       ...(typeof body.description === "string" && body.description.trim()
         ? { description: body.description.trim() }
+        : {}),
+      ...(mode ? { mode } : {}),
+      ...(typeof body.scriptPath === "string" && body.scriptPath.trim()
+        ? { scriptPath: body.scriptPath.trim() }
+        : {}),
+      ...(typeof body.timeoutMs === "number" && Number.isFinite(body.timeoutMs)
+        ? { timeoutMs: Math.max(1, Math.floor(body.timeoutMs)) }
+        : {}),
+      ...(typeof body.quietOnEmptyStdout === "boolean"
+        ? { quietOnEmptyStdout: body.quietOnEmptyStdout }
+        : {}),
+      ...(body.deliveryPolicy === "stdout_non_empty" ||
+      body.deliveryPolicy === "always" ||
+      body.deliveryPolicy === "never"
+        ? { deliveryPolicy: body.deliveryPolicy }
         : {}),
       ...(sessionKey ? { sessionKey } : {}),
     });

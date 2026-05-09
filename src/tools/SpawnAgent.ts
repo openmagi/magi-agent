@@ -39,7 +39,7 @@ import type { Agent } from "../Agent.js";
 import type { BackgroundTaskRegistry } from "../tasks/BackgroundTaskRegistry.js";
 import type { MissionClient } from "../missions/MissionClient.js";
 import type { MissionChannelType, MissionKind } from "../missions/types.js";
-import { errorResult } from "../util/toolResult.js";
+import { errorResult, summariseDelegatedPrompt } from "../util/toolResult.js";
 import type { ArtifactMeta } from "../artifacts/ArtifactManager.js";
 import type { PermissionMode } from "../Session.js";
 import {
@@ -1334,7 +1334,7 @@ export function makeSpawnAgentTool(
   return {
     name: "SpawnAgent",
     description:
-      "Delegate a focused sub-task to a child agent with a custom persona and filtered toolset. Omit `workspace_policy` for automatic policy: coding-oriented children (for example persona `coder`, coding persona names, `PatchApply`/`FileEdit`/diagnostic tool hints, or a non-empty `write_set`) default to a detached git worktree when the parent workspace can create one; other children remain trusted workers that can read/write the parent workspace and use `.spawn/{taskId}` for scratch/audit storage. Set `workspace_policy:\"trusted\"` only when a coding child must operate directly on the current parent checkout, `workspace_policy:\"git_worktree\"` when detached worktree isolation is required, or `workspace_policy:\"isolated\"` when the task should be sandboxed to `.spawn/{taskId}`. The runtime automatically includes the current turn's selected KB/system addendum and attachment manifest in the child work order; still provide concrete task instructions, required files, expected outputs, allowed tools, completion criteria, and retry/idempotency guidance. `deliver:\"return\"` blocks until the child finishes and returns final text. `deliver:\"background\"` returns a taskId immediately; completion surfaces as a spawn_result event and TaskGet record. Use background delivery for long browser QA, research, or artifact generation; it defaults to a 3 hour timeout and accepts `timeout_ms` up to 6 hours. Spawn depth is capped at 2. Use `completion_contract.required_evidence:\"files\"` plus `required_files` for durable file deliverables, `\"text\"` for answer-only work, `\"artifact\"` for artifact handoff, `\"tool_call\"` for concrete tool work, or `\"none\"` only when no evidence is expected. Use `model` only when deliberately selecting a child model; copy an exact value from this schema enum or omit `model` to inherit the bot's runtime model. Never invent provider/model ids. IMPORTANT: child output longer than ~500 chars should go into ArtifactCreate rather than finalText; child-produced artifacts are imported into the parent workspace and returned on `artifacts.handedOffArtifacts`.",
+      "Delegate a focused sub-task to a child agent with a custom persona and filtered toolset. Omit `workspace_policy` for automatic policy: coding-oriented children (for example persona `coder`, coding persona names, `PatchApply`/`FileEdit`/diagnostic tool hints, or a non-empty `write_set`) default to a detached git worktree when the parent workspace can create one; other children remain trusted workers that can read/write the parent workspace and use `.spawn/{taskId}` for scratch/audit storage. Set `workspace_policy:\"trusted\"` only when a coding child must operate directly on the current parent checkout, `workspace_policy:\"git_worktree\"` when detached worktree isolation is required, or `workspace_policy:\"isolated\"` when the task should be sandboxed to `.spawn/{taskId}`. After a git_worktree child finishes, use SpawnWorktreeApply to preview, apply, or reject the child worktree changes; do not copy files manually. The runtime automatically includes the current turn's selected KB/system addendum and attachment manifest in the child work order; still provide concrete task instructions, required files, expected outputs, allowed tools, completion criteria, and retry/idempotency guidance. `deliver:\"return\"` blocks until the child finishes and returns final text. `deliver:\"background\"` returns a taskId immediately; completion surfaces as a spawn_result event and TaskGet record. Use background delivery for long browser QA, research, or artifact generation; it defaults to a 3 hour timeout and accepts `timeout_ms` up to 6 hours. Spawn depth is capped at 2. Use `completion_contract.required_evidence:\"files\"` plus `required_files` for durable file deliverables, `\"text\"` for answer-only work, `\"artifact\"` for artifact handoff, `\"tool_call\"` for concrete tool work, or `\"none\"` only when no evidence is expected. Use `model` only when deliberately selecting a child model; copy an exact value from this schema enum or omit `model` to inherit the bot's runtime model. Never invent provider/model ids. IMPORTANT: child output longer than ~500 chars should go into ArtifactCreate rather than finalText; child-produced artifacts are imported into the parent workspace and returned on `artifacts.handedOffArtifacts`.",
     inputSchema: INPUT_SCHEMA,
     permission: "meta",
     kind: "core",
@@ -1535,12 +1535,14 @@ export function makeSpawnAgentTool(
         return errorResult(prepared, start);
       }
       const { spawnDir, spawnWorkspace } = prepared;
+      const delegatedDetail = summariseDelegatedPrompt(input.prompt);
 
       ctx.emitAgentEvent?.({
         type: "spawn_started",
         taskId,
         persona: input.persona,
         prompt: input.prompt,
+        ...(delegatedDetail ? { detail: delegatedDetail } : {}),
         deliver: input.deliver,
         ...(modelOverride ? { model: modelOverride } : {}),
       });
@@ -1550,6 +1552,7 @@ export function makeSpawnAgentTool(
         taskId,
         parentTurnId: ctx.turnId,
         prompt: input.prompt,
+        ...(delegatedDetail ? { detail: delegatedDetail } : {}),
         emitControlEvent: ctx.emitControlEvent,
         emitAgentEvent: ctx.emitAgentEvent,
       });

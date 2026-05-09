@@ -409,6 +409,14 @@ export class Turn {
           ` msgCount=${messages.length} model=${effectiveModel}` +
           ` turnId=${this.meta.turnId}`,
         );
+        sse.agent({
+          type: "llm_progress",
+          turnId: this.meta.turnId,
+          iter,
+          stage: "started",
+          label: "Thinking through next step",
+          detail: `Calling ${effectiveModel}`,
+        });
 
         const llmAbort = this.createLlmAbortSignal();
         let blocks: LLMContentBlock[];
@@ -852,6 +860,14 @@ export class Turn {
       ({ messages, tools: toolDefs, system: systemPrompt } = preLLM.args);
 
       const effectiveModel = await this.resolveEffectiveModel(messages, toolDefs);
+      this.sse.agent({
+        type: "llm_progress",
+        turnId: this.meta.turnId,
+        iter,
+        stage: "started",
+        label: "Thinking through next step",
+        detail: `Calling ${effectiveModel}`,
+      });
       const { blocks, stopReason, usage } = await readOneStream(
         {
           llm: this.session.agent.llm,

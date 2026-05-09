@@ -11,6 +11,7 @@ export interface JudgeGoalTurnInput {
   llm: Pick<LLMClient, "stream">;
   model: string;
   objective: string;
+  completionCriteria?: string[];
   userText: string;
   assistantText: string;
   signal?: AbortSignal;
@@ -58,10 +59,13 @@ export async function judgeGoalTurn(
         role: "user",
         content: [
           `Goal: ${input.objective}`,
+          input.completionCriteria?.length
+            ? `Completion criteria:\n${input.completionCriteria.map((item) => `- ${item}`).join("\n")}`
+            : "",
           `Latest user/continuation request: ${input.userText}`,
           `Latest assistant result: ${input.assistantText}`,
           "Should the runtime continue this goal automatically?",
-        ].join("\n\n"),
+        ].filter(Boolean).join("\n\n"),
       },
     ],
     max_tokens: 512,

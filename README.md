@@ -1,6 +1,8 @@
 # Magi
 
-**Self-host a Codex-like agent app with any LLM and a runtime that can prove work happened.**
+**Open Magi is a governed AI operator that actually gets things done.**
+
+Built to plan, run, and complete long-running missions. Self-host a Codex-like agent app with any LLM and a runtime that can prove work happened.
 
 Most agent projects ship a prompt, a tool loop, and a chat box. Magi ships the layer that keeps the agent honest: local workspace control, memory, scheduled work, child agents, evidence gates, deterministic checks, and a browser app you can run yourself.
 

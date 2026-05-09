@@ -46,6 +46,15 @@ export type AgentEvent =
   | { type: "text_delta"; delta: string }
   | { type: "response_clear" }
   | { type: "thinking_delta"; delta: string }
+  | {
+      type: "llm_progress";
+      turnId: string;
+      iter: number;
+      stage: "started" | "waiting" | "completed";
+      label: string;
+      detail?: string;
+      elapsedMs?: number;
+    }
   | { type: "tool_start"; id: string; name: string; input_preview?: string }
   | { type: "tool_progress"; id: string; label: string }
   | { type: "tool_end"; id: string; status: string; output_preview?: string; durationMs: number }
@@ -118,6 +127,7 @@ export type AgentEvent =
       taskId: string;
       persona: string;
       prompt: string;
+      detail?: string;
       deliver: "return" | "background";
     }
   | {
@@ -160,6 +170,7 @@ export type AgentEvent =
       taskId: string;
       parentTurnId?: string;
       prompt?: string;
+      detail?: string;
     }
   | {
       type: "child_progress";

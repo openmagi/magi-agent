@@ -319,6 +319,17 @@ function makeFakeAgent(workspaceRoot: string): FakeAgent {
           consecutiveFailures: 0,
           sessionKey:
             typeof input.sessionKey === "string" ? input.sessionKey : undefined,
+          mode: typeof input.mode === "string" ? input.mode : undefined,
+          scriptPath:
+            typeof input.scriptPath === "string" ? input.scriptPath : undefined,
+          timeoutMs:
+            typeof input.timeoutMs === "number" ? input.timeoutMs : undefined,
+          quietOnEmptyStdout:
+            typeof input.quietOnEmptyStdout === "boolean"
+              ? input.quietOnEmptyStdout
+              : undefined,
+          deliveryPolicy:
+            typeof input.deliveryPolicy === "string" ? input.deliveryPolicy : undefined,
         };
         crons.push(cron);
         return cron;
@@ -1019,6 +1030,38 @@ describe("HttpServer /v1/app runtime routes", () => {
     expect(
       (sessions.body as { sessions: Array<{ crons: string[] }> }).sessions[0]?.crons,
     ).toContain("cron-created");
+
+    const scriptCreated = await requestJson(
+      `http://127.0.0.1:${port}/v1/app/crons`,
+      "local-token",
+      {
+        method: "POST",
+        body: {
+          expression: "@hourly",
+          prompt: "run local health script",
+          mode: "script",
+          scriptPath: "jobs/health.sh",
+          timeoutMs: 120_000,
+          quietOnEmptyStdout: false,
+          deliveryPolicy: "always",
+          sessionKey: "agent:main:app:web:default",
+        },
+      },
+    );
+
+    expect(scriptCreated.status).toBe(200);
+    expect(scriptCreated.body).toEqual(
+      expect.objectContaining({
+        ok: true,
+        cron: expect.objectContaining({
+          mode: "script",
+          scriptPath: "jobs/health.sh",
+          timeoutMs: 120_000,
+          quietOnEmptyStdout: false,
+          deliveryPolicy: "always",
+        }),
+      }),
+    );
 
     const updated = await requestJson(
       `http://127.0.0.1:${port}/v1/app/crons/cron-created`,

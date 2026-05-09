@@ -18,6 +18,7 @@ export interface ChildAgentHarnessOptions {
   taskId: string;
   parentTurnId: string;
   prompt?: string;
+  detail?: string;
   emitControlEvent?(event: ControlEventInput): Promise<unknown> | unknown;
   emitAgentEvent?(event: unknown): void;
 }
@@ -53,6 +54,7 @@ export function createChildAgentHarness(
         taskId: options.taskId,
         parentTurnId: options.parentTurnId,
         ...(options.prompt ? { prompt: options.prompt } : {}),
+        ...(options.detail ? { detail: options.detail } : {}),
       });
     },
     async progress(detail: string) {

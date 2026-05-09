@@ -168,6 +168,7 @@ export type ChildStartedControlEvent = ControlEventBase & {
   taskId: string;
   parentTurnId?: string;
   prompt?: string;
+  detail?: string;
 };
 
 export type ChildProgressControlEvent = ControlEventBase & {
