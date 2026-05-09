@@ -133,6 +133,7 @@
     --animate-bounce: bounce 1s infinite;
     --blur-sm: 8px;
     --blur-xl: 24px;
+    --aspect-video: 16 / 9;
     --default-transition-duration: .15s;
     --default-transition-timing-function: cubic-bezier(.4, 0, .2, 1);
     --default-font-family: "Plus Jakarta Sans", var(--font-geist-sans), "Apple SD Gothic Neo", "Noto Sans KR", "Malgun Gothic", system-ui, sans-serif;
@@ -742,6 +743,10 @@
     display: table;
   }
 
+  .aspect-video {
+    aspect-ratio: var(--aspect-video);
+  }
+
   .h-0\.5 {
     height: calc(var(--spacing) * .5);
   }
@@ -832,6 +837,10 @@
 
   .max-h-48 {
     max-height: calc(var(--spacing) * 48);
+  }
+
+  .max-h-64 {
+    max-height: calc(var(--spacing) * 64);
   }
 
   .max-h-\[44vh\] {
@@ -1118,6 +1127,10 @@
 
   .cursor-col-resize {
     cursor: col-resize;
+  }
+
+  .cursor-crosshair {
+    cursor: crosshair;
   }
 
   .cursor-default {
@@ -1584,6 +1597,16 @@
     }
   }
 
+  .border-red-500\/20 {
+    border-color: #fb2c3633;
+  }
+
+  @supports (color: color-mix(in lab, red, red)) {
+    .border-red-500\/20 {
+      border-color: color-mix(in oklab, var(--color-red-500) 20%, transparent);
+    }
+  }
+
   .border-secondary\/40 {
     border-color: var(--text-secondary);
   }
@@ -1812,6 +1835,16 @@
     }
   }
 
+  .bg-black\/\[0\.025\] {
+    background-color: #00000006;
+  }
+
+  @supports (color: color-mix(in lab, red, red)) {
+    .bg-black\/\[0\.025\] {
+      background-color: color-mix(in oklab, var(--color-black) 2.5%, transparent);
+    }
+  }
+
   .bg-black\/\[0\.035\] {
     background-color: #00000009;
   }
@@ -2015,6 +2048,16 @@
   @supports (color: color-mix(in lab, red, red)) {
     .bg-secondary\/25 {
       background-color: color-mix(in oklab, var(--text-secondary) 25%, transparent);
+    }
+  }
+
+  .bg-secondary\/30 {
+    background-color: var(--text-secondary);
+  }
+
+  @supports (color: color-mix(in lab, red, red)) {
+    .bg-secondary\/30 {
+      background-color: color-mix(in oklab, var(--text-secondary) 30%, transparent);
     }
   }
 
@@ -3329,6 +3372,16 @@
     }
   }
 
+  .focus\:ring-primary\/20:focus {
+    --tw-ring-color: var(--primary);
+  }
+
+  @supports (color: color-mix(in lab, red, red)) {
+    .focus\:ring-primary\/20:focus {
+      --tw-ring-color: color-mix(in oklab, var(--primary) 20%, transparent);
+    }
+  }
+
   .focus\:outline-none:focus {
     --tw-outline-style: none;
     outline-style: none;
@@ -3417,10 +3470,6 @@
       display: flex;
     }
 
-    .sm\:inline-flex {
-      display: inline-flex;
-    }
-
     .sm\:h-8 {
       height: calc(var(--spacing) * 8);
     }
@@ -3455,6 +3504,18 @@
 
     .sm\:max-w-\[240px\] {
       max-width: 240px;
+    }
+
+    .sm\:flex-row {
+      flex-direction: row;
+    }
+
+    .sm\:items-start {
+      align-items: flex-start;
+    }
+
+    .sm\:justify-between {
+      justify-content: space-between;
     }
 
     .sm\:px-2\.5 {

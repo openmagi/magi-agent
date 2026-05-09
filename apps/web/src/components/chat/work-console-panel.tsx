@@ -9,6 +9,7 @@ import {
 } from "@/lib/chat/work-console";
 import type {
   ChannelState,
+  BrowserFrame,
   ChatResponseLanguage,
   ControlRequestRecord,
   QueuedMessage,
@@ -212,6 +213,61 @@ function WorkConsoleRowItem({ row }: { row: WorkConsoleRow }) {
   );
 }
 
+function browserActionLabel(action: string, language?: ChatResponseLanguage): string {
+  switch (action) {
+    case "open":
+      return t(language, "Opening page", "페이지 여는 중");
+    case "click":
+    case "mouse_click":
+      return t(language, "Clicking", "클릭 중");
+    case "fill":
+    case "keyboard_type":
+    case "press":
+      return t(language, "Typing", "입력 중");
+    case "scroll":
+      return t(language, "Scrolling", "스크롤 중");
+    case "screenshot":
+    case "snapshot":
+      return t(language, "Inspecting page", "페이지 확인 중");
+    case "scrape":
+      return t(language, "Reading page", "페이지 읽는 중");
+    default:
+      return t(language, "Using browser", "브라우저 사용 중");
+  }
+}
+
+function BrowserFramePreview({
+  frame,
+  language,
+}: {
+  frame: BrowserFrame;
+  language?: ChatResponseLanguage;
+}) {
+  const imageSrc = `data:${frame.contentType};base64,${frame.imageBase64}`;
+  return (
+    <section
+      className="mb-3 overflow-hidden rounded-xl border border-black/[0.08] bg-white shadow-[0_1px_6px_rgba(15,23,42,0.06)]"
+      data-work-console-browser-frame="true"
+    >
+      <div className="flex min-w-0 items-center justify-between gap-2 border-b border-black/[0.06] px-2.5 py-1.5">
+        <span className="shrink-0 text-[10px] font-semibold uppercase tracking-wide text-secondary/45">
+          {t(language, "Live browser", "실시간 브라우저")}
+        </span>
+        <span className="min-w-0 truncate text-[10.5px] text-secondary/55">
+          {browserActionLabel(frame.action, language)}
+          {frame.url ? ` · ${frame.url}` : ""}
+        </span>
+      </div>
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img
+        src={imageSrc}
+        alt={t(language, "Browser preview", "브라우저 미리보기")}
+        className="block aspect-video w-full bg-black/[0.03] object-contain"
+      />
+    </section>
+  );
+}
+
 export function WorkConsolePanel({
   channelState,
   queuedMessages = [],
@@ -253,6 +309,9 @@ export function WorkConsolePanel({
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto px-2 py-2">
+        {channelState.browserFrame && (
+          <BrowserFramePreview frame={channelState.browserFrame} language={language} />
+        )}
         {groups.map(([group, groupRows]) => {
           const isActionsGroup = group === "tool";
           const isSubagentGroup = group === "subagent";

@@ -5,6 +5,7 @@ import { AgentActivityTimeline } from "./agent-activity-timeline";
 import { TaskBoard } from "./task-board";
 import { deriveWorkStateSummary, type WorkStateSummary } from "@/lib/chat/work-state";
 import type {
+  BrowserFrame,
   ChannelState,
   ChatResponseLanguage,
   ControlRequestRecord,
@@ -46,6 +47,7 @@ function hasVisibleRunState(
   return (
     channelState.streaming ||
     (channelState.activeTools ?? []).length > 0 ||
+    !!channelState.browserFrame ||
     subagents.length > 0 ||
     queuedMessages.length > 0 ||
     pendingRequests.length > 0 ||
@@ -64,6 +66,7 @@ function runIdentity(
   const startedAt =
     channelState.thinkingStartedAt ??
     activeTools[0]?.startedAt ??
+    channelState.browserFrame?.capturedAt ??
     subagents[0]?.startedAt ??
     null;
   if (startedAt !== null) return `run:${startedAt}`;
@@ -253,6 +256,61 @@ function WorkStateSummaryRows({
   );
 }
 
+function browserActionLabel(action: string, language?: ChatResponseLanguage): string {
+  switch (action) {
+    case "open":
+      return t(language, "Opening page", "페이지 여는 중");
+    case "click":
+    case "mouse_click":
+      return t(language, "Clicking", "클릭 중");
+    case "fill":
+    case "keyboard_type":
+    case "press":
+      return t(language, "Typing", "입력 중");
+    case "scroll":
+      return t(language, "Scrolling", "스크롤 중");
+    case "screenshot":
+    case "snapshot":
+      return t(language, "Inspecting page", "페이지 확인 중");
+    case "scrape":
+      return t(language, "Reading page", "페이지 읽는 중");
+    default:
+      return t(language, "Using browser", "브라우저 사용 중");
+  }
+}
+
+function BrowserFrameInline({
+  frame,
+  language,
+}: {
+  frame: BrowserFrame;
+  language?: ChatResponseLanguage;
+}) {
+  const imageSrc = `data:${frame.contentType};base64,${frame.imageBase64}`;
+  return (
+    <div
+      className="mt-2 overflow-hidden rounded-lg border border-black/[0.08] bg-white"
+      data-run-inspector-browser-frame="true"
+    >
+      <div className="flex min-w-0 items-center justify-between gap-2 border-b border-black/[0.06] px-2.5 py-1.5">
+        <span className="shrink-0 text-[10px] font-semibold uppercase tracking-wide text-secondary/45">
+          {t(language, "Live browser", "실시간 브라우저")}
+        </span>
+        <span className="min-w-0 truncate text-[10.5px] text-secondary/55">
+          {browserActionLabel(frame.action, language)}
+          {frame.url ? ` · ${frame.url}` : ""}
+        </span>
+      </div>
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img
+        src={imageSrc}
+        alt={t(language, "Browser preview", "브라우저 미리보기")}
+        className="block aspect-video w-full max-h-64 bg-black/[0.03] object-contain"
+      />
+    </div>
+  );
+}
+
 export function RunInspectorDock({
   channelState,
   queuedMessages = [],
@@ -391,6 +449,10 @@ export function RunInspectorDock({
 
         {compactDetails ? null : (
         <div className="mt-2 max-h-[min(50vh,34rem)] overflow-y-auto overscroll-contain pr-1 [scrollbar-gutter:stable]">
+          {channelState.browserFrame && (
+            <BrowserFrameInline frame={channelState.browserFrame} language={language} />
+          )}
+
           {(channelState.streaming || activeTools.length > 0) && (
             <div>
               <AgentActivityTimeline

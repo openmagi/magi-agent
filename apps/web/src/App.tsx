@@ -32,7 +32,9 @@ import {
   normalizeWorkspaceFileList,
   type WorkspaceFileEntry,
 } from "@/lib/workspace/workspace-files";
+import { localizeChannel } from "@/lib/chat/channel-i18n";
 import type {
+  BrowserFrame,
   Channel,
   ChannelState,
   ChatMessage,
@@ -51,8 +53,8 @@ import type { KbCollectionWithDocs, KbDocEntry } from "@/hooks/use-kb-docs";
 const BOT_ID = "local";
 const BOT_NAME = "Magi_Local";
 const DEFAULT_CHANNEL = "general";
-const DEFAULT_MODEL = "auto";
-const DEFAULT_ROUTER = "standard";
+const DEFAULT_MODEL = "magi_smart_routing";
+const DEFAULT_ROUTER = "big_dic";
 const WORKSPACE_SCAN_LIMIT = 220;
 const EDITABLE_WORKSPACE_ROOTS = new Set([
   ".magi",
@@ -106,7 +108,7 @@ function defaultChannel(): Channel {
   return {
     id: "local-general",
     name: DEFAULT_CHANNEL,
-    display_name: null,
+    display_name: "General",
     position: 0,
     category: "General",
     created_at: new Date(0).toISOString(),
@@ -274,6 +276,22 @@ function normalizeSubagentStatus(type: string, status: unknown): SubagentActivit
   if (type === "child_failed" || status === "failed" || status === "error") return "error";
   if (status === "waiting") return "waiting";
   return "running";
+}
+
+function normalizeBrowserFrame(payload: JsonRecord): BrowserFrame | null {
+  const imageBase64 = asString(payload.imageBase64);
+  if (!imageBase64) return null;
+  const contentType =
+    payload.contentType === "image/jpeg" || payload.contentType === "image/png"
+      ? payload.contentType
+      : "image/png";
+  return {
+    action: asString(payload.action, "browser"),
+    imageBase64,
+    contentType,
+    capturedAt: asNumber(payload.capturedAt, Date.now()),
+    ...(typeof payload.url === "string" && payload.url ? { url: payload.url } : {}),
+  };
 }
 
 function appendToolActivity(current: ToolActivity[] | undefined, patch: ToolActivity): ToolActivity[] {
@@ -627,6 +645,7 @@ export function App() {
           turnPhase: "pending",
           error: null,
           activeTools: [],
+          browserFrame: null,
           subagents: [],
           taskBoard: null,
           heartbeatElapsedMs: null,
@@ -689,6 +708,12 @@ export function App() {
             outputPreview: asString(payload.output_preview),
             durationMs: asNumber(payload.durationMs),
           });
+        }
+      }
+      if (type === "browser_frame") {
+        const browserFrame = normalizeBrowserFrame(payload);
+        if (browserFrame) {
+          store.setChannelState(channel, { browserFrame }, { botId: BOT_ID });
         }
       }
       if (type === "task_board") {
@@ -861,6 +886,7 @@ export function App() {
         heartbeatElapsedMs: null,
         pendingInjectionCount: 0,
         activeTools: [],
+        browserFrame: null,
         subagents: [],
         taskBoard: null,
         responseLanguage: detectMessageResponseLanguage(messageText),
@@ -1124,32 +1150,17 @@ export function App() {
     window.localStorage.setItem(storage.modelOverride, nextModel);
   }, []);
 
-  const handleLocalConfigUpdate = useCallback(() => {
-    window.localStorage.setItem(storage.agentUrl, agentUrl);
-    window.localStorage.setItem(storage.token, token);
-    void Promise.allSettled([refreshKnowledge(), refreshWorkspace()]);
-  }, [agentUrl, refreshKnowledge, refreshWorkspace, token]);
-
   const composerAccessory = (
-    <div className="flex max-w-full flex-wrap items-center justify-end gap-1">
-      <button
-        type="button"
-        onClick={handleLocalConfigUpdate}
-        className="hidden sm:inline-flex h-8 items-center rounded-lg px-2.5 text-xs font-medium text-secondary/70 transition-colors hover:bg-white hover:text-foreground"
-      >
-        Save
-      </button>
-      <ChatModelPicker
-        botId={BOT_ID}
-        modelSelection={modelSelection}
-        routerType={routerType}
-        apiKeyMode="platform_credits"
-        subscriptionPlan="max"
-        persistMode="local"
-        menuPlacement="top"
-        onModelSelectionChange={handleModelSelectionChange}
-      />
-    </div>
+    <ChatModelPicker
+      botId={BOT_ID}
+      modelSelection={modelSelection}
+      routerType={routerType}
+      apiKeyMode="platform_credits"
+      subscriptionPlan="max"
+      persistMode="local"
+      menuPlacement="top"
+      onModelSelectionChange={handleModelSelectionChange}
+    />
   );
 
   return (
@@ -1205,16 +1216,19 @@ export function App() {
         onDragLeave={handleDragLeave}
       >
         {isDraggingOver && (
-          <div className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center rounded-2xl border-2 border-dashed border-primary/30 bg-primary/[0.04]">
-            <div className="rounded-xl border border-primary/20 bg-white/90 px-5 py-3 text-sm font-medium text-primary/70 shadow-sm backdrop-blur-sm">
+          <div className="absolute inset-0 z-20 flex items-center justify-center bg-primary/[0.04] border-2 border-dashed border-primary/30 rounded-2xl pointer-events-none">
+            <div className="flex items-center gap-2 text-sm text-primary/70 font-medium bg-white/90 backdrop-blur-sm px-5 py-3 rounded-xl border border-primary/20 shadow-sm">
+              <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+                <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />
+              </svg>
               Drop files to attach
             </div>
           </div>
         )}
-        <div className="flex items-center gap-3 border-b border-black/[0.06] px-4 py-3 md:px-6">
+        <div className="px-4 md:px-6 py-3 flex items-center gap-3 border-b border-black/[0.06]">
           <button
             onClick={() => setSidebarOpen(true)}
-            className="-ml-1 rounded-xl p-1.5 text-secondary/60 transition-all duration-200 hover:bg-black/[0.04] hover:text-foreground md:hidden"
+            className="md:hidden p-1.5 -ml-1 text-secondary/60 hover:text-foreground rounded-xl hover:bg-black/[0.04] transition-all duration-200"
             aria-label="Open channels"
           >
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -1223,15 +1237,28 @@ export function App() {
               <line x1="3" y1="18" x2="21" y2="18" />
             </svg>
           </button>
-          <h1 className="min-w-0 flex-1 truncate text-sm font-medium text-foreground/80">
-            {activeChannel}
+          <h1 className="text-sm font-medium text-foreground/80 flex-1 min-w-0 truncate">
+            {localizeChannel(
+              activeChannel,
+              store.channels.find((channel) => channel.name === activeChannel)?.display_name ?? null,
+              "en",
+            )}
           </h1>
           <button
             onClick={handleReset}
-            className="rounded-lg px-2.5 py-1 text-[11px] text-secondary/50 transition-all duration-200 hover:bg-black/[0.04] hover:text-foreground/70"
+            className="px-2.5 py-1 text-[11px] text-secondary/50 hover:text-foreground/70 rounded-lg hover:bg-black/[0.04] transition-all duration-200"
           >
             Reset
           </button>
+          <a
+            href="/dashboard"
+            className="md:hidden p-1.5 text-secondary/60 hover:text-foreground rounded-xl hover:bg-black/[0.04] transition-all duration-200"
+            aria-label="Dashboard"
+          >
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M10.5 6h9.75M10.5 6a1.5 1.5 0 11-3 0m3 0a1.5 1.5 0 10-3 0M3.75 6H7.5m3 12h9.75m-9.75 0a1.5 1.5 0 01-3 0m3 0a1.5 1.5 0 00-3 0m-3.75 0H7.5m9-6h3.75m-3.75 0a1.5 1.5 0 01-3 0m3 0a1.5 1.5 0 00-3 0m-9.75 0h9.75" />
+            </svg>
+          </a>
         </div>
 
         <ChatMessages

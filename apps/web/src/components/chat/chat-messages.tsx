@@ -5,6 +5,8 @@ import { MessageBubble } from "./message-bubble";
 import { TypingIndicator } from "./typing-indicator";
 import { ControlRequestCard } from "./control-request";
 import { compareChatMessages } from "@/lib/chat/message-order";
+import { deriveWorkConsoleRows, type WorkConsoleRow, type WorkConsoleRowStatus } from "@/lib/chat/work-console";
+import { deriveWorkStateSummary } from "@/lib/chat/work-state";
 import type { ReactNode } from "react";
 import type {
   ChatMessage,
@@ -56,6 +58,14 @@ function writingAnswerLabel(language?: ChatResponseLanguage): string {
   return language === "ko" ? "답변 작성 중..." : "Writing answer...";
 }
 
+function isKorean(language?: ChatResponseLanguage): boolean {
+  return language === "ko";
+}
+
+function t(language: ChatResponseLanguage | undefined, en: string, ko: string): string {
+  return isKorean(language) ? ko : en;
+}
+
 function MessageSkeleton() {
   return (
     <div className="space-y-5 py-2">
@@ -77,6 +87,199 @@ function MessageSkeleton() {
           <div className="chat-skeleton-line h-4 w-44" />
           <div className="chat-skeleton-line h-4 w-28" />
         </div>
+      </div>
+    </div>
+  );
+}
+
+function statusDotClass(status: WorkConsoleRowStatus): string {
+  switch (status) {
+    case "running":
+      return "bg-[#7C3AED]";
+    case "done":
+      return "bg-emerald-500";
+    case "waiting":
+      return "bg-amber-500";
+    case "error":
+      return "bg-red-500";
+    case "info":
+    default:
+      return "bg-secondary/30";
+  }
+}
+
+function browserActionLabel(action: string, language?: ChatResponseLanguage): string {
+  switch (action) {
+    case "open":
+      return t(language, "Opening page", "페이지 여는 중");
+    case "click":
+    case "mouse_click":
+      return t(language, "Clicking", "클릭 중");
+    case "fill":
+    case "keyboard_type":
+    case "press":
+      return t(language, "Typing", "입력 중");
+    case "scroll":
+      return t(language, "Scrolling", "스크롤 중");
+    case "screenshot":
+    case "snapshot":
+      return t(language, "Inspecting page", "페이지 확인 중");
+    case "scrape":
+      return t(language, "Reading page", "페이지 읽는 중");
+    default:
+      return t(language, "Using browser", "브라우저 사용 중");
+  }
+}
+
+function hasOpenTaskState(channelState: ChannelState): boolean {
+  return !!channelState.taskBoard?.tasks.some(
+    (task) => task.status === "pending" || task.status === "in_progress",
+  );
+}
+
+function hasInlineRunStatus(
+  channelState: ChannelState,
+  queuedMessages: QueuedMessage[],
+  pendingRequests: ControlRequestRecord[],
+): boolean {
+  const hasLiveWork =
+    (channelState.activeTools ?? []).some((tool) => tool.status === "running") ||
+    (channelState.subagents ?? []).some(
+      (subagent) => subagent.status === "running" || subagent.status === "waiting",
+    ) ||
+    hasOpenTaskState(channelState) ||
+    !!channelState.browserFrame ||
+    queuedMessages.length > 0 ||
+    pendingRequests.length > 0 ||
+    channelState.fileProcessing ||
+    channelState.reconnecting;
+
+  return hasLiveWork || (channelState.streaming && !channelState.streamingText);
+}
+
+function inlineWorkRows(
+  channelState: ChannelState,
+  queuedMessages: QueuedMessage[],
+  pendingRequests: ControlRequestRecord[],
+): WorkConsoleRow[] {
+  const language = channelState.responseLanguage;
+  const rows = deriveWorkConsoleRows({
+    channelState,
+    queuedMessages,
+    controlRequests: pendingRequests,
+  });
+  const selected: WorkConsoleRow[] = [];
+
+  selected.push(...rows.filter((row) => row.group === "control" && row.status === "waiting"));
+
+  if (channelState.browserFrame) {
+    selected.push({
+      id: "browser-frame",
+      group: "status",
+      label: t(language, "Live browser", "실시간 브라우저"),
+      detail: [
+        browserActionLabel(channelState.browserFrame.action, language),
+        channelState.browserFrame.url,
+      ].filter(Boolean).join(" - "),
+      status: "running",
+    });
+  }
+
+  selected.push(...rows.filter((row) => row.group === "tool" && row.status === "running"));
+  selected.push(
+    ...rows.filter(
+      (row) => row.group === "subagent" && (row.status === "running" || row.status === "waiting"),
+    ),
+  );
+  selected.push(...rows.filter((row) => row.group === "task" && row.status === "running"));
+
+  if (selected.length === 0) {
+    selected.push(...rows.filter((row) => row.group === "status" && row.id !== "idle"));
+  }
+
+  if (selected.length === 0 && queuedMessages.length > 0) {
+    selected.push(...rows.filter((row) => row.group === "queue").slice(0, 1));
+  }
+
+  return selected.slice(0, 3);
+}
+
+function InlineRunStatus({
+  channelState,
+  queuedMessages,
+  pendingRequests,
+}: {
+  channelState: ChannelState;
+  queuedMessages: QueuedMessage[];
+  pendingRequests: ControlRequestRecord[];
+}) {
+  if (!hasInlineRunStatus(channelState, queuedMessages, pendingRequests)) return null;
+
+  const language = channelState.responseLanguage;
+  const summary = deriveWorkStateSummary({
+    channelState,
+    queuedMessages,
+    controlRequests: pendingRequests,
+  });
+  const rows = inlineWorkRows(channelState, queuedMessages, pendingRequests);
+
+  return (
+    <div className="chat-msg-in mb-4 flex justify-start" data-chat-inline-run-status="true">
+      <div className="w-full max-w-[92%] rounded-lg border border-black/[0.08] bg-white/90 px-3 py-2.5 shadow-sm backdrop-blur sm:max-w-[82%]">
+        <div className="flex min-w-0 items-center justify-between gap-3">
+          <div className="min-w-0">
+            <div className="text-[11px] font-semibold uppercase tracking-wide text-secondary/50">
+              {summary.title}
+            </div>
+            <div className="mt-0.5 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-xs text-secondary/70">
+              <span className="font-medium text-foreground/75">{summary.status}</span>
+              {summary.progress && <span>{summary.progress}</span>}
+              {queuedMessages.length > 0 && (
+                <span>
+                  {isKorean(language)
+                    ? `${queuedMessages.length}개 대기`
+                    : `${queuedMessages.length} queued`}
+                </span>
+              )}
+            </div>
+          </div>
+          <span className="shrink-0 rounded-full bg-[#7C3AED]/10 px-2 py-0.5 text-[10px] font-semibold text-[#7C3AED]">
+            {t(language, "Live", "실시간")}
+          </span>
+        </div>
+
+        {rows.length > 0 && (
+          <ul className="mt-2 space-y-1" aria-label={t(language, "Current work updates", "현재 작업 업데이트")}>
+            {rows.map((row) => (
+              <li
+                key={row.id}
+                className="flex min-w-0 items-start gap-2 rounded-md bg-black/[0.025] px-2 py-1.5"
+                data-chat-inline-run-row="true"
+                data-chat-inline-run-row-status={row.status}
+              >
+                <span
+                  className={`mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full ${statusDotClass(row.status)}`}
+                  aria-hidden="true"
+                />
+                <span className="min-w-0 flex-1">
+                  <span className="flex min-w-0 items-baseline gap-2">
+                    <span className="min-w-0 truncate text-[12px] font-medium text-foreground/80">
+                      {row.label}
+                    </span>
+                    {row.meta && (
+                      <span className="shrink-0 text-[10px] text-secondary/40">{row.meta}</span>
+                    )}
+                  </span>
+                  {row.detail && (
+                    <span className="mt-0.5 block truncate text-[11.5px] leading-snug text-secondary/60">
+                      {row.detail}
+                    </span>
+                  )}
+                </span>
+              </li>
+            ))}
+          </ul>
+        )}
       </div>
     </div>
   );
@@ -226,13 +429,20 @@ export const ChatMessages = forwardRef<ChatMessagesHandle, ChatMessagesProps>(fu
     });
   }, [allMessages.length, channelState.streamingText, channelState.thinkingText]);
 
-  // Show typing dots only as a fallback. The live run details live in RunInspectorDock
-  // near the composer so task boards and action state do not duplicate in the timeline.
-  const showTyping = channelState.streaming && !channelState.streamingText && !channelState.thinkingText && !channelState.thinkingStartedAt;
   const pendingControlRequests = useMemo(
     () => (controlRequests ?? []).filter((request) => request.state === "pending"),
     [controlRequests],
   );
+  const liveQueuedMessages = queuedMessages ?? [];
+  const inlineRunVisible = hasInlineRunStatus(
+    channelState,
+    liveQueuedMessages,
+    pendingControlRequests,
+  );
+
+  // Show typing dots only as a fallback. The inline run snapshot now carries
+  // active work in the transcript while the right inspector keeps details.
+  const showTyping = channelState.streaming && !inlineRunVisible && !channelState.streamingText && !channelState.thinkingText && !channelState.thinkingStartedAt;
 
   const selectableCount = useMemo(() => {
     return allMessages.filter((m) => m.role !== "system").length;
@@ -597,6 +807,12 @@ export const ChatMessages = forwardRef<ChatMessagesHandle, ChatMessagesProps>(fu
               {unanchoredMidTurnInjected.map((msg, i) =>
                 renderMessage(msg, i, mainMessages.length),
               )}
+
+              <InlineRunStatus
+                channelState={channelState}
+                queuedMessages={liveQueuedMessages}
+                pendingRequests={pendingControlRequests}
+              />
             </>
           );
         })()}

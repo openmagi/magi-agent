@@ -24,6 +24,7 @@ const DEFAULT_CHANNEL_STATE: ChannelState = {
   heartbeatElapsedMs: null,
   pendingInjectionCount: 0,
   activeTools: [],
+  browserFrame: null,
   subagents: [],
   taskBoard: null,
   fileProcessing: false,
@@ -39,6 +40,7 @@ const RESET_LIVE_RUN_STATE: Partial<ChannelState> = {
   heartbeatElapsedMs: null,
   pendingInjectionCount: 0,
   activeTools: [],
+  browserFrame: null,
   subagents: [],
   taskBoard: null,
   fileProcessing: false,
@@ -129,6 +131,7 @@ function isLiveStreamProgress(partial: Partial<ChannelState>): boolean {
     !!partial.streamingText ||
     !!partial.thinkingText ||
     (partial.activeTools?.length ?? 0) > 0 ||
+    !!partial.browserFrame ||
     (partial.subagents?.length ?? 0) > 0 ||
     !!partial.taskBoard?.tasks.length ||
     partial.heartbeatElapsedMs !== undefined ||

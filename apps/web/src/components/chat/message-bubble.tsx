@@ -10,6 +10,7 @@ import { AgentActivityTimeline } from "./agent-activity-timeline";
 import { EChartRenderer } from "./echart-renderer";
 import { parseMarkers } from "@/lib/chat/attachment-marker";
 import { parseKbContextMarker } from "@/lib/chat/kb-context-marker";
+import { buildMessageCopyText } from "@/lib/chat/message-copy";
 import { getAttachmentUrl, getKnowledgeDocumentUrl, fetchAttachmentBlob } from "@/lib/chat/attachments";
 import type { ReplyTo, ToolActivity, TaskBoardSnapshot } from "@/lib/chat/types";
 
@@ -317,7 +318,7 @@ export function MessageBubble({ role, content, timestamp, isStreaming, thinkingC
     if (action === "copy") {
       // Selection-aware copy (2026-04-19 fix): prefer user selection over full content.
       const selection = typeof window !== "undefined" ? window.getSelection?.()?.toString() ?? "" : "";
-      const textToCopy = selection.trim().length > 0 ? selection : content;
+      const textToCopy = buildMessageCopyText({ content, selection });
       navigator.clipboard.writeText(textToCopy).catch(() => {});
     }
     onContextAction?.(action);
