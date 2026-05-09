@@ -1,6 +1,73 @@
-import { ReactNode, useCallback, useEffect, useMemo, useState } from "react";
-import { ChatWorkbench } from "./components/chat-workbench";
-import { WorkspaceEditorPage } from "./components/workspace-editor";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type DragEvent,
+} from "react";
+import { ChatSidebar } from "@/components/chat/chat-sidebar";
+import { ChatMessages, type ChatMessagesHandle } from "@/components/chat/chat-messages";
+import { ChatInput, type ChatInputHandle } from "@/components/chat/chat-input";
+import { ChatModelPicker } from "@/components/chat/chat-model-picker";
+import { KbContextBar } from "@/components/chat/kb-context-bar";
+import { KbSidePanel } from "@/components/chat/kb-side-panel";
+import { RunInspectorDock } from "@/components/chat/run-inspector-dock";
+import { useChatStore } from "@/lib/chat/chat-store";
+import { buildReplyPreview } from "@/lib/chat/attachment-marker";
+import {
+  buildMessageContentWithKbContext,
+  mergeKbDocReferences,
+} from "@/lib/chat/kb-send";
+import { detectMessageResponseLanguage } from "@/lib/chat/message-language";
+import { MAX_QUEUED_MESSAGES } from "@/lib/chat/queue-constants";
+import {
+  canSteerMidTurn,
+  getStreamingSendMode,
+  type StreamingComposerMode,
+} from "@/lib/chat/send-policy";
+import {
+  buildWorkspaceFileContentUrl,
+  getWorkspaceFilePreviewKind,
+  normalizeWorkspaceFileList,
+  type WorkspaceFileEntry,
+} from "@/lib/workspace/workspace-files";
+import type {
+  Channel,
+  ChannelState,
+  ChatMessage,
+  ControlEvent,
+  ControlRequestRecord,
+  KbDocReference,
+  QueuedMessage,
+  ReplyTo,
+  SubagentActivity,
+  TaskBoardTask,
+  ToolActivity,
+} from "@/lib/chat/types";
+import type { PendingKbUpload } from "@/lib/chat/kb-uploads";
+import type { KbCollectionWithDocs, KbDocEntry } from "@/hooks/use-kb-docs";
+
+const BOT_ID = "local";
+const BOT_NAME = "Magi_Local";
+const DEFAULT_CHANNEL = "general";
+const DEFAULT_MODEL = "auto";
+const DEFAULT_ROUTER = "standard";
+const WORKSPACE_SCAN_LIMIT = 220;
+const EDITABLE_WORKSPACE_ROOTS = new Set([
+  ".magi",
+  ".hipocampus",
+  "compaction",
+  "compactions",
+  "contracts",
+  "harness",
+  "harness-rules",
+  "harnesses",
+  "hooks",
+  "memory",
+  "prompts",
+  "system-prompts",
+]);
 
 const storage = {
   agentUrl: "magi.agent.app.agentUrl",
@@ -9,468 +76,76 @@ const storage = {
   modelOverride: "magi.agent.app.modelOverride",
 };
 
-type Section = "chat" | "overview" | "settings" | "workspace" | "usage" | "skills" | "knowledge";
-type DockView = "work" | "knowledge";
-type Role = "user" | "assistant" | "system";
 type JsonRecord = Record<string, unknown>;
-
-interface Message {
-  id: string;
-  role: Role;
-  text: string;
-  streaming?: boolean;
-  error?: boolean;
-}
-
-interface AppChannel {
-  id: string;
-  name: string;
-  displayName: string | null;
-  category: string | null;
-  position: number;
-}
-
-type TurnPhase = "pending" | "planning" | "executing" | "verifying" | "committing" | "committed" | "aborted";
-type ToolActivityStatus = "running" | "done" | "error" | "denied";
-type SubagentActivityStatus = "running" | "waiting" | "done" | "error" | "cancelled";
-
-interface ToolActivity {
-  id: string;
-  label: string;
-  status: ToolActivityStatus;
-  startedAt: number;
-  inputPreview?: string;
-  outputPreview?: string;
-  durationMs?: number;
-}
-
-interface SubagentActivity {
-  taskId: string;
-  role: string;
-  status: SubagentActivityStatus;
-  detail?: string;
-  startedAt: number;
-  updatedAt: number;
-}
-
-interface TaskBoardTask {
-  id: string;
-  title: string;
-  description: string;
-  status: "pending" | "in_progress" | "completed" | "cancelled";
-  parallelGroup?: string;
-  dependsOn?: string[];
-}
-
-interface TaskBoardSnapshot {
-  tasks: TaskBoardTask[];
-  receivedAt: number;
-}
-
-interface ChannelState {
-  streaming: boolean;
-  streamingText: string;
-  thinkingText: string;
-  error: string | null;
-  hasTextContent?: boolean;
-  thinkingStartedAt?: number | null;
-  turnPhase?: TurnPhase | null;
-  heartbeatElapsedMs?: number | null;
-  pendingInjectionCount?: number;
-  activeTools?: ToolActivity[];
-  subagents?: SubagentActivity[];
-  taskBoard?: TaskBoardSnapshot | null;
-  fileProcessing?: boolean;
-  reconnecting?: boolean;
-  saveError?: string | null;
-}
-
-interface QueuedMessage {
-  id: string;
-  content: string;
-  priority?: "now" | "next" | "later";
-  queuedAt: number;
-}
-
-interface ControlRequestRecord {
-  requestId: string;
-  kind: "tool_permission" | "plan_approval" | "user_question";
-  state: "pending" | "approved" | "denied" | "answered" | "cancelled" | "timed_out";
-  sessionKey: string;
-  turnId?: string;
-  channelName?: string;
-  source: "turn" | "mcp" | "child-agent" | "plan" | "system";
-  prompt: string;
-  proposedInput?: unknown;
-  createdAt: number;
-  expiresAt: number;
-  resolvedAt?: number;
-  decision?: "approved" | "denied" | "answered";
-  feedback?: string;
-  updatedInput?: unknown;
-  answer?: string;
-}
-
-interface EventRecord {
-  id: string;
-  type: string;
-  payload: JsonRecord;
-  ts: number;
-}
-
-interface RuntimeSnapshot {
-  sessions?: { count?: number; items?: JsonRecord[] };
-  tasks?: { count?: number; items?: JsonRecord[] };
-  crons?: { count?: number; items?: JsonRecord[] };
-  artifacts?: { count?: number; items?: JsonRecord[] };
-  tools?: { count?: number; items?: JsonRecord[] };
-  skills?: { loadedCount?: number; items?: JsonRecord[]; runtimeHookCount?: number };
-}
-
-interface AppConfig {
-  llm?: {
-    provider?: string;
-    model?: string;
-    baseUrl?: string;
-    apiKeyEnvVar?: string;
-    capabilities?: {
-      contextWindow?: number;
-      maxOutputTokens?: number;
-    };
-  };
-  server?: {
-    gatewayTokenEnvVar?: string;
-  };
-  workspace?: string;
-}
+type RuntimePhase = NonNullable<ChannelState["turnPhase"]>;
 
 interface AppBootstrap {
   agentUrl?: string;
-  tokenRequired?: boolean;
   token?: string;
 }
 
-interface BeforeInstallPromptEvent extends Event {
-  prompt: () => Promise<void>;
-  userChoice: Promise<{ outcome: string }>;
+interface KnowledgeDocumentRow {
+  collection?: string;
+  filename?: string;
+  title?: string;
+  path?: string;
+  objectKey?: string;
+  sizeBytes?: number;
+  mtimeMs?: number;
 }
 
-type WorkConsoleRowGroup = "status" | "tool" | "subagent" | "task" | "queue" | "control";
-type WorkConsoleRowStatus = "running" | "done" | "waiting" | "error" | "info";
-
-interface WorkConsoleRow {
-  id: string;
-  group: WorkConsoleRowGroup;
-  label: string;
-  detail?: string;
-  snippet?: string;
-  status: WorkConsoleRowStatus;
-  meta?: string;
+interface WorkspaceEntryRow {
+  name?: string;
+  path?: string;
+  type?: string;
+  sizeBytes?: number;
+  mtimeMs?: number;
 }
 
-const GROUP_LABELS: Record<WorkConsoleRowGroup, string> = {
-  status: "Now",
-  tool: "Current steps",
-  subagent: "Helpers",
-  task: "Plan",
-  queue: "Queued messages",
-  control: "Needs input",
-};
-
-const SUBAGENT_NAMES = [
-  "Halley",
-  "Meitner",
-  "Kant",
-  "Noether",
-  "Turing",
-  "Curie",
-  "Hopper",
-  "Lovelace",
-  "Feynman",
-  "Franklin",
-  "Shannon",
-  "Lamarr",
-];
-
-const LOW_SIGNAL_TOOL_LABELS = new Set(["glob", "grep", "subagentrunning", "subagenttooldecision"]);
-
-function initialChannelState(): ChannelState {
+function defaultChannel(): Channel {
   return {
-    streaming: false,
-    streamingText: "",
-    thinkingText: "",
-    error: null,
-    thinkingStartedAt: null,
-    turnPhase: null,
-    heartbeatElapsedMs: null,
-    pendingInjectionCount: 0,
-    activeTools: [],
-    subagents: [],
-    taskBoard: null,
+    id: "local-general",
+    name: DEFAULT_CHANNEL,
+    display_name: null,
+    position: 0,
+    category: "General",
+    created_at: new Date(0).toISOString(),
   };
-}
-
-function defaultLocalChannels(): AppChannel[] {
-  return [
-    {
-      id: "local-general",
-      name: "general",
-      displayName: null,
-      category: "General",
-      position: 0,
-    },
-  ];
-}
-
-function groupLocalChannels(channels: AppChannel[]): Array<{ title: string; channels: AppChannel[] }> {
-  const grouped = new Map<string, AppChannel[]>();
-  for (const channel of channels) {
-    const category = channel.category || "General";
-    grouped.set(category, [...(grouped.get(category) ?? []), channel]);
-  }
-  return Array.from(grouped.entries()).map(([title, items]) => ({
-    title,
-    channels: [...items].sort((a, b) => a.position - b.position),
-  }));
-}
-
-function normalizeChannelName(value: string): string {
-  return value
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9-_ ]/g, "")
-    .replace(/\s+/g, "-")
-    .replace(/^-+|-+$/g, "");
-}
-
-function formatElapsed(ms?: number | null): string | undefined {
-  if (!ms || ms < 1000) return undefined;
-  return `${Math.max(1, Math.round(ms / 1000))}s`;
-}
-
-function normalizeRole(role: string): string {
-  const value = role.trim().toLowerCase();
-  if (value === "explore" || value === "explorer" || value === "research") return "explorer";
-  if (value === "review" || value === "reviewer") return "reviewer";
-  if (value === "work" || value === "worker") return "worker";
-  return value || "subagent";
-}
-
-function normalizeToolLabel(label: string): string {
-  return label.replace(/[^a-z0-9]/gi, "").toLowerCase();
-}
-
-function shouldDisplayToolActivity(activity: ToolActivity): boolean {
-  return !LOW_SIGNAL_TOOL_LABELS.has(normalizeToolLabel(activity.label));
-}
-
-function subagentName(index: number): string {
-  return SUBAGENT_NAMES[index % SUBAGENT_NAMES.length] ?? `Agent ${index + 1}`;
-}
-
-function statusFromTool(activity: ToolActivity): WorkConsoleRowStatus {
-  if (activity.status === "running") return "running";
-  if (activity.status === "done") return "done";
-  if (activity.status === "error" || activity.status === "denied") return "error";
-  return "info";
-}
-
-function statusFromSubagent(activity: SubagentActivity): WorkConsoleRowStatus {
-  if (activity.status === "running") return "running";
-  if (activity.status === "waiting") return "waiting";
-  if (activity.status === "done") return "done";
-  if (activity.status === "error" || activity.status === "cancelled") return "error";
-  return "info";
-}
-
-function statusFromTask(task: TaskBoardTask): WorkConsoleRowStatus {
-  if (task.status === "in_progress") return "running";
-  if (task.status === "completed") return "done";
-  if (task.status === "cancelled") return "error";
-  return "waiting";
-}
-
-function taskMeta(task: TaskBoardTask): string {
-  if (task.status === "in_progress") return "running";
-  if (task.status === "completed") return "done";
-  if (task.status === "cancelled") return "cancelled";
-  return "pending";
-}
-
-function phaseLabel(phase: ChannelState["turnPhase"]): string {
-  switch (phase) {
-    case "pending":
-      return "Preparing";
-    case "planning":
-      return "Planning";
-    case "executing":
-      return "Running";
-    case "verifying":
-      return "Verifying";
-    case "committing":
-      return "Writing answer";
-    case "committed":
-      return "Finalizing";
-    case "aborted":
-      return "Interrupted";
-    default:
-      return "Working";
-  }
-}
-
-function toolPreview(activity: ToolActivity): Pick<WorkConsoleRow, "label" | "detail" | "snippet"> {
-  const label = activity.label || "Running tool";
-  const detail = activity.inputPreview || activity.outputPreview;
-  return {
-    label,
-    detail: detail ? preview(detail, 120) : undefined,
-    snippet: activity.outputPreview ? preview(activity.outputPreview, 240) : undefined,
-  };
-}
-
-function deriveWorkConsoleRows({
-  channelState,
-  queuedMessages = [],
-  controlRequests = [],
-}: {
-  channelState: ChannelState;
-  queuedMessages?: QueuedMessage[];
-  controlRequests?: ControlRequestRecord[];
-}): WorkConsoleRow[] {
-  const rows: WorkConsoleRow[] = [];
-  const phase = channelState.reconnecting
-    ? "Reconnecting"
-    : channelState.error
-      ? "Blocked"
-      : channelState.turnPhase
-        ? phaseLabel(channelState.turnPhase)
-        : channelState.streaming
-          ? "Working"
-          : null;
-  const elapsed = formatElapsed(channelState.heartbeatElapsedMs);
-
-  if (phase) {
-    rows.push({
-      id: "phase",
-      group: "status",
-      label: phase,
-      detail: elapsed ? `${elapsed} elapsed` : undefined,
-      status: channelState.error || channelState.turnPhase === "aborted" ? "error" : "running",
-    });
-  }
-
-  for (const [index, subagent] of (channelState.subagents ?? []).entries()) {
-    rows.push({
-      id: `subagent:${subagent.taskId}`,
-      group: "subagent",
-      label: subagentName(index),
-      detail: subagent.detail,
-      status: statusFromSubagent(subagent),
-      meta: normalizeRole(subagent.role),
-    });
-  }
-
-  for (const activity of channelState.activeTools ?? []) {
-    if (!shouldDisplayToolActivity(activity)) continue;
-    const duration = activity.durationMs ? formatElapsed(activity.durationMs) : undefined;
-    rows.push({
-      id: `tool:${activity.id}`,
-      group: "tool",
-      ...toolPreview(activity),
-      status: statusFromTool(activity),
-      ...(duration ? { meta: duration } : {}),
-    });
-  }
-
-  for (const task of channelState.taskBoard?.tasks ?? []) {
-    rows.push({
-      id: `task:${task.id}`,
-      group: "task",
-      label: task.title,
-      detail: task.description,
-      status: statusFromTask(task),
-      meta: taskMeta(task),
-    });
-  }
-
-  for (const [index, message] of queuedMessages.entries()) {
-    rows.push({
-      id: `queue:${message.id}`,
-      group: "queue",
-      label: index === 0 ? "Queued follow-up" : `Queued follow-up ${index + 1}`,
-      detail: message.content,
-      status: message.priority === "now" ? "running" : "waiting",
-      meta: message.priority === "now" ? "steering next" : "will send later",
-    });
-  }
-
-  for (const request of controlRequests.filter((item) => item.state === "pending")) {
-    rows.push({
-      id: `control:${request.requestId}`,
-      group: "control",
-      label: request.kind === "user_question" ? "Needs answer" : "Needs approval",
-      detail: request.prompt,
-      status: "waiting",
-      meta: request.kind.replace("_", " "),
-    });
-  }
-
-  if (rows.length === 0) {
-    return [
-      {
-        id: "idle",
-        group: "status",
-        label: "Idle",
-        detail: "Live agent work will appear here.",
-        status: "info",
-      },
-    ];
-  }
-  return rows;
-}
-
-function groupWorkRows(rows: WorkConsoleRow[]): Array<[WorkConsoleRowGroup, WorkConsoleRow[]]> {
-  const groups = new Map<WorkConsoleRowGroup, WorkConsoleRow[]>();
-  for (const row of rows) groups.set(row.group, [...(groups.get(row.group) ?? []), row]);
-  return Array.from(groups.entries());
-}
-
-function defaultSessionKey(): string {
-  return "agent:local:app:web:default";
 }
 
 function nowId(prefix: string): string {
-  return `${prefix}:${Date.now()}:${Math.random().toString(16).slice(2)}`;
+  return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
-function getStored(key: string, fallback: string): string {
-  return window.localStorage.getItem(key) || fallback;
+function normalizeChannelName(value: string): string {
+  return (
+    value
+      .trim()
+      .toLowerCase()
+      .replace(/\s+/g, "-")
+      .replace(/[^a-z0-9-_]/g, "-")
+      .replace(/-+/g, "-")
+      .replace(/^-|-$/g, "") || `ch-${Date.now().toString(36)}`
+  );
 }
 
 function normalizeAgentUrl(value: string): string {
   const trimmed = value.trim();
-  return trimmed.length > 0 ? trimmed.replace(/\/+$/, "") : window.location.origin;
+  return trimmed ? trimmed.replace(/\/+$/, "") : window.location.origin;
 }
 
-function isLoopbackHost(hostname: string): boolean {
-  return hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1" || hostname === "[::1]";
+function defaultSessionKey(channel: string): string {
+  return `agent:local:app:${channel}`;
 }
 
-function sameLocalRuntimeUrl(left: string, right: string): boolean {
-  const normalizedLeft = normalizeAgentUrl(left);
-  const normalizedRight = normalizeAgentUrl(right);
-  if (normalizedLeft === normalizedRight) return true;
-  try {
-    const leftUrl = new URL(normalizedLeft);
-    const rightUrl = new URL(normalizedRight);
-    return isLoopbackHost(leftUrl.hostname) && isLoopbackHost(rightUrl.hostname) && leftUrl.port === rightUrl.port;
-  } catch {
-    return false;
-  }
+function sessionKeyForChannel(channel: string): string {
+  const raw = window.localStorage.getItem(storage.sessionKey)?.trim();
+  return raw || defaultSessionKey(channel);
 }
 
-function asArray(value: unknown): JsonRecord[] {
-  return Array.isArray(value) ? value.filter((item): item is JsonRecord => !!item && typeof item === "object") : [];
+function getStored(key: string, fallback: string): string {
+  if (typeof window === "undefined") return fallback;
+  return window.localStorage.getItem(key) || fallback;
 }
 
 function asString(value: unknown, fallback = ""): string {
@@ -481,17 +156,38 @@ function asNumber(value: unknown, fallback = 0): number {
   return typeof value === "number" && Number.isFinite(value) ? value : fallback;
 }
 
-function formatTime(ts: unknown): string {
-  const value = typeof ts === "number" ? ts : Date.now();
-  return new Date(value).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+function asRecord(value: unknown): JsonRecord {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as JsonRecord)
+    : {};
 }
 
-function preview(value: unknown, max = 140): string {
-  const text = typeof value === "string" ? value : value == null ? "" : JSON.stringify(value);
+function asArray(value: unknown): JsonRecord[] {
+  return Array.isArray(value)
+    ? value.filter((item): item is JsonRecord => !!item && typeof item === "object")
+    : [];
+}
+
+function preview(value: unknown, max = 400): string | undefined {
+  if (value === undefined || value === null) return undefined;
+  const text = typeof value === "string" ? value : JSON.stringify(value);
+  if (!text) return undefined;
   return text.length > max ? `${text.slice(0, max - 3)}...` : text;
 }
 
-export function createSseParser(onEvent: (eventName: string, rawData: string) => void) {
+function isRuntimePhase(value: unknown): value is RuntimePhase {
+  return (
+    value === "pending" ||
+    value === "planning" ||
+    value === "executing" ||
+    value === "verifying" ||
+    value === "committing" ||
+    value === "committed" ||
+    value === "aborted"
+  );
+}
+
+function createSseParser(onEvent: (eventName: string, rawData: string) => void) {
   let buffer = "";
   return (chunk: string) => {
     buffer += chunk;
@@ -511,1324 +207,422 @@ export function createSseParser(onEvent: (eventName: string, rawData: string) =>
   };
 }
 
-function Icon({ name }: { name: "doc" | "refresh" | "send" | "attach" | "settings" | "chevron" }) {
-  if (name === "refresh") {
-    return (
-      <svg viewBox="0 0 24 24" aria-hidden="true">
-        <path d="M4 4v5h5M20 20v-5h-5" />
-        <path d="M5.6 15.5A7 7 0 0 0 18.8 18M18.4 8.5A7 7 0 0 0 5.2 6" />
-      </svg>
-    );
-  }
-  if (name === "send") {
-    return (
-      <svg viewBox="0 0 24 24" aria-hidden="true">
-        <path d="M12 19V5" />
-        <path d="m5 12 7-7 7 7" />
-      </svg>
-    );
-  }
-  if (name === "attach") {
-    return (
-      <svg viewBox="0 0 24 24" aria-hidden="true">
-        <path d="m21 11-9 9a6 6 0 0 1-8.5-8.5l9-9a4 4 0 0 1 5.7 5.7l-9 9a2 2 0 0 1-2.8-2.8l8.4-8.4" />
-      </svg>
-    );
-  }
-  if (name === "settings") {
-    return (
-      <svg viewBox="0 0 24 24" aria-hidden="true">
-        <path d="M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z" />
-        <path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1-2 3.4-.2-.1a1.8 1.8 0 0 0-2.1-.3 1.8 1.8 0 0 0-1 1.6v.2h-4v-.2a1.8 1.8 0 0 0-1-1.6 1.8 1.8 0 0 0-2.1.3l-.2.1-2-3.4.1-.1A1.7 1.7 0 0 0 5.6 15a1.8 1.8 0 0 0-1.4-1.2H4v-4h.2a1.8 1.8 0 0 0 1.4-1.2 1.7 1.7 0 0 0-.3-1.9l-.1-.1 2-3.4.2.1a1.8 1.8 0 0 0 2.1.3 1.8 1.8 0 0 0 1-1.6V2h4v.2a1.8 1.8 0 0 0 1 1.6 1.8 1.8 0 0 0 2.1-.3l.2-.1 2 3.4-.1.1a1.7 1.7 0 0 0-.3 1.9 1.8 1.8 0 0 0 1.4 1.2h.2v4h-.2A1.8 1.8 0 0 0 19.4 15Z" />
-      </svg>
-    );
-  }
-  if (name === "chevron") {
-    return (
-      <svg viewBox="0 0 24 24" aria-hidden="true">
-        <path d="m9 18 6-6-6-6" />
-      </svg>
-    );
-  }
-  return (
-    <svg viewBox="0 0 24 24" aria-hidden="true">
-      <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z" />
-      <path d="M14 2v6h6" />
-    </svg>
-  );
-}
-
-function Pill({ children, tone = "neutral" }: { children: ReactNode; tone?: "neutral" | "green" | "purple" | "red" | "amber" }) {
-  return <span className={`pill pill-${tone}`}>{children}</span>;
-}
-
-function SnapshotList({
-  id,
-  items,
-  empty,
-  onSelect,
-}: {
-  id?: string;
-  items: JsonRecord[];
-  empty: string;
-  onSelect?: (item: JsonRecord) => void;
-}) {
-  if (items.length === 0) {
-    return <div id={id} className="snapshot-list"><div className="snapshot-empty">{empty}</div></div>;
-  }
-  return (
-    <div id={id} className="snapshot-list">
-      {items.map((item, index) => (
-        <button
-          key={`${asString(item.id) || asString(item.taskId) || asString(item.path) || index}`}
-          type="button"
-          className="snapshot-row"
-          onClick={() => onSelect?.(item)}
-        >
-          <span className="snapshot-title">
-            {asString(item.title) || asString(item.name) || asString(item.sessionKey) || asString(item.taskId) || asString(item.cronId) || asString(item.path) || `item ${index + 1}`}
-          </span>
-          <span className="snapshot-meta">
-            {asString(item.status) || asString(item.kind) || asString(item.collection) || asString(item.permission) || preview(item.meta, 60)}
-          </span>
-          <span className="snapshot-detail">
-            {asString(item.detail) || asString(item.promptPreview) || asString(item.resultPreview) || asString(item.path) || preview(item.contentPreview || item.inputPreview || item.outputPreview, 120)}
-          </span>
-        </button>
-      ))}
-    </div>
-  );
-}
-
-function Field({ label, children }: { label: string; children: ReactNode }) {
-  return (
-    <label className="field">
-      <span>{label}</span>
-      {children}
-    </label>
-  );
-}
-
-function SectionCard({ title, action, children, id }: { title: string; action?: ReactNode; children: ReactNode; id?: string }) {
-  return (
-    <section id={id} className="panel-card">
-      <div className="panel-card-header">
-        <h3>{title}</h3>
-        {action}
-      </div>
-      {children}
-    </section>
-  );
-}
-
-function OpenMagiLogo() {
-  return (
-    <div className="openmagi-logo" aria-label="Open Magi">
-      <span className="logo-mark">M</span>
-      <span>Open <strong>Magi</strong></span>
-    </div>
-  );
-}
-
-function DashboardSidebar({
-  active,
-  setActive,
-  runtimeStatus,
-}: {
-  active: Section;
-  setActive: (section: Section) => void;
-  runtimeStatus: string;
-}) {
-  const nav = [
-    { group: "Agent", items: [["chat", "Chat"], ["overview", "Overview"], ["settings", "Settings"]] },
-    { group: "Workspace", items: [["workspace", "Workspace"], ["knowledge", "Knowledge"], ["skills", "Skills"], ["usage", "Usage"]] },
-  ] as const;
-  return (
-    <aside className="dashboard-sidebar" aria-label="Dashboard navigation">
-      <OpenMagiLogo />
-      <button className="bot-switcher" type="button">
-        <span>Magi_Local</span>
-        <Icon name="chevron" />
-      </button>
-      <nav className="dashboard-nav">
-        {nav.map((group) => (
-          <div key={group.group} className="nav-section">
-            <div className="nav-label">{group.group}</div>
-            {group.items.map(([key, label]) => {
-              const section = (["chat", "overview", "settings", "usage", "skills", "knowledge", "workspace"].includes(key) ? key : "overview") as Section;
-              return (
-                <button
-                  key={key}
-                  className={`nav-item ${active === section && key === section ? "active" : ""}`}
-                  type="button"
-                  onClick={() => setActive(section)}
-                >
-                  {label}
-                </button>
-              );
-            })}
-          </div>
-        ))}
-      </nav>
-      <div className="sidebar-footer">
-        <span className="status-dot" />
-        <span>{runtimeStatus}</span>
-      </div>
-    </aside>
-  );
-}
-
-function ChatSidebar({
-  channels,
-  activeChannel,
-  setActiveChannel,
-  setActive,
-  onRefresh,
-  runtimeStatus,
-  editing,
-  onToggleEdit,
-  onCancelEdit,
-  onCreateChannel,
-}: {
-  channels: AppChannel[];
-  activeChannel: string;
-  setActiveChannel: (channel: string) => void;
-  setActive: (section: Section) => void;
-  onRefresh: () => void;
-  runtimeStatus: string;
-  editing: boolean;
-  onToggleEdit: () => void;
-  onCancelEdit: () => void;
-  onCreateChannel: (name: string) => void;
-}) {
-  const [showNewChannel, setShowNewChannel] = useState(false);
-  const [newChannelName, setNewChannelName] = useState("");
-  const groupedChannels = groupLocalChannels(channels.length > 0 ? channels : defaultLocalChannels());
-  const createChannel = () => {
-    const name = normalizeChannelName(newChannelName);
-    if (!name) return;
-    onCreateChannel(name);
-    setNewChannelName("");
-    setShowNewChannel(false);
+function makeControlRequest(raw: JsonRecord, fallbackSessionKey: string): ControlRequestRecord | null {
+  const requestId = asString(raw.requestId);
+  const prompt = asString(raw.prompt);
+  if (!requestId || !prompt) return null;
+  const kind =
+    raw.kind === "plan_approval" || raw.kind === "user_question"
+      ? raw.kind
+      : "tool_permission";
+  const state =
+    raw.state === "approved" ||
+    raw.state === "denied" ||
+    raw.state === "answered" ||
+    raw.state === "cancelled" ||
+    raw.state === "timed_out"
+      ? raw.state
+      : "pending";
+  const source =
+    raw.source === "mcp" ||
+    raw.source === "child-agent" ||
+    raw.source === "plan" ||
+    raw.source === "system"
+      ? raw.source
+      : "turn";
+  return {
+    requestId,
+    kind,
+    state,
+    sessionKey: asString(raw.sessionKey, fallbackSessionKey),
+    source,
+    prompt,
+    createdAt: asNumber(raw.createdAt, Date.now()),
+    expiresAt: asNumber(raw.expiresAt, Date.now() + 10 * 60_000),
+    ...(typeof raw.turnId === "string" ? { turnId: raw.turnId } : {}),
+    ...(typeof raw.channelName === "string" ? { channelName: raw.channelName } : {}),
+    ...(raw.proposedInput !== undefined ? { proposedInput: raw.proposedInput } : {}),
   };
-  return (
-    <aside className="chat-sidebar" aria-label="Chat channels">
-      <div className="bot-status">
-        <div>
-          <strong>Magi_Local</strong>
-          <span><i /> {runtimeStatus}</span>
-        </div>
-      </div>
-      <div className="chat-edit-row">
-        {editing && <button type="button" onClick={onCancelEdit}>Cancel</button>}
-        <button type="button" onClick={onToggleEdit}>{editing ? "Done" : "Edit"}</button>
-      </div>
-      <nav className="channel-scroll">
-        {groupedChannels.map(({ title, channels: channelItems }) => (
-          <div key={title} className="channel-group">
-            <div className="channel-group-label">{title}</div>
-            {channelItems.map((channel) => (
-              <button
-                key={channel.id}
-                className={`channel-row ${activeChannel === channel.name ? "active" : ""}`}
-                type="button"
-                onClick={() => setActiveChannel(channel.name)}
-              >
-                <span>#</span>
-                <strong>{channel.displayName || channel.name}</strong>
-              </button>
-            ))}
-          </div>
-        ))}
-        <div className="channel-add-row">
-          <button type="button" onClick={() => setShowNewChannel(true)}>
-            <span>+</span>
-            Add Channel
-          </button>
-        </div>
-      </nav>
-      <div className="chat-sidebar-bottom">
-        <button type="button" onClick={onRefresh}><Icon name="refresh" /> Refresh</button>
-        <button type="button" onClick={() => setActive("overview")}><Icon name="settings" /> Dashboard</button>
-      </div>
-      {showNewChannel && (
-        <div className="local-modal-backdrop" onClick={() => setShowNewChannel(false)}>
-          <div className="local-modal" onClick={(event) => event.stopPropagation()}>
-            <h3>New Channel</h3>
-            <input
-              value={newChannelName}
-              onChange={(event) => setNewChannelName(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key === "Enter") createChannel();
-                if (event.key === "Escape") setShowNewChannel(false);
-              }}
-              placeholder="Channel name"
-              autoFocus
-            />
-            <div className="modal-actions">
-              <button type="button" onClick={() => setShowNewChannel(false)}>Cancel</button>
-              <button type="button" onClick={createChannel}>Create</button>
-            </div>
-          </div>
-        </div>
-      )}
-    </aside>
+}
+
+function normalizeTaskBoard(payload: JsonRecord): TaskBoardTask[] {
+  return asArray(payload.tasks).map((task, index) => {
+    const status =
+      task.status === "in_progress" ||
+      task.status === "completed" ||
+      task.status === "cancelled"
+        ? task.status
+        : "pending";
+    return {
+      id: asString(task.id, `task-${index + 1}`),
+      title: asString(task.title, asString(task.name, `Task ${index + 1}`)),
+      description: asString(task.description, asString(task.detail)),
+      status,
+      ...(Array.isArray(task.dependsOn)
+        ? { dependsOn: task.dependsOn.filter((item): item is string => typeof item === "string") }
+        : {}),
+      ...(typeof task.parallelGroup === "string" ? { parallelGroup: task.parallelGroup } : {}),
+    };
+  });
+}
+
+function normalizeSubagentStatus(type: string, status: unknown): SubagentActivity["status"] {
+  if (type === "child_completed" || type === "spawn_result" || status === "completed" || status === "ok") {
+    return "done";
+  }
+  if (type === "child_cancelled" || status === "aborted") return "cancelled";
+  if (type === "child_failed" || status === "failed" || status === "error") return "error";
+  if (status === "waiting") return "waiting";
+  return "running";
+}
+
+function appendToolActivity(current: ToolActivity[] | undefined, patch: ToolActivity): ToolActivity[] {
+  const next = [...(current ?? [])];
+  const index = next.findIndex((item) => item.id === patch.id);
+  if (index >= 0) {
+    next[index] = {
+      ...next[index],
+      ...patch,
+      label: patch.label === patch.id ? next[index].label : patch.label,
+      startedAt: next[index].startedAt,
+    };
+  } else {
+    next.push(patch);
+  }
+  return next.slice(-24);
+}
+
+function appendSubagentActivity(
+  current: SubagentActivity[] | undefined,
+  patch: SubagentActivity,
+): SubagentActivity[] {
+  const next = [...(current ?? [])];
+  const index = next.findIndex((item) => item.taskId === patch.taskId);
+  if (index >= 0) next[index] = { ...next[index], ...patch };
+  else next.push(patch);
+  return next.slice(-32);
+}
+
+function toKbCollections(payload: JsonRecord): KbCollectionWithDocs[] {
+  const documents = asArray(payload.documents) as KnowledgeDocumentRow[];
+  if (documents.length === 0) return [];
+
+  const grouped = new Map<string, KbDocEntry[]>();
+  for (const [index, doc] of documents.entries()) {
+    const collectionName = doc.collection || "knowledge";
+    const collectionId = `local-${collectionName}`;
+    const id = doc.objectKey || doc.path || doc.filename || `doc-${index}`;
+    const entry: KbDocEntry = {
+      id,
+      filename: doc.title || doc.filename || id,
+      status: "ready",
+      scope: "personal",
+      orgId: null,
+      path: doc.path || doc.objectKey || id,
+      sort_order: index,
+      source_external_id: doc.objectKey || doc.path || id,
+      source_parent_external_id: null,
+      parent_document_id: null,
+      collectionId,
+      collectionName,
+    };
+    grouped.set(collectionName, [...(grouped.get(collectionName) ?? []), entry]);
+  }
+
+  return Array.from(grouped.entries()).map(([name, docs]) => ({
+    id: `local-${name}`,
+    name,
+    scope: "personal",
+    orgId: null,
+    docs,
+  }));
+}
+
+function toWorkspaceFiles(payload: JsonRecord): WorkspaceFileEntry[] {
+  const entries = asArray(payload.entries) as WorkspaceEntryRow[];
+  return normalizeWorkspaceFileList(
+    entries
+      .filter((entry) => entry.type === "file")
+      .map((entry) => ({
+        path: entry.path || entry.name || "",
+        size: entry.sizeBytes ?? 0,
+        modifiedAt:
+          typeof entry.mtimeMs === "number"
+            ? new Date(entry.mtimeMs).toISOString()
+            : null,
+      }))
+      .filter((entry) => entry.path.length > 0),
   );
 }
 
-function RuntimeMetrics({ runtime, eventCount }: { runtime: RuntimeSnapshot | null; eventCount: number }) {
-  const rows = [
-    ["Sessions", runtime?.sessions?.count ?? 0],
-    ["Tasks", runtime?.tasks?.count ?? 0],
-    ["Crons", runtime?.crons?.count ?? 0],
-    ["Artifacts", runtime?.artifacts?.count ?? 0],
-    ["Tools", runtime?.tools?.count ?? 0],
-    ["Skills", runtime?.skills?.loadedCount ?? 0],
-    ["Events", eventCount],
-  ];
-  return (
-    <div className="metric-grid">
-      {rows.map(([label, value]) => (
-        <div key={label}>
-          <dt>{label}</dt>
-          <dd>{value}</dd>
-        </div>
-      ))}
-    </div>
-  );
-}
-
-function WorkDock({
-  activeDock,
-  setActiveDock,
-  runtime,
-  events,
-  channelState,
-  queuedMessages,
-  controlRequests,
-  knowledgeQuery,
-  setKnowledgeQuery,
-  knowledgePath,
-  setKnowledgePath,
-  knowledgeContent,
-  setKnowledgeContent,
-  knowledgeItems,
-  onSearchKnowledge,
-  onLoadKnowledge,
-  onSaveKnowledge,
-  onReloadSkills,
-}: {
-  activeDock: DockView;
-  setActiveDock: (view: DockView) => void;
-  runtime: RuntimeSnapshot | null;
-  events: EventRecord[];
-  channelState: ChannelState;
-  queuedMessages: QueuedMessage[];
-  controlRequests: ControlRequestRecord[];
-  knowledgeQuery: string;
-  setKnowledgeQuery: (value: string) => void;
-  knowledgePath: string;
-  setKnowledgePath: (value: string) => void;
-  knowledgeContent: string;
-  setKnowledgeContent: (value: string) => void;
-  knowledgeItems: JsonRecord[];
-  onSearchKnowledge: () => void;
-  onLoadKnowledge: () => void;
-  onSaveKnowledge: () => void;
-  onReloadSkills: () => void;
-}) {
-  const sessionRows = runtime?.sessions?.items ?? [];
-  const artifactRows = runtime?.artifacts?.items ?? [];
-  const cronRows = runtime?.crons?.items ?? [];
-  const workGroups = groupWorkRows(deriveWorkConsoleRows({ channelState, queuedMessages, controlRequests }));
-  return (
-    <aside className="work-dock" aria-label="Work">
-      <header className="work-dock-header">
-        <div>
-          <p>WORK</p>
-          <h2>{activeDock === "work" ? "Work" : "Knowledge"}</h2>
-        </div>
-        <button className="icon-button" type="button" aria-label="Collapse">»</button>
-      </header>
-      <div className="dock-tabs" role="tablist" aria-label="Right inspector">
-        <button className={activeDock === "work" ? "active" : ""} type="button" onClick={() => setActiveDock("work")}>Work</button>
-        <button className={activeDock === "knowledge" ? "active" : ""} type="button" onClick={() => setActiveDock("knowledge")}>Knowledge</button>
-      </div>
-      {activeDock === "work" ? (
-        <div className="dock-panel">
-          <div className="dock-intro">
-            <h3>Work in progress</h3>
-            <p>Plain-language progress from the current run.</p>
-          </div>
-          {workGroups.map(([group, rows]) => (
-            <section key={group} className={`work-card work-card-${group} ${group === "status" ? "live" : ""} ${group === "subagent" ? "helpers-card" : ""}`}>
-              <div className="work-card-title">
-                <span>{GROUP_LABELS[group]}</span>
-                {group === "status" && channelState.streaming && <Pill tone="purple">LIVE</Pill>}
-                {group === "tool" && <Pill>{rows.length}</Pill>}
-                {group === "subagent" && <Pill tone="green">{rows.length} AGENTS</Pill>}
-                {group === "queue" && <Pill tone="amber">{rows.length} WAITING</Pill>}
-              </div>
-              <div
-                id={group === "tool" ? "tasks-list" : undefined}
-                className={group === "subagent" ? "helper-grid" : group === "tool" ? "current-step-list" : "work-row-list"}
-              >
-                {rows.map((row) => (
-                  group === "subagent" ? (
-                    <div key={row.id} className="helper-chip" data-work-console-agent-chip="true" data-work-console-row-status={row.status}>
-                      <span className={`helper-dot ${row.status === "done" ? "green" : row.status === "waiting" ? "amber" : row.status === "error" ? "red" : "purple"}`} />
-                      <strong>{row.label} {row.meta && <em>{row.meta}</em>}</strong>
-                      {row.detail && <div className="helper-bar">{row.detail}</div>}
-                    </div>
-                  ) : (
-                    <div key={row.id} className={`current-step-row work-row-${row.status}`} data-work-console-action-row={group === "tool" ? "true" : undefined} data-work-console-row-status={row.status}>
-                      <span className={row.status === "running" ? "purple-dot" : row.status === "error" ? "red-dot" : row.status === "waiting" ? "amber-dot" : "green-dot"} />
-                      <div>
-                        <strong>{row.label}</strong>
-                        {row.meta && <small>{row.meta}</small>}
-                        {row.detail && <p>{row.detail}</p>}
-                        {row.snippet && <pre>{row.snippet}</pre>}
-                      </div>
-                    </div>
-                  )
-                ))}
-              </div>
-            </section>
-          ))}
-          <section className="work-card">
-            <div className="work-card-title"><span>SESSIONS</span></div>
-            <SnapshotList id="sessions-list" items={sessionRows} empty="No sessions" />
-          </section>
-          <section className="work-card">
-            <div className="work-card-title"><span>SCHEDULES</span></div>
-            <SnapshotList id="crons-list" items={cronRows} empty="No schedules" />
-          </section>
-          <section className="work-card">
-            <div className="work-card-title">
-              <span>ARTIFACTS</span>
-              <div className="row-actions">
-                <button id="open-artifact-button" type="button">Open</button>
-                <button id="download-artifact-button" type="button">Download</button>
-              </div>
-            </div>
-            <SnapshotList id="artifacts-list" items={artifactRows} empty="No artifacts" />
-            <pre id="artifact-content" className="code-view" />
-          </section>
-          <section className="work-card">
-            <div className="work-card-title"><span>EVENTS</span></div>
-            <div id="events" className="event-list">
-              {events.slice(0, 12).map((event) => (
-                <div key={event.id} className="event-row">
-                  <strong>{event.type}</strong>
-                  <p className="event-summary">{preview(event.type, 120)}</p>
-                </div>
-              ))}
-            </div>
-          </section>
-        </div>
-      ) : (
-        <div className="dock-panel">
-          <div className="dock-intro">
-            <h3>Knowledge Base</h3>
-            <p>Local workspace KB. No hosted Knowledge Base required.</p>
-          </div>
-          <form id="knowledge-search-form" className="dock-form" onSubmit={(event) => { event.preventDefault(); onSearchKnowledge(); }}>
-            <Field label="Search">
-              <input id="knowledge-query" value={knowledgeQuery} onChange={(event) => setKnowledgeQuery(event.target.value)} placeholder="delivery evidence" />
-            </Field>
-            <div className="row-actions full">
-              <button type="submit">Search</button>
-              <button id="load-knowledge-button" type="button" onClick={onLoadKnowledge}>List KB</button>
-            </div>
-          </form>
-          <SnapshotList id="knowledge-results" items={knowledgeItems} empty="No KB documents" />
-          <form id="knowledge-file-form" className="dock-form" onSubmit={(event) => { event.preventDefault(); onSaveKnowledge(); }}>
-            <Field label="Path">
-              <input id="knowledge-file-path" value={knowledgePath} onChange={(event) => setKnowledgePath(event.target.value)} placeholder="reports/brief.md" />
-            </Field>
-            <Field label="Markdown">
-              <textarea id="knowledge-file-content" rows={7} value={knowledgeContent} onChange={(event) => setKnowledgeContent(event.target.value)} />
-            </Field>
-            <button type="submit">Save KB document</button>
-          </form>
-          <button id="reload-skills-button" className="secondary-button" type="button" onClick={onReloadSkills}>Reload Skills</button>
-        </div>
-      )}
-    </aside>
-  );
-}
-
-function ChatView({
-  channels,
-  activeChannel,
-  setActiveChannel,
-  setActive,
-  runtimeStatus,
-  onRefresh,
-  messages,
-  input,
-  setInput,
-  isStreaming,
-  onSend,
-  onReset,
-  modelOverride,
-  setModelOverride,
-  streamingMode,
-  setStreamingMode,
-  activeDock,
-  setActiveDock,
-  runtime,
-  events,
-  channelState,
-  queuedMessages,
-  controlRequests,
-  knowledgeProps,
-  onReloadSkills,
-  editingChannels,
-  onToggleEditChannels,
-  onCancelEditChannels,
-  onCreateChannel,
-}: {
-  channels: AppChannel[];
-  activeChannel: string;
-  setActiveChannel: (channel: string) => void;
-  setActive: (section: Section) => void;
-  runtimeStatus: string;
-  onRefresh: () => void;
-  messages: Message[];
-  input: string;
-  setInput: (value: string) => void;
-  isStreaming: boolean;
-  onSend: () => void;
-  onReset: () => void;
-  modelOverride: string;
-  setModelOverride: (value: string) => void;
-  streamingMode: "queue" | "steer";
-  setStreamingMode: (value: "queue" | "steer") => void;
-  activeDock: DockView;
-  setActiveDock: (view: DockView) => void;
-  runtime: RuntimeSnapshot | null;
-  events: EventRecord[];
-  channelState: ChannelState;
-  queuedMessages: QueuedMessage[];
-  controlRequests: ControlRequestRecord[];
-  knowledgeProps: Pick<Parameters<typeof WorkDock>[0], "knowledgeQuery" | "setKnowledgeQuery" | "knowledgePath" | "setKnowledgePath" | "knowledgeContent" | "setKnowledgeContent" | "knowledgeItems" | "onSearchKnowledge" | "onLoadKnowledge" | "onSaveKnowledge">;
-  onReloadSkills: () => void;
-  editingChannels: boolean;
-  onToggleEditChannels: () => void;
-  onCancelEditChannels: () => void;
-  onCreateChannel: (name: string) => void;
-}) {
-  const activeToolCount = (channelState.activeTools ?? []).filter((tool) => tool.status === "running").length;
-  const activeSubagentCount = (channelState.subagents ?? []).filter((subagent) => subagent.status === "running" || subagent.status === "waiting").length;
-  const pendingRequests = controlRequests.filter((request) => request.state === "pending");
-  const visibleRunState =
-    channelState.streaming ||
-    activeToolCount > 0 ||
-    activeSubagentCount > 0 ||
-    queuedMessages.length > 0 ||
-    pendingRequests.length > 0 ||
-    Boolean(channelState.taskBoard?.tasks.some((task) => task.status === "pending" || task.status === "in_progress"));
-  const currentWork =
-    channelState.taskBoard?.tasks.find((task) => task.status === "in_progress")?.title ||
-    channelState.activeTools?.find((tool) => tool.status === "running")?.label ||
-    channelState.subagents?.find((subagent) => subagent.status === "running" || subagent.status === "waiting")?.detail ||
-    (isStreaming ? "Working on your request" : "Waiting for input");
-
-  return (
-    <div className="cloud-chat-shell" data-cloud-chat-shell="true">
-      <ChatSidebar
-        channels={channels}
-        activeChannel={activeChannel}
-        setActiveChannel={setActiveChannel}
-        setActive={setActive}
-        onRefresh={onRefresh}
-        runtimeStatus={runtimeStatus}
-        editing={editingChannels}
-        onToggleEdit={onToggleEditChannels}
-        onCancelEdit={onCancelEditChannels}
-        onCreateChannel={onCreateChannel}
-      />
-      <main className="chat-main">
-        <header className="chat-header">
-          <h1>{activeChannel}</h1>
-          <button id="clear-button" type="button" onClick={onReset}>Reset</button>
-        </header>
-        <div id="messages" className="message-timeline" aria-live="polite">
-          {messages.length === 0 ? (
-            <section className="empty-chat">
-              <div className="empty-chat-icon">⌁</div>
-              <p>Start a conversation</p>
-            </section>
-          ) : (
-            messages.map((message) => (
-              <div key={message.id} className={`message-bubble ${message.role} ${message.error ? "error" : ""} ${message.streaming ? "streaming" : ""}`}>
-                {message.text}
-              </div>
-            ))
-          )}
-        </div>
-        {visibleRunState && (
-          <section className="current-run-card" aria-label="Current run">
-            <button type="button" className="run-card-close">×</button>
-            <div className="run-grid">
-              <span>CURRENT RUN</span>
-              <strong>{channelState.reconnecting ? "Reconnecting" : phaseLabel(channelState.turnPhase ?? null)}</strong>
-              <span>CURRENT WORK</span>
-              <strong>{currentWork}</strong>
-              {activeToolCount > 0 && (
-                <>
-                  <span>ACTIONS</span>
-                  <strong>{activeToolCount} active</strong>
-                </>
-              )}
-              {activeSubagentCount > 0 && (
-                <>
-                  <span>HELPERS</span>
-                  <strong>{activeSubagentCount} active</strong>
-                </>
-              )}
-            </div>
-          </section>
-        )}
-        <form
-          id="message-form"
-          className="chat-composer"
-          data-chat-input-shell="true"
-          onSubmit={(event) => {
-            event.preventDefault();
-            onSend();
-          }}
-        >
-          {isStreaming && (
-            <div className="composer-mode-row" aria-label="Streaming send mode">
-              <button type="button" className={streamingMode === "queue" ? "mode-active" : ""} onClick={() => setStreamingMode("queue")}>Queue after run</button>
-              <button type="button" className={streamingMode === "steer" ? "mode-active" : ""} onClick={() => setStreamingMode("steer")}>Steer current run</button>
-            </div>
-          )}
-          <textarea
-            id="message-input"
-            value={input}
-            rows={1}
-            placeholder="Message..."
-            onChange={(event) => setInput(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === "Enter" && !event.shiftKey) {
-                event.preventDefault();
-                onSend();
-              }
-            }}
-          />
-          <div className="composer-bottom">
-            <button type="button" className="attach-button" aria-label="Attach file"><Icon name="attach" /></button>
-            <div className="model-picker">
-              <span>Custom</span>
-              <input id="model-override" value={modelOverride} onChange={(event) => setModelOverride(event.target.value)} placeholder="auto" />
-            </div>
-            <button id="send-button" className={isStreaming ? "stop-button" : "send-button"} type="submit">
-              {isStreaming ? "■" : <Icon name="send" />}
-            </button>
-          </div>
-        </form>
-      </main>
-      <WorkDock
-        activeDock={activeDock}
-        setActiveDock={setActiveDock}
-        runtime={runtime}
-        events={events}
-        channelState={channelState}
-        queuedMessages={queuedMessages}
-        controlRequests={controlRequests}
-        onReloadSkills={onReloadSkills}
-        {...knowledgeProps}
-      />
-    </div>
-  );
-}
-
-function Overview({ runtime, eventCount }: { runtime: RuntimeSnapshot | null; eventCount: number }) {
-  return (
-    <main className="dashboard-content">
-      <div className="page-title">
-        <h1>Dashboard</h1>
-        <p>Manage your local agent and monitor runtime performance.</p>
-      </div>
-      <section className="cloud-card bot-card">
-        <div className="bot-card-header">
-          <div className="bot-name"><span className="green-dot" /> <strong>Magi_Local</strong></div>
-          <Pill tone="green">Active</Pill>
-        </div>
-        <div className="bot-facts">
-          <div><span>Runtime</span><strong>Self-hosted</strong></div>
-          <div><span>Model</span><strong>OpenAI-compatible</strong></div>
-          <div><span>Workspace</span><strong>./workspace</strong></div>
-          <div><span>Created</span><strong>Local</strong></div>
-        </div>
-        <div className="settings-tabs">
-          <button type="button">Settings</button>
-          <button type="button">Usage</button>
-          <button type="button">Runtime proof</button>
-        </div>
-        <RuntimeMetrics runtime={runtime} eventCount={eventCount} />
-      </section>
-      <section className="cloud-card">
-        <div className="card-heading">
-          <div>
-            <h2>Integrations</h2>
-            <p>Connect local providers and workspace services to your runtime.</p>
-          </div>
-        </div>
-        <div className="integration-row">
-          <span className="integration-icon">O</span>
-          <div><strong>OpenAI-compatible</strong><p>Ollama, LM Studio, vLLM, llama.cpp, LiteLLM</p></div>
-          <Pill tone="green">Local</Pill>
-        </div>
-        <div className="integration-row">
-          <span className="integration-icon">K</span>
-          <div><strong>Workspace Knowledge</strong><p>Markdown, text, CSV, JSON, YAML, HTML</p></div>
-          <Pill tone="green">Connected</Pill>
-        </div>
-        <div className="integration-row">
-          <span className="integration-icon">C</span>
-          <div><strong>Cron workflows</strong><p>Scheduled runs with delivery safety</p></div>
-          <Pill tone="purple">Runtime</Pill>
-        </div>
-      </section>
-    </main>
-  );
-}
-
-function Settings({
-  agentUrl,
-  setAgentUrl,
-  token,
-  setToken,
-  sessionKey,
-  setSessionKey,
-  planMode,
-  setPlanMode,
-  runtimeStatus,
-  onSaveConnection,
-  onCheckRuntime,
-  installAvailable,
-  onInstall,
-  config,
-  setConfig,
-  onSaveConfig,
-  onReloadConfig,
-  configStatus,
-  harnessName,
-  setHarnessName,
-  harnessContent,
-  setHarnessContent,
-  onSaveHarnessRule,
-}: {
-  agentUrl: string;
-  setAgentUrl: (value: string) => void;
-  token: string;
-  setToken: (value: string) => void;
-  sessionKey: string;
-  setSessionKey: (value: string) => void;
-  planMode: boolean;
-  setPlanMode: (value: boolean) => void;
-  runtimeStatus: string;
-  onSaveConnection: () => void;
-  onCheckRuntime: () => void;
-  installAvailable: boolean;
-  onInstall: () => void;
-  config: AppConfig;
-  setConfig: (value: AppConfig) => void;
-  onSaveConfig: () => void;
-  onReloadConfig: () => void;
-  configStatus: string;
-  harnessName: string;
-  setHarnessName: (value: string) => void;
-  harnessContent: string;
-  setHarnessContent: (value: string) => void;
-  onSaveHarnessRule: () => void;
-}) {
-  const llm = config.llm ?? {};
-  const server = config.server ?? {};
-  const capabilities = llm.capabilities ?? {};
-  const updateLlm = (patch: NonNullable<AppConfig["llm"]>) => setConfig({ ...config, llm: { ...llm, ...patch } });
-  return (
-    <main className="dashboard-content">
-      <div className="page-title">
-        <h1>Settings</h1>
-        <p>Local runtime connection, model routing, and agent safeguards.</p>
-      </div>
-      <section className="cloud-card settings-card">
-        <form id="connection-form" onSubmit={(event) => { event.preventDefault(); onSaveConnection(); }}>
-          <div className="settings-row-title">
-            <h2>Local Runtime</h2>
-            <Pill tone={runtimeStatus === "active" ? "green" : "purple"}>{runtimeStatus}</Pill>
-          </div>
-          <Field label="Agent URL">
-            <input id="agent-url" value={agentUrl} onChange={(event) => setAgentUrl(event.target.value)} />
-          </Field>
-          <Field label="Server token">
-            <input id="server-token" type="password" value={token} onChange={(event) => setToken(event.target.value)} />
-          </Field>
-          <Field label="Session key">
-            <input id="session-key" value={sessionKey} onChange={(event) => setSessionKey(event.target.value)} />
-          </Field>
-          <label className="check-row">
-            <input id="plan-mode" type="checkbox" checked={planMode} onChange={(event) => setPlanMode(event.target.checked)} />
-            Plan mode
-          </label>
-          <div className="row-actions">
-            <button type="submit">Save Settings</button>
-            <button id="health-button" type="button" onClick={onCheckRuntime}>Check Runtime</button>
-            {installAvailable && <button id="install-button" type="button" onClick={onInstall}>Install App</button>}
-          </div>
-        </form>
-      </section>
-      <section className="cloud-card settings-card">
-        <form id="runtime-config-form" onSubmit={(event) => { event.preventDefault(); onSaveConfig(); }}>
-          <Field label="Model">
-            <select id="config-provider" value={llm.provider ?? "openai-compatible"} onChange={(event) => updateLlm({ provider: event.target.value })}>
-              <option value="openai-compatible">Custom</option>
-              <option value="anthropic">Anthropic</option>
-              <option value="openai">OpenAI</option>
-              <option value="google">Google</option>
-            </select>
-          </Field>
-          <Field label="Custom model">
-            <input id="config-model" value={llm.model ?? ""} onChange={(event) => updateLlm({ model: event.target.value })} placeholder="llama3.1" />
-          </Field>
-          <Field label="Base URL">
-            <input id="config-base-url" value={llm.baseUrl ?? ""} onChange={(event) => updateLlm({ baseUrl: event.target.value })} placeholder="http://host.docker.internal:11434/v1" />
-          </Field>
-          <div className="two-col">
-            <Field label="API key env var">
-              <input id="config-api-key-env" value={llm.apiKeyEnvVar ?? ""} onChange={(event) => updateLlm({ apiKeyEnvVar: event.target.value })} />
-            </Field>
-            <Field label="Server token env var">
-              <input
-                id="config-server-token-env"
-                value={server.gatewayTokenEnvVar ?? "MAGI_AGENT_SERVER_TOKEN"}
-                onChange={(event) => setConfig({ ...config, server: { ...server, gatewayTokenEnvVar: event.target.value } })}
-              />
-            </Field>
-          </div>
-          <Field label="Workspace">
-            <input id="config-workspace" value={config.workspace ?? "./workspace"} onChange={(event) => setConfig({ ...config, workspace: event.target.value })} />
-          </Field>
-          <div className="two-col">
-            <Field label="Context window">
-              <input
-                id="config-context-window"
-                type="number"
-                value={capabilities.contextWindow ?? ""}
-                onChange={(event) => updateLlm({ capabilities: { ...capabilities, contextWindow: Number(event.target.value) || undefined } })}
-              />
-            </Field>
-            <Field label="Max output tokens">
-              <input
-                id="config-max-output"
-                type="number"
-                value={capabilities.maxOutputTokens ?? ""}
-                onChange={(event) => updateLlm({ capabilities: { ...capabilities, maxOutputTokens: Number(event.target.value) || undefined } })}
-              />
-            </Field>
-          </div>
-          <div className="row-actions">
-            <button type="submit">Save Config</button>
-            <button id="config-reload-button" type="button" onClick={onReloadConfig}>Reload</button>
-          </div>
-          <p id="config-restart-status" className="muted-line">{configStatus}</p>
-        </form>
-      </section>
-      <section className="cloud-card settings-card">
-        <h2>Agent Safeguards</h2>
-        <p className="muted-line">Build safeguards that tell the agent what it must verify, deliver, or ask before finishing work.</p>
-        <form id="harness-rule-form" onSubmit={(event) => { event.preventDefault(); onSaveHarnessRule(); }}>
-          <Field label="Rule file">
-            <input id="harness-rule-name" value={harnessName} onChange={(event) => setHarnessName(event.target.value)} placeholder="file-delivery.md" />
-          </Field>
-          <Field label="Markdown rule">
-            <textarea id="harness-rule-content" rows={7} value={harnessContent} onChange={(event) => setHarnessContent(event.target.value)} />
-          </Field>
-          <button type="submit">Save Rule</button>
-        </form>
-      </section>
-    </main>
-  );
-}
-
-function KnowledgePage({
-  knowledgeQuery,
-  setKnowledgeQuery,
-  knowledgeItems,
-  onSearchKnowledge,
-  onLoadKnowledge,
-  knowledgePath,
-  setKnowledgePath,
-  knowledgeContent,
-  setKnowledgeContent,
-  onSaveKnowledge,
-}: Pick<Parameters<typeof WorkDock>[0], "knowledgeQuery" | "setKnowledgeQuery" | "knowledgePath" | "setKnowledgePath" | "knowledgeContent" | "setKnowledgeContent" | "knowledgeItems" | "onSearchKnowledge" | "onLoadKnowledge" | "onSaveKnowledge">) {
-  return (
-    <main className="dashboard-content">
-      <div className="page-title">
-        <h1>Knowledge Base</h1>
-        <p>Local KB backed by files under <code>workspace/knowledge</code>.</p>
-      </div>
-      <section className="cloud-card">
-        <form id="knowledge-search-page-form" onSubmit={(event) => { event.preventDefault(); onSearchKnowledge(); }}>
-          <Field label="Search documents">
-            <input value={knowledgeQuery} onChange={(event) => setKnowledgeQuery(event.target.value)} placeholder="reusable runtime context" />
-          </Field>
-          <div className="row-actions">
-            <button type="submit">Search</button>
-            <button type="button" onClick={onLoadKnowledge}>List documents</button>
-          </div>
-        </form>
-        <SnapshotList items={knowledgeItems} empty="No local KB documents" />
-      </section>
-      <section className="cloud-card">
-        <h2>Write a KB document</h2>
-        <form onSubmit={(event) => { event.preventDefault(); onSaveKnowledge(); }}>
-          <Field label="Path">
-            <input value={knowledgePath} onChange={(event) => setKnowledgePath(event.target.value)} placeholder="reports/brief.md" />
-          </Field>
-          <Field label="Markdown">
-            <textarea rows={10} value={knowledgeContent} onChange={(event) => setKnowledgeContent(event.target.value)} />
-          </Field>
-          <button type="submit">Save KB document</button>
-        </form>
-      </section>
-    </main>
-  );
-}
-
-function UtilityPage({ title, description, children }: { title: string; description: string; children: ReactNode }) {
-  return (
-    <main className="dashboard-content">
-      <div className="page-title">
-        <h1>{title}</h1>
-        <p>{description}</p>
-      </div>
-      <section className="cloud-card">{children}</section>
-    </main>
-  );
+function shouldScanWorkspaceDirectory(entryPath: string, depth: number): boolean {
+  if (depth >= 4) return false;
+  const root = entryPath.split("/").filter(Boolean)[0] ?? "";
+  return EDITABLE_WORKSPACE_ROOTS.has(root);
 }
 
 export function App() {
-  const [active, setActive] = useState<Section>("chat");
-  const [channels, setChannels] = useState<AppChannel[]>(() => defaultLocalChannels());
-  const [activeChannel, setActiveChannel] = useState("general");
-  const [editingChannels, setEditingChannels] = useState(false);
-  const [activeDock, setActiveDock] = useState<DockView>("work");
+  const store = useChatStore();
+  const chatMessagesRef = useRef<ChatMessagesHandle>(null);
+  const chatInputRef = useRef<ChatInputHandle>(null);
+  const sawAgentEventRef = useRef(false);
   const [agentUrl, setAgentUrl] = useState(() => getStored(storage.agentUrl, window.location.origin));
   const [token, setToken] = useState(() => getStored(storage.token, ""));
-  const [sessionKey, setSessionKey] = useState(() => getStored(storage.sessionKey, defaultSessionKey()));
-  const [modelOverride, setModelOverride] = useState(() => getStored(storage.modelOverride, "auto"));
-  const [planMode, setPlanMode] = useState(false);
-  const [runtimeStatus, setRuntimeStatus] = useState("active");
-  const [runtime, setRuntime] = useState<RuntimeSnapshot | null>(null);
-  const [events, setEvents] = useState<EventRecord[]>([]);
-  const [messages, setMessages] = useState<Message[]>([]);
-  const [channelState, setChannelState] = useState<ChannelState>(() => initialChannelState());
-  const [queuedMessages, setQueuedMessages] = useState<QueuedMessage[]>([]);
-  const [controlRequests, setControlRequests] = useState<ControlRequestRecord[]>([]);
-  const [input, setInput] = useState("");
-  const [isStreaming, setIsStreaming] = useState(false);
-  const [streamingMode, setStreamingMode] = useState<"queue" | "steer">("queue");
-  const [deferredInstallPrompt, setDeferredInstallPrompt] = useState<BeforeInstallPromptEvent | null>(null);
-  const [config, setConfig] = useState<AppConfig>({});
-  const [configStatus, setConfigStatus] = useState("");
-  const [knowledgeQuery, setKnowledgeQuery] = useState("");
-  const [knowledgePath, setKnowledgePath] = useState("notes/local.md");
-  const [knowledgeContent, setKnowledgeContent] = useState("# Local note\n\n");
-  const [knowledgeItems, setKnowledgeItems] = useState<JsonRecord[]>([]);
-  const [memoryQuery, setMemoryQuery] = useState("");
-  const [workspacePath, setWorkspacePath] = useState(".");
-  const [workspaceItems, setWorkspaceItems] = useState<JsonRecord[]>([]);
-  const [selectedWorkspaceFile, setSelectedWorkspaceFile] = useState("SOUL.md");
-  const [workspaceFileContent, setWorkspaceFileContent] = useState("");
-  const [workspaceFileStatus, setWorkspaceFileStatus] = useState("");
-  const [transcriptItems, setTranscriptItems] = useState<JsonRecord[]>([]);
-  const [evidenceItems, setEvidenceItems] = useState<JsonRecord[]>([]);
-  const [cronExpression, setCronExpression] = useState("@daily");
-  const [cronPrompt, setCronPrompt] = useState("");
-  const [harnessName, setHarnessName] = useState("file-delivery.md");
-  const [harnessContent, setHarnessContent] = useState("---\ntrigger: beforeCommit\naction:\n  type: require_tool\n  toolName: FileDeliver\n---\nDeliver generated files before claiming completion.\n");
-
-  const addEvent = useCallback((type: string, payload: JsonRecord = {}) => {
-    setEvents((current) => [{ id: nowId("event"), type, payload, ts: Date.now() }, ...current].slice(0, 80));
-  }, []);
+  const [editing, setEditing] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [customCategories, setCustomCategories] = useState<string[]>([]);
+  const [selectedKbDocs, setSelectedKbDocs] = useState<KbDocReference[]>([]);
+  const [kbCollections, setKbCollections] = useState<KbCollectionWithDocs[]>([]);
+  const [kbLoading, setKbLoading] = useState(true);
+  const [kbRefreshing, setKbRefreshing] = useState(false);
+  const [workspaceFiles, setWorkspaceFiles] = useState<WorkspaceFileEntry[]>([]);
+  const [workspaceLoading, setWorkspaceLoading] = useState(true);
+  const [workspaceRefreshing, setWorkspaceRefreshing] = useState(false);
+  const [uploadStates, setUploadStates] = useState<Record<string, PendingKbUpload>>({});
+  const [replyingTo, setReplyingTo] = useState<ReplyTo | null>(null);
+  const [streamingComposerMode, setStreamingComposerMode] = useState<StreamingComposerMode>("queue");
+  const [rightWorkInspectorOpen, setRightWorkInspectorOpen] = useState(() => {
+    try {
+      return (
+        localStorage.getItem("magi:kbPanelExpanded") !== "0" &&
+        localStorage.getItem("magi:rightInspectorView") !== "knowledge"
+      );
+    } catch {
+      return true;
+    }
+  });
+  const [modelSelection, setModelSelection] = useState(() =>
+    getStored(storage.modelOverride, DEFAULT_MODEL),
+  );
+  const [routerType, setRouterType] = useState(DEFAULT_ROUTER);
+  const [isDraggingOver, setIsDraggingOver] = useState(false);
+  const dragCounterRef = useRef(0);
 
   const normalizedBase = useMemo(() => normalizeAgentUrl(agentUrl), [agentUrl]);
+  const activeChannel = store.activeChannel || DEFAULT_CHANNEL;
+  const channelState = store.channelStates[activeChannel] ?? store.getChannelState(activeChannel);
+  const queuedForChannel = store.queuedMessages[activeChannel] ?? [];
+  const controlsForChannel = store.controlRequests[activeChannel] ?? [];
+  const allKbDocs = useMemo(() => kbCollections.flatMap((collection) => collection.docs), [kbCollections]);
 
-  const authHeaders = useCallback((json = false): HeadersInit => {
-    const storedToken = window.localStorage.getItem(storage.token)?.trim() ?? "";
-    const effectiveToken = token.trim() || storedToken;
-    return {
+  const authHeaders = useCallback(
+    (json = false): HeadersInit => ({
       ...(json ? { "Content-Type": "application/json" } : {}),
-      ...(effectiveToken ? { Authorization: `Bearer ${effectiveToken}` } : {}),
-      "X-Core-Agent-Session-Key": sessionKey.trim() || defaultSessionKey(),
-      ...(planMode ? { "X-Core-Agent-Plan-Mode": "on" } : {}),
-    };
-  }, [planMode, sessionKey, token]);
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      "X-Magi-Session-Key": sessionKeyForChannel(activeChannel),
+    }),
+    [activeChannel, token],
+  );
 
-  const getJson = useCallback(async (path: string): Promise<JsonRecord> => {
-    const response = await fetch(`${normalizedBase}${path}`, { headers: authHeaders() });
-    const payload = await response.json().catch(() => ({}));
-    if (!response.ok) throw new Error(asString((payload as JsonRecord).error, response.statusText));
-    return payload as JsonRecord;
-  }, [authHeaders, normalizedBase]);
+  const getAccessToken = useCallback(async () => token || null, [token]);
 
-  const sendJson = useCallback(async (path: string, method: string, body: JsonRecord): Promise<JsonRecord> => {
-    const response = await fetch(`${normalizedBase}${path}`, {
-      method,
-      headers: authHeaders(true),
-      body: JSON.stringify(body),
-    });
-    const payload = await response.json().catch(() => ({}));
-    if (!response.ok) throw new Error(asString((payload as JsonRecord).error, response.statusText));
-    return payload as JsonRecord;
-  }, [authHeaders, normalizedBase]);
-
-  const saveConnection = useCallback(() => {
-    const nextUrl = normalizeAgentUrl(agentUrl);
-    setAgentUrl(nextUrl);
-    window.localStorage.setItem(storage.agentUrl, nextUrl);
-    window.localStorage.setItem(storage.token, token.trim());
-    window.localStorage.setItem(storage.sessionKey, sessionKey.trim() || defaultSessionKey());
-    window.localStorage.setItem(storage.modelOverride, modelOverride.trim() || "auto");
-    addEvent("connection_saved", { agentUrl: nextUrl, sessionKey, modelOverride });
-  }, [addEvent, agentUrl, modelOverride, sessionKey, token]);
-
-  const loadAppBootstrap = useCallback(async () => {
-    const response = await fetch(`${window.location.origin}/app/bootstrap.json`, { cache: "no-store" });
-    if (!response.ok) return;
-    const payload = (await response.json().catch(() => ({}))) as AppBootstrap;
-    const bootstrapUrl = normalizeAgentUrl(asString(payload.agentUrl, window.location.origin));
-    const storedUrl = window.localStorage.getItem(storage.agentUrl);
-    const currentUrl = normalizeAgentUrl(storedUrl || agentUrl || window.location.origin);
-    const usesServedRuntime = sameLocalRuntimeUrl(currentUrl, bootstrapUrl) || sameLocalRuntimeUrl(currentUrl, window.location.origin);
-    if (!storedUrl || usesServedRuntime) {
-      setAgentUrl(bootstrapUrl);
-      window.localStorage.setItem(storage.agentUrl, bootstrapUrl);
-    }
-    if (payload.token && usesServedRuntime) {
-      setToken(payload.token);
-      window.localStorage.setItem(storage.token, payload.token);
-      addEvent("connection_bootstrapped", {
-        tokenRequired: payload.tokenRequired === true,
-        agentUrl: bootstrapUrl,
+  const getJson = useCallback(
+    async (path: string): Promise<JsonRecord> => {
+      const response = await fetch(`${normalizedBase}${path}`, {
+        headers: authHeaders(),
       });
-    }
-  }, [addEvent, agentUrl]);
-
-  const loadRuntimeSnapshot = useCallback(async () => {
-    const payload = await getJson("/v1/app/runtime?limit=16");
-    setRuntime(payload as RuntimeSnapshot);
-    addEvent("runtime_snapshot", {
-      sessions: (payload.sessions as JsonRecord | undefined)?.count ?? 0,
-      tasks: (payload.tasks as JsonRecord | undefined)?.count ?? 0,
-      crons: (payload.crons as JsonRecord | undefined)?.count ?? 0,
-      artifacts: (payload.artifacts as JsonRecord | undefined)?.count ?? 0,
-    });
-  }, [addEvent, getJson]);
-
-  const loadAppConfig = useCallback(async () => {
-    const payload = await getJson("/v1/app/config");
-    setConfig((payload.config as AppConfig | undefined) ?? {});
-    addEvent("config_loaded", { exists: payload.exists === true });
-  }, [addEvent, getJson]);
-
-  const loadTranscript = useCallback(async () => {
-    const payload = await getJson(`/v1/app/transcript?sessionKey=${encodeURIComponent(sessionKey || defaultSessionKey())}&limit=80`);
-    setTranscriptItems(asArray(payload.entries));
-    addEvent("transcript_loaded", { count: asArray(payload.entries).length });
-  }, [addEvent, getJson, sessionKey]);
-
-  const loadEvidence = useCallback(async () => {
-    const payload = await getJson(`/v1/app/evidence?sessionKey=${encodeURIComponent(sessionKey || defaultSessionKey())}&limit=20`);
-    setEvidenceItems(asArray(payload.turns));
-    addEvent("evidence_loaded", { count: asArray(payload.turns).length });
-  }, [addEvent, getJson, sessionKey]);
-
-  const loadKnowledge = useCallback(async () => {
-    const payload = await getJson("/v1/app/knowledge");
-    setKnowledgeItems([...asArray(payload.collections), ...asArray(payload.documents)]);
-    addEvent("knowledge_loaded", {
-      collections: asArray(payload.collections).length,
-      documents: asArray(payload.documents).length,
-    });
-  }, [addEvent, getJson]);
-
-  const searchKnowledge = useCallback(async () => {
-    if (!knowledgeQuery.trim()) {
-      await loadKnowledge();
-      return;
-    }
-    const payload = await getJson(`/v1/app/knowledge/search?q=${encodeURIComponent(knowledgeQuery.trim())}&limit=12`);
-    setKnowledgeItems(asArray(payload.results));
-    addEvent("knowledge_search", { query: knowledgeQuery, count: asArray(payload.results).length });
-  }, [addEvent, getJson, knowledgeQuery, loadKnowledge]);
-
-  const saveKnowledge = useCallback(async () => {
-    if (!knowledgePath.trim()) throw new Error("KB path is required");
-    const payload = await sendJson("/v1/app/knowledge/file", "PUT", {
-      path: knowledgePath.trim(),
-      content: knowledgeContent,
-    });
-    addEvent("knowledge_file_saved", { path: asString(payload.path, knowledgePath) });
-    await loadKnowledge();
-  }, [addEvent, knowledgeContent, knowledgePath, loadKnowledge, sendJson]);
-
-  const loadWorkspaceAt = useCallback(async (nextPath?: string) => {
-    const targetPath = nextPath || workspacePath || ".";
-    const payload = await getJson(`/v1/app/workspace?path=${encodeURIComponent(targetPath)}`);
-    setWorkspacePath(asString(payload.path, targetPath));
-    setWorkspaceItems(asArray(payload.entries));
-    addEvent("workspace_loaded", { path: asString(payload.path, targetPath), count: asArray(payload.entries).length });
-  }, [addEvent, getJson, workspacePath]);
-
-  const loadWorkspace = useCallback(async () => {
-    await loadWorkspaceAt();
-  }, [loadWorkspaceAt]);
-
-  const openWorkspaceFile = useCallback(async (pathName: string) => {
-    if (!pathName.trim()) return;
-    const payload = await getJson(`/v1/app/workspace/file?path=${encodeURIComponent(pathName.trim())}&maxBytes=1048576`);
-    const content = asString(payload.content);
-    setSelectedWorkspaceFile(asString(payload.path, pathName.trim()));
-    setWorkspaceFileContent(content);
-    setWorkspaceFileStatus(content.length === 0 ? "Loaded empty file" : "Loaded");
-    addEvent("workspace_file_loaded", { path: asString(payload.path, pathName.trim()) });
-  }, [addEvent, getJson]);
-
-  const saveWorkspaceFile = useCallback(async () => {
-    if (!selectedWorkspaceFile.trim()) throw new Error("Workspace file path is required");
-    const payload = await sendJson("/v1/app/workspace/file", "PUT", {
-      path: selectedWorkspaceFile.trim(),
-      content: workspaceFileContent,
-    });
-    setWorkspaceFileStatus("Saved");
-    addEvent("workspace_file_saved", { path: asString(payload.path, selectedWorkspaceFile.trim()) });
-    await loadWorkspaceAt(workspacePath);
-  }, [addEvent, loadWorkspaceAt, selectedWorkspaceFile, sendJson, workspaceFileContent, workspacePath]);
-
-  const selectWorkspaceItem = useCallback((item: JsonRecord) => {
-    const itemPath = asString(item.path);
-    if (!itemPath) return;
-    if (asString(item.type) === "directory") {
-      setWorkspaceFileStatus("");
-      void loadWorkspaceAt(itemPath).catch((error) => addEvent("workspace_error", { message: String(error instanceof Error ? error.message : error) }));
-      return;
-    }
-    void openWorkspaceFile(itemPath).catch((error) => addEvent("workspace_error", { message: String(error instanceof Error ? error.message : error) }));
-  }, [addEvent, loadWorkspaceAt, openWorkspaceFile]);
-
-  const searchMemory = useCallback(async () => {
-    if (!memoryQuery.trim()) return;
-    const payload = await getJson(`/v1/app/memory/search?q=${encodeURIComponent(memoryQuery.trim())}&limit=8`);
-    addEvent("memory_search", { query: memoryQuery, count: asArray(payload.results).length });
-  }, [addEvent, getJson, memoryQuery]);
-
-  const compactMemory = useCallback(async () => {
-    await sendJson("/v1/app/memory/compact", "POST", { force: true });
-    addEvent("memory_compacted", {});
-  }, [addEvent, sendJson]);
-
-  const saveCron = useCallback(async () => {
-    await sendJson("/v1/app/crons", "POST", {
-      expression: cronExpression.trim(),
-      prompt: cronPrompt,
-      sessionKey,
-      durable: true,
-      enabled: true,
-    });
-    addEvent("cron_saved", { expression: cronExpression });
-    await loadRuntimeSnapshot();
-  }, [addEvent, cronExpression, cronPrompt, loadRuntimeSnapshot, sendJson, sessionKey]);
-
-  const reloadSkills = useCallback(async () => {
-    const payload = await sendJson("/v1/app/skills/reload", "POST", {});
-    addEvent("skills_reloaded", {
-      loaded: Array.isArray(payload.loaded) ? payload.loaded.length : 0,
-      issues: Array.isArray(payload.issues) ? payload.issues.length : 0,
-    });
-    await loadRuntimeSnapshot();
-  }, [addEvent, loadRuntimeSnapshot, sendJson]);
-
-  const saveAppConfig = useCallback(async () => {
-    const llm = config.llm ?? {};
-    const server = config.server ?? {};
-    const payload = await sendJson("/v1/app/config", "PUT", {
-      llm: {
-        provider: llm.provider ?? "openai-compatible",
-        model: llm.model ?? "llama3.1",
-        baseUrl: llm.baseUrl ?? "",
-        apiKeyEnvVar: llm.apiKeyEnvVar ?? "",
-        capabilities: llm.capabilities,
-      },
-      server: {
-        gatewayTokenEnvVar: server.gatewayTokenEnvVar ?? "MAGI_AGENT_SERVER_TOKEN",
-      },
-      workspace: config.workspace ?? "./workspace",
-    });
-    setConfigStatus(payload.restartRequired === true ? "Runtime restart required" : "Config saved");
-    addEvent("config_saved", { model: llm.model ?? "llama3.1" });
-  }, [addEvent, config, sendJson]);
-
-  const reloadRuntimeConfig = useCallback(async () => {
-    const payload = await sendJson("/v1/app/config/reload", "POST", {});
-    setConfig((payload.config as AppConfig | undefined) ?? config);
-    setConfigStatus(payload.restartRequired === true ? "Runtime restart required" : "Runtime config is current");
-    addEvent("config_reload_status", { restartRequired: payload.restartRequired === true });
-  }, [addEvent, config, sendJson]);
-
-  const saveHarnessRule = useCallback(async () => {
-    if (!harnessName.trim()) throw new Error("Rule file name is required");
-    await sendJson(`/v1/app/harness-rules/${encodeURIComponent(harnessName.trim())}`, "PUT", {
-      content: harnessContent,
-    });
-    addEvent("harness_rule_saved", { name: harnessName.trim() });
-  }, [addEvent, harnessContent, harnessName, sendJson]);
-
-  const checkRuntime = useCallback(async () => {
-    setRuntimeStatus("checking");
-    try {
-      const response = await fetch(`${normalizedBase}/health`);
-      const payload = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(asString((payload as JsonRecord).error, response.statusText));
-      setRuntimeStatus("active");
-      addEvent("health", payload as JsonRecord);
-      await Promise.allSettled([loadRuntimeSnapshot(), loadAppConfig(), loadKnowledge(), loadTranscript(), loadEvidence(), loadWorkspace()]);
-    } catch (error) {
-      setRuntimeStatus("unavailable");
-      addEvent("health_error", { message: String(error instanceof Error ? error.message : error) });
-    }
-  }, [addEvent, loadAppConfig, loadEvidence, loadKnowledge, loadRuntimeSnapshot, loadTranscript, loadWorkspace, normalizedBase]);
-
-  const upsertToolActivity = useCallback((patch: ToolActivity) => {
-    setChannelState((current) => {
-      const next = [...(current.activeTools ?? [])];
-      const index = next.findIndex((tool) => tool.id === patch.id);
-      if (index >= 0) {
-        next[index] = {
-          ...next[index],
-          ...patch,
-          label: patch.label === patch.id ? next[index].label : patch.label,
-          startedAt: next[index].startedAt,
-        };
+      const payload = (await response.json().catch(() => ({}))) as JsonRecord;
+      if (!response.ok) {
+        throw new Error(asString(payload.error, response.statusText));
       }
-      else next.push(patch);
-      return { ...current, activeTools: next };
-    });
-  }, []);
+      return payload;
+    },
+    [authHeaders, normalizedBase],
+  );
 
-  const upsertSubagentActivity = useCallback((patch: SubagentActivity) => {
-    setChannelState((current) => {
-      const next = [...(current.subagents ?? [])];
-      const index = next.findIndex((subagent) => subagent.taskId === patch.taskId);
-      if (index >= 0) next[index] = { ...next[index], ...patch };
-      else next.push(patch);
-      return { ...current, subagents: next };
-    });
-  }, []);
-
-  const applyControlEvent = useCallback((event: unknown) => {
-    if (!event || typeof event !== "object") return;
-    const record = event as JsonRecord;
-    const type = asString(record.type);
-    if (type === "control_request_created" && record.request && typeof record.request === "object") {
-      const request = record.request as JsonRecord;
-      const requestId = asString(request.requestId);
-      const prompt = asString(request.prompt);
-      if (!requestId || !prompt) return;
-      const next: ControlRequestRecord = {
-        requestId,
-        kind: request.kind === "plan_approval" || request.kind === "user_question" ? request.kind : "tool_permission",
-        state: request.state === "approved" || request.state === "denied" || request.state === "answered" || request.state === "cancelled" || request.state === "timed_out" ? request.state : "pending",
-        sessionKey: asString(request.sessionKey, sessionKey || defaultSessionKey()),
-        source: request.source === "mcp" || request.source === "child-agent" || request.source === "plan" || request.source === "system" ? request.source : "turn",
-        prompt,
-        createdAt: asNumber(request.createdAt, Date.now()),
-        expiresAt: asNumber(request.expiresAt, Date.now()),
-      };
-      setControlRequests((current) => [next, ...current.filter((item) => item.requestId !== next.requestId)]);
-      return;
-    }
-    const requestId = asString(record.requestId);
-    if (!requestId) return;
-    if (type === "control_request_resolved") {
-      setControlRequests((current) => current.map((item) => item.requestId === requestId ? { ...item, state: record.decision === "answered" ? "answered" : record.decision === "approved" ? "approved" : "denied", resolvedAt: Date.now() } : item));
-    }
-    if (type === "control_request_cancelled") {
-      setControlRequests((current) => current.map((item) => item.requestId === requestId ? { ...item, state: "cancelled", resolvedAt: Date.now() } : item));
-    }
-    if (type === "control_request_timed_out") {
-      setControlRequests((current) => current.map((item) => item.requestId === requestId ? { ...item, state: "timed_out", resolvedAt: Date.now() } : item));
-    }
-  }, [sessionKey]);
-
-  const tasksFromPayload = useCallback((payload: JsonRecord): TaskBoardTask[] => {
-    return asArray(payload.tasks).map((task, index): TaskBoardTask => {
-      const status = task.status === "in_progress" || task.status === "completed" || task.status === "cancelled" ? task.status : "pending";
-      return {
-        id: asString(task.id, `task-${index + 1}`),
-        title: asString(task.title, asString(task.name, `Task ${index + 1}`)),
-        description: asString(task.description, asString(task.detail)),
-        status,
-        ...(Array.isArray(task.dependsOn) ? { dependsOn: task.dependsOn.filter((item): item is string => typeof item === "string") } : {}),
-        ...(typeof task.parallelGroup === "string" ? { parallelGroup: task.parallelGroup } : {}),
-      };
-    });
-  }, []);
-
-  const appendAssistantText = useCallback((text: string) => {
-    setMessages((current) => {
-      const last = current[current.length - 1];
-      if (last?.role === "assistant" && last.streaming) {
-        return [...current.slice(0, -1), { ...last, text: last.text + text }];
+  const sendJson = useCallback(
+    async (path: string, body: JsonRecord): Promise<JsonRecord> => {
+      const response = await fetch(`${normalizedBase}${path}`, {
+        method: "POST",
+        headers: authHeaders(true),
+        body: JSON.stringify(body),
+      });
+      const payload = (await response.json().catch(() => ({}))) as JsonRecord;
+      if (!response.ok) {
+        throw new Error(asString(payload.error, response.statusText));
       }
-      return [...current, { id: nowId("assistant"), role: "assistant", text, streaming: true }];
-    });
-    setChannelState((current) => ({
-      ...current,
-      streaming: true,
-      streamingText: `${current.streamingText}${text}`,
-      hasTextContent: true,
-    }));
-  }, []);
+      return payload;
+    },
+    [authHeaders, normalizedBase],
+  );
 
-  const finishAssistantMessage = useCallback(() => {
-    setMessages((current) => current.map((message) => message.streaming ? { ...message, streaming: false } : message));
-    setChannelState((current) => ({
-      ...current,
-      streaming: false,
-      streamingText: "",
-      thinkingText: "",
-      thinkingStartedAt: null,
-      heartbeatElapsedMs: null,
-    }));
-  }, []);
+  const putJson = useCallback(
+    async (path: string, body: JsonRecord): Promise<JsonRecord> => {
+      const response = await fetch(`${normalizedBase}${path}`, {
+        method: "PUT",
+        headers: authHeaders(true),
+        body: JSON.stringify(body),
+      });
+      const payload = (await response.json().catch(() => ({}))) as JsonRecord;
+      if (!response.ok) {
+        throw new Error(asString(payload.error, response.statusText));
+      }
+      return payload;
+    },
+    [authHeaders, normalizedBase],
+  );
 
-  const handleSseEvent = useCallback((eventName: string, rawData: string) => {
-    if (rawData === "[DONE]") {
-      finishAssistantMessage();
-      addEvent("done", {});
-      return;
-    }
-    let payload: JsonRecord;
+  const refreshKnowledge = useCallback(async () => {
+    setKbRefreshing(true);
     try {
-      payload = JSON.parse(rawData) as JsonRecord;
+      const payload = await getJson("/v1/app/knowledge");
+      setKbCollections(toKbCollections(payload));
     } catch {
-      addEvent("sse_parse_error", { eventName, rawData });
-      return;
+      setKbCollections([]);
+    } finally {
+      setKbLoading(false);
+      setKbRefreshing(false);
     }
-    if (eventName === "agent") {
+  }, [getJson]);
+
+  const refreshWorkspace = useCallback(async () => {
+    setWorkspaceRefreshing(true);
+    try {
+      const seen = new Map<string, { path: string; size: number; modifiedAt: string | null }>();
+      const visit = async (path: string, depth: number): Promise<void> => {
+        if (seen.size >= WORKSPACE_SCAN_LIMIT) return;
+        const payload = await getJson(`/v1/app/workspace?path=${encodeURIComponent(path)}`);
+        const entries = asArray(payload.entries) as WorkspaceEntryRow[];
+        for (const entry of entries) {
+          if (!entry.path) continue;
+          if (entry.type === "file") {
+            seen.set(entry.path, {
+              path: entry.path,
+              size: entry.sizeBytes ?? 0,
+              modifiedAt:
+                typeof entry.mtimeMs === "number"
+                  ? new Date(entry.mtimeMs).toISOString()
+                  : null,
+            });
+            if (seen.size >= WORKSPACE_SCAN_LIMIT) break;
+            continue;
+          }
+          if (entry.type === "directory" && shouldScanWorkspaceDirectory(entry.path, depth)) {
+            await visit(entry.path, depth + 1);
+          }
+        }
+      };
+      await visit(".", 0);
+      setWorkspaceFiles(normalizeWorkspaceFileList(Array.from(seen.values())));
+    } catch {
+      setWorkspaceFiles([]);
+    } finally {
+      setWorkspaceLoading(false);
+      setWorkspaceRefreshing(false);
+    }
+  }, [getJson]);
+
+  const saveWorkspaceFile = useCallback(
+    async (path: string, content: string) => {
+      await putJson("/v1/app/workspace/file", { path, content });
+      void refreshWorkspace();
+    },
+    [putJson, refreshWorkspace],
+  );
+
+  const refreshChannels = useCallback(() => {
+    setRefreshing(true);
+    store.setChannels(store.channels.length > 0 ? store.channels : [defaultChannel()], { botId: BOT_ID });
+    void Promise.allSettled([refreshKnowledge(), refreshWorkspace()]).finally(() => {
+      window.setTimeout(() => setRefreshing(false), 300);
+    });
+  }, [refreshKnowledge, refreshWorkspace, store]);
+
+  useEffect(() => {
+    store.setBotId(BOT_ID);
+    store.setChannels([defaultChannel()], { botId: BOT_ID });
+    store.setActiveChannel(DEFAULT_CHANNEL);
+    void fetch(`${window.location.origin}/app/bootstrap.json`, { cache: "no-store" })
+      .then((response) => (response.ok ? response.json() : null))
+      .then((bootstrap: AppBootstrap | null) => {
+        if (!bootstrap) return;
+        if (bootstrap.agentUrl) {
+          setAgentUrl(bootstrap.agentUrl);
+          window.localStorage.setItem(storage.agentUrl, bootstrap.agentUrl);
+        }
+        if (bootstrap.token) {
+          setToken(bootstrap.token);
+          window.localStorage.setItem(storage.token, bootstrap.token);
+        }
+      })
+      .catch(() => {});
+    void Promise.allSettled([refreshKnowledge(), refreshWorkspace()]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    if (!channelState.streaming) setStreamingComposerMode("queue");
+  }, [channelState.streaming]);
+
+  const handleToggleKbDoc = useCallback((doc: KbDocReference) => {
+    setSelectedKbDocs((prev) => {
+      const exists = prev.some((item) => item.id === doc.id);
+      return exists ? prev.filter((item) => item.id !== doc.id) : [...prev, doc];
+    });
+  }, []);
+
+  const handleRemoveKbDoc = useCallback((docId: string) => {
+    setSelectedKbDocs((prev) => prev.filter((doc) => doc.id !== docId));
+  }, []);
+
+  const updateActiveTools = useCallback(
+    (channel: string, patch: ToolActivity) => {
+      const current = useChatStore.getState().channelStates[channel];
+      store.setChannelState(channel, {
+        activeTools: appendToolActivity(current?.activeTools, patch),
+      }, { botId: BOT_ID });
+    },
+    [store],
+  );
+
+  const updateSubagents = useCallback(
+    (channel: string, patch: SubagentActivity) => {
+      const current = useChatStore.getState().channelStates[channel];
+      store.setChannelState(channel, {
+        subagents: appendSubagentActivity(current?.subagents, patch),
+      }, { botId: BOT_ID });
+    },
+    [store],
+  );
+
+  const applyControlEvent = useCallback(
+    (channel: string, event: unknown) => {
+      const record = asRecord(event);
+      const type = asString(record.type);
+      if (type === "control_request_created") {
+        const request = makeControlRequest(asRecord(record.request), sessionKeyForChannel(channel));
+        if (request) store.upsertControlRequest(channel, request);
+        return;
+      }
+      if (
+        type === "control_request_resolved" ||
+        type === "control_request_cancelled" ||
+        type === "control_request_timed_out"
+      ) {
+        store.applyControlEvent(channel, record as ControlEvent);
+      }
+    },
+    [store],
+  );
+
+  const appendAssistantDelta = useCallback(
+    (channel: string, delta: string) => {
+      const state = useChatStore.getState().channelStates[channel];
+      store.setChannelState(channel, {
+        streamingText: `${state?.streamingText ?? ""}${delta}`,
+        hasTextContent: true,
+        fileProcessing: false,
+      }, { botId: BOT_ID });
+    },
+    [store],
+  );
+
+  const handleAgentEvent = useCallback(
+    (channel: string, payload: JsonRecord) => {
       const type = asString(payload.type, "agent");
-      addEvent(type, payload);
       if (type === "turn_start") {
-        setChannelState((current) => ({
-          ...current,
+        store.setChannelState(channel, {
           streaming: true,
           turnPhase: "pending",
           error: null,
@@ -1836,32 +630,35 @@ export function App() {
           subagents: [],
           taskBoard: null,
           heartbeatElapsedMs: null,
-        }));
+        }, { botId: BOT_ID });
       }
-      if (type === "turn_phase") {
-        const phase = payload.phase;
-        if (phase === "pending" || phase === "planning" || phase === "executing" || phase === "verifying" || phase === "committing" || phase === "committed" || phase === "aborted") {
-          setChannelState((current) => ({ ...current, turnPhase: phase }));
-        }
+      if (type === "turn_phase" && isRuntimePhase(payload.phase)) {
+        store.setChannelState(channel, { turnPhase: payload.phase }, { botId: BOT_ID });
       }
       if (type === "response_clear") {
-        setMessages((current) => current.filter((message) => !message.streaming));
-        setChannelState((current) => ({ ...current, streamingText: "", hasTextContent: false }));
+        store.setChannelState(channel, {
+          streamingText: "",
+          hasTextContent: false,
+          heartbeatElapsedMs: null,
+        }, { botId: BOT_ID });
       }
       if (type === "thinking_delta" && typeof payload.delta === "string") {
-        setChannelState((current) => ({
-          ...current,
+        const state = useChatStore.getState().channelStates[channel];
+        store.setChannelState(channel, {
           streaming: true,
-          thinkingText: `${current.thinkingText}${payload.delta as string}`,
-          thinkingStartedAt: current.thinkingStartedAt ?? Date.now(),
-        }));
+          thinkingText: `${state?.thinkingText ?? ""}${payload.delta}`,
+          thinkingStartedAt: state?.thinkingStartedAt ?? Date.now(),
+          fileProcessing: false,
+        }, { botId: BOT_ID });
       }
-      if (type === "text_delta" && typeof payload.delta === "string") appendAssistantText(payload.delta);
+      if (type === "text_delta" && typeof payload.delta === "string") {
+        appendAssistantDelta(channel, payload.delta);
+      }
       if (type === "tool_start") {
         const id = asString(payload.id, nowId("tool"));
-        upsertToolActivity({
+        updateActiveTools(channel, {
           id,
-          label: asString(payload.name, "Running tool"),
+          label: asString(payload.name, "Working in workspace"),
           status: "running",
           startedAt: Date.now(),
           inputPreview: asString(payload.input_preview),
@@ -1870,9 +667,9 @@ export function App() {
       if (type === "tool_progress") {
         const id = asString(payload.id);
         if (id) {
-          upsertToolActivity({
+          updateActiveTools(channel, {
             id,
-            label: asString(payload.label, "Running tool"),
+            label: asString(payload.label, "Working in workspace"),
             status: "running",
             startedAt: Date.now(),
           });
@@ -1881,11 +678,13 @@ export function App() {
       if (type === "tool_end") {
         const id = asString(payload.id);
         if (id) {
-          const status = payload.status === "error" || payload.status === "denied" ? payload.status : "done";
-          upsertToolActivity({
+          updateActiveTools(channel, {
             id,
             label: asString(payload.name, asString(payload.label, id)),
-            status,
+            status:
+              payload.status === "error" || payload.status === "denied"
+                ? payload.status
+                : "done",
             startedAt: Date.now(),
             outputPreview: asString(payload.output_preview),
             durationMs: asNumber(payload.durationMs),
@@ -1893,19 +692,30 @@ export function App() {
         }
       }
       if (type === "task_board") {
-        setChannelState((current) => ({
-          ...current,
-          taskBoard: { tasks: tasksFromPayload(payload), receivedAt: Date.now() },
-        }));
+        store.setChannelState(channel, {
+          taskBoard: { tasks: normalizeTaskBoard(payload), receivedAt: Date.now() },
+        }, { botId: BOT_ID });
       }
-      if (type === "spawn_started" || type === "child_started" || type === "background_task") {
+      if (
+        type === "spawn_started" ||
+        type === "child_started" ||
+        type === "background_task" ||
+        type === "spawn_result" ||
+        type === "child_completed" ||
+        type === "child_failed" ||
+        type === "child_cancelled"
+      ) {
         const taskId = asString(payload.taskId, nowId("child"));
-        const status = payload.status === "completed" ? "done" : payload.status === "failed" || payload.status === "aborted" ? "error" : "running";
-        upsertSubagentActivity({
+        updateSubagents(channel, {
           taskId,
           role: asString(payload.persona, "worker"),
-          status,
-          detail: asString(payload.prompt, asString(payload.detail)),
+          status: normalizeSubagentStatus(type, payload.status),
+          detail:
+            asString(payload.prompt) ||
+            asString(payload.detail) ||
+            asString(payload.finalText) ||
+            asString(payload.errorMessage) ||
+            preview(payload.summary),
           startedAt: Date.now(),
           updatedAt: Date.now(),
         });
@@ -1913,7 +723,7 @@ export function App() {
       if (type === "child_progress") {
         const taskId = asString(payload.taskId);
         if (taskId) {
-          upsertSubagentActivity({
+          updateSubagents(channel, {
             taskId,
             role: "worker",
             status: "running",
@@ -1923,315 +733,611 @@ export function App() {
           });
         }
       }
-      if (type === "spawn_result" || type === "child_completed" || type === "child_failed" || type === "child_cancelled") {
-        const taskId = asString(payload.taskId);
-        if (taskId) {
-          upsertSubagentActivity({
-            taskId,
-            role: "worker",
-            status: type === "child_completed" || payload.status === "ok" ? "done" : type === "child_cancelled" ? "cancelled" : "error",
-            detail: asString(payload.finalText, asString(payload.errorMessage, asString(payload.reason))),
-            startedAt: Date.now(),
-            updatedAt: Date.now(),
-          });
-        }
-      }
       if (type === "heartbeat") {
-        setChannelState((current) => ({
-          ...current,
-          heartbeatElapsedMs: asNumber(payload.elapsedMs, current.heartbeatElapsedMs ?? 0),
-        }));
+        const current = useChatStore.getState().channelStates[channel];
+        store.setChannelState(channel, {
+          heartbeatElapsedMs: asNumber(payload.elapsedMs, current?.heartbeatElapsedMs ?? 0),
+        }, { botId: BOT_ID });
       }
       if (type === "turn_interrupted") {
-        setChannelState((current) => ({ ...current, turnPhase: "aborted" }));
+        store.setChannelState(channel, { turnPhase: "aborted" }, { botId: BOT_ID });
       }
       if (type === "control_event") {
-        applyControlEvent(payload.event);
+        applyControlEvent(channel, payload.event);
       }
       if (type === "turn_end") {
-        setChannelState((current) => ({
-          ...current,
+        store.setChannelState(channel, {
           turnPhase: payload.status === "aborted" ? "aborted" : "committed",
+        }, { botId: BOT_ID });
+        store.finalizeStream(channel, undefined, { botId: BOT_ID });
+      }
+    },
+    [appendAssistantDelta, applyControlEvent, store, updateActiveTools, updateSubagents],
+  );
+
+  const handleSseEvent = useCallback(
+    (channel: string, eventName: string, rawData: string) => {
+      if (rawData === "[DONE]") {
+        store.finalizeStream(channel, undefined, { botId: BOT_ID });
+        return;
+      }
+      let payload: JsonRecord;
+      try {
+        payload = JSON.parse(rawData) as JsonRecord;
+      } catch {
+        return;
+      }
+      if (eventName === "agent") {
+        sawAgentEventRef.current = true;
+        handleAgentEvent(channel, payload);
+        return;
+      }
+      if (sawAgentEventRef.current) return;
+      const choice = asRecord(asArray(payload.choices)[0]);
+      const delta = asString(asRecord(choice.delta).content);
+      if (delta) appendAssistantDelta(channel, delta);
+      if (choice.finish_reason) {
+        store.finalizeStream(channel, undefined, { botId: BOT_ID });
+      }
+    },
+    [appendAssistantDelta, handleAgentEvent, store],
+  );
+
+  const resolveKbDocsForFiles = useCallback(
+    async (files?: File[]): Promise<KbDocReference[]> => {
+      if (!files?.length) return [];
+      const refs: KbDocReference[] = [];
+      for (const file of files) {
+        const key = `${file.name}:${file.size}:${file.lastModified}`;
+        setUploadStates((prev) => ({
+          ...prev,
+          [key]: { key, filename: file.name, phase: "uploading" },
         }));
-        finishAssistantMessage();
+        const path = `uploads/${Date.now()}-${file.name.replace(/[^A-Za-z0-9._-]+/g, "-")}`;
+        const content =
+          getWorkspaceFilePreviewKind(file.name) === "download"
+            ? `Binary file attached through local web UI: ${file.name} (${file.size} bytes)`
+            : await file.text();
+        await fetch(`${normalizedBase}/v1/app/knowledge/file`, {
+          method: "PUT",
+          headers: authHeaders(true),
+          body: JSON.stringify({ path, content }),
+        }).then(async (response) => {
+          if (!response.ok) {
+            const body = (await response.json().catch(() => ({}))) as JsonRecord;
+            throw new Error(asString(body.error, response.statusText));
+          }
+        });
+        const ref = {
+          id: path,
+          filename: file.name,
+          collectionId: "local-uploads",
+          collectionName: "uploads",
+          source: "chat_upload" as const,
+        };
+        refs.push(ref);
+        setUploadStates((prev) => ({
+          ...prev,
+          [key]: { key, filename: file.name, phase: "ready", ref },
+        }));
       }
-      return;
-    }
-    const choices = Array.isArray(payload.choices) ? payload.choices : [];
-    const delta = choices[0] && typeof choices[0] === "object"
-      ? (((choices[0] as JsonRecord).delta as JsonRecord | undefined)?.content)
-      : undefined;
-    if (typeof delta === "string") appendAssistantText(delta);
-    if (choices[0] && typeof choices[0] === "object" && (choices[0] as JsonRecord).finish_reason) finishAssistantMessage();
-  }, [addEvent, appendAssistantText, applyControlEvent, finishAssistantMessage, tasksFromPayload, upsertSubagentActivity, upsertToolActivity]);
+      void refreshKnowledge();
+      return refs;
+    },
+    [authHeaders, normalizedBase, refreshKnowledge],
+  );
 
-  const streamTurn = useCallback(async (text: string) => {
-    if (!text.trim()) return;
-    saveConnection();
-    setMessages((current) => [...current, { id: nowId("user"), role: "user", text: text.trim() }]);
-    setChannelState({
-      ...initialChannelState(),
-      streaming: true,
-      turnPhase: "pending",
-    });
-    setIsStreaming(true);
-    try {
-      const response = await fetch(`${normalizedBase}/v1/chat/completions`, {
-        method: "POST",
-        headers: authHeaders(true),
-        body: JSON.stringify({
-          stream: true,
-          ...(modelOverride.trim() && modelOverride.trim() !== "auto" ? { model: modelOverride.trim() } : {}),
-          messages: [{ role: "user", content: text.trim() }],
-        }),
-      });
-      if (!response.ok || !response.body) {
-        const payload = await response.json().catch(() => ({}));
-        throw new Error(asString((payload as JsonRecord).error, response.statusText));
-      }
-      const decoder = new TextDecoder();
-      const parser = createSseParser(handleSseEvent);
-      const reader = response.body.getReader();
-      for (;;) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        parser(decoder.decode(value, { stream: true }));
-      }
-      parser(decoder.decode());
-      finishAssistantMessage();
-      await Promise.allSettled([loadRuntimeSnapshot(), loadTranscript(), loadEvidence()]);
-    } catch (error) {
-      finishAssistantMessage();
-      setMessages((current) => [...current, { id: nowId("error"), role: "assistant", text: String(error instanceof Error ? error.message : error), error: true }]);
-      addEvent("send_error", { message: String(error instanceof Error ? error.message : error) });
-    } finally {
-      setIsStreaming(false);
-    }
-  }, [addEvent, authHeaders, finishAssistantMessage, handleSseEvent, loadEvidence, loadRuntimeSnapshot, loadTranscript, modelOverride, normalizedBase, saveConnection]);
+  const performSend = useCallback(
+    async (
+      text: string,
+      explicitReply: ReplyTo | null,
+      kbDocs: KbDocReference[],
+      modelOverride?: string,
+    ) => {
+      const channel = useChatStore.getState().activeChannel || DEFAULT_CHANNEL;
+      const messageText = buildMessageContentWithKbContext(text, kbDocs);
+      if (!messageText.trim()) return;
+      const userMsg: ChatMessage = {
+        id: nowId("user"),
+        role: "user",
+        content: messageText,
+        timestamp: Date.now(),
+        ...(explicitReply ? { replyTo: explicitReply } : {}),
+      };
+      store.addMessage(channel, userMsg, { botId: BOT_ID });
+      chatMessagesRef.current?.scrollToBottom();
+      sawAgentEventRef.current = false;
+      const controller = new AbortController();
+      store.setAbortController(channel, controller, { botId: BOT_ID });
+      store.setChannelState(channel, {
+        streaming: true,
+        streamingText: "",
+        thinkingText: "",
+        hasTextContent: false,
+        error: null,
+        thinkingStartedAt: Date.now(),
+        fileProcessing: false,
+        turnPhase: "pending",
+        heartbeatElapsedMs: null,
+        pendingInjectionCount: 0,
+        activeTools: [],
+        subagents: [],
+        taskBoard: null,
+        responseLanguage: detectMessageResponseLanguage(messageText),
+      }, { botId: BOT_ID });
 
-  const sendMessage = useCallback(async () => {
-    const text = input.trim();
-    if (!text) return;
-    setInput("");
-
-    if (isStreaming) {
-      if (streamingMode === "steer") {
-        try {
-          await sendJson("/v1/chat/inject", "POST", {
-            sessionKey: sessionKey.trim() || defaultSessionKey(),
-            text,
-            source: "web",
-          });
-          setMessages((current) => [...current, { id: nowId("user"), role: "user", text }]);
-          setChannelState((current) => ({
-            ...current,
-            pendingInjectionCount: (current.pendingInjectionCount ?? 0) + 1,
-          }));
-          addEvent("message_injected", { sessionKey, length: text.length });
-          return;
-        } catch (error) {
-          addEvent("message_inject_failed", { message: String(error instanceof Error ? error.message : error) });
+      try {
+        const response = await fetch(`${normalizedBase}/v1/chat/completions`, {
+          method: "POST",
+          headers: authHeaders(true),
+          signal: controller.signal,
+          body: JSON.stringify({
+            stream: true,
+            ...(modelOverride && modelOverride !== "auto" ? { model: modelOverride } : {}),
+            ...(explicitReply ? { replyTo: explicitReply } : {}),
+            messages: [{ role: "user", content: messageText }],
+          }),
+        });
+        if (!response.ok || !response.body) {
+          const payload = (await response.json().catch(() => ({}))) as JsonRecord;
+          throw new Error(asString(payload.error, response.statusText));
+        }
+        const parser = createSseParser((eventName, rawData) =>
+          handleSseEvent(channel, eventName, rawData),
+        );
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        for (;;) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          parser(decoder.decode(value, { stream: true }));
+        }
+        parser(decoder.decode());
+        store.finalizeStream(channel, undefined, { botId: BOT_ID });
+        void Promise.allSettled([refreshKnowledge(), refreshWorkspace()]);
+      } catch (err) {
+        if (controller.signal.aborted) return;
+        const hasText = useChatStore.getState().channelStates[channel]?.hasTextContent;
+        if (hasText) {
+          store.finalizeStream(channel, undefined, { botId: BOT_ID });
+        } else {
+          store.setChannelState(channel, {
+            streaming: false,
+            streamingText: "",
+            thinkingText: "",
+            hasTextContent: false,
+            turnPhase: null,
+            error: err instanceof Error ? err.message : "Unknown error",
+          }, { botId: BOT_ID });
         }
       }
-      const queued: QueuedMessage = {
-        id: nowId("queue"),
-        content: text,
-        priority: "next",
-        queuedAt: Date.now(),
+    },
+    [authHeaders, handleSseEvent, normalizedBase, refreshKnowledge, refreshWorkspace, store],
+  );
+
+  const drainQueue = useCallback(
+    (channel: string) => {
+      const next = useChatStore.getState().dequeueFirst(channel, { botId: BOT_ID });
+      if (!next) return;
+      window.setTimeout(() => {
+        void performSend(
+          next.content,
+          next.replyTo ?? null,
+          next.kbDocs ?? [],
+          next.modelOverride,
+        );
+      }, 0);
+    },
+    [performSend],
+  );
+
+  useEffect(() => {
+    if (channelState.streaming || queuedForChannel.length === 0) return;
+    drainQueue(activeChannel);
+  }, [activeChannel, channelState.streaming, drainQueue, queuedForChannel.length]);
+
+  const handleSend = useCallback(
+    async (text: string, files?: File[]) => {
+      const channel = useChatStore.getState().activeChannel || DEFAULT_CHANNEL;
+      const activeReply = replyingTo;
+      setReplyingTo(null);
+      let uploadedRefs: KbDocReference[] = [];
+      try {
+        uploadedRefs = await resolveKbDocsForFiles(files);
+      } catch (err) {
+        if (activeReply) setReplyingTo(activeReply);
+        store.setChannelState(channel, {
+          error: err instanceof Error ? err.message : "Failed to prepare files",
+        }, { botId: BOT_ID });
+        return false;
+      }
+      const messageKbDocs = mergeKbDocReferences(selectedKbDocs, uploadedRefs);
+      const isStreaming = !!useChatStore.getState().channelStates[channel]?.streaming;
+      if (isStreaming) {
+        const sendMode = getStreamingSendMode({
+          hasFiles: !!files?.length,
+          hasKbContext: messageKbDocs.length > 0,
+          requestedMode: streamingComposerMode,
+        });
+        if (sendMode === "inject") {
+          try {
+            const injectedAfterChars =
+              useChatStore.getState().channelStates[channel]?.streamingText?.length ?? 0;
+            const result = await sendJson("/v1/chat/inject", {
+              sessionKey: sessionKeyForChannel(channel),
+              text,
+              source: "web",
+            });
+            if (result.injectionId) {
+              store.addMessage(channel, {
+                id: nowId("injected"),
+                role: "user",
+                content: text,
+                timestamp: Date.now(),
+                injected: true,
+                injectedAfterChars,
+                ...(activeReply ? { replyTo: activeReply } : {}),
+              }, { botId: BOT_ID });
+              const current = useChatStore.getState().channelStates[channel];
+              store.setChannelState(channel, {
+                pendingInjectionCount: (current?.pendingInjectionCount ?? 0) + 1,
+              }, { botId: BOT_ID });
+              setSelectedKbDocs([]);
+              return true;
+            }
+          } catch {
+            // Runtime may be between LLM iterations; queue is the fallback.
+          }
+        }
+        const queued: QueuedMessage = {
+          id: nowId("queued"),
+          content: text,
+          queuedAt: Date.now(),
+          modelOverride: modelSelection,
+          ...(activeReply ? { replyTo: activeReply } : {}),
+          ...(messageKbDocs.length > 0 ? { kbDocs: messageKbDocs } : {}),
+        };
+        const ok = store.enqueueMessage(channel, queued, { botId: BOT_ID });
+        if (!ok) {
+          if (activeReply) setReplyingTo(activeReply);
+          store.setChannelState(channel, {
+            error: `Queue full (max ${MAX_QUEUED_MESSAGES}). Wait for the agent to finish.`,
+          }, { botId: BOT_ID });
+          return false;
+        }
+        setSelectedKbDocs([]);
+        return true;
+      }
+
+      void performSend(text, activeReply, messageKbDocs, modelSelection);
+      setSelectedKbDocs([]);
+      return true;
+    },
+    [
+      modelSelection,
+      performSend,
+      replyingTo,
+      resolveKbDocsForFiles,
+      selectedKbDocs,
+      sendJson,
+      store,
+      streamingComposerMode,
+    ],
+  );
+
+  const handleCancel = useCallback(() => {
+    const channel = useChatStore.getState().activeChannel || DEFAULT_CHANNEL;
+    const controller = useChatStore.getState().abortControllers[channel];
+    controller?.abort();
+    void sendJson("/v1/chat/interrupt", {
+      sessionKey: sessionKeyForChannel(channel),
+      handoffRequested: (useChatStore.getState().queuedMessages[channel] ?? []).length > 0,
+      source: "web",
+    }).catch(() => {});
+    store.cancelStream(channel, { preserveQueue: true, botId: BOT_ID });
+  }, [sendJson, store]);
+
+  const handleCancelQueue = useCallback(() => {
+    const channel = useChatStore.getState().activeChannel || DEFAULT_CHANNEL;
+    store.clearQueue(channel, { botId: BOT_ID });
+  }, [store]);
+
+  const handleReplyTo = useCallback((message: ChatMessage) => {
+    if (message.role !== "user" && message.role !== "assistant") return;
+    const previewText = buildReplyPreview(message.content);
+    if (!previewText) return;
+    setReplyingTo({
+      messageId: message.serverId ?? message.id,
+      preview: previewText,
+      role: message.role,
+    });
+    chatInputRef.current?.focus();
+  }, []);
+
+  const handleCreateChannel = useCallback(
+    (name: string) => {
+      const channelName = normalizeChannelName(name);
+      const existing = useChatStore.getState().channels;
+      if (existing.some((channel) => channel.name === channelName)) {
+        store.setActiveChannel(channelName);
+        return;
+      }
+      const channel: Channel = {
+        id: `local-${channelName}`,
+        name: channelName,
+        display_name: name === channelName ? null : name,
+        category: "General",
+        position: existing.length,
+        created_at: new Date().toISOString(),
       };
-      setQueuedMessages((current) => [...current, queued].slice(0, 8));
-      addEvent("message_queued", { sessionKey, length: text.length });
-      return;
-    }
+      store.setChannels([...existing, channel], { botId: BOT_ID });
+      store.setActiveChannel(channel.name);
+    },
+    [store],
+  );
 
-    await streamTurn(text);
-  }, [addEvent, input, isStreaming, sendJson, sessionKey, streamTurn, streamingMode]);
+  const handleDeleteChannel = useCallback(
+    (name: string) => {
+      if (name === DEFAULT_CHANNEL) return;
+      const remaining = useChatStore.getState().channels.filter((channel) => channel.name !== name);
+      store.setChannels(remaining, { botId: BOT_ID });
+      if (useChatStore.getState().activeChannel === name) {
+        store.setActiveChannel(remaining[0]?.name ?? DEFAULT_CHANNEL);
+      }
+    },
+    [store],
+  );
 
-  useEffect(() => {
-    if (isStreaming || queuedMessages.length === 0) return;
-    const [next, ...rest] = queuedMessages;
-    setQueuedMessages(rest);
-    void streamTurn(next.content);
-  }, [isStreaming, queuedMessages, streamTurn]);
-
-  useEffect(() => {
-    addEvent("app_ready", { agentUrl, sessionKey });
-    const installHandler = (event: Event) => {
-      event.preventDefault();
-      setDeferredInstallPrompt(event as BeforeInstallPromptEvent);
-    };
-    window.addEventListener("beforeinstallprompt", installHandler);
-    if ("serviceWorker" in navigator) {
-      navigator.serviceWorker
-        .register("/app/sw.js", { scope: "/app/" })
-        .then(() => addEvent("service_worker_ready", {}))
-        .catch((error: Error) => addEvent("service_worker_error", { message: error.message }));
-    }
-    void loadAppBootstrap().finally(() => {
-      void checkRuntime();
-    });
-    return () => window.removeEventListener("beforeinstallprompt", installHandler);
-    // Intentionally one boot pass. The latest connection settings are saved by explicit actions.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+  const handleCreateCategory = useCallback((name: string) => {
+    setCustomCategories((prev) => (prev.includes(name) ? prev : [...prev, name]));
   }, []);
 
-  const installApp = useCallback(async () => {
-    if (!deferredInstallPrompt) return;
-    const prompt = deferredInstallPrompt;
-    setDeferredInstallPrompt(null);
-    await prompt.prompt();
-    const choice = await prompt.userChoice;
-    addEvent("install_prompt", { outcome: choice.outcome });
-  }, [addEvent, deferredInstallPrompt]);
-
-  const createLocalChannel = useCallback((rawName: string) => {
-    const name = normalizeChannelName(rawName);
-    if (!name) return;
-    setChannels((current) => {
-      if (current.some((channel) => channel.name === name)) return current;
-      return [
-        ...current,
-        {
-          id: `local-${name}`,
-          name,
-          displayName: null,
-          category: "General",
-          position: current.length,
-        },
-      ];
-    });
-    setActiveChannel(name);
+  const handleDragEnter = useCallback((event: DragEvent) => {
+    event.preventDefault();
+    dragCounterRef.current += 1;
+    if (event.dataTransfer.types.includes("Files")) setIsDraggingOver(true);
   }, []);
 
-  const knowledgeProps = {
-    knowledgeQuery,
-    setKnowledgeQuery,
-    knowledgePath,
-    setKnowledgePath,
-    knowledgeContent,
-    setKnowledgeContent,
-    knowledgeItems,
-    onSearchKnowledge: () => void searchKnowledge().catch((error) => addEvent("knowledge_error", { message: String(error instanceof Error ? error.message : error) })),
-    onLoadKnowledge: () => void loadKnowledge().catch((error) => addEvent("knowledge_error", { message: String(error instanceof Error ? error.message : error) })),
-    onSaveKnowledge: () => void saveKnowledge().catch((error) => addEvent("knowledge_error", { message: String(error instanceof Error ? error.message : error) })),
-  };
+  const handleDragLeave = useCallback((event: DragEvent) => {
+    event.preventDefault();
+    dragCounterRef.current -= 1;
+    if (dragCounterRef.current <= 0) setIsDraggingOver(false);
+  }, []);
 
-  const workspaceProps = {
-    workspacePath,
-    setWorkspacePath,
-    workspaceItems,
-    selectedWorkspaceFile,
-    setSelectedWorkspaceFile,
-    workspaceFileContent,
-    setWorkspaceFileContent,
-    workspaceFileStatus,
-    memoryQuery,
-    setMemoryQuery,
-    cronExpression,
-    setCronExpression,
-    cronPrompt,
-    setCronPrompt,
-    onLoadWorkspace: () => void loadWorkspace().catch((error) => addEvent("workspace_error", { message: String(error instanceof Error ? error.message : error) })),
-    onOpenWorkspaceFile: (pathName: string) => void openWorkspaceFile(pathName).catch((error) => addEvent("workspace_error", { message: String(error instanceof Error ? error.message : error) })),
-    onSaveWorkspaceFile: () => void saveWorkspaceFile().catch((error) => {
-      setWorkspaceFileStatus(String(error instanceof Error ? error.message : error));
-      addEvent("workspace_error", { message: String(error instanceof Error ? error.message : error) });
-    }),
-    onSelectWorkspaceItem: selectWorkspaceItem,
-    onSearchMemory: () => void searchMemory().catch((error) => addEvent("memory_error", { message: String(error instanceof Error ? error.message : error) })),
-    onCompactMemory: () => void compactMemory().catch((error) => addEvent("memory_error", { message: String(error instanceof Error ? error.message : error) })),
-    onSaveCron: () => void saveCron().catch((error) => addEvent("cron_error", { message: String(error instanceof Error ? error.message : error) })),
-    onReloadSkills: () => void reloadSkills().catch((error) => addEvent("skills_reload_error", { message: String(error instanceof Error ? error.message : error) })),
-  };
+  const handleDrop = useCallback((event: DragEvent) => {
+    event.preventDefault();
+    dragCounterRef.current = 0;
+    setIsDraggingOver(false);
+    if (event.dataTransfer.files.length > 0) {
+      chatInputRef.current?.addFiles(event.dataTransfer.files);
+    }
+  }, []);
 
-  if (active === "chat") {
-    return (
-      <ChatWorkbench
-        channels={channels}
-        activeChannel={activeChannel}
-        setActiveChannel={setActiveChannel}
-        setActive={setActive}
-        runtimeStatus={runtimeStatus}
-        onRefresh={() => void checkRuntime()}
-        messages={messages}
-        input={input}
-        setInput={setInput}
-        isStreaming={isStreaming}
-        onSend={() => void sendMessage()}
-        onReset={() => {
-          setMessages([]);
-          setQueuedMessages([]);
-          setControlRequests([]);
-          setChannelState(initialChannelState());
-        }}
-        modelOverride={modelOverride}
-        setModelOverride={setModelOverride}
-        streamingMode={streamingMode}
-        setStreamingMode={setStreamingMode}
-        activeDock={activeDock}
-        setActiveDock={setActiveDock}
-        runtime={runtime}
-        events={events}
-        channelState={channelState}
-        queuedMessages={queuedMessages}
-        controlRequests={controlRequests}
-        knowledgeProps={knowledgeProps}
-        onReloadSkills={() => void reloadSkills().catch((error) => addEvent("skills_reload_error", { message: String(error instanceof Error ? error.message : error) }))}
-        editingChannels={editingChannels}
-        onToggleEditChannels={() => setEditingChannels((value) => !value)}
-        onCancelEditChannels={() => setEditingChannels(false)}
-        onCreateChannel={createLocalChannel}
+  const handleReset = useCallback(() => {
+    const channel = useChatStore.getState().activeChannel || DEFAULT_CHANNEL;
+    store.resetSession(channel, getAccessToken);
+  }, [getAccessToken, store]);
+
+  const handleModelSelectionChange = useCallback((nextModel: string, nextRouter: string) => {
+    setModelSelection(nextModel);
+    setRouterType(nextRouter);
+    window.localStorage.setItem(storage.modelOverride, nextModel);
+  }, []);
+
+  const handleLocalConfigUpdate = useCallback(() => {
+    window.localStorage.setItem(storage.agentUrl, agentUrl);
+    window.localStorage.setItem(storage.token, token);
+    void Promise.allSettled([refreshKnowledge(), refreshWorkspace()]);
+  }, [agentUrl, refreshKnowledge, refreshWorkspace, token]);
+
+  const composerAccessory = (
+    <div className="flex max-w-full flex-wrap items-center justify-end gap-1">
+      <button
+        type="button"
+        onClick={handleLocalConfigUpdate}
+        className="hidden sm:inline-flex h-8 items-center rounded-lg px-2.5 text-xs font-medium text-secondary/70 transition-colors hover:bg-white hover:text-foreground"
+      >
+        Save
+      </button>
+      <ChatModelPicker
+        botId={BOT_ID}
+        modelSelection={modelSelection}
+        routerType={routerType}
+        apiKeyMode="platform_credits"
+        subscriptionPlan="max"
+        persistMode="local"
+        menuPlacement="top"
+        onModelSelectionChange={handleModelSelectionChange}
       />
-    );
-  }
+    </div>
+  );
 
   return (
-    <div className="dashboard-shell" data-dashboard-shell="true">
-      <DashboardSidebar active={active} setActive={setActive} runtimeStatus={runtimeStatus} />
-      {active === "overview" && <Overview runtime={runtime} eventCount={events.length} />}
-      {active === "settings" && (
-        <Settings
-          agentUrl={agentUrl}
-          setAgentUrl={setAgentUrl}
-          token={token}
-          setToken={setToken}
-          sessionKey={sessionKey}
-          setSessionKey={setSessionKey}
-          planMode={planMode}
-          setPlanMode={setPlanMode}
-          runtimeStatus={runtimeStatus}
-          onSaveConnection={saveConnection}
-          onCheckRuntime={() => void checkRuntime()}
-          installAvailable={!!deferredInstallPrompt}
-          onInstall={() => void installApp()}
-          config={config}
-          setConfig={setConfig}
-          onSaveConfig={() => void saveAppConfig().catch((error) => addEvent("config_error", { message: String(error instanceof Error ? error.message : error) }))}
-          onReloadConfig={() => void reloadRuntimeConfig().catch((error) => addEvent("config_error", { message: String(error instanceof Error ? error.message : error) }))}
-          configStatus={configStatus}
-          harnessName={harnessName}
-          setHarnessName={setHarnessName}
-          harnessContent={harnessContent}
-          setHarnessContent={setHarnessContent}
-          onSaveHarnessRule={() => void saveHarnessRule().catch((error) => addEvent("harness_rule_error", { message: String(error instanceof Error ? error.message : error) }))}
+    <div className="flex h-full bg-background">
+      <ChatSidebar
+        channels={store.channels.length > 0 ? store.channels : [defaultChannel()]}
+        activeChannel={activeChannel}
+        currentBotId={BOT_ID}
+        botName={BOT_NAME}
+        botStatus="active"
+        bots={[{ id: BOT_ID, name: BOT_NAME, status: "active" }]}
+        maxBots={1}
+        editing={editing}
+        customCategories={customCategories}
+        refreshing={refreshing}
+        mobileOpen={sidebarOpen}
+        onChannelSelect={(name) => store.setActiveChannel(name)}
+        onDeleteChannel={handleDeleteChannel}
+        onCreateChannel={handleCreateChannel}
+        onCreateCategory={handleCreateCategory}
+        onDeleteCategory={(name) => setCustomCategories((prev) => prev.filter((item) => item !== name))}
+        onRefreshChannels={refreshChannels}
+        onToggleEdit={() => setEditing((prev) => !prev)}
+        onCancelEdit={() => setEditing(false)}
+        onMobileClose={() => setSidebarOpen(false)}
+        onReorderChannels={(channels) => store.setChannels(channels, { botId: BOT_ID })}
+        onRenameChannel={(channelName, newDisplayName) => {
+          store.setChannels(
+            useChatStore.getState().channels.map((channel) =>
+              channel.name === channelName
+                ? { ...channel, display_name: newDisplayName }
+                : channel,
+            ),
+            { botId: BOT_ID },
+          );
+        }}
+        onRenameCategory={(oldName, newName) => {
+          store.setChannels(
+            useChatStore.getState().channels.map((channel) =>
+              channel.category === oldName ? { ...channel, category: newName } : channel,
+            ),
+            { botId: BOT_ID },
+          );
+          setCustomCategories((prev) => prev.map((item) => (item === oldName ? newName : item)));
+        }}
+      />
+
+      <div
+        className="relative flex min-w-0 flex-1 flex-col"
+        onDrop={handleDrop}
+        onDragOver={(event) => event.preventDefault()}
+        onDragEnter={handleDragEnter}
+        onDragLeave={handleDragLeave}
+      >
+        {isDraggingOver && (
+          <div className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center rounded-2xl border-2 border-dashed border-primary/30 bg-primary/[0.04]">
+            <div className="rounded-xl border border-primary/20 bg-white/90 px-5 py-3 text-sm font-medium text-primary/70 shadow-sm backdrop-blur-sm">
+              Drop files to attach
+            </div>
+          </div>
+        )}
+        <div className="flex items-center gap-3 border-b border-black/[0.06] px-4 py-3 md:px-6">
+          <button
+            onClick={() => setSidebarOpen(true)}
+            className="-ml-1 rounded-xl p-1.5 text-secondary/60 transition-all duration-200 hover:bg-black/[0.04] hover:text-foreground md:hidden"
+            aria-label="Open channels"
+          >
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <line x1="3" y1="6" x2="21" y2="6" />
+              <line x1="3" y1="12" x2="21" y2="12" />
+              <line x1="3" y1="18" x2="21" y2="18" />
+            </svg>
+          </button>
+          <h1 className="min-w-0 flex-1 truncate text-sm font-medium text-foreground/80">
+            {activeChannel}
+          </h1>
+          <button
+            onClick={handleReset}
+            className="rounded-lg px-2.5 py-1 text-[11px] text-secondary/50 transition-all duration-200 hover:bg-black/[0.04] hover:text-foreground/70"
+          >
+            Reset
+          </button>
+        </div>
+
+        <ChatMessages
+          ref={chatMessagesRef}
+          key={activeChannel}
+          messages={store.messages[activeChannel] ?? []}
+          serverMessages={store.serverMessages[activeChannel] ?? []}
+          channelState={channelState}
+          loading={false}
+          botId={BOT_ID}
+          selectionMode={store.selectionMode}
+          selectedMessages={store.selectedMessages[activeChannel]}
+          onToggleSelect={(msgId) => store.toggleMessageSelection(activeChannel, msgId)}
+          onEnterSelectionMode={(msgId) => store.enterSelectionMode(activeChannel, msgId)}
+          onSelectAll={() => store.selectAllMessages(activeChannel)}
+          onDeselectAll={() => store.deselectAllMessages(activeChannel)}
+          onExportSelected={() => {}}
+          onDeleteSelected={() => {
+            const selected = store.selectedMessages[activeChannel];
+            if (selected) store.removeMessages(activeChannel, selected, { botId: BOT_ID });
+            store.exitSelectionMode();
+          }}
+          onExitSelectionMode={() => store.exitSelectionMode()}
+          onReplyTo={handleReplyTo}
+          queuedMessages={queuedForChannel}
+          onCancelQueued={(id) => store.removeFromQueue(activeChannel, id, { botId: BOT_ID })}
+          controlRequests={controlsForChannel}
+          onRespondControlRequest={async (request, response) => {
+            store.applyControlEvent(activeChannel, {
+              type: "control_request_resolved",
+              requestId: request.requestId,
+              decision: response.decision,
+              feedback: response.feedback,
+              updatedInput: response.updatedInput,
+              answer: response.answer,
+            });
+          }}
         />
-      )}
-      {active === "knowledge" && <KnowledgePage {...knowledgeProps} />}
-      {active === "usage" && (
-        <UtilityPage title="Usage" description="Local runtime usage counters and recent proof events.">
-          <RuntimeMetrics runtime={runtime} eventCount={events.length} />
-          <SnapshotList id="transcript-list" items={transcriptItems} empty="No transcript entries" />
-          <SnapshotList id="evidence-list" items={evidenceItems} empty="No runtime proof evidence" />
-        </UtilityPage>
-      )}
-      {active === "skills" && (
-        <UtilityPage title="Skills" description="Reload and inspect workspace SKILL.md capabilities.">
-          <button id="reload-skills-button" type="button" onClick={() => void reloadSkills()}>Reload Skills</button>
-          <SnapshotList id="skills-list" items={runtime?.skills?.items ?? []} empty="No loaded skills" />
-          <SnapshotList id="tools-list" items={runtime?.tools?.items ?? []} empty="No registered tools" />
-        </UtilityPage>
-      )}
-      {active === "workspace" && <WorkspaceEditorPage {...workspaceProps} />}
+
+        {channelState.error && (
+          <div className="px-4 pb-1">
+            <div className="mx-auto max-w-3xl rounded-xl bg-red-500/[0.06] px-3 py-2 text-xs text-red-400/80">
+              {channelState.error}
+            </div>
+          </div>
+        )}
+
+        {selectedKbDocs.length > 0 && (
+          <div className="px-4 md:px-8 lg:px-12">
+            <div className="mx-auto max-w-3xl">
+              <KbContextBar docs={selectedKbDocs} onRemove={handleRemoveKbDoc} />
+            </div>
+          </div>
+        )}
+
+        <RunInspectorDock
+          channelState={channelState}
+          queuedMessages={queuedForChannel}
+          controlRequests={controlsForChannel}
+          compactDetails={rightWorkInspectorOpen}
+        />
+
+        <ChatInput
+          ref={chatInputRef}
+          onSend={handleSend}
+          onReset={handleReset}
+          streaming={channelState.streaming}
+          onCancel={handleCancel}
+          replyingTo={replyingTo}
+          onCancelReply={() => setReplyingTo(null)}
+          queuedCount={queuedForChannel.length}
+          onCancelQueue={handleCancelQueue}
+          queueFull={queuedForChannel.length >= MAX_QUEUED_MESSAGES}
+          streamingMode={streamingComposerMode}
+          onStreamingModeChange={setStreamingComposerMode}
+          steeringDisabled={!canSteerMidTurn({
+            hasFiles: false,
+            hasKbContext: selectedKbDocs.length > 0,
+          })}
+          steeringDisabledReason="Selected knowledge will send after the current run."
+          kbDocs={allKbDocs}
+          onSelectKbDoc={handleToggleKbDoc}
+          uploadStates={uploadStates}
+          composerAccessory={composerAccessory}
+        />
+      </div>
+
+      <KbSidePanel
+        botId={BOT_ID}
+        collections={kbCollections}
+        loading={kbLoading}
+        refreshing={kbRefreshing}
+        workspaceFiles={workspaceFiles}
+        workspaceLoading={workspaceLoading}
+        workspaceRefreshing={workspaceRefreshing}
+        selectedDocs={selectedKbDocs}
+        onToggleDoc={handleToggleKbDoc}
+        onRefresh={() => void refreshKnowledge()}
+        onWorkspaceRefresh={() => void refreshWorkspace()}
+        onWorkspaceFileSave={saveWorkspaceFile}
+        getAccessToken={getAccessToken}
+        channelState={channelState}
+        queuedMessages={queuedForChannel}
+        controlRequests={controlsForChannel}
+        onWorkOpenChange={setRightWorkInspectorOpen}
+      />
     </div>
   );
 }
