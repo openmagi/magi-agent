@@ -32,6 +32,9 @@ describe("Magi App shell", () => {
     expect(source).toContain("/v1/chat/completions");
     expect(source).toContain("/v1/chat/inject");
     expect(source).toContain("/v1/chat/interrupt");
+    expect(source).toContain("cancelActiveTurnWithQueueHandoff");
+    expect(source).toContain("buildEscCancelDecision");
+    expect(source).toContain("promoteNextQueuedMessage");
     expect(source).toContain('type === "llm_progress"');
     expect(source).toContain('type === "tool_start"');
     expect(source).toContain('type === "task_board"');

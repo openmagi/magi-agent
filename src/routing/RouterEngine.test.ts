@@ -87,6 +87,22 @@ describe("routing profiles", () => {
     });
   });
 
+  it("loads local-first and hybrid profiles for self-hosted direct routing", () => {
+    const local = getRoutingProfile("local-first");
+    expect(local.id).toBe("local-first");
+    expect(local.classifierModel).toBe("ollama/llama3.2:3b");
+    expect(local.tiers.MEDIUM).toMatchObject({
+      tier: "MEDIUM",
+      provider: "ollama",
+      model: "ollama/qwen2.5-coder:32b",
+    });
+
+    const hybrid = getRoutingProfile("hybrid");
+    expect(hybrid.id).toBe("hybrid");
+    expect(hybrid.tiers.LIGHT.provider).toBe("ollama");
+    expect(hybrid.tiers.HEAVY.provider).toBe("anthropic");
+  });
+
   it("maps explicit user model preferences through profile rules", () => {
     const profile = getRoutingProfile("standard");
 
@@ -221,6 +237,22 @@ describe("RouterEngine", () => {
     });
 
     expect(decision.tier).toBe("MEDIUM");
+    expect(decision.supportsTools).toBe(true);
+  });
+
+  it("keeps local-first tool turns away from local routes marked as tool-unsupported", async () => {
+    const llm = fakeClassifier("DEEP");
+    const router = new RouterEngine({ llm, profileId: "local-first" });
+
+    const decision = await router.resolve({
+      configuredModel: "magi-smart-router/auto",
+      messages: [{ role: "user", content: "use a file tool for this" }],
+      hasTools: true,
+      hasImages: false,
+    });
+
+    expect(decision.tier).toBe("MEDIUM");
+    expect(decision.model).toBe("ollama/qwen2.5-coder:32b");
     expect(decision.supportsTools).toBe(true);
   });
 

@@ -5,7 +5,7 @@ import { CHAT_ATTACHMENT_ACCEPT, validateFile } from "@/lib/chat/attachments";
 import { isImageMimetype, formatFileSize } from "@/lib/chat/attachment-marker";
 import { extractClipboardImageFiles } from "@/lib/chat/clipboard-images";
 import { kbUploadKey } from "@/lib/chat/kb-uploads";
-import type { ReplyTo, KbDocReference } from "@/lib/chat/types";
+import type { ReplyTo, KbDocReference, ChatResponseLanguage } from "@/lib/chat/types";
 import { isStreamingComposerBlockedByQueue } from "@/lib/chat/send-policy";
 import type { StreamingComposerMode } from "@/lib/chat/send-policy";
 import { SKILLS } from "@/lib/skills-catalog";
@@ -70,6 +70,7 @@ interface ChatInputProps {
     files?: File[],
     options?: ChatInputSendOptions,
   ) => void | boolean | Promise<void | boolean>;
+  uiLanguage?: ChatResponseLanguage;
   onReset?: () => void;
   disabled?: boolean;
   streaming?: boolean;
@@ -113,6 +114,18 @@ interface ComposerEnterEvent {
   };
 }
 
+function isKorean(language?: ChatResponseLanguage): boolean {
+  return language === "ko";
+}
+
+function t(language: ChatResponseLanguage | undefined, en: string, ko: string): string {
+  return isKorean(language) ? ko : en;
+}
+
+function waitingCountLabel(count: number, language?: ChatResponseLanguage): string {
+  return isKorean(language) ? `${count}개 대기` : `${count} waiting`;
+}
+
 interface ComposerEnterOptions {
   mobileWeb?: boolean;
 }
@@ -152,6 +165,7 @@ export function shouldCancelStopOnPointerDown(pointerType: string): boolean {
 export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput(
   {
     onSend,
+    uiLanguage,
     onReset,
     disabled,
     streaming,
@@ -184,6 +198,7 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
   const slashRef = useRef<HTMLDivElement>(null);
   const stopPointerHandledRef = useRef(false);
   const stopPointerResetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const language = uiLanguage;
   const steeringUnavailable = steeringDisabled || pendingFiles.length > 0;
   const effectiveStreamingMode: StreamingComposerMode =
     streamingMode === "steer" && steeringUnavailable ? "queue" : streamingMode;
@@ -193,8 +208,17 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
   });
   const steeringUnavailableReason =
     pendingFiles.length > 0
-      ? "Attachments will send after the current run."
-      : steeringDisabledReason ?? "Selected context will send after the current run.";
+      ? t(
+        language,
+        "Attachments will send after the current run.",
+        "첨부 파일은 현재 실행이 끝난 뒤 전송됩니다.",
+      )
+      : steeringDisabledReason
+        ?? t(
+          language,
+          "Selected context will send after the current run.",
+          "선택한 컨텍스트는 현재 실행이 끝난 뒤 전송됩니다.",
+        );
 
   // Slash autocomplete: detect "/word" token at cursor position (works mid-sentence)
   const [cursorPos, setCursorPos] = useState(0);
@@ -501,18 +525,24 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
               </span>
               <span className="min-w-0">
                 <span className="flex flex-wrap items-center gap-1.5">
-                  <span className="font-semibold text-amber-950">Queued after current run</span>
+                  <span className="font-semibold text-amber-950">
+                    {t(language, "Queued after current run", "현재 실행 후 대기")}
+                  </span>
                   <span className="rounded-full bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-semibold text-amber-800">
-                    {queuedCount} waiting
+                    {waitingCountLabel(queuedCount, language)}
                   </span>
                   {queueFull && (
                     <span className="rounded-full bg-red-500/10 px-1.5 py-0.5 text-[10px] font-semibold text-red-600">
-                      Queue full
+                      {t(language, "Queue full", "대기열 가득 참")}
                     </span>
                   )}
                 </span>
                 <span className="mt-0.5 block truncate text-[10.5px] text-amber-800/75">
-                  Will send automatically when this run finishes.
+                  {t(
+                    language,
+                    "Will send automatically when this run finishes.",
+                    "현재 실행이 끝나면 자동 전송됩니다.",
+                  )}
                 </span>
               </span>
             </div>
@@ -522,7 +552,7 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
                 onClick={onCancelQueue}
                 className="shrink-0 rounded-md px-2 py-1 text-[11px] font-semibold text-amber-800 transition-colors hover:bg-red-500/10 hover:text-red-600"
               >
-                Clear queue
+                {t(language, "Clear queue", "대기열 비우기")}
               </button>
             )}
           </div>
@@ -531,7 +561,7 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
           <div className="mb-2 flex flex-wrap items-center justify-between gap-2 text-[11px] text-secondary/70">
             <div
               className="inline-flex rounded-md border border-black/[0.08] bg-black/[0.04] p-0.5"
-              aria-label="Streaming send mode"
+              aria-label={t(language, "Streaming send mode", "스트리밍 전송 모드")}
             >
               <button
                 type="button"
@@ -542,9 +572,13 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
                     : "text-secondary/70 hover:text-foreground"
                 }`}
                 aria-pressed={effectiveStreamingMode === "queue"}
-                title="Send after the current run reaches a checkpoint"
+                title={t(
+                  language,
+                  "Send after the current run reaches a checkpoint",
+                  "현재 실행이 체크포인트에 도달하면 전송",
+                )}
               >
-                Queue after run
+                {t(language, "Queue after run", "현재 실행 후 대기")}
               </button>
               <button
                 type="button"
@@ -561,10 +595,14 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
                 title={
                   steeringUnavailable
                     ? steeringUnavailableReason
-                    : "Send now as a text-only steering update"
+                    : t(
+                      language,
+                      "Send now as a text-only steering update",
+                      "텍스트 지시로 지금 현재 실행 조정",
+                    )
                 }
               >
-                Steer current run
+                {t(language, "Steer current run", "현재 실행 조정")}
               </button>
             </div>
             {steeringUnavailable && (
@@ -582,14 +620,17 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
             </svg>
             <div className="min-w-0 flex-1 leading-snug">
               <div className="text-[11px] font-medium text-[#7C3AED]">
-                Replying to {replyingTo.role === "user" ? "You" : "Bot"}
+                {t(language, "Replying to", "답장 대상")}{" "}
+                {replyingTo.role === "user"
+                  ? t(language, "You", "나")
+                  : t(language, "Bot", "봇")}
               </div>
               <div className="truncate text-xs text-secondary/80">{replyingTo.preview}</div>
             </div>
             <button
               type="button"
               onClick={onCancelReply}
-              aria-label="Cancel reply"
+              aria-label={t(language, "Cancel reply", "답장 취소")}
               className="shrink-0 p-1 -m-1 rounded-md text-secondary/60 hover:text-foreground hover:bg-black/[0.04] transition-colors cursor-pointer"
             >
               <svg width="14" height="14" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
@@ -689,7 +730,7 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
                 className="absolute bottom-full left-0 right-0 mb-1 max-h-48 sm:max-h-64 overflow-y-auto rounded-xl border border-black/10 bg-white shadow-lg z-50"
               >
                 <div className="px-3 py-1.5 text-[10px] font-semibold text-secondary/50 uppercase tracking-wide border-b border-black/[0.05]">
-                  Knowledge Base
+                  {t(language, "Knowledge Base", "지식베이스")}
                 </div>
                 {kbMatches.map((entry, i) => (
                   <button
@@ -724,7 +765,7 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
               onKeyUp={(e) => setCursorPos((e.target as HTMLTextAreaElement).selectionStart ?? cursorPos)}
               onClick={(e) => setCursorPos((e.target as HTMLTextAreaElement).selectionStart ?? cursorPos)}
               onPaste={handlePaste}
-              placeholder="Message..."
+              placeholder={t(language, "Message...", "메시지...")}
               rows={1}
               disabled={disabled || isSubmitting}
               data-chat-input-field="true"
@@ -743,7 +784,7 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
               onClick={() => fileInputRef.current?.click()}
               disabled={disabled || queueBlocked || isSubmitting}
               className="w-10 h-10 flex items-center justify-center rounded-2xl bg-black/[0.04] text-secondary/60 hover:text-foreground hover:bg-black/[0.06] transition-all duration-200 cursor-pointer disabled:opacity-20 disabled:cursor-not-allowed shrink-0"
-              aria-label="Attach file"
+              aria-label={t(language, "Attach file", "파일 첨부")}
             >
               <svg className="w-4.5 h-4.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
                 <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />
@@ -772,7 +813,11 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
                   ? "border-primary/25 bg-primary/10 text-primary shadow-[0_1px_6px_rgba(124,58,237,0.10)]"
                   : "border-black/[0.08] bg-black/[0.03] text-secondary/75 hover:bg-black/[0.05] hover:text-foreground"
               }`}
-              title="Run the next message as a goal mission"
+              title={t(
+                language,
+                "Run the next message as a goal mission",
+                "다음 메시지를 목표 미션으로 실행",
+              )}
             >
               <span
                 className={`flex h-5 w-5 items-center justify-center rounded-full ${
@@ -785,7 +830,9 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
                   <path strokeLinecap="round" strokeLinejoin="round" d="M12 3v3m0 12v3m9-9h-3M6 12H3" />
                 </svg>
               </span>
-              <span className="whitespace-nowrap">Run until done</span>
+              <span className="whitespace-nowrap">
+                {t(language, "Run until done", "완료까지 실행")}
+              </span>
               {runUntilDone && (
                 <span className="rounded-md bg-white/70 px-1.5 py-0.5 text-[10px] font-semibold text-primary/80">
                   1x
@@ -807,8 +854,8 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
                   onPointerDown={handleStopPointerDown}
                   onClick={handleStopClick}
                   className="w-10 h-10 flex items-center justify-center rounded-2xl bg-red-500/15 text-red-400 hover:bg-red-500/25 active:scale-95 touch-manipulation transition-all duration-200 cursor-pointer"
-                  aria-label="Stop"
-                  title="Stop (ESC)"
+                  aria-label={t(language, "Stop", "중지")}
+                  title={t(language, "Stop (ESC)", "중지 (ESC)")}
                 >
                   <svg className="w-4 h-4" viewBox="0 0 24 24" fill="currentColor">
                     <rect x="6" y="6" width="12" height="12" rx="2" />
@@ -821,7 +868,7 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
                   aria-hidden="true"
                 >
                   <kbd className="font-mono">{"\u238B"}</kbd>
-                  <span>{cancelHint ?? "ESC to cancel"}</span>
+                  <span>{cancelHint ?? t(language, "ESC to cancel", "ESC로 취소")}</span>
                 </span>
               </div>
           ) : (
@@ -832,18 +879,26 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
               aria-label={
                 streaming
                   ? effectiveStreamingMode === "steer"
-                    ? "Steer current run"
-                    : "Queue message"
-                  : "Send"
+                    ? t(language, "Steer current run", "현재 실행 조정")
+                    : t(language, "Queue message", "메시지 대기열에 추가")
+                  : t(language, "Send", "전송")
               }
               title={
                 queueBlocked
-                  ? "Queue full — wait for the bot to finish"
+                  ? t(
+                    language,
+                    "Queue full - wait for the bot to finish",
+                    "대기열이 가득 찼습니다 - 봇 응답 완료까지 기다려 주세요",
+                  )
                   : streaming
                     ? effectiveStreamingMode === "steer"
-                      ? "Steer current run"
-                      : "Queue message (fires after current response)"
-                    : "Send"
+                      ? t(language, "Steer current run", "현재 실행 조정")
+                      : t(
+                        language,
+                        "Queue message (fires after current response)",
+                        "메시지 대기열에 추가 (현재 응답 후 전송)",
+                      )
+                    : t(language, "Send", "전송")
               }
             >
               <svg

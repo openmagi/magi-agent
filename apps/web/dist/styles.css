@@ -2373,6 +2373,10 @@
     padding-right: calc(var(--spacing) * 2);
   }
 
+  .pr-\[18rem\] {
+    padding-right: 18rem;
+  }
+
   .pb-1 {
     padding-bottom: calc(var(--spacing) * 1);
   }
