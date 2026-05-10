@@ -1245,6 +1245,63 @@ async function handleMemoryReindex(
   writeJson(res, 200, { ok: true });
 }
 
+async function handleMemoryFilesDelete(
+  req: IncomingMessage,
+  res: ServerResponse,
+  _match: RegExpMatchArray,
+  ctx: HttpServerCtx,
+): Promise<void> {
+  if (!authorizeBearer(req, res, ctx)) return;
+  const body = readObject(await readJsonBody(req));
+  const rawPaths = Array.isArray(body.paths) ? body.paths : [];
+  if (rawPaths.length === 0) {
+    writeJson(res, 400, { error: "missing_paths" });
+    return;
+  }
+  if (rawPaths.length > 50) {
+    writeJson(res, 400, { error: "too_many_paths" });
+    return;
+  }
+
+  const deleted: string[] = [];
+  for (const rawPath of rawPaths) {
+    if (typeof rawPath !== "string") {
+      writeJson(res, 400, { error: "invalid_path" });
+      return;
+    }
+    const rel = normalizeRelativePath(rawPath);
+    if (!rel || !rel.startsWith("memory/") || rel.endsWith("/") || path.posix.basename(rel).startsWith(".")) {
+      writeJson(res, 400, { error: "invalid_path" });
+      return;
+    }
+    const resolved = resolveWorkspacePath(ctx, rel);
+    if (!resolved || !isMemoryPath(resolved.rel)) {
+      writeJson(res, 400, { error: "invalid_path" });
+      return;
+    }
+    try {
+      const stat = await fs.stat(resolved.full);
+      if (!stat.isFile()) {
+        writeJson(res, 400, { error: "not_file" });
+        return;
+      }
+      await fs.rm(resolved.full, { force: true });
+      deleted.push(resolved.rel);
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === "ENOENT") {
+        deleted.push(resolved.rel);
+        continue;
+      }
+      throw err;
+    }
+  }
+
+  if (deleted.length > 0) {
+    await ctx.agent.hipocampus.getQmdManager().reindex().catch(() => {});
+  }
+  writeJson(res, 200, { ok: true, deleted });
+}
+
 async function handleKnowledgeList(
   req: IncomingMessage,
   res: ServerResponse,
@@ -1612,6 +1669,7 @@ export const appRuntimeRoutes: RouteHandler[] = [
   route("GET", /^\/v1\/app\/memory\/search(?:\?.*)?$/, handleMemorySearch),
   route("POST", /^\/v1\/app\/memory\/compact(?:\?.*)?$/, handleMemoryCompact),
   route("POST", /^\/v1\/app\/memory\/reindex(?:\?.*)?$/, handleMemoryReindex),
+  route("DELETE", /^\/v1\/app\/memory\/files(?:\?.*)?$/, handleMemoryFilesDelete),
   route("GET", /^\/v1\/app\/knowledge(?:\?.*)?$/, handleKnowledgeList),
   route("GET", /^\/v1\/app\/knowledge\/search(?:\?.*)?$/, handleKnowledgeSearch),
   route("GET", /^\/v1\/app\/knowledge\/file(?:\?.*)?$/, handleKnowledgeFile),

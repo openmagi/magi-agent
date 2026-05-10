@@ -17,6 +17,7 @@
     "web:dev": "vite --config apps/web/vite.config.ts --host 127.0.0.1",
     "desktop:dev": "npm --prefix apps/desktop run dev",
     "desktop:build": "npm --prefix apps/desktop run build",
+    "research:eval": "node scripts/research-parity-eval.mjs",
     "test": "vitest run",
     "test:watch": "vitest",
     "lint": "tsc --noEmit && npm run web:check",

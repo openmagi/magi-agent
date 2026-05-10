@@ -36641,7 +36641,7 @@ function decodePathPart(value) {
   }
 }
 function isDashboardRoute(value) {
-  return value === "overview" || value === "settings" || value === "usage" || value === "skills" || value === "workspace" || value === "knowledge";
+  return value === "overview" || value === "settings" || value === "usage" || value === "skills" || value === "workspace" || value === "knowledge" || value === "memory";
 }
 function routeFromPathname(pathname) {
   const parts = pathname.split("/").filter(Boolean);
@@ -36951,6 +36951,7 @@ function DashboardSidebar({
   ];
   const workspaceItems = [
     { route: "knowledge", label: "Knowledge" },
+    { route: "memory", label: "Memory" },
     { route: "workspace", label: "Workspace" }
   ];
   const renderItem = ({ route, label }) => {
@@ -37224,6 +37225,336 @@ function WorkspaceDashboard({
     }
   );
 }
+function MemoryDashboard({
+  memoryFiles,
+  memoryStatus,
+  loading,
+  refreshing,
+  onRefresh,
+  onSearch,
+  onReadFile,
+  onSaveFile,
+  onDeleteFiles,
+  onCompact,
+  onReindex
+}) {
+  const [query, setQuery] = reactExports.useState("");
+  const [searching, setSearching] = reactExports.useState(false);
+  const [searchResults, setSearchResults] = reactExports.useState([]);
+  const [selectedPaths, setSelectedPaths] = reactExports.useState(() => /* @__PURE__ */ new Set());
+  const [selectedPath, setSelectedPath] = reactExports.useState(null);
+  const [content2, setContent] = reactExports.useState("");
+  const [editedContent, setEditedContent] = reactExports.useState("");
+  const [fileLoading, setFileLoading] = reactExports.useState(false);
+  const [busy, setBusy] = reactExports.useState(false);
+  const [notice, setNotice] = reactExports.useState(null);
+  const [error, setError] = reactExports.useState(null);
+  const queryLower = query.trim().toLowerCase();
+  const filteredFiles = reactExports.useMemo(() => {
+    if (!queryLower) return memoryFiles;
+    return memoryFiles.filter((file) => file.path.toLowerCase().includes(queryLower));
+  }, [memoryFiles, queryLower]);
+  const rootMemory = asRecord(memoryStatus?.rootMemory);
+  const openFile = reactExports.useCallback(
+    async (path2) => {
+      setSelectedPath(path2);
+      setFileLoading(true);
+      setNotice(null);
+      setError(null);
+      try {
+        const nextContent = await onReadFile(path2);
+        setContent(nextContent);
+        setEditedContent(nextContent);
+      } catch (err) {
+        setContent("");
+        setEditedContent("");
+        setError(err instanceof Error ? err.message : "Failed to read memory file");
+      } finally {
+        setFileLoading(false);
+      }
+    },
+    [onReadFile]
+  );
+  const runSearch = reactExports.useCallback(async () => {
+    const trimmed = query.trim();
+    if (!trimmed) {
+      setSearchResults([]);
+      return;
+    }
+    setSearching(true);
+    setError(null);
+    try {
+      const payload = await onSearch(trimmed);
+      setSearchResults(asArray(payload.results));
+    } catch (err) {
+      setSearchResults([]);
+      setError(err instanceof Error ? err.message : "Memory search failed");
+    } finally {
+      setSearching(false);
+    }
+  }, [onSearch, query]);
+  const toggleSelected = reactExports.useCallback((path2) => {
+    setSelectedPaths((prev) => {
+      const next = new Set(prev);
+      if (next.has(path2)) next.delete(path2);
+      else next.add(path2);
+      return next;
+    });
+  }, []);
+  const deletePaths = reactExports.useCallback(
+    async (paths) => {
+      if (paths.length === 0) return;
+      setBusy(true);
+      setError(null);
+      setNotice(null);
+      try {
+        await onDeleteFiles(paths);
+        setSelectedPaths((prev) => {
+          const next = new Set(prev);
+          for (const path2 of paths) next.delete(path2);
+          return next;
+        });
+        if (selectedPath && paths.includes(selectedPath)) {
+          setSelectedPath(null);
+          setContent("");
+          setEditedContent("");
+        }
+        setNotice(`${paths.length} memory file${paths.length === 1 ? "" : "s"} deleted`);
+        onRefresh();
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Failed to delete memory files");
+      } finally {
+        setBusy(false);
+      }
+    },
+    [onDeleteFiles, onRefresh, selectedPath]
+  );
+  const saveSelected = reactExports.useCallback(async () => {
+    if (!selectedPath) return;
+    setBusy(true);
+    setError(null);
+    setNotice(null);
+    try {
+      await onSaveFile(selectedPath, editedContent);
+      setContent(editedContent);
+      setNotice("Memory file saved");
+      onRefresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to save memory file");
+    } finally {
+      setBusy(false);
+    }
+  }, [editedContent, onRefresh, onSaveFile, selectedPath]);
+  const runMemoryAction = reactExports.useCallback(
+    async (action) => {
+      setBusy(true);
+      setError(null);
+      setNotice(null);
+      try {
+        if (action === "compact") await onCompact();
+        else await onReindex();
+        setNotice(action === "compact" ? "Compaction triggered" : "Memory index refreshed");
+        onRefresh();
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Memory operation failed");
+      } finally {
+        setBusy(false);
+      }
+    },
+    [onCompact, onRefresh, onReindex]
+  );
+  const selectedCount = selectedPaths.size;
+  const dailyPaths = memoryFiles.map((file) => file.path).filter((path2) => path2.startsWith("memory/daily/"));
+  return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "grid gap-5 xl:grid-cols-[minmax(0,420px)_minmax(0,1fr)]", children: [
+    /* @__PURE__ */ jsxRuntimeExports.jsxs(
+      DashboardCard,
+      {
+        title: "Memory",
+        action: /* @__PURE__ */ jsxRuntimeExports.jsx(
+          "button",
+          {
+            type: "button",
+            onClick: onRefresh,
+            disabled: refreshing,
+            className: "rounded-xl bg-gray-100 px-3 py-1.5 text-sm font-semibold text-foreground transition hover:bg-gray-200 disabled:opacity-50",
+            children: refreshing ? "Refreshing..." : "Refresh"
+          }
+        ),
+        children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "mb-4 grid gap-3 sm:grid-cols-2", children: [
+            /* @__PURE__ */ jsxRuntimeExports.jsx(MetricTile, { label: "Files", value: memoryFiles.length }),
+            /* @__PURE__ */ jsxRuntimeExports.jsx(
+              MetricTile,
+              {
+                label: "QMD",
+                value: memoryStatus?.qmdReady === true ? "Ready" : "Local"
+              }
+            )
+          ] }),
+          asString(rootMemory.path) && /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "mb-4 rounded-xl bg-gray-50 px-4 py-3 text-xs text-secondary", children: [
+            "Root: ",
+            asString(rootMemory.path)
+          ] }),
+          /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "mb-4 flex gap-2", children: [
+            /* @__PURE__ */ jsxRuntimeExports.jsx(
+              "input",
+              {
+                value: query,
+                onChange: (event) => setQuery(event.target.value),
+                onKeyDown: (event) => {
+                  if (event.key === "Enter") void runSearch();
+                },
+                placeholder: "Search memory...",
+                className: "min-w-0 flex-1 rounded-xl border border-black/[0.08] bg-white px-3 py-2 text-sm outline-none transition focus:border-primary/40 focus:ring-4 focus:ring-primary/10"
+              }
+            ),
+            /* @__PURE__ */ jsxRuntimeExports.jsx(
+              "button",
+              {
+                type: "button",
+                onClick: () => void runSearch(),
+                disabled: searching,
+                className: "rounded-xl bg-primary px-3 py-2 text-sm font-semibold text-white transition hover:bg-primary/90 disabled:opacity-50",
+                children: searching ? "Searching" : "Search"
+              }
+            )
+          ] }),
+          /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "mb-4 flex flex-wrap gap-2", children: [
+            /* @__PURE__ */ jsxRuntimeExports.jsxs(
+              "button",
+              {
+                type: "button",
+                onClick: () => void deletePaths(Array.from(selectedPaths)),
+                disabled: busy || selectedCount === 0,
+                className: "rounded-xl bg-gray-100 px-3 py-1.5 text-xs font-semibold text-foreground transition hover:bg-gray-200 disabled:opacity-50",
+                children: [
+                  "Delete selected",
+                  selectedCount > 0 ? ` (${selectedCount})` : ""
+                ]
+              }
+            ),
+            /* @__PURE__ */ jsxRuntimeExports.jsx(
+              "button",
+              {
+                type: "button",
+                onClick: () => void deletePaths(dailyPaths),
+                disabled: busy || dailyPaths.length === 0,
+                className: "rounded-xl bg-gray-100 px-3 py-1.5 text-xs font-semibold text-foreground transition hover:bg-gray-200 disabled:opacity-50",
+                children: "Clear daily logs"
+              }
+            ),
+            /* @__PURE__ */ jsxRuntimeExports.jsx(
+              "button",
+              {
+                type: "button",
+                onClick: () => void runMemoryAction("compact"),
+                disabled: busy,
+                className: "rounded-xl bg-gray-100 px-3 py-1.5 text-xs font-semibold text-foreground transition hover:bg-gray-200 disabled:opacity-50",
+                children: "Compact"
+              }
+            ),
+            /* @__PURE__ */ jsxRuntimeExports.jsx(
+              "button",
+              {
+                type: "button",
+                onClick: () => void runMemoryAction("reindex"),
+                disabled: busy,
+                className: "rounded-xl bg-gray-100 px-3 py-1.5 text-xs font-semibold text-foreground transition hover:bg-gray-200 disabled:opacity-50",
+                children: "Reindex"
+              }
+            )
+          ] }),
+          notice && /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "mb-3 rounded-xl bg-emerald-50 px-3 py-2 text-xs text-emerald-700", children: notice }),
+          error && /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "mb-3 rounded-xl bg-red-50 px-3 py-2 text-xs text-red-500", children: error }),
+          loading ? /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "rounded-xl border border-dashed border-black/[0.08] px-4 py-8 text-center text-sm text-secondary", children: "Loading memory..." }) : filteredFiles.length === 0 ? /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "rounded-xl border border-dashed border-black/[0.08] px-4 py-8 text-center text-sm text-secondary", children: "No memory files found." }) : /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "max-h-[520px] divide-y divide-black/[0.06] overflow-y-auto rounded-xl border border-black/[0.08]", children: filteredFiles.map((file) => {
+            const checked = selectedPaths.has(file.path);
+            const active = selectedPath === file.path;
+            return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: `flex items-center gap-3 px-3 py-2 ${active ? "bg-primary/[0.06]" : "bg-white"}`, children: [
+              /* @__PURE__ */ jsxRuntimeExports.jsx(
+                "input",
+                {
+                  type: "checkbox",
+                  checked,
+                  onChange: () => toggleSelected(file.path),
+                  className: "h-4 w-4 rounded border-black/[0.12]",
+                  "aria-label": `Select ${file.path}`
+                }
+              ),
+              /* @__PURE__ */ jsxRuntimeExports.jsxs(
+                "button",
+                {
+                  type: "button",
+                  onClick: () => void openFile(file.path),
+                  className: "min-w-0 flex-1 text-left",
+                  children: [
+                    /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "truncate text-sm font-semibold text-foreground", children: file.path }),
+                    /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "mt-0.5 text-xs text-secondary", children: [
+                      formatFileSize(file.sizeBytes),
+                      file.mtimeMs ? ` · ${new Date(file.mtimeMs).toISOString()}` : ""
+                    ] })
+                  ]
+                }
+              ),
+              /* @__PURE__ */ jsxRuntimeExports.jsx(
+                "button",
+                {
+                  type: "button",
+                  onClick: () => void deletePaths([file.path]),
+                  disabled: busy,
+                  className: "rounded-lg px-2 py-1 text-xs font-semibold text-red-500 transition hover:bg-red-50 disabled:opacity-50",
+                  children: "Delete"
+                }
+              )
+            ] }, file.path);
+          }) })
+        ]
+      }
+    ),
+    /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "space-y-5", children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsx(
+        DashboardCard,
+        {
+          title: selectedPath ?? "Memory File",
+          action: selectedPath ? /* @__PURE__ */ jsxRuntimeExports.jsx(
+            "button",
+            {
+              type: "button",
+              onClick: () => void saveSelected(),
+              disabled: busy || fileLoading || editedContent === content2,
+              className: "rounded-xl bg-primary px-3 py-1.5 text-sm font-semibold text-white transition hover:bg-primary/90 disabled:opacity-50",
+              children: "Save"
+            }
+          ) : null,
+          children: !selectedPath ? /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "rounded-xl border border-dashed border-black/[0.08] px-4 py-10 text-center text-sm text-secondary", children: "Select a memory file to view or edit it." }) : fileLoading ? /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "rounded-xl border border-dashed border-black/[0.08] px-4 py-10 text-center text-sm text-secondary", children: "Loading file..." }) : /* @__PURE__ */ jsxRuntimeExports.jsx(
+            "textarea",
+            {
+              value: editedContent,
+              onChange: (event) => setEditedContent(event.target.value),
+              spellCheck: false,
+              className: "h-[420px] w-full resize-none rounded-xl border border-black/[0.08] bg-white px-4 py-3 font-mono text-sm leading-6 text-foreground outline-none transition focus:border-primary/40 focus:ring-4 focus:ring-primary/10"
+            }
+          )
+        }
+      ),
+      searchResults.length > 0 && /* @__PURE__ */ jsxRuntimeExports.jsx(DashboardCard, { title: "Search Results", children: /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "space-y-2", children: searchResults.map((result, index2) => /* @__PURE__ */ jsxRuntimeExports.jsxs(
+        "button",
+        {
+          type: "button",
+          onClick: () => result.path && void openFile(result.path),
+          className: "block w-full rounded-xl bg-gray-50 px-4 py-3 text-left transition hover:bg-gray-100",
+          children: [
+            /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center justify-between gap-3", children: [
+              /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "truncate text-sm font-semibold text-foreground", children: result.path ?? `result-${index2 + 1}` }),
+              typeof result.score === "number" && /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "shrink-0 text-xs text-secondary", children: result.score.toFixed(2) })
+            ] }),
+            result.contentPreview && /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "mt-1 line-clamp-3 text-xs leading-5 text-secondary", children: result.contentPreview })
+          ]
+        },
+        `${result.path ?? "result"}-${index2}`
+      )) }) })
+    ] })
+  ] });
+}
 function SkillsDashboard({
   skillsSnapshot,
   loading,
@@ -37288,13 +37619,24 @@ function LocalDashboardShell({
   workspaceFiles,
   workspaceLoading,
   workspaceRefreshing,
+  memoryFiles,
+  memoryStatus,
+  memoryLoading,
+  memoryRefreshing,
   setAgentUrl,
   setToken,
   onNavigate,
   onRefreshAll,
   onRefreshKnowledge,
   onRefreshWorkspace,
+  onRefreshMemory,
   onRefreshSkills,
+  onMemorySearch,
+  onMemoryReadFile,
+  onMemorySaveFile,
+  onMemoryDeleteFiles,
+  onMemoryCompact,
+  onMemoryReindex,
   onSaveConnection,
   onCheckRuntime
 }) {
@@ -37304,7 +37646,8 @@ function LocalDashboardShell({
     usage: "Usage",
     skills: "Skills",
     workspace: "Workspace",
-    knowledge: "Knowledge"
+    knowledge: "Knowledge",
+    memory: "Memory"
   };
   return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex h-full min-w-0 flex-1 bg-background", children: [
     /* @__PURE__ */ jsxRuntimeExports.jsx(
@@ -37381,6 +37724,22 @@ function LocalDashboardShell({
             refreshing: workspaceRefreshing,
             onRefresh: onRefreshWorkspace
           }
+        ),
+        route === "memory" && /* @__PURE__ */ jsxRuntimeExports.jsx(
+          MemoryDashboard,
+          {
+            memoryFiles,
+            memoryStatus,
+            loading: memoryLoading,
+            refreshing: memoryRefreshing,
+            onRefresh: onRefreshMemory,
+            onSearch: onMemorySearch,
+            onReadFile: onMemoryReadFile,
+            onSaveFile: onMemorySaveFile,
+            onDeleteFiles: onMemoryDeleteFiles,
+            onCompact: onMemoryCompact,
+            onReindex: onMemoryReindex
+          }
         )
       ] })
     ] })
@@ -37410,6 +37769,10 @@ function App() {
   const [workspaceFiles, setWorkspaceFiles] = reactExports.useState([]);
   const [workspaceLoading, setWorkspaceLoading] = reactExports.useState(true);
   const [workspaceRefreshing, setWorkspaceRefreshing] = reactExports.useState(false);
+  const [memoryFiles, setMemoryFiles] = reactExports.useState([]);
+  const [memoryStatus, setMemoryStatus] = reactExports.useState(null);
+  const [memoryLoading, setMemoryLoading] = reactExports.useState(true);
+  const [memoryRefreshing, setMemoryRefreshing] = reactExports.useState(false);
   const [uploadStates, setUploadStates] = reactExports.useState({});
   const [replyingTo, setReplyingTo] = reactExports.useState(null);
   const [streamingComposerMode, setStreamingComposerMode] = reactExports.useState("queue");
@@ -37473,6 +37836,21 @@ function App() {
     async (path2, body) => {
       const response = await fetch(`${normalizedBase}${path2}`, {
         method: "PUT",
+        headers: authHeaders(true),
+        body: JSON.stringify(body)
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(asString(payload.error, response.statusText));
+      }
+      return payload;
+    },
+    [authHeaders, normalizedBase]
+  );
+  const deleteJson = reactExports.useCallback(
+    async (path2, body) => {
+      const response = await fetch(`${normalizedBase}${path2}`, {
+        method: "DELETE",
         headers: authHeaders(true),
         body: JSON.stringify(body)
       });
@@ -37551,6 +37929,26 @@ function App() {
       setWorkspaceRefreshing(false);
     }
   }, [getJson]);
+  const refreshMemory = reactExports.useCallback(async () => {
+    setMemoryRefreshing(true);
+    try {
+      const payload = await getJson("/v1/app/memory");
+      setMemoryStatus(asRecord(payload.status));
+      setMemoryFiles(
+        asArray(payload.files).map((file) => ({
+          path: asString(file.path),
+          sizeBytes: asNumber(file.sizeBytes, 0),
+          mtimeMs: typeof file.mtimeMs === "number" && Number.isFinite(file.mtimeMs) ? file.mtimeMs : null
+        })).filter((file) => file.path.length > 0)
+      );
+    } catch {
+      setMemoryStatus(null);
+      setMemoryFiles([]);
+    } finally {
+      setMemoryLoading(false);
+      setMemoryRefreshing(false);
+    }
+  }, [getJson]);
   const saveWorkspaceFile = reactExports.useCallback(
     async (path2, content2) => {
       await putJson("/v1/app/workspace/file", { path: path2, content: content2 });
@@ -37558,19 +37956,53 @@ function App() {
     },
     [putJson, refreshWorkspace]
   );
+  const readMemoryFile = reactExports.useCallback(
+    async (path2) => {
+      const payload = await getJson(`/v1/app/memory/file?path=${encodeURIComponent(path2)}`);
+      return asString(payload.content);
+    },
+    [getJson]
+  );
+  const searchMemory = reactExports.useCallback(
+    async (query) => getJson(`/v1/app/memory/search?q=${encodeURIComponent(query)}&limit=10`),
+    [getJson]
+  );
+  const deleteMemoryFiles = reactExports.useCallback(
+    async (paths) => {
+      await deleteJson("/v1/app/memory/files", { paths });
+      await refreshMemory();
+      await refreshWorkspace();
+    },
+    [deleteJson, refreshMemory, refreshWorkspace]
+  );
+  const compactMemory = reactExports.useCallback(async () => {
+    await sendJson("/v1/app/memory/compact", { force: true });
+    await refreshMemory();
+  }, [refreshMemory, sendJson]);
+  const reindexMemory = reactExports.useCallback(async () => {
+    await sendJson("/v1/app/memory/reindex", {});
+    await refreshMemory();
+  }, [refreshMemory, sendJson]);
+  const saveMemoryFile = reactExports.useCallback(
+    async (path2, content2) => {
+      await saveWorkspaceFile(path2, content2);
+      await refreshMemory();
+    },
+    [refreshMemory, saveWorkspaceFile]
+  );
   const refreshChannels = reactExports.useCallback(() => {
     setRefreshing(true);
     store.setChannels(store.channels.length > 0 ? store.channels : [defaultChannel()], { botId: BOT_ID });
-    void Promise.allSettled([refreshRuntime(), refreshKnowledge(), refreshWorkspace(), refreshSkills()]).finally(() => {
+    void Promise.allSettled([refreshRuntime(), refreshKnowledge(), refreshWorkspace(), refreshMemory(), refreshSkills()]).finally(() => {
       window.setTimeout(() => setRefreshing(false), 300);
     });
-  }, [refreshKnowledge, refreshRuntime, refreshSkills, refreshWorkspace, store]);
+  }, [refreshKnowledge, refreshMemory, refreshRuntime, refreshSkills, refreshWorkspace, store]);
   const refreshDashboardData = reactExports.useCallback(() => {
     setRefreshing(true);
-    void Promise.allSettled([refreshRuntime(), refreshKnowledge(), refreshWorkspace(), refreshSkills()]).finally(() => {
+    void Promise.allSettled([refreshRuntime(), refreshKnowledge(), refreshWorkspace(), refreshMemory(), refreshSkills()]).finally(() => {
       window.setTimeout(() => setRefreshing(false), 300);
     });
-  }, [refreshKnowledge, refreshRuntime, refreshSkills, refreshWorkspace]);
+  }, [refreshKnowledge, refreshMemory, refreshRuntime, refreshSkills, refreshWorkspace]);
   const navigateToRoute = reactExports.useCallback(
     (route, channel = useChatStore.getState().activeChannel || DEFAULT_CHANNEL) => {
       if (route === "chat") {
@@ -37608,7 +38040,7 @@ function App() {
       }
     }).catch(() => {
     });
-    void Promise.allSettled([refreshRuntime(), refreshKnowledge(), refreshWorkspace(), refreshSkills()]);
+    void Promise.allSettled([refreshRuntime(), refreshKnowledge(), refreshWorkspace(), refreshMemory(), refreshSkills()]);
   }, []);
   reactExports.useEffect(() => {
     const syncRoute = () => {
@@ -38353,13 +38785,24 @@ function App() {
         workspaceFiles,
         workspaceLoading,
         workspaceRefreshing,
+        memoryFiles,
+        memoryStatus,
+        memoryLoading,
+        memoryRefreshing,
         setAgentUrl,
         setToken,
         onNavigate: navigateToRoute,
         onRefreshAll: refreshDashboardData,
         onRefreshKnowledge: () => void refreshKnowledge(),
         onRefreshWorkspace: () => void refreshWorkspace(),
+        onRefreshMemory: () => void refreshMemory(),
         onRefreshSkills: () => void refreshSkills(),
+        onMemorySearch: searchMemory,
+        onMemoryReadFile: readMemoryFile,
+        onMemorySaveFile: saveMemoryFile,
+        onMemoryDeleteFiles: deleteMemoryFiles,
+        onMemoryCompact: compactMemory,
+        onMemoryReindex: reindexMemory,
         onSaveConnection: handleSaveConnection,
         onCheckRuntime: () => void refreshRuntime()
       }

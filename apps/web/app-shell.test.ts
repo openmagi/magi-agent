@@ -172,4 +172,19 @@ describe("Magi App shell", () => {
     expect(sidePanel).toContain('method: "PUT"');
     expect(sidePanel).toContain("/v1/app/knowledge/file");
   });
+
+  it("surfaces a local memory editor with search, delete, compaction, and reindex controls", () => {
+    const source = readAppFile(path.join("src", "App.tsx"));
+
+    expect(source).toContain('type AppRoute = "chat"');
+    expect(source).toContain('"memory"');
+    expect(source).toContain("MemoryDashboard");
+    expect(source).toContain("memoryFiles");
+    expect(source).toContain("refreshMemory");
+    expect(source).toContain("deleteMemoryFiles");
+    expect(source).toContain("/v1/app/memory/search");
+    expect(source).toContain("/v1/app/memory/files");
+    expect(source).toContain("/v1/app/memory/compact");
+    expect(source).toContain("/v1/app/memory/reindex");
+  });
 });

@@ -824,6 +824,10 @@
     height: calc(var(--spacing) * 11);
   }
 
+  .h-\[420px\] {
+    height: 420px;
+  }
+
   .h-full {
     height: 100%;
   }
@@ -874,6 +878,10 @@
 
   .max-h-\[140px\] {
     max-height: 140px;
+  }
+
+  .max-h-\[520px\] {
+    max-height: 520px;
   }
 
   .max-h-\[1200px\] {
@@ -1552,6 +1560,16 @@
     }
   }
 
+  .border-black\/\[0\.12\] {
+    border-color: #0000001f;
+  }
+
+  @supports (color: color-mix(in lab, red, red)) {
+    .border-black\/\[0\.12\] {
+      border-color: color-mix(in oklab, var(--color-black) 12%, transparent);
+    }
+  }
+
   .border-black\/\[0\.15\] {
     border-color: #00000026;
   }
@@ -1914,6 +1932,10 @@
     .bg-black\/\[0\.035\] {
       background-color: color-mix(in oklab, var(--color-black) 3.5%, transparent);
     }
+  }
+
+  .bg-emerald-50 {
+    background-color: var(--color-emerald-50);
   }
 
   .bg-emerald-50\/35 {
@@ -2347,6 +2369,10 @@
 
   .py-8 {
     padding-block: calc(var(--spacing) * 8);
+  }
+
+  .py-10 {
+    padding-block: calc(var(--spacing) * 10);
   }
 
   .pt-1\.5 {
@@ -3360,6 +3386,10 @@
       }
     }
 
+    .hover\:bg-gray-100:hover {
+      background-color: var(--color-gray-100);
+    }
+
     .hover\:bg-gray-200:hover {
       background-color: var(--color-gray-200);
     }
@@ -3791,6 +3821,10 @@
   @media (min-width: 80rem) {
     .xl\:grid-cols-\[minmax\(0\,1fr\)_360px\] {
       grid-template-columns: minmax(0, 1fr) 360px;
+    }
+
+    .xl\:grid-cols-\[minmax\(0\,420px\)_minmax\(0\,1fr\)\] {
+      grid-template-columns: minmax(0, 420px) minmax(0, 1fr);
     }
   }
 }
