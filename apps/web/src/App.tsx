@@ -93,7 +93,7 @@ const storage = {
 
 type JsonRecord = Record<string, unknown>;
 type RuntimePhase = NonNullable<ChannelState["turnPhase"]>;
-type AppRoute = "chat" | "overview" | "settings" | "usage" | "skills" | "workspace" | "knowledge";
+type AppRoute = "chat" | "overview" | "settings" | "usage" | "skills" | "workspace" | "knowledge" | "memory";
 type DashboardRoute = Exclude<AppRoute, "chat">;
 type RuntimeCheckStatus = "not_checked" | "checking" | "active" | "unavailable";
 
@@ -118,6 +118,19 @@ interface WorkspaceEntryRow {
   type?: string;
   sizeBytes?: number;
   mtimeMs?: number;
+}
+
+interface MemoryFileEntry {
+  path: string;
+  sizeBytes: number;
+  mtimeMs: number | null;
+}
+
+interface MemorySearchResult {
+  path?: string;
+  score?: number;
+  contentPreview?: string;
+  context?: string;
 }
 
 function defaultChannel(): Channel {
@@ -177,7 +190,8 @@ function isDashboardRoute(value: string | null): value is DashboardRoute {
     value === "usage" ||
     value === "skills" ||
     value === "workspace" ||
-    value === "knowledge"
+    value === "knowledge" ||
+    value === "memory"
   );
 }
 
@@ -624,6 +638,7 @@ function DashboardSidebar({
   ];
   const workspaceItems: Array<{ route: AppRoute; label: string }> = [
     { route: "knowledge", label: "Knowledge" },
+    { route: "memory", label: "Memory" },
     { route: "workspace", label: "Workspace" },
   ];
 
@@ -987,6 +1002,366 @@ function WorkspaceDashboard({
   );
 }
 
+function MemoryDashboard({
+  memoryFiles,
+  memoryStatus,
+  loading,
+  refreshing,
+  onRefresh,
+  onSearch,
+  onReadFile,
+  onSaveFile,
+  onDeleteFiles,
+  onCompact,
+  onReindex,
+}: {
+  memoryFiles: MemoryFileEntry[];
+  memoryStatus: JsonRecord | null;
+  loading: boolean;
+  refreshing: boolean;
+  onRefresh: () => void;
+  onSearch: (query: string) => Promise<JsonRecord>;
+  onReadFile: (path: string) => Promise<string>;
+  onSaveFile: (path: string, content: string) => Promise<void>;
+  onDeleteFiles: (paths: string[]) => Promise<void>;
+  onCompact: () => Promise<void>;
+  onReindex: () => Promise<void>;
+}) {
+  const [query, setQuery] = useState("");
+  const [searching, setSearching] = useState(false);
+  const [searchResults, setSearchResults] = useState<MemorySearchResult[]>([]);
+  const [selectedPaths, setSelectedPaths] = useState<Set<string>>(() => new Set());
+  const [selectedPath, setSelectedPath] = useState<string | null>(null);
+  const [content, setContent] = useState("");
+  const [editedContent, setEditedContent] = useState("");
+  const [fileLoading, setFileLoading] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const queryLower = query.trim().toLowerCase();
+  const filteredFiles = useMemo(() => {
+    if (!queryLower) return memoryFiles;
+    return memoryFiles.filter((file) => file.path.toLowerCase().includes(queryLower));
+  }, [memoryFiles, queryLower]);
+  const rootMemory = asRecord(memoryStatus?.rootMemory);
+
+  const openFile = useCallback(
+    async (path: string) => {
+      setSelectedPath(path);
+      setFileLoading(true);
+      setNotice(null);
+      setError(null);
+      try {
+        const nextContent = await onReadFile(path);
+        setContent(nextContent);
+        setEditedContent(nextContent);
+      } catch (err) {
+        setContent("");
+        setEditedContent("");
+        setError(err instanceof Error ? err.message : "Failed to read memory file");
+      } finally {
+        setFileLoading(false);
+      }
+    },
+    [onReadFile],
+  );
+
+  const runSearch = useCallback(async () => {
+    const trimmed = query.trim();
+    if (!trimmed) {
+      setSearchResults([]);
+      return;
+    }
+    setSearching(true);
+    setError(null);
+    try {
+      const payload = await onSearch(trimmed);
+      setSearchResults(asArray(payload.results) as MemorySearchResult[]);
+    } catch (err) {
+      setSearchResults([]);
+      setError(err instanceof Error ? err.message : "Memory search failed");
+    } finally {
+      setSearching(false);
+    }
+  }, [onSearch, query]);
+
+  const toggleSelected = useCallback((path: string) => {
+    setSelectedPaths((prev) => {
+      const next = new Set(prev);
+      if (next.has(path)) next.delete(path);
+      else next.add(path);
+      return next;
+    });
+  }, []);
+
+  const deletePaths = useCallback(
+    async (paths: string[]) => {
+      if (paths.length === 0) return;
+      setBusy(true);
+      setError(null);
+      setNotice(null);
+      try {
+        await onDeleteFiles(paths);
+        setSelectedPaths((prev) => {
+          const next = new Set(prev);
+          for (const path of paths) next.delete(path);
+          return next;
+        });
+        if (selectedPath && paths.includes(selectedPath)) {
+          setSelectedPath(null);
+          setContent("");
+          setEditedContent("");
+        }
+        setNotice(`${paths.length} memory file${paths.length === 1 ? "" : "s"} deleted`);
+        onRefresh();
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Failed to delete memory files");
+      } finally {
+        setBusy(false);
+      }
+    },
+    [onDeleteFiles, onRefresh, selectedPath],
+  );
+
+  const saveSelected = useCallback(async () => {
+    if (!selectedPath) return;
+    setBusy(true);
+    setError(null);
+    setNotice(null);
+    try {
+      await onSaveFile(selectedPath, editedContent);
+      setContent(editedContent);
+      setNotice("Memory file saved");
+      onRefresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to save memory file");
+    } finally {
+      setBusy(false);
+    }
+  }, [editedContent, onRefresh, onSaveFile, selectedPath]);
+
+  const runMemoryAction = useCallback(
+    async (action: "compact" | "reindex") => {
+      setBusy(true);
+      setError(null);
+      setNotice(null);
+      try {
+        if (action === "compact") await onCompact();
+        else await onReindex();
+        setNotice(action === "compact" ? "Compaction triggered" : "Memory index refreshed");
+        onRefresh();
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Memory operation failed");
+      } finally {
+        setBusy(false);
+      }
+    },
+    [onCompact, onRefresh, onReindex],
+  );
+
+  const selectedCount = selectedPaths.size;
+  const dailyPaths = memoryFiles
+    .map((file) => file.path)
+    .filter((path) => path.startsWith("memory/daily/"));
+
+  return (
+    <div className="grid gap-5 xl:grid-cols-[minmax(0,420px)_minmax(0,1fr)]">
+      <DashboardCard
+        title="Memory"
+        action={
+          <button
+            type="button"
+            onClick={onRefresh}
+            disabled={refreshing}
+            className="rounded-xl bg-gray-100 px-3 py-1.5 text-sm font-semibold text-foreground transition hover:bg-gray-200 disabled:opacity-50"
+          >
+            {refreshing ? "Refreshing..." : "Refresh"}
+          </button>
+        }
+      >
+        <div className="mb-4 grid gap-3 sm:grid-cols-2">
+          <MetricTile label="Files" value={memoryFiles.length} />
+          <MetricTile
+            label="QMD"
+            value={memoryStatus?.qmdReady === true ? "Ready" : "Local"}
+          />
+        </div>
+        {asString(rootMemory.path) && (
+          <div className="mb-4 rounded-xl bg-gray-50 px-4 py-3 text-xs text-secondary">
+            Root: {asString(rootMemory.path)}
+          </div>
+        )}
+        <div className="mb-4 flex gap-2">
+          <input
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") void runSearch();
+            }}
+            placeholder="Search memory..."
+            className="min-w-0 flex-1 rounded-xl border border-black/[0.08] bg-white px-3 py-2 text-sm outline-none transition focus:border-primary/40 focus:ring-4 focus:ring-primary/10"
+          />
+          <button
+            type="button"
+            onClick={() => void runSearch()}
+            disabled={searching}
+            className="rounded-xl bg-primary px-3 py-2 text-sm font-semibold text-white transition hover:bg-primary/90 disabled:opacity-50"
+          >
+            {searching ? "Searching" : "Search"}
+          </button>
+        </div>
+        <div className="mb-4 flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={() => void deletePaths(Array.from(selectedPaths))}
+            disabled={busy || selectedCount === 0}
+            className="rounded-xl bg-gray-100 px-3 py-1.5 text-xs font-semibold text-foreground transition hover:bg-gray-200 disabled:opacity-50"
+          >
+            Delete selected{selectedCount > 0 ? ` (${selectedCount})` : ""}
+          </button>
+          <button
+            type="button"
+            onClick={() => void deletePaths(dailyPaths)}
+            disabled={busy || dailyPaths.length === 0}
+            className="rounded-xl bg-gray-100 px-3 py-1.5 text-xs font-semibold text-foreground transition hover:bg-gray-200 disabled:opacity-50"
+          >
+            Clear daily logs
+          </button>
+          <button
+            type="button"
+            onClick={() => void runMemoryAction("compact")}
+            disabled={busy}
+            className="rounded-xl bg-gray-100 px-3 py-1.5 text-xs font-semibold text-foreground transition hover:bg-gray-200 disabled:opacity-50"
+          >
+            Compact
+          </button>
+          <button
+            type="button"
+            onClick={() => void runMemoryAction("reindex")}
+            disabled={busy}
+            className="rounded-xl bg-gray-100 px-3 py-1.5 text-xs font-semibold text-foreground transition hover:bg-gray-200 disabled:opacity-50"
+          >
+            Reindex
+          </button>
+        </div>
+        {notice && <div className="mb-3 rounded-xl bg-emerald-50 px-3 py-2 text-xs text-emerald-700">{notice}</div>}
+        {error && <div className="mb-3 rounded-xl bg-red-50 px-3 py-2 text-xs text-red-500">{error}</div>}
+        {loading ? (
+          <div className="rounded-xl border border-dashed border-black/[0.08] px-4 py-8 text-center text-sm text-secondary">
+            Loading memory...
+          </div>
+        ) : filteredFiles.length === 0 ? (
+          <div className="rounded-xl border border-dashed border-black/[0.08] px-4 py-8 text-center text-sm text-secondary">
+            No memory files found.
+          </div>
+        ) : (
+          <div className="max-h-[520px] divide-y divide-black/[0.06] overflow-y-auto rounded-xl border border-black/[0.08]">
+            {filteredFiles.map((file) => {
+              const checked = selectedPaths.has(file.path);
+              const active = selectedPath === file.path;
+              return (
+                <div key={file.path} className={`flex items-center gap-3 px-3 py-2 ${active ? "bg-primary/[0.06]" : "bg-white"}`}>
+                  <input
+                    type="checkbox"
+                    checked={checked}
+                    onChange={() => toggleSelected(file.path)}
+                    className="h-4 w-4 rounded border-black/[0.12]"
+                    aria-label={`Select ${file.path}`}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => void openFile(file.path)}
+                    className="min-w-0 flex-1 text-left"
+                  >
+                    <div className="truncate text-sm font-semibold text-foreground">{file.path}</div>
+                    <div className="mt-0.5 text-xs text-secondary">
+                      {formatFileSize(file.sizeBytes)}
+                      {file.mtimeMs ? ` · ${new Date(file.mtimeMs).toISOString()}` : ""}
+                    </div>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void deletePaths([file.path])}
+                    disabled={busy}
+                    className="rounded-lg px-2 py-1 text-xs font-semibold text-red-500 transition hover:bg-red-50 disabled:opacity-50"
+                  >
+                    Delete
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </DashboardCard>
+
+      <div className="space-y-5">
+        <DashboardCard
+          title={selectedPath ?? "Memory File"}
+          action={
+            selectedPath ? (
+              <button
+                type="button"
+                onClick={() => void saveSelected()}
+                disabled={busy || fileLoading || editedContent === content}
+                className="rounded-xl bg-primary px-3 py-1.5 text-sm font-semibold text-white transition hover:bg-primary/90 disabled:opacity-50"
+              >
+                Save
+              </button>
+            ) : null
+          }
+        >
+          {!selectedPath ? (
+            <div className="rounded-xl border border-dashed border-black/[0.08] px-4 py-10 text-center text-sm text-secondary">
+              Select a memory file to view or edit it.
+            </div>
+          ) : fileLoading ? (
+            <div className="rounded-xl border border-dashed border-black/[0.08] px-4 py-10 text-center text-sm text-secondary">
+              Loading file...
+            </div>
+          ) : (
+            <textarea
+              value={editedContent}
+              onChange={(event) => setEditedContent(event.target.value)}
+              spellCheck={false}
+              className="h-[420px] w-full resize-none rounded-xl border border-black/[0.08] bg-white px-4 py-3 font-mono text-sm leading-6 text-foreground outline-none transition focus:border-primary/40 focus:ring-4 focus:ring-primary/10"
+            />
+          )}
+        </DashboardCard>
+
+        {searchResults.length > 0 && (
+          <DashboardCard title="Search Results">
+            <div className="space-y-2">
+              {searchResults.map((result, index) => (
+                <button
+                  key={`${result.path ?? "result"}-${index}`}
+                  type="button"
+                  onClick={() => result.path && void openFile(result.path)}
+                  className="block w-full rounded-xl bg-gray-50 px-4 py-3 text-left transition hover:bg-gray-100"
+                >
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="truncate text-sm font-semibold text-foreground">
+                      {result.path ?? `result-${index + 1}`}
+                    </div>
+                    {typeof result.score === "number" && (
+                      <div className="shrink-0 text-xs text-secondary">{result.score.toFixed(2)}</div>
+                    )}
+                  </div>
+                  {result.contentPreview && (
+                    <div className="mt-1 line-clamp-3 text-xs leading-5 text-secondary">
+                      {result.contentPreview}
+                    </div>
+                  )}
+                </button>
+              ))}
+            </div>
+          </DashboardCard>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function SkillsDashboard({
   skillsSnapshot,
   loading,
@@ -1081,13 +1456,24 @@ function LocalDashboardShell({
   workspaceFiles,
   workspaceLoading,
   workspaceRefreshing,
+  memoryFiles,
+  memoryStatus,
+  memoryLoading,
+  memoryRefreshing,
   setAgentUrl,
   setToken,
   onNavigate,
   onRefreshAll,
   onRefreshKnowledge,
   onRefreshWorkspace,
+  onRefreshMemory,
   onRefreshSkills,
+  onMemorySearch,
+  onMemoryReadFile,
+  onMemorySaveFile,
+  onMemoryDeleteFiles,
+  onMemoryCompact,
+  onMemoryReindex,
   onSaveConnection,
   onCheckRuntime,
 }: {
@@ -1104,13 +1490,24 @@ function LocalDashboardShell({
   workspaceFiles: WorkspaceFileEntry[];
   workspaceLoading: boolean;
   workspaceRefreshing: boolean;
+  memoryFiles: MemoryFileEntry[];
+  memoryStatus: JsonRecord | null;
+  memoryLoading: boolean;
+  memoryRefreshing: boolean;
   setAgentUrl: (value: string) => void;
   setToken: (value: string) => void;
   onNavigate: (route: AppRoute) => void;
   onRefreshAll: () => void;
   onRefreshKnowledge: () => void;
   onRefreshWorkspace: () => void;
+  onRefreshMemory: () => void;
   onRefreshSkills: () => void;
+  onMemorySearch: (query: string) => Promise<JsonRecord>;
+  onMemoryReadFile: (path: string) => Promise<string>;
+  onMemorySaveFile: (path: string, content: string) => Promise<void>;
+  onMemoryDeleteFiles: (paths: string[]) => Promise<void>;
+  onMemoryCompact: () => Promise<void>;
+  onMemoryReindex: () => Promise<void>;
   onSaveConnection: () => void;
   onCheckRuntime: () => void;
 }) {
@@ -1121,6 +1518,7 @@ function LocalDashboardShell({
     skills: "Skills",
     workspace: "Workspace",
     knowledge: "Knowledge",
+    memory: "Memory",
   };
 
   return (
@@ -1192,6 +1590,21 @@ function LocalDashboardShell({
               onRefresh={onRefreshWorkspace}
             />
           )}
+          {route === "memory" && (
+            <MemoryDashboard
+              memoryFiles={memoryFiles}
+              memoryStatus={memoryStatus}
+              loading={memoryLoading}
+              refreshing={memoryRefreshing}
+              onRefresh={onRefreshMemory}
+              onSearch={onMemorySearch}
+              onReadFile={onMemoryReadFile}
+              onSaveFile={onMemorySaveFile}
+              onDeleteFiles={onMemoryDeleteFiles}
+              onCompact={onMemoryCompact}
+              onReindex={onMemoryReindex}
+            />
+          )}
         </div>
       </main>
     </div>
@@ -1222,6 +1635,10 @@ export function App() {
   const [workspaceFiles, setWorkspaceFiles] = useState<WorkspaceFileEntry[]>([]);
   const [workspaceLoading, setWorkspaceLoading] = useState(true);
   const [workspaceRefreshing, setWorkspaceRefreshing] = useState(false);
+  const [memoryFiles, setMemoryFiles] = useState<MemoryFileEntry[]>([]);
+  const [memoryStatus, setMemoryStatus] = useState<JsonRecord | null>(null);
+  const [memoryLoading, setMemoryLoading] = useState(true);
+  const [memoryRefreshing, setMemoryRefreshing] = useState(false);
   const [uploadStates, setUploadStates] = useState<Record<string, PendingKbUpload>>({});
   const [replyingTo, setReplyingTo] = useState<ReplyTo | null>(null);
   const [streamingComposerMode, setStreamingComposerMode] = useState<StreamingComposerMode>("queue");
@@ -1294,6 +1711,22 @@ export function App() {
     async (path: string, body: JsonRecord): Promise<JsonRecord> => {
       const response = await fetch(`${normalizedBase}${path}`, {
         method: "PUT",
+        headers: authHeaders(true),
+        body: JSON.stringify(body),
+      });
+      const payload = (await response.json().catch(() => ({}))) as JsonRecord;
+      if (!response.ok) {
+        throw new Error(asString(payload.error, response.statusText));
+      }
+      return payload;
+    },
+    [authHeaders, normalizedBase],
+  );
+
+  const deleteJson = useCallback(
+    async (path: string, body: JsonRecord): Promise<JsonRecord> => {
+      const response = await fetch(`${normalizedBase}${path}`, {
+        method: "DELETE",
         headers: authHeaders(true),
         body: JSON.stringify(body),
       });
@@ -1380,6 +1813,32 @@ export function App() {
     }
   }, [getJson]);
 
+  const refreshMemory = useCallback(async () => {
+    setMemoryRefreshing(true);
+    try {
+      const payload = await getJson("/v1/app/memory");
+      setMemoryStatus(asRecord(payload.status));
+      setMemoryFiles(
+        asArray(payload.files)
+          .map((file) => ({
+            path: asString(file.path),
+            sizeBytes: asNumber(file.sizeBytes, 0),
+            mtimeMs:
+              typeof file.mtimeMs === "number" && Number.isFinite(file.mtimeMs)
+                ? file.mtimeMs
+                : null,
+          }))
+          .filter((file) => file.path.length > 0),
+      );
+    } catch {
+      setMemoryStatus(null);
+      setMemoryFiles([]);
+    } finally {
+      setMemoryLoading(false);
+      setMemoryRefreshing(false);
+    }
+  }, [getJson]);
+
   const saveWorkspaceFile = useCallback(
     async (path: string, content: string) => {
       await putJson("/v1/app/workspace/file", { path, content });
@@ -1388,20 +1847,61 @@ export function App() {
     [putJson, refreshWorkspace],
   );
 
+  const readMemoryFile = useCallback(
+    async (path: string): Promise<string> => {
+      const payload = await getJson(`/v1/app/memory/file?path=${encodeURIComponent(path)}`);
+      return asString(payload.content);
+    },
+    [getJson],
+  );
+
+  const searchMemory = useCallback(
+    async (query: string): Promise<JsonRecord> =>
+      getJson(`/v1/app/memory/search?q=${encodeURIComponent(query)}&limit=10`),
+    [getJson],
+  );
+
+  const deleteMemoryFiles = useCallback(
+    async (paths: string[]): Promise<void> => {
+      await deleteJson("/v1/app/memory/files", { paths });
+      await refreshMemory();
+      await refreshWorkspace();
+    },
+    [deleteJson, refreshMemory, refreshWorkspace],
+  );
+
+  const compactMemory = useCallback(async (): Promise<void> => {
+    await sendJson("/v1/app/memory/compact", { force: true });
+    await refreshMemory();
+  }, [refreshMemory, sendJson]);
+
+  const reindexMemory = useCallback(async (): Promise<void> => {
+    await sendJson("/v1/app/memory/reindex", {});
+    await refreshMemory();
+  }, [refreshMemory, sendJson]);
+
+  const saveMemoryFile = useCallback(
+    async (path: string, content: string): Promise<void> => {
+      await saveWorkspaceFile(path, content);
+      await refreshMemory();
+    },
+    [refreshMemory, saveWorkspaceFile],
+  );
+
   const refreshChannels = useCallback(() => {
     setRefreshing(true);
     store.setChannels(store.channels.length > 0 ? store.channels : [defaultChannel()], { botId: BOT_ID });
-    void Promise.allSettled([refreshRuntime(), refreshKnowledge(), refreshWorkspace(), refreshSkills()]).finally(() => {
+    void Promise.allSettled([refreshRuntime(), refreshKnowledge(), refreshWorkspace(), refreshMemory(), refreshSkills()]).finally(() => {
       window.setTimeout(() => setRefreshing(false), 300);
     });
-  }, [refreshKnowledge, refreshRuntime, refreshSkills, refreshWorkspace, store]);
+  }, [refreshKnowledge, refreshMemory, refreshRuntime, refreshSkills, refreshWorkspace, store]);
 
   const refreshDashboardData = useCallback(() => {
     setRefreshing(true);
-    void Promise.allSettled([refreshRuntime(), refreshKnowledge(), refreshWorkspace(), refreshSkills()]).finally(() => {
+    void Promise.allSettled([refreshRuntime(), refreshKnowledge(), refreshWorkspace(), refreshMemory(), refreshSkills()]).finally(() => {
       window.setTimeout(() => setRefreshing(false), 300);
     });
-  }, [refreshKnowledge, refreshRuntime, refreshSkills, refreshWorkspace]);
+  }, [refreshKnowledge, refreshMemory, refreshRuntime, refreshSkills, refreshWorkspace]);
 
   const navigateToRoute = useCallback(
     (route: AppRoute, channel = useChatStore.getState().activeChannel || DEFAULT_CHANNEL) => {
@@ -1444,7 +1944,7 @@ export function App() {
         }
       })
       .catch(() => {});
-    void Promise.allSettled([refreshRuntime(), refreshKnowledge(), refreshWorkspace(), refreshSkills()]);
+    void Promise.allSettled([refreshRuntime(), refreshKnowledge(), refreshWorkspace(), refreshMemory(), refreshSkills()]);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -2260,19 +2760,30 @@ export function App() {
         kbCollections={kbCollections}
         kbLoading={kbLoading}
         kbRefreshing={kbRefreshing}
-        workspaceFiles={workspaceFiles}
-        workspaceLoading={workspaceLoading}
-        workspaceRefreshing={workspaceRefreshing}
-        setAgentUrl={setAgentUrl}
-        setToken={setToken}
-        onNavigate={navigateToRoute}
-        onRefreshAll={refreshDashboardData}
-        onRefreshKnowledge={() => void refreshKnowledge()}
-        onRefreshWorkspace={() => void refreshWorkspace()}
-        onRefreshSkills={() => void refreshSkills()}
-        onSaveConnection={handleSaveConnection}
-        onCheckRuntime={() => void refreshRuntime()}
-      />
+         workspaceFiles={workspaceFiles}
+         workspaceLoading={workspaceLoading}
+         workspaceRefreshing={workspaceRefreshing}
+         memoryFiles={memoryFiles}
+         memoryStatus={memoryStatus}
+         memoryLoading={memoryLoading}
+         memoryRefreshing={memoryRefreshing}
+         setAgentUrl={setAgentUrl}
+         setToken={setToken}
+         onNavigate={navigateToRoute}
+         onRefreshAll={refreshDashboardData}
+         onRefreshKnowledge={() => void refreshKnowledge()}
+         onRefreshWorkspace={() => void refreshWorkspace()}
+         onRefreshMemory={() => void refreshMemory()}
+         onRefreshSkills={() => void refreshSkills()}
+         onMemorySearch={searchMemory}
+         onMemoryReadFile={readMemoryFile}
+         onMemorySaveFile={saveMemoryFile}
+         onMemoryDeleteFiles={deleteMemoryFiles}
+         onMemoryCompact={compactMemory}
+         onMemoryReindex={reindexMemory}
+         onSaveConnection={handleSaveConnection}
+         onCheckRuntime={() => void refreshRuntime()}
+       />
     );
   }
 

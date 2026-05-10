@@ -1,0 +1,39 @@
+{
+  "benchmarkVersion": 1,
+  "agent": "magi-agent",
+  "runId": "sample",
+  "createdAt": "2026-05-08T00:00:00.000Z",
+  "results": [
+    {
+      "taskId": "current-public-facts",
+      "mode": "manual-sample",
+      "elapsedMs": 1000,
+      "inspectedSources": [
+        {
+          "kind": "web_fetch",
+          "url": "https://github.com/sst/opencode",
+          "title": "OpenCode GitHub repository"
+        }
+      ],
+      "toolCalls": [
+        {
+          "name": "WebSearch",
+          "count": 1
+        }
+      ],
+      "scores": {
+        "factualAccuracy": 4,
+        "citationPrecision": 4,
+        "sourceFreshness": 4,
+        "primarySourcePreference": 4,
+        "contradictionHandling": 3,
+        "claimEvidenceCoverage": 3,
+        "toolUsageQuality": 4,
+        "permissionErgonomics": 3,
+        "synthesisUsefulness": 4
+      },
+      "failureCategories": ["claim_evidence_partial"],
+      "notes": "Sample only; not a production baseline."
+    }
+  ]
+}

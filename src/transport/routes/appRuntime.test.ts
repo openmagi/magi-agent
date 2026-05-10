@@ -456,13 +456,19 @@ function requestJson(
   opts: { method?: string; body?: unknown } = {},
 ): Promise<{ status: number; body: unknown }> {
   return new Promise((resolve, reject) => {
+    const bodyText = opts.body !== undefined ? JSON.stringify(opts.body) : undefined;
     const req = http.request(
       url,
       {
         method: opts.method ?? "GET",
         headers: {
           ...(token ? { Authorization: `Bearer ${token}` } : {}),
-          ...(opts.body !== undefined ? { "Content-Type": "application/json" } : {}),
+          ...(bodyText !== undefined
+            ? {
+                "Content-Type": "application/json",
+                "Content-Length": Buffer.byteLength(bodyText),
+              }
+            : {}),
         },
       },
       (res) => {
@@ -481,7 +487,7 @@ function requestJson(
       },
     );
     req.on("error", reject);
-    if (opts.body !== undefined) req.write(JSON.stringify(opts.body));
+    if (bodyText !== undefined) req.write(bodyText);
     req.end();
   });
 }
@@ -868,6 +874,39 @@ describe("HttpServer /v1/app runtime routes", () => {
     expect(reindex.status).toBe(200);
     expect(reindex.body).toEqual({ ok: true });
     await expect(fs.readFile(path.join(tmp, "memory", ".reindexed"), "utf8")).resolves.toBe("1");
+  });
+
+  it("deletes selected Hipocampus memory files without allowing path escapes", async () => {
+    const deleted = await requestJson(
+      `http://127.0.0.1:${port}/v1/app/memory/files`,
+      "local-token",
+      {
+        method: "DELETE",
+        body: { paths: ["memory/daily/2026-05-07.md"] },
+      },
+    );
+
+    expect(deleted.status).toBe(200);
+    expect(deleted.body).toEqual({
+      ok: true,
+      deleted: ["memory/daily/2026-05-07.md"],
+    });
+    await expect(
+      fs.stat(path.join(tmp, "memory", "daily", "2026-05-07.md")),
+    ).rejects.toMatchObject({ code: "ENOENT" });
+    await expect(fs.readFile(path.join(tmp, "memory", ".reindexed"), "utf8")).resolves.toBe("1");
+
+    const escape = await requestJson(
+      `http://127.0.0.1:${port}/v1/app/memory/files`,
+      "local-token",
+      {
+        method: "DELETE",
+        body: { paths: ["../outside.md"] },
+      },
+    );
+
+    expect(escape.status).toBe(400);
+    expect(escape.body).toEqual({ error: "invalid_path" });
   });
 
   it("lists, searches, reads, and writes local workspace knowledge files", async () => {
