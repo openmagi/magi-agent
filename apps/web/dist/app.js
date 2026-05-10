@@ -30076,11 +30076,11 @@ function plural(count, singular, pluralText) {
 function secondsBetween(startedAt, now) {
   return Math.max(0, Math.round((now - startedAt) / 1e3));
 }
-function isKorean$6(language) {
+function isKorean$7(language) {
   return language === "ko";
 }
-function t$5(language, en, ko) {
-  return isKorean$6(language) ? ko : en;
+function t$6(language, en, ko) {
+  return isKorean$7(language) ? ko : en;
 }
 function thinkingDurationLabel(seconds, language, completed) {
   if (language === "ko") return `${seconds}초 동안 작업`;
@@ -30089,36 +30089,36 @@ function thinkingDurationLabel(seconds, language, completed) {
 }
 function formatSeconds(seconds, language) {
   const rounded = Math.max(0, Math.round(seconds));
-  return isKorean$6(language) ? `${rounded}초` : `${rounded}s`;
+  return isKorean$7(language) ? `${rounded}초` : `${rounded}s`;
 }
 function describePhase(phase, language, elapsedSeconds) {
   switch (phase) {
     case "pending":
-      return { label: t$5(language, "Preparing turn", "턴 준비 중") };
+      return { label: t$6(language, "Preparing turn", "턴 준비 중") };
     case "planning":
       return {
-        label: t$5(language, "Planning next steps", "다음 단계 계획 중"),
+        label: t$6(language, "Planning next steps", "다음 단계 계획 중"),
         ...typeof elapsedSeconds === "number" ? { detail: formatSeconds(elapsedSeconds, language) } : {}
       };
     case "executing":
       return {
-        label: t$5(language, "Running current step", "현재 단계 실행 중"),
+        label: t$6(language, "Running current step", "현재 단계 실행 중"),
         ...typeof elapsedSeconds === "number" ? { detail: formatSeconds(elapsedSeconds, language) } : {}
       };
     case "verifying":
       return {
-        label: t$5(language, "Verifying results", "결과 검증 중"),
+        label: t$6(language, "Verifying results", "결과 검증 중"),
         ...typeof elapsedSeconds === "number" ? { detail: formatSeconds(elapsedSeconds, language) } : {}
       };
     case "committing":
       return {
-        label: t$5(language, "Preparing final answer", "최종 답변 준비 중"),
+        label: t$6(language, "Preparing final answer", "최종 답변 준비 중"),
         ...typeof elapsedSeconds === "number" ? { detail: formatSeconds(elapsedSeconds, language) } : {}
       };
     case "aborted":
-      return { label: t$5(language, "Stopping current turn", "현재 턴 중단 중") };
+      return { label: t$6(language, "Stopping current turn", "현재 턴 중단 중") };
     case "committed":
-      return { label: t$5(language, "Finalizing response", "답변 마무리 중") };
+      return { label: t$6(language, "Finalizing response", "답변 마무리 중") };
     default:
       return null;
   }
@@ -30146,15 +30146,15 @@ function summarizeTaskBoard(taskBoard, live, language) {
   if (!live) {
     return {
       id: "task-board",
-      label: t$5(language, "Updated task board", "작업 목록 업데이트"),
-      detail: isKorean$6(language) ? `${completed}/${total}개 완료` : `${completed}/${total} complete`,
+      label: t$6(language, "Updated task board", "작업 목록 업데이트"),
+      detail: isKorean$7(language) ? `${completed}/${total}개 완료` : `${completed}/${total} complete`,
       status: "done"
     };
   }
   return {
     id: "task-board",
-    label: active > 0 ? isKorean$6(language) ? `${active}개 작업 진행 중` : `Working on ${active} ${plural(active, "task", "tasks")}` : t$5(language, "Updated task board", "작업 목록 업데이트"),
-    detail: isKorean$6(language) ? `${completed}/${total}개 완료` : `${completed}/${total} complete`,
+    label: active > 0 ? isKorean$7(language) ? `${active}개 작업 진행 중` : `Working on ${active} ${plural(active, "task", "tasks")}` : t$6(language, "Updated task board", "작업 목록 업데이트"),
+    detail: isKorean$7(language) ? `${completed}/${total}개 완료` : `${completed}/${total} complete`,
     status: active > 0 ? "running" : "done"
   };
 }
@@ -30172,7 +30172,7 @@ function groupCompletedActivities(activities, language) {
   if (counts.command > 0) {
     rows.push({
       id: "completed-command",
-      label: isKorean$6(language) ? `${counts.command}개 명령 실행` : `Ran ${counts.command} ${plural(counts.command, "command", "commands")}`,
+      label: isKorean$7(language) ? `${counts.command}개 명령 실행` : `Ran ${counts.command} ${plural(counts.command, "command", "commands")}`,
       status: "done",
       actionCount: counts.command
     });
@@ -30180,7 +30180,7 @@ function groupCompletedActivities(activities, language) {
   if (counts.read > 0) {
     rows.push({
       id: "completed-read",
-      label: isKorean$6(language) ? `${counts.read}개 파일 읽음` : `Read ${counts.read} ${plural(counts.read, "file", "files")}`,
+      label: isKorean$7(language) ? `${counts.read}개 파일 읽음` : `Read ${counts.read} ${plural(counts.read, "file", "files")}`,
       status: "done",
       actionCount: counts.read
     });
@@ -30188,7 +30188,7 @@ function groupCompletedActivities(activities, language) {
   if (counts.knowledge > 0) {
     rows.push({
       id: "completed-knowledge",
-      label: isKorean$6(language) ? `지식 ${counts.knowledge}회 사용` : `Used knowledge ${counts.knowledge} ${plural(counts.knowledge, "time", "times")}`,
+      label: isKorean$7(language) ? `지식 ${counts.knowledge}회 사용` : `Used knowledge ${counts.knowledge} ${plural(counts.knowledge, "time", "times")}`,
       status: "done",
       actionCount: counts.knowledge
     });
@@ -30196,7 +30196,7 @@ function groupCompletedActivities(activities, language) {
   if (counts.other > 0) {
     rows.push({
       id: "completed-other",
-      label: isKorean$6(language) ? `${counts.other}개 작업 완료` : `Completed ${counts.other} ${plural(counts.other, "action", "actions")}`,
+      label: isKorean$7(language) ? `${counts.other}개 작업 완료` : `Completed ${counts.other} ${plural(counts.other, "action", "actions")}`,
       status: "done",
       actionCount: counts.other
     });
@@ -30211,7 +30211,7 @@ function deriveAgentActivityItems(input) {
   if (input.fileProcessing) {
     rows.push({
       id: "file-processing",
-      label: t$5(language, "Processing attachments", "첨부파일 처리 중"),
+      label: t$6(language, "Processing attachments", "첨부파일 처리 중"),
       status: "running"
     });
   }
@@ -30235,7 +30235,7 @@ function deriveAgentActivityItems(input) {
   } else if (!input.live && (input.thinkingDuration || input.thinkingContent)) {
     rows.push({
       id: "thought",
-      label: input.thinkingDuration ? thinkingDurationLabel(input.thinkingDuration, language, true) : t$5(language, "Work", "작업"),
+      label: input.thinkingDuration ? thinkingDurationLabel(input.thinkingDuration, language, true) : t$6(language, "Work", "작업"),
       status: "done",
       ...input.thinkingContent ? { inputPreview: input.thinkingContent.slice(-500) } : {}
     });
@@ -30243,14 +30243,14 @@ function deriveAgentActivityItems(input) {
   if (input.live && typeof input.pendingInjectionCount === "number" && input.pendingInjectionCount > 0) {
     rows.push({
       id: "pending-injections",
-      label: input.pendingInjectionCount === 1 ? t$5(language, "1 follow-up queued", "후속 메시지 1개 대기") : isKorean$6(language) ? `후속 메시지 ${input.pendingInjectionCount}개 대기` : `${input.pendingInjectionCount} follow-ups queued`,
+      label: input.pendingInjectionCount === 1 ? t$6(language, "1 follow-up queued", "후속 메시지 1개 대기") : isKorean$7(language) ? `후속 메시지 ${input.pendingInjectionCount}개 대기` : `${input.pendingInjectionCount} follow-ups queued`,
       status: "running"
     });
   }
   if (input.live && typeof input.heartbeatElapsedMs === "number" && input.heartbeatElapsedMs > 0 && !rows.some((row) => row.id === "phase-executing")) {
     rows.push({
       id: "heartbeat",
-      label: t$5(language, "Still working on current step", "현재 단계 계속 진행 중"),
+      label: t$6(language, "Still working on current step", "현재 단계 계속 진행 중"),
       detail: formatSeconds(input.heartbeatElapsedMs / 1e3, language),
       status: "running"
     });
@@ -30267,7 +30267,7 @@ function deriveAgentActivityItems(input) {
     if (status === "running") {
       explicitRows.push({
         id: activity.id,
-        label: isKorean$6(language) ? `${activity.label} 실행 중` : `Running ${activity.label}`,
+        label: isKorean$7(language) ? `${activity.label} 실행 중` : `Running ${activity.label}`,
         status: "running",
         durationMs: activity.durationMs,
         inputPreview: activity.inputPreview
@@ -30275,7 +30275,7 @@ function deriveAgentActivityItems(input) {
     } else if (status === "error") {
       explicitRows.push({
         id: activity.id,
-        label: isKorean$6(language) ? `${activity.label} 실패` : `${activity.label} failed`,
+        label: isKorean$7(language) ? `${activity.label} 실패` : `${activity.label} failed`,
         status: "error",
         durationMs: activity.durationMs,
         outputPreview: activity.outputPreview
@@ -30283,7 +30283,7 @@ function deriveAgentActivityItems(input) {
     } else if (status === "denied") {
       explicitRows.push({
         id: activity.id,
-        label: isKorean$6(language) ? `${activity.label} 거부됨` : `${activity.label} denied`,
+        label: isKorean$7(language) ? `${activity.label} 거부됨` : `${activity.label} denied`,
         status: "denied",
         durationMs: activity.durationMs
       });
@@ -30301,9 +30301,9 @@ function getAgentActivitySummary(items, language) {
   const active = items.filter((item) => item.status === "running").length;
   const total = items.reduce((sum, item) => sum + (item.actionCount ?? 1), 0);
   if (active > 0) {
-    return isKorean$6(language) ? `${total}개 작업 진행 중` : `${total} ${plural(total, "action", "actions")} in progress`;
+    return isKorean$7(language) ? `${total}개 작업 진행 중` : `${total} ${plural(total, "action", "actions")} in progress`;
   }
-  return isKorean$6(language) ? `${total}개 작업 실행` : `Ran ${total} ${plural(total, "action", "actions")}`;
+  return isKorean$7(language) ? `${total}개 작업 실행` : `Ran ${total} ${plural(total, "action", "actions")}`;
 }
 function formatActivityDuration(durationMs) {
   if (typeof durationMs !== "number") return null;
@@ -31727,11 +31727,11 @@ function ControlRequestCard({ request, onRespond }) {
 }
 const MAX_SNIPPET_LENGTH = 240;
 const MAX_TARGET_LENGTH = 180;
-function isKorean$5(language) {
+function isKorean$6(language) {
   return language === "ko";
 }
 function localized(language, en, ko) {
-  return isKorean$5(language) ? ko : en;
+  return isKorean$6(language) ? ko : en;
 }
 const INTERNAL_STRUCTURED_KEYS = /* @__PURE__ */ new Set([
   "artifactid",
@@ -31967,7 +31967,7 @@ function commandPreview(command, outputSnippet, language) {
   if (/\b(pandoc|libreoffice|soffice|wkhtmltopdf|weasyprint|markdown-pdf)\b/.test(lower)) {
     const target = outputPath ? bounded(outputPath, MAX_TARGET_LENGTH) : void 0;
     return {
-      action: isKorean$5(language) ? `${fileKind(outputPath, language)} 생성` : `Creating ${fileKind(outputPath, language)}`,
+      action: isKorean$6(language) ? `${fileKind(outputPath, language)} 생성` : `Creating ${fileKind(outputPath, language)}`,
       ...target ? { target } : {},
       ...outputSnippet ? { snippet: outputSnippet } : {}
     };
@@ -32308,7 +32308,7 @@ function modelProgressPreview(inputPreview2, outputPreview, language) {
   const detail = displayValue(input, ["detail"]);
   const elapsedMs = displayValue(input, ["elapsedMs"]);
   const elapsedSeconds = elapsedMs ? Math.max(1, Math.round(Number(elapsedMs) / 1e3)) : null;
-  const elapsed = elapsedSeconds ? isKorean$5(language) ? `${elapsedSeconds}초째 작업 중` : `${elapsedSeconds}s elapsed` : void 0;
+  const elapsed = elapsedSeconds ? isKorean$6(language) ? `${elapsedSeconds}초째 작업 중` : `${elapsedSeconds}s elapsed` : void 0;
   const action = stage === "completed" ? localized(language, "Model step finished", "모델 단계 완료") : localized(language, "Thinking through next step", "다음 단계 판단 중");
   const target = label && !/thinking through next step/i.test(label) ? bounded(label, MAX_TARGET_LENGTH) : elapsed;
   const snippet = snippetFrom([detail, output].filter(Boolean).join("\n"));
@@ -32445,7 +32445,7 @@ function structuredFallbackPreview(label, inputPreview2, outputPreview, language
   }
   if (path2) {
     return {
-      action: isKorean$5(language) ? `${fileKind(path2, language)} 검토` : `Reviewing ${fileKind(path2, language)}`,
+      action: isKorean$6(language) ? `${fileKind(path2, language)} 검토` : `Reviewing ${fileKind(path2, language)}`,
       target: bounded(path2, MAX_TARGET_LENGTH)
     };
   }
@@ -32469,7 +32469,7 @@ function derivePublicToolPreview(input) {
   const outputSnippet = snippetFrom(input.outputPreview);
   if (tool === "fileread" || tool === "read") {
     return {
-      action: isKorean$5(language) ? `${fileKind(targetPath, language)} 검토` : `Reviewing ${fileKind(targetPath, language)}`,
+      action: isKorean$6(language) ? `${fileKind(targetPath, language)} 검토` : `Reviewing ${fileKind(targetPath, language)}`,
       ...targetPath ? { target: bounded(targetPath, MAX_TARGET_LENGTH) } : {},
       ...outputSnippet ? { snippet: outputSnippet } : {}
     };
@@ -32478,7 +32478,7 @@ function derivePublicToolPreview(input) {
     const content2 = stringValue(parsedInput, ["content", "text", "body"]);
     const contentSnippet = snippetFrom(content2);
     return {
-      action: isKorean$5(language) ? `${fileKind(targetPath, language)} 생성` : `Creating ${fileKind(targetPath, language)}`,
+      action: isKorean$6(language) ? `${fileKind(targetPath, language)} 생성` : `Creating ${fileKind(targetPath, language)}`,
       ...targetPath ? { target: bounded(targetPath, MAX_TARGET_LENGTH) } : {},
       ...contentSnippet ? { snippet: contentSnippet } : outputSnippet ? { snippet: outputSnippet } : {}
     };
@@ -32488,7 +32488,7 @@ function derivePublicToolPreview(input) {
     const newText = snippetFrom(stringValue(parsedInput, ["new_string", "newText", "replacement"]));
     const editSnippet = oldText && newText ? snippetFrom(`${localized(language, "Replace", "교체")}: ${oldText} -> ${newText}`) : snippetFrom(firstPreviewText(input));
     return {
-      action: isKorean$5(language) ? `${fileKind(targetPath, language)} 수정` : `Updating ${fileKind(targetPath, language)}`,
+      action: isKorean$6(language) ? `${fileKind(targetPath, language)} 수정` : `Updating ${fileKind(targetPath, language)}`,
       ...targetPath ? { target: bounded(targetPath, MAX_TARGET_LENGTH) } : {},
       ...editSnippet ? { snippet: editSnippet } : {}
     };
@@ -32598,16 +32598,16 @@ const PHASE_LABELS_KO$1 = {
   committed: "마무리 중",
   aborted: "중단됨"
 };
-function isKorean$4(language) {
+function isKorean$5(language) {
   return language === "ko";
 }
-function t$4(language, en, ko) {
-  return isKorean$4(language) ? ko : en;
+function t$5(language, en, ko) {
+  return isKorean$5(language) ? ko : en;
 }
 function formatElapsed(ms, language) {
   if (!ms || ms < 1e3) return void 0;
   const seconds = Math.max(1, Math.round(ms / 1e3));
-  return isKorean$4(language) ? `${seconds}초` : `${seconds}s`;
+  return isKorean$5(language) ? `${seconds}초` : `${seconds}s`;
 }
 function pendingControlRequests$2(requests) {
   return (requests ?? []).filter((request) => request.state === "pending");
@@ -32673,14 +32673,14 @@ function statusFromTask(task) {
 function taskMeta(task, language) {
   switch (task.status) {
     case "in_progress":
-      return t$4(language, "running", "진행 중");
+      return t$5(language, "running", "진행 중");
     case "completed":
-      return t$4(language, "done", "완료");
+      return t$5(language, "done", "완료");
     case "cancelled":
-      return t$4(language, "cancelled", "취소됨");
+      return t$5(language, "cancelled", "취소됨");
     case "pending":
     default:
-      return t$4(language, "pending", "대기 중");
+      return t$5(language, "pending", "대기 중");
   }
 }
 function missionMeta(mission) {
@@ -32697,18 +32697,18 @@ function normalizeRole(role) {
   return value || "subagent";
 }
 function controlLabel(request, language) {
-  if (request.kind === "user_question") return t$4(language, "Needs answer", "답변 필요");
-  return t$4(language, "Needs approval", "승인 필요");
+  if (request.kind === "user_question") return t$5(language, "Needs answer", "답변 필요");
+  return t$5(language, "Needs approval", "승인 필요");
 }
 function controlMeta(request, language) {
   switch (request.kind) {
     case "plan_approval":
-      return t$4(language, "plan", "계획");
+      return t$5(language, "plan", "계획");
     case "user_question":
-      return t$4(language, "question", "질문");
+      return t$5(language, "question", "질문");
     case "tool_permission":
     default:
-      return t$4(language, "tool", "도구");
+      return t$5(language, "tool", "도구");
   }
 }
 function normalizeToolLabel(label) {
@@ -32718,7 +32718,7 @@ function shouldDisplayToolActivity(activity) {
   return !LOW_SIGNAL_TOOL_LABELS.has(normalizeToolLabel(activity.label));
 }
 function patchOperationLabel(file, language) {
-  if (isKorean$4(language)) {
+  if (isKorean$5(language)) {
     if (file.operation === "create") return "생성";
     if (file.operation === "delete") return "삭제";
     return "수정";
@@ -32729,18 +32729,18 @@ function patchOperationLabel(file, language) {
 }
 function patchAction(activity, language) {
   const preview2 = activity.patchPreview;
-  if (preview2?.dryRun) return t$4(language, "Previewing patch", "패치 미리보기");
-  if (activity.status === "done") return t$4(language, "Applied patch", "패치 적용됨");
+  if (preview2?.dryRun) return t$5(language, "Previewing patch", "패치 미리보기");
+  if (activity.status === "done") return t$5(language, "Applied patch", "패치 적용됨");
   if (activity.status === "error" || activity.status === "denied") {
-    return t$4(language, "Patch blocked", "패치 차단됨");
+    return t$5(language, "Patch blocked", "패치 차단됨");
   }
-  return t$4(language, "Reviewing patch", "패치 검토 중");
+  return t$5(language, "Reviewing patch", "패치 검토 중");
 }
 function patchTarget(files, language) {
   if (files.length === 0) return void 0;
   const visible = files.slice(0, 3).join(", ");
   const suffix = files.length > 3 ? `, +${files.length - 3}` : "";
-  const noun = files.length === 1 ? t$4(language, "file", "파일") : t$4(language, "files", "파일");
+  const noun = files.length === 1 ? t$5(language, "file", "파일") : t$5(language, "files", "파일");
   return `${files.length} ${noun}: ${visible}${suffix}`;
 }
 function patchSnippet(files, language) {
@@ -32749,7 +32749,7 @@ function patchSnippet(files, language) {
     (file) => `${patchOperationLabel(file, language)} ${file.path} (+${file.addedLines}/-${file.removedLines})`
   );
   if (files.length > 4) {
-    lines.push(t$4(language, `+${files.length - 4} more files`, `외 ${files.length - 4}개 파일`));
+    lines.push(t$5(language, `+${files.length - 4} more files`, `외 ${files.length - 4}개 파일`));
   }
   return lines.join("\n");
 }
@@ -32795,14 +32795,14 @@ function deriveWorkConsoleRows({
 }) {
   const rows = [];
   const language = uiLanguage ?? channelState.responseLanguage;
-  const phase = channelState.reconnecting ? t$4(language, "Reconnecting", "다시 연결 중") : channelState.error ? t$4(language, "Blocked", "차단됨") : channelState.turnPhase ? isKorean$4(language) ? PHASE_LABELS_KO$1[channelState.turnPhase] : PHASE_LABELS$1[channelState.turnPhase] : channelState.streaming ? t$4(language, "Working", "작업 중") : null;
+  const phase = channelState.reconnecting ? t$5(language, "Reconnecting", "다시 연결 중") : channelState.error ? t$5(language, "Blocked", "차단됨") : channelState.turnPhase ? isKorean$5(language) ? PHASE_LABELS_KO$1[channelState.turnPhase] : PHASE_LABELS$1[channelState.turnPhase] : channelState.streaming ? t$5(language, "Working", "작업 중") : null;
   const elapsed = formatElapsed(channelState.heartbeatElapsedMs, language);
   if (phase) {
     rows.push({
       id: "phase",
       group: "status",
       label: phase,
-      detail: elapsed ? t$4(language, `${elapsed} elapsed`, `${elapsed} 경과`) : void 0,
+      detail: elapsed ? t$5(language, `${elapsed} elapsed`, `${elapsed} 경과`) : void 0,
       status: channelState.error || channelState.turnPhase === "aborted" ? "error" : "running"
     });
   }
@@ -32844,10 +32844,10 @@ function deriveWorkConsoleRows({
     rows.push({
       id: `queue:${message.id}`,
       group: "queue",
-      label: index2 === 0 ? t$4(language, "Queued follow-up", "대기 중인 후속 메시지") : t$4(language, `Queued follow-up ${index2 + 1}`, `대기 중인 후속 메시지 ${index2 + 1}`),
+      label: index2 === 0 ? t$5(language, "Queued follow-up", "대기 중인 후속 메시지") : t$5(language, `Queued follow-up ${index2 + 1}`, `대기 중인 후속 메시지 ${index2 + 1}`),
       detail: message.content,
       status: message.priority === "now" ? "running" : "waiting",
-      meta: message.priority === "now" ? t$4(language, "steering next", "다음 턴 조정") : t$4(language, "will send later", "나중에 전송")
+      meta: message.priority === "now" ? t$5(language, "steering next", "다음 턴 조정") : t$5(language, "will send later", "나중에 전송")
     });
   }
   for (const request of pendingControlRequests$2(controlRequests)) {
@@ -32865,8 +32865,8 @@ function deriveWorkConsoleRows({
       {
         id: "idle",
         group: "status",
-        label: t$4(language, "Idle", "대기 중"),
-        detail: t$4(language, "Live agent work will appear here.", "실시간 작업 상태가 여기에 표시됩니다."),
+        label: t$5(language, "Idle", "대기 중"),
+        detail: t$5(language, "Live agent work will appear here.", "실시간 작업 상태가 여기에 표시됩니다."),
         status: "info"
       }
     ];
@@ -32897,11 +32897,11 @@ const TERMINAL_MISSION_STATUSES = /* @__PURE__ */ new Set([
   "failed",
   "cancelled"
 ]);
-function isKorean$3(language) {
+function isKorean$4(language) {
   return language === "ko";
 }
-function t$3(language, en, ko) {
-  return isKorean$3(language) ? ko : en;
+function t$4(language, en, ko) {
+  return isKorean$4(language) ? ko : en;
 }
 function pendingControlRequests$1(requests) {
   return (requests ?? []).filter((request) => request.state === "pending");
@@ -32935,64 +32935,64 @@ function firstReadyPendingTask(taskBoard) {
   ) ?? taskBoard.tasks.find((task) => task.status === "pending") ?? null;
 }
 function controlRequestStatus(request, language) {
-  return request.kind === "user_question" ? t$3(language, "Needs answer", "답변 필요") : t$3(language, "Needs approval", "승인 필요");
+  return request.kind === "user_question" ? t$4(language, "Needs answer", "답변 필요") : t$4(language, "Needs approval", "승인 필요");
 }
 function controlRequestNow(request, language) {
   switch (request.kind) {
     case "plan_approval":
-      return t$3(language, "Waiting for plan approval", "계획 승인 대기 중");
+      return t$4(language, "Waiting for plan approval", "계획 승인 대기 중");
     case "user_question":
-      return t$3(language, "Waiting for your answer", "사용자 답변 대기 중");
+      return t$4(language, "Waiting for your answer", "사용자 답변 대기 중");
     case "tool_permission":
     default:
-      return t$3(language, "Waiting for tool permission", "도구 권한 대기 중");
+      return t$4(language, "Waiting for tool permission", "도구 권한 대기 중");
   }
 }
 function statusFrom(channelState, pendingRequests, language) {
   if (pendingRequests[0]) return controlRequestStatus(pendingRequests[0], language);
-  if (channelState.reconnecting) return t$3(language, "Reconnecting", "다시 연결 중");
+  if (channelState.reconnecting) return t$4(language, "Reconnecting", "다시 연결 중");
   if (channelState.turnPhase === "aborted" || channelState.error) {
-    return t$3(language, "Blocked", "차단됨");
+    return t$4(language, "Blocked", "차단됨");
   }
   if ((channelState.activeTools ?? []).some((activity) => activity.status === "error")) {
-    return t$3(language, "Blocked", "차단됨");
+    return t$4(language, "Blocked", "차단됨");
   }
-  if (channelState.turnPhase === "verifying") return t$3(language, "Verifying", "검증 중");
+  if (channelState.turnPhase === "verifying") return t$4(language, "Verifying", "검증 중");
   if (channelState.turnPhase === "committing" || channelState.turnPhase === "committed") {
-    return t$3(language, "Writing answer", "답변 작성 중");
+    return t$4(language, "Writing answer", "답변 작성 중");
   }
   if (channelState.turnPhase === "executing" || activeTools(channelState).length > 0 || activeSubagents(channelState).length > 0 || firstInProgressTask(channelState.taskBoard)) {
-    return t$3(language, "Running", "실행 중");
+    return t$4(language, "Running", "실행 중");
   }
   if (channelState.turnPhase === "pending" || channelState.turnPhase === "planning") {
-    return t$3(language, "Planning", "계획 중");
+    return t$4(language, "Planning", "계획 중");
   }
-  return t$3(language, "Working", "작업 중");
+  return t$4(language, "Working", "작업 중");
 }
 function progressFrom(channelState, language) {
   const tasks = channelState.taskBoard?.tasks ?? [];
   if (tasks.length > 0) {
     const completed = completedLikeTaskCount(tasks);
-    return isKorean$3(language) ? `${completed}/${tasks.length}개 완료` : `${completed}/${tasks.length} tasks complete`;
+    return isKorean$4(language) ? `${completed}/${tasks.length}개 완료` : `${completed}/${tasks.length} tasks complete`;
   }
   const runningTools = activeTools(channelState);
   const runningSubagents = activeSubagents(channelState);
   if (runningTools.length > 0 && runningSubagents.length > 0) {
     const count = runningTools.length + runningSubagents.length;
-    return isKorean$3(language) ? `${count}개 작업 실행 중` : `${count} actions active`;
+    return isKorean$4(language) ? `${count}개 작업 실행 중` : `${count} actions active`;
   }
   if (runningTools.length > 0) {
-    return isKorean$3(language) ? `${runningTools.length}개 작업 실행 중` : `${runningTools.length} action${runningTools.length === 1 ? "" : "s"} active`;
+    return isKorean$4(language) ? `${runningTools.length}개 작업 실행 중` : `${runningTools.length} action${runningTools.length === 1 ? "" : "s"} active`;
   }
   if (runningSubagents.length > 0) {
-    if (isKorean$3(language)) return `${runningSubagents.length}명 백그라운드 작업 중`;
+    if (isKorean$4(language)) return `${runningSubagents.length}명 백그라운드 작업 중`;
     return `${runningSubagents.length} background agent${runningSubagents.length === 1 ? "" : "s"} active`;
   }
   return void 0;
 }
 function phaseLabel$1(phase, language) {
-  if (!phase) return t$3(language, "Working", "작업 중");
-  return isKorean$3(language) ? PHASE_LABELS_KO[phase] : PHASE_LABELS[phase];
+  if (!phase) return t$4(language, "Working", "작업 중");
+  return isKorean$4(language) ? PHASE_LABELS_KO[phase] : PHASE_LABELS[phase];
 }
 function currentGoalFrom(channelState) {
   const goal = channelState.currentGoal?.replace(/\s+/g, " ").trim();
@@ -33010,7 +33010,7 @@ function activeGoalMission(channelState) {
   ) ?? null;
 }
 function goalFrom(channelState, language) {
-  return firstInProgressTask(channelState.taskBoard)?.title ?? activeGoalMission(channelState)?.title ?? currentGoalFrom(channelState) ?? t$3(language, "Working on your request", "요청 처리 중");
+  return firstInProgressTask(channelState.taskBoard)?.title ?? activeGoalMission(channelState)?.title ?? currentGoalFrom(channelState) ?? t$4(language, "Working on your request", "요청 처리 중");
 }
 function nowFrom(channelState, pendingRequests, language) {
   if (pendingRequests[0]) return controlRequestNow(pendingRequests[0], language);
@@ -33020,7 +33020,7 @@ function nowFrom(channelState, pendingRequests, language) {
   if (tool) return tool.label;
   const subagent = activeSubagents(channelState)[0];
   if (subagent) {
-    return subagent.detail || subagent.role || t$3(language, "Background agent", "백그라운드 도우미");
+    return subagent.detail || subagent.role || t$4(language, "Background agent", "백그라운드 도우미");
   }
   return phaseLabel$1(channelState.turnPhase ?? null, language);
 }
@@ -33030,7 +33030,7 @@ function nextFrom(channelState, queuedMessages, pendingRequests, language) {
   const task = firstReadyPendingTask(channelState.taskBoard);
   if (task) return task.title;
   if (channelState.turnPhase === "committing" || channelState.turnPhase === "committed") {
-    return t$3(language, "Preparing final answer", "최종 답변 준비 중");
+    return t$4(language, "Preparing final answer", "최종 답변 준비 중");
   }
   return void 0;
 }
@@ -33043,7 +33043,7 @@ function deriveWorkStateSummary({
   const pendingRequests = pendingControlRequests$1(controlRequests);
   const language = uiLanguage ?? channelState.responseLanguage;
   return {
-    title: t$3(language, "Current Work", "현재 작업"),
+    title: t$4(language, "Current Work", "현재 작업"),
     goal: goalFrom(channelState, language),
     status: statusFrom(channelState, pendingRequests, language),
     progress: progressFrom(channelState, language),
@@ -33054,11 +33054,11 @@ function deriveWorkStateSummary({
 function writingAnswerLabel(language) {
   return language === "ko" ? "답변 작성 중..." : "Writing answer...";
 }
-function isKorean$2(language) {
+function isKorean$3(language) {
   return language === "ko";
 }
-function t$2(language, en, ko) {
-  return isKorean$2(language) ? ko : en;
+function t$3(language, en, ko) {
+  return isKorean$3(language) ? ko : en;
 }
 function MessageSkeleton() {
   return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "space-y-5 py-2", children: [
@@ -33092,23 +33092,23 @@ function statusDotClass(status) {
 function browserActionLabel$2(action, language) {
   switch (action) {
     case "open":
-      return t$2(language, "Opening page", "페이지 여는 중");
+      return t$3(language, "Opening page", "페이지 여는 중");
     case "click":
     case "mouse_click":
-      return t$2(language, "Clicking", "클릭 중");
+      return t$3(language, "Clicking", "클릭 중");
     case "fill":
     case "keyboard_type":
     case "press":
-      return t$2(language, "Typing", "입력 중");
+      return t$3(language, "Typing", "입력 중");
     case "scroll":
-      return t$2(language, "Scrolling", "스크롤 중");
+      return t$3(language, "Scrolling", "스크롤 중");
     case "screenshot":
     case "snapshot":
-      return t$2(language, "Inspecting page", "페이지 확인 중");
+      return t$3(language, "Inspecting page", "페이지 확인 중");
     case "scrape":
-      return t$2(language, "Reading page", "페이지 읽는 중");
+      return t$3(language, "Reading page", "페이지 읽는 중");
     default:
-      return t$2(language, "Using browser", "브라우저 사용 중");
+      return t$3(language, "Using browser", "브라우저 사용 중");
   }
 }
 function hasOpenTaskState(channelState) {
@@ -33135,7 +33135,7 @@ function inlineWorkRows(channelState, queuedMessages, pendingRequests) {
     selected.push({
       id: "browser-frame",
       group: "status",
-      label: t$2(language, "Live browser", "실시간 브라우저"),
+      label: t$3(language, "Live browser", "실시간 브라우저"),
       detail: [
         browserActionLabel$2(channelState.browserFrame.action, language),
         channelState.browserFrame.url
@@ -33178,12 +33178,12 @@ function InlineRunStatus({
         /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "mt-0.5 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-xs text-secondary/70", children: [
           /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "font-medium text-foreground/75", children: summary.status }),
           summary.progress && /* @__PURE__ */ jsxRuntimeExports.jsx("span", { children: summary.progress }),
-          queuedMessages.length > 0 && /* @__PURE__ */ jsxRuntimeExports.jsx("span", { children: isKorean$2(language) ? `${queuedMessages.length}개 대기` : `${queuedMessages.length} queued` })
+          queuedMessages.length > 0 && /* @__PURE__ */ jsxRuntimeExports.jsx("span", { children: isKorean$3(language) ? `${queuedMessages.length}개 대기` : `${queuedMessages.length} queued` })
         ] })
       ] }),
-      /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "shrink-0 rounded-full bg-[#7C3AED]/10 px-2 py-0.5 text-[10px] font-semibold text-[#7C3AED]", children: t$2(language, "Live", "실시간") })
+      /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "shrink-0 rounded-full bg-[#7C3AED]/10 px-2 py-0.5 text-[10px] font-semibold text-[#7C3AED]", children: t$3(language, "Live", "실시간") })
     ] }),
-    rows.length > 0 && /* @__PURE__ */ jsxRuntimeExports.jsx("ul", { className: "mt-2 space-y-1", "aria-label": t$2(language, "Current work updates", "현재 작업 업데이트"), children: rows.map((row) => /* @__PURE__ */ jsxRuntimeExports.jsxs(
+    rows.length > 0 && /* @__PURE__ */ jsxRuntimeExports.jsx("ul", { className: "mt-2 space-y-1", "aria-label": t$3(language, "Current work updates", "현재 작업 업데이트"), children: rows.map((row) => /* @__PURE__ */ jsxRuntimeExports.jsxs(
       "li",
       {
         className: "flex min-w-0 items-start gap-2 rounded-md bg-black/[0.025] px-2 py-1.5",
@@ -33906,6 +33906,15 @@ function nextRunUntilDoneAfterSend(current, result) {
   if (!current) return false;
   return result === false;
 }
+function isKorean$2(language) {
+  return language === "ko";
+}
+function t$2(language, en, ko) {
+  return isKorean$2(language) ? ko : en;
+}
+function waitingCountLabel(count, language) {
+  return isKorean$2(language) ? `${count}개 대기` : `${count} waiting`;
+}
 function prefersMobileWebLineBreaks() {
   if (typeof navigator === "undefined") return false;
   const ua = navigator.userAgent;
@@ -33930,6 +33939,7 @@ function shouldCancelStopOnPointerDown(pointerType) {
 }
 const ChatInput = reactExports.forwardRef(function ChatInput2({
   onSend,
+  uiLanguage,
   onReset,
   disabled,
   streaming,
@@ -33960,13 +33970,22 @@ const ChatInput = reactExports.forwardRef(function ChatInput2({
   const slashRef = reactExports.useRef(null);
   const stopPointerHandledRef = reactExports.useRef(false);
   const stopPointerResetTimerRef = reactExports.useRef(null);
+  const language = uiLanguage;
   const steeringUnavailable = steeringDisabled || pendingFiles.length > 0;
   const effectiveStreamingMode = streamingMode === "steer" && steeringUnavailable ? "queue" : streamingMode;
   const queueBlocked = isStreamingComposerBlockedByQueue({
     queueFull,
     mode: effectiveStreamingMode
   });
-  const steeringUnavailableReason = pendingFiles.length > 0 ? "Attachments will send after the current run." : steeringDisabledReason ?? "Selected context will send after the current run.";
+  const steeringUnavailableReason = pendingFiles.length > 0 ? t$2(
+    language,
+    "Attachments will send after the current run.",
+    "첨부 파일은 현재 실행이 끝난 뒤 전송됩니다."
+  ) : steeringDisabledReason ?? t$2(
+    language,
+    "Selected context will send after the current run.",
+    "선택한 컨텍스트는 현재 실행이 끝난 뒤 전송됩니다."
+  );
   const [cursorPos, setCursorPos] = reactExports.useState(0);
   const slashToken = reactExports.useMemo(() => {
     const before = text2.slice(0, cursorPos);
@@ -34254,14 +34273,15 @@ const ChatInput = reactExports.forwardRef(function ChatInput2({
                 ] }) }),
                 /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "min-w-0", children: [
                   /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "flex flex-wrap items-center gap-1.5", children: [
-                    /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "font-semibold text-amber-950", children: "Queued after current run" }),
-                    /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "rounded-full bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-semibold text-amber-800", children: [
-                      queuedCount,
-                      " waiting"
-                    ] }),
-                    queueFull && /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "rounded-full bg-red-500/10 px-1.5 py-0.5 text-[10px] font-semibold text-red-600", children: "Queue full" })
+                    /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "font-semibold text-amber-950", children: t$2(language, "Queued after current run", "현재 실행 후 대기") }),
+                    /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "rounded-full bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-semibold text-amber-800", children: waitingCountLabel(queuedCount, language) }),
+                    queueFull && /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "rounded-full bg-red-500/10 px-1.5 py-0.5 text-[10px] font-semibold text-red-600", children: t$2(language, "Queue full", "대기열 가득 참") })
                   ] }),
-                  /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "mt-0.5 block truncate text-[10.5px] text-amber-800/75", children: "Will send automatically when this run finishes." })
+                  /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "mt-0.5 block truncate text-[10.5px] text-amber-800/75", children: t$2(
+                    language,
+                    "Will send automatically when this run finishes.",
+                    "현재 실행이 끝나면 자동 전송됩니다."
+                  ) })
                 ] })
               ] }),
               onCancelQueue && /* @__PURE__ */ jsxRuntimeExports.jsx(
@@ -34270,7 +34290,7 @@ const ChatInput = reactExports.forwardRef(function ChatInput2({
                   type: "button",
                   onClick: onCancelQueue,
                   className: "shrink-0 rounded-md px-2 py-1 text-[11px] font-semibold text-amber-800 transition-colors hover:bg-red-500/10 hover:text-red-600",
-                  children: "Clear queue"
+                  children: t$2(language, "Clear queue", "대기열 비우기")
                 }
               )
             ]
@@ -34281,7 +34301,7 @@ const ChatInput = reactExports.forwardRef(function ChatInput2({
             "div",
             {
               className: "inline-flex rounded-md border border-black/[0.08] bg-black/[0.04] p-0.5",
-              "aria-label": "Streaming send mode",
+              "aria-label": t$2(language, "Streaming send mode", "스트리밍 전송 모드"),
               children: [
                 /* @__PURE__ */ jsxRuntimeExports.jsx(
                   "button",
@@ -34290,8 +34310,12 @@ const ChatInput = reactExports.forwardRef(function ChatInput2({
                     onClick: () => onStreamingModeChange?.("queue"),
                     className: `rounded px-2 py-1 font-medium transition-colors ${effectiveStreamingMode === "queue" ? "bg-white text-foreground shadow-sm" : "text-secondary/70 hover:text-foreground"}`,
                     "aria-pressed": effectiveStreamingMode === "queue",
-                    title: "Send after the current run reaches a checkpoint",
-                    children: "Queue after run"
+                    title: t$2(
+                      language,
+                      "Send after the current run reaches a checkpoint",
+                      "현재 실행이 체크포인트에 도달하면 전송"
+                    ),
+                    children: t$2(language, "Queue after run", "현재 실행 후 대기")
                   }
                 ),
                 /* @__PURE__ */ jsxRuntimeExports.jsx(
@@ -34304,8 +34328,12 @@ const ChatInput = reactExports.forwardRef(function ChatInput2({
                     disabled: steeringUnavailable,
                     className: `rounded px-2 py-1 font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${effectiveStreamingMode === "steer" ? "bg-white text-foreground shadow-sm" : "text-secondary/70 hover:text-foreground"}`,
                     "aria-pressed": effectiveStreamingMode === "steer",
-                    title: steeringUnavailable ? steeringUnavailableReason : "Send now as a text-only steering update",
-                    children: "Steer current run"
+                    title: steeringUnavailable ? steeringUnavailableReason : t$2(
+                      language,
+                      "Send now as a text-only steering update",
+                      "텍스트 지시로 지금 현재 실행 조정"
+                    ),
+                    children: t$2(language, "Steer current run", "현재 실행 조정")
                   }
                 )
               ]
@@ -34320,8 +34348,9 @@ const ChatInput = reactExports.forwardRef(function ChatInput2({
           ] }),
           /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "min-w-0 flex-1 leading-snug", children: [
             /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "text-[11px] font-medium text-[#7C3AED]", children: [
-              "Replying to ",
-              replyingTo.role === "user" ? "You" : "Bot"
+              t$2(language, "Replying to", "답장 대상"),
+              " ",
+              replyingTo.role === "user" ? t$2(language, "You", "나") : t$2(language, "Bot", "봇")
             ] }),
             /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "truncate text-xs text-secondary/80", children: replyingTo.preview })
           ] }),
@@ -34330,7 +34359,7 @@ const ChatInput = reactExports.forwardRef(function ChatInput2({
             {
               type: "button",
               onClick: onCancelReply,
-              "aria-label": "Cancel reply",
+              "aria-label": t$2(language, "Cancel reply", "답장 취소"),
               className: "shrink-0 p-1 -m-1 rounded-md text-secondary/60 hover:text-foreground hover:bg-black/[0.04] transition-colors cursor-pointer",
               children: /* @__PURE__ */ jsxRuntimeExports.jsx("svg", { width: "14", height: "14", viewBox: "0 0 20 20", fill: "currentColor", "aria-hidden": "true", children: /* @__PURE__ */ jsxRuntimeExports.jsx("path", { d: "M6.28 5.22a.75.75 0 00-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 101.06 1.06L10 11.06l3.72 3.72a.75.75 0 101.06-1.06L11.06 10l3.72-3.72a.75.75 0 00-1.06-1.06L10 8.94 6.28 5.22z" }) })
             }
@@ -34418,7 +34447,7 @@ const ChatInput = reactExports.forwardRef(function ChatInput2({
                 ref: kbRef,
                 className: "absolute bottom-full left-0 right-0 mb-1 max-h-48 sm:max-h-64 overflow-y-auto rounded-xl border border-black/10 bg-white shadow-lg z-50",
                 children: [
-                  /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "px-3 py-1.5 text-[10px] font-semibold text-secondary/50 uppercase tracking-wide border-b border-black/[0.05]", children: "Knowledge Base" }),
+                  /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "px-3 py-1.5 text-[10px] font-semibold text-secondary/50 uppercase tracking-wide border-b border-black/[0.05]", children: t$2(language, "Knowledge Base", "지식베이스") }),
                   kbMatches.map((entry, i) => /* @__PURE__ */ jsxRuntimeExports.jsxs(
                     "button",
                     {
@@ -34456,7 +34485,7 @@ const ChatInput = reactExports.forwardRef(function ChatInput2({
                 onKeyUp: (e) => setCursorPos(e.target.selectionStart ?? cursorPos),
                 onClick: (e) => setCursorPos(e.target.selectionStart ?? cursorPos),
                 onPaste: handlePaste,
-                placeholder: "Message...",
+                placeholder: t$2(language, "Message...", "메시지..."),
                 rows: 1,
                 disabled: disabled || isSubmitting,
                 "data-chat-input-field": "true",
@@ -34477,7 +34506,7 @@ const ChatInput = reactExports.forwardRef(function ChatInput2({
                     onClick: () => fileInputRef.current?.click(),
                     disabled: disabled || queueBlocked || isSubmitting,
                     className: "w-10 h-10 flex items-center justify-center rounded-2xl bg-black/[0.04] text-secondary/60 hover:text-foreground hover:bg-black/[0.06] transition-all duration-200 cursor-pointer disabled:opacity-20 disabled:cursor-not-allowed shrink-0",
-                    "aria-label": "Attach file",
+                    "aria-label": t$2(language, "Attach file", "파일 첨부"),
                     children: /* @__PURE__ */ jsxRuntimeExports.jsx("svg", { className: "w-4.5 h-4.5", viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 2, strokeLinecap: "round", strokeLinejoin: "round", children: /* @__PURE__ */ jsxRuntimeExports.jsx("path", { d: "M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" }) })
                   }
                 ),
@@ -34504,7 +34533,11 @@ const ChatInput = reactExports.forwardRef(function ChatInput2({
                     "aria-pressed": runUntilDone,
                     "data-chat-goal-toggle": "true",
                     className: `flex h-10 shrink-0 items-center gap-2 rounded-2xl border px-3 text-xs font-medium transition-all duration-200 disabled:cursor-not-allowed disabled:opacity-30 ${runUntilDone ? "border-primary/25 bg-primary/10 text-primary shadow-[0_1px_6px_rgba(124,58,237,0.10)]" : "border-black/[0.08] bg-black/[0.03] text-secondary/75 hover:bg-black/[0.05] hover:text-foreground"}`,
-                    title: "Run the next message as a goal mission",
+                    title: t$2(
+                      language,
+                      "Run the next message as a goal mission",
+                      "다음 메시지를 목표 미션으로 실행"
+                    ),
                     children: [
                       /* @__PURE__ */ jsxRuntimeExports.jsx(
                         "span",
@@ -34517,7 +34550,7 @@ const ChatInput = reactExports.forwardRef(function ChatInput2({
                           ] })
                         }
                       ),
-                      /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "whitespace-nowrap", children: "Run until done" }),
+                      /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "whitespace-nowrap", children: t$2(language, "Run until done", "완료까지 실행") }),
                       runUntilDone && /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "rounded-md bg-white/70 px-1.5 py-0.5 text-[10px] font-semibold text-primary/80", children: "1x" })
                     ]
                   }
@@ -34532,8 +34565,8 @@ const ChatInput = reactExports.forwardRef(function ChatInput2({
                       onPointerDown: handleStopPointerDown,
                       onClick: handleStopClick,
                       className: "w-10 h-10 flex items-center justify-center rounded-2xl bg-red-500/15 text-red-400 hover:bg-red-500/25 active:scale-95 touch-manipulation transition-all duration-200 cursor-pointer",
-                      "aria-label": "Stop",
-                      title: "Stop (ESC)",
+                      "aria-label": t$2(language, "Stop", "중지"),
+                      title: t$2(language, "Stop (ESC)", "중지 (ESC)"),
                       children: /* @__PURE__ */ jsxRuntimeExports.jsx("svg", { className: "w-4 h-4", viewBox: "0 0 24 24", fill: "currentColor", children: /* @__PURE__ */ jsxRuntimeExports.jsx("rect", { x: "6", y: "6", width: "12", height: "12", rx: "2" }) })
                     }
                   ),
@@ -34544,7 +34577,7 @@ const ChatInput = reactExports.forwardRef(function ChatInput2({
                       "aria-hidden": "true",
                       children: [
                         /* @__PURE__ */ jsxRuntimeExports.jsx("kbd", { className: "font-mono", children: "⎋" }),
-                        /* @__PURE__ */ jsxRuntimeExports.jsx("span", { children: cancelHint ?? "ESC to cancel" })
+                        /* @__PURE__ */ jsxRuntimeExports.jsx("span", { children: cancelHint ?? t$2(language, "ESC to cancel", "ESC로 취소") })
                       ]
                     }
                   )
@@ -34554,8 +34587,16 @@ const ChatInput = reactExports.forwardRef(function ChatInput2({
                     onClick: () => void handleSend(),
                     disabled: !text2.trim() && pendingFiles.length === 0 || disabled || queueBlocked || isSubmitting,
                     className: "w-10 h-10 flex items-center justify-center rounded-2xl bg-primary text-white disabled:opacity-20 hover:bg-primary/80 active:scale-95 transition-all duration-200 cursor-pointer disabled:cursor-not-allowed shrink-0",
-                    "aria-label": streaming ? effectiveStreamingMode === "steer" ? "Steer current run" : "Queue message" : "Send",
-                    title: queueBlocked ? "Queue full — wait for the bot to finish" : streaming ? effectiveStreamingMode === "steer" ? "Steer current run" : "Queue message (fires after current response)" : "Send",
+                    "aria-label": streaming ? effectiveStreamingMode === "steer" ? t$2(language, "Steer current run", "현재 실행 조정") : t$2(language, "Queue message", "메시지 대기열에 추가") : t$2(language, "Send", "전송"),
+                    title: queueBlocked ? t$2(
+                      language,
+                      "Queue full - wait for the bot to finish",
+                      "대기열이 가득 찼습니다 - 봇 응답 완료까지 기다려 주세요"
+                    ) : streaming ? effectiveStreamingMode === "steer" ? t$2(language, "Steer current run", "현재 실행 조정") : t$2(
+                      language,
+                      "Queue message (fires after current response)",
+                      "메시지 대기열에 추가 (현재 응답 후 전송)"
+                    ) : t$2(language, "Send", "전송"),
                     children: /* @__PURE__ */ jsxRuntimeExports.jsx(
                       "svg",
                       {
@@ -36501,6 +36542,43 @@ function detectMessageResponseLanguage(text2) {
   if (latin >= 3) return spanishSignal >= 2 ? "es" : "en";
   return "en";
 }
+const DEFAULT_ESC_ARM_WINDOW_MS = 5e3;
+function buildEscCancelDecision({
+  hasQueued,
+  armedUntil,
+  now,
+  armWindowMs = DEFAULT_ESC_ARM_WINDOW_MS
+}) {
+  if (hasQueued) return { action: "cancel", nextArmedUntil: null };
+  if (armedUntil !== null && now <= armedUntil) {
+    return { action: "cancel", nextArmedUntil: null };
+  }
+  return { action: "arm", nextArmedUntil: now + armWindowMs };
+}
+async function cancelActiveTurnWithQueueHandoff({
+  hasQueued,
+  promoteQueuedForHandoff,
+  cancelStream,
+  interrupt,
+  drainQueue
+}) {
+  const handoffRequested = hasQueued();
+  if (handoffRequested) {
+    promoteQueuedForHandoff?.();
+  }
+  const interruptPromise = interrupt(handoffRequested);
+  cancelStream({ preserveQueue: handoffRequested });
+  const interruptResult = await interruptPromise;
+  const canDrain = handoffRequested && (interruptResult.accepted || interruptResult.reason === "no_active_turn");
+  if (canDrain) {
+    drainQueue();
+  }
+  return {
+    handoffRequested,
+    interruptAccepted: interruptResult.accepted,
+    drained: canDrain
+  };
+}
 const BOT_ID = "local";
 const BOT_NAME = "Magi_Local";
 const DEFAULT_CHANNEL = "general";
@@ -37313,6 +37391,7 @@ function App() {
   const chatMessagesRef = reactExports.useRef(null);
   const chatInputRef = reactExports.useRef(null);
   const sawAgentEventRef = reactExports.useRef(false);
+  const interruptHandoffChannelsRef = reactExports.useRef(/* @__PURE__ */ new Set());
   const [appRoute, setAppRoute] = reactExports.useState(() => routeFromPathname(window.location.pathname));
   const [agentUrl, setAgentUrl] = reactExports.useState(() => getStored(storage.agentUrl, window.location.origin));
   const [token, setToken] = reactExports.useState(() => getStored(storage.token, ""));
@@ -37334,6 +37413,7 @@ function App() {
   const [uploadStates, setUploadStates] = reactExports.useState({});
   const [replyingTo, setReplyingTo] = reactExports.useState(null);
   const [streamingComposerMode, setStreamingComposerMode] = reactExports.useState("queue");
+  const [escArmedUntil, setEscArmedUntil] = reactExports.useState(null);
   const [rightWorkInspectorOpen, setRightWorkInspectorOpen] = reactExports.useState(() => {
     try {
       return localStorage.getItem("magi:kbPanelExpanded") !== "0" && localStorage.getItem("magi:rightInspectorView") !== "knowledge";
@@ -37351,6 +37431,7 @@ function App() {
   const queuedForChannel = store.queuedMessages[activeChannel] ?? [];
   const controlsForChannel = store.controlRequests[activeChannel] ?? [];
   const allKbDocs = reactExports.useMemo(() => kbCollections.flatMap((collection) => collection.docs), [kbCollections]);
+  const anyStreaming = Object.values(store.channelStates).some((state) => state.streaming);
   const authHeaders = reactExports.useCallback(
     (json = false) => ({
       ...json ? { "Content-Type": "application/json" } : {},
@@ -38076,22 +38157,98 @@ function App() {
       streamingComposerMode
     ]
   );
+  const cancelChannelTurn = reactExports.useCallback((channel) => {
+    if (interruptHandoffChannelsRef.current.has(channel)) return;
+    interruptHandoffChannelsRef.current.add(channel);
+    void cancelActiveTurnWithQueueHandoff({
+      hasQueued: () => (useChatStore.getState().queuedMessages[channel] ?? []).length > 0,
+      promoteQueuedForHandoff: () => {
+        useChatStore.getState().promoteNextQueuedMessage(channel, { botId: BOT_ID });
+      },
+      cancelStream: (options) => {
+        store.cancelStream(channel, { ...options, botId: BOT_ID });
+      },
+      interrupt: async (handoffRequested) => {
+        const response = await fetch(`${normalizedBase}/v1/chat/interrupt`, {
+          method: "POST",
+          headers: authHeaders(true),
+          body: JSON.stringify({
+            sessionKey: sessionKeyForChannel(channel),
+            handoffRequested,
+            source: "web"
+          })
+        });
+        const payload = await response.json().catch(() => ({}));
+        return {
+          accepted: response.ok && asString(payload.status) === "accepted",
+          handoffRequested: payload.handoffRequested === true,
+          status: response.status,
+          reason: asString(payload.error)
+        };
+      },
+      drainQueue: () => {
+        drainQueue(channel);
+      }
+    }).then((result) => {
+      setEscArmedUntil(null);
+      if (result.handoffRequested && !result.drained) {
+        store.setChannelState(channel, {
+          error: "Interrupted current turn, but could not hand off the queued message yet. Please send again."
+        }, { botId: BOT_ID });
+      }
+    }).catch((err) => {
+      console.warn("[chat] runtime interrupt failed:", err);
+    }).finally(() => {
+      interruptHandoffChannelsRef.current.delete(channel);
+    });
+  }, [authHeaders, drainQueue, normalizedBase, store]);
   const handleCancel = reactExports.useCallback(() => {
     const channel = useChatStore.getState().activeChannel || DEFAULT_CHANNEL;
-    const controller = useChatStore.getState().abortControllers[channel];
-    controller?.abort();
-    void sendJson("/v1/chat/interrupt", {
-      sessionKey: sessionKeyForChannel(channel),
-      handoffRequested: (useChatStore.getState().queuedMessages[channel] ?? []).length > 0,
-      source: "web"
-    }).catch(() => {
-    });
-    store.cancelStream(channel, { preserveQueue: true, botId: BOT_ID });
-  }, [sendJson, store]);
+    cancelChannelTurn(channel);
+  }, [cancelChannelTurn]);
   const handleCancelQueue = reactExports.useCallback(() => {
     const channel = useChatStore.getState().activeChannel || DEFAULT_CHANNEL;
     store.clearQueue(channel, { botId: BOT_ID });
   }, [store]);
+  reactExports.useEffect(() => {
+    if (!anyStreaming) return;
+    const onKey = (event) => {
+      if (event.key !== "Escape" || event.defaultPrevented) return;
+      const active = document.activeElement;
+      if (active?.closest('[role="dialog"], [aria-modal="true"]')) return;
+      if (event.isComposing) return;
+      event.preventDefault();
+      const channel = useChatStore.getState().activeChannel || DEFAULT_CHANNEL;
+      const hasQueued = (useChatStore.getState().queuedMessages[channel] ?? []).length > 0;
+      const decision = buildEscCancelDecision({
+        hasQueued,
+        armedUntil: escArmedUntil,
+        now: Date.now()
+      });
+      if (decision.action === "arm") {
+        setEscArmedUntil(decision.nextArmedUntil);
+        return;
+      }
+      setEscArmedUntil(null);
+      cancelChannelTurn(channel);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [anyStreaming, cancelChannelTurn, escArmedUntil]);
+  reactExports.useEffect(() => {
+    if (!anyStreaming && escArmedUntil !== null) {
+      setEscArmedUntil(null);
+    }
+  }, [anyStreaming, escArmedUntil]);
+  reactExports.useEffect(() => {
+    setEscArmedUntil(null);
+  }, [activeChannel]);
+  reactExports.useEffect(() => {
+    if (escArmedUntil === null) return;
+    const delay = Math.max(0, escArmedUntil - Date.now());
+    const timer = window.setTimeout(() => setEscArmedUntil(null), delay);
+    return () => window.clearTimeout(timer);
+  }, [escArmedUntil]);
   const handleReplyTo = reactExports.useCallback((message) => {
     if (message.role !== "user" && message.role !== "assistant") return;
     const previewText = buildReplyPreview(message.content);
@@ -38165,6 +38322,7 @@ function App() {
     setRouterType(DEFAULT_ROUTER);
     window.localStorage.removeItem(storage.modelOverride);
   }, []);
+  const cancelHint = escArmedUntil !== null ? channelState.responseLanguage === "ko" ? "다시 ESC로 중지" : "ESC again to stop" : void 0;
   const composerAccessory = /* @__PURE__ */ jsxRuntimeExports.jsx(
     ChatModelPicker,
     {
@@ -38358,9 +38516,11 @@ function App() {
             {
               ref: chatInputRef,
               onSend: handleSend,
+              uiLanguage: channelState.responseLanguage,
               onReset: handleReset,
               streaming: channelState.streaming,
               onCancel: handleCancel,
+              cancelHint,
               replyingTo,
               onCancelReply: () => setReplyingTo(null),
               queuedCount: queuedForChannel.length,
@@ -38372,7 +38532,7 @@ function App() {
                 hasFiles: false,
                 hasKbContext: selectedKbDocs.length > 0
               }),
-              steeringDisabledReason: "Selected knowledge will send after the current run.",
+              steeringDisabledReason: channelState.responseLanguage === "ko" ? "선택한 지식은 현재 실행이 끝난 뒤 전송됩니다." : "Selected knowledge will send after the current run.",
               kbDocs: allKbDocs,
               onSelectKbDoc: handleToggleKbDoc,
               uploadStates,

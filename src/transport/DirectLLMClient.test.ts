@@ -153,6 +153,101 @@ describe("DirectLLMClient", () => {
     expect(deltas.join("")).toBe("local");
   });
 
+  it("routes ollama-prefixed models to no-auth local providers without OpenAI stream options", async () => {
+    let body = "";
+    const baseUrl = await startServer((req, res) => {
+      expect(req.url).toBe("/v1/chat/completions");
+      expect(req.headers.authorization).toBeUndefined();
+      req.on("data", (chunk) => {
+        body += chunk;
+      });
+      req.on("end", () => {
+        res.writeHead(200, { "content-type": "text/event-stream" });
+        res.end([
+          'data: {"choices":[{"delta":{"content":"local-ok"},"finish_reason":"stop"}]}',
+          "",
+          "data: [DONE]",
+          "",
+        ].join("\n"));
+      });
+    });
+
+    const client = new DirectLLMClient({
+      providers: {
+        ollama: { kind: "openai-compatible", baseUrl },
+      },
+    });
+
+    const events = [];
+    for await (const evt of client.stream({
+      model: "ollama/llama3.3:70b",
+      messages: [{ role: "user", content: "hi" }],
+    })) {
+      events.push(evt);
+    }
+
+    expect(JSON.parse(body).model).toBe("llama3.3:70b");
+    expect(JSON.parse(body).stream_options).toBeUndefined();
+    expect(events).toContainEqual({ kind: "text_delta", blockIndex: 0, delta: "local-ok" });
+  });
+
+  it("aborts pending direct HTTP requests before the upstream response starts", async () => {
+    const baseUrl = await startServer((req, res) => {
+      req.resume();
+      req.on("end", () => {
+        setTimeout(() => {
+          if (!res.destroyed) {
+            res.writeHead(200, { "content-type": "text/event-stream" });
+            res.end("data: [DONE]\n\n");
+          }
+        }, 200);
+      });
+    });
+    const controller = new AbortController();
+    const client = new DirectLLMClient({
+      providers: {
+        openai: { kind: "openai-compatible", baseUrl },
+      },
+    });
+    const events = client.stream({
+      model: "gpt-5-nano",
+      messages: [{ role: "user", content: "hi" }],
+      signal: controller.signal,
+    });
+
+    controller.abort(new Error("stop-now"));
+
+    await expect(events.next()).rejects.toThrow("stop-now");
+  });
+
+  it("aborts active OpenAI-compatible streams after partial output", async () => {
+    const baseUrl = await startServer((req, res) => {
+      req.resume();
+      req.on("end", () => {
+        res.writeHead(200, { "content-type": "text/event-stream" });
+        res.write('data: {"choices":[{"delta":{"content":"hello"},"finish_reason":null}]}\n\n');
+      });
+    });
+    const controller = new AbortController();
+    const client = new DirectLLMClient({
+      providers: {
+        openai: { kind: "openai-compatible", baseUrl },
+      },
+    });
+    const events = client.stream({
+      model: "gpt-5-nano",
+      messages: [{ role: "user", content: "hi" }],
+      signal: controller.signal,
+    });
+
+    await expect(events.next()).resolves.toMatchObject({
+      value: { kind: "text_delta", delta: "hello" },
+    });
+    controller.abort(new Error("stream-stop"));
+
+    await expect(events.next()).rejects.toThrow("stream-stop");
+  });
+
   it("preserves Korean text when OpenAI-compatible SSE chunks split a UTF-8 character", async () => {
     const korean = "프롬프트";
     const frame = [

@@ -27,6 +27,10 @@ import {
 import { detectMessageResponseLanguage } from "@/lib/chat/message-language";
 import { MAX_QUEUED_MESSAGES } from "@/lib/chat/queue-constants";
 import {
+  buildEscCancelDecision,
+  cancelActiveTurnWithQueueHandoff,
+} from "@/lib/chat/interrupt-handoff";
+import {
   canSteerMidTurn,
   getStreamingSendMode,
   type StreamingComposerMode,
@@ -1199,6 +1203,7 @@ export function App() {
   const chatMessagesRef = useRef<ChatMessagesHandle>(null);
   const chatInputRef = useRef<ChatInputHandle>(null);
   const sawAgentEventRef = useRef(false);
+  const interruptHandoffChannelsRef = useRef(new Set<string>());
   const [appRoute, setAppRoute] = useState<AppRoute>(() => routeFromPathname(window.location.pathname));
   const [agentUrl, setAgentUrl] = useState(() => getStored(storage.agentUrl, window.location.origin));
   const [token, setToken] = useState(() => getStored(storage.token, ""));
@@ -1220,6 +1225,7 @@ export function App() {
   const [uploadStates, setUploadStates] = useState<Record<string, PendingKbUpload>>({});
   const [replyingTo, setReplyingTo] = useState<ReplyTo | null>(null);
   const [streamingComposerMode, setStreamingComposerMode] = useState<StreamingComposerMode>("queue");
+  const [escArmedUntil, setEscArmedUntil] = useState<number | null>(null);
   const [rightWorkInspectorOpen, setRightWorkInspectorOpen] = useState(() => {
     try {
       return (
@@ -1241,6 +1247,7 @@ export function App() {
   const queuedForChannel = store.queuedMessages[activeChannel] ?? [];
   const controlsForChannel = store.controlRequests[activeChannel] ?? [];
   const allKbDocs = useMemo(() => kbCollections.flatMap((collection) => collection.docs), [kbCollections]);
+  const anyStreaming = Object.values(store.channelStates).some((state) => state.streaming);
 
   const authHeaders = useCallback(
     (json = false): HeadersInit => ({
@@ -2036,22 +2043,107 @@ export function App() {
     ],
   );
 
+  const cancelChannelTurn = useCallback((channel: string) => {
+    if (interruptHandoffChannelsRef.current.has(channel)) return;
+    interruptHandoffChannelsRef.current.add(channel);
+    void cancelActiveTurnWithQueueHandoff({
+      hasQueued: () => (useChatStore.getState().queuedMessages[channel] ?? []).length > 0,
+      promoteQueuedForHandoff: () => {
+        useChatStore.getState().promoteNextQueuedMessage(channel, { botId: BOT_ID });
+      },
+      cancelStream: (options) => {
+        store.cancelStream(channel, { ...options, botId: BOT_ID });
+      },
+      interrupt: async (handoffRequested) => {
+        const response = await fetch(`${normalizedBase}/v1/chat/interrupt`, {
+          method: "POST",
+          headers: authHeaders(true),
+          body: JSON.stringify({
+            sessionKey: sessionKeyForChannel(channel),
+            handoffRequested,
+            source: "web",
+          }),
+        });
+        const payload = (await response.json().catch(() => ({}))) as JsonRecord;
+        return {
+          accepted: response.ok && asString(payload.status) === "accepted",
+          handoffRequested: payload.handoffRequested === true,
+          status: response.status,
+          reason: asString(payload.error),
+        };
+      },
+      drainQueue: () => {
+        drainQueue(channel);
+      },
+    })
+      .then((result) => {
+        setEscArmedUntil(null);
+        if (result.handoffRequested && !result.drained) {
+          store.setChannelState(channel, {
+            error: "Interrupted current turn, but could not hand off the queued message yet. Please send again.",
+          }, { botId: BOT_ID });
+        }
+      })
+      .catch((err) => {
+        console.warn("[chat] runtime interrupt failed:", err);
+      })
+      .finally(() => {
+        interruptHandoffChannelsRef.current.delete(channel);
+      });
+  }, [authHeaders, drainQueue, normalizedBase, store]);
+
   const handleCancel = useCallback(() => {
     const channel = useChatStore.getState().activeChannel || DEFAULT_CHANNEL;
-    const controller = useChatStore.getState().abortControllers[channel];
-    controller?.abort();
-    void sendJson("/v1/chat/interrupt", {
-      sessionKey: sessionKeyForChannel(channel),
-      handoffRequested: (useChatStore.getState().queuedMessages[channel] ?? []).length > 0,
-      source: "web",
-    }).catch(() => {});
-    store.cancelStream(channel, { preserveQueue: true, botId: BOT_ID });
-  }, [sendJson, store]);
+    cancelChannelTurn(channel);
+  }, [cancelChannelTurn]);
 
   const handleCancelQueue = useCallback(() => {
     const channel = useChatStore.getState().activeChannel || DEFAULT_CHANNEL;
     store.clearQueue(channel, { botId: BOT_ID });
   }, [store]);
+
+  useEffect(() => {
+    if (!anyStreaming) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== "Escape" || event.defaultPrevented) return;
+      const active = document.activeElement as HTMLElement | null;
+      if (active?.closest('[role="dialog"], [aria-modal="true"]')) return;
+      if ((event as KeyboardEvent & { isComposing?: boolean }).isComposing) return;
+      event.preventDefault();
+      const channel = useChatStore.getState().activeChannel || DEFAULT_CHANNEL;
+      const hasQueued = (useChatStore.getState().queuedMessages[channel] ?? []).length > 0;
+      const decision = buildEscCancelDecision({
+        hasQueued,
+        armedUntil: escArmedUntil,
+        now: Date.now(),
+      });
+      if (decision.action === "arm") {
+        setEscArmedUntil(decision.nextArmedUntil);
+        return;
+      }
+      setEscArmedUntil(null);
+      cancelChannelTurn(channel);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [anyStreaming, cancelChannelTurn, escArmedUntil]);
+
+  useEffect(() => {
+    if (!anyStreaming && escArmedUntil !== null) {
+      setEscArmedUntil(null);
+    }
+  }, [anyStreaming, escArmedUntil]);
+
+  useEffect(() => {
+    setEscArmedUntil(null);
+  }, [activeChannel]);
+
+  useEffect(() => {
+    if (escArmedUntil === null) return;
+    const delay = Math.max(0, escArmedUntil - Date.now());
+    const timer = window.setTimeout(() => setEscArmedUntil(null), delay);
+    return () => window.clearTimeout(timer);
+  }, [escArmedUntil]);
 
   const handleReplyTo = useCallback((message: ChatMessage) => {
     if (message.role !== "user" && message.role !== "assistant") return;
@@ -2134,6 +2226,13 @@ export function App() {
     setRouterType(DEFAULT_ROUTER);
     window.localStorage.removeItem(storage.modelOverride);
   }, []);
+
+  const cancelHint =
+    escArmedUntil !== null
+      ? channelState.responseLanguage === "ko"
+        ? "다시 ESC로 중지"
+        : "ESC again to stop"
+      : undefined;
 
   const composerAccessory = (
     <ChatModelPicker
@@ -2339,9 +2438,11 @@ export function App() {
         <ChatInput
           ref={chatInputRef}
           onSend={handleSend}
+          uiLanguage={channelState.responseLanguage}
           onReset={handleReset}
           streaming={channelState.streaming}
           onCancel={handleCancel}
+          cancelHint={cancelHint}
           replyingTo={replyingTo}
           onCancelReply={() => setReplyingTo(null)}
           queuedCount={queuedForChannel.length}
@@ -2353,7 +2454,11 @@ export function App() {
             hasFiles: false,
             hasKbContext: selectedKbDocs.length > 0,
           })}
-          steeringDisabledReason="Selected knowledge will send after the current run."
+          steeringDisabledReason={
+            channelState.responseLanguage === "ko"
+              ? "선택한 지식은 현재 실행이 끝난 뒤 전송됩니다."
+              : "Selected knowledge will send after the current run."
+          }
           kbDocs={allKbDocs}
           onSelectKbDoc={handleToggleKbDoc}
           uploadStates={uploadStates}
