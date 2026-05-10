@@ -19,10 +19,12 @@ interface WorkConsolePanelProps {
   channelState: ChannelState;
   queuedMessages?: QueuedMessage[];
   controlRequests?: ControlRequestRecord[];
+  uiLanguage?: ChatResponseLanguage;
 }
 
 const GROUP_LABELS: Record<WorkConsoleRowGroup, string> = {
   status: "Now",
+  mission: "Missions",
   tool: "Current steps",
   subagent: "Helpers",
   task: "Plan",
@@ -32,6 +34,7 @@ const GROUP_LABELS: Record<WorkConsoleRowGroup, string> = {
 
 const GROUP_LABELS_KO: Record<WorkConsoleRowGroup, string> = {
   status: "현재",
+  mission: "미션",
   tool: "현재 단계",
   subagent: "도우미",
   task: "계획",
@@ -79,8 +82,9 @@ function groupRows(rows: WorkConsoleRow[]): Array<[WorkConsoleRowGroup, WorkCons
 
 function sectionTone(
   group: WorkConsoleRowGroup,
-): "status" | "agents" | "actions" | "queue" | "default" {
+): "status" | "mission" | "agents" | "actions" | "queue" | "default" {
   if (group === "status") return "status";
+  if (group === "mission") return "mission";
   if (group === "subagent") return "agents";
   if (group === "tool") return "actions";
   if (group === "queue") return "queue";
@@ -91,6 +95,8 @@ function sectionClass(group: WorkConsoleRowGroup): string {
   switch (sectionTone(group)) {
     case "status":
       return "mb-3 min-h-0 rounded-xl border border-[#7C3AED]/15 bg-[#F8F6FF] p-2 shadow-[0_1px_6px_rgba(124,58,237,0.08)]";
+    case "mission":
+      return "mb-3 min-h-0 rounded-xl border border-sky-500/20 bg-sky-50/70 p-2 shadow-[0_1px_6px_rgba(14,165,233,0.08)]";
     case "agents":
       return "mb-3 min-h-0 rounded-xl border border-emerald-500/20 bg-white p-2 shadow-[0_1px_6px_rgba(16,185,129,0.08)]";
     case "actions":
@@ -151,6 +157,7 @@ function WorkConsoleAgentChip({ row }: { row: WorkConsoleRow }) {
 function WorkConsoleRowItem({ row }: { row: WorkConsoleRow }) {
   const isActionRow = row.group === "tool";
   const isStatusRow = row.group === "status";
+  const isMissionRow = row.group === "mission";
   const isQueueRow = row.group === "queue";
 
   return (
@@ -158,6 +165,8 @@ function WorkConsoleRowItem({ row }: { row: WorkConsoleRow }) {
       className={
         isStatusRow
           ? "flex min-w-0 items-start gap-2 rounded-lg border border-[#7C3AED]/20 bg-white/70 px-2.5 py-2.5 shadow-[0_1px_4px_rgba(124,58,237,0.08)]"
+          : isMissionRow
+            ? "flex min-w-0 items-start gap-2 rounded-lg border border-sky-500/20 bg-white/75 px-2.5 py-2 shadow-[0_1px_4px_rgba(14,165,233,0.08)]"
           : isActionRow
             ? `flex min-w-0 items-start gap-2 rounded-lg border px-2.5 py-2 ${actionRowToneClass(row.status)}`
             : isQueueRow
@@ -166,6 +175,7 @@ function WorkConsoleRowItem({ row }: { row: WorkConsoleRow }) {
       }
       data-work-console-action-row={isActionRow ? "true" : undefined}
       data-work-console-status-row={isStatusRow ? "true" : undefined}
+      data-work-console-mission-row={isMissionRow ? "true" : undefined}
       data-work-console-queue-row={isQueueRow ? "true" : undefined}
       data-work-console-row-status={row.status}
     >
@@ -272,14 +282,16 @@ export function WorkConsolePanel({
   channelState,
   queuedMessages = [],
   controlRequests = [],
+  uiLanguage,
 }: WorkConsolePanelProps): React.ReactElement {
   const actionsListRef = useRef<HTMLUListElement | null>(null);
   const rows = deriveWorkConsoleRows({
     channelState,
     queuedMessages,
     controlRequests,
+    uiLanguage,
   });
-  const language = channelState.responseLanguage;
+  const language = uiLanguage ?? channelState.responseLanguage;
   const groups = groupRows(rows);
   const actionRows = groups.find(([group]) => group === "tool")?.[1] ?? [];
   const lastActionId = actionRows[actionRows.length - 1]?.id ?? "";

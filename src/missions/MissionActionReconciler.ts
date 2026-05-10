@@ -7,7 +7,11 @@ import type {
   BackgroundTaskRegistry,
 } from "../tasks/BackgroundTaskRegistry.js";
 import type { MissionClient } from "./MissionClient.js";
-import type { MissionActionEvent } from "./types.js";
+import type {
+  GoalMissionResumeInput,
+  MissionActionEvent,
+  MissionChannelType,
+} from "./types.js";
 
 const DEFAULT_POLL_INTERVAL_MS = 15_000;
 const DEFAULT_LIMIT = 50;
@@ -15,13 +19,26 @@ const MAX_PROCESSED_IDS = 500;
 
 export interface MissionActionReconcilerOptions {
   workspaceRoot: string;
-  missionClient: Pick<MissionClient, "listActionEvents" | "appendEvent">;
+  missionClient: Pick<
+    MissionClient,
+    "listActionEvents" | "appendEvent" | "abandonRunningOnRestart"
+  >;
   backgroundTasks: Pick<
     BackgroundTaskRegistry,
     "findByMissionId" | "reconcileAbandonedRunning" | "stop"
   >;
   crons?: MissionActionCronScheduler;
+  goals?: MissionGoalResumer;
   pollIntervalMs?: number;
+  startedAt?: Date;
+}
+
+interface MissionGoalResumer {
+  resumeAfterRestart(input: GoalMissionResumeInput): Promise<void>;
+  cancel?(
+    missionId: string,
+    input: { actionEventId: string; reason: "mission_cancel_requested" },
+  ): Promise<void> | void;
 }
 
 interface MissionActionCronScheduler {
@@ -39,6 +56,7 @@ interface ActionCheckpoint {
 export class MissionActionReconciler {
   private readonly checkpointPath: string;
   private readonly pollIntervalMs: number;
+  private readonly startedAt: string;
   private timer: ReturnType<typeof setInterval> | null = null;
   private pollInProgress = false;
 
@@ -53,12 +71,14 @@ export class MissionActionReconciler {
       1_000,
       options.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS,
     );
+    this.startedAt = (options.startedAt ?? new Date()).toISOString();
   }
 
   async start(): Promise<void> {
     if (this.timer) return;
     await this.safeReconcileAbandonedBackgroundTasks();
-    await this.safePollOnce();
+    await this.safeReconcileAbandonedMissions();
+    void this.safePollOnce();
     this.timer = setInterval(() => {
       void this.safePollOnce();
     }, this.pollIntervalMs);
@@ -89,6 +109,13 @@ export class MissionActionReconciler {
       });
     }
     return abandoned;
+  }
+
+  async reconcileAbandonedMissions(): Promise<{ abandoned: number; missionIds: string[] }> {
+    return this.options.missionClient.abandonRunningOnRestart({
+      startedAt: this.startedAt,
+      reason: "abandoned_by_restart",
+    });
   }
 
   async pollOnce(): Promise<void> {
@@ -127,6 +154,16 @@ export class MissionActionReconciler {
     }
   }
 
+  private async safeReconcileAbandonedMissions(): Promise<void> {
+    try {
+      await this.reconcileAbandonedMissions();
+    } catch (err) {
+      console.warn(
+        `[core-agent] mission restart ledger recovery failed: ${(err as Error).message}`,
+      );
+    }
+  }
+
   private async safePollOnce(): Promise<void> {
     try {
       await this.pollOnce();
@@ -142,10 +179,20 @@ export class MissionActionReconciler {
       await this.handleCancelRequested(event);
       return;
     }
+    const goalResume = parseRestartGoalResumeEvent(event);
+    if (goalResume && this.options.goals) {
+      await this.options.goals.resumeAfterRestart(goalResume);
+      return;
+    }
     await this.handleResumeRequested(event);
   }
 
   private async handleCancelRequested(event: MissionActionEvent): Promise<void> {
+    await this.options.goals?.cancel?.(event.mission_id, {
+      actionEventId: event.id,
+      reason: "mission_cancel_requested",
+    });
+
     const linkedTasks = await this.options.backgroundTasks.findByMissionId(
       event.mission_id,
     );
@@ -280,4 +327,62 @@ function latestTimestamp(
   if (!next) return current;
   if (!current) return next;
   return next > current ? next : current;
+}
+
+function parseRestartGoalResumeEvent(
+  event: MissionActionEvent,
+): GoalMissionResumeInput | null {
+  if (event.event_type !== "retry_requested") return null;
+  const payload = event.payload ?? {};
+  if (payload.reason !== "restart_recovery") return null;
+  const goal = payload.goal;
+  if (!goal || typeof goal !== "object" || Array.isArray(goal)) return null;
+  const record = goal as Record<string, unknown>;
+  const sessionKey = stringValue(record.sessionKey);
+  const channelType = missionChannelType(record.channelType);
+  const channelId = stringValue(record.channelId);
+  const objective = stringValue(record.objective);
+  const resumeContext = stringValue(record.resumeContext);
+  if (!sessionKey || !channelType || !channelId || !objective) return null;
+  return {
+    actionEventId: event.id,
+    missionId: event.mission_id,
+    ...(typeof payload.startedAt === "string" ? { startedAt: payload.startedAt } : {}),
+    sessionKey,
+    channel: {
+      type: channelType,
+      channelId,
+    },
+    objective,
+    ...(stringValue(record.sourceRequest) ? { sourceRequest: stringValue(record.sourceRequest) } : {}),
+    ...(stringValue(record.title) ? { title: stringValue(record.title) } : {}),
+    completionCriteria: stringArray(record.completionCriteria),
+    turnsUsed: numberValue(record.turnsUsed) ?? 0,
+    ...(numberValue(record.maxTurns) !== undefined ? { maxTurns: numberValue(record.maxTurns) } : {}),
+    ...(resumeContext ? { resumeContext } : {}),
+  };
+}
+
+function stringValue(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim().length > 0
+    ? value.trim()
+    : undefined;
+}
+
+function numberValue(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value)
+    ? value
+    : undefined;
+}
+
+function stringArray(value: unknown): string[] {
+  return Array.isArray(value)
+    ? value.filter((item): item is string => typeof item === "string" && item.trim().length > 0)
+    : [];
+}
+
+function missionChannelType(value: unknown): MissionChannelType | undefined {
+  return value === "app" || value === "telegram" || value === "discord" || value === "internal"
+    ? value
+    : undefined;
 }

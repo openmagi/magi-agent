@@ -31,11 +31,11 @@ function hookContext(): HookContext {
   };
 }
 
-function testRunTranscript(): TranscriptEntry[] {
+function testRunTranscript(ts = 1): TranscriptEntry[] {
   return [
     {
       kind: "tool_call",
-      ts: 1,
+      ts,
       turnId: "turn-1",
       toolUseId: "test-1",
       name: "TestRun",
@@ -43,7 +43,7 @@ function testRunTranscript(): TranscriptEntry[] {
     },
     {
       kind: "tool_result",
-      ts: 2,
+      ts: ts + 1,
       turnId: "turn-1",
       toolUseId: "test-1",
       status: "ok",
@@ -53,11 +53,11 @@ function testRunTranscript(): TranscriptEntry[] {
   ];
 }
 
-function gitDiffTranscript(): TranscriptEntry[] {
+function gitDiffTranscript(ts = 3): TranscriptEntry[] {
   return [
     {
       kind: "tool_call",
-      ts: 3,
+      ts,
       turnId: "turn-1",
       toolUseId: "diff-1",
       name: "GitDiff",
@@ -65,7 +65,7 @@ function gitDiffTranscript(): TranscriptEntry[] {
     },
     {
       kind: "tool_result",
-      ts: 4,
+      ts: ts + 1,
       turnId: "turn-1",
       toolUseId: "diff-1",
       status: "ok",
@@ -73,6 +73,27 @@ function gitDiffTranscript(): TranscriptEntry[] {
         changedFiles: ["workspace/code/app/src/app.ts"],
         diff: "diff --git a/src/app.ts b/src/app.ts\n",
       }),
+      isError: false,
+    },
+  ];
+}
+
+function fileWriteTranscript(ts = 5): TranscriptEntry[] {
+  return [
+    {
+      kind: "tool_call",
+      ts,
+      turnId: "turn-1",
+      toolUseId: "write-1",
+      name: "FileWrite",
+      input: { path: "workspace/code/app/src/app.ts" },
+    },
+    {
+      kind: "tool_result",
+      ts: ts + 1,
+      turnId: "turn-1",
+      toolUseId: "write-1",
+      status: "ok",
       isError: false,
     },
   ];
@@ -136,8 +157,9 @@ describe("coding verification gate", () => {
       agent: {
         getSessionDiscipline: () => CODING_DISCIPLINE,
         readSessionTranscript: async () => [
-          ...testRunTranscript(),
-          ...gitDiffTranscript(),
+          ...fileWriteTranscript(1),
+          ...gitDiffTranscript(3),
+          ...testRunTranscript(5),
         ],
       },
     });
@@ -155,6 +177,36 @@ describe("coding verification gate", () => {
     );
 
     expect(out).toEqual({ action: "continue" });
+  });
+
+  it("blocks coding completions when verification happened before the last file edit", async () => {
+    const hook = makeCodingVerificationGateHook({
+      agent: {
+        getSessionDiscipline: () => CODING_DISCIPLINE,
+        readSessionTranscript: async () => [
+          ...testRunTranscript(1),
+          ...gitDiffTranscript(3),
+          ...fileWriteTranscript(5),
+        ],
+      },
+    });
+
+    const out = await hook.handler(
+      {
+        assistantText: "Implemented and verified.",
+        toolCallCount: 3,
+        toolReadHappened: true,
+        userMessage: "fix the bug",
+        retryCount: 0,
+        filesChanged: ["workspace/code/app/src/app.ts"],
+      },
+      hookContext(),
+    );
+
+    expect(out).toEqual({
+      action: "block",
+      reason: expect.stringContaining("After the last code edit"),
+    });
   });
 
   it("does not gate non-coding turns", async () => {

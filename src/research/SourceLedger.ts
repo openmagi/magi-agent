@@ -5,7 +5,8 @@ export type SourceLedgerKind =
   | "kb"
   | "file"
   | "external_repo"
-  | "external_doc";
+  | "external_doc"
+  | "subagent_result";
 
 export type SourceTrustTier = "primary" | "official" | "secondary" | "unknown";
 
@@ -52,8 +53,11 @@ export class SourceLedgerStore {
   }
 
   sourcesForTurn(turnId: string): SourceLedgerRecord[] {
+    const childTurnPrefix = `${turnId}::spawn::`;
     return this.records
-      .filter((record) => record.turnId === turnId)
+      .filter((record) =>
+        record.turnId === turnId || record.turnId.startsWith(childTurnPrefix)
+      )
       .map((record) => this.copyRecord(record));
   }
 

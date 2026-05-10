@@ -21,6 +21,7 @@ import {
   DEFAULT_DISCIPLINE,
   loadDisciplineConfig,
 } from "./discipline/config.js";
+import { isCodingHardModeSkillActive } from "./discipline/codingHardModeSkills.js";
 import {
   makeCommitCheckpointTool,
   runGit,
@@ -116,7 +117,7 @@ import { makeCronUpdateTool } from "./tools/CronUpdate.js";
 import { makeCronDeleteTool } from "./tools/CronDelete.js";
 import { MissionClient } from "./missions/MissionClient.js";
 import { MissionActionReconciler } from "./missions/MissionActionReconciler.js";
-import type { MissionChannelType } from "./missions/types.js";
+import type { GoalMissionResumeInput, MissionChannelType } from "./missions/types.js";
 import { makeMissionLedgerTool } from "./tools/MissionLedger.js";
 import type { Turn } from "./Turn.js";
 import type {
@@ -376,6 +377,7 @@ export class Agent {
   /** Active turns indexed by turnId — populated by Session.runTurn so
    * the HTTP ask-response endpoint + ExitPlanMode tool can find them. */
   private readonly activeTurns = new Map<string, Turn>();
+  private readonly cancelledGoalMissionIds = new Set<string>();
   /** C1 — live channel adapters. Populated in start() when tokens set. */
   private readonly channelAdapters: ChannelAdapter[] = [];
   private skillRuntimeHooksRegistered = false;
@@ -465,6 +467,10 @@ export class Agent {
       missionClient: this.missionClient,
       backgroundTasks: this.backgroundTasks,
       crons: this.crons,
+      goals: {
+        resumeAfterRestart: (input) => this.resumeGoalMissionAfterRestart(input),
+        cancel: (missionId) => this.cancelGoalMission(missionId),
+      },
     });
     // Native hipocampus — qmd search. Started in start().
     this.qmdManager = new QmdManager(
@@ -732,6 +738,26 @@ export class Agent {
     return false;
   }
 
+  markGoalMissionCancelled(missionId: string): boolean {
+    if (this.cancelledGoalMissionIds.has(missionId)) return false;
+    this.cancelledGoalMissionIds.add(missionId);
+    return true;
+  }
+
+  isGoalMissionCancelled(missionId: string): boolean {
+    return this.cancelledGoalMissionIds.has(missionId);
+  }
+
+  cancelGoalMission(missionId: string): void {
+    this.markGoalMissionCancelled(missionId);
+    for (const turn of this.activeTurns.values()) {
+      const metadata = turn.userMessage.metadata;
+      if (metadata?.goalMode === true && metadata.missionId === missionId) {
+        turn.requestInterrupt(false, "api");
+      }
+    }
+  }
+
   /**
    * Coding Discipline accessors — returned to hook + tool delegates.
    * Public so the hooks/builtin wiring + CommitCheckpoint factory can
@@ -899,11 +925,11 @@ export class Agent {
           this.setSessionDiscipline(sessionKey, next),
         getSessionCounter: (sessionKey) =>
           this.getDisciplineCounter(sessionKey),
-        // Kevin's A/A/A rule #1 — surface "is coding-agent skill
+        // Kevin's A/A/A rule #1 — surface "coding hard-mode skill
         // active" so the classifier hook can promote soft → hard on
-        // coding-labeled turns for bots that bundle the skill.
+        // coding-labeled turns for bots that bundle a coding agent skill.
         isCodingAgentSkillActive: () =>
-          this.tools.resolve("coding-agent") !== null,
+          isCodingHardModeSkillActive(this.tools),
       },
       midTurnInjectorAgent: {
         getSession: (sessionKey) => this.sessions.get(sessionKey),
@@ -1710,6 +1736,11 @@ export class Agent {
     const fname = sessionFileName(sessionKey);
     this.sessionKeyByHash.set(fname.replace(/\.jsonl$/, ""), sessionKey);
     return session;
+  }
+
+  async resumeGoalMissionAfterRestart(input: GoalMissionResumeInput): Promise<void> {
+    const session = await this.getOrCreateSession(input.sessionKey, input.channel);
+    await session.resumeGoalAfterRestart(input);
   }
 
   /** Snapshot of the hash → sessionKey reverse index (Phase 2h). */

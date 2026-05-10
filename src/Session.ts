@@ -11,8 +11,12 @@
 
 import type { Agent } from "./Agent.js";
 import { Turn, TurnInterruptedError, type TurnResult } from "./Turn.js";
+import {
+  isResearchProofBlockReason,
+  researchProofFailureNoticeText,
+} from "./turn/ResearchProofFailureNotice.js";
 import type { ChannelRef, TokenUsage, UserMessage } from "./util/types.js";
-import type { MissionChannelType } from "./missions/types.js";
+import type { GoalMissionResumeInput, MissionChannelType } from "./missions/types.js";
 import { judgeGoalTurn } from "./goals/GoalJudge.js";
 import {
   buildGoalContinuationMessage,
@@ -21,7 +25,7 @@ import {
   goalLoopMaxTurns,
   goalRequestFromMessage,
 } from "./goals/GoalLoop.js";
-import type { SseWriter } from "./transport/SseWriter.js";
+import { StubSseWriter, type SseWriter } from "./transport/SseWriter.js";
 import { Transcript } from "./storage/Transcript.js";
 import { ControlEventLedger } from "./control/ControlEventLedger.js";
 import { ControlRequestStore } from "./control/ControlRequestStore.js";
@@ -44,6 +48,18 @@ import {
   type ContextStats,
 } from "./Context.js";
 import { matchSlashCommand } from "./slash/registry.js";
+
+const TERMINAL_ABORT_FALLBACK =
+  "Warning: The run stopped before completion. No final answer was produced. Please retry.";
+
+function emitTerminalAbortFallback(sse: SseWriter, reason?: string): void {
+  sse.agent({ type: "response_clear" });
+  if (reason && isResearchProofBlockReason(reason)) {
+    sse.agent({ type: "text_delta", delta: researchProofFailureNoticeText(reason) });
+    return;
+  }
+  sse.agent({ type: "text_delta", delta: TERMINAL_ABORT_FALLBACK });
+}
 
 /**
  * Coding Discipline block (docs/plans/2026-04-20-coding-discipline-design.md).
@@ -912,7 +928,23 @@ export class Session {
     if (!this.activeTurn) {
       return { status: "noop", handoffRequested: false };
     }
-    return this.activeTurn.requestInterrupt(handoffRequested, source);
+    const activeTurn = this.activeTurn;
+    const result = activeTurn.requestInterrupt(handoffRequested, source);
+    if (result.status === "accepted" && !handoffRequested) {
+      const missionId = metadataString(activeTurn.userMessage.metadata, "missionId");
+      if (activeTurn.userMessage.metadata?.goalMode === true && missionId) {
+        const newlyCancelled = this.markGoalMissionCancelled(missionId);
+        if (newlyCancelled) {
+          const missionRunId = metadataString(activeTurn.userMessage.metadata, "missionRunId");
+          void this.appendGoalCancelledEvent({
+            missionId,
+            ...(missionRunId ? { missionRunId } : {}),
+            reason: "user_interrupt",
+          });
+        }
+      }
+    }
+    return result;
   }
 
   /**
@@ -968,6 +1000,7 @@ export class Session {
       rawRequest: goalRequest.objective,
     });
 
+    const maxTurns = goalLoopMaxTurns();
     const metadata: NonNullable<UserMessage["metadata"]> = {
       ...(userMessage.metadata ?? {}),
       goalMode: true,
@@ -977,7 +1010,7 @@ export class Session {
       goalCompletionCriteria: goalSpec.completionCriteria,
       goalSourceRequest: goalRequest.objective,
       goalTurnsUsed: 0,
-      goalMaxTurns: goalLoopMaxTurns(),
+      goalMaxTurns: maxTurns,
     };
 
     try {
@@ -995,6 +1028,8 @@ export class Session {
           completionCriteria: goalSpec.completionCriteria,
           sessionKey: this.meta.sessionKey,
           turnId,
+          turnsUsed: 0,
+          maxTurns,
         },
       });
       const run = await this.agent.missionClient.createRun(mission.id, {
@@ -1002,7 +1037,13 @@ export class Session {
         status: "running",
         sessionKey: this.meta.sessionKey,
         turnId,
-        metadata: { objective: goalSpec.objective },
+        metadata: {
+          objective: goalSpec.objective,
+          sourceRequest: goalRequest.objective,
+          completionCriteria: goalSpec.completionCriteria,
+          turnsUsed: 0,
+          maxTurns,
+        },
       });
       metadata.missionId = mission.id;
       if (typeof run.id === "string") metadata.missionRunId = run.id;
@@ -1048,15 +1089,20 @@ export class Session {
       goalObjective: objective,
       goalCompletionCriteria: completionCriteria,
     };
+    const resumeAfterRestart = metadata.goalResumeAfterRestart === true;
+    const actionEventId = metadataString(metadata, "goalResumeActionEventId");
     try {
       const run = await this.agent.missionClient.createRun(missionId, {
-        triggerType: "goal_continue",
+        triggerType: resumeAfterRestart ? "resume" : "goal_continue",
         status: "running",
         sessionKey: this.meta.sessionKey,
         turnId,
         metadata: {
           objective,
+          completionCriteria,
           turnsUsed: metadataNumber(metadata, "goalTurnsUsed") ?? 0,
+          ...(resumeAfterRestart ? { restartRecovery: true } : {}),
+          ...(actionEventId ? { actionEventId } : {}),
         },
       });
       if (typeof run.id === "string") nextMetadata.missionRunId = run.id;
@@ -1077,7 +1123,7 @@ export class Session {
   private async appendGoalMissionEvent(input: {
     missionId: string;
     missionRunId?: string;
-    eventType: "heartbeat" | "completed" | "blocked" | "failed";
+    eventType: "heartbeat" | "completed" | "blocked" | "failed" | "resumed" | "cancelled";
     message?: string;
     payload?: Record<string, unknown>;
   }): Promise<void> {
@@ -1094,6 +1140,38 @@ export class Session {
         `[core-agent] goal mission event append failed missionId=${input.missionId}: ${(err as Error).message}`,
       );
     }
+  }
+
+  private isGoalMissionCancelled(missionId: string): boolean {
+    const agent = this.agent as Agent & {
+      isGoalMissionCancelled?: (missionId: string) => boolean;
+    };
+    return agent.isGoalMissionCancelled?.(missionId) ?? false;
+  }
+
+  private markGoalMissionCancelled(missionId: string): boolean {
+    const agent = this.agent as Agent & {
+      markGoalMissionCancelled?: (missionId: string) => boolean;
+    };
+    return agent.markGoalMissionCancelled?.(missionId) ?? true;
+  }
+
+  private async appendGoalCancelledEvent(input: {
+    missionId: string;
+    missionRunId?: string;
+    reason: string;
+    actionEventId?: string;
+  }): Promise<void> {
+    await this.appendGoalMissionEvent({
+      missionId: input.missionId,
+      ...(input.missionRunId ? { missionRunId: input.missionRunId } : {}),
+      eventType: "cancelled",
+      message: "Goal mission cancelled",
+      payload: {
+        reason: input.reason,
+        ...(input.actionEventId ? { actionEventId: input.actionEventId } : {}),
+      },
+    });
   }
 
   private recordGoalJudgeContractEvidence(input: {
@@ -1134,8 +1212,51 @@ export class Session {
   }
 
   private async runGoalContinuation(message: UserMessage): Promise<void> {
-    const { StubSseWriter } = await import("./transport/SseWriter.js");
+    const missionId = metadataString(message.metadata, "missionId");
+    if (missionId && this.isGoalMissionCancelled(missionId)) return;
     const result = await this.runTurn(message, new StubSseWriter());
+    if (missionId && this.isGoalMissionCancelled(missionId)) return;
+    const text = result.assistantText.trim();
+    if (text.length === 0) return;
+    await this.agent.deliverAssistantTextToChannel(this.meta.channel, text, "goal");
+  }
+
+  async resumeGoalAfterRestart(
+    input: Omit<GoalMissionResumeInput, "sessionKey" | "channel">,
+  ): Promise<void> {
+    if (this.isGoalMissionCancelled(input.missionId)) return;
+    const maxTurns = input.maxTurns ?? goalLoopMaxTurns();
+    const resumeMessage = buildGoalContinuationMessage({
+      objective: input.objective,
+      title: input.title,
+      completionCriteria: input.completionCriteria,
+      missionId: input.missionId,
+      turnsUsed: input.turnsUsed,
+      maxTurns,
+      previousAssistantText:
+        input.resumeContext ?? "Runtime restarted before this goal finished.",
+      reason: "Restart recovery requested a fresh continuation.",
+    });
+    resumeMessage.metadata = {
+      ...(resumeMessage.metadata ?? {}),
+      goalResumeAfterRestart: true,
+      goalResumeActionEventId: input.actionEventId,
+      ...(input.startedAt ? { goalRestartedAt: input.startedAt } : {}),
+      ...(input.sourceRequest ? { goalSourceRequest: input.sourceRequest } : {}),
+    };
+
+    await this.appendGoalMissionEvent({
+      missionId: input.missionId,
+      eventType: "resumed",
+      message: "Goal mission resumed after restart",
+      payload: {
+        actionEventId: input.actionEventId,
+        reason: "restart_recovery",
+        ...(input.startedAt ? { startedAt: input.startedAt } : {}),
+      },
+    });
+
+    const result = await this.runTurn(resumeMessage, new StubSseWriter());
     const text = result.assistantText.trim();
     if (text.length === 0) return;
     await this.agent.deliverAssistantTextToChannel(this.meta.channel, text, "goal");
@@ -1157,6 +1278,14 @@ export class Session {
     const turnsUsed = (metadataNumber(metadata, "goalTurnsUsed") ?? 0) + 1;
     const maxTurns = metadataNumber(metadata, "goalMaxTurns") ?? goalLoopMaxTurns();
     const missionRunId = metadataString(metadata, "missionRunId");
+    if (this.isGoalMissionCancelled(missionId)) {
+      await this.appendGoalCancelledEvent({
+        missionId,
+        ...(missionRunId ? { missionRunId } : {}),
+        reason: "mission_cancel_requested",
+      });
+      return;
+    }
     let decision;
     try {
       decision = await judgeGoalTurn({
@@ -1174,6 +1303,14 @@ export class Session {
         eventType: "blocked",
         message: (err as Error).message,
         payload: { reason: "goal_judge_failed", turnsUsed, maxTurns },
+      });
+      return;
+    }
+    if (this.isGoalMissionCancelled(missionId)) {
+      await this.appendGoalCancelledEvent({
+        missionId,
+        ...(missionRunId ? { missionRunId } : {}),
+        reason: "mission_cancel_requested",
       });
       return;
     }
@@ -1409,7 +1546,9 @@ export class Session {
         const report = await turn.verify();
         turn.assertNotInterrupted();
         if (!report.ok) {
-          await turn.abort(`verify failed: ${report.violations.join(",")}`);
+          const reason = `verify failed: ${report.violations.join(",")}`;
+          emitTerminalAbortFallback(sse, reason);
+          await turn.abort(reason);
         } else {
           turn.assertNotInterrupted();
           const commitResult = await turn.commitWithRetry();
@@ -1447,6 +1586,7 @@ export class Session {
         } else {
           const msg = err instanceof Error ? err.message : String(err);
           sse.agent({ type: "error", code: "turn_failed", message: msg });
+          emitTerminalAbortFallback(sse, msg);
           await turn.abort(msg);
         }
       } finally {

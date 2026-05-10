@@ -40,16 +40,25 @@ function args(
   };
 }
 
-function ledgerWithSource(): SourceLedgerStore {
+function ledgerWithSources(count = 1): SourceLedgerStore {
   const sourceLedger = new SourceLedgerStore({ now: () => 10 });
-  sourceLedger.recordSource({
-    turnId: "turn-1",
-    toolName: "WebFetch",
-    kind: "web_fetch",
-    uri: "https://github.com/anomalyco/opencode",
-    title: "OpenCode",
-  });
+  for (let index = 0; index < count; index += 1) {
+    sourceLedger.recordSource({
+      turnId: "turn-1",
+      toolName: "WebFetch",
+      kind: "web_fetch",
+      uri: `https://github.com/anomalyco/opencode/${index + 1}`,
+      title: `OpenCode ${index + 1}`,
+      snippets: [
+        "OpenCode provides websearch and webfetch tools for inspecting public sources.",
+      ],
+    });
+  }
   return sourceLedger;
+}
+
+function ledgerWithSource(): SourceLedgerStore {
+  return ledgerWithSources(1);
 }
 
 afterEach(() => {
@@ -82,6 +91,30 @@ describe("claim citation gate", () => {
         verdict: "violation",
       },
     ]);
+  });
+
+  it("includes inspected source context and missing claims in retry instructions", async () => {
+    const hook = makeClaimCitationGateHook();
+
+    const result = await hook.handler(
+      args("OpenCode has web search and fetch-oriented research tools."),
+      makeCtx({
+        sourceLedger: ledgerWithSource(),
+        researchContract: new ResearchContractStore({ now: () => 100 }),
+      }),
+    );
+
+    expect(result.action).toBe("block");
+    expect(result.reason).toContain("Available inspected sources");
+    expect(result.reason).toContain("[src_1]");
+    expect(result.reason).toContain("OpenCode");
+    expect(result.reason).toContain("https://github.com/anomalyco/opencode");
+    expect(result.reason).toContain("websearch and webfetch");
+    expect(result.reason).toContain("Missing citation examples");
+    expect(result.reason).toContain("OpenCode has web search");
+    expect(result.reason).toContain(
+      "If a claim is not supported by these sources, remove it or mark it uncertain",
+    );
   });
 
   it("allows claims cited with source ids or inspected source URLs", async () => {
@@ -132,7 +165,7 @@ describe("claim citation gate", () => {
     expect(result).toEqual({ action: "continue" });
   });
 
-  it("fails open after the retry budget is exhausted", async () => {
+  it("fails closed after the retry budget is exhausted", async () => {
     const hook = makeClaimCitationGateHook();
     const researchContract = new ResearchContractStore({ now: () => 100 });
 
@@ -141,12 +174,70 @@ describe("claim citation gate", () => {
       makeCtx({ sourceLedger: ledgerWithSource(), researchContract }),
     );
 
-    expect(result).toEqual({ action: "continue" });
+    expect(result).toMatchObject({ action: "block" });
+    expect(result.reason).toContain("[RULE:CLAIM_CITATION_REQUIRED]");
     expect(researchContract.claimsForTurn("turn-1")).toMatchObject([
       {
         status: "missing",
       },
     ]);
+  });
+
+  it("fails closed when the verifier itself errors", async () => {
+    const hook = makeClaimCitationGateHook();
+    const explodingLedger = {
+      sourcesForTurn: () => {
+        throw new Error("source ledger unavailable");
+      },
+    } as unknown as SourceLedgerStore;
+
+    const result = await hook.handler(
+      args("OpenCode has web research tools."),
+      makeCtx({
+        sourceLedger: explodingLedger,
+        researchContract: new ResearchContractStore({ now: () => 100 }),
+      }),
+    );
+
+    expect(result).toMatchObject({ action: "block" });
+    expect(result.reason).toContain("[RULE:CLAIM_CITATION_GATE_ERROR]");
+    expect(result.reason).toContain("source ledger unavailable");
+  });
+
+  it("does not resample long source-backed drafts for a small citation gap", async () => {
+    const hook = makeClaimCitationGateHook();
+    const researchContract = new ResearchContractStore({ now: () => 100 });
+    const events: unknown[] = [];
+    const ctx = makeCtx({
+      sourceLedger: ledgerWithSources(3),
+      researchContract,
+      events,
+    });
+    const citedBody = Array.from({ length: 80 }, () =>
+      "OpenCode has public repository evidence for tool behavior [src_1].",
+    ).join(" ");
+    const draft = `${citedBody} OpenCode provides web research tools without this sentence citing a source.`;
+
+    const result = await hook.handler(args(draft), ctx);
+
+    expect(result).toEqual({ action: "continue" });
+    expect(
+      researchContract
+        .claimsForTurn("turn-1")
+        .some((claim) => claim.status === "missing"),
+    ).toBe(true);
+    expect(events).toMatchObject([
+      {
+        type: "rule_check",
+        ruleId: "claim-citation-gate",
+        verdict: "violation",
+      },
+    ]);
+    expect(ctx.log).toHaveBeenCalledWith(
+      "warn",
+      "[claim-citation-gate] long sourced draft has partial citation gaps; failing open",
+      expect.objectContaining({ missing: 1, sources: 3 }),
+    );
   });
 
   it("can be disabled by environment", async () => {

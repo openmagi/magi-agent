@@ -17,7 +17,12 @@ import { AuditLog } from "../../storage/AuditLog.js";
 import { ResetCounterStore } from "../../slash/resetCounters.js";
 import { ControlEventLedger } from "../../control/ControlEventLedger.js";
 import { ControlRequestStore } from "../../control/ControlRequestStore.js";
-import { extractLastUserMessage, extractReplyTo, extractRuntimeModelOverride } from "./turns.js";
+import {
+  extractGoalMode,
+  extractLastUserMessage,
+  extractReplyTo,
+  extractRuntimeModelOverride,
+} from "./turns.js";
 
 interface SseLike {
   legacyDelta(_t: string): void;
@@ -356,6 +361,24 @@ describe("HttpServer /v1/chat/completions + /v1/turns/:id/ask-response", () => {
     expect(capture.runOptions).toMatchObject({
       runtimeModelOverride: "openai/gpt-5.5-pro",
     });
+  });
+
+  it("POST /v1/chat/completions passes goal mode to the turn", async () => {
+    const r = await rawRequest(
+      "POST",
+      `http://127.0.0.1:${port}/v1/chat/completions`,
+      {
+        Authorization: `Bearer ${TOKEN}`,
+        "Content-Type": "application/json",
+      },
+      JSON.stringify({
+        goalMode: true,
+        messages: [{ role: "user", content: "finish this launch memo end to end" }],
+      }),
+    );
+
+    expect(r.status).toBe(200);
+    expect(capture.runOptions).toMatchObject({ goalMode: true });
   });
 
   it("POST /v1/chat/completions treats router aliases as automatic local routing", async () => {
@@ -1063,6 +1086,15 @@ describe("extractRuntimeModelOverride", () => {
     expect(extractRuntimeModelOverride({ model: "auto" })).toBeUndefined();
     expect(extractRuntimeModelOverride({ model: "magi-smart-router/auto" })).toBeUndefined();
     expect(extractRuntimeModelOverride({ model: "big-dic-router/auto" })).toBeUndefined();
+  });
+});
+
+describe("extractGoalMode", () => {
+  it("only enables goal mode for explicit true", () => {
+    expect(extractGoalMode({ goalMode: true })).toBe(true);
+    expect(extractGoalMode({ goalMode: false })).toBe(false);
+    expect(extractGoalMode({ goalMode: "true" })).toBe(false);
+    expect(extractGoalMode(null)).toBe(false);
   });
 });
 

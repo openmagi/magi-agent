@@ -1,7 +1,9 @@
 import type {
   ChannelState,
   ControlRequestRecord,
+  MissionActivity,
   QueuedMessage,
+  PatchPreviewFile,
   SubagentActivity,
   TaskBoardTask,
   ToolActivity,
@@ -11,6 +13,7 @@ import { derivePublicToolPreview } from "./public-tool-preview";
 
 export type WorkConsoleRowGroup =
   | "status"
+  | "mission"
   | "tool"
   | "subagent"
   | "task"
@@ -38,6 +41,7 @@ export interface WorkConsoleInput {
   channelState: ChannelState;
   queuedMessages?: QueuedMessage[];
   controlRequests?: ControlRequestRecord[];
+  uiLanguage?: ChatResponseLanguage;
 }
 
 const SUBAGENT_NAMES = [
@@ -135,6 +139,24 @@ function statusFromSubagent(activity: SubagentActivity): WorkConsoleRowStatus {
   }
 }
 
+function statusFromMission(mission: MissionActivity): WorkConsoleRowStatus {
+  switch (mission.status) {
+    case "running":
+      return "running";
+    case "completed":
+      return "done";
+    case "failed":
+    case "cancelled":
+      return "error";
+    case "queued":
+    case "blocked":
+    case "waiting":
+    case "paused":
+    default:
+      return "waiting";
+  }
+}
+
 function statusFromTask(task: TaskBoardTask): WorkConsoleRowStatus {
   switch (task.status) {
     case "in_progress":
@@ -161,6 +183,10 @@ function taskMeta(task: TaskBoardTask, language?: ChatResponseLanguage): string 
     default:
       return t(language, "pending", "대기 중");
   }
+}
+
+function missionMeta(mission: MissionActivity): string {
+  return `${mission.kind} ${mission.status}`;
 }
 
 function subagentName(index: number): string {
@@ -206,7 +232,76 @@ function shouldDisplayToolActivity(activity: ToolActivity): boolean {
   return !LOW_SIGNAL_TOOL_LABELS.has(normalizeToolLabel(activity.label));
 }
 
+function patchOperationLabel(
+  file: PatchPreviewFile,
+  language?: ChatResponseLanguage,
+): string {
+  if (isKorean(language)) {
+    if (file.operation === "create") return "생성";
+    if (file.operation === "delete") return "삭제";
+    return "수정";
+  }
+  if (file.operation === "create") return "Create";
+  if (file.operation === "delete") return "Delete";
+  return "Update";
+}
+
+function patchAction(activity: ToolActivity, language?: ChatResponseLanguage): string {
+  const preview = activity.patchPreview;
+  if (preview?.dryRun) return t(language, "Previewing patch", "패치 미리보기");
+  if (activity.status === "done") return t(language, "Applied patch", "패치 적용됨");
+  if (activity.status === "error" || activity.status === "denied") {
+    return t(language, "Patch blocked", "패치 차단됨");
+  }
+  return t(language, "Reviewing patch", "패치 검토 중");
+}
+
+function patchTarget(files: string[], language?: ChatResponseLanguage): string | undefined {
+  if (files.length === 0) return undefined;
+  const visible = files.slice(0, 3).join(", ");
+  const suffix = files.length > 3 ? `, +${files.length - 3}` : "";
+  const noun = files.length === 1
+    ? t(language, "file", "파일")
+    : t(language, "files", "파일");
+  return `${files.length} ${noun}: ${visible}${suffix}`;
+}
+
+function patchSnippet(
+  files: PatchPreviewFile[],
+  language?: ChatResponseLanguage,
+): string | undefined {
+  if (files.length === 0) return undefined;
+  const lines = files.slice(0, 4).map((file) =>
+    `${patchOperationLabel(file, language)} ${file.path} (+${file.addedLines}/-${file.removedLines})`
+  );
+  if (files.length > 4) {
+    lines.push(t(language, `+${files.length - 4} more files`, `외 ${files.length - 4}개 파일`));
+  }
+  return lines.join("\n");
+}
+
+function patchPreviewRow(
+  activity: ToolActivity,
+  language?: ChatResponseLanguage,
+): WorkConsoleRow | null {
+  const preview = activity.patchPreview;
+  if (!preview) return null;
+  const duration = activity.durationMs ? formatElapsed(activity.durationMs, language) : undefined;
+  return {
+    id: `tool:${activity.id}`,
+    group: "tool",
+    label: patchAction(activity, language),
+    detail: patchTarget(preview.changedFiles, language),
+    snippet: patchSnippet(preview.files, language),
+    status: statusFromTool(activity),
+    ...(duration ? { meta: duration } : {}),
+  };
+}
+
 function toolRow(activity: ToolActivity, language?: ChatResponseLanguage): WorkConsoleRow {
+  const patchRow = patchPreviewRow(activity, language);
+  if (patchRow) return patchRow;
+
   const preview = derivePublicToolPreview({
     label: activity.label,
     inputPreview: activity.inputPreview,
@@ -230,9 +325,10 @@ export function deriveWorkConsoleRows({
   channelState,
   queuedMessages = [],
   controlRequests = [],
+  uiLanguage,
 }: WorkConsoleInput): WorkConsoleRow[] {
   const rows: WorkConsoleRow[] = [];
-  const language = channelState.responseLanguage;
+  const language = uiLanguage ?? channelState.responseLanguage;
   const phase = channelState.reconnecting
     ? t(language, "Reconnecting", "다시 연결 중")
     : channelState.error
@@ -253,6 +349,17 @@ export function deriveWorkConsoleRows({
       label: phase,
       detail: elapsed ? t(language, `${elapsed} elapsed`, `${elapsed} 경과`) : undefined,
       status: channelState.error || channelState.turnPhase === "aborted" ? "error" : "running",
+    });
+  }
+
+  for (const mission of channelState.missions ?? []) {
+    rows.push({
+      id: `mission:${mission.id}`,
+      group: "mission",
+      label: mission.title,
+      detail: mission.detail,
+      status: statusFromMission(mission),
+      meta: missionMeta(mission),
     });
   }
 

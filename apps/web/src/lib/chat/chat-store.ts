@@ -8,10 +8,12 @@ import type {
   QueuedMessage,
   ControlEvent,
   ControlRequestRecord,
+  MissionActivity,
   SubagentActivity,
 } from "./types";
 import { INTERRUPTED_SUFFIX, MAX_QUEUED_MESSAGES } from "./queue-constants";
 import { compareChatMessages } from "./message-order";
+import { hasNonTextTurnWork } from "./empty-response";
 
 const DEFAULT_CHANNEL_STATE: ChannelState = {
   streaming: false,
@@ -22,11 +24,17 @@ const DEFAULT_CHANNEL_STATE: ChannelState = {
   thinkingStartedAt: null,
   turnPhase: null,
   heartbeatElapsedMs: null,
+  currentGoal: null,
   pendingInjectionCount: 0,
   activeTools: [],
   browserFrame: null,
   subagents: [],
   taskBoard: null,
+  missions: [],
+  activeGoalMissionId: null,
+  pendingGoalMissionTitle: null,
+  inspectedSources: [],
+  citationGate: null,
   fileProcessing: false,
 };
 
@@ -38,11 +46,15 @@ const RESET_LIVE_RUN_STATE: Partial<ChannelState> = {
   thinkingStartedAt: null,
   turnPhase: null,
   heartbeatElapsedMs: null,
+  currentGoal: null,
   pendingInjectionCount: 0,
   activeTools: [],
   browserFrame: null,
   subagents: [],
   taskBoard: null,
+  pendingGoalMissionTitle: null,
+  inspectedSources: [],
+  citationGate: null,
   fileProcessing: false,
   reconnecting: false,
 };
@@ -88,10 +100,69 @@ function activeBackgroundSubagents(channelState: ChannelState): SubagentActivity
   );
 }
 
-function streamErrorFallback(language: ChannelState["responseLanguage"]): string {
-  return language === "ko"
-    ? "⚠️ 응답 생성 중 오류가 발생했습니다. 다시 시도해 주세요."
-    : "⚠️ Something went wrong while generating the response. Please try again.";
+function compactErrorDetail(message: string): string {
+  const compact = message.replace(/\s+/g, " ").trim();
+  return compact.length > 160 ? `${compact.slice(0, 157)}...` : compact;
+}
+
+function streamErrorFallback(state: ChannelState): string {
+  const language = state.responseLanguage;
+  const errorDetail = state.error ? compactErrorDetail(state.error) : null;
+  if (language === "ko") {
+    if (errorDetail) {
+      return `⚠️ 응답 생성이 중단되었습니다: ${errorDetail}. 다시 시도해 주세요.`;
+    }
+    if (state.turnPhase === "aborted") {
+      return "⚠️ 응답 생성이 중단되었습니다. 최종 답변 텍스트가 도착하지 않았습니다. 다시 시도해 주세요.";
+    }
+    if (hasNonTextTurnWork(state)) {
+      return "⚠️ 작업은 진행됐지만 최종 답변 텍스트가 도착하지 않았습니다. 다시 시도해 주세요.";
+    }
+    return "⚠️ 빈 응답이 도착했습니다. 다시 시도해 주세요.";
+  }
+
+  if (errorDetail) {
+    return `⚠️ Response generation stopped: ${errorDetail}. Please try again.`;
+  }
+  if (state.turnPhase === "aborted") {
+    return "⚠️ Response generation stopped before final answer text arrived. Please try again.";
+  }
+  if (hasNonTextTurnWork(state)) {
+    return "⚠️ Work started, but no final answer text arrived. Please try again.";
+  }
+  return "⚠️ The response ended without visible answer text. Please try again.";
+}
+
+function finalVisibleStreamContent(state: ChannelState, content: string): string {
+  if (!state.error && state.turnPhase !== "aborted") return content;
+  const suffix = streamErrorFallback({
+    ...state,
+    streamingText: "",
+    hasTextContent: false,
+  });
+  return `${content.trimEnd()}\n\n${suffix}`;
+}
+
+function isTerminalMission(mission: MissionActivity): boolean {
+  return (
+    mission.status === "completed" ||
+    mission.status === "failed" ||
+    mission.status === "cancelled"
+  );
+}
+
+function durableMissionState(
+  current: ChannelState,
+): Pick<ChannelState, "missions" | "activeGoalMissionId"> {
+  const missions = (current.missions ?? []).filter((mission) => !isTerminalMission(mission));
+  const currentActiveGoalId =
+    current.activeGoalMissionId &&
+    missions.some((mission) => mission.id === current.activeGoalMissionId && mission.kind === "goal")
+      ? current.activeGoalMissionId
+      : null;
+  const fallbackActiveGoalId =
+    currentActiveGoalId ?? missions.find((mission) => mission.kind === "goal")?.id ?? null;
+  return { missions, activeGoalMissionId: fallbackActiveGoalId };
 }
 
 function terminalLiveRunReset(
@@ -99,6 +170,9 @@ function terminalLiveRunReset(
   partial: Partial<ChannelState>,
 ): Partial<ChannelState> {
   const reset = { ...RESET_LIVE_RUN_STATE };
+  if (partial.missions === undefined) {
+    Object.assign(reset, durableMissionState(current));
+  }
   if (partial.subagents === undefined) {
     const detachedSubagents = activeBackgroundSubagents(current);
     if (detachedSubagents.length > 0) {
@@ -133,7 +207,10 @@ function isLiveStreamProgress(partial: Partial<ChannelState>): boolean {
     (partial.activeTools?.length ?? 0) > 0 ||
     !!partial.browserFrame ||
     (partial.subagents?.length ?? 0) > 0 ||
+    (partial.missions?.length ?? 0) > 0 ||
     !!partial.taskBoard?.tasks.length ||
+    (partial.inspectedSources?.length ?? 0) > 0 ||
+    !!partial.citationGate ||
     partial.heartbeatElapsedMs !== undefined ||
     (partial.pendingInjectionCount ?? 0) > 0 ||
     (partial.turnPhase !== undefined && partial.turnPhase !== null && partial.turnPhase !== "pending")
@@ -507,7 +584,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       return {
         channelStates: {
           ...s.channelStates,
-          [ch]: { ...DEFAULT_CHANNEL_STATE },
+          [ch]: { ...DEFAULT_CHANNEL_STATE, ...durableMissionState(state) },
         },
         queuedMessages: nextQueued,
       };
@@ -534,6 +611,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     const activities = state.activeTools ?? [];
     const taskBoard = state.taskBoard ?? null;
     const detachedSubagents = activeBackgroundSubagents(state);
+    const missions = durableMissionState(state);
     {
       const thinkingDuration = state.thinkingStartedAt
         ? Math.round((Date.now() - state.thinkingStartedAt) / 1000)
@@ -542,9 +620,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
       // show a fallback so the user doesn't see a vanished response.
       const hadStreamActivity = state.streaming || hasThinking || activities.length > 0;
       const finalContent = hasVisibleText
-        ? (content || "")
+        ? finalVisibleStreamContent(state, content || "")
         : hadStreamActivity
-          ? streamErrorFallback(state.responseLanguage)
+          ? streamErrorFallback(state)
           : "";
       if (finalContent) {
         get().addMessage(channel, {
@@ -563,8 +641,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
       channelStates: {
         ...s.channelStates,
         [channel]: detachedSubagents.length > 0
-          ? { ...DEFAULT_CHANNEL_STATE, subagents: detachedSubagents }
-          : { ...DEFAULT_CHANNEL_STATE },
+          ? { ...DEFAULT_CHANNEL_STATE, ...missions, subagents: detachedSubagents }
+          : { ...DEFAULT_CHANNEL_STATE, ...missions },
       },
     }));
   },

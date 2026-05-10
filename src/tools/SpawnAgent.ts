@@ -94,6 +94,7 @@ const MAX_RETURN_TIMEOUT_MS = 600_000;
 const MAX_BACKGROUND_TIMEOUT_MS = 6 * 60 * 60 * 1000;
 const PARENT_TURN_CONTEXT_TEXT_LIMIT = 24_000;
 const PARENT_TURN_CONTEXT_SYSTEM_LIMIT = 64_000;
+const SPAWN_RESULT_SOURCE_SNIPPET_MAX = 500;
 const CODING_PERSONA_PATTERN =
   /(?:^|[-_\s])(coder|coding|code|developer|engineer|implementer)(?:$|[-_\s])/i;
 const CODING_TOOL_HINTS = new Set([
@@ -843,6 +844,46 @@ function spawnFailureResult(
   };
 }
 
+function subagentResultTurnId(parentTurnId: string, taskId: string): string {
+  return `${parentTurnId}::spawn::${taskId}`;
+}
+
+function sourceSnippet(value: string, maxLength = SPAWN_RESULT_SOURCE_SNIPPET_MAX): string {
+  const normalized = value.replace(/\s+/g, " ").trim();
+  if (normalized.length <= maxLength) return normalized;
+  return `${normalized.slice(0, Math.max(0, maxLength - 3)).trimEnd()}...`;
+}
+
+function recordSubagentResultSource(args: {
+  ctx: ToolContext;
+  input: SpawnAgentInput;
+  taskId: string;
+  result: SpawnChildResult;
+  attempts: number;
+}): void {
+  const { ctx, input, taskId, result, attempts } = args;
+  if (result.status !== "ok") return;
+  if (!ctx.sourceLedger) return;
+
+  const snippet = sourceSnippet(result.finalText);
+  const source = ctx.sourceLedger.recordSource({
+    turnId: subagentResultTurnId(ctx.turnId, taskId),
+    toolName: "SpawnAgent",
+    kind: "subagent_result",
+    uri: `spawn://${taskId}`,
+    title: `${input.persona} subagent result`,
+    ...(snippet ? { snippets: [snippet] } : {}),
+    metadata: {
+      taskId,
+      persona: input.persona,
+      deliver: input.deliver,
+      toolCallCount: result.toolCallCount,
+      attempts,
+    },
+  });
+  ctx.emitAgentEvent?.({ type: "source_inspected", source });
+}
+
 function partialChildResultFromError(err: unknown): SpawnChildResultImpl | null {
   if (!err || typeof err !== "object" || !("partialResult" in err)) {
     return null;
@@ -1472,6 +1513,7 @@ export function makeSpawnAgentTool(
         askUser: ctx.askUser,
         permissionMode: resolveParentPermissionMode(agent, ctx.sessionKey),
         executionContract: parentExecutionContract,
+        sourceLedger: ctx.sourceLedger,
         ...(modelOverride ? { modelOverride } : {}),
       };
 
@@ -1612,6 +1654,13 @@ export function makeSpawnAgentTool(
               artifacts,
             );
           }
+          recordSubagentResultSource({
+            ctx,
+            input,
+            taskId,
+            result,
+            attempts: childRun.attempts,
+          });
           return {
             status: "ok",
             output: {
@@ -1749,6 +1798,13 @@ async function runBackgroundChild(args: BackgroundRunArgs): Promise<void> {
         emit,
       );
       const fileCount = await countFilesRecursive(spawnDir);
+      recordSubagentResultSource({
+        ctx,
+        input,
+        taskId,
+        result,
+        attempts: childRun.attempts,
+      });
       emit?.({
         type: "spawn_result",
         taskId,

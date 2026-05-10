@@ -89,6 +89,44 @@ describe("MissionClient", () => {
     );
   });
 
+  it("requests restart recovery for runtime missions", async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({
+      abandoned: 1,
+      missionIds: ["mission-1"],
+    }), { status: 200 }));
+    const client = new MissionClient({
+      chatProxyUrl: "http://chat-proxy",
+      gatewayToken: "gw-token",
+      fetchImpl: fetchMock as unknown as typeof fetch,
+    });
+
+    const result = await client.abandonRunningOnRestart({
+      startedAt: "2026-05-09T15:15:14.000Z",
+      reason: "abandoned_by_restart",
+    });
+
+    expect(result).toEqual({
+      abandoned: 1,
+      missionIds: ["mission-1"],
+      resumeRequested: 0,
+      resumeMissionIds: [],
+    });
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://chat-proxy/v1/missions/restart-recovery",
+      expect.objectContaining({
+        method: "POST",
+        headers: expect.objectContaining({
+          "Content-Type": "application/json",
+          Authorization: "Bearer gw-token",
+        }),
+        body: JSON.stringify({
+          startedAt: "2026-05-09T15:15:14.000Z",
+          reason: "abandoned_by_restart",
+        }),
+      }),
+    );
+  });
+
   it("throws an actionable error on failed proxy requests", async () => {
     const fetchMock = vi.fn(async () => new Response(JSON.stringify({ error: "bad" }), { status: 400 }));
     const client = new MissionClient({

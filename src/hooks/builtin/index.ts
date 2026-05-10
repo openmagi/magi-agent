@@ -39,6 +39,7 @@ import { makeCronDeliverySafetyHook } from "./cronDeliverySafety.js";
 import { subSessionIdentityHook } from "./subSessionIdentity.js";
 import { citationGateHook } from "./citationGate.js";
 import { makeClaimCitationGateHook } from "./claimCitationGate.js";
+import { makeParallelResearchGateHook } from "./parallelResearchGate.js";
 import { sessionCommitmentTrackerHook } from "./sessionCommitmentTracker.js";
 import { makeHipocampusCheckpointHook } from "./hipocampusCheckpoint.js";
 import { makeHipocampusCompactorHook } from "./hipocampusCompactor.js";
@@ -176,7 +177,8 @@ export interface RegisterBuiltinsOpts {
     /**
      * Kevin's A/A/A rule #1 — when returns true, the classifier hook
      * promotes `requireCommit` from soft → hard for coding-labeled
-     * turns. Wired off `ToolRegistry.resolve("coding-agent")`.
+     * turns. Wired off coding hard-mode skills such as `coding-agent`
+     * and `complex-coding`.
      */
     isCodingAgentSkillActive?(): boolean;
   };
@@ -647,6 +649,11 @@ export function registerBuiltinHooks(
   }
   if (maybe(citationGateHook.name)) {
     registry.register(citationGateHook);
+    registered++;
+  }
+  const parallelResearchGateHook = makeParallelResearchGateHook();
+  if (maybe(parallelResearchGateHook.name)) {
+    registry.register(parallelResearchGateHook);
     registered++;
   }
   const claimCitationGateEnv =

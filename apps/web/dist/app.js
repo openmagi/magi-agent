@@ -15974,6 +15974,9 @@ function compareChatMessages(a, b) {
   if (roleDiff !== 0) return roleDiff;
   return (a.serverId ?? a.id ?? a.content).localeCompare(b.serverId ?? b.id ?? b.content);
 }
+function hasNonTextTurnWork(state) {
+  return !!state.thinkingText || (state.activeTools?.length ?? 0) > 0 || !!state.browserFrame || (state.subagents?.length ?? 0) > 0 || (state.missions?.length ?? 0) > 0 || !!state.taskBoard?.tasks.length || (state.inspectedSources?.length ?? 0) > 0 || !!state.citationGate || (state.pendingInjectionCount ?? 0) > 0;
+}
 const DEFAULT_CHANNEL_STATE = {
   streaming: false,
   streamingText: "",
@@ -15983,11 +15986,17 @@ const DEFAULT_CHANNEL_STATE = {
   thinkingStartedAt: null,
   turnPhase: null,
   heartbeatElapsedMs: null,
+  currentGoal: null,
   pendingInjectionCount: 0,
   activeTools: [],
   browserFrame: null,
   subagents: [],
   taskBoard: null,
+  missions: [],
+  activeGoalMissionId: null,
+  pendingGoalMissionTitle: null,
+  inspectedSources: [],
+  citationGate: null,
   fileProcessing: false
 };
 const RESET_LIVE_RUN_STATE = {
@@ -15998,11 +16007,15 @@ const RESET_LIVE_RUN_STATE = {
   thinkingStartedAt: null,
   turnPhase: null,
   heartbeatElapsedMs: null,
+  currentGoal: null,
   pendingInjectionCount: 0,
   activeTools: [],
   browserFrame: null,
   subagents: [],
   taskBoard: null,
+  pendingGoalMissionTitle: null,
+  inspectedSources: [],
+  citationGate: null,
   fileProcessing: false,
   reconnecting: false
 };
@@ -16031,11 +16044,59 @@ function activeBackgroundSubagents(channelState) {
     (subagent) => subagent.status === "running" || subagent.status === "waiting"
   );
 }
-function streamErrorFallback(language) {
-  return language === "ko" ? "⚠️ 응답 생성 중 오류가 발생했습니다. 다시 시도해 주세요." : "⚠️ Something went wrong while generating the response. Please try again.";
+function compactErrorDetail(message) {
+  const compact = message.replace(/\s+/g, " ").trim();
+  return compact.length > 160 ? `${compact.slice(0, 157)}...` : compact;
+}
+function streamErrorFallback(state) {
+  const language = state.responseLanguage;
+  const errorDetail = state.error ? compactErrorDetail(state.error) : null;
+  if (language === "ko") {
+    if (errorDetail) {
+      return `⚠️ 응답 생성이 중단되었습니다: ${errorDetail}. 다시 시도해 주세요.`;
+    }
+    if (state.turnPhase === "aborted") {
+      return "⚠️ 응답 생성이 중단되었습니다. 최종 답변 텍스트가 도착하지 않았습니다. 다시 시도해 주세요.";
+    }
+    if (hasNonTextTurnWork(state)) {
+      return "⚠️ 작업은 진행됐지만 최종 답변 텍스트가 도착하지 않았습니다. 다시 시도해 주세요.";
+    }
+    return "⚠️ 빈 응답이 도착했습니다. 다시 시도해 주세요.";
+  }
+  if (errorDetail) {
+    return `⚠️ Response generation stopped: ${errorDetail}. Please try again.`;
+  }
+  if (state.turnPhase === "aborted") {
+    return "⚠️ Response generation stopped before final answer text arrived. Please try again.";
+  }
+  if (hasNonTextTurnWork(state)) {
+    return "⚠️ Work started, but no final answer text arrived. Please try again.";
+  }
+  return "⚠️ The response ended without visible answer text. Please try again.";
+}
+function finalVisibleStreamContent(state, content2) {
+  if (!state.error && state.turnPhase !== "aborted") return content2;
+  const suffix = streamErrorFallback({
+    ...state
+  });
+  return `${content2.trimEnd()}
+
+${suffix}`;
+}
+function isTerminalMission(mission) {
+  return mission.status === "completed" || mission.status === "failed" || mission.status === "cancelled";
+}
+function durableMissionState(current) {
+  const missions = (current.missions ?? []).filter((mission) => !isTerminalMission(mission));
+  const currentActiveGoalId = current.activeGoalMissionId && missions.some((mission) => mission.id === current.activeGoalMissionId && mission.kind === "goal") ? current.activeGoalMissionId : null;
+  const fallbackActiveGoalId = currentActiveGoalId ?? missions.find((mission) => mission.kind === "goal")?.id ?? null;
+  return { missions, activeGoalMissionId: fallbackActiveGoalId };
 }
 function terminalLiveRunReset(current, partial) {
   const reset = { ...RESET_LIVE_RUN_STATE };
+  if (partial.missions === void 0) {
+    Object.assign(reset, durableMissionState(current));
+  }
   if (partial.subagents === void 0) {
     const detachedSubagents = activeBackgroundSubagents(current);
     if (detachedSubagents.length > 0) {
@@ -16054,7 +16115,7 @@ function shouldClearReconnecting(current, partial) {
   return isLiveStreamProgress(partial);
 }
 function isLiveStreamProgress(partial) {
-  return partial.hasTextContent === true || !!partial.streamingText || !!partial.thinkingText || (partial.activeTools?.length ?? 0) > 0 || !!partial.browserFrame || (partial.subagents?.length ?? 0) > 0 || !!partial.taskBoard?.tasks.length || partial.heartbeatElapsedMs !== void 0 || (partial.pendingInjectionCount ?? 0) > 0 || partial.turnPhase !== void 0 && partial.turnPhase !== null && partial.turnPhase !== "pending";
+  return partial.hasTextContent === true || !!partial.streamingText || !!partial.thinkingText || (partial.activeTools?.length ?? 0) > 0 || !!partial.browserFrame || (partial.subagents?.length ?? 0) > 0 || (partial.missions?.length ?? 0) > 0 || !!partial.taskBoard?.tasks.length || (partial.inspectedSources?.length ?? 0) > 0 || !!partial.citationGate || partial.heartbeatElapsedMs !== void 0 || (partial.pendingInjectionCount ?? 0) > 0 || partial.turnPhase !== void 0 && partial.turnPhase !== null && partial.turnPhase !== "pending";
 }
 function getResetCounter(botId, channel) {
   try {
@@ -16251,7 +16312,7 @@ const useChatStore = create$1((set, get) => ({
       return {
         channelStates: {
           ...s.channelStates,
-          [ch]: { ...DEFAULT_CHANNEL_STATE }
+          [ch]: { ...DEFAULT_CHANNEL_STATE, ...durableMissionState(state) }
         },
         queuedMessages: nextQueued
       };
@@ -16275,10 +16336,11 @@ const useChatStore = create$1((set, get) => ({
     const activities = state.activeTools ?? [];
     const taskBoard = state.taskBoard ?? null;
     const detachedSubagents = activeBackgroundSubagents(state);
+    const missions = durableMissionState(state);
     {
       const thinkingDuration = state.thinkingStartedAt ? Math.round((Date.now() - state.thinkingStartedAt) / 1e3) : void 0;
       const hadStreamActivity = state.streaming || hasThinking || activities.length > 0;
-      const finalContent = hasVisibleText ? content2 || "" : hadStreamActivity ? streamErrorFallback(state.responseLanguage) : "";
+      const finalContent = hasVisibleText ? finalVisibleStreamContent(state, content2 || "") : hadStreamActivity ? streamErrorFallback(state) : "";
       if (finalContent) {
         get().addMessage(channel, {
           id: msgId ?? `assistant-${Date.now()}`,
@@ -16295,7 +16357,7 @@ const useChatStore = create$1((set, get) => ({
     set((s) => ({
       channelStates: {
         ...s.channelStates,
-        [channel]: detachedSubagents.length > 0 ? { ...DEFAULT_CHANNEL_STATE, subagents: detachedSubagents } : { ...DEFAULT_CHANNEL_STATE }
+        [channel]: detachedSubagents.length > 0 ? { ...DEFAULT_CHANNEL_STATE, ...missions, subagents: detachedSubagents } : { ...DEFAULT_CHANNEL_STATE, ...missions }
       }
     }));
   },
@@ -31817,8 +31879,38 @@ function stringFromJsonLikeText(value, keys2) {
     if (match?.[1]?.trim()) {
       return match[1].replace(/\\n/g, "\n").replace(/\\"/g, '"').trim();
     }
+    const prefix = stringPrefixFromJsonLikeText(value, key);
+    if (prefix) return prefix;
   }
   return void 0;
+}
+function stringPrefixFromJsonLikeText(value, key) {
+  const pattern = new RegExp(`["']${escapeRegExp(key)}["']\\s*:\\s*(["'])`, "i");
+  const match = value.match(pattern);
+  if (!match || match.index === void 0) return void 0;
+  const quote = match[1];
+  if (!quote) return void 0;
+  let result = "";
+  let escaped = false;
+  const start = match.index + match[0].length;
+  for (let i = start; i < value.length && result.length < MAX_TARGET_LENGTH * 2; i += 1) {
+    const ch = value[i];
+    if (escaped) {
+      if (ch === "n") result += "\n";
+      else if (ch === "r") result += "\r";
+      else if (ch === "t") result += "	";
+      else result += ch;
+      escaped = false;
+      continue;
+    }
+    if (ch === "\\") {
+      escaped = true;
+      continue;
+    }
+    if (ch === quote) break;
+    result += ch;
+  }
+  return result.trim() || void 0;
 }
 function pathFromPreviewText(preview2) {
   const parsed = previewObject(preview2);
@@ -31927,9 +32019,14 @@ function cleanPromptLine(line) {
 function promptSummary(prompt) {
   if (!prompt) return void 0;
   const lines = prompt.split(/\r?\n/).map(cleanPromptLine).filter(Boolean);
-  const title = lines[0];
+  const taskLine = lines.find(
+    (line) => /^(task|request|work order|작업|요청)\s*:/i.test(line)
+  );
+  const goalLine = lines.find((line) => /^(goal|objective|목표)\s*:/i.test(line));
+  const firstLine = lines[0];
+  const title = taskLine ?? (firstLine && /^you are\b/i.test(firstLine) ? goalLine : firstLine);
   if (!title) return void 0;
-  const objective = lines.slice(1).find((line) => /^(goal|objective|목표)\s*:/i.test(line));
+  const objective = goalLine && goalLine !== title ? goalLine : void 0;
   return snippetFrom([title, objective].filter(Boolean).join("\n"));
 }
 function labeledLine(text2, label) {
@@ -32203,6 +32300,24 @@ function dateRangePreview(outputPreview) {
     } : {}
   };
 }
+function modelProgressPreview(inputPreview2, outputPreview, language) {
+  const input = previewObject(inputPreview2);
+  const output = outputPreview ? bounded(outputPreview, MAX_SNIPPET_LENGTH) : void 0;
+  const stage = displayValue(input, ["stage"]);
+  const label = displayValue(input, ["label"]);
+  const detail = displayValue(input, ["detail"]);
+  const elapsedMs = displayValue(input, ["elapsedMs"]);
+  const elapsedSeconds = elapsedMs ? Math.max(1, Math.round(Number(elapsedMs) / 1e3)) : null;
+  const elapsed = elapsedSeconds ? isKorean$5(language) ? `${elapsedSeconds}초째 작업 중` : `${elapsedSeconds}s elapsed` : void 0;
+  const action = stage === "completed" ? localized(language, "Model step finished", "모델 단계 완료") : localized(language, "Thinking through next step", "다음 단계 판단 중");
+  const target = label && !/thinking through next step/i.test(label) ? bounded(label, MAX_TARGET_LENGTH) : elapsed;
+  const snippet = snippetFrom([detail, output].filter(Boolean).join("\n"));
+  return {
+    action,
+    ...target ? { target } : {},
+    ...snippet ? { snippet } : {}
+  };
+}
 function generatedOutputAction(tool) {
   switch (tool) {
     case "documentwrite":
@@ -32388,7 +32503,7 @@ function derivePublicToolPreview(input) {
     if (preview2) return preview2;
   }
   if (tool === "spawnagent") {
-    const prompt = stringValue(parsedInput, ["prompt", "task", "instructions", "message"]);
+    const prompt = stringValue(parsedInput, ["prompt", "task", "instructions", "message"]) ?? stringFromJsonLikeText(input.inputPreview, ["prompt", "task", "instructions", "message"]);
     const summary = promptSummary(prompt);
     const resultPreview = helperResultPreview(input.outputPreview, language);
     return {
@@ -32408,6 +32523,9 @@ function derivePublicToolPreview(input) {
   if (tool === "daterange") {
     const preview2 = dateRangePreview(input.outputPreview);
     if (preview2) return preview2;
+  }
+  if (tool === "modelprogress") {
+    return modelProgressPreview(input.inputPreview, input.outputPreview, language);
   }
   if (tool === "taskboard" || tool === "taskupdate") {
     const preview2 = taskBoardPreview(input);
@@ -32522,6 +32640,23 @@ function statusFromSubagent(activity) {
       return "info";
   }
 }
+function statusFromMission(mission) {
+  switch (mission.status) {
+    case "running":
+      return "running";
+    case "completed":
+      return "done";
+    case "failed":
+    case "cancelled":
+      return "error";
+    case "queued":
+    case "blocked":
+    case "waiting":
+    case "paused":
+    default:
+      return "waiting";
+  }
+}
 function statusFromTask(task) {
   switch (task.status) {
     case "in_progress":
@@ -32547,6 +32682,9 @@ function taskMeta(task, language) {
     default:
       return t$4(language, "pending", "대기 중");
   }
+}
+function missionMeta(mission) {
+  return `${mission.kind} ${mission.status}`;
 }
 function subagentName(index2) {
   return SUBAGENT_NAMES$1[index2 % SUBAGENT_NAMES$1.length] ?? `Agent ${index2 + 1}`;
@@ -32579,7 +32717,59 @@ function normalizeToolLabel(label) {
 function shouldDisplayToolActivity(activity) {
   return !LOW_SIGNAL_TOOL_LABELS.has(normalizeToolLabel(activity.label));
 }
+function patchOperationLabel(file, language) {
+  if (isKorean$4(language)) {
+    if (file.operation === "create") return "생성";
+    if (file.operation === "delete") return "삭제";
+    return "수정";
+  }
+  if (file.operation === "create") return "Create";
+  if (file.operation === "delete") return "Delete";
+  return "Update";
+}
+function patchAction(activity, language) {
+  const preview2 = activity.patchPreview;
+  if (preview2?.dryRun) return t$4(language, "Previewing patch", "패치 미리보기");
+  if (activity.status === "done") return t$4(language, "Applied patch", "패치 적용됨");
+  if (activity.status === "error" || activity.status === "denied") {
+    return t$4(language, "Patch blocked", "패치 차단됨");
+  }
+  return t$4(language, "Reviewing patch", "패치 검토 중");
+}
+function patchTarget(files, language) {
+  if (files.length === 0) return void 0;
+  const visible = files.slice(0, 3).join(", ");
+  const suffix = files.length > 3 ? `, +${files.length - 3}` : "";
+  const noun = files.length === 1 ? t$4(language, "file", "파일") : t$4(language, "files", "파일");
+  return `${files.length} ${noun}: ${visible}${suffix}`;
+}
+function patchSnippet(files, language) {
+  if (files.length === 0) return void 0;
+  const lines = files.slice(0, 4).map(
+    (file) => `${patchOperationLabel(file, language)} ${file.path} (+${file.addedLines}/-${file.removedLines})`
+  );
+  if (files.length > 4) {
+    lines.push(t$4(language, `+${files.length - 4} more files`, `외 ${files.length - 4}개 파일`));
+  }
+  return lines.join("\n");
+}
+function patchPreviewRow(activity, language) {
+  const preview2 = activity.patchPreview;
+  if (!preview2) return null;
+  const duration = activity.durationMs ? formatElapsed(activity.durationMs, language) : void 0;
+  return {
+    id: `tool:${activity.id}`,
+    group: "tool",
+    label: patchAction(activity, language),
+    detail: patchTarget(preview2.changedFiles, language),
+    snippet: patchSnippet(preview2.files, language),
+    status: statusFromTool(activity),
+    ...duration ? { meta: duration } : {}
+  };
+}
 function toolRow(activity, language) {
+  const patchRow = patchPreviewRow(activity, language);
+  if (patchRow) return patchRow;
   const preview2 = derivePublicToolPreview({
     label: activity.label,
     inputPreview: activity.inputPreview,
@@ -32600,10 +32790,11 @@ function toolRow(activity, language) {
 function deriveWorkConsoleRows({
   channelState,
   queuedMessages = [],
-  controlRequests = []
+  controlRequests = [],
+  uiLanguage
 }) {
   const rows = [];
-  const language = channelState.responseLanguage;
+  const language = uiLanguage ?? channelState.responseLanguage;
   const phase = channelState.reconnecting ? t$4(language, "Reconnecting", "다시 연결 중") : channelState.error ? t$4(language, "Blocked", "차단됨") : channelState.turnPhase ? isKorean$4(language) ? PHASE_LABELS_KO$1[channelState.turnPhase] : PHASE_LABELS$1[channelState.turnPhase] : channelState.streaming ? t$4(language, "Working", "작업 중") : null;
   const elapsed = formatElapsed(channelState.heartbeatElapsedMs, language);
   if (phase) {
@@ -32613,6 +32804,16 @@ function deriveWorkConsoleRows({
       label: phase,
       detail: elapsed ? t$4(language, `${elapsed} elapsed`, `${elapsed} 경과`) : void 0,
       status: channelState.error || channelState.turnPhase === "aborted" ? "error" : "running"
+    });
+  }
+  for (const mission of channelState.missions ?? []) {
+    rows.push({
+      id: `mission:${mission.id}`,
+      group: "mission",
+      label: mission.title,
+      detail: mission.detail,
+      status: statusFromMission(mission),
+      meta: missionMeta(mission)
     });
   }
   for (const [index2, subagent] of (channelState.subagents ?? []).entries()) {
@@ -32690,6 +32891,12 @@ const PHASE_LABELS_KO = {
   committed: "답변 작성 중",
   aborted: "중단 중"
 };
+const MAX_DISPLAY_GOAL_CHARS = 140;
+const TERMINAL_MISSION_STATUSES = /* @__PURE__ */ new Set([
+  "completed",
+  "failed",
+  "cancelled"
+]);
 function isKorean$3(language) {
   return language === "ko";
 }
@@ -32741,8 +32948,7 @@ function controlRequestNow(request, language) {
       return t$3(language, "Waiting for tool permission", "도구 권한 대기 중");
   }
 }
-function statusFrom(channelState, pendingRequests) {
-  const language = channelState.responseLanguage;
+function statusFrom(channelState, pendingRequests, language) {
   if (pendingRequests[0]) return controlRequestStatus(pendingRequests[0], language);
   if (channelState.reconnecting) return t$3(language, "Reconnecting", "다시 연결 중");
   if (channelState.turnPhase === "aborted" || channelState.error) {
@@ -32763,8 +32969,7 @@ function statusFrom(channelState, pendingRequests) {
   }
   return t$3(language, "Working", "작업 중");
 }
-function progressFrom(channelState) {
-  const language = channelState.responseLanguage;
+function progressFrom(channelState, language) {
   const tasks = channelState.taskBoard?.tasks ?? [];
   if (tasks.length > 0) {
     const completed = completedLikeTaskCount(tasks);
@@ -32789,11 +32994,25 @@ function phaseLabel$1(phase, language) {
   if (!phase) return t$3(language, "Working", "작업 중");
   return isKorean$3(language) ? PHASE_LABELS_KO[phase] : PHASE_LABELS[phase];
 }
-function goalFrom(channelState) {
-  return firstInProgressTask(channelState.taskBoard)?.title ?? t$3(channelState.responseLanguage, "Working on your request", "요청 처리 중");
+function currentGoalFrom(channelState) {
+  const goal = channelState.currentGoal?.replace(/\s+/g, " ").trim();
+  if (!goal) return null;
+  return goal.length <= MAX_DISPLAY_GOAL_CHARS ? goal : null;
 }
-function nowFrom(channelState, pendingRequests) {
-  const language = channelState.responseLanguage;
+function activeGoalMission(channelState) {
+  const missions = channelState.missions ?? [];
+  const active = channelState.activeGoalMissionId ? missions.find((mission) => mission.id === channelState.activeGoalMissionId) : null;
+  if (active && active.kind === "goal" && !TERMINAL_MISSION_STATUSES.has(active.status)) {
+    return active;
+  }
+  return missions.find(
+    (mission) => mission.kind === "goal" && !TERMINAL_MISSION_STATUSES.has(mission.status)
+  ) ?? null;
+}
+function goalFrom(channelState, language) {
+  return firstInProgressTask(channelState.taskBoard)?.title ?? activeGoalMission(channelState)?.title ?? currentGoalFrom(channelState) ?? t$3(language, "Working on your request", "요청 처리 중");
+}
+function nowFrom(channelState, pendingRequests, language) {
   if (pendingRequests[0]) return controlRequestNow(pendingRequests[0], language);
   const task = firstInProgressTask(channelState.taskBoard);
   if (task) return task.title;
@@ -32805,29 +33024,31 @@ function nowFrom(channelState, pendingRequests) {
   }
   return phaseLabel$1(channelState.turnPhase ?? null, language);
 }
-function nextFrom(channelState, queuedMessages, pendingRequests) {
+function nextFrom(channelState, queuedMessages, pendingRequests, language) {
   if (pendingRequests[0]) return pendingRequests[0].prompt;
   if (queuedMessages[0]) return queuedMessages[0].content;
   const task = firstReadyPendingTask(channelState.taskBoard);
   if (task) return task.title;
   if (channelState.turnPhase === "committing" || channelState.turnPhase === "committed") {
-    return t$3(channelState.responseLanguage, "Preparing final answer", "최종 답변 준비 중");
+    return t$3(language, "Preparing final answer", "최종 답변 준비 중");
   }
   return void 0;
 }
 function deriveWorkStateSummary({
   channelState,
   queuedMessages = [],
-  controlRequests = []
+  controlRequests = [],
+  uiLanguage
 }) {
   const pendingRequests = pendingControlRequests$1(controlRequests);
+  const language = uiLanguage ?? channelState.responseLanguage;
   return {
-    title: t$3(channelState.responseLanguage, "Current Work", "현재 작업"),
-    goal: goalFrom(channelState),
-    status: statusFrom(channelState, pendingRequests),
-    progress: progressFrom(channelState),
-    now: nowFrom(channelState, pendingRequests),
-    next: nextFrom(channelState, queuedMessages, pendingRequests)
+    title: t$3(language, "Current Work", "현재 작업"),
+    goal: goalFrom(channelState, language),
+    status: statusFrom(channelState, pendingRequests, language),
+    progress: progressFrom(channelState, language),
+    now: nowFrom(channelState, pendingRequests, language),
+    next: nextFrom(channelState, queuedMessages, pendingRequests, language)
   };
 }
 function writingAnswerLabel(language) {
@@ -33678,6 +33899,13 @@ const ALL_SLASH = (() => {
   }
   return entries;
 })();
+function buildChatInputSendOptions(runUntilDone) {
+  return runUntilDone ? { goalMode: true } : void 0;
+}
+function nextRunUntilDoneAfterSend(current, result) {
+  if (!current) return false;
+  return result === false;
+}
 function prefersMobileWebLineBreaks() {
   if (typeof navigator === "undefined") return false;
   const ua = navigator.userAgent;
@@ -33726,6 +33954,7 @@ const ChatInput = reactExports.forwardRef(function ChatInput2({
   const [isSubmitting, setIsSubmitting] = reactExports.useState(false);
   const [slashIdx, setSlashIdx] = reactExports.useState(0);
   const [kbIdx, setKbIdx] = reactExports.useState(0);
+  const [runUntilDone, setRunUntilDone] = reactExports.useState(false);
   const textareaRef = reactExports.useRef(null);
   const fileInputRef = reactExports.useRef(null);
   const slashRef = reactExports.useRef(null);
@@ -33908,7 +34137,8 @@ const ChatInput = reactExports.forwardRef(function ChatInput2({
     try {
       const result = await onSend(
         trimmed,
-        pendingFiles.length > 0 ? pendingFiles.map((p) => p.file) : void 0
+        pendingFiles.length > 0 ? pendingFiles.map((p) => p.file) : void 0,
+        buildChatInputSendOptions(runUntilDone)
       );
       if (result === false) return;
       for (const p of pendingFiles) {
@@ -33916,11 +34146,12 @@ const ChatInput = reactExports.forwardRef(function ChatInput2({
       }
       setText("");
       setPendingFiles([]);
+      setRunUntilDone(nextRunUntilDoneAfterSend(runUntilDone, result));
       if (textareaRef.current) textareaRef.current.style.height = "auto";
     } finally {
       setIsSubmitting(false);
     }
-  }, [text2, pendingFiles, onSend, onReset]);
+  }, [text2, pendingFiles, onSend, onReset, runUntilDone]);
   const handleKeyDown = reactExports.useCallback(
     (e) => {
       const enterSends = shouldSendComposerOnEnter(e);
@@ -34234,81 +34465,115 @@ const ChatInput = reactExports.forwardRef(function ChatInput2({
               }
             )
           ] }),
-          /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center gap-2", children: [
-            /* @__PURE__ */ jsxRuntimeExports.jsx(
-              "button",
-              {
-                onClick: () => fileInputRef.current?.click(),
-                disabled: disabled || queueBlocked || isSubmitting,
-                className: "w-10 h-10 flex items-center justify-center rounded-2xl bg-black/[0.04] text-secondary/60 hover:text-foreground hover:bg-black/[0.06] transition-all duration-200 cursor-pointer disabled:opacity-20 disabled:cursor-not-allowed shrink-0",
-                "aria-label": "Attach file",
-                children: /* @__PURE__ */ jsxRuntimeExports.jsx("svg", { className: "w-4.5 h-4.5", viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 2, strokeLinecap: "round", strokeLinejoin: "round", children: /* @__PURE__ */ jsxRuntimeExports.jsx("path", { d: "M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" }) })
-              }
-            ),
-            /* @__PURE__ */ jsxRuntimeExports.jsx(
-              "input",
-              {
-                ref: fileInputRef,
-                type: "file",
-                className: "hidden",
-                accept: CHAT_ATTACHMENT_ACCEPT,
-                multiple: true,
-                onChange: (e) => {
-                  if (e.target.files) addFiles(e.target.files);
-                  e.target.value = "";
-                }
-              }
-            ),
-            composerAccessory && /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "flex min-w-0 flex-1 items-center justify-end", "data-composer-accessory": "bottom-row", children: composerAccessory }),
-            streaming && !text2.trim() && pendingFiles.length === 0 ? /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "relative shrink-0", children: [
-              /* @__PURE__ */ jsxRuntimeExports.jsx(
-                "button",
-                {
-                  type: "button",
-                  "data-chat-stop-button": "true",
-                  onPointerDown: handleStopPointerDown,
-                  onClick: handleStopClick,
-                  className: "w-10 h-10 flex items-center justify-center rounded-2xl bg-red-500/15 text-red-400 hover:bg-red-500/25 active:scale-95 touch-manipulation transition-all duration-200 cursor-pointer",
-                  "aria-label": "Stop",
-                  title: "Stop (ESC)",
-                  children: /* @__PURE__ */ jsxRuntimeExports.jsx("svg", { className: "w-4 h-4", viewBox: "0 0 24 24", fill: "currentColor", children: /* @__PURE__ */ jsxRuntimeExports.jsx("rect", { x: "6", y: "6", width: "12", height: "12", rx: "2" }) })
-                }
-              ),
-              /* @__PURE__ */ jsxRuntimeExports.jsxs(
-                "span",
-                {
-                  className: "hidden sm:flex pointer-events-none absolute -top-6 right-0 items-center gap-1 rounded-md bg-black/[0.06] border border-black/[0.08] px-1.5 py-0.5 text-[10px] font-medium text-secondary whitespace-nowrap",
-                  "aria-hidden": "true",
-                  children: [
-                    /* @__PURE__ */ jsxRuntimeExports.jsx("kbd", { className: "font-mono", children: "⎋" }),
-                    /* @__PURE__ */ jsxRuntimeExports.jsx("span", { children: cancelHint ?? "ESC to cancel" })
-                  ]
-                }
-              )
-            ] }) : /* @__PURE__ */ jsxRuntimeExports.jsx(
-              "button",
-              {
-                onClick: () => void handleSend(),
-                disabled: !text2.trim() && pendingFiles.length === 0 || disabled || queueBlocked || isSubmitting,
-                className: "w-10 h-10 flex items-center justify-center rounded-2xl bg-primary text-white disabled:opacity-20 hover:bg-primary/80 active:scale-95 transition-all duration-200 cursor-pointer disabled:cursor-not-allowed shrink-0",
-                "aria-label": streaming ? effectiveStreamingMode === "steer" ? "Steer current run" : "Queue message" : "Send",
-                title: queueBlocked ? "Queue full — wait for the bot to finish" : streaming ? effectiveStreamingMode === "steer" ? "Steer current run" : "Queue message (fires after current response)" : "Send",
-                children: /* @__PURE__ */ jsxRuntimeExports.jsx(
-                  "svg",
+          /* @__PURE__ */ jsxRuntimeExports.jsxs(
+            "div",
+            {
+              className: "flex flex-wrap items-center gap-2",
+              "data-chat-composer-controls": "true",
+              children: [
+                /* @__PURE__ */ jsxRuntimeExports.jsx(
+                  "button",
                   {
-                    className: "w-4 h-4",
-                    viewBox: "0 0 24 24",
-                    fill: "none",
-                    stroke: "currentColor",
-                    strokeWidth: 2,
-                    strokeLinecap: "round",
-                    strokeLinejoin: "round",
-                    children: /* @__PURE__ */ jsxRuntimeExports.jsx("path", { d: "M12 19V5M5 12l7-7 7 7" })
+                    onClick: () => fileInputRef.current?.click(),
+                    disabled: disabled || queueBlocked || isSubmitting,
+                    className: "w-10 h-10 flex items-center justify-center rounded-2xl bg-black/[0.04] text-secondary/60 hover:text-foreground hover:bg-black/[0.06] transition-all duration-200 cursor-pointer disabled:opacity-20 disabled:cursor-not-allowed shrink-0",
+                    "aria-label": "Attach file",
+                    children: /* @__PURE__ */ jsxRuntimeExports.jsx("svg", { className: "w-4.5 h-4.5", viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 2, strokeLinecap: "round", strokeLinejoin: "round", children: /* @__PURE__ */ jsxRuntimeExports.jsx("path", { d: "M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" }) })
+                  }
+                ),
+                /* @__PURE__ */ jsxRuntimeExports.jsx(
+                  "input",
+                  {
+                    ref: fileInputRef,
+                    type: "file",
+                    className: "hidden",
+                    accept: CHAT_ATTACHMENT_ACCEPT,
+                    multiple: true,
+                    onChange: (e) => {
+                      if (e.target.files) addFiles(e.target.files);
+                      e.target.value = "";
+                    }
+                  }
+                ),
+                /* @__PURE__ */ jsxRuntimeExports.jsxs(
+                  "button",
+                  {
+                    type: "button",
+                    onClick: () => setRunUntilDone((value) => !value),
+                    disabled: disabled || isSubmitting,
+                    "aria-pressed": runUntilDone,
+                    "data-chat-goal-toggle": "true",
+                    className: `flex h-10 shrink-0 items-center gap-2 rounded-2xl border px-3 text-xs font-medium transition-all duration-200 disabled:cursor-not-allowed disabled:opacity-30 ${runUntilDone ? "border-primary/25 bg-primary/10 text-primary shadow-[0_1px_6px_rgba(124,58,237,0.10)]" : "border-black/[0.08] bg-black/[0.03] text-secondary/75 hover:bg-black/[0.05] hover:text-foreground"}`,
+                    title: "Run the next message as a goal mission",
+                    children: [
+                      /* @__PURE__ */ jsxRuntimeExports.jsx(
+                        "span",
+                        {
+                          className: `flex h-5 w-5 items-center justify-center rounded-full ${runUntilDone ? "bg-primary text-white" : "bg-black/[0.04] text-secondary/55"}`,
+                          "aria-hidden": "true",
+                          children: /* @__PURE__ */ jsxRuntimeExports.jsxs("svg", { className: "h-3.5 w-3.5", viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 2, children: [
+                            /* @__PURE__ */ jsxRuntimeExports.jsx("circle", { cx: "12", cy: "12", r: "6" }),
+                            /* @__PURE__ */ jsxRuntimeExports.jsx("path", { strokeLinecap: "round", strokeLinejoin: "round", d: "M12 3v3m0 12v3m9-9h-3M6 12H3" })
+                          ] })
+                        }
+                      ),
+                      /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "whitespace-nowrap", children: "Run until done" }),
+                      runUntilDone && /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "rounded-md bg-white/70 px-1.5 py-0.5 text-[10px] font-semibold text-primary/80", children: "1x" })
+                    ]
+                  }
+                ),
+                composerAccessory && /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "flex min-w-0 flex-1 items-center justify-end", "data-composer-accessory": "bottom-row", children: composerAccessory }),
+                streaming && !text2.trim() && pendingFiles.length === 0 ? /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "relative shrink-0", children: [
+                  /* @__PURE__ */ jsxRuntimeExports.jsx(
+                    "button",
+                    {
+                      type: "button",
+                      "data-chat-stop-button": "true",
+                      onPointerDown: handleStopPointerDown,
+                      onClick: handleStopClick,
+                      className: "w-10 h-10 flex items-center justify-center rounded-2xl bg-red-500/15 text-red-400 hover:bg-red-500/25 active:scale-95 touch-manipulation transition-all duration-200 cursor-pointer",
+                      "aria-label": "Stop",
+                      title: "Stop (ESC)",
+                      children: /* @__PURE__ */ jsxRuntimeExports.jsx("svg", { className: "w-4 h-4", viewBox: "0 0 24 24", fill: "currentColor", children: /* @__PURE__ */ jsxRuntimeExports.jsx("rect", { x: "6", y: "6", width: "12", height: "12", rx: "2" }) })
+                    }
+                  ),
+                  /* @__PURE__ */ jsxRuntimeExports.jsxs(
+                    "span",
+                    {
+                      className: "hidden sm:flex pointer-events-none absolute -top-6 right-0 items-center gap-1 rounded-md bg-black/[0.06] border border-black/[0.08] px-1.5 py-0.5 text-[10px] font-medium text-secondary whitespace-nowrap",
+                      "aria-hidden": "true",
+                      children: [
+                        /* @__PURE__ */ jsxRuntimeExports.jsx("kbd", { className: "font-mono", children: "⎋" }),
+                        /* @__PURE__ */ jsxRuntimeExports.jsx("span", { children: cancelHint ?? "ESC to cancel" })
+                      ]
+                    }
+                  )
+                ] }) : /* @__PURE__ */ jsxRuntimeExports.jsx(
+                  "button",
+                  {
+                    onClick: () => void handleSend(),
+                    disabled: !text2.trim() && pendingFiles.length === 0 || disabled || queueBlocked || isSubmitting,
+                    className: "w-10 h-10 flex items-center justify-center rounded-2xl bg-primary text-white disabled:opacity-20 hover:bg-primary/80 active:scale-95 transition-all duration-200 cursor-pointer disabled:cursor-not-allowed shrink-0",
+                    "aria-label": streaming ? effectiveStreamingMode === "steer" ? "Steer current run" : "Queue message" : "Send",
+                    title: queueBlocked ? "Queue full — wait for the bot to finish" : streaming ? effectiveStreamingMode === "steer" ? "Steer current run" : "Queue message (fires after current response)" : "Send",
+                    children: /* @__PURE__ */ jsxRuntimeExports.jsx(
+                      "svg",
+                      {
+                        className: "w-4 h-4",
+                        viewBox: "0 0 24 24",
+                        fill: "none",
+                        stroke: "currentColor",
+                        strokeWidth: 2,
+                        strokeLinecap: "round",
+                        strokeLinejoin: "round",
+                        children: /* @__PURE__ */ jsxRuntimeExports.jsx("path", { d: "M12 19V5M5 12l7-7 7 7" })
+                      }
+                    )
                   }
                 )
-              }
-            )
-          ] })
+              ]
+            }
+          )
         ] })
       ] })
     }
@@ -34361,6 +34626,7 @@ function Image({ fill: _fill, unoptimized: _unoptimized, ...props }) {
 }
 const GROUP_LABELS = {
   status: "Now",
+  mission: "Missions",
   tool: "Current steps",
   subagent: "Helpers",
   task: "Plan",
@@ -34369,6 +34635,7 @@ const GROUP_LABELS = {
 };
 const GROUP_LABELS_KO = {
   status: "현재",
+  mission: "미션",
   tool: "현재 단계",
   subagent: "도우미",
   task: "계획",
@@ -34410,6 +34677,7 @@ function groupRows(rows) {
 }
 function sectionTone(group) {
   if (group === "status") return "status";
+  if (group === "mission") return "mission";
   if (group === "subagent") return "agents";
   if (group === "tool") return "actions";
   if (group === "queue") return "queue";
@@ -34419,6 +34687,8 @@ function sectionClass(group) {
   switch (sectionTone(group)) {
     case "status":
       return "mb-3 min-h-0 rounded-xl border border-[#7C3AED]/15 bg-[#F8F6FF] p-2 shadow-[0_1px_6px_rgba(124,58,237,0.08)]";
+    case "mission":
+      return "mb-3 min-h-0 rounded-xl border border-sky-500/20 bg-sky-50/70 p-2 shadow-[0_1px_6px_rgba(14,165,233,0.08)]";
     case "agents":
       return "mb-3 min-h-0 rounded-xl border border-emerald-500/20 bg-white p-2 shadow-[0_1px_6px_rgba(16,185,129,0.08)]";
     case "actions":
@@ -34476,13 +34746,15 @@ function WorkConsoleAgentChip({ row }) {
 function WorkConsoleRowItem({ row }) {
   const isActionRow = row.group === "tool";
   const isStatusRow = row.group === "status";
+  const isMissionRow = row.group === "mission";
   const isQueueRow = row.group === "queue";
   return /* @__PURE__ */ jsxRuntimeExports.jsxs(
     "li",
     {
-      className: isStatusRow ? "flex min-w-0 items-start gap-2 rounded-lg border border-[#7C3AED]/20 bg-white/70 px-2.5 py-2.5 shadow-[0_1px_4px_rgba(124,58,237,0.08)]" : isActionRow ? `flex min-w-0 items-start gap-2 rounded-lg border px-2.5 py-2 ${actionRowToneClass(row.status)}` : isQueueRow ? "flex min-w-0 items-start gap-2 rounded-lg border border-amber-500/20 bg-white/70 px-2.5 py-2 shadow-[0_1px_4px_rgba(245,158,11,0.08)]" : "flex min-w-0 items-start gap-2 rounded-md px-2 py-1.5",
+      className: isStatusRow ? "flex min-w-0 items-start gap-2 rounded-lg border border-[#7C3AED]/20 bg-white/70 px-2.5 py-2.5 shadow-[0_1px_4px_rgba(124,58,237,0.08)]" : isMissionRow ? "flex min-w-0 items-start gap-2 rounded-lg border border-sky-500/20 bg-white/75 px-2.5 py-2 shadow-[0_1px_4px_rgba(14,165,233,0.08)]" : isActionRow ? `flex min-w-0 items-start gap-2 rounded-lg border px-2.5 py-2 ${actionRowToneClass(row.status)}` : isQueueRow ? "flex min-w-0 items-start gap-2 rounded-lg border border-amber-500/20 bg-white/70 px-2.5 py-2 shadow-[0_1px_4px_rgba(245,158,11,0.08)]" : "flex min-w-0 items-start gap-2 rounded-md px-2 py-1.5",
       "data-work-console-action-row": isActionRow ? "true" : void 0,
       "data-work-console-status-row": isStatusRow ? "true" : void 0,
+      "data-work-console-mission-row": isMissionRow ? "true" : void 0,
       "data-work-console-queue-row": isQueueRow ? "true" : void 0,
       "data-work-console-row-status": row.status,
       children: [
@@ -34572,15 +34844,17 @@ function BrowserFramePreview({
 function WorkConsolePanel({
   channelState,
   queuedMessages = [],
-  controlRequests = []
+  controlRequests = [],
+  uiLanguage
 }) {
   const actionsListRef = reactExports.useRef(null);
   const rows = deriveWorkConsoleRows({
     channelState,
     queuedMessages,
-    controlRequests
+    controlRequests,
+    uiLanguage
   });
-  const language = channelState.responseLanguage;
+  const language = uiLanguage ?? channelState.responseLanguage;
   const groups = groupRows(rows);
   const actionRows = groups.find(([group]) => group === "tool")?.[1] ?? [];
   const lastActionId = actionRows[actionRows.length - 1]?.id ?? "";
@@ -35724,11 +35998,13 @@ function pendingControlRequests(requests) {
   return (requests ?? []).filter((request) => request.state === "pending");
 }
 function hasVisibleRunState(channelState, queuedMessages, pendingRequests, taskBoard, subagents) {
-  return channelState.streaming || (channelState.activeTools ?? []).length > 0 || !!channelState.browserFrame || subagents.length > 0 || queuedMessages.length > 0 || pendingRequests.length > 0 || !!taskBoard;
+  const inspectedSources = channelState.inspectedSources ?? [];
+  return channelState.streaming || (channelState.activeTools ?? []).length > 0 || !!channelState.browserFrame || subagents.length > 0 || queuedMessages.length > 0 || pendingRequests.length > 0 || !!taskBoard || inspectedSources.length > 0 || !!channelState.citationGate;
 }
 function runIdentity(channelState, queuedMessages, pendingRequests, taskBoard, subagents) {
   const activeTools2 = channelState.activeTools ?? [];
-  const startedAt = channelState.thinkingStartedAt ?? activeTools2[0]?.startedAt ?? channelState.browserFrame?.capturedAt ?? subagents[0]?.startedAt ?? null;
+  const inspectedSources = channelState.inspectedSources ?? [];
+  const startedAt = channelState.thinkingStartedAt ?? activeTools2[0]?.startedAt ?? channelState.browserFrame?.capturedAt ?? subagents[0]?.startedAt ?? inspectedSources[0]?.inspectedAt ?? channelState.citationGate?.checkedAt ?? null;
   if (startedAt !== null) return `run:${startedAt}`;
   if (pendingRequests.length > 0) {
     return `controls:${pendingRequests.map((request) => request.requestId).join(",")}`;
@@ -35925,15 +36201,103 @@ function BrowserFrameInline({
     }
   );
 }
+function sourceKindLabel(kind, language) {
+  switch (kind) {
+    case "web_search":
+      return t(language, "search", "검색");
+    case "web_fetch":
+      return t(language, "web", "웹");
+    case "browser":
+      return t(language, "browser", "브라우저");
+    case "kb":
+      return "KB";
+    case "file":
+      return t(language, "file", "파일");
+    case "external_repo":
+      return t(language, "repo", "저장소");
+    case "external_doc":
+      return t(language, "doc", "문서");
+    case "subagent_result":
+      return t(language, "helper", "도우미");
+    default:
+      return t(language, "source", "출처");
+  }
+}
+function displaySourceUri(uri) {
+  try {
+    const parsed = new URL(uri);
+    return `${parsed.hostname}${parsed.pathname}${parsed.search}`.replace(/\/$/, "");
+  } catch {
+    return uri.replace(/^external:/, "");
+  }
+}
+function citationStatusLabel(status, language) {
+  switch (status.verdict) {
+    case "ok":
+      return t(language, "covered", "충족");
+    case "violation":
+      return t(language, "needs citations", "인용 필요");
+    case "pending":
+    default:
+      return t(language, "checking", "확인 중");
+  }
+}
+function citationStatusClass(status) {
+  switch (status.verdict) {
+    case "ok":
+      return "bg-emerald-500";
+    case "violation":
+      return "bg-amber-500";
+    case "pending":
+    default:
+      return "bg-secondary/35";
+  }
+}
+function ResearchEvidence({
+  sources,
+  citationGate,
+  language
+}) {
+  if (sources.length === 0 && !citationGate) return null;
+  const recentSources = sources.slice(-5).reverse();
+  return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "mt-2 border-t border-black/[0.06] pt-2", "aria-label": t(language, "Research evidence", "리서치 근거"), children: [
+    /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "mb-1.5 flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wide text-secondary/50", children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsx("span", { children: t(language, "Research evidence", "리서치 근거") }),
+      sources.length > 0 && /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "font-medium normal-case tracking-normal text-secondary/35", children: isKorean(language) ? `출처 ${sources.length}개` : `${sources.length} sources` })
+    ] }),
+    citationGate && /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "mb-1.5 flex min-w-0 items-center gap-2 text-xs", children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsx(
+        "span",
+        {
+          className: `h-1.5 w-1.5 shrink-0 rounded-full ${citationStatusClass(citationGate)}`,
+          "aria-hidden": "true"
+        }
+      ),
+      /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "shrink-0 font-medium text-secondary/80", children: t(language, "Citation coverage", "인용 커버리지") }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "shrink-0 text-secondary/50", children: citationStatusLabel(citationGate, language) }),
+      citationGate.detail && /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "min-w-0 truncate text-secondary/55", children: citationGate.detail })
+    ] }),
+    recentSources.length > 0 && /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "space-y-1", "aria-label": t(language, "Sources", "출처"), children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "sr-only", children: t(language, "Sources", "출처") }),
+      recentSources.map((source) => /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex min-w-0 items-center gap-2 text-xs", children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "shrink-0 rounded bg-black/[0.04] px-1.5 py-0.5 font-mono text-[10px] text-secondary/55", children: source.sourceId }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "shrink-0 text-[10px] font-semibold uppercase tracking-wide text-secondary/40", children: sourceKindLabel(source.kind, language) }),
+        source.title && /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "min-w-0 truncate font-medium text-secondary/80", children: source.title }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "min-w-0 truncate text-secondary/50", children: displaySourceUri(source.uri) })
+      ] }, source.sourceId))
+    ] })
+  ] });
+}
 function RunInspectorDock({
   channelState,
   queuedMessages = [],
   controlRequests = [],
   cancelHint,
   defaultHidden = false,
-  compactDetails = false
+  compactDetails = false,
+  uiLanguage
 }) {
-  const language = channelState.responseLanguage;
+  const language = uiLanguage ?? channelState.responseLanguage;
   const taskBoard = openTaskBoard(channelState.taskBoard);
   const subagents = channelState.subagents ?? [];
   const pendingRequests = pendingControlRequests(controlRequests);
@@ -35969,6 +36333,7 @@ function RunInspectorDock({
   }
   const nextQueued = queuedMessages[0];
   const activeTools2 = channelState.activeTools ?? [];
+  const inspectedSources = channelState.inspectedSources ?? [];
   const activeToolCount = activeTools2.filter((activity) => activity.status === "running").length;
   const activeSubagentCount = subagents.filter(
     (subagent) => subagent.status === "running" || subagent.status === "waiting"
@@ -36022,6 +36387,14 @@ function RunInspectorDock({
     /* @__PURE__ */ jsxRuntimeExports.jsx(WorkStateSummaryRows, { summary: workState, language }),
     compactDetails ? null : /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "mt-2 max-h-[min(50vh,34rem)] overflow-y-auto overscroll-contain pr-1 [scrollbar-gutter:stable]", children: [
       channelState.browserFrame && /* @__PURE__ */ jsxRuntimeExports.jsx(BrowserFrameInline, { frame: channelState.browserFrame, language }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx(
+        ResearchEvidence,
+        {
+          sources: inspectedSources,
+          citationGate: channelState.citationGate,
+          language
+        }
+      ),
       (channelState.streaming || activeTools2.length > 0) && /* @__PURE__ */ jsxRuntimeExports.jsx("div", { children: /* @__PURE__ */ jsxRuntimeExports.jsx(
         AgentActivityTimeline,
         {
@@ -36233,6 +36606,9 @@ function asRecord(value) {
 function asArray(value) {
   return Array.isArray(value) ? value.filter((item) => !!item && typeof item === "object") : [];
 }
+function asStringArray(value) {
+  return Array.isArray(value) ? value.filter((item) => typeof item === "string") : [];
+}
 function preview(value, max = 400) {
   if (value === void 0 || value === null) return void 0;
   const text2 = typeof value === "string" ? value : JSON.stringify(value);
@@ -36315,6 +36691,94 @@ function normalizeBrowserFrame(payload) {
     capturedAt: asNumber(payload.capturedAt, Date.now()),
     ...typeof payload.url === "string" && payload.url ? { url: payload.url } : {}
   };
+}
+function normalizePatchPreview(payload) {
+  const files = asArray(payload.files).map((file) => {
+    const filePath = asString(file.path);
+    if (!filePath) return null;
+    const operation = file.operation === "create" || file.operation === "delete" || file.operation === "update" ? file.operation : "update";
+    return {
+      path: filePath,
+      operation,
+      hunks: Math.max(0, Math.floor(asNumber(file.hunks, 0))),
+      addedLines: Math.max(0, Math.floor(asNumber(file.addedLines, 0))),
+      removedLines: Math.max(0, Math.floor(asNumber(file.removedLines, 0))),
+      ...typeof file.oldSha256 === "string" ? { oldSha256: file.oldSha256 } : {},
+      ...typeof file.newSha256 === "string" ? { newSha256: file.newSha256 } : {}
+    };
+  }).filter((file) => file !== null);
+  const changedFiles = asStringArray(payload.changedFiles);
+  if (files.length === 0 && changedFiles.length === 0) return null;
+  return {
+    dryRun: payload.dryRun === true,
+    changedFiles: changedFiles.length > 0 ? changedFiles : files.map((file) => file.path),
+    createdFiles: asStringArray(payload.createdFiles),
+    deletedFiles: asStringArray(payload.deletedFiles),
+    files
+  };
+}
+function sourceKind(value) {
+  if (value === "web_search" || value === "web_fetch" || value === "browser" || value === "kb" || value === "file" || value === "external_repo" || value === "external_doc" || value === "subagent_result") {
+    return value;
+  }
+  return "file";
+}
+function normalizeInspectedSource(payload) {
+  const sourceId = asString(payload.sourceId);
+  const uri = asString(payload.uri);
+  if (!sourceId || !uri) return null;
+  const trustTier = payload.trustTier === "primary" || payload.trustTier === "official" || payload.trustTier === "secondary" || payload.trustTier === "unknown" ? payload.trustTier : void 0;
+  return {
+    sourceId,
+    kind: sourceKind(payload.kind),
+    uri,
+    inspectedAt: asNumber(payload.inspectedAt, Date.now()),
+    ...typeof payload.turnId === "string" ? { turnId: payload.turnId } : {},
+    ...typeof payload.toolName === "string" ? { toolName: payload.toolName } : {},
+    ...typeof payload.toolUseId === "string" ? { toolUseId: payload.toolUseId } : {},
+    ...typeof payload.title === "string" ? { title: payload.title } : {},
+    ...typeof payload.contentHash === "string" ? { contentHash: payload.contentHash } : {},
+    ...typeof payload.contentType === "string" ? { contentType: payload.contentType } : {},
+    ...trustTier ? { trustTier } : {},
+    ...Array.isArray(payload.snippets) ? { snippets: asStringArray(payload.snippets).slice(0, 4) } : {}
+  };
+}
+function appendInspectedSource(current, source) {
+  const next = [...(current ?? []).filter((item) => item.sourceId !== source.sourceId), source];
+  return next.slice(-40);
+}
+function normalizeCitationGate(payload) {
+  if (payload.ruleId !== "claim-citation-gate") return null;
+  const verdict = payload.verdict === "ok" || payload.verdict === "violation" || payload.verdict === "pending" ? payload.verdict : "pending";
+  return {
+    ruleId: "claim-citation-gate",
+    verdict,
+    checkedAt: Date.now(),
+    ...typeof payload.detail === "string" ? { detail: payload.detail } : {}
+  };
+}
+function missionStatus(value) {
+  if (value === "queued" || value === "running" || value === "blocked" || value === "waiting" || value === "completed" || value === "failed" || value === "cancelled" || value === "paused") {
+    return value;
+  }
+  return "running";
+}
+function missionStatusFromEvent(eventType) {
+  const normalized = eventType.toLowerCase();
+  if (normalized.includes("complete") || normalized.includes("done")) return "completed";
+  if (normalized.includes("fail") || normalized.includes("error")) return "failed";
+  if (normalized.includes("cancel")) return "cancelled";
+  if (normalized.includes("block")) return "blocked";
+  if (normalized.includes("pause")) return "paused";
+  if (normalized.includes("wait")) return "waiting";
+  return "running";
+}
+function appendMissionActivity(current, patch2) {
+  const next = [...current ?? []];
+  const index2 = next.findIndex((item) => item.id === patch2.id);
+  if (index2 >= 0) next[index2] = { ...next[index2], ...patch2 };
+  else next.push(patch2);
+  return next.slice(-32);
 }
 function appendToolActivity(current, patch2) {
   const next = [...current ?? []];
@@ -37142,10 +37606,13 @@ function App() {
           streaming: true,
           turnPhase: "pending",
           error: null,
+          currentGoal: typeof payload.goal === "string" ? payload.goal : null,
           activeTools: [],
           browserFrame: null,
           subagents: [],
           taskBoard: null,
+          inspectedSources: [],
+          citationGate: null,
           heartbeatElapsedMs: null
         }, { botId: BOT_ID });
       }
@@ -37208,13 +37675,35 @@ function App() {
       if (type === "tool_end") {
         const id = asString(payload.id);
         if (id) {
+          const current = useChatStore.getState().channelStates[channel];
+          const existing = current?.activeTools?.find((item) => item.id === id);
           updateActiveTools(channel, {
             id,
             label: asString(payload.name, asString(payload.label, id)),
             status: payload.status === "error" || payload.status === "denied" ? payload.status : "done",
             startedAt: Date.now(),
             outputPreview: asString(payload.output_preview),
-            durationMs: asNumber(payload.durationMs)
+            durationMs: asNumber(payload.durationMs),
+            ...existing?.patchPreview ? { patchPreview: existing.patchPreview } : {}
+          });
+        }
+      }
+      if (type === "patch_preview") {
+        const patchPreview = normalizePatchPreview(payload);
+        if (patchPreview) {
+          const current = useChatStore.getState().channelStates[channel];
+          const activeTools2 = current?.activeTools ?? [];
+          const toolUseId = asString(payload.toolUseId);
+          const patchTool = [...activeTools2].reverse().find(
+            (item) => item.label.toLowerCase().replace(/[^a-z0-9]/g, "") === "patchapply"
+          );
+          const id = toolUseId || patchTool?.id || nowId("patch");
+          updateActiveTools(channel, {
+            id,
+            label: "PatchApply",
+            status: patchTool?.status ?? "running",
+            startedAt: Date.now(),
+            patchPreview
           });
         }
       }
@@ -37228,6 +37717,57 @@ function App() {
         store.setChannelState(channel, {
           taskBoard: { tasks: normalizeTaskBoard(payload), receivedAt: Date.now() }
         }, { botId: BOT_ID });
+      }
+      if (type === "source_inspected") {
+        const source = normalizeInspectedSource(asRecord(payload.source));
+        if (source) {
+          const current = useChatStore.getState().channelStates[channel];
+          store.setChannelState(channel, {
+            inspectedSources: appendInspectedSource(current?.inspectedSources, source)
+          }, { botId: BOT_ID });
+        }
+      }
+      if (type === "rule_check") {
+        const citationGate = normalizeCitationGate(payload);
+        if (citationGate) {
+          store.setChannelState(channel, { citationGate }, { botId: BOT_ID });
+        }
+      }
+      if (type === "mission_created") {
+        const mission = asRecord(payload.mission);
+        const id = asString(mission.id);
+        if (id) {
+          const current = useChatStore.getState().channelStates[channel];
+          const activity = {
+            id,
+            title: asString(mission.title, "Mission"),
+            kind: asString(mission.kind, "manual"),
+            status: missionStatus(mission.status),
+            updatedAt: Date.now()
+          };
+          store.setChannelState(channel, {
+            missions: appendMissionActivity(current?.missions, activity),
+            ...activity.kind === "goal" ? { activeGoalMissionId: activity.id } : {}
+          }, { botId: BOT_ID });
+        }
+      }
+      if (type === "mission_event") {
+        const missionId = asString(payload.missionId);
+        if (missionId) {
+          const current = useChatStore.getState().channelStates[channel];
+          const existing = current?.missions?.find((mission) => mission.id === missionId);
+          const eventType = asString(payload.eventType, "heartbeat");
+          store.setChannelState(channel, {
+            missions: appendMissionActivity(current?.missions, {
+              id: missionId,
+              title: existing?.title ?? "Mission",
+              kind: existing?.kind ?? "manual",
+              status: missionStatusFromEvent(eventType),
+              detail: asString(payload.message) || existing?.detail,
+              updatedAt: Date.now()
+            })
+          }, { botId: BOT_ID });
+        }
       }
       if (type === "spawn_started" || type === "child_started" || type === "background_task" || type === "spawn_result" || type === "child_completed" || type === "child_failed" || type === "child_cancelled") {
         const taskId = asString(payload.taskId, nowId("child"));
@@ -37342,10 +37882,11 @@ function App() {
     [authHeaders, normalizedBase, refreshKnowledge]
   );
   const performSend = reactExports.useCallback(
-    async (text2, explicitReply, kbDocs, modelOverride) => {
+    async (text2, explicitReply, kbDocs, modelOverride, sendOptions) => {
       const channel = useChatStore.getState().activeChannel || DEFAULT_CHANNEL;
       const messageText = buildMessageContentWithKbContext(text2, kbDocs);
       if (!messageText.trim()) return;
+      const goalMode = sendOptions?.goalMode === true;
       const userMsg = {
         id: nowId("user"),
         role: "user",
@@ -37373,6 +37914,10 @@ function App() {
         browserFrame: null,
         subagents: [],
         taskBoard: null,
+        inspectedSources: [],
+        citationGate: null,
+        currentGoal: goalMode ? text2.trim() : null,
+        pendingGoalMissionTitle: goalMode ? text2.trim() : null,
         responseLanguage: detectMessageResponseLanguage(messageText)
       }, { botId: BOT_ID });
       try {
@@ -37383,6 +37928,7 @@ function App() {
           body: JSON.stringify({
             stream: true,
             ...modelOverride && modelOverride !== "auto" ? { model: modelOverride } : {},
+            ...goalMode ? { goalMode: true } : {},
             ...explicitReply ? { replyTo: explicitReply } : {},
             messages: [{ role: "user", content: messageText }]
           })
@@ -37432,7 +37978,8 @@ function App() {
           next.content,
           next.replyTo ?? null,
           next.kbDocs ?? [],
-          next.modelOverride
+          next.modelOverride,
+          next.goalMode ? { goalMode: true } : void 0
         );
       }, 0);
     },
@@ -37443,9 +37990,10 @@ function App() {
     drainQueue(activeChannel);
   }, [activeChannel, channelState.streaming, drainQueue, queuedForChannel.length]);
   const handleSend = reactExports.useCallback(
-    async (text2, files) => {
+    async (text2, files, options) => {
       const channel = useChatStore.getState().activeChannel || DEFAULT_CHANNEL;
       const activeReply = replyingTo;
+      const goalMode = options?.goalMode === true;
       setReplyingTo(null);
       let uploadedRefs = [];
       try {
@@ -37465,7 +38013,7 @@ function App() {
           hasKbContext: messageKbDocs.length > 0,
           requestedMode: streamingComposerMode
         });
-        if (sendMode === "inject") {
+        if (!goalMode && sendMode === "inject") {
           try {
             const injectedAfterChars = useChatStore.getState().channelStates[channel]?.streamingText?.length ?? 0;
             const result = await sendJson("/v1/chat/inject", {
@@ -37498,6 +38046,7 @@ function App() {
           content: text2,
           queuedAt: Date.now(),
           modelOverride: modelSelection,
+          ...goalMode ? { goalMode: true } : {},
           ...activeReply ? { replyTo: activeReply } : {},
           ...messageKbDocs.length > 0 ? { kbDocs: messageKbDocs } : {}
         };
@@ -37512,7 +38061,7 @@ function App() {
         setSelectedKbDocs([]);
         return true;
       }
-      void performSend(text2, activeReply, messageKbDocs, modelSelection);
+      void performSend(text2, activeReply, messageKbDocs, modelSelection, options);
       setSelectedKbDocs([]);
       return true;
     },

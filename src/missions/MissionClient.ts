@@ -3,6 +3,8 @@ import type {
   ListMissionActionEventsInput,
   MissionActionEvent,
   MissionRecord,
+  RestartRecoveryInput,
+  RestartRecoveryResult,
 } from "./types.js";
 
 export interface MissionClientOptions {
@@ -67,6 +69,25 @@ export class MissionClient {
         ? response.events
         : [];
     return events.filter(isMissionActionEvent);
+  }
+
+  async abandonRunningOnRestart(
+    input: RestartRecoveryInput,
+  ): Promise<RestartRecoveryResult> {
+    const response = await this.request("/v1/missions/restart-recovery", input);
+    const record = Array.isArray(response) ? response[0] ?? {} : response;
+    return {
+      abandoned: typeof record.abandoned === "number" ? record.abandoned : 0,
+      missionIds: Array.isArray(record.missionIds)
+        ? record.missionIds.filter((id): id is string => typeof id === "string")
+        : [],
+      resumeRequested: typeof record.resumeRequested === "number"
+        ? record.resumeRequested
+        : 0,
+      resumeMissionIds: Array.isArray(record.resumeMissionIds)
+        ? record.resumeMissionIds.filter((id): id is string => typeof id === "string")
+        : [],
+    };
   }
 
   private async request(

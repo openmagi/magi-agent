@@ -43,6 +43,7 @@ describe("MissionActionReconciler", () => {
     const missionClient = {
       listActionEvents: vi.fn(async () => [actionEvent]),
       appendEvent: vi.fn(async () => ({})),
+      abandonRunningOnRestart: vi.fn(async () => ({ abandoned: 0, missionIds: [] })),
     };
     const reconciler = new MissionActionReconciler({
       workspaceRoot: root,
@@ -86,6 +87,7 @@ describe("MissionActionReconciler", () => {
     const missionClient = {
       listActionEvents: vi.fn(async () => []),
       appendEvent: vi.fn(async () => ({})),
+      abandonRunningOnRestart: vi.fn(async () => ({ abandoned: 0, missionIds: [] })),
     };
     const reconciler = new MissionActionReconciler({
       workspaceRoot: root,
@@ -145,6 +147,7 @@ describe("MissionActionReconciler", () => {
         },
       ] satisfies MissionActionEvent[]),
       appendEvent: vi.fn(async () => ({})),
+      abandonRunningOnRestart: vi.fn(async () => ({ abandoned: 0, missionIds: [] })),
     };
     const reconciler = new MissionActionReconciler({
       workspaceRoot: root,
@@ -167,5 +170,185 @@ describe("MissionActionReconciler", () => {
       expect.objectContaining({ eventType: "resumed" }),
     );
     expect(cron.enabled).toBe(true);
+  });
+
+  it("marks stale runtime missions abandoned before polling action events", async () => {
+    const backgroundTasks = new BackgroundTaskRegistry(root);
+    const missionClient = {
+      listActionEvents: vi.fn(async () => []),
+      appendEvent: vi.fn(async () => ({})),
+      abandonRunningOnRestart: vi.fn(async () => ({
+        abandoned: 1,
+        missionIds: ["mission-stale"],
+      })),
+    };
+    const reconciler = new MissionActionReconciler({
+      workspaceRoot: root,
+      missionClient,
+      backgroundTasks,
+      startedAt: new Date("2026-05-09T15:15:14.000Z"),
+      pollIntervalMs: 60_000,
+    });
+
+    await reconciler.start();
+    await vi.waitFor(() => expect(missionClient.listActionEvents).toHaveBeenCalled());
+    reconciler.stop();
+
+    expect(missionClient.abandonRunningOnRestart).toHaveBeenCalledWith({
+      startedAt: "2026-05-09T15:15:14.000Z",
+      reason: "abandoned_by_restart",
+    });
+    expect(missionClient.abandonRunningOnRestart.mock.invocationCallOrder[0])
+      .toBeLessThan(missionClient.listActionEvents.mock.invocationCallOrder[0]);
+  });
+
+  it("dispatches restart goal retry events to the goal resumer", async () => {
+    const actionEvent: MissionActionEvent = {
+      id: "event-goal-retry",
+      mission_id: "mission-goal",
+      event_type: "retry_requested",
+      created_at: "2026-05-09T15:16:00.000Z",
+      payload: {
+        reason: "restart_recovery",
+        startedAt: "2026-05-09T15:15:14.000Z",
+        goal: {
+          sessionKey: "agent:main:app:general:32",
+          channelType: "app",
+          channelId: "general",
+          objective: "Finish the IC memo",
+          sourceRequest: "Run the investment committee workflow",
+          title: "Investment memo",
+          completionCriteria: ["Final IC memo delivered"],
+          turnsUsed: 2,
+          maxTurns: 30,
+          resumeContext: "Recent mission ledger before restart:\n- heartbeat: Drafted partner critique.",
+        },
+      },
+    };
+    const backgroundTasks = new BackgroundTaskRegistry(root);
+    const missionClient = {
+      listActionEvents: vi.fn(async () => [actionEvent]),
+      appendEvent: vi.fn(async () => ({})),
+      abandonRunningOnRestart: vi.fn(async () => ({ abandoned: 0, missionIds: [] })),
+    };
+    const goalResumer = {
+      resumeAfterRestart: vi.fn(async () => undefined),
+    };
+    const reconciler = new MissionActionReconciler({
+      workspaceRoot: root,
+      missionClient,
+      backgroundTasks,
+      goals: goalResumer,
+      pollIntervalMs: 60_000,
+    });
+
+    await reconciler.pollOnce();
+
+    expect(goalResumer.resumeAfterRestart).toHaveBeenCalledWith({
+      actionEventId: "event-goal-retry",
+      missionId: "mission-goal",
+      startedAt: "2026-05-09T15:15:14.000Z",
+      sessionKey: "agent:main:app:general:32",
+      channel: { type: "app", channelId: "general" },
+      objective: "Finish the IC memo",
+      sourceRequest: "Run the investment committee workflow",
+      title: "Investment memo",
+      completionCriteria: ["Final IC memo delivered"],
+      turnsUsed: 2,
+      maxTurns: 30,
+      resumeContext: "Recent mission ledger before restart:\n- heartbeat: Drafted partner critique.",
+    });
+    expect(missionClient.appendEvent).not.toHaveBeenCalled();
+  });
+
+  it("notifies the goal controller when a mission cancel is requested", async () => {
+    const actionEvent: MissionActionEvent = {
+      id: "event-goal-cancel",
+      mission_id: "mission-goal",
+      event_type: "cancel_requested",
+      created_at: "2026-05-09T15:17:00.000Z",
+    };
+    const backgroundTasks = new BackgroundTaskRegistry(root);
+    const missionClient = {
+      listActionEvents: vi.fn(async () => [actionEvent]),
+      appendEvent: vi.fn(async () => ({})),
+      abandonRunningOnRestart: vi.fn(async () => ({ abandoned: 0, missionIds: [] })),
+    };
+    const goalController = {
+      resumeAfterRestart: vi.fn(async () => undefined),
+      cancel: vi.fn(async () => undefined),
+    };
+    const reconciler = new MissionActionReconciler({
+      workspaceRoot: root,
+      missionClient,
+      backgroundTasks,
+      goals: goalController,
+      pollIntervalMs: 60_000,
+    });
+
+    await reconciler.pollOnce();
+
+    expect(goalController.cancel).toHaveBeenCalledWith("mission-goal", {
+      actionEventId: "event-goal-cancel",
+      reason: "mission_cancel_requested",
+    });
+  });
+
+  it("does not block startup while restart goal resume is still running", async () => {
+    const actionEvent: MissionActionEvent = {
+      id: "event-goal-retry",
+      mission_id: "mission-goal",
+      event_type: "retry_requested",
+      created_at: "2026-05-09T15:16:00.000Z",
+      payload: {
+        reason: "restart_recovery",
+        startedAt: "2026-05-09T15:15:14.000Z",
+        goal: {
+          sessionKey: "agent:main:app:general:32",
+          channelType: "app",
+          channelId: "general",
+          objective: "Finish the IC memo",
+          sourceRequest: "Run the investment committee workflow",
+          title: "Investment memo",
+          completionCriteria: ["Final IC memo delivered"],
+          turnsUsed: 2,
+          maxTurns: 30,
+          resumeContext: "Recent mission ledger before restart:\n- heartbeat: Drafted partner critique.",
+        },
+      },
+    };
+    const backgroundTasks = new BackgroundTaskRegistry(root);
+    const missionClient = {
+      listActionEvents: vi.fn(async () => [actionEvent]),
+      appendEvent: vi.fn(async () => ({})),
+      abandonRunningOnRestart: vi.fn(async () => ({ abandoned: 0, missionIds: [] })),
+    };
+    let resolveResume: () => void = () => {};
+    const resumePending = new Promise<void>((resolve) => {
+      resolveResume = resolve;
+    });
+    const goalResumer = {
+      resumeAfterRestart: vi.fn(async () => resumePending),
+    };
+    const reconciler = new MissionActionReconciler({
+      workspaceRoot: root,
+      missionClient,
+      backgroundTasks,
+      goals: goalResumer,
+      pollIntervalMs: 60_000,
+    });
+
+    const started = reconciler.start();
+
+    await vi.waitFor(() => expect(goalResumer.resumeAfterRestart).toHaveBeenCalled());
+    const result = await Promise.race([
+      started.then(() => "resolved"),
+      new Promise<"blocked">((resolve) => setTimeout(() => resolve("blocked"), 30)),
+    ]);
+
+    resolveResume();
+    await started;
+    reconciler.stop();
+    expect(result).toBe("resolved");
   });
 });
