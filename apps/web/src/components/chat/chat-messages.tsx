@@ -66,6 +66,14 @@ function t(language: ChatResponseLanguage | undefined, en: string, ko: string): 
   return isKorean(language) ? ko : en;
 }
 
+function waitingCountLabel(count: number, language?: ChatResponseLanguage): string {
+  return isKorean(language) ? `${count}개 대기` : `${count} waiting`;
+}
+
+function queuedIndexLabel(index: number, language?: ChatResponseLanguage): string {
+  return isKorean(language) ? `대기 #${index}` : `Queued #${index}`;
+}
+
 function MessageSkeleton() {
   return (
     <div className="space-y-5 py-2">
@@ -304,6 +312,7 @@ function duplicateContentKey(message: ChatMessage): string | null {
 export const ChatMessages = forwardRef<ChatMessagesHandle, ChatMessagesProps>(function ChatMessages({ messages, serverMessages, channelState, loading, botId, selectionMode, selectedMessages, onToggleSelect, onEnterSelectionMode, onSelectAll, onDeselectAll, onExportSelected, onDeleteSelected, onExitSelectionMode, onLoadOlder, hasOlderMessages, loadingOlder, onReplyTo, queuedMessages, onCancelQueued, controlRequests, onRespondControlRequest }, ref) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [showScrollBtn, setShowScrollBtn] = useState(false);
+  const language = channelState.responseLanguage;
   const userScrolledUp = useRef(false);
   const prevMsgCount = useRef(0);
   const animateFromRef = useRef(0);
@@ -843,27 +852,40 @@ export const ChatMessages = forwardRef<ChatMessagesHandle, ChatMessagesProps>(fu
           <div className="mt-3 flex justify-end">
             <div className="w-full max-w-[92%] sm:max-w-[82%] rounded-2xl border border-amber-500/25 bg-amber-50 px-3 py-2 shadow-[0_1px_8px_rgba(245,158,11,0.10)]">
               <div className="mb-1.5 flex items-center justify-between gap-2 text-[10px] font-semibold uppercase tracking-wide text-amber-800/70">
-                <span>Queued follow-ups</span>
+                <span>{t(language, "Queued follow-ups", "대기 중인 후속 메시지")}</span>
                 <span className="rounded-full bg-amber-500/15 px-1.5 py-0.5 text-[9px] text-amber-800">
-                  {queuedMessages.length} waiting
+                  {waitingCountLabel(queuedMessages.length, language)}
                 </span>
               </div>
               <div className="space-y-1.5">
                 {queuedMessages.map((q, index) => (
                   <div key={q.id} className="flex justify-end">
-                    <button
-                      type="button"
-                      onClick={() => onCancelQueued?.(q.id)}
-                      className="group w-full text-left rounded-xl border border-dashed border-amber-500/25 bg-white/75 px-3 py-2 text-[13px] text-foreground/75 transition-colors hover:border-red-500/25 hover:bg-red-500/10 hover:text-red-600"
+                    <div
+                      className="group w-full rounded-xl border border-dashed border-amber-500/25 bg-white/75 px-3 py-2 text-left text-[13px] text-foreground/75"
                       data-chat-queued-card="true"
-                      title="Click to cancel this message before the current turn finishes"
                     >
-                      <span className="mb-0.5 flex items-center justify-between gap-2 text-[10px] font-semibold uppercase tracking-wide text-amber-800/70 group-hover:text-red-500/80">
-                        <span>Queued #{index + 1}</span>
-                        <span className="normal-case tracking-normal">Waiting for current run</span>
-                      </span>
-                      <span className="block whitespace-pre-wrap break-words">{q.content}</span>
-                    </button>
+                      <div className="flex items-start gap-3">
+                        <div className="min-w-0 flex-1">
+                          <span className="mb-0.5 flex items-center justify-between gap-2 text-[10px] font-semibold uppercase tracking-wide text-amber-800/70">
+                            <span>{queuedIndexLabel(index + 1, language)}</span>
+                            <span className="normal-case tracking-normal">
+                              {t(language, "Waiting for current run", "현재 실행 대기 중")}
+                            </span>
+                          </span>
+                          <span className="block whitespace-pre-wrap break-words">{q.content}</span>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => onCancelQueued?.(q.id)}
+                          className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-red-500/15 bg-red-500/10 text-lg font-semibold leading-none text-red-600 transition-colors hover:border-red-500/35 hover:bg-red-500/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-400/70 focus-visible:ring-offset-2"
+                          aria-label={t(language, `Cancel queued follow-up #${index + 1}`, `대기 중인 후속 메시지 #${index + 1} 취소`)}
+                          title={t(language, "Cancel queued follow-up", "대기 중인 후속 메시지 취소")}
+                          data-chat-queued-cancel="true"
+                        >
+                          <span aria-hidden="true">×</span>
+                        </button>
+                      </div>
+                    </div>
                   </div>
                 ))}
               </div>

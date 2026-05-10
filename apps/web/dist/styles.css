@@ -98,6 +98,7 @@
     --color-emerald-700: oklch(50.8% .118 165.612);
     --color-sky-50: oklch(97.7% .013 236.62);
     --color-sky-500: oklch(68.5% .169 237.323);
+    --color-sky-800: oklch(44.3% .11 240.79);
     --color-slate-200: oklch(92.9% .013 255.508);
     --color-slate-400: oklch(70.4% .04 256.788);
     --color-slate-500: oklch(55.4% .046 257.417);
@@ -118,6 +119,8 @@
     --text-sm--line-height: calc(1.25 / .875);
     --text-base: 1rem;
     --text-base--line-height: calc(1.5 / 1);
+    --text-lg: 1.125rem;
+    --text-lg--line-height: calc(1.75 / 1.125);
     --text-xl: 1.25rem;
     --text-xl--line-height: calc(1.75 / 1.25);
     --text-2xl: 1.5rem;
@@ -2180,6 +2183,16 @@
     }
   }
 
+  .bg-sky-500\/15 {
+    background-color: #00a5ef26;
+  }
+
+  @supports (color: color-mix(in lab, red, red)) {
+    .bg-sky-500\/15 {
+      background-color: color-mix(in oklab, var(--color-sky-500) 15%, transparent);
+    }
+  }
+
   .bg-white {
     background-color: var(--color-white);
   }
@@ -2459,6 +2472,11 @@
   .text-base {
     font-size: var(--text-base);
     line-height: var(--tw-leading, var(--text-base--line-height));
+  }
+
+  .text-lg {
+    font-size: var(--text-lg);
+    line-height: var(--tw-leading, var(--text-lg--line-height));
   }
 
   .text-sm {
@@ -2880,6 +2898,10 @@
     }
   }
 
+  .text-sky-800 {
+    color: var(--color-sky-800);
+  }
+
   .text-slate-400 {
     color: var(--color-slate-400);
   }
@@ -3236,16 +3258,6 @@
       color: #7c3aed;
     }
 
-    .group-hover\:text-red-500\/80:is(:where(.group):hover *) {
-      color: #fb2c36cc;
-    }
-
-    @supports (color: color-mix(in lab, red, red)) {
-      .group-hover\:text-red-500\/80:is(:where(.group):hover *) {
-        color: color-mix(in oklab, var(--color-red-500) 80%, transparent);
-      }
-    }
-
     .group-hover\:text-secondary:is(:where(.group):hover *) {
       color: var(--text-secondary);
     }
@@ -3286,13 +3298,13 @@
       }
     }
 
-    .hover\:border-red-500\/25:hover {
-      border-color: #fb2c3640;
+    .hover\:border-red-500\/35:hover {
+      border-color: #fb2c3659;
     }
 
     @supports (color: color-mix(in lab, red, red)) {
-      .hover\:border-red-500\/25:hover {
-        border-color: color-mix(in oklab, var(--color-red-500) 25%, transparent);
+      .hover\:border-red-500\/35:hover {
+        border-color: color-mix(in oklab, var(--color-red-500) 35%, transparent);
       }
     }
 
@@ -3445,6 +3457,16 @@
     @supports (color: color-mix(in lab, red, red)) {
       .hover\:bg-red-500\/10:hover {
         background-color: color-mix(in oklab, var(--color-red-500) 10%, transparent);
+      }
+    }
+
+    .hover\:bg-red-500\/15:hover {
+      background-color: #fb2c3626;
+    }
+
+    @supports (color: color-mix(in lab, red, red)) {
+      .hover\:bg-red-500\/15:hover {
+        background-color: color-mix(in oklab, var(--color-red-500) 15%, transparent);
       }
     }
 
@@ -3606,6 +3628,26 @@
 
   .focus-visible\:ring-\[\#7C3AED\]\/60:focus-visible {
     --tw-ring-color: oklab(54.1337% .0963843 -.226968 / .6);
+  }
+
+  .focus-visible\:ring-red-400\/70:focus-visible {
+    --tw-ring-color: #ff6568b3;
+  }
+
+  @supports (color: color-mix(in lab, red, red)) {
+    .focus-visible\:ring-red-400\/70:focus-visible {
+      --tw-ring-color: color-mix(in oklab, var(--color-red-400) 70%, transparent);
+    }
+  }
+
+  .focus-visible\:ring-offset-2:focus-visible {
+    --tw-ring-offset-width: 2px;
+    --tw-ring-offset-shadow: var(--tw-ring-inset, ) 0 0 0 var(--tw-ring-offset-width) var(--tw-ring-offset-color);
+  }
+
+  .focus-visible\:outline-none:focus-visible {
+    --tw-outline-style: none;
+    outline-style: none;
   }
 
   .active\:scale-95:active {
@@ -4088,6 +4130,93 @@ body {
 
 .chat-channel-fade {
   animation: .15s ease-out chat-fade-in;
+}
+
+@keyframes work-console-row-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes work-console-dot-breathe {
+  0%, 100% {
+    opacity: .78;
+    transform: scale(1);
+    box-shadow: 0 0 #7c3aed2e;
+  }
+
+  50% {
+    opacity: 1;
+    transform: scale(1.14);
+    box-shadow: 0 0 0 5px #7c3aed00;
+  }
+}
+
+@keyframes work-console-row-sheen {
+  0% {
+    opacity: 0;
+    transform: translateX(-70%);
+  }
+
+  20%, 70% {
+    opacity: .55;
+  }
+
+  100% {
+    opacity: 0;
+    transform: translateX(70%);
+  }
+}
+
+@keyframes work-console-text-in {
+  from {
+    opacity: .58;
+    transform: translateY(2px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.work-console-row-motion {
+  animation: .18s ease-out both work-console-row-in;
+  animation-delay: var(--work-console-row-delay, 0s);
+  will-change: opacity, transform;
+  transition: background-color .18s, border-color .18s, box-shadow .18s, opacity .18s, transform .18s;
+}
+
+.work-console-running-dot {
+  animation: 1.45s ease-in-out infinite work-console-dot-breathe;
+}
+
+.work-console-running-row {
+  position: relative;
+  overflow: hidden;
+}
+
+.work-console-running-row:after {
+  content: "";
+  pointer-events: none;
+  background: linear-gradient(90deg, #0000, #7c3aed52, #0000);
+  border-radius: 999px;
+  height: 1px;
+  animation: 1.9s ease-in-out infinite work-console-row-sheen;
+  position: absolute;
+  bottom: .25rem;
+  left: .625rem;
+  right: .625rem;
+}
+
+.work-console-text-motion {
+  animation: .15s ease-out both work-console-text-in;
 }
 
 @keyframes fade-in-up {

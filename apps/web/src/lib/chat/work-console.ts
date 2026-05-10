@@ -201,6 +201,24 @@ function normalizeRole(role: string): string {
   return value || "subagent";
 }
 
+function subagentDetail(
+  activity: SubagentActivity,
+  language?: ChatResponseLanguage,
+): string | undefined {
+  const detail = activity.detail?.replace(/\s+/g, " ").trim();
+  if (!detail) return undefined;
+
+  const normalized = detail.toLowerCase();
+  if (/^iteration\s+\d+$/.test(normalized)) return undefined;
+  if (normalized === "allow" || normalized === "allowed" || normalized === "permission") {
+    return activity.status === "waiting"
+      ? t(language, "Checking permissions", "권한 확인 중")
+      : t(language, "Permission checked", "권한 확인됨");
+  }
+
+  return detail;
+}
+
 function controlLabel(
   request: ControlRequestRecord,
   language?: ChatResponseLanguage,
@@ -368,7 +386,7 @@ export function deriveWorkConsoleRows({
       id: `subagent:${subagent.taskId}`,
       group: "subagent",
       label: subagentName(index),
-      detail: subagent.detail,
+      detail: subagentDetail(subagent, language),
       status: statusFromSubagent(subagent),
       meta: normalizeRole(subagent.role),
     });

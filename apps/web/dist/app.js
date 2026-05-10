@@ -32180,7 +32180,7 @@ function structuredValueText(value) {
   }
   return void 0;
 }
-function browserPreview(input) {
+function browserPreview(input, language) {
   const output = previewObject(input.outputPreview) ?? previewObject(input.inputPreview);
   if (!output) return null;
   const action = displayValue(output, ["action", "type"]);
@@ -32189,32 +32189,32 @@ function browserPreview(input) {
   const path2 = displayValue(output, ["path", "filename", "title", "url"]);
   if (status && /error|fail|aborted/i.test(status)) {
     return {
-      action: "Browser step failed",
+      action: localized(language, "Browser step failed", "브라우저 단계 실패"),
       ...path2 ? { target: bounded(path2, MAX_TARGET_LENGTH) } : {},
       ...error ? { snippet: snippetFrom(error) } : {}
     };
   }
   if (action === "create_session" || action === "open_session" || action === "session") {
     return {
-      action: "Opening browser",
-      target: "Starting browser session"
+      action: localized(language, "Opening browser", "브라우저 여는 중"),
+      target: localized(language, "Starting browser session", "브라우저 세션 시작 중")
     };
   }
   if (action === "scrape" || action === "read" || action === "extract") {
     return {
-      action: "Reading page",
+      action: localized(language, "Reading page", "페이지 읽는 중"),
       ...path2 ? { target: bounded(path2, MAX_TARGET_LENGTH) } : {},
       ...error ? { snippet: snippetFrom(error) } : {}
     };
   }
   if (action === "navigate" || action === "goto" || action === "open") {
     return {
-      action: "Opening page",
+      action: localized(language, "Opening page", "페이지 여는 중"),
       ...path2 ? { target: bounded(path2, MAX_TARGET_LENGTH) } : {}
     };
   }
   return {
-    action: "Using browser",
+    action: localized(language, "Using browser", "브라우저 사용 중"),
     ...path2 ? { target: bounded(path2, MAX_TARGET_LENGTH) } : {}
   };
 }
@@ -32503,7 +32503,7 @@ function derivePublicToolPreview(input) {
     return commandPreview(command, commandOutputSnippet(input.outputPreview, language), language);
   }
   if (tool === "browser" || tool === "browseruse" || tool === "browserworker") {
-    const preview2 = browserPreview(input);
+    const preview2 = browserPreview(input, language);
     if (preview2) return preview2;
   }
   if (tool === "spawnagent") {
@@ -32700,6 +32700,16 @@ function normalizeRole(role) {
   if (value === "work" || value === "worker") return "worker";
   return value || "subagent";
 }
+function subagentDetail(activity, language) {
+  const detail = activity.detail?.replace(/\s+/g, " ").trim();
+  if (!detail) return void 0;
+  const normalized = detail.toLowerCase();
+  if (/^iteration\s+\d+$/.test(normalized)) return void 0;
+  if (normalized === "allow" || normalized === "allowed" || normalized === "permission") {
+    return activity.status === "waiting" ? t$5(language, "Checking permissions", "권한 확인 중") : t$5(language, "Permission checked", "권한 확인됨");
+  }
+  return detail;
+}
 function controlLabel(request, language) {
   if (request.kind === "user_question") return t$5(language, "Needs answer", "답변 필요");
   return t$5(language, "Needs approval", "승인 필요");
@@ -32825,7 +32835,7 @@ function deriveWorkConsoleRows({
       id: `subagent:${subagent.taskId}`,
       group: "subagent",
       label: subagentName(index2),
-      detail: subagent.detail,
+      detail: subagentDetail(subagent, language),
       status: statusFromSubagent(subagent),
       meta: normalizeRole(subagent.role)
     });
@@ -32895,7 +32905,7 @@ const PHASE_LABELS_KO = {
   committed: "답변 작성 중",
   aborted: "중단 중"
 };
-const MAX_DISPLAY_GOAL_CHARS = 140;
+const MAX_DISPLAY_GOAL_CHARS$1 = 140;
 const TERMINAL_MISSION_STATUSES = /* @__PURE__ */ new Set([
   "completed",
   "failed",
@@ -33001,7 +33011,7 @@ function phaseLabel$1(phase, language) {
 function currentGoalFrom(channelState) {
   const goal = channelState.currentGoal?.replace(/\s+/g, " ").trim();
   if (!goal) return null;
-  return goal.length <= MAX_DISPLAY_GOAL_CHARS ? goal : null;
+  return goal.length <= MAX_DISPLAY_GOAL_CHARS$1 ? goal : null;
 }
 function activeGoalMission(channelState) {
   const missions = channelState.missions ?? [];
@@ -33064,6 +33074,12 @@ function isKorean$3(language) {
 function t$3(language, en, ko) {
   return isKorean$3(language) ? ko : en;
 }
+function waitingCountLabel$1(count, language) {
+  return isKorean$3(language) ? `${count}개 대기` : `${count} waiting`;
+}
+function queuedIndexLabel(index2, language) {
+  return isKorean$3(language) ? `대기 #${index2}` : `Queued #${index2}`;
+}
 function MessageSkeleton() {
   return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "space-y-5 py-2", children: [
     /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "flex justify-start", children: /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "space-y-2 max-w-[65%]", children: [
@@ -33115,7 +33131,7 @@ function browserActionLabel$2(action, language) {
       return t$3(language, "Using browser", "브라우저 사용 중");
   }
 }
-function hasOpenTaskState(channelState) {
+function hasOpenTaskState$1(channelState) {
   return !!channelState.taskBoard?.tasks.some(
     (task) => task.status === "pending" || task.status === "in_progress"
   );
@@ -33123,7 +33139,7 @@ function hasOpenTaskState(channelState) {
 function hasInlineRunStatus(channelState, queuedMessages, pendingRequests) {
   const hasLiveWork = (channelState.activeTools ?? []).some((tool) => tool.status === "running") || (channelState.subagents ?? []).some(
     (subagent) => subagent.status === "running" || subagent.status === "waiting"
-  ) || hasOpenTaskState(channelState) || !!channelState.browserFrame || queuedMessages.length > 0 || pendingRequests.length > 0 || channelState.fileProcessing || channelState.reconnecting;
+  ) || hasOpenTaskState$1(channelState) || !!channelState.browserFrame || queuedMessages.length > 0 || pendingRequests.length > 0 || channelState.fileProcessing || channelState.reconnecting;
   return hasLiveWork || channelState.streaming && !channelState.streamingText;
 }
 function inlineWorkRows(channelState, queuedMessages, pendingRequests) {
@@ -33230,6 +33246,7 @@ function duplicateContentKey(message) {
 const ChatMessages = reactExports.forwardRef(function ChatMessages2({ messages, serverMessages, channelState, loading, botId, selectionMode, selectedMessages, onToggleSelect, onEnterSelectionMode, onSelectAll, onDeselectAll, onExportSelected, onDeleteSelected, onExitSelectionMode, onLoadOlder, hasOlderMessages, loadingOlder, onReplyTo, queuedMessages, onCancelQueued, controlRequests, onRespondControlRequest }, ref) {
   const containerRef = reactExports.useRef(null);
   const [showScrollBtn, setShowScrollBtn] = reactExports.useState(false);
+  const language = channelState.responseLanguage;
   const userScrolledUp = reactExports.useRef(false);
   const prevMsgCount = reactExports.useRef(0);
   const animateFromRef = reactExports.useRef(0);
@@ -33651,30 +33668,35 @@ const ChatMessages = reactExports.forwardRef(function ChatMessages2({ messages, 
             showTyping && !channelState.fileProcessing && /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "chat-msg-in", children: /* @__PURE__ */ jsxRuntimeExports.jsx(TypingIndicator, {}) }),
             queuedMessages && queuedMessages.length > 0 && /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "mt-3 flex justify-end", children: /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "w-full max-w-[92%] sm:max-w-[82%] rounded-2xl border border-amber-500/25 bg-amber-50 px-3 py-2 shadow-[0_1px_8px_rgba(245,158,11,0.10)]", children: [
               /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "mb-1.5 flex items-center justify-between gap-2 text-[10px] font-semibold uppercase tracking-wide text-amber-800/70", children: [
-                /* @__PURE__ */ jsxRuntimeExports.jsx("span", { children: "Queued follow-ups" }),
-                /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "rounded-full bg-amber-500/15 px-1.5 py-0.5 text-[9px] text-amber-800", children: [
-                  queuedMessages.length,
-                  " waiting"
-                ] })
+                /* @__PURE__ */ jsxRuntimeExports.jsx("span", { children: t$3(language, "Queued follow-ups", "대기 중인 후속 메시지") }),
+                /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "rounded-full bg-amber-500/15 px-1.5 py-0.5 text-[9px] text-amber-800", children: waitingCountLabel$1(queuedMessages.length, language) })
               ] }),
-              /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "space-y-1.5", children: queuedMessages.map((q, index2) => /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "flex justify-end", children: /* @__PURE__ */ jsxRuntimeExports.jsxs(
-                "button",
+              /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "space-y-1.5", children: queuedMessages.map((q, index2) => /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "flex justify-end", children: /* @__PURE__ */ jsxRuntimeExports.jsx(
+                "div",
                 {
-                  type: "button",
-                  onClick: () => onCancelQueued?.(q.id),
-                  className: "group w-full text-left rounded-xl border border-dashed border-amber-500/25 bg-white/75 px-3 py-2 text-[13px] text-foreground/75 transition-colors hover:border-red-500/25 hover:bg-red-500/10 hover:text-red-600",
+                  className: "group w-full rounded-xl border border-dashed border-amber-500/25 bg-white/75 px-3 py-2 text-left text-[13px] text-foreground/75",
                   "data-chat-queued-card": "true",
-                  title: "Click to cancel this message before the current turn finishes",
-                  children: [
-                    /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "mb-0.5 flex items-center justify-between gap-2 text-[10px] font-semibold uppercase tracking-wide text-amber-800/70 group-hover:text-red-500/80", children: [
-                      /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { children: [
-                        "Queued #",
-                        index2 + 1
+                  children: /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-start gap-3", children: [
+                    /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "min-w-0 flex-1", children: [
+                      /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "mb-0.5 flex items-center justify-between gap-2 text-[10px] font-semibold uppercase tracking-wide text-amber-800/70", children: [
+                        /* @__PURE__ */ jsxRuntimeExports.jsx("span", { children: queuedIndexLabel(index2 + 1, language) }),
+                        /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "normal-case tracking-normal", children: t$3(language, "Waiting for current run", "현재 실행 대기 중") })
                       ] }),
-                      /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "normal-case tracking-normal", children: "Waiting for current run" })
+                      /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "block whitespace-pre-wrap break-words", children: q.content })
                     ] }),
-                    /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "block whitespace-pre-wrap break-words", children: q.content })
-                  ]
+                    /* @__PURE__ */ jsxRuntimeExports.jsx(
+                      "button",
+                      {
+                        type: "button",
+                        onClick: () => onCancelQueued?.(q.id),
+                        className: "flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-red-500/15 bg-red-500/10 text-lg font-semibold leading-none text-red-600 transition-colors hover:border-red-500/35 hover:bg-red-500/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-400/70 focus-visible:ring-offset-2",
+                        "aria-label": t$3(language, `Cancel queued follow-up #${index2 + 1}`, `대기 중인 후속 메시지 #${index2 + 1} 취소`),
+                        title: t$3(language, "Cancel queued follow-up", "대기 중인 후속 메시지 취소"),
+                        "data-chat-queued-cancel": "true",
+                        children: /* @__PURE__ */ jsxRuntimeExports.jsx("span", { "aria-hidden": "true", children: "×" })
+                      }
+                    )
+                  ] })
                 }
               ) }, q.id)) })
             ] }) }),
@@ -34669,6 +34691,26 @@ function KbContextBar({ docs: docs2, onRemove }) {
 function Image({ fill: _fill, unoptimized: _unoptimized, ...props }) {
   return /* @__PURE__ */ jsxRuntimeExports.jsx("img", { ...props });
 }
+const WORK_CONSOLE_MOTION_TICK_MS = 1e3;
+const WORK_CONSOLE_ROW_STAGGER_MS = 60;
+const WORK_CONSOLE_ROW_STAGGER_MAX_MS = 240;
+function smoothedHeartbeatElapsedMs(baseElapsedMs, observedAtMs, nowMs) {
+  if (typeof baseElapsedMs !== "number" || !Number.isFinite(baseElapsedMs) || baseElapsedMs < 1e3) {
+    return null;
+  }
+  if (!Number.isFinite(observedAtMs) || !Number.isFinite(nowMs)) {
+    return Math.max(1e3, Math.floor(baseElapsedMs));
+  }
+  const localDeltaMs = Math.max(0, nowMs - observedAtMs);
+  return Math.floor(baseElapsedMs) + Math.floor(localDeltaMs / 1e3) * 1e3;
+}
+function workConsoleRowDelayMs(index2) {
+  if (!Number.isFinite(index2) || index2 <= 0) return 0;
+  return Math.min(
+    WORK_CONSOLE_ROW_STAGGER_MAX_MS,
+    Math.floor(index2) * WORK_CONSOLE_ROW_STAGGER_MS
+  );
+}
 const GROUP_LABELS = {
   status: "Now",
   mission: "Missions",
@@ -34687,6 +34729,14 @@ const GROUP_LABELS_KO = {
   queue: "대기 메시지",
   control: "입력 필요"
 };
+const INLINE_RUN_DETAIL_GROUPS = /* @__PURE__ */ new Set([
+  "tool",
+  "subagent",
+  "task",
+  "queue",
+  "control"
+]);
+const MAX_DISPLAY_GOAL_CHARS = 140;
 function isKorean$1(language) {
   return language === "ko";
 }
@@ -34719,6 +34769,36 @@ function groupRows(rows) {
     groups.set(row.group, existing);
   }
   return Array.from(groups.entries());
+}
+function suppressInlineRunDetailRows(rows) {
+  return rows.filter((row) => !INLINE_RUN_DETAIL_GROUPS.has(row.group));
+}
+function compactDisplayGoal(value) {
+  const normalized = value?.replace(/\s+/g, " ").trim();
+  if (!normalized) return null;
+  return normalized.length <= MAX_DISPLAY_GOAL_CHARS ? normalized : null;
+}
+function hasVisibleGoalMission(rows, activeGoalMissionId) {
+  const activeMissionRowId = activeGoalMissionId ? `mission:${activeGoalMissionId}` : null;
+  return rows.some((row) => {
+    if (row.group !== "mission") return false;
+    if (activeMissionRowId && row.id === activeMissionRowId) return true;
+    return row.meta?.split(/\s+/)[0] === "goal";
+  });
+}
+function compactInlineOverviewRows(rows, channelState, language) {
+  const visible = suppressInlineRunDetailRows(rows);
+  const goal = hasVisibleGoalMission(visible, channelState.activeGoalMissionId) ? null : compactDisplayGoal(channelState.pendingGoalMissionTitle) ?? compactDisplayGoal(channelState.currentGoal);
+  if (goal) {
+    visible.push({
+      id: "overview:goal",
+      group: "status",
+      label: t$1(language, "Goal", "목표"),
+      detail: goal,
+      status: "info"
+    });
+  }
+  return visible;
 }
 function sectionTone(group) {
   if (group === "status") return "status";
@@ -34760,35 +34840,100 @@ function actionRowToneClass(status) {
       return "border-black/[0.06] bg-white/70 shadow-[0_1px_0_rgba(0,0,0,0.03)]";
   }
 }
-function WorkConsoleAgentChip({ row }) {
-  return /* @__PURE__ */ jsxRuntimeExports.jsx("li", { className: "min-w-0 max-w-full", children: /* @__PURE__ */ jsxRuntimeExports.jsxs(
-    "div",
-    {
-      className: "grid w-full min-w-0 grid-cols-[auto,minmax(0,1fr),auto] items-center gap-1 rounded-md border border-emerald-500/12 bg-emerald-50/35 px-1.5 py-1 text-[10.5px] leading-none",
-      "data-work-console-agent-chip": "true",
-      "data-work-console-row-status": row.status,
-      title: [row.label, row.meta, row.detail].filter(Boolean).join(" "),
-      children: [
-        /* @__PURE__ */ jsxRuntimeExports.jsx(
-          "span",
-          {
-            className: `h-1.5 w-1.5 shrink-0 rounded-full ${statusClass(row.status)}`,
-            "aria-hidden": "true"
-          }
-        ),
-        /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "min-w-0 truncate", children: [
-          /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "font-medium text-foreground/80", children: row.label }),
-          row.meta && /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "text-secondary/40", children: [
-            " ",
-            row.meta
-          ] })
-        ] }),
-        row.detail && /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "shrink-0 rounded bg-black/[0.04] px-1 py-0.5 text-[9px] font-medium text-secondary/55", children: row.detail })
-      ]
-    }
-  ) });
+function runningMotionClass(status) {
+  return status === "running" ? "work-console-running-row" : "";
 }
-function WorkConsoleRowItem({ row }) {
+function runningDotMotionClass(status) {
+  return status === "running" ? "work-console-running-dot" : "";
+}
+function motionStyle(delayMs) {
+  return { "--work-console-row-delay": `${delayMs}ms` };
+}
+function useSmoothedChannelState(channelState) {
+  const [displayNowMs, setDisplayNowMs] = reactExports.useState(() => Date.now());
+  const heartbeatAnchorRef = reactExports.useRef({
+    elapsedMs: channelState.heartbeatElapsedMs ?? null,
+    observedAtMs: displayNowMs
+  });
+  const currentHeartbeatElapsedMs = channelState.heartbeatElapsedMs ?? null;
+  if (heartbeatAnchorRef.current.elapsedMs !== currentHeartbeatElapsedMs) {
+    heartbeatAnchorRef.current = {
+      elapsedMs: currentHeartbeatElapsedMs,
+      observedAtMs: displayNowMs
+    };
+  }
+  reactExports.useEffect(() => {
+    if (!channelState.streaming || currentHeartbeatElapsedMs === null) return;
+    const tick = window.setInterval(() => {
+      setDisplayNowMs(Date.now());
+    }, WORK_CONSOLE_MOTION_TICK_MS);
+    return () => window.clearInterval(tick);
+  }, [channelState.streaming, currentHeartbeatElapsedMs]);
+  const smoothedElapsedMs = smoothedHeartbeatElapsedMs(
+    heartbeatAnchorRef.current.elapsedMs,
+    heartbeatAnchorRef.current.observedAtMs,
+    displayNowMs
+  );
+  if (smoothedElapsedMs === currentHeartbeatElapsedMs) return channelState;
+  return { ...channelState, heartbeatElapsedMs: smoothedElapsedMs };
+}
+function WorkConsoleAgentChip({
+  row,
+  motionDelayMs
+}) {
+  return /* @__PURE__ */ jsxRuntimeExports.jsx(
+    "li",
+    {
+      className: `work-console-row-motion min-w-0 max-w-full ${runningMotionClass(row.status)}`,
+      "data-work-console-motion": "true",
+      style: motionStyle(motionDelayMs),
+      children: /* @__PURE__ */ jsxRuntimeExports.jsxs(
+        "div",
+        {
+          className: "grid w-full min-w-0 grid-cols-[auto,minmax(0,1fr),auto] items-center gap-1 rounded-md border border-emerald-500/12 bg-emerald-50/35 px-1.5 py-1 text-[10.5px] leading-none",
+          "data-work-console-agent-chip": "true",
+          "data-work-console-row-status": row.status,
+          title: [row.label, row.meta, row.detail].filter(Boolean).join(" "),
+          children: [
+            /* @__PURE__ */ jsxRuntimeExports.jsx(
+              "span",
+              {
+                className: `h-1.5 w-1.5 shrink-0 rounded-full ${statusClass(row.status)} ${runningDotMotionClass(row.status)}`,
+                "aria-hidden": "true"
+              }
+            ),
+            /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "min-w-0 truncate", children: [
+              /* @__PURE__ */ jsxRuntimeExports.jsx(
+                "span",
+                {
+                  className: "work-console-text-motion font-medium text-foreground/80",
+                  children: row.label
+                },
+                row.label
+              ),
+              row.meta && /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "work-console-text-motion text-secondary/40", children: [
+                " ",
+                row.meta
+              ] }, row.meta)
+            ] }),
+            row.detail && /* @__PURE__ */ jsxRuntimeExports.jsx(
+              "span",
+              {
+                className: "work-console-text-motion shrink-0 rounded bg-black/[0.04] px-1 py-0.5 text-[9px] font-medium text-secondary/55",
+                children: row.detail
+              },
+              row.detail
+            )
+          ]
+        }
+      )
+    }
+  );
+}
+function WorkConsoleRowItem({
+  row,
+  motionDelayMs
+}) {
   const isActionRow = row.group === "tool";
   const isStatusRow = row.group === "status";
   const isMissionRow = row.group === "mission";
@@ -34796,38 +34941,56 @@ function WorkConsoleRowItem({ row }) {
   return /* @__PURE__ */ jsxRuntimeExports.jsxs(
     "li",
     {
-      className: isStatusRow ? "flex min-w-0 items-start gap-2 rounded-lg border border-[#7C3AED]/20 bg-white/70 px-2.5 py-2.5 shadow-[0_1px_4px_rgba(124,58,237,0.08)]" : isMissionRow ? "flex min-w-0 items-start gap-2 rounded-lg border border-sky-500/20 bg-white/75 px-2.5 py-2 shadow-[0_1px_4px_rgba(14,165,233,0.08)]" : isActionRow ? `flex min-w-0 items-start gap-2 rounded-lg border px-2.5 py-2 ${actionRowToneClass(row.status)}` : isQueueRow ? "flex min-w-0 items-start gap-2 rounded-lg border border-amber-500/20 bg-white/70 px-2.5 py-2 shadow-[0_1px_4px_rgba(245,158,11,0.08)]" : "flex min-w-0 items-start gap-2 rounded-md px-2 py-1.5",
+      className: isStatusRow ? `work-console-row-motion flex min-w-0 items-start gap-2 rounded-lg border border-[#7C3AED]/20 bg-white/70 px-2.5 py-2.5 shadow-[0_1px_4px_rgba(124,58,237,0.08)] ${runningMotionClass(row.status)}` : isMissionRow ? `work-console-row-motion flex min-w-0 items-start gap-2 rounded-lg border border-sky-500/20 bg-white/75 px-2.5 py-2 shadow-[0_1px_4px_rgba(14,165,233,0.08)] ${runningMotionClass(row.status)}` : isActionRow ? `work-console-row-motion flex min-w-0 items-start gap-2 rounded-lg border px-2.5 py-2 ${actionRowToneClass(row.status)} ${runningMotionClass(row.status)}` : isQueueRow ? `work-console-row-motion flex min-w-0 items-start gap-2 rounded-lg border border-amber-500/20 bg-white/70 px-2.5 py-2 shadow-[0_1px_4px_rgba(245,158,11,0.08)] ${runningMotionClass(row.status)}` : `work-console-row-motion flex min-w-0 items-start gap-2 rounded-md px-2 py-1.5 ${runningMotionClass(row.status)}`,
+      "data-work-console-motion": "true",
       "data-work-console-action-row": isActionRow ? "true" : void 0,
       "data-work-console-status-row": isStatusRow ? "true" : void 0,
       "data-work-console-mission-row": isMissionRow ? "true" : void 0,
       "data-work-console-queue-row": isQueueRow ? "true" : void 0,
       "data-work-console-row-status": row.status,
+      style: motionStyle(motionDelayMs),
       children: [
         /* @__PURE__ */ jsxRuntimeExports.jsx(
           "span",
           {
-            className: `${isStatusRow ? "mt-2 h-2.5 w-2.5 ring-4 ring-[#7C3AED]/10" : isActionRow ? "mt-2 h-2 w-2" : "mt-1.5 h-1.5 w-1.5"} shrink-0 rounded-full ${statusClass(row.status)}`,
+            className: `${isStatusRow ? "mt-2 h-2.5 w-2.5 ring-4 ring-[#7C3AED]/10" : isMissionRow || isActionRow ? "mt-2 h-2 w-2" : "mt-1.5 h-1.5 w-1.5"} shrink-0 rounded-full ${statusClass(row.status)} ${runningDotMotionClass(row.status)}`,
             "aria-hidden": "true"
           }
         ),
         /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "min-w-0 flex-1", children: [
           /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex min-w-0 items-baseline gap-2", children: [
-            /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "min-w-0 truncate text-[12px] font-medium text-foreground/80", children: row.label }),
-            row.meta && /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "shrink-0 text-[10px] text-secondary/40", children: row.meta })
+            /* @__PURE__ */ jsxRuntimeExports.jsx(
+              "span",
+              {
+                className: "work-console-text-motion min-w-0 truncate text-[12px] font-medium text-foreground/80",
+                children: row.label
+              },
+              row.label
+            ),
+            row.meta && /* @__PURE__ */ jsxRuntimeExports.jsx(
+              "span",
+              {
+                className: "work-console-text-motion shrink-0 text-[10px] text-secondary/40",
+                children: row.meta
+              },
+              row.meta
+            )
           ] }),
           row.detail && /* @__PURE__ */ jsxRuntimeExports.jsx(
             "p",
             {
-              className: isStatusRow ? "mt-0.5 break-words text-[11.5px] leading-snug text-secondary/60" : isQueueRow ? "mt-1 line-clamp-3 break-words text-[11.5px] leading-snug text-amber-950/75" : isActionRow ? "mt-1 line-clamp-2 break-words text-[11.5px] leading-snug text-secondary/65" : "mt-0.5 line-clamp-3 break-words text-[11px] leading-snug text-secondary/65",
+              className: isStatusRow ? "work-console-text-motion mt-0.5 break-words text-[11.5px] leading-snug text-secondary/60" : isQueueRow ? "work-console-text-motion mt-1 line-clamp-3 break-words text-[11.5px] leading-snug text-amber-950/75" : isActionRow ? "work-console-text-motion mt-1 line-clamp-2 break-words text-[11.5px] leading-snug text-secondary/65" : "work-console-text-motion mt-0.5 line-clamp-3 break-words text-[11px] leading-snug text-secondary/65",
               children: row.detail
-            }
+            },
+            row.detail
           ),
           row.snippet && /* @__PURE__ */ jsxRuntimeExports.jsx(
             "pre",
             {
-              className: isActionRow ? "mt-2 max-h-20 overflow-auto rounded-md bg-black/[0.04] px-2 py-1.5 whitespace-pre-wrap break-words text-[10.5px] leading-snug text-secondary/70" : "mt-1 max-h-28 overflow-auto rounded-md bg-black/[0.04] px-2 py-1.5 whitespace-pre-wrap break-words text-[10.5px] leading-snug text-secondary/70",
+              className: isActionRow ? "work-console-text-motion mt-2 max-h-20 overflow-auto rounded-md bg-black/[0.04] px-2 py-1.5 whitespace-pre-wrap break-words text-[10.5px] leading-snug text-secondary/70" : "work-console-text-motion mt-1 max-h-28 overflow-auto rounded-md bg-black/[0.04] px-2 py-1.5 whitespace-pre-wrap break-words text-[10.5px] leading-snug text-secondary/70",
               children: row.snippet
-            }
+            },
+            row.snippet
           )
         ] })
       ]
@@ -34890,16 +35053,32 @@ function WorkConsolePanel({
   channelState,
   queuedMessages = [],
   controlRequests = [],
+  suppressInlineRunDetails = false,
   uiLanguage
 }) {
   const actionsListRef = reactExports.useRef(null);
-  const rows = deriveWorkConsoleRows({
-    channelState,
+  const smoothedChannelState = useSmoothedChannelState(channelState);
+  const language = uiLanguage ?? smoothedChannelState.responseLanguage;
+  const allRows = deriveWorkConsoleRows({
+    channelState: smoothedChannelState,
     queuedMessages,
     controlRequests,
-    uiLanguage
+    uiLanguage: language
   });
-  const language = uiLanguage ?? channelState.responseLanguage;
+  const visibleRows = suppressInlineRunDetails ? compactInlineOverviewRows(allRows, smoothedChannelState, language) : allRows;
+  const rows = visibleRows.length > 0 ? visibleRows : [
+    {
+      id: "inline-stream",
+      group: "status",
+      label: t$1(language, "Streaming in chat", "채팅에서 표시 중"),
+      detail: t$1(
+        language,
+        "Live step details are shown inline in the conversation.",
+        "실시간 단계 상세는 채팅 안에 표시됩니다."
+      ),
+      status: "info"
+    }
+  ];
   const groups = groupRows(rows);
   const actionRows = groups.find(([group]) => group === "tool")?.[1] ?? [];
   const lastActionId = actionRows[actionRows.length - 1]?.id ?? "";
@@ -34940,6 +35119,10 @@ function WorkConsolePanel({
                     /* @__PURE__ */ jsxRuntimeExports.jsx("span", { children: groupLabel(group, language) }),
                     tone === "status" && /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "rounded-full bg-[#7C3AED]/10 px-1.5 py-0.5 text-[9px] font-semibold text-[#7C3AED]", children: t$1(language, "Live", "실시간") }),
                     tone === "actions" && /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "rounded-full bg-black/[0.04] px-1.5 py-0.5 text-[9px] font-semibold text-secondary/45", children: groupRows2.length }),
+                    tone === "mission" && /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "rounded-full bg-sky-500/15 px-1.5 py-0.5 text-[9px] font-semibold text-sky-800", children: [
+                      groupRows2.length,
+                      " tracked"
+                    ] }),
                     tone === "agents" && /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "rounded-full bg-emerald-500/15 px-1.5 py-0.5 text-[9px] font-semibold text-emerald-700", children: isKorean$1(language) ? `${groupRows2.length}명` : `${groupRows2.length} agents` }),
                     tone === "queue" && /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "rounded-full bg-amber-500/15 px-1.5 py-0.5 text-[9px] font-semibold text-amber-800", children: isKorean$1(language) ? `${groupRows2.length}개 대기` : `${groupRows2.length} waiting` })
                   ]
@@ -34954,7 +35137,21 @@ function WorkConsolePanel({
                   "data-work-console-agent-roster": isSubagentGroup ? "compact" : void 0,
                   "data-work-console-agent-layout": isSubagentGroup ? "grid" : void 0,
                   "aria-label": isActionsGroup ? groupLabel("tool", language) : isSubagentGroup ? groupLabel("subagent", language) : void 0,
-                  children: groupRows2.map((row) => isSubagentGroup ? /* @__PURE__ */ jsxRuntimeExports.jsx(WorkConsoleAgentChip, { row }, row.id) : /* @__PURE__ */ jsxRuntimeExports.jsx(WorkConsoleRowItem, { row }, row.id))
+                  children: groupRows2.map((row, index2) => isSubagentGroup ? /* @__PURE__ */ jsxRuntimeExports.jsx(
+                    WorkConsoleAgentChip,
+                    {
+                      row,
+                      motionDelayMs: workConsoleRowDelayMs(index2)
+                    },
+                    row.id
+                  ) : /* @__PURE__ */ jsxRuntimeExports.jsx(
+                    WorkConsoleRowItem,
+                    {
+                      row,
+                      motionDelayMs: workConsoleRowDelayMs(index2)
+                    },
+                    row.id
+                  ))
                 }
               )
             ]
@@ -35197,6 +35394,18 @@ const EMPTY_CHANNEL_STATE = {
   taskBoard: null,
   fileProcessing: false
 };
+function hasOpenTaskState(channelState) {
+  return !!channelState.taskBoard?.tasks.some(
+    (task) => task.status === "pending" || task.status === "in_progress"
+  );
+}
+function shouldSuppressInlineRunDetails(channelState, queuedMessages, controlRequests) {
+  const hasPendingControlRequest = controlRequests.some((request) => request.state === "pending");
+  const hasLiveWork = (channelState.activeTools ?? []).length > 0 || (channelState.subagents ?? []).some(
+    (subagent) => subagent.status === "running" || subagent.status === "waiting"
+  ) || hasOpenTaskState(channelState) || !!channelState.browserFrame || queuedMessages.length > 0 || hasPendingControlRequest || channelState.fileProcessing || channelState.reconnecting;
+  return hasLiveWork || channelState.streaming && !channelState.streamingText;
+}
 function KbSidePanel({
   botId,
   collections,
@@ -35284,6 +35493,11 @@ function KbSidePanel({
   }, [activeScope, scopeBuckets]);
   const isWorkspaceScope = activeScope === "workspace";
   const panelRefreshing = isWorkspaceScope ? workspaceRefreshing : refreshing;
+  const suppressInlineRunDetails = shouldSuppressInlineRunDetails(
+    channelState,
+    queuedMessages,
+    controlRequests
+  );
   const selectView = reactExports.useCallback((view) => {
     setActiveView(view);
     try {
@@ -35704,7 +35918,8 @@ function KbSidePanel({
         {
           channelState,
           queuedMessages,
-          controlRequests
+          controlRequests,
+          suppressInlineRunDetails
         }
       ) }),
       /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: `${activeView === "knowledge" ? "flex" : "hidden"} min-h-0 flex-1 flex-col`, children: [

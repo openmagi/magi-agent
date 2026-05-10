@@ -216,4 +216,31 @@ describe("deriveWorkConsoleRows", () => {
     expect(actionIndex).toBeGreaterThan(-1);
     expect(subagentIndex).toBeLessThan(actionIndex);
   });
+
+  it("filters noisy helper details into plain progress copy", () => {
+    const rows = deriveWorkConsoleRows({
+      channelState: channelState({
+        streaming: true,
+        responseLanguage: "ko",
+        subagents: [
+          {
+            ...subagent,
+            taskId: "iteration-only",
+            detail: "iteration 7",
+          },
+          {
+            ...subagent,
+            taskId: "permission-check",
+            status: "waiting",
+            detail: "allow",
+          },
+        ],
+      }),
+    });
+
+    expect(rows.find((row) => row.id === "subagent:iteration-only")?.detail).toBeUndefined();
+    expect(rows.find((row) => row.id === "subagent:permission-check")?.detail).toBe("권한 확인 중");
+    expect(JSON.stringify(rows)).not.toContain("iteration 7");
+    expect(JSON.stringify(rows)).not.toContain("\"allow\"");
+  });
 });
