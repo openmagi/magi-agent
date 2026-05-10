@@ -36645,7 +36645,7 @@ function decodePathPart(value) {
   }
 }
 function isDashboardRoute(value) {
-  return value === "overview" || value === "settings" || value === "usage" || value === "skills" || value === "workspace" || value === "knowledge" || value === "memory";
+  return value === "overview" || value === "settings" || value === "usage" || value === "skills" || value === "converter" || value === "workspace" || value === "knowledge" || value === "memory";
 }
 function routeFromPathname(pathname) {
   const parts = pathname.split("/").filter(Boolean);
@@ -36690,6 +36690,53 @@ function asArray(value) {
 }
 function asStringArray(value) {
   return Array.isArray(value) ? value.filter((item) => typeof item === "string") : [];
+}
+function asProviderName(value) {
+  return value === "anthropic" || value === "openai" || value === "google" || value === "openai-compatible" ? value : "openai-compatible";
+}
+function localConfigFromPayload(payload) {
+  const config = asRecord(payload.config);
+  const llm = asRecord(config.llm);
+  const server = asRecord(config.server);
+  const capabilities = asRecord(llm.capabilities);
+  return {
+    path: asString(payload.path, asString(config.path, "magi-agent.yaml")),
+    exists: payload.exists === true,
+    provider: asProviderName(llm.provider),
+    model: asString(llm.model, "llama3.1"),
+    baseUrl: asString(llm.baseUrl),
+    apiKeyEnvVar: asString(llm.apiKeyEnvVar),
+    gatewayTokenEnvVar: asString(server.gatewayTokenEnvVar),
+    workspace: asString(config.workspace, "./workspace"),
+    contextWindow: typeof capabilities.contextWindow === "number" ? String(capabilities.contextWindow) : "",
+    maxOutputTokens: typeof capabilities.maxOutputTokens === "number" ? String(capabilities.maxOutputTokens) : "",
+    supportsThinking: capabilities.supportsThinking === true,
+    restartRequired: payload.restartRequired === true,
+    liveReloadSupported: payload.liveReloadSupported === true
+  };
+}
+function optionalNumber(value) {
+  const trimmed = value.trim();
+  if (!trimmed) return void 0;
+  const parsed = Number(trimmed);
+  return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : void 0;
+}
+function configSavePayload(config) {
+  return {
+    llm: {
+      provider: config.provider,
+      model: config.model.trim() || "llama3.1",
+      ...config.baseUrl.trim() ? { baseUrl: config.baseUrl.trim() } : {},
+      ...config.apiKeyEnvVar.trim() ? { apiKeyEnvVar: config.apiKeyEnvVar.trim() } : {},
+      capabilities: {
+        ...optionalNumber(config.contextWindow) ? { contextWindow: optionalNumber(config.contextWindow) } : {},
+        ...optionalNumber(config.maxOutputTokens) ? { maxOutputTokens: optionalNumber(config.maxOutputTokens) } : {},
+        supportsThinking: config.supportsThinking
+      }
+    },
+    ...config.gatewayTokenEnvVar.trim() ? { server: { gatewayTokenEnvVar: config.gatewayTokenEnvVar.trim() } } : {},
+    ...config.workspace.trim() ? { workspace: config.workspace.trim() } : {}
+  };
 }
 function preview(value, max = 400) {
   if (value === void 0 || value === null) return void 0;
@@ -36951,7 +36998,8 @@ function DashboardSidebar({
     { route: "overview", label: "Overview" },
     { route: "settings", label: "Settings" },
     { route: "usage", label: "Usage" },
-    { route: "skills", label: "Skills" }
+    { route: "skills", label: "Skills" },
+    { route: "converter", label: "Converter" }
   ];
   const workspaceItems = [
     { route: "knowledge", label: "Knowledge" },
@@ -36965,15 +37013,28 @@ function DashboardSidebar({
       {
         type: "button",
         onClick: () => onNavigate(route),
-        className: `w-full rounded-xl px-3 py-2 text-left text-sm font-medium transition ${active ? "bg-primary/10 text-primary shadow-[inset_0_0_0_1px_rgba(124,58,237,0.12)]" : "text-secondary hover:bg-black/[0.04] hover:text-foreground"}`,
+        className: `block w-full rounded-xl px-3 py-2.5 text-left text-sm font-medium transition-colors duration-200 cursor-pointer ${active ? "bg-primary/10 text-primary-light border border-primary/25" : "text-gray-700 hover:text-gray-900 hover:bg-gray-100"}`,
         children: label
       },
       route
     );
   };
-  return /* @__PURE__ */ jsxRuntimeExports.jsxs("aside", { className: "hidden h-screen w-64 shrink-0 border-r border-black/[0.06] bg-gray-50/80 md:flex md:flex-col", children: [
-    /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "border-b border-black/[0.06] px-5 py-5", children: [
-      /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "text-base font-semibold text-foreground", children: BOT_NAME }),
+  return /* @__PURE__ */ jsxRuntimeExports.jsxs("aside", { className: "hidden h-screen w-64 shrink-0 flex-col border-r border-gray-200 bg-gray-50 p-6 md:flex", children: [
+    /* @__PURE__ */ jsxRuntimeExports.jsxs(
+      "button",
+      {
+        type: "button",
+        onClick: () => onNavigate("overview"),
+        className: "mb-10 flex items-center gap-2 text-left",
+        "aria-label": "Open Magi dashboard",
+        children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "flex h-6 w-6 items-center justify-center rounded-md bg-primary text-xs font-bold text-white", children: "M" }),
+          /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "text-sm font-semibold text-foreground", children: "Open Magi" })
+        ]
+      }
+    ),
+    /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "mb-4 rounded-xl border border-gray-200 bg-white px-3 py-2.5", children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "min-w-0 truncate text-sm font-semibold text-foreground", children: BOT_NAME }),
       /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "mt-1 flex items-center gap-2 text-sm text-secondary", children: [
         /* @__PURE__ */ jsxRuntimeExports.jsx(
           "span",
@@ -36984,23 +37045,22 @@ function DashboardSidebar({
         runtimeStatusLabel(runtimeStatus)
       ] })
     ] }),
-    /* @__PURE__ */ jsxRuntimeExports.jsxs("nav", { className: "flex-1 overflow-y-auto px-3 py-5", children: [
-      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "mb-6 space-y-1", children: [
-        /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "px-2 pb-2 text-[11px] font-bold uppercase tracking-[0.12em] text-secondary/60", children: "General" }),
-        primaryItems.map(renderItem)
+    /* @__PURE__ */ jsxRuntimeExports.jsxs("nav", { className: "min-h-0 flex-1 space-y-1 overflow-y-auto", children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "pb-1", children: /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "px-3 text-xs font-medium uppercase tracking-wider text-gray-400", children: "Chat" }) }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "space-y-1", children: primaryItems.map(renderItem) }),
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "pt-4 pb-1", children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "mb-3 border-t border-gray-200" }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "px-3 text-xs font-medium uppercase tracking-wider text-gray-400", children: "Local Runtime" })
       ] }),
-      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "space-y-1", children: [
-        /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "px-2 pb-2 text-[11px] font-bold uppercase tracking-[0.12em] text-secondary/60", children: "Local Runtime" }),
-        workspaceItems.map(renderItem)
-      ] })
+      /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "space-y-1", children: workspaceItems.map(renderItem) })
     ] }),
-    /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "border-t border-black/[0.06] p-3 space-y-1", children: [
+    /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "space-y-2 border-t border-gray-200 pt-4", children: [
       /* @__PURE__ */ jsxRuntimeExports.jsx(
         "button",
         {
           type: "button",
           onClick: onRefresh,
-          className: "w-full rounded-lg px-2 py-1.5 text-left text-sm text-secondary transition hover:bg-black/[0.04] hover:text-foreground",
+          className: "w-full rounded-xl px-3 py-2.5 text-left text-sm font-medium text-gray-700 transition-colors hover:bg-gray-100 hover:text-gray-900",
           children: "Refresh"
         }
       ),
@@ -37009,7 +37069,7 @@ function DashboardSidebar({
         {
           type: "button",
           onClick: () => onNavigate("chat"),
-          className: "w-full rounded-lg px-2 py-1.5 text-left text-sm text-secondary transition hover:bg-black/[0.04] hover:text-foreground",
+          className: "w-full rounded-xl px-3 py-2.5 text-left text-sm font-medium text-gray-700 transition-colors hover:bg-gray-100 hover:text-gray-900",
           children: "Back to chat"
         }
       )
@@ -37021,9 +37081,9 @@ function DashboardCard({
   children,
   action
 }) {
-  return /* @__PURE__ */ jsxRuntimeExports.jsxs("section", { className: "rounded-2xl border border-black/[0.08] bg-white p-5 shadow-[0_12px_30px_rgba(15,23,42,0.04)]", children: [
-    /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "mb-4 flex items-center justify-between gap-3", children: [
-      /* @__PURE__ */ jsxRuntimeExports.jsx("h2", { className: "text-base font-semibold text-foreground", children: title }),
+  return /* @__PURE__ */ jsxRuntimeExports.jsxs("section", { className: "glass rounded-2xl p-6", children: [
+    (title || action) && /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "mb-4 flex items-center justify-between gap-3", children: [
+      title ? /* @__PURE__ */ jsxRuntimeExports.jsx("h2", { className: "text-base font-semibold text-foreground", children: title }) : /* @__PURE__ */ jsxRuntimeExports.jsx("span", {}),
       action
     ] }),
     children
@@ -37035,6 +37095,116 @@ function MetricTile({ label, value }) {
     /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "mt-1 text-2xl font-semibold text-foreground", children: value })
   ] });
 }
+function ButtonLike({
+  children,
+  variant = "primary",
+  disabled,
+  onClick,
+  type = "button",
+  className = ""
+}) {
+  const variants = {
+    primary: "bg-primary text-white hover:bg-primary-light glow-sm",
+    secondary: "border border-black/10 bg-transparent text-foreground hover:border-primary/40 hover:bg-black/[0.04]",
+    ghost: "bg-transparent text-secondary hover:bg-black/[0.04] hover:text-foreground",
+    danger: "border border-red-500/20 bg-red-500/10 text-red-500 hover:bg-red-500/15"
+  };
+  return /* @__PURE__ */ jsxRuntimeExports.jsx(
+    "button",
+    {
+      type,
+      disabled,
+      onClick,
+      className: `inline-flex min-h-[44px] items-center justify-center rounded-xl px-5 py-2.5 text-sm font-semibold transition-all duration-200 disabled:pointer-events-none disabled:opacity-40 ${variants[variant]} ${className}`,
+      children
+    }
+  );
+}
+function SettingsInput({
+  label,
+  value,
+  onChange,
+  placeholder,
+  type = "text"
+}) {
+  return /* @__PURE__ */ jsxRuntimeExports.jsxs("label", { className: "block", children: [
+    /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "mb-1.5 block text-sm font-medium text-secondary", children: label }),
+    /* @__PURE__ */ jsxRuntimeExports.jsx(
+      "input",
+      {
+        value,
+        type,
+        placeholder,
+        onChange: (event) => onChange(event.target.value),
+        className: "w-full rounded-xl border border-black/10 bg-white px-4 py-3 text-foreground outline-none transition-colors duration-200 focus:border-primary/50 focus:ring-1 focus:ring-primary/20"
+      }
+    )
+  ] });
+}
+function SettingsDropdown({
+  label,
+  value,
+  onChange,
+  options
+}) {
+  return /* @__PURE__ */ jsxRuntimeExports.jsxs("label", { className: "block", children: [
+    /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "mb-1.5 block text-sm font-medium text-secondary", children: label }),
+    /* @__PURE__ */ jsxRuntimeExports.jsx(
+      "select",
+      {
+        value,
+        onChange: (event) => onChange(event.target.value),
+        className: "w-full rounded-xl border border-black/10 bg-white px-4 py-3 text-foreground outline-none transition-colors duration-200 focus:border-primary/50 focus:ring-1 focus:ring-primary/20",
+        children: options.map((option) => /* @__PURE__ */ jsxRuntimeExports.jsx("option", { value: option.value, children: option.label }, option.value))
+      }
+    )
+  ] });
+}
+function ChevronIcon({ expanded }) {
+  return /* @__PURE__ */ jsxRuntimeExports.jsx(
+    "svg",
+    {
+      className: `h-4 w-4 text-secondary transition-transform duration-200 ${expanded ? "rotate-180" : ""}`,
+      fill: "none",
+      viewBox: "0 0 24 24",
+      stroke: "currentColor",
+      children: /* @__PURE__ */ jsxRuntimeExports.jsx("path", { strokeLinecap: "round", strokeLinejoin: "round", strokeWidth: 2, d: "M19 9l-7 7-7-7" })
+    }
+  );
+}
+function CollapsibleCard({
+  title,
+  subtitle,
+  children,
+  defaultOpen = false
+}) {
+  const [open, setOpen] = reactExports.useState(defaultOpen);
+  return /* @__PURE__ */ jsxRuntimeExports.jsxs(
+    DashboardCard,
+    {
+      title: "",
+      action: null,
+      children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsxs(
+          "button",
+          {
+            type: "button",
+            onClick: () => setOpen((prev) => !prev),
+            className: "-m-6 flex w-[calc(100%+3rem)] items-center justify-between p-5 text-left transition-colors hover:bg-gray-50",
+            children: [
+              /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "min-w-0", children: [
+                /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "font-medium text-foreground", children: title }),
+                subtitle && /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "mt-1 text-xs text-secondary", children: subtitle })
+              ] }),
+              /* @__PURE__ */ jsxRuntimeExports.jsx(ChevronIcon, { expanded: open })
+            ]
+          }
+        ),
+        open && /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "mt-6 border-t border-gray-200 pt-5", children })
+      ]
+    }
+  );
+}
 function OverviewDashboard({
   runtimeSnapshot,
   runtimeStatus,
@@ -37043,7 +37213,11 @@ function OverviewDashboard({
   onNavigate
 }) {
   const docCount = kbCollections.reduce((sum, collection) => sum + collection.docs.length, 0);
-  return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "grid gap-5 xl:grid-cols-[minmax(0,1fr)_360px]", children: [
+  return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "max-w-3xl space-y-6", children: [
+    /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "mb-8", children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsx("h1", { className: "text-2xl font-bold text-foreground", children: "Dashboard" }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "mt-1 text-sm text-secondary", children: "Manage your local Magi agent and monitor runtime performance." })
+    ] }),
     /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "space-y-5", children: [
       /* @__PURE__ */ jsxRuntimeExports.jsx(DashboardCard, { title: "Agent", children: /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex flex-col gap-5 sm:flex-row sm:items-start sm:justify-between", children: [
         /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { children: [
@@ -37054,38 +37228,41 @@ function OverviewDashboard({
                 className: `h-2.5 w-2.5 rounded-full ${runtimeStatus === "active" ? "bg-emerald-400" : "bg-gray-300"}`
               }
             ),
-            /* @__PURE__ */ jsxRuntimeExports.jsx("h3", { className: "text-xl font-semibold text-foreground", children: BOT_NAME })
+            /* @__PURE__ */ jsxRuntimeExports.jsx("h3", { className: "text-xl font-semibold text-foreground", children: BOT_NAME }),
+            /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "rounded-full border border-emerald-500/20 bg-emerald-500/10 px-3 py-1 text-xs font-medium text-emerald-600", children: runtimeStatusLabel(runtimeStatus) })
           ] }),
-          /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "mt-2 max-w-2xl text-sm leading-6 text-secondary", children: "Self-hosted Magi runtime with local chat, workspace knowledge, runtime proof, and editable operator files." })
+          /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "mt-2 max-w-2xl text-sm leading-6 text-secondary", children: "Self-hosted Magi runtime with local chat, workspace knowledge, runtime proof, editable operator files, and your configured LLM provider." })
         ] }),
-        /* @__PURE__ */ jsxRuntimeExports.jsx(
-          "button",
-          {
-            type: "button",
-            onClick: () => onNavigate("chat"),
-            className: "rounded-xl bg-primary px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-primary/90",
-            children: "Open Chat"
-          }
-        )
+        /* @__PURE__ */ jsxRuntimeExports.jsx(ButtonLike, { onClick: () => onNavigate("chat"), children: "Open Chat" })
       ] }) }),
       /* @__PURE__ */ jsxRuntimeExports.jsx(DashboardCard, { title: "Runtime", children: /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "grid gap-3 sm:grid-cols-2 lg:grid-cols-4", children: [
         /* @__PURE__ */ jsxRuntimeExports.jsx(MetricTile, { label: "Sessions", value: runtimeItemCount(runtimeSnapshot, "sessions") }),
         /* @__PURE__ */ jsxRuntimeExports.jsx(MetricTile, { label: "Tasks", value: runtimeItemCount(runtimeSnapshot, "tasks") }),
         /* @__PURE__ */ jsxRuntimeExports.jsx(MetricTile, { label: "Schedules", value: runtimeItemCount(runtimeSnapshot, "crons") }),
         /* @__PURE__ */ jsxRuntimeExports.jsx(MetricTile, { label: "Artifacts", value: runtimeItemCount(runtimeSnapshot, "artifacts") })
-      ] }) })
-    ] }),
-    /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "space-y-5", children: [
-      /* @__PURE__ */ jsxRuntimeExports.jsx(DashboardCard, { title: "Local Assets", children: /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "grid gap-3", children: [
+      ] }) }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx(DashboardCard, { title: "Local Assets", children: /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "grid gap-3 sm:grid-cols-3", children: [
         /* @__PURE__ */ jsxRuntimeExports.jsx(MetricTile, { label: "KB Docs", value: docCount }),
         /* @__PURE__ */ jsxRuntimeExports.jsx(MetricTile, { label: "Workspace Files", value: workspaceFiles.length }),
         /* @__PURE__ */ jsxRuntimeExports.jsx(MetricTile, { label: "Skills", value: runtimeItemCount(runtimeSnapshot, "skills") })
       ] }) }),
-      /* @__PURE__ */ jsxRuntimeExports.jsx(DashboardCard, { title: "Next Setup", children: /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "space-y-2 text-sm text-secondary", children: [
-        /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", onClick: () => onNavigate("settings"), className: "block text-primary", children: "Configure local provider and connection" }),
-        /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", onClick: () => onNavigate("knowledge"), className: "block text-primary", children: "Add workspace knowledge" }),
-        /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", onClick: () => onNavigate("workspace"), className: "block text-primary", children: "Edit system prompts, contracts, harnesses, hooks, and memory" })
-      ] }) })
+      /* @__PURE__ */ jsxRuntimeExports.jsx(DashboardCard, { title: "Integrations", children: /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "space-y-3", children: [
+        { title: "Local LLM Provider", detail: "Anthropic, OpenAI, Google, or any OpenAI-compatible server.", route: "settings" },
+        { title: "Workspace Knowledge", detail: "Local KB documents under the runtime workspace.", route: "knowledge" },
+        { title: "Operator Files", detail: "System prompts, contracts, harness rules, hooks, and memory.", route: "workspace" }
+      ].map((item) => /* @__PURE__ */ jsxRuntimeExports.jsxs(
+        "button",
+        {
+          type: "button",
+          onClick: () => onNavigate(item.route),
+          className: "block w-full rounded-xl border border-gray-100 bg-gray-50 px-4 py-3 text-left transition hover:border-gray-200 hover:bg-white",
+          children: [
+            /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "text-sm font-semibold text-foreground", children: item.title }),
+            /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "mt-1 text-xs text-secondary", children: item.detail })
+          ]
+        },
+        item.title
+      )) }) })
     ] })
   ] });
 }
@@ -37093,24 +37270,112 @@ function SettingsDashboard({
   agentUrl,
   token,
   runtimeStatus,
+  config,
+  configLoading,
+  configSaving,
+  configNotice,
+  configError,
   setAgentUrl,
   setToken,
   onSaveConnection,
-  onCheckRuntime
+  onCheckRuntime,
+  onSaveConfig,
+  onReloadConfig,
+  onRestartRuntime
 }) {
+  const [draft, setDraft] = reactExports.useState(config);
+  reactExports.useEffect(() => {
+    setDraft(config);
+  }, [config]);
+  const updateDraft = reactExports.useCallback((patch2) => {
+    setDraft((prev) => prev ? { ...prev, ...patch2 } : prev);
+  }, []);
   return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "max-w-3xl space-y-5", children: [
-    /* @__PURE__ */ jsxRuntimeExports.jsx(DashboardCard, { title: "Model", children: /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "space-y-4", children: [
-      /* @__PURE__ */ jsxRuntimeExports.jsxs("label", { className: "block", children: [
-        /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "mb-2 block text-sm font-medium text-secondary", children: "Model" }),
-        /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "rounded-xl border border-black/[0.08] bg-gray-50 px-4 py-3 text-sm font-medium text-foreground", children: "Configured LLM" })
-      ] }),
-      /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-sm leading-6 text-secondary", children: "The open-source app uses the provider configured in the local runtime. Hosted smart routers and platform credit billing are intentionally not exposed." })
-    ] }) }),
+    /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "mb-8", children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsx("h1", { className: "text-2xl font-bold text-foreground", children: "Settings" }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "mt-1 text-sm text-secondary", children: "Configure the self-hosted runtime, provider, and local workspace." })
+    ] }),
     /* @__PURE__ */ jsxRuntimeExports.jsx(
       DashboardCard,
       {
-        title: "Connection",
-        action: /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "rounded-full bg-primary/10 px-3 py-1 text-xs font-semibold text-primary", children: runtimeStatusLabel(runtimeStatus) }),
+        title: "Model",
+        action: configLoading ? /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "rounded-full bg-gray-100 px-3 py-1 text-xs font-semibold text-secondary", children: "Loading" }) : null,
+        children: !draft ? /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "rounded-xl border border-dashed border-black/[0.08] px-4 py-8 text-center text-sm text-secondary", children: "No config loaded yet. Save a local provider below to create `magi-agent.yaml`." }) : /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "space-y-4", children: [
+          configNotice && /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "rounded-xl border border-emerald-500/20 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-700", children: configNotice }),
+          configError && /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "rounded-xl border border-red-500/20 bg-red-500/10 px-4 py-3 text-sm text-red-500", children: configError }),
+          /* @__PURE__ */ jsxRuntimeExports.jsx(
+            SettingsDropdown,
+            {
+              label: "Provider",
+              value: draft.provider,
+              onChange: (value) => updateDraft({ provider: asProviderName(value) }),
+              options: [
+                { value: "openai-compatible", label: "OpenAI-compatible / local" },
+                { value: "anthropic", label: "Anthropic" },
+                { value: "openai", label: "OpenAI" },
+                { value: "google", label: "Google Gemini" }
+              ]
+            }
+          ),
+          /* @__PURE__ */ jsxRuntimeExports.jsx(
+            SettingsInput,
+            {
+              label: "Model",
+              value: draft.model,
+              onChange: (model) => updateDraft({ model }),
+              placeholder: "llama3.1, gpt-4.1, claude-sonnet-4-5..."
+            }
+          ),
+          /* @__PURE__ */ jsxRuntimeExports.jsx(
+            SettingsInput,
+            {
+              label: "Base URL",
+              value: draft.baseUrl,
+              onChange: (baseUrl) => updateDraft({ baseUrl }),
+              placeholder: "http://127.0.0.1:11434/v1"
+            }
+          ),
+          /* @__PURE__ */ jsxRuntimeExports.jsx(
+            SettingsInput,
+            {
+              label: "API key env var",
+              value: draft.apiKeyEnvVar,
+              onChange: (apiKeyEnvVar) => updateDraft({ apiKeyEnvVar }),
+              placeholder: "OPENAI_API_KEY"
+            }
+          ),
+          /* @__PURE__ */ jsxRuntimeExports.jsx(
+            SettingsDropdown,
+            {
+              label: "Response Language",
+              value: "auto",
+              onChange: () => {
+              },
+              options: [{ value: "auto", label: "Auto Detect" }]
+            }
+          ),
+          /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "border-t border-gray-200 pt-4", children: [
+            /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "mb-2 block text-sm font-medium text-secondary", children: "API Key Mode" }),
+            /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center justify-between", children: [
+              /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-sm font-medium text-foreground", children: "Local env vars" }),
+              /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "text-xs text-secondary", children: "No platform credits or hosted routers" })
+            ] })
+          ] }),
+          /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex flex-wrap gap-3", children: [
+            /* @__PURE__ */ jsxRuntimeExports.jsx(ButtonLike, { onClick: () => void onSaveConfig(draft), disabled: configSaving, children: configSaving ? "Saving..." : "Save Settings" }),
+            /* @__PURE__ */ jsxRuntimeExports.jsx(ButtonLike, { variant: "secondary", onClick: () => void onReloadConfig(), children: "Reload Config" }),
+            /* @__PURE__ */ jsxRuntimeExports.jsx(ButtonLike, { variant: "secondary", onClick: () => void onRestartRuntime(), children: "Restart Runtime" })
+          ] }),
+          /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-xs leading-5 text-secondary", children: "Secrets are stored as environment variable references in `magi-agent.yaml`; raw keys are never returned to the browser." })
+        ] })
+      }
+    ),
+    /* @__PURE__ */ jsxRuntimeExports.jsx(
+      CollapsibleCard,
+      {
+        title: "Runtime Connection",
+        subtitle: `Current status: ${runtimeStatusLabel(runtimeStatus)}`,
+        defaultOpen: false,
         children: /* @__PURE__ */ jsxRuntimeExports.jsxs(
           "form",
           {
@@ -37120,51 +37385,93 @@ function SettingsDashboard({
               onSaveConnection();
             },
             children: [
-              /* @__PURE__ */ jsxRuntimeExports.jsxs("label", { className: "block", children: [
-                /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "mb-2 block text-sm font-medium text-secondary", children: "Agent URL" }),
-                /* @__PURE__ */ jsxRuntimeExports.jsx(
-                  "input",
-                  {
-                    value: agentUrl,
-                    onChange: (event) => setAgentUrl(event.target.value),
-                    className: "w-full rounded-xl border border-black/[0.08] bg-white px-4 py-3 text-sm text-foreground outline-none transition focus:border-primary/40 focus:ring-4 focus:ring-primary/10"
-                  }
-                )
-              ] }),
-              /* @__PURE__ */ jsxRuntimeExports.jsxs("label", { className: "block", children: [
-                /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "mb-2 block text-sm font-medium text-secondary", children: "Server token" }),
-                /* @__PURE__ */ jsxRuntimeExports.jsx(
-                  "input",
-                  {
-                    value: token,
-                    onChange: (event) => setToken(event.target.value),
-                    type: "password",
-                    className: "w-full rounded-xl border border-black/[0.08] bg-white px-4 py-3 text-sm text-foreground outline-none transition focus:border-primary/40 focus:ring-4 focus:ring-primary/10"
-                  }
-                )
-              ] }),
+              /* @__PURE__ */ jsxRuntimeExports.jsx(SettingsInput, { label: "Agent URL", value: agentUrl, onChange: setAgentUrl }),
+              /* @__PURE__ */ jsxRuntimeExports.jsx(SettingsInput, { label: "Server token", value: token, onChange: setToken, type: "password" }),
               /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex flex-wrap gap-3", children: [
-                /* @__PURE__ */ jsxRuntimeExports.jsx(
-                  "button",
-                  {
-                    type: "submit",
-                    className: "rounded-xl bg-primary px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-primary/90",
-                    children: "Save Settings"
-                  }
-                ),
-                /* @__PURE__ */ jsxRuntimeExports.jsx(
-                  "button",
-                  {
-                    type: "button",
-                    onClick: onCheckRuntime,
-                    className: "rounded-xl bg-gray-100 px-4 py-2 text-sm font-semibold text-foreground transition hover:bg-gray-200",
-                    children: "Check Runtime"
-                  }
-                )
+                /* @__PURE__ */ jsxRuntimeExports.jsx(ButtonLike, { type: "submit", children: "Save Settings" }),
+                /* @__PURE__ */ jsxRuntimeExports.jsx(ButtonLike, { variant: "secondary", onClick: onCheckRuntime, children: "Check Runtime" })
               ] })
             ]
           }
         )
+      }
+    ),
+    /* @__PURE__ */ jsxRuntimeExports.jsx(
+      CollapsibleCard,
+      {
+        title: "Advanced Runtime",
+        subtitle: draft?.path ? `Config path: ${draft.path}` : "Workspace and capability metadata",
+        defaultOpen: false,
+        children: draft && /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "space-y-4", children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsx(
+            SettingsInput,
+            {
+              label: "Workspace",
+              value: draft.workspace,
+              onChange: (workspace) => updateDraft({ workspace }),
+              placeholder: "./workspace"
+            }
+          ),
+          /* @__PURE__ */ jsxRuntimeExports.jsx(
+            SettingsInput,
+            {
+              label: "Gateway token env var",
+              value: draft.gatewayTokenEnvVar,
+              onChange: (gatewayTokenEnvVar) => updateDraft({ gatewayTokenEnvVar }),
+              placeholder: "MAGI_AGENT_SERVER_TOKEN"
+            }
+          ),
+          /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "grid gap-4 sm:grid-cols-2", children: [
+            /* @__PURE__ */ jsxRuntimeExports.jsx(
+              SettingsInput,
+              {
+                label: "Context window",
+                value: draft.contextWindow,
+                onChange: (contextWindow) => updateDraft({ contextWindow }),
+                placeholder: "131072"
+              }
+            ),
+            /* @__PURE__ */ jsxRuntimeExports.jsx(
+              SettingsInput,
+              {
+                label: "Max output tokens",
+                value: draft.maxOutputTokens,
+                onChange: (maxOutputTokens) => updateDraft({ maxOutputTokens }),
+                placeholder: "8192"
+              }
+            )
+          ] }),
+          /* @__PURE__ */ jsxRuntimeExports.jsxs("label", { className: "flex items-center gap-3 text-sm text-secondary", children: [
+            /* @__PURE__ */ jsxRuntimeExports.jsx(
+              "input",
+              {
+                type: "checkbox",
+                checked: draft.supportsThinking,
+                onChange: (event) => updateDraft({ supportsThinking: event.target.checked }),
+                className: "h-4 w-4 rounded border-black/10"
+              }
+            ),
+            "Model supports thinking blocks"
+          ] }),
+          /* @__PURE__ */ jsxRuntimeExports.jsx(ButtonLike, { onClick: () => void onSaveConfig(draft), disabled: configSaving, children: "Save Advanced Settings" })
+        ] })
+      }
+    ),
+    /* @__PURE__ */ jsxRuntimeExports.jsx(
+      CollapsibleCard,
+      {
+        title: "Agent Safeguards",
+        subtitle: "Edit local skills, contracts, harness rules, hooks, memory, and compaction files from Workspace.",
+        children: /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "grid gap-3 sm:grid-cols-2", children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "rounded-xl border border-gray-100 bg-gray-50 px-4 py-3", children: [
+            /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "text-sm font-semibold text-foreground", children: "Custom skills" }),
+            /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "mt-1 text-xs leading-5 text-secondary", children: "Install reusable SKILL.md-style capabilities on the Skills page." })
+          ] }),
+          /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "rounded-xl border border-gray-100 bg-gray-50 px-4 py-3", children: [
+            /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "text-sm font-semibold text-foreground", children: "Harness rules" }),
+            /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "mt-1 text-xs leading-5 text-secondary", children: "Markdown rules become runtime checks through the local workspace." })
+          ] })
+        ] })
       }
     )
   ] });
@@ -37173,61 +37480,192 @@ function KnowledgeDashboard({
   kbCollections,
   loading,
   refreshing,
-  onRefresh
+  onRefresh,
+  onUpload
 }) {
+  const [uploading, setUploading] = reactExports.useState(false);
+  const [uploadNotice, setUploadNotice] = reactExports.useState(null);
+  const [uploadError, setUploadError] = reactExports.useState(null);
   const docs2 = kbCollections.flatMap(
     (collection) => collection.docs.map((doc) => ({ ...doc, collectionName: collection.name }))
   );
-  return /* @__PURE__ */ jsxRuntimeExports.jsx(
-    DashboardCard,
-    {
-      title: "Knowledge",
-      action: /* @__PURE__ */ jsxRuntimeExports.jsx(
-        "button",
-        {
-          type: "button",
-          onClick: onRefresh,
-          disabled: refreshing,
-          className: "rounded-xl bg-gray-100 px-3 py-1.5 text-sm font-semibold text-foreground transition hover:bg-gray-200 disabled:opacity-50",
-          children: refreshing ? "Refreshing..." : "Refresh"
-        }
-      ),
-      children: loading ? /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "rounded-xl border border-dashed border-black/[0.08] px-4 py-8 text-center text-sm text-secondary", children: "Loading knowledge..." }) : docs2.length === 0 ? /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "rounded-xl border border-dashed border-black/[0.08] px-4 py-8 text-center text-sm text-secondary", children: "No local KB documents yet." }) : /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "divide-y divide-black/[0.06] overflow-hidden rounded-xl border border-black/[0.08]", children: docs2.map((doc) => /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "px-4 py-3", children: [
-        /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "text-sm font-semibold text-foreground", children: doc.filename }),
-        /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "mt-1 text-xs text-secondary", children: doc.collectionName })
-      ] }, `${doc.collectionName}:${doc.id}`)) })
-    }
+  const handleFiles = reactExports.useCallback(
+    async (files) => {
+      if (!files || files.length === 0) return;
+      setUploading(true);
+      setUploadNotice(null);
+      setUploadError(null);
+      try {
+        await onUpload(files);
+        setUploadNotice(`${files.length} file${files.length === 1 ? "" : "s"} added to local KB`);
+      } catch (err) {
+        setUploadError(err instanceof Error ? err.message : "Upload failed");
+      } finally {
+        setUploading(false);
+      }
+    },
+    [onUpload]
   );
+  return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "max-w-4xl space-y-6", children: [
+    /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "mb-8", children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsx("h1", { className: "text-2xl font-bold text-foreground", children: "Knowledge" }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "mt-1 text-sm text-secondary", children: "Upload and inspect the local workspace KB used by the self-hosted agent." })
+    ] }),
+    /* @__PURE__ */ jsxRuntimeExports.jsxs(
+      DashboardCard,
+      {
+        title: "Workspace Knowledge",
+        action: /* @__PURE__ */ jsxRuntimeExports.jsx(ButtonLike, { variant: "secondary", onClick: onRefresh, disabled: refreshing, children: refreshing ? "Refreshing..." : "Refresh" }),
+        children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "mb-5 rounded-xl border border-dashed border-primary/20 bg-primary/5 px-4 py-5", children: /* @__PURE__ */ jsxRuntimeExports.jsxs("label", { className: "block cursor-pointer text-center", children: [
+            /* @__PURE__ */ jsxRuntimeExports.jsx(
+              "input",
+              {
+                type: "file",
+                multiple: true,
+                className: "hidden",
+                onChange: (event) => void handleFiles(event.target.files)
+              }
+            ),
+            /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "text-sm font-semibold text-primary", children: uploading ? "Uploading..." : "Upload local knowledge" }),
+            /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "mt-1 block text-xs text-secondary", children: "PDF, DOCX, XLSX, PPTX, HTML, CSV, TXT, MD, JSON, ZIP, and other supported files." })
+          ] }) }),
+          uploadNotice && /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "mb-3 rounded-xl bg-emerald-50 px-3 py-2 text-xs text-emerald-700", children: uploadNotice }),
+          uploadError && /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "mb-3 rounded-xl bg-red-50 px-3 py-2 text-xs text-red-500", children: uploadError }),
+          loading ? /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "rounded-xl border border-dashed border-black/[0.08] px-4 py-8 text-center text-sm text-secondary", children: "Loading knowledge..." }) : docs2.length === 0 ? /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "rounded-xl border border-dashed border-black/[0.08] px-4 py-8 text-center text-sm text-secondary", children: "No local KB documents yet." }) : /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "divide-y divide-black/[0.06] overflow-hidden rounded-xl border border-black/[0.08]", children: docs2.map((doc) => /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "px-4 py-3", children: [
+            /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "text-sm font-semibold text-foreground", children: doc.filename }),
+            /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "mt-1 text-xs text-secondary", children: doc.collectionName })
+          ] }, `${doc.collectionName}:${doc.id}`)) })
+        ]
+      }
+    )
+  ] });
 }
 function WorkspaceDashboard({
   workspaceFiles,
   loading,
   refreshing,
-  onRefresh
+  onRefresh,
+  onReadFile,
+  onSaveFile
 }) {
-  return /* @__PURE__ */ jsxRuntimeExports.jsx(
-    DashboardCard,
-    {
-      title: "Workspace",
-      action: /* @__PURE__ */ jsxRuntimeExports.jsx(
-        "button",
+  const [query, setQuery] = reactExports.useState("");
+  const [selectedPath, setSelectedPath] = reactExports.useState(null);
+  const [content2, setContent] = reactExports.useState("");
+  const [editedContent, setEditedContent] = reactExports.useState("");
+  const [fileLoading, setFileLoading] = reactExports.useState(false);
+  const [saving, setSaving] = reactExports.useState(false);
+  const [notice, setNotice] = reactExports.useState(null);
+  const [error, setError] = reactExports.useState(null);
+  const filteredFiles = reactExports.useMemo(() => {
+    const normalized = query.trim().toLowerCase();
+    if (!normalized) return workspaceFiles;
+    return workspaceFiles.filter((file) => file.path.toLowerCase().includes(normalized));
+  }, [query, workspaceFiles]);
+  const openFile = reactExports.useCallback(
+    async (path2) => {
+      setSelectedPath(path2);
+      setFileLoading(true);
+      setNotice(null);
+      setError(null);
+      try {
+        const nextContent = await onReadFile(path2);
+        setContent(nextContent);
+        setEditedContent(nextContent);
+      } catch (err) {
+        setContent("");
+        setEditedContent("");
+        setError(err instanceof Error ? err.message : "Failed to read file");
+      } finally {
+        setFileLoading(false);
+      }
+    },
+    [onReadFile]
+  );
+  const saveSelected = reactExports.useCallback(async () => {
+    if (!selectedPath) return;
+    setSaving(true);
+    setNotice(null);
+    setError(null);
+    try {
+      await onSaveFile(selectedPath, editedContent);
+      setContent(editedContent);
+      setNotice("Workspace file saved");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to save file");
+    } finally {
+      setSaving(false);
+    }
+  }, [editedContent, onSaveFile, selectedPath]);
+  return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "space-y-6", children: [
+    /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "mb-8", children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsx("h1", { className: "text-2xl font-bold text-foreground", children: "Workspace" }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "mt-1 text-sm text-secondary", children: "Edit local prompts, contracts, harness rules, hooks, memory, compaction files, and artifacts." })
+    ] }),
+    /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "grid gap-5 xl:grid-cols-[minmax(0,420px)_minmax(0,1fr)]", children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsxs(
+        DashboardCard,
         {
-          type: "button",
-          onClick: onRefresh,
-          disabled: refreshing,
-          className: "rounded-xl bg-gray-100 px-3 py-1.5 text-sm font-semibold text-foreground transition hover:bg-gray-200 disabled:opacity-50",
-          children: refreshing ? "Refreshing..." : "Refresh"
+          title: "Files",
+          action: /* @__PURE__ */ jsxRuntimeExports.jsx(ButtonLike, { variant: "secondary", onClick: onRefresh, disabled: refreshing, children: refreshing ? "Refreshing..." : "Refresh" }),
+          children: [
+            /* @__PURE__ */ jsxRuntimeExports.jsx(
+              "input",
+              {
+                value: query,
+                onChange: (event) => setQuery(event.target.value),
+                placeholder: "Filter files...",
+                className: "mb-4 w-full rounded-xl border border-black/[0.08] bg-white px-3 py-2 text-sm outline-none transition focus:border-primary/40 focus:ring-4 focus:ring-primary/10"
+              }
+            ),
+            loading ? /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "rounded-xl border border-dashed border-black/[0.08] px-4 py-8 text-center text-sm text-secondary", children: "Loading workspace..." }) : filteredFiles.length === 0 ? /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "rounded-xl border border-dashed border-black/[0.08] px-4 py-8 text-center text-sm text-secondary", children: "No editable workspace files found." }) : /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "max-h-[620px] divide-y divide-black/[0.06] overflow-y-auto rounded-xl border border-black/[0.08]", children: filteredFiles.slice(0, 160).map((file) => /* @__PURE__ */ jsxRuntimeExports.jsxs(
+              "button",
+              {
+                type: "button",
+                onClick: () => void openFile(file.path),
+                className: `block w-full px-4 py-3 text-left transition hover:bg-gray-50 ${selectedPath === file.path ? "bg-primary/[0.06]" : "bg-white"}`,
+                children: [
+                  /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "truncate text-sm font-semibold text-foreground", children: file.path }),
+                  /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "mt-1 text-xs text-secondary", children: [
+                    formatFileSize(file.size ?? 0),
+                    file.modifiedAt ? ` · ${file.modifiedAt}` : ""
+                  ] })
+                ]
+              },
+              file.path
+            )) })
+          ]
         }
       ),
-      children: loading ? /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "rounded-xl border border-dashed border-black/[0.08] px-4 py-8 text-center text-sm text-secondary", children: "Loading workspace..." }) : workspaceFiles.length === 0 ? /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "rounded-xl border border-dashed border-black/[0.08] px-4 py-8 text-center text-sm text-secondary", children: "No editable workspace files found." }) : /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "divide-y divide-black/[0.06] overflow-hidden rounded-xl border border-black/[0.08]", children: workspaceFiles.slice(0, 80).map((file) => /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center justify-between gap-4 px-4 py-3", children: [
-        /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "min-w-0", children: [
-          /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "truncate text-sm font-semibold text-foreground", children: file.path }),
-          file.modifiedAt && /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "mt-1 text-xs text-secondary", children: file.modifiedAt })
-        ] }),
-        /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "shrink-0 text-xs text-secondary", children: formatFileSize(file.size ?? 0) })
-      ] }, file.path)) })
-    }
-  );
+      /* @__PURE__ */ jsxRuntimeExports.jsxs(
+        DashboardCard,
+        {
+          title: selectedPath ?? "Workspace File",
+          action: selectedPath ? /* @__PURE__ */ jsxRuntimeExports.jsx(
+            ButtonLike,
+            {
+              onClick: () => void saveSelected(),
+              disabled: saving || fileLoading || editedContent === content2,
+              children: saving ? "Saving..." : "Save"
+            }
+          ) : null,
+          children: [
+            notice && /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "mb-3 rounded-xl bg-emerald-50 px-3 py-2 text-xs text-emerald-700", children: notice }),
+            error && /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "mb-3 rounded-xl bg-red-50 px-3 py-2 text-xs text-red-500", children: error }),
+            !selectedPath ? /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "rounded-xl border border-dashed border-black/[0.08] px-4 py-10 text-center text-sm text-secondary", children: "Select a workspace file to view or edit it." }) : fileLoading ? /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "rounded-xl border border-dashed border-black/[0.08] px-4 py-10 text-center text-sm text-secondary", children: "Loading file..." }) : /* @__PURE__ */ jsxRuntimeExports.jsx(
+              "textarea",
+              {
+                value: editedContent,
+                onChange: (event) => setEditedContent(event.target.value),
+                spellCheck: false,
+                className: "h-[520px] w-full resize-none rounded-xl border border-black/[0.08] bg-white px-4 py-3 font-mono text-sm leading-6 text-foreground outline-none transition focus:border-primary/40 focus:ring-4 focus:ring-primary/10"
+              }
+            )
+          ]
+        }
+      )
+    ] })
+  ] });
 }
 function MemoryDashboard({
   memoryFiles,
@@ -37369,133 +37807,76 @@ function MemoryDashboard({
   );
   const selectedCount = selectedPaths.size;
   const dailyPaths = memoryFiles.map((file) => file.path).filter((path2) => path2.startsWith("memory/daily/"));
-  return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "grid gap-5 xl:grid-cols-[minmax(0,420px)_minmax(0,1fr)]", children: [
-    /* @__PURE__ */ jsxRuntimeExports.jsxs(
-      DashboardCard,
-      {
-        title: "Memory",
-        action: /* @__PURE__ */ jsxRuntimeExports.jsx(
-          "button",
-          {
-            type: "button",
-            onClick: onRefresh,
-            disabled: refreshing,
-            className: "rounded-xl bg-gray-100 px-3 py-1.5 text-sm font-semibold text-foreground transition hover:bg-gray-200 disabled:opacity-50",
-            children: refreshing ? "Refreshing..." : "Refresh"
-          }
-        ),
-        children: [
-          /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "mb-4 grid gap-3 sm:grid-cols-2", children: [
-            /* @__PURE__ */ jsxRuntimeExports.jsx(MetricTile, { label: "Files", value: memoryFiles.length }),
-            /* @__PURE__ */ jsxRuntimeExports.jsx(
-              MetricTile,
-              {
-                label: "QMD",
-                value: memoryStatus?.qmdReady === true ? "Ready" : "Local"
-              }
-            )
-          ] }),
-          asString(rootMemory.path) && /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "mb-4 rounded-xl bg-gray-50 px-4 py-3 text-xs text-secondary", children: [
-            "Root: ",
-            asString(rootMemory.path)
-          ] }),
-          /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "mb-4 flex gap-2", children: [
-            /* @__PURE__ */ jsxRuntimeExports.jsx(
-              "input",
-              {
-                value: query,
-                onChange: (event) => setQuery(event.target.value),
-                onKeyDown: (event) => {
-                  if (event.key === "Enter") void runSearch();
-                },
-                placeholder: "Search memory...",
-                className: "min-w-0 flex-1 rounded-xl border border-black/[0.08] bg-white px-3 py-2 text-sm outline-none transition focus:border-primary/40 focus:ring-4 focus:ring-primary/10"
-              }
-            ),
-            /* @__PURE__ */ jsxRuntimeExports.jsx(
-              "button",
-              {
-                type: "button",
-                onClick: () => void runSearch(),
-                disabled: searching,
-                className: "rounded-xl bg-primary px-3 py-2 text-sm font-semibold text-white transition hover:bg-primary/90 disabled:opacity-50",
-                children: searching ? "Searching" : "Search"
-              }
-            )
-          ] }),
-          /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "mb-4 flex flex-wrap gap-2", children: [
-            /* @__PURE__ */ jsxRuntimeExports.jsxs(
-              "button",
-              {
-                type: "button",
-                onClick: () => void deletePaths(Array.from(selectedPaths)),
-                disabled: busy || selectedCount === 0,
-                className: "rounded-xl bg-gray-100 px-3 py-1.5 text-xs font-semibold text-foreground transition hover:bg-gray-200 disabled:opacity-50",
-                children: [
-                  "Delete selected",
-                  selectedCount > 0 ? ` (${selectedCount})` : ""
-                ]
-              }
-            ),
-            /* @__PURE__ */ jsxRuntimeExports.jsx(
-              "button",
-              {
-                type: "button",
-                onClick: () => void deletePaths(dailyPaths),
-                disabled: busy || dailyPaths.length === 0,
-                className: "rounded-xl bg-gray-100 px-3 py-1.5 text-xs font-semibold text-foreground transition hover:bg-gray-200 disabled:opacity-50",
-                children: "Clear daily logs"
-              }
-            ),
-            /* @__PURE__ */ jsxRuntimeExports.jsx(
-              "button",
-              {
-                type: "button",
-                onClick: () => void runMemoryAction("compact"),
-                disabled: busy,
-                className: "rounded-xl bg-gray-100 px-3 py-1.5 text-xs font-semibold text-foreground transition hover:bg-gray-200 disabled:opacity-50",
-                children: "Compact"
-              }
-            ),
-            /* @__PURE__ */ jsxRuntimeExports.jsx(
-              "button",
-              {
-                type: "button",
-                onClick: () => void runMemoryAction("reindex"),
-                disabled: busy,
-                className: "rounded-xl bg-gray-100 px-3 py-1.5 text-xs font-semibold text-foreground transition hover:bg-gray-200 disabled:opacity-50",
-                children: "Reindex"
-              }
-            )
-          ] }),
-          notice && /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "mb-3 rounded-xl bg-emerald-50 px-3 py-2 text-xs text-emerald-700", children: notice }),
-          error && /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "mb-3 rounded-xl bg-red-50 px-3 py-2 text-xs text-red-500", children: error }),
-          loading ? /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "rounded-xl border border-dashed border-black/[0.08] px-4 py-8 text-center text-sm text-secondary", children: "Loading memory..." }) : filteredFiles.length === 0 ? /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "rounded-xl border border-dashed border-black/[0.08] px-4 py-8 text-center text-sm text-secondary", children: "No memory files found." }) : /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "max-h-[520px] divide-y divide-black/[0.06] overflow-y-auto rounded-xl border border-black/[0.08]", children: filteredFiles.map((file) => {
-            const checked = selectedPaths.has(file.path);
-            const active = selectedPath === file.path;
-            return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: `flex items-center gap-3 px-3 py-2 ${active ? "bg-primary/[0.06]" : "bg-white"}`, children: [
+  return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "space-y-6", children: [
+    /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "mb-8", children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsx("h1", { className: "text-2xl font-bold text-foreground", children: "Memory" }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "mt-1 text-sm text-secondary", children: "Browse, search, edit, compact, and reindex Hipocampus memory from the local runtime." })
+    ] }),
+    /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "grid gap-5 xl:grid-cols-[minmax(0,420px)_minmax(0,1fr)]", children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsxs(
+        DashboardCard,
+        {
+          title: "Memory Files",
+          action: /* @__PURE__ */ jsxRuntimeExports.jsx(
+            "button",
+            {
+              type: "button",
+              onClick: onRefresh,
+              disabled: refreshing,
+              className: "rounded-xl bg-gray-100 px-3 py-1.5 text-sm font-semibold text-foreground transition hover:bg-gray-200 disabled:opacity-50",
+              children: refreshing ? "Refreshing..." : "Refresh"
+            }
+          ),
+          children: [
+            /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "mb-4 grid gap-3 sm:grid-cols-2", children: [
+              /* @__PURE__ */ jsxRuntimeExports.jsx(MetricTile, { label: "Files", value: memoryFiles.length }),
+              /* @__PURE__ */ jsxRuntimeExports.jsx(
+                MetricTile,
+                {
+                  label: "QMD",
+                  value: memoryStatus?.qmdReady === true ? "Ready" : "Local"
+                }
+              )
+            ] }),
+            asString(rootMemory.path) && /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "mb-4 rounded-xl bg-gray-50 px-4 py-3 text-xs text-secondary", children: [
+              "Root: ",
+              asString(rootMemory.path)
+            ] }),
+            /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "mb-4 flex gap-2", children: [
               /* @__PURE__ */ jsxRuntimeExports.jsx(
                 "input",
                 {
-                  type: "checkbox",
-                  checked,
-                  onChange: () => toggleSelected(file.path),
-                  className: "h-4 w-4 rounded border-black/[0.12]",
-                  "aria-label": `Select ${file.path}`
+                  value: query,
+                  onChange: (event) => setQuery(event.target.value),
+                  onKeyDown: (event) => {
+                    if (event.key === "Enter") void runSearch();
+                  },
+                  placeholder: "Search memory...",
+                  className: "min-w-0 flex-1 rounded-xl border border-black/[0.08] bg-white px-3 py-2 text-sm outline-none transition focus:border-primary/40 focus:ring-4 focus:ring-primary/10"
                 }
               ),
+              /* @__PURE__ */ jsxRuntimeExports.jsx(
+                "button",
+                {
+                  type: "button",
+                  onClick: () => void runSearch(),
+                  disabled: searching,
+                  className: "rounded-xl bg-primary px-3 py-2 text-sm font-semibold text-white transition hover:bg-primary/90 disabled:opacity-50",
+                  children: searching ? "Searching" : "Search"
+                }
+              )
+            ] }),
+            /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "mb-4 flex flex-wrap gap-2", children: [
               /* @__PURE__ */ jsxRuntimeExports.jsxs(
                 "button",
                 {
                   type: "button",
-                  onClick: () => void openFile(file.path),
-                  className: "min-w-0 flex-1 text-left",
+                  onClick: () => void deletePaths(Array.from(selectedPaths)),
+                  disabled: busy || selectedCount === 0,
+                  className: "rounded-xl bg-gray-100 px-3 py-1.5 text-xs font-semibold text-foreground transition hover:bg-gray-200 disabled:opacity-50",
                   children: [
-                    /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "truncate text-sm font-semibold text-foreground", children: file.path }),
-                    /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "mt-0.5 text-xs text-secondary", children: [
-                      formatFileSize(file.sizeBytes),
-                      file.mtimeMs ? ` · ${new Date(file.mtimeMs).toISOString()}` : ""
-                    ] })
+                    "Delete selected",
+                    selectedCount > 0 ? ` (${selectedCount})` : ""
                   ]
                 }
               ),
@@ -37503,59 +37884,122 @@ function MemoryDashboard({
                 "button",
                 {
                   type: "button",
-                  onClick: () => void deletePaths([file.path]),
+                  onClick: () => void deletePaths(dailyPaths),
+                  disabled: busy || dailyPaths.length === 0,
+                  className: "rounded-xl bg-gray-100 px-3 py-1.5 text-xs font-semibold text-foreground transition hover:bg-gray-200 disabled:opacity-50",
+                  children: "Clear daily logs"
+                }
+              ),
+              /* @__PURE__ */ jsxRuntimeExports.jsx(
+                "button",
+                {
+                  type: "button",
+                  onClick: () => void runMemoryAction("compact"),
                   disabled: busy,
-                  className: "rounded-lg px-2 py-1 text-xs font-semibold text-red-500 transition hover:bg-red-50 disabled:opacity-50",
-                  children: "Delete"
+                  className: "rounded-xl bg-gray-100 px-3 py-1.5 text-xs font-semibold text-foreground transition hover:bg-gray-200 disabled:opacity-50",
+                  children: "Compact"
+                }
+              ),
+              /* @__PURE__ */ jsxRuntimeExports.jsx(
+                "button",
+                {
+                  type: "button",
+                  onClick: () => void runMemoryAction("reindex"),
+                  disabled: busy,
+                  className: "rounded-xl bg-gray-100 px-3 py-1.5 text-xs font-semibold text-foreground transition hover:bg-gray-200 disabled:opacity-50",
+                  children: "Reindex"
                 }
               )
-            ] }, file.path);
-          }) })
-        ]
-      }
-    ),
-    /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "space-y-5", children: [
-      /* @__PURE__ */ jsxRuntimeExports.jsx(
-        DashboardCard,
-        {
-          title: selectedPath ?? "Memory File",
-          action: selectedPath ? /* @__PURE__ */ jsxRuntimeExports.jsx(
-            "button",
-            {
-              type: "button",
-              onClick: () => void saveSelected(),
-              disabled: busy || fileLoading || editedContent === content2,
-              className: "rounded-xl bg-primary px-3 py-1.5 text-sm font-semibold text-white transition hover:bg-primary/90 disabled:opacity-50",
-              children: "Save"
-            }
-          ) : null,
-          children: !selectedPath ? /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "rounded-xl border border-dashed border-black/[0.08] px-4 py-10 text-center text-sm text-secondary", children: "Select a memory file to view or edit it." }) : fileLoading ? /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "rounded-xl border border-dashed border-black/[0.08] px-4 py-10 text-center text-sm text-secondary", children: "Loading file..." }) : /* @__PURE__ */ jsxRuntimeExports.jsx(
-            "textarea",
-            {
-              value: editedContent,
-              onChange: (event) => setEditedContent(event.target.value),
-              spellCheck: false,
-              className: "h-[420px] w-full resize-none rounded-xl border border-black/[0.08] bg-white px-4 py-3 font-mono text-sm leading-6 text-foreground outline-none transition focus:border-primary/40 focus:ring-4 focus:ring-primary/10"
-            }
-          )
+            ] }),
+            notice && /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "mb-3 rounded-xl bg-emerald-50 px-3 py-2 text-xs text-emerald-700", children: notice }),
+            error && /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "mb-3 rounded-xl bg-red-50 px-3 py-2 text-xs text-red-500", children: error }),
+            loading ? /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "rounded-xl border border-dashed border-black/[0.08] px-4 py-8 text-center text-sm text-secondary", children: "Loading memory..." }) : filteredFiles.length === 0 ? /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "rounded-xl border border-dashed border-black/[0.08] px-4 py-8 text-center text-sm text-secondary", children: "No memory files found." }) : /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "max-h-[520px] divide-y divide-black/[0.06] overflow-y-auto rounded-xl border border-black/[0.08]", children: filteredFiles.map((file) => {
+              const checked = selectedPaths.has(file.path);
+              const active = selectedPath === file.path;
+              return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: `flex items-center gap-3 px-3 py-2 ${active ? "bg-primary/[0.06]" : "bg-white"}`, children: [
+                /* @__PURE__ */ jsxRuntimeExports.jsx(
+                  "input",
+                  {
+                    type: "checkbox",
+                    checked,
+                    onChange: () => toggleSelected(file.path),
+                    className: "h-4 w-4 rounded border-black/[0.12]",
+                    "aria-label": `Select ${file.path}`
+                  }
+                ),
+                /* @__PURE__ */ jsxRuntimeExports.jsxs(
+                  "button",
+                  {
+                    type: "button",
+                    onClick: () => void openFile(file.path),
+                    className: "min-w-0 flex-1 text-left",
+                    children: [
+                      /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "truncate text-sm font-semibold text-foreground", children: file.path }),
+                      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "mt-0.5 text-xs text-secondary", children: [
+                        formatFileSize(file.sizeBytes),
+                        file.mtimeMs ? ` · ${new Date(file.mtimeMs).toISOString()}` : ""
+                      ] })
+                    ]
+                  }
+                ),
+                /* @__PURE__ */ jsxRuntimeExports.jsx(
+                  "button",
+                  {
+                    type: "button",
+                    onClick: () => void deletePaths([file.path]),
+                    disabled: busy,
+                    className: "rounded-lg px-2 py-1 text-xs font-semibold text-red-500 transition hover:bg-red-50 disabled:opacity-50",
+                    children: "Delete"
+                  }
+                )
+              ] }, file.path);
+            }) })
+          ]
         }
       ),
-      searchResults.length > 0 && /* @__PURE__ */ jsxRuntimeExports.jsx(DashboardCard, { title: "Search Results", children: /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "space-y-2", children: searchResults.map((result, index2) => /* @__PURE__ */ jsxRuntimeExports.jsxs(
-        "button",
-        {
-          type: "button",
-          onClick: () => result.path && void openFile(result.path),
-          className: "block w-full rounded-xl bg-gray-50 px-4 py-3 text-left transition hover:bg-gray-100",
-          children: [
-            /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center justify-between gap-3", children: [
-              /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "truncate text-sm font-semibold text-foreground", children: result.path ?? `result-${index2 + 1}` }),
-              typeof result.score === "number" && /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "shrink-0 text-xs text-secondary", children: result.score.toFixed(2) })
-            ] }),
-            result.contentPreview && /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "mt-1 line-clamp-3 text-xs leading-5 text-secondary", children: result.contentPreview })
-          ]
-        },
-        `${result.path ?? "result"}-${index2}`
-      )) }) })
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "space-y-5", children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsx(
+          DashboardCard,
+          {
+            title: selectedPath ?? "Memory File",
+            action: selectedPath ? /* @__PURE__ */ jsxRuntimeExports.jsx(
+              "button",
+              {
+                type: "button",
+                onClick: () => void saveSelected(),
+                disabled: busy || fileLoading || editedContent === content2,
+                className: "rounded-xl bg-primary px-3 py-1.5 text-sm font-semibold text-white transition hover:bg-primary/90 disabled:opacity-50",
+                children: "Save"
+              }
+            ) : null,
+            children: !selectedPath ? /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "rounded-xl border border-dashed border-black/[0.08] px-4 py-10 text-center text-sm text-secondary", children: "Select a memory file to view or edit it." }) : fileLoading ? /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "rounded-xl border border-dashed border-black/[0.08] px-4 py-10 text-center text-sm text-secondary", children: "Loading file..." }) : /* @__PURE__ */ jsxRuntimeExports.jsx(
+              "textarea",
+              {
+                value: editedContent,
+                onChange: (event) => setEditedContent(event.target.value),
+                spellCheck: false,
+                className: "h-[420px] w-full resize-none rounded-xl border border-black/[0.08] bg-white px-4 py-3 font-mono text-sm leading-6 text-foreground outline-none transition focus:border-primary/40 focus:ring-4 focus:ring-primary/10"
+              }
+            )
+          }
+        ),
+        searchResults.length > 0 && /* @__PURE__ */ jsxRuntimeExports.jsx(DashboardCard, { title: "Search Results", children: /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "space-y-2", children: searchResults.map((result, index2) => /* @__PURE__ */ jsxRuntimeExports.jsxs(
+          "button",
+          {
+            type: "button",
+            onClick: () => result.path && void openFile(result.path),
+            className: "block w-full rounded-xl bg-gray-50 px-4 py-3 text-left transition hover:bg-gray-100",
+            children: [
+              /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center justify-between gap-3", children: [
+                /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "truncate text-sm font-semibold text-foreground", children: result.path ?? `result-${index2 + 1}` }),
+                typeof result.score === "number" && /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "shrink-0 text-xs text-secondary", children: result.score.toFixed(2) })
+              ] }),
+              result.contentPreview && /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "mt-1 line-clamp-3 text-xs leading-5 text-secondary", children: result.contentPreview })
+            ]
+          },
+          `${result.path ?? "result"}-${index2}`
+        )) }) })
+      ] })
     ] })
   ] });
 }
@@ -37567,20 +38011,16 @@ function SkillsDashboard({
   const loaded = asArray(skillsSnapshot?.loaded);
   const hooks = asArray(skillsSnapshot?.runtimeHooks);
   const issues = asArray(skillsSnapshot?.issues);
-  return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "grid gap-5 lg:grid-cols-2", children: [
+  return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "max-w-4xl space-y-6", children: [
+    /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "mb-8", children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsx("h1", { className: "text-2xl font-bold text-foreground", children: "Skills" }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "mt-1 text-sm text-secondary", children: "Workspace SKILL.md capabilities and runtime hook metadata loaded by the local agent." })
+    ] }),
     /* @__PURE__ */ jsxRuntimeExports.jsx(
       DashboardCard,
       {
         title: "Skills",
-        action: /* @__PURE__ */ jsxRuntimeExports.jsx(
-          "button",
-          {
-            type: "button",
-            onClick: onRefresh,
-            className: "rounded-xl bg-gray-100 px-3 py-1.5 text-sm font-semibold text-foreground transition hover:bg-gray-200",
-            children: "Reload"
-          }
-        ),
+        action: /* @__PURE__ */ jsxRuntimeExports.jsx(ButtonLike, { variant: "secondary", onClick: onRefresh, children: "Reload" }),
         children: loading ? /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "text-sm text-secondary", children: "Loading skills..." }) : loaded.length === 0 ? /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "text-sm text-secondary", children: "No skills loaded." }) : /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "space-y-2", children: loaded.map((skill, index2) => /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "rounded-xl bg-gray-50 px-4 py-3", children: [
           /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "text-sm font-semibold text-foreground", children: asString(skill.name, `skill-${index2 + 1}`) }),
           asString(skill.path) && /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "mt-1 truncate text-xs text-secondary", children: asString(skill.path) })
@@ -37599,14 +38039,60 @@ function SkillsDashboard({
   ] });
 }
 function UsageDashboard({ runtimeSnapshot }) {
-  return /* @__PURE__ */ jsxRuntimeExports.jsxs(DashboardCard, { title: "Usage", children: [
-    /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "grid gap-3 sm:grid-cols-2 lg:grid-cols-4", children: [
-      /* @__PURE__ */ jsxRuntimeExports.jsx(MetricTile, { label: "Sessions", value: runtimeItemCount(runtimeSnapshot, "sessions") }),
-      /* @__PURE__ */ jsxRuntimeExports.jsx(MetricTile, { label: "Tasks", value: runtimeItemCount(runtimeSnapshot, "tasks") }),
-      /* @__PURE__ */ jsxRuntimeExports.jsx(MetricTile, { label: "Tools", value: runtimeItemCount(runtimeSnapshot, "tools") }),
-      /* @__PURE__ */ jsxRuntimeExports.jsx(MetricTile, { label: "Artifacts", value: runtimeItemCount(runtimeSnapshot, "artifacts") })
+  const sectionRows = [
+    { key: "sessions", title: "Sessions" },
+    { key: "tasks", title: "Background Tasks" },
+    { key: "crons", title: "Schedules" },
+    { key: "artifacts", title: "Artifacts" },
+    { key: "tools", title: "Tools" }
+  ].map((section) => {
+    const data = asRecord(runtimeSnapshot?.[section.key]);
+    const items = asArray(data.items).slice(0, 6);
+    return { ...section, count: runtimeItemCount(runtimeSnapshot, section.key), items };
+  });
+  return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "max-w-4xl space-y-6", children: [
+    /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "mb-8", children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsx("h1", { className: "text-2xl font-bold text-foreground", children: "Usage" }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "mt-1 text-sm text-secondary", children: "Local runtime activity. Self-hosted Magi does not meter platform credits." })
     ] }),
-    /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "mt-5 text-sm leading-6 text-secondary", children: "Self-hosted Magi does not meter platform credits. Model usage is controlled by the local provider configuration and any provider-side billing you attach." })
+    /* @__PURE__ */ jsxRuntimeExports.jsxs(DashboardCard, { title: "Runtime Totals", children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "grid gap-3 sm:grid-cols-2 lg:grid-cols-5", children: sectionRows.map((row) => /* @__PURE__ */ jsxRuntimeExports.jsx(MetricTile, { label: row.title, value: row.count }, row.key)) }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "mt-5 text-sm leading-6 text-secondary", children: "Model usage is controlled by the provider or local model server you configure." })
+    ] }),
+    /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "grid gap-5 lg:grid-cols-2", children: sectionRows.map((row) => /* @__PURE__ */ jsxRuntimeExports.jsx(DashboardCard, { title: row.title, children: row.items.length === 0 ? /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "rounded-xl border border-dashed border-black/[0.08] px-4 py-6 text-sm text-secondary", children: [
+      "No ",
+      row.title.toLowerCase(),
+      " reported."
+    ] }) : /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "space-y-2", children: row.items.map((item, index2) => {
+      const label = asString(item.name) || asString(item.id) || asString(item.sessionKey) || asString(item.taskId) || `${row.title} ${index2 + 1}`;
+      const detail = asString(item.status) || asString(item.state) || asString(item.schedule) || asString(item.description);
+      return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "rounded-xl bg-gray-50 px-4 py-3", children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "truncate text-sm font-semibold text-foreground", children: label }),
+        detail && /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "mt-1 text-xs text-secondary", children: detail })
+      ] }, `${row.key}-${index2}`);
+    }) }) }, row.key)) })
+  ] });
+}
+function ConverterDashboard({ onNavigate }) {
+  return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "max-w-3xl space-y-6", children: [
+    /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "mb-8", children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsx("h1", { className: "text-2xl font-bold text-foreground", children: "Converter" }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "mt-1 text-sm text-secondary", children: "Local document conversion runs through the agent workspace and artifact pipeline." })
+    ] }),
+    /* @__PURE__ */ jsxRuntimeExports.jsx(DashboardCard, { title: "Local Conversion Flow", children: /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "space-y-3 text-sm leading-6 text-secondary", children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsx("p", { children: "Drop files into chat or upload them to Knowledge, then ask Magi to convert, summarize, extract tables, or generate deliverable artifacts. Outputs appear in the Work inspector and workspace artifacts." }),
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex flex-wrap gap-3", children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsx(ButtonLike, { onClick: () => onNavigate("chat"), children: "Open Chat" }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx(ButtonLike, { variant: "secondary", onClick: () => onNavigate("knowledge"), children: "Upload Knowledge" }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx(ButtonLike, { variant: "secondary", onClick: () => onNavigate("workspace"), children: "Open Workspace" })
+      ] })
+    ] }) }),
+    /* @__PURE__ */ jsxRuntimeExports.jsx(DashboardCard, { title: "Supported Pattern", children: /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "grid gap-3 sm:grid-cols-2", children: [
+      "DOCX/PDF/PPTX/XLSX extraction",
+      "Markdown and structured report generation",
+      "Workspace artifact review",
+      "Runtime proof before completion"
+    ].map((item) => /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "rounded-xl bg-gray-50 px-4 py-3 text-sm font-medium text-foreground", children: item }, item)) }) })
   ] });
 }
 function LocalDashboardShell({
@@ -37615,6 +38101,11 @@ function LocalDashboardShell({
   runtimeStatus,
   skillsSnapshot,
   skillsLoading,
+  config,
+  configLoading,
+  configSaving,
+  configNotice,
+  configError,
   agentUrl,
   token,
   kbCollections,
@@ -37635,6 +38126,9 @@ function LocalDashboardShell({
   onRefreshWorkspace,
   onRefreshMemory,
   onRefreshSkills,
+  onUploadKnowledge,
+  onReadWorkspaceFile,
+  onSaveWorkspaceFile,
   onMemorySearch,
   onMemoryReadFile,
   onMemorySaveFile,
@@ -37642,17 +38136,22 @@ function LocalDashboardShell({
   onMemoryCompact,
   onMemoryReindex,
   onSaveConnection,
-  onCheckRuntime
+  onCheckRuntime,
+  onSaveConfig,
+  onReloadConfig,
+  onRestartRuntime
 }) {
-  const titles = {
-    overview: "Dashboard",
-    settings: "Settings",
-    usage: "Usage",
-    skills: "Skills",
-    workspace: "Workspace",
-    knowledge: "Knowledge",
-    memory: "Memory"
-  };
+  const mobileRoutes = [
+    { route: "chat", label: "Chat" },
+    { route: "overview", label: "Overview" },
+    { route: "settings", label: "Settings" },
+    { route: "usage", label: "Usage" },
+    { route: "skills", label: "Skills" },
+    { route: "converter", label: "Converter" },
+    { route: "knowledge", label: "Knowledge" },
+    { route: "memory", label: "Memory" },
+    { route: "workspace", label: "Workspace" }
+  ];
   return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex h-full min-w-0 flex-1 bg-background", children: [
     /* @__PURE__ */ jsxRuntimeExports.jsx(
       DashboardSidebar,
@@ -37663,23 +38162,30 @@ function LocalDashboardShell({
         onRefresh: onRefreshAll
       }
     ),
-    /* @__PURE__ */ jsxRuntimeExports.jsxs("main", { className: "flex min-w-0 flex-1 flex-col", children: [
-      /* @__PURE__ */ jsxRuntimeExports.jsxs("header", { className: "flex min-h-[64px] items-center justify-between gap-4 border-b border-black/[0.06] px-5 md:px-8", children: [
-        /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { children: [
-          /* @__PURE__ */ jsxRuntimeExports.jsx("h1", { className: "text-xl font-semibold text-foreground", children: titles[route] }),
-          /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "mt-1 text-sm text-secondary", children: "Local Magi runtime, provider, knowledge, and operator files." })
+    /* @__PURE__ */ jsxRuntimeExports.jsxs("main", { className: "min-w-0 flex-1 overflow-y-auto", children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "border-b border-gray-200 bg-gray-50 px-4 py-3 md:hidden", children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "mb-3 flex items-center justify-between gap-3", children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "min-w-0", children: [
+            /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "truncate text-sm font-semibold text-foreground", children: BOT_NAME }),
+            /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "mt-1 flex items-center gap-2 text-xs text-secondary", children: [
+              /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: `h-2 w-2 rounded-full ${runtimeStatus === "active" ? "bg-emerald-400" : "bg-gray-300"}` }),
+              runtimeStatusLabel(runtimeStatus)
+            ] })
+          ] }),
+          /* @__PURE__ */ jsxRuntimeExports.jsx(ButtonLike, { variant: "secondary", onClick: () => onNavigate("chat"), className: "min-h-0 px-3 py-2", children: "Chat" })
         ] }),
         /* @__PURE__ */ jsxRuntimeExports.jsx(
-          "button",
+          "select",
           {
-            type: "button",
-            onClick: () => onNavigate("chat"),
-            className: "rounded-xl bg-gray-100 px-4 py-2 text-sm font-semibold text-foreground transition hover:bg-gray-200",
-            children: "Open Chat"
+            value: route,
+            onChange: (event) => onNavigate(event.target.value),
+            className: "w-full rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm font-medium text-foreground",
+            "aria-label": "Dashboard section",
+            children: mobileRoutes.map((item) => /* @__PURE__ */ jsxRuntimeExports.jsx("option", { value: item.route, children: item.label }, item.route))
           }
         )
       ] }),
-      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "min-h-0 flex-1 overflow-y-auto px-5 py-6 md:px-8", children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "min-w-0 p-4 sm:p-6 md:p-8", children: [
         route === "overview" && /* @__PURE__ */ jsxRuntimeExports.jsx(
           OverviewDashboard,
           {
@@ -37696,13 +38202,22 @@ function LocalDashboardShell({
             agentUrl,
             token,
             runtimeStatus,
+            config,
+            configLoading,
+            configSaving,
+            configNotice,
+            configError,
             setAgentUrl,
             setToken,
             onSaveConnection,
-            onCheckRuntime
+            onCheckRuntime,
+            onSaveConfig,
+            onReloadConfig,
+            onRestartRuntime
           }
         ),
         route === "usage" && /* @__PURE__ */ jsxRuntimeExports.jsx(UsageDashboard, { runtimeSnapshot }),
+        route === "converter" && /* @__PURE__ */ jsxRuntimeExports.jsx(ConverterDashboard, { onNavigate }),
         route === "skills" && /* @__PURE__ */ jsxRuntimeExports.jsx(
           SkillsDashboard,
           {
@@ -37717,7 +38232,8 @@ function LocalDashboardShell({
             kbCollections,
             loading: kbLoading,
             refreshing: kbRefreshing,
-            onRefresh: onRefreshKnowledge
+            onRefresh: onRefreshKnowledge,
+            onUpload: onUploadKnowledge
           }
         ),
         route === "workspace" && /* @__PURE__ */ jsxRuntimeExports.jsx(
@@ -37726,7 +38242,9 @@ function LocalDashboardShell({
             workspaceFiles,
             loading: workspaceLoading,
             refreshing: workspaceRefreshing,
-            onRefresh: onRefreshWorkspace
+            onRefresh: onRefreshWorkspace,
+            onReadFile: onReadWorkspaceFile,
+            onSaveFile: onSaveWorkspaceFile
           }
         ),
         route === "memory" && /* @__PURE__ */ jsxRuntimeExports.jsx(
@@ -37764,6 +38282,11 @@ function App() {
   const [runtimeSnapshot, setRuntimeSnapshot] = reactExports.useState(null);
   const [skillsSnapshot, setSkillsSnapshot] = reactExports.useState(null);
   const [skillsLoading, setSkillsLoading] = reactExports.useState(true);
+  const [localConfig, setLocalConfig] = reactExports.useState(null);
+  const [configLoading, setConfigLoading] = reactExports.useState(true);
+  const [configSaving, setConfigSaving] = reactExports.useState(false);
+  const [configNotice, setConfigNotice] = reactExports.useState(null);
+  const [configError, setConfigError] = reactExports.useState(null);
   const [sidebarOpen, setSidebarOpen] = reactExports.useState(false);
   const [customCategories, setCustomCategories] = reactExports.useState([]);
   const [selectedKbDocs, setSelectedKbDocs] = reactExports.useState([]);
@@ -37888,6 +38411,19 @@ function App() {
       setSkillsLoading(false);
     }
   }, [getJson]);
+  const refreshConfig = reactExports.useCallback(async () => {
+    setConfigLoading(true);
+    try {
+      const payload = await getJson("/v1/app/config");
+      setLocalConfig(localConfigFromPayload(payload));
+      setConfigError(null);
+    } catch (err) {
+      setLocalConfig(null);
+      setConfigError(err instanceof Error ? err.message : "Failed to load config");
+    } finally {
+      setConfigLoading(false);
+    }
+  }, [getJson]);
   const refreshKnowledge = reactExports.useCallback(async () => {
     setKbRefreshing(true);
     try {
@@ -37900,6 +38436,29 @@ function App() {
       setKbRefreshing(false);
     }
   }, [getJson]);
+  const uploadKnowledgeFiles = reactExports.useCallback(
+    async (files) => {
+      for (const file of Array.from(files)) {
+        const extension2 = file.name.split(".").pop()?.toLowerCase() ?? "";
+        if (!KB_UPLOAD_EXTENSIONS.has(extension2)) {
+          throw new Error(`Unsupported file type: ${file.name}`);
+        }
+        const contentType = resolveKnowledgeUploadMimeType(file);
+        const isTextFile = contentType.startsWith("text/") || ["application/json", "application/xml"].includes(contentType) || /\.(md|markdown|txt|csv|tsv|json|yaml|yml|html|htm|xml)$/i.test(file.name);
+        const content2 = isTextFile ? await file.text() : `Binary knowledge file saved from local dashboard: ${file.name} (${file.size} bytes, ${contentType})`;
+        const safeName = file.name.replace(/[^A-Za-z0-9._-]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 120) || "document.txt";
+        const response = await fetch(`${normalizedBase}/v1/app/knowledge/file`, {
+          method: "PUT",
+          headers: authHeaders(true),
+          body: JSON.stringify({ path: `dashboard/${safeName}`, content: content2 })
+        });
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(asString(payload.error, response.statusText));
+      }
+      await refreshKnowledge();
+    },
+    [authHeaders, normalizedBase, refreshKnowledge]
+  );
   const refreshWorkspace = reactExports.useCallback(async () => {
     setWorkspaceRefreshing(true);
     try {
@@ -37960,6 +38519,52 @@ function App() {
     },
     [putJson, refreshWorkspace]
   );
+  const readWorkspaceFile = reactExports.useCallback(
+    async (path2) => {
+      const payload = await getJson(`/v1/app/workspace/file?path=${encodeURIComponent(path2)}`);
+      return asString(payload.content);
+    },
+    [getJson]
+  );
+  const saveConfig = reactExports.useCallback(
+    async (config) => {
+      setConfigSaving(true);
+      setConfigNotice(null);
+      setConfigError(null);
+      try {
+        const payload = await putJson("/v1/app/config", configSavePayload(config));
+        const next = { ...config, ...localConfigFromPayload({ ...payload, config: configSavePayload(config) }) };
+        setLocalConfig(next);
+        setConfigNotice("Settings saved. Restart the runtime for provider or workspace changes to take effect.");
+      } catch (err) {
+        setConfigError(err instanceof Error ? err.message : "Failed to save config");
+      } finally {
+        setConfigSaving(false);
+      }
+    },
+    [putJson]
+  );
+  const reloadConfig = reactExports.useCallback(async () => {
+    setConfigNotice(null);
+    setConfigError(null);
+    try {
+      const payload = await sendJson("/v1/app/config/reload", {});
+      setLocalConfig(localConfigFromPayload(payload));
+      setConfigNotice(asString(payload.message, "Config reloaded. Restart may still be required."));
+    } catch (err) {
+      setConfigError(err instanceof Error ? err.message : "Failed to reload config");
+    }
+  }, [sendJson]);
+  const restartRuntime = reactExports.useCallback(async () => {
+    setConfigNotice(null);
+    setConfigError(null);
+    try {
+      const payload = await sendJson("/v1/app/runtime/restart", {});
+      setConfigNotice(asString(payload.message, payload.ok === true ? "Runtime restart scheduled." : "Runtime restart is not configured."));
+    } catch (err) {
+      setConfigError(err instanceof Error ? err.message : "Failed to restart runtime");
+    }
+  }, [sendJson]);
   const readMemoryFile = reactExports.useCallback(
     async (path2) => {
       const payload = await getJson(`/v1/app/memory/file?path=${encodeURIComponent(path2)}`);
@@ -37997,16 +38602,16 @@ function App() {
   const refreshChannels = reactExports.useCallback(() => {
     setRefreshing(true);
     store.setChannels(store.channels.length > 0 ? store.channels : [defaultChannel()], { botId: BOT_ID });
-    void Promise.allSettled([refreshRuntime(), refreshKnowledge(), refreshWorkspace(), refreshMemory(), refreshSkills()]).finally(() => {
+    void Promise.allSettled([refreshRuntime(), refreshKnowledge(), refreshWorkspace(), refreshMemory(), refreshSkills(), refreshConfig()]).finally(() => {
       window.setTimeout(() => setRefreshing(false), 300);
     });
-  }, [refreshKnowledge, refreshMemory, refreshRuntime, refreshSkills, refreshWorkspace, store]);
+  }, [refreshConfig, refreshKnowledge, refreshMemory, refreshRuntime, refreshSkills, refreshWorkspace, store]);
   const refreshDashboardData = reactExports.useCallback(() => {
     setRefreshing(true);
-    void Promise.allSettled([refreshRuntime(), refreshKnowledge(), refreshWorkspace(), refreshMemory(), refreshSkills()]).finally(() => {
+    void Promise.allSettled([refreshRuntime(), refreshKnowledge(), refreshWorkspace(), refreshMemory(), refreshSkills(), refreshConfig()]).finally(() => {
       window.setTimeout(() => setRefreshing(false), 300);
     });
-  }, [refreshKnowledge, refreshMemory, refreshRuntime, refreshSkills, refreshWorkspace]);
+  }, [refreshConfig, refreshKnowledge, refreshMemory, refreshRuntime, refreshSkills, refreshWorkspace]);
   const navigateToRoute = reactExports.useCallback(
     (route, channel = useChatStore.getState().activeChannel || DEFAULT_CHANNEL) => {
       if (route === "chat") {
@@ -38044,7 +38649,7 @@ function App() {
       }
     }).catch(() => {
     });
-    void Promise.allSettled([refreshRuntime(), refreshKnowledge(), refreshWorkspace(), refreshMemory(), refreshSkills()]);
+    void Promise.allSettled([refreshRuntime(), refreshKnowledge(), refreshWorkspace(), refreshMemory(), refreshSkills(), refreshConfig()]);
   }, []);
   reactExports.useEffect(() => {
     const syncRoute = () => {
@@ -38781,6 +39386,11 @@ function App() {
         runtimeStatus,
         skillsSnapshot,
         skillsLoading,
+        config: localConfig,
+        configLoading,
+        configSaving,
+        configNotice,
+        configError,
         agentUrl,
         token,
         kbCollections,
@@ -38801,6 +39411,9 @@ function App() {
         onRefreshWorkspace: () => void refreshWorkspace(),
         onRefreshMemory: () => void refreshMemory(),
         onRefreshSkills: () => void refreshSkills(),
+        onUploadKnowledge: uploadKnowledgeFiles,
+        onReadWorkspaceFile: readWorkspaceFile,
+        onSaveWorkspaceFile: saveWorkspaceFile,
         onMemorySearch: searchMemory,
         onMemoryReadFile: readMemoryFile,
         onMemorySaveFile: saveMemoryFile,
@@ -38808,7 +39421,10 @@ function App() {
         onMemoryCompact: compactMemory,
         onMemoryReindex: reindexMemory,
         onSaveConnection: handleSaveConnection,
-        onCheckRuntime: () => void refreshRuntime()
+        onCheckRuntime: () => void refreshRuntime(),
+        onSaveConfig: saveConfig,
+        onReloadConfig: reloadConfig,
+        onRestartRuntime: restartRuntime
       }
     );
   }

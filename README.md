@@ -19,6 +19,7 @@ docker compose up --build
 ```
 
 Open `http://localhost:8080/app` and paste the server token from `.env`.
+The local dashboard is at `http://localhost:8080/dashboard/local/overview` for provider settings, usage, skills, Knowledge, Memory, and Workspace editors.
 
 ## CLI Usage
 

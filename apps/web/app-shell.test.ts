@@ -66,6 +66,31 @@ describe("Magi App shell", () => {
     expect(linkShim).toContain('new PopStateEvent("popstate")');
   });
 
+  it("keeps dashboard pages wired to local runtime controls instead of hosted SaaS controls", () => {
+    const source = readAppFile(path.join("src", "App.tsx"));
+    const js = readAppFile(path.join("dist", "app.js"));
+
+    expect(source).toContain("OverviewDashboard");
+    expect(source).toContain("SettingsDashboard");
+    expect(source).toContain("UsageDashboard");
+    expect(source).toContain("SkillsDashboard");
+    expect(source).toContain("ConverterDashboard");
+    expect(source).toContain("KnowledgeDashboard");
+    expect(source).toContain("WorkspaceDashboard");
+    expect(source).toContain("MemoryDashboard");
+    expect(source).toContain('aria-label="Dashboard section"');
+    expect(source).toContain("/v1/app/config");
+    expect(source).toContain("/v1/app/config/reload");
+    expect(source).toContain("/v1/app/runtime/restart");
+    expect(source).toContain("/v1/app/knowledge/file");
+    expect(source).toContain("onReadWorkspaceFile");
+    expect(source).toContain("onSaveWorkspaceFile");
+    expect(source).toContain("OpenAI-compatible / local");
+    expect(js).toContain("Configured LLM");
+    expect(js).not.toContain("Platform Credits");
+    expect(js).not.toContain("Change Plan");
+  });
+
   it("uses the copied cloud chat components and visual system", () => {
     const sidebar = readAppFile(path.join("src", "components", "chat", "chat-sidebar.tsx"));
     const input = readAppFile(path.join("src", "components", "chat", "chat-input.tsx"));
@@ -176,7 +201,8 @@ describe("Magi App shell", () => {
   it("surfaces a local memory editor with search, delete, compaction, and reindex controls", () => {
     const source = readAppFile(path.join("src", "App.tsx"));
 
-    expect(source).toContain('type AppRoute = "chat"');
+    expect(source).toContain("type AppRoute =");
+    expect(source).toContain('| "chat"');
     expect(source).toContain('"memory"');
     expect(source).toContain("MemoryDashboard");
     expect(source).toContain("memoryFiles");
