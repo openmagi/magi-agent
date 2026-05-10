@@ -31363,7 +31363,11 @@ function useAuthFetch() {
     if (token && !headers.has("Authorization")) {
       headers.set("Authorization", `Bearer ${token}`);
     }
-    return fetch(input, { ...init, headers });
+    const target = typeof input === "string" && input.startsWith("/v1/") ? new URL(
+      input,
+      window.localStorage.getItem("magi.agent.app.agentUrl") || window.location.origin
+    ).toString() : input;
+    return fetch(target, { ...init, headers });
   });
 }
 function inputPreview(value) {
@@ -31431,7 +31435,7 @@ function SocialBrowserRequestCard({
     setBusy("start");
     setError(null);
     try {
-      const res = await authFetch("/api/integrations/social-browser/session", {
+      const res = await authFetch("/v1/app/social-browser/session", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ provider: info.provider })
@@ -31455,7 +31459,7 @@ function SocialBrowserRequestCard({
     setError(null);
     try {
       const res = await authFetch(
-        `/api/integrations/social-browser/session/${sessionId}/command`,
+        `/v1/app/social-browser/session/${sessionId}/command`,
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },

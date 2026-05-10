@@ -80,6 +80,7 @@ After npm publishing, the same surface is available as `magi-agent chat`,
 - **CLI-native runtime:** use Magi from a browser, desktop shell, interactive terminal, one-shot command, or Unix pipe.
 - **Any model:** hosted providers, local OpenAI-compatible servers, Ollama, LM Studio, vLLM, llama.cpp, and LiteLLM.
 - **Local knowledge base:** write and search project knowledge inside `workspace/knowledge` when no external KB exists.
+- **Local browser sessions:** one-time browser previews and social-login handoff run through the self-hosted app, not a hosted credential broker.
 - **Hipocampus memory:** time-structured memory for durable context, session resume, and compaction.
 - **Local memory editor:** browse, search, edit, delete, compact, and reindex memory from the self-hosted dashboard.
 - **Runtime proof:** completion can be blocked unless work has evidence attached to the user's criteria.
