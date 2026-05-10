@@ -109,7 +109,7 @@ function SocialBrowserRequestCard({
     setBusy("start");
     setError(null);
     try {
-      const res = await authFetch("/api/integrations/social-browser/session", {
+      const res = await authFetch("/v1/app/social-browser/session", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ provider: info.provider }),
@@ -134,7 +134,7 @@ function SocialBrowserRequestCard({
     setError(null);
     try {
       const res = await authFetch(
-        `/api/integrations/social-browser/session/${sessionId}/command`,
+        `/v1/app/social-browser/session/${sessionId}/command`,
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
