@@ -100,6 +100,10 @@ export function extractRuntimeModelOverride(body: unknown): string | undefined {
   return model;
 }
 
+export function extractGoalMode(body: unknown): boolean {
+  return !!body && typeof body === "object" && (body as { goalMode?: unknown }).goalMode === true;
+}
+
 export function extractLastUserMessage(body: unknown): UserMessage | null {
   if (!body || typeof body !== "object") return null;
   const messages = (body as { messages?: unknown }).messages;
@@ -331,10 +335,12 @@ async function handleChatCompletions(
   const planMode =
     planHeader === "on" || planHeader === "1" || planHeader === "true";
   const runtimeModelOverride = extractRuntimeModelOverride(body);
+  const goalMode = extractGoalMode(body);
 
   try {
     await session.runTurn(userMsg, sse, {
       planMode,
+      ...(goalMode ? { goalMode } : {}),
       ...(runtimeModelOverride ? { runtimeModelOverride } : {}),
     });
   } finally {

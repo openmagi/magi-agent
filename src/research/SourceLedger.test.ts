@@ -69,4 +69,31 @@ describe("SourceLedgerStore", () => {
       "https://b.example",
     ]);
   });
+
+  it("treats spawned child sources as parent-turn evidence", () => {
+    const ledger = new SourceLedgerStore({ now: () => 1 });
+    ledger.recordSource({
+      turnId: "turn-a",
+      toolName: "WebFetch",
+      kind: "web_fetch",
+      uri: "https://parent.example",
+    });
+    ledger.recordSource({
+      turnId: "turn-a::spawn::child-1",
+      toolName: "WebFetch",
+      kind: "web_fetch",
+      uri: "https://child.example",
+    });
+    ledger.recordSource({
+      turnId: "turn-a-other::spawn::child-1",
+      toolName: "WebFetch",
+      kind: "web_fetch",
+      uri: "https://sibling.example",
+    });
+
+    expect(ledger.sourcesForTurn("turn-a").map((record) => record.uri)).toEqual([
+      "https://parent.example",
+      "https://child.example",
+    ]);
+  });
 });

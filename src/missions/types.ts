@@ -51,3 +51,33 @@ export interface ListMissionActionEventsInput {
   since?: string;
   limit?: number;
 }
+
+export interface RestartRecoveryInput {
+  startedAt: string;
+  reason?: string;
+}
+
+export interface RestartRecoveryResult {
+  abandoned: number;
+  missionIds: string[];
+  resumeRequested?: number;
+  resumeMissionIds?: string[];
+}
+
+export interface GoalMissionResumeInput {
+  actionEventId: string;
+  missionId: string;
+  startedAt?: string;
+  sessionKey: string;
+  channel: {
+    type: MissionChannelType;
+    channelId: string;
+  };
+  objective: string;
+  sourceRequest?: string;
+  title?: string;
+  completionCriteria: string[];
+  turnsUsed: number;
+  maxTurns?: number;
+  resumeContext?: string;
+}

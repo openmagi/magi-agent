@@ -36,6 +36,12 @@ describe("Magi App shell", () => {
     expect(source).toContain('type === "tool_start"');
     expect(source).toContain('type === "task_board"');
     expect(source).toContain('type === "child_progress"');
+    expect(source).toContain('type === "patch_preview"');
+    expect(source).toContain('type === "source_inspected"');
+    expect(source).toContain('type === "rule_check"');
+    expect(source).toContain('type === "mission_created"');
+    expect(source).toContain('type === "mission_event"');
+    expect(source).toContain("goalMode");
     expect(source).toContain("/v1/app/knowledge");
     expect(source).toContain("/v1/app/workspace?path=");
     expect(source).toContain("/v1/app/workspace/file");
@@ -69,6 +75,7 @@ describe("Magi App shell", () => {
     expect(sidebar).toContain("SortableContext");
     expect(sidebar).toContain("DEFAULT_CHANNELS");
     expect(input).toContain("data-chat-queue-strip");
+    expect(input).toContain("data-chat-goal-toggle");
     expect(modelPicker).toContain("data-chat-model-picker");
     expect(sidePanel).toContain("PANEL_VIEW_KEY");
     expect(sidePanel).toContain("WorkConsolePanel");

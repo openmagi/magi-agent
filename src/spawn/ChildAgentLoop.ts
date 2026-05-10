@@ -57,6 +57,7 @@ import { classifyFinalAnswerMeta } from "../hooks/builtin/turnMetaClassifier.js"
 import { buildChildSystemPrompt } from "./ChildSystemPrompt.js";
 import type { ChannelMemoryMode, UserMessage } from "../util/types.js";
 import type { ExecutionContractStore } from "../execution/ExecutionContract.js";
+import type { SourceLedgerStore } from "../research/SourceLedger.js";
 import {
   classifyEvidence,
   transcriptEvidenceForTurn,
@@ -216,6 +217,8 @@ export interface SpawnChildOptions {
   permissionMode?: PermissionMode;
   /** Parent execution contract, propagated so child hooks/tools enforce the same runtime harness. */
   executionContract?: ExecutionContractStore;
+  /** Parent source ledger, propagated so child research tools emit parent-visible evidence. */
+  sourceLedger?: SourceLedgerStore;
   /** Disable the extra LLM deferral classifier for answer-only/tournament children. */
   deferralCheck?: boolean;
   /** Workspace-relative files/directories the child may read when provided. */
@@ -443,6 +446,7 @@ function makeChildHookContext(
     deadlineMs: 5_000,
     memoryMode: opts.memoryMode,
     executionContract: opts.executionContract,
+    sourceLedger: opts.sourceLedger,
     ...(opts.askUser ? { askUser: opts.askUser } : {}),
   };
 }
@@ -1112,6 +1116,7 @@ async function runOneChildTool(
     },
     spawnDepth: opts.parentSpawnDepth + 1,
     executionContract: opts.executionContract,
+    sourceLedger: opts.sourceLedger,
   };
 
   let result: ToolResult;

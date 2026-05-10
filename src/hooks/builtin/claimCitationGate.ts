@@ -2,6 +2,9 @@ import type { SourceLedgerRecord } from "../../research/SourceLedger.js";
 import type { RegisteredHook, HookContext } from "../types.js";
 
 const MAX_RETRIES = 1;
+const LONG_SOURCED_DRAFT_MIN_CHARS = 4_000;
+const LONG_SOURCED_DRAFT_MIN_SOURCES = 3;
+const LONG_SOURCED_DRAFT_MAX_MISSING = 3;
 
 const UNCERTAIN_RE =
   /\b(?:may|might|could|appears|seems|probably|unconfirmed|manual confirmation|needs confirmation)\b|(?:확인 필요|불확실|추정|가능성|확인되지|원문 확인 불가|수동 확인)/i;
@@ -14,6 +17,16 @@ const FACTUAL_VERB_RE =
 interface CitationClaim {
   text: string;
   uncertain: boolean;
+}
+
+interface CitationCoverageMissing {
+  text: string;
+}
+
+interface CitationCoverage {
+  text: string;
+  status: "uncertain" | "covered" | "missing";
+  sourceIds: string[];
 }
 
 function isEnabled(): boolean {
@@ -88,13 +101,63 @@ function sourceSensitiveTurn(ctx: HookContext, userMessage: string): boolean {
   }).sourceSensitive ?? false;
 }
 
+function truncate(value: string, maxLength: number): string {
+  const normalized = value.replace(/\s+/g, " ").trim();
+  if (normalized.length <= maxLength) return normalized;
+  return `${normalized.slice(0, Math.max(0, maxLength - 3)).trimEnd()}...`;
+}
+
+function renderSourceRepairContext(
+  sources: readonly SourceLedgerRecord[],
+  missing: readonly CitationCoverageMissing[],
+): string[] {
+  const lines = [
+    "Available inspected sources:",
+    ...sources.slice(0, 8).map((source) => {
+      const title = source.title ? ` - ${truncate(source.title, 80)}` : "";
+      const snippet = source.snippets?.[0]
+        ? ` | excerpt: ${truncate(source.snippets[0], 180)}`
+        : "";
+      return `- [${source.sourceId}] ${source.kind}${title}: ${source.uri}${snippet}`;
+    }),
+  ];
+  if (sources.length > 8) {
+    lines.push(`- ${sources.length - 8} more inspected sources omitted from retry prompt.`);
+  }
+  lines.push(
+    "Missing citation examples:",
+    ...missing.slice(0, 6).map((claim, index) => {
+      return `${index + 1}. ${truncate(claim.text, 220)}`;
+    }),
+  );
+  if (missing.length > 6) {
+    lines.push(`${missing.length - 6} more uncited claims omitted from retry prompt.`);
+  }
+  return lines;
+}
+
+function shouldFailOpenLongSourcedDraft(
+  assistantText: string,
+  sources: readonly SourceLedgerRecord[],
+  coverage: readonly CitationCoverage[],
+): boolean {
+  if (assistantText.length < LONG_SOURCED_DRAFT_MIN_CHARS) return false;
+  if (sources.length < LONG_SOURCED_DRAFT_MIN_SOURCES) return false;
+
+  const covered = coverage.filter((claim) => claim.status === "covered").length;
+  if (covered === 0) return false;
+
+  const missing = coverage.filter((claim) => claim.status === "missing").length;
+  return missing > 0 && missing <= LONG_SOURCED_DRAFT_MAX_MISSING;
+}
+
 export function makeClaimCitationGateHook(): RegisteredHook<"beforeCommit"> {
   return {
     name: "builtin:claim-citation-gate",
     point: "beforeCommit",
     priority: 81,
     blocking: true,
-    failOpen: true,
+    failOpen: false,
     timeoutMs: 1_000,
     handler: async ({ assistantText, userMessage, retryCount }, ctx: HookContext) => {
       try {
@@ -108,7 +171,7 @@ export function makeClaimCitationGateHook(): RegisteredHook<"beforeCommit"> {
         const claims = extractCitationClaims(assistantText);
         if (claims.length === 0) return { action: "continue" };
 
-        const coverage = claims.map((claim) => {
+        const coverage: CitationCoverage[] = claims.map((claim) => {
           const sourceIds = claim.uncertain ? [] : citedSourceIds(claim.text, sources);
           return {
             text: claim.text,
@@ -136,11 +199,32 @@ export function makeClaimCitationGateHook(): RegisteredHook<"beforeCommit"> {
           detail: `${missing.length} uncited claims`,
         });
 
+        if (shouldFailOpenLongSourcedDraft(assistantText, sources, coverage)) {
+          ctx.log(
+            "warn",
+            "[claim-citation-gate] long sourced draft has partial citation gaps; failing open",
+            {
+              missing: missing.length,
+              sources: sources.length,
+              claims: coverage.length,
+            },
+          );
+          return { action: "continue" };
+        }
+
         if (retryCount >= MAX_RETRIES) {
-          ctx.log("warn", "[claim-citation-gate] retry exhausted; failing open", {
+          ctx.log("warn", "[claim-citation-gate] retry exhausted; failing closed", {
             missing: missing.length,
           });
-          return { action: "continue" };
+          return {
+            action: "block",
+            reason: [
+              "[RULE:CLAIM_CITATION_REQUIRED]",
+              "Research claims still lack inspected-source citations after verifier retry.",
+              `Missing citation count: ${missing.length}.`,
+              "No answer should be committed until each concrete claim cites an inspected source id/URL, or unsupported claims are removed/downgraded as uncertain.",
+            ].join("\n"),
+          };
         }
 
         if (sources.length === 0) {
@@ -160,15 +244,26 @@ export function makeClaimCitationGateHook(): RegisteredHook<"beforeCommit"> {
           reason: [
             "[RETRY:CLAIM_CITATION]",
             "Your draft contains factual research claims without per-claim citations.",
+            ...renderSourceRepairContext(sources, missing),
             "Regenerate with each concrete claim citing an inspected source id like [src_1] or the inspected URL.",
-            "Unsupported claims must be removed or explicitly framed as uncertain.",
+            "Use only source ids from the inspected source list above; do not invent citations.",
+            "If a claim is not supported by these sources, remove it or mark it uncertain.",
           ].join("\n"),
         };
       } catch (err) {
-        ctx.log("warn", "[claim-citation-gate] failed; commit continues", {
-          error: err instanceof Error ? err.message : String(err),
+        const error = err instanceof Error ? err.message : String(err);
+        ctx.log("warn", "[claim-citation-gate] failed; failing closed", {
+          error,
         });
-        return { action: "continue" };
+        return {
+          action: "block",
+          reason: [
+            "[RULE:CLAIM_CITATION_GATE_ERROR]",
+            "Claim-citation verifier failed while checking citation coverage.",
+            `Verifier error: ${truncate(error, 240)}.`,
+            "No answer should be committed until the verifier can confirm citation coverage.",
+          ].join("\n"),
+        };
       }
     },
   };

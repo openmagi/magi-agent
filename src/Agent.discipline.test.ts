@@ -92,6 +92,15 @@ describe("Agent Discipline — Kevin A/A/A defaults", () => {
   });
 
   afterEach(async () => {
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      try {
+        await fs.rm(workspaceRoot, { recursive: true, force: true });
+        return;
+      } catch (err) {
+        if ((err as NodeJS.ErrnoException).code !== "ENOTEMPTY") throw err;
+        await new Promise((resolve) => setTimeout(resolve, 25 * (attempt + 1)));
+      }
+    }
     await fs.rm(workspaceRoot, { recursive: true, force: true });
   });
 
@@ -394,6 +403,64 @@ describe("Agent Discipline — Kevin A/A/A defaults", () => {
     } finally {
       // No start() so no stop() needed either — the ctor alone is
       // enough to validate the tool-resolve wire.
+    }
+  });
+
+  it("A4: Agent treats complex-coding as a coding hard-mode skill", async () => {
+    const agent = new Agent({
+      botId: "bot-disc-4b",
+      userId: "user-disc-4b",
+      workspaceRoot,
+      gatewayToken: "tok",
+      apiProxyUrl: "http://proxy",
+      chatProxyUrl: "http://chat",
+      redisUrl: "redis://r",
+      model: "claude-haiku",
+    });
+    agent.tools.register({
+      name: "complex-coding",
+      description: "Delegate complex coding work",
+      inputSchema: { type: "object" } as unknown,
+      permission: "execute",
+      kind: "skill",
+      async execute() {
+        return { status: "ok", durationMs: 0 } as const;
+      },
+    } as never);
+
+    await agent.start();
+    try {
+      const session = await agent.getOrCreateSession("s-complex-coding", {
+        type: "app",
+        channelId: "c1",
+      });
+      const ctx = {
+        ...makeHookCtx(),
+        sessionKey: session.meta.sessionKey,
+      };
+
+      await agent.hooks.runPre(
+        "beforeLLMCall",
+        {
+          messages: [
+            {
+              role: "user",
+              content:
+                "please implement a new function in src/foo.ts and add a failing test first",
+            },
+          ],
+          tools: [],
+          system: "",
+          iteration: 0,
+        },
+        ctx,
+      );
+
+      expect(session.meta.discipline!.lastClassifiedMode).toBe("coding");
+      expect(session.meta.discipline!.requireCommit).toBe("hard");
+      expect(session.meta.discipline!.tdd).toBe(true);
+    } finally {
+      await agent.stop();
     }
   });
 });

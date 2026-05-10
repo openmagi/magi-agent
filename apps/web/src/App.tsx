@@ -9,7 +9,11 @@ import {
 } from "react";
 import { ChatSidebar } from "@/components/chat/chat-sidebar";
 import { ChatMessages, type ChatMessagesHandle } from "@/components/chat/chat-messages";
-import { ChatInput, type ChatInputHandle } from "@/components/chat/chat-input";
+import {
+  ChatInput,
+  type ChatInputHandle,
+  type ChatInputSendOptions,
+} from "@/components/chat/chat-input";
 import { ChatModelPicker } from "@/components/chat/chat-model-picker";
 import { KbContextBar } from "@/components/chat/kb-context-bar";
 import { KbSidePanel } from "@/components/chat/kb-side-panel";
@@ -41,7 +45,11 @@ import type {
   ChatMessage,
   ControlEvent,
   ControlRequestRecord,
+  CitationGateStatus,
+  InspectedSource,
   KbDocReference,
+  MissionActivity,
+  PatchPreview,
   QueuedMessage,
   ReplyTo,
   SubagentActivity,
@@ -223,6 +231,10 @@ function asArray(value: unknown): JsonRecord[] {
     : [];
 }
 
+function asStringArray(value: unknown): string[] {
+  return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
+}
+
 function preview(value: unknown, max = 400): string | undefined {
   if (value === undefined || value === null) return undefined;
   const text = typeof value === "string" ? value : JSON.stringify(value);
@@ -345,6 +357,140 @@ function normalizeBrowserFrame(payload: JsonRecord): BrowserFrame | null {
     capturedAt: asNumber(payload.capturedAt, Date.now()),
     ...(typeof payload.url === "string" && payload.url ? { url: payload.url } : {}),
   };
+}
+
+function normalizePatchPreview(payload: JsonRecord): PatchPreview | null {
+  const files = asArray(payload.files)
+    .map((file) => {
+      const filePath = asString(file.path);
+      if (!filePath) return null;
+      const operation =
+        file.operation === "create" || file.operation === "delete" || file.operation === "update"
+          ? file.operation
+          : "update";
+      return {
+        path: filePath,
+        operation,
+        hunks: Math.max(0, Math.floor(asNumber(file.hunks, 0))),
+        addedLines: Math.max(0, Math.floor(asNumber(file.addedLines, 0))),
+        removedLines: Math.max(0, Math.floor(asNumber(file.removedLines, 0))),
+        ...(typeof file.oldSha256 === "string" ? { oldSha256: file.oldSha256 } : {}),
+        ...(typeof file.newSha256 === "string" ? { newSha256: file.newSha256 } : {}),
+      };
+    })
+    .filter((file): file is PatchPreview["files"][number] => file !== null);
+  const changedFiles = asStringArray(payload.changedFiles);
+  if (files.length === 0 && changedFiles.length === 0) return null;
+  return {
+    dryRun: payload.dryRun === true,
+    changedFiles: changedFiles.length > 0 ? changedFiles : files.map((file) => file.path),
+    createdFiles: asStringArray(payload.createdFiles),
+    deletedFiles: asStringArray(payload.deletedFiles),
+    files,
+  };
+}
+
+function sourceKind(value: unknown): InspectedSource["kind"] {
+  if (
+    value === "web_search" ||
+    value === "web_fetch" ||
+    value === "browser" ||
+    value === "kb" ||
+    value === "file" ||
+    value === "external_repo" ||
+    value === "external_doc" ||
+    value === "subagent_result"
+  ) {
+    return value;
+  }
+  return "file";
+}
+
+function normalizeInspectedSource(payload: JsonRecord): InspectedSource | null {
+  const sourceId = asString(payload.sourceId);
+  const uri = asString(payload.uri);
+  if (!sourceId || !uri) return null;
+  const trustTier =
+    payload.trustTier === "primary" ||
+    payload.trustTier === "official" ||
+    payload.trustTier === "secondary" ||
+    payload.trustTier === "unknown"
+      ? payload.trustTier
+      : undefined;
+  return {
+    sourceId,
+    kind: sourceKind(payload.kind),
+    uri,
+    inspectedAt: asNumber(payload.inspectedAt, Date.now()),
+    ...(typeof payload.turnId === "string" ? { turnId: payload.turnId } : {}),
+    ...(typeof payload.toolName === "string" ? { toolName: payload.toolName } : {}),
+    ...(typeof payload.toolUseId === "string" ? { toolUseId: payload.toolUseId } : {}),
+    ...(typeof payload.title === "string" ? { title: payload.title } : {}),
+    ...(typeof payload.contentHash === "string" ? { contentHash: payload.contentHash } : {}),
+    ...(typeof payload.contentType === "string" ? { contentType: payload.contentType } : {}),
+    ...(trustTier ? { trustTier } : {}),
+    ...(Array.isArray(payload.snippets) ? { snippets: asStringArray(payload.snippets).slice(0, 4) } : {}),
+  };
+}
+
+function appendInspectedSource(
+  current: InspectedSource[] | undefined,
+  source: InspectedSource,
+): InspectedSource[] {
+  const next = [...(current ?? []).filter((item) => item.sourceId !== source.sourceId), source];
+  return next.slice(-40);
+}
+
+function normalizeCitationGate(payload: JsonRecord): CitationGateStatus | null {
+  if (payload.ruleId !== "claim-citation-gate") return null;
+  const verdict =
+    payload.verdict === "ok" || payload.verdict === "violation" || payload.verdict === "pending"
+      ? payload.verdict
+      : "pending";
+  return {
+    ruleId: "claim-citation-gate",
+    verdict,
+    checkedAt: Date.now(),
+    ...(typeof payload.detail === "string" ? { detail: payload.detail } : {}),
+  };
+}
+
+function missionStatus(value: unknown): MissionActivity["status"] {
+  if (
+    value === "queued" ||
+    value === "running" ||
+    value === "blocked" ||
+    value === "waiting" ||
+    value === "completed" ||
+    value === "failed" ||
+    value === "cancelled" ||
+    value === "paused"
+  ) {
+    return value;
+  }
+  return "running";
+}
+
+function missionStatusFromEvent(eventType: string): MissionActivity["status"] {
+  const normalized = eventType.toLowerCase();
+  if (normalized.includes("complete") || normalized.includes("done")) return "completed";
+  if (normalized.includes("fail") || normalized.includes("error")) return "failed";
+  if (normalized.includes("cancel")) return "cancelled";
+  if (normalized.includes("block")) return "blocked";
+  if (normalized.includes("pause")) return "paused";
+  if (normalized.includes("wait")) return "waiting";
+  return "running";
+}
+
+function appendMissionActivity(
+  current: MissionActivity[] | undefined,
+  patch: MissionActivity,
+): MissionActivity[] {
+  const next = [...(current ?? [])];
+  const index = next.findIndex((item) => item.id === patch.id);
+  if (index >= 0) next[index] = { ...next[index], ...patch };
+  else next.push(patch);
+  return next.slice(-32);
 }
 
 function appendToolActivity(current: ToolActivity[] | undefined, patch: ToolActivity): ToolActivity[] {
@@ -1384,10 +1530,13 @@ export function App() {
           streaming: true,
           turnPhase: "pending",
           error: null,
+          currentGoal: typeof payload.goal === "string" ? payload.goal : null,
           activeTools: [],
           browserFrame: null,
           subagents: [],
           taskBoard: null,
+          inspectedSources: [],
+          citationGate: null,
           heartbeatElapsedMs: null,
         }, { botId: BOT_ID });
       }
@@ -1450,6 +1599,8 @@ export function App() {
       if (type === "tool_end") {
         const id = asString(payload.id);
         if (id) {
+          const current = useChatStore.getState().channelStates[channel];
+          const existing = current?.activeTools?.find((item) => item.id === id);
           updateActiveTools(channel, {
             id,
             label: asString(payload.name, asString(payload.label, id)),
@@ -1460,6 +1611,26 @@ export function App() {
             startedAt: Date.now(),
             outputPreview: asString(payload.output_preview),
             durationMs: asNumber(payload.durationMs),
+            ...(existing?.patchPreview ? { patchPreview: existing.patchPreview } : {}),
+          });
+        }
+      }
+      if (type === "patch_preview") {
+        const patchPreview = normalizePatchPreview(payload);
+        if (patchPreview) {
+          const current = useChatStore.getState().channelStates[channel];
+          const activeTools = current?.activeTools ?? [];
+          const toolUseId = asString(payload.toolUseId);
+          const patchTool = [...activeTools].reverse().find((item) =>
+            item.label.toLowerCase().replace(/[^a-z0-9]/g, "") === "patchapply"
+          );
+          const id = toolUseId || patchTool?.id || nowId("patch");
+          updateActiveTools(channel, {
+            id,
+            label: "PatchApply",
+            status: patchTool?.status ?? "running",
+            startedAt: Date.now(),
+            patchPreview,
           });
         }
       }
@@ -1473,6 +1644,57 @@ export function App() {
         store.setChannelState(channel, {
           taskBoard: { tasks: normalizeTaskBoard(payload), receivedAt: Date.now() },
         }, { botId: BOT_ID });
+      }
+      if (type === "source_inspected") {
+        const source = normalizeInspectedSource(asRecord(payload.source));
+        if (source) {
+          const current = useChatStore.getState().channelStates[channel];
+          store.setChannelState(channel, {
+            inspectedSources: appendInspectedSource(current?.inspectedSources, source),
+          }, { botId: BOT_ID });
+        }
+      }
+      if (type === "rule_check") {
+        const citationGate = normalizeCitationGate(payload);
+        if (citationGate) {
+          store.setChannelState(channel, { citationGate }, { botId: BOT_ID });
+        }
+      }
+      if (type === "mission_created") {
+        const mission = asRecord(payload.mission);
+        const id = asString(mission.id);
+        if (id) {
+          const current = useChatStore.getState().channelStates[channel];
+          const activity: MissionActivity = {
+            id,
+            title: asString(mission.title, "Mission"),
+            kind: asString(mission.kind, "manual"),
+            status: missionStatus(mission.status),
+            updatedAt: Date.now(),
+          };
+          store.setChannelState(channel, {
+            missions: appendMissionActivity(current?.missions, activity),
+            ...(activity.kind === "goal" ? { activeGoalMissionId: activity.id } : {}),
+          }, { botId: BOT_ID });
+        }
+      }
+      if (type === "mission_event") {
+        const missionId = asString(payload.missionId);
+        if (missionId) {
+          const current = useChatStore.getState().channelStates[channel];
+          const existing = current?.missions?.find((mission) => mission.id === missionId);
+          const eventType = asString(payload.eventType, "heartbeat");
+          store.setChannelState(channel, {
+            missions: appendMissionActivity(current?.missions, {
+              id: missionId,
+              title: existing?.title ?? "Mission",
+              kind: existing?.kind ?? "manual",
+              status: missionStatusFromEvent(eventType),
+              detail: asString(payload.message) || existing?.detail,
+              updatedAt: Date.now(),
+            }),
+          }, { botId: BOT_ID });
+        }
       }
       if (
         type === "spawn_started" ||
@@ -1611,10 +1833,12 @@ export function App() {
       explicitReply: ReplyTo | null,
       kbDocs: KbDocReference[],
       modelOverride?: string,
+      sendOptions?: ChatInputSendOptions,
     ) => {
       const channel = useChatStore.getState().activeChannel || DEFAULT_CHANNEL;
       const messageText = buildMessageContentWithKbContext(text, kbDocs);
       if (!messageText.trim()) return;
+      const goalMode = sendOptions?.goalMode === true;
       const userMsg: ChatMessage = {
         id: nowId("user"),
         role: "user",
@@ -1642,6 +1866,10 @@ export function App() {
         browserFrame: null,
         subagents: [],
         taskBoard: null,
+        inspectedSources: [],
+        citationGate: null,
+        currentGoal: goalMode ? text.trim() : null,
+        pendingGoalMissionTitle: goalMode ? text.trim() : null,
         responseLanguage: detectMessageResponseLanguage(messageText),
       }, { botId: BOT_ID });
 
@@ -1653,6 +1881,7 @@ export function App() {
           body: JSON.stringify({
             stream: true,
             ...(modelOverride && modelOverride !== "auto" ? { model: modelOverride } : {}),
+            ...(goalMode ? { goalMode: true } : {}),
             ...(explicitReply ? { replyTo: explicitReply } : {}),
             messages: [{ role: "user", content: messageText }],
           }),
@@ -1704,6 +1933,7 @@ export function App() {
           next.replyTo ?? null,
           next.kbDocs ?? [],
           next.modelOverride,
+          next.goalMode ? { goalMode: true } : undefined,
         );
       }, 0);
     },
@@ -1716,9 +1946,10 @@ export function App() {
   }, [activeChannel, channelState.streaming, drainQueue, queuedForChannel.length]);
 
   const handleSend = useCallback(
-    async (text: string, files?: File[]) => {
+    async (text: string, files?: File[], options?: ChatInputSendOptions) => {
       const channel = useChatStore.getState().activeChannel || DEFAULT_CHANNEL;
       const activeReply = replyingTo;
+      const goalMode = options?.goalMode === true;
       setReplyingTo(null);
       let uploadedRefs: KbDocReference[] = [];
       try {
@@ -1738,7 +1969,7 @@ export function App() {
           hasKbContext: messageKbDocs.length > 0,
           requestedMode: streamingComposerMode,
         });
-        if (sendMode === "inject") {
+        if (!goalMode && sendMode === "inject") {
           try {
             const injectedAfterChars =
               useChatStore.getState().channelStates[channel]?.streamingText?.length ?? 0;
@@ -1773,6 +2004,7 @@ export function App() {
           content: text,
           queuedAt: Date.now(),
           modelOverride: modelSelection,
+          ...(goalMode ? { goalMode: true } : {}),
           ...(activeReply ? { replyTo: activeReply } : {}),
           ...(messageKbDocs.length > 0 ? { kbDocs: messageKbDocs } : {}),
         };
@@ -1788,7 +2020,7 @@ export function App() {
         return true;
       }
 
-      void performSend(text, activeReply, messageKbDocs, modelSelection);
+      void performSend(text, activeReply, messageKbDocs, modelSelection, options);
       setSelectedKbDocs([]);
       return true;
     },

@@ -48,8 +48,28 @@ export interface ChatInputHandle {
   focus: () => void;
 }
 
+export interface ChatInputSendOptions {
+  goalMode?: boolean;
+}
+
+export function buildChatInputSendOptions(runUntilDone: boolean): ChatInputSendOptions | undefined {
+  return runUntilDone ? { goalMode: true } : undefined;
+}
+
+export function nextRunUntilDoneAfterSend(
+  current: boolean,
+  result: void | boolean,
+): boolean {
+  if (!current) return false;
+  return result === false;
+}
+
 interface ChatInputProps {
-  onSend: (text: string, files?: File[]) => void | boolean | Promise<void | boolean>;
+  onSend: (
+    text: string,
+    files?: File[],
+    options?: ChatInputSendOptions,
+  ) => void | boolean | Promise<void | boolean>;
   onReset?: () => void;
   disabled?: boolean;
   streaming?: boolean;
@@ -158,6 +178,7 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [slashIdx, setSlashIdx] = useState(0);
   const [kbIdx, setKbIdx] = useState(0);
+  const [runUntilDone, setRunUntilDone] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const slashRef = useRef<HTMLDivElement>(null);
@@ -377,6 +398,7 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
       const result = await onSend(
         trimmed,
         pendingFiles.length > 0 ? pendingFiles.map((p) => p.file) : undefined,
+        buildChatInputSendOptions(runUntilDone),
       );
       if (result === false) return;
       for (const p of pendingFiles) {
@@ -384,11 +406,12 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
       }
       setText("");
       setPendingFiles([]);
+      setRunUntilDone(nextRunUntilDoneAfterSend(runUntilDone, result));
       if (textareaRef.current) textareaRef.current.style.height = "auto";
     } finally {
       setIsSubmitting(false);
     }
-  }, [text, pendingFiles, onSend, onReset]);
+  }, [text, pendingFiles, onSend, onReset, runUntilDone]);
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -712,7 +735,10 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
               style={{ maxHeight: 160 }}
             />
           </div>
-          <div className="flex items-center gap-2">
+          <div
+            className="flex flex-wrap items-center gap-2"
+            data-chat-composer-controls="true"
+          >
             <button
               onClick={() => fileInputRef.current?.click()}
               disabled={disabled || queueBlocked || isSubmitting}
@@ -734,6 +760,38 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
                 e.target.value = "";
               }}
             />
+
+            <button
+              type="button"
+              onClick={() => setRunUntilDone((value) => !value)}
+              disabled={disabled || isSubmitting}
+              aria-pressed={runUntilDone}
+              data-chat-goal-toggle="true"
+              className={`flex h-10 shrink-0 items-center gap-2 rounded-2xl border px-3 text-xs font-medium transition-all duration-200 disabled:cursor-not-allowed disabled:opacity-30 ${
+                runUntilDone
+                  ? "border-primary/25 bg-primary/10 text-primary shadow-[0_1px_6px_rgba(124,58,237,0.10)]"
+                  : "border-black/[0.08] bg-black/[0.03] text-secondary/75 hover:bg-black/[0.05] hover:text-foreground"
+              }`}
+              title="Run the next message as a goal mission"
+            >
+              <span
+                className={`flex h-5 w-5 items-center justify-center rounded-full ${
+                  runUntilDone ? "bg-primary text-white" : "bg-black/[0.04] text-secondary/55"
+                }`}
+                aria-hidden="true"
+              >
+                <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+                  <circle cx="12" cy="12" r="6" />
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 3v3m0 12v3m9-9h-3M6 12H3" />
+                </svg>
+              </span>
+              <span className="whitespace-nowrap">Run until done</span>
+              {runUntilDone && (
+                <span className="rounded-md bg-white/70 px-1.5 py-0.5 text-[10px] font-semibold text-primary/80">
+                  1x
+                </span>
+              )}
+            </button>
 
             {composerAccessory && (
               <div className="flex min-w-0 flex-1 items-center justify-end" data-composer-accessory="bottom-row">

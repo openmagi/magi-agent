@@ -28,6 +28,7 @@ import type {
 import { Workspace } from "../storage/Workspace.js";
 import { ExecutionContractStore } from "../execution/ExecutionContract.js";
 import { HookRegistry } from "../hooks/HookRegistry.js";
+import { SourceLedgerStore } from "../research/SourceLedger.js";
 import {
   MAX_SPAWN_DEPTH,
   SPAWNABLE_MODELS,
@@ -472,6 +473,165 @@ describe("SpawnAgent — §7.12.d", () => {
     const out = result.output as SpawnAgentOutput;
     expect(out.finalText).toBe("done");
     expect(out.toolCallCount).toBe(1);
+  });
+
+  it("(c1) shares the parent source ledger with child research tools", async () => {
+    const ledger = new SourceLedgerStore({ now: () => 777 });
+    const sourceProbe: Tool<{ uri: string }, { sourceId?: string }> = {
+      name: "SourceProbe",
+      description: "records inspected source evidence",
+      inputSchema: { type: "object" },
+      permission: "net",
+      kind: "core",
+      async execute(input, ctx) {
+        const source = ctx.sourceLedger?.recordSource({
+          turnId: ctx.turnId,
+          toolName: "SourceProbe",
+          kind: "web_fetch",
+          uri: input.uri,
+          title: "Child Source",
+          snippets: ["child inspected source evidence"],
+        });
+        if (source) {
+          ctx.emitAgentEvent?.({ type: "source_inspected", source });
+        }
+        return {
+          status: "ok",
+          output: { sourceId: source?.sourceId },
+          durationMs: 1,
+        };
+      },
+    };
+    const script: MockScript = {
+      rounds: [
+        [
+          {
+            kind: "tool_use_start",
+            blockIndex: 0,
+            id: "toolu_source",
+            name: "SourceProbe",
+          },
+          {
+            kind: "tool_use_input_delta",
+            blockIndex: 0,
+            partial: JSON.stringify({ uri: "https://example.com/child-source" }),
+          },
+          {
+            kind: "message_end",
+            stopReason: "tool_use",
+            usage: { inputTokens: 1, outputTokens: 1 },
+          },
+        ],
+        [
+          { kind: "text_delta", blockIndex: 0, delta: "child found evidence [src_1]" },
+          {
+            kind: "message_end",
+            stopReason: "end_turn",
+            usage: { inputTokens: 1, outputTokens: 1 },
+          },
+        ],
+      ],
+    };
+    const { agent } = fakeAgent([sourceProbe], script) as unknown as {
+      agent: Parameters<typeof makeSpawnAgentTool>[0];
+    };
+    const tool = makeSpawnAgentTool(agent);
+    const { ctx, events } = makeParentCtx({ sourceLedger: ledger });
+
+    const result = await tool.execute(
+      {
+        persona: "research",
+        prompt: "Inspect child source evidence.",
+        allowed_tools: ["SourceProbe"],
+        deliver: "return",
+      },
+      ctx,
+    );
+
+    expect(result.status).toBe("ok");
+    expect(ledger.sourcesForTurn("turn_0")).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          turnId: expect.stringMatching(/^turn_0::spawn::/),
+          uri: "https://example.com/child-source",
+          sourceId: "src_1",
+        }),
+      ]),
+    );
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        type: "source_inspected",
+        source: expect.objectContaining({
+          sourceId: "src_1",
+          uri: "https://example.com/child-source",
+        }),
+      }),
+    );
+  });
+
+  it("(c2) records successful returned child results as subagent source evidence", async () => {
+    const ledger = new SourceLedgerStore({ now: () => 888 });
+    const script: MockScript = {
+      rounds: [
+        [
+          {
+            kind: "text_delta",
+            blockIndex: 0,
+            delta: "Child inspected two independent sources and found a supported conclusion.",
+          },
+          {
+            kind: "message_end",
+            stopReason: "end_turn",
+            usage: { inputTokens: 1, outputTokens: 1 },
+          },
+        ],
+      ],
+    };
+    const { agent } = fakeAgent([], script) as unknown as {
+      agent: Parameters<typeof makeSpawnAgentTool>[0];
+    };
+    const tool = makeSpawnAgentTool(agent);
+    const { ctx, events } = makeParentCtx({ sourceLedger: ledger });
+
+    const result = await tool.execute(
+      {
+        persona: "research",
+        prompt: "Research one independent slice.",
+        deliver: "return",
+        completion_contract: { required_evidence: "text" },
+      },
+      ctx,
+    );
+
+    expect(result.status).toBe("ok");
+    expect(ledger.sourcesForTurn("turn_0")).toEqual([
+      expect.objectContaining({
+        turnId: expect.stringMatching(/^turn_0::spawn::/),
+        toolName: "SpawnAgent",
+        kind: "subagent_result",
+        uri: expect.stringMatching(/^spawn:\/\//),
+        title: "research subagent result",
+        snippets: [
+          "Child inspected two independent sources and found a supported conclusion.",
+        ],
+        metadata: expect.objectContaining({
+          taskId: expect.any(String),
+          persona: "research",
+          deliver: "return",
+          toolCallCount: 0,
+          attempts: 1,
+        }),
+      }),
+    ]);
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        type: "source_inspected",
+        source: expect.objectContaining({
+          kind: "subagent_result",
+          toolName: "SpawnAgent",
+        }),
+      }),
+    );
   });
 
   it("(c1a) child LLM calls run the same beforeLLMCall hook plane with execution contract context", async () => {

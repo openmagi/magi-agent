@@ -102,7 +102,16 @@ function safeSourceRecord(value: unknown): Record<string, unknown> | null {
     sourceId,
     kind: oneOf(
       value.kind,
-      ["web_search", "web_fetch", "browser", "kb", "file", "external_repo"] as const,
+      [
+        "web_search",
+        "web_fetch",
+        "browser",
+        "kb",
+        "file",
+        "external_repo",
+        "external_doc",
+        "subagent_result",
+      ] as const,
       "web_fetch",
     ),
     uri,
