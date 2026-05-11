@@ -105,6 +105,78 @@ describe("SpawnWorktreeApply", () => {
     }
   });
 
+  it("can adopt a child worktree commit through cherry-pick and clean up the child", async () => {
+    const root = await initRepo();
+    try {
+      const prepared = await prepareGitWorktreeSpawnDir(root, "spawn_cherry_pick");
+      await writeChildChanges(prepared.worktreeDir);
+
+      const tool = makeSpawnWorktreeApplyTool(root);
+      const result = await tool.execute(
+        { action: "cherry_pick", spawnDir: ".spawn/spawn_cherry_pick", cleanup: true },
+        makeCtx(root),
+      );
+
+      expect(result.status).toBe("ok");
+      const output = result.output as SpawnWorktreeApplyOutput;
+      expect(output.action).toBe("cherry_pick");
+      expect(output.applied).toBe(true);
+      expect(output.cleanedUp).toBe(true);
+      expect(output.mergeStrategy).toBe("cherry_pick");
+      expect(output.adoptedCommit).toMatch(/^[a-f0-9]{40}$/);
+      await expect(fs.readFile(path.join(root, "src/existing.ts"), "utf8")).resolves.toBe(
+        "export const value = 2;\n",
+      );
+      await expect(fs.readFile(path.join(root, "src/new.ts"), "utf8")).resolves.toBe(
+        "export const created = true;\n",
+      );
+      await expect(fs.access(path.join(root, "README.md"))).rejects.toBeDefined();
+      await expect(fs.access(prepared.spawnDir)).rejects.toBeDefined();
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("returns structured output when cherry-pick adoption conflicts", async () => {
+    const root = await initRepo();
+    try {
+      const prepared = await prepareGitWorktreeSpawnDir(root, "spawn_cherry_conflict");
+      await fs.writeFile(
+        path.join(prepared.worktreeDir, "src/existing.ts"),
+        "export const value = 2;\n",
+        "utf8",
+      );
+      await fs.writeFile(path.join(root, "src/existing.ts"), "export const value = 99;\n", "utf8");
+      await execFileAsync("git", ["add", "src/existing.ts"], { cwd: root });
+      await execFileAsync("git", ["commit", "-m", "parent update", "-q"], { cwd: root });
+
+      const tool = makeSpawnWorktreeApplyTool(root);
+      const result = await tool.execute(
+        { action: "cherry_pick", spawnDir: ".spawn/spawn_cherry_conflict", cleanup: true },
+        makeCtx(root),
+      );
+
+      expect(result.status).toBe("error");
+      expect(result.errorCode).toBe("cherry_pick_conflict");
+      expect(result.output).toMatchObject({
+        action: "cherry_pick",
+        applied: false,
+        cleanedUp: false,
+        mergeStrategy: "cherry_pick",
+        conflictedFiles: ["src/existing.ts"],
+      });
+      expect((result.output as SpawnWorktreeApplyOutput | undefined)?.adoptedCommit).toMatch(
+        /^[a-f0-9]{40}$/,
+      );
+      await expect(fs.access(prepared.spawnDir)).resolves.toBeUndefined();
+      await expect(fs.readFile(path.join(root, "src/existing.ts"), "utf8")).resolves.toBe(
+        "export const value = 99;\n",
+      );
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  });
+
   it("refuses to apply when the parent has dirty changes to the same files", async () => {
     const root = await initRepo();
     try {
@@ -121,6 +193,14 @@ describe("SpawnWorktreeApply", () => {
       expect(result.status).toBe("error");
       expect(result.errorCode).toBe("parent_dirty_conflict");
       expect(result.errorMessage).toContain("src/existing.ts");
+      expect(result.output).toMatchObject({
+        action: "apply",
+        applied: false,
+        cleanedUp: false,
+        mergeStrategy: "copy",
+        conflictedFiles: ["src/existing.ts"],
+        changedFiles: ["README.md", "src/existing.ts", "src/new.ts"],
+      });
       await expect(fs.readFile(path.join(root, "src/existing.ts"), "utf8")).resolves.toBe(
         "export const value = 99;\n",
       );
@@ -152,6 +232,62 @@ describe("SpawnWorktreeApply", () => {
       );
       await expect(fs.readFile(path.join(root, "README.md"), "utf8")).resolves.toBe("# repo\n");
       await expect(fs.access(path.join(root, "src/new.ts"))).rejects.toBeDefined();
+      await expect(fs.access(prepared.spawnDir)).rejects.toBeDefined();
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("reports a no-op copy apply as unapplied while still honoring cleanup", async () => {
+    const root = await initRepo();
+    try {
+      const prepared = await prepareGitWorktreeSpawnDir(root, "spawn_noop_apply");
+
+      const tool = makeSpawnWorktreeApplyTool(root);
+      const result = await tool.execute(
+        { action: "apply", spawnDir: ".spawn/spawn_noop_apply", cleanup: true },
+        makeCtx(root),
+      );
+
+      expect(result.status).toBe("ok");
+      expect(result.output).toMatchObject({
+        action: "apply",
+        applied: false,
+        cleanedUp: true,
+        mergeStrategy: "copy",
+        changedFiles: [],
+      });
+      await expect(fs.readFile(path.join(root, "src/existing.ts"), "utf8")).resolves.toBe(
+        "export const value = 1;\n",
+      );
+      await expect(fs.access(prepared.spawnDir)).rejects.toBeDefined();
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("honors cleanup for no-op cherry-pick adoption", async () => {
+    const root = await initRepo();
+    try {
+      const prepared = await prepareGitWorktreeSpawnDir(root, "spawn_noop_cherry_pick");
+
+      const tool = makeSpawnWorktreeApplyTool(root);
+      const result = await tool.execute(
+        { action: "cherry_pick", spawnDir: ".spawn/spawn_noop_cherry_pick", cleanup: true },
+        makeCtx(root),
+      );
+
+      expect(result.status).toBe("ok");
+      expect(result.output).toMatchObject({
+        action: "cherry_pick",
+        applied: false,
+        cleanedUp: true,
+        mergeStrategy: "cherry_pick",
+        changedFiles: [],
+      });
+      await expect(fs.readFile(path.join(root, "src/existing.ts"), "utf8")).resolves.toBe(
+        "export const value = 1;\n",
+      );
       await expect(fs.access(prepared.spawnDir)).rejects.toBeDefined();
     } finally {
       await fs.rm(root, { recursive: true, force: true });

@@ -44,7 +44,8 @@ function parsePermissionMode(raw: string | undefined): PermissionMode | undefine
     raw === "default" ||
     raw === "plan" ||
     raw === "auto" ||
-    raw === "bypass"
+    raw === "bypass" ||
+    raw === "workspace-bypass"
   ) {
     return raw;
   }
@@ -266,7 +267,7 @@ export function loadRuntimeEnv(): RuntimeEnv {
     redisUrl: optionalEnv("CORE_AGENT_REDIS_URL"),
     model,
     defaultPermissionMode:
-      parsePermissionMode(optionalEnv("CORE_AGENT_PERMISSION_MODE")) ?? "bypass",
+      parsePermissionMode(optionalEnv("CORE_AGENT_PERMISSION_MODE")) ?? "workspace-bypass",
     routingMode,
     routingProfileId: optionalEnv("CORE_AGENT_ROUTING_PROFILE") ?? "standard",
     directProviders: routingMode === "direct" ? directProvidersFromEnv() : undefined,

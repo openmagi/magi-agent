@@ -151,6 +151,7 @@ function successfulFileDeliver(
     marker?: string;
     externalId?: string;
     providerMessageId?: string;
+    deliveryAck?: string;
   }>,
 ): TranscriptEntry[] {
   return [
@@ -183,6 +184,16 @@ function successfulFileDeliver(
 }
 
 function successfulFileSend(): TranscriptEntry[] {
+  return fileSendResult({
+    filename: "report.md",
+    channel: { type: "telegram", channelId: "1234" },
+    mode: "document",
+    providerMessageId: "987",
+    deliveryAck: "provider_message_receipt",
+  });
+}
+
+function fileSendResult(output: Record<string, unknown>): TranscriptEntry[] {
   return [
     {
       kind: "tool_call",
@@ -200,12 +211,7 @@ function successfulFileSend(): TranscriptEntry[] {
       turnId: "turn-test",
       toolUseId: "tool-send",
       status: "ok",
-      output: JSON.stringify({
-        filename: "report.md",
-        channel: { type: "telegram", channelId: "1234" },
-        mode: "document",
-        providerMessageId: "987",
-      }),
+      output: JSON.stringify(output),
     },
   ];
 }
@@ -232,6 +238,7 @@ function successfulWebFileSend(marker: string): TranscriptEntry[] {
         id: "00000000-0000-4000-8000-000000000000",
         filename: "report.md",
         marker,
+        deliveryAck: "attachment_marker",
       }),
     },
   ];
@@ -386,23 +393,38 @@ describe("artifactDeliveryGate helpers", () => {
     ]);
   });
 
-  it("accepts chat attachment markers as delivery evidence", () => {
+  it("does not accept bare chat attachment markers without same-turn delivery evidence", () => {
     expect(
       hasArtifactDeliveryEvidence(
         "생성한 파일입니다. [attachment:00000000-0000-4000-8000-000000000000:debate-verdict.md]",
         [],
         "turn-test",
       ),
-    ).toBe(true);
+    ).toBe(false);
   });
 
   it("accepts native FileDeliver KB results as KB write evidence", () => {
     expect(
       hasKbWriteEvidence(
-        successfulFileDeliver([{ target: "kb", externalId: "artifacts/report.md" }]),
+        successfulFileDeliver([
+          {
+            target: "kb",
+            externalId: "artifacts/report.md",
+            deliveryAck: "kb_write_receipt",
+          },
+        ]),
         "turn-test",
       ),
     ).toBe(true);
+  });
+
+  it("does not accept native FileDeliver KB results without a KB write receipt", () => {
+    expect(
+      hasKbWriteEvidence(
+        successfulFileDeliver([{ target: "kb", externalId: "artifacts/report.md" }]),
+        "turn-test",
+      ),
+    ).toBe(false);
   });
 });
 
@@ -440,13 +462,24 @@ describe("artifactDeliveryGate hook", () => {
   });
 
   it("continues when a generated file is attached in the final answer", async () => {
+    const marker = "[attachment:00000000-0000-4000-8000-000000000000:debate-verdict.md]";
     const hook = makeArtifactDeliveryGateHook();
     const result = await hook.handler(
       args(
-        "파일을 생성하고 첨부했습니다.\n[attachment:00000000-0000-4000-8000-000000000000:debate-verdict.md]",
+        `파일을 생성하고 첨부했습니다.\n${marker}`,
         "파일 여기 채팅에도 첨부해줘",
       ),
-      makeCtx(successfulFileWrite("workspace/duol-debate/debate-verdict.md"), {
+      makeCtx([
+        ...successfulFileWrite("workspace/duol-debate/debate-verdict.md"),
+        ...successfulFileDeliver([
+          {
+            target: "chat",
+            externalId: "00000000-0000-4000-8000-000000000000",
+            marker,
+            deliveryAck: "attachment_marker",
+          },
+        ]),
+      ], {
         wantsChat: true,
         wantsFile: true,
         claimsChat: true,
@@ -511,7 +544,13 @@ describe("artifactDeliveryGate hook", () => {
   it("allows KB save requests with same-turn native FileDeliver KB evidence", async () => {
     const transcript: TranscriptEntry[] = [
       ...successfulDocumentWrite("report.md"),
-      ...successfulFileDeliver([{ target: "kb", externalId: "artifacts/report.md" }]),
+      ...successfulFileDeliver([
+        {
+          target: "kb",
+          externalId: "artifacts/report.md",
+          deliveryAck: "kb_write_receipt",
+        },
+      ]),
     ];
     const hook = makeArtifactDeliveryGateHook();
     const result = await hook.handler(
@@ -533,6 +572,7 @@ describe("artifactDeliveryGate hook", () => {
           target: "chat",
           externalId: "00000000-0000-4000-8000-000000000000",
           marker: "[attachment:00000000-0000-4000-8000-000000000000:report.md]",
+          deliveryAck: "attachment_marker",
         },
       ]),
     ];
@@ -551,13 +591,45 @@ describe("artifactDeliveryGate hook", () => {
     }
   });
 
+  it("blocks missing web/app FileDeliver markers even when classifier intent is uncertain", async () => {
+    const marker = "[attachment:00000000-0000-4000-8000-000000000000:report.md]";
+    const transcript: TranscriptEntry[] = [
+      ...successfulFileDeliver([
+        {
+          target: "chat",
+          externalId: "00000000-0000-4000-8000-000000000000",
+          marker,
+          deliveryAck: "attachment_marker",
+        },
+      ]),
+    ];
+    const hook = makeArtifactDeliveryGateHook();
+    const result = await hook.handler(
+      args('6건 모두 `status: "sent"` 응답 받았습니다.', "첨부 다시 ㄱ"),
+      makeCtx(transcript),
+    );
+    expect(result?.action).toBe("block");
+    if (result?.action === "block") {
+      expect(result.reason).toContain(marker);
+    }
+  });
+
   it("continues when native FileDeliver returned marker is included in the final answer", async () => {
     const marker = "[attachment:00000000-0000-4000-8000-000000000000:report.md]";
     const transcript: TranscriptEntry[] = [
       ...successfulDocumentWrite("report.md"),
       ...successfulFileDeliver([
-        { target: "chat", externalId: "00000000-0000-4000-8000-000000000000", marker },
-        { target: "kb", externalId: "artifacts/report.md" },
+        {
+          target: "chat",
+          externalId: "00000000-0000-4000-8000-000000000000",
+          marker,
+          deliveryAck: "attachment_marker",
+        },
+        {
+          target: "kb",
+          externalId: "artifacts/report.md",
+          deliveryAck: "kb_write_receipt",
+        },
       ]),
     ];
     const hook = makeArtifactDeliveryGateHook();
@@ -579,7 +651,12 @@ describe("artifactDeliveryGate hook", () => {
     const transcript: TranscriptEntry[] = [
       ...successfulDocumentWrite("report.md"),
       ...successfulFileDeliver([
-        { target: "chat", externalId: "telegram:1234:987", providerMessageId: "987" },
+        {
+          target: "chat",
+          externalId: "telegram:1234:987",
+          providerMessageId: "987",
+          deliveryAck: "provider_message_receipt",
+        },
       ]),
     ];
     const hook = makeArtifactDeliveryGateHook();
@@ -618,11 +695,43 @@ describe("artifactDeliveryGate hook", () => {
     }
   });
 
+  it("blocks direct Telegram FileDeliver evidence without explicit provider ACK", async () => {
+    const transcript: TranscriptEntry[] = [
+      ...successfulDocumentWrite("report.md"),
+      ...successfulFileDeliver([
+        {
+          target: "chat",
+          externalId: "telegram:1234:987",
+          providerMessageId: "987",
+        },
+      ]),
+    ];
+    const hook = makeArtifactDeliveryGateHook();
+    const result = await hook.handler(
+      args("파일을 텔레그램 채팅에 전달했습니다.", "파일 여기 채팅에도 첨부해줘"),
+      makeCtx(transcript, {
+        wantsChat: true,
+        wantsFile: true,
+        claimsChat: true,
+        claimsFileCreated: true,
+      }),
+    );
+    expect(result?.action).toBe("block");
+    if (result?.action === "block") {
+      expect(result.reason).toContain("provider message receipt");
+    }
+  });
+
   it("blocks final answers that ask the user to confirm delivery after claiming delivery", async () => {
     const transcript: TranscriptEntry[] = [
       ...successfulDocumentWrite("report.md"),
       ...successfulFileDeliver([
-        { target: "chat", externalId: "telegram:1234:987", providerMessageId: "987" },
+        {
+          target: "chat",
+          externalId: "telegram:1234:987",
+          providerMessageId: "987",
+          deliveryAck: "provider_message_receipt",
+        },
       ]),
     ];
     const hook = makeArtifactDeliveryGateHook();
@@ -669,6 +778,27 @@ describe("artifactDeliveryGate hook", () => {
       }),
     );
     expect(result).toEqual({ action: "continue" });
+  });
+
+  it("blocks direct native FileSend evidence without explicit provider ACK", async () => {
+    const hook = makeArtifactDeliveryGateHook();
+    const result = await hook.handler(
+      args("요청하신 report.md 파일을 전달했습니다.", "report.md 파일 보내줘"),
+      makeCtx(fileSendResult({
+        filename: "report.md",
+        channel: { type: "telegram", channelId: "1234" },
+        mode: "document",
+        providerMessageId: "987",
+      }), {
+        wantsChat: true,
+        wantsFile: true,
+        claimsChat: true,
+      }),
+    );
+    expect(result?.action).toBe("block");
+    if (result?.action === "block") {
+      expect(result.reason).toContain("provider message receipt");
+    }
   });
 
   it("blocks web FileSend delivery claims unless the returned attachment marker is in the final answer", async () => {

@@ -24,7 +24,11 @@ import type { LLMContentBlock, LLMMessage } from "../transport/LLMClient.js";
 import { renderIdentitySystem } from "../storage/Workspace.js";
 import { getCapability } from "../llm/modelCapabilities.js";
 import type { RouteDecision } from "../routing/types.js";
-import { OUTPUT_RULES_BLOCK } from "../prompt/RuntimePromptBlocks.js";
+import {
+  buildRuntimeTemporalContext,
+  OUTPUT_RULES_BLOCK,
+} from "../prompt/RuntimePromptBlocks.js";
+import { normalizeMemoryMode } from "../util/memoryMode.js";
 
 /**
  * Fallback soft cap on transcript tokens before `maybeCompact` is
@@ -33,6 +37,24 @@ import { OUTPUT_RULES_BLOCK } from "../prompt/RuntimePromptBlocks.js";
  * only used when the model id is not in the registry.
  */
 export const TOKEN_LIMIT_FOR_COMPACTION = 150_000;
+
+const INCOGNITO_MEMORY_MODE_BLOCK = [
+  '<memory_mode hidden="true">',
+  "memory_mode: incognito",
+  "This channel keeps chat history, but long-term memory is disabled.",
+  "Do not read, search, summarize, or write long-term memory files such as memory/*, MEMORY.md, SCRATCHPAD.md, WORKING.md, or TASK-QUEUE.md.",
+  "Do not ask another agent or tool to persist this channel's conversation into long-term memory.",
+  "</memory_mode>",
+].join("\n");
+
+const READ_ONLY_MEMORY_MODE_BLOCK = [
+  '<memory_mode hidden="true">',
+  "memory_mode: read_only",
+  "Existing long-term memory may be read for context.",
+  "Do not write, summarize, checkpoint, or persist this channel's conversation into long-term memory files such as memory/*, MEMORY.md, SCRATCHPAD.md, WORKING.md, or TASK-QUEUE.md.",
+  "Do not ask another agent or tool to persist this channel's conversation into long-term memory.",
+  "</memory_mode>",
+].join("\n");
 
 /**
  * Max preview length for the `[Reply to …]` preamble (chars, not
@@ -50,6 +72,8 @@ export interface RuntimeModelIdentityContext {
 
 const RUNTIME_MODEL_IDENTITY_OPEN = "<runtime_model_identity hidden=\"true\">";
 const RUNTIME_MODEL_IDENTITY_CLOSE = "</runtime_model_identity>";
+const RUNTIME_TEMPORAL_CONTEXT_PATTERN =
+  /<runtime_temporal_context hidden="true">[\s\S]*?<\/runtime_temporal_context>/;
 
 /**
  * Format a `ReplyToRef` into a single-line preamble. The line sits
@@ -301,7 +325,8 @@ export async function buildSystemPrompt(
 ): Promise<string> {
   const identity = await session.agent.workspace.loadIdentity();
   const rendered = renderIdentitySystem(identity);
-  const stamp = new Date().toISOString();
+  const now = new Date();
+  const stamp = now.toISOString();
   // P3 — `[Channel: <kind>]` hint so the LLM can gate output channel
   // (Telegram file dispatch vs web/app delivery) on the session's
   // origin. Defaults to `web` for sessions without a populated channel
@@ -320,6 +345,7 @@ export async function buildSystemPrompt(
     `[Time: ${stamp}]`,
     `[Channel: ${channelType}]`,
   ].join("\n");
+  const temporalContext = buildRuntimeTemporalContext(now);
   const systemPromptAddendum =
     typeof userMessage?.metadata?.systemPromptAddendum === "string" &&
     userMessage.metadata.systemPromptAddendum.trim().length > 0
@@ -331,10 +357,18 @@ export async function buildSystemPrompt(
   // sees a thin response while the detailed analysis lives in thinking
   // (which is ephemeral and not committed to transcript).
   const thinkingBoundary = `\n${OUTPUT_RULES_BLOCK}`;
-  const base = rendered ? `${sessionHeader}\n\n${rendered}` : sessionHeader;
+  const promptPrefix = `${sessionHeader}\n\n${temporalContext}`;
+  const base = rendered ? `${promptPrefix}\n\n${rendered}` : promptPrefix;
+  const memoryMode = normalizeMemoryMode(session.meta.channel?.memoryMode);
+  const memoryModeBlock =
+    memoryMode === "incognito"
+      ? `\n\n${INCOGNITO_MEMORY_MODE_BLOCK}`
+      : memoryMode === "read_only"
+        ? `\n\n${READ_ONLY_MEMORY_MODE_BLOCK}`
+        : "";
   const withAddendum = systemPromptAddendum
-    ? `${base}\n\n${systemPromptAddendum}`
-    : base;
+    ? `${base}${memoryModeBlock}\n\n${systemPromptAddendum}`
+    : `${base}${memoryModeBlock}`;
   return `${withAddendum}\n${thinkingBoundary}`;
 }
 
@@ -342,9 +376,16 @@ export function refreshRuntimeTimeHeader(
   systemPrompt: string,
   now = new Date(),
 ): string {
-  return systemPrompt.replace(
+  const refreshedTime = systemPrompt.replace(
     /(^|\n)\[Time: [^\]\n]*\]/,
     `$1[Time: ${now.toISOString()}]`,
+  );
+  if (!RUNTIME_TEMPORAL_CONTEXT_PATTERN.test(refreshedTime)) {
+    return refreshedTime;
+  }
+  return refreshedTime.replace(
+    RUNTIME_TEMPORAL_CONTEXT_PATTERN,
+    buildRuntimeTemporalContext(now),
   );
 }
 

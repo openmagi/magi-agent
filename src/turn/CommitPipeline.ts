@@ -76,6 +76,23 @@ export type CommitResult =
       stopReason?: TurnStopReason;
     };
 
+type RuntimeTraceInput = {
+  phase:
+    | "verifier_blocked"
+    | "retry_scheduled"
+    | "retry_aborted"
+    | "terminal_abort";
+  severity: "info" | "warning" | "error";
+  title: string;
+  detail?: string;
+  reasonCode?: string;
+  ruleId?: string;
+  attempt?: number;
+  maxAttempts?: number;
+  retryable?: boolean;
+  requiredAction?: string;
+};
+
 /**
  * Commit path: beforeCommit → assistant_text append → turn_committed
  * append → phase=committed → turn_end SSE → observer hooks.
@@ -96,6 +113,14 @@ export async function commit(ctx: CommitPipelineContext): Promise<CommitResult> 
     finalText,
   );
   if (planVerificationBlock) {
+    await emitRuntimeTrace(ctx, {
+      phase: "verifier_blocked",
+      severity: "warning",
+      title: "Plan verification is still pending",
+      detail: planVerificationBlock,
+      retryable: true,
+      requiredAction: "Run verification or explicitly report the result as partial.",
+    });
     return {
       status: "blocked",
       reason: planVerificationBlock,
@@ -106,6 +131,14 @@ export async function commit(ctx: CommitPipelineContext): Promise<CommitResult> 
 
   const structuredOutputBlock = await structuredOutputBlockReason(ctx, finalText);
   if (structuredOutputBlock) {
+    await emitRuntimeTrace(ctx, {
+      phase: "verifier_blocked",
+      severity: structuredOutputBlock.retryable ? "warning" : "error",
+      title: "Structured output verifier blocked completion",
+      detail: structuredOutputBlock.reason,
+      retryable: structuredOutputBlock.retryable,
+      requiredAction: "Produce output that satisfies the required schema.",
+    });
     return {
       status: "blocked",
       reason: structuredOutputBlock.reason,
@@ -122,6 +155,9 @@ export async function commit(ctx: CommitPipelineContext): Promise<CommitResult> 
   const toolCallCount = ctx.emittedAssistantBlocks.filter(
     (b) => b.type === "tool_use",
   ).length;
+  const toolNames = ctx.emittedAssistantBlocks
+    .filter((b): b is Extract<LLMContentBlock, { type: "tool_use" }> => b.type === "tool_use")
+    .map((b) => b.name);
   const filesChanged = collectFilesChanged(ctx.emittedAssistantBlocks);
   const toolReadHappened = ctx.emittedAssistantBlocks.some(
     (b) =>
@@ -138,17 +174,28 @@ export async function commit(ctx: CommitPipelineContext): Promise<CommitResult> 
       toolReadHappened,
       userMessage: ctx.userMessage.text,
       retryCount: ctx.commitRetryCount,
+      toolNames,
       filesChanged,
     },
-    ctx.buildHookContext("beforeCommit"),
+    await buildBeforeCommitHookContext(ctx),
   );
   if (preCommit.action === "block") {
     const reason = preCommit.reason ?? "beforeCommit blocked";
+    const retryable = isBeforeCommitBlockRetryable(reason);
+    await emitRuntimeTrace(ctx, {
+      phase: "verifier_blocked",
+      severity: retryable ? "warning" : "error",
+      title: "Runtime verifier blocked completion",
+      detail: reason,
+      reasonCode: reasonCodeFromReason(reason),
+      retryable,
+      requiredAction: requiredActionFromReason(reason),
+    });
     return {
       status: "blocked",
       reason,
       finalText,
-      retryable: isBeforeCommitBlockRetryable(reason),
+      retryable,
     };
   }
 
@@ -201,9 +248,6 @@ export async function commit(ctx: CommitPipelineContext): Promise<CommitResult> 
   // ── onTaskCheckpoint (hipocampus feed) ─────────────────────
   // Observer only — never blocks. Built-in hipocampusCheckpoint and
   // any user-authored memory hook consume this.
-  const toolNames = ctx.emittedAssistantBlocks
-    .filter((b): b is Extract<LLMContentBlock, { type: "tool_use" }> => b.type === "tool_use")
-    .map((b) => b.name);
   void ctx.session.agent.hooks.runPost(
     "onTaskCheckpoint",
     {
@@ -224,9 +268,26 @@ export async function commit(ctx: CommitPipelineContext): Promise<CommitResult> 
 export function isBeforeCommitBlockRetryable(reason: string): boolean {
   const normalized = reason.trim();
   if (/^\[RULE:SEALED_FILES\]/u.test(normalized)) return false;
+  if (/^\[RULE:MEMORY_MUTATION_TOOL_REQUIRED\]/u.test(normalized)) return false;
+  if (/^\[RULE:CLAIM_CITATION_REQUIRED\]/u.test(normalized)) return false;
+  if (/^\[RULE:CLAIM_CITATION_GATE_ERROR\]/u.test(normalized)) return false;
   if (/^hook:[^\s]+ threw:/iu.test(normalized)) return false;
   if (/^hook:[^\s]+ .*?(?:timeout|timed out)/iu.test(normalized)) return false;
   return true;
+}
+
+async function buildBeforeCommitHookContext(
+  ctx: CommitPipelineContext,
+): Promise<HookContext> {
+  const hookContext = ctx.buildHookContext("beforeCommit");
+  try {
+    return {
+      ...hookContext,
+      transcript: await ctx.session.transcript.readAll(),
+    };
+  } catch {
+    return hookContext;
+  }
 }
 
 async function recordExecutionContractEvidence(
@@ -412,6 +473,14 @@ export async function abort(
     /* swallow */
   }
   await appendStopReason(ctx, stopReason);
+  await emitRuntimeTrace(ctx, {
+    phase: "terminal_abort",
+    severity: "error",
+    title: "Turn aborted before completion",
+    detail: reason,
+    reasonCode: reasonCodeFromReason(reason),
+    retryable: false,
+  });
   ctx.sse.agent({
     type: "turn_end",
     turnId: ctx.turnId,
@@ -464,6 +533,69 @@ function optionalControlEvents(session: Session): {
   return ledger as {
     append: (event: Parameters<Session["controlEvents"]["append"]>[0]) => Promise<unknown>;
   };
+}
+
+export async function emitRuntimeTrace(
+  ctx: CommitPipelineContext,
+  input: RuntimeTraceInput,
+): Promise<void> {
+  const event = {
+    type: "runtime_trace" as const,
+    turnId: ctx.turnId,
+    phase: input.phase,
+    severity: input.severity,
+    title: input.title,
+    ...(input.detail ? { detail: publicTraceDetail(input.detail) } : {}),
+    ...(input.reasonCode ? { reasonCode: input.reasonCode } : {}),
+    ...(input.ruleId ? { ruleId: input.ruleId } : {}),
+    ...(typeof input.attempt === "number" ? { attempt: input.attempt } : {}),
+    ...(typeof input.maxAttempts === "number" ? { maxAttempts: input.maxAttempts } : {}),
+    ...(typeof input.retryable === "boolean" ? { retryable: input.retryable } : {}),
+    ...(input.requiredAction ? { requiredAction: input.requiredAction } : {}),
+  };
+  ctx.sse.agent(event);
+  try {
+    await optionalControlEvents(ctx.session)?.append(event);
+  } catch {
+    // Runtime trace observability must not prevent commit/abort progress.
+  }
+}
+
+export function reasonCodeFromReason(reason: string): string | undefined {
+  const match = reason.match(/\[(?:RETRY|RULE):([A-Z0-9_:-]+)\]/u);
+  return match?.[1];
+}
+
+function requiredActionFromReason(reason: string): string | undefined {
+  const code = reasonCodeFromReason(reason);
+  if (!code) return undefined;
+  if (code.includes("GOAL_PROGRESS_EXECUTE_NEXT")) {
+    return "Call the required tool or runtime action before answering.";
+  }
+  if (code.includes("INTERACTIVE_TOOL_REQUIRED")) {
+    return "Use Browser or SocialBrowser before answering.";
+  }
+  if (code.includes("CLAIM_CITATION") || code.includes("RESEARCH_PROOF")) {
+    return "Cite inspected sources or remove unsupported claims.";
+  }
+  if (code.includes("ARTIFACT") || code.includes("DELIVERY") || code.includes("FILE")) {
+    return "Deliver the requested artifact before claiming completion.";
+  }
+  return undefined;
+}
+
+function publicTraceDetail(value: string): string {
+  const redacted = value
+    .replace(/(Bearer\s+)[A-Za-z0-9._~+/=-]+/gi, "$1[redacted]")
+    .replace(/\bgh[pousr]_[A-Za-z0-9_]+\b/g, "[redacted]")
+    .replace(/\bsk-[A-Za-z0-9_-]+\b/g, "[redacted]")
+    .replace(
+      /((?:api[_-]?key|token|secret|password)["'\s:=]+)([^"'\s,}]+)/gi,
+      "$1[redacted]",
+    )
+    .replace(/\s+/g, " ")
+    .trim();
+  return redacted.length > 500 ? `${redacted.slice(0, 497)}...` : redacted;
 }
 
 /**

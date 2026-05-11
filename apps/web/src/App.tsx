@@ -46,6 +46,11 @@ import {
   resolveKnowledgeUploadMimeType,
 } from "@/lib/knowledge/upload-mime";
 import { localizeChannel } from "@/lib/chat/channel-i18n";
+import {
+  buildChatExportFilename,
+  buildChatExportMarkdown,
+  normalizeSelectedChatExportMessages,
+} from "@/lib/chat/export";
 import type {
   BrowserFrame,
   Channel,
@@ -60,6 +65,7 @@ import type {
   PatchPreview,
   QueuedMessage,
   ReplyTo,
+  RuntimeTrace,
   SubagentActivity,
   TaskBoardTask,
   ToolActivity,
@@ -94,6 +100,18 @@ const storage = {
   sessionKey: "magi.agent.app.sessionKey",
   modelOverride: "magi.agent.app.modelOverride",
 };
+
+function downloadMarkdownFile(filename: string, markdown: string): void {
+  const blob = new Blob([markdown], { type: "text/markdown;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = filename;
+  document.body.appendChild(anchor);
+  anchor.click();
+  document.body.removeChild(anchor);
+  URL.revokeObjectURL(url);
+}
 
 type JsonRecord = Record<string, unknown>;
 type RuntimePhase = NonNullable<ChannelState["turnPhase"]>;
@@ -586,6 +604,42 @@ function normalizeCitationGate(payload: JsonRecord): CitationGateStatus | null {
   };
 }
 
+function runtimeTracePhase(value: unknown): RuntimeTrace["phase"] {
+  if (
+    value === "retry_scheduled" ||
+    value === "retry_aborted" ||
+    value === "terminal_abort"
+  ) {
+    return value;
+  }
+  return "verifier_blocked";
+}
+
+function runtimeTraceSeverity(value: unknown): RuntimeTrace["severity"] {
+  if (value === "warning" || value === "error") return value;
+  return "info";
+}
+
+function normalizeRuntimeTrace(payload: JsonRecord): RuntimeTrace | null {
+  const turnId = asString(payload.turnId);
+  const title = asString(payload.title);
+  if (!turnId || !title) return null;
+  return {
+    turnId,
+    title,
+    phase: runtimeTracePhase(payload.phase),
+    severity: runtimeTraceSeverity(payload.severity),
+    receivedAt: Date.now(),
+    ...(typeof payload.detail === "string" ? { detail: payload.detail } : {}),
+    ...(typeof payload.reasonCode === "string" ? { reasonCode: payload.reasonCode } : {}),
+    ...(typeof payload.ruleId === "string" ? { ruleId: payload.ruleId } : {}),
+    ...(typeof payload.attempt === "number" ? { attempt: payload.attempt } : {}),
+    ...(typeof payload.maxAttempts === "number" ? { maxAttempts: payload.maxAttempts } : {}),
+    ...(typeof payload.retryable === "boolean" ? { retryable: payload.retryable } : {}),
+    ...(typeof payload.requiredAction === "string" ? { requiredAction: payload.requiredAction } : {}),
+  };
+}
+
 function missionStatus(value: unknown): MissionActivity["status"] {
   if (
     value === "queued" ||
@@ -731,6 +785,64 @@ function runtimeStatusLabel(status: RuntimeCheckStatus): string {
   return "not checked";
 }
 
+function DashboardPageHeader({
+  eyebrow,
+  title,
+  description,
+  action,
+}: {
+  eyebrow?: string;
+  title: string;
+  description: string;
+  action?: ReactNode;
+}) {
+  return (
+    <div className="mb-7 flex flex-col gap-4 border-b border-black/[0.06] pb-5 sm:flex-row sm:items-end sm:justify-between">
+      <div className="min-w-0">
+        {eyebrow && (
+          <div className="mb-2 text-xs font-semibold uppercase tracking-[0.18em] text-secondary/70">
+            {eyebrow}
+          </div>
+        )}
+        <h1 className="text-[1.7rem] font-semibold leading-tight text-foreground">{title}</h1>
+        <p className="mt-2 max-w-2xl text-sm leading-6 text-secondary">{description}</p>
+      </div>
+      {action && <div className="shrink-0">{action}</div>}
+    </div>
+  );
+}
+
+function StatusPill({
+  status,
+  children,
+}: {
+  status: RuntimeCheckStatus | "ok" | "muted" | "warning";
+  children: ReactNode;
+}) {
+  const tones = {
+    active: "border-emerald-500/20 bg-emerald-500/10 text-emerald-700",
+    checking: "border-amber-500/20 bg-amber-500/10 text-amber-700",
+    unavailable: "border-red-500/20 bg-red-500/10 text-red-600",
+    not_checked: "border-black/10 bg-gray-100 text-secondary",
+    ok: "border-emerald-500/20 bg-emerald-500/10 text-emerald-700",
+    muted: "border-black/10 bg-gray-100 text-secondary",
+    warning: "border-amber-500/20 bg-amber-500/10 text-amber-700",
+  } satisfies Record<RuntimeCheckStatus | "ok" | "muted" | "warning", string>;
+  return (
+    <span className={`inline-flex min-h-7 items-center rounded-full border px-2.5 text-xs font-semibold ${tones[status]}`}>
+      {children}
+    </span>
+  );
+}
+
+function EmptyState({ children }: { children: ReactNode }) {
+  return (
+    <div className="rounded-lg border border-dashed border-black/[0.10] bg-gray-50/70 px-4 py-8 text-center text-sm leading-6 text-secondary">
+      {children}
+    </div>
+  );
+}
+
 function DashboardSidebar({
   activeRoute,
   runtimeStatus,
@@ -763,10 +875,10 @@ function DashboardSidebar({
         key={route}
         type="button"
         onClick={() => onNavigate(route)}
-        className={`block w-full rounded-xl px-3 py-2.5 text-left text-sm font-medium transition-colors duration-200 cursor-pointer ${
+        className={`flex min-h-11 w-full items-center rounded-lg px-3 text-left text-sm font-semibold transition-colors duration-200 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30 ${
           active
-            ? "bg-primary/10 text-primary-light border border-primary/25"
-            : "text-gray-700 hover:text-gray-900 hover:bg-gray-100"
+            ? "border border-primary/20 bg-primary/10 text-primary-light"
+            : "border border-transparent text-gray-600 hover:bg-gray-100 hover:text-gray-950"
         }`}
       >
         {label}
@@ -775,22 +887,25 @@ function DashboardSidebar({
   };
 
   return (
-    <aside className="hidden h-screen w-64 shrink-0 flex-col border-r border-gray-200 bg-gray-50 p-6 md:flex">
+    <aside className="hidden h-screen w-72 shrink-0 flex-col border-r border-black/[0.07] bg-white p-5 md:flex">
       <button
         type="button"
         onClick={() => onNavigate("overview")}
-        className="mb-10 flex items-center gap-2 text-left"
+        className="mb-7 flex min-h-11 items-center gap-3 rounded-lg text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30"
         aria-label="Open Magi dashboard"
       >
-        <span className="flex h-6 w-6 items-center justify-center rounded-md bg-primary text-xs font-bold text-white">
+        <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary text-sm font-bold text-white">
           M
         </span>
-        <span className="text-sm font-semibold text-foreground">Open Magi</span>
+        <span className="min-w-0">
+          <span className="block text-sm font-semibold text-foreground">Open Magi</span>
+          <span className="block text-xs text-secondary">Local operator</span>
+        </span>
       </button>
 
-      <div className="mb-4 rounded-xl border border-gray-200 bg-white px-3 py-2.5">
+      <div className="mb-5 rounded-xl border border-black/[0.08] bg-gray-50 px-3.5 py-3">
         <div className="min-w-0 truncate text-sm font-semibold text-foreground">{BOT_NAME}</div>
-        <div className="mt-1 flex items-center gap-2 text-sm text-secondary">
+        <div className="mt-2 flex items-center gap-2 text-xs font-medium text-secondary">
           <span
             className={`h-2.5 w-2.5 rounded-full ${
               runtimeStatus === "active" ? "bg-emerald-400" : "bg-gray-300"
@@ -802,7 +917,7 @@ function DashboardSidebar({
 
       <nav className="min-h-0 flex-1 space-y-1 overflow-y-auto">
         <div className="pb-1">
-          <span className="px-3 text-xs font-medium uppercase tracking-wider text-gray-400">
+          <span className="px-3 text-[11px] font-semibold uppercase tracking-[0.18em] text-gray-400">
             Chat
           </span>
         </div>
@@ -810,8 +925,8 @@ function DashboardSidebar({
           {primaryItems.map(renderItem)}
         </div>
         <div className="pt-4 pb-1">
-          <div className="mb-3 border-t border-gray-200" />
-          <span className="px-3 text-xs font-medium uppercase tracking-wider text-gray-400">
+          <div className="mb-3 border-t border-black/[0.07]" />
+          <span className="px-3 text-[11px] font-semibold uppercase tracking-[0.18em] text-gray-400">
             Local Runtime
           </span>
         </div>
@@ -820,18 +935,18 @@ function DashboardSidebar({
         </div>
       </nav>
 
-      <div className="space-y-2 border-t border-gray-200 pt-4">
+      <div className="space-y-2 border-t border-black/[0.07] pt-4">
         <button
           type="button"
           onClick={onRefresh}
-          className="w-full rounded-xl px-3 py-2.5 text-left text-sm font-medium text-gray-700 transition-colors hover:bg-gray-100 hover:text-gray-900"
+          className="flex min-h-11 w-full items-center rounded-lg px-3 text-left text-sm font-semibold text-gray-600 transition-colors hover:bg-gray-100 hover:text-gray-950 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30"
         >
           Refresh
         </button>
         <button
           type="button"
           onClick={() => onNavigate("chat")}
-          className="w-full rounded-xl px-3 py-2.5 text-left text-sm font-medium text-gray-700 transition-colors hover:bg-gray-100 hover:text-gray-900"
+          className="flex min-h-11 w-full items-center rounded-lg px-3 text-left text-sm font-semibold text-gray-600 transition-colors hover:bg-gray-100 hover:text-gray-950 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30"
         >
           Back to chat
         </button>
@@ -850,10 +965,10 @@ function DashboardCard({
   action?: ReactNode;
 }) {
   return (
-    <section className="glass rounded-2xl p-6">
+    <section className="rounded-xl border border-black/[0.08] bg-white p-5 shadow-[0_10px_30px_rgba(15,23,42,0.035)]">
       {(title || action) && (
-        <div className="mb-4 flex items-center justify-between gap-3">
-          {title ? <h2 className="text-base font-semibold text-foreground">{title}</h2> : <span />}
+        <div className="mb-4 flex min-h-9 items-center justify-between gap-3">
+          {title ? <h2 className="text-sm font-semibold text-foreground">{title}</h2> : <span />}
           {action}
         </div>
       )}
@@ -864,8 +979,8 @@ function DashboardCard({
 
 function MetricTile({ label, value }: { label: string; value: string | number }) {
   return (
-    <div className="rounded-xl bg-gray-50 px-4 py-3">
-      <div className="text-xs font-medium uppercase tracking-[0.08em] text-secondary/70">{label}</div>
+    <div className="rounded-lg border border-black/[0.06] bg-gray-50 px-4 py-3">
+      <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-secondary/70">{label}</div>
       <div className="mt-1 text-2xl font-semibold text-foreground">{value}</div>
     </div>
   );
@@ -887,8 +1002,8 @@ function ButtonLike({
   className?: string;
 }) {
   const variants = {
-    primary: "bg-primary text-white hover:bg-primary-light glow-sm",
-    secondary: "border border-black/10 bg-transparent text-foreground hover:border-primary/40 hover:bg-black/[0.04]",
+    primary: "bg-primary text-white hover:bg-primary-light shadow-[0_8px_18px_rgba(124,58,237,0.18)]",
+    secondary: "border border-black/10 bg-white text-foreground hover:border-primary/35 hover:bg-gray-50",
     ghost: "bg-transparent text-secondary hover:bg-black/[0.04] hover:text-foreground",
     danger: "border border-red-500/20 bg-red-500/10 text-red-500 hover:bg-red-500/15",
   };
@@ -897,7 +1012,7 @@ function ButtonLike({
       type={type}
       disabled={disabled}
       onClick={onClick}
-      className={`inline-flex min-h-[44px] items-center justify-center rounded-xl px-5 py-2.5 text-sm font-semibold transition-all duration-200 disabled:pointer-events-none disabled:opacity-40 ${variants[variant]} ${className}`}
+      className={`inline-flex min-h-[44px] items-center justify-center rounded-lg px-5 py-2.5 text-sm font-semibold transition-all duration-200 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30 disabled:pointer-events-none disabled:opacity-40 ${variants[variant]} ${className}`}
     >
       {children}
     </button>
@@ -919,13 +1034,13 @@ function SettingsInput({
 }) {
   return (
     <label className="block">
-      <span className="mb-1.5 block text-sm font-medium text-secondary">{label}</span>
+      <span className="mb-1.5 block text-xs font-semibold uppercase tracking-[0.12em] text-secondary/75">{label}</span>
       <input
         value={value}
         type={type}
         placeholder={placeholder}
         onChange={(event) => onChange(event.target.value)}
-        className="w-full rounded-xl border border-black/10 bg-white px-4 py-3 text-foreground outline-none transition-colors duration-200 focus:border-primary/50 focus:ring-1 focus:ring-primary/20"
+        className="min-h-11 w-full rounded-lg border border-black/10 bg-white px-3.5 py-2.5 text-sm font-medium text-foreground outline-none transition-colors duration-200 placeholder:text-secondary/45 focus:border-primary/45 focus:ring-4 focus:ring-primary/10"
       />
     </label>
   );
@@ -944,11 +1059,11 @@ function SettingsDropdown({
 }) {
   return (
     <label className="block">
-      <span className="mb-1.5 block text-sm font-medium text-secondary">{label}</span>
+      <span className="mb-1.5 block text-xs font-semibold uppercase tracking-[0.12em] text-secondary/75">{label}</span>
       <select
         value={value}
         onChange={(event) => onChange(event.target.value)}
-        className="w-full rounded-xl border border-black/10 bg-white px-4 py-3 text-foreground outline-none transition-colors duration-200 focus:border-primary/50 focus:ring-1 focus:ring-primary/20"
+        className="min-h-11 w-full rounded-lg border border-black/10 bg-white px-3.5 py-2.5 text-sm font-medium text-foreground outline-none transition-colors duration-200 focus:border-primary/45 focus:ring-4 focus:ring-primary/10"
       >
         {options.map((option) => (
           <option key={option.value} value={option.value}>
@@ -993,15 +1108,15 @@ function CollapsibleCard({
       <button
         type="button"
         onClick={() => setOpen((prev) => !prev)}
-        className="-m-6 flex w-[calc(100%+3rem)] items-center justify-between p-5 text-left transition-colors hover:bg-gray-50"
+        className="-m-5 flex min-h-[58px] w-[calc(100%+2.5rem)] items-center justify-between rounded-xl p-5 text-left transition-colors hover:bg-gray-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30"
       >
         <div className="min-w-0">
-          <div className="font-medium text-foreground">{title}</div>
+          <div className="text-sm font-semibold text-foreground">{title}</div>
           {subtitle && <div className="mt-1 text-xs text-secondary">{subtitle}</div>}
         </div>
         <ChevronIcon expanded={open} />
       </button>
-      {open && <div className="mt-6 border-t border-gray-200 pt-5">{children}</div>}
+      {open && <div className="mt-5 border-t border-black/[0.06] pt-5">{children}</div>}
     </DashboardCard>
   );
 }
@@ -1021,13 +1136,13 @@ function OverviewDashboard({
 }) {
   const docCount = kbCollections.reduce((sum, collection) => sum + collection.docs.length, 0);
   return (
-    <div className="max-w-3xl space-y-6">
-      <div className="mb-8">
-        <h1 className="text-2xl font-bold text-foreground">Dashboard</h1>
-        <p className="mt-1 text-sm text-secondary">
-          Manage your local Magi agent and monitor runtime performance.
-        </p>
-      </div>
+    <div className="max-w-5xl space-y-6">
+      <DashboardPageHeader
+        eyebrow="Local Runtime"
+        title="Dashboard"
+        description="Manage your local Magi agent, runtime state, workspace knowledge, and operator files from one console."
+        action={<ButtonLike onClick={() => onNavigate("chat")}>Open Chat</ButtonLike>}
+      />
 
       <div className="space-y-5">
         <DashboardCard title="Agent">
@@ -1040,18 +1155,13 @@ function OverviewDashboard({
                   }`}
                 />
                 <h3 className="text-xl font-semibold text-foreground">{BOT_NAME}</h3>
-                <span className="rounded-full border border-emerald-500/20 bg-emerald-500/10 px-3 py-1 text-xs font-medium text-emerald-600">
-                  {runtimeStatusLabel(runtimeStatus)}
-                </span>
+                <StatusPill status={runtimeStatus}>{runtimeStatusLabel(runtimeStatus)}</StatusPill>
               </div>
               <p className="mt-2 max-w-2xl text-sm leading-6 text-secondary">
                 Self-hosted Magi runtime with local chat, workspace knowledge, runtime proof,
                 editable operator files, and your configured LLM provider.
               </p>
             </div>
-            <ButtonLike onClick={() => onNavigate("chat")}>
-              Open Chat
-            </ButtonLike>
           </div>
         </DashboardCard>
 
@@ -1083,7 +1193,7 @@ function OverviewDashboard({
                 key={item.title}
                 type="button"
                 onClick={() => onNavigate(item.route)}
-                className="block w-full rounded-xl border border-gray-100 bg-gray-50 px-4 py-3 text-left transition hover:border-gray-200 hover:bg-white"
+                className="block min-h-16 w-full rounded-lg border border-black/[0.06] bg-gray-50 px-4 py-3 text-left transition hover:border-primary/20 hover:bg-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30"
               >
                 <div className="text-sm font-semibold text-foreground">{item.title}</div>
                 <div className="mt-1 text-xs text-secondary">{item.detail}</div>
@@ -1140,13 +1250,13 @@ function SettingsDashboard({
   }, []);
 
   return (
-    <div className="max-w-3xl space-y-5">
-      <div className="mb-8">
-        <h1 className="text-2xl font-bold text-foreground">Settings</h1>
-        <p className="mt-1 text-sm text-secondary">
-          Configure the self-hosted runtime, provider, and local workspace.
-        </p>
-      </div>
+    <div className="max-w-4xl space-y-5">
+      <DashboardPageHeader
+        eyebrow="Configuration"
+        title="Settings"
+        description="Configure the local runtime, provider endpoint, workspace path, and safeguards used by the self-hosted agent."
+        action={<StatusPill status={runtimeStatus}>{runtimeStatusLabel(runtimeStatus)}</StatusPill>}
+      />
 
       <DashboardCard
         title="Model"
@@ -1159,9 +1269,9 @@ function SettingsDashboard({
         }
       >
         {!draft ? (
-          <div className="rounded-xl border border-dashed border-black/[0.08] px-4 py-8 text-center text-sm text-secondary">
+          <EmptyState>
             No config loaded yet. Save a local provider below to create `magi-agent.yaml`.
-          </div>
+          </EmptyState>
         ) : (
           <div className="space-y-4">
             {configNotice && (
@@ -1370,21 +1480,20 @@ function KnowledgeDashboard({
 
   return (
     <div className="max-w-4xl space-y-6">
-      <div className="mb-8">
-        <h1 className="text-2xl font-bold text-foreground">Knowledge</h1>
-        <p className="mt-1 text-sm text-secondary">
-          Upload and inspect the local workspace KB used by the self-hosted agent.
-        </p>
-      </div>
-      <DashboardCard
-        title="Workspace Knowledge"
+      <DashboardPageHeader
+        eyebrow="Workspace KB"
+        title="Knowledge"
+        description="Upload and inspect local documents that the self-hosted runtime can search during a mission."
         action={
           <ButtonLike variant="secondary" onClick={onRefresh} disabled={refreshing}>
             {refreshing ? "Refreshing..." : "Refresh"}
           </ButtonLike>
         }
+      />
+      <DashboardCard
+        title="Workspace Knowledge"
       >
-        <div className="mb-5 rounded-xl border border-dashed border-primary/20 bg-primary/5 px-4 py-5">
+        <div className="mb-5 rounded-lg border border-dashed border-primary/25 bg-primary/[0.04] px-4 py-5">
           <label className="block cursor-pointer text-center">
             <input
               type="file"
@@ -1403,15 +1512,11 @@ function KnowledgeDashboard({
         {uploadNotice && <div className="mb-3 rounded-xl bg-emerald-50 px-3 py-2 text-xs text-emerald-700">{uploadNotice}</div>}
         {uploadError && <div className="mb-3 rounded-xl bg-red-50 px-3 py-2 text-xs text-red-500">{uploadError}</div>}
         {loading ? (
-          <div className="rounded-xl border border-dashed border-black/[0.08] px-4 py-8 text-center text-sm text-secondary">
-            Loading knowledge...
-          </div>
+          <EmptyState>Loading knowledge...</EmptyState>
         ) : docs.length === 0 ? (
-          <div className="rounded-xl border border-dashed border-black/[0.08] px-4 py-8 text-center text-sm text-secondary">
-            No local KB documents yet.
-          </div>
+          <EmptyState>No local KB documents yet.</EmptyState>
         ) : (
-          <div className="divide-y divide-black/[0.06] overflow-hidden rounded-xl border border-black/[0.08]">
+          <div className="divide-y divide-black/[0.06] overflow-hidden rounded-lg border border-black/[0.08]">
             {docs.map((doc) => (
               <div key={`${doc.collectionName}:${doc.id}`} className="px-4 py-3">
                 <div className="text-sm font-semibold text-foreground">{doc.filename}</div>
@@ -1494,43 +1599,38 @@ function WorkspaceDashboard({
 
   return (
     <div className="space-y-6">
-      <div className="mb-8">
-        <h1 className="text-2xl font-bold text-foreground">Workspace</h1>
-        <p className="mt-1 text-sm text-secondary">
-          Edit local prompts, contracts, harness rules, hooks, memory, compaction files, and artifacts.
-        </p>
-      </div>
+      <DashboardPageHeader
+        eyebrow="Operator Files"
+        title="Workspace"
+        description="Edit local prompts, contracts, harness rules, hooks, memory, compaction files, and artifacts."
+        action={
+          <ButtonLike variant="secondary" onClick={onRefresh} disabled={refreshing}>
+            {refreshing ? "Refreshing..." : "Refresh"}
+          </ButtonLike>
+        }
+      />
       <div className="grid gap-5 xl:grid-cols-[minmax(0,420px)_minmax(0,1fr)]">
         <DashboardCard
           title="Files"
-          action={
-            <ButtonLike variant="secondary" onClick={onRefresh} disabled={refreshing}>
-              {refreshing ? "Refreshing..." : "Refresh"}
-            </ButtonLike>
-          }
         >
           <input
             value={query}
             onChange={(event) => setQuery(event.target.value)}
             placeholder="Filter files..."
-            className="mb-4 w-full rounded-xl border border-black/[0.08] bg-white px-3 py-2 text-sm outline-none transition focus:border-primary/40 focus:ring-4 focus:ring-primary/10"
+            className="mb-4 min-h-11 w-full rounded-lg border border-black/[0.08] bg-white px-3.5 py-2.5 text-sm outline-none transition focus:border-primary/40 focus:ring-4 focus:ring-primary/10"
           />
           {loading ? (
-            <div className="rounded-xl border border-dashed border-black/[0.08] px-4 py-8 text-center text-sm text-secondary">
-              Loading workspace...
-            </div>
+            <EmptyState>Loading workspace...</EmptyState>
           ) : filteredFiles.length === 0 ? (
-            <div className="rounded-xl border border-dashed border-black/[0.08] px-4 py-8 text-center text-sm text-secondary">
-              No editable workspace files found.
-            </div>
+            <EmptyState>No editable workspace files found.</EmptyState>
           ) : (
-            <div className="max-h-[620px] divide-y divide-black/[0.06] overflow-y-auto rounded-xl border border-black/[0.08]">
+            <div className="max-h-[620px] divide-y divide-black/[0.06] overflow-y-auto rounded-lg border border-black/[0.08]">
               {filteredFiles.slice(0, 160).map((file) => (
                 <button
                   key={file.path}
                   type="button"
                   onClick={() => void openFile(file.path)}
-                  className={`block w-full px-4 py-3 text-left transition hover:bg-gray-50 ${selectedPath === file.path ? "bg-primary/[0.06]" : "bg-white"}`}
+                  className={`block min-h-14 w-full px-4 py-3 text-left transition hover:bg-gray-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/30 ${selectedPath === file.path ? "bg-primary/[0.06]" : "bg-white"}`}
                 >
                   <div className="truncate text-sm font-semibold text-foreground">{file.path}</div>
                   <div className="mt-1 text-xs text-secondary">
@@ -1559,19 +1659,15 @@ function WorkspaceDashboard({
           {notice && <div className="mb-3 rounded-xl bg-emerald-50 px-3 py-2 text-xs text-emerald-700">{notice}</div>}
           {error && <div className="mb-3 rounded-xl bg-red-50 px-3 py-2 text-xs text-red-500">{error}</div>}
           {!selectedPath ? (
-            <div className="rounded-xl border border-dashed border-black/[0.08] px-4 py-10 text-center text-sm text-secondary">
-              Select a workspace file to view or edit it.
-            </div>
+            <EmptyState>Select a workspace file to view or edit it.</EmptyState>
           ) : fileLoading ? (
-            <div className="rounded-xl border border-dashed border-black/[0.08] px-4 py-10 text-center text-sm text-secondary">
-              Loading file...
-            </div>
+            <EmptyState>Loading file...</EmptyState>
           ) : (
             <textarea
               value={editedContent}
               onChange={(event) => setEditedContent(event.target.value)}
               spellCheck={false}
-              className="h-[520px] w-full resize-none rounded-xl border border-black/[0.08] bg-white px-4 py-3 font-mono text-sm leading-6 text-foreground outline-none transition focus:border-primary/40 focus:ring-4 focus:ring-primary/10"
+              className="h-[520px] w-full resize-none rounded-lg border border-black/[0.08] bg-white px-4 py-3 font-mono text-sm leading-6 text-foreground outline-none transition focus:border-primary/40 focus:ring-4 focus:ring-primary/10"
             />
           )}
         </DashboardCard>
@@ -1745,25 +1841,19 @@ function MemoryDashboard({
 
   return (
     <div className="space-y-6">
-      <div className="mb-8">
-        <h1 className="text-2xl font-bold text-foreground">Memory</h1>
-        <p className="mt-1 text-sm text-secondary">
-          Browse, search, edit, compact, and reindex Hipocampus memory from the local runtime.
-        </p>
-      </div>
+      <DashboardPageHeader
+        eyebrow="Hipocampus"
+        title="Memory"
+        description="Browse, search, edit, compact, and reindex local memory used by the runtime."
+        action={
+          <ButtonLike variant="secondary" onClick={onRefresh} disabled={refreshing}>
+            {refreshing ? "Refreshing..." : "Refresh"}
+          </ButtonLike>
+        }
+      />
       <div className="grid gap-5 xl:grid-cols-[minmax(0,420px)_minmax(0,1fr)]">
         <DashboardCard
           title="Memory Files"
-          action={
-            <button
-              type="button"
-              onClick={onRefresh}
-              disabled={refreshing}
-              className="rounded-xl bg-gray-100 px-3 py-1.5 text-sm font-semibold text-foreground transition hover:bg-gray-200 disabled:opacity-50"
-            >
-              {refreshing ? "Refreshing..." : "Refresh"}
-            </button>
-          }
         >
           <div className="mb-4 grid gap-3 sm:grid-cols-2">
             <MetricTile label="Files" value={memoryFiles.length} />
@@ -1785,23 +1875,18 @@ function MemoryDashboard({
                 if (event.key === "Enter") void runSearch();
               }}
               placeholder="Search memory..."
-              className="min-w-0 flex-1 rounded-xl border border-black/[0.08] bg-white px-3 py-2 text-sm outline-none transition focus:border-primary/40 focus:ring-4 focus:ring-primary/10"
+              className="min-h-11 min-w-0 flex-1 rounded-lg border border-black/[0.08] bg-white px-3.5 py-2.5 text-sm outline-none transition focus:border-primary/40 focus:ring-4 focus:ring-primary/10"
             />
-            <button
-              type="button"
-              onClick={() => void runSearch()}
-              disabled={searching}
-              className="rounded-xl bg-primary px-3 py-2 text-sm font-semibold text-white transition hover:bg-primary/90 disabled:opacity-50"
-            >
+            <ButtonLike onClick={() => void runSearch()} disabled={searching} className="px-4">
               {searching ? "Searching" : "Search"}
-            </button>
+            </ButtonLike>
           </div>
           <div className="mb-4 flex flex-wrap gap-2">
             <button
               type="button"
               onClick={() => void deletePaths(Array.from(selectedPaths))}
               disabled={busy || selectedCount === 0}
-              className="rounded-xl bg-gray-100 px-3 py-1.5 text-xs font-semibold text-foreground transition hover:bg-gray-200 disabled:opacity-50"
+              className="min-h-9 rounded-lg bg-gray-100 px-3 text-xs font-semibold text-foreground transition hover:bg-gray-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30 disabled:opacity-50"
             >
               Delete selected{selectedCount > 0 ? ` (${selectedCount})` : ""}
             </button>
@@ -1809,7 +1894,7 @@ function MemoryDashboard({
               type="button"
               onClick={() => void deletePaths(dailyPaths)}
               disabled={busy || dailyPaths.length === 0}
-              className="rounded-xl bg-gray-100 px-3 py-1.5 text-xs font-semibold text-foreground transition hover:bg-gray-200 disabled:opacity-50"
+              className="min-h-9 rounded-lg bg-gray-100 px-3 text-xs font-semibold text-foreground transition hover:bg-gray-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30 disabled:opacity-50"
             >
               Clear daily logs
             </button>
@@ -1817,7 +1902,7 @@ function MemoryDashboard({
               type="button"
               onClick={() => void runMemoryAction("compact")}
               disabled={busy}
-              className="rounded-xl bg-gray-100 px-3 py-1.5 text-xs font-semibold text-foreground transition hover:bg-gray-200 disabled:opacity-50"
+              className="min-h-9 rounded-lg bg-gray-100 px-3 text-xs font-semibold text-foreground transition hover:bg-gray-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30 disabled:opacity-50"
             >
               Compact
             </button>
@@ -1825,7 +1910,7 @@ function MemoryDashboard({
               type="button"
               onClick={() => void runMemoryAction("reindex")}
               disabled={busy}
-              className="rounded-xl bg-gray-100 px-3 py-1.5 text-xs font-semibold text-foreground transition hover:bg-gray-200 disabled:opacity-50"
+              className="min-h-9 rounded-lg bg-gray-100 px-3 text-xs font-semibold text-foreground transition hover:bg-gray-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30 disabled:opacity-50"
             >
               Reindex
             </button>
@@ -1833,20 +1918,16 @@ function MemoryDashboard({
           {notice && <div className="mb-3 rounded-xl bg-emerald-50 px-3 py-2 text-xs text-emerald-700">{notice}</div>}
           {error && <div className="mb-3 rounded-xl bg-red-50 px-3 py-2 text-xs text-red-500">{error}</div>}
           {loading ? (
-            <div className="rounded-xl border border-dashed border-black/[0.08] px-4 py-8 text-center text-sm text-secondary">
-              Loading memory...
-            </div>
+            <EmptyState>Loading memory...</EmptyState>
           ) : filteredFiles.length === 0 ? (
-            <div className="rounded-xl border border-dashed border-black/[0.08] px-4 py-8 text-center text-sm text-secondary">
-              No memory files found.
-            </div>
+            <EmptyState>No memory files found.</EmptyState>
           ) : (
-            <div className="max-h-[520px] divide-y divide-black/[0.06] overflow-y-auto rounded-xl border border-black/[0.08]">
+            <div className="max-h-[520px] divide-y divide-black/[0.06] overflow-y-auto rounded-lg border border-black/[0.08]">
               {filteredFiles.map((file) => {
                 const checked = selectedPaths.has(file.path);
                 const active = selectedPath === file.path;
                 return (
-                  <div key={file.path} className={`flex items-center gap-3 px-3 py-2 ${active ? "bg-primary/[0.06]" : "bg-white"}`}>
+                  <div key={file.path} className={`flex min-h-14 items-center gap-3 px-3 py-2 ${active ? "bg-primary/[0.06]" : "bg-white"}`}>
                     <input
                       type="checkbox"
                       checked={checked}
@@ -1857,7 +1938,7 @@ function MemoryDashboard({
                     <button
                       type="button"
                       onClick={() => void openFile(file.path)}
-                      className="min-w-0 flex-1 text-left"
+                      className="min-w-0 flex-1 rounded-md text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30"
                     >
                       <div className="truncate text-sm font-semibold text-foreground">{file.path}</div>
                       <div className="mt-0.5 text-xs text-secondary">
@@ -1869,7 +1950,7 @@ function MemoryDashboard({
                       type="button"
                       onClick={() => void deletePaths([file.path])}
                       disabled={busy}
-                      className="rounded-lg px-2 py-1 text-xs font-semibold text-red-500 transition hover:bg-red-50 disabled:opacity-50"
+                      className="min-h-8 rounded-lg px-2 text-xs font-semibold text-red-500 transition hover:bg-red-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500/20 disabled:opacity-50"
                     >
                       Delete
                     </button>
@@ -1885,31 +1966,26 @@ function MemoryDashboard({
             title={selectedPath ?? "Memory File"}
             action={
               selectedPath ? (
-                <button
-                  type="button"
+                <ButtonLike
                   onClick={() => void saveSelected()}
                   disabled={busy || fileLoading || editedContent === content}
-                  className="rounded-xl bg-primary px-3 py-1.5 text-sm font-semibold text-white transition hover:bg-primary/90 disabled:opacity-50"
+                  className="min-h-9 px-3 py-1.5"
                 >
                   Save
-                </button>
+                </ButtonLike>
               ) : null
             }
           >
             {!selectedPath ? (
-              <div className="rounded-xl border border-dashed border-black/[0.08] px-4 py-10 text-center text-sm text-secondary">
-                Select a memory file to view or edit it.
-              </div>
+              <EmptyState>Select a memory file to view or edit it.</EmptyState>
             ) : fileLoading ? (
-              <div className="rounded-xl border border-dashed border-black/[0.08] px-4 py-10 text-center text-sm text-secondary">
-                Loading file...
-              </div>
+              <EmptyState>Loading file...</EmptyState>
             ) : (
               <textarea
                 value={editedContent}
                 onChange={(event) => setEditedContent(event.target.value)}
                 spellCheck={false}
-                className="h-[420px] w-full resize-none rounded-xl border border-black/[0.08] bg-white px-4 py-3 font-mono text-sm leading-6 text-foreground outline-none transition focus:border-primary/40 focus:ring-4 focus:ring-primary/10"
+                className="h-[420px] w-full resize-none rounded-lg border border-black/[0.08] bg-white px-4 py-3 font-mono text-sm leading-6 text-foreground outline-none transition focus:border-primary/40 focus:ring-4 focus:ring-primary/10"
               />
             )}
           </DashboardCard>
@@ -1922,7 +1998,7 @@ function MemoryDashboard({
                     key={`${result.path ?? "result"}-${index}`}
                     type="button"
                     onClick={() => result.path && void openFile(result.path)}
-                    className="block w-full rounded-xl bg-gray-50 px-4 py-3 text-left transition hover:bg-gray-100"
+                    className="block min-h-14 w-full rounded-lg bg-gray-50 px-4 py-3 text-left transition hover:bg-gray-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30"
                   >
                     <div className="flex items-center justify-between gap-3">
                       <div className="truncate text-sm font-semibold text-foreground">
@@ -1962,28 +2038,27 @@ function SkillsDashboard({
   const issues = asArray(skillsSnapshot?.issues);
   return (
     <div className="max-w-4xl space-y-6">
-      <div className="mb-8">
-        <h1 className="text-2xl font-bold text-foreground">Skills</h1>
-        <p className="mt-1 text-sm text-secondary">
-          Workspace SKILL.md capabilities and runtime hook metadata loaded by the local agent.
-        </p>
-      </div>
-      <DashboardCard
+      <DashboardPageHeader
+        eyebrow="Capabilities"
         title="Skills"
+        description="Workspace SKILL.md capabilities and runtime hook metadata loaded by the local agent."
         action={
           <ButtonLike variant="secondary" onClick={onRefresh}>
             Reload
           </ButtonLike>
         }
+      />
+      <DashboardCard
+        title="Skills"
       >
         {loading ? (
-          <div className="text-sm text-secondary">Loading skills...</div>
+          <EmptyState>Loading skills...</EmptyState>
         ) : loaded.length === 0 ? (
-          <div className="text-sm text-secondary">No skills loaded.</div>
+          <EmptyState>No skills loaded.</EmptyState>
         ) : (
           <div className="space-y-2">
             {loaded.map((skill, index) => (
-              <div key={asString(skill.name, `skill-${index}`)} className="rounded-xl bg-gray-50 px-4 py-3">
+              <div key={asString(skill.name, `skill-${index}`)} className="rounded-lg border border-black/[0.06] bg-gray-50 px-4 py-3">
                 <div className="text-sm font-semibold text-foreground">{asString(skill.name, `skill-${index + 1}`)}</div>
                 {asString(skill.path) && <div className="mt-1 truncate text-xs text-secondary">{asString(skill.path)}</div>}
               </div>
@@ -1994,10 +2069,10 @@ function SkillsDashboard({
       <DashboardCard title="Runtime Hooks">
         <div className="space-y-2">
           {hooks.length === 0 ? (
-            <div className="text-sm text-secondary">No runtime hooks reported.</div>
+            <EmptyState>No runtime hooks reported.</EmptyState>
           ) : (
             hooks.map((hook, index) => (
-              <div key={asString(hook.name, `hook-${index}`)} className="rounded-xl bg-gray-50 px-4 py-3 text-sm font-semibold text-foreground">
+              <div key={asString(hook.name, `hook-${index}`)} className="rounded-lg border border-black/[0.06] bg-gray-50 px-4 py-3 text-sm font-semibold text-foreground">
                 {asString(hook.name, `hook-${index + 1}`)}
               </div>
             ))
@@ -2028,12 +2103,11 @@ function UsageDashboard({ runtimeSnapshot }: { runtimeSnapshot: JsonRecord | nul
 
   return (
     <div className="max-w-4xl space-y-6">
-      <div className="mb-8">
-        <h1 className="text-2xl font-bold text-foreground">Usage</h1>
-        <p className="mt-1 text-sm text-secondary">
-          Local runtime activity. Self-hosted Magi does not meter platform credits.
-        </p>
-      </div>
+      <DashboardPageHeader
+        eyebrow="Runtime Activity"
+        title="Usage"
+        description="Local runtime activity. Self-hosted Magi does not meter platform credits."
+      />
       <DashboardCard title="Runtime Totals">
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
           {sectionRows.map((row) => (
@@ -2048,9 +2122,7 @@ function UsageDashboard({ runtimeSnapshot }: { runtimeSnapshot: JsonRecord | nul
         {sectionRows.map((row) => (
           <DashboardCard key={row.key} title={row.title}>
             {row.items.length === 0 ? (
-              <div className="rounded-xl border border-dashed border-black/[0.08] px-4 py-6 text-sm text-secondary">
-                No {row.title.toLowerCase()} reported.
-              </div>
+              <EmptyState>No {row.title.toLowerCase()} reported.</EmptyState>
             ) : (
               <div className="space-y-2">
                 {row.items.map((item, index) => {
@@ -2066,7 +2138,7 @@ function UsageDashboard({ runtimeSnapshot }: { runtimeSnapshot: JsonRecord | nul
                     asString(item.schedule) ||
                     asString(item.description);
                   return (
-                    <div key={`${row.key}-${index}`} className="rounded-xl bg-gray-50 px-4 py-3">
+                    <div key={`${row.key}-${index}`} className="rounded-lg border border-black/[0.06] bg-gray-50 px-4 py-3">
                       <div className="truncate text-sm font-semibold text-foreground">{label}</div>
                       {detail && <div className="mt-1 text-xs text-secondary">{detail}</div>}
                     </div>
@@ -2084,12 +2156,11 @@ function UsageDashboard({ runtimeSnapshot }: { runtimeSnapshot: JsonRecord | nul
 function ConverterDashboard({ onNavigate }: { onNavigate: (route: AppRoute) => void }) {
   return (
     <div className="max-w-3xl space-y-6">
-      <div className="mb-8">
-        <h1 className="text-2xl font-bold text-foreground">Converter</h1>
-        <p className="mt-1 text-sm text-secondary">
-          Local document conversion runs through the agent workspace and artifact pipeline.
-        </p>
-      </div>
+      <DashboardPageHeader
+        eyebrow="Artifacts"
+        title="Converter"
+        description="Local document conversion runs through the agent workspace and artifact pipeline."
+      />
       <DashboardCard title="Local Conversion Flow">
         <div className="space-y-3 text-sm leading-6 text-secondary">
           <p>
@@ -2112,7 +2183,7 @@ function ConverterDashboard({ onNavigate }: { onNavigate: (route: AppRoute) => v
             "Workspace artifact review",
             "Runtime proof before completion",
           ].map((item) => (
-            <div key={item} className="rounded-xl bg-gray-50 px-4 py-3 text-sm font-medium text-foreground">
+            <div key={item} className="rounded-lg border border-black/[0.06] bg-gray-50 px-4 py-3 text-sm font-semibold text-foreground">
               {item}
             </div>
           ))}
@@ -2873,6 +2944,7 @@ export function App() {
           taskBoard: null,
           inspectedSources: [],
           citationGate: null,
+          runtimeTraces: [],
           heartbeatElapsedMs: null,
         }, { botId: BOT_ID });
       }
@@ -2902,13 +2974,17 @@ export function App() {
         const turnId = asString(payload.turnId, channel);
         const iter = asNumber(payload.iter, 0);
         const stage = asString(payload.stage, "waiting");
+        const label = asString(payload.label, "Thinking through next step");
+        const detail = asString(payload.detail);
+        const elapsedMs = asNumber(payload.elapsedMs);
         updateActiveTools(channel, {
           id: `llm:${turnId}:${iter}`,
-          label: asString(payload.label, "Thinking through next step"),
+          label: "ModelProgress",
           status: stage === "completed" ? "done" : "running",
           startedAt: Date.now(),
-          outputPreview: asString(payload.detail),
-          durationMs: asNumber(payload.elapsedMs),
+          inputPreview: JSON.stringify({ stage, label, detail, elapsedMs }),
+          outputPreview: detail,
+          durationMs: elapsedMs,
         });
       }
       if (type === "tool_start") {
@@ -2994,6 +3070,15 @@ export function App() {
         const citationGate = normalizeCitationGate(payload);
         if (citationGate) {
           store.setChannelState(channel, { citationGate }, { botId: BOT_ID });
+        }
+      }
+      if (type === "runtime_trace") {
+        const trace = normalizeRuntimeTrace(payload);
+        if (trace) {
+          store.applyControlEvent(channel, {
+            type: "runtime_trace",
+            ...trace,
+          });
         }
       }
       if (type === "mission_created") {
@@ -3550,6 +3635,64 @@ export function App() {
     store.resetSession(channel, getAccessToken);
   }, [getAccessToken, store]);
 
+  const handleStartExportSelection = useCallback(() => {
+    const channel = useChatStore.getState().activeChannel || DEFAULT_CHANNEL;
+    store.startSelectionMode(channel);
+  }, [store]);
+
+  const handleExportSelected = useCallback(() => {
+    const {
+      activeChannel: channel,
+      messages: localMessages,
+      serverMessages,
+      selectedMessages,
+    } = useChatStore.getState();
+    const selected = selectedMessages[channel];
+    if (!channel || !selected || selected.size === 0) {
+      store.setChannelState(channel || DEFAULT_CHANNEL, {
+        error: "Select at least one user or assistant message to export.",
+      }, { botId: BOT_ID });
+      return;
+    }
+
+    const combined = [
+      ...(localMessages[channel] ?? []),
+      ...(serverMessages[channel] ?? []),
+    ];
+    const normalized = normalizeSelectedChatExportMessages(combined, selected);
+    const unique = Array.from(
+      new Map(
+        normalized.map((message) => [
+          `${message.role}:${message.timestamp}:${message.content}`,
+          message,
+        ]),
+      ).values(),
+    );
+
+    if (unique.length === 0) {
+      store.setChannelState(channel, {
+        error: "Select at least one user or assistant message to export.",
+      }, { botId: BOT_ID });
+      return;
+    }
+
+    const exportedAt = new Date();
+    downloadMarkdownFile(
+      buildChatExportFilename({
+        botName: BOT_NAME,
+        channelName: channel,
+        exportedAt,
+      }),
+      buildChatExportMarkdown({
+        botName: BOT_NAME,
+        channelName: channel,
+        exportedAt,
+        messages: unique,
+      }),
+    );
+    store.exitSelectionMode();
+  }, [store]);
+
   const handleModelSelectionChange = useCallback((_nextModel: string, _nextRouter: string) => {
     setModelSelection(DEFAULT_MODEL);
     setRouterType(DEFAULT_ROUTER);
@@ -3709,6 +3852,22 @@ export function App() {
             )}
           </h1>
           <button
+            type="button"
+            onClick={handleStartExportSelection}
+            className="flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-[11px] text-secondary/55 transition-all duration-200 hover:bg-black/[0.04] hover:text-foreground/75"
+            aria-label="Export conversation"
+            title="Export conversation"
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <circle cx="18" cy="5" r="3" />
+              <circle cx="6" cy="12" r="3" />
+              <circle cx="18" cy="19" r="3" />
+              <line x1="8.59" y1="13.51" x2="15.42" y2="17.49" />
+              <line x1="15.41" y1="6.51" x2="8.59" y2="10.49" />
+            </svg>
+            <span>Export</span>
+          </button>
+          <button
             onClick={handleReset}
             className="px-2.5 py-1 text-[11px] text-secondary/50 hover:text-foreground/70 rounded-lg hover:bg-black/[0.04] transition-all duration-200"
           >
@@ -3740,7 +3899,7 @@ export function App() {
           onEnterSelectionMode={(msgId) => store.enterSelectionMode(activeChannel, msgId)}
           onSelectAll={() => store.selectAllMessages(activeChannel)}
           onDeselectAll={() => store.deselectAllMessages(activeChannel)}
-          onExportSelected={() => {}}
+          onExportSelected={handleExportSelected}
           onDeleteSelected={() => {
             const selected = store.selectedMessages[activeChannel];
             if (selected) store.removeMessages(activeChannel, selected, { botId: BOT_ID });

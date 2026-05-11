@@ -110,6 +110,29 @@ export type AgentEvent =
       toolName?: string;
     }
   | {
+      /**
+       * Runtime contract trace — public, bounded explanation of a
+       * verifier block, retry, or terminal abort. This is intentionally
+       * not a hidden prompt or chain-of-thought channel.
+       */
+      type: "runtime_trace";
+      turnId: string;
+      phase:
+        | "verifier_blocked"
+        | "retry_scheduled"
+        | "retry_aborted"
+        | "terminal_abort";
+      severity: "info" | "warning" | "error";
+      title: string;
+      detail?: string;
+      reasonCode?: string;
+      ruleId?: string;
+      attempt?: number;
+      maxAttempts?: number;
+      retryable?: boolean;
+      requiredAction?: string;
+    }
+  | {
       type: "turn_interrupted";
       turnId: string;
       handoffRequested: boolean;

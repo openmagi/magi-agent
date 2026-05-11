@@ -29,6 +29,7 @@ export interface FileSendOutput {
   channel?: ChannelRef;
   mode?: "document" | "photo";
   providerMessageId?: string;
+  deliveryAck?: "attachment_marker" | "provider_message_receipt";
 }
 
 export interface FileSendDeps {
@@ -152,14 +153,21 @@ export function makeFileSendTool(deps: FileSendDeps): Tool<FileSendInput, FileSe
               filename,
               channel: sourceChannel,
               mode,
-              ...(receipt.messageId ? { providerMessageId: receipt.messageId } : {}),
+              ...(receipt.messageId
+                ? {
+                    providerMessageId: receipt.messageId,
+                    deliveryAck: "provider_message_receipt" as const,
+                  }
+                : {}),
             },
             durationMs: Date.now() - start,
           };
         }
 
         const fileSendSh = path.join(deps.binDir, "file-send.sh");
-        const channel = input.channel || "General";
+        const channel =
+          input.channel ||
+          (sourceChannel?.type === "app" ? sourceChannel.channelId : "General");
 
         const { stdout, stderr, code } = await execScript(
           "sh",
@@ -199,6 +207,7 @@ export function makeFileSendTool(deps: FileSendDeps): Tool<FileSendInput, FileSe
             id: idMatch[1]!,
             filename,
             marker: markerMatch?.[0] || `[attachment:${idMatch[1]}:${filename}]`,
+            deliveryAck: "attachment_marker",
           },
           durationMs: Date.now() - start,
         };

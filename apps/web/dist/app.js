@@ -15997,6 +15997,7 @@ const DEFAULT_CHANNEL_STATE = {
   pendingGoalMissionTitle: null,
   inspectedSources: [],
   citationGate: null,
+  runtimeTraces: [],
   fileProcessing: false
 };
 const RESET_LIVE_RUN_STATE = {
@@ -16016,6 +16017,7 @@ const RESET_LIVE_RUN_STATE = {
   pendingGoalMissionTitle: null,
   inspectedSources: [],
   citationGate: null,
+  runtimeTraces: [],
   fileProcessing: false,
   reconnecting: false
 };
@@ -16115,7 +16117,7 @@ function shouldClearReconnecting(current, partial) {
   return isLiveStreamProgress(partial);
 }
 function isLiveStreamProgress(partial) {
-  return partial.hasTextContent === true || !!partial.streamingText || !!partial.thinkingText || (partial.activeTools?.length ?? 0) > 0 || !!partial.browserFrame || (partial.subagents?.length ?? 0) > 0 || (partial.missions?.length ?? 0) > 0 || !!partial.taskBoard?.tasks.length || (partial.inspectedSources?.length ?? 0) > 0 || !!partial.citationGate || partial.heartbeatElapsedMs !== void 0 || (partial.pendingInjectionCount ?? 0) > 0 || partial.turnPhase !== void 0 && partial.turnPhase !== null && partial.turnPhase !== "pending";
+  return partial.hasTextContent === true || !!partial.streamingText || !!partial.thinkingText || (partial.activeTools?.length ?? 0) > 0 || !!partial.browserFrame || (partial.subagents?.length ?? 0) > 0 || (partial.missions?.length ?? 0) > 0 || !!partial.taskBoard?.tasks.length || (partial.inspectedSources?.length ?? 0) > 0 || !!partial.citationGate || (partial.runtimeTraces?.length ?? 0) > 0 || partial.heartbeatElapsedMs !== void 0 || (partial.pendingInjectionCount ?? 0) > 0 || partial.turnPhase !== void 0 && partial.turnPhase !== null && partial.turnPhase !== "pending";
 }
 function getResetCounter(botId, channel) {
   try {
@@ -16200,6 +16202,25 @@ function upsertControlRequestList(requests, request) {
     ...requests.filter((item) => item.requestId !== request.requestId),
     request
   ]);
+}
+function appendRuntimeTrace(current, trace) {
+  return [...current ?? [], trace].slice(-12);
+}
+function runtimeTraceFromControlEvent(event) {
+  return {
+    turnId: event.turnId,
+    phase: event.phase,
+    severity: event.severity,
+    title: event.title,
+    ...event.detail ? { detail: event.detail } : {},
+    ...event.reasonCode ? { reasonCode: event.reasonCode } : {},
+    ...event.ruleId ? { ruleId: event.ruleId } : {},
+    ...typeof event.attempt === "number" ? { attempt: event.attempt } : {},
+    ...typeof event.maxAttempts === "number" ? { maxAttempts: event.maxAttempts } : {},
+    ...typeof event.retryable === "boolean" ? { retryable: event.retryable } : {},
+    ...event.requiredAction ? { requiredAction: event.requiredAction } : {},
+    receivedAt: event.receivedAt ?? Date.now()
+  };
 }
 function queuedPriorityRank(message) {
   if (message.priority === "now") return 0;
@@ -16418,6 +16439,10 @@ const useChatStore = create$1((set, get) => ({
     const srvMsgs = serverMessages[channel] ?? [];
     return srvMsgs.some((m) => m.role === "assistant" && (m.timestamp ?? 0) > lastRead);
   },
+  startSelectionMode: (channel) => set({
+    selectionMode: true,
+    selectedMessages: { [channel]: /* @__PURE__ */ new Set() }
+  }),
   enterSelectionMode: (channel, msgId) => set({
     selectionMode: true,
     selectedMessages: { [channel]: /* @__PURE__ */ new Set([msgId]) }
@@ -16550,6 +16575,20 @@ const useChatStore = create$1((set, get) => ({
     }
   })),
   applyControlEvent: (channel, event) => set((state) => {
+    if (event.type === "runtime_trace") {
+      const currentState = state.channelStates[channel] ?? DEFAULT_CHANNEL_STATE;
+      return {
+        channelStates: {
+          ...state.channelStates,
+          [channel]: mergeChannelState(currentState, {
+            runtimeTraces: appendRuntimeTrace(
+              currentState.runtimeTraces,
+              runtimeTraceFromControlEvent(event)
+            )
+          })
+        }
+      };
+    }
     const current = state.controlRequests[channel] ?? [];
     let next = current;
     if (event.type === "control_request_created") {
@@ -32313,7 +32352,7 @@ function modelProgressPreview(inputPreview2, outputPreview, language) {
   const elapsedMs = displayValue(input, ["elapsedMs"]);
   const elapsedSeconds = elapsedMs ? Math.max(1, Math.round(Number(elapsedMs) / 1e3)) : null;
   const elapsed = elapsedSeconds ? isKorean$6(language) ? `${elapsedSeconds}초째 작업 중` : `${elapsedSeconds}s elapsed` : void 0;
-  const action = stage === "completed" ? localized(language, "Model step finished", "모델 단계 완료") : localized(language, "Thinking through next step", "다음 단계 판단 중");
+  const action = stage === "completed" ? localized(language, "Model step finished", "모델 단계 완료") : stage === "heartbeat" ? localized(language, "Still working", "계속 작업 중") : localized(language, "Thinking through next step", "다음 단계 판단 중");
   const target = label && !/thinking through next step/i.test(label) ? bounded(label, MAX_TARGET_LENGTH) : elapsed;
   const snippet = snippetFrom([detail, output].filter(Boolean).join("\n"));
   return {
@@ -32661,6 +32700,11 @@ function statusFromMission(mission) {
       return "waiting";
   }
 }
+function statusFromRuntimeTrace(trace) {
+  if (trace.severity === "error") return "error";
+  if (trace.severity === "warning") return "waiting";
+  return "info";
+}
 function statusFromTask(task) {
   switch (task.status) {
     case "in_progress":
@@ -32689,6 +32733,34 @@ function taskMeta(task, language) {
 }
 function missionMeta(mission) {
   return `${mission.kind} ${mission.status}`;
+}
+function runtimeTraceLabel(trace, language) {
+  switch (trace.phase) {
+    case "retry_scheduled":
+      return t$5(language, "Retry scheduled", "재시도 예정");
+    case "retry_aborted":
+      return t$5(language, "Retry stopped", "재시도 중단");
+    case "terminal_abort":
+      return t$5(language, "Turn stopped", "턴 중단");
+    case "verifier_blocked":
+    default:
+      return t$5(language, "Runtime verifier blocked completion", "런타임 검증에서 완료 차단");
+  }
+}
+function runtimeTraceMeta(trace) {
+  const attempt = typeof trace.attempt === "number" && typeof trace.maxAttempts === "number" ? `${trace.attempt}/${trace.maxAttempts}` : void 0;
+  return [trace.reasonCode, attempt].filter(Boolean).join(" · ") || void 0;
+}
+function runtimeTraceRow(trace, language) {
+  return {
+    id: `trace:${trace.turnId}:${trace.receivedAt}:${trace.reasonCode ?? trace.phase}`,
+    group: "trace",
+    label: runtimeTraceLabel(trace, language),
+    detail: trace.requiredAction ?? trace.detail ?? trace.title,
+    status: statusFromRuntimeTrace(trace),
+    ...trace.detail && trace.requiredAction ? { snippet: trace.detail } : {},
+    ...runtimeTraceMeta(trace) ? { meta: runtimeTraceMeta(trace) } : {}
+  };
 }
 function subagentName(index2) {
   return SUBAGENT_NAMES$1[index2 % SUBAGENT_NAMES$1.length] ?? `Agent ${index2 + 1}`;
@@ -32829,6 +32901,9 @@ function deriveWorkConsoleRows({
       status: statusFromMission(mission),
       meta: missionMeta(mission)
     });
+  }
+  for (const trace of (channelState.runtimeTraces ?? []).slice(-6)) {
+    rows.push(runtimeTraceRow(trace, language));
   }
   for (const [index2, subagent] of (channelState.subagents ?? []).entries()) {
     rows.push({
@@ -34718,6 +34793,7 @@ const GROUP_LABELS = {
   subagent: "Helpers",
   task: "Plan",
   queue: "Queued messages",
+  trace: "Runtime proof",
   control: "Needs input"
 };
 const GROUP_LABELS_KO = {
@@ -34727,6 +34803,7 @@ const GROUP_LABELS_KO = {
   subagent: "도우미",
   task: "계획",
   queue: "대기 메시지",
+  trace: "런타임 증거",
   control: "입력 필요"
 };
 const INLINE_RUN_DETAIL_GROUPS = /* @__PURE__ */ new Set([
@@ -34734,6 +34811,7 @@ const INLINE_RUN_DETAIL_GROUPS = /* @__PURE__ */ new Set([
   "subagent",
   "task",
   "queue",
+  "trace",
   "control"
 ]);
 const MAX_DISPLAY_GOAL_CHARS = 140;
@@ -36798,6 +36876,69 @@ async function cancelActiveTurnWithQueueHandoff({
     drained: canDrain
   };
 }
+function stripAttachmentMarkers(content2) {
+  let cleaned = content2;
+  for (const marker of parseMarkers(content2)) {
+    cleaned = cleaned.replace(marker.fullMatch, "");
+  }
+  return cleaned.replace(/\[attachment:[0-9a-f-]{36}:[^\]]+\]/gi, "").replace(/\[Attachment: [^\]]+\]\(attachment:[^)]+\)/gi, "").trim();
+}
+function cleanChatExportContent(content2) {
+  const withoutKbContext = parseKbContextMarker(content2).text;
+  return stripAttachmentMarkers(withoutKbContext).trim();
+}
+function isExportableChatMessage(message) {
+  return message.role === "user" || message.role === "assistant";
+}
+function normalizeSelectedChatExportMessages(messages, selectedIds) {
+  return messages.filter(isExportableChatMessage).filter(
+    (message) => selectedIds.has(message.id) || typeof message.serverId === "string" && selectedIds.has(message.serverId)
+  ).sort(compareChatMessages).map((message) => ({
+    id: message.id,
+    role: message.role,
+    content: cleanChatExportContent(message.content),
+    timestamp: message.timestamp
+  })).filter((message) => message.content.trim().length > 0);
+}
+function formatExportTimestamp(timestamp) {
+  const date = new Date(timestamp);
+  const year = date.getUTCFullYear();
+  const month = `${date.getUTCMonth() + 1}`.padStart(2, "0");
+  const day = `${date.getUTCDate()}`.padStart(2, "0");
+  const hours = `${date.getUTCHours()}`.padStart(2, "0");
+  const minutes = `${date.getUTCMinutes()}`.padStart(2, "0");
+  return `${year}-${month}-${day} ${hours}:${minutes}`;
+}
+function roleLabel(role) {
+  return role === "user" ? "User" : "Assistant";
+}
+function buildChatExportMarkdown(input) {
+  const lines = [
+    "# Open Magi Chat Export",
+    "",
+    `- Bot: ${input.botName}`,
+    `- Channel: ${input.channelName}`,
+    `- Exported: ${input.exportedAt.toISOString()}`,
+    `- Messages: ${input.messages.length}`,
+    ""
+  ];
+  for (const message of input.messages) {
+    lines.push(`## ${roleLabel(message.role)} - ${formatExportTimestamp(message.timestamp)}`);
+    lines.push("");
+    lines.push(message.content.trim());
+    lines.push("");
+  }
+  return `${lines.join("\n").trim()}
+`;
+}
+function slugPart(value) {
+  const slug = value.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 60);
+  return slug || "chat";
+}
+function buildChatExportFilename(input) {
+  const day = input.exportedAt.toISOString().slice(0, 10);
+  return `open-magi-${slugPart(input.botName)}-${slugPart(input.channelName)}-${day}.md`;
+}
 const BOT_ID = "local";
 const BOT_NAME = "Magi_Local";
 const DEFAULT_CHANNEL = "general";
@@ -36824,6 +36965,17 @@ const storage = {
   sessionKey: "magi.agent.app.sessionKey",
   modelOverride: "magi.agent.app.modelOverride"
 };
+function downloadMarkdownFile(filename, markdown) {
+  const blob = new Blob([markdown], { type: "text/markdown;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = filename;
+  document.body.appendChild(anchor);
+  anchor.click();
+  document.body.removeChild(anchor);
+  URL.revokeObjectURL(url);
+}
 function defaultChannel() {
   return {
     id: "local-general",
@@ -37101,6 +37253,35 @@ function normalizeCitationGate(payload) {
     ...typeof payload.detail === "string" ? { detail: payload.detail } : {}
   };
 }
+function runtimeTracePhase(value) {
+  if (value === "retry_scheduled" || value === "retry_aborted" || value === "terminal_abort") {
+    return value;
+  }
+  return "verifier_blocked";
+}
+function runtimeTraceSeverity(value) {
+  if (value === "warning" || value === "error") return value;
+  return "info";
+}
+function normalizeRuntimeTrace(payload) {
+  const turnId = asString(payload.turnId);
+  const title = asString(payload.title);
+  if (!turnId || !title) return null;
+  return {
+    turnId,
+    title,
+    phase: runtimeTracePhase(payload.phase),
+    severity: runtimeTraceSeverity(payload.severity),
+    receivedAt: Date.now(),
+    ...typeof payload.detail === "string" ? { detail: payload.detail } : {},
+    ...typeof payload.reasonCode === "string" ? { reasonCode: payload.reasonCode } : {},
+    ...typeof payload.ruleId === "string" ? { ruleId: payload.ruleId } : {},
+    ...typeof payload.attempt === "number" ? { attempt: payload.attempt } : {},
+    ...typeof payload.maxAttempts === "number" ? { maxAttempts: payload.maxAttempts } : {},
+    ...typeof payload.retryable === "boolean" ? { retryable: payload.retryable } : {},
+    ...typeof payload.requiredAction === "string" ? { requiredAction: payload.requiredAction } : {}
+  };
+}
 function missionStatus(value) {
   if (value === "queued" || value === "running" || value === "blocked" || value === "waiting" || value === "completed" || value === "failed" || value === "cancelled" || value === "paused") {
     return value;
@@ -37202,6 +37383,39 @@ function runtimeStatusLabel(status) {
   if (status === "unavailable") return "offline";
   return "not checked";
 }
+function DashboardPageHeader({
+  eyebrow,
+  title,
+  description,
+  action
+}) {
+  return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "mb-7 flex flex-col gap-4 border-b border-black/[0.06] pb-5 sm:flex-row sm:items-end sm:justify-between", children: [
+    /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "min-w-0", children: [
+      eyebrow && /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "mb-2 text-xs font-semibold uppercase tracking-[0.18em] text-secondary/70", children: eyebrow }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx("h1", { className: "text-[1.7rem] font-semibold leading-tight text-foreground", children: title }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "mt-2 max-w-2xl text-sm leading-6 text-secondary", children: description })
+    ] }),
+    action && /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "shrink-0", children: action })
+  ] });
+}
+function StatusPill({
+  status,
+  children
+}) {
+  const tones = {
+    active: "border-emerald-500/20 bg-emerald-500/10 text-emerald-700",
+    checking: "border-amber-500/20 bg-amber-500/10 text-amber-700",
+    unavailable: "border-red-500/20 bg-red-500/10 text-red-600",
+    not_checked: "border-black/10 bg-gray-100 text-secondary",
+    ok: "border-emerald-500/20 bg-emerald-500/10 text-emerald-700",
+    muted: "border-black/10 bg-gray-100 text-secondary",
+    warning: "border-amber-500/20 bg-amber-500/10 text-amber-700"
+  };
+  return /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: `inline-flex min-h-7 items-center rounded-full border px-2.5 text-xs font-semibold ${tones[status]}`, children });
+}
+function EmptyState({ children }) {
+  return /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "rounded-lg border border-dashed border-black/[0.10] bg-gray-50/70 px-4 py-8 text-center text-sm leading-6 text-secondary", children });
+}
 function DashboardSidebar({
   activeRoute,
   runtimeStatus,
@@ -37228,29 +37442,32 @@ function DashboardSidebar({
       {
         type: "button",
         onClick: () => onNavigate(route),
-        className: `block w-full rounded-xl px-3 py-2.5 text-left text-sm font-medium transition-colors duration-200 cursor-pointer ${active ? "bg-primary/10 text-primary-light border border-primary/25" : "text-gray-700 hover:text-gray-900 hover:bg-gray-100"}`,
+        className: `flex min-h-11 w-full items-center rounded-lg px-3 text-left text-sm font-semibold transition-colors duration-200 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30 ${active ? "border border-primary/20 bg-primary/10 text-primary-light" : "border border-transparent text-gray-600 hover:bg-gray-100 hover:text-gray-950"}`,
         children: label
       },
       route
     );
   };
-  return /* @__PURE__ */ jsxRuntimeExports.jsxs("aside", { className: "hidden h-screen w-64 shrink-0 flex-col border-r border-gray-200 bg-gray-50 p-6 md:flex", children: [
+  return /* @__PURE__ */ jsxRuntimeExports.jsxs("aside", { className: "hidden h-screen w-72 shrink-0 flex-col border-r border-black/[0.07] bg-white p-5 md:flex", children: [
     /* @__PURE__ */ jsxRuntimeExports.jsxs(
       "button",
       {
         type: "button",
         onClick: () => onNavigate("overview"),
-        className: "mb-10 flex items-center gap-2 text-left",
+        className: "mb-7 flex min-h-11 items-center gap-3 rounded-lg text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30",
         "aria-label": "Open Magi dashboard",
         children: [
-          /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "flex h-6 w-6 items-center justify-center rounded-md bg-primary text-xs font-bold text-white", children: "M" }),
-          /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "text-sm font-semibold text-foreground", children: "Open Magi" })
+          /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "flex h-9 w-9 items-center justify-center rounded-lg bg-primary text-sm font-bold text-white", children: "M" }),
+          /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "min-w-0", children: [
+            /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "block text-sm font-semibold text-foreground", children: "Open Magi" }),
+            /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "block text-xs text-secondary", children: "Local operator" })
+          ] })
         ]
       }
     ),
-    /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "mb-4 rounded-xl border border-gray-200 bg-white px-3 py-2.5", children: [
+    /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "mb-5 rounded-xl border border-black/[0.08] bg-gray-50 px-3.5 py-3", children: [
       /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "min-w-0 truncate text-sm font-semibold text-foreground", children: BOT_NAME }),
-      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "mt-1 flex items-center gap-2 text-sm text-secondary", children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "mt-2 flex items-center gap-2 text-xs font-medium text-secondary", children: [
         /* @__PURE__ */ jsxRuntimeExports.jsx(
           "span",
           {
@@ -37261,21 +37478,21 @@ function DashboardSidebar({
       ] })
     ] }),
     /* @__PURE__ */ jsxRuntimeExports.jsxs("nav", { className: "min-h-0 flex-1 space-y-1 overflow-y-auto", children: [
-      /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "pb-1", children: /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "px-3 text-xs font-medium uppercase tracking-wider text-gray-400", children: "Chat" }) }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "pb-1", children: /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "px-3 text-[11px] font-semibold uppercase tracking-[0.18em] text-gray-400", children: "Chat" }) }),
       /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "space-y-1", children: primaryItems.map(renderItem) }),
       /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "pt-4 pb-1", children: [
-        /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "mb-3 border-t border-gray-200" }),
-        /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "px-3 text-xs font-medium uppercase tracking-wider text-gray-400", children: "Local Runtime" })
+        /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "mb-3 border-t border-black/[0.07]" }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "px-3 text-[11px] font-semibold uppercase tracking-[0.18em] text-gray-400", children: "Local Runtime" })
       ] }),
       /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "space-y-1", children: workspaceItems.map(renderItem) })
     ] }),
-    /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "space-y-2 border-t border-gray-200 pt-4", children: [
+    /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "space-y-2 border-t border-black/[0.07] pt-4", children: [
       /* @__PURE__ */ jsxRuntimeExports.jsx(
         "button",
         {
           type: "button",
           onClick: onRefresh,
-          className: "w-full rounded-xl px-3 py-2.5 text-left text-sm font-medium text-gray-700 transition-colors hover:bg-gray-100 hover:text-gray-900",
+          className: "flex min-h-11 w-full items-center rounded-lg px-3 text-left text-sm font-semibold text-gray-600 transition-colors hover:bg-gray-100 hover:text-gray-950 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30",
           children: "Refresh"
         }
       ),
@@ -37284,7 +37501,7 @@ function DashboardSidebar({
         {
           type: "button",
           onClick: () => onNavigate("chat"),
-          className: "w-full rounded-xl px-3 py-2.5 text-left text-sm font-medium text-gray-700 transition-colors hover:bg-gray-100 hover:text-gray-900",
+          className: "flex min-h-11 w-full items-center rounded-lg px-3 text-left text-sm font-semibold text-gray-600 transition-colors hover:bg-gray-100 hover:text-gray-950 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30",
           children: "Back to chat"
         }
       )
@@ -37296,17 +37513,17 @@ function DashboardCard({
   children,
   action
 }) {
-  return /* @__PURE__ */ jsxRuntimeExports.jsxs("section", { className: "glass rounded-2xl p-6", children: [
-    (title || action) && /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "mb-4 flex items-center justify-between gap-3", children: [
-      title ? /* @__PURE__ */ jsxRuntimeExports.jsx("h2", { className: "text-base font-semibold text-foreground", children: title }) : /* @__PURE__ */ jsxRuntimeExports.jsx("span", {}),
+  return /* @__PURE__ */ jsxRuntimeExports.jsxs("section", { className: "rounded-xl border border-black/[0.08] bg-white p-5 shadow-[0_10px_30px_rgba(15,23,42,0.035)]", children: [
+    (title || action) && /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "mb-4 flex min-h-9 items-center justify-between gap-3", children: [
+      title ? /* @__PURE__ */ jsxRuntimeExports.jsx("h2", { className: "text-sm font-semibold text-foreground", children: title }) : /* @__PURE__ */ jsxRuntimeExports.jsx("span", {}),
       action
     ] }),
     children
   ] });
 }
 function MetricTile({ label, value }) {
-  return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "rounded-xl bg-gray-50 px-4 py-3", children: [
-    /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "text-xs font-medium uppercase tracking-[0.08em] text-secondary/70", children: label }),
+  return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "rounded-lg border border-black/[0.06] bg-gray-50 px-4 py-3", children: [
+    /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "text-[11px] font-semibold uppercase tracking-[0.14em] text-secondary/70", children: label }),
     /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "mt-1 text-2xl font-semibold text-foreground", children: value })
   ] });
 }
@@ -37319,8 +37536,8 @@ function ButtonLike({
   className = ""
 }) {
   const variants = {
-    primary: "bg-primary text-white hover:bg-primary-light glow-sm",
-    secondary: "border border-black/10 bg-transparent text-foreground hover:border-primary/40 hover:bg-black/[0.04]",
+    primary: "bg-primary text-white hover:bg-primary-light shadow-[0_8px_18px_rgba(124,58,237,0.18)]",
+    secondary: "border border-black/10 bg-white text-foreground hover:border-primary/35 hover:bg-gray-50",
     ghost: "bg-transparent text-secondary hover:bg-black/[0.04] hover:text-foreground",
     danger: "border border-red-500/20 bg-red-500/10 text-red-500 hover:bg-red-500/15"
   };
@@ -37330,7 +37547,7 @@ function ButtonLike({
       type,
       disabled,
       onClick,
-      className: `inline-flex min-h-[44px] items-center justify-center rounded-xl px-5 py-2.5 text-sm font-semibold transition-all duration-200 disabled:pointer-events-none disabled:opacity-40 ${variants[variant]} ${className}`,
+      className: `inline-flex min-h-[44px] items-center justify-center rounded-lg px-5 py-2.5 text-sm font-semibold transition-all duration-200 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30 disabled:pointer-events-none disabled:opacity-40 ${variants[variant]} ${className}`,
       children
     }
   );
@@ -37343,7 +37560,7 @@ function SettingsInput({
   type = "text"
 }) {
   return /* @__PURE__ */ jsxRuntimeExports.jsxs("label", { className: "block", children: [
-    /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "mb-1.5 block text-sm font-medium text-secondary", children: label }),
+    /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "mb-1.5 block text-xs font-semibold uppercase tracking-[0.12em] text-secondary/75", children: label }),
     /* @__PURE__ */ jsxRuntimeExports.jsx(
       "input",
       {
@@ -37351,7 +37568,7 @@ function SettingsInput({
         type,
         placeholder,
         onChange: (event) => onChange(event.target.value),
-        className: "w-full rounded-xl border border-black/10 bg-white px-4 py-3 text-foreground outline-none transition-colors duration-200 focus:border-primary/50 focus:ring-1 focus:ring-primary/20"
+        className: "min-h-11 w-full rounded-lg border border-black/10 bg-white px-3.5 py-2.5 text-sm font-medium text-foreground outline-none transition-colors duration-200 placeholder:text-secondary/45 focus:border-primary/45 focus:ring-4 focus:ring-primary/10"
       }
     )
   ] });
@@ -37363,13 +37580,13 @@ function SettingsDropdown({
   options
 }) {
   return /* @__PURE__ */ jsxRuntimeExports.jsxs("label", { className: "block", children: [
-    /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "mb-1.5 block text-sm font-medium text-secondary", children: label }),
+    /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "mb-1.5 block text-xs font-semibold uppercase tracking-[0.12em] text-secondary/75", children: label }),
     /* @__PURE__ */ jsxRuntimeExports.jsx(
       "select",
       {
         value,
         onChange: (event) => onChange(event.target.value),
-        className: "w-full rounded-xl border border-black/10 bg-white px-4 py-3 text-foreground outline-none transition-colors duration-200 focus:border-primary/50 focus:ring-1 focus:ring-primary/20",
+        className: "min-h-11 w-full rounded-lg border border-black/10 bg-white px-3.5 py-2.5 text-sm font-medium text-foreground outline-none transition-colors duration-200 focus:border-primary/45 focus:ring-4 focus:ring-primary/10",
         children: options.map((option) => /* @__PURE__ */ jsxRuntimeExports.jsx("option", { value: option.value, children: option.label }, option.value))
       }
     )
@@ -37405,17 +37622,17 @@ function CollapsibleCard({
           {
             type: "button",
             onClick: () => setOpen((prev) => !prev),
-            className: "-m-6 flex w-[calc(100%+3rem)] items-center justify-between p-5 text-left transition-colors hover:bg-gray-50",
+            className: "-m-5 flex min-h-[58px] w-[calc(100%+2.5rem)] items-center justify-between rounded-xl p-5 text-left transition-colors hover:bg-gray-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30",
             children: [
               /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "min-w-0", children: [
-                /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "font-medium text-foreground", children: title }),
+                /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "text-sm font-semibold text-foreground", children: title }),
                 subtitle && /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "mt-1 text-xs text-secondary", children: subtitle })
               ] }),
               /* @__PURE__ */ jsxRuntimeExports.jsx(ChevronIcon, { expanded: open })
             ]
           }
         ),
-        open && /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "mt-6 border-t border-gray-200 pt-5", children })
+        open && /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "mt-5 border-t border-black/[0.06] pt-5", children })
       ]
     }
   );
@@ -37428,28 +37645,30 @@ function OverviewDashboard({
   onNavigate
 }) {
   const docCount = kbCollections.reduce((sum, collection) => sum + collection.docs.length, 0);
-  return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "max-w-3xl space-y-6", children: [
-    /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "mb-8", children: [
-      /* @__PURE__ */ jsxRuntimeExports.jsx("h1", { className: "text-2xl font-bold text-foreground", children: "Dashboard" }),
-      /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "mt-1 text-sm text-secondary", children: "Manage your local Magi agent and monitor runtime performance." })
-    ] }),
+  return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "max-w-5xl space-y-6", children: [
+    /* @__PURE__ */ jsxRuntimeExports.jsx(
+      DashboardPageHeader,
+      {
+        eyebrow: "Local Runtime",
+        title: "Dashboard",
+        description: "Manage your local Magi agent, runtime state, workspace knowledge, and operator files from one console.",
+        action: /* @__PURE__ */ jsxRuntimeExports.jsx(ButtonLike, { onClick: () => onNavigate("chat"), children: "Open Chat" })
+      }
+    ),
     /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "space-y-5", children: [
-      /* @__PURE__ */ jsxRuntimeExports.jsx(DashboardCard, { title: "Agent", children: /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex flex-col gap-5 sm:flex-row sm:items-start sm:justify-between", children: [
-        /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { children: [
-          /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center gap-3", children: [
-            /* @__PURE__ */ jsxRuntimeExports.jsx(
-              "span",
-              {
-                className: `h-2.5 w-2.5 rounded-full ${runtimeStatus === "active" ? "bg-emerald-400" : "bg-gray-300"}`
-              }
-            ),
-            /* @__PURE__ */ jsxRuntimeExports.jsx("h3", { className: "text-xl font-semibold text-foreground", children: BOT_NAME }),
-            /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "rounded-full border border-emerald-500/20 bg-emerald-500/10 px-3 py-1 text-xs font-medium text-emerald-600", children: runtimeStatusLabel(runtimeStatus) })
-          ] }),
-          /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "mt-2 max-w-2xl text-sm leading-6 text-secondary", children: "Self-hosted Magi runtime with local chat, workspace knowledge, runtime proof, editable operator files, and your configured LLM provider." })
+      /* @__PURE__ */ jsxRuntimeExports.jsx(DashboardCard, { title: "Agent", children: /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "flex flex-col gap-5 sm:flex-row sm:items-start sm:justify-between", children: /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center gap-3", children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsx(
+            "span",
+            {
+              className: `h-2.5 w-2.5 rounded-full ${runtimeStatus === "active" ? "bg-emerald-400" : "bg-gray-300"}`
+            }
+          ),
+          /* @__PURE__ */ jsxRuntimeExports.jsx("h3", { className: "text-xl font-semibold text-foreground", children: BOT_NAME }),
+          /* @__PURE__ */ jsxRuntimeExports.jsx(StatusPill, { status: runtimeStatus, children: runtimeStatusLabel(runtimeStatus) })
         ] }),
-        /* @__PURE__ */ jsxRuntimeExports.jsx(ButtonLike, { onClick: () => onNavigate("chat"), children: "Open Chat" })
-      ] }) }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "mt-2 max-w-2xl text-sm leading-6 text-secondary", children: "Self-hosted Magi runtime with local chat, workspace knowledge, runtime proof, editable operator files, and your configured LLM provider." })
+      ] }) }) }),
       /* @__PURE__ */ jsxRuntimeExports.jsx(DashboardCard, { title: "Runtime", children: /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "grid gap-3 sm:grid-cols-2 lg:grid-cols-4", children: [
         /* @__PURE__ */ jsxRuntimeExports.jsx(MetricTile, { label: "Sessions", value: runtimeItemCount(runtimeSnapshot, "sessions") }),
         /* @__PURE__ */ jsxRuntimeExports.jsx(MetricTile, { label: "Tasks", value: runtimeItemCount(runtimeSnapshot, "tasks") }),
@@ -37470,7 +37689,7 @@ function OverviewDashboard({
         {
           type: "button",
           onClick: () => onNavigate(item.route),
-          className: "block w-full rounded-xl border border-gray-100 bg-gray-50 px-4 py-3 text-left transition hover:border-gray-200 hover:bg-white",
+          className: "block min-h-16 w-full rounded-lg border border-black/[0.06] bg-gray-50 px-4 py-3 text-left transition hover:border-primary/20 hover:bg-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30",
           children: [
             /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "text-sm font-semibold text-foreground", children: item.title }),
             /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "mt-1 text-xs text-secondary", children: item.detail })
@@ -37505,17 +37724,22 @@ function SettingsDashboard({
   const updateDraft = reactExports.useCallback((patch2) => {
     setDraft((prev) => prev ? { ...prev, ...patch2 } : prev);
   }, []);
-  return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "max-w-3xl space-y-5", children: [
-    /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "mb-8", children: [
-      /* @__PURE__ */ jsxRuntimeExports.jsx("h1", { className: "text-2xl font-bold text-foreground", children: "Settings" }),
-      /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "mt-1 text-sm text-secondary", children: "Configure the self-hosted runtime, provider, and local workspace." })
-    ] }),
+  return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "max-w-4xl space-y-5", children: [
+    /* @__PURE__ */ jsxRuntimeExports.jsx(
+      DashboardPageHeader,
+      {
+        eyebrow: "Configuration",
+        title: "Settings",
+        description: "Configure the local runtime, provider endpoint, workspace path, and safeguards used by the self-hosted agent.",
+        action: /* @__PURE__ */ jsxRuntimeExports.jsx(StatusPill, { status: runtimeStatus, children: runtimeStatusLabel(runtimeStatus) })
+      }
+    ),
     /* @__PURE__ */ jsxRuntimeExports.jsx(
       DashboardCard,
       {
         title: "Model",
         action: configLoading ? /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "rounded-full bg-gray-100 px-3 py-1 text-xs font-semibold text-secondary", children: "Loading" }) : null,
-        children: !draft ? /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "rounded-xl border border-dashed border-black/[0.08] px-4 py-8 text-center text-sm text-secondary", children: "No config loaded yet. Save a local provider below to create `magi-agent.yaml`." }) : /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "space-y-4", children: [
+        children: !draft ? /* @__PURE__ */ jsxRuntimeExports.jsx(EmptyState, { children: "No config loaded yet. Save a local provider below to create `magi-agent.yaml`." }) : /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "space-y-4", children: [
           configNotice && /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "rounded-xl border border-emerald-500/20 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-700", children: configNotice }),
           configError && /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "rounded-xl border border-red-500/20 bg-red-500/10 px-4 py-3 text-sm text-red-500", children: configError }),
           /* @__PURE__ */ jsxRuntimeExports.jsx(
@@ -37722,17 +37946,21 @@ function KnowledgeDashboard({
     [onUpload]
   );
   return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "max-w-4xl space-y-6", children: [
-    /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "mb-8", children: [
-      /* @__PURE__ */ jsxRuntimeExports.jsx("h1", { className: "text-2xl font-bold text-foreground", children: "Knowledge" }),
-      /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "mt-1 text-sm text-secondary", children: "Upload and inspect the local workspace KB used by the self-hosted agent." })
-    ] }),
+    /* @__PURE__ */ jsxRuntimeExports.jsx(
+      DashboardPageHeader,
+      {
+        eyebrow: "Workspace KB",
+        title: "Knowledge",
+        description: "Upload and inspect local documents that the self-hosted runtime can search during a mission.",
+        action: /* @__PURE__ */ jsxRuntimeExports.jsx(ButtonLike, { variant: "secondary", onClick: onRefresh, disabled: refreshing, children: refreshing ? "Refreshing..." : "Refresh" })
+      }
+    ),
     /* @__PURE__ */ jsxRuntimeExports.jsxs(
       DashboardCard,
       {
         title: "Workspace Knowledge",
-        action: /* @__PURE__ */ jsxRuntimeExports.jsx(ButtonLike, { variant: "secondary", onClick: onRefresh, disabled: refreshing, children: refreshing ? "Refreshing..." : "Refresh" }),
         children: [
-          /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "mb-5 rounded-xl border border-dashed border-primary/20 bg-primary/5 px-4 py-5", children: /* @__PURE__ */ jsxRuntimeExports.jsxs("label", { className: "block cursor-pointer text-center", children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "mb-5 rounded-lg border border-dashed border-primary/25 bg-primary/[0.04] px-4 py-5", children: /* @__PURE__ */ jsxRuntimeExports.jsxs("label", { className: "block cursor-pointer text-center", children: [
             /* @__PURE__ */ jsxRuntimeExports.jsx(
               "input",
               {
@@ -37747,7 +37975,7 @@ function KnowledgeDashboard({
           ] }) }),
           uploadNotice && /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "mb-3 rounded-xl bg-emerald-50 px-3 py-2 text-xs text-emerald-700", children: uploadNotice }),
           uploadError && /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "mb-3 rounded-xl bg-red-50 px-3 py-2 text-xs text-red-500", children: uploadError }),
-          loading ? /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "rounded-xl border border-dashed border-black/[0.08] px-4 py-8 text-center text-sm text-secondary", children: "Loading knowledge..." }) : docs2.length === 0 ? /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "rounded-xl border border-dashed border-black/[0.08] px-4 py-8 text-center text-sm text-secondary", children: "No local KB documents yet." }) : /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "divide-y divide-black/[0.06] overflow-hidden rounded-xl border border-black/[0.08]", children: docs2.map((doc) => /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "px-4 py-3", children: [
+          loading ? /* @__PURE__ */ jsxRuntimeExports.jsx(EmptyState, { children: "Loading knowledge..." }) : docs2.length === 0 ? /* @__PURE__ */ jsxRuntimeExports.jsx(EmptyState, { children: "No local KB documents yet." }) : /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "divide-y divide-black/[0.06] overflow-hidden rounded-lg border border-black/[0.08]", children: docs2.map((doc) => /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "px-4 py-3", children: [
             /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "text-sm font-semibold text-foreground", children: doc.filename }),
             /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "mt-1 text-xs text-secondary", children: doc.collectionName })
           ] }, `${doc.collectionName}:${doc.id}`)) })
@@ -37813,16 +38041,20 @@ function WorkspaceDashboard({
     }
   }, [editedContent, onSaveFile, selectedPath]);
   return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "space-y-6", children: [
-    /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "mb-8", children: [
-      /* @__PURE__ */ jsxRuntimeExports.jsx("h1", { className: "text-2xl font-bold text-foreground", children: "Workspace" }),
-      /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "mt-1 text-sm text-secondary", children: "Edit local prompts, contracts, harness rules, hooks, memory, compaction files, and artifacts." })
-    ] }),
+    /* @__PURE__ */ jsxRuntimeExports.jsx(
+      DashboardPageHeader,
+      {
+        eyebrow: "Operator Files",
+        title: "Workspace",
+        description: "Edit local prompts, contracts, harness rules, hooks, memory, compaction files, and artifacts.",
+        action: /* @__PURE__ */ jsxRuntimeExports.jsx(ButtonLike, { variant: "secondary", onClick: onRefresh, disabled: refreshing, children: refreshing ? "Refreshing..." : "Refresh" })
+      }
+    ),
     /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "grid gap-5 xl:grid-cols-[minmax(0,420px)_minmax(0,1fr)]", children: [
       /* @__PURE__ */ jsxRuntimeExports.jsxs(
         DashboardCard,
         {
           title: "Files",
-          action: /* @__PURE__ */ jsxRuntimeExports.jsx(ButtonLike, { variant: "secondary", onClick: onRefresh, disabled: refreshing, children: refreshing ? "Refreshing..." : "Refresh" }),
           children: [
             /* @__PURE__ */ jsxRuntimeExports.jsx(
               "input",
@@ -37830,15 +38062,15 @@ function WorkspaceDashboard({
                 value: query,
                 onChange: (event) => setQuery(event.target.value),
                 placeholder: "Filter files...",
-                className: "mb-4 w-full rounded-xl border border-black/[0.08] bg-white px-3 py-2 text-sm outline-none transition focus:border-primary/40 focus:ring-4 focus:ring-primary/10"
+                className: "mb-4 min-h-11 w-full rounded-lg border border-black/[0.08] bg-white px-3.5 py-2.5 text-sm outline-none transition focus:border-primary/40 focus:ring-4 focus:ring-primary/10"
               }
             ),
-            loading ? /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "rounded-xl border border-dashed border-black/[0.08] px-4 py-8 text-center text-sm text-secondary", children: "Loading workspace..." }) : filteredFiles.length === 0 ? /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "rounded-xl border border-dashed border-black/[0.08] px-4 py-8 text-center text-sm text-secondary", children: "No editable workspace files found." }) : /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "max-h-[620px] divide-y divide-black/[0.06] overflow-y-auto rounded-xl border border-black/[0.08]", children: filteredFiles.slice(0, 160).map((file) => /* @__PURE__ */ jsxRuntimeExports.jsxs(
+            loading ? /* @__PURE__ */ jsxRuntimeExports.jsx(EmptyState, { children: "Loading workspace..." }) : filteredFiles.length === 0 ? /* @__PURE__ */ jsxRuntimeExports.jsx(EmptyState, { children: "No editable workspace files found." }) : /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "max-h-[620px] divide-y divide-black/[0.06] overflow-y-auto rounded-lg border border-black/[0.08]", children: filteredFiles.slice(0, 160).map((file) => /* @__PURE__ */ jsxRuntimeExports.jsxs(
               "button",
               {
                 type: "button",
                 onClick: () => void openFile(file.path),
-                className: `block w-full px-4 py-3 text-left transition hover:bg-gray-50 ${selectedPath === file.path ? "bg-primary/[0.06]" : "bg-white"}`,
+                className: `block min-h-14 w-full px-4 py-3 text-left transition hover:bg-gray-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/30 ${selectedPath === file.path ? "bg-primary/[0.06]" : "bg-white"}`,
                 children: [
                   /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "truncate text-sm font-semibold text-foreground", children: file.path }),
                   /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "mt-1 text-xs text-secondary", children: [
@@ -37867,13 +38099,13 @@ function WorkspaceDashboard({
           children: [
             notice && /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "mb-3 rounded-xl bg-emerald-50 px-3 py-2 text-xs text-emerald-700", children: notice }),
             error && /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "mb-3 rounded-xl bg-red-50 px-3 py-2 text-xs text-red-500", children: error }),
-            !selectedPath ? /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "rounded-xl border border-dashed border-black/[0.08] px-4 py-10 text-center text-sm text-secondary", children: "Select a workspace file to view or edit it." }) : fileLoading ? /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "rounded-xl border border-dashed border-black/[0.08] px-4 py-10 text-center text-sm text-secondary", children: "Loading file..." }) : /* @__PURE__ */ jsxRuntimeExports.jsx(
+            !selectedPath ? /* @__PURE__ */ jsxRuntimeExports.jsx(EmptyState, { children: "Select a workspace file to view or edit it." }) : fileLoading ? /* @__PURE__ */ jsxRuntimeExports.jsx(EmptyState, { children: "Loading file..." }) : /* @__PURE__ */ jsxRuntimeExports.jsx(
               "textarea",
               {
                 value: editedContent,
                 onChange: (event) => setEditedContent(event.target.value),
                 spellCheck: false,
-                className: "h-[520px] w-full resize-none rounded-xl border border-black/[0.08] bg-white px-4 py-3 font-mono text-sm leading-6 text-foreground outline-none transition focus:border-primary/40 focus:ring-4 focus:ring-primary/10"
+                className: "h-[520px] w-full resize-none rounded-lg border border-black/[0.08] bg-white px-4 py-3 font-mono text-sm leading-6 text-foreground outline-none transition focus:border-primary/40 focus:ring-4 focus:ring-primary/10"
               }
             )
           ]
@@ -38023,25 +38255,20 @@ function MemoryDashboard({
   const selectedCount = selectedPaths.size;
   const dailyPaths = memoryFiles.map((file) => file.path).filter((path2) => path2.startsWith("memory/daily/"));
   return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "space-y-6", children: [
-    /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "mb-8", children: [
-      /* @__PURE__ */ jsxRuntimeExports.jsx("h1", { className: "text-2xl font-bold text-foreground", children: "Memory" }),
-      /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "mt-1 text-sm text-secondary", children: "Browse, search, edit, compact, and reindex Hipocampus memory from the local runtime." })
-    ] }),
+    /* @__PURE__ */ jsxRuntimeExports.jsx(
+      DashboardPageHeader,
+      {
+        eyebrow: "Hipocampus",
+        title: "Memory",
+        description: "Browse, search, edit, compact, and reindex local memory used by the runtime.",
+        action: /* @__PURE__ */ jsxRuntimeExports.jsx(ButtonLike, { variant: "secondary", onClick: onRefresh, disabled: refreshing, children: refreshing ? "Refreshing..." : "Refresh" })
+      }
+    ),
     /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "grid gap-5 xl:grid-cols-[minmax(0,420px)_minmax(0,1fr)]", children: [
       /* @__PURE__ */ jsxRuntimeExports.jsxs(
         DashboardCard,
         {
           title: "Memory Files",
-          action: /* @__PURE__ */ jsxRuntimeExports.jsx(
-            "button",
-            {
-              type: "button",
-              onClick: onRefresh,
-              disabled: refreshing,
-              className: "rounded-xl bg-gray-100 px-3 py-1.5 text-sm font-semibold text-foreground transition hover:bg-gray-200 disabled:opacity-50",
-              children: refreshing ? "Refreshing..." : "Refresh"
-            }
-          ),
           children: [
             /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "mb-4 grid gap-3 sm:grid-cols-2", children: [
               /* @__PURE__ */ jsxRuntimeExports.jsx(MetricTile, { label: "Files", value: memoryFiles.length }),
@@ -38067,19 +38294,10 @@ function MemoryDashboard({
                     if (event.key === "Enter") void runSearch();
                   },
                   placeholder: "Search memory...",
-                  className: "min-w-0 flex-1 rounded-xl border border-black/[0.08] bg-white px-3 py-2 text-sm outline-none transition focus:border-primary/40 focus:ring-4 focus:ring-primary/10"
+                  className: "min-h-11 min-w-0 flex-1 rounded-lg border border-black/[0.08] bg-white px-3.5 py-2.5 text-sm outline-none transition focus:border-primary/40 focus:ring-4 focus:ring-primary/10"
                 }
               ),
-              /* @__PURE__ */ jsxRuntimeExports.jsx(
-                "button",
-                {
-                  type: "button",
-                  onClick: () => void runSearch(),
-                  disabled: searching,
-                  className: "rounded-xl bg-primary px-3 py-2 text-sm font-semibold text-white transition hover:bg-primary/90 disabled:opacity-50",
-                  children: searching ? "Searching" : "Search"
-                }
-              )
+              /* @__PURE__ */ jsxRuntimeExports.jsx(ButtonLike, { onClick: () => void runSearch(), disabled: searching, className: "px-4", children: searching ? "Searching" : "Search" })
             ] }),
             /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "mb-4 flex flex-wrap gap-2", children: [
               /* @__PURE__ */ jsxRuntimeExports.jsxs(
@@ -38088,7 +38306,7 @@ function MemoryDashboard({
                   type: "button",
                   onClick: () => void deletePaths(Array.from(selectedPaths)),
                   disabled: busy || selectedCount === 0,
-                  className: "rounded-xl bg-gray-100 px-3 py-1.5 text-xs font-semibold text-foreground transition hover:bg-gray-200 disabled:opacity-50",
+                  className: "min-h-9 rounded-lg bg-gray-100 px-3 text-xs font-semibold text-foreground transition hover:bg-gray-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30 disabled:opacity-50",
                   children: [
                     "Delete selected",
                     selectedCount > 0 ? ` (${selectedCount})` : ""
@@ -38101,7 +38319,7 @@ function MemoryDashboard({
                   type: "button",
                   onClick: () => void deletePaths(dailyPaths),
                   disabled: busy || dailyPaths.length === 0,
-                  className: "rounded-xl bg-gray-100 px-3 py-1.5 text-xs font-semibold text-foreground transition hover:bg-gray-200 disabled:opacity-50",
+                  className: "min-h-9 rounded-lg bg-gray-100 px-3 text-xs font-semibold text-foreground transition hover:bg-gray-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30 disabled:opacity-50",
                   children: "Clear daily logs"
                 }
               ),
@@ -38111,7 +38329,7 @@ function MemoryDashboard({
                   type: "button",
                   onClick: () => void runMemoryAction("compact"),
                   disabled: busy,
-                  className: "rounded-xl bg-gray-100 px-3 py-1.5 text-xs font-semibold text-foreground transition hover:bg-gray-200 disabled:opacity-50",
+                  className: "min-h-9 rounded-lg bg-gray-100 px-3 text-xs font-semibold text-foreground transition hover:bg-gray-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30 disabled:opacity-50",
                   children: "Compact"
                 }
               ),
@@ -38121,17 +38339,17 @@ function MemoryDashboard({
                   type: "button",
                   onClick: () => void runMemoryAction("reindex"),
                   disabled: busy,
-                  className: "rounded-xl bg-gray-100 px-3 py-1.5 text-xs font-semibold text-foreground transition hover:bg-gray-200 disabled:opacity-50",
+                  className: "min-h-9 rounded-lg bg-gray-100 px-3 text-xs font-semibold text-foreground transition hover:bg-gray-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30 disabled:opacity-50",
                   children: "Reindex"
                 }
               )
             ] }),
             notice && /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "mb-3 rounded-xl bg-emerald-50 px-3 py-2 text-xs text-emerald-700", children: notice }),
             error && /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "mb-3 rounded-xl bg-red-50 px-3 py-2 text-xs text-red-500", children: error }),
-            loading ? /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "rounded-xl border border-dashed border-black/[0.08] px-4 py-8 text-center text-sm text-secondary", children: "Loading memory..." }) : filteredFiles.length === 0 ? /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "rounded-xl border border-dashed border-black/[0.08] px-4 py-8 text-center text-sm text-secondary", children: "No memory files found." }) : /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "max-h-[520px] divide-y divide-black/[0.06] overflow-y-auto rounded-xl border border-black/[0.08]", children: filteredFiles.map((file) => {
+            loading ? /* @__PURE__ */ jsxRuntimeExports.jsx(EmptyState, { children: "Loading memory..." }) : filteredFiles.length === 0 ? /* @__PURE__ */ jsxRuntimeExports.jsx(EmptyState, { children: "No memory files found." }) : /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "max-h-[520px] divide-y divide-black/[0.06] overflow-y-auto rounded-lg border border-black/[0.08]", children: filteredFiles.map((file) => {
               const checked = selectedPaths.has(file.path);
               const active = selectedPath === file.path;
-              return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: `flex items-center gap-3 px-3 py-2 ${active ? "bg-primary/[0.06]" : "bg-white"}`, children: [
+              return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: `flex min-h-14 items-center gap-3 px-3 py-2 ${active ? "bg-primary/[0.06]" : "bg-white"}`, children: [
                 /* @__PURE__ */ jsxRuntimeExports.jsx(
                   "input",
                   {
@@ -38147,7 +38365,7 @@ function MemoryDashboard({
                   {
                     type: "button",
                     onClick: () => void openFile(file.path),
-                    className: "min-w-0 flex-1 text-left",
+                    className: "min-w-0 flex-1 rounded-md text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30",
                     children: [
                       /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "truncate text-sm font-semibold text-foreground", children: file.path }),
                       /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "mt-0.5 text-xs text-secondary", children: [
@@ -38163,7 +38381,7 @@ function MemoryDashboard({
                     type: "button",
                     onClick: () => void deletePaths([file.path]),
                     disabled: busy,
-                    className: "rounded-lg px-2 py-1 text-xs font-semibold text-red-500 transition hover:bg-red-50 disabled:opacity-50",
+                    className: "min-h-8 rounded-lg px-2 text-xs font-semibold text-red-500 transition hover:bg-red-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500/20 disabled:opacity-50",
                     children: "Delete"
                   }
                 )
@@ -38178,22 +38396,21 @@ function MemoryDashboard({
           {
             title: selectedPath ?? "Memory File",
             action: selectedPath ? /* @__PURE__ */ jsxRuntimeExports.jsx(
-              "button",
+              ButtonLike,
               {
-                type: "button",
                 onClick: () => void saveSelected(),
                 disabled: busy || fileLoading || editedContent === content2,
-                className: "rounded-xl bg-primary px-3 py-1.5 text-sm font-semibold text-white transition hover:bg-primary/90 disabled:opacity-50",
+                className: "min-h-9 px-3 py-1.5",
                 children: "Save"
               }
             ) : null,
-            children: !selectedPath ? /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "rounded-xl border border-dashed border-black/[0.08] px-4 py-10 text-center text-sm text-secondary", children: "Select a memory file to view or edit it." }) : fileLoading ? /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "rounded-xl border border-dashed border-black/[0.08] px-4 py-10 text-center text-sm text-secondary", children: "Loading file..." }) : /* @__PURE__ */ jsxRuntimeExports.jsx(
+            children: !selectedPath ? /* @__PURE__ */ jsxRuntimeExports.jsx(EmptyState, { children: "Select a memory file to view or edit it." }) : fileLoading ? /* @__PURE__ */ jsxRuntimeExports.jsx(EmptyState, { children: "Loading file..." }) : /* @__PURE__ */ jsxRuntimeExports.jsx(
               "textarea",
               {
                 value: editedContent,
                 onChange: (event) => setEditedContent(event.target.value),
                 spellCheck: false,
-                className: "h-[420px] w-full resize-none rounded-xl border border-black/[0.08] bg-white px-4 py-3 font-mono text-sm leading-6 text-foreground outline-none transition focus:border-primary/40 focus:ring-4 focus:ring-primary/10"
+                className: "h-[420px] w-full resize-none rounded-lg border border-black/[0.08] bg-white px-4 py-3 font-mono text-sm leading-6 text-foreground outline-none transition focus:border-primary/40 focus:ring-4 focus:ring-primary/10"
               }
             )
           }
@@ -38203,7 +38420,7 @@ function MemoryDashboard({
           {
             type: "button",
             onClick: () => result.path && void openFile(result.path),
-            className: "block w-full rounded-xl bg-gray-50 px-4 py-3 text-left transition hover:bg-gray-100",
+            className: "block min-h-14 w-full rounded-lg bg-gray-50 px-4 py-3 text-left transition hover:bg-gray-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30",
             children: [
               /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center justify-between gap-3", children: [
                 /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "truncate text-sm font-semibold text-foreground", children: result.path ?? `result-${index2 + 1}` }),
@@ -38227,23 +38444,27 @@ function SkillsDashboard({
   const hooks = asArray(skillsSnapshot?.runtimeHooks);
   const issues = asArray(skillsSnapshot?.issues);
   return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "max-w-4xl space-y-6", children: [
-    /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "mb-8", children: [
-      /* @__PURE__ */ jsxRuntimeExports.jsx("h1", { className: "text-2xl font-bold text-foreground", children: "Skills" }),
-      /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "mt-1 text-sm text-secondary", children: "Workspace SKILL.md capabilities and runtime hook metadata loaded by the local agent." })
-    ] }),
+    /* @__PURE__ */ jsxRuntimeExports.jsx(
+      DashboardPageHeader,
+      {
+        eyebrow: "Capabilities",
+        title: "Skills",
+        description: "Workspace SKILL.md capabilities and runtime hook metadata loaded by the local agent.",
+        action: /* @__PURE__ */ jsxRuntimeExports.jsx(ButtonLike, { variant: "secondary", onClick: onRefresh, children: "Reload" })
+      }
+    ),
     /* @__PURE__ */ jsxRuntimeExports.jsx(
       DashboardCard,
       {
         title: "Skills",
-        action: /* @__PURE__ */ jsxRuntimeExports.jsx(ButtonLike, { variant: "secondary", onClick: onRefresh, children: "Reload" }),
-        children: loading ? /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "text-sm text-secondary", children: "Loading skills..." }) : loaded.length === 0 ? /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "text-sm text-secondary", children: "No skills loaded." }) : /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "space-y-2", children: loaded.map((skill, index2) => /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "rounded-xl bg-gray-50 px-4 py-3", children: [
+        children: loading ? /* @__PURE__ */ jsxRuntimeExports.jsx(EmptyState, { children: "Loading skills..." }) : loaded.length === 0 ? /* @__PURE__ */ jsxRuntimeExports.jsx(EmptyState, { children: "No skills loaded." }) : /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "space-y-2", children: loaded.map((skill, index2) => /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "rounded-lg border border-black/[0.06] bg-gray-50 px-4 py-3", children: [
           /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "text-sm font-semibold text-foreground", children: asString(skill.name, `skill-${index2 + 1}`) }),
           asString(skill.path) && /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "mt-1 truncate text-xs text-secondary", children: asString(skill.path) })
         ] }, asString(skill.name, `skill-${index2}`))) })
       }
     ),
     /* @__PURE__ */ jsxRuntimeExports.jsx(DashboardCard, { title: "Runtime Hooks", children: /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "space-y-2", children: [
-      hooks.length === 0 ? /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "text-sm text-secondary", children: "No runtime hooks reported." }) : hooks.map((hook, index2) => /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "rounded-xl bg-gray-50 px-4 py-3 text-sm font-semibold text-foreground", children: asString(hook.name, `hook-${index2 + 1}`) }, asString(hook.name, `hook-${index2}`))),
+      hooks.length === 0 ? /* @__PURE__ */ jsxRuntimeExports.jsx(EmptyState, { children: "No runtime hooks reported." }) : hooks.map((hook, index2) => /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "rounded-lg border border-black/[0.06] bg-gray-50 px-4 py-3 text-sm font-semibold text-foreground", children: asString(hook.name, `hook-${index2 + 1}`) }, asString(hook.name, `hook-${index2}`))),
       issues.length > 0 && /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "rounded-xl bg-red-50 px-4 py-3 text-sm text-red-500", children: [
         issues.length,
         " skill issue",
@@ -38266,22 +38487,26 @@ function UsageDashboard({ runtimeSnapshot }) {
     return { ...section, count: runtimeItemCount(runtimeSnapshot, section.key), items };
   });
   return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "max-w-4xl space-y-6", children: [
-    /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "mb-8", children: [
-      /* @__PURE__ */ jsxRuntimeExports.jsx("h1", { className: "text-2xl font-bold text-foreground", children: "Usage" }),
-      /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "mt-1 text-sm text-secondary", children: "Local runtime activity. Self-hosted Magi does not meter platform credits." })
-    ] }),
+    /* @__PURE__ */ jsxRuntimeExports.jsx(
+      DashboardPageHeader,
+      {
+        eyebrow: "Runtime Activity",
+        title: "Usage",
+        description: "Local runtime activity. Self-hosted Magi does not meter platform credits."
+      }
+    ),
     /* @__PURE__ */ jsxRuntimeExports.jsxs(DashboardCard, { title: "Runtime Totals", children: [
       /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "grid gap-3 sm:grid-cols-2 lg:grid-cols-5", children: sectionRows.map((row) => /* @__PURE__ */ jsxRuntimeExports.jsx(MetricTile, { label: row.title, value: row.count }, row.key)) }),
       /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "mt-5 text-sm leading-6 text-secondary", children: "Model usage is controlled by the provider or local model server you configure." })
     ] }),
-    /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "grid gap-5 lg:grid-cols-2", children: sectionRows.map((row) => /* @__PURE__ */ jsxRuntimeExports.jsx(DashboardCard, { title: row.title, children: row.items.length === 0 ? /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "rounded-xl border border-dashed border-black/[0.08] px-4 py-6 text-sm text-secondary", children: [
+    /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "grid gap-5 lg:grid-cols-2", children: sectionRows.map((row) => /* @__PURE__ */ jsxRuntimeExports.jsx(DashboardCard, { title: row.title, children: row.items.length === 0 ? /* @__PURE__ */ jsxRuntimeExports.jsxs(EmptyState, { children: [
       "No ",
       row.title.toLowerCase(),
       " reported."
     ] }) : /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "space-y-2", children: row.items.map((item, index2) => {
       const label = asString(item.name) || asString(item.id) || asString(item.sessionKey) || asString(item.taskId) || `${row.title} ${index2 + 1}`;
       const detail = asString(item.status) || asString(item.state) || asString(item.schedule) || asString(item.description);
-      return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "rounded-xl bg-gray-50 px-4 py-3", children: [
+      return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "rounded-lg border border-black/[0.06] bg-gray-50 px-4 py-3", children: [
         /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "truncate text-sm font-semibold text-foreground", children: label }),
         detail && /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "mt-1 text-xs text-secondary", children: detail })
       ] }, `${row.key}-${index2}`);
@@ -38290,10 +38515,14 @@ function UsageDashboard({ runtimeSnapshot }) {
 }
 function ConverterDashboard({ onNavigate }) {
   return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "max-w-3xl space-y-6", children: [
-    /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "mb-8", children: [
-      /* @__PURE__ */ jsxRuntimeExports.jsx("h1", { className: "text-2xl font-bold text-foreground", children: "Converter" }),
-      /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "mt-1 text-sm text-secondary", children: "Local document conversion runs through the agent workspace and artifact pipeline." })
-    ] }),
+    /* @__PURE__ */ jsxRuntimeExports.jsx(
+      DashboardPageHeader,
+      {
+        eyebrow: "Artifacts",
+        title: "Converter",
+        description: "Local document conversion runs through the agent workspace and artifact pipeline."
+      }
+    ),
     /* @__PURE__ */ jsxRuntimeExports.jsx(DashboardCard, { title: "Local Conversion Flow", children: /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "space-y-3 text-sm leading-6 text-secondary", children: [
       /* @__PURE__ */ jsxRuntimeExports.jsx("p", { children: "Drop files into chat or upload them to Knowledge, then ask Magi to convert, summarize, extract tables, or generate deliverable artifacts. Outputs appear in the Work inspector and workspace artifacts." }),
       /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex flex-wrap gap-3", children: [
@@ -38307,7 +38536,7 @@ function ConverterDashboard({ onNavigate }) {
       "Markdown and structured report generation",
       "Workspace artifact review",
       "Runtime proof before completion"
-    ].map((item) => /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "rounded-xl bg-gray-50 px-4 py-3 text-sm font-medium text-foreground", children: item }, item)) }) })
+    ].map((item) => /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "rounded-lg border border-black/[0.06] bg-gray-50 px-4 py-3 text-sm font-semibold text-foreground", children: item }, item)) }) })
   ] });
 }
 function LocalDashboardShell({
@@ -38950,6 +39179,7 @@ function App() {
           taskBoard: null,
           inspectedSources: [],
           citationGate: null,
+          runtimeTraces: [],
           heartbeatElapsedMs: null
         }, { botId: BOT_ID });
       }
@@ -38979,13 +39209,17 @@ function App() {
         const turnId = asString(payload.turnId, channel);
         const iter = asNumber(payload.iter, 0);
         const stage = asString(payload.stage, "waiting");
+        const label = asString(payload.label, "Thinking through next step");
+        const detail = asString(payload.detail);
+        const elapsedMs = asNumber(payload.elapsedMs);
         updateActiveTools(channel, {
           id: `llm:${turnId}:${iter}`,
-          label: asString(payload.label, "Thinking through next step"),
+          label: "ModelProgress",
           status: stage === "completed" ? "done" : "running",
           startedAt: Date.now(),
-          outputPreview: asString(payload.detail),
-          durationMs: asNumber(payload.elapsedMs)
+          inputPreview: JSON.stringify({ stage, label, detail, elapsedMs }),
+          outputPreview: detail,
+          durationMs: elapsedMs
         });
       }
       if (type === "tool_start") {
@@ -39068,6 +39302,15 @@ function App() {
         const citationGate = normalizeCitationGate(payload);
         if (citationGate) {
           store.setChannelState(channel, { citationGate }, { botId: BOT_ID });
+        }
+      }
+      if (type === "runtime_trace") {
+        const trace = normalizeRuntimeTrace(payload);
+        if (trace) {
+          store.applyControlEvent(channel, {
+            type: "runtime_trace",
+            ...trace
+          });
         }
       }
       if (type === "mission_created") {
@@ -39573,6 +39816,59 @@ function App() {
     const channel = useChatStore.getState().activeChannel || DEFAULT_CHANNEL;
     store.resetSession(channel, getAccessToken);
   }, [getAccessToken, store]);
+  const handleStartExportSelection = reactExports.useCallback(() => {
+    const channel = useChatStore.getState().activeChannel || DEFAULT_CHANNEL;
+    store.startSelectionMode(channel);
+  }, [store]);
+  const handleExportSelected = reactExports.useCallback(() => {
+    const {
+      activeChannel: channel,
+      messages: localMessages,
+      serverMessages,
+      selectedMessages
+    } = useChatStore.getState();
+    const selected = selectedMessages[channel];
+    if (!channel || !selected || selected.size === 0) {
+      store.setChannelState(channel || DEFAULT_CHANNEL, {
+        error: "Select at least one user or assistant message to export."
+      }, { botId: BOT_ID });
+      return;
+    }
+    const combined = [
+      ...localMessages[channel] ?? [],
+      ...serverMessages[channel] ?? []
+    ];
+    const normalized = normalizeSelectedChatExportMessages(combined, selected);
+    const unique = Array.from(
+      new Map(
+        normalized.map((message) => [
+          `${message.role}:${message.timestamp}:${message.content}`,
+          message
+        ])
+      ).values()
+    );
+    if (unique.length === 0) {
+      store.setChannelState(channel, {
+        error: "Select at least one user or assistant message to export."
+      }, { botId: BOT_ID });
+      return;
+    }
+    const exportedAt = /* @__PURE__ */ new Date();
+    downloadMarkdownFile(
+      buildChatExportFilename({
+        botName: BOT_NAME,
+        channelName: channel,
+        exportedAt
+      }),
+      buildChatExportMarkdown({
+        botName: BOT_NAME,
+        channelName: channel,
+        exportedAt,
+        messages: unique
+      })
+    );
+    store.exitSelectionMode();
+  }, [store]);
   const handleModelSelectionChange = reactExports.useCallback((_nextModel, _nextRouter) => {
     setModelSelection(DEFAULT_MODEL);
     setRouterType(DEFAULT_ROUTER);
@@ -39719,6 +40015,26 @@ function App() {
               store.channels.find((channel) => channel.name === activeChannel)?.display_name ?? null,
               "en"
             ) }),
+            /* @__PURE__ */ jsxRuntimeExports.jsxs(
+              "button",
+              {
+                type: "button",
+                onClick: handleStartExportSelection,
+                className: "flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-[11px] text-secondary/55 transition-all duration-200 hover:bg-black/[0.04] hover:text-foreground/75",
+                "aria-label": "Export conversation",
+                title: "Export conversation",
+                children: [
+                  /* @__PURE__ */ jsxRuntimeExports.jsxs("svg", { width: "14", height: "14", viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: "1.6", strokeLinecap: "round", strokeLinejoin: "round", "aria-hidden": "true", children: [
+                    /* @__PURE__ */ jsxRuntimeExports.jsx("circle", { cx: "18", cy: "5", r: "3" }),
+                    /* @__PURE__ */ jsxRuntimeExports.jsx("circle", { cx: "6", cy: "12", r: "3" }),
+                    /* @__PURE__ */ jsxRuntimeExports.jsx("circle", { cx: "18", cy: "19", r: "3" }),
+                    /* @__PURE__ */ jsxRuntimeExports.jsx("line", { x1: "8.59", y1: "13.51", x2: "15.42", y2: "17.49" }),
+                    /* @__PURE__ */ jsxRuntimeExports.jsx("line", { x1: "15.41", y1: "6.51", x2: "8.59", y2: "10.49" })
+                  ] }),
+                  /* @__PURE__ */ jsxRuntimeExports.jsx("span", { children: "Export" })
+                ]
+              }
+            ),
             /* @__PURE__ */ jsxRuntimeExports.jsx(
               "button",
               {
@@ -39753,8 +40069,7 @@ function App() {
               onEnterSelectionMode: (msgId) => store.enterSelectionMode(activeChannel, msgId),
               onSelectAll: () => store.selectAllMessages(activeChannel),
               onDeselectAll: () => store.deselectAllMessages(activeChannel),
-              onExportSelected: () => {
-              },
+              onExportSelected: handleExportSelected,
               onDeleteSelected: () => {
                 const selected = store.selectedMessages[activeChannel];
                 if (selected) store.removeMessages(activeChannel, selected, { botId: BOT_ID });

@@ -224,6 +224,12 @@ function validateControlEventInput(input: ControlEventInput): void {
     case "compaction_boundary":
       requireString(input.boundaryId, "boundaryId");
       break;
+    case "runtime_trace":
+      requireString(input.turnId, "turnId");
+      requireString(input.phase, "phase");
+      requireString(input.severity, "severity");
+      requireString(input.title, "title");
+      break;
     default:
       break;
   }

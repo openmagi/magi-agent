@@ -55,6 +55,39 @@ describe("MissionClient", () => {
     ]);
   });
 
+  it("updates mission runs with gateway-token authentication", async () => {
+    const fetchMock = vi.fn(async () =>
+      new Response(JSON.stringify([{ id: "run-1", status: "completed" }]), { status: 200 }),
+    );
+    const client = new MissionClient({
+      chatProxyUrl: "http://chat-proxy",
+      gatewayToken: "gw-token",
+      fetchImpl: fetchMock as unknown as typeof fetch,
+    });
+
+    await client.updateRun("mission/1", "run/1", {
+      status: "completed",
+      finishedAt: "2026-05-11T00:00:00.000Z",
+      stdoutPreview: "watchdog changed",
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://chat-proxy/v1/missions/mission%2F1/runs/run%2F1",
+      expect.objectContaining({
+        method: "PATCH",
+        headers: expect.objectContaining({
+          "Content-Type": "application/json",
+          Authorization: "Bearer gw-token",
+        }),
+        body: JSON.stringify({
+          status: "completed",
+          finishedAt: "2026-05-11T00:00:00.000Z",
+          stdoutPreview: "watchdog changed",
+        }),
+      }),
+    );
+  });
+
   it("lists action events with gateway-token authentication", async () => {
     const fetchMock = vi.fn(async () => new Response(JSON.stringify({
       events: [

@@ -152,6 +152,25 @@ export interface CitationGateStatus {
   checkedAt: number;
 }
 
+export interface RuntimeTrace {
+  turnId: string;
+  phase:
+    | "verifier_blocked"
+    | "retry_scheduled"
+    | "retry_aborted"
+    | "terminal_abort";
+  severity: "info" | "warning" | "error";
+  title: string;
+  detail?: string;
+  reasonCode?: string;
+  ruleId?: string;
+  attempt?: number;
+  maxAttempts?: number;
+  retryable?: boolean;
+  requiredAction?: string;
+  receivedAt: number;
+}
+
 export type SubagentActivityStatus = "running" | "waiting" | "done" | "error" | "cancelled";
 
 export interface SubagentActivity {
@@ -207,6 +226,8 @@ export interface ChannelState {
   inspectedSources?: InspectedSource[];
   /** Latest claim-citation gate status for the current research turn. */
   citationGate?: CitationGateStatus | null;
+  /** Public runtime verifier/retry/abort trace for the current turn. */
+  runtimeTraces?: RuntimeTrace[];
   /** True while chat-proxy is processing file attachments (KB ingest) before bot receives the message */
   fileProcessing?: boolean;
   /** True when SSE stream dropped mid-response and client is polling active-snapshot to recover */
@@ -262,7 +283,8 @@ export type ControlEvent =
       answer?: string;
     }
   | { type: "control_request_cancelled"; requestId: string; reason: string }
-  | { type: "control_request_timed_out"; requestId: string };
+  | { type: "control_request_timed_out"; requestId: string }
+  | ({ type: "runtime_trace" } & Omit<RuntimeTrace, "receivedAt"> & { receivedAt?: number });
 
 export interface ControlRequestResponse {
   decision: ControlRequestDecision;

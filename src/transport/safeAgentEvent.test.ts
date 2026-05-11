@@ -195,6 +195,28 @@ describe("safeAgentEvent", () => {
     });
 
     expect(safeAgentEvent({
+      type: "runtime_trace",
+      turnId: "turn-1",
+      phase: "verifier_blocked",
+      severity: "warning",
+      title: "Runtime verifier blocked completion",
+      detail: "token=ghp_supersecret blocked",
+      reasonCode: "ARTIFACT_DELIVERY_REQUIRED",
+      retryable: true,
+      requiredAction: "Deliver the file before answering.",
+    })).toEqual({
+      type: "runtime_trace",
+      turnId: "turn-1",
+      phase: "verifier_blocked",
+      severity: "warning",
+      title: "Runtime verifier blocked completion",
+      detail: "token=[redacted] blocked",
+      reasonCode: "ARTIFACT_DELIVERY_REQUIRED",
+      retryable: true,
+      requiredAction: "Deliver the file before answering.",
+    });
+
+    expect(safeAgentEvent({
       type: "turn_interrupted",
       turnId: "turn-1",
       handoffRequested: true,

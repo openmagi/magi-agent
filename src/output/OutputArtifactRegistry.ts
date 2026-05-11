@@ -31,6 +31,7 @@ function makeDeliveryRecord(
     ...(mutation.providerMessageId
       ? { providerMessageId: mutation.providerMessageId }
       : {}),
+    ...(mutation.deliveryAck ? { deliveryAck: mutation.deliveryAck } : {}),
     ...(mutation.errorMessage ? { errorMessage: mutation.errorMessage } : {}),
     ...(status === "sent"
       ? { deliveredAt: now }

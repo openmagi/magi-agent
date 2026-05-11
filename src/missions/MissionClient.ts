@@ -44,6 +44,18 @@ export class MissionClient {
     return Array.isArray(response) ? response[0] ?? {} : response;
   }
 
+  async updateRun(
+    missionId: string,
+    runId: string,
+    input: Record<string, unknown>,
+  ): Promise<Record<string, unknown>> {
+    const response = await this.requestPatch(
+      `/v1/missions/${encodeURIComponent(missionId)}/runs/${encodeURIComponent(runId)}`,
+      input,
+    );
+    return Array.isArray(response) ? response[0] ?? {} : response;
+  }
+
   async appendEvent(
     missionId: string,
     input: Record<string, unknown>,
@@ -118,6 +130,26 @@ export class MissionClient {
       headers: {
         Authorization: `Bearer ${this.gatewayToken}`,
       },
+    });
+    const text = await response.text();
+    const parsed = text ? JSON.parse(text) : {};
+    if (!response.ok) {
+      throw new Error(`mission request failed: HTTP ${response.status} ${text.slice(0, 200)}`);
+    }
+    return parsed;
+  }
+
+  private async requestPatch(
+    path: string,
+    body: unknown,
+  ): Promise<Record<string, unknown> | Array<Record<string, unknown>>> {
+    const response = await this.fetchImpl(`${this.baseUrl}${path}`, {
+      method: "PATCH",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${this.gatewayToken}`,
+      },
+      body: JSON.stringify(body),
     });
     const text = await response.text();
     const parsed = text ? JSON.parse(text) : {};

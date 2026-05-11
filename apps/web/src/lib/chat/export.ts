@@ -33,12 +33,18 @@ export function cleanChatExportContent(content: string): string {
   return stripAttachmentMarkers(withoutKbContext).trim();
 }
 
+function isExportableChatMessage(
+  message: ChatMessage,
+): message is ChatMessage & { role: ChatExportMessage["role"] } {
+  return message.role === "user" || message.role === "assistant";
+}
+
 export function normalizeSelectedChatExportMessages(
   messages: ChatMessage[],
   selectedIds: Set<string>,
 ): ChatExportMessage[] {
   return messages
-    .filter((message) => message.role !== "system")
+    .filter(isExportableChatMessage)
     .filter(
       (message) =>
         selectedIds.has(message.id) ||
@@ -47,7 +53,7 @@ export function normalizeSelectedChatExportMessages(
     .sort(compareChatMessages)
     .map((message) => ({
       id: message.id,
-      role: message.role as "user" | "assistant",
+      role: message.role,
       content: cleanChatExportContent(message.content),
       timestamp: message.timestamp,
     }))

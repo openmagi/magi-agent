@@ -14,6 +14,7 @@
 
 import type { Discipline } from "../Session.js";
 import type { DisciplineSessionCounter } from "../hooks/builtin/disciplineHook.js";
+import { CODING_SEMANTIC_NAVIGATION_POLICY } from "../prompt/RuntimePromptBlocks.js";
 
 export interface DisciplinePromptInput {
   discipline: Discipline;
@@ -58,6 +59,21 @@ export function buildDisciplineBlock(
   lines.push(`Mode: ${mode}`);
   lines.push(`Source files modified this session: ${counter.sourceMutations}`);
   lines.push(`Test files modified this session: ${counter.testMutations}`);
+  if (mode === "coding") {
+    lines.push(
+      'Coding workspace: for repo feature work, create or use CodeWorkspace under workspace/code/<project>/ or SpawnAgent workspace_policy="git_worktree" before writing source files.',
+    );
+    lines.push(
+      "Commit units: use RepoTaskState to acquire the coding workspace lock, keep one commit unit in_progress, maintain the coding ledger, then record GitDiff/TestRun/CommitCheckpoint evidence before marking the unit completed.",
+    );
+    lines.push(
+      "Do not edit source files directly in a dirty workspace root or parent checkout; keep repo files, tests, and generated outputs inside the dedicated coding workspace.",
+    );
+    lines.push(
+      "Sandbox boundary: No Docker-in-Docker, privileged containers, root operations, or host Docker socket mounts; use in-workspace verification commands instead.",
+    );
+    lines.push(CODING_SEMANTIC_NAVIGATION_POLICY);
+  }
 
   if (discipline.tdd) {
     const ratio =

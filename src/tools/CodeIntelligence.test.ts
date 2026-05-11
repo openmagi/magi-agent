@@ -207,4 +207,69 @@ describe("CodeIntelligence", () => {
       ]),
     );
   });
+
+  it("returns rename locations and code actions from the TypeScript language service", async () => {
+    await fs.writeFile(
+      path.join(root, "src/missing-import.ts"),
+      "export const missingTotal = add(1, 2);\n",
+      "utf8",
+    );
+    const tool = makeCodeIntelligenceTool(root);
+    const ctx = makeCtx(root);
+
+    const rename = await tool.execute(
+      {
+        action: "rename",
+        file: "src/math.ts",
+        line: 1,
+        column: 17,
+        newName: "sum",
+      },
+      ctx,
+    );
+
+    expect(rename.status).toBe("ok");
+    expect(rename.output?.results).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          kind: "rename",
+          file: "src/math.ts",
+          text: "sum",
+          startOffset: expect.any(Number),
+          length: expect.any(Number),
+          sourceText: "add",
+          preview: expect.stringContaining("export function add"),
+        }),
+        expect.objectContaining({
+          kind: "rename",
+          file: "src/use.ts",
+          text: "sum",
+          preview: expect.stringContaining("add(1, 2)"),
+        }),
+      ]),
+    );
+
+    const codeActions = await tool.execute(
+      {
+        action: "code_actions",
+        file: "src/missing-import.ts",
+        line: 1,
+        column: 29,
+      },
+      ctx,
+    );
+
+    expect(codeActions.status).toBe("ok");
+    expect(codeActions.output?.results).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          kind: "code_action",
+          text: expect.stringMatching(/import/i),
+          file: "src/missing-import.ts",
+          editCount: expect.any(Number),
+          targetFiles: expect.arrayContaining(["src/missing-import.ts"]),
+        }),
+      ]),
+    );
+  });
 });

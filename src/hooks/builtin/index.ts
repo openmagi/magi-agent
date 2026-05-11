@@ -137,6 +137,7 @@ import {
   makeCodingVerificationGateHook,
   type CodingVerificationGateAgent,
 } from "./codingVerificationGate.js";
+import { makeCodingWorkspaceLockHooks } from "./codingWorkspaceLockGate.js";
 import {
   makeResourceBoundaryHooks,
   type ResourceBoundaryAgent,
@@ -1053,6 +1054,18 @@ export function registerBuiltinHooks(
     });
     if (maybe(promptHook.name)) {
       registry.register(promptHook);
+      registered++;
+    }
+    const workspaceLockHooks = makeCodingWorkspaceLockHooks({
+      workspaceRoot: opts.workspaceRoot,
+      agent: opts.disciplineAgent,
+    });
+    if (maybe(workspaceLockHooks.beforeToolUse.name)) {
+      registry.register(workspaceLockHooks.beforeToolUse);
+      registered++;
+    }
+    if (maybe(workspaceLockHooks.beforeCommit.name)) {
+      registry.register(workspaceLockHooks.beforeCommit);
       registered++;
     }
     const beforeHook = makeDisciplineBeforeToolUseHook({

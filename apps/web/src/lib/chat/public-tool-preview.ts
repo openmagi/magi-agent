@@ -756,7 +756,9 @@ function modelProgressPreview(
 
   const action = stage === "completed"
     ? localized(language, "Model step finished", "모델 단계 완료")
-    : localized(language, "Thinking through next step", "다음 단계 판단 중");
+    : stage === "heartbeat"
+      ? localized(language, "Still working", "계속 작업 중")
+      : localized(language, "Thinking through next step", "다음 단계 판단 중");
   const target = label && !/thinking through next step/i.test(label)
     ? bounded(label, MAX_TARGET_LENGTH)
     : elapsed;

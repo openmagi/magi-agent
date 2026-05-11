@@ -143,6 +143,37 @@ describe("deriveWorkConsoleRows", () => {
     expect(JSON.stringify(rows)).not.toContain("payload");
   });
 
+  it("shows runtime verifier trace rows without exposing raw event JSON", () => {
+    const rows = deriveWorkConsoleRows({
+      channelState: channelState({
+        runtimeTraces: [
+          {
+            turnId: "turn-1",
+            phase: "verifier_blocked",
+            severity: "warning",
+            title: "Runtime verifier blocked completion",
+            detail: "[RULE:ARTIFACT_DELIVERY_REQUIRED] file not delivered",
+            reasonCode: "ARTIFACT_DELIVERY_REQUIRED",
+            requiredAction: "Deliver the requested artifact before claiming completion.",
+            receivedAt: 123,
+          },
+        ],
+      }),
+      uiLanguage: "en",
+    });
+
+    expect(rows).toContainEqual(
+      expect.objectContaining({
+        group: "trace",
+        label: "Runtime verifier blocked completion",
+        detail: "Deliver the requested artifact before claiming completion.",
+        status: "waiting",
+        meta: "ARTIFACT_DELIVERY_REQUIRED",
+      }),
+    );
+    expect(JSON.stringify(rows)).not.toContain("\"phase\"");
+  });
+
   it("renders structured patch previews as file-level change summaries", () => {
     const rows = deriveWorkConsoleRows({
       channelState: channelState({

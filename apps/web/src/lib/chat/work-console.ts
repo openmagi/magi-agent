@@ -4,6 +4,7 @@ import type {
   MissionActivity,
   QueuedMessage,
   PatchPreviewFile,
+  RuntimeTrace,
   SubagentActivity,
   TaskBoardTask,
   ToolActivity,
@@ -18,6 +19,7 @@ export type WorkConsoleRowGroup =
   | "subagent"
   | "task"
   | "queue"
+  | "trace"
   | "control";
 
 export type WorkConsoleRowStatus =
@@ -157,6 +159,12 @@ function statusFromMission(mission: MissionActivity): WorkConsoleRowStatus {
   }
 }
 
+function statusFromRuntimeTrace(trace: RuntimeTrace): WorkConsoleRowStatus {
+  if (trace.severity === "error") return "error";
+  if (trace.severity === "warning") return "waiting";
+  return "info";
+}
+
 function statusFromTask(task: TaskBoardTask): WorkConsoleRowStatus {
   switch (task.status) {
     case "in_progress":
@@ -187,6 +195,46 @@ function taskMeta(task: TaskBoardTask, language?: ChatResponseLanguage): string 
 
 function missionMeta(mission: MissionActivity): string {
   return `${mission.kind} ${mission.status}`;
+}
+
+function runtimeTraceLabel(
+  trace: RuntimeTrace,
+  language?: ChatResponseLanguage,
+): string {
+  switch (trace.phase) {
+    case "retry_scheduled":
+      return t(language, "Retry scheduled", "재시도 예정");
+    case "retry_aborted":
+      return t(language, "Retry stopped", "재시도 중단");
+    case "terminal_abort":
+      return t(language, "Turn stopped", "턴 중단");
+    case "verifier_blocked":
+    default:
+      return t(language, "Runtime verifier blocked completion", "런타임 검증에서 완료 차단");
+  }
+}
+
+function runtimeTraceMeta(trace: RuntimeTrace): string | undefined {
+  const attempt =
+    typeof trace.attempt === "number" && typeof trace.maxAttempts === "number"
+      ? `${trace.attempt}/${trace.maxAttempts}`
+      : undefined;
+  return [trace.reasonCode, attempt].filter(Boolean).join(" · ") || undefined;
+}
+
+function runtimeTraceRow(
+  trace: RuntimeTrace,
+  language?: ChatResponseLanguage,
+): WorkConsoleRow {
+  return {
+    id: `trace:${trace.turnId}:${trace.receivedAt}:${trace.reasonCode ?? trace.phase}`,
+    group: "trace",
+    label: runtimeTraceLabel(trace, language),
+    detail: trace.requiredAction ?? trace.detail ?? trace.title,
+    status: statusFromRuntimeTrace(trace),
+    ...(trace.detail && trace.requiredAction ? { snippet: trace.detail } : {}),
+    ...(runtimeTraceMeta(trace) ? { meta: runtimeTraceMeta(trace) } : {}),
+  };
 }
 
 function subagentName(index: number): string {
@@ -379,6 +427,10 @@ export function deriveWorkConsoleRows({
       status: statusFromMission(mission),
       meta: missionMeta(mission),
     });
+  }
+
+  for (const trace of (channelState.runtimeTraces ?? []).slice(-6)) {
+    rows.push(runtimeTraceRow(trace, language));
   }
 
   for (const [index, subagent] of (channelState.subagents ?? []).entries()) {

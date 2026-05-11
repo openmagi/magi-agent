@@ -6,7 +6,7 @@
  *   CommitPipeline | ToolSelector | AskUserController | HookContextBuilder
  */
 
-import type { Session } from "./Session.js";
+import type { PermissionMode, Session } from "./Session.js";
 import type { UserMessage } from "./util/types.js";
 import type { SseWriter } from "./transport/SseWriter.js";
 import type { LLMContentBlock, LLMMessage, LLMToolDef, LLMUsage } from "./transport/LLMClient.js";
@@ -796,6 +796,7 @@ export class Turn {
         askUser: (q) => this.asks.ask(q),
         abortSignal: this.interruptController.signal,
         currentUserMessage: this.userMessage,
+        shouldYieldAfterTool: () => this.session.hasPendingInjections(),
         unknownToolCounter: {
           get: () => this.unknownToolCount,
           inc: () => ++this.unknownToolCount,
@@ -1186,8 +1187,8 @@ export class Turn {
  * pre-existing stubs) — treat that as `"default"`.
  */
 function safeGetPermissionMode(
-  session: { getPermissionMode?: () => "default" | "plan" | "auto" | "bypass" },
-): "default" | "plan" | "auto" | "bypass" {
+  session: { getPermissionMode?: () => PermissionMode },
+): PermissionMode {
   if (typeof session.getPermissionMode !== "function") return "default";
   return session.getPermissionMode();
 }

@@ -10,7 +10,9 @@ export type CodeIntelligenceAction =
   | "hover"
   | "document_symbols"
   | "workspace_symbols"
-  | "diagnostics";
+  | "diagnostics"
+  | "rename"
+  | "code_actions";
 
 export interface CodeIntelligenceInput {
   action: CodeIntelligenceAction;
@@ -19,6 +21,7 @@ export interface CodeIntelligenceInput {
   line?: number;
   column?: number;
   query?: string;
+  newName?: string;
   maxResults?: number;
 }
 
@@ -30,8 +33,14 @@ export interface CodeIntelligenceResult {
   column: number;
   endLine?: number;
   endColumn?: number;
+  startOffset?: number;
+  length?: number;
+  sourceText?: string;
   preview?: string;
   text?: string;
+  newText?: string;
+  editCount?: number;
+  targetFiles?: string[];
   severity?: "error" | "warning" | "suggestion" | "message";
   code?: string;
 }
@@ -57,9 +66,11 @@ const INPUT_SCHEMA = {
         "document_symbols",
         "workspace_symbols",
         "diagnostics",
+        "rename",
+        "code_actions",
       ],
       description:
-        "Semantic TypeScript operation to run: definition, references, hover, document_symbols, workspace_symbols, or diagnostics.",
+        "Semantic TypeScript operation to run: definition, references, hover, rename, code_actions, document_symbols, workspace_symbols, or diagnostics.",
     },
     projectPath: {
       type: "string",
@@ -68,21 +79,25 @@ const INPUT_SCHEMA = {
     file: {
       type: "string",
       description:
-        "Workspace-relative source file. Required for definition, references, hover, and document_symbols.",
+        "Workspace-relative source file. Required for definition, references, hover, rename, code_actions, and document_symbols.",
     },
     line: {
       type: "integer",
       minimum: 1,
-      description: "1-based line number. Required for definition, references, and hover.",
+      description: "1-based line number. Required for definition, references, hover, rename, and code_actions.",
     },
     column: {
       type: "integer",
       minimum: 1,
-      description: "1-based column number. Required for definition, references, and hover.",
+      description: "1-based column number. Required for definition, references, hover, rename, and code_actions.",
     },
     query: {
       type: "string",
       description: "Symbol query. Required for workspace_symbols.",
+    },
+    newName: {
+      type: "string",
+      description: "Replacement identifier. Required for rename.",
     },
     maxResults: {
       type: "integer",
@@ -101,6 +116,8 @@ const ACTIONS = new Set<CodeIntelligenceAction>([
   "document_symbols",
   "workspace_symbols",
   "diagnostics",
+  "rename",
+  "code_actions",
 ]);
 
 interface TypeScriptProject {
@@ -117,7 +134,7 @@ export function makeCodeIntelligenceTool(
   return {
     name: "CodeIntelligence",
     description:
-      "Run read-only semantic TypeScript code intelligence for coding work: go to definition, find references, hover/type info, document symbols, workspace symbols, and compiler diagnostics. Prefer this over broad text search when navigating existing TypeScript code.",
+      "Run read-only semantic TypeScript code intelligence for coding work: go to definition, find references, rename locations, code actions, hover/type info, document symbols, workspace symbols, and compiler diagnostics. Prefer this over broad text search when navigating existing TypeScript code.",
     inputSchema: INPUT_SCHEMA,
     permission: "read",
     kind: "core",
@@ -125,7 +142,7 @@ export function makeCodeIntelligenceTool(
     isConcurrencySafe: true,
     validate(input) {
       if (!input || !ACTIONS.has(input.action)) {
-        return "`action` must be one of: definition, references, hover, document_symbols, workspace_symbols, diagnostics";
+        return "`action` must be one of: definition, references, hover, rename, code_actions, document_symbols, workspace_symbols, diagnostics";
       }
       if (input.projectPath !== undefined && typeof input.projectPath !== "string") {
         return "`projectPath` must be a string";
@@ -144,6 +161,14 @@ export function makeCodeIntelligenceTool(
       }
       if (input.action === "document_symbols" && !input.file) {
         return "`file` is required for document_symbols";
+      }
+      if (input.action === "rename") {
+        if (typeof input.newName !== "string" || input.newName.trim().length === 0) {
+          return "`newName` is required for rename";
+        }
+        if (!/^[A-Za-z_$][0-9A-Za-z_$]*$/.test(input.newName.trim())) {
+          return "`newName` must be a valid JavaScript/TypeScript identifier";
+        }
       }
       if (
         input.action === "workspace_symbols" &&
@@ -198,7 +223,13 @@ export function makeCodeIntelligenceTool(
 }
 
 function requiresPosition(action: CodeIntelligenceAction): boolean {
-  return action === "definition" || action === "references" || action === "hover";
+  return (
+    action === "definition" ||
+    action === "references" ||
+    action === "hover" ||
+    action === "rename" ||
+    action === "code_actions"
+  );
 }
 
 function loadTypeScriptProject(ws: Workspace, projectPath: string): TypeScriptProject {
@@ -286,6 +317,10 @@ function runAction(
       return referencesAtPosition(project, input);
     case "hover":
       return hoverAtPosition(project, input);
+    case "rename":
+      return renameLocationsAtPosition(project, input);
+    case "code_actions":
+      return codeActionsAtPosition(project, input);
     case "document_symbols":
       return documentSymbols(project, input.file ?? "");
     case "workspace_symbols":
@@ -356,6 +391,99 @@ function hoverAtPosition(
     .join("\n");
   const result = resultFromSpan(project, file, info.textSpan, { text });
   return result ? [result] : [];
+}
+
+function renameLocationsAtPosition(
+  project: TypeScriptProject,
+  input: CodeIntelligenceInput,
+): CodeIntelligenceResult[] {
+  const { file, position } = sourcePosition(project, input);
+  const newName = input.newName?.trim() ?? "";
+  return (project.service.findRenameLocations(file, position, false, false, true) ?? [])
+    .map((location) => resultFromSpan(project, location.fileName, location.textSpan, {
+      kind: "rename",
+      text: newName,
+      newText: `${location.prefixText ?? ""}${newName}${location.suffixText ?? ""}`,
+    }))
+    .filter((item): item is CodeIntelligenceResult => item !== null);
+}
+
+function codeActionsAtPosition(
+  project: TypeScriptProject,
+  input: CodeIntelligenceInput,
+): CodeIntelligenceResult[] {
+  const { file, position } = sourcePosition(project, input);
+  const diagnosticsAtPoint = diagnosticsForFile(project, file).filter((diagnostic) => {
+    if (diagnostic.start === undefined) return false;
+    const end = diagnostic.start + (diagnostic.length ?? 0);
+    return position >= diagnostic.start && position <= Math.max(diagnostic.start, end);
+  });
+  const seen = new Set<string>();
+  const results: CodeIntelligenceResult[] = [];
+
+  for (const diagnostic of diagnosticsAtPoint) {
+    if (diagnostic.start === undefined) continue;
+    const fixes = project.service.getCodeFixesAtPosition(
+      file,
+      diagnostic.start,
+      diagnostic.start + (diagnostic.length ?? 0),
+      [diagnostic.code],
+      {},
+      {},
+    );
+    for (const fix of fixes) {
+      const changes = workspaceTextChanges(project, fix);
+      const change = changes[0] ?? null;
+      const fileName = change?.fileName ?? file;
+      const textSpan = change?.textChange.span ?? {
+        start: diagnostic.start,
+        length: diagnostic.length ?? 0,
+      };
+      const key = `${fix.fixName}\0${fileName}\0${textSpan.start}\0${fix.description}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      const result = resultFromSpan(project, fileName, textSpan, {
+        name: fix.fixName,
+        kind: "code_action",
+        text: fix.description,
+        ...(change ? { newText: change.textChange.newText } : {}),
+        editCount: changes.length,
+        targetFiles: [
+          ...new Set(
+            changes.map((item) => workspaceRelative(project.wsRoot, item.fileName)),
+          ),
+        ],
+      });
+      if (result) results.push(result);
+    }
+  }
+
+  return results;
+}
+
+function diagnosticsForFile(project: TypeScriptProject, file: string): ts.Diagnostic[] {
+  const program = project.service.getProgram();
+  const source = program?.getSourceFile(file);
+  if (!source) return [];
+  return [
+    ...project.service.getSyntacticDiagnostics(file),
+    ...project.service.getSemanticDiagnostics(file),
+    ...project.service.getSuggestionDiagnostics(file),
+  ];
+}
+
+function workspaceTextChanges(
+  project: TypeScriptProject,
+  fix: ts.CodeFixAction,
+): Array<{ fileName: string; textChange: ts.TextChange }> {
+  const changes: Array<{ fileName: string; textChange: ts.TextChange }> = [];
+  for (const change of fix.changes) {
+    if (!isInside(project.wsRoot, change.fileName)) continue;
+    for (const textChange of change.textChanges) {
+      changes.push({ fileName: change.fileName, textChange });
+    }
+  }
+  return changes;
 }
 
 function documentSymbols(project: TypeScriptProject, file: string): CodeIntelligenceResult[] {
@@ -433,6 +561,9 @@ function resultFromSpan(
     column: start.character + 1,
     endLine: end.line + 1,
     endColumn: end.character + 1,
+    startOffset: textSpan.start,
+    length: textSpan.length,
+    sourceText: source.text.slice(textSpan.start, textSpan.start + textSpan.length),
     preview: linePreview(fileName, start.line + 1),
   };
 }
