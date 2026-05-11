@@ -33,6 +33,7 @@ import {
   moveQueueToWorking,
   moveWorkingToDaily,
 } from "../../storage/TaskQueue.js";
+import { shouldSkipMemoryWriteForSession } from "../../reliability/ChannelMemoryPolicy.js";
 import { isLongTermMemoryWriteDisabled } from "../../util/memoryMode.js";
 
 // ---------------------------------------------------------------------------
@@ -285,6 +286,7 @@ export function makeTaskLifecycleHook(
     handler: async (args, ctx: HookContext) => {
       recordTurnStart(ctx.turnId);
       try {
+        if (shouldSkipMemoryWriteForSession(ctx.sessionKey)) return { action: "continue" };
         if (isLongTermMemoryWriteDisabled(ctx.memoryMode)) return { action: "continue" };
         if (testMode()) return { action: "continue" };
         if (!lifecycleEnabled()) return { action: "continue" };
@@ -329,6 +331,7 @@ export function makeTaskLifecycleHook(
     timeoutMs: 2_000,
     handler: async (_args, ctx: HookContext) => {
       try {
+        if (shouldSkipMemoryWriteForSession(ctx.sessionKey)) return { action: "continue" };
         if (isLongTermMemoryWriteDisabled(ctx.memoryMode)) return { action: "continue" };
         if (testMode()) return { action: "continue" };
         if (!lifecycleEnabled()) return { action: "continue" };
@@ -359,6 +362,7 @@ export function makeTaskLifecycleHook(
     timeoutMs: 3_000,
     handler: async (args, ctx: HookContext) => {
       try {
+        if (shouldSkipMemoryWriteForSession(ctx.sessionKey)) return { action: "continue" };
         if (isLongTermMemoryWriteDisabled(ctx.memoryMode)) return { action: "continue" };
         if (testMode()) return { action: "continue" };
         if (!lifecycleEnabled()) return { action: "continue" };

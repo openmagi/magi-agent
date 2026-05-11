@@ -21,6 +21,7 @@ import {
 import { SseWriter } from "../SseWriter.js";
 import { applyResetToSessionKey } from "../../slash/resetCounters.js";
 import { isRouterKeyword } from "../../routing/types.js";
+import { memoryModeFromSessionKey } from "../../reliability/ChannelMemoryPolicy.js";
 import type {
   ChannelRef,
   ImageContentBlock,
@@ -294,6 +295,8 @@ async function handleChatCompletions(
     channelId:
       sessionKey.match(/^agent:[^:]+:[^:]+:([^:]+)/)?.[1] ?? "default",
   };
+  const sessionMemoryMode = memoryModeFromSessionKey(sessionKey);
+  if (sessionMemoryMode) channel.memoryMode = sessionMemoryMode;
   // Apply any per-channel `/reset` counter. Counter == 0 leaves the
   // incoming sessionKey untouched (existing clients unaffected). Once
   // a user has run `/reset` the sessionKey picks up a `:<N>` suffix so

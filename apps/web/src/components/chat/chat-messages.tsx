@@ -25,6 +25,7 @@ interface ChatMessagesProps {
   messages: ChatMessage[];
   serverMessages: ChatMessage[];
   channelState: ChannelState;
+  uiLanguage?: ChatResponseLanguage;
   loading?: boolean;
   botId?: string;
   /** Selection mode */
@@ -169,12 +170,13 @@ function inlineWorkRows(
   channelState: ChannelState,
   queuedMessages: QueuedMessage[],
   pendingRequests: ControlRequestRecord[],
+  language?: ChatResponseLanguage,
 ): WorkConsoleRow[] {
-  const language = channelState.responseLanguage;
   const rows = deriveWorkConsoleRows({
     channelState,
     queuedMessages,
     controlRequests: pendingRequests,
+    uiLanguage: language,
   });
   const selected: WorkConsoleRow[] = [];
 
@@ -216,20 +218,23 @@ function InlineRunStatus({
   channelState,
   queuedMessages,
   pendingRequests,
+  uiLanguage,
 }: {
   channelState: ChannelState;
   queuedMessages: QueuedMessage[];
   pendingRequests: ControlRequestRecord[];
+  uiLanguage?: ChatResponseLanguage;
 }) {
   if (!hasInlineRunStatus(channelState, queuedMessages, pendingRequests)) return null;
 
-  const language = channelState.responseLanguage;
+  const language = uiLanguage ?? channelState.responseLanguage;
   const summary = deriveWorkStateSummary({
     channelState,
     queuedMessages,
     controlRequests: pendingRequests,
+    uiLanguage: language,
   });
-  const rows = inlineWorkRows(channelState, queuedMessages, pendingRequests);
+  const rows = inlineWorkRows(channelState, queuedMessages, pendingRequests, language);
 
   return (
     <div className="chat-msg-in mb-4 flex justify-start" data-chat-inline-run-status="true">
@@ -309,10 +314,10 @@ function duplicateContentKey(message: ChatMessage): string | null {
   return normalized ? `${message.role}\u0000${normalized}` : null;
 }
 
-export const ChatMessages = forwardRef<ChatMessagesHandle, ChatMessagesProps>(function ChatMessages({ messages, serverMessages, channelState, loading, botId, selectionMode, selectedMessages, onToggleSelect, onEnterSelectionMode, onSelectAll, onDeselectAll, onExportSelected, onDeleteSelected, onExitSelectionMode, onLoadOlder, hasOlderMessages, loadingOlder, onReplyTo, queuedMessages, onCancelQueued, controlRequests, onRespondControlRequest }, ref) {
+export const ChatMessages = forwardRef<ChatMessagesHandle, ChatMessagesProps>(function ChatMessages({ messages, serverMessages, channelState, uiLanguage, loading, botId, selectionMode, selectedMessages, onToggleSelect, onEnterSelectionMode, onSelectAll, onDeselectAll, onExportSelected, onDeleteSelected, onExitSelectionMode, onLoadOlder, hasOlderMessages, loadingOlder, onReplyTo, queuedMessages, onCancelQueued, controlRequests, onRespondControlRequest }, ref) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [showScrollBtn, setShowScrollBtn] = useState(false);
-  const language = channelState.responseLanguage;
+  const language = uiLanguage ?? channelState.responseLanguage;
   const userScrolledUp = useRef(false);
   const prevMsgCount = useRef(0);
   const animateFromRef = useRef(0);
@@ -478,10 +483,10 @@ export const ChatMessages = forwardRef<ChatMessagesHandle, ChatMessagesProps>(fu
                 </svg>
               )}
             </div>
-            Select all
+            {t(language, "Select all", "전체 선택")}
           </button>
           <span className="text-sm text-secondary/50">
-            {selectedCount} selected
+            {isKorean(language) ? `${selectedCount}개 선택됨` : `${selectedCount} selected`}
           </span>
           <div className="flex-1" />
           <button
@@ -496,7 +501,7 @@ export const ChatMessages = forwardRef<ChatMessagesHandle, ChatMessagesProps>(fu
               <line x1="8.59" y1="13.51" x2="15.42" y2="17.49" />
               <line x1="15.41" y1="6.51" x2="8.59" y2="10.49" />
             </svg>
-            Export
+            {t(language, "Export", "내보내기")}
           </button>
           <button
             onClick={onDeleteSelected}
@@ -507,13 +512,13 @@ export const ChatMessages = forwardRef<ChatMessagesHandle, ChatMessagesProps>(fu
               <polyline points="3 6 5 6 21 6" />
               <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
             </svg>
-            Delete
+            {t(language, "Delete", "삭제")}
           </button>
           <button
             onClick={onExitSelectionMode}
             className="text-sm text-secondary/60 hover:text-foreground transition-colors cursor-pointer"
           >
-            Cancel
+            {t(language, "Cancel", "취소")}
           </button>
         </div>
       )}
@@ -791,7 +796,7 @@ export const ChatMessages = forwardRef<ChatMessagesHandle, ChatMessagesProps>(fu
                 channelState.thinkingText !== "" && (
                 <div className="chat-msg-in flex justify-start mb-4">
                   <div className="w-full max-w-full py-1 text-sm text-secondary/50 animate-pulse">
-                    {writingAnswerLabel(channelState.responseLanguage)}
+                    {writingAnswerLabel(language)}
                   </div>
                 </div>
               )}
@@ -810,6 +815,7 @@ export const ChatMessages = forwardRef<ChatMessagesHandle, ChatMessagesProps>(fu
                     role="assistant"
                     content={channelState.streamingText}
                     isStreaming
+                    botId={botId}
                   />
                 ))}
 
@@ -821,6 +827,7 @@ export const ChatMessages = forwardRef<ChatMessagesHandle, ChatMessagesProps>(fu
                 channelState={channelState}
                 queuedMessages={liveQueuedMessages}
                 pendingRequests={pendingControlRequests}
+                uiLanguage={language}
               />
             </>
           );

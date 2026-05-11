@@ -19,6 +19,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import type { RegisteredHook, HookContext } from "../types.js";
+import { shouldSkipMemoryWriteForSession } from "../../reliability/ChannelMemoryPolicy.js";
 import { isLongTermMemoryWriteDisabled } from "../../util/memoryMode.js";
 
 const MIN_TEXT_LEN = 400;
@@ -74,6 +75,12 @@ export function makeHipocampusCheckpointHook(workspaceRoot: string): RegisteredH
     blocking: false, // pure observer
     timeoutMs: 8_000, // summariser can take a few seconds
     handler: async (args, ctx: HookContext) => {
+      if (shouldSkipMemoryWriteForSession(ctx.sessionKey)) {
+        ctx.log("info", "hipocampus checkpoint skipped by channel memory mode", {
+          sessionKey: ctx.sessionKey,
+        });
+        return;
+      }
       if (isLongTermMemoryWriteDisabled(ctx.memoryMode)) return;
       // Skip trivial turns (no tools, short text).
       if (args.toolCallCount === 0 && args.assistantText.length < MIN_TEXT_LEN) {

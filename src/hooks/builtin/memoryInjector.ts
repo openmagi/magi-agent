@@ -41,6 +41,7 @@ import {
   type MemoryContinuity,
   type MemoryRecallRecord,
 } from "../../reliability/MemoryContinuity.js";
+import { channelMemoryPolicyFromSessionKey } from "../../reliability/ChannelMemoryPolicy.js";
 import { isIncognitoMemoryMode } from "../../util/memoryMode.js";
 
 /** Soft budget for total injected content (bytes, UTF-8). */
@@ -371,6 +372,19 @@ export function makeMemoryInjectorHook(
 
       const userText = extractLastUserText(messages);
       if (!userText || userText.trim().length === 0) {
+        return { action: "continue" };
+      }
+
+      if (channelMemoryPolicyFromSessionKey(ctx.sessionKey) === "disabled") {
+        ctx.emit({
+          type: "rule_check",
+          ruleId: "memory-injector",
+          verdict: "ok",
+          detail: "skipped because channel memory mode disabled long-term memory",
+        });
+        ctx.log("info", "[memoryInjector] skipped by channel memory mode", {
+          sessionKey: ctx.sessionKey,
+        });
         return { action: "continue" };
       }
 

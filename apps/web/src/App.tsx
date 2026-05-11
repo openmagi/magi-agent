@@ -47,6 +47,10 @@ import {
 } from "@/lib/knowledge/upload-mime";
 import { localizeChannel } from "@/lib/chat/channel-i18n";
 import {
+  buildMemoryModeChannelIdentity,
+  type ChannelMemoryModeOption,
+} from "@/lib/chat/channel-memory-mode";
+import {
   buildChatExportFilename,
   buildChatExportMarkdown,
   normalizeSelectedChatExportMessages,
@@ -3572,8 +3576,9 @@ export function App() {
   }, []);
 
   const handleCreateChannel = useCallback(
-    (name: string) => {
-      const channelName = normalizeChannelName(name);
+    (name: string, memoryMode: ChannelMemoryModeOption = "normal") => {
+      const identity = buildMemoryModeChannelIdentity(name, memoryMode);
+      const channelName = identity.name || normalizeChannelName(name);
       const existing = useChatStore.getState().channels;
       if (existing.some((channel) => channel.name === channelName)) {
         store.setActiveChannel(channelName);
@@ -3582,8 +3587,9 @@ export function App() {
       const channel: Channel = {
         id: `local-${channelName}`,
         name: channelName,
-        display_name: name === channelName ? null : name,
+        display_name: identity.displayName ?? (name === channelName ? null : name),
         category: "General",
+        memory_mode: identity.memoryMode,
         position: existing.length,
         created_at: new Date().toISOString(),
       };
@@ -3891,6 +3897,7 @@ export function App() {
           messages={store.messages[activeChannel] ?? []}
           serverMessages={store.serverMessages[activeChannel] ?? []}
           channelState={channelState}
+          uiLanguage={channelState.responseLanguage}
           loading={false}
           botId={BOT_ID}
           selectionMode={store.selectionMode}

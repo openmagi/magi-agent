@@ -95,7 +95,6 @@
     --color-emerald-50: oklch(97.9% .021 166.113);
     --color-emerald-400: oklch(76.5% .177 163.223);
     --color-emerald-500: oklch(69.6% .17 162.48);
-    --color-emerald-600: oklch(59.6% .145 163.225);
     --color-emerald-700: oklch(50.8% .118 165.612);
     --color-sky-50: oklch(97.7% .013 236.62);
     --color-sky-500: oklch(68.5% .169 237.323);
@@ -109,8 +108,6 @@
     --color-gray-300: oklch(87.2% .01 258.338);
     --color-gray-400: oklch(70.7% .022 261.325);
     --color-gray-600: oklch(44.6% .03 256.802);
-    --color-gray-700: oklch(37.3% .034 259.733);
-    --color-gray-900: oklch(21% .034 264.665);
     --color-gray-950: oklch(13% .028 261.692);
     --color-black: #000;
     --color-white: #fff;
@@ -933,6 +930,10 @@
 
   .min-h-9 {
     min-height: calc(var(--spacing) * 9);
+  }
+
+  .min-h-10 {
+    min-height: calc(var(--spacing) * 10);
   }
 
   .min-h-11 {

@@ -16701,7 +16701,84 @@ function localizeChannel(name2, displayName, locale) {
   return CHANNEL_LABELS[name2]?.[locale] ?? displayName ?? name2;
 }
 const DEFAULT_CHANNELS = Object.keys(CHANNEL_LABELS);
+const MODE_LABELS = {
+  read_only: "Read-only memory",
+  incognito: "No memory"
+};
+function normalizeText(value) {
+  return (value ?? "").toLowerCase().replace(/[_-]+/g, " ").replace(/\s+/g, " ").trim();
+}
+function detectMemoryModeText(value) {
+  const text2 = normalizeText(value);
+  if (!text2) return null;
+  if (/\b(?:no memory|memory off|memory disabled|disabled memory)\b/.test(text2)) {
+    return "incognito";
+  }
+  if (/\b(?:read only memory|readonly memory|memory read only)\b/.test(text2)) {
+    return "read_only";
+  }
+  return null;
+}
+function sanitizeChannelName(value) {
+  return value.toLowerCase().replace(/\s+/g, "-").replace(/[^a-z0-9-]/g, "-").replace(/-+/g, "-").replace(/^-|-$/g, "");
+}
+function appendSlugSuffix(slug, suffix) {
+  if (slug === suffix || slug.endsWith(`-${suffix}`) || slug.startsWith(`${suffix}-`)) {
+    return slug;
+  }
+  return `${slug}-${suffix}`;
+}
+function hasLabel(text2, mode) {
+  return detectMemoryModeText(text2) === mode;
+}
+function formatChannelMemoryLabel(mode) {
+  if (!mode || mode === "normal") return null;
+  return MODE_LABELS[mode];
+}
+function getChannelMemoryMode(channel) {
+  if (channel.memory_mode && channel.memory_mode !== "normal") return channel.memory_mode;
+  return detectMemoryModeText(channel.name) ?? detectMemoryModeText(channel.display_name) ?? detectMemoryModeText(channel.category);
+}
+function withChannelMemoryModeSuffix(channel) {
+  const base = channel.display_name || channel.name;
+  const mode = getChannelMemoryMode(channel);
+  if (!mode) return base;
+  if (hasLabel(base, mode)) return base;
+  return `${base} · ${MODE_LABELS[mode]}`;
+}
+function buildMemoryModeChannelIdentity(rawName, mode = "normal") {
+  const trimmed = rawName.trim();
+  const baseSlug = sanitizeChannelName(trimmed) || `ch-${Date.now().toString(36)}`;
+  const inferredMode = mode === "normal" ? detectMemoryModeText(trimmed) ?? "normal" : mode;
+  if (inferredMode === "incognito") {
+    const name2 = appendSlugSuffix(baseSlug, "no-memory");
+    return {
+      name: name2,
+      displayName: hasLabel(trimmed, "incognito") ? trimmed : `${trimmed || name2} · ${MODE_LABELS.incognito}`,
+      memoryMode: "incognito"
+    };
+  }
+  if (inferredMode === "read_only") {
+    const name2 = appendSlugSuffix(baseSlug, "read-only-memory");
+    return {
+      name: name2,
+      displayName: hasLabel(trimmed, "read_only") ? trimmed : `${trimmed || name2} · ${MODE_LABELS.read_only}`,
+      memoryMode: "read_only"
+    };
+  }
+  const normalizedInputSlug = sanitizeChannelName(trimmed);
+  return {
+    name: baseSlug,
+    ...baseSlug !== normalizedInputSlug ? { displayName: trimmed || baseSlug } : {},
+    memoryMode: "normal"
+  };
+}
 const DEFAULT_CATEGORIES = ["General", "Info", "Life", "Finance", "Study", "People", "Tasks"];
+const CHANNEL_MEMORY_MODE_OPTIONS = [
+  { value: "normal", label: "Normal" },
+  { value: "read_only", label: "Read-only" },
+  { value: "incognito", label: "No memory" }
+];
 function rebuildChannelsFromFlat(items) {
   const channels = [];
   let currentCategory = "Other";
@@ -16838,7 +16915,7 @@ function SortableChannel({ id, channel, isActive, isCustom, canDelete, isRenamin
             onPointerDown: (e) => e.stopPropagation()
           }
         ) : /* @__PURE__ */ jsxRuntimeExports.jsxs(jsxRuntimeExports.Fragment, { children: [
-          /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "truncate flex-1", children: channel.display_name || channel.name }),
+          /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "truncate flex-1", children: withChannelMemoryModeSuffix(channel) }),
           /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center gap-0.5 shrink-0", children: [
             isCustom && /* @__PURE__ */ jsxRuntimeExports.jsx(PencilIcon, { onClick: () => onStartRename(id, channel.display_name || channel.name) }),
             canDelete && /* @__PURE__ */ jsxRuntimeExports.jsx(TrashIcon, { onClick: () => onDelete(channel.name) })
@@ -16876,6 +16953,7 @@ function ChatSidebar({
   const router = useRouter();
   const [showNewChannel, setShowNewChannel] = reactExports.useState(false);
   const [newChannelName, setNewChannelName] = reactExports.useState("");
+  const [newChannelMemoryMode, setNewChannelMemoryMode] = reactExports.useState("normal");
   const [showNewCategory, setShowNewCategory] = reactExports.useState(false);
   const [newCategoryName, setNewCategoryName] = reactExports.useState("");
   const [showAddMenu, setShowAddMenu] = reactExports.useState(false);
@@ -17020,10 +17098,11 @@ function ChatSidebar({
   const handleCreateChannel = reactExports.useCallback(() => {
     const name2 = newChannelName.trim();
     if (!name2) return;
-    onCreateChannel(name2);
+    onCreateChannel(name2, newChannelMemoryMode);
     setNewChannelName("");
+    setNewChannelMemoryMode("normal");
     setShowNewChannel(false);
-  }, [newChannelName, onCreateChannel]);
+  }, [newChannelMemoryMode, newChannelName, onCreateChannel]);
   const handleCreateCategory = reactExports.useCallback(() => {
     const name2 = newCategoryName.trim();
     if (!name2) return;
@@ -17172,6 +17251,13 @@ function ChatSidebar({
         /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "px-2 mb-1", children: /* @__PURE__ */ jsxRuntimeExports.jsx("h3", { className: "text-[10px] font-semibold text-slate-500 uppercase tracking-wider", children: localizeCategory(title, locale) }) }),
         /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "space-y-0.5", children: chs.map((ch) => {
           const unread = activeChannel !== ch.name && useChatStore.getState().hasUnread(ch.name);
+          const localizedChannel = {
+            ...ch,
+            display_name: localizeChannel(ch.name, ch.display_name, locale)
+          };
+          const memoryModeLabel = formatChannelMemoryLabel(
+            getChannelMemoryMode(localizedChannel)
+          );
           return /* @__PURE__ */ jsxRuntimeExports.jsxs(
             "button",
             {
@@ -17179,10 +17265,11 @@ function ChatSidebar({
               onContextMenu: (e) => handleContextMenu(e, ch.name),
               className: `w-full text-left px-2 py-1.5 rounded-lg text-sm transition-colors cursor-pointer flex items-center gap-1.5 ${activeChannel === ch.name ? "bg-primary/10 text-primary-light" : unread ? "text-foreground font-semibold hover:bg-black/5" : "text-secondary hover:text-foreground hover:bg-black/5"}`,
               children: [
-                /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "truncate", children: [
+                /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "min-w-0 flex-1 truncate", children: [
                   "# ",
-                  localizeChannel(ch.name, ch.display_name, locale)
+                  withChannelMemoryModeSuffix(localizedChannel)
                 ] }),
+                memoryModeLabel && /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "shrink-0 rounded-md border border-black/[0.08] bg-black/[0.04] px-1.5 py-0.5 text-[10px] font-medium text-secondary/70", children: memoryModeLabel }),
                 unread && /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "ml-auto w-2 h-2 rounded-full bg-primary shrink-0" })
               ]
             },
@@ -17328,9 +17415,21 @@ function ChatSidebar({
           autoFocus: true
         }
       ),
+      /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "mb-4 grid grid-cols-3 gap-1 rounded-xl bg-black/[0.04] p-1", children: CHANNEL_MEMORY_MODE_OPTIONS.map((option) => /* @__PURE__ */ jsxRuntimeExports.jsx(
+        "button",
+        {
+          type: "button",
+          onClick: () => setNewChannelMemoryMode(option.value),
+          "aria-pressed": newChannelMemoryMode === option.value,
+          className: `min-h-10 rounded-lg px-2 py-1.5 text-xs font-medium transition-colors ${newChannelMemoryMode === option.value ? "bg-white text-foreground shadow-sm" : "text-secondary hover:text-foreground"}`,
+          children: option.label
+        },
+        option.value
+      )) }),
       /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex gap-3", children: [
         /* @__PURE__ */ jsxRuntimeExports.jsx("button", { onClick: () => {
           setNewChannelName("");
+          setNewChannelMemoryMode("normal");
           setShowNewChannel(false);
         }, className: "flex-1 py-2.5 rounded-xl border border-black/8 text-sm text-secondary hover:bg-black/5 transition-colors cursor-pointer", children: "Cancel" }),
         /* @__PURE__ */ jsxRuntimeExports.jsx("button", { onClick: handleCreateChannel, className: "flex-1 py-2.5 rounded-xl bg-primary text-sm text-white font-medium hover:bg-primary/80 transition-colors cursor-pointer", children: "Create" })
@@ -33217,12 +33316,12 @@ function hasInlineRunStatus(channelState, queuedMessages, pendingRequests) {
   ) || hasOpenTaskState$1(channelState) || !!channelState.browserFrame || queuedMessages.length > 0 || pendingRequests.length > 0 || channelState.fileProcessing || channelState.reconnecting;
   return hasLiveWork || channelState.streaming && !channelState.streamingText;
 }
-function inlineWorkRows(channelState, queuedMessages, pendingRequests) {
-  const language = channelState.responseLanguage;
+function inlineWorkRows(channelState, queuedMessages, pendingRequests, language) {
   const rows = deriveWorkConsoleRows({
     channelState,
     queuedMessages,
-    controlRequests: pendingRequests
+    controlRequests: pendingRequests,
+    uiLanguage: language
   });
   const selected = [];
   selected.push(...rows.filter((row) => row.group === "control" && row.status === "waiting"));
@@ -33256,16 +33355,18 @@ function inlineWorkRows(channelState, queuedMessages, pendingRequests) {
 function InlineRunStatus({
   channelState,
   queuedMessages,
-  pendingRequests
+  pendingRequests,
+  uiLanguage
 }) {
   if (!hasInlineRunStatus(channelState, queuedMessages, pendingRequests)) return null;
-  const language = channelState.responseLanguage;
+  const language = uiLanguage ?? channelState.responseLanguage;
   const summary = deriveWorkStateSummary({
     channelState,
     queuedMessages,
-    controlRequests: pendingRequests
+    controlRequests: pendingRequests,
+    uiLanguage: language
   });
-  const rows = inlineWorkRows(channelState, queuedMessages, pendingRequests);
+  const rows = inlineWorkRows(channelState, queuedMessages, pendingRequests, language);
   return /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "chat-msg-in mb-4 flex justify-start", "data-chat-inline-run-status": "true", children: /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "w-full max-w-[92%] rounded-lg border border-black/[0.08] bg-white/90 px-3 py-2.5 shadow-sm backdrop-blur sm:max-w-[82%]", children: [
     /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex min-w-0 items-center justify-between gap-3", children: [
       /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "min-w-0", children: [
@@ -33318,10 +33419,10 @@ function duplicateContentKey(message) {
   const normalized = normalizedDuplicateContent(message);
   return normalized ? `${message.role}\0${normalized}` : null;
 }
-const ChatMessages = reactExports.forwardRef(function ChatMessages2({ messages, serverMessages, channelState, loading, botId, selectionMode, selectedMessages, onToggleSelect, onEnterSelectionMode, onSelectAll, onDeselectAll, onExportSelected, onDeleteSelected, onExitSelectionMode, onLoadOlder, hasOlderMessages, loadingOlder, onReplyTo, queuedMessages, onCancelQueued, controlRequests, onRespondControlRequest }, ref) {
+const ChatMessages = reactExports.forwardRef(function ChatMessages2({ messages, serverMessages, channelState, uiLanguage, loading, botId, selectionMode, selectedMessages, onToggleSelect, onEnterSelectionMode, onSelectAll, onDeselectAll, onExportSelected, onDeleteSelected, onExitSelectionMode, onLoadOlder, hasOlderMessages, loadingOlder, onReplyTo, queuedMessages, onCancelQueued, controlRequests, onRespondControlRequest }, ref) {
   const containerRef = reactExports.useRef(null);
   const [showScrollBtn, setShowScrollBtn] = reactExports.useState(false);
-  const language = channelState.responseLanguage;
+  const language = uiLanguage ?? channelState.responseLanguage;
   const userScrolledUp = reactExports.useRef(false);
   const prevMsgCount = reactExports.useRef(0);
   const animateFromRef = reactExports.useRef(0);
@@ -33451,14 +33552,11 @@ const ChatMessages = reactExports.forwardRef(function ChatMessages2({ messages, 
           className: "flex items-center gap-2 text-sm text-secondary/70 hover:text-foreground transition-colors cursor-pointer",
           children: [
             /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: `w-4.5 h-4.5 rounded border-2 flex items-center justify-center transition-colors ${allSelected ? "bg-[#7C3AED] border-[#7C3AED]" : selectedCount > 0 ? "bg-[#7C3AED]/30 border-[#7C3AED]" : "border-black/20 bg-white"}`, children: (allSelected || selectedCount > 0) && /* @__PURE__ */ jsxRuntimeExports.jsx("svg", { width: "10", height: "10", viewBox: "0 0 24 24", fill: "none", stroke: "white", strokeWidth: "3", strokeLinecap: "round", strokeLinejoin: "round", children: allSelected ? /* @__PURE__ */ jsxRuntimeExports.jsx("polyline", { points: "20 6 9 17 4 12" }) : /* @__PURE__ */ jsxRuntimeExports.jsx("line", { x1: "6", y1: "12", x2: "18", y2: "12" }) }) }),
-            "Select all"
+            t$3(language, "Select all", "전체 선택")
           ]
         }
       ),
-      /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "text-sm text-secondary/50", children: [
-        selectedCount,
-        " selected"
-      ] }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "text-sm text-secondary/50", children: isKorean$3(language) ? `${selectedCount}개 선택됨` : `${selectedCount} selected` }),
       /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "flex-1" }),
       /* @__PURE__ */ jsxRuntimeExports.jsxs(
         "button",
@@ -33474,7 +33572,7 @@ const ChatMessages = reactExports.forwardRef(function ChatMessages2({ messages, 
               /* @__PURE__ */ jsxRuntimeExports.jsx("line", { x1: "8.59", y1: "13.51", x2: "15.42", y2: "17.49" }),
               /* @__PURE__ */ jsxRuntimeExports.jsx("line", { x1: "15.41", y1: "6.51", x2: "8.59", y2: "10.49" })
             ] }),
-            "Export"
+            t$3(language, "Export", "내보내기")
           ]
         }
       ),
@@ -33489,7 +33587,7 @@ const ChatMessages = reactExports.forwardRef(function ChatMessages2({ messages, 
               /* @__PURE__ */ jsxRuntimeExports.jsx("polyline", { points: "3 6 5 6 21 6" }),
               /* @__PURE__ */ jsxRuntimeExports.jsx("path", { d: "M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" })
             ] }),
-            "Delete"
+            t$3(language, "Delete", "삭제")
           ]
         }
       ),
@@ -33498,7 +33596,7 @@ const ChatMessages = reactExports.forwardRef(function ChatMessages2({ messages, 
         {
           onClick: onExitSelectionMode,
           className: "text-sm text-secondary/60 hover:text-foreground transition-colors cursor-pointer",
-          children: "Cancel"
+          children: t$3(language, "Cancel", "취소")
         }
       )
     ] }),
@@ -33704,7 +33802,7 @@ const ChatMessages = reactExports.forwardRef(function ChatMessages2({ messages, 
               );
               return /* @__PURE__ */ jsxRuntimeExports.jsxs(jsxRuntimeExports.Fragment, { children: [
                 renderFinalizedMessages(mainMessages),
-                channelState.streaming && !channelState.streamingText && channelState.thinkingStartedAt !== null && channelState.thinkingText !== "" && /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "chat-msg-in flex justify-start mb-4", children: /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "w-full max-w-full py-1 text-sm text-secondary/50 animate-pulse", children: writingAnswerLabel(channelState.responseLanguage) }) }),
+                channelState.streaming && !channelState.streamingText && channelState.thinkingStartedAt !== null && channelState.thinkingText !== "" && /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "chat-msg-in flex justify-start mb-4", children: /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "w-full max-w-full py-1 text-sm text-secondary/50 animate-pulse", children: writingAnswerLabel(language) }) }),
                 channelState.streamingText && (anchoredMidTurnInjected.length > 0 ? renderAssistantWithInjected(
                   channelState.streamingText,
                   anchoredMidTurnInjected,
@@ -33716,7 +33814,8 @@ const ChatMessages = reactExports.forwardRef(function ChatMessages2({ messages, 
                   {
                     role: "assistant",
                     content: channelState.streamingText,
-                    isStreaming: true
+                    isStreaming: true,
+                    botId
                   }
                 )),
                 unanchoredMidTurnInjected.map(
@@ -33727,7 +33826,8 @@ const ChatMessages = reactExports.forwardRef(function ChatMessages2({ messages, 
                   {
                     channelState,
                     queuedMessages: liveQueuedMessages,
-                    pendingRequests: pendingControlRequests2
+                    pendingRequests: pendingControlRequests2,
+                    uiLanguage: language
                   }
                 )
               ] });
@@ -39760,8 +39860,9 @@ function App() {
     chatInputRef.current?.focus();
   }, []);
   const handleCreateChannel = reactExports.useCallback(
-    (name2) => {
-      const channelName = normalizeChannelName(name2);
+    (name2, memoryMode = "normal") => {
+      const identity2 = buildMemoryModeChannelIdentity(name2, memoryMode);
+      const channelName = identity2.name || normalizeChannelName(name2);
       const existing = useChatStore.getState().channels;
       if (existing.some((channel2) => channel2.name === channelName)) {
         store.setActiveChannel(channelName);
@@ -39770,8 +39871,9 @@ function App() {
       const channel = {
         id: `local-${channelName}`,
         name: channelName,
-        display_name: name2 === channelName ? null : name2,
+        display_name: identity2.displayName ?? (name2 === channelName ? null : name2),
         category: "General",
+        memory_mode: identity2.memoryMode,
         position: existing.length,
         created_at: (/* @__PURE__ */ new Date()).toISOString()
       };
@@ -40061,6 +40163,7 @@ function App() {
               messages: store.messages[activeChannel] ?? [],
               serverMessages: store.serverMessages[activeChannel] ?? [],
               channelState,
+              uiLanguage: channelState.responseLanguage,
               loading: false,
               botId: BOT_ID,
               selectionMode: store.selectionMode,
