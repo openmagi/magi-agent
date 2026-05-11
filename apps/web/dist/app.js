@@ -37158,6 +37158,74 @@ function asArray(value) {
 function asStringArray(value) {
   return Array.isArray(value) ? value.filter((item) => typeof item === "string") : [];
 }
+function normalizedLookupKey(value) {
+  return value.trim().toLowerCase();
+}
+function compactUniqueStrings(values) {
+  return Array.from(
+    new Set(values.map((value) => value.trim()).filter((value) => value.length > 0))
+  );
+}
+function normalizeSkillIssueDetails(issues) {
+  return issues.map((issue, index2) => {
+    const skillName = asString(issue.skillName);
+    const dir = asString(issue.dir);
+    const path2 = asString(issue.path, dir);
+    const title = skillName || dir || `Issue ${index2 + 1}`;
+    const reason = asString(issue.reason, "unknown_issue");
+    const detail = asString(issue.detail);
+    const lookupKeys = compactUniqueStrings([skillName, dir, path2, title]).map(normalizedLookupKey);
+    return {
+      key: `${title}-${reason}-${index2}`,
+      title,
+      reason,
+      detail,
+      path: path2,
+      lookupKeys
+    };
+  });
+}
+function normalizeSkillDirectoryItems(loaded, issues) {
+  const issueDetails = normalizeSkillIssueDetails(issues);
+  return loaded.map((skill, index2) => {
+    const name2 = asString(skill.name, `skill-${index2 + 1}`);
+    const dir = asString(skill.dir);
+    const path2 = asString(skill.path, dir);
+    const lookupKeys = compactUniqueStrings([name2, dir, path2]).map(normalizedLookupKey);
+    const matchedIssues = issueDetails.filter(
+      (issue) => issue.lookupKeys.some((key) => lookupKeys.includes(key))
+    );
+    return {
+      name: name2,
+      path: path2,
+      tags: asStringArray(skill.tags),
+      promptOnly: skill.promptOnly === true,
+      scriptBacked: skill.scriptBacked === true,
+      runtimeHooks: Math.max(0, Math.floor(asNumber(skill.runtimeHooks, 0))),
+      issues: matchedIssues
+    };
+  });
+}
+function skillSearchText(skill) {
+  return [
+    skill.name,
+    skill.path,
+    ...skill.tags,
+    ...skill.issues.flatMap((issue) => [issue.title, issue.reason, issue.detail, issue.path])
+  ].join(" ").toLowerCase();
+}
+function filterSkillDirectoryItem(skill, filter) {
+  if (filter === "prompt") return skill.promptOnly;
+  if (filter === "script") return skill.scriptBacked;
+  if (filter === "hooks") return skill.runtimeHooks > 0;
+  if (filter === "issues") return skill.issues.length > 0;
+  return true;
+}
+function skillTypeLabel(skill) {
+  if (skill.scriptBacked) return "Script skill";
+  if (skill.promptOnly) return "Prompt skill";
+  return "Skill";
+}
 function asProviderName(value) {
   return value === "anthropic" || value === "openai" || value === "google" || value === "openai-compatible" ? value : "openai-compatible";
 }
@@ -38535,43 +38603,196 @@ function MemoryDashboard({
     ] })
   ] });
 }
+function SkillDirectoryFilterButton({
+  active,
+  label,
+  count,
+  onClick
+}) {
+  return /* @__PURE__ */ jsxRuntimeExports.jsxs(
+    "button",
+    {
+      type: "button",
+      "aria-pressed": active,
+      onClick,
+      className: `inline-flex min-h-10 items-center gap-2 rounded-xl border px-3.5 py-2 text-sm font-semibold transition-all duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30 ${active ? "border-primary/25 bg-primary/[0.08] text-primary" : "border-black/[0.08] bg-white text-secondary hover:border-primary/25 hover:bg-primary/[0.035] hover:text-foreground"}`,
+      children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsx("span", { children: label }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: `rounded-full px-2 py-0.5 text-[11px] ${active ? "bg-primary/10" : "bg-black/[0.04]"}`, children: count })
+      ]
+    }
+  );
+}
+function SkillBadge({
+  children,
+  tone = "neutral"
+}) {
+  const tones = {
+    neutral: "border-black/[0.08] bg-black/[0.025] text-secondary",
+    primary: "border-primary/15 bg-primary/[0.08] text-primary",
+    green: "border-emerald-500/20 bg-emerald-500/[0.08] text-emerald-700",
+    red: "border-red-500/20 bg-red-500/[0.08] text-red-500"
+  };
+  return /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: `inline-flex items-center rounded-full border px-2.5 py-1 text-[11px] font-semibold ${tones[tone]}`, children });
+}
 function SkillsDashboard({
   skillsSnapshot,
   loading,
   onRefresh
 }) {
+  const [query, setQuery] = reactExports.useState("");
+  const [filter, setFilter] = reactExports.useState("all");
   const loaded = asArray(skillsSnapshot?.loaded);
   const hooks = asArray(skillsSnapshot?.runtimeHooks);
   const issues = asArray(skillsSnapshot?.issues);
-  return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "max-w-4xl space-y-6", children: [
+  const issueDetails = reactExports.useMemo(() => normalizeSkillIssueDetails(issues), [issues]);
+  const skillItems = reactExports.useMemo(() => normalizeSkillDirectoryItems(loaded, issues), [loaded, issues]);
+  const hookGroups = reactExports.useMemo(() => {
+    const groups = /* @__PURE__ */ new Map();
+    for (const hook of hooks) {
+      const point2 = asString(hook.point, asString(hook.kind, "runtime"));
+      groups.set(point2, [...groups.get(point2) ?? [], hook]);
+    }
+    return Array.from(groups.entries()).map(([point2, items]) => ({ point: point2, items }));
+  }, [hooks]);
+  const normalizedQuery = query.trim().toLowerCase();
+  const promptSkillCount = skillItems.filter((skill) => skill.promptOnly).length;
+  const scriptSkillCount = skillItems.filter((skill) => skill.scriptBacked).length;
+  const hookSkillCount = skillItems.filter((skill) => skill.runtimeHooks > 0).length;
+  const issueSkillCount = skillItems.filter((skill) => skill.issues.length > 0).length;
+  const filterOptions = [
+    { id: "all", label: "All", count: skillItems.length },
+    { id: "prompt", label: "Prompt skills", count: promptSkillCount },
+    { id: "script", label: "Script skills", count: scriptSkillCount },
+    { id: "hooks", label: "Runtime hooks", count: hookSkillCount },
+    { id: "issues", label: "Issues", count: issueSkillCount }
+  ];
+  const filteredSkills = skillItems.filter((skill) => {
+    if (!filterSkillDirectoryItem(skill, filter)) return false;
+    if (!normalizedQuery) return true;
+    return skillSearchText(skill).includes(normalizedQuery);
+  });
+  return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "max-w-6xl space-y-6", children: [
     /* @__PURE__ */ jsxRuntimeExports.jsx(
       DashboardPageHeader,
       {
         eyebrow: "Capabilities",
         title: "Skills",
-        description: "Workspace SKILL.md capabilities and runtime hook metadata loaded by the local agent.",
+        description: "Local SKILL.md capabilities loaded by the runtime. Search installed skills, inspect hook wiring, and catch broken skill metadata before a run depends on it.",
         action: /* @__PURE__ */ jsxRuntimeExports.jsx(ButtonLike, { variant: "secondary", onClick: onRefresh, children: "Reload" })
       }
     ),
-    /* @__PURE__ */ jsxRuntimeExports.jsx(
+    /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "grid gap-3 sm:grid-cols-2 xl:grid-cols-4", children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsx(MetricTile, { label: "Installed", value: skillItems.length }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx(MetricTile, { label: "Prompt Skills", value: promptSkillCount }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx(MetricTile, { label: "Script Skills", value: scriptSkillCount }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx(MetricTile, { label: "Runtime Hooks", value: hooks.length })
+    ] }),
+    issueDetails.length > 0 && /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "rounded-2xl border border-red-500/15 bg-red-500/[0.045] px-5 py-4", children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "text-sm font-semibold text-red-500", children: [
+        issueDetails.length,
+        " skill issue",
+        issueDetails.length === 1 ? "" : "s",
+        " need attention"
+      ] }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "mt-1 text-sm leading-6 text-red-500/80", children: "Invalid skill metadata stays visible here so local operators can fix it before relying on the capability." })
+    ] }),
+    /* @__PURE__ */ jsxRuntimeExports.jsxs(
       DashboardCard,
       {
-        title: "Skills",
-        children: loading ? /* @__PURE__ */ jsxRuntimeExports.jsx(EmptyState, { children: "Loading skills..." }) : loaded.length === 0 ? /* @__PURE__ */ jsxRuntimeExports.jsx(EmptyState, { children: "No skills loaded." }) : /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "space-y-2", children: loaded.map((skill, index2) => /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "rounded-lg border border-black/[0.06] bg-gray-50 px-4 py-3", children: [
-          /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "text-sm font-semibold text-foreground", children: asString(skill.name, `skill-${index2 + 1}`) }),
-          asString(skill.path) && /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "mt-1 truncate text-xs text-secondary", children: asString(skill.path) })
-        ] }, asString(skill.name, `skill-${index2}`))) })
+        title: "Directory",
+        action: /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "text-xs font-semibold uppercase tracking-[0.14em] text-secondary/60", children: [
+          filteredSkills.length,
+          " shown"
+        ] }),
+        children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "mb-5 grid gap-3 lg:grid-cols-[minmax(0,1fr)_auto]", children: [
+            /* @__PURE__ */ jsxRuntimeExports.jsxs("label", { className: "block", children: [
+              /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "sr-only", children: "Search skills" }),
+              /* @__PURE__ */ jsxRuntimeExports.jsx(
+                "input",
+                {
+                  value: query,
+                  onChange: (event) => setQuery(event.target.value),
+                  placeholder: "Search skills...",
+                  className: "min-h-11 w-full rounded-xl border border-black/[0.08] bg-white px-4 py-2.5 text-sm font-medium text-foreground outline-none transition-colors duration-200 placeholder:text-secondary/45 focus:border-primary/45 focus:ring-4 focus:ring-primary/10"
+                }
+              )
+            ] }),
+            /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "flex flex-wrap gap-2", children: filterOptions.map((option) => /* @__PURE__ */ jsxRuntimeExports.jsx(
+              SkillDirectoryFilterButton,
+              {
+                active: filter === option.id,
+                label: option.label,
+                count: option.count,
+                onClick: () => setFilter(option.id)
+              },
+              option.id
+            )) })
+          ] }),
+          loading ? /* @__PURE__ */ jsxRuntimeExports.jsx(EmptyState, { children: "Loading skills..." }) : skillItems.length === 0 ? /* @__PURE__ */ jsxRuntimeExports.jsx(EmptyState, { children: "No skills loaded. Add SKILL.md directories to the local workspace, then reload." }) : filteredSkills.length === 0 ? /* @__PURE__ */ jsxRuntimeExports.jsx(EmptyState, { children: "No skills match the current search or filter." }) : /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "grid gap-3 md:grid-cols-2 xl:grid-cols-3", children: filteredSkills.map((skill) => /* @__PURE__ */ jsxRuntimeExports.jsxs(
+            "article",
+            {
+              className: "flex min-h-[190px] flex-col rounded-2xl border border-black/[0.06] bg-white px-4 py-4 transition-all duration-200 hover:border-primary/20 hover:bg-primary/[0.025]",
+              children: [
+                /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-start justify-between gap-3", children: [
+                  /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "min-w-0", children: [
+                    /* @__PURE__ */ jsxRuntimeExports.jsx("h3", { className: "truncate text-base font-semibold text-foreground", children: skill.name }),
+                    /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "mt-1 truncate text-xs text-secondary", children: skill.path || "workspace skill" })
+                  ] }),
+                  /* @__PURE__ */ jsxRuntimeExports.jsx(SkillBadge, { tone: skill.scriptBacked ? "green" : "primary", children: skillTypeLabel(skill) })
+                ] }),
+                /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "mt-4 flex flex-wrap gap-2", children: [
+                  skill.tags.slice(0, 5).map((tag) => /* @__PURE__ */ jsxRuntimeExports.jsx(SkillBadge, { children: tag }, tag)),
+                  skill.runtimeHooks > 0 && /* @__PURE__ */ jsxRuntimeExports.jsxs(SkillBadge, { tone: "green", children: [
+                    skill.runtimeHooks,
+                    " hook",
+                    skill.runtimeHooks === 1 ? "" : "s"
+                  ] }),
+                  skill.issues.length > 0 && /* @__PURE__ */ jsxRuntimeExports.jsxs(SkillBadge, { tone: "red", children: [
+                    skill.issues.length,
+                    " issue",
+                    skill.issues.length === 1 ? "" : "s"
+                  ] }),
+                  skill.tags.length === 0 && skill.runtimeHooks === 0 && skill.issues.length === 0 && /* @__PURE__ */ jsxRuntimeExports.jsx(SkillBadge, { children: "no tags" })
+                ] }),
+                /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "mt-auto pt-4", children: /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "rounded-xl border border-black/[0.05] bg-black/[0.025] px-3 py-2", children: [
+                  /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "text-[11px] font-semibold uppercase tracking-[0.12em] text-secondary/60", children: "Runtime role" }),
+                  /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "mt-1 text-sm leading-5 text-secondary", children: skill.scriptBacked ? "Executable capability with an input schema and local entrypoint." : "Prompt capability that can be invoked by the local operator." })
+                ] }) })
+              ]
+            },
+            `${skill.name}-${skill.path}`
+          )) })
+        ]
       }
     ),
-    /* @__PURE__ */ jsxRuntimeExports.jsx(DashboardCard, { title: "Runtime Hooks", children: /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "space-y-2", children: [
-      hooks.length === 0 ? /* @__PURE__ */ jsxRuntimeExports.jsx(EmptyState, { children: "No runtime hooks reported." }) : hooks.map((hook, index2) => /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "rounded-lg border border-black/[0.06] bg-gray-50 px-4 py-3 text-sm font-semibold text-foreground", children: asString(hook.name, `hook-${index2 + 1}`) }, asString(hook.name, `hook-${index2}`))),
-      issues.length > 0 && /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "rounded-xl bg-red-50 px-4 py-3 text-sm text-red-500", children: [
-        issues.length,
-        " skill issue",
-        issues.length === 1 ? "" : "s",
-        " reported."
-      ] })
-    ] }) })
+    /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "grid gap-5 lg:grid-cols-[minmax(0,1fr)_minmax(320px,380px)]", children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsx(DashboardCard, { title: "Runtime Hooks", children: hookGroups.length === 0 ? /* @__PURE__ */ jsxRuntimeExports.jsx(EmptyState, { children: "No runtime hooks reported." }) : /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "space-y-3", children: hookGroups.map((group) => /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "rounded-2xl border border-black/[0.06] bg-gray-50 p-4", children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center justify-between gap-3", children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "text-sm font-semibold text-foreground", children: group.point }),
+          /* @__PURE__ */ jsxRuntimeExports.jsx(SkillBadge, { children: group.items.length })
+        ] }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "mt-3 space-y-2", children: group.items.map((hook, index2) => {
+          const hookName = asString(hook.name, asString(hook.skillName, `hook-${index2 + 1}`));
+          const detail = asString(hook.command, asString(hook.path, asString(hook.entry)));
+          return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "rounded-xl bg-white px-3 py-2", children: [
+            /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "text-sm font-semibold text-foreground", children: hookName }),
+            detail && /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "mt-1 truncate text-xs text-secondary", children: detail })
+          ] }, `${group.point}-${hookName}-${index2}`);
+        }) })
+      ] }, group.point)) }) }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx(DashboardCard, { title: "Issue detail", children: issueDetails.length === 0 ? /* @__PURE__ */ jsxRuntimeExports.jsx(EmptyState, { children: "No skill issues reported." }) : /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "space-y-3", children: issueDetails.map((issue) => /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "rounded-2xl border border-red-500/15 bg-red-500/[0.04] px-4 py-3", children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-start justify-between gap-3", children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "min-w-0", children: [
+            /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "truncate text-sm font-semibold text-foreground", children: issue.title }),
+            issue.path && /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "mt-1 truncate text-xs text-secondary", children: issue.path })
+          ] }),
+          /* @__PURE__ */ jsxRuntimeExports.jsx(SkillBadge, { tone: "red", children: issue.reason })
+        ] }),
+        issue.detail && /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "mt-3 rounded-xl bg-white/70 px-3 py-2 text-xs leading-5 text-secondary", children: issue.detail })
+      ] }, issue.key)) }) })
+    ] })
   ] });
 }
 function UsageDashboard({ runtimeSnapshot }) {
