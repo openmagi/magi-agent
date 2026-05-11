@@ -35,4 +35,35 @@ describe("derivePublicToolPreview", () => {
       snippet: "Synthesizing verified notes",
     });
   });
+
+  it("localizes browser session output without exposing transport internals", () => {
+    expect(
+      derivePublicToolPreview({
+        label: "Browser",
+        language: "ko",
+        outputPreview: JSON.stringify({
+          action: "create_session",
+          sessionId: "browser-session-fixture",
+          cdpEndpoint: "ws://browser-worker.magi-system:9222/cdp/browser-session-fixture",
+        }),
+      }),
+    ).toEqual({
+      action: "브라우저 여는 중",
+      target: "브라우저 세션 시작 중",
+    });
+
+    expect(
+      derivePublicToolPreview({
+        label: "Browser",
+        language: "ko",
+        outputPreview: JSON.stringify({
+          action: "scrape",
+          url: "https://example.com/report",
+        }),
+      }),
+    ).toEqual({
+      action: "페이지 읽는 중",
+      target: "https://example.com/report",
+    });
+  });
 });

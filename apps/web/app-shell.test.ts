@@ -72,6 +72,7 @@ describe("Magi App shell", () => {
     const modelPicker = readAppFile(path.join("src", "components", "chat", "chat-model-picker.tsx"));
     const sidePanel = readAppFile(path.join("src", "components", "chat", "kb-side-panel.tsx"));
     const workPanel = readAppFile(path.join("src", "components", "chat", "work-console-panel.tsx"));
+    const runInspector = readAppFile(path.join("src", "components", "chat", "run-inspector-dock.tsx"));
     const css = readAppFile(path.join("src", "styles.css"));
 
     expect(sidebar).toContain("DndContext");
@@ -83,11 +84,18 @@ describe("Magi App shell", () => {
     expect(sidePanel).toContain("PANEL_VIEW_KEY");
     expect(sidePanel).toContain("WorkConsolePanel");
     expect(sidePanel).toContain("onWorkspaceFileSave");
+    expect(sidePanel).toContain("shouldSuppressInlineRunDetails");
+    expect(sidePanel).toContain("suppressInlineRunDetails={suppressInlineRunDetails}");
     expect(workPanel).toContain("deriveWorkConsoleRows");
+    expect(workPanel).toContain("work-console-motion");
+    expect(workPanel).toContain("work-console-row-motion");
+    expect(runInspector).toContain("external_doc");
+    expect(runInspector).toContain("subagent_result");
     expect(css).toContain('@import "tailwindcss"');
     expect(css).toContain("--background: #FAFAFA");
     expect(css).toContain("--primary: #7C3AED");
     expect(css).toContain(".chat-input-glow");
+    expect(css).toContain(".work-console-running-dot");
     expect(css).toContain(".prose-chat");
   });
 

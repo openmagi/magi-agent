@@ -582,7 +582,10 @@ function structuredValueText(value: unknown): string | undefined {
   return undefined;
 }
 
-function browserPreview(input: PublicToolPreviewInput): PublicToolPreview | null {
+function browserPreview(
+  input: PublicToolPreviewInput,
+  language?: ChatResponseLanguage,
+): PublicToolPreview | null {
   const output = previewObject(input.outputPreview) ?? previewObject(input.inputPreview);
   if (!output) return null;
 
@@ -593,7 +596,7 @@ function browserPreview(input: PublicToolPreviewInput): PublicToolPreview | null
 
   if (status && /error|fail|aborted/i.test(status)) {
     return {
-      action: "Browser step failed",
+      action: localized(language, "Browser step failed", "브라우저 단계 실패"),
       ...(path ? { target: bounded(path, MAX_TARGET_LENGTH) } : {}),
       ...(error ? { snippet: snippetFrom(error) } : {}),
     };
@@ -601,14 +604,14 @@ function browserPreview(input: PublicToolPreviewInput): PublicToolPreview | null
 
   if (action === "create_session" || action === "open_session" || action === "session") {
     return {
-      action: "Opening browser",
-      target: "Starting browser session",
+      action: localized(language, "Opening browser", "브라우저 여는 중"),
+      target: localized(language, "Starting browser session", "브라우저 세션 시작 중"),
     };
   }
 
   if (action === "scrape" || action === "read" || action === "extract") {
     return {
-      action: "Reading page",
+      action: localized(language, "Reading page", "페이지 읽는 중"),
       ...(path ? { target: bounded(path, MAX_TARGET_LENGTH) } : {}),
       ...(error ? { snippet: snippetFrom(error) } : {}),
     };
@@ -616,13 +619,13 @@ function browserPreview(input: PublicToolPreviewInput): PublicToolPreview | null
 
   if (action === "navigate" || action === "goto" || action === "open") {
     return {
-      action: "Opening page",
+      action: localized(language, "Opening page", "페이지 여는 중"),
       ...(path ? { target: bounded(path, MAX_TARGET_LENGTH) } : {}),
     };
   }
 
   return {
-    action: "Using browser",
+    action: localized(language, "Using browser", "브라우저 사용 중"),
     ...(path ? { target: bounded(path, MAX_TARGET_LENGTH) } : {}),
   };
 }
@@ -1015,7 +1018,7 @@ export function derivePublicToolPreview(
   }
 
   if (tool === "browser" || tool === "browseruse" || tool === "browserworker") {
-    const preview = browserPreview(input);
+    const preview = browserPreview(input, language);
     if (preview) return preview;
   }
 
