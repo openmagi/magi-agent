@@ -41,6 +41,10 @@ import {
   normalizeWorkspaceFileList,
   type WorkspaceFileEntry,
 } from "@/lib/workspace/workspace-files";
+import {
+  KB_UPLOAD_EXTENSIONS,
+  resolveKnowledgeUploadMimeType,
+} from "@/lib/knowledge/upload-mime";
 import { localizeChannel } from "@/lib/chat/channel-i18n";
 import type {
   BrowserFrame,
@@ -93,8 +97,18 @@ const storage = {
 
 type JsonRecord = Record<string, unknown>;
 type RuntimePhase = NonNullable<ChannelState["turnPhase"]>;
-type AppRoute = "chat" | "overview" | "settings" | "usage" | "skills" | "workspace" | "knowledge" | "memory";
+type AppRoute =
+  | "chat"
+  | "overview"
+  | "settings"
+  | "usage"
+  | "skills"
+  | "converter"
+  | "workspace"
+  | "knowledge"
+  | "memory";
 type DashboardRoute = Exclude<AppRoute, "chat">;
+type ProviderName = "anthropic" | "openai" | "google" | "openai-compatible";
 type RuntimeCheckStatus = "not_checked" | "checking" | "active" | "unavailable";
 
 interface AppBootstrap {
@@ -131,6 +145,40 @@ interface MemorySearchResult {
   score?: number;
   contentPreview?: string;
   context?: string;
+}
+
+interface LocalConfigState {
+  path: string;
+  exists: boolean;
+  provider: ProviderName;
+  model: string;
+  baseUrl: string;
+  apiKeyEnvVar: string;
+  gatewayTokenEnvVar: string;
+  workspace: string;
+  contextWindow: string;
+  maxOutputTokens: string;
+  supportsThinking: boolean;
+  restartRequired: boolean;
+  liveReloadSupported: boolean;
+}
+
+interface LocalConfigSaveInput {
+  llm: {
+    provider: ProviderName;
+    model: string;
+    baseUrl?: string;
+    apiKeyEnvVar?: string;
+    capabilities: {
+      contextWindow?: number;
+      maxOutputTokens?: number;
+      supportsThinking: boolean;
+    };
+  };
+  server?: {
+    gatewayTokenEnvVar?: string;
+  };
+  workspace?: string;
 }
 
 function defaultChannel(): Channel {
@@ -189,6 +237,7 @@ function isDashboardRoute(value: string | null): value is DashboardRoute {
     value === "settings" ||
     value === "usage" ||
     value === "skills" ||
+    value === "converter" ||
     value === "workspace" ||
     value === "knowledge" ||
     value === "memory"
@@ -251,6 +300,70 @@ function asArray(value: unknown): JsonRecord[] {
 
 function asStringArray(value: unknown): string[] {
   return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
+}
+
+function asProviderName(value: unknown): ProviderName {
+  return value === "anthropic" ||
+    value === "openai" ||
+    value === "google" ||
+    value === "openai-compatible"
+    ? value
+    : "openai-compatible";
+}
+
+function localConfigFromPayload(payload: JsonRecord): LocalConfigState {
+  const config = asRecord(payload.config);
+  const llm = asRecord(config.llm);
+  const server = asRecord(config.server);
+  const capabilities = asRecord(llm.capabilities);
+  return {
+    path: asString(payload.path, asString(config.path, "magi-agent.yaml")),
+    exists: payload.exists === true,
+    provider: asProviderName(llm.provider),
+    model: asString(llm.model, "llama3.1"),
+    baseUrl: asString(llm.baseUrl),
+    apiKeyEnvVar: asString(llm.apiKeyEnvVar),
+    gatewayTokenEnvVar: asString(server.gatewayTokenEnvVar),
+    workspace: asString(config.workspace, "./workspace"),
+    contextWindow:
+      typeof capabilities.contextWindow === "number"
+        ? String(capabilities.contextWindow)
+        : "",
+    maxOutputTokens:
+      typeof capabilities.maxOutputTokens === "number"
+        ? String(capabilities.maxOutputTokens)
+        : "",
+    supportsThinking: capabilities.supportsThinking === true,
+    restartRequired: payload.restartRequired === true,
+    liveReloadSupported: payload.liveReloadSupported === true,
+  };
+}
+
+function optionalNumber(value: string): number | undefined {
+  const trimmed = value.trim();
+  if (!trimmed) return undefined;
+  const parsed = Number(trimmed);
+  return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : undefined;
+}
+
+function configSavePayload(config: LocalConfigState): LocalConfigSaveInput {
+  return {
+    llm: {
+      provider: config.provider,
+      model: config.model.trim() || "llama3.1",
+      ...(config.baseUrl.trim() ? { baseUrl: config.baseUrl.trim() } : {}),
+      ...(config.apiKeyEnvVar.trim() ? { apiKeyEnvVar: config.apiKeyEnvVar.trim() } : {}),
+      capabilities: {
+        ...(optionalNumber(config.contextWindow) ? { contextWindow: optionalNumber(config.contextWindow) } : {}),
+        ...(optionalNumber(config.maxOutputTokens) ? { maxOutputTokens: optionalNumber(config.maxOutputTokens) } : {}),
+        supportsThinking: config.supportsThinking,
+      },
+    },
+    ...(config.gatewayTokenEnvVar.trim()
+      ? { server: { gatewayTokenEnvVar: config.gatewayTokenEnvVar.trim() } }
+      : {}),
+    ...(config.workspace.trim() ? { workspace: config.workspace.trim() } : {}),
+  };
 }
 
 function preview(value: unknown, max = 400): string | undefined {
@@ -635,6 +748,7 @@ function DashboardSidebar({
     { route: "settings", label: "Settings" },
     { route: "usage", label: "Usage" },
     { route: "skills", label: "Skills" },
+    { route: "converter", label: "Converter" },
   ];
   const workspaceItems: Array<{ route: AppRoute; label: string }> = [
     { route: "knowledge", label: "Knowledge" },
@@ -649,10 +763,10 @@ function DashboardSidebar({
         key={route}
         type="button"
         onClick={() => onNavigate(route)}
-        className={`w-full rounded-xl px-3 py-2 text-left text-sm font-medium transition ${
+        className={`block w-full rounded-xl px-3 py-2.5 text-left text-sm font-medium transition-colors duration-200 cursor-pointer ${
           active
-            ? "bg-primary/10 text-primary shadow-[inset_0_0_0_1px_rgba(124,58,237,0.12)]"
-            : "text-secondary hover:bg-black/[0.04] hover:text-foreground"
+            ? "bg-primary/10 text-primary-light border border-primary/25"
+            : "text-gray-700 hover:text-gray-900 hover:bg-gray-100"
         }`}
       >
         {label}
@@ -661,9 +775,21 @@ function DashboardSidebar({
   };
 
   return (
-    <aside className="hidden h-screen w-64 shrink-0 border-r border-black/[0.06] bg-gray-50/80 md:flex md:flex-col">
-      <div className="border-b border-black/[0.06] px-5 py-5">
-        <div className="text-base font-semibold text-foreground">{BOT_NAME}</div>
+    <aside className="hidden h-screen w-64 shrink-0 flex-col border-r border-gray-200 bg-gray-50 p-6 md:flex">
+      <button
+        type="button"
+        onClick={() => onNavigate("overview")}
+        className="mb-10 flex items-center gap-2 text-left"
+        aria-label="Open Magi dashboard"
+      >
+        <span className="flex h-6 w-6 items-center justify-center rounded-md bg-primary text-xs font-bold text-white">
+          M
+        </span>
+        <span className="text-sm font-semibold text-foreground">Open Magi</span>
+      </button>
+
+      <div className="mb-4 rounded-xl border border-gray-200 bg-white px-3 py-2.5">
+        <div className="min-w-0 truncate text-sm font-semibold text-foreground">{BOT_NAME}</div>
         <div className="mt-1 flex items-center gap-2 text-sm text-secondary">
           <span
             className={`h-2.5 w-2.5 rounded-full ${
@@ -673,32 +799,39 @@ function DashboardSidebar({
           {runtimeStatusLabel(runtimeStatus)}
         </div>
       </div>
-      <nav className="flex-1 overflow-y-auto px-3 py-5">
-        <div className="mb-6 space-y-1">
-          <div className="px-2 pb-2 text-[11px] font-bold uppercase tracking-[0.12em] text-secondary/60">
-            General
-          </div>
-          {primaryItems.map(renderItem)}
+
+      <nav className="min-h-0 flex-1 space-y-1 overflow-y-auto">
+        <div className="pb-1">
+          <span className="px-3 text-xs font-medium uppercase tracking-wider text-gray-400">
+            Chat
+          </span>
         </div>
         <div className="space-y-1">
-          <div className="px-2 pb-2 text-[11px] font-bold uppercase tracking-[0.12em] text-secondary/60">
+          {primaryItems.map(renderItem)}
+        </div>
+        <div className="pt-4 pb-1">
+          <div className="mb-3 border-t border-gray-200" />
+          <span className="px-3 text-xs font-medium uppercase tracking-wider text-gray-400">
             Local Runtime
-          </div>
+          </span>
+        </div>
+        <div className="space-y-1">
           {workspaceItems.map(renderItem)}
         </div>
       </nav>
-      <div className="border-t border-black/[0.06] p-3 space-y-1">
+
+      <div className="space-y-2 border-t border-gray-200 pt-4">
         <button
           type="button"
           onClick={onRefresh}
-          className="w-full rounded-lg px-2 py-1.5 text-left text-sm text-secondary transition hover:bg-black/[0.04] hover:text-foreground"
+          className="w-full rounded-xl px-3 py-2.5 text-left text-sm font-medium text-gray-700 transition-colors hover:bg-gray-100 hover:text-gray-900"
         >
           Refresh
         </button>
         <button
           type="button"
           onClick={() => onNavigate("chat")}
-          className="w-full rounded-lg px-2 py-1.5 text-left text-sm text-secondary transition hover:bg-black/[0.04] hover:text-foreground"
+          className="w-full rounded-xl px-3 py-2.5 text-left text-sm font-medium text-gray-700 transition-colors hover:bg-gray-100 hover:text-gray-900"
         >
           Back to chat
         </button>
@@ -717,11 +850,13 @@ function DashboardCard({
   action?: ReactNode;
 }) {
   return (
-    <section className="rounded-2xl border border-black/[0.08] bg-white p-5 shadow-[0_12px_30px_rgba(15,23,42,0.04)]">
-      <div className="mb-4 flex items-center justify-between gap-3">
-        <h2 className="text-base font-semibold text-foreground">{title}</h2>
-        {action}
-      </div>
+    <section className="glass rounded-2xl p-6">
+      {(title || action) && (
+        <div className="mb-4 flex items-center justify-between gap-3">
+          {title ? <h2 className="text-base font-semibold text-foreground">{title}</h2> : <span />}
+          {action}
+        </div>
+      )}
       {children}
     </section>
   );
@@ -733,6 +868,141 @@ function MetricTile({ label, value }: { label: string; value: string | number })
       <div className="text-xs font-medium uppercase tracking-[0.08em] text-secondary/70">{label}</div>
       <div className="mt-1 text-2xl font-semibold text-foreground">{value}</div>
     </div>
+  );
+}
+
+function ButtonLike({
+  children,
+  variant = "primary",
+  disabled,
+  onClick,
+  type = "button",
+  className = "",
+}: {
+  children: ReactNode;
+  variant?: "primary" | "secondary" | "ghost" | "danger";
+  disabled?: boolean;
+  onClick?: () => void;
+  type?: "button" | "submit";
+  className?: string;
+}) {
+  const variants = {
+    primary: "bg-primary text-white hover:bg-primary-light glow-sm",
+    secondary: "border border-black/10 bg-transparent text-foreground hover:border-primary/40 hover:bg-black/[0.04]",
+    ghost: "bg-transparent text-secondary hover:bg-black/[0.04] hover:text-foreground",
+    danger: "border border-red-500/20 bg-red-500/10 text-red-500 hover:bg-red-500/15",
+  };
+  return (
+    <button
+      type={type}
+      disabled={disabled}
+      onClick={onClick}
+      className={`inline-flex min-h-[44px] items-center justify-center rounded-xl px-5 py-2.5 text-sm font-semibold transition-all duration-200 disabled:pointer-events-none disabled:opacity-40 ${variants[variant]} ${className}`}
+    >
+      {children}
+    </button>
+  );
+}
+
+function SettingsInput({
+  label,
+  value,
+  onChange,
+  placeholder,
+  type = "text",
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  placeholder?: string;
+  type?: string;
+}) {
+  return (
+    <label className="block">
+      <span className="mb-1.5 block text-sm font-medium text-secondary">{label}</span>
+      <input
+        value={value}
+        type={type}
+        placeholder={placeholder}
+        onChange={(event) => onChange(event.target.value)}
+        className="w-full rounded-xl border border-black/10 bg-white px-4 py-3 text-foreground outline-none transition-colors duration-200 focus:border-primary/50 focus:ring-1 focus:ring-primary/20"
+      />
+    </label>
+  );
+}
+
+function SettingsDropdown({
+  label,
+  value,
+  onChange,
+  options,
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  options: Array<{ value: string; label: string }>;
+}) {
+  return (
+    <label className="block">
+      <span className="mb-1.5 block text-sm font-medium text-secondary">{label}</span>
+      <select
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        className="w-full rounded-xl border border-black/10 bg-white px-4 py-3 text-foreground outline-none transition-colors duration-200 focus:border-primary/50 focus:ring-1 focus:ring-primary/20"
+      >
+        {options.map((option) => (
+          <option key={option.value} value={option.value}>
+            {option.label}
+          </option>
+        ))}
+      </select>
+    </label>
+  );
+}
+
+function ChevronIcon({ expanded }: { expanded: boolean }) {
+  return (
+    <svg
+      className={`h-4 w-4 text-secondary transition-transform duration-200 ${expanded ? "rotate-180" : ""}`}
+      fill="none"
+      viewBox="0 0 24 24"
+      stroke="currentColor"
+    >
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+    </svg>
+  );
+}
+
+function CollapsibleCard({
+  title,
+  subtitle,
+  children,
+  defaultOpen = false,
+}: {
+  title: string;
+  subtitle?: string;
+  children: ReactNode;
+  defaultOpen?: boolean;
+}) {
+  const [open, setOpen] = useState(defaultOpen);
+  return (
+    <DashboardCard
+      title=""
+      action={null}
+    >
+      <button
+        type="button"
+        onClick={() => setOpen((prev) => !prev)}
+        className="-m-6 flex w-[calc(100%+3rem)] items-center justify-between p-5 text-left transition-colors hover:bg-gray-50"
+      >
+        <div className="min-w-0">
+          <div className="font-medium text-foreground">{title}</div>
+          {subtitle && <div className="mt-1 text-xs text-secondary">{subtitle}</div>}
+        </div>
+        <ChevronIcon expanded={open} />
+      </button>
+      {open && <div className="mt-6 border-t border-gray-200 pt-5">{children}</div>}
+    </DashboardCard>
   );
 }
 
@@ -751,7 +1021,14 @@ function OverviewDashboard({
 }) {
   const docCount = kbCollections.reduce((sum, collection) => sum + collection.docs.length, 0);
   return (
-    <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_360px]">
+    <div className="max-w-3xl space-y-6">
+      <div className="mb-8">
+        <h1 className="text-2xl font-bold text-foreground">Dashboard</h1>
+        <p className="mt-1 text-sm text-secondary">
+          Manage your local Magi agent and monitor runtime performance.
+        </p>
+      </div>
+
       <div className="space-y-5">
         <DashboardCard title="Agent">
           <div className="flex flex-col gap-5 sm:flex-row sm:items-start sm:justify-between">
@@ -763,19 +1040,18 @@ function OverviewDashboard({
                   }`}
                 />
                 <h3 className="text-xl font-semibold text-foreground">{BOT_NAME}</h3>
+                <span className="rounded-full border border-emerald-500/20 bg-emerald-500/10 px-3 py-1 text-xs font-medium text-emerald-600">
+                  {runtimeStatusLabel(runtimeStatus)}
+                </span>
               </div>
               <p className="mt-2 max-w-2xl text-sm leading-6 text-secondary">
-                Self-hosted Magi runtime with local chat, workspace knowledge, runtime proof, and
-                editable operator files.
+                Self-hosted Magi runtime with local chat, workspace knowledge, runtime proof,
+                editable operator files, and your configured LLM provider.
               </p>
             </div>
-            <button
-              type="button"
-              onClick={() => onNavigate("chat")}
-              className="rounded-xl bg-primary px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-primary/90"
-            >
+            <ButtonLike onClick={() => onNavigate("chat")}>
               Open Chat
-            </button>
+            </ButtonLike>
           </div>
         </DashboardCard>
 
@@ -787,27 +1063,32 @@ function OverviewDashboard({
             <MetricTile label="Artifacts" value={runtimeItemCount(runtimeSnapshot, "artifacts")} />
           </div>
         </DashboardCard>
-      </div>
 
-      <div className="space-y-5">
         <DashboardCard title="Local Assets">
-          <div className="grid gap-3">
+          <div className="grid gap-3 sm:grid-cols-3">
             <MetricTile label="KB Docs" value={docCount} />
             <MetricTile label="Workspace Files" value={workspaceFiles.length} />
             <MetricTile label="Skills" value={runtimeItemCount(runtimeSnapshot, "skills")} />
           </div>
         </DashboardCard>
-        <DashboardCard title="Next Setup">
-          <div className="space-y-2 text-sm text-secondary">
-            <button type="button" onClick={() => onNavigate("settings")} className="block text-primary">
-              Configure local provider and connection
-            </button>
-            <button type="button" onClick={() => onNavigate("knowledge")} className="block text-primary">
-              Add workspace knowledge
-            </button>
-            <button type="button" onClick={() => onNavigate("workspace")} className="block text-primary">
-              Edit system prompts, contracts, harnesses, hooks, and memory
-            </button>
+
+        <DashboardCard title="Integrations">
+          <div className="space-y-3">
+            {[
+              { title: "Local LLM Provider", detail: "Anthropic, OpenAI, Google, or any OpenAI-compatible server.", route: "settings" as AppRoute },
+              { title: "Workspace Knowledge", detail: "Local KB documents under the runtime workspace.", route: "knowledge" as AppRoute },
+              { title: "Operator Files", detail: "System prompts, contracts, harness rules, hooks, and memory.", route: "workspace" as AppRoute },
+            ].map((item) => (
+              <button
+                key={item.title}
+                type="button"
+                onClick={() => onNavigate(item.route)}
+                className="block w-full rounded-xl border border-gray-100 bg-gray-50 px-4 py-3 text-left transition hover:border-gray-200 hover:bg-white"
+              >
+                <div className="text-sm font-semibold text-foreground">{item.title}</div>
+                <div className="mt-1 text-xs text-secondary">{item.detail}</div>
+              </button>
+            ))}
           </div>
         </DashboardCard>
       </div>
@@ -819,43 +1100,147 @@ function SettingsDashboard({
   agentUrl,
   token,
   runtimeStatus,
+  config,
+  configLoading,
+  configSaving,
+  configNotice,
+  configError,
   setAgentUrl,
   setToken,
   onSaveConnection,
   onCheckRuntime,
+  onSaveConfig,
+  onReloadConfig,
+  onRestartRuntime,
 }: {
   agentUrl: string;
   token: string;
   runtimeStatus: RuntimeCheckStatus;
+  config: LocalConfigState | null;
+  configLoading: boolean;
+  configSaving: boolean;
+  configNotice: string | null;
+  configError: string | null;
   setAgentUrl: (value: string) => void;
   setToken: (value: string) => void;
   onSaveConnection: () => void;
   onCheckRuntime: () => void;
+  onSaveConfig: (config: LocalConfigState) => Promise<void>;
+  onReloadConfig: () => Promise<void>;
+  onRestartRuntime: () => Promise<void>;
 }) {
+  const [draft, setDraft] = useState<LocalConfigState | null>(config);
+
+  useEffect(() => {
+    setDraft(config);
+  }, [config]);
+
+  const updateDraft = useCallback((patch: Partial<LocalConfigState>) => {
+    setDraft((prev) => (prev ? { ...prev, ...patch } : prev));
+  }, []);
+
   return (
     <div className="max-w-3xl space-y-5">
-      <DashboardCard title="Model">
-        <div className="space-y-4">
-          <label className="block">
-            <span className="mb-2 block text-sm font-medium text-secondary">Model</span>
-            <div className="rounded-xl border border-black/[0.08] bg-gray-50 px-4 py-3 text-sm font-medium text-foreground">
-              Configured LLM
-            </div>
-          </label>
-          <p className="text-sm leading-6 text-secondary">
-            The open-source app uses the provider configured in the local runtime. Hosted smart
-            routers and platform credit billing are intentionally not exposed.
-          </p>
-        </div>
-      </DashboardCard>
+      <div className="mb-8">
+        <h1 className="text-2xl font-bold text-foreground">Settings</h1>
+        <p className="mt-1 text-sm text-secondary">
+          Configure the self-hosted runtime, provider, and local workspace.
+        </p>
+      </div>
 
       <DashboardCard
-        title="Connection"
+        title="Model"
         action={
-          <span className="rounded-full bg-primary/10 px-3 py-1 text-xs font-semibold text-primary">
-            {runtimeStatusLabel(runtimeStatus)}
-          </span>
+          configLoading ? (
+            <span className="rounded-full bg-gray-100 px-3 py-1 text-xs font-semibold text-secondary">
+              Loading
+            </span>
+          ) : null
         }
+      >
+        {!draft ? (
+          <div className="rounded-xl border border-dashed border-black/[0.08] px-4 py-8 text-center text-sm text-secondary">
+            No config loaded yet. Save a local provider below to create `magi-agent.yaml`.
+          </div>
+        ) : (
+          <div className="space-y-4">
+            {configNotice && (
+              <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-700">
+                {configNotice}
+              </div>
+            )}
+            {configError && (
+              <div className="rounded-xl border border-red-500/20 bg-red-500/10 px-4 py-3 text-sm text-red-500">
+                {configError}
+              </div>
+            )}
+            <SettingsDropdown
+              label="Provider"
+              value={draft.provider}
+              onChange={(value) => updateDraft({ provider: asProviderName(value) })}
+              options={[
+                { value: "openai-compatible", label: "OpenAI-compatible / local" },
+                { value: "anthropic", label: "Anthropic" },
+                { value: "openai", label: "OpenAI" },
+                { value: "google", label: "Google Gemini" },
+              ]}
+            />
+            <SettingsInput
+              label="Model"
+              value={draft.model}
+              onChange={(model) => updateDraft({ model })}
+              placeholder="llama3.1, gpt-4.1, claude-sonnet-4-5..."
+            />
+            <SettingsInput
+              label="Base URL"
+              value={draft.baseUrl}
+              onChange={(baseUrl) => updateDraft({ baseUrl })}
+              placeholder="http://127.0.0.1:11434/v1"
+            />
+            <SettingsInput
+              label="API key env var"
+              value={draft.apiKeyEnvVar}
+              onChange={(apiKeyEnvVar) => updateDraft({ apiKeyEnvVar })}
+              placeholder="OPENAI_API_KEY"
+            />
+            <SettingsDropdown
+              label="Response Language"
+              value="auto"
+              onChange={() => {}}
+              options={[{ value: "auto", label: "Auto Detect" }]}
+            />
+
+            <div className="border-t border-gray-200 pt-4">
+              <p className="mb-2 block text-sm font-medium text-secondary">API Key Mode</p>
+              <div className="flex items-center justify-between">
+                <p className="text-sm font-medium text-foreground">Local env vars</p>
+                <span className="text-xs text-secondary">No platform credits or hosted routers</span>
+              </div>
+            </div>
+
+            <div className="flex flex-wrap gap-3">
+              <ButtonLike onClick={() => void onSaveConfig(draft)} disabled={configSaving}>
+                {configSaving ? "Saving..." : "Save Settings"}
+              </ButtonLike>
+              <ButtonLike variant="secondary" onClick={() => void onReloadConfig()}>
+                Reload Config
+              </ButtonLike>
+              <ButtonLike variant="secondary" onClick={() => void onRestartRuntime()}>
+                Restart Runtime
+              </ButtonLike>
+            </div>
+            <p className="text-xs leading-5 text-secondary">
+              Secrets are stored as environment variable references in `magi-agent.yaml`; raw keys are
+              never returned to the browser.
+            </p>
+          </div>
+        )}
+      </DashboardCard>
+
+      <CollapsibleCard
+        title="Runtime Connection"
+        subtitle={`Current status: ${runtimeStatusLabel(runtimeStatus)}`}
+        defaultOpen={false}
       >
         <form
           className="space-y-4"
@@ -864,40 +1249,83 @@ function SettingsDashboard({
             onSaveConnection();
           }}
         >
-          <label className="block">
-            <span className="mb-2 block text-sm font-medium text-secondary">Agent URL</span>
-            <input
-              value={agentUrl}
-              onChange={(event) => setAgentUrl(event.target.value)}
-              className="w-full rounded-xl border border-black/[0.08] bg-white px-4 py-3 text-sm text-foreground outline-none transition focus:border-primary/40 focus:ring-4 focus:ring-primary/10"
-            />
-          </label>
-          <label className="block">
-            <span className="mb-2 block text-sm font-medium text-secondary">Server token</span>
-            <input
-              value={token}
-              onChange={(event) => setToken(event.target.value)}
-              type="password"
-              className="w-full rounded-xl border border-black/[0.08] bg-white px-4 py-3 text-sm text-foreground outline-none transition focus:border-primary/40 focus:ring-4 focus:ring-primary/10"
-            />
-          </label>
+          <SettingsInput label="Agent URL" value={agentUrl} onChange={setAgentUrl} />
+          <SettingsInput label="Server token" value={token} onChange={setToken} type="password" />
           <div className="flex flex-wrap gap-3">
-            <button
-              type="submit"
-              className="rounded-xl bg-primary px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-primary/90"
-            >
+            <ButtonLike type="submit">
               Save Settings
-            </button>
-            <button
-              type="button"
-              onClick={onCheckRuntime}
-              className="rounded-xl bg-gray-100 px-4 py-2 text-sm font-semibold text-foreground transition hover:bg-gray-200"
-            >
+            </ButtonLike>
+            <ButtonLike variant="secondary" onClick={onCheckRuntime}>
               Check Runtime
-            </button>
+            </ButtonLike>
           </div>
         </form>
-      </DashboardCard>
+      </CollapsibleCard>
+
+      <CollapsibleCard
+        title="Advanced Runtime"
+        subtitle={draft?.path ? `Config path: ${draft.path}` : "Workspace and capability metadata"}
+        defaultOpen={false}
+      >
+        {draft && (
+          <div className="space-y-4">
+            <SettingsInput
+              label="Workspace"
+              value={draft.workspace}
+              onChange={(workspace) => updateDraft({ workspace })}
+              placeholder="./workspace"
+            />
+            <SettingsInput
+              label="Gateway token env var"
+              value={draft.gatewayTokenEnvVar}
+              onChange={(gatewayTokenEnvVar) => updateDraft({ gatewayTokenEnvVar })}
+              placeholder="MAGI_AGENT_SERVER_TOKEN"
+            />
+            <div className="grid gap-4 sm:grid-cols-2">
+              <SettingsInput
+                label="Context window"
+                value={draft.contextWindow}
+                onChange={(contextWindow) => updateDraft({ contextWindow })}
+                placeholder="131072"
+              />
+              <SettingsInput
+                label="Max output tokens"
+                value={draft.maxOutputTokens}
+                onChange={(maxOutputTokens) => updateDraft({ maxOutputTokens })}
+                placeholder="8192"
+              />
+            </div>
+            <label className="flex items-center gap-3 text-sm text-secondary">
+              <input
+                type="checkbox"
+                checked={draft.supportsThinking}
+                onChange={(event) => updateDraft({ supportsThinking: event.target.checked })}
+                className="h-4 w-4 rounded border-black/10"
+              />
+              Model supports thinking blocks
+            </label>
+            <ButtonLike onClick={() => void onSaveConfig(draft)} disabled={configSaving}>
+              Save Advanced Settings
+            </ButtonLike>
+          </div>
+        )}
+      </CollapsibleCard>
+
+      <CollapsibleCard
+        title="Agent Safeguards"
+        subtitle="Edit local skills, contracts, harness rules, hooks, memory, and compaction files from Workspace."
+      >
+        <div className="grid gap-3 sm:grid-cols-2">
+          <div className="rounded-xl border border-gray-100 bg-gray-50 px-4 py-3">
+            <div className="text-sm font-semibold text-foreground">Custom skills</div>
+            <div className="mt-1 text-xs leading-5 text-secondary">Install reusable SKILL.md-style capabilities on the Skills page.</div>
+          </div>
+          <div className="rounded-xl border border-gray-100 bg-gray-50 px-4 py-3">
+            <div className="text-sm font-semibold text-foreground">Harness rules</div>
+            <div className="mt-1 text-xs leading-5 text-secondary">Markdown rules become runtime checks through the local workspace.</div>
+          </div>
+        </div>
+      </CollapsibleCard>
     </div>
   );
 }
@@ -907,48 +1335,93 @@ function KnowledgeDashboard({
   loading,
   refreshing,
   onRefresh,
+  onUpload,
 }: {
   kbCollections: KbCollectionWithDocs[];
   loading: boolean;
   refreshing: boolean;
   onRefresh: () => void;
+  onUpload: (files: FileList) => Promise<void>;
 }) {
+  const [uploading, setUploading] = useState(false);
+  const [uploadNotice, setUploadNotice] = useState<string | null>(null);
+  const [uploadError, setUploadError] = useState<string | null>(null);
   const docs = kbCollections.flatMap((collection) =>
     collection.docs.map((doc) => ({ ...doc, collectionName: collection.name })),
   );
-  return (
-    <DashboardCard
-      title="Knowledge"
-      action={
-        <button
-          type="button"
-          onClick={onRefresh}
-          disabled={refreshing}
-          className="rounded-xl bg-gray-100 px-3 py-1.5 text-sm font-semibold text-foreground transition hover:bg-gray-200 disabled:opacity-50"
-        >
-          {refreshing ? "Refreshing..." : "Refresh"}
-        </button>
+
+  const handleFiles = useCallback(
+    async (files: FileList | null) => {
+      if (!files || files.length === 0) return;
+      setUploading(true);
+      setUploadNotice(null);
+      setUploadError(null);
+      try {
+        await onUpload(files);
+        setUploadNotice(`${files.length} file${files.length === 1 ? "" : "s"} added to local KB`);
+      } catch (err) {
+        setUploadError(err instanceof Error ? err.message : "Upload failed");
+      } finally {
+        setUploading(false);
       }
-    >
-      {loading ? (
-        <div className="rounded-xl border border-dashed border-black/[0.08] px-4 py-8 text-center text-sm text-secondary">
-          Loading knowledge...
+    },
+    [onUpload],
+  );
+
+  return (
+    <div className="max-w-4xl space-y-6">
+      <div className="mb-8">
+        <h1 className="text-2xl font-bold text-foreground">Knowledge</h1>
+        <p className="mt-1 text-sm text-secondary">
+          Upload and inspect the local workspace KB used by the self-hosted agent.
+        </p>
+      </div>
+      <DashboardCard
+        title="Workspace Knowledge"
+        action={
+          <ButtonLike variant="secondary" onClick={onRefresh} disabled={refreshing}>
+            {refreshing ? "Refreshing..." : "Refresh"}
+          </ButtonLike>
+        }
+      >
+        <div className="mb-5 rounded-xl border border-dashed border-primary/20 bg-primary/5 px-4 py-5">
+          <label className="block cursor-pointer text-center">
+            <input
+              type="file"
+              multiple
+              className="hidden"
+              onChange={(event) => void handleFiles(event.target.files)}
+            />
+            <span className="text-sm font-semibold text-primary">
+              {uploading ? "Uploading..." : "Upload local knowledge"}
+            </span>
+            <span className="mt-1 block text-xs text-secondary">
+              PDF, DOCX, XLSX, PPTX, HTML, CSV, TXT, MD, JSON, ZIP, and other supported files.
+            </span>
+          </label>
         </div>
-      ) : docs.length === 0 ? (
-        <div className="rounded-xl border border-dashed border-black/[0.08] px-4 py-8 text-center text-sm text-secondary">
-          No local KB documents yet.
-        </div>
-      ) : (
-        <div className="divide-y divide-black/[0.06] overflow-hidden rounded-xl border border-black/[0.08]">
-          {docs.map((doc) => (
-            <div key={`${doc.collectionName}:${doc.id}`} className="px-4 py-3">
-              <div className="text-sm font-semibold text-foreground">{doc.filename}</div>
-              <div className="mt-1 text-xs text-secondary">{doc.collectionName}</div>
-            </div>
-          ))}
-        </div>
-      )}
-    </DashboardCard>
+        {uploadNotice && <div className="mb-3 rounded-xl bg-emerald-50 px-3 py-2 text-xs text-emerald-700">{uploadNotice}</div>}
+        {uploadError && <div className="mb-3 rounded-xl bg-red-50 px-3 py-2 text-xs text-red-500">{uploadError}</div>}
+        {loading ? (
+          <div className="rounded-xl border border-dashed border-black/[0.08] px-4 py-8 text-center text-sm text-secondary">
+            Loading knowledge...
+          </div>
+        ) : docs.length === 0 ? (
+          <div className="rounded-xl border border-dashed border-black/[0.08] px-4 py-8 text-center text-sm text-secondary">
+            No local KB documents yet.
+          </div>
+        ) : (
+          <div className="divide-y divide-black/[0.06] overflow-hidden rounded-xl border border-black/[0.08]">
+            {docs.map((doc) => (
+              <div key={`${doc.collectionName}:${doc.id}`} className="px-4 py-3">
+                <div className="text-sm font-semibold text-foreground">{doc.filename}</div>
+                <div className="mt-1 text-xs text-secondary">{doc.collectionName}</div>
+              </div>
+            ))}
+          </div>
+        )}
+      </DashboardCard>
+    </div>
   );
 }
 
@@ -957,48 +1430,153 @@ function WorkspaceDashboard({
   loading,
   refreshing,
   onRefresh,
+  onReadFile,
+  onSaveFile,
 }: {
   workspaceFiles: WorkspaceFileEntry[];
   loading: boolean;
   refreshing: boolean;
   onRefresh: () => void;
+  onReadFile: (path: string) => Promise<string>;
+  onSaveFile: (path: string, content: string) => Promise<void>;
 }) {
-  return (
-    <DashboardCard
-      title="Workspace"
-      action={
-        <button
-          type="button"
-          onClick={onRefresh}
-          disabled={refreshing}
-          className="rounded-xl bg-gray-100 px-3 py-1.5 text-sm font-semibold text-foreground transition hover:bg-gray-200 disabled:opacity-50"
-        >
-          {refreshing ? "Refreshing..." : "Refresh"}
-        </button>
+  const [query, setQuery] = useState("");
+  const [selectedPath, setSelectedPath] = useState<string | null>(null);
+  const [content, setContent] = useState("");
+  const [editedContent, setEditedContent] = useState("");
+  const [fileLoading, setFileLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const filteredFiles = useMemo(() => {
+    const normalized = query.trim().toLowerCase();
+    if (!normalized) return workspaceFiles;
+    return workspaceFiles.filter((file) => file.path.toLowerCase().includes(normalized));
+  }, [query, workspaceFiles]);
+
+  const openFile = useCallback(
+    async (path: string) => {
+      setSelectedPath(path);
+      setFileLoading(true);
+      setNotice(null);
+      setError(null);
+      try {
+        const nextContent = await onReadFile(path);
+        setContent(nextContent);
+        setEditedContent(nextContent);
+      } catch (err) {
+        setContent("");
+        setEditedContent("");
+        setError(err instanceof Error ? err.message : "Failed to read file");
+      } finally {
+        setFileLoading(false);
       }
-    >
-      {loading ? (
-        <div className="rounded-xl border border-dashed border-black/[0.08] px-4 py-8 text-center text-sm text-secondary">
-          Loading workspace...
-        </div>
-      ) : workspaceFiles.length === 0 ? (
-        <div className="rounded-xl border border-dashed border-black/[0.08] px-4 py-8 text-center text-sm text-secondary">
-          No editable workspace files found.
-        </div>
-      ) : (
-        <div className="divide-y divide-black/[0.06] overflow-hidden rounded-xl border border-black/[0.08]">
-          {workspaceFiles.slice(0, 80).map((file) => (
-            <div key={file.path} className="flex items-center justify-between gap-4 px-4 py-3">
-              <div className="min-w-0">
-                <div className="truncate text-sm font-semibold text-foreground">{file.path}</div>
-                {file.modifiedAt && <div className="mt-1 text-xs text-secondary">{file.modifiedAt}</div>}
-              </div>
-              <div className="shrink-0 text-xs text-secondary">{formatFileSize(file.size ?? 0)}</div>
+    },
+    [onReadFile],
+  );
+
+  const saveSelected = useCallback(async () => {
+    if (!selectedPath) return;
+    setSaving(true);
+    setNotice(null);
+    setError(null);
+    try {
+      await onSaveFile(selectedPath, editedContent);
+      setContent(editedContent);
+      setNotice("Workspace file saved");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to save file");
+    } finally {
+      setSaving(false);
+    }
+  }, [editedContent, onSaveFile, selectedPath]);
+
+  return (
+    <div className="space-y-6">
+      <div className="mb-8">
+        <h1 className="text-2xl font-bold text-foreground">Workspace</h1>
+        <p className="mt-1 text-sm text-secondary">
+          Edit local prompts, contracts, harness rules, hooks, memory, compaction files, and artifacts.
+        </p>
+      </div>
+      <div className="grid gap-5 xl:grid-cols-[minmax(0,420px)_minmax(0,1fr)]">
+        <DashboardCard
+          title="Files"
+          action={
+            <ButtonLike variant="secondary" onClick={onRefresh} disabled={refreshing}>
+              {refreshing ? "Refreshing..." : "Refresh"}
+            </ButtonLike>
+          }
+        >
+          <input
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            placeholder="Filter files..."
+            className="mb-4 w-full rounded-xl border border-black/[0.08] bg-white px-3 py-2 text-sm outline-none transition focus:border-primary/40 focus:ring-4 focus:ring-primary/10"
+          />
+          {loading ? (
+            <div className="rounded-xl border border-dashed border-black/[0.08] px-4 py-8 text-center text-sm text-secondary">
+              Loading workspace...
             </div>
-          ))}
-        </div>
-      )}
-    </DashboardCard>
+          ) : filteredFiles.length === 0 ? (
+            <div className="rounded-xl border border-dashed border-black/[0.08] px-4 py-8 text-center text-sm text-secondary">
+              No editable workspace files found.
+            </div>
+          ) : (
+            <div className="max-h-[620px] divide-y divide-black/[0.06] overflow-y-auto rounded-xl border border-black/[0.08]">
+              {filteredFiles.slice(0, 160).map((file) => (
+                <button
+                  key={file.path}
+                  type="button"
+                  onClick={() => void openFile(file.path)}
+                  className={`block w-full px-4 py-3 text-left transition hover:bg-gray-50 ${selectedPath === file.path ? "bg-primary/[0.06]" : "bg-white"}`}
+                >
+                  <div className="truncate text-sm font-semibold text-foreground">{file.path}</div>
+                  <div className="mt-1 text-xs text-secondary">
+                    {formatFileSize(file.size ?? 0)}
+                    {file.modifiedAt ? ` · ${file.modifiedAt}` : ""}
+                  </div>
+                </button>
+              ))}
+            </div>
+          )}
+        </DashboardCard>
+
+        <DashboardCard
+          title={selectedPath ?? "Workspace File"}
+          action={
+            selectedPath ? (
+              <ButtonLike
+                onClick={() => void saveSelected()}
+                disabled={saving || fileLoading || editedContent === content}
+              >
+                {saving ? "Saving..." : "Save"}
+              </ButtonLike>
+            ) : null
+          }
+        >
+          {notice && <div className="mb-3 rounded-xl bg-emerald-50 px-3 py-2 text-xs text-emerald-700">{notice}</div>}
+          {error && <div className="mb-3 rounded-xl bg-red-50 px-3 py-2 text-xs text-red-500">{error}</div>}
+          {!selectedPath ? (
+            <div className="rounded-xl border border-dashed border-black/[0.08] px-4 py-10 text-center text-sm text-secondary">
+              Select a workspace file to view or edit it.
+            </div>
+          ) : fileLoading ? (
+            <div className="rounded-xl border border-dashed border-black/[0.08] px-4 py-10 text-center text-sm text-secondary">
+              Loading file...
+            </div>
+          ) : (
+            <textarea
+              value={editedContent}
+              onChange={(event) => setEditedContent(event.target.value)}
+              spellCheck={false}
+              className="h-[520px] w-full resize-none rounded-xl border border-black/[0.08] bg-white px-4 py-3 font-mono text-sm leading-6 text-foreground outline-none transition focus:border-primary/40 focus:ring-4 focus:ring-primary/10"
+            />
+          )}
+        </DashboardCard>
+      </div>
+    </div>
   );
 }
 
@@ -1166,197 +1744,205 @@ function MemoryDashboard({
     .filter((path) => path.startsWith("memory/daily/"));
 
   return (
-    <div className="grid gap-5 xl:grid-cols-[minmax(0,420px)_minmax(0,1fr)]">
-      <DashboardCard
-        title="Memory"
-        action={
-          <button
-            type="button"
-            onClick={onRefresh}
-            disabled={refreshing}
-            className="rounded-xl bg-gray-100 px-3 py-1.5 text-sm font-semibold text-foreground transition hover:bg-gray-200 disabled:opacity-50"
-          >
-            {refreshing ? "Refreshing..." : "Refresh"}
-          </button>
-        }
-      >
-        <div className="mb-4 grid gap-3 sm:grid-cols-2">
-          <MetricTile label="Files" value={memoryFiles.length} />
-          <MetricTile
-            label="QMD"
-            value={memoryStatus?.qmdReady === true ? "Ready" : "Local"}
-          />
-        </div>
-        {asString(rootMemory.path) && (
-          <div className="mb-4 rounded-xl bg-gray-50 px-4 py-3 text-xs text-secondary">
-            Root: {asString(rootMemory.path)}
-          </div>
-        )}
-        <div className="mb-4 flex gap-2">
-          <input
-            value={query}
-            onChange={(event) => setQuery(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === "Enter") void runSearch();
-            }}
-            placeholder="Search memory..."
-            className="min-w-0 flex-1 rounded-xl border border-black/[0.08] bg-white px-3 py-2 text-sm outline-none transition focus:border-primary/40 focus:ring-4 focus:ring-primary/10"
-          />
-          <button
-            type="button"
-            onClick={() => void runSearch()}
-            disabled={searching}
-            className="rounded-xl bg-primary px-3 py-2 text-sm font-semibold text-white transition hover:bg-primary/90 disabled:opacity-50"
-          >
-            {searching ? "Searching" : "Search"}
-          </button>
-        </div>
-        <div className="mb-4 flex flex-wrap gap-2">
-          <button
-            type="button"
-            onClick={() => void deletePaths(Array.from(selectedPaths))}
-            disabled={busy || selectedCount === 0}
-            className="rounded-xl bg-gray-100 px-3 py-1.5 text-xs font-semibold text-foreground transition hover:bg-gray-200 disabled:opacity-50"
-          >
-            Delete selected{selectedCount > 0 ? ` (${selectedCount})` : ""}
-          </button>
-          <button
-            type="button"
-            onClick={() => void deletePaths(dailyPaths)}
-            disabled={busy || dailyPaths.length === 0}
-            className="rounded-xl bg-gray-100 px-3 py-1.5 text-xs font-semibold text-foreground transition hover:bg-gray-200 disabled:opacity-50"
-          >
-            Clear daily logs
-          </button>
-          <button
-            type="button"
-            onClick={() => void runMemoryAction("compact")}
-            disabled={busy}
-            className="rounded-xl bg-gray-100 px-3 py-1.5 text-xs font-semibold text-foreground transition hover:bg-gray-200 disabled:opacity-50"
-          >
-            Compact
-          </button>
-          <button
-            type="button"
-            onClick={() => void runMemoryAction("reindex")}
-            disabled={busy}
-            className="rounded-xl bg-gray-100 px-3 py-1.5 text-xs font-semibold text-foreground transition hover:bg-gray-200 disabled:opacity-50"
-          >
-            Reindex
-          </button>
-        </div>
-        {notice && <div className="mb-3 rounded-xl bg-emerald-50 px-3 py-2 text-xs text-emerald-700">{notice}</div>}
-        {error && <div className="mb-3 rounded-xl bg-red-50 px-3 py-2 text-xs text-red-500">{error}</div>}
-        {loading ? (
-          <div className="rounded-xl border border-dashed border-black/[0.08] px-4 py-8 text-center text-sm text-secondary">
-            Loading memory...
-          </div>
-        ) : filteredFiles.length === 0 ? (
-          <div className="rounded-xl border border-dashed border-black/[0.08] px-4 py-8 text-center text-sm text-secondary">
-            No memory files found.
-          </div>
-        ) : (
-          <div className="max-h-[520px] divide-y divide-black/[0.06] overflow-y-auto rounded-xl border border-black/[0.08]">
-            {filteredFiles.map((file) => {
-              const checked = selectedPaths.has(file.path);
-              const active = selectedPath === file.path;
-              return (
-                <div key={file.path} className={`flex items-center gap-3 px-3 py-2 ${active ? "bg-primary/[0.06]" : "bg-white"}`}>
-                  <input
-                    type="checkbox"
-                    checked={checked}
-                    onChange={() => toggleSelected(file.path)}
-                    className="h-4 w-4 rounded border-black/[0.12]"
-                    aria-label={`Select ${file.path}`}
-                  />
-                  <button
-                    type="button"
-                    onClick={() => void openFile(file.path)}
-                    className="min-w-0 flex-1 text-left"
-                  >
-                    <div className="truncate text-sm font-semibold text-foreground">{file.path}</div>
-                    <div className="mt-0.5 text-xs text-secondary">
-                      {formatFileSize(file.sizeBytes)}
-                      {file.mtimeMs ? ` · ${new Date(file.mtimeMs).toISOString()}` : ""}
-                    </div>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => void deletePaths([file.path])}
-                    disabled={busy}
-                    className="rounded-lg px-2 py-1 text-xs font-semibold text-red-500 transition hover:bg-red-50 disabled:opacity-50"
-                  >
-                    Delete
-                  </button>
-                </div>
-              );
-            })}
-          </div>
-        )}
-      </DashboardCard>
-
-      <div className="space-y-5">
+    <div className="space-y-6">
+      <div className="mb-8">
+        <h1 className="text-2xl font-bold text-foreground">Memory</h1>
+        <p className="mt-1 text-sm text-secondary">
+          Browse, search, edit, compact, and reindex Hipocampus memory from the local runtime.
+        </p>
+      </div>
+      <div className="grid gap-5 xl:grid-cols-[minmax(0,420px)_minmax(0,1fr)]">
         <DashboardCard
-          title={selectedPath ?? "Memory File"}
+          title="Memory Files"
           action={
-            selectedPath ? (
-              <button
-                type="button"
-                onClick={() => void saveSelected()}
-                disabled={busy || fileLoading || editedContent === content}
-                className="rounded-xl bg-primary px-3 py-1.5 text-sm font-semibold text-white transition hover:bg-primary/90 disabled:opacity-50"
-              >
-                Save
-              </button>
-            ) : null
+            <button
+              type="button"
+              onClick={onRefresh}
+              disabled={refreshing}
+              className="rounded-xl bg-gray-100 px-3 py-1.5 text-sm font-semibold text-foreground transition hover:bg-gray-200 disabled:opacity-50"
+            >
+              {refreshing ? "Refreshing..." : "Refresh"}
+            </button>
           }
         >
-          {!selectedPath ? (
-            <div className="rounded-xl border border-dashed border-black/[0.08] px-4 py-10 text-center text-sm text-secondary">
-              Select a memory file to view or edit it.
+          <div className="mb-4 grid gap-3 sm:grid-cols-2">
+            <MetricTile label="Files" value={memoryFiles.length} />
+            <MetricTile
+              label="QMD"
+              value={memoryStatus?.qmdReady === true ? "Ready" : "Local"}
+            />
+          </div>
+          {asString(rootMemory.path) && (
+            <div className="mb-4 rounded-xl bg-gray-50 px-4 py-3 text-xs text-secondary">
+              Root: {asString(rootMemory.path)}
             </div>
-          ) : fileLoading ? (
-            <div className="rounded-xl border border-dashed border-black/[0.08] px-4 py-10 text-center text-sm text-secondary">
-              Loading file...
+          )}
+          <div className="mb-4 flex gap-2">
+            <input
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") void runSearch();
+              }}
+              placeholder="Search memory..."
+              className="min-w-0 flex-1 rounded-xl border border-black/[0.08] bg-white px-3 py-2 text-sm outline-none transition focus:border-primary/40 focus:ring-4 focus:ring-primary/10"
+            />
+            <button
+              type="button"
+              onClick={() => void runSearch()}
+              disabled={searching}
+              className="rounded-xl bg-primary px-3 py-2 text-sm font-semibold text-white transition hover:bg-primary/90 disabled:opacity-50"
+            >
+              {searching ? "Searching" : "Search"}
+            </button>
+          </div>
+          <div className="mb-4 flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={() => void deletePaths(Array.from(selectedPaths))}
+              disabled={busy || selectedCount === 0}
+              className="rounded-xl bg-gray-100 px-3 py-1.5 text-xs font-semibold text-foreground transition hover:bg-gray-200 disabled:opacity-50"
+            >
+              Delete selected{selectedCount > 0 ? ` (${selectedCount})` : ""}
+            </button>
+            <button
+              type="button"
+              onClick={() => void deletePaths(dailyPaths)}
+              disabled={busy || dailyPaths.length === 0}
+              className="rounded-xl bg-gray-100 px-3 py-1.5 text-xs font-semibold text-foreground transition hover:bg-gray-200 disabled:opacity-50"
+            >
+              Clear daily logs
+            </button>
+            <button
+              type="button"
+              onClick={() => void runMemoryAction("compact")}
+              disabled={busy}
+              className="rounded-xl bg-gray-100 px-3 py-1.5 text-xs font-semibold text-foreground transition hover:bg-gray-200 disabled:opacity-50"
+            >
+              Compact
+            </button>
+            <button
+              type="button"
+              onClick={() => void runMemoryAction("reindex")}
+              disabled={busy}
+              className="rounded-xl bg-gray-100 px-3 py-1.5 text-xs font-semibold text-foreground transition hover:bg-gray-200 disabled:opacity-50"
+            >
+              Reindex
+            </button>
+          </div>
+          {notice && <div className="mb-3 rounded-xl bg-emerald-50 px-3 py-2 text-xs text-emerald-700">{notice}</div>}
+          {error && <div className="mb-3 rounded-xl bg-red-50 px-3 py-2 text-xs text-red-500">{error}</div>}
+          {loading ? (
+            <div className="rounded-xl border border-dashed border-black/[0.08] px-4 py-8 text-center text-sm text-secondary">
+              Loading memory...
+            </div>
+          ) : filteredFiles.length === 0 ? (
+            <div className="rounded-xl border border-dashed border-black/[0.08] px-4 py-8 text-center text-sm text-secondary">
+              No memory files found.
             </div>
           ) : (
-            <textarea
-              value={editedContent}
-              onChange={(event) => setEditedContent(event.target.value)}
-              spellCheck={false}
-              className="h-[420px] w-full resize-none rounded-xl border border-black/[0.08] bg-white px-4 py-3 font-mono text-sm leading-6 text-foreground outline-none transition focus:border-primary/40 focus:ring-4 focus:ring-primary/10"
-            />
+            <div className="max-h-[520px] divide-y divide-black/[0.06] overflow-y-auto rounded-xl border border-black/[0.08]">
+              {filteredFiles.map((file) => {
+                const checked = selectedPaths.has(file.path);
+                const active = selectedPath === file.path;
+                return (
+                  <div key={file.path} className={`flex items-center gap-3 px-3 py-2 ${active ? "bg-primary/[0.06]" : "bg-white"}`}>
+                    <input
+                      type="checkbox"
+                      checked={checked}
+                      onChange={() => toggleSelected(file.path)}
+                      className="h-4 w-4 rounded border-black/[0.12]"
+                      aria-label={`Select ${file.path}`}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => void openFile(file.path)}
+                      className="min-w-0 flex-1 text-left"
+                    >
+                      <div className="truncate text-sm font-semibold text-foreground">{file.path}</div>
+                      <div className="mt-0.5 text-xs text-secondary">
+                        {formatFileSize(file.sizeBytes)}
+                        {file.mtimeMs ? ` · ${new Date(file.mtimeMs).toISOString()}` : ""}
+                      </div>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => void deletePaths([file.path])}
+                      disabled={busy}
+                      className="rounded-lg px-2 py-1 text-xs font-semibold text-red-500 transition hover:bg-red-50 disabled:opacity-50"
+                    >
+                      Delete
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
           )}
         </DashboardCard>
 
-        {searchResults.length > 0 && (
-          <DashboardCard title="Search Results">
-            <div className="space-y-2">
-              {searchResults.map((result, index) => (
+        <div className="space-y-5">
+          <DashboardCard
+            title={selectedPath ?? "Memory File"}
+            action={
+              selectedPath ? (
                 <button
-                  key={`${result.path ?? "result"}-${index}`}
                   type="button"
-                  onClick={() => result.path && void openFile(result.path)}
-                  className="block w-full rounded-xl bg-gray-50 px-4 py-3 text-left transition hover:bg-gray-100"
+                  onClick={() => void saveSelected()}
+                  disabled={busy || fileLoading || editedContent === content}
+                  className="rounded-xl bg-primary px-3 py-1.5 text-sm font-semibold text-white transition hover:bg-primary/90 disabled:opacity-50"
                 >
-                  <div className="flex items-center justify-between gap-3">
-                    <div className="truncate text-sm font-semibold text-foreground">
-                      {result.path ?? `result-${index + 1}`}
-                    </div>
-                    {typeof result.score === "number" && (
-                      <div className="shrink-0 text-xs text-secondary">{result.score.toFixed(2)}</div>
-                    )}
-                  </div>
-                  {result.contentPreview && (
-                    <div className="mt-1 line-clamp-3 text-xs leading-5 text-secondary">
-                      {result.contentPreview}
-                    </div>
-                  )}
+                  Save
                 </button>
-              ))}
-            </div>
+              ) : null
+            }
+          >
+            {!selectedPath ? (
+              <div className="rounded-xl border border-dashed border-black/[0.08] px-4 py-10 text-center text-sm text-secondary">
+                Select a memory file to view or edit it.
+              </div>
+            ) : fileLoading ? (
+              <div className="rounded-xl border border-dashed border-black/[0.08] px-4 py-10 text-center text-sm text-secondary">
+                Loading file...
+              </div>
+            ) : (
+              <textarea
+                value={editedContent}
+                onChange={(event) => setEditedContent(event.target.value)}
+                spellCheck={false}
+                className="h-[420px] w-full resize-none rounded-xl border border-black/[0.08] bg-white px-4 py-3 font-mono text-sm leading-6 text-foreground outline-none transition focus:border-primary/40 focus:ring-4 focus:ring-primary/10"
+              />
+            )}
           </DashboardCard>
-        )}
+
+          {searchResults.length > 0 && (
+            <DashboardCard title="Search Results">
+              <div className="space-y-2">
+                {searchResults.map((result, index) => (
+                  <button
+                    key={`${result.path ?? "result"}-${index}`}
+                    type="button"
+                    onClick={() => result.path && void openFile(result.path)}
+                    className="block w-full rounded-xl bg-gray-50 px-4 py-3 text-left transition hover:bg-gray-100"
+                  >
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="truncate text-sm font-semibold text-foreground">
+                        {result.path ?? `result-${index + 1}`}
+                      </div>
+                      {typeof result.score === "number" && (
+                        <div className="shrink-0 text-xs text-secondary">{result.score.toFixed(2)}</div>
+                      )}
+                    </div>
+                    {result.contentPreview && (
+                      <div className="mt-1 line-clamp-3 text-xs leading-5 text-secondary">
+                        {result.contentPreview}
+                      </div>
+                    )}
+                  </button>
+                ))}
+              </div>
+            </DashboardCard>
+          )}
+        </div>
       </div>
     </div>
   );
@@ -1375,17 +1961,19 @@ function SkillsDashboard({
   const hooks = asArray(skillsSnapshot?.runtimeHooks);
   const issues = asArray(skillsSnapshot?.issues);
   return (
-    <div className="grid gap-5 lg:grid-cols-2">
+    <div className="max-w-4xl space-y-6">
+      <div className="mb-8">
+        <h1 className="text-2xl font-bold text-foreground">Skills</h1>
+        <p className="mt-1 text-sm text-secondary">
+          Workspace SKILL.md capabilities and runtime hook metadata loaded by the local agent.
+        </p>
+      </div>
       <DashboardCard
         title="Skills"
         action={
-          <button
-            type="button"
-            onClick={onRefresh}
-            className="rounded-xl bg-gray-100 px-3 py-1.5 text-sm font-semibold text-foreground transition hover:bg-gray-200"
-          >
+          <ButtonLike variant="secondary" onClick={onRefresh}>
             Reload
-          </button>
+          </ButtonLike>
         }
       >
         {loading ? (
@@ -1426,19 +2014,111 @@ function SkillsDashboard({
 }
 
 function UsageDashboard({ runtimeSnapshot }: { runtimeSnapshot: JsonRecord | null }) {
+  const sectionRows = [
+    { key: "sessions", title: "Sessions" },
+    { key: "tasks", title: "Background Tasks" },
+    { key: "crons", title: "Schedules" },
+    { key: "artifacts", title: "Artifacts" },
+    { key: "tools", title: "Tools" },
+  ].map((section) => {
+    const data = asRecord(runtimeSnapshot?.[section.key]);
+    const items = asArray(data.items).slice(0, 6);
+    return { ...section, count: runtimeItemCount(runtimeSnapshot, section.key), items };
+  });
+
   return (
-    <DashboardCard title="Usage">
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <MetricTile label="Sessions" value={runtimeItemCount(runtimeSnapshot, "sessions")} />
-        <MetricTile label="Tasks" value={runtimeItemCount(runtimeSnapshot, "tasks")} />
-        <MetricTile label="Tools" value={runtimeItemCount(runtimeSnapshot, "tools")} />
-        <MetricTile label="Artifacts" value={runtimeItemCount(runtimeSnapshot, "artifacts")} />
+    <div className="max-w-4xl space-y-6">
+      <div className="mb-8">
+        <h1 className="text-2xl font-bold text-foreground">Usage</h1>
+        <p className="mt-1 text-sm text-secondary">
+          Local runtime activity. Self-hosted Magi does not meter platform credits.
+        </p>
       </div>
-      <p className="mt-5 text-sm leading-6 text-secondary">
-        Self-hosted Magi does not meter platform credits. Model usage is controlled by the local
-        provider configuration and any provider-side billing you attach.
-      </p>
-    </DashboardCard>
+      <DashboardCard title="Runtime Totals">
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+          {sectionRows.map((row) => (
+            <MetricTile key={row.key} label={row.title} value={row.count} />
+          ))}
+        </div>
+        <p className="mt-5 text-sm leading-6 text-secondary">
+          Model usage is controlled by the provider or local model server you configure.
+        </p>
+      </DashboardCard>
+      <div className="grid gap-5 lg:grid-cols-2">
+        {sectionRows.map((row) => (
+          <DashboardCard key={row.key} title={row.title}>
+            {row.items.length === 0 ? (
+              <div className="rounded-xl border border-dashed border-black/[0.08] px-4 py-6 text-sm text-secondary">
+                No {row.title.toLowerCase()} reported.
+              </div>
+            ) : (
+              <div className="space-y-2">
+                {row.items.map((item, index) => {
+                  const label =
+                    asString(item.name) ||
+                    asString(item.id) ||
+                    asString(item.sessionKey) ||
+                    asString(item.taskId) ||
+                    `${row.title} ${index + 1}`;
+                  const detail =
+                    asString(item.status) ||
+                    asString(item.state) ||
+                    asString(item.schedule) ||
+                    asString(item.description);
+                  return (
+                    <div key={`${row.key}-${index}`} className="rounded-xl bg-gray-50 px-4 py-3">
+                      <div className="truncate text-sm font-semibold text-foreground">{label}</div>
+                      {detail && <div className="mt-1 text-xs text-secondary">{detail}</div>}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </DashboardCard>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function ConverterDashboard({ onNavigate }: { onNavigate: (route: AppRoute) => void }) {
+  return (
+    <div className="max-w-3xl space-y-6">
+      <div className="mb-8">
+        <h1 className="text-2xl font-bold text-foreground">Converter</h1>
+        <p className="mt-1 text-sm text-secondary">
+          Local document conversion runs through the agent workspace and artifact pipeline.
+        </p>
+      </div>
+      <DashboardCard title="Local Conversion Flow">
+        <div className="space-y-3 text-sm leading-6 text-secondary">
+          <p>
+            Drop files into chat or upload them to Knowledge, then ask Magi to convert,
+            summarize, extract tables, or generate deliverable artifacts. Outputs appear in the
+            Work inspector and workspace artifacts.
+          </p>
+          <div className="flex flex-wrap gap-3">
+            <ButtonLike onClick={() => onNavigate("chat")}>Open Chat</ButtonLike>
+            <ButtonLike variant="secondary" onClick={() => onNavigate("knowledge")}>Upload Knowledge</ButtonLike>
+            <ButtonLike variant="secondary" onClick={() => onNavigate("workspace")}>Open Workspace</ButtonLike>
+          </div>
+        </div>
+      </DashboardCard>
+      <DashboardCard title="Supported Pattern">
+        <div className="grid gap-3 sm:grid-cols-2">
+          {[
+            "DOCX/PDF/PPTX/XLSX extraction",
+            "Markdown and structured report generation",
+            "Workspace artifact review",
+            "Runtime proof before completion",
+          ].map((item) => (
+            <div key={item} className="rounded-xl bg-gray-50 px-4 py-3 text-sm font-medium text-foreground">
+              {item}
+            </div>
+          ))}
+        </div>
+      </DashboardCard>
+    </div>
   );
 }
 
@@ -1448,6 +2128,11 @@ function LocalDashboardShell({
   runtimeStatus,
   skillsSnapshot,
   skillsLoading,
+  config,
+  configLoading,
+  configSaving,
+  configNotice,
+  configError,
   agentUrl,
   token,
   kbCollections,
@@ -1468,6 +2153,9 @@ function LocalDashboardShell({
   onRefreshWorkspace,
   onRefreshMemory,
   onRefreshSkills,
+  onUploadKnowledge,
+  onReadWorkspaceFile,
+  onSaveWorkspaceFile,
   onMemorySearch,
   onMemoryReadFile,
   onMemorySaveFile,
@@ -1476,12 +2164,20 @@ function LocalDashboardShell({
   onMemoryReindex,
   onSaveConnection,
   onCheckRuntime,
+  onSaveConfig,
+  onReloadConfig,
+  onRestartRuntime,
 }: {
   route: DashboardRoute;
   runtimeSnapshot: JsonRecord | null;
   runtimeStatus: RuntimeCheckStatus;
   skillsSnapshot: JsonRecord | null;
   skillsLoading: boolean;
+  config: LocalConfigState | null;
+  configLoading: boolean;
+  configSaving: boolean;
+  configNotice: string | null;
+  configError: string | null;
   agentUrl: string;
   token: string;
   kbCollections: KbCollectionWithDocs[];
@@ -1502,6 +2198,9 @@ function LocalDashboardShell({
   onRefreshWorkspace: () => void;
   onRefreshMemory: () => void;
   onRefreshSkills: () => void;
+  onUploadKnowledge: (files: FileList) => Promise<void>;
+  onReadWorkspaceFile: (path: string) => Promise<string>;
+  onSaveWorkspaceFile: (path: string, content: string) => Promise<void>;
   onMemorySearch: (query: string) => Promise<JsonRecord>;
   onMemoryReadFile: (path: string) => Promise<string>;
   onMemorySaveFile: (path: string, content: string) => Promise<void>;
@@ -1510,16 +2209,21 @@ function LocalDashboardShell({
   onMemoryReindex: () => Promise<void>;
   onSaveConnection: () => void;
   onCheckRuntime: () => void;
+  onSaveConfig: (config: LocalConfigState) => Promise<void>;
+  onReloadConfig: () => Promise<void>;
+  onRestartRuntime: () => Promise<void>;
 }) {
-  const titles: Record<DashboardRoute, string> = {
-    overview: "Dashboard",
-    settings: "Settings",
-    usage: "Usage",
-    skills: "Skills",
-    workspace: "Workspace",
-    knowledge: "Knowledge",
-    memory: "Memory",
-  };
+  const mobileRoutes: Array<{ route: AppRoute; label: string }> = [
+    { route: "chat", label: "Chat" },
+    { route: "overview", label: "Overview" },
+    { route: "settings", label: "Settings" },
+    { route: "usage", label: "Usage" },
+    { route: "skills", label: "Skills" },
+    { route: "converter", label: "Converter" },
+    { route: "knowledge", label: "Knowledge" },
+    { route: "memory", label: "Memory" },
+    { route: "workspace", label: "Workspace" },
+  ];
 
   return (
     <div className="flex h-full min-w-0 flex-1 bg-background">
@@ -1529,23 +2233,34 @@ function LocalDashboardShell({
         onNavigate={onNavigate}
         onRefresh={onRefreshAll}
       />
-      <main className="flex min-w-0 flex-1 flex-col">
-        <header className="flex min-h-[64px] items-center justify-between gap-4 border-b border-black/[0.06] px-5 md:px-8">
-          <div>
-            <h1 className="text-xl font-semibold text-foreground">{titles[route]}</h1>
-            <p className="mt-1 text-sm text-secondary">
-              Local Magi runtime, provider, knowledge, and operator files.
-            </p>
+      <main className="min-w-0 flex-1 overflow-y-auto">
+        <div className="border-b border-gray-200 bg-gray-50 px-4 py-3 md:hidden">
+          <div className="mb-3 flex items-center justify-between gap-3">
+            <div className="min-w-0">
+              <div className="truncate text-sm font-semibold text-foreground">{BOT_NAME}</div>
+              <div className="mt-1 flex items-center gap-2 text-xs text-secondary">
+                <span className={`h-2 w-2 rounded-full ${runtimeStatus === "active" ? "bg-emerald-400" : "bg-gray-300"}`} />
+                {runtimeStatusLabel(runtimeStatus)}
+              </div>
+            </div>
+            <ButtonLike variant="secondary" onClick={() => onNavigate("chat")} className="min-h-0 px-3 py-2">
+              Chat
+            </ButtonLike>
           </div>
-          <button
-            type="button"
-            onClick={() => onNavigate("chat")}
-            className="rounded-xl bg-gray-100 px-4 py-2 text-sm font-semibold text-foreground transition hover:bg-gray-200"
+          <select
+            value={route}
+            onChange={(event) => onNavigate(event.target.value as AppRoute)}
+            className="w-full rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm font-medium text-foreground"
+            aria-label="Dashboard section"
           >
-            Open Chat
-          </button>
-        </header>
-        <div className="min-h-0 flex-1 overflow-y-auto px-5 py-6 md:px-8">
+            {mobileRoutes.map((item) => (
+              <option key={item.route} value={item.route}>
+                {item.label}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div className="min-w-0 p-4 sm:p-6 md:p-8">
           {route === "overview" && (
             <OverviewDashboard
               runtimeSnapshot={runtimeSnapshot}
@@ -1560,13 +2275,22 @@ function LocalDashboardShell({
               agentUrl={agentUrl}
               token={token}
               runtimeStatus={runtimeStatus}
+              config={config}
+              configLoading={configLoading}
+              configSaving={configSaving}
+              configNotice={configNotice}
+              configError={configError}
               setAgentUrl={setAgentUrl}
               setToken={setToken}
               onSaveConnection={onSaveConnection}
               onCheckRuntime={onCheckRuntime}
+              onSaveConfig={onSaveConfig}
+              onReloadConfig={onReloadConfig}
+              onRestartRuntime={onRestartRuntime}
             />
           )}
           {route === "usage" && <UsageDashboard runtimeSnapshot={runtimeSnapshot} />}
+          {route === "converter" && <ConverterDashboard onNavigate={onNavigate} />}
           {route === "skills" && (
             <SkillsDashboard
               skillsSnapshot={skillsSnapshot}
@@ -1580,6 +2304,7 @@ function LocalDashboardShell({
               loading={kbLoading}
               refreshing={kbRefreshing}
               onRefresh={onRefreshKnowledge}
+              onUpload={onUploadKnowledge}
             />
           )}
           {route === "workspace" && (
@@ -1588,6 +2313,8 @@ function LocalDashboardShell({
               loading={workspaceLoading}
               refreshing={workspaceRefreshing}
               onRefresh={onRefreshWorkspace}
+              onReadFile={onReadWorkspaceFile}
+              onSaveFile={onSaveWorkspaceFile}
             />
           )}
           {route === "memory" && (
@@ -1626,6 +2353,11 @@ export function App() {
   const [runtimeSnapshot, setRuntimeSnapshot] = useState<JsonRecord | null>(null);
   const [skillsSnapshot, setSkillsSnapshot] = useState<JsonRecord | null>(null);
   const [skillsLoading, setSkillsLoading] = useState(true);
+  const [localConfig, setLocalConfig] = useState<LocalConfigState | null>(null);
+  const [configLoading, setConfigLoading] = useState(true);
+  const [configSaving, setConfigSaving] = useState(false);
+  const [configNotice, setConfigNotice] = useState<string | null>(null);
+  const [configError, setConfigError] = useState<string | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [customCategories, setCustomCategories] = useState<string[]>([]);
   const [selectedKbDocs, setSelectedKbDocs] = useState<KbDocReference[]>([]);
@@ -1763,6 +2495,20 @@ export function App() {
     }
   }, [getJson]);
 
+  const refreshConfig = useCallback(async () => {
+    setConfigLoading(true);
+    try {
+      const payload = await getJson("/v1/app/config");
+      setLocalConfig(localConfigFromPayload(payload));
+      setConfigError(null);
+    } catch (err) {
+      setLocalConfig(null);
+      setConfigError(err instanceof Error ? err.message : "Failed to load config");
+    } finally {
+      setConfigLoading(false);
+    }
+  }, [getJson]);
+
   const refreshKnowledge = useCallback(async () => {
     setKbRefreshing(true);
     try {
@@ -1775,6 +2521,39 @@ export function App() {
       setKbRefreshing(false);
     }
   }, [getJson]);
+
+  const uploadKnowledgeFiles = useCallback(
+    async (files: FileList): Promise<void> => {
+      for (const file of Array.from(files)) {
+        const extension = file.name.split(".").pop()?.toLowerCase() ?? "";
+        if (!KB_UPLOAD_EXTENSIONS.has(extension)) {
+          throw new Error(`Unsupported file type: ${file.name}`);
+        }
+        const contentType = resolveKnowledgeUploadMimeType(file);
+        const isTextFile =
+          contentType.startsWith("text/") ||
+          ["application/json", "application/xml"].includes(contentType) ||
+          /\.(md|markdown|txt|csv|tsv|json|yaml|yml|html|htm|xml)$/i.test(file.name);
+        const content = isTextFile
+          ? await file.text()
+          : `Binary knowledge file saved from local dashboard: ${file.name} (${file.size} bytes, ${contentType})`;
+        const safeName =
+          file.name
+            .replace(/[^A-Za-z0-9._-]+/g, "-")
+            .replace(/^-+|-+$/g, "")
+            .slice(0, 120) || "document.txt";
+        const response = await fetch(`${normalizedBase}/v1/app/knowledge/file`, {
+          method: "PUT",
+          headers: authHeaders(true),
+          body: JSON.stringify({ path: `dashboard/${safeName}`, content }),
+        });
+        const payload = (await response.json().catch(() => ({}))) as JsonRecord;
+        if (!response.ok) throw new Error(asString(payload.error, response.statusText));
+      }
+      await refreshKnowledge();
+    },
+    [authHeaders, normalizedBase, refreshKnowledge],
+  );
 
   const refreshWorkspace = useCallback(async () => {
     setWorkspaceRefreshing(true);
@@ -1847,6 +2626,56 @@ export function App() {
     [putJson, refreshWorkspace],
   );
 
+  const readWorkspaceFile = useCallback(
+    async (path: string): Promise<string> => {
+      const payload = await getJson(`/v1/app/workspace/file?path=${encodeURIComponent(path)}`);
+      return asString(payload.content);
+    },
+    [getJson],
+  );
+
+  const saveConfig = useCallback(
+    async (config: LocalConfigState): Promise<void> => {
+      setConfigSaving(true);
+      setConfigNotice(null);
+      setConfigError(null);
+      try {
+        const payload = await putJson("/v1/app/config", configSavePayload(config) as unknown as JsonRecord);
+        const next = { ...config, ...localConfigFromPayload({ ...payload, config: configSavePayload(config) as unknown as JsonRecord }) };
+        setLocalConfig(next);
+        setConfigNotice("Settings saved. Restart the runtime for provider or workspace changes to take effect.");
+      } catch (err) {
+        setConfigError(err instanceof Error ? err.message : "Failed to save config");
+      } finally {
+        setConfigSaving(false);
+      }
+    },
+    [putJson],
+  );
+
+  const reloadConfig = useCallback(async (): Promise<void> => {
+    setConfigNotice(null);
+    setConfigError(null);
+    try {
+      const payload = await sendJson("/v1/app/config/reload", {});
+      setLocalConfig(localConfigFromPayload(payload));
+      setConfigNotice(asString(payload.message, "Config reloaded. Restart may still be required."));
+    } catch (err) {
+      setConfigError(err instanceof Error ? err.message : "Failed to reload config");
+    }
+  }, [sendJson]);
+
+  const restartRuntime = useCallback(async (): Promise<void> => {
+    setConfigNotice(null);
+    setConfigError(null);
+    try {
+      const payload = await sendJson("/v1/app/runtime/restart", {});
+      setConfigNotice(asString(payload.message, payload.ok === true ? "Runtime restart scheduled." : "Runtime restart is not configured."));
+    } catch (err) {
+      setConfigError(err instanceof Error ? err.message : "Failed to restart runtime");
+    }
+  }, [sendJson]);
+
   const readMemoryFile = useCallback(
     async (path: string): Promise<string> => {
       const payload = await getJson(`/v1/app/memory/file?path=${encodeURIComponent(path)}`);
@@ -1891,17 +2720,17 @@ export function App() {
   const refreshChannels = useCallback(() => {
     setRefreshing(true);
     store.setChannels(store.channels.length > 0 ? store.channels : [defaultChannel()], { botId: BOT_ID });
-    void Promise.allSettled([refreshRuntime(), refreshKnowledge(), refreshWorkspace(), refreshMemory(), refreshSkills()]).finally(() => {
+    void Promise.allSettled([refreshRuntime(), refreshKnowledge(), refreshWorkspace(), refreshMemory(), refreshSkills(), refreshConfig()]).finally(() => {
       window.setTimeout(() => setRefreshing(false), 300);
     });
-  }, [refreshKnowledge, refreshMemory, refreshRuntime, refreshSkills, refreshWorkspace, store]);
+  }, [refreshConfig, refreshKnowledge, refreshMemory, refreshRuntime, refreshSkills, refreshWorkspace, store]);
 
   const refreshDashboardData = useCallback(() => {
     setRefreshing(true);
-    void Promise.allSettled([refreshRuntime(), refreshKnowledge(), refreshWorkspace(), refreshMemory(), refreshSkills()]).finally(() => {
+    void Promise.allSettled([refreshRuntime(), refreshKnowledge(), refreshWorkspace(), refreshMemory(), refreshSkills(), refreshConfig()]).finally(() => {
       window.setTimeout(() => setRefreshing(false), 300);
     });
-  }, [refreshKnowledge, refreshMemory, refreshRuntime, refreshSkills, refreshWorkspace]);
+  }, [refreshConfig, refreshKnowledge, refreshMemory, refreshRuntime, refreshSkills, refreshWorkspace]);
 
   const navigateToRoute = useCallback(
     (route: AppRoute, channel = useChatStore.getState().activeChannel || DEFAULT_CHANNEL) => {
@@ -1944,7 +2773,7 @@ export function App() {
         }
       })
       .catch(() => {});
-    void Promise.allSettled([refreshRuntime(), refreshKnowledge(), refreshWorkspace(), refreshMemory(), refreshSkills()]);
+    void Promise.allSettled([refreshRuntime(), refreshKnowledge(), refreshWorkspace(), refreshMemory(), refreshSkills(), refreshConfig()]);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -2755,35 +3584,46 @@ export function App() {
         runtimeStatus={runtimeStatus}
         skillsSnapshot={skillsSnapshot}
         skillsLoading={skillsLoading}
+        config={localConfig}
+        configLoading={configLoading}
+        configSaving={configSaving}
+        configNotice={configNotice}
+        configError={configError}
         agentUrl={agentUrl}
         token={token}
         kbCollections={kbCollections}
         kbLoading={kbLoading}
         kbRefreshing={kbRefreshing}
-         workspaceFiles={workspaceFiles}
-         workspaceLoading={workspaceLoading}
-         workspaceRefreshing={workspaceRefreshing}
-         memoryFiles={memoryFiles}
-         memoryStatus={memoryStatus}
-         memoryLoading={memoryLoading}
-         memoryRefreshing={memoryRefreshing}
-         setAgentUrl={setAgentUrl}
-         setToken={setToken}
-         onNavigate={navigateToRoute}
-         onRefreshAll={refreshDashboardData}
-         onRefreshKnowledge={() => void refreshKnowledge()}
-         onRefreshWorkspace={() => void refreshWorkspace()}
-         onRefreshMemory={() => void refreshMemory()}
-         onRefreshSkills={() => void refreshSkills()}
-         onMemorySearch={searchMemory}
-         onMemoryReadFile={readMemoryFile}
-         onMemorySaveFile={saveMemoryFile}
-         onMemoryDeleteFiles={deleteMemoryFiles}
-         onMemoryCompact={compactMemory}
-         onMemoryReindex={reindexMemory}
-         onSaveConnection={handleSaveConnection}
-         onCheckRuntime={() => void refreshRuntime()}
-       />
+        workspaceFiles={workspaceFiles}
+        workspaceLoading={workspaceLoading}
+        workspaceRefreshing={workspaceRefreshing}
+        memoryFiles={memoryFiles}
+        memoryStatus={memoryStatus}
+        memoryLoading={memoryLoading}
+        memoryRefreshing={memoryRefreshing}
+        setAgentUrl={setAgentUrl}
+        setToken={setToken}
+        onNavigate={navigateToRoute}
+        onRefreshAll={refreshDashboardData}
+        onRefreshKnowledge={() => void refreshKnowledge()}
+        onRefreshWorkspace={() => void refreshWorkspace()}
+        onRefreshMemory={() => void refreshMemory()}
+        onRefreshSkills={() => void refreshSkills()}
+        onUploadKnowledge={uploadKnowledgeFiles}
+        onReadWorkspaceFile={readWorkspaceFile}
+        onSaveWorkspaceFile={saveWorkspaceFile}
+        onMemorySearch={searchMemory}
+        onMemoryReadFile={readMemoryFile}
+        onMemorySaveFile={saveMemoryFile}
+        onMemoryDeleteFiles={deleteMemoryFiles}
+        onMemoryCompact={compactMemory}
+        onMemoryReindex={reindexMemory}
+        onSaveConnection={handleSaveConnection}
+        onCheckRuntime={() => void refreshRuntime()}
+        onSaveConfig={saveConfig}
+        onReloadConfig={reloadConfig}
+        onRestartRuntime={restartRuntime}
+      />
     );
   }
 
