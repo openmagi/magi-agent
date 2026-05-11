@@ -268,6 +268,8 @@ export async function commit(ctx: CommitPipelineContext): Promise<CommitResult> 
 export function isBeforeCommitBlockRetryable(reason: string): boolean {
   const normalized = reason.trim();
   if (/^\[RULE:SEALED_FILES\]/u.test(normalized)) return false;
+  if (/^\[RULE:GOAL_PROGRESS_EXECUTE_NEXT\]/u.test(normalized)) return false;
+  if (normalized.startsWith("[RULE:INTERACTIVE_TOOL_REQUIRED]")) return false;
   if (/^\[RULE:MEMORY_MUTATION_TOOL_REQUIRED\]/u.test(normalized)) return false;
   if (/^\[RULE:CLAIM_CITATION_REQUIRED\]/u.test(normalized)) return false;
   if (/^\[RULE:CLAIM_CITATION_GATE_ERROR\]/u.test(normalized)) return false;

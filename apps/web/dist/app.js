@@ -37489,10 +37489,10 @@ function DashboardPageHeader({
   description,
   action
 }) {
-  return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "mb-7 flex flex-col gap-4 border-b border-black/[0.06] pb-5 sm:flex-row sm:items-end sm:justify-between", children: [
+  return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "mb-8 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between", children: [
     /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "min-w-0", children: [
-      eyebrow && /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "mb-2 text-xs font-semibold uppercase tracking-[0.18em] text-secondary/70", children: eyebrow }),
-      /* @__PURE__ */ jsxRuntimeExports.jsx("h1", { className: "text-[1.7rem] font-semibold leading-tight text-foreground", children: title }),
+      eyebrow && /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "mb-2 text-[11px] font-semibold uppercase tracking-[0.16em] text-gray-400", children: eyebrow }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx("h1", { className: "text-2xl font-bold leading-tight text-foreground", children: title }),
       /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "mt-2 max-w-2xl text-sm leading-6 text-secondary", children: description })
     ] }),
     action && /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "shrink-0", children: action })
@@ -37542,22 +37542,22 @@ function DashboardSidebar({
       {
         type: "button",
         onClick: () => onNavigate(route),
-        className: `flex min-h-11 w-full items-center rounded-lg px-3 text-left text-sm font-semibold transition-colors duration-200 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30 ${active ? "border border-primary/20 bg-primary/10 text-primary-light" : "border border-transparent text-gray-600 hover:bg-gray-100 hover:text-gray-950"}`,
+        className: `flex min-h-11 w-full items-center rounded-xl px-3 text-left text-sm font-medium transition-colors duration-200 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30 ${active ? "border border-primary/20 bg-primary/10 text-primary-light" : "border border-transparent text-gray-600 hover:bg-gray-100 hover:text-gray-950"}`,
         children: label
       },
       route
     );
   };
-  return /* @__PURE__ */ jsxRuntimeExports.jsxs("aside", { className: "hidden h-screen w-72 shrink-0 flex-col border-r border-black/[0.07] bg-white p-5 md:flex", children: [
+  return /* @__PURE__ */ jsxRuntimeExports.jsxs("aside", { className: "hidden h-screen w-64 shrink-0 flex-col border-r border-gray-200 bg-gray-50 p-6 md:flex", children: [
     /* @__PURE__ */ jsxRuntimeExports.jsxs(
       "button",
       {
         type: "button",
         onClick: () => onNavigate("overview"),
-        className: "mb-7 flex min-h-11 items-center gap-3 rounded-lg text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30",
+        className: "mb-10 flex min-h-11 items-center gap-3 rounded-xl text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30",
         "aria-label": "Open Magi dashboard",
         children: [
-          /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "flex h-9 w-9 items-center justify-center rounded-lg bg-primary text-sm font-bold text-white", children: "M" }),
+          /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "flex h-9 w-9 items-center justify-center rounded-xl bg-primary text-sm font-bold text-white shadow-[0_8px_18px_rgba(124,58,237,0.18)]", children: "M" }),
           /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "min-w-0", children: [
             /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "block text-sm font-semibold text-foreground", children: "Open Magi" }),
             /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "block text-xs text-secondary", children: "Local operator" })
@@ -37565,7 +37565,7 @@ function DashboardSidebar({
         ]
       }
     ),
-    /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "mb-5 rounded-xl border border-black/[0.08] bg-gray-50 px-3.5 py-3", children: [
+    /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "mb-4 rounded-xl border border-gray-200 bg-white px-3.5 py-3", children: [
       /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "min-w-0 truncate text-sm font-semibold text-foreground", children: BOT_NAME }),
       /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "mt-2 flex items-center gap-2 text-xs font-medium text-secondary", children: [
         /* @__PURE__ */ jsxRuntimeExports.jsx(
@@ -37578,21 +37578,21 @@ function DashboardSidebar({
       ] })
     ] }),
     /* @__PURE__ */ jsxRuntimeExports.jsxs("nav", { className: "min-h-0 flex-1 space-y-1 overflow-y-auto", children: [
-      /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "pb-1", children: /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "px-3 text-[11px] font-semibold uppercase tracking-[0.18em] text-gray-400", children: "Chat" }) }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "pb-1", children: /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "px-3 text-xs font-medium uppercase tracking-wider text-gray-400", children: "Chat" }) }),
       /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "space-y-1", children: primaryItems.map(renderItem) }),
       /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "pt-4 pb-1", children: [
-        /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "mb-3 border-t border-black/[0.07]" }),
-        /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "px-3 text-[11px] font-semibold uppercase tracking-[0.18em] text-gray-400", children: "Local Runtime" })
+        /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "mb-3 border-t border-gray-200" }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "px-3 text-xs font-medium uppercase tracking-wider text-gray-400", children: "Local Runtime" })
       ] }),
       /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "space-y-1", children: workspaceItems.map(renderItem) })
     ] }),
-    /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "space-y-2 border-t border-black/[0.07] pt-4", children: [
+    /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "space-y-2 border-t border-gray-200 pt-4", children: [
       /* @__PURE__ */ jsxRuntimeExports.jsx(
         "button",
         {
           type: "button",
           onClick: onRefresh,
-          className: "flex min-h-11 w-full items-center rounded-lg px-3 text-left text-sm font-semibold text-gray-600 transition-colors hover:bg-gray-100 hover:text-gray-950 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30",
+          className: "flex min-h-11 w-full items-center rounded-xl px-3 text-left text-sm font-medium text-gray-600 transition-colors hover:bg-gray-100 hover:text-gray-950 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30",
           children: "Refresh"
         }
       ),
@@ -37601,7 +37601,7 @@ function DashboardSidebar({
         {
           type: "button",
           onClick: () => onNavigate("chat"),
-          className: "flex min-h-11 w-full items-center rounded-lg px-3 text-left text-sm font-semibold text-gray-600 transition-colors hover:bg-gray-100 hover:text-gray-950 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30",
+          className: "flex min-h-11 w-full items-center rounded-xl px-3 text-left text-sm font-medium text-gray-600 transition-colors hover:bg-gray-100 hover:text-gray-950 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30",
           children: "Back to chat"
         }
       )
@@ -37613,7 +37613,7 @@ function DashboardCard({
   children,
   action
 }) {
-  return /* @__PURE__ */ jsxRuntimeExports.jsxs("section", { className: "rounded-xl border border-black/[0.08] bg-white p-5 shadow-[0_10px_30px_rgba(15,23,42,0.035)]", children: [
+  return /* @__PURE__ */ jsxRuntimeExports.jsxs("section", { className: "glass rounded-2xl p-6 shadow-none", children: [
     (title || action) && /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "mb-4 flex min-h-9 items-center justify-between gap-3", children: [
       title ? /* @__PURE__ */ jsxRuntimeExports.jsx("h2", { className: "text-sm font-semibold text-foreground", children: title }) : /* @__PURE__ */ jsxRuntimeExports.jsx("span", {}),
       action
@@ -37622,7 +37622,7 @@ function DashboardCard({
   ] });
 }
 function MetricTile({ label, value }) {
-  return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "rounded-lg border border-black/[0.06] bg-gray-50 px-4 py-3", children: [
+  return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "rounded-xl border border-black/[0.04] bg-black/[0.025] px-4 py-3", children: [
     /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "text-[11px] font-semibold uppercase tracking-[0.14em] text-secondary/70", children: label }),
     /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "mt-1 text-2xl font-semibold text-foreground", children: value })
   ] });
@@ -37647,7 +37647,7 @@ function ButtonLike({
       type,
       disabled,
       onClick,
-      className: `inline-flex min-h-[44px] items-center justify-center rounded-lg px-5 py-2.5 text-sm font-semibold transition-all duration-200 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30 disabled:pointer-events-none disabled:opacity-40 ${variants[variant]} ${className}`,
+      className: `inline-flex min-h-[44px] items-center justify-center rounded-xl px-5 py-2.5 text-sm font-semibold transition-all duration-200 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30 disabled:pointer-events-none disabled:opacity-40 ${variants[variant]} ${className}`,
       children
     }
   );
@@ -37722,7 +37722,7 @@ function CollapsibleCard({
           {
             type: "button",
             onClick: () => setOpen((prev) => !prev),
-            className: "-m-5 flex min-h-[58px] w-[calc(100%+2.5rem)] items-center justify-between rounded-xl p-5 text-left transition-colors hover:bg-gray-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30",
+            className: "-m-6 flex min-h-[64px] w-[calc(100%+3rem)] items-center justify-between rounded-2xl p-6 text-left transition-colors hover:bg-black/[0.025] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30",
             children: [
               /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "min-w-0", children: [
                 /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "text-sm font-semibold text-foreground", children: title }),
@@ -37732,7 +37732,7 @@ function CollapsibleCard({
             ]
           }
         ),
-        open && /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "mt-5 border-t border-black/[0.06] pt-5", children })
+        open && /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "mt-6 border-t border-black/[0.06] pt-6", children })
       ]
     }
   );

@@ -16,6 +16,30 @@ describe("visible text sanitizers", () => {
     );
   });
 
+  it("localizes Korean coding experiment route META values to English when the reply is English", () => {
+    const text = [
+      "[META: intent=execution, domain=코딩/실험, complexity=complex, route=subagent]",
+      "\nI'll spawn 4 helpers in parallel.",
+    ].join("");
+
+    expect(normalizeUserVisibleRouteMetaTags(text)).toBe(
+      "[META: intent=execution, domain=coding/testing, complexity=complex, route=subagent]" +
+        "\nI'll spawn 4 helpers in parallel.",
+    );
+  });
+
+  it("localizes Korean AI orchestration route META values to English when the reply is English", () => {
+    const text = [
+      "[META: intent=execution, domain=AI오케스트레이션, complexity=complex, route=subagent]",
+      "\nI'll coordinate the validators in parallel.",
+    ].join("");
+
+    expect(normalizeUserVisibleRouteMetaTags(text)).toBe(
+      "[META: intent=execution, domain=AI orchestration, complexity=complex, route=subagent]" +
+        "\nI'll coordinate the validators in parallel.",
+    );
+  });
+
   it("localizes common English route META values to Korean when the reply is Korean", () => {
     const text = [
       "[META: intent=execution, domain=document writing, complexity=complex, route=subagent]",

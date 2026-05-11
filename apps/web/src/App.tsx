@@ -801,14 +801,14 @@ function DashboardPageHeader({
   action?: ReactNode;
 }) {
   return (
-    <div className="mb-7 flex flex-col gap-4 border-b border-black/[0.06] pb-5 sm:flex-row sm:items-end sm:justify-between">
+    <div className="mb-8 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
       <div className="min-w-0">
         {eyebrow && (
-          <div className="mb-2 text-xs font-semibold uppercase tracking-[0.18em] text-secondary/70">
+          <div className="mb-2 text-[11px] font-semibold uppercase tracking-[0.16em] text-gray-400">
             {eyebrow}
           </div>
         )}
-        <h1 className="text-[1.7rem] font-semibold leading-tight text-foreground">{title}</h1>
+        <h1 className="text-2xl font-bold leading-tight text-foreground">{title}</h1>
         <p className="mt-2 max-w-2xl text-sm leading-6 text-secondary">{description}</p>
       </div>
       {action && <div className="shrink-0">{action}</div>}
@@ -879,7 +879,7 @@ function DashboardSidebar({
         key={route}
         type="button"
         onClick={() => onNavigate(route)}
-        className={`flex min-h-11 w-full items-center rounded-lg px-3 text-left text-sm font-semibold transition-colors duration-200 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30 ${
+        className={`flex min-h-11 w-full items-center rounded-xl px-3 text-left text-sm font-medium transition-colors duration-200 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30 ${
           active
             ? "border border-primary/20 bg-primary/10 text-primary-light"
             : "border border-transparent text-gray-600 hover:bg-gray-100 hover:text-gray-950"
@@ -891,14 +891,14 @@ function DashboardSidebar({
   };
 
   return (
-    <aside className="hidden h-screen w-72 shrink-0 flex-col border-r border-black/[0.07] bg-white p-5 md:flex">
+    <aside className="hidden h-screen w-64 shrink-0 flex-col border-r border-gray-200 bg-gray-50 p-6 md:flex">
       <button
         type="button"
         onClick={() => onNavigate("overview")}
-        className="mb-7 flex min-h-11 items-center gap-3 rounded-lg text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30"
+        className="mb-10 flex min-h-11 items-center gap-3 rounded-xl text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30"
         aria-label="Open Magi dashboard"
       >
-        <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary text-sm font-bold text-white">
+        <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-primary text-sm font-bold text-white shadow-[0_8px_18px_rgba(124,58,237,0.18)]">
           M
         </span>
         <span className="min-w-0">
@@ -907,7 +907,7 @@ function DashboardSidebar({
         </span>
       </button>
 
-      <div className="mb-5 rounded-xl border border-black/[0.08] bg-gray-50 px-3.5 py-3">
+      <div className="mb-4 rounded-xl border border-gray-200 bg-white px-3.5 py-3">
         <div className="min-w-0 truncate text-sm font-semibold text-foreground">{BOT_NAME}</div>
         <div className="mt-2 flex items-center gap-2 text-xs font-medium text-secondary">
           <span
@@ -921,7 +921,7 @@ function DashboardSidebar({
 
       <nav className="min-h-0 flex-1 space-y-1 overflow-y-auto">
         <div className="pb-1">
-          <span className="px-3 text-[11px] font-semibold uppercase tracking-[0.18em] text-gray-400">
+          <span className="px-3 text-xs font-medium uppercase tracking-wider text-gray-400">
             Chat
           </span>
         </div>
@@ -929,8 +929,8 @@ function DashboardSidebar({
           {primaryItems.map(renderItem)}
         </div>
         <div className="pt-4 pb-1">
-          <div className="mb-3 border-t border-black/[0.07]" />
-          <span className="px-3 text-[11px] font-semibold uppercase tracking-[0.18em] text-gray-400">
+          <div className="mb-3 border-t border-gray-200" />
+          <span className="px-3 text-xs font-medium uppercase tracking-wider text-gray-400">
             Local Runtime
           </span>
         </div>
@@ -939,18 +939,18 @@ function DashboardSidebar({
         </div>
       </nav>
 
-      <div className="space-y-2 border-t border-black/[0.07] pt-4">
+      <div className="space-y-2 border-t border-gray-200 pt-4">
         <button
           type="button"
           onClick={onRefresh}
-          className="flex min-h-11 w-full items-center rounded-lg px-3 text-left text-sm font-semibold text-gray-600 transition-colors hover:bg-gray-100 hover:text-gray-950 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30"
+          className="flex min-h-11 w-full items-center rounded-xl px-3 text-left text-sm font-medium text-gray-600 transition-colors hover:bg-gray-100 hover:text-gray-950 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30"
         >
           Refresh
         </button>
         <button
           type="button"
           onClick={() => onNavigate("chat")}
-          className="flex min-h-11 w-full items-center rounded-lg px-3 text-left text-sm font-semibold text-gray-600 transition-colors hover:bg-gray-100 hover:text-gray-950 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30"
+          className="flex min-h-11 w-full items-center rounded-xl px-3 text-left text-sm font-medium text-gray-600 transition-colors hover:bg-gray-100 hover:text-gray-950 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30"
         >
           Back to chat
         </button>
@@ -969,7 +969,7 @@ function DashboardCard({
   action?: ReactNode;
 }) {
   return (
-    <section className="rounded-xl border border-black/[0.08] bg-white p-5 shadow-[0_10px_30px_rgba(15,23,42,0.035)]">
+    <section className="glass rounded-2xl p-6 shadow-none">
       {(title || action) && (
         <div className="mb-4 flex min-h-9 items-center justify-between gap-3">
           {title ? <h2 className="text-sm font-semibold text-foreground">{title}</h2> : <span />}
@@ -983,7 +983,7 @@ function DashboardCard({
 
 function MetricTile({ label, value }: { label: string; value: string | number }) {
   return (
-    <div className="rounded-lg border border-black/[0.06] bg-gray-50 px-4 py-3">
+    <div className="rounded-xl border border-black/[0.04] bg-black/[0.025] px-4 py-3">
       <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-secondary/70">{label}</div>
       <div className="mt-1 text-2xl font-semibold text-foreground">{value}</div>
     </div>
@@ -1016,7 +1016,7 @@ function ButtonLike({
       type={type}
       disabled={disabled}
       onClick={onClick}
-      className={`inline-flex min-h-[44px] items-center justify-center rounded-lg px-5 py-2.5 text-sm font-semibold transition-all duration-200 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30 disabled:pointer-events-none disabled:opacity-40 ${variants[variant]} ${className}`}
+      className={`inline-flex min-h-[44px] items-center justify-center rounded-xl px-5 py-2.5 text-sm font-semibold transition-all duration-200 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30 disabled:pointer-events-none disabled:opacity-40 ${variants[variant]} ${className}`}
     >
       {children}
     </button>
@@ -1112,7 +1112,7 @@ function CollapsibleCard({
       <button
         type="button"
         onClick={() => setOpen((prev) => !prev)}
-        className="-m-5 flex min-h-[58px] w-[calc(100%+2.5rem)] items-center justify-between rounded-xl p-5 text-left transition-colors hover:bg-gray-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30"
+        className="-m-6 flex min-h-[64px] w-[calc(100%+3rem)] items-center justify-between rounded-2xl p-6 text-left transition-colors hover:bg-black/[0.025] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30"
       >
         <div className="min-w-0">
           <div className="text-sm font-semibold text-foreground">{title}</div>
@@ -1120,7 +1120,7 @@ function CollapsibleCard({
         </div>
         <ChevronIcon expanded={open} />
       </button>
-      {open && <div className="mt-5 border-t border-black/[0.06] pt-5">{children}</div>}
+      {open && <div className="mt-6 border-t border-black/[0.06] pt-6">{children}</div>}
     </DashboardCard>
   );
 }

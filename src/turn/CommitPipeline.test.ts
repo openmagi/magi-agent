@@ -19,6 +19,7 @@ import {
   commit,
   abort,
   collectFilesChanged,
+  isBeforeCommitBlockRetryable,
   type CommitPipelineContext,
 } from "./CommitPipeline.js";
 import type { LLMContentBlock } from "../transport/LLMClient.js";
@@ -295,6 +296,22 @@ describe("CommitPipeline.commit", () => {
         reasonCode: "CLAIM_CITATION_REQUIRED",
       }),
     );
+  });
+
+  it("treats repeated goal-progress plan-only blocks as non-retryable", () => {
+    expect(
+      isBeforeCommitBlockRetryable(
+        "[RULE:GOAL_PROGRESS_EXECUTE_NEXT] The draft still ends at the planning boundary.",
+      ),
+    ).toBe(false);
+  });
+
+  it("treats repeated interactive-tool evidence blocks as non-retryable", () => {
+    expect(
+      isBeforeCommitBlockRetryable(
+        "[RULE:INTERACTIVE_TOOL_REQUIRED] Browser work still ended without tool evidence.",
+      ),
+    ).toBe(false);
   });
 
   it("blocks invalid structured output before transcript commit", async () => {
