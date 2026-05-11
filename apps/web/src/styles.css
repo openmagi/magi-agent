@@ -262,6 +262,93 @@ body {
   animation: chat-fade-in 0.15s ease-out;
 }
 
+@keyframes work-console-row-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes work-console-dot-breathe {
+  0%, 100% {
+    opacity: 0.78;
+    transform: scale(1);
+    box-shadow: 0 0 0 0 rgba(124, 58, 237, 0.18);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.14);
+    box-shadow: 0 0 0 5px rgba(124, 58, 237, 0);
+  }
+}
+
+@keyframes work-console-row-sheen {
+  0% {
+    transform: translateX(-70%);
+    opacity: 0;
+  }
+  20%, 70% {
+    opacity: 0.55;
+  }
+  100% {
+    transform: translateX(70%);
+    opacity: 0;
+  }
+}
+
+@keyframes work-console-text-in {
+  from {
+    opacity: 0.58;
+    transform: translateY(2px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.work-console-row-motion {
+  animation: work-console-row-in 180ms ease-out both;
+  animation-delay: var(--work-console-row-delay, 0ms);
+  transition:
+    background-color 180ms ease,
+    border-color 180ms ease,
+    box-shadow 180ms ease,
+    opacity 180ms ease,
+    transform 180ms ease;
+  will-change: opacity, transform;
+}
+
+.work-console-running-dot {
+  animation: work-console-dot-breathe 1.45s ease-in-out infinite;
+}
+
+.work-console-running-row {
+  position: relative;
+  overflow: hidden;
+}
+
+.work-console-running-row::after {
+  content: "";
+  position: absolute;
+  left: 0.625rem;
+  right: 0.625rem;
+  bottom: 0.25rem;
+  height: 1px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, transparent, rgba(124, 58, 237, 0.32), transparent);
+  animation: work-console-row-sheen 1.9s ease-in-out infinite;
+  pointer-events: none;
+}
+
+.work-console-text-motion {
+  animation: work-console-text-in 150ms ease-out both;
+}
+
 @keyframes fade-in-up {
   from { opacity: 0; transform: translateX(-50%) translateY(4px); }
   to { opacity: 1; transform: translateX(-50%) translateY(0); }
