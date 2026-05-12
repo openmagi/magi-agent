@@ -46,6 +46,15 @@ import {
   resolveKnowledgeUploadMimeType,
 } from "@/lib/knowledge/upload-mime";
 import { localizeChannel } from "@/lib/chat/channel-i18n";
+import {
+  buildMemoryModeChannelIdentity,
+  type ChannelMemoryModeOption,
+} from "@/lib/chat/channel-memory-mode";
+import {
+  buildChatExportFilename,
+  buildChatExportMarkdown,
+  normalizeSelectedChatExportMessages,
+} from "@/lib/chat/export";
 import type {
   BrowserFrame,
   Channel,
@@ -60,6 +69,7 @@ import type {
   PatchPreview,
   QueuedMessage,
   ReplyTo,
+  RuntimeTrace,
   SubagentActivity,
   TaskBoardTask,
   ToolActivity,
@@ -95,6 +105,18 @@ const storage = {
   modelOverride: "magi.agent.app.modelOverride",
 };
 
+function downloadMarkdownFile(filename: string, markdown: string): void {
+  const blob = new Blob([markdown], { type: "text/markdown;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = filename;
+  document.body.appendChild(anchor);
+  anchor.click();
+  document.body.removeChild(anchor);
+  URL.revokeObjectURL(url);
+}
+
 type JsonRecord = Record<string, unknown>;
 type RuntimePhase = NonNullable<ChannelState["turnPhase"]>;
 type AppRoute =
@@ -110,6 +132,7 @@ type AppRoute =
 type DashboardRoute = Exclude<AppRoute, "chat">;
 type ProviderName = "anthropic" | "openai" | "google" | "openai-compatible";
 type RuntimeCheckStatus = "not_checked" | "checking" | "active" | "unavailable";
+type SkillDirectoryFilter = "all" | "prompt" | "script" | "hooks" | "issues";
 
 interface AppBootstrap {
   agentUrl?: string;
@@ -179,6 +202,25 @@ interface LocalConfigSaveInput {
     gatewayTokenEnvVar?: string;
   };
   workspace?: string;
+}
+
+interface SkillIssueDetail {
+  key: string;
+  title: string;
+  reason: string;
+  detail: string;
+  path: string;
+  lookupKeys: string[];
+}
+
+interface SkillDirectoryItem {
+  name: string;
+  path: string;
+  tags: string[];
+  promptOnly: boolean;
+  scriptBacked: boolean;
+  runtimeHooks: number;
+  issues: SkillIssueDetail[];
 }
 
 function defaultChannel(): Channel {
@@ -300,6 +342,86 @@ function asArray(value: unknown): JsonRecord[] {
 
 function asStringArray(value: unknown): string[] {
   return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
+}
+
+function normalizedLookupKey(value: string): string {
+  return value.trim().toLowerCase();
+}
+
+function compactUniqueStrings(values: string[]): string[] {
+  return Array.from(
+    new Set(values.map((value) => value.trim()).filter((value) => value.length > 0)),
+  );
+}
+
+function normalizeSkillIssueDetails(issues: JsonRecord[]): SkillIssueDetail[] {
+  return issues.map((issue, index) => {
+    const skillName = asString(issue.skillName);
+    const dir = asString(issue.dir);
+    const path = asString(issue.path, dir);
+    const title = skillName || dir || `Issue ${index + 1}`;
+    const reason = asString(issue.reason, "unknown_issue");
+    const detail = asString(issue.detail);
+    const lookupKeys = compactUniqueStrings([skillName, dir, path, title]).map(normalizedLookupKey);
+    return {
+      key: `${title}-${reason}-${index}`,
+      title,
+      reason,
+      detail,
+      path,
+      lookupKeys,
+    };
+  });
+}
+
+function normalizeSkillDirectoryItems(
+  loaded: JsonRecord[],
+  issues: JsonRecord[],
+): SkillDirectoryItem[] {
+  const issueDetails = normalizeSkillIssueDetails(issues);
+  return loaded.map((skill, index) => {
+    const name = asString(skill.name, `skill-${index + 1}`);
+    const dir = asString(skill.dir);
+    const path = asString(skill.path, dir);
+    const lookupKeys = compactUniqueStrings([name, dir, path]).map(normalizedLookupKey);
+    const matchedIssues = issueDetails.filter((issue) =>
+      issue.lookupKeys.some((key) => lookupKeys.includes(key)),
+    );
+    return {
+      name,
+      path,
+      tags: asStringArray(skill.tags),
+      promptOnly: skill.promptOnly === true,
+      scriptBacked: skill.scriptBacked === true,
+      runtimeHooks: Math.max(0, Math.floor(asNumber(skill.runtimeHooks, 0))),
+      issues: matchedIssues,
+    };
+  });
+}
+
+function skillSearchText(skill: SkillDirectoryItem): string {
+  return [
+    skill.name,
+    skill.path,
+    ...skill.tags,
+    ...skill.issues.flatMap((issue) => [issue.title, issue.reason, issue.detail, issue.path]),
+  ]
+    .join(" ")
+    .toLowerCase();
+}
+
+function filterSkillDirectoryItem(skill: SkillDirectoryItem, filter: SkillDirectoryFilter): boolean {
+  if (filter === "prompt") return skill.promptOnly;
+  if (filter === "script") return skill.scriptBacked;
+  if (filter === "hooks") return skill.runtimeHooks > 0;
+  if (filter === "issues") return skill.issues.length > 0;
+  return true;
+}
+
+function skillTypeLabel(skill: SkillDirectoryItem): string {
+  if (skill.scriptBacked) return "Script skill";
+  if (skill.promptOnly) return "Prompt skill";
+  return "Skill";
 }
 
 function asProviderName(value: unknown): ProviderName {
@@ -586,6 +708,42 @@ function normalizeCitationGate(payload: JsonRecord): CitationGateStatus | null {
   };
 }
 
+function runtimeTracePhase(value: unknown): RuntimeTrace["phase"] {
+  if (
+    value === "retry_scheduled" ||
+    value === "retry_aborted" ||
+    value === "terminal_abort"
+  ) {
+    return value;
+  }
+  return "verifier_blocked";
+}
+
+function runtimeTraceSeverity(value: unknown): RuntimeTrace["severity"] {
+  if (value === "warning" || value === "error") return value;
+  return "info";
+}
+
+function normalizeRuntimeTrace(payload: JsonRecord): RuntimeTrace | null {
+  const turnId = asString(payload.turnId);
+  const title = asString(payload.title);
+  if (!turnId || !title) return null;
+  return {
+    turnId,
+    title,
+    phase: runtimeTracePhase(payload.phase),
+    severity: runtimeTraceSeverity(payload.severity),
+    receivedAt: Date.now(),
+    ...(typeof payload.detail === "string" ? { detail: payload.detail } : {}),
+    ...(typeof payload.reasonCode === "string" ? { reasonCode: payload.reasonCode } : {}),
+    ...(typeof payload.ruleId === "string" ? { ruleId: payload.ruleId } : {}),
+    ...(typeof payload.attempt === "number" ? { attempt: payload.attempt } : {}),
+    ...(typeof payload.maxAttempts === "number" ? { maxAttempts: payload.maxAttempts } : {}),
+    ...(typeof payload.retryable === "boolean" ? { retryable: payload.retryable } : {}),
+    ...(typeof payload.requiredAction === "string" ? { requiredAction: payload.requiredAction } : {}),
+  };
+}
+
 function missionStatus(value: unknown): MissionActivity["status"] {
   if (
     value === "queued" ||
@@ -731,6 +889,64 @@ function runtimeStatusLabel(status: RuntimeCheckStatus): string {
   return "not checked";
 }
 
+function DashboardPageHeader({
+  eyebrow,
+  title,
+  description,
+  action,
+}: {
+  eyebrow?: string;
+  title: string;
+  description: string;
+  action?: ReactNode;
+}) {
+  return (
+    <div className="mb-8 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+      <div className="min-w-0">
+        {eyebrow && (
+          <div className="mb-2 text-[11px] font-semibold uppercase tracking-[0.16em] text-gray-400">
+            {eyebrow}
+          </div>
+        )}
+        <h1 className="text-2xl font-bold leading-tight text-foreground">{title}</h1>
+        <p className="mt-2 max-w-2xl text-sm leading-6 text-secondary">{description}</p>
+      </div>
+      {action && <div className="shrink-0">{action}</div>}
+    </div>
+  );
+}
+
+function StatusPill({
+  status,
+  children,
+}: {
+  status: RuntimeCheckStatus | "ok" | "muted" | "warning";
+  children: ReactNode;
+}) {
+  const tones = {
+    active: "border-emerald-500/20 bg-emerald-500/10 text-emerald-700",
+    checking: "border-amber-500/20 bg-amber-500/10 text-amber-700",
+    unavailable: "border-red-500/20 bg-red-500/10 text-red-600",
+    not_checked: "border-black/10 bg-gray-100 text-secondary",
+    ok: "border-emerald-500/20 bg-emerald-500/10 text-emerald-700",
+    muted: "border-black/10 bg-gray-100 text-secondary",
+    warning: "border-amber-500/20 bg-amber-500/10 text-amber-700",
+  } satisfies Record<RuntimeCheckStatus | "ok" | "muted" | "warning", string>;
+  return (
+    <span className={`inline-flex min-h-7 items-center rounded-full border px-2.5 text-xs font-semibold ${tones[status]}`}>
+      {children}
+    </span>
+  );
+}
+
+function EmptyState({ children }: { children: ReactNode }) {
+  return (
+    <div className="rounded-lg border border-dashed border-black/[0.10] bg-gray-50/70 px-4 py-8 text-center text-sm leading-6 text-secondary">
+      {children}
+    </div>
+  );
+}
+
 function DashboardSidebar({
   activeRoute,
   runtimeStatus,
@@ -763,10 +979,10 @@ function DashboardSidebar({
         key={route}
         type="button"
         onClick={() => onNavigate(route)}
-        className={`block w-full rounded-xl px-3 py-2.5 text-left text-sm font-medium transition-colors duration-200 cursor-pointer ${
+        className={`flex min-h-11 w-full items-center rounded-xl px-3 text-left text-sm font-medium transition-colors duration-200 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30 ${
           active
-            ? "bg-primary/10 text-primary-light border border-primary/25"
-            : "text-gray-700 hover:text-gray-900 hover:bg-gray-100"
+            ? "border border-primary/20 bg-primary/10 text-primary-light"
+            : "border border-transparent text-gray-600 hover:bg-gray-100 hover:text-gray-950"
         }`}
       >
         {label}
@@ -779,18 +995,21 @@ function DashboardSidebar({
       <button
         type="button"
         onClick={() => onNavigate("overview")}
-        className="mb-10 flex items-center gap-2 text-left"
+        className="mb-10 flex min-h-11 items-center gap-3 rounded-xl text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30"
         aria-label="Open Magi dashboard"
       >
-        <span className="flex h-6 w-6 items-center justify-center rounded-md bg-primary text-xs font-bold text-white">
+        <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-primary text-sm font-bold text-white shadow-[0_8px_18px_rgba(124,58,237,0.18)]">
           M
         </span>
-        <span className="text-sm font-semibold text-foreground">Open Magi</span>
+        <span className="min-w-0">
+          <span className="block text-sm font-semibold text-foreground">Open Magi</span>
+          <span className="block text-xs text-secondary">Local operator</span>
+        </span>
       </button>
 
-      <div className="mb-4 rounded-xl border border-gray-200 bg-white px-3 py-2.5">
+      <div className="mb-4 rounded-xl border border-gray-200 bg-white px-3.5 py-3">
         <div className="min-w-0 truncate text-sm font-semibold text-foreground">{BOT_NAME}</div>
-        <div className="mt-1 flex items-center gap-2 text-sm text-secondary">
+        <div className="mt-2 flex items-center gap-2 text-xs font-medium text-secondary">
           <span
             className={`h-2.5 w-2.5 rounded-full ${
               runtimeStatus === "active" ? "bg-emerald-400" : "bg-gray-300"
@@ -824,14 +1043,14 @@ function DashboardSidebar({
         <button
           type="button"
           onClick={onRefresh}
-          className="w-full rounded-xl px-3 py-2.5 text-left text-sm font-medium text-gray-700 transition-colors hover:bg-gray-100 hover:text-gray-900"
+          className="flex min-h-11 w-full items-center rounded-xl px-3 text-left text-sm font-medium text-gray-600 transition-colors hover:bg-gray-100 hover:text-gray-950 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30"
         >
           Refresh
         </button>
         <button
           type="button"
           onClick={() => onNavigate("chat")}
-          className="w-full rounded-xl px-3 py-2.5 text-left text-sm font-medium text-gray-700 transition-colors hover:bg-gray-100 hover:text-gray-900"
+          className="flex min-h-11 w-full items-center rounded-xl px-3 text-left text-sm font-medium text-gray-600 transition-colors hover:bg-gray-100 hover:text-gray-950 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30"
         >
           Back to chat
         </button>
@@ -850,10 +1069,10 @@ function DashboardCard({
   action?: ReactNode;
 }) {
   return (
-    <section className="glass rounded-2xl p-6">
+    <section className="glass rounded-2xl p-6 shadow-none">
       {(title || action) && (
-        <div className="mb-4 flex items-center justify-between gap-3">
-          {title ? <h2 className="text-base font-semibold text-foreground">{title}</h2> : <span />}
+        <div className="mb-4 flex min-h-9 items-center justify-between gap-3">
+          {title ? <h2 className="text-sm font-semibold text-foreground">{title}</h2> : <span />}
           {action}
         </div>
       )}
@@ -864,8 +1083,8 @@ function DashboardCard({
 
 function MetricTile({ label, value }: { label: string; value: string | number }) {
   return (
-    <div className="rounded-xl bg-gray-50 px-4 py-3">
-      <div className="text-xs font-medium uppercase tracking-[0.08em] text-secondary/70">{label}</div>
+    <div className="rounded-xl border border-black/[0.04] bg-black/[0.025] px-4 py-3">
+      <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-secondary/70">{label}</div>
       <div className="mt-1 text-2xl font-semibold text-foreground">{value}</div>
     </div>
   );
@@ -887,8 +1106,8 @@ function ButtonLike({
   className?: string;
 }) {
   const variants = {
-    primary: "bg-primary text-white hover:bg-primary-light glow-sm",
-    secondary: "border border-black/10 bg-transparent text-foreground hover:border-primary/40 hover:bg-black/[0.04]",
+    primary: "bg-primary text-white hover:bg-primary-light shadow-[0_8px_18px_rgba(124,58,237,0.18)]",
+    secondary: "border border-black/10 bg-white text-foreground hover:border-primary/35 hover:bg-gray-50",
     ghost: "bg-transparent text-secondary hover:bg-black/[0.04] hover:text-foreground",
     danger: "border border-red-500/20 bg-red-500/10 text-red-500 hover:bg-red-500/15",
   };
@@ -897,7 +1116,7 @@ function ButtonLike({
       type={type}
       disabled={disabled}
       onClick={onClick}
-      className={`inline-flex min-h-[44px] items-center justify-center rounded-xl px-5 py-2.5 text-sm font-semibold transition-all duration-200 disabled:pointer-events-none disabled:opacity-40 ${variants[variant]} ${className}`}
+      className={`inline-flex min-h-[44px] items-center justify-center rounded-xl px-5 py-2.5 text-sm font-semibold transition-all duration-200 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30 disabled:pointer-events-none disabled:opacity-40 ${variants[variant]} ${className}`}
     >
       {children}
     </button>
@@ -919,13 +1138,13 @@ function SettingsInput({
 }) {
   return (
     <label className="block">
-      <span className="mb-1.5 block text-sm font-medium text-secondary">{label}</span>
+      <span className="mb-1.5 block text-xs font-semibold uppercase tracking-[0.12em] text-secondary/75">{label}</span>
       <input
         value={value}
         type={type}
         placeholder={placeholder}
         onChange={(event) => onChange(event.target.value)}
-        className="w-full rounded-xl border border-black/10 bg-white px-4 py-3 text-foreground outline-none transition-colors duration-200 focus:border-primary/50 focus:ring-1 focus:ring-primary/20"
+        className="min-h-11 w-full rounded-lg border border-black/10 bg-white px-3.5 py-2.5 text-sm font-medium text-foreground outline-none transition-colors duration-200 placeholder:text-secondary/45 focus:border-primary/45 focus:ring-4 focus:ring-primary/10"
       />
     </label>
   );
@@ -944,11 +1163,11 @@ function SettingsDropdown({
 }) {
   return (
     <label className="block">
-      <span className="mb-1.5 block text-sm font-medium text-secondary">{label}</span>
+      <span className="mb-1.5 block text-xs font-semibold uppercase tracking-[0.12em] text-secondary/75">{label}</span>
       <select
         value={value}
         onChange={(event) => onChange(event.target.value)}
-        className="w-full rounded-xl border border-black/10 bg-white px-4 py-3 text-foreground outline-none transition-colors duration-200 focus:border-primary/50 focus:ring-1 focus:ring-primary/20"
+        className="min-h-11 w-full rounded-lg border border-black/10 bg-white px-3.5 py-2.5 text-sm font-medium text-foreground outline-none transition-colors duration-200 focus:border-primary/45 focus:ring-4 focus:ring-primary/10"
       >
         {options.map((option) => (
           <option key={option.value} value={option.value}>
@@ -993,15 +1212,15 @@ function CollapsibleCard({
       <button
         type="button"
         onClick={() => setOpen((prev) => !prev)}
-        className="-m-6 flex w-[calc(100%+3rem)] items-center justify-between p-5 text-left transition-colors hover:bg-gray-50"
+        className="-m-6 flex min-h-[64px] w-[calc(100%+3rem)] items-center justify-between rounded-2xl p-6 text-left transition-colors hover:bg-black/[0.025] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30"
       >
         <div className="min-w-0">
-          <div className="font-medium text-foreground">{title}</div>
+          <div className="text-sm font-semibold text-foreground">{title}</div>
           {subtitle && <div className="mt-1 text-xs text-secondary">{subtitle}</div>}
         </div>
         <ChevronIcon expanded={open} />
       </button>
-      {open && <div className="mt-6 border-t border-gray-200 pt-5">{children}</div>}
+      {open && <div className="mt-6 border-t border-black/[0.06] pt-6">{children}</div>}
     </DashboardCard>
   );
 }
@@ -1021,13 +1240,13 @@ function OverviewDashboard({
 }) {
   const docCount = kbCollections.reduce((sum, collection) => sum + collection.docs.length, 0);
   return (
-    <div className="max-w-3xl space-y-6">
-      <div className="mb-8">
-        <h1 className="text-2xl font-bold text-foreground">Dashboard</h1>
-        <p className="mt-1 text-sm text-secondary">
-          Manage your local Magi agent and monitor runtime performance.
-        </p>
-      </div>
+    <div className="max-w-5xl space-y-6">
+      <DashboardPageHeader
+        eyebrow="Local Runtime"
+        title="Dashboard"
+        description="Manage your local Magi agent, runtime state, workspace knowledge, and operator files from one console."
+        action={<ButtonLike onClick={() => onNavigate("chat")}>Open Chat</ButtonLike>}
+      />
 
       <div className="space-y-5">
         <DashboardCard title="Agent">
@@ -1040,18 +1259,13 @@ function OverviewDashboard({
                   }`}
                 />
                 <h3 className="text-xl font-semibold text-foreground">{BOT_NAME}</h3>
-                <span className="rounded-full border border-emerald-500/20 bg-emerald-500/10 px-3 py-1 text-xs font-medium text-emerald-600">
-                  {runtimeStatusLabel(runtimeStatus)}
-                </span>
+                <StatusPill status={runtimeStatus}>{runtimeStatusLabel(runtimeStatus)}</StatusPill>
               </div>
               <p className="mt-2 max-w-2xl text-sm leading-6 text-secondary">
                 Self-hosted Magi runtime with local chat, workspace knowledge, runtime proof,
                 editable operator files, and your configured LLM provider.
               </p>
             </div>
-            <ButtonLike onClick={() => onNavigate("chat")}>
-              Open Chat
-            </ButtonLike>
           </div>
         </DashboardCard>
 
@@ -1083,7 +1297,7 @@ function OverviewDashboard({
                 key={item.title}
                 type="button"
                 onClick={() => onNavigate(item.route)}
-                className="block w-full rounded-xl border border-gray-100 bg-gray-50 px-4 py-3 text-left transition hover:border-gray-200 hover:bg-white"
+                className="block min-h-16 w-full rounded-lg border border-black/[0.06] bg-gray-50 px-4 py-3 text-left transition hover:border-primary/20 hover:bg-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30"
               >
                 <div className="text-sm font-semibold text-foreground">{item.title}</div>
                 <div className="mt-1 text-xs text-secondary">{item.detail}</div>
@@ -1140,13 +1354,13 @@ function SettingsDashboard({
   }, []);
 
   return (
-    <div className="max-w-3xl space-y-5">
-      <div className="mb-8">
-        <h1 className="text-2xl font-bold text-foreground">Settings</h1>
-        <p className="mt-1 text-sm text-secondary">
-          Configure the self-hosted runtime, provider, and local workspace.
-        </p>
-      </div>
+    <div className="max-w-4xl space-y-5">
+      <DashboardPageHeader
+        eyebrow="Configuration"
+        title="Settings"
+        description="Configure the local runtime, provider endpoint, workspace path, and safeguards used by the self-hosted agent."
+        action={<StatusPill status={runtimeStatus}>{runtimeStatusLabel(runtimeStatus)}</StatusPill>}
+      />
 
       <DashboardCard
         title="Model"
@@ -1159,9 +1373,9 @@ function SettingsDashboard({
         }
       >
         {!draft ? (
-          <div className="rounded-xl border border-dashed border-black/[0.08] px-4 py-8 text-center text-sm text-secondary">
+          <EmptyState>
             No config loaded yet. Save a local provider below to create `magi-agent.yaml`.
-          </div>
+          </EmptyState>
         ) : (
           <div className="space-y-4">
             {configNotice && (
@@ -1370,21 +1584,20 @@ function KnowledgeDashboard({
 
   return (
     <div className="max-w-4xl space-y-6">
-      <div className="mb-8">
-        <h1 className="text-2xl font-bold text-foreground">Knowledge</h1>
-        <p className="mt-1 text-sm text-secondary">
-          Upload and inspect the local workspace KB used by the self-hosted agent.
-        </p>
-      </div>
-      <DashboardCard
-        title="Workspace Knowledge"
+      <DashboardPageHeader
+        eyebrow="Workspace KB"
+        title="Knowledge"
+        description="Upload and inspect local documents that the self-hosted runtime can search during a mission."
         action={
           <ButtonLike variant="secondary" onClick={onRefresh} disabled={refreshing}>
             {refreshing ? "Refreshing..." : "Refresh"}
           </ButtonLike>
         }
+      />
+      <DashboardCard
+        title="Workspace Knowledge"
       >
-        <div className="mb-5 rounded-xl border border-dashed border-primary/20 bg-primary/5 px-4 py-5">
+        <div className="mb-5 rounded-lg border border-dashed border-primary/25 bg-primary/[0.04] px-4 py-5">
           <label className="block cursor-pointer text-center">
             <input
               type="file"
@@ -1403,15 +1616,11 @@ function KnowledgeDashboard({
         {uploadNotice && <div className="mb-3 rounded-xl bg-emerald-50 px-3 py-2 text-xs text-emerald-700">{uploadNotice}</div>}
         {uploadError && <div className="mb-3 rounded-xl bg-red-50 px-3 py-2 text-xs text-red-500">{uploadError}</div>}
         {loading ? (
-          <div className="rounded-xl border border-dashed border-black/[0.08] px-4 py-8 text-center text-sm text-secondary">
-            Loading knowledge...
-          </div>
+          <EmptyState>Loading knowledge...</EmptyState>
         ) : docs.length === 0 ? (
-          <div className="rounded-xl border border-dashed border-black/[0.08] px-4 py-8 text-center text-sm text-secondary">
-            No local KB documents yet.
-          </div>
+          <EmptyState>No local KB documents yet.</EmptyState>
         ) : (
-          <div className="divide-y divide-black/[0.06] overflow-hidden rounded-xl border border-black/[0.08]">
+          <div className="divide-y divide-black/[0.06] overflow-hidden rounded-lg border border-black/[0.08]">
             {docs.map((doc) => (
               <div key={`${doc.collectionName}:${doc.id}`} className="px-4 py-3">
                 <div className="text-sm font-semibold text-foreground">{doc.filename}</div>
@@ -1494,43 +1703,38 @@ function WorkspaceDashboard({
 
   return (
     <div className="space-y-6">
-      <div className="mb-8">
-        <h1 className="text-2xl font-bold text-foreground">Workspace</h1>
-        <p className="mt-1 text-sm text-secondary">
-          Edit local prompts, contracts, harness rules, hooks, memory, compaction files, and artifacts.
-        </p>
-      </div>
+      <DashboardPageHeader
+        eyebrow="Operator Files"
+        title="Workspace"
+        description="Edit local prompts, contracts, harness rules, hooks, memory, compaction files, and artifacts."
+        action={
+          <ButtonLike variant="secondary" onClick={onRefresh} disabled={refreshing}>
+            {refreshing ? "Refreshing..." : "Refresh"}
+          </ButtonLike>
+        }
+      />
       <div className="grid gap-5 xl:grid-cols-[minmax(0,420px)_minmax(0,1fr)]">
         <DashboardCard
           title="Files"
-          action={
-            <ButtonLike variant="secondary" onClick={onRefresh} disabled={refreshing}>
-              {refreshing ? "Refreshing..." : "Refresh"}
-            </ButtonLike>
-          }
         >
           <input
             value={query}
             onChange={(event) => setQuery(event.target.value)}
             placeholder="Filter files..."
-            className="mb-4 w-full rounded-xl border border-black/[0.08] bg-white px-3 py-2 text-sm outline-none transition focus:border-primary/40 focus:ring-4 focus:ring-primary/10"
+            className="mb-4 min-h-11 w-full rounded-lg border border-black/[0.08] bg-white px-3.5 py-2.5 text-sm outline-none transition focus:border-primary/40 focus:ring-4 focus:ring-primary/10"
           />
           {loading ? (
-            <div className="rounded-xl border border-dashed border-black/[0.08] px-4 py-8 text-center text-sm text-secondary">
-              Loading workspace...
-            </div>
+            <EmptyState>Loading workspace...</EmptyState>
           ) : filteredFiles.length === 0 ? (
-            <div className="rounded-xl border border-dashed border-black/[0.08] px-4 py-8 text-center text-sm text-secondary">
-              No editable workspace files found.
-            </div>
+            <EmptyState>No editable workspace files found.</EmptyState>
           ) : (
-            <div className="max-h-[620px] divide-y divide-black/[0.06] overflow-y-auto rounded-xl border border-black/[0.08]">
+            <div className="max-h-[620px] divide-y divide-black/[0.06] overflow-y-auto rounded-lg border border-black/[0.08]">
               {filteredFiles.slice(0, 160).map((file) => (
                 <button
                   key={file.path}
                   type="button"
                   onClick={() => void openFile(file.path)}
-                  className={`block w-full px-4 py-3 text-left transition hover:bg-gray-50 ${selectedPath === file.path ? "bg-primary/[0.06]" : "bg-white"}`}
+                  className={`block min-h-14 w-full px-4 py-3 text-left transition hover:bg-gray-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/30 ${selectedPath === file.path ? "bg-primary/[0.06]" : "bg-white"}`}
                 >
                   <div className="truncate text-sm font-semibold text-foreground">{file.path}</div>
                   <div className="mt-1 text-xs text-secondary">
@@ -1559,19 +1763,15 @@ function WorkspaceDashboard({
           {notice && <div className="mb-3 rounded-xl bg-emerald-50 px-3 py-2 text-xs text-emerald-700">{notice}</div>}
           {error && <div className="mb-3 rounded-xl bg-red-50 px-3 py-2 text-xs text-red-500">{error}</div>}
           {!selectedPath ? (
-            <div className="rounded-xl border border-dashed border-black/[0.08] px-4 py-10 text-center text-sm text-secondary">
-              Select a workspace file to view or edit it.
-            </div>
+            <EmptyState>Select a workspace file to view or edit it.</EmptyState>
           ) : fileLoading ? (
-            <div className="rounded-xl border border-dashed border-black/[0.08] px-4 py-10 text-center text-sm text-secondary">
-              Loading file...
-            </div>
+            <EmptyState>Loading file...</EmptyState>
           ) : (
             <textarea
               value={editedContent}
               onChange={(event) => setEditedContent(event.target.value)}
               spellCheck={false}
-              className="h-[520px] w-full resize-none rounded-xl border border-black/[0.08] bg-white px-4 py-3 font-mono text-sm leading-6 text-foreground outline-none transition focus:border-primary/40 focus:ring-4 focus:ring-primary/10"
+              className="h-[520px] w-full resize-none rounded-lg border border-black/[0.08] bg-white px-4 py-3 font-mono text-sm leading-6 text-foreground outline-none transition focus:border-primary/40 focus:ring-4 focus:ring-primary/10"
             />
           )}
         </DashboardCard>
@@ -1745,25 +1945,19 @@ function MemoryDashboard({
 
   return (
     <div className="space-y-6">
-      <div className="mb-8">
-        <h1 className="text-2xl font-bold text-foreground">Memory</h1>
-        <p className="mt-1 text-sm text-secondary">
-          Browse, search, edit, compact, and reindex Hipocampus memory from the local runtime.
-        </p>
-      </div>
+      <DashboardPageHeader
+        eyebrow="Hipocampus"
+        title="Memory"
+        description="Browse, search, edit, compact, and reindex local memory used by the runtime."
+        action={
+          <ButtonLike variant="secondary" onClick={onRefresh} disabled={refreshing}>
+            {refreshing ? "Refreshing..." : "Refresh"}
+          </ButtonLike>
+        }
+      />
       <div className="grid gap-5 xl:grid-cols-[minmax(0,420px)_minmax(0,1fr)]">
         <DashboardCard
           title="Memory Files"
-          action={
-            <button
-              type="button"
-              onClick={onRefresh}
-              disabled={refreshing}
-              className="rounded-xl bg-gray-100 px-3 py-1.5 text-sm font-semibold text-foreground transition hover:bg-gray-200 disabled:opacity-50"
-            >
-              {refreshing ? "Refreshing..." : "Refresh"}
-            </button>
-          }
         >
           <div className="mb-4 grid gap-3 sm:grid-cols-2">
             <MetricTile label="Files" value={memoryFiles.length} />
@@ -1785,23 +1979,18 @@ function MemoryDashboard({
                 if (event.key === "Enter") void runSearch();
               }}
               placeholder="Search memory..."
-              className="min-w-0 flex-1 rounded-xl border border-black/[0.08] bg-white px-3 py-2 text-sm outline-none transition focus:border-primary/40 focus:ring-4 focus:ring-primary/10"
+              className="min-h-11 min-w-0 flex-1 rounded-lg border border-black/[0.08] bg-white px-3.5 py-2.5 text-sm outline-none transition focus:border-primary/40 focus:ring-4 focus:ring-primary/10"
             />
-            <button
-              type="button"
-              onClick={() => void runSearch()}
-              disabled={searching}
-              className="rounded-xl bg-primary px-3 py-2 text-sm font-semibold text-white transition hover:bg-primary/90 disabled:opacity-50"
-            >
+            <ButtonLike onClick={() => void runSearch()} disabled={searching} className="px-4">
               {searching ? "Searching" : "Search"}
-            </button>
+            </ButtonLike>
           </div>
           <div className="mb-4 flex flex-wrap gap-2">
             <button
               type="button"
               onClick={() => void deletePaths(Array.from(selectedPaths))}
               disabled={busy || selectedCount === 0}
-              className="rounded-xl bg-gray-100 px-3 py-1.5 text-xs font-semibold text-foreground transition hover:bg-gray-200 disabled:opacity-50"
+              className="min-h-9 rounded-lg bg-gray-100 px-3 text-xs font-semibold text-foreground transition hover:bg-gray-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30 disabled:opacity-50"
             >
               Delete selected{selectedCount > 0 ? ` (${selectedCount})` : ""}
             </button>
@@ -1809,7 +1998,7 @@ function MemoryDashboard({
               type="button"
               onClick={() => void deletePaths(dailyPaths)}
               disabled={busy || dailyPaths.length === 0}
-              className="rounded-xl bg-gray-100 px-3 py-1.5 text-xs font-semibold text-foreground transition hover:bg-gray-200 disabled:opacity-50"
+              className="min-h-9 rounded-lg bg-gray-100 px-3 text-xs font-semibold text-foreground transition hover:bg-gray-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30 disabled:opacity-50"
             >
               Clear daily logs
             </button>
@@ -1817,7 +2006,7 @@ function MemoryDashboard({
               type="button"
               onClick={() => void runMemoryAction("compact")}
               disabled={busy}
-              className="rounded-xl bg-gray-100 px-3 py-1.5 text-xs font-semibold text-foreground transition hover:bg-gray-200 disabled:opacity-50"
+              className="min-h-9 rounded-lg bg-gray-100 px-3 text-xs font-semibold text-foreground transition hover:bg-gray-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30 disabled:opacity-50"
             >
               Compact
             </button>
@@ -1825,7 +2014,7 @@ function MemoryDashboard({
               type="button"
               onClick={() => void runMemoryAction("reindex")}
               disabled={busy}
-              className="rounded-xl bg-gray-100 px-3 py-1.5 text-xs font-semibold text-foreground transition hover:bg-gray-200 disabled:opacity-50"
+              className="min-h-9 rounded-lg bg-gray-100 px-3 text-xs font-semibold text-foreground transition hover:bg-gray-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30 disabled:opacity-50"
             >
               Reindex
             </button>
@@ -1833,20 +2022,16 @@ function MemoryDashboard({
           {notice && <div className="mb-3 rounded-xl bg-emerald-50 px-3 py-2 text-xs text-emerald-700">{notice}</div>}
           {error && <div className="mb-3 rounded-xl bg-red-50 px-3 py-2 text-xs text-red-500">{error}</div>}
           {loading ? (
-            <div className="rounded-xl border border-dashed border-black/[0.08] px-4 py-8 text-center text-sm text-secondary">
-              Loading memory...
-            </div>
+            <EmptyState>Loading memory...</EmptyState>
           ) : filteredFiles.length === 0 ? (
-            <div className="rounded-xl border border-dashed border-black/[0.08] px-4 py-8 text-center text-sm text-secondary">
-              No memory files found.
-            </div>
+            <EmptyState>No memory files found.</EmptyState>
           ) : (
-            <div className="max-h-[520px] divide-y divide-black/[0.06] overflow-y-auto rounded-xl border border-black/[0.08]">
+            <div className="max-h-[520px] divide-y divide-black/[0.06] overflow-y-auto rounded-lg border border-black/[0.08]">
               {filteredFiles.map((file) => {
                 const checked = selectedPaths.has(file.path);
                 const active = selectedPath === file.path;
                 return (
-                  <div key={file.path} className={`flex items-center gap-3 px-3 py-2 ${active ? "bg-primary/[0.06]" : "bg-white"}`}>
+                  <div key={file.path} className={`flex min-h-14 items-center gap-3 px-3 py-2 ${active ? "bg-primary/[0.06]" : "bg-white"}`}>
                     <input
                       type="checkbox"
                       checked={checked}
@@ -1857,7 +2042,7 @@ function MemoryDashboard({
                     <button
                       type="button"
                       onClick={() => void openFile(file.path)}
-                      className="min-w-0 flex-1 text-left"
+                      className="min-w-0 flex-1 rounded-md text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30"
                     >
                       <div className="truncate text-sm font-semibold text-foreground">{file.path}</div>
                       <div className="mt-0.5 text-xs text-secondary">
@@ -1869,7 +2054,7 @@ function MemoryDashboard({
                       type="button"
                       onClick={() => void deletePaths([file.path])}
                       disabled={busy}
-                      className="rounded-lg px-2 py-1 text-xs font-semibold text-red-500 transition hover:bg-red-50 disabled:opacity-50"
+                      className="min-h-8 rounded-lg px-2 text-xs font-semibold text-red-500 transition hover:bg-red-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500/20 disabled:opacity-50"
                     >
                       Delete
                     </button>
@@ -1885,31 +2070,26 @@ function MemoryDashboard({
             title={selectedPath ?? "Memory File"}
             action={
               selectedPath ? (
-                <button
-                  type="button"
+                <ButtonLike
                   onClick={() => void saveSelected()}
                   disabled={busy || fileLoading || editedContent === content}
-                  className="rounded-xl bg-primary px-3 py-1.5 text-sm font-semibold text-white transition hover:bg-primary/90 disabled:opacity-50"
+                  className="min-h-9 px-3 py-1.5"
                 >
                   Save
-                </button>
+                </ButtonLike>
               ) : null
             }
           >
             {!selectedPath ? (
-              <div className="rounded-xl border border-dashed border-black/[0.08] px-4 py-10 text-center text-sm text-secondary">
-                Select a memory file to view or edit it.
-              </div>
+              <EmptyState>Select a memory file to view or edit it.</EmptyState>
             ) : fileLoading ? (
-              <div className="rounded-xl border border-dashed border-black/[0.08] px-4 py-10 text-center text-sm text-secondary">
-                Loading file...
-              </div>
+              <EmptyState>Loading file...</EmptyState>
             ) : (
               <textarea
                 value={editedContent}
                 onChange={(event) => setEditedContent(event.target.value)}
                 spellCheck={false}
-                className="h-[420px] w-full resize-none rounded-xl border border-black/[0.08] bg-white px-4 py-3 font-mono text-sm leading-6 text-foreground outline-none transition focus:border-primary/40 focus:ring-4 focus:ring-primary/10"
+                className="h-[420px] w-full resize-none rounded-lg border border-black/[0.08] bg-white px-4 py-3 font-mono text-sm leading-6 text-foreground outline-none transition focus:border-primary/40 focus:ring-4 focus:ring-primary/10"
               />
             )}
           </DashboardCard>
@@ -1922,7 +2102,7 @@ function MemoryDashboard({
                     key={`${result.path ?? "result"}-${index}`}
                     type="button"
                     onClick={() => result.path && void openFile(result.path)}
-                    className="block w-full rounded-xl bg-gray-50 px-4 py-3 text-left transition hover:bg-gray-100"
+                    className="block min-h-14 w-full rounded-lg bg-gray-50 px-4 py-3 text-left transition hover:bg-gray-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30"
                   >
                     <div className="flex items-center justify-between gap-3">
                       <div className="truncate text-sm font-semibold text-foreground">
@@ -1948,6 +2128,56 @@ function MemoryDashboard({
   );
 }
 
+function SkillDirectoryFilterButton({
+  active,
+  label,
+  count,
+  onClick,
+}: {
+  active: boolean;
+  label: string;
+  count: number;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      aria-pressed={active}
+      onClick={onClick}
+      className={`inline-flex min-h-10 items-center gap-2 rounded-xl border px-3.5 py-2 text-sm font-semibold transition-all duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30 ${
+        active
+          ? "border-primary/25 bg-primary/[0.08] text-primary"
+          : "border-black/[0.08] bg-white text-secondary hover:border-primary/25 hover:bg-primary/[0.035] hover:text-foreground"
+      }`}
+    >
+      <span>{label}</span>
+      <span className={`rounded-full px-2 py-0.5 text-[11px] ${active ? "bg-primary/10" : "bg-black/[0.04]"}`}>
+        {count}
+      </span>
+    </button>
+  );
+}
+
+function SkillBadge({
+  children,
+  tone = "neutral",
+}: {
+  children: ReactNode;
+  tone?: "neutral" | "primary" | "green" | "red";
+}) {
+  const tones = {
+    neutral: "border-black/[0.08] bg-black/[0.025] text-secondary",
+    primary: "border-primary/15 bg-primary/[0.08] text-primary",
+    green: "border-emerald-500/20 bg-emerald-500/[0.08] text-emerald-700",
+    red: "border-red-500/20 bg-red-500/[0.08] text-red-500",
+  };
+  return (
+    <span className={`inline-flex items-center rounded-full border px-2.5 py-1 text-[11px] font-semibold ${tones[tone]}`}>
+      {children}
+    </span>
+  );
+}
+
 function SkillsDashboard({
   skillsSnapshot,
   loading,
@@ -1957,58 +2187,216 @@ function SkillsDashboard({
   loading: boolean;
   onRefresh: () => void;
 }) {
+  const [query, setQuery] = useState("");
+  const [filter, setFilter] = useState<SkillDirectoryFilter>("all");
   const loaded = asArray(skillsSnapshot?.loaded);
   const hooks = asArray(skillsSnapshot?.runtimeHooks);
   const issues = asArray(skillsSnapshot?.issues);
+  const issueDetails = useMemo(() => normalizeSkillIssueDetails(issues), [issues]);
+  const skillItems = useMemo(() => normalizeSkillDirectoryItems(loaded, issues), [loaded, issues]);
+  const hookGroups = useMemo(() => {
+    const groups = new Map<string, JsonRecord[]>();
+    for (const hook of hooks) {
+      const point = asString(hook.point, asString(hook.kind, "runtime"));
+      groups.set(point, [...(groups.get(point) ?? []), hook]);
+    }
+    return Array.from(groups.entries()).map(([point, items]) => ({ point, items }));
+  }, [hooks]);
+  const normalizedQuery = query.trim().toLowerCase();
+  const promptSkillCount = skillItems.filter((skill) => skill.promptOnly).length;
+  const scriptSkillCount = skillItems.filter((skill) => skill.scriptBacked).length;
+  const hookSkillCount = skillItems.filter((skill) => skill.runtimeHooks > 0).length;
+  const issueSkillCount = skillItems.filter((skill) => skill.issues.length > 0).length;
+  const filterOptions: Array<{ id: SkillDirectoryFilter; label: string; count: number }> = [
+    { id: "all", label: "All", count: skillItems.length },
+    { id: "prompt", label: "Prompt skills", count: promptSkillCount },
+    { id: "script", label: "Script skills", count: scriptSkillCount },
+    { id: "hooks", label: "Runtime hooks", count: hookSkillCount },
+    { id: "issues", label: "Issues", count: issueSkillCount },
+  ];
+  const filteredSkills = skillItems.filter((skill) => {
+    if (!filterSkillDirectoryItem(skill, filter)) return false;
+    if (!normalizedQuery) return true;
+    return skillSearchText(skill).includes(normalizedQuery);
+  });
+
   return (
-    <div className="max-w-4xl space-y-6">
-      <div className="mb-8">
-        <h1 className="text-2xl font-bold text-foreground">Skills</h1>
-        <p className="mt-1 text-sm text-secondary">
-          Workspace SKILL.md capabilities and runtime hook metadata loaded by the local agent.
-        </p>
-      </div>
-      <DashboardCard
+    <div className="max-w-6xl space-y-6">
+      <DashboardPageHeader
+        eyebrow="Capabilities"
         title="Skills"
+        description="Local SKILL.md capabilities loaded by the runtime. Search installed skills, inspect hook wiring, and catch broken skill metadata before a run depends on it."
         action={
           <ButtonLike variant="secondary" onClick={onRefresh}>
             Reload
           </ButtonLike>
         }
+      />
+
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        <MetricTile label="Installed" value={skillItems.length} />
+        <MetricTile label="Prompt Skills" value={promptSkillCount} />
+        <MetricTile label="Script Skills" value={scriptSkillCount} />
+        <MetricTile label="Runtime Hooks" value={hooks.length} />
+      </div>
+
+      {issueDetails.length > 0 && (
+        <div className="rounded-2xl border border-red-500/15 bg-red-500/[0.045] px-5 py-4">
+          <div className="text-sm font-semibold text-red-500">
+            {issueDetails.length} skill issue{issueDetails.length === 1 ? "" : "s"} need attention
+          </div>
+          <p className="mt-1 text-sm leading-6 text-red-500/80">
+            Invalid skill metadata stays visible here so local operators can fix it before relying on the capability.
+          </p>
+        </div>
+      )}
+
+      <DashboardCard
+        title="Directory"
+        action={
+          <div className="text-xs font-semibold uppercase tracking-[0.14em] text-secondary/60">
+            {filteredSkills.length} shown
+          </div>
+        }
       >
+        <div className="mb-5 grid gap-3 lg:grid-cols-[minmax(0,1fr)_auto]">
+          <label className="block">
+            <span className="sr-only">Search skills</span>
+            <input
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder="Search skills..."
+              className="min-h-11 w-full rounded-xl border border-black/[0.08] bg-white px-4 py-2.5 text-sm font-medium text-foreground outline-none transition-colors duration-200 placeholder:text-secondary/45 focus:border-primary/45 focus:ring-4 focus:ring-primary/10"
+            />
+          </label>
+          <div className="flex flex-wrap gap-2">
+            {filterOptions.map((option) => (
+              <SkillDirectoryFilterButton
+                key={option.id}
+                active={filter === option.id}
+                label={option.label}
+                count={option.count}
+                onClick={() => setFilter(option.id)}
+              />
+            ))}
+          </div>
+        </div>
+
         {loading ? (
-          <div className="text-sm text-secondary">Loading skills...</div>
-        ) : loaded.length === 0 ? (
-          <div className="text-sm text-secondary">No skills loaded.</div>
+          <EmptyState>Loading skills...</EmptyState>
+        ) : skillItems.length === 0 ? (
+          <EmptyState>No skills loaded. Add SKILL.md directories to the local workspace, then reload.</EmptyState>
+        ) : filteredSkills.length === 0 ? (
+          <EmptyState>No skills match the current search or filter.</EmptyState>
         ) : (
-          <div className="space-y-2">
-            {loaded.map((skill, index) => (
-              <div key={asString(skill.name, `skill-${index}`)} className="rounded-xl bg-gray-50 px-4 py-3">
-                <div className="text-sm font-semibold text-foreground">{asString(skill.name, `skill-${index + 1}`)}</div>
-                {asString(skill.path) && <div className="mt-1 truncate text-xs text-secondary">{asString(skill.path)}</div>}
-              </div>
+          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+            {filteredSkills.map((skill) => (
+              <article
+                key={`${skill.name}-${skill.path}`}
+                className="flex min-h-[190px] flex-col rounded-2xl border border-black/[0.06] bg-white px-4 py-4 transition-all duration-200 hover:border-primary/20 hover:bg-primary/[0.025]"
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <h3 className="truncate text-base font-semibold text-foreground">{skill.name}</h3>
+                    <p className="mt-1 truncate text-xs text-secondary">
+                      {skill.path || "workspace skill"}
+                    </p>
+                  </div>
+                  <SkillBadge tone={skill.scriptBacked ? "green" : "primary"}>{skillTypeLabel(skill)}</SkillBadge>
+                </div>
+
+                <div className="mt-4 flex flex-wrap gap-2">
+                  {skill.tags.slice(0, 5).map((tag) => (
+                    <SkillBadge key={tag}>{tag}</SkillBadge>
+                  ))}
+                  {skill.runtimeHooks > 0 && (
+                    <SkillBadge tone="green">
+                      {skill.runtimeHooks} hook{skill.runtimeHooks === 1 ? "" : "s"}
+                    </SkillBadge>
+                  )}
+                  {skill.issues.length > 0 && (
+                    <SkillBadge tone="red">
+                      {skill.issues.length} issue{skill.issues.length === 1 ? "" : "s"}
+                    </SkillBadge>
+                  )}
+                  {skill.tags.length === 0 && skill.runtimeHooks === 0 && skill.issues.length === 0 && (
+                    <SkillBadge>no tags</SkillBadge>
+                  )}
+                </div>
+
+                <div className="mt-auto pt-4">
+                  <div className="rounded-xl border border-black/[0.05] bg-black/[0.025] px-3 py-2">
+                    <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-secondary/60">
+                      Runtime role
+                    </div>
+                    <p className="mt-1 text-sm leading-5 text-secondary">
+                      {skill.scriptBacked
+                        ? "Executable capability with an input schema and local entrypoint."
+                        : "Prompt capability that can be invoked by the local operator."}
+                    </p>
+                  </div>
+                </div>
+              </article>
             ))}
           </div>
         )}
       </DashboardCard>
-      <DashboardCard title="Runtime Hooks">
-        <div className="space-y-2">
-          {hooks.length === 0 ? (
-            <div className="text-sm text-secondary">No runtime hooks reported.</div>
+
+      <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_minmax(320px,380px)]">
+        <DashboardCard title="Runtime Hooks">
+          {hookGroups.length === 0 ? (
+            <EmptyState>No runtime hooks reported.</EmptyState>
           ) : (
-            hooks.map((hook, index) => (
-              <div key={asString(hook.name, `hook-${index}`)} className="rounded-xl bg-gray-50 px-4 py-3 text-sm font-semibold text-foreground">
-                {asString(hook.name, `hook-${index + 1}`)}
-              </div>
-            ))
-          )}
-          {issues.length > 0 && (
-            <div className="rounded-xl bg-red-50 px-4 py-3 text-sm text-red-500">
-              {issues.length} skill issue{issues.length === 1 ? "" : "s"} reported.
+            <div className="space-y-3">
+              {hookGroups.map((group) => (
+                <div key={group.point} className="rounded-2xl border border-black/[0.06] bg-gray-50 p-4">
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="text-sm font-semibold text-foreground">{group.point}</div>
+                    <SkillBadge>{group.items.length}</SkillBadge>
+                  </div>
+                  <div className="mt-3 space-y-2">
+                    {group.items.map((hook, index) => {
+                      const hookName = asString(hook.name, asString(hook.skillName, `hook-${index + 1}`));
+                      const detail = asString(hook.command, asString(hook.path, asString(hook.entry)));
+                      return (
+                        <div key={`${group.point}-${hookName}-${index}`} className="rounded-xl bg-white px-3 py-2">
+                          <div className="text-sm font-semibold text-foreground">{hookName}</div>
+                          {detail && <div className="mt-1 truncate text-xs text-secondary">{detail}</div>}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              ))}
             </div>
           )}
-        </div>
-      </DashboardCard>
+        </DashboardCard>
+
+        <DashboardCard title="Issue detail">
+          {issueDetails.length === 0 ? (
+            <EmptyState>No skill issues reported.</EmptyState>
+          ) : (
+            <div className="space-y-3">
+              {issueDetails.map((issue) => (
+                <div key={issue.key} className="rounded-2xl border border-red-500/15 bg-red-500/[0.04] px-4 py-3">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="truncate text-sm font-semibold text-foreground">{issue.title}</div>
+                      {issue.path && <div className="mt-1 truncate text-xs text-secondary">{issue.path}</div>}
+                    </div>
+                    <SkillBadge tone="red">{issue.reason}</SkillBadge>
+                  </div>
+                  {issue.detail && (
+                    <p className="mt-3 rounded-xl bg-white/70 px-3 py-2 text-xs leading-5 text-secondary">
+                      {issue.detail}
+                    </p>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </DashboardCard>
+      </div>
     </div>
   );
 }
@@ -2028,12 +2416,11 @@ function UsageDashboard({ runtimeSnapshot }: { runtimeSnapshot: JsonRecord | nul
 
   return (
     <div className="max-w-4xl space-y-6">
-      <div className="mb-8">
-        <h1 className="text-2xl font-bold text-foreground">Usage</h1>
-        <p className="mt-1 text-sm text-secondary">
-          Local runtime activity. Self-hosted Magi does not meter platform credits.
-        </p>
-      </div>
+      <DashboardPageHeader
+        eyebrow="Runtime Activity"
+        title="Usage"
+        description="Local runtime activity. Self-hosted Magi does not meter platform credits."
+      />
       <DashboardCard title="Runtime Totals">
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
           {sectionRows.map((row) => (
@@ -2048,9 +2435,7 @@ function UsageDashboard({ runtimeSnapshot }: { runtimeSnapshot: JsonRecord | nul
         {sectionRows.map((row) => (
           <DashboardCard key={row.key} title={row.title}>
             {row.items.length === 0 ? (
-              <div className="rounded-xl border border-dashed border-black/[0.08] px-4 py-6 text-sm text-secondary">
-                No {row.title.toLowerCase()} reported.
-              </div>
+              <EmptyState>No {row.title.toLowerCase()} reported.</EmptyState>
             ) : (
               <div className="space-y-2">
                 {row.items.map((item, index) => {
@@ -2066,7 +2451,7 @@ function UsageDashboard({ runtimeSnapshot }: { runtimeSnapshot: JsonRecord | nul
                     asString(item.schedule) ||
                     asString(item.description);
                   return (
-                    <div key={`${row.key}-${index}`} className="rounded-xl bg-gray-50 px-4 py-3">
+                    <div key={`${row.key}-${index}`} className="rounded-lg border border-black/[0.06] bg-gray-50 px-4 py-3">
                       <div className="truncate text-sm font-semibold text-foreground">{label}</div>
                       {detail && <div className="mt-1 text-xs text-secondary">{detail}</div>}
                     </div>
@@ -2084,12 +2469,11 @@ function UsageDashboard({ runtimeSnapshot }: { runtimeSnapshot: JsonRecord | nul
 function ConverterDashboard({ onNavigate }: { onNavigate: (route: AppRoute) => void }) {
   return (
     <div className="max-w-3xl space-y-6">
-      <div className="mb-8">
-        <h1 className="text-2xl font-bold text-foreground">Converter</h1>
-        <p className="mt-1 text-sm text-secondary">
-          Local document conversion runs through the agent workspace and artifact pipeline.
-        </p>
-      </div>
+      <DashboardPageHeader
+        eyebrow="Artifacts"
+        title="Converter"
+        description="Local document conversion runs through the agent workspace and artifact pipeline."
+      />
       <DashboardCard title="Local Conversion Flow">
         <div className="space-y-3 text-sm leading-6 text-secondary">
           <p>
@@ -2112,7 +2496,7 @@ function ConverterDashboard({ onNavigate }: { onNavigate: (route: AppRoute) => v
             "Workspace artifact review",
             "Runtime proof before completion",
           ].map((item) => (
-            <div key={item} className="rounded-xl bg-gray-50 px-4 py-3 text-sm font-medium text-foreground">
+            <div key={item} className="rounded-lg border border-black/[0.06] bg-gray-50 px-4 py-3 text-sm font-semibold text-foreground">
               {item}
             </div>
           ))}
@@ -2873,6 +3257,7 @@ export function App() {
           taskBoard: null,
           inspectedSources: [],
           citationGate: null,
+          runtimeTraces: [],
           heartbeatElapsedMs: null,
         }, { botId: BOT_ID });
       }
@@ -2902,13 +3287,17 @@ export function App() {
         const turnId = asString(payload.turnId, channel);
         const iter = asNumber(payload.iter, 0);
         const stage = asString(payload.stage, "waiting");
+        const label = asString(payload.label, "Thinking through next step");
+        const detail = asString(payload.detail);
+        const elapsedMs = asNumber(payload.elapsedMs);
         updateActiveTools(channel, {
           id: `llm:${turnId}:${iter}`,
-          label: asString(payload.label, "Thinking through next step"),
+          label: "ModelProgress",
           status: stage === "completed" ? "done" : "running",
           startedAt: Date.now(),
-          outputPreview: asString(payload.detail),
-          durationMs: asNumber(payload.elapsedMs),
+          inputPreview: JSON.stringify({ stage, label, detail, elapsedMs }),
+          outputPreview: detail,
+          durationMs: elapsedMs,
         });
       }
       if (type === "tool_start") {
@@ -2994,6 +3383,15 @@ export function App() {
         const citationGate = normalizeCitationGate(payload);
         if (citationGate) {
           store.setChannelState(channel, { citationGate }, { botId: BOT_ID });
+        }
+      }
+      if (type === "runtime_trace") {
+        const trace = normalizeRuntimeTrace(payload);
+        if (trace) {
+          store.applyControlEvent(channel, {
+            type: "runtime_trace",
+            ...trace,
+          });
         }
       }
       if (type === "mission_created") {
@@ -3487,8 +3885,9 @@ export function App() {
   }, []);
 
   const handleCreateChannel = useCallback(
-    (name: string) => {
-      const channelName = normalizeChannelName(name);
+    (name: string, memoryMode: ChannelMemoryModeOption = "normal") => {
+      const identity = buildMemoryModeChannelIdentity(name, memoryMode);
+      const channelName = identity.name || normalizeChannelName(name);
       const existing = useChatStore.getState().channels;
       if (existing.some((channel) => channel.name === channelName)) {
         store.setActiveChannel(channelName);
@@ -3497,8 +3896,9 @@ export function App() {
       const channel: Channel = {
         id: `local-${channelName}`,
         name: channelName,
-        display_name: name === channelName ? null : name,
+        display_name: identity.displayName ?? (name === channelName ? null : name),
         category: "General",
+        memory_mode: identity.memoryMode,
         position: existing.length,
         created_at: new Date().toISOString(),
       };
@@ -3549,6 +3949,64 @@ export function App() {
     const channel = useChatStore.getState().activeChannel || DEFAULT_CHANNEL;
     store.resetSession(channel, getAccessToken);
   }, [getAccessToken, store]);
+
+  const handleStartExportSelection = useCallback(() => {
+    const channel = useChatStore.getState().activeChannel || DEFAULT_CHANNEL;
+    store.startSelectionMode(channel);
+  }, [store]);
+
+  const handleExportSelected = useCallback(() => {
+    const {
+      activeChannel: channel,
+      messages: localMessages,
+      serverMessages,
+      selectedMessages,
+    } = useChatStore.getState();
+    const selected = selectedMessages[channel];
+    if (!channel || !selected || selected.size === 0) {
+      store.setChannelState(channel || DEFAULT_CHANNEL, {
+        error: "Select at least one user or assistant message to export.",
+      }, { botId: BOT_ID });
+      return;
+    }
+
+    const combined = [
+      ...(localMessages[channel] ?? []),
+      ...(serverMessages[channel] ?? []),
+    ];
+    const normalized = normalizeSelectedChatExportMessages(combined, selected);
+    const unique = Array.from(
+      new Map(
+        normalized.map((message) => [
+          `${message.role}:${message.timestamp}:${message.content}`,
+          message,
+        ]),
+      ).values(),
+    );
+
+    if (unique.length === 0) {
+      store.setChannelState(channel, {
+        error: "Select at least one user or assistant message to export.",
+      }, { botId: BOT_ID });
+      return;
+    }
+
+    const exportedAt = new Date();
+    downloadMarkdownFile(
+      buildChatExportFilename({
+        botName: BOT_NAME,
+        channelName: channel,
+        exportedAt,
+      }),
+      buildChatExportMarkdown({
+        botName: BOT_NAME,
+        channelName: channel,
+        exportedAt,
+        messages: unique,
+      }),
+    );
+    store.exitSelectionMode();
+  }, [store]);
 
   const handleModelSelectionChange = useCallback((_nextModel: string, _nextRouter: string) => {
     setModelSelection(DEFAULT_MODEL);
@@ -3709,6 +4167,22 @@ export function App() {
             )}
           </h1>
           <button
+            type="button"
+            onClick={handleStartExportSelection}
+            className="flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-[11px] text-secondary/55 transition-all duration-200 hover:bg-black/[0.04] hover:text-foreground/75"
+            aria-label="Export conversation"
+            title="Export conversation"
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <circle cx="18" cy="5" r="3" />
+              <circle cx="6" cy="12" r="3" />
+              <circle cx="18" cy="19" r="3" />
+              <line x1="8.59" y1="13.51" x2="15.42" y2="17.49" />
+              <line x1="15.41" y1="6.51" x2="8.59" y2="10.49" />
+            </svg>
+            <span>Export</span>
+          </button>
+          <button
             onClick={handleReset}
             className="px-2.5 py-1 text-[11px] text-secondary/50 hover:text-foreground/70 rounded-lg hover:bg-black/[0.04] transition-all duration-200"
           >
@@ -3732,6 +4206,7 @@ export function App() {
           messages={store.messages[activeChannel] ?? []}
           serverMessages={store.serverMessages[activeChannel] ?? []}
           channelState={channelState}
+          uiLanguage={channelState.responseLanguage}
           loading={false}
           botId={BOT_ID}
           selectionMode={store.selectionMode}
@@ -3740,7 +4215,7 @@ export function App() {
           onEnterSelectionMode={(msgId) => store.enterSelectionMode(activeChannel, msgId)}
           onSelectAll={() => store.selectAllMessages(activeChannel)}
           onDeselectAll={() => store.deselectAllMessages(activeChannel)}
-          onExportSelected={() => {}}
+          onExportSelected={handleExportSelected}
           onDeleteSelected={() => {
             const selected = store.selectedMessages[activeChannel];
             if (selected) store.removeMessages(activeChannel, selected, { botId: BOT_ID });

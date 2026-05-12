@@ -36,6 +36,22 @@ describe("derivePublicToolPreview", () => {
     });
   });
 
+  it("renders ModelProgress heartbeats as ongoing work", () => {
+    expect(
+      derivePublicToolPreview({
+        label: "ModelProgress",
+        language: "ko",
+        inputPreview: JSON.stringify({
+          stage: "heartbeat",
+          elapsedMs: 45_000,
+        }),
+      }),
+    ).toEqual({
+      action: "계속 작업 중",
+      target: "45초째 작업 중",
+    });
+  });
+
   it("localizes browser session output without exposing transport internals", () => {
     expect(
       derivePublicToolPreview({

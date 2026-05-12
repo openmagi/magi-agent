@@ -218,6 +218,25 @@ export type CompactionBoundaryControlEvent = ControlEventBase & {
   summaryHash?: string;
 };
 
+export type RuntimeTraceControlEvent = ControlEventBase & {
+  type: "runtime_trace";
+  turnId: string;
+  phase:
+    | "verifier_blocked"
+    | "retry_scheduled"
+    | "retry_aborted"
+    | "terminal_abort";
+  severity: "info" | "warning" | "error";
+  title: string;
+  detail?: string;
+  reasonCode?: string;
+  ruleId?: string;
+  attempt?: number;
+  maxAttempts?: number;
+  retryable?: boolean;
+  requiredAction?: string;
+};
+
 export type ControlEvent =
   | RetryControlEvent
   | PermissionDecisionControlEvent
@@ -238,7 +257,8 @@ export type ControlEvent =
   | ChildCancelledControlEvent
   | ChildFailedControlEvent
   | ChildCompletedControlEvent
-  | CompactionBoundaryControlEvent;
+  | CompactionBoundaryControlEvent
+  | RuntimeTraceControlEvent;
 
 type DistributiveOmit<T, K extends keyof any> = T extends unknown
   ? Omit<T, K>
@@ -271,4 +291,5 @@ export const CONTROL_EVENT_TYPES = new Set<ControlEvent["type"]>([
   "child_failed",
   "child_completed",
   "compaction_boundary",
+  "runtime_trace",
 ]);

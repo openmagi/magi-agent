@@ -254,9 +254,10 @@ export const DEFAULT_MAX_COST_USD_PER_SESSION = 0;
  *   - `auto`: auto-approve tools with `tool.dangerous === false`;
  *     dangerous tools still require askUser.
  *   - `bypass`: full access, no beforeToolUse hook prompts
+ *   - `workspace-bypass`: workspace-local automation with system/secret boundary checks
  *     (admin/shadow sessions only — not user-reachable).
  */
-export type PermissionMode = "default" | "plan" | "auto" | "bypass";
+export type PermissionMode = "default" | "plan" | "auto" | "bypass" | "workspace-bypass";
 
 export interface BackgroundTask {
   taskId: string;

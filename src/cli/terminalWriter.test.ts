@@ -58,4 +58,24 @@ describe("TerminalSseWriter", () => {
     expect(text).toContain("Done FileWrite");
     expect(text).not.toContain("[tool]");
   });
+
+  it("renders public runtime trace without exposing raw event payloads", () => {
+    const output = new MemoryOutput();
+    const writer = new TerminalSseWriter({ output });
+
+    writer.agent({
+      type: "runtime_trace",
+      turnId: "turn-1",
+      phase: "verifier_blocked",
+      severity: "warning",
+      title: "Runtime verifier blocked completion",
+      reasonCode: "ARTIFACT_DELIVERY_REQUIRED",
+      requiredAction: "Deliver the requested artifact before answering.",
+    });
+
+    const text = stripAnsi(output.value);
+    expect(text).toContain("Runtime verifier blocked completion");
+    expect(text).toContain("Deliver the requested artifact before answering.");
+    expect(text).not.toContain("ARTIFACT_DELIVERY_REQUIRED");
+  });
 });

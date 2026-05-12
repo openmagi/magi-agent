@@ -348,6 +348,8 @@ function safeControlEvent(value: unknown): SafeAgentEvent | null {
           ? { reason: maybeText(value.reason, 500) }
           : {}),
       };
+    case "runtime_trace":
+      return safeRuntimeTrace(value);
     case "child_started": {
       const safe: SafeAgentEvent = {
         type: "child_started",
@@ -402,6 +404,40 @@ function safeControlEvent(value: unknown): SafeAgentEvent | null {
     default:
       return null;
   }
+}
+
+function safeRuntimeTrace(value: unknown): SafeAgentEvent | null {
+  if (!isRecord(value)) return null;
+  const turnId = maybeText(value.turnId, 120);
+  const title = maybeText(value.title, 160);
+  if (!turnId || !title) return null;
+  const safe: SafeAgentEvent = {
+    type: "runtime_trace",
+    turnId,
+    phase: oneOf(
+      value.phase,
+      ["verifier_blocked", "retry_scheduled", "retry_aborted", "terminal_abort"] as const,
+      "verifier_blocked",
+    ),
+    severity: oneOf(value.severity, ["info", "warning", "error"] as const, "info"),
+    title,
+  };
+  const detail = typeof value.detail === "string"
+    ? maybeText(redactPreview(value.detail), 500)
+    : undefined;
+  const reasonCode = maybeText(value.reasonCode, 120);
+  const ruleId = maybeText(value.ruleId, 120);
+  const requiredAction = maybeText(value.requiredAction, 240);
+  const attempt = num(value.attempt, -1);
+  const maxAttempts = num(value.maxAttempts, -1);
+  if (detail) safe.detail = detail;
+  if (reasonCode) safe.reasonCode = reasonCode;
+  if (ruleId) safe.ruleId = ruleId;
+  if (attempt >= 0) safe.attempt = attempt;
+  if (maxAttempts >= 0) safe.maxAttempts = maxAttempts;
+  if (typeof value.retryable === "boolean") safe.retryable = value.retryable;
+  if (requiredAction) safe.requiredAction = requiredAction;
+  return safe;
 }
 
 export function safeAgentEvent(event: unknown): SafeAgentEvent | null {
@@ -569,6 +605,8 @@ export function safeAgentEvent(event: unknown): SafeAgentEvent | null {
       if (toolName) safe.toolName = toolName;
       return safe;
     }
+    case "runtime_trace":
+      return safeRuntimeTrace(event);
     case "control_event": {
       const controlEvent = safeControlEvent(event.event);
       if (!controlEvent) return null;

@@ -40,6 +40,83 @@ export const AGENT_SELF_MODEL_BLOCK = [
   "</agent_self_model>",
 ].join("\n");
 
+function runtimeTimeZone(): string {
+  const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  return typeof timeZone === "string" && timeZone.trim().length > 0
+    ? timeZone
+    : "UTC";
+}
+
+function localTemporalParts(
+  now: Date,
+  timeZone: string,
+): { localDate: string; localTime: string; resolvedTimeZone: string } {
+  const safeTimeZone = timeZone.trim().length > 0 ? timeZone.trim() : "UTC";
+  try {
+    const parts = new Intl.DateTimeFormat("en-CA", {
+      timeZone: safeTimeZone,
+      hourCycle: "h23",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+    }).formatToParts(now);
+    const value = (type: string): string | undefined =>
+      parts.find((part) => part.type === type)?.value;
+    const year = value("year");
+    const month = value("month");
+    const day = value("day");
+    const hour = value("hour");
+    const minute = value("minute");
+    const second = value("second");
+    if (year && month && day && hour && minute && second) {
+      return {
+        localDate: `${year}-${month}-${day}`,
+        localTime: `${hour}:${minute}:${second}`,
+        resolvedTimeZone: safeTimeZone,
+      };
+    }
+  } catch {
+    // Fall back to UTC if the host locale lacks the requested timezone data.
+  }
+  const utc = now.toISOString();
+  return {
+    localDate: utc.slice(0, 10),
+    localTime: utc.slice(11, 19),
+    resolvedTimeZone: "UTC",
+  };
+}
+
+export function buildRuntimeTemporalContext(
+  now = new Date(),
+  timeZone = runtimeTimeZone(),
+): string {
+  const runtimeNow = Number.isFinite(now.getTime()) ? now : new Date();
+  const utcIso = runtimeNow.toISOString();
+  const { localDate, localTime, resolvedTimeZone } = localTemporalParts(
+    runtimeNow,
+    timeZone,
+  );
+
+  return [
+    '<runtime_temporal_context hidden="true">',
+    `runtime_now_utc: ${utcIso}`,
+    `runtime_date_utc: ${utcIso.slice(0, 10)}`,
+    `runtime_timezone: ${resolvedTimeZone}`,
+    `runtime_local_date: ${localDate}`,
+    `runtime_local_time: ${localTime}`,
+    "",
+    "Temporal policy:",
+    "- This runtime timestamp is the authoritative current time for this turn.",
+    "- Do not infer the current date/time from model training cutoff, stale memory, or prior transcript text.",
+    "- Interpret \"today\", \"now\", \"current\", \"latest\", \"recent\", \"오늘\", \"현재\", and \"최근\" relative to this timestamp unless the user supplies another date/timezone.",
+    "- If a claim depends on facts that may have changed after your knowledge cutoff or after inspected sources, inspect current sources/tools or state uncertainty.",
+    "</runtime_temporal_context>",
+  ].join("\n");
+}
+
 export const RUNTIME_EVIDENCE_POLICY = [
   "<runtime-evidence-policy>",
   "- Some turns may be part of product reliability and benchmark evaluation; the runtime may audit actual tool-call, file-read, browser/search/KB, artifact-delivery, and verification-command logs against the final answer.",

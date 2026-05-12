@@ -94,6 +94,7 @@ interface NativeFileDelivery {
   marker?: string;
   externalId?: string;
   providerMessageId?: string;
+  deliveryAck?: string;
 }
 
 export interface CreatedArtifact {
@@ -391,6 +392,7 @@ function nativeFileDeliveries(
         marker: stringField(delivery, "marker") ?? undefined,
         externalId: stringField(delivery, "externalId") ?? undefined,
         providerMessageId: stringField(delivery, "providerMessageId") ?? undefined,
+        deliveryAck: stringField(delivery, "deliveryAck") ?? undefined,
       });
     }
   }
@@ -423,6 +425,7 @@ function nativeFileSendDeliveries(
       marker,
       externalId: channelType && channelId ? `${channelType}:${channelId}` : stringField(output, "id") ?? undefined,
       providerMessageId: stringField(output, "providerMessageId") ?? undefined,
+      deliveryAck: stringField(output, "deliveryAck") ?? undefined,
     });
   }
 
@@ -461,6 +464,7 @@ function bashFileSendDeliveries(
         status: "sent",
         marker,
         externalId: attachmentIdFromMarker(marker),
+        deliveryAck: "attachment_marker",
       });
     }
   }
@@ -473,7 +477,22 @@ function sentNativeFileDeliveries(
   turnId: string,
 ): NativeFileDelivery[] {
   return nativeFileDeliveries(transcript, turnId).filter(
-    (delivery) => delivery.status === "sent",
+    (delivery) => delivery.status === "sent" && hasAckGradeDelivery(delivery),
+  );
+}
+
+function hasAckGradeDelivery(delivery: NativeFileDelivery): boolean {
+  if (delivery.target === "kb") {
+    return delivery.deliveryAck === "kb_write_receipt";
+  }
+  if (delivery.target !== "chat") return false;
+  if (delivery.marker) {
+    return delivery.deliveryAck === "attachment_marker";
+  }
+  return (
+    delivery.deliveryAck === "provider_message_receipt" &&
+    !!delivery.externalId &&
+    /^(?:telegram|discord):/.test(delivery.externalId)
   );
 }
 
@@ -483,7 +502,7 @@ function sentChatFileDeliveries(
 ): NativeFileDelivery[] {
   return [
     ...sentNativeFileDeliveries(transcript, turnId).filter((delivery) => delivery.target === "chat"),
-    ...nativeFileSendDeliveries(transcript, turnId),
+    ...nativeFileSendDeliveries(transcript, turnId).filter(hasAckGradeDelivery),
     ...bashFileSendDeliveries(transcript, turnId),
   ];
 }
@@ -516,6 +535,7 @@ function hasDirectChannelChatDelivery(
       !delivery.marker &&
       !!delivery.externalId &&
       /^(?:telegram|discord):/.test(delivery.externalId) &&
+      delivery.deliveryAck === "provider_message_receipt" &&
       (
         !!delivery.providerMessageId ||
         /^(?:telegram|discord):[^:]+:[^:]+/.test(delivery.externalId)
@@ -529,12 +549,8 @@ function hasChatDeliveryEvidence(
   turnId: string,
 ): boolean {
   const nativeMarkers = sentNativeChatMarkers(transcript, turnId);
-  const hasRequiredNativeMarker =
-    nativeMarkers.length === 0 || nativeMarkers.some((marker) => assistantText.includes(marker));
-  return (
-    (ATTACHMENT_MARKER_RE.test(assistantText) && hasRequiredNativeMarker) ||
-    hasDirectChannelChatDelivery(transcript, turnId)
-  );
+  const hasRequiredNativeMarker = nativeMarkers.some((marker) => assistantText.includes(marker));
+  return hasRequiredNativeMarker || hasDirectChannelChatDelivery(transcript, turnId);
 }
 
 function successfulBashCommands(
@@ -574,8 +590,7 @@ export function hasArtifactDeliveryEvidence(
   transcript: ReadonlyArray<TranscriptEntry>,
   turnId: string,
 ): boolean {
-  if (ATTACHMENT_MARKER_RE.test(assistantText)) return true;
-  return hasDirectChannelChatDelivery(transcript, turnId) || hasKbWriteEvidence(transcript, turnId);
+  return hasChatDeliveryEvidence(assistantText, transcript, turnId) || hasKbWriteEvidence(transcript, turnId);
 }
 
 function hasRequiredDeliveryEvidence(
@@ -584,18 +599,16 @@ function hasRequiredDeliveryEvidence(
   transcript: ReadonlyArray<TranscriptEntry>,
   turnId: string,
 ): boolean {
-  const hasAttachment = ATTACHMENT_MARKER_RE.test(assistantText);
   const nativeMarkers = sentNativeChatMarkers(transcript, turnId);
-  const hasRequiredNativeMarker =
-    nativeMarkers.length === 0 || nativeMarkers.some((marker) => assistantText.includes(marker));
+  const hasRequiredNativeMarker = nativeMarkers.some((marker) => assistantText.includes(marker));
   const hasDirectChannelDelivery = hasDirectChannelChatDelivery(transcript, turnId);
   const hasKbWrite = hasKbWriteEvidence(transcript, turnId);
 
-  if (intent.wantsAttachment && ((!hasAttachment && !hasDirectChannelDelivery) || !hasRequiredNativeMarker)) return false;
+  if (intent.wantsAttachment && !hasDirectChannelDelivery && !hasRequiredNativeMarker) return false;
   if (intent.wantsKb && !hasKbWrite) return false;
   if (intent.wantsAttachment || intent.wantsKb) return true;
 
-  return (hasAttachment && hasRequiredNativeMarker) || hasDirectChannelDelivery || hasKbWrite;
+  return hasRequiredNativeMarker || hasDirectChannelDelivery || hasKbWrite;
 }
 
 function describeMissingEvidence(
@@ -750,20 +763,17 @@ export function makeArtifactDeliveryGateHook(
         }
 
         const missingDeliveredMarkers = missingNativeChatMarkers(assistantText, transcript, ctx.turnId);
-        if (
-          missingDeliveredMarkers.length > 0 &&
-          (intent.wantsAttachment || finalMeta.assistantClaimsChatDelivery)
-        ) {
+        if (missingDeliveredMarkers.length > 0) {
           ctx.emit({
             type: "rule_check",
             ruleId: "artifact-delivery-gate",
             verdict: "violation",
-            detail: "FileDeliver returned a chat marker that is missing from the final answer",
+            detail: "chat delivery returned a marker that is missing from the final answer",
           });
           return {
             action: "block",
             reason: [
-              "[RETRY:ARTIFACT_DELIVERY] FileDeliver uploaded a chat attachment,",
+              "[RETRY:ARTIFACT_DELIVERY] A delivery tool uploaded a chat attachment,",
               "but the final answer does not include the returned attachment marker, so the client cannot render it.",
               "",
               `Include this exact marker in the final answer: ${missingDeliveredMarkers[0]}`,

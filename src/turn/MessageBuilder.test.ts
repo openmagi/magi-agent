@@ -19,6 +19,7 @@ import {
   buildMessages,
   formatReplyPreamble,
   REPLY_PREVIEW_MAX_CHARS,
+  refreshRuntimeTimeHeader,
 } from "./MessageBuilder.js";
 import { Transcript } from "../storage/Transcript.js";
 import type { Session } from "../Session.js";
@@ -35,7 +36,7 @@ async function makeSession(opts: {
   model?: string;
   identity?: Record<string, string>;
   replayMessages?: LLMMessage[];
-  channel?: { type: string; channelId: string } | null;
+  channel?: { type: string; channelId: string; memoryMode?: string } | null;
   maybeCompactResult?: unknown;
   workspaceRoot?: string;
 }): Promise<{
@@ -107,7 +108,20 @@ describe("MessageBuilder.buildSystemPrompt", () => {
     expect(out).toContain("[Session: sess-1]");
     expect(out).toContain("[Turn: turn-A]");
     expect(out).toContain("[Time: ");
+    expect(out).toContain('<runtime_temporal_context hidden="true">');
     expect(out).not.toContain("# IDENTITY");
+  });
+
+  it("injects runtime temporal context that anchors current-date reasoning", async () => {
+    const { session } = await makeSession({ identity: {} });
+    const out = await buildSystemPrompt(session, "turn-time");
+
+    expect(out).toContain('<runtime_temporal_context hidden="true">');
+    expect(out).toContain("runtime_now_utc:");
+    expect(out).toContain("runtime_date_utc:");
+    expect(out).toContain("model training cutoff");
+    expect(out).toContain("today");
+    expect(out).toContain("오늘");
   });
 
   it("includes identity sections when present", async () => {
@@ -176,6 +190,28 @@ describe("MessageBuilder.buildSystemPrompt", () => {
     expect(out).toContain("[Channel: app]");
   });
 
+  it("adds an incognito memory guard for memory-off app channels", async () => {
+    const { session } = await makeSession({
+      channel: { type: "app", channelId: "private", memoryMode: "incognito" },
+    });
+    const out = await buildSystemPrompt(session, "turn-incognito");
+    expect(out).toContain('<memory_mode hidden="true">');
+    expect(out).toContain("memory_mode: incognito");
+    expect(out).toContain("Do not read, search, summarize, or write long-term memory");
+  });
+
+  it("adds a read-only memory guard for memory-read-only app channels", async () => {
+    const { session } = await makeSession({
+      channel: { type: "app", channelId: "readonly", memoryMode: "read_only" },
+    });
+    const out = await buildSystemPrompt(session, "turn-read-only");
+    expect(out).toContain('<memory_mode hidden="true">');
+    expect(out).toContain("memory_mode: read_only");
+    expect(out).toContain("Existing long-term memory may be read");
+    expect(out).toContain("Do not write, summarize, checkpoint, or persist");
+    expect(out).not.toContain("Do not read, search, summarize, or write long-term memory");
+  });
+
   it("defaults to [Channel: web] when channel is undefined", async () => {
     const { session } = await makeSession({});
     const out = await buildSystemPrompt(session, "turn-web");
@@ -223,6 +259,33 @@ describe("MessageBuilder.buildSystemPrompt", () => {
     expect(out).toContain(
       "<kb-context>\n[file: report.pdf]\nRevenue was up 12%.\n</kb-context>",
     );
+  });
+});
+
+describe("MessageBuilder.refreshRuntimeTimeHeader", () => {
+  it("refreshes the runtime temporal context with the time header", () => {
+    const oldPrompt = [
+      "[Session: sess-1]",
+      "[Turn: turn-old]",
+      "[Time: 2026-05-03T16:03:00.000Z]",
+      "[Channel: web]",
+      '<runtime_temporal_context hidden="true">',
+      "runtime_now_utc: 2026-05-03T16:03:00.000Z",
+      "runtime_date_utc: 2026-05-03",
+      "</runtime_temporal_context>",
+      "# IDENTITY",
+      "I am bot",
+    ].join("\n");
+
+    const out = refreshRuntimeTimeHeader(
+      oldPrompt,
+      new Date("2026-05-03T16:12:00.000Z"),
+    );
+
+    expect(out).toContain("[Time: 2026-05-03T16:12:00.000Z]");
+    expect(out).toContain("runtime_now_utc: 2026-05-03T16:12:00.000Z");
+    expect(out).toContain("runtime_date_utc: 2026-05-03");
+    expect(out).not.toContain("runtime_now_utc: 2026-05-03T16:03:00.000Z");
   });
 });
 

@@ -33,7 +33,7 @@ import { isReadOnlyTool } from "../permissions/ToolPermissionAdapters.js";
 import { buildPatchApplyApprovalInput } from "../tools/PatchApply.js";
 import { decideToolAccess } from "./ToolArbiter.js";
 
-export type PermissionMode = "default" | "plan" | "auto" | "bypass";
+export type PermissionMode = "default" | "plan" | "auto" | "bypass" | "workspace-bypass";
 
 /**
  * Threshold at which repeated unknown-tool dispatches abort the turn
@@ -92,6 +92,17 @@ export interface ToolDispatchContext {
   readonly exposedToolNames?: readonly string[];
   /** Current user message, including runtime-injected system addendum and attachments. */
   readonly currentUserMessage?: UserMessage;
+  /**
+   * Return true after a completed tool when the caller wants to yield
+   * control back to the LLM before executing more tools from the same
+   * assistant tool_use batch. Used by mid-turn steering: finish the
+   * current tool call, synthesize tool_results for not-yet-run calls,
+   * then let the next beforeLLMCall drain the user's steering message.
+   */
+  readonly shouldYieldAfterTool?: (
+    result: ToolDispatchResult,
+    toolUse: Extract<LLMContentBlock, { type: "tool_use" }>,
+  ) => boolean;
 }
 
 export interface ToolDispatchResult {
@@ -113,6 +124,15 @@ export class UnknownToolLoopError extends Error {
     this.name = "UnknownToolLoopError";
     this.unknownToolCount = count;
   }
+}
+
+const USER_STEER_SKIP_STATUS = "skipped_user_steer";
+
+function skippedForUserSteerContent(toolName: string): string {
+  return [
+    `Tool ${toolName} was not executed because the user sent a steering update while this tool batch was running.`,
+    "Re-read the latest user steering message before deciding whether to run additional tools.",
+  ].join(" ");
 }
 
 /**
@@ -137,16 +157,29 @@ export async function dispatch(
   const enterPlanUses = toolUses.filter((tu) => tu.name === "EnterPlanMode");
   const otherUses = toolUses.filter((tu) => tu.name !== "EnterPlanMode");
   const enteredResults: ToolDispatchResult[] = [];
-  for (const tu of enterPlanUses) {
-    enteredResults.push(await dispatchOne(ctx, tu, abortController));
+  for (let index = 0; index < enterPlanUses.length; index += 1) {
+    const tu = enterPlanUses[index]!;
+    const result = await dispatchOne(ctx, tu, abortController);
+    enteredResults.push(result);
+    if (shouldYieldAfterTool(ctx, result, tu)) {
+      const skipped = await skippedToolResultsForUserSteer(ctx, [
+        ...enterPlanUses.slice(index + 1),
+        ...otherUses,
+      ]);
+      const results = [...enteredResults, ...skipped];
+      throwUnknownToolLoopIfNeeded(ctx);
+      return results;
+    }
   }
   const results = [
     ...enteredResults,
     ...(await dispatchInConcurrencySafeBatches(ctx, otherUses, abortController)),
   ];
-  // Gap §11.3 — if the per-turn counter crossed the threshold during
-  // this batch, tell Turn.ts to abort. Emit a user-facing text_delta
-  // FIRST so the UI shows the reason before the abort propagates.
+  throwUnknownToolLoopIfNeeded(ctx);
+  return results;
+}
+
+function throwUnknownToolLoopIfNeeded(ctx: ToolDispatchContext): void {
   const counter = ctx.unknownToolCounter;
   if (counter && counter.get() >= UNKNOWN_TOOL_LOOP_THRESHOLD) {
     ctx.sse.agent({
@@ -159,6 +192,50 @@ export async function dispatch(
     });
     throw new UnknownToolLoopError(counter.get());
   }
+}
+
+function shouldYieldAfterTool(
+  ctx: ToolDispatchContext,
+  result: ToolDispatchResult,
+  toolUse: Extract<LLMContentBlock, { type: "tool_use" }>,
+): boolean {
+  try {
+    return ctx.shouldYieldAfterTool?.(result, toolUse) === true;
+  } catch (err) {
+    console.warn(
+      `[core-agent] shouldYieldAfterTool failed turnId=${ctx.turnId}: ${(err as Error).message}`,
+    );
+    return false;
+  }
+}
+
+async function skippedToolResultsForUserSteer(
+  ctx: ToolDispatchContext,
+  toolUses: Array<Extract<LLMContentBlock, { type: "tool_use" }>>,
+): Promise<ToolDispatchResult[]> {
+  if (toolUses.length === 0) return [];
+  ctx.stageAuditEvent("tool_batch_yielded_for_user_steer", {
+    skippedToolUseIds: toolUses.map((tu) => tu.id),
+    skippedToolNames: toolUses.map((tu) => tu.name),
+  });
+  const results: ToolDispatchResult[] = [];
+  for (const tu of toolUses) {
+    const content = skippedForUserSteerContent(tu.name);
+    await ctx.session.transcript.append({
+      kind: "tool_result",
+      ts: Date.now(),
+      turnId: ctx.turnId,
+      toolUseId: tu.id,
+      status: USER_STEER_SKIP_STATUS,
+      output: content,
+      isError: true,
+      metadata: {
+        reason: "user_steer_pending",
+        toolName: tu.name,
+      },
+    });
+    results.push({ toolUseId: tu.id, content, isError: true });
+  }
   return results;
 }
 
@@ -169,24 +246,38 @@ async function dispatchInConcurrencySafeBatches(
 ): Promise<ToolDispatchResult[]> {
   const results: ToolDispatchResult[] = [];
   let readOnlyBatch: Array<Extract<LLMContentBlock, { type: "tool_use" }>> = [];
-  const flushReadOnlyBatch = async () => {
-    if (readOnlyBatch.length === 0) return;
+  const flushReadOnlyBatch = async (
+    remainingAfterBatch: Array<Extract<LLMContentBlock, { type: "tool_use" }>>,
+  ): Promise<boolean> => {
+    if (readOnlyBatch.length === 0) return false;
     const batch = readOnlyBatch;
     readOnlyBatch = [];
-    results.push(
-      ...(await Promise.all(batch.map((tu) => dispatchOne(ctx, tu, abortController)))),
+    const batchResults = await Promise.all(
+      batch.map((tu) => dispatchOne(ctx, tu, abortController)),
     );
+    results.push(...batchResults);
+    if (batchResults.some((result, index) => shouldYieldAfterTool(ctx, result, batch[index]!))) {
+      results.push(...(await skippedToolResultsForUserSteer(ctx, remainingAfterBatch)));
+      return true;
+    }
+    return false;
   };
 
-  for (const tu of toolUses) {
+  for (let index = 0; index < toolUses.length; index += 1) {
+    const tu = toolUses[index]!;
     if (isConcurrencySafeToolUse(ctx, tu)) {
       readOnlyBatch.push(tu);
       continue;
     }
-    await flushReadOnlyBatch();
-    results.push(await dispatchOne(ctx, tu, abortController));
+    if (await flushReadOnlyBatch(toolUses.slice(index))) return results;
+    const result = await dispatchOne(ctx, tu, abortController);
+    results.push(result);
+    if (shouldYieldAfterTool(ctx, result, tu)) {
+      results.push(...(await skippedToolResultsForUserSteer(ctx, toolUses.slice(index + 1))));
+      return results;
+    }
   }
-  await flushReadOnlyBatch();
+  await flushReadOnlyBatch([]);
   return results;
 }
 
@@ -324,11 +415,11 @@ async function dispatchOne(
   // so hooks returning `permission_decision: "ask"` can reach the
   // human via the turn's pendingAsks machinery.
   //
-  // T2-08 — `permissionMode=bypass` sessions (admin / shadow)
-  // skip the beforeToolUse chain entirely. An audit event
+  // T2-08 — bypass-like sessions skip the beforeToolUse chain
+  // entirely. An audit event
   // `permission_bypass` is emitted per tool so the skipped hook
   // chain is still observable.
-  const bypass = permissionMode === "bypass";
+  const bypass = isBypassLikeMode(permissionMode);
   if (bypass) {
     ctx.stageAuditEvent("permission_bypass", {
       toolName: tu.name,
@@ -519,6 +610,10 @@ async function dispatchOne(
   );
 
   return { toolUseId: tu.id, content, isError };
+}
+
+function isBypassLikeMode(mode: PermissionMode): boolean {
+  return mode === "bypass" || mode === "workspace-bypass";
 }
 
 async function resolvePermissionDecision(

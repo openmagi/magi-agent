@@ -83,6 +83,13 @@ export class TerminalSseWriter {
         this.assistantLabelPrinted = false;
         break;
 
+      case "runtime_trace":
+        this.closeThinkingForVisibleOutput();
+        this.output.write(
+          `${YELLOW}● ${event.title}${event.requiredAction ? ` - ${event.requiredAction}` : ""}${RESET}\n`,
+        );
+        break;
+
       case "error":
         this.closeThinkingForVisibleOutput();
         this.output.write(

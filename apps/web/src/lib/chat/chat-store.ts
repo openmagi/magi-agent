@@ -9,6 +9,7 @@ import type {
   ControlEvent,
   ControlRequestRecord,
   MissionActivity,
+  RuntimeTrace,
   SubagentActivity,
 } from "./types";
 import { INTERRUPTED_SUFFIX, MAX_QUEUED_MESSAGES } from "./queue-constants";
@@ -35,6 +36,7 @@ const DEFAULT_CHANNEL_STATE: ChannelState = {
   pendingGoalMissionTitle: null,
   inspectedSources: [],
   citationGate: null,
+  runtimeTraces: [],
   fileProcessing: false,
 };
 
@@ -55,6 +57,7 @@ const RESET_LIVE_RUN_STATE: Partial<ChannelState> = {
   pendingGoalMissionTitle: null,
   inspectedSources: [],
   citationGate: null,
+  runtimeTraces: [],
   fileProcessing: false,
   reconnecting: false,
 };
@@ -211,6 +214,7 @@ function isLiveStreamProgress(partial: Partial<ChannelState>): boolean {
     !!partial.taskBoard?.tasks.length ||
     (partial.inspectedSources?.length ?? 0) > 0 ||
     !!partial.citationGate ||
+    (partial.runtimeTraces?.length ?? 0) > 0 ||
     partial.heartbeatElapsedMs !== undefined ||
     (partial.pendingInjectionCount ?? 0) > 0 ||
     (partial.turnPhase !== undefined && partial.turnPhase !== null && partial.turnPhase !== "pending")
@@ -354,6 +358,32 @@ function upsertControlRequestList(
   ]);
 }
 
+function appendRuntimeTrace(
+  current: RuntimeTrace[] | undefined,
+  trace: RuntimeTrace,
+): RuntimeTrace[] {
+  return [...(current ?? []), trace].slice(-12);
+}
+
+function runtimeTraceFromControlEvent(
+  event: Extract<ControlEvent, { type: "runtime_trace" }>,
+): RuntimeTrace {
+  return {
+    turnId: event.turnId,
+    phase: event.phase,
+    severity: event.severity,
+    title: event.title,
+    ...(event.detail ? { detail: event.detail } : {}),
+    ...(event.reasonCode ? { reasonCode: event.reasonCode } : {}),
+    ...(event.ruleId ? { ruleId: event.ruleId } : {}),
+    ...(typeof event.attempt === "number" ? { attempt: event.attempt } : {}),
+    ...(typeof event.maxAttempts === "number" ? { maxAttempts: event.maxAttempts } : {}),
+    ...(typeof event.retryable === "boolean" ? { retryable: event.retryable } : {}),
+    ...(event.requiredAction ? { requiredAction: event.requiredAction } : {}),
+    receivedAt: event.receivedAt ?? Date.now(),
+  };
+}
+
 function queuedPriorityRank(message: QueuedMessage): number {
   if (message.priority === "now") return 0;
   if (message.priority === "later") return 2;
@@ -415,6 +445,7 @@ interface ChatState {
   hasUnread: (channel: string) => boolean;
 
   /** Selection mode actions */
+  startSelectionMode: (channel: string) => void;
   enterSelectionMode: (channel: string, msgId: string) => void;
   exitSelectionMode: () => void;
   toggleMessageSelection: (channel: string, msgId: string) => void;
@@ -714,6 +745,12 @@ export const useChatStore = create<ChatState>((set, get) => ({
     return srvMsgs.some((m) => m.role === "assistant" && (m.timestamp ?? 0) > lastRead);
   },
 
+  startSelectionMode: (channel) =>
+    set({
+      selectionMode: true,
+      selectedMessages: { [channel]: new Set() },
+    }),
+
   enterSelectionMode: (channel, msgId) =>
     set({
       selectionMode: true,
@@ -879,6 +916,20 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
   applyControlEvent: (channel, event) =>
     set((state) => {
+      if (event.type === "runtime_trace") {
+        const currentState = state.channelStates[channel] ?? DEFAULT_CHANNEL_STATE;
+        return {
+          channelStates: {
+            ...state.channelStates,
+            [channel]: mergeChannelState(currentState, {
+              runtimeTraces: appendRuntimeTrace(
+                currentState.runtimeTraces,
+                runtimeTraceFromControlEvent(event),
+              ),
+            }),
+          },
+        };
+      }
       const current = state.controlRequests[channel] ?? [];
       let next = current;
       if (event.type === "control_request_created") {

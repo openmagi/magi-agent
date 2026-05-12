@@ -35,6 +35,7 @@ const GROUP_LABELS: Record<WorkConsoleRowGroup, string> = {
   subagent: "Helpers",
   task: "Plan",
   queue: "Queued messages",
+  trace: "Runtime proof",
   control: "Needs input",
 };
 
@@ -45,6 +46,7 @@ const GROUP_LABELS_KO: Record<WorkConsoleRowGroup, string> = {
   subagent: "도우미",
   task: "계획",
   queue: "대기 메시지",
+  trace: "런타임 증거",
   control: "입력 필요",
 };
 
@@ -53,6 +55,7 @@ const INLINE_RUN_DETAIL_GROUPS = new Set<WorkConsoleRowGroup>([
   "subagent",
   "task",
   "queue",
+  "trace",
   "control",
 ]);
 const MAX_DISPLAY_GOAL_CHARS = 140;

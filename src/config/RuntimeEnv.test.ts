@@ -23,12 +23,12 @@ describe("loadRuntimeEnv", () => {
     resetCustomModelCapabilitiesForTests();
   });
 
-  it("preserves hosted UX by making bypass an explicit env-mode default", () => {
+  it("uses workspace-bypass as the default env permission mode", () => {
     setRequiredEnv();
 
     const env = loadRuntimeEnv();
 
-    expect(env.agentConfig.defaultPermissionMode).toBe("bypass");
+    expect(env.agentConfig.defaultPermissionMode).toBe("workspace-bypass");
   });
 
   it("accepts CORE_AGENT_PERMISSION_MODE as an explicit override", () => {

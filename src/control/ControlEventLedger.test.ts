@@ -49,6 +49,29 @@ describe("ControlEventLedger", () => {
     expect(await ledger.readAll()).toEqual([]);
   });
 
+  it("persists runtime trace events for verifier and abort observability", async () => {
+    const root = await tmpdir();
+    const ledger = new ControlEventLedger({ rootDir: root, sessionKey: "session-a" });
+
+    const event = await ledger.append({
+      type: "runtime_trace",
+      turnId: "turn-1",
+      phase: "verifier_blocked",
+      severity: "warning",
+      title: "Runtime verifier blocked completion",
+      reasonCode: "ARTIFACT_DELIVERY_REQUIRED",
+      retryable: true,
+    });
+
+    expect(event).toMatchObject({
+      type: "runtime_trace",
+      seq: 1,
+      turnId: "turn-1",
+      reasonCode: "ARTIFACT_DELIVERY_REQUIRED",
+    });
+    expect(await ledger.readByTurn("turn-1")).toContainEqual(event);
+  });
+
   it("ignores a malformed tail while preserving earlier events", async () => {
     const root = await tmpdir();
     const ledger = new ControlEventLedger({ rootDir: root, sessionKey: "session-a" });

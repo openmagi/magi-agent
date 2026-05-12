@@ -221,4 +221,18 @@ describe("Magi App shell", () => {
     expect(source).toContain("/v1/app/memory/compact");
     expect(source).toContain("/v1/app/memory/reindex");
   });
+
+  it("renders Skills as a searchable local capability directory", () => {
+    const source = readAppFile(path.join("src", "App.tsx"));
+
+    expect(source).toContain("type SkillDirectoryFilter");
+    expect(source).toContain("normalizeSkillDirectoryItems");
+    expect(source).toContain("filteredSkills");
+    expect(source).toContain("Search skills...");
+    expect(source).toContain("Prompt skills");
+    expect(source).toContain("Script skills");
+    expect(source).toContain("Runtime hooks");
+    expect(source).toContain("Issue detail");
+    expect(source).not.toContain("/api/bots/${botId}/custom-skills");
+  });
 });

@@ -1,9 +1,12 @@
 import type { Tool } from "../Tool.js";
 import { classifyPathSafety } from "./PathSafetyPolicy.js";
-import { classifyShellSafety } from "./ShellSafetyPolicy.js";
+import {
+  classifyShellSafety,
+  classifyWorkspaceShellBoundary,
+} from "./ShellSafetyPolicy.js";
 import { isReadOnlyTool, toolNeedsConsent } from "./ToolPermissionAdapters.js";
 
-export type PermissionMode = "default" | "plan" | "auto" | "bypass";
+export type PermissionMode = "default" | "plan" | "auto" | "bypass" | "workspace-bypass";
 export type PermissionSource = "turn" | "mcp" | "child-agent";
 
 export type PermissionDecision =
@@ -66,8 +69,14 @@ export async function decideRuntimePermission(
     };
   }
 
-  if (input.mode === "bypass") {
-    return { decision: "allow", reason: "bypass mode after security policy" };
+  if (isBypassLikeMode(input.mode)) {
+    return {
+      decision: "allow",
+      reason:
+        input.mode === "workspace-bypass"
+          ? "workspace-bypass mode after workspace boundary policy"
+          : "bypass mode after security policy",
+    };
   }
 
   if (input.source === "child-agent" && input.tool?.dangerous !== true) {
@@ -105,9 +114,12 @@ export function resetPermissionArbiterStatusForTests(): void {
 function securityDecision(input: PermissionArbiterInput): PermissionDecision | null {
   if (input.toolName === "Bash") {
     const command = commandOf(input.input);
-    const shell = classifyShellSafety(command);
+    const shell =
+      input.mode === "workspace-bypass"
+        ? classifyWorkspaceShellBoundary(command)
+        : classifyShellSafety(command);
     if (!shell.safe) {
-      if (input.mode === "bypass" || isSecurityCriticalShellReason(shell.reason)) {
+      if (isBypassLikeMode(input.mode) || isSecurityCriticalShellReason(shell.reason)) {
         recordDeny(input, shell.reason ?? "unsafe shell command");
         return {
           decision: "deny",
@@ -129,6 +141,7 @@ function securityDecision(input: PermissionArbiterInput): PermissionDecision | n
       workspaceRoot: input.workspaceRoot,
       filePath,
       operation: input.toolName === "FileRead" ? "read" : "write",
+      allowWorkspaceSecretPaths: input.mode === "workspace-bypass",
     });
     if (pathSafety.classification !== "workspace_safe") {
       recordDeny(input, pathSafety.reason ?? pathSafety.classification);
@@ -168,8 +181,12 @@ function isSecurityCriticalShellReason(reason: string | undefined): boolean {
   return !/complex shell/.test(reason);
 }
 
+function isBypassLikeMode(mode: PermissionMode): boolean {
+  return mode === "bypass" || mode === "workspace-bypass";
+}
+
 function recordDeny(input: PermissionArbiterInput, reason: string): void {
-  if (input.mode === "bypass") bypassDeniedCount += 1;
+  if (isBypassLikeMode(input.mode)) bypassDeniedCount += 1;
   lastDeniedReasons.unshift(`${input.toolName}: ${reason}`);
   lastDeniedReasons.splice(10);
 }

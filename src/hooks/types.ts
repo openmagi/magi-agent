@@ -186,6 +186,8 @@ export interface HookArgs {
      * gates (§7.13) to bound retry loops.
      */
     retryCount: number;
+    /** Tool names used in the current turn, in model call order. */
+    toolNames: string[];
     /**
      * Workspace-relative paths written by the current turn, derived
      * from FileWrite/FileEdit tool calls. Hooks should use this to

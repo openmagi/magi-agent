@@ -4,6 +4,7 @@ import {
   detectCurrentTurnSourceKinds,
   resolveEffectiveLongTermMemoryPolicy,
 } from "../../reliability/SourceAuthority.js";
+import { channelMemoryPolicyFromSessionKey } from "../../reliability/ChannelMemoryPolicy.js";
 import type { HookContext, RegisteredHook } from "../types.js";
 import { latestUserText } from "./classifyTurnMode.js";
 import { getOrClassifyRequestMeta } from "./turnMetaClassifier.js";
@@ -52,25 +53,32 @@ export function makeSourceAuthorityPromptHook(): RegisteredHook<"beforeLLMCall">
             classified.sourceAuthority.currentSourcesAuthoritative,
           currentSourceKinds,
         });
+        const channelMemoryPolicy = channelMemoryPolicyFromSessionKey(ctx.sessionKey);
+        const effectiveLongTermMemoryPolicy =
+          channelMemoryPolicy === "disabled" ? "disabled" : longTermMemoryPolicy;
+        const classifierReason =
+          channelMemoryPolicy === "disabled"
+            ? `Channel memory mode is no-memory. ${classified.sourceAuthority.reason}`
+            : classified.sourceAuthority.reason;
 
         ctx.executionContract.replaceSourceAuthorityForTurn(ctx.turnId, [
           {
             turnId: ctx.turnId,
             currentSourceKinds,
-            longTermMemoryPolicy,
-            classifierReason: classified.sourceAuthority.reason,
+            longTermMemoryPolicy: effectiveLongTermMemoryPolicy,
+            classifierReason,
           },
         ]);
 
-        if (longTermMemoryPolicy === "normal" && currentSourceKinds.length === 0) {
+        if (effectiveLongTermMemoryPolicy === "normal" && currentSourceKinds.length === 0) {
           return { action: "continue" };
         }
 
         const block = buildSourceAuthorityPromptBlock({
           turnId: ctx.turnId,
           currentSourceKinds,
-          longTermMemoryPolicy,
-          classifierReason: classified.sourceAuthority.reason,
+          longTermMemoryPolicy: effectiveLongTermMemoryPolicy,
+          classifierReason,
         });
         return {
           action: "replace",

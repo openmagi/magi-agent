@@ -6,6 +6,7 @@ import type { ChannelDeliveryReceipt } from "../channels/ChannelAdapter.js";
 import type { OutputArtifactRegistry } from "../output/OutputArtifactRegistry.js";
 import type { ChannelRef } from "../util/types.js";
 import type {
+  DeliveryAck,
   DeliveryStatus,
   DeliveryTarget,
   OutputArtifactRecord,
@@ -33,6 +34,7 @@ export interface FileDeliverOutput {
     externalId?: string;
     marker?: string;
     providerMessageId?: string;
+    deliveryAck?: DeliveryAck;
     attemptCount: number;
   }>;
 }
@@ -102,6 +104,16 @@ function isTransientError(error: unknown): boolean {
 
 function toTargets(target: FileDeliverInput["target"]): DeliveryTarget[] {
   return target === "both" ? ["chat", "kb"] : [target];
+}
+
+function deliveryAckFor(
+  target: DeliveryTarget,
+  delivered: { marker?: string; providerMessageId?: string },
+): DeliveryAck | undefined {
+  if (target === "kb") return "kb_write_receipt";
+  if (delivered.marker) return "attachment_marker";
+  if (delivered.providerMessageId) return "provider_message_receipt";
+  return undefined;
 }
 
 function safeKbFilename(filename: string, mimeType: string): string {
@@ -186,7 +198,10 @@ async function deliverToChat(
     new Blob([bytes], { type: artifact.mimeType || "application/octet-stream" }),
     artifact.filename,
   );
-  form.append("channel_name", input.chat?.channel || "general");
+  const channelName =
+    input.chat?.channel ||
+    (sourceChannel?.type === "app" ? sourceChannel.channelId : "general");
+  form.append("channel_name", channelName);
   if (input.chat?.caption) {
     form.append("caption", input.chat.caption);
   }
@@ -288,6 +303,7 @@ async function deliverWithRetry(
   externalId?: string;
   marker?: string;
   providerMessageId?: string;
+  deliveryAck?: DeliveryAck;
   attemptCount: number;
 }> {
   let lastError: unknown = null;
@@ -315,6 +331,7 @@ async function deliverWithRetry(
         target === "chat"
           ? await deliverToChat(deps, artifact, bytes, input, ctx, filePath)
           : await deliverToKb(deps, artifact, bytes, input, ctx);
+      const deliveryAck = deliveryAckFor(target, delivered);
 
       if (trackRegistry) {
         await deps.outputRegistry.markDeliveryResult(artifact.artifactId, {
@@ -324,6 +341,7 @@ async function deliverWithRetry(
           externalId: delivered.externalId,
           marker: delivered.marker,
           providerMessageId: delivered.providerMessageId,
+          deliveryAck,
         });
       }
 
@@ -332,7 +350,8 @@ async function deliverWithRetry(
         status: "sent",
         externalId: delivered.externalId,
         marker: delivered.marker,
-        providerMessageId: delivered.providerMessageId,
+        ...(delivered.providerMessageId ? { providerMessageId: delivered.providerMessageId } : {}),
+        deliveryAck,
         attemptCount: attempt,
       };
     } catch (error) {

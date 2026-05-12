@@ -40,6 +40,7 @@ export function classifyPathSafety(input: {
   workspaceRoot: string;
   filePath: string;
   operation: "read" | "write";
+  allowWorkspaceSecretPaths?: boolean;
 }): PathSafetyResult {
   const workspaceRoot = safeRealpath(path.resolve(input.workspaceRoot));
   const raw = input.filePath.startsWith("~")
@@ -75,7 +76,7 @@ export function classifyPathSafety(input: {
     };
   }
 
-  if (isSecretLike(canonical)) {
+  if (!input.allowWorkspaceSecretPaths && isSecretLike(canonical)) {
     return {
       classification: "secret_path",
       reason: "secret-like path access is not allowed",

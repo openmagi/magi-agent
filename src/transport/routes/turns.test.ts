@@ -89,6 +89,7 @@ function makeStubAgent(
   capture?: {
     userMessage?: unknown;
     runOptions?: unknown;
+    channel?: unknown;
     structuredSpecs?: unknown[];
     interruptCalls?: Array<{ handoffRequested?: boolean; source?: string }>;
     runTurnDelayMs?: number;
@@ -113,7 +114,8 @@ function makeStubAgent(
     hasActiveTurnForSession: injectState
       ? (key) => injectState.activeSessions.has(key)
       : undefined,
-    async getOrCreateSession(): Promise<StubSession> {
+    async getOrCreateSession(_sessionKey: string, channel: unknown): Promise<StubSession> {
+      if (capture) capture.channel = channel;
       return {
         getStructuredOutputContract: () => null,
         setStructuredOutputContract: (spec) => {
@@ -379,6 +381,28 @@ describe("HttpServer /v1/chat/completions + /v1/turns/:id/ask-response", () => {
 
     expect(r.status).toBe(200);
     expect(capture.runOptions).toMatchObject({ goalMode: true });
+  });
+
+  it("derives app channel memory mode from the session channel slug", async () => {
+    const r = await rawRequest(
+      "POST",
+      `http://127.0.0.1:${port}/v1/chat/completions`,
+      {
+        Authorization: `Bearer ${TOKEN}`,
+        "Content-Type": "application/json",
+        "X-Magi-Session-Key": "agent:local:app:research-no-memory",
+      },
+      JSON.stringify({
+        messages: [{ role: "user", content: "keep this private" }],
+      }),
+    );
+
+    expect(r.status).toBe(200);
+    expect(capture.channel).toMatchObject({
+      type: "app",
+      channelId: "research-no-memory",
+      memoryMode: "incognito",
+    });
   });
 
   it("POST /v1/chat/completions treats router aliases as automatic local routing", async () => {

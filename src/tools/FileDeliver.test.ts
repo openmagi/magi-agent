@@ -90,6 +90,7 @@ describe("FileDeliver", () => {
         status: "sent",
         externalId: "att-123",
         marker: "[attachment:att-123:report.xlsx]",
+        deliveryAck: "attachment_marker",
         attemptCount: 1,
       },
     ]);
@@ -101,9 +102,60 @@ describe("FileDeliver", () => {
         status: "sent",
         externalId: "att-123",
         marker: "[attachment:att-123:report.xlsx]",
+        deliveryAck: "attachment_marker",
         attemptCount: 1,
       }),
     ]);
+  });
+
+  it("defaults web/app chat uploads to the current source channel", async () => {
+    const root = await makeRoot();
+    const registry = new OutputArtifactRegistry(root);
+    await fs.mkdir(path.join(root, "exports"), { recursive: true });
+    await fs.writeFile(path.join(root, "exports", "stock-report.pdf"), "PDF");
+    const artifact = await registry.register({
+      sessionKey: "s-1",
+      turnId: "t-1",
+      kind: "document",
+      format: "pdf",
+      title: "Stock Report",
+      filename: "stock-report.pdf",
+      mimeType: "application/pdf",
+      workspacePath: "exports/stock-report.pdf",
+      previewKind: "download-only",
+      createdByTool: "DocumentWrite",
+      sourceKind: "structured",
+    });
+
+    const fetchImpl = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ id: "att-stock" }), {
+        status: 201,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+
+    const tool = makeFileDeliverTool({
+      workspaceRoot: root,
+      outputRegistry: registry,
+      chatProxyUrl: "http://chat-proxy",
+      gatewayToken: "gw-token",
+      fetchImpl,
+      sleepImpl: async () => {},
+      getSourceChannel: () => ({ type: "app", channelId: "stock-skill" }),
+    });
+
+    const result = await tool.execute(
+      {
+        artifactId: artifact.artifactId,
+        target: "chat",
+      },
+      ctx(root),
+    );
+
+    expect(result.status).toBe("ok");
+    const form = fetchImpl.mock.calls[0]?.[1]?.body;
+    expect(form).toBeInstanceOf(FormData);
+    expect((form as FormData).get("channel_name")).toBe("stock-skill");
   });
 
   it("uploads an existing workspace file path without DocumentWrite conversion", async () => {
@@ -146,6 +198,7 @@ describe("FileDeliver", () => {
       status: "sent",
       externalId: "att-md",
       marker: "[attachment:att-md:WSJ_PIPELINE_HANDBOOK.md]",
+      deliveryAck: "attachment_marker",
       attemptCount: 1,
     });
 
@@ -243,6 +296,7 @@ describe("FileDeliver", () => {
       externalId: "telegram:1234:100",
       providerMessageId: "100",
       marker: undefined,
+      deliveryAck: "provider_message_receipt",
       attemptCount: 1,
     });
     expect(sendFile).toHaveBeenCalledWith(
@@ -259,6 +313,7 @@ describe("FileDeliver", () => {
         status: "sent",
         externalId: "telegram:1234:100",
         providerMessageId: "100",
+        deliveryAck: "provider_message_receipt",
         attemptCount: 1,
       }),
     ]);
@@ -301,6 +356,7 @@ describe("FileDeliver", () => {
       status: "sent",
       externalId: "att-hwpx",
       marker: "[attachment:att-hwpx:minutes.hwpx]",
+      deliveryAck: "attachment_marker",
       attemptCount: 1,
     });
 
@@ -468,6 +524,7 @@ describe("FileDeliver", () => {
       status: "sent",
       externalId: "att-999",
       marker: "[attachment:att-999:memo.docx]",
+      deliveryAck: "attachment_marker",
       attemptCount: 2,
     });
   });
@@ -523,6 +580,7 @@ describe("FileDeliver", () => {
         status: "sent",
         externalId: "artifacts/minutes.hwpx",
         marker: undefined,
+        deliveryAck: "kb_write_receipt",
         attemptCount: 1,
       },
     ]);
@@ -559,6 +617,7 @@ describe("FileDeliver", () => {
         status: "sent",
         externalId: "knowledge/ops/runbook.md",
         marker: undefined,
+        deliveryAck: "kb_write_receipt",
         attemptCount: 1,
       },
     ]);

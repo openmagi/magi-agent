@@ -267,9 +267,9 @@ export interface AgentConfig {
   agentInstructions?: string;
   /**
    * Initial tool-permission posture for newly-created sessions.
-   * Hosted Magi Cloud pods set "bypass" explicitly to preserve the
-   * low-friction product UX; bare Session construction defaults to
-   * "default" so hooks are active unless runtime config opts out.
+   * Hosted Magi Cloud pods can set "bypass" explicitly; OSS env mode
+   * defaults to "workspace-bypass" so local workspace automation stays
+   * low-friction while system/secret boundaries remain active.
    */
   defaultPermissionMode?: PermissionMode;
   telegramBotToken?: string;

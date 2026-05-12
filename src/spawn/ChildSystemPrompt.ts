@@ -6,6 +6,7 @@ import {
 } from "../policy/PolicyKernel.js";
 import {
   AGENT_SELF_MODEL_BLOCK,
+  buildRuntimeTemporalContext,
   CODING_SEMANTIC_NAVIGATION_POLICY,
   EXECUTION_DISCIPLINE_POLICY,
   OUTPUT_RULES_BLOCK,
@@ -237,6 +238,7 @@ export async function buildChildSystemPrompt(
 
   return [
     AGENT_SELF_MODEL_BLOCK,
+    buildRuntimeTemporalContext(),
     ...reliabilityBlocks,
     OUTPUT_RULES_BLOCK,
     workspaceContext,
