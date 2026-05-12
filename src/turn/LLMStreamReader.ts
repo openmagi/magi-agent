@@ -19,6 +19,7 @@ import type {
 } from "../transport/LLMClient.js";
 import type { SseWriter } from "../transport/SseWriter.js";
 import { RepetitionDetector } from "./RepetitionDetector.js";
+import type { SystemBlock } from "../prompt/CacheOptimizedPrompt.js";
 
 export type StopReasonRaw =
   | "end_turn"
@@ -61,9 +62,171 @@ export interface ReadOneOptions {
   routing?: LLMStreamRequest["routing"];
 }
 
+const MAX_DOCUMENT_DRAFT_PREVIEW_CHARS = 4_000;
+
+interface ToolInputAccumulator {
+  id: string;
+  name: string;
+  inputJson: string;
+}
+
+interface DocumentDraftState {
+  contentPreview: string;
+  contentLength: number;
+  truncated: boolean;
+  filename?: string;
+}
+
+interface DocumentDraftCandidate {
+  filename?: string;
+  format: "md" | "txt";
+  content: string;
+}
+
+function documentFormatFromPath(filePath: string | undefined): "md" | "txt" | null {
+  const normalized = (filePath ?? "").split(/[?#]/, 1)[0]?.toLowerCase() ?? "";
+  if (normalized.endsWith(".md") || normalized.endsWith(".markdown")) return "md";
+  if (normalized.endsWith(".txt")) return "txt";
+  return null;
+}
+
+function decodeJsonStringPrefix(raw: string, start: number): string {
+  let value = "";
+  let escaped = false;
+  for (let index = start; index < raw.length; index += 1) {
+    const char = raw[index];
+    if (escaped) {
+      switch (char) {
+        case "n":
+          value += "\n";
+          break;
+        case "r":
+          value += "\r";
+          break;
+        case "t":
+          value += "\t";
+          break;
+        case "b":
+          value += "\b";
+          break;
+        case "f":
+          value += "\f";
+          break;
+        case "u": {
+          const hex = raw.slice(index + 1, index + 5);
+          if (/^[0-9a-f]{4}$/i.test(hex)) {
+            value += String.fromCharCode(Number.parseInt(hex, 16));
+            index += 4;
+          }
+          break;
+        }
+        default:
+          value += char ?? "";
+          break;
+      }
+      escaped = false;
+      continue;
+    }
+    if (char === "\\") {
+      escaped = true;
+      continue;
+    }
+    if (char === "\"") break;
+    value += char ?? "";
+  }
+  return value;
+}
+
+function jsonStringFieldPrefix(raw: string, key: string): string | undefined {
+  const escapedKey = key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const pattern = new RegExp(`"${escapedKey}"\\s*:\\s*"`, "g");
+  const match = pattern.exec(raw);
+  if (!match) return undefined;
+  return decodeJsonStringPrefix(raw, match.index + match[0].length);
+}
+
+function firstJsonStringFieldPrefix(raw: string, keys: readonly string[]): string | undefined {
+  for (const key of keys) {
+    const value = jsonStringFieldPrefix(raw, key);
+    if (value !== undefined) return value;
+  }
+  return undefined;
+}
+
+function parsedObject(raw: string): Record<string, unknown> | null {
+  try {
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? parsed as Record<string, unknown>
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+function stringField(object: Record<string, unknown> | null, keys: readonly string[]): string | undefined {
+  if (!object) return undefined;
+  for (const key of keys) {
+    const value = object[key];
+    if (typeof value === "string") return value;
+  }
+  return undefined;
+}
+
+function documentWriteSourceContent(source: unknown): string | undefined {
+  if (typeof source === "string") return source;
+  if (!source || typeof source !== "object" || Array.isArray(source)) return undefined;
+  return stringField(source as Record<string, unknown>, ["content", "markdown", "text"]);
+}
+
+function draftCandidateFromTool(tool: ToolInputAccumulator): DocumentDraftCandidate | null {
+  if (tool.name !== "FileWrite" && tool.name !== "DocumentWrite") return null;
+  const parsed = parsedObject(tool.inputJson);
+
+  if (tool.name === "FileWrite") {
+    const filename =
+      stringField(parsed, ["path", "file_path", "filepath", "filename"]) ??
+      firstJsonStringFieldPrefix(tool.inputJson, ["path", "file_path", "filepath", "filename"]);
+    const format = documentFormatFromPath(filename);
+    if (!format) return null;
+    const content =
+      stringField(parsed, ["content"]) ??
+      jsonStringFieldPrefix(tool.inputJson, "content") ??
+      "";
+    return content ? { filename, format, content } : null;
+  }
+
+  const filename =
+    stringField(parsed, ["filename", "path"]) ??
+    firstJsonStringFieldPrefix(tool.inputJson, ["filename", "path"]);
+  const formatValue =
+    stringField(parsed, ["format"]) ??
+    jsonStringFieldPrefix(tool.inputJson, "format");
+  const format =
+    formatValue === "md" || formatValue === "txt"
+      ? formatValue
+      : documentFormatFromPath(filename);
+  if (format !== "md" && format !== "txt") return null;
+  const content =
+    documentWriteSourceContent(parsed?.source) ??
+    firstJsonStringFieldPrefix(tool.inputJson, ["content", "markdown", "text", "source"]) ??
+    "";
+  return content ? { filename, format, content } : null;
+}
+
+function previewTail(content: string): { contentPreview: string; truncated: boolean } {
+  if (content.length <= MAX_DOCUMENT_DRAFT_PREVIEW_CHARS) {
+    return { contentPreview: content, truncated: false };
+  }
+  return {
+    contentPreview: content.slice(-MAX_DOCUMENT_DRAFT_PREVIEW_CHARS),
+    truncated: true,
+  };
+}
+
 export async function readOne(
   deps: LLMStreamReaderDeps,
-  systemPrompt: string,
+  systemPrompt: string | SystemBlock[],
   messages: LLMMessage[],
   toolDefs: LLMToolDef[],
   options?: ReadOneOptions,
@@ -79,17 +242,18 @@ export async function readOne(
     number,
     { thinking: string; signature: string }
   >();
-  const toolByIndex = new Map<
-    number,
-    { id: string; name: string; inputJson: string }
-  >();
+  const toolByIndex = new Map<number, ToolInputAccumulator>();
+  const documentDraftByIndex = new Map<number, DocumentDraftState>();
   const blockOrder: number[] = [];
 
   let stream: AsyncGenerator<LLMEvent, void, void>;
   try {
+    const systemValue: LLMStreamRequest["system"] = Array.isArray(systemPrompt)
+      ? systemPrompt
+      : systemPrompt || undefined;
     stream = deps.llm.stream({
       model: deps.model,
-      system: systemPrompt || undefined,
+      system: systemValue,
       messages,
       tools: toolDefs.length ? toolDefs : undefined,
       ...(deps.abortSignal ? { signal: deps.abortSignal } : {}),
@@ -186,7 +350,35 @@ export async function readOne(
       }
       case "tool_use_input_delta": {
         const cur = toolByIndex.get(evt.blockIndex);
-        if (cur) cur.inputJson += evt.partial;
+        if (cur) {
+          cur.inputJson += evt.partial;
+          const draft = draftCandidateFromTool(cur);
+          if (draft) {
+            const preview = previewTail(draft.content);
+            const previous = documentDraftByIndex.get(evt.blockIndex);
+            if (
+              !previous ||
+              previous.contentPreview !== preview.contentPreview ||
+              previous.contentLength !== draft.content.length ||
+              previous.filename !== draft.filename
+            ) {
+              deps.sse.agent({
+                type: "document_draft",
+                id: cur.id,
+                ...(draft.filename ? { filename: draft.filename } : {}),
+                format: draft.format,
+                contentPreview: preview.contentPreview,
+                contentLength: draft.content.length,
+                truncated: preview.truncated,
+              });
+              documentDraftByIndex.set(evt.blockIndex, {
+                ...preview,
+                contentLength: draft.content.length,
+                ...(draft.filename ? { filename: draft.filename } : {}),
+              });
+            }
+          }
+        }
         break;
       }
       case "block_stop":

@@ -16,6 +16,7 @@ import {
   isProtectedMemoryPath,
   protectedMemoryError,
 } from "../util/memoryMode.js";
+import { fuzzyFindOldString, detectLazyComments } from "./fuzzyEdit.js";
 
 export interface FileEditInput {
   path: string;
@@ -29,6 +30,9 @@ export interface FileEditOutput {
   path: string;
   replaced: number;
   patch: FileEditPatchEvidence;
+  fuzzyApplied?: boolean;
+  fuzzyStage?: string;
+  fuzzySimilarity?: number;
 }
 
 export interface FileEditPatchHunk {
@@ -108,6 +112,18 @@ export function makeFileEditTool(workspaceRoot: string): Tool<FileEditInput, Fil
         };
       }
       try {
+        const lazyDetection = detectLazyComments(input.new_string);
+        if (lazyDetection) {
+          return {
+            status: "error",
+            errorCode: "lazy_output",
+            errorMessage:
+              `new_string contains a placeholder comment at line ${lazyDetection.line}: "${lazyDetection.matchedText}". ` +
+              "Write the complete replacement code instead of using placeholder comments like '// ... existing code'.",
+            durationMs: Date.now() - start,
+          };
+        }
+
         const ws = ctx.spawnWorkspace ?? defaultWorkspace;
         // Safe read — FD-based realpath blocks symlink-swap TOCTOU.
         const content = await readSafe(input.path, ws.root);
@@ -128,6 +144,10 @@ export function makeFileEditTool(workspaceRoot: string): Tool<FileEditInput, Fil
         let next = content;
         let replaced = 0;
         let replacementOffsets: number[] = [];
+        let fuzzyApplied = false;
+        let fuzzyStage: string | undefined;
+        let fuzzySimilarity: number | undefined;
+        let patchOldString = oldString;
         if (input.replace_all) {
           replacementOffsets = findAllOccurrences(content, oldString);
           const parts = content.split(oldString);
@@ -144,26 +164,46 @@ export function makeFileEditTool(workspaceRoot: string): Tool<FileEditInput, Fil
         } else {
           const first = content.indexOf(oldString);
           if (first < 0) {
-            return {
-              status: "error",
-              errorCode: "not_found",
-              errorMessage: `old_string not found in ${input.path}`,
-              durationMs: Date.now() - start,
-            };
+            const fuzzyResult = fuzzyFindOldString(content, oldString);
+            if (
+              fuzzyResult.kind === "fuzzy" &&
+              fuzzyResult.offset !== undefined &&
+              fuzzyResult.matchedText !== undefined
+            ) {
+              const matchedText = fuzzyResult.matchedText;
+              next =
+                content.slice(0, fuzzyResult.offset) +
+                newString +
+                content.slice(fuzzyResult.offset + matchedText.length);
+              replaced = 1;
+              replacementOffsets = [fuzzyResult.offset];
+              patchOldString = matchedText;
+              fuzzyApplied = true;
+              fuzzyStage = fuzzyResult.stage;
+              fuzzySimilarity = fuzzyResult.similarity;
+            } else {
+              return {
+                status: "error",
+                errorCode: "not_found",
+                errorMessage: `old_string not found in ${input.path}`,
+                durationMs: Date.now() - start,
+              };
+            }
+          } else {
+            const second = content.indexOf(oldString, first + oldString.length);
+            if (second >= 0) {
+              return {
+                status: "error",
+                errorCode: "not_unique",
+                errorMessage: `old_string appears more than once in ${input.path}; use replace_all or extend with surrounding context`,
+                durationMs: Date.now() - start,
+              };
+            }
+            next =
+              content.slice(0, first) + newString + content.slice(first + oldString.length);
+            replaced = 1;
+            replacementOffsets = [first];
           }
-          const second = content.indexOf(oldString, first + oldString.length);
-          if (second >= 0) {
-            return {
-              status: "error",
-              errorCode: "not_unique",
-              errorMessage: `old_string appears more than once in ${input.path}; use replace_all or extend with surrounding context`,
-              durationMs: Date.now() - start,
-            };
-          }
-          next =
-            content.slice(0, first) + newString + content.slice(first + oldString.length);
-          replaced = 1;
-          replacementOffsets = [first];
         }
         // Safe write — re-validate via FD realpath before committing.
         await writeSafe(input.path, next, ws.root);
@@ -171,14 +211,20 @@ export function makeFileEditTool(workspaceRoot: string): Tool<FileEditInput, Fil
           path: input.path,
           before: content,
           after: next,
-          oldString,
+          oldString: patchOldString,
           newString,
           replacementOffsets,
           replaced,
         });
+        const output: FileEditOutput = { path: input.path, replaced, patch };
+        if (fuzzyApplied) {
+          output.fuzzyApplied = true;
+          if (fuzzyStage !== undefined) output.fuzzyStage = fuzzyStage;
+          if (fuzzySimilarity !== undefined) output.fuzzySimilarity = fuzzySimilarity;
+        }
         return {
           status: "ok",
-          output: { path: input.path, replaced, patch },
+          output,
           metadata: {
             evidenceKind: "patch",
             changedFiles: [input.path],

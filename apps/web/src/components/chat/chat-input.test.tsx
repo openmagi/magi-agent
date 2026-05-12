@@ -2,7 +2,9 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import {
   ChatInput,
+  buildSlashEntries,
   buildChatInputSendOptions,
+  getSlashMatches,
   nextRunUntilDoneAfterSend,
   shouldCancelStopOnPointerDown,
   shouldSendComposerOnEnter,
@@ -135,5 +137,34 @@ describe("ChatInput", () => {
         { mobileWeb: false },
       ),
     ).toBe(false);
+  });
+
+  it("adds local workspace skills to slash autocomplete without duplicating builtins", () => {
+    const entries = buildSlashEntries([
+      {
+        name: "local-research",
+        title: "Local Research",
+        description: "Search the local knowledge base",
+        tags: ["kb", "workspace"],
+      },
+      { name: "/reset", title: "Duplicate reset" },
+    ]);
+
+    expect(entries.filter((entry) => entry.command === "reset")).toHaveLength(1);
+    expect(entries).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          command: "local-research",
+          label: "Local Research",
+          category: "custom",
+        }),
+      ]),
+    );
+    expect(getSlashMatches(entries, "workspace")).toEqual(
+      expect.arrayContaining([expect.objectContaining({ command: "local-research" })]),
+    );
+    expect(getSlashMatches(entries, "local")).toEqual(
+      expect.arrayContaining([expect.objectContaining({ command: "local-research" })]),
+    );
   });
 });

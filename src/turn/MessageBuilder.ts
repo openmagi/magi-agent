@@ -20,8 +20,9 @@ import type {
   ReplyToRef,
   UserMessage,
 } from "../util/types.js";
-import type { LLMContentBlock, LLMMessage } from "../transport/LLMClient.js";
+import type { LLMContentBlock, LLMMessage, LLMToolDef } from "../transport/LLMClient.js";
 import { renderIdentitySystem } from "../storage/Workspace.js";
+import type { TranscriptEntry } from "../storage/Transcript.js";
 import { getCapability } from "../llm/modelCapabilities.js";
 import type { RouteDecision } from "../routing/types.js";
 import {
@@ -29,6 +30,11 @@ import {
   OUTPUT_RULES_BLOCK,
 } from "../prompt/RuntimePromptBlocks.js";
 import { normalizeMemoryMode } from "../util/memoryMode.js";
+import {
+  ContextChunkManager,
+  splitHistoryByRecentTurns,
+  type BudgetAllocation,
+} from "../services/compact/ContextChunkManager.js";
 
 /**
  * Fallback soft cap on transcript tokens before `maybeCompact` is
@@ -37,6 +43,7 @@ import { normalizeMemoryMode } from "../util/memoryMode.js";
  * only used when the model id is not in the registry.
  */
 export const TOKEN_LIMIT_FOR_COMPACTION = 150_000;
+const PRIORITY_CONTEXT_OLD_HISTORY_SUMMARY_FRACTION = 0.6;
 
 const INCOGNITO_MEMORY_MODE_BLOCK = [
   '<memory_mode hidden="true">',
@@ -259,6 +266,27 @@ function isKbCommand(text: string): boolean {
   return /^\/kb(?:\s|$)/.test(text.trim());
 }
 
+function isPriorityContextEnabled(): boolean {
+  return process.env.MAGI_PRIORITY_CONTEXT === "1";
+}
+
+function contextBudgetForModel(model: string): number {
+  const cap = getCapability(model);
+  return cap ? Math.floor(cap.contextWindow * 0.75) : TOKEN_LIMIT_FOR_COMPACTION;
+}
+
+export function applyPriorityContextToSystemPrompt(
+  system: string,
+  tools: readonly LLMToolDef[],
+  model: string,
+): { system: string; allocation: BudgetAllocation | null } {
+  if (!isPriorityContextEnabled()) {
+    return { system, allocation: null };
+  }
+  const manager = new ContextChunkManager();
+  return manager.allocateSystem(system, tools, contextBudgetForModel(model));
+}
+
 function buildKbCommandContract(userText: string): LLMMessage {
   const mentionsDownload =
     /\bdownloads?\b/i.test(userText) || /download\s*컬렉션/i.test(userText);
@@ -409,10 +437,7 @@ export async function buildMessages(
   // T4-17: model-aware context limit. Use 75% of the model's
   // contextWindow as the compaction threshold; fall back to the legacy
   // 150k constant for unknown models.
-  const cap = getCapability(model);
-  const tokenLimit = cap
-    ? Math.floor(cap.contextWindow * 0.75)
-    : TOKEN_LIMIT_FOR_COMPACTION;
+  const tokenLimit = contextBudgetForModel(model);
   // Pass the routed model so ContextEngine can apply the §11.6
   // feasibility check (throws CompactionImpossibleError when the window
   // is too small to fit summary+reserve). Without the model arg the
@@ -429,7 +454,60 @@ export async function buildMessages(
   const refreshed = boundary
     ? await session.transcript.readCommitted()
     : committed;
-  const out = session.agent.contextEngine.buildMessagesFromTranscript(refreshed);
+  let out = session.agent.contextEngine.buildMessagesFromTranscript(refreshed);
+  if (isPriorityContextEnabled()) {
+    const manager = new ContextChunkManager();
+    const proactiveSummary =
+      (
+        session.agent.contextEngine as {
+          getProactiveSummary?: (sessionKey: string) => string | null;
+        }
+      ).getProactiveSummary?.(session.meta.sessionKey) ?? null;
+    if (proactiveSummary) {
+      const split = splitHistoryByRecentTurns(out, 3);
+      out = [
+        {
+          role: "user",
+          content: [
+            "<history_old_summary hidden=\"true\">",
+            proactiveSummary,
+            "</history_old_summary>",
+          ].join("\n"),
+        },
+        ...split.recent,
+      ];
+    }
+    const allocated = manager.allocateHistoryMessages(out, tokenLimit, 3);
+    if (
+      allocated.oldTokenCount >
+      tokenLimit * PRIORITY_CONTEXT_OLD_HISTORY_SUMMARY_FRACTION
+    ) {
+      const proactive = (
+        session.agent.contextEngine as {
+          requestProactiveSummary?: (
+            session: Session,
+            entries: readonly (TranscriptEntry | LLMMessage)[],
+          ) => Promise<void> | void;
+        }
+      ).requestProactiveSummary;
+      if (typeof proactive === "function") {
+        Promise.resolve(
+          proactive.call(
+            session.agent.contextEngine,
+            session,
+            refreshed.length > 0 ? refreshed : out,
+          ),
+        ).catch((err: unknown) => {
+          console.warn(
+            `[message-builder] proactive history summary failed: ${
+              err instanceof Error ? err.message : String(err)
+            }`,
+          );
+        });
+      }
+    }
+    out = allocated.messages;
+  }
   const hiddenContexts =
     typeof session.drainPendingHiddenContext === "function"
       ? session.drainPendingHiddenContext()

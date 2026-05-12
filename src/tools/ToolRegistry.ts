@@ -22,11 +22,24 @@ export interface SkillLoadOptions {
   trustedSkillDirs?: readonly string[];
 }
 
+export type RegistryMode = "plan" | "act";
+
+const DEFAULT_MODES: readonly ("plan" | "act")[] = ["plan", "act"];
+const ACT_ONLY_PERMISSIONS = new Set(["write", "execute"]);
+
+function inferModes(tool: Tool): readonly ("plan" | "act")[] {
+  if (ACT_ONLY_PERMISSIONS.has(tool.permission) || tool.mutatesWorkspace) {
+    return ["act"];
+  }
+  return DEFAULT_MODES;
+}
+
 export class ToolRegistry implements IToolRegistry {
   private readonly tools = new Map<string, Tool>();
   /** Last loadSkills() result — exposed via /healthz. */
   private lastSkillReport: SkillLoadReport | null = null;
   private readonly loadedSkillToolNames = new Set<string>();
+  private currentMode: RegistryMode = "act";
 
   register(tool: Tool): void {
     if (this.tools.has(tool.name)) {
@@ -46,6 +59,29 @@ export class ToolRegistry implements IToolRegistry {
 
   list(): Tool[] {
     return [...this.tools.values()];
+  }
+
+  setMode(mode: RegistryMode): void {
+    this.currentMode = mode;
+  }
+
+  getMode(): RegistryMode {
+    return this.currentMode;
+  }
+
+  getAvailableTools(): Tool[] {
+    const mode = this.currentMode;
+    return [...this.tools.values()].filter((tool) => {
+      const modes = tool.availableInModes ?? inferModes(tool);
+      return modes.includes(mode);
+    });
+  }
+
+  isToolAllowedInCurrentMode(name: string): boolean {
+    const tool = this.tools.get(name);
+    if (!tool) return false;
+    const modes = tool.availableInModes ?? inferModes(tool);
+    return modes.includes(this.currentMode);
   }
 
   /**

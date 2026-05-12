@@ -105,6 +105,15 @@ export function extractGoalMode(body: unknown): boolean {
   return !!body && typeof body === "object" && (body as { goalMode?: unknown }).goalMode === true;
 }
 
+function parsePositiveIntegerHeader(value: unknown): number | undefined {
+  const raw = Array.isArray(value) ? value[0] : value;
+  if (typeof raw !== "string") return undefined;
+  const trimmed = raw.trim();
+  if (!/^[0-9]+$/u.test(trimmed)) return undefined;
+  const parsed = Number.parseInt(trimmed, 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : undefined;
+}
+
 export function extractLastUserMessage(body: unknown): UserMessage | null {
   if (!body || typeof body !== "object") return null;
   const messages = (body as { messages?: unknown }).messages;
@@ -319,14 +328,23 @@ async function handleChatCompletions(
 
   const sse = new SseWriter(res);
   sse.start();
+  let turnFinished = false;
 
   // If the client disconnects mid-turn, interrupt the live Turn so
   // LLM streams and cooperative tools can stop spending work.
-  res.once("close", () => {
-    if (!res.writableEnded) {
+  const interruptOnClientClose = () => {
+    if (turnFinished) return;
+    try {
       session.requestInterrupt(false, "http_close");
+    } catch (err) {
+      console.warn(
+        `[core-agent] http client close interrupt failed sessionKey=${effectiveSessionKey}: ${
+          (err as Error).message
+        }`,
+      );
     }
-  });
+  };
+  res.once("close", interruptOnClientClose);
 
   // Plan mode (§7.2) can be toggled via HTTP header. The Turn also
   // detects a `[PLAN_MODE: on]` marker embedded in the user text, so
@@ -339,14 +357,26 @@ async function handleChatCompletions(
     planHeader === "on" || planHeader === "1" || planHeader === "true";
   const runtimeModelOverride = extractRuntimeModelOverride(body);
   const goalMode = extractGoalMode(body);
+  const responseDeadlineMs = parsePositiveIntegerHeader(
+    req.headers["x-core-agent-response-deadline-ms"],
+  );
+  const traceIdHeader =
+    req.headers["x-magi-trace-id"] ?? req.headers["x-core-agent-trace-id"];
+  const traceId = Array.isArray(traceIdHeader) ? traceIdHeader[0] : traceIdHeader;
 
   try {
     await session.runTurn(userMsg, sse, {
       planMode,
       ...(goalMode ? { goalMode } : {}),
       ...(runtimeModelOverride ? { runtimeModelOverride } : {}),
+      ...(responseDeadlineMs !== undefined ? { responseDeadlineMs } : {}),
+      ...(typeof traceId === "string" && traceId.trim().length > 0
+        ? { traceId: traceId.trim() }
+        : {}),
     });
+    turnFinished = true;
   } finally {
+    res.off("close", interruptOnClientClose);
     if (structuredOutputSpec && typeof session.setStructuredOutputContract === "function") {
       session.setStructuredOutputContract(previousStructuredOutputSpec);
     }

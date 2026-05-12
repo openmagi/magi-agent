@@ -198,7 +198,7 @@ describe("Session terminal abort fallback", () => {
     expect(eventTypes(sse.agentEvents)).toContain("turn_end");
   });
 
-  it("preserves research-proof verifier notice instead of replacing it with generic fallback", async () => {
+  it("shows a public research-proof verifier notice instead of leaking verifier internals", async () => {
     const session = makeSession(new ScriptedLlm(["Unsupported claim.", ""]), {
       beforeCommitBlockReason:
         "[RULE:CLAIM_CITATION_REQUIRED] Research claims still lack inspected-source citations.",
@@ -212,8 +212,8 @@ describe("Session terminal abort fallback", () => {
 
     expect(result.meta.status).toBe("aborted");
     const visible = visibleTextAfterLastClear(sse.agentEvents);
-    expect(visible).toContain("research proof verifier blocked");
-    expect(visible).toContain("CLAIM_CITATION_REQUIRED");
+    expect(visible).toContain("source-verified final answer");
+    expect(visible).not.toContain("CLAIM_CITATION_REQUIRED");
     expect(visible).not.toContain("No final answer was produced");
     expect(visible).not.toContain("Unsupported claim");
     expect(eventTypes(sse.agentEvents)).toContain("turn_end");

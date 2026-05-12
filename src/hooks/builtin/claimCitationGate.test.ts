@@ -84,13 +84,18 @@ describe("claim citation gate", () => {
         sourceIds: [],
       },
     ]);
-    expect(events).toMatchObject([
-      {
-        type: "rule_check",
-        ruleId: "claim-citation-gate",
-        verdict: "violation",
-      },
-    ]);
+    expect(events).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: "rule_check",
+          ruleId: "claim-citation-gate",
+          verdict: "violation",
+        }),
+        expect.objectContaining({
+          type: "research_artifact_delta",
+        }),
+      ]),
+    );
   });
 
   it("includes inspected source context and missing claims in retry instructions", async () => {
@@ -165,7 +170,7 @@ describe("claim citation gate", () => {
     expect(result).toEqual({ action: "continue" });
   });
 
-  it("fails closed after the retry budget is exhausted", async () => {
+  it("fails open after the retry budget is exhausted but records the citation gap", async () => {
     const hook = makeClaimCitationGateHook();
     const researchContract = new ResearchContractStore({ now: () => 100 });
 
@@ -174,8 +179,7 @@ describe("claim citation gate", () => {
       makeCtx({ sourceLedger: ledgerWithSource(), researchContract }),
     );
 
-    expect(result).toMatchObject({ action: "block" });
-    expect(result.reason).toContain("[RULE:CLAIM_CITATION_REQUIRED]");
+    expect(result).toEqual({ action: "continue" });
     expect(researchContract.claimsForTurn("turn-1")).toMatchObject([
       {
         status: "missing",
@@ -226,13 +230,18 @@ describe("claim citation gate", () => {
         .claimsForTurn("turn-1")
         .some((claim) => claim.status === "missing"),
     ).toBe(true);
-    expect(events).toMatchObject([
-      {
-        type: "rule_check",
-        ruleId: "claim-citation-gate",
-        verdict: "violation",
-      },
-    ]);
+    expect(events).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: "rule_check",
+          ruleId: "claim-citation-gate",
+          verdict: "violation",
+        }),
+        expect.objectContaining({
+          type: "research_artifact_delta",
+        }),
+      ]),
+    );
     expect(ctx.log).toHaveBeenCalledWith(
       "warn",
       "[claim-citation-gate] long sourced draft has partial citation gaps; failing open",

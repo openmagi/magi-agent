@@ -753,13 +753,19 @@ function modelProgressPreview(
   const elapsed = elapsedSeconds
     ? (isKorean(language) ? `${elapsedSeconds}초째 작업 중` : `${elapsedSeconds}s elapsed`)
     : undefined;
+  const isHeartbeat = stage === "heartbeat";
+  const heartbeatLabel = isHeartbeat && label && !/^(still working|계속 작업 중)$/iu.test(label.trim())
+    ? bounded(label, MAX_TARGET_LENGTH)
+    : undefined;
 
   const action = stage === "completed"
     ? localized(language, "Model step finished", "모델 단계 완료")
-    : stage === "heartbeat"
-      ? localized(language, "Still working", "계속 작업 중")
+    : isHeartbeat
+      ? heartbeatLabel ?? localized(language, "Still working", "계속 작업 중")
       : localized(language, "Thinking through next step", "다음 단계 판단 중");
-  const target = label && !/thinking through next step/i.test(label)
+  const target = isHeartbeat
+    ? elapsed
+    : label && !/thinking through next step/i.test(label)
     ? bounded(label, MAX_TARGET_LENGTH)
     : elapsed;
   const snippet = snippetFrom([detail, output].filter(Boolean).join("\n"));
@@ -767,6 +773,29 @@ function modelProgressPreview(
   return {
     action,
     ...(target ? { target } : {}),
+    ...(snippet ? { snippet } : {}),
+  };
+}
+
+function activityProgressPreview(
+  inputPreview?: string,
+  _outputPreview?: string,
+  language?: ChatResponseLanguage,
+): PublicToolPreview {
+  const input = previewObject(inputPreview);
+  const label = displayValue(input, ["label"]) ?? localized(language, "Working through current step", "작업 진행 중");
+  const target = displayValue(input, ["target"]);
+  const detail = displayValue(input, ["detail"]);
+  const elapsedMs = displayValue(input, ["elapsedMs"]);
+  const elapsedSeconds = elapsedMs ? Math.max(1, Math.round(Number(elapsedMs) / 1000)) : null;
+  const elapsed = elapsedSeconds
+    ? (isKorean(language) ? `${elapsedSeconds}초째 작업 중` : `${elapsedSeconds}s elapsed`)
+    : undefined;
+  const snippet = snippetFrom([target, detail].filter(Boolean).join("\n"));
+
+  return {
+    action: bounded(label, MAX_TARGET_LENGTH),
+    ...(elapsed ? { target: elapsed } : {}),
     ...(snippet ? { snippet } : {}),
   };
 }
@@ -1054,6 +1083,10 @@ export function derivePublicToolPreview(
 
   if (tool === "modelprogress") {
     return modelProgressPreview(input.inputPreview, input.outputPreview, language);
+  }
+
+  if (tool === "activityprogress") {
+    return activityProgressPreview(input.inputPreview, input.outputPreview, language);
   }
 
   if (tool === "taskboard" || tool === "taskupdate") {

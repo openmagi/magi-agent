@@ -5,6 +5,7 @@ export function hasNonTextTurnWork(state: ChannelState): boolean {
     !!state.thinkingText ||
     (state.activeTools?.length ?? 0) > 0 ||
     !!state.browserFrame ||
+    !!state.documentDraft ||
     (state.subagents?.length ?? 0) > 0 ||
     (state.missions?.length ?? 0) > 0 ||
     !!state.taskBoard?.tasks.length ||

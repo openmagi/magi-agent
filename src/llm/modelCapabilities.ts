@@ -28,6 +28,13 @@
  * without spamming the per-turn hot path.
  */
 
+import {
+  ModelRegistry,
+  defaultModelRegistryPath,
+  isModelRegistryEnabled,
+  type ModelCapability as RegistryModelCapability,
+} from "../config/ModelRegistry.js";
+
 export interface ModelCapability {
   /** Model id as used by Anthropic /v1/messages. */
   id: string;
@@ -124,6 +131,46 @@ export const MODEL_CAPABILITIES: Record<string, ModelCapability> = {
     inputUsdPerMtok: 0.2,
     outputUsdPerMtok: 1.25,
   },
+  "gpt-5.4-nano": {
+    id: "gpt-5.4-nano",
+    supportsThinking: false,
+    maxOutputTokens: 4_096,
+    contextWindow: 128_000,
+    inputUsdPerMtok: 0.2,
+    outputUsdPerMtok: 1.25,
+  },
+  "gpt-5-nano": {
+    id: "gpt-5-nano",
+    supportsThinking: false,
+    maxOutputTokens: 8_000,
+    contextWindow: 400_000,
+    inputUsdPerMtok: 0.05,
+    outputUsdPerMtok: 0.4,
+  },
+  "gpt-5-mini": {
+    id: "gpt-5-mini",
+    supportsThinking: false,
+    maxOutputTokens: 16_000,
+    contextWindow: 400_000,
+    inputUsdPerMtok: 0.25,
+    outputUsdPerMtok: 2,
+  },
+  "gpt-5.1": {
+    id: "gpt-5.1",
+    supportsThinking: false,
+    maxOutputTokens: 16_000,
+    contextWindow: 400_000,
+    inputUsdPerMtok: 1.25,
+    outputUsdPerMtok: 10,
+  },
+  "gpt-5.4": {
+    id: "gpt-5.4",
+    supportsThinking: false,
+    maxOutputTokens: 32_000,
+    contextWindow: 400_000,
+    inputUsdPerMtok: 2.5,
+    outputUsdPerMtok: 15,
+  },
   "openai/gpt-5.4-mini": {
     id: "openai/gpt-5.4-mini",
     supportsThinking: false,
@@ -132,8 +179,24 @@ export const MODEL_CAPABILITIES: Record<string, ModelCapability> = {
     inputUsdPerMtok: 0.75,
     outputUsdPerMtok: 4.5,
   },
+  "gpt-5.4-mini": {
+    id: "gpt-5.4-mini",
+    supportsThinking: false,
+    maxOutputTokens: 8_192,
+    contextWindow: 128_000,
+    inputUsdPerMtok: 0.75,
+    outputUsdPerMtok: 4.5,
+  },
   "openai/gpt-5.5": {
     id: "openai/gpt-5.5",
+    supportsThinking: false,
+    maxOutputTokens: 128_000,
+    contextWindow: 1_000_000,
+    inputUsdPerMtok: 5,
+    outputUsdPerMtok: 30,
+  },
+  "gpt-5.5": {
+    id: "gpt-5.5",
     supportsThinking: false,
     maxOutputTokens: 128_000,
     contextWindow: 1_000_000,
@@ -164,11 +227,27 @@ export const MODEL_CAPABILITIES: Record<string, ModelCapability> = {
     inputUsdPerMtok: 0.95,
     outputUsdPerMtok: 4,
   },
+  "kimi-k2p6": {
+    id: "kimi-k2p6",
+    supportsThinking: false,
+    maxOutputTokens: 32_000,
+    contextWindow: 256_000,
+    inputUsdPerMtok: 0.95,
+    outputUsdPerMtok: 4,
+  },
   "fireworks/minimax-m2p7": {
     id: "fireworks/minimax-m2p7",
     supportsThinking: false,
     maxOutputTokens: 8_192,
     contextWindow: 196_608,
+    inputUsdPerMtok: 0.3,
+    outputUsdPerMtok: 1.2,
+  },
+  "minimax-m2p7": {
+    id: "minimax-m2p7",
+    supportsThinking: false,
+    maxOutputTokens: 16_000,
+    contextWindow: 256_000,
     inputUsdPerMtok: 0.3,
     outputUsdPerMtok: 1.2,
   },
@@ -180,11 +259,27 @@ export const MODEL_CAPABILITIES: Record<string, ModelCapability> = {
     inputUsdPerMtok: 0.25,
     outputUsdPerMtok: 1.5,
   },
+  "gemini-3.1-flash-lite-preview": {
+    id: "gemini-3.1-flash-lite-preview",
+    supportsThinking: false,
+    maxOutputTokens: 16_000,
+    contextWindow: 1_000_000,
+    inputUsdPerMtok: 0.25,
+    outputUsdPerMtok: 1.5,
+  },
   "google/gemini-3.1-pro-preview": {
     id: "google/gemini-3.1-pro-preview",
     supportsThinking: false,
     maxOutputTokens: 65_536,
     contextWindow: 1_048_576,
+    inputUsdPerMtok: 2,
+    outputUsdPerMtok: 12,
+  },
+  "gemini-3.1-pro-preview": {
+    id: "gemini-3.1-pro-preview",
+    supportsThinking: false,
+    maxOutputTokens: 32_000,
+    contextWindow: 1_000_000,
     inputUsdPerMtok: 2,
     outputUsdPerMtok: 12,
   },
@@ -236,7 +331,10 @@ export function getRegisteredCapability(model: string): ModelCapability | null {
  * missing entries without noise.
  */
 export function getCapability(model: string): ModelCapability | null {
-  const cap = getRegisteredCapability(model);
+  const registryCap = getRegistryCapability(model);
+  if (registryCap) return registryCap;
+
+  const cap = getRegisteredCapability(model) ?? deriveOpenAICompatibleCapability(model);
   if (!cap) {
     warnUnknownModelOnce(model);
     return null;
@@ -267,7 +365,11 @@ export function computeUsd(
  * never send `thinking` to a model that might 400 on it.
  */
 export function shouldEnableThinkingByDefault(model: string): boolean {
-  const cap = CUSTOM_MODEL_CAPABILITIES[model] ?? MODEL_CAPABILITIES[model];
+  const cap =
+    getRegistryCapability(model) ??
+    CUSTOM_MODEL_CAPABILITIES[model] ??
+    MODEL_CAPABILITIES[model] ??
+    deriveOpenAICompatibleCapability(model);
   return cap?.supportsThinking ?? false;
 }
 
@@ -288,8 +390,91 @@ export const DEFAULT_CONTEXT_WINDOW_TOKENS = 200_000;
  * `getCapability` at every call site.
  */
 export function getContextWindowOrDefault(model: string): number {
-  const cap = CUSTOM_MODEL_CAPABILITIES[model] ?? MODEL_CAPABILITIES[model];
+  const cap =
+    getRegistryCapability(model) ??
+    CUSTOM_MODEL_CAPABILITIES[model] ??
+    MODEL_CAPABILITIES[model] ??
+    deriveOpenAICompatibleCapability(model);
   return cap?.contextWindow ?? DEFAULT_CONTEXT_WINDOW_TOKENS;
+}
+
+export function getDefaultTemperature(model: string): number | undefined {
+  return getActiveModelRegistry()?.getModel(model)?.temperature;
+}
+
+export function getModelProviderParams(model: string): Record<string, unknown> {
+  return getActiveModelRegistry()?.getModel(model)?.providerParams ?? {};
+}
+
+export function getModelEditFormat(model: string): string | undefined {
+  return getActiveModelRegistry()?.getModel(model)?.editFormat;
+}
+
+const OPENAI_COMPAT_PREFIXES = [
+  "ollama/",
+  "local/",
+  "localai/",
+  "vllm/",
+  "tgi/",
+  "custom/",
+  "openrouter/",
+];
+
+function deriveOpenAICompatibleCapability(model: string): ModelCapability | null {
+  if (!OPENAI_COMPAT_PREFIXES.some((prefix) => model.startsWith(prefix))) {
+    return null;
+  }
+  return {
+    id: model,
+    supportsThinking: false,
+    maxOutputTokens: 8_192,
+    contextWindow: 131_072,
+    inputUsdPerMtok: 0,
+    outputUsdPerMtok: 0,
+  };
+}
+
+let activeRegistry: ModelRegistry | null = null;
+
+function getActiveModelRegistry(): ModelRegistry | null {
+  if (!isModelRegistryEnabled()) {
+    if (activeRegistry) {
+      activeRegistry.close();
+      activeRegistry = null;
+    }
+    return null;
+  }
+  if (!activeRegistry || activeRegistry.path !== defaultModelRegistryPath()) {
+    activeRegistry?.close();
+    activeRegistry = new ModelRegistry({ path: defaultModelRegistryPath(), watch: true });
+  }
+  return activeRegistry;
+}
+
+function getRegistryCapability(model: string): ModelCapability | null {
+  const registryModel = getActiveModelRegistry()?.getModel(model);
+  return registryModel ? toRuntimeCapability(registryModel) : null;
+}
+
+function toRuntimeCapability(model: RegistryModelCapability): ModelCapability {
+  return {
+    id: model.id,
+    supportsThinking:
+      (model.thinking !== undefined && model.thinking.type !== "none") ||
+      model.capabilities.includes("extended_thinking"),
+    maxOutputTokens: model.maxOutput,
+    contextWindow: model.contextWindow,
+    inputUsdPerMtok: model.pricing.inputPerMtok,
+    outputUsdPerMtok: model.pricing.outputPerMtok,
+  };
+}
+
+export function reloadModelRegistryForTests(): void {
+  activeRegistry?.close();
+  activeRegistry = null;
+  if (isModelRegistryEnabled()) {
+    activeRegistry = new ModelRegistry({ path: defaultModelRegistryPath(), watch: false });
+  }
 }
 
 const warnedModels = new Set<string>();
@@ -297,6 +482,6 @@ function warnUnknownModelOnce(model: string): void {
   if (warnedModels.has(model)) return;
   warnedModels.add(model);
   console.warn(
-    `[modelCapabilities] unknown model "${model}" — costUsd=0, thinking=off, contextWindow=default. Add to MODEL_CAPABILITIES in src/llm/modelCapabilities.ts.`,
+    `[modelCapabilities] unknown model "${model}" — costUsd=0, thinking=off, contextWindow=default. Add it to config/model-registry.yaml or MODEL_CAPABILITIES in src/llm/modelCapabilities.ts.`,
   );
 }

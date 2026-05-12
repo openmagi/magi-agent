@@ -153,6 +153,18 @@ import {
   makeDebugAfterToolCheckpointHook,
   makeDebugCommitCheckpointHook,
 } from "./debugCheckpointRecorder.js";
+import { makeEnsembleSecurityHooks } from "./ensembleSecurity.js";
+import { isEnvOn } from "../../security/EnsembleAnalyzer.js";
+import {
+  makeCriticGateHook,
+  HallucinationScorer,
+  CompletionScorer,
+  SecurityScorer,
+} from "../../security/CriticMixin.js";
+import { makeRepoMapInjectorHook } from "./repoMapInjector.js";
+import { makeShadowCheckpointHook } from "./shadowCheckpoint.js";
+import { makeFocusChainTrackerHook } from "./focusChainTracker.js";
+import { makeFocusChainInjectorHook } from "./focusChainInjector.js";
 
 export interface RegisterBuiltinsOpts {
   disabled?: string[];
@@ -337,6 +349,8 @@ export function registerBuiltinHooks(
     }
     return true;
   };
+  const ensembleSecurityEnabled = isEnvOn(process.env.MAGI_ENSEMBLE_SECURITY);
+  let ensembleSecurityRegistered = false;
 
   // File delivery interceptor (priority 1, runs before everything).
   // Haiku-classified — deterministic file delivery without depending
@@ -432,6 +446,34 @@ export function registerBuiltinHooks(
   if (maybe(workspaceAwarenessHook.name)) {
     registry.register(workspaceAwarenessHook);
     registered++;
+  }
+
+  // Structure-aware code map ranked by PageRank + current chat file refs.
+  // The hook is non-blocking and self-disables via CORE_AGENT_REPO_MAP=off.
+  const repoMapHook = makeRepoMapInjectorHook({
+    workspaceRoot: opts.workspaceRoot,
+  });
+  if (maybe(repoMapHook.name)) {
+    registry.register(repoMapHook);
+    registered++;
+  }
+
+  // Focus chain — compact, compaction-resilient current task state.
+  // Env-gated: MAGI_FOCUS_CHAIN=1 (default off).
+  const focusChainEnabled = process.env["MAGI_FOCUS_CHAIN"] === "1";
+  if (focusChainEnabled) {
+    const focusTrackerHook = makeFocusChainTrackerHook({ workspaceRoot: opts.workspaceRoot });
+    if (maybe(focusTrackerHook.name)) {
+      registry.register(focusTrackerHook);
+      registered++;
+    }
+    const focusInjectorHook = makeFocusChainInjectorHook({ workspaceRoot: opts.workspaceRoot });
+    if (maybe(focusInjectorHook.name)) {
+      registry.register(focusInjectorHook);
+      registered++;
+    }
+  } else {
+    skipped.push("builtin:focus-chain");
   }
 
   // Session resume seed (Layer 4 meta-cognitive scaffolding). Priority
@@ -562,6 +604,20 @@ export function registerBuiltinHooks(
     skipped.push("builtin:memory-continuity-guard");
   }
 
+  if (ensembleSecurityEnabled) {
+    const ensembleHooks = makeEnsembleSecurityHooks({
+      workspaceRoot: opts.workspaceRoot,
+    });
+    if (maybe(ensembleHooks.beforeToolUse.name)) {
+      registry.register(ensembleHooks.beforeToolUse);
+      registry.register(ensembleHooks.beforeCommit);
+      registered += 2;
+      ensembleSecurityRegistered = true;
+    }
+  } else {
+    skipped.push("builtin:ensemble-security-analyzer");
+  }
+
   const sourceAuthorityGateEnv =
     (process.env.CORE_AGENT_SOURCE_AUTHORITY_GATE ?? "on")
       .trim()
@@ -571,7 +627,7 @@ export function registerBuiltinHooks(
     sourceAuthorityGateEnv === "on" ||
     sourceAuthorityGateEnv === "true" ||
     sourceAuthorityGateEnv === "1";
-  if (sourceAuthorityGateEnabled) {
+  if (!ensembleSecurityRegistered && sourceAuthorityGateEnabled) {
     const sourceAuthorityGateHook = makeSourceAuthorityGateHook();
     if (maybe(sourceAuthorityGateHook.name)) {
       registry.register(sourceAuthorityGateHook);
@@ -684,10 +740,14 @@ export function registerBuiltinHooks(
     registered++;
   }
 
-  const secretHook = makeSecretExposureGateHook();
-  if (maybe(secretHook.name)) {
-    registry.register(secretHook);
-    registered++;
+  if (!ensembleSecurityRegistered) {
+    const secretHook = makeSecretExposureGateHook();
+    if (maybe(secretHook.name)) {
+      registry.register(secretHook);
+      registered++;
+    }
+  } else {
+    skipped.push("builtin:secret-exposure-gate");
   }
 
   const providerHealthHook = makeProviderHealthVerifierHook();
@@ -883,6 +943,35 @@ export function registerBuiltinHooks(
     skipped.push("builtin:benchmark-verifier");
   }
 
+  const criticGateEnabled = isEnvOn(process.env.MAGI_CRITIC_GATE);
+  if (criticGateEnabled) {
+    const criticHook = makeCriticGateHook({
+      threshold: 0.7,
+      maxRetries: 2,
+      scorer: [
+        new HallucinationScorer(),
+        new CompletionScorer(),
+        new SecurityScorer(),
+      ],
+      buildFollowup: (score) => [
+        `[RETRY:CRITIC_GATE] Output quality score ${score.score.toFixed(2)} is below threshold.`,
+        `Scorer: ${score.scoredBy}`,
+        `Issue: ${score.reason}`,
+        ...(score.suggestions.length > 0
+          ? ["", "Suggestions:", ...score.suggestions.map((suggestion) => `- ${suggestion}`)]
+          : []),
+        "",
+        "Re-draft your response addressing the issues above.",
+      ].join("\n"),
+    });
+    if (maybe(criticHook.name)) {
+      registry.register(criticHook);
+      registered++;
+    }
+  } else {
+    skipped.push("builtin:critic-gate");
+  }
+
   const hipoHook = makeHipocampusCheckpointHook(opts.workspaceRoot);
   if (maybe(hipoHook.name)) {
     registry.register(hipoHook);
@@ -976,7 +1065,7 @@ export function registerBuiltinHooks(
     dangerousPatternsEnv === "on" ||
     dangerousPatternsEnv === "true" ||
     dangerousPatternsEnv === "1";
-  if (dangerousPatternsEnabled) {
+  if (!ensembleSecurityRegistered && dangerousPatternsEnabled) {
     const dpHook = makeDangerousPatternsHook({ workspaceRoot: opts.workspaceRoot });
     if (maybe(dpHook.name)) {
       registry.register(dpHook);
@@ -1208,6 +1297,21 @@ export function registerBuiltinHooks(
     }
   } else {
     skipped.push("builtin:task-lifecycle");
+  }
+
+  // Shadow checkpoint — workspace time machine via .shadow-git DAG.
+  // Env-gated: MAGI_CHECKPOINT=1 (default off).
+  const shadowCheckpointEnabled = process.env["MAGI_CHECKPOINT"] === "1";
+  if (shadowCheckpointEnabled) {
+    const shadowHook = makeShadowCheckpointHook({
+      workspaceRoot: opts.workspaceRoot,
+    });
+    if (maybe(shadowHook.name)) {
+      registry.register(shadowHook);
+      registered++;
+    }
+  } else {
+    skipped.push("builtin:shadow-checkpoint");
   }
 
   return { registered, skipped };

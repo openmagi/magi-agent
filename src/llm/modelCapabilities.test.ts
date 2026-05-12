@@ -8,21 +8,43 @@
  *   - MODEL_CAPABILITIES contains the expected ids
  */
 
-import { afterEach, describe, it, expect } from "vitest";
+import { afterEach, beforeEach, describe, it, expect, vi } from "vitest";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
   MODEL_CAPABILITIES,
   getCapability,
   computeUsd,
+  reloadModelRegistryForTests,
   registerModelCapability,
   resetCustomModelCapabilitiesForTests,
   shouldEnableThinkingByDefault,
 } from "./modelCapabilities.js";
 
-describe("getCapability", () => {
-  afterEach(() => {
-    resetCustomModelCapabilitiesForTests();
-  });
+beforeEach(() => {
+  vi.stubEnv("MAGI_MODEL_REGISTRY", "");
+  vi.stubEnv("MODEL_REGISTRY_PATH", "");
+  resetCustomModelCapabilitiesForTests();
+  reloadModelRegistryForTests();
+});
 
+afterEach(() => {
+  vi.stubEnv("MAGI_MODEL_REGISTRY", "");
+  vi.stubEnv("MODEL_REGISTRY_PATH", "");
+  resetCustomModelCapabilitiesForTests();
+  reloadModelRegistryForTests();
+  vi.unstubAllEnvs();
+});
+
+function withRegistryYaml(contents: string): { dir: string; file: string } {
+  const dir = mkdtempSync(join(tmpdir(), "model-capability-registry-"));
+  const file = join(dir, "model-registry.yaml");
+  writeFileSync(file, contents, "utf8");
+  return { dir, file };
+}
+
+describe("getCapability", () => {
   it("returns the full record for a known model", () => {
     const cap = getCapability("claude-opus-4-7");
     expect(cap).not.toBeNull();
@@ -53,6 +75,14 @@ describe("getCapability", () => {
     expect(MODEL_CAPABILITIES["local/gemma-fast"]).toBeDefined();
     expect(MODEL_CAPABILITIES["local/gemma-max"]).toBeDefined();
     expect(MODEL_CAPABILITIES["local/qwen-uncensored"]).toBeDefined();
+    expect(MODEL_CAPABILITIES["gpt-5.4-nano"]).toBeDefined();
+    expect(MODEL_CAPABILITIES["gpt-5.4-mini"]).toBeDefined();
+    expect(MODEL_CAPABILITIES["gpt-5.5"]).toBeDefined();
+    expect(MODEL_CAPABILITIES["gpt-5-nano"]).toBeDefined();
+    expect(MODEL_CAPABILITIES["kimi-k2p6"]).toBeDefined();
+    expect(MODEL_CAPABILITIES["gemini-3.1-pro-preview"]).toBeDefined();
+    expect(MODEL_CAPABILITIES["magi-smart-router/auto"]).toBeUndefined();
+    expect(MODEL_CAPABILITIES["big-dic-router/auto"]).toBeUndefined();
   });
 
   it("contains Mac Studio local model capabilities", () => {
@@ -93,6 +123,46 @@ describe("getCapability", () => {
     expect(shouldEnableThinkingByDefault("llama3.1")).toBe(false);
   });
 
+  it("derives zero-cost fallback capabilities for OpenAI-compatible local model prefixes", () => {
+    expect(getCapability("ollama/llama3.3:70b")).toMatchObject({
+      id: "ollama/llama3.3:70b",
+      supportsThinking: false,
+      maxOutputTokens: 8192,
+      contextWindow: 131072,
+      inputUsdPerMtok: 0,
+      outputUsdPerMtok: 0,
+    });
+    expect(getCapability("vllm/qwen2.5-72b")).toMatchObject({
+      id: "vllm/qwen2.5-72b",
+      contextWindow: 131072,
+    });
+    expect(getCapability("tgi/mistral-large")).toMatchObject({
+      id: "tgi/mistral-large",
+      contextWindow: 131072,
+    });
+    expect(getCapability("localai/llama3")).toMatchObject({
+      id: "localai/llama3",
+      contextWindow: 131072,
+    });
+    expect(getCapability("custom/qwen2.5-72b")).toMatchObject({
+      id: "custom/qwen2.5-72b",
+      contextWindow: 131072,
+    });
+    expect(computeUsd("ollama/llama3.3:70b", 1_000_000, 1_000_000)).toBe(0);
+    expect(shouldEnableThinkingByDefault("ollama/deepseek-r1:32b")).toBe(false);
+  });
+
+  it("derives OpenRouter fallback capabilities without pretending pricing is known", () => {
+    expect(getCapability("openrouter/anthropic/claude-opus-4-7")).toMatchObject({
+      id: "openrouter/anthropic/claude-opus-4-7",
+      supportsThinking: false,
+      maxOutputTokens: 8192,
+      contextWindow: 131072,
+      inputUsdPerMtok: 0,
+      outputUsdPerMtok: 0,
+    });
+  });
+
   it("recognizes provider-prefixed runtime model ids used by provisioning and api-proxy", () => {
     expect(getCapability("anthropic/claude-opus-4-7")).toMatchObject({
       id: "claude-opus-4-7",
@@ -110,6 +180,56 @@ describe("getCapability", () => {
       contextWindow: 1_048_576,
       maxOutputTokens: 65_536,
     });
+  });
+
+  it("uses the YAML registry when MAGI_MODEL_REGISTRY is enabled", () => {
+    const { dir, file } = withRegistryYaml(`models:
+  yaml-only-model:
+    provider: anthropic
+    context_window: 345678
+    max_output: 12345
+    thinking: { type: adaptive }
+    temperature: 0.4
+    capabilities: [tool_use, vision, extended_thinking]
+    edit_format: search_replace
+    pricing: { input_per_mtok: 2, output_per_mtok: 8 }
+`);
+    try {
+      vi.stubEnv("MAGI_MODEL_REGISTRY", "1");
+      vi.stubEnv("MODEL_REGISTRY_PATH", file);
+      reloadModelRegistryForTests();
+
+      expect(getCapability("yaml-only-model")).toEqual({
+        id: "yaml-only-model",
+        supportsThinking: true,
+        maxOutputTokens: 12345,
+        contextWindow: 345678,
+        inputUsdPerMtok: 2,
+        outputUsdPerMtok: 8,
+      });
+      expect(computeUsd("yaml-only-model", 1_000_000, 1_000_000)).toBeCloseTo(10, 6);
+      expect(shouldEnableThinkingByDefault("yaml-only-model")).toBe(true);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("falls back to hardcoded capabilities when YAML is empty", () => {
+    const { dir, file } = withRegistryYaml("models: {}\n");
+    try {
+      vi.stubEnv("MAGI_MODEL_REGISTRY", "1");
+      vi.stubEnv("MODEL_REGISTRY_PATH", file);
+      reloadModelRegistryForTests();
+
+      expect(getCapability("claude-sonnet-4-6")).toMatchObject({
+        id: "claude-sonnet-4-6",
+        contextWindow: 200000,
+        maxOutputTokens: 16000,
+      });
+      expect(getCapability("missing-from-yaml-and-fallback")).toBeNull();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
 
@@ -150,6 +270,12 @@ describe("computeUsd", () => {
   it("computes USD correctly for GPT-5.5 Pro ($30 in / $180 out)", () => {
     expect(computeUsd("openai/gpt-5.5-pro", 1_000_000, 1_000_000)).toBeCloseTo(210, 6);
   });
+
+  it("computes non-zero costs for bare routed model ids", () => {
+    expect(computeUsd("gpt-5.4-nano", 1_000_000, 1_000_000)).toBeGreaterThan(0);
+    expect(computeUsd("gpt-5.4-mini", 1_000_000, 1_000_000)).toBeGreaterThan(0);
+    expect(computeUsd("kimi-k2p6", 1_000_000, 1_000_000)).toBeGreaterThan(0);
+  });
 });
 
 describe("shouldEnableThinkingByDefault", () => {
@@ -172,6 +298,13 @@ describe("shouldEnableThinkingByDefault", () => {
     expect(shouldEnableThinkingByDefault("openai/gpt-5.5")).toBe(false);
     expect(shouldEnableThinkingByDefault("openai/gpt-5.5-pro")).toBe(false);
     expect(shouldEnableThinkingByDefault("openai-codex/gpt-5.5")).toBe(false);
+  });
+
+  it("returns false for non-Anthropic routed models", () => {
+    expect(shouldEnableThinkingByDefault("gpt-5.4-nano")).toBe(false);
+    expect(shouldEnableThinkingByDefault("gpt-5.4-mini")).toBe(false);
+    expect(shouldEnableThinkingByDefault("kimi-k2p6")).toBe(false);
+    expect(shouldEnableThinkingByDefault("gemini-3.1-pro-preview")).toBe(false);
   });
 
   it("returns false for unknown models (fail-closed on thinking)", () => {

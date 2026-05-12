@@ -27,6 +27,12 @@ import type { LLMClient, LLMMessage, LLMContentBlock } from "../../transport/LLM
 import type { TranscriptEntry } from "../../storage/Transcript.js";
 import { isCompactionBoundary } from "../../storage/Transcript.js";
 import { getContextWindowOrDefault } from "../../llm/modelCapabilities.js";
+import {
+  STRUCTURED_COMPACTION_PROMPT,
+  MAX_COMPACTION_RETRIES,
+  validateCompactionOutput,
+  buildRetryPrompt,
+} from "./structuredCompaction.js";
 
 export type CompactionBoundaryEntry = Extract<
   TranscriptEntry,
@@ -144,6 +150,10 @@ export class ContextEngine {
   private readonly configuredReserveTokens: number;
   private readonly minViableBudgetTokens: number;
   private readonly contextWindowResolver: (model: string) => number;
+  private readonly proactiveSummaries = new Map<
+    string,
+    { status: "pending" | "ready"; summaryText?: string }
+  >();
 
   constructor(
     private readonly llm: LLMClient,
@@ -305,6 +315,35 @@ export class ContextEngine {
   }
 
   /**
+   * Best-effort background summary for old transcript history under
+   * priority-context pressure. The canonical transcript remains untouched;
+   * a later turn may use the ready memo as a bounded old-history substitute.
+   */
+  requestProactiveSummary(
+    session: Session,
+    transcriptEntries: readonly TranscriptEntry[],
+  ): void {
+    if (transcriptEntries.length === 0) return;
+    const key = session.meta.sessionKey;
+    const existing = this.proactiveSummaries.get(key);
+    if (existing?.status === "pending") return;
+    this.proactiveSummaries.set(key, { status: "pending" });
+    void (async () => {
+      const summaryText = await this.summarise(transcriptEntries);
+      if (summaryText === null) {
+        this.proactiveSummaries.delete(key);
+        return;
+      }
+      this.proactiveSummaries.set(key, { status: "ready", summaryText });
+    })();
+  }
+
+  getProactiveSummary(sessionKey: string): string | null {
+    const found = this.proactiveSummaries.get(sessionKey);
+    return found?.status === "ready" ? found.summaryText ?? null : null;
+  }
+
+  /**
    * Rehydrate a transcript into LLM messages, collapsing everything
    * BEFORE the latest compaction boundary (inclusive of any earlier
    * boundaries) into a single synthetic system summary message per
@@ -344,41 +383,59 @@ export class ContextEngine {
   }
 
   /**
-   * Drive a single Haiku summarisation round-trip against the
-   * pre-compaction transcript. Returns `null` on any failure so the
-   * caller fails open (no boundary is written).
+   * Drive structured Haiku summarisation with validation and retry.
+   * Uses the forced template to prevent compaction drift. Returns
+   * `null` on hard failures so the caller fails open.
    */
   private async summarise(
     entries: readonly TranscriptEntry[],
   ): Promise<string | null> {
-    const deadline = Date.now() + this.haikuDeadlineMs;
-    const system = [
-      "You compact a conversational transcript into a handoff memo for the next turn or a new session.",
-      "A successor assistant instance will rely on this summary to continue work after compaction.",
-      "Write the summary as a handoff memo that preserves:",
-      "- Active task / goal.",
-      "- Preserve execution-contract state exactly when present:",
-      "  goal, constraints, current plan, completed steps, blockers, acceptance criteria, verification evidence, artifacts, and remaining risks.",
-      "- Decisions already made.",
-      "- Open questions / pending sub-tasks.",
-      "- Files, ids, and numeric values the successor needs.",
-      "Use these headings when relevant: Current objective, Current state, Completed work, Decisions, Files and IDs, Blockers or risks, Next step.",
-      "Prefer the latest concrete state over older exploration. Do not preserve dead ends unless they explain a decision or risk.",
-      "Write 10-30 lines of dense prose. No preamble, no postamble.",
-    ].join("\n");
-
     const userPayload = sampleSummaryPayload(
       renderEntriesForSummary(entries),
       SUMMARY_INPUT_BUDGET_CHARS,
     );
+    let bestOutput: string | null = null;
+
+    for (let attempt = 0; attempt <= MAX_COMPACTION_RETRIES; attempt += 1) {
+      const messages: LLMMessage[] =
+        attempt === 0
+          ? [{ role: "user", content: userPayload }]
+          : [
+              { role: "user", content: userPayload },
+              { role: "assistant", content: bestOutput ?? "" },
+              {
+                role: "user",
+                content: buildRetryPrompt(
+                  validateCompactionOutput(bestOutput ?? "").missing,
+                ),
+              },
+            ];
+
+      const result = await this.callSummarizer(messages);
+      if (result === null) return bestOutput;
+
+      bestOutput = result;
+      if (validateCompactionOutput(result).valid) return result;
+    }
+
+    return bestOutput;
+  }
+
+  /**
+   * Single summarizer round-trip with the structured compaction prompt.
+   */
+  private async callSummarizer(
+    messages: LLMMessage[],
+  ): Promise<string | null> {
+    const deadline = Date.now() + this.haikuDeadlineMs;
 
     let output = "";
     try {
       const stream = this.llm.stream({
         model: this.summaryModel,
-        system,
-        messages: [{ role: "user", content: userPayload }],
-        max_tokens: 1024,
+        system: STRUCTURED_COMPACTION_PROMPT,
+        messages,
+        max_tokens: 1536,
         temperature: 0,
       });
       for await (const evt of stream) {

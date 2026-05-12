@@ -12,11 +12,12 @@ import { SKILLS } from "@/lib/skills-catalog";
 import type { KbDocEntry } from "@/hooks/use-kb-docs";
 import type { PendingKbUpload } from "@/lib/chat/kb-uploads";
 
-interface SlashEntry {
+export interface SlashEntry {
   command: string;
   label: string;
   category: string;
   builtin?: boolean;
+  searchText?: string;
 }
 
 const BUILTIN_COMMANDS: SlashEntry[] = [
@@ -37,6 +38,55 @@ const ALL_SLASH: SlashEntry[] = (() => {
   }
   return entries;
 })();
+
+export interface ChatInputCustomSkill {
+  name: string;
+  title: string;
+  description?: string;
+  tags?: string[];
+}
+
+export function buildSlashEntries(customSkills: ChatInputCustomSkill[] = []): SlashEntry[] {
+  const entries: SlashEntry[] = [...ALL_SLASH];
+  const seenCommands = new Set(entries.map((entry) => entry.command.toLowerCase()));
+
+  for (const skill of customSkills) {
+    const command = normalizeSlashCommand(skill.name);
+    if (!command) continue;
+    const dedupeKey = command.toLowerCase();
+    if (seenCommands.has(dedupeKey)) continue;
+    seenCommands.add(dedupeKey);
+    const label = skill.title.trim() || command;
+    entries.push({
+      command,
+      label,
+      category: "custom",
+      searchText: [
+        command,
+        label,
+        skill.description ?? "",
+        ...(skill.tags ?? []),
+      ].join(" "),
+    });
+  }
+
+  return entries;
+}
+
+export function getSlashMatches(entries: SlashEntry[], query: string): SlashEntry[] {
+  const normalizedQuery = query.toLowerCase();
+  if (normalizedQuery === "") return entries.slice(0, 12);
+  return entries
+    .filter((entry) => {
+      const haystack = `${entry.command} ${entry.label} ${entry.category} ${entry.searchText ?? ""}`.toLowerCase();
+      return haystack.includes(normalizedQuery);
+    })
+    .slice(0, 12);
+}
+
+function normalizeSlashCommand(command: string): string {
+  return command.trim().replace(/^\/+/, "").replace(/\s+/g, "-");
+}
 
 interface PendingFile {
   file: File;
@@ -103,6 +153,8 @@ interface ChatInputProps {
   uploadStates?: Record<string, PendingKbUpload>;
   /** Optional controls rendered as compact trailing controls inside the composer shell. */
   composerAccessory?: ReactNode;
+  /** Custom skills installed for the current runtime and exposed via slash autocomplete. */
+  customSkills?: ChatInputCustomSkill[];
 }
 
 interface ComposerEnterEvent {
@@ -184,6 +236,7 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
     onSelectKbDoc,
     uploadStates,
     composerAccessory,
+    customSkills,
   },
   ref,
 ) {
@@ -234,13 +287,11 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
   }, [text, cursorPos]);
   const slashQuery = slashToken?.query ?? null;
   const prevQueryRef = useRef(slashQuery);
+  const slashEntries = useMemo(() => buildSlashEntries(customSkills), [customSkills]);
   const slashMatches = useMemo(() => {
     if (slashQuery === null) return [];
-    if (slashQuery === "") return ALL_SLASH.slice(0, 12);
-    return ALL_SLASH.filter(
-      (e) => e.command.toLowerCase().includes(slashQuery) || e.label.toLowerCase().includes(slashQuery),
-    ).slice(0, 12);
-  }, [slashQuery]);
+    return getSlashMatches(slashEntries, slashQuery);
+  }, [slashEntries, slashQuery]);
   const slashOpen = slashMatches.length > 0;
 
   // Reset index when query changes (no useEffect — derive synchronously)

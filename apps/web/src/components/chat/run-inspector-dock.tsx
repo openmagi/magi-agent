@@ -10,6 +10,7 @@ import type {
   ChannelState,
   ChatResponseLanguage,
   ControlRequestRecord,
+  DocumentDraftPreview,
   InspectedSource,
   QueuedMessage,
   SubagentActivity,
@@ -52,6 +53,7 @@ function hasVisibleRunState(
     channelState.streaming ||
     (channelState.activeTools ?? []).length > 0 ||
     !!channelState.browserFrame ||
+    !!channelState.documentDraft ||
     subagents.length > 0 ||
     queuedMessages.length > 0 ||
     pendingRequests.length > 0 ||
@@ -74,6 +76,7 @@ function runIdentity(
     channelState.thinkingStartedAt ??
     activeTools[0]?.startedAt ??
     channelState.browserFrame?.capturedAt ??
+    channelState.documentDraft?.updatedAt ??
     subagents[0]?.startedAt ??
     inspectedSources[0]?.inspectedAt ??
     channelState.citationGate?.checkedAt ??
@@ -112,6 +115,8 @@ function phaseLabel(
       return t(language, "Planning", "계획 중");
     case "executing":
       return t(language, "Running", "실행 중");
+    case "compacting":
+      return t(language, "Compacting", "압축 중");
     case "verifying":
       return t(language, "Verifying", "검증 중");
     case "committing":
@@ -316,6 +321,41 @@ function BrowserFrameInline({
         alt={t(language, "Browser preview", "브라우저 미리보기")}
         className="block aspect-video w-full max-h-64 bg-black/[0.03] object-contain"
       />
+    </div>
+  );
+}
+
+function DocumentDraftInline({
+  draft,
+  language,
+}: {
+  draft: DocumentDraftPreview;
+  language?: ChatResponseLanguage;
+}) {
+  const unit = draft.contentLength === 1 ? "char" : "chars";
+  const sizeLabel = isKorean(language)
+    ? `${draft.contentLength.toLocaleString()}자`
+    : `${draft.contentLength.toLocaleString()} ${unit}`;
+
+  return (
+    <div
+      className="mt-2 overflow-hidden rounded-lg border border-[#7C3AED]/15 bg-white"
+      data-run-inspector-document-draft="true"
+    >
+      <div className="flex min-w-0 items-center justify-between gap-2 border-b border-black/[0.06] px-2.5 py-1.5">
+        <span className="shrink-0 text-[10px] font-semibold uppercase tracking-wide text-secondary/45">
+          {draft.status === "done"
+            ? t(language, "Document written", "문서 작성 완료")
+            : t(language, "Writing document", "문서 작성 중")}
+        </span>
+        <span className="min-w-0 truncate text-[10.5px] text-secondary/55">
+          {draft.filename ?? (draft.format === "md" ? "Markdown" : "Text")}
+          <span className="text-secondary/35"> · {sizeLabel}</span>
+        </span>
+      </div>
+      <pre className="max-h-52 overflow-auto bg-[#FBFBFD] px-2.5 py-2 whitespace-pre-wrap break-words text-[11px] leading-snug text-secondary/75">
+        {draft.truncated ? `...\n${draft.contentPreview}` : draft.contentPreview}
+      </pre>
     </div>
   );
 }
@@ -589,6 +629,10 @@ export function RunInspectorDock({
         <div className="mt-2 max-h-[min(50vh,34rem)] overflow-y-auto overscroll-contain pr-1 [scrollbar-gutter:stable]">
           {channelState.browserFrame && (
             <BrowserFrameInline frame={channelState.browserFrame} language={language} />
+          )}
+
+          {channelState.documentDraft && (
+            <DocumentDraftInline draft={channelState.documentDraft} language={language} />
           )}
 
           <ResearchEvidence

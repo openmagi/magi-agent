@@ -6,6 +6,7 @@ export interface ResearchTurnRecord {
   turnId: string;
   sourceSensitive: boolean;
   requiredSourceKinds: SourceLedgerKind[];
+  reason: string;
   startedAt: number;
 }
 
@@ -30,16 +31,8 @@ export interface ResearchContractStoreOptions {
   now?: () => number;
 }
 
-const SOURCE_SENSITIVE_RE =
-  /\b(?:latest|current|today|recent|now|news|price|version|release|github|api|docs?|documentation|web|research|source|verify|citation)\b|(?:최신|현재|오늘|최근|뉴스|가격|버전|릴리스|깃허브|문서|공식|출처|근거|검증|조사|리서치|인용)/i;
-
-export function isSourceSensitiveResearchRequest(userMessage: string): boolean {
-  return SOURCE_SENSITIVE_RE.test(userMessage);
-}
-
-function sourceRequirementsFor(userMessage: string): SourceLedgerKind[] {
-  if (!isSourceSensitiveResearchRequest(userMessage)) return [];
-  return ["web_search", "web_fetch"];
+function sourceRequirementsFor(sourceSensitive: boolean): SourceLedgerKind[] {
+  return sourceSensitive ? ["web_search", "web_fetch"] : [];
 }
 
 export class ResearchContractStore {
@@ -51,12 +44,22 @@ export class ResearchContractStore {
     this.now = opts.now ?? Date.now;
   }
 
-  startTurn(input: { turnId: string; userMessage: string }): ResearchTurnRecord {
-    const requiredSourceKinds = sourceRequirementsFor(input.userMessage);
+  startTurn(input: {
+    turnId: string;
+    sourceSensitive?: boolean;
+    reason?: string;
+  }): ResearchTurnRecord {
+    const sourceSensitive = input.sourceSensitive === true;
+    const requiredSourceKinds = sourceRequirementsFor(sourceSensitive);
     const record: ResearchTurnRecord = {
       turnId: input.turnId,
-      sourceSensitive: requiredSourceKinds.length > 0,
+      sourceSensitive,
       requiredSourceKinds,
+      reason:
+        input.reason ??
+        (sourceSensitive
+          ? "LLM classifier marked this turn as source-sensitive research."
+          : "LLM classifier did not mark this turn as source-sensitive research."),
       startedAt: this.now(),
     };
     this.turns.set(input.turnId, this.copyTurn(record));

@@ -26,6 +26,7 @@ import type { SourceLedgerRecord } from "../research/SourceLedger.js";
 import type { TurnStatus, TurnStopReason } from "../turn/types.js";
 import type { ControlEvent } from "../control/ControlEvents.js";
 import { UserVisibleRouteMetaFilter } from "../turn/visibleText.js";
+import type { TokenUsage } from "../util/types.js";
 
 export type TurnRoute = "direct" | "subagent" | "pipeline";
 
@@ -40,12 +41,22 @@ export type AgentEvent =
       status: "committed" | "aborted";
       stopReason: TurnStopReason;
       reason?: string;
+      usage?: TokenUsage;
     }
   | { type: "control_event"; seq: number; event: ControlEvent }
   | { type: "control_replay_complete"; lastSeq: number }
   | { type: "text_delta"; delta: string }
   | { type: "response_clear" }
   | { type: "thinking_delta"; delta: string }
+  | {
+      type: "document_draft";
+      id: string;
+      filename?: string;
+      format: "md" | "txt";
+      contentPreview: string;
+      contentLength: number;
+      truncated: boolean;
+    }
   | {
       type: "llm_progress";
       turnId: string;
@@ -76,6 +87,35 @@ export type AgentEvent =
       }>;
     }
   | { type: "source_inspected"; source: SourceLedgerRecord }
+  | {
+      type: "research_artifact_delta";
+      claims?: Array<{
+        claimId: string;
+        text: string;
+        claimType: "fact" | "uncertainty" | "inference" | "recommendation" | "limitation";
+        supportStatus: "supported" | "partial" | "unsupported" | "uncertain";
+        sourceIds: string[];
+        confidence?: number;
+        reasoning?: {
+          premiseSourceIds: string[];
+          inference: string;
+          assumptions: string[];
+          status: "source_backed" | "partial" | "missing_source_support" | "uncertain";
+        };
+      }>;
+      claimSourceLinks?: Array<{
+        claimId: string;
+        sourceId: string;
+        support: "supports" | "partially_supports" | "contradicts" | "context";
+      }>;
+      contradictions?: Array<{
+        contradictionId: string;
+        claimIds: string[];
+        sourceIds: string[];
+        resolution?: string;
+        status: "handled" | "unresolved" | "not_applicable";
+      }>;
+    }
   | {
       type: "browser_frame";
       action: string;
@@ -108,6 +148,18 @@ export type AgentEvent =
       retryNo: number;
       toolUseId?: string;
       toolName?: string;
+    }
+  | {
+      type: "spawn_worktree_conflict";
+      action: "apply" | "cherry_pick";
+      spawnDir: string;
+      conflictKind: "parent_dirty" | "cherry_pick";
+      conflictedFiles: string[];
+      changedFiles: string[];
+      mergeStrategy: "copy" | "cherry_pick";
+      adoptedCommit?: string;
+      summary: string;
+      suggestedActions: string[];
     }
   | {
       /**
@@ -228,6 +280,58 @@ export type AgentEvent =
       summary?: unknown;
     }
   | {
+      type: "child_llm_start";
+      taskId: string;
+      parentTurnId?: string;
+      childTurnId?: string;
+      traceId?: string;
+      iter: number;
+      model: string;
+    }
+  | {
+      type: "child_llm_end";
+      taskId: string;
+      parentTurnId?: string;
+      childTurnId?: string;
+      traceId?: string;
+      iter: number;
+      model: string;
+      stopReason: string;
+      durationMs: number;
+    }
+  | {
+      type: "child_tool_batch_start";
+      taskId: string;
+      parentTurnId?: string;
+      childTurnId?: string;
+      traceId?: string;
+      iter: number;
+      toolCount: number;
+      toolNames: string[];
+    }
+  | {
+      type: "child_tool_batch_end";
+      taskId: string;
+      parentTurnId?: string;
+      childTurnId?: string;
+      traceId?: string;
+      iter: number;
+      status: "ok" | "error";
+      toolCount: number;
+      errorCount: number;
+      durationMs: number;
+      errorName?: string;
+      errorMessage?: string;
+    }
+  | {
+      type: "child_abort";
+      taskId: string;
+      parentTurnId?: string;
+      childTurnId?: string;
+      traceId?: string;
+      source: string;
+    }
+  | {
       /** SpawnAgent tournament mode (T3-16, OMC Port A) — final ranked variants. */
       type: "tournament_result";
       variants: Array<{
@@ -321,8 +425,8 @@ export type AgentEvent =
   | {
       /**
        * B5 pipeline heartbeat — emitted by Turn.ts when an iteration
-       * goes silent for > HEARTBEAT_SILENCE_MS (20s). Subsequent
-       * heartbeats fire every HEARTBEAT_INTERVAL_MS (30s) until the
+       * goes silent for > HEARTBEAT_SILENCE_MS (10s). Subsequent
+       * heartbeats fire every HEARTBEAT_INTERVAL_MS (10s) until the
        * iteration emits something else or the turn ends. Lets the
        * frontend distinguish "agent alive but thinking" from "agent
        * wedged" on long-running tool calls / LLM streams.

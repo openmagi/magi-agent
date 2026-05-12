@@ -1,5 +1,7 @@
 import type {
   ChannelState,
+  CitationGateStatus,
+  InspectedSource,
   MissionActivity,
   SubagentActivity,
   TaskBoardSnapshot,
@@ -24,6 +26,8 @@ export interface ActiveSnapshot {
   taskBoard?: TaskBoardSnapshot | null;
   missions?: MissionActivity[];
   activeGoalMissionId?: string | null;
+  inspectedSources?: InspectedSource[];
+  citationGate?: CitationGateStatus | null;
 }
 
 export function isLiveActiveSnapshot(
@@ -38,6 +42,8 @@ export function isLiveActiveSnapshot(
     (snapshot.activeTools?.length ?? 0) > 0 ||
     (snapshot.subagents?.length ?? 0) > 0 ||
     (snapshot.missions?.length ?? 0) > 0 ||
+    (snapshot.inspectedSources?.length ?? 0) > 0 ||
+    !!snapshot.citationGate ||
     !!snapshot.taskBoard?.tasks.length
   );
 }
@@ -52,6 +58,8 @@ function hasVisibleSnapshotProgress(snapshot: ActiveSnapshot): boolean {
     (snapshot.activeTools?.length ?? 0) > 0 ||
     (snapshot.subagents?.length ?? 0) > 0 ||
     (snapshot.missions?.length ?? 0) > 0 ||
+    (snapshot.inspectedSources?.length ?? 0) > 0 ||
+    !!snapshot.citationGate ||
     !!snapshot.taskBoard?.tasks.length
   );
 }
@@ -65,11 +73,15 @@ export function channelStateFromActiveSnapshot(
   const subagents = snapshot.subagents ?? existing?.subagents ?? [];
   const taskBoard = snapshot.taskBoard ?? existing?.taskBoard ?? null;
   const missions = snapshot.missions ?? existing?.missions ?? [];
+  const inspectedSources = snapshot.inspectedSources ?? existing?.inspectedSources ?? [];
+  const citationGate = snapshot.citationGate ?? existing?.citationGate ?? null;
   const hasProgress =
     hasVisibleSnapshotProgress(snapshot) ||
     activeTools.length > 0 ||
     subagents.length > 0 ||
     missions.length > 0 ||
+    inspectedSources.length > 0 ||
+    !!citationGate ||
     !!taskBoard?.tasks.length;
   return {
     streaming: !detached,
@@ -92,5 +104,7 @@ export function channelStateFromActiveSnapshot(
     missions,
     activeGoalMissionId:
       snapshot.activeGoalMissionId ?? existing?.activeGoalMissionId ?? null,
+    inspectedSources,
+    citationGate,
   };
 }

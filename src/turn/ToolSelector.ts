@@ -13,6 +13,7 @@ import type { SseWriter } from "../transport/SseWriter.js";
 import type { LLMToolDef } from "../transport/LLMClient.js";
 import type { Tool } from "../Tool.js";
 import { filterToolsByIntent } from "../rules/IntentClassifier.js";
+import type { ToolRegistry } from "../tools/ToolRegistry.js";
 
 /**
  * Hard cap on tools exposed per turn (§9.8 P3).
@@ -23,7 +24,7 @@ import { filterToolsByIntent } from "../rules/IntentClassifier.js";
  */
 export const MAX_TOOLS_PER_TURN = 50;
 
-/** Tool names allowed while planMode=true. */
+/** Tool names allowed while planMode=true. Writes remain runtime-gated. */
 export const PLAN_MODE_ALLOWED_TOOLS: ReadonlySet<string> = new Set([
   "FileRead",
   "Glob",
@@ -31,6 +32,7 @@ export const PLAN_MODE_ALLOWED_TOOLS: ReadonlySet<string> = new Set([
   "TaskBoard",
   "ExitPlanMode",
   "AskUserQuestion",
+  "SwitchToActMode",
 ]);
 
 export interface ToolSelectorDeps {
@@ -42,11 +44,25 @@ export interface ToolSelectorDeps {
   readonly planMode: boolean;
 }
 
+export function isStrictPlanModeEnabled(): boolean {
+  const v = (process.env.MAGI_STRICT_PLAN_MODE ?? "").trim().toLowerCase();
+  return v === "1" || v === "true" || v === "on";
+}
+
 export async function buildToolDefs(deps: ToolSelectorDeps): Promise<LLMToolDef[]> {
-  let all = deps.session.agent.tools.list();
-  if (deps.planMode) {
-    all = all.filter((t) => PLAN_MODE_ALLOWED_TOOLS.has(t.name));
+  const registry = deps.session.agent.tools as ToolRegistry;
+  let all: Tool[];
+
+  if (deps.planMode && isStrictPlanModeEnabled() && typeof registry.getAvailableTools === "function") {
+    registry.setMode("plan");
+    all = registry.getAvailableTools();
+  } else if (deps.planMode) {
+    all = registry.list().filter((t) => PLAN_MODE_ALLOWED_TOOLS.has(t.name));
+  } else {
+    if (typeof registry.setMode === "function") registry.setMode("act");
+    all = registry.list();
   }
+
   const hasSkills = all.some((t) => t.kind === "skill");
 
   let selected: Tool[];

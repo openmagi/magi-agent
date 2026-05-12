@@ -1,5 +1,7 @@
 import type { SourceLedgerRecord } from "../../research/SourceLedger.js";
+import type { ResearchClaimRecord } from "../../research/ResearchContract.js";
 import type { RegisteredHook, HookContext } from "../types.js";
+import { getOrClassifyRequestMeta } from "./turnMetaClassifier.js";
 
 const MAX_RETRIES = 1;
 const LONG_SOURCED_DRAFT_MIN_CHARS = 4_000;
@@ -13,6 +15,11 @@ const PROCEDURAL_RE =
 const SOURCE_ID_RE = /\bsrc_\d+\b/g;
 const FACTUAL_VERB_RE =
   /\b(?:is|are|has|have|supports?|provides?|uses?|contains?|includes?|released?|changed?|defaults?)\b|(?:이다|입니다|있다|있습니다|지원|제공|사용|포함|변경|출시|기본값|구성|도구)/i;
+const FRESH_RESEARCH_REQUEST_RE =
+  /\b(?:latest|current|today|recent|now|news|price|version|release|verify|citation|search|fetch|web|browse)\b|(?:최신|현재|오늘|최근|뉴스|가격|버전|릴리스|새로|다시\s*확인|재확인|검증|검색|웹|브라우저|찾아(?:봐|줘)|조사해|리서치해)/i;
+const FOLLOWUP_CONTROL_RE =
+  /(?:어느\s*쪽|뭐가?\s*나아|뭘로\s*갈까|골라줘|추천해줘|선택해줘|[ABC]\s*(?:로|으로)?\s*(?:가|진행|채택)|이걸로|그걸로|좋아|ㅇㅋ|오케이|archive|아카이브|문서는\s*archive|다시\s*써줘|재작성|고쳐줘|수정해줘|피드백|반영해줘)/i;
+const MAX_FOLLOWUP_CONTROL_CHARS = 160;
 
 interface CitationClaim {
   text: string;
@@ -27,6 +34,29 @@ interface CitationCoverage {
   text: string;
   status: "uncertain" | "covered" | "missing";
   sourceIds: string[];
+}
+
+type CitationArtifactRecord = Pick<ResearchClaimRecord, "claimId" | "text" | "status" | "sourceIds">;
+
+interface ResearchArtifactClaim {
+  claimId: string;
+  text: string;
+  claimType: "fact" | "uncertainty";
+  supportStatus: "supported" | "unsupported" | "uncertain";
+  sourceIds: string[];
+  confidence: number;
+  reasoning: {
+    premiseSourceIds: string[];
+    inference: string;
+    assumptions: string[];
+    status: "source_backed" | "missing_source_support" | "uncertain";
+  };
+}
+
+interface ResearchArtifactClaimSourceLink {
+  claimId: string;
+  sourceId: string;
+  support: "supports";
 }
 
 function isEnabled(): boolean {
@@ -92,13 +122,83 @@ function citedSourceIds(text: string, sources: readonly SourceLedgerRecord[]): s
   return [...sourceIds];
 }
 
-function sourceSensitiveTurn(ctx: HookContext, userMessage: string): boolean {
+async function sourceSensitiveTurn(ctx: HookContext, userMessage: string): Promise<boolean> {
   const existing = ctx.researchContract?.turnFor(ctx.turnId);
   if (existing) return existing.sourceSensitive;
-  return ctx.researchContract?.startTurn({
+
+  const meta = await getOrClassifyRequestMeta(ctx, { userMessage });
+  const researchMeta = (meta as typeof meta & {
+    research?: { sourceSensitive?: boolean; reason?: string };
+  }).research;
+  const sourceSensitive =
+    researchMeta?.sourceSensitive === true ||
+    meta.goalProgress.actionKinds.includes("research") ||
+    FRESH_RESEARCH_REQUEST_RE.test(userMessage);
+  const reason =
+    researchMeta?.reason ??
+    (sourceSensitive
+      ? "Classifier or deterministic fallback marked this turn as source-sensitive research."
+      : "Classifier did not mark this turn as source-sensitive research.");
+  if (!ctx.researchContract) return sourceSensitive;
+  return ctx.researchContract.startTurn({
     turnId: ctx.turnId,
-    userMessage,
-  }).sourceSensitive ?? false;
+    sourceSensitive,
+    reason,
+  }).sourceSensitive;
+}
+
+function isFollowupControlTurn(userMessage: string): boolean {
+  const normalized = userMessage.replace(/\s+/g, " ").trim();
+  if (!normalized) return false;
+  if (normalized.length > MAX_FOLLOWUP_CONTROL_CHARS) return false;
+  if (FRESH_RESEARCH_REQUEST_RE.test(normalized)) return false;
+  return FOLLOWUP_CONTROL_RE.test(normalized);
+}
+
+type TranscriptEntry = HookContext["transcript"][number];
+type ToolResultEntry = Extract<TranscriptEntry, { kind: "tool_result" }>;
+
+function isSuccessfulResult(entry: TranscriptEntry): entry is ToolResultEntry {
+  if (entry.kind !== "tool_result") return false;
+  if (entry.isError === true) return false;
+  return !entry.status || entry.status === "ok" || entry.status === "success";
+}
+
+function successfulToolNamesThisTurn(ctx: HookContext): Set<string> {
+  const successfulResults = new Set<string>();
+  for (const entry of ctx.transcript) {
+    if (entry.turnId !== ctx.turnId) continue;
+    if (!isSuccessfulResult(entry)) continue;
+    successfulResults.add(entry.toolUseId);
+  }
+
+  const names = new Set<string>();
+  for (const entry of ctx.transcript) {
+    if (entry.kind !== "tool_call") continue;
+    if (entry.turnId !== ctx.turnId) continue;
+    if (successfulResults.has(entry.toolUseId)) names.add(entry.name);
+  }
+  return names;
+}
+
+function hasLocalCodingEvidence(ctx: HookContext, toolNames: readonly string[] = []): boolean {
+  const liveTools = new Set(toolNames);
+  if (liveTools.has("CodingBenchmark")) return true;
+  if (liveTools.has("TestRun") && liveTools.has("GitDiff")) return true;
+
+  const tools = successfulToolNamesThisTurn(ctx);
+  if (tools.has("CodingBenchmark")) return true;
+  return tools.has("TestRun") && tools.has("GitDiff");
+}
+
+function isResearchEvidenceSource(source: SourceLedgerRecord): boolean {
+  return (
+    source.kind === "web_search" ||
+    source.kind === "web_fetch" ||
+    source.kind === "external_repo" ||
+    source.kind === "external_doc" ||
+    source.kind === "subagent_result"
+  );
 }
 
 function truncate(value: string, maxLength: number): string {
@@ -151,6 +251,87 @@ function shouldFailOpenLongSourcedDraft(
   return missing > 0 && missing <= LONG_SOURCED_DRAFT_MAX_MISSING;
 }
 
+function fallbackClaimRecords(coverage: readonly CitationCoverage[]): CitationArtifactRecord[] {
+  return coverage.map((claim, index) => ({
+    claimId: `claim_${index + 1}`,
+    text: claim.text,
+    status: claim.status,
+    sourceIds: [...claim.sourceIds],
+  }));
+}
+
+function artifactClaimFor(record: CitationArtifactRecord): ResearchArtifactClaim {
+  if (record.status === "covered") {
+    return {
+      claimId: record.claimId,
+      text: record.text,
+      claimType: "fact",
+      supportStatus: "supported",
+      sourceIds: [...record.sourceIds],
+      confidence: 0.8,
+      reasoning: {
+        premiseSourceIds: [...record.sourceIds],
+        inference: "Claim is directly tied to inspected source identifiers captured by the citation gate.",
+        assumptions: [],
+        status: "source_backed",
+      },
+    };
+  }
+  if (record.status === "uncertain") {
+    return {
+      claimId: record.claimId,
+      text: record.text,
+      claimType: "uncertainty",
+      supportStatus: "uncertain",
+      sourceIds: [],
+      confidence: 0.35,
+      reasoning: {
+        premiseSourceIds: [],
+        inference: "Claim is explicitly downgraded as uncertain by the citation gate.",
+        assumptions: ["The artifact does not treat this as a verified source-backed fact."],
+        status: "uncertain",
+      },
+    };
+  }
+  return {
+    claimId: record.claimId,
+    text: record.text,
+    claimType: "fact",
+    supportStatus: "unsupported",
+    sourceIds: [],
+    confidence: 0.25,
+    reasoning: {
+      premiseSourceIds: [],
+      inference: "",
+      assumptions: ["No inspected source identifiers covered this claim."],
+      status: "missing_source_support",
+    },
+  };
+}
+
+function claimSourceLinksFor(records: readonly CitationArtifactRecord[]): ResearchArtifactClaimSourceLink[] {
+  return records.flatMap((record) => {
+    if (record.status !== "covered") return [];
+    return record.sourceIds.map((sourceId) => ({
+      claimId: record.claimId,
+      sourceId,
+      support: "supports" as const,
+    }));
+  });
+}
+
+function emitResearchArtifactDelta(
+  ctx: HookContext,
+  records: readonly CitationArtifactRecord[],
+): void {
+  if (records.length === 0) return;
+  ctx.emit({
+    type: "research_artifact_delta",
+    claims: records.map(artifactClaimFor),
+    claimSourceLinks: claimSourceLinksFor(records),
+  });
+}
+
 export function makeClaimCitationGateHook(): RegisteredHook<"beforeCommit"> {
   return {
     name: "builtin:claim-citation-gate",
@@ -158,14 +339,22 @@ export function makeClaimCitationGateHook(): RegisteredHook<"beforeCommit"> {
     priority: 81,
     blocking: true,
     failOpen: false,
-    timeoutMs: 1_000,
-    handler: async ({ assistantText, userMessage, retryCount }, ctx: HookContext) => {
+    timeoutMs: 5_000,
+    handler: async ({ assistantText, userMessage, retryCount, toolNames }, ctx: HookContext) => {
       try {
         if (!isEnabled()) return { action: "continue" };
         if (!assistantText.trim()) return { action: "continue" };
 
         const sources = ctx.sourceLedger?.sourcesForTurn(ctx.turnId) ?? [];
-        const sensitive = sourceSensitiveTurn(ctx, userMessage) || sources.length > 0;
+        if (sources.length === 0 && isFollowupControlTurn(userMessage)) {
+          return { action: "continue" };
+        }
+        if (hasLocalCodingEvidence(ctx, toolNames)) {
+          return { action: "continue" };
+        }
+        const sensitive =
+          await sourceSensitiveTurn(ctx, userMessage) ||
+          sources.some(isResearchEvidenceSource);
         if (!sensitive) return { action: "continue" };
 
         const claims = extractCitationClaims(assistantText);
@@ -179,7 +368,9 @@ export function makeClaimCitationGateHook(): RegisteredHook<"beforeCommit"> {
             sourceIds,
           };
         });
-        ctx.researchContract?.recordCitationCoverage(ctx.turnId, coverage);
+        const recordedClaims =
+          ctx.researchContract?.recordCitationCoverage(ctx.turnId, coverage) ??
+          fallbackClaimRecords(coverage);
 
         const missing = coverage.filter((claim) => claim.status === "missing");
         if (missing.length === 0) {
@@ -189,6 +380,7 @@ export function makeClaimCitationGateHook(): RegisteredHook<"beforeCommit"> {
             verdict: "ok",
             detail: `${coverage.length} claims checked`,
           });
+          emitResearchArtifactDelta(ctx, recordedClaims);
           return { action: "continue" };
         }
 
@@ -198,6 +390,7 @@ export function makeClaimCitationGateHook(): RegisteredHook<"beforeCommit"> {
           verdict: "violation",
           detail: `${missing.length} uncited claims`,
         });
+        emitResearchArtifactDelta(ctx, recordedClaims);
 
         if (shouldFailOpenLongSourcedDraft(assistantText, sources, coverage)) {
           ctx.log(
@@ -213,18 +406,12 @@ export function makeClaimCitationGateHook(): RegisteredHook<"beforeCommit"> {
         }
 
         if (retryCount >= MAX_RETRIES) {
-          ctx.log("warn", "[claim-citation-gate] retry exhausted; failing closed", {
+          ctx.log("warn", "[claim-citation-gate] retry exhausted; failing open with citation warning", {
             missing: missing.length,
+            sources: sources.length,
+            claims: coverage.length,
           });
-          return {
-            action: "block",
-            reason: [
-              "[RULE:CLAIM_CITATION_REQUIRED]",
-              "Research claims still lack inspected-source citations after verifier retry.",
-              `Missing citation count: ${missing.length}.`,
-              "No answer should be committed until each concrete claim cites an inspected source id/URL, or unsupported claims are removed/downgraded as uncertain.",
-            ].join("\n"),
-          };
+          return { action: "continue" };
         }
 
         if (sources.length === 0) {
