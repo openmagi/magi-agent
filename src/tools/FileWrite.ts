@@ -17,6 +17,7 @@ import {
   isProtectedMemoryPath,
   protectedMemoryError,
 } from "../util/memoryMode.js";
+import { detectLazyComments } from "./fuzzyEdit.js";
 
 export interface FileWriteInput {
   path: string;
@@ -66,6 +67,21 @@ export function makeFileWriteTool(workspaceRoot: string): Tool<FileWriteInput, F
         };
       }
       try {
+        const lineCount = input.content.split("\n").length;
+        if (lineCount < 500) {
+          const lazyDetection = detectLazyComments(input.content);
+          if (lazyDetection) {
+            return {
+              status: "error",
+              errorCode: "lazy_output",
+              errorMessage:
+                `content contains a placeholder comment at line ${lazyDetection.line}: "${lazyDetection.matchedText}". ` +
+                "Write the complete file content instead of using placeholder comments.",
+              durationMs: Date.now() - start,
+            };
+          }
+        }
+
         const ws = ctx.spawnWorkspace ?? defaultWorkspace;
         // Pre-create parent directory via Workspace.resolve — parent
         // creation is idempotent and benign even if the final write

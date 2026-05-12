@@ -69,6 +69,8 @@ export interface ToolContext {
   executionContract?: ExecutionContractStore;
   /** Per-session ledger of inspected sources for research/evidence tracking. */
   sourceLedger?: SourceLedgerStore;
+  /** Optional cross-service diagnostic trace id for tool logs/events. */
+  traceId?: string;
   /**
    * The current top-level user message for this turn. Tools that create
    * child work, such as SpawnAgent, use this to preserve selected KB,
@@ -142,6 +144,12 @@ export interface Tool<I = unknown, O = unknown> {
   isConcurrencySafe?: boolean;
   /** True when the tool can mutate files, external state, or the workspace. */
   mutatesWorkspace?: boolean;
+  /**
+   * Modes in which this tool is available. Defaults to ["plan", "act"]
+   * for read/net/meta tools; write/execute tools default to ["act"] when
+   * unset (inferred by ToolRegistry from permission class).
+   */
+  availableInModes?: ("plan" | "act")[];
   /** "core" tools are always loaded; "skill" tools go through intent
    * filtering (§9.8 P2/P3). Defaults to "core" when unset. */
   kind?: "core" | "skill";

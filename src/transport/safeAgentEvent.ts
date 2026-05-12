@@ -3,6 +3,12 @@ type SafeAgentEvent = Record<string, unknown> & { type: string };
 const MAX_TEXT = 240;
 const MAX_TOOL_PREVIEW = 400;
 const MAX_BROWSER_FRAME_BASE64 = 1_000_000;
+const MAX_DOCUMENT_DRAFT_PREVIEW = 6_000;
+const MAX_RESEARCH_CLAIMS = 24;
+const MAX_RESEARCH_LINKS = 100;
+const MAX_RESEARCH_CONTRADICTIONS = 24;
+const MAX_RESEARCH_SOURCE_IDS = 20;
+const MAX_RESEARCH_ASSUMPTIONS = 12;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === "object" && !Array.isArray(value);
@@ -53,14 +59,38 @@ function num(value: unknown, fallback = 0): number {
   return typeof value === "number" && Number.isFinite(value) ? value : fallback;
 }
 
+function nonNegativeNum(value: unknown): number {
+  return Math.max(0, num(value, 0));
+}
+
+function safeUsage(value: unknown): Record<string, number> | undefined {
+  if (!isRecord(value)) return undefined;
+  const inputTokens = nonNegativeNum(value.inputTokens);
+  const outputTokens = nonNegativeNum(value.outputTokens);
+  const costUsd = nonNegativeNum(value.costUsd);
+  if (inputTokens === 0 && outputTokens === 0 && costUsd === 0) return undefined;
+  return { inputTokens, outputTokens, costUsd };
+}
+
 function oneOf<T extends string>(value: unknown, allowed: readonly T[], fallback: T): T {
   return allowed.includes(value as T) ? (value as T) : fallback;
 }
 
-function stringArray(value: unknown): string[] | undefined {
+function stringArray(value: unknown, maxItems = Number.POSITIVE_INFINITY): string[] | undefined {
   if (!Array.isArray(value)) return undefined;
-  const items = value.map((item) => text(item)).filter(Boolean);
+  const selected = Number.isFinite(maxItems) ? value.slice(0, maxItems) : value;
+  const items = selected.map((item) => text(item)).filter(Boolean);
   return items.length > 0 ? items : undefined;
+}
+
+function boundedRatio(value: unknown): number | undefined {
+  if (typeof value !== "number" || !Number.isFinite(value)) return undefined;
+  return Math.max(0, Math.min(1, value));
+}
+
+function redactedText(value: unknown, max = MAX_TEXT): string | undefined {
+  if (typeof value !== "string") return undefined;
+  return maybeText(redactPreview(value), max);
 }
 
 function browserFrameImage(value: unknown): string | undefined {
@@ -140,6 +170,122 @@ function safeSourceRecord(value: unknown): Record<string, unknown> | null {
   return source;
 }
 
+function safeResearchReasoning(value: unknown): Record<string, unknown> | undefined {
+  if (!isRecord(value)) return undefined;
+  const reasoning: Record<string, unknown> = {
+    premiseSourceIds: stringArray(value.premiseSourceIds, MAX_RESEARCH_SOURCE_IDS) ?? [],
+    inference: redactedText(value.inference, 500) ?? "",
+    assumptions: Array.isArray(value.assumptions)
+      ? value.assumptions
+        .slice(0, MAX_RESEARCH_ASSUMPTIONS)
+        .map((assumption) => redactedText(assumption, 500))
+        .filter((assumption): assumption is string => !!assumption)
+      : [],
+    status: oneOf(
+      value.status,
+      ["source_backed", "partial", "missing_source_support", "uncertain"] as const,
+      "missing_source_support",
+    ),
+  };
+  return reasoning;
+}
+
+function safeResearchClaims(value: unknown): Array<Record<string, unknown>> {
+  if (!Array.isArray(value)) return [];
+  const claims: Array<Record<string, unknown>> = [];
+  for (const item of value.slice(0, MAX_RESEARCH_CLAIMS)) {
+    if (!isRecord(item)) continue;
+    const claimId = maybeText(item.claimId, 120);
+    const claimText = redactedText(item.text, 1_000);
+    if (!claimId || !claimText) continue;
+    const claim: Record<string, unknown> = {
+      claimId,
+      text: claimText,
+      claimType: oneOf(
+        item.claimType,
+        ["fact", "uncertainty", "inference", "recommendation", "limitation"] as const,
+        "fact",
+      ),
+      supportStatus: oneOf(
+        item.supportStatus,
+        ["supported", "partial", "unsupported", "uncertain"] as const,
+        "unsupported",
+      ),
+      sourceIds: stringArray(item.sourceIds, MAX_RESEARCH_SOURCE_IDS) ?? [],
+    };
+    const confidence = boundedRatio(item.confidence);
+    const reasoning = safeResearchReasoning(item.reasoning);
+    if (confidence !== undefined) claim.confidence = confidence;
+    if (reasoning) claim.reasoning = reasoning;
+    claims.push(claim);
+  }
+  return claims;
+}
+
+function safeClaimSourceLinks(value: unknown): Array<Record<string, unknown>> {
+  if (!Array.isArray(value)) return [];
+  const links: Array<Record<string, unknown>> = [];
+  for (const item of value.slice(0, MAX_RESEARCH_LINKS)) {
+    if (!isRecord(item)) continue;
+    const claimId = maybeText(item.claimId, 120);
+    const sourceId = maybeText(item.sourceId, 120);
+    if (!claimId || !sourceId) continue;
+    links.push({
+      claimId,
+      sourceId,
+      support: oneOf(
+        item.support,
+        ["supports", "partially_supports", "contradicts", "context"] as const,
+        "supports",
+      ),
+    });
+  }
+  return links;
+}
+
+function safeResearchContradictions(value: unknown): Array<Record<string, unknown>> {
+  if (!Array.isArray(value)) return [];
+  const contradictions: Array<Record<string, unknown>> = [];
+  for (const item of value.slice(0, MAX_RESEARCH_CONTRADICTIONS)) {
+    if (!isRecord(item)) continue;
+    const contradictionId = maybeText(item.contradictionId, 120);
+    if (!contradictionId) continue;
+    const contradiction: Record<string, unknown> = {
+      contradictionId,
+      claimIds: stringArray(item.claimIds, MAX_RESEARCH_SOURCE_IDS) ?? [],
+      sourceIds: stringArray(item.sourceIds, MAX_RESEARCH_SOURCE_IDS) ?? [],
+      status: oneOf(
+        item.status,
+        ["handled", "unresolved", "not_applicable"] as const,
+        "unresolved",
+      ),
+    };
+    const resolution = redactedText(item.resolution, 500);
+    if (resolution) contradiction.resolution = resolution;
+    contradictions.push(contradiction);
+  }
+  return contradictions;
+}
+
+function safeResearchArtifactDelta(value: unknown): SafeAgentEvent | null {
+  if (!isRecord(value)) return null;
+  const safe: SafeAgentEvent = { type: "research_artifact_delta" };
+  let hasPayload = false;
+  if (Array.isArray(value.claims)) {
+    safe.claims = safeResearchClaims(value.claims);
+    hasPayload = true;
+  }
+  if (Array.isArray(value.claimSourceLinks)) {
+    safe.claimSourceLinks = safeClaimSourceLinks(value.claimSourceLinks);
+    hasPayload = true;
+  }
+  if (Array.isArray(value.contradictions)) {
+    safe.contradictions = safeResearchContradictions(value.contradictions);
+    hasPayload = true;
+  }
+  return hasPayload ? safe : null;
+}
+
 function askUserChoices(value: unknown): Array<Record<string, string>> {
   if (!Array.isArray(value)) return [];
   const choices: Array<Record<string, string>> = [];
@@ -173,6 +319,24 @@ function nonNegativeInt(value: unknown): number {
   return typeof value === "number" && Number.isFinite(value)
     ? Math.max(0, Math.floor(value))
     : 0;
+}
+
+function safeDocumentDraft(value: unknown): SafeAgentEvent | null {
+  if (!isRecord(value)) return null;
+  const id = maybeText(value.id, 120);
+  const contentPreview = redactedText(value.contentPreview, MAX_DOCUMENT_DRAFT_PREVIEW);
+  if (!id || contentPreview === undefined) return null;
+  const safe: SafeAgentEvent = {
+    type: "document_draft",
+    id,
+    format: oneOf(value.format, ["md", "txt"] as const, "md"),
+    contentPreview,
+    contentLength: nonNegativeInt(value.contentLength),
+    truncated: bool(value.truncated),
+  };
+  const filename = maybeText(value.filename, 500);
+  if (filename) safe.filename = filename;
+  return safe;
 }
 
 function patchPreviewFiles(value: unknown): Array<Record<string, unknown>> {
@@ -440,6 +604,20 @@ function safeRuntimeTrace(value: unknown): SafeAgentEvent | null {
   return safe;
 }
 
+function childTelemetryBase(typeValue: string, value: Record<string, unknown>): SafeAgentEvent {
+  const safe: SafeAgentEvent = {
+    type: typeValue,
+    taskId: text(value.taskId, "task", 120),
+  };
+  const parentTurnId = maybeText(value.parentTurnId, 120);
+  const childTurnId = maybeText(value.childTurnId, 160);
+  const traceId = maybeText(value.traceId, 160);
+  if (parentTurnId) safe.parentTurnId = parentTurnId;
+  if (childTurnId) safe.childTurnId = childTurnId;
+  if (traceId) safe.traceId = traceId;
+  return safe;
+}
+
 export function safeAgentEvent(event: unknown): SafeAgentEvent | null {
   if (!isRecord(event) || typeof event.type !== "string") return null;
 
@@ -456,7 +634,7 @@ export function safeAgentEvent(event: unknown): SafeAgentEvent | null {
         turnId: text(event.turnId, "turn"),
         phase: oneOf(
           event.phase,
-          ["pending", "planning", "executing", "verifying", "committing", "committed", "aborted"] as const,
+          ["pending", "planning", "executing", "verifying", "committing", "compacting", "committed", "aborted"] as const,
           "pending",
         ),
       };
@@ -468,6 +646,8 @@ export function safeAgentEvent(event: unknown): SafeAgentEvent | null {
       };
       const reason = maybeText(event.reason);
       if (reason) safe.reason = reason;
+      const usage = safeUsage(event.usage);
+      if (usage) safe.usage = usage;
       return safe;
     }
     case "text_delta":
@@ -476,22 +656,27 @@ export function safeAgentEvent(event: unknown): SafeAgentEvent | null {
       return { type: "response_clear" };
     case "thinking_delta":
       return null;
+    case "document_draft":
+      return safeDocumentDraft(event);
     case "llm_progress": {
       const safe: SafeAgentEvent = {
         type: "llm_progress",
         turnId: text(event.turnId, "turn"),
         iter: num(event.iter),
-        stage: oneOf(event.stage, ["started", "waiting", "completed"] as const, "waiting"),
-        label: text(event.label, "Model progress"),
+        stage: oneOf(
+          event.stage,
+          ["started", "waiting", "completed"] as const,
+          "waiting",
+        ),
+        label: text(event.label, "Thinking through next step"),
       };
       const detail = typeof event.detail === "string"
-        ? maybeText(redactPreview(event.detail))
+        ? maybeText(redactPreview(event.detail), 400)
         : undefined;
       if (detail) safe.detail = detail;
-      const elapsedMs = typeof event.elapsedMs === "number" && Number.isFinite(event.elapsedMs)
-        ? Math.max(0, Math.trunc(event.elapsedMs))
-        : undefined;
-      if (elapsedMs !== undefined) safe.elapsedMs = elapsedMs;
+      if (typeof event.elapsedMs === "number" && Number.isFinite(event.elapsedMs)) {
+        safe.elapsedMs = Math.max(0, Math.floor(event.elapsedMs));
+      }
       return safe;
     }
     case "tool_start": {
@@ -536,6 +721,8 @@ export function safeAgentEvent(event: unknown): SafeAgentEvent | null {
       const source = safeSourceRecord(event.source);
       return source ? { type: "source_inspected", source } : null;
     }
+    case "research_artifact_delta":
+      return safeResearchArtifactDelta(event);
     case "browser_frame": {
       const imageBase64 = browserFrameImage(event.imageBase64);
       if (!imageBase64) return null;
@@ -603,6 +790,28 @@ export function safeAgentEvent(event: unknown): SafeAgentEvent | null {
       const toolName = maybeText(event.toolName, 96);
       if (toolUseId) safe.toolUseId = toolUseId;
       if (toolName) safe.toolName = toolName;
+      return safe;
+    }
+    case "spawn_worktree_conflict": {
+      const safe: SafeAgentEvent = {
+        type: "spawn_worktree_conflict",
+        action: oneOf(event.action, ["apply", "cherry_pick"] as const, "apply"),
+        spawnDir: text(event.spawnDir, ".spawn", 240),
+        conflictKind: oneOf(
+          event.conflictKind,
+          ["parent_dirty", "cherry_pick"] as const,
+          "parent_dirty",
+        ),
+        conflictedFiles: stringArray(event.conflictedFiles, 50) ?? [],
+        changedFiles: stringArray(event.changedFiles, 100) ?? [],
+        mergeStrategy: oneOf(event.mergeStrategy, ["copy", "cherry_pick"] as const, "copy"),
+        summary: typeof event.summary === "string"
+          ? maybeText(redactPreview(event.summary), 500) ?? ""
+          : "",
+        suggestedActions: stringArray(event.suggestedActions, 8) ?? [],
+      };
+      const adoptedCommit = maybeText(event.adoptedCommit, 80);
+      if (adoptedCommit) safe.adoptedCommit = adoptedCommit;
       return safe;
     }
     case "runtime_trace":
@@ -680,6 +889,45 @@ export function safeAgentEvent(event: unknown): SafeAgentEvent | null {
     case "child_failed":
     case "child_completed":
       return safeControlEvent(event);
+    case "child_llm_start":
+      return {
+        ...childTelemetryBase("child_llm_start", event),
+        iter: num(event.iter),
+        model: text(event.model, "unknown", 120),
+      };
+    case "child_llm_end":
+      return {
+        ...childTelemetryBase("child_llm_end", event),
+        iter: num(event.iter),
+        model: text(event.model, "unknown", 120),
+        stopReason: text(event.stopReason, "unknown", 120),
+        durationMs: num(event.durationMs),
+      };
+    case "child_tool_batch_start":
+      return {
+        ...childTelemetryBase("child_tool_batch_start", event),
+        iter: num(event.iter),
+        toolCount: num(event.toolCount),
+        toolNames: stringArray(event.toolNames) ?? [],
+      };
+    case "child_tool_batch_end": {
+      const safe = childTelemetryBase("child_tool_batch_end", event);
+      safe.iter = num(event.iter);
+      safe.status = oneOf(event.status, ["ok", "error"] as const, "error");
+      safe.toolCount = num(event.toolCount);
+      safe.errorCount = num(event.errorCount);
+      safe.durationMs = num(event.durationMs);
+      const errorName = maybeText(event.errorName, 120);
+      const errorMessage = maybeText(event.errorMessage, 240);
+      if (errorName) safe.errorName = errorName;
+      if (errorMessage) safe.errorMessage = errorMessage;
+      return safe;
+    }
+    case "child_abort":
+      return {
+        ...childTelemetryBase("child_abort", event),
+        source: text(event.source, "unknown", 96),
+      };
     case "tournament_result":
       return {
         type: "tournament_result",

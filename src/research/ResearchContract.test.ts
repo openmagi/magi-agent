@@ -2,18 +2,20 @@ import { describe, expect, it } from "vitest";
 import { ResearchContractStore } from "./ResearchContract.js";
 
 describe("ResearchContractStore", () => {
-  it("marks current web research turns as source sensitive", () => {
+  it("records classifier-provided source sensitivity", () => {
     const contract = new ResearchContractStore({ now: () => 123 });
 
     const turn = contract.startTurn({
       turnId: "turn-1",
-      userMessage: "2026년 현재 OpenCode 웹 리서치 도구 구성을 조사해줘.",
+      sourceSensitive: true,
+      reason: "The classifier says this answer needs inspected-source citations.",
     });
 
     expect(turn).toMatchObject({
       turnId: "turn-1",
       sourceSensitive: true,
       requiredSourceKinds: ["web_search", "web_fetch"],
+      reason: "The classifier says this answer needs inspected-source citations.",
       startedAt: 123,
     });
     expect(contract.turnFor("turn-1")).toMatchObject({
@@ -27,7 +29,18 @@ describe("ResearchContractStore", () => {
 
     const turn = contract.startTurn({
       turnId: "turn-local",
-      userMessage: "방금 수정한 파일 요약해줘.",
+      sourceSensitive: false,
+    });
+
+    expect(turn.sourceSensitive).toBe(false);
+    expect(turn.requiredSourceKinds).toEqual([]);
+  });
+
+  it("defaults turns to non-source-sensitive without classifier input", () => {
+    const contract = new ResearchContractStore({ now: () => 1 });
+
+    const turn = contract.startTurn({
+      turnId: "turn-ui-test",
     });
 
     expect(turn.sourceSensitive).toBe(false);
@@ -38,7 +51,7 @@ describe("ResearchContractStore", () => {
     const contract = new ResearchContractStore({ now: () => 500 });
     contract.startTurn({
       turnId: "turn-1",
-      userMessage: "latest API docs 조사해줘.",
+      sourceSensitive: true,
     });
 
     const records = contract.recordCitationCoverage("turn-1", [

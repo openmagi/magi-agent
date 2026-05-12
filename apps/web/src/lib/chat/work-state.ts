@@ -34,6 +34,7 @@ const PHASE_LABELS: Record<NonNullable<ChannelState["turnPhase"]>, string> = {
   executing: "Running",
   verifying: "Verifying",
   committing: "Writing answer",
+  compacting: "Compacting",
   committed: "Writing answer",
   aborted: "Stopping",
 };
@@ -44,6 +45,7 @@ const PHASE_LABELS_KO: Record<NonNullable<ChannelState["turnPhase"]>, string> = 
   executing: "실행 중",
   verifying: "검증 중",
   committing: "답변 작성 중",
+  compacting: "압축 중",
   committed: "답변 작성 중",
   aborted: "중단 중",
 };
@@ -143,6 +145,7 @@ function statusFrom(
   if ((channelState.activeTools ?? []).some((activity) => activity.status === "error")) {
     return t(language, "Blocked", "차단됨");
   }
+  if (channelState.turnPhase === "compacting") return t(language, "Compacting", "압축 중");
   if (channelState.turnPhase === "verifying") return t(language, "Verifying", "검증 중");
   if (channelState.turnPhase === "committing" || channelState.turnPhase === "committed") {
     return t(language, "Writing answer", "답변 작성 중");

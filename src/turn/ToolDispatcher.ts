@@ -25,6 +25,7 @@ import type {
 } from "../Tool.js";
 import type { UserMessage } from "../util/types.js";
 import { buildToolInputPreview, summariseToolOutput } from "../util/toolResult.js";
+import type { ToolCallLoopDetector, LoopCheckResult } from "./ToolCallLoopDetector.js";
 import {
   decideRuntimePermission,
   type PermissionDecision,
@@ -103,6 +104,14 @@ export interface ToolDispatchContext {
     result: ToolDispatchResult,
     toolUse: Extract<LLMContentBlock, { type: "tool_use" }>,
   ) => boolean;
+  /** Cross-service diagnostic trace ID propagated to tools. */
+  readonly traceId?: string;
+  /**
+   * Per-turn loop detector. When omitted, loop detection is disabled
+   * for backward compatibility with direct dispatch tests and spawn
+   * pipelines.
+   */
+  readonly loopDetector?: ToolCallLoopDetector;
 }
 
 export interface ToolDispatchResult {
@@ -408,6 +417,40 @@ async function dispatchOne(
   }
   const tool = access.tool;
 
+  let softWarningPrefix = "";
+  if (ctx.loopDetector) {
+    const loopCheck: LoopCheckResult = ctx.loopDetector.check(tu.name, tu.input);
+    if (loopCheck.action === "hard_escalation") {
+      const warning = `Loop detected: ${tu.name} called ${loopCheck.count} times with identical parameters. Breaking loop — change your approach.`;
+      ctx.stageAuditEvent("tool_loop_detected", {
+        toolName: tu.name,
+        hash: loopCheck.hash,
+        count: loopCheck.count,
+        action: "hard_escalation",
+      });
+      sse.agent({
+        type: "tool_end",
+        id: tu.id,
+        status: "error",
+        durationMs: Date.now() - started,
+        output_preview: warning,
+      });
+      await session.transcript.append({
+        kind: "tool_result",
+        ts: Date.now(),
+        turnId,
+        toolUseId: tu.id,
+        status: "error",
+        output: warning,
+        isError: true,
+      });
+      return { toolUseId: tu.id, content: warning, isError: true };
+    }
+    if (loopCheck.action === "soft_warning") {
+      softWarningPrefix = `[WARNING: This is call #${loopCheck.count} with identical parameters. Consider changing your approach.]\n`;
+    }
+  }
+
   // ── beforeToolUse hook ─────────────────────────────────────
   // Hooks may rewrite the input or block with a reason (which
   // becomes the tool_result content with is_error=true so the
@@ -500,6 +543,7 @@ async function dispatchOne(
     toolUseId: tu.id,
     executionContract: session.executionContract,
     sourceLedger: session.sourceLedger,
+    ...(ctx.traceId ? { traceId: ctx.traceId } : {}),
     ...(ctx.currentUserMessage ? { currentUserMessage: ctx.currentUserMessage } : {}),
     emitProgress: (p) => {
       sse.agent({ type: "tool_start", id: tu.id, name: p.label });
@@ -580,7 +624,7 @@ async function dispatchOne(
     typeof previewSource === "string"
       ? previewSource
       : JSON.stringify(previewSource);
-  const content = summariseToolOutput(result);
+  const content = softWarningPrefix + summariseToolOutput(result);
   const isError = result.status !== "ok";
 
   sse.agent({

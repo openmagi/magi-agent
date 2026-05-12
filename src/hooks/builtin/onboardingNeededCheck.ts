@@ -14,8 +14,8 @@
  *     (`session.budgetStats().turns === 0`).
  *   - Skips when `session.meta.onboarded === true` OR
  *     `session.meta.onboardingDeclines >= 2`.
- *   - When the user's message looks like a decline (regex: no|안 할래|
- *     나중에|skip), increments the declines counter — no nudge added.
+ *   - When the LLM classifier says the user's message is a decline,
+ *     increments the declines counter — no nudge added.
  *   - Otherwise emits an `onboarding_nudge` AgentEvent and queues a
  *     mid-turn injection so the bot receives the nudge text as a
  *     system-level user message at the very start of the LLM call.
@@ -76,7 +76,7 @@ export function isOnboardingSteerEnabled(env: string | undefined): boolean {
 }
 
 export const ONBOARDING_NUDGE_TEXT =
-  "2분 온보딩 먼저 하시죠. `/onboarding` 혹은 `/superpowers:using-superpowers` 를 실행해보세요.";
+  "Let's do the 2-minute onboarding first. Try running `/onboarding` or `/superpowers:using-superpowers`.";
 
 export function shouldSkipNudge(session: Session): boolean {
   if (session.meta.onboarded === true) return true;

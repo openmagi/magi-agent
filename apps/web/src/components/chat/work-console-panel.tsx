@@ -17,6 +17,7 @@ import type {
   BrowserFrame,
   ChatResponseLanguage,
   ControlRequestRecord,
+  DocumentDraftPreview,
   QueuedMessage,
 } from "@/lib/chat/types";
 
@@ -399,6 +400,40 @@ function browserActionLabel(action: string, language?: ChatResponseLanguage): st
   }
 }
 
+function DocumentDraftPreviewCard({
+  draft,
+  language,
+}: {
+  draft: DocumentDraftPreview;
+  language?: ChatResponseLanguage;
+}) {
+  const unit = draft.contentLength === 1 ? "char" : "chars";
+  const sizeLabel = isKorean(language)
+    ? `${draft.contentLength.toLocaleString()}자`
+    : `${draft.contentLength.toLocaleString()} ${unit}`;
+  return (
+    <section
+      className="mb-3 overflow-hidden rounded-xl border border-[#7C3AED]/15 bg-white shadow-[0_1px_6px_rgba(124,58,237,0.08)]"
+      data-work-console-document-draft="true"
+    >
+      <div className="flex min-w-0 items-center justify-between gap-2 border-b border-black/[0.06] px-2.5 py-1.5">
+        <span className="shrink-0 text-[10px] font-semibold uppercase tracking-wide text-secondary/45">
+          {draft.status === "done"
+            ? t(language, "Document written", "문서 작성 완료")
+            : t(language, "Writing document", "문서 작성 중")}
+        </span>
+        <span className="min-w-0 truncate text-[10.5px] text-secondary/55">
+          {draft.filename ?? (draft.format === "md" ? "Markdown" : "Text")}
+          <span className="text-secondary/35"> · {sizeLabel}</span>
+        </span>
+      </div>
+      <pre className="max-h-44 overflow-auto bg-[#FBFBFD] px-2.5 py-2 whitespace-pre-wrap break-words text-[11px] leading-snug text-secondary/75">
+        {draft.truncated ? `...\n${draft.contentPreview}` : draft.contentPreview}
+      </pre>
+    </section>
+  );
+}
+
 function BrowserFramePreview({
   frame,
   language,
@@ -494,6 +529,9 @@ export function WorkConsolePanel({
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto px-2 py-2">
+        {channelState.documentDraft && (
+          <DocumentDraftPreviewCard draft={channelState.documentDraft} language={language} />
+        )}
         {channelState.browserFrame && (
           <BrowserFramePreview frame={channelState.browserFrame} language={language} />
         )}

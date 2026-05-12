@@ -25,6 +25,10 @@ export interface ChatMessage {
   activities?: ToolActivity[];
   /** Persisted TaskBoard snapshot captured during the streaming phase. */
   taskBoard?: TaskBoardSnapshot;
+  /** Persisted research evidence metadata, when the runtime attached a claim/source audit. */
+  researchEvidence?: ResearchArtifactDelta;
+  /** Token/cost usage reported at turn completion. */
+  usage?: TokenUsage;
   /** If present, this message was authored as a reply to another. */
   replyTo?: ReplyTo;
   /**
@@ -62,6 +66,43 @@ export interface TaskBoardSnapshot {
   receivedAt: number;
 }
 
+export interface TokenUsage {
+  inputTokens: number;
+  outputTokens: number;
+  costUsd: number;
+}
+
+export interface ResearchClaimRecord {
+  claimId: string;
+  text: string;
+  claimType: "fact" | "uncertainty" | "inference" | "recommendation" | "limitation";
+  supportStatus: "supported" | "partial" | "unsupported" | "uncertain";
+  sourceIds: string[];
+  confidence?: number;
+  reasoning?: {
+    premiseSourceIds: string[];
+    inference: string;
+    assumptions: string[];
+    status: "source_backed" | "partial" | "missing_source_support" | "uncertain";
+  };
+}
+
+export interface ResearchArtifactDelta {
+  claims?: ResearchClaimRecord[];
+  claimSourceLinks?: Array<{
+    claimId: string;
+    sourceId: string;
+    support: "supports" | "partially_supports" | "contradicts" | "context";
+  }>;
+  contradictions?: Array<{
+    contradictionId: string;
+    claimIds: string[];
+    sourceIds: string[];
+    resolution?: string;
+    status: "handled" | "unresolved" | "not_applicable";
+  }>;
+}
+
 export type PatchPreviewOperation = "create" | "update" | "delete";
 
 export interface PatchPreviewFile {
@@ -80,6 +121,17 @@ export interface PatchPreview {
   createdFiles: string[];
   deletedFiles: string[];
   files: PatchPreviewFile[];
+}
+
+export interface DocumentDraftPreview {
+  id: string;
+  filename?: string;
+  format: "md" | "txt";
+  status: "streaming" | "done";
+  contentPreview: string;
+  contentLength: number;
+  truncated: boolean;
+  updatedAt: number;
 }
 
 export interface Channel {
@@ -201,7 +253,7 @@ export interface ChannelState {
   /** Timestamp when thinking phase started (for elapsed timer) */
   thinkingStartedAt?: number | null;
   /** Latest structured runtime phase from core-agent. */
-  turnPhase?: "pending" | "planning" | "executing" | "verifying" | "committing" | "committed" | "aborted" | null;
+  turnPhase?: "pending" | "planning" | "executing" | "verifying" | "committing" | "compacting" | "committed" | "aborted" | null;
   /** Latest heartbeat elapsed time while the current iteration is still alive. */
   heartbeatElapsedMs?: number | null;
   /** Best-effort user-facing goal for the current live turn. */
@@ -212,6 +264,8 @@ export interface ChannelState {
   activeTools?: ToolActivity[];
   /** Latest safe browser preview frame from parent or subagent browser work. */
   browserFrame?: BrowserFrame | null;
+  /** Latest live markdown/text draft preview from an in-flight document write. */
+  documentDraft?: DocumentDraftPreview | null;
   /** Live spawned subagent roster during streaming. */
   subagents?: SubagentActivity[];
   /** Live TaskBoard snapshot during streaming (replaced on each emission). */

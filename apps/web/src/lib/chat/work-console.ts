@@ -77,6 +77,7 @@ const PHASE_LABELS: Record<NonNullable<ChannelState["turnPhase"]>, string> = {
   executing: "Running",
   verifying: "Verifying",
   committing: "Writing answer",
+  compacting: "Compacting",
   committed: "Finalizing",
   aborted: "Interrupted",
 };
@@ -87,6 +88,7 @@ const PHASE_LABELS_KO: Record<NonNullable<ChannelState["turnPhase"]>, string> = 
   executing: "실행 중",
   verifying: "검증 중",
   committing: "답변 작성 중",
+  compacting: "컨텍스트 정리 중",
   committed: "마무리 중",
   aborted: "중단됨",
 };

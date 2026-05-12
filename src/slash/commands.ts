@@ -12,6 +12,7 @@ import type { SseWriter } from "../transport/SseWriter.js";
 import type { SlashCommand, SlashCommandContext } from "./registry.js";
 import { ResetCounterStore } from "./resetCounters.js";
 import { flushMemory } from "../hooks/builtin/hipocampusFlush.js";
+import { isLongTermMemoryWriteDisabled } from "../util/memoryMode.js";
 
 /**
  * Write a synthetic assistant text response onto the `event: agent`
@@ -26,6 +27,37 @@ function emitText(sse: SseWriter, text: string): void {
 
 // ── /compact ──────────────────────────────────────────────────────────
 
+function fmtNum(n: number): string {
+  return n.toLocaleString("en-US");
+}
+
+function emitCompactSummary(
+  sse: SseWriter,
+  transcriptBefore: number,
+  transcriptAfter: number,
+  memoryStats: { daily: string[]; weekly: string[]; monthly: string[] } | null,
+  memoryError?: string,
+): void {
+  const lines: string[] = ["✅ Compaction complete\n"];
+  if (transcriptBefore > 0) {
+    const saved = transcriptBefore - transcriptAfter;
+    const pct = Math.round((saved / transcriptBefore) * 100);
+    lines.push(`📝 Transcript: ${fmtNum(transcriptBefore)} → ${fmtNum(transcriptAfter)} tokens (${pct}% reduced)`);
+  } else {
+    lines.push("📝 Transcript: already compact");
+  }
+  if (memoryError) {
+    lines.push(`🧠 Memory tree: ⚠️ ${memoryError}`);
+  } else if (memoryStats) {
+    const parts: string[] = [];
+    if (memoryStats.daily.length) parts.push(`${memoryStats.daily.length} daily`);
+    if (memoryStats.weekly.length) parts.push(`${memoryStats.weekly.length} weekly`);
+    if (memoryStats.monthly.length) parts.push(`${memoryStats.monthly.length} monthly`);
+    lines.push(`🧠 Memory tree: ${parts.length ? parts.join(", ") + " compacted" : "nothing to compact"}`);
+  }
+  emitText(sse, lines.join("\n"));
+}
+
 export function makeCompactCommand(agent: Agent): SlashCommand {
   return {
     name: "/compact",
@@ -34,40 +66,93 @@ export function makeCompactCommand(agent: Agent): SlashCommand {
       "Force an immediate compaction of the current session transcript + memory tree.",
     async handler(_args: string, ctx: SlashCommandContext): Promise<void> {
       const { session, sse } = ctx;
+      sse.agent({ type: "turn_phase", turnId: "compact", phase: "compacting" });
       const transcriptEntries = await session.transcript.readAll();
+      let transcriptBefore = 0;
+      let transcriptAfter = 0;
 
-      // 1. Transcript compaction (existing)
+      sse.agent({ type: "tool_start", id: "compact-transcript", name: "Transcript Compaction" });
+      const t0 = Date.now();
       try {
-        await agent.contextEngine.maybeCompact(
+        const boundary = await agent.contextEngine.maybeCompact(
           session,
           transcriptEntries,
           /*tokenLimit=*/ 0,
           agent.config.model,
         );
+        if (boundary) {
+          transcriptBefore = boundary.beforeTokenCount;
+          transcriptAfter = boundary.afterTokenCount;
+          sse.agent({
+            type: "tool_end",
+            id: "compact-transcript",
+            status: "done",
+            output_preview: `${fmtNum(transcriptBefore)} → ${fmtNum(transcriptAfter)} tokens`,
+            durationMs: Date.now() - t0,
+          });
+        } else {
+          sse.agent({
+            type: "tool_end",
+            id: "compact-transcript",
+            status: "done",
+            output_preview: "Already compact",
+            durationMs: Date.now() - t0,
+          });
+        }
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
-        emitText(sse, `⚠️ Transcript compaction failed: ${msg}`);
+        sse.agent({
+          type: "tool_end",
+          id: "compact-transcript",
+          status: "error",
+          output_preview: msg,
+          durationMs: Date.now() - t0,
+        });
       }
 
-      // 2. Hipocampus memory compaction (forced, no cooldown)
       if (agent.hipocampus) {
+        sse.agent({ type: "tool_start", id: "compact-memory", name: "Memory Tree Compaction" });
+        const t1 = Date.now();
         try {
           const result = await agent.hipocampus.compact(true);
           if (result.compacted) {
-            emitText(
-              sse,
-              `✅ Compaction complete — transcript + memory tree (daily=${result.stats.daily.length} weekly=${result.stats.weekly.length} monthly=${result.stats.monthly.length}).`,
-            );
+            const parts: string[] = [];
+            if (result.stats.daily.length) parts.push(`daily ${result.stats.daily.length}`);
+            if (result.stats.weekly.length) parts.push(`weekly ${result.stats.weekly.length}`);
+            if (result.stats.monthly.length) parts.push(`monthly ${result.stats.monthly.length}`);
+            sse.agent({
+              type: "tool_end",
+              id: "compact-memory",
+              status: "done",
+              output_preview: parts.join(", ") || "No changes",
+              durationMs: Date.now() - t1,
+            });
+            emitCompactSummary(sse, transcriptBefore, transcriptAfter, result.stats);
           } else {
-            emitText(sse, "✅ Transcript compacted. Memory tree: nothing to compact.");
+            sse.agent({
+              type: "tool_end",
+              id: "compact-memory",
+              status: "done",
+              output_preview: "Nothing to compact",
+              durationMs: Date.now() - t1,
+            });
+            emitCompactSummary(sse, transcriptBefore, transcriptAfter, null);
           }
         } catch (err) {
           const msg = err instanceof Error ? err.message : String(err);
-          emitText(sse, `✅ Transcript compacted. ⚠️ Memory tree failed: ${msg}`);
+          sse.agent({
+            type: "tool_end",
+            id: "compact-memory",
+            status: "error",
+            output_preview: msg,
+            durationMs: Date.now() - t1,
+          });
+          emitCompactSummary(sse, transcriptBefore, transcriptAfter, null, msg);
         }
       } else {
-        emitText(sse, "✅ Compaction complete. Summary boundary written.");
+        emitCompactSummary(sse, transcriptBefore, transcriptAfter, null);
       }
+      sse.agent({ type: "turn_phase", turnId: "compact", phase: "committed" });
     },
   };
 }
@@ -86,12 +171,15 @@ export function makeResetCommand(
       const { session, sse } = ctx;
       const ref = session.meta.channel;
 
-      // Flush memory before reset so no context is lost
-      try {
-        const transcript = await session.transcript.readAll();
-        await flushMemory(agent.config.workspaceRoot, transcript);
-      } catch {
-        // flush failure is non-fatal
+      // Flush memory before reset so no context is lost, except channels
+      // with disabled long-term memory writes.
+      if (!isLongTermMemoryWriteDisabled(ref.memoryMode)) {
+        try {
+          const transcript = await session.transcript.readAll();
+          await flushMemory(agent.config.workspaceRoot, transcript);
+        } catch {
+          // flush failure is non-fatal
+        }
       }
 
       const next = await resetStore.bump(ref);

@@ -38,6 +38,11 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { parse as parseYaml } from "yaml";
 import type { RegisteredHook, HookContext } from "../types.js";
+import {
+  analyzeCommand,
+  DEFAULT_SEGMENT_RULES,
+  type SegmentRule,
+} from "../../security/CommandSegmentAnalyzer.js";
 
 export type DangerousPatternScope = "bash" | "path";
 export type DangerousPatternKind = "substring" | "regex";
@@ -57,7 +62,7 @@ export const DEFAULT_DANGEROUS_PATTERNS: readonly DangerousPatternRule[] = [
   { match: "secrets/", scope: "path" },
   { match: "sudo", scope: "bash" },
   { match: "chmod 777", scope: "bash" },
-  { match: "curl.*\\|.*sh", scope: "bash", kind: "regex" },
+  // curl.*|.*sh is superseded by segment rule curl_pipe_exec.
   { match: "\\bgit\\s+push\\b", scope: "bash", kind: "regex", action: "ask" },
   { match: "\\bgit\\s+reset\\s+--hard\\b", scope: "bash", kind: "regex", action: "deny" },
   { match: "\\bgit\\s+checkout\\s+--\\b", scope: "bash", kind: "regex", action: "deny" },
@@ -132,6 +137,53 @@ export function resolveRulesFromConfig(
     out.push({ match, scope, kind, action });
   }
   return out;
+}
+
+/**
+ * Resolve segment_rules from agent.config.yaml. Returns DEFAULT_SEGMENT_RULES
+ * when the key is absent.
+ */
+function resolveSegmentRulesFromConfig(
+  config: Record<string, unknown> | null,
+): readonly SegmentRule[] {
+  if (!config || !Object.prototype.hasOwnProperty.call(config, "segment_rules")) {
+    return DEFAULT_SEGMENT_RULES;
+  }
+  const raw = config["segment_rules"];
+  if (!Array.isArray(raw) || raw.length === 0) return DEFAULT_SEGMENT_RULES;
+
+  const out: SegmentRule[] = [];
+  for (const entry of raw) {
+    if (!entry || typeof entry !== "object") continue;
+    const e = entry as Record<string, unknown>;
+    const id = typeof e["id"] === "string" ? e["id"] : "";
+    if (!id) continue;
+    const match = e["match"];
+    if (!match || typeof match !== "object") continue;
+    const m = match as Record<string, unknown>;
+    const leftStr = typeof m["left"] === "string" ? m["left"] : "";
+    const rightStr = typeof m["right"] === "string" ? m["right"] : "";
+    if (!leftStr || !rightStr) continue;
+
+    try {
+      const left = new RegExp(leftStr);
+      const right = new RegExp(rightStr);
+      const action = e["action"] === "deny" ? "deny" : "ask";
+      const severity = e["severity"] === "critical" ? "critical" : "high";
+      const description = typeof e["description"] === "string" ? e["description"] : id;
+
+      out.push({
+        id,
+        match: { left, right, connector: "|" },
+        action,
+        severity,
+        description,
+      });
+    } catch {
+      // Skip segment rules with invalid regexes.
+    }
+  }
+  return out.length > 0 ? out : DEFAULT_SEGMENT_RULES;
 }
 
 interface CompiledRule {
@@ -215,6 +267,87 @@ export function makeDangerousPatternsHook(
       const fromConfig = resolveRulesFromConfig(config);
       const rules: readonly DangerousPatternRule[] =
         fromConfig === null ? DEFAULT_DANGEROUS_PATTERNS : fromConfig;
+
+      if (scoped.scope === "bash") {
+        const segRules =
+          fromConfig !== null && fromConfig.length === 0
+            ? []
+            : resolveSegmentRulesFromConfig(config);
+        const bashRules = rules.filter((r) => r.scope === "bash");
+
+        try {
+          const analysis = analyzeCommand(scoped.target, segRules, bashRules);
+
+          for (const violation of analysis.violations) {
+            ctx.emit({
+              type: "rule_check",
+              ruleId: "dangerous-patterns",
+              verdict: "violation",
+              detail: `segment_rule_matched rule=${violation.rule.id} severity=${violation.rule.severity} action=${violation.rule.action} left=${violation.leftSegment.command} right=${violation.rightSegment.command} tool=${toolName}`,
+            });
+            ctx.log("warn", "[dangerousPatterns] segment rule matched", {
+              turnId: ctx.turnId,
+              toolName,
+              ruleId: violation.rule.id,
+              severity: violation.rule.severity,
+              action: violation.rule.action,
+              leftCommand: violation.leftSegment.command,
+              rightCommand: violation.rightSegment.command,
+            });
+
+            if (violation.rule.action === "deny") {
+              return {
+                action: "permission_decision",
+                decision: "deny",
+                reason: `[SEGMENT_RULE] ${violation.rule.description} (${violation.rule.id})`,
+              };
+            }
+            return {
+              action: "permission_decision",
+              decision: "ask",
+              reason: `${violation.rule.description} (${violation.rule.id}). Allow ${toolName} to proceed?`,
+            };
+          }
+
+          for (const match of analysis.legacyMatches) {
+            const action: DangerousPatternAction = match.rule.action ?? "ask";
+            ctx.emit({
+              type: "rule_check",
+              ruleId: "dangerous-patterns",
+              verdict: "violation",
+              detail: `dangerous_pattern_matched rule=${match.rule.match} scope=${match.rule.scope} kind=${match.rule.kind ?? "substring"} action=${action} tool=${toolName}`,
+            });
+            ctx.log("warn", "[dangerousPatterns] pattern matched", {
+              turnId: ctx.turnId,
+              toolName,
+              rule: match.rule.match,
+              scope: match.rule.scope,
+              kind: match.rule.kind ?? "substring",
+              action,
+            });
+
+            if (action === "deny") {
+              return {
+                action: "permission_decision",
+                decision: "deny",
+                reason: `[DANGEROUS_PATTERN] matched: ${match.rule.match}`,
+              };
+            }
+            return {
+              action: "permission_decision",
+              decision: "ask",
+              reason: `Dangerous pattern matched (${match.rule.scope}): "${match.rule.match}". Allow ${toolName} to proceed?`,
+            };
+          }
+
+          return { action: "continue" };
+        } catch (err) {
+          ctx.log("warn", "[dangerousPatterns] segment parsing failed, using legacy fallback", {
+            error: String(err),
+          });
+        }
+      }
+
       if (rules.length === 0) return { action: "continue" };
 
       const compileErrors: string[] = [];

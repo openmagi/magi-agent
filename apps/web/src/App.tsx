@@ -12,6 +12,7 @@ import { ChatMessages, type ChatMessagesHandle } from "@/components/chat/chat-me
 import {
   ChatInput,
   type ChatInputHandle,
+  type ChatInputCustomSkill,
   type ChatInputSendOptions,
 } from "@/components/chat/chat-input";
 import { ChatModelPicker } from "@/components/chat/chat-model-picker";
@@ -63,6 +64,7 @@ import type {
   ControlEvent,
   ControlRequestRecord,
   CitationGateStatus,
+  DocumentDraftPreview,
   InspectedSource,
   KbDocReference,
   MissionActivity,
@@ -502,6 +504,7 @@ function isRuntimePhase(value: unknown): value is RuntimePhase {
     value === "executing" ||
     value === "verifying" ||
     value === "committing" ||
+    value === "compacting" ||
     value === "committed" ||
     value === "aborted"
   );
@@ -609,6 +612,23 @@ function normalizeBrowserFrame(payload: JsonRecord): BrowserFrame | null {
     contentType,
     capturedAt: asNumber(payload.capturedAt, Date.now()),
     ...(typeof payload.url === "string" && payload.url ? { url: payload.url } : {}),
+  };
+}
+
+function normalizeDocumentDraft(payload: JsonRecord): DocumentDraftPreview | null {
+  const id = asString(payload.id);
+  const contentPreview = asString(payload.contentPreview);
+  if (!id && !contentPreview) return null;
+  const format = payload.format === "txt" ? "txt" : "md";
+  return {
+    id: id || nowId("document-draft"),
+    ...(typeof payload.filename === "string" && payload.filename ? { filename: payload.filename } : {}),
+    format,
+    status: payload.status === "done" ? "done" : "streaming",
+    contentPreview,
+    contentLength: Math.max(0, Math.floor(asNumber(payload.contentLength, contentPreview.length))),
+    truncated: payload.truncated === true,
+    updatedAt: Date.now(),
   };
 }
 
@@ -2780,6 +2800,16 @@ export function App() {
   const queuedForChannel = store.queuedMessages[activeChannel] ?? [];
   const controlsForChannel = store.controlRequests[activeChannel] ?? [];
   const allKbDocs = useMemo(() => kbCollections.flatMap((collection) => collection.docs), [kbCollections]);
+  const chatInputCustomSkills = useMemo<ChatInputCustomSkill[]>(() => {
+    return normalizeSkillDirectoryItems(asArray(skillsSnapshot?.loaded), asArray(skillsSnapshot?.issues))
+      .filter((skill) => skill.promptOnly || skill.scriptBacked || skill.runtimeHooks > 0)
+      .map((skill) => ({
+        name: skill.name,
+        title: skill.name,
+        tags: skill.tags,
+        description: skill.path,
+      }));
+  }, [skillsSnapshot]);
   const anyStreaming = Object.values(store.channelStates).some((state) => state.streaming);
 
   const authHeaders = useCallback(
@@ -3253,6 +3283,7 @@ export function App() {
           currentGoal: typeof payload.goal === "string" ? payload.goal : null,
           activeTools: [],
           browserFrame: null,
+          documentDraft: null,
           subagents: [],
           taskBoard: null,
           inspectedSources: [],
@@ -3338,6 +3369,21 @@ export function App() {
             durationMs: asNumber(payload.durationMs),
             ...(existing?.patchPreview ? { patchPreview: existing.patchPreview } : {}),
           });
+          if (current?.documentDraft?.id === id) {
+            store.setChannelState(channel, {
+              documentDraft: {
+                ...current.documentDraft,
+                status: "done",
+                updatedAt: Date.now(),
+              },
+            }, { botId: BOT_ID });
+          }
+        }
+      }
+      if (type === "document_draft") {
+        const documentDraft = normalizeDocumentDraft(payload);
+        if (documentDraft) {
+          store.setChannelState(channel, { documentDraft }, { botId: BOT_ID });
         }
       }
       if (type === "patch_preview") {
@@ -4289,6 +4335,7 @@ export function App() {
           onSelectKbDoc={handleToggleKbDoc}
           uploadStates={uploadStates}
           composerAccessory={composerAccessory}
+          customSkills={chatInputCustomSkills}
         />
       </div>
 

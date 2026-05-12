@@ -13,6 +13,7 @@ import type { Agent } from "./Agent.js";
 import { Turn, TurnInterruptedError, type TurnResult } from "./Turn.js";
 import {
   isResearchProofBlockReason,
+  publicResearchProofFailureReason,
   researchProofFailureNoticeText,
 } from "./turn/ResearchProofFailureNotice.js";
 import type { ChannelRef, TokenUsage, UserMessage } from "./util/types.js";
@@ -1414,6 +1415,8 @@ export class Session {
       contextId?: string;
       runtimeModelOverride?: string;
       goalMode?: boolean;
+      responseDeadlineMs?: number;
+      traceId?: string;
     } = {},
   ): Promise<TurnResult> {
     return this.mutex.run(async () => {
@@ -1579,16 +1582,17 @@ export class Session {
             minViableBudgetTokens: err.minViableBudgetTokens,
           });
           const userMsg =
-            "모델 컨텍스트 창이 너무 작아 compaction이 불가능합니다. 더 큰 컨텍스트 모델로 전환하세요.";
+            "Model context window is too small for compaction. Please switch to a model with a larger context window.";
           // Emit on the agent channel only — see LLMStreamReader.ts for
           // the dual-emit regression context.
           sse.agent({ type: "text_delta", delta: userMsg });
           await turn.abort(err.message, "compaction_impossible");
         } else {
           const msg = err instanceof Error ? err.message : String(err);
-          sse.agent({ type: "error", code: "turn_failed", message: msg });
+          const publicMsg = publicResearchProofFailureReason(msg);
+          sse.agent({ type: "error", code: "turn_failed", message: publicMsg });
           emitTerminalAbortFallback(sse, msg);
-          await turn.abort(msg);
+          await turn.abort(publicMsg);
         }
       } finally {
         this.activeTurn = null;

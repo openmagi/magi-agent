@@ -55,10 +55,14 @@
     "discord.js": "^14.26.3",
     "echarts": "^6.0.0",
     "echarts-for-react": "^3.0.6",
+    "js-yaml": "^4.1.1",
     "react-markdown": "^10.1.0",
     "remark-gfm": "^4.0.1",
+    "sql.js": "^1.14.1",
     "tailwindcss": "^4.2.4",
+    "tree-sitter-wasms": "^0.1.13",
     "ulid": "^2.3.0",
+    "web-tree-sitter": "^0.24.7",
     "yaml": "^2.8.3",
     "zustand": "^5.0.13"
   },
@@ -70,6 +74,7 @@
     "playwright": "^1.52.0"
   },
   "devDependencies": {
+    "@types/js-yaml": "^4.0.9",
     "@types/node": "^22.7.5",
     "@types/pdfkit": "^0.17.6",
     "@types/react": "^19.1.9",

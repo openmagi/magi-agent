@@ -78,6 +78,7 @@ import {
   makeExitPlanModeTool,
   type PlanModeController,
 } from "./tools/ExitPlanMode.js";
+import { makeSwitchToActModeTool } from "./tools/SwitchToActMode.js";
 import {
   makeEnterPlanModeTool,
   type PlanModeEntryController,
@@ -675,6 +676,7 @@ export class Agent {
         return controller;
       }),
     );
+    this.tools.register(makeSwitchToActModeTool(this.tools));
   }
 
   async resolveRuntimeModel(): Promise<string> {
@@ -1248,6 +1250,7 @@ export class Agent {
     this.tools.replace(makeClockTool());
     this.tools.replace(makeDateRangeTool());
     this.tools.replace(makeCalculationTool());
+    this.tools.replace(makeSwitchToActModeTool(this.tools));
   }
 
   /** Construct + start any channel adapters whose tokens are set. */

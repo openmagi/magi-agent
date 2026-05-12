@@ -15975,7 +15975,7 @@ function compareChatMessages(a, b) {
   return (a.serverId ?? a.id ?? a.content).localeCompare(b.serverId ?? b.id ?? b.content);
 }
 function hasNonTextTurnWork(state) {
-  return !!state.thinkingText || (state.activeTools?.length ?? 0) > 0 || !!state.browserFrame || (state.subagents?.length ?? 0) > 0 || (state.missions?.length ?? 0) > 0 || !!state.taskBoard?.tasks.length || (state.inspectedSources?.length ?? 0) > 0 || !!state.citationGate || (state.pendingInjectionCount ?? 0) > 0;
+  return !!state.thinkingText || (state.activeTools?.length ?? 0) > 0 || !!state.browserFrame || !!state.documentDraft || (state.subagents?.length ?? 0) > 0 || (state.missions?.length ?? 0) > 0 || !!state.taskBoard?.tasks.length || (state.inspectedSources?.length ?? 0) > 0 || !!state.citationGate || (state.pendingInjectionCount ?? 0) > 0;
 }
 const DEFAULT_CHANNEL_STATE = {
   streaming: false,
@@ -15990,6 +15990,7 @@ const DEFAULT_CHANNEL_STATE = {
   pendingInjectionCount: 0,
   activeTools: [],
   browserFrame: null,
+  documentDraft: null,
   subagents: [],
   taskBoard: null,
   missions: [],
@@ -16012,6 +16013,7 @@ const RESET_LIVE_RUN_STATE = {
   pendingInjectionCount: 0,
   activeTools: [],
   browserFrame: null,
+  documentDraft: null,
   subagents: [],
   taskBoard: null,
   pendingGoalMissionTitle: null,
@@ -16085,11 +16087,11 @@ function finalVisibleStreamContent(state, content2) {
 
 ${suffix}`;
 }
-function isTerminalMission(mission) {
+function isTerminalMission$1(mission) {
   return mission.status === "completed" || mission.status === "failed" || mission.status === "cancelled";
 }
 function durableMissionState(current) {
-  const missions = (current.missions ?? []).filter((mission) => !isTerminalMission(mission));
+  const missions = (current.missions ?? []).filter((mission) => !isTerminalMission$1(mission));
   const currentActiveGoalId = current.activeGoalMissionId && missions.some((mission) => mission.id === current.activeGoalMissionId && mission.kind === "goal") ? current.activeGoalMissionId : null;
   const fallbackActiveGoalId = currentActiveGoalId ?? missions.find((mission) => mission.kind === "goal")?.id ?? null;
   return { missions, activeGoalMissionId: fallbackActiveGoalId };
@@ -30253,6 +30255,11 @@ function describePhase(phase, language, elapsedSeconds) {
         label: t$6(language, "Preparing final answer", "최종 답변 준비 중"),
         ...typeof elapsedSeconds === "number" ? { detail: formatSeconds(elapsedSeconds, language) } : {}
       };
+    case "compacting":
+      return {
+        label: t$6(language, "Compacting memory", "메모리 압축 중"),
+        ...typeof elapsedSeconds === "number" ? { detail: formatSeconds(elapsedSeconds, language) } : {}
+      };
     case "aborted":
       return { label: t$6(language, "Stopping current turn", "현재 턴 중단 중") };
     case "committed":
@@ -31867,6 +31874,29 @@ function ControlRequestCard({ request, onRespond }) {
     ] })
   ] }) });
 }
+const REPLACEMENT_CHAR = "�";
+const SERVER_PATCH_EXTRA_CHARS = 20;
+function shouldPatchAssistantTextFromServer(localContent, serverContent) {
+  if (!serverContent || serverContent === localContent) return false;
+  if (serverContent.length > localContent.length + SERVER_PATCH_EXTRA_CHARS) return true;
+  return localContent.includes(REPLACEMENT_CHAR) && !serverContent.includes(REPLACEMENT_CHAR);
+}
+function shouldPreferServerAssistantMessage(local, server, proximityWindowMs) {
+  if (local.role !== "assistant" || server.role !== "assistant") return false;
+  if (local.serverId) return false;
+  if (!local.id.startsWith("assistant-")) return false;
+  if (!Number.isFinite(local.timestamp) || !Number.isFinite(server.timestamp)) return false;
+  if (Math.abs(server.timestamp - local.timestamp) > proximityWindowMs) return false;
+  return shouldPatchAssistantTextFromServer(local.content, server.content);
+}
+const ROUTE_META_PREAMBLE_RE = /^\[META\s*:\s*(?=[^\]]*\b(?:intent|domain|complexity|route)\s*=)[^\]]*\]\s*\n?/i;
+const SKILLS_PREAMBLE_RE = /^\[SKILLS\s*:[^\]]*\]\s*\n?/i;
+function stripAssistantMetadataPreamble(content2) {
+  if (!content2.startsWith("[META:")) return content2;
+  const withoutMeta = content2.replace(ROUTE_META_PREAMBLE_RE, "");
+  if (withoutMeta === content2) return content2;
+  return withoutMeta.replace(SKILLS_PREAMBLE_RE, "");
+}
 const MAX_SNIPPET_LENGTH = 240;
 const MAX_TARGET_LENGTH = 180;
 function isKorean$6(language) {
@@ -32451,12 +32481,29 @@ function modelProgressPreview(inputPreview2, outputPreview, language) {
   const elapsedMs = displayValue(input, ["elapsedMs"]);
   const elapsedSeconds = elapsedMs ? Math.max(1, Math.round(Number(elapsedMs) / 1e3)) : null;
   const elapsed = elapsedSeconds ? isKorean$6(language) ? `${elapsedSeconds}초째 작업 중` : `${elapsedSeconds}s elapsed` : void 0;
-  const action = stage === "completed" ? localized(language, "Model step finished", "모델 단계 완료") : stage === "heartbeat" ? localized(language, "Still working", "계속 작업 중") : localized(language, "Thinking through next step", "다음 단계 판단 중");
-  const target = label && !/thinking through next step/i.test(label) ? bounded(label, MAX_TARGET_LENGTH) : elapsed;
+  const isHeartbeat = stage === "heartbeat";
+  const heartbeatLabel = isHeartbeat && label && !/^(still working|계속 작업 중)$/iu.test(label.trim()) ? bounded(label, MAX_TARGET_LENGTH) : void 0;
+  const action = stage === "completed" ? localized(language, "Model step finished", "모델 단계 완료") : isHeartbeat ? heartbeatLabel ?? localized(language, "Still working", "계속 작업 중") : localized(language, "Thinking through next step", "다음 단계 판단 중");
+  const target = isHeartbeat ? elapsed : label && !/thinking through next step/i.test(label) ? bounded(label, MAX_TARGET_LENGTH) : elapsed;
   const snippet = snippetFrom([detail, output].filter(Boolean).join("\n"));
   return {
     action,
     ...target ? { target } : {},
+    ...snippet ? { snippet } : {}
+  };
+}
+function activityProgressPreview(inputPreview2, _outputPreview, language) {
+  const input = previewObject(inputPreview2);
+  const label = displayValue(input, ["label"]) ?? localized(language, "Working through current step", "작업 진행 중");
+  const target = displayValue(input, ["target"]);
+  const detail = displayValue(input, ["detail"]);
+  const elapsedMs = displayValue(input, ["elapsedMs"]);
+  const elapsedSeconds = elapsedMs ? Math.max(1, Math.round(Number(elapsedMs) / 1e3)) : null;
+  const elapsed = elapsedSeconds ? isKorean$6(language) ? `${elapsedSeconds}초째 작업 중` : `${elapsedSeconds}s elapsed` : void 0;
+  const snippet = snippetFrom([target, detail].filter(Boolean).join("\n"));
+  return {
+    action: bounded(label, MAX_TARGET_LENGTH),
+    ...elapsed ? { target: elapsed } : {},
     ...snippet ? { snippet } : {}
   };
 }
@@ -32669,6 +32716,9 @@ function derivePublicToolPreview(input) {
   if (tool === "modelprogress") {
     return modelProgressPreview(input.inputPreview, input.outputPreview, language);
   }
+  if (tool === "activityprogress") {
+    return activityProgressPreview(input.inputPreview, input.outputPreview, language);
+  }
   if (tool === "taskboard" || tool === "taskupdate") {
     const preview2 = taskBoardPreview(input);
     if (preview2) return preview2;
@@ -32728,6 +32778,7 @@ const PHASE_LABELS$1 = {
   executing: "Running",
   verifying: "Verifying",
   committing: "Writing answer",
+  compacting: "Compacting",
   committed: "Finalizing",
   aborted: "Interrupted"
 };
@@ -32737,6 +32788,7 @@ const PHASE_LABELS_KO$1 = {
   executing: "실행 중",
   verifying: "검증 중",
   committing: "답변 작성 중",
+  compacting: "컨텍스트 정리 중",
   committed: "마무리 중",
   aborted: "중단됨"
 };
@@ -33067,6 +33119,7 @@ const PHASE_LABELS = {
   executing: "Running",
   verifying: "Verifying",
   committing: "Writing answer",
+  compacting: "Compacting",
   committed: "Writing answer",
   aborted: "Stopping"
 };
@@ -33076,6 +33129,7 @@ const PHASE_LABELS_KO = {
   executing: "실행 중",
   verifying: "검증 중",
   committing: "답변 작성 중",
+  compacting: "압축 중",
   committed: "답변 작성 중",
   aborted: "중단 중"
 };
@@ -33145,6 +33199,7 @@ function statusFrom(channelState, pendingRequests, language) {
   if ((channelState.activeTools ?? []).some((activity) => activity.status === "error")) {
     return t$4(language, "Blocked", "차단됨");
   }
+  if (channelState.turnPhase === "compacting") return t$4(language, "Compacting", "압축 중");
   if (channelState.turnPhase === "verifying") return t$4(language, "Verifying", "검증 중");
   if (channelState.turnPhase === "committing" || channelState.turnPhase === "committed") {
     return t$4(language, "Writing answer", "답변 작성 중");
@@ -33239,6 +33294,15 @@ function deriveWorkStateSummary({
     next: nextFrom(channelState, queuedMessages, pendingRequests, language)
   };
 }
+const OPEN_MISSION_LEDGER_EVENT = "magi:open-mission-ledger";
+function dispatchOpenMissionLedgerEvent(missionId) {
+  if (typeof window === "undefined") return;
+  const trimmed = missionId.trim();
+  if (!trimmed) return;
+  window.dispatchEvent(new CustomEvent(OPEN_MISSION_LEDGER_EVENT, {
+    detail: { missionId: trimmed }
+  }));
+}
 function writingAnswerLabel(language) {
   return language === "ko" ? "답변 작성 중..." : "Writing answer...";
 }
@@ -33305,16 +33369,59 @@ function browserActionLabel$2(action, language) {
       return t$3(language, "Using browser", "브라우저 사용 중");
   }
 }
+function InlineBrowserFramePreview({
+  frame,
+  language
+}) {
+  const imageSrc = `data:${frame.contentType};base64,${frame.imageBase64}`;
+  return /* @__PURE__ */ jsxRuntimeExports.jsxs(
+    "div",
+    {
+      className: "mt-2 overflow-hidden rounded-md border border-black/[0.08] bg-white",
+      "data-chat-inline-browser-frame": "true",
+      children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex min-w-0 items-center justify-between gap-2 border-b border-black/[0.06] px-2.5 py-1.5", children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "shrink-0 text-[10px] font-semibold uppercase tracking-wide text-secondary/45", children: t$3(language, "Live browser", "실시간 브라우저") }),
+          /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "min-w-0 truncate text-[10.5px] text-secondary/55", children: [
+            browserActionLabel$2(frame.action, language),
+            frame.url ? ` · ${frame.url}` : ""
+          ] })
+        ] }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx(
+          "img",
+          {
+            src: imageSrc,
+            alt: t$3(language, "Browser preview", "브라우저 미리보기"),
+            className: "block aspect-video w-full max-h-56 bg-black/[0.03] object-contain"
+          }
+        )
+      ]
+    }
+  );
+}
 function hasOpenTaskState$1(channelState) {
   return !!channelState.taskBoard?.tasks.some(
     (task) => task.status === "pending" || task.status === "in_progress"
   );
 }
+function isTerminalMission(mission) {
+  return mission.status === "completed" || mission.status === "failed" || mission.status === "cancelled";
+}
+function currentRunMission(channelState) {
+  const missions = channelState.missions ?? [];
+  const activeGoal = channelState.activeGoalMissionId ? missions.find((mission) => mission.id === channelState.activeGoalMissionId) : null;
+  if (activeGoal && !isTerminalMission(activeGoal)) return activeGoal;
+  return missions.find((mission) => !isTerminalMission(mission)) ?? null;
+}
 function hasInlineRunStatus(channelState, queuedMessages, pendingRequests) {
   const hasLiveWork = (channelState.activeTools ?? []).some((tool) => tool.status === "running") || (channelState.subagents ?? []).some(
     (subagent) => subagent.status === "running" || subagent.status === "waiting"
-  ) || hasOpenTaskState$1(channelState) || !!channelState.browserFrame || queuedMessages.length > 0 || pendingRequests.length > 0 || channelState.fileProcessing || channelState.reconnecting;
+  ) || hasOpenTaskState$1(channelState) || (channelState.runtimeTraces ?? []).some((trace) => trace.severity !== "info") || !!channelState.browserFrame || queuedMessages.length > 0 || pendingRequests.length > 0 || channelState.fileProcessing || channelState.reconnecting;
   return hasLiveWork || channelState.streaming && !channelState.streamingText;
+}
+const INLINE_WORK_ROW_LIMIT = 4;
+function isUsefulSubagentRow(row) {
+  return !row.detail || !/^iteration\s+\d+$/i.test(row.detail.trim());
 }
 function inlineWorkRows(channelState, queuedMessages, pendingRequests, language) {
   const rows = deriveWorkConsoleRows({
@@ -33324,9 +33431,15 @@ function inlineWorkRows(channelState, queuedMessages, pendingRequests, language)
     uiLanguage: language
   });
   const selected = [];
-  selected.push(...rows.filter((row) => row.group === "control" && row.status === "waiting"));
-  if (channelState.browserFrame) {
-    selected.push({
+  const appendRows = (items) => {
+    for (const item of items) {
+      if (selected.length >= INLINE_WORK_ROW_LIMIT) break;
+      selected.push(item);
+    }
+  };
+  appendRows(rows.filter((row) => row.group === "control" && row.status === "waiting"));
+  if (channelState.browserFrame && selected.length < INLINE_WORK_ROW_LIMIT) {
+    appendRows([{
       id: "browser-frame",
       group: "status",
       label: t$3(language, "Live browser", "실시간 브라우저"),
@@ -33335,22 +33448,25 @@ function inlineWorkRows(channelState, queuedMessages, pendingRequests, language)
         channelState.browserFrame.url
       ].filter(Boolean).join(" - "),
       status: "running"
-    });
+    }]);
   }
-  selected.push(...rows.filter((row) => row.group === "tool" && row.status === "running"));
-  selected.push(
-    ...rows.filter(
-      (row) => row.group === "subagent" && (row.status === "running" || row.status === "waiting")
-    )
-  );
-  selected.push(...rows.filter((row) => row.group === "task" && row.status === "running"));
+  const toolRows = rows.filter((row) => row.group === "tool").slice(-INLINE_WORK_ROW_LIMIT);
+  const traceRows = rows.filter((row) => row.group === "trace" && row.status !== "info").slice(-2);
+  const taskRows = rows.filter((row) => row.group === "task" && (row.status === "running" || row.status === "done")).slice(-2);
+  const subagentRows = rows.filter(
+    (row) => row.group === "subagent" && (row.status === "running" || row.status === "waiting") && isUsefulSubagentRow(row)
+  ).slice(-2);
+  appendRows(subagentRows);
+  appendRows(traceRows);
+  appendRows(toolRows);
+  appendRows(taskRows);
   if (selected.length === 0) {
-    selected.push(...rows.filter((row) => row.group === "status" && row.id !== "idle"));
+    appendRows(rows.filter((row) => row.group === "status" && row.id !== "idle"));
   }
   if (selected.length === 0 && queuedMessages.length > 0) {
-    selected.push(...rows.filter((row) => row.group === "queue").slice(0, 1));
+    appendRows(rows.filter((row) => row.group === "queue").slice(0, 1));
   }
-  return selected.slice(0, 3);
+  return selected.slice(0, INLINE_WORK_ROW_LIMIT);
 }
 function InlineRunStatus({
   channelState,
@@ -33367,18 +33483,37 @@ function InlineRunStatus({
     uiLanguage: language
   });
   const rows = inlineWorkRows(channelState, queuedMessages, pendingRequests, language);
+  const genericGoal = t$3(language, "Working on your request", "요청 처리 중");
+  const displayGoal = summary.goal !== genericGoal ? summary.goal : null;
+  const mission = currentRunMission(channelState);
   return /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "chat-msg-in mb-4 flex justify-start", "data-chat-inline-run-status": "true", children: /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "w-full max-w-[92%] rounded-lg border border-black/[0.08] bg-white/90 px-3 py-2.5 shadow-sm backdrop-blur sm:max-w-[82%]", children: [
     /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex min-w-0 items-center justify-between gap-3", children: [
       /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "min-w-0", children: [
         /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "text-[11px] font-semibold uppercase tracking-wide text-secondary/50", children: summary.title }),
+        displayGoal && /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "mt-1 line-clamp-2 break-words text-[12px] leading-snug text-foreground/70", children: displayGoal }),
         /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "mt-0.5 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-xs text-secondary/70", children: [
           /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "font-medium text-foreground/75", children: summary.status }),
           summary.progress && /* @__PURE__ */ jsxRuntimeExports.jsx("span", { children: summary.progress }),
           queuedMessages.length > 0 && /* @__PURE__ */ jsxRuntimeExports.jsx("span", { children: isKorean$3(language) ? `${queuedMessages.length}개 대기` : `${queuedMessages.length} queued` })
         ] })
       ] }),
-      /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "shrink-0 rounded-full bg-[#7C3AED]/10 px-2 py-0.5 text-[10px] font-semibold text-[#7C3AED]", children: t$3(language, "Live", "실시간") })
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex shrink-0 items-center gap-1.5", children: [
+        mission && /* @__PURE__ */ jsxRuntimeExports.jsx(
+          "button",
+          {
+            type: "button",
+            onClick: () => dispatchOpenMissionLedgerEvent(mission.id),
+            className: "rounded-md border border-[#7C3AED]/15 bg-[#7C3AED]/10 px-2 py-1 text-[10px] font-semibold text-[#6D28D9] transition-colors hover:border-[#7C3AED]/25 hover:bg-[#7C3AED]/15",
+            "aria-label": `Open Mission Ledger for ${mission.title}`,
+            title: t$3(language, "Open mission ledger", "미션 원장 열기"),
+            "data-chat-open-mission-ledger": mission.id,
+            children: t$3(language, "Open mission ledger", "미션 원장 열기")
+          }
+        ),
+        /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "rounded-full bg-[#7C3AED]/10 px-2 py-0.5 text-[10px] font-semibold text-[#7C3AED]", children: t$3(language, "Live", "실시간") })
+      ] })
     ] }),
+    channelState.browserFrame && /* @__PURE__ */ jsxRuntimeExports.jsx(InlineBrowserFramePreview, { frame: channelState.browserFrame, language }),
     rows.length > 0 && /* @__PURE__ */ jsxRuntimeExports.jsx("ul", { className: "mt-2 space-y-1", "aria-label": t$3(language, "Current work updates", "현재 작업 업데이트"), children: rows.map((row) => /* @__PURE__ */ jsxRuntimeExports.jsxs(
       "li",
       {
@@ -33411,7 +33546,8 @@ const OPTIMISTIC_CONTENT_DEDUP_WINDOW_MS = 5 * 6e4;
 const OPTIMISTIC_CONTENT_DEDUP_MIN_CHARS = 80;
 function normalizedDuplicateContent(message) {
   if (message.role === "system") return null;
-  const normalized = message.content.replace(/\s+/g, " ").trim();
+  const content2 = message.role === "assistant" ? stripAssistantMetadataPreamble(message.content) : message.content;
+  const normalized = content2.replace(/\s+/g, " ").trim();
   if (normalized.length < OPTIMISTIC_CONTENT_DEDUP_MIN_CHARS) return null;
   return normalized;
 }
@@ -33419,10 +33555,10 @@ function duplicateContentKey(message) {
   const normalized = normalizedDuplicateContent(message);
   return normalized ? `${message.role}\0${normalized}` : null;
 }
-const ChatMessages = reactExports.forwardRef(function ChatMessages2({ messages, serverMessages, channelState, uiLanguage, loading, botId, selectionMode, selectedMessages, onToggleSelect, onEnterSelectionMode, onSelectAll, onDeselectAll, onExportSelected, onDeleteSelected, onExitSelectionMode, onLoadOlder, hasOlderMessages, loadingOlder, onReplyTo, queuedMessages, onCancelQueued, controlRequests, onRespondControlRequest }, ref) {
+const ChatMessages = reactExports.forwardRef(function ChatMessages2({ messages, serverMessages, channelState, loading, botId, selectionMode, selectedMessages, onToggleSelect, onEnterSelectionMode, onSelectAll, onDeselectAll, onExportSelected, onDeleteSelected, onExitSelectionMode, onLoadOlder, hasOlderMessages, loadingOlder, onReplyTo, queuedMessages, onCancelQueued, controlRequests, onRespondControlRequest, uiLanguage }, ref) {
   const containerRef = reactExports.useRef(null);
-  const [showScrollBtn, setShowScrollBtn] = reactExports.useState(false);
   const language = uiLanguage ?? channelState.responseLanguage;
+  const [showScrollBtn, setShowScrollBtn] = reactExports.useState(false);
   const userScrolledUp = reactExports.useRef(false);
   const prevMsgCount = reactExports.useRef(0);
   const animateFromRef = reactExports.useRef(0);
@@ -33441,10 +33577,15 @@ const ChatMessages = reactExports.forwardRef(function ChatMessages2({ messages, 
   const allMessages = reactExports.useMemo(() => {
     if (serverMessages.length === 0) return [...messages].sort(compareChatMessages);
     if (messages.length === 0) return [...serverMessages].sort(compareChatMessages);
-    const localServerIds = new Set(messages.map((m) => m.serverId).filter(Boolean));
+    const localMessages = messages.filter((message) => !serverMessages.some((serverMessage) => shouldPreferServerAssistantMessage(
+      message,
+      serverMessage,
+      TIMESTAMP_DEDUP_WINDOW_MS
+    )));
+    const localServerIds = new Set(localMessages.map((m) => m.serverId).filter(Boolean));
     const localByRole = /* @__PURE__ */ new Map();
     const optimisticByContent = /* @__PURE__ */ new Map();
-    for (const m of messages) {
+    for (const m of localMessages) {
       const ts = m.timestamp ?? 0;
       if (!localByRole.has(m.role)) localByRole.set(m.role, []);
       localByRole.get(m.role).push(ts);
@@ -33474,7 +33615,7 @@ const ChatMessages = reactExports.forwardRef(function ChatMessages2({ messages, 
       }
       return true;
     });
-    return [...messages, ...filtered].sort(compareChatMessages);
+    return [...localMessages, ...filtered].sort(compareChatMessages);
   }, [messages, serverMessages]);
   if (allMessages.length > prevMsgCount.current) {
     animateFromRef.current = prevMsgCount.current;
@@ -33609,12 +33750,12 @@ const ChatMessages = reactExports.forwardRef(function ChatMessages2({ messages, 
         children: [
           /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "max-w-5xl mx-auto", children: [
             loadingOlder && /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "flex justify-center py-3", children: /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "w-5 h-5 border-2 border-black/10 border-t-black/40 rounded-full animate-spin" }) }),
-            loading && allMessages.length === 0 && /* @__PURE__ */ jsxRuntimeExports.jsx(MessageSkeleton, {}),
+            loading && /* @__PURE__ */ jsxRuntimeExports.jsx(MessageSkeleton, {}),
             !loading && allMessages.length === 0 && !channelState.streaming && /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex flex-col items-center justify-center h-full min-h-[200px] gap-2", children: [
               /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "w-10 h-10 rounded-full bg-black/[0.04] flex items-center justify-center", children: /* @__PURE__ */ jsxRuntimeExports.jsx("svg", { width: "20", height: "20", viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: "1.5", className: "text-secondary/60", children: /* @__PURE__ */ jsxRuntimeExports.jsx("path", { strokeLinecap: "round", strokeLinejoin: "round", d: "M8.625 12a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Zm0 0H8.25m4.125 0a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Zm0 0H12m4.125 0a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Zm0 0h-.375M21 12c0 4.556-4.03 8.25-9 8.25a9.764 9.764 0 0 1-2.555-.337A5.972 5.972 0 0 1 5.41 20.97a5.969 5.969 0 0 1-.474-.065 4.48 4.48 0 0 0 .978-2.025c.09-.457-.133-.901-.467-1.226C3.93 16.178 3 14.189 3 12c0-4.556 4.03-8.25 9-8.25s9 3.694 9 8.25Z" }) }) }),
               /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-secondary/50 text-sm", children: "Start a conversation" })
             ] }),
-            (() => {
+            !loading && (() => {
               const streamingNow = !!channelState.streaming;
               let mainMessages = allMessages;
               let midTurnInjected = [];
@@ -33647,6 +33788,8 @@ const ChatMessages = reactExports.forwardRef(function ChatMessages2({ messages, 
                       thinkingDuration: msg.thinkingDuration,
                       activities: msg.activities,
                       taskBoard: msg.taskBoard,
+                      researchEvidence: msg.researchEvidence,
+                      usage: msg.usage,
                       botId,
                       replyTo: msg.replyTo,
                       injected: msg.injected,
@@ -33676,6 +33819,8 @@ const ChatMessages = reactExports.forwardRef(function ChatMessages2({ messages, 
                     thinkingDuration: options.includeSourceMeta ? source?.thinkingDuration : void 0,
                     activities: options.includeSourceMeta ? source?.activities : void 0,
                     taskBoard: options.includeSourceMeta ? source?.taskBoard : void 0,
+                    researchEvidence: options.includeSourceMeta ? source?.researchEvidence : void 0,
+                    usage: options.includeSourceMeta ? source?.usage : void 0,
                     botId,
                     selectionMode: source ? selectionMode : void 0,
                     selected: source ? selectedMessages?.has(source.id) : void 0,
@@ -33818,6 +33963,9 @@ const ChatMessages = reactExports.forwardRef(function ChatMessages2({ messages, 
                     botId
                   }
                 )),
+                !channelState.streamingText && anchoredMidTurnInjected.map(
+                  (msg, i) => renderMessage(msg, i, mainMessages.length, `pending-injected:${msg.id}`)
+                ),
                 unanchoredMidTurnInjected.map(
                   (msg, i) => renderMessage(msg, i, mainMessages.length)
                 ),
@@ -33832,7 +33980,7 @@ const ChatMessages = reactExports.forwardRef(function ChatMessages2({ messages, 
                 )
               ] });
             })(),
-            pendingControlRequests2.length > 0 && /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "mt-2", children: pendingControlRequests2.map((request) => /* @__PURE__ */ jsxRuntimeExports.jsx(
+            !loading && pendingControlRequests2.length > 0 && /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "mt-2", children: pendingControlRequests2.map((request) => /* @__PURE__ */ jsxRuntimeExports.jsx(
               ControlRequestCard,
               {
                 request,
@@ -33840,8 +33988,8 @@ const ChatMessages = reactExports.forwardRef(function ChatMessages2({ messages, 
               },
               request.requestId
             )) }),
-            showTyping && !channelState.fileProcessing && /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "chat-msg-in", children: /* @__PURE__ */ jsxRuntimeExports.jsx(TypingIndicator, {}) }),
-            queuedMessages && queuedMessages.length > 0 && /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "mt-3 flex justify-end", children: /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "w-full max-w-[92%] sm:max-w-[82%] rounded-2xl border border-amber-500/25 bg-amber-50 px-3 py-2 shadow-[0_1px_8px_rgba(245,158,11,0.10)]", children: [
+            !loading && showTyping && !channelState.fileProcessing && /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "chat-msg-in", children: /* @__PURE__ */ jsxRuntimeExports.jsx(TypingIndicator, {}) }),
+            !loading && queuedMessages && queuedMessages.length > 0 && /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "mt-3 flex justify-end", children: /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "w-full max-w-[92%] sm:max-w-[82%] rounded-2xl border border-amber-500/25 bg-amber-50 px-3 py-2 shadow-[0_1px_8px_rgba(245,158,11,0.10)]", children: [
               /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "mb-1.5 flex items-center justify-between gap-2 text-[10px] font-semibold uppercase tracking-wide text-amber-800/70", children: [
                 /* @__PURE__ */ jsxRuntimeExports.jsx("span", { children: t$3(language, "Queued follow-ups", "대기 중인 후속 메시지") }),
                 /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "rounded-full bg-amber-500/15 px-1.5 py-0.5 text-[9px] text-amber-800", children: waitingCountLabel$1(queuedMessages.length, language) })
@@ -34100,6 +34248,41 @@ const ALL_SLASH = (() => {
   }
   return entries;
 })();
+function buildSlashEntries(customSkills = []) {
+  const entries = [...ALL_SLASH];
+  const seenCommands = new Set(entries.map((entry) => entry.command.toLowerCase()));
+  for (const skill of customSkills) {
+    const command = normalizeSlashCommand(skill.name);
+    if (!command) continue;
+    const dedupeKey = command.toLowerCase();
+    if (seenCommands.has(dedupeKey)) continue;
+    seenCommands.add(dedupeKey);
+    const label = skill.title.trim() || command;
+    entries.push({
+      command,
+      label,
+      category: "custom",
+      searchText: [
+        command,
+        label,
+        skill.description ?? "",
+        ...skill.tags ?? []
+      ].join(" ")
+    });
+  }
+  return entries;
+}
+function getSlashMatches(entries, query) {
+  const normalizedQuery = query.toLowerCase();
+  if (normalizedQuery === "") return entries.slice(0, 12);
+  return entries.filter((entry) => {
+    const haystack = `${entry.command} ${entry.label} ${entry.category} ${entry.searchText ?? ""}`.toLowerCase();
+    return haystack.includes(normalizedQuery);
+  }).slice(0, 12);
+}
+function normalizeSlashCommand(command) {
+  return command.trim().replace(/^\/+/, "").replace(/\s+/g, "-");
+}
 function buildChatInputSendOptions(runUntilDone) {
   return runUntilDone ? { goalMode: true } : void 0;
 }
@@ -34158,7 +34341,8 @@ const ChatInput = reactExports.forwardRef(function ChatInput2({
   kbDocs,
   onSelectKbDoc,
   uploadStates,
-  composerAccessory
+  composerAccessory,
+  customSkills
 }, ref) {
   const [text2, setText] = reactExports.useState("");
   const [pendingFiles, setPendingFiles] = reactExports.useState([]);
@@ -34199,13 +34383,11 @@ const ChatInput = reactExports.forwardRef(function ChatInput2({
   }, [text2, cursorPos]);
   const slashQuery = slashToken?.query ?? null;
   const prevQueryRef = reactExports.useRef(slashQuery);
+  const slashEntries = reactExports.useMemo(() => buildSlashEntries(customSkills), [customSkills]);
   const slashMatches = reactExports.useMemo(() => {
     if (slashQuery === null) return [];
-    if (slashQuery === "") return ALL_SLASH.slice(0, 12);
-    return ALL_SLASH.filter(
-      (e) => e.command.toLowerCase().includes(slashQuery) || e.label.toLowerCase().includes(slashQuery)
-    ).slice(0, 12);
-  }, [slashQuery]);
+    return getSlashMatches(slashEntries, slashQuery);
+  }, [slashEntries, slashQuery]);
   const slashOpen = slashMatches.length > 0;
   if (prevQueryRef.current !== slashQuery) {
     prevQueryRef.current = slashQuery;
@@ -35197,6 +35379,34 @@ function browserActionLabel$1(action, language) {
       return t$1(language, "Using browser", "브라우저 사용 중");
   }
 }
+function DocumentDraftPreviewCard({
+  draft,
+  language
+}) {
+  const unit = draft.contentLength === 1 ? "char" : "chars";
+  const sizeLabel = isKorean$1(language) ? `${draft.contentLength.toLocaleString()}자` : `${draft.contentLength.toLocaleString()} ${unit}`;
+  return /* @__PURE__ */ jsxRuntimeExports.jsxs(
+    "section",
+    {
+      className: "mb-3 overflow-hidden rounded-xl border border-[#7C3AED]/15 bg-white shadow-[0_1px_6px_rgba(124,58,237,0.08)]",
+      "data-work-console-document-draft": "true",
+      children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex min-w-0 items-center justify-between gap-2 border-b border-black/[0.06] px-2.5 py-1.5", children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "shrink-0 text-[10px] font-semibold uppercase tracking-wide text-secondary/45", children: draft.status === "done" ? t$1(language, "Document written", "문서 작성 완료") : t$1(language, "Writing document", "문서 작성 중") }),
+          /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "min-w-0 truncate text-[10.5px] text-secondary/55", children: [
+            draft.filename ?? (draft.format === "md" ? "Markdown" : "Text"),
+            /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "text-secondary/35", children: [
+              " · ",
+              sizeLabel
+            ] })
+          ] })
+        ] }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx("pre", { className: "max-h-44 overflow-auto bg-[#FBFBFD] px-2.5 py-2 whitespace-pre-wrap break-words text-[11px] leading-snug text-secondary/75", children: draft.truncated ? `...
+${draft.contentPreview}` : draft.contentPreview })
+      ]
+    }
+  );
+}
 function BrowserFramePreview({
   frame,
   language
@@ -35275,6 +35485,7 @@ function WorkConsolePanel({
       /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "mt-1 text-[11px] leading-snug text-secondary/45", children: t$1(language, "Plain-language progress from the current run.", "현재 실행의 진행 상황입니다.") })
     ] }),
     /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "min-h-0 flex-1 overflow-y-auto px-2 py-2", children: [
+      channelState.documentDraft && /* @__PURE__ */ jsxRuntimeExports.jsx(DocumentDraftPreviewCard, { draft: channelState.documentDraft, language }),
       channelState.browserFrame && /* @__PURE__ */ jsxRuntimeExports.jsx(BrowserFramePreview, { frame: channelState.browserFrame, language }),
       groups.map(([group, groupRows2]) => {
         const isActionsGroup = group === "tool";
@@ -36437,12 +36648,12 @@ function pendingControlRequests(requests) {
 }
 function hasVisibleRunState(channelState, queuedMessages, pendingRequests, taskBoard, subagents) {
   const inspectedSources = channelState.inspectedSources ?? [];
-  return channelState.streaming || (channelState.activeTools ?? []).length > 0 || !!channelState.browserFrame || subagents.length > 0 || queuedMessages.length > 0 || pendingRequests.length > 0 || !!taskBoard || inspectedSources.length > 0 || !!channelState.citationGate;
+  return channelState.streaming || (channelState.activeTools ?? []).length > 0 || !!channelState.browserFrame || !!channelState.documentDraft || subagents.length > 0 || queuedMessages.length > 0 || pendingRequests.length > 0 || !!taskBoard || inspectedSources.length > 0 || !!channelState.citationGate;
 }
 function runIdentity(channelState, queuedMessages, pendingRequests, taskBoard, subagents) {
   const activeTools2 = channelState.activeTools ?? [];
   const inspectedSources = channelState.inspectedSources ?? [];
-  const startedAt = channelState.thinkingStartedAt ?? activeTools2[0]?.startedAt ?? channelState.browserFrame?.capturedAt ?? subagents[0]?.startedAt ?? inspectedSources[0]?.inspectedAt ?? channelState.citationGate?.checkedAt ?? null;
+  const startedAt = channelState.thinkingStartedAt ?? activeTools2[0]?.startedAt ?? channelState.browserFrame?.capturedAt ?? channelState.documentDraft?.updatedAt ?? subagents[0]?.startedAt ?? inspectedSources[0]?.inspectedAt ?? channelState.citationGate?.checkedAt ?? null;
   if (startedAt !== null) return `run:${startedAt}`;
   if (pendingRequests.length > 0) {
     return `controls:${pendingRequests.map((request) => request.requestId).join(",")}`;
@@ -36470,6 +36681,8 @@ function phaseLabel(phase, language) {
       return t(language, "Planning", "계획 중");
     case "executing":
       return t(language, "Running", "실행 중");
+    case "compacting":
+      return t(language, "Compacting", "압축 중");
     case "verifying":
       return t(language, "Verifying", "검증 중");
     case "committing":
@@ -36635,6 +36848,34 @@ function BrowserFrameInline({
             className: "block aspect-video w-full max-h-64 bg-black/[0.03] object-contain"
           }
         )
+      ]
+    }
+  );
+}
+function DocumentDraftInline({
+  draft,
+  language
+}) {
+  const unit = draft.contentLength === 1 ? "char" : "chars";
+  const sizeLabel = isKorean(language) ? `${draft.contentLength.toLocaleString()}자` : `${draft.contentLength.toLocaleString()} ${unit}`;
+  return /* @__PURE__ */ jsxRuntimeExports.jsxs(
+    "div",
+    {
+      className: "mt-2 overflow-hidden rounded-lg border border-[#7C3AED]/15 bg-white",
+      "data-run-inspector-document-draft": "true",
+      children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex min-w-0 items-center justify-between gap-2 border-b border-black/[0.06] px-2.5 py-1.5", children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "shrink-0 text-[10px] font-semibold uppercase tracking-wide text-secondary/45", children: draft.status === "done" ? t(language, "Document written", "문서 작성 완료") : t(language, "Writing document", "문서 작성 중") }),
+          /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "min-w-0 truncate text-[10.5px] text-secondary/55", children: [
+            draft.filename ?? (draft.format === "md" ? "Markdown" : "Text"),
+            /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "text-secondary/35", children: [
+              " · ",
+              sizeLabel
+            ] })
+          ] })
+        ] }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx("pre", { className: "max-h-52 overflow-auto bg-[#FBFBFD] px-2.5 py-2 whitespace-pre-wrap break-words text-[11px] leading-snug text-secondary/75", children: draft.truncated ? `...
+${draft.contentPreview}` : draft.contentPreview })
       ]
     }
   );
@@ -36825,6 +37066,7 @@ function RunInspectorDock({
     /* @__PURE__ */ jsxRuntimeExports.jsx(WorkStateSummaryRows, { summary: workState, language }),
     compactDetails ? null : /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "mt-2 max-h-[min(50vh,34rem)] overflow-y-auto overscroll-contain pr-1 [scrollbar-gutter:stable]", children: [
       channelState.browserFrame && /* @__PURE__ */ jsxRuntimeExports.jsx(BrowserFrameInline, { frame: channelState.browserFrame, language }),
+      channelState.documentDraft && /* @__PURE__ */ jsxRuntimeExports.jsx(DocumentDraftInline, { draft: channelState.documentDraft, language }),
       /* @__PURE__ */ jsxRuntimeExports.jsx(
         ResearchEvidence,
         {
@@ -37280,7 +37522,7 @@ function preview(value, max = 400) {
   return text2.length > max ? `${text2.slice(0, max - 3)}...` : text2;
 }
 function isRuntimePhase(value) {
-  return value === "pending" || value === "planning" || value === "executing" || value === "verifying" || value === "committing" || value === "committed" || value === "aborted";
+  return value === "pending" || value === "planning" || value === "executing" || value === "verifying" || value === "committing" || value === "compacting" || value === "committed" || value === "aborted";
 }
 function createSseParser(onEvent) {
   let buffer = "";
@@ -37354,6 +37596,22 @@ function normalizeBrowserFrame(payload) {
     contentType,
     capturedAt: asNumber(payload.capturedAt, Date.now()),
     ...typeof payload.url === "string" && payload.url ? { url: payload.url } : {}
+  };
+}
+function normalizeDocumentDraft(payload) {
+  const id = asString(payload.id);
+  const contentPreview = asString(payload.contentPreview);
+  if (!id && !contentPreview) return null;
+  const format = payload.format === "txt" ? "txt" : "md";
+  return {
+    id: id || nowId("document-draft"),
+    ...typeof payload.filename === "string" && payload.filename ? { filename: payload.filename } : {},
+    format,
+    status: payload.status === "done" ? "done" : "streaming",
+    contentPreview,
+    contentLength: Math.max(0, Math.floor(asNumber(payload.contentLength, contentPreview.length))),
+    truncated: payload.truncated === true,
+    updatedAt: Date.now()
   };
 }
 function normalizePatchPreview(payload) {
@@ -39086,6 +39344,14 @@ function App() {
   const queuedForChannel = store.queuedMessages[activeChannel] ?? [];
   const controlsForChannel = store.controlRequests[activeChannel] ?? [];
   const allKbDocs = reactExports.useMemo(() => kbCollections.flatMap((collection) => collection.docs), [kbCollections]);
+  const chatInputCustomSkills = reactExports.useMemo(() => {
+    return normalizeSkillDirectoryItems(asArray(skillsSnapshot?.loaded), asArray(skillsSnapshot?.issues)).filter((skill) => skill.promptOnly || skill.scriptBacked || skill.runtimeHooks > 0).map((skill) => ({
+      name: skill.name,
+      title: skill.name,
+      tags: skill.tags,
+      description: skill.path
+    }));
+  }, [skillsSnapshot]);
   const anyStreaming = Object.values(store.channelStates).some((state) => state.streaming);
   const authHeaders = reactExports.useCallback(
     (json = false) => ({
@@ -39496,6 +39762,7 @@ function App() {
           currentGoal: typeof payload.goal === "string" ? payload.goal : null,
           activeTools: [],
           browserFrame: null,
+          documentDraft: null,
           subagents: [],
           taskBoard: null,
           inspectedSources: [],
@@ -39578,6 +39845,21 @@ function App() {
             durationMs: asNumber(payload.durationMs),
             ...existing?.patchPreview ? { patchPreview: existing.patchPreview } : {}
           });
+          if (current?.documentDraft?.id === id) {
+            store.setChannelState(channel, {
+              documentDraft: {
+                ...current.documentDraft,
+                status: "done",
+                updatedAt: Date.now()
+              }
+            }, { botId: BOT_ID });
+          }
+        }
+      }
+      if (type === "document_draft") {
+        const documentDraft = normalizeDocumentDraft(payload);
+        if (documentDraft) {
+          store.setChannelState(channel, { documentDraft }, { botId: BOT_ID });
         }
       }
       if (type === "patch_preview") {
@@ -40453,7 +40735,8 @@ function App() {
               kbDocs: allKbDocs,
               onSelectKbDoc: handleToggleKbDoc,
               uploadStates,
-              composerAccessory
+              composerAccessory,
+              customSkills: chatInputCustomSkills
             }
           )
         ]
