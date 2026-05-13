@@ -41,6 +41,8 @@ import { HeartbeatMonitor, wrapSseWithMonitor } from "./turn/HeartbeatMonitor.js
 import { SessionHeartbeat } from "./turn/SessionHeartbeat.js";
 import { RetryController } from "./turn/RetryController.js";
 import { ToolCallLoopDetector } from "./turn/ToolCallLoopDetector.js";
+import { sanitizeMessagesForLLM } from "./turn/MessageSanitizer.js";
+import { detectPollingIteration } from "./turn/pollingDetector.js";
 import type { TurnRoute, TurnStatus, TurnMeta, TurnStopReason, PlanResult, VerificationReport } from "./turn/types.js";
 import { messagesHaveImages } from "./routing/messageText.js";
 import { isRouterKeyword } from "./routing/types.js";
@@ -241,6 +243,8 @@ export class Turn {
   /** Gap §11.3 unknown-tool hallucination counter — shared across every
    * dispatchTools call within this turn. */
   private unknownToolCount = 0;
+  private static readonly POLLING_MODEL = "claude-haiku-4-5-20251001";
+  private pollingModelOverride: string | null = null;
   private _commitRetryCount = 0;
   get commitRetryCount(): number { return this._commitRetryCount; }
   /** Increment commit retry counter — called by Session.runTurn
@@ -509,11 +513,12 @@ export class Turn {
         let usage: LLMUsage;
         try {
           const systemForLLM = maybeCacheOptimize(systemPrompt, effectiveModel);
+          const sanitizedMessages = sanitizeMessagesForLLM(messages);
           ({ blocks, stopReason, usage } = await readOneStream(
             { llm: this.session.agent.llm, model: effectiveModel, sse,
               abortSignal: llmAbort.signal,
               onError: (code, err) => this.emitError(code, err) },
-            systemForLLM, messages, toolDefs,
+            systemForLLM, sanitizedMessages, toolDefs,
             this.readOptions(),
           ));
         } catch (err) {
@@ -719,6 +724,16 @@ export class Turn {
         }
         this.throwIfInterrupted();
         this.appendToolTurn(messages, blocks, dispatched);
+
+        const pollingResult = detectPollingIteration(
+          decision.toolUses.map((tu: { name: string }) => tu.name),
+          dispatched,
+        );
+        if (pollingResult.isPolling && pollingResult.allStillRunning) {
+          this.pollingModelOverride = Turn.POLLING_MODEL;
+        } else if (this.pollingModelOverride) {
+          this.pollingModelOverride = null;
+        }
       }
 
       const err = new Error(`turn exceeded ${Turn.MAX_ITERATIONS} tool iterations`);
@@ -1021,6 +1036,7 @@ export class Turn {
         detail: `Calling ${effectiveModel}`,
       });
       const retrySystemForLLM = maybeCacheOptimize(systemPrompt, effectiveModel);
+      const retrySanitized = sanitizeMessagesForLLM(messages);
       const { blocks, stopReason, usage } = await readOneStream(
         {
           llm: this.session.agent.llm,
@@ -1030,7 +1046,7 @@ export class Turn {
           onError: (code, err) => this.emitError(code, err),
         },
         retrySystemForLLM,
-        messages,
+        retrySanitized,
         toolDefs as LLMToolDef[],
         this.readOptions(),
       );
@@ -1176,6 +1192,10 @@ export class Turn {
     messages: LLMMessage[],
     toolDefs: ReadonlyArray<{ name: string }>,
   ): Promise<string> {
+    if (this.pollingModelOverride) {
+      this.meta.effectiveModel = this.pollingModelOverride;
+      return this.pollingModelOverride;
+    }
     if (this.emptyResponseModelOverride) {
       this.meta.configuredModel = await this.resolveRuntimeModel();
       this.meta.effectiveModel = this.emptyResponseModelOverride;
@@ -1224,6 +1244,7 @@ export class Turn {
             },
           }
         : {}),
+      ...(this.traceId ? { traceId: this.traceId } : {}),
     };
   }
 
