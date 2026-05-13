@@ -123,6 +123,13 @@ export interface HookContext {
   /** Structured research contract state for source-sensitive turns. */
   readonly researchContract?: ResearchContractStore;
   /**
+   * Custom classifier dimensions from magi.config.yaml. Populated by
+   * ExtendedClassifier when custom dimensions are configured; absent
+   * otherwise. Keyed by dimension name, value is the parsed JSON
+   * output from the classifier for that dimension.
+   */
+  readonly customClassification?: ReadonlyMap<string, Record<string, unknown>>;
+  /**
    * Optional human-in-the-loop delegate. Populated by Turn.ts for
    * phases that can reasonably interact with the user (currently
    * `beforeToolUse` only) so a hook returning
