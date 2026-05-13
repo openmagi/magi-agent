@@ -28,6 +28,32 @@ Run it with Anthropic, OpenAI, Google, Ollama, LM Studio, vLLM, llama.cpp, LiteL
 
 Other agent frameworks decide what "safe" means for you. Magi gives you the control plane and lets you wire in whatever "safe" means in **your** domain.
 
+### What hooks actually catch
+
+We run 30+ autonomous bots in production. The most common failures are not dramatic -- they are plausible-sounding answers that happen to be wrong:
+
+- The agent reads a config showing `claude-opus-4-6`, reports "the system uses gpt-5.5"
+- Says "I fixed the bug and tests pass" without ever running `npm test`
+- Promises "I'll send the report later" and never does — no cron, no background task
+- Reads financial data, then reports wrong numbers in the answer
+
+None of these involve exceeding permissions. The agent had access to every tool. It chose not to use them, or used them and misreported the results. Permission gates are orthogonal to answer quality.
+
+These are the built-in hooks that catch each failure class:
+
+| Hook | Catches |
+|------|---------|
+| `deferralBlocker` | "I'll send it later" with no scheduled delivery |
+| `selfClaimVerifier` | Claims about files or data without supporting reads |
+| `factGroundingVerifier` | Tool results that contradict the stated answer |
+| `resourceExistenceChecker` | References to files never read |
+| `goalProgressGate` | Text-only responses to action requests |
+| `completionEvidenceGate` | "Fixed it" without running tests |
+| `answerVerifier` | Deflection, partial answers, or refusal |
+| `deterministicEvidenceVerifier` | Numeric/date claims not backed by tool evidence |
+
+[Full architecture comparison: how this differs from Claude Code →](https://openmagi.ai/blog/magi-vs-claude-code)
+
 ## Quick start
 
 ```bash
