@@ -42,7 +42,7 @@ export type LLMContentBlock =
   | {
       type: "tool_result";
       tool_use_id: string;
-      content: string | Array<{ type: "text"; text: string }>;
+      content: string | Array<{ type: string; [key: string]: unknown }>;
       is_error?: boolean;
     };
 
@@ -55,6 +55,8 @@ export interface LLMToolDef {
   name: string;
   description: string;
   input_schema: object;
+  /** When true, Anthropic API shows only the tool name — schema hidden until discovered via tool_reference. */
+  defer_loading?: boolean;
 }
 
 export interface LLMStreamRequest {

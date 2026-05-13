@@ -116,7 +116,8 @@ export interface ToolDispatchContext {
 
 export interface ToolDispatchResult {
   toolUseId: string;
-  content: string;
+  /** Text content, or array of content blocks (e.g. tool_reference for ToolSearch). */
+  content: string | Array<{type: string; [key: string]: unknown}>;
   isError: boolean;
 }
 
@@ -652,6 +653,23 @@ async function dispatchOne(
     { toolName: tu.name, toolUseId: tu.id, input: permittedInput, result },
     ctx.buildHookContext("afterToolUse"),
   );
+
+  // ToolSearch returns tool_reference blocks that the API expands into
+  // full tool schemas in the model's context. Pass them through as
+  // structured content instead of serialising to text.
+  if (
+    tu.name === "ToolSearch" &&
+    result.status === "ok" &&
+    result.output &&
+    typeof result.output === "object" &&
+    "tool_references" in (result.output as Record<string, unknown>) &&
+    Array.isArray((result.output as { tool_references: unknown }).tool_references)
+  ) {
+    const refs = (result.output as { tool_references: Array<{ type: string; tool_name: string }> }).tool_references;
+    if (refs.length > 0) {
+      return { toolUseId: tu.id, content: refs, isError: false };
+    }
+  }
 
   return { toolUseId: tu.id, content, isError };
 }

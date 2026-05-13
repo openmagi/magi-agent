@@ -121,6 +121,10 @@ export interface StagingSurface {
 export interface ToolResult<T = unknown> {
   status: ToolStatus;
   output?: T;
+  /** Compact text rendered back to the LLM as the tool_result content. */
+  llmOutput?: string;
+  /** Compact text persisted to transcript replay when llmOutput is absent. */
+  transcriptOutput?: string;
   errorCode?: string;
   errorMessage?: string;
   durationMs: number;
@@ -156,6 +160,9 @@ export interface Tool<I = unknown, O = unknown> {
   /** Intent tags used by the classifier to decide whether to expose
    * this tool in a given turn's tools[] (§9.8 P2). */
   tags?: string[];
+  /** When true, tool is sent with defer_loading — model must use
+   * ToolSearch to discover its full schema before calling it. */
+  shouldDefer?: boolean;
   /** Optional pre-validation; return null if ok, string error if not. */
   validate?(input: I): string | null;
   execute(input: I, ctx: ToolContext): Promise<ToolResult<O>>;
