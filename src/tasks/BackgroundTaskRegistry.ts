@@ -417,6 +417,27 @@ export class BackgroundTaskRegistry {
     return fired || prev.status === "running";
   }
 
+  async waitForCompletion(
+    taskId: string,
+    opts?: { signal?: AbortSignal; intervalMs?: number },
+  ): Promise<BackgroundTaskRecord | null> {
+    await this.hydrate();
+    const interval = opts?.intervalMs ?? 500;
+    const signal = opts?.signal;
+    for (;;) {
+      if (signal?.aborted) return null;
+      const rec = this.records.get(taskId);
+      if (rec && rec.status !== "running") return { ...rec };
+      await new Promise<void>((resolve) => {
+        const t = setTimeout(resolve, interval);
+        if (signal) {
+          const onAbort = (): void => { clearTimeout(t); resolve(); };
+          signal.addEventListener("abort", onAbort, { once: true });
+        }
+      });
+    }
+  }
+
   /** Test / teardown hook — flushes controllers without touching disk. */
   clearControllers(): void {
     this.aborts.clear();

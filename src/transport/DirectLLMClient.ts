@@ -355,10 +355,13 @@ function textBlocksToString(blocks: Exclude<LLMMessage["content"], string>): str
 }
 
 function toolResultToText(
-  content: string | Array<{ type: "text"; text: string }>,
+  content: string | Array<{ type: string; [key: string]: unknown }>,
 ): string {
   if (typeof content === "string") return content;
-  return content.map((block) => block.text).join("\n");
+  return content
+    .filter((block): block is { type: "text"; text: string } => block.type === "text" && typeof block.text === "string")
+    .map((block) => block.text)
+    .join("\n");
 }
 
 async function* parseOpenAISse(

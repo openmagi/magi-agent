@@ -29,6 +29,7 @@ export const PLAN_MODE_ALLOWED_TOOLS: ReadonlySet<string> = new Set([
   "FileRead",
   "Glob",
   "Grep",
+  "PatchApply",
   "TaskBoard",
   "ExitPlanMode",
   "AskUserQuestion",
@@ -42,6 +43,9 @@ export interface ToolSelectorDeps {
   readonly userText: string;
   /** True when the session (or Turn mirror) is in plan mode. */
   readonly planMode: boolean;
+  /** Tool names already discovered via tool_reference in message history.
+   *  Discovered deferred tools are sent with full schema (no defer_loading). */
+  readonly discoveredToolNames?: ReadonlySet<string>;
 }
 
 export function isStrictPlanModeEnabled(): boolean {
@@ -94,9 +98,22 @@ export async function buildToolDefs(deps: ToolSelectorDeps): Promise<LLMToolDef[
     selected = filterToolsByIntent(all, intentTags, MAX_TOOLS_PER_TURN);
   }
 
-  return selected.map((t) => ({
-    name: t.name,
-    description: t.description,
-    input_schema: t.inputSchema,
-  }));
+  return selected.map((t) => {
+    const isDeferred = t.shouldDefer === true;
+    const isDiscovered = deps.discoveredToolNames?.has(t.name) ?? false;
+
+    if (isDeferred && !isDiscovered) {
+      return {
+        name: t.name,
+        description: t.description,
+        input_schema: t.inputSchema,
+        defer_loading: true as const,
+      };
+    }
+    return {
+      name: t.name,
+      description: t.description,
+      input_schema: t.inputSchema,
+    };
+  });
 }
