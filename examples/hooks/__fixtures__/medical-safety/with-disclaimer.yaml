@@ -1,0 +1,12 @@
+# medical-safety — fixture with disclaimer present
+
+description: "Should allow dosage with disclaimer"
+point: "beforeCommit"
+input:
+  assistantText: "A common dosage is 500mg every 6 hours, but please consult your doctor before taking any medication."
+  toolCallCount: 0
+  toolReadHappened: false
+  userMessage: "What should I take for a headache?"
+  retryCount: 0
+expected:
+  action: "continue"
