@@ -6,6 +6,8 @@ import type { OutputArtifactRegistry } from "../output/OutputArtifactRegistry.js
 import { Workspace } from "../storage/Workspace.js";
 import type { Tool, ToolContext, ToolResult } from "../Tool.js";
 import { errorResult } from "../util/toolResult.js";
+import { renderCanonicalMarkdownViaChatProxy } from "./document/browserRenderClient.js";
+import { exportCanonicalMarkdownDocument } from "./document/canonicalMarkdownExport.js";
 import { convertDocxToPdf, type DocxToPdfConverter } from "./document/docxToPdfDriver.js";
 import { markdownToStructuredBlocks, writeDocxFromBlocks, type StructuredBlock } from "./document/docxDriver.js";
 import { renderMarkdownToHtml } from "./document/htmlDriver.js";
@@ -23,6 +25,8 @@ import {
 } from "./document/textDriver.js";
 
 type DocumentOutputFormat = "html" | "docx" | "hwpx" | "md" | "txt" | "pdf";
+type DocumentRenderer = "auto" | "default" | "canonical_markdown";
+type CanonicalOutputFormat = "html" | "pdf" | "docx";
 type MarkdownSourceKind = "markdown" | "text" | "plain_text";
 type DocumentWriteSourceInput =
   | string
@@ -49,10 +53,17 @@ const SUPPORTED_FORMATS: readonly DocumentOutputFormat[] = [
   "txt",
   "pdf",
 ];
+const CANONICAL_OUTPUT_FORMATS: readonly CanonicalOutputFormat[] = ["html", "pdf", "docx"];
 
 export interface DocumentWriteInput {
   mode: "create" | "edit";
   format: DocumentOutputFormat;
+  renderer?: DocumentRenderer;
+  outputs?: CanonicalOutputFormat[];
+  docxMode?: "editable" | "fixed_layout";
+  preset?: "memo" | "report" | "investment_committee" | "plain";
+  page?: { size?: "A4" | "Letter"; margin?: string };
+  locale?: "en-US" | "ko-KR" | "ja-JP" | "zh-CN" | "es-ES";
   title: string;
   filename: string;
   template?: HwpxTemplate;
@@ -73,6 +84,11 @@ export interface DocumentWriteDeps {
   agenticWriter?: AgenticDocumentWriter;
   agentic?: AgenticDocumentAuthorDeps;
   docxToPdfConverter?: DocxToPdfConverter;
+  canonicalMarkdown?: {
+    chatProxyUrl?: string;
+    gatewayToken?: string;
+    renderPdf?: Parameters<typeof exportCanonicalMarkdownDocument>[0]["renderPdf"];
+  };
 }
 
 const STRUCTURED_BLOCK_SCHEMA = {
@@ -135,6 +151,19 @@ const INPUT_SCHEMA = {
   properties: {
     mode: { type: "string", enum: ["create", "edit"] },
     format: { type: "string", enum: SUPPORTED_FORMATS },
+    renderer: { type: "string", enum: ["auto", "default", "canonical_markdown"] },
+    outputs: { type: "array", items: { type: "string", enum: CANONICAL_OUTPUT_FORMATS } },
+    docxMode: { type: "string", enum: ["editable", "fixed_layout"] },
+    preset: { type: "string", enum: ["memo", "report", "investment_committee", "plain"] },
+    page: {
+      type: "object",
+      properties: {
+        size: { type: "string", enum: ["A4", "Letter"] },
+        margin: { type: "string" },
+      },
+      additionalProperties: false,
+    },
+    locale: { type: "string", enum: ["en-US", "ko-KR", "ja-JP", "zh-CN", "es-ES"] },
     title: { type: "string" },
     filename: { type: "string" },
     template: { type: "string", enum: ["base", "gonmun", "report", "minutes"] },
@@ -450,9 +479,10 @@ export function makeDocumentWriteTool(
   return {
     name: "DocumentWrite",
     description:
-      "Create or edit user-facing md, txt, html, pdf, docx, and hwpx documents inside the bot workspace and register the result as an output artifact. DOCX/HWPX use an agentic authoring loop when available. PDF is always produced by first authoring a DOCX intermediate, then converting DOCX to PDF; conversion failure returns an error instead of direct-rendering a degraded PDF. Source may be inline markdown/blocks or a workspace-relative path/blocksFile.",
+      "Create or edit user-facing md, txt, html, pdf, docx, and hwpx documents inside the workspace and register the result as an output artifact. Renderer may be auto, default, or canonical_markdown; omit it or use auto unless a caller intentionally needs a native/default route or exact canonical Markdown export. DOCX/HWPX use an agentic authoring loop when available. Default PDF is produced by first authoring a DOCX intermediate, then converting DOCX to PDF; conversion failure returns an error instead of direct-rendering a degraded PDF. Source may be inline markdown/blocks or a workspace-relative path/blocksFile.",
     inputSchema: INPUT_SCHEMA,
     permission: "write",
+    shouldDefer: true,
     validate(input) {
       if (!input || (input.mode !== "create" && input.mode !== "edit")) {
         return "`mode` must be create or edit";
@@ -495,7 +525,141 @@ export function makeDocumentWriteTool(
         }
         const docxToPdfConverter = deps.docxToPdfConverter ?? convertDocxToPdf;
 
+        if (input.renderer === "canonical_markdown") {
+          const outputs = input.outputs && input.outputs.length > 0
+            ? input.outputs
+            : [
+                input.format === "html" || input.format === "pdf" || input.format === "docx"
+                  ? input.format
+                  : "pdf",
+              ];
+          const renderPdf = deps.canonicalMarkdown?.renderPdf
+            ?? (deps.canonicalMarkdown?.chatProxyUrl && deps.canonicalMarkdown?.gatewayToken
+              ? (request: Parameters<typeof renderCanonicalMarkdownViaChatProxy>[0]["request"]) =>
+                  renderCanonicalMarkdownViaChatProxy({
+                    chatProxyUrl: deps.canonicalMarkdown?.chatProxyUrl ?? "",
+                    gatewayToken: deps.canonicalMarkdown?.gatewayToken ?? "",
+                    request,
+                  })
+              : null);
+          if (!renderPdf && (outputs.includes("pdf") || input.docxMode === "fixed_layout")) {
+            throw new Error("render configuration is required for canonical Markdown PDF export");
+          }
+          const exportResult = await exportCanonicalMarkdownDocument({
+            workspaceRoot,
+            title: input.title,
+            filenameBase: outputPath.workspacePath.replace(/^outputs\//, "").replace(/\.[^.]+$/, ""),
+            sourceMarkdown: sourceToMarkdown(source),
+            outputs,
+            docxMode: input.docxMode ?? "editable",
+            preset: input.preset ?? "report",
+            locale: input.locale ?? "ko-KR",
+            page: {
+              size: input.page?.size ?? "A4",
+              margin: input.page?.margin ?? "18mm",
+            },
+            renderPdf: renderPdf ?? (async () => {
+              throw new Error("PDF renderer unavailable");
+            }),
+          });
+          const registeredArtifacts = [];
+          for (const file of exportResult.files) {
+            registeredArtifacts.push(await outputRegistry.register({
+              sessionKey: ctx.sessionKey,
+              turnId: ctx.turnId,
+              kind: "document",
+              format: file.format,
+              title: input.title,
+              filename: file.filename,
+              mimeType: file.mimeType,
+              workspacePath: file.workspacePath,
+              previewKind: file.format === "html" ? "inline-html" : "download-only",
+              createdByTool: "DocumentWrite",
+              sourceKind: source.kind,
+            }));
+          }
+          const primary = registeredArtifacts.find((artifact) => artifact.format === input.format)
+            ?? registeredArtifacts[0];
+          if (!primary) throw new Error("canonical Markdown export produced no files");
+          return {
+            status: "ok",
+            output: {
+              artifactId: primary.artifactId,
+              workspacePath: primary.workspacePath,
+              filename: primary.filename,
+            },
+            durationMs: Date.now() - start,
+            metadata: {
+              documentWriteMode: "canonical_markdown",
+              canonicalMarkdownQa: exportResult.qa,
+              canonicalMarkdownOutputs: exportResult.files.map((file) => file.format),
+              canonicalMarkdownArtifactIds: registeredArtifacts.map((artifact) => artifact.artifactId),
+            },
+          };
+        }
+
         if (input.format === "pdf") {
+          const canUseCanonicalPdf =
+            input.renderer !== "default" &&
+            !!(deps.canonicalMarkdown?.renderPdf ||
+              (deps.canonicalMarkdown?.chatProxyUrl && deps.canonicalMarkdown?.gatewayToken));
+
+          if (canUseCanonicalPdf) {
+            const renderPdf = deps.canonicalMarkdown?.renderPdf
+              ?? ((request: Parameters<typeof renderCanonicalMarkdownViaChatProxy>[0]["request"]) =>
+                renderCanonicalMarkdownViaChatProxy({
+                  chatProxyUrl: deps.canonicalMarkdown?.chatProxyUrl ?? "",
+                  gatewayToken: deps.canonicalMarkdown?.gatewayToken ?? "",
+                  request,
+                }));
+            const exportResult = await exportCanonicalMarkdownDocument({
+              workspaceRoot,
+              title: input.title,
+              filenameBase: outputPath.workspacePath.replace(/^outputs\//, "").replace(/\.[^.]+$/, ""),
+              sourceMarkdown: sourceToMarkdown(source),
+              outputs: ["pdf"],
+              docxMode: input.docxMode ?? "editable",
+              preset: input.preset ?? "report",
+              locale: input.locale ?? "ko-KR",
+              page: {
+                size: input.page?.size ?? "A4",
+                margin: input.page?.margin ?? "18mm",
+              },
+              renderPdf,
+            });
+            const registeredArtifacts = [];
+            for (const file of exportResult.files) {
+              registeredArtifacts.push(await outputRegistry.register({
+                sessionKey: ctx.sessionKey,
+                turnId: ctx.turnId,
+                kind: "document",
+                format: file.format as DocumentOutputFormat,
+                title: input.title,
+                filename: file.filename,
+                mimeType: file.mimeType,
+                workspacePath: file.workspacePath,
+                previewKind: "download-only",
+                createdByTool: "DocumentWrite",
+                sourceKind: source.kind,
+              }));
+            }
+            const primary = registeredArtifacts[0];
+            if (!primary) throw new Error("canonical PDF export produced no files");
+            return {
+              status: "ok",
+              output: {
+                artifactId: primary.artifactId,
+                workspacePath: primary.workspacePath,
+                filename: primary.filename,
+              },
+              durationMs: Date.now() - start,
+              metadata: {
+                documentWriteMode: "canonical_html_to_pdf",
+                canonicalMarkdownQa: exportResult.qa,
+              },
+            };
+          }
+
           writeMetadata = await writePdfViaDocx(
             input,
             source,
