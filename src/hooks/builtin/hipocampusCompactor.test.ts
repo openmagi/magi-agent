@@ -63,6 +63,34 @@ describe("hipocampusCompactor", () => {
     }));
   });
 
+  it("skips flush, compaction, and reindex in incognito memory mode", async () => {
+    const engine = makeEngine({ compacted: true });
+    const qmd = makeQmd();
+    const flush: FlushFn = vi.fn(async () => ({ flushed: 1, lastTurnId: "t1" }));
+    const hook = makeHipocampusCompactorHook(engine, qmd, flush);
+    const ctx = makeCtx("session-incognito", { memoryMode: "incognito" });
+
+    await hook.handler({ userMessage: "private turn" }, ctx);
+
+    expect(flush).not.toHaveBeenCalled();
+    expect(engine.run).not.toHaveBeenCalled();
+    expect(qmd.reindex).not.toHaveBeenCalled();
+  });
+
+  it("skips flush, compaction, and reindex in read-only memory mode", async () => {
+    const engine = makeEngine({ compacted: true });
+    const qmd = makeQmd();
+    const flush: FlushFn = vi.fn(async () => ({ flushed: 1, lastTurnId: "t1" }));
+    const hook = makeHipocampusCompactorHook(engine, qmd, flush);
+    const ctx = makeCtx("session-read-only", { memoryMode: "read_only" });
+
+    await hook.handler({ userMessage: "private turn" }, ctx);
+
+    expect(flush).not.toHaveBeenCalled();
+    expect(engine.run).not.toHaveBeenCalled();
+    expect(qmd.reindex).not.toHaveBeenCalled();
+  });
+
   it("skips on subsequent turns of same session", async () => {
     const engine = makeEngine({ compacted: true });
     const qmd = makeQmd();

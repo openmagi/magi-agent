@@ -6,12 +6,9 @@ export interface ModelOption {
 }
 
 export const BASE_MODEL_OPTIONS = [
-  { value: "smart_routing", label: "Smart Routing" },
   { value: "haiku", label: "Claude Haiku 4.5" },
   { value: "sonnet", label: "Claude Sonnet 4.5" },
   { value: "opus", label: "Claude Opus 4.6" },
-  { value: "magi_smart_routing", label: "Open Magi Router" },
-  { value: "gpt_smart_routing", label: "GPT Smart Routing" },
   { value: "gpt_5_nano", label: "GPT-5.4 Nano" },
   { value: "gpt_5_mini", label: "GPT-5.4 Mini" },
   { value: "gpt_5_5", label: "GPT-5.5" },

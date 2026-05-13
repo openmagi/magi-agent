@@ -9,7 +9,8 @@
 
 import type { Workspace } from "./storage/Workspace.js";
 import type { ExecutionContractStore } from "./execution/ExecutionContract.js";
-import type { UserMessage } from "./util/types.js";
+import type { SourceLedgerStore } from "./research/SourceLedger.js";
+import type { ChannelMemoryMode, UserMessage } from "./util/types.js";
 
 export type PermissionClass = "read" | "write" | "execute" | "net" | "meta";
 
@@ -43,6 +44,8 @@ export interface ToolContext {
   turnId: string;
   /** Workspace root; tools MUST scope all paths under this. */
   workspaceRoot: string;
+  /** Channel-level long-term memory behavior. Defaults to normal. */
+  memoryMode?: ChannelMemoryMode;
   /** Called by the Tool when it needs the human in the loop. */
   askUser(q: AskUserQuestionInput): Promise<AskUserQuestionOutput>;
   emitProgress(p: ToolProgress): void;
@@ -64,12 +67,23 @@ export interface ToolContext {
   staging: StagingSurface;
   /** Active first-class execution contract for tools that produce evidence. */
   executionContract?: ExecutionContractStore;
+  /** Per-session ledger of inspected sources for research/evidence tracking. */
+  sourceLedger?: SourceLedgerStore;
+  /** Optional cross-service diagnostic trace id for tool logs/events. */
+  traceId?: string;
   /**
-   * Current top-level user message for this turn. Tools that create child
-   * work can preserve selected KB, attachments, and channel-provided context
-   * instead of relying on the model to copy it into a sub-task prompt.
+   * The current top-level user message for this turn. Tools that create
+   * child work, such as SpawnAgent, use this to preserve selected KB,
+   * attachment, and channel-provided context instead of relying on the
+   * parent model to copy it into a sub-task prompt.
    */
   currentUserMessage?: UserMessage;
+  /**
+   * Current LLM tool_use id when the tool is running inside a turn.
+   * Tool-emitted AgentEvents can use this to attach structured previews
+   * to the matching tool activity on the client.
+   */
+  toolUseId?: string;
   /**
    * Spawn depth — 0 for a top-level turn, 1 for a direct child spawned
    * via SpawnAgent, 2 for a grandchild. `MAX_SPAWN_DEPTH` enforced by
@@ -107,6 +121,10 @@ export interface StagingSurface {
 export interface ToolResult<T = unknown> {
   status: ToolStatus;
   output?: T;
+  /** Compact text rendered back to the LLM as the tool_result content. */
+  llmOutput?: string;
+  /** Compact text persisted to transcript replay when llmOutput is absent. */
+  transcriptOutput?: string;
   errorCode?: string;
   errorMessage?: string;
   durationMs: number;
@@ -123,19 +141,28 @@ export interface Tool<I = unknown, O = unknown> {
   /** Requires user consent even if permission class allows. */
   dangerous?: boolean;
   /**
-   * True when multiple calls to this tool can safely run alongside other
-   * concurrency-safe tools. Defaults to true for read/meta tools and false for
-   * write/execute/net tools.
+   * True when multiple calls to this tool can safely run alongside
+   * other concurrency-safe tools. Defaults to true for read/meta tools
+   * and false for write/execute/net tools.
    */
   isConcurrencySafe?: boolean;
   /** True when the tool can mutate files, external state, or the workspace. */
   mutatesWorkspace?: boolean;
+  /**
+   * Modes in which this tool is available. Defaults to ["plan", "act"]
+   * for read/net/meta tools; write/execute tools default to ["act"] when
+   * unset (inferred by ToolRegistry from permission class).
+   */
+  availableInModes?: ("plan" | "act")[];
   /** "core" tools are always loaded; "skill" tools go through intent
    * filtering (§9.8 P2/P3). Defaults to "core" when unset. */
   kind?: "core" | "skill";
   /** Intent tags used by the classifier to decide whether to expose
    * this tool in a given turn's tools[] (§9.8 P2). */
   tags?: string[];
+  /** When true, tool is sent with defer_loading — model must use
+   * ToolSearch to discover its full schema before calling it. */
+  shouldDefer?: boolean;
   /** Optional pre-validation; return null if ok, string error if not. */
   validate?(input: I): string | null;
   execute(input: I, ctx: ToolContext): Promise<ToolResult<O>>;

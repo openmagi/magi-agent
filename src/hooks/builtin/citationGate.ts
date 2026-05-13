@@ -43,11 +43,11 @@ function detectCitations(text: string): CitationDetection | null {
 function buildCitationGateHint(detection: CitationDetection): string {
   const sources: string[] = [];
   if (detection.kind !== "academic") {
-    sources.push("- 판례: 대법원 판례검색 (https://glaw.scourt.go.kr) 또는 CaseNote API");
-    sources.push("- 법령: https://www.law.go.kr — 조문 원문 그대로 인용");
+    sources.push("- Korean case law: Supreme Court search (https://glaw.scourt.go.kr) or CaseNote API");
+    sources.push("- Korean statutes: https://www.law.go.kr — quote original text verbatim");
   }
   if (detection.kind !== "legal") {
-    sources.push("- 논문: DOI resolver (https://doi.org/<id>) 또는 arXiv (https://arxiv.org/abs/<id>)");
+    sources.push("- Papers: DOI resolver (https://doi.org/<id>) or arXiv (https://arxiv.org/abs/<id>)");
   }
 
   return `<aef_citation_gate priority="critical">
@@ -57,13 +57,13 @@ This turn references a CITATION (${detection.signals.join(", ")}).
 
 1. Do NOT quote, summarize, or characterize the cited source from memory.
    Training data frequently contains fabricated / paraphrased versions
-   of 판례 / 법령 / papers. Quoting from memory WILL mislead the user.
+   of case law / statutes / papers. Quoting from memory WILL mislead the user.
 
 2. For every citation, call a tool FIRST to fetch the primary source:
 ${sources.join("\n")}
 
 3. If the lookup fails, do NOT substitute memory. Say:
-   "<인용> 원문 확인 불가 — 수동 확인 필요."
+   "[Citation] Original text could not be verified — manual verification required."
 
 4. Only quote content you have verified against the fetched text this turn.
 

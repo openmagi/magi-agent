@@ -9,10 +9,16 @@
 
 import fs from "node:fs/promises";
 import path from "node:path";
+import crypto from "node:crypto";
 import type { Tool, ToolContext, ToolResult } from "../Tool.js";
 import { Workspace } from "../storage/Workspace.js";
 import { errorResult } from "../util/toolResult.js";
 import { readSafe, statSafe, isFsSafeEscape } from "../util/fsSafe.js";
+import {
+  isIncognitoMemoryMode,
+  isProtectedMemoryPath,
+  protectedMemoryError,
+} from "../util/memoryMode.js";
 
 export interface FileReadInput {
   path: string;
@@ -26,6 +32,8 @@ export interface FileReadOutput {
   path: string;
   content: string;
   sizeBytes: number;
+  contentSha256: string;
+  fileSha256: string;
   truncated: boolean;
 }
 
@@ -57,6 +65,14 @@ export function makeFileReadTool(workspaceRoot: string): Tool<FileReadInput, Fil
     },
     async execute(input: FileReadInput, ctx: ToolContext): Promise<ToolResult<FileReadOutput>> {
       const start = Date.now();
+      if (isIncognitoMemoryMode(ctx.memoryMode) && isProtectedMemoryPath(input.path)) {
+        return {
+          status: "permission_denied",
+          errorCode: "incognito_memory_blocked",
+          errorMessage: protectedMemoryError(input.path),
+          durationMs: Date.now() - start,
+        };
+      }
       try {
         const ws = ctx.spawnWorkspace ?? defaultWorkspace;
         // Safe stat + read — opens once, re-validates via FD realpath,
@@ -91,15 +107,33 @@ export function makeFileReadTool(workspaceRoot: string): Tool<FileReadInput, Fil
           content = content.slice(0, MAX_BYTES);
           truncated = true;
         }
+        const source = ctx.sourceLedger?.recordSource({
+          turnId: ctx.turnId,
+          toolName: "FileRead",
+          kind: "file",
+          uri: `file:${input.path}`,
+          title: input.path,
+          contentHash: `sha256:${crypto.createHash("sha256").update(content).digest("hex")}`,
+          contentType: "text/plain",
+          trustTier: "unknown",
+          snippets: content ? [content.slice(0, 500)] : [],
+          metadata: { truncated },
+        });
+        if (source) {
+          ctx.emitAgentEvent?.({ type: "source_inspected", source });
+        }
         return {
           status: "ok",
           output: {
             path: input.path,
+            fileSha256: crypto.createHash("sha256").update(raw).digest("hex"),
+            contentSha256: crypto.createHash("sha256").update(content).digest("hex"),
             content,
             sizeBytes: stat.size,
             truncated,
           },
           durationMs: Date.now() - start,
+          ...(source ? { metadata: { sourceId: source.sourceId } } : {}),
         };
       } catch (err) {
         if (isFsSafeEscape(err)) {

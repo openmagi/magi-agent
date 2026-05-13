@@ -14,6 +14,7 @@ export type TurnStatus =
   | "executing"
   | "verifying"
   | "committing"
+  | "compacting"
   | "committed"
   | "aborted";
 

@@ -23,8 +23,19 @@ import type { Channel } from "@/lib/chat/types";
 import { useChatStore } from "@/lib/chat/chat-store";
 import { useI18n } from "@/lib/i18n";
 import { localizeCategory, localizeChannel, DEFAULT_CHANNELS } from "@/lib/chat/channel-i18n";
+import {
+  formatChannelMemoryLabel,
+  getChannelMemoryMode,
+  withChannelMemoryModeSuffix,
+  type ChannelMemoryModeOption,
+} from "@/lib/chat/channel-memory-mode";
 
 const DEFAULT_CATEGORIES = ["General", "Info", "Life", "Finance", "Study", "People", "Tasks"];
+const CHANNEL_MEMORY_MODE_OPTIONS: Array<{ value: ChannelMemoryModeOption; label: string }> = [
+  { value: "normal", label: "Normal" },
+  { value: "read_only", label: "Read-only" },
+  { value: "incognito", label: "No memory" },
+];
 
 type FlatItem =
   | { type: "header"; key: string; title: string }
@@ -208,7 +219,7 @@ function SortableChannel({ id, channel, isActive, isCustom, canDelete, isRenamin
       ) : (
         <>
           <span className="truncate flex-1">
-            {channel.display_name || channel.name}
+            {withChannelMemoryModeSuffix(channel)}
           </span>
           <div className="flex items-center gap-0.5 shrink-0">
             {isCustom && (
@@ -241,7 +252,7 @@ interface ChatSidebarProps {
   mobileOpen: boolean;
   onChannelSelect: (name: string) => void;
   onDeleteChannel: (name: string) => void;
-  onCreateChannel: (name: string) => void;
+  onCreateChannel: (name: string, memoryMode?: ChannelMemoryModeOption) => void;
   onCreateCategory: (name: string) => void;
   onDeleteCategory: (name: string) => void;
   onRefreshChannels: () => void;
@@ -287,6 +298,8 @@ export function ChatSidebar({
   const router = useRouter();
   const [showNewChannel, setShowNewChannel] = useState(false);
   const [newChannelName, setNewChannelName] = useState("");
+  const [newChannelMemoryMode, setNewChannelMemoryMode] =
+    useState<ChannelMemoryModeOption>("normal");
   const [showNewCategory, setShowNewCategory] = useState(false);
   const [newCategoryName, setNewCategoryName] = useState("");
   const [showAddMenu, setShowAddMenu] = useState(false);
@@ -447,11 +460,12 @@ export function ChatSidebar({
   const handleCreateChannel = useCallback(() => {
     const name = newChannelName.trim();
     if (!name) return;
-    onCreateChannel(name);
+    onCreateChannel(name, newChannelMemoryMode);
     setNewChannelName("");
+    setNewChannelMemoryMode("normal");
     setShowNewChannel(false);
     // Stay in edit mode — don't call onToggleEdit
-  }, [newChannelName, onCreateChannel]);
+  }, [newChannelMemoryMode, newChannelName, onCreateChannel]);
 
   const handleCreateCategory = useCallback(() => {
     const name = newCategoryName.trim();
@@ -624,6 +638,13 @@ export function ChatSidebar({
                 <div className="space-y-0.5">
                   {chs.map((ch) => {
                     const unread = activeChannel !== ch.name && useChatStore.getState().hasUnread(ch.name);
+                    const localizedChannel = {
+                      ...ch,
+                      display_name: localizeChannel(ch.name, ch.display_name, locale),
+                    };
+                    const memoryModeLabel = formatChannelMemoryLabel(
+                      getChannelMemoryMode(localizedChannel),
+                    );
                     return (
                       <button
                         key={ch.id}
@@ -637,7 +658,14 @@ export function ChatSidebar({
                               : "text-secondary hover:text-foreground hover:bg-black/5"
                         }`}
                       >
-                        <span className="truncate"># {localizeChannel(ch.name, ch.display_name, locale)}</span>
+                        <span className="min-w-0 flex-1 truncate">
+                          # {withChannelMemoryModeSuffix(localizedChannel)}
+                        </span>
+                        {memoryModeLabel && (
+                          <span className="shrink-0 rounded-md border border-black/[0.08] bg-black/[0.04] px-1.5 py-0.5 text-[10px] font-medium text-secondary/70">
+                            {memoryModeLabel}
+                          </span>
+                        )}
                         {unread && (
                           <span className="ml-auto w-2 h-2 rounded-full bg-primary shrink-0" />
                         )}
@@ -776,8 +804,25 @@ export function ChatSidebar({
               className="w-full bg-black/5 border border-black/8 rounded-xl px-4 py-3 text-sm text-foreground placeholder-secondary focus:outline-none focus:border-primary/50 mb-4"
               autoFocus
             />
+            <div className="mb-4 grid grid-cols-3 gap-1 rounded-xl bg-black/[0.04] p-1">
+              {CHANNEL_MEMORY_MODE_OPTIONS.map((option) => (
+                <button
+                  key={option.value}
+                  type="button"
+                  onClick={() => setNewChannelMemoryMode(option.value)}
+                  aria-pressed={newChannelMemoryMode === option.value}
+                  className={`min-h-10 rounded-lg px-2 py-1.5 text-xs font-medium transition-colors ${
+                    newChannelMemoryMode === option.value
+                      ? "bg-white text-foreground shadow-sm"
+                      : "text-secondary hover:text-foreground"
+                  }`}
+                >
+                  {option.label}
+                </button>
+              ))}
+            </div>
             <div className="flex gap-3">
-              <button onClick={() => { setNewChannelName(""); setShowNewChannel(false); }} className="flex-1 py-2.5 rounded-xl border border-black/8 text-sm text-secondary hover:bg-black/5 transition-colors cursor-pointer">Cancel</button>
+              <button onClick={() => { setNewChannelName(""); setNewChannelMemoryMode("normal"); setShowNewChannel(false); }} className="flex-1 py-2.5 rounded-xl border border-black/8 text-sm text-secondary hover:bg-black/5 transition-colors cursor-pointer">Cancel</button>
               <button onClick={handleCreateChannel} className="flex-1 py-2.5 rounded-xl bg-primary text-sm text-white font-medium hover:bg-primary/80 transition-colors cursor-pointer">Create</button>
             </div>
           </div>

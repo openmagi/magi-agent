@@ -19,6 +19,10 @@ export type OutputFormat =
 export type PreviewKind = "inline-html" | "inline-markdown" | "download-only" | "none";
 export type DeliveryTarget = "chat" | "kb";
 export type DeliveryStatus = "pending" | "retrying" | "sent" | "failed";
+export type DeliveryAck =
+  | "attachment_marker"
+  | "provider_message_receipt"
+  | "kb_write_receipt";
 
 export interface DeliveryRecord {
   target: DeliveryTarget;
@@ -27,6 +31,7 @@ export interface DeliveryRecord {
   externalId?: string;
   marker?: string;
   providerMessageId?: string;
+  deliveryAck?: DeliveryAck;
   errorMessage?: string;
   deliveredAt?: number;
   updatedAt: number;
@@ -71,5 +76,6 @@ export interface DeliveryMutation {
   externalId?: string;
   marker?: string;
   providerMessageId?: string;
+  deliveryAck?: DeliveryAck;
   errorMessage?: string;
 }

@@ -1,13 +1,15 @@
 /**
  * Shared value types used across core-agent.
- * Design reference: docs/plans/2026-04-19-magi-core-agent-design.md §5.
+ * Design reference: docs/plans/2026-04-19-magi-agent-design.md §5.
  */
 
 export type ChannelType = "app" | "telegram" | "discord" | "internal";
+export type ChannelMemoryMode = "normal" | "read_only" | "incognito";
 
 export interface ChannelRef {
   type: ChannelType;
   channelId: string;
+  memoryMode?: ChannelMemoryMode;
 }
 
 /**

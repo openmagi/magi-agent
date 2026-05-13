@@ -19,13 +19,13 @@ export const AGENT_SELF_MODEL_BLOCK = [
   "think — **use them before answering.**",
   "",
   "## Before refusing or disclaiming",
-  "If you are about to say \"I don't have X\", \"KB에 없음\", \"확인",
-  "불가\", or similar — you MUST have already run:",
+  "If you are about to say \"I don't have X\", \"Not in KB\", \"Cannot",
+  "verify\", or similar — you MUST have already run:",
   "- `Glob` or `Bash(ls)` on the relevant workspace subtree, AND",
   "- `Grep` on a plausible substring, OR `FileRead` on a likely path.",
   "",
   "If you haven't, investigate first. After investigation, it is",
-  "perfectly fine to say \"확인해봤는데 찾을 수 없습니다\" — honest",
+  "perfectly fine to say \"I checked but could not find it\" — honest",
   "uncertainty after verification is always better than fabrication.",
   "",
   "## Workspace > KB when both could apply",
@@ -34,11 +34,88 @@ export const AGENT_SELF_MODEL_BLOCK = [
   "supplementary signal, not the primary source of truth.",
   "",
   "## Honest uncertainty is competence",
-  "유능한 어시스턴트는 모르는 걸 모른다고 한다. 구체적 수치, 모델명,",
-  "설정값을 확인 없이 말하는 것은 무능이다. \"확인해보겠습니다\"가",
-  "\"아마 이럴 겁니다\"보다 항상 낫다.",
+  "A competent assistant admits what it does not know. Stating specific",
+  "numbers, model names, or configuration values without verification is",
+  "incompetence. \"Let me check\" is always better than \"It's probably this.\"",
   "</agent_self_model>",
 ].join("\n");
+
+function runtimeTimeZone(): string {
+  const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  return typeof timeZone === "string" && timeZone.trim().length > 0
+    ? timeZone
+    : "UTC";
+}
+
+function localTemporalParts(
+  now: Date,
+  timeZone: string,
+): { localDate: string; localTime: string; resolvedTimeZone: string } {
+  const safeTimeZone = timeZone.trim().length > 0 ? timeZone.trim() : "UTC";
+  try {
+    const parts = new Intl.DateTimeFormat("en-CA", {
+      timeZone: safeTimeZone,
+      hourCycle: "h23",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+    }).formatToParts(now);
+    const value = (type: string): string | undefined =>
+      parts.find((part) => part.type === type)?.value;
+    const year = value("year");
+    const month = value("month");
+    const day = value("day");
+    const hour = value("hour");
+    const minute = value("minute");
+    const second = value("second");
+    if (year && month && day && hour && minute && second) {
+      return {
+        localDate: `${year}-${month}-${day}`,
+        localTime: `${hour}:${minute}:${second}`,
+        resolvedTimeZone: safeTimeZone,
+      };
+    }
+  } catch {
+    // Fall back to UTC if the host locale lacks the requested timezone data.
+  }
+  const utc = now.toISOString();
+  return {
+    localDate: utc.slice(0, 10),
+    localTime: utc.slice(11, 19),
+    resolvedTimeZone: "UTC",
+  };
+}
+
+export function buildRuntimeTemporalContext(
+  now = new Date(),
+  timeZone = runtimeTimeZone(),
+): string {
+  const runtimeNow = Number.isFinite(now.getTime()) ? now : new Date();
+  const utcIso = runtimeNow.toISOString();
+  const { localDate, localTime, resolvedTimeZone } = localTemporalParts(
+    runtimeNow,
+    timeZone,
+  );
+
+  return [
+    '<runtime_temporal_context hidden="true">',
+    `runtime_now_utc: ${utcIso}`,
+    `runtime_date_utc: ${utcIso.slice(0, 10)}`,
+    `runtime_timezone: ${resolvedTimeZone}`,
+    `runtime_local_date: ${localDate}`,
+    `runtime_local_time: ${localTime}`,
+    "",
+    "Temporal policy:",
+    "- This runtime timestamp is the authoritative current time for this turn.",
+    "- Do not infer the current date/time from model training cutoff, stale memory, or prior transcript text.",
+    "- Interpret \"today\", \"now\", \"current\", \"latest\", \"recent\", \"오늘\", \"현재\", and \"최근\" relative to this timestamp unless the user supplies another date/timezone.",
+    "- If a claim depends on facts that may have changed after your knowledge cutoff or after inspected sources, inspect current sources/tools or state uncertainty.",
+    "</runtime_temporal_context>",
+  ].join("\n");
+}
 
 export const RUNTIME_EVIDENCE_POLICY = [
   "<runtime-evidence-policy>",
@@ -59,6 +136,16 @@ export const EXECUTION_DISCIPLINE_POLICY = [
   "- Define success criteria before implementation or delivery. For fixes, reproduce/inspect first; for artifacts, verify the produced file exists and matches the request.",
   "- Before saying done/fixed/passing/verified/deployed, make sure current-turn tool evidence supports that claim; otherwise state the remaining gap.",
   "</execution-discipline-policy>",
+].join("\n");
+
+export const CODING_SEMANTIC_NAVIGATION_POLICY = [
+  "<coding-semantic-navigation>",
+  "- For TypeScript/JavaScript projects, prefer `CodeIntelligence` before broad text search when changing existing code.",
+  "- Use `CodeIntelligence` action=`definition`, `references`, or `hover` to understand existing symbols before editing.",
+  "- Use `CodeIntelligence` action=`document_symbols` or `workspace_symbols` to map files and exported APIs.",
+  "- Use `CodeSymbolSearch` as the fallback when `CodeIntelligence` cannot load the project or when the code is not TypeScript/JavaScript.",
+  "- After semantic or type-affecting edits, run `CodeDiagnostics`; use `ProjectVerificationPlanner` to choose tests, lint, typecheck, or build commands.",
+  "</coding-semantic-navigation>",
 ].join("\n");
 
 export const OUTPUT_RULES_BLOCK = [

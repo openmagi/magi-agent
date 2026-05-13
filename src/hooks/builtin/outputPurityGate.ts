@@ -43,6 +43,7 @@ export function makeOutputPurityGateHook(): RegisteredHook<"beforeCommit"> {
     point: "beforeCommit",
     priority: 84,
     blocking: true,
+    failOpen: true,
     timeoutMs: 5_000,
     handler: async ({ assistantText, retryCount, userMessage }, ctx: HookContext) => {
       try {

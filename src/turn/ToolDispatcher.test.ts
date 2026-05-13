@@ -65,7 +65,7 @@ interface HookRecord {
 
 async function makeCtx(opts: {
   tools: ToolRecord[];
-  permissionMode?: "default" | "plan" | "auto" | "bypass";
+  permissionMode?: "default" | "plan" | "auto" | "bypass" | "workspace-bypass";
   blockReason?: string;
   askUserSelectedId?: string;
 }): Promise<{
@@ -489,6 +489,65 @@ describe("ToolDispatcher.dispatch", () => {
     expect(writeB.calls).toHaveLength(1);
     expect(maxActiveWrites).toBe(1);
     expect(events).toEqual(["WriteA:start", "WriteA:end", "WriteB:start", "WriteB:end"]);
+  });
+
+  it("yields after the current serial tool when a steering update is pending", async () => {
+    const first: ToolRecord = {
+      name: "FirstWrite",
+      calls: [],
+      behaviour: "ok",
+      permission: "write",
+    };
+    const second: ToolRecord = {
+      name: "SecondWrite",
+      calls: [],
+      behaviour: "ok",
+      permission: "write",
+    };
+    let pendingSteer = false;
+    first.onExecute = () => {
+      pendingSteer = true;
+    };
+    const { ctx, transcript } = await makeCtx({
+      tools: [first, second],
+      permissionMode: "bypass",
+    });
+
+    const results = await dispatch(
+      {
+        ...ctx,
+        shouldYieldAfterTool: () => pendingSteer,
+      },
+      [
+        tu("first", "FirstWrite"),
+        tu("second", "SecondWrite"),
+      ],
+    );
+
+    expect(first.calls).toHaveLength(1);
+    expect(second.calls).toHaveLength(0);
+    expect(results).toHaveLength(2);
+    expect(results[0]).toMatchObject({
+      toolUseId: "first",
+      isError: false,
+    });
+    expect(results[1]).toMatchObject({
+      toolUseId: "second",
+      isError: true,
+    });
+    expect(results[1]?.content).toContain("steering update");
+
+    const entries = await transcript.readAll();
+    const skipped = entries.find(
+      (entry) =>
+        entry.kind === "tool_result" &&
+        entry.toolUseId === "second",
+    );
+    expect(skipped).toMatchObject({
+      kind: "tool_result",
+      status: "skipped_user_steer",
+      isError: true,
+    });
   });
 });
 

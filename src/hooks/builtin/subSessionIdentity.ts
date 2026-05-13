@@ -4,7 +4,7 @@
  * Design reference: §6 invariant E (layered context).
  *
  * Injects an identity block at the head of the system prompt so the
- * LLM recognises its own sub-persona output (e.g. 변호두, Main Machine)
+ * LLM recognises its own sub-persona output (e.g. researcher, reviewer)
  * as its own instead of analysing it in the third person.
  */
 
@@ -42,8 +42,8 @@ ${personaLine}
 **Identity rules:**
 
 1. Every assistant message in this conversation history — including
-   messages attributed to sub-personas you operate (e.g. \`변호두\`,
-   \`Main Machine\`, project-specific personas) — is YOUR OWN output.
+   messages attributed to sub-personas you operate (e.g. \`researcher\`,
+   \`reviewer\`, project-specific personas) — is YOUR OWN output.
    Do not analyze them as if they came from another bot or an external
    system.
 

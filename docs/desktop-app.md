@@ -81,7 +81,8 @@ not include:
 
 - hosted Magi Cloud auth, billing, entitlements, or customer data contracts
 - private download, signing, auto-update, or telemetry infrastructure
-- managed social-browser credential broker flows
+- managed social-browser credential broker flows; the OSS shell only uses the
+  local one-time browser-session adapter exposed by the self-hosted runtime
 - production admin or operator backoffice routes
 
 Signed releases, notarization, auto-update, and managed desktop telemetry are

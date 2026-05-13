@@ -5,7 +5,13 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { errorResult, summariseToolOutput, buildPreview } from "./toolResult.js";
+import {
+  errorResult,
+  summariseToolOutput,
+  buildPreview,
+  buildToolInputPreview,
+  summariseDelegatedPrompt,
+} from "./toolResult.js";
 
 describe("errorResult", () => {
   it("produces status:error with message from Error instance", () => {
@@ -90,5 +96,36 @@ describe("buildPreview", () => {
     const circ: Record<string, unknown> = {};
     circ.self = circ;
     expect(buildPreview(circ)).toBe("<unstringifiable>");
+  });
+});
+
+describe("delegated prompt previews", () => {
+  it("summarises delegated prompts without exposing the full private work order", () => {
+    const prompt = [
+      "You are the spawned child agent.",
+      "Task: Review the investment materials",
+      "Goal: produce a short risk memo",
+      "Private context: this line should not be copied wholesale",
+    ].join("\n");
+
+    expect(summariseDelegatedPrompt(prompt)).toBe(
+      "Task: Review the investment materials\nGoal: produce a short risk memo",
+    );
+  });
+
+  it("uses the delegated prompt summary for SpawnAgent input previews", () => {
+    const preview = buildToolInputPreview("SpawnAgent", {
+      persona: "reviewer",
+      prompt: [
+        "You are the spawned child agent.",
+        "Task: Review the investment materials",
+        "Private context: do not leak this raw instruction",
+      ].join("\n"),
+    });
+
+    expect(preview).toBe(JSON.stringify({
+      prompt: "Task: Review the investment materials",
+    }));
+    expect(preview).not.toContain("Private context");
   });
 });

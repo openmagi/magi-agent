@@ -19,6 +19,7 @@ import {
   commit,
   abort,
   collectFilesChanged,
+  isBeforeCommitBlockRetryable,
   type CommitPipelineContext,
 } from "./CommitPipeline.js";
 import type { LLMContentBlock } from "../transport/LLMClient.js";
@@ -263,16 +264,16 @@ describe("CommitPipeline.commit", () => {
   });
 
   it("beforeCommit block → throws, no transcript commits", async () => {
-    const { ctx, transcript, phases } = await makeCtx({
+    const { ctx, transcript, phases, sse, controlEvents } = await makeCtx({
       blocks: [{ type: "text", text: "x" }],
-      blockBeforeCommit: "citation-gate",
+      blockBeforeCommit: "[RULE:CLAIM_CITATION_REQUIRED] citation-gate",
     });
     const result = await commit(ctx);
     expect(result).toMatchObject({
       status: "blocked",
-      reason: "citation-gate",
+      reason: "[RULE:CLAIM_CITATION_REQUIRED] citation-gate",
       finalText: "x",
-      retryable: true,
+      retryable: false,
     });
     const entries = await transcript.readAll();
     const kinds = entries.map((e) => e.kind);
@@ -280,6 +281,37 @@ describe("CommitPipeline.commit", () => {
     expect(kinds).not.toContain("turn_committed");
     // Phase went to "committing" but not "committed".
     expect(phases).toEqual(["committing"]);
+    expect(sse.events).toContainEqual(
+      expect.objectContaining({
+        type: "runtime_trace",
+        phase: "verifier_blocked",
+        severity: "error",
+        reasonCode: "CLAIM_CITATION_REQUIRED",
+      }),
+    );
+    expect(controlEvents).toContainEqual(
+      expect.objectContaining({
+        type: "runtime_trace",
+        phase: "verifier_blocked",
+        reasonCode: "CLAIM_CITATION_REQUIRED",
+      }),
+    );
+  });
+
+  it("treats repeated goal-progress plan-only blocks as non-retryable", () => {
+    expect(
+      isBeforeCommitBlockRetryable(
+        "[RULE:GOAL_PROGRESS_EXECUTE_NEXT] The draft still ends at the planning boundary.",
+      ),
+    ).toBe(false);
+  });
+
+  it("treats repeated interactive-tool evidence blocks as non-retryable", () => {
+    expect(
+      isBeforeCommitBlockRetryable(
+        "[RULE:INTERACTIVE_TOOL_REQUIRED] Browser work still ended without tool evidence.",
+      ),
+    ).toBe(false);
   });
 
   it("blocks invalid structured output before transcript commit", async () => {
@@ -420,7 +452,7 @@ describe("CommitPipeline.commit", () => {
 
 describe("CommitPipeline.abort", () => {
   it("writes turn_aborted, fires onAbort + afterTurnEnd, rejects pending asks", async () => {
-    const { ctx, sse, transcript, hooks, phases, rejectedReasons } = await makeCtx({
+    const { ctx, sse, transcript, hooks, phases, rejectedReasons, controlEvents } = await makeCtx({
       blocks: [{ type: "text", text: "partial" }],
     });
     await abort(ctx, "user-cancelled");
@@ -441,6 +473,21 @@ describe("CommitPipeline.abort", () => {
     expect(ends[0]?.status).toBe("aborted");
     expect(ends[0]?.reason).toBe("user-cancelled");
     expect(ends[0]?.stopReason).toBe("aborted");
+    expect(sse.events).toContainEqual(
+      expect.objectContaining({
+        type: "runtime_trace",
+        phase: "terminal_abort",
+        severity: "error",
+        detail: "user-cancelled",
+      }),
+    );
+    expect(controlEvents).toContainEqual(
+      expect.objectContaining({
+        type: "runtime_trace",
+        phase: "terminal_abort",
+        title: "Turn aborted before completion",
+      }),
+    );
   });
 });
 

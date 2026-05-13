@@ -23,12 +23,12 @@ describe("loadRuntimeEnv", () => {
     resetCustomModelCapabilitiesForTests();
   });
 
-  it("preserves hosted UX by making bypass an explicit env-mode default", () => {
+  it("uses workspace-bypass as the default env permission mode", () => {
     setRequiredEnv();
 
     const env = loadRuntimeEnv();
 
-    expect(env.agentConfig.defaultPermissionMode).toBe("bypass");
+    expect(env.agentConfig.defaultPermissionMode).toBe("workspace-bypass");
   });
 
   it("accepts CORE_AGENT_PERMISSION_MODE as an explicit override", () => {
@@ -82,6 +82,45 @@ describe("loadRuntimeEnv routing", () => {
       kind: "anthropic",
       baseUrl: "https://api.anthropic.com",
       apiKey: "sk-ant-test",
+    });
+  });
+
+  it("configures local OpenAI-compatible providers in direct mode without API keys", () => {
+    setRequiredEnv();
+    vi.stubEnv("CORE_AGENT_MODEL", "magi-smart-router/auto");
+    vi.stubEnv("CORE_AGENT_ROUTING_MODE", "direct");
+    vi.stubEnv("OLLAMA_BASE_URL", "http://ollama.local:11434/v1");
+    vi.stubEnv("LM_STUDIO_BASE_URL", "http://lmstudio.local:1234/v1");
+    vi.stubEnv("VLLM_BASE_URL", "http://gpu.local:8000/v1");
+    vi.stubEnv("TGI_BASE_URL", "http://tgi.local:8080/v1");
+    vi.stubEnv("OPENROUTER_API_KEY", "sk-or-test");
+
+    const env = loadRuntimeEnv();
+
+    expect(env.agentConfig.directProviders?.ollama).toEqual({
+      kind: "openai-compatible",
+      baseUrl: "http://ollama.local:11434/v1",
+      apiKey: "",
+    });
+    expect(env.agentConfig.directProviders?.local).toEqual({
+      kind: "openai-compatible",
+      baseUrl: "http://lmstudio.local:1234/v1",
+      apiKey: "",
+    });
+    expect(env.agentConfig.directProviders?.vllm).toEqual({
+      kind: "openai-compatible",
+      baseUrl: "http://gpu.local:8000/v1",
+      apiKey: "",
+    });
+    expect(env.agentConfig.directProviders?.tgi).toEqual({
+      kind: "openai-compatible",
+      baseUrl: "http://tgi.local:8080/v1",
+      apiKey: "",
+    });
+    expect(env.agentConfig.directProviders?.openrouter).toEqual({
+      kind: "openai-compatible",
+      baseUrl: "https://openrouter.ai/api/v1",
+      apiKey: "sk-or-test",
     });
   });
 });

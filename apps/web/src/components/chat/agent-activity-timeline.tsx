@@ -15,7 +15,7 @@ interface AgentActivityTimelineProps {
   thinkingContent?: string;
   thinkingDuration?: number;
   fileProcessing?: boolean;
-  turnPhase?: "pending" | "planning" | "executing" | "verifying" | "committing" | "committed" | "aborted" | null;
+  turnPhase?: "pending" | "planning" | "executing" | "verifying" | "committing" | "compacting" | "committed" | "aborted" | null;
   heartbeatElapsedMs?: number | null;
   pendingInjectionCount?: number;
   activities?: ToolActivity[];

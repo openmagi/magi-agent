@@ -9,6 +9,7 @@
 import { loadConfig } from "./config.js";
 import { Agent, type AgentConfig } from "../Agent.js";
 import { HttpServer } from "../transport/HttpServer.js";
+import { bootstrapCoreAgent } from "../bootstrap.js";
 import { buildCliAgentConfig, cleanToken } from "./agentConfig.js";
 
 const DIM = "\x1b[2m";
@@ -65,13 +66,6 @@ export async function runServe(port?: number): Promise<void> {
   const agentName = config.identity?.name ?? "Magi";
 
   const agent = new Agent(agentConfig);
-  try {
-    await agent.start();
-  } catch (err) {
-    console.error(`Failed to start agent: ${(err as Error).message}`);
-    process.exit(1);
-  }
-
   const http = new HttpServer({
     port: listenPort,
     agent,
@@ -79,9 +73,9 @@ export async function runServe(port?: number): Promise<void> {
   });
 
   try {
-    await http.start();
+    await bootstrapCoreAgent({ agent, http });
   } catch (err) {
-    console.error(`Failed to start HTTP server: ${(err as Error).message}`);
+    console.error(`Failed to start server: ${(err as Error).message}`);
     process.exit(1);
   }
 

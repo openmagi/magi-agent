@@ -14,8 +14,8 @@
  *     (`session.budgetStats().turns === 0`).
  *   - Skips when `session.meta.onboarded === true` OR
  *     `session.meta.onboardingDeclines >= 2`.
- *   - When the user's message looks like a decline (regex: no|안 할래|
- *     나중에|skip), increments the declines counter — no nudge added.
+ *   - When the LLM classifier says the user's message is a decline,
+ *     increments the declines counter — no nudge added.
  *   - Otherwise emits an `onboarding_nudge` AgentEvent and queues a
  *     mid-turn injection so the bot receives the nudge text as a
  *     system-level user message at the very start of the LLM call.
@@ -49,35 +49,25 @@ NOT DECLINE (NO): "괜찮아, 해볼게" (OK, let me try), "sure", "yes", "ok", 
 
 Reply ONLY: YES or NO`;
 
-export const DECLINE_RE =
-  /\b(?:no|nope|nah|not now|later|skip|pass|don't|do not|stop)\b|(?:나중에|안\s*할래|싫어|괜찮(?:아|아요)?\s*됐(?:어|어요)?)/i;
-
-export function looksLikeDecline(text: string): boolean;
-export function looksLikeDecline(text: string, ctx: HookContext): Promise<boolean>;
-export function looksLikeDecline(text: string, ctx?: HookContext): boolean | Promise<boolean> {
+export async function looksLikeDecline(text: string, ctx?: HookContext): Promise<boolean> {
   if (!text) return false;
+  if (!ctx?.llm) return false;
   if (text.length > 200) return false; // Long messages are tasks, not declines
-  const deterministic = DECLINE_RE.test(text);
-  if (deterministic || !ctx?.llm || typeof ctx.llm.stream !== "function") {
-    return deterministic;
-  }
 
-  return (async () => {
-    try {
-      let result = "";
-      for await (const event of ctx.llm.stream({
-        model: "claude-haiku-4-5",
-        system: DECLINE_CLASSIFIER_PROMPT,
-        messages: [{ role: "user", content: [{ type: "text", text: text.slice(0, 200) }] }],
-        max_tokens: 5,
-      })) {
-        if (event.kind === "text_delta") result += event.delta;
-      }
-      return result.trim().toUpperCase().startsWith("YES");
-    } catch {
-      return deterministic;
+  try {
+    let result = "";
+    for await (const event of ctx.llm.stream({
+      model: "claude-haiku-4-5",
+      system: DECLINE_CLASSIFIER_PROMPT,
+      messages: [{ role: "user", content: [{ type: "text", text: text.slice(0, 200) }] }],
+      max_tokens: 5,
+    })) {
+      if (event.kind === "text_delta") result += event.delta;
     }
-  })();
+    return result.trim().toUpperCase().startsWith("YES");
+  } catch {
+    return false;
+  }
 }
 
 export function isOnboardingSteerEnabled(env: string | undefined): boolean {
@@ -86,12 +76,13 @@ export function isOnboardingSteerEnabled(env: string | undefined): boolean {
 }
 
 export const ONBOARDING_NUDGE_TEXT =
-  "2분 온보딩 먼저 하시죠. `/onboarding` 혹은 `/superpowers:using-superpowers` 를 실행해보세요.";
+  "Let's do the 2-minute onboarding first. Try running `/onboarding` or `/superpowers:using-superpowers`.";
 
 export function shouldSkipNudge(session: Session): boolean {
   if (session.meta.onboarded === true) return true;
   const declines = session.meta.onboardingDeclines ?? 0;
   if (declines >= 2) return true;
+  if (typeof session.meta.resumeSeededAt === "number") return true;
   // Only fire on the very first turn of this session (proxy for
   // "first turn of pod" — a fresh pod cannot have a session with
   // committed turns).

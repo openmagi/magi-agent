@@ -6,9 +6,12 @@ import { TaskBoard } from "./task-board";
 import { deriveWorkStateSummary, type WorkStateSummary } from "@/lib/chat/work-state";
 import type {
   BrowserFrame,
+  CitationGateStatus,
   ChannelState,
   ChatResponseLanguage,
   ControlRequestRecord,
+  DocumentDraftPreview,
+  InspectedSource,
   QueuedMessage,
   SubagentActivity,
   TaskBoardSnapshot,
@@ -21,6 +24,7 @@ interface RunInspectorDockProps {
   cancelHint?: string | null;
   defaultHidden?: boolean;
   compactDetails?: boolean;
+  uiLanguage?: ChatResponseLanguage;
 }
 
 function openTaskBoard(snapshot?: TaskBoardSnapshot | null): TaskBoardSnapshot | null {
@@ -44,14 +48,18 @@ function hasVisibleRunState(
   taskBoard: TaskBoardSnapshot | null,
   subagents: SubagentActivity[],
 ): boolean {
+  const inspectedSources = channelState.inspectedSources ?? [];
   return (
     channelState.streaming ||
     (channelState.activeTools ?? []).length > 0 ||
     !!channelState.browserFrame ||
+    !!channelState.documentDraft ||
     subagents.length > 0 ||
     queuedMessages.length > 0 ||
     pendingRequests.length > 0 ||
-    !!taskBoard
+    !!taskBoard ||
+    inspectedSources.length > 0 ||
+    !!channelState.citationGate
   );
 }
 
@@ -63,11 +71,15 @@ function runIdentity(
   subagents: SubagentActivity[],
 ): string {
   const activeTools = channelState.activeTools ?? [];
+  const inspectedSources = channelState.inspectedSources ?? [];
   const startedAt =
     channelState.thinkingStartedAt ??
     activeTools[0]?.startedAt ??
     channelState.browserFrame?.capturedAt ??
+    channelState.documentDraft?.updatedAt ??
     subagents[0]?.startedAt ??
+    inspectedSources[0]?.inspectedAt ??
+    channelState.citationGate?.checkedAt ??
     null;
   if (startedAt !== null) return `run:${startedAt}`;
 
@@ -103,6 +115,8 @@ function phaseLabel(
       return t(language, "Planning", "계획 중");
     case "executing":
       return t(language, "Running", "실행 중");
+    case "compacting":
+      return t(language, "Compacting", "압축 중");
     case "verifying":
       return t(language, "Verifying", "검증 중");
     case "committing":
@@ -311,6 +325,168 @@ function BrowserFrameInline({
   );
 }
 
+function DocumentDraftInline({
+  draft,
+  language,
+}: {
+  draft: DocumentDraftPreview;
+  language?: ChatResponseLanguage;
+}) {
+  const unit = draft.contentLength === 1 ? "char" : "chars";
+  const sizeLabel = isKorean(language)
+    ? `${draft.contentLength.toLocaleString()}자`
+    : `${draft.contentLength.toLocaleString()} ${unit}`;
+
+  return (
+    <div
+      className="mt-2 overflow-hidden rounded-lg border border-[#7C3AED]/15 bg-white"
+      data-run-inspector-document-draft="true"
+    >
+      <div className="flex min-w-0 items-center justify-between gap-2 border-b border-black/[0.06] px-2.5 py-1.5">
+        <span className="shrink-0 text-[10px] font-semibold uppercase tracking-wide text-secondary/45">
+          {draft.status === "done"
+            ? t(language, "Document written", "문서 작성 완료")
+            : t(language, "Writing document", "문서 작성 중")}
+        </span>
+        <span className="min-w-0 truncate text-[10.5px] text-secondary/55">
+          {draft.filename ?? (draft.format === "md" ? "Markdown" : "Text")}
+          <span className="text-secondary/35"> · {sizeLabel}</span>
+        </span>
+      </div>
+      <pre className="max-h-52 overflow-auto bg-[#FBFBFD] px-2.5 py-2 whitespace-pre-wrap break-words text-[11px] leading-snug text-secondary/75">
+        {draft.truncated ? `...\n${draft.contentPreview}` : draft.contentPreview}
+      </pre>
+    </div>
+  );
+}
+
+function sourceKindLabel(kind: InspectedSource["kind"], language?: ChatResponseLanguage): string {
+  switch (kind) {
+    case "web_search":
+      return t(language, "search", "검색");
+    case "web_fetch":
+      return t(language, "web", "웹");
+    case "browser":
+      return t(language, "browser", "브라우저");
+    case "kb":
+      return "KB";
+    case "file":
+      return t(language, "file", "파일");
+    case "external_repo":
+      return t(language, "repo", "저장소");
+    case "external_doc":
+      return t(language, "doc", "문서");
+    case "subagent_result":
+      return t(language, "helper", "도우미");
+    default:
+      return t(language, "source", "출처");
+  }
+}
+
+function displaySourceUri(uri: string): string {
+  try {
+    const parsed = new URL(uri);
+    return `${parsed.hostname}${parsed.pathname}${parsed.search}`.replace(/\/$/, "");
+  } catch {
+    return uri.replace(/^external:/, "");
+  }
+}
+
+function citationStatusLabel(
+  status: CitationGateStatus,
+  language?: ChatResponseLanguage,
+): string {
+  switch (status.verdict) {
+    case "ok":
+      return t(language, "covered", "충족");
+    case "violation":
+      return t(language, "needs citations", "인용 필요");
+    case "pending":
+    default:
+      return t(language, "checking", "확인 중");
+  }
+}
+
+function citationStatusClass(status: CitationGateStatus): string {
+  switch (status.verdict) {
+    case "ok":
+      return "bg-emerald-500";
+    case "violation":
+      return "bg-amber-500";
+    case "pending":
+    default:
+      return "bg-secondary/35";
+  }
+}
+
+function ResearchEvidence({
+  sources,
+  citationGate,
+  language,
+}: {
+  sources: InspectedSource[];
+  citationGate?: CitationGateStatus | null;
+  language?: ChatResponseLanguage;
+}) {
+  if (sources.length === 0 && !citationGate) return null;
+  const recentSources = sources.slice(-5).reverse();
+
+  return (
+    <div className="mt-2 border-t border-black/[0.06] pt-2" aria-label={t(language, "Research evidence", "리서치 근거")}>
+      <div className="mb-1.5 flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wide text-secondary/50">
+        <span>{t(language, "Research evidence", "리서치 근거")}</span>
+        {sources.length > 0 && (
+          <span className="font-medium normal-case tracking-normal text-secondary/35">
+            {isKorean(language) ? `출처 ${sources.length}개` : `${sources.length} sources`}
+          </span>
+        )}
+      </div>
+
+      {citationGate && (
+        <div className="mb-1.5 flex min-w-0 items-center gap-2 text-xs">
+          <span
+            className={`h-1.5 w-1.5 shrink-0 rounded-full ${citationStatusClass(citationGate)}`}
+            aria-hidden="true"
+          />
+          <span className="shrink-0 font-medium text-secondary/80">
+            {t(language, "Citation coverage", "인용 커버리지")}
+          </span>
+          <span className="shrink-0 text-secondary/50">
+            {citationStatusLabel(citationGate, language)}
+          </span>
+          {citationGate.detail && (
+            <span className="min-w-0 truncate text-secondary/55">{citationGate.detail}</span>
+          )}
+        </div>
+      )}
+
+      {recentSources.length > 0 && (
+        <div className="space-y-1" aria-label={t(language, "Sources", "출처")}>
+          <div className="sr-only">{t(language, "Sources", "출처")}</div>
+          {recentSources.map((source) => (
+            <div key={source.sourceId} className="flex min-w-0 items-center gap-2 text-xs">
+              <span className="shrink-0 rounded bg-black/[0.04] px-1.5 py-0.5 font-mono text-[10px] text-secondary/55">
+                {source.sourceId}
+              </span>
+              <span className="shrink-0 text-[10px] font-semibold uppercase tracking-wide text-secondary/40">
+                {sourceKindLabel(source.kind, language)}
+              </span>
+              {source.title && (
+                <span className="min-w-0 truncate font-medium text-secondary/80">
+                  {source.title}
+                </span>
+              )}
+              <span className="min-w-0 truncate text-secondary/50">
+                {displaySourceUri(source.uri)}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function RunInspectorDock({
   channelState,
   queuedMessages = [],
@@ -318,8 +494,9 @@ export function RunInspectorDock({
   cancelHint,
   defaultHidden = false,
   compactDetails = false,
+  uiLanguage,
 }: RunInspectorDockProps) {
-  const language = channelState.responseLanguage;
+  const language = uiLanguage ?? channelState.responseLanguage;
   const taskBoard = openTaskBoard(channelState.taskBoard);
   const subagents = channelState.subagents ?? [];
   const pendingRequests = pendingControlRequests(controlRequests);
@@ -363,6 +540,7 @@ export function RunInspectorDock({
 
   const nextQueued = queuedMessages[0];
   const activeTools = channelState.activeTools ?? [];
+  const inspectedSources = channelState.inspectedSources ?? [];
   const activeToolCount = activeTools.filter((activity) => activity.status === "running").length;
   const activeSubagentCount = subagents.filter(
     (subagent) => subagent.status === "running" || subagent.status === "waiting",
@@ -452,6 +630,16 @@ export function RunInspectorDock({
           {channelState.browserFrame && (
             <BrowserFrameInline frame={channelState.browserFrame} language={language} />
           )}
+
+          {channelState.documentDraft && (
+            <DocumentDraftInline draft={channelState.documentDraft} language={language} />
+          )}
+
+          <ResearchEvidence
+            sources={inspectedSources}
+            citationGate={channelState.citationGate}
+            language={language}
+          />
 
           {(channelState.streaming || activeTools.length > 0) && (
             <div>

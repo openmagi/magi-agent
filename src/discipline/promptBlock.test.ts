@@ -64,6 +64,22 @@ describe("buildDisciplineBlock", () => {
     expect(block).toContain("Ratio: 0.29");
     expect(block).toContain("Last git commit:");
     expect(block).toContain("Enforcement: soft");
+    expect(block).toContain("Coding workspace:");
+    expect(block).toContain("CodeWorkspace");
+    expect(block).toContain("workspace/code/");
+    expect(block).toContain('workspace_policy="git_worktree"');
+    expect(block).toContain("RepoTaskState");
+    expect(block).toContain("Commit units");
+    expect(block).toContain("coding ledger");
+    expect(block).toContain("workspace lock");
+    expect(block).toContain("dirty workspace root");
+    expect(block).toContain("No Docker-in-Docker");
+    expect(block).toContain("in-workspace verification commands");
+    expect(block).toContain("CodeIntelligence");
+    expect(block).toContain("definition");
+    expect(block).toContain("references");
+    expect(block).toContain("CodeSymbolSearch");
+    expect(block).toContain("CodeDiagnostics");
   });
 
   it("emits a suggestion when dirty files exceeds threshold", () => {

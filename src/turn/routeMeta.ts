@@ -113,6 +113,8 @@ const DOMAIN_LABELS: Record<RouteMetaLanguage, Record<string, string>> = {
     legal: "legal",
     research: "research",
     development: "development",
+    "coding/testing": "coding/testing",
+    "AI orchestration": "AI orchestration",
     "knowledge base": "knowledge base",
   },
   ko: {
@@ -121,6 +123,8 @@ const DOMAIN_LABELS: Record<RouteMetaLanguage, Record<string, string>> = {
     legal: "법률",
     research: "연구",
     development: "개발",
+    "coding/testing": "코딩/실험",
+    "AI orchestration": "AI오케스트레이션",
     "knowledge base": "지식베이스",
   },
   ja: {
@@ -129,6 +133,8 @@ const DOMAIN_LABELS: Record<RouteMetaLanguage, Record<string, string>> = {
     legal: "法務",
     research: "研究",
     development: "開発",
+    "coding/testing": "コーディング/テスト",
+    "AI orchestration": "AIオーケストレーション",
     "knowledge base": "ナレッジベース",
   },
   zh: {
@@ -137,6 +143,8 @@ const DOMAIN_LABELS: Record<RouteMetaLanguage, Record<string, string>> = {
     legal: "法律",
     research: "研究",
     development: "开发",
+    "coding/testing": "编码/测试",
+    "AI orchestration": "AI编排",
     "knowledge base": "知识库",
   },
   es: {
@@ -145,6 +153,8 @@ const DOMAIN_LABELS: Record<RouteMetaLanguage, Record<string, string>> = {
     legal: "legal",
     research: "investigación",
     development: "desarrollo",
+    "coding/testing": "programación/pruebas",
+    "AI orchestration": "orquestación de IA",
     "knowledge base": "base de conocimiento",
   },
 };
@@ -172,6 +182,23 @@ const DOMAIN_ALIASES: Record<string, readonly string[]> = {
   legal: ["legal", "law", "법률", "법무", "法務", "法律"],
   research: ["research", "연구", "조사", "研究", "investigación", "investigacion"],
   development: ["development", "coding", "code", "개발", "코딩", "開発", "开发", "desarrollo"],
+  "coding/testing": [
+    "coding/testing",
+    "coding / testing",
+    "coding test",
+    "coding tests",
+    "coding experiment",
+    "coding experiments",
+    "코딩/실험",
+    "코딩 실험",
+    "코딩/테스트",
+  ],
+  "AI orchestration": [
+    "AI orchestration",
+    "AI오케스트레이션",
+    "AI 오케스트레이션",
+    "에이아이 오케스트레이션",
+  ],
   "knowledge base": ["knowledge base", "kb", "지식베이스", "ナレッジベース", "知识库", "base de conocimiento"],
 };
 

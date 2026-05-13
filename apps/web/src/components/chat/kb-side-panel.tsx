@@ -83,6 +83,33 @@ const EMPTY_CHANNEL_STATE: ChannelState = {
   fileProcessing: false,
 };
 
+function hasOpenTaskState(channelState: ChannelState): boolean {
+  return !!channelState.taskBoard?.tasks.some(
+    (task) => task.status === "pending" || task.status === "in_progress",
+  );
+}
+
+function shouldSuppressInlineRunDetails(
+  channelState: ChannelState,
+  queuedMessages: QueuedMessage[],
+  controlRequests: ControlRequestRecord[],
+): boolean {
+  const hasPendingControlRequest = controlRequests.some((request) => request.state === "pending");
+  const hasLiveWork =
+    (channelState.activeTools ?? []).length > 0 ||
+    (channelState.subagents ?? []).some(
+      (subagent) => subagent.status === "running" || subagent.status === "waiting",
+    ) ||
+    hasOpenTaskState(channelState) ||
+    !!channelState.browserFrame ||
+    queuedMessages.length > 0 ||
+    hasPendingControlRequest ||
+    channelState.fileProcessing ||
+    channelState.reconnecting;
+
+  return hasLiveWork || (channelState.streaming && !channelState.streamingText);
+}
+
 interface PreviewState {
   id: string;
   source: "kb" | "workspace";
@@ -174,6 +201,11 @@ export function KbSidePanel({
   }, [activeScope, scopeBuckets]);
   const isWorkspaceScope = activeScope === "workspace";
   const panelRefreshing = isWorkspaceScope ? workspaceRefreshing : refreshing;
+  const suppressInlineRunDetails = shouldSuppressInlineRunDetails(
+    channelState,
+    queuedMessages,
+    controlRequests,
+  );
 
   const selectView = useCallback((view: RightInspectorView) => {
     setActiveView(view);
@@ -657,6 +689,7 @@ export function KbSidePanel({
           channelState={channelState}
           queuedMessages={queuedMessages}
           controlRequests={controlRequests}
+          suppressInlineRunDetails={suppressInlineRunDetails}
         />
       </div>
 

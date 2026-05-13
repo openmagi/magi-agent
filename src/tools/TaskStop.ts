@@ -1,10 +1,10 @@
 /**
  * TaskStop — T2-10.
  *
- * Aborts a running background subagent task by triggering the
+ * Aborts a running background task by triggering the
  * AbortController held inside BackgroundTaskRegistry. The registry
- * transitions the task to status="aborted"; the child loop sees the
- * abort signal on its next iteration and unwinds.
+ * transitions the task to status="aborted"; task runners use the abort
+ * signal to unwind or terminate their underlying work.
  */
 
 import type { Tool, ToolContext, ToolResult } from "../Tool.js";
@@ -24,7 +24,7 @@ export interface TaskStopOutput {
 const INPUT_SCHEMA = {
   type: "object",
   properties: {
-    taskId: { type: "string", description: "taskId returned by SpawnAgent." },
+    taskId: { type: "string", description: "taskId returned by SpawnAgent or Bash runInBackground." },
     reason: {
       type: "string",
       description:
@@ -40,7 +40,7 @@ export function makeTaskStopTool(
   return {
     name: "TaskStop",
     description:
-      "Abort a running background subagent task. Triggers the child's AbortSignal and marks the task as 'aborted'. Returns stopped=true when an abort was actually fired; stopped=false when the task was unknown or already in a terminal state.",
+      "Abort a running background task. Triggers its AbortSignal and marks the task as 'aborted'. Returns stopped=true when an abort was actually fired; stopped=false when the task was unknown or already in a terminal state.",
     inputSchema: INPUT_SCHEMA,
     permission: "meta",
     kind: "core",

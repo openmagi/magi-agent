@@ -66,6 +66,35 @@ describe("policyPromptBlock", () => {
     }
   });
 
+  it("adds the concrete latest-user-language target before streaming starts", async () => {
+    const root = await makeRoot("- Match the user's language.");
+    const hook = makePolicyPromptBlockHook({
+      policy: new PolicyKernel(new Workspace(root)),
+    });
+
+    const result = await hook.handler(
+      {
+        messages: [
+          { role: "user", content: "이전 질문입니다." },
+          { role: "assistant", content: "이전 답변입니다." },
+          { role: "user", content: "Please calculate 1 + 1." },
+        ],
+        tools: [],
+        system: "base system",
+        iteration: 0,
+      },
+      makeCtx(),
+    );
+
+    expect(result?.action).toBe("replace");
+    if (result?.action === "replace") {
+      expect(result.value.system).toContain("response.language=auto");
+      expect(result.value.system).toContain("response.target_language=en");
+      expect(result.value.system).toContain("streamed progress");
+      expect(result.value.system).toContain("latest user message is English");
+    }
+  });
+
   it("does not inject on follow-up iterations", async () => {
     const root = await makeRoot("- Always answer in Korean.");
     const hook = makePolicyPromptBlockHook({

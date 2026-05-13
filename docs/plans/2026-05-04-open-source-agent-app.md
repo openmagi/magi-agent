@@ -79,7 +79,9 @@ Do not open-source these as part of the self-hosted app:
 - Production Telegram/Discord fleet orchestration.
 - Hosted chat proxy, API proxy, provisioning worker, admin dashboards, growth
   analytics, and operator backoffice.
-- Managed social-browser credential broker and session claiming backend.
+- Managed social-browser credential broker and session claiming backend. The OSS
+  app can provide a local one-time browser-session adapter, but it must not
+  depend on hosted credential brokerage.
 - Hosted desktop download page, binary signing, auto-update channel,
   entitlement checks, and managed desktop telemetry.
 - Secrets, production endpoints, customer data, telemetry keys, and internal
@@ -116,7 +118,7 @@ Pieces that should be rewritten or replaced:
 - Any component that assumes Privy, Supabase, Stripe, hosted bot IDs, hosted
   billing state, production API routes, or Magi Cloud tenancy.
 - Any social-browser UI that assumes the managed credential broker. The OSS app
-  should expose local/session adapter configuration instead.
+  uses local `/v1/app/social-browser/*` session adapter routes instead.
 - Any analytics, admin, invite, entitlement, or production growth surface.
 
 ## Target Architecture

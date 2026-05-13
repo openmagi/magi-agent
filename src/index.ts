@@ -10,6 +10,7 @@
 
 import { Agent } from "./Agent.js";
 import { HttpServer } from "./transport/HttpServer.js";
+import { bootstrapCoreAgent } from "./bootstrap.js";
 import {
   loadRuntimeEnv,
   loadFromConfig,
@@ -29,14 +30,12 @@ export type { RuntimeEnv, MagiAgentConfig } from "./config/RuntimeEnv.js";
 
 async function boot(env: RuntimeEnv): Promise<void> {
   const agent = new Agent(env.agentConfig);
-  await agent.start();
-
   const http = new HttpServer({
     port: env.port,
     agent,
     bearerToken: env.agentConfig.gatewayToken || undefined,
   });
-  await http.start();
+  await bootstrapCoreAgent({ agent, http });
 
   console.log(
     `[magi-agent] botId=${env.agentConfig.botId} port=${env.port} phase=0 ready`,

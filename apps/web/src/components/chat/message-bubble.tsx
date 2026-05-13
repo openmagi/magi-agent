@@ -12,7 +12,7 @@ import { parseMarkers } from "@/lib/chat/attachment-marker";
 import { parseKbContextMarker } from "@/lib/chat/kb-context-marker";
 import { buildMessageCopyText } from "@/lib/chat/message-copy";
 import { getAttachmentUrl, getKnowledgeDocumentUrl, fetchAttachmentBlob } from "@/lib/chat/attachments";
-import type { ReplyTo, ToolActivity, TaskBoardSnapshot } from "@/lib/chat/types";
+import type { ReplyTo, ToolActivity, TaskBoardSnapshot, ResearchArtifactDelta, TokenUsage } from "@/lib/chat/types";
 
 export type MessageContextAction = "copy" | "select" | "reply";
 
@@ -28,6 +28,10 @@ interface MessageBubbleProps {
   activities?: ToolActivity[];
   /** Persisted / live TaskBoard snapshot rendered above the message body. */
   taskBoard?: TaskBoardSnapshot;
+  /** Persisted research evidence metadata. Currently rendered in the work inspector. */
+  researchEvidence?: ResearchArtifactDelta;
+  /** Token/cost usage reported by the runtime. */
+  usage?: TokenUsage;
   botId?: string;
   /** Quoted-reply metadata (if this message is a reply to another) */
   replyTo?: ReplyTo;

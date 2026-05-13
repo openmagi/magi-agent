@@ -2,8 +2,8 @@ import { spawn } from "node:child_process";
 import type { Tool, ToolContext, ToolResult } from "../Tool.js";
 import { Workspace } from "../storage/Workspace.js";
 import { Utf8StreamCapture } from "../util/Utf8StreamCapture.js";
-import { withMagiBinPath } from "../util/shellPath.js";
 import { errorResult } from "../util/toolResult.js";
+import { withMagiBinPath } from "../util/shellPath.js";
 
 export interface TestRunInput {
   command: string;
@@ -36,7 +36,7 @@ const INPUT_SCHEMA = {
   required: ["command"],
 } as const;
 
-const MAX_OUTPUT_CHARS = 512 * 1024;
+const MAX_OUTPUT_BYTES = 512 * 1024;
 const DEFAULT_TIMEOUT_MS = 120_000;
 const MAX_TIMEOUT_MS = 600_000;
 
@@ -48,7 +48,7 @@ export function makeTestRunTool(workspaceRoot: string): Tool<TestRunInput, TestR
       "Run a deterministic verification command for code changes. Use this for tests, build, lint, typecheck, smoke checks, or other acceptance checks before claiming code work is complete.",
     inputSchema: INPUT_SCHEMA,
     permission: "execute",
-    dangerous: false,
+    dangerous: true,
     mutatesWorkspace: false,
     isConcurrencySafe: false,
     validate(input) {
@@ -75,8 +75,8 @@ export function makeTestRunTool(workspaceRoot: string): Tool<TestRunInput, TestR
             env: { ...withMagiBinPath(process.env), PWD: cwd },
             stdio: ["ignore", "pipe", "pipe"],
           });
-          const stdout = new Utf8StreamCapture(MAX_OUTPUT_CHARS);
-          const stderr = new Utf8StreamCapture(MAX_OUTPUT_CHARS);
+          const stdout = new Utf8StreamCapture(MAX_OUTPUT_BYTES);
+          const stderr = new Utf8StreamCapture(MAX_OUTPUT_BYTES);
           child.stdout.on("data", (c: Buffer) => stdout.write(c));
           child.stderr.on("data", (c: Buffer) => stderr.write(c));
 

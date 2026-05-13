@@ -22,6 +22,30 @@ describe("VerificationEvidence", () => {
     expect(shouldBlockClaim("changed file but not verified", fileEditOnlyEvidence)).toBe(false);
   });
 
+  it("classifies child worktree apply as workspace mutation evidence", () => {
+    expect(
+      classifyEvidence([
+        {
+          tool: "SpawnWorktreeApply",
+          status: "ok",
+          metadata: { changedFiles: ["src/feature.ts"] },
+        },
+      ]),
+    ).toMatchObject({ work: true, verification: false });
+  });
+
+  it("classifies benchmark reports as verification evidence", () => {
+    expect(
+      classifyEvidence([
+        {
+          tool: "CodingBenchmark",
+          status: "ok",
+          metadata: { evidenceKind: "benchmark_report" },
+        },
+      ]),
+    ).toMatchObject({ verification: true });
+  });
+
   it("classifies common verification commands and document render checks", () => {
     expect(
       classifyEvidence([
@@ -35,7 +59,7 @@ describe("VerificationEvidence", () => {
     ).toMatchObject({ verification: true, documentVerification: true });
   });
 
-  it("treats native web tools as same-turn verification evidence for source-sensitive claims", () => {
+  it("treats native web search as same-turn verification evidence for source-sensitive claims", () => {
     expect(
       classifyEvidence([
         { tool: "WebSearch", input: { query: "latest pricing" }, status: "ok" },
@@ -43,7 +67,7 @@ describe("VerificationEvidence", () => {
     ).toMatchObject({ verification: true });
     expect(
       shouldBlockClaim("검색해서 확인했습니다.", [
-        { tool: "WebFetch", input: { url: "https://example.com" }, status: "ok" },
+        { tool: "web-search", input: { query: "latest pricing" }, status: "ok" },
       ]),
     ).toBe(false);
   });
@@ -98,5 +122,39 @@ describe("VerificationEvidence", () => {
       work: true,
       verification: true,
     });
+  });
+
+  it("preserves structured tool-result metadata in transcript evidence", () => {
+    const transcript: TranscriptEntry[] = [
+      {
+        kind: "tool_call",
+        ts: 1,
+        turnId: "turn-1",
+        toolUseId: "tool-1",
+        name: "FileEdit",
+        input: { path: "src/a.ts" },
+      },
+      {
+        kind: "tool_result",
+        ts: 2,
+        turnId: "turn-1",
+        toolUseId: "tool-1",
+        status: "ok",
+        metadata: {
+          evidenceKind: "patch",
+          changedFiles: ["src/a.ts"],
+        },
+      },
+    ];
+
+    expect(transcriptEvidenceForTurn(transcript, "turn-1")).toEqual([
+      expect.objectContaining({
+        tool: "FileEdit",
+        metadata: {
+          evidenceKind: "patch",
+          changedFiles: ["src/a.ts"],
+        },
+      }),
+    ]);
   });
 });

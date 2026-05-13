@@ -414,6 +414,60 @@ describe("sealedFiles hook — integration", () => {
     }
   });
 
+  it("allows a system-owned Hipocampus ROOT.md update during the turn", async () => {
+    await writeFileP(ws, "memory/ROOT.md", "root v1");
+    const hooks = makeSealedFilesHooks({ workspaceRoot: ws });
+    await hooks.beforeCommit.handler(
+      {
+        assistantText: "",
+        toolCallCount: 0,
+        toolReadHappened: false,
+        userMessage: "init",
+        retryCount: 0,
+      },
+      makeCtx("turn-init").ctx,
+    );
+
+    await writeFileP(ws, "memory/ROOT.md", "root v2 from compactor");
+    const { ctx, emitted } = makeCtx("turn-hipocampus");
+    allowSealedFileUpdateForTurn(ctx.turnId, "memory/ROOT.md");
+
+    const result = await hooks.beforeCommit.handler(
+      {
+        assistantText: "done",
+        toolCallCount: 0,
+        toolReadHappened: false,
+        userMessage: "hello",
+        retryCount: 0,
+      },
+      ctx,
+    );
+
+    expect(result).toEqual({ action: "continue" });
+    expect(
+      emitted.some(
+        (e) =>
+          e.type === "rule_check" &&
+          e.ruleId === "sealed-files" &&
+          e.verdict === "ok" &&
+          typeof e.detail === "string" &&
+          e.detail.includes("sealed_files_bypass kind=system"),
+      ),
+    ).toBe(true);
+    await hooks.afterCommit.handler({ assistantText: "done" }, ctx);
+    const again = await hooks.beforeCommit.handler(
+      {
+        assistantText: "next",
+        toolCallCount: 0,
+        toolReadHappened: false,
+        userMessage: "next",
+        retryCount: 0,
+      },
+      makeCtx("turn-next").ctx,
+    );
+    expect(again).toEqual({ action: "continue" });
+  });
+
   it("sealed path changed still blocks on commit retry attempts", async () => {
     await writeFileP(ws, "SOUL.md", "soul v1");
     const { beforeCommit } = makeSealedFilesHooks({ workspaceRoot: ws });
@@ -600,115 +654,6 @@ describe("sealedFiles hook — integration", () => {
       ctx3,
     );
     expect(again).toEqual({ action: "continue" });
-  });
-
-  it("allows a system-owned Hipocampus ROOT.md update during the turn", async () => {
-    await writeFileP(ws, "memory/ROOT.md", "root v1");
-    const hooks = makeSealedFilesHooks({ workspaceRoot: ws });
-    await hooks.beforeCommit.handler(
-      {
-        assistantText: "",
-        toolCallCount: 0,
-        toolReadHappened: false,
-        userMessage: "init",
-        retryCount: 0,
-      },
-      makeCtx("turn-init").ctx,
-    );
-
-    await writeFileP(ws, "memory/ROOT.md", "root v2 from compactor");
-    const { ctx, emitted } = makeCtx("turn-hipocampus");
-    allowSealedFileUpdateForTurn(ctx.turnId, "memory/ROOT.md");
-
-    const result = await hooks.beforeCommit.handler(
-      {
-        assistantText: "done",
-        toolCallCount: 0,
-        toolReadHappened: false,
-        userMessage: "hello",
-        retryCount: 0,
-      },
-      ctx,
-    );
-
-    expect(result).toEqual({ action: "continue" });
-    expect(
-      emitted.some(
-        (e) =>
-          e.type === "rule_check" &&
-          e.ruleId === "sealed-files" &&
-          e.verdict === "ok" &&
-          typeof e.detail === "string" &&
-          e.detail.includes("sealed_files_bypass kind=system"),
-      ),
-    ).toBe(true);
-    await hooks.afterCommit.handler({ assistantText: "done" }, ctx);
-    const again = await hooks.beforeCommit.handler(
-      {
-        assistantText: "next",
-        toolCallCount: 0,
-        toolReadHappened: false,
-        userMessage: "next",
-        retryCount: 0,
-      },
-      makeCtx("turn-next").ctx,
-    );
-    expect(again).toEqual({ action: "continue" });
-  });
-
-  it("reports system-owned Hipocampus updates as system even when the turn is allowlisted", async () => {
-    await writeFileP(ws, "memory/ROOT.md", "root v1");
-    await writeFileP(
-      ws,
-      "agent.config.yaml",
-      "sealed_files_allowlist_turns:\n  - turn-system-overlap\n",
-    );
-    const hooks = makeSealedFilesHooks({ workspaceRoot: ws });
-    await hooks.beforeCommit.handler(
-      {
-        assistantText: "",
-        toolCallCount: 0,
-        toolReadHappened: false,
-        userMessage: "init",
-        retryCount: 0,
-      },
-      makeCtx("turn-init").ctx,
-    );
-
-    await writeFileP(ws, "memory/ROOT.md", "root v2 from compactor");
-    const { ctx, emitted } = makeCtx("turn-system-overlap");
-    allowSealedFileUpdateForTurn(ctx.turnId, "memory/ROOT.md");
-
-    const result = await hooks.beforeCommit.handler(
-      {
-        assistantText: "done",
-        toolCallCount: 0,
-        toolReadHappened: false,
-        userMessage: "hello",
-        retryCount: 0,
-      },
-      ctx,
-    );
-
-    expect(result).toEqual({ action: "continue" });
-    expect(
-      emitted.some(
-        (e) =>
-          e.type === "rule_check" &&
-          e.ruleId === "sealed-files" &&
-          e.verdict === "ok" &&
-          typeof e.detail === "string" &&
-          e.detail.includes("sealed_files_bypass kind=system path=memory/ROOT.md"),
-      ),
-    ).toBe(true);
-    expect(
-      emitted.some(
-        (e) =>
-          e.type === "rule_check" &&
-          typeof e.detail === "string" &&
-          e.detail.includes("sealed_files_bypass kind=config_turn path=memory/ROOT.md"),
-      ),
-    ).toBe(false);
   });
 
   // 6

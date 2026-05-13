@@ -402,7 +402,7 @@ describe("Turn.execute() stop-reason taxonomy", () => {
       ? identityContent[0].text
       : "";
     expect(identityText).toContain("<runtime_model_identity hidden=\"true\">");
-    expect(identityText).toContain("router: Premium Router");
+    expect(identityText).toContain("router: premium");
     expect(identityText).toContain("answering_model: openai/gpt-5.5");
     expect(identityText).toContain("classifier_model: claude-sonnet-4-6");
     expect(messages.at(-1)?.content).toBe("say something long please");

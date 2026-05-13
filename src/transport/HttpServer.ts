@@ -30,6 +30,7 @@ import { parityRoutes } from "./routes/parity.js";
 import { skillsRoutes } from "./routes/skills.js";
 import { hooksRoutes } from "./routes/hooks.js";
 import { appRoutes } from "./routes/app.js";
+import { appSocialBrowserRoutes } from "./routes/appSocialBrowser.js";
 import { appRuntimeRoutes } from "./routes/appRuntime.js";
 import { appSettingsRoutes } from "./routes/appSettings.js";
 
@@ -93,6 +94,7 @@ export class HttpServer {
   private get routes(): RouteHandler[] {
     return [
       ...appRoutes,
+      ...appSocialBrowserRoutes,
       ...appRuntimeRoutes,
       ...appSettingsRoutes,
       ...healthRoutes,

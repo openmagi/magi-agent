@@ -6,7 +6,7 @@
  *   CommitPipeline | ToolSelector | AskUserController | HookContextBuilder
  */
 
-import type { Session } from "./Session.js";
+import type { PermissionMode, Session } from "./Session.js";
 import type { UserMessage } from "./util/types.js";
 import type { SseWriter } from "./transport/SseWriter.js";
 import type { LLMContentBlock, LLMMessage, LLMToolDef, LLMUsage } from "./transport/LLMClient.js";
@@ -15,11 +15,17 @@ import type { HookPoint } from "./hooks/types.js";
 import { computeUsd } from "./llm/modelCapabilities.js";
 import {
   appendRuntimeModelIdentityContext,
+  applyPriorityContextToSystemPrompt,
   buildSystemPrompt,
   buildMessages,
   refreshRuntimeTimeHeader,
 } from "./turn/MessageBuilder.js";
 import { readOne as readOneStream } from "./turn/LLMStreamReader.js";
+import {
+  splitForCacheOptimization,
+  toSystemBlocks,
+  type SystemBlock,
+} from "./prompt/CacheOptimizedPrompt.js";
 import { dispatch as dispatchTools, type ToolDispatchResult, UnknownToolLoopError } from "./turn/ToolDispatcher.js";
 import { handle as handleStopReason } from "./turn/StopReasonHandler.js";
 import {
@@ -34,6 +40,7 @@ import { buildHookContext } from "./turn/HookContextBuilder.js";
 import { HeartbeatMonitor, wrapSseWithMonitor } from "./turn/HeartbeatMonitor.js";
 import { SessionHeartbeat } from "./turn/SessionHeartbeat.js";
 import { RetryController } from "./turn/RetryController.js";
+import { ToolCallLoopDetector } from "./turn/ToolCallLoopDetector.js";
 import type { TurnRoute, TurnStatus, TurnMeta, TurnStopReason, PlanResult, VerificationReport } from "./turn/types.js";
 import { messagesHaveImages } from "./routing/messageText.js";
 import { isRouterKeyword } from "./routing/types.js";
@@ -46,11 +53,50 @@ export { MAX_OUTPUT_TOKENS_RECOVERY_LIMIT, classifyStopReason, type StopReasonCa
 /** Case-insensitive `[PLAN_MODE: on]` header trigger. */
 export const PLAN_MODE_HEADER_RE = /\[PLAN_MODE:\s*on\]/i;
 const DEFAULT_EMPTY_RESPONSE_FALLBACK_MODEL = "claude-haiku-4-5-20251001";
+const DEFAULT_RESPONSE_DEADLINE_FINALIZE_BUFFER_MS = 30_000;
+
+function isToolLoopDetectionEnabled(): boolean {
+  return process.env.MAGI_LOOP_DETECTION === "1" ||
+    process.env.CORE_AGENT_LOOP_DETECTION === "1";
+}
+
+function isCachePromptEnabled(): boolean {
+  return process.env.MAGI_CACHE_PROMPT === "1";
+}
+
+function isAnthropicModel(model: string): boolean {
+  const normalized = model.replace(/^anthropic\//, "");
+  return normalized.startsWith("claude-");
+}
+
+function maybeCacheOptimize(systemPrompt: string, model: string): string | SystemBlock[] {
+  if (!isCachePromptEnabled() || !isAnthropicModel(model)) {
+    return systemPrompt;
+  }
+  const split = splitForCacheOptimization(systemPrompt);
+  return toSystemBlocks(split);
+}
 
 function emptyResponseFallbackModel(): string | null {
   const raw = process.env.CORE_AGENT_EMPTY_RESPONSE_FALLBACK_MODEL?.trim();
   if (raw && /^(?:off|none|disabled)$/i.test(raw)) return null;
   return raw && raw.length > 0 ? raw : DEFAULT_EMPTY_RESPONSE_FALLBACK_MODEL;
+}
+
+function responseDeadlineFinalizeBufferMs(): number {
+  const raw = process.env.CORE_AGENT_RESPONSE_DEADLINE_FINALIZE_BUFFER_MS;
+  const parsed = raw !== undefined ? Number.parseInt(raw, 10) : NaN;
+  if (!Number.isFinite(parsed)) return DEFAULT_RESPONSE_DEADLINE_FINALIZE_BUFFER_MS;
+  return Math.min(120_000, Math.max(1_000, parsed));
+}
+
+const RETRYABLE_LLM_STREAM_ERROR_RE =
+  /\b(aborted|ECONNRESET|EPIPE|ETIMEDOUT|UND_ERR|socket hang up|premature close|terminated|network error|fetch failed)\b/i;
+
+function isRetryableLlmStreamError(err: unknown): boolean {
+  if (!(err instanceof Error)) return false;
+  if (err.name === "AbortError" || err instanceof TurnInterruptedError) return false;
+  return RETRYABLE_LLM_STREAM_ERROR_RE.test(err.message);
 }
 
 function truncationGuardEnding(text: string): {
@@ -121,6 +167,16 @@ export class TurnInterruptedError extends Error {
   }
 }
 
+class TurnSteerResumeError extends Error {
+  readonly source: string;
+
+  constructor(source: string) {
+    super("user_steer_resume");
+    this.name = "TurnSteerResumeError";
+    this.source = source;
+  }
+}
+
 function normalizeAssistantReplayBlocks(blocks: LLMContentBlock[]): LLMContentBlock[] {
   const toolUseBlocks = blocks.filter((block) => block.type === "tool_use");
   if (toolUseBlocks.length === 0) return blocks;
@@ -168,10 +224,20 @@ export class Turn {
   /** One-shot model override used only after repeated empty visible output. */
   private emptyResponseModelOverride: string | null = null;
   private emptyResponseFallbackUsed = false;
+  private streamRetry = 0;
+  static readonly MAX_STREAM_RETRIES = 1;
   /** Runtime model resolved once at turn start. */
   private runtimeModel: string | null = null;
   /** Explicit per-turn model override from chat clients. */
   private readonly runtimeModelOverride: string | null = null;
+  /** Cross-service diagnostic trace ID propagated from HTTP clients. */
+  private readonly traceId: string | null = null;
+  /** Absolute wall-clock deadline for bounded clients such as benchmark harnesses. */
+  private readonly responseDeadlineAtMs: number | null = null;
+  private deadlineFinalizationRequested = false;
+  /** Consecutive identical tool-call detector. Env-gated. */
+  private readonly loopDetector: ToolCallLoopDetector | undefined =
+    isToolLoopDetectionEnabled() ? new ToolCallLoopDetector() : undefined;
   /** Gap §11.3 unknown-tool hallucination counter — shared across every
    * dispatchTools call within this turn. */
   private unknownToolCount = 0;
@@ -186,6 +252,8 @@ export class Turn {
     requestedAt: number;
   } | null = null;
   private readonly interruptController = new AbortController();
+  private activeLlmController: AbortController | null = null;
+  private acceptingSteerInjections = false;
 
   requestInterrupt(
     handoffRequested = false,
@@ -214,6 +282,29 @@ export class Turn {
     return { status: "accepted", handoffRequested: mergedHandoff };
   }
 
+  requestSteerResume(source = "api"): { status: "accepted" | "noop" } {
+    if (this.meta.status === "committed" || this.meta.status === "aborted") {
+      return { status: "noop" };
+    }
+    if (this.interruptState) {
+      return { status: "noop" };
+    }
+    const active = this.activeLlmController;
+    if (active && !active.signal.aborted) {
+      active.abort(new TurnSteerResumeError(source));
+    }
+    return { status: "accepted" };
+  }
+
+  canAcceptSteerInjection(): boolean {
+    return (
+      this.acceptingSteerInjections &&
+      this.meta.status !== "committed" &&
+      this.meta.status !== "aborted" &&
+      !this.interruptState
+    );
+  }
+
   assertNotInterrupted(): void {
     this.throwIfInterrupted();
   }
@@ -224,7 +315,12 @@ export class Turn {
     turnId: string,
     readonly sse: SseWriter,
     declaredRoute: TurnRoute = "direct",
-    options: { planMode?: boolean; runtimeModelOverride?: string } = {},
+    options: {
+      planMode?: boolean;
+      runtimeModelOverride?: string;
+      responseDeadlineMs?: number;
+      traceId?: string;
+    } = {},
   ) {
     this.meta = {
       turnId,
@@ -240,6 +336,16 @@ export class Turn {
     this.runtimeModelOverride =
       typeof options.runtimeModelOverride === "string" && options.runtimeModelOverride.trim().length > 0
         ? options.runtimeModelOverride.trim()
+        : null;
+    this.traceId =
+      typeof options.traceId === "string" && options.traceId.trim().length > 0
+        ? options.traceId.trim()
+        : null;
+    this.responseDeadlineAtMs =
+      typeof options.responseDeadlineMs === "number" &&
+      Number.isFinite(options.responseDeadlineMs) &&
+      options.responseDeadlineMs > 0
+        ? this.meta.startedAt + Math.floor(options.responseDeadlineMs)
         : null;
     // T2-08 — Session permission mode is authoritative.
     const sessionInPlan = safeGetPermissionMode(session) === "plan";
@@ -339,6 +445,7 @@ export class Turn {
 
     try {
       for (let iter = 0; iter < Turn.MAX_ITERATIONS; iter++) {
+        this.acceptingSteerInjections = true;
         this.throwIfInterrupted();
         heartbeat.start(iter);
         if (iter === 0) {
@@ -347,6 +454,7 @@ export class Turn {
           sessionHeartbeat.updateIteration(iter);
         }
         systemPrompt = refreshRuntimeTimeHeader(systemPrompt);
+        toolDefs = this.prepareResponseDeadlineFinalization(messages, toolDefs);
         const preLLM = await this.session.agent.hooks.runPre(
           "beforeLLMCall",
           { messages, tools: toolDefs, system: systemPrompt, iteration: iter },
@@ -362,6 +470,19 @@ export class Turn {
         this.throwIfInterrupted();
 
         const effectiveModel = await this.resolveEffectiveModel(messages, toolDefs);
+        const priorityContext = applyPriorityContextToSystemPrompt(
+          systemPrompt,
+          toolDefs,
+          effectiveModel,
+        );
+        systemPrompt = priorityContext.system;
+        if (priorityContext.allocation?.droppedChunks.length) {
+          console.log(
+            `[core-agent] priority-context dropped=${JSON.stringify(priorityContext.allocation.droppedChunks)} ` +
+            `used=${priorityContext.allocation.usedTokens}/${priorityContext.allocation.totalBudget} ` +
+            `turnId=${this.meta.turnId}`,
+          );
+        }
         appendRuntimeModelIdentityContext(messages, {
           configuredModel: this.session.agent.config.model,
           effectiveModel,
@@ -373,14 +494,58 @@ export class Turn {
           ` msgCount=${messages.length} model=${effectiveModel}` +
           ` turnId=${this.meta.turnId}`,
         );
+        sse.agent({
+          type: "llm_progress",
+          turnId: this.meta.turnId,
+          iter,
+          stage: "started",
+          label: "Thinking through next step",
+          detail: `Calling ${effectiveModel}`,
+        });
 
-        const { blocks, stopReason, usage } = await readOneStream(
-          { llm: this.session.agent.llm, model: effectiveModel, sse,
-            abortSignal: this.interruptController.signal,
-            onError: (code, err) => this.emitError(code, err) },
-          systemPrompt, messages, toolDefs,
-          this.readOptions(),
-        );
+        const llmAbort = this.createLlmAbortSignal();
+        let blocks: LLMContentBlock[];
+        let stopReason: Awaited<ReturnType<typeof readOneStream>>["stopReason"];
+        let usage: LLMUsage;
+        try {
+          const systemForLLM = maybeCacheOptimize(systemPrompt, effectiveModel);
+          ({ blocks, stopReason, usage } = await readOneStream(
+            { llm: this.session.agent.llm, model: effectiveModel, sse,
+              abortSignal: llmAbort.signal,
+              onError: (code, err) => this.emitError(code, err) },
+            systemForLLM, messages, toolDefs,
+            this.readOptions(),
+          ));
+        } catch (err) {
+          if (err instanceof TurnSteerResumeError) {
+            this.forceNoThinking = false;
+            this.clearUserVisibleDraftForSteerResume(sse, err.source);
+            iter -= 1;
+            continue;
+          }
+          if (
+            isRetryableLlmStreamError(err) &&
+            this.streamRetry < Turn.MAX_STREAM_RETRIES
+          ) {
+            const retryErrorMessage = err instanceof Error ? err.message : String(err);
+            this.streamRetry += 1;
+            this.stageAuditEvent("llm_stream_retry", {
+              error: retryErrorMessage,
+              retry: this.streamRetry,
+              iter,
+            });
+            console.warn(
+              `[core-agent] LLM stream error, retrying iter` +
+              ` error=${retryErrorMessage} retry=${this.streamRetry}/${Turn.MAX_STREAM_RETRIES}` +
+              ` iter=${iter} turnId=${this.meta.turnId}`,
+            );
+            iter -= 1;
+            continue;
+          }
+          throw err;
+        } finally {
+          llmAbort.cleanup();
+        }
         // Reset after use — only applies to the single recovery call.
         this.forceNoThinking = false;
         this.recordUsage(usage);
@@ -417,6 +582,7 @@ export class Turn {
         );
 
         if (decision.kind === "finalise") {
+          this.acceptingSteerInjections = false;
           const finalBlocks = this.applyFinalAssistantReplayBlocks(blocks);
           if (!this.meta.stopReason) {
             this.setStopReason(this.recoveryAttempt > 0 ? "max_tokens_recovered" : "end_turn");
@@ -560,6 +726,7 @@ export class Turn {
       this.setStopReason("iteration_limit");
       throw err;
     } finally {
+      this.acceptingSteerInjections = false;
       this.session.setActiveSse(null);
       heartbeat.stop();
       await sessionHeartbeat.stop().catch(() => {});
@@ -603,20 +770,29 @@ export class Turn {
           result.finalText,
           decision.hiddenUserMessage,
         );
+        if (!this.hasVisibleAssistantText()) {
+          const err = new Error(
+            `blocked commit retry produced no visible response after verifier retry: ${result.reason}`,
+          );
+          this.stageAuditEvent("turn_aborted", {
+            reason: "blocked_commit_retry_empty_response",
+            verifierReason: result.reason,
+            attempt,
+          });
+          this.setStopReason("empty_response_retry_exhausted");
+          throw err;
+        }
       } catch (resampleErr) {
         // The previous draft was rejected by a beforeCommit verifier.
         // Never restore it after retry failure: doing so leaks exactly
-        // the response the verifier blocked. Show a truthful runtime
-        // failure placeholder instead; the turn will still abort below.
-        const fallbackText =
-          "A runtime verifier blocked the previous draft, but the correction attempt failed before a valid response could be produced. Please retry.";
+        // the response the verifier blocked. Do not stream a placeholder
+        // either; the terminal turn_failed event lets clients show an error
+        // state without committing a fake assistant answer.
         console.warn(
           `[core-agent] resample failed after blocked commit; clearing blocked draft` +
           ` turnId=${this.meta.turnId}`,
         );
         this.sse.agent({ type: "response_clear" });
-        this.sse.agent({ type: "text_delta", delta: fallbackText });
-        this.emittedAssistantBlocks.push({ type: "text", text: fallbackText });
         throw resampleErr;
       }
     }
@@ -656,6 +832,37 @@ export class Turn {
       })
       .catch(() => { /* audit failures never abort — §6 invariant G */ });
     throw new Error(userFacing);
+  }
+
+  private prepareResponseDeadlineFinalization(
+    messages: LLMMessage[],
+    toolDefs: LLMToolDef[],
+  ): LLMToolDef[] {
+    if (this.deadlineFinalizationRequested) return toolDefs;
+    if (this.responseDeadlineAtMs === null) return toolDefs;
+    const remainingMs = this.responseDeadlineAtMs - Date.now();
+    const bufferMs = responseDeadlineFinalizeBufferMs();
+    if (remainingMs > bufferMs) return toolDefs;
+
+    this.deadlineFinalizationRequested = true;
+    this.forceNoThinking = true;
+    messages.push({
+      role: "user",
+      content: [
+        "Response deadline is approaching.",
+        "Stop calling tools and write the final answer now as plain text.",
+        "Use only evidence already inspected in this turn.",
+        "For source-sensitive research, cite every factual claim with the inspected source id such as [src_1].",
+        "Remove or explicitly downgrade claims that are not directly supported by inspected source ids.",
+        "If the evidence is incomplete, state the concrete limitation instead of continuing research.",
+      ].join(" "),
+    });
+    this.stageAuditEvent("response_deadline_finalization_requested", {
+      remainingMs,
+      bufferMs,
+      toolCountSuppressed: toolDefs.length,
+    });
+    return [];
   }
 
   /** Persist turn_started + user_message BEFORE any LLM call (invariant F). */
@@ -725,6 +932,9 @@ export class Turn {
         askUser: (q) => this.asks.ask(q),
         abortSignal: this.interruptController.signal,
         currentUserMessage: this.userMessage,
+        shouldYieldAfterTool: () => this.session.hasPendingInjections(),
+        ...(this.traceId ? { traceId: this.traceId } : {}),
+        ...(this.loopDetector ? { loopDetector: this.loopDetector } : {}),
         unknownToolCounter: {
           get: () => this.unknownToolCount,
           inc: () => ++this.unknownToolCount,
@@ -789,6 +999,28 @@ export class Turn {
       ({ messages, tools: toolDefs, system: systemPrompt } = preLLM.args);
 
       const effectiveModel = await this.resolveEffectiveModel(messages, toolDefs);
+      const priorityContext = applyPriorityContextToSystemPrompt(
+        systemPrompt,
+        toolDefs,
+        effectiveModel,
+      );
+      systemPrompt = priorityContext.system;
+      if (priorityContext.allocation?.droppedChunks.length) {
+        console.log(
+          `[core-agent] priority-context dropped=${JSON.stringify(priorityContext.allocation.droppedChunks)} ` +
+          `used=${priorityContext.allocation.usedTokens}/${priorityContext.allocation.totalBudget} ` +
+          `turnId=${this.meta.turnId}`,
+        );
+      }
+      this.sse.agent({
+        type: "llm_progress",
+        turnId: this.meta.turnId,
+        iter,
+        stage: "started",
+        label: "Thinking through next step",
+        detail: `Calling ${effectiveModel}`,
+      });
+      const retrySystemForLLM = maybeCacheOptimize(systemPrompt, effectiveModel);
       const { blocks, stopReason, usage } = await readOneStream(
         {
           llm: this.session.agent.llm,
@@ -797,7 +1029,7 @@ export class Turn {
           abortSignal: this.interruptController.signal,
           onError: (code, err) => this.emitError(code, err),
         },
-        systemPrompt,
+        retrySystemForLLM,
         messages,
         toolDefs as LLMToolDef[],
         this.readOptions(),
@@ -847,6 +1079,15 @@ export class Turn {
     throw new Error(`turn exceeded ${Turn.MAX_ITERATIONS} retry tool iterations`);
   }
 
+  private hasVisibleAssistantText(): boolean {
+    return this.emittedAssistantBlocks.some(
+      (block) =>
+        block.type === "text" &&
+        typeof block.text === "string" &&
+        block.text.trim().length > 0,
+    );
+  }
+
   private async recordRetryEvent(
     reason: string,
     attempt: number,
@@ -887,6 +1128,34 @@ export class Turn {
       this.interruptState.handoffRequested,
       this.interruptState.source,
     );
+  }
+
+  private createLlmAbortSignal(): {
+    signal: AbortSignal;
+    cleanup: () => void;
+  } {
+    const controller = new AbortController();
+    const interruptSignal = this.interruptController.signal;
+    const abortFromInterrupt = () => {
+      if (!controller.signal.aborted) {
+        controller.abort(interruptSignal.reason);
+      }
+    };
+    if (interruptSignal.aborted) {
+      abortFromInterrupt();
+    } else {
+      interruptSignal.addEventListener("abort", abortFromInterrupt, { once: true });
+    }
+    this.activeLlmController = controller;
+    return {
+      signal: controller.signal,
+      cleanup: () => {
+        interruptSignal.removeEventListener("abort", abortFromInterrupt);
+        if (this.activeLlmController === controller) {
+          this.activeLlmController = null;
+        }
+      },
+    };
   }
 
   private recordUsage(u: LLMUsage): void {
@@ -1027,6 +1296,30 @@ export class Turn {
     );
   }
 
+  private clearUserVisibleDraftForSteerResume(
+    sse: SseWriter,
+    source: string,
+  ): void {
+    let removedTextLen = 0;
+    let removedThinkingLen = 0;
+    for (const block of this.emittedAssistantBlocks) {
+      if (block.type === "text") {
+        removedTextLen += block.text.length;
+      } else if (block.type === "thinking") {
+        removedThinkingLen += block.thinking.length;
+      }
+    }
+    this.emittedAssistantBlocks = this.emittedAssistantBlocks.filter(
+      (block) => block.type !== "text" && block.type !== "thinking",
+    );
+    sse.agent({ type: "response_clear" });
+    console.log(
+      `[core-agent] cleared visible draft for steer resume source=${source}` +
+      ` textLen=${removedTextLen} thinkingLen=${removedThinkingLen}` +
+      ` turnId=${this.meta.turnId}`,
+    );
+  }
+
   /** Fire-and-forget audit event from within the turn loop (§6.G). */
   private stageAuditEvent(event: string, data?: Record<string, unknown>): void {
     void this.session.agent.auditLog.append(
@@ -1046,8 +1339,8 @@ export class Turn {
  * pre-existing stubs) — treat that as `"default"`.
  */
 function safeGetPermissionMode(
-  session: { getPermissionMode?: () => "default" | "plan" | "auto" | "bypass" },
-): "default" | "plan" | "auto" | "bypass" {
+  session: { getPermissionMode?: () => PermissionMode },
+): PermissionMode {
   if (typeof session.getPermissionMode !== "function") return "default";
   return session.getPermissionMode();
 }
