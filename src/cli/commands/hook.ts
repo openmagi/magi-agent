@@ -7,12 +7,18 @@
 
 import fs from "node:fs";
 import path from "node:path";
+import readline from "node:readline";
 
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import { loadMagiConfig, magiConfigPath } from "../../config/MagiConfig.js";
 import { loadUserHooks } from "../../hooks/HookLoader.js";
 import { HookLogger } from "../../hooks/HookLogger.js";
 import type { HookPoint } from "../../hooks/types.js";
+import {
+  buildHookFromNaturalLanguage,
+  type NLHookLLM,
+  type GeneratedHookConfig,
+} from "../../hooks/NaturalLanguageHookBuilder.js";
 
 /* ------------------------------------------------------------------ */
 /*  Formatting helpers                                                 */
@@ -434,6 +440,209 @@ export async function hookLogs(args: string[]): Promise<void> {
 }
 
 /* ------------------------------------------------------------------ */
+/*  `magi hook create-from-rule "<description>"`                       */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Build a minimal LLM client for the create-from-rule command.
+ * Uses the configured LLM provider from magi-agent.yaml or env vars.
+ */
+async function buildCliLLM(): Promise<NLHookLLM> {
+  const { loadConfig } = await import("../config.js");
+  const { buildCliAgentConfig, cleanToken } = await import("../agentConfig.js");
+  const config = loadConfig();
+  const agentConfig = buildCliAgentConfig(config, { botId: "cli-hook-builder" });
+
+  const apiUrl = agentConfig.apiProxyUrl;
+  const token = cleanToken(agentConfig.gatewayToken) ?? "";
+  const model = "claude-haiku-4-5-20251001";
+
+  return {
+    async complete(system: string, user: string): Promise<string> {
+      const body = {
+        model,
+        max_tokens: 2048,
+        system,
+        messages: [{ role: "user", content: user }],
+      };
+      const res = await fetch(`${apiUrl}/v1/messages`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-api-key": token,
+          "anthropic-version": "2023-06-01",
+        },
+        body: JSON.stringify(body),
+      });
+      if (!res.ok) {
+        throw new Error(`LLM request failed: ${res.status} ${res.statusText}`);
+      }
+      const json = (await res.json()) as Record<string, unknown>;
+      const content = json.content;
+      if (!Array.isArray(content) || content.length === 0) {
+        throw new Error("Empty LLM response");
+      }
+      const firstBlock = content[0] as Record<string, unknown>;
+      if (typeof firstBlock.text !== "string") {
+        throw new Error("Unexpected LLM response format");
+      }
+      return firstBlock.text;
+    },
+  };
+}
+
+function askConfirm(question: string): Promise<boolean> {
+  const rl = readline.createInterface({
+    input: process.stdin,
+    output: process.stdout,
+  });
+  return new Promise((resolve) => {
+    rl.question(`${question} [y/N] `, (answer) => {
+      rl.close();
+      resolve(answer.toLowerCase() === "y" || answer.toLowerCase() === "yes");
+    });
+  });
+}
+
+function writeGeneratedHook(config: GeneratedHookConfig): void {
+  const hooksDir = path.resolve(process.cwd(), "hooks");
+  const fixturesDir = path.join(hooksDir, "__fixtures__", config.name);
+  const hookFile = path.join(hooksDir, `${config.name}.ts`);
+
+  fs.mkdirSync(fixturesDir, { recursive: true });
+  fs.writeFileSync(hookFile, config.hookCode, "utf-8");
+  fs.writeFileSync(
+    path.join(fixturesDir, "basic.yaml"),
+    config.fixtureYaml,
+    "utf-8",
+  );
+
+  console.log(`${GREEN}Created hook:${RESET} ${hookFile}`);
+  console.log(`${GREEN}Created fixture:${RESET} ${fixturesDir}/basic.yaml`);
+
+  // Update magi.config.yaml if classifier dimension was generated
+  if (config.classifierDimension) {
+    const configPath = magiConfigPath();
+    let doc: Record<string, unknown> = {};
+
+    if (fs.existsSync(configPath)) {
+      try {
+        const raw = fs.readFileSync(configPath, "utf-8");
+        doc = (parseYaml(raw) as Record<string, unknown>) ?? {};
+      } catch {
+        doc = {};
+      }
+    }
+
+    // Ensure classifier.custom_dimensions exists
+    if (!doc.classifier || typeof doc.classifier !== "object") {
+      doc.classifier = {};
+    }
+    const classifier = doc.classifier as Record<string, unknown>;
+    if (
+      !classifier.custom_dimensions ||
+      typeof classifier.custom_dimensions !== "object"
+    ) {
+      classifier.custom_dimensions = {};
+    }
+    const dims = classifier.custom_dimensions as Record<
+      string,
+      Record<string, unknown>
+    >;
+
+    dims[config.classifierDimension.name] = {
+      phase: config.classifierDimension.phase,
+      prompt: config.classifierDimension.prompt,
+      output_schema: config.classifierDimension.output_schema,
+    };
+
+    fs.writeFileSync(configPath, stringifyYaml(doc), "utf-8");
+    console.log(
+      `${GREEN}Updated classifier dimension:${RESET} ${configPath}`,
+    );
+  }
+}
+
+export async function hookCreateFromRule(args: string[]): Promise<void> {
+  const description = args.filter((a) => !a.startsWith("--")).join(" ").trim();
+  const noConfirm = args.includes("--yes") || args.includes("-y");
+
+  if (!description) {
+    console.error(
+      'Usage: magi hook create-from-rule "<natural language rule>"',
+    );
+    console.error("");
+    console.error("Examples:");
+    console.error(
+      '  magi hook create-from-rule "Block responses containing drug dosage outside safe ranges"',
+    );
+    console.error(
+      '  magi hook create-from-rule "투자 조언이 포함된 응답에 면책조항 경고 추가"',
+    );
+    process.exitCode = 1;
+    return;
+  }
+
+  console.log(`${DIM}Parsing rule...${RESET}`);
+
+  let llm: NLHookLLM;
+  try {
+    llm = await buildCliLLM();
+  } catch (err) {
+    console.error(
+      `Failed to initialize LLM client: ${(err as Error).message}`,
+    );
+    console.error(
+      `${DIM}Make sure magi-agent.yaml is configured with valid LLM credentials.${RESET}`,
+    );
+    process.exitCode = 1;
+    return;
+  }
+
+  let config: GeneratedHookConfig;
+  try {
+    config = await buildHookFromNaturalLanguage({ description }, llm);
+  } catch (err) {
+    console.error(
+      `Failed to generate hook config: ${(err as Error).message}`,
+    );
+    process.exitCode = 1;
+    return;
+  }
+
+  // Show preview
+  console.log("");
+  console.log(`${BOLD}Generated Hook Configuration${RESET}`);
+  console.log(`${"─".repeat(50)}`);
+  console.log(`${BOLD}Name:${RESET}     ${config.name}`);
+  console.log(`${BOLD}Point:${RESET}    ${config.point}`);
+  console.log(`${BOLD}Priority:${RESET} ${config.priority}`);
+  console.log(`${BOLD}Blocking:${RESET} ${config.blocking}`);
+  if (config.classifierDimension) {
+    console.log(
+      `${BOLD}Classifier:${RESET} ${config.classifierDimension.name} (${config.classifierDimension.phase})`,
+    );
+  }
+  console.log(`${"─".repeat(50)}`);
+  console.log("");
+  console.log(`${BOLD}magi.config.yaml snippet:${RESET}`);
+  console.log(`${DIM}${config.yamlConfig}${RESET}`);
+
+  if (noConfirm) {
+    writeGeneratedHook(config);
+    return;
+  }
+
+  const confirmed = await askConfirm("Write hook files?");
+  if (!confirmed) {
+    console.log(`${DIM}Aborted.${RESET}`);
+    return;
+  }
+
+  writeGeneratedHook(config);
+}
+
+/* ------------------------------------------------------------------ */
 /*  Router                                                             */
 /* ------------------------------------------------------------------ */
 
@@ -444,6 +653,9 @@ export async function runHookCommand(args: string[]): Promise<void> {
   switch (subcommand) {
     case "create":
       await hookCreate(rest);
+      break;
+    case "create-from-rule":
+      await hookCreateFromRule(rest);
       break;
     case "list":
       await hookList();
@@ -466,6 +678,7 @@ ${BOLD}magi hook${RESET} — manage hooks
 
 ${BOLD}Subcommands:${RESET}
   create <name> --point <hookPoint>   Scaffold a new hook + fixture
+  create-from-rule "<description>"    Generate hook from natural language rule
   list                                List all registered hooks
   enable <name>                       Enable a hook in magi.config.yaml
   disable <name>                      Disable a hook in magi.config.yaml
