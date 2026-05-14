@@ -20,11 +20,21 @@ import type {
   ReplyToRef,
   UserMessage,
 } from "../util/types.js";
-import type { LLMContentBlock, LLMMessage } from "../transport/LLMClient.js";
+import type { LLMContentBlock, LLMMessage, LLMToolDef } from "../transport/LLMClient.js";
 import { renderIdentitySystem } from "../storage/Workspace.js";
+import type { TranscriptEntry } from "../storage/Transcript.js";
 import { getCapability } from "../llm/modelCapabilities.js";
 import type { RouteDecision } from "../routing/types.js";
-import { OUTPUT_RULES_BLOCK } from "../prompt/RuntimePromptBlocks.js";
+import {
+  buildRuntimeTemporalContext,
+  OUTPUT_RULES_BLOCK,
+} from "../prompt/RuntimePromptBlocks.js";
+import { normalizeMemoryMode } from "../util/memoryMode.js";
+import {
+  ContextChunkManager,
+  splitHistoryByRecentTurns,
+  type BudgetAllocation,
+} from "../services/compact/ContextChunkManager.js";
 
 /**
  * Fallback soft cap on transcript tokens before `maybeCompact` is
@@ -33,6 +43,25 @@ import { OUTPUT_RULES_BLOCK } from "../prompt/RuntimePromptBlocks.js";
  * only used when the model id is not in the registry.
  */
 export const TOKEN_LIMIT_FOR_COMPACTION = 150_000;
+const PRIORITY_CONTEXT_OLD_HISTORY_SUMMARY_FRACTION = 0.6;
+
+const INCOGNITO_MEMORY_MODE_BLOCK = [
+  '<memory_mode hidden="true">',
+  "memory_mode: incognito",
+  "This channel keeps chat history, but long-term memory is disabled.",
+  "Do not read, search, summarize, or write long-term memory files such as memory/*, MEMORY.md, SCRATCHPAD.md, WORKING.md, or TASK-QUEUE.md.",
+  "Do not ask another agent or tool to persist this channel's conversation into long-term memory.",
+  "</memory_mode>",
+].join("\n");
+
+const READ_ONLY_MEMORY_MODE_BLOCK = [
+  '<memory_mode hidden="true">',
+  "memory_mode: read_only",
+  "Existing long-term memory may be read for context.",
+  "Do not write, summarize, checkpoint, or persist this channel's conversation into long-term memory files such as memory/*, MEMORY.md, SCRATCHPAD.md, WORKING.md, or TASK-QUEUE.md.",
+  "Do not ask another agent or tool to persist this channel's conversation into long-term memory.",
+  "</memory_mode>",
+].join("\n");
 
 /**
  * Max preview length for the `[Reply to …]` preamble (chars, not
@@ -50,6 +79,8 @@ export interface RuntimeModelIdentityContext {
 
 const RUNTIME_MODEL_IDENTITY_OPEN = "<runtime_model_identity hidden=\"true\">";
 const RUNTIME_MODEL_IDENTITY_CLOSE = "</runtime_model_identity>";
+const RUNTIME_TEMPORAL_CONTEXT_PATTERN =
+  /<runtime_temporal_context hidden="true">[\s\S]*?<\/runtime_temporal_context>/;
 
 /**
  * Format a `ReplyToRef` into a single-line preamble. The line sits
@@ -124,10 +155,7 @@ function runtimeModelLabel(model: string, provider?: string): string {
 }
 
 function routerDisplayName(profileId: string | undefined): string {
-  if (profileId === "standard") return "Standard Router";
-  if (profileId === "premium") return "Premium Router";
-  if (profileId === "anthropic_only") return "Claude Router";
-  return profileId ? `${profileId} Router` : "Direct model";
+  return profileId ?? "configured model";
 }
 
 function isRuntimeModelIdentityBlock(block: LLMContentBlock): boolean {
@@ -238,6 +266,27 @@ function isKbCommand(text: string): boolean {
   return /^\/kb(?:\s|$)/.test(text.trim());
 }
 
+function isPriorityContextEnabled(): boolean {
+  return process.env.MAGI_PRIORITY_CONTEXT === "1";
+}
+
+function contextBudgetForModel(model: string): number {
+  const cap = getCapability(model);
+  return cap ? Math.floor(cap.contextWindow * 0.75) : TOKEN_LIMIT_FOR_COMPACTION;
+}
+
+export function applyPriorityContextToSystemPrompt(
+  system: string,
+  tools: readonly LLMToolDef[],
+  model: string,
+): { system: string; allocation: BudgetAllocation | null } {
+  if (!isPriorityContextEnabled()) {
+    return { system, allocation: null };
+  }
+  const manager = new ContextChunkManager();
+  return manager.allocateSystem(system, tools, contextBudgetForModel(model));
+}
+
 function buildKbCommandContract(userText: string): LLMMessage {
   const mentionsDownload =
     /\bdownloads?\b/i.test(userText) || /download\s*컬렉션/i.test(userText);
@@ -304,7 +353,8 @@ export async function buildSystemPrompt(
 ): Promise<string> {
   const identity = await session.agent.workspace.loadIdentity();
   const rendered = renderIdentitySystem(identity);
-  const stamp = new Date().toISOString();
+  const now = new Date();
+  const stamp = now.toISOString();
   // P3 — `[Channel: <kind>]` hint so the LLM can gate output channel
   // (Telegram file dispatch vs web/app delivery) on the session's
   // origin. Defaults to `web` for sessions without a populated channel
@@ -323,6 +373,7 @@ export async function buildSystemPrompt(
     `[Time: ${stamp}]`,
     `[Channel: ${channelType}]`,
   ].join("\n");
+  const temporalContext = buildRuntimeTemporalContext(now);
   const systemPromptAddendum =
     typeof userMessage?.metadata?.systemPromptAddendum === "string" &&
     userMessage.metadata.systemPromptAddendum.trim().length > 0
@@ -334,10 +385,18 @@ export async function buildSystemPrompt(
   // sees a thin response while the detailed analysis lives in thinking
   // (which is ephemeral and not committed to transcript).
   const thinkingBoundary = `\n${OUTPUT_RULES_BLOCK}`;
-  const base = rendered ? `${sessionHeader}\n\n${rendered}` : sessionHeader;
+  const promptPrefix = `${sessionHeader}\n\n${temporalContext}`;
+  const base = rendered ? `${promptPrefix}\n\n${rendered}` : promptPrefix;
+  const memoryMode = normalizeMemoryMode(session.meta.channel?.memoryMode);
+  const memoryModeBlock =
+    memoryMode === "incognito"
+      ? `\n\n${INCOGNITO_MEMORY_MODE_BLOCK}`
+      : memoryMode === "read_only"
+        ? `\n\n${READ_ONLY_MEMORY_MODE_BLOCK}`
+        : "";
   const withAddendum = systemPromptAddendum
-    ? `${base}\n\n${systemPromptAddendum}`
-    : base;
+    ? `${base}${memoryModeBlock}\n\n${systemPromptAddendum}`
+    : `${base}${memoryModeBlock}`;
   return `${withAddendum}\n${thinkingBoundary}`;
 }
 
@@ -345,9 +404,16 @@ export function refreshRuntimeTimeHeader(
   systemPrompt: string,
   now = new Date(),
 ): string {
-  return systemPrompt.replace(
+  const refreshedTime = systemPrompt.replace(
     /(^|\n)\[Time: [^\]\n]*\]/,
     `$1[Time: ${now.toISOString()}]`,
+  );
+  if (!RUNTIME_TEMPORAL_CONTEXT_PATTERN.test(refreshedTime)) {
+    return refreshedTime;
+  }
+  return refreshedTime.replace(
+    RUNTIME_TEMPORAL_CONTEXT_PATTERN,
+    buildRuntimeTemporalContext(now),
   );
 }
 
@@ -371,10 +437,7 @@ export async function buildMessages(
   // T4-17: model-aware context limit. Use 75% of the model's
   // contextWindow as the compaction threshold; fall back to the legacy
   // 150k constant for unknown models.
-  const cap = getCapability(model);
-  const tokenLimit = cap
-    ? Math.floor(cap.contextWindow * 0.75)
-    : TOKEN_LIMIT_FOR_COMPACTION;
+  const tokenLimit = contextBudgetForModel(model);
   // Pass the routed model so ContextEngine can apply the §11.6
   // feasibility check (throws CompactionImpossibleError when the window
   // is too small to fit summary+reserve). Without the model arg the
@@ -391,7 +454,60 @@ export async function buildMessages(
   const refreshed = boundary
     ? await session.transcript.readCommitted()
     : committed;
-  const out = session.agent.contextEngine.buildMessagesFromTranscript(refreshed);
+  let out = session.agent.contextEngine.buildMessagesFromTranscript(refreshed);
+  if (isPriorityContextEnabled()) {
+    const manager = new ContextChunkManager();
+    const proactiveSummary =
+      (
+        session.agent.contextEngine as {
+          getProactiveSummary?: (sessionKey: string) => string | null;
+        }
+      ).getProactiveSummary?.(session.meta.sessionKey) ?? null;
+    if (proactiveSummary) {
+      const split = splitHistoryByRecentTurns(out, 3);
+      out = [
+        {
+          role: "user",
+          content: [
+            "<history_old_summary hidden=\"true\">",
+            proactiveSummary,
+            "</history_old_summary>",
+          ].join("\n"),
+        },
+        ...split.recent,
+      ];
+    }
+    const allocated = manager.allocateHistoryMessages(out, tokenLimit, 3);
+    if (
+      allocated.oldTokenCount >
+      tokenLimit * PRIORITY_CONTEXT_OLD_HISTORY_SUMMARY_FRACTION
+    ) {
+      const proactive = (
+        session.agent.contextEngine as {
+          requestProactiveSummary?: (
+            session: Session,
+            entries: readonly (TranscriptEntry | LLMMessage)[],
+          ) => Promise<void> | void;
+        }
+      ).requestProactiveSummary;
+      if (typeof proactive === "function") {
+        Promise.resolve(
+          proactive.call(
+            session.agent.contextEngine,
+            session,
+            refreshed.length > 0 ? refreshed : out,
+          ),
+        ).catch((err: unknown) => {
+          console.warn(
+            `[message-builder] proactive history summary failed: ${
+              err instanceof Error ? err.message : String(err)
+            }`,
+          );
+        });
+      }
+    }
+    out = allocated.messages;
+  }
   const hiddenContexts =
     typeof session.drainPendingHiddenContext === "function"
       ? session.drainPendingHiddenContext()

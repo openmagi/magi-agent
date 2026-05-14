@@ -193,8 +193,41 @@ function stringFromJsonLikeText(value: string | undefined, keys: string[]): stri
     if (match?.[1]?.trim()) {
       return match[1].replace(/\\n/g, "\n").replace(/\\"/g, '"').trim();
     }
+    const prefix = stringPrefixFromJsonLikeText(value, key);
+    if (prefix) return prefix;
   }
   return undefined;
+}
+
+function stringPrefixFromJsonLikeText(value: string, key: string): string | undefined {
+  const pattern = new RegExp(`["']${escapeRegExp(key)}["']\\s*:\\s*(["'])`, "i");
+  const match = value.match(pattern);
+  if (!match || match.index === undefined) return undefined;
+  const quote = match[1];
+  if (!quote) return undefined;
+
+  let result = "";
+  let escaped = false;
+  const start = match.index + match[0].length;
+  for (let i = start; i < value.length && result.length < MAX_TARGET_LENGTH * 2; i += 1) {
+    const ch = value[i];
+    if (escaped) {
+      if (ch === "n") result += "\n";
+      else if (ch === "r") result += "\r";
+      else if (ch === "t") result += "\t";
+      else result += ch;
+      escaped = false;
+      continue;
+    }
+    if (ch === "\\") {
+      escaped = true;
+      continue;
+    }
+    if (ch === quote) break;
+    result += ch;
+  }
+
+  return result.trim() || undefined;
 }
 
 function pathFromPreviewText(preview?: string): string | undefined {
@@ -335,11 +368,16 @@ function promptSummary(prompt?: string): string | undefined {
     .split(/\r?\n/)
     .map(cleanPromptLine)
     .filter(Boolean);
-  const title = lines[0];
+  const taskLine = lines.find((line) =>
+    /^(task|request|work order|작업|요청)\s*:/i.test(line),
+  );
+  const goalLine = lines.find((line) => /^(goal|objective|목표)\s*:/i.test(line));
+  const firstLine = lines[0];
+  const title = taskLine ?? (
+    firstLine && /^you are\b/i.test(firstLine) ? goalLine : firstLine
+  );
   if (!title) return undefined;
-  const objective = lines
-    .slice(1)
-    .find((line) => /^(goal|objective|목표)\s*:/i.test(line));
+  const objective = goalLine && goalLine !== title ? goalLine : undefined;
   return snippetFrom([title, objective].filter(Boolean).join("\n"));
 }
 
@@ -544,7 +582,10 @@ function structuredValueText(value: unknown): string | undefined {
   return undefined;
 }
 
-function browserPreview(input: PublicToolPreviewInput): PublicToolPreview | null {
+function browserPreview(
+  input: PublicToolPreviewInput,
+  language?: ChatResponseLanguage,
+): PublicToolPreview | null {
   const output = previewObject(input.outputPreview) ?? previewObject(input.inputPreview);
   if (!output) return null;
 
@@ -555,7 +596,7 @@ function browserPreview(input: PublicToolPreviewInput): PublicToolPreview | null
 
   if (status && /error|fail|aborted/i.test(status)) {
     return {
-      action: "Browser step failed",
+      action: localized(language, "Browser step failed", "브라우저 단계 실패"),
       ...(path ? { target: bounded(path, MAX_TARGET_LENGTH) } : {}),
       ...(error ? { snippet: snippetFrom(error) } : {}),
     };
@@ -563,14 +604,14 @@ function browserPreview(input: PublicToolPreviewInput): PublicToolPreview | null
 
   if (action === "create_session" || action === "open_session" || action === "session") {
     return {
-      action: "Opening browser",
-      target: "Starting browser session",
+      action: localized(language, "Opening browser", "브라우저 여는 중"),
+      target: localized(language, "Starting browser session", "브라우저 세션 시작 중"),
     };
   }
 
   if (action === "scrape" || action === "read" || action === "extract") {
     return {
-      action: "Reading page",
+      action: localized(language, "Reading page", "페이지 읽는 중"),
       ...(path ? { target: bounded(path, MAX_TARGET_LENGTH) } : {}),
       ...(error ? { snippet: snippetFrom(error) } : {}),
     };
@@ -578,13 +619,13 @@ function browserPreview(input: PublicToolPreviewInput): PublicToolPreview | null
 
   if (action === "navigate" || action === "goto" || action === "open") {
     return {
-      action: "Opening page",
+      action: localized(language, "Opening page", "페이지 여는 중"),
       ...(path ? { target: bounded(path, MAX_TARGET_LENGTH) } : {}),
     };
   }
 
   return {
-    action: "Using browser",
+    action: localized(language, "Using browser", "브라우저 사용 중"),
     ...(path ? { target: bounded(path, MAX_TARGET_LENGTH) } : {}),
   };
 }
@@ -694,6 +735,68 @@ function dateRangePreview(outputPreview?: string): PublicToolPreview | null {
           ),
         }
       : {}),
+  };
+}
+
+function modelProgressPreview(
+  inputPreview?: string,
+  outputPreview?: string,
+  language?: ChatResponseLanguage,
+): PublicToolPreview {
+  const input = previewObject(inputPreview);
+  const output = outputPreview ? bounded(outputPreview, MAX_SNIPPET_LENGTH) : undefined;
+  const stage = displayValue(input, ["stage"]);
+  const label = displayValue(input, ["label"]);
+  const detail = displayValue(input, ["detail"]);
+  const elapsedMs = displayValue(input, ["elapsedMs"]);
+  const elapsedSeconds = elapsedMs ? Math.max(1, Math.round(Number(elapsedMs) / 1000)) : null;
+  const elapsed = elapsedSeconds
+    ? (isKorean(language) ? `${elapsedSeconds}초째 작업 중` : `${elapsedSeconds}s elapsed`)
+    : undefined;
+  const isHeartbeat = stage === "heartbeat";
+  const heartbeatLabel = isHeartbeat && label && !/^(still working|계속 작업 중)$/iu.test(label.trim())
+    ? bounded(label, MAX_TARGET_LENGTH)
+    : undefined;
+
+  const action = stage === "completed"
+    ? localized(language, "Model step finished", "모델 단계 완료")
+    : isHeartbeat
+      ? heartbeatLabel ?? localized(language, "Still working", "계속 작업 중")
+      : localized(language, "Thinking through next step", "다음 단계 판단 중");
+  const target = isHeartbeat
+    ? elapsed
+    : label && !/thinking through next step/i.test(label)
+    ? bounded(label, MAX_TARGET_LENGTH)
+    : elapsed;
+  const snippet = snippetFrom([detail, output].filter(Boolean).join("\n"));
+
+  return {
+    action,
+    ...(target ? { target } : {}),
+    ...(snippet ? { snippet } : {}),
+  };
+}
+
+function activityProgressPreview(
+  inputPreview?: string,
+  _outputPreview?: string,
+  language?: ChatResponseLanguage,
+): PublicToolPreview {
+  const input = previewObject(inputPreview);
+  const label = displayValue(input, ["label"]) ?? localized(language, "Working through current step", "작업 진행 중");
+  const target = displayValue(input, ["target"]);
+  const detail = displayValue(input, ["detail"]);
+  const elapsedMs = displayValue(input, ["elapsedMs"]);
+  const elapsedSeconds = elapsedMs ? Math.max(1, Math.round(Number(elapsedMs) / 1000)) : null;
+  const elapsed = elapsedSeconds
+    ? (isKorean(language) ? `${elapsedSeconds}초째 작업 중` : `${elapsedSeconds}s elapsed`)
+    : undefined;
+  const snippet = snippetFrom([target, detail].filter(Boolean).join("\n"));
+
+  return {
+    action: bounded(label, MAX_TARGET_LENGTH),
+    ...(elapsed ? { target: elapsed } : {}),
+    ...(snippet ? { snippet } : {}),
   };
 }
 
@@ -946,12 +1049,14 @@ export function derivePublicToolPreview(
   }
 
   if (tool === "browser" || tool === "browseruse" || tool === "browserworker") {
-    const preview = browserPreview(input);
+    const preview = browserPreview(input, language);
     if (preview) return preview;
   }
 
   if (tool === "spawnagent") {
-    const prompt = stringValue(parsedInput, ["prompt", "task", "instructions", "message"]);
+    const prompt =
+      stringValue(parsedInput, ["prompt", "task", "instructions", "message"]) ??
+      stringFromJsonLikeText(input.inputPreview, ["prompt", "task", "instructions", "message"]);
     const summary = promptSummary(prompt);
     const resultPreview = helperResultPreview(input.outputPreview, language);
     return {
@@ -974,6 +1079,14 @@ export function derivePublicToolPreview(
   if (tool === "daterange") {
     const preview = dateRangePreview(input.outputPreview);
     if (preview) return preview;
+  }
+
+  if (tool === "modelprogress") {
+    return modelProgressPreview(input.inputPreview, input.outputPreview, language);
+  }
+
+  if (tool === "activityprogress") {
+    return activityProgressPreview(input.inputPreview, input.outputPreview, language);
   }
 
   if (tool === "taskboard" || tool === "taskupdate") {

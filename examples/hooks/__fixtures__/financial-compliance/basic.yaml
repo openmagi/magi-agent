@@ -1,0 +1,12 @@
+# financial-compliance — test fixtures
+
+description: "Should block investment advice without disclaimer"
+point: "beforeCommit"
+input:
+  assistantText: "You should buy 100 shares of ACME Corp. The stock will increase by 50% next quarter."
+  toolCallCount: 0
+  toolReadHappened: false
+  userMessage: "What stocks should I invest in?"
+  retryCount: 0
+expected:
+  action: "block"

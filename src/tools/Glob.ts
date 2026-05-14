@@ -14,6 +14,11 @@ import path from "node:path";
 import type { Tool, ToolContext, ToolResult } from "../Tool.js";
 import { Workspace } from "../storage/Workspace.js";
 import { errorResult } from "../util/toolResult.js";
+import {
+  isIncognitoMemoryMode,
+  isProtectedMemoryPath,
+  protectedMemoryError,
+} from "../util/memoryMode.js";
 
 export interface GlobInput {
   pattern: string;
@@ -53,6 +58,18 @@ export function makeGlobTool(workspaceRoot: string): Tool<GlobInput, GlobOutput>
     },
     async execute(input: GlobInput, ctx: ToolContext): Promise<ToolResult<GlobOutput>> {
       const start = Date.now();
+      const incognito = isIncognitoMemoryMode(ctx.memoryMode);
+      if (
+        incognito &&
+        (isProtectedMemoryPath(input.path) || isProtectedMemoryPath(input.pattern))
+      ) {
+        return {
+          status: "permission_denied",
+          errorCode: "incognito_memory_blocked",
+          errorMessage: protectedMemoryError(input.path ?? input.pattern),
+          durationMs: Date.now() - start,
+        };
+      }
       const ws = ctx.spawnWorkspace ?? defaultWorkspace;
       let base: string;
       try {
@@ -92,7 +109,8 @@ export function makeGlobTool(workspaceRoot: string): Tool<GlobInput, GlobOutput>
             const truncated = raw.length > MAX_MATCHES;
             const matches = raw
               .slice(0, MAX_MATCHES)
-              .map((entry) => path.relative(ws.root, entry.p));
+              .map((entry) => path.relative(ws.root, entry.p))
+              .filter((file) => !incognito || !isProtectedMemoryPath(file));
             resolve({
               status: "ok",
               output: { matches, truncated },

@@ -47,6 +47,7 @@ export type TranscriptEntry =
       status: string;
       output?: string;
       isError?: boolean;
+      metadata?: Record<string, unknown>;
     }
   | {
       kind: "turn_started";

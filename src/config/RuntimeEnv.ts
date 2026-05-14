@@ -44,7 +44,8 @@ function parsePermissionMode(raw: string | undefined): PermissionMode | undefine
     raw === "default" ||
     raw === "plan" ||
     raw === "auto" ||
-    raw === "bypass"
+    raw === "bypass" ||
+    raw === "workspace-bypass"
   ) {
     return raw;
   }
@@ -60,6 +61,7 @@ function parseRoutingMode(model: string): RoutingMode {
 }
 
 function directProvidersFromEnv(): AgentConfig["directProviders"] {
+  const lmStudioBaseUrl = optionalEnv("LM_STUDIO_BASE_URL") ?? optionalEnv("LOCAL_LLM_BASE_URL");
   const openAIBaseUrl = optionalEnv("OPENAI_BASE_URL");
   const openAIApiKey = optionalEnv("OPENAI_API_KEY");
   return {
@@ -98,6 +100,61 @@ function directProvidersFromEnv(): AgentConfig["directProviders"] {
               optionalEnv("GOOGLE_BASE_URL") ??
               "https://generativelanguage.googleapis.com/v1beta/openai",
             apiKey: optionalEnv("GOOGLE_API_KEY") ?? "",
+          },
+        }
+      : {}),
+    ollama: {
+      kind: "openai-compatible" as const,
+      baseUrl: optionalEnv("OLLAMA_BASE_URL") ?? "http://localhost:11434/v1",
+      apiKey: optionalEnv("OLLAMA_API_KEY") ?? "",
+    },
+    local: {
+      kind: "openai-compatible" as const,
+      baseUrl: lmStudioBaseUrl ?? "http://localhost:1234/v1",
+      apiKey: optionalEnv("LOCAL_LLM_API_KEY") ?? optionalEnv("LM_STUDIO_API_KEY") ?? "",
+    },
+    ...(optionalEnv("LOCALAI_BASE_URL")
+      ? {
+          localai: {
+            kind: "openai-compatible" as const,
+            baseUrl: optionalEnv("LOCALAI_BASE_URL") ?? "",
+            apiKey: optionalEnv("LOCALAI_API_KEY") ?? "",
+          },
+        }
+      : {}),
+    ...(optionalEnv("VLLM_BASE_URL")
+      ? {
+          vllm: {
+            kind: "openai-compatible" as const,
+            baseUrl: optionalEnv("VLLM_BASE_URL") ?? "",
+            apiKey: optionalEnv("VLLM_API_KEY") ?? "",
+          },
+        }
+      : {}),
+    ...(optionalEnv("TGI_BASE_URL")
+      ? {
+          tgi: {
+            kind: "openai-compatible" as const,
+            baseUrl: optionalEnv("TGI_BASE_URL") ?? "",
+            apiKey: optionalEnv("TGI_API_KEY") ?? "",
+          },
+        }
+      : {}),
+    ...(optionalEnv("OPENROUTER_API_KEY") || optionalEnv("OPENROUTER_BASE_URL")
+      ? {
+          openrouter: {
+            kind: "openai-compatible" as const,
+            baseUrl: optionalEnv("OPENROUTER_BASE_URL") ?? "https://openrouter.ai/api/v1",
+            apiKey: optionalEnv("OPENROUTER_API_KEY") ?? "",
+          },
+        }
+      : {}),
+    ...(optionalEnv("CUSTOM_LLM_BASE_URL")
+      ? {
+          custom: {
+            kind: "openai-compatible" as const,
+            baseUrl: optionalEnv("CUSTOM_LLM_BASE_URL") ?? "",
+            apiKey: optionalEnv("CUSTOM_LLM_API_KEY") ?? "",
           },
         }
       : {}),
@@ -210,7 +267,7 @@ export function loadRuntimeEnv(): RuntimeEnv {
     redisUrl: optionalEnv("CORE_AGENT_REDIS_URL"),
     model,
     defaultPermissionMode:
-      parsePermissionMode(optionalEnv("CORE_AGENT_PERMISSION_MODE")) ?? "bypass",
+      parsePermissionMode(optionalEnv("CORE_AGENT_PERMISSION_MODE")) ?? "workspace-bypass",
     routingMode,
     routingProfileId: optionalEnv("CORE_AGENT_ROUTING_PROFILE") ?? "standard",
     directProviders: routingMode === "direct" ? directProvidersFromEnv() : undefined,

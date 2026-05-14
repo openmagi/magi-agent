@@ -180,6 +180,58 @@ describe("ExecutionContractStore", () => {
     ]);
   });
 
+  it("treats goal mode as a heavy execution contract", () => {
+    const store = new ExecutionContractStore({ now: () => 1 });
+
+    store.startTurn({
+      userMessage: "Continue working toward this goal.",
+      metadata: {
+        goalMode: true,
+        goalObjective: "Ship the launch memo",
+        missionId: "mission-1",
+        goalTurnsUsed: 0,
+        goalMaxTurns: 30,
+      },
+    });
+
+    expect(store.snapshot().control).toEqual({
+      mode: "heavy",
+      reason: "goal_loop",
+    });
+    expect(store.snapshot().taskState.goal).toBe("Ship the launch memo");
+    expect(store.snapshot().taskState.constraints).toEqual(
+      expect.arrayContaining([
+        "Autonomous goal mission: mission-1",
+        expect.stringContaining("goal judge will decide"),
+      ]),
+    );
+    expect(store.snapshot().taskState.currentPlan).toEqual([
+      "Continue concrete work toward the goal until it is done, blocked, needs user input, or the 30-turn budget is exhausted.",
+    ]);
+    expect(store.snapshot().taskState.verificationMode).toBe("sample");
+  });
+
+  it("marks goal continuations with a continuation control reason", () => {
+    const store = new ExecutionContractStore({ now: () => 1 });
+
+    store.startTurn({
+      userMessage: "Continue working toward this goal.",
+      metadata: {
+        goalMode: true,
+        goalContinuation: true,
+        goalObjective: "Ship the launch memo",
+        missionId: "mission-1",
+        goalTurnsUsed: 1,
+        goalMaxTurns: 30,
+      },
+    });
+
+    expect(store.snapshot().control).toEqual({
+      mode: "heavy",
+      reason: "goal_loop_continuation",
+    });
+  });
+
   it("records memory recall metadata for the current turn", () => {
     const store = new ExecutionContractStore({ now: () => 123 });
     store.recordMemoryRecall({

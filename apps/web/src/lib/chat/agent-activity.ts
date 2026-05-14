@@ -20,7 +20,7 @@ export interface DeriveAgentActivityInput {
   thinkingDuration?: number;
   now?: number;
   fileProcessing?: boolean;
-  turnPhase?: "pending" | "planning" | "executing" | "verifying" | "committing" | "committed" | "aborted" | null;
+  turnPhase?: "pending" | "planning" | "executing" | "verifying" | "committing" | "compacting" | "committed" | "aborted" | null;
   heartbeatElapsedMs?: number | null;
   pendingInjectionCount?: number;
   activities?: ToolActivity[];
@@ -87,6 +87,11 @@ function describePhase(
     case "committing":
       return {
         label: t(language, "Preparing final answer", "최종 답변 준비 중"),
+        ...(typeof elapsedSeconds === "number" ? { detail: formatSeconds(elapsedSeconds, language) } : {}),
+      };
+    case "compacting":
+      return {
+        label: t(language, "Compacting memory", "메모리 압축 중"),
         ...(typeof elapsedSeconds === "number" ? { detail: formatSeconds(elapsedSeconds, language) } : {}),
       };
     case "aborted":

@@ -1,4 +1,6 @@
 /**
+ * Memory continuity guard.
+ *
  * Recalled memory is reference material, not active conversation state.
  * This beforeCommit gate retries only when background memory is clearly
  * promoted into a new user-facing pending decision/question.
@@ -12,8 +14,8 @@ const MAX_RETRIES = 1;
 function isEnabled(): boolean {
   const raw = process.env.CORE_AGENT_MEMORY_CONTINUITY_GUARD;
   if (raw === undefined || raw === null) return true;
-  const value = raw.trim().toLowerCase();
-  return value === "" || value === "on" || value === "true" || value === "1";
+  const v = raw.trim().toLowerCase();
+  return v === "" || v === "on" || v === "true" || v === "1";
 }
 
 export function makeMemoryContinuityGuardHook(): RegisteredHook<"beforeCommit"> {

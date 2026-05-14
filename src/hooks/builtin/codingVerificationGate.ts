@@ -48,6 +48,77 @@ function isCodingMode(discipline: Discipline | null): boolean {
   return discipline?.lastClassifiedMode === "coding";
 }
 
+function hasCurrentTurnDiffEvidence(evidence: ReturnType<typeof transcriptEvidenceForTurn>): boolean {
+  return evidence.some(
+    (item) =>
+      item.tool === "GitDiff" &&
+      item.isError !== true &&
+      (item.status === undefined || item.status === "ok" || item.status === "success"),
+  );
+}
+
+const CODE_MUTATION_TOOLS = new Set(["FileWrite", "FileEdit"]);
+
+type ToolResultEntry = Extract<TranscriptEntry, { kind: "tool_result" }>;
+
+interface ToolResultRecord {
+  entry: ToolResultEntry;
+  index: number;
+}
+
+function currentTurnResultMap(
+  transcript: ReadonlyArray<TranscriptEntry>,
+  turnId: string,
+): Map<string, ToolResultRecord> {
+  const results = new Map<string, ToolResultRecord>();
+  for (const [index, entry] of transcript.entries()) {
+    if (entry.kind === "tool_result" && entry.turnId === turnId) {
+      results.set(entry.toolUseId, { entry, index });
+    }
+  }
+  return results;
+}
+
+function latestCodeMutationIndex(
+  transcript: ReadonlyArray<TranscriptEntry>,
+  turnId: string,
+): number | null {
+  const results = currentTurnResultMap(transcript, turnId);
+  let latest: number | null = null;
+  for (const [index, entry] of transcript.entries()) {
+    if (entry.kind !== "tool_call" || entry.turnId !== turnId) continue;
+    if (!CODE_MUTATION_TOOLS.has(entry.name)) continue;
+    const result = results.get(entry.toolUseId);
+    const mutationIndex = result?.index ?? index;
+    latest = latest === null ? mutationIndex : Math.max(latest, mutationIndex);
+  }
+  return latest;
+}
+
+function transcriptEvidenceForTurnAfter(
+  transcript: ReadonlyArray<TranscriptEntry>,
+  turnId: string,
+  afterIndex: number,
+): ReturnType<typeof transcriptEvidenceForTurn> {
+  const results = currentTurnResultMap(transcript, turnId);
+  const out: ReturnType<typeof transcriptEvidenceForTurn> = [];
+  for (const [index, entry] of transcript.entries()) {
+    if (entry.kind !== "tool_call" || entry.turnId !== turnId) continue;
+    if (index <= afterIndex) continue;
+    const result = results.get(entry.toolUseId);
+    if (!result || result.index <= afterIndex) continue;
+    out.push({
+      tool: entry.name,
+      input: entry.input,
+      status: result.entry.status,
+      output: result.entry.output,
+      isError: result.entry.isError,
+      metadata: result.entry.metadata,
+    });
+  }
+  return out;
+}
+
 export function makeCodingVerificationGateHook(
   opts: CodingVerificationGateOptions = {},
 ): RegisteredHook<"beforeCommit"> {
@@ -65,14 +136,18 @@ export function makeCodingVerificationGateHook(
       if (explicitlyUnverified(assistantText)) return { action: "continue" };
 
       const transcript = await readTranscript(opts, ctx);
-      const evidence = transcriptEvidenceForTurn(transcript, ctx.turnId);
+      const latestMutationIndex = latestCodeMutationIndex(transcript, ctx.turnId);
+      const evidence = latestMutationIndex === null
+        ? transcriptEvidenceForTurn(transcript, ctx.turnId)
+        : transcriptEvidenceForTurnAfter(transcript, ctx.turnId, latestMutationIndex);
       const classified = classifyEvidence(evidence);
-      if (classified.verification) {
+      const hasDiff = hasCurrentTurnDiffEvidence(evidence);
+      if (classified.verification && hasDiff) {
         ctx.emit({
           type: "rule_check",
           ruleId: "coding-verification-gate",
           verdict: "ok",
-          detail: `coding changes verified by ${classified.tools.join(", ")}`,
+          detail: `coding changes verified by ${classified.tools.join(", ")} with GitDiff evidence`,
         });
         return { action: "continue" };
       }
@@ -81,13 +156,15 @@ export function makeCodingVerificationGateHook(
         type: "rule_check",
         ruleId: "coding-verification-gate",
         verdict: "violation",
-        detail: "coding files changed without current-turn verification evidence",
+        detail: latestMutationIndex === null
+          ? "coding files changed without current-turn verification evidence"
+          : "coding files changed without verification evidence after the last code edit",
       });
       return {
         action: "block",
         reason: [
-          "[RETRY:CODING_VERIFICATION] Code files changed in this turn, but no current-turn verification evidence was found.",
-          "Run TestRun with the relevant test/build/lint/typecheck command before claiming completion.",
+          "[RETRY:CODING_VERIFICATION] Code files changed in this turn, but post-edit verification evidence is incomplete.",
+          "After the last code edit, run GitDiff to capture changed-file/diff evidence and TestRun with the relevant test/build/lint/typecheck command before claiming completion.",
           "If verification cannot be run, say that explicitly and report the remaining risk instead of claiming the work is complete.",
         ].join("\n"),
       };

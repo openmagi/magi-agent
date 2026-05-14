@@ -12089,8 +12089,24 @@ function useRouter() {
 function useParams() {
   return { botId: "local" };
 }
-function Link({ href, children, ...props }) {
-  return /* @__PURE__ */ jsxRuntimeExports.jsx("a", { href, ...props, children });
+function isModifiedEvent(event) {
+  return event.metaKey || event.altKey || event.ctrlKey || event.shiftKey;
+}
+function isLocalHref(href) {
+  return href.startsWith("/") && !href.startsWith("//");
+}
+function Link({ href, children, onClick, target, ...props }) {
+  const handleClick = (event) => {
+    onClick?.(event);
+    if (event.defaultPrevented) return;
+    if (target && target !== "_self") return;
+    if (event.button !== 0 || isModifiedEvent(event)) return;
+    if (!isLocalHref(href)) return;
+    event.preventDefault();
+    window.history.pushState({}, "", href);
+    window.dispatchEvent(new PopStateEvent("popstate"));
+  };
+  return /* @__PURE__ */ jsxRuntimeExports.jsx("a", { href, target, onClick: handleClick, ...props, children });
 }
 var reactDomExports = requireReactDom();
 function useCombinedRefs() {
@@ -15958,6 +15974,9 @@ function compareChatMessages(a, b) {
   if (roleDiff !== 0) return roleDiff;
   return (a.serverId ?? a.id ?? a.content).localeCompare(b.serverId ?? b.id ?? b.content);
 }
+function hasNonTextTurnWork(state) {
+  return !!state.thinkingText || (state.activeTools?.length ?? 0) > 0 || !!state.browserFrame || !!state.documentDraft || (state.subagents?.length ?? 0) > 0 || (state.missions?.length ?? 0) > 0 || !!state.taskBoard?.tasks.length || (state.inspectedSources?.length ?? 0) > 0 || !!state.citationGate || (state.pendingInjectionCount ?? 0) > 0;
+}
 const DEFAULT_CHANNEL_STATE = {
   streaming: false,
   streamingText: "",
@@ -15967,11 +15986,19 @@ const DEFAULT_CHANNEL_STATE = {
   thinkingStartedAt: null,
   turnPhase: null,
   heartbeatElapsedMs: null,
+  currentGoal: null,
   pendingInjectionCount: 0,
   activeTools: [],
   browserFrame: null,
+  documentDraft: null,
   subagents: [],
   taskBoard: null,
+  missions: [],
+  activeGoalMissionId: null,
+  pendingGoalMissionTitle: null,
+  inspectedSources: [],
+  citationGate: null,
+  runtimeTraces: [],
   fileProcessing: false
 };
 const RESET_LIVE_RUN_STATE = {
@@ -15982,11 +16009,17 @@ const RESET_LIVE_RUN_STATE = {
   thinkingStartedAt: null,
   turnPhase: null,
   heartbeatElapsedMs: null,
+  currentGoal: null,
   pendingInjectionCount: 0,
   activeTools: [],
   browserFrame: null,
+  documentDraft: null,
   subagents: [],
   taskBoard: null,
+  pendingGoalMissionTitle: null,
+  inspectedSources: [],
+  citationGate: null,
+  runtimeTraces: [],
   fileProcessing: false,
   reconnecting: false
 };
@@ -16015,11 +16048,59 @@ function activeBackgroundSubagents(channelState) {
     (subagent) => subagent.status === "running" || subagent.status === "waiting"
   );
 }
-function streamErrorFallback(language) {
-  return language === "ko" ? "⚠️ 응답 생성 중 오류가 발생했습니다. 다시 시도해 주세요." : "⚠️ Something went wrong while generating the response. Please try again.";
+function compactErrorDetail(message) {
+  const compact = message.replace(/\s+/g, " ").trim();
+  return compact.length > 160 ? `${compact.slice(0, 157)}...` : compact;
+}
+function streamErrorFallback(state) {
+  const language = state.responseLanguage;
+  const errorDetail = state.error ? compactErrorDetail(state.error) : null;
+  if (language === "ko") {
+    if (errorDetail) {
+      return `⚠️ 응답 생성이 중단되었습니다: ${errorDetail}. 다시 시도해 주세요.`;
+    }
+    if (state.turnPhase === "aborted") {
+      return "⚠️ 응답 생성이 중단되었습니다. 최종 답변 텍스트가 도착하지 않았습니다. 다시 시도해 주세요.";
+    }
+    if (hasNonTextTurnWork(state)) {
+      return "⚠️ 작업은 진행됐지만 최종 답변 텍스트가 도착하지 않았습니다. 다시 시도해 주세요.";
+    }
+    return "⚠️ 빈 응답이 도착했습니다. 다시 시도해 주세요.";
+  }
+  if (errorDetail) {
+    return `⚠️ Response generation stopped: ${errorDetail}. Please try again.`;
+  }
+  if (state.turnPhase === "aborted") {
+    return "⚠️ Response generation stopped before final answer text arrived. Please try again.";
+  }
+  if (hasNonTextTurnWork(state)) {
+    return "⚠️ Work started, but no final answer text arrived. Please try again.";
+  }
+  return "⚠️ The response ended without visible answer text. Please try again.";
+}
+function finalVisibleStreamContent(state, content2) {
+  if (!state.error && state.turnPhase !== "aborted") return content2;
+  const suffix = streamErrorFallback({
+    ...state
+  });
+  return `${content2.trimEnd()}
+
+${suffix}`;
+}
+function isTerminalMission$1(mission) {
+  return mission.status === "completed" || mission.status === "failed" || mission.status === "cancelled";
+}
+function durableMissionState(current) {
+  const missions = (current.missions ?? []).filter((mission) => !isTerminalMission$1(mission));
+  const currentActiveGoalId = current.activeGoalMissionId && missions.some((mission) => mission.id === current.activeGoalMissionId && mission.kind === "goal") ? current.activeGoalMissionId : null;
+  const fallbackActiveGoalId = currentActiveGoalId ?? missions.find((mission) => mission.kind === "goal")?.id ?? null;
+  return { missions, activeGoalMissionId: fallbackActiveGoalId };
 }
 function terminalLiveRunReset(current, partial) {
   const reset = { ...RESET_LIVE_RUN_STATE };
+  if (partial.missions === void 0) {
+    Object.assign(reset, durableMissionState(current));
+  }
   if (partial.subagents === void 0) {
     const detachedSubagents = activeBackgroundSubagents(current);
     if (detachedSubagents.length > 0) {
@@ -16038,7 +16119,7 @@ function shouldClearReconnecting(current, partial) {
   return isLiveStreamProgress(partial);
 }
 function isLiveStreamProgress(partial) {
-  return partial.hasTextContent === true || !!partial.streamingText || !!partial.thinkingText || (partial.activeTools?.length ?? 0) > 0 || !!partial.browserFrame || (partial.subagents?.length ?? 0) > 0 || !!partial.taskBoard?.tasks.length || partial.heartbeatElapsedMs !== void 0 || (partial.pendingInjectionCount ?? 0) > 0 || partial.turnPhase !== void 0 && partial.turnPhase !== null && partial.turnPhase !== "pending";
+  return partial.hasTextContent === true || !!partial.streamingText || !!partial.thinkingText || (partial.activeTools?.length ?? 0) > 0 || !!partial.browserFrame || (partial.subagents?.length ?? 0) > 0 || (partial.missions?.length ?? 0) > 0 || !!partial.taskBoard?.tasks.length || (partial.inspectedSources?.length ?? 0) > 0 || !!partial.citationGate || (partial.runtimeTraces?.length ?? 0) > 0 || partial.heartbeatElapsedMs !== void 0 || (partial.pendingInjectionCount ?? 0) > 0 || partial.turnPhase !== void 0 && partial.turnPhase !== null && partial.turnPhase !== "pending";
 }
 function getResetCounter(botId, channel) {
   try {
@@ -16123,6 +16204,25 @@ function upsertControlRequestList(requests, request) {
     ...requests.filter((item) => item.requestId !== request.requestId),
     request
   ]);
+}
+function appendRuntimeTrace(current, trace) {
+  return [...current ?? [], trace].slice(-12);
+}
+function runtimeTraceFromControlEvent(event) {
+  return {
+    turnId: event.turnId,
+    phase: event.phase,
+    severity: event.severity,
+    title: event.title,
+    ...event.detail ? { detail: event.detail } : {},
+    ...event.reasonCode ? { reasonCode: event.reasonCode } : {},
+    ...event.ruleId ? { ruleId: event.ruleId } : {},
+    ...typeof event.attempt === "number" ? { attempt: event.attempt } : {},
+    ...typeof event.maxAttempts === "number" ? { maxAttempts: event.maxAttempts } : {},
+    ...typeof event.retryable === "boolean" ? { retryable: event.retryable } : {},
+    ...event.requiredAction ? { requiredAction: event.requiredAction } : {},
+    receivedAt: event.receivedAt ?? Date.now()
+  };
 }
 function queuedPriorityRank(message) {
   if (message.priority === "now") return 0;
@@ -16235,7 +16335,7 @@ const useChatStore = create$1((set, get) => ({
       return {
         channelStates: {
           ...s.channelStates,
-          [ch]: { ...DEFAULT_CHANNEL_STATE }
+          [ch]: { ...DEFAULT_CHANNEL_STATE, ...durableMissionState(state) }
         },
         queuedMessages: nextQueued
       };
@@ -16259,10 +16359,11 @@ const useChatStore = create$1((set, get) => ({
     const activities = state.activeTools ?? [];
     const taskBoard = state.taskBoard ?? null;
     const detachedSubagents = activeBackgroundSubagents(state);
+    const missions = durableMissionState(state);
     {
       const thinkingDuration = state.thinkingStartedAt ? Math.round((Date.now() - state.thinkingStartedAt) / 1e3) : void 0;
       const hadStreamActivity = state.streaming || hasThinking || activities.length > 0;
-      const finalContent = hasVisibleText ? content2 || "" : hadStreamActivity ? streamErrorFallback(state.responseLanguage) : "";
+      const finalContent = hasVisibleText ? finalVisibleStreamContent(state, content2 || "") : hadStreamActivity ? streamErrorFallback(state) : "";
       if (finalContent) {
         get().addMessage(channel, {
           id: msgId ?? `assistant-${Date.now()}`,
@@ -16279,7 +16380,7 @@ const useChatStore = create$1((set, get) => ({
     set((s) => ({
       channelStates: {
         ...s.channelStates,
-        [channel]: detachedSubagents.length > 0 ? { ...DEFAULT_CHANNEL_STATE, subagents: detachedSubagents } : { ...DEFAULT_CHANNEL_STATE }
+        [channel]: detachedSubagents.length > 0 ? { ...DEFAULT_CHANNEL_STATE, ...missions, subagents: detachedSubagents } : { ...DEFAULT_CHANNEL_STATE, ...missions }
       }
     }));
   },
@@ -16340,6 +16441,10 @@ const useChatStore = create$1((set, get) => ({
     const srvMsgs = serverMessages[channel] ?? [];
     return srvMsgs.some((m) => m.role === "assistant" && (m.timestamp ?? 0) > lastRead);
   },
+  startSelectionMode: (channel) => set({
+    selectionMode: true,
+    selectedMessages: { [channel]: /* @__PURE__ */ new Set() }
+  }),
   enterSelectionMode: (channel, msgId) => set({
     selectionMode: true,
     selectedMessages: { [channel]: /* @__PURE__ */ new Set([msgId]) }
@@ -16472,6 +16577,20 @@ const useChatStore = create$1((set, get) => ({
     }
   })),
   applyControlEvent: (channel, event) => set((state) => {
+    if (event.type === "runtime_trace") {
+      const currentState = state.channelStates[channel] ?? DEFAULT_CHANNEL_STATE;
+      return {
+        channelStates: {
+          ...state.channelStates,
+          [channel]: mergeChannelState(currentState, {
+            runtimeTraces: appendRuntimeTrace(
+              currentState.runtimeTraces,
+              runtimeTraceFromControlEvent(event)
+            )
+          })
+        }
+      };
+    }
     const current = state.controlRequests[channel] ?? [];
     let next = current;
     if (event.type === "control_request_created") {
@@ -16584,7 +16703,84 @@ function localizeChannel(name2, displayName, locale) {
   return CHANNEL_LABELS[name2]?.[locale] ?? displayName ?? name2;
 }
 const DEFAULT_CHANNELS = Object.keys(CHANNEL_LABELS);
+const MODE_LABELS = {
+  read_only: "Read-only memory",
+  incognito: "No memory"
+};
+function normalizeText(value) {
+  return (value ?? "").toLowerCase().replace(/[_-]+/g, " ").replace(/\s+/g, " ").trim();
+}
+function detectMemoryModeText(value) {
+  const text2 = normalizeText(value);
+  if (!text2) return null;
+  if (/\b(?:no memory|memory off|memory disabled|disabled memory)\b/.test(text2)) {
+    return "incognito";
+  }
+  if (/\b(?:read only memory|readonly memory|memory read only)\b/.test(text2)) {
+    return "read_only";
+  }
+  return null;
+}
+function sanitizeChannelName(value) {
+  return value.toLowerCase().replace(/\s+/g, "-").replace(/[^a-z0-9-]/g, "-").replace(/-+/g, "-").replace(/^-|-$/g, "");
+}
+function appendSlugSuffix(slug, suffix) {
+  if (slug === suffix || slug.endsWith(`-${suffix}`) || slug.startsWith(`${suffix}-`)) {
+    return slug;
+  }
+  return `${slug}-${suffix}`;
+}
+function hasLabel(text2, mode) {
+  return detectMemoryModeText(text2) === mode;
+}
+function formatChannelMemoryLabel(mode) {
+  if (!mode || mode === "normal") return null;
+  return MODE_LABELS[mode];
+}
+function getChannelMemoryMode(channel) {
+  if (channel.memory_mode && channel.memory_mode !== "normal") return channel.memory_mode;
+  return detectMemoryModeText(channel.name) ?? detectMemoryModeText(channel.display_name) ?? detectMemoryModeText(channel.category);
+}
+function withChannelMemoryModeSuffix(channel) {
+  const base = channel.display_name || channel.name;
+  const mode = getChannelMemoryMode(channel);
+  if (!mode) return base;
+  if (hasLabel(base, mode)) return base;
+  return `${base} · ${MODE_LABELS[mode]}`;
+}
+function buildMemoryModeChannelIdentity(rawName, mode = "normal") {
+  const trimmed = rawName.trim();
+  const baseSlug = sanitizeChannelName(trimmed) || `ch-${Date.now().toString(36)}`;
+  const inferredMode = mode === "normal" ? detectMemoryModeText(trimmed) ?? "normal" : mode;
+  if (inferredMode === "incognito") {
+    const name2 = appendSlugSuffix(baseSlug, "no-memory");
+    return {
+      name: name2,
+      displayName: hasLabel(trimmed, "incognito") ? trimmed : `${trimmed || name2} · ${MODE_LABELS.incognito}`,
+      memoryMode: "incognito"
+    };
+  }
+  if (inferredMode === "read_only") {
+    const name2 = appendSlugSuffix(baseSlug, "read-only-memory");
+    return {
+      name: name2,
+      displayName: hasLabel(trimmed, "read_only") ? trimmed : `${trimmed || name2} · ${MODE_LABELS.read_only}`,
+      memoryMode: "read_only"
+    };
+  }
+  const normalizedInputSlug = sanitizeChannelName(trimmed);
+  return {
+    name: baseSlug,
+    ...baseSlug !== normalizedInputSlug ? { displayName: trimmed || baseSlug } : {},
+    memoryMode: "normal"
+  };
+}
 const DEFAULT_CATEGORIES = ["General", "Info", "Life", "Finance", "Study", "People", "Tasks"];
+const CHANNEL_MEMORY_MODE_OPTIONS = [
+  { value: "normal", label: "Normal" },
+  { value: "read_only", label: "Read-only" },
+  { value: "incognito", label: "No memory" }
+];
 function rebuildChannelsFromFlat(items) {
   const channels = [];
   let currentCategory = "Other";
@@ -16721,7 +16917,7 @@ function SortableChannel({ id, channel, isActive, isCustom, canDelete, isRenamin
             onPointerDown: (e) => e.stopPropagation()
           }
         ) : /* @__PURE__ */ jsxRuntimeExports.jsxs(jsxRuntimeExports.Fragment, { children: [
-          /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "truncate flex-1", children: channel.display_name || channel.name }),
+          /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "truncate flex-1", children: withChannelMemoryModeSuffix(channel) }),
           /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center gap-0.5 shrink-0", children: [
             isCustom && /* @__PURE__ */ jsxRuntimeExports.jsx(PencilIcon, { onClick: () => onStartRename(id, channel.display_name || channel.name) }),
             canDelete && /* @__PURE__ */ jsxRuntimeExports.jsx(TrashIcon, { onClick: () => onDelete(channel.name) })
@@ -16759,6 +16955,7 @@ function ChatSidebar({
   const router = useRouter();
   const [showNewChannel, setShowNewChannel] = reactExports.useState(false);
   const [newChannelName, setNewChannelName] = reactExports.useState("");
+  const [newChannelMemoryMode, setNewChannelMemoryMode] = reactExports.useState("normal");
   const [showNewCategory, setShowNewCategory] = reactExports.useState(false);
   const [newCategoryName, setNewCategoryName] = reactExports.useState("");
   const [showAddMenu, setShowAddMenu] = reactExports.useState(false);
@@ -16903,10 +17100,11 @@ function ChatSidebar({
   const handleCreateChannel = reactExports.useCallback(() => {
     const name2 = newChannelName.trim();
     if (!name2) return;
-    onCreateChannel(name2);
+    onCreateChannel(name2, newChannelMemoryMode);
     setNewChannelName("");
+    setNewChannelMemoryMode("normal");
     setShowNewChannel(false);
-  }, [newChannelName, onCreateChannel]);
+  }, [newChannelMemoryMode, newChannelName, onCreateChannel]);
   const handleCreateCategory = reactExports.useCallback(() => {
     const name2 = newCategoryName.trim();
     if (!name2) return;
@@ -17055,6 +17253,13 @@ function ChatSidebar({
         /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "px-2 mb-1", children: /* @__PURE__ */ jsxRuntimeExports.jsx("h3", { className: "text-[10px] font-semibold text-slate-500 uppercase tracking-wider", children: localizeCategory(title, locale) }) }),
         /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "space-y-0.5", children: chs.map((ch) => {
           const unread = activeChannel !== ch.name && useChatStore.getState().hasUnread(ch.name);
+          const localizedChannel = {
+            ...ch,
+            display_name: localizeChannel(ch.name, ch.display_name, locale)
+          };
+          const memoryModeLabel = formatChannelMemoryLabel(
+            getChannelMemoryMode(localizedChannel)
+          );
           return /* @__PURE__ */ jsxRuntimeExports.jsxs(
             "button",
             {
@@ -17062,10 +17267,11 @@ function ChatSidebar({
               onContextMenu: (e) => handleContextMenu(e, ch.name),
               className: `w-full text-left px-2 py-1.5 rounded-lg text-sm transition-colors cursor-pointer flex items-center gap-1.5 ${activeChannel === ch.name ? "bg-primary/10 text-primary-light" : unread ? "text-foreground font-semibold hover:bg-black/5" : "text-secondary hover:text-foreground hover:bg-black/5"}`,
               children: [
-                /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "truncate", children: [
+                /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "min-w-0 flex-1 truncate", children: [
                   "# ",
-                  localizeChannel(ch.name, ch.display_name, locale)
+                  withChannelMemoryModeSuffix(localizedChannel)
                 ] }),
+                memoryModeLabel && /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "shrink-0 rounded-md border border-black/[0.08] bg-black/[0.04] px-1.5 py-0.5 text-[10px] font-medium text-secondary/70", children: memoryModeLabel }),
                 unread && /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "ml-auto w-2 h-2 rounded-full bg-primary shrink-0" })
               ]
             },
@@ -17211,9 +17417,21 @@ function ChatSidebar({
           autoFocus: true
         }
       ),
+      /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "mb-4 grid grid-cols-3 gap-1 rounded-xl bg-black/[0.04] p-1", children: CHANNEL_MEMORY_MODE_OPTIONS.map((option) => /* @__PURE__ */ jsxRuntimeExports.jsx(
+        "button",
+        {
+          type: "button",
+          onClick: () => setNewChannelMemoryMode(option.value),
+          "aria-pressed": newChannelMemoryMode === option.value,
+          className: `min-h-10 rounded-lg px-2 py-1.5 text-xs font-medium transition-colors ${newChannelMemoryMode === option.value ? "bg-white text-foreground shadow-sm" : "text-secondary hover:text-foreground"}`,
+          children: option.label
+        },
+        option.value
+      )) }),
       /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex gap-3", children: [
         /* @__PURE__ */ jsxRuntimeExports.jsx("button", { onClick: () => {
           setNewChannelName("");
+          setNewChannelMemoryMode("normal");
           setShowNewChannel(false);
         }, className: "flex-1 py-2.5 rounded-xl border border-black/8 text-sm text-secondary hover:bg-black/5 transition-colors cursor-pointer", children: "Cancel" }),
         /* @__PURE__ */ jsxRuntimeExports.jsx("button", { onClick: handleCreateChannel, className: "flex-1 py-2.5 rounded-xl bg-primary text-sm text-white font-medium hover:bg-primary/80 transition-colors cursor-pointer", children: "Create" })
@@ -29998,11 +30216,11 @@ function plural(count, singular, pluralText) {
 function secondsBetween(startedAt, now) {
   return Math.max(0, Math.round((now - startedAt) / 1e3));
 }
-function isKorean$6(language) {
+function isKorean$7(language) {
   return language === "ko";
 }
-function t$5(language, en, ko) {
-  return isKorean$6(language) ? ko : en;
+function t$6(language, en, ko) {
+  return isKorean$7(language) ? ko : en;
 }
 function thinkingDurationLabel(seconds, language, completed) {
   if (language === "ko") return `${seconds}초 동안 작업`;
@@ -30011,36 +30229,41 @@ function thinkingDurationLabel(seconds, language, completed) {
 }
 function formatSeconds(seconds, language) {
   const rounded = Math.max(0, Math.round(seconds));
-  return isKorean$6(language) ? `${rounded}초` : `${rounded}s`;
+  return isKorean$7(language) ? `${rounded}초` : `${rounded}s`;
 }
 function describePhase(phase, language, elapsedSeconds) {
   switch (phase) {
     case "pending":
-      return { label: t$5(language, "Preparing turn", "턴 준비 중") };
+      return { label: t$6(language, "Preparing turn", "턴 준비 중") };
     case "planning":
       return {
-        label: t$5(language, "Planning next steps", "다음 단계 계획 중"),
+        label: t$6(language, "Planning next steps", "다음 단계 계획 중"),
         ...typeof elapsedSeconds === "number" ? { detail: formatSeconds(elapsedSeconds, language) } : {}
       };
     case "executing":
       return {
-        label: t$5(language, "Running current step", "현재 단계 실행 중"),
+        label: t$6(language, "Running current step", "현재 단계 실행 중"),
         ...typeof elapsedSeconds === "number" ? { detail: formatSeconds(elapsedSeconds, language) } : {}
       };
     case "verifying":
       return {
-        label: t$5(language, "Verifying results", "결과 검증 중"),
+        label: t$6(language, "Verifying results", "결과 검증 중"),
         ...typeof elapsedSeconds === "number" ? { detail: formatSeconds(elapsedSeconds, language) } : {}
       };
     case "committing":
       return {
-        label: t$5(language, "Preparing final answer", "최종 답변 준비 중"),
+        label: t$6(language, "Preparing final answer", "최종 답변 준비 중"),
+        ...typeof elapsedSeconds === "number" ? { detail: formatSeconds(elapsedSeconds, language) } : {}
+      };
+    case "compacting":
+      return {
+        label: t$6(language, "Compacting memory", "메모리 압축 중"),
         ...typeof elapsedSeconds === "number" ? { detail: formatSeconds(elapsedSeconds, language) } : {}
       };
     case "aborted":
-      return { label: t$5(language, "Stopping current turn", "현재 턴 중단 중") };
+      return { label: t$6(language, "Stopping current turn", "현재 턴 중단 중") };
     case "committed":
-      return { label: t$5(language, "Finalizing response", "답변 마무리 중") };
+      return { label: t$6(language, "Finalizing response", "답변 마무리 중") };
     default:
       return null;
   }
@@ -30068,15 +30291,15 @@ function summarizeTaskBoard(taskBoard, live, language) {
   if (!live) {
     return {
       id: "task-board",
-      label: t$5(language, "Updated task board", "작업 목록 업데이트"),
-      detail: isKorean$6(language) ? `${completed}/${total}개 완료` : `${completed}/${total} complete`,
+      label: t$6(language, "Updated task board", "작업 목록 업데이트"),
+      detail: isKorean$7(language) ? `${completed}/${total}개 완료` : `${completed}/${total} complete`,
       status: "done"
     };
   }
   return {
     id: "task-board",
-    label: active > 0 ? isKorean$6(language) ? `${active}개 작업 진행 중` : `Working on ${active} ${plural(active, "task", "tasks")}` : t$5(language, "Updated task board", "작업 목록 업데이트"),
-    detail: isKorean$6(language) ? `${completed}/${total}개 완료` : `${completed}/${total} complete`,
+    label: active > 0 ? isKorean$7(language) ? `${active}개 작업 진행 중` : `Working on ${active} ${plural(active, "task", "tasks")}` : t$6(language, "Updated task board", "작업 목록 업데이트"),
+    detail: isKorean$7(language) ? `${completed}/${total}개 완료` : `${completed}/${total} complete`,
     status: active > 0 ? "running" : "done"
   };
 }
@@ -30094,7 +30317,7 @@ function groupCompletedActivities(activities, language) {
   if (counts.command > 0) {
     rows.push({
       id: "completed-command",
-      label: isKorean$6(language) ? `${counts.command}개 명령 실행` : `Ran ${counts.command} ${plural(counts.command, "command", "commands")}`,
+      label: isKorean$7(language) ? `${counts.command}개 명령 실행` : `Ran ${counts.command} ${plural(counts.command, "command", "commands")}`,
       status: "done",
       actionCount: counts.command
     });
@@ -30102,7 +30325,7 @@ function groupCompletedActivities(activities, language) {
   if (counts.read > 0) {
     rows.push({
       id: "completed-read",
-      label: isKorean$6(language) ? `${counts.read}개 파일 읽음` : `Read ${counts.read} ${plural(counts.read, "file", "files")}`,
+      label: isKorean$7(language) ? `${counts.read}개 파일 읽음` : `Read ${counts.read} ${plural(counts.read, "file", "files")}`,
       status: "done",
       actionCount: counts.read
     });
@@ -30110,7 +30333,7 @@ function groupCompletedActivities(activities, language) {
   if (counts.knowledge > 0) {
     rows.push({
       id: "completed-knowledge",
-      label: isKorean$6(language) ? `지식 ${counts.knowledge}회 사용` : `Used knowledge ${counts.knowledge} ${plural(counts.knowledge, "time", "times")}`,
+      label: isKorean$7(language) ? `지식 ${counts.knowledge}회 사용` : `Used knowledge ${counts.knowledge} ${plural(counts.knowledge, "time", "times")}`,
       status: "done",
       actionCount: counts.knowledge
     });
@@ -30118,7 +30341,7 @@ function groupCompletedActivities(activities, language) {
   if (counts.other > 0) {
     rows.push({
       id: "completed-other",
-      label: isKorean$6(language) ? `${counts.other}개 작업 완료` : `Completed ${counts.other} ${plural(counts.other, "action", "actions")}`,
+      label: isKorean$7(language) ? `${counts.other}개 작업 완료` : `Completed ${counts.other} ${plural(counts.other, "action", "actions")}`,
       status: "done",
       actionCount: counts.other
     });
@@ -30133,7 +30356,7 @@ function deriveAgentActivityItems(input) {
   if (input.fileProcessing) {
     rows.push({
       id: "file-processing",
-      label: t$5(language, "Processing attachments", "첨부파일 처리 중"),
+      label: t$6(language, "Processing attachments", "첨부파일 처리 중"),
       status: "running"
     });
   }
@@ -30157,7 +30380,7 @@ function deriveAgentActivityItems(input) {
   } else if (!input.live && (input.thinkingDuration || input.thinkingContent)) {
     rows.push({
       id: "thought",
-      label: input.thinkingDuration ? thinkingDurationLabel(input.thinkingDuration, language, true) : t$5(language, "Work", "작업"),
+      label: input.thinkingDuration ? thinkingDurationLabel(input.thinkingDuration, language, true) : t$6(language, "Work", "작업"),
       status: "done",
       ...input.thinkingContent ? { inputPreview: input.thinkingContent.slice(-500) } : {}
     });
@@ -30165,14 +30388,14 @@ function deriveAgentActivityItems(input) {
   if (input.live && typeof input.pendingInjectionCount === "number" && input.pendingInjectionCount > 0) {
     rows.push({
       id: "pending-injections",
-      label: input.pendingInjectionCount === 1 ? t$5(language, "1 follow-up queued", "후속 메시지 1개 대기") : isKorean$6(language) ? `후속 메시지 ${input.pendingInjectionCount}개 대기` : `${input.pendingInjectionCount} follow-ups queued`,
+      label: input.pendingInjectionCount === 1 ? t$6(language, "1 follow-up queued", "후속 메시지 1개 대기") : isKorean$7(language) ? `후속 메시지 ${input.pendingInjectionCount}개 대기` : `${input.pendingInjectionCount} follow-ups queued`,
       status: "running"
     });
   }
   if (input.live && typeof input.heartbeatElapsedMs === "number" && input.heartbeatElapsedMs > 0 && !rows.some((row) => row.id === "phase-executing")) {
     rows.push({
       id: "heartbeat",
-      label: t$5(language, "Still working on current step", "현재 단계 계속 진행 중"),
+      label: t$6(language, "Still working on current step", "현재 단계 계속 진행 중"),
       detail: formatSeconds(input.heartbeatElapsedMs / 1e3, language),
       status: "running"
     });
@@ -30189,7 +30412,7 @@ function deriveAgentActivityItems(input) {
     if (status === "running") {
       explicitRows.push({
         id: activity.id,
-        label: isKorean$6(language) ? `${activity.label} 실행 중` : `Running ${activity.label}`,
+        label: isKorean$7(language) ? `${activity.label} 실행 중` : `Running ${activity.label}`,
         status: "running",
         durationMs: activity.durationMs,
         inputPreview: activity.inputPreview
@@ -30197,7 +30420,7 @@ function deriveAgentActivityItems(input) {
     } else if (status === "error") {
       explicitRows.push({
         id: activity.id,
-        label: isKorean$6(language) ? `${activity.label} 실패` : `${activity.label} failed`,
+        label: isKorean$7(language) ? `${activity.label} 실패` : `${activity.label} failed`,
         status: "error",
         durationMs: activity.durationMs,
         outputPreview: activity.outputPreview
@@ -30205,7 +30428,7 @@ function deriveAgentActivityItems(input) {
     } else if (status === "denied") {
       explicitRows.push({
         id: activity.id,
-        label: isKorean$6(language) ? `${activity.label} 거부됨` : `${activity.label} denied`,
+        label: isKorean$7(language) ? `${activity.label} 거부됨` : `${activity.label} denied`,
         status: "denied",
         durationMs: activity.durationMs
       });
@@ -30223,9 +30446,9 @@ function getAgentActivitySummary(items, language) {
   const active = items.filter((item) => item.status === "running").length;
   const total = items.reduce((sum, item) => sum + (item.actionCount ?? 1), 0);
   if (active > 0) {
-    return isKorean$6(language) ? `${total}개 작업 진행 중` : `${total} ${plural(total, "action", "actions")} in progress`;
+    return isKorean$7(language) ? `${total}개 작업 진행 중` : `${total} ${plural(total, "action", "actions")} in progress`;
   }
-  return isKorean$6(language) ? `${total}개 작업 실행` : `Ran ${total} ${plural(total, "action", "actions")}`;
+  return isKorean$7(language) ? `${total}개 작업 실행` : `Ran ${total} ${plural(total, "action", "actions")}`;
 }
 function formatActivityDuration(durationMs) {
   if (typeof durationMs !== "number") return null;
@@ -30509,7 +30732,7 @@ function parseMarkers(content2) {
 function isImageMimetype(mimetype) {
   return /^image\/(jpeg|png|gif|webp)$/.test(mimetype);
 }
-function formatFileSize(bytes) {
+function formatFileSize$1(bytes) {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
@@ -31285,7 +31508,11 @@ function useAuthFetch() {
     if (token && !headers.has("Authorization")) {
       headers.set("Authorization", `Bearer ${token}`);
     }
-    return fetch(input, { ...init, headers });
+    const target = typeof input === "string" && input.startsWith("/v1/") ? new URL(
+      input,
+      window.localStorage.getItem("magi.agent.app.agentUrl") || window.location.origin
+    ).toString() : input;
+    return fetch(target, { ...init, headers });
   });
 }
 function inputPreview(value) {
@@ -31353,7 +31580,7 @@ function SocialBrowserRequestCard({
     setBusy("start");
     setError(null);
     try {
-      const res = await authFetch("/api/integrations/social-browser/session", {
+      const res = await authFetch("/v1/app/social-browser/session", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ provider: info.provider })
@@ -31377,7 +31604,7 @@ function SocialBrowserRequestCard({
     setError(null);
     try {
       const res = await authFetch(
-        `/api/integrations/social-browser/session/${sessionId}/command`,
+        `/v1/app/social-browser/session/${sessionId}/command`,
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -31647,13 +31874,36 @@ function ControlRequestCard({ request, onRespond }) {
     ] })
   ] }) });
 }
+const REPLACEMENT_CHAR = "�";
+const SERVER_PATCH_EXTRA_CHARS = 20;
+function shouldPatchAssistantTextFromServer(localContent, serverContent) {
+  if (!serverContent || serverContent === localContent) return false;
+  if (serverContent.length > localContent.length + SERVER_PATCH_EXTRA_CHARS) return true;
+  return localContent.includes(REPLACEMENT_CHAR) && !serverContent.includes(REPLACEMENT_CHAR);
+}
+function shouldPreferServerAssistantMessage(local, server, proximityWindowMs) {
+  if (local.role !== "assistant" || server.role !== "assistant") return false;
+  if (local.serverId) return false;
+  if (!local.id.startsWith("assistant-")) return false;
+  if (!Number.isFinite(local.timestamp) || !Number.isFinite(server.timestamp)) return false;
+  if (Math.abs(server.timestamp - local.timestamp) > proximityWindowMs) return false;
+  return shouldPatchAssistantTextFromServer(local.content, server.content);
+}
+const ROUTE_META_PREAMBLE_RE = /^\[META\s*:\s*(?=[^\]]*\b(?:intent|domain|complexity|route)\s*=)[^\]]*\]\s*\n?/i;
+const SKILLS_PREAMBLE_RE = /^\[SKILLS\s*:[^\]]*\]\s*\n?/i;
+function stripAssistantMetadataPreamble(content2) {
+  if (!content2.startsWith("[META:")) return content2;
+  const withoutMeta = content2.replace(ROUTE_META_PREAMBLE_RE, "");
+  if (withoutMeta === content2) return content2;
+  return withoutMeta.replace(SKILLS_PREAMBLE_RE, "");
+}
 const MAX_SNIPPET_LENGTH = 240;
 const MAX_TARGET_LENGTH = 180;
-function isKorean$5(language) {
+function isKorean$6(language) {
   return language === "ko";
 }
 function localized(language, en, ko) {
-  return isKorean$5(language) ? ko : en;
+  return isKorean$6(language) ? ko : en;
 }
 const INTERNAL_STRUCTURED_KEYS = /* @__PURE__ */ new Set([
   "artifactid",
@@ -31801,8 +32051,38 @@ function stringFromJsonLikeText(value, keys2) {
     if (match?.[1]?.trim()) {
       return match[1].replace(/\\n/g, "\n").replace(/\\"/g, '"').trim();
     }
+    const prefix = stringPrefixFromJsonLikeText(value, key);
+    if (prefix) return prefix;
   }
   return void 0;
+}
+function stringPrefixFromJsonLikeText(value, key) {
+  const pattern = new RegExp(`["']${escapeRegExp(key)}["']\\s*:\\s*(["'])`, "i");
+  const match = value.match(pattern);
+  if (!match || match.index === void 0) return void 0;
+  const quote = match[1];
+  if (!quote) return void 0;
+  let result = "";
+  let escaped = false;
+  const start = match.index + match[0].length;
+  for (let i = start; i < value.length && result.length < MAX_TARGET_LENGTH * 2; i += 1) {
+    const ch = value[i];
+    if (escaped) {
+      if (ch === "n") result += "\n";
+      else if (ch === "r") result += "\r";
+      else if (ch === "t") result += "	";
+      else result += ch;
+      escaped = false;
+      continue;
+    }
+    if (ch === "\\") {
+      escaped = true;
+      continue;
+    }
+    if (ch === quote) break;
+    result += ch;
+  }
+  return result.trim() || void 0;
 }
 function pathFromPreviewText(preview2) {
   const parsed = previewObject(preview2);
@@ -31859,7 +32139,7 @@ function commandPreview(command, outputSnippet, language) {
   if (/\b(pandoc|libreoffice|soffice|wkhtmltopdf|weasyprint|markdown-pdf)\b/.test(lower)) {
     const target = outputPath ? bounded(outputPath, MAX_TARGET_LENGTH) : void 0;
     return {
-      action: isKorean$5(language) ? `${fileKind(outputPath, language)} 생성` : `Creating ${fileKind(outputPath, language)}`,
+      action: isKorean$6(language) ? `${fileKind(outputPath, language)} 생성` : `Creating ${fileKind(outputPath, language)}`,
       ...target ? { target } : {},
       ...outputSnippet ? { snippet: outputSnippet } : {}
     };
@@ -31911,9 +32191,14 @@ function cleanPromptLine(line) {
 function promptSummary(prompt) {
   if (!prompt) return void 0;
   const lines = prompt.split(/\r?\n/).map(cleanPromptLine).filter(Boolean);
-  const title = lines[0];
+  const taskLine = lines.find(
+    (line) => /^(task|request|work order|작업|요청)\s*:/i.test(line)
+  );
+  const goalLine = lines.find((line) => /^(goal|objective|목표)\s*:/i.test(line));
+  const firstLine = lines[0];
+  const title = taskLine ?? (firstLine && /^you are\b/i.test(firstLine) ? goalLine : firstLine);
   if (!title) return void 0;
-  const objective = lines.slice(1).find((line) => /^(goal|objective|목표)\s*:/i.test(line));
+  const objective = goalLine && goalLine !== title ? goalLine : void 0;
   return snippetFrom([title, objective].filter(Boolean).join("\n"));
 }
 function labeledLine(text2, label) {
@@ -32063,7 +32348,7 @@ function structuredValueText(value) {
   }
   return void 0;
 }
-function browserPreview(input) {
+function browserPreview(input, language) {
   const output = previewObject(input.outputPreview) ?? previewObject(input.inputPreview);
   if (!output) return null;
   const action = displayValue(output, ["action", "type"]);
@@ -32072,32 +32357,32 @@ function browserPreview(input) {
   const path2 = displayValue(output, ["path", "filename", "title", "url"]);
   if (status && /error|fail|aborted/i.test(status)) {
     return {
-      action: "Browser step failed",
+      action: localized(language, "Browser step failed", "브라우저 단계 실패"),
       ...path2 ? { target: bounded(path2, MAX_TARGET_LENGTH) } : {},
       ...error ? { snippet: snippetFrom(error) } : {}
     };
   }
   if (action === "create_session" || action === "open_session" || action === "session") {
     return {
-      action: "Opening browser",
-      target: "Starting browser session"
+      action: localized(language, "Opening browser", "브라우저 여는 중"),
+      target: localized(language, "Starting browser session", "브라우저 세션 시작 중")
     };
   }
   if (action === "scrape" || action === "read" || action === "extract") {
     return {
-      action: "Reading page",
+      action: localized(language, "Reading page", "페이지 읽는 중"),
       ...path2 ? { target: bounded(path2, MAX_TARGET_LENGTH) } : {},
       ...error ? { snippet: snippetFrom(error) } : {}
     };
   }
   if (action === "navigate" || action === "goto" || action === "open") {
     return {
-      action: "Opening page",
+      action: localized(language, "Opening page", "페이지 여는 중"),
       ...path2 ? { target: bounded(path2, MAX_TARGET_LENGTH) } : {}
     };
   }
   return {
-    action: "Using browser",
+    action: localized(language, "Using browser", "브라우저 사용 중"),
     ...path2 ? { target: bounded(path2, MAX_TARGET_LENGTH) } : {}
   };
 }
@@ -32185,6 +32470,41 @@ function dateRangePreview(outputPreview) {
         [dayCount ? `${dayCount} days` : void 0, timezone].filter(Boolean).join(" · ")
       )
     } : {}
+  };
+}
+function modelProgressPreview(inputPreview2, outputPreview, language) {
+  const input = previewObject(inputPreview2);
+  const output = outputPreview ? bounded(outputPreview, MAX_SNIPPET_LENGTH) : void 0;
+  const stage = displayValue(input, ["stage"]);
+  const label = displayValue(input, ["label"]);
+  const detail = displayValue(input, ["detail"]);
+  const elapsedMs = displayValue(input, ["elapsedMs"]);
+  const elapsedSeconds = elapsedMs ? Math.max(1, Math.round(Number(elapsedMs) / 1e3)) : null;
+  const elapsed = elapsedSeconds ? isKorean$6(language) ? `${elapsedSeconds}초째 작업 중` : `${elapsedSeconds}s elapsed` : void 0;
+  const isHeartbeat = stage === "heartbeat";
+  const heartbeatLabel = isHeartbeat && label && !/^(still working|계속 작업 중)$/iu.test(label.trim()) ? bounded(label, MAX_TARGET_LENGTH) : void 0;
+  const action = stage === "completed" ? localized(language, "Model step finished", "모델 단계 완료") : isHeartbeat ? heartbeatLabel ?? localized(language, "Still working", "계속 작업 중") : localized(language, "Thinking through next step", "다음 단계 판단 중");
+  const target = isHeartbeat ? elapsed : label && !/thinking through next step/i.test(label) ? bounded(label, MAX_TARGET_LENGTH) : elapsed;
+  const snippet = snippetFrom([detail, output].filter(Boolean).join("\n"));
+  return {
+    action,
+    ...target ? { target } : {},
+    ...snippet ? { snippet } : {}
+  };
+}
+function activityProgressPreview(inputPreview2, _outputPreview, language) {
+  const input = previewObject(inputPreview2);
+  const label = displayValue(input, ["label"]) ?? localized(language, "Working through current step", "작업 진행 중");
+  const target = displayValue(input, ["target"]);
+  const detail = displayValue(input, ["detail"]);
+  const elapsedMs = displayValue(input, ["elapsedMs"]);
+  const elapsedSeconds = elapsedMs ? Math.max(1, Math.round(Number(elapsedMs) / 1e3)) : null;
+  const elapsed = elapsedSeconds ? isKorean$6(language) ? `${elapsedSeconds}초째 작업 중` : `${elapsedSeconds}s elapsed` : void 0;
+  const snippet = snippetFrom([target, detail].filter(Boolean).join("\n"));
+  return {
+    action: bounded(label, MAX_TARGET_LENGTH),
+    ...elapsed ? { target: elapsed } : {},
+    ...snippet ? { snippet } : {}
   };
 }
 function generatedOutputAction(tool) {
@@ -32314,7 +32634,7 @@ function structuredFallbackPreview(label, inputPreview2, outputPreview, language
   }
   if (path2) {
     return {
-      action: isKorean$5(language) ? `${fileKind(path2, language)} 검토` : `Reviewing ${fileKind(path2, language)}`,
+      action: isKorean$6(language) ? `${fileKind(path2, language)} 검토` : `Reviewing ${fileKind(path2, language)}`,
       target: bounded(path2, MAX_TARGET_LENGTH)
     };
   }
@@ -32338,7 +32658,7 @@ function derivePublicToolPreview(input) {
   const outputSnippet = snippetFrom(input.outputPreview);
   if (tool === "fileread" || tool === "read") {
     return {
-      action: isKorean$5(language) ? `${fileKind(targetPath, language)} 검토` : `Reviewing ${fileKind(targetPath, language)}`,
+      action: isKorean$6(language) ? `${fileKind(targetPath, language)} 검토` : `Reviewing ${fileKind(targetPath, language)}`,
       ...targetPath ? { target: bounded(targetPath, MAX_TARGET_LENGTH) } : {},
       ...outputSnippet ? { snippet: outputSnippet } : {}
     };
@@ -32347,7 +32667,7 @@ function derivePublicToolPreview(input) {
     const content2 = stringValue(parsedInput, ["content", "text", "body"]);
     const contentSnippet = snippetFrom(content2);
     return {
-      action: isKorean$5(language) ? `${fileKind(targetPath, language)} 생성` : `Creating ${fileKind(targetPath, language)}`,
+      action: isKorean$6(language) ? `${fileKind(targetPath, language)} 생성` : `Creating ${fileKind(targetPath, language)}`,
       ...targetPath ? { target: bounded(targetPath, MAX_TARGET_LENGTH) } : {},
       ...contentSnippet ? { snippet: contentSnippet } : outputSnippet ? { snippet: outputSnippet } : {}
     };
@@ -32357,7 +32677,7 @@ function derivePublicToolPreview(input) {
     const newText = snippetFrom(stringValue(parsedInput, ["new_string", "newText", "replacement"]));
     const editSnippet = oldText && newText ? snippetFrom(`${localized(language, "Replace", "교체")}: ${oldText} -> ${newText}`) : snippetFrom(firstPreviewText(input));
     return {
-      action: isKorean$5(language) ? `${fileKind(targetPath, language)} 수정` : `Updating ${fileKind(targetPath, language)}`,
+      action: isKorean$6(language) ? `${fileKind(targetPath, language)} 수정` : `Updating ${fileKind(targetPath, language)}`,
       ...targetPath ? { target: bounded(targetPath, MAX_TARGET_LENGTH) } : {},
       ...editSnippet ? { snippet: editSnippet } : {}
     };
@@ -32368,11 +32688,11 @@ function derivePublicToolPreview(input) {
     return commandPreview(command, commandOutputSnippet(input.outputPreview, language), language);
   }
   if (tool === "browser" || tool === "browseruse" || tool === "browserworker") {
-    const preview2 = browserPreview(input);
+    const preview2 = browserPreview(input, language);
     if (preview2) return preview2;
   }
   if (tool === "spawnagent") {
-    const prompt = stringValue(parsedInput, ["prompt", "task", "instructions", "message"]);
+    const prompt = stringValue(parsedInput, ["prompt", "task", "instructions", "message"]) ?? stringFromJsonLikeText(input.inputPreview, ["prompt", "task", "instructions", "message"]);
     const summary = promptSummary(prompt);
     const resultPreview = helperResultPreview(input.outputPreview, language);
     return {
@@ -32392,6 +32712,12 @@ function derivePublicToolPreview(input) {
   if (tool === "daterange") {
     const preview2 = dateRangePreview(input.outputPreview);
     if (preview2) return preview2;
+  }
+  if (tool === "modelprogress") {
+    return modelProgressPreview(input.inputPreview, input.outputPreview, language);
+  }
+  if (tool === "activityprogress") {
+    return activityProgressPreview(input.inputPreview, input.outputPreview, language);
   }
   if (tool === "taskboard" || tool === "taskupdate") {
     const preview2 = taskBoardPreview(input);
@@ -32452,6 +32778,7 @@ const PHASE_LABELS$1 = {
   executing: "Running",
   verifying: "Verifying",
   committing: "Writing answer",
+  compacting: "Compacting",
   committed: "Finalizing",
   aborted: "Interrupted"
 };
@@ -32461,19 +32788,20 @@ const PHASE_LABELS_KO$1 = {
   executing: "실행 중",
   verifying: "검증 중",
   committing: "답변 작성 중",
+  compacting: "컨텍스트 정리 중",
   committed: "마무리 중",
   aborted: "중단됨"
 };
-function isKorean$4(language) {
+function isKorean$5(language) {
   return language === "ko";
 }
-function t$4(language, en, ko) {
-  return isKorean$4(language) ? ko : en;
+function t$5(language, en, ko) {
+  return isKorean$5(language) ? ko : en;
 }
 function formatElapsed(ms, language) {
   if (!ms || ms < 1e3) return void 0;
   const seconds = Math.max(1, Math.round(ms / 1e3));
-  return isKorean$4(language) ? `${seconds}초` : `${seconds}s`;
+  return isKorean$5(language) ? `${seconds}초` : `${seconds}s`;
 }
 function pendingControlRequests$2(requests) {
   return (requests ?? []).filter((request) => request.state === "pending");
@@ -32506,6 +32834,28 @@ function statusFromSubagent(activity) {
       return "info";
   }
 }
+function statusFromMission(mission) {
+  switch (mission.status) {
+    case "running":
+      return "running";
+    case "completed":
+      return "done";
+    case "failed":
+    case "cancelled":
+      return "error";
+    case "queued":
+    case "blocked":
+    case "waiting":
+    case "paused":
+    default:
+      return "waiting";
+  }
+}
+function statusFromRuntimeTrace(trace) {
+  if (trace.severity === "error") return "error";
+  if (trace.severity === "warning") return "waiting";
+  return "info";
+}
 function statusFromTask(task) {
   switch (task.status) {
     case "in_progress":
@@ -32522,15 +32872,46 @@ function statusFromTask(task) {
 function taskMeta(task, language) {
   switch (task.status) {
     case "in_progress":
-      return t$4(language, "running", "진행 중");
+      return t$5(language, "running", "진행 중");
     case "completed":
-      return t$4(language, "done", "완료");
+      return t$5(language, "done", "완료");
     case "cancelled":
-      return t$4(language, "cancelled", "취소됨");
+      return t$5(language, "cancelled", "취소됨");
     case "pending":
     default:
-      return t$4(language, "pending", "대기 중");
+      return t$5(language, "pending", "대기 중");
   }
+}
+function missionMeta(mission) {
+  return `${mission.kind} ${mission.status}`;
+}
+function runtimeTraceLabel(trace, language) {
+  switch (trace.phase) {
+    case "retry_scheduled":
+      return t$5(language, "Retry scheduled", "재시도 예정");
+    case "retry_aborted":
+      return t$5(language, "Retry stopped", "재시도 중단");
+    case "terminal_abort":
+      return t$5(language, "Turn stopped", "턴 중단");
+    case "verifier_blocked":
+    default:
+      return t$5(language, "Runtime verifier blocked completion", "런타임 검증에서 완료 차단");
+  }
+}
+function runtimeTraceMeta(trace) {
+  const attempt = typeof trace.attempt === "number" && typeof trace.maxAttempts === "number" ? `${trace.attempt}/${trace.maxAttempts}` : void 0;
+  return [trace.reasonCode, attempt].filter(Boolean).join(" · ") || void 0;
+}
+function runtimeTraceRow(trace, language) {
+  return {
+    id: `trace:${trace.turnId}:${trace.receivedAt}:${trace.reasonCode ?? trace.phase}`,
+    group: "trace",
+    label: runtimeTraceLabel(trace, language),
+    detail: trace.requiredAction ?? trace.detail ?? trace.title,
+    status: statusFromRuntimeTrace(trace),
+    ...trace.detail && trace.requiredAction ? { snippet: trace.detail } : {},
+    ...runtimeTraceMeta(trace) ? { meta: runtimeTraceMeta(trace) } : {}
+  };
 }
 function subagentName(index2) {
   return SUBAGENT_NAMES$1[index2 % SUBAGENT_NAMES$1.length] ?? `Agent ${index2 + 1}`;
@@ -32542,19 +32923,29 @@ function normalizeRole(role) {
   if (value === "work" || value === "worker") return "worker";
   return value || "subagent";
 }
+function subagentDetail(activity, language) {
+  const detail = activity.detail?.replace(/\s+/g, " ").trim();
+  if (!detail) return void 0;
+  const normalized = detail.toLowerCase();
+  if (/^iteration\s+\d+$/.test(normalized)) return void 0;
+  if (normalized === "allow" || normalized === "allowed" || normalized === "permission") {
+    return activity.status === "waiting" ? t$5(language, "Checking permissions", "권한 확인 중") : t$5(language, "Permission checked", "권한 확인됨");
+  }
+  return detail;
+}
 function controlLabel(request, language) {
-  if (request.kind === "user_question") return t$4(language, "Needs answer", "답변 필요");
-  return t$4(language, "Needs approval", "승인 필요");
+  if (request.kind === "user_question") return t$5(language, "Needs answer", "답변 필요");
+  return t$5(language, "Needs approval", "승인 필요");
 }
 function controlMeta(request, language) {
   switch (request.kind) {
     case "plan_approval":
-      return t$4(language, "plan", "계획");
+      return t$5(language, "plan", "계획");
     case "user_question":
-      return t$4(language, "question", "질문");
+      return t$5(language, "question", "질문");
     case "tool_permission":
     default:
-      return t$4(language, "tool", "도구");
+      return t$5(language, "tool", "도구");
   }
 }
 function normalizeToolLabel(label) {
@@ -32563,7 +32954,59 @@ function normalizeToolLabel(label) {
 function shouldDisplayToolActivity(activity) {
   return !LOW_SIGNAL_TOOL_LABELS.has(normalizeToolLabel(activity.label));
 }
+function patchOperationLabel(file, language) {
+  if (isKorean$5(language)) {
+    if (file.operation === "create") return "생성";
+    if (file.operation === "delete") return "삭제";
+    return "수정";
+  }
+  if (file.operation === "create") return "Create";
+  if (file.operation === "delete") return "Delete";
+  return "Update";
+}
+function patchAction(activity, language) {
+  const preview2 = activity.patchPreview;
+  if (preview2?.dryRun) return t$5(language, "Previewing patch", "패치 미리보기");
+  if (activity.status === "done") return t$5(language, "Applied patch", "패치 적용됨");
+  if (activity.status === "error" || activity.status === "denied") {
+    return t$5(language, "Patch blocked", "패치 차단됨");
+  }
+  return t$5(language, "Reviewing patch", "패치 검토 중");
+}
+function patchTarget(files, language) {
+  if (files.length === 0) return void 0;
+  const visible = files.slice(0, 3).join(", ");
+  const suffix = files.length > 3 ? `, +${files.length - 3}` : "";
+  const noun = files.length === 1 ? t$5(language, "file", "파일") : t$5(language, "files", "파일");
+  return `${files.length} ${noun}: ${visible}${suffix}`;
+}
+function patchSnippet(files, language) {
+  if (files.length === 0) return void 0;
+  const lines = files.slice(0, 4).map(
+    (file) => `${patchOperationLabel(file, language)} ${file.path} (+${file.addedLines}/-${file.removedLines})`
+  );
+  if (files.length > 4) {
+    lines.push(t$5(language, `+${files.length - 4} more files`, `외 ${files.length - 4}개 파일`));
+  }
+  return lines.join("\n");
+}
+function patchPreviewRow(activity, language) {
+  const preview2 = activity.patchPreview;
+  if (!preview2) return null;
+  const duration = activity.durationMs ? formatElapsed(activity.durationMs, language) : void 0;
+  return {
+    id: `tool:${activity.id}`,
+    group: "tool",
+    label: patchAction(activity, language),
+    detail: patchTarget(preview2.changedFiles, language),
+    snippet: patchSnippet(preview2.files, language),
+    status: statusFromTool(activity),
+    ...duration ? { meta: duration } : {}
+  };
+}
 function toolRow(activity, language) {
+  const patchRow = patchPreviewRow(activity, language);
+  if (patchRow) return patchRow;
   const preview2 = derivePublicToolPreview({
     label: activity.label,
     inputPreview: activity.inputPreview,
@@ -32584,27 +33027,41 @@ function toolRow(activity, language) {
 function deriveWorkConsoleRows({
   channelState,
   queuedMessages = [],
-  controlRequests = []
+  controlRequests = [],
+  uiLanguage
 }) {
   const rows = [];
-  const language = channelState.responseLanguage;
-  const phase = channelState.reconnecting ? t$4(language, "Reconnecting", "다시 연결 중") : channelState.error ? t$4(language, "Blocked", "차단됨") : channelState.turnPhase ? isKorean$4(language) ? PHASE_LABELS_KO$1[channelState.turnPhase] : PHASE_LABELS$1[channelState.turnPhase] : channelState.streaming ? t$4(language, "Working", "작업 중") : null;
+  const language = uiLanguage ?? channelState.responseLanguage;
+  const phase = channelState.reconnecting ? t$5(language, "Reconnecting", "다시 연결 중") : channelState.error ? t$5(language, "Blocked", "차단됨") : channelState.turnPhase ? isKorean$5(language) ? PHASE_LABELS_KO$1[channelState.turnPhase] : PHASE_LABELS$1[channelState.turnPhase] : channelState.streaming ? t$5(language, "Working", "작업 중") : null;
   const elapsed = formatElapsed(channelState.heartbeatElapsedMs, language);
   if (phase) {
     rows.push({
       id: "phase",
       group: "status",
       label: phase,
-      detail: elapsed ? t$4(language, `${elapsed} elapsed`, `${elapsed} 경과`) : void 0,
+      detail: elapsed ? t$5(language, `${elapsed} elapsed`, `${elapsed} 경과`) : void 0,
       status: channelState.error || channelState.turnPhase === "aborted" ? "error" : "running"
     });
+  }
+  for (const mission of channelState.missions ?? []) {
+    rows.push({
+      id: `mission:${mission.id}`,
+      group: "mission",
+      label: mission.title,
+      detail: mission.detail,
+      status: statusFromMission(mission),
+      meta: missionMeta(mission)
+    });
+  }
+  for (const trace of (channelState.runtimeTraces ?? []).slice(-6)) {
+    rows.push(runtimeTraceRow(trace, language));
   }
   for (const [index2, subagent] of (channelState.subagents ?? []).entries()) {
     rows.push({
       id: `subagent:${subagent.taskId}`,
       group: "subagent",
       label: subagentName(index2),
-      detail: subagent.detail,
+      detail: subagentDetail(subagent, language),
       status: statusFromSubagent(subagent),
       meta: normalizeRole(subagent.role)
     });
@@ -32627,10 +33084,10 @@ function deriveWorkConsoleRows({
     rows.push({
       id: `queue:${message.id}`,
       group: "queue",
-      label: index2 === 0 ? t$4(language, "Queued follow-up", "대기 중인 후속 메시지") : t$4(language, `Queued follow-up ${index2 + 1}`, `대기 중인 후속 메시지 ${index2 + 1}`),
+      label: index2 === 0 ? t$5(language, "Queued follow-up", "대기 중인 후속 메시지") : t$5(language, `Queued follow-up ${index2 + 1}`, `대기 중인 후속 메시지 ${index2 + 1}`),
       detail: message.content,
       status: message.priority === "now" ? "running" : "waiting",
-      meta: message.priority === "now" ? t$4(language, "steering next", "다음 턴 조정") : t$4(language, "will send later", "나중에 전송")
+      meta: message.priority === "now" ? t$5(language, "steering next", "다음 턴 조정") : t$5(language, "will send later", "나중에 전송")
     });
   }
   for (const request of pendingControlRequests$2(controlRequests)) {
@@ -32648,8 +33105,8 @@ function deriveWorkConsoleRows({
       {
         id: "idle",
         group: "status",
-        label: t$4(language, "Idle", "대기 중"),
-        detail: t$4(language, "Live agent work will appear here.", "실시간 작업 상태가 여기에 표시됩니다."),
+        label: t$5(language, "Idle", "대기 중"),
+        detail: t$5(language, "Live agent work will appear here.", "실시간 작업 상태가 여기에 표시됩니다."),
         status: "info"
       }
     ];
@@ -32662,6 +33119,7 @@ const PHASE_LABELS = {
   executing: "Running",
   verifying: "Verifying",
   committing: "Writing answer",
+  compacting: "Compacting",
   committed: "Writing answer",
   aborted: "Stopping"
 };
@@ -32671,14 +33129,21 @@ const PHASE_LABELS_KO = {
   executing: "실행 중",
   verifying: "검증 중",
   committing: "답변 작성 중",
+  compacting: "압축 중",
   committed: "답변 작성 중",
   aborted: "중단 중"
 };
-function isKorean$3(language) {
+const MAX_DISPLAY_GOAL_CHARS$1 = 140;
+const TERMINAL_MISSION_STATUSES = /* @__PURE__ */ new Set([
+  "completed",
+  "failed",
+  "cancelled"
+]);
+function isKorean$4(language) {
   return language === "ko";
 }
-function t$3(language, en, ko) {
-  return isKorean$3(language) ? ko : en;
+function t$4(language, en, ko) {
+  return isKorean$4(language) ? ko : en;
 }
 function pendingControlRequests$1(requests) {
   return (requests ?? []).filter((request) => request.state === "pending");
@@ -32712,72 +33177,85 @@ function firstReadyPendingTask(taskBoard) {
   ) ?? taskBoard.tasks.find((task) => task.status === "pending") ?? null;
 }
 function controlRequestStatus(request, language) {
-  return request.kind === "user_question" ? t$3(language, "Needs answer", "답변 필요") : t$3(language, "Needs approval", "승인 필요");
+  return request.kind === "user_question" ? t$4(language, "Needs answer", "답변 필요") : t$4(language, "Needs approval", "승인 필요");
 }
 function controlRequestNow(request, language) {
   switch (request.kind) {
     case "plan_approval":
-      return t$3(language, "Waiting for plan approval", "계획 승인 대기 중");
+      return t$4(language, "Waiting for plan approval", "계획 승인 대기 중");
     case "user_question":
-      return t$3(language, "Waiting for your answer", "사용자 답변 대기 중");
+      return t$4(language, "Waiting for your answer", "사용자 답변 대기 중");
     case "tool_permission":
     default:
-      return t$3(language, "Waiting for tool permission", "도구 권한 대기 중");
+      return t$4(language, "Waiting for tool permission", "도구 권한 대기 중");
   }
 }
-function statusFrom(channelState, pendingRequests) {
-  const language = channelState.responseLanguage;
+function statusFrom(channelState, pendingRequests, language) {
   if (pendingRequests[0]) return controlRequestStatus(pendingRequests[0], language);
-  if (channelState.reconnecting) return t$3(language, "Reconnecting", "다시 연결 중");
+  if (channelState.reconnecting) return t$4(language, "Reconnecting", "다시 연결 중");
   if (channelState.turnPhase === "aborted" || channelState.error) {
-    return t$3(language, "Blocked", "차단됨");
+    return t$4(language, "Blocked", "차단됨");
   }
   if ((channelState.activeTools ?? []).some((activity) => activity.status === "error")) {
-    return t$3(language, "Blocked", "차단됨");
+    return t$4(language, "Blocked", "차단됨");
   }
-  if (channelState.turnPhase === "verifying") return t$3(language, "Verifying", "검증 중");
+  if (channelState.turnPhase === "compacting") return t$4(language, "Compacting", "압축 중");
+  if (channelState.turnPhase === "verifying") return t$4(language, "Verifying", "검증 중");
   if (channelState.turnPhase === "committing" || channelState.turnPhase === "committed") {
-    return t$3(language, "Writing answer", "답변 작성 중");
+    return t$4(language, "Writing answer", "답변 작성 중");
   }
   if (channelState.turnPhase === "executing" || activeTools(channelState).length > 0 || activeSubagents(channelState).length > 0 || firstInProgressTask(channelState.taskBoard)) {
-    return t$3(language, "Running", "실행 중");
+    return t$4(language, "Running", "실행 중");
   }
   if (channelState.turnPhase === "pending" || channelState.turnPhase === "planning") {
-    return t$3(language, "Planning", "계획 중");
+    return t$4(language, "Planning", "계획 중");
   }
-  return t$3(language, "Working", "작업 중");
+  return t$4(language, "Working", "작업 중");
 }
-function progressFrom(channelState) {
-  const language = channelState.responseLanguage;
+function progressFrom(channelState, language) {
   const tasks = channelState.taskBoard?.tasks ?? [];
   if (tasks.length > 0) {
     const completed = completedLikeTaskCount(tasks);
-    return isKorean$3(language) ? `${completed}/${tasks.length}개 완료` : `${completed}/${tasks.length} tasks complete`;
+    return isKorean$4(language) ? `${completed}/${tasks.length}개 완료` : `${completed}/${tasks.length} tasks complete`;
   }
   const runningTools = activeTools(channelState);
   const runningSubagents = activeSubagents(channelState);
   if (runningTools.length > 0 && runningSubagents.length > 0) {
     const count = runningTools.length + runningSubagents.length;
-    return isKorean$3(language) ? `${count}개 작업 실행 중` : `${count} actions active`;
+    return isKorean$4(language) ? `${count}개 작업 실행 중` : `${count} actions active`;
   }
   if (runningTools.length > 0) {
-    return isKorean$3(language) ? `${runningTools.length}개 작업 실행 중` : `${runningTools.length} action${runningTools.length === 1 ? "" : "s"} active`;
+    return isKorean$4(language) ? `${runningTools.length}개 작업 실행 중` : `${runningTools.length} action${runningTools.length === 1 ? "" : "s"} active`;
   }
   if (runningSubagents.length > 0) {
-    if (isKorean$3(language)) return `${runningSubagents.length}명 백그라운드 작업 중`;
+    if (isKorean$4(language)) return `${runningSubagents.length}명 백그라운드 작업 중`;
     return `${runningSubagents.length} background agent${runningSubagents.length === 1 ? "" : "s"} active`;
   }
   return void 0;
 }
 function phaseLabel$1(phase, language) {
-  if (!phase) return t$3(language, "Working", "작업 중");
-  return isKorean$3(language) ? PHASE_LABELS_KO[phase] : PHASE_LABELS[phase];
+  if (!phase) return t$4(language, "Working", "작업 중");
+  return isKorean$4(language) ? PHASE_LABELS_KO[phase] : PHASE_LABELS[phase];
 }
-function goalFrom(channelState) {
-  return firstInProgressTask(channelState.taskBoard)?.title ?? t$3(channelState.responseLanguage, "Working on your request", "요청 처리 중");
+function currentGoalFrom(channelState) {
+  const goal = channelState.currentGoal?.replace(/\s+/g, " ").trim();
+  if (!goal) return null;
+  return goal.length <= MAX_DISPLAY_GOAL_CHARS$1 ? goal : null;
 }
-function nowFrom(channelState, pendingRequests) {
-  const language = channelState.responseLanguage;
+function activeGoalMission(channelState) {
+  const missions = channelState.missions ?? [];
+  const active = channelState.activeGoalMissionId ? missions.find((mission) => mission.id === channelState.activeGoalMissionId) : null;
+  if (active && active.kind === "goal" && !TERMINAL_MISSION_STATUSES.has(active.status)) {
+    return active;
+  }
+  return missions.find(
+    (mission) => mission.kind === "goal" && !TERMINAL_MISSION_STATUSES.has(mission.status)
+  ) ?? null;
+}
+function goalFrom(channelState, language) {
+  return firstInProgressTask(channelState.taskBoard)?.title ?? activeGoalMission(channelState)?.title ?? currentGoalFrom(channelState) ?? t$4(language, "Working on your request", "요청 처리 중");
+}
+function nowFrom(channelState, pendingRequests, language) {
   if (pendingRequests[0]) return controlRequestNow(pendingRequests[0], language);
   const task = firstInProgressTask(channelState.taskBoard);
   if (task) return task.title;
@@ -32785,43 +33263,60 @@ function nowFrom(channelState, pendingRequests) {
   if (tool) return tool.label;
   const subagent = activeSubagents(channelState)[0];
   if (subagent) {
-    return subagent.detail || subagent.role || t$3(language, "Background agent", "백그라운드 도우미");
+    return subagent.detail || subagent.role || t$4(language, "Background agent", "백그라운드 도우미");
   }
   return phaseLabel$1(channelState.turnPhase ?? null, language);
 }
-function nextFrom(channelState, queuedMessages, pendingRequests) {
+function nextFrom(channelState, queuedMessages, pendingRequests, language) {
   if (pendingRequests[0]) return pendingRequests[0].prompt;
   if (queuedMessages[0]) return queuedMessages[0].content;
   const task = firstReadyPendingTask(channelState.taskBoard);
   if (task) return task.title;
   if (channelState.turnPhase === "committing" || channelState.turnPhase === "committed") {
-    return t$3(channelState.responseLanguage, "Preparing final answer", "최종 답변 준비 중");
+    return t$4(language, "Preparing final answer", "최종 답변 준비 중");
   }
   return void 0;
 }
 function deriveWorkStateSummary({
   channelState,
   queuedMessages = [],
-  controlRequests = []
+  controlRequests = [],
+  uiLanguage
 }) {
   const pendingRequests = pendingControlRequests$1(controlRequests);
+  const language = uiLanguage ?? channelState.responseLanguage;
   return {
-    title: t$3(channelState.responseLanguage, "Current Work", "현재 작업"),
-    goal: goalFrom(channelState),
-    status: statusFrom(channelState, pendingRequests),
-    progress: progressFrom(channelState),
-    now: nowFrom(channelState, pendingRequests),
-    next: nextFrom(channelState, queuedMessages, pendingRequests)
+    title: t$4(language, "Current Work", "현재 작업"),
+    goal: goalFrom(channelState, language),
+    status: statusFrom(channelState, pendingRequests, language),
+    progress: progressFrom(channelState, language),
+    now: nowFrom(channelState, pendingRequests, language),
+    next: nextFrom(channelState, queuedMessages, pendingRequests, language)
   };
+}
+const OPEN_MISSION_LEDGER_EVENT = "magi:open-mission-ledger";
+function dispatchOpenMissionLedgerEvent(missionId) {
+  if (typeof window === "undefined") return;
+  const trimmed = missionId.trim();
+  if (!trimmed) return;
+  window.dispatchEvent(new CustomEvent(OPEN_MISSION_LEDGER_EVENT, {
+    detail: { missionId: trimmed }
+  }));
 }
 function writingAnswerLabel(language) {
   return language === "ko" ? "답변 작성 중..." : "Writing answer...";
 }
-function isKorean$2(language) {
+function isKorean$3(language) {
   return language === "ko";
 }
-function t$2(language, en, ko) {
-  return isKorean$2(language) ? ko : en;
+function t$3(language, en, ko) {
+  return isKorean$3(language) ? ko : en;
+}
+function waitingCountLabel$1(count, language) {
+  return isKorean$3(language) ? `${count}개 대기` : `${count} waiting`;
+}
+function queuedIndexLabel(index2, language) {
+  return isKorean$3(language) ? `대기 #${index2}` : `Queued #${index2}`;
 }
 function MessageSkeleton() {
   return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "space-y-5 py-2", children: [
@@ -32855,98 +33350,171 @@ function statusDotClass(status) {
 function browserActionLabel$2(action, language) {
   switch (action) {
     case "open":
-      return t$2(language, "Opening page", "페이지 여는 중");
+      return t$3(language, "Opening page", "페이지 여는 중");
     case "click":
     case "mouse_click":
-      return t$2(language, "Clicking", "클릭 중");
+      return t$3(language, "Clicking", "클릭 중");
     case "fill":
     case "keyboard_type":
     case "press":
-      return t$2(language, "Typing", "입력 중");
+      return t$3(language, "Typing", "입력 중");
     case "scroll":
-      return t$2(language, "Scrolling", "스크롤 중");
+      return t$3(language, "Scrolling", "스크롤 중");
     case "screenshot":
     case "snapshot":
-      return t$2(language, "Inspecting page", "페이지 확인 중");
+      return t$3(language, "Inspecting page", "페이지 확인 중");
     case "scrape":
-      return t$2(language, "Reading page", "페이지 읽는 중");
+      return t$3(language, "Reading page", "페이지 읽는 중");
     default:
-      return t$2(language, "Using browser", "브라우저 사용 중");
+      return t$3(language, "Using browser", "브라우저 사용 중");
   }
 }
-function hasOpenTaskState(channelState) {
+function InlineBrowserFramePreview({
+  frame,
+  language
+}) {
+  const imageSrc = `data:${frame.contentType};base64,${frame.imageBase64}`;
+  return /* @__PURE__ */ jsxRuntimeExports.jsxs(
+    "div",
+    {
+      className: "mt-2 overflow-hidden rounded-md border border-black/[0.08] bg-white",
+      "data-chat-inline-browser-frame": "true",
+      children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex min-w-0 items-center justify-between gap-2 border-b border-black/[0.06] px-2.5 py-1.5", children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "shrink-0 text-[10px] font-semibold uppercase tracking-wide text-secondary/45", children: t$3(language, "Live browser", "실시간 브라우저") }),
+          /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "min-w-0 truncate text-[10.5px] text-secondary/55", children: [
+            browserActionLabel$2(frame.action, language),
+            frame.url ? ` · ${frame.url}` : ""
+          ] })
+        ] }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx(
+          "img",
+          {
+            src: imageSrc,
+            alt: t$3(language, "Browser preview", "브라우저 미리보기"),
+            className: "block aspect-video w-full max-h-56 bg-black/[0.03] object-contain"
+          }
+        )
+      ]
+    }
+  );
+}
+function hasOpenTaskState$1(channelState) {
   return !!channelState.taskBoard?.tasks.some(
     (task) => task.status === "pending" || task.status === "in_progress"
   );
 }
+function isTerminalMission(mission) {
+  return mission.status === "completed" || mission.status === "failed" || mission.status === "cancelled";
+}
+function currentRunMission(channelState) {
+  const missions = channelState.missions ?? [];
+  const activeGoal = channelState.activeGoalMissionId ? missions.find((mission) => mission.id === channelState.activeGoalMissionId) : null;
+  if (activeGoal && !isTerminalMission(activeGoal)) return activeGoal;
+  return missions.find((mission) => !isTerminalMission(mission)) ?? null;
+}
 function hasInlineRunStatus(channelState, queuedMessages, pendingRequests) {
   const hasLiveWork = (channelState.activeTools ?? []).some((tool) => tool.status === "running") || (channelState.subagents ?? []).some(
     (subagent) => subagent.status === "running" || subagent.status === "waiting"
-  ) || hasOpenTaskState(channelState) || !!channelState.browserFrame || queuedMessages.length > 0 || pendingRequests.length > 0 || channelState.fileProcessing || channelState.reconnecting;
+  ) || hasOpenTaskState$1(channelState) || (channelState.runtimeTraces ?? []).some((trace) => trace.severity !== "info") || !!channelState.browserFrame || queuedMessages.length > 0 || pendingRequests.length > 0 || channelState.fileProcessing || channelState.reconnecting;
   return hasLiveWork || channelState.streaming && !channelState.streamingText;
 }
-function inlineWorkRows(channelState, queuedMessages, pendingRequests) {
-  const language = channelState.responseLanguage;
+const INLINE_WORK_ROW_LIMIT = 4;
+function isUsefulSubagentRow(row) {
+  return !row.detail || !/^iteration\s+\d+$/i.test(row.detail.trim());
+}
+function inlineWorkRows(channelState, queuedMessages, pendingRequests, language) {
   const rows = deriveWorkConsoleRows({
     channelState,
     queuedMessages,
-    controlRequests: pendingRequests
+    controlRequests: pendingRequests,
+    uiLanguage: language
   });
   const selected = [];
-  selected.push(...rows.filter((row) => row.group === "control" && row.status === "waiting"));
-  if (channelState.browserFrame) {
-    selected.push({
+  const appendRows = (items) => {
+    for (const item of items) {
+      if (selected.length >= INLINE_WORK_ROW_LIMIT) break;
+      selected.push(item);
+    }
+  };
+  appendRows(rows.filter((row) => row.group === "control" && row.status === "waiting"));
+  if (channelState.browserFrame && selected.length < INLINE_WORK_ROW_LIMIT) {
+    appendRows([{
       id: "browser-frame",
       group: "status",
-      label: t$2(language, "Live browser", "실시간 브라우저"),
+      label: t$3(language, "Live browser", "실시간 브라우저"),
       detail: [
         browserActionLabel$2(channelState.browserFrame.action, language),
         channelState.browserFrame.url
       ].filter(Boolean).join(" - "),
       status: "running"
-    });
+    }]);
   }
-  selected.push(...rows.filter((row) => row.group === "tool" && row.status === "running"));
-  selected.push(
-    ...rows.filter(
-      (row) => row.group === "subagent" && (row.status === "running" || row.status === "waiting")
-    )
-  );
-  selected.push(...rows.filter((row) => row.group === "task" && row.status === "running"));
+  const toolRows = rows.filter((row) => row.group === "tool").slice(-INLINE_WORK_ROW_LIMIT);
+  const traceRows = rows.filter((row) => row.group === "trace" && row.status !== "info").slice(-2);
+  const taskRows = rows.filter((row) => row.group === "task" && (row.status === "running" || row.status === "done")).slice(-2);
+  const subagentRows = rows.filter(
+    (row) => row.group === "subagent" && (row.status === "running" || row.status === "waiting") && isUsefulSubagentRow(row)
+  ).slice(-2);
+  appendRows(subagentRows);
+  appendRows(traceRows);
+  appendRows(toolRows);
+  appendRows(taskRows);
   if (selected.length === 0) {
-    selected.push(...rows.filter((row) => row.group === "status" && row.id !== "idle"));
+    appendRows(rows.filter((row) => row.group === "status" && row.id !== "idle"));
   }
   if (selected.length === 0 && queuedMessages.length > 0) {
-    selected.push(...rows.filter((row) => row.group === "queue").slice(0, 1));
+    appendRows(rows.filter((row) => row.group === "queue").slice(0, 1));
   }
-  return selected.slice(0, 3);
+  return selected.slice(0, INLINE_WORK_ROW_LIMIT);
 }
 function InlineRunStatus({
   channelState,
   queuedMessages,
-  pendingRequests
+  pendingRequests,
+  uiLanguage
 }) {
   if (!hasInlineRunStatus(channelState, queuedMessages, pendingRequests)) return null;
-  const language = channelState.responseLanguage;
+  const language = uiLanguage ?? channelState.responseLanguage;
   const summary = deriveWorkStateSummary({
     channelState,
     queuedMessages,
-    controlRequests: pendingRequests
+    controlRequests: pendingRequests,
+    uiLanguage: language
   });
-  const rows = inlineWorkRows(channelState, queuedMessages, pendingRequests);
+  const rows = inlineWorkRows(channelState, queuedMessages, pendingRequests, language);
+  const genericGoal = t$3(language, "Working on your request", "요청 처리 중");
+  const displayGoal = summary.goal !== genericGoal ? summary.goal : null;
+  const mission = currentRunMission(channelState);
   return /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "chat-msg-in mb-4 flex justify-start", "data-chat-inline-run-status": "true", children: /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "w-full max-w-[92%] rounded-lg border border-black/[0.08] bg-white/90 px-3 py-2.5 shadow-sm backdrop-blur sm:max-w-[82%]", children: [
     /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex min-w-0 items-center justify-between gap-3", children: [
       /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "min-w-0", children: [
         /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "text-[11px] font-semibold uppercase tracking-wide text-secondary/50", children: summary.title }),
+        displayGoal && /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "mt-1 line-clamp-2 break-words text-[12px] leading-snug text-foreground/70", children: displayGoal }),
         /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "mt-0.5 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-xs text-secondary/70", children: [
           /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "font-medium text-foreground/75", children: summary.status }),
           summary.progress && /* @__PURE__ */ jsxRuntimeExports.jsx("span", { children: summary.progress }),
-          queuedMessages.length > 0 && /* @__PURE__ */ jsxRuntimeExports.jsx("span", { children: isKorean$2(language) ? `${queuedMessages.length}개 대기` : `${queuedMessages.length} queued` })
+          queuedMessages.length > 0 && /* @__PURE__ */ jsxRuntimeExports.jsx("span", { children: isKorean$3(language) ? `${queuedMessages.length}개 대기` : `${queuedMessages.length} queued` })
         ] })
       ] }),
-      /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "shrink-0 rounded-full bg-[#7C3AED]/10 px-2 py-0.5 text-[10px] font-semibold text-[#7C3AED]", children: t$2(language, "Live", "실시간") })
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex shrink-0 items-center gap-1.5", children: [
+        mission && /* @__PURE__ */ jsxRuntimeExports.jsx(
+          "button",
+          {
+            type: "button",
+            onClick: () => dispatchOpenMissionLedgerEvent(mission.id),
+            className: "rounded-md border border-[#7C3AED]/15 bg-[#7C3AED]/10 px-2 py-1 text-[10px] font-semibold text-[#6D28D9] transition-colors hover:border-[#7C3AED]/25 hover:bg-[#7C3AED]/15",
+            "aria-label": `Open Mission Ledger for ${mission.title}`,
+            title: t$3(language, "Open mission ledger", "미션 원장 열기"),
+            "data-chat-open-mission-ledger": mission.id,
+            children: t$3(language, "Open mission ledger", "미션 원장 열기")
+          }
+        ),
+        /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "rounded-full bg-[#7C3AED]/10 px-2 py-0.5 text-[10px] font-semibold text-[#7C3AED]", children: t$3(language, "Live", "실시간") })
+      ] })
     ] }),
-    rows.length > 0 && /* @__PURE__ */ jsxRuntimeExports.jsx("ul", { className: "mt-2 space-y-1", "aria-label": t$2(language, "Current work updates", "현재 작업 업데이트"), children: rows.map((row) => /* @__PURE__ */ jsxRuntimeExports.jsxs(
+    channelState.browserFrame && /* @__PURE__ */ jsxRuntimeExports.jsx(InlineBrowserFramePreview, { frame: channelState.browserFrame, language }),
+    rows.length > 0 && /* @__PURE__ */ jsxRuntimeExports.jsx("ul", { className: "mt-2 space-y-1", "aria-label": t$3(language, "Current work updates", "현재 작업 업데이트"), children: rows.map((row) => /* @__PURE__ */ jsxRuntimeExports.jsxs(
       "li",
       {
         className: "flex min-w-0 items-start gap-2 rounded-md bg-black/[0.025] px-2 py-1.5",
@@ -32978,7 +33546,8 @@ const OPTIMISTIC_CONTENT_DEDUP_WINDOW_MS = 5 * 6e4;
 const OPTIMISTIC_CONTENT_DEDUP_MIN_CHARS = 80;
 function normalizedDuplicateContent(message) {
   if (message.role === "system") return null;
-  const normalized = message.content.replace(/\s+/g, " ").trim();
+  const content2 = message.role === "assistant" ? stripAssistantMetadataPreamble(message.content) : message.content;
+  const normalized = content2.replace(/\s+/g, " ").trim();
   if (normalized.length < OPTIMISTIC_CONTENT_DEDUP_MIN_CHARS) return null;
   return normalized;
 }
@@ -32986,8 +33555,9 @@ function duplicateContentKey(message) {
   const normalized = normalizedDuplicateContent(message);
   return normalized ? `${message.role}\0${normalized}` : null;
 }
-const ChatMessages = reactExports.forwardRef(function ChatMessages2({ messages, serverMessages, channelState, loading, botId, selectionMode, selectedMessages, onToggleSelect, onEnterSelectionMode, onSelectAll, onDeselectAll, onExportSelected, onDeleteSelected, onExitSelectionMode, onLoadOlder, hasOlderMessages, loadingOlder, onReplyTo, queuedMessages, onCancelQueued, controlRequests, onRespondControlRequest }, ref) {
+const ChatMessages = reactExports.forwardRef(function ChatMessages2({ messages, serverMessages, channelState, loading, botId, selectionMode, selectedMessages, onToggleSelect, onEnterSelectionMode, onSelectAll, onDeselectAll, onExportSelected, onDeleteSelected, onExitSelectionMode, onLoadOlder, hasOlderMessages, loadingOlder, onReplyTo, queuedMessages, onCancelQueued, controlRequests, onRespondControlRequest, uiLanguage }, ref) {
   const containerRef = reactExports.useRef(null);
+  const language = uiLanguage ?? channelState.responseLanguage;
   const [showScrollBtn, setShowScrollBtn] = reactExports.useState(false);
   const userScrolledUp = reactExports.useRef(false);
   const prevMsgCount = reactExports.useRef(0);
@@ -33007,10 +33577,15 @@ const ChatMessages = reactExports.forwardRef(function ChatMessages2({ messages, 
   const allMessages = reactExports.useMemo(() => {
     if (serverMessages.length === 0) return [...messages].sort(compareChatMessages);
     if (messages.length === 0) return [...serverMessages].sort(compareChatMessages);
-    const localServerIds = new Set(messages.map((m) => m.serverId).filter(Boolean));
+    const localMessages = messages.filter((message) => !serverMessages.some((serverMessage) => shouldPreferServerAssistantMessage(
+      message,
+      serverMessage,
+      TIMESTAMP_DEDUP_WINDOW_MS
+    )));
+    const localServerIds = new Set(localMessages.map((m) => m.serverId).filter(Boolean));
     const localByRole = /* @__PURE__ */ new Map();
     const optimisticByContent = /* @__PURE__ */ new Map();
-    for (const m of messages) {
+    for (const m of localMessages) {
       const ts = m.timestamp ?? 0;
       if (!localByRole.has(m.role)) localByRole.set(m.role, []);
       localByRole.get(m.role).push(ts);
@@ -33040,7 +33615,7 @@ const ChatMessages = reactExports.forwardRef(function ChatMessages2({ messages, 
       }
       return true;
     });
-    return [...messages, ...filtered].sort(compareChatMessages);
+    return [...localMessages, ...filtered].sort(compareChatMessages);
   }, [messages, serverMessages]);
   if (allMessages.length > prevMsgCount.current) {
     animateFromRef.current = prevMsgCount.current;
@@ -33118,14 +33693,11 @@ const ChatMessages = reactExports.forwardRef(function ChatMessages2({ messages, 
           className: "flex items-center gap-2 text-sm text-secondary/70 hover:text-foreground transition-colors cursor-pointer",
           children: [
             /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: `w-4.5 h-4.5 rounded border-2 flex items-center justify-center transition-colors ${allSelected ? "bg-[#7C3AED] border-[#7C3AED]" : selectedCount > 0 ? "bg-[#7C3AED]/30 border-[#7C3AED]" : "border-black/20 bg-white"}`, children: (allSelected || selectedCount > 0) && /* @__PURE__ */ jsxRuntimeExports.jsx("svg", { width: "10", height: "10", viewBox: "0 0 24 24", fill: "none", stroke: "white", strokeWidth: "3", strokeLinecap: "round", strokeLinejoin: "round", children: allSelected ? /* @__PURE__ */ jsxRuntimeExports.jsx("polyline", { points: "20 6 9 17 4 12" }) : /* @__PURE__ */ jsxRuntimeExports.jsx("line", { x1: "6", y1: "12", x2: "18", y2: "12" }) }) }),
-            "Select all"
+            t$3(language, "Select all", "전체 선택")
           ]
         }
       ),
-      /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "text-sm text-secondary/50", children: [
-        selectedCount,
-        " selected"
-      ] }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "text-sm text-secondary/50", children: isKorean$3(language) ? `${selectedCount}개 선택됨` : `${selectedCount} selected` }),
       /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "flex-1" }),
       /* @__PURE__ */ jsxRuntimeExports.jsxs(
         "button",
@@ -33141,7 +33713,7 @@ const ChatMessages = reactExports.forwardRef(function ChatMessages2({ messages, 
               /* @__PURE__ */ jsxRuntimeExports.jsx("line", { x1: "8.59", y1: "13.51", x2: "15.42", y2: "17.49" }),
               /* @__PURE__ */ jsxRuntimeExports.jsx("line", { x1: "15.41", y1: "6.51", x2: "8.59", y2: "10.49" })
             ] }),
-            "Export"
+            t$3(language, "Export", "내보내기")
           ]
         }
       ),
@@ -33156,7 +33728,7 @@ const ChatMessages = reactExports.forwardRef(function ChatMessages2({ messages, 
               /* @__PURE__ */ jsxRuntimeExports.jsx("polyline", { points: "3 6 5 6 21 6" }),
               /* @__PURE__ */ jsxRuntimeExports.jsx("path", { d: "M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" })
             ] }),
-            "Delete"
+            t$3(language, "Delete", "삭제")
           ]
         }
       ),
@@ -33165,7 +33737,7 @@ const ChatMessages = reactExports.forwardRef(function ChatMessages2({ messages, 
         {
           onClick: onExitSelectionMode,
           className: "text-sm text-secondary/60 hover:text-foreground transition-colors cursor-pointer",
-          children: "Cancel"
+          children: t$3(language, "Cancel", "취소")
         }
       )
     ] }),
@@ -33178,12 +33750,12 @@ const ChatMessages = reactExports.forwardRef(function ChatMessages2({ messages, 
         children: [
           /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "max-w-5xl mx-auto", children: [
             loadingOlder && /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "flex justify-center py-3", children: /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "w-5 h-5 border-2 border-black/10 border-t-black/40 rounded-full animate-spin" }) }),
-            loading && allMessages.length === 0 && /* @__PURE__ */ jsxRuntimeExports.jsx(MessageSkeleton, {}),
+            loading && /* @__PURE__ */ jsxRuntimeExports.jsx(MessageSkeleton, {}),
             !loading && allMessages.length === 0 && !channelState.streaming && /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex flex-col items-center justify-center h-full min-h-[200px] gap-2", children: [
               /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "w-10 h-10 rounded-full bg-black/[0.04] flex items-center justify-center", children: /* @__PURE__ */ jsxRuntimeExports.jsx("svg", { width: "20", height: "20", viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: "1.5", className: "text-secondary/60", children: /* @__PURE__ */ jsxRuntimeExports.jsx("path", { strokeLinecap: "round", strokeLinejoin: "round", d: "M8.625 12a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Zm0 0H8.25m4.125 0a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Zm0 0H12m4.125 0a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Zm0 0h-.375M21 12c0 4.556-4.03 8.25-9 8.25a9.764 9.764 0 0 1-2.555-.337A5.972 5.972 0 0 1 5.41 20.97a5.969 5.969 0 0 1-.474-.065 4.48 4.48 0 0 0 .978-2.025c.09-.457-.133-.901-.467-1.226C3.93 16.178 3 14.189 3 12c0-4.556 4.03-8.25 9-8.25s9 3.694 9 8.25Z" }) }) }),
               /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-secondary/50 text-sm", children: "Start a conversation" })
             ] }),
-            (() => {
+            !loading && (() => {
               const streamingNow = !!channelState.streaming;
               let mainMessages = allMessages;
               let midTurnInjected = [];
@@ -33216,6 +33788,8 @@ const ChatMessages = reactExports.forwardRef(function ChatMessages2({ messages, 
                       thinkingDuration: msg.thinkingDuration,
                       activities: msg.activities,
                       taskBoard: msg.taskBoard,
+                      researchEvidence: msg.researchEvidence,
+                      usage: msg.usage,
                       botId,
                       replyTo: msg.replyTo,
                       injected: msg.injected,
@@ -33245,6 +33819,8 @@ const ChatMessages = reactExports.forwardRef(function ChatMessages2({ messages, 
                     thinkingDuration: options.includeSourceMeta ? source?.thinkingDuration : void 0,
                     activities: options.includeSourceMeta ? source?.activities : void 0,
                     taskBoard: options.includeSourceMeta ? source?.taskBoard : void 0,
+                    researchEvidence: options.includeSourceMeta ? source?.researchEvidence : void 0,
+                    usage: options.includeSourceMeta ? source?.usage : void 0,
                     botId,
                     selectionMode: source ? selectionMode : void 0,
                     selected: source ? selectedMessages?.has(source.id) : void 0,
@@ -33371,7 +33947,7 @@ const ChatMessages = reactExports.forwardRef(function ChatMessages2({ messages, 
               );
               return /* @__PURE__ */ jsxRuntimeExports.jsxs(jsxRuntimeExports.Fragment, { children: [
                 renderFinalizedMessages(mainMessages),
-                channelState.streaming && !channelState.streamingText && channelState.thinkingStartedAt !== null && channelState.thinkingText !== "" && /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "chat-msg-in flex justify-start mb-4", children: /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "w-full max-w-full py-1 text-sm text-secondary/50 animate-pulse", children: writingAnswerLabel(channelState.responseLanguage) }) }),
+                channelState.streaming && !channelState.streamingText && channelState.thinkingStartedAt !== null && channelState.thinkingText !== "" && /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "chat-msg-in flex justify-start mb-4", children: /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "w-full max-w-full py-1 text-sm text-secondary/50 animate-pulse", children: writingAnswerLabel(language) }) }),
                 channelState.streamingText && (anchoredMidTurnInjected.length > 0 ? renderAssistantWithInjected(
                   channelState.streamingText,
                   anchoredMidTurnInjected,
@@ -33383,9 +33959,13 @@ const ChatMessages = reactExports.forwardRef(function ChatMessages2({ messages, 
                   {
                     role: "assistant",
                     content: channelState.streamingText,
-                    isStreaming: true
+                    isStreaming: true,
+                    botId
                   }
                 )),
+                !channelState.streamingText && anchoredMidTurnInjected.map(
+                  (msg, i) => renderMessage(msg, i, mainMessages.length, `pending-injected:${msg.id}`)
+                ),
                 unanchoredMidTurnInjected.map(
                   (msg, i) => renderMessage(msg, i, mainMessages.length)
                 ),
@@ -33394,12 +33974,13 @@ const ChatMessages = reactExports.forwardRef(function ChatMessages2({ messages, 
                   {
                     channelState,
                     queuedMessages: liveQueuedMessages,
-                    pendingRequests: pendingControlRequests2
+                    pendingRequests: pendingControlRequests2,
+                    uiLanguage: language
                   }
                 )
               ] });
             })(),
-            pendingControlRequests2.length > 0 && /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "mt-2", children: pendingControlRequests2.map((request) => /* @__PURE__ */ jsxRuntimeExports.jsx(
+            !loading && pendingControlRequests2.length > 0 && /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "mt-2", children: pendingControlRequests2.map((request) => /* @__PURE__ */ jsxRuntimeExports.jsx(
               ControlRequestCard,
               {
                 request,
@@ -33407,33 +33988,38 @@ const ChatMessages = reactExports.forwardRef(function ChatMessages2({ messages, 
               },
               request.requestId
             )) }),
-            showTyping && !channelState.fileProcessing && /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "chat-msg-in", children: /* @__PURE__ */ jsxRuntimeExports.jsx(TypingIndicator, {}) }),
-            queuedMessages && queuedMessages.length > 0 && /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "mt-3 flex justify-end", children: /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "w-full max-w-[92%] sm:max-w-[82%] rounded-2xl border border-amber-500/25 bg-amber-50 px-3 py-2 shadow-[0_1px_8px_rgba(245,158,11,0.10)]", children: [
+            !loading && showTyping && !channelState.fileProcessing && /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "chat-msg-in", children: /* @__PURE__ */ jsxRuntimeExports.jsx(TypingIndicator, {}) }),
+            !loading && queuedMessages && queuedMessages.length > 0 && /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "mt-3 flex justify-end", children: /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "w-full max-w-[92%] sm:max-w-[82%] rounded-2xl border border-amber-500/25 bg-amber-50 px-3 py-2 shadow-[0_1px_8px_rgba(245,158,11,0.10)]", children: [
               /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "mb-1.5 flex items-center justify-between gap-2 text-[10px] font-semibold uppercase tracking-wide text-amber-800/70", children: [
-                /* @__PURE__ */ jsxRuntimeExports.jsx("span", { children: "Queued follow-ups" }),
-                /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "rounded-full bg-amber-500/15 px-1.5 py-0.5 text-[9px] text-amber-800", children: [
-                  queuedMessages.length,
-                  " waiting"
-                ] })
+                /* @__PURE__ */ jsxRuntimeExports.jsx("span", { children: t$3(language, "Queued follow-ups", "대기 중인 후속 메시지") }),
+                /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "rounded-full bg-amber-500/15 px-1.5 py-0.5 text-[9px] text-amber-800", children: waitingCountLabel$1(queuedMessages.length, language) })
               ] }),
-              /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "space-y-1.5", children: queuedMessages.map((q, index2) => /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "flex justify-end", children: /* @__PURE__ */ jsxRuntimeExports.jsxs(
-                "button",
+              /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "space-y-1.5", children: queuedMessages.map((q, index2) => /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "flex justify-end", children: /* @__PURE__ */ jsxRuntimeExports.jsx(
+                "div",
                 {
-                  type: "button",
-                  onClick: () => onCancelQueued?.(q.id),
-                  className: "group w-full text-left rounded-xl border border-dashed border-amber-500/25 bg-white/75 px-3 py-2 text-[13px] text-foreground/75 transition-colors hover:border-red-500/25 hover:bg-red-500/10 hover:text-red-600",
+                  className: "group w-full rounded-xl border border-dashed border-amber-500/25 bg-white/75 px-3 py-2 text-left text-[13px] text-foreground/75",
                   "data-chat-queued-card": "true",
-                  title: "Click to cancel this message before the current turn finishes",
-                  children: [
-                    /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "mb-0.5 flex items-center justify-between gap-2 text-[10px] font-semibold uppercase tracking-wide text-amber-800/70 group-hover:text-red-500/80", children: [
-                      /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { children: [
-                        "Queued #",
-                        index2 + 1
+                  children: /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-start gap-3", children: [
+                    /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "min-w-0 flex-1", children: [
+                      /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "mb-0.5 flex items-center justify-between gap-2 text-[10px] font-semibold uppercase tracking-wide text-amber-800/70", children: [
+                        /* @__PURE__ */ jsxRuntimeExports.jsx("span", { children: queuedIndexLabel(index2 + 1, language) }),
+                        /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "normal-case tracking-normal", children: t$3(language, "Waiting for current run", "현재 실행 대기 중") })
                       ] }),
-                      /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "normal-case tracking-normal", children: "Waiting for current run" })
+                      /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "block whitespace-pre-wrap break-words", children: q.content })
                     ] }),
-                    /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "block whitespace-pre-wrap break-words", children: q.content })
-                  ]
+                    /* @__PURE__ */ jsxRuntimeExports.jsx(
+                      "button",
+                      {
+                        type: "button",
+                        onClick: () => onCancelQueued?.(q.id),
+                        className: "flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-red-500/15 bg-red-500/10 text-lg font-semibold leading-none text-red-600 transition-colors hover:border-red-500/35 hover:bg-red-500/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-400/70 focus-visible:ring-offset-2",
+                        "aria-label": t$3(language, `Cancel queued follow-up #${index2 + 1}`, `대기 중인 후속 메시지 #${index2 + 1} 취소`),
+                        title: t$3(language, "Cancel queued follow-up", "대기 중인 후속 메시지 취소"),
+                        "data-chat-queued-cancel": "true",
+                        children: /* @__PURE__ */ jsxRuntimeExports.jsx("span", { "aria-hidden": "true", children: "×" })
+                      }
+                    )
+                  ] })
                 }
               ) }, q.id)) })
             ] }) }),
@@ -33662,6 +34248,57 @@ const ALL_SLASH = (() => {
   }
   return entries;
 })();
+function buildSlashEntries(customSkills = []) {
+  const entries = [...ALL_SLASH];
+  const seenCommands = new Set(entries.map((entry) => entry.command.toLowerCase()));
+  for (const skill of customSkills) {
+    const command = normalizeSlashCommand(skill.name);
+    if (!command) continue;
+    const dedupeKey = command.toLowerCase();
+    if (seenCommands.has(dedupeKey)) continue;
+    seenCommands.add(dedupeKey);
+    const label = skill.title.trim() || command;
+    entries.push({
+      command,
+      label,
+      category: "custom",
+      searchText: [
+        command,
+        label,
+        skill.description ?? "",
+        ...skill.tags ?? []
+      ].join(" ")
+    });
+  }
+  return entries;
+}
+function getSlashMatches(entries, query) {
+  const normalizedQuery = query.toLowerCase();
+  if (normalizedQuery === "") return entries.slice(0, 12);
+  return entries.filter((entry) => {
+    const haystack = `${entry.command} ${entry.label} ${entry.category} ${entry.searchText ?? ""}`.toLowerCase();
+    return haystack.includes(normalizedQuery);
+  }).slice(0, 12);
+}
+function normalizeSlashCommand(command) {
+  return command.trim().replace(/^\/+/, "").replace(/\s+/g, "-");
+}
+function buildChatInputSendOptions(runUntilDone) {
+  return runUntilDone ? { goalMode: true } : void 0;
+}
+function nextRunUntilDoneAfterSend(current, result) {
+  if (!current) return false;
+  return result === false;
+}
+function isKorean$2(language) {
+  return language === "ko";
+}
+function t$2(language, en, ko) {
+  return isKorean$2(language) ? ko : en;
+}
+function waitingCountLabel(count, language) {
+  return isKorean$2(language) ? `${count}개 대기` : `${count} waiting`;
+}
 function prefersMobileWebLineBreaks() {
   if (typeof navigator === "undefined") return false;
   const ua = navigator.userAgent;
@@ -33686,6 +34323,7 @@ function shouldCancelStopOnPointerDown(pointerType) {
 }
 const ChatInput = reactExports.forwardRef(function ChatInput2({
   onSend,
+  uiLanguage,
   onReset,
   disabled,
   streaming,
@@ -33703,25 +34341,36 @@ const ChatInput = reactExports.forwardRef(function ChatInput2({
   kbDocs,
   onSelectKbDoc,
   uploadStates,
-  composerAccessory
+  composerAccessory,
+  customSkills
 }, ref) {
   const [text2, setText] = reactExports.useState("");
   const [pendingFiles, setPendingFiles] = reactExports.useState([]);
   const [isSubmitting, setIsSubmitting] = reactExports.useState(false);
   const [slashIdx, setSlashIdx] = reactExports.useState(0);
   const [kbIdx, setKbIdx] = reactExports.useState(0);
+  const [runUntilDone, setRunUntilDone] = reactExports.useState(false);
   const textareaRef = reactExports.useRef(null);
   const fileInputRef = reactExports.useRef(null);
   const slashRef = reactExports.useRef(null);
   const stopPointerHandledRef = reactExports.useRef(false);
   const stopPointerResetTimerRef = reactExports.useRef(null);
+  const language = uiLanguage;
   const steeringUnavailable = steeringDisabled || pendingFiles.length > 0;
   const effectiveStreamingMode = streamingMode === "steer" && steeringUnavailable ? "queue" : streamingMode;
   const queueBlocked = isStreamingComposerBlockedByQueue({
     queueFull,
     mode: effectiveStreamingMode
   });
-  const steeringUnavailableReason = pendingFiles.length > 0 ? "Attachments will send after the current run." : steeringDisabledReason ?? "Selected context will send after the current run.";
+  const steeringUnavailableReason = pendingFiles.length > 0 ? t$2(
+    language,
+    "Attachments will send after the current run.",
+    "첨부 파일은 현재 실행이 끝난 뒤 전송됩니다."
+  ) : steeringDisabledReason ?? t$2(
+    language,
+    "Selected context will send after the current run.",
+    "선택한 컨텍스트는 현재 실행이 끝난 뒤 전송됩니다."
+  );
   const [cursorPos, setCursorPos] = reactExports.useState(0);
   const slashToken = reactExports.useMemo(() => {
     const before = text2.slice(0, cursorPos);
@@ -33734,13 +34383,11 @@ const ChatInput = reactExports.forwardRef(function ChatInput2({
   }, [text2, cursorPos]);
   const slashQuery = slashToken?.query ?? null;
   const prevQueryRef = reactExports.useRef(slashQuery);
+  const slashEntries = reactExports.useMemo(() => buildSlashEntries(customSkills), [customSkills]);
   const slashMatches = reactExports.useMemo(() => {
     if (slashQuery === null) return [];
-    if (slashQuery === "") return ALL_SLASH.slice(0, 12);
-    return ALL_SLASH.filter(
-      (e) => e.command.toLowerCase().includes(slashQuery) || e.label.toLowerCase().includes(slashQuery)
-    ).slice(0, 12);
-  }, [slashQuery]);
+    return getSlashMatches(slashEntries, slashQuery);
+  }, [slashEntries, slashQuery]);
   const slashOpen = slashMatches.length > 0;
   if (prevQueryRef.current !== slashQuery) {
     prevQueryRef.current = slashQuery;
@@ -33892,7 +34539,8 @@ const ChatInput = reactExports.forwardRef(function ChatInput2({
     try {
       const result = await onSend(
         trimmed,
-        pendingFiles.length > 0 ? pendingFiles.map((p) => p.file) : void 0
+        pendingFiles.length > 0 ? pendingFiles.map((p) => p.file) : void 0,
+        buildChatInputSendOptions(runUntilDone)
       );
       if (result === false) return;
       for (const p of pendingFiles) {
@@ -33900,11 +34548,12 @@ const ChatInput = reactExports.forwardRef(function ChatInput2({
       }
       setText("");
       setPendingFiles([]);
+      setRunUntilDone(nextRunUntilDoneAfterSend(runUntilDone, result));
       if (textareaRef.current) textareaRef.current.style.height = "auto";
     } finally {
       setIsSubmitting(false);
     }
-  }, [text2, pendingFiles, onSend, onReset]);
+  }, [text2, pendingFiles, onSend, onReset, runUntilDone]);
   const handleKeyDown = reactExports.useCallback(
     (e) => {
       const enterSends = shouldSendComposerOnEnter(e);
@@ -34007,14 +34656,15 @@ const ChatInput = reactExports.forwardRef(function ChatInput2({
                 ] }) }),
                 /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "min-w-0", children: [
                   /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "flex flex-wrap items-center gap-1.5", children: [
-                    /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "font-semibold text-amber-950", children: "Queued after current run" }),
-                    /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "rounded-full bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-semibold text-amber-800", children: [
-                      queuedCount,
-                      " waiting"
-                    ] }),
-                    queueFull && /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "rounded-full bg-red-500/10 px-1.5 py-0.5 text-[10px] font-semibold text-red-600", children: "Queue full" })
+                    /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "font-semibold text-amber-950", children: t$2(language, "Queued after current run", "현재 실행 후 대기") }),
+                    /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "rounded-full bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-semibold text-amber-800", children: waitingCountLabel(queuedCount, language) }),
+                    queueFull && /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "rounded-full bg-red-500/10 px-1.5 py-0.5 text-[10px] font-semibold text-red-600", children: t$2(language, "Queue full", "대기열 가득 참") })
                   ] }),
-                  /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "mt-0.5 block truncate text-[10.5px] text-amber-800/75", children: "Will send automatically when this run finishes." })
+                  /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "mt-0.5 block truncate text-[10.5px] text-amber-800/75", children: t$2(
+                    language,
+                    "Will send automatically when this run finishes.",
+                    "현재 실행이 끝나면 자동 전송됩니다."
+                  ) })
                 ] })
               ] }),
               onCancelQueue && /* @__PURE__ */ jsxRuntimeExports.jsx(
@@ -34023,7 +34673,7 @@ const ChatInput = reactExports.forwardRef(function ChatInput2({
                   type: "button",
                   onClick: onCancelQueue,
                   className: "shrink-0 rounded-md px-2 py-1 text-[11px] font-semibold text-amber-800 transition-colors hover:bg-red-500/10 hover:text-red-600",
-                  children: "Clear queue"
+                  children: t$2(language, "Clear queue", "대기열 비우기")
                 }
               )
             ]
@@ -34034,7 +34684,7 @@ const ChatInput = reactExports.forwardRef(function ChatInput2({
             "div",
             {
               className: "inline-flex rounded-md border border-black/[0.08] bg-black/[0.04] p-0.5",
-              "aria-label": "Streaming send mode",
+              "aria-label": t$2(language, "Streaming send mode", "스트리밍 전송 모드"),
               children: [
                 /* @__PURE__ */ jsxRuntimeExports.jsx(
                   "button",
@@ -34043,8 +34693,12 @@ const ChatInput = reactExports.forwardRef(function ChatInput2({
                     onClick: () => onStreamingModeChange?.("queue"),
                     className: `rounded px-2 py-1 font-medium transition-colors ${effectiveStreamingMode === "queue" ? "bg-white text-foreground shadow-sm" : "text-secondary/70 hover:text-foreground"}`,
                     "aria-pressed": effectiveStreamingMode === "queue",
-                    title: "Send after the current run reaches a checkpoint",
-                    children: "Queue after run"
+                    title: t$2(
+                      language,
+                      "Send after the current run reaches a checkpoint",
+                      "현재 실행이 체크포인트에 도달하면 전송"
+                    ),
+                    children: t$2(language, "Queue after run", "현재 실행 후 대기")
                   }
                 ),
                 /* @__PURE__ */ jsxRuntimeExports.jsx(
@@ -34057,8 +34711,12 @@ const ChatInput = reactExports.forwardRef(function ChatInput2({
                     disabled: steeringUnavailable,
                     className: `rounded px-2 py-1 font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${effectiveStreamingMode === "steer" ? "bg-white text-foreground shadow-sm" : "text-secondary/70 hover:text-foreground"}`,
                     "aria-pressed": effectiveStreamingMode === "steer",
-                    title: steeringUnavailable ? steeringUnavailableReason : "Send now as a text-only steering update",
-                    children: "Steer current run"
+                    title: steeringUnavailable ? steeringUnavailableReason : t$2(
+                      language,
+                      "Send now as a text-only steering update",
+                      "텍스트 지시로 지금 현재 실행 조정"
+                    ),
+                    children: t$2(language, "Steer current run", "현재 실행 조정")
                   }
                 )
               ]
@@ -34073,8 +34731,9 @@ const ChatInput = reactExports.forwardRef(function ChatInput2({
           ] }),
           /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "min-w-0 flex-1 leading-snug", children: [
             /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "text-[11px] font-medium text-[#7C3AED]", children: [
-              "Replying to ",
-              replyingTo.role === "user" ? "You" : "Bot"
+              t$2(language, "Replying to", "답장 대상"),
+              " ",
+              replyingTo.role === "user" ? t$2(language, "You", "나") : t$2(language, "Bot", "봇")
             ] }),
             /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "truncate text-xs text-secondary/80", children: replyingTo.preview })
           ] }),
@@ -34083,7 +34742,7 @@ const ChatInput = reactExports.forwardRef(function ChatInput2({
             {
               type: "button",
               onClick: onCancelReply,
-              "aria-label": "Cancel reply",
+              "aria-label": t$2(language, "Cancel reply", "답장 취소"),
               className: "shrink-0 p-1 -m-1 rounded-md text-secondary/60 hover:text-foreground hover:bg-black/[0.04] transition-colors cursor-pointer",
               children: /* @__PURE__ */ jsxRuntimeExports.jsx("svg", { width: "14", height: "14", viewBox: "0 0 20 20", fill: "currentColor", "aria-hidden": "true", children: /* @__PURE__ */ jsxRuntimeExports.jsx("path", { d: "M6.28 5.22a.75.75 0 00-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 101.06 1.06L10 11.06l3.72 3.72a.75.75 0 101.06-1.06L11.06 10l3.72-3.72a.75.75 0 00-1.06-1.06L10 8.94 6.28 5.22z" }) })
             }
@@ -34107,7 +34766,7 @@ const ChatInput = reactExports.forwardRef(function ChatInput2({
               ] }) }),
               /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex-1 min-w-0", children: [
                 /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-xs text-foreground truncate", children: pf.file.name }),
-                /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-[10px] text-secondary/50", children: formatFileSize(pf.file.size) }),
+                /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-[10px] text-secondary/50", children: formatFileSize$1(pf.file.size) }),
                 uploadStates?.[kbUploadKey(pf.file)] && (() => {
                   const state = uploadStates[kbUploadKey(pf.file)];
                   const isFailed = state?.phase === "failed";
@@ -34171,7 +34830,7 @@ const ChatInput = reactExports.forwardRef(function ChatInput2({
                 ref: kbRef,
                 className: "absolute bottom-full left-0 right-0 mb-1 max-h-48 sm:max-h-64 overflow-y-auto rounded-xl border border-black/10 bg-white shadow-lg z-50",
                 children: [
-                  /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "px-3 py-1.5 text-[10px] font-semibold text-secondary/50 uppercase tracking-wide border-b border-black/[0.05]", children: "Knowledge Base" }),
+                  /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "px-3 py-1.5 text-[10px] font-semibold text-secondary/50 uppercase tracking-wide border-b border-black/[0.05]", children: t$2(language, "Knowledge Base", "지식베이스") }),
                   kbMatches.map((entry, i) => /* @__PURE__ */ jsxRuntimeExports.jsxs(
                     "button",
                     {
@@ -34209,7 +34868,7 @@ const ChatInput = reactExports.forwardRef(function ChatInput2({
                 onKeyUp: (e) => setCursorPos(e.target.selectionStart ?? cursorPos),
                 onClick: (e) => setCursorPos(e.target.selectionStart ?? cursorPos),
                 onPaste: handlePaste,
-                placeholder: "Message...",
+                placeholder: t$2(language, "Message...", "메시지..."),
                 rows: 1,
                 disabled: disabled || isSubmitting,
                 "data-chat-input-field": "true",
@@ -34218,385 +34877,140 @@ const ChatInput = reactExports.forwardRef(function ChatInput2({
               }
             )
           ] }),
-          /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center gap-2", children: [
-            /* @__PURE__ */ jsxRuntimeExports.jsx(
-              "button",
-              {
-                onClick: () => fileInputRef.current?.click(),
-                disabled: disabled || queueBlocked || isSubmitting,
-                className: "w-10 h-10 flex items-center justify-center rounded-2xl bg-black/[0.04] text-secondary/60 hover:text-foreground hover:bg-black/[0.06] transition-all duration-200 cursor-pointer disabled:opacity-20 disabled:cursor-not-allowed shrink-0",
-                "aria-label": "Attach file",
-                children: /* @__PURE__ */ jsxRuntimeExports.jsx("svg", { className: "w-4.5 h-4.5", viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 2, strokeLinecap: "round", strokeLinejoin: "round", children: /* @__PURE__ */ jsxRuntimeExports.jsx("path", { d: "M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" }) })
-              }
-            ),
-            /* @__PURE__ */ jsxRuntimeExports.jsx(
-              "input",
-              {
-                ref: fileInputRef,
-                type: "file",
-                className: "hidden",
-                accept: CHAT_ATTACHMENT_ACCEPT,
-                multiple: true,
-                onChange: (e) => {
-                  if (e.target.files) addFiles(e.target.files);
-                  e.target.value = "";
-                }
-              }
-            ),
-            composerAccessory && /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "flex min-w-0 flex-1 items-center justify-end", "data-composer-accessory": "bottom-row", children: composerAccessory }),
-            streaming && !text2.trim() && pendingFiles.length === 0 ? /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "relative shrink-0", children: [
-              /* @__PURE__ */ jsxRuntimeExports.jsx(
-                "button",
-                {
-                  type: "button",
-                  "data-chat-stop-button": "true",
-                  onPointerDown: handleStopPointerDown,
-                  onClick: handleStopClick,
-                  className: "w-10 h-10 flex items-center justify-center rounded-2xl bg-red-500/15 text-red-400 hover:bg-red-500/25 active:scale-95 touch-manipulation transition-all duration-200 cursor-pointer",
-                  "aria-label": "Stop",
-                  title: "Stop (ESC)",
-                  children: /* @__PURE__ */ jsxRuntimeExports.jsx("svg", { className: "w-4 h-4", viewBox: "0 0 24 24", fill: "currentColor", children: /* @__PURE__ */ jsxRuntimeExports.jsx("rect", { x: "6", y: "6", width: "12", height: "12", rx: "2" }) })
-                }
-              ),
-              /* @__PURE__ */ jsxRuntimeExports.jsxs(
-                "span",
-                {
-                  className: "hidden sm:flex pointer-events-none absolute -top-6 right-0 items-center gap-1 rounded-md bg-black/[0.06] border border-black/[0.08] px-1.5 py-0.5 text-[10px] font-medium text-secondary whitespace-nowrap",
-                  "aria-hidden": "true",
-                  children: [
-                    /* @__PURE__ */ jsxRuntimeExports.jsx("kbd", { className: "font-mono", children: "⎋" }),
-                    /* @__PURE__ */ jsxRuntimeExports.jsx("span", { children: cancelHint ?? "ESC to cancel" })
-                  ]
-                }
-              )
-            ] }) : /* @__PURE__ */ jsxRuntimeExports.jsx(
-              "button",
-              {
-                onClick: () => void handleSend(),
-                disabled: !text2.trim() && pendingFiles.length === 0 || disabled || queueBlocked || isSubmitting,
-                className: "w-10 h-10 flex items-center justify-center rounded-2xl bg-primary text-white disabled:opacity-20 hover:bg-primary/80 active:scale-95 transition-all duration-200 cursor-pointer disabled:cursor-not-allowed shrink-0",
-                "aria-label": streaming ? effectiveStreamingMode === "steer" ? "Steer current run" : "Queue message" : "Send",
-                title: queueBlocked ? "Queue full — wait for the bot to finish" : streaming ? effectiveStreamingMode === "steer" ? "Steer current run" : "Queue message (fires after current response)" : "Send",
-                children: /* @__PURE__ */ jsxRuntimeExports.jsx(
-                  "svg",
+          /* @__PURE__ */ jsxRuntimeExports.jsxs(
+            "div",
+            {
+              className: "flex flex-wrap items-center gap-2",
+              "data-chat-composer-controls": "true",
+              children: [
+                /* @__PURE__ */ jsxRuntimeExports.jsx(
+                  "button",
                   {
-                    className: "w-4 h-4",
-                    viewBox: "0 0 24 24",
-                    fill: "none",
-                    stroke: "currentColor",
-                    strokeWidth: 2,
-                    strokeLinecap: "round",
-                    strokeLinejoin: "round",
-                    children: /* @__PURE__ */ jsxRuntimeExports.jsx("path", { d: "M12 19V5M5 12l7-7 7 7" })
+                    onClick: () => fileInputRef.current?.click(),
+                    disabled: disabled || queueBlocked || isSubmitting,
+                    className: "w-10 h-10 flex items-center justify-center rounded-2xl bg-black/[0.04] text-secondary/60 hover:text-foreground hover:bg-black/[0.06] transition-all duration-200 cursor-pointer disabled:opacity-20 disabled:cursor-not-allowed shrink-0",
+                    "aria-label": t$2(language, "Attach file", "파일 첨부"),
+                    children: /* @__PURE__ */ jsxRuntimeExports.jsx("svg", { className: "w-4.5 h-4.5", viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 2, strokeLinecap: "round", strokeLinejoin: "round", children: /* @__PURE__ */ jsxRuntimeExports.jsx("path", { d: "M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" }) })
+                  }
+                ),
+                /* @__PURE__ */ jsxRuntimeExports.jsx(
+                  "input",
+                  {
+                    ref: fileInputRef,
+                    type: "file",
+                    className: "hidden",
+                    accept: CHAT_ATTACHMENT_ACCEPT,
+                    multiple: true,
+                    onChange: (e) => {
+                      if (e.target.files) addFiles(e.target.files);
+                      e.target.value = "";
+                    }
+                  }
+                ),
+                /* @__PURE__ */ jsxRuntimeExports.jsxs(
+                  "button",
+                  {
+                    type: "button",
+                    onClick: () => setRunUntilDone((value) => !value),
+                    disabled: disabled || isSubmitting,
+                    "aria-pressed": runUntilDone,
+                    "data-chat-goal-toggle": "true",
+                    className: `flex h-10 shrink-0 items-center gap-2 rounded-2xl border px-3 text-xs font-medium transition-all duration-200 disabled:cursor-not-allowed disabled:opacity-30 ${runUntilDone ? "border-primary/25 bg-primary/10 text-primary shadow-[0_1px_6px_rgba(124,58,237,0.10)]" : "border-black/[0.08] bg-black/[0.03] text-secondary/75 hover:bg-black/[0.05] hover:text-foreground"}`,
+                    title: t$2(
+                      language,
+                      "Run the next message as a goal mission",
+                      "다음 메시지를 목표 미션으로 실행"
+                    ),
+                    children: [
+                      /* @__PURE__ */ jsxRuntimeExports.jsx(
+                        "span",
+                        {
+                          className: `flex h-5 w-5 items-center justify-center rounded-full ${runUntilDone ? "bg-primary text-white" : "bg-black/[0.04] text-secondary/55"}`,
+                          "aria-hidden": "true",
+                          children: /* @__PURE__ */ jsxRuntimeExports.jsxs("svg", { className: "h-3.5 w-3.5", viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 2, children: [
+                            /* @__PURE__ */ jsxRuntimeExports.jsx("circle", { cx: "12", cy: "12", r: "6" }),
+                            /* @__PURE__ */ jsxRuntimeExports.jsx("path", { strokeLinecap: "round", strokeLinejoin: "round", d: "M12 3v3m0 12v3m9-9h-3M6 12H3" })
+                          ] })
+                        }
+                      ),
+                      /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "whitespace-nowrap", children: t$2(language, "Run until done", "완료까지 실행") }),
+                      runUntilDone && /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "rounded-md bg-white/70 px-1.5 py-0.5 text-[10px] font-semibold text-primary/80", children: "1x" })
+                    ]
+                  }
+                ),
+                composerAccessory && /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "flex min-w-0 flex-1 items-center justify-end", "data-composer-accessory": "bottom-row", children: composerAccessory }),
+                streaming && !text2.trim() && pendingFiles.length === 0 ? /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "relative shrink-0", children: [
+                  /* @__PURE__ */ jsxRuntimeExports.jsx(
+                    "button",
+                    {
+                      type: "button",
+                      "data-chat-stop-button": "true",
+                      onPointerDown: handleStopPointerDown,
+                      onClick: handleStopClick,
+                      className: "w-10 h-10 flex items-center justify-center rounded-2xl bg-red-500/15 text-red-400 hover:bg-red-500/25 active:scale-95 touch-manipulation transition-all duration-200 cursor-pointer",
+                      "aria-label": t$2(language, "Stop", "중지"),
+                      title: t$2(language, "Stop (ESC)", "중지 (ESC)"),
+                      children: /* @__PURE__ */ jsxRuntimeExports.jsx("svg", { className: "w-4 h-4", viewBox: "0 0 24 24", fill: "currentColor", children: /* @__PURE__ */ jsxRuntimeExports.jsx("rect", { x: "6", y: "6", width: "12", height: "12", rx: "2" }) })
+                    }
+                  ),
+                  /* @__PURE__ */ jsxRuntimeExports.jsxs(
+                    "span",
+                    {
+                      className: "hidden sm:flex pointer-events-none absolute -top-6 right-0 items-center gap-1 rounded-md bg-black/[0.06] border border-black/[0.08] px-1.5 py-0.5 text-[10px] font-medium text-secondary whitespace-nowrap",
+                      "aria-hidden": "true",
+                      children: [
+                        /* @__PURE__ */ jsxRuntimeExports.jsx("kbd", { className: "font-mono", children: "⎋" }),
+                        /* @__PURE__ */ jsxRuntimeExports.jsx("span", { children: cancelHint ?? t$2(language, "ESC to cancel", "ESC로 취소") })
+                      ]
+                    }
+                  )
+                ] }) : /* @__PURE__ */ jsxRuntimeExports.jsx(
+                  "button",
+                  {
+                    onClick: () => void handleSend(),
+                    disabled: !text2.trim() && pendingFiles.length === 0 || disabled || queueBlocked || isSubmitting,
+                    className: "w-10 h-10 flex items-center justify-center rounded-2xl bg-primary text-white disabled:opacity-20 hover:bg-primary/80 active:scale-95 transition-all duration-200 cursor-pointer disabled:cursor-not-allowed shrink-0",
+                    "aria-label": streaming ? effectiveStreamingMode === "steer" ? t$2(language, "Steer current run", "현재 실행 조정") : t$2(language, "Queue message", "메시지 대기열에 추가") : t$2(language, "Send", "전송"),
+                    title: queueBlocked ? t$2(
+                      language,
+                      "Queue full - wait for the bot to finish",
+                      "대기열이 가득 찼습니다 - 봇 응답 완료까지 기다려 주세요"
+                    ) : streaming ? effectiveStreamingMode === "steer" ? t$2(language, "Steer current run", "현재 실행 조정") : t$2(
+                      language,
+                      "Queue message (fires after current response)",
+                      "메시지 대기열에 추가 (현재 응답 후 전송)"
+                    ) : t$2(language, "Send", "전송"),
+                    children: /* @__PURE__ */ jsxRuntimeExports.jsx(
+                      "svg",
+                      {
+                        className: "w-4 h-4",
+                        viewBox: "0 0 24 24",
+                        fill: "none",
+                        stroke: "currentColor",
+                        strokeWidth: 2,
+                        strokeLinecap: "round",
+                        strokeLinejoin: "round",
+                        children: /* @__PURE__ */ jsxRuntimeExports.jsx("path", { d: "M12 19V5M5 12l7-7 7 7" })
+                      }
+                    )
                   }
                 )
-              }
-            )
-          ] })
+              ]
+            }
+          )
         ] })
       ] })
     }
   );
 });
-const LOCAL_LLM_MODEL_OPTIONS = [
-  {
-    value: "local_gemma_fast",
-    label: "Gemma 4 Fast (beta)",
-    description: "Fast local beta model for Max and Flex bots.",
-    runtimeModel: "local/gemma-fast",
-    upstreamModel: "gemma-fast",
-    contextWindow: 131072,
-    maxOutputTokens: 8192
-  },
-  {
-    value: "local_gemma_max",
-    label: "Gemma 4 Max (beta)",
-    description: "Larger local beta Gemma model for Max and Flex bots.",
-    runtimeModel: "local/gemma-max",
-    upstreamModel: "gemma-max",
-    contextWindow: 131072,
-    maxOutputTokens: 8192
-  },
-  {
-    value: "local_qwen_uncensored",
-    label: "Qwen 3.5 Uncensored (beta)",
-    description: "Local beta Qwen model for Max and Flex bots.",
-    runtimeModel: "local/qwen-uncensored",
-    upstreamModel: "qwen-uncensored",
-    contextWindow: 131072,
-    maxOutputTokens: 8192
-  }
-];
-new Map(
-  LOCAL_LLM_MODEL_OPTIONS.map((model) => [model.value, model])
-);
-function isLocalLlmEnabledPlan(plan) {
-  return plan === "max" || plan === "flex";
-}
-const BASE_MODEL_OPTIONS = [
-  { value: "smart_routing", label: "Smart Routing" },
-  { value: "haiku", label: "Claude Haiku 4.5" },
-  { value: "sonnet", label: "Claude Sonnet 4.5" },
-  { value: "opus", label: "Claude Opus 4.6" },
-  { value: "magi_smart_routing", label: "Open Magi Router" },
-  { value: "gpt_smart_routing", label: "GPT Smart Routing" },
-  { value: "gpt_5_nano", label: "GPT-5.4 Nano" },
-  { value: "gpt_5_mini", label: "GPT-5.4 Mini" },
-  { value: "gpt_5_5", label: "GPT-5.5" },
-  { value: "gpt_5_5_pro", label: "GPT-5.5 Pro" },
-  { value: "codex", label: "Codex (OAuth Required)" },
-  { value: "kimi_k2_5", label: "Kimi K2.6 (Fireworks AI)" },
-  { value: "minimax_m2_7", label: "MiniMax M2.7 (Fireworks AI)" },
-  { value: "gemini_3_1_flash_lite", label: "Gemini 3.1 Flash Lite (Google)" },
-  { value: "gemini_3_1_pro", label: "Gemini 3.1 Pro (Google)" }
-];
-function normalizeModelSelectionForSettings(value) {
-  if (value === "gpt_5_1") return "gpt_5_mini";
-  if (value === "gpt_5_4") return "gpt_5_5";
-  return value;
-}
-function getModelOptions(subscriptionPlan) {
-  const baseOptions = [...BASE_MODEL_OPTIONS];
-  if (!isLocalLlmEnabledPlan(subscriptionPlan)) return baseOptions;
-  return [
-    ...baseOptions,
-    ...LOCAL_LLM_MODEL_OPTIONS.map((model) => ({
-      value: model.value,
-      label: model.label
-    }))
-  ];
-}
-({
-  ...Object.fromEntries(
-    LOCAL_LLM_MODEL_OPTIONS.map((model) => [model.value, model.label])
-  )
-});
-const DEFAULT_ADVANCED_MODEL = "opus";
-const ROUTER_MODEL_SELECTIONS = /* @__PURE__ */ new Set([
-  "magi_smart_routing",
-  "smart_routing",
-  "gpt_smart_routing"
-]);
-const ROUTER_PICKER_OPTIONS = [
-  {
-    value: "standard_router",
-    label: "Standard Router",
-    description: "Cost-aware routing for everyday work."
-  },
-  {
-    value: "premium_router",
-    label: "Premium Router",
-    description: "Frontier routing for demanding work."
-  },
-  {
-    value: "advanced",
-    label: "Custom",
-    description: "Pick a specific model manually."
-  }
-];
-function getRouterPickerMode(modelSelection, routerType) {
-  if (modelSelection === "magi_smart_routing" && routerType === "big_dic") {
-    return "premium_router";
-  }
-  if (modelSelection === "magi_smart_routing" && (!routerType || routerType === "standard")) {
-    return "standard_router";
-  }
-  return "advanced";
-}
-function applyRouterPickerMode(mode, advancedModel = DEFAULT_ADVANCED_MODEL) {
-  if (mode === "standard_router") {
-    return { modelSelection: "magi_smart_routing", routerType: "standard" };
-  }
-  if (mode === "premium_router") {
-    return { modelSelection: "magi_smart_routing", routerType: "big_dic" };
-  }
-  return {
-    modelSelection: ROUTER_MODEL_SELECTIONS.has(advancedModel) ? DEFAULT_ADVANCED_MODEL : advancedModel,
-    routerType: "standard"
-  };
-}
-function ensureSelectedOption(options, value) {
-  if (options.some((option) => option.value === value)) return options;
-  return [{ value, label: value }, ...options];
-}
-function Dropdown({
-  label,
-  options,
-  value,
-  onChange,
-  disabled,
-  menuPlacement = "bottom"
-}) {
-  const [open, setOpen] = reactExports.useState(false);
-  const ref = reactExports.useRef(null);
-  reactExports.useEffect(() => {
-    if (!open) return;
-    function onClickOutside(e) {
-      if (ref.current && !ref.current.contains(e.target)) setOpen(false);
-    }
-    document.addEventListener("mousedown", onClickOutside);
-    return () => document.removeEventListener("mousedown", onClickOutside);
-  }, [open]);
-  const selected = options.find((o) => o.value === value);
-  return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { ref, className: "relative", children: [
-    /* @__PURE__ */ jsxRuntimeExports.jsxs(
-      "button",
-      {
-        type: "button",
-        "aria-label": label,
-        disabled,
-        onClick: () => setOpen((o) => !o),
-        className: "flex h-11 max-w-[13rem] cursor-pointer items-center gap-1.5 rounded-lg border border-transparent bg-white/70 px-3 text-xs font-medium text-foreground/80 outline-none transition-all duration-200 hover:bg-white focus:border-primary/30 focus:ring-2 focus:ring-primary/10 disabled:cursor-wait disabled:opacity-60 sm:h-8 sm:px-2.5",
-        children: [
-          /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "truncate", children: selected?.label ?? value }),
-          /* @__PURE__ */ jsxRuntimeExports.jsx("svg", { className: `h-3 w-3 shrink-0 text-secondary transition-transform ${open ? "rotate-180" : ""}`, viewBox: "0 0 12 12", fill: "none", children: /* @__PURE__ */ jsxRuntimeExports.jsx("path", { d: "M3 4.5L6 7.5L9 4.5", stroke: "currentColor", strokeWidth: "1.5", strokeLinecap: "round", strokeLinejoin: "round" }) })
-        ]
-      }
-    ),
-    open && /* @__PURE__ */ jsxRuntimeExports.jsx(
-      "div",
-      {
-        className: `absolute left-0 z-50 min-w-[180px] overflow-hidden rounded-xl border border-black/[0.08] bg-white/95 py-1 shadow-lg backdrop-blur-xl ${menuPlacement === "top" ? "bottom-full mb-1" : "top-full mt-1"}`,
-        children: options.map((option) => /* @__PURE__ */ jsxRuntimeExports.jsxs(
-          "button",
-          {
-            type: "button",
-            onClick: () => {
-              onChange(option.value);
-              setOpen(false);
-            },
-            className: `flex w-full cursor-pointer items-center gap-2 px-3 py-2 text-left text-xs transition-colors ${option.value === value ? "bg-primary/[0.06] font-semibold text-primary" : "text-foreground/80 hover:bg-black/[0.03]"}`,
-            children: [
-              /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: `h-1.5 w-1.5 shrink-0 rounded-full ${option.value === value ? "bg-primary" : "bg-transparent"}` }),
-              /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "truncate", children: option.label })
-            ]
-          },
-          option.value
-        ))
-      }
-    )
-  ] });
-}
-function ChatModelPicker({
-  botId,
-  modelSelection,
-  routerType,
-  apiKeyMode,
-  subscriptionPlan,
-  persistMode = "bot",
-  menuPlacement = "bottom",
-  onModelSelectionChange
-}) {
-  const authFetch = useAuthFetch();
-  const [selectedModel, setSelectedModel] = reactExports.useState(
-    () => normalizeModelSelectionForSettings(modelSelection)
-  );
-  const [currentRouterType, setCurrentRouterType] = reactExports.useState(routerType ?? "standard");
-  const [saving, setSaving] = reactExports.useState(false);
-  const [error, setError] = reactExports.useState(null);
-  const pickerMode = reactExports.useMemo(
-    () => getRouterPickerMode(selectedModel, currentRouterType),
-    [selectedModel, currentRouterType]
-  );
-  reactExports.useEffect(() => {
-    setSelectedModel(normalizeModelSelectionForSettings(modelSelection));
-    setCurrentRouterType(routerType ?? "standard");
-  }, [modelSelection, routerType]);
-  const advancedOptions = reactExports.useMemo(
-    () => ensureSelectedOption(getModelOptions(subscriptionPlan), selectedModel),
-    [selectedModel, subscriptionPlan]
-  );
-  const saveModel = reactExports.useCallback(
-    async (nextModelSelection, nextRouterType) => {
-      setError(null);
-      const prevModel = selectedModel;
-      const prevRouter = currentRouterType;
-      setSelectedModel(nextModelSelection);
-      setCurrentRouterType(nextRouterType);
-      if (persistMode === "local") {
-        onModelSelectionChange?.(nextModelSelection, nextRouterType);
-        return;
-      }
-      setSaving(true);
-      try {
-        const res = await authFetch(`/api/bots/${botId}`, {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            model_selection: nextModelSelection,
-            router_type: nextRouterType
-          })
-        });
-        const data = await res.json().catch(() => ({}));
-        if (!res.ok) {
-          throw new Error(
-            typeof data.error === "string" ? data.error : "Failed to update model"
-          );
-        }
-        const savedModel = typeof data.model_selection === "string" ? normalizeModelSelectionForSettings(data.model_selection) : nextModelSelection;
-        setSelectedModel(savedModel);
-        onModelSelectionChange?.(savedModel, nextRouterType);
-      } catch (err) {
-        setSelectedModel(prevModel);
-        setCurrentRouterType(prevRouter);
-        setError(err instanceof Error ? err.message : "Failed to update model");
-      } finally {
-        setSaving(false);
-      }
-    },
-    [authFetch, botId, onModelSelectionChange, persistMode, selectedModel, currentRouterType]
-  );
-  if (apiKeyMode !== "platform_credits") return null;
-  return /* @__PURE__ */ jsxRuntimeExports.jsxs(
+function ChatModelPicker(_props) {
+  return /* @__PURE__ */ jsxRuntimeExports.jsx(
     "div",
     {
-      className: "relative flex max-w-full flex-wrap items-center justify-end gap-1 rounded-xl border border-black/[0.06] bg-white/80 p-1 shadow-[0_1px_8px_rgba(15,23,42,0.06)] backdrop-blur",
+      className: "flex h-11 max-w-[13rem] items-center rounded-lg border border-black/[0.06] bg-white/80 px-3 text-xs font-medium text-foreground/80 shadow-[0_1px_8px_rgba(15,23,42,0.06)] backdrop-blur sm:h-8 sm:px-2.5",
       "data-chat-model-picker": "true",
-      children: [
-        /* @__PURE__ */ jsxRuntimeExports.jsx(
-          Dropdown,
-          {
-            label: "Router tier",
-            options: ROUTER_PICKER_OPTIONS,
-            value: pickerMode,
-            onChange: (mode) => {
-              const { modelSelection: nextModel, routerType: nextRouter } = applyRouterPickerMode(
-                mode,
-                selectedModel
-              );
-              void saveModel(nextModel, nextRouter);
-            },
-            disabled: saving,
-            menuPlacement
-          }
-        ),
-        pickerMode === "advanced" && /* @__PURE__ */ jsxRuntimeExports.jsx(
-          Dropdown,
-          {
-            label: "Model",
-            options: advancedOptions,
-            value: selectedModel,
-            onChange: (value) => void saveModel(value, "standard"),
-            disabled: saving,
-            menuPlacement
-          }
-        ),
-        saving && /* @__PURE__ */ jsxRuntimeExports.jsx(
-          "span",
-          {
-            className: "pointer-events-none h-3 w-3 rounded-full border border-primary/30 border-t-primary animate-spin",
-            "aria-hidden": "true"
-          }
-        ),
-        error && /* @__PURE__ */ jsxRuntimeExports.jsx(
-          "span",
-          {
-            className: "pointer-events-none absolute left-0 top-full mt-1 whitespace-nowrap rounded-md border border-red-500/15 bg-white px-2 py-1 text-[11px] text-red-500 shadow-sm",
-            role: "status",
-            children: error
-          }
-        )
-      ]
+      title: "Uses the model configured in magi-agent.yaml",
+      children: /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "truncate", children: "Configured LLM" })
     }
   );
 }
@@ -34634,22 +35048,55 @@ function KbContextBar({ docs: docs2, onRemove }) {
 function Image({ fill: _fill, unoptimized: _unoptimized, ...props }) {
   return /* @__PURE__ */ jsxRuntimeExports.jsx("img", { ...props });
 }
+const WORK_CONSOLE_MOTION_TICK_MS = 1e3;
+const WORK_CONSOLE_ROW_STAGGER_MS = 60;
+const WORK_CONSOLE_ROW_STAGGER_MAX_MS = 240;
+function smoothedHeartbeatElapsedMs(baseElapsedMs, observedAtMs, nowMs) {
+  if (typeof baseElapsedMs !== "number" || !Number.isFinite(baseElapsedMs) || baseElapsedMs < 1e3) {
+    return null;
+  }
+  if (!Number.isFinite(observedAtMs) || !Number.isFinite(nowMs)) {
+    return Math.max(1e3, Math.floor(baseElapsedMs));
+  }
+  const localDeltaMs = Math.max(0, nowMs - observedAtMs);
+  return Math.floor(baseElapsedMs) + Math.floor(localDeltaMs / 1e3) * 1e3;
+}
+function workConsoleRowDelayMs(index2) {
+  if (!Number.isFinite(index2) || index2 <= 0) return 0;
+  return Math.min(
+    WORK_CONSOLE_ROW_STAGGER_MAX_MS,
+    Math.floor(index2) * WORK_CONSOLE_ROW_STAGGER_MS
+  );
+}
 const GROUP_LABELS = {
   status: "Now",
+  mission: "Missions",
   tool: "Current steps",
   subagent: "Helpers",
   task: "Plan",
   queue: "Queued messages",
+  trace: "Runtime proof",
   control: "Needs input"
 };
 const GROUP_LABELS_KO = {
   status: "현재",
+  mission: "미션",
   tool: "현재 단계",
   subagent: "도우미",
   task: "계획",
   queue: "대기 메시지",
+  trace: "런타임 증거",
   control: "입력 필요"
 };
+const INLINE_RUN_DETAIL_GROUPS = /* @__PURE__ */ new Set([
+  "tool",
+  "subagent",
+  "task",
+  "queue",
+  "trace",
+  "control"
+]);
+const MAX_DISPLAY_GOAL_CHARS = 140;
 function isKorean$1(language) {
   return language === "ko";
 }
@@ -34683,8 +35130,39 @@ function groupRows(rows) {
   }
   return Array.from(groups.entries());
 }
+function suppressInlineRunDetailRows(rows) {
+  return rows.filter((row) => !INLINE_RUN_DETAIL_GROUPS.has(row.group));
+}
+function compactDisplayGoal(value) {
+  const normalized = value?.replace(/\s+/g, " ").trim();
+  if (!normalized) return null;
+  return normalized.length <= MAX_DISPLAY_GOAL_CHARS ? normalized : null;
+}
+function hasVisibleGoalMission(rows, activeGoalMissionId) {
+  const activeMissionRowId = activeGoalMissionId ? `mission:${activeGoalMissionId}` : null;
+  return rows.some((row) => {
+    if (row.group !== "mission") return false;
+    if (activeMissionRowId && row.id === activeMissionRowId) return true;
+    return row.meta?.split(/\s+/)[0] === "goal";
+  });
+}
+function compactInlineOverviewRows(rows, channelState, language) {
+  const visible = suppressInlineRunDetailRows(rows);
+  const goal = hasVisibleGoalMission(visible, channelState.activeGoalMissionId) ? null : compactDisplayGoal(channelState.pendingGoalMissionTitle) ?? compactDisplayGoal(channelState.currentGoal);
+  if (goal) {
+    visible.push({
+      id: "overview:goal",
+      group: "status",
+      label: t$1(language, "Goal", "목표"),
+      detail: goal,
+      status: "info"
+    });
+  }
+  return visible;
+}
 function sectionTone(group) {
   if (group === "status") return "status";
+  if (group === "mission") return "mission";
   if (group === "subagent") return "agents";
   if (group === "tool") return "actions";
   if (group === "queue") return "queue";
@@ -34694,6 +35172,8 @@ function sectionClass(group) {
   switch (sectionTone(group)) {
     case "status":
       return "mb-3 min-h-0 rounded-xl border border-[#7C3AED]/15 bg-[#F8F6FF] p-2 shadow-[0_1px_6px_rgba(124,58,237,0.08)]";
+    case "mission":
+      return "mb-3 min-h-0 rounded-xl border border-sky-500/20 bg-sky-50/70 p-2 shadow-[0_1px_6px_rgba(14,165,233,0.08)]";
     case "agents":
       return "mb-3 min-h-0 rounded-xl border border-emerald-500/20 bg-white p-2 shadow-[0_1px_6px_rgba(16,185,129,0.08)]";
     case "actions":
@@ -34720,72 +35200,157 @@ function actionRowToneClass(status) {
       return "border-black/[0.06] bg-white/70 shadow-[0_1px_0_rgba(0,0,0,0.03)]";
   }
 }
-function WorkConsoleAgentChip({ row }) {
-  return /* @__PURE__ */ jsxRuntimeExports.jsx("li", { className: "min-w-0 max-w-full", children: /* @__PURE__ */ jsxRuntimeExports.jsxs(
-    "div",
-    {
-      className: "grid w-full min-w-0 grid-cols-[auto,minmax(0,1fr),auto] items-center gap-1 rounded-md border border-emerald-500/12 bg-emerald-50/35 px-1.5 py-1 text-[10.5px] leading-none",
-      "data-work-console-agent-chip": "true",
-      "data-work-console-row-status": row.status,
-      title: [row.label, row.meta, row.detail].filter(Boolean).join(" "),
-      children: [
-        /* @__PURE__ */ jsxRuntimeExports.jsx(
-          "span",
-          {
-            className: `h-1.5 w-1.5 shrink-0 rounded-full ${statusClass(row.status)}`,
-            "aria-hidden": "true"
-          }
-        ),
-        /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "min-w-0 truncate", children: [
-          /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "font-medium text-foreground/80", children: row.label }),
-          row.meta && /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "text-secondary/40", children: [
-            " ",
-            row.meta
-          ] })
-        ] }),
-        row.detail && /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "shrink-0 rounded bg-black/[0.04] px-1 py-0.5 text-[9px] font-medium text-secondary/55", children: row.detail })
-      ]
-    }
-  ) });
+function runningMotionClass(status) {
+  return status === "running" ? "work-console-running-row" : "";
 }
-function WorkConsoleRowItem({ row }) {
+function runningDotMotionClass(status) {
+  return status === "running" ? "work-console-running-dot" : "";
+}
+function motionStyle(delayMs) {
+  return { "--work-console-row-delay": `${delayMs}ms` };
+}
+function useSmoothedChannelState(channelState) {
+  const [displayNowMs, setDisplayNowMs] = reactExports.useState(() => Date.now());
+  const heartbeatAnchorRef = reactExports.useRef({
+    elapsedMs: channelState.heartbeatElapsedMs ?? null,
+    observedAtMs: displayNowMs
+  });
+  const currentHeartbeatElapsedMs = channelState.heartbeatElapsedMs ?? null;
+  if (heartbeatAnchorRef.current.elapsedMs !== currentHeartbeatElapsedMs) {
+    heartbeatAnchorRef.current = {
+      elapsedMs: currentHeartbeatElapsedMs,
+      observedAtMs: displayNowMs
+    };
+  }
+  reactExports.useEffect(() => {
+    if (!channelState.streaming || currentHeartbeatElapsedMs === null) return;
+    const tick = window.setInterval(() => {
+      setDisplayNowMs(Date.now());
+    }, WORK_CONSOLE_MOTION_TICK_MS);
+    return () => window.clearInterval(tick);
+  }, [channelState.streaming, currentHeartbeatElapsedMs]);
+  const smoothedElapsedMs = smoothedHeartbeatElapsedMs(
+    heartbeatAnchorRef.current.elapsedMs,
+    heartbeatAnchorRef.current.observedAtMs,
+    displayNowMs
+  );
+  if (smoothedElapsedMs === currentHeartbeatElapsedMs) return channelState;
+  return { ...channelState, heartbeatElapsedMs: smoothedElapsedMs };
+}
+function WorkConsoleAgentChip({
+  row,
+  motionDelayMs
+}) {
+  return /* @__PURE__ */ jsxRuntimeExports.jsx(
+    "li",
+    {
+      className: `work-console-row-motion min-w-0 max-w-full ${runningMotionClass(row.status)}`,
+      "data-work-console-motion": "true",
+      style: motionStyle(motionDelayMs),
+      children: /* @__PURE__ */ jsxRuntimeExports.jsxs(
+        "div",
+        {
+          className: "grid w-full min-w-0 grid-cols-[auto,minmax(0,1fr),auto] items-center gap-1 rounded-md border border-emerald-500/12 bg-emerald-50/35 px-1.5 py-1 text-[10.5px] leading-none",
+          "data-work-console-agent-chip": "true",
+          "data-work-console-row-status": row.status,
+          title: [row.label, row.meta, row.detail].filter(Boolean).join(" "),
+          children: [
+            /* @__PURE__ */ jsxRuntimeExports.jsx(
+              "span",
+              {
+                className: `h-1.5 w-1.5 shrink-0 rounded-full ${statusClass(row.status)} ${runningDotMotionClass(row.status)}`,
+                "aria-hidden": "true"
+              }
+            ),
+            /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "min-w-0 truncate", children: [
+              /* @__PURE__ */ jsxRuntimeExports.jsx(
+                "span",
+                {
+                  className: "work-console-text-motion font-medium text-foreground/80",
+                  children: row.label
+                },
+                row.label
+              ),
+              row.meta && /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "work-console-text-motion text-secondary/40", children: [
+                " ",
+                row.meta
+              ] }, row.meta)
+            ] }),
+            row.detail && /* @__PURE__ */ jsxRuntimeExports.jsx(
+              "span",
+              {
+                className: "work-console-text-motion shrink-0 rounded bg-black/[0.04] px-1 py-0.5 text-[9px] font-medium text-secondary/55",
+                children: row.detail
+              },
+              row.detail
+            )
+          ]
+        }
+      )
+    }
+  );
+}
+function WorkConsoleRowItem({
+  row,
+  motionDelayMs
+}) {
   const isActionRow = row.group === "tool";
   const isStatusRow = row.group === "status";
+  const isMissionRow = row.group === "mission";
   const isQueueRow = row.group === "queue";
   return /* @__PURE__ */ jsxRuntimeExports.jsxs(
     "li",
     {
-      className: isStatusRow ? "flex min-w-0 items-start gap-2 rounded-lg border border-[#7C3AED]/20 bg-white/70 px-2.5 py-2.5 shadow-[0_1px_4px_rgba(124,58,237,0.08)]" : isActionRow ? `flex min-w-0 items-start gap-2 rounded-lg border px-2.5 py-2 ${actionRowToneClass(row.status)}` : isQueueRow ? "flex min-w-0 items-start gap-2 rounded-lg border border-amber-500/20 bg-white/70 px-2.5 py-2 shadow-[0_1px_4px_rgba(245,158,11,0.08)]" : "flex min-w-0 items-start gap-2 rounded-md px-2 py-1.5",
+      className: isStatusRow ? `work-console-row-motion flex min-w-0 items-start gap-2 rounded-lg border border-[#7C3AED]/20 bg-white/70 px-2.5 py-2.5 shadow-[0_1px_4px_rgba(124,58,237,0.08)] ${runningMotionClass(row.status)}` : isMissionRow ? `work-console-row-motion flex min-w-0 items-start gap-2 rounded-lg border border-sky-500/20 bg-white/75 px-2.5 py-2 shadow-[0_1px_4px_rgba(14,165,233,0.08)] ${runningMotionClass(row.status)}` : isActionRow ? `work-console-row-motion flex min-w-0 items-start gap-2 rounded-lg border px-2.5 py-2 ${actionRowToneClass(row.status)} ${runningMotionClass(row.status)}` : isQueueRow ? `work-console-row-motion flex min-w-0 items-start gap-2 rounded-lg border border-amber-500/20 bg-white/70 px-2.5 py-2 shadow-[0_1px_4px_rgba(245,158,11,0.08)] ${runningMotionClass(row.status)}` : `work-console-row-motion flex min-w-0 items-start gap-2 rounded-md px-2 py-1.5 ${runningMotionClass(row.status)}`,
+      "data-work-console-motion": "true",
       "data-work-console-action-row": isActionRow ? "true" : void 0,
       "data-work-console-status-row": isStatusRow ? "true" : void 0,
+      "data-work-console-mission-row": isMissionRow ? "true" : void 0,
       "data-work-console-queue-row": isQueueRow ? "true" : void 0,
       "data-work-console-row-status": row.status,
+      style: motionStyle(motionDelayMs),
       children: [
         /* @__PURE__ */ jsxRuntimeExports.jsx(
           "span",
           {
-            className: `${isStatusRow ? "mt-2 h-2.5 w-2.5 ring-4 ring-[#7C3AED]/10" : isActionRow ? "mt-2 h-2 w-2" : "mt-1.5 h-1.5 w-1.5"} shrink-0 rounded-full ${statusClass(row.status)}`,
+            className: `${isStatusRow ? "mt-2 h-2.5 w-2.5 ring-4 ring-[#7C3AED]/10" : isMissionRow || isActionRow ? "mt-2 h-2 w-2" : "mt-1.5 h-1.5 w-1.5"} shrink-0 rounded-full ${statusClass(row.status)} ${runningDotMotionClass(row.status)}`,
             "aria-hidden": "true"
           }
         ),
         /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "min-w-0 flex-1", children: [
           /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex min-w-0 items-baseline gap-2", children: [
-            /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "min-w-0 truncate text-[12px] font-medium text-foreground/80", children: row.label }),
-            row.meta && /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "shrink-0 text-[10px] text-secondary/40", children: row.meta })
+            /* @__PURE__ */ jsxRuntimeExports.jsx(
+              "span",
+              {
+                className: "work-console-text-motion min-w-0 truncate text-[12px] font-medium text-foreground/80",
+                children: row.label
+              },
+              row.label
+            ),
+            row.meta && /* @__PURE__ */ jsxRuntimeExports.jsx(
+              "span",
+              {
+                className: "work-console-text-motion shrink-0 text-[10px] text-secondary/40",
+                children: row.meta
+              },
+              row.meta
+            )
           ] }),
           row.detail && /* @__PURE__ */ jsxRuntimeExports.jsx(
             "p",
             {
-              className: isStatusRow ? "mt-0.5 break-words text-[11.5px] leading-snug text-secondary/60" : isQueueRow ? "mt-1 line-clamp-3 break-words text-[11.5px] leading-snug text-amber-950/75" : isActionRow ? "mt-1 line-clamp-2 break-words text-[11.5px] leading-snug text-secondary/65" : "mt-0.5 line-clamp-3 break-words text-[11px] leading-snug text-secondary/65",
+              className: isStatusRow ? "work-console-text-motion mt-0.5 break-words text-[11.5px] leading-snug text-secondary/60" : isQueueRow ? "work-console-text-motion mt-1 line-clamp-3 break-words text-[11.5px] leading-snug text-amber-950/75" : isActionRow ? "work-console-text-motion mt-1 line-clamp-2 break-words text-[11.5px] leading-snug text-secondary/65" : "work-console-text-motion mt-0.5 line-clamp-3 break-words text-[11px] leading-snug text-secondary/65",
               children: row.detail
-            }
+            },
+            row.detail
           ),
           row.snippet && /* @__PURE__ */ jsxRuntimeExports.jsx(
             "pre",
             {
-              className: isActionRow ? "mt-2 max-h-20 overflow-auto rounded-md bg-black/[0.04] px-2 py-1.5 whitespace-pre-wrap break-words text-[10.5px] leading-snug text-secondary/70" : "mt-1 max-h-28 overflow-auto rounded-md bg-black/[0.04] px-2 py-1.5 whitespace-pre-wrap break-words text-[10.5px] leading-snug text-secondary/70",
+              className: isActionRow ? "work-console-text-motion mt-2 max-h-20 overflow-auto rounded-md bg-black/[0.04] px-2 py-1.5 whitespace-pre-wrap break-words text-[10.5px] leading-snug text-secondary/70" : "work-console-text-motion mt-1 max-h-28 overflow-auto rounded-md bg-black/[0.04] px-2 py-1.5 whitespace-pre-wrap break-words text-[10.5px] leading-snug text-secondary/70",
               children: row.snippet
-            }
+            },
+            row.snippet
           )
         ] })
       ]
@@ -34813,6 +35378,34 @@ function browserActionLabel$1(action, language) {
     default:
       return t$1(language, "Using browser", "브라우저 사용 중");
   }
+}
+function DocumentDraftPreviewCard({
+  draft,
+  language
+}) {
+  const unit = draft.contentLength === 1 ? "char" : "chars";
+  const sizeLabel = isKorean$1(language) ? `${draft.contentLength.toLocaleString()}자` : `${draft.contentLength.toLocaleString()} ${unit}`;
+  return /* @__PURE__ */ jsxRuntimeExports.jsxs(
+    "section",
+    {
+      className: "mb-3 overflow-hidden rounded-xl border border-[#7C3AED]/15 bg-white shadow-[0_1px_6px_rgba(124,58,237,0.08)]",
+      "data-work-console-document-draft": "true",
+      children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex min-w-0 items-center justify-between gap-2 border-b border-black/[0.06] px-2.5 py-1.5", children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "shrink-0 text-[10px] font-semibold uppercase tracking-wide text-secondary/45", children: draft.status === "done" ? t$1(language, "Document written", "문서 작성 완료") : t$1(language, "Writing document", "문서 작성 중") }),
+          /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "min-w-0 truncate text-[10.5px] text-secondary/55", children: [
+            draft.filename ?? (draft.format === "md" ? "Markdown" : "Text"),
+            /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "text-secondary/35", children: [
+              " · ",
+              sizeLabel
+            ] })
+          ] })
+        ] }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx("pre", { className: "max-h-44 overflow-auto bg-[#FBFBFD] px-2.5 py-2 whitespace-pre-wrap break-words text-[11px] leading-snug text-secondary/75", children: draft.truncated ? `...
+${draft.contentPreview}` : draft.contentPreview })
+      ]
+    }
+  );
 }
 function BrowserFramePreview({
   frame,
@@ -34847,15 +35440,33 @@ function BrowserFramePreview({
 function WorkConsolePanel({
   channelState,
   queuedMessages = [],
-  controlRequests = []
+  controlRequests = [],
+  suppressInlineRunDetails = false,
+  uiLanguage
 }) {
   const actionsListRef = reactExports.useRef(null);
-  const rows = deriveWorkConsoleRows({
-    channelState,
+  const smoothedChannelState = useSmoothedChannelState(channelState);
+  const language = uiLanguage ?? smoothedChannelState.responseLanguage;
+  const allRows = deriveWorkConsoleRows({
+    channelState: smoothedChannelState,
     queuedMessages,
-    controlRequests
+    controlRequests,
+    uiLanguage: language
   });
-  const language = channelState.responseLanguage;
+  const visibleRows = suppressInlineRunDetails ? compactInlineOverviewRows(allRows, smoothedChannelState, language) : allRows;
+  const rows = visibleRows.length > 0 ? visibleRows : [
+    {
+      id: "inline-stream",
+      group: "status",
+      label: t$1(language, "Streaming in chat", "채팅에서 표시 중"),
+      detail: t$1(
+        language,
+        "Live step details are shown inline in the conversation.",
+        "실시간 단계 상세는 채팅 안에 표시됩니다."
+      ),
+      status: "info"
+    }
+  ];
   const groups = groupRows(rows);
   const actionRows = groups.find(([group]) => group === "tool")?.[1] ?? [];
   const lastActionId = actionRows[actionRows.length - 1]?.id ?? "";
@@ -34874,6 +35485,7 @@ function WorkConsolePanel({
       /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "mt-1 text-[11px] leading-snug text-secondary/45", children: t$1(language, "Plain-language progress from the current run.", "현재 실행의 진행 상황입니다.") })
     ] }),
     /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "min-h-0 flex-1 overflow-y-auto px-2 py-2", children: [
+      channelState.documentDraft && /* @__PURE__ */ jsxRuntimeExports.jsx(DocumentDraftPreviewCard, { draft: channelState.documentDraft, language }),
       channelState.browserFrame && /* @__PURE__ */ jsxRuntimeExports.jsx(BrowserFramePreview, { frame: channelState.browserFrame, language }),
       groups.map(([group, groupRows2]) => {
         const isActionsGroup = group === "tool";
@@ -34896,6 +35508,10 @@ function WorkConsolePanel({
                     /* @__PURE__ */ jsxRuntimeExports.jsx("span", { children: groupLabel(group, language) }),
                     tone === "status" && /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "rounded-full bg-[#7C3AED]/10 px-1.5 py-0.5 text-[9px] font-semibold text-[#7C3AED]", children: t$1(language, "Live", "실시간") }),
                     tone === "actions" && /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "rounded-full bg-black/[0.04] px-1.5 py-0.5 text-[9px] font-semibold text-secondary/45", children: groupRows2.length }),
+                    tone === "mission" && /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "rounded-full bg-sky-500/15 px-1.5 py-0.5 text-[9px] font-semibold text-sky-800", children: [
+                      groupRows2.length,
+                      " tracked"
+                    ] }),
                     tone === "agents" && /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "rounded-full bg-emerald-500/15 px-1.5 py-0.5 text-[9px] font-semibold text-emerald-700", children: isKorean$1(language) ? `${groupRows2.length}명` : `${groupRows2.length} agents` }),
                     tone === "queue" && /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "rounded-full bg-amber-500/15 px-1.5 py-0.5 text-[9px] font-semibold text-amber-800", children: isKorean$1(language) ? `${groupRows2.length}개 대기` : `${groupRows2.length} waiting` })
                   ]
@@ -34910,7 +35526,21 @@ function WorkConsolePanel({
                   "data-work-console-agent-roster": isSubagentGroup ? "compact" : void 0,
                   "data-work-console-agent-layout": isSubagentGroup ? "grid" : void 0,
                   "aria-label": isActionsGroup ? groupLabel("tool", language) : isSubagentGroup ? groupLabel("subagent", language) : void 0,
-                  children: groupRows2.map((row) => isSubagentGroup ? /* @__PURE__ */ jsxRuntimeExports.jsx(WorkConsoleAgentChip, { row }, row.id) : /* @__PURE__ */ jsxRuntimeExports.jsx(WorkConsoleRowItem, { row }, row.id))
+                  children: groupRows2.map((row, index2) => isSubagentGroup ? /* @__PURE__ */ jsxRuntimeExports.jsx(
+                    WorkConsoleAgentChip,
+                    {
+                      row,
+                      motionDelayMs: workConsoleRowDelayMs(index2)
+                    },
+                    row.id
+                  ) : /* @__PURE__ */ jsxRuntimeExports.jsx(
+                    WorkConsoleRowItem,
+                    {
+                      row,
+                      motionDelayMs: workConsoleRowDelayMs(index2)
+                    },
+                    row.id
+                  ))
                 }
               )
             ]
@@ -35153,6 +35783,18 @@ const EMPTY_CHANNEL_STATE = {
   taskBoard: null,
   fileProcessing: false
 };
+function hasOpenTaskState(channelState) {
+  return !!channelState.taskBoard?.tasks.some(
+    (task) => task.status === "pending" || task.status === "in_progress"
+  );
+}
+function shouldSuppressInlineRunDetails(channelState, queuedMessages, controlRequests) {
+  const hasPendingControlRequest = controlRequests.some((request) => request.state === "pending");
+  const hasLiveWork = (channelState.activeTools ?? []).length > 0 || (channelState.subagents ?? []).some(
+    (subagent) => subagent.status === "running" || subagent.status === "waiting"
+  ) || hasOpenTaskState(channelState) || !!channelState.browserFrame || queuedMessages.length > 0 || hasPendingControlRequest || channelState.fileProcessing || channelState.reconnecting;
+  return hasLiveWork || channelState.streaming && !channelState.streamingText;
+}
 function KbSidePanel({
   botId,
   collections,
@@ -35240,6 +35882,11 @@ function KbSidePanel({
   }, [activeScope, scopeBuckets]);
   const isWorkspaceScope = activeScope === "workspace";
   const panelRefreshing = isWorkspaceScope ? workspaceRefreshing : refreshing;
+  const suppressInlineRunDetails = shouldSuppressInlineRunDetails(
+    channelState,
+    queuedMessages,
+    controlRequests
+  );
   const selectView = reactExports.useCallback((view) => {
     setActiveView(view);
     try {
@@ -35660,7 +36307,8 @@ function KbSidePanel({
         {
           channelState,
           queuedMessages,
-          controlRequests
+          controlRequests,
+          suppressInlineRunDetails
         }
       ) }),
       /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: `${activeView === "knowledge" ? "flex" : "hidden"} min-h-0 flex-1 flex-col`, children: [
@@ -35999,11 +36647,13 @@ function pendingControlRequests(requests) {
   return (requests ?? []).filter((request) => request.state === "pending");
 }
 function hasVisibleRunState(channelState, queuedMessages, pendingRequests, taskBoard, subagents) {
-  return channelState.streaming || (channelState.activeTools ?? []).length > 0 || !!channelState.browserFrame || subagents.length > 0 || queuedMessages.length > 0 || pendingRequests.length > 0 || !!taskBoard;
+  const inspectedSources = channelState.inspectedSources ?? [];
+  return channelState.streaming || (channelState.activeTools ?? []).length > 0 || !!channelState.browserFrame || !!channelState.documentDraft || subagents.length > 0 || queuedMessages.length > 0 || pendingRequests.length > 0 || !!taskBoard || inspectedSources.length > 0 || !!channelState.citationGate;
 }
 function runIdentity(channelState, queuedMessages, pendingRequests, taskBoard, subagents) {
   const activeTools2 = channelState.activeTools ?? [];
-  const startedAt = channelState.thinkingStartedAt ?? activeTools2[0]?.startedAt ?? channelState.browserFrame?.capturedAt ?? subagents[0]?.startedAt ?? null;
+  const inspectedSources = channelState.inspectedSources ?? [];
+  const startedAt = channelState.thinkingStartedAt ?? activeTools2[0]?.startedAt ?? channelState.browserFrame?.capturedAt ?? channelState.documentDraft?.updatedAt ?? subagents[0]?.startedAt ?? inspectedSources[0]?.inspectedAt ?? channelState.citationGate?.checkedAt ?? null;
   if (startedAt !== null) return `run:${startedAt}`;
   if (pendingRequests.length > 0) {
     return `controls:${pendingRequests.map((request) => request.requestId).join(",")}`;
@@ -36031,6 +36681,8 @@ function phaseLabel(phase, language) {
       return t(language, "Planning", "계획 중");
     case "executing":
       return t(language, "Running", "실행 중");
+    case "compacting":
+      return t(language, "Compacting", "압축 중");
     case "verifying":
       return t(language, "Verifying", "검증 중");
     case "committing":
@@ -36200,15 +36852,131 @@ function BrowserFrameInline({
     }
   );
 }
+function DocumentDraftInline({
+  draft,
+  language
+}) {
+  const unit = draft.contentLength === 1 ? "char" : "chars";
+  const sizeLabel = isKorean(language) ? `${draft.contentLength.toLocaleString()}자` : `${draft.contentLength.toLocaleString()} ${unit}`;
+  return /* @__PURE__ */ jsxRuntimeExports.jsxs(
+    "div",
+    {
+      className: "mt-2 overflow-hidden rounded-lg border border-[#7C3AED]/15 bg-white",
+      "data-run-inspector-document-draft": "true",
+      children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex min-w-0 items-center justify-between gap-2 border-b border-black/[0.06] px-2.5 py-1.5", children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "shrink-0 text-[10px] font-semibold uppercase tracking-wide text-secondary/45", children: draft.status === "done" ? t(language, "Document written", "문서 작성 완료") : t(language, "Writing document", "문서 작성 중") }),
+          /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "min-w-0 truncate text-[10.5px] text-secondary/55", children: [
+            draft.filename ?? (draft.format === "md" ? "Markdown" : "Text"),
+            /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "text-secondary/35", children: [
+              " · ",
+              sizeLabel
+            ] })
+          ] })
+        ] }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx("pre", { className: "max-h-52 overflow-auto bg-[#FBFBFD] px-2.5 py-2 whitespace-pre-wrap break-words text-[11px] leading-snug text-secondary/75", children: draft.truncated ? `...
+${draft.contentPreview}` : draft.contentPreview })
+      ]
+    }
+  );
+}
+function sourceKindLabel(kind, language) {
+  switch (kind) {
+    case "web_search":
+      return t(language, "search", "검색");
+    case "web_fetch":
+      return t(language, "web", "웹");
+    case "browser":
+      return t(language, "browser", "브라우저");
+    case "kb":
+      return "KB";
+    case "file":
+      return t(language, "file", "파일");
+    case "external_repo":
+      return t(language, "repo", "저장소");
+    case "external_doc":
+      return t(language, "doc", "문서");
+    case "subagent_result":
+      return t(language, "helper", "도우미");
+    default:
+      return t(language, "source", "출처");
+  }
+}
+function displaySourceUri(uri) {
+  try {
+    const parsed = new URL(uri);
+    return `${parsed.hostname}${parsed.pathname}${parsed.search}`.replace(/\/$/, "");
+  } catch {
+    return uri.replace(/^external:/, "");
+  }
+}
+function citationStatusLabel(status, language) {
+  switch (status.verdict) {
+    case "ok":
+      return t(language, "covered", "충족");
+    case "violation":
+      return t(language, "needs citations", "인용 필요");
+    case "pending":
+    default:
+      return t(language, "checking", "확인 중");
+  }
+}
+function citationStatusClass(status) {
+  switch (status.verdict) {
+    case "ok":
+      return "bg-emerald-500";
+    case "violation":
+      return "bg-amber-500";
+    case "pending":
+    default:
+      return "bg-secondary/35";
+  }
+}
+function ResearchEvidence({
+  sources,
+  citationGate,
+  language
+}) {
+  if (sources.length === 0 && !citationGate) return null;
+  const recentSources = sources.slice(-5).reverse();
+  return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "mt-2 border-t border-black/[0.06] pt-2", "aria-label": t(language, "Research evidence", "리서치 근거"), children: [
+    /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "mb-1.5 flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wide text-secondary/50", children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsx("span", { children: t(language, "Research evidence", "리서치 근거") }),
+      sources.length > 0 && /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "font-medium normal-case tracking-normal text-secondary/35", children: isKorean(language) ? `출처 ${sources.length}개` : `${sources.length} sources` })
+    ] }),
+    citationGate && /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "mb-1.5 flex min-w-0 items-center gap-2 text-xs", children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsx(
+        "span",
+        {
+          className: `h-1.5 w-1.5 shrink-0 rounded-full ${citationStatusClass(citationGate)}`,
+          "aria-hidden": "true"
+        }
+      ),
+      /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "shrink-0 font-medium text-secondary/80", children: t(language, "Citation coverage", "인용 커버리지") }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "shrink-0 text-secondary/50", children: citationStatusLabel(citationGate, language) }),
+      citationGate.detail && /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "min-w-0 truncate text-secondary/55", children: citationGate.detail })
+    ] }),
+    recentSources.length > 0 && /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "space-y-1", "aria-label": t(language, "Sources", "출처"), children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "sr-only", children: t(language, "Sources", "출처") }),
+      recentSources.map((source) => /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex min-w-0 items-center gap-2 text-xs", children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "shrink-0 rounded bg-black/[0.04] px-1.5 py-0.5 font-mono text-[10px] text-secondary/55", children: source.sourceId }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "shrink-0 text-[10px] font-semibold uppercase tracking-wide text-secondary/40", children: sourceKindLabel(source.kind, language) }),
+        source.title && /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "min-w-0 truncate font-medium text-secondary/80", children: source.title }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "min-w-0 truncate text-secondary/50", children: displaySourceUri(source.uri) })
+      ] }, source.sourceId))
+    ] })
+  ] });
+}
 function RunInspectorDock({
   channelState,
   queuedMessages = [],
   controlRequests = [],
   cancelHint,
   defaultHidden = false,
-  compactDetails = false
+  compactDetails = false,
+  uiLanguage
 }) {
-  const language = channelState.responseLanguage;
+  const language = uiLanguage ?? channelState.responseLanguage;
   const taskBoard = openTaskBoard(channelState.taskBoard);
   const subagents = channelState.subagents ?? [];
   const pendingRequests = pendingControlRequests(controlRequests);
@@ -36244,6 +37012,7 @@ function RunInspectorDock({
   }
   const nextQueued = queuedMessages[0];
   const activeTools2 = channelState.activeTools ?? [];
+  const inspectedSources = channelState.inspectedSources ?? [];
   const activeToolCount = activeTools2.filter((activity) => activity.status === "running").length;
   const activeSubagentCount = subagents.filter(
     (subagent) => subagent.status === "running" || subagent.status === "waiting"
@@ -36297,6 +37066,15 @@ function RunInspectorDock({
     /* @__PURE__ */ jsxRuntimeExports.jsx(WorkStateSummaryRows, { summary: workState, language }),
     compactDetails ? null : /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "mt-2 max-h-[min(50vh,34rem)] overflow-y-auto overscroll-contain pr-1 [scrollbar-gutter:stable]", children: [
       channelState.browserFrame && /* @__PURE__ */ jsxRuntimeExports.jsx(BrowserFrameInline, { frame: channelState.browserFrame, language }),
+      channelState.documentDraft && /* @__PURE__ */ jsxRuntimeExports.jsx(DocumentDraftInline, { draft: channelState.documentDraft, language }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx(
+        ResearchEvidence,
+        {
+          sources: inspectedSources,
+          citationGate: channelState.citationGate,
+          language
+        }
+      ),
       (channelState.streaming || activeTools2.length > 0) && /* @__PURE__ */ jsxRuntimeExports.jsx("div", { children: /* @__PURE__ */ jsxRuntimeExports.jsx(
         AgentActivityTimeline,
         {
@@ -36403,11 +37181,111 @@ function detectMessageResponseLanguage(text2) {
   if (latin >= 3) return spanishSignal >= 2 ? "es" : "en";
   return "en";
 }
+const DEFAULT_ESC_ARM_WINDOW_MS = 5e3;
+function buildEscCancelDecision({
+  hasQueued,
+  armedUntil,
+  now,
+  armWindowMs = DEFAULT_ESC_ARM_WINDOW_MS
+}) {
+  if (hasQueued) return { action: "cancel", nextArmedUntil: null };
+  if (armedUntil !== null && now <= armedUntil) {
+    return { action: "cancel", nextArmedUntil: null };
+  }
+  return { action: "arm", nextArmedUntil: now + armWindowMs };
+}
+async function cancelActiveTurnWithQueueHandoff({
+  hasQueued,
+  promoteQueuedForHandoff,
+  cancelStream,
+  interrupt,
+  drainQueue
+}) {
+  const handoffRequested = hasQueued();
+  if (handoffRequested) {
+    promoteQueuedForHandoff?.();
+  }
+  const interruptPromise = interrupt(handoffRequested);
+  cancelStream({ preserveQueue: handoffRequested });
+  const interruptResult = await interruptPromise;
+  const canDrain = handoffRequested && (interruptResult.accepted || interruptResult.reason === "no_active_turn");
+  if (canDrain) {
+    drainQueue();
+  }
+  return {
+    handoffRequested,
+    interruptAccepted: interruptResult.accepted,
+    drained: canDrain
+  };
+}
+function stripAttachmentMarkers(content2) {
+  let cleaned = content2;
+  for (const marker of parseMarkers(content2)) {
+    cleaned = cleaned.replace(marker.fullMatch, "");
+  }
+  return cleaned.replace(/\[attachment:[0-9a-f-]{36}:[^\]]+\]/gi, "").replace(/\[Attachment: [^\]]+\]\(attachment:[^)]+\)/gi, "").trim();
+}
+function cleanChatExportContent(content2) {
+  const withoutKbContext = parseKbContextMarker(content2).text;
+  return stripAttachmentMarkers(withoutKbContext).trim();
+}
+function isExportableChatMessage(message) {
+  return message.role === "user" || message.role === "assistant";
+}
+function normalizeSelectedChatExportMessages(messages, selectedIds) {
+  return messages.filter(isExportableChatMessage).filter(
+    (message) => selectedIds.has(message.id) || typeof message.serverId === "string" && selectedIds.has(message.serverId)
+  ).sort(compareChatMessages).map((message) => ({
+    id: message.id,
+    role: message.role,
+    content: cleanChatExportContent(message.content),
+    timestamp: message.timestamp
+  })).filter((message) => message.content.trim().length > 0);
+}
+function formatExportTimestamp(timestamp) {
+  const date = new Date(timestamp);
+  const year = date.getUTCFullYear();
+  const month = `${date.getUTCMonth() + 1}`.padStart(2, "0");
+  const day = `${date.getUTCDate()}`.padStart(2, "0");
+  const hours = `${date.getUTCHours()}`.padStart(2, "0");
+  const minutes = `${date.getUTCMinutes()}`.padStart(2, "0");
+  return `${year}-${month}-${day} ${hours}:${minutes}`;
+}
+function roleLabel(role) {
+  return role === "user" ? "User" : "Assistant";
+}
+function buildChatExportMarkdown(input) {
+  const lines = [
+    "# Open Magi Chat Export",
+    "",
+    `- Bot: ${input.botName}`,
+    `- Channel: ${input.channelName}`,
+    `- Exported: ${input.exportedAt.toISOString()}`,
+    `- Messages: ${input.messages.length}`,
+    ""
+  ];
+  for (const message of input.messages) {
+    lines.push(`## ${roleLabel(message.role)} - ${formatExportTimestamp(message.timestamp)}`);
+    lines.push("");
+    lines.push(message.content.trim());
+    lines.push("");
+  }
+  return `${lines.join("\n").trim()}
+`;
+}
+function slugPart(value) {
+  const slug = value.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 60);
+  return slug || "chat";
+}
+function buildChatExportFilename(input) {
+  const day = input.exportedAt.toISOString().slice(0, 10);
+  return `open-magi-${slugPart(input.botName)}-${slugPart(input.channelName)}-${day}.md`;
+}
 const BOT_ID = "local";
 const BOT_NAME = "Magi_Local";
 const DEFAULT_CHANNEL = "general";
-const DEFAULT_MODEL = "magi_smart_routing";
-const DEFAULT_ROUTER = "big_dic";
+const DEFAULT_MODEL = "auto";
+const DEFAULT_ROUTER = "standard";
 const WORKSPACE_SCAN_LIMIT = 220;
 const EDITABLE_WORKSPACE_ROOTS = /* @__PURE__ */ new Set([
   ".magi",
@@ -36429,6 +37307,17 @@ const storage = {
   sessionKey: "magi.agent.app.sessionKey",
   modelOverride: "magi.agent.app.modelOverride"
 };
+function downloadMarkdownFile(filename, markdown) {
+  const blob = new Blob([markdown], { type: "text/markdown;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = filename;
+  document.body.appendChild(anchor);
+  anchor.click();
+  document.body.removeChild(anchor);
+  URL.revokeObjectURL(url);
+}
 function defaultChannel() {
   return {
     id: "local-general",
@@ -36456,9 +37345,45 @@ function sessionKeyForChannel(channel) {
   const raw = window.localStorage.getItem(storage.sessionKey)?.trim();
   return raw || defaultSessionKey(channel);
 }
+function decodePathPart(value) {
+  if (!value) return null;
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
+}
+function isDashboardRoute(value) {
+  return value === "overview" || value === "settings" || value === "usage" || value === "skills" || value === "converter" || value === "workspace" || value === "knowledge" || value === "memory";
+}
+function routeFromPathname(pathname) {
+  const parts = pathname.split("/").filter(Boolean);
+  if (parts[0] !== "dashboard") return "chat";
+  const section = decodePathPart(parts[2] ?? parts[1]);
+  if (section === "chat") return "chat";
+  return isDashboardRoute(section) ? section : "overview";
+}
+function channelFromPathname(pathname) {
+  const parts = pathname.split("/").filter(Boolean);
+  if (parts[0] !== "dashboard" || parts[2] !== "chat") return null;
+  const channel = decodePathPart(parts[3]);
+  return channel ? normalizeChannelName(channel) : null;
+}
+function pathForRoute(route, channel = DEFAULT_CHANNEL) {
+  if (route === "chat") {
+    return `/dashboard/${BOT_ID}/chat/${encodeURIComponent(channel)}`;
+  }
+  return `/dashboard/${BOT_ID}/${route}`;
+}
 function getStored(key, fallback) {
   if (typeof window === "undefined") return fallback;
   return window.localStorage.getItem(key) || fallback;
+}
+function getConfiguredModelSelection() {
+  if (typeof window !== "undefined") {
+    window.localStorage.removeItem(storage.modelOverride);
+  }
+  return DEFAULT_MODEL;
 }
 function asString(value, fallback = "") {
   return typeof value === "string" ? value : fallback;
@@ -36472,6 +37397,124 @@ function asRecord(value) {
 function asArray(value) {
   return Array.isArray(value) ? value.filter((item) => !!item && typeof item === "object") : [];
 }
+function asStringArray(value) {
+  return Array.isArray(value) ? value.filter((item) => typeof item === "string") : [];
+}
+function normalizedLookupKey(value) {
+  return value.trim().toLowerCase();
+}
+function compactUniqueStrings(values) {
+  return Array.from(
+    new Set(values.map((value) => value.trim()).filter((value) => value.length > 0))
+  );
+}
+function normalizeSkillIssueDetails(issues) {
+  return issues.map((issue, index2) => {
+    const skillName = asString(issue.skillName);
+    const dir = asString(issue.dir);
+    const path2 = asString(issue.path, dir);
+    const title = skillName || dir || `Issue ${index2 + 1}`;
+    const reason = asString(issue.reason, "unknown_issue");
+    const detail = asString(issue.detail);
+    const lookupKeys = compactUniqueStrings([skillName, dir, path2, title]).map(normalizedLookupKey);
+    return {
+      key: `${title}-${reason}-${index2}`,
+      title,
+      reason,
+      detail,
+      path: path2,
+      lookupKeys
+    };
+  });
+}
+function normalizeSkillDirectoryItems(loaded, issues) {
+  const issueDetails = normalizeSkillIssueDetails(issues);
+  return loaded.map((skill, index2) => {
+    const name2 = asString(skill.name, `skill-${index2 + 1}`);
+    const dir = asString(skill.dir);
+    const path2 = asString(skill.path, dir);
+    const lookupKeys = compactUniqueStrings([name2, dir, path2]).map(normalizedLookupKey);
+    const matchedIssues = issueDetails.filter(
+      (issue) => issue.lookupKeys.some((key) => lookupKeys.includes(key))
+    );
+    return {
+      name: name2,
+      path: path2,
+      tags: asStringArray(skill.tags),
+      promptOnly: skill.promptOnly === true,
+      scriptBacked: skill.scriptBacked === true,
+      runtimeHooks: Math.max(0, Math.floor(asNumber(skill.runtimeHooks, 0))),
+      issues: matchedIssues
+    };
+  });
+}
+function skillSearchText(skill) {
+  return [
+    skill.name,
+    skill.path,
+    ...skill.tags,
+    ...skill.issues.flatMap((issue) => [issue.title, issue.reason, issue.detail, issue.path])
+  ].join(" ").toLowerCase();
+}
+function filterSkillDirectoryItem(skill, filter) {
+  if (filter === "prompt") return skill.promptOnly;
+  if (filter === "script") return skill.scriptBacked;
+  if (filter === "hooks") return skill.runtimeHooks > 0;
+  if (filter === "issues") return skill.issues.length > 0;
+  return true;
+}
+function skillTypeLabel(skill) {
+  if (skill.scriptBacked) return "Script skill";
+  if (skill.promptOnly) return "Prompt skill";
+  return "Skill";
+}
+function asProviderName(value) {
+  return value === "anthropic" || value === "openai" || value === "google" || value === "openai-compatible" ? value : "openai-compatible";
+}
+function localConfigFromPayload(payload) {
+  const config = asRecord(payload.config);
+  const llm = asRecord(config.llm);
+  const server = asRecord(config.server);
+  const capabilities = asRecord(llm.capabilities);
+  return {
+    path: asString(payload.path, asString(config.path, "magi-agent.yaml")),
+    exists: payload.exists === true,
+    provider: asProviderName(llm.provider),
+    model: asString(llm.model, "llama3.1"),
+    baseUrl: asString(llm.baseUrl),
+    apiKeyEnvVar: asString(llm.apiKeyEnvVar),
+    gatewayTokenEnvVar: asString(server.gatewayTokenEnvVar),
+    workspace: asString(config.workspace, "./workspace"),
+    contextWindow: typeof capabilities.contextWindow === "number" ? String(capabilities.contextWindow) : "",
+    maxOutputTokens: typeof capabilities.maxOutputTokens === "number" ? String(capabilities.maxOutputTokens) : "",
+    supportsThinking: capabilities.supportsThinking === true,
+    restartRequired: payload.restartRequired === true,
+    liveReloadSupported: payload.liveReloadSupported === true
+  };
+}
+function optionalNumber(value) {
+  const trimmed = value.trim();
+  if (!trimmed) return void 0;
+  const parsed = Number(trimmed);
+  return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : void 0;
+}
+function configSavePayload(config) {
+  return {
+    llm: {
+      provider: config.provider,
+      model: config.model.trim() || "llama3.1",
+      ...config.baseUrl.trim() ? { baseUrl: config.baseUrl.trim() } : {},
+      ...config.apiKeyEnvVar.trim() ? { apiKeyEnvVar: config.apiKeyEnvVar.trim() } : {},
+      capabilities: {
+        ...optionalNumber(config.contextWindow) ? { contextWindow: optionalNumber(config.contextWindow) } : {},
+        ...optionalNumber(config.maxOutputTokens) ? { maxOutputTokens: optionalNumber(config.maxOutputTokens) } : {},
+        supportsThinking: config.supportsThinking
+      }
+    },
+    ...config.gatewayTokenEnvVar.trim() ? { server: { gatewayTokenEnvVar: config.gatewayTokenEnvVar.trim() } } : {},
+    ...config.workspace.trim() ? { workspace: config.workspace.trim() } : {}
+  };
+}
 function preview(value, max = 400) {
   if (value === void 0 || value === null) return void 0;
   const text2 = typeof value === "string" ? value : JSON.stringify(value);
@@ -36479,7 +37522,7 @@ function preview(value, max = 400) {
   return text2.length > max ? `${text2.slice(0, max - 3)}...` : text2;
 }
 function isRuntimePhase(value) {
-  return value === "pending" || value === "planning" || value === "executing" || value === "verifying" || value === "committing" || value === "committed" || value === "aborted";
+  return value === "pending" || value === "planning" || value === "executing" || value === "verifying" || value === "committing" || value === "compacting" || value === "committed" || value === "aborted";
 }
 function createSseParser(onEvent) {
   let buffer = "";
@@ -36555,6 +37598,139 @@ function normalizeBrowserFrame(payload) {
     ...typeof payload.url === "string" && payload.url ? { url: payload.url } : {}
   };
 }
+function normalizeDocumentDraft(payload) {
+  const id = asString(payload.id);
+  const contentPreview = asString(payload.contentPreview);
+  if (!id && !contentPreview) return null;
+  const format = payload.format === "txt" ? "txt" : "md";
+  return {
+    id: id || nowId("document-draft"),
+    ...typeof payload.filename === "string" && payload.filename ? { filename: payload.filename } : {},
+    format,
+    status: payload.status === "done" ? "done" : "streaming",
+    contentPreview,
+    contentLength: Math.max(0, Math.floor(asNumber(payload.contentLength, contentPreview.length))),
+    truncated: payload.truncated === true,
+    updatedAt: Date.now()
+  };
+}
+function normalizePatchPreview(payload) {
+  const files = asArray(payload.files).map((file) => {
+    const filePath = asString(file.path);
+    if (!filePath) return null;
+    const operation = file.operation === "create" || file.operation === "delete" || file.operation === "update" ? file.operation : "update";
+    return {
+      path: filePath,
+      operation,
+      hunks: Math.max(0, Math.floor(asNumber(file.hunks, 0))),
+      addedLines: Math.max(0, Math.floor(asNumber(file.addedLines, 0))),
+      removedLines: Math.max(0, Math.floor(asNumber(file.removedLines, 0))),
+      ...typeof file.oldSha256 === "string" ? { oldSha256: file.oldSha256 } : {},
+      ...typeof file.newSha256 === "string" ? { newSha256: file.newSha256 } : {}
+    };
+  }).filter((file) => file !== null);
+  const changedFiles = asStringArray(payload.changedFiles);
+  if (files.length === 0 && changedFiles.length === 0) return null;
+  return {
+    dryRun: payload.dryRun === true,
+    changedFiles: changedFiles.length > 0 ? changedFiles : files.map((file) => file.path),
+    createdFiles: asStringArray(payload.createdFiles),
+    deletedFiles: asStringArray(payload.deletedFiles),
+    files
+  };
+}
+function sourceKind(value) {
+  if (value === "web_search" || value === "web_fetch" || value === "browser" || value === "kb" || value === "file" || value === "external_repo" || value === "external_doc" || value === "subagent_result") {
+    return value;
+  }
+  return "file";
+}
+function normalizeInspectedSource(payload) {
+  const sourceId = asString(payload.sourceId);
+  const uri = asString(payload.uri);
+  if (!sourceId || !uri) return null;
+  const trustTier = payload.trustTier === "primary" || payload.trustTier === "official" || payload.trustTier === "secondary" || payload.trustTier === "unknown" ? payload.trustTier : void 0;
+  return {
+    sourceId,
+    kind: sourceKind(payload.kind),
+    uri,
+    inspectedAt: asNumber(payload.inspectedAt, Date.now()),
+    ...typeof payload.turnId === "string" ? { turnId: payload.turnId } : {},
+    ...typeof payload.toolName === "string" ? { toolName: payload.toolName } : {},
+    ...typeof payload.toolUseId === "string" ? { toolUseId: payload.toolUseId } : {},
+    ...typeof payload.title === "string" ? { title: payload.title } : {},
+    ...typeof payload.contentHash === "string" ? { contentHash: payload.contentHash } : {},
+    ...typeof payload.contentType === "string" ? { contentType: payload.contentType } : {},
+    ...trustTier ? { trustTier } : {},
+    ...Array.isArray(payload.snippets) ? { snippets: asStringArray(payload.snippets).slice(0, 4) } : {}
+  };
+}
+function appendInspectedSource(current, source) {
+  const next = [...(current ?? []).filter((item) => item.sourceId !== source.sourceId), source];
+  return next.slice(-40);
+}
+function normalizeCitationGate(payload) {
+  if (payload.ruleId !== "claim-citation-gate") return null;
+  const verdict = payload.verdict === "ok" || payload.verdict === "violation" || payload.verdict === "pending" ? payload.verdict : "pending";
+  return {
+    ruleId: "claim-citation-gate",
+    verdict,
+    checkedAt: Date.now(),
+    ...typeof payload.detail === "string" ? { detail: payload.detail } : {}
+  };
+}
+function runtimeTracePhase(value) {
+  if (value === "retry_scheduled" || value === "retry_aborted" || value === "terminal_abort") {
+    return value;
+  }
+  return "verifier_blocked";
+}
+function runtimeTraceSeverity(value) {
+  if (value === "warning" || value === "error") return value;
+  return "info";
+}
+function normalizeRuntimeTrace(payload) {
+  const turnId = asString(payload.turnId);
+  const title = asString(payload.title);
+  if (!turnId || !title) return null;
+  return {
+    turnId,
+    title,
+    phase: runtimeTracePhase(payload.phase),
+    severity: runtimeTraceSeverity(payload.severity),
+    receivedAt: Date.now(),
+    ...typeof payload.detail === "string" ? { detail: payload.detail } : {},
+    ...typeof payload.reasonCode === "string" ? { reasonCode: payload.reasonCode } : {},
+    ...typeof payload.ruleId === "string" ? { ruleId: payload.ruleId } : {},
+    ...typeof payload.attempt === "number" ? { attempt: payload.attempt } : {},
+    ...typeof payload.maxAttempts === "number" ? { maxAttempts: payload.maxAttempts } : {},
+    ...typeof payload.retryable === "boolean" ? { retryable: payload.retryable } : {},
+    ...typeof payload.requiredAction === "string" ? { requiredAction: payload.requiredAction } : {}
+  };
+}
+function missionStatus(value) {
+  if (value === "queued" || value === "running" || value === "blocked" || value === "waiting" || value === "completed" || value === "failed" || value === "cancelled" || value === "paused") {
+    return value;
+  }
+  return "running";
+}
+function missionStatusFromEvent(eventType) {
+  const normalized = eventType.toLowerCase();
+  if (normalized.includes("complete") || normalized.includes("done")) return "completed";
+  if (normalized.includes("fail") || normalized.includes("error")) return "failed";
+  if (normalized.includes("cancel")) return "cancelled";
+  if (normalized.includes("block")) return "blocked";
+  if (normalized.includes("pause")) return "paused";
+  if (normalized.includes("wait")) return "waiting";
+  return "running";
+}
+function appendMissionActivity(current, patch2) {
+  const next = [...current ?? []];
+  const index2 = next.findIndex((item) => item.id === patch2.id);
+  if (index2 >= 0) next[index2] = { ...next[index2], ...patch2 };
+  else next.push(patch2);
+  return next.slice(-32);
+}
 function appendToolActivity(current, patch2) {
   const next = [...current ?? []];
   const index2 = next.findIndex((item) => item.id === patch2.id);
@@ -36614,15 +37790,1526 @@ function shouldScanWorkspaceDirectory(entryPath, depth) {
   const root2 = entryPath.split("/").filter(Boolean)[0] ?? "";
   return EDITABLE_WORKSPACE_ROOTS.has(root2);
 }
+function runtimeItemCount(snapshot, key) {
+  const section = asRecord(snapshot?.[key]);
+  const directCount = asNumber(section.count, Number.NaN);
+  if (Number.isFinite(directCount)) return directCount;
+  const loadedCount = asNumber(section.loadedCount, Number.NaN);
+  if (Number.isFinite(loadedCount)) return loadedCount;
+  return asArray(section.items).length;
+}
+function formatFileSize(bytes) {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 102.4) / 10} KB`;
+  return `${Math.round(bytes / 1024 / 102.4) / 10} MB`;
+}
+function runtimeStatusLabel(status) {
+  if (status === "active") return "active";
+  if (status === "checking") return "checking";
+  if (status === "unavailable") return "offline";
+  return "not checked";
+}
+function DashboardPageHeader({
+  eyebrow,
+  title,
+  description,
+  action
+}) {
+  return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "mb-8 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between", children: [
+    /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "min-w-0", children: [
+      eyebrow && /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "mb-2 text-[11px] font-semibold uppercase tracking-[0.16em] text-gray-400", children: eyebrow }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx("h1", { className: "text-2xl font-bold leading-tight text-foreground", children: title }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "mt-2 max-w-2xl text-sm leading-6 text-secondary", children: description })
+    ] }),
+    action && /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "shrink-0", children: action })
+  ] });
+}
+function StatusPill({
+  status,
+  children
+}) {
+  const tones = {
+    active: "border-emerald-500/20 bg-emerald-500/10 text-emerald-700",
+    checking: "border-amber-500/20 bg-amber-500/10 text-amber-700",
+    unavailable: "border-red-500/20 bg-red-500/10 text-red-600",
+    not_checked: "border-black/10 bg-gray-100 text-secondary",
+    ok: "border-emerald-500/20 bg-emerald-500/10 text-emerald-700",
+    muted: "border-black/10 bg-gray-100 text-secondary",
+    warning: "border-amber-500/20 bg-amber-500/10 text-amber-700"
+  };
+  return /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: `inline-flex min-h-7 items-center rounded-full border px-2.5 text-xs font-semibold ${tones[status]}`, children });
+}
+function EmptyState({ children }) {
+  return /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "rounded-lg border border-dashed border-black/[0.10] bg-gray-50/70 px-4 py-8 text-center text-sm leading-6 text-secondary", children });
+}
+function DashboardSidebar({
+  activeRoute,
+  runtimeStatus,
+  onNavigate,
+  onRefresh
+}) {
+  const primaryItems = [
+    { route: "chat", label: "Chat" },
+    { route: "overview", label: "Overview" },
+    { route: "settings", label: "Settings" },
+    { route: "usage", label: "Usage" },
+    { route: "skills", label: "Skills" },
+    { route: "converter", label: "Converter" }
+  ];
+  const workspaceItems = [
+    { route: "knowledge", label: "Knowledge" },
+    { route: "memory", label: "Memory" },
+    { route: "workspace", label: "Workspace" }
+  ];
+  const renderItem = ({ route, label }) => {
+    const active = route === activeRoute;
+    return /* @__PURE__ */ jsxRuntimeExports.jsx(
+      "button",
+      {
+        type: "button",
+        onClick: () => onNavigate(route),
+        className: `flex min-h-11 w-full items-center rounded-xl px-3 text-left text-sm font-medium transition-colors duration-200 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30 ${active ? "border border-primary/20 bg-primary/10 text-primary-light" : "border border-transparent text-gray-600 hover:bg-gray-100 hover:text-gray-950"}`,
+        children: label
+      },
+      route
+    );
+  };
+  return /* @__PURE__ */ jsxRuntimeExports.jsxs("aside", { className: "hidden h-screen w-64 shrink-0 flex-col border-r border-gray-200 bg-gray-50 p-6 md:flex", children: [
+    /* @__PURE__ */ jsxRuntimeExports.jsxs(
+      "button",
+      {
+        type: "button",
+        onClick: () => onNavigate("overview"),
+        className: "mb-10 flex min-h-11 items-center gap-3 rounded-xl text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30",
+        "aria-label": "Open Magi dashboard",
+        children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "flex h-9 w-9 items-center justify-center rounded-xl bg-primary text-sm font-bold text-white shadow-[0_8px_18px_rgba(124,58,237,0.18)]", children: "M" }),
+          /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "min-w-0", children: [
+            /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "block text-sm font-semibold text-foreground", children: "Open Magi" }),
+            /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "block text-xs text-secondary", children: "Local operator" })
+          ] })
+        ]
+      }
+    ),
+    /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "mb-4 rounded-xl border border-gray-200 bg-white px-3.5 py-3", children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "min-w-0 truncate text-sm font-semibold text-foreground", children: BOT_NAME }),
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "mt-2 flex items-center gap-2 text-xs font-medium text-secondary", children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsx(
+          "span",
+          {
+            className: `h-2.5 w-2.5 rounded-full ${runtimeStatus === "active" ? "bg-emerald-400" : "bg-gray-300"}`
+          }
+        ),
+        runtimeStatusLabel(runtimeStatus)
+      ] })
+    ] }),
+    /* @__PURE__ */ jsxRuntimeExports.jsxs("nav", { className: "min-h-0 flex-1 space-y-1 overflow-y-auto", children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "pb-1", children: /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "px-3 text-xs font-medium uppercase tracking-wider text-gray-400", children: "Chat" }) }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "space-y-1", children: primaryItems.map(renderItem) }),
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "pt-4 pb-1", children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "mb-3 border-t border-gray-200" }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "px-3 text-xs font-medium uppercase tracking-wider text-gray-400", children: "Local Runtime" })
+      ] }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "space-y-1", children: workspaceItems.map(renderItem) })
+    ] }),
+    /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "space-y-2 border-t border-gray-200 pt-4", children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsx(
+        "button",
+        {
+          type: "button",
+          onClick: onRefresh,
+          className: "flex min-h-11 w-full items-center rounded-xl px-3 text-left text-sm font-medium text-gray-600 transition-colors hover:bg-gray-100 hover:text-gray-950 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30",
+          children: "Refresh"
+        }
+      ),
+      /* @__PURE__ */ jsxRuntimeExports.jsx(
+        "button",
+        {
+          type: "button",
+          onClick: () => onNavigate("chat"),
+          className: "flex min-h-11 w-full items-center rounded-xl px-3 text-left text-sm font-medium text-gray-600 transition-colors hover:bg-gray-100 hover:text-gray-950 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30",
+          children: "Back to chat"
+        }
+      )
+    ] })
+  ] });
+}
+function DashboardCard({
+  title,
+  children,
+  action
+}) {
+  return /* @__PURE__ */ jsxRuntimeExports.jsxs("section", { className: "glass rounded-2xl p-6 shadow-none", children: [
+    (title || action) && /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "mb-4 flex min-h-9 items-center justify-between gap-3", children: [
+      title ? /* @__PURE__ */ jsxRuntimeExports.jsx("h2", { className: "text-sm font-semibold text-foreground", children: title }) : /* @__PURE__ */ jsxRuntimeExports.jsx("span", {}),
+      action
+    ] }),
+    children
+  ] });
+}
+function MetricTile({ label, value }) {
+  return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "rounded-xl border border-black/[0.04] bg-black/[0.025] px-4 py-3", children: [
+    /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "text-[11px] font-semibold uppercase tracking-[0.14em] text-secondary/70", children: label }),
+    /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "mt-1 text-2xl font-semibold text-foreground", children: value })
+  ] });
+}
+function ButtonLike({
+  children,
+  variant = "primary",
+  disabled,
+  onClick,
+  type = "button",
+  className = ""
+}) {
+  const variants = {
+    primary: "bg-primary text-white hover:bg-primary-light shadow-[0_8px_18px_rgba(124,58,237,0.18)]",
+    secondary: "border border-black/10 bg-white text-foreground hover:border-primary/35 hover:bg-gray-50",
+    ghost: "bg-transparent text-secondary hover:bg-black/[0.04] hover:text-foreground",
+    danger: "border border-red-500/20 bg-red-500/10 text-red-500 hover:bg-red-500/15"
+  };
+  return /* @__PURE__ */ jsxRuntimeExports.jsx(
+    "button",
+    {
+      type,
+      disabled,
+      onClick,
+      className: `inline-flex min-h-[44px] items-center justify-center rounded-xl px-5 py-2.5 text-sm font-semibold transition-all duration-200 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30 disabled:pointer-events-none disabled:opacity-40 ${variants[variant]} ${className}`,
+      children
+    }
+  );
+}
+function SettingsInput({
+  label,
+  value,
+  onChange,
+  placeholder,
+  type = "text"
+}) {
+  return /* @__PURE__ */ jsxRuntimeExports.jsxs("label", { className: "block", children: [
+    /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "mb-1.5 block text-xs font-semibold uppercase tracking-[0.12em] text-secondary/75", children: label }),
+    /* @__PURE__ */ jsxRuntimeExports.jsx(
+      "input",
+      {
+        value,
+        type,
+        placeholder,
+        onChange: (event) => onChange(event.target.value),
+        className: "min-h-11 w-full rounded-lg border border-black/10 bg-white px-3.5 py-2.5 text-sm font-medium text-foreground outline-none transition-colors duration-200 placeholder:text-secondary/45 focus:border-primary/45 focus:ring-4 focus:ring-primary/10"
+      }
+    )
+  ] });
+}
+function SettingsDropdown({
+  label,
+  value,
+  onChange,
+  options
+}) {
+  return /* @__PURE__ */ jsxRuntimeExports.jsxs("label", { className: "block", children: [
+    /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "mb-1.5 block text-xs font-semibold uppercase tracking-[0.12em] text-secondary/75", children: label }),
+    /* @__PURE__ */ jsxRuntimeExports.jsx(
+      "select",
+      {
+        value,
+        onChange: (event) => onChange(event.target.value),
+        className: "min-h-11 w-full rounded-lg border border-black/10 bg-white px-3.5 py-2.5 text-sm font-medium text-foreground outline-none transition-colors duration-200 focus:border-primary/45 focus:ring-4 focus:ring-primary/10",
+        children: options.map((option) => /* @__PURE__ */ jsxRuntimeExports.jsx("option", { value: option.value, children: option.label }, option.value))
+      }
+    )
+  ] });
+}
+function ChevronIcon({ expanded }) {
+  return /* @__PURE__ */ jsxRuntimeExports.jsx(
+    "svg",
+    {
+      className: `h-4 w-4 text-secondary transition-transform duration-200 ${expanded ? "rotate-180" : ""}`,
+      fill: "none",
+      viewBox: "0 0 24 24",
+      stroke: "currentColor",
+      children: /* @__PURE__ */ jsxRuntimeExports.jsx("path", { strokeLinecap: "round", strokeLinejoin: "round", strokeWidth: 2, d: "M19 9l-7 7-7-7" })
+    }
+  );
+}
+function CollapsibleCard({
+  title,
+  subtitle,
+  children,
+  defaultOpen = false
+}) {
+  const [open, setOpen] = reactExports.useState(defaultOpen);
+  return /* @__PURE__ */ jsxRuntimeExports.jsxs(
+    DashboardCard,
+    {
+      title: "",
+      action: null,
+      children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsxs(
+          "button",
+          {
+            type: "button",
+            onClick: () => setOpen((prev) => !prev),
+            className: "-m-6 flex min-h-[64px] w-[calc(100%+3rem)] items-center justify-between rounded-2xl p-6 text-left transition-colors hover:bg-black/[0.025] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30",
+            children: [
+              /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "min-w-0", children: [
+                /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "text-sm font-semibold text-foreground", children: title }),
+                subtitle && /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "mt-1 text-xs text-secondary", children: subtitle })
+              ] }),
+              /* @__PURE__ */ jsxRuntimeExports.jsx(ChevronIcon, { expanded: open })
+            ]
+          }
+        ),
+        open && /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "mt-6 border-t border-black/[0.06] pt-6", children })
+      ]
+    }
+  );
+}
+function OverviewDashboard({
+  runtimeSnapshot,
+  runtimeStatus,
+  kbCollections,
+  workspaceFiles,
+  onNavigate
+}) {
+  const docCount = kbCollections.reduce((sum, collection) => sum + collection.docs.length, 0);
+  return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "max-w-5xl space-y-6", children: [
+    /* @__PURE__ */ jsxRuntimeExports.jsx(
+      DashboardPageHeader,
+      {
+        eyebrow: "Local Runtime",
+        title: "Dashboard",
+        description: "Manage your local Magi agent, runtime state, workspace knowledge, and operator files from one console.",
+        action: /* @__PURE__ */ jsxRuntimeExports.jsx(ButtonLike, { onClick: () => onNavigate("chat"), children: "Open Chat" })
+      }
+    ),
+    /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "space-y-5", children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsx(DashboardCard, { title: "Agent", children: /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "flex flex-col gap-5 sm:flex-row sm:items-start sm:justify-between", children: /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center gap-3", children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsx(
+            "span",
+            {
+              className: `h-2.5 w-2.5 rounded-full ${runtimeStatus === "active" ? "bg-emerald-400" : "bg-gray-300"}`
+            }
+          ),
+          /* @__PURE__ */ jsxRuntimeExports.jsx("h3", { className: "text-xl font-semibold text-foreground", children: BOT_NAME }),
+          /* @__PURE__ */ jsxRuntimeExports.jsx(StatusPill, { status: runtimeStatus, children: runtimeStatusLabel(runtimeStatus) })
+        ] }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "mt-2 max-w-2xl text-sm leading-6 text-secondary", children: "Self-hosted Magi runtime with local chat, workspace knowledge, runtime proof, editable operator files, and your configured LLM provider." })
+      ] }) }) }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx(DashboardCard, { title: "Runtime", children: /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "grid gap-3 sm:grid-cols-2 lg:grid-cols-4", children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsx(MetricTile, { label: "Sessions", value: runtimeItemCount(runtimeSnapshot, "sessions") }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx(MetricTile, { label: "Tasks", value: runtimeItemCount(runtimeSnapshot, "tasks") }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx(MetricTile, { label: "Schedules", value: runtimeItemCount(runtimeSnapshot, "crons") }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx(MetricTile, { label: "Artifacts", value: runtimeItemCount(runtimeSnapshot, "artifacts") })
+      ] }) }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx(DashboardCard, { title: "Local Assets", children: /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "grid gap-3 sm:grid-cols-3", children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsx(MetricTile, { label: "KB Docs", value: docCount }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx(MetricTile, { label: "Workspace Files", value: workspaceFiles.length }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx(MetricTile, { label: "Skills", value: runtimeItemCount(runtimeSnapshot, "skills") })
+      ] }) }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx(DashboardCard, { title: "Integrations", children: /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "space-y-3", children: [
+        { title: "Local LLM Provider", detail: "Anthropic, OpenAI, Google, or any OpenAI-compatible server.", route: "settings" },
+        { title: "Workspace Knowledge", detail: "Local KB documents under the runtime workspace.", route: "knowledge" },
+        { title: "Operator Files", detail: "System prompts, contracts, harness rules, hooks, and memory.", route: "workspace" }
+      ].map((item) => /* @__PURE__ */ jsxRuntimeExports.jsxs(
+        "button",
+        {
+          type: "button",
+          onClick: () => onNavigate(item.route),
+          className: "block min-h-16 w-full rounded-lg border border-black/[0.06] bg-gray-50 px-4 py-3 text-left transition hover:border-primary/20 hover:bg-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30",
+          children: [
+            /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "text-sm font-semibold text-foreground", children: item.title }),
+            /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "mt-1 text-xs text-secondary", children: item.detail })
+          ]
+        },
+        item.title
+      )) }) })
+    ] })
+  ] });
+}
+function SettingsDashboard({
+  agentUrl,
+  token,
+  runtimeStatus,
+  config,
+  configLoading,
+  configSaving,
+  configNotice,
+  configError,
+  setAgentUrl,
+  setToken,
+  onSaveConnection,
+  onCheckRuntime,
+  onSaveConfig,
+  onReloadConfig,
+  onRestartRuntime
+}) {
+  const [draft, setDraft] = reactExports.useState(config);
+  reactExports.useEffect(() => {
+    setDraft(config);
+  }, [config]);
+  const updateDraft = reactExports.useCallback((patch2) => {
+    setDraft((prev) => prev ? { ...prev, ...patch2 } : prev);
+  }, []);
+  return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "max-w-4xl space-y-5", children: [
+    /* @__PURE__ */ jsxRuntimeExports.jsx(
+      DashboardPageHeader,
+      {
+        eyebrow: "Configuration",
+        title: "Settings",
+        description: "Configure the local runtime, provider endpoint, workspace path, and safeguards used by the self-hosted agent.",
+        action: /* @__PURE__ */ jsxRuntimeExports.jsx(StatusPill, { status: runtimeStatus, children: runtimeStatusLabel(runtimeStatus) })
+      }
+    ),
+    /* @__PURE__ */ jsxRuntimeExports.jsx(
+      DashboardCard,
+      {
+        title: "Model",
+        action: configLoading ? /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "rounded-full bg-gray-100 px-3 py-1 text-xs font-semibold text-secondary", children: "Loading" }) : null,
+        children: !draft ? /* @__PURE__ */ jsxRuntimeExports.jsx(EmptyState, { children: "No config loaded yet. Save a local provider below to create `magi-agent.yaml`." }) : /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "space-y-4", children: [
+          configNotice && /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "rounded-xl border border-emerald-500/20 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-700", children: configNotice }),
+          configError && /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "rounded-xl border border-red-500/20 bg-red-500/10 px-4 py-3 text-sm text-red-500", children: configError }),
+          /* @__PURE__ */ jsxRuntimeExports.jsx(
+            SettingsDropdown,
+            {
+              label: "Provider",
+              value: draft.provider,
+              onChange: (value) => updateDraft({ provider: asProviderName(value) }),
+              options: [
+                { value: "openai-compatible", label: "OpenAI-compatible / local" },
+                { value: "anthropic", label: "Anthropic" },
+                { value: "openai", label: "OpenAI" },
+                { value: "google", label: "Google Gemini" }
+              ]
+            }
+          ),
+          /* @__PURE__ */ jsxRuntimeExports.jsx(
+            SettingsInput,
+            {
+              label: "Model",
+              value: draft.model,
+              onChange: (model) => updateDraft({ model }),
+              placeholder: "llama3.1, gpt-4.1, claude-sonnet-4-5..."
+            }
+          ),
+          /* @__PURE__ */ jsxRuntimeExports.jsx(
+            SettingsInput,
+            {
+              label: "Base URL",
+              value: draft.baseUrl,
+              onChange: (baseUrl) => updateDraft({ baseUrl }),
+              placeholder: "http://127.0.0.1:11434/v1"
+            }
+          ),
+          /* @__PURE__ */ jsxRuntimeExports.jsx(
+            SettingsInput,
+            {
+              label: "API key env var",
+              value: draft.apiKeyEnvVar,
+              onChange: (apiKeyEnvVar) => updateDraft({ apiKeyEnvVar }),
+              placeholder: "OPENAI_API_KEY"
+            }
+          ),
+          /* @__PURE__ */ jsxRuntimeExports.jsx(
+            SettingsDropdown,
+            {
+              label: "Response Language",
+              value: "auto",
+              onChange: () => {
+              },
+              options: [{ value: "auto", label: "Auto Detect" }]
+            }
+          ),
+          /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "border-t border-gray-200 pt-4", children: [
+            /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "mb-2 block text-sm font-medium text-secondary", children: "API Key Mode" }),
+            /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center justify-between", children: [
+              /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-sm font-medium text-foreground", children: "Local env vars" }),
+              /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "text-xs text-secondary", children: "No platform credits or hosted routers" })
+            ] })
+          ] }),
+          /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex flex-wrap gap-3", children: [
+            /* @__PURE__ */ jsxRuntimeExports.jsx(ButtonLike, { onClick: () => void onSaveConfig(draft), disabled: configSaving, children: configSaving ? "Saving..." : "Save Settings" }),
+            /* @__PURE__ */ jsxRuntimeExports.jsx(ButtonLike, { variant: "secondary", onClick: () => void onReloadConfig(), children: "Reload Config" }),
+            /* @__PURE__ */ jsxRuntimeExports.jsx(ButtonLike, { variant: "secondary", onClick: () => void onRestartRuntime(), children: "Restart Runtime" })
+          ] }),
+          /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-xs leading-5 text-secondary", children: "Secrets are stored as environment variable references in `magi-agent.yaml`; raw keys are never returned to the browser." })
+        ] })
+      }
+    ),
+    /* @__PURE__ */ jsxRuntimeExports.jsx(
+      CollapsibleCard,
+      {
+        title: "Runtime Connection",
+        subtitle: `Current status: ${runtimeStatusLabel(runtimeStatus)}`,
+        defaultOpen: false,
+        children: /* @__PURE__ */ jsxRuntimeExports.jsxs(
+          "form",
+          {
+            className: "space-y-4",
+            onSubmit: (event) => {
+              event.preventDefault();
+              onSaveConnection();
+            },
+            children: [
+              /* @__PURE__ */ jsxRuntimeExports.jsx(SettingsInput, { label: "Agent URL", value: agentUrl, onChange: setAgentUrl }),
+              /* @__PURE__ */ jsxRuntimeExports.jsx(SettingsInput, { label: "Server token", value: token, onChange: setToken, type: "password" }),
+              /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex flex-wrap gap-3", children: [
+                /* @__PURE__ */ jsxRuntimeExports.jsx(ButtonLike, { type: "submit", children: "Save Settings" }),
+                /* @__PURE__ */ jsxRuntimeExports.jsx(ButtonLike, { variant: "secondary", onClick: onCheckRuntime, children: "Check Runtime" })
+              ] })
+            ]
+          }
+        )
+      }
+    ),
+    /* @__PURE__ */ jsxRuntimeExports.jsx(
+      CollapsibleCard,
+      {
+        title: "Advanced Runtime",
+        subtitle: draft?.path ? `Config path: ${draft.path}` : "Workspace and capability metadata",
+        defaultOpen: false,
+        children: draft && /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "space-y-4", children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsx(
+            SettingsInput,
+            {
+              label: "Workspace",
+              value: draft.workspace,
+              onChange: (workspace) => updateDraft({ workspace }),
+              placeholder: "./workspace"
+            }
+          ),
+          /* @__PURE__ */ jsxRuntimeExports.jsx(
+            SettingsInput,
+            {
+              label: "Gateway token env var",
+              value: draft.gatewayTokenEnvVar,
+              onChange: (gatewayTokenEnvVar) => updateDraft({ gatewayTokenEnvVar }),
+              placeholder: "MAGI_AGENT_SERVER_TOKEN"
+            }
+          ),
+          /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "grid gap-4 sm:grid-cols-2", children: [
+            /* @__PURE__ */ jsxRuntimeExports.jsx(
+              SettingsInput,
+              {
+                label: "Context window",
+                value: draft.contextWindow,
+                onChange: (contextWindow) => updateDraft({ contextWindow }),
+                placeholder: "131072"
+              }
+            ),
+            /* @__PURE__ */ jsxRuntimeExports.jsx(
+              SettingsInput,
+              {
+                label: "Max output tokens",
+                value: draft.maxOutputTokens,
+                onChange: (maxOutputTokens) => updateDraft({ maxOutputTokens }),
+                placeholder: "8192"
+              }
+            )
+          ] }),
+          /* @__PURE__ */ jsxRuntimeExports.jsxs("label", { className: "flex items-center gap-3 text-sm text-secondary", children: [
+            /* @__PURE__ */ jsxRuntimeExports.jsx(
+              "input",
+              {
+                type: "checkbox",
+                checked: draft.supportsThinking,
+                onChange: (event) => updateDraft({ supportsThinking: event.target.checked }),
+                className: "h-4 w-4 rounded border-black/10"
+              }
+            ),
+            "Model supports thinking blocks"
+          ] }),
+          /* @__PURE__ */ jsxRuntimeExports.jsx(ButtonLike, { onClick: () => void onSaveConfig(draft), disabled: configSaving, children: "Save Advanced Settings" })
+        ] })
+      }
+    ),
+    /* @__PURE__ */ jsxRuntimeExports.jsx(
+      CollapsibleCard,
+      {
+        title: "Agent Safeguards",
+        subtitle: "Edit local skills, contracts, harness rules, hooks, memory, and compaction files from Workspace.",
+        children: /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "grid gap-3 sm:grid-cols-2", children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "rounded-xl border border-gray-100 bg-gray-50 px-4 py-3", children: [
+            /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "text-sm font-semibold text-foreground", children: "Custom skills" }),
+            /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "mt-1 text-xs leading-5 text-secondary", children: "Install reusable SKILL.md-style capabilities on the Skills page." })
+          ] }),
+          /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "rounded-xl border border-gray-100 bg-gray-50 px-4 py-3", children: [
+            /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "text-sm font-semibold text-foreground", children: "Harness rules" }),
+            /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "mt-1 text-xs leading-5 text-secondary", children: "Markdown rules become runtime checks through the local workspace." })
+          ] })
+        ] })
+      }
+    )
+  ] });
+}
+function KnowledgeDashboard({
+  kbCollections,
+  loading,
+  refreshing,
+  onRefresh,
+  onUpload
+}) {
+  const [uploading, setUploading] = reactExports.useState(false);
+  const [uploadNotice, setUploadNotice] = reactExports.useState(null);
+  const [uploadError, setUploadError] = reactExports.useState(null);
+  const docs2 = kbCollections.flatMap(
+    (collection) => collection.docs.map((doc) => ({ ...doc, collectionName: collection.name }))
+  );
+  const handleFiles = reactExports.useCallback(
+    async (files) => {
+      if (!files || files.length === 0) return;
+      setUploading(true);
+      setUploadNotice(null);
+      setUploadError(null);
+      try {
+        await onUpload(files);
+        setUploadNotice(`${files.length} file${files.length === 1 ? "" : "s"} added to local KB`);
+      } catch (err) {
+        setUploadError(err instanceof Error ? err.message : "Upload failed");
+      } finally {
+        setUploading(false);
+      }
+    },
+    [onUpload]
+  );
+  return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "max-w-4xl space-y-6", children: [
+    /* @__PURE__ */ jsxRuntimeExports.jsx(
+      DashboardPageHeader,
+      {
+        eyebrow: "Workspace KB",
+        title: "Knowledge",
+        description: "Upload and inspect local documents that the self-hosted runtime can search during a mission.",
+        action: /* @__PURE__ */ jsxRuntimeExports.jsx(ButtonLike, { variant: "secondary", onClick: onRefresh, disabled: refreshing, children: refreshing ? "Refreshing..." : "Refresh" })
+      }
+    ),
+    /* @__PURE__ */ jsxRuntimeExports.jsxs(
+      DashboardCard,
+      {
+        title: "Workspace Knowledge",
+        children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "mb-5 rounded-lg border border-dashed border-primary/25 bg-primary/[0.04] px-4 py-5", children: /* @__PURE__ */ jsxRuntimeExports.jsxs("label", { className: "block cursor-pointer text-center", children: [
+            /* @__PURE__ */ jsxRuntimeExports.jsx(
+              "input",
+              {
+                type: "file",
+                multiple: true,
+                className: "hidden",
+                onChange: (event) => void handleFiles(event.target.files)
+              }
+            ),
+            /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "text-sm font-semibold text-primary", children: uploading ? "Uploading..." : "Upload local knowledge" }),
+            /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "mt-1 block text-xs text-secondary", children: "PDF, DOCX, XLSX, PPTX, HTML, CSV, TXT, MD, JSON, ZIP, and other supported files." })
+          ] }) }),
+          uploadNotice && /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "mb-3 rounded-xl bg-emerald-50 px-3 py-2 text-xs text-emerald-700", children: uploadNotice }),
+          uploadError && /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "mb-3 rounded-xl bg-red-50 px-3 py-2 text-xs text-red-500", children: uploadError }),
+          loading ? /* @__PURE__ */ jsxRuntimeExports.jsx(EmptyState, { children: "Loading knowledge..." }) : docs2.length === 0 ? /* @__PURE__ */ jsxRuntimeExports.jsx(EmptyState, { children: "No local KB documents yet." }) : /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "divide-y divide-black/[0.06] overflow-hidden rounded-lg border border-black/[0.08]", children: docs2.map((doc) => /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "px-4 py-3", children: [
+            /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "text-sm font-semibold text-foreground", children: doc.filename }),
+            /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "mt-1 text-xs text-secondary", children: doc.collectionName })
+          ] }, `${doc.collectionName}:${doc.id}`)) })
+        ]
+      }
+    )
+  ] });
+}
+function WorkspaceDashboard({
+  workspaceFiles,
+  loading,
+  refreshing,
+  onRefresh,
+  onReadFile,
+  onSaveFile
+}) {
+  const [query, setQuery] = reactExports.useState("");
+  const [selectedPath, setSelectedPath] = reactExports.useState(null);
+  const [content2, setContent] = reactExports.useState("");
+  const [editedContent, setEditedContent] = reactExports.useState("");
+  const [fileLoading, setFileLoading] = reactExports.useState(false);
+  const [saving, setSaving] = reactExports.useState(false);
+  const [notice, setNotice] = reactExports.useState(null);
+  const [error, setError] = reactExports.useState(null);
+  const filteredFiles = reactExports.useMemo(() => {
+    const normalized = query.trim().toLowerCase();
+    if (!normalized) return workspaceFiles;
+    return workspaceFiles.filter((file) => file.path.toLowerCase().includes(normalized));
+  }, [query, workspaceFiles]);
+  const openFile = reactExports.useCallback(
+    async (path2) => {
+      setSelectedPath(path2);
+      setFileLoading(true);
+      setNotice(null);
+      setError(null);
+      try {
+        const nextContent = await onReadFile(path2);
+        setContent(nextContent);
+        setEditedContent(nextContent);
+      } catch (err) {
+        setContent("");
+        setEditedContent("");
+        setError(err instanceof Error ? err.message : "Failed to read file");
+      } finally {
+        setFileLoading(false);
+      }
+    },
+    [onReadFile]
+  );
+  const saveSelected = reactExports.useCallback(async () => {
+    if (!selectedPath) return;
+    setSaving(true);
+    setNotice(null);
+    setError(null);
+    try {
+      await onSaveFile(selectedPath, editedContent);
+      setContent(editedContent);
+      setNotice("Workspace file saved");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to save file");
+    } finally {
+      setSaving(false);
+    }
+  }, [editedContent, onSaveFile, selectedPath]);
+  return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "space-y-6", children: [
+    /* @__PURE__ */ jsxRuntimeExports.jsx(
+      DashboardPageHeader,
+      {
+        eyebrow: "Operator Files",
+        title: "Workspace",
+        description: "Edit local prompts, contracts, harness rules, hooks, memory, compaction files, and artifacts.",
+        action: /* @__PURE__ */ jsxRuntimeExports.jsx(ButtonLike, { variant: "secondary", onClick: onRefresh, disabled: refreshing, children: refreshing ? "Refreshing..." : "Refresh" })
+      }
+    ),
+    /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "grid gap-5 xl:grid-cols-[minmax(0,420px)_minmax(0,1fr)]", children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsxs(
+        DashboardCard,
+        {
+          title: "Files",
+          children: [
+            /* @__PURE__ */ jsxRuntimeExports.jsx(
+              "input",
+              {
+                value: query,
+                onChange: (event) => setQuery(event.target.value),
+                placeholder: "Filter files...",
+                className: "mb-4 min-h-11 w-full rounded-lg border border-black/[0.08] bg-white px-3.5 py-2.5 text-sm outline-none transition focus:border-primary/40 focus:ring-4 focus:ring-primary/10"
+              }
+            ),
+            loading ? /* @__PURE__ */ jsxRuntimeExports.jsx(EmptyState, { children: "Loading workspace..." }) : filteredFiles.length === 0 ? /* @__PURE__ */ jsxRuntimeExports.jsx(EmptyState, { children: "No editable workspace files found." }) : /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "max-h-[620px] divide-y divide-black/[0.06] overflow-y-auto rounded-lg border border-black/[0.08]", children: filteredFiles.slice(0, 160).map((file) => /* @__PURE__ */ jsxRuntimeExports.jsxs(
+              "button",
+              {
+                type: "button",
+                onClick: () => void openFile(file.path),
+                className: `block min-h-14 w-full px-4 py-3 text-left transition hover:bg-gray-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/30 ${selectedPath === file.path ? "bg-primary/[0.06]" : "bg-white"}`,
+                children: [
+                  /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "truncate text-sm font-semibold text-foreground", children: file.path }),
+                  /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "mt-1 text-xs text-secondary", children: [
+                    formatFileSize(file.size ?? 0),
+                    file.modifiedAt ? ` · ${file.modifiedAt}` : ""
+                  ] })
+                ]
+              },
+              file.path
+            )) })
+          ]
+        }
+      ),
+      /* @__PURE__ */ jsxRuntimeExports.jsxs(
+        DashboardCard,
+        {
+          title: selectedPath ?? "Workspace File",
+          action: selectedPath ? /* @__PURE__ */ jsxRuntimeExports.jsx(
+            ButtonLike,
+            {
+              onClick: () => void saveSelected(),
+              disabled: saving || fileLoading || editedContent === content2,
+              children: saving ? "Saving..." : "Save"
+            }
+          ) : null,
+          children: [
+            notice && /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "mb-3 rounded-xl bg-emerald-50 px-3 py-2 text-xs text-emerald-700", children: notice }),
+            error && /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "mb-3 rounded-xl bg-red-50 px-3 py-2 text-xs text-red-500", children: error }),
+            !selectedPath ? /* @__PURE__ */ jsxRuntimeExports.jsx(EmptyState, { children: "Select a workspace file to view or edit it." }) : fileLoading ? /* @__PURE__ */ jsxRuntimeExports.jsx(EmptyState, { children: "Loading file..." }) : /* @__PURE__ */ jsxRuntimeExports.jsx(
+              "textarea",
+              {
+                value: editedContent,
+                onChange: (event) => setEditedContent(event.target.value),
+                spellCheck: false,
+                className: "h-[520px] w-full resize-none rounded-lg border border-black/[0.08] bg-white px-4 py-3 font-mono text-sm leading-6 text-foreground outline-none transition focus:border-primary/40 focus:ring-4 focus:ring-primary/10"
+              }
+            )
+          ]
+        }
+      )
+    ] })
+  ] });
+}
+function MemoryDashboard({
+  memoryFiles,
+  memoryStatus,
+  loading,
+  refreshing,
+  onRefresh,
+  onSearch,
+  onReadFile,
+  onSaveFile,
+  onDeleteFiles,
+  onCompact,
+  onReindex
+}) {
+  const [query, setQuery] = reactExports.useState("");
+  const [searching, setSearching] = reactExports.useState(false);
+  const [searchResults, setSearchResults] = reactExports.useState([]);
+  const [selectedPaths, setSelectedPaths] = reactExports.useState(() => /* @__PURE__ */ new Set());
+  const [selectedPath, setSelectedPath] = reactExports.useState(null);
+  const [content2, setContent] = reactExports.useState("");
+  const [editedContent, setEditedContent] = reactExports.useState("");
+  const [fileLoading, setFileLoading] = reactExports.useState(false);
+  const [busy, setBusy] = reactExports.useState(false);
+  const [notice, setNotice] = reactExports.useState(null);
+  const [error, setError] = reactExports.useState(null);
+  const queryLower = query.trim().toLowerCase();
+  const filteredFiles = reactExports.useMemo(() => {
+    if (!queryLower) return memoryFiles;
+    return memoryFiles.filter((file) => file.path.toLowerCase().includes(queryLower));
+  }, [memoryFiles, queryLower]);
+  const rootMemory = asRecord(memoryStatus?.rootMemory);
+  const openFile = reactExports.useCallback(
+    async (path2) => {
+      setSelectedPath(path2);
+      setFileLoading(true);
+      setNotice(null);
+      setError(null);
+      try {
+        const nextContent = await onReadFile(path2);
+        setContent(nextContent);
+        setEditedContent(nextContent);
+      } catch (err) {
+        setContent("");
+        setEditedContent("");
+        setError(err instanceof Error ? err.message : "Failed to read memory file");
+      } finally {
+        setFileLoading(false);
+      }
+    },
+    [onReadFile]
+  );
+  const runSearch = reactExports.useCallback(async () => {
+    const trimmed = query.trim();
+    if (!trimmed) {
+      setSearchResults([]);
+      return;
+    }
+    setSearching(true);
+    setError(null);
+    try {
+      const payload = await onSearch(trimmed);
+      setSearchResults(asArray(payload.results));
+    } catch (err) {
+      setSearchResults([]);
+      setError(err instanceof Error ? err.message : "Memory search failed");
+    } finally {
+      setSearching(false);
+    }
+  }, [onSearch, query]);
+  const toggleSelected = reactExports.useCallback((path2) => {
+    setSelectedPaths((prev) => {
+      const next = new Set(prev);
+      if (next.has(path2)) next.delete(path2);
+      else next.add(path2);
+      return next;
+    });
+  }, []);
+  const deletePaths = reactExports.useCallback(
+    async (paths) => {
+      if (paths.length === 0) return;
+      setBusy(true);
+      setError(null);
+      setNotice(null);
+      try {
+        await onDeleteFiles(paths);
+        setSelectedPaths((prev) => {
+          const next = new Set(prev);
+          for (const path2 of paths) next.delete(path2);
+          return next;
+        });
+        if (selectedPath && paths.includes(selectedPath)) {
+          setSelectedPath(null);
+          setContent("");
+          setEditedContent("");
+        }
+        setNotice(`${paths.length} memory file${paths.length === 1 ? "" : "s"} deleted`);
+        onRefresh();
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Failed to delete memory files");
+      } finally {
+        setBusy(false);
+      }
+    },
+    [onDeleteFiles, onRefresh, selectedPath]
+  );
+  const saveSelected = reactExports.useCallback(async () => {
+    if (!selectedPath) return;
+    setBusy(true);
+    setError(null);
+    setNotice(null);
+    try {
+      await onSaveFile(selectedPath, editedContent);
+      setContent(editedContent);
+      setNotice("Memory file saved");
+      onRefresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to save memory file");
+    } finally {
+      setBusy(false);
+    }
+  }, [editedContent, onRefresh, onSaveFile, selectedPath]);
+  const runMemoryAction = reactExports.useCallback(
+    async (action) => {
+      setBusy(true);
+      setError(null);
+      setNotice(null);
+      try {
+        if (action === "compact") await onCompact();
+        else await onReindex();
+        setNotice(action === "compact" ? "Compaction triggered" : "Memory index refreshed");
+        onRefresh();
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Memory operation failed");
+      } finally {
+        setBusy(false);
+      }
+    },
+    [onCompact, onRefresh, onReindex]
+  );
+  const selectedCount = selectedPaths.size;
+  const dailyPaths = memoryFiles.map((file) => file.path).filter((path2) => path2.startsWith("memory/daily/"));
+  return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "space-y-6", children: [
+    /* @__PURE__ */ jsxRuntimeExports.jsx(
+      DashboardPageHeader,
+      {
+        eyebrow: "Hipocampus",
+        title: "Memory",
+        description: "Browse, search, edit, compact, and reindex local memory used by the runtime.",
+        action: /* @__PURE__ */ jsxRuntimeExports.jsx(ButtonLike, { variant: "secondary", onClick: onRefresh, disabled: refreshing, children: refreshing ? "Refreshing..." : "Refresh" })
+      }
+    ),
+    /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "grid gap-5 xl:grid-cols-[minmax(0,420px)_minmax(0,1fr)]", children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsxs(
+        DashboardCard,
+        {
+          title: "Memory Files",
+          children: [
+            /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "mb-4 grid gap-3 sm:grid-cols-2", children: [
+              /* @__PURE__ */ jsxRuntimeExports.jsx(MetricTile, { label: "Files", value: memoryFiles.length }),
+              /* @__PURE__ */ jsxRuntimeExports.jsx(
+                MetricTile,
+                {
+                  label: "QMD",
+                  value: memoryStatus?.qmdReady === true ? "Ready" : "Local"
+                }
+              )
+            ] }),
+            asString(rootMemory.path) && /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "mb-4 rounded-xl bg-gray-50 px-4 py-3 text-xs text-secondary", children: [
+              "Root: ",
+              asString(rootMemory.path)
+            ] }),
+            /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "mb-4 flex gap-2", children: [
+              /* @__PURE__ */ jsxRuntimeExports.jsx(
+                "input",
+                {
+                  value: query,
+                  onChange: (event) => setQuery(event.target.value),
+                  onKeyDown: (event) => {
+                    if (event.key === "Enter") void runSearch();
+                  },
+                  placeholder: "Search memory...",
+                  className: "min-h-11 min-w-0 flex-1 rounded-lg border border-black/[0.08] bg-white px-3.5 py-2.5 text-sm outline-none transition focus:border-primary/40 focus:ring-4 focus:ring-primary/10"
+                }
+              ),
+              /* @__PURE__ */ jsxRuntimeExports.jsx(ButtonLike, { onClick: () => void runSearch(), disabled: searching, className: "px-4", children: searching ? "Searching" : "Search" })
+            ] }),
+            /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "mb-4 flex flex-wrap gap-2", children: [
+              /* @__PURE__ */ jsxRuntimeExports.jsxs(
+                "button",
+                {
+                  type: "button",
+                  onClick: () => void deletePaths(Array.from(selectedPaths)),
+                  disabled: busy || selectedCount === 0,
+                  className: "min-h-9 rounded-lg bg-gray-100 px-3 text-xs font-semibold text-foreground transition hover:bg-gray-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30 disabled:opacity-50",
+                  children: [
+                    "Delete selected",
+                    selectedCount > 0 ? ` (${selectedCount})` : ""
+                  ]
+                }
+              ),
+              /* @__PURE__ */ jsxRuntimeExports.jsx(
+                "button",
+                {
+                  type: "button",
+                  onClick: () => void deletePaths(dailyPaths),
+                  disabled: busy || dailyPaths.length === 0,
+                  className: "min-h-9 rounded-lg bg-gray-100 px-3 text-xs font-semibold text-foreground transition hover:bg-gray-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30 disabled:opacity-50",
+                  children: "Clear daily logs"
+                }
+              ),
+              /* @__PURE__ */ jsxRuntimeExports.jsx(
+                "button",
+                {
+                  type: "button",
+                  onClick: () => void runMemoryAction("compact"),
+                  disabled: busy,
+                  className: "min-h-9 rounded-lg bg-gray-100 px-3 text-xs font-semibold text-foreground transition hover:bg-gray-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30 disabled:opacity-50",
+                  children: "Compact"
+                }
+              ),
+              /* @__PURE__ */ jsxRuntimeExports.jsx(
+                "button",
+                {
+                  type: "button",
+                  onClick: () => void runMemoryAction("reindex"),
+                  disabled: busy,
+                  className: "min-h-9 rounded-lg bg-gray-100 px-3 text-xs font-semibold text-foreground transition hover:bg-gray-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30 disabled:opacity-50",
+                  children: "Reindex"
+                }
+              )
+            ] }),
+            notice && /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "mb-3 rounded-xl bg-emerald-50 px-3 py-2 text-xs text-emerald-700", children: notice }),
+            error && /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "mb-3 rounded-xl bg-red-50 px-3 py-2 text-xs text-red-500", children: error }),
+            loading ? /* @__PURE__ */ jsxRuntimeExports.jsx(EmptyState, { children: "Loading memory..." }) : filteredFiles.length === 0 ? /* @__PURE__ */ jsxRuntimeExports.jsx(EmptyState, { children: "No memory files found." }) : /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "max-h-[520px] divide-y divide-black/[0.06] overflow-y-auto rounded-lg border border-black/[0.08]", children: filteredFiles.map((file) => {
+              const checked = selectedPaths.has(file.path);
+              const active = selectedPath === file.path;
+              return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: `flex min-h-14 items-center gap-3 px-3 py-2 ${active ? "bg-primary/[0.06]" : "bg-white"}`, children: [
+                /* @__PURE__ */ jsxRuntimeExports.jsx(
+                  "input",
+                  {
+                    type: "checkbox",
+                    checked,
+                    onChange: () => toggleSelected(file.path),
+                    className: "h-4 w-4 rounded border-black/[0.12]",
+                    "aria-label": `Select ${file.path}`
+                  }
+                ),
+                /* @__PURE__ */ jsxRuntimeExports.jsxs(
+                  "button",
+                  {
+                    type: "button",
+                    onClick: () => void openFile(file.path),
+                    className: "min-w-0 flex-1 rounded-md text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30",
+                    children: [
+                      /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "truncate text-sm font-semibold text-foreground", children: file.path }),
+                      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "mt-0.5 text-xs text-secondary", children: [
+                        formatFileSize(file.sizeBytes),
+                        file.mtimeMs ? ` · ${new Date(file.mtimeMs).toISOString()}` : ""
+                      ] })
+                    ]
+                  }
+                ),
+                /* @__PURE__ */ jsxRuntimeExports.jsx(
+                  "button",
+                  {
+                    type: "button",
+                    onClick: () => void deletePaths([file.path]),
+                    disabled: busy,
+                    className: "min-h-8 rounded-lg px-2 text-xs font-semibold text-red-500 transition hover:bg-red-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500/20 disabled:opacity-50",
+                    children: "Delete"
+                  }
+                )
+              ] }, file.path);
+            }) })
+          ]
+        }
+      ),
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "space-y-5", children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsx(
+          DashboardCard,
+          {
+            title: selectedPath ?? "Memory File",
+            action: selectedPath ? /* @__PURE__ */ jsxRuntimeExports.jsx(
+              ButtonLike,
+              {
+                onClick: () => void saveSelected(),
+                disabled: busy || fileLoading || editedContent === content2,
+                className: "min-h-9 px-3 py-1.5",
+                children: "Save"
+              }
+            ) : null,
+            children: !selectedPath ? /* @__PURE__ */ jsxRuntimeExports.jsx(EmptyState, { children: "Select a memory file to view or edit it." }) : fileLoading ? /* @__PURE__ */ jsxRuntimeExports.jsx(EmptyState, { children: "Loading file..." }) : /* @__PURE__ */ jsxRuntimeExports.jsx(
+              "textarea",
+              {
+                value: editedContent,
+                onChange: (event) => setEditedContent(event.target.value),
+                spellCheck: false,
+                className: "h-[420px] w-full resize-none rounded-lg border border-black/[0.08] bg-white px-4 py-3 font-mono text-sm leading-6 text-foreground outline-none transition focus:border-primary/40 focus:ring-4 focus:ring-primary/10"
+              }
+            )
+          }
+        ),
+        searchResults.length > 0 && /* @__PURE__ */ jsxRuntimeExports.jsx(DashboardCard, { title: "Search Results", children: /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "space-y-2", children: searchResults.map((result, index2) => /* @__PURE__ */ jsxRuntimeExports.jsxs(
+          "button",
+          {
+            type: "button",
+            onClick: () => result.path && void openFile(result.path),
+            className: "block min-h-14 w-full rounded-lg bg-gray-50 px-4 py-3 text-left transition hover:bg-gray-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30",
+            children: [
+              /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center justify-between gap-3", children: [
+                /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "truncate text-sm font-semibold text-foreground", children: result.path ?? `result-${index2 + 1}` }),
+                typeof result.score === "number" && /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "shrink-0 text-xs text-secondary", children: result.score.toFixed(2) })
+              ] }),
+              result.contentPreview && /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "mt-1 line-clamp-3 text-xs leading-5 text-secondary", children: result.contentPreview })
+            ]
+          },
+          `${result.path ?? "result"}-${index2}`
+        )) }) })
+      ] })
+    ] })
+  ] });
+}
+function SkillDirectoryFilterButton({
+  active,
+  label,
+  count,
+  onClick
+}) {
+  return /* @__PURE__ */ jsxRuntimeExports.jsxs(
+    "button",
+    {
+      type: "button",
+      "aria-pressed": active,
+      onClick,
+      className: `inline-flex min-h-10 items-center gap-2 rounded-xl border px-3.5 py-2 text-sm font-semibold transition-all duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30 ${active ? "border-primary/25 bg-primary/[0.08] text-primary" : "border-black/[0.08] bg-white text-secondary hover:border-primary/25 hover:bg-primary/[0.035] hover:text-foreground"}`,
+      children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsx("span", { children: label }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: `rounded-full px-2 py-0.5 text-[11px] ${active ? "bg-primary/10" : "bg-black/[0.04]"}`, children: count })
+      ]
+    }
+  );
+}
+function SkillBadge({
+  children,
+  tone = "neutral"
+}) {
+  const tones = {
+    neutral: "border-black/[0.08] bg-black/[0.025] text-secondary",
+    primary: "border-primary/15 bg-primary/[0.08] text-primary",
+    green: "border-emerald-500/20 bg-emerald-500/[0.08] text-emerald-700",
+    red: "border-red-500/20 bg-red-500/[0.08] text-red-500"
+  };
+  return /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: `inline-flex items-center rounded-full border px-2.5 py-1 text-[11px] font-semibold ${tones[tone]}`, children });
+}
+function SkillsDashboard({
+  skillsSnapshot,
+  loading,
+  onRefresh
+}) {
+  const [query, setQuery] = reactExports.useState("");
+  const [filter, setFilter] = reactExports.useState("all");
+  const loaded = asArray(skillsSnapshot?.loaded);
+  const hooks = asArray(skillsSnapshot?.runtimeHooks);
+  const issues = asArray(skillsSnapshot?.issues);
+  const issueDetails = reactExports.useMemo(() => normalizeSkillIssueDetails(issues), [issues]);
+  const skillItems = reactExports.useMemo(() => normalizeSkillDirectoryItems(loaded, issues), [loaded, issues]);
+  const hookGroups = reactExports.useMemo(() => {
+    const groups = /* @__PURE__ */ new Map();
+    for (const hook of hooks) {
+      const point2 = asString(hook.point, asString(hook.kind, "runtime"));
+      groups.set(point2, [...groups.get(point2) ?? [], hook]);
+    }
+    return Array.from(groups.entries()).map(([point2, items]) => ({ point: point2, items }));
+  }, [hooks]);
+  const normalizedQuery = query.trim().toLowerCase();
+  const promptSkillCount = skillItems.filter((skill) => skill.promptOnly).length;
+  const scriptSkillCount = skillItems.filter((skill) => skill.scriptBacked).length;
+  const hookSkillCount = skillItems.filter((skill) => skill.runtimeHooks > 0).length;
+  const issueSkillCount = skillItems.filter((skill) => skill.issues.length > 0).length;
+  const filterOptions = [
+    { id: "all", label: "All", count: skillItems.length },
+    { id: "prompt", label: "Prompt skills", count: promptSkillCount },
+    { id: "script", label: "Script skills", count: scriptSkillCount },
+    { id: "hooks", label: "Runtime hooks", count: hookSkillCount },
+    { id: "issues", label: "Issues", count: issueSkillCount }
+  ];
+  const filteredSkills = skillItems.filter((skill) => {
+    if (!filterSkillDirectoryItem(skill, filter)) return false;
+    if (!normalizedQuery) return true;
+    return skillSearchText(skill).includes(normalizedQuery);
+  });
+  return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "max-w-6xl space-y-6", children: [
+    /* @__PURE__ */ jsxRuntimeExports.jsx(
+      DashboardPageHeader,
+      {
+        eyebrow: "Capabilities",
+        title: "Skills",
+        description: "Local SKILL.md capabilities loaded by the runtime. Search installed skills, inspect hook wiring, and catch broken skill metadata before a run depends on it.",
+        action: /* @__PURE__ */ jsxRuntimeExports.jsx(ButtonLike, { variant: "secondary", onClick: onRefresh, children: "Reload" })
+      }
+    ),
+    /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "grid gap-3 sm:grid-cols-2 xl:grid-cols-4", children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsx(MetricTile, { label: "Installed", value: skillItems.length }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx(MetricTile, { label: "Prompt Skills", value: promptSkillCount }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx(MetricTile, { label: "Script Skills", value: scriptSkillCount }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx(MetricTile, { label: "Runtime Hooks", value: hooks.length })
+    ] }),
+    issueDetails.length > 0 && /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "rounded-2xl border border-red-500/15 bg-red-500/[0.045] px-5 py-4", children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "text-sm font-semibold text-red-500", children: [
+        issueDetails.length,
+        " skill issue",
+        issueDetails.length === 1 ? "" : "s",
+        " need attention"
+      ] }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "mt-1 text-sm leading-6 text-red-500/80", children: "Invalid skill metadata stays visible here so local operators can fix it before relying on the capability." })
+    ] }),
+    /* @__PURE__ */ jsxRuntimeExports.jsxs(
+      DashboardCard,
+      {
+        title: "Directory",
+        action: /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "text-xs font-semibold uppercase tracking-[0.14em] text-secondary/60", children: [
+          filteredSkills.length,
+          " shown"
+        ] }),
+        children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "mb-5 grid gap-3 lg:grid-cols-[minmax(0,1fr)_auto]", children: [
+            /* @__PURE__ */ jsxRuntimeExports.jsxs("label", { className: "block", children: [
+              /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "sr-only", children: "Search skills" }),
+              /* @__PURE__ */ jsxRuntimeExports.jsx(
+                "input",
+                {
+                  value: query,
+                  onChange: (event) => setQuery(event.target.value),
+                  placeholder: "Search skills...",
+                  className: "min-h-11 w-full rounded-xl border border-black/[0.08] bg-white px-4 py-2.5 text-sm font-medium text-foreground outline-none transition-colors duration-200 placeholder:text-secondary/45 focus:border-primary/45 focus:ring-4 focus:ring-primary/10"
+                }
+              )
+            ] }),
+            /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "flex flex-wrap gap-2", children: filterOptions.map((option) => /* @__PURE__ */ jsxRuntimeExports.jsx(
+              SkillDirectoryFilterButton,
+              {
+                active: filter === option.id,
+                label: option.label,
+                count: option.count,
+                onClick: () => setFilter(option.id)
+              },
+              option.id
+            )) })
+          ] }),
+          loading ? /* @__PURE__ */ jsxRuntimeExports.jsx(EmptyState, { children: "Loading skills..." }) : skillItems.length === 0 ? /* @__PURE__ */ jsxRuntimeExports.jsx(EmptyState, { children: "No skills loaded. Add SKILL.md directories to the local workspace, then reload." }) : filteredSkills.length === 0 ? /* @__PURE__ */ jsxRuntimeExports.jsx(EmptyState, { children: "No skills match the current search or filter." }) : /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "grid gap-3 md:grid-cols-2 xl:grid-cols-3", children: filteredSkills.map((skill) => /* @__PURE__ */ jsxRuntimeExports.jsxs(
+            "article",
+            {
+              className: "flex min-h-[190px] flex-col rounded-2xl border border-black/[0.06] bg-white px-4 py-4 transition-all duration-200 hover:border-primary/20 hover:bg-primary/[0.025]",
+              children: [
+                /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-start justify-between gap-3", children: [
+                  /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "min-w-0", children: [
+                    /* @__PURE__ */ jsxRuntimeExports.jsx("h3", { className: "truncate text-base font-semibold text-foreground", children: skill.name }),
+                    /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "mt-1 truncate text-xs text-secondary", children: skill.path || "workspace skill" })
+                  ] }),
+                  /* @__PURE__ */ jsxRuntimeExports.jsx(SkillBadge, { tone: skill.scriptBacked ? "green" : "primary", children: skillTypeLabel(skill) })
+                ] }),
+                /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "mt-4 flex flex-wrap gap-2", children: [
+                  skill.tags.slice(0, 5).map((tag) => /* @__PURE__ */ jsxRuntimeExports.jsx(SkillBadge, { children: tag }, tag)),
+                  skill.runtimeHooks > 0 && /* @__PURE__ */ jsxRuntimeExports.jsxs(SkillBadge, { tone: "green", children: [
+                    skill.runtimeHooks,
+                    " hook",
+                    skill.runtimeHooks === 1 ? "" : "s"
+                  ] }),
+                  skill.issues.length > 0 && /* @__PURE__ */ jsxRuntimeExports.jsxs(SkillBadge, { tone: "red", children: [
+                    skill.issues.length,
+                    " issue",
+                    skill.issues.length === 1 ? "" : "s"
+                  ] }),
+                  skill.tags.length === 0 && skill.runtimeHooks === 0 && skill.issues.length === 0 && /* @__PURE__ */ jsxRuntimeExports.jsx(SkillBadge, { children: "no tags" })
+                ] }),
+                /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "mt-auto pt-4", children: /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "rounded-xl border border-black/[0.05] bg-black/[0.025] px-3 py-2", children: [
+                  /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "text-[11px] font-semibold uppercase tracking-[0.12em] text-secondary/60", children: "Runtime role" }),
+                  /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "mt-1 text-sm leading-5 text-secondary", children: skill.scriptBacked ? "Executable capability with an input schema and local entrypoint." : "Prompt capability that can be invoked by the local operator." })
+                ] }) })
+              ]
+            },
+            `${skill.name}-${skill.path}`
+          )) })
+        ]
+      }
+    ),
+    /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "grid gap-5 lg:grid-cols-[minmax(0,1fr)_minmax(320px,380px)]", children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsx(DashboardCard, { title: "Runtime Hooks", children: hookGroups.length === 0 ? /* @__PURE__ */ jsxRuntimeExports.jsx(EmptyState, { children: "No runtime hooks reported." }) : /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "space-y-3", children: hookGroups.map((group) => /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "rounded-2xl border border-black/[0.06] bg-gray-50 p-4", children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center justify-between gap-3", children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "text-sm font-semibold text-foreground", children: group.point }),
+          /* @__PURE__ */ jsxRuntimeExports.jsx(SkillBadge, { children: group.items.length })
+        ] }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "mt-3 space-y-2", children: group.items.map((hook, index2) => {
+          const hookName = asString(hook.name, asString(hook.skillName, `hook-${index2 + 1}`));
+          const detail = asString(hook.command, asString(hook.path, asString(hook.entry)));
+          return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "rounded-xl bg-white px-3 py-2", children: [
+            /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "text-sm font-semibold text-foreground", children: hookName }),
+            detail && /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "mt-1 truncate text-xs text-secondary", children: detail })
+          ] }, `${group.point}-${hookName}-${index2}`);
+        }) })
+      ] }, group.point)) }) }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx(DashboardCard, { title: "Issue detail", children: issueDetails.length === 0 ? /* @__PURE__ */ jsxRuntimeExports.jsx(EmptyState, { children: "No skill issues reported." }) : /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "space-y-3", children: issueDetails.map((issue) => /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "rounded-2xl border border-red-500/15 bg-red-500/[0.04] px-4 py-3", children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-start justify-between gap-3", children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "min-w-0", children: [
+            /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "truncate text-sm font-semibold text-foreground", children: issue.title }),
+            issue.path && /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "mt-1 truncate text-xs text-secondary", children: issue.path })
+          ] }),
+          /* @__PURE__ */ jsxRuntimeExports.jsx(SkillBadge, { tone: "red", children: issue.reason })
+        ] }),
+        issue.detail && /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "mt-3 rounded-xl bg-white/70 px-3 py-2 text-xs leading-5 text-secondary", children: issue.detail })
+      ] }, issue.key)) }) })
+    ] })
+  ] });
+}
+function UsageDashboard({ runtimeSnapshot }) {
+  const sectionRows = [
+    { key: "sessions", title: "Sessions" },
+    { key: "tasks", title: "Background Tasks" },
+    { key: "crons", title: "Schedules" },
+    { key: "artifacts", title: "Artifacts" },
+    { key: "tools", title: "Tools" }
+  ].map((section) => {
+    const data = asRecord(runtimeSnapshot?.[section.key]);
+    const items = asArray(data.items).slice(0, 6);
+    return { ...section, count: runtimeItemCount(runtimeSnapshot, section.key), items };
+  });
+  return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "max-w-4xl space-y-6", children: [
+    /* @__PURE__ */ jsxRuntimeExports.jsx(
+      DashboardPageHeader,
+      {
+        eyebrow: "Runtime Activity",
+        title: "Usage",
+        description: "Local runtime activity. Self-hosted Magi does not meter platform credits."
+      }
+    ),
+    /* @__PURE__ */ jsxRuntimeExports.jsxs(DashboardCard, { title: "Runtime Totals", children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "grid gap-3 sm:grid-cols-2 lg:grid-cols-5", children: sectionRows.map((row) => /* @__PURE__ */ jsxRuntimeExports.jsx(MetricTile, { label: row.title, value: row.count }, row.key)) }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "mt-5 text-sm leading-6 text-secondary", children: "Model usage is controlled by the provider or local model server you configure." })
+    ] }),
+    /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "grid gap-5 lg:grid-cols-2", children: sectionRows.map((row) => /* @__PURE__ */ jsxRuntimeExports.jsx(DashboardCard, { title: row.title, children: row.items.length === 0 ? /* @__PURE__ */ jsxRuntimeExports.jsxs(EmptyState, { children: [
+      "No ",
+      row.title.toLowerCase(),
+      " reported."
+    ] }) : /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "space-y-2", children: row.items.map((item, index2) => {
+      const label = asString(item.name) || asString(item.id) || asString(item.sessionKey) || asString(item.taskId) || `${row.title} ${index2 + 1}`;
+      const detail = asString(item.status) || asString(item.state) || asString(item.schedule) || asString(item.description);
+      return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "rounded-lg border border-black/[0.06] bg-gray-50 px-4 py-3", children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "truncate text-sm font-semibold text-foreground", children: label }),
+        detail && /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "mt-1 text-xs text-secondary", children: detail })
+      ] }, `${row.key}-${index2}`);
+    }) }) }, row.key)) })
+  ] });
+}
+function ConverterDashboard({ onNavigate }) {
+  return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "max-w-3xl space-y-6", children: [
+    /* @__PURE__ */ jsxRuntimeExports.jsx(
+      DashboardPageHeader,
+      {
+        eyebrow: "Artifacts",
+        title: "Converter",
+        description: "Local document conversion runs through the agent workspace and artifact pipeline."
+      }
+    ),
+    /* @__PURE__ */ jsxRuntimeExports.jsx(DashboardCard, { title: "Local Conversion Flow", children: /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "space-y-3 text-sm leading-6 text-secondary", children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsx("p", { children: "Drop files into chat or upload them to Knowledge, then ask Magi to convert, summarize, extract tables, or generate deliverable artifacts. Outputs appear in the Work inspector and workspace artifacts." }),
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex flex-wrap gap-3", children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsx(ButtonLike, { onClick: () => onNavigate("chat"), children: "Open Chat" }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx(ButtonLike, { variant: "secondary", onClick: () => onNavigate("knowledge"), children: "Upload Knowledge" }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx(ButtonLike, { variant: "secondary", onClick: () => onNavigate("workspace"), children: "Open Workspace" })
+      ] })
+    ] }) }),
+    /* @__PURE__ */ jsxRuntimeExports.jsx(DashboardCard, { title: "Supported Pattern", children: /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "grid gap-3 sm:grid-cols-2", children: [
+      "DOCX/PDF/PPTX/XLSX extraction",
+      "Markdown and structured report generation",
+      "Workspace artifact review",
+      "Runtime proof before completion"
+    ].map((item) => /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "rounded-lg border border-black/[0.06] bg-gray-50 px-4 py-3 text-sm font-semibold text-foreground", children: item }, item)) }) })
+  ] });
+}
+function LocalDashboardShell({
+  route,
+  runtimeSnapshot,
+  runtimeStatus,
+  skillsSnapshot,
+  skillsLoading,
+  config,
+  configLoading,
+  configSaving,
+  configNotice,
+  configError,
+  agentUrl,
+  token,
+  kbCollections,
+  kbLoading,
+  kbRefreshing,
+  workspaceFiles,
+  workspaceLoading,
+  workspaceRefreshing,
+  memoryFiles,
+  memoryStatus,
+  memoryLoading,
+  memoryRefreshing,
+  setAgentUrl,
+  setToken,
+  onNavigate,
+  onRefreshAll,
+  onRefreshKnowledge,
+  onRefreshWorkspace,
+  onRefreshMemory,
+  onRefreshSkills,
+  onUploadKnowledge,
+  onReadWorkspaceFile,
+  onSaveWorkspaceFile,
+  onMemorySearch,
+  onMemoryReadFile,
+  onMemorySaveFile,
+  onMemoryDeleteFiles,
+  onMemoryCompact,
+  onMemoryReindex,
+  onSaveConnection,
+  onCheckRuntime,
+  onSaveConfig,
+  onReloadConfig,
+  onRestartRuntime
+}) {
+  const mobileRoutes = [
+    { route: "chat", label: "Chat" },
+    { route: "overview", label: "Overview" },
+    { route: "settings", label: "Settings" },
+    { route: "usage", label: "Usage" },
+    { route: "skills", label: "Skills" },
+    { route: "converter", label: "Converter" },
+    { route: "knowledge", label: "Knowledge" },
+    { route: "memory", label: "Memory" },
+    { route: "workspace", label: "Workspace" }
+  ];
+  return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex h-full min-w-0 flex-1 bg-background", children: [
+    /* @__PURE__ */ jsxRuntimeExports.jsx(
+      DashboardSidebar,
+      {
+        activeRoute: route,
+        runtimeStatus,
+        onNavigate,
+        onRefresh: onRefreshAll
+      }
+    ),
+    /* @__PURE__ */ jsxRuntimeExports.jsxs("main", { className: "min-w-0 flex-1 overflow-y-auto", children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "border-b border-gray-200 bg-gray-50 px-4 py-3 md:hidden", children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "mb-3 flex items-center justify-between gap-3", children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "min-w-0", children: [
+            /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "truncate text-sm font-semibold text-foreground", children: BOT_NAME }),
+            /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "mt-1 flex items-center gap-2 text-xs text-secondary", children: [
+              /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: `h-2 w-2 rounded-full ${runtimeStatus === "active" ? "bg-emerald-400" : "bg-gray-300"}` }),
+              runtimeStatusLabel(runtimeStatus)
+            ] })
+          ] }),
+          /* @__PURE__ */ jsxRuntimeExports.jsx(ButtonLike, { variant: "secondary", onClick: () => onNavigate("chat"), className: "min-h-0 px-3 py-2", children: "Chat" })
+        ] }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx(
+          "select",
+          {
+            value: route,
+            onChange: (event) => onNavigate(event.target.value),
+            className: "w-full rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm font-medium text-foreground",
+            "aria-label": "Dashboard section",
+            children: mobileRoutes.map((item) => /* @__PURE__ */ jsxRuntimeExports.jsx("option", { value: item.route, children: item.label }, item.route))
+          }
+        )
+      ] }),
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "min-w-0 p-4 sm:p-6 md:p-8", children: [
+        route === "overview" && /* @__PURE__ */ jsxRuntimeExports.jsx(
+          OverviewDashboard,
+          {
+            runtimeSnapshot,
+            runtimeStatus,
+            kbCollections,
+            workspaceFiles,
+            onNavigate
+          }
+        ),
+        route === "settings" && /* @__PURE__ */ jsxRuntimeExports.jsx(
+          SettingsDashboard,
+          {
+            agentUrl,
+            token,
+            runtimeStatus,
+            config,
+            configLoading,
+            configSaving,
+            configNotice,
+            configError,
+            setAgentUrl,
+            setToken,
+            onSaveConnection,
+            onCheckRuntime,
+            onSaveConfig,
+            onReloadConfig,
+            onRestartRuntime
+          }
+        ),
+        route === "usage" && /* @__PURE__ */ jsxRuntimeExports.jsx(UsageDashboard, { runtimeSnapshot }),
+        route === "converter" && /* @__PURE__ */ jsxRuntimeExports.jsx(ConverterDashboard, { onNavigate }),
+        route === "skills" && /* @__PURE__ */ jsxRuntimeExports.jsx(
+          SkillsDashboard,
+          {
+            skillsSnapshot,
+            loading: skillsLoading,
+            onRefresh: onRefreshSkills
+          }
+        ),
+        route === "knowledge" && /* @__PURE__ */ jsxRuntimeExports.jsx(
+          KnowledgeDashboard,
+          {
+            kbCollections,
+            loading: kbLoading,
+            refreshing: kbRefreshing,
+            onRefresh: onRefreshKnowledge,
+            onUpload: onUploadKnowledge
+          }
+        ),
+        route === "workspace" && /* @__PURE__ */ jsxRuntimeExports.jsx(
+          WorkspaceDashboard,
+          {
+            workspaceFiles,
+            loading: workspaceLoading,
+            refreshing: workspaceRefreshing,
+            onRefresh: onRefreshWorkspace,
+            onReadFile: onReadWorkspaceFile,
+            onSaveFile: onSaveWorkspaceFile
+          }
+        ),
+        route === "memory" && /* @__PURE__ */ jsxRuntimeExports.jsx(
+          MemoryDashboard,
+          {
+            memoryFiles,
+            memoryStatus,
+            loading: memoryLoading,
+            refreshing: memoryRefreshing,
+            onRefresh: onRefreshMemory,
+            onSearch: onMemorySearch,
+            onReadFile: onMemoryReadFile,
+            onSaveFile: onMemorySaveFile,
+            onDeleteFiles: onMemoryDeleteFiles,
+            onCompact: onMemoryCompact,
+            onReindex: onMemoryReindex
+          }
+        )
+      ] })
+    ] })
+  ] });
+}
 function App() {
   const store = useChatStore();
   const chatMessagesRef = reactExports.useRef(null);
   const chatInputRef = reactExports.useRef(null);
   const sawAgentEventRef = reactExports.useRef(false);
+  const interruptHandoffChannelsRef = reactExports.useRef(/* @__PURE__ */ new Set());
+  const [appRoute, setAppRoute] = reactExports.useState(() => routeFromPathname(window.location.pathname));
   const [agentUrl, setAgentUrl] = reactExports.useState(() => getStored(storage.agentUrl, window.location.origin));
   const [token, setToken] = reactExports.useState(() => getStored(storage.token, ""));
   const [editing, setEditing] = reactExports.useState(false);
   const [refreshing, setRefreshing] = reactExports.useState(false);
+  const [runtimeStatus, setRuntimeStatus] = reactExports.useState("not_checked");
+  const [runtimeSnapshot, setRuntimeSnapshot] = reactExports.useState(null);
+  const [skillsSnapshot, setSkillsSnapshot] = reactExports.useState(null);
+  const [skillsLoading, setSkillsLoading] = reactExports.useState(true);
+  const [localConfig, setLocalConfig] = reactExports.useState(null);
+  const [configLoading, setConfigLoading] = reactExports.useState(true);
+  const [configSaving, setConfigSaving] = reactExports.useState(false);
+  const [configNotice, setConfigNotice] = reactExports.useState(null);
+  const [configError, setConfigError] = reactExports.useState(null);
   const [sidebarOpen, setSidebarOpen] = reactExports.useState(false);
   const [customCategories, setCustomCategories] = reactExports.useState([]);
   const [selectedKbDocs, setSelectedKbDocs] = reactExports.useState([]);
@@ -36632,9 +39319,14 @@ function App() {
   const [workspaceFiles, setWorkspaceFiles] = reactExports.useState([]);
   const [workspaceLoading, setWorkspaceLoading] = reactExports.useState(true);
   const [workspaceRefreshing, setWorkspaceRefreshing] = reactExports.useState(false);
+  const [memoryFiles, setMemoryFiles] = reactExports.useState([]);
+  const [memoryStatus, setMemoryStatus] = reactExports.useState(null);
+  const [memoryLoading, setMemoryLoading] = reactExports.useState(true);
+  const [memoryRefreshing, setMemoryRefreshing] = reactExports.useState(false);
   const [uploadStates, setUploadStates] = reactExports.useState({});
   const [replyingTo, setReplyingTo] = reactExports.useState(null);
   const [streamingComposerMode, setStreamingComposerMode] = reactExports.useState("queue");
+  const [escArmedUntil, setEscArmedUntil] = reactExports.useState(null);
   const [rightWorkInspectorOpen, setRightWorkInspectorOpen] = reactExports.useState(() => {
     try {
       return localStorage.getItem("magi:kbPanelExpanded") !== "0" && localStorage.getItem("magi:rightInspectorView") !== "knowledge";
@@ -36642,9 +39334,7 @@ function App() {
       return true;
     }
   });
-  const [modelSelection, setModelSelection] = reactExports.useState(
-    () => getStored(storage.modelOverride, DEFAULT_MODEL)
-  );
+  const [modelSelection, setModelSelection] = reactExports.useState(getConfiguredModelSelection);
   const [routerType, setRouterType] = reactExports.useState(DEFAULT_ROUTER);
   const [isDraggingOver, setIsDraggingOver] = reactExports.useState(false);
   const dragCounterRef = reactExports.useRef(0);
@@ -36654,6 +39344,15 @@ function App() {
   const queuedForChannel = store.queuedMessages[activeChannel] ?? [];
   const controlsForChannel = store.controlRequests[activeChannel] ?? [];
   const allKbDocs = reactExports.useMemo(() => kbCollections.flatMap((collection) => collection.docs), [kbCollections]);
+  const chatInputCustomSkills = reactExports.useMemo(() => {
+    return normalizeSkillDirectoryItems(asArray(skillsSnapshot?.loaded), asArray(skillsSnapshot?.issues)).filter((skill) => skill.promptOnly || skill.scriptBacked || skill.runtimeHooks > 0).map((skill) => ({
+      name: skill.name,
+      title: skill.name,
+      tags: skill.tags,
+      description: skill.path
+    }));
+  }, [skillsSnapshot]);
+  const anyStreaming = Object.values(store.channelStates).some((state) => state.streaming);
   const authHeaders = reactExports.useCallback(
     (json = false) => ({
       ...json ? { "Content-Type": "application/json" } : {},
@@ -36706,6 +39405,56 @@ function App() {
     },
     [authHeaders, normalizedBase]
   );
+  const deleteJson = reactExports.useCallback(
+    async (path2, body) => {
+      const response = await fetch(`${normalizedBase}${path2}`, {
+        method: "DELETE",
+        headers: authHeaders(true),
+        body: JSON.stringify(body)
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(asString(payload.error, response.statusText));
+      }
+      return payload;
+    },
+    [authHeaders, normalizedBase]
+  );
+  const refreshRuntime = reactExports.useCallback(async () => {
+    setRuntimeStatus("checking");
+    try {
+      const payload = await getJson("/v1/app/runtime");
+      setRuntimeSnapshot(payload);
+      setRuntimeStatus("active");
+    } catch {
+      setRuntimeSnapshot(null);
+      setRuntimeStatus("unavailable");
+    }
+  }, [getJson]);
+  const refreshSkills = reactExports.useCallback(async () => {
+    setSkillsLoading(true);
+    try {
+      const payload = await getJson("/v1/app/skills");
+      setSkillsSnapshot(payload);
+    } catch {
+      setSkillsSnapshot(null);
+    } finally {
+      setSkillsLoading(false);
+    }
+  }, [getJson]);
+  const refreshConfig = reactExports.useCallback(async () => {
+    setConfigLoading(true);
+    try {
+      const payload = await getJson("/v1/app/config");
+      setLocalConfig(localConfigFromPayload(payload));
+      setConfigError(null);
+    } catch (err) {
+      setLocalConfig(null);
+      setConfigError(err instanceof Error ? err.message : "Failed to load config");
+    } finally {
+      setConfigLoading(false);
+    }
+  }, [getJson]);
   const refreshKnowledge = reactExports.useCallback(async () => {
     setKbRefreshing(true);
     try {
@@ -36718,6 +39467,29 @@ function App() {
       setKbRefreshing(false);
     }
   }, [getJson]);
+  const uploadKnowledgeFiles = reactExports.useCallback(
+    async (files) => {
+      for (const file of Array.from(files)) {
+        const extension2 = file.name.split(".").pop()?.toLowerCase() ?? "";
+        if (!KB_UPLOAD_EXTENSIONS.has(extension2)) {
+          throw new Error(`Unsupported file type: ${file.name}`);
+        }
+        const contentType = resolveKnowledgeUploadMimeType(file);
+        const isTextFile = contentType.startsWith("text/") || ["application/json", "application/xml"].includes(contentType) || /\.(md|markdown|txt|csv|tsv|json|yaml|yml|html|htm|xml)$/i.test(file.name);
+        const content2 = isTextFile ? await file.text() : `Binary knowledge file saved from local dashboard: ${file.name} (${file.size} bytes, ${contentType})`;
+        const safeName = file.name.replace(/[^A-Za-z0-9._-]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 120) || "document.txt";
+        const response = await fetch(`${normalizedBase}/v1/app/knowledge/file`, {
+          method: "PUT",
+          headers: authHeaders(true),
+          body: JSON.stringify({ path: `dashboard/${safeName}`, content: content2 })
+        });
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(asString(payload.error, response.statusText));
+      }
+      await refreshKnowledge();
+    },
+    [authHeaders, normalizedBase, refreshKnowledge]
+  );
   const refreshWorkspace = reactExports.useCallback(async () => {
     setWorkspaceRefreshing(true);
     try {
@@ -36751,6 +39523,26 @@ function App() {
       setWorkspaceRefreshing(false);
     }
   }, [getJson]);
+  const refreshMemory = reactExports.useCallback(async () => {
+    setMemoryRefreshing(true);
+    try {
+      const payload = await getJson("/v1/app/memory");
+      setMemoryStatus(asRecord(payload.status));
+      setMemoryFiles(
+        asArray(payload.files).map((file) => ({
+          path: asString(file.path),
+          sizeBytes: asNumber(file.sizeBytes, 0),
+          mtimeMs: typeof file.mtimeMs === "number" && Number.isFinite(file.mtimeMs) ? file.mtimeMs : null
+        })).filter((file) => file.path.length > 0)
+      );
+    } catch {
+      setMemoryStatus(null);
+      setMemoryFiles([]);
+    } finally {
+      setMemoryLoading(false);
+      setMemoryRefreshing(false);
+    }
+  }, [getJson]);
   const saveWorkspaceFile = reactExports.useCallback(
     async (path2, content2) => {
       await putJson("/v1/app/workspace/file", { path: path2, content: content2 });
@@ -36758,13 +39550,120 @@ function App() {
     },
     [putJson, refreshWorkspace]
   );
+  const readWorkspaceFile = reactExports.useCallback(
+    async (path2) => {
+      const payload = await getJson(`/v1/app/workspace/file?path=${encodeURIComponent(path2)}`);
+      return asString(payload.content);
+    },
+    [getJson]
+  );
+  const saveConfig = reactExports.useCallback(
+    async (config) => {
+      setConfigSaving(true);
+      setConfigNotice(null);
+      setConfigError(null);
+      try {
+        const payload = await putJson("/v1/app/config", configSavePayload(config));
+        const next = { ...config, ...localConfigFromPayload({ ...payload, config: configSavePayload(config) }) };
+        setLocalConfig(next);
+        setConfigNotice("Settings saved. Restart the runtime for provider or workspace changes to take effect.");
+      } catch (err) {
+        setConfigError(err instanceof Error ? err.message : "Failed to save config");
+      } finally {
+        setConfigSaving(false);
+      }
+    },
+    [putJson]
+  );
+  const reloadConfig = reactExports.useCallback(async () => {
+    setConfigNotice(null);
+    setConfigError(null);
+    try {
+      const payload = await sendJson("/v1/app/config/reload", {});
+      setLocalConfig(localConfigFromPayload(payload));
+      setConfigNotice(asString(payload.message, "Config reloaded. Restart may still be required."));
+    } catch (err) {
+      setConfigError(err instanceof Error ? err.message : "Failed to reload config");
+    }
+  }, [sendJson]);
+  const restartRuntime = reactExports.useCallback(async () => {
+    setConfigNotice(null);
+    setConfigError(null);
+    try {
+      const payload = await sendJson("/v1/app/runtime/restart", {});
+      setConfigNotice(asString(payload.message, payload.ok === true ? "Runtime restart scheduled." : "Runtime restart is not configured."));
+    } catch (err) {
+      setConfigError(err instanceof Error ? err.message : "Failed to restart runtime");
+    }
+  }, [sendJson]);
+  const readMemoryFile = reactExports.useCallback(
+    async (path2) => {
+      const payload = await getJson(`/v1/app/memory/file?path=${encodeURIComponent(path2)}`);
+      return asString(payload.content);
+    },
+    [getJson]
+  );
+  const searchMemory = reactExports.useCallback(
+    async (query) => getJson(`/v1/app/memory/search?q=${encodeURIComponent(query)}&limit=10`),
+    [getJson]
+  );
+  const deleteMemoryFiles = reactExports.useCallback(
+    async (paths) => {
+      await deleteJson("/v1/app/memory/files", { paths });
+      await refreshMemory();
+      await refreshWorkspace();
+    },
+    [deleteJson, refreshMemory, refreshWorkspace]
+  );
+  const compactMemory = reactExports.useCallback(async () => {
+    await sendJson("/v1/app/memory/compact", { force: true });
+    await refreshMemory();
+  }, [refreshMemory, sendJson]);
+  const reindexMemory = reactExports.useCallback(async () => {
+    await sendJson("/v1/app/memory/reindex", {});
+    await refreshMemory();
+  }, [refreshMemory, sendJson]);
+  const saveMemoryFile = reactExports.useCallback(
+    async (path2, content2) => {
+      await saveWorkspaceFile(path2, content2);
+      await refreshMemory();
+    },
+    [refreshMemory, saveWorkspaceFile]
+  );
   const refreshChannels = reactExports.useCallback(() => {
     setRefreshing(true);
     store.setChannels(store.channels.length > 0 ? store.channels : [defaultChannel()], { botId: BOT_ID });
-    void Promise.allSettled([refreshKnowledge(), refreshWorkspace()]).finally(() => {
+    void Promise.allSettled([refreshRuntime(), refreshKnowledge(), refreshWorkspace(), refreshMemory(), refreshSkills(), refreshConfig()]).finally(() => {
       window.setTimeout(() => setRefreshing(false), 300);
     });
-  }, [refreshKnowledge, refreshWorkspace, store]);
+  }, [refreshConfig, refreshKnowledge, refreshMemory, refreshRuntime, refreshSkills, refreshWorkspace, store]);
+  const refreshDashboardData = reactExports.useCallback(() => {
+    setRefreshing(true);
+    void Promise.allSettled([refreshRuntime(), refreshKnowledge(), refreshWorkspace(), refreshMemory(), refreshSkills(), refreshConfig()]).finally(() => {
+      window.setTimeout(() => setRefreshing(false), 300);
+    });
+  }, [refreshConfig, refreshKnowledge, refreshMemory, refreshRuntime, refreshSkills, refreshWorkspace]);
+  const navigateToRoute = reactExports.useCallback(
+    (route, channel = useChatStore.getState().activeChannel || DEFAULT_CHANNEL) => {
+      if (route === "chat") {
+        store.setActiveChannel(channel);
+      }
+      window.history.pushState({}, "", pathForRoute(route, channel));
+      window.dispatchEvent(new PopStateEvent("popstate"));
+      setAppRoute(route);
+    },
+    [store]
+  );
+  const handleSaveConnection = reactExports.useCallback(() => {
+    const nextAgentUrl = normalizeAgentUrl(agentUrl);
+    const nextToken = token.trim();
+    setAgentUrl(nextAgentUrl);
+    setToken(nextToken);
+    window.localStorage.setItem(storage.agentUrl, nextAgentUrl);
+    if (nextToken) window.localStorage.setItem(storage.token, nextToken);
+    else window.localStorage.removeItem(storage.token);
+    void refreshRuntime();
+  }, [agentUrl, refreshRuntime, token]);
   reactExports.useEffect(() => {
     store.setBotId(BOT_ID);
     store.setChannels([defaultChannel()], { botId: BOT_ID });
@@ -36781,7 +39680,20 @@ function App() {
       }
     }).catch(() => {
     });
-    void Promise.allSettled([refreshKnowledge(), refreshWorkspace()]);
+    void Promise.allSettled([refreshRuntime(), refreshKnowledge(), refreshWorkspace(), refreshMemory(), refreshSkills(), refreshConfig()]);
+  }, []);
+  reactExports.useEffect(() => {
+    const syncRoute = () => {
+      const nextRoute = routeFromPathname(window.location.pathname);
+      const nextChannel = channelFromPathname(window.location.pathname);
+      setAppRoute((current) => current === nextRoute ? current : nextRoute);
+      if (nextChannel && useChatStore.getState().activeChannel !== nextChannel) {
+        useChatStore.getState().setActiveChannel(nextChannel);
+      }
+    };
+    syncRoute();
+    window.addEventListener("popstate", syncRoute);
+    return () => window.removeEventListener("popstate", syncRoute);
   }, []);
   reactExports.useEffect(() => {
     if (!channelState.streaming) setStreamingComposerMode("queue");
@@ -36847,10 +39759,15 @@ function App() {
           streaming: true,
           turnPhase: "pending",
           error: null,
+          currentGoal: typeof payload.goal === "string" ? payload.goal : null,
           activeTools: [],
           browserFrame: null,
+          documentDraft: null,
           subagents: [],
           taskBoard: null,
+          inspectedSources: [],
+          citationGate: null,
+          runtimeTraces: [],
           heartbeatElapsedMs: null
         }, { botId: BOT_ID });
       }
@@ -36876,6 +39793,23 @@ function App() {
       if (type === "text_delta" && typeof payload.delta === "string") {
         appendAssistantDelta(channel, payload.delta);
       }
+      if (type === "llm_progress") {
+        const turnId = asString(payload.turnId, channel);
+        const iter = asNumber(payload.iter, 0);
+        const stage = asString(payload.stage, "waiting");
+        const label = asString(payload.label, "Thinking through next step");
+        const detail = asString(payload.detail);
+        const elapsedMs = asNumber(payload.elapsedMs);
+        updateActiveTools(channel, {
+          id: `llm:${turnId}:${iter}`,
+          label: "ModelProgress",
+          status: stage === "completed" ? "done" : "running",
+          startedAt: Date.now(),
+          inputPreview: JSON.stringify({ stage, label, detail, elapsedMs }),
+          outputPreview: detail,
+          durationMs: elapsedMs
+        });
+      }
       if (type === "tool_start") {
         const id = asString(payload.id, nowId("tool"));
         updateActiveTools(channel, {
@@ -36900,13 +39834,50 @@ function App() {
       if (type === "tool_end") {
         const id = asString(payload.id);
         if (id) {
+          const current = useChatStore.getState().channelStates[channel];
+          const existing = current?.activeTools?.find((item) => item.id === id);
           updateActiveTools(channel, {
             id,
             label: asString(payload.name, asString(payload.label, id)),
             status: payload.status === "error" || payload.status === "denied" ? payload.status : "done",
             startedAt: Date.now(),
             outputPreview: asString(payload.output_preview),
-            durationMs: asNumber(payload.durationMs)
+            durationMs: asNumber(payload.durationMs),
+            ...existing?.patchPreview ? { patchPreview: existing.patchPreview } : {}
+          });
+          if (current?.documentDraft?.id === id) {
+            store.setChannelState(channel, {
+              documentDraft: {
+                ...current.documentDraft,
+                status: "done",
+                updatedAt: Date.now()
+              }
+            }, { botId: BOT_ID });
+          }
+        }
+      }
+      if (type === "document_draft") {
+        const documentDraft = normalizeDocumentDraft(payload);
+        if (documentDraft) {
+          store.setChannelState(channel, { documentDraft }, { botId: BOT_ID });
+        }
+      }
+      if (type === "patch_preview") {
+        const patchPreview = normalizePatchPreview(payload);
+        if (patchPreview) {
+          const current = useChatStore.getState().channelStates[channel];
+          const activeTools2 = current?.activeTools ?? [];
+          const toolUseId = asString(payload.toolUseId);
+          const patchTool = [...activeTools2].reverse().find(
+            (item) => item.label.toLowerCase().replace(/[^a-z0-9]/g, "") === "patchapply"
+          );
+          const id = toolUseId || patchTool?.id || nowId("patch");
+          updateActiveTools(channel, {
+            id,
+            label: "PatchApply",
+            status: patchTool?.status ?? "running",
+            startedAt: Date.now(),
+            patchPreview
           });
         }
       }
@@ -36920,6 +39891,66 @@ function App() {
         store.setChannelState(channel, {
           taskBoard: { tasks: normalizeTaskBoard(payload), receivedAt: Date.now() }
         }, { botId: BOT_ID });
+      }
+      if (type === "source_inspected") {
+        const source = normalizeInspectedSource(asRecord(payload.source));
+        if (source) {
+          const current = useChatStore.getState().channelStates[channel];
+          store.setChannelState(channel, {
+            inspectedSources: appendInspectedSource(current?.inspectedSources, source)
+          }, { botId: BOT_ID });
+        }
+      }
+      if (type === "rule_check") {
+        const citationGate = normalizeCitationGate(payload);
+        if (citationGate) {
+          store.setChannelState(channel, { citationGate }, { botId: BOT_ID });
+        }
+      }
+      if (type === "runtime_trace") {
+        const trace = normalizeRuntimeTrace(payload);
+        if (trace) {
+          store.applyControlEvent(channel, {
+            type: "runtime_trace",
+            ...trace
+          });
+        }
+      }
+      if (type === "mission_created") {
+        const mission = asRecord(payload.mission);
+        const id = asString(mission.id);
+        if (id) {
+          const current = useChatStore.getState().channelStates[channel];
+          const activity = {
+            id,
+            title: asString(mission.title, "Mission"),
+            kind: asString(mission.kind, "manual"),
+            status: missionStatus(mission.status),
+            updatedAt: Date.now()
+          };
+          store.setChannelState(channel, {
+            missions: appendMissionActivity(current?.missions, activity),
+            ...activity.kind === "goal" ? { activeGoalMissionId: activity.id } : {}
+          }, { botId: BOT_ID });
+        }
+      }
+      if (type === "mission_event") {
+        const missionId = asString(payload.missionId);
+        if (missionId) {
+          const current = useChatStore.getState().channelStates[channel];
+          const existing = current?.missions?.find((mission) => mission.id === missionId);
+          const eventType = asString(payload.eventType, "heartbeat");
+          store.setChannelState(channel, {
+            missions: appendMissionActivity(current?.missions, {
+              id: missionId,
+              title: existing?.title ?? "Mission",
+              kind: existing?.kind ?? "manual",
+              status: missionStatusFromEvent(eventType),
+              detail: asString(payload.message) || existing?.detail,
+              updatedAt: Date.now()
+            })
+          }, { botId: BOT_ID });
+        }
       }
       if (type === "spawn_started" || type === "child_started" || type === "background_task" || type === "spawn_result" || type === "child_completed" || type === "child_failed" || type === "child_cancelled") {
         const taskId = asString(payload.taskId, nowId("child"));
@@ -37034,10 +40065,11 @@ function App() {
     [authHeaders, normalizedBase, refreshKnowledge]
   );
   const performSend = reactExports.useCallback(
-    async (text2, explicitReply, kbDocs, modelOverride) => {
+    async (text2, explicitReply, kbDocs, modelOverride, sendOptions) => {
       const channel = useChatStore.getState().activeChannel || DEFAULT_CHANNEL;
       const messageText = buildMessageContentWithKbContext(text2, kbDocs);
       if (!messageText.trim()) return;
+      const goalMode = sendOptions?.goalMode === true;
       const userMsg = {
         id: nowId("user"),
         role: "user",
@@ -37065,6 +40097,10 @@ function App() {
         browserFrame: null,
         subagents: [],
         taskBoard: null,
+        inspectedSources: [],
+        citationGate: null,
+        currentGoal: goalMode ? text2.trim() : null,
+        pendingGoalMissionTitle: goalMode ? text2.trim() : null,
         responseLanguage: detectMessageResponseLanguage(messageText)
       }, { botId: BOT_ID });
       try {
@@ -37075,6 +40111,7 @@ function App() {
           body: JSON.stringify({
             stream: true,
             ...modelOverride && modelOverride !== "auto" ? { model: modelOverride } : {},
+            ...goalMode ? { goalMode: true } : {},
             ...explicitReply ? { replyTo: explicitReply } : {},
             messages: [{ role: "user", content: messageText }]
           })
@@ -37124,7 +40161,8 @@ function App() {
           next.content,
           next.replyTo ?? null,
           next.kbDocs ?? [],
-          next.modelOverride
+          next.modelOverride,
+          next.goalMode ? { goalMode: true } : void 0
         );
       }, 0);
     },
@@ -37135,9 +40173,10 @@ function App() {
     drainQueue(activeChannel);
   }, [activeChannel, channelState.streaming, drainQueue, queuedForChannel.length]);
   const handleSend = reactExports.useCallback(
-    async (text2, files) => {
+    async (text2, files, options) => {
       const channel = useChatStore.getState().activeChannel || DEFAULT_CHANNEL;
       const activeReply = replyingTo;
+      const goalMode = options?.goalMode === true;
       setReplyingTo(null);
       let uploadedRefs = [];
       try {
@@ -37157,7 +40196,7 @@ function App() {
           hasKbContext: messageKbDocs.length > 0,
           requestedMode: streamingComposerMode
         });
-        if (sendMode === "inject") {
+        if (!goalMode && sendMode === "inject") {
           try {
             const injectedAfterChars = useChatStore.getState().channelStates[channel]?.streamingText?.length ?? 0;
             const result = await sendJson("/v1/chat/inject", {
@@ -37190,6 +40229,7 @@ function App() {
           content: text2,
           queuedAt: Date.now(),
           modelOverride: modelSelection,
+          ...goalMode ? { goalMode: true } : {},
           ...activeReply ? { replyTo: activeReply } : {},
           ...messageKbDocs.length > 0 ? { kbDocs: messageKbDocs } : {}
         };
@@ -37204,7 +40244,7 @@ function App() {
         setSelectedKbDocs([]);
         return true;
       }
-      void performSend(text2, activeReply, messageKbDocs, modelSelection);
+      void performSend(text2, activeReply, messageKbDocs, modelSelection, options);
       setSelectedKbDocs([]);
       return true;
     },
@@ -37219,22 +40259,98 @@ function App() {
       streamingComposerMode
     ]
   );
+  const cancelChannelTurn = reactExports.useCallback((channel) => {
+    if (interruptHandoffChannelsRef.current.has(channel)) return;
+    interruptHandoffChannelsRef.current.add(channel);
+    void cancelActiveTurnWithQueueHandoff({
+      hasQueued: () => (useChatStore.getState().queuedMessages[channel] ?? []).length > 0,
+      promoteQueuedForHandoff: () => {
+        useChatStore.getState().promoteNextQueuedMessage(channel, { botId: BOT_ID });
+      },
+      cancelStream: (options) => {
+        store.cancelStream(channel, { ...options, botId: BOT_ID });
+      },
+      interrupt: async (handoffRequested) => {
+        const response = await fetch(`${normalizedBase}/v1/chat/interrupt`, {
+          method: "POST",
+          headers: authHeaders(true),
+          body: JSON.stringify({
+            sessionKey: sessionKeyForChannel(channel),
+            handoffRequested,
+            source: "web"
+          })
+        });
+        const payload = await response.json().catch(() => ({}));
+        return {
+          accepted: response.ok && asString(payload.status) === "accepted",
+          handoffRequested: payload.handoffRequested === true,
+          status: response.status,
+          reason: asString(payload.error)
+        };
+      },
+      drainQueue: () => {
+        drainQueue(channel);
+      }
+    }).then((result) => {
+      setEscArmedUntil(null);
+      if (result.handoffRequested && !result.drained) {
+        store.setChannelState(channel, {
+          error: "Interrupted current turn, but could not hand off the queued message yet. Please send again."
+        }, { botId: BOT_ID });
+      }
+    }).catch((err) => {
+      console.warn("[chat] runtime interrupt failed:", err);
+    }).finally(() => {
+      interruptHandoffChannelsRef.current.delete(channel);
+    });
+  }, [authHeaders, drainQueue, normalizedBase, store]);
   const handleCancel = reactExports.useCallback(() => {
     const channel = useChatStore.getState().activeChannel || DEFAULT_CHANNEL;
-    const controller = useChatStore.getState().abortControllers[channel];
-    controller?.abort();
-    void sendJson("/v1/chat/interrupt", {
-      sessionKey: sessionKeyForChannel(channel),
-      handoffRequested: (useChatStore.getState().queuedMessages[channel] ?? []).length > 0,
-      source: "web"
-    }).catch(() => {
-    });
-    store.cancelStream(channel, { preserveQueue: true, botId: BOT_ID });
-  }, [sendJson, store]);
+    cancelChannelTurn(channel);
+  }, [cancelChannelTurn]);
   const handleCancelQueue = reactExports.useCallback(() => {
     const channel = useChatStore.getState().activeChannel || DEFAULT_CHANNEL;
     store.clearQueue(channel, { botId: BOT_ID });
   }, [store]);
+  reactExports.useEffect(() => {
+    if (!anyStreaming) return;
+    const onKey = (event) => {
+      if (event.key !== "Escape" || event.defaultPrevented) return;
+      const active = document.activeElement;
+      if (active?.closest('[role="dialog"], [aria-modal="true"]')) return;
+      if (event.isComposing) return;
+      event.preventDefault();
+      const channel = useChatStore.getState().activeChannel || DEFAULT_CHANNEL;
+      const hasQueued = (useChatStore.getState().queuedMessages[channel] ?? []).length > 0;
+      const decision = buildEscCancelDecision({
+        hasQueued,
+        armedUntil: escArmedUntil,
+        now: Date.now()
+      });
+      if (decision.action === "arm") {
+        setEscArmedUntil(decision.nextArmedUntil);
+        return;
+      }
+      setEscArmedUntil(null);
+      cancelChannelTurn(channel);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [anyStreaming, cancelChannelTurn, escArmedUntil]);
+  reactExports.useEffect(() => {
+    if (!anyStreaming && escArmedUntil !== null) {
+      setEscArmedUntil(null);
+    }
+  }, [anyStreaming, escArmedUntil]);
+  reactExports.useEffect(() => {
+    setEscArmedUntil(null);
+  }, [activeChannel]);
+  reactExports.useEffect(() => {
+    if (escArmedUntil === null) return;
+    const delay = Math.max(0, escArmedUntil - Date.now());
+    const timer = window.setTimeout(() => setEscArmedUntil(null), delay);
+    return () => window.clearTimeout(timer);
+  }, [escArmedUntil]);
   const handleReplyTo = reactExports.useCallback((message) => {
     if (message.role !== "user" && message.role !== "assistant") return;
     const previewText = buildReplyPreview(message.content);
@@ -37247,8 +40363,9 @@ function App() {
     chatInputRef.current?.focus();
   }, []);
   const handleCreateChannel = reactExports.useCallback(
-    (name2) => {
-      const channelName = normalizeChannelName(name2);
+    (name2, memoryMode = "normal") => {
+      const identity2 = buildMemoryModeChannelIdentity(name2, memoryMode);
+      const channelName = identity2.name || normalizeChannelName(name2);
       const existing = useChatStore.getState().channels;
       if (existing.some((channel2) => channel2.name === channelName)) {
         store.setActiveChannel(channelName);
@@ -37257,8 +40374,9 @@ function App() {
       const channel = {
         id: `local-${channelName}`,
         name: channelName,
-        display_name: name2 === channelName ? null : name2,
+        display_name: identity2.displayName ?? (name2 === channelName ? null : name2),
         category: "General",
+        memory_mode: identity2.memoryMode,
         position: existing.length,
         created_at: (/* @__PURE__ */ new Date()).toISOString()
       };
@@ -37303,11 +40421,65 @@ function App() {
     const channel = useChatStore.getState().activeChannel || DEFAULT_CHANNEL;
     store.resetSession(channel, getAccessToken);
   }, [getAccessToken, store]);
-  const handleModelSelectionChange = reactExports.useCallback((nextModel, nextRouter) => {
-    setModelSelection(nextModel);
-    setRouterType(nextRouter);
-    window.localStorage.setItem(storage.modelOverride, nextModel);
+  const handleStartExportSelection = reactExports.useCallback(() => {
+    const channel = useChatStore.getState().activeChannel || DEFAULT_CHANNEL;
+    store.startSelectionMode(channel);
+  }, [store]);
+  const handleExportSelected = reactExports.useCallback(() => {
+    const {
+      activeChannel: channel,
+      messages: localMessages,
+      serverMessages,
+      selectedMessages
+    } = useChatStore.getState();
+    const selected = selectedMessages[channel];
+    if (!channel || !selected || selected.size === 0) {
+      store.setChannelState(channel || DEFAULT_CHANNEL, {
+        error: "Select at least one user or assistant message to export."
+      }, { botId: BOT_ID });
+      return;
+    }
+    const combined = [
+      ...localMessages[channel] ?? [],
+      ...serverMessages[channel] ?? []
+    ];
+    const normalized = normalizeSelectedChatExportMessages(combined, selected);
+    const unique = Array.from(
+      new Map(
+        normalized.map((message) => [
+          `${message.role}:${message.timestamp}:${message.content}`,
+          message
+        ])
+      ).values()
+    );
+    if (unique.length === 0) {
+      store.setChannelState(channel, {
+        error: "Select at least one user or assistant message to export."
+      }, { botId: BOT_ID });
+      return;
+    }
+    const exportedAt = /* @__PURE__ */ new Date();
+    downloadMarkdownFile(
+      buildChatExportFilename({
+        botName: BOT_NAME,
+        channelName: channel,
+        exportedAt
+      }),
+      buildChatExportMarkdown({
+        botName: BOT_NAME,
+        channelName: channel,
+        exportedAt,
+        messages: unique
+      })
+    );
+    store.exitSelectionMode();
+  }, [store]);
+  const handleModelSelectionChange = reactExports.useCallback((_nextModel, _nextRouter) => {
+    setModelSelection(DEFAULT_MODEL);
+    setRouterType(DEFAULT_ROUTER);
+    window.localStorage.removeItem(storage.modelOverride);
   }, []);
+  const cancelHint = escArmedUntil !== null ? channelState.responseLanguage === "ko" ? "다시 ESC로 중지" : "ESC again to stop" : void 0;
   const composerAccessory = /* @__PURE__ */ jsxRuntimeExports.jsx(
     ChatModelPicker,
     {
@@ -37321,6 +40493,57 @@ function App() {
       onModelSelectionChange: handleModelSelectionChange
     }
   );
+  if (appRoute !== "chat") {
+    return /* @__PURE__ */ jsxRuntimeExports.jsx(
+      LocalDashboardShell,
+      {
+        route: appRoute,
+        runtimeSnapshot,
+        runtimeStatus,
+        skillsSnapshot,
+        skillsLoading,
+        config: localConfig,
+        configLoading,
+        configSaving,
+        configNotice,
+        configError,
+        agentUrl,
+        token,
+        kbCollections,
+        kbLoading,
+        kbRefreshing,
+        workspaceFiles,
+        workspaceLoading,
+        workspaceRefreshing,
+        memoryFiles,
+        memoryStatus,
+        memoryLoading,
+        memoryRefreshing,
+        setAgentUrl,
+        setToken,
+        onNavigate: navigateToRoute,
+        onRefreshAll: refreshDashboardData,
+        onRefreshKnowledge: () => void refreshKnowledge(),
+        onRefreshWorkspace: () => void refreshWorkspace(),
+        onRefreshMemory: () => void refreshMemory(),
+        onRefreshSkills: () => void refreshSkills(),
+        onUploadKnowledge: uploadKnowledgeFiles,
+        onReadWorkspaceFile: readWorkspaceFile,
+        onSaveWorkspaceFile: saveWorkspaceFile,
+        onMemorySearch: searchMemory,
+        onMemoryReadFile: readMemoryFile,
+        onMemorySaveFile: saveMemoryFile,
+        onMemoryDeleteFiles: deleteMemoryFiles,
+        onMemoryCompact: compactMemory,
+        onMemoryReindex: reindexMemory,
+        onSaveConnection: handleSaveConnection,
+        onCheckRuntime: () => void refreshRuntime(),
+        onSaveConfig: saveConfig,
+        onReloadConfig: reloadConfig,
+        onRestartRuntime: restartRuntime
+      }
+    );
+  }
   return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex h-full bg-background", children: [
     /* @__PURE__ */ jsxRuntimeExports.jsx(
       ChatSidebar,
@@ -37336,7 +40559,7 @@ function App() {
         customCategories,
         refreshing,
         mobileOpen: sidebarOpen,
-        onChannelSelect: (name2) => store.setActiveChannel(name2),
+        onChannelSelect: (name2) => navigateToRoute("chat", name2),
         onDeleteChannel: handleDeleteChannel,
         onCreateChannel: handleCreateChannel,
         onCreateCategory: handleCreateCategory,
@@ -37397,6 +40620,26 @@ function App() {
               store.channels.find((channel) => channel.name === activeChannel)?.display_name ?? null,
               "en"
             ) }),
+            /* @__PURE__ */ jsxRuntimeExports.jsxs(
+              "button",
+              {
+                type: "button",
+                onClick: handleStartExportSelection,
+                className: "flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-[11px] text-secondary/55 transition-all duration-200 hover:bg-black/[0.04] hover:text-foreground/75",
+                "aria-label": "Export conversation",
+                title: "Export conversation",
+                children: [
+                  /* @__PURE__ */ jsxRuntimeExports.jsxs("svg", { width: "14", height: "14", viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: "1.6", strokeLinecap: "round", strokeLinejoin: "round", "aria-hidden": "true", children: [
+                    /* @__PURE__ */ jsxRuntimeExports.jsx("circle", { cx: "18", cy: "5", r: "3" }),
+                    /* @__PURE__ */ jsxRuntimeExports.jsx("circle", { cx: "6", cy: "12", r: "3" }),
+                    /* @__PURE__ */ jsxRuntimeExports.jsx("circle", { cx: "18", cy: "19", r: "3" }),
+                    /* @__PURE__ */ jsxRuntimeExports.jsx("line", { x1: "8.59", y1: "13.51", x2: "15.42", y2: "17.49" }),
+                    /* @__PURE__ */ jsxRuntimeExports.jsx("line", { x1: "15.41", y1: "6.51", x2: "8.59", y2: "10.49" })
+                  ] }),
+                  /* @__PURE__ */ jsxRuntimeExports.jsx("span", { children: "Export" })
+                ]
+              }
+            ),
             /* @__PURE__ */ jsxRuntimeExports.jsx(
               "button",
               {
@@ -37406,9 +40649,10 @@ function App() {
               }
             ),
             /* @__PURE__ */ jsxRuntimeExports.jsx(
-              "a",
+              "button",
               {
-                href: "/dashboard",
+                type: "button",
+                onClick: () => navigateToRoute("overview"),
                 className: "md:hidden p-1.5 text-secondary/60 hover:text-foreground rounded-xl hover:bg-black/[0.04] transition-all duration-200",
                 "aria-label": "Dashboard",
                 children: /* @__PURE__ */ jsxRuntimeExports.jsx("svg", { width: "18", height: "18", viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: "1.5", children: /* @__PURE__ */ jsxRuntimeExports.jsx("path", { strokeLinecap: "round", strokeLinejoin: "round", d: "M10.5 6h9.75M10.5 6a1.5 1.5 0 11-3 0m3 0a1.5 1.5 0 10-3 0M3.75 6H7.5m3 12h9.75m-9.75 0a1.5 1.5 0 01-3 0m3 0a1.5 1.5 0 00-3 0m-3.75 0H7.5m9-6h3.75m-3.75 0a1.5 1.5 0 01-3 0m3 0a1.5 1.5 0 00-3 0m-9.75 0h9.75" }) })
@@ -37422,6 +40666,7 @@ function App() {
               messages: store.messages[activeChannel] ?? [],
               serverMessages: store.serverMessages[activeChannel] ?? [],
               channelState,
+              uiLanguage: channelState.responseLanguage,
               loading: false,
               botId: BOT_ID,
               selectionMode: store.selectionMode,
@@ -37430,8 +40675,7 @@ function App() {
               onEnterSelectionMode: (msgId) => store.enterSelectionMode(activeChannel, msgId),
               onSelectAll: () => store.selectAllMessages(activeChannel),
               onDeselectAll: () => store.deselectAllMessages(activeChannel),
-              onExportSelected: () => {
-              },
+              onExportSelected: handleExportSelected,
               onDeleteSelected: () => {
                 const selected = store.selectedMessages[activeChannel];
                 if (selected) store.removeMessages(activeChannel, selected, { botId: BOT_ID });
@@ -37471,9 +40715,11 @@ function App() {
             {
               ref: chatInputRef,
               onSend: handleSend,
+              uiLanguage: channelState.responseLanguage,
               onReset: handleReset,
               streaming: channelState.streaming,
               onCancel: handleCancel,
+              cancelHint,
               replyingTo,
               onCancelReply: () => setReplyingTo(null),
               queuedCount: queuedForChannel.length,
@@ -37485,11 +40731,12 @@ function App() {
                 hasFiles: false,
                 hasKbContext: selectedKbDocs.length > 0
               }),
-              steeringDisabledReason: "Selected knowledge will send after the current run.",
+              steeringDisabledReason: channelState.responseLanguage === "ko" ? "선택한 지식은 현재 실행이 끝난 뒤 전송됩니다." : "Selected knowledge will send after the current run.",
               kbDocs: allKbDocs,
               onSelectKbDoc: handleToggleKbDoc,
               uploadStates,
-              composerAccessory
+              composerAccessory,
+              customSkills: chatInputCustomSkills
             }
           )
         ]

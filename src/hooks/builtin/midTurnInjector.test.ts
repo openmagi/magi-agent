@@ -8,6 +8,7 @@ import {
   makeMidTurnInjectorHook,
   wrapInjection,
 } from "./midTurnInjector.js";
+import { HookRegistry } from "../HookRegistry.js";
 import type { Session } from "../../Session.js";
 import type { HookContext } from "../types.js";
 import type { UserMessage } from "../../util/types.js";
@@ -95,12 +96,12 @@ describe("buildInjectionMessages", () => {
 });
 
 describe("makeMidTurnInjectorHook", () => {
-  it("declares name, point, priority, non-blocking", () => {
+  it("declares name, point, priority, and participates in pre-hook replacement", () => {
     const hook = makeMidTurnInjectorHook({ agent: { getSession: () => undefined } });
     expect(hook.name).toBe("builtin:mid-turn-injector");
     expect(hook.point).toBe("beforeLLMCall");
     expect(hook.priority).toBe(3);
-    expect(hook.blocking).toBe(false);
+    expect(hook.blocking).not.toBe(false);
   });
 
   it("continues unchanged when session has no pending injections", async () => {
@@ -143,6 +144,26 @@ describe("makeMidTurnInjectorHook", () => {
       "[mid-turn-injector] drained injections",
       expect.objectContaining({ count: 2 }),
     );
+  });
+
+  it("applies injected user messages when run through HookRegistry", async () => {
+    const { session } = stubSessionWithInjections([
+      { text: "follow-up", receivedAt: 1_000 },
+    ]);
+    const registry = new HookRegistry();
+    registry.register(makeMidTurnInjectorHook({ agent: { getSession: () => session } }));
+
+    const result = await registry.runPre(
+      "beforeLLMCall",
+      baseArgs,
+      makeCtx("s1"),
+    );
+
+    expect(result.action).toBe("continue");
+    if (result.action !== "continue") throw new Error("expected continue");
+    expect(result.args.messages).toHaveLength(2);
+    expect(result.args.messages.at(-1)?.role).toBe("user");
+    expect(JSON.stringify(result.args.messages.at(-1))).toContain("follow-up");
   });
 
   it("fails open if drain throws", async () => {

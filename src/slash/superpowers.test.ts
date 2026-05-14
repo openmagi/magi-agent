@@ -46,7 +46,7 @@ function makeSse(): {
 
 function makeCtx(sse: SseWriter): SlashCommandContext {
   return {
-    session: {} as Session,
+    session: { setPermissionMode: vi.fn() } as unknown as Session,
     sse,
   };
 }
@@ -85,38 +85,22 @@ describe("readSkillBody", () => {
 });
 
 describe("/plan command", () => {
-  let root: string;
-  beforeEach(async () => {
-    root = await fs.mkdtemp(path.join(os.tmpdir(), "sp-plan-"));
-    await fs.mkdir(path.join(root, "writing-plans"), { recursive: true });
-    await fs.writeFile(
-      path.join(root, "writing-plans", "SKILL.md"),
-      "---\nname: writing-plans\n---\n\nPLAN BODY GOES HERE",
-    );
-  });
-  afterEach(async () => {
-    await fs.rm(root, { recursive: true, force: true });
-  });
-
-  it("emits the writing-plans skill body on invocation", async () => {
-    const cmd = makePlanCommand(root);
+  it("sets session to plan mode and emits confirmation", async () => {
+    const cmd = makePlanCommand("/unused");
     expect(cmd.name).toBe("/plan");
-    const { sse, agentEvents, legacy, text } = makeSse();
-    await cmd.handler("", makeCtx(sse));
-    const joined = text();
-    expect(joined).toContain("superpowers:writing-plans");
-    expect(joined).toContain("PLAN BODY GOES HERE");
-    // Single-channel: text flows only on the agent event stream. The
-    // legacy path must stay silent to avoid the dual-render bug.
-    expect(agentEvents.length).toBeGreaterThan(0);
-    expect(legacy).toHaveLength(0);
+    const { sse, text } = makeSse();
+    const ctx = makeCtx(sse);
+    await cmd.handler("", ctx);
+    expect(ctx.session.setPermissionMode).toHaveBeenCalledWith("plan");
+    expect(text()).toContain("Plan mode is on");
   });
 
-  it("falls open with a pointer text if body is missing", async () => {
-    const cmd = makePlanCommand(path.join(root, "nowhere"));
+  it("includes task description when args provided", async () => {
+    const cmd = makePlanCommand("/unused");
     const { sse, text } = makeSse();
-    await cmd.handler("", makeCtx(sse));
-    expect(text()).toContain("superpowers:writing-plans");
+    const ctx = makeCtx(sse);
+    await cmd.handler("refactor the auth module", ctx);
+    expect(text()).toContain("Task to plan: refactor the auth module");
   });
 });
 

@@ -1,17 +1,23 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState, type CSSProperties } from "react";
 import {
   deriveWorkConsoleRows,
   type WorkConsoleRow,
   type WorkConsoleRowGroup,
   type WorkConsoleRowStatus,
 } from "@/lib/chat/work-console";
+import {
+  WORK_CONSOLE_MOTION_TICK_MS,
+  smoothedHeartbeatElapsedMs,
+  workConsoleRowDelayMs,
+} from "@/lib/chat/work-console-motion";
 import type {
   ChannelState,
   BrowserFrame,
   ChatResponseLanguage,
   ControlRequestRecord,
+  DocumentDraftPreview,
   QueuedMessage,
 } from "@/lib/chat/types";
 
@@ -19,24 +25,44 @@ interface WorkConsolePanelProps {
   channelState: ChannelState;
   queuedMessages?: QueuedMessage[];
   controlRequests?: ControlRequestRecord[];
+  suppressInlineRunDetails?: boolean;
+  uiLanguage?: ChatResponseLanguage;
 }
 
 const GROUP_LABELS: Record<WorkConsoleRowGroup, string> = {
   status: "Now",
+  mission: "Missions",
   tool: "Current steps",
   subagent: "Helpers",
   task: "Plan",
   queue: "Queued messages",
+  trace: "Runtime proof",
   control: "Needs input",
 };
 
 const GROUP_LABELS_KO: Record<WorkConsoleRowGroup, string> = {
   status: "현재",
+  mission: "미션",
   tool: "현재 단계",
   subagent: "도우미",
   task: "계획",
   queue: "대기 메시지",
+  trace: "런타임 증거",
   control: "입력 필요",
+};
+
+const INLINE_RUN_DETAIL_GROUPS = new Set<WorkConsoleRowGroup>([
+  "tool",
+  "subagent",
+  "task",
+  "queue",
+  "trace",
+  "control",
+]);
+const MAX_DISPLAY_GOAL_CHARS = 140;
+
+type WorkConsoleMotionStyle = CSSProperties & {
+  "--work-console-row-delay"?: string;
 };
 
 function isKorean(language?: ChatResponseLanguage): boolean {
@@ -77,10 +103,55 @@ function groupRows(rows: WorkConsoleRow[]): Array<[WorkConsoleRowGroup, WorkCons
   return Array.from(groups.entries());
 }
 
+function suppressInlineRunDetailRows(rows: WorkConsoleRow[]): WorkConsoleRow[] {
+  return rows.filter((row) => !INLINE_RUN_DETAIL_GROUPS.has(row.group));
+}
+
+function compactDisplayGoal(value?: string | null): string | null {
+  const normalized = value?.replace(/\s+/g, " ").trim();
+  if (!normalized) return null;
+  return normalized.length <= MAX_DISPLAY_GOAL_CHARS ? normalized : null;
+}
+
+function hasVisibleGoalMission(
+  rows: WorkConsoleRow[],
+  activeGoalMissionId?: string | null,
+): boolean {
+  const activeMissionRowId = activeGoalMissionId ? `mission:${activeGoalMissionId}` : null;
+  return rows.some((row) => {
+    if (row.group !== "mission") return false;
+    if (activeMissionRowId && row.id === activeMissionRowId) return true;
+    return row.meta?.split(/\s+/)[0] === "goal";
+  });
+}
+
+function compactInlineOverviewRows(
+  rows: WorkConsoleRow[],
+  channelState: ChannelState,
+  language?: ChatResponseLanguage,
+): WorkConsoleRow[] {
+  const visible = suppressInlineRunDetailRows(rows);
+  const goal = hasVisibleGoalMission(visible, channelState.activeGoalMissionId)
+    ? null
+    : compactDisplayGoal(channelState.pendingGoalMissionTitle)
+      ?? compactDisplayGoal(channelState.currentGoal);
+  if (goal) {
+    visible.push({
+      id: "overview:goal",
+      group: "status",
+      label: t(language, "Goal", "목표"),
+      detail: goal,
+      status: "info",
+    });
+  }
+  return visible;
+}
+
 function sectionTone(
   group: WorkConsoleRowGroup,
-): "status" | "agents" | "actions" | "queue" | "default" {
+): "status" | "mission" | "agents" | "actions" | "queue" | "default" {
   if (group === "status") return "status";
+  if (group === "mission") return "mission";
   if (group === "subagent") return "agents";
   if (group === "tool") return "actions";
   if (group === "queue") return "queue";
@@ -91,6 +162,8 @@ function sectionClass(group: WorkConsoleRowGroup): string {
   switch (sectionTone(group)) {
     case "status":
       return "mb-3 min-h-0 rounded-xl border border-[#7C3AED]/15 bg-[#F8F6FF] p-2 shadow-[0_1px_6px_rgba(124,58,237,0.08)]";
+    case "mission":
+      return "mb-3 min-h-0 rounded-xl border border-sky-500/20 bg-sky-50/70 p-2 shadow-[0_1px_6px_rgba(14,165,233,0.08)]";
     case "agents":
       return "mb-3 min-h-0 rounded-xl border border-emerald-500/20 bg-white p-2 shadow-[0_1px_6px_rgba(16,185,129,0.08)]";
     case "actions":
@@ -119,9 +192,67 @@ function actionRowToneClass(status: WorkConsoleRowStatus): string {
   }
 }
 
-function WorkConsoleAgentChip({ row }: { row: WorkConsoleRow }) {
+function runningMotionClass(status: WorkConsoleRowStatus): string {
+  return status === "running" ? "work-console-running-row" : "";
+}
+
+function runningDotMotionClass(status: WorkConsoleRowStatus): string {
+  return status === "running" ? "work-console-running-dot" : "";
+}
+
+function motionStyle(delayMs: number): WorkConsoleMotionStyle {
+  return { "--work-console-row-delay": `${delayMs}ms` };
+}
+
+function useSmoothedChannelState(channelState: ChannelState): ChannelState {
+  const [displayNowMs, setDisplayNowMs] = useState(() => Date.now());
+  const heartbeatAnchorRef = useRef<{
+    elapsedMs: number | null;
+    observedAtMs: number;
+  }>({
+    elapsedMs: channelState.heartbeatElapsedMs ?? null,
+    observedAtMs: displayNowMs,
+  });
+  const currentHeartbeatElapsedMs = channelState.heartbeatElapsedMs ?? null;
+
+  if (heartbeatAnchorRef.current.elapsedMs !== currentHeartbeatElapsedMs) {
+    heartbeatAnchorRef.current = {
+      elapsedMs: currentHeartbeatElapsedMs,
+      observedAtMs: displayNowMs,
+    };
+  }
+
+  useEffect(() => {
+    if (!channelState.streaming || currentHeartbeatElapsedMs === null) return;
+    const tick = window.setInterval(() => {
+      setDisplayNowMs(Date.now());
+    }, WORK_CONSOLE_MOTION_TICK_MS);
+    return () => window.clearInterval(tick);
+  }, [channelState.streaming, currentHeartbeatElapsedMs]);
+
+  const smoothedElapsedMs = smoothedHeartbeatElapsedMs(
+    heartbeatAnchorRef.current.elapsedMs,
+    heartbeatAnchorRef.current.observedAtMs,
+    displayNowMs,
+  );
+
+  if (smoothedElapsedMs === currentHeartbeatElapsedMs) return channelState;
+  return { ...channelState, heartbeatElapsedMs: smoothedElapsedMs };
+}
+
+function WorkConsoleAgentChip({
+  row,
+  motionDelayMs,
+}: {
+  row: WorkConsoleRow;
+  motionDelayMs: number;
+}) {
   return (
-    <li className="min-w-0 max-w-full">
+    <li
+      className={`work-console-row-motion min-w-0 max-w-full ${runningMotionClass(row.status)}`}
+      data-work-console-motion="true"
+      style={motionStyle(motionDelayMs)}
+    >
       <div
         className="grid w-full min-w-0 grid-cols-[auto,minmax(0,1fr),auto] items-center gap-1 rounded-md border border-emerald-500/12 bg-emerald-50/35 px-1.5 py-1 text-[10.5px] leading-none"
         data-work-console-agent-chip="true"
@@ -129,17 +260,28 @@ function WorkConsoleAgentChip({ row }: { row: WorkConsoleRow }) {
         title={[row.label, row.meta, row.detail].filter(Boolean).join(" ")}
       >
         <span
-          className={`h-1.5 w-1.5 shrink-0 rounded-full ${statusClass(row.status)}`}
+          className={`h-1.5 w-1.5 shrink-0 rounded-full ${statusClass(row.status)} ${runningDotMotionClass(row.status)}`}
           aria-hidden="true"
         />
         <span className="min-w-0 truncate">
-          <span className="font-medium text-foreground/80">{row.label}</span>
+          <span
+            key={row.label}
+            className="work-console-text-motion font-medium text-foreground/80"
+          >
+            {row.label}
+          </span>
           {row.meta && (
-            <span className="text-secondary/40"> {row.meta}</span>
+            <span key={row.meta} className="work-console-text-motion text-secondary/40">
+              {" "}
+              {row.meta}
+            </span>
           )}
         </span>
         {row.detail && (
-          <span className="shrink-0 rounded bg-black/[0.04] px-1 py-0.5 text-[9px] font-medium text-secondary/55">
+          <span
+            key={row.detail}
+            className="work-console-text-motion shrink-0 rounded bg-black/[0.04] px-1 py-0.5 text-[9px] font-medium text-secondary/55"
+          >
             {row.detail}
           </span>
         )}
@@ -148,50 +290,71 @@ function WorkConsoleAgentChip({ row }: { row: WorkConsoleRow }) {
   );
 }
 
-function WorkConsoleRowItem({ row }: { row: WorkConsoleRow }) {
+function WorkConsoleRowItem({
+  row,
+  motionDelayMs,
+}: {
+  row: WorkConsoleRow;
+  motionDelayMs: number;
+}) {
   const isActionRow = row.group === "tool";
   const isStatusRow = row.group === "status";
+  const isMissionRow = row.group === "mission";
   const isQueueRow = row.group === "queue";
 
   return (
     <li
       className={
         isStatusRow
-          ? "flex min-w-0 items-start gap-2 rounded-lg border border-[#7C3AED]/20 bg-white/70 px-2.5 py-2.5 shadow-[0_1px_4px_rgba(124,58,237,0.08)]"
+          ? `work-console-row-motion flex min-w-0 items-start gap-2 rounded-lg border border-[#7C3AED]/20 bg-white/70 px-2.5 py-2.5 shadow-[0_1px_4px_rgba(124,58,237,0.08)] ${runningMotionClass(row.status)}`
+          : isMissionRow
+            ? `work-console-row-motion flex min-w-0 items-start gap-2 rounded-lg border border-sky-500/20 bg-white/75 px-2.5 py-2 shadow-[0_1px_4px_rgba(14,165,233,0.08)] ${runningMotionClass(row.status)}`
           : isActionRow
-            ? `flex min-w-0 items-start gap-2 rounded-lg border px-2.5 py-2 ${actionRowToneClass(row.status)}`
+            ? `work-console-row-motion flex min-w-0 items-start gap-2 rounded-lg border px-2.5 py-2 ${actionRowToneClass(row.status)} ${runningMotionClass(row.status)}`
             : isQueueRow
-              ? "flex min-w-0 items-start gap-2 rounded-lg border border-amber-500/20 bg-white/70 px-2.5 py-2 shadow-[0_1px_4px_rgba(245,158,11,0.08)]"
-              : "flex min-w-0 items-start gap-2 rounded-md px-2 py-1.5"
+              ? `work-console-row-motion flex min-w-0 items-start gap-2 rounded-lg border border-amber-500/20 bg-white/70 px-2.5 py-2 shadow-[0_1px_4px_rgba(245,158,11,0.08)] ${runningMotionClass(row.status)}`
+              : `work-console-row-motion flex min-w-0 items-start gap-2 rounded-md px-2 py-1.5 ${runningMotionClass(row.status)}`
       }
+      data-work-console-motion="true"
       data-work-console-action-row={isActionRow ? "true" : undefined}
       data-work-console-status-row={isStatusRow ? "true" : undefined}
+      data-work-console-mission-row={isMissionRow ? "true" : undefined}
       data-work-console-queue-row={isQueueRow ? "true" : undefined}
       data-work-console-row-status={row.status}
+      style={motionStyle(motionDelayMs)}
     >
       <span
-        className={`${isStatusRow ? "mt-2 h-2.5 w-2.5 ring-4 ring-[#7C3AED]/10" : isActionRow ? "mt-2 h-2 w-2" : "mt-1.5 h-1.5 w-1.5"} shrink-0 rounded-full ${statusClass(row.status)}`}
+        className={`${isStatusRow ? "mt-2 h-2.5 w-2.5 ring-4 ring-[#7C3AED]/10" : isMissionRow || isActionRow ? "mt-2 h-2 w-2" : "mt-1.5 h-1.5 w-1.5"} shrink-0 rounded-full ${statusClass(row.status)} ${runningDotMotionClass(row.status)}`}
         aria-hidden="true"
       />
       <div className="min-w-0 flex-1">
         <div className="flex min-w-0 items-baseline gap-2">
-          <span className="min-w-0 truncate text-[12px] font-medium text-foreground/80">
+          <span
+            key={row.label}
+            className="work-console-text-motion min-w-0 truncate text-[12px] font-medium text-foreground/80"
+          >
             {row.label}
           </span>
           {row.meta && (
-            <span className="shrink-0 text-[10px] text-secondary/40">{row.meta}</span>
+            <span
+              key={row.meta}
+              className="work-console-text-motion shrink-0 text-[10px] text-secondary/40"
+            >
+              {row.meta}
+            </span>
           )}
         </div>
         {row.detail && (
           <p
+            key={row.detail}
             className={
               isStatusRow
-                ? "mt-0.5 break-words text-[11.5px] leading-snug text-secondary/60"
+                ? "work-console-text-motion mt-0.5 break-words text-[11.5px] leading-snug text-secondary/60"
                 : isQueueRow
-                  ? "mt-1 line-clamp-3 break-words text-[11.5px] leading-snug text-amber-950/75"
+                  ? "work-console-text-motion mt-1 line-clamp-3 break-words text-[11.5px] leading-snug text-amber-950/75"
                 : isActionRow
-                ? "mt-1 line-clamp-2 break-words text-[11.5px] leading-snug text-secondary/65"
-                : "mt-0.5 line-clamp-3 break-words text-[11px] leading-snug text-secondary/65"
+                ? "work-console-text-motion mt-1 line-clamp-2 break-words text-[11.5px] leading-snug text-secondary/65"
+                : "work-console-text-motion mt-0.5 line-clamp-3 break-words text-[11px] leading-snug text-secondary/65"
             }
           >
             {row.detail}
@@ -199,10 +362,11 @@ function WorkConsoleRowItem({ row }: { row: WorkConsoleRow }) {
         )}
         {row.snippet && (
           <pre
+            key={row.snippet}
             className={
               isActionRow
-                ? "mt-2 max-h-20 overflow-auto rounded-md bg-black/[0.04] px-2 py-1.5 whitespace-pre-wrap break-words text-[10.5px] leading-snug text-secondary/70"
-                : "mt-1 max-h-28 overflow-auto rounded-md bg-black/[0.04] px-2 py-1.5 whitespace-pre-wrap break-words text-[10.5px] leading-snug text-secondary/70"
+                ? "work-console-text-motion mt-2 max-h-20 overflow-auto rounded-md bg-black/[0.04] px-2 py-1.5 whitespace-pre-wrap break-words text-[10.5px] leading-snug text-secondary/70"
+                : "work-console-text-motion mt-1 max-h-28 overflow-auto rounded-md bg-black/[0.04] px-2 py-1.5 whitespace-pre-wrap break-words text-[10.5px] leading-snug text-secondary/70"
             }
           >
             {row.snippet}
@@ -234,6 +398,40 @@ function browserActionLabel(action: string, language?: ChatResponseLanguage): st
     default:
       return t(language, "Using browser", "브라우저 사용 중");
   }
+}
+
+function DocumentDraftPreviewCard({
+  draft,
+  language,
+}: {
+  draft: DocumentDraftPreview;
+  language?: ChatResponseLanguage;
+}) {
+  const unit = draft.contentLength === 1 ? "char" : "chars";
+  const sizeLabel = isKorean(language)
+    ? `${draft.contentLength.toLocaleString()}자`
+    : `${draft.contentLength.toLocaleString()} ${unit}`;
+  return (
+    <section
+      className="mb-3 overflow-hidden rounded-xl border border-[#7C3AED]/15 bg-white shadow-[0_1px_6px_rgba(124,58,237,0.08)]"
+      data-work-console-document-draft="true"
+    >
+      <div className="flex min-w-0 items-center justify-between gap-2 border-b border-black/[0.06] px-2.5 py-1.5">
+        <span className="shrink-0 text-[10px] font-semibold uppercase tracking-wide text-secondary/45">
+          {draft.status === "done"
+            ? t(language, "Document written", "문서 작성 완료")
+            : t(language, "Writing document", "문서 작성 중")}
+        </span>
+        <span className="min-w-0 truncate text-[10.5px] text-secondary/55">
+          {draft.filename ?? (draft.format === "md" ? "Markdown" : "Text")}
+          <span className="text-secondary/35"> · {sizeLabel}</span>
+        </span>
+      </div>
+      <pre className="max-h-44 overflow-auto bg-[#FBFBFD] px-2.5 py-2 whitespace-pre-wrap break-words text-[11px] leading-snug text-secondary/75">
+        {draft.truncated ? `...\n${draft.contentPreview}` : draft.contentPreview}
+      </pre>
+    </section>
+  );
 }
 
 function BrowserFramePreview({
@@ -272,14 +470,36 @@ export function WorkConsolePanel({
   channelState,
   queuedMessages = [],
   controlRequests = [],
+  suppressInlineRunDetails = false,
+  uiLanguage,
 }: WorkConsolePanelProps): React.ReactElement {
   const actionsListRef = useRef<HTMLUListElement | null>(null);
-  const rows = deriveWorkConsoleRows({
-    channelState,
+  const smoothedChannelState = useSmoothedChannelState(channelState);
+  const language = uiLanguage ?? smoothedChannelState.responseLanguage;
+  const allRows = deriveWorkConsoleRows({
+    channelState: smoothedChannelState,
     queuedMessages,
     controlRequests,
+    uiLanguage: language,
   });
-  const language = channelState.responseLanguage;
+  const visibleRows = suppressInlineRunDetails
+    ? compactInlineOverviewRows(allRows, smoothedChannelState, language)
+    : allRows;
+  const rows = visibleRows.length > 0
+    ? visibleRows
+    : [
+        {
+          id: "inline-stream",
+          group: "status" as const,
+          label: t(language, "Streaming in chat", "채팅에서 표시 중"),
+          detail: t(
+            language,
+            "Live step details are shown inline in the conversation.",
+            "실시간 단계 상세는 채팅 안에 표시됩니다.",
+          ),
+          status: "info" as const,
+        },
+      ];
   const groups = groupRows(rows);
   const actionRows = groups.find(([group]) => group === "tool")?.[1] ?? [];
   const lastActionId = actionRows[actionRows.length - 1]?.id ?? "";
@@ -309,6 +529,9 @@ export function WorkConsolePanel({
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto px-2 py-2">
+        {channelState.documentDraft && (
+          <DocumentDraftPreviewCard draft={channelState.documentDraft} language={language} />
+        )}
         {channelState.browserFrame && (
           <BrowserFramePreview frame={channelState.browserFrame} language={language} />
         )}
@@ -343,6 +566,11 @@ export function WorkConsolePanel({
                     {groupRows.length}
                   </span>
                 )}
+                {tone === "mission" && (
+                  <span className="rounded-full bg-sky-500/15 px-1.5 py-0.5 text-[9px] font-semibold text-sky-800">
+                    {groupRows.length} tracked
+                  </span>
+                )}
                 {tone === "agents" && (
                   <span className="rounded-full bg-emerald-500/15 px-1.5 py-0.5 text-[9px] font-semibold text-emerald-700">
                     {isKorean(language) ? `${groupRows.length}명` : `${groupRows.length} agents`}
@@ -374,11 +602,19 @@ export function WorkConsolePanel({
                       : undefined
                 }
               >
-                {groupRows.map((row) => (
+                {groupRows.map((row, index) => (
                   isSubagentGroup ? (
-                    <WorkConsoleAgentChip key={row.id} row={row} />
+                    <WorkConsoleAgentChip
+                      key={row.id}
+                      row={row}
+                      motionDelayMs={workConsoleRowDelayMs(index)}
+                    />
                   ) : (
-                    <WorkConsoleRowItem key={row.id} row={row} />
+                    <WorkConsoleRowItem
+                      key={row.id}
+                      row={row}
+                      motionDelayMs={workConsoleRowDelayMs(index)}
+                    />
                   )
                 ))}
               </ul>

@@ -1,0 +1,12 @@
+# content-moderation — clean response
+
+description: "Should allow response without PII"
+point: "beforeCommit"
+input:
+  assistantText: "Here is the summary of the project. The code changes look good."
+  toolCallCount: 1
+  toolReadHappened: true
+  userMessage: "Summarize the project"
+  retryCount: 0
+expected:
+  action: "continue"

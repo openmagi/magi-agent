@@ -7,6 +7,7 @@ import type {
   TaskBoardTask,
   ToolActivity,
   ChatResponseLanguage,
+  MissionActivity,
 } from "./types";
 
 export type WorkStateStatus = string;
@@ -24,6 +25,7 @@ export interface WorkStateInput {
   channelState: ChannelState;
   queuedMessages?: QueuedMessage[];
   controlRequests?: ControlRequestRecord[];
+  uiLanguage?: ChatResponseLanguage;
 }
 
 const PHASE_LABELS: Record<NonNullable<ChannelState["turnPhase"]>, string> = {
@@ -32,6 +34,7 @@ const PHASE_LABELS: Record<NonNullable<ChannelState["turnPhase"]>, string> = {
   executing: "Running",
   verifying: "Verifying",
   committing: "Writing answer",
+  compacting: "Compacting",
   committed: "Writing answer",
   aborted: "Stopping",
 };
@@ -42,9 +45,16 @@ const PHASE_LABELS_KO: Record<NonNullable<ChannelState["turnPhase"]>, string> = 
   executing: "실행 중",
   verifying: "검증 중",
   committing: "답변 작성 중",
+  compacting: "압축 중",
   committed: "답변 작성 중",
   aborted: "중단 중",
 };
+const MAX_DISPLAY_GOAL_CHARS = 140;
+const TERMINAL_MISSION_STATUSES = new Set<MissionActivity["status"]>([
+  "completed",
+  "failed",
+  "cancelled",
+]);
 
 function isKorean(language?: ChatResponseLanguage): boolean {
   return language === "ko";
@@ -125,8 +135,8 @@ function controlRequestNow(
 function statusFrom(
   channelState: ChannelState,
   pendingRequests: ControlRequestRecord[],
+  language?: ChatResponseLanguage,
 ): WorkStateStatus {
-  const language = channelState.responseLanguage;
   if (pendingRequests[0]) return controlRequestStatus(pendingRequests[0], language);
   if (channelState.reconnecting) return t(language, "Reconnecting", "다시 연결 중");
   if (channelState.turnPhase === "aborted" || channelState.error) {
@@ -135,6 +145,7 @@ function statusFrom(
   if ((channelState.activeTools ?? []).some((activity) => activity.status === "error")) {
     return t(language, "Blocked", "차단됨");
   }
+  if (channelState.turnPhase === "compacting") return t(language, "Compacting", "압축 중");
   if (channelState.turnPhase === "verifying") return t(language, "Verifying", "검증 중");
   if (channelState.turnPhase === "committing" || channelState.turnPhase === "committed") {
     return t(language, "Writing answer", "답변 작성 중");
@@ -153,8 +164,10 @@ function statusFrom(
   return t(language, "Working", "작업 중");
 }
 
-function progressFrom(channelState: ChannelState): string | undefined {
-  const language = channelState.responseLanguage;
+function progressFrom(
+  channelState: ChannelState,
+  language?: ChatResponseLanguage,
+): string | undefined {
   const tasks = channelState.taskBoard?.tasks ?? [];
   if (tasks.length > 0) {
     const completed = completedLikeTaskCount(tasks);
@@ -191,16 +204,40 @@ function phaseLabel(
   return isKorean(language) ? PHASE_LABELS_KO[phase] : PHASE_LABELS[phase];
 }
 
-function goalFrom(channelState: ChannelState): string {
+function currentGoalFrom(channelState: ChannelState): string | null {
+  const goal = channelState.currentGoal?.replace(/\s+/g, " ").trim();
+  if (!goal) return null;
+  return goal.length <= MAX_DISPLAY_GOAL_CHARS ? goal : null;
+}
+
+function activeGoalMission(channelState: ChannelState): MissionActivity | null {
+  const missions = channelState.missions ?? [];
+  const active = channelState.activeGoalMissionId
+    ? missions.find((mission) => mission.id === channelState.activeGoalMissionId)
+    : null;
+  if (active && active.kind === "goal" && !TERMINAL_MISSION_STATUSES.has(active.status)) {
+    return active;
+  }
+  return missions.find(
+    (mission) => mission.kind === "goal" && !TERMINAL_MISSION_STATUSES.has(mission.status),
+  ) ?? null;
+}
+
+function goalFrom(
+  channelState: ChannelState,
+  language?: ChatResponseLanguage,
+): string {
   return firstInProgressTask(channelState.taskBoard)?.title
-    ?? t(channelState.responseLanguage, "Working on your request", "요청 처리 중");
+    ?? activeGoalMission(channelState)?.title
+    ?? currentGoalFrom(channelState)
+    ?? t(language, "Working on your request", "요청 처리 중");
 }
 
 function nowFrom(
   channelState: ChannelState,
   pendingRequests: ControlRequestRecord[],
+  language?: ChatResponseLanguage,
 ): string {
-  const language = channelState.responseLanguage;
   if (pendingRequests[0]) return controlRequestNow(pendingRequests[0], language);
 
   const task = firstInProgressTask(channelState.taskBoard);
@@ -221,6 +258,7 @@ function nextFrom(
   channelState: ChannelState,
   queuedMessages: QueuedMessage[],
   pendingRequests: ControlRequestRecord[],
+  language?: ChatResponseLanguage,
 ): string | undefined {
   if (pendingRequests[0]) return pendingRequests[0].prompt;
   if (queuedMessages[0]) return queuedMessages[0].content;
@@ -229,7 +267,7 @@ function nextFrom(
   if (task) return task.title;
 
   if (channelState.turnPhase === "committing" || channelState.turnPhase === "committed") {
-    return t(channelState.responseLanguage, "Preparing final answer", "최종 답변 준비 중");
+    return t(language, "Preparing final answer", "최종 답변 준비 중");
   }
   return undefined;
 }
@@ -238,15 +276,17 @@ export function deriveWorkStateSummary({
   channelState,
   queuedMessages = [],
   controlRequests = [],
+  uiLanguage,
 }: WorkStateInput): WorkStateSummary {
   const pendingRequests = pendingControlRequests(controlRequests);
+  const language = uiLanguage ?? channelState.responseLanguage;
 
   return {
-    title: t(channelState.responseLanguage, "Current Work", "현재 작업"),
-    goal: goalFrom(channelState),
-    status: statusFrom(channelState, pendingRequests),
-    progress: progressFrom(channelState),
-    now: nowFrom(channelState, pendingRequests),
-    next: nextFrom(channelState, queuedMessages, pendingRequests),
+    title: t(language, "Current Work", "현재 작업"),
+    goal: goalFrom(channelState, language),
+    status: statusFrom(channelState, pendingRequests, language),
+    progress: progressFrom(channelState, language),
+    now: nowFrom(channelState, pendingRequests, language),
+    next: nextFrom(channelState, queuedMessages, pendingRequests, language),
   };
 }

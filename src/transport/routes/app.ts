@@ -38,6 +38,9 @@ async function findAppRoot(): Promise<string | null> {
 function requestedAsset(req: IncomingMessage): string | null {
   const url = parseUrl(req.url);
   const pathname = url.pathname;
+  if (pathname === "/dashboard" || pathname.startsWith("/dashboard/")) {
+    return "index.html";
+  }
   if (pathname === "/app" || pathname === "/app/") {
     return "index.html";
   }
@@ -145,4 +148,5 @@ async function handleApp(
 export const appRoutes: RouteHandler[] = [
   route("GET", /^\/app\/bootstrap\.json(?:\?.*)?$/, handleBootstrap),
   route("GET", /^\/app(?:\/[^?]*)?(?:\?.*)?$/, handleApp),
+  route("GET", /^\/dashboard(?:\/[^?]*)?(?:\?.*)?$/, handleApp),
 ];

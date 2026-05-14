@@ -143,6 +143,8 @@ const DEFAULT_TIMEOUT_MS = 30_000;
 const SLOW_ACTION_TIMEOUT_MS = 60_000;
 const MAX_TIMEOUT_MS = 120_000;
 const MAX_OUTPUT_BYTES = 128 * 1024;
+const MAX_BROWSER_FRAME_BYTES = 750 * 1024;
+const BROWSER_FRAME_DIR = ".magi/browser-frames";
 const BLOCKED_EXACT_HOSTS = new Set([
   "localhost",
   "metadata",
@@ -397,6 +399,100 @@ function commandOutput(
     signal: run.signal,
     truncated: run.truncated,
   };
+}
+
+function browserFrameContentType(buffer: Buffer): "image/png" | "image/jpeg" {
+  if (
+    buffer.length >= 3 &&
+    buffer[0] === 0xff &&
+    buffer[1] === 0xd8 &&
+    buffer[2] === 0xff
+  ) {
+    return "image/jpeg";
+  }
+  return "image/png";
+}
+
+function safeFrameName(turnId: string, action: BrowserAction): string {
+  const safeTurn = turnId.replace(/[^a-zA-Z0-9_.-]/g, "-") || "turn";
+  const safeAction = action.replace(/[^a-zA-Z0-9_.-]/g, "-") || "browser";
+  return `${safeTurn}-${Date.now()}-${safeAction}.png`;
+}
+
+async function emitBrowserFrameFromFile(input: {
+  action: BrowserAction;
+  url?: string;
+  filePath: string;
+  ctx: ToolContext;
+  removeAfterRead?: boolean;
+}): Promise<void> {
+  if (!input.ctx.emitAgentEvent) return;
+  try {
+    const stat = await fs.stat(input.filePath);
+    if (!stat.isFile() || stat.size <= 0 || stat.size > MAX_BROWSER_FRAME_BYTES) {
+      if (input.removeAfterRead) await fs.rm(input.filePath, { force: true });
+      return;
+    }
+    const buffer = await fs.readFile(input.filePath);
+    input.ctx.emitAgentEvent({
+      type: "browser_frame",
+      action: input.action,
+      ...(input.url ? { url: input.url } : {}),
+      imageBase64: buffer.toString("base64"),
+      contentType: browserFrameContentType(buffer),
+      capturedAt: Date.now(),
+    });
+    if (input.removeAfterRead) {
+      await fs.rm(input.filePath, { force: true });
+    }
+  } catch {
+    // Browser previews are best-effort UI telemetry; never fail the tool.
+  }
+}
+
+async function emitBrowserFrame(input: {
+  action: BrowserAction;
+  session: BrowserSession;
+  ctx: ToolContext;
+  runner: BrowserRunner;
+  cwd: string;
+  timeoutMs: number;
+  url?: string;
+  existingScreenshotPath?: string;
+}): Promise<void> {
+  if (!input.ctx.emitAgentEvent) return;
+  if (input.existingScreenshotPath) {
+    await emitBrowserFrameFromFile({
+      action: input.action,
+      url: input.url,
+      filePath: input.existingScreenshotPath,
+      ctx: input.ctx,
+    });
+    return;
+  }
+
+  const frameDir = path.resolve(input.cwd, BROWSER_FRAME_DIR);
+  const framePath = path.join(frameDir, safeFrameName(input.ctx.turnId, input.action));
+  try {
+    await fs.mkdir(frameDir, { recursive: true });
+    const run = await input.runner(
+      "agent-browser",
+      ["--session", input.session.agentBrowserSessionName, "screenshot", framePath],
+      input.ctx,
+      Math.min(input.timeoutMs, DEFAULT_TIMEOUT_MS),
+      input.cwd,
+    );
+    if (run.exitCode !== 0) return;
+    await emitBrowserFrameFromFile({
+      action: input.action,
+      url: input.url,
+      filePath: framePath,
+      ctx: input.ctx,
+      removeAfterRead: true,
+    });
+  } catch {
+    // Browser previews are best-effort UI telemetry; never fail the tool.
+  }
 }
 
 function agentBrowserSessionName(sessionId: string): string {
@@ -735,9 +831,19 @@ export function makeBrowserTool(
         );
         session.lastUsedAt = Date.now();
         const output = commandOutput("open", session, run);
-        return run.exitCode === 0
-          ? okResult(output, start)
-          : errorResult("command_failed", run.stderr || run.stdout || "browser open failed", start, output);
+        if (run.exitCode === 0) {
+          await emitBrowserFrame({
+            action: "open",
+            session,
+            ctx,
+            runner,
+            cwd,
+            timeoutMs,
+            url,
+          });
+          return okResult(output, start);
+        }
+        return errorResult("command_failed", run.stderr || run.stdout || "browser open failed", start, output);
       }
 
       if (input.action === "snapshot" || input.action === "scrape") {
@@ -754,9 +860,18 @@ export function makeBrowserTool(
         );
         session.lastUsedAt = Date.now();
         const output = commandOutput(input.action, session, run);
-        return run.exitCode === 0
-          ? okResult(output, start)
-          : errorResult("command_failed", run.stderr || run.stdout || `browser ${input.action} failed`, start, output);
+        if (run.exitCode === 0) {
+          await emitBrowserFrame({
+            action: input.action,
+            session,
+            ctx,
+            runner,
+            cwd,
+            timeoutMs,
+          });
+          return okResult(output, start);
+        }
+        return errorResult("command_failed", run.stderr || run.stdout || `browser ${input.action} failed`, start, output);
       }
 
       if (input.action === "click") {
@@ -778,14 +893,16 @@ export function makeBrowserTool(
           : await runSelectorFallbacks("click", session, rawSelector, "", runner, ctx, timeoutMs, cwd);
         const finalRun = fallbackRun ?? retryRun ?? run;
         const output = commandOutput("click", session, finalRun);
-        return finalRun.exitCode === 0
-          ? okResult(output, start)
-          : errorResult(
-              "command_failed",
-              finalRun.stderr || finalRun.stdout || "browser click failed",
-              start,
-              output,
-            );
+        if (finalRun.exitCode === 0) {
+          await emitBrowserFrame({ action: "click", session, ctx, runner, cwd, timeoutMs });
+          return okResult(output, start);
+        }
+        return errorResult(
+          "command_failed",
+          finalRun.stderr || finalRun.stdout || "browser click failed",
+          start,
+          output,
+        );
       }
 
       if (input.action === "fill") {
@@ -808,14 +925,16 @@ export function makeBrowserTool(
           : await runSelectorFallbacks("fill", session, rawSelector, text, runner, ctx, timeoutMs, cwd);
         const finalRun = fallbackRun ?? retryRun ?? run;
         const output = commandOutput("fill", session, finalRun);
-        return finalRun.exitCode === 0
-          ? okResult(output, start)
-          : errorResult(
-              "command_failed",
-              finalRun.stderr || finalRun.stdout || "browser fill failed",
-              start,
-              output,
-            );
+        if (finalRun.exitCode === 0) {
+          await emitBrowserFrame({ action: "fill", session, ctx, runner, cwd, timeoutMs });
+          return okResult(output, start);
+        }
+        return errorResult(
+          "command_failed",
+          finalRun.stderr || finalRun.stdout || "browser fill failed",
+          start,
+          output,
+        );
       }
 
       if (input.action === "scroll") {
@@ -829,9 +948,11 @@ export function makeBrowserTool(
         );
         session.lastUsedAt = Date.now();
         const output = commandOutput("scroll", session, run);
-        return run.exitCode === 0
-          ? okResult(output, start)
-          : errorResult("command_failed", run.stderr || run.stdout || "browser scroll failed", start, output);
+        if (run.exitCode === 0) {
+          await emitBrowserFrame({ action: "scroll", session, ctx, runner, cwd, timeoutMs });
+          return okResult(output, start);
+        }
+        return errorResult("command_failed", run.stderr || run.stdout || "browser scroll failed", start, output);
       }
 
       if (input.action === "screenshot") {
@@ -851,9 +972,19 @@ export function makeBrowserTool(
         );
         session.lastUsedAt = Date.now();
         const output = commandOutput("screenshot", session, run);
-        return run.exitCode === 0
-          ? okResult(output, start)
-          : errorResult("command_failed", run.stderr || run.stdout || "browser screenshot failed", start, output);
+        if (run.exitCode === 0) {
+          await emitBrowserFrame({
+            action: "screenshot",
+            session,
+            ctx,
+            runner,
+            cwd,
+            timeoutMs,
+            existingScreenshotPath: screenshotPath,
+          });
+          return okResult(output, start);
+        }
+        return errorResult("command_failed", run.stderr || run.stdout || "browser screenshot failed", start, output);
       }
 
       if (input.action === "mouse_click") {
@@ -885,14 +1016,16 @@ export function makeBrowserTool(
           truncated: false,
         };
         const output = commandOutput("mouse_click", session, finalRun);
-        return finalRun.exitCode === 0
-          ? okResult(output, start)
-          : errorResult(
-              "command_failed",
-              finalRun.stderr || finalRun.stdout || "browser mouse click failed",
-              start,
-              output,
-            );
+        if (finalRun.exitCode === 0) {
+          await emitBrowserFrame({ action: "mouse_click", session, ctx, runner, cwd, timeoutMs });
+          return okResult(output, start);
+        }
+        return errorResult(
+          "command_failed",
+          finalRun.stderr || finalRun.stdout || "browser mouse click failed",
+          start,
+          output,
+        );
       }
 
       if (input.action === "keyboard_type") {
@@ -905,14 +1038,16 @@ export function makeBrowserTool(
         );
         session.lastUsedAt = Date.now();
         const output = commandOutput("keyboard_type", session, run);
-        return run.exitCode === 0
-          ? okResult(output, start)
-          : errorResult(
-              "command_failed",
-              run.stderr || run.stdout || "browser keyboard type failed",
-              start,
-              output,
-            );
+        if (run.exitCode === 0) {
+          await emitBrowserFrame({ action: "keyboard_type", session, ctx, runner, cwd, timeoutMs });
+          return okResult(output, start);
+        }
+        return errorResult(
+          "command_failed",
+          run.stderr || run.stdout || "browser keyboard type failed",
+          start,
+          output,
+        );
       }
 
       if (input.action === "press") {
@@ -926,14 +1061,16 @@ export function makeBrowserTool(
         );
         session.lastUsedAt = Date.now();
         const output = commandOutput("press", session, run);
-        return run.exitCode === 0
-          ? okResult(output, start)
-          : errorResult(
-              "command_failed",
-              run.stderr || run.stdout || "browser key press failed",
-              start,
-              output,
-            );
+        if (run.exitCode === 0) {
+          await emitBrowserFrame({ action: "press", session, ctx, runner, cwd, timeoutMs });
+          return okResult(output, start);
+        }
+        return errorResult(
+          "command_failed",
+          run.stderr || run.stdout || "browser key press failed",
+          start,
+          output,
+        );
       }
 
       return errorResult("unsupported_action", `browser action not implemented: ${input.action}`, start, {

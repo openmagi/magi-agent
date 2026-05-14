@@ -2,6 +2,7 @@ node_modules/
 dist/
 !apps/web/dist/
 !apps/web/dist/**
+.worktrees/
 *.tsbuildinfo
 .env
 .env.local

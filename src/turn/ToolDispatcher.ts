@@ -24,15 +24,20 @@ import type {
   ToolResult,
 } from "../Tool.js";
 import type { UserMessage } from "../util/types.js";
-import { buildPreview, summariseToolOutput } from "../util/toolResult.js";
+import { buildToolInputPreview, summariseToolOutput } from "../util/toolResult.js";
+import { createLogger } from "../util/logger.js";
+
+const logger = createLogger("ToolDispatcher");
+import type { ToolCallLoopDetector, LoopCheckResult } from "./ToolCallLoopDetector.js";
 import {
   decideRuntimePermission,
   type PermissionDecision,
 } from "../permissions/PermissionArbiter.js";
 import { isReadOnlyTool } from "../permissions/ToolPermissionAdapters.js";
+import { buildPatchApplyApprovalInput } from "../tools/PatchApply.js";
 import { decideToolAccess } from "./ToolArbiter.js";
 
-export type PermissionMode = "default" | "plan" | "auto" | "bypass";
+export type PermissionMode = "default" | "plan" | "auto" | "bypass" | "workspace-bypass";
 
 /**
  * Threshold at which repeated unknown-tool dispatches abort the turn
@@ -89,13 +94,33 @@ export interface ToolDispatchContext {
    * and the hint falls back to the full registry (legacy behaviour).
    */
   readonly exposedToolNames?: readonly string[];
-  /** Current user message, including runtime-injected addendum and attachments. */
+  /** Current user message, including runtime-injected system addendum and attachments. */
   readonly currentUserMessage?: UserMessage;
+  /**
+   * Return true after a completed tool when the caller wants to yield
+   * control back to the LLM before executing more tools from the same
+   * assistant tool_use batch. Used by mid-turn steering: finish the
+   * current tool call, synthesize tool_results for not-yet-run calls,
+   * then let the next beforeLLMCall drain the user's steering message.
+   */
+  readonly shouldYieldAfterTool?: (
+    result: ToolDispatchResult,
+    toolUse: Extract<LLMContentBlock, { type: "tool_use" }>,
+  ) => boolean;
+  /** Cross-service diagnostic trace ID propagated to tools. */
+  readonly traceId?: string;
+  /**
+   * Per-turn loop detector. When omitted, loop detection is disabled
+   * for backward compatibility with direct dispatch tests and spawn
+   * pipelines.
+   */
+  readonly loopDetector?: ToolCallLoopDetector;
 }
 
 export interface ToolDispatchResult {
   toolUseId: string;
-  content: string;
+  /** Text content, or array of content blocks (e.g. tool_reference for ToolSearch). */
+  content: string | Array<{type: string; [key: string]: unknown}>;
   isError: boolean;
 }
 
@@ -112,6 +137,15 @@ export class UnknownToolLoopError extends Error {
     this.name = "UnknownToolLoopError";
     this.unknownToolCount = count;
   }
+}
+
+const USER_STEER_SKIP_STATUS = "skipped_user_steer";
+
+function skippedForUserSteerContent(toolName: string): string {
+  return [
+    `Tool ${toolName} was not executed because the user sent a steering update while this tool batch was running.`,
+    "Re-read the latest user steering message before deciding whether to run additional tools.",
+  ].join(" ");
 }
 
 /**
@@ -136,16 +170,29 @@ export async function dispatch(
   const enterPlanUses = toolUses.filter((tu) => tu.name === "EnterPlanMode");
   const otherUses = toolUses.filter((tu) => tu.name !== "EnterPlanMode");
   const enteredResults: ToolDispatchResult[] = [];
-  for (const tu of enterPlanUses) {
-    enteredResults.push(await dispatchOne(ctx, tu, abortController));
+  for (let index = 0; index < enterPlanUses.length; index += 1) {
+    const tu = enterPlanUses[index]!;
+    const result = await dispatchOne(ctx, tu, abortController);
+    enteredResults.push(result);
+    if (shouldYieldAfterTool(ctx, result, tu)) {
+      const skipped = await skippedToolResultsForUserSteer(ctx, [
+        ...enterPlanUses.slice(index + 1),
+        ...otherUses,
+      ]);
+      const results = [...enteredResults, ...skipped];
+      throwUnknownToolLoopIfNeeded(ctx);
+      return results;
+    }
   }
   const results = [
     ...enteredResults,
     ...(await dispatchInConcurrencySafeBatches(ctx, otherUses, abortController)),
   ];
-  // Gap §11.3 — if the per-turn counter crossed the threshold during
-  // this batch, tell Turn.ts to abort. Emit a user-facing text_delta
-  // FIRST so the UI shows the reason before the abort propagates.
+  throwUnknownToolLoopIfNeeded(ctx);
+  return results;
+}
+
+function throwUnknownToolLoopIfNeeded(ctx: ToolDispatchContext): void {
   const counter = ctx.unknownToolCounter;
   if (counter && counter.get() >= UNKNOWN_TOOL_LOOP_THRESHOLD) {
     ctx.sse.agent({
@@ -158,6 +205,50 @@ export async function dispatch(
     });
     throw new UnknownToolLoopError(counter.get());
   }
+}
+
+function shouldYieldAfterTool(
+  ctx: ToolDispatchContext,
+  result: ToolDispatchResult,
+  toolUse: Extract<LLMContentBlock, { type: "tool_use" }>,
+): boolean {
+  try {
+    return ctx.shouldYieldAfterTool?.(result, toolUse) === true;
+  } catch (err) {
+    logger.warn("should_yield_after_tool_failed", {
+      turnId: ctx.turnId, error: (err as Error).message,
+    });
+    return false;
+  }
+}
+
+async function skippedToolResultsForUserSteer(
+  ctx: ToolDispatchContext,
+  toolUses: Array<Extract<LLMContentBlock, { type: "tool_use" }>>,
+): Promise<ToolDispatchResult[]> {
+  if (toolUses.length === 0) return [];
+  ctx.stageAuditEvent("tool_batch_yielded_for_user_steer", {
+    skippedToolUseIds: toolUses.map((tu) => tu.id),
+    skippedToolNames: toolUses.map((tu) => tu.name),
+  });
+  const results: ToolDispatchResult[] = [];
+  for (const tu of toolUses) {
+    const content = skippedForUserSteerContent(tu.name);
+    await ctx.session.transcript.append({
+      kind: "tool_result",
+      ts: Date.now(),
+      turnId: ctx.turnId,
+      toolUseId: tu.id,
+      status: USER_STEER_SKIP_STATUS,
+      output: content,
+      isError: true,
+      metadata: {
+        reason: "user_steer_pending",
+        toolName: tu.name,
+      },
+    });
+    results.push({ toolUseId: tu.id, content, isError: true });
+  }
   return results;
 }
 
@@ -168,24 +259,38 @@ async function dispatchInConcurrencySafeBatches(
 ): Promise<ToolDispatchResult[]> {
   const results: ToolDispatchResult[] = [];
   let readOnlyBatch: Array<Extract<LLMContentBlock, { type: "tool_use" }>> = [];
-  const flushReadOnlyBatch = async () => {
-    if (readOnlyBatch.length === 0) return;
+  const flushReadOnlyBatch = async (
+    remainingAfterBatch: Array<Extract<LLMContentBlock, { type: "tool_use" }>>,
+  ): Promise<boolean> => {
+    if (readOnlyBatch.length === 0) return false;
     const batch = readOnlyBatch;
     readOnlyBatch = [];
-    results.push(
-      ...(await Promise.all(batch.map((tu) => dispatchOne(ctx, tu, abortController)))),
+    const batchResults = await Promise.all(
+      batch.map((tu) => dispatchOne(ctx, tu, abortController)),
     );
+    results.push(...batchResults);
+    if (batchResults.some((result, index) => shouldYieldAfterTool(ctx, result, batch[index]!))) {
+      results.push(...(await skippedToolResultsForUserSteer(ctx, remainingAfterBatch)));
+      return true;
+    }
+    return false;
   };
 
-  for (const tu of toolUses) {
+  for (let index = 0; index < toolUses.length; index += 1) {
+    const tu = toolUses[index]!;
     if (isConcurrencySafeToolUse(ctx, tu)) {
       readOnlyBatch.push(tu);
       continue;
     }
-    await flushReadOnlyBatch();
-    results.push(await dispatchOne(ctx, tu, abortController));
+    if (await flushReadOnlyBatch(toolUses.slice(index))) return results;
+    const result = await dispatchOne(ctx, tu, abortController);
+    results.push(result);
+    if (shouldYieldAfterTool(ctx, result, tu)) {
+      results.push(...(await skippedToolResultsForUserSteer(ctx, toolUses.slice(index + 1))));
+      return results;
+    }
   }
-  await flushReadOnlyBatch();
+  await flushReadOnlyBatch([]);
   return results;
 }
 
@@ -276,7 +381,7 @@ async function dispatchOne(
 
   // Emit tool_start with input_preview — clients render this as the
   // expandable activity card. 400 char cap keeps it light over SSE.
-  const inputPreview = buildPreview(tu.input);
+  const inputPreview = buildToolInputPreview(tu.name, tu.input);
   sse.agent({
     type: "tool_start",
     id: tu.id,
@@ -293,9 +398,10 @@ async function dispatchOne(
     const counter = ctx.unknownToolCounter;
     const currentCount = counter ? counter.inc() : 0;
     const err = access.message;
-    console.warn(
-      `[core-agent] unknown_tool=${tu.name} turnId=${turnId} count=${currentCount}`,
-    );
+    logger.warn("unknown_tool", {
+      toolName: tu.name, turnId, count: currentCount,
+      ...(ctx.traceId ? { traceId: ctx.traceId } : {}),
+    });
     sse.agent({
       type: "tool_end",
       id: tu.id,
@@ -316,6 +422,40 @@ async function dispatchOne(
   }
   const tool = access.tool;
 
+  let softWarningPrefix = "";
+  if (ctx.loopDetector) {
+    const loopCheck: LoopCheckResult = ctx.loopDetector.check(tu.name, tu.input);
+    if (loopCheck.action === "hard_escalation") {
+      const warning = `Loop detected: ${tu.name} called ${loopCheck.count} times with identical parameters. Breaking loop — change your approach.`;
+      ctx.stageAuditEvent("tool_loop_detected", {
+        toolName: tu.name,
+        hash: loopCheck.hash,
+        count: loopCheck.count,
+        action: "hard_escalation",
+      });
+      sse.agent({
+        type: "tool_end",
+        id: tu.id,
+        status: "error",
+        durationMs: Date.now() - started,
+        output_preview: warning,
+      });
+      await session.transcript.append({
+        kind: "tool_result",
+        ts: Date.now(),
+        turnId,
+        toolUseId: tu.id,
+        status: "error",
+        output: warning,
+        isError: true,
+      });
+      return { toolUseId: tu.id, content: warning, isError: true };
+    }
+    if (loopCheck.action === "soft_warning") {
+      softWarningPrefix = `[WARNING: This is call #${loopCheck.count} with identical parameters. Consider changing your approach.]\n`;
+    }
+  }
+
   // ── beforeToolUse hook ─────────────────────────────────────
   // Hooks may rewrite the input or block with a reason (which
   // becomes the tool_result content with is_error=true so the
@@ -323,11 +463,11 @@ async function dispatchOne(
   // so hooks returning `permission_decision: "ask"` can reach the
   // human via the turn's pendingAsks machinery.
   //
-  // T2-08 — `permissionMode=bypass` sessions (admin / shadow)
-  // skip the beforeToolUse chain entirely. An audit event
+  // T2-08 — bypass-like sessions skip the beforeToolUse chain
+  // entirely. An audit event
   // `permission_bypass` is emitted per tool so the skipped hook
   // chain is still observable.
-  const bypass = permissionMode === "bypass";
+  const bypass = isBypassLikeMode(permissionMode);
   if (bypass) {
     ctx.stageAuditEvent("permission_bypass", {
       toolName: tu.name,
@@ -403,11 +543,19 @@ async function dispatchOne(
     sessionKey: session.meta.sessionKey,
     turnId,
     workspaceRoot: session.agent.config.workspaceRoot,
+    memoryMode: session.meta.channel?.memoryMode,
     abortSignal: abortController.signal,
+    toolUseId: tu.id,
     executionContract: session.executionContract,
+    sourceLedger: session.sourceLedger,
+    ...(ctx.traceId ? { traceId: ctx.traceId } : {}),
     ...(ctx.currentUserMessage ? { currentUserMessage: ctx.currentUserMessage } : {}),
     emitProgress: (p) => {
       sse.agent({ type: "tool_start", id: tu.id, name: p.label });
+      logger.info("tool_dispatch", {
+        turnId, toolName: p.label, toolId: tu.id,
+        ...(ctx.traceId ? { traceId: ctx.traceId } : {}),
+      });
     },
     emitAgentEvent: (event) => {
       // Tool-emitted structured events (task_board, future
@@ -485,7 +633,7 @@ async function dispatchOne(
     typeof previewSource === "string"
       ? previewSource
       : JSON.stringify(previewSource);
-  const content = summariseToolOutput(result);
+  const content = softWarningPrefix + summariseToolOutput(result);
   const isError = result.status !== "ok";
 
   sse.agent({
@@ -504,6 +652,7 @@ async function dispatchOne(
     status: result.status,
     output: content.slice(0, 64 * 1024),
     isError,
+    ...(result.metadata ? { metadata: result.metadata } : {}),
   });
 
   // ── afterToolUse hook (observer) ───────────────────────────
@@ -513,7 +662,28 @@ async function dispatchOne(
     ctx.buildHookContext("afterToolUse"),
   );
 
+  // ToolSearch returns tool_reference blocks that the API expands into
+  // full tool schemas in the model's context. Pass them through as
+  // structured content instead of serialising to text.
+  if (
+    tu.name === "ToolSearch" &&
+    result.status === "ok" &&
+    result.output &&
+    typeof result.output === "object" &&
+    "tool_references" in (result.output as Record<string, unknown>) &&
+    Array.isArray((result.output as { tool_references: unknown }).tool_references)
+  ) {
+    const refs = (result.output as { tool_references: Array<{ type: string; tool_name: string }> }).tool_references;
+    if (refs.length > 0) {
+      return { toolUseId: tu.id, content: refs, isError: false };
+    }
+  }
+
   return { toolUseId: tu.id, content, isError };
+}
+
+function isBypassLikeMode(mode: PermissionMode): boolean {
+  return mode === "bypass" || mode === "workspace-bypass";
 }
 
 async function resolvePermissionDecision(
@@ -531,6 +701,12 @@ async function resolvePermissionDecision(
 
   if (permission.decision === "ask") {
     await recordPermissionDecision(ctx, tu.name, "ask", permission.reason);
+    const proposedInput = await buildPermissionProposedInput(
+      ctx,
+      tu.name,
+      permission,
+      effectiveInput,
+    );
     const request = await ctx.session.controlRequests.create({
       kind: "tool_permission",
       turnId: ctx.turnId,
@@ -538,7 +714,7 @@ async function resolvePermissionDecision(
       channelName: ctx.session.meta.channel.channelId,
       source: "turn",
       prompt: permission.reason,
-      proposedInput: permission.proposedInput ?? effectiveInput,
+      proposedInput,
       expiresAt: Date.now() + 10 * 60_000,
       idempotencyKey: `tool_permission:${ctx.turnId}:${tu.id}`,
     });
@@ -552,13 +728,15 @@ async function resolvePermissionDecision(
     } as Parameters<typeof ctx.sse.agent>[0]);
     const resolved = await ctx.session.waitForControlRequestResolution(request.requestId);
     if (resolved.state === "approved") {
-      const input = resolved.updatedInput ?? resolved.proposedInput ?? effectiveInput;
+      const input = approvedInputForTool(tu.name, resolved.updatedInput, effectiveInput);
       await recordPermissionDecision(ctx, tu.name, "allow", "approved by user", input);
       return { result: null, input };
     }
-    const msg = resolved.state === "timed_out"
-      ? `permission denied: ${permission.reason} (request timed out)`
-      : `permission denied: ${permission.reason}`;
+    const msg = permissionDeniedMessage(
+      permission.reason,
+      resolved.state,
+      resolved.feedback,
+    );
     await recordPermissionDecision(ctx, tu.name, "deny", msg);
     return { result: await permissionDeniedResult(ctx, tu, started, msg), input: effectiveInput };
   }
@@ -566,6 +744,51 @@ async function resolvePermissionDecision(
   const msg = `permission denied: ${permission.reason}`;
   await recordPermissionDecision(ctx, tu.name, "deny", permission.reason);
   return { result: await permissionDeniedResult(ctx, tu, started, msg), input: effectiveInput };
+}
+
+async function buildPermissionProposedInput(
+  ctx: ToolDispatchContext,
+  toolName: string,
+  permission: PermissionDecision,
+  effectiveInput: unknown,
+): Promise<unknown> {
+  if (toolName === "PatchApply") {
+    return await buildPatchApplyApprovalInput(
+      effectiveInput,
+      ctx.session.agent.config.workspaceRoot,
+    );
+  }
+  return permission.decision === "ask"
+    ? permission.proposedInput ?? effectiveInput
+    : effectiveInput;
+}
+
+function approvedInputForTool(
+  toolName: string,
+  updatedInput: unknown,
+  effectiveInput: unknown,
+): unknown {
+  if (toolName === "PatchApply") {
+    return isPatchApplyExecutableInput(updatedInput) ? updatedInput : effectiveInput;
+  }
+  return updatedInput ?? effectiveInput;
+}
+
+function isPatchApplyExecutableInput(value: unknown): boolean {
+  return !!value && typeof value === "object" && typeof (value as { patch?: unknown }).patch === "string";
+}
+
+function permissionDeniedMessage(
+  reason: string,
+  state: string,
+  feedback?: string,
+): string {
+  const base = state === "timed_out"
+    ? `permission denied: ${reason} (request timed out)`
+    : `permission denied: ${reason}`;
+  const trimmedFeedback = typeof feedback === "string" ? feedback.trim() : "";
+  if (!trimmedFeedback) return base;
+  return `${base}\n\nUser feedback:\n${trimmedFeedback.slice(0, 4_000)}`;
 }
 
 async function permissionDeniedResult(
@@ -611,8 +834,8 @@ async function recordPermissionDecision(
       ...(updatedInput !== undefined ? { updatedInput } : {}),
     });
   } catch (err) {
-    console.warn(
-      `[core-agent] permission_decision event failed turnId=${ctx.turnId}: ${(err as Error).message}`,
-    );
+    logger.warn("permission_decision_event_failed", {
+      turnId: ctx.turnId, error: (err as Error).message,
+    });
   }
 }

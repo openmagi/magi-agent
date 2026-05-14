@@ -1,12 +1,12 @@
 /**
- * CronScheduler — T-cron (post-Phase-3 compat with legacy gateway).
+ * CronScheduler — T-cron (post-Phase-3 compat with Magi).
  *
  * In-process scheduler that fires stored crons as synthetic turns.
  * A single setInterval tick-loop (30s cadence) scans for any cron
  * whose `nextFireAt` has passed and dispatches it.
  *
- * Channel routing — the critical fix vs legacy gateway:
- *   legacy gateway routed cron output via session-recency heuristic
+ * Channel routing — the critical fix vs Magi:
+ *   Magi routed cron output via session-recency heuristic
  *   (active session = most-recently-updated). The LLM also chose
  *   a `--target` flag, routinely wrong (web-authored cron → Telegram
  *   delivery). In Magi, the cron record persists the **delivery
@@ -25,6 +25,8 @@ import { atomicWriteJson } from "../storage/atomicWrite.js";
 import type { ChannelRef } from "../util/types.js";
 
 const ulid = monotonicFactory();
+export type CronMode = "agent" | "script";
+export type ScriptCronDeliveryPolicy = "stdout_non_empty" | "always" | "never";
 
 export interface CronRecord {
   cronId: string;
@@ -44,6 +46,19 @@ export interface CronRecord {
   lastFiredAt?: number;
   /** Consecutive failure count — shuts the cron down at 5. */
   consecutiveFailures: number;
+  /** Agent prompt cron by default; script crons run a workspace script without LLM. */
+  mode?: CronMode;
+  /** Workspace-relative script path when mode="script". */
+  scriptPath?: string;
+  /** Script execution timeout in milliseconds. */
+  timeoutMs?: number;
+  /** Suppress delivery when stdout is empty. Defaults true. */
+  quietOnEmptyStdout?: boolean;
+  /** Delivery behavior for script stdout. Defaults stdout_non_empty. */
+  deliveryPolicy?: ScriptCronDeliveryPolicy;
+  /** Mission Ledger linkage for durable cron executions when enabled. */
+  missionId?: string;
+  missionRunId?: string;
   /**
    * Durable crons survive session end and are persisted to
    * `workspace/core-agent/crons/index.json`. Non-durable crons are
@@ -93,7 +108,7 @@ export class CronScheduler {
   readonly nowFn: () => number;
   private readonly maxConsecutiveFailures: number;
   private fireHandler: CronFireHandler | null = null;
-  private tickInProgress = false;
+  private readonly inFlightCronIds = new Set<string>();
 
   constructor(
     private readonly workspaceRoot: string,
@@ -202,45 +217,45 @@ export class CronScheduler {
    * so tests can advance a mock clock + call tick() directly.
    */
   async tick(): Promise<void> {
-    if (this.tickInProgress) return;
-    this.tickInProgress = true;
+    const currentTime = this.nowFn();
+    const due: CronRecord[] = [];
+    for (const c of this.crons.values()) {
+      if (!c.enabled) continue;
+      if (this.inFlightCronIds.has(c.cronId)) continue;
+      if (c.nextFireAt <= currentTime) due.push(c);
+    }
+    if (due.length === 0) return;
+
+    for (const cron of due) this.inFlightCronIds.add(cron.cronId);
+    await Promise.all(due.map((cron) => this.fireDueCron(cron)));
+    await this.persist();
+  }
+
+  private async fireDueCron(cron: CronRecord): Promise<void> {
     try {
-      const currentTime = this.nowFn();
-      const due: CronRecord[] = [];
-      for (const c of this.crons.values()) {
-        if (!c.enabled) continue;
-        if (c.nextFireAt <= currentTime) due.push(c);
+      if (cron.internal) {
+        const handler = this.internalHandlers.get(cron.cronId);
+        if (handler) await handler();
+      } else if (this.fireHandler) {
+        await this.fireHandler(cron);
       }
-      for (const cron of due) {
-        try {
-          if (cron.internal) {
-            // Internal crons use their dedicated handler
-            const handler = this.internalHandlers.get(cron.cronId);
-            if (handler) await handler();
-          } else if (this.fireHandler) {
-            await this.fireHandler(cron);
-          }
-          cron.lastFiredAt = this.nowFn();
-          cron.consecutiveFailures = 0;
-        } catch (err) {
-          cron.consecutiveFailures += 1;
-          if (cron.consecutiveFailures >= this.maxConsecutiveFailures) {
-            cron.enabled = false;
-          }
-          console.warn(
-            `[cron] fire failed cronId=${cron.cronId} failures=${cron.consecutiveFailures}: ${(err as Error).message}`,
-          );
-        } finally {
-          try {
-            cron.nextFireAt = getNextFireAt(cron.expression, new Date(this.nowFn())).getTime();
-          } catch {
-            cron.enabled = false;
-          }
-        }
+      cron.lastFiredAt = this.nowFn();
+      cron.consecutiveFailures = 0;
+    } catch (err) {
+      cron.consecutiveFailures += 1;
+      if (cron.consecutiveFailures >= this.maxConsecutiveFailures) {
+        cron.enabled = false;
       }
-      if (due.length > 0) await this.persist();
+      console.warn(
+        `[cron] fire failed cronId=${cron.cronId} failures=${cron.consecutiveFailures}: ${(err as Error).message}`,
+      );
     } finally {
-      this.tickInProgress = false;
+      try {
+        cron.nextFireAt = getNextFireAt(cron.expression, new Date(this.nowFn())).getTime();
+      } catch {
+        cron.enabled = false;
+      }
+      this.inFlightCronIds.delete(cron.cronId);
     }
   }
 
@@ -255,6 +270,11 @@ export class CronScheduler {
     durable?: boolean;
     /** Required when durable=false so Session.close() can sweep. */
     sessionKey?: string;
+    mode?: CronMode;
+    scriptPath?: string;
+    timeoutMs?: number;
+    quietOnEmptyStdout?: boolean;
+    deliveryPolicy?: ScriptCronDeliveryPolicy;
   }): Promise<CronRecord> {
     // Throws if expression invalid — callers surface as tool error.
     const nextFireAt = getNextFireAt(opts.expression, new Date(this.nowFn())).getTime();
@@ -272,6 +292,13 @@ export class CronScheduler {
       nextFireAt,
       consecutiveFailures: 0,
       durable,
+      ...(opts.mode ? { mode: opts.mode } : {}),
+      ...(opts.scriptPath ? { scriptPath: opts.scriptPath } : {}),
+      ...(opts.timeoutMs !== undefined ? { timeoutMs: opts.timeoutMs } : {}),
+      ...(opts.quietOnEmptyStdout !== undefined
+        ? { quietOnEmptyStdout: opts.quietOnEmptyStdout }
+        : {}),
+      ...(opts.deliveryPolicy ? { deliveryPolicy: opts.deliveryPolicy } : {}),
       ...(!durable && opts.sessionKey ? { sessionKey: opts.sessionKey } : {}),
     };
     this.crons.set(record.cronId, record);

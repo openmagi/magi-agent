@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { ExecutionContractStore } from "../../execution/ExecutionContract.js";
-import type { LLMClient } from "../../transport/LLMClient.js";
 import type { HookContext } from "../types.js";
+import type { LLMClient } from "../../transport/LLMClient.js";
 import {
   countFailedToolResultsThisTurn,
   countSuccessfulToolResultsThisTurn,
@@ -61,11 +61,6 @@ const actionRequestMeta = {
     wantsKbDelivery: false,
     wantsFileOutput: false,
   },
-  planning: {
-    need: "none",
-    reason: "No planning needed.",
-    suggestedStrategy: "Answer directly.",
-  },
   goalProgress: {
     requiresAction: true,
     actionKinds: ["browser_interaction"],
@@ -102,6 +97,14 @@ const actionClaimMeta = {
   assistantGivesUpEarly: false,
   assistantClaimsActionWithoutEvidence: true,
   reason: "The draft claims debugging happened.",
+};
+
+const planOnlyMeta = {
+  ...earlyGiveUpMeta,
+  assistantGivesUpEarly: false,
+  assistantClaimsActionWithoutEvidence: false,
+  assistantEndsWithUnexecutedPlan: true,
+  reason: "The draft only says it will start the subagents instead of returning results.",
 };
 
 describe("goalProgressGate helpers", () => {
@@ -248,6 +251,130 @@ describe("goalProgressGate hook", () => {
 
     expect(result?.action).toBe("block");
     expect(result?.reason).toContain("[RETRY:GOAL_PROGRESS_ACTION_EVIDENCE]");
+  });
+
+  it("blocks goal-oriented turns that end with a plan instead of executing the next action", async () => {
+    const hook = makeGoalProgressGateHook();
+    const ctx = makeCtx({
+      transcript: [
+        {
+          kind: "tool_call",
+          turnId: "t1",
+          toolUseId: "write-context",
+          name: "FileWrite",
+        },
+        {
+          kind: "tool_result",
+          turnId: "t1",
+          toolUseId: "write-context",
+          status: "ok",
+          output: JSON.stringify({ path: "workspace/context.md" }),
+          isError: false,
+        },
+      ] as HookContext["transcript"],
+      llm: mockLlm([actionRequestMeta, planOnlyMeta]),
+    });
+
+    const result = await hook.handler(
+      {
+        assistantText:
+          "컨텍스트 파일이 준비되었습니다. 이제 낙관 파트너와 회의 파트너를 Opus 4.6으로 병렬 디스패치하겠습니다.",
+        toolCallCount: 1,
+        toolReadHappened: false,
+        userMessage: "투심위를 진행해서 최종 리포트를 줘",
+        retryCount: 0,
+      },
+      ctx,
+    );
+
+    expect(result?.action).toBe("block");
+    expect(result?.reason).toContain("[RETRY:GOAL_PROGRESS_EXECUTE_NEXT]");
+  });
+
+  it("blocks subagent work orders that only announce dispatch without any tool progress", async () => {
+    const hook = makeGoalProgressGateHook();
+    const ctx = makeCtx({
+      transcript: [],
+      llm: mockLlm([
+        {
+          ...actionRequestMeta,
+          deterministic: {
+            requiresDeterministic: true,
+            kinds: ["calculation"],
+            reason: "The user requested exact arithmetic.",
+            suggestedTools: ["Calculation"],
+            acceptanceCriteria: ["Compute 1+1 with deterministic evidence."],
+          },
+          documentOrFileOperation: true,
+          planning: {
+            need: "task_board",
+            reason: "The user asked for coordinated subagent work and a file deliverable.",
+            suggestedStrategy: "Track dispatch, validation, report creation, and delivery.",
+          },
+          goalProgress: {
+            requiresAction: true,
+            actionKinds: ["subagent_dispatch", "calculation", "file_delivery"],
+            reason: "The request explicitly asks the agent to run subagents and return a file.",
+          },
+        },
+        planOnlyMeta,
+      ]),
+    });
+
+    const result = await hook.handler(
+      {
+        assistantText:
+          "I'll spawn 4 subagents with different SOTA LLMs to compute 1+1, then cross-validate and deliver the result as a markdown file.",
+        toolCallCount: 0,
+        toolReadHappened: false,
+        userMessage:
+          "Spawn 4 subagents with different SOTA LLMs, compute 1+1 on each, cross-validate the results, and return the final answer as a .md file.",
+        retryCount: 0,
+      },
+      ctx,
+    );
+
+    expect(result?.action).toBe("block");
+    expect(result?.reason).toContain("[RETRY:GOAL_PROGRESS_EXECUTE_NEXT]");
+  });
+
+  it("hard-blocks repeated plan-only endings after the retry budget is exhausted", async () => {
+    const hook = makeGoalProgressGateHook();
+    const ctx = makeCtx({
+      transcript: [
+        {
+          kind: "tool_call",
+          turnId: "t1",
+          toolUseId: "write-context",
+          name: "FileWrite",
+        },
+        {
+          kind: "tool_result",
+          turnId: "t1",
+          toolUseId: "write-context",
+          status: "ok",
+          output: JSON.stringify({ path: "workspace/context.md" }),
+          isError: false,
+        },
+      ] as HookContext["transcript"],
+      llm: mockLlm([actionRequestMeta, planOnlyMeta]),
+    });
+
+    const result = await hook.handler(
+      {
+        assistantText:
+          "죄송합니다. 실제로 서브에이전트를 띄우겠습니다.",
+        toolCallCount: 1,
+        toolReadHappened: false,
+        userMessage: "투심위를 진행해서 최종 리포트를 줘",
+        retryCount: 1,
+      },
+      ctx,
+    );
+
+    expect(result?.action).toBe("block");
+    expect(result?.reason).toContain("[RULE:GOAL_PROGRESS_EXECUTE_NEXT]");
+    expect(result?.reason).not.toContain("[RETRY:");
   });
 
   it("does not block conversational requests", async () => {

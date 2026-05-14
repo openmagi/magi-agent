@@ -4,7 +4,7 @@ export interface ChannelModelSelection {
 }
 
 export const DEFAULT_CHANNEL_MODEL_SELECTION: ChannelModelSelection = {
-  modelSelection: "magi_smart_routing",
+  modelSelection: "auto",
   routerType: "standard",
 };
 
@@ -14,8 +14,6 @@ const MODEL_SELECTION_TO_RUNTIME_MODEL: Record<string, string> = {
   haiku: "anthropic/claude-haiku-4-5",
   sonnet: "anthropic/claude-sonnet-4-6",
   opus: "anthropic/claude-opus-4-7",
-  smart_routing: "anthropic/claude-sonnet-4-6",
-  gpt_smart_routing: "openai/gpt-5.4-mini",
   gpt_5_nano: "openai/gpt-5.4-nano",
   gpt_5_mini: "openai/gpt-5.4-mini",
   gpt_5_1: "openai/gpt-5.4-mini",
@@ -82,10 +80,6 @@ export function setChannelModelSelection(
 }
 
 export function channelModelSelectionToRuntimeModel(selection: ChannelModelSelection): string {
-  if (selection.modelSelection === "magi_smart_routing") {
-    return selection.routerType === "big_dic"
-      ? "big-dic-router/auto"
-      : "magi-smart-router/auto";
-  }
+  if (selection.modelSelection === "auto") return "auto";
   return MODEL_SELECTION_TO_RUNTIME_MODEL[selection.modelSelection] ?? selection.modelSelection;
 }

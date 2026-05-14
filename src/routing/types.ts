@@ -5,7 +5,14 @@ export type RouteProvider =
   | "openai"
   | "openai-compatible"
   | "fireworks"
-  | "google";
+  | "google"
+  | "ollama"
+  | "local"
+  | "localai"
+  | "vllm"
+  | "tgi"
+  | "openrouter"
+  | "custom";
 
 export type RoutingMode = "off" | "hosted-proxy" | "direct";
 

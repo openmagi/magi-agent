@@ -15,6 +15,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import type { RegisteredHook } from "../types.js";
 import type { TranscriptEntry } from "../../storage/Transcript.js";
+import { shouldSkipMemoryWriteForSession } from "../../reliability/ChannelMemoryPolicy.js";
 
 const MARKER_FILE = ".last-flushed-turn";
 
@@ -161,6 +162,12 @@ export function makeHipocampusFlushHook(
     timeoutMs: 5_000,
     handler: async (args, ctx) => {
       try {
+        if (shouldSkipMemoryWriteForSession(ctx.sessionKey)) {
+          ctx.log("info", "hipocampus flush skipped by channel memory mode", {
+            sessionKey: ctx.sessionKey,
+          });
+          return;
+        }
         const { flushed, lastTurnId } = await flushMemory(
           workspaceRoot,
           args.transcript,

@@ -145,6 +145,90 @@ describe("Cron durable flag", () => {
     expect(session.meta.crons ?? []).toHaveLength(0);
   });
 
+  it("rejects script cron mode unless the script cron flag is enabled", async () => {
+    const scheduler = new CronScheduler(root);
+    const agent = makeStubAgent(root, scheduler);
+    const session = makeSession(agent);
+    const tool = makeCronCreateTool({
+      scheduler,
+      botId: agent.config.botId,
+      userId: agent.config.userId,
+      getSourceChannel: () => session.meta.channel,
+      getSession: () => session,
+    });
+
+    const previous = process.env.CORE_AGENT_SCRIPT_CRON;
+    delete process.env.CORE_AGENT_SCRIPT_CRON;
+    try {
+      const result = await invokeCronCreate(
+        tool,
+        {
+          expression: "@hourly",
+          prompt: "ignored for script",
+          mode: "script",
+          scriptPath: "jobs/check.sh",
+        },
+        makeCtx(),
+      );
+
+      expect(result.status).toBe("error");
+      expect(result.errorCode).toBe("script_cron_disabled");
+      expect(scheduler.list()).toHaveLength(0);
+    } finally {
+      if (previous === undefined) {
+        delete process.env.CORE_AGENT_SCRIPT_CRON;
+      } else {
+        process.env.CORE_AGENT_SCRIPT_CRON = previous;
+      }
+    }
+  });
+
+  it("creates script cron records when script cron mode is enabled", async () => {
+    const scheduler = new CronScheduler(root);
+    const agent = makeStubAgent(root, scheduler);
+    const session = makeSession(agent);
+    const tool = makeCronCreateTool({
+      scheduler,
+      botId: agent.config.botId,
+      userId: agent.config.userId,
+      getSourceChannel: () => session.meta.channel,
+      getSession: () => session,
+    });
+
+    const previous = process.env.CORE_AGENT_SCRIPT_CRON;
+    process.env.CORE_AGENT_SCRIPT_CRON = "1";
+    try {
+      const result = await invokeCronCreate(
+        tool,
+        {
+          expression: "@hourly",
+          prompt: "script fallback label",
+          mode: "script",
+          scriptPath: "jobs/check.sh",
+          timeoutMs: 600_000,
+          quietOnEmptyStdout: false,
+          deliveryPolicy: "always",
+        },
+        makeCtx(),
+      );
+
+      expect(result.status).toBe("ok");
+      expect(result.output?.cron).toMatchObject({
+        mode: "script",
+        scriptPath: "jobs/check.sh",
+        timeoutMs: 300_000,
+        quietOnEmptyStdout: false,
+        deliveryPolicy: "always",
+      });
+    } finally {
+      if (previous === undefined) {
+        delete process.env.CORE_AGENT_SCRIPT_CRON;
+      } else {
+        process.env.CORE_AGENT_SCRIPT_CRON = previous;
+      }
+    }
+  });
+
   it("durable=false lives only on Session.meta.crons and is NOT in index.json", async () => {
     const scheduler = new CronScheduler(root);
     const agent = makeStubAgent(root, scheduler);

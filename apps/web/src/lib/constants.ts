@@ -1,7 +1,6 @@
 import { LOCAL_LLM_MODEL_OPTIONS } from "@/lib/models/local-llm";
 
 export const MODEL_LABELS: Record<string, string> = {
-  smart_routing: "Smart Routing",
   haiku: "Claude Haiku 4.5",
   sonnet: "Claude Sonnet 4.5",
   opus: "Claude Opus 4.6",
@@ -11,9 +10,7 @@ export const MODEL_LABELS: Record<string, string> = {
   gpt_5_mini: "GPT-5.4 Mini",
   gpt_5_5: "GPT-5.5",
   gpt_5_5_pro: "GPT-5.5 Pro",
-  gpt_smart_routing: "GPT Smart Routing",
   codex: "Codex",
-  magi_smart_routing: "Open Magi Router",
   gemini_3_1_flash_lite: "Gemini 3.1 Flash Lite",
   gemini_3_1_pro: "Gemini 3.1 Pro",
   ...Object.fromEntries(
@@ -23,6 +20,5 @@ export const MODEL_LABELS: Record<string, string> = {
 
 export type ValidRouterType =
   | "standard"
-  | "big_dic"
   | "only_claude"
   | "claude_supremacy";

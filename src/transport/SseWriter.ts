@@ -5,7 +5,7 @@
  * Emits TWO interleaved streams on the same SSE body:
  *
  *  1. Legacy OpenAI-compatible `data: {...}` lines (choices[].delta.*)
- *     so chat-proxy's existing legacy parsing pipeline keeps
+ *     so chat-proxy's existing Magi-era parsing pipeline keeps
  *     working for this bot during the migration.
  *
  *  2. `event: agent\ndata: {...}` lines carrying structured
@@ -22,9 +22,11 @@
 
 import type { ServerResponse } from "node:http";
 import { safeAgentEvent } from "./safeAgentEvent.js";
+import type { SourceLedgerRecord } from "../research/SourceLedger.js";
 import type { TurnStatus, TurnStopReason } from "../turn/types.js";
 import type { ControlEvent } from "../control/ControlEvents.js";
 import { UserVisibleRouteMetaFilter } from "../turn/visibleText.js";
+import type { TokenUsage } from "../util/types.js";
 
 export type TurnRoute = "direct" | "subagent" | "pipeline";
 
@@ -39,15 +41,89 @@ export type AgentEvent =
       status: "committed" | "aborted";
       stopReason: TurnStopReason;
       reason?: string;
+      usage?: TokenUsage;
     }
   | { type: "control_event"; seq: number; event: ControlEvent }
   | { type: "control_replay_complete"; lastSeq: number }
   | { type: "text_delta"; delta: string }
   | { type: "response_clear" }
   | { type: "thinking_delta"; delta: string }
+  | {
+      type: "document_draft";
+      id: string;
+      filename?: string;
+      format: "md" | "txt";
+      contentPreview: string;
+      contentLength: number;
+      truncated: boolean;
+    }
+  | {
+      type: "llm_progress";
+      turnId: string;
+      iter: number;
+      stage: "started" | "waiting" | "completed";
+      label: string;
+      detail?: string;
+      elapsedMs?: number;
+    }
   | { type: "tool_start"; id: string; name: string; input_preview?: string }
   | { type: "tool_progress"; id: string; label: string }
   | { type: "tool_end"; id: string; status: string; output_preview?: string; durationMs: number }
+  | {
+      type: "patch_preview";
+      toolUseId?: string;
+      dryRun: boolean;
+      changedFiles: string[];
+      createdFiles: string[];
+      deletedFiles: string[];
+      files: Array<{
+        path: string;
+        operation: "create" | "update" | "delete";
+        hunks: number;
+        addedLines: number;
+        removedLines: number;
+        oldSha256?: string;
+        newSha256?: string;
+      }>;
+    }
+  | { type: "source_inspected"; source: SourceLedgerRecord }
+  | {
+      type: "research_artifact_delta";
+      claims?: Array<{
+        claimId: string;
+        text: string;
+        claimType: "fact" | "uncertainty" | "inference" | "recommendation" | "limitation";
+        supportStatus: "supported" | "partial" | "unsupported" | "uncertain";
+        sourceIds: string[];
+        confidence?: number;
+        reasoning?: {
+          premiseSourceIds: string[];
+          inference: string;
+          assumptions: string[];
+          status: "source_backed" | "partial" | "missing_source_support" | "uncertain";
+        };
+      }>;
+      claimSourceLinks?: Array<{
+        claimId: string;
+        sourceId: string;
+        support: "supports" | "partially_supports" | "contradicts" | "context";
+      }>;
+      contradictions?: Array<{
+        contradictionId: string;
+        claimIds: string[];
+        sourceIds: string[];
+        resolution?: string;
+        status: "handled" | "unresolved" | "not_applicable";
+      }>;
+    }
+  | {
+      type: "browser_frame";
+      action: string;
+      url?: string;
+      imageBase64: string;
+      contentType: "image/png" | "image/jpeg";
+      capturedAt: number;
+    }
   | { type: "context_end" }
   | {
       type: "task_board";
@@ -74,6 +150,41 @@ export type AgentEvent =
       toolName?: string;
     }
   | {
+      type: "spawn_worktree_conflict";
+      action: "apply" | "cherry_pick";
+      spawnDir: string;
+      conflictKind: "parent_dirty" | "cherry_pick";
+      conflictedFiles: string[];
+      changedFiles: string[];
+      mergeStrategy: "copy" | "cherry_pick";
+      adoptedCommit?: string;
+      summary: string;
+      suggestedActions: string[];
+    }
+  | {
+      /**
+       * Runtime contract trace — public, bounded explanation of a
+       * verifier block, retry, or terminal abort. This is intentionally
+       * not a hidden prompt or chain-of-thought channel.
+       */
+      type: "runtime_trace";
+      turnId: string;
+      phase:
+        | "verifier_blocked"
+        | "retry_scheduled"
+        | "retry_aborted"
+        | "terminal_abort";
+      severity: "info" | "warning" | "error";
+      title: string;
+      detail?: string;
+      reasonCode?: string;
+      ruleId?: string;
+      attempt?: number;
+      maxAttempts?: number;
+      retryable?: boolean;
+      requiredAction?: string;
+    }
+  | {
       type: "turn_interrupted";
       turnId: string;
       handoffRequested: boolean;
@@ -91,6 +202,7 @@ export type AgentEvent =
       taskId: string;
       persona: string;
       prompt: string;
+      detail?: string;
       deliver: "return" | "background";
     }
   | {
@@ -111,11 +223,29 @@ export type AgentEvent =
       detail?: string;
     }
   | {
+      /** Durable mission ledger created or linked by runtime work. */
+      type: "mission_created";
+      mission: {
+        id: string;
+        title?: string;
+        kind?: string;
+        status?: string;
+      };
+    }
+  | {
+      /** Durable mission ledger event safe for client-visible work state. */
+      type: "mission_event";
+      missionId: string;
+      eventType: string;
+      message?: string;
+    }
+  | {
       /** SpawnAgent child lifecycle — live mirror of durable control events. */
       type: "child_started";
       taskId: string;
       parentTurnId?: string;
       prompt?: string;
+      detail?: string;
     }
   | {
       type: "child_progress";
@@ -148,6 +278,58 @@ export type AgentEvent =
       type: "child_completed";
       taskId: string;
       summary?: unknown;
+    }
+  | {
+      type: "child_llm_start";
+      taskId: string;
+      parentTurnId?: string;
+      childTurnId?: string;
+      traceId?: string;
+      iter: number;
+      model: string;
+    }
+  | {
+      type: "child_llm_end";
+      taskId: string;
+      parentTurnId?: string;
+      childTurnId?: string;
+      traceId?: string;
+      iter: number;
+      model: string;
+      stopReason: string;
+      durationMs: number;
+    }
+  | {
+      type: "child_tool_batch_start";
+      taskId: string;
+      parentTurnId?: string;
+      childTurnId?: string;
+      traceId?: string;
+      iter: number;
+      toolCount: number;
+      toolNames: string[];
+    }
+  | {
+      type: "child_tool_batch_end";
+      taskId: string;
+      parentTurnId?: string;
+      childTurnId?: string;
+      traceId?: string;
+      iter: number;
+      status: "ok" | "error";
+      toolCount: number;
+      errorCount: number;
+      durationMs: number;
+      errorName?: string;
+      errorMessage?: string;
+    }
+  | {
+      type: "child_abort";
+      taskId: string;
+      parentTurnId?: string;
+      childTurnId?: string;
+      traceId?: string;
+      source: string;
     }
   | {
       /** SpawnAgent tournament mode (T3-16, OMC Port A) — final ranked variants. */
@@ -219,7 +401,7 @@ export type AgentEvent =
        * minimum viable live budget, the turn aborts with this event so
        * the UI can prompt the user to switch to a larger-window model.
        *
-       * Fields mirror Open-source legacy runtime's upstream `compaction_impossible`
+       * Fields mirror Magi's upstream `compaction_impossible`
        * telemetry so dashboards can cross-check.
        */
       type: "compaction_impossible";
@@ -243,8 +425,8 @@ export type AgentEvent =
   | {
       /**
        * B5 pipeline heartbeat — emitted by Turn.ts when an iteration
-       * goes silent for > HEARTBEAT_SILENCE_MS (20s). Subsequent
-       * heartbeats fire every HEARTBEAT_INTERVAL_MS (30s) until the
+       * goes silent for > HEARTBEAT_SILENCE_MS (10s). Subsequent
+       * heartbeats fire every HEARTBEAT_INTERVAL_MS (10s) until the
        * iteration emits something else or the turn ends. Lets the
        * frontend distinguish "agent alive but thinking" from "agent
        * wedged" on long-running tool calls / LLM streams.

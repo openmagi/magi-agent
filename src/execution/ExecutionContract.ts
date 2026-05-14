@@ -1,4 +1,9 @@
 import type { MemoryRecallRecord } from "../reliability/MemoryContinuity.js";
+import type {
+  LongTermMemoryPolicy,
+  SourceAuthorityRecord,
+} from "../reliability/SourceAuthority.js";
+import type { UserMessageMetadata } from "../util/types.js";
 
 export type VerificationMode = "none" | "sample" | "full";
 export type ExecutionControlMode = "light" | "heavy";
@@ -155,6 +160,25 @@ export interface RequestMetaClassificationResult {
     actionKinds: string[];
     reason: string;
   };
+  sourceAuthority: {
+    longTermMemoryPolicy: LongTermMemoryPolicy;
+    currentSourcesAuthoritative: boolean;
+    reason: string;
+  };
+  clarification: {
+    needed: boolean;
+    reason: string;
+    question: string | null;
+    choices: string[];
+    allowFreeText: boolean;
+    riskIfAssumed: string;
+  };
+  memoryMutation: {
+    intent: "none" | "redact";
+    target: string | null;
+    rawFileRedactionRequested: boolean;
+    reason: string;
+  };
 }
 
 export interface RequestMetaClassificationRecord {
@@ -177,6 +201,10 @@ export interface FinalAnswerMetaClassificationResult {
   assistantReportsDeliveryUnverified: boolean;
   assistantGivesUpEarly: boolean;
   assistantClaimsActionWithoutEvidence: boolean;
+  assistantEndsWithUnexecutedPlan: boolean;
+  assistantClaimsMemoryMutation: boolean;
+  assistantReportsMemoryMutationFailure: boolean;
+  sourceAuthorityViolation: boolean;
   reason: string;
 }
 
@@ -206,6 +234,7 @@ export interface ExecutionTaskState {
   requestMetaClassifications: RequestMetaClassificationRecord[];
   finalAnswerMetaClassifications: FinalAnswerMetaClassificationRecord[];
   memoryRecall: MemoryRecallRecord[];
+  sourceAuthority: SourceAuthorityRecord[];
   artifacts: string[];
   updatedAt: number;
 }
@@ -229,6 +258,14 @@ export interface ExecutionContractSnapshot {
 
 export interface ExecutionContractStoreOptions {
   now?: () => number;
+}
+
+interface GoalContractInput {
+  objective: string;
+  missionId?: string;
+  turnsUsed?: number;
+  maxTurns?: number;
+  continuation: boolean;
 }
 
 const COMPLETION_CLAIM_RE =
@@ -271,6 +308,7 @@ export class ExecutionContractStore {
         requestMetaClassifications: [],
         finalAnswerMetaClassifications: [],
         memoryRecall: [],
+        sourceAuthority: [],
         artifacts: [],
         updatedAt: this.now(),
       },
@@ -282,18 +320,34 @@ export class ExecutionContractStore {
     };
   }
 
-  startTurn(input: { userMessage: string }): void {
+  startTurn(input: { userMessage: string; metadata?: UserMessageMetadata }): void {
     const parsed = parseTaskContract(input.userMessage);
+    const goalContract = goalContractFromMetadata(input.metadata);
     const goal = firstNonContractLine(input.userMessage);
-    const control = classifyExecutionControl(input.userMessage, parsed, this.snapshotValue);
+    const control = goalContract
+      ? {
+          mode: "heavy" as const,
+          reason: goalContract.continuation ? "goal_loop_continuation" : "goal_loop",
+        }
+      : classifyExecutionControl(input.userMessage, parsed, this.snapshotValue);
     const acceptanceCriteria = mergeUnique(
       this.snapshotValue.taskState.acceptanceCriteria,
       parsed.acceptanceCriteria,
     );
+    const goalConstraints = goalContractConstraints(goalContract);
+    const goalPlan = goalContractPlan(goalContract);
     this.patchTaskState({
-      goal: parsed.goal ?? this.snapshotValue.taskState.goal ?? goal,
-      constraints: mergeUnique(this.snapshotValue.taskState.constraints, parsed.constraints),
-      currentPlan: mergeUnique(this.snapshotValue.taskState.currentPlan, parsed.currentPlan),
+      goal: goalContract?.objective ?? parsed.goal ?? this.snapshotValue.taskState.goal ?? goal,
+      constraints: mergeUnique(
+        this.snapshotValue.taskState.constraints,
+        parsed.constraints,
+        goalConstraints,
+      ),
+      currentPlan: mergeUnique(
+        this.snapshotValue.taskState.currentPlan,
+        parsed.currentPlan,
+        goalPlan,
+      ),
       completedSteps: mergeUnique(this.snapshotValue.taskState.completedSteps, parsed.completedSteps),
       blockers: mergeUnique(this.snapshotValue.taskState.blockers, parsed.blockers),
       criteria: mergeCriteria(
@@ -309,7 +363,12 @@ export class ExecutionContractStore {
           )
         : this.snapshotValue.taskState.resourceBindings,
       artifacts: mergeUnique(this.snapshotValue.taskState.artifacts, parsed.artifacts),
-      verificationMode: parsed.verificationMode ?? this.snapshotValue.taskState.verificationMode,
+      verificationMode: goalContract
+        ? strongerVerificationMode(
+            parsed.verificationMode ?? this.snapshotValue.taskState.verificationMode,
+            "sample",
+          )
+        : parsed.verificationMode ?? this.snapshotValue.taskState.verificationMode,
     });
     this.snapshotValue = {
       ...this.snapshotValue,
@@ -431,6 +490,33 @@ export class ExecutionContractStore {
         (record) => record.turnId === turnId,
       ),
     )) as MemoryRecallRecord[];
+  }
+
+  replaceSourceAuthorityForTurn(
+    turnId: string,
+    records: readonly SourceAuthorityRecord[],
+  ): void {
+    const retained = this.snapshotValue.taskState.sourceAuthority.filter(
+      (record) => record.turnId !== turnId,
+    );
+    const now = this.now();
+    this.patchTaskState({
+      sourceAuthority: [
+        ...retained,
+        ...records.map((record) => ({
+          ...record,
+          recordedAt: record.recordedAt ?? now,
+        })),
+      ],
+    });
+  }
+
+  sourceAuthorityForTurn(turnId: string): SourceAuthorityRecord[] {
+    return JSON.parse(JSON.stringify(
+      this.snapshotValue.taskState.sourceAuthority.filter(
+        (record) => record.turnId === turnId,
+      ),
+    )) as SourceAuthorityRecord[];
   }
 
   recordDeterministicRequirement(
@@ -846,9 +932,10 @@ function normalizeWhitespace(value: string): string {
   return value.replace(/\s+/g, " ").trim();
 }
 
-function mergeUnique(existing: string[], next?: string[]): string[] {
-  if (!next || next.length === 0) return existing;
-  return [...new Set([...existing, ...next])];
+function mergeUnique(existing: string[], ...nextLists: Array<string[] | undefined>): string[] {
+  const values = nextLists.flatMap((next) => next ?? []);
+  if (values.length === 0) return existing;
+  return [...new Set([...existing, ...values])];
 }
 
 function defaultResourceBindings(): ResourceBindings {
@@ -939,6 +1026,61 @@ function hasActiveHeavyContract(snapshot?: ExecutionContractSnapshot): boolean {
     snapshot.taskState.verificationMode === "full" ||
     snapshot.taskState.acceptanceCriteria.length > 0
   );
+}
+
+function goalContractFromMetadata(
+  metadata?: UserMessageMetadata,
+): GoalContractInput | null {
+  if (metadata?.goalMode !== true) return null;
+  const objective = metadataString(metadata, "goalObjective")?.trim();
+  if (!objective) return null;
+  return {
+    objective,
+    missionId: metadataString(metadata, "missionId"),
+    turnsUsed: metadataNumber(metadata, "goalTurnsUsed"),
+    maxTurns: metadataNumber(metadata, "goalMaxTurns"),
+    continuation: metadata.goalContinuation === true,
+  };
+}
+
+function goalContractConstraints(goal: GoalContractInput | null): string[] {
+  if (!goal) return [];
+  return [
+    `Autonomous goal mission: ${goal.missionId ?? "pending"}`,
+    "Do not stop because the first visible answer is incomplete; the goal judge will decide whether to continue, block, or finish.",
+  ];
+}
+
+function goalContractPlan(goal: GoalContractInput | null): string[] {
+  if (!goal) return [];
+  const maxTurns = goal.maxTurns ?? 30;
+  return [
+    `Continue concrete work toward the goal until it is done, blocked, needs user input, or the ${maxTurns}-turn budget is exhausted.`,
+  ];
+}
+
+function strongerVerificationMode(
+  current: VerificationMode,
+  next: VerificationMode,
+): VerificationMode {
+  const rank: Record<VerificationMode, number> = { none: 0, sample: 1, full: 2 };
+  return rank[next] > rank[current] ? next : current;
+}
+
+function metadataString(
+  metadata: UserMessageMetadata,
+  key: string,
+): string | undefined {
+  const value = metadata[key];
+  return typeof value === "string" && value.trim().length > 0 ? value : undefined;
+}
+
+function metadataNumber(
+  metadata: UserMessageMetadata,
+  key: string,
+): number | undefined {
+  const value = metadata[key];
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
 }
 
 function renderList(label: string, values: string[]): string {

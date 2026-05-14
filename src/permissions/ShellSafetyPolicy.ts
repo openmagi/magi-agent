@@ -21,6 +21,30 @@ const SECRET_EXFIL_PATTERNS: Array<[RegExp, string]> = [
   [/\bcat\b\s+(?:\.env|~\/\.ssh|[^ ]*\/\.env)\b/, "secret file read"],
 ];
 
+const WORKSPACE_BOUNDARY_PATTERNS: Array<[RegExp, string]> = [
+  [/\b(?:sudo|doas)\b|\bsu\s+-/, "privilege escalation command"],
+  [/\bmkfs(?:\.[a-z0-9]+)?\b/, "filesystem formatting command"],
+  [/\bdd\b[^|;&]*\bof=\s*\/dev\//, "raw disk write command"],
+  [/:\s*\(\)\s*\{[^}]*:\s*\|\s*:\s*&?[^}]*\}/, "fork bomb"],
+  [
+    /\brm\s+(?:-[^\s]*r[^\s]*f|-[^\s]*f[^\s]*r)\s+(?:--\s+)?['"]?\/(?:\*|['"]?\s|$)/,
+    "destructive rm -rf root",
+  ],
+  [/\b(?:chmod|chown)\s+-R\b[^|;&]*\s\/(?:\s|$)/, "recursive system permission change"],
+  [/(^|[\s"'`=])\/(?:etc|sys|root)\b/, "system path access"],
+  [/(^|[\s"'`=])\/(?:var\/run|run)\/secrets\b/, "runtime secret path access"],
+  [/(^|[\s"'`=])\/proc\/(?:self|\d+)\/environ\b/, "process environment access"],
+  [
+    /(^|[\s"'`=])(?:~|\/home\/[^/\s"'`]+|\/Users\/[^/\s"'`]+|\/root)\/\.ssh\b/,
+    "ssh secret path access",
+  ],
+  [
+    /\b(?:curl|wget)\b[^\n]*(?:169\.254\.169\.254|metadata\.google\.internal|metadata\.azure\.com)/i,
+    "cloud metadata access",
+  ],
+  [/\b(?:kubectl|helm)\b/, "cluster control command"],
+];
+
 const COMPLEX_PATTERNS: RegExp[] = [
   /[`$]\(/,
   /[`]/,
@@ -42,6 +66,16 @@ export function classifyShellSafety(command: string): ShellSafetyResult {
     complex,
     ...(complex ? { reason: "complex shell requires explicit approval" } : {}),
   };
+}
+
+export function classifyWorkspaceShellBoundary(command: string): ShellSafetyResult {
+  const normalized = command.trim();
+  for (const [pattern, reason] of WORKSPACE_BOUNDARY_PATTERNS) {
+    if (pattern.test(normalized)) {
+      return { safe: false, reason, complex: isComplexShell(normalized) };
+    }
+  }
+  return { safe: true, complex: isComplexShell(normalized) };
 }
 
 function isComplexShell(command: string): boolean {

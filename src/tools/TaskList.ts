@@ -1,7 +1,7 @@
 /**
  * TaskList — T2-10.
  *
- * Lists previously-spawned background tasks from the
+ * Lists background tasks from the
  * BackgroundTaskRegistry. Mirrors Claude Code's AgentTool "TaskList"
  * surface.
  */
@@ -59,7 +59,7 @@ export function makeTaskListTool(
   return {
     name: "TaskList",
     description:
-      "List background subagent tasks spawned via SpawnAgent with deliver='background'. Optionally filter by status (running|completed|aborted|failed), limit, cursor, or sessionKey. Returns a page of BackgroundTaskRecord entries sorted newest-first.",
+      "List background tasks spawned via SpawnAgent deliver='background' or Bash runInBackground. Optionally filter by status (running|completed|aborted|failed), limit, cursor, or sessionKey. Returns a page of BackgroundTaskRecord entries sorted newest-first.",
     inputSchema: INPUT_SCHEMA,
     permission: "meta",
     kind: "core",

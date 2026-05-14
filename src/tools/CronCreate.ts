@@ -8,7 +8,12 @@
  */
 
 import type { Tool, ToolContext, ToolResult } from "../Tool.js";
-import type { CronScheduler, CronRecord } from "../cron/CronScheduler.js";
+import type {
+  CronScheduler,
+  CronRecord,
+  CronMode,
+  ScriptCronDeliveryPolicy,
+} from "../cron/CronScheduler.js";
 import type { ChannelRef } from "../util/types.js";
 import type { Session } from "../Session.js";
 import { errorResult } from "../util/toolResult.js";
@@ -17,6 +22,11 @@ export interface CronCreateInput {
   expression: string;
   prompt: string;
   description?: string;
+  mode?: CronMode;
+  scriptPath?: string;
+  timeoutMs?: number;
+  quietOnEmptyStdout?: boolean;
+  deliveryPolicy?: ScriptCronDeliveryPolicy;
   /**
    * Optional explicit channel override. When omitted, defaults to the
    * current turn's source channel (see Turn.ts metadata). This is the
@@ -48,6 +58,29 @@ const INPUT_SCHEMA = {
       description: "The prompt the bot will receive when the cron fires.",
     },
     description: { type: "string", description: "Optional human-facing label." },
+    mode: {
+      type: "string",
+      enum: ["agent", "script"],
+      description:
+        "Optional, default agent. script runs a workspace-relative script without an LLM turn when script crons are enabled.",
+    },
+    scriptPath: {
+      type: "string",
+      description: "Workspace-relative executable script path for mode='script'.",
+    },
+    timeoutMs: {
+      type: "number",
+      description: "Script cron timeout in milliseconds, capped at 300000.",
+    },
+    quietOnEmptyStdout: {
+      type: "boolean",
+      description: "For script mode, suppress delivery when stdout is empty. Defaults true.",
+    },
+    deliveryPolicy: {
+      type: "string",
+      enum: ["stdout_non_empty", "always", "never"],
+      description: "For script mode, controls delivery of stdout. Defaults stdout_non_empty.",
+    },
     deliveryChannel: {
       type: "object",
       description:
@@ -66,6 +99,26 @@ const INPUT_SCHEMA = {
   },
   required: ["expression", "prompt"],
 } as const;
+
+const MAX_SCRIPT_CRON_TIMEOUT_MS = 300_000;
+const DEFAULT_SCRIPT_CRON_TIMEOUT_MS = 60_000;
+
+function scriptCronEnabled(): boolean {
+  return process.env.CORE_AGENT_SCRIPT_CRON === "1";
+}
+
+function normalizeScriptTimeout(timeoutMs: unknown): number {
+  if (typeof timeoutMs !== "number" || !Number.isFinite(timeoutMs) || timeoutMs <= 0) {
+    return DEFAULT_SCRIPT_CRON_TIMEOUT_MS;
+  }
+  return Math.min(Math.floor(timeoutMs), MAX_SCRIPT_CRON_TIMEOUT_MS);
+}
+
+function normalizeDeliveryPolicy(
+  policy: ScriptCronDeliveryPolicy | undefined,
+): ScriptCronDeliveryPolicy {
+  return policy ?? "stdout_non_empty";
+}
 
 export interface CronCreateDeps {
   scheduler: CronScheduler;
@@ -113,9 +166,28 @@ export function makeCronCreateTool(
         const session = deps.getSession(ctx);
         const channel = input.deliveryChannel ?? deps.getSourceChannel(ctx);
         const durable = input.durable === true;
+        const mode = input.mode ?? "agent";
 
         // Validation path — all rejects happen BEFORE the scheduler
         // is mutated so the write fails atomically.
+        if (mode === "script") {
+          if (!scriptCronEnabled()) {
+            return {
+              status: "error",
+              errorCode: "script_cron_disabled",
+              errorMessage: "mode='script' requires CORE_AGENT_SCRIPT_CRON=1",
+              durationMs: Date.now() - start,
+            };
+          }
+          if (!input.scriptPath || input.scriptPath.trim().length === 0) {
+            return {
+              status: "error",
+              errorCode: "script_path_required",
+              errorMessage: "scriptPath is required when mode='script'",
+              durationMs: Date.now() - start,
+            };
+          }
+        }
         if (durable) {
           if (session?.meta.role === "subagent") {
             return {
@@ -153,6 +225,15 @@ export function makeCronCreateTool(
           deliveryChannel: channel,
           ...(input.description ? { description: input.description } : {}),
           durable,
+          ...(mode === "script"
+            ? {
+                mode,
+                scriptPath: input.scriptPath!.trim(),
+                timeoutMs: normalizeScriptTimeout(input.timeoutMs),
+                quietOnEmptyStdout: input.quietOnEmptyStdout !== false,
+                deliveryPolicy: normalizeDeliveryPolicy(input.deliveryPolicy),
+              }
+            : {}),
           ...(!durable && session ? { sessionKey: session.meta.sessionKey } : {}),
         });
         // Session-scoped crons register on their owning Session so

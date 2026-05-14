@@ -51,7 +51,6 @@ function isEnabled(): boolean {
   return v === "" || v === "on" || v === "true" || v === "1";
 }
 
-/** LLM-based deferral classification. No regex fallback. */
 export async function matchesDeferral(
   text: string,
   ctx?: HookContext,
