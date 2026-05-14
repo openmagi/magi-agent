@@ -136,6 +136,14 @@ export interface RequestMetaClassificationResult {
   skipTdd: boolean;
   implementationIntent: boolean;
   documentOrFileOperation: boolean;
+  documentExport: {
+    strategy: "none" | "canonical_markdown" | "native_template" | "default";
+    confidence: number;
+    renderParityRequired: boolean;
+    nativeTemplateRequired: boolean;
+    docxMode: "editable" | "fixed_layout" | null;
+    reason: string;
+  };
   deterministic: {
     requiresDeterministic: boolean;
     kinds: DeterministicRequirementKind[];
@@ -163,6 +171,10 @@ export interface RequestMetaClassificationResult {
   sourceAuthority: {
     longTermMemoryPolicy: LongTermMemoryPolicy;
     currentSourcesAuthoritative: boolean;
+    reason: string;
+  };
+  research: {
+    sourceSensitive: boolean;
     reason: string;
   };
   clarification: {
@@ -202,6 +214,8 @@ export interface FinalAnswerMetaClassificationResult {
   assistantGivesUpEarly: boolean;
   assistantClaimsActionWithoutEvidence: boolean;
   assistantEndsWithUnexecutedPlan: boolean;
+  assistantNeedsMoreRuntimeWork: boolean;
+  assistantNeedsInteractiveRuntimeWork: boolean;
   assistantClaimsMemoryMutation: boolean;
   assistantReportsMemoryMutationFailure: boolean;
   sourceAuthorityViolation: boolean;

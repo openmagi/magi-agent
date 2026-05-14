@@ -16,6 +16,7 @@ import {
   shouldBlockClaim,
   transcriptEvidenceForTurn,
 } from "../../verification/VerificationEvidence.js";
+import { getOrClassifyFinalAnswerMeta } from "./turnMetaClassifier.js";
 
 export { matchesCompletionClaim };
 
@@ -33,7 +34,7 @@ export interface CompletionEvidenceGateOptions {
 }
 
 function isEnabled(): boolean {
-  const raw = process.env.CORE_AGENT_COMPLETION_EVIDENCE;
+  const raw = process.env.MAGI_COMPLETION_EVIDENCE;
   if (raw === undefined || raw === null) return true;
   const v = raw.trim().toLowerCase();
   return v === "" || v === "on" || v === "true" || v === "1";
@@ -71,7 +72,7 @@ export function makeCompletionEvidenceGateHook(
     priority: 87,
     blocking: true,
     timeoutMs: 2_000,
-    handler: async ({ assistantText, retryCount }, ctx: HookContext) => {
+    handler: async ({ assistantText, retryCount, userMessage }, ctx: HookContext) => {
       try {
         if (!isEnabled()) return { action: "continue" };
         if (!matchesCompletionClaim(assistantText)) return { action: "continue" };
@@ -116,6 +117,29 @@ export function makeCompletionEvidenceGateHook(
             retryCount,
           });
           return { action: "continue" };
+        }
+
+        const finalMeta = await getOrClassifyFinalAnswerMeta(ctx, {
+          userMessage,
+          assistantText,
+        });
+        if (finalMeta.assistantNeedsInteractiveRuntimeWork) {
+          ctx.emit({
+            type: "rule_check",
+            ruleId: "completion-evidence-gate",
+            verdict: "violation",
+            detail: "completion claim deferred browser/GUI work without same-turn evidence",
+          });
+          return {
+            action: "block",
+            reason: [
+              "[RETRY:INTERACTIVE_TOOL_REQUIRED]",
+              "The draft makes a completion/status claim about browser/GUI work,",
+              "but this turn has no successful Browser/SocialBrowser evidence.",
+              "Use Browser/SocialBrowser now for the next concrete action, then",
+              "report the actual observation or hard blocker with evidence.",
+            ].join("\n"),
+          };
         }
 
         ctx.emit({

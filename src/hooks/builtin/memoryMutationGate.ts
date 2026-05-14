@@ -25,7 +25,7 @@ interface MemoryRedactEvidence {
 }
 
 function isEnabled(): boolean {
-  const raw = process.env.CORE_AGENT_MEMORY_MUTATION_GATE;
+  const raw = process.env.MAGI_MEMORY_MUTATION_GATE;
   if (raw === undefined || raw === null) return true;
   const value = raw.trim().toLowerCase();
   return value === "" || value === "on" || value === "true" || value === "1";
@@ -99,15 +99,20 @@ export function makeMemoryMutationGateHooks(
       point: "beforeCommit",
       priority: 88,
       blocking: true,
+      failOpen: true,
       timeoutMs: 6_000,
       handler: async ({ assistantText, retryCount, userMessage }, ctx) => {
         if (!isEnabled()) return { action: "continue" };
         const requestMeta = await getOrClassifyRequestMeta(ctx, { userMessage });
+        const requestNeedsMutation = requestMeta.memoryMutation.intent !== "none";
+        if (!requestNeedsMutation && !mayClaimMemoryMutation(assistantText)) {
+          return { action: "continue" };
+        }
+
         const finalMeta = await getOrClassifyFinalAnswerMeta(ctx, {
           userMessage,
           assistantText,
         });
-        const requestNeedsMutation = requestMeta.memoryMutation.intent !== "none";
         const answerClaimsMutation = finalMeta.assistantClaimsMemoryMutation;
         if (!requestNeedsMutation && !answerClaimsMutation) {
           return { action: "continue" };
@@ -161,6 +166,17 @@ export function makeMemoryMutationGateHooks(
       },
     },
   };
+}
+
+function mayClaimMemoryMutation(text: string): boolean {
+  const normalized = text.trim().toLowerCase();
+  if (!normalized) return false;
+  return (
+    /\b(memory|memories|stored context|hipocampus)\b.*\b(deleted|removed|erased|redacted|forgotten|cleared)\b/i.test(normalized) ||
+    /\b(deleted|removed|erased|redacted|forgot|cleared)\b.*\b(memory|memories|stored context|hipocampus)\b/i.test(normalized) ||
+    /(?:메모리|기억|저장된\s*내용|히포캠퍼스).*(?:삭제|제거|지웠|잊었|초기화|비웠|redact)/i.test(text) ||
+    /(?:삭제|제거|지웠|잊었|초기화|비웠).*(?:메모리|기억|저장된\s*내용|히포캠퍼스)/i.test(text)
+  );
 }
 
 async function readTranscript(

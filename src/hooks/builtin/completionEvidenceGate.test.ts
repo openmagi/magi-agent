@@ -118,17 +118,17 @@ describe("completionEvidenceGate helpers", () => {
 });
 
 describe("completionEvidenceGate hook", () => {
-  const originalEnv = process.env.CORE_AGENT_COMPLETION_EVIDENCE;
+  const originalEnv = process.env.MAGI_COMPLETION_EVIDENCE;
 
   beforeEach(() => {
-    delete process.env.CORE_AGENT_COMPLETION_EVIDENCE;
+    delete process.env.MAGI_COMPLETION_EVIDENCE;
   });
 
   afterEach(() => {
     if (originalEnv === undefined) {
-      delete process.env.CORE_AGENT_COMPLETION_EVIDENCE;
+      delete process.env.MAGI_COMPLETION_EVIDENCE;
     } else {
-      process.env.CORE_AGENT_COMPLETION_EVIDENCE = originalEnv;
+      process.env.MAGI_COMPLETION_EVIDENCE = originalEnv;
     }
   });
 
@@ -195,8 +195,8 @@ describe("completionEvidenceGate hook", () => {
     expect(result).toEqual({ action: "continue" });
   });
 
-  it("respects CORE_AGENT_COMPLETION_EVIDENCE=off", async () => {
-    process.env.CORE_AGENT_COMPLETION_EVIDENCE = "off";
+  it("respects MAGI_COMPLETION_EVIDENCE=off", async () => {
+    process.env.MAGI_COMPLETION_EVIDENCE = "off";
     const hook = makeCompletionEvidenceGateHook();
     const result = await hook.handler(args("Fixed and tests pass."), makeCtx());
     expect(result).toEqual({ action: "continue" });

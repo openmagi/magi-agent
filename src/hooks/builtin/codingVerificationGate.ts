@@ -18,7 +18,7 @@ export interface CodingVerificationGateOptions {
 }
 
 function isEnabled(): boolean {
-  const raw = process.env.CORE_AGENT_CODING_VERIFY;
+  const raw = process.env.MAGI_CODING_VERIFY;
   if (raw === undefined || raw === null) return true;
   const v = raw.trim().toLowerCase();
   return v === "" || v === "on" || v === "true" || v === "1";
@@ -57,7 +57,7 @@ function hasCurrentTurnDiffEvidence(evidence: ReturnType<typeof transcriptEviden
   );
 }
 
-const CODE_MUTATION_TOOLS = new Set(["FileWrite", "FileEdit"]);
+const CODE_MUTATION_TOOLS = new Set(["FileWrite", "FileEdit", "SpawnWorktreeApply"]);
 
 type ToolResultEntry = Extract<TranscriptEntry, { kind: "tool_result" }>;
 
@@ -89,10 +89,39 @@ function latestCodeMutationIndex(
     if (entry.kind !== "tool_call" || entry.turnId !== turnId) continue;
     if (!CODE_MUTATION_TOOLS.has(entry.name)) continue;
     const result = results.get(entry.toolUseId);
+    if (!isCodeMutationResult(entry.name, result?.entry)) continue;
     const mutationIndex = result?.index ?? index;
     latest = latest === null ? mutationIndex : Math.max(latest, mutationIndex);
   }
   return latest;
+}
+
+function isCodeMutationResult(
+  toolName: string,
+  result: ToolResultEntry | undefined,
+): boolean {
+  if (toolName === "FileWrite" || toolName === "FileEdit") return true;
+  if (toolName !== "SpawnWorktreeApply") return false;
+  if (!result || result.isError === true) return false;
+  if (result.status && result.status !== "ok" && result.status !== "success") return false;
+  const output = parseToolOutputObject(result.output);
+  return output?.applied === true;
+}
+
+function parseToolOutputObject(output: unknown): Record<string, unknown> | null {
+  if (!output) return null;
+  if (typeof output === "object" && !Array.isArray(output)) {
+    return output as Record<string, unknown>;
+  }
+  if (typeof output !== "string") return null;
+  try {
+    const parsed = JSON.parse(output) as unknown;
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? parsed as Record<string, unknown>
+      : null;
+  } catch {
+    return null;
+  }
 }
 
 function transcriptEvidenceForTurnAfter(

@@ -20,7 +20,7 @@
  *          even trying).
  *
  * Retry budget: 1. Fail-open on error. Operator-gate:
- * `CORE_AGENT_DEFERRAL_BLOCKER=off`.
+ * `MAGI_DEFERRAL_BLOCKER=off`.
  */
 
 import type { RegisteredHook, HookContext } from "../types.js";
@@ -45,7 +45,7 @@ export interface DeferralBlockerAgent {
 }
 
 function isEnabled(): boolean {
-  const raw = process.env.CORE_AGENT_DEFERRAL_BLOCKER;
+  const raw = process.env.MAGI_DEFERRAL_BLOCKER;
   if (raw === undefined || raw === null) return true;
   const v = raw.trim().toLowerCase();
   return v === "" || v === "on" || v === "true" || v === "1";
@@ -64,6 +64,17 @@ export async function matchesDeferral(
     assistantText: text,
   });
   return meta.deferralPromise;
+}
+
+async function classifyFinalAnswerForDeferral(
+  text: string,
+  ctx: HookContext,
+  userMessage: string,
+) {
+  return getOrClassifyFinalAnswerMeta(ctx, {
+    userMessage,
+    assistantText: text,
+  });
 }
 
 /** Exported for tests — count WORK_TOOLS calls in the turn's transcript. */
@@ -206,7 +217,12 @@ export function makeDeferralBlockerHook(
           return { action: "continue" };
         }
 
-        if (!(await matchesDeferral(assistantText, ctx, userMessage))) {
+        const finalMeta = await classifyFinalAnswerForDeferral(
+          assistantText,
+          ctx,
+          userMessage,
+        );
+        if (!finalMeta.deferralPromise && !finalMeta.assistantNeedsInteractiveRuntimeWork) {
           return { action: "continue" };
         }
 
@@ -221,6 +237,30 @@ export function makeDeferralBlockerHook(
             detail: "retry exhausted; failing open",
           });
           return { action: "continue" };
+        }
+
+        if (finalMeta.assistantNeedsInteractiveRuntimeWork) {
+          ctx.log("warn", "[deferral-blocker] blocking deferred interactive work", {
+            retryCount,
+            reason: finalMeta.reason,
+          });
+          ctx.emit({
+            type: "rule_check",
+            ruleId: "deferral-blocker",
+            verdict: "violation",
+            detail: "interactive browser/GUI work was deferred instead of executed",
+          });
+          return {
+            action: "block",
+            reason: [
+              "[RETRY:INTERACTIVE_TOOL_REQUIRED]",
+              "The draft says browser/GUI work still needs to happen, but it",
+              "does not provide Browser/SocialBrowser tool evidence from this turn.",
+              "Do not finish by saying you will open, click, inspect, login, or test.",
+              "Use Browser/SocialBrowser now for the next concrete action, then",
+              "report the actual observation or a hard blocker with evidence.",
+            ].join("\n"),
+          };
         }
 
         // We block for retry regardless of whether tools fired this

@@ -2,17 +2,22 @@ import { createHash } from "node:crypto";
 import type {
   DeterministicRequirementKind,
   FinalAnswerMetaClassificationResult,
+  MetaClassificationSource,
   PlanningNeed,
   RequestMetaClassificationResult,
 } from "../../execution/ExecutionContract.js";
 import type { LongTermMemoryPolicy } from "../../reliability/SourceAuthority.js";
 import { buildSourceAuthorityClassifierContext } from "../../reliability/SourceAuthority.js";
+import type { TranscriptEntry } from "../../storage/Transcript.js";
 import type { LLMClient } from "../../transport/LLMClient.js";
 import type { HookContext } from "../types.js";
 
 const REQUEST_CLASSIFIER_TIMEOUT_MS = 8_000;
 const FINAL_CLASSIFIER_TIMEOUT_MS = 6_000;
 const CLASSIFIER_HOOK_DEADLINE_HEADROOM_MS = 250;
+const REQUEST_CONTEXT_ENTRY_LIMIT = 8;
+const REQUEST_CONTEXT_TEXT_LIMIT = 3_000;
+const REQUEST_CONTEXT_ENTRY_TEXT_LIMIT = 700;
 
 const VALID_KINDS: readonly DeterministicRequirementKind[] = [
   "clock",
@@ -37,11 +42,18 @@ const VALID_MEMORY_POLICIES: readonly LongTermMemoryPolicy[] = [
   "disabled",
 ];
 const VALID_MEMORY_POLICY_SET = new Set<string>(VALID_MEMORY_POLICIES);
+const VALID_DOCUMENT_EXPORT_STRATEGY_SET = new Set<string>([
+  "none",
+  "canonical_markdown",
+  "native_template",
+  "default",
+]);
 
 const REQUEST_CLASSIFIER_SYSTEM = [
   "You are a runtime-control classifier for an AI agent.",
   "Classify the user's current request once so multiple hooks do not each call an LLM.",
   "Use semantic judgment across languages. Do not rely on keyword matching.",
+  "When recent conversation/task context is supplied, use it only to resolve references, continuations, attachments, and status-check follow-ups. The current user request remains controlling.",
   "",
   "Return ONLY strict JSON with this shape:",
   "{",
@@ -49,6 +61,14 @@ const REQUEST_CLASSIFIER_SYSTEM = [
   '  "skipTdd": boolean,',
   '  "implementationIntent": boolean,',
   '  "documentOrFileOperation": boolean,',
+  '  "documentExport": {',
+  '    "strategy": "none" | "canonical_markdown" | "native_template" | "default",',
+  '    "confidence": number,',
+  '    "renderParityRequired": boolean,',
+  '    "nativeTemplateRequired": boolean,',
+  '    "docxMode": "editable" | "fixed_layout" | null,',
+  '    "reason": string',
+  "  },",
   '  "deterministic": {',
   '    "requiresDeterministic": boolean,',
   '    "kinds": ["clock" | "date_range" | "calculation" | "counting" | "data_query" | "comparison"],',
@@ -78,6 +98,10 @@ const REQUEST_CLASSIFIER_SYSTEM = [
   '    "currentSourcesAuthoritative": boolean,',
   '    "reason": string',
   "  },",
+  '  "research": {',
+  '    "sourceSensitive": boolean,',
+  '    "reason": string',
+  "  },",
   '  "clarification": {',
   '    "needed": boolean,',
   '    "reason": string,',
@@ -102,6 +126,18 @@ const REQUEST_CLASSIFIER_SYSTEM = [
   "skipTdd is true only when the user explicitly asks to skip tests/TDD.",
   "implementationIntent is true for non-trivial code implementation, not document/file creation.",
   "documentOrFileOperation is true for document/file/report/spreadsheet/export/create/convert/deliver requests.",
+  [
+    "documentExport:",
+    "- Use semantic judgment across languages, not regex or keyword matching.",
+    '- strategy=canonical_markdown when the user wants an md/Markdown-first pipeline, PDF/DOCX/HTML that exactly matches a Markdown/web preview, browser-rendered export parity, or deterministic conversion from one canonical Markdown source. The user never needs to say "canonical_markdown".',
+    "- strategy=native_template when the user asks to follow a specific form/template/company format, edit an existing document, preserve a provided DOCX/HWPX/HWP/PDF-like form, use HWPX/native Korean office templates, or otherwise prioritizes native document structure over Markdown render parity.",
+    "- strategy=default for ordinary document/report/export creation where no strict Markdown render parity or native template requirement is expressed.",
+    "- strategy=none when the turn is not asking for document creation/conversion/export.",
+    "- renderParityRequired=true only when matching the rendered Markdown/web version is materially part of the request.",
+    "- nativeTemplateRequired=true when a specific external/native/reference/template format should govern layout.",
+    "- docxMode=fixed_layout when DOCX output must visually match the rendered HTML/PDF; docxMode=editable when editable Word structure matters more; null when not relevant or unclear.",
+    "- If canonical parity and native template requirements conflict, prefer native_template and explain the conflict briefly in reason; the tool harness will make the final deterministic route.",
+  ].join("\n"),
   "deterministic.requiresDeterministic is true for exact arithmetic, counts, dates, time windows, averages, financial metrics, database/table analytics, or exact comparisons.",
   "fileDelivery.intent is deliver_existing only when the user asks to send/attach/deliver an existing file, not to create, read, summarize, or analyze it.",
   "planning.need:",
@@ -115,10 +151,10 @@ const REQUEST_CLASSIFIER_SYSTEM = [
     "Examples: browser interaction, file/document work, sending/uploading/delivering, web or KB research, coding/deploying, debugging by inspection, API/integration checks, data extraction/analysis, subagent dispatch, or workspace operations.",
     "Set goalProgress.requiresAction=true for explicit work orders like:",
     '- English: "Spawn 4 subagents with different SOTA LLMs, compute 1+1, cross-validate, and return the final answer as a .md file."',
-    '- Korean: "서브에이전트 4개 띄워서 각각 계산시키고 검증한 뒤 md 파일로 줘."',
+    '- Korean: "Spawn 4 subagents, have each calculate and verify, then give me an md file."',
     '- English: "Open this site, click through it like a human, and report what happens."',
-    '- Korean: "사람처럼 브라우저에서 직접 클릭하고 입력하면서 테스트해봐."',
-    '- Korean: "파일 만들어서 채팅에 첨부해줘."',
+    '- Korean: "Test it by clicking and typing directly in the browser like a human."',
+    '- Korean: "Create a file and attach it to the chat."',
     "goalProgress.requiresAction is false for pure explanation, opinion, brainstorming, or answering from supplied context without needing tool evidence.",
     "For browser, app, web UI, or human-like GUI operation requests, include browser_interaction in actionKinds so the runtime can enforce short checkpointed tool loops.",
     "actionKinds should use short semantic labels such as browser_interaction, file_delivery, file_editing, research, debugging, coding, integration_check, data_analysis, subagent_dispatch, communication, or other.",
@@ -131,6 +167,17 @@ const REQUEST_CLASSIFIER_SYSTEM = [
     "- longTermMemoryPolicy=background_only when the latest user message makes current files, selected KB, current images, or newly supplied information the basis/source of truth, but does not explicitly forbid memory.",
     "- longTermMemoryPolicy=normal when ordinary memory continuity is allowed, including when the user explicitly asks to continue an earlier topic.",
     "- currentSourcesAuthoritative=true when the latest request treats current-turn files, selected KB, current images, pasted data, or newly supplied facts as authoritative for the answer.",
+  ].join("\n"),
+  [
+    "research:",
+    "- Use semantic judgment across languages, not regex or keyword matching.",
+    "- sourceSensitive=true when the user asks for an answer containing factual claims that should be grounded in inspected external/current sources before finalizing.",
+    "- Examples of sourceSensitive=true: latest/current market facts, news, prices, releases, API documentation facts, public company/person facts, source-backed research, citation/evidence requests, or verification of external factual claims.",
+    "- sourceSensitive=false for browser/UI operation, human-like website testing, login flows, clicking/typing/scanning a provided app, coding, local file work, or workflow execution where the answer should be based on tool evidence rather than public-source citations.",
+    '- Korean false example: "Don\'t bypass via API input \u2014 test the web service in the browser like a real person." This is browser/UI operation, not source-sensitive research.',
+    '- English false example: "Open this web app and click through the onboarding like a human." This needs browser_interaction in goalProgress, not research citations.',
+    '- English true example: "Research current market sentiment and cite sources before making a conviction bet." This is source-sensitive research.',
+    "- If the request mixes UI operation and factual external research, set sourceSensitive=true only when the final answer is expected to make externally sourced factual claims.",
   ].join("\n"),
   [
     "clarification:",
@@ -171,6 +218,8 @@ const FINAL_ANSWER_CLASSIFIER_SYSTEM = [
   '  "assistantGivesUpEarly": boolean,',
   '  "assistantClaimsActionWithoutEvidence": boolean,',
   '  "assistantEndsWithUnexecutedPlan": boolean,',
+  '  "assistantNeedsMoreRuntimeWork": boolean,',
+  '  "assistantNeedsInteractiveRuntimeWork": boolean,',
   '  "assistantClaimsMemoryMutation": boolean,',
   '  "assistantReportsMemoryMutationFailure": boolean,',
   '  "sourceAuthorityViolation": boolean,',
@@ -183,8 +232,8 @@ const FINAL_ANSWER_CLASSIFIER_SYSTEM = [
   [
     "deferralPromise: answer promises to start, continue, finish, complete, send, deliver, share, or update results after this message instead of completing or plainly failing in this turn.",
     "Set deferralPromise=true for deferred-work final answers, including time promises and 'when done' promises such as:",
-    '- Korean: "지금 1-3 마무리 시작할 게. 10분 내 완성할 거야."',
-    '- Korean: "완료되면 결과 보내드리겠습니다."',
+    '- Korean: "I will start wrapping up 1-3 now. I will finish within 10 minutes."',
+    '- Korean: "I will send the results when done."',
     '- English: "I will start now and finish later."',
     '- English: "I will send the results when done."',
     "Set deferralPromise=false when the answer already provides the requested result, or plainly says the work cannot be completed now without promising future delivery.",
@@ -205,15 +254,31 @@ const FINAL_ANSWER_CLASSIFIER_SYSTEM = [
   [
     "assistantEndsWithUnexecutedPlan: answer ends the turn with a plan, procedure, next-step promise, or dispatch announcement instead of executing the next needed runtime action and returning the requested result.",
     "Use semantic judgment across languages. Set true even if some preparatory work happened, when the answer's substance is 'now I will do the real work' and no result/deliverable is returned.",
+    "Set true when the answer promises immediate tool/runtime action such as calling KnowledgeSearch, Browser, WebSearch, Bash, SpawnAgent, FileRead, or another tool, but the draft itself only announces that action and returns no tool-backed result.",
     "Set true for plan-only or dispatch-only drafts such as:",
     '- English: "I\'ll spawn 4 subagents with different SOTA LLMs to compute 1+1, then cross-validate and deliver the result as a markdown file."',
-    '- Korean: "이제 서브에이전트를 띄우겠습니다."',
-    '- Korean: "컨텍스트 파일이 준비되었습니다. 이제 낙관 파트너와 회의 파트너를 병렬 디스패치하겠습니다."',
+    '- Korean: "I will now spawn the subagents."',
+    '- Korean: "The context files are ready. I will now dispatch the optimist and meeting partners in parallel."',
     '- English: "I will start the browser review now."',
+    '- Korean: "I will call KnowledgeSearch and Browser tools right now to verify."',
     "These do not complete the turn because they announce the real work instead of returning the requested result or evidence-backed blocker.",
     "Set false when the answer includes the actual requested result, reports a hard blocker with concrete evidence, or confirms a real asynchronous handoff already scheduled by tools.",
   ].join("\n"),
   "When the user asked for concrete runtime progress and the draft only announces future work, choose true for assistantEndsWithUnexecutedPlan rather than false.",
+  [
+    "assistantNeedsMoreRuntimeWork: broader semantic detector for drafts that are not an answer yet because more runtime work still needs to happen before satisfying the user.",
+    "Set true when the answer says or implies that tools, browser actions, subagents, searches, file operations, calculations, uploads, memory edits, or other runtime actions still need to be executed after this draft.",
+    "This includes drafts like 'I will now call KnowledgeSearch and Browser', 'I'll open the browser next', 'I will now actually call the tools', or 'I will first spawn the Bull/Bear partners'.",
+    "Set false when the answer already provides the requested result, reports a concrete hard blocker based on actual evidence, or confirms a real asynchronous handoff already created by tools.",
+    "When uncertain for a concrete work request, choose true.",
+  ].join("\n"),
+  [
+    "assistantNeedsInteractiveRuntimeWork: browser/GUI-specific semantic detector.",
+    "Set true when the draft says or implies that browser, website, app, GUI, clicking, typing, login, form-filling, screen inspection, or human-like UI testing still needs to happen after this draft, or when it reports that such work is currently starting/ongoing without returning concrete observed results.",
+    "Use semantic judgment across languages, not regex or keyword matching.",
+    "Examples true: 'I will open the browser now and test the login flow', 'I will open the browser now and click through it like a human to test', 'I am attempting to access the site'.",
+    "Set false for non-interactive runtime work such as ordinary file creation, shell commands, subagent dispatch, or web research that does not require Browser/SocialBrowser-style UI evidence.",
+  ].join("\n"),
   "assistantClaimsMemoryMutation: answer claims persistent memory, Hipocampus memory, remembered facts, memory files, KB-like memory, or prior remembered content was deleted, erased, removed, redacted, forgotten, or updated to no longer contain something.",
   "assistantReportsMemoryMutationFailure: answer plainly says the requested memory deletion/redaction was not completed, the target was not found, raw deletion requires confirmation, or memory could not be modified.",
   [
@@ -224,6 +289,13 @@ const FINAL_ANSWER_CLASSIFIER_SYSTEM = [
   ].join("\n"),
   "When uncertain, choose false.",
 ].join("\n");
+
+const UNSTABLE_CLASSIFIER_REASONS = new Set([
+  "classifier unavailable",
+  "classifier failed open",
+  "classifier output was not valid JSON",
+  "no LLM context",
+]);
 
 export function hashMetaInput(...parts: readonly string[]): string {
   const hash = createHash("sha256");
@@ -295,6 +367,91 @@ function stringOrNull(value: unknown, max = 500): string | null {
   return trimmed ? trimmed.slice(0, max) : null;
 }
 
+function truncateText(value: string, max: number): string {
+  const trimmed = value.trim();
+  if (trimmed.length <= max) return trimmed;
+  return trimmed.slice(0, Math.max(0, max - 1)) + "\u2026";
+}
+
+function collectText(value: unknown, out: string[], depth = 0): void {
+  if (out.length >= 20 || depth > 4) return;
+  if (typeof value === "string") {
+    const text = value.trim();
+    if (text) out.push(text);
+    return;
+  }
+  if (Array.isArray(value)) {
+    for (const item of value) collectText(item, out, depth + 1);
+    return;
+  }
+  if (!value || typeof value !== "object") return;
+  for (const item of Object.values(value as Record<string, unknown>)) {
+    collectText(item, out, depth + 1);
+  }
+}
+
+function transcriptContextLine(
+  entry: TranscriptEntry,
+  currentTurnId: string,
+): string | null {
+  if (entry.kind === "user_message") {
+    if (entry.turnId === currentTurnId) return null;
+    return "user: " + truncateText(entry.text, REQUEST_CONTEXT_ENTRY_TEXT_LIMIT);
+  }
+  if (entry.kind === "assistant_text") {
+    if (entry.turnId === currentTurnId) return null;
+    return "assistant: " + truncateText(entry.text, REQUEST_CONTEXT_ENTRY_TEXT_LIMIT);
+  }
+  if (entry.kind === "canonical_message") {
+    const parts: string[] = [];
+    collectText(entry.content, parts);
+    const text = truncateText(parts.join("\n"), REQUEST_CONTEXT_ENTRY_TEXT_LIMIT);
+    if (!text) return null;
+    return entry.role + ": " + text;
+  }
+  if (entry.kind === "compaction_boundary") {
+    return "summary: " + truncateText(entry.summaryText, REQUEST_CONTEXT_ENTRY_TEXT_LIMIT);
+  }
+  return null;
+}
+
+function buildRequestClassifierContext(
+  ctx: HookContext,
+  currentUserMessage: string,
+): string {
+  const sections: string[] = [];
+  const task = ctx.executionContract?.snapshot().taskState;
+  if (task) {
+    const taskLines: string[] = [];
+    const current = currentUserMessage.trim();
+    if (task.goal && task.goal.trim() && task.goal.trim() !== current) {
+      taskLines.push("goal: " + truncateText(task.goal, 600));
+    }
+    if (task.currentPlan.length > 0) {
+      taskLines.push("current_plan: " + task.currentPlan.slice(-5).join(" | "));
+    }
+    if (task.blockers.length > 0) {
+      taskLines.push("blockers: " + task.blockers.slice(-3).join(" | "));
+    }
+    if (task.acceptanceCriteria.length > 0) {
+      taskLines.push("acceptance_criteria: " + task.acceptanceCriteria.slice(-5).join(" | "));
+    }
+    if (taskLines.length > 0) {
+      sections.push(["Current task state:", ...taskLines].join("\n"));
+    }
+  }
+
+  const recentLines = ctx.transcript
+    .map((entry) => transcriptContextLine(entry, ctx.turnId))
+    .filter((line): line is string => line !== null && line.trim().length > 0)
+    .slice(-REQUEST_CONTEXT_ENTRY_LIMIT);
+  if (recentLines.length > 0) {
+    sections.push(["Recent conversation context:", ...recentLines].join("\n"));
+  }
+
+  return truncateText(sections.join("\n\n"), REQUEST_CONTEXT_TEXT_LIMIT);
+}
+
 function classifierTimeoutWithinHook(maxMs: number, hookDeadlineMs: number): number {
   const finiteDeadline = Number.isFinite(hookDeadlineMs) ? Math.max(1, hookDeadlineMs) : maxMs;
   const headroom =
@@ -362,12 +519,55 @@ function clampConfidence(value: unknown): number {
   return Math.max(0, Math.min(1, n));
 }
 
+function defaultDocumentExport(
+  reason = "No document export routing requested.",
+): RequestMetaClassificationResult["documentExport"] {
+  return {
+    strategy: "none",
+    confidence: 0,
+    renderParityRequired: false,
+    nativeTemplateRequired: false,
+    docxMode: null,
+    reason,
+  };
+}
+
+function normalizeDocumentExport(
+  raw: unknown,
+): RequestMetaClassificationResult["documentExport"] {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+    return defaultDocumentExport();
+  }
+  const value = raw as Record<string, unknown>;
+  const rawStrategy = stringOrNull(value.strategy, 40);
+  const strategy = rawStrategy && VALID_DOCUMENT_EXPORT_STRATEGY_SET.has(rawStrategy)
+    ? rawStrategy as RequestMetaClassificationResult["documentExport"]["strategy"]
+    : "none";
+  if (strategy === "none") {
+    return defaultDocumentExport(stringOrNull(value.reason) ?? undefined);
+  }
+  const rawDocxMode = stringOrNull(value.docxMode, 30);
+  const docxMode =
+    rawDocxMode === "editable" || rawDocxMode === "fixed_layout"
+      ? rawDocxMode
+      : null;
+  return {
+    strategy,
+    confidence: clampConfidence(value.confidence),
+    renderParityRequired: bool(value.renderParityRequired),
+    nativeTemplateRequired: bool(value.nativeTemplateRequired),
+    docxMode,
+    reason: stringOrNull(value.reason) ?? "Document export routing classified.",
+  };
+}
+
 export function defaultRequestMeta(reason = "classifier unavailable"): RequestMetaClassificationResult {
   return {
     turnMode: { label: "other", confidence: 0.5 },
     skipTdd: false,
     implementationIntent: false,
     documentOrFileOperation: false,
+    documentExport: defaultDocumentExport(),
     deterministic: {
       requiresDeterministic: false,
       kinds: [],
@@ -396,6 +596,10 @@ export function defaultRequestMeta(reason = "classifier unavailable"): RequestMe
       longTermMemoryPolicy: "normal",
       currentSourcesAuthoritative: false,
       reason: "No source authority override required.",
+    },
+    research: {
+      sourceSensitive: false,
+      reason: "No external source verification required.",
     },
     clarification: {
       needed: false,
@@ -434,6 +638,7 @@ export function parseRequestMetaOutput(raw: string): RequestMetaClassificationRe
   const planningNeed = normalizePlanningNeed(planning.need);
   const goalProgress = objectField(parsed, "goalProgress");
   const sourceAuthority = objectField(parsed, "sourceAuthority");
+  const research = objectField(parsed, "research");
   const clarification = objectField(parsed, "clarification");
   const memoryMutation = objectField(parsed, "memoryMutation");
   const clarificationQuestion = stringOrNull(clarification.question, 500);
@@ -450,6 +655,7 @@ export function parseRequestMetaOutput(raw: string): RequestMetaClassificationRe
     skipTdd: bool(parsed.skipTdd),
     implementationIntent: bool(parsed.implementationIntent),
     documentOrFileOperation: bool(parsed.documentOrFileOperation),
+    documentExport: normalizeDocumentExport(parsed.documentExport),
     deterministic: {
       requiresDeterministic,
       kinds: requiresDeterministic && kinds.length === 0 ? ["calculation"] : kinds,
@@ -496,6 +702,14 @@ export function parseRequestMetaOutput(raw: string): RequestMetaClassificationRe
       reason:
         stringOrNull(sourceAuthority.reason) ??
         "No source authority override required.",
+    },
+    research: {
+      sourceSensitive: bool(research.sourceSensitive),
+      reason:
+        stringOrNull(research.reason) ??
+        (bool(research.sourceSensitive)
+          ? "The request requires inspected-source citations."
+          : "No external source verification required."),
     },
     clarification: {
       needed: clarificationNeeded,
@@ -546,6 +760,8 @@ export function defaultFinalAnswerMeta(
     assistantGivesUpEarly: false,
     assistantClaimsActionWithoutEvidence: false,
     assistantEndsWithUnexecutedPlan: false,
+    assistantNeedsMoreRuntimeWork: false,
+    assistantNeedsInteractiveRuntimeWork: false,
     assistantClaimsMemoryMutation: false,
     assistantReportsMemoryMutationFailure: false,
     sourceAuthorityViolation: false,
@@ -569,11 +785,28 @@ export function parseFinalAnswerMetaOutput(raw: string): FinalAnswerMetaClassifi
     assistantGivesUpEarly: bool(parsed.assistantGivesUpEarly),
     assistantClaimsActionWithoutEvidence: bool(parsed.assistantClaimsActionWithoutEvidence),
     assistantEndsWithUnexecutedPlan: bool(parsed.assistantEndsWithUnexecutedPlan),
+    assistantNeedsMoreRuntimeWork: bool(parsed.assistantNeedsMoreRuntimeWork),
+    assistantNeedsInteractiveRuntimeWork: bool(parsed.assistantNeedsInteractiveRuntimeWork),
     assistantClaimsMemoryMutation: bool(parsed.assistantClaimsMemoryMutation),
     assistantReportsMemoryMutationFailure: bool(parsed.assistantReportsMemoryMutationFailure),
     sourceAuthorityViolation: bool(parsed.sourceAuthorityViolation),
     reason: stringOrNull(parsed.reason) ?? "classified final answer metadata.",
   };
+}
+
+function isUnstableClassifierReason(reason: string): boolean {
+  return UNSTABLE_CLASSIFIER_REASONS.has(reason);
+}
+
+function shouldCacheRequestMeta(result: RequestMetaClassificationResult): boolean {
+  return !(
+    isUnstableClassifierReason(result.goalProgress.reason) ||
+    isUnstableClassifierReason(result.deterministic.reason)
+  );
+}
+
+function shouldCacheFinalAnswerMeta(result: FinalAnswerMetaClassificationResult): boolean {
+  return !isUnstableClassifierReason(result.reason);
 }
 
 async function streamClassifier(input: {
@@ -632,6 +865,7 @@ export async function classifyRequestMeta(input: {
   llm: LLMClient;
   model: string;
   userMessage: string;
+  contextText?: string;
   timeoutMs?: number;
   signal?: AbortSignal;
 }): Promise<RequestMetaClassificationResult> {
@@ -642,13 +876,22 @@ export async function classifyRequestMeta(input: {
       model: input.model,
       system: REQUEST_CLASSIFIER_SYSTEM,
       userText: [
-        "Classify this user request:",
+        "Classify this user request in context:",
+        "",
+        ...(input.contextText?.trim()
+          ? [
+              "Relevant context:",
+              input.contextText.slice(0, REQUEST_CONTEXT_TEXT_LIMIT),
+              "",
+            ]
+          : []),
+        "Current user request:",
         "",
         input.userMessage.slice(0, 4_000),
         "",
         "Return strict JSON only.",
       ].join("\n"),
-      maxTokens: 900,
+      maxTokens: 1_050,
       timeoutMs: input.timeoutMs ?? REQUEST_CLASSIFIER_TIMEOUT_MS,
       signal: input.signal,
     });
@@ -703,24 +946,43 @@ export async function getOrClassifyRequestMeta(
   ctx: HookContext,
   input: { userMessage: string },
 ): Promise<RequestMetaClassificationResult> {
-  const inputHash = hashMetaInput(input.userMessage);
+  const contextText = buildRequestClassifierContext(ctx, input.userMessage);
+  const inputHash = contextText
+    ? hashMetaInput(input.userMessage, contextText)
+    : hashMetaInput(input.userMessage);
   const cached = ctx.executionContract?.getRequestMetaClassification(ctx.turnId, inputHash);
   if (cached) return cached;
   if (!ctx.llm) return defaultRequestMeta("no LLM context");
+
+  // P3: deterministic mode -- keyword/regex classifier, no LLM
+  if (process.env.MAGI_DETERMINISTIC_META === "1") {
+    const { classifyRequestMetaDeterministic } = await import("./deterministicMetaClassifier.js");
+    const result = classifyRequestMetaDeterministic(input.userMessage);
+    ctx.executionContract?.recordRequestMetaClassification({
+      turnId: ctx.turnId,
+      inputHash,
+      source: "deterministic" as MetaClassificationSource,
+      result,
+    });
+    return result;
+  }
 
   const result = await classifyRequestMeta({
     llm: ctx.llm,
     model: ctx.agentModel,
     userMessage: input.userMessage,
+    contextText,
     timeoutMs: classifierTimeoutWithinHook(REQUEST_CLASSIFIER_TIMEOUT_MS, ctx.deadlineMs),
     signal: ctx.abortSignal,
   });
-  ctx.executionContract?.recordRequestMetaClassification({
-    turnId: ctx.turnId,
-    inputHash,
-    source: "llm_classifier",
-    result,
-  });
+  if (shouldCacheRequestMeta(result)) {
+    ctx.executionContract?.recordRequestMetaClassification({
+      turnId: ctx.turnId,
+      inputHash,
+      source: "llm_classifier",
+      result,
+    });
+  }
   return result;
 }
 
@@ -757,11 +1019,13 @@ export async function getOrClassifyFinalAnswerMeta(
     timeoutMs: classifierTimeoutWithinHook(FINAL_CLASSIFIER_TIMEOUT_MS, ctx.deadlineMs),
     signal: ctx.abortSignal,
   });
-  ctx.executionContract?.recordFinalAnswerClassification({
-    turnId: ctx.turnId,
-    inputHash,
-    source: "llm_classifier",
-    result,
-  });
+  if (shouldCacheFinalAnswerMeta(result)) {
+    ctx.executionContract?.recordFinalAnswerClassification({
+      turnId: ctx.turnId,
+      inputHash,
+      source: "llm_classifier",
+      result,
+    });
+  }
   return result;
 }

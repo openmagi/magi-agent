@@ -47,6 +47,7 @@ const actionRequestMeta = {
   skipTdd: false,
   implementationIntent: false,
   documentOrFileOperation: false,
+  documentExport: { strategy: "none", confidence: 0, renderParityRequired: false, nativeTemplateRequired: false, docxMode: null, reason: "No document export routing requested." },
   deterministic: {
     requiresDeterministic: false,
     kinds: [],
@@ -89,6 +90,8 @@ const earlyGiveUpMeta = {
   assistantReportsDeliveryUnverified: false,
   assistantGivesUpEarly: true,
   assistantClaimsActionWithoutEvidence: false,
+  assistantEndsWithUnexecutedPlan: false,
+  assistantNeedsMoreRuntimeWork: false,
   reason: "The draft asks the user to choose after one failed click.",
 };
 
@@ -99,12 +102,30 @@ const actionClaimMeta = {
   reason: "The draft claims debugging happened.",
 };
 
+const neutralFinalMeta = {
+  ...earlyGiveUpMeta,
+  assistantGivesUpEarly: false,
+  assistantClaimsActionWithoutEvidence: false,
+  assistantEndsWithUnexecutedPlan: false,
+  assistantNeedsMoreRuntimeWork: false,
+  reason: "The draft does not claim runtime action.",
+};
+
 const planOnlyMeta = {
   ...earlyGiveUpMeta,
   assistantGivesUpEarly: false,
   assistantClaimsActionWithoutEvidence: false,
   assistantEndsWithUnexecutedPlan: true,
   reason: "The draft only says it will start the subagents instead of returning results.",
+};
+
+const runtimeWorkStillNeededMeta = {
+  ...earlyGiveUpMeta,
+  assistantGivesUpEarly: false,
+  assistantClaimsActionWithoutEvidence: false,
+  assistantEndsWithUnexecutedPlan: false,
+  assistantNeedsMoreRuntimeWork: true,
+  reason: "The draft says it will now call KnowledgeSearch and Browser before it can answer.",
 };
 
 describe("goalProgressGate helpers", () => {
@@ -291,6 +312,52 @@ describe("goalProgressGate hook", () => {
     expect(result?.reason).toContain("[RETRY:GOAL_PROGRESS_EXECUTE_NEXT]");
   });
 
+  it("blocks immediate tool-action promises even when the latest user message is only a status follow-up", async () => {
+    const hook = makeGoalProgressGateHook();
+    const ctx = makeCtx({
+      transcript: [],
+      llm: mockLlm([noActionRequestMeta, planOnlyMeta]),
+    });
+
+    const result = await hook.handler(
+      {
+        assistantText:
+          "아니요, 아직 하지 못했습니다. 지금 당장 KnowledgeSearch와 Browser 도구를 호출하여 지침과 접속 상태를 확인하겠습니다.",
+        toolCallCount: 0,
+        toolReadHappened: false,
+        userMessage: "했음?",
+        retryCount: 0,
+      },
+      ctx,
+    );
+
+    expect(result?.action).toBe("block");
+    expect(result?.reason).toContain("[RETRY:GOAL_PROGRESS_EXECUTE_NEXT]");
+  });
+
+  it("blocks drafts classified as still needing runtime work even without narrower plan-only flags", async () => {
+    const hook = makeGoalProgressGateHook();
+    const ctx = makeCtx({
+      transcript: [],
+      llm: mockLlm([noActionRequestMeta, runtimeWorkStillNeededMeta]),
+    });
+
+    const result = await hook.handler(
+      {
+        assistantText:
+          "이번에는 KnowledgeSearch와 Browser 도구를 실제로 호출해서 확인하겠습니다.",
+        toolCallCount: 0,
+        toolReadHappened: false,
+        userMessage: "이번엔 정말 했어?",
+        retryCount: 0,
+      },
+      ctx,
+    );
+
+    expect(result?.action).toBe("block");
+    expect(result?.reason).toContain("[RETRY:GOAL_PROGRESS_EXECUTE_NEXT]");
+  });
+
   it("blocks subagent work orders that only announce dispatch without any tool progress", async () => {
     const hook = makeGoalProgressGateHook();
     const ctx = makeCtx({
@@ -306,6 +373,7 @@ describe("goalProgressGate hook", () => {
             acceptanceCriteria: ["Compute 1+1 with deterministic evidence."],
           },
           documentOrFileOperation: true,
+          documentExport: { strategy: "none", confidence: 0, renderParityRequired: false, nativeTemplateRequired: false, docxMode: null, reason: "No document export routing requested." },
           planning: {
             need: "task_board",
             reason: "The user asked for coordinated subagent work and a file deliverable.",
@@ -338,7 +406,7 @@ describe("goalProgressGate hook", () => {
     expect(result?.reason).toContain("[RETRY:GOAL_PROGRESS_EXECUTE_NEXT]");
   });
 
-  it("hard-blocks repeated plan-only endings after the retry budget is exhausted", async () => {
+  it("keeps repeated plan-only endings retryable so the turn controller can keep steering tool use", async () => {
     const hook = makeGoalProgressGateHook();
     const ctx = makeCtx({
       transcript: [
@@ -373,15 +441,15 @@ describe("goalProgressGate hook", () => {
     );
 
     expect(result?.action).toBe("block");
-    expect(result?.reason).toContain("[RULE:GOAL_PROGRESS_EXECUTE_NEXT]");
-    expect(result?.reason).not.toContain("[RETRY:");
+    expect(result?.reason).toContain("[RETRY:GOAL_PROGRESS_EXECUTE_NEXT]");
+    expect(result?.reason).not.toContain("[RULE:");
   });
 
   it("does not block conversational requests", async () => {
     const hook = makeGoalProgressGateHook();
     const ctx = makeCtx({
       transcript: [],
-      llm: mockLlm([noActionRequestMeta, actionClaimMeta]),
+      llm: mockLlm([noActionRequestMeta, neutralFinalMeta]),
     });
 
     const result = await hook.handler(
