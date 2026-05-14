@@ -35,6 +35,11 @@ export class ToolRegistry implements IToolRegistry {
     this.tools.set(tool.name, tool);
   }
 
+  /** Remove a tool by name. Returns true if it existed. */
+  unregister(name: string): boolean {
+    return this.tools.delete(name);
+  }
+
   /** Replace an existing registration — used during skill hot-reload. */
   replace(tool: Tool): void {
     this.tools.set(tool.name, tool);

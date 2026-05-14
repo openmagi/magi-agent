@@ -10,7 +10,8 @@ export type CliCommand =
       sessionKey?: string;
       model?: string;
       planMode?: boolean;
-    };
+    }
+  | { command: "tool"; args: string[] };
 
 export class CliUsageError extends Error {
   readonly exitCode = 1;
@@ -119,6 +120,8 @@ export function parseCliArgs(args: string[]): CliCommand {
       return parseServeArgs(rest);
     case "run":
       return parseRunArgs(rest);
+    case "tool":
+      return { command: "tool", args: rest };
     default:
       throw new CliUsageError(`Unknown command: "${command}".`);
   }

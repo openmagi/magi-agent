@@ -1,0 +1,9 @@
+# CodeMetrics — basic test fixture
+#
+# Run with: magi tool test CodeMetrics
+
+description: "Analyze a TypeScript file"
+input:
+  filePath: "package.json"
+expected:
+  status: "ok"

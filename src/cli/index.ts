@@ -33,6 +33,7 @@ ${BOLD}Commands:${RESET}
   chat               Start the agent in interactive terminal mode
   start              Alias for chat
   run [prompt]       Run one prompt and print the streamed result
+  tool <subcommand>  Manage custom tools (create, list, enable, disable, test, logs)
   serve [--port N]   Start the HTTP API server (default port: 8080)
   version            Print version
 
@@ -94,6 +95,12 @@ async function main(): Promise<void> {
     case "serve": {
       const { runServe } = await import("./serve.js");
       await runServe(parsed.port);
+      break;
+    }
+
+    case "tool": {
+      const { runToolCommand } = await import("./commands/tool.js");
+      await runToolCommand(parsed.args);
       break;
     }
 

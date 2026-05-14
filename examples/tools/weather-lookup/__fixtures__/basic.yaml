@@ -1,0 +1,10 @@
+# WeatherLookup — basic test fixture
+#
+# Run with: magi tool test WeatherLookup
+
+description: "Fetch weather for Seoul"
+input:
+  city: "Seoul"
+  units: "metric"
+expected:
+  status: "ok"
