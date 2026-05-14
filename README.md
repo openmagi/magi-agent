@@ -20,6 +20,79 @@ This is fine when you're watching. You catch the mistake and try again. But when
 
 **Magi solves this by turning your rules into runtime enforcement.** You write a hook that says "block any response that cites a file the agent didn't read." The runtime runs it. The agent literally cannot ship that response. Not because you asked nicely — because the code won't let it.
 
+## Four layers of control
+
+Prompts are a single point of control that the model can ignore. Magi enforces rules across four independent layers — each one programmable, each one customizable.
+
+### Layer 1: Classifier
+
+A fast LLM call (Haiku-class) classifies every turn at two phases — request and final answer. It detects intent, deferral patterns, completion claims, deterministic requirements (dates, calculations, data queries), and planning needs. The result is cached for the turn so all hooks share one classification — no duplicate calls.
+
+You add custom classifier dimensions in YAML. They run inside the same classification pass alongside the built-in dimensions:
+
+```yaml
+# magi.config.yaml
+classifier:
+  custom_dimensions:
+    medical_safety:
+      phase: "request"
+      prompt: "Does this involve drug dosage or medical treatment recommendations?"
+      output_schema:
+        containsDosage: boolean
+        containsTreatmentAdvice: boolean
+```
+
+### Layer 2: Hooks
+
+74 hooks run at every lifecycle point: `beforeLLMCall`, `beforeToolUse`, `afterToolUse`, `beforeCommit`, `afterResponse`, `onSessionStart`, `onTurnEnd`. Blocking hooks reject output and force a retry with a corrective message. After retries exhaust, the system fails open — the agent never gets stuck.
+
+You write your own hooks with the same `RegisteredHook` interface. No adapters, no wrappers:
+
+```bash
+magi hook create my-compliance-check --point beforeCommit
+```
+
+```typescript
+const hook: Hook = {
+  name: "my-compliance-check",
+  point: "beforeCommit",
+  priority: 100,
+
+  async execute(ctx: HookContext): Promise<HookResult> {
+    const response = ctx.pendingResponse;
+
+    if (response.includes("guaranteed returns")) {
+      return {
+        action: "block",
+        reason: "Response contains prohibited financial guarantee language",
+      };
+    }
+
+    return { action: "pass" };
+  },
+};
+```
+
+```bash
+magi hook test my-compliance-check --input "This stock has guaranteed returns of 50%"
+```
+
+### Layer 3: Policy engine
+
+The **PolicyKernel** compiles your rules — from `USER-RULES.md`, `harness-rules/*.md`, and dashboard safeguards — into typed `HarnessRule` objects. The **ExecutionContract** tracks what happened during the turn: which tools ran, which files were read, which claims were made, what evidence was produced.
+
+Hooks use this state to make decisions. A completion-evidence gate checks whether the agent produced the artifacts it claims to have produced. A resource-boundary gate checks whether tool calls stayed within declared scope. The policy engine gives hooks structured facts instead of requiring each hook to parse raw transcripts.
+
+Rules that can't be compiled into typed objects fall back to prompt-level injection — shown as "prompt rules" in the dashboard. Typed rules are enforced deterministically by hooks.
+
+### Layer 4: Meta-agent
+
+The main agent operates as a meta-thinker: it plans, verifies, and steers. Actual execution — file operations, searches, code changes, document generation — is delegated to sub-agents via `SpawnAgent`.
+
+The controller never generates the output it verifies. This structural separation is more reliable than self-policing via prompt, where the same model that produced a claim also judges whether the claim is accurate.
+
+Sub-agents run with their own tool sets and resource bindings. The parent agent inspects their results, decides whether to accept or retry, and assembles the final output. Verification hooks then run on that final output before it commits.
+
 ## Quick Start
 
 ### Docker (recommended)
@@ -56,71 +129,7 @@ npx tsx src/cli/index.ts serve --port 8080                  # browser app + API
 | `magi-agent run --model name "task"` | Override model for one task |
 | `magi-agent serve --port 8080` | Self-hosted app and HTTP API |
 
-## Write your rules
-
-### Hooks — rules the agent can't skip
-
-Hooks are TypeScript functions that run at lifecycle points: before a tool call, before a response commits, after a response, on session start. They use the same `RegisteredHook` interface as built-in hooks. No adapters. No wrappers. Full access.
-
-```bash
-magi hook create my-compliance-check --point beforeCommit
-```
-
-```typescript
-// hooks/my-compliance-check/index.ts
-const hook: Hook = {
-  name: "my-compliance-check",
-  point: "beforeCommit",
-  priority: 100,
-
-  async execute(ctx: HookContext): Promise<HookResult> {
-    const response = ctx.pendingResponse;
-
-    if (response.includes("guaranteed returns")) {
-      return {
-        action: "block",
-        reason: "Response contains prohibited financial guarantee language",
-      };
-    }
-
-    return { action: "pass" };
-  },
-};
-```
-
-When this hook blocks, the runtime tells the agent what went wrong and lets it retry with corrected output. After retries exhaust, it delivers the best available response. The agent never gets stuck. But it also can't skip your rule.
-
-```bash
-magi hook test my-compliance-check --input "This stock has guaranteed returns of 50%"
-```
-
-### Classifiers — domain checks in YAML, zero extra LLM calls
-
-Add domain-specific classifier dimensions without writing code. They run inside the existing classification pass — no additional API calls.
-
-```yaml
-# magi.config.yaml
-classifier:
-  custom_dimensions:
-    medical_safety:
-      phase: "request"
-      prompt: "Does this involve drug dosage or medical treatment recommendations?"
-      output_schema:
-        containsDosage: boolean
-        containsTreatmentAdvice: boolean
-```
-
-Then use results in your hooks:
-
-```typescript
-async execute(ctx: HookContext): Promise<HookResult> {
-  const { containsDosage } = ctx.classifierResult.medical_safety;
-  if (containsDosage) {
-    return { action: "inject", content: "Verify all dosage information against official sources." };
-  }
-  return { action: "pass" };
-}
-```
+## Customize everything
 
 ### Natural language rules
 
@@ -133,7 +142,7 @@ magi hook create-from-rule "Require source verification for any numerical claim"
 
 ### Disable and override built-ins
 
-Magi ships with 60+ built-in hooks. Disable any that don't fit your domain:
+Magi ships with 74 built-in hooks. Disable any that don't fit your domain:
 
 ```yaml
 # magi.config.yaml
@@ -148,7 +157,7 @@ hooks:
 
 You control what runs. Not us.
 
-## Custom tools
+### Custom tools
 
 Tools use the same `Tool<I, O>` interface as built-ins. First-class, not plugin wrappers.
 
@@ -172,7 +181,7 @@ const tool: Tool<MedicalLookupInput, MedicalLookupOutput> = {
 
 ## Any model
 
-Run with any provider or local model. The hook and classifier system works the same regardless of which model generates the draft.
+Run with any provider or local model. The four control layers work the same regardless of which model generates the draft.
 
 ```bash
 # Hosted
@@ -192,12 +201,15 @@ Works with Ollama, LM Studio, vLLM, llama.cpp, LiteLLM, or any OpenAI-compatible
 
 ```
 User message
-  → requestClassifier (+ your custom dimensions)
+  → Classifier (LLM + rule-based hybrid, + your custom dimensions)
   → onSessionStart / onTurnStart
+  → Meta-agent plans and delegates to sub-agents
   → beforeToolCall          ← your safety gates
   → [tool execution]
   → afterToolCall           ← your audit logging
+  → Sub-agent results inspected by meta-agent
   → beforeCommit            ← your quality gates
+  → PolicyKernel evaluates harness rules
   → blocked? → retry with corrective message
   → passed? → commit to transcript, deliver to user
   → afterResponse           ← your compliance checks
@@ -207,8 +219,8 @@ User message
 
 | Band | Range | Purpose |
 | --- | --- | --- |
-| Critical | 0-49 | Security, safety blocks |
-| High | 50-99 | Compliance, regulatory checks |
+| Critical | 0-49 | Security, safety, identity, classification |
+| High | 50-99 | Compliance, verification, evidence gates |
 | Normal | 100-199 | Domain logic, custom gates |
 | Low | 200-299 | Logging, telemetry |
 | Passive | 300+ | Non-blocking observation |
@@ -226,9 +238,9 @@ User message
 
 ## What's built in
 
-**Runtime:** evidence contracts, deterministic tools (Clock, DateRange, Calculation), scheduled delivery safety, child agent spawning, Hipocampus memory.
+**Runtime:** evidence contracts, deterministic tools (Clock, DateRange, Calculation), scheduled delivery safety, child agent spawning, Hipocampus memory, execution contracts with resource bindings.
 
-**60+ hooks:** security gates, grounding verification, completion evidence, deferral blocking, fact-checking, and operational defaults — all overridable.
+**74 hooks:** classifier, identity injection, security gates, grounding verification, completion evidence, deferral blocking, fact-checking, coding verification, citation gates, user harness rules — all overridable.
 
 **60+ tools:** file operations, search, code analysis, knowledge base, artifacts, browser.
 
