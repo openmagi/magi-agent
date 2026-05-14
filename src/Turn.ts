@@ -12,7 +12,7 @@ import type { SseWriter } from "./transport/SseWriter.js";
 import type { LLMContentBlock, LLMMessage, LLMToolDef, LLMUsage } from "./transport/LLMClient.js";
 import type { AskUserQuestionOutput } from "./Tool.js";
 import type { HookPoint } from "./hooks/types.js";
-import { computeUsd } from "./llm/modelCapabilities.js";
+import { computeUsd, getContextWindowOrDefault } from "./llm/modelCapabilities.js";
 import {
   appendRuntimeModelIdentityContext,
   applyPriorityContextToSystemPrompt,
@@ -48,6 +48,8 @@ import { sanitizeMessagesForLLM } from "./turn/MessageSanitizer.js";
 import { detectPollingIteration } from "./turn/pollingDetector.js";
 import { isResearchProofBlockReason } from "./turn/ResearchProofFailureNotice.js";
 import { buildResearchProofFallback } from "./turn/ResearchProofFinalizer.js";
+import { compactMessagesInline, estimateMessageTokens } from "./turn/InlineCompactor.js";
+import { isContextOverflowError } from "./turn/ContextOverflowError.js";
 import { createLogger } from "./util/logger.js";
 
 const turnLogger = createLogger("Turn");
@@ -252,6 +254,8 @@ export class Turn {
   private emptyResponseFallbackUsed = false;
   private streamRetry = 0;
   static readonly MAX_STREAM_RETRIES = 1;
+  /** Layer 3 — overflow recovery attempt counter (max 1 retry). */
+  private overflowRecoveryAttempt = 0;
   /** Runtime model resolved once at turn start. */
   private runtimeModel: string | null = null;
   /** Explicit per-turn model override from chat clients. */
@@ -518,6 +522,20 @@ export class Turn {
           effectiveModel,
           ...(this.meta.routeDecision ? { routeDecision: this.meta.routeDecision } : {}),
         });
+        // Layer 2 — Pre-LLM inline compaction when approaching context limit.
+        if (process.env.MAGI_INLINE_COMPACTION !== "0") {
+          const threshold = parseFloat(process.env.MAGI_INLINE_COMPACTION_THRESHOLD ?? "0.80");
+          const contextWindow = getContextWindowOrDefault(effectiveModel);
+          const estTokens = estimateMessageTokens(messages);
+          if (estTokens > contextWindow * threshold) {
+            const target = Math.floor(contextWindow * 0.65);
+            const before = estTokens;
+            messages = compactMessagesInline(messages, target);
+            this.stageAuditEvent("inline_compaction", {
+              before, after: estimateMessageTokens(messages), target, contextWindow,
+            });
+          }
+        }
         const payloadSize = JSON.stringify(messages).length + JSON.stringify(systemPrompt).length;
         turnLogger.info("parent_llm_start", {
           iter, payloadSize,
@@ -554,6 +572,35 @@ export class Turn {
             this.clearUserVisibleDraftForSteerResume(sse, err.source);
             iter -= 1;
             continue;
+          }
+          // Layer 3 — Context overflow recovery: compact and retry once.
+          if (
+            process.env.MAGI_OVERFLOW_RECOVERY !== "0" &&
+            err instanceof Error &&
+            this.overflowRecoveryAttempt < 1
+          ) {
+            const errMsg = err.message;
+            const codeMatch = errMsg.match(/^(http_\d+):/);
+            const code = codeMatch?.[1] ?? "";
+            if (isContextOverflowError(code, errMsg)) {
+              this.overflowRecoveryAttempt++;
+              const contextWindow = getContextWindowOrDefault(effectiveModel);
+              const target = Math.floor(contextWindow * 0.50);
+              messages = compactMessagesInline(messages, target);
+              this.stageAuditEvent("overflow_recovery", {
+                code,
+                target,
+                contextWindow,
+                attempt: this.overflowRecoveryAttempt,
+              });
+              turnLogger.warn("overflow_recovery", {
+                turnId: this.meta.turnId,
+                code,
+                attempt: this.overflowRecoveryAttempt,
+              });
+              iter -= 1;
+              continue;
+            }
           }
           if (
             isRetryableLlmStreamError(err) &&
