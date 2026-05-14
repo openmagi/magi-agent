@@ -37,6 +37,7 @@ function llmThatAnswers(
             skipTdd: false,
             implementationIntent: answer === "YES",
             documentOrFileOperation: false,
+            documentExport: { strategy: "none", confidence: 0, renderParityRequired: false, nativeTemplateRequired: false, docxMode: null, reason: "No document export routing requested." },
             deterministic: {
               requiresDeterministic: false,
               kinds: [],

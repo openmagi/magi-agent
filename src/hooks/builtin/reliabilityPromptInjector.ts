@@ -36,9 +36,11 @@ const SUBSTANTIAL_ANALYSIS_RE =
   /(?:\b(?:analy[sz]e|compare|audit|review|strategy|plan|investigate|research|assess|evaluate)\b|분석|비교|감사|검토|전략|계획|조사|평가)/i;
 const COMPLETION_WORK_RE =
   /(?:\b(?:done|fixed|passing|verified|deployed|complete)\b|완료|고쳤|통과|검증|배포)/i;
+const BROAD_RESEARCH_ORCHESTRATION_RE =
+  /(?:\b(?:broad|deep|multi[-\s]?source|multi[-\s]?step|long[-\s]?running|parallel|independent\s+subquestions?)\b.{0,80}\b(?:research|investigat|source|synthesi[sz]e)\b|\b(?:research|investigat|source|synthesi[sz]e)\b.{0,80}\b(?:broad|deep|multi[-\s]?source|multi[-\s]?step|long[-\s]?running|parallel|independent\s+subquestions?)\b|딥\s*리서치|심층\s*(?:조사|리서치)|병렬.{0,40}(?:조사|리서치)|(?:조사|리서치).{0,40}병렬|복수.{0,20}출처|여러.{0,20}출처)/i;
 
 export function isReliabilityPromptEnabled(): boolean {
-  const raw = process.env.CORE_AGENT_RELIABILITY_PROMPT;
+  const raw = process.env.MAGI_RELIABILITY_PROMPT;
   if (raw === undefined || raw === null) return true;
   const v = raw.trim().toLowerCase();
   return v === "" || v === "on" || v === "true" || v === "1";
@@ -59,6 +61,15 @@ export function buildReliabilityPolicyBlock(userText: string): string {
       "- Use evidence-router: choose current sources, native WebSearch/web-search, KB search, file reads, or document extraction before factual claims.",
       "- For public web/current/recent/source-sensitive questions, call native WebSearch/web-search first; do not test raw internet availability with curl as a substitute.",
       "- Cite or name the evidence source when the user needs accuracy, freshness, legal, financial, or operational facts.",
+      "- Use research-proof-contract: decompose the answer into public claims, evidence, warrant, and limits before finalizing; do not expose private chain-of-thought.",
+      "- Every important conclusion should have an inspected-source citation plus a concise public reason showing how the evidence supports it; unresolved contradictions must be named instead of smoothed over.",
+    );
+  }
+  if (BROAD_RESEARCH_ORCHESTRATION_RE.test(text)) {
+    lines.push(
+      "- Use research-orchestration: for broad or parallel research, split the request into independent source-facing work units and use SpawnAgent with the builtin research or scout persona for at least two units when available.",
+      "- For in-turn synthesis use deliver:\"return\"; for genuinely long-running research use deliver:\"background\". Keep completion_contract.required_evidence:\"tool_call\" so child findings require real tool evidence.",
+      "- Inspect child results before synthesis, deduplicating inspected sources and child evidence; cite source ids or URLs and preserve unresolved uncertainty.",
     );
   }
   if (SELF_MODEL_RE.test(text)) {

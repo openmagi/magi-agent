@@ -30,7 +30,7 @@ export interface GoalProgressGateOptions {
 }
 
 function isEnabled(): boolean {
-  const raw = process.env.CORE_AGENT_GOAL_PROGRESS_GATE;
+  const raw = process.env.MAGI_GOAL_PROGRESS_GATE;
   if (raw === undefined || raw === null) return true;
   const v = raw.trim().toLowerCase();
   return v === "" || v === "on" || v === "true" || v === "1";
@@ -117,18 +117,24 @@ export function makeGoalProgressGateHook(
         }
 
         const requestMeta = await getOrClassifyRequestMeta(ctx, { userMessage });
-        if (!requestMeta.goalProgress.requiresAction) {
-          return { action: "continue" };
-        }
-
+        const requestRequiresAction = requestMeta.goalProgress.requiresAction;
         const finalMeta = await getOrClassifyFinalAnswerMeta(ctx, {
           userMessage,
           assistantText,
         });
+        const finalRequiresEvidence =
+          finalMeta.assistantClaimsActionWithoutEvidence ||
+          finalMeta.assistantEndsWithUnexecutedPlan ||
+          finalMeta.assistantNeedsMoreRuntimeWork ||
+          (requestRequiresAction && finalMeta.assistantGivesUpEarly);
+        if (!requestRequiresAction && !finalRequiresEvidence) {
+          return { action: "continue" };
+        }
         if (
           !finalMeta.assistantGivesUpEarly &&
           !finalMeta.assistantClaimsActionWithoutEvidence &&
-          !finalMeta.assistantEndsWithUnexecutedPlan
+          !finalMeta.assistantEndsWithUnexecutedPlan &&
+          !finalMeta.assistantNeedsMoreRuntimeWork
         ) {
           return { action: "continue" };
         }
@@ -161,31 +167,30 @@ export function makeGoalProgressGateHook(
           };
         }
 
-        if (finalMeta.assistantEndsWithUnexecutedPlan) {
-          const retryExhausted = retryCount >= MAX_RETRIES;
+        if (
+          finalMeta.assistantEndsWithUnexecutedPlan ||
+          finalMeta.assistantNeedsMoreRuntimeWork
+        ) {
           ctx.log("warn", "[goal-progress-gate] blocking plan-only turn ending", {
             toolCalls,
             failedResults,
             successfulResults,
             retryCount,
-            retryExhausted,
             reason: finalMeta.reason,
           });
           ctx.emit({
             type: "rule_check",
             ruleId: "goal-progress-gate",
             verdict: "violation",
-            detail: `plan-only ending; retryExhausted=${retryExhausted} toolCalls=${toolCalls} failedResults=${failedResults} successfulResults=${successfulResults}`,
+            detail: `runtime work still needed; toolCalls=${toolCalls} failedResults=${failedResults} successfulResults=${successfulResults}`,
           });
           return {
             action: "block",
             reason: [
-              retryExhausted
-                ? "[RULE:GOAL_PROGRESS_EXECUTE_NEXT]"
-                : "[RETRY:GOAL_PROGRESS_EXECUTE_NEXT]",
+              "[RETRY:GOAL_PROGRESS_EXECUTE_NEXT]",
               "The user asked for concrete goal progress, and the draft ends",
-              "with a plan, next-step promise, or dispatch announcement instead",
-              "of executing the next needed action and returning the result.",
+              "with more runtime work still needed instead of executing the next",
+              "needed action and returning the result.",
               "Do not end the turn at the planning boundary. Continue now:",
               "- Call the next required tool/subagent/action in this turn.",
               "- Use the resulting evidence to synthesize the requested output.",

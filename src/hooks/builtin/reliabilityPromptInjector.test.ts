@@ -27,17 +27,17 @@ function userMessage(text: string): LLMMessage[] {
 }
 
 describe("reliabilityPromptInjector", () => {
-  const originalEnv = process.env.CORE_AGENT_RELIABILITY_PROMPT;
+  const originalEnv = process.env.MAGI_RELIABILITY_PROMPT;
 
   beforeEach(() => {
-    delete process.env.CORE_AGENT_RELIABILITY_PROMPT;
+    delete process.env.MAGI_RELIABILITY_PROMPT;
   });
 
   afterEach(() => {
     if (originalEnv === undefined) {
-      delete process.env.CORE_AGENT_RELIABILITY_PROMPT;
+      delete process.env.MAGI_RELIABILITY_PROMPT;
     } else {
-      process.env.CORE_AGENT_RELIABILITY_PROMPT = originalEnv;
+      process.env.MAGI_RELIABILITY_PROMPT = originalEnv;
     }
   });
 
@@ -154,8 +154,8 @@ describe("reliabilityPromptInjector", () => {
     }
   });
 
-  it("respects CORE_AGENT_RELIABILITY_PROMPT=off", async () => {
-    process.env.CORE_AGENT_RELIABILITY_PROMPT = "off";
+  it("respects MAGI_RELIABILITY_PROMPT=off", async () => {
+    process.env.MAGI_RELIABILITY_PROMPT = "off";
     const hook = makeReliabilityPromptInjectorHook();
     const result = await hook.handler(
       {

@@ -35,6 +35,7 @@ function makeCtx(transcript: TranscriptEntry[] = [], meta: MetaOptions = {}): Ho
                   skipTdd: false,
                   implementationIntent: false,
                   documentOrFileOperation: meta.wantsFile ?? false,
+                  documentExport: { strategy: "none", confidence: 0, renderParityRequired: false, nativeTemplateRequired: false, docxMode: null, reason: "No document export routing requested." },
                   deterministic: {
                     requiresDeterministic: false,
                     kinds: [],

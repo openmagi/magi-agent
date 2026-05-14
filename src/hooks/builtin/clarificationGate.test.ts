@@ -26,6 +26,7 @@ function requestMeta(overrides: Record<string, unknown> = {}) {
     skipTdd: false,
     implementationIntent: false,
     documentOrFileOperation: true,
+    documentExport: { strategy: "none", confidence: 0, renderParityRequired: false, nativeTemplateRequired: false, docxMode: null, reason: "No document export routing requested." },
     deterministic: {
       requiresDeterministic: false,
       kinds: [],
@@ -110,6 +111,7 @@ describe("clarificationGate", () => {
             reason: "Simple question.",
           },
           documentOrFileOperation: false,
+          documentExport: { strategy: "none", confidence: 0, renderParityRequired: false, nativeTemplateRequired: false, docxMode: null, reason: "No document export routing requested." },
           fileDelivery: {
             intent: "none",
             path: null,

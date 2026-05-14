@@ -1058,9 +1058,9 @@ describe("ChildAgentLoop — loop semantics", () => {
     expect(system).toContain("Do not operate as a meta-layer orchestrator");
   });
 
-  it("respects CORE_AGENT_RELIABILITY_PROMPT=off for child reliability prompts", async () => {
-    const original = process.env.CORE_AGENT_RELIABILITY_PROMPT;
-    process.env.CORE_AGENT_RELIABILITY_PROMPT = "off";
+  it("respects MAGI_RELIABILITY_PROMPT=off for child reliability prompts", async () => {
+    const original = process.env.MAGI_RELIABILITY_PROMPT;
+    process.env.MAGI_RELIABILITY_PROMPT = "off";
     try {
       const { agent, llmCalls } = fakeAgent([], {
         rounds: [
@@ -1086,9 +1086,9 @@ describe("ChildAgentLoop — loop semantics", () => {
       expect(system).not.toContain("<execution-discipline-policy>");
     } finally {
       if (original === undefined) {
-        delete process.env.CORE_AGENT_RELIABILITY_PROMPT;
+        delete process.env.MAGI_RELIABILITY_PROMPT;
       } else {
-        process.env.CORE_AGENT_RELIABILITY_PROMPT = original;
+        process.env.MAGI_RELIABILITY_PROMPT = original;
       }
     }
   });

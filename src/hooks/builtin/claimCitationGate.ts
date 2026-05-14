@@ -60,7 +60,7 @@ interface ResearchArtifactClaimSourceLink {
 }
 
 function isEnabled(): boolean {
-  const raw = process.env.CORE_AGENT_CLAIM_CITATION_GATE;
+  const raw = process.env.MAGI_CLAIM_CITATION_GATE;
   if (raw === undefined || raw === null) return true;
   const v = raw.trim().toLowerCase();
   return v === "" || v === "on" || v === "true" || v === "1";
@@ -127,23 +127,11 @@ async function sourceSensitiveTurn(ctx: HookContext, userMessage: string): Promi
   if (existing) return existing.sourceSensitive;
 
   const meta = await getOrClassifyRequestMeta(ctx, { userMessage });
-  const researchMeta = (meta as typeof meta & {
-    research?: { sourceSensitive?: boolean; reason?: string };
-  }).research;
-  const sourceSensitive =
-    researchMeta?.sourceSensitive === true ||
-    meta.goalProgress.actionKinds.includes("research") ||
-    FRESH_RESEARCH_REQUEST_RE.test(userMessage);
-  const reason =
-    researchMeta?.reason ??
-    (sourceSensitive
-      ? "Classifier or deterministic fallback marked this turn as source-sensitive research."
-      : "Classifier did not mark this turn as source-sensitive research.");
-  if (!ctx.researchContract) return sourceSensitive;
+  if (!ctx.researchContract) return meta.research.sourceSensitive;
   return ctx.researchContract.startTurn({
     turnId: ctx.turnId,
-    sourceSensitive,
-    reason,
+    sourceSensitive: meta.research.sourceSensitive,
+    reason: meta.research.reason,
   }).sourceSensitive;
 }
 

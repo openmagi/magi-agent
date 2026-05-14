@@ -165,6 +165,11 @@ import { makeRepoMapInjectorHook } from "./repoMapInjector.js";
 import { makeShadowCheckpointHook } from "./shadowCheckpoint.js";
 import { makeFocusChainTrackerHook } from "./focusChainTracker.js";
 import { makeFocusChainInjectorHook } from "./focusChainInjector.js";
+import {
+  makeCodingChildReviewGateHook,
+  type CodingChildReviewGateAgent,
+} from "./codingChildReviewGate.js";
+import { makeDocumentExportRoutingHook } from "./documentExportRouting.js";
 
 export interface RegisterBuiltinsOpts {
   disabled?: string[];
@@ -264,6 +269,12 @@ export interface RegisterBuiltinsOpts {
   fileEditSafetyAgent?: FileEditSafetyGateAgent;
   /** Delegate used by coding-mode verification enforcement. */
   codingVerificationAgent?: CodingVerificationGateAgent;
+  /**
+   * Delegate used by coding-child-review-gate to read the session
+   * discipline and transcript so it can verify that coding child
+   * work is reviewed before completion claims.
+   */
+  codingChildReviewAgent?: CodingChildReviewGateAgent;
   /**
    * Delegate used by task-contract verification enforcement. Shares
    * the completion-evidence transcript reader shape.
@@ -1175,6 +1186,53 @@ export function registerBuiltinHooks(
     }
   } else {
     skipped.push("builtin:discipline");
+  }
+
+  // Coding child review gate (priority 89, beforeCommit). Blocks
+  // completion claims after coding child work unless a reviewer
+  // SpawnAgent ran after the latest apply/edit. Env-gated
+  // (`MAGI_CODING_CHILD_REVIEW`, default on); skipped when no
+  // delegate was wired.
+  const codingChildReviewEnv = (process.env.MAGI_CODING_CHILD_REVIEW ?? "on")
+    .trim()
+    .toLowerCase();
+  const codingChildReviewEnabled =
+    codingChildReviewEnv === "" ||
+    codingChildReviewEnv === "on" ||
+    codingChildReviewEnv === "true" ||
+    codingChildReviewEnv === "1";
+  if (codingChildReviewEnabled) {
+    const childReviewHook = makeCodingChildReviewGateHook({
+      agent: opts.codingChildReviewAgent,
+    });
+    if (maybe(childReviewHook.name)) {
+      registry.register(childReviewHook);
+      registered++;
+    }
+  } else {
+    skipped.push("builtin:coding-child-review-gate");
+  }
+
+  // Document export routing (priority 18, beforeToolUse). Routes
+  // DocumentWrite calls to canonical_markdown renderer when the
+  // turn classifier detected render-parity intent. Env-gated
+  // (`MAGI_DOCUMENT_EXPORT_ROUTING`, default on).
+  const documentExportRoutingEnv = (process.env.MAGI_DOCUMENT_EXPORT_ROUTING ?? "on")
+    .trim()
+    .toLowerCase();
+  const documentExportRoutingEnabled =
+    documentExportRoutingEnv === "" ||
+    documentExportRoutingEnv === "on" ||
+    documentExportRoutingEnv === "true" ||
+    documentExportRoutingEnv === "1";
+  if (documentExportRoutingEnabled) {
+    const docExportHook = makeDocumentExportRoutingHook();
+    if (maybe(docExportHook.name)) {
+      registry.register(docExportHook);
+      registered++;
+    }
+  } else {
+    skipped.push("builtin:document-export-routing");
   }
 
   // #81 — inline task notifier. Priority 4 (right after midTurnInjector

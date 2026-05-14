@@ -55,6 +55,7 @@ describe("sourceAuthority prompt hook", () => {
             skipTdd: false,
             implementationIntent: false,
             documentOrFileOperation: false,
+            documentExport: { strategy: "none", confidence: 0, renderParityRequired: false, nativeTemplateRequired: false, docxMode: null, reason: "No document export routing requested." },
             deterministic: {
               requiresDeterministic: false,
               kinds: [],

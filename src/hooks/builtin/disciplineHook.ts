@@ -22,9 +22,17 @@
 
 import fs from "node:fs/promises";
 import path from "node:path";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 import type { RegisteredHook, HookContext } from "../types.js";
 import type { Discipline } from "../../Session.js";
-import { matchesAny, expectedTestPaths } from "../../discipline/globMatch.js";
+import {
+  matchesAny,
+  expectedTestPaths,
+  normalisePath,
+} from "../../discipline/globMatch.js";
+
+const execFileAsync = promisify(execFile);
 
 /**
  * Per-session observation counters — keyed by sessionKey. Accumulated
@@ -73,6 +81,69 @@ function activeDisciplineFor(
   return d;
 }
 
+function isDedicatedCodingWorkspacePath(target: string): boolean {
+  const norm = normalisePath(target);
+  return (
+    norm.startsWith("code/") || /^\.spawn\/[^/]+\/worktree(?:\/|$)/.test(norm)
+  );
+}
+
+async function isDirtyGitCheckout(workspaceRoot: string): Promise<boolean> {
+  try {
+    const { stdout } = await execFileAsync(
+      "git",
+      ["status", "--porcelain", "--untracked-files=normal"],
+      {
+        cwd: workspaceRoot,
+        encoding: "utf8",
+        timeout: 250,
+        maxBuffer: 1024 * 1024,
+      },
+    );
+    return String(stdout).trim().length > 0;
+  } catch {
+    return false;
+  }
+}
+
+async function enforceParentWorktreeDiscipline(
+  target: string,
+  discipline: Discipline,
+  opts: DisciplineHookOptions,
+  ctx: HookContext,
+): Promise<{ action: "continue" } | { action: "block"; reason: string }> {
+  if (!discipline.git) return { action: "continue" };
+  if (discipline.lastClassifiedMode !== "coding") return { action: "continue" };
+  if (isDedicatedCodingWorkspacePath(target)) return { action: "continue" };
+
+  const dirty = await isDirtyGitCheckout(opts.workspaceRoot);
+  if (!dirty) return { action: "continue" };
+
+  const detail = `worktree_discipline: dirty parent checkout before editing ${target}; use CodeWorkspace code/<project> or SpawnAgent workspace_policy="git_worktree"`;
+  ctx.log("warn", "[discipline] worktree_discipline", {
+    turnId: ctx.turnId,
+    sourcePath: target,
+    enforcement: discipline.requireCommit,
+  });
+  ctx.emit({
+    type: "rule_check",
+    ruleId: "discipline.worktree",
+    verdict: "violation",
+    detail,
+  });
+
+  if (discipline.requireCommit === "hard") {
+    return {
+      action: "block",
+      reason:
+        `Worktree discipline: dirty parent checkout before editing ${target}. ` +
+        `Use CodeWorkspace under code/<project>, SpawnAgent with workspace_policy="git_worktree", or checkpoint/clean the parent checkout first.`,
+    };
+  }
+
+  return { action: "continue" };
+}
+
 /**
  * beforeToolUse — TDD violation detector for FileWrite / FileEdit.
  */
@@ -115,9 +186,6 @@ export function makeDisciplineBeforeToolUseHook(
       }
       const discipline = activeDisciplineFor(ctx.sessionKey, opts.agent);
       if (!discipline) return { action: "continue" };
-      // Only care about TDD enforcement here; git-only sessions let
-      // afterTurnEnd do the reminder work.
-      if (!discipline.tdd) return { action: "continue" };
 
       const asRec = input as { path?: unknown } | null;
       const target =
@@ -140,6 +208,19 @@ export function makeDisciplineBeforeToolUseHook(
       const counter = opts.agent.getSessionCounter(ctx.sessionKey);
       counter.sourceMutations += 1;
       counter.dirtyFilesSinceCommit += 1;
+
+      // Git/worktree discipline is independent of TDD. A user may
+      // explicitly skip TDD for a coding task, but the agent should
+      // still avoid piling feature edits into a dirty parent checkout.
+      const worktreeDecision = await enforceParentWorktreeDiscipline(
+        target,
+        discipline,
+        opts,
+        ctx,
+      );
+      if (worktreeDecision.action === "block") return worktreeDecision;
+
+      if (!discipline.tdd) return { action: "continue" };
 
       const candidates = expectedTestPaths(target);
       let hasTest = false;

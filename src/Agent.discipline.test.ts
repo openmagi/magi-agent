@@ -50,6 +50,7 @@ function makeHookCtx(): HookContext {
           skipTdd: false,
           implementationIntent: /implement|function|type error/i.test(text),
           documentOrFileOperation: false,
+          documentExport: { strategy: "none", confidence: 0, renderParityRequired: false, nativeTemplateRequired: false, docxMode: null, reason: "No document export routing requested." },
           deterministic: {
             requiresDeterministic: false,
             kinds: [],
