@@ -54,7 +54,7 @@ export function parseGroundingVerdict(raw: string): GroundingVerdict {
  * Build the tool results summary for the judge prompt.
  * Pairs tool_call with tool_result by toolUseId.
  */
-function buildToolResultsSummary(
+export function buildToolResultsSummary(
   transcript: ReadonlyArray<TranscriptEntry>,
   turnId: string,
 ): string {

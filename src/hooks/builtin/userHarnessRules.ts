@@ -11,7 +11,7 @@
 import type { HookContext, RegisteredHook } from "../types.js";
 import type { TranscriptEntry } from "../../storage/Transcript.js";
 import type { PolicyKernel } from "../../policy/PolicyKernel.js";
-import type { HarnessRule } from "../../policy/policyTypes.js";
+import type { HarnessRule, BuiltinPresetId, BuiltinPresetConfig } from "../../policy/policyTypes.js";
 
 const MAX_RETRIES = 1;
 
@@ -312,6 +312,10 @@ async function evaluateBeforeCommitRule(
     return { pass: false, detail: rule.action.reason };
   }
 
+  if (rule.action.type === "builtin_preset") {
+    return executeBuiltinPreset(rule.action.preset, rule.action.config, args, transcript, ctx);
+  }
+
   return runLlmVerifier(rule, ctx, {
     userMessage: args.userMessage,
     assistantText: args.assistantText,
@@ -400,4 +404,179 @@ export function makeUserHarnessRuleHooks(
       },
     },
   };
+}
+
+// ── Builtin Preset Executor ─────────────────────────────────────
+
+async function executeBuiltinPreset(
+  preset: BuiltinPresetId,
+  config: BuiltinPresetConfig | undefined,
+  args: { assistantText: string; userMessage: string; retryCount: number; toolCallCount?: number; toolReadHappened?: boolean; toolNames?: string[] },
+  transcript: ReadonlyArray<TranscriptEntry>,
+  ctx: HookContext,
+): Promise<{ pass: boolean; detail: string }> {
+  const mode = config?.mode ?? "hybrid";
+
+  switch (preset) {
+    case "answer-quality":
+      return executeAnswerQualityPreset(mode, args, ctx);
+    case "self-claim":
+      return executeSelfClaimPreset(mode, args, ctx);
+    case "fact-grounding":
+      return executeFactGroundingPreset(mode, args, transcript, ctx);
+    case "response-language":
+      return executeResponseLanguagePreset(mode, args, ctx);
+    case "deterministic-evidence":
+      return executeDeterministicEvidencePreset(mode, args, ctx);
+    default:
+      return { pass: true, detail: `unknown preset: ${preset}` };
+  }
+}
+
+async function executeAnswerQualityPreset(
+  mode: string,
+  args: { assistantText: string; userMessage: string },
+  ctx: HookContext,
+): Promise<{ pass: boolean; detail: string }> {
+  const { judgeAnswerDeterministic, judgeAnswer } = await import("./answerVerifier.js");
+  if (mode === "deterministic" || mode === "hybrid") {
+    const det = judgeAnswerDeterministic(args.userMessage, args.assistantText);
+    if (mode === "deterministic" || det.confidence === "high") {
+      return { pass: det.verdict === "FULFILLED" || det.verdict === "REFUSAL", detail: `answer-quality: ${det.verdict} (${det.reason})` };
+    }
+  }
+  const verdict = await judgeAnswer(ctx.llm, args.userMessage, args.assistantText, 15_000, ctx.agentModel);
+  return { pass: verdict === "FULFILLED" || verdict === "REFUSAL", detail: `answer-quality: ${verdict} (llm)` };
+}
+
+async function executeSelfClaimPreset(
+  mode: string,
+  args: { assistantText: string; userMessage: string; toolReadHappened?: boolean },
+  ctx: HookContext,
+): Promise<{ pass: boolean; detail: string }> {
+  const { detectSelfClaimDeterministic } = await import("./selfClaimVerifier.js");
+  const det = detectSelfClaimDeterministic(args.assistantText);
+
+  if (mode === "deterministic" || (mode === "hybrid" && det.confidence === "high")) {
+    if (!det.hasClaim) return { pass: true, detail: "self-claim: no claim detected" };
+    if (args.toolReadHappened) return { pass: true, detail: "self-claim: claim with tool read" };
+    return { pass: false, detail: `self-claim: ${det.reason} without file read` };
+  }
+
+  // LLM fallback
+  const { getOrClassifyFinalAnswerMeta } = await import("./turnMetaClassifier.js");
+  const meta = await getOrClassifyFinalAnswerMeta(ctx, { userMessage: args.userMessage, assistantText: args.assistantText });
+  if (!meta.selfClaim) return { pass: true, detail: "self-claim: no claim (llm)" };
+  if (args.toolReadHappened) return { pass: true, detail: "self-claim: claim with tool read (llm)" };
+  return { pass: false, detail: "self-claim: claim without file read (llm)" };
+}
+
+async function executeFactGroundingPreset(
+  mode: string,
+  args: { assistantText: string; userMessage: string; toolReadHappened?: boolean },
+  transcript: ReadonlyArray<TranscriptEntry>,
+  ctx: HookContext,
+): Promise<{ pass: boolean; detail: string }> {
+  const {
+    groundAgainstToolResults,
+    detectUngroundedFileClaims,
+    judgeGrounding,
+    judgeUngroundedClaims,
+  } = await import("./factGroundingVerifier.js");
+
+  if (!args.toolReadHappened) {
+    const det = detectUngroundedFileClaims(args.assistantText);
+    if (mode === "deterministic" || (mode === "hybrid" && det.confidence === "high")) {
+      const pass = det.verdict !== "FABRICATED";
+      return { pass, detail: `fact-grounding-B: ${det.verdict} (${det.reason})` };
+    }
+    const verdict = await judgeUngroundedClaims(ctx.llm, args.assistantText, 15_000, ctx.agentModel);
+    return { pass: verdict !== "FABRICATED", detail: `fact-grounding-B: ${verdict} (llm)` };
+  }
+
+  const det = groundAgainstToolResults(transcript, ctx.turnId, args.assistantText);
+  if (mode === "deterministic" || (mode === "hybrid" && det.confidence === "high")) {
+    return { pass: det.verdict === "GROUNDED", detail: `fact-grounding-A: ${det.verdict} (${det.reason})` };
+  }
+  // Need buildToolResultsSummary — import it
+  const factModule = await import("./factGroundingVerifier.js");
+  const summary = (factModule as Record<string, unknown>)["buildToolResultsSummary"] as
+    ((transcript: ReadonlyArray<TranscriptEntry>, turnId: string) => string) | undefined;
+  const summaryText = summary ? summary(transcript, ctx.turnId) : "";
+  if (!summaryText.trim()) return { pass: true, detail: "fact-grounding-A: no tool results" };
+  const verdict = await judgeGrounding(ctx.llm, summaryText, args.assistantText, 15_000, ctx.agentModel);
+  return { pass: verdict === "GROUNDED", detail: `fact-grounding-A: ${verdict} (llm)` };
+}
+
+async function executeResponseLanguagePreset(
+  mode: string,
+  args: { assistantText: string; userMessage: string },
+  ctx: HookContext,
+): Promise<{ pass: boolean; detail: string }> {
+  const {
+    resolveLanguagePolicy,
+    detectPrimaryLanguage,
+    judgeResponseLanguage,
+  } = await import("./responseLanguageGate.js");
+
+  // Load language policy from PolicyKernel is not available here directly,
+  // so we detect from user message as fallback
+  const resolved = resolveLanguagePolicy("auto", args.userMessage);
+  const detected = detectPrimaryLanguage(args.assistantText);
+
+  if (mode === "deterministic" || mode === "hybrid") {
+    if (detected === resolved.target || resolved.target === "auto") {
+      return { pass: true, detail: `response-language: ${detected ?? "auto"} matches target` };
+    }
+    if (mode === "deterministic") {
+      return detected
+        ? { pass: false, detail: `response-language: ${detected} vs target ${resolved.target}` }
+        : { pass: true, detail: "response-language: undetectable, pass" };
+    }
+  }
+
+  const verdict = await judgeResponseLanguage(ctx, {
+    language: "auto",
+    userMessage: args.userMessage,
+    assistantText: args.assistantText,
+  });
+  return { pass: verdict.pass, detail: `response-language: ${verdict.detail}` };
+}
+
+async function executeDeterministicEvidencePreset(
+  mode: string,
+  args: { assistantText: string; userMessage: string },
+  ctx: HookContext,
+): Promise<{ pass: boolean; detail: string }> {
+  const contract = ctx.executionContract;
+  if (!contract) return { pass: true, detail: "deterministic-evidence: no contract" };
+
+  const snapshot = contract.snapshot();
+  const requirements = snapshot.taskState.deterministicRequirements.filter(
+    (r) => r.turnId === ctx.turnId && r.status !== "waived",
+  );
+  if (requirements.length === 0) return { pass: true, detail: "deterministic-evidence: no requirements" };
+
+  const reqIds = new Set(requirements.map((r) => r.requirementId));
+  const evidence = snapshot.taskState.deterministicEvidence.filter(
+    (e) => e.kind !== "verification" && e.status === "passed" && e.requirementIds.some((id) => reqIds.has(id)),
+  );
+  if (evidence.length === 0) return { pass: false, detail: "deterministic-evidence: no tool evidence" };
+
+  const { judgeDeterministicEvidenceBySchema, judgeDeterministicEvidence } = await import("./deterministicEvidenceVerifier.js");
+
+  if (mode === "deterministic" || mode === "hybrid") {
+    const det = judgeDeterministicEvidenceBySchema(args.assistantText, evidence);
+    if (mode === "deterministic" || det.confidence === "high") {
+      return { pass: det.verdict === "PASS", detail: `deterministic-evidence: ${det.verdict} (${det.reason})` };
+    }
+  }
+
+  const verdict = await judgeDeterministicEvidence({
+    llm: ctx.llm, model: ctx.agentModel,
+    userMessage: args.userMessage, assistantText: args.assistantText,
+    requirements, evidence,
+    timeoutMs: 10_000, signal: ctx.abortSignal,
+  });
+  return { pass: verdict === "PASS", detail: `deterministic-evidence: ${verdict} (llm)` };
 }

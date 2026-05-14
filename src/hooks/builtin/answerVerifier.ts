@@ -113,15 +113,29 @@ const REFUSAL_PATTERNS = [
   /\b(?:against\s+(?:my|the)\s+policy|not\s+(?:designed|able|allowed)\s+to)\b/i,
 ];
 
+export interface AnswerDeterministicResult {
+  verdict: AnswerVerdict;
+  confidence: "high" | "low";
+  reason: string;
+}
+
 export function judgeAnswerDeterministic(
   userMessage: string,
   assistantText: string,
-): AnswerVerdict {
+): AnswerDeterministicResult {
   const trimmed = assistantText.trim();
-  if (REFUSAL_PATTERNS.some((p) => p.test(trimmed))) return "REFUSAL";
+  if (REFUSAL_PATTERNS.some((p) => p.test(trimmed))) {
+    return { verdict: "REFUSAL", confidence: "high", reason: "explicit refusal pattern matched" };
+  }
   const userWords = userMessage.trim().split(/\s+/).length;
-  if (trimmed.length < 100 && userWords > 15) return "PARTIAL";
-  return "FULFILLED";
+  if (trimmed.length < 100 && userWords > 15) {
+    return { verdict: "PARTIAL", confidence: "low", reason: "short response to complex question — may be intentionally concise" };
+  }
+  if (trimmed.length > 200) {
+    return { verdict: "FULFILLED", confidence: "high", reason: "substantive response" };
+  }
+  // Short but possibly adequate — ambiguous
+  return { verdict: "FULFILLED", confidence: "low", reason: "short response — may be partial" };
 }
 
 function isEnabled(): boolean {
@@ -154,13 +168,21 @@ export const answerVerifierHook: RegisteredHook<"beforeCommit"> = {
       return { action: "continue" };
     }
 
-    // P2-3: deterministic mode — structural heuristic, no LLM
-    const verdict = process.env.MAGI_DETERMINISTIC_ANSWER === "1"
-      ? judgeAnswerDeterministic(userMessage, assistantText)
-      : await judgeAnswer(
-          ctx.llm, userMessage, assistantText,
-          DEFAULT_TIMEOUT_MS, ctx.agentModel,
-        );
+    // Hybrid: deterministic first, LLM fallback on low confidence
+    const hybridMode = process.env.MAGI_HYBRID_ANSWER === "1";
+    let verdict: AnswerVerdict;
+    if (hybridMode) {
+      const det = judgeAnswerDeterministic(userMessage, assistantText);
+      if (det.confidence === "high") {
+        verdict = det.verdict;
+        ctx.log("info", `[answer-verifier] hybrid: deterministic ${det.verdict} (${det.reason})`);
+      } else {
+        verdict = await judgeAnswer(ctx.llm, userMessage, assistantText, DEFAULT_TIMEOUT_MS, ctx.agentModel);
+        ctx.log("info", `[answer-verifier] hybrid: LLM fallback → ${verdict} (deterministic was low-confidence: ${det.reason})`);
+      }
+    } else {
+      verdict = await judgeAnswer(ctx.llm, userMessage, assistantText, DEFAULT_TIMEOUT_MS, ctx.agentModel);
+    }
 
     ctx.emit({
       type: "rule_check",

@@ -23,9 +23,26 @@ const WORKSPACE_CLAIM_PATTERNS = [
   /\b(?:TOOLS|AGENTS|MEMORY|USER)\.md\s+(?:says?|contains?|includes?|specifies?|lists?)\b/i,
 ];
 
-function detectSelfClaimDeterministic(text: string): boolean {
-  if (!text || text.length < 10) return false;
-  return WORKSPACE_CLAIM_PATTERNS.some((p) => p.test(text));
+export interface SelfClaimDeterministicResult {
+  hasClaim: boolean;
+  confidence: "high" | "low";
+  reason: string;
+}
+
+export function detectSelfClaimDeterministic(text: string): SelfClaimDeterministicResult {
+  if (!text || text.length < 10) {
+    return { hasClaim: false, confidence: "high", reason: "text too short" };
+  }
+  const matched = WORKSPACE_CLAIM_PATTERNS.some((p) => p.test(text));
+  if (matched) {
+    return { hasClaim: true, confidence: "high", reason: "explicit workspace/config claim pattern" };
+  }
+  // Vague references that might be claims — low confidence
+  const vagueRef = /\b(?:설정|config|prompt|메모리|memory)\b/i.test(text);
+  if (vagueRef) {
+    return { hasClaim: false, confidence: "low", reason: "mentions config/memory without explicit claim — needs LLM" };
+  }
+  return { hasClaim: false, confidence: "high", reason: "no workspace claim detected" };
 }
 
 async function detectSelfClaim(
@@ -35,12 +52,23 @@ async function detectSelfClaim(
 ): Promise<boolean> {
   if (!text || text.length < 10) return false;
 
-  // P2-2: deterministic mode — regex-based detection, no LLM
-  if (process.env.MAGI_DETERMINISTIC_SELF_CLAIM === "1") {
-    return detectSelfClaimDeterministic(text);
+  // Hybrid: deterministic first, LLM fallback on low confidence
+  if (process.env.MAGI_HYBRID_SELF_CLAIM === "1") {
+    const det = detectSelfClaimDeterministic(text);
+    if (det.confidence === "high") {
+      ctx?.log("info", `[self-claim] hybrid: deterministic ${det.hasClaim} (${det.reason})`);
+      return det.hasClaim;
+    }
+    // Low confidence → fall through to LLM
+    if (ctx?.llm) {
+      ctx.log("info", `[self-claim] hybrid: LLM fallback (${det.reason})`);
+      const meta = await getOrClassifyFinalAnswerMeta(ctx, { userMessage, assistantText: text });
+      return meta.selfClaim;
+    }
+    return det.hasClaim;
   }
 
-  if (!ctx?.llm) return detectSelfClaimDeterministic(text);
+  if (!ctx?.llm) return detectSelfClaimDeterministic(text).hasClaim;
 
   const meta = await getOrClassifyFinalAnswerMeta(ctx, {
     userMessage,
