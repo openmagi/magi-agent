@@ -1112,9 +1112,18 @@ export class Session {
     };
     const resumeAfterRestart = metadata.goalResumeAfterRestart === true;
     const actionEventId = metadataString(metadata, "goalResumeActionEventId");
+    const actionReason = metadataString(metadata, "goalResumeActionReason");
+    const sourceEventType = metadataString(metadata, "goalResumeSourceEventType");
+    const resumeTriggerType = metadataString(metadata, "goalResumeTriggerType");
+    const triggerType =
+      resumeTriggerType === "retry" || resumeTriggerType === "resume"
+        ? resumeTriggerType
+        : resumeAfterRestart
+          ? "resume"
+          : "goal_continue";
     try {
       const run = await this.agent.missionClient.createRun(missionId, {
-        triggerType: resumeAfterRestart ? "resume" : "goal_continue",
+        triggerType,
         status: "running",
         sessionKey: this.meta.sessionKey,
         turnId,
@@ -1124,6 +1133,8 @@ export class Session {
           turnsUsed: metadataNumber(metadata, "goalTurnsUsed") ?? 0,
           ...(resumeAfterRestart ? { restartRecovery: true } : {}),
           ...(actionEventId ? { actionEventId } : {}),
+          ...(actionReason ? { reason: actionReason } : {}),
+          ...(sourceEventType ? { sourceEventType } : {}),
         },
       });
       if (typeof run.id === "string") nextMetadata.missionRunId = run.id;
@@ -1295,7 +1306,6 @@ export class Session {
         actionEventId: input.actionEventId,
         reason: actionReason,
         sourceEventType,
-        triggerType,
         ...(input.startedAt ? { startedAt: input.startedAt } : {}),
       },
     });

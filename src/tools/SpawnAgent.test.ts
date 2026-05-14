@@ -124,7 +124,7 @@ function fakeAgent(tools: Tool[], script: MockScript): {
     apiProxyUrl: "http://api.local",
     chatProxyUrl: "http://chat.local",
     redisUrl: "redis://r",
-    model: "claude-opus-4-7",
+    model: "claude-opus-4-6",
   };
   const agent = {
     config,
@@ -374,6 +374,59 @@ describe("SpawnAgent — §7.12.d", () => {
         },
       }),
     );
+  });
+
+  it("(c) deliver='return' exposes compact llmOutput while preserving full finalText", async () => {
+    const longFinalText = [
+      "short executive summary",
+      "details:",
+      "x".repeat(6000),
+      "tail-marker-that-should-not-be-in-parent-replay",
+    ].join("\n");
+    const script: MockScript = {
+      rounds: [
+        [
+          { kind: "text_delta", blockIndex: 0, delta: longFinalText },
+          {
+            kind: "message_end",
+            stopReason: "end_turn",
+            usage: { inputTokens: 10, outputTokens: 2_000 },
+          },
+        ],
+      ],
+    };
+    const { agent } = fakeAgent([], script) as unknown as {
+      agent: Parameters<typeof makeSpawnAgentTool>[0];
+    };
+    const tool = makeSpawnAgentTool(agent);
+    const { ctx } = makeParentCtx();
+
+    const result = await tool.execute(
+      {
+        persona: "child",
+        prompt: "return a long memo",
+        deliver: "return",
+        completion_contract: {
+          required_evidence: "none",
+          reason: "answer-only delegation",
+        },
+      },
+      ctx,
+    );
+
+    expect(result.status).toBe("ok");
+    const out = result.output as SpawnAgentOutput;
+    expect(out.finalText).toBe(longFinalText);
+    const compact = JSON.parse(String(result.llmOutput)) as {
+      status: string;
+      summary: string;
+      fullTextOmitted: boolean;
+    };
+    expect(compact.status).toBe("ok");
+    expect(compact.summary).toContain("short executive summary");
+    expect(compact.summary).not.toContain("tail-marker-that-should-not-be-in-parent-replay");
+    expect(compact.fullTextOmitted).toBe(true);
+    expect(String(result.llmOutput).length).toBeLessThan(2_500);
   });
 
   it("(c0) includes current-turn KB and file context in the child prompt", async () => {
@@ -1075,6 +1128,45 @@ describe("SpawnAgent — §7.12.d", () => {
 
       await fs.rm(tmpRoot, { recursive: true, force: true });
     });
+  });
+
+  it("(c2d1) completion_contract required_evidence='artifact' accepts parent-managed ArtifactCreate evidence", async () => {
+    const tmpRoot = await fs.mkdtemp(path.join(os.tmpdir(), "spawn-artifact-evidence-"));
+    try {
+      const { agent } = fakeAgent([], { rounds: [] }) as unknown as {
+        agent: Parameters<typeof makeSpawnAgentTool>[0] & {
+          spawnChildTurn: () => Promise<SpawnChildTestResult>;
+        };
+      };
+      agent.spawnChildTurn = async (): Promise<SpawnChildTestResult> => ({
+        status: "ok" as const,
+        finalText: "Created artifact 01KRC4PBCP7AW4TR97DNYZ83N8",
+        toolCallCount: 1,
+        evidence: {
+          toolNames: ["ArtifactCreate"],
+          changedFiles: [],
+          verificationCommands: [],
+        },
+      });
+      const tool = makeSpawnAgentTool(agent);
+      const { ctx } = makeParentCtx({ workspaceRoot: tmpRoot });
+
+      const result = await tool.execute(
+        {
+          persona: "researcher",
+          prompt: "create an artifact report",
+          deliver: "return",
+          completion_contract: { required_evidence: "artifact" },
+        } as SpawnAgentInput,
+        ctx,
+      );
+
+      expect(result.status).toBe("ok");
+      const out = result.output as SpawnAgentOutput;
+      expect(out.childEvidence?.toolNames).toContain("ArtifactCreate");
+    } finally {
+      await fs.rm(tmpRoot, { recursive: true, force: true });
+    }
   });
 
   it("(c2d) completion_contract required_evidence='text' rejects empty final text", async () => {
@@ -1927,6 +2019,11 @@ describe("SpawnAgent — §7.12.d", () => {
       // parent's workspace after the spawnDir is long gone.
       const l0 = await parentMgr.readL0(h.artifactId);
       expect(l0).toContain("113 skills tested");
+      const compact = JSON.parse(String(result.llmOutput)) as {
+        artifacts?: { handedOffArtifacts?: Array<{ artifactId?: string; title?: string }> };
+      };
+      expect(compact.artifacts?.handedOffArtifacts?.[0]?.artifactId).toBe(h.artifactId);
+      expect(compact.artifacts?.handedOffArtifacts?.[0]?.title).toBe("Group 4 of 5 report");
     });
 
     it("(ha2) no-op when child produces no artifacts — handedOffArtifacts is []", async () => {
@@ -2094,6 +2191,7 @@ describe("SpawnAgent — §7.12.d", () => {
         makeStubTool("Browser"),
         makeStubTool("SocialBrowser"),
         makeStubTool("KnowledgeSearch"),
+        makeStubTool("FileRead"),
         makeStubTool("FileRead"),
         makeStubTool("ExternalSourceRead"),
         makeStubTool("Glob"),
@@ -2469,6 +2567,64 @@ describe("SpawnAgent — §7.12.d", () => {
       }
     });
 
+    it("(t3b) git_worktree tournament exposes a winner SpawnWorktreeApply preview handoff", async () => {
+      await execFileAsync("git", ["init", "-q"], { cwd: tmpRoot });
+      await execFileAsync("git", ["config", "user.email", "bot@example.com"], { cwd: tmpRoot });
+      await execFileAsync("git", ["config", "user.name", "Bot"], { cwd: tmpRoot });
+      await fs.writeFile(path.join(tmpRoot, "README.md"), "# repo\n");
+      await execFileAsync("git", ["add", "README.md"], { cwd: tmpRoot });
+      await execFileAsync("git", ["commit", "-m", "init", "-q"], { cwd: tmpRoot });
+
+      const script: MockScript = {
+        rounds: [
+          variantRound("losing implementation"),
+          variantRound("10"),
+          variantRound("winning implementation"),
+          variantRound("90"),
+        ],
+      };
+      const { agent } = fakeAgent([], script) as unknown as {
+        agent: Parameters<typeof makeSpawnAgentTool>[0];
+      };
+      const tool = makeSpawnAgentTool(agent);
+      const { ctx, events } = makeParentCtx({
+        workspaceRoot: tmpRoot,
+        turnId: "turn_git",
+      });
+
+      const result = await tool.execute(
+        {
+          persona: "coder",
+          prompt: "try two implementations",
+          deliver: "return",
+          mode: "tournament",
+          variants: 2,
+          concurrency: 1,
+          scorer: { kind: "haiku_rubric", rubric: "Correctness" },
+          workspace_policy: "git_worktree",
+        },
+        ctx,
+      );
+
+      expect(result.status).toBe("ok");
+      const out = result.output as SpawnAgentOutput;
+      expect(out.winnerIndex).toBe(1);
+      expect(out.winnerWorktreeApply).toEqual({
+        action: "preview",
+        spawnDir: path.join(tmpRoot, ".spawn", "turn_git.tournament-1"),
+      });
+      await expect(
+        execFileAsync("git", ["rev-parse", "--is-inside-work-tree"], {
+          cwd: path.join(out.winnerWorktreeApply!.spawnDir, "worktree"),
+        }),
+      ).resolves.toMatchObject({ stdout: "true\n" });
+      expect(events).toContainEqual(expect.objectContaining({
+        type: "tournament_result",
+        winnerIndex: 1,
+        winnerWorktreeApply: out.winnerWorktreeApply,
+      }));
+    });
+
     it("(t4) variants=1 returns bad_input", async () => {
       const { agent } = fakeAgent([], { rounds: [] }) as unknown as {
         agent: Parameters<typeof makeSpawnAgentTool>[0];
@@ -2767,7 +2923,37 @@ describe("SpawnAgent — §7.12.d", () => {
     );
 
     expect(llmCalls.length).toBe(1);
-    expect(llmCalls[0]?.model).toBe("claude-opus-4-7");
+    expect(llmCalls[0]?.model).toBe("claude-opus-4-6");
+  });
+
+  it("aliases explicit Opus 4.7 child model requests to Opus 4.6", async () => {
+    const script: MockScript = {
+      rounds: [
+        [
+          { kind: "text_delta", blockIndex: 0, delta: "aliased" },
+          { kind: "message_end", stopReason: "end_turn", usage: { inputTokens: 10, outputTokens: 2 } },
+        ],
+      ],
+    };
+    const { agent, llmCalls } = fakeAgent([], script) as unknown as {
+      agent: Parameters<typeof makeSpawnAgentTool>[0];
+      llmCalls: LLMStreamRequest[];
+    };
+    const tool = makeSpawnAgentTool(agent);
+    const { ctx } = makeParentCtx();
+
+    await tool.execute(
+      {
+        persona: "default-child",
+        prompt: "go",
+        deliver: "return",
+        model: "anthropic/claude-opus-4-7",
+        completion_contract: { required_evidence: "none" },
+      },
+      ctx,
+    );
+
+    expect(llmCalls[0]?.model).toBe("claude-opus-4-6");
   });
 
   it("rejects invalid model names", async () => {
@@ -2804,6 +2990,7 @@ describe("SpawnAgent — §7.12.d", () => {
   it("validate() accepts all SPAWNABLE_MODELS", () => {
     const { agent } = fakeAgent([], { rounds: [] });
     const tool = makeSpawnAgentTool(agent);
+    expect(SPAWNABLE_MODELS).not.toContain("claude-opus-4-7");
     for (const m of SPAWNABLE_MODELS) {
       const err = tool.validate?.({
         persona: "child",

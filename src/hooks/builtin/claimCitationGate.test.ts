@@ -116,7 +116,7 @@ function ledgerWithLocalFileSource(): SourceLedgerStore {
     turnId: "turn-1",
     toolName: "FileRead",
     kind: "file",
-    uri: "file:///workspace/.clawy/coding-benchmark-reports/latest.json",
+    uri: "file:///workspace/.magi/coding-benchmark-reports/latest.json",
     title: "CodingBenchmark latest report",
     snippets: ["Coding benchmark summary: 1 passed run out of 1 recorded run."],
   });
