@@ -426,12 +426,16 @@ async function dispatchOne(
   if (ctx.loopDetector) {
     const loopCheck: LoopCheckResult = ctx.loopDetector.check(tu.name, tu.input);
     if (loopCheck.action === "hard_escalation") {
-      const warning = `Loop detected: ${tu.name} called ${loopCheck.count} times with identical parameters. Breaking loop — change your approach.`;
+      const isFrequency = loopCheck.frequencyCount !== undefined;
+      const warning = isFrequency
+        ? `Loop detected: ${tu.name} called ${loopCheck.frequencyCount} times this turn (frequency limit). Breaking loop — change your approach. If waiting for a background task, write your current progress and end the turn instead of polling.`
+        : `Loop detected: ${tu.name} called ${loopCheck.count} times with identical parameters. Breaking loop — change your approach.`;
       ctx.stageAuditEvent("tool_loop_detected", {
         toolName: tu.name,
         hash: loopCheck.hash,
         count: loopCheck.count,
         action: "hard_escalation",
+        ...(isFrequency ? { frequencyCount: loopCheck.frequencyCount, trigger: "frequency" } : { trigger: "consecutive" }),
       });
       sse.agent({
         type: "tool_end",
@@ -452,7 +456,10 @@ async function dispatchOne(
       return { toolUseId: tu.id, content: warning, isError: true };
     }
     if (loopCheck.action === "soft_warning") {
-      softWarningPrefix = `[WARNING: This is call #${loopCheck.count} with identical parameters. Consider changing your approach.]\n`;
+      const isFrequency = loopCheck.frequencyCount !== undefined;
+      softWarningPrefix = isFrequency
+        ? `[WARNING: ${tu.name} has been called ${loopCheck.frequencyCount} times this turn. You may be in a polling loop. Consider summarizing progress and ending the turn, or use Bash sleep to add delays between checks.]\n`
+        : `[WARNING: This is call #${loopCheck.count} with identical parameters. Consider changing your approach.]\n`;
     }
   }
 

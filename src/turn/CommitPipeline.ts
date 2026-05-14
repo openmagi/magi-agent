@@ -226,6 +226,7 @@ export async function commit(ctx: CommitPipelineContext): Promise<CommitResult> 
     turnId: ctx.turnId,
     status: "committed",
     stopReason,
+    usage: ctx.meta.usage,
   });
   ctx.sse.legacyFinish();
 
@@ -304,6 +305,7 @@ export async function commitBypassHooks(ctx: CommitPipelineContext): Promise<Com
     turnId: ctx.turnId,
     status: "committed",
     stopReason,
+    usage: ctx.meta.usage,
   });
   ctx.sse.legacyFinish();
 

@@ -31,6 +31,9 @@ import { handle as handleStopReason } from "./turn/StopReasonHandler.js";
 import {
   commit as commitTurn,
   abort as abortTurn,
+  commitBypassHooks,
+  emitRuntimeTrace,
+  reasonCodeFromReason,
   type CommitPipelineContext,
   type CommitResult,
 } from "./turn/CommitPipeline.js";
@@ -43,6 +46,8 @@ import { RetryController } from "./turn/RetryController.js";
 import { ToolCallLoopDetector } from "./turn/ToolCallLoopDetector.js";
 import { sanitizeMessagesForLLM } from "./turn/MessageSanitizer.js";
 import { detectPollingIteration } from "./turn/pollingDetector.js";
+import { isResearchProofBlockReason } from "./turn/ResearchProofFailureNotice.js";
+import { buildResearchProofFallback } from "./turn/ResearchProofFinalizer.js";
 import { createLogger } from "./util/logger.js";
 
 const turnLogger = createLogger("Turn");
@@ -571,6 +576,7 @@ export class Turn {
             iter -= 1;
             continue;
           }
+          this.emitRuntimeFailureNoticeIfNoVisibleText(err);
           throw err;
         } finally {
           llmAbort.cleanup();
@@ -679,17 +685,12 @@ export class Turn {
               iter -= 1;
               continue;
             }
-            const err = new Error(
-              `empty response retry exhausted after ${this.emptyResponseRetry} retries`,
-            );
-            this.stageAuditEvent("turn_aborted", {
-              reason: "empty_response_retry_exhausted",
-              retries: this.emptyResponseRetry,
+            this.applyEmptyResponseTerminalFallback({
               model: currentModel,
+              retries: this.emptyResponseRetry,
+              fallbackUsed: this.emptyResponseFallbackUsed,
             });
-            this.setStopReason("empty_response_retry_exhausted");
-            this.emitError("empty_response_retry_exhausted", err);
-            throw err;
+            return;
           }
 
           // ── Guard 2: truncated response (text ends mid-sentence) ──
@@ -777,8 +778,15 @@ export class Turn {
       const result = await this.commit();
       if (result.status === "committed") return result;
       if (!result.retryable) {
+        if (
+          this.isDeterministicResearchProofRetry(result.reason) &&
+          this.applyDeterministicResearchProofFallback(result.reason)
+        ) {
+          continue;
+        }
         if (result.stopReason) this.setStopReason(result.stopReason);
         this.clearBlockedDraftBeforeAbort(result.reason);
+        this.emitResearchProofFailureNotice(result.reason);
         throw new Error(`beforeCommit blocked: ${result.reason}`);
       }
 
@@ -789,12 +797,35 @@ export class Turn {
       });
       if (decision.action === "abort") {
         if (result.retryKind === "structured_output_invalid") {
+          await emitRuntimeTrace(this.buildCommitCtx(), {
+            phase: "retry_aborted",
+            severity: "error",
+            title: "Runtime verifier retry limit reached",
+            detail: decision.reason,
+            reasonCode: reasonCodeFromReason(decision.reason),
+            attempt,
+            maxAttempts,
+            retryable: false,
+          });
           this.setStopReason("structured_output_retry_exhausted");
+          this.clearBlockedDraftBeforeAbort(decision.reason);
+          this.emitResearchProofFailureNotice(decision.reason);
+          throw new Error(`beforeCommit blocked: ${decision.reason}`);
         }
-        this.clearBlockedDraftBeforeAbort(decision.reason);
-        throw new Error(`beforeCommit blocked: ${decision.reason}`);
+        this.setStopReason("commit_bypass_hooks");
+        return commitBypassHooks(this.buildCommitCtx());
       }
 
+      await emitRuntimeTrace(this.buildCommitCtx(), {
+        phase: "retry_scheduled",
+        severity: "info",
+        title: "Retrying after runtime verifier block",
+        detail: result.reason,
+        reasonCode: reasonCodeFromReason(result.reason),
+        attempt,
+        maxAttempts,
+        retryable: true,
+      });
       await this.recordRetryEvent(result.reason, attempt, maxAttempts);
       this.incrementCommitRetry();
       this.sse.agent({
@@ -802,6 +833,22 @@ export class Turn {
         reason: result.reason,
         retryNo: attempt,
       });
+      const deterministicResearchProofRetry =
+        decision.toolPolicy === "text_only" &&
+        this.isDeterministicResearchProofRetry(result.reason);
+      if (deterministicResearchProofRetry && this.applyDeterministicResearchProofFallback(result.reason)) {
+        continue;
+      }
+      if (
+        deterministicResearchProofRetry &&
+        isResearchProofBlockReason(result.reason)
+      ) {
+        this.stageAuditEvent("research_proof_deterministic_fallback_unavailable", {
+          verifierReason: result.reason.slice(0, 500),
+        });
+        this.setStopReason("commit_bypass_hooks");
+        return commitBypassHooks(this.buildCommitCtx());
+      }
       try {
         await this.resampleAfterBlockedCommit(
           result.finalText,
@@ -821,17 +868,20 @@ export class Turn {
           throw err;
         }
       } catch (resampleErr) {
-        // The previous draft was rejected by a beforeCommit verifier.
-        // Never restore it after retry failure: doing so leaks exactly
-        // the response the verifier blocked. Do not stream a placeholder
-        // either; the terminal turn_failed event lets clients show an error
-        // state without committing a fake assistant answer.
-        turnLogger.warn("resample_failed", { turnId: this.meta.turnId });
-        this.sse.agent({ type: "response_clear" });
-        throw resampleErr;
+        turnLogger.warn("resample_failed_bypassing_hooks", {
+          turnId: this.meta.turnId,
+          error: resampleErr instanceof Error ? resampleErr.message : String(resampleErr),
+        });
+        if (result.finalText && !this.hasVisibleAssistantText()) {
+          this.emittedAssistantBlocks = [{ type: "text" as const, text: result.finalText }];
+          this.assistantText = result.finalText;
+        }
+        this.setStopReason("commit_bypass_hooks");
+        return commitBypassHooks(this.buildCommitCtx());
       }
     }
-    throw new Error("commit retry attempts exhausted");
+    this.setStopReason("commit_bypass_hooks");
+    return commitBypassHooks(this.buildCommitCtx());
   }
   async abort(reason: string, stopReason: TurnStopReason = this.meta.stopReason ?? "aborted"): Promise<void> {
     this.setStopReason(stopReason);
@@ -1127,6 +1177,114 @@ export class Turn {
         typeof block.text === "string" &&
         block.text.trim().length > 0,
     );
+  }
+
+  private applyDeterministicResearchProofFallback(reason: string): boolean {
+    if (!this.isDeterministicResearchProofRetry(reason)) return false;
+    const fallback = buildResearchProofFallback({
+      sources: this.session.sourceLedger?.sourcesForTurn(this.meta.turnId) ?? [],
+    });
+    if (!fallback) return false;
+
+    this.emittedAssistantBlocks = [{ type: "text", text: fallback.text }];
+    if (this.canonicalAssistantMessages.length > 0) {
+      this.canonicalAssistantMessages.pop();
+    }
+    this.canonicalAssistantMessages.push([{ type: "text", text: fallback.text }]);
+    this.assistantText = "";
+    this.forceNoThinking = false;
+    this.setPhase("executing");
+    this.sse.agent({ type: "response_clear" });
+    this.sse.agent({ type: "text_delta", delta: fallback.text });
+    this.stageAuditEvent("research_proof_deterministic_fallback", {
+      sourceCount: fallback.sourceCount,
+      verifierReason: reason.slice(0, 500),
+    });
+    return true;
+  }
+
+  private applyEmptyResponseTerminalFallback(input: {
+    model: string;
+    retries: number;
+    fallbackUsed: boolean;
+  }): void {
+    const fallbackSentence = input.fallbackUsed
+      ? "The fallback text model was also tried but returned no visible text."
+      : "No fallback text model was available for this turn.";
+    const text = [
+      "Runtime diagnostic: the model/provider did not produce visible text after the configured empty-response retries.",
+      fallbackSentence,
+      "No final answer from the model was committed.",
+      "Please retry the request or switch providers; this diagnostic was committed so the conversation does not end with an empty response.",
+    ].join(" ");
+    const fallbackBlock: LLMContentBlock = { type: "text", text };
+    const toolUseBlocks = this.emittedAssistantBlocks.filter(
+      (block): block is Extract<LLMContentBlock, { type: "tool_use" }> =>
+        block.type === "tool_use",
+    );
+    const canonicalToolMessages = this.canonicalAssistantMessages
+      .map((blocks) => blocks.filter((block) => block.type === "tool_use"))
+      .filter((blocks) => blocks.length > 0);
+
+    this.emittedAssistantBlocks = [...toolUseBlocks, fallbackBlock];
+    this.canonicalAssistantMessages = [...canonicalToolMessages, [fallbackBlock]];
+    this.assistantText = "";
+    this.forceNoThinking = false;
+    this.setStopReason("empty_response_retry_exhausted");
+    this.setPhase("executing");
+    this.sse.agent({ type: "response_clear" });
+    this.sse.agent({ type: "text_delta", delta: text });
+    this.stageAuditEvent("empty_response_terminal_fallback", {
+      retries: input.retries,
+      model: input.model,
+      fallbackUsed: input.fallbackUsed,
+    });
+    turnLogger.warn("empty_response_terminal_fallback", {
+      model: input.model,
+      retries: input.retries,
+      fallbackUsed: input.fallbackUsed,
+      turnId: this.meta.turnId,
+    });
+  }
+
+  private isDeterministicResearchProofRetry(reason: string): boolean {
+    if (!isResearchProofBlockReason(reason)) return false;
+    if (/\[(?:RETRY|RULE):(?:SOURCE_AUTHORITY|RESEARCH_PROOF)[^\]]*\]/iu.test(reason)) {
+      return true;
+    }
+    const turn = this.session.researchContract?.turnFor(this.meta.turnId);
+    if (turn?.sourceSensitive === true) return true;
+    if (turn?.sourceSensitive === false) return false;
+    if (!/\[(?:RETRY|RULE):CLAIM_CITATION[^\]]*\]/iu.test(reason)) return false;
+    const sources = this.session.sourceLedger?.sourcesForTurn(this.meta.turnId) ?? [];
+    if (sources.length === 0) return true;
+    return sources.some((source) =>
+      source.kind === "web_search" ||
+      source.kind === "web_fetch" ||
+      source.kind === "external_doc" ||
+      source.kind === "external_repo" ||
+      source.kind === "subagent_result",
+    );
+  }
+
+  private emitResearchProofFailureNotice(_reason: string): void {
+    // Verifier diagnostics belong in structured events/runtime traces, not
+    // assistant-visible prose. Keep the hook point so abort paths stay explicit.
+  }
+
+  private emitRuntimeFailureNoticeIfNoVisibleText(err: unknown): void {
+    if (this.interruptState || this.hasVisibleAssistantText()) return;
+    const detail = (err instanceof Error ? err.message : String(err))
+      .replace(/\s+/g, " ")
+      .trim()
+      .slice(0, 360);
+    this.sse.agent({
+      type: "text_delta",
+      delta:
+        "I could not complete the response because the model/provider call failed before producing visible text. " +
+        `Error: ${detail}. ` +
+        "No final answer was committed; please retry or switch providers if the upstream issue persists.",
+    });
   }
 
   private async recordRetryEvent(

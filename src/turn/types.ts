@@ -29,6 +29,7 @@ export type TurnStopReason =
   | "compaction_impossible"
   | "empty_response_retry_exhausted"
   | "structured_output_retry_exhausted"
+  | "commit_bypass_hooks"
   | "aborted";
 
 export interface TurnMeta {

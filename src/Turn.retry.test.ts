@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -12,18 +12,22 @@ import type { Session } from "./Session.js";
 import type { AuditLog } from "./storage/AuditLog.js";
 import { ControlEventLedger } from "./control/ControlEventLedger.js";
 import type { StructuredOutputSpec } from "./structured/StructuredOutputContract.js";
+import { SourceLedgerStore, type SourceLedgerInput } from "./research/SourceLedger.js";
+import { ResearchContractStore } from "./research/ResearchContract.js";
 
 interface ScriptedTurn {
-  blocks: Array<
+  blocks?: Array<
     | { type: "text"; text: string }
     | { type: "tool_use"; id: string; name: string; input: unknown }
   >;
-  stopReason: "end_turn" | "tool_use" | "max_tokens";
+  stopReason?: "end_turn" | "tool_use" | "max_tokens";
+  error?: Error;
 }
 
 function* scriptedEvents(turn: ScriptedTurn): Generator<LLMEvent, void, void> {
+  if (turn.error) throw turn.error;
   let idx = 0;
-  for (const block of turn.blocks) {
+  for (const block of turn.blocks ?? []) {
     if (block.type === "text") {
       yield { kind: "text_delta", blockIndex: idx, delta: block.text };
     } else {
@@ -39,7 +43,7 @@ function* scriptedEvents(turn: ScriptedTurn): Generator<LLMEvent, void, void> {
   }
   yield {
     kind: "message_end",
-    stopReason: turn.stopReason,
+    stopReason: turn.stopReason ?? "end_turn",
     usage: { inputTokens: 5, outputTokens: 5 },
   };
 }
@@ -111,6 +115,10 @@ async function makeFixture(script: ScriptedTurn[] = [
   runtimeModel?: string;
   blockRetryPreLlm?: boolean;
   beforeCommitBlockReason?: string;
+  sources?: SourceLedgerInput[];
+  userMessageText?: string;
+  responseDeadlineMs?: number;
+  toolExecute?: (input: unknown) => Promise<{ status: "ok"; durationMs: number; output: string }>;
 } = {}): Promise<{
   turn: Turn;
   llm: ScriptedLLM;
@@ -119,11 +127,16 @@ async function makeFixture(script: ScriptedTurn[] = [
   sse: FakeSse;
 }> {
   const workspaceRoot = await fs.mkdtemp(path.join(os.tmpdir(), "turn-retry-"));
-  const sessionsDir = path.join(workspaceRoot, "core-agent", "sessions");
+  const sessionsDir = path.join(workspaceRoot, "magi-agent", "sessions");
   await fs.mkdir(sessionsDir, { recursive: true });
 
   const llm = new ScriptedLLM(script);
   const transcript = new Transcript(sessionsDir, "agent:main:app:general:1");
+  const sourceLedger = new SourceLedgerStore({ now: () => 10 });
+  for (const source of opts.sources ?? []) {
+    sourceLedger.recordSource(source);
+  }
+  const researchContract = new ResearchContractStore({ now: () => 11 });
   const controlEvents = new ControlEventLedger({
     rootDir: sessionsDir,
     sessionKey: "agent:main:app:general:1",
@@ -153,6 +166,11 @@ async function makeFixture(script: ScriptedTurn[] = [
     runPost: async () => {},
     list: () => [],
   };
+  const executeEcho = opts.toolExecute ?? (async (input: unknown) => ({
+    status: "ok" as const,
+    durationMs: 1,
+    output: JSON.stringify(input),
+  }));
 
   const auditLog: Pick<AuditLog, "append"> = {
     append: async () => {},
@@ -165,7 +183,7 @@ async function makeFixture(script: ScriptedTurn[] = [
     apiProxyUrl: "http://localhost",
     chatProxyUrl: "http://localhost",
     redisUrl: "redis://localhost",
-    model: "claude-opus-4-7",
+    model: "claude-opus-4-6",
   };
   const agentStub = {
     config: agentConfig,
@@ -179,11 +197,7 @@ async function makeFixture(script: ScriptedTurn[] = [
           permission: "read" as const,
           description: "Echo test tool",
           inputSchema: { type: "object", properties: {} },
-          execute: async (input: unknown) => ({
-            status: "ok" as const,
-            durationMs: 1,
-            output: JSON.stringify(input),
-          }),
+          execute: executeEcho,
         },
       ],
       resolve: (name: string) =>
@@ -194,11 +208,7 @@ async function makeFixture(script: ScriptedTurn[] = [
               permission: "read" as const,
               description: "Echo test tool",
               inputSchema: { type: "object", properties: {} },
-              execute: async (input: unknown) => ({
-                status: "ok" as const,
-                durationMs: 1,
-                output: JSON.stringify(input),
-              }),
+              execute: executeEcho,
             }
           : undefined,
     },
@@ -222,6 +232,8 @@ async function makeFixture(script: ScriptedTurn[] = [
     },
     transcript,
     controlEvents,
+    sourceLedger,
+    researchContract,
     agent: agentStub,
     budgetExceeded: () => ({ exceeded: false as const }),
     budgetStats: () => ({ turns: 0, inputTokens: 0, outputTokens: 0, costUsd: 0 }),
@@ -232,7 +244,7 @@ async function makeFixture(script: ScriptedTurn[] = [
     getStructuredOutputContract: () => opts.structuredOutputContract ?? null,
   };
   const userMessage: UserMessage = {
-    text: "answer with evidence",
+    text: opts.userMessageText ?? "answer with evidence",
     receivedAt: Date.now(),
   };
   const sse = new FakeSse();
@@ -244,6 +256,11 @@ async function makeFixture(script: ScriptedTurn[] = [
       "turn-retry-1",
       sse,
       "direct",
+      {
+        ...(opts.responseDeadlineMs !== undefined
+          ? { responseDeadlineMs: opts.responseDeadlineMs }
+          : {}),
+      },
     ),
     llm,
     transcript,
@@ -310,38 +327,259 @@ describe("Turn blocked-output retry", () => {
     );
   });
 
-  it("does not leave user-visible text when retry preflight fails after clearing a blocked draft", async () => {
-    const { turn, transcript, sse } = await makeFixture(undefined, {
-      blockRetryPreLlm: true,
-    });
+  it("switches to text-only finalization when the response deadline is close after tool evidence", async () => {
+    let now = 1_000_000;
+    const nowSpy = vi.spyOn(Date, "now").mockImplementation(() => now);
+    try {
+      const { turn, llm } = await makeFixture([
+        {
+          blocks: [{ type: "tool_use", id: "tool_deadline", name: "Echo", input: { q: "source lookup" } }],
+          stopReason: "tool_use",
+        },
+        {
+          blocks: [{ type: "text", text: "Final synthesis from inspected evidence [src_1]." }],
+          stopReason: "end_turn",
+        },
+      ], {
+        responseDeadlineMs: 60_000,
+        toolExecute: async (input: unknown) => {
+          now += 35_000;
+          return {
+            status: "ok",
+            durationMs: 1,
+            output: JSON.stringify(input),
+          };
+        },
+      });
 
-    await turn.execute();
-    await expect(turn.commitWithRetry()).rejects.toThrow("retry preflight timeout");
+      await turn.execute();
 
-    const visible = visibleTextAfterLastClear(sse.agentEvents);
-    expect(visible).toBe("");
-
-    const entries = await transcript.readAll();
-    expect(entries.some((entry) => entry.kind === "assistant_text")).toBe(false);
+      expect(llm.calls).toHaveLength(2);
+      expect(llm.calls[0]?.tools?.map((tool) => tool.name)).toEqual(["Echo"]);
+      expect(llm.calls[1]?.tools ?? []).toEqual([]);
+      expect(JSON.stringify(llm.calls[1]?.messages)).toContain(
+        "Response deadline is approaching",
+      );
+      expect(llm.calls[1]?.thinking).toEqual({ type: "disabled" });
+    } finally {
+      nowSpy.mockRestore();
+    }
   });
 
-  it("does not commit an empty response produced by a blocked-commit retry", async () => {
+  it("surfaces a visible failure report when the first LLM call fails before text", async () => {
     const { turn, transcript, sse } = await makeFixture([
-      { blocks: [{ type: "text", text: "Unsupported claim." }], stopReason: "end_turn" },
-      { blocks: [], stopReason: "end_turn" },
+      { error: new Error('{"error":{"type":"api_error","message":"Upstream provider error (503)"}}') },
     ]);
 
-    await turn.execute();
-    await expect(turn.commitWithRetry()).rejects.toThrow(
-      "blocked commit retry produced no visible response",
-    );
+    await expect(turn.execute()).rejects.toThrow("Upstream provider error");
 
     const visible = visibleTextAfterLastClear(sse.agentEvents);
-    expect(visible).toBe("");
+    expect(visible).toContain("I could not complete the response");
+    expect(visible).toContain("model/provider call failed");
+    expect(visible).toContain("Upstream provider error");
 
     const entries = await transcript.readAll();
     expect(entries.some((entry) => entry.kind === "assistant_text")).toBe(false);
     expect(entries.some((entry) => entry.kind === "turn_committed")).toBe(false);
+  });
+
+  it("passes through when retry preflight fails after clearing a blocked draft", async () => {
+    const { turn } = await makeFixture(undefined, {
+      blockRetryPreLlm: true,
+    });
+
+    await turn.execute();
+    const result = await turn.commitWithRetry();
+
+    expect(result.status).toBe("committed");
+  });
+
+  it("passes through the original draft when resample produces an empty response", async () => {
+    const { turn } = await makeFixture([
+      { blocks: [{ type: "text", text: "Unsupported claim." }], stopReason: "end_turn" },
+      { blocks: [], stopReason: "end_turn" },
+    ], {
+      beforeCommitBlockReason: "generic verifier block",
+    });
+
+    await turn.execute();
+    const result = await turn.commitWithRetry();
+
+    expect(result.status).toBe("committed");
+  });
+
+  it("passes through the original draft when deterministic fallback is unavailable", async () => {
+    const { turn, llm } = await makeFixture([
+      { blocks: [{ type: "text", text: "Unsupported claim." }], stopReason: "end_turn" },
+    ], {
+      beforeCommitBlockReason:
+        "[RETRY:CLAIM_CITATION]\n" +
+        "Available inspected sources:\n" +
+        "- [src_99] web_fetch - Stale Source: https://stale.example\n" +
+        "Missing citation examples:\n" +
+        "1. Unsupported claim.",
+      userMessageText: "최신 OpenCode 도구 구성을 조사해줘.",
+      sources: [
+        {
+          turnId: "turn-retry-1",
+          toolName: "WebFetch",
+          kind: "web_fetch",
+          uri: "https://example.com",
+          title: "Example Source",
+          snippets: ["Example Source states the supported answer in concrete terms."],
+        },
+      ],
+    });
+
+    await turn.execute();
+    const result = await turn.commitWithRetry();
+
+    expect(result.status).toBe("committed");
+    expect(result.finalText).toBe("Unsupported claim.");
+    expect(llm.calls).toHaveLength(1);
+  });
+
+  it("does not commit a deterministic source-ledger fallback for research proof retries", async () => {
+    const { turn, llm } = await makeFixture([
+      { blocks: [{ type: "text", text: "Unsupported claim." }], stopReason: "end_turn" },
+    ], {
+      beforeCommitBlockReason:
+        "[RETRY:CLAIM_CITATION]\n" +
+        "Available inspected sources:\n" +
+        "- [src_1] web_fetch - Example Source: https://example.com\n" +
+        "Missing citation examples:\n" +
+        "1. Unsupported claim.",
+      userMessageText: "최신 OpenCode 도구 구성을 조사해줘.",
+      sources: [
+        {
+          turnId: "turn-retry-1",
+          toolName: "WebFetch",
+          toolUseId: "tool_source_1",
+          kind: "web_fetch",
+          uri: "https://example.com",
+          title: "Example Source",
+          snippets: ["Example Source states the supported answer in concrete terms."],
+        },
+      ],
+    });
+
+    await turn.execute();
+    const result = await turn.commitWithRetry();
+
+    expect(result.status).toBe("committed");
+    expect(result.finalText).toBe("Unsupported claim.");
+    expect(llm.calls).toHaveLength(1);
+  });
+
+  it("does not commit a deterministic fallback for terminal research citation rule blocks", async () => {
+    const { turn, llm, transcript, sse } = await makeFixture([
+      { blocks: [{ type: "text", text: "Unsupported claim." }], stopReason: "end_turn" },
+    ], {
+      beforeCommitBlockReason:
+        "[RULE:CLAIM_CITATION_REQUIRED]\n" +
+        "Research claims still lack inspected-source citations after verifier retry.\n" +
+        "Missing citation count: 2.",
+      userMessageText: "최신 MCP 문서를 조사해서 한국어로 요약해줘.",
+      sources: [
+        {
+          turnId: "turn-retry-1",
+          toolName: "WebFetch",
+          toolUseId: "tool_source_1",
+          kind: "web_fetch",
+          uri: "https://example.com/mcp",
+          title: "MCP Docs",
+          snippets: ["MCP Docs describe the protocol and integration model."],
+        },
+      ],
+    });
+
+    await turn.execute();
+    await expect(turn.commitWithRetry()).rejects.toThrow("beforeCommit blocked");
+
+    expect(visibleTextAfterLastClear(sse.agentEvents)).toBe("");
+    expect(llm.calls).toHaveLength(1);
+
+    const entries = await transcript.readAll();
+    expect(entries.some((entry) => entry.kind === "assistant_text")).toBe(false);
+    expect(entries.some((entry) => entry.kind === "turn_committed")).toBe(false);
+  });
+
+  it("does not use the research proof fallback for non-research claim citation retries", async () => {
+    const { turn, llm } = await makeFixture([
+      { blocks: [{ type: "text", text: "Unsupported claim." }], stopReason: "end_turn" },
+      { blocks: [{ type: "text", text: "Coding benchmark fixed with tests passing. [src_1]" }], stopReason: "end_turn" },
+    ], {
+      beforeCommitBlockReason:
+        "[RETRY:CLAIM_CITATION]\n" +
+        "Available inspected sources:\n" +
+        "- [src_1] file - Coding benchmark report: file:///workspace/report.json\n" +
+        "Missing citation examples:\n" +
+        "1. Unsupported claim.",
+      userMessageText: "Run the coding benchmark smoke and tell me the result.",
+      sources: [
+        {
+          turnId: "turn-retry-1",
+          toolName: "FileRead",
+          toolUseId: "tool_source_1",
+          kind: "file",
+          uri: "file:///workspace/report.json",
+          title: "Coding benchmark report",
+          snippets: ["Coding benchmark fixed with tests passing."],
+        },
+      ],
+    });
+
+    await turn.execute();
+    const result = await turn.commitWithRetry();
+
+    expect(result.status).toBe("committed");
+    expect(result.finalText).toBe("Coding benchmark fixed with tests passing. [src_1]");
+    expect(result.finalText).not.toContain("Verified from inspected sources");
+    expect(llm.calls).toHaveLength(2);
+  });
+
+  it("aborts research proof retries without another LLM call when no inspected source fallback exists", async () => {
+    const { turn, llm } = await makeFixture([
+      { blocks: [{ type: "text", text: "Unsupported claim." }], stopReason: "end_turn" },
+    ], {
+      beforeCommitBlockReason:
+        "[RETRY:CLAIM_CITATION]\n" +
+        "This is a source-sensitive research answer, but no source was inspected this turn.",
+      userMessageText: "최신 OpenCode 도구 구성을 조사해줘.",
+    });
+
+    await turn.execute();
+    const result = await turn.commitWithRetry();
+
+    expect(result.status).toBe("committed");
+    expect(result.finalText).toBe("Unsupported claim.");
+    expect(llm.calls).toHaveLength(1);
+  });
+
+  it("passes through the original draft when no source fallback exists and resample would loop", async () => {
+    const { turn, llm } = await makeFixture([
+      { blocks: [{ type: "text", text: "Unsupported claim." }], stopReason: "end_turn" },
+      {
+        blocks: [{ type: "tool_use", id: "tool_retry", name: "Echo", input: { q: "more" } }],
+        stopReason: "tool_use",
+      },
+      { blocks: [{ type: "text", text: "Should not run." }], stopReason: "end_turn" },
+    ], {
+      beforeCommitBlockReason:
+        "[RETRY:CLAIM_CITATION]\n" +
+        "Available inspected sources:\n" +
+        "- [src_1] web_fetch - Example Source: https://example.com\n" +
+        "Missing citation examples:\n" +
+        "1. Unsupported claim.",
+      userMessageText: "최신 OpenCode 도구 구성을 조사해줘.",
+    });
+
+    await turn.execute();
+    const result = await turn.commitWithRetry();
+
+    expect(result.status).toBe("committed");
+    expect(result.finalText).toBe("Unsupported claim.");
+    expect(llm.calls).toHaveLength(1);
   });
 
   it("does not resample when a sealed-files verifier blocks the commit", async () => {
@@ -453,6 +691,270 @@ describe("Turn blocked-output retry", () => {
     expect(retryMessages).not.toContain("tool_orphan");
   });
 
+  it("retries iter-level LLM stream error once before aborting the turn", async () => {
+    const script: (ScriptedTurn | Error)[] = [
+      new Error("aborted"),
+      { blocks: [{ type: "text", text: "Recovered answer." }], stopReason: "end_turn" },
+    ];
+    const workspaceRoot = await fs.mkdtemp(path.join(os.tmpdir(), "turn-stream-retry-"));
+    const sessionsDir = path.join(workspaceRoot, "magi-agent", "sessions");
+    await fs.mkdir(sessionsDir, { recursive: true });
+
+    class StreamRetryLLM {
+      readonly calls: LLMStreamRequest[] = [];
+      async *stream(req: LLMStreamRequest): AsyncGenerator<LLMEvent, void, void> {
+        this.calls.push(req);
+        const next = script.shift();
+        if (!next) throw new Error("StreamRetryLLM exhausted");
+        if (next instanceof Error) throw next;
+        for (const evt of scriptedEvents(next)) yield evt;
+      }
+    }
+    const llm = new StreamRetryLLM();
+    const transcript = new Transcript(sessionsDir, "agent:main:app:general:1");
+    const controlEvents = new ControlEventLedger({
+      rootDir: sessionsDir,
+      sessionKey: "agent:main:app:general:1",
+      transcript,
+    });
+    const hooks = {
+      runPre: async (_point: string, args: unknown) => ({ action: "continue" as const, args }),
+      runPost: async () => {},
+      list: () => [],
+    };
+    const auditLog: Pick<AuditLog, "append"> = { append: async () => {} };
+    const agentConfig = {
+      botId: "bot-stream-retry",
+      userId: "user-stream-retry",
+      workspaceRoot,
+      gatewayToken: "test",
+      apiProxyUrl: "http://localhost",
+      chatProxyUrl: "http://localhost",
+      redisUrl: "redis://localhost",
+      model: "claude-opus-4-6",
+    };
+    const agentStub = {
+      config: agentConfig,
+      resolveRuntimeModel: async () => agentConfig.model,
+      hooks,
+      tools: { list: () => [], resolve: () => undefined },
+      intent: { classify: async () => ["general"] },
+      workspace: { loadIdentity: async () => ({}) },
+      auditLog,
+      llm,
+      sessionsDir,
+      contextEngine: {
+        maybeCompact: async () => {},
+        buildMessagesFromTranscript: () => [],
+      },
+    };
+    const sessionStub = {
+      meta: {
+        sessionKey: "agent:main:app:general:1",
+        botId: "bot-stream-retry",
+        channel: { type: "app" as const, channelId: "general" },
+        createdAt: Date.now(),
+        lastActivityAt: Date.now(),
+      },
+      transcript,
+      controlEvents,
+      agent: agentStub,
+      budgetExceeded: () => ({ exceeded: false as const }),
+      budgetStats: () => ({ turns: 0, inputTokens: 0, outputTokens: 0, costUsd: 0 }),
+      maxTurns: 100,
+      maxCostUsd: 10,
+      setActiveSse: () => {},
+      hasPendingInjections: () => false,
+      getStructuredOutputContract: () => null,
+    };
+    const sse = new FakeSse();
+    const turn = new Turn(
+      sessionStub as unknown as Session,
+      { text: "hello", receivedAt: Date.now() },
+      "turn-stream-retry-1",
+      sse,
+      "direct",
+    );
+
+    await turn.execute();
+    const result = await turn.commitWithRetry();
+
+    expect(result).toMatchObject({ status: "committed", finalText: "Recovered answer." });
+    expect(llm.calls).toHaveLength(2);
+  });
+
+  it("aborts the turn when iter-level stream error retry is also exhausted", async () => {
+    const script: Error[] = [
+      new Error("aborted"),
+      new Error("aborted"),
+    ];
+    const workspaceRoot = await fs.mkdtemp(path.join(os.tmpdir(), "turn-stream-exhaust-"));
+    const sessionsDir = path.join(workspaceRoot, "magi-agent", "sessions");
+    await fs.mkdir(sessionsDir, { recursive: true });
+
+    class StreamExhaustLLM {
+      readonly calls: LLMStreamRequest[] = [];
+      async *stream(req: LLMStreamRequest): AsyncGenerator<LLMEvent, void, void> {
+        this.calls.push(req);
+        const next = script.shift();
+        if (!next) throw new Error("StreamExhaustLLM exhausted");
+        throw next;
+      }
+    }
+    const llm = new StreamExhaustLLM();
+    const transcript = new Transcript(sessionsDir, "agent:main:app:general:1");
+    const controlEvents = new ControlEventLedger({
+      rootDir: sessionsDir,
+      sessionKey: "agent:main:app:general:1",
+      transcript,
+    });
+    const hooks = {
+      runPre: async (_point: string, args: unknown) => ({ action: "continue" as const, args }),
+      runPost: async () => {},
+      list: () => [],
+    };
+    const auditLog: Pick<AuditLog, "append"> = { append: async () => {} };
+    const agentConfig = {
+      botId: "bot-stream-exhaust",
+      userId: "user-stream-exhaust",
+      workspaceRoot,
+      gatewayToken: "test",
+      apiProxyUrl: "http://localhost",
+      chatProxyUrl: "http://localhost",
+      redisUrl: "redis://localhost",
+      model: "claude-opus-4-6",
+    };
+    const agentStub = {
+      config: agentConfig,
+      resolveRuntimeModel: async () => agentConfig.model,
+      hooks,
+      tools: { list: () => [], resolve: () => undefined },
+      intent: { classify: async () => ["general"] },
+      workspace: { loadIdentity: async () => ({}) },
+      auditLog,
+      llm,
+      sessionsDir,
+      contextEngine: {
+        maybeCompact: async () => {},
+        buildMessagesFromTranscript: () => [],
+      },
+    };
+    const sessionStub = {
+      meta: {
+        sessionKey: "agent:main:app:general:1",
+        botId: "bot-stream-exhaust",
+        channel: { type: "app" as const, channelId: "general" },
+        createdAt: Date.now(),
+        lastActivityAt: Date.now(),
+      },
+      transcript,
+      controlEvents,
+      agent: agentStub,
+      budgetExceeded: () => ({ exceeded: false as const }),
+      budgetStats: () => ({ turns: 0, inputTokens: 0, outputTokens: 0, costUsd: 0 }),
+      maxTurns: 100,
+      maxCostUsd: 10,
+      setActiveSse: () => {},
+      hasPendingInjections: () => false,
+      getStructuredOutputContract: () => null,
+    };
+    const sse = new FakeSse();
+    const turn = new Turn(
+      sessionStub as unknown as Session,
+      { text: "hello", receivedAt: Date.now() },
+      "turn-stream-exhaust-1",
+      sse,
+      "direct",
+    );
+
+    await expect(turn.execute()).rejects.toThrow("aborted");
+    expect(llm.calls).toHaveLength(2);
+  });
+
+  it("does not retry AbortError from client signal cancellation", async () => {
+    const workspaceRoot = await fs.mkdtemp(path.join(os.tmpdir(), "turn-no-retry-abort-"));
+    const sessionsDir = path.join(workspaceRoot, "magi-agent", "sessions");
+    await fs.mkdir(sessionsDir, { recursive: true });
+
+    class AbortErrorLLM {
+      readonly calls: LLMStreamRequest[] = [];
+      async *stream(req: LLMStreamRequest): AsyncGenerator<LLMEvent, void, void> {
+        this.calls.push(req);
+        const err = new Error("The operation was aborted");
+        err.name = "AbortError";
+        throw err;
+      }
+    }
+    const llm = new AbortErrorLLM();
+    const transcript = new Transcript(sessionsDir, "agent:main:app:general:1");
+    const controlEvents = new ControlEventLedger({
+      rootDir: sessionsDir,
+      sessionKey: "agent:main:app:general:1",
+      transcript,
+    });
+    const hooks = {
+      runPre: async (_point: string, args: unknown) => ({ action: "continue" as const, args }),
+      runPost: async () => {},
+      list: () => [],
+    };
+    const auditLog: Pick<AuditLog, "append"> = { append: async () => {} };
+    const agentConfig = {
+      botId: "bot-no-retry",
+      userId: "user-no-retry",
+      workspaceRoot,
+      gatewayToken: "test",
+      apiProxyUrl: "http://localhost",
+      chatProxyUrl: "http://localhost",
+      redisUrl: "redis://localhost",
+      model: "claude-opus-4-6",
+    };
+    const agentStub = {
+      config: agentConfig,
+      resolveRuntimeModel: async () => agentConfig.model,
+      hooks,
+      tools: { list: () => [], resolve: () => undefined },
+      intent: { classify: async () => ["general"] },
+      workspace: { loadIdentity: async () => ({}) },
+      auditLog,
+      llm,
+      sessionsDir,
+      contextEngine: {
+        maybeCompact: async () => {},
+        buildMessagesFromTranscript: () => [],
+      },
+    };
+    const sessionStub = {
+      meta: {
+        sessionKey: "agent:main:app:general:1",
+        botId: "bot-no-retry",
+        channel: { type: "app" as const, channelId: "general" },
+        createdAt: Date.now(),
+        lastActivityAt: Date.now(),
+      },
+      transcript,
+      controlEvents,
+      agent: agentStub,
+      budgetExceeded: () => ({ exceeded: false as const }),
+      budgetStats: () => ({ turns: 0, inputTokens: 0, outputTokens: 0, costUsd: 0 }),
+      maxTurns: 100,
+      maxCostUsd: 10,
+      setActiveSse: () => {},
+      hasPendingInjections: () => false,
+      getStructuredOutputContract: () => null,
+    };
+    const sse = new FakeSse();
+    const turn = new Turn(
+      sessionStub as unknown as Session,
+      { text: "hello", receivedAt: Date.now() },
+      "turn-no-retry-abort-1",
+      sse,
+      "direct",
+    );
+
+    await expect(turn.execute()).rejects.toThrow("The operation was aborted");
+    expect(llm.calls).toHaveLength(1);
+  });
+
   it("advances structured-output retry attempts and aborts only after exhaustion", async () => {
     const { turn, controlEvents } = await makeFixture([
       { blocks: [{ type: "text", text: "not json" }], stopReason: "end_turn" },
@@ -478,5 +980,27 @@ describe("Turn blocked-output retry", () => {
       .filter((event) => event.type === "structured_output")
       .map((event) => event.status);
     expect(statuses).toEqual(["invalid", "invalid", "retry_exhausted"]);
+  });
+
+  it("falls through to bypass commit when retryable block retries are exhausted", async () => {
+    const { turn, transcript, sse } = await makeFixture([
+      { blocks: [{ type: "text", text: "Unsupported claim." }], stopReason: "end_turn" },
+      { blocks: [{ type: "text", text: "Unsupported claim 2." }], stopReason: "end_turn" },
+      { blocks: [{ type: "text", text: "Unsupported claim 3." }], stopReason: "end_turn" },
+    ]);
+
+    await turn.execute();
+    const result = await turn.commitWithRetry();
+
+    expect(result.status).toBe("committed");
+    expect(result.finalText).toBe("Unsupported claim 3.");
+    expect(turn.meta.stopReason).toBe("commit_bypass_hooks");
+
+    const entries = await transcript.readAll();
+    const assistantTexts = entries
+      .filter((entry) => entry.kind === "assistant_text")
+      .map((entry) => (entry as { text: string }).text);
+    expect(assistantTexts).toEqual(["Unsupported claim 3."]);
+    expect(sse.finished).toBe(1);
   });
 });
