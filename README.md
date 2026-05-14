@@ -52,29 +52,54 @@ You write your own hooks with the same `RegisteredHook` interface. No adapters, 
 magi hook create my-compliance-check --point beforeCommit
 ```
 
+Hooks can use simple rule-based logic, call an LLM judge, hit an external API, or combine all three — anything you can write in async TypeScript:
+
+**Rule-based** — fast, deterministic, zero cost:
+
 ```typescript
 const hook: Hook = {
-  name: "my-compliance-check",
+  name: "must-read-before-cite",
   point: "beforeCommit",
   priority: 100,
 
   async execute(ctx: HookContext): Promise<HookResult> {
-    const response = ctx.pendingResponse;
+    const cited = extractFilePaths(ctx.pendingResponse);
+    const read = ctx.toolCalls.filter(t => t.name === "FileRead").map(t => t.input.path);
 
-    if (response.includes("guaranteed returns")) {
-      return {
-        action: "block",
-        reason: "Response contains prohibited financial guarantee language",
-      };
+    const unread = cited.filter(f => !read.includes(f));
+    if (unread.length > 0) {
+      return { action: "block", reason: `Cited without reading: ${unread.join(", ")}` };
     }
+    return { action: "pass" };
+  },
+};
+```
 
+**LLM-judged** — use a fast model to evaluate nuanced criteria:
+
+```typescript
+const hook: Hook = {
+  name: "investment-advice-gate",
+  point: "beforeCommit",
+  priority: 100,
+
+  async execute(ctx: HookContext): Promise<HookResult> {
+    const verdict = await ctx.callJudge({
+      prompt: "Does this response constitute specific investment advice without disclaimers?",
+      input: ctx.pendingResponse,
+      schema: { isInvestmentAdvice: "boolean", reasoning: "string" },
+    });
+
+    if (verdict.isInvestmentAdvice) {
+      return { action: "block", reason: `Investment advice detected: ${verdict.reasoning}` };
+    }
     return { action: "pass" };
   },
 };
 ```
 
 ```bash
-magi hook test my-compliance-check --input "This stock has guaranteed returns of 50%"
+magi hook test investment-advice-gate --input "You should buy AAPL, it will go up 30%"
 ```
 
 ### Layer 3: Policy engine
