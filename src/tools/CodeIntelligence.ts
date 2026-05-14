@@ -1,8 +1,10 @@
 import path from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import ts from "typescript";
 import type { Tool, ToolContext, ToolResult } from "../Tool.js";
 import { Workspace } from "../storage/Workspace.js";
 import { errorResult } from "../util/toolResult.js";
+import { parseCommandLine, StdioLspClient } from "./lspClient.js";
 
 export type CodeIntelligenceAction =
   | "definition"
@@ -16,6 +18,7 @@ export type CodeIntelligenceAction =
 
 export interface CodeIntelligenceInput {
   action: CodeIntelligenceAction;
+  language?: "typescript" | "python" | "auto";
   projectPath?: string;
   file?: string;
   line?: number;
@@ -47,7 +50,7 @@ export interface CodeIntelligenceResult {
 
 export interface CodeIntelligenceOutput {
   action: CodeIntelligenceAction;
-  language: "typescript";
+  language: "typescript" | "python";
   projectPath: string;
   results: CodeIntelligenceResult[];
   resultCount: number;
@@ -70,7 +73,13 @@ const INPUT_SCHEMA = {
         "code_actions",
       ],
       description:
-        "Semantic TypeScript operation to run: definition, references, hover, rename, code_actions, document_symbols, workspace_symbols, or diagnostics.",
+        "Semantic code-intelligence operation to run: definition, references, hover, rename, code_actions, document_symbols, workspace_symbols, or diagnostics.",
+    },
+    language: {
+      type: "string",
+      enum: ["typescript", "python", "auto"],
+      description:
+        "Language backend to use. Default/typescript uses the built-in TypeScript service. python uses the configured external Python LSP server.",
     },
     projectPath: {
       type: "string",
@@ -134,15 +143,24 @@ export function makeCodeIntelligenceTool(
   return {
     name: "CodeIntelligence",
     description:
-      "Run read-only semantic TypeScript code intelligence for coding work: go to definition, find references, rename locations, code actions, hover/type info, document symbols, workspace symbols, and compiler diagnostics. Prefer this over broad text search when navigating existing TypeScript code.",
+      "Run read-only semantic code intelligence for coding work: go to definition, find references, rename locations, code actions, hover/type info, document symbols, workspace symbols, and diagnostics. Uses the built-in TypeScript service by default and configured external LSP servers for other languages.",
     inputSchema: INPUT_SCHEMA,
     permission: "read",
+    shouldDefer: true,
     kind: "core",
     mutatesWorkspace: false,
     isConcurrencySafe: true,
     validate(input) {
       if (!input || !ACTIONS.has(input.action)) {
         return "`action` must be one of: definition, references, hover, rename, code_actions, document_symbols, workspace_symbols, diagnostics";
+      }
+      if (
+        input.language !== undefined &&
+        input.language !== "typescript" &&
+        input.language !== "python" &&
+        input.language !== "auto"
+      ) {
+        return "`language` must be typescript, python, or auto";
       }
       if (input.projectPath !== undefined && typeof input.projectPath !== "string") {
         return "`projectPath` must be a string";
@@ -193,6 +211,11 @@ export function makeCodeIntelligenceTool(
       const start = Date.now();
       try {
         const ws = ctx.spawnWorkspace ?? defaultWorkspace;
+        const language = resolveLanguage(input);
+        if (language === "python") {
+          return await runExternalLspAction(ws, input, language, start);
+        }
+
         const project = loadTypeScriptProject(ws, input.projectPath ?? ".");
         const maxResults = Math.min(200, Math.max(1, input.maxResults ?? 50));
         const allResults = runAction(project, input);
@@ -222,6 +245,13 @@ export function makeCodeIntelligenceTool(
   };
 }
 
+function resolveLanguage(input: CodeIntelligenceInput): "typescript" | "python" {
+  if (input.language === "python") return "python";
+  if (input.language === "typescript" || input.language === undefined) return "typescript";
+  if (input.file?.endsWith(".py") && pythonLspCommand().trim().length > 0) return "python";
+  return "typescript";
+}
+
 function requiresPosition(action: CodeIntelligenceAction): boolean {
   return (
     action === "definition" ||
@@ -230,6 +260,533 @@ function requiresPosition(action: CodeIntelligenceAction): boolean {
     action === "rename" ||
     action === "code_actions"
   );
+}
+
+interface ExternalLspProject {
+  client: StdioLspClient;
+  language: "python";
+  projectRoot: string;
+  projectPath: string;
+  wsRoot: string;
+  diagnostics: LspDiagnostic[];
+}
+
+interface LspPosition {
+  line: number;
+  character: number;
+}
+
+interface LspRange {
+  start: LspPosition;
+  end: LspPosition;
+}
+
+interface LspLocation {
+  uri: string;
+  range: LspRange;
+}
+
+interface LspLocationLink {
+  targetUri: string;
+  targetRange: LspRange;
+  targetSelectionRange?: LspRange;
+}
+
+interface LspDocumentSymbol {
+  name: string;
+  kind: number;
+  range: LspRange;
+  selectionRange?: LspRange;
+  children?: LspDocumentSymbol[];
+}
+
+interface LspSymbolInformation {
+  name: string;
+  kind: number;
+  location: LspLocation;
+}
+
+interface LspTextEdit {
+  range: LspRange;
+  newText: string;
+}
+
+interface LspTextDocumentEdit {
+  textDocument: {
+    uri: string;
+  };
+  edits: LspTextEdit[];
+}
+
+interface LspWorkspaceEdit {
+  changes?: Record<string, LspTextEdit[]>;
+  documentChanges?: LspTextDocumentEdit[];
+}
+
+interface LspCodeAction {
+  title: string;
+  kind?: string;
+  edit?: LspWorkspaceEdit;
+}
+
+interface LspDiagnostic {
+  range: LspRange;
+  severity?: number;
+  code?: string | number;
+  message: string;
+}
+
+async function runExternalLspAction(
+  ws: Workspace,
+  input: CodeIntelligenceInput,
+  language: "python",
+  start: number,
+): Promise<ToolResult<CodeIntelligenceOutput>> {
+  const project = await loadExternalLspProject(ws, input.projectPath ?? ".", language);
+  try {
+    const maxResults = Math.min(200, Math.max(1, input.maxResults ?? 50));
+    const allResults = await runLspAction(project, input);
+    const results = allResults.slice(0, maxResults);
+    return {
+      status: "ok",
+      output: {
+        action: input.action,
+        language,
+        projectPath: project.projectPath,
+        results,
+        resultCount: results.length,
+        truncated: allResults.length > results.length,
+      },
+      metadata: {
+        evidenceKind: "code_intelligence",
+        action: input.action,
+        language,
+        provider: "external_lsp",
+        resultCount: results.length,
+      },
+      durationMs: Date.now() - start,
+    };
+  } finally {
+    await project.client.shutdown().catch(() => project.client.dispose());
+  }
+}
+
+async function loadExternalLspProject(
+  ws: Workspace,
+  projectPath: string,
+  language: "python",
+): Promise<ExternalLspProject> {
+  const commandLine = pythonLspCommand().trim();
+  if (!commandLine) {
+    throw new Error(
+      "Python CodeIntelligence requires MAGI_CODE_INTELLIGENCE_PYTHON_LSP_COMMAND to be configured",
+    );
+  }
+  const projectRoot = ws.resolve(projectPath);
+  const parsed = parseCommandLine(commandLine);
+  const diagnostics: LspDiagnostic[] = [];
+  const client = new StdioLspClient({
+    command: parsed.command,
+    args: parsed.args,
+    cwd: projectRoot,
+    onNotification(method, params) {
+      if (method !== "textDocument/publishDiagnostics") return;
+      const value = params as { diagnostics?: LspDiagnostic[] };
+      diagnostics.splice(0, diagnostics.length, ...(value.diagnostics ?? []));
+    },
+  });
+
+  await client.initialize(pathToFileURL(projectRoot).href);
+  return {
+    client,
+    language,
+    projectRoot,
+    projectPath: workspaceRelative(ws.root, projectRoot),
+    wsRoot: ws.root,
+    diagnostics,
+  };
+}
+
+function pythonLspCommand(): string {
+  return process.env.MAGI_CODE_INTELLIGENCE_PYTHON_LSP_COMMAND ?? "";
+}
+
+async function runLspAction(
+  project: ExternalLspProject,
+  input: CodeIntelligenceInput,
+): Promise<CodeIntelligenceResult[]> {
+  switch (input.action) {
+    case "definition":
+      await openLspDocument(project, input.file ?? "");
+      return lspDefinitions(project, input);
+    case "references":
+      await openLspDocument(project, input.file ?? "");
+      return lspReferences(project, input);
+    case "hover":
+      await openLspDocument(project, input.file ?? "");
+      return lspHover(project, input);
+    case "rename":
+      await openLspDocument(project, input.file ?? "");
+      return lspRename(project, input);
+    case "code_actions":
+      await openLspDocument(project, input.file ?? "");
+      return lspCodeActions(project, input);
+    case "document_symbols":
+      await openLspDocument(project, input.file ?? "");
+      return lspDocumentSymbols(project, input.file ?? "");
+    case "workspace_symbols":
+      return lspWorkspaceSymbols(project, input.query ?? "");
+    case "diagnostics":
+      if (input.file) {
+        await openLspDocument(project, input.file);
+      }
+      return project.diagnostics
+        .map((diagnostic) => resultFromLspDiagnostic(project, input.file ?? "", diagnostic))
+        .filter((item): item is CodeIntelligenceResult => item !== null);
+  }
+}
+
+async function openLspDocument(project: ExternalLspProject, file: string): Promise<void> {
+  const absFile = resolveWorkspaceFile(project.wsRoot, file);
+  const text = ts.sys.readFile(absFile);
+  if (text === undefined) {
+    throw new Error(`File not found: ${file}`);
+  }
+  project.client.openTextDocument(pathToFileURL(absFile).href, project.language, 1, text);
+}
+
+function lspPosition(input: CodeIntelligenceInput): LspPosition {
+  return {
+    line: Math.max(0, Number(input.line) - 1),
+    character: Math.max(0, Number(input.column) - 1),
+  };
+}
+
+function lspTextDocumentPositionParams(project: ExternalLspProject, input: CodeIntelligenceInput) {
+  const absFile = resolveWorkspaceFile(project.wsRoot, input.file ?? "");
+  return {
+    textDocument: { uri: pathToFileURL(absFile).href },
+    position: lspPosition(input),
+  };
+}
+
+async function lspDefinitions(
+  project: ExternalLspProject,
+  input: CodeIntelligenceInput,
+): Promise<CodeIntelligenceResult[]> {
+  const result = await project.client.request(
+    "textDocument/definition",
+    lspTextDocumentPositionParams(project, input),
+  );
+  return normalizeLspLocations(project, result);
+}
+
+async function lspReferences(
+  project: ExternalLspProject,
+  input: CodeIntelligenceInput,
+): Promise<CodeIntelligenceResult[]> {
+  const result = await project.client.request("textDocument/references", {
+    ...lspTextDocumentPositionParams(project, input),
+    context: { includeDeclaration: true },
+  });
+  return normalizeLspLocations(project, result);
+}
+
+async function lspHover(
+  project: ExternalLspProject,
+  input: CodeIntelligenceInput,
+): Promise<CodeIntelligenceResult[]> {
+  const result = (await project.client.request(
+    "textDocument/hover",
+    lspTextDocumentPositionParams(project, input),
+  )) as { contents?: unknown; range?: LspRange } | null;
+  if (!result) return [];
+  const absFile = resolveWorkspaceFile(project.wsRoot, input.file ?? "");
+  const range = result.range ?? { start: lspPosition(input), end: lspPosition(input) };
+  const item = resultFromLspRange(project.wsRoot, pathToFileURL(absFile).href, range, {
+    text: lspHoverText(result.contents),
+  });
+  return item ? [item] : [];
+}
+
+async function lspRename(
+  project: ExternalLspProject,
+  input: CodeIntelligenceInput,
+): Promise<CodeIntelligenceResult[]> {
+  const result = (await project.client.request("textDocument/rename", {
+    ...lspTextDocumentPositionParams(project, input),
+    newName: input.newName?.trim() ?? "",
+  })) as LspWorkspaceEdit | null;
+  return workspaceEditResults(project, result, {
+    kind: "rename",
+    text: input.newName?.trim() ?? "",
+  });
+}
+
+async function lspCodeActions(
+  project: ExternalLspProject,
+  input: CodeIntelligenceInput,
+): Promise<CodeIntelligenceResult[]> {
+  const position = lspPosition(input);
+  const result = await project.client.request("textDocument/codeAction", {
+    textDocument: {
+      uri: pathToFileURL(resolveWorkspaceFile(project.wsRoot, input.file ?? "")).href,
+    },
+    range: { start: position, end: position },
+    context: { diagnostics: project.diagnostics },
+  });
+  if (!Array.isArray(result)) return [];
+  return result
+    .map((action) => lspCodeActionResult(project, action as LspCodeAction, input))
+    .filter((item): item is CodeIntelligenceResult => item !== null);
+}
+
+async function lspDocumentSymbols(
+  project: ExternalLspProject,
+  file: string,
+): Promise<CodeIntelligenceResult[]> {
+  const absFile = resolveWorkspaceFile(project.wsRoot, file);
+  const uri = pathToFileURL(absFile).href;
+  const result = await project.client.request("textDocument/documentSymbol", {
+    textDocument: { uri },
+  });
+  return normalizeLspDocumentSymbols(project, uri, result);
+}
+
+async function lspWorkspaceSymbols(
+  project: ExternalLspProject,
+  query: string,
+): Promise<CodeIntelligenceResult[]> {
+  const result = await project.client.request("workspace/symbol", { query });
+  return normalizeLspSymbols(project, result);
+}
+
+function normalizeLspDocumentSymbols(
+  project: ExternalLspProject,
+  uri: string,
+  result: unknown,
+): CodeIntelligenceResult[] {
+  if (!Array.isArray(result)) return [];
+  const out: CodeIntelligenceResult[] = [];
+  const visit = (symbol: LspDocumentSymbol): void => {
+    const item = resultFromLspRange(project.wsRoot, uri, symbol.selectionRange ?? symbol.range, {
+      name: symbol.name,
+      kind: lspSymbolKind(symbol.kind),
+    });
+    if (item) out.push(item);
+    for (const child of symbol.children ?? []) visit(child);
+  };
+  for (const value of result) {
+    const symbol = value as Partial<LspDocumentSymbol>;
+    if (typeof symbol.name === "string" && symbol.range) {
+      visit(symbol as LspDocumentSymbol);
+    }
+  }
+  return out;
+}
+
+function normalizeLspLocations(
+  project: ExternalLspProject,
+  result: unknown,
+): CodeIntelligenceResult[] {
+  const values = Array.isArray(result) ? result : result ? [result] : [];
+  return values
+    .map((value) => {
+      const item = value as Partial<LspLocation & LspLocationLink>;
+      if (typeof item.targetUri === "string" && item.targetRange) {
+        return resultFromLspRange(project.wsRoot, item.targetUri, item.targetSelectionRange ?? item.targetRange);
+      }
+      if (typeof item.uri === "string" && item.range) {
+        return resultFromLspRange(project.wsRoot, item.uri, item.range);
+      }
+      return null;
+    })
+    .filter((item): item is CodeIntelligenceResult => item !== null);
+}
+
+function normalizeLspSymbols(
+  project: ExternalLspProject,
+  result: unknown,
+): CodeIntelligenceResult[] {
+  if (!Array.isArray(result)) return [];
+  const out: CodeIntelligenceResult[] = [];
+
+  for (const value of result) {
+    const maybeInfo = value as Partial<LspSymbolInformation>;
+    if (maybeInfo.location && typeof maybeInfo.name === "string") {
+      const item = resultFromLspRange(project.wsRoot, maybeInfo.location.uri, maybeInfo.location.range, {
+        name: maybeInfo.name,
+        kind: lspSymbolKind(Number(maybeInfo.kind)),
+      });
+      if (item) out.push(item);
+    }
+  }
+  return out;
+}
+
+function workspaceEditResults(
+  project: ExternalLspProject,
+  edit: LspWorkspaceEdit | null,
+  extra: Partial<CodeIntelligenceResult>,
+): CodeIntelligenceResult[] {
+  if (!edit) return [];
+  const changes = lspTextEdits(edit);
+  return changes
+    .map((change) => resultFromLspRange(project.wsRoot, change.uri, change.edit.range, {
+      ...extra,
+      newText: change.edit.newText,
+    }))
+    .filter((item): item is CodeIntelligenceResult => item !== null);
+}
+
+function lspTextEdits(edit: LspWorkspaceEdit): Array<{ uri: string; edit: LspTextEdit }> {
+  const out: Array<{ uri: string; edit: LspTextEdit }> = [];
+  for (const [uri, edits] of Object.entries(edit.changes ?? {})) {
+    for (const item of edits) out.push({ uri, edit: item });
+  }
+  for (const change of edit.documentChanges ?? []) {
+    if (!("textDocument" in change) || !Array.isArray(change.edits)) continue;
+    for (const item of change.edits) out.push({ uri: change.textDocument.uri, edit: item });
+  }
+  return out;
+}
+
+function lspCodeActionResult(
+  project: ExternalLspProject,
+  action: LspCodeAction,
+  input: CodeIntelligenceInput,
+): CodeIntelligenceResult | null {
+  const edits = action.edit ? lspTextEdits(action.edit) : [];
+  const first = edits[0] ?? null;
+  const uri = first?.uri ?? pathToFileURL(resolveWorkspaceFile(project.wsRoot, input.file ?? "")).href;
+  const position = lspPosition(input);
+  const range = first?.edit.range ?? { start: position, end: position };
+  const targetFiles = [
+    ...new Set(
+      edits
+        .map((edit) => pathFromFileUri(edit.uri))
+        .filter((file): file is string => file !== null && isInside(project.wsRoot, file))
+        .map((file) => workspaceRelative(project.wsRoot, file)),
+    ),
+  ];
+  return resultFromLspRange(project.wsRoot, uri, range, {
+    name: action.kind,
+    kind: "code_action",
+    text: action.title,
+    editCount: edits.length,
+    targetFiles,
+    ...(first ? { newText: first.edit.newText } : {}),
+  });
+}
+
+function resultFromLspDiagnostic(
+  project: ExternalLspProject,
+  file: string,
+  diagnostic: LspDiagnostic,
+): CodeIntelligenceResult | null {
+  const absFile = file ? resolveWorkspaceFile(project.wsRoot, file) : null;
+  if (!absFile) return null;
+  return resultFromLspRange(project.wsRoot, pathToFileURL(absFile).href, diagnostic.range, {
+    severity: lspDiagnosticSeverity(diagnostic.severity),
+    code: diagnostic.code === undefined ? undefined : String(diagnostic.code),
+    text: diagnostic.message,
+  });
+}
+
+function resultFromLspRange(
+  wsRoot: string,
+  uri: string,
+  range: LspRange,
+  extra: Partial<CodeIntelligenceResult> = {},
+): CodeIntelligenceResult | null {
+  const file = pathFromFileUri(uri);
+  if (!file || !isInside(wsRoot, file)) return null;
+  const content = ts.sys.readFile(file) ?? "";
+  const startOffset = offsetFromLspPosition(content, range.start);
+  const endOffset = offsetFromLspPosition(content, range.end);
+  return {
+    ...extra,
+    file: workspaceRelative(wsRoot, file),
+    line: range.start.line + 1,
+    column: range.start.character + 1,
+    endLine: range.end.line + 1,
+    endColumn: range.end.character + 1,
+    startOffset,
+    length: Math.max(0, endOffset - startOffset),
+    sourceText: content.slice(startOffset, endOffset),
+    preview: linePreview(file, range.start.line + 1),
+  };
+}
+
+function pathFromFileUri(uri: string): string | null {
+  try {
+    return fileURLToPath(uri);
+  } catch {
+    return null;
+  }
+}
+
+function offsetFromLspPosition(content: string, position: LspPosition): number {
+  const lines = content.split(/\n/);
+  let offset = 0;
+  for (let i = 0; i < Math.min(position.line, lines.length); i++) {
+    offset += (lines[i] ?? "").length + 1;
+  }
+  const line = lines[position.line] ?? "";
+  return offset + Math.min(position.character, line.replace(/\r$/, "").length);
+}
+
+function lspHoverText(contents: unknown): string {
+  if (typeof contents === "string") return contents;
+  if (Array.isArray(contents)) {
+    return contents.map(lspHoverText).filter(Boolean).join("\n");
+  }
+  if (contents && typeof contents === "object") {
+    const item = contents as { value?: unknown; language?: unknown };
+    if (typeof item.value === "string") return item.value;
+  }
+  return "";
+}
+
+function lspDiagnosticSeverity(severity: number | undefined): CodeIntelligenceResult["severity"] {
+  if (severity === 1) return "error";
+  if (severity === 2) return "warning";
+  if (severity === 3) return "message";
+  if (severity === 4) return "suggestion";
+  return "message";
+}
+
+function lspSymbolKind(kind: number): string {
+  const names = [
+    "",
+    "File",
+    "Module",
+    "Namespace",
+    "Package",
+    "Class",
+    "Method",
+    "Property",
+    "Field",
+    "Constructor",
+    "Enum",
+    "Interface",
+    "Function",
+    "Variable",
+    "Constant",
+    "String",
+    "Number",
+    "Boolean",
+    "Array",
+    "Object",
+    "Key",
+    "Null",
+    "EnumMember",
+    "Struct",
+    "Event",
+    "Operator",
+    "TypeParameter",
+  ];
+  return names[kind] ?? `SymbolKind${kind}`;
 }
 
 function loadTypeScriptProject(ws: Workspace, projectPath: string): TypeScriptProject {

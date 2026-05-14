@@ -67,6 +67,17 @@ export class MissionClient {
     return Array.isArray(response) ? response[0] ?? {} : response;
   }
 
+  async createArtifact(
+    missionId: string,
+    input: Record<string, unknown>,
+  ): Promise<Record<string, unknown>> {
+    const response = await this.request(
+      `/v1/missions/${encodeURIComponent(missionId)}/artifacts`,
+      input,
+    );
+    return Array.isArray(response) ? response[0] ?? {} : response;
+  }
+
   async listActionEvents(
     input: ListMissionActionEventsInput = {},
   ): Promise<MissionActionEvent[]> {

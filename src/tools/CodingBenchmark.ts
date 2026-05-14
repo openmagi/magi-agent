@@ -5,6 +5,10 @@ import type { Tool, ToolContext, ToolResult } from "../Tool.js";
 export type CodingBenchmarkOutcome = "passed" | "failed" | "blocked";
 export type CodingBenchmarkSuite = "coding-golden-v1";
 export type CodingBenchmarkLanguage = "javascript" | "python";
+export type CodingBenchmarkHarnessCapability =
+  | "child_worktree_adoption"
+  | "child_worktree_conflict_disposition"
+  | "tournament_worktree";
 
 export interface CodingBenchmarkInput {
   action: "record" | "summary" | "list_tasks" | "start_run" | "report";
@@ -13,6 +17,7 @@ export interface CodingBenchmarkInput {
   taskIds?: string[];
   languages?: CodingBenchmarkLanguage[];
   categories?: string[];
+  harnessCapabilities?: CodingBenchmarkHarnessCapability[];
   taskId?: string;
   category?: string;
   outcome?: CodingBenchmarkOutcome;
@@ -28,6 +33,7 @@ export interface CodingGoldenTask {
   title: string;
   language: CodingBenchmarkLanguage;
   category: string;
+  harnessCapabilities?: CodingBenchmarkHarnessCapability[];
   prompt: string;
   verificationCommands: string[];
   successCriteria: string[];
@@ -39,6 +45,7 @@ export interface CodingGoldenTaskInfo {
   title: string;
   language: CodingBenchmarkLanguage;
   category: string;
+  harnessCapabilities: CodingBenchmarkHarnessCapability[];
   prompt: string;
   verificationCommands: string[];
   successCriteria: string[];
@@ -49,6 +56,7 @@ export interface CodingGoldenRunTask {
   title: string;
   language: CodingBenchmarkLanguage;
   category: string;
+  harnessCapabilities: CodingBenchmarkHarnessCapability[];
   workspacePath: string;
   prompt: string;
   verificationCommands: string[];
@@ -99,6 +107,10 @@ export interface CodingBenchmarkCategoryReport extends CodingBenchmarkReportGrou
   category: string;
 }
 
+export interface CodingBenchmarkHarnessCapabilityReport extends CodingBenchmarkReportGroup {
+  harnessCapability: string;
+}
+
 export interface CodingBenchmarkTaskReport extends CodingBenchmarkReportGroup {
   taskId: string;
   language: string;
@@ -123,6 +135,7 @@ export interface CodingBenchmarkReport {
   summary: CodingBenchmarkSummary;
   byCategory: CodingBenchmarkCategoryReport[];
   byLanguage: CodingBenchmarkLanguageReport[];
+  byHarnessCapability: CodingBenchmarkHarnessCapabilityReport[];
   byTask: CodingBenchmarkTaskReport[];
   goldenRuns: CodingBenchmarkGoldenRunReport[];
 }
@@ -151,6 +164,17 @@ const INPUT_SCHEMA = {
       items: { type: "string", enum: ["javascript", "python"] },
     },
     categories: { type: "array", items: { type: "string" } },
+    harnessCapabilities: {
+      type: "array",
+      items: {
+        type: "string",
+        enum: [
+          "child_worktree_adoption",
+          "child_worktree_conflict_disposition",
+          "tournament_worktree",
+        ],
+      },
+    },
     taskId: { type: "string" },
     category: { type: "string" },
     outcome: { type: "string", enum: ["passed", "failed", "blocked"] },
@@ -172,6 +196,7 @@ export function makeCodingBenchmarkTool(
       "Record and summarize coding-agent benchmark outcomes, list deterministic golden coding tasks, and materialize golden benchmark run workspaces with verification commands.",
     inputSchema: INPUT_SCHEMA,
     permission: "meta",
+    shouldDefer: true,
     kind: "core",
     mutatesWorkspace: true,
     isConcurrencySafe: false,
@@ -204,6 +229,13 @@ export function makeCodingBenchmarkTool(
           if (input.categories.some((category) => typeof category !== "string" || !category.trim())) {
             return "`categories` must contain non-empty strings";
           }
+        }
+        if (input.harnessCapabilities !== undefined) {
+          if (!Array.isArray(input.harnessCapabilities) || input.harnessCapabilities.length === 0) {
+            return "`harnessCapabilities` must be a non-empty array when provided";
+          }
+          const invalid = input.harnessCapabilities.find(isUnknownHarnessCapability);
+          if (invalid) return `unknown coding benchmark harness capability: ${invalid}`;
         }
       }
       if (input.action === "record") {
@@ -276,6 +308,7 @@ export function makeCodingBenchmarkTool(
             title: task.title,
             language: task.language,
             category: task.category,
+            harnessCapabilities: task.harnessCapabilities,
             prompt: task.prompt,
             verificationCommands: task.verificationCommands,
             successCriteria: task.successCriteria,
@@ -796,6 +829,7 @@ function goldenTaskInfo(task: CodingGoldenTask): CodingGoldenTaskInfo {
     title: task.title,
     language: task.language,
     category: task.category,
+    harnessCapabilities: task.harnessCapabilities ?? [],
     prompt: task.prompt,
     verificationCommands: task.verificationCommands,
     successCriteria: task.successCriteria,
@@ -804,6 +838,14 @@ function goldenTaskInfo(task: CodingGoldenTask): CodingGoldenTaskInfo {
 
 function isUnknownGoldenTaskLanguage(value: string): boolean {
   return value !== "javascript" && value !== "python";
+}
+
+function isUnknownHarnessCapability(value: string): boolean {
+  return (
+    value !== "child_worktree_adoption" &&
+    value !== "child_worktree_conflict_disposition" &&
+    value !== "tournament_worktree"
+  );
 }
 
 function selectGoldenTasks(input: CodingBenchmarkInput): CodingGoldenTask[] {
@@ -815,9 +857,16 @@ function selectGoldenTasks(input: CodingBenchmarkInput): CodingGoldenTask[] {
   });
   const languages = new Set(input.languages);
   const categories = new Set(input.categories?.map((category) => category.trim()));
+  const harnessCapabilities = new Set(input.harnessCapabilities);
   return selected.filter((task) => {
     if (languages.size > 0 && !languages.has(task.language)) return false;
     if (categories.size > 0 && !categories.has(task.category)) return false;
+    if (
+      harnessCapabilities.size > 0 &&
+      !(task.harnessCapabilities ?? []).some((capability) => harnessCapabilities.has(capability))
+    ) {
+      return false;
+    }
     return true;
   });
 }
@@ -852,6 +901,7 @@ async function startGoldenRun(
       title: task.title,
       language: task.language,
       category: task.category,
+      harnessCapabilities: task.harnessCapabilities ?? [],
       workspacePath: relativeStorePath(workspaceRoot, workspacePath),
       prompt: task.prompt,
       verificationCommands: task.verificationCommands,
@@ -961,6 +1011,7 @@ async function writeBenchmarkReport(
 ): Promise<CodingBenchmarkReport> {
   const manifests = await readGoldenRunManifests(workspaceRoot);
   const taskLanguages = buildTaskLanguageMap(manifests);
+  const taskHarnessCapabilities = buildTaskHarnessCapabilityMap(manifests);
   const goldenRuns = summarizeGoldenRuns(manifests, records);
   const reportDir = benchmarkReportDirPath(workspaceRoot);
   await fs.mkdir(reportDir, { recursive: true });
@@ -974,6 +1025,7 @@ async function writeBenchmarkReport(
     summary,
     byCategory: summarizeByCategory(records),
     byLanguage: summarizeByLanguage(records, taskLanguages),
+    byHarnessCapability: summarizeByHarnessCapability(records, taskHarnessCapabilities),
     byTask: summarizeByTask(records, taskLanguages),
     goldenRuns,
   };
@@ -1004,6 +1056,29 @@ function summarizeByLanguage(
     .map(([language, languageRecords]) => ({
       language,
       ...summarizeReportGroup(languageRecords),
+    }));
+}
+
+function summarizeByHarnessCapability(
+  records: readonly CodingBenchmarkRecord[],
+  taskHarnessCapabilities: ReadonlyMap<string, readonly string[]>,
+): CodingBenchmarkHarnessCapabilityReport[] {
+  const groups = new Map<string, CodingBenchmarkRecord[]>();
+  for (const record of records) {
+    for (const capability of harnessCapabilitiesForRecord(record, taskHarnessCapabilities)) {
+      const group = groups.get(capability);
+      if (group) {
+        group.push(record);
+      } else {
+        groups.set(capability, [record]);
+      }
+    }
+  }
+  return [...groups.entries()]
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([harnessCapability, capabilityRecords]) => ({
+      harnessCapability,
+      ...summarizeReportGroup(capabilityRecords),
     }));
 }
 
@@ -1087,6 +1162,34 @@ function languageForRecord(
     if (runScopedLanguage) return runScopedLanguage;
   }
   return taskLanguages.get(record.taskId) ?? "unknown";
+}
+
+function buildTaskHarnessCapabilityMap(
+  manifests: readonly CodingGoldenRun[],
+): Map<string, readonly string[]> {
+  const capabilities = new Map<string, readonly string[]>();
+  for (const task of GOLDEN_TASKS) {
+    capabilities.set(task.id, task.harnessCapabilities ?? []);
+  }
+  for (const run of manifests) {
+    for (const task of run.tasks) {
+      const taskCapabilities = task.harnessCapabilities ?? [];
+      capabilities.set(`${run.runId}\0${task.id}`, taskCapabilities);
+      capabilities.set(task.id, taskCapabilities);
+    }
+  }
+  return capabilities;
+}
+
+function harnessCapabilitiesForRecord(
+  record: CodingBenchmarkRecord,
+  taskHarnessCapabilities: ReadonlyMap<string, readonly string[]>,
+): readonly string[] {
+  if (record.runId) {
+    const runScopedCapabilities = taskHarnessCapabilities.get(`${record.runId}\0${record.taskId}`);
+    if (runScopedCapabilities) return runScopedCapabilities;
+  }
+  return taskHarnessCapabilities.get(record.taskId) ?? [];
 }
 
 async function readGoldenRunManifests(workspaceRoot: string): Promise<CodingGoldenRun[]> {
@@ -1176,6 +1279,15 @@ function renderBenchmarkMarkdown(report: CodingBenchmarkReport): string {
     ...report.byLanguage.map(
       (language) =>
         `| ${language.language} | ${language.totalRuns} | ${language.passedRuns} | ${language.failedRuns} | ${language.blockedRuns} | ${formatPercent(language.successRate)} | ${formatPercent(language.testsPassRate)} |`,
+    ),
+    "",
+    "## Harness Capabilities",
+    "",
+    "| Harness Capability | Runs | Passed | Failed | Blocked | Success | Tests |",
+    "| --- | ---: | ---: | ---: | ---: | ---: | ---: |",
+    ...report.byHarnessCapability.map(
+      (capability) =>
+        `| ${capability.harnessCapability} | ${capability.totalRuns} | ${capability.passedRuns} | ${capability.failedRuns} | ${capability.blockedRuns} | ${formatPercent(capability.successRate)} | ${formatPercent(capability.testsPassRate)} |`,
     ),
     "",
     "## Tasks",

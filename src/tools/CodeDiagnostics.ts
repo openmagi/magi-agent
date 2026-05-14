@@ -10,10 +10,13 @@ import type * as ts from "typescript";
 const execFileAsync = promisify(execFile);
 const requireFromHere = createRequire(__filename);
 
+export type CheckerKind = "typescript" | "python" | "go" | "auto";
+
 export interface CodeDiagnosticsInput {
   action?: "diagnostics" | "references" | "rename" | "codeActions" | "workspaceSymbols";
   projectPath?: string;
   maxDiagnostics?: number;
+  checker?: CheckerKind;
   file?: string;
   line?: number;
   column?: number;
@@ -50,8 +53,10 @@ export interface TypeScriptProjectOutputBase {
   checker: "typescript";
 }
 
-export interface CodeDiagnosticsReportOutput extends TypeScriptProjectOutputBase {
+export interface CodeDiagnosticsReportOutput {
   action: "diagnostics";
+  cwd: string;
+  checker: "typescript" | "python" | "go";
   passed: boolean;
   exitCode: number;
   diagnosticCount: number;
@@ -135,6 +140,8 @@ export type CodeDiagnosticsOutput =
   | CodeActionsOutput
   | CodeWorkspaceSymbolsOutput;
 
+const VALID_CHECKERS = new Set(["typescript", "python", "go", "auto"]);
+
 const INPUT_SCHEMA = {
   type: "object",
   properties: {
@@ -153,6 +160,12 @@ const INPUT_SCHEMA = {
       minimum: 1,
       maximum: 200,
       description: "Maximum diagnostics to return. Default: 50.",
+    },
+    checker: {
+      type: "string",
+      enum: ["typescript", "python", "go", "auto"],
+      description:
+        "Which diagnostics checker to run. Default auto-detects tsconfig.json, Python, or Go project files. Language-service navigation always uses TypeScript.",
     },
     file: {
       type: "string",
@@ -193,9 +206,10 @@ export function makeCodeDiagnosticsTool(
   return {
     name: "CodeDiagnostics",
     description:
-      "Run deterministic TypeScript project diagnostics and language-service navigation. Supports diagnostics, references, rename preview, code actions, and workspace symbols.",
+      "Run deterministic project diagnostics and TypeScript language-service navigation. Diagnostics support TypeScript, Python, and Go auto-detection; references, rename, code actions, and workspace symbols use TypeScript.",
     inputSchema: INPUT_SCHEMA,
     permission: "execute",
+    shouldDefer: true,
     kind: "core",
     mutatesWorkspace: false,
     validate(input) {
@@ -217,6 +231,17 @@ export function makeCodeDiagnosticsTool(
           input.maxDiagnostics > 200)
       ) {
         return "`maxDiagnostics` must be an integer in [1..200]";
+      }
+      if (input.checker !== undefined && !VALID_CHECKERS.has(input.checker)) {
+        return "`checker` must be one of: typescript, python, go, auto";
+      }
+      if (
+        action !== "diagnostics" &&
+        input.checker !== undefined &&
+        input.checker !== "typescript" &&
+        input.checker !== "auto"
+      ) {
+        return "`checker` must be typescript or auto for language-service actions";
       }
       if (
         input.maxResults !== undefined &&
@@ -266,19 +291,18 @@ export function makeCodeDiagnosticsTool(
       try {
         const cwd = workspace.resolve(input.projectPath ?? ".");
         const action = input.action ?? "diagnostics";
-        const tsconfig = path.join(cwd, "tsconfig.json");
-        try {
-          await fs.access(tsconfig);
-        } catch {
-          return {
-            status: "error",
-            errorCode: "no_tsconfig",
-            errorMessage: `No tsconfig.json found at ${relativeToWorkspace(workspaceRoot, tsconfig)}`,
-            durationMs: Date.now() - start,
-          };
-        }
-
         if (action !== "diagnostics") {
+          const tsconfig = path.join(cwd, "tsconfig.json");
+          try {
+            await fs.access(tsconfig);
+          } catch {
+            return {
+              status: "error",
+              errorCode: "no_tsconfig",
+              errorMessage: `No tsconfig.json found at ${relativeToWorkspace(workspaceRoot, tsconfig)}`,
+              durationMs: Date.now() - start,
+            };
+          }
           const language = await createTypeScriptLanguageService(workspaceRoot, cwd);
           const output = runLanguageServiceAction(language, input);
           return {
@@ -305,34 +329,79 @@ export function makeCodeDiagnosticsTool(
           };
         }
 
-        const tsc = await resolveTscBinary();
-        const { exitCode, combined } = await runTsc(tsc, cwd);
         const maxDiagnostics = input.maxDiagnostics ?? 50;
-        const diagnostics = parseTypeScriptDiagnostics(combined, cwd).slice(
-          0,
-          maxDiagnostics,
-        );
-        const output: CodeDiagnosticsOutput = {
+        const requestedChecker = input.checker ?? "auto";
+        const resolvedChecker = requestedChecker === "auto"
+          ? await autoDetectChecker(cwd)
+          : requestedChecker;
+
+        if (resolvedChecker === "typescript") {
+          const tsconfig = path.join(cwd, "tsconfig.json");
+          try {
+            await fs.access(tsconfig);
+          } catch {
+            return {
+              status: "error",
+              errorCode: "no_tsconfig",
+              errorMessage: `No tsconfig.json found at ${relativeToWorkspace(workspaceRoot, tsconfig)}`,
+              durationMs: Date.now() - start,
+            };
+          }
+          const tsc = await resolveTscBinary();
+          const { exitCode, combined } = await runTsc(tsc, cwd);
+          const diagnostics = parseTypeScriptDiagnostics(combined, cwd).slice(
+            0,
+            maxDiagnostics,
+          );
+          return makeDiagnosticsResult(workspaceRoot, cwd, "typescript", exitCode, combined, diagnostics, start);
+        }
+
+        if (resolvedChecker === "python") {
+          const binary = await resolvePythonLinter();
+          if (!binary) {
+            return {
+              status: "error",
+              errorCode: "checker_not_found",
+              errorMessage: "No Python linter found. Install ruff or flake8.",
+              durationMs: Date.now() - start,
+            };
+          }
+          const { exitCode, combined } = await runPythonLinter(binary, cwd);
+          const diagnostics = parsePythonDiagnostics(combined, cwd).slice(0, maxDiagnostics);
+          return makeDiagnosticsResult(workspaceRoot, cwd, "python", exitCode, combined, diagnostics, start);
+        }
+
+        if (resolvedChecker === "go") {
+          const hasGo = await binaryExists("go");
+          if (!hasGo) {
+            return {
+              status: "error",
+              errorCode: "checker_not_found",
+              errorMessage: "Go is not installed.",
+              durationMs: Date.now() - start,
+            };
+          }
+          const { exitCode, combined } = await runGoVet(cwd);
+          const diagnostics = parseGoDiagnostics(combined, cwd).slice(0, maxDiagnostics);
+          return makeDiagnosticsResult(workspaceRoot, cwd, "go", exitCode, combined, diagnostics, start);
+        }
+
+        const output: CodeDiagnosticsReportOutput = {
           action: "diagnostics",
           cwd: relativeToWorkspace(workspaceRoot, cwd),
           checker: "typescript",
-          passed: exitCode === 0,
-          exitCode,
-          diagnosticCount: diagnostics.length,
-          diagnostics,
-          raw: combined.slice(0, 64 * 1024),
-          truncated: combined.length > 64 * 1024,
+          passed: false,
+          exitCode: 1,
+          diagnosticCount: 0,
+          diagnostics: [],
+          raw: "",
+          truncated: false,
         };
         return {
-          status: "ok",
+          status: "error",
+          errorCode: "no_checker",
+          errorMessage: "No supported project files found (tsconfig.json, *.py, *.go).",
           output,
-          metadata: {
-            evidenceKind: "diagnostics",
-            checker: "typescript",
-            passed: output.passed,
-            diagnosticCount: output.diagnosticCount,
-            diagnostics: output.diagnostics,
-          },
           durationMs: Date.now() - start,
         };
       } catch (err) {
@@ -421,7 +490,7 @@ async function loadTypeScript(cwd: string): Promise<TypeScriptModule> {
     }
   }
   throw new Error(
-    "TypeScript language service is unavailable; install typescript in the project or bundle it with core-agent",
+    "TypeScript language service is unavailable; install typescript in the project or bundle it with magi-agent",
   );
 }
 
@@ -480,9 +549,9 @@ function getRenamePreview(
   const renameInfo = language.service.getRenameInfo(file, position, {});
   const locations = renameInfo.canRename
     ? (language.service.findRenameLocations(file, position, false, false, false) ?? [])
-        .map((location) => locationFromTextSpan(language, location.fileName, location.textSpan))
-        .sort(compareLocations)
-        .slice(0, input.maxResults ?? 100)
+      .map((location) => locationFromTextSpan(language, location.fileName, location.textSpan))
+      .sort(compareLocations)
+      .slice(0, input.maxResults ?? 100)
     : [];
   return {
     cwd: relativeToWorkspace(language.workspaceRoot, language.cwd),
@@ -600,11 +669,7 @@ function getWorkspaceSymbols(
       };
     })
     .filter((item) => !item.file.startsWith(".."))
-    .sort((a, b) =>
-      `${a.file}:${a.line}:${a.column}:${a.name}`.localeCompare(
-        `${b.file}:${b.line}:${b.column}:${b.name}`,
-      ),
-    )
+    .sort((a, b) => `${a.file}:${a.line}:${a.column}:${a.name}`.localeCompare(`${b.file}:${b.line}:${b.column}:${b.name}`))
     .slice(0, maxResults);
   return {
     cwd: relativeToWorkspace(language.workspaceRoot, language.cwd),
@@ -680,6 +745,170 @@ function parseTypeScriptDiagnostics(raw: string, cwd: string): CodeDiagnostic[] 
   return diagnostics;
 }
 
+function makeDiagnosticsResult(
+  workspaceRoot: string,
+  cwd: string,
+  checker: "typescript" | "python" | "go",
+  exitCode: number,
+  combined: string,
+  diagnostics: CodeDiagnostic[],
+  start: number,
+): ToolResult<CodeDiagnosticsReportOutput> {
+  const output: CodeDiagnosticsReportOutput = {
+    action: "diagnostics",
+    cwd: relativeToWorkspace(workspaceRoot, cwd),
+    checker,
+    passed: exitCode === 0,
+    exitCode,
+    diagnosticCount: diagnostics.length,
+    diagnostics,
+    raw: combined.slice(0, 64 * 1024),
+    truncated: combined.length > 64 * 1024,
+  };
+  return {
+    status: "ok",
+    output,
+    metadata: {
+      evidenceKind: "diagnostics",
+      checker,
+      passed: output.passed,
+      diagnosticCount: output.diagnosticCount,
+      diagnostics: output.diagnostics,
+    },
+    durationMs: Date.now() - start,
+  };
+}
+
+async function autoDetectChecker(cwd: string): Promise<CheckerKind> {
+  try {
+    await fs.access(path.join(cwd, "tsconfig.json"));
+    return "typescript";
+  } catch {
+    // Try lightweight language file detection below.
+  }
+
+  let dirents: string[];
+  try {
+    dirents = await fs.readdir(cwd);
+  } catch {
+    return "typescript";
+  }
+
+  if (dirents.some((file) => file.endsWith(".go") || file === "go.mod")) return "go";
+  if (
+    dirents.some((file) =>
+      file.endsWith(".py") ||
+      file === "requirements.txt" ||
+      file === "pyproject.toml",
+    )
+  ) {
+    return "python";
+  }
+  return "typescript";
+}
+
+function binaryExists(name: string): Promise<boolean> {
+  return new Promise((resolve) => {
+    execFile("sh", ["-c", `command -v ${name} >/dev/null 2>&1`], (err) => {
+      resolve(!err);
+    });
+  });
+}
+
+async function resolvePythonLinter(): Promise<string | null> {
+  if (await binaryExists("ruff")) return "ruff";
+  if (await binaryExists("flake8")) return "flake8";
+  return null;
+}
+
+async function runPythonLinter(
+  binary: string,
+  cwd: string,
+): Promise<{ exitCode: number; combined: string }> {
+  const args = binary === "ruff"
+    ? ["check", "--output-format=text", "."]
+    : ["."];
+  try {
+    const { stdout, stderr } = await execFileAsync(binary, args, {
+      cwd,
+      timeout: 60_000,
+      maxBuffer: 10 * 1024 * 1024,
+    });
+    return { exitCode: 0, combined: `${stdout}${stderr}` };
+  } catch (err) {
+    const e = err as NodeJS.ErrnoException & {
+      stdout?: string;
+      stderr?: string;
+      code?: number | string;
+    };
+    const code = typeof e.code === "number" ? e.code : 1;
+    return { exitCode: code, combined: `${e.stdout ?? ""}${e.stderr ?? ""}` };
+  }
+}
+
+function parsePythonDiagnostics(raw: string, cwd: string): CodeDiagnostic[] {
+  const diagnostics: CodeDiagnostic[] = [];
+  const cwdResolved = path.resolve(cwd);
+  const re = /^(.+?):(\d+):(\d+):\s+(\w+)\s+(.+)$/;
+  for (const line of raw.split(/\r?\n/)) {
+    const match = re.exec(line.trim());
+    if (!match) continue;
+    const file = path.resolve(cwdResolved, match[1]!);
+    const code = match[4]!;
+    diagnostics.push({
+      file: relativeToWorkspace(cwdResolved, file),
+      line: Number.parseInt(match[2]!, 10),
+      column: Number.parseInt(match[3]!, 10),
+      severity: code.startsWith("E") || code.startsWith("F") ? "error" : "warning",
+      code,
+      message: match[5]!,
+    });
+  }
+  return diagnostics;
+}
+
+async function runGoVet(
+  cwd: string,
+): Promise<{ exitCode: number; combined: string }> {
+  try {
+    const { stdout, stderr } = await execFileAsync("go", ["vet", "./..."], {
+      cwd,
+      timeout: 120_000,
+      maxBuffer: 10 * 1024 * 1024,
+    });
+    return { exitCode: 0, combined: `${stdout}${stderr}` };
+  } catch (err) {
+    const e = err as NodeJS.ErrnoException & {
+      stdout?: string;
+      stderr?: string;
+      code?: number | string;
+    };
+    const code = typeof e.code === "number" ? e.code : 1;
+    return { exitCode: code, combined: `${e.stdout ?? ""}${e.stderr ?? ""}` };
+  }
+}
+
+function parseGoDiagnostics(raw: string, cwd: string): CodeDiagnostic[] {
+  const diagnostics: CodeDiagnostic[] = [];
+  const cwdResolved = path.resolve(cwd);
+  const re = /^(.+?\.go):(\d+):(?:(\d+):)?\s+(.+)$/;
+  for (const line of raw.split(/\r?\n/)) {
+    if (line.startsWith("#")) continue;
+    const match = re.exec(line.trim());
+    if (!match) continue;
+    const file = path.resolve(cwdResolved, match[1]!);
+    diagnostics.push({
+      file: relativeToWorkspace(cwdResolved, file),
+      line: Number.parseInt(match[2]!, 10),
+      column: match[3] ? Number.parseInt(match[3], 10) : 1,
+      severity: "error",
+      code: "go-vet",
+      message: match[4]!,
+    });
+  }
+  return diagnostics;
+}
+
 function selectDiagnosticsAtPosition(
   sourceFile: ts.SourceFile,
   diagnostics: readonly ts.Diagnostic[],
@@ -714,8 +943,9 @@ function diagnosticToCodeDiagnostic(
     file: relativeToWorkspace(language.cwd, file),
     line: location.line + 1,
     column: location.character + 1,
-    severity:
-      diagnostic.category === language.ts.DiagnosticCategory.Warning ? "warning" : "error",
+    severity: diagnostic.category === language.ts.DiagnosticCategory.Warning
+      ? "warning"
+      : "error",
     code: `TS${diagnostic.code}`,
     message: flattenTsMessage(language.ts, diagnostic.messageText),
   };
@@ -793,6 +1023,16 @@ function rangeFromTextSpan(
     endLine: end.line + 1,
     endColumn: end.character + 1,
   };
+}
+
+function lineColumnFromTextSpan(
+  language: TypeScriptLanguageServiceContext,
+  file: string,
+  textSpan: ts.TextSpan,
+): { line: number; column: number } {
+  const sourceFile = getSourceFile(language, file);
+  const start = sourceFile.getLineAndCharacterOfPosition(textSpan.start);
+  return { line: start.line + 1, column: start.character + 1 };
 }
 
 function symbolLineColumn(

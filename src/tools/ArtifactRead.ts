@@ -21,6 +21,8 @@ export interface ArtifactReadOutput {
   tier: "L0" | "L1" | "L2";
 }
 
+const ARTIFACT_READ_PREVIEW_LIMIT = 900;
+
 const INPUT_SCHEMA = {
   type: "object",
   properties: {
@@ -34,6 +36,23 @@ const INPUT_SCHEMA = {
   required: ["artifactId"],
 } as const;
 
+function previewArtifactReadForLlm(output: ArtifactReadOutput): string {
+  const preview =
+    output.content.length > ARTIFACT_READ_PREVIEW_LIMIT
+      ? `${output.content.slice(0, ARTIFACT_READ_PREVIEW_LIMIT).trimEnd()}\n[truncated: ${output.content.length - ARTIFACT_READ_PREVIEW_LIMIT} chars omitted]`
+      : output.content;
+  return JSON.stringify({
+    artifactId: output.meta.artifactId,
+    title: output.meta.title,
+    kind: output.meta.kind,
+    tier: output.tier,
+    sizeBytes: output.meta.sizeBytes,
+    preview,
+    fullReadAvailable: output.tier === "L0" && output.content.length > preview.length,
+    path: output.meta.path,
+  });
+}
+
 export function makeArtifactReadTool(
   manager: ArtifactManager,
 ): Tool<ArtifactReadInput, ArtifactReadOutput> {
@@ -45,6 +64,7 @@ export function makeArtifactReadTool(
       "need to quote or transform the original.",
     inputSchema: INPUT_SCHEMA,
     permission: "read",
+    shouldDefer: true,
     async execute(
       input: ArtifactReadInput,
       _ctx: ToolContext,
@@ -59,9 +79,11 @@ export function makeArtifactReadTool(
             : tier === "L1"
               ? await manager.readL1(input.artifactId)
               : await manager.readL2(input.artifactId);
+        const output = { content, meta, tier };
         return {
           status: "ok",
-          output: { content, meta, tier },
+          output,
+          llmOutput: previewArtifactReadForLlm(output),
           durationMs: Date.now() - start,
         };
       } catch (err) {

@@ -40,6 +40,10 @@ export interface TournamentResult {
   mode: "tournament";
   winnerIndex: number;
   variants: TournamentVariantResult[];
+  winnerWorktreeApply?: {
+    action: "preview";
+    spawnDir: string;
+  };
 }
 
 export interface PreparedVariant {
@@ -66,6 +70,7 @@ export interface RunTournamentOptions {
   variants: number;
   concurrency?: number;
   cleanup_losers?: boolean;
+  exposeWinnerWorktreeApply?: boolean;
   ctx: TournamentContext;
   /**
    * Run a single variant (child agent loop) and return its finalText
@@ -187,12 +192,20 @@ export async function runTournament(
 
   // Rank by score DESC; ties broken by variantIndex ASC.
   const ranked = rankVariants(results);
-  const winnerIndex = ranked[0]!.variantIndex;
+  const winner = ranked[0]!;
+  const winnerIndex = winner.variantIndex;
+  const winnerWorktreeApply = options.exposeWinnerWorktreeApply === true
+    ? {
+        action: "preview" as const,
+        spawnDir: winner.spawnDir,
+      }
+    : undefined;
 
   ctx.emitAgentEvent?.({
     type: "tournament_result",
     variants: results,
     winnerIndex,
+    ...(winnerWorktreeApply ? { winnerWorktreeApply } : {}),
   });
 
   if (options.cleanup_losers === true) {
@@ -207,7 +220,12 @@ export async function runTournament(
     );
   }
 
-  return { mode: "tournament", winnerIndex, variants: results };
+  return {
+    mode: "tournament",
+    winnerIndex,
+    variants: results,
+    ...(winnerWorktreeApply ? { winnerWorktreeApply } : {}),
+  };
 }
 
 /**

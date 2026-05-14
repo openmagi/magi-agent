@@ -66,6 +66,7 @@ export function makeExitPlanModeTool(
       "Signal that you are done planning and ready to execute. Pass the final plan text. The runtime emits a `plan_ready` event; the client UI may request user approval before subsequent write/execute tools are unlocked. Only callable while in plan mode.",
     inputSchema: INPUT_SCHEMA,
     permission: "meta",
+    shouldDefer: true,
     validate(input) {
       if (!input || typeof input.plan !== "string" || input.plan.trim().length === 0) {
         return "`plan` is required and must be non-empty";

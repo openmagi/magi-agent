@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { createHash } from "node:crypto";
 import type { Tool, ToolContext, ToolResult } from "../Tool.js";
 import { runLocalKnowledgeCommand } from "../knowledge/LocalKnowledgeBase.js";
 import { Utf8StreamCapture } from "../util/Utf8StreamCapture.js";
@@ -12,12 +13,16 @@ type KnowledgeSearchMode =
   | "guide"
   | "get";
 
+export type KnowledgeSearchScope = "all" | "personal" | "org";
+
 export interface KnowledgeSearchInput {
   mode?: KnowledgeSearchMode;
   query?: string;
   collection?: string;
+  scope?: KnowledgeSearchScope;
   limit?: number;
   objectKey?: string;
+  maxBytes?: number;
   timeoutMs?: number;
 }
 
@@ -33,6 +38,7 @@ export type KnowledgeSearchRunner = (
   args: string[],
   ctx: ToolContext,
   timeoutMs: number,
+  extraEnv?: Record<string, string>,
 ) => Promise<KnowledgeSearchRunResult>;
 
 const INPUT_SCHEMA = {
@@ -51,6 +57,11 @@ const INPUT_SCHEMA = {
       type: "string",
       description: "Optional collection name for search/manifest/documents; required for guide.",
     },
+    scope: {
+      type: "string",
+      enum: ["all", "personal", "org"],
+      description: "Filter by KB scope. 'personal' = only this bot's KB, 'org' = only shared org KB, 'all' = both (default).",
+    },
     limit: {
       type: "integer",
       minimum: 1,
@@ -60,6 +71,12 @@ const INPUT_SCHEMA = {
     objectKey: {
       type: "string",
       description: "Converted object key from manifest/search results. Required for mode=get.",
+    },
+    maxBytes: {
+      type: "integer",
+      minimum: 1,
+      maximum: 524288,
+      description: "Optional byte cap for mode=get output. Defaults to 128KB and is capped at 512KB.",
     },
     timeoutMs: {
       type: "integer",
@@ -74,7 +91,8 @@ const INPUT_SCHEMA = {
 const DEFAULT_TIMEOUT_MS = 120_000;
 const MAX_TIMEOUT_MS = 600_000;
 const MAX_OUTPUT_BYTES = 128 * 1024;
-const MAX_GET_OUTPUT_BYTES = 24 * 1024;
+const DEFAULT_GET_OUTPUT_BYTES = 128 * 1024;
+const MAX_GET_OUTPUT_BYTES = 512 * 1024;
 
 function stringValue(value: unknown): string | null {
   return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
@@ -91,6 +109,17 @@ function modeOf(input: KnowledgeSearchInput): KnowledgeSearchMode {
 
 function outputLimitForArgs(args: string[]): number {
   return args[0] === "--get" ? MAX_GET_OUTPUT_BYTES : MAX_OUTPUT_BYTES;
+}
+
+function normalizeGetMaxBytes(input: KnowledgeSearchInput): number {
+  if (typeof input.maxBytes !== "number" || !Number.isFinite(input.maxBytes)) {
+    return DEFAULT_GET_OUTPUT_BYTES;
+  }
+  return Math.max(1, Math.min(MAX_GET_OUTPUT_BYTES, Math.trunc(input.maxBytes)));
+}
+
+function contentHash(content: string): string {
+  return `sha256:${createHash("sha256").update(content).digest("hex")}`;
 }
 
 function truncateOutput(output: string, maxBytes: number): {
@@ -270,6 +299,7 @@ async function externalRunner(
   args: string[],
   ctx: ToolContext,
   timeoutMs: number,
+  extraEnv?: Record<string, string>,
 ): Promise<KnowledgeSearchRunResult> {
   const cwd = ctx.spawnWorkspace?.root ?? ctx.workspaceRoot;
   const maxOutputBytes = outputLimitForArgs(args);
@@ -282,6 +312,7 @@ async function externalRunner(
         BOT_ID: process.env.BOT_ID ?? ctx.botId,
         MAGI_WORKSPACE_ROOT: cwd,
         MAGI_BOT_ID: ctx.botId,
+        ...extraEnv,
       },
       stdio: ["ignore", "pipe", "pipe"],
     });
@@ -335,12 +366,13 @@ async function defaultRunner(
   args: string[],
   ctx: ToolContext,
   timeoutMs: number,
+  extraEnv?: Record<string, string>,
 ): Promise<KnowledgeSearchRunResult> {
   const externalCommand =
     process.env.MAGI_KB_SEARCH_COMMAND?.trim() ||
     process.env.CORE_AGENT_KB_SEARCH_COMMAND?.trim();
   if (externalCommand) {
-    return externalRunner(externalCommand, args, ctx, timeoutMs);
+    return externalRunner(externalCommand, args, ctx, timeoutMs, extraEnv);
   }
   return runLocalKnowledgeCommand(args, ctx);
 }
@@ -348,8 +380,11 @@ async function defaultRunner(
 export function makeKnowledgeSearchTool(opts: {
   name?: "knowledge-search" | "KnowledgeSearch";
   runner?: KnowledgeSearchRunner;
+  command?: string;
 } = {}): Tool<KnowledgeSearchInput, string> {
-  const runner = opts.runner ?? defaultRunner;
+  const runner = opts.runner ??
+    ((args: string[], ctx: ToolContext, timeoutMs: number, extraEnv?: Record<string, string>) =>
+      defaultRunner(args, ctx, timeoutMs, extraEnv));
   return {
     name: opts.name ?? "knowledge-search",
     description:
@@ -375,7 +410,10 @@ export function makeKnowledgeSearchTool(opts: {
       const timeoutMs = Math.min(MAX_TIMEOUT_MS, input.timeoutMs ?? DEFAULT_TIMEOUT_MS);
       const mode = modeOf(input);
       let args = buildKnowledgeSearchArgs(input);
-      let result = await runner(args, ctx, timeoutMs);
+      const scopeEnv = input.scope && input.scope !== "all"
+        ? { KB_SCOPE: input.scope }
+        : undefined;
+      let result = await runner(args, ctx, timeoutMs, scopeEnv);
       let augmentedOutput: string | null = null;
       let usedDocumentFallback = false;
       if (mode === "search" && result.exitCode === 0) {
@@ -384,7 +422,7 @@ export function makeKnowledgeSearchTool(opts: {
           const documentsArgs = stringValue(input.collection)
             ? ["--documents", stringValue(input.collection) ?? ""]
             : ["--documents"];
-          const documentsResult = await runner(documentsArgs, ctx, timeoutMs);
+          const documentsResult = await runner(documentsArgs, ctx, timeoutMs, scopeEnv);
           if (documentsResult.exitCode === 0) {
             const matches = findDocumentMatches(
               stringValue(input.query) ?? "",
@@ -407,7 +445,7 @@ export function makeKnowledgeSearchTool(opts: {
         const documentsArgs = stringValue(input.collection)
           ? ["--documents", stringValue(input.collection) ?? ""]
           : ["--documents"];
-        const documentsResult = await runner(documentsArgs, ctx, timeoutMs);
+        const documentsResult = await runner(documentsArgs, ctx, timeoutMs, scopeEnv);
         if (documentsResult.exitCode === 0) {
           const repairedObjectKey = findNormalizedObjectKey(
             stringValue(input.objectKey) ?? "",
@@ -415,16 +453,36 @@ export function makeKnowledgeSearchTool(opts: {
           );
           if (repairedObjectKey && repairedObjectKey !== stringValue(input.objectKey)) {
             args = ["--get", repairedObjectKey];
-            result = await runner(args, ctx, timeoutMs);
+            result = await runner(args, ctx, timeoutMs, scopeEnv);
           }
         }
       }
       const rawOutput = augmentedOutput ?? result.stdout.trim();
       const capped = mode === "get"
-        ? truncateOutput(rawOutput, MAX_GET_OUTPUT_BYTES)
+        ? truncateOutput(rawOutput, normalizeGetMaxBytes(input))
         : { output: rawOutput, truncated: false };
       const output = capped.output;
       const error = result.stderr.trim();
+      const source = result.exitCode === 0 && mode === "get"
+        ? ctx.sourceLedger?.recordSource({
+            turnId: ctx.turnId,
+            toolName: opts.name ?? "knowledge-search",
+            kind: "kb",
+            uri: `kb:${args[1] ?? stringValue(input.objectKey) ?? ""}`,
+            title: keyBasename(args[1] ?? stringValue(input.objectKey) ?? ""),
+            contentHash: contentHash(output),
+            contentType: "text/markdown",
+            trustTier: "unknown",
+            snippets: output ? [output.slice(0, 500)] : [],
+            metadata: {
+              args,
+              truncated: result.truncated || capped.truncated,
+            },
+          })
+        : undefined;
+      if (source) {
+        ctx.emitAgentEvent?.({ type: "source_inspected", source });
+      }
       return {
         status: result.exitCode === 0 ? "ok" : "error",
         output: result.exitCode === 0 ? output : undefined,
@@ -439,6 +497,7 @@ export function makeKnowledgeSearchTool(opts: {
         durationMs: Date.now() - start,
         metadata: {
           args,
+          ...(source ? { sourceId: source.sourceId } : {}),
           signal: result.signal,
           truncated: result.truncated || capped.truncated,
           documentFallback: usedDocumentFallback,

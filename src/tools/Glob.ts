@@ -40,7 +40,7 @@ const INPUT_SCHEMA = {
   required: ["pattern"],
 } as const;
 
-const MAX_MATCHES = 500;
+const MAX_MATCHES = 2000;
 
 export function makeGlobTool(workspaceRoot: string): Tool<GlobInput, GlobOutput> {
   const defaultWorkspace = new Workspace(workspaceRoot);

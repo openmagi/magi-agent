@@ -8,6 +8,34 @@ import { errorResult } from "../util/toolResult.js";
 const execFileAsync = promisify(execFile);
 
 export type SpawnWorktreeApplyAction = "preview" | "apply" | "reject" | "cherry_pick";
+export type SpawnWorktreeConflictKind = "parent_dirty" | "cherry_pick";
+
+export interface SpawnWorktreeConflictResolverSpawn {
+  persona: "conflict_resolver";
+  prompt: string;
+  deliver: "return";
+  workspace_policy: "trusted";
+  write_set: string[];
+  metadata: {
+    sourceTool: "SpawnWorktreeApply";
+    conflictKind: SpawnWorktreeConflictKind;
+    mergeStrategy: "copy" | "cherry_pick";
+    spawnDir: string;
+    changedFiles: string[];
+    conflictedFiles: string[];
+    adoptedCommit?: string;
+  };
+}
+
+export interface SpawnWorktreeConflictReview {
+  conflictKind: SpawnWorktreeConflictKind;
+  conflictedFiles: string[];
+  summary: string;
+  suggestedActions: string[];
+  resolverPrompt: string;
+  resolverSpawn: SpawnWorktreeConflictResolverSpawn;
+  preservesChildWorktree: boolean;
+}
 
 export interface SpawnWorktreeApplyInput {
   action: SpawnWorktreeApplyAction;
@@ -27,6 +55,7 @@ export interface SpawnWorktreeApplyOutput {
   createdFiles: string[];
   modifiedFiles: string[];
   deletedFiles: string[];
+  renamedFiles: Array<{ from: string; to: string }>;
   diff: string;
   truncated: boolean;
   applied: boolean;
@@ -34,6 +63,7 @@ export interface SpawnWorktreeApplyOutput {
   mergeStrategy?: "copy" | "cherry_pick";
   adoptedCommit?: string;
   conflictedFiles?: string[];
+  conflictReview?: SpawnWorktreeConflictReview;
 }
 
 interface WorktreeChanges {
@@ -41,6 +71,7 @@ interface WorktreeChanges {
   createdFiles: string[];
   modifiedFiles: string[];
   deletedFiles: string[];
+  renamedFiles: Array<{ from: string; to: string }>;
 }
 
 const INPUT_SCHEMA = {
@@ -111,16 +142,24 @@ function parsePorcelainZ(status: string): WorktreeChanges {
   const created = new Set<string>();
   const modified = new Set<string>();
   const deleted = new Set<string>();
+  const renamed: Array<{ from: string; to: string }> = [];
   const tokens = status.split("\0").filter((token) => token.length > 0);
 
-  for (let i = 0; i < tokens.length; i += 1) {
+  for (let i = 0; i < tokens.length; i++) {
     const token = tokens[i]!;
     if (token.length < 4) continue;
     const code = token.slice(0, 2);
     const rawPath = normalizeRelPath(token.slice(3));
     if (!rawPath) continue;
     if (code[0] === "R" || code[0] === "C") {
+      const sourcePath = normalizeRelPath(tokens[i + 1] ?? "");
       i += 1;
+      created.add(rawPath);
+      if (code[0] === "R" && sourcePath) {
+        deleted.add(sourcePath);
+        renamed.push({ from: sourcePath, to: rawPath });
+      }
+      continue;
     }
     if (code.includes("?") || code.includes("A")) {
       created.add(rawPath);
@@ -143,6 +182,59 @@ function parsePorcelainZ(status: string): WorktreeChanges {
     createdFiles: [...created].sort(),
     modifiedFiles: [...modified].sort(),
     deletedFiles: [...deleted].sort(),
+    renamedFiles: renamed.sort((a, b) => a.from.localeCompare(b.from) || a.to.localeCompare(b.to)),
+  };
+}
+
+async function headBlobHash(worktreeDir: string, relPath: string): Promise<string | null> {
+  try {
+    return (await git(worktreeDir, ["rev-parse", "--verify", `HEAD:${relPath}`])).trim();
+  } catch {
+    return null;
+  }
+}
+
+async function worktreeBlobHash(worktreeDir: string, relPath: string): Promise<string | null> {
+  try {
+    return (await git(worktreeDir, ["hash-object", "--", relPath])).trim();
+  } catch {
+    return null;
+  }
+}
+
+async function inferExactUnstagedRenames(
+  worktreeDir: string,
+  changes: WorktreeChanges,
+): Promise<WorktreeChanges> {
+  if (changes.deletedFiles.length === 0 || changes.createdFiles.length === 0) {
+    return changes;
+  }
+  const known = new Set(changes.renamedFiles.map((item) => `${item.from}\0${item.to}`));
+  const createdHashes = new Map<string, string>();
+  for (const created of changes.createdFiles) {
+    const hash = await worktreeBlobHash(worktreeDir, created);
+    if (hash) createdHashes.set(created, hash);
+  }
+
+  const renamedFiles = [...changes.renamedFiles];
+  for (const deleted of changes.deletedFiles) {
+    const oldHash = await headBlobHash(worktreeDir, deleted);
+    if (!oldHash) continue;
+    for (const [created, newHash] of createdHashes) {
+      const key = `${deleted}\0${created}`;
+      if (oldHash !== newHash || known.has(key)) continue;
+      known.add(key);
+      renamedFiles.push({ from: deleted, to: created });
+      break;
+    }
+  }
+
+  if (renamedFiles.length === changes.renamedFiles.length) {
+    return changes;
+  }
+  return {
+    ...changes,
+    renamedFiles: renamedFiles.sort((a, b) => a.from.localeCompare(b.from) || a.to.localeCompare(b.to)),
   };
 }
 
@@ -151,9 +243,10 @@ async function readChanges(worktreeDir: string): Promise<WorktreeChanges> {
     "status",
     "--porcelain=v1",
     "-z",
+    "--renames",
     "--untracked-files=all",
   ]);
-  return parsePorcelainZ(status);
+  return inferExactUnstagedRenames(worktreeDir, parsePorcelainZ(status));
 }
 
 async function readCreatedFileDiff(worktreeDir: string, relPath: string): Promise<string> {
@@ -309,6 +402,7 @@ function outputFor(input: {
   mergeStrategy?: "copy" | "cherry_pick";
   adoptedCommit?: string;
   conflictedFiles?: string[];
+  conflictReview?: SpawnWorktreeConflictReview;
 }): SpawnWorktreeApplyOutput {
   return {
     action: input.action,
@@ -318,6 +412,7 @@ function outputFor(input: {
     createdFiles: input.changes.createdFiles,
     modifiedFiles: input.changes.modifiedFiles,
     deletedFiles: input.changes.deletedFiles,
+    renamedFiles: input.changes.renamedFiles,
     diff: input.diff,
     truncated: input.truncated,
     applied: input.applied,
@@ -325,7 +420,112 @@ function outputFor(input: {
     ...(input.mergeStrategy ? { mergeStrategy: input.mergeStrategy } : {}),
     ...(input.adoptedCommit ? { adoptedCommit: input.adoptedCommit } : {}),
     ...(input.conflictedFiles ? { conflictedFiles: input.conflictedFiles } : {}),
+    ...(input.conflictReview ? { conflictReview: input.conflictReview } : {}),
   };
+}
+
+function conflictReviewFor(input: {
+  conflictKind: SpawnWorktreeConflictKind;
+  action: SpawnWorktreeApplyAction;
+  spawnDir: string;
+  changedFiles: readonly string[];
+  conflictedFiles: readonly string[];
+  mergeStrategy: "copy" | "cherry_pick";
+  adoptedCommit?: string;
+}): SpawnWorktreeConflictReview {
+  const conflicted = input.conflictedFiles.length > 0
+    ? input.conflictedFiles.join(", ")
+    : "unknown files";
+  const changed = input.changedFiles.length > 0
+    ? input.changedFiles.join(", ")
+    : "no child file changes";
+  const summary = input.conflictKind === "parent_dirty"
+    ? `The parent checkout has local changes for child worktree files: ${conflicted}.`
+    : `The child worktree commit could not be cherry-picked cleanly: ${conflicted}.`;
+  const suggestedActions = input.conflictKind === "parent_dirty"
+    ? [
+        "Inspect the parent checkout changes for the conflicted files.",
+        "Decide whether to keep parent changes, child changes, or combine them.",
+        "Resolve or checkpoint the parent checkout, then rerun SpawnWorktreeApply preview before applying.",
+        "Use SpawnWorktreeApply reject only when the child work should be discarded.",
+      ]
+    : [
+        "Inspect the preserved child worktree and parent file versions for the conflicted files.",
+        "Spawn a reviewer or conflict-resolver child with a narrow write_set for the conflicted files.",
+        "After resolving, rerun GitDiff and the relevant TestRun before claiming completion.",
+        "Use SpawnWorktreeApply reject only when the child work should be discarded.",
+      ];
+  const adopted = input.adoptedCommit ? ` Adopted commit: ${input.adoptedCommit}.` : "";
+  const resolverPrompt = [
+    `Resolve SpawnWorktreeApply ${input.conflictKind} conflict for ${input.spawnDir}.`,
+    `Conflicted files: ${conflicted}.`,
+    `Child changed files: ${changed}.`,
+    `Merge strategy: ${input.mergeStrategy}.${adopted}`,
+    "Keep edits limited to the conflicted files and directly related imports/tests.",
+    "Do not delete the preserved child worktree until adoption or reject is complete.",
+    "Do not call SpawnWorktreeApply, switch branches, push, merge, delete the child worktree, or broaden the feature scope.",
+    "After resolving, run GitDiff and run TestRun with the most relevant verification command.",
+    "In the final response, return changed files and verification evidence.",
+  ].join(" ");
+  return {
+    conflictKind: input.conflictKind,
+    conflictedFiles: [...input.conflictedFiles],
+    summary,
+    suggestedActions,
+    resolverPrompt,
+    resolverSpawn: {
+      persona: "conflict_resolver",
+      prompt: resolverPrompt,
+      deliver: "return",
+      workspace_policy: "trusted",
+      write_set: [...input.conflictedFiles],
+      metadata: {
+        sourceTool: "SpawnWorktreeApply",
+        conflictKind: input.conflictKind,
+        mergeStrategy: input.mergeStrategy,
+        spawnDir: input.spawnDir,
+        changedFiles: [...input.changedFiles],
+        conflictedFiles: [...input.conflictedFiles],
+        ...(input.adoptedCommit ? { adoptedCommit: input.adoptedCommit } : {}),
+      },
+    },
+    preservesChildWorktree: true,
+  };
+}
+
+function emitConflictEvidence(
+  ctx: ToolContext,
+  input: {
+    action: SpawnWorktreeApplyAction;
+    spawnDir: string;
+    changes: WorktreeChanges;
+    mergeStrategy: "copy" | "cherry_pick";
+    conflictReview: SpawnWorktreeConflictReview;
+    adoptedCommit?: string;
+  },
+): void {
+  const event = {
+    type: "spawn_worktree_conflict",
+    action: input.action,
+    spawnDir: input.spawnDir,
+    conflictKind: input.conflictReview.conflictKind,
+    conflictedFiles: input.conflictReview.conflictedFiles,
+    changedFiles: input.changes.changedFiles,
+    mergeStrategy: input.mergeStrategy,
+    ...(input.adoptedCommit ? { adoptedCommit: input.adoptedCommit } : {}),
+    summary: input.conflictReview.summary,
+    suggestedActions: input.conflictReview.suggestedActions,
+  };
+  ctx.emitAgentEvent?.(event);
+  ctx.staging.stageAuditEvent("spawn_worktree_conflict", {
+    action: input.action,
+    spawnDir: input.spawnDir,
+    conflictKind: input.conflictReview.conflictKind,
+    conflictedFiles: input.conflictReview.conflictedFiles,
+    changedFiles: input.changes.changedFiles,
+    mergeStrategy: input.mergeStrategy,
+    ...(input.adoptedCommit ? { adoptedCommit: input.adoptedCommit } : {}),
+  });
 }
 
 export function makeSpawnWorktreeApplyTool(
@@ -337,6 +537,7 @@ export function makeSpawnWorktreeApplyTool(
       "Preview, apply, cherry-pick, or reject changes produced by a SpawnAgent child running with workspace_policy='git_worktree'. Use preview first, then apply or cherry_pick only when the child changes should be adopted into the parent checkout. Apply refuses to overwrite dirty parent files.",
     inputSchema: INPUT_SCHEMA,
     permission: "write",
+    shouldDefer: true,
     mutatesWorkspace: true,
     isConcurrencySafe: false,
     validate(input) {
@@ -408,6 +609,21 @@ export function makeSpawnWorktreeApplyTool(
         const parentConflicts = await parentDirtyConflictsForFiles(parentRoot, changes.changedFiles);
         if (parentConflicts.length > 0) {
           const mergeStrategy = input.action === "cherry_pick" ? "cherry_pick" : "copy";
+          const conflictReview = conflictReviewFor({
+            conflictKind: "parent_dirty",
+            action: input.action,
+            spawnDir,
+            changedFiles: changes.changedFiles,
+            conflictedFiles: parentConflicts,
+            mergeStrategy,
+          });
+          emitConflictEvidence(ctx, {
+            action: input.action,
+            spawnDir,
+            changes,
+            mergeStrategy,
+            conflictReview,
+          });
           return {
             status: "error",
             errorCode: "parent_dirty_conflict",
@@ -423,6 +639,7 @@ export function makeSpawnWorktreeApplyTool(
               cleanedUp: false,
               mergeStrategy,
               conflictedFiles: parentConflicts,
+              conflictReview,
             }),
             durationMs: Date.now() - start,
             metadata: {
@@ -430,6 +647,7 @@ export function makeSpawnWorktreeApplyTool(
               conflictKind: "parent_dirty",
               conflictedFiles: parentConflicts,
               mergeStrategy,
+              conflictReview,
             },
           };
         }
@@ -470,12 +688,27 @@ export function makeSpawnWorktreeApplyTool(
           } catch (err) {
             const conflicts = await conflictedFiles(parentRoot);
             await abortCherryPick(parentRoot);
+            const conflictReview = conflictReviewFor({
+              conflictKind: "cherry_pick",
+              action: input.action,
+              spawnDir,
+              changedFiles: changes.changedFiles,
+              conflictedFiles: conflicts,
+              mergeStrategy: "cherry_pick",
+              adoptedCommit,
+            });
+            emitConflictEvidence(ctx, {
+              action: input.action,
+              spawnDir,
+              changes,
+              mergeStrategy: "cherry_pick",
+              conflictReview,
+              adoptedCommit,
+            });
             return {
               status: "error",
               errorCode: "cherry_pick_conflict",
-              errorMessage: `child worktree commit could not be cherry-picked cleanly: ${
-                conflicts.join(", ") || (err instanceof Error ? err.message : String(err))
-              }`,
+              errorMessage: `child worktree commit could not be cherry-picked cleanly: ${conflicts.join(", ") || (err instanceof Error ? err.message : String(err))}`,
               output: outputFor({
                 action: input.action,
                 spawnDir,
@@ -488,6 +721,7 @@ export function makeSpawnWorktreeApplyTool(
                 mergeStrategy: "cherry_pick",
                 adoptedCommit,
                 conflictedFiles: conflicts,
+                conflictReview,
               }),
               durationMs: Date.now() - start,
               metadata: {
@@ -495,6 +729,8 @@ export function makeSpawnWorktreeApplyTool(
                 conflictedFiles: conflicts,
                 adoptedCommit,
                 mergeStrategy: "cherry_pick",
+                conflictKind: "cherry_pick",
+                conflictReview,
               },
             };
           }
