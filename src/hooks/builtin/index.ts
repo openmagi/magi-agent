@@ -170,6 +170,9 @@ import {
   type CodingChildReviewGateAgent,
 } from "./codingChildReviewGate.js";
 import { makeDocumentExportRoutingHook } from "./documentExportRouting.js";
+import {
+  makeArityPermissionGateHook,
+} from "./arityPermissionGate.js";
 import { makeTurnSnapshotHooks } from "./turnSnapshot.js";
 import type { TurnSnapshotService } from "../../checkpoint/TurnSnapshotService.js";
 
@@ -1063,6 +1066,17 @@ export function registerBuiltinHooks(
   });
   if (maybe(stopHook.name)) {
     registry.register(stopHook);
+    registered++;
+  }
+
+  // Arity-based permission gate (priority 38). Semantic command
+  // classification via BashArity prefix extraction + glob-based
+  // permission rules. Runs after auto-approval (30) and before
+  // dangerousPatterns (40). Env-gated (`MAGI_ARITY_PERMISSION`,
+  // default off during rollout).
+  const arityHook = makeArityPermissionGateHook({ workspaceRoot: opts.workspaceRoot });
+  if (maybe(arityHook.name)) {
+    registry.register(arityHook);
     registered++;
   }
 
