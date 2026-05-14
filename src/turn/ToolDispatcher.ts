@@ -25,6 +25,7 @@ import type {
 } from "../Tool.js";
 import type { UserMessage } from "../util/types.js";
 import { buildToolInputPreview, summariseToolOutput } from "../util/toolResult.js";
+import { applyToolResultBudget } from "./ToolResultBudget.js";
 import { createLogger } from "../util/logger.js";
 
 const logger = createLogger("ToolDispatcher");
@@ -640,7 +641,10 @@ async function dispatchOne(
     typeof previewSource === "string"
       ? previewSource
       : JSON.stringify(previewSource);
-  const content = softWarningPrefix + summariseToolOutput(result);
+  const rawContent = softWarningPrefix + summariseToolOutput(result);
+  const content = process.env.MAGI_TOOL_RESULT_BUDGET !== "0"
+    ? applyToolResultBudget(rawContent, tu.name)
+    : rawContent;
   const isError = result.status !== "ok";
 
   sse.agent({
