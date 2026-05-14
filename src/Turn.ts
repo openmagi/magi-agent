@@ -55,6 +55,22 @@ export type { TurnRoute, TurnStatus, TurnMeta, TurnStopReason, PlanResult, Verif
 export { PLAN_MODE_ALLOWED_TOOLS } from "./turn/ToolSelector.js";
 export { MAX_OUTPUT_TOKENS_RECOVERY_LIMIT, classifyStopReason, type StopReasonCase } from "./turn/StopReasonHandler.js";
 
+function stripToolBlocksFromMessages(messages: LLMMessage[]): LLMMessage[] {
+  return messages.reduce<LLMMessage[]>((acc, msg) => {
+    if (!Array.isArray(msg.content)) {
+      acc.push(msg);
+      return acc;
+    }
+    const filtered = (msg.content as LLMContentBlock[]).filter(
+      (b) => b.type !== "tool_use" && b.type !== "tool_result",
+    );
+    if (filtered.length > 0) {
+      acc.push({ ...msg, content: filtered });
+    }
+    return acc;
+  }, []);
+}
+
 /** Case-insensitive `[PLAN_MODE: on]` header trigger. */
 export const PLAN_MODE_HEADER_RE = /\[PLAN_MODE:\s*on\]/i;
 const DEFAULT_EMPTY_RESPONSE_FALLBACK_MODEL = "claude-haiku-4-5-20251001";
@@ -790,6 +806,7 @@ export class Turn {
         await this.resampleAfterBlockedCommit(
           result.finalText,
           decision.hiddenUserMessage,
+          decision.toolPolicy,
         );
         if (!this.hasVisibleAssistantText()) {
           const err = new Error(
@@ -969,6 +986,7 @@ export class Turn {
   private async resampleAfterBlockedCommit(
     failedText: string,
     hiddenUserMessage: string,
+    toolPolicy: "normal" | "text_only" = "normal",
   ): Promise<void> {
     const rawBlocks = this.emittedAssistantBlocks.length > 0
       ? [...this.emittedAssistantBlocks]
@@ -993,6 +1011,9 @@ export class Turn {
       messages.push({ role: "assistant", content: failedBlocks });
     }
     messages.push({ role: "user", content: hiddenUserMessage });
+    if (toolPolicy === "text_only") {
+      messages = stripToolBlocksFromMessages(messages);
+    }
     let toolDefs = await buildToolDefs({
       session: this.session,
       sse: this.sse,
