@@ -170,6 +170,8 @@ import {
   type CodingChildReviewGateAgent,
 } from "./codingChildReviewGate.js";
 import { makeDocumentExportRoutingHook } from "./documentExportRouting.js";
+import { makeTurnSnapshotHooks } from "./turnSnapshot.js";
+import type { TurnSnapshotService } from "../../checkpoint/TurnSnapshotService.js";
 
 export interface RegisterBuiltinsOpts {
   disabled?: string[];
@@ -348,10 +350,11 @@ export interface RegisterBuiltinsOpts {
 export function registerBuiltinHooks(
   registry: HookRegistry,
   opts: RegisterBuiltinsOpts,
-): { registered: number; skipped: string[] } {
+): { registered: number; skipped: string[]; turnSnapshotService?: TurnSnapshotService } {
   const disabled = opts.disabled ?? [];
   const skipped: string[] = [];
   let registered = 0;
+  let turnSnapshotService: TurnSnapshotService | undefined;
 
   const maybe = (name: string): boolean => {
     if (disabled.includes(name)) {
@@ -1372,5 +1375,27 @@ export function registerBuiltinHooks(
     skipped.push("builtin:shadow-checkpoint");
   }
 
-  return { registered, skipped };
+  // Turn snapshots — per-turn boundary checkpoints for rollback.
+  // Env-gated: MAGI_TURN_SNAPSHOT=1 (default off).
+  const turnSnapshotEnabled = process.env["MAGI_TURN_SNAPSHOT"] === "1";
+  if (turnSnapshotEnabled) {
+    const turnSnapHooks = makeTurnSnapshotHooks({
+      workspaceRoot: opts.workspaceRoot,
+      enabled: true,
+    });
+    if (maybe(turnSnapHooks.start.name)) {
+      registry.register(turnSnapHooks.start);
+      registered++;
+    }
+    if (maybe(turnSnapHooks.end.name)) {
+      registry.register(turnSnapHooks.end);
+      registered++;
+    }
+    turnSnapshotService = turnSnapHooks.service;
+  } else {
+    skipped.push("builtin:turn-snapshot-start");
+    skipped.push("builtin:turn-snapshot-end");
+  }
+
+  return { registered, skipped, turnSnapshotService };
 }

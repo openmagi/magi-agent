@@ -743,6 +743,18 @@ export class Agent {
     return false;
   }
 
+  private turnSnapshotService?: import("./checkpoint/TurnSnapshotService.js").TurnSnapshotService;
+
+  setTurnSnapshotService(
+    svc: import("./checkpoint/TurnSnapshotService.js").TurnSnapshotService,
+  ): void {
+    this.turnSnapshotService = svc;
+  }
+
+  getTurnSnapshotService(): import("./checkpoint/TurnSnapshotService.js").TurnSnapshotService | undefined {
+    return this.turnSnapshotService;
+  }
+
   markGoalMissionCancelled(missionId: string): boolean {
     if (this.cancelledGoalMissionIds.has(missionId)) return false;
     this.cancelledGoalMissionIds.add(missionId);
@@ -1109,6 +1121,10 @@ export class Agent {
       registered: hookResult.registered,
       skipped: hookResult.skipped,
     });
+
+    if (hookResult.turnSnapshotService) {
+      this.setTurnSnapshotService(hookResult.turnSnapshotService);
+    }
 
     try {
       await this.reloadWorkspaceSkills();
