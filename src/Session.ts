@@ -327,6 +327,10 @@ export class Session {
   private activeContextId: string = DEFAULT_CONTEXT_ID;
   private metaHydrated = false;
 
+  // ── P1-1 read-before-write guard ───────────────────────────────
+  readonly filesRead: Set<string> | undefined =
+    process.env.MAGI_READ_GUARD === "1" ? new Set() : undefined;
+
   // ── T1-06 session budget state ────────────────────────────────
   private cumulativeTurns = 0;
   private cumulativeInputTokens = 0;

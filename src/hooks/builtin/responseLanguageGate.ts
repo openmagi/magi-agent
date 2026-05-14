@@ -340,13 +340,17 @@ export function makeResponseLanguageGateHook(
         resolved,
         assistantText,
       );
+      // P2-1: deterministic-only mode skips LLM judge entirely
+      const deterministicOnly = process.env.MAGI_DETERMINISTIC_LANG === "1";
       const verdict = deterministicMismatch
         ? { pass: false, detail: deterministicMismatch }
-        : await judgeResponseLanguage(ctx, {
-            language,
-            userMessage,
-            assistantText,
-          });
+        : deterministicOnly
+          ? { pass: true, detail: "deterministic check passed" }
+          : await judgeResponseLanguage(ctx, {
+              language,
+              userMessage,
+              assistantText,
+            });
 
       ctx.emit({
         type: "rule_check",

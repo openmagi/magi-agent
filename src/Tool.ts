@@ -79,6 +79,14 @@ export interface ToolContext {
    */
   currentUserMessage?: UserMessage;
   /**
+   * Set of workspace-relative paths (or directory prefixes) that have
+   * been read in this session via FileRead, Grep, or Glob. Write tools
+   * (FileEdit, FileWrite) check this set before executing — if the
+   * target file hasn't been read, the tool returns an error forcing the
+   * model to read first. Undefined = guard disabled (backward compat).
+   */
+  filesRead?: Set<string>;
+  /**
    * Current LLM tool_use id when the tool is running inside a turn.
    * Tool-emitted AgentEvents can use this to attach structured previews
    * to the matching tool activity on the client.

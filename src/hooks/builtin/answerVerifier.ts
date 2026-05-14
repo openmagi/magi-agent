@@ -107,6 +107,23 @@ export function parseVerdict(raw: string): AnswerVerdict {
   return "FULFILLED";
 }
 
+const REFUSAL_PATTERNS = [
+  /\b(?:I\s+cannot|I'm\s+unable|I\s+can(?:'|')t|I\s+won(?:'|')t|I\s+am\s+not\s+able)\b/i,
+  /\b(?:불가능|할\s*수\s*없|못\s*합니다|못\s*하겠|거부|드리기\s*어렵)/,
+  /\b(?:against\s+(?:my|the)\s+policy|not\s+(?:designed|able|allowed)\s+to)\b/i,
+];
+
+export function judgeAnswerDeterministic(
+  userMessage: string,
+  assistantText: string,
+): AnswerVerdict {
+  const trimmed = assistantText.trim();
+  if (REFUSAL_PATTERNS.some((p) => p.test(trimmed))) return "REFUSAL";
+  const userWords = userMessage.trim().split(/\s+/).length;
+  if (trimmed.length < 100 && userWords > 15) return "PARTIAL";
+  return "FULFILLED";
+}
+
 function isEnabled(): boolean {
   const raw = process.env.MAGI_ANSWER_VERIFY;
   if (raw === undefined || raw === null) return true;
@@ -137,10 +154,13 @@ export const answerVerifierHook: RegisteredHook<"beforeCommit"> = {
       return { action: "continue" };
     }
 
-    const verdict = await judgeAnswer(
-      ctx.llm, userMessage, assistantText,
-      DEFAULT_TIMEOUT_MS, ctx.agentModel,
-    );
+    // P2-3: deterministic mode — structural heuristic, no LLM
+    const verdict = process.env.MAGI_DETERMINISTIC_ANSWER === "1"
+      ? judgeAnswerDeterministic(userMessage, assistantText)
+      : await judgeAnswer(
+          ctx.llm, userMessage, assistantText,
+          DEFAULT_TIMEOUT_MS, ctx.agentModel,
+        );
 
     ctx.emit({
       type: "rule_check",

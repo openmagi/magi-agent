@@ -15,13 +15,32 @@ import { getOrClassifyFinalAnswerMeta } from "./turnMetaClassifier.js";
 /** Tools whose execution counts as "having read a workspace file". */
 const READ_TOOLS = new Set(["FileRead", "Grep", "Glob", "Bash"]);
 
+const WORKSPACE_CLAIM_PATTERNS = [
+  /\bmy\s+(?:workspace|config|settings?|prompt|SOUL\.md|TOOLS\.md|AGENTS\.md|MEMORY\.md|USER\.md)\b/i,
+  /\b(?:workspace|config|설정|프롬프트|메모리)\s*(?:에|에는|에서|에서는|를|의|includes?|contains?|says?|has|shows?)\b/i,
+  /\b(?:in|from|according to)\s+(?:my|the)\s+(?:workspace|prompt|config|memory|settings)\b/i,
+  /\bSOUL\.md\s+(?:says?|contains?|includes?|specifies?|defines?|mentions?)\b/i,
+  /\b(?:TOOLS|AGENTS|MEMORY|USER)\.md\s+(?:says?|contains?|includes?|specifies?|lists?)\b/i,
+];
+
+function detectSelfClaimDeterministic(text: string): boolean {
+  if (!text || text.length < 10) return false;
+  return WORKSPACE_CLAIM_PATTERNS.some((p) => p.test(text));
+}
+
 async function detectSelfClaim(
   text: string,
   ctx?: HookContext,
   userMessage = "",
 ): Promise<boolean> {
   if (!text || text.length < 10) return false;
-  if (!ctx?.llm) return false;
+
+  // P2-2: deterministic mode — regex-based detection, no LLM
+  if (process.env.MAGI_DETERMINISTIC_SELF_CLAIM === "1") {
+    return detectSelfClaimDeterministic(text);
+  }
+
+  if (!ctx?.llm) return detectSelfClaimDeterministic(text);
 
   const meta = await getOrClassifyFinalAnswerMeta(ctx, {
     userMessage,
