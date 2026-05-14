@@ -304,4 +304,475 @@ describe("Session goal loop automation", () => {
       "Opus 4.6 서브에이전트",
     );
   });
+
+  it("resumes a restart-recovered goal mission with a resume run", async () => {
+    class ResumeGoalLlm extends ScriptedGoalLlm {
+      protected readonly normalReplies = ["Recovered pass"];
+      protected readonly judgeReplies = ['{"decision":"done","reason":"Recovered"}'];
+    }
+    const llm = new ResumeGoalLlm();
+    const missionClient = {
+      createMission: vi.fn(),
+      createRun: vi.fn(async () => ({ id: "run-resume-1" })),
+      appendEvent: vi.fn(async () => ({})),
+    };
+    const deliveries: Array<{ channel: ChannelRef; text: string; source: string }> = [];
+    const sessionMeta: SessionMeta = {
+      sessionKey: "agent:main:app:general:32",
+      botId: "bot-goal",
+      channel: { type: "app", channelId: "general" },
+      createdAt: Date.now(),
+      lastActivityAt: Date.now(),
+    };
+    const agent = {
+      config: {
+        botId: "bot-goal",
+        userId: "user-goal",
+        workspaceRoot,
+        gatewayToken: "tok",
+        apiProxyUrl: "http://api",
+        chatProxyUrl: "http://chat",
+        redisUrl: "redis://r",
+        model: "claude-haiku-4-5",
+      },
+      hooks: new HookRegistry(),
+      tools: { list: () => [], resolve: () => null },
+      intent: { classify: async () => ["general"] },
+      workspace: { loadIdentity: async () => ({}) },
+      auditLog: { append: vi.fn(async () => undefined) },
+      llm,
+      router: null,
+      sessionsDir: path.join(workspaceRoot, "core-agent", "sessions"),
+      contextEngine: {
+        assertCompactionFeasible: () => undefined,
+        maybeCompact: async () => undefined,
+        buildMessagesFromTranscript: () => [],
+      },
+      missionClient,
+      nextTurnId: () => "turn-resume-1",
+      registerTurn: vi.fn(),
+      unregisterTurn: vi.fn(),
+      deliverAssistantTextToChannel: vi.fn(async (channel: ChannelRef, text: string, source: string) => {
+        deliveries.push({ channel, text, source });
+      }),
+    } as unknown as Agent;
+
+    const session = new Session(sessionMeta, agent);
+    await session.resumeGoalAfterRestart({
+      actionEventId: "event-retry-1",
+      missionId: "mission-1",
+      startedAt: "2026-05-09T15:15:14.000Z",
+      objective: "Finish the IC memo",
+      sourceRequest: "Run the investment committee workflow",
+      title: "Investment memo",
+      completionCriteria: ["Final IC memo delivered"],
+      turnsUsed: 2,
+      maxTurns: 30,
+      resumeContext:
+        "Recent mission ledger before restart:\n" +
+        "- heartbeat: Drafted market sizing and queued the partner critique.",
+    });
+
+    expect(deliveries).toEqual([
+      {
+        channel: { type: "app", channelId: "general" },
+        text: "Recovered pass",
+        source: "goal",
+      },
+    ]);
+    expect(missionClient.createRun).toHaveBeenCalledWith(
+      "mission-1",
+      expect.objectContaining({
+        triggerType: "resume",
+        status: "running",
+        sessionKey: "agent:main:app:general:32",
+        turnId: "turn-resume-1",
+        metadata: expect.objectContaining({
+          objective: "Finish the IC memo",
+          turnsUsed: 2,
+          restartRecovery: true,
+          actionEventId: "event-retry-1",
+        }),
+      }),
+    );
+    expect(missionClient.appendEvent).toHaveBeenCalledWith(
+      "mission-1",
+      expect.objectContaining({
+        eventType: "resumed",
+        message: "Goal mission resumed after restart",
+      }),
+    );
+    const normalCall = llm.calls.find(
+      (call) =>
+        !String(call.system ?? "").includes("goal mission judge") &&
+        !String(call.system ?? "").includes("goal mission distiller"),
+    );
+    expect(JSON.stringify(normalCall?.messages)).toContain(
+      "Drafted market sizing and queued the partner critique.",
+    );
+    await eventually(() => {
+      expect(missionClient.appendEvent).toHaveBeenCalledWith(
+        "mission-1",
+        expect.objectContaining({
+          eventType: "completed",
+          message: "Recovered",
+        }),
+      );
+    });
+  });
+
+  it("resumes a user-retried goal mission with a retry run and action ledger reason", async () => {
+    class RetryGoalLlm extends ScriptedGoalLlm {
+      protected readonly normalReplies = ["Manual retry pass"];
+      protected readonly judgeReplies = ['{"decision":"done","reason":"Retried and complete"}'];
+    }
+    const llm = new RetryGoalLlm();
+    const missionClient = {
+      createMission: vi.fn(),
+      createRun: vi.fn(async () => ({ id: "run-retry-1" })),
+      appendEvent: vi.fn(async () => ({})),
+    };
+    const deliveries: Array<{ channel: ChannelRef; text: string; source: string }> = [];
+    const sessionMeta: SessionMeta = {
+      sessionKey: "agent:main:app:general:32",
+      botId: "bot-goal",
+      channel: { type: "app", channelId: "general" },
+      createdAt: Date.now(),
+      lastActivityAt: Date.now(),
+    };
+    const agent = {
+      config: {
+        botId: "bot-goal",
+        userId: "user-goal",
+        workspaceRoot,
+        gatewayToken: "tok",
+        apiProxyUrl: "http://api",
+        chatProxyUrl: "http://chat",
+        redisUrl: "redis://r",
+        model: "claude-haiku-4-5",
+      },
+      hooks: new HookRegistry(),
+      tools: { list: () => [], resolve: () => null },
+      intent: { classify: async () => ["general"] },
+      workspace: { loadIdentity: async () => ({}) },
+      auditLog: { append: vi.fn(async () => undefined) },
+      llm,
+      router: null,
+      sessionsDir: path.join(workspaceRoot, "core-agent", "sessions"),
+      contextEngine: {
+        assertCompactionFeasible: () => undefined,
+        maybeCompact: async () => undefined,
+        buildMessagesFromTranscript: () => [],
+      },
+      missionClient,
+      nextTurnId: () => "turn-retry-1",
+      registerTurn: vi.fn(),
+      unregisterTurn: vi.fn(),
+      deliverAssistantTextToChannel: vi.fn(async (channel: ChannelRef, text: string, source: string) => {
+        deliveries.push({ channel, text, source });
+      }),
+    } as unknown as Agent;
+
+    const session = new Session(sessionMeta, agent);
+    await session.resumeGoalAfterRestart({
+      actionEventId: "event-retry-1",
+      missionId: "mission-1",
+      sourceEventType: "retry_requested",
+      reason: "manual_retry",
+      objective: "Finish the IC memo",
+      sourceRequest: "Run the investment committee workflow",
+      title: "Investment memo",
+      completionCriteria: ["Final IC memo delivered"],
+      turnsUsed: 4,
+      maxTurns: 30,
+      resumeContext: "User requested retry: retry after adding the deck",
+    } as Parameters<typeof session.resumeGoalAfterRestart>[0] & {
+      sourceEventType: "retry_requested";
+      reason: "manual_retry";
+    });
+
+    expect(deliveries).toEqual([
+      {
+        channel: { type: "app", channelId: "general" },
+        text: "Manual retry pass",
+        source: "goal",
+      },
+    ]);
+    expect(missionClient.createRun).toHaveBeenCalledWith(
+      "mission-1",
+      expect.objectContaining({
+        triggerType: "retry",
+        status: "running",
+        sessionKey: "agent:main:app:general:32",
+        turnId: "turn-retry-1",
+        metadata: expect.objectContaining({
+          objective: "Finish the IC memo",
+          turnsUsed: 4,
+          actionEventId: "event-retry-1",
+          sourceEventType: "retry_requested",
+        }),
+      }),
+    );
+    expect(missionClient.appendEvent).toHaveBeenCalledWith(
+      "mission-1",
+      expect.objectContaining({
+        eventType: "resumed",
+        message: "Goal mission retry requested by user",
+        payload: expect.objectContaining({
+          actionEventId: "event-retry-1",
+          reason: "manual_retry",
+          sourceEventType: "retry_requested",
+        }),
+      }),
+    );
+  });
+
+  it("resumes a user-unblocked goal mission with a resume run and action ledger reason", async () => {
+    class UnblockGoalLlm extends ScriptedGoalLlm {
+      protected readonly normalReplies = ["Manual unblock pass"];
+      protected readonly judgeReplies = ['{"decision":"done","reason":"Unblocked and complete"}'];
+    }
+    const llm = new UnblockGoalLlm();
+    const missionClient = {
+      createMission: vi.fn(),
+      createRun: vi.fn(async () => ({ id: "run-unblock-1" })),
+      appendEvent: vi.fn(async () => ({})),
+    };
+    const deliveries: Array<{ channel: ChannelRef; text: string; source: string }> = [];
+    const sessionMeta: SessionMeta = {
+      sessionKey: "agent:main:app:general:32",
+      botId: "bot-goal",
+      channel: { type: "app", channelId: "general" },
+      createdAt: Date.now(),
+      lastActivityAt: Date.now(),
+    };
+    const agent = {
+      config: {
+        botId: "bot-goal",
+        userId: "user-goal",
+        workspaceRoot,
+        gatewayToken: "tok",
+        apiProxyUrl: "http://api",
+        chatProxyUrl: "http://chat",
+        redisUrl: "redis://r",
+        model: "claude-haiku-4-5",
+      },
+      hooks: new HookRegistry(),
+      tools: { list: () => [], resolve: () => null },
+      intent: { classify: async () => ["general"] },
+      workspace: { loadIdentity: async () => ({}) },
+      auditLog: { append: vi.fn(async () => undefined) },
+      llm,
+      router: null,
+      sessionsDir: path.join(workspaceRoot, "core-agent", "sessions"),
+      contextEngine: {
+        assertCompactionFeasible: () => undefined,
+        maybeCompact: async () => undefined,
+        buildMessagesFromTranscript: () => [],
+      },
+      missionClient,
+      nextTurnId: () => "turn-unblock-1",
+      registerTurn: vi.fn(),
+      unregisterTurn: vi.fn(),
+      deliverAssistantTextToChannel: vi.fn(async (channel: ChannelRef, text: string, source: string) => {
+        deliveries.push({ channel, text, source });
+      }),
+    } as unknown as Agent;
+
+    const session = new Session(sessionMeta, agent);
+    await session.resumeGoalAfterRestart({
+      actionEventId: "event-unblock-1",
+      missionId: "mission-1",
+      sourceEventType: "unblocked",
+      reason: "user_unblocked",
+      objective: "Finish the IC memo",
+      sourceRequest: "Run the investment committee workflow",
+      title: "Investment memo",
+      completionCriteria: ["Final IC memo delivered"],
+      turnsUsed: 4,
+      maxTurns: 30,
+      resumeContext: "User unblocked mission: token restored",
+    });
+
+    expect(deliveries).toEqual([
+      {
+        channel: { type: "app", channelId: "general" },
+        text: "Manual unblock pass",
+        source: "goal",
+      },
+    ]);
+    expect(missionClient.createRun).toHaveBeenCalledWith(
+      "mission-1",
+      expect.objectContaining({
+        triggerType: "resume",
+        status: "running",
+        sessionKey: "agent:main:app:general:32",
+        turnId: "turn-unblock-1",
+        metadata: expect.objectContaining({
+          objective: "Finish the IC memo",
+          turnsUsed: 4,
+          actionEventId: "event-unblock-1",
+          sourceEventType: "unblocked",
+        }),
+      }),
+    );
+    expect(missionClient.appendEvent).toHaveBeenCalledWith(
+      "mission-1",
+      expect.objectContaining({
+        eventType: "resumed",
+        message: "Goal mission resumed by user",
+        payload: expect.objectContaining({
+          actionEventId: "event-unblock-1",
+          reason: "user_unblocked",
+          sourceEventType: "unblocked",
+        }),
+      }),
+    );
+  });
+
+  it("does not continue a goal mission after it has been cancelled", async () => {
+    class ContinueGoalLlm extends ScriptedGoalLlm {
+      protected readonly normalReplies = ["First pass"];
+      protected readonly judgeReplies = ['{"decision":"continue","reason":"Need more work"}'];
+    }
+    const llm = new ContinueGoalLlm();
+    const missionClient = {
+      createMission: vi.fn(async () => ({
+        id: "mission-cancelled",
+        title: "Ship the launch memo",
+        kind: "goal",
+        status: "running",
+      })),
+      createRun: vi.fn(async () => ({ id: "run-cancelled-1" })),
+      appendEvent: vi.fn(async () => ({})),
+    };
+    const deliveries: Array<{ channel: ChannelRef; text: string }> = [];
+    const sessionMeta: SessionMeta = {
+      sessionKey: "agent:main:app:general:33",
+      botId: "bot-goal",
+      channel: { type: "app", channelId: "general" },
+      createdAt: Date.now(),
+      lastActivityAt: Date.now(),
+    };
+    const agent = {
+      config: {
+        botId: "bot-goal",
+        userId: "user-goal",
+        workspaceRoot,
+        gatewayToken: "tok",
+        apiProxyUrl: "http://api",
+        chatProxyUrl: "http://chat",
+        redisUrl: "redis://r",
+        model: "claude-haiku-4-5",
+      },
+      hooks: new HookRegistry(),
+      tools: { list: () => [], resolve: () => null },
+      intent: { classify: async () => ["general"] },
+      workspace: { loadIdentity: async () => ({}) },
+      auditLog: { append: vi.fn(async () => undefined) },
+      llm,
+      router: null,
+      sessionsDir: path.join(workspaceRoot, "core-agent", "sessions"),
+      contextEngine: {
+        assertCompactionFeasible: () => undefined,
+        maybeCompact: async () => undefined,
+        buildMessagesFromTranscript: () => [],
+      },
+      missionClient,
+      nextTurnId: () => `turn-${missionClient.createRun.mock.calls.length + 1}`,
+      registerTurn: vi.fn(),
+      unregisterTurn: vi.fn(),
+      isGoalMissionCancelled: vi.fn((missionId: string) => missionId === "mission-cancelled"),
+      deliverAssistantTextToChannel: vi.fn(async (channel: ChannelRef, text: string) => {
+        deliveries.push({ channel, text });
+      }),
+    } as unknown as Agent;
+
+    const session = new Session(sessionMeta, agent);
+    await session.runTurn(
+      { text: "Ship the launch memo", receivedAt: Date.now() },
+      new CaptureSse(),
+      { goalMode: true },
+    );
+
+    await new Promise((resolve) => setTimeout(resolve, 25));
+
+    expect(deliveries).toEqual([]);
+    expect(missionClient.createRun).toHaveBeenCalledTimes(1);
+    expect(missionClient.appendEvent).toHaveBeenCalledWith(
+      "mission-cancelled",
+      expect.objectContaining({
+        eventType: "cancelled",
+        message: "Goal mission cancelled",
+      }),
+    );
+    expect(missionClient.appendEvent).not.toHaveBeenCalledWith(
+      "mission-cancelled",
+      expect.objectContaining({
+        eventType: "heartbeat",
+        message: "Goal continuation scheduled",
+      }),
+    );
+  });
+
+  it("does not resume a restart-recovered goal mission after it has been cancelled", async () => {
+    const llm = new ScriptedGoalLlm();
+    const missionClient = {
+      createMission: vi.fn(),
+      createRun: vi.fn(async () => ({ id: "run-resume-1" })),
+      appendEvent: vi.fn(async () => ({})),
+    };
+    const agent = {
+      config: {
+        botId: "bot-goal",
+        userId: "user-goal",
+        workspaceRoot,
+        gatewayToken: "tok",
+        apiProxyUrl: "http://api",
+        chatProxyUrl: "http://chat",
+        redisUrl: "redis://r",
+        model: "claude-haiku-4-5",
+      },
+      hooks: new HookRegistry(),
+      tools: { list: () => [], resolve: () => null },
+      intent: { classify: async () => ["general"] },
+      workspace: { loadIdentity: async () => ({}) },
+      auditLog: { append: vi.fn(async () => undefined) },
+      llm,
+      router: null,
+      sessionsDir: path.join(workspaceRoot, "core-agent", "sessions"),
+      contextEngine: {
+        assertCompactionFeasible: () => undefined,
+        maybeCompact: async () => undefined,
+        buildMessagesFromTranscript: () => [],
+      },
+      missionClient,
+      nextTurnId: () => "turn-resume-1",
+      registerTurn: vi.fn(),
+      unregisterTurn: vi.fn(),
+      isGoalMissionCancelled: vi.fn((missionId: string) => missionId === "mission-1"),
+      deliverAssistantTextToChannel: vi.fn(async () => undefined),
+    } as unknown as Agent;
+    const session = new Session({
+      sessionKey: "agent:main:app:general:34",
+      botId: "bot-goal",
+      channel: { type: "app", channelId: "general" },
+      createdAt: Date.now(),
+      lastActivityAt: Date.now(),
+    }, agent);
+
+    await session.resumeGoalAfterRestart({
+      actionEventId: "event-retry-1",
+      missionId: "mission-1",
+      objective: "Finish the IC memo",
+      title: "Investment memo",
+      completionCriteria: ["Final IC memo delivered"],
+      turnsUsed: 2,
+      maxTurns: 30,
+    });
+
+    expect(missionClient.createRun).not.toHaveBeenCalled();
+    expect(missionClient.appendEvent).not.toHaveBeenCalled();
+    expect(agent.deliverAssistantTextToChannel).not.toHaveBeenCalled();
+  });
 });
