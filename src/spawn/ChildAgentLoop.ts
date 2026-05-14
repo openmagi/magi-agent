@@ -444,6 +444,7 @@ function makeChildHookContext(
       /* child hook logs stay local; rule_check events still emit */
     },
     agentModel,
+    classifierModel: agentModel,
     abortSignal,
     deadlineMs: 5_000,
     memoryMode: opts.memoryMode,

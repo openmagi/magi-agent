@@ -26,6 +26,7 @@ export function buildHookContext(
     memoryMode: normalizeMemoryMode(session.meta.channel?.memoryMode),
     llm: agent.llm,
     agentModel,
+    classifierModel: agentModel,
     executionContract: session.executionContract,
     sourceLedger: session.sourceLedger,
     researchContract: session.researchContract,

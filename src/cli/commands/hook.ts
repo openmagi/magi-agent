@@ -358,6 +358,7 @@ export async function hookTest(args: string[]): Promise<void> {
           emit: () => {},
           log: () => {},
           agentModel: "test",
+          classifierModel: "test",
           abortSignal: new AbortController().signal,
           deadlineMs: 5_000,
         };
