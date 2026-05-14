@@ -35,6 +35,7 @@ describe("Agent built-in tools", () => {
     try {
       expect(agent.tools.resolve("WebSearch")).not.toBeNull();
       expect(agent.tools.resolve("WebFetch")).not.toBeNull();
+      expect(agent.tools.resolve("SpawnWorktreeApply")).not.toBeNull();
     } finally {
       await agent.stop();
     }

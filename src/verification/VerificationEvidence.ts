@@ -6,6 +6,7 @@ export interface EvidenceItem {
   input?: unknown;
   output?: string;
   isError?: boolean;
+  metadata?: Record<string, unknown>;
 }
 
 export interface EvidenceClassification {
@@ -49,11 +50,13 @@ const VERIFY_COMMAND_PATTERNS: readonly RegExp[] = [
 const WORK_EVIDENCE_TOOLS = new Set([
   "FileWrite",
   "FileEdit",
+  "MemoryRedact",
   "DocumentWrite",
   "SpreadsheetWrite",
   "FileDeliver",
   "Bash",
   "SpawnAgent",
+  "SpawnWorktreeApply",
   "Task",
   "CommitCheckpoint",
 ]);
@@ -79,10 +82,10 @@ const EXPLICIT_VERIFIER_TOOLS = new Set([
   "Calculation",
   "TestRun",
   "DeterministicEvidenceVerifier",
+  "MemoryRedact",
 ]);
 
 const SOURCE_VERIFICATION_TOOLS = new Set([
-  "WebFetch",
   "WebSearch",
   "web-search",
   "web_search",
@@ -120,11 +123,20 @@ export function classifyEvidence(
     const documentToolVerifies = DOCUMENT_VERIFICATION_TOOLS.has(item.tool);
     const explicitVerifier = EXPLICIT_VERIFIER_TOOLS.has(item.tool);
     const sourceVerifier = SOURCE_VERIFICATION_TOOLS.has(item.tool);
+    const benchmarkReportVerifies =
+      item.tool === "CodingBenchmark" &&
+      item.metadata?.evidenceKind === "benchmark_report";
 
     if (WORK_EVIDENCE_TOOLS.has(item.tool) && !commandVerifies) {
       work = true;
     }
-    if (commandVerifies || documentToolVerifies || explicitVerifier || sourceVerifier) {
+    if (
+      commandVerifies ||
+      documentToolVerifies ||
+      explicitVerifier ||
+      sourceVerifier ||
+      benchmarkReportVerifies
+    ) {
       verification = true;
       if (command.length > 0) verificationCommands.push(command);
     }
@@ -164,6 +176,7 @@ export function transcriptEvidenceForTurn(
       status: result.status,
       output: result.output,
       isError: result.isError,
+      metadata: result.metadata,
     });
   }
   return out;

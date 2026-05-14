@@ -266,6 +266,52 @@ describe("Browser", () => {
     expect(result.errorCode).toBe("no_active_session");
   });
 
+  it("emits a browser_frame event after a successful browser action", async () => {
+    const root = await makeRoot();
+    const tinyPng = Buffer.from(
+      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=",
+      "base64",
+    );
+    const events: unknown[] = [];
+    const runner: BrowserRunner = async (command, args) => {
+      if (command === "integration.sh") {
+        return {
+          exitCode: 0,
+          signal: null,
+          stdout: JSON.stringify({
+            sessionId: "sess-1",
+            cdpEndpoint: "ws://browser-worker:9222/devtools?token=t",
+          }),
+          stderr: "",
+          truncated: false,
+        };
+      }
+      if (args.includes("screenshot")) {
+        const target = args.at(-1);
+        if (typeof target === "string") await fs.writeFile(target, tinyPng);
+      }
+      return { exitCode: 0, signal: null, stdout: "ok", stderr: "", truncated: false };
+    };
+    const tool = makeBrowserTool(root, { runner, resolveHost: resolvePublicHost });
+    const ctx = {
+      ...makeCtx(root),
+      emitAgentEvent: (event: unknown) => events.push(event),
+    };
+
+    await tool.execute({ action: "create_session" }, ctx);
+    await tool.execute({ action: "open", url: "https://example.com/app" }, ctx);
+
+    expect(events).toContainEqual({
+      type: "browser_frame",
+      action: "open",
+      url: "https://example.com/app",
+      imageBase64: tinyPng.toString("base64"),
+      contentType: "image/png",
+      capturedAt: expect.any(Number),
+    });
+    expect(JSON.stringify(events)).not.toContain("cdpEndpoint");
+  });
+
   it("runs scrape, click, fill, scroll, and screenshot with safe argument arrays", async () => {
     const root = await makeRoot();
     const calls: Array<{ command: string; args: string[] }> = [];

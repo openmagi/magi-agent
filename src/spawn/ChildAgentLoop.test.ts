@@ -173,6 +173,87 @@ describe("ChildAgentLoop — loop semantics", () => {
     expect(result.toolCallCount).toBe(0);
   });
 
+  it("skips child deferral classification when deferralCheck is disabled", async () => {
+    const { agent, llmCalls } = fakeAgent([], {
+      rounds: [
+        [
+          { kind: "text_delta", blockIndex: 0, delta: "answer-only result" },
+          {
+            kind: "message_end",
+            stopReason: "end_turn",
+            usage: { inputTokens: 1, outputTokens: 2 },
+          },
+        ],
+      ],
+    });
+    const { opts, cleanup } = await makeOpts({ deferralCheck: false });
+    cleanups.push(cleanup);
+
+    const result = await runChildAgentLoop(agent, opts);
+
+    expect(result.status).toBe("ok");
+    expect(result.finalText).toBe("answer-only result");
+    expect(llmCalls).toHaveLength(1);
+  });
+
+  it("streams child tool starts and completions as live agent events", async () => {
+    const reader = stubTool<{ path: string }, string>(
+      "FileRead",
+      async (input) => ({
+        status: "ok",
+        output: `read ${input.path}`,
+        durationMs: 7,
+      }),
+    );
+    const { agent } = fakeAgent([reader], {
+      rounds: [
+        [
+          { kind: "tool_use_start", blockIndex: 0, id: "tu_read", name: "FileRead" },
+          {
+            kind: "tool_use_input_delta",
+            blockIndex: 0,
+            partial: "{\"path\":\"workspace/magi/shared-context.md\"}",
+          },
+          {
+            kind: "message_end",
+            stopReason: "tool_use",
+            usage: { inputTokens: 1, outputTokens: 1 },
+          },
+        ],
+        [
+          { kind: "text_delta", blockIndex: 0, delta: "done" },
+          {
+            kind: "message_end",
+            stopReason: "end_turn",
+            usage: { inputTokens: 1, outputTokens: 1 },
+          },
+        ],
+      ],
+    });
+    const events: Array<Record<string, unknown>> = [];
+    const { opts, cleanup } = await makeOpts({
+      onAgentEvent: (event) => events.push(event as Record<string, unknown>),
+    });
+    cleanups.push(cleanup);
+
+    await runChildAgentLoop(agent, opts);
+
+    expect(events).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        type: "tool_start",
+        id: "child:task_1:tu_read",
+        name: "FileRead",
+        input_preview: expect.stringContaining("workspace/magi/shared-context.md"),
+      }),
+      expect.objectContaining({
+        type: "tool_end",
+        id: "child:task_1:tu_read",
+        status: "ok",
+        output_preview: "read workspace/magi/shared-context.md",
+      }),
+    ]));
+  });
+
   it("uses the LLM classifier to retry child deferral narratives", async () => {
     let executed = 0;
     const writer = stubTool<Record<string, unknown>, { ok: boolean }>(
@@ -192,6 +273,7 @@ describe("ChildAgentLoop — loop semantics", () => {
       assistantClaimsChatDelivery: false,
       assistantClaimsKbDelivery: false,
       assistantReportsDeliveryFailure: false,
+      assistantReportsDeliveryUnverified: false,
       reason: "The child says it will write the file next instead of doing it now.",
     });
     const classifierFalse = JSON.stringify({
@@ -203,6 +285,7 @@ describe("ChildAgentLoop — loop semantics", () => {
       assistantClaimsChatDelivery: false,
       assistantClaimsKbDelivery: false,
       assistantReportsDeliveryFailure: false,
+      assistantReportsDeliveryUnverified: false,
       reason: "The child reports completed work.",
     });
     const { agent, llmCalls } = fakeAgent([writer as Tool], {
@@ -318,6 +401,36 @@ describe("ChildAgentLoop — loop semantics", () => {
     expect(system).toContain("Do not assume access to parent workspace files");
   });
 
+  it("adds semantic navigation guidance for coding child workers", async () => {
+    const { agent, llmCalls } = fakeAgent([], {
+      rounds: [
+        [
+          {
+            kind: "message_end",
+            stopReason: "end_turn",
+            usage: { inputTokens: 1, outputTokens: 1 },
+          },
+        ],
+      ],
+    });
+    const { opts, cleanup } = await makeOpts({
+      persona: "coder",
+      prompt: "implement the TypeScript fix",
+      workspacePolicy: "git_worktree",
+    });
+    cleanups.push(cleanup);
+
+    await runChildAgentLoop(agent, opts);
+
+    const system = String(llmCalls[0]?.system ?? "");
+    expect(system).toContain("<coding-semantic-navigation>");
+    expect(system).toContain("CodeIntelligence");
+    expect(system).toContain("definition");
+    expect(system).toContain("references");
+    expect(system).toContain("CodeSymbolSearch");
+    expect(system).toContain("CodeDiagnostics");
+  });
+
   it("passes the merged child abort signal into child LLM calls", async () => {
     const { agent, llmCalls } = fakeAgent([], {
       rounds: [
@@ -419,7 +532,10 @@ describe("ChildAgentLoop — loop semantics", () => {
       list: () => [],
       runPre: async (point: string, args: unknown) => {
         hookCalls.push({ point, args });
-        return { action: "block" as const, reason: "child boundary block" };
+        if (point === "beforeToolUse") {
+          return { action: "block" as const, reason: "child boundary block" };
+        }
+        return { action: "continue" as const, args };
       },
       runPost: async () => {},
     };
@@ -432,10 +548,232 @@ describe("ChildAgentLoop — loop semantics", () => {
     expect(result.toolCallCount).toBe(1);
     expect(result.finalText).toBe("blocked handled");
     expect(executed).toBe(0);
-    expect(hookCalls).toHaveLength(1);
-    expect(hookCalls[0]).toMatchObject({
+    const beforeToolCalls = hookCalls.filter(
+      (call) =>
+        typeof call === "object" &&
+        call !== null &&
+        (call as { point?: string }).point === "beforeToolUse",
+    );
+    expect(beforeToolCalls).toHaveLength(1);
+    expect(beforeToolCalls[0]).toMatchObject({
       point: "beforeToolUse",
       args: { toolName: "Blocked", toolUseId: "tu_block", input: { x: 1 } },
+    });
+  });
+
+  it("records child-local transcript so beforeToolUse hooks see prior child evidence", async () => {
+    let editExecuted = 0;
+    const read = {
+      ...stubTool("FileRead", async () => ({
+        status: "ok" as const,
+        output: { path: "src/app.ts", fileSha256: "abc", contentSha256: "abc" },
+        durationMs: 0,
+      })),
+      permission: "read" as const,
+      isConcurrencySafe: true,
+    };
+    const edit = {
+      ...stubTool("FileEdit", async () => {
+        editExecuted++;
+        return { status: "ok" as const, output: { path: "src/app.ts" }, durationMs: 0 };
+      }),
+      permission: "write" as const,
+      mutatesWorkspace: true,
+      isConcurrencySafe: false,
+    };
+    const { agent } = fakeAgent([read as Tool, edit as Tool], {
+      rounds: [
+        [
+          { kind: "tool_use_start", blockIndex: 0, id: "read-1", name: "FileRead" },
+          {
+            kind: "tool_use_input_delta",
+            blockIndex: 0,
+            partial: JSON.stringify({ path: "src/app.ts" }),
+          },
+          {
+            kind: "message_end",
+            stopReason: "tool_use",
+            usage: { inputTokens: 1, outputTokens: 1 },
+          },
+        ],
+        [
+          { kind: "tool_use_start", blockIndex: 0, id: "edit-1", name: "FileEdit" },
+          {
+            kind: "tool_use_input_delta",
+            blockIndex: 0,
+            partial: JSON.stringify({
+              path: "src/app.ts",
+              old_string: "1",
+              new_string: "2",
+            }),
+          },
+          {
+            kind: "message_end",
+            stopReason: "tool_use",
+            usage: { inputTokens: 1, outputTokens: 1 },
+          },
+        ],
+        [
+          { kind: "text_delta", blockIndex: 0, delta: "done" },
+          {
+            kind: "message_end",
+            stopReason: "end_turn",
+            usage: { inputTokens: 1, outputTokens: 1 },
+          },
+        ],
+      ],
+    });
+    agent.hooks = {
+      list: () => [],
+      runPre: async (point: string, args: { toolName?: string }, ctx: { transcript?: unknown[] }) => {
+        if (point === "beforeToolUse" && args.toolName === "FileEdit") {
+          const hasPriorReadCall = ctx.transcript?.some(
+            (entry) =>
+              typeof entry === "object" &&
+              entry !== null &&
+              (entry as { kind?: string; name?: string }).kind === "tool_call" &&
+              (entry as { name?: string }).name === "FileRead",
+          );
+          const hasPriorReadResult = ctx.transcript?.some(
+            (entry) =>
+              typeof entry === "object" &&
+              entry !== null &&
+              (entry as { kind?: string; toolUseId?: string }).kind === "tool_result" &&
+              (entry as { toolUseId?: string }).toolUseId === "read-1",
+          );
+          if (!hasPriorReadCall || !hasPriorReadResult) {
+            return { action: "block" as const, reason: "missing local child transcript evidence" };
+          }
+        }
+        return { action: "continue" as const, args };
+      },
+      runPost: async () => {},
+    };
+    const { opts, cleanup } = await makeOpts();
+    cleanups.push(cleanup);
+
+    const result = await runChildAgentLoop(agent, opts);
+
+    expect(result.status).toBe("ok");
+    expect(editExecuted).toBe(1);
+    expect(result.finalText).toBe("done");
+  });
+
+  it("blocks child writes outside an explicit write set", async () => {
+    let executed = 0;
+    const write = {
+      ...stubTool("FileWrite", async () => {
+        executed++;
+        return { status: "ok" as const, output: { path: "src/blocked.ts" }, durationMs: 0 };
+      }),
+      permission: "write" as const,
+      mutatesWorkspace: true,
+      isConcurrencySafe: false,
+    };
+    const { agent } = fakeAgent([write as Tool], {
+      rounds: [
+        [
+          { kind: "tool_use_start", blockIndex: 0, id: "write-1", name: "FileWrite" },
+          {
+            kind: "tool_use_input_delta",
+            blockIndex: 0,
+            partial: JSON.stringify({ path: "src/blocked.ts", content: "bad" }),
+          },
+          {
+            kind: "message_end",
+            stopReason: "tool_use",
+            usage: { inputTokens: 1, outputTokens: 1 },
+          },
+        ],
+        [
+          { kind: "text_delta", blockIndex: 0, delta: "blocked" },
+          {
+            kind: "message_end",
+            stopReason: "end_turn",
+            usage: { inputTokens: 1, outputTokens: 1 },
+          },
+        ],
+      ],
+    });
+    const { opts, cleanup } = await makeOpts({
+      writeSet: ["src/allowed.ts"],
+    });
+    cleanups.push(cleanup);
+
+    const result = await runChildAgentLoop(agent, opts);
+
+    expect(result.status).toBe("ok");
+    expect(executed).toBe(0);
+    expect(result.evidence?.changedFiles).toEqual([]);
+  });
+
+  it("returns structured child evidence for tools and changed files", async () => {
+    const write = {
+      ...stubTool("FileWrite", async () => ({
+        status: "ok" as const,
+        output: { path: "src/created.ts" },
+        durationMs: 0,
+      })),
+      permission: "write" as const,
+      mutatesWorkspace: true,
+      isConcurrencySafe: false,
+    };
+    const testRun = {
+      ...stubTool("TestRun", async () => ({
+        status: "ok" as const,
+        output: { command: "npm test", passed: true },
+        durationMs: 0,
+      })),
+      permission: "execute" as const,
+      isConcurrencySafe: false,
+    };
+    const { agent } = fakeAgent([write as Tool, testRun as Tool], {
+      rounds: [
+        [
+          { kind: "tool_use_start", blockIndex: 0, id: "write-1", name: "FileWrite" },
+          {
+            kind: "tool_use_input_delta",
+            blockIndex: 0,
+            partial: JSON.stringify({ path: "src/created.ts", content: "ok" }),
+          },
+          {
+            kind: "message_end",
+            stopReason: "tool_use",
+            usage: { inputTokens: 1, outputTokens: 1 },
+          },
+        ],
+        [
+          { kind: "tool_use_start", blockIndex: 0, id: "test-1", name: "TestRun" },
+          {
+            kind: "tool_use_input_delta",
+            blockIndex: 0,
+            partial: JSON.stringify({ command: "npm test" }),
+          },
+          {
+            kind: "message_end",
+            stopReason: "tool_use",
+            usage: { inputTokens: 1, outputTokens: 1 },
+          },
+        ],
+        [
+          { kind: "text_delta", blockIndex: 0, delta: "done" },
+          {
+            kind: "message_end",
+            stopReason: "end_turn",
+            usage: { inputTokens: 1, outputTokens: 1 },
+          },
+        ],
+      ],
+    });
+    const { opts, cleanup } = await makeOpts();
+    cleanups.push(cleanup);
+
+    const result = await runChildAgentLoop(agent, opts);
+
+    expect(result.evidence).toMatchObject({
+      toolNames: ["FileWrite", "TestRun"],
+      changedFiles: ["src/created.ts"],
+      verificationCommands: ["npm test"],
     });
   });
 
@@ -806,7 +1144,7 @@ describe("ChildAgentLoop — loop semantics", () => {
           "execution rules",
           "",
           "## Multi-Agent Orchestration",
-          "magi-agent --agent specialist",
+          "magi agent --agent specialist",
         ].join("\n"),
         "utf8",
       ),
@@ -854,7 +1192,7 @@ describe("ChildAgentLoop — loop semantics", () => {
     expect(system).toContain("You are the spawned child agent, not the main meta-layer agent");
     expect(system).toContain("Do not spawn, route to, or manage further subagents");
     expect(system).not.toContain("All complex tasks are executed via subagent");
-    expect(system).not.toContain("magi-agent --agent specialist");
+    expect(system).not.toContain("magi agent --agent specialist");
     expect(system).not.toContain("Spawn subagents with any model");
     expect(system).not.toContain("delegate to the coding agent");
     expect(system).not.toContain("MAIN META SOUL MUST NOT ENTER CHILD");

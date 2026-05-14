@@ -28,7 +28,7 @@ export interface TaskOutputOutput {
 const INPUT_SCHEMA = {
   type: "object",
   properties: {
-    taskId: { type: "string", description: "taskId returned by SpawnAgent." },
+    taskId: { type: "string", description: "taskId returned by SpawnAgent or Bash runInBackground." },
   },
   required: ["taskId"],
 } as const;
@@ -39,7 +39,7 @@ export function makeTaskOutputTool(
   return {
     name: "TaskOutput",
     description:
-      "Return the final output (resultText, error, durationMs) of a background subagent task. If the task is still running, returns its current status without blocking.",
+      "Return the final output (resultText, error, durationMs) of a background task. If the task is still running, returns its current status without blocking.",
     inputSchema: INPUT_SCHEMA,
     permission: "meta",
     kind: "core",

@@ -5,6 +5,13 @@ export function useAuthFetch(): typeof fetch {
     if (token && !headers.has("Authorization")) {
       headers.set("Authorization", `Bearer ${token}`);
     }
-    return fetch(input, { ...init, headers });
+    const target =
+      typeof input === "string" && input.startsWith("/v1/")
+        ? new URL(
+            input,
+            window.localStorage.getItem("magi.agent.app.agentUrl") || window.location.origin,
+          ).toString()
+        : input;
+    return fetch(target, { ...init, headers });
   }) as typeof fetch;
 }

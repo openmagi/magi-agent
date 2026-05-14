@@ -25,6 +25,12 @@ function makeConfig(
   overrides?: Partial<MagiConfigData["tools"]>,
 ): MagiConfigData {
   return {
+    hooks: {
+      disable_builtin: [],
+      directory: "./hooks",
+      global_directory: "~/.magi/hooks",
+      overrides: {},
+    },
     tools: {
       disable_builtin: [],
       directory: "./nonexistent-tools",

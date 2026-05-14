@@ -1,0 +1,12 @@
+# content-moderation — test fixtures
+
+description: "Should block response with SSN"
+point: "beforeCommit"
+input:
+  assistantText: "Your social security number is 123-45-6789."
+  toolCallCount: 0
+  toolReadHappened: false
+  userMessage: "What is my SSN?"
+  retryCount: 0
+expected:
+  action: "block"

@@ -60,6 +60,8 @@ export interface BackgroundTaskRecord {
   toolCallCount?: number;
   attempts?: number;
   error?: string;
+  missionId?: string;
+  missionRunId?: string;
   spawnDir?: string;
   artifacts?: BackgroundTaskArtifacts;
   progress?: BackgroundTaskProgress[];
@@ -71,6 +73,8 @@ export interface CreateBackgroundTaskInput {
   sessionKey: string;
   persona: string;
   prompt: string;
+  missionId?: string;
+  missionRunId?: string;
   spawnDir?: string;
   abortController?: AbortController;
 }
@@ -101,6 +105,8 @@ export type BackgroundTaskPatch = Partial<
     | "toolCallCount"
     | "attempts"
     | "error"
+    | "missionId"
+    | "missionRunId"
     | "spawnDir"
     | "artifacts"
     | "progress"
@@ -202,6 +208,8 @@ export class BackgroundTaskRegistry {
       prompt: input.prompt,
       status: "running",
       startedAt: now,
+      ...(input.missionId ? { missionId: input.missionId } : {}),
+      ...(input.missionRunId ? { missionRunId: input.missionRunId } : {}),
       ...(input.spawnDir ? { spawnDir: input.spawnDir } : {}),
     };
     this.records.set(record.taskId, record);
@@ -243,18 +251,20 @@ export class BackgroundTaskRegistry {
       ...(result.error !== undefined ? { error: result.error } : {}),
       ...(result.artifacts !== undefined ? { artifacts: result.artifacts } : {}),
     });
+    this.aborts.delete(taskId);
 
     // #81 — fire an inline notification for the parent session so the
-    // next LLM turn sees a `<task-notification>` user-role block. We
-    // keep this narrow (spawn only here); cron/agent-kind tasks call
-    // `enqueueNotification` directly from their own completion paths.
+    // next LLM turn sees a `<task-notification>` user-role block. Cron
+    // and agent-kind tasks call `enqueueNotification` directly from
+    // their own completion paths.
     if (updated) {
+      const source = updated.persona === "bash" ? "bash" : "spawn";
       const summary =
         result.status === "completed"
-          ? `spawn ${taskId} completed`
+          ? `${source} ${taskId} completed`
           : result.status === "aborted"
-            ? `spawn ${taskId} aborted`
-            : `spawn ${taskId} failed${result.error ? `: ${result.error}` : ""}`;
+            ? `${source} ${taskId} aborted`
+            : `${source} ${taskId} failed${result.error ? `: ${result.error}` : ""}`;
       this.enqueueNotification({
         taskId,
         sessionKey: updated.sessionKey,
@@ -347,6 +357,38 @@ export class BackgroundTaskRegistry {
     return nextCursor ? { tasks: page, nextCursor } : { tasks: page };
   }
 
+  async findByMissionId(missionId: string): Promise<BackgroundTaskRecord[]> {
+    await this.hydrate();
+    return [...this.records.values()]
+      .filter((record) => record.missionId === missionId)
+      .sort((a, b) => b.startedAt - a.startedAt)
+      .map((record) => ({ ...record }));
+  }
+
+  async reconcileAbandonedRunning(
+    reason = "abandoned_by_restart",
+  ): Promise<BackgroundTaskRecord[]> {
+    await this.hydrate();
+    const abandoned: BackgroundTaskRecord[] = [];
+    const finishedAt = Date.now();
+
+    for (const record of this.records.values()) {
+      if (record.status !== "running") continue;
+      if (this.aborts.has(record.taskId)) continue;
+      const next: BackgroundTaskRecord = {
+        ...record,
+        status: "failed",
+        finishedAt,
+        error: reason,
+      };
+      this.records.set(record.taskId, next);
+      await this.persist(next);
+      abandoned.push({ ...next });
+    }
+
+    return abandoned;
+  }
+
   /**
    * Trigger the child's abort signal, transition the record to
    * status="aborted". Returns true when an abort was actually fired
@@ -373,6 +415,27 @@ export class BackgroundTaskRegistry {
     this.aborts.delete(taskId);
     await this.persist(next);
     return fired || prev.status === "running";
+  }
+
+  async waitForCompletion(
+    taskId: string,
+    opts?: { signal?: AbortSignal; intervalMs?: number },
+  ): Promise<BackgroundTaskRecord | null> {
+    await this.hydrate();
+    const interval = opts?.intervalMs ?? 500;
+    const signal = opts?.signal;
+    for (;;) {
+      if (signal?.aborted) return null;
+      const rec = this.records.get(taskId);
+      if (rec && rec.status !== "running") return { ...rec };
+      await new Promise<void>((resolve) => {
+        const t = setTimeout(resolve, interval);
+        if (signal) {
+          const onAbort = (): void => { clearTimeout(t); resolve(); };
+          signal.addEventListener("abort", onAbort, { once: true });
+        }
+      });
+    }
   }
 
   /** Test / teardown hook — flushes controllers without touching disk. */

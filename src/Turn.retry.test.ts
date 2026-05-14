@@ -291,7 +291,26 @@ describe("Turn blocked-output retry", () => {
     });
   });
 
-  it("does not restore a verifier-blocked draft when retry preflight fails", async () => {
+  it("emits public model progress before waiting on an LLM stream", async () => {
+    const { turn, sse } = await makeFixture([
+      { blocks: [{ type: "text", text: "Verified answer." }], stopReason: "end_turn" },
+    ]);
+
+    await turn.execute();
+
+    expect(sse.agentEvents).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: "llm_progress",
+          turnId: "turn-retry-1",
+          iter: 0,
+          stage: "started",
+        }),
+      ]),
+    );
+  });
+
+  it("does not leave user-visible text when retry preflight fails after clearing a blocked draft", async () => {
     const { turn, transcript, sse } = await makeFixture(undefined, {
       blockRetryPreLlm: true,
     });
@@ -300,11 +319,29 @@ describe("Turn blocked-output retry", () => {
     await expect(turn.commitWithRetry()).rejects.toThrow("retry preflight timeout");
 
     const visible = visibleTextAfterLastClear(sse.agentEvents);
-    expect(visible).toContain("runtime verifier blocked");
-    expect(visible).not.toContain("Unsupported claim");
+    expect(visible).toBe("");
 
     const entries = await transcript.readAll();
     expect(entries.some((entry) => entry.kind === "assistant_text")).toBe(false);
+  });
+
+  it("does not commit an empty response produced by a blocked-commit retry", async () => {
+    const { turn, transcript, sse } = await makeFixture([
+      { blocks: [{ type: "text", text: "Unsupported claim." }], stopReason: "end_turn" },
+      { blocks: [], stopReason: "end_turn" },
+    ]);
+
+    await turn.execute();
+    await expect(turn.commitWithRetry()).rejects.toThrow(
+      "blocked commit retry produced no visible response",
+    );
+
+    const visible = visibleTextAfterLastClear(sse.agentEvents);
+    expect(visible).toBe("");
+
+    const entries = await transcript.readAll();
+    expect(entries.some((entry) => entry.kind === "assistant_text")).toBe(false);
+    expect(entries.some((entry) => entry.kind === "turn_committed")).toBe(false);
   });
 
   it("does not resample when a sealed-files verifier blocks the commit", async () => {

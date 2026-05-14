@@ -60,7 +60,7 @@ function makeHookCtx(overrides: Partial<HookContext> = {}): HookContext {
 describe("fileDeliveryInterceptor", () => {
   it("creates a registered hook with correct metadata", () => {
     const hook = fileDeliveryInterceptor({
-      workspaceRoot: "/home/magi/.magi/workspace",
+      workspaceRoot: "/home/ocuser/.magi/workspace",
     });
 
     expect(hook.name).toBe("builtin:file-delivery-interceptor");
@@ -72,7 +72,7 @@ describe("fileDeliveryInterceptor", () => {
 
   it("skips non-zero iterations", async () => {
     const hook = fileDeliveryInterceptor({
-      workspaceRoot: "/home/magi/.magi/workspace",
+      workspaceRoot: "/home/ocuser/.magi/workspace",
     });
 
     const result = await hook.handler(
@@ -90,7 +90,7 @@ describe("fileDeliveryInterceptor", () => {
 
   it("skips messages without file extensions", async () => {
     const hook = fileDeliveryInterceptor({
-      workspaceRoot: "/home/magi/.magi/workspace",
+      workspaceRoot: "/home/ocuser/.magi/workspace",
     });
 
     const result = await hook.handler(
@@ -108,7 +108,7 @@ describe("fileDeliveryInterceptor", () => {
 
   it("skips messages longer than 500 chars", async () => {
     const hook = fileDeliveryInterceptor({
-      workspaceRoot: "/home/magi/.magi/workspace",
+      workspaceRoot: "/home/ocuser/.magi/workspace",
     });
 
     const result = await hook.handler(
@@ -131,7 +131,7 @@ describe("fileDeliveryInterceptor", () => {
       const sendFile = vi.fn(async () => ({
         provider: "telegram" as const,
         channelId: "777",
-        messageId: "100",
+        messageId: "1001",
       }));
       const emitted: string[] = [];
       const hook = fileDeliveryInterceptor({
@@ -161,8 +161,8 @@ describe("fileDeliveryInterceptor", () => {
         "document",
       );
       expect(result?.action).toBe("replace");
-      expect(result?.value.system).toContain("File delivery already completed");
-      expect(emitted.join("")).toContain("sent to Telegram chat");
+      expect(result?.value.system).toContain("provider message id 1001");
+      expect(emitted.join("")).toContain("provider message id 1001");
     } finally {
       await fs.rm(workspaceRoot, { recursive: true, force: true });
     }

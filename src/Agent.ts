@@ -21,12 +21,16 @@ import {
   DEFAULT_DISCIPLINE,
   loadDisciplineConfig,
 } from "./discipline/config.js";
+import { isCodingHardModeSkillActive } from "./discipline/codingHardModeSkills.js";
 import {
   makeCommitCheckpointTool,
   runGit,
 } from "./tools/CommitCheckpoint.js";
 import type { DisciplineSessionCounter } from "./hooks/builtin/disciplineHook.js";
 import type { ChannelRef } from "./util/types.js";
+import { createLogger } from "./util/logger.js";
+
+const agentLogger = createLogger("Agent");
 import { LLMClient } from "./transport/LLMClient.js";
 import { DirectLLMClient } from "./transport/DirectLLMClient.js";
 import { Workspace } from "./storage/Workspace.js";
@@ -44,9 +48,24 @@ import { HipocampusService } from "./services/memory/HipocampusService.js";
 import { makeFileReadTool } from "./tools/FileRead.js";
 import { makeFileWriteTool } from "./tools/FileWrite.js";
 import { makeFileEditTool } from "./tools/FileEdit.js";
+import { makePatchApplyTool } from "./tools/PatchApply.js";
+import { makeMemoryRedactTool } from "./tools/MemoryRedact.js";
 import { makeCodeWorkspaceTool } from "./tools/CodeWorkspace.js";
+import { makeCodeSymbolSearchTool } from "./tools/CodeSymbolSearch.js";
+import { makeCodeIntelligenceTool } from "./tools/CodeIntelligence.js";
+import { makeCodeDiagnosticsTool } from "./tools/CodeDiagnostics.js";
+import { makeRepositoryMapTool } from "./tools/RepositoryMap.js";
+import { makeCodingBenchmarkTool } from "./tools/CodingBenchmark.js";
+import { makeSpawnWorktreeApplyTool } from "./tools/SpawnWorktreeApply.js";
+import { makePackageDependencyResolveTool } from "./tools/PackageDependencyResolve.js";
+import { makeExternalSourceCacheTool } from "./tools/ExternalSourceCache.js";
+import { makeExternalSourceReadTool } from "./tools/ExternalSourceRead.js";
 import { makeBashTool } from "./tools/Bash.js";
+import { makeSafeCommandTool } from "./tools/SafeCommand.js";
 import { makeTestRunTool } from "./tools/TestRun.js";
+import { makeProjectVerificationPlannerTool } from "./tools/ProjectVerificationPlanner.js";
+import { makeGitDiffTool } from "./tools/GitDiff.js";
+import { makeRepoTaskStateTool } from "./tools/RepoTaskState.js";
 import { makeGlobTool } from "./tools/Glob.js";
 import { makeGrepTool } from "./tools/Grep.js";
 import { makeTaskBoardTool } from "./tools/TaskBoard.js";
@@ -62,6 +81,7 @@ import {
   makeExitPlanModeTool,
   type PlanModeController,
 } from "./tools/ExitPlanMode.js";
+import { makeSwitchToActModeTool } from "./tools/SwitchToActMode.js";
 import {
   makeEnterPlanModeTool,
   type PlanModeEntryController,
@@ -94,10 +114,15 @@ import { makeFileSendTool } from "./tools/FileSend.js";
 import { makeSpreadsheetWriteTool } from "./tools/SpreadsheetWrite.js";
 import { registerSkillRuntimeHooks } from "./tools/SkillRuntimeHooks.js";
 import { CronScheduler, type CronRecord } from "./cron/CronScheduler.js";
+import { runScriptCron, type ScriptCronResult } from "./cron/ScriptCronRunner.js";
 import { makeCronCreateTool } from "./tools/CronCreate.js";
 import { makeCronListTool } from "./tools/CronList.js";
 import { makeCronUpdateTool } from "./tools/CronUpdate.js";
 import { makeCronDeleteTool } from "./tools/CronDelete.js";
+import { MissionClient } from "./missions/MissionClient.js";
+import { MissionActionReconciler } from "./missions/MissionActionReconciler.js";
+import type { GoalMissionResumeInput, MissionChannelType } from "./missions/types.js";
+import { makeMissionLedgerTool } from "./tools/MissionLedger.js";
 import type { Turn } from "./Turn.js";
 import type {
   ChannelAdapter,
@@ -145,6 +170,11 @@ export interface BackgroundTaskDeliveryInput {
   errorMessage?: string;
 }
 
+interface CronMissionLink {
+  missionId: string;
+  missionRunId?: string;
+}
+
 export interface SkillReloadResult {
   loaded: number;
   issues: number;
@@ -153,6 +183,22 @@ export interface SkillReloadResult {
 
 const MAX_BACKGROUND_DELIVERY_BYTES = 15 * 1024;
 const TRUNCATED_BACKGROUND_RESULT_MARKER = "\n\n[truncated background result]";
+
+function runtimeMissionsEnabled(): boolean {
+  return process.env.CORE_AGENT_MISSIONS === "1";
+}
+
+function missionActionsEnabled(): boolean {
+  return runtimeMissionsEnabled() && process.env.CORE_AGENT_MISSION_ACTIONS !== "0";
+}
+
+function scriptCronEnabled(): boolean {
+  return process.env.CORE_AGENT_SCRIPT_CRON === "1";
+}
+
+function truncateMissionText(value: string, limit: number): string {
+  return value.length <= limit ? value : value.slice(0, limit - 1).trimEnd();
+}
 
 export function formatBackgroundTaskDelivery(
   input: BackgroundTaskDeliveryInput,
@@ -206,7 +252,7 @@ export interface AgentConfig {
   apiProxyUrl: string;
   chatProxyUrl?: string;
   redisUrl?: string;
-  /** Default model for this bot. Overridable per-turn via smart-router. */
+  /** Default model for this bot. Can be overridden per turn by hosted deployments. */
   model: string;
   /** OSS multi-provider support — delegates LLM calls to this provider. */
   llmProvider?: { stream(req: import("./transport/LLMClient.js").LLMStreamRequest): AsyncGenerator<import("./transport/LLMClient.js").LLMEvent, void, void> };
@@ -225,9 +271,9 @@ export interface AgentConfig {
   agentInstructions?: string;
   /**
    * Initial tool-permission posture for newly-created sessions.
-   * Hosted Magi Cloud pods set "bypass" explicitly to preserve the
-   * low-friction product UX; bare Session construction defaults to
-   * "default" so hooks are active unless runtime config opts out.
+   * Hosted Magi Cloud pods can set "bypass" explicitly; OSS env mode
+   * defaults to "workspace-bypass" so local workspace automation stays
+   * low-friction while system/secret boundaries remain active.
    */
   defaultPermissionMode?: PermissionMode;
   telegramBotToken?: string;
@@ -301,6 +347,10 @@ export class Agent {
   readonly outputArtifacts: OutputArtifactRegistry;
   /** Cron scheduler — post-Phase-3 legacy-runtime parity. */
   readonly crons: CronScheduler;
+  /** Mission ledger client for durable runtime coordination. */
+  readonly missionClient: MissionClient;
+  /** Polls durable mission user actions into local runtime state. */
+  private readonly missionActionReconciler: MissionActionReconciler;
   /** Native hipocampus memory — qmd search index. */
   readonly qmdManager: QmdManager;
   /** Native hipocampus memory — compaction engine. */
@@ -331,6 +381,7 @@ export class Agent {
   /** Active turns indexed by turnId — populated by Session.runTurn so
    * the HTTP ask-response endpoint + ExitPlanMode tool can find them. */
   private readonly activeTurns = new Map<string, Turn>();
+  private readonly cancelledGoalMissionIds = new Set<string>();
   /** C1 — live channel adapters. Populated in start() when tokens set. */
   private readonly channelAdapters: ChannelAdapter[] = [];
   private skillRuntimeHooksRegistered = false;
@@ -411,6 +462,20 @@ export class Agent {
     // below so they're available before the first turn even if no
     // crons exist yet.
     this.crons = new CronScheduler(config.workspaceRoot);
+    this.missionClient = new MissionClient({
+      chatProxyUrl: config.chatProxyUrl ?? "",
+      gatewayToken: config.gatewayToken,
+    });
+    this.missionActionReconciler = new MissionActionReconciler({
+      workspaceRoot: config.workspaceRoot,
+      missionClient: this.missionClient,
+      backgroundTasks: this.backgroundTasks,
+      crons: this.crons,
+      goals: {
+        resumeAfterRestart: (input) => this.resumeGoalMissionAfterRestart(input),
+        cancel: (missionId) => this.cancelGoalMission(missionId),
+      },
+    });
     // Native hipocampus — qmd search. Started in start().
     this.qmdManager = new QmdManager(
       config.workspaceRoot,
@@ -449,12 +514,29 @@ export class Agent {
     // Register the Phase 1b built-in tool set. Phase 2 adds skill
     // loading on top of this via ToolRegistry.loadSkills().
     this.tools = new ToolRegistry();
+    const getSourceChannelForTool = (ctx: { turnId: string }): ChannelRef | null =>
+      this.getSourceChannelForTool(ctx);
     this.tools.register(makeFileReadTool(config.workspaceRoot));
     this.tools.register(makeFileWriteTool(config.workspaceRoot));
     this.tools.register(makeFileEditTool(config.workspaceRoot));
+    this.tools.register(makePatchApplyTool(config.workspaceRoot));
+    this.tools.register(makeMemoryRedactTool(config.workspaceRoot));
     this.tools.register(makeCodeWorkspaceTool(config.workspaceRoot));
-    this.tools.register(makeBashTool(config.workspaceRoot));
+    this.tools.register(makeCodeSymbolSearchTool(config.workspaceRoot));
+    this.tools.register(makeCodeIntelligenceTool(config.workspaceRoot));
+    this.tools.register(makeCodeDiagnosticsTool(config.workspaceRoot));
+    this.tools.register(makeRepositoryMapTool(config.workspaceRoot));
+    this.tools.register(makeCodingBenchmarkTool(config.workspaceRoot));
+    this.tools.register(makeSpawnWorktreeApplyTool(config.workspaceRoot));
+    this.tools.register(makePackageDependencyResolveTool());
+    this.tools.register(makeExternalSourceCacheTool());
+    this.tools.register(makeExternalSourceReadTool());
+    this.tools.register(makeBashTool(config.workspaceRoot, this.backgroundTasks));
+    this.tools.register(makeSafeCommandTool(config.workspaceRoot));
     this.tools.register(makeTestRunTool(config.workspaceRoot));
+    this.tools.register(makeProjectVerificationPlannerTool(config.workspaceRoot));
+    this.tools.register(makeGitDiffTool(config.workspaceRoot));
+    this.tools.register(makeRepoTaskStateTool(config.workspaceRoot));
     this.tools.register(makeGlobTool(config.workspaceRoot));
     this.tools.register(makeGrepTool(config.workspaceRoot));
     this.tools.register(makeTaskBoardTool(this.sessionsDir));
@@ -468,8 +550,13 @@ export class Agent {
     );
     // §7.12.d — native subagent delegation. Registered last so it sees
     // the full parent tool list when the child filters its allowlist.
-    this.tools.register(makeSpawnAgentTool(this, this.backgroundTasks));
-    // T2-10 — query / stop tools over background SpawnAgent tasks.
+    this.tools.register(
+      makeSpawnAgentTool(this, this.backgroundTasks, {
+        missionClient: this.missionClient,
+        getSourceChannel: getSourceChannelForTool,
+      }),
+    );
+    // T2-10 — query / stop tools over background SpawnAgent and Bash tasks.
     this.tools.register(makeTaskListTool(this.backgroundTasks));
     this.tools.register(makeTaskGetTool(this.backgroundTasks));
     this.tools.register(makeTaskOutputTool(this.backgroundTasks));
@@ -501,8 +588,12 @@ export class Agent {
     this.tools.register(makeDateRangeTool());
     this.tools.register(makeCalculationTool());
     this.tools.register(makeSpreadsheetWriteTool(config.workspaceRoot, this.outputArtifacts));
-    const getSourceChannelForTool = (ctx: { turnId: string }): ChannelRef | null =>
-      this.getSourceChannelForTool(ctx);
+    this.tools.register(
+      makeMissionLedgerTool({
+        client: this.missionClient,
+        getSourceChannel: getSourceChannelForTool,
+      }),
+    );
     const sendFileToSourceChannel = async (
       channel: ChannelRef,
       filePath: string,
@@ -588,6 +679,7 @@ export class Agent {
         return controller;
       }),
     );
+    this.tools.register(makeSwitchToActModeTool(this.tools));
   }
 
   async resolveRuntimeModel(): Promise<string> {
@@ -651,6 +743,26 @@ export class Agent {
     return false;
   }
 
+  markGoalMissionCancelled(missionId: string): boolean {
+    if (this.cancelledGoalMissionIds.has(missionId)) return false;
+    this.cancelledGoalMissionIds.add(missionId);
+    return true;
+  }
+
+  isGoalMissionCancelled(missionId: string): boolean {
+    return this.cancelledGoalMissionIds.has(missionId);
+  }
+
+  cancelGoalMission(missionId: string): void {
+    this.markGoalMissionCancelled(missionId);
+    for (const turn of this.activeTurns.values()) {
+      const metadata = turn.userMessage.metadata;
+      if (metadata?.goalMode === true && metadata.missionId === missionId) {
+        turn.requestInterrupt(false, "api");
+      }
+    }
+  }
+
   /**
    * Coding Discipline accessors — returned to hook + tool delegates.
    * Public so the hooks/builtin wiring + CommitCheckpoint factory can
@@ -687,9 +799,11 @@ export class Agent {
 
     const session = this.sessions.get(input.sessionKey);
     if (!session) {
-      console.warn(
-        `[core-agent] background delivery skipped taskId=${input.taskId}: session not live sessionKey=${input.sessionKey}`,
-      );
+      agentLogger.warn("background_delivery_skipped", {
+        taskId: input.taskId,
+        reason: "session_not_live",
+        sessionKey: input.sessionKey,
+      });
       return false;
     }
 
@@ -697,9 +811,10 @@ export class Agent {
     try {
       if (channel.type === "app") {
         if (!this.webAppAdapter) {
-          console.warn(
-            `[core-agent] background delivery skipped taskId=${input.taskId}: webapp adapter not configured`,
-          );
+          agentLogger.warn("background_delivery_skipped", {
+            taskId: input.taskId,
+            reason: "webapp_adapter_not_configured",
+          });
           return false;
         }
         await this.webAppAdapter.send({
@@ -712,9 +827,11 @@ export class Agent {
       if (channel.type === "telegram" || channel.type === "discord") {
         const adapter = this.channelAdapters.find((a) => a.kind === channel.type);
         if (!adapter) {
-          console.warn(
-            `[core-agent] background delivery skipped taskId=${input.taskId}: ${channel.type} adapter not configured`,
-          );
+          agentLogger.warn("background_delivery_skipped", {
+            taskId: input.taskId,
+            reason: "adapter_not_configured",
+            channelType: channel.type,
+          });
           return false;
         }
         await adapter.send({
@@ -724,14 +841,19 @@ export class Agent {
         return true;
       }
 
-      console.warn(
-        `[core-agent] background delivery skipped taskId=${input.taskId}: unsupported channel=${channel.type}`,
-      );
+      agentLogger.warn("background_delivery_skipped", {
+        taskId: input.taskId,
+        reason: "unsupported_channel",
+        channelType: channel.type,
+      });
       return false;
     } catch (err) {
-      console.warn(
-        `[core-agent] background delivery failed taskId=${input.taskId} channel=${channel.type}:${channel.channelId}: ${(err as Error).message}`,
-      );
+      agentLogger.warn("background_delivery_failed", {
+        taskId: input.taskId,
+        channelType: channel.type,
+        channelId: channel.channelId,
+        error: (err as Error).message,
+      });
       return false;
     }
   }
@@ -754,9 +876,7 @@ export class Agent {
     try {
       await this.backgroundTasks.hydrate();
     } catch (err) {
-      console.warn(
-        `[core-agent] background-tasks hydrate failed: ${(err as Error).message}`,
-      );
+      agentLogger.warn("background_tasks_hydrate_failed", { error: (err as Error).message });
     }
 
     // Coding Discipline — read `.discipline.yaml` if present, seed
@@ -766,14 +886,14 @@ export class Agent {
       const cfg = await loadDisciplineConfig(this.config.workspaceRoot);
       if (cfg) {
         this.disciplineDefault = cfg;
-        console.log(
-          `[core-agent] discipline: config loaded tdd=${cfg.tdd} git=${cfg.git} enforcement=${cfg.requireCommit}`,
-        );
+        agentLogger.info("discipline_config_loaded", {
+          tdd: cfg.tdd,
+          git: cfg.git,
+          enforcement: cfg.requireCommit,
+        });
       }
     } catch (err) {
-      console.warn(
-        `[core-agent] discipline config load failed: ${(err as Error).message}`,
-      );
+      agentLogger.warn("discipline_config_load_failed", { error: (err as Error).message });
     }
 
     // Kevin's A/A/A decision: `git init` always runs on Agent.start,
@@ -818,11 +938,11 @@ export class Agent {
           this.setSessionDiscipline(sessionKey, next),
         getSessionCounter: (sessionKey) =>
           this.getDisciplineCounter(sessionKey),
-        // Kevin's A/A/A rule #1 — surface "is coding-agent skill
+        // Kevin's A/A/A rule #1 — surface "coding hard-mode skill
         // active" so the classifier hook can promote soft → hard on
-        // coding-labeled turns for bots that bundle the skill.
+        // coding-labeled turns for bots that bundle a coding agent skill.
         isCodingAgentSkillActive: () =>
-          this.tools.resolve("coding-agent") !== null,
+          isCodingHardModeSkillActive(this.tools),
       },
       midTurnInjectorAgent: {
         getSession: (sessionKey) => this.sessions.get(sessionKey),
@@ -846,9 +966,44 @@ export class Agent {
           const s = this.sessions.get(sessionKey);
           return s ? s.getPermissionMode() : null;
         },
-        enterPlanMode: async (sessionKey) => {
+        enterPlanMode: async (sessionKey, turnId) => {
           const s = this.sessions.get(sessionKey);
-          s?.setPermissionMode("plan");
+          if (!s) return;
+          await s.planLifecycle.enterPlanMode({ turnId });
+        },
+      },
+      clarificationGateAgent: {
+        askClarification: async (input) => {
+          const s = this.sessions.get(input.sessionKey);
+          if (!s) {
+            throw new Error(`session not found for clarification: ${input.sessionKey}`);
+          }
+          const choices = input.choices.slice(0, 4).map((label, index) => ({
+            id: `choice_${index + 1}`,
+            label,
+          }));
+          const request = await s.controlRequests.create({
+            kind: "user_question",
+            turnId: input.turnId,
+            sessionKey: input.sessionKey,
+            channelName: s.meta.channel.channelId,
+            source: "system",
+            prompt: input.question,
+            proposedInput: {
+              reason: input.reason,
+              riskIfAssumed: input.riskIfAssumed,
+              choices,
+              allowFreeText: input.allowFreeText || choices.length === 0,
+            },
+            expiresAt: Date.now() + 5 * 60_000,
+            idempotencyKey: `clarification:${input.turnId}`,
+          });
+          input.onRequest?.(request);
+          const resolved = await s.waitForControlRequestResolution(
+            request.requestId,
+            input.signal,
+          );
+          return { request, resolved };
         },
       },
       // Superpowers onboarding nudge — reads session.meta for
@@ -883,6 +1038,9 @@ export class Agent {
       // so "complete/fixed/verified" claims are checked against
       // current-turn tool calls instead of model memory.
       completionEvidenceAgent: {
+        readSessionTranscript,
+      },
+      memoryMutationAgent: {
         readSessionTranscript,
       },
       fileEditSafetyAgent: {
@@ -920,16 +1078,17 @@ export class Agent {
           }));
         },
       },
-      // Layer 4 (session resume) — snapshot = committed transcript +
-      // last-activity anchor; append = queue the seed as a pending
-      // injection so the midTurn injector absorbs it into the first
-      // post-resume iteration.
+      // Layer 4 (session resume) — snapshot = transcript +
+      // last-activity anchor; append = queue the seed as hidden
+      // first-iteration context. This must not use mid-turn injection:
+      // post-reprovision resume context has higher authority than a
+      // user follow-up and must be visible before the first LLM call.
       sessionResumeAgent: {
         getResumeSnapshot: async (sessionKey) => {
           const s = this.sessions.get(sessionKey);
           if (!s) return null;
           try {
-            const entries = await s.transcript.readCommitted();
+            const entries = await s.transcript.readAll();
             return {
               transcript: entries,
               lastActivityAt: s.meta.lastActivityAt,
@@ -941,18 +1100,20 @@ export class Agent {
         appendResumeSeed: async (sessionKey, seed) => {
           const s = this.sessions.get(sessionKey);
           if (!s) return;
-          s.injectMessage(seed, "api");
+          s.meta.resumeSeededAt = Date.now();
+          s.enqueueHiddenContext(seed);
         },
       },
     });
-    console.log(
-      `[core-agent] hooks: builtin registered=${hookResult.registered} skipped=[${hookResult.skipped.join(",")}]`,
-    );
+    agentLogger.info("builtin_hooks_registered", {
+      registered: hookResult.registered,
+      skipped: hookResult.skipped,
+    });
 
     try {
       await this.reloadWorkspaceSkills();
     } catch (err) {
-      console.warn(`[core-agent] skill load failed: ${(err as Error).message}`);
+      agentLogger.warn("skill_load_failed", { error: (err as Error).message });
     }
 
     // Cron scheduler — hydrate persisted cron records then wire the
@@ -963,11 +1124,21 @@ export class Agent {
       await this.crons.hydrate();
       this.crons.setFireHandler((record) => this.fireCron(record));
       this.crons.start();
-      console.log(
-        `[core-agent] crons hydrated=${this.crons.list().length} tickerStarted`,
-      );
+      agentLogger.info("crons_hydrated", {
+        count: this.crons.list().length,
+        tickerStarted: true,
+      });
     } catch (err) {
-      console.warn(`[core-agent] cron hydrate failed: ${(err as Error).message}`);
+      agentLogger.warn("cron_hydrate_failed", { error: (err as Error).message });
+    }
+
+    if (missionActionsEnabled()) {
+      try {
+        await this.missionActionReconciler.start();
+        agentLogger.info("mission_reconciler_started");
+      } catch (err) {
+        agentLogger.warn("mission_reconciler_start_failed", { error: (err as Error).message });
+      }
     }
 
     // Native hipocampus memory — qmd index + compaction engine + daily cron.
@@ -982,7 +1153,7 @@ export class Agent {
           try {
             await this.hipocampus.compact();
           } catch (err) {
-            console.warn(`[core-agent] hipocampus cron failed: ${(err as Error).message}`);
+            agentLogger.warn("hipocampus_cron_failed", { error: (err as Error).message });
           }
         },
       });
@@ -1000,11 +1171,13 @@ export class Agent {
         this.config.workspaceRoot,
       );
       this.hooks.register(flushHook);
-      console.log(
-        `[core-agent] hipocampus: qmd=${this.qmdManager.isReady()} vector=${(process.env.CORE_AGENT_VECTOR_SEARCH ?? "off").trim().toLowerCase() === "on"} compactor+flush=registered`,
-      );
+      agentLogger.info("hipocampus_started", {
+        qmd: this.qmdManager.isReady(),
+        vector: (process.env.CORE_AGENT_VECTOR_SEARCH ?? "off").trim().toLowerCase() === "on",
+        compactorFlush: "registered",
+      });
     } catch (err) {
-      console.warn(`[core-agent] hipocampus init failed: ${(err as Error).message}`);
+      agentLogger.warn("hipocampus_init_failed", { error: (err as Error).message });
     }
 
     // C1 — channel adapters. Instantiated + started for each configured
@@ -1054,9 +1227,12 @@ export class Agent {
       }
     }
     this.restoreNativeToolOverrides();
-    console.log(
-      `[core-agent] skills: loaded=${loaded} issues=${issues} runtimeHooks=${runtimeHooks} from ${skillRoots.map((root) => root.skillsDir).join(",")}`,
-    );
+    agentLogger.info("skills_loaded", {
+      loaded,
+      issues,
+      runtimeHooks,
+      roots: skillRoots.map((root) => root.skillsDir),
+    });
     return { loaded, issues, runtimeHooks };
   }
 
@@ -1071,9 +1247,26 @@ export class Agent {
     this.tools.replace(makeWebSearchTool({ name: "WebSearch" }));
     this.tools.replace(makeWebSearchTool({ name: "web_search" }));
     this.tools.replace(makeWebFetchTool());
+    this.tools.replace(makePackageDependencyResolveTool());
+    this.tools.replace(makeExternalSourceCacheTool());
+    this.tools.replace(makeExternalSourceReadTool());
+    this.tools.replace(makePatchApplyTool(this.config.workspaceRoot));
+    this.tools.replace(makeMemoryRedactTool(this.config.workspaceRoot));
+    this.tools.replace(makeCodeWorkspaceTool(this.config.workspaceRoot));
+    this.tools.replace(makeCodeSymbolSearchTool(this.config.workspaceRoot));
+    this.tools.replace(makeCodeIntelligenceTool(this.config.workspaceRoot));
+    this.tools.replace(makeCodeDiagnosticsTool(this.config.workspaceRoot));
+    this.tools.replace(makeRepositoryMapTool(this.config.workspaceRoot));
+    this.tools.replace(makeCodingBenchmarkTool(this.config.workspaceRoot));
+    this.tools.replace(makeSpawnWorktreeApplyTool(this.config.workspaceRoot));
+    this.tools.replace(makeSafeCommandTool(this.config.workspaceRoot));
+    this.tools.replace(makeProjectVerificationPlannerTool(this.config.workspaceRoot));
+    this.tools.replace(makeGitDiffTool(this.config.workspaceRoot));
+    this.tools.replace(makeRepoTaskStateTool(this.config.workspaceRoot));
     this.tools.replace(makeClockTool());
     this.tools.replace(makeDateRangeTool());
     this.tools.replace(makeCalculationTool());
+    this.tools.replace(makeSwitchToActModeTool(this.tools));
   }
 
   /** Construct + start any channel adapters whose tokens are set. */
@@ -1099,19 +1292,21 @@ export class Agent {
         try {
           await dispatchInbound(this, adapter, msg);
         } catch (err) {
-          console.warn(
-            `[core-agent] ${adapter.kind} dispatch failed: ${(err as Error).message}`,
-          );
+          agentLogger.warn("channel_dispatch_failed", {
+            kind: adapter.kind,
+            error: (err as Error).message,
+          });
         }
       });
       try {
         await adapter.start();
         this.channelAdapters.push(adapter);
-        console.log(`[core-agent] channel adapter started kind=${adapter.kind}`);
+        agentLogger.info("channel_adapter_started", { kind: adapter.kind });
       } catch (err) {
-        console.warn(
-          `[core-agent] channel adapter start failed kind=${adapter.kind}: ${(err as Error).message}`,
-        );
+        agentLogger.warn("channel_adapter_start_failed", {
+          kind: adapter.kind,
+          error: (err as Error).message,
+        });
       }
     }
   }
@@ -1144,11 +1339,9 @@ export class Agent {
       // lifecycle symmetry with Telegram/Discord.
       void adapter.start();
       this.webAppAdapter = adapter;
-      console.log(`[core-agent] webapp push adapter started`);
+      agentLogger.info("webapp_push_started");
     } catch (err) {
-      console.warn(
-        `[core-agent] webapp push adapter start failed: ${(err as Error).message}`,
-      );
+      agentLogger.warn("webapp_push_start_failed", { error: (err as Error).message });
     }
   }
 
@@ -1167,13 +1360,15 @@ export class Agent {
       try {
         await this.closeSession(key, "shutdown");
       } catch (err) {
-        console.warn(
-          `[core-agent] session close on shutdown failed sessionKey=${key}: ${(err as Error).message}`,
-        );
+        agentLogger.warn("session_close_on_shutdown_failed", {
+          sessionKey: key,
+          error: (err as Error).message,
+        });
       }
     }
 
     this.crons.stop();
+    this.missionActionReconciler.stop();
     await this.hipocampus.stop();
     // C1 — stop all channel adapters. Each adapter is responsible for
     // aborting its own long-polls / closing gateway sockets.
@@ -1181,9 +1376,10 @@ export class Agent {
       try {
         await adapter.stop();
       } catch (err) {
-        console.warn(
-          `[core-agent] channel adapter stop failed kind=${adapter.kind}: ${(err as Error).message}`,
-        );
+        agentLogger.warn("channel_adapter_stop_failed", {
+          kind: adapter.kind,
+          error: (err as Error).message,
+        });
       }
     }
     // §7.15 — outbound-only web/app adapter. No-op stop but exercised
@@ -1192,9 +1388,7 @@ export class Agent {
       try {
         await this.webAppAdapter.stop();
       } catch (err) {
-        console.warn(
-          `[core-agent] webapp adapter stop failed: ${(err as Error).message}`,
-        );
+        agentLogger.warn("webapp_adapter_stop_failed", { error: (err as Error).message });
       }
       this.webAppAdapter = null;
     }
@@ -1218,11 +1412,138 @@ export class Agent {
    * model simply answers normally instead of explicitly invoking a
    * separate delivery tool.
    */
+  private async createCronMissionRun(
+    record: CronRecord,
+    sessionKey: string,
+  ): Promise<CronMissionLink | null> {
+    if (!runtimeMissionsEnabled()) return null;
+    try {
+      const mission = await this.missionClient.createMission({
+        channelType: record.deliveryChannel.type as MissionChannelType,
+        channelId: record.deliveryChannel.channelId,
+        kind: record.mode === "script" ? "script_cron" : "cron",
+        title: truncateMissionText(record.description?.trim() || `Cron ${record.cronId}`, 240),
+        summary: truncateMissionText(record.prompt, 500),
+        status: "running",
+        createdBy: "cron",
+        idempotencyKey: `cron:${record.cronId}`,
+        metadata: {
+          cronId: record.cronId,
+          expression: record.expression,
+          durable: record.durable,
+        },
+      });
+      record.missionId = mission.id;
+      const run = await this.missionClient.createRun(mission.id, {
+        triggerType: record.mode === "script" ? "script_cron" : "cron",
+        status: "running",
+        sessionKey,
+        cronId: record.cronId,
+        metadata: {
+          expression: record.expression,
+          deliveryChannel: record.deliveryChannel,
+        },
+      });
+      const runId = typeof run.id === "string" ? run.id : undefined;
+      if (runId) record.missionRunId = runId;
+      return { missionId: mission.id, ...(runId ? { missionRunId: runId } : {}) };
+    } catch (err) {
+      agentLogger.warn("cron_mission_create_failed", {
+        cronId: record.cronId,
+        error: (err as Error).message,
+      });
+      return null;
+    }
+  }
+
+  private async appendCronMissionEvent(
+    link: CronMissionLink | null,
+    input: {
+      eventType: "completed" | "failed";
+      message?: string;
+      payload?: Record<string, unknown>;
+    },
+  ): Promise<void> {
+    if (!link) return;
+    try {
+      await this.missionClient.appendEvent(link.missionId, {
+        ...(link.missionRunId ? { runId: link.missionRunId } : {}),
+        actorType: "cron",
+        eventType: input.eventType,
+        ...(input.message ? { message: input.message } : {}),
+        payload: input.payload ?? {},
+      });
+    } catch (err) {
+      agentLogger.warn("cron_mission_event_failed", { missionId: link.missionId, error: (err as Error).message });
+    }
+  }
+
+  private shouldDeliverScriptCronStdout(
+    record: CronRecord,
+    result: ScriptCronResult,
+  ): boolean {
+    const policy = record.deliveryPolicy ?? "stdout_non_empty";
+    if (policy === "never") return false;
+    if (result.stdout.trim().length > 0) return true;
+    if (record.quietOnEmptyStdout !== false) return false;
+    return policy === "always";
+  }
+
+  private async fireScriptCron(record: CronRecord): Promise<void> {
+    if (!scriptCronEnabled()) {
+      throw new Error("script cron disabled");
+    }
+    if (!record.scriptPath) {
+      throw new Error("script cron missing scriptPath");
+    }
+    const sessionKey = `agent:cron:${record.deliveryChannel.type}:${record.deliveryChannel.channelId}:${record.cronId}`;
+    const missionLink = await this.createCronMissionRun(record, sessionKey);
+    try {
+      const result = await runScriptCron({
+        workspaceRoot: this.config.workspaceRoot,
+        scriptPath: record.scriptPath,
+        timeoutMs: record.timeoutMs ?? 60_000,
+      });
+      if (result.timedOut) {
+        throw new Error(`script cron timed out after ${record.timeoutMs ?? 60_000}ms`);
+      }
+      if (result.code !== 0) {
+        throw new Error(
+          `script cron exited with code ${result.code}${result.stderr ? `: ${result.stderr.trim()}` : ""}`,
+        );
+      }
+      if (this.shouldDeliverScriptCronStdout(record, result)) {
+        await this.deliverCronAssistantText(record.deliveryChannel, result.stdout);
+      }
+      await this.appendCronMissionEvent(missionLink, {
+        eventType: "completed",
+        payload: {
+          cronId: record.cronId,
+          mode: "script",
+          stdoutChars: result.stdout.length,
+          stderrChars: result.stderr.length,
+        },
+      });
+    } catch (err) {
+      await this.appendCronMissionEvent(missionLink, {
+        eventType: "failed",
+        message: (err as Error).message,
+        payload: { cronId: record.cronId, mode: "script" },
+      });
+      throw err;
+    }
+  }
+
   private async fireCron(record: CronRecord): Promise<void> {
+    if (record.mode === "script") {
+      await this.fireScriptCron(record);
+      return;
+    }
     const sessionKey = `agent:cron:${record.deliveryChannel.type}:${record.deliveryChannel.channelId}:${record.cronId}`;
     const session = await this.getOrCreateSession(sessionKey, record.deliveryChannel);
     const { StubSseWriter } = await import("./transport/SseWriter.js");
     const stubSse = new StubSseWriter();
+    const missionLink = await this.createCronMissionRun(record, sessionKey);
     try {
       const turnResult = await session.runTurn(
         {
@@ -1268,6 +1589,20 @@ export class Agent {
           throw err;
         }
       }
+      await this.appendCronMissionEvent(missionLink, {
+        eventType: "completed",
+        payload: {
+          cronId: record.cronId,
+          assistantTextChars: assistantText.length,
+        },
+      });
+    } catch (err) {
+      await this.appendCronMissionEvent(missionLink, {
+        eventType: "failed",
+        message: (err as Error).message,
+        payload: { cronId: record.cronId },
+      });
+      throw err;
     } finally {
       // #82 — non-durable cron fire: close the synthetic session so
       // its in-memory state + pendingInjections + any session-scoped
@@ -1280,9 +1615,7 @@ export class Agent {
         try {
           await this.closeSession(sessionKey, "cron_complete");
         } catch (err) {
-          console.warn(
-            `[core-agent] fireCron: closeSession failed cronId=${record.cronId}: ${(err as Error).message}`,
-          );
+          agentLogger.warn("cron_close_session_failed", { cronId: record.cronId, error: (err as Error).message });
         }
       }
     }
@@ -1292,9 +1625,17 @@ export class Agent {
     channel: ChannelRef,
     text: string,
   ): Promise<void> {
+    await this.deliverAssistantTextToChannel(channel, text, "cron");
+  }
+
+  async deliverAssistantTextToChannel(
+    channel: ChannelRef,
+    text: string,
+    source = "agent",
+  ): Promise<void> {
     if (channel.type === "app") {
       if (!this.config.chatProxyUrl) {
-        throw new Error("cron app delivery failed: no chatProxyUrl configured");
+        throw new Error(`${source} app delivery failed: no chatProxyUrl configured`);
       }
       const url = `${this.config.chatProxyUrl.replace(/\/$/, "")}/v1/bot-channels/post`;
       const resp = await fetch(url, {
@@ -1311,7 +1652,7 @@ export class Agent {
       if (!resp.ok) {
         const errText = await resp.text().catch(() => "");
         throw new Error(
-          `cron app delivery failed: HTTP ${resp.status} ${errText.slice(0, 200)}`,
+          `${source} app delivery failed: HTTP ${resp.status} ${errText.slice(0, 200)}`,
         );
       }
       return;
@@ -1320,7 +1661,7 @@ export class Agent {
     if (channel.type === "telegram" || channel.type === "discord") {
       const adapter = this.channelAdapters.find((a) => a.kind === channel.type);
       if (!adapter) {
-        throw new Error(`cron ${channel.type} adapter not configured`);
+        throw new Error(`${source} ${channel.type} adapter not configured`);
       }
       await adapter.send({
         chatId: channel.channelId,
@@ -1353,9 +1694,7 @@ export class Agent {
       const init = await runGit(this.config.workspaceRoot, ["init"]);
       if (init.code !== 0) {
         this.disciplineDefault = { ...this.disciplineDefault, git: false };
-        console.warn(
-          `[core-agent] discipline: git init failed (code=${init.code}) — disabling git half. ${init.stderr.slice(0, 200)}`,
-        );
+        agentLogger.warn("discipline_git_init_failed", { code: init.code, stderr: init.stderr.slice(0, 200) });
         return;
       }
       await runGit(this.config.workspaceRoot, [
@@ -1368,14 +1707,10 @@ export class Agent {
         "user.name",
         "magi-bot",
       ]);
-      console.log(
-        `[core-agent] discipline: git repo initialised at ${this.config.workspaceRoot}`,
-      );
+      agentLogger.info("discipline_git_init", { root: this.config.workspaceRoot });
     } catch (err) {
       this.disciplineDefault = { ...this.disciplineDefault, git: false };
-      console.warn(
-        `[core-agent] discipline: git init threw — disabling git half: ${(err as Error).message}`,
-      );
+      agentLogger.warn("discipline_git_init_error", { error: (err as Error).message });
     }
   }
 
@@ -1411,6 +1746,11 @@ export class Agent {
     const fname = sessionFileName(sessionKey);
     this.sessionKeyByHash.set(fname.replace(/\.jsonl$/, ""), sessionKey);
     return session;
+  }
+
+  async resumeGoalMissionAfterRestart(input: GoalMissionResumeInput): Promise<void> {
+    const session = await this.getOrCreateSession(input.sessionKey, input.channel);
+    await session.resumeGoalAfterRestart(input);
   }
 
   /** Snapshot of the hash → sessionKey reverse index (Phase 2h). */
@@ -1459,9 +1799,7 @@ export class Agent {
       try {
         listener(event);
       } catch (err) {
-        console.warn(
-          `[core-agent] agent-event listener failed type=${event.type}: ${(err as Error).message}`,
-        );
+        agentLogger.warn("agent_event_listener_failed", { type: event.type, error: (err as Error).message });
       }
     }
   }

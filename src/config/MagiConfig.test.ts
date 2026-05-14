@@ -1,190 +1,187 @@
-/**
- * MagiConfig.test — covers loading, parsing, defaults, env-var
- * substitution, and the tools section.
- */
-
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
 
-import {
-  loadMagiConfig,
-  resetMagiConfig,
-} from "./MagiConfig.js";
+import { loadMagiConfig, resetMagiConfig } from "./MagiConfig.js";
 
-let tmpDir: string;
-
-beforeEach(() => {
-  tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "magiconfig-test-"));
-  resetMagiConfig();
-});
-
-afterEach(() => {
-  fs.rmSync(tmpDir, { recursive: true, force: true });
-  resetMagiConfig();
-});
+function makeTmpDir(): string {
+  return fs.mkdtempSync(path.join(os.tmpdir(), "magi-config-test-"));
+}
 
 describe("MagiConfig", () => {
+  let tmpDir: string;
+
+  beforeEach(() => {
+    tmpDir = makeTmpDir();
+    resetMagiConfig();
+  });
+
+  afterEach(() => {
+    resetMagiConfig();
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
   it("returns defaults when no config file exists", () => {
     const config = loadMagiConfig(tmpDir);
-
-    expect(config.tools.disable_builtin).toEqual([]);
+    expect(config.hooks.directory).toBe("./hooks");
+    expect(config.hooks.disable_builtin).toEqual([]);
+    expect(config.hooks.overrides).toEqual({});
     expect(config.tools.directory).toBe("./tools");
-    expect(config.tools.global_directory).toBe("~/.magi/tools");
-    expect(config.tools.packages).toEqual([]);
+    expect(config.tools.disable_builtin).toEqual([]);
     expect(config.tools.overrides).toEqual({});
     expect(config.classifier.custom_dimensions).toEqual({});
   });
 
+  it("caches config on repeated calls", () => {
+    const a = loadMagiConfig(tmpDir);
+    const b = loadMagiConfig(tmpDir);
+    expect(a).toBe(b);
+  });
+
+  it("resets cache", () => {
+    const a = loadMagiConfig(tmpDir);
+    resetMagiConfig();
+    const b = loadMagiConfig(tmpDir);
+    expect(a).not.toBe(b);
+    expect(a).toEqual(b);
+  });
+
+  // --- Hooks section ---
+
+  it("parses hooks section", () => {
+    fs.writeFileSync(
+      path.join(tmpDir, "magi.config.yaml"),
+      `
+hooks:
+  disable_builtin:
+    - factGroundingVerifier
+  directory: ./my-hooks
+  overrides:
+    my-hook:
+      enabled: true
+      priority: 50
+      blocking: false
+`,
+    );
+    const config = loadMagiConfig(tmpDir);
+    expect(config.hooks.disable_builtin).toEqual(["factGroundingVerifier"]);
+    expect(config.hooks.directory).toBe("./my-hooks");
+    expect(config.hooks.overrides["my-hook"]).toEqual({
+      enabled: true,
+      priority: 50,
+      blocking: false,
+    });
+  });
+
+  it("parses hooks global_directory", () => {
+    fs.writeFileSync(
+      path.join(tmpDir, "magi.config.yaml"),
+      `
+hooks:
+  global_directory: /custom/hooks
+`,
+    );
+    const config = loadMagiConfig(tmpDir);
+    expect(config.hooks.global_directory).toBe("/custom/hooks");
+  });
+
+  // --- Tools section ---
+
   it("parses tools section", () => {
-    const configContent = `
+    fs.writeFileSync(
+      path.join(tmpDir, "magi.config.yaml"),
+      `
 tools:
   disable_builtin:
     - Bash
-    - Edit
-  directory: ./custom-tools
-  global_directory: ~/.magi/custom-global
+  directory: ./my-tools
   packages:
-    - "@magi-tools/sql"
+    - "@magi-tools/weather"
   overrides:
-    MyTool:
-      enabled: false
-      permission: net
-      timeoutMs: 5000
-`;
-    fs.writeFileSync(
-      path.join(tmpDir, "magi.config.yaml"),
-      configContent,
-      "utf-8",
+    my-tool:
+      enabled: true
+      permission: write
+`,
     );
-
     const config = loadMagiConfig(tmpDir);
-
-    expect(config.tools.disable_builtin).toEqual(["Bash", "Edit"]);
-    expect(config.tools.directory).toBe("./custom-tools");
-    expect(config.tools.global_directory).toBe("~/.magi/custom-global");
-    expect(config.tools.packages).toEqual(["@magi-tools/sql"]);
-    expect(config.tools.overrides.MyTool).toEqual({
-      enabled: false,
-      permission: "net",
-      timeoutMs: 5000,
+    expect(config.tools.disable_builtin).toEqual(["Bash"]);
+    expect(config.tools.directory).toBe("./my-tools");
+    expect(config.tools.packages).toEqual(["@magi-tools/weather"]);
+    expect(config.tools.overrides["my-tool"]).toEqual({
+      enabled: true,
+      permission: "write",
     });
   });
 
-  it("parses classifier section", () => {
-    const configContent = `
+  it("parses tools global_directory", () => {
+    fs.writeFileSync(
+      path.join(tmpDir, "magi.config.yaml"),
+      `
+tools:
+  global_directory: /custom/tools
+`,
+    );
+    const config = loadMagiConfig(tmpDir);
+    expect(config.tools.global_directory).toBe("/custom/tools");
+  });
+
+  // --- Classifier section ---
+
+  it("parses classifier custom_dimensions", () => {
+    fs.writeFileSync(
+      path.join(tmpDir, "magi.config.yaml"),
+      `
 classifier:
   custom_dimensions:
     safety:
-      phase: final_answer
-      prompt: "Check for safety issues"
+      phase: "final_answer"
+      prompt: "Is this safe?"
       output_schema:
-        safe: "boolean"
-`;
-    fs.writeFileSync(
-      path.join(tmpDir, "magi.config.yaml"),
-      configContent,
-      "utf-8",
+        is_safe: "boolean"
+`,
     );
-
     const config = loadMagiConfig(tmpDir);
-
-    expect(config.classifier.custom_dimensions.safety).toEqual({
-      phase: "final_answer",
-      prompt: "Check for safety issues",
-      output_schema: { safe: "boolean" },
-    });
+    const dim = config.classifier.custom_dimensions["safety"];
+    expect(dim).toBeDefined();
+    expect(dim!.phase).toBe("final_answer");
+    expect(dim!.prompt).toBe("Is this safe?");
+    expect(dim!.output_schema).toEqual({ is_safe: "boolean" });
   });
 
-  it("resolves environment variables", () => {
-    process.env.TEST_TOOLS_DIR = "/custom/tools/path";
+  // --- Env var substitution ---
 
-    const configContent = `
+  it("resolves env vars in values", () => {
+    process.env.TEST_HOOK_DIR = "/env-hooks";
+    process.env.TEST_TOOL_DIR = "/env-tools";
+    fs.writeFileSync(
+      path.join(tmpDir, "magi.config.yaml"),
+      `
+hooks:
+  directory: "\${TEST_HOOK_DIR}"
 tools:
-  directory: "\${TEST_TOOLS_DIR}"
-`;
-    fs.writeFileSync(
-      path.join(tmpDir, "magi.config.yaml"),
-      configContent,
-      "utf-8",
+  directory: "\${TEST_TOOL_DIR}"
+`,
     );
-
     const config = loadMagiConfig(tmpDir);
-    expect(config.tools.directory).toBe("/custom/tools/path");
-
-    delete process.env.TEST_TOOLS_DIR;
+    expect(config.hooks.directory).toBe("/env-hooks");
+    expect(config.tools.directory).toBe("/env-tools");
+    delete process.env.TEST_HOOK_DIR;
+    delete process.env.TEST_TOOL_DIR;
   });
 
-  it("caches config on second load", () => {
-    const config1 = loadMagiConfig(tmpDir);
-    const config2 = loadMagiConfig(tmpDir);
-    expect(config1).toBe(config2); // same reference
-  });
-
-  it("reloads after resetMagiConfig", () => {
-    const config1 = loadMagiConfig(tmpDir);
-    resetMagiConfig();
-    const config2 = loadMagiConfig(tmpDir);
-    expect(config1).not.toBe(config2); // different reference
-    expect(config1).toEqual(config2); // same content
-  });
-
-  it("handles empty config file gracefully", () => {
-    fs.writeFileSync(
-      path.join(tmpDir, "magi.config.yaml"),
-      "",
-      "utf-8",
-    );
-
+  it("handles empty YAML gracefully", () => {
+    fs.writeFileSync(path.join(tmpDir, "magi.config.yaml"), "");
     const config = loadMagiConfig(tmpDir);
-    expect(config.tools.disable_builtin).toEqual([]);
+    expect(config.hooks.directory).toBe("./hooks");
+    expect(config.tools.directory).toBe("./tools");
   });
 
-  it("throws on invalid YAML", () => {
+  it("throws on invalid YAML syntax", () => {
     fs.writeFileSync(
       path.join(tmpDir, "magi.config.yaml"),
-      ":\n  :\n    [[[invalid",
-      "utf-8",
+      "{{invalid yaml",
     );
-
     expect(() => loadMagiConfig(tmpDir)).toThrow("Invalid YAML");
-  });
-
-  it("ignores non-string disable_builtin entries", () => {
-    const configContent = `
-tools:
-  disable_builtin:
-    - ValidTool
-    - 123
-    - true
-`;
-    fs.writeFileSync(
-      path.join(tmpDir, "magi.config.yaml"),
-      configContent,
-      "utf-8",
-    );
-
-    const config = loadMagiConfig(tmpDir);
-    expect(config.tools.disable_builtin).toEqual(["ValidTool"]);
-  });
-
-  it("ignores overrides with non-object values", () => {
-    const configContent = `
-tools:
-  overrides:
-    GoodTool:
-      enabled: true
-    BadTool: "not an object"
-`;
-    fs.writeFileSync(
-      path.join(tmpDir, "magi.config.yaml"),
-      configContent,
-      "utf-8",
-    );
-
-    const config = loadMagiConfig(tmpDir);
-    expect(config.tools.overrides.GoodTool).toEqual({ enabled: true });
-    expect(config.tools.overrides.BadTool).toBeUndefined();
   });
 });

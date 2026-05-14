@@ -1,6 +1,6 @@
 /**
  * MagiConfig — reads `magi.config.yaml` from the workspace root and
- * exposes typed tool / classifier extension configuration.
+ * exposes typed hook / tool / classifier extension configuration.
  *
  * Singleton pattern: loaded once per process, cached. Falls back
  * gracefully when the config file does not exist (empty defaults).
@@ -13,6 +13,20 @@ import { parse as parseYaml } from "yaml";
 /* ------------------------------------------------------------------ */
 /*  Public types                                                       */
 /* ------------------------------------------------------------------ */
+
+export interface HookOverride {
+  enabled?: boolean;
+  priority?: number;
+  blocking?: boolean;
+  timeoutMs?: number;
+}
+
+export interface HooksConfig {
+  disable_builtin: string[];
+  directory: string;
+  global_directory: string;
+  overrides: Record<string, HookOverride>;
+}
 
 export interface ToolOverrideConfig {
   enabled?: boolean;
@@ -39,6 +53,7 @@ export interface ClassifierConfig {
 }
 
 export interface MagiConfigData {
+  hooks: HooksConfig;
   tools: ToolsConfig;
   classifier: ClassifierConfig;
 }
@@ -47,12 +62,20 @@ export interface MagiConfigData {
 /*  Defaults                                                           */
 /* ------------------------------------------------------------------ */
 
+const DEFAULT_HOOKS_DIR = "./hooks";
+const DEFAULT_GLOBAL_HOOKS_DIR = "~/.magi/hooks";
 const DEFAULT_TOOLS_DIR = "./tools";
 const DEFAULT_GLOBAL_TOOLS_DIR = "~/.magi/tools";
 const CONFIG_FILENAME = "magi.config.yaml";
 
 function defaultConfig(): MagiConfigData {
   return {
+    hooks: {
+      disable_builtin: [],
+      directory: DEFAULT_HOOKS_DIR,
+      global_directory: DEFAULT_GLOBAL_HOOKS_DIR,
+      overrides: {},
+    },
     tools: {
       disable_builtin: [],
       directory: DEFAULT_TOOLS_DIR,
@@ -94,6 +117,49 @@ function resolveEnvVars(obj: unknown): unknown {
 /* ------------------------------------------------------------------ */
 /*  Parser helpers                                                     */
 /* ------------------------------------------------------------------ */
+
+function parseHooksSection(raw: Record<string, unknown>): HooksConfig {
+  const section = raw.hooks as Record<string, unknown> | undefined;
+  if (!section || typeof section !== "object") {
+    return defaultConfig().hooks;
+  }
+
+  const disableBuiltin = Array.isArray(section.disable_builtin)
+    ? (section.disable_builtin as unknown[]).filter(
+        (v): v is string => typeof v === "string",
+      )
+    : [];
+
+  const directory =
+    typeof section.directory === "string"
+      ? section.directory
+      : DEFAULT_HOOKS_DIR;
+
+  const globalDirectory =
+    typeof section.global_directory === "string"
+      ? section.global_directory
+      : DEFAULT_GLOBAL_HOOKS_DIR;
+
+  const rawOverrides =
+    section.overrides && typeof section.overrides === "object"
+      ? (section.overrides as Record<string, unknown>)
+      : {};
+
+  const overrides: Record<string, HookOverride> = {};
+  for (const [name, val] of Object.entries(rawOverrides)) {
+    if (val && typeof val === "object") {
+      const v = val as Record<string, unknown>;
+      overrides[name] = {
+        ...(typeof v.enabled === "boolean" ? { enabled: v.enabled } : {}),
+        ...(typeof v.priority === "number" ? { priority: v.priority } : {}),
+        ...(typeof v.blocking === "boolean" ? { blocking: v.blocking } : {}),
+        ...(typeof v.timeoutMs === "number" ? { timeoutMs: v.timeoutMs } : {}),
+      };
+    }
+  }
+
+  return { disable_builtin: disableBuiltin, directory, global_directory: globalDirectory, overrides };
+}
 
 function parseToolsSection(raw: Record<string, unknown>): ToolsConfig {
   const section = raw.tools as Record<string, unknown> | undefined;
@@ -199,11 +265,6 @@ function parseClassifierSection(
 let cachedConfig: MagiConfigData | null = null;
 let cachedDir: string | null = null;
 
-/**
- * Load `magi.config.yaml` from `dir` (default: `process.cwd()`).
- * Returns cached instance on subsequent calls with the same directory.
- * Falls back to empty defaults when the file does not exist.
- */
 export function loadMagiConfig(dir?: string): MagiConfigData {
   const resolvedDir = dir ?? process.cwd();
   if (cachedConfig && cachedDir === resolvedDir) return cachedConfig;
@@ -242,6 +303,7 @@ export function loadMagiConfig(dir?: string): MagiConfigData {
   const resolved = resolveEnvVars(parsed) as Record<string, unknown>;
 
   cachedConfig = {
+    hooks: parseHooksSection(resolved),
     tools: parseToolsSection(resolved),
     classifier: parseClassifierSection(resolved),
   };
@@ -249,17 +311,11 @@ export function loadMagiConfig(dir?: string): MagiConfigData {
   return cachedConfig;
 }
 
-/**
- * Clear the singleton cache. Primarily for testing.
- */
 export function resetMagiConfig(): void {
   cachedConfig = null;
   cachedDir = null;
 }
 
-/**
- * Return the path where `magi.config.yaml` would be located.
- */
 export function magiConfigPath(dir?: string): string {
   return path.join(dir ?? process.cwd(), CONFIG_FILENAME);
 }

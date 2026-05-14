@@ -61,3 +61,63 @@ export function buildPreview(input: unknown): string {
     return "<unstringifiable>";
   }
 }
+
+function cleanPromptLine(line: string): string {
+  return line
+    .trim()
+    .replace(/^#+\s*/, "")
+    .replace(/\*\*/g, "")
+    .replace(/^[-*]\s*/, "")
+    .trim();
+}
+
+function bounded(value: string, maxLength: number): string {
+  const clean = value.trim();
+  if (clean.length <= maxLength) return clean;
+  return `${clean.slice(0, Math.max(0, maxLength - 3)).trimEnd()}...`;
+}
+
+export function summariseDelegatedPrompt(
+  prompt?: string,
+  maxLength = 240,
+): string | undefined {
+  if (!prompt) return undefined;
+  const lines = prompt
+    .split(/\r?\n/)
+    .map(cleanPromptLine)
+    .filter(Boolean);
+  const taskLine = lines.find((line) =>
+    /^(task|request|work order|작업|요청)\s*:/i.test(line),
+  );
+  const goalLine = lines.find((line) => /^(goal|objective|목표)\s*:/i.test(line));
+  const firstNonPersonaLine = lines.find((line) => !/^you are\b/i.test(line));
+  const title = taskLine ?? goalLine ?? firstNonPersonaLine ?? lines[0];
+  if (!title) return undefined;
+  const objective = goalLine && goalLine !== title ? goalLine : undefined;
+  return bounded([title, objective].filter(Boolean).join("\n"), maxLength);
+}
+
+function recordFromUnknown(value: unknown): Record<string, unknown> | null {
+  return value !== null && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null;
+}
+
+function promptField(input: Record<string, unknown>): string | undefined {
+  for (const key of ["prompt", "task", "instructions", "message"]) {
+    const value = input[key];
+    if (typeof value === "string" && value.trim()) return value;
+  }
+  return undefined;
+}
+
+export function buildToolInputPreview(toolName: string, input: unknown): string {
+  const normalized = toolName.replace(/[^a-z0-9]/gi, "").toLowerCase();
+  if (normalized === "spawnagent") {
+    const summary = summariseDelegatedPrompt(
+      promptField(recordFromUnknown(input) ?? {}),
+    );
+    if (summary) return JSON.stringify({ prompt: summary });
+  }
+  return buildPreview(input);
+}

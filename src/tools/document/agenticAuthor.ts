@@ -1,5 +1,6 @@
 import { execFile as execFileCb } from "node:child_process";
 import fs from "node:fs/promises";
+import { createRequire } from "node:module";
 import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
@@ -16,6 +17,7 @@ import { inspectDocx, validateDocxMarkdownRender } from "./docxQuality.js";
 import { HWPX_RUNTIME_ROOT, type HwpxTemplate } from "./hwpxDriver.js";
 
 const execFile = promisify(execFileCb);
+const requireFromHere = createRequire(__filename);
 
 export type AgenticDocumentFormat = "docx" | "hwpx";
 
@@ -165,6 +167,37 @@ async function runCommand(
 
   const output = [stdout, stderr].filter((part) => part.trim().length > 0).join("\n");
   return output.slice(0, 12_000) || "(no output)";
+}
+
+function findNodeModulesRoot(resolvedPackageJson: string): string | null {
+  let cursor = path.dirname(resolvedPackageJson);
+  while (cursor !== path.dirname(cursor)) {
+    if (path.basename(cursor) === "node_modules") return cursor;
+    cursor = path.dirname(cursor);
+  }
+  return null;
+}
+
+function resolvePackageNodeModulesRoot(packageName: string): string | null {
+  try {
+    const resolvedPackageJson = requireFromHere.resolve(`${packageName}/package.json`);
+    return findNodeModulesRoot(resolvedPackageJson);
+  } catch {
+    try {
+      return findNodeModulesRoot(requireFromHere.resolve(packageName));
+    } catch {
+      return null;
+    }
+  }
+}
+
+function defaultNodePath(): string {
+  const entries = [
+    path.resolve(process.cwd(), "node_modules"),
+    resolvePackageNodeModulesRoot("docx"),
+    ...(process.env.NODE_PATH?.split(path.delimiter) ?? []),
+  ];
+  return [...new Set(entries.filter((entry): entry is string => Boolean(entry)))].join(path.delimiter);
 }
 
 function systemPromptFor(
@@ -330,7 +363,7 @@ export async function writeDocumentAgentically(
   const jobDir = await fs.mkdtemp(path.join(os.tmpdir(), "magi-document-author-"));
   const outputName = `output.${input.format}`;
   const outputPath = path.join(jobDir, outputName);
-  const nodePath = deps.nodePath ?? path.resolve(process.cwd(), "node_modules");
+  const nodePath = deps.nodePath ?? defaultNodePath();
   const maxTurns = deps.maxTurns ?? (input.format === "hwpx" ? 25 : 20);
   const model = deps.resolveModel
     ? await deps.resolveModel()

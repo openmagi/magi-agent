@@ -1,0 +1,152 @@
+{
+  "version": 1,
+  "name": "research-parity-v1",
+  "rubric": [
+    "factualAccuracy",
+    "citationPrecision",
+    "sourceFreshness",
+    "primarySourcePreference",
+    "contradictionHandling",
+    "claimEvidenceCoverage",
+    "toolUsageQuality",
+    "permissionErgonomics",
+    "synthesisUsefulness"
+  ],
+  "tasks": [
+    {
+      "id": "current-public-facts",
+      "category": "current_public_facts",
+      "locale": "ko",
+      "freshness": "current",
+      "weight": 1.2,
+      "requiredSourceTypes": ["web_search", "web_fetch"],
+      "prompt": "Research the current OpenCode web research tool surface and compare it with Magi Agent. Use current public source material and answer in Korean.",
+      "expectedBehaviors": [
+        "Searches or fetches current public sources before answering",
+        "Inspects at least one primary source",
+        "Separates confirmed current facts from inference"
+      ],
+      "failureSignals": ["stale_answer", "primary_source_missing", "url_not_inspected"]
+    },
+    {
+      "id": "primary-source-verification",
+      "category": "primary_source_verification",
+      "locale": "en",
+      "freshness": "current",
+      "weight": 1.1,
+      "requiredSourceTypes": ["web_fetch", "primary_source"],
+      "prompt": "Verify a current product or API capability using primary documentation first, then summarize what is confirmed and what remains uncertain.",
+      "expectedBehaviors": [
+        "Prioritizes official documentation or repository source",
+        "Avoids relying only on search snippets",
+        "Flags unsupported claims"
+      ],
+      "failureSignals": ["primary_source_missing", "uncited_claims", "claim_evidence_partial"]
+    },
+    {
+      "id": "contradiction-handling",
+      "category": "contradiction_handling",
+      "locale": "en",
+      "freshness": "recent",
+      "weight": 1.1,
+      "requiredSourceTypes": ["web_search", "web_fetch"],
+      "prompt": "Compare two sources that disagree about a recent technical capability. Identify the conflict, decide which source is higher authority, and explain why.",
+      "expectedBehaviors": [
+        "Finds at least two relevant sources",
+        "Identifies the contradiction explicitly",
+        "Ranks source authority instead of blending claims"
+      ],
+      "failureSignals": ["contradiction_missed", "primary_source_missing", "uncited_claims"]
+    },
+    {
+      "id": "api-docs-research",
+      "category": "api_docs_research",
+      "locale": "en",
+      "freshness": "current",
+      "weight": 1,
+      "requiredSourceTypes": ["official_docs", "web_fetch"],
+      "prompt": "Research how to use a current API feature from official docs. Produce a short implementation-oriented answer with exact option names and caveats.",
+      "expectedBehaviors": [
+        "Uses official documentation",
+        "Preserves exact option names",
+        "Mentions version or freshness limits"
+      ],
+      "failureSignals": ["stale_answer", "primary_source_missing", "uncited_claims"]
+    },
+    {
+      "id": "external-repo-research",
+      "category": "external_repo_research",
+      "locale": "en",
+      "freshness": "current",
+      "weight": 1.2,
+      "requiredSourceTypes": ["git_repository", "code_search"],
+      "prompt": "Inspect an external open-source repository and identify the files that implement its web research tools or subagent behavior.",
+      "expectedBehaviors": [
+        "Uses repository source rather than package marketing copy",
+        "Names concrete files or modules",
+        "Distinguishes direct evidence from inference"
+      ],
+      "failureSignals": ["external_repo_gap", "primary_source_missing", "claim_evidence_partial"]
+    },
+    {
+      "id": "internal-kb-source-authority",
+      "category": "internal_kb_source_authority",
+      "locale": "en",
+      "freshness": "current_turn",
+      "weight": 1,
+      "requiredSourceTypes": ["kb", "current_user_source"],
+      "prompt": "Use selected KB or attached source material as higher authority than long-term memory. Summarize only what the current source supports.",
+      "expectedBehaviors": [
+        "Treats current-turn source as authoritative",
+        "Avoids memory overriding current evidence",
+        "States when requested details are absent"
+      ],
+      "failureSignals": ["memory_overrode_source", "uncited_claims", "claim_evidence_partial"]
+    },
+    {
+      "id": "korean-synthesis",
+      "category": "korean_synthesis",
+      "locale": "ko",
+      "freshness": "recent",
+      "weight": 1,
+      "requiredSourceTypes": ["web_fetch", "primary_source"],
+      "prompt": "Research English source material and produce a concise Korean executive summary with citations and uncertainty clearly separated.",
+      "expectedBehaviors": [
+        "Reads English sources accurately",
+        "Answers naturally in Korean",
+        "Keeps citations tied to claims"
+      ],
+      "failureSignals": ["translation_loss", "uncited_claims", "claim_evidence_partial"]
+    },
+    {
+      "id": "parallel-long-running-research",
+      "category": "parallel_long_running_research",
+      "locale": "en",
+      "freshness": "current",
+      "weight": 1.1,
+      "requiredSourceTypes": ["web_search", "web_fetch", "subagent_result"],
+      "prompt": "Break a broad research question into independent subquestions, inspect sources in parallel where possible, then synthesize a single answer.",
+      "expectedBehaviors": [
+        "Splits the task into independent work units",
+        "Uses subagents or an explicit parallel research plan when available",
+        "Deduplicates sources before synthesis"
+      ],
+      "failureSignals": ["parallel_research_gap", "claim_evidence_partial", "uncited_claims"]
+    },
+    {
+      "id": "js-heavy-page-research",
+      "category": "js_heavy_page_research",
+      "locale": "en",
+      "freshness": "current",
+      "weight": 1,
+      "requiredSourceTypes": ["browser", "web_fetch"],
+      "prompt": "Inspect a JavaScript-heavy public page where search snippets are insufficient. Use browser evidence or rendered content before answering.",
+      "expectedBehaviors": [
+        "Uses browser inspection when fetch-only evidence is insufficient",
+        "Captures rendered source evidence",
+        "Does not infer from page title alone"
+      ],
+      "failureSignals": ["js_page_gap", "url_not_inspected", "claim_evidence_partial"]
+    }
+  ]
+}

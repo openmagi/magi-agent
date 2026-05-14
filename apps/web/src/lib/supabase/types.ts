@@ -1,5 +1,4 @@
 export type ModelSelection =
-  | "smart_routing"
   | "haiku"
   | "sonnet"
   | "opus"
@@ -9,9 +8,7 @@ export type ModelSelection =
   | "gpt_5_mini"
   | "gpt_5_5"
   | "gpt_5_5_pro"
-  | "gpt_smart_routing"
   | "codex"
-  | "magi_smart_routing"
   | "local_gemma_fast"
   | "local_gemma_max"
   | "local_qwen_uncensored"

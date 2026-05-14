@@ -105,8 +105,8 @@ describe("agentSelfModelHook", () => {
     expect(AGENT_SELF_MODEL_BLOCK).toMatch(/before answering/i);
   });
 
-  it("block enumerates refusal patterns in both languages", () => {
-    expect(AGENT_SELF_MODEL_BLOCK).toContain("KB에 없음");
+  it("block enumerates refusal patterns", () => {
+    expect(AGENT_SELF_MODEL_BLOCK).toContain("Not in KB");
     expect(AGENT_SELF_MODEL_BLOCK).toContain("I don't have");
   });
 });

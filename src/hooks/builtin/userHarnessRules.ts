@@ -1,12 +1,11 @@
 /**
  * User harness rules.
  *
- * OSS users configure these as Markdown files (`USER-RULES.md`,
- * `USER-HARNESS-RULES.md`, or `harness-rules/*.md`). PolicyKernel
- * compiles only a conservative typed subset into HarnessRule objects.
- * This hook executes that typed subset. It never runs arbitrary code,
- * never exposes tools to verifier calls, and never treats unknown
- * natural-language text as executable policy.
+ * Bot-owner Agent Rules remain natural language in the dashboard, but
+ * PolicyKernel compiles a conservative subset into typed HarnessRule
+ * objects. This hook executes only that typed subset. It never runs
+ * arbitrary code, never exposes tools to verifier calls, and never
+ * treats unknown natural-language text as executable policy.
  */
 
 import type { HookContext, RegisteredHook } from "../types.js";
@@ -203,7 +202,7 @@ async function runLlmVerifier(
   }
 
   const prompt = [
-    "You are a runtime verifier for a user harness rule.",
+    "You are a runtime verifier for a bot-owner harness rule.",
     "Do not use tools. Judge only the supplied text and result summary.",
     "Reply with exactly `PASS` or `FAIL: <short reason>`.",
     "",
@@ -265,7 +264,7 @@ function emitRuleCheck(
 
 function blockReason(rule: HarnessRule, detail: string): string {
   return [
-    `[RETRY:USER_HARNESS_RULE:${rule.id}] A user harness rule failed.`,
+    `[RETRY:USER_HARNESS_RULE:${rule.id}] A bot-owner harness rule failed.`,
     "",
     `Rule: ${rule.sourceText}`,
     `Failure: ${detail}`,

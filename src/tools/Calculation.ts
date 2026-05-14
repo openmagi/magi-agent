@@ -162,6 +162,22 @@ function calculate(input: CalculationInput): CalculationOutput {
   return { ...base, result: max ?? null, max };
 }
 
+function activeRequirementIdsForCalculation(ctx: ToolContext): string[] {
+  const snapshot = ctx.executionContract?.snapshot();
+  if (!snapshot) return [];
+  return snapshot.taskState.deterministicRequirements
+    .filter(
+      (requirement) =>
+        requirement.status === "active" &&
+        requirement.kinds.some((kind) =>
+          kind === "calculation" ||
+          kind === "counting" ||
+          kind === "comparison",
+        ),
+    )
+    .map((requirement) => requirement.requirementId);
+}
+
 export function makeCalculationTool(): Tool<CalculationInput, CalculationOutput> {
   return {
     name: "Calculation",
@@ -182,7 +198,9 @@ export function makeCalculationTool(): Tool<CalculationInput, CalculationOutput>
         };
       }
       const output = calculate(input);
-      const requirementIds = input.requirementId ? [input.requirementId] : [];
+      const requirementIds = input.requirementId
+        ? [input.requirementId]
+        : activeRequirementIdsForCalculation(ctx);
       const resources = input.resourceIds ?? [];
       ctx.executionContract?.recordDeterministicEvidence({
         evidenceId: `de_calc_${ctx.turnId}_${input.operation}_${Date.now().toString(36)}`,

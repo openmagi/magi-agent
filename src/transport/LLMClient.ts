@@ -16,7 +16,11 @@ import https from "node:https";
 import { StringDecoder } from "node:string_decoder";
 import { URL } from "node:url";
 import type { ImageContentBlock } from "../util/types.js";
-import { shouldEnableThinkingByDefault, getCapability } from "../llm/modelCapabilities.js";
+import {
+  getCapability,
+  getDefaultTemperature,
+  shouldEnableThinkingByDefault,
+} from "../llm/modelCapabilities.js";
 
 export interface LLMClientOptions {
   apiProxyUrl: string; // e.g. http://api-proxy.magi-system.svc.cluster.local:3001
@@ -38,7 +42,7 @@ export type LLMContentBlock =
   | {
       type: "tool_result";
       tool_use_id: string;
-      content: string | Array<{ type: "text"; text: string }>;
+      content: string | Array<{ type: string; [key: string]: unknown }>;
       is_error?: boolean;
     };
 
@@ -51,11 +55,13 @@ export interface LLMToolDef {
   name: string;
   description: string;
   input_schema: object;
+  /** When true, Anthropic API shows only the tool name — schema hidden until discovered via tool_reference. */
+  defer_loading?: boolean;
 }
 
 export interface LLMStreamRequest {
   model?: string;
-  system?: string | Array<{ type: "text"; text: string }>;
+  system?: string | Array<{ type: "text"; text: string; cache_control?: { type: "ephemeral" } }>;
   messages: LLMMessage[];
   tools?: LLMToolDef[];
   max_tokens?: number;
@@ -297,6 +303,7 @@ export class LLMClient {
       (shouldEnableThinkingByDefault(model)
         ? ({ type: "adaptive" } as const)
         : undefined);
+    const defaultMaxTokens = getCapability(model)?.maxOutputTokens ?? (thinking ? 16_000 : 4096);
     const normalizedMessages = normalizeToolUseIdsForRequest(req.messages).map((msg) => {
       if (!Array.isArray(msg.content)) return msg;
       const filtered = (msg.content as Array<Record<string, unknown>>).filter(
@@ -309,8 +316,8 @@ export class LLMClient {
       system: req.system,
       messages: normalizedMessages,
       tools: req.tools,
-      max_tokens: req.max_tokens ?? (thinking ? (getCapability(model)?.maxOutputTokens ?? 16_000) : 4096),
-      temperature: req.temperature,
+      max_tokens: req.max_tokens ?? defaultMaxTokens,
+      temperature: req.temperature ?? getDefaultTemperature(model),
       ...(thinking ? { thinking } : {}),
       stream: true,
     });

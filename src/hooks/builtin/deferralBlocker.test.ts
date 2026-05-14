@@ -23,6 +23,7 @@ function makeCtx(transcript: HookContext["transcript"]): HookContext {
           assistantClaimsChatDelivery: false,
           assistantClaimsKbDelivery: false,
           assistantReportsDeliveryFailure: false,
+      assistantReportsDeliveryUnverified: false,
           reason: "test deferral",
         }),
       };

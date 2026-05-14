@@ -167,9 +167,97 @@ export const ANTHROPIC_ONLY_PROFILE: RoutingProfile = {
   },
 };
 
+export const LOCAL_FIRST_PROFILE: RoutingProfile = {
+  id: "local-first",
+  classifierModel: "ollama/llama3.2:3b",
+  fallbackTier: "MEDIUM",
+  classifierPrompt: STANDARD_CLASSIFIER_PROMPT,
+  tiers: {
+    LIGHT: route("LIGHT", "ollama", "ollama/llama3.2:3b", "local-first LIGHT", {
+      supportsTools: false,
+      supportsImages: false,
+    }),
+    MEDIUM: route("MEDIUM", "ollama", "ollama/qwen2.5-coder:32b", "local-first MEDIUM", {
+      supportsTools: true,
+      supportsImages: false,
+    }),
+    HEAVY: route("HEAVY", "ollama", "ollama/llama3.3:70b", "local-first HEAVY", {
+      supportsTools: true,
+      supportsImages: false,
+    }),
+    DEEP: route("DEEP", "ollama", "ollama/deepseek-r1:32b", "local-first DEEP", {
+      supportsTools: false,
+      supportsImages: false,
+    }),
+    XDEEP: route("XDEEP", "ollama", "ollama/deepseek-r1:70b", "local-first XDEEP", {
+      supportsTools: false,
+      supportsImages: false,
+    }),
+  },
+  explicitModelRules: [
+    { pattern: /\b(qwen|coder|코딩|code|debug|bug|implement|구현|디버그)\b/i, tier: "MEDIUM" },
+    { pattern: /\b(llama|large|70b|큰\s*모델)\b/i, tier: "HEAVY" },
+    { pattern: /\b(deepseek|reason|reasoning|추론|깊게)\b/i, tier: "DEEP" },
+  ],
+  fastPaths: [
+    { id: "heartbeat", pattern: /heartbeat|HEARTBEAT/i, tier: "LIGHT" },
+    {
+      id: "session-startup",
+      pattern: /session startup|Execute your Session Startup|Conversation info \(untrusted metadata\)/i,
+      tier: "MEDIUM",
+    },
+  ],
+};
+
+export const HYBRID_PROFILE: RoutingProfile = {
+  id: "hybrid",
+  classifierModel: "ollama/llama3.2:3b",
+  fallbackTier: "MEDIUM",
+  classifierPrompt: STANDARD_CLASSIFIER_PROMPT,
+  tiers: {
+    LIGHT: route("LIGHT", "ollama", "ollama/llama3.2:3b", "hybrid LIGHT", {
+      supportsTools: false,
+      supportsImages: false,
+    }),
+    MEDIUM: route("MEDIUM", "ollama", "ollama/qwen2.5-coder:32b", "hybrid MEDIUM", {
+      supportsTools: true,
+      supportsImages: false,
+    }),
+    HEAVY: route("HEAVY", "anthropic", "claude-sonnet-4-6", "hybrid HEAVY", {
+      supportsTools: true,
+      supportsImages: true,
+    }),
+    DEEP: route("DEEP", "anthropic", "claude-opus-4-7", "hybrid DEEP", {
+      thinking: { type: "adaptive" },
+      supportsTools: true,
+      supportsImages: true,
+    }),
+    XDEEP: route("XDEEP", "anthropic", "claude-opus-4-7", "hybrid XDEEP", {
+      thinking: { type: "adaptive" },
+      supportsTools: true,
+      supportsImages: true,
+    }),
+  },
+  explicitModelRules: [
+    { pattern: /\b(local|ollama|로컬)\b/i, tier: "MEDIUM" },
+    { pattern: /\b(opus|claude|클로드|오퍼스)\b/i, tier: "DEEP" },
+    { pattern: /\b(code|coding|debug|bug|implement|architecture|코딩|디버그|구현|아키텍처)\b/i, tier: "HEAVY" },
+  ],
+  fastPaths: [
+    { id: "heartbeat", pattern: /heartbeat|HEARTBEAT/i, tier: "LIGHT" },
+    {
+      id: "session-startup",
+      pattern: /session startup|Execute your Session Startup|Conversation info \(untrusted metadata\)/i,
+      tier: "MEDIUM",
+    },
+  ],
+};
+
 export function getRoutingProfile(id: string | undefined): RoutingProfile {
   if (id === "premium") return PREMIUM_PROFILE;
   if (id === "anthropic_only") return ANTHROPIC_ONLY_PROFILE;
+  if (id === "local-first" || id === "local_first" || id === "local") return LOCAL_FIRST_PROFILE;
+  if (id === "hybrid") return HYBRID_PROFILE;
   return STANDARD_PROFILE;
 }
 

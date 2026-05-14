@@ -255,6 +255,29 @@ describe("ContextEngine.buildMessagesFromTranscript", () => {
 });
 
 describe("ContextEngine.maybeCompact", () => {
+  const structuredSummary = [
+    "## 1. Active Intent",
+    "Continue the current task.",
+    "## 2. Completed Steps",
+    "- Inspected transcript.",
+    "## 3. Current Plan",
+    "1. Resume from handoff.",
+    "## 4. Modified Files",
+    "None.",
+    "## 5. Key Code Snippets",
+    "None.",
+    "## 6. Important Values",
+    "None.",
+    "## 7. Decisions Made",
+    "None.",
+    "## 8. Pending Questions",
+    "None.",
+    "## 9. Execution Contract State",
+    "No active execution contract.",
+    "## 10. Next Immediate Step",
+    "Continue from the latest user request.",
+  ].join("\n");
+
   it("does not compact below the token threshold", async () => {
     const { client, calls } = mockLLM(() => [
       { kind: "message_end", stopReason: "end_turn", usage: { inputTokens: 0, outputTokens: 0 } },
@@ -273,7 +296,7 @@ describe("ContextEngine.maybeCompact", () => {
   });
 
   it("creates a boundary with sha256 hash when Haiku succeeds", async () => {
-    const summaryPayload = "compact summary of everything that happened";
+    const summaryPayload = structuredSummary;
     const { client, calls } = mockLLM(() => [
       { kind: "text_delta", blockIndex: 0, delta: summaryPayload },
       { kind: "message_end", stopReason: "end_turn", usage: { inputTokens: 100, outputTokens: 20 } },
@@ -301,13 +324,13 @@ describe("ContextEngine.maybeCompact", () => {
     });
     expect(transcript.appended[1]).toBe(boundary);
     expect(calls.length).toBe(1);
-    expect(calls[0]!.system).toContain("Preserve execution-contract state");
-    expect(calls[0]!.system).toContain("goal, constraints, current plan, completed steps, blockers, acceptance criteria");
+    expect(calls[0]!.system).toContain("You MUST output ALL 10 sections");
+    expect(calls[0]!.system).toContain("## 9. Execution Contract State");
   });
 
   it("prompts the summarizer to write a next-session handoff memo", async () => {
     const { client, calls } = mockLLM(() => [
-      { kind: "text_delta", blockIndex: 0, delta: "handoff summary" },
+      { kind: "text_delta", blockIndex: 0, delta: structuredSummary },
       { kind: "message_end", stopReason: "end_turn", usage: { inputTokens: 100, outputTokens: 20 } },
     ]);
     const engine = new ContextEngine(client);
@@ -322,11 +345,10 @@ describe("ContextEngine.maybeCompact", () => {
 
     expect(calls.length).toBe(1);
     const system = String(calls[0]!.system);
-    expect(system).toContain("next turn or a new session");
-    expect(system).toContain("Write the summary as a handoff memo");
-    expect(system).toContain("Current objective");
-    expect(system).toContain("Completed work");
-    expect(system).toContain("Next step");
+    expect(system).toContain("structured handoff memo");
+    expect(system).toContain("## 1. Active Intent");
+    expect(system).toContain("## 2. Completed Steps");
+    expect(system).toContain("## 10. Next Immediate Step");
   });
 
   it("keeps recent transcript tail visible to the summarizer when input is over budget", async () => {

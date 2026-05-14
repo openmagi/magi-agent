@@ -12,7 +12,7 @@
  *   1. Zod-style JSON input schema + two-layer input validation
  *      (`validate()` hook + hard guard inside `execute()`).
  *   2. `applyPersona` — T2-11 catalog expansion.
- *   3. `makeSpawnAgentTool(agent, backgroundRegistry?)` factory that
+ *   3. `makeSpawnAgentTool(agent, backgroundRegistry?, deps?)` factory that
  *      glues the three deliver paths (tournament / return / background)
  *      to the spawn runtime.
  *
@@ -37,7 +37,9 @@ import type {
 } from "../Tool.js";
 import type { Agent } from "../Agent.js";
 import type { BackgroundTaskRegistry } from "../tasks/BackgroundTaskRegistry.js";
-import { errorResult } from "../util/toolResult.js";
+import type { MissionClient } from "../missions/MissionClient.js";
+import type { MissionChannelType, MissionKind } from "../missions/types.js";
+import { errorResult, summariseDelegatedPrompt } from "../util/toolResult.js";
 import type { ArtifactMeta } from "../artifacts/ArtifactManager.js";
 import type { PermissionMode } from "../Session.js";
 import {
@@ -45,6 +47,7 @@ import {
   loadPersonaCatalog,
   resolvePersona,
   type PersonaCatalog,
+  type PersonaCompletionContract,
   type PersonaSpec,
 } from "../personas/catalog.js";
 import {
@@ -68,7 +71,9 @@ import {
   type TournamentScorer as TournamentScorerImpl,
 } from "../spawn/ScoreVariant.js";
 import {
+  canPrepareGitWorktreeSpawnDir,
   countFilesRecursive as countFilesRecursiveImpl,
+  prepareGitWorktreeSpawnDir,
   prepareSpawnDir as prepareSpawnDirImpl,
   randomTaskId,
 } from "../spawn/SpawnWorkspace.js";
@@ -80,7 +85,7 @@ import {
   buildSpawnWorkOrderPrompt,
   type ExecutionContractStore,
 } from "../execution/ExecutionContract.js";
-import type { MessageAttachment, UserMessage } from "../util/types.js";
+import type { ChannelRef, MessageAttachment, UserMessage } from "../util/types.js";
 
 export const MAX_SPAWN_DEPTH = 2;
 const DEFAULT_RETURN_TIMEOUT_MS = 120_000;
@@ -89,6 +94,26 @@ const MAX_RETURN_TIMEOUT_MS = 600_000;
 const MAX_BACKGROUND_TIMEOUT_MS = 6 * 60 * 60 * 1000;
 const PARENT_TURN_CONTEXT_TEXT_LIMIT = 24_000;
 const PARENT_TURN_CONTEXT_SYSTEM_LIMIT = 64_000;
+const SPAWN_RESULT_SOURCE_SNIPPET_MAX = 500;
+const CODING_PERSONA_PATTERN =
+  /(?:^|[-_\s])(coder|coding|code|developer|engineer|implementer)(?:$|[-_\s])/i;
+const CODING_TOOL_HINTS = new Set([
+  "PatchApply",
+  "FileEdit",
+  "CodeDiagnostics",
+  "ProjectVerificationPlanner",
+]);
+const MISSION_KINDS: ReadonlySet<MissionKind> = new Set([
+  "manual",
+  "goal",
+  "spawn",
+  "cron",
+  "script_cron",
+  "pipeline",
+  "browser_qa",
+  "document",
+  "research",
+]);
 
 /**
  * Canonical models available for SpawnAgent model override.
@@ -112,8 +137,6 @@ const CANONICAL_SPAWNABLE_MODELS = [
   "gpt-5.5-pro",
   "kimi-k2p6",
   "minimax-m2p7",
-  "gemini-2.5-flash",
-  "gemini-2.5-pro",
   "gemini-3.1-flash-lite-preview",
   "gemini-3.1-pro-preview",
 ] as const;
@@ -135,8 +158,6 @@ const SPAWN_MODEL_ALIASES: Readonly<Record<string, (typeof CANONICAL_SPAWNABLE_M
   "openai/gpt-5.5-pro": "gpt-5.5-pro",
   "fireworks/kimi-k2p6": "kimi-k2p6",
   "fireworks/minimax-m2p7": "minimax-m2p7",
-  "google/gemini-2.5-flash": "gemini-2.5-flash",
-  "google/gemini-2.5-pro": "gemini-2.5-pro",
   "google/gemini-3.1-flash-lite-preview": "gemini-3.1-flash-lite-preview",
   "google/gemini-3.1-pro-preview": "gemini-3.1-pro-preview",
 };
@@ -176,10 +197,14 @@ export interface SpawnAgentInput {
   timeout_ms?: number;
   completion_contract?: SpawnCompletionContract;
   /**
-   * Trusted children share the parent workspace authority. Isolated is the
-   * legacy `.spawn/{taskId}` sandbox and must be requested explicitly.
+   * When omitted, coding-oriented children use a detached git worktree when
+   * the parent workspace can create one; other children use trusted mode.
    */
   workspace_policy?: SpawnWorkspacePolicy;
+  /** Optional child read scope, workspace-relative files/directories. */
+  allowed_files?: string[];
+  /** Optional child write scope, workspace-relative files/directories. */
+  write_set?: string[];
   metadata?: Record<string, unknown>;
   /** Override the LLM model for this child. Must be in SPAWNABLE_MODELS. */
   model?: string;
@@ -244,6 +269,7 @@ export interface SpawnAgentOutput {
   status: "ok" | "error" | "aborted" | "pending";
   finalText?: string;
   toolCallCount?: number;
+  childEvidence?: SpawnChildResult["evidence"];
   attempts?: number;
   errorMessage?: string;
   /**
@@ -264,7 +290,7 @@ const INPUT_SCHEMA = {
     persona: {
       type: "string",
       description:
-        "Sub-agent identity (e.g. 'legal-researcher'). Prepended as a system-prompt role.",
+        "Sub-agent identity or builtin preset. Builtins include research, explore, scout, synthesis, planner, coder, and reviewer.",
     },
     prompt: {
       type: "string",
@@ -295,9 +321,21 @@ const INPUT_SCHEMA = {
     },
     workspace_policy: {
       type: "string",
-      enum: ["trusted", "isolated"],
+      enum: ["trusted", "isolated", "git_worktree"],
       description:
-        "Workspace authority for the child. Default 'trusted' lets the child read/write the parent workspace. 'isolated' confines file tools and Bash cwd to .spawn/{taskId}.",
+        "Workspace authority for the child. Omit for automatic policy: coding-oriented children (for example persona='coder' or non-empty write_set) use 'git_worktree' when the parent git repo has HEAD; otherwise the child uses 'trusted'. 'trusted' lets the child read/write the parent workspace. 'isolated' confines file tools and Bash cwd to .spawn/{taskId}. 'git_worktree' runs the child in .spawn/{taskId}/worktree as a detached git worktree.",
+    },
+    allowed_files: {
+      type: "array",
+      items: { type: "string" },
+      description:
+        "Optional workspace-relative files/directories the child may read. Omit to inherit normal workspace read scope.",
+    },
+    write_set: {
+      type: "array",
+      items: { type: "string" },
+      description:
+        "Optional workspace-relative files/directories the child may write. Use for deterministic child ownership and merge safety.",
     },
     completion_contract: {
       type: "object",
@@ -367,6 +405,17 @@ const INPUT_SCHEMA = {
 
 // ── Persona expansion (T2-11) ──────────────────────────────────────
 
+const DEFAULT_CHILD_BROWSER_TOOLS = ["Browser", "SocialBrowser"] as const;
+
+function withDefaultChildBrowserTools(tools: string[]): string[] {
+  if (tools.length === 0) return tools;
+  const out = tools.slice();
+  for (const tool of DEFAULT_CHILD_BROWSER_TOOLS) {
+    if (!out.includes(tool)) out.push(tool);
+  }
+  return out;
+}
+
 export interface PersonaExpansion {
   /** Effective allowed_tools to pass to the child loop. `undefined` = inherit all parent tools. */
   allowedTools: string[] | undefined;
@@ -376,6 +425,8 @@ export interface PersonaExpansion {
   prompt: string;
   /** True when the persona name matched a catalog entry. */
   matched: boolean;
+  /** Persona-level default completion contract. Caller input wins when present. */
+  defaultCompletionContract?: PersonaCompletionContract;
 }
 
 /**
@@ -408,7 +459,7 @@ export function applyPersona(
   } else if (spec.allowed_tools === ALLOWED_TOOLS_WILDCARD) {
     allowedTools = undefined;
   } else {
-    allowedTools = spec.allowed_tools.slice();
+    allowedTools = withDefaultChildBrowserTools(spec.allowed_tools);
   }
   const allowedSkills =
     input.allowed_skills !== undefined
@@ -421,6 +472,9 @@ export function applyPersona(
     allowedSkills,
     prompt: `${spec.system_prompt}\n\n${input.prompt}`,
     matched: true,
+    ...(spec.completion_contract
+      ? { defaultCompletionContract: { ...spec.completion_contract } }
+      : {}),
   };
 }
 
@@ -602,20 +656,24 @@ function isMissingRequiredFilesContractFailure(result: SpawnChildResult): boolea
   );
 }
 
-function normalizeCompletionContract(input: SpawnAgentInput): SpawnCompletionContract & {
+function normalizeCompletionContract(
+  input: SpawnAgentInput,
+  defaultContract?: PersonaCompletionContract,
+): SpawnCompletionContract & {
   required_evidence: SpawnEvidenceRequirement;
 } {
-  const requiredEvidence = input.completion_contract?.required_evidence ?? "tool_call";
+  const source = input.completion_contract ?? defaultContract;
+  const requiredEvidence = source?.required_evidence ?? "tool_call";
   return {
     required_evidence: requiredEvidence,
-    ...(input.completion_contract?.required_files
-      ? { required_files: input.completion_contract.required_files }
+    ...(source?.required_files
+      ? { required_files: source.required_files }
       : {}),
-    ...(input.completion_contract?.require_non_empty_result !== undefined
-      ? { require_non_empty_result: input.completion_contract.require_non_empty_result }
+    ...(source?.require_non_empty_result !== undefined
+      ? { require_non_empty_result: source.require_non_empty_result }
       : {}),
-    ...(input.completion_contract?.reason
-      ? { reason: input.completion_contract.reason }
+    ...(source?.reason
+      ? { reason: source.reason }
       : {}),
   };
 }
@@ -777,12 +835,53 @@ function spawnFailureResult(
       status: result.status === "aborted" ? "aborted" : "error",
       finalText: result.finalText,
       toolCallCount: result.toolCallCount,
+      childEvidence: result.evidence,
       attempts,
       errorMessage,
       ...(artifacts ? { artifacts } : {}),
     },
     durationMs: Date.now() - start,
   };
+}
+
+function subagentResultTurnId(parentTurnId: string, taskId: string): string {
+  return `${parentTurnId}::spawn::${taskId}`;
+}
+
+function sourceSnippet(value: string, maxLength = SPAWN_RESULT_SOURCE_SNIPPET_MAX): string {
+  const normalized = value.replace(/\s+/g, " ").trim();
+  if (normalized.length <= maxLength) return normalized;
+  return `${normalized.slice(0, Math.max(0, maxLength - 3)).trimEnd()}...`;
+}
+
+function recordSubagentResultSource(args: {
+  ctx: ToolContext;
+  input: SpawnAgentInput;
+  taskId: string;
+  result: SpawnChildResult;
+  attempts: number;
+}): void {
+  const { ctx, input, taskId, result, attempts } = args;
+  if (result.status !== "ok") return;
+  if (!ctx.sourceLedger) return;
+
+  const snippet = sourceSnippet(result.finalText);
+  const source = ctx.sourceLedger.recordSource({
+    turnId: subagentResultTurnId(ctx.turnId, taskId),
+    toolName: "SpawnAgent",
+    kind: "subagent_result",
+    uri: `spawn://${taskId}`,
+    title: `${input.persona} subagent result`,
+    ...(snippet ? { snippets: [snippet] } : {}),
+    metadata: {
+      taskId,
+      persona: input.persona,
+      deliver: input.deliver,
+      toolCallCount: result.toolCallCount,
+      attempts,
+    },
+  });
+  ctx.emitAgentEvent?.({ type: "source_inspected", source });
 }
 
 function partialChildResultFromError(err: unknown): SpawnChildResultImpl | null {
@@ -803,6 +902,7 @@ function partialChildResultFromError(err: unknown): SpawnChildResultImpl | null 
       status: candidate.status,
       finalText: candidate.finalText,
       toolCallCount: candidate.toolCallCount,
+      ...("evidence" in candidate ? { evidence: candidate.evidence } : {}),
       ...(typeof candidate.errorMessage === "string"
         ? { errorMessage: candidate.errorMessage }
         : {}),
@@ -955,9 +1055,24 @@ function validateInput(input: SpawnAgentInput): string | null {
   if (
     input.workspace_policy !== undefined &&
     input.workspace_policy !== "trusted" &&
-    input.workspace_policy !== "isolated"
+    input.workspace_policy !== "isolated" &&
+    input.workspace_policy !== "git_worktree"
   ) {
-    return "`workspace_policy` must be 'trusted' or 'isolated'";
+    return "`workspace_policy` must be 'trusted', 'isolated', or 'git_worktree'";
+  }
+  if (
+    input.allowed_files !== undefined &&
+    (!Array.isArray(input.allowed_files) ||
+      input.allowed_files.some((x) => typeof x !== "string" || x.length === 0))
+  ) {
+    return "`allowed_files` must be an array of non-empty strings";
+  }
+  if (
+    input.write_set !== undefined &&
+    (!Array.isArray(input.write_set) ||
+      input.write_set.some((x) => typeof x !== "string" || x.length === 0))
+  ) {
+    return "`write_set` must be an array of non-empty strings";
   }
   const requiredEvidence = input.completion_contract?.required_evidence;
   if (
@@ -994,6 +1109,39 @@ function normalizeSpawnTimeoutMs(input: SpawnAgentInput): number {
     maxTimeoutMs,
     Math.max(1_000, input.timeout_ms ?? defaultTimeoutMs),
   );
+}
+
+function shouldDefaultCodingSpawnToGitWorktree(
+  input: SpawnAgentInput,
+  expanded: PersonaExpansion,
+): boolean {
+  if (input.workspace_policy !== undefined || input.mode === "tournament") {
+    return false;
+  }
+  if (input.write_set !== undefined && input.write_set.length > 0) {
+    return true;
+  }
+  if (CODING_PERSONA_PATTERN.test(input.persona)) {
+    return true;
+  }
+  const allowedTools = expanded.allowedTools ?? input.allowed_tools ?? [];
+  return allowedTools.some((tool) => CODING_TOOL_HINTS.has(tool));
+}
+
+async function resolveSpawnWorkspacePolicy(
+  input: SpawnAgentInput,
+  expanded: PersonaExpansion,
+  workspaceRoot: string,
+): Promise<SpawnWorkspacePolicy> {
+  if (input.workspace_policy !== undefined) {
+    return input.workspace_policy;
+  }
+  if (!shouldDefaultCodingSpawnToGitWorktree(input, expanded)) {
+    return "trusted";
+  }
+  return (await canPrepareGitWorktreeSpawnDir(workspaceRoot))
+    ? "git_worktree"
+    : "trusted";
 }
 
 function resolveParentPermissionMode(agent: Agent, sessionKey: string): PermissionMode {
@@ -1070,6 +1218,149 @@ function buildParentTurnContextBlock(message?: UserMessage): string {
   ].join("\n");
 }
 
+export interface SpawnAgentMissionDeps {
+  missionClient?: Pick<MissionClient, "createMission" | "createRun" | "appendEvent">;
+  getSourceChannel?: (ctx: ToolContext) => ChannelRef | null;
+  missionsEnabled?: () => boolean;
+}
+
+interface SpawnMissionLink {
+  missionId?: string;
+  missionRunId?: string;
+}
+
+function isMissionsEnabled(deps: SpawnAgentMissionDeps | undefined): boolean {
+  return deps?.missionsEnabled?.() ?? process.env.CORE_AGENT_MISSIONS === "1";
+}
+
+function metadataString(
+  metadata: Record<string, unknown> | undefined,
+  key: string,
+): string | undefined {
+  const value = metadata?.[key];
+  if (typeof value !== "string") return undefined;
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : undefined;
+}
+
+function truncateMissionText(value: string, limit: number): string {
+  return value.length <= limit ? value : value.slice(0, limit - 1).trimEnd();
+}
+
+function resolveMissionKind(metadata: Record<string, unknown> | undefined): MissionKind {
+  const raw = metadataString(metadata, "missionKind");
+  return raw && MISSION_KINDS.has(raw as MissionKind) ? (raw as MissionKind) : "spawn";
+}
+
+function resolveMissionTitle(input: SpawnAgentInput): string {
+  return truncateMissionText(
+    metadataString(input.metadata, "missionTitle") ?? `${input.persona} handoff`,
+    240,
+  );
+}
+
+function missionRunId(run: Record<string, unknown>): string | undefined {
+  return typeof run.id === "string" ? run.id : undefined;
+}
+
+async function createBackgroundSpawnMission(args: {
+  deps?: SpawnAgentMissionDeps;
+  input: SpawnAgentInput;
+  ctx: ToolContext;
+  taskId: string;
+}): Promise<SpawnMissionLink> {
+  const { deps, input, ctx, taskId } = args;
+  if (!deps?.missionClient || !isMissionsEnabled(deps)) return {};
+
+  let missionId = metadataString(input.metadata, "missionId");
+  let missionRunIdValue = metadataString(input.metadata, "missionRunId");
+
+  if (!missionId) {
+    const channel = deps.getSourceChannel?.(ctx) ?? null;
+    if (!channel) return {};
+    try {
+      const mission = await deps.missionClient.createMission({
+        channelType: channel.type as MissionChannelType,
+        channelId: channel.channelId,
+        kind: resolveMissionKind(input.metadata),
+        title: resolveMissionTitle(input),
+        summary: truncateMissionText(input.prompt, 500),
+        status: "running",
+        createdBy: "agent",
+        metadata: {
+          ...(input.metadata ?? {}),
+          spawnTaskId: taskId,
+          persona: input.persona,
+        },
+      });
+      missionId = mission.id;
+      ctx.emitAgentEvent?.({ type: "mission_created", mission });
+    } catch (err) {
+      console.warn(
+        `[core-agent] SpawnAgent mission create failed taskId=${taskId}: ${(err as Error).message}`,
+      );
+      return {};
+    }
+  }
+
+  if (missionId && !missionRunIdValue) {
+    try {
+      const run = await deps.missionClient.createRun(missionId, {
+        triggerType: "handoff",
+        status: "running",
+        sessionKey: ctx.sessionKey,
+        turnId: ctx.turnId,
+        spawnTaskId: taskId,
+        metadata: {
+          persona: input.persona,
+          missionKind: resolveMissionKind(input.metadata),
+        },
+      });
+      missionRunIdValue = missionRunId(run);
+    } catch (err) {
+      console.warn(
+        `[core-agent] SpawnAgent mission run create failed taskId=${taskId} missionId=${missionId}: ${(err as Error).message}`,
+      );
+    }
+  }
+
+  return {
+    ...(missionId ? { missionId } : {}),
+    ...(missionRunIdValue ? { missionRunId: missionRunIdValue } : {}),
+  };
+}
+
+async function appendBackgroundSpawnMissionEvent(args: {
+  deps?: SpawnAgentMissionDeps;
+  ctx: ToolContext;
+  link: SpawnMissionLink;
+  eventType: "completed" | "failed" | "cancelled";
+  message?: string;
+  payload?: Record<string, unknown>;
+}): Promise<void> {
+  const { deps, ctx, link, eventType, message, payload } = args;
+  if (!deps?.missionClient || !link.missionId) return;
+  try {
+    await deps.missionClient.appendEvent(link.missionId, {
+      ...(link.missionRunId ? { runId: link.missionRunId } : {}),
+      actorType: "agent",
+      eventType,
+      ...(message ? { message } : {}),
+      payload: payload ?? {},
+    });
+    ctx.emitAgentEvent?.({
+      type: "mission_event",
+      missionId: link.missionId,
+      eventType,
+      ...(message ? { message } : {}),
+    });
+  } catch (err) {
+    console.warn(
+      `[core-agent] SpawnAgent mission event append failed missionId=${link.missionId}: ${(err as Error).message}`,
+    );
+  }
+}
+
 // ── Tool factory ───────────────────────────────────────────────────
 
 /**
@@ -1079,11 +1370,12 @@ function buildParentTurnContextBlock(message?: UserMessage): string {
 export function makeSpawnAgentTool(
   agent: Agent,
   backgroundRegistry?: BackgroundTaskRegistry,
+  missionDeps?: SpawnAgentMissionDeps,
 ): Tool<SpawnAgentInput, SpawnAgentOutput> {
   return {
     name: "SpawnAgent",
     description:
-      "Delegate a focused sub-task to a child agent with a custom persona and filtered toolset. Children are trusted workers by default: they can read/write the parent workspace, and `.spawn/{taskId}` is scratch/audit storage. Set `workspace_policy:\"isolated\"` only when the task should be sandboxed to `.spawn/{taskId}`. The runtime automatically includes the current turn's selected KB/system addendum and attachment manifest in the child work order; still provide concrete task instructions, required files, expected outputs, allowed tools, completion criteria, and retry/idempotency guidance. `deliver:\"return\"` blocks until the child finishes and returns final text. `deliver:\"background\"` returns a taskId immediately; completion surfaces as a spawn_result event and TaskGet record. Use background delivery for long browser QA, research, or artifact generation; it defaults to a 3 hour timeout and accepts `timeout_ms` up to 6 hours. Spawn depth is capped at 2. Use `completion_contract.required_evidence:\"files\"` plus `required_files` for durable file deliverables, `\"text\"` for answer-only work, `\"artifact\"` for artifact handoff, `\"tool_call\"` for concrete tool work, or `\"none\"` only when no evidence is expected. Use `model` only when deliberately selecting a child model; copy an exact value from this schema enum or omit `model` to inherit the bot's runtime model. Never invent provider/model ids. IMPORTANT: child output longer than ~500 chars should go into ArtifactCreate rather than finalText; child-produced artifacts are imported into the parent workspace and returned on `artifacts.handedOffArtifacts`.",
+      "Delegate a focused sub-task to a child agent with a custom persona and filtered toolset. Omit `workspace_policy` for automatic policy: coding-oriented children (for example persona `coder`, coding persona names, `PatchApply`/`FileEdit`/diagnostic tool hints, or a non-empty `write_set`) default to a detached git worktree when the parent workspace can create one; other children remain trusted workers that can read/write the parent workspace and use `.spawn/{taskId}` for scratch/audit storage. Set `workspace_policy:\"trusted\"` only when a coding child must operate directly on the current parent checkout, `workspace_policy:\"git_worktree\"` when detached worktree isolation is required, or `workspace_policy:\"isolated\"` when the task should be sandboxed to `.spawn/{taskId}`. After a git_worktree child finishes, use SpawnWorktreeApply to preview, apply, or reject the child worktree changes; do not copy files manually. The runtime automatically includes the current turn's selected KB/system addendum and attachment manifest in the child work order; still provide concrete task instructions, required files, expected outputs, allowed tools, completion criteria, and retry/idempotency guidance. `deliver:\"return\"` blocks until the child finishes and returns final text. `deliver:\"background\"` returns a taskId immediately; completion surfaces as a spawn_result event and TaskGet record. Use background delivery for long browser QA, research, or artifact generation; it defaults to a 3 hour timeout and accepts `timeout_ms` up to 6 hours. Spawn depth is capped at 2. Use `completion_contract.required_evidence:\"files\"` plus `required_files` for durable file deliverables, `\"text\"` for answer-only work, `\"artifact\"` for artifact handoff, `\"tool_call\"` for concrete tool work, or `\"none\"` only when no evidence is expected. Use `model` only when deliberately selecting a child model; copy an exact value from this schema enum or omit `model` to inherit the bot's runtime model. Never invent provider/model ids. IMPORTANT: child output longer than ~500 chars should go into ArtifactCreate rather than finalText; child-produced artifacts are imported into the parent workspace and returned on `artifacts.handedOffArtifacts`.",
     inputSchema: INPUT_SCHEMA,
     permission: "meta",
     kind: "core",
@@ -1117,6 +1409,14 @@ export function makeSpawnAgentTool(
         };
       }
       if (input.mode === "tournament") {
+        if (input.workspace_policy === "git_worktree") {
+          return {
+            status: "error",
+            errorCode: "bad_input",
+            errorMessage: "`workspace_policy:\"git_worktree\"` is not supported with tournament mode yet",
+            durationMs: Date.now() - start,
+          };
+        }
         const err = validateTournamentInput(input);
         if (err) {
           return {
@@ -1130,7 +1430,6 @@ export function makeSpawnAgentTool(
 
       const taskId = randomTaskId();
       const timeoutMs = normalizeSpawnTimeoutMs(input);
-      const completionContract = normalizeCompletionContract(input);
 
       // T2-11 persona catalog expansion. Loaded per-call so workspace
       // overrides are picked up live; falls back to BUILTIN_PERSONAS on
@@ -1145,6 +1444,10 @@ export function makeSpawnAgentTool(
         },
         catalog,
       );
+      const completionContract = normalizeCompletionContract(
+        input,
+        expanded.defaultCompletionContract,
+      );
       const getSession = (agent as {
         getSession?: (sessionKey: string) => { executionContract?: ExecutionContractStore } | undefined;
       }).getSession;
@@ -1156,6 +1459,11 @@ export function makeSpawnAgentTool(
       const expandedPromptWithContext = parentTurnContext
         ? `${parentTurnContext}\n\n${expanded.prompt}`
         : expanded.prompt;
+      const workspacePolicy = await resolveSpawnWorkspacePolicy(
+        input,
+        expanded,
+        ctx.workspaceRoot,
+      );
       const childPrompt = parentExecutionContract
         ? buildSpawnWorkOrderPrompt({
             parent: parentExecutionContract.snapshot(),
@@ -1193,12 +1501,21 @@ export function makeSpawnAgentTool(
         abortSignal: ctx.abortSignal,
         botId: ctx.botId,
         workspaceRoot: ctx.workspaceRoot,
-        workspacePolicy: input.workspace_policy ?? "trusted",
+        workspacePolicy,
+        deferralCheck:
+          input.mode === "tournament"
+            ? false
+            : completionContract.required_evidence !== "none",
+        memoryMode: ctx.memoryMode,
+        allowedFiles: input.allowed_files,
+        writeSet: input.write_set,
         onAgentEvent: ctx.emitAgentEvent,
         askUser: ctx.askUser,
         permissionMode: resolveParentPermissionMode(agent, ctx.sessionKey),
         executionContract: parentExecutionContract,
+        sourceLedger: ctx.sourceLedger,
         ...(modelOverride ? { modelOverride } : {}),
+        ...(ctx.traceId ? { traceId: ctx.traceId } : {}),
       };
 
       // T3-16 — tournament mode branches here. The tournament runner
@@ -1252,19 +1569,23 @@ export function makeSpawnAgentTool(
       }
 
       // Single spawn — allocate ephemeral subdir before launching.
-      const prepared = await prepareSpawnDir(ctx.workspaceRoot, taskId).catch(
-        (err) => err,
-      );
+      const prepared = await (
+        workspacePolicy === "git_worktree"
+          ? prepareGitWorktreeSpawnDir(ctx.workspaceRoot, taskId)
+          : prepareSpawnDir(ctx.workspaceRoot, taskId)
+      ).catch((err) => err);
       if (prepared instanceof Error) {
         return errorResult(prepared, start);
       }
       const { spawnDir, spawnWorkspace } = prepared;
+      const delegatedDetail = summariseDelegatedPrompt(input.prompt);
 
       ctx.emitAgentEvent?.({
         type: "spawn_started",
         taskId,
         persona: input.persona,
         prompt: input.prompt,
+        ...(delegatedDetail ? { detail: delegatedDetail } : {}),
         deliver: input.deliver,
         ...(modelOverride ? { model: modelOverride } : {}),
       });
@@ -1274,6 +1595,7 @@ export function makeSpawnAgentTool(
         taskId,
         parentTurnId: ctx.turnId,
         prompt: input.prompt,
+        ...(delegatedDetail ? { detail: delegatedDetail } : {}),
         emitControlEvent: ctx.emitControlEvent,
         emitAgentEvent: ctx.emitAgentEvent,
       });
@@ -1333,6 +1655,13 @@ export function makeSpawnAgentTool(
               artifacts,
             );
           }
+          recordSubagentResultSource({
+            ctx,
+            input,
+            taskId,
+            result,
+            attempts: childRun.attempts,
+          });
           return {
             status: "ok",
             output: {
@@ -1340,6 +1669,7 @@ export function makeSpawnAgentTool(
               status: result.status,
               finalText: result.finalText,
               toolCallCount: result.toolCallCount,
+              childEvidence: result.evidence,
               attempts: childRun.attempts,
               artifacts,
             },
@@ -1360,6 +1690,7 @@ export function makeSpawnAgentTool(
         spawnDir,
         childOptions,
         backgroundRegistry,
+        missionDeps,
         input,
         completionContract,
       });
@@ -1381,6 +1712,7 @@ interface BackgroundRunArgs {
   spawnDir: string;
   childOptions: SpawnChildOptions;
   backgroundRegistry?: BackgroundTaskRegistry;
+  missionDeps?: SpawnAgentMissionDeps;
   input: SpawnAgentInput;
   completionContract: SpawnCompletionContract;
 }
@@ -1402,6 +1734,7 @@ async function runBackgroundChild(args: BackgroundRunArgs): Promise<void> {
     spawnDir,
     childOptions,
     backgroundRegistry,
+    missionDeps,
     input,
     completionContract,
   } = args;
@@ -1414,6 +1747,12 @@ async function runBackgroundChild(args: BackgroundRunArgs): Promise<void> {
     ...childOptions,
     abortSignal: bgController.signal,
   };
+  const missionLink = await createBackgroundSpawnMission({
+    deps: missionDeps,
+    input,
+    ctx,
+    taskId,
+  });
 
   if (backgroundRegistry) {
     // Registry is best-effort; never fail the spawn on a persist error.
@@ -1426,6 +1765,10 @@ async function runBackgroundChild(args: BackgroundRunArgs): Promise<void> {
         sessionKey: ctx.sessionKey,
         persona: input.persona,
         prompt: input.prompt,
+        ...(missionLink.missionId ? { missionId: missionLink.missionId } : {}),
+        ...(missionLink.missionRunId
+          ? { missionRunId: missionLink.missionRunId }
+          : {}),
         spawnDir,
         abortController: bgController,
       });
@@ -1456,37 +1799,45 @@ async function runBackgroundChild(args: BackgroundRunArgs): Promise<void> {
         emit,
       );
       const fileCount = await countFilesRecursive(spawnDir);
+      recordSubagentResultSource({
+        ctx,
+        input,
+        taskId,
+        result,
+        attempts: childRun.attempts,
+      });
       emit?.({
         type: "spawn_result",
         taskId,
         status: result.status,
         finalText: result.finalText,
         toolCallCount: result.toolCallCount,
+        childEvidence: result.evidence,
         attempts: childRun.attempts,
         artifacts: { spawnDir, fileCount, handedOffArtifacts },
         ...(result.status === "ok"
-          ? result.errorMessage
-            ? { errorMessage: result.errorMessage }
-            : {}
-          : {
-              errorMessage: buildSpawnFailureMessage(
-                taskId,
-                result,
-                childRun.attempts,
-              ),
-            }),
+        ? result.errorMessage
+          ? { errorMessage: result.errorMessage }
+          : {}
+        : {
+            errorMessage: buildSpawnFailureMessage(
+              taskId,
+              result,
+              childRun.attempts,
+            ),
+          }),
       });
+      const mappedStatus =
+        result.status === "ok"
+          ? "completed"
+          : result.status === "aborted"
+            ? "aborted"
+            : "failed";
+      const errorMessage =
+        result.status === "ok"
+          ? result.errorMessage
+          : buildSpawnFailureMessage(taskId, result, childRun.attempts);
       if (backgroundRegistry) {
-        const mappedStatus =
-          result.status === "ok"
-            ? "completed"
-            : result.status === "aborted"
-              ? "aborted"
-              : "failed";
-        const errorMessage =
-          result.status === "ok"
-            ? result.errorMessage
-            : buildSpawnFailureMessage(taskId, result, childRun.attempts);
         await backgroundRegistry
           .attachResult(taskId, {
             status: mappedStatus,
@@ -1500,6 +1851,25 @@ async function runBackgroundChild(args: BackgroundRunArgs): Promise<void> {
             /* ignore persist errors */
           });
       }
+      const eventType =
+        result.status === "ok"
+          ? "completed"
+          : result.status === "aborted"
+            ? "cancelled"
+            : "failed";
+      await appendBackgroundSpawnMissionEvent({
+        deps: missionDeps,
+        ctx,
+        link: missionLink,
+        eventType,
+        ...(errorMessage ? { message: errorMessage } : {}),
+        payload: {
+          taskId,
+          status: result.status,
+          toolCallCount: result.toolCallCount,
+          attempts: childRun.attempts,
+        },
+      });
     })
     .catch(async (err: unknown) => {
       const msg = err instanceof Error ? err.message : String(err);
@@ -1519,6 +1889,14 @@ async function runBackgroundChild(args: BackgroundRunArgs): Promise<void> {
             /* ignore */
           });
       }
+      await appendBackgroundSpawnMissionEvent({
+        deps: missionDeps,
+        ctx,
+        link: missionLink,
+        eventType: "failed",
+        message: msg,
+        payload: { taskId, status: "error" },
+      });
     })
     .finally(() => {
       ctx.abortSignal.removeEventListener("abort", onParentAbortBg);

@@ -3,7 +3,7 @@
  *
  * Design reference:
  * - `docs/plans/2026-04-19-core-agent-phase-3-plan.md` §3 / T1-01
- * - `docs/plans/2026-04-19-magi-core-agent-design.md` §7.12.c
+ * - `docs/plans/2026-04-19-magi-agent-design.md` §7.12.c
  *   (memory fencing format)
  *
  * On the first iteration of each user turn, this hook queries qmd
@@ -41,6 +41,8 @@ import {
   type MemoryContinuity,
   type MemoryRecallRecord,
 } from "../../reliability/MemoryContinuity.js";
+import { channelMemoryPolicyFromSessionKey } from "../../reliability/ChannelMemoryPolicy.js";
+import { isIncognitoMemoryMode } from "../../util/memoryMode.js";
 
 /** Soft budget for total injected content (bytes, UTF-8). */
 const MAX_BYTES_INJECTED = 5_000;
@@ -221,8 +223,10 @@ export async function searchQmd(
 export function buildMemoryFence(
   results: QmdResult[],
   maxBytes: number = MAX_BYTES_INJECTED,
+  authority?: string,
 ): { fence: string; bytes: number; used: number } {
-  const header = `<memory-context source="qmd" tier="L0">`;
+  const authorityAttr = authority ? ` authority="${authority}"` : "";
+  const header = `<memory-context source="qmd" tier="L0"${authorityAttr}>`;
   const footer = `</memory-context>`;
   const overhead = Buffer.byteLength(header, "utf8") + Buffer.byteLength(footer, "utf8") + 2;
   let remaining = Math.max(0, maxBytes - overhead);
@@ -265,8 +269,10 @@ export function buildRootMemoryFence(
   root: RootMemory,
   continuity: MemoryContinuity = "background",
   maxBytes: number = MAX_ROOT_BYTES,
+  authority?: string,
 ): { fence: string; bytes: number } {
-  const header = `<memory-root source="hipocampus-root" tier="L2" continuity="${continuity}">`;
+  const authorityAttr = authority ? ` authority="${authority}"` : "";
+  const header = `<memory-root source="hipocampus-root" tier="L2" continuity="${continuity}"${authorityAttr}>`;
   const footer = `</memory-root>`;
   const prefix = `[path: ${root.path}]\n`;
   const overhead =
@@ -351,6 +357,9 @@ export function makeMemoryInjectorHook(
     blocking: true,
     timeoutMs: QMD_TIMEOUT_MS + 500,
     handler: async ({ messages, tools, system, iteration }, ctx: HookContext) => {
+      if (isIncognitoMemoryMode(ctx.memoryMode)) {
+        return { action: "continue" };
+      }
       // Only inject on the first iteration of a turn — subsequent
       // iterations already carry the block in `system`.
       if (iteration > 0) return { action: "continue" };
@@ -366,6 +375,19 @@ export function makeMemoryInjectorHook(
         return { action: "continue" };
       }
 
+      if (channelMemoryPolicyFromSessionKey(ctx.sessionKey) === "disabled") {
+        ctx.emit({
+          type: "rule_check",
+          ruleId: "memory-injector",
+          verdict: "ok",
+          detail: "skipped because channel memory mode disabled long-term memory",
+        });
+        ctx.log("info", "[memoryInjector] skipped by channel memory mode", {
+          sessionKey: ctx.sessionKey,
+        });
+        return { action: "continue" };
+      }
+
       // Workspace file override beats env default-on.
       const fileEnabled = await isEnabledByWorkspaceConfig(opts.workspaceRoot);
       if (!fileEnabled) return { action: "continue" };
@@ -375,6 +397,24 @@ export function makeMemoryInjectorHook(
       const minScore = getMinScore();
       const startedAt = Date.now();
       let root: RootMemory | null = null;
+      const sourceAuthority =
+        ctx.executionContract?.sourceAuthorityForTurn(ctx.turnId)[0] ?? null;
+      const longTermMemoryPolicy =
+        sourceAuthority?.longTermMemoryPolicy ?? "normal";
+      const backgroundOnly = longTermMemoryPolicy === "background_only";
+      if (longTermMemoryPolicy === "disabled") {
+        ctx.emit({
+          type: "rule_check",
+          ruleId: "memory-injector",
+          verdict: "ok",
+          detail: "skipped because source authority disabled long-term memory",
+        });
+        ctx.log("info", "[memoryInjector] skipped by source authority", {
+          policy: longTermMemoryPolicy,
+          reason: sourceAuthority?.classifierReason,
+        });
+        return { action: "continue" };
+      }
 
       // Try native QmdManager first (no HTTP), fall back to legacy HTTP.
       // Use hybridSearch (BM25 + vector) when available for better recall.
@@ -440,9 +480,19 @@ export function makeMemoryInjectorHook(
       let used = 0;
       const records: MemoryRecallRecord[] = [];
       if (root) {
-        const rootRecord = memoryRecordForRoot(root, userText, ctx.turnId);
+        const rootRecord = backgroundOnly
+          ? {
+              ...memoryRecordForRoot(root, userText, ctx.turnId),
+              continuity: "background" as const,
+            }
+          : memoryRecordForRoot(root, userText, ctx.turnId);
         records.push(rootRecord);
-        const rootFence = buildRootMemoryFence(root, rootRecord.continuity);
+        const rootFence = buildRootMemoryFence(
+          root,
+          rootRecord.continuity,
+          backgroundOnly ? 800 : MAX_ROOT_BYTES,
+          backgroundOnly ? "L4" : undefined,
+        );
         if (rootFence.fence.length > 0) {
           fences.push(rootFence.fence);
           bytes += rootFence.bytes;
@@ -450,13 +500,22 @@ export function makeMemoryInjectorHook(
       }
       if (results.length > 0) {
         const resultRecords = results.map((result) =>
-          memoryRecordForQmdResult(result, userText, ctx.turnId),
+          backgroundOnly
+            ? {
+                ...memoryRecordForQmdResult(result, userText, ctx.turnId),
+                continuity: "background" as const,
+              }
+            : memoryRecordForQmdResult(result, userText, ctx.turnId),
         );
         const enrichedResults = results.map((result, index) => ({
           ...result,
           continuity: resultRecords[index]?.continuity ?? "background",
         }));
-        const recallFence = buildMemoryFence(enrichedResults);
+        const recallFence = buildMemoryFence(
+          enrichedResults,
+          backgroundOnly ? 2_000 : MAX_BYTES_INJECTED,
+          backgroundOnly ? "L4" : undefined,
+        );
         if (recallFence.fence.length > 0 && recallFence.used > 0) {
           fences.push(recallFence.fence);
           bytes += recallFence.bytes;

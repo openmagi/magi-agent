@@ -1,0 +1,12 @@
+# medical-safety — test fixtures
+
+description: "Should block dosage without disclaimer"
+point: "beforeCommit"
+input:
+  assistantText: "Take 500mg of ibuprofen every 6 hours."
+  toolCallCount: 0
+  toolReadHappened: false
+  userMessage: "What should I take for a headache?"
+  retryCount: 0
+expected:
+  action: "block"

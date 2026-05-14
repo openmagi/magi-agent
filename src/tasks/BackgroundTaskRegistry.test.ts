@@ -50,6 +50,28 @@ describe("BackgroundTaskRegistry", () => {
     expect(parsed.persona).toBe("researcher");
   });
 
+  it("create() persists mission linkage for durable handoff recovery", async () => {
+    const reg = new BackgroundTaskRegistry(root);
+    const rec = await reg.create({
+      taskId: "mission-task",
+      parentTurnId: "turn_m",
+      sessionKey: "agent:main:x:mission",
+      persona: "researcher",
+      prompt: "continue the mission",
+      missionId: "mission_123",
+      missionRunId: "run_456",
+    });
+
+    expect(rec.missionId).toBe("mission_123");
+    expect(rec.missionRunId).toBe("run_456");
+
+    const second = new BackgroundTaskRegistry(root);
+    await second.hydrate();
+    const reloaded = await second.get("mission-task");
+    expect(reloaded?.missionId).toBe("mission_123");
+    expect(reloaded?.missionRunId).toBe("run_456");
+  });
+
   it("update() merges a patch and re-persists", async () => {
     const reg = new BackgroundTaskRegistry(root);
     await reg.create({
@@ -177,6 +199,49 @@ describe("BackgroundTaskRegistry", () => {
     // Second stop is a no-op — record already terminal.
     const again = await reg.stop("to_stop");
     expect(again).toBe(false);
+  });
+
+  it("reconciles running tasks without live controllers as restart-abandoned", async () => {
+    const first = new BackgroundTaskRegistry(root);
+    await first.create({
+      taskId: "stale",
+      parentTurnId: "turn_stale",
+      sessionKey: "session_stale",
+      persona: "researcher",
+      prompt: "keep going",
+      missionId: "mission-stale",
+      missionRunId: "run-stale",
+    });
+
+    const second = new BackgroundTaskRegistry(root);
+    await second.hydrate();
+    const abandoned = await second.reconcileAbandonedRunning("abandoned_by_restart");
+
+    expect(abandoned.map((record) => record.taskId)).toEqual(["stale"]);
+    const reloaded = await second.get("stale");
+    expect(reloaded?.status).toBe("failed");
+    expect(reloaded?.finishedAt).toBeGreaterThan(0);
+    expect(reloaded?.error).toBe("abandoned_by_restart");
+  });
+
+  it("does not reconcile running tasks that still have live controllers", async () => {
+    const reg = new BackgroundTaskRegistry(root);
+    const controller = new AbortController();
+    await reg.create({
+      taskId: "live",
+      parentTurnId: "turn_live",
+      sessionKey: "session_live",
+      persona: "coder",
+      prompt: "work",
+      abortController: controller,
+    });
+
+    const abandoned = await reg.reconcileAbandonedRunning("abandoned_by_restart");
+
+    expect(abandoned).toEqual([]);
+    expect(controller.signal.aborted).toBe(false);
+    const rec = await reg.get("live");
+    expect(rec?.status).toBe("running");
   });
 
   it("get()/stop() on unknown taskId return null/false", async () => {

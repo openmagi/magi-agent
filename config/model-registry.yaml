@@ -1,0 +1,314 @@
+models:
+  claude-opus-4-7:
+    provider: anthropic
+    aliases:
+      - anthropic/claude-opus-4-7
+    context_window: 200000
+    max_output: 32000
+    thinking:
+      type: adaptive
+    temperature: 1.0
+    capabilities:
+      - tool_use
+      - vision
+      - extended_thinking
+    edit_format: search_replace
+    pricing:
+      input_per_mtok: 15.0
+      output_per_mtok: 75.0
+
+  claude-opus-4-6:
+    provider: anthropic
+    aliases:
+      - anthropic/claude-opus-4-6
+    context_window: 200000
+    max_output: 32000
+    thinking:
+      type: adaptive
+    temperature: 1.0
+    capabilities:
+      - tool_use
+      - vision
+      - extended_thinking
+    edit_format: search_replace
+    pricing:
+      input_per_mtok: 15.0
+      output_per_mtok: 75.0
+
+  claude-sonnet-4-6:
+    provider: anthropic
+    aliases:
+      - anthropic/claude-sonnet-4-6
+    context_window: 200000
+    max_output: 16000
+    thinking:
+      type: adaptive
+    temperature: 1.0
+    capabilities:
+      - tool_use
+      - vision
+      - extended_thinking
+    edit_format: search_replace
+    pricing:
+      input_per_mtok: 3.0
+      output_per_mtok: 15.0
+
+  claude-haiku-4-5-20251001:
+    provider: anthropic
+    aliases:
+      - claude-haiku-4-5
+      - anthropic/claude-haiku-4-5
+    context_window: 200000
+    max_output: 8000
+    temperature: 1.0
+    capabilities:
+      - tool_use
+      - vision
+    edit_format: search_replace
+    pricing:
+      input_per_mtok: 1.0
+      output_per_mtok: 5.0
+
+  gpt-5-nano:
+    provider: openai
+    aliases:
+      - openai/gpt-5-nano
+    context_window: 400000
+    max_output: 8000
+    temperature: 0.7
+    capabilities:
+      - tool_use
+    edit_format: whole
+    pricing:
+      input_per_mtok: 0.05
+      output_per_mtok: 0.4
+    provider_params:
+      reasoning_effort: low
+
+  gpt-5-mini:
+    provider: openai
+    aliases:
+      - openai/gpt-5-mini
+    context_window: 400000
+    max_output: 16000
+    temperature: 0.7
+    capabilities:
+      - tool_use
+      - vision
+    edit_format: whole
+    pricing:
+      input_per_mtok: 0.25
+      output_per_mtok: 2.0
+    provider_params:
+      reasoning_effort: low
+
+  gpt-5.1:
+    provider: openai
+    aliases:
+      - openai/gpt-5.1
+    context_window: 400000
+    max_output: 16000
+    temperature: 0.7
+    capabilities:
+      - tool_use
+      - vision
+    edit_format: whole
+    pricing:
+      input_per_mtok: 1.25
+      output_per_mtok: 10.0
+    provider_params:
+      reasoning_effort: medium
+
+  gpt-5.4:
+    provider: openai
+    aliases:
+      - openai/gpt-5.4
+    context_window: 400000
+    max_output: 32000
+    temperature: 0.7
+    capabilities:
+      - tool_use
+      - vision
+    edit_format: whole
+    pricing:
+      input_per_mtok: 2.5
+      output_per_mtok: 15.0
+    provider_params:
+      reasoning_effort: medium
+
+  gpt-5.4-nano:
+    provider: openai
+    aliases:
+      - openai/gpt-5.4-nano
+    context_window: 128000
+    max_output: 4096
+    temperature: 0.7
+    capabilities:
+      - tool_use
+    edit_format: whole
+    pricing:
+      input_per_mtok: 0.2
+      output_per_mtok: 1.25
+    provider_params:
+      reasoning_effort: low
+
+  gpt-5.4-mini:
+    provider: openai
+    aliases:
+      - openai/gpt-5.4-mini
+    context_window: 128000
+    max_output: 8192
+    temperature: 0.7
+    capabilities:
+      - tool_use
+      - vision
+    edit_format: whole
+    pricing:
+      input_per_mtok: 0.75
+      output_per_mtok: 4.5
+    provider_params:
+      reasoning_effort: low
+
+  gpt-5.5:
+    provider: openai
+    aliases:
+      - openai/gpt-5.5
+      - openai-codex/gpt-5.5
+    context_window: 1000000
+    max_output: 128000
+    temperature: 0.7
+    capabilities:
+      - tool_use
+      - vision
+    edit_format: whole
+    pricing:
+      input_per_mtok: 5.0
+      output_per_mtok: 30.0
+    provider_params:
+      reasoning_effort: medium
+
+  gpt-5.5-pro:
+    provider: openai
+    aliases:
+      - openai/gpt-5.5-pro
+    context_window: 1050000
+    max_output: 128000
+    temperature: 0.7
+    capabilities:
+      - tool_use
+      - vision
+    edit_format: whole
+    pricing:
+      input_per_mtok: 30.0
+      output_per_mtok: 180.0
+    provider_params:
+      reasoning_effort: high
+
+  kimi-k2p6:
+    provider: fireworks
+    aliases:
+      - fireworks/kimi-k2p6
+    context_window: 256000
+    max_output: 32000
+    temperature: 0.7
+    capabilities:
+      - tool_use
+    edit_format: whole
+    pricing:
+      input_per_mtok: 0.95
+      output_per_mtok: 4.0
+      cached_input_per_mtok: 0.16
+
+  minimax-m2p7:
+    provider: fireworks
+    aliases:
+      - fireworks/minimax-m2p7
+    context_window: 256000
+    max_output: 16000
+    temperature: 0.7
+    capabilities:
+      - tool_use
+    edit_format: whole
+    pricing:
+      input_per_mtok: 0.3
+      output_per_mtok: 1.2
+      cached_input_per_mtok: 0.03
+
+  gemini-3.1-flash-lite-preview:
+    provider: google
+    aliases:
+      - google/gemini-3.1-flash-lite-preview
+    context_window: 1000000
+    max_output: 16000
+    temperature: 0.7
+    capabilities:
+      - tool_use
+      - vision
+      - pdf
+    edit_format: whole
+    pricing:
+      input_per_mtok: 0.25
+      output_per_mtok: 1.5
+
+  gemini-3.1-pro-preview:
+    provider: google
+    aliases:
+      - google/gemini-3.1-pro-preview
+    context_window: 1000000
+    max_output: 32000
+    temperature: 0.7
+    capabilities:
+      - tool_use
+      - vision
+      - pdf
+    edit_format: whole
+    pricing:
+      input_per_mtok: 2.0
+      output_per_mtok: 12.0
+    provider_params:
+      thinking_budget_tokens: 24576
+
+  local/gemma-fast:
+    provider: local
+    aliases:
+      - gemma-fast
+    context_window: 131072
+    max_output: 8192
+    temperature: 0.7
+    capabilities:
+      - tool_use
+      - local
+    edit_format: whole
+    pricing:
+      input_per_mtok: 0
+      output_per_mtok: 0
+
+  local/gemma-max:
+    provider: local
+    aliases:
+      - gemma-max
+    context_window: 131072
+    max_output: 8192
+    temperature: 0.7
+    capabilities:
+      - tool_use
+      - local
+    edit_format: whole
+    pricing:
+      input_per_mtok: 0
+      output_per_mtok: 0
+
+  local/qwen-uncensored:
+    provider: local
+    aliases:
+      - qwen-uncensored
+    context_window: 131072
+    max_output: 8192
+    temperature: 0.7
+    capabilities:
+      - tool_use
+      - local
+    edit_format: whole
+    pricing:
+      input_per_mtok: 0
+      output_per_mtok: 0

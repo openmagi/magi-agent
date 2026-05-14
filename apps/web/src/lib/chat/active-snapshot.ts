@@ -1,4 +1,12 @@
-import type { ChannelState, SubagentActivity, TaskBoardSnapshot, ToolActivity } from "./types";
+import type {
+  ChannelState,
+  CitationGateStatus,
+  InspectedSource,
+  MissionActivity,
+  SubagentActivity,
+  TaskBoardSnapshot,
+  ToolActivity,
+} from "./types";
 
 export interface ActiveSnapshot {
   turnId: string | null;
@@ -11,10 +19,15 @@ export interface ActiveSnapshot {
   updatedAt: number | null;
   turnPhase?: ChannelState["turnPhase"];
   heartbeatElapsedMs?: number | null;
+  currentGoal?: string | null;
   pendingInjectionCount?: number;
   activeTools?: ToolActivity[];
   subagents?: SubagentActivity[];
   taskBoard?: TaskBoardSnapshot | null;
+  missions?: MissionActivity[];
+  activeGoalMissionId?: string | null;
+  inspectedSources?: InspectedSource[];
+  citationGate?: CitationGateStatus | null;
 }
 
 export function isLiveActiveSnapshot(
@@ -28,6 +41,9 @@ export function isLiveActiveSnapshot(
     !!snapshot.turnPhase ||
     (snapshot.activeTools?.length ?? 0) > 0 ||
     (snapshot.subagents?.length ?? 0) > 0 ||
+    (snapshot.missions?.length ?? 0) > 0 ||
+    (snapshot.inspectedSources?.length ?? 0) > 0 ||
+    !!snapshot.citationGate ||
     !!snapshot.taskBoard?.tasks.length
   );
 }
@@ -41,6 +57,9 @@ function hasVisibleSnapshotProgress(snapshot: ActiveSnapshot): boolean {
     (snapshot.pendingInjectionCount ?? 0) > 0 ||
     (snapshot.activeTools?.length ?? 0) > 0 ||
     (snapshot.subagents?.length ?? 0) > 0 ||
+    (snapshot.missions?.length ?? 0) > 0 ||
+    (snapshot.inspectedSources?.length ?? 0) > 0 ||
+    !!snapshot.citationGate ||
     !!snapshot.taskBoard?.tasks.length
   );
 }
@@ -53,10 +72,16 @@ export function channelStateFromActiveSnapshot(
   const activeTools = snapshot.activeTools ?? existing?.activeTools ?? [];
   const subagents = snapshot.subagents ?? existing?.subagents ?? [];
   const taskBoard = snapshot.taskBoard ?? existing?.taskBoard ?? null;
+  const missions = snapshot.missions ?? existing?.missions ?? [];
+  const inspectedSources = snapshot.inspectedSources ?? existing?.inspectedSources ?? [];
+  const citationGate = snapshot.citationGate ?? existing?.citationGate ?? null;
   const hasProgress =
     hasVisibleSnapshotProgress(snapshot) ||
     activeTools.length > 0 ||
     subagents.length > 0 ||
+    missions.length > 0 ||
+    inspectedSources.length > 0 ||
+    !!citationGate ||
     !!taskBoard?.tasks.length;
   return {
     streaming: !detached,
@@ -70,10 +95,16 @@ export function channelStateFromActiveSnapshot(
     heartbeatElapsedMs: detached
       ? null
       : (snapshot.heartbeatElapsedMs ?? existing?.heartbeatElapsedMs ?? null),
+    currentGoal: snapshot.currentGoal ?? existing?.currentGoal ?? null,
     pendingInjectionCount:
       detached ? 0 : (snapshot.pendingInjectionCount ?? existing?.pendingInjectionCount ?? 0),
     activeTools,
     subagents,
     taskBoard,
+    missions,
+    activeGoalMissionId:
+      snapshot.activeGoalMissionId ?? existing?.activeGoalMissionId ?? null,
+    inspectedSources,
+    citationGate,
   };
 }

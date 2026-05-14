@@ -11,6 +11,7 @@ export type CliCommand =
       model?: string;
       planMode?: boolean;
     }
+  | { command: "hook"; args: string[] }
   | { command: "tool"; args: string[] };
 
 export class CliUsageError extends Error {
@@ -120,6 +121,8 @@ export function parseCliArgs(args: string[]): CliCommand {
       return parseServeArgs(rest);
     case "run":
       return parseRunArgs(rest);
+    case "hook":
+      return { command: "hook", args: rest };
     case "tool":
       return { command: "tool", args: rest };
     default:

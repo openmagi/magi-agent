@@ -25,6 +25,10 @@ export interface ChatMessage {
   activities?: ToolActivity[];
   /** Persisted TaskBoard snapshot captured during the streaming phase. */
   taskBoard?: TaskBoardSnapshot;
+  /** Persisted research evidence metadata, when the runtime attached a claim/source audit. */
+  researchEvidence?: ResearchArtifactDelta;
+  /** Token/cost usage reported at turn completion. */
+  usage?: TokenUsage;
   /** If present, this message was authored as a reply to another. */
   replyTo?: ReplyTo;
   /**
@@ -62,14 +66,85 @@ export interface TaskBoardSnapshot {
   receivedAt: number;
 }
 
+export interface TokenUsage {
+  inputTokens: number;
+  outputTokens: number;
+  costUsd: number;
+}
+
+export interface ResearchClaimRecord {
+  claimId: string;
+  text: string;
+  claimType: "fact" | "uncertainty" | "inference" | "recommendation" | "limitation";
+  supportStatus: "supported" | "partial" | "unsupported" | "uncertain";
+  sourceIds: string[];
+  confidence?: number;
+  reasoning?: {
+    premiseSourceIds: string[];
+    inference: string;
+    assumptions: string[];
+    status: "source_backed" | "partial" | "missing_source_support" | "uncertain";
+  };
+}
+
+export interface ResearchArtifactDelta {
+  claims?: ResearchClaimRecord[];
+  claimSourceLinks?: Array<{
+    claimId: string;
+    sourceId: string;
+    support: "supports" | "partially_supports" | "contradicts" | "context";
+  }>;
+  contradictions?: Array<{
+    contradictionId: string;
+    claimIds: string[];
+    sourceIds: string[];
+    resolution?: string;
+    status: "handled" | "unresolved" | "not_applicable";
+  }>;
+}
+
+export type PatchPreviewOperation = "create" | "update" | "delete";
+
+export interface PatchPreviewFile {
+  path: string;
+  operation: PatchPreviewOperation;
+  hunks: number;
+  addedLines: number;
+  removedLines: number;
+  oldSha256?: string;
+  newSha256?: string;
+}
+
+export interface PatchPreview {
+  dryRun: boolean;
+  changedFiles: string[];
+  createdFiles: string[];
+  deletedFiles: string[];
+  files: PatchPreviewFile[];
+}
+
+export interface DocumentDraftPreview {
+  id: string;
+  filename?: string;
+  format: "md" | "txt";
+  status: "streaming" | "done";
+  contentPreview: string;
+  contentLength: number;
+  truncated: boolean;
+  updatedAt: number;
+}
+
 export interface Channel {
   id: string;
   name: string;
   display_name: string | null;
   position: number;
   category: string | null;
+  memory_mode?: ChannelMemoryMode;
   created_at: string;
 }
+
+export type ChannelMemoryMode = "normal" | "read_only" | "incognito";
 
 export interface ToolActivity {
   /** Stable id — tool_call.id or synthesized for skill mentions */
@@ -83,6 +158,8 @@ export interface ToolActivity {
   inputPreview?: string;
   /** Tool output (success) or error message, truncated ~400 chars (from tool_end event) */
   outputPreview?: string;
+  /** Structured patch preview emitted by PatchApply after preflight and before writes. */
+  patchPreview?: PatchPreview;
   /** Tool execution duration in ms (populated on tool_end) */
   durationMs?: number;
 }
@@ -93,6 +170,57 @@ export interface BrowserFrame {
   imageBase64: string;
   contentType: "image/png" | "image/jpeg";
   capturedAt: number;
+}
+
+export type InspectedSourceKind =
+  | "web_search"
+  | "web_fetch"
+  | "browser"
+  | "kb"
+  | "file"
+  | "external_repo"
+  | "external_doc"
+  | "subagent_result";
+
+export interface InspectedSource {
+  sourceId: string;
+  kind: InspectedSourceKind;
+  uri: string;
+  inspectedAt: number;
+  turnId?: string;
+  toolName?: string;
+  toolUseId?: string;
+  title?: string;
+  contentHash?: string;
+  contentType?: string;
+  trustTier?: "primary" | "official" | "secondary" | "unknown";
+  snippets?: string[];
+}
+
+export interface CitationGateStatus {
+  ruleId: "claim-citation-gate";
+  verdict: "pending" | "ok" | "violation";
+  detail?: string;
+  checkedAt: number;
+}
+
+export interface RuntimeTrace {
+  turnId: string;
+  phase:
+    | "verifier_blocked"
+    | "retry_scheduled"
+    | "retry_aborted"
+    | "terminal_abort";
+  severity: "info" | "warning" | "error";
+  title: string;
+  detail?: string;
+  reasonCode?: string;
+  ruleId?: string;
+  attempt?: number;
+  maxAttempts?: number;
+  retryable?: boolean;
+  requiredAction?: string;
+  receivedAt: number;
 }
 
 export type SubagentActivityStatus = "running" | "waiting" | "done" | "error" | "cancelled";
@@ -106,6 +234,15 @@ export interface SubagentActivity {
   updatedAt: number;
 }
 
+export interface MissionActivity {
+  id: string;
+  title: string;
+  kind: string;
+  status: "queued" | "running" | "blocked" | "waiting" | "completed" | "failed" | "cancelled" | "paused";
+  detail?: string;
+  updatedAt: number;
+}
+
 export interface ChannelState {
   streaming: boolean;
   streamingText: string;
@@ -116,19 +253,35 @@ export interface ChannelState {
   /** Timestamp when thinking phase started (for elapsed timer) */
   thinkingStartedAt?: number | null;
   /** Latest structured runtime phase from core-agent. */
-  turnPhase?: "pending" | "planning" | "executing" | "verifying" | "committing" | "committed" | "aborted" | null;
+  turnPhase?: "pending" | "planning" | "executing" | "verifying" | "committing" | "compacting" | "committed" | "aborted" | null;
   /** Latest heartbeat elapsed time while the current iteration is still alive. */
   heartbeatElapsedMs?: number | null;
+  /** Best-effort user-facing goal for the current live turn. */
+  currentGoal?: string | null;
   /** Count of explicit mid-turn injections accepted by the runtime. */
   pendingInjectionCount?: number;
   /** Live tool activity feed during streaming */
   activeTools?: ToolActivity[];
   /** Latest safe browser preview frame from parent or subagent browser work. */
   browserFrame?: BrowserFrame | null;
+  /** Latest live markdown/text draft preview from an in-flight document write. */
+  documentDraft?: DocumentDraftPreview | null;
   /** Live spawned subagent roster during streaming. */
   subagents?: SubagentActivity[];
   /** Live TaskBoard snapshot during streaming (replaced on each emission). */
   taskBoard?: TaskBoardSnapshot | null;
+  /** Durable public Mission state for long-running work. */
+  missions?: MissionActivity[];
+  /** Active persistent goal mission id for this channel, when present. */
+  activeGoalMissionId?: string | null;
+  /** One-shot goal request accepted by the client while runtime mission creation is pending. */
+  pendingGoalMissionTitle?: string | null;
+  /** Live inspected source ledger records from the current research turn. */
+  inspectedSources?: InspectedSource[];
+  /** Latest claim-citation gate status for the current research turn. */
+  citationGate?: CitationGateStatus | null;
+  /** Public runtime verifier/retry/abort trace for the current turn. */
+  runtimeTraces?: RuntimeTrace[];
   /** True while chat-proxy is processing file attachments (KB ingest) before bot receives the message */
   fileProcessing?: boolean;
   /** True when SSE stream dropped mid-response and client is polling active-snapshot to recover */
@@ -184,7 +337,8 @@ export type ControlEvent =
       answer?: string;
     }
   | { type: "control_request_cancelled"; requestId: string; reason: string }
-  | { type: "control_request_timed_out"; requestId: string };
+  | { type: "control_request_timed_out"; requestId: string }
+  | ({ type: "runtime_trace" } & Omit<RuntimeTrace, "receivedAt"> & { receivedAt?: number });
 
 export interface ControlRequestResponse {
   decision: ControlRequestDecision;
@@ -232,6 +386,8 @@ export interface QueuedMessage {
   kbDocs?: KbDocReference[];
   /** Runtime model override captured when the message was queued. */
   modelOverride?: string;
+  /** Preserve persistent-goal intent when the message drains later. */
+  goalMode?: boolean;
   queuedAt: number;
 }
 

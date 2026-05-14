@@ -80,24 +80,19 @@ export async function readSkillBody(
  * `/superpowers:plan`). Dispatches the writing-plans skill body as the
  * synthetic assistant text.
  */
-export function makePlanCommand(skillsRoot: string): SlashCommand {
+export function makePlanCommand(_skillsRoot: string): SlashCommand {
   return {
     name: "/plan",
     description:
-      "Load the writing-plans superpower and kick off a numbered implementation plan.",
-    async handler(_args: string, ctx: SlashCommandContext): Promise<void> {
-      const body = await readSkillBody(skillsRoot, "writing-plans");
-      if (body) {
-        emitText(
-          ctx.sse,
-          `[Skill activated: superpowers:writing-plans]\n\n${body}`,
-        );
-      } else {
-        emitText(
-          ctx.sse,
-          "[Skill activated: superpowers:writing-plans]\n\nUse this skill to turn a spec into a numbered implementation plan.",
-        );
-      }
+      "Enter native plan mode before executing a complex task.",
+    async handler(args: string, ctx: SlashCommandContext): Promise<void> {
+      ctx.session.setPermissionMode("plan");
+      const task = args.trim();
+      const suffix = task ? `\n\nTask to plan: ${task}` : "";
+      emitText(
+        ctx.sse,
+        `Plan mode is on. I will read/context-gather only, draft a concrete plan, and submit it for approval before execution.${suffix}`,
+      );
     },
   };
 }

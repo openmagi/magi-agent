@@ -29,6 +29,7 @@
  *     child audit/provenance instead of parent transcript writes)
  */
 
+import path from "node:path";
 import type { Agent } from "../Agent.js";
 import type {
   AskUserQuestionInput,
@@ -45,15 +46,22 @@ import type {
 } from "../transport/LLMClient.js";
 import { StubSseWriter } from "../transport/SseWriter.js";
 import { decideRuntimePermission } from "../permissions/PermissionArbiter.js";
+import { isReadOnlyTool } from "../permissions/ToolPermissionAdapters.js";
 import type { ChildAgentLifecycle } from "./ChildAgentHarness.js";
 import type { Workspace } from "../storage/Workspace.js";
+import type { TranscriptEntry } from "../storage/Transcript.js";
 import { readOne } from "../turn/LLMStreamReader.js";
 import type { PermissionMode } from "../turn/ToolDispatcher.js";
-import { summariseToolOutput } from "../util/toolResult.js";
+import { buildToolInputPreview, summariseToolOutput } from "../util/toolResult.js";
 import { classifyFinalAnswerMeta } from "../hooks/builtin/turnMetaClassifier.js";
 import { buildChildSystemPrompt } from "./ChildSystemPrompt.js";
-import type { UserMessage } from "../util/types.js";
+import type { ChannelMemoryMode, UserMessage } from "../util/types.js";
 import type { ExecutionContractStore } from "../execution/ExecutionContract.js";
+import type { SourceLedgerStore } from "../research/SourceLedger.js";
+import {
+  classifyEvidence,
+  transcriptEvidenceForTurn,
+} from "../verification/VerificationEvidence.js";
 
 /**
  * Cap on child loop iterations — protects against pathological loops.
@@ -152,9 +160,16 @@ export interface SpawnChildResult {
   finalText: string;
   toolCallCount: number;
   errorMessage?: string;
+  evidence?: SpawnChildEvidence;
 }
 
-export type SpawnWorkspacePolicy = "trusted" | "isolated";
+export type SpawnWorkspacePolicy = "trusted" | "isolated" | "git_worktree";
+
+export interface SpawnChildEvidence {
+  toolNames: string[];
+  changedFiles: string[];
+  verificationCommands: string[];
+}
 
 export class SpawnChildPartialError extends Error {
   readonly partialResult: SpawnChildResult;
@@ -187,11 +202,13 @@ export interface SpawnChildOptions {
   spawnDir: string;
   /** Workspace instance rooted at `spawnDir`. */
   spawnWorkspace: Workspace;
-  /** Trusted by default; isolated preserves the legacy spawnDir sandbox. */
+  /** SpawnAgent resolves omitted policy before entering the child loop. */
   workspacePolicy?: SpawnWorkspacePolicy;
   taskId: string;
   /** Override the LLM model for this child (e.g. "gpt-5.4", "gemini-3.1-pro-preview"). */
   modelOverride?: string;
+  /** Parent channel memory mode. */
+  memoryMode?: ChannelMemoryMode;
   /** Called when child emits tool events — wired to the parent's SSE. */
   onAgentEvent?(event: unknown): void;
   /** Parent turn's askUser delegate, when the child can request consent. */
@@ -200,8 +217,18 @@ export interface SpawnChildOptions {
   permissionMode?: PermissionMode;
   /** Parent execution contract, propagated so child hooks/tools enforce the same runtime harness. */
   executionContract?: ExecutionContractStore;
+  /** Parent source ledger, propagated so child research tools emit parent-visible evidence. */
+  sourceLedger?: SourceLedgerStore;
+  /** Disable the extra LLM deferral classifier for answer-only/tournament children. */
+  deferralCheck?: boolean;
+  /** Workspace-relative files/directories the child may read when provided. */
+  allowedFiles?: string[];
+  /** Workspace-relative files/directories the child may write when provided. */
+  writeSet?: string[];
   /** Durable child lifecycle recorder wired to the parent's control ledger. */
   lifecycle?: ChildAgentLifecycle;
+  /** Parent turn's traceId for correlated logging. */
+  traceId?: string;
 }
 
 /**
@@ -271,11 +298,115 @@ function childWorkspacePolicy(opts: Pick<SpawnChildOptions, "workspacePolicy">):
 }
 
 function childWorkspaceRoot(opts: SpawnChildOptions): string {
-  return childWorkspacePolicy(opts) === "isolated" ? opts.spawnDir : opts.workspaceRoot;
+  const policy = childWorkspacePolicy(opts);
+  return policy === "isolated" || policy === "git_worktree"
+    ? opts.spawnWorkspace.root
+    : opts.workspaceRoot;
 }
 
 function childSpawnWorkspace(opts: SpawnChildOptions): Workspace | undefined {
-  return childWorkspacePolicy(opts) === "isolated" ? opts.spawnWorkspace : undefined;
+  const policy = childWorkspacePolicy(opts);
+  return policy === "isolated" || policy === "git_worktree"
+    ? opts.spawnWorkspace
+    : undefined;
+}
+
+function childTurnId(opts: SpawnChildOptions): string {
+  return `${opts.parentTurnId}::spawn::${opts.taskId}`;
+}
+
+function shouldRunChildDeferralCheck(opts: SpawnChildOptions): boolean {
+  return opts.deferralCheck !== false;
+}
+
+function normalizeChildRelPath(value: string): string | null {
+  const normalized = path.posix.normalize(value.replace(/\\/g, "/").replace(/^\/+/, ""));
+  if (!normalized || normalized === "." || normalized.startsWith("../") || normalized === "..") {
+    return null;
+  }
+  return normalized;
+}
+
+function inputPathForTool(toolName: string, input: unknown): string | null {
+  if (!input || typeof input !== "object") return null;
+  const obj = input as Record<string, unknown>;
+  const value =
+    toolName === "DocumentWrite" || toolName === "SpreadsheetWrite"
+      ? obj.filename
+      : obj.path;
+  return typeof value === "string" && value.trim().length > 0 ? value : null;
+}
+
+function pathInScope(target: string, allowed: readonly string[] | undefined): boolean {
+  if (!allowed) return true;
+  const normalizedTarget = normalizeChildRelPath(target);
+  if (!normalizedTarget) return false;
+  return allowed.some((entry) => {
+    const normalizedEntry = normalizeChildRelPath(entry);
+    if (!normalizedEntry) return false;
+    return (
+      normalizedTarget === normalizedEntry ||
+      normalizedTarget.startsWith(`${normalizedEntry.replace(/\/+$/, "")}/`)
+    );
+  });
+}
+
+function childScopeViolation(
+  toolName: string,
+  input: unknown,
+  opts: SpawnChildOptions,
+): string | null {
+  const target = inputPathForTool(toolName, input);
+  if (!target) return null;
+  if (toolName === "FileRead" && !pathInScope(target, opts.allowedFiles)) {
+    return `child read path outside allowed_files: ${target}`;
+  }
+  if (
+    /^(FileWrite|FileEdit|DocumentWrite|SpreadsheetWrite)$/.test(toolName) &&
+    !pathInScope(target, opts.writeSet)
+  ) {
+    return `child write path outside write_set: ${target}`;
+  }
+  return null;
+}
+
+function changedFileFromTool(toolName: string, input: unknown): string | null {
+  if (!/^(FileWrite|FileEdit|DocumentWrite|SpreadsheetWrite)$/.test(toolName)) {
+    return null;
+  }
+  const raw = inputPathForTool(toolName, input);
+  return raw ? normalizeChildRelPath(raw) : null;
+}
+
+function isSuccessfulResultEntry(entry: Extract<TranscriptEntry, { kind: "tool_result" }>): boolean {
+  return entry.isError !== true && (entry.status === "ok" || entry.status === "success");
+}
+
+function buildChildEvidence(
+  transcript: ReadonlyArray<TranscriptEntry>,
+  turnId: string,
+): SpawnChildEvidence {
+  const evidence = transcriptEvidenceForTurn(transcript, turnId);
+  const classified = classifyEvidence(evidence);
+  const results = new Map<string, Extract<TranscriptEntry, { kind: "tool_result" }>>();
+  for (const entry of transcript) {
+    if (entry.kind === "tool_result" && entry.turnId === turnId) {
+      results.set(entry.toolUseId, entry);
+    }
+  }
+  const changedFiles = new Set<string>();
+  for (const entry of transcript) {
+    if (entry.kind !== "tool_call" || entry.turnId !== turnId) continue;
+    const result = results.get(entry.toolUseId);
+    if (!result || !isSuccessfulResultEntry(result)) continue;
+    const changed = changedFileFromTool(entry.name, entry.input);
+    if (changed) changedFiles.add(changed);
+  }
+  return {
+    toolNames: classified.tools,
+    changedFiles: [...changedFiles].sort(),
+    verificationCommands: classified.verificationCommands,
+  };
 }
 
 type ChildHookRegistry = Pick<Agent["hooks"], "list" | "runPre" | "runPost">;
@@ -298,15 +429,16 @@ function makeChildHookContext(
   opts: SpawnChildOptions,
   abortSignal: AbortSignal,
   agentModel = agent.config.model,
+  transcript: ReadonlyArray<TranscriptEntry> = [],
 ): HookContext {
   return {
     botId: opts.botId,
     userId: agent.config.userId,
     sessionKey: opts.parentSessionKey,
-    turnId: `${opts.parentTurnId}::spawn::${opts.taskId}`,
+    turnId: childTurnId(opts),
     contextId: childSessionKey(opts.parentSessionKey, opts.persona, 0),
     llm: agent.llm,
-    transcript: [],
+    transcript,
     emit: (event) => opts.onAgentEvent?.(event),
     log: () => {
       /* child hook logs stay local; rule_check events still emit */
@@ -314,7 +446,9 @@ function makeChildHookContext(
     agentModel,
     abortSignal,
     deadlineMs: 5_000,
+    memoryMode: opts.memoryMode,
     executionContract: opts.executionContract,
+    sourceLedger: opts.sourceLedger,
     ...(opts.askUser ? { askUser: opts.askUser } : {}),
   };
 }
@@ -366,13 +500,13 @@ export async function runChildAgentLoop(
   const allTools = agent.tools.list();
   const childTools = selectChildTools(allTools, opts.allowedTools, opts.allowedSkills);
   const toolsByName = new Map<string, Tool>(childTools.map((t) => [t.name, t]));
-  const toolDefs: LLMToolDef[] = childTools.map((t) => ({
+  let toolDefs: LLMToolDef[] = childTools.map((t) => ({
     name: t.name,
     description: t.description,
     input_schema: t.inputSchema,
   }));
 
-  const system = await buildChildSystemPrompt({
+  let system = await buildChildSystemPrompt({
     persona: opts.persona,
     prompt: opts.prompt,
     parentTurnId: opts.parentTurnId,
@@ -380,9 +514,10 @@ export async function runChildAgentLoop(
     parentWorkspaceRoot: opts.workspaceRoot,
     spawnDir: opts.spawnDir,
     workspacePolicy: childWorkspacePolicy(opts),
+    memoryMode: opts.memoryMode,
   });
 
-  const messages: LLMMessage[] = [{ role: "user", content: opts.prompt }];
+  let messages: LLMMessage[] = [{ role: "user", content: opts.prompt }];
   const resolvedModel =
     typeof (agent as { resolveRuntimeModel?: () => Promise<string> }).resolveRuntimeModel === "function"
       ? await agent.resolveRuntimeModel()
@@ -393,6 +528,8 @@ export async function runChildAgentLoop(
   let toolCallCount = 0;
   let deferralRetryUsed = false;
   const deadline = Date.now() + opts.timeoutMs;
+  const childTranscript: TranscriptEntry[] = [];
+  const effectiveTurnId = childTurnId(opts);
 
   // Merge timeout + parent abort into one signal for nested tools.
   const controller = new AbortController();
@@ -418,6 +555,7 @@ export async function runChildAgentLoop(
   // (spawn_started / spawn_result / tool_start / tool_end emitted by
   // the tools themselves via ctx.emitAgentEvent).
   const sse = new StubSseWriter();
+  const hooks = getChildHookRegistry(agent);
 
   try {
     for (let iter = 0; iter < CHILD_MAX_ITERATIONS; iter++) {
@@ -429,6 +567,7 @@ export async function runChildAgentLoop(
             finalText: collectText(assistantBlocks),
             toolCallCount,
             errorMessage: "child timeout",
+            evidence: buildChildEvidence(childTranscript, effectiveTurnId),
           };
         }
         await opts.lifecycle?.cancelled("parent aborted");
@@ -436,6 +575,7 @@ export async function runChildAgentLoop(
           status: "aborted",
           finalText: collectText(assistantBlocks),
           toolCallCount,
+          evidence: buildChildEvidence(childTranscript, effectiveTurnId),
         };
       }
       if (Date.now() > deadline) {
@@ -445,9 +585,45 @@ export async function runChildAgentLoop(
           finalText: collectText(assistantBlocks),
           toolCallCount,
           errorMessage: "child timeout",
+          evidence: buildChildEvidence(childTranscript, effectiveTurnId),
         };
       }
-      await opts.lifecycle?.progress(`iteration ${iter + 1}`);
+      await opts.lifecycle?.progress(
+        iter === 0
+          ? "Thinking through delegated task"
+          : `Continuing delegated task pass ${iter + 1}`,
+      );
+
+      if (hooks) {
+        const preLLM = await hooks.runPre(
+          "beforeLLMCall",
+          { messages, tools: toolDefs, system, iteration: iter },
+          makeChildHookContext(agent, opts, controller.signal, effectiveModel, childTranscript),
+        );
+        if (preLLM.action === "block") {
+          const reason = `beforeLLMCall blocked: ${preLLM.reason}`;
+          await opts.lifecycle?.failed(reason);
+          return {
+            status: "error",
+            finalText: collectText(assistantBlocks),
+            toolCallCount,
+            errorMessage: reason,
+            evidence: buildChildEvidence(childTranscript, effectiveTurnId),
+          };
+        }
+        if (preLLM.action === "skip") {
+          const reason = "beforeLLMCall skipped child LLM call";
+          await opts.lifecycle?.failed(reason);
+          return {
+            status: "error",
+            finalText: collectText(assistantBlocks),
+            toolCallCount,
+            errorMessage: reason,
+            evidence: buildChildEvidence(childTranscript, effectiveTurnId),
+          };
+        }
+        ({ messages, tools: toolDefs, system } = preLLM.args);
+      }
 
       const { blocks, stopReason } = await readOne(
         {
@@ -464,6 +640,13 @@ export async function runChildAgentLoop(
         toolDefs,
       );
       assistantBlocks.push(...blocks);
+      if (hooks) {
+        void hooks.runPost(
+          "afterLLMCall",
+          { messages, tools: toolDefs, system, iteration: iter, stopReason, assistantBlocks: blocks },
+          makeChildHookContext(agent, opts, controller.signal, effectiveModel, childTranscript),
+        );
+      }
 
       if (stopReason !== "tool_use") {
         // LLM-based DeferralBlocker for children: if the child is
@@ -471,6 +654,7 @@ export async function runChildAgentLoop(
         // actually execute. Fail-open on classifier errors/timeouts.
         const finalText = collectText(assistantBlocks);
         if (
+          shouldRunChildDeferralCheck(opts) &&
           !deferralRetryUsed &&
           (await classifyChildDeferralNarrative({
             llm: agent.llm,
@@ -499,6 +683,7 @@ export async function runChildAgentLoop(
           status: "ok",
           finalText,
           toolCallCount,
+          evidence: buildChildEvidence(childTranscript, effectiveTurnId),
         } satisfies SpawnChildResult;
         await opts.lifecycle?.completed({
           status: final.status,
@@ -515,6 +700,7 @@ export async function runChildAgentLoop(
       if (toolUses.length === 0) {
         const finalText = collectText(assistantBlocks);
         if (
+          shouldRunChildDeferralCheck(opts) &&
           !deferralRetryUsed &&
           (await classifyChildDeferralNarrative({
             llm: agent.llm,
@@ -543,6 +729,7 @@ export async function runChildAgentLoop(
           status: "ok",
           finalText,
           toolCallCount,
+          evidence: buildChildEvidence(childTranscript, effectiveTurnId),
         } satisfies SpawnChildResult;
         await opts.lifecycle?.completed({
           status: final.status,
@@ -560,6 +747,7 @@ export async function runChildAgentLoop(
         opts,
         abortSignal: controller.signal,
         agentModel: effectiveModel,
+        childTranscript,
       });
       messages.push({ role: "assistant", content: blocks });
       messages.push({
@@ -579,6 +767,7 @@ export async function runChildAgentLoop(
       finalText: collectText(assistantBlocks),
       toolCallCount,
       errorMessage: `child exceeded ${CHILD_MAX_ITERATIONS} iterations`,
+      evidence: buildChildEvidence(childTranscript, effectiveTurnId),
     };
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
@@ -587,6 +776,7 @@ export async function runChildAgentLoop(
       finalText: collectText(assistantBlocks),
       toolCallCount,
       errorMessage: msg,
+      evidence: buildChildEvidence(childTranscript, effectiveTurnId),
     };
     await opts.lifecycle?.failed(msg);
     throw new SpawnChildPartialError(msg, partialResult);
@@ -605,161 +795,364 @@ interface ChildToolRunInput {
   opts: SpawnChildOptions;
   abortSignal: AbortSignal;
   agentModel: string;
+  childTranscript: TranscriptEntry[];
 }
+
+interface ChildToolResult {
+  toolUseId: string;
+  content: string;
+  isError: boolean;
+}
+
+type ChildToolUse = Extract<LLMContentBlock, { type: "tool_use" }>;
 
 async function runChildTools(
   args: ChildToolRunInput,
-): Promise<Array<{ toolUseId: string; content: string; isError: boolean }>> {
-  const { toolUses, toolsByName, agent, opts, abortSignal, agentModel } = args;
-  const hooks = getChildHookRegistry(agent);
+): Promise<ChildToolResult[]> {
+  const { toolUses, toolsByName } = args;
+  const results: ChildToolResult[] = [];
+  let readOnlyBatch: Array<Extract<LLMContentBlock, { type: "tool_use" }>> = [];
 
-  const runs = toolUses.map(async (tu) => {
-    await opts.lifecycle?.toolRequest({ requestId: tu.id, toolName: tu.name });
+  const flushReadOnlyBatch = async (): Promise<void> => {
+    if (readOnlyBatch.length === 0) return;
+    const batch = readOnlyBatch;
+    readOnlyBatch = [];
+    results.push(...(await Promise.all(batch.map((tu) => runOneChildTool(args, tu)))));
+  };
+
+  for (const tu of toolUses) {
     const tool = toolsByName.get(tu.name);
-    if (!tool) {
-      return {
+    if (tool && isChildConcurrencySafe(tu.name, tool)) {
+      readOnlyBatch.push(tu);
+      continue;
+    }
+    await flushReadOnlyBatch();
+    results.push(await runOneChildTool(args, tu));
+  }
+  await flushReadOnlyBatch();
+  return results;
+}
+
+function isChildConcurrencySafe(toolName: string, tool: Tool): boolean {
+  if (tool.isConcurrencySafe === true) return true;
+  if (tool.isConcurrencySafe === false) return false;
+  if (tool.mutatesWorkspace === true) return false;
+  return isReadOnlyTool(toolName, tool);
+}
+
+function recordChildToolTranscript(input: {
+  transcript: TranscriptEntry[];
+  turnId: string;
+  toolUseId: string;
+  toolName: string;
+  input: unknown;
+  result: ToolResult;
+  output: string;
+}): void {
+  const ts = Date.now();
+  input.transcript.push({
+    kind: "tool_call",
+    ts,
+    turnId: input.turnId,
+    toolUseId: input.toolUseId,
+    name: input.toolName,
+    input: input.input,
+  });
+  input.transcript.push({
+    kind: "tool_result",
+    ts: ts + 1,
+    turnId: input.turnId,
+    toolUseId: input.toolUseId,
+    status: input.result.status,
+    output: input.output,
+    isError: input.result.status !== "ok",
+    ...(input.result.metadata ? { metadata: input.result.metadata } : {}),
+  });
+}
+
+function deniedToolResult(message: string): ToolResult {
+  return {
+    status: "permission_denied",
+    errorCode: "permission_denied",
+    errorMessage: message,
+    durationMs: 0,
+  };
+}
+
+function childToolEventId(opts: SpawnChildOptions, toolUseId: string): string {
+  return `child:${opts.taskId}:${toolUseId}`;
+}
+
+function previewChildToolOutput(result: ToolResult, fallback: string): string | undefined {
+  const previewSource = result.output ?? result.errorMessage ?? fallback;
+  if (previewSource === undefined) return undefined;
+  try {
+    const preview =
+      typeof previewSource === "string" ? previewSource : JSON.stringify(previewSource);
+    return preview.length > 400 ? `${preview.slice(0, 400)}...` : preview;
+  } catch {
+    return fallback.length > 400 ? `${fallback.slice(0, 400)}...` : fallback;
+  }
+}
+
+function emitChildToolStart(
+  opts: SpawnChildOptions,
+  tu: ChildToolUse,
+  eventId: string,
+): void {
+  opts.onAgentEvent?.({
+    type: "tool_start",
+    id: eventId,
+    name: tu.name,
+    input_preview: buildToolInputPreview(tu.name, tu.input),
+  });
+}
+
+function emitChildToolEnd(input: {
+  opts: SpawnChildOptions;
+  eventId: string;
+  startedAt: number;
+  result: ToolResult;
+  content: string;
+}): void {
+  input.opts.onAgentEvent?.({
+    type: "tool_end",
+    id: input.eventId,
+    status: input.result.status,
+    durationMs: input.result.durationMs ?? Date.now() - input.startedAt,
+    output_preview: previewChildToolOutput(input.result, input.content),
+  });
+}
+
+async function runOneChildTool(
+  args: ChildToolRunInput,
+  tu: ChildToolUse,
+): Promise<ChildToolResult> {
+  const { toolsByName, agent, opts, abortSignal, agentModel, childTranscript } = args;
+  const hooks = getChildHookRegistry(agent);
+  const started = Date.now();
+  const eventId = childToolEventId(opts, tu.id);
+
+  await opts.lifecycle?.toolRequest({ requestId: tu.id, toolName: tu.name });
+  emitChildToolStart(opts, tu, eventId);
+  const finish = (result: ToolResult, content: string): ChildToolResult => {
+    emitChildToolEnd({ opts, eventId, startedAt: started, result, content });
+    return { toolUseId: tu.id, content, isError: result.status !== "ok" };
+  };
+
+  const tool = toolsByName.get(tu.name);
+  if (!tool) {
+    const content = `error:unknown_tool ${tu.name} not in child toolset`;
+    return finish({
+      status: "error",
+      errorCode: "unknown_tool",
+      errorMessage: content,
+      durationMs: Date.now() - started,
+    }, content);
+  }
+
+  let effectiveInput = tu.input;
+  const bypass = opts.permissionMode === "bypass";
+  const hookCtx = makeChildHookContext(
+    agent,
+    opts,
+    abortSignal,
+    agentModel,
+    childTranscript,
+  );
+  const turnId = childTurnId(opts);
+  if (!bypass && hooks) {
+    const preTool = await hooks.runPre(
+      "beforeToolUse",
+      { toolName: tu.name, toolUseId: tu.id, input: tu.input },
+      hookCtx,
+    );
+    if (preTool.action === "block") {
+      const result = deniedToolResult(`blocked by hook: ${preTool.reason}`);
+      const content = summariseToolOutput(result);
+      recordChildToolTranscript({
+        transcript: childTranscript,
+        turnId,
         toolUseId: tu.id,
-        content: `error:unknown_tool ${tu.name} not in child toolset`,
-        isError: true,
-      };
+        toolName: tu.name,
+        input: effectiveInput,
+        result,
+        output: content,
+      });
+      return finish(result, content);
     }
-
-    let effectiveInput = tu.input;
-    const bypass = opts.permissionMode === "bypass";
-    const hookCtx = makeChildHookContext(agent, opts, abortSignal, agentModel);
-    if (!bypass && hooks) {
-      const preTool = await hooks.runPre(
-        "beforeToolUse",
-        { toolName: tu.name, toolUseId: tu.id, input: tu.input },
-        hookCtx,
-      );
-      if (preTool.action === "block") {
-        return {
-          toolUseId: tu.id,
-          content: `blocked by hook: ${preTool.reason}`,
-          isError: true,
-        };
-      }
-      if (preTool.action === "continue") {
-        effectiveInput = preTool.args.input;
-      }
+    if (preTool.action === "continue") {
+      effectiveInput = preTool.args.input;
     }
+  }
 
-    if (tu.name === "Bash" && childWorkspacePolicy(opts) === "isolated") {
-      const boundary = classifyChildBashBoundary(effectiveInput);
-      if (!boundary.safe) {
-        await opts.lifecycle?.permissionDecision({
-          decision: "deny",
-          reason: boundary.reason,
-        });
-        return {
-          toolUseId: tu.id,
-          content: `permission_denied: ${boundary.reason ?? "child Bash boundary denied"}`,
-          isError: true,
-        };
-      }
-    }
-
-    const permission = await decideRuntimePermission({
-      mode: opts.permissionMode ?? "default",
-      source: "child-agent",
+  const scopeViolation = childScopeViolation(tu.name, effectiveInput, opts);
+  if (scopeViolation) {
+    await opts.lifecycle?.permissionDecision({
+      decision: "deny",
+      reason: scopeViolation,
+    });
+    const result = deniedToolResult(scopeViolation);
+    const content = summariseToolOutput(result);
+    recordChildToolTranscript({
+      transcript: childTranscript,
+      turnId,
+      toolUseId: tu.id,
       toolName: tu.name,
       input: effectiveInput,
-      tool,
-      workspaceRoot: childWorkspaceRoot(opts),
+      result,
+      output: content,
     });
-    await opts.lifecycle?.permissionDecision({
-      decision: permission.decision,
-      reason: permission.reason,
-    });
-    if (permission.decision === "ask") {
-      const denied = await askDangerousChildToolConsent(opts, tu.name);
-      if (denied !== null) {
-        await opts.lifecycle?.permissionDecision({
-          decision: "deny",
-          reason: permission.reason,
-        });
-        return {
-          toolUseId: tu.id,
-          content: `permission_denied: ${permission.reason}`,
-          isError: true,
-        };
-      }
+    return finish(result, content);
+  }
+
+  if (tu.name === "Bash" && childWorkspacePolicy(opts) !== "trusted") {
+    const boundary = classifyChildBashBoundary(effectiveInput);
+    if (!boundary.safe) {
       await opts.lifecycle?.permissionDecision({
-        decision: "allow",
+        decision: "deny",
+        reason: boundary.reason,
+      });
+      const result = deniedToolResult(boundary.reason ?? "child Bash boundary denied");
+      const content = summariseToolOutput(result);
+      recordChildToolTranscript({
+        transcript: childTranscript,
+        turnId,
+        toolUseId: tu.id,
+        toolName: tu.name,
+        input: effectiveInput,
+        result,
+        output: content,
+      });
+      return finish(result, content);
+    }
+  }
+
+  const permission = await decideRuntimePermission({
+    mode: opts.permissionMode ?? "default",
+    source: "child-agent",
+    toolName: tu.name,
+    input: effectiveInput,
+    tool,
+    workspaceRoot: childWorkspaceRoot(opts),
+  });
+  await opts.lifecycle?.permissionDecision({
+    decision: permission.decision,
+    reason: permission.reason,
+  });
+  if (permission.decision === "ask") {
+    const denied = await askDangerousChildToolConsent(opts, tu.name);
+    if (denied !== null) {
+      await opts.lifecycle?.permissionDecision({
+        decision: "deny",
         reason: permission.reason,
       });
-      effectiveInput = permission.proposedInput ?? effectiveInput;
-    } else if (permission.decision !== "allow") {
-      return {
+      const result = deniedToolResult(permission.reason);
+      const content = summariseToolOutput(result);
+      recordChildToolTranscript({
+        transcript: childTranscript,
+        turnId,
         toolUseId: tu.id,
-        content: `permission_denied: ${permission.reason}`,
-        isError: true,
-      };
+        toolName: tu.name,
+        input: effectiveInput,
+        result,
+        output: content,
+      });
+      return finish(result, content);
     }
-    if (permission.decision === "allow") {
-      effectiveInput = permission.updatedInput ?? effectiveInput;
-    }
-
-    const childCtx: ToolContext = {
-      botId: opts.botId,
-      sessionKey: childSessionKey(opts.parentSessionKey, opts.persona, 0),
-      turnId: `${opts.parentTurnId}::spawn::${opts.taskId}`,
-      workspaceRoot: childWorkspaceRoot(opts),
-      spawnWorkspace: childSpawnWorkspace(opts),
-      abortSignal,
-      currentUserMessage: childUserMessage(opts),
-      emitProgress: () => {
-        /* child progress folded into spawn_result — no per-step SSE */
-      },
-      emitAgentEvent: opts.onAgentEvent,
-      askUser:
-        opts.askUser ??
-        (async () => {
-          throw new Error("askUser not available in a spawned child");
-        }),
-      staging: {
-        stageFileWrite: () => {
-          /* children don't stage atomic writes */
-        },
-        stageTranscriptAppend: () => {
-          /* no-op */
-        },
-        stageAuditEvent: () => {
-          /* no-op */
-        },
-      },
-      spawnDepth: opts.parentSpawnDepth + 1,
-      executionContract: opts.executionContract,
-    };
-
-    const started = Date.now();
-    let result: ToolResult;
-    try {
-      result = await (tool as Tool<unknown, unknown>).execute(effectiveInput, childCtx);
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      result = {
-        status: "error",
-        errorCode: "tool_threw",
-        errorMessage: msg,
-        durationMs: Date.now() - started,
-      };
-    }
-
-    if (!bypass && hooks) {
-      void hooks.runPost(
-        "afterToolUse",
-        { toolName: tu.name, toolUseId: tu.id, input: effectiveInput, result },
-        hookCtx,
-      );
-    }
-
+    await opts.lifecycle?.permissionDecision({
+      decision: "allow",
+      reason: permission.reason,
+    });
+    effectiveInput = permission.proposedInput ?? effectiveInput;
+  } else if (permission.decision !== "allow") {
+    const result = deniedToolResult(permission.reason);
     const content = summariseToolOutput(result);
-    return { toolUseId: tu.id, content, isError: result.status !== "ok" };
-  });
+    recordChildToolTranscript({
+      transcript: childTranscript,
+      turnId,
+      toolUseId: tu.id,
+      toolName: tu.name,
+      input: effectiveInput,
+      result,
+      output: content,
+    });
+    return finish(result, content);
+  }
+  if (permission.decision === "allow") {
+    effectiveInput = permission.updatedInput ?? effectiveInput;
+  }
 
-  return Promise.all(runs);
+  const childCtx: ToolContext = {
+    botId: opts.botId,
+    sessionKey: childSessionKey(opts.parentSessionKey, opts.persona, 0),
+    turnId,
+    workspaceRoot: childWorkspaceRoot(opts),
+    memoryMode: opts.memoryMode,
+    spawnWorkspace: childSpawnWorkspace(opts),
+    abortSignal,
+    currentUserMessage: childUserMessage(opts),
+    emitProgress: (progress) => {
+      opts.onAgentEvent?.({
+        type: "tool_progress",
+        id: eventId,
+        label: progress.label,
+      });
+    },
+    emitAgentEvent: opts.onAgentEvent,
+    askUser:
+      opts.askUser ??
+      (async () => {
+        throw new Error("askUser not available in a spawned child");
+      }),
+    staging: {
+      stageFileWrite: () => {
+        /* children don't stage atomic writes */
+      },
+      stageTranscriptAppend: () => {
+        /* no-op */
+      },
+      stageAuditEvent: () => {
+        /* no-op */
+      },
+    },
+    spawnDepth: opts.parentSpawnDepth + 1,
+    executionContract: opts.executionContract,
+    sourceLedger: opts.sourceLedger,
+  };
+
+  let result: ToolResult;
+  try {
+    result = await (tool as Tool<unknown, unknown>).execute(effectiveInput, childCtx);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    result = {
+      status: "error",
+      errorCode: "tool_threw",
+      errorMessage: msg,
+      durationMs: Date.now() - started,
+    };
+  }
+
+  if (!bypass && hooks) {
+    void hooks.runPost(
+      "afterToolUse",
+      { toolName: tu.name, toolUseId: tu.id, input: effectiveInput, result },
+      hookCtx,
+    );
+  }
+
+  const content = summariseToolOutput(result);
+  recordChildToolTranscript({
+    transcript: childTranscript,
+    turnId,
+    toolUseId: tu.id,
+    toolName: tu.name,
+    input: effectiveInput,
+    result,
+    output: content,
+  });
+  return finish(result, content);
 }
 
 function commandOf(input: unknown): string {

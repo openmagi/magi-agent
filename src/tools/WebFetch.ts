@@ -1,170 +1,284 @@
-/**
- * WebFetch — fetch a URL and extract readable text content.
- *
- * Zero external dependencies. Uses Node.js built-in fetch() and strips
- * HTML tags with regex. When Playwright is installed, falls back to
- * browser rendering for JS-heavy pages.
- */
+import { createHash } from "node:crypto";
+import type { Tool, ToolContext, ToolResult } from "../Tool.js";
+import {
+  defaultResolvePublicFetchHost,
+  validatePublicFetchUrl,
+  type PublicFetchHostAddress,
+  type PublicFetchHostResolver,
+} from "../util/publicFetchUrl.js";
 
-import type { Tool, ToolResult } from "../Tool.js";
-import { errorResult } from "../util/toolResult.js";
+export type WebFetchFormat = "markdown" | "text" | "html";
 
 export interface WebFetchInput {
-  url: string;
-  raw?: boolean;
+  url?: string;
+  format?: WebFetchFormat;
   timeoutMs?: number;
+}
+
+export interface WebFetchRunInput {
+  url: string;
+  format: WebFetchFormat;
+}
+
+export interface WebFetchRunResult {
+  statusCode: number;
+  url: string;
+  finalUrl?: string;
+  contentType?: string;
+  body: string;
+  truncated: boolean;
 }
 
 export interface WebFetchOutput {
   url: string;
-  status: number;
-  title: string;
+  finalUrl: string;
+  statusCode: number;
+  contentType?: string;
+  format: WebFetchFormat;
+  title?: string;
   content: string;
-  contentLength: number;
   truncated: boolean;
-  usedBrowser: boolean;
+  sourceId?: string;
+}
+
+export type WebFetchRunner = (
+  input: WebFetchRunInput,
+  ctx: ToolContext,
+  timeoutMs: number,
+) => Promise<WebFetchRunResult>;
+
+export type WebFetchHostAddress = PublicFetchHostAddress;
+
+export type WebFetchHostResolver = PublicFetchHostResolver;
+
+interface WebFetchToolOptions {
+  runner?: WebFetchRunner;
+  resolveHost?: WebFetchHostResolver;
 }
 
 const INPUT_SCHEMA = {
   type: "object",
   properties: {
-    url: { type: "string", description: "URL to fetch." },
-    raw: { type: "boolean", description: "Return raw HTML instead of extracted text." },
-    timeoutMs: { type: "integer", minimum: 1000, description: "Timeout in ms (default 30000)." },
+    url: {
+      type: "string",
+      description: "Public HTTP(S) URL to fetch for source-sensitive research.",
+    },
+    format: {
+      type: "string",
+      enum: ["markdown", "text", "html"],
+      description: "Returned content format. Defaults to markdown.",
+    },
+    timeoutMs: {
+      type: "integer",
+      minimum: 100,
+      maximum: 120000,
+      description: "Timeout in ms. Defaults to 30000.",
+    },
   },
   required: ["url"],
+  additionalProperties: false,
 } as const;
 
-const MAX_CONTENT_BYTES = 100 * 1024;
 const DEFAULT_TIMEOUT_MS = 30_000;
+const MAX_TIMEOUT_MS = 120_000;
+const MAX_BODY_BYTES = 1024 * 1024;
+
+function stringValue(value: unknown): string | null {
+  return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
+}
+
+function normalizeTimeout(timeoutMs: unknown): number {
+  if (typeof timeoutMs !== "number" || !Number.isFinite(timeoutMs)) return DEFAULT_TIMEOUT_MS;
+  return Math.max(100, Math.min(MAX_TIMEOUT_MS, Math.trunc(timeoutMs)));
+}
+
+export function normalizeWebFetchFormat(format: unknown): WebFetchFormat {
+  return format === "text" || format === "html" || format === "markdown" ? format : "markdown";
+}
+
+export function validateWebFetchInput(input: WebFetchInput): string | null {
+  if (!input || typeof input !== "object" || Array.isArray(input)) {
+    return "`input` must be an object";
+  }
+  if (!stringValue(input.url)) return "`url` is required for web fetch";
+  if (input.format !== undefined && !["markdown", "text", "html"].includes(String(input.format))) {
+    return "`format` must be markdown, text, or html";
+  }
+  return null;
+}
+
+function contentHash(content: string): string {
+  return `sha256:${createHash("sha256").update(content).digest("hex")}`;
+}
+
+function decodeHtmlEntities(value: string): string {
+  return value
+    .replace(/&nbsp;/gi, " ")
+    .replace(/&amp;/gi, "&")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">")
+    .replace(/&quot;/gi, "\"")
+    .replace(/&#39;/g, "'");
+}
+
+function extractTitle(html: string): string | undefined {
+  const title = /<title[^>]*>([\s\S]*?)<\/title>/i.exec(html)?.[1];
+  const normalized = title ? decodeHtmlEntities(stripHtml(title)).trim() : "";
+  return normalized.length > 0 ? normalized : undefined;
+}
 
 function stripHtml(html: string): string {
-  let text = html;
-  text = text.replace(/<script[^>]*>[\s\S]*?<\/script>/gi, "");
-  text = text.replace(/<style[^>]*>[\s\S]*?<\/style>/gi, "");
-  text = text.replace(/<nav[^>]*>[\s\S]*?<\/nav>/gi, "");
-  text = text.replace(/<footer[^>]*>[\s\S]*?<\/footer>/gi, "");
-  text = text.replace(/<header[^>]*>[\s\S]*?<\/header>/gi, "");
-  text = text.replace(/<[^>]+>/g, " ");
-  text = text.replace(/&nbsp;/g, " ");
-  text = text.replace(/&amp;/g, "&");
-  text = text.replace(/&lt;/g, "<");
-  text = text.replace(/&gt;/g, ">");
-  text = text.replace(/&quot;/g, '"');
-  text = text.replace(/&#39;/g, "'");
-  text = text.replace(/\s+/g, " ");
-  return text.trim();
+  return decodeHtmlEntities(
+    html
+      .replace(/<script[\s\S]*?<\/script>/gi, " ")
+      .replace(/<style[\s\S]*?<\/style>/gi, " ")
+      .replace(/<noscript[\s\S]*?<\/noscript>/gi, " ")
+      .replace(/<br\s*\/?>/gi, "\n")
+      .replace(/<\/(p|div|section|article|header|footer|h[1-6]|li)>/gi, "\n")
+      .replace(/<[^>]+>/g, " ")
+      .replace(/[ \t\r\f\v]+/g, " ")
+      .replace(/\n\s+/g, "\n")
+      .replace(/\n{3,}/g, "\n\n")
+      .trim(),
+  );
 }
 
-function extractTitle(html: string): string {
-  const match = html.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
-  return match?.[1]?.trim().replace(/\s+/g, " ") ?? "";
+function isHtmlContent(contentType: string | undefined, body: string): boolean {
+  return Boolean(
+    contentType?.toLowerCase().includes("text/html") ||
+      /^\s*<!doctype html/i.test(body) ||
+      /^\s*<html[\s>]/i.test(body),
+  );
 }
 
-async function tryPlaywrightFetch(url: string, timeoutMs: number): Promise<{ html: string; status: number } | null> {
+export function renderWebFetchContent(
+  body: string,
+  contentType: string | undefined,
+  format: WebFetchFormat,
+): { content: string; title?: string } {
+  const html = isHtmlContent(contentType, body);
+  if (!html) return { content: body };
+  const title = extractTitle(body);
+  if (format === "html") return { content: body, title };
+  return { content: stripHtml(body), title };
+}
+
+async function defaultRunner(
+  input: WebFetchRunInput,
+  ctx: ToolContext,
+  timeoutMs: number,
+): Promise<WebFetchRunResult> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  ctx.abortSignal.addEventListener("abort", () => controller.abort(), { once: true });
   try {
-    // Dynamic import — playwright is optional
-    const pw = await (Function('return import("playwright")')() as Promise<Record<string, unknown>>);
-    const chromium = pw["chromium"] as { launch(opts: { headless: boolean }): Promise<unknown> };
-    const browser = await chromium.launch({ headless: true }) as {
-      newPage(): Promise<{
-        goto(url: string, opts: Record<string, unknown>): Promise<{ status(): number } | null>;
-        waitForTimeout(ms: number): Promise<void>;
-        content(): Promise<string>;
-      }>;
-      close(): Promise<void>;
+    const response = await fetch(input.url, {
+      redirect: "follow",
+      signal: controller.signal,
+      headers: {
+        Accept: "text/html,application/xhtml+xml,application/xml,text/plain;q=0.9,*/*;q=0.8",
+        "User-Agent": "MagiResearchAgent/1.0",
+      },
+    });
+    const buffer = Buffer.from(await response.arrayBuffer());
+    const truncated = buffer.byteLength > MAX_BODY_BYTES;
+    const body = buffer.subarray(0, MAX_BODY_BYTES).toString("utf8");
+    return {
+      statusCode: response.status,
+      url: input.url,
+      finalUrl: response.url,
+      contentType: response.headers.get("content-type") ?? undefined,
+      body,
+      truncated,
     };
-    try {
-      const page = await browser.newPage();
-      const resp = await page.goto(url, { waitUntil: "domcontentloaded", timeout: timeoutMs });
-      await page.waitForTimeout(1000);
-      const html = await page.content();
-      return { html, status: resp?.status() ?? 200 };
-    } finally {
-      await browser.close();
-    }
-  } catch {
-    return null;
+  } finally {
+    clearTimeout(timeout);
   }
 }
 
-function truncateToBytes(text: string, maxBytes: number): { text: string; truncated: boolean } {
-  if (Buffer.byteLength(text, "utf8") <= maxBytes) return { text, truncated: false };
-  let used = 0;
-  let cutoff = 0;
-  for (const char of text) {
-    const b = Buffer.byteLength(char, "utf8");
-    if (used + b > maxBytes) break;
-    used += b;
-    cutoff++;
-  }
-  return { text: text.slice(0, cutoff) + "\n\n[truncated]", truncated: true };
+function errorResult(
+  code: string,
+  message: string,
+  start: number,
+): ToolResult<WebFetchOutput> {
+  return {
+    status: "error",
+    errorCode: code,
+    errorMessage: message,
+    durationMs: Date.now() - start,
+  };
 }
 
-export function makeWebFetchTool(): Tool<WebFetchInput, WebFetchOutput> {
+export function makeWebFetchTool(opts: WebFetchToolOptions = {}): Tool<WebFetchInput, WebFetchOutput> {
+  const runner = opts.runner ?? defaultRunner;
+  const resolveHost = opts.resolveHost ?? (opts.runner ? null : defaultResolvePublicFetchHost);
   return {
     name: "WebFetch",
     description:
-      "Fetch a URL and extract its text content. Strips HTML tags, scripts, and navigation. " +
-      "Use this to read web pages, documentation, articles, or any publicly accessible URL.",
+      "Fetch a public HTTP(S) URL and register it as an inspected source. Use after WebSearch to inspect primary pages before citing or synthesizing claims.",
     inputSchema: INPUT_SCHEMA,
     permission: "net",
-
+    dangerous: false,
+    tags: ["web", "fetch", "current", "sources", "research"],
     validate(input) {
-      try {
-        new URL(input.url);
-        return null;
-      } catch {
-        return `Invalid URL: ${input.url}`;
-      }
+      return validateWebFetchInput(input as WebFetchInput);
     },
+    async execute(input: WebFetchInput, ctx: ToolContext): Promise<ToolResult<WebFetchOutput>> {
+      const start = Date.now();
+      const validation = validateWebFetchInput(input);
+      if (validation) return errorResult("invalid_input", validation, start);
 
-    async execute(input): Promise<ToolResult<WebFetchOutput>> {
-      const t0 = Date.now();
-      const timeoutMs = Math.min(input.timeoutMs ?? DEFAULT_TIMEOUT_MS, 60_000);
+      const url = stringValue(input.url) ?? "";
+      const urlError = await validatePublicFetchUrl(url, resolveHost);
+      if (urlError) return errorResult("invalid_url", urlError, start);
 
-      let html: string;
-      let status: number;
-      let usedBrowser = false;
-
+      const format = normalizeWebFetchFormat(input.format);
+      const timeoutMs = normalizeTimeout(input.timeoutMs);
       try {
-        const controller = new AbortController();
-        const timer = setTimeout(() => controller.abort(), timeoutMs);
-        const resp = await fetch(input.url, {
-          signal: controller.signal,
-          headers: {
-            "User-Agent": "MagiAgent/1.0 (https://github.com/openmagi/magi-agent)",
-            Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-          },
-          redirect: "follow",
+        const run = await runner({ url, format }, ctx, timeoutMs);
+        const rendered = renderWebFetchContent(run.body, run.contentType, format);
+        const finalUrl = run.finalUrl ?? run.url;
+        const source = ctx.sourceLedger?.recordSource({
+          turnId: ctx.turnId,
+          toolName: "WebFetch",
+          kind: "web_fetch",
+          uri: finalUrl,
+          title: rendered.title,
+          contentHash: contentHash(rendered.content),
+          contentType: run.contentType,
+          trustTier: "unknown",
+          snippets: rendered.content ? [rendered.content.slice(0, 500)] : [],
         });
-        clearTimeout(timer);
-        status = resp.status;
-        html = await resp.text();
-      } catch (err) {
-        const browserResult = await tryPlaywrightFetch(input.url, timeoutMs);
-        if (browserResult) {
-          html = browserResult.html;
-          status = browserResult.status;
-          usedBrowser = true;
-        } else {
-          return errorResult(`Fetch failed: ${(err as Error).message}`, t0);
+        if (source) {
+          ctx.emitAgentEvent?.({ type: "source_inspected", source });
         }
+        return {
+          status: run.statusCode >= 200 && run.statusCode < 400 ? "ok" : "error",
+          output: {
+            url: run.url,
+            finalUrl,
+            statusCode: run.statusCode,
+            contentType: run.contentType,
+            format,
+            title: rendered.title,
+            content: rendered.content,
+            truncated: run.truncated,
+            sourceId: source?.sourceId,
+          },
+          errorCode: run.statusCode >= 200 && run.statusCode < 400 ? undefined : "fetch_failed",
+          errorMessage: run.statusCode >= 200 && run.statusCode < 400
+            ? undefined
+            : `web fetch returned HTTP ${run.statusCode}`,
+          durationMs: Date.now() - start,
+          metadata: {
+            sourceId: source?.sourceId,
+            truncated: run.truncated,
+          },
+        };
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        return errorResult("fetch_failed", message, start);
       }
-
-      if (status >= 400) {
-        return errorResult(`HTTP ${status}`, t0);
-      }
-
-      const title = extractTitle(html);
-      const raw = input.raw ? html : stripHtml(html);
-      const { text: content, truncated } = truncateToBytes(raw, MAX_CONTENT_BYTES);
-
-      return {
-        status: "ok",
-        output: { url: input.url, status, title, content, contentLength: content.length, truncated, usedBrowser },
-        durationMs: Date.now() - t0,
-      };
     },
   };
 }

@@ -5,8 +5,11 @@ import { MessageBubble } from "./message-bubble";
 import { TypingIndicator } from "./typing-indicator";
 import { ControlRequestCard } from "./control-request";
 import { compareChatMessages } from "@/lib/chat/message-order";
+import { shouldPreferServerAssistantMessage } from "@/lib/chat/server-reconcile";
+import { stripAssistantMetadataPreamble } from "@/lib/chat/visible-content";
 import { deriveWorkConsoleRows, type WorkConsoleRow, type WorkConsoleRowStatus } from "@/lib/chat/work-console";
 import { deriveWorkStateSummary } from "@/lib/chat/work-state";
+import { dispatchOpenMissionLedgerEvent } from "@/lib/chat/mission-ledger-events";
 import type { ReactNode } from "react";
 import type {
   ChatMessage,
@@ -15,6 +18,8 @@ import type {
   ControlRequestRecord,
   ControlRequestResponse,
   ChatResponseLanguage,
+  BrowserFrame,
+  MissionActivity,
 } from "@/lib/chat/types";
 
 export interface ChatMessagesHandle {
@@ -52,6 +57,7 @@ interface ChatMessagesProps {
     request: ControlRequestRecord,
     response: ControlRequestResponse,
   ) => Promise<void> | void;
+  uiLanguage?: ChatResponseLanguage;
 }
 
 function writingAnswerLabel(language?: ChatResponseLanguage): string {
@@ -64,6 +70,14 @@ function isKorean(language?: ChatResponseLanguage): boolean {
 
 function t(language: ChatResponseLanguage | undefined, en: string, ko: string): string {
   return isKorean(language) ? ko : en;
+}
+
+function waitingCountLabel(count: number, language?: ChatResponseLanguage): string {
+  return isKorean(language) ? `${count}개 대기` : `${count} waiting`;
+}
+
+function queuedIndexLabel(index: number, language?: ChatResponseLanguage): string {
+  return isKorean(language) ? `대기 #${index}` : `Queued #${index}`;
 }
 
 function MessageSkeleton() {
@@ -131,10 +145,59 @@ function browserActionLabel(action: string, language?: ChatResponseLanguage): st
   }
 }
 
+function InlineBrowserFramePreview({
+  frame,
+  language,
+}: {
+  frame: BrowserFrame;
+  language?: ChatResponseLanguage;
+}) {
+  const imageSrc = `data:${frame.contentType};base64,${frame.imageBase64}`;
+  return (
+    <div
+      className="mt-2 overflow-hidden rounded-md border border-black/[0.08] bg-white"
+      data-chat-inline-browser-frame="true"
+    >
+      <div className="flex min-w-0 items-center justify-between gap-2 border-b border-black/[0.06] px-2.5 py-1.5">
+        <span className="shrink-0 text-[10px] font-semibold uppercase tracking-wide text-secondary/45">
+          {t(language, "Live browser", "실시간 브라우저")}
+        </span>
+        <span className="min-w-0 truncate text-[10.5px] text-secondary/55">
+          {browserActionLabel(frame.action, language)}
+          {frame.url ? ` · ${frame.url}` : ""}
+        </span>
+      </div>
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img
+        src={imageSrc}
+        alt={t(language, "Browser preview", "브라우저 미리보기")}
+        className="block aspect-video w-full max-h-56 bg-black/[0.03] object-contain"
+      />
+    </div>
+  );
+}
+
 function hasOpenTaskState(channelState: ChannelState): boolean {
   return !!channelState.taskBoard?.tasks.some(
     (task) => task.status === "pending" || task.status === "in_progress",
   );
+}
+
+function isTerminalMission(mission: MissionActivity): boolean {
+  return (
+    mission.status === "completed" ||
+    mission.status === "failed" ||
+    mission.status === "cancelled"
+  );
+}
+
+function currentRunMission(channelState: ChannelState): MissionActivity | null {
+  const missions = channelState.missions ?? [];
+  const activeGoal = channelState.activeGoalMissionId
+    ? missions.find((mission) => mission.id === channelState.activeGoalMissionId)
+    : null;
+  if (activeGoal && !isTerminalMission(activeGoal)) return activeGoal;
+  return missions.find((mission) => !isTerminalMission(mission)) ?? null;
 }
 
 function hasInlineRunStatus(
@@ -148,6 +211,7 @@ function hasInlineRunStatus(
       (subagent) => subagent.status === "running" || subagent.status === "waiting",
     ) ||
     hasOpenTaskState(channelState) ||
+    (channelState.runtimeTraces ?? []).some((trace) => trace.severity !== "info") ||
     !!channelState.browserFrame ||
     queuedMessages.length > 0 ||
     pendingRequests.length > 0 ||
@@ -157,23 +221,36 @@ function hasInlineRunStatus(
   return hasLiveWork || (channelState.streaming && !channelState.streamingText);
 }
 
+const INLINE_WORK_ROW_LIMIT = 4;
+
+function isUsefulSubagentRow(row: WorkConsoleRow): boolean {
+  return !row.detail || !/^iteration\s+\d+$/i.test(row.detail.trim());
+}
+
 function inlineWorkRows(
   channelState: ChannelState,
   queuedMessages: QueuedMessage[],
   pendingRequests: ControlRequestRecord[],
+  language?: ChatResponseLanguage,
 ): WorkConsoleRow[] {
-  const language = channelState.responseLanguage;
   const rows = deriveWorkConsoleRows({
     channelState,
     queuedMessages,
     controlRequests: pendingRequests,
+    uiLanguage: language,
   });
   const selected: WorkConsoleRow[] = [];
+  const appendRows = (items: WorkConsoleRow[]) => {
+    for (const item of items) {
+      if (selected.length >= INLINE_WORK_ROW_LIMIT) break;
+      selected.push(item);
+    }
+  };
 
-  selected.push(...rows.filter((row) => row.group === "control" && row.status === "waiting"));
+  appendRows(rows.filter((row) => row.group === "control" && row.status === "waiting"));
 
-  if (channelState.browserFrame) {
-    selected.push({
+  if (channelState.browserFrame && selected.length < INLINE_WORK_ROW_LIMIT) {
+    appendRows([{
       id: "browser-frame",
       group: "status",
       label: t(language, "Live browser", "실시간 브라우저"),
@@ -182,46 +259,65 @@ function inlineWorkRows(
         channelState.browserFrame.url,
       ].filter(Boolean).join(" - "),
       status: "running",
-    });
+    }]);
   }
 
-  selected.push(...rows.filter((row) => row.group === "tool" && row.status === "running"));
-  selected.push(
-    ...rows.filter(
-      (row) => row.group === "subagent" && (row.status === "running" || row.status === "waiting"),
-    ),
-  );
-  selected.push(...rows.filter((row) => row.group === "task" && row.status === "running"));
+  const toolRows = rows.filter((row) => row.group === "tool").slice(-INLINE_WORK_ROW_LIMIT);
+  const traceRows = rows
+    .filter((row) => row.group === "trace" && row.status !== "info")
+    .slice(-2);
+  const taskRows = rows
+    .filter((row) => row.group === "task" && (row.status === "running" || row.status === "done"))
+    .slice(-2);
+  const subagentRows = rows
+    .filter(
+      (row) =>
+        row.group === "subagent" &&
+        (row.status === "running" || row.status === "waiting") &&
+        isUsefulSubagentRow(row),
+    )
+    .slice(-2);
+
+  appendRows(subagentRows);
+  appendRows(traceRows);
+  appendRows(toolRows);
+  appendRows(taskRows);
 
   if (selected.length === 0) {
-    selected.push(...rows.filter((row) => row.group === "status" && row.id !== "idle"));
+    appendRows(rows.filter((row) => row.group === "status" && row.id !== "idle"));
   }
 
   if (selected.length === 0 && queuedMessages.length > 0) {
-    selected.push(...rows.filter((row) => row.group === "queue").slice(0, 1));
+    appendRows(rows.filter((row) => row.group === "queue").slice(0, 1));
   }
 
-  return selected.slice(0, 3);
+  return selected.slice(0, INLINE_WORK_ROW_LIMIT);
 }
 
 function InlineRunStatus({
   channelState,
   queuedMessages,
   pendingRequests,
+  uiLanguage,
 }: {
   channelState: ChannelState;
   queuedMessages: QueuedMessage[];
   pendingRequests: ControlRequestRecord[];
+  uiLanguage?: ChatResponseLanguage;
 }) {
   if (!hasInlineRunStatus(channelState, queuedMessages, pendingRequests)) return null;
 
-  const language = channelState.responseLanguage;
+  const language = uiLanguage ?? channelState.responseLanguage;
   const summary = deriveWorkStateSummary({
     channelState,
     queuedMessages,
     controlRequests: pendingRequests,
+    uiLanguage: language,
   });
-  const rows = inlineWorkRows(channelState, queuedMessages, pendingRequests);
+  const rows = inlineWorkRows(channelState, queuedMessages, pendingRequests, language);
+  const genericGoal = t(language, "Working on your request", "요청 처리 중");
+  const displayGoal = summary.goal !== genericGoal ? summary.goal : null;
+  const mission = currentRunMission(channelState);
 
   return (
     <div className="chat-msg-in mb-4 flex justify-start" data-chat-inline-run-status="true">
@@ -231,6 +327,11 @@ function InlineRunStatus({
             <div className="text-[11px] font-semibold uppercase tracking-wide text-secondary/50">
               {summary.title}
             </div>
+            {displayGoal && (
+              <div className="mt-1 line-clamp-2 break-words text-[12px] leading-snug text-foreground/70">
+                {displayGoal}
+              </div>
+            )}
             <div className="mt-0.5 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-xs text-secondary/70">
               <span className="font-medium text-foreground/75">{summary.status}</span>
               {summary.progress && <span>{summary.progress}</span>}
@@ -243,10 +344,28 @@ function InlineRunStatus({
               )}
             </div>
           </div>
-          <span className="shrink-0 rounded-full bg-[#7C3AED]/10 px-2 py-0.5 text-[10px] font-semibold text-[#7C3AED]">
-            {t(language, "Live", "실시간")}
-          </span>
+          <div className="flex shrink-0 items-center gap-1.5">
+            {mission && (
+              <button
+                type="button"
+                onClick={() => dispatchOpenMissionLedgerEvent(mission.id)}
+                className="rounded-md border border-[#7C3AED]/15 bg-[#7C3AED]/10 px-2 py-1 text-[10px] font-semibold text-[#6D28D9] transition-colors hover:border-[#7C3AED]/25 hover:bg-[#7C3AED]/15"
+                aria-label={`Open Mission Ledger for ${mission.title}`}
+                title={t(language, "Open mission ledger", "미션 원장 열기")}
+                data-chat-open-mission-ledger={mission.id}
+              >
+                {t(language, "Open mission ledger", "미션 원장 열기")}
+              </button>
+            )}
+            <span className="rounded-full bg-[#7C3AED]/10 px-2 py-0.5 text-[10px] font-semibold text-[#7C3AED]">
+              {t(language, "Live", "실시간")}
+            </span>
+          </div>
         </div>
+
+        {channelState.browserFrame && (
+          <InlineBrowserFramePreview frame={channelState.browserFrame} language={language} />
+        )}
 
         {rows.length > 0 && (
           <ul className="mt-2 space-y-1" aria-label={t(language, "Current work updates", "현재 작업 업데이트")}>
@@ -291,7 +410,10 @@ const OPTIMISTIC_CONTENT_DEDUP_MIN_CHARS = 80;
 
 function normalizedDuplicateContent(message: ChatMessage): string | null {
   if (message.role === "system") return null;
-  const normalized = message.content.replace(/\s+/g, " ").trim();
+  const content = message.role === "assistant"
+    ? stripAssistantMetadataPreamble(message.content)
+    : message.content;
+  const normalized = content.replace(/\s+/g, " ").trim();
   if (normalized.length < OPTIMISTIC_CONTENT_DEDUP_MIN_CHARS) return null;
   return normalized;
 }
@@ -301,8 +423,9 @@ function duplicateContentKey(message: ChatMessage): string | null {
   return normalized ? `${message.role}\u0000${normalized}` : null;
 }
 
-export const ChatMessages = forwardRef<ChatMessagesHandle, ChatMessagesProps>(function ChatMessages({ messages, serverMessages, channelState, loading, botId, selectionMode, selectedMessages, onToggleSelect, onEnterSelectionMode, onSelectAll, onDeselectAll, onExportSelected, onDeleteSelected, onExitSelectionMode, onLoadOlder, hasOlderMessages, loadingOlder, onReplyTo, queuedMessages, onCancelQueued, controlRequests, onRespondControlRequest }, ref) {
+export const ChatMessages = forwardRef<ChatMessagesHandle, ChatMessagesProps>(function ChatMessages({ messages, serverMessages, channelState, loading, botId, selectionMode, selectedMessages, onToggleSelect, onEnterSelectionMode, onSelectAll, onDeselectAll, onExportSelected, onDeleteSelected, onExitSelectionMode, onLoadOlder, hasOlderMessages, loadingOlder, onReplyTo, queuedMessages, onCancelQueued, controlRequests, onRespondControlRequest, uiLanguage }, ref) {
   const containerRef = useRef<HTMLDivElement>(null);
+  const language = uiLanguage ?? channelState.responseLanguage;
   const [showScrollBtn, setShowScrollBtn] = useState(false);
   const userScrolledUp = useRef(false);
   const prevMsgCount = useRef(0);
@@ -325,13 +448,23 @@ export const ChatMessages = forwardRef<ChatMessagesHandle, ChatMessagesProps>(fu
     if (serverMessages.length === 0) return [...messages].sort(compareChatMessages);
     if (messages.length === 0) return [...serverMessages].sort(compareChatMessages);
 
+    const localMessages = messages.filter((message) => (
+      !serverMessages.some((serverMessage) => (
+        shouldPreferServerAssistantMessage(
+          message,
+          serverMessage,
+          TIMESTAMP_DEDUP_WINDOW_MS,
+        )
+      ))
+    ));
+
     // Build set of local serverIds for exact match
-    const localServerIds = new Set(messages.map((m) => m.serverId).filter(Boolean));
+    const localServerIds = new Set(localMessages.map((m) => m.serverId).filter(Boolean));
 
     // Build timestamp index for proximity dedup (same role within 10s = duplicate)
     const localByRole = new Map<string, number[]>();
     const optimisticByContent = new Map<string, number[]>();
-    for (const m of messages) {
+    for (const m of localMessages) {
       const ts = m.timestamp ?? 0;
       if (!localByRole.has(m.role)) localByRole.set(m.role, []);
       localByRole.get(m.role)!.push(ts);
@@ -365,7 +498,7 @@ export const ChatMessages = forwardRef<ChatMessagesHandle, ChatMessagesProps>(fu
       return true;
     });
 
-    return [...messages, ...filtered].sort(compareChatMessages);
+    return [...localMessages, ...filtered].sort(compareChatMessages);
   }, [messages, serverMessages]);
 
   // Track which messages should animate (only newly added ones)
@@ -469,10 +602,10 @@ export const ChatMessages = forwardRef<ChatMessagesHandle, ChatMessagesProps>(fu
                 </svg>
               )}
             </div>
-            Select all
+            {t(language, "Select all", "전체 선택")}
           </button>
           <span className="text-sm text-secondary/50">
-            {selectedCount} selected
+            {isKorean(language) ? `${selectedCount}개 선택됨` : `${selectedCount} selected`}
           </span>
           <div className="flex-1" />
           <button
@@ -487,7 +620,7 @@ export const ChatMessages = forwardRef<ChatMessagesHandle, ChatMessagesProps>(fu
               <line x1="8.59" y1="13.51" x2="15.42" y2="17.49" />
               <line x1="15.41" y1="6.51" x2="8.59" y2="10.49" />
             </svg>
-            Export
+            {t(language, "Export", "내보내기")}
           </button>
           <button
             onClick={onDeleteSelected}
@@ -498,13 +631,13 @@ export const ChatMessages = forwardRef<ChatMessagesHandle, ChatMessagesProps>(fu
               <polyline points="3 6 5 6 21 6" />
               <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
             </svg>
-            Delete
+            {t(language, "Delete", "삭제")}
           </button>
           <button
             onClick={onExitSelectionMode}
             className="text-sm text-secondary/60 hover:text-foreground transition-colors cursor-pointer"
           >
-            Cancel
+            {t(language, "Cancel", "취소")}
           </button>
         </div>
       )}
@@ -522,7 +655,7 @@ export const ChatMessages = forwardRef<ChatMessagesHandle, ChatMessagesProps>(fu
           </div>
         )}
 
-        {loading && allMessages.length === 0 && (
+        {loading && (
           <MessageSkeleton />
         )}
 
@@ -540,7 +673,7 @@ export const ChatMessages = forwardRef<ChatMessagesHandle, ChatMessagesProps>(fu
         {/* Mid-turn steering messages belong at the assistant text offset
             that was visible when the user sent them. Render the assistant
             answer in segments so the transcript chronology matches that. */}
-        {(() => {
+        {!loading && (() => {
           const streamingNow = !!channelState.streaming;
           let mainMessages = allMessages;
           let midTurnInjected: typeof allMessages = [];
@@ -579,6 +712,8 @@ export const ChatMessages = forwardRef<ChatMessagesHandle, ChatMessagesProps>(fu
                 thinkingDuration={msg.thinkingDuration}
                 activities={msg.activities}
                 taskBoard={msg.taskBoard}
+                researchEvidence={msg.researchEvidence}
+                usage={msg.usage}
                 botId={botId}
                 replyTo={msg.replyTo}
                 injected={msg.injected}
@@ -617,6 +752,8 @@ export const ChatMessages = forwardRef<ChatMessagesHandle, ChatMessagesProps>(fu
                   thinkingDuration={options.includeSourceMeta ? source?.thinkingDuration : undefined}
                   activities={options.includeSourceMeta ? source?.activities : undefined}
                   taskBoard={options.includeSourceMeta ? source?.taskBoard : undefined}
+                  researchEvidence={options.includeSourceMeta ? source?.researchEvidence : undefined}
+                  usage={options.includeSourceMeta ? source?.usage : undefined}
                   botId={botId}
                   selectionMode={source ? selectionMode : undefined}
                   selected={source ? selectedMessages?.has(source.id) : undefined}
@@ -782,7 +919,7 @@ export const ChatMessages = forwardRef<ChatMessagesHandle, ChatMessagesProps>(fu
                 channelState.thinkingText !== "" && (
                 <div className="chat-msg-in flex justify-start mb-4">
                   <div className="w-full max-w-full py-1 text-sm text-secondary/50 animate-pulse">
-                    {writingAnswerLabel(channelState.responseLanguage)}
+                    {writingAnswerLabel(language)}
                   </div>
                 </div>
               )}
@@ -801,8 +938,14 @@ export const ChatMessages = forwardRef<ChatMessagesHandle, ChatMessagesProps>(fu
                     role="assistant"
                     content={channelState.streamingText}
                     isStreaming
+                    botId={botId}
                   />
                 ))}
+
+              {!channelState.streamingText &&
+                anchoredMidTurnInjected.map((msg, i) =>
+                  renderMessage(msg, i, mainMessages.length, `pending-injected:${msg.id}`),
+                )}
 
               {unanchoredMidTurnInjected.map((msg, i) =>
                 renderMessage(msg, i, mainMessages.length),
@@ -812,12 +955,13 @@ export const ChatMessages = forwardRef<ChatMessagesHandle, ChatMessagesProps>(fu
                 channelState={channelState}
                 queuedMessages={liveQueuedMessages}
                 pendingRequests={pendingControlRequests}
+                uiLanguage={language}
               />
             </>
           );
         })()}
 
-        {pendingControlRequests.length > 0 && (
+        {!loading && pendingControlRequests.length > 0 && (
           <div className="mt-2">
             {pendingControlRequests.map((request) => (
               <ControlRequestCard
@@ -831,7 +975,7 @@ export const ChatMessages = forwardRef<ChatMessagesHandle, ChatMessagesProps>(fu
           </div>
         )}
 
-        {showTyping && !channelState.fileProcessing && (
+        {!loading && showTyping && !channelState.fileProcessing && (
           <div className="chat-msg-in">
             <TypingIndicator />
           </div>
@@ -839,31 +983,44 @@ export const ChatMessages = forwardRef<ChatMessagesHandle, ChatMessagesProps>(fu
 
         {/* Queued user messages (Claude Code CLI-style). Kept visually
             distinct from sent messages so pending follow-ups are obvious. */}
-        {queuedMessages && queuedMessages.length > 0 && (
+        {!loading && queuedMessages && queuedMessages.length > 0 && (
           <div className="mt-3 flex justify-end">
             <div className="w-full max-w-[92%] sm:max-w-[82%] rounded-2xl border border-amber-500/25 bg-amber-50 px-3 py-2 shadow-[0_1px_8px_rgba(245,158,11,0.10)]">
               <div className="mb-1.5 flex items-center justify-between gap-2 text-[10px] font-semibold uppercase tracking-wide text-amber-800/70">
-                <span>Queued follow-ups</span>
+                <span>{t(language, "Queued follow-ups", "대기 중인 후속 메시지")}</span>
                 <span className="rounded-full bg-amber-500/15 px-1.5 py-0.5 text-[9px] text-amber-800">
-                  {queuedMessages.length} waiting
+                  {waitingCountLabel(queuedMessages.length, language)}
                 </span>
               </div>
               <div className="space-y-1.5">
                 {queuedMessages.map((q, index) => (
                   <div key={q.id} className="flex justify-end">
-                    <button
-                      type="button"
-                      onClick={() => onCancelQueued?.(q.id)}
-                      className="group w-full text-left rounded-xl border border-dashed border-amber-500/25 bg-white/75 px-3 py-2 text-[13px] text-foreground/75 transition-colors hover:border-red-500/25 hover:bg-red-500/10 hover:text-red-600"
+                    <div
+                      className="group w-full rounded-xl border border-dashed border-amber-500/25 bg-white/75 px-3 py-2 text-left text-[13px] text-foreground/75"
                       data-chat-queued-card="true"
-                      title="Click to cancel this message before the current turn finishes"
                     >
-                      <span className="mb-0.5 flex items-center justify-between gap-2 text-[10px] font-semibold uppercase tracking-wide text-amber-800/70 group-hover:text-red-500/80">
-                        <span>Queued #{index + 1}</span>
-                        <span className="normal-case tracking-normal">Waiting for current run</span>
-                      </span>
-                      <span className="block whitespace-pre-wrap break-words">{q.content}</span>
-                    </button>
+                      <div className="flex items-start gap-3">
+                        <div className="min-w-0 flex-1">
+                          <span className="mb-0.5 flex items-center justify-between gap-2 text-[10px] font-semibold uppercase tracking-wide text-amber-800/70">
+                            <span>{queuedIndexLabel(index + 1, language)}</span>
+                            <span className="normal-case tracking-normal">
+                              {t(language, "Waiting for current run", "현재 실행 대기 중")}
+                            </span>
+                          </span>
+                          <span className="block whitespace-pre-wrap break-words">{q.content}</span>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => onCancelQueued?.(q.id)}
+                          className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-red-500/15 bg-red-500/10 text-lg font-semibold leading-none text-red-600 transition-colors hover:border-red-500/35 hover:bg-red-500/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-400/70 focus-visible:ring-offset-2"
+                          aria-label={t(language, `Cancel queued follow-up #${index + 1}`, `대기 중인 후속 메시지 #${index + 1} 취소`)}
+                          title={t(language, "Cancel queued follow-up", "대기 중인 후속 메시지 취소")}
+                          data-chat-queued-cancel="true"
+                        >
+                          <span aria-hidden="true">×</span>
+                        </button>
+                      </div>
+                    </div>
                   </div>
                 ))}
               </div>

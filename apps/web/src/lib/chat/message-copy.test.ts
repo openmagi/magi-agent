@@ -5,14 +5,14 @@ describe("message copy text", () => {
   it("strips hidden KB context metadata from full-message copies", () => {
     const text = buildMessageCopyText({
       content:
-        "[KB_CONTEXT: 56fdc3c1-7da2-47c4-a87a-83d35beced19=clawy_gemini_v0_3_agent_tester_prompt.md]\n" +
-        "40대 재력가 페르소나를 테스터 질문 작성시 답변 원칙으로",
+        "[KB_CONTEXT: 56fdc3c1-7da2-47c4-a87a-83d35beced19=example_notes.md]\n" +
+        "Please summarize the attached project notes.",
       selection: "",
     });
 
-    expect(text).toBe("40대 재력가 페르소나를 테스터 질문 작성시 답변 원칙으로");
+    expect(text).toBe("Please summarize the attached project notes.");
     expect(text).not.toContain("KB_CONTEXT");
-    expect(text).not.toContain("clawy_gemini_v0_3_agent_tester_prompt.md");
+    expect(text).not.toContain("example_notes.md");
   });
 
   it("strips hidden attachment markers from full-message copies", () => {

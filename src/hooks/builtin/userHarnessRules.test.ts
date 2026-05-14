@@ -285,7 +285,7 @@ describe("userHarnessRules", () => {
           makeSnapshot([
             {
               id: "tossplace-merchant-grounding",
-              sourceText: "Toss POS connection status must be grounded",
+              sourceText: "Toss POS 연결 상태 질문은 my-merchants로 확인",
               enabled: true,
               trigger: "beforeCommit",
               condition: {
@@ -296,7 +296,8 @@ describe("userHarnessRules", () => {
                 type: "require_tool_input_match",
                 toolName: "Bash",
                 inputPath: "command",
-                pattern: "integration\\.sh\\s+[\"']?tossplace/my-merchants",
+                pattern:
+                  "integration\\.sh\\s+[\"']?tossplace/my-merchants",
               },
               enforcement: "block_on_fail",
               timeoutMs: 2_000,
@@ -334,7 +335,7 @@ describe("userHarnessRules", () => {
           makeSnapshot([
             {
               id: "tossplace-merchant-grounding",
-              sourceText: "Toss POS connection status must be grounded",
+              sourceText: "Toss POS 연결 상태 질문은 my-merchants로 확인",
               enabled: true,
               trigger: "beforeCommit",
               condition: {
@@ -345,7 +346,8 @@ describe("userHarnessRules", () => {
                 type: "require_tool_input_match",
                 toolName: "Bash",
                 inputPath: "command",
-                pattern: "integration\\.sh\\s+[\"']?tossplace/my-merchants",
+                pattern:
+                  "integration\\.sh\\s+[\"']?tossplace/my-merchants",
               },
               enforcement: "block_on_fail",
               timeoutMs: 2_000,
@@ -380,7 +382,7 @@ describe("userHarnessRules", () => {
           makeSnapshot([
             {
               id: "tossplace-merchant-grounding",
-              sourceText: "Toss POS connection status must be grounded",
+              sourceText: "Toss POS 연결 상태 질문은 my-merchants로 확인",
               enabled: true,
               trigger: "beforeCommit",
               condition: {
@@ -391,7 +393,8 @@ describe("userHarnessRules", () => {
                 type: "require_tool_input_match",
                 toolName: "Bash",
                 inputPath: "command",
-                pattern: "integration\\.sh\\s+[\"']?tossplace/my-merchants",
+                pattern:
+                  "integration\\.sh\\s+[\"']?tossplace/my-merchants",
               },
               enforcement: "block_on_fail",
               timeoutMs: 2_000,
@@ -424,7 +427,7 @@ describe("userHarnessRules", () => {
           makeSnapshot([
             {
               id: "tossplace-merchant-grounding",
-              sourceText: "Toss POS connection status must be grounded",
+              sourceText: "Toss POS 연결 상태 질문은 my-merchants로 확인",
               enabled: true,
               trigger: "beforeCommit",
               condition: {
@@ -435,7 +438,8 @@ describe("userHarnessRules", () => {
                 type: "require_tool_input_match",
                 toolName: "Bash",
                 inputPath: "command",
-                pattern: "integration\\.sh\\s+[\"']?tossplace/my-merchants",
+                pattern:
+                  "integration\\.sh\\s+[\"']?tossplace/my-merchants",
               },
               enforcement: "block_on_fail",
               timeoutMs: 2_000,
@@ -483,7 +487,7 @@ describe("userHarnessRules", () => {
           makeSnapshot([
             {
               id: "tossplace-merchant-grounding",
-              sourceText: "Toss POS connection status must be grounded",
+              sourceText: "Toss POS 연결 상태 질문은 my-merchants로 확인",
               enabled: true,
               trigger: "beforeCommit",
               condition: {
@@ -494,7 +498,8 @@ describe("userHarnessRules", () => {
                 type: "require_tool_input_match",
                 toolName: "Bash",
                 inputPath: "command",
-                pattern: "integration\\.sh\\s+[\"']?tossplace/my-merchants",
+                pattern:
+                  "integration\\.sh\\s+[\"']?tossplace/my-merchants",
               },
               enforcement: "block_on_fail",
               timeoutMs: 2_000,

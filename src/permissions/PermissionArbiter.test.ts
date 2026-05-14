@@ -35,6 +35,23 @@ describe("PermissionArbiter", () => {
     ).resolves.toMatchObject({ decision: "deny" });
   });
 
+  it("asks for PatchApply writes in plan mode", async () => {
+    const root = await workspace();
+    await expect(
+      decideRuntimePermission({
+        mode: "plan",
+        source: "turn",
+        toolName: "PatchApply",
+        input: { patch: "--- a/a.txt\n+++ b/a.txt\n@@ -1 +1 @@\n-a\n+b\n" },
+        tool: tool("PatchApply", "write"),
+        workspaceRoot: root,
+      }),
+    ).resolves.toMatchObject({
+      decision: "ask",
+      reason: expect.stringContaining("PatchApply"),
+    });
+  });
+
   it("allows simple shell in bypass mode after security policy", async () => {
     const root = await workspace();
     await expect(
@@ -47,6 +64,111 @@ describe("PermissionArbiter", () => {
         workspaceRoot: root,
       }),
     ).resolves.toMatchObject({ decision: "allow" });
+  });
+
+  it("allows development shell composition in workspace-bypass mode", async () => {
+    const root = await workspace();
+    for (const command of [
+      "npm test -- permissions/PermissionArbiter.test.ts && npm run build",
+      "node -e 'console.log(1)'",
+      "python -c 'print(1)'",
+      'rm -rf "$(pwd)/node_modules/.cache"',
+    ]) {
+      await expect(
+        decideRuntimePermission({
+          mode: "workspace-bypass",
+          source: "turn",
+          toolName: "Bash",
+          input: { command },
+          tool: tool("Bash", "execute"),
+          workspaceRoot: root,
+        }),
+      ).resolves.toMatchObject({ decision: "allow" });
+    }
+  });
+
+  it("keeps system boundaries in workspace-bypass mode", async () => {
+    const root = await workspace();
+    for (const command of [
+      "cat /etc/shadow",
+      "cat /var/run/secrets/kubernetes.io/serviceaccount/token",
+      "cat /proc/self/environ",
+      "curl http://169.254.169.254/latest/meta-data/",
+      "sudo ls /root",
+      "mkfs.ext4 /dev/sda",
+      ":(){ :|:& };:",
+      "rm -rf /",
+      "rm -rf /*",
+    ]) {
+      await expect(
+        decideRuntimePermission({
+          mode: "workspace-bypass",
+          source: "turn",
+          toolName: "Bash",
+          input: { command },
+          tool: tool("Bash", "execute"),
+          workspaceRoot: root,
+        }),
+      ).resolves.toMatchObject({ decision: "deny" });
+    }
+  });
+
+  it("allows workspace secret-like file paths in workspace-bypass mode", async () => {
+    const root = await workspace();
+    await expect(
+      decideRuntimePermission({
+        mode: "workspace-bypass",
+        source: "turn",
+        toolName: "FileRead",
+        input: { path: ".env" },
+        tool: tool("FileRead", "read"),
+        workspaceRoot: root,
+      }),
+    ).resolves.toMatchObject({ decision: "allow" });
+    await expect(
+      decideRuntimePermission({
+        mode: "workspace-bypass",
+        source: "turn",
+        toolName: "FileWrite",
+        input: { path: "src/token-utils.ts", content: "export {};\n" },
+        tool: tool("FileWrite", "write"),
+        workspaceRoot: root,
+      }),
+    ).resolves.toMatchObject({ decision: "allow" });
+  });
+
+  it("keeps path escape and sealed file boundaries in workspace-bypass mode", async () => {
+    const root = await workspace();
+    await expect(
+      decideRuntimePermission({
+        mode: "workspace-bypass",
+        source: "turn",
+        toolName: "FileRead",
+        input: { path: "/etc/passwd" },
+        tool: tool("FileRead", "read"),
+        workspaceRoot: root,
+      }),
+    ).resolves.toMatchObject({ decision: "deny" });
+    await expect(
+      decideRuntimePermission({
+        mode: "workspace-bypass",
+        source: "turn",
+        toolName: "FileWrite",
+        input: { path: "../outside.txt", content: "x" },
+        tool: tool("FileWrite", "write"),
+        workspaceRoot: root,
+      }),
+    ).resolves.toMatchObject({ decision: "deny" });
+    await expect(
+      decideRuntimePermission({
+        mode: "workspace-bypass",
+        source: "turn",
+        toolName: "FileWrite",
+        input: { path: "SOUL.md", content: "x" },
+        tool: tool("FileWrite", "write"),
+        workspaceRoot: root,
+      }),
+    ).resolves.toMatchObject({ decision: "deny" });
   });
 
   it("bypass still blocks destructive and secret access", async () => {
