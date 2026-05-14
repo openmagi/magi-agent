@@ -128,6 +128,52 @@ export async function judgeDeterministicEvidence(
   return parseDeterministicEvidenceVerdict(output);
 }
 
+export function judgeDeterministicEvidenceBySchema(
+  assistantText: string,
+  evidence: DeterministicEvidenceRecord[],
+): DeterministicEvidenceVerdict {
+  for (const record of evidence) {
+    if (!record.assertions || record.assertions.length === 0) continue;
+    for (const assertion of record.assertions) {
+      if (typeof assertion !== "string") continue;
+      // Check if the assertion pattern appears in the assistant text
+      try {
+        const re = new RegExp(assertion, "i");
+        if (!re.test(assistantText)) return "MISSING_EVIDENCE";
+      } catch {
+        // If assertion is not a valid regex, check as literal substring
+        if (!assistantText.toLowerCase().includes(assertion.toLowerCase())) {
+          return "MISSING_EVIDENCE";
+        }
+      }
+    }
+    // Check numeric values from evidence output against assistant text
+    if (record.output && typeof record.output === "object") {
+      const outputStr = JSON.stringify(record.output);
+      const numbers = outputStr.match(/\b\d+(?:\.\d+)?\b/g);
+      if (numbers) {
+        for (const num of numbers) {
+          const val = parseFloat(num);
+          if (isNaN(val) || val === 0) continue;
+          // Check if this number appears in assistant text (±1%)
+          const numRe = new RegExp(`\\b${num.replace(".", "\\.")}\\b`);
+          if (!numRe.test(assistantText)) {
+            // Check approximate match
+            const tolerance = Math.abs(val * 0.01);
+            const allNumbers = assistantText.match(/\b\d+(?:\.\d+)?\b/g) ?? [];
+            const hasApproxMatch = allNumbers.some((n) => {
+              const parsed = parseFloat(n);
+              return !isNaN(parsed) && Math.abs(parsed - val) <= tolerance;
+            });
+            if (!hasApproxMatch && val > 1) return "CONTRADICTS_EVIDENCE";
+          }
+        }
+      }
+    }
+  }
+  return "PASS";
+}
+
 function isEnabled(): boolean {
   const raw = process.env.MAGI_DETERMINISTIC_EVIDENCE_VERIFY;
   if (raw === undefined || raw === null) return true;
@@ -238,16 +284,19 @@ export function makeDeterministicEvidenceVerifierHook(): RegisteredHook<"beforeC
         };
       }
 
-      const verdict = await judgeDeterministicEvidence({
-        llm: ctx.llm,
-        model: ctx.agentModel,
-        userMessage,
-        assistantText,
-        requirements,
-        evidence: toolEvidence,
-        timeoutMs: Math.min(DEFAULT_TIMEOUT_MS, ctx.deadlineMs),
-        signal: ctx.abortSignal,
-      });
+      // P2-4: deterministic mode — schema matching, no LLM
+      const verdict = process.env.MAGI_DETERMINISTIC_EVIDENCE === "1"
+        ? judgeDeterministicEvidenceBySchema(assistantText, toolEvidence)
+        : await judgeDeterministicEvidence({
+            llm: ctx.llm,
+            model: ctx.agentModel,
+            userMessage,
+            assistantText,
+            requirements,
+            evidence: toolEvidence,
+            timeoutMs: Math.min(DEFAULT_TIMEOUT_MS, ctx.deadlineMs),
+            signal: ctx.abortSignal,
+          });
       if (verdict === "PASS") {
         contract.recordDeterministicEvidence({
           evidenceId: `det_verify_${ctx.turnId}_${Date.now().toString(36)}`,

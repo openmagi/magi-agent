@@ -25,6 +25,7 @@ import type {
 } from "../Tool.js";
 import type { UserMessage } from "../util/types.js";
 import { buildToolInputPreview, summariseToolOutput } from "../util/toolResult.js";
+import { applyToolResultBudget } from "./ToolResultBudget.js";
 import { createLogger } from "../util/logger.js";
 
 const logger = createLogger("ToolDispatcher");
@@ -109,6 +110,12 @@ export interface ToolDispatchContext {
   ) => boolean;
   /** Cross-service diagnostic trace ID propagated to tools. */
   readonly traceId?: string;
+  /**
+   * Shared set of workspace-relative paths read in this session.
+   * FileRead/Grep/Glob append to it; FileEdit/FileWrite check it.
+   * Undefined = read-guard disabled (backward compat).
+   */
+  readonly filesRead?: Set<string>;
   /**
    * Per-turn loop detector. When omitted, loop detection is disabled
    * for backward compatibility with direct dispatch tests and spawn
@@ -557,6 +564,7 @@ async function dispatchOne(
     sourceLedger: session.sourceLedger,
     ...(ctx.traceId ? { traceId: ctx.traceId } : {}),
     ...(ctx.currentUserMessage ? { currentUserMessage: ctx.currentUserMessage } : {}),
+    ...(ctx.filesRead ? { filesRead: ctx.filesRead } : {}),
     emitProgress: (p) => {
       sse.agent({ type: "tool_start", id: tu.id, name: p.label });
       logger.info("tool_dispatch", {
@@ -635,12 +643,20 @@ async function dispatchOne(
     break;
   }
 
+  // P1-1: Track files read by read-class tools
+  if (ctx.filesRead && result.status === "ok") {
+    trackFilesRead(ctx.filesRead, tu.name, permittedInput);
+  }
+
   const previewSource = result.output ?? result.errorMessage ?? "";
   const preview =
     typeof previewSource === "string"
       ? previewSource
       : JSON.stringify(previewSource);
-  const content = softWarningPrefix + summariseToolOutput(result);
+  const rawContent = softWarningPrefix + summariseToolOutput(result);
+  const content = process.env.MAGI_TOOL_RESULT_BUDGET !== "0"
+    ? applyToolResultBudget(rawContent, tu.name)
+    : rawContent;
   const isError = result.status !== "ok";
 
   sse.agent({
@@ -844,5 +860,28 @@ async function recordPermissionDecision(
     logger.warn("permission_decision_event_failed", {
       turnId: ctx.turnId, error: (err as Error).message,
     });
+  }
+}
+
+const READ_TRACKING_TOOLS: Record<string, (input: unknown) => string[]> = {
+  FileRead: (input) => {
+    const p = (input as { path?: string })?.path;
+    return p ? [p.replace(/^\.\//, "")] : [];
+  },
+  Grep: (input) => {
+    const p = (input as { path?: string })?.path;
+    return p ? [p.replace(/^\.\//, "") + (p.endsWith("/") ? "" : "/")] : [];
+  },
+  Glob: (input) => {
+    const p = (input as { path?: string })?.path;
+    return p ? [p.replace(/^\.\//, "") + (p.endsWith("/") ? "" : "/")] : [];
+  },
+};
+
+function trackFilesRead(filesRead: Set<string>, toolName: string, input: unknown): void {
+  const extractor = READ_TRACKING_TOOLS[toolName];
+  if (!extractor) return;
+  for (const p of extractor(input)) {
+    if (p) filesRead.add(p);
   }
 }

@@ -1,5 +1,7 @@
+import fs from "node:fs/promises";
+import path from "node:path";
+import { parse as parseYaml, parseDocument } from "yaml";
 import type { Workspace, WorkspaceIdentity } from "../storage/Workspace.js";
-import { parseDocument } from "yaml";
 import type {
   HarnessRule,
   HarnessRuleAction,
@@ -11,6 +13,8 @@ import type {
   RuntimePolicyStatus,
   ResponseLanguagePolicy,
 } from "./policyTypes.js";
+import type { ExternalHookConfig } from "../hooks/ExternalHookLoader.js";
+import type { ClassifierDimensionDef } from "../hooks/builtin/classifierExtensions.js";
 
 const DEFAULT_POLICY: RuntimePolicy = {
   approval: {
@@ -35,6 +39,7 @@ const DEFAULT_POLICY: RuntimePolicy = {
   harnessRules: [],
 };
 
+const AGENT_CONFIG_REL = "agent.config.yaml";
 const DIRECTIVE_LINE_PREFIX_RE = /^\s*(?:[-*+]\s+|\d+[.)]\s+)?/;
 const MARKDOWN_HEADING_RE = /^\s*#+\s+/;
 const MAX_REGEX_PATTERN_CHARS = 300;
@@ -219,6 +224,210 @@ function validateRegexPattern(pattern: string, label: string): string | null {
   return null;
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function booleanOrDefault(value: unknown, fallback: boolean): boolean {
+  return typeof value === "boolean" ? value : fallback;
+}
+
+function parseHarnessCondition(
+  raw: unknown,
+): { condition: HarnessRuleCondition; warning?: string } {
+  if (!isRecord(raw)) return { condition: {} };
+  const condition: HarnessRuleCondition = {};
+
+  const userMessageMatches = nonEmptyString(
+    raw.user_message_matches ?? raw.userMessageMatches,
+  );
+  if (userMessageMatches) {
+    const warning = validateRegexPattern(
+      userMessageMatches,
+      "user_message_matches",
+    );
+    if (warning) return { condition, warning };
+    condition.userMessageMatches = userMessageMatches;
+  }
+
+  const userMessageIncludes = raw.user_message_includes ?? raw.userMessageIncludes;
+  if (Array.isArray(userMessageIncludes)) {
+    const includes = userMessageIncludes
+      .map((item) => nonEmptyString(item))
+      .filter((item): item is string => item !== null)
+      .slice(0, 20);
+    if (includes.length > 0) condition.userMessageIncludes = includes;
+  }
+
+  const toolName = nonEmptyString(raw.tool_name ?? raw.toolName);
+  if (toolName) condition.toolName = toolName;
+
+  const anyToolUsed = raw.any_tool_used ?? raw.anyToolUsed;
+  if (Array.isArray(anyToolUsed)) {
+    const tools = anyToolUsed
+      .map((item) => nonEmptyString(item))
+      .filter((item): item is string => item !== null)
+      .slice(0, 50);
+    if (tools.length > 0) condition.anyToolUsed = tools;
+  }
+
+  return { condition };
+}
+
+function parseHarnessAction(raw: unknown): {
+  action?: HarnessRuleAction;
+  warning?: string;
+} {
+  if (!isRecord(raw)) {
+    return { warning: "require/action block is missing" };
+  }
+
+  const directType = nonEmptyString(raw.type);
+  if (directType === "require_tool") {
+    const toolName = nonEmptyString(raw.toolName ?? raw.tool_name ?? raw.tool);
+    if (!toolName) return { warning: "require_tool action is missing toolName" };
+    return { action: { type: "require_tool", toolName } };
+  }
+
+  if (directType === "llm_verifier") {
+    const prompt = nonEmptyString(raw.prompt);
+    if (!prompt) return { warning: "llm_verifier action is missing prompt" };
+    return { action: makeVerifierAction(prompt) };
+  }
+
+  if (directType === "block") {
+    const reason = nonEmptyString(raw.reason);
+    if (!reason) return { warning: "block action is missing reason" };
+    return { action: { type: "block", reason } };
+  }
+
+  const toolName = nonEmptyString(raw.tool ?? raw.toolName ?? raw.tool_name);
+  const commandPattern = nonEmptyString(
+    raw.input_command_matches ?? raw.inputCommandMatches,
+  );
+  const genericPattern = nonEmptyString(raw.pattern ?? raw.input_matches);
+  const inputPath =
+    nonEmptyString(raw.input_path ?? raw.inputPath) ??
+    (commandPattern ? "command" : null);
+  const pattern = commandPattern ?? genericPattern;
+
+  if (toolName && inputPath && pattern) {
+    if (inputPath.length > MAX_INPUT_PATH_CHARS) {
+      return { warning: "input path is too long" };
+    }
+    const warning = validateRegexPattern(
+      pattern,
+      commandPattern ? "input_command_matches" : "pattern",
+    );
+    if (warning) return { warning };
+    return {
+      action: {
+        type: "require_tool_input_match",
+        toolName,
+        inputPath,
+        pattern,
+      },
+    };
+  }
+
+  return { warning: "unsupported harness action" };
+}
+
+function parseStructuredHarnessRule(
+  raw: unknown,
+  index: number,
+): { rule?: HarnessRule; warning?: string } {
+  if (!isRecord(raw)) {
+    return { warning: `ignored harness rule ${index + 1}: rule must be an object` };
+  }
+
+  const id = nonEmptyString(raw.id) ?? `config-harness-rule-${index + 1}`;
+  const trigger = nonEmptyString(raw.trigger) ?? "beforeCommit";
+  if (trigger !== "beforeCommit" && trigger !== "afterToolUse") {
+    return { warning: `ignored harness rule ${id}: unsupported trigger ${trigger}` };
+  }
+
+  const enforcement = nonEmptyString(raw.enforcement) ?? "block_on_fail";
+  if (enforcement !== "audit" && enforcement !== "block_on_fail") {
+    return {
+      warning: `ignored harness rule ${id}: unsupported enforcement ${enforcement}`,
+    };
+  }
+
+  const conditionResult = parseHarnessCondition(raw.when ?? raw.condition);
+  if (conditionResult.warning) {
+    return { warning: `ignored harness rule ${id}: ${conditionResult.warning}` };
+  }
+
+  const actionResult = parseHarnessAction(raw.require ?? raw.action);
+  if (actionResult.warning || !actionResult.action) {
+    return {
+      warning: `ignored harness rule ${id}: ${actionResult.warning ?? "invalid action"}`,
+    };
+  }
+
+  const timeoutMs =
+    typeof raw.timeoutMs === "number" && Number.isFinite(raw.timeoutMs)
+      ? Math.min(10_000, Math.max(500, Math.trunc(raw.timeoutMs)))
+      : 2_000;
+
+  return {
+    rule: {
+      id,
+      sourceText: `agent.config.yaml:harness_rules.${id}`,
+      enabled: booleanOrDefault(raw.enabled, true),
+      trigger,
+      condition:
+        Object.keys(conditionResult.condition).length > 0
+          ? conditionResult.condition
+          : undefined,
+      action: actionResult.action,
+      enforcement,
+      timeoutMs,
+    },
+  };
+}
+
+async function loadStructuredHarnessRules(
+  workspace: Workspace,
+): Promise<{ rules: HarnessRule[]; warnings: string[] }> {
+  let raw: string;
+  try {
+    raw = await fs.readFile(path.join(workspace.root, AGENT_CONFIG_REL), "utf8");
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") {
+      return { rules: [], warnings: [] };
+    }
+    return {
+      rules: [],
+      warnings: [`failed to read ${AGENT_CONFIG_REL}: ${(err as Error).message}`],
+    };
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = parseYaml(raw);
+  } catch (err) {
+    return {
+      rules: [],
+      warnings: [`failed to parse ${AGENT_CONFIG_REL}: ${(err as Error).message}`],
+    };
+  }
+  if (!isRecord(parsed)) return { rules: [], warnings: [] };
+
+  const rawRules = parsed.harness_rules ?? parsed.harnessRules;
+  if (!Array.isArray(rawRules)) return { rules: [], warnings: [] };
+
+  const rules: HarnessRule[] = [];
+  const warnings: string[] = [];
+  for (const [index, rawRule] of rawRules.entries()) {
+    const result = parseStructuredHarnessRule(rawRule, index);
+    if (result.warning) warnings.push(result.warning);
+    if (result.rule) rules.push(result.rule);
+  }
+  return { rules, warnings };
+}
+
 function compileHarnessRule(line: string): HarnessRule | null {
   if (
     /(?=.*(?:파일|문서|리포트|보고서|artifact|file|document|report))(?=.*(?:만들|생성|작성|create|generate|write))(?=.*(?:첨부|채팅|전달|attach|attachment|deliver|send))/i.test(
@@ -293,11 +502,7 @@ function compileHarnessRule(line: string): HarnessRule | null {
 }
 
 function addHarnessRule(policy: RuntimePolicy, rule: HarnessRule): void {
-  const index = policy.harnessRules.findIndex((existing) => existing.id === rule.id);
-  if (index >= 0) {
-    policy.harnessRules[index] = rule;
-    return;
-  }
+  if (policy.harnessRules.some((existing) => existing.id === rule.id)) return;
   policy.harnessRules.push(rule);
 }
 
@@ -551,12 +756,186 @@ function parseUserRules(identity: WorkspaceIdentity): RuntimePolicySnapshot {
   };
 }
 
+export interface AgentConfigExtensions {
+  disableBuiltinHooks: string[];
+  customHooks?: ExternalHookConfig;
+}
+
+export async function loadAgentConfigExtensions(
+  workspace: Workspace,
+): Promise<{ extensions: AgentConfigExtensions; warnings: string[] }> {
+  const warnings: string[] = [];
+  const extensions: AgentConfigExtensions = { disableBuiltinHooks: [] };
+
+  let raw: string;
+  try {
+    raw = await fs.readFile(
+      path.join(workspace.root, AGENT_CONFIG_REL),
+      "utf8",
+    );
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") {
+      return { extensions, warnings };
+    }
+    return {
+      extensions,
+      warnings: [
+        `failed to read ${AGENT_CONFIG_REL}: ${(err as Error).message}`,
+      ],
+    };
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = parseYaml(raw);
+  } catch (err) {
+    return {
+      extensions,
+      warnings: [
+        `failed to parse ${AGENT_CONFIG_REL}: ${(err as Error).message}`,
+      ],
+    };
+  }
+  if (!isRecord(parsed)) return { extensions, warnings };
+
+  // disable_builtin_hooks
+  const disableList =
+    parsed.disable_builtin_hooks ?? parsed.disableBuiltinHooks;
+  if (Array.isArray(disableList)) {
+    extensions.disableBuiltinHooks = disableList
+      .filter(
+        (item): item is string =>
+          typeof item === "string" && item.trim().length > 0,
+      )
+      .map((item) => item.trim());
+  }
+
+  // custom_hooks
+  const customHooks = parsed.custom_hooks ?? parsed.customHooks;
+  if (isRecord(customHooks)) {
+    const dir = nonEmptyString(customHooks.directory) ?? "./hooks";
+    const autoDiscover =
+      typeof customHooks.auto_discover === "boolean"
+        ? customHooks.auto_discover
+        : true;
+    const hooks: Array<{
+      file: string;
+      enabled?: boolean;
+      priority?: number;
+      config?: Record<string, unknown>;
+    }> = [];
+
+    const hooksList = customHooks.hooks;
+    if (Array.isArray(hooksList)) {
+      for (const hookEntry of hooksList) {
+        if (!isRecord(hookEntry)) continue;
+        const file = nonEmptyString(hookEntry.file);
+        if (!file) {
+          warnings.push("custom_hooks entry missing file field");
+          continue;
+        }
+        hooks.push({
+          file,
+          enabled:
+            typeof hookEntry.enabled === "boolean"
+              ? hookEntry.enabled
+              : undefined,
+          priority:
+            typeof hookEntry.priority === "number"
+              ? hookEntry.priority
+              : undefined,
+          config: isRecord(hookEntry.config)
+            ? (hookEntry.config as Record<string, unknown>)
+            : undefined,
+        });
+      }
+    }
+
+    extensions.customHooks = {
+      directory: dir,
+      autoDiscover,
+      hooks: hooks.length > 0 ? hooks : undefined,
+    };
+  }
+
+  return { extensions, warnings };
+}
+
+export async function loadClassifierDimensions(
+  workspace: Workspace,
+): Promise<{ dimensions: ClassifierDimensionDef[]; warnings: string[] }> {
+  const warnings: string[] = [];
+  const dimensions: ClassifierDimensionDef[] = [];
+
+  let raw: string;
+  try {
+    raw = await fs.readFile(path.join(workspace.root, AGENT_CONFIG_REL), "utf8");
+  } catch {
+    return { dimensions, warnings };
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = parseYaml(raw);
+  } catch {
+    return { dimensions, warnings };
+  }
+  if (!isRecord(parsed)) return { dimensions, warnings };
+
+  const rawDims = parsed.classifier_dimensions ?? parsed.classifierDimensions;
+  if (!isRecord(rawDims)) return { dimensions, warnings };
+
+  for (const phase of ["request", "finalAnswer"] as const) {
+    const phaseKey = phase === "finalAnswer" ? "final_answer" : phase;
+    const rawList =
+      (rawDims as Record<string, unknown>)[phaseKey] ??
+      (rawDims as Record<string, unknown>)[phase];
+    if (!Array.isArray(rawList)) continue;
+
+    for (const entry of rawList) {
+      if (!isRecord(entry)) continue;
+      const name = nonEmptyString(entry.name);
+      if (!name) {
+        warnings.push("classifier dimension missing name");
+        continue;
+      }
+      const schema = entry.schema;
+      if (!isRecord(schema)) {
+        warnings.push(`classifier dimension ${name} missing schema`);
+        continue;
+      }
+      const instructions = nonEmptyString(entry.instructions);
+      if (!instructions) {
+        warnings.push(`classifier dimension ${name} missing instructions`);
+        continue;
+      }
+
+      const schemaMap: Record<string, string> = {};
+      for (const [k, v] of Object.entries(schema)) {
+        schemaMap[k] = typeof v === "string" ? v : String(v);
+      }
+
+      dimensions.push({ name, phase, schema: schemaMap, instructions });
+    }
+  }
+
+  return { dimensions, warnings };
+}
+
 export class PolicyKernel {
   constructor(private readonly workspace: Workspace) {}
 
   async current(): Promise<RuntimePolicySnapshot> {
     const identity = await this.workspace.loadIdentity();
-    return parseUserRules(identity);
+    const snapshot = parseUserRules(identity);
+    const structured = await loadStructuredHarnessRules(this.workspace);
+    for (const rule of structured.rules) {
+      addHarnessRule(snapshot.policy, rule);
+    }
+    snapshot.status.warnings.push(...structured.warnings);
+    snapshot.status.harnessDirectives =
+      snapshot.policy.harnessRules.map(harnessDirective);
+    return snapshot;
   }
 
   async status(): Promise<RuntimePolicyStatus> {

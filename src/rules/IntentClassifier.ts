@@ -123,7 +123,7 @@ export interface FilterInput {
 }
 
 export function filterToolsByIntent<
-  T extends { name: string; tags?: string[]; kind?: "core" | "skill" },
+  T extends { name: string; tags?: string[]; kind?: "core" | "skill" | "external" },
 >(tools: T[], intentTags: string[], maxTotal = 15): T[] {
   const core = tools.filter((t) => t.kind !== "skill");
   const skills = tools.filter((t) => t.kind === "skill");

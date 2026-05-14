@@ -35,9 +35,9 @@ export async function loadAndRegisterUserTools(
   config: MagiConfigData,
   workspaceRoot?: string,
 ): Promise<UserToolRegistrationResult> {
-  // 1. Apply disable_builtin — unregister named builtin tools
+  // 1. Apply disable_builtin — disable named builtin tools
   for (const name of config.tools.disable_builtin) {
-    registry.unregister(name);
+    registry.disable(name);
   }
 
   // 2. Load user tools from filesystem

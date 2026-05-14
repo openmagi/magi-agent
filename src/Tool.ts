@@ -79,6 +79,14 @@ export interface ToolContext {
    */
   currentUserMessage?: UserMessage;
   /**
+   * Set of workspace-relative paths (or directory prefixes) that have
+   * been read in this session via FileRead, Grep, or Glob. Write tools
+   * (FileEdit, FileWrite) check this set before executing — if the
+   * target file hasn't been read, the tool returns an error forcing the
+   * model to read first. Undefined = guard disabled (backward compat).
+   */
+  filesRead?: Set<string>;
+  /**
    * Current LLM tool_use id when the tool is running inside a turn.
    * Tool-emitted AgentEvents can use this to attach structured previews
    * to the matching tool activity on the client.
@@ -156,7 +164,7 @@ export interface Tool<I = unknown, O = unknown> {
   availableInModes?: ("plan" | "act")[];
   /** "core" tools are always loaded; "skill" tools go through intent
    * filtering (§9.8 P2/P3). Defaults to "core" when unset. */
-  kind?: "core" | "skill";
+  kind?: "core" | "skill" | "external";
   /** Intent tags used by the classifier to decide whether to expose
    * this tool in a given turn's tools[] (§9.8 P2). */
   tags?: string[];

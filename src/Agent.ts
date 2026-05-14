@@ -37,6 +37,8 @@ import { Workspace } from "./storage/Workspace.js";
 import { AuditLog } from "./storage/AuditLog.js";
 import { sessionFileName } from "./storage/TranscriptReader.js";
 import { ToolRegistry } from "./tools/ToolRegistry.js";
+import { loadExternalTools } from "./tools/ExternalToolLoader.js";
+import { loadAgentConfigFile } from "./config/AgentConfigFile.js";
 import { IntentClassifier } from "./rules/IntentClassifier.js";
 import { HookRegistry } from "./hooks/HookRegistry.js";
 import { clearCircuitBreakerState } from "./hooks/builtin/repeatedFailureGuard.js";
@@ -743,6 +745,18 @@ export class Agent {
     return false;
   }
 
+  private turnSnapshotService?: import("./checkpoint/TurnSnapshotService.js").TurnSnapshotService;
+
+  setTurnSnapshotService(
+    svc: import("./checkpoint/TurnSnapshotService.js").TurnSnapshotService,
+  ): void {
+    this.turnSnapshotService = svc;
+  }
+
+  getTurnSnapshotService(): import("./checkpoint/TurnSnapshotService.js").TurnSnapshotService | undefined {
+    return this.turnSnapshotService;
+  }
+
   markGoalMissionCancelled(missionId: string): boolean {
     if (this.cancelledGoalMissionIds.has(missionId)) return false;
     this.cancelledGoalMissionIds.add(missionId);
@@ -1110,10 +1124,54 @@ export class Agent {
       skipped: hookResult.skipped,
     });
 
+    if (hookResult.turnSnapshotService) {
+      this.setTurnSnapshotService(hookResult.turnSnapshotService);
+    }
+
     try {
       await this.reloadWorkspaceSkills();
     } catch (err) {
       agentLogger.warn("skill_load_failed", { error: (err as Error).message });
+    }
+
+    // Apply tool disable list + load external tools from agent.config.yaml
+    try {
+      const { config: agentConfig, warnings: agentConfigWarnings } =
+        await loadAgentConfigFile(this.config.workspaceRoot);
+      for (const w of agentConfigWarnings) {
+        agentLogger.warn("agent_config_warning", { warning: w });
+      }
+      for (const toolName of agentConfig.tools.disabled) {
+        this.tools.disable(toolName);
+        agentLogger.info("tool_disabled_by_config", { tool: toolName });
+      }
+
+      // Load external tools from workspace and configured dirs
+      const toolDirs = [
+        path.join(this.config.workspaceRoot, "tools"),
+        ...agentConfig.tools.externalDirs.map((d) => path.resolve(this.config.workspaceRoot, d)),
+      ];
+      const trustedDirs = agentConfig.tools.trustedDirs.map((d) =>
+        path.resolve(this.config.workspaceRoot, d),
+      );
+      const { tools: externalTools, result: externalResult } = await loadExternalTools(
+        toolDirs,
+        trustedDirs,
+        (level, msg, data) => agentLogger[level](msg, data),
+      );
+      for (const tool of externalTools) {
+        try {
+          this.tools.register(tool);
+        } catch {
+          this.tools.replace(tool);
+        }
+      }
+      agentLogger.info("external_tools_loaded", {
+        loaded: externalResult.loaded,
+        failed: externalResult.failed.length,
+      });
+    } catch (err) {
+      agentLogger.warn("external_tools_init_failed", { error: (err as Error).message });
     }
 
     // Cron scheduler — hydrate persisted cron records then wire the
