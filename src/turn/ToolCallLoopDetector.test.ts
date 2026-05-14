@@ -132,4 +132,55 @@ describe("ToolCallLoopDetector", () => {
     expect(r.count).toBe(3);
     expect(r.action).toBe("soft_warning");
   });
+
+  describe("frequency-based detection", () => {
+    it("triggers soft_warning at frequencySoftThreshold even with different params", () => {
+      const d = new ToolCallLoopDetector({ frequencySoftThreshold: 3, frequencyHardThreshold: 6 });
+      d.check("FileRead", { path: "a.ts" });
+      d.check("FileRead", { path: "b.ts" });
+      const r = d.check("FileRead", { path: "c.ts" });
+      expect(r.action).toBe("soft_warning");
+      expect(r.frequencyCount).toBe(3);
+      expect(r.count).toBe(1); // consecutive count is 1 (different params each time)
+    });
+
+    it("triggers hard_escalation at frequencyHardThreshold", () => {
+      const d = new ToolCallLoopDetector({ frequencySoftThreshold: 2, frequencyHardThreshold: 4 });
+      for (let i = 0; i < 4; i++) d.check("Grep", { pattern: `p${i}` });
+      expect(d.getToolNameCount("Grep")).toBe(4);
+    });
+
+    it("getToolNameCount returns 0 for unknown tool", () => {
+      const d = new ToolCallLoopDetector();
+      expect(d.getToolNameCount("Unknown")).toBe(0);
+    });
+
+    it("reset clears frequency counts", () => {
+      const d = new ToolCallLoopDetector({ frequencySoftThreshold: 3 });
+      d.check("FileRead", { path: "a.ts" });
+      d.check("FileRead", { path: "b.ts" });
+      d.reset();
+      expect(d.getToolNameCount("FileRead")).toBe(0);
+    });
+
+    it("consecutive hard_escalation takes priority over frequency soft_warning", () => {
+      const d = new ToolCallLoopDetector({
+        softThreshold: 3, hardThreshold: 5,
+        frequencySoftThreshold: 4, frequencyHardThreshold: 10,
+      });
+      for (let i = 0; i < 5; i++) d.check("FileRead", { path: "a.ts" });
+      // consecutive=5 (hard) vs frequency=5 (soft) → hard wins
+      const r = d.check("FileRead", { path: "a.ts" });
+      expect(r.action).toBe("hard_escalation");
+      expect(r.frequencyCount).toBeUndefined();
+    });
+
+    it("frequencyCount is set when frequency triggers the action", () => {
+      const d = new ToolCallLoopDetector({ frequencySoftThreshold: 2, frequencyHardThreshold: 10 });
+      d.check("Bash", { command: "ls" });
+      const r = d.check("Bash", { command: "pwd" });
+      expect(r.action).toBe("soft_warning");
+      expect(r.frequencyCount).toBe(2);
+    });
+  });
 });
