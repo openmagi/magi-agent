@@ -30,6 +30,9 @@
  */
 
 import path from "node:path";
+import { createLogger } from "../util/logger.js";
+
+const childLogger = createLogger("ChildAgentLoop");
 import type { Agent } from "../Agent.js";
 import type {
   AskUserQuestionInput,
@@ -529,6 +532,7 @@ export async function runChildAgentLoop(
   let toolCallCount = 0;
   let deferralRetryUsed = false;
   const deadline = Date.now() + opts.timeoutMs;
+  const childTurnStartedAt = Date.now();
   const childTranscript: TranscriptEntry[] = [];
   const effectiveTurnId = childTurnId(opts);
 
@@ -594,6 +598,21 @@ export async function runChildAgentLoop(
           ? "Thinking through delegated task"
           : `Continuing delegated task pass ${iter + 1}`,
       );
+      const childLlmStartedAt = Date.now();
+      const childPayloadSize = JSON.stringify(messages).length + system.length;
+      childLogger.info("child_llm_start", {
+        taskId: opts.taskId, parentTurnId: opts.parentTurnId, traceId: opts.traceId,
+        iter, model: effectiveModel, payloadSize: childPayloadSize, messageCount: messages.length,
+      });
+      opts.onAgentEvent?.({
+        type: "child_llm_start",
+        taskId: opts.taskId,
+        parentTurnId: opts.parentTurnId,
+        childTurnId: effectiveTurnId,
+        traceId: opts.traceId,
+        iter,
+        model: effectiveModel,
+      });
 
       if (hooks) {
         const preLLM = await hooks.runPre(
@@ -639,7 +658,25 @@ export async function runChildAgentLoop(
         system,
         messages,
         toolDefs,
+        opts.traceId ? { traceId: opts.traceId } : undefined,
       );
+      const childLlmDurationMs = Date.now() - childLlmStartedAt;
+      childLogger.info("child_llm_end", {
+        taskId: opts.taskId, parentTurnId: opts.parentTurnId, traceId: opts.traceId,
+        iter, model: effectiveModel, stopReason, durationMs: childLlmDurationMs,
+        payloadSize: childPayloadSize, messageCount: messages.length,
+      });
+      opts.onAgentEvent?.({
+        type: "child_llm_end",
+        taskId: opts.taskId,
+        parentTurnId: opts.parentTurnId,
+        childTurnId: effectiveTurnId,
+        traceId: opts.traceId,
+        iter,
+        model: effectiveModel,
+        stopReason,
+        durationMs: childLlmDurationMs,
+      });
       assistantBlocks.push(...blocks);
       if (hooks) {
         void hooks.runPost(
@@ -741,6 +778,21 @@ export async function runChildAgentLoop(
       }
 
       toolCallCount += toolUses.length;
+      const toolNames = toolUses.map((toolUse) => toolUse.name);
+      const toolLabel = toolNames.length <= 3
+        ? toolNames.join(", ")
+        : `${toolNames.slice(0, 3).join(", ")} +${toolNames.length - 3}`;
+      await opts.lifecycle?.progress(toolLabel);
+      opts.onAgentEvent?.({
+        type: "child_tool_batch_start",
+        taskId: opts.taskId,
+        parentTurnId: opts.parentTurnId,
+        childTurnId: effectiveTurnId,
+        traceId: opts.traceId,
+        iter,
+        toolCount: toolUses.length,
+        toolNames,
+      });
       const results = await runChildTools({
         toolUses,
         toolsByName,
@@ -782,6 +834,12 @@ export async function runChildAgentLoop(
     await opts.lifecycle?.failed(msg);
     throw new SpawnChildPartialError(msg, partialResult);
   } finally {
+    childLogger.info("child_turn_end", {
+      taskId: opts.taskId, parentTurnId: opts.parentTurnId, traceId: opts.traceId,
+      persona: opts.persona, model: effectiveModel,
+      totalMs: Date.now() - childTurnStartedAt,
+      toolCallCount, abortReason,
+    });
     clearTimeout(timer);
     if (parentAbortListenerRegistered) {
       opts.abortSignal.removeEventListener("abort", onParentAbort);

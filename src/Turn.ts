@@ -476,8 +476,13 @@ export class Turn {
     // injection_queued events to the client during this turn.
     this.session.setActiveSse(this.sse);
 
+    const turnStartedAt = Date.now();
+    let totalLlmMs = 0;
+    let totalToolMs = 0;
+    let finalIter = 0;
     try {
       for (let iter = 0; iter < Turn.MAX_ITERATIONS; iter++) {
+        finalIter = iter;
         this.acceptingSteerInjections = true;
         this.throwIfInterrupted();
         heartbeat.start(iter);
@@ -557,6 +562,7 @@ export class Turn {
         let blocks: LLMContentBlock[];
         let stopReason: Awaited<ReturnType<typeof readOneStream>>["stopReason"];
         let usage: LLMUsage;
+        const llmStartedAt = Date.now();
         try {
           const systemForLLM = maybeCacheOptimize(systemPrompt, effectiveModel);
           const sanitizedMessages = sanitizeMessagesForLLM(messages);
@@ -567,7 +573,9 @@ export class Turn {
             systemForLLM, sanitizedMessages, toolDefs,
             this.readOptions(),
           ));
+          totalLlmMs += Date.now() - llmStartedAt;
         } catch (err) {
+          totalLlmMs += Date.now() - llmStartedAt;
           if (err instanceof TurnSteerResumeError) {
             this.forceNoThinking = false;
             this.clearUserVisibleDraftForSteerResume(sse, err.source);
@@ -777,9 +785,12 @@ export class Turn {
         // decision.kind === "run_tools"
         this.throwIfInterrupted();
         let dispatched: ToolDispatchResult[];
+        const toolsStartedAt = Date.now();
         try {
           dispatched = await this.runToolsVia(sse, decision.toolUses, toolDefs);
+          totalToolMs += Date.now() - toolsStartedAt;
         } catch (err) {
+          totalToolMs += Date.now() - toolsStartedAt;
           if (err instanceof UnknownToolLoopError) {
             // Gap §11.3 — hallucination loop. Stop_reason + SSE text
             // already emitted by the dispatcher; abort the turn.
@@ -816,6 +827,21 @@ export class Turn {
       this.session.setActiveSse(null);
       heartbeat.stop();
       await sessionHeartbeat.stop().catch(() => {});
+      const turnTotalMs = Date.now() - turnStartedAt;
+      const overheadMs = turnTotalMs - totalLlmMs - totalToolMs;
+      turnLogger.info("turn_end", {
+        turnId: this.meta.turnId,
+        sessionKey: this.session.meta.sessionKey,
+        model: this.currentModel(),
+        iterationCount: finalIter + 1,
+        turnTotalMs,
+        totalLlmMs,
+        totalToolMs,
+        overheadMs,
+        llmPct: turnTotalMs > 0 ? Math.round((totalLlmMs / turnTotalMs) * 100) : 0,
+        toolPct: turnTotalMs > 0 ? Math.round((totalToolMs / turnTotalMs) * 100) : 0,
+        overheadPct: turnTotalMs > 0 ? Math.round((overheadMs / turnTotalMs) * 100) : 0,
+      });
     }
   }
 
