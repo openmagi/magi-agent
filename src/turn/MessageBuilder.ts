@@ -247,9 +247,48 @@ export function appendRuntimeModelIdentityContext(
     return;
   }
 
+  // Find a safe insertion point that does not split a tool_use/tool_result
+  // pair. Walk backwards from the end to find the first position where
+  // inserting a user message would not break tool pairing.
   const identityMessage: LLMMessage = { role: "user", content: [identityBlock] };
-  const insertAt = Math.max(0, messages.length - 1);
+  let insertAt = Math.max(0, messages.length - 1);
+
+  // Check if inserting at insertAt would split an assistant(tool_use) →
+  // user(tool_result) boundary. If so, search earlier.
+  while (insertAt > 0) {
+    const before = messages[insertAt - 1];
+    const after = messages[insertAt];
+    // If the message before insertAt is assistant with tool_use and
+    // the message at insertAt is user with tool_result, we'd break the pair.
+    if (
+      before &&
+      after &&
+      before.role === "assistant" &&
+      after.role === "user" &&
+      hasToolUseBlock(before) &&
+      hasToolResultBlock(after)
+    ) {
+      insertAt -= 1;
+      continue;
+    }
+    break;
+  }
+
   messages.splice(insertAt, 0, identityMessage);
+}
+
+function hasToolUseBlock(msg: LLMMessage): boolean {
+  return (
+    Array.isArray(msg.content) &&
+    msg.content.some((b) => b.type === "tool_use")
+  );
+}
+
+function hasToolResultBlock(msg: LLMMessage): boolean {
+  return (
+    Array.isArray(msg.content) &&
+    msg.content.some((b) => b.type === "tool_result")
+  );
 }
 
 function formatAttachmentsPreamble(

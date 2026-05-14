@@ -84,8 +84,9 @@ const DEFAULT_EMPTY_RESPONSE_FALLBACK_MODEL = "claude-haiku-4-5-20251001";
 const DEFAULT_RESPONSE_DEADLINE_FINALIZE_BUFFER_MS = 30_000;
 
 function isToolLoopDetectionEnabled(): boolean {
-  return process.env.MAGI_LOOP_DETECTION === "1" ||
-    process.env.MAGI_LOOP_DETECTION === "1";
+  const raw = process.env.MAGI_LOOP_DETECTION;
+  if (raw === "0" || raw === "false") return false;
+  return true;
 }
 
 function isCachePromptEnabled(): boolean {

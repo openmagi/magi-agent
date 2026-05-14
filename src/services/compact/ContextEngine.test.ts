@@ -861,7 +861,7 @@ describe("ContextEngine.buildMessagesFromTranscript — tool blocks", () => {
     expect(hasToolResult).toBe(true);
   });
 
-  it("strips tool_use when matching tool_result was merged after user text", () => {
+  it("keeps tool_use when matching tool_result was merged after user text (position-independent)", () => {
     const { client } = mockLLM(() => []);
     const engine = new ContextEngine(client);
 
@@ -876,8 +876,9 @@ describe("ContextEngine.buildMessagesFromTranscript — tool blocks", () => {
         },
       ]),
       // A later interrupted turn can merge the user's text before a
-      // same-id tool_result. That result is not "immediately after" the
-      // tool_use and must not keep the historical tool_use alive.
+      // same-id tool_result. After mergeConsecutiveSameRole, the user
+      // message contains [text, tool_result]. The position-independent
+      // scanner must still match the tool_result and keep both blocks.
       userEntry("t2", "어캐됐어", 4_000),
       toolResultEntry("t2", "functions.TaskOutput:0", "late result", 4_001),
     ];
@@ -886,16 +887,18 @@ describe("ContextEngine.buildMessagesFromTranscript — tool blocks", () => {
     const assistant = messages.find((msg) => msg.role === "assistant");
     expect(assistant).toBeDefined();
     expect(Array.isArray(assistant?.content)).toBe(true);
+    // tool_use should be kept because the tool_result matches
     expect((assistant?.content as Array<{ type: string }>).some(
       (block) => block.type === "tool_use",
-    )).toBe(false);
+    )).toBe(true);
 
     const last = messages[messages.length - 1]!;
     expect(last.role).toBe("user");
     expect(Array.isArray(last.content)).toBe(true);
     const userBlocks = last.content as Array<{ type: string; text?: string }>;
-    expect(userBlocks.map((block) => block.type)).toEqual(["text"]);
-    expect(userBlocks[0]?.text).toContain("어캐됐어");
+    // tool_result should be reordered before text
+    expect(userBlocks[0]?.type).toBe("tool_result");
+    expect(userBlocks.some((b) => b.type === "text" && b.text?.includes("어캐됐어"))).toBe(true);
   });
 
   it("deduplicates repeated tool_results for the same tool_use id", () => {
