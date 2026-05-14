@@ -85,6 +85,9 @@ export interface HookContext {
    * that need an LLM judge should use this instead of hardcoding a
    * model — Haiku misjudges Korean context and Opus-quality output. */
   readonly agentModel: string;
+  /** Fast, cheap model for classification/gating hooks. Falls back to
+   * agentModel when not configured. Override via MAGI_CLASSIFIER_MODEL. */
+  readonly classifierModel: string;
   /** Cancellation propagated from the turn. */
   readonly abortSignal: AbortSignal;
   /** Remaining time the hook has to return, in ms. */
@@ -299,4 +302,6 @@ export interface RegisteredHook<Point extends HookPoint = HookPoint> {
    * Default: false (fail-closed — legacy behaviour preserved).
    */
   failOpen?: boolean;
+  enabled?: boolean;
+  source?: "builtin" | "custom" | "runtime";
 }

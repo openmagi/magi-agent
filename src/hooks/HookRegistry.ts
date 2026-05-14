@@ -72,6 +72,27 @@ async function askUserWithTimeout(
   }
 }
 
+export interface HookStats {
+  totalRuns: number;
+  timeouts: number;
+  errors: number;
+  blocks: number;
+  avgDurationMs: number;
+  lastRunAt: number;
+}
+
+export interface HookInfo {
+  name: string;
+  point: HookPoint;
+  priority: number;
+  blocking: boolean;
+  enabled: boolean;
+  source: "builtin" | "custom" | "runtime";
+  failOpen: boolean;
+  timeoutMs?: number;
+  stats: HookStats;
+}
+
 export type PrePhaseOutcome<Point extends HookPoint> =
   | { action: "continue"; args: HookArgs[Point] }
   | { action: "block"; reason: string }
@@ -91,6 +112,7 @@ export class HookRegistry {
    */
   private readonly parsedIfCache = new WeakMap<RegisteredHook, ParsedRule>();
   private readonly malformedLogged = new WeakSet<RegisteredHook>();
+  private readonly stats = new Map<string, HookStats>();
 
   register<Point extends HookPoint>(hook: RegisteredHook<Point>): void {
     const list = this.hooks.get(hook.point) ?? [];
@@ -168,6 +190,68 @@ export class HookRegistry {
     return out;
   }
 
+  unregister(name: string): boolean {
+    let found = false;
+    for (const [point, list] of this.hooks.entries()) {
+      const filtered = list.filter((h) => {
+        if (h.name === name) {
+          // Only allow unregistering custom/runtime hooks
+          if (h.source === "builtin") return true;
+          found = true;
+          return false;
+        }
+        return true;
+      });
+      if (filtered.length !== list.length) this.hooks.set(point, filtered);
+    }
+    return found;
+  }
+
+  enable(name: string): void {
+    for (const list of this.hooks.values()) {
+      for (const hook of list) {
+        if (hook.name === name) hook.enabled = true;
+      }
+    }
+  }
+
+  disable(name: string): void {
+    for (const list of this.hooks.values()) {
+      for (const hook of list) {
+        if (hook.name === name) hook.enabled = false;
+      }
+    }
+  }
+
+  getStats(name: string): HookStats {
+    return this.stats.get(name) ?? { totalRuns: 0, timeouts: 0, errors: 0, blocks: 0, avgDurationMs: 0, lastRunAt: 0 };
+  }
+
+  listDetailed(point?: HookPoint): HookInfo[] {
+    const hooks = point ? (this.hooks.get(point) ?? []) : Array.from(this.hooks.values()).flat();
+    return hooks.map((h) => ({
+      name: h.name,
+      point: h.point,
+      priority: h.priority ?? 100,
+      blocking: h.blocking !== false,
+      enabled: h.enabled !== false,
+      source: h.source ?? "builtin",
+      failOpen: h.failOpen === true,
+      timeoutMs: h.timeoutMs,
+      stats: this.getStats(h.name),
+    }));
+  }
+
+  private recordStats(name: string, outcome: HookOutcome): void {
+    const s = this.stats.get(name) ?? { totalRuns: 0, timeouts: 0, errors: 0, blocks: 0, avgDurationMs: 0, lastRunAt: 0 };
+    s.totalRuns++;
+    s.lastRunAt = Date.now();
+    if (outcome.kind === "timeout") s.timeouts++;
+    if (outcome.kind === "error") s.errors++;
+    if (outcome.kind === "ok" && outcome.result && "action" in outcome.result && outcome.result.action === "block") s.blocks++;
+    this.stats.set(name, s);
+  }
+
   /**
    * Run pre-hooks for `point`. Returns either the (possibly mutated)
    * args to use for the phase, a block reason, or a skip signal.
@@ -186,6 +270,7 @@ export class HookRegistry {
     const matchCtx = this.buildMatchCtx(point, current);
 
     for (const hook of list) {
+      if (hook.enabled === false) continue;
       if (baseCtx.abortSignal.aborted) {
         return { action: "block", reason: "aborted" };
       }
@@ -217,6 +302,7 @@ export class HookRegistry {
         current,
         ctx,
       );
+      this.recordStats(hook.name, outcome);
       if (outcome.kind === "error" || outcome.kind === "timeout") {
         const errString = outcomeErrorString(outcome);
         if (hook.failOpen) {
@@ -379,7 +465,7 @@ export class HookRegistry {
 
     const matchCtx = this.buildMatchCtx(point, args);
     const applicable = list.filter((hook) =>
-      this.hookRuleMatches(hook, baseCtx, matchCtx),
+      hook.enabled !== false && this.hookRuleMatches(hook, baseCtx, matchCtx),
     );
     if (applicable.length === 0) return;
 

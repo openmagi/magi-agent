@@ -1,14 +1,14 @@
 /**
- * HTTP route: POST /api/hooks/from-natural-language
+ * Hook management routes — /v1/hooks + /api/hooks.
  *
- * Accepts a natural language rule description and returns a generated
- * hook configuration. Used by the dashboard frontend for the
- * "create hook from plain language" feature.
+ * Provides runtime introspection and control over registered hooks:
+ * list, detail, enable/disable, remove custom hooks, and NL→config.
  */
 
 import type { RouteHandler } from "./_helpers.js";
 import {
   route,
+  authorizeGateway,
   authorizeBearer,
   readJsonBody,
   writeJson,
@@ -60,6 +60,55 @@ function buildLLMFromCtx(ctx: HttpServerCtx): NLHookLLM {
 }
 
 export const hooksRoutes: RouteHandler[] = [
+  // GET /v1/hooks — list all hooks with stats
+  route("GET", /^\/v1\/hooks(\?|$)/, async (_req, res, _match, ctx) => {
+    if (!authorizeGateway(_req, res, ctx)) return;
+    const hooks = ctx.agent.hooks.listDetailed();
+    writeJson(res, 200, { hooks });
+  }),
+
+  // GET /v1/hooks/:name — single hook detail
+  route("GET", /^\/v1\/hooks\/([^/?]+)/, async (_req, res, match, ctx) => {
+    if (!authorizeGateway(_req, res, ctx)) return;
+    const name = decodeURIComponent(match[1] as string);
+    const all = ctx.agent.hooks.listDetailed();
+    const hook = all.find((h) => h.name === name);
+    if (!hook) {
+      writeJson(res, 404, { error: "not_found", message: `hook "${name}" not found` });
+      return;
+    }
+    writeJson(res, 200, { hook });
+  }),
+
+  // POST /v1/hooks/:name/disable
+  route("POST", /^\/v1\/hooks\/([^/?]+)\/disable/, async (_req, res, match, ctx) => {
+    if (!authorizeGateway(_req, res, ctx)) return;
+    const name = decodeURIComponent(match[1] as string);
+    ctx.agent.hooks.disable(name);
+    writeJson(res, 200, { ok: true, name, enabled: false });
+  }),
+
+  // POST /v1/hooks/:name/enable
+  route("POST", /^\/v1\/hooks\/([^/?]+)\/enable/, async (_req, res, match, ctx) => {
+    if (!authorizeGateway(_req, res, ctx)) return;
+    const name = decodeURIComponent(match[1] as string);
+    ctx.agent.hooks.enable(name);
+    writeJson(res, 200, { ok: true, name, enabled: true });
+  }),
+
+  // DELETE /v1/hooks/:name — remove custom hook (builtin rejected)
+  route("DELETE", /^\/v1\/hooks\/([^/?]+)/, async (_req, res, match, ctx) => {
+    if (!authorizeGateway(_req, res, ctx)) return;
+    const name = decodeURIComponent(match[1] as string);
+    const removed = ctx.agent.hooks.unregister(name);
+    if (!removed) {
+      writeJson(res, 400, { error: "cannot_remove", message: "builtin hooks cannot be removed" });
+      return;
+    }
+    writeJson(res, 200, { ok: true, removed: name });
+  }),
+
+  // POST /api/hooks/from-natural-language — NL→config
   route(
     "POST",
     /^\/api\/hooks\/from-natural-language$/,
