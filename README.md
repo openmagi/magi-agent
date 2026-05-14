@@ -3,58 +3,30 @@
 **The self-supervised agent framework. Your rules. Your agent. Zero fork.**
 
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
-[![TypeScript](https://img.shields.io/badge/TypeScript-5.x-3178c6.svg)](https://www.typescriptlang.org/)
+[![TypeScript](https://img.shields.io/badge/TypeScript-5.x-3178C6.svg)](https://www.typescriptlang.org/)
 [![Node.js](https://img.shields.io/badge/Node.js-%3E%3D20-339933.svg)](https://nodejs.org/)
 
----
+## What is Magi
 
-## What is Magi?
+Magi is an open-source agent framework with 60+ built-in hooks and tools that provide production-grade defaults for workspace control, memory, scheduled work, evidence gates, and deterministic checks.
 
-Magi is an open-source agent runtime where **you** define what "well-controlled" means.
-
-60+ built-in hooks provide production-grade defaults for evidence gates, deterministic checks, delivery safety, and memory. But the real power is that you add **your** hooks -- medical safety, legal compliance, financial regulation, content moderation -- without touching a line of core code. Drop a TypeScript file in `hooks/`, add a YAML dimension to `magi.config.yaml`, or describe a rule in plain language. The runtime enforces it.
+But the real power is that **you** add your own hooks, tools, classifiers, and gates — medical safety, legal compliance, financial regulation, content moderation — without touching a line of core code. You define what "well-controlled" means for your domain.
 
 Run it with Anthropic, OpenAI, Google, Ollama, LM Studio, vLLM, llama.cpp, LiteLLM, or any OpenAI-compatible endpoint.
 
-## Why hooks matter
+## Why Magi
 
 | | Traditional agents | Magi |
-|---|---|---|
-| Safety rules | Hardcoded by vendor | You define them |
-| Domain compliance | Not supported | YAML config or TypeScript |
-| Custom classifiers | Fork the code | Append to existing LLM call |
+| --- | --- | --- |
+| Safety rules | Hardcoded by vendor | You define them (hooks) |
+| Domain tools | Fork the codebase | `magi tool create` |
+| Custom classifiers | Not supported | YAML config, zero extra LLM calls |
 | Quality gates | One-size-fits-all | Per-project, per-domain |
-| Verification | Trust the model | Runtime evidence required |
+| Verification | Trust the model | Deterministic evidence contracts |
 
-Other agent frameworks decide what "safe" means for you. Magi gives you the control plane and lets you wire in whatever "safe" means in **your** domain.
+## Quick Start
 
-### What hooks actually catch
-
-We run 30+ autonomous bots in production. The most common failures are not dramatic -- they are plausible-sounding answers that happen to be wrong:
-
-- The agent reads a config showing `claude-opus-4-6`, reports "the system uses gpt-5.5"
-- Says "I fixed the bug and tests pass" without ever running `npm test`
-- Promises "I'll send the report later" and never does — no cron, no background task
-- Reads financial data, then reports wrong numbers in the answer
-
-None of these involve exceeding permissions. The agent had access to every tool. It chose not to use them, or used them and misreported the results. Permission gates are orthogonal to answer quality.
-
-These are the built-in hooks that catch each failure class:
-
-| Hook | Catches |
-|------|---------|
-| `deferralBlocker` | "I'll send it later" with no scheduled delivery |
-| `selfClaimVerifier` | Claims about files or data without supporting reads |
-| `factGroundingVerifier` | Tool results that contradict the stated answer |
-| `resourceExistenceChecker` | References to files never read |
-| `goalProgressGate` | Text-only responses to action requests |
-| `completionEvidenceGate` | "Fixed it" without running tests |
-| `answerVerifier` | Deflection, partial answers, or refusal |
-| `deterministicEvidenceVerifier` | Numeric/date claims not backed by tool evidence |
-
-[Full architecture comparison: how this differs from Claude Code →](https://openmagi.ai/blog/magi-vs-claude-code)
-
-## Quick start
+### Docker (recommended)
 
 ```bash
 git clone https://github.com/openmagi/magi-agent.git
@@ -66,49 +38,87 @@ docker compose up --build
 
 Open `http://localhost:8080/app` and paste the server token from `.env`.
 
-Or run from source as a CLI agent:
+### CLI
 
 ```bash
-npm install && npm run build
+npm install
+npm run build
 npx tsx src/cli/index.ts init
+```
+
+Interactive chat:
+
+```bash
 npx tsx src/cli/index.ts chat
 ```
 
-## Your first custom hook
+One-shot task:
 
-Create a hook in one command:
+```bash
+npx tsx src/cli/index.ts run "summarize workspace/knowledge"
+```
+
+Pipe input from another command or file:
+
+```bash
+cat notes.md | npx tsx src/cli/index.ts run --session notes
+```
+
+Run against a specific model or force plan mode:
+
+```bash
+npx tsx src/cli/index.ts run --model llama3.1 --plan "draft an implementation plan"
+```
+
+Serve the local HTTP API and browser app:
+
+```bash
+npx tsx src/cli/index.ts serve --port 8080
+```
+
+After npm publishing, the same surface is available as `magi-agent chat`,
+`magi-agent run`, and `magi-agent serve`.
+
+| Command | Use it for |
+| --- | --- |
+| `magi-agent init` | Generate `magi-agent.yaml` for hosted or local LLMs. |
+| `magi-agent chat` | Persistent interactive terminal session with Claude Code-style terminal chrome. |
+| `magi-agent run "task"` | Single task with streamed output. |
+| `magi-agent run --session name` | Reuse a named CLI session and memory context. |
+| `magi-agent run --model name --plan "task"` | Override the model for one task and start in plan mode. |
+| `magi-agent serve --port 8080` | Start the self-hosted app and HTTP runtime API. |
+
+## Your First Custom Hook
+
+Hooks let you inject domain-specific logic at any point in the agent lifecycle — before a tool runs, after a response, before a commit, on session start.
 
 ```bash
 magi hook create my-compliance-check --point beforeCommit
 ```
 
-This scaffolds `hooks/my-compliance-check.ts` and a test fixture:
+This scaffolds a hook in `./hooks/my-compliance-check/`:
 
 ```typescript
-import type { HookArgs, HookContext, HookResult, RegisteredHook } from "magi-agent/hooks/types";
+// hooks/my-compliance-check/index.ts
+import type { Hook, HookContext, HookResult } from "magi-agent";
 
-const hook: RegisteredHook<"beforeCommit"> = {
+const hook: Hook = {
   name: "my-compliance-check",
   point: "beforeCommit",
   priority: 100,
-  blocking: true,
-  timeoutMs: 5_000,
 
-  async handler(
-    args: HookArgs["beforeCommit"],
-    ctx: HookContext,
-  ): Promise<HookResult<HookArgs["beforeCommit"]> | void> {
-    const text = args.assistantText;
+  async execute(ctx: HookContext): Promise<HookResult> {
+    const response = ctx.pendingResponse;
 
-    // Your domain logic here. Block, warn, or continue.
-    if (text.includes("guaranteed returns")) {
+    // Your domain logic here
+    if (response.includes("guaranteed returns")) {
       return {
         action: "block",
-        reason: "Response contains prohibited financial guarantees.",
+        reason: "Response contains prohibited financial guarantee language",
       };
     }
 
-    return { action: "continue" };
+    return { action: "pass" };
   },
 };
 
@@ -118,204 +128,294 @@ export default hook;
 Test it:
 
 ```bash
-magi hook test my-compliance-check
+magi hook test my-compliance-check --input "This stock has guaranteed returns of 50%"
 ```
 
-List all hooks (built-in + yours):
+## Your First Custom Tool
+
+Custom tools use the same `Tool<I, O>` interface as built-in tools. They are first-class citizens, not plugin wrappers.
 
 ```bash
-magi hook list
+magi tool create medical-lookup --permission net
 ```
 
-No core code was modified. No fork needed. Your hook runs alongside the 60 built-in hooks at the priority you set.
+This scaffolds a tool in `./tools/medical-lookup/`:
 
-### Real-world examples included
+```
+tools/medical-lookup/
+  index.ts          # Tool implementation
+  manifest.yaml     # Metadata and permissions
+  medical-lookup.test.ts
+```
 
-See `examples/hooks/` for complete, runnable hooks:
+```typescript
+// tools/medical-lookup/index.ts
+import type { Tool, ToolInput, ToolOutput } from "magi-agent";
 
-- **`medical-safety.ts`** -- Blocks drug dosage recommendations without disclaimers
-- **`financial-compliance.ts`** -- Catches prohibited investment guarantees
-- **`content-moderation.ts`** -- Domain-specific content filtering
+interface MedicalLookupInput extends ToolInput {
+  drugName: string;
+  field?: "interactions" | "dosage" | "contraindications";
+}
 
-## Custom classifier dimensions
+interface MedicalLookupOutput extends ToolOutput {
+  drugName: string;
+  results: string[];
+  source: string;
+}
 
-Need the LLM classifier to evaluate a new dimension? Add it in YAML -- no code, no extra LLM calls:
+const tool: Tool<MedicalLookupInput, MedicalLookupOutput> = {
+  name: "MedicalLookup",
+  description: "Look up drug information from verified medical databases",
+  permission: "net",
+
+  inputSchema: {
+    type: "object",
+    properties: {
+      drugName: { type: "string", description: "Drug name to look up" },
+      field: {
+        type: "string",
+        enum: ["interactions", "dosage", "contraindications"],
+      },
+    },
+    required: ["drugName"],
+  },
+
+  async execute(input: MedicalLookupInput): Promise<MedicalLookupOutput> {
+    const response = await fetch(
+      `https://api.openfda.gov/drug/label.json?search=${input.drugName}`
+    );
+    const data = await response.json();
+
+    return {
+      drugName: input.drugName,
+      results: data.results?.map((r: Record<string, string[]>) =>
+        r[input.field ?? "interactions"]
+      ) ?? [],
+      source: "openFDA",
+    };
+  },
+};
+
+export default tool;
+```
+
+Test it:
+
+```bash
+magi tool test medical-lookup --input '{"drugName": "aspirin"}'
+```
+
+## Custom Classifier Dimensions
+
+Add domain-specific classifier dimensions without writing code. The classifier runs alongside the built-in request analysis with zero extra LLM calls — dimensions are evaluated from the same classification pass.
 
 ```yaml
 # magi.config.yaml
 classifier:
   custom_dimensions:
-    regulatory_risk:
-      phase: final_answer
-      prompt: |
-        Evaluate whether the response contains statements that could
-        constitute unregistered investment advice under SEC regulations.
-        Consider: specific stock recommendations, price predictions,
-        and "guaranteed return" language.
+    medical_safety:
+      phase: "request"
+      prompt: "Does this involve drug dosage or medical treatment recommendations?"
       output_schema:
-        risk_level: '"none" | "low" | "medium" | "high"'
-        flagged_phrases: "string[]"
+        containsDosage: boolean
+        containsTreatmentAdvice: boolean
+
+    financial_compliance:
+      phase: "request"
+      prompt: "Does this request involve specific investment advice or return guarantees?"
+      output_schema:
+        containsInvestmentAdvice: boolean
+        containsReturnGuarantee: boolean
 ```
 
-Custom dimensions piggyback on the existing classifier call. Zero additional LLM requests, zero code changes.
+Then use results in your hooks:
 
-## Natural language rules
-
-Don't know TypeScript? Describe your rule in plain English (or Korean):
-
-```markdown
-<!-- harness-rules/investment-disclaimer.md -->
-
-# Investment Disclaimer Rule
-
-Every response that discusses specific stocks, bonds, or investment
-products must include the disclaimer: "This is not financial advice.
-Consult a licensed financial advisor."
+```typescript
+async execute(ctx: HookContext): Promise<HookResult> {
+  const { containsDosage } = ctx.classifierResult.medical_safety;
+  if (containsDosage) {
+    return { action: "inject", content: "IMPORTANT: Verify all dosage information against official sources." };
+  }
+  return { action: "pass" };
+}
 ```
 
-```markdown
-<!-- harness-rules/medical-disclaimer.md -->
+## Natural Language Rules
 
-# 의료 면책 조항 규칙
+Define agent behavior rules in plain language. Magi converts them into executable hooks.
 
-약물 복용량, 투약 일정, 또는 구체적인 치료 방법을 언급하는 모든 응답에는
-반드시 "이 정보는 의료 전문가의 조언을 대체하지 않습니다"라는 면책 조항을
-포함해야 합니다.
+```bash
+magi hook create-from-rule "Block responses containing investment advice without disclaimers"
+magi hook create-from-rule "Require manager approval for any code deletion over 50 lines"
+magi hook create-from-rule "투자 조언이 포함된 응답에 면책조항 경고 추가"
 ```
 
-Drop a Markdown file in `harness-rules/` and the runtime promotes it into a gate. The PolicyKernel parses your rules and enforces them at `beforeCommit` or `afterToolUse`.
+Each command generates a typed hook with the rule logic, ready to customize:
+
+```bash
+# Generated: hooks/block-investment-advice-without-disclaimers/index.ts
+magi hook test block-investment-advice-without-disclaimers \
+  --input "You should buy AAPL, it will definitely go up 30% this quarter"
+```
+
+## Tool & Hook Configuration
+
+Configure hooks, tools, classifiers, and their interactions in `magi.config.yaml`:
+
+```yaml
+hooks:
+  disable_builtin:
+    - "builtin:output-purity-gate"
+  directory: "./hooks"
+
+tools:
+  disable_builtin:
+    - Browser
+  directory: "./tools"
+  packages:
+    - "@magi-tools/pubmed-search"
+
+classifier:
+  custom_dimensions:
+    medical_safety:
+      phase: "request"
+      prompt: "Does this involve drug dosage?"
+      output_schema:
+        containsDosage: boolean
+```
+
+Disable built-in hooks or tools that conflict with your domain. Load tools from local directories or published npm packages. All configuration is declarative — no code changes needed.
 
 ## Architecture
 
-### Hook lifecycle
-
-Every user request passes through a sequence of hook points. Your custom hooks slot in at any point, at any priority.
+### Hook Lifecycle
 
 ```
 User message
-  |
-  v
-[beforeTurnStart] ---- Can block the turn entirely
-  |
-  v
-[beforeLLMCall] ------ Modify system prompt, inject context
-  |
-  v
-  LLM generates response
-  |
-  v
-[afterLLMCall] ------- Inspect raw LLM output
-  |
-  v
-[beforeToolUse] ------ Gate individual tool calls
-  |
-  v
-  Tool executes
-  |
-  v
-[afterToolUse] ------- Inspect tool results, enforce policies
-  |
-  v
-  ... (repeat for each tool call) ...
-  |
-  v
-[beforeCommit] ------- Final quality gate before response delivery
-  |
-  v
-[afterCommit] -------- Post-delivery logging, analytics
-  |
-  v
-[afterTurnEnd] ------- Cleanup, memory flush
+  -> requestClassifier (+ custom dimensions)
+  -> onSessionStart / onTurnStart
+  -> beforeToolCall          ← your safety gates
+  -> [tool execution]
+  -> afterToolCall           ← your audit logging
+  -> beforeCommit            ← your quality gates
+  -> final response or retry
+  -> afterResponse           ← your compliance checks
+  -> onTurnEnd
 ```
 
-### Priority bands
+### Priority Bands
 
-Hooks execute in priority order (lower = earlier). Use these bands to position your hooks relative to built-in ones:
+Hooks run in priority order within each lifecycle point. Lower numbers run first.
 
-| Band | Priority | Purpose |
-|------|----------|---------|
-| Critical safety | 0-30 | Hard blocks, sealed file checks |
-| Verification | 30-60 | Evidence gates, fact grounding |
-| Quality | 60-90 | Answer verification, citation checks |
-| **Your hooks** | **80-120** | Domain compliance, custom gates |
-| Observation | 120-150 | Logging, analytics, memory |
-| Cleanup | 150+ | Post-turn housekeeping |
+| Band | Priority range | Purpose |
+| --- | --- | --- |
+| Critical | 0-49 | Security, safety blocks |
+| High | 50-99 | Compliance, regulatory checks |
+| Normal | 100-199 | Domain logic, custom gates |
+| Low | 200-299 | Logging, telemetry, analytics |
+| Passive | 300+ | Non-blocking observation |
 
-### Configuration at every level
+### Tool Permission Model
 
-```yaml
-# magi.config.yaml
-hooks:
-  directory: ./hooks                  # Project hooks
-  global_directory: ~/.magi/hooks     # Org-wide hooks
+Every tool declares its required permissions. The runtime enforces them before execution.
 
-  disable_builtin:
-    - factGroundingVerifier           # Turn off a built-in you don't need
+| Permission | Access |
+| --- | --- |
+| `none` | Pure computation, no side effects |
+| `fs:read` | Read files from workspace |
+| `fs:write` | Write files to workspace |
+| `net` | Network access (HTTP, WebSocket) |
+| `exec` | Execute shell commands |
+| `spawn` | Spawn child agents |
 
-  overrides:
-    medical-safety:
-      priority: 30                    # Promote to critical safety band
-      blocking: true
-      timeoutMs: 3000
-```
+Custom tools declare permissions in `manifest.yaml`. The agent operator can further restrict permissions per-project in `magi.config.yaml`.
 
 ## Features
 
-**Runtime**
-- 60+ built-in hooks: evidence gates, deterministic checks, delivery safety, anti-hallucination, citation verification
-- User-defined hooks: TypeScript files, auto-loaded from `hooks/` directory
-- Custom classifier dimensions: YAML-defined, zero extra LLM calls
-- Natural language rules: Markdown files in `harness-rules/` promoted to runtime gates
-- Hook CLI: `create`, `list`, `enable`, `disable`, `test`, `logs`
-- PolicyKernel: Markdown rules parsed into typed enforcement policies
+### Runtime
 
-**Agent capabilities**
-- Multi-provider LLM: Anthropic, OpenAI, Google, Ollama, LM Studio, vLLM, llama.cpp, LiteLLM
-- Hipocampus memory: time-structured memory with compaction (daily/weekly/monthly/root)
-- Local knowledge base: workspace KB with search, no external service needed
-- Deterministic tools: `Clock`, `DateRange`, `Calculation` keep facts out of model guesswork
-- Child agents: `SpawnAgent` with structured criteria and resource bindings
-- Cron-safe scheduling: delivery safety, deterministic cron control, background task lifecycle
-- Execution contracts: acceptance criteria, resource bindings, evidence tracking
+- **Evidence contracts:** completion can be blocked unless work has evidence attached to user criteria.
+- **Deterministic exactness:** `Clock`, `DateRange`, and `Calculation` tools keep dates, quantities, and arithmetic out of model guesswork.
+- **Cron-safe agents:** scheduled delivery safety, deterministic cron control, and background task lifecycle tracking.
+- **Spawn agents:** delegate bounded work to child agents with structured criteria and resource bindings.
+- **Hipocampus memory:** time-structured memory for durable context, session resume, and compaction.
 
-**Surfaces**
-- Browser app: self-hosted at `localhost:8080/app` with workspace, knowledge, artifacts, and runtime inspector
-- CLI: `magi chat`, `magi run`, `magi serve`
-- Desktop: PWA or Tauri build
-- Channels: Telegram, Discord, webhook
+### Extensibility
 
-## CLI reference
+- **Custom hooks:** add domain safety, compliance, and quality gates at any lifecycle point.
+- **Custom tools:** build first-class tools with the same `Tool<I, O>` interface as built-in tools.
+- **Custom classifiers:** add domain dimensions to the request classifier via YAML config, zero extra LLM calls.
+- **Natural language rules:** define agent behavior rules in plain language (English, Korean, any language).
+- **Operator harness rules:** Markdown rules promoted into runtime checks.
+- **Package ecosystem:** install published tool packages from npm.
 
-| Command | Purpose |
-|---|---|
-| `magi init` | Generate config for hosted or local LLMs |
-| `magi chat` | Interactive terminal session |
-| `magi run "task"` | Single task with streamed output |
-| `magi serve --port 8080` | Start the self-hosted app and HTTP API |
-| `magi hook create <name> --point <point>` | Scaffold a new hook |
-| `magi hook list` | List all registered hooks |
-| `magi hook test <name>` | Run hook test fixtures |
-| `magi hook enable/disable <name>` | Toggle hooks via config |
-| `magi hook logs <name>` | View hook execution history |
+### Agent Capabilities
+
+- **Any model:** hosted providers, local OpenAI-compatible servers, Ollama, LM Studio, vLLM, llama.cpp, and LiteLLM.
+- **Local knowledge base:** write and search project knowledge inside `workspace/knowledge`.
+- **60+ built-in tools:** file operations, search, code analysis, knowledge, artifacts, browser, and more.
+- **60+ built-in hooks:** security, safety, compliance, quality, and operational defaults.
+
+### Surfaces
+
+- **Browser app:** `http://localhost:8080/app` — chat, workspace files, runtime inspector, knowledge, artifacts, and evidence.
+- **CLI:** `magi-agent chat`, `magi-agent run`, `magi-agent serve` — terminal-native agent with Claude Code-style chrome.
+- **Desktop:** PWA or Tauri build for macOS, Windows, and Linux.
+- **Channels:** Telegram, Discord, webhook.
+- **HTTP API:** local `/v1/app/*` endpoints for programmatic access.
 
 ## Local LLMs
 
+The default config is local OpenAI-compatible. For Ollama on the host machine:
+
 ```bash
-ollama serve && ollama pull llama3.1
+ollama serve
+ollama pull llama3.1
 ```
 
-```env
+`.env`:
+
+```bash
 OPENAI_BASE_URL=http://host.docker.internal:11434/v1
 OPENAI_API_KEY=
 CORE_AGENT_ROUTING_MODE=direct
 CORE_AGENT_MODEL=llama3.1
+MAGI_AGENT_SERVER_TOKEN=change-me-local-token
 ```
 
-Works the same with LM Studio, vLLM, llama.cpp, LiteLLM, or any OpenAI-compatible server.
+`magi-agent.yaml`:
 
-## Managed platform
+```yaml
+llm:
+  provider: openai-compatible
+  model: ${CORE_AGENT_MODEL}
+  baseUrl: ${OPENAI_BASE_URL}
+  apiKey: ${OPENAI_API_KEY}
 
-[openmagi.ai](https://openmagi.ai) provides the hosted version with managed auth, billing, fleet provisioning, encrypted secrets, knowledge base storage, observability, and support. The open-source version gives you the part that matters most: the runtime, the hooks, and the workspace.
+server:
+  gatewayToken: ${MAGI_AGENT_SERVER_TOKEN}
+
+workspace: ./workspace
+```
+
+Use the same shape for LM Studio, vLLM, llama.cpp, LiteLLM, or another OpenAI-compatible server by changing `OPENAI_BASE_URL` and `CORE_AGENT_MODEL`.
+
+## Local Workspace
+
+```text
+workspace/
+  knowledge/       local KB documents
+  memory/          Hipocampus memory
+  artifacts/       generated outputs
+  skills/          user-installed skills
+  harness-rules/   Markdown runtime rules
+```
+
+Open-source deployments do not need an external Knowledge Base. Put Markdown, text, CSV, JSON, YAML, or HTML under `workspace/knowledge`, then use `KnowledgeSearch` or the app's Knowledge panel.
+
+## Managed Platform
+
+[openmagi.ai](https://openmagi.ai) adds managed accounts, hosted auth, billing, encrypted secrets, fleet provisioning, managed Knowledge Base storage, observability, and support. The open-source version gives builders the part that matters most: the runtime, the hooks, the tools, and the local workspace.
 
 ## Docs
 
@@ -323,6 +423,8 @@ Works the same with LM Studio, vLLM, llama.cpp, LiteLLM, or any OpenAI-compatibl
 - [Desktop app](docs/desktop-app.md)
 - [Open-source app plan](docs/plans/2026-05-04-open-source-agent-app.md)
 - [Runtime proof coverage map](docs/notes/2026-04-30-execution-discipline-coverage-map.md)
+- [Migration from Hermes](docs/MIGRATION-FROM-HERMES.md)
+- [Migration from legacy gateway](docs/MIGRATION-FROM-LEGACY-GATEWAY.md)
 
 ## License
 
