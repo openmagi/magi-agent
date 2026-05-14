@@ -53,13 +53,32 @@ import { matchSlashCommand } from "./slash/registry.js";
 const TERMINAL_ABORT_FALLBACK =
   "Warning: The run stopped before completion. No final answer was produced. Please retry.";
 
+function terminalAbortFallbackText(reason?: string): string {
+  if (
+    reason?.includes("GOAL_PROGRESS_EXECUTE_NEXT") ||
+    reason?.includes("INTERACTIVE_TOOL_REQUIRED")
+  ) {
+    return [
+      "Warning: The runtime verifier stopped this run because the assistant promised work without completing it.",
+      "No final answer was produced. Retry the request; the runtime will steer the agent to call the required tools before answering.",
+    ].join(" ");
+  }
+  return TERMINAL_ABORT_FALLBACK;
+}
+
+function isSilentVerifierAbortReason(reason?: string): boolean {
+  if (!reason) return false;
+  return isResearchProofBlockReason(reason) ||
+    reason.includes("GOAL_PROGRESS_EXECUTE_NEXT") ||
+    reason.includes("INTERACTIVE_TOOL_REQUIRED");
+}
+
 function emitTerminalAbortFallback(sse: SseWriter, reason?: string): void {
   sse.agent({ type: "response_clear" });
-  if (reason && isResearchProofBlockReason(reason)) {
-    sse.agent({ type: "text_delta", delta: researchProofFailureNoticeText(reason) });
+  if (isSilentVerifierAbortReason(reason)) {
     return;
   }
-  sse.agent({ type: "text_delta", delta: TERMINAL_ABORT_FALLBACK });
+  sse.agent({ type: "text_delta", delta: terminalAbortFallbackText(reason) });
 }
 
 /**
@@ -1228,6 +1247,24 @@ export class Session {
   ): Promise<void> {
     if (this.isGoalMissionCancelled(input.missionId)) return;
     const maxTurns = input.maxTurns ?? goalLoopMaxTurns();
+    const actionReason = input.reason ?? "restart_recovery";
+    const sourceEventType = input.sourceEventType ?? "retry_requested";
+    const restartRecovery = actionReason === "restart_recovery";
+    const triggerType = restartRecovery
+      ? "resume"
+      : sourceEventType === "retry_requested"
+        ? "retry"
+        : "resume";
+    const continuationReason = restartRecovery
+      ? "Restart recovery requested a fresh continuation."
+      : sourceEventType === "retry_requested"
+        ? "User requested a retry for this goal mission."
+        : "User unblocked this goal mission.";
+    const eventMessage = restartRecovery
+      ? "Goal mission resumed after restart"
+      : sourceEventType === "retry_requested"
+        ? "Goal mission retry requested by user"
+        : "Goal mission resumed by user";
     const resumeMessage = buildGoalContinuationMessage({
       objective: input.objective,
       title: input.title,
@@ -1237,12 +1274,15 @@ export class Session {
       maxTurns,
       previousAssistantText:
         input.resumeContext ?? "Runtime restarted before this goal finished.",
-      reason: "Restart recovery requested a fresh continuation.",
+      reason: continuationReason,
     });
     resumeMessage.metadata = {
       ...(resumeMessage.metadata ?? {}),
-      goalResumeAfterRestart: true,
+      goalResumeAfterRestart: restartRecovery,
       goalResumeActionEventId: input.actionEventId,
+      goalResumeActionReason: actionReason,
+      goalResumeSourceEventType: sourceEventType,
+      goalResumeTriggerType: triggerType,
       ...(input.startedAt ? { goalRestartedAt: input.startedAt } : {}),
       ...(input.sourceRequest ? { goalSourceRequest: input.sourceRequest } : {}),
     };
@@ -1250,10 +1290,12 @@ export class Session {
     await this.appendGoalMissionEvent({
       missionId: input.missionId,
       eventType: "resumed",
-      message: "Goal mission resumed after restart",
+      message: eventMessage,
       payload: {
         actionEventId: input.actionEventId,
-        reason: "restart_recovery",
+        reason: actionReason,
+        sourceEventType,
+        triggerType,
         ...(input.startedAt ? { startedAt: input.startedAt } : {}),
       },
     });

@@ -67,6 +67,8 @@ export interface RestartRecoveryResult {
 export interface GoalMissionResumeInput {
   actionEventId: string;
   missionId: string;
+  sourceEventType?: MissionActionEventType;
+  reason?: string;
   startedAt?: string;
   sessionKey: string;
   channel: {
