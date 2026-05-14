@@ -78,6 +78,9 @@ import type {
 } from "@/lib/chat/types";
 import type { PendingKbUpload } from "@/lib/chat/kb-uploads";
 import type { KbCollectionWithDocs, KbDocEntry } from "@/hooks/use-kb-docs";
+import { ToolsSettings } from "@/components/dashboard/tools-settings";
+import { HooksSettings } from "@/components/dashboard/hooks-settings";
+import { ClassifierSettings } from "@/components/dashboard/classifier-settings";
 
 const BOT_ID = "local";
 const BOT_NAME = "Magi_Local";
@@ -1330,6 +1333,8 @@ function OverviewDashboard({
   );
 }
 
+type SettingsTab = "config" | "tools" | "hooks" | "classifier";
+
 function SettingsDashboard({
   agentUrl,
   token,
@@ -1346,6 +1351,10 @@ function SettingsDashboard({
   onSaveConfig,
   onReloadConfig,
   onRestartRuntime,
+  getJson,
+  sendJson,
+  putJson,
+  deleteJson,
 }: {
   agentUrl: string;
   token: string;
@@ -1362,8 +1371,13 @@ function SettingsDashboard({
   onSaveConfig: (config: LocalConfigState) => Promise<void>;
   onReloadConfig: () => Promise<void>;
   onRestartRuntime: () => Promise<void>;
+  getJson: (path: string) => Promise<Record<string, unknown>>;
+  sendJson: (path: string, body: Record<string, unknown>) => Promise<Record<string, unknown>>;
+  putJson: (path: string, body: Record<string, unknown>) => Promise<Record<string, unknown>>;
+  deleteJson: (path: string, body: Record<string, unknown>) => Promise<Record<string, unknown>>;
 }) {
   const [draft, setDraft] = useState<LocalConfigState | null>(config);
+  const [settingsTab, setSettingsTab] = useState<SettingsTab>("config");
 
   useEffect(() => {
     setDraft(config);
@@ -1373,15 +1387,62 @@ function SettingsDashboard({
     setDraft((prev) => (prev ? { ...prev, ...patch } : prev));
   }, []);
 
+  const settingsTabs: Array<{ key: SettingsTab; label: string }> = [
+    { key: "config", label: "Configuration" },
+    { key: "tools", label: "Tools" },
+    { key: "hooks", label: "Hooks" },
+    { key: "classifier", label: "Classifier" },
+  ];
+
+  const tabEyebrow: Record<SettingsTab, string> = {
+    config: "Configuration",
+    tools: "Tool Registry",
+    hooks: "Verification Hooks",
+    classifier: "Classifier Dimensions",
+  };
+  const tabDescription: Record<SettingsTab, string> = {
+    config: "Configure the local runtime, provider endpoint, workspace path, and safeguards used by the self-hosted agent.",
+    tools: "View and manage all registered tools. Enable, disable, or remove tools from the runtime.",
+    hooks: "Inspect and manage hooks that verify every response. Create new hooks from natural language.",
+    classifier: "Add custom classifier dimensions that run alongside built-in classification on every turn.",
+  };
+
   return (
     <div className="max-w-4xl space-y-5">
       <DashboardPageHeader
-        eyebrow="Configuration"
+        eyebrow={tabEyebrow[settingsTab]}
         title="Settings"
-        description="Configure the local runtime, provider endpoint, workspace path, and safeguards used by the self-hosted agent."
+        description={tabDescription[settingsTab]}
         action={<StatusPill status={runtimeStatus}>{runtimeStatusLabel(runtimeStatus)}</StatusPill>}
       />
 
+      <div className="flex gap-1 border-b border-gray-200 pb-px">
+        {settingsTabs.map((tab) => (
+          <button
+            key={tab.key}
+            onClick={() => setSettingsTab(tab.key)}
+            className={`rounded-t-lg px-4 py-2 text-sm font-medium transition-colors ${
+              settingsTab === tab.key
+                ? "border-b-2 border-primary bg-white text-foreground"
+                : "text-secondary hover:text-foreground"
+            }`}
+          >
+            {tab.label}
+          </button>
+        ))}
+      </div>
+
+      {settingsTab === "tools" && (
+        <ToolsSettings getJson={getJson} putJson={putJson} deleteJson={deleteJson} />
+      )}
+      {settingsTab === "hooks" && (
+        <HooksSettings getJson={getJson} sendJson={sendJson} deleteJson={deleteJson} />
+      )}
+      {settingsTab === "classifier" && (
+        <ClassifierSettings sendJson={sendJson} />
+      )}
+
+      {settingsTab === "config" && (<>
       <DashboardCard
         title="Model"
         action={
@@ -1560,6 +1621,7 @@ function SettingsDashboard({
           </div>
         </div>
       </CollapsibleCard>
+      </>)}
     </div>
   );
 }
@@ -2571,6 +2633,10 @@ function LocalDashboardShell({
   onSaveConfig,
   onReloadConfig,
   onRestartRuntime,
+  getJson,
+  sendJson,
+  putJson,
+  deleteJson,
 }: {
   route: DashboardRoute;
   runtimeSnapshot: JsonRecord | null;
@@ -2616,6 +2682,10 @@ function LocalDashboardShell({
   onSaveConfig: (config: LocalConfigState) => Promise<void>;
   onReloadConfig: () => Promise<void>;
   onRestartRuntime: () => Promise<void>;
+  getJson: (path: string) => Promise<JsonRecord>;
+  sendJson: (path: string, body: JsonRecord) => Promise<JsonRecord>;
+  putJson: (path: string, body: JsonRecord) => Promise<JsonRecord>;
+  deleteJson: (path: string, body: JsonRecord) => Promise<JsonRecord>;
 }) {
   const mobileRoutes: Array<{ route: AppRoute; label: string }> = [
     { route: "chat", label: "Chat" },
@@ -2691,6 +2761,10 @@ function LocalDashboardShell({
               onSaveConfig={onSaveConfig}
               onReloadConfig={onReloadConfig}
               onRestartRuntime={onRestartRuntime}
+              getJson={getJson}
+              sendJson={sendJson}
+              putJson={putJson}
+              deleteJson={deleteJson}
             />
           )}
           {route === "usage" && <UsageDashboard runtimeSnapshot={runtimeSnapshot} />}
@@ -4127,6 +4201,10 @@ export function App() {
         onSaveConfig={saveConfig}
         onReloadConfig={reloadConfig}
         onRestartRuntime={restartRuntime}
+        getJson={getJson}
+        sendJson={sendJson}
+        putJson={putJson}
+        deleteJson={deleteJson}
       />
     );
   }
