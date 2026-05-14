@@ -284,7 +284,7 @@ describe("KnowledgeSearch", () => {
     const runner: KnowledgeSearchRunner = async () => ({
       exitCode: 0,
       signal: null,
-      stdout: "x".repeat(80_000),
+      stdout: "x".repeat(200_000),
       stderr: "",
       truncated: false,
     });
@@ -292,6 +292,28 @@ describe("KnowledgeSearch", () => {
 
     const result = await tool.execute(
       { mode: "get", objectKey: "bot/Downloads/converted/large.md" },
+      ctx(root),
+    );
+
+    expect(result.status).toBe("ok");
+    expect(result.output?.length).toBeLessThan(140_000);
+    expect(result.output).toContain("[KB content truncated");
+    expect(result.metadata).toMatchObject({ truncated: true });
+  });
+
+  it("respects maxBytes parameter for get mode", async () => {
+    const root = await makeRoot();
+    const runner: KnowledgeSearchRunner = async () => ({
+      exitCode: 0,
+      signal: null,
+      stdout: "x".repeat(80_000),
+      stderr: "",
+      truncated: false,
+    });
+    const tool = makeKnowledgeSearchTool({ name: "knowledge-search", runner });
+
+    const result = await tool.execute(
+      { mode: "get", objectKey: "bot/Downloads/converted/large.md", maxBytes: 24_000 },
       ctx(root),
     );
 

@@ -24,6 +24,7 @@ export interface FileDeliverInput {
   };
   kb?: {
     collection?: string;
+    scope?: "personal" | "org";
   };
 }
 
@@ -72,6 +73,7 @@ const INPUT_SCHEMA = {
       type: "object",
       properties: {
         collection: { type: "string" },
+        scope: { type: "string", enum: ["personal", "org"], description: "Where to write: 'personal' (default) or 'org' (shared organization KB)." },
       },
     },
   },
@@ -269,6 +271,7 @@ async function deliverToKb(
         filename: artifact.filename,
         mime_type: artifact.mimeType,
         content_base64: Buffer.from(bytes).toString("base64"),
+        ...(input.kb?.scope ? { scope: input.kb.scope } : {}),
       }),
       signal: ctx.abortSignal,
     },

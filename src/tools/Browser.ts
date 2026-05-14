@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { createHash } from "node:crypto";
 import { lookup } from "node:dns/promises";
 import fs from "node:fs/promises";
 import { isIP } from "node:net";
@@ -76,6 +77,7 @@ interface BrowserSession {
   agentBrowserSessionName: string;
   createdAt: number;
   lastUsedAt: number;
+  lastUrl?: string;
 }
 
 interface BrowserToolOptions {
@@ -298,11 +300,35 @@ function resolveWorkspacePath(workspaceRoot: string, relPath: string): string | 
   return null;
 }
 
-function okResult(output: BrowserOutput, start: number): ToolResult<BrowserOutput> {
+function contentHash(content: string): string {
+  return `sha256:${createHash("sha256").update(content).digest("hex")}`;
+}
+
+function extractHtmlTitle(html: string): string | undefined {
+  const rawTitle = /<title[^>]*>([\s\S]*?)<\/title>/i.exec(html)?.[1];
+  const title = rawTitle
+    ?.replace(/<[^>]+>/g, " ")
+    .replace(/&nbsp;/gi, " ")
+    .replace(/&amp;/gi, "&")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">")
+    .replace(/&quot;/gi, "\"")
+    .replace(/&#39;/g, "'")
+    .replace(/\s+/g, " ")
+    .trim();
+  return title || undefined;
+}
+
+function okResult(
+  output: BrowserOutput,
+  start: number,
+  metadata?: Record<string, unknown>,
+): ToolResult<BrowserOutput> {
   return {
     status: "ok",
     output,
     durationMs: Date.now() - start,
+    ...(metadata ? { metadata } : {}),
   };
 }
 
@@ -704,6 +730,7 @@ export function makeBrowserTool(
       "Use the centralized browser-worker through agent-browser for interactive or JS-rendered public websites. Create a session before open/snapshot/scrape/click/fill/scroll/screenshot, then close it when done. Snapshot refs may be passed as @e3 or copied from [ref=e3].",
     inputSchema: INPUT_SCHEMA,
     permission: "net",
+    shouldDefer: true,
     dangerous: false,
     validate: validateBrowserInput,
     async execute(input: BrowserInput, ctx: ToolContext): Promise<ToolResult<BrowserOutput>> {
@@ -832,6 +859,7 @@ export function makeBrowserTool(
         session.lastUsedAt = Date.now();
         const output = commandOutput("open", session, run);
         if (run.exitCode === 0) {
+          session.lastUrl = url;
           await emitBrowserFrame({
             action: "open",
             session,
@@ -861,6 +889,24 @@ export function makeBrowserTool(
         session.lastUsedAt = Date.now();
         const output = commandOutput(input.action, session, run);
         if (run.exitCode === 0) {
+          const source = ctx.sourceLedger?.recordSource({
+            turnId: ctx.turnId,
+            toolName: "Browser",
+            kind: "browser",
+            uri: session.lastUrl ?? `browser:${session.sessionId}:${input.action}`,
+            title: input.action === "scrape"
+              ? extractHtmlTitle(run.stdout) ?? session.lastUrl
+              : session.lastUrl,
+            contentHash: contentHash(run.stdout),
+            contentType: input.action === "scrape" ? "text/html" : "text/plain",
+            trustTier: "unknown",
+            snippets: run.stdout ? [run.stdout.slice(0, 500)] : [],
+            metadata: {
+              action: input.action,
+              truncated: run.truncated,
+            },
+          });
+          if (source) ctx.emitAgentEvent?.({ type: "source_inspected", source });
           await emitBrowserFrame({
             action: input.action,
             session,
@@ -869,7 +915,7 @@ export function makeBrowserTool(
             cwd,
             timeoutMs,
           });
-          return okResult(output, start);
+          return okResult(output, start, source ? { sourceId: source.sourceId } : undefined);
         }
         return errorResult("command_failed", run.stderr || run.stdout || `browser ${input.action} failed`, start, output);
       }

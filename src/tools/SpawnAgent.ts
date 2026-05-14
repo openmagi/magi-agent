@@ -95,6 +95,7 @@ const MAX_BACKGROUND_TIMEOUT_MS = 6 * 60 * 60 * 1000;
 const PARENT_TURN_CONTEXT_TEXT_LIMIT = 24_000;
 const PARENT_TURN_CONTEXT_SYSTEM_LIMIT = 64_000;
 const SPAWN_RESULT_SOURCE_SNIPPET_MAX = 500;
+const SPAWN_PARENT_SUMMARY_LIMIT = 1_800;
 const CODING_PERSONA_PATTERN =
   /(?:^|[-_\s])(coder|coding|code|developer|engineer|implementer)(?:$|[-_\s])/i;
 const CODING_TOOL_HINTS = new Set([
@@ -114,6 +115,11 @@ const MISSION_KINDS: ReadonlySet<MissionKind> = new Set([
   "document",
   "research",
 ]);
+const MISSION_ARTIFACT_CATEGORIES: ReadonlySet<string> = new Set([
+  "child_result",
+  "parallel_research_evidence",
+  "parallel_synthesis",
+] as const);
 
 /**
  * Canonical models available for SpawnAgent model override.
@@ -121,7 +127,6 @@ const MISSION_KINDS: ReadonlySet<MissionKind> = new Set([
  * api-proxy auto-routes to the correct provider by model name.
  */
 const CANONICAL_SPAWNABLE_MODELS = [
-  "claude-opus-4-7",
   "claude-opus-4-6",
   "claude-sonnet-4-6",
   "claude-sonnet-4-5",
@@ -142,7 +147,6 @@ const CANONICAL_SPAWNABLE_MODELS = [
 ] as const;
 
 const SPAWN_MODEL_ALIASES: Readonly<Record<string, (typeof CANONICAL_SPAWNABLE_MODELS)[number]>> = {
-  "anthropic/claude-opus-4-7": "claude-opus-4-7",
   "anthropic/claude-opus-4-6": "claude-opus-4-6",
   "anthropic/claude-sonnet-4-6": "claude-sonnet-4-6",
   "anthropic/claude-sonnet-4-5": "claude-sonnet-4-5",
@@ -162,6 +166,11 @@ const SPAWN_MODEL_ALIASES: Readonly<Record<string, (typeof CANONICAL_SPAWNABLE_M
   "google/gemini-3.1-pro-preview": "gemini-3.1-pro-preview",
 };
 
+const DEPRECATED_SPAWN_MODEL_ALIASES: Readonly<Record<string, (typeof CANONICAL_SPAWNABLE_MODELS)[number]>> = {
+  "claude-opus-4-7": "claude-opus-4-6",
+  "anthropic/claude-opus-4-7": "claude-opus-4-6",
+};
+
 /**
  * Models accepted in the SpawnAgent input schema. Includes provider-prefixed
  * aliases because workspace prompts and dynamic model docs use those ids.
@@ -174,7 +183,7 @@ export const SPAWNABLE_MODELS: readonly string[] = [
 function normalizeSpawnModelOverride(model: string | undefined): string | undefined | null {
   if (model === undefined) return undefined;
   if ((CANONICAL_SPAWNABLE_MODELS as readonly string[]).includes(model)) return model;
-  return SPAWN_MODEL_ALIASES[model] ?? null;
+  return SPAWN_MODEL_ALIASES[model] ?? DEPRECATED_SPAWN_MODEL_ALIASES[model] ?? null;
 }
 
 // Re-exports for API stability — Agent.ts + tests import these from
@@ -282,6 +291,10 @@ export interface SpawnAgentOutput {
   mode?: "tournament";
   winnerIndex?: number;
   variants?: TournamentVariantResult[];
+  winnerWorktreeApply?: {
+    action: "preview";
+    spawnDir: string;
+  };
 }
 
 const INPUT_SCHEMA = {
@@ -290,7 +303,7 @@ const INPUT_SCHEMA = {
     persona: {
       type: "string",
       description:
-        "Sub-agent identity or builtin preset. Builtins include research, explore, scout, synthesis, planner, coder, and reviewer.",
+        "Sub-agent identity or builtin preset. Builtins include research, explore, scout, synthesis, planner, coder, reviewer, and conflict_resolver.",
     },
     prompt: {
       type: "string",
@@ -486,20 +499,22 @@ async function runTournamentAdapter(
   ctx: ToolContext,
   agent: Agent,
   baseChildOptions: Omit<SpawnChildOptions, "spawnDir" | "spawnWorkspace" | "taskId">,
-): Promise<TournamentResult> {
+): Promise<TournamentResult & { winnerWorktreeApply?: SpawnAgentOutput["winnerWorktreeApply"] }> {
   const variants = input.variants as number;
   const scorer = input.scorer as TournamentScorer;
+  const useGitWorktree = baseChildOptions.workspacePolicy === "git_worktree";
   return runTournamentCore({
     variants,
     concurrency: input.concurrency,
     cleanup_losers: input.cleanup_losers,
+    exposeWinnerWorktreeApply: useGitWorktree,
     ctx: {
       workspaceRoot: ctx.workspaceRoot,
       turnId: ctx.turnId,
       stageAuditEvent: ctx.staging.stageAuditEvent,
       emitAgentEvent: ctx.emitAgentEvent,
     },
-    prepareSpawnDir,
+    prepareSpawnDir: useGitWorktree ? prepareGitWorktreeSpawnDir : prepareSpawnDir,
     async runChild(prep: PreparedVariant) {
       const lifecycle = createChildAgentHarness({
         taskId: prep.taskId,
@@ -679,7 +694,8 @@ function normalizeCompletionContract(
 }
 
 function spawnErrorMessage(result: SpawnChildResult): string {
-  return result.errorMessage || result.finalText || result.status;
+  const raw = result.errorMessage || result.finalText || result.status;
+  return compactTextForParentReplay(raw, 1_200).summary;
 }
 
 function completionContractError(
@@ -734,6 +750,10 @@ function activeDeterministicRequirements(
   return snapshot.taskState.deterministicRequirements
     .filter((requirement) => requirement.status === "active")
     .map((requirement) => requirement.requirementId);
+}
+
+function hasParentManagedArtifactEvidence(result: SpawnChildResult): boolean {
+  return result.evidence?.toolNames.includes("ArtifactCreate") === true;
 }
 
 async function enforceChildCompletionContract(
@@ -795,12 +815,22 @@ async function enforceChildCompletionContract(
       const artifactFileCount = await countFilesRecursive(
         path.join(childOptions.spawnDir, "artifacts"),
       );
-      return artifactFileCount > 0
-        ? result
-        : completionContractError(
-            result,
-            "child produced no artifact evidence required by SpawnAgent completion_contract",
-          );
+      if (artifactFileCount > 0 || hasParentManagedArtifactEvidence(result)) {
+        return result;
+      }
+      const calledArtifactCreate =
+        result.evidence?.toolNames.includes("ArtifactCreate") === true;
+      const diagnostic = calledArtifactCreate
+        ? "child called ArtifactCreate, but no child-local artifact files were found under spawnDir/artifacts; the artifact may have been parent-managed or the child returned text only"
+        : "child did not call ArtifactCreate";
+      return completionContractError(
+        result,
+        [
+          "child produced no artifact evidence required by SpawnAgent completion_contract",
+          diagnostic,
+          'completion_contract required artifact, but child returned text only. Use required_evidence:"text" for direct memo return, or instruct child to call ArtifactCreate.',
+        ].join("; "),
+      );
     }
     default:
       return result;
@@ -818,6 +848,64 @@ function buildSpawnFailureMessage(
   }: ${spawnErrorMessage(result)}. Do not switch to direct execution or answer from parent memory. Retry SpawnAgent if duplicate side effects are safe, otherwise ask the user before doing the work directly.`;
 }
 
+function compactTextForParentReplay(text: string, limit = SPAWN_PARENT_SUMMARY_LIMIT): {
+  summary: string;
+  omitted: boolean;
+} {
+  if (text.length <= limit) return { summary: text, omitted: false };
+  return {
+    summary: `${text.slice(0, limit).trimEnd()}\n[truncated: ${text.length - limit} chars omitted]`,
+    omitted: true,
+  };
+}
+
+function compactArtifactsForParentReplay(artifacts?: SpawnArtifacts): {
+  handedOffArtifacts: Array<{
+    artifactId: string;
+    kind: string;
+    title: string;
+    slug: string;
+  }>;
+} | undefined {
+  if (!artifacts || artifacts.handedOffArtifacts.length === 0) return undefined;
+  return {
+    handedOffArtifacts: artifacts.handedOffArtifacts.map((artifact) => ({
+      artifactId: artifact.artifactId,
+      kind: artifact.kind,
+      title: artifact.title,
+      slug: artifact.slug,
+    })),
+  };
+}
+
+function compactSpawnResultForParent(
+  output: SpawnAgentOutput,
+  durationMs: number,
+): string {
+  const compact = compactTextForParentReplay(
+    output.errorMessage ?? output.finalText ?? "",
+  );
+  return JSON.stringify({
+    taskId: output.taskId,
+    status: output.status,
+    ...(compact.summary ? { summary: compact.summary } : {}),
+    ...(output.errorMessage ? { errorMessage: output.errorMessage } : {}),
+    ...(typeof output.toolCallCount === "number"
+      ? { toolCallCount: output.toolCallCount }
+      : {}),
+    ...(typeof output.attempts === "number" ? { attempts: output.attempts } : {}),
+    durationMs,
+    ...(output.artifacts
+      ? {
+          artifacts: compactArtifactsForParentReplay(output.artifacts) ?? {
+            handedOffArtifacts: [],
+          },
+        }
+      : {}),
+    fullTextOmitted: compact.omitted,
+  });
+}
+
 function spawnFailureResult(
   taskId: string,
   result: SpawnChildResult,
@@ -826,21 +914,24 @@ function spawnFailureResult(
   artifacts?: SpawnArtifacts,
 ): ToolResult<SpawnAgentOutput> {
   const errorMessage = buildSpawnFailureMessage(taskId, result, attempts);
+  const durationMs = Date.now() - start;
+  const output: SpawnAgentOutput = {
+    taskId,
+    status: result.status === "aborted" ? "aborted" : "error",
+    finalText: result.finalText,
+    toolCallCount: result.toolCallCount,
+    childEvidence: result.evidence,
+    attempts,
+    errorMessage,
+    ...(artifacts ? { artifacts } : {}),
+  };
   return {
     status: result.status === "aborted" ? "aborted" : "error",
     errorCode: result.status === "aborted" ? "spawn_aborted" : "spawn_failed",
     errorMessage,
-    output: {
-      taskId,
-      status: result.status === "aborted" ? "aborted" : "error",
-      finalText: result.finalText,
-      toolCallCount: result.toolCallCount,
-      childEvidence: result.evidence,
-      attempts,
-      errorMessage,
-      ...(artifacts ? { artifacts } : {}),
-    },
-    durationMs: Date.now() - start,
+    output,
+    llmOutput: compactSpawnResultForParent(output, durationMs),
+    durationMs,
   };
 }
 
@@ -1219,7 +1310,8 @@ function buildParentTurnContextBlock(message?: UserMessage): string {
 }
 
 export interface SpawnAgentMissionDeps {
-  missionClient?: Pick<MissionClient, "createMission" | "createRun" | "appendEvent">;
+  missionClient?: Pick<MissionClient, "createMission" | "createRun" | "appendEvent"> &
+    Partial<Pick<MissionClient, "createArtifact">>;
   getSourceChannel?: (ctx: ToolContext) => ChannelRef | null;
   missionsEnabled?: () => boolean;
 }
@@ -1257,6 +1349,44 @@ function resolveMissionTitle(input: SpawnAgentInput): string {
     metadataString(input.metadata, "missionTitle") ?? `${input.persona} handoff`,
     240,
   );
+}
+
+function resolveMissionArtifactCategory(
+  metadata: Record<string, unknown> | undefined,
+): string | undefined {
+  const raw = metadataString(metadata, "evidenceCategory") ?? metadataString(metadata, "category");
+  if (raw && MISSION_ARTIFACT_CATEGORIES.has(raw)) return raw;
+  if (metadataString(metadata, "synthesisId")) return "parallel_synthesis";
+  if (metadataString(metadata, "parallelGroup")) return "parallel_research_evidence";
+  return undefined;
+}
+
+function missionArtifactMetadata(args: {
+  input: SpawnAgentInput;
+  taskId: string;
+  result: SpawnChildResult;
+  attempts: number;
+  fileCount: number;
+  handedOffArtifacts: SpawnHandoffArtifact[];
+}): Record<string, unknown> {
+  const { input, taskId, result, attempts, fileCount, handedOffArtifacts } = args;
+  const category = resolveMissionArtifactCategory(input.metadata);
+  const sourceId = metadataString(input.metadata, "sourceId") ?? `spawn:${taskId}`;
+  const parallelGroup = metadataString(input.metadata, "parallelGroup");
+  const synthesisId = metadataString(input.metadata, "synthesisId");
+  return {
+    taskId,
+    persona: input.persona,
+    status: result.status,
+    toolCallCount: result.toolCallCount,
+    attempts,
+    fileCount,
+    artifactCount: handedOffArtifacts.length,
+    sourceId,
+    ...(category ? { category } : {}),
+    ...(parallelGroup ? { parallelGroup } : {}),
+    ...(synthesisId ? { synthesisId } : {}),
+  };
 }
 
 function missionRunId(run: Record<string, unknown>): string | undefined {
@@ -1324,10 +1454,83 @@ async function createBackgroundSpawnMission(args: {
     }
   }
 
+  if (missionId) {
+    try {
+      await deps.missionClient.appendEvent(missionId, {
+        ...(missionRunIdValue ? { runId: missionRunIdValue } : {}),
+        actorType: "agent",
+        eventType: "evidence",
+        message: "Child agent spawned",
+        payload: {
+          category: "child_spawned",
+          taskId,
+          spawnTaskId: taskId,
+          persona: input.persona,
+          missionKind: resolveMissionKind(input.metadata),
+        },
+      });
+      ctx.emitAgentEvent?.({
+        type: "mission_event",
+        missionId,
+        eventType: "evidence",
+        message: "Child agent spawned",
+      });
+    } catch (err) {
+      console.warn(
+        `[core-agent] SpawnAgent child-spawn mission event failed taskId=${taskId} missionId=${missionId}: ${(err as Error).message}`,
+      );
+    }
+  }
+
   return {
     ...(missionId ? { missionId } : {}),
     ...(missionRunIdValue ? { missionRunId: missionRunIdValue } : {}),
   };
+}
+
+async function createBackgroundSpawnMissionArtifact(args: {
+  deps?: SpawnAgentMissionDeps;
+  link: SpawnMissionLink;
+  input: SpawnAgentInput;
+  taskId: string;
+  result: SpawnChildResult;
+  attempts: number;
+  fileCount: number;
+  handedOffArtifacts: SpawnHandoffArtifact[];
+}): Promise<void> {
+  const {
+    deps,
+    link,
+    input,
+    taskId,
+    result,
+    attempts,
+    fileCount,
+    handedOffArtifacts,
+  } = args;
+  if (!deps?.missionClient?.createArtifact || !link.missionId) return;
+  const finalText = result.finalText.trim();
+  if (!finalText) return;
+  try {
+    await deps.missionClient.createArtifact(link.missionId, {
+      ...(link.missionRunId ? { runId: link.missionRunId } : {}),
+      kind: "subagent_output",
+      title: truncateMissionText(`${input.persona} result`, 240),
+      preview: truncateMissionText(finalText, 2000),
+      metadata: missionArtifactMetadata({
+        input,
+        taskId,
+        result,
+        attempts,
+        fileCount,
+        handedOffArtifacts,
+      }),
+    });
+  } catch (err) {
+    console.warn(
+      `[core-agent] SpawnAgent mission artifact create failed missionId=${link.missionId}: ${(err as Error).message}`,
+    );
+  }
 }
 
 async function appendBackgroundSpawnMissionEvent(args: {
@@ -1375,7 +1578,7 @@ export function makeSpawnAgentTool(
   return {
     name: "SpawnAgent",
     description:
-      "Delegate a focused sub-task to a child agent with a custom persona and filtered toolset. Omit `workspace_policy` for automatic policy: coding-oriented children (for example persona `coder`, coding persona names, `PatchApply`/`FileEdit`/diagnostic tool hints, or a non-empty `write_set`) default to a detached git worktree when the parent workspace can create one; other children remain trusted workers that can read/write the parent workspace and use `.spawn/{taskId}` for scratch/audit storage. Set `workspace_policy:\"trusted\"` only when a coding child must operate directly on the current parent checkout, `workspace_policy:\"git_worktree\"` when detached worktree isolation is required, or `workspace_policy:\"isolated\"` when the task should be sandboxed to `.spawn/{taskId}`. After a git_worktree child finishes, use SpawnWorktreeApply to preview, apply, or reject the child worktree changes; do not copy files manually. The runtime automatically includes the current turn's selected KB/system addendum and attachment manifest in the child work order; still provide concrete task instructions, required files, expected outputs, allowed tools, completion criteria, and retry/idempotency guidance. `deliver:\"return\"` blocks until the child finishes and returns final text. `deliver:\"background\"` returns a taskId immediately; completion surfaces as a spawn_result event and TaskGet record. Use background delivery for long browser QA, research, or artifact generation; it defaults to a 3 hour timeout and accepts `timeout_ms` up to 6 hours. Spawn depth is capped at 2. Use `completion_contract.required_evidence:\"files\"` plus `required_files` for durable file deliverables, `\"text\"` for answer-only work, `\"artifact\"` for artifact handoff, `\"tool_call\"` for concrete tool work, or `\"none\"` only when no evidence is expected. Use `model` only when deliberately selecting a child model; copy an exact value from this schema enum or omit `model` to inherit the bot's runtime model. Never invent provider/model ids. IMPORTANT: child output longer than ~500 chars should go into ArtifactCreate rather than finalText; child-produced artifacts are imported into the parent workspace and returned on `artifacts.handedOffArtifacts`.",
+      "Delegate a focused sub-task to a child agent with a custom persona and filtered toolset. Omit `workspace_policy` for automatic policy: coding-oriented children (for example persona `coder`, coding persona names, `PatchApply`/`FileEdit`/diagnostic tool hints, or a non-empty `write_set`) default to a detached git worktree when the parent workspace can create one; other children remain trusted workers that can read/write the parent workspace and use `.spawn/{taskId}` for scratch/audit storage. Set `workspace_policy:\"trusted\"` only when a coding child must operate directly on the current parent checkout, `workspace_policy:\"git_worktree\"` when detached worktree isolation is required, or `workspace_policy:\"isolated\"` when the task should be sandboxed to `.spawn/{taskId}`. After a git_worktree child finishes, use SpawnWorktreeApply to preview, apply, or reject the child worktree changes; do not copy files manually. In tournament mode, explicit `workspace_policy:\"git_worktree\"` runs each variant in its own detached git worktree and returns `winnerWorktreeApply` as the selected variant's SpawnWorktreeApply preview handoff. If SpawnWorktreeApply returns `conflictReview.resolverSpawn`, pass that recipe to SpawnAgent unchanged so persona `conflict_resolver` can repair only the conflicted `write_set` in the parent checkout before GitDiff/TestRun review. The runtime automatically includes the current turn's selected KB/system addendum and attachment manifest in the child work order; still provide concrete task instructions, required files, expected outputs, allowed tools, completion criteria, and retry/idempotency guidance. `deliver:\"return\"` blocks until the child finishes and returns final text. `deliver:\"background\"` returns a taskId immediately; completion surfaces as a spawn_result event and TaskGet record. Use background delivery for long browser QA, research, or artifact generation; it defaults to a 3 hour timeout and accepts `timeout_ms` up to 6 hours. Spawn depth is capped at 2. Use `completion_contract.required_evidence:\"files\"` plus `required_files` for durable file deliverables, `\"text\"` for answer-only work, `\"artifact\"` for artifact handoff, `\"tool_call\"` for concrete tool work, or `\"none\"` only when no evidence is expected. Use `model` only when deliberately selecting a child model; copy an exact value from this schema enum or omit `model` to inherit the bot's runtime model. Never invent provider/model ids. IMPORTANT: child output longer than ~500 chars should go into ArtifactCreate rather than finalText; child-produced artifacts are imported into the parent workspace and returned on `artifacts.handedOffArtifacts`.",
     inputSchema: INPUT_SCHEMA,
     permission: "meta",
     kind: "core",
@@ -1409,14 +1612,6 @@ export function makeSpawnAgentTool(
         };
       }
       if (input.mode === "tournament") {
-        if (input.workspace_policy === "git_worktree") {
-          return {
-            status: "error",
-            errorCode: "bad_input",
-            errorMessage: "`workspace_policy:\"git_worktree\"` is not supported with tournament mode yet",
-            durationMs: Date.now() - start,
-          };
-        }
         const err = validateTournamentInput(input);
         if (err) {
           return {
@@ -1542,26 +1737,30 @@ export function makeSpawnAgentTool(
           const winner = tourney.variants.find(
             (v) => v.variantIndex === tourney.winnerIndex,
           );
+          const durationMs = Date.now() - start;
+          const output: SpawnAgentOutput = {
+            taskId,
+            status: "ok",
+            finalText: winner?.finalText ?? "",
+            mode: "tournament",
+            winnerIndex: tourney.winnerIndex,
+            variants: tourney.variants,
+            ...(tourney.winnerWorktreeApply ? { winnerWorktreeApply: tourney.winnerWorktreeApply } : {}),
+            ...(allHandedOff.length > 0
+              ? {
+                  artifacts: {
+                    spawnDir: path.join(ctx.workspaceRoot, ".spawn"),
+                    fileCount: 0,
+                    handedOffArtifacts: allHandedOff,
+                  },
+                }
+              : {}),
+          };
           return {
             status: "ok",
-            output: {
-              taskId,
-              status: "ok",
-              finalText: winner?.finalText ?? "",
-              mode: "tournament",
-              winnerIndex: tourney.winnerIndex,
-              variants: tourney.variants,
-              ...(allHandedOff.length > 0
-                ? {
-                    artifacts: {
-                      spawnDir: path.join(ctx.workspaceRoot, ".spawn"),
-                      fileCount: 0,
-                      handedOffArtifacts: allHandedOff,
-                    },
-                  }
-                : {}),
-            },
-            durationMs: Date.now() - start,
+            output,
+            llmOutput: compactSpawnResultForParent(output, durationMs),
+            durationMs,
           };
         } catch (err) {
           return errorResult(err, start);
@@ -1583,11 +1782,14 @@ export function makeSpawnAgentTool(
       ctx.emitAgentEvent?.({
         type: "spawn_started",
         taskId,
+        parentTurnId: ctx.turnId,
         persona: input.persona,
         prompt: input.prompt,
         ...(delegatedDetail ? { detail: delegatedDetail } : {}),
         deliver: input.deliver,
         ...(modelOverride ? { model: modelOverride } : {}),
+        timeoutMs,
+        completionContract,
       });
       ctx.emitAgentEvent?.({ type: "spawn_dir_created", taskId, spawnDir });
       ctx.staging.stageAuditEvent("spawn_dir_created", { taskId, spawnDir });
@@ -1647,6 +1849,16 @@ export function makeSpawnAgentTool(
           });
           const artifacts = { spawnDir, fileCount, handedOffArtifacts };
           if (result.status !== "ok") {
+            ctx.emitAgentEvent?.({
+              type: result.status === "aborted" ? "spawn_aborted" : "spawn_failed",
+              taskId,
+              parentTurnId: ctx.turnId,
+              deliver: input.deliver,
+              attempts: childRun.attempts,
+              durationMs: Date.now() - start,
+              completionContract,
+              errorMessage: spawnErrorMessage(result),
+            });
             return spawnFailureResult(
               taskId,
               result,
@@ -1662,18 +1874,33 @@ export function makeSpawnAgentTool(
             result,
             attempts: childRun.attempts,
           });
+          const durationMs = Date.now() - start;
+          const output: SpawnAgentOutput = {
+            taskId,
+            status: result.status,
+            finalText: result.finalText,
+            toolCallCount: result.toolCallCount,
+            childEvidence: result.evidence,
+            attempts: childRun.attempts,
+            artifacts,
+          };
+          ctx.emitAgentEvent?.({
+            type: "spawn_completed",
+            taskId,
+            parentTurnId: ctx.turnId,
+            deliver: input.deliver,
+            ...(modelOverride ? { model: modelOverride } : {}),
+            timeoutMs,
+            attempts: childRun.attempts,
+            durationMs,
+            completionContract,
+            toolCallCount: result.toolCallCount,
+          });
           return {
             status: "ok",
-            output: {
-              taskId,
-              status: result.status,
-              finalText: result.finalText,
-              toolCallCount: result.toolCallCount,
-              childEvidence: result.evidence,
-              attempts: childRun.attempts,
-              artifacts,
-            },
-            durationMs: Date.now() - start,
+            output,
+            llmOutput: compactSpawnResultForParent(output, durationMs),
+            durationMs,
           };
         } catch (err) {
           const msg = err instanceof Error ? err.message : String(err);
@@ -1694,10 +1921,13 @@ export function makeSpawnAgentTool(
         input,
         completionContract,
       });
+      const durationMs = Date.now() - start;
+      const output: SpawnAgentOutput = { taskId, status: "pending" };
       return {
         status: "ok",
-        output: { taskId, status: "pending" },
-        durationMs: Date.now() - start,
+        output,
+        llmOutput: compactSpawnResultForParent(output, durationMs),
+        durationMs,
       };
     },
   };
@@ -1851,6 +2081,16 @@ async function runBackgroundChild(args: BackgroundRunArgs): Promise<void> {
             /* ignore persist errors */
           });
       }
+      await createBackgroundSpawnMissionArtifact({
+        deps: missionDeps,
+        link: missionLink,
+        input,
+        taskId,
+        result,
+        attempts: childRun.attempts,
+        fileCount,
+        handedOffArtifacts,
+      });
       const eventType =
         result.status === "ok"
           ? "completed"
@@ -1864,10 +2104,13 @@ async function runBackgroundChild(args: BackgroundRunArgs): Promise<void> {
         eventType,
         ...(errorMessage ? { message: errorMessage } : {}),
         payload: {
+          category: "child_result",
           taskId,
           status: result.status,
           toolCallCount: result.toolCallCount,
           attempts: childRun.attempts,
+          artifactCount: handedOffArtifacts.length,
+          fileCount,
         },
       });
     })
@@ -1895,7 +2138,7 @@ async function runBackgroundChild(args: BackgroundRunArgs): Promise<void> {
         link: missionLink,
         eventType: "failed",
         message: msg,
-        payload: { taskId, status: "error" },
+        payload: { category: "child_result", taskId, status: "error" },
       });
     })
     .finally(() => {

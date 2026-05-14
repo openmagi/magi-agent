@@ -56,7 +56,7 @@ const INPUT_SCHEMA = {
   required: ["pattern"],
 } as const;
 
-const MAX_MATCHES = 500;
+const MAX_MATCHES = 2000;
 
 export function makeGrepTool(workspaceRoot: string): Tool<GrepInput, GrepOutput> {
   const defaultWorkspace = new Workspace(workspaceRoot);

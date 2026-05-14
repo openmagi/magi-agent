@@ -5,8 +5,9 @@
  * HTML lite endpoint which doesn't require JavaScript.
  */
 
-import type { Tool, ToolResult } from "../Tool.js";
+import type { Tool, ToolContext, ToolResult } from "../Tool.js";
 import { errorResult } from "../util/toolResult.js";
+import { createHash } from "node:crypto";
 
 export type WebSearchToolName = "WebSearch" | "web-search" | "web_search";
 
@@ -41,6 +42,10 @@ const INPUT_SCHEMA = {
 
 const DEFAULT_TIMEOUT_MS = 15_000;
 const DEFAULT_MAX_RESULTS = 8;
+
+function contentHash(content: string): string {
+  return `sha256:${createHash("sha256").update(content).digest("hex")}`;
+}
 
 function parseDdgHtml(html: string): WebSearchResult[] {
   const results: WebSearchResult[] = [];
@@ -92,13 +97,14 @@ export function makeWebSearchTool(
       "No API key required. Use WebFetch to read the full content of any result URL.",
     inputSchema: INPUT_SCHEMA,
     permission: "net",
+    shouldDefer: true,
 
     validate(input) {
       if (!input.query?.trim()) return "Query must not be empty.";
       return null;
     },
 
-    async execute(input): Promise<ToolResult<WebSearchOutput>> {
+    async execute(input, ctx: ToolContext): Promise<ToolResult<WebSearchOutput>> {
       const t0 = Date.now();
       const maxResults = Math.min(input.maxResults ?? DEFAULT_MAX_RESULTS, 20);
       const timeoutMs = Math.min(input.timeoutMs ?? DEFAULT_TIMEOUT_MS, 30_000);
@@ -134,6 +140,25 @@ export function makeWebSearchTool(
       }
 
       const trimmed = results.slice(0, maxResults);
+
+      // Register each result as a source in the ledger and emit source_inspected events.
+      for (const result of trimmed) {
+        const ledgerRecord = ctx.sourceLedger?.recordSource({
+          turnId: ctx.turnId,
+          toolName: opts.name ?? "WebSearch",
+          kind: "web_search",
+          uri: result.url,
+          title: result.title,
+          contentHash: contentHash(result.snippet),
+          contentType: "text/html",
+          trustTier: "unknown",
+          snippets: result.snippet ? [result.snippet] : [],
+          metadata: { query: input.query, source },
+        });
+        if (ledgerRecord) {
+          ctx.emitAgentEvent?.({ type: "source_inspected", source: ledgerRecord });
+        }
+      }
 
       return {
         status: "ok",
