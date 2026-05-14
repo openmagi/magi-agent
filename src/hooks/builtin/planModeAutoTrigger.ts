@@ -21,7 +21,7 @@
  *     any upstream hook's system edits are preserved).
  *   - Fail-open: any regex/classifier error → `continue`, no mutation.
  *
- * Env gate: `CORE_AGENT_PLAN_AUTOTRIGGER` (default "on", per-bot
+ * Env gate: `MAGI_PLAN_AUTOTRIGGER` (default "on", per-bot
  * opt-out via `off` / `false` / `0`).
  */
 
@@ -188,7 +188,7 @@ export function makePlanModeAutoTriggerHook(
     handler: async (args, ctx: HookContext) => {
       try {
         // Env gate — operators / per-bot config may disable.
-        if (!isAutoTriggerEnabled(process.env.CORE_AGENT_PLAN_AUTOTRIGGER)) {
+        if (!isAutoTriggerEnabled(process.env.MAGI_PLAN_AUTOTRIGGER)) {
           return { action: "continue" };
         }
         // Only nudge on the first iteration of a turn — subsequent

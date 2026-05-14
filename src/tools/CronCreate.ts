@@ -104,7 +104,7 @@ const MAX_SCRIPT_CRON_TIMEOUT_MS = 300_000;
 const DEFAULT_SCRIPT_CRON_TIMEOUT_MS = 60_000;
 
 function scriptCronEnabled(): boolean {
-  return process.env.CORE_AGENT_SCRIPT_CRON === "1";
+  return process.env.MAGI_SCRIPT_CRON === "1";
 }
 
 function normalizeScriptTimeout(timeoutMs: unknown): number {
@@ -175,7 +175,7 @@ export function makeCronCreateTool(
             return {
               status: "error",
               errorCode: "script_cron_disabled",
-              errorMessage: "mode='script' requires CORE_AGENT_SCRIPT_CRON=1",
+              errorMessage: "mode='script' requires MAGI_SCRIPT_CRON=1",
               durationMs: Date.now() - start,
             };
           }

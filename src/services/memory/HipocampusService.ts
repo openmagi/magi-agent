@@ -92,7 +92,7 @@ export class HipocampusService {
       deps.qmdManager ??
       new QmdManager(
         deps.workspaceRoot,
-        (process.env.CORE_AGENT_VECTOR_SEARCH ?? "off").trim().toLowerCase() === "on",
+        (process.env.MAGI_VECTOR_SEARCH ?? "off").trim().toLowerCase() === "on",
       );
     this.loadConfigFn = deps.loadConfig ?? CompactionEngine.loadConfig;
     this.createCompactionEngineFn =
@@ -181,7 +181,7 @@ export class HipocampusService {
     return {
       qmdReady: this.qmdManager.isReady(),
       vectorEnabled:
-        (process.env.CORE_AGENT_VECTOR_SEARCH ?? "off").trim().toLowerCase() === "on",
+        (process.env.MAGI_VECTOR_SEARCH ?? "off").trim().toLowerCase() === "on",
       compactionConfigured: this.compactionConfig !== null,
       cooldownHours: this.compactionConfig?.cooldownHours ?? null,
       rootMaxTokens: this.compactionConfig?.rootMaxTokens ?? null,

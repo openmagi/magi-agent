@@ -9,14 +9,14 @@ import type { HookContext, RegisteredHook } from "../types.js";
 const MAX_RETRIES = 1;
 
 function isPromptEnabled(): boolean {
-  const raw = process.env.CORE_AGENT_EXECUTION_CONTRACT_PROMPT;
+  const raw = process.env.MAGI_EXECUTION_CONTRACT_PROMPT;
   if (raw === undefined || raw === null) return true;
   const v = raw.trim().toLowerCase();
   return v === "" || v === "on" || v === "true" || v === "1";
 }
 
 function isVerifierEnabled(): boolean {
-  const raw = process.env.CORE_AGENT_EXECUTION_CONTRACT_VERIFIER;
+  const raw = process.env.MAGI_EXECUTION_CONTRACT_VERIFIER;
   if (raw === undefined || raw === null) return true;
   const v = raw.trim().toLowerCase();
   return v === "" || v === "on" || v === "true" || v === "1";

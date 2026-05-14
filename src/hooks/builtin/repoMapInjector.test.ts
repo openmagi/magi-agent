@@ -150,8 +150,8 @@ describe("repoMapInjector", () => {
     expect(result2.action).toBe("replace");
   });
 
-  it("skips when CORE_AGENT_REPO_MAP is off", async () => {
-    process.env.CORE_AGENT_REPO_MAP = "off";
+  it("skips when MAGI_REPO_MAP is off", async () => {
+    process.env.MAGI_REPO_MAP = "off";
     try {
       fs.writeFileSync(path.join(tmpDir, "x.ts"), "export const x = 1;");
       const hook = makeRepoMapInjectorHook({ workspaceRoot: tmpDir });
@@ -161,7 +161,7 @@ describe("repoMapInjector", () => {
       );
       expect(result).toEqual({ action: "continue" });
     } finally {
-      delete process.env.CORE_AGENT_REPO_MAP;
+      delete process.env.MAGI_REPO_MAP;
     }
   });
 

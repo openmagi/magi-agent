@@ -10,7 +10,7 @@ import { latestUserText } from "./classifyTurnMode.js";
 import { getOrClassifyRequestMeta } from "./turnMetaClassifier.js";
 
 function isEnabled(): boolean {
-  const raw = process.env.CORE_AGENT_SOURCE_AUTHORITY;
+  const raw = process.env.MAGI_SOURCE_AUTHORITY;
   if (raw === undefined || raw === null) return true;
   const v = raw.trim().toLowerCase();
   return v === "" || v === "on" || v === "true" || v === "1";

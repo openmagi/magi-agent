@@ -40,17 +40,17 @@ function args(assistantText: string, userMessage: string, retryCount = 0) {
 const FULL_CONTRACT = "<task_contract><verification_mode>full</verification_mode></task_contract>";
 
 describe("taskContractGate", () => {
-  const originalEnv = process.env.CORE_AGENT_TASK_CONTRACT_GATE;
+  const originalEnv = process.env.MAGI_TASK_CONTRACT_GATE;
 
   beforeEach(() => {
-    delete process.env.CORE_AGENT_TASK_CONTRACT_GATE;
+    delete process.env.MAGI_TASK_CONTRACT_GATE;
   });
 
   afterEach(() => {
     if (originalEnv === undefined) {
-      delete process.env.CORE_AGENT_TASK_CONTRACT_GATE;
+      delete process.env.MAGI_TASK_CONTRACT_GATE;
     } else {
-      process.env.CORE_AGENT_TASK_CONTRACT_GATE = originalEnv;
+      process.env.MAGI_TASK_CONTRACT_GATE = originalEnv;
     }
   });
 
@@ -97,8 +97,8 @@ describe("taskContractGate", () => {
     expect(result).toEqual({ action: "continue" });
   });
 
-  it("respects CORE_AGENT_TASK_CONTRACT_GATE=off", async () => {
-    process.env.CORE_AGENT_TASK_CONTRACT_GATE = "off";
+  it("respects MAGI_TASK_CONTRACT_GATE=off", async () => {
+    process.env.MAGI_TASK_CONTRACT_GATE = "off";
     const hook = makeTaskContractGateHook();
     const result = await hook.handler(
       args("샘플만 확인했고 완료했습니다.", FULL_CONTRACT),

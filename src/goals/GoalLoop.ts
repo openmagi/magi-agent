@@ -151,9 +151,9 @@ export async function distillGoalSpec(input: {
 }
 
 export function goalLoopMaxTurns(
-  env: { CORE_AGENT_GOAL_MAX_TURNS?: string } = process.env,
+  env: { MAGI_GOAL_MAX_TURNS?: string } = process.env,
 ): number {
-  const raw = env.CORE_AGENT_GOAL_MAX_TURNS;
+  const raw = env.MAGI_GOAL_MAX_TURNS;
   const parsed = raw ? Number.parseInt(raw, 10) : NaN;
   if (!Number.isFinite(parsed)) return 30;
   return Math.max(1, Math.min(parsed, 50));

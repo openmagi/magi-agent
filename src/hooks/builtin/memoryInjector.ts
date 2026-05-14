@@ -24,7 +24,7 @@
  * "nice to have" — it must never block a turn.
  *
  * Toggle:
- * - `CORE_AGENT_MEMORY_INJECTION=off` (env) disables the hook.
+ * - `MAGI_MEMORY_INJECTION=off` (env) disables the hook.
  * - `workspace/agent.config.yaml: memory_injection: off` (file) also
  *   disables; file override beats env so operators can flip it per-bot.
  */
@@ -78,7 +78,7 @@ interface QmdSearchResponse {
 }
 
 function isEnabledByEnv(): boolean {
-  const raw = process.env.CORE_AGENT_MEMORY_INJECTION;
+  const raw = process.env.MAGI_MEMORY_INJECTION;
   if (raw === undefined || raw === null) return true;
   const v = raw.trim().toLowerCase();
   if (v === "" || v === "on" || v === "true" || v === "1") return true;
@@ -92,18 +92,18 @@ function getQmdUrl(): string | null {
 }
 
 function getCollection(): string {
-  const raw = process.env.CORE_AGENT_MEMORY_INJECT_COLLECTION?.trim();
+  const raw = process.env.MAGI_MEMORY_INJECT_COLLECTION?.trim();
   return raw && raw.length > 0 ? raw : DEFAULT_COLLECTION;
 }
 
 function getLimit(): number {
-  const raw = process.env.CORE_AGENT_MEMORY_INJECT_LIMIT;
+  const raw = process.env.MAGI_MEMORY_INJECT_LIMIT;
   const n = raw ? Number.parseInt(raw, 10) : NaN;
   return Number.isFinite(n) && n > 0 ? n : DEFAULT_LIMIT;
 }
 
 function getMinScore(): number {
-  const raw = process.env.CORE_AGENT_MEMORY_INJECT_MIN_SCORE;
+  const raw = process.env.MAGI_MEMORY_INJECT_MIN_SCORE;
   const n = raw ? Number.parseFloat(raw) : NaN;
   return Number.isFinite(n) && n >= 0 && n <= 1 ? n : DEFAULT_MIN_SCORE;
 }

@@ -163,7 +163,7 @@ export async function classifyExactnessNeed(
 }
 
 function isEnabled(): boolean {
-  const raw = process.env.CORE_AGENT_DETERMINISTIC_EXACTNESS;
+  const raw = process.env.MAGI_DETERMINISTIC_EXACTNESS;
   if (raw === undefined || raw === null) return true;
   const v = raw.trim().toLowerCase();
   return v === "" || v === "on" || v === "true" || v === "1";

@@ -55,7 +55,7 @@ export function isCronParentTurn(ctx: Pick<HookContext, "sessionKey" | "turnId">
 }
 
 function isEnabled(): boolean {
-  const raw = process.env.CORE_AGENT_CRON_META_ORCHESTRATOR;
+  const raw = process.env.MAGI_CRON_META_ORCHESTRATOR;
   if (raw === undefined || raw === null) return true;
   const v = raw.trim().toLowerCase();
   return v === "" || v === "on" || v === "true" || v === "1";

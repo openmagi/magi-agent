@@ -373,7 +373,7 @@ export function registerBuiltinHooks(
 
   // Agent self-model (Layer 1 meta-cognitive scaffolding). Priority 0
   // — runs first so identity/memory/discipline layer on top. Hook
-  // reads CORE_AGENT_SELF_MODEL env internally (default on).
+  // reads MAGI_SELF_MODEL env internally (default on).
   if (maybe(agentSelfModelHook.name)) {
     registry.register(agentSelfModelHook);
     registered++;
@@ -450,7 +450,7 @@ export function registerBuiltinHooks(
   // Workspace awareness (Layer 2 meta-cognitive scaffolding). Priority
   // 7, beforeLLMCall. Injects a `<workspace_snapshot>` block listing
   // top-level dirs + recently-modified files. Hook reads
-  // CORE_AGENT_WORKSPACE_AWARENESS env internally (default on).
+  // MAGI_WORKSPACE_AWARENESS env internally (default on).
   const workspaceAwarenessHook = makeWorkspaceAwarenessHook({
     workspaceRoot: opts.workspaceRoot,
   });
@@ -460,7 +460,7 @@ export function registerBuiltinHooks(
   }
 
   // Structure-aware code map ranked by PageRank + current chat file refs.
-  // The hook is non-blocking and self-disables via CORE_AGENT_REPO_MAP=off.
+  // The hook is non-blocking and self-disables via MAGI_REPO_MAP=off.
   const repoMapHook = makeRepoMapInjectorHook({
     workspaceRoot: opts.workspaceRoot,
   });
@@ -489,7 +489,7 @@ export function registerBuiltinHooks(
 
   // Session resume seed (Layer 4 meta-cognitive scaffolding). Priority
   // 2, beforeTurnStart. Skipped entirely when no delegate is wired
-  // (unit tests). Hook reads CORE_AGENT_SESSION_RESUME_SEED env
+  // (unit tests). Hook reads MAGI_SESSION_RESUME_SEED env
   // internally (default on).
   if (opts.sessionResumeAgent) {
     const resumeHook = makeSessionResumeHook({
@@ -521,7 +521,7 @@ export function registerBuiltinHooks(
   // preRefusalVerifier (85), before answerVerifier (90). Blocks
   // turn-ending responses that promise future delivery ("I'll send
   // results when done" / "완료되면 결과 보내드릴게요"). One retry then
-  // fail-open. Env gate CORE_AGENT_DEFERRAL_BLOCKER (default on).
+  // fail-open. Env gate MAGI_DEFERRAL_BLOCKER (default on).
   const deferralHook = makeDeferralBlockerHook({
     agent: opts.deferralBlockerAgent,
   });
@@ -574,7 +574,7 @@ export function registerBuiltinHooks(
   // the whole hook globally (e.g. during qmd outage) without editing
   // per-bot agent.config.yaml. Runs at priority 5 (earliest
   // beforeLLMCall) so downstream hooks see the augmented system.
-  const memoryInjectionEnv = (process.env.CORE_AGENT_MEMORY_INJECTION ?? "on")
+  const memoryInjectionEnv = (process.env.MAGI_MEMORY_INJECTION ?? "on")
     .trim()
     .toLowerCase();
   const memoryInjectionEnabled =
@@ -597,7 +597,7 @@ export function registerBuiltinHooks(
   }
 
   const memoryContinuityEnv =
-    (process.env.CORE_AGENT_MEMORY_CONTINUITY_GUARD ?? "on")
+    (process.env.MAGI_MEMORY_CONTINUITY_GUARD ?? "on")
       .trim()
       .toLowerCase();
   const memoryContinuityEnabled =
@@ -630,7 +630,7 @@ export function registerBuiltinHooks(
   }
 
   const sourceAuthorityGateEnv =
-    (process.env.CORE_AGENT_SOURCE_AUTHORITY_GATE ?? "on")
+    (process.env.MAGI_SOURCE_AUTHORITY_GATE ?? "on")
       .trim()
       .toLowerCase();
   const sourceAuthorityGateEnabled =
@@ -649,7 +649,7 @@ export function registerBuiltinHooks(
   }
 
   const clarificationGateEnv =
-    (process.env.CORE_AGENT_CLARIFICATION_GATE ?? "on")
+    (process.env.MAGI_CLARIFICATION_GATE ?? "on")
       .trim()
       .toLowerCase();
   const clarificationGateEnabled =
@@ -672,9 +672,9 @@ export function registerBuiltinHooks(
   // Mid-turn injector (#86) — drains Session.pendingInjections at the
   // start of each beforeLLMCall so injected messages are absorbed into
   // the running turn (Claude Code parity). Env-gated
-  // (`CORE_AGENT_MID_TURN_INJECT`, default on); skipped when no
+  // (`MAGI_MID_TURN_INJECT`, default on); skipped when no
   // delegate was wired (unit tests).
-  const midTurnInjectEnv = (process.env.CORE_AGENT_MID_TURN_INJECT ?? "on")
+  const midTurnInjectEnv = (process.env.MAGI_MID_TURN_INJECT ?? "on")
     .trim()
     .toLowerCase();
   const midTurnInjectEnabled =
@@ -725,7 +725,7 @@ export function registerBuiltinHooks(
     registered++;
   }
   const claimCitationGateEnv =
-    (process.env.CORE_AGENT_CLAIM_CITATION_GATE ?? "on")
+    (process.env.MAGI_CLAIM_CITATION_GATE ?? "on")
       .trim()
       .toLowerCase();
   const claimCitationGateEnabled =
@@ -769,9 +769,9 @@ export function registerBuiltinHooks(
 
   // Fact grounding verifier (priority 82) — Haiku-judged gate that
   // blocks commits where tool output is distorted or fabricated in the
-  // response. Env-gated (`CORE_AGENT_FACT_GROUNDING`, default on).
+  // response. Env-gated (`MAGI_FACT_GROUNDING`, default on).
   // Design: docs/plans/2026-04-21-anti-hallucination-hooks-design.md
-  const factGroundingEnv = (process.env.CORE_AGENT_FACT_GROUNDING ?? "on")
+  const factGroundingEnv = (process.env.MAGI_FACT_GROUNDING ?? "on")
     .trim()
     .toLowerCase();
   const factGroundingEnabled =
@@ -794,9 +794,9 @@ export function registerBuiltinHooks(
   // Resource existence checker (priority 83) — heuristic gate that
   // blocks commits claiming file contents without having read the file
   // this turn. No LLM call, pure regex. Env-gated
-  // (`CORE_AGENT_RESOURCE_CHECK`, default on).
+  // (`MAGI_RESOURCE_CHECK`, default on).
   // Design: docs/plans/2026-04-21-anti-hallucination-hooks-design.md
-  const resourceCheckEnv = (process.env.CORE_AGENT_RESOURCE_CHECK ?? "on")
+  const resourceCheckEnv = (process.env.MAGI_RESOURCE_CHECK ?? "on")
     .trim()
     .toLowerCase();
   const resourceCheckEnabled =
@@ -922,7 +922,7 @@ export function registerBuiltinHooks(
     registered++;
   }
 
-  // Gated by CORE_AGENT_ANSWER_VERIFY env (default on). The hook
+  // Gated by MAGI_ANSWER_VERIFY env (default on). The hook
   // itself reads the env and no-ops when off, but skip registration
   // entirely if the operator listed it in disable_builtin_hooks.
   if (maybe(answerVerifierHook.name)) {
@@ -934,9 +934,9 @@ export function registerBuiltinHooks(
   // answer-verifier: runs a user-configured command, compares extracted
   // metric against baseline, blocks commit on regression. Opt-in via
   // `agent.config.yaml: benchmark:` block — the hook no-ops otherwise.
-  // Env-gated (`CORE_AGENT_BENCHMARK_VERIFY`, default on) and honours
+  // Env-gated (`MAGI_BENCHMARK_VERIFY`, default on) and honours
   // `disable_builtin_hooks: [builtin:benchmark-verifier]`.
-  const benchmarkVerifyEnv = (process.env.CORE_AGENT_BENCHMARK_VERIFY ?? "on")
+  const benchmarkVerifyEnv = (process.env.MAGI_BENCHMARK_VERIFY ?? "on")
     .trim()
     .toLowerCase();
   const benchmarkVerifyEnabled =
@@ -997,7 +997,7 @@ export function registerBuiltinHooks(
   // on). Registers turn-start drift snapshotting, the beforeCommit
   // guard, and the afterCommit manifest updater under the same
   // `builtin:sealed-files` toggle in `disable_builtin_hooks`.
-  const sealedFilesEnv = (process.env.CORE_AGENT_SEALED_FILES ?? "on").trim().toLowerCase();
+  const sealedFilesEnv = (process.env.MAGI_SEALED_FILES ?? "on").trim().toLowerCase();
   const sealedFilesEnabled =
     sealedFilesEnv === "" ||
     sealedFilesEnv === "on" ||
@@ -1019,8 +1019,8 @@ export function registerBuiltinHooks(
   // the persisted circuit-breaker state written by sealedFiles (and
   // any future fail-closed hook). Runs at priority 5 so it short-
   // circuits before memoryInjector / task_contract / etc. Fail-open.
-  // Env-gated via `CORE_AGENT_CIRCUIT_BREAKER` (default on).
-  const circuitEnv = (process.env.CORE_AGENT_CIRCUIT_BREAKER ?? "off")
+  // Env-gated via `MAGI_CIRCUIT_BREAKER` (default on).
+  const circuitEnv = (process.env.MAGI_CIRCUIT_BREAKER ?? "off")
     .trim()
     .toLowerCase();
   const circuitEnabled =
@@ -1066,9 +1066,9 @@ export function registerBuiltinHooks(
   // T2-09 — declarative dangerous_patterns beforeToolUse hook. Reads
   // `agent.config.yaml → dangerous_patterns: [...]`, falls back to a
   // hardcoded default set when the key is absent. Env-gated
-  // (`CORE_AGENT_DANGEROUS_PATTERNS`, default on); opt-out per bot via
+  // (`MAGI_DANGEROUS_PATTERNS`, default on); opt-out per bot via
   // `disable_builtin_hooks: [builtin:dangerous-patterns]`.
-  const dangerousPatternsEnv = (process.env.CORE_AGENT_DANGEROUS_PATTERNS ?? "on")
+  const dangerousPatternsEnv = (process.env.MAGI_DANGEROUS_PATTERNS ?? "on")
     .trim()
     .toLowerCase();
   const dangerousPatternsEnabled =
@@ -1111,9 +1111,9 @@ export function registerBuiltinHooks(
   // Coding Discipline hooks (docs/plans/2026-04-20-coding-discipline-design.md).
   // All four share the `builtin:discipline-*` prefix so operators can
   // disable individually in agent.config.yaml: disable_builtin_hooks.
-  // Env-gated via `CORE_AGENT_DISCIPLINE` (default on); skipped
+  // Env-gated via `MAGI_DISCIPLINE` (default on); skipped
   // entirely when no delegate was wired.
-  const disciplineEnv = (process.env.CORE_AGENT_DISCIPLINE ?? "on")
+  const disciplineEnv = (process.env.MAGI_DISCIPLINE ?? "on")
     .trim()
     .toLowerCase();
   const disciplineEnabled =
@@ -1236,11 +1236,11 @@ export function registerBuiltinHooks(
   }
 
   // #81 — inline task notifier. Priority 4 (right after midTurnInjector
-  // at 3). Env-gated (`CORE_AGENT_INLINE_TASK_NOTIFY`, default on);
+  // at 3). Env-gated (`MAGI_INLINE_TASK_NOTIFY`, default on);
   // skipped when no delegate was wired.
   try {
     const inlineNotifyEnv = (
-      process.env.CORE_AGENT_INLINE_TASK_NOTIFY ?? "on"
+      process.env.MAGI_INLINE_TASK_NOTIFY ?? "on"
     )
       .trim()
       .toLowerCase();
@@ -1266,10 +1266,10 @@ export function registerBuiltinHooks(
 
   // Superpowers plan-mode auto-trigger (beforeLLMCall, priority 8).
   // See docs/plans/2026-04-20-superpowers-plugin-design.md design #1.
-  // Env-gated via CORE_AGENT_PLAN_AUTOTRIGGER (default on); skipped
+  // Env-gated via MAGI_PLAN_AUTOTRIGGER (default on); skipped
   // when no delegate was wired.
   const planAutoTriggerEnv = (
-    process.env.CORE_AGENT_PLAN_AUTOTRIGGER ?? "on"
+    process.env.MAGI_PLAN_AUTOTRIGGER ?? "on"
   )
     .trim()
     .toLowerCase();
@@ -1292,10 +1292,10 @@ export function registerBuiltinHooks(
 
   // Superpowers onboarding nudge (beforeTurnStart, priority 6).
   // See docs/plans/2026-04-20-superpowers-plugin-design.md design #2.
-  // Env-gated via CORE_AGENT_ONBOARDING_STEER (default on); skipped
+  // Env-gated via MAGI_ONBOARDING_STEER (default on); skipped
   // when no delegate was wired.
   const onboardingSteerEnv = (
-    process.env.CORE_AGENT_ONBOARDING_STEER ?? "on"
+    process.env.MAGI_ONBOARDING_STEER ?? "on"
   )
     .trim()
     .toLowerCase();
@@ -1318,9 +1318,9 @@ export function registerBuiltinHooks(
 
   // Task Lifecycle hooks (0.17.1) — runtime-managed
   // `TASK-QUEUE.md → WORKING.md → memory/YYYY-MM-DD.md` flow. Three
-  // hooks share one env gate `CORE_AGENT_TASK_LIFECYCLE` (default on);
+  // hooks share one env gate `MAGI_TASK_LIFECYCLE` (default on);
   // the Haiku tiebreak is gated separately by
-  // `CORE_AGENT_TASK_LIFECYCLE_HAIKU` (default on). Non-blocking,
+  // `MAGI_TASK_LIFECYCLE_HAIKU` (default on). Non-blocking,
   // fail-open. Each hook can be individually disabled via
   // `disable_builtin_hooks: ["builtin:task-lifecycle-detect", ...]`.
   const taskLifecycleEnv = (
@@ -1329,8 +1329,8 @@ export function registerBuiltinHooks(
     // handlers short-circuit when the workspace lives under /tmp or
     // /var/folders, so afterEach(fs.rm) no longer races afterTurnEnd.
     // To explicitly disable lifecycle in production, set
-    // `CORE_AGENT_TASK_LIFECYCLE=off`.
-    process.env.CORE_AGENT_TASK_LIFECYCLE ?? "on"
+    // `MAGI_TASK_LIFECYCLE=off`.
+    process.env.MAGI_TASK_LIFECYCLE ?? "on"
   )
     .trim()
     .toLowerCase();

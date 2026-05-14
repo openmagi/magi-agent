@@ -55,7 +55,7 @@ interface InteractiveToolStats {
 }
 
 function isEnabled(): boolean {
-  const raw = process.env.CORE_AGENT_INTERACTIVE_WORK_CONTROLLER;
+  const raw = process.env.MAGI_INTERACTIVE_WORK_CONTROLLER;
   if (raw === undefined || raw === null) return true;
   const v = raw.trim().toLowerCase();
   return v === "" || v === "on" || v === "true" || v === "1";
@@ -70,14 +70,14 @@ function positiveIntFromEnv(name: string, fallback: number): number {
 
 function checkpointMs(opts: InteractiveWorkControllerOptions): number {
   return opts.checkpointMs ?? positiveIntFromEnv(
-    "CORE_AGENT_INTERACTIVE_CHECKPOINT_MS",
+    "MAGI_INTERACTIVE_CHECKPOINT_MS",
     DEFAULT_CHECKPOINT_MS,
   );
 }
 
 function maxToolResults(opts: InteractiveWorkControllerOptions): number {
   return opts.maxToolResults ?? positiveIntFromEnv(
-    "CORE_AGENT_INTERACTIVE_MAX_TOOL_RESULTS",
+    "MAGI_INTERACTIVE_MAX_TOOL_RESULTS",
     DEFAULT_MAX_TOOL_RESULTS,
   );
 }

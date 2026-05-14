@@ -6,9 +6,9 @@ const REQUIRED_ENV = {
   BOT_ID: "bot",
   USER_ID: "user",
   GATEWAY_TOKEN: "gateway",
-  CORE_AGENT_API_PROXY_URL: "http://api-proxy",
-  CORE_AGENT_CHAT_PROXY_URL: "http://chat-proxy",
-  CORE_AGENT_REDIS_URL: "redis://localhost:6379",
+  MAGI_API_PROXY_URL: "http://api-proxy",
+  MAGI_CHAT_PROXY_URL: "http://chat-proxy",
+  MAGI_REDIS_URL: "redis://localhost:6379",
 };
 
 function setRequiredEnv(): void {
@@ -31,9 +31,9 @@ describe("loadRuntimeEnv", () => {
     expect(env.agentConfig.defaultPermissionMode).toBe("workspace-bypass");
   });
 
-  it("accepts CORE_AGENT_PERMISSION_MODE as an explicit override", () => {
+  it("accepts MAGI_PERMISSION_MODE as an explicit override", () => {
     setRequiredEnv();
-    vi.stubEnv("CORE_AGENT_PERMISSION_MODE", "auto");
+    vi.stubEnv("MAGI_PERMISSION_MODE", "auto");
 
     const env = loadRuntimeEnv();
 
@@ -49,7 +49,7 @@ describe("loadRuntimeEnv routing", () => {
 
   it("defaults routing off for normal single-model bots", () => {
     setRequiredEnv();
-    vi.stubEnv("CORE_AGENT_MODEL", "claude-sonnet-4-6");
+    vi.stubEnv("MAGI_MODEL", "claude-sonnet-4-6");
 
     const env = loadRuntimeEnv();
 
@@ -59,7 +59,7 @@ describe("loadRuntimeEnv routing", () => {
 
   it("defaults router keyword bots to hosted-proxy routing", () => {
     setRequiredEnv();
-    vi.stubEnv("CORE_AGENT_MODEL", "magi-smart-router/auto");
+    vi.stubEnv("MAGI_MODEL", "magi-smart-router/auto");
 
     const env = loadRuntimeEnv();
 
@@ -69,9 +69,9 @@ describe("loadRuntimeEnv routing", () => {
 
   it("accepts explicit direct routing mode for standalone deployments", () => {
     setRequiredEnv();
-    vi.stubEnv("CORE_AGENT_MODEL", "magi-smart-router/auto");
-    vi.stubEnv("CORE_AGENT_ROUTING_MODE", "direct");
-    vi.stubEnv("CORE_AGENT_ROUTING_PROFILE", "anthropic_only");
+    vi.stubEnv("MAGI_MODEL", "magi-smart-router/auto");
+    vi.stubEnv("MAGI_ROUTING_MODE", "direct");
+    vi.stubEnv("MAGI_ROUTING_PROFILE", "anthropic_only");
     vi.stubEnv("ANTHROPIC_API_KEY", "sk-ant-test");
 
     const env = loadRuntimeEnv();
@@ -87,8 +87,8 @@ describe("loadRuntimeEnv routing", () => {
 
   it("configures local OpenAI-compatible providers in direct mode without API keys", () => {
     setRequiredEnv();
-    vi.stubEnv("CORE_AGENT_MODEL", "magi-smart-router/auto");
-    vi.stubEnv("CORE_AGENT_ROUTING_MODE", "direct");
+    vi.stubEnv("MAGI_MODEL", "magi-smart-router/auto");
+    vi.stubEnv("MAGI_ROUTING_MODE", "direct");
     vi.stubEnv("OLLAMA_BASE_URL", "http://ollama.local:11434/v1");
     vi.stubEnv("LM_STUDIO_BASE_URL", "http://lmstudio.local:1234/v1");
     vi.stubEnv("VLLM_BASE_URL", "http://gpu.local:8000/v1");

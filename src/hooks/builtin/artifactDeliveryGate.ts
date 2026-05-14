@@ -110,7 +110,7 @@ export interface ArtifactDeliveryGateOptions {
 }
 
 function isEnabled(): boolean {
-  const raw = process.env.CORE_AGENT_ARTIFACT_DELIVERY_GATE;
+  const raw = process.env.MAGI_ARTIFACT_DELIVERY_GATE;
   if (raw === undefined || raw === null) return true;
   const v = raw.trim().toLowerCase();
   return v === "" || v === "on" || v === "true" || v === "1";

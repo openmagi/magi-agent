@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Bring `openmagi/magi-agent` back to parity with the current cloud `clawy-core-agent` runtime while preserving OSS-only local provider, CLI, local KB, and `.magi` workspace behavior.
+**Goal:** Bring `openmagi/magi-agent` back to parity with the current cloud `magi-core-agent` runtime while preserving OSS-only local provider, CLI, local KB, and `.magi` workspace behavior.
 
-**Architecture:** Treat `/Users/kevin/Desktop/claude_code/clawy` `origin/main:infra/docker/clawy-core-agent/src` as the committed cloud source of truth. Port behavior by feature, not by wholesale file copy, because `magi-agent` intentionally differs in branding, local LLM provider plumbing, app routes, CLI, and storage roots.
+**Architecture:** Treat the cloud monorepo `origin/main:infra/docker/magi-core-agent/src` as the committed cloud source of truth. Port behavior by feature, not by wholesale file copy, because `magi-agent` intentionally differs in branding, local LLM provider plumbing, app routes, CLI, and storage roots.
 
 **Tech Stack:** TypeScript, Vitest, Node runtime tools, SSE agent events, React/Vite web app.
 
@@ -12,7 +12,7 @@
 
 ## Current Inspection Summary
 
-Cloud committed source inspected: `/Users/kevin/Desktop/claude_code/clawy` `origin/main`, path `infra/docker/clawy-core-agent/src`.
+Cloud committed source inspected: cloud monorepo `origin/main`, path `infra/docker/magi-core-agent/src`.
 
 OSS source inspected: `/Users/kevin/Desktop/claude_code/magi-agent` `main`, path `src`.
 
@@ -35,7 +35,7 @@ Confirmed gaps:
 - Missing coverage files: `src/Session.goalLoop.test.ts` and `src/turn/HookContextBuilder.test.ts`.
 
 Guardrails:
-- Preserve `.magi` paths in OSS. Do not introduce `.clawy` or `clawy-*` runtime names.
+- Preserve `.magi` paths in OSS. Do not introduce legacy cloud runtime names.
 - Preserve `withMagiBinPath`, local provider registration, CLI, local KB, and no cloud-only API proxy assumptions.
 - Do not add cloud smart routers to OSS. User-selected/configured LLM remains the only model source.
 
@@ -179,7 +179,7 @@ Guardrails:
 
 - [ ] Add failing `Browser` test based on cloud: successful `open` emits `browser_frame` without CDP secrets.
 - [ ] Port cloud browser frame helpers into `src/tools/Browser.ts`.
-- [ ] Use OSS transient directory `.magi/browser-frames` instead of `.clawy` or `.openmagi`.
+- [ ] Use OSS transient directory `.magi/browser-frames` instead of legacy cloud paths.
 - [ ] Emit frames after successful `open`, `snapshot`, `scrape`, `click`, `fill`, `scroll`, `screenshot`, `mouse_click`, `keyboard_type`, and `press`.
 - [ ] Add failing `SocialBrowser` test based on cloud: `social_browser_session_required` asks user to connect, then retries claim.
 - [ ] Port `socialConnectChoiceId`, `SOCIAL_BROWSER_CANCEL_CHOICE_ID`, `runRequiresSocialBrowserSession`, and `askToConnectSocialBrowser`.

@@ -30,7 +30,7 @@
  * at load time) rather than crashing the hook.
  *
  * Toggle:
- *   CORE_AGENT_DANGEROUS_PATTERNS=off  — disable globally.
+ *   MAGI_DANGEROUS_PATTERNS=off  — disable globally.
  *   disable_builtin_hooks: [builtin:dangerous-patterns]  — disable per-bot.
  */
 
@@ -75,7 +75,7 @@ const CONFIG_REL = "agent.config.yaml";
 const PATH_TOOLS = new Set<string>(["FileWrite", "FileEdit", "FileRead"]);
 
 export function isEnabledByEnv(): boolean {
-  const raw = process.env.CORE_AGENT_DANGEROUS_PATTERNS;
+  const raw = process.env.MAGI_DANGEROUS_PATTERNS;
   if (raw === undefined || raw === null) return true;
   const v = raw.trim().toLowerCase();
   if (v === "" || v === "on" || v === "true" || v === "1") return true;

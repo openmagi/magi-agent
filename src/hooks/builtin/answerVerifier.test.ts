@@ -47,17 +47,17 @@ function makeCtx(llm: LLMClient): {
 }
 
 describe("answerVerifier", () => {
-  const originalEnv = process.env.CORE_AGENT_ANSWER_VERIFY;
+  const originalEnv = process.env.MAGI_ANSWER_VERIFY;
 
   beforeEach(() => {
-    delete process.env.CORE_AGENT_ANSWER_VERIFY;
+    delete process.env.MAGI_ANSWER_VERIFY;
   });
 
   afterEach(() => {
     if (originalEnv === undefined) {
-      delete process.env.CORE_AGENT_ANSWER_VERIFY;
+      delete process.env.MAGI_ANSWER_VERIFY;
     } else {
-      process.env.CORE_AGENT_ANSWER_VERIFY = originalEnv;
+      process.env.MAGI_ANSWER_VERIFY = originalEnv;
     }
   });
 
@@ -145,7 +145,7 @@ describe("answerVerifier", () => {
   });
 
   it("env=off → noop (no LLM call, continue)", async () => {
-    process.env.CORE_AGENT_ANSWER_VERIFY = "off";
+    process.env.MAGI_ANSWER_VERIFY = "off";
     let called = false;
     const llm = {
       stream: async function* () {

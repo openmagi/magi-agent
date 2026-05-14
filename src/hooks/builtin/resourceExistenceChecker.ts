@@ -9,7 +9,7 @@
  * 2.5 Flash" without FileRead → blocked. Bot reads it first → pass.
  *
  * Retry budget: 1, then fail-open.
- * Toggle: `CORE_AGENT_RESOURCE_CHECK=off` disables globally.
+ * Toggle: `MAGI_RESOURCE_CHECK=off` disables globally.
  */
 
 import type { RegisteredHook, HookContext } from "../types.js";
@@ -187,7 +187,7 @@ export interface ResourceExistenceCheckerOptions {
 }
 
 function isEnabled(): boolean {
-  const raw = process.env.CORE_AGENT_RESOURCE_CHECK;
+  const raw = process.env.MAGI_RESOURCE_CHECK;
   if (raw === undefined || raw === null) return true;
   const v = raw.trim().toLowerCase();
   return v === "" || v === "on" || v === "true" || v === "1";

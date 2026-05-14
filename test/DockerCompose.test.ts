@@ -36,7 +36,7 @@ describe("self-host Docker Compose", () => {
   it("documents no-auth local OpenAI-compatible model defaults", () => {
     expect(envExample).toContain("MAGI_AGENT_SERVER_TOKEN=");
     expect(envExample).toContain("OPENAI_BASE_URL=http://host.docker.internal:11434/v1");
-    expect(envExample).toContain("CORE_AGENT_ROUTING_MODE=direct");
+    expect(envExample).toContain("MAGI_ROUTING_MODE=direct");
     expect(envExample).not.toMatch(/sk-[A-Za-z0-9]/);
   });
 });

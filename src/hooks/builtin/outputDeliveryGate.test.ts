@@ -32,7 +32,7 @@ function makeArgs(assistantText: string, retryCount = 0) {
 }
 
 afterEach(() => {
-  delete process.env.CORE_AGENT_OUTPUT_DELIVERY_GATE;
+  delete process.env.MAGI_OUTPUT_DELIVERY_GATE;
 });
 
 describe("matchesDeliveryFailureExplanation", () => {
@@ -82,8 +82,8 @@ describe("outputDeliveryGate", () => {
     expect(result).toEqual({ action: "continue" });
   });
 
-  it("respects CORE_AGENT_OUTPUT_DELIVERY_GATE=off", async () => {
-    process.env.CORE_AGENT_OUTPUT_DELIVERY_GATE = "off";
+  it("respects MAGI_OUTPUT_DELIVERY_GATE=off", async () => {
+    process.env.MAGI_OUTPUT_DELIVERY_GATE = "off";
     const hook = makeOutputDeliveryGateHook({
       agent: {
         listUndelivered: async () => [{ artifactId: "a1", filename: "memo.docx" }],

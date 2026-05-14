@@ -177,15 +177,15 @@ function makeParentCtx(overrides: Partial<ToolContext> = {}): {
 type SpawnChildTestResult = Awaited<ReturnType<typeof runChildAgentLoop>>;
 
 async function withZeroSpawnRetryDelay<T>(fn: () => Promise<T>): Promise<T> {
-  const previous = process.env.CORE_AGENT_SPAWN_RETRY_BASE_DELAY_MS;
-  process.env.CORE_AGENT_SPAWN_RETRY_BASE_DELAY_MS = "0";
+  const previous = process.env.MAGI_SPAWN_RETRY_BASE_DELAY_MS;
+  process.env.MAGI_SPAWN_RETRY_BASE_DELAY_MS = "0";
   try {
     return await fn();
   } finally {
     if (previous === undefined) {
-      delete process.env.CORE_AGENT_SPAWN_RETRY_BASE_DELAY_MS;
+      delete process.env.MAGI_SPAWN_RETRY_BASE_DELAY_MS;
     } else {
-      process.env.CORE_AGENT_SPAWN_RETRY_BASE_DELAY_MS = previous;
+      process.env.MAGI_SPAWN_RETRY_BASE_DELAY_MS = previous;
     }
   }
 }
@@ -820,8 +820,8 @@ describe("SpawnAgent — §7.12.d", () => {
   it("(c1c) child text-only completion is rejected while deterministic requirements remain active", async () => {
     await withSpawnEnv(
       {
-        CORE_AGENT_SPAWN_MAX_ATTEMPTS: "1",
-        CORE_AGENT_SPAWN_RETRY_BASE_DELAY_MS: "0",
+        MAGI_SPAWN_MAX_ATTEMPTS: "1",
+        MAGI_SPAWN_RETRY_BASE_DELAY_MS: "0",
       },
       async () => {
         const contract = new ExecutionContractStore({ now: () => 1_700_000_000_000 });

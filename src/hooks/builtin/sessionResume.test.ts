@@ -71,7 +71,7 @@ async function mkTmpWorkspace(): Promise<string> {
 }
 
 afterEach(() => {
-  delete process.env.CORE_AGENT_SESSION_RESUME_SEED;
+  delete process.env.MAGI_SESSION_RESUME_SEED;
   _clearSessionResumeMemo();
 });
 
@@ -442,8 +442,8 @@ describe("sessionResumeHook", () => {
     }
   });
 
-  it("respects CORE_AGENT_SESSION_RESUME_SEED=off", async () => {
-    process.env.CORE_AGENT_SESSION_RESUME_SEED = "off";
+  it("respects MAGI_SESSION_RESUME_SEED=off", async () => {
+    process.env.MAGI_SESSION_RESUME_SEED = "off";
     const root = await mkTmpWorkspace();
     try {
       const snapshot: SessionResumeSnapshot = {

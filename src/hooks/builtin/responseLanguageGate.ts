@@ -54,7 +54,7 @@ export interface ResolvedLanguagePolicy {
 }
 
 function isEnabled(): boolean {
-  const raw = process.env.CORE_AGENT_RESPONSE_LANGUAGE_GATE;
+  const raw = process.env.MAGI_RESPONSE_LANGUAGE_GATE;
   if (raw === undefined || raw === null) return true;
   const v = raw.trim().toLowerCase();
   return v === "" || v === "on" || v === "true" || v === "1";

@@ -21,7 +21,7 @@ const SECRET_ASSIGNMENT_RE =
   /\b[A-Z0-9_]*(?:API_KEY|TOKEN|SECRET|PASSWORD|PRIVATE_KEY)\s*=\s*["']?(?!\$|<|your_|redacted|masked|\*{3,})[A-Za-z0-9_./+=:-]{12,}/i;
 
 function isEnabled(): boolean {
-  const raw = process.env.CORE_AGENT_SECRET_EXPOSURE;
+  const raw = process.env.MAGI_SECRET_EXPOSURE;
   if (raw === undefined || raw === null) return true;
   const v = raw.trim().toLowerCase();
   return v === "" || v === "on" || v === "true" || v === "1";

@@ -21,7 +21,7 @@
  * verdict => treat as FULFILLED. The judge is advisory safety, not a
  * correctness oracle; a broken judge must never block a turn.
  *
- * Toggle: `CORE_AGENT_ANSWER_VERIFY=off` disables the hook globally
+ * Toggle: `MAGI_ANSWER_VERIFY=off` disables the hook globally
  * (set by chat-proxy when a bot opts out via agent.config.yaml
  * `answer_verify: off`).
  */
@@ -108,7 +108,7 @@ export function parseVerdict(raw: string): AnswerVerdict {
 }
 
 function isEnabled(): boolean {
-  const raw = process.env.CORE_AGENT_ANSWER_VERIFY;
+  const raw = process.env.MAGI_ANSWER_VERIFY;
   if (raw === undefined || raw === null) return true;
   const v = raw.trim().toLowerCase();
   if (v === "" || v === "on" || v === "true" || v === "1") return true;

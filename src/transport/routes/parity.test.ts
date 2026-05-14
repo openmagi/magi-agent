@@ -112,24 +112,24 @@ describe("GET /v1/parity/evidence", () => {
     tmp = await fs.mkdtemp(path.join(os.tmpdir(), "parity-route-"));
     const helperPath = path.join(tmp, "reliable-request.mjs");
     await fs.writeFile(helperPath, "process.stdout.write('{}')\n", "utf8");
-    oldReliableScript = process.env.CORE_AGENT_RELIABLE_REQUEST_SCRIPT;
-    oldBuildSha = process.env.CORE_AGENT_BUILD_SHA;
-    oldBuiltBuildSha = process.env.CORE_AGENT_BUILT_BUILD_SHA;
-    oldImageRepo = process.env.CORE_AGENT_IMAGE_REPO;
-    oldBuiltImageRepo = process.env.CORE_AGENT_BUILT_IMAGE_REPO;
-    oldImageTag = process.env.CORE_AGENT_IMAGE_TAG;
-    oldBuiltImageTag = process.env.CORE_AGENT_BUILT_IMAGE_TAG;
-    oldDigest = process.env.CORE_AGENT_EXPECTED_IMAGE_DIGEST;
-    oldBuiltDigest = process.env.CORE_AGENT_BUILT_IMAGE_DIGEST;
-    process.env.CORE_AGENT_RELIABLE_REQUEST_SCRIPT = helperPath;
-    process.env.CORE_AGENT_BUILD_SHA = "sha-test";
-    process.env.CORE_AGENT_BUILT_BUILD_SHA = "sha-test";
-    process.env.CORE_AGENT_IMAGE_REPO = "ghcr.io/test/core-agent";
-    process.env.CORE_AGENT_BUILT_IMAGE_REPO = "ghcr.io/test/core-agent";
-    process.env.CORE_AGENT_IMAGE_TAG = "tag-test";
-    process.env.CORE_AGENT_BUILT_IMAGE_TAG = "tag-test";
-    process.env.CORE_AGENT_EXPECTED_IMAGE_DIGEST = "sha256:digest-test";
-    process.env.CORE_AGENT_BUILT_IMAGE_DIGEST = "sha256:digest-test";
+    oldReliableScript = process.env.MAGI_RELIABLE_REQUEST_SCRIPT;
+    oldBuildSha = process.env.MAGI_BUILD_SHA;
+    oldBuiltBuildSha = process.env.MAGI_BUILT_BUILD_SHA;
+    oldImageRepo = process.env.MAGI_IMAGE_REPO;
+    oldBuiltImageRepo = process.env.MAGI_BUILT_IMAGE_REPO;
+    oldImageTag = process.env.MAGI_IMAGE_TAG;
+    oldBuiltImageTag = process.env.MAGI_BUILT_IMAGE_TAG;
+    oldDigest = process.env.MAGI_EXPECTED_IMAGE_DIGEST;
+    oldBuiltDigest = process.env.MAGI_BUILT_IMAGE_DIGEST;
+    process.env.MAGI_RELIABLE_REQUEST_SCRIPT = helperPath;
+    process.env.MAGI_BUILD_SHA = "sha-test";
+    process.env.MAGI_BUILT_BUILD_SHA = "sha-test";
+    process.env.MAGI_IMAGE_REPO = "ghcr.io/test/core-agent";
+    process.env.MAGI_BUILT_IMAGE_REPO = "ghcr.io/test/core-agent";
+    process.env.MAGI_IMAGE_TAG = "tag-test";
+    process.env.MAGI_BUILT_IMAGE_TAG = "tag-test";
+    process.env.MAGI_EXPECTED_IMAGE_DIGEST = "sha256:digest-test";
+    process.env.MAGI_BUILT_IMAGE_DIGEST = "sha256:digest-test";
 
     const agent = new FakeAgent(tmp);
     const toolRequest: ControlRequestRecord = {
@@ -223,15 +223,15 @@ describe("GET /v1/parity/evidence", () => {
   afterEach(async () => {
     await server.stop();
     await fs.rm(tmp, { recursive: true, force: true });
-    setOrDeleteEnv("CORE_AGENT_RELIABLE_REQUEST_SCRIPT", oldReliableScript);
-    setOrDeleteEnv("CORE_AGENT_BUILD_SHA", oldBuildSha);
-    setOrDeleteEnv("CORE_AGENT_BUILT_BUILD_SHA", oldBuiltBuildSha);
-    setOrDeleteEnv("CORE_AGENT_IMAGE_REPO", oldImageRepo);
-    setOrDeleteEnv("CORE_AGENT_BUILT_IMAGE_REPO", oldBuiltImageRepo);
-    setOrDeleteEnv("CORE_AGENT_IMAGE_TAG", oldImageTag);
-    setOrDeleteEnv("CORE_AGENT_BUILT_IMAGE_TAG", oldBuiltImageTag);
-    setOrDeleteEnv("CORE_AGENT_EXPECTED_IMAGE_DIGEST", oldDigest);
-    setOrDeleteEnv("CORE_AGENT_BUILT_IMAGE_DIGEST", oldBuiltDigest);
+    setOrDeleteEnv("MAGI_RELIABLE_REQUEST_SCRIPT", oldReliableScript);
+    setOrDeleteEnv("MAGI_BUILD_SHA", oldBuildSha);
+    setOrDeleteEnv("MAGI_BUILT_BUILD_SHA", oldBuiltBuildSha);
+    setOrDeleteEnv("MAGI_IMAGE_REPO", oldImageRepo);
+    setOrDeleteEnv("MAGI_BUILT_IMAGE_REPO", oldBuiltImageRepo);
+    setOrDeleteEnv("MAGI_IMAGE_TAG", oldImageTag);
+    setOrDeleteEnv("MAGI_BUILT_IMAGE_TAG", oldBuiltImageTag);
+    setOrDeleteEnv("MAGI_EXPECTED_IMAGE_DIGEST", oldDigest);
+    setOrDeleteEnv("MAGI_BUILT_IMAGE_DIGEST", oldBuiltDigest);
   });
 
   it("requires bearer auth", async () => {

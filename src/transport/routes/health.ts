@@ -52,7 +52,7 @@ export interface HealthPayload {
   expectedImage: ImageIdentity;
   features: RuntimeFeatureStatus;
   rollback: {
-    transportReliability: "CORE_AGENT_TRANSPORT_RELIABILITY=off";
+    transportReliability: "MAGI_TRANSPORT_RELIABILITY=off";
     safetyCriticalRuntime: "image_rollback_only";
   };
   tools: Array<{ name: string; permission: string }>;
@@ -77,26 +77,26 @@ export interface HealthPayload {
 
 export function readBuildInfo(): BuildInfo {
   const builtImage: ImageIdentity = {
-    buildSha: readNonEmptyEnv("CORE_AGENT_BUILT_BUILD_SHA"),
-    imageRepo: readNonEmptyEnv("CORE_AGENT_BUILT_IMAGE_REPO"),
-    imageTag: readNonEmptyEnv("CORE_AGENT_BUILT_IMAGE_TAG"),
-    imageDigest: readNonEmptyEnv("CORE_AGENT_BUILT_IMAGE_DIGEST"),
+    buildSha: readNonEmptyEnv("MAGI_BUILT_BUILD_SHA"),
+    imageRepo: readNonEmptyEnv("MAGI_BUILT_IMAGE_REPO"),
+    imageTag: readNonEmptyEnv("MAGI_BUILT_IMAGE_TAG"),
+    imageDigest: readNonEmptyEnv("MAGI_BUILT_IMAGE_DIGEST"),
   };
   const expectedImage: ImageIdentity = {
     buildSha:
-      readNonEmptyEnv("CORE_AGENT_BUILD_SHA") ??
+      readNonEmptyEnv("MAGI_BUILD_SHA") ??
       readNonEmptyEnv("MAGI_BUILD_SHA") ??
       readNonEmptyEnv("VERCEL_GIT_COMMIT_SHA") ??
       null,
-    imageRepo: readNonEmptyEnv("CORE_AGENT_IMAGE_REPO"),
-    imageTag: readNonEmptyEnv("CORE_AGENT_IMAGE_TAG"),
+    imageRepo: readNonEmptyEnv("MAGI_IMAGE_REPO"),
+    imageTag: readNonEmptyEnv("MAGI_IMAGE_TAG"),
     imageDigest:
-      readNonEmptyEnv("CORE_AGENT_EXPECTED_IMAGE_DIGEST") ??
-      readNonEmptyEnv("CORE_AGENT_IMAGE_DIGEST") ??
+      readNonEmptyEnv("MAGI_EXPECTED_IMAGE_DIGEST") ??
+      readNonEmptyEnv("MAGI_IMAGE_DIGEST") ??
       null,
   };
   return {
-    version: readNonEmptyEnv("CORE_AGENT_VERSION") ?? "0.19.10",
+    version: readNonEmptyEnv("MAGI_VERSION") ?? "0.19.10",
     buildSha: builtImage.buildSha ?? expectedImage.buildSha,
     imageRepo: builtImage.imageRepo ?? expectedImage.imageRepo,
     imageTag: builtImage.imageTag ?? expectedImage.imageTag,
@@ -119,7 +119,7 @@ export function runtimeFeatures(): RuntimeFeatureStatus {
     planApproval: true,
     structuredOutput: true,
     childHarness: true,
-    transportReliability: process.env.CORE_AGENT_TRANSPORT_RELIABILITY !== "off",
+    transportReliability: process.env.MAGI_TRANSPORT_RELIABILITY !== "off",
   };
 }
 
@@ -173,7 +173,7 @@ export async function buildHealthPayload(input: {
     ...input.buildInfo,
     features: input.features,
     rollback: {
-      transportReliability: "CORE_AGENT_TRANSPORT_RELIABILITY=off",
+      transportReliability: "MAGI_TRANSPORT_RELIABILITY=off",
       safetyCriticalRuntime: "image_rollback_only",
     },
     tools: input.tools,

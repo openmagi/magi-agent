@@ -21,10 +21,10 @@ RUN npm run build
 
 FROM node:22-bookworm-slim
 
-ARG CORE_AGENT_BUILD_SHA=""
-ARG CORE_AGENT_IMAGE_REPO=""
-ARG CORE_AGENT_IMAGE_TAG=""
-ARG CORE_AGENT_EXPECTED_IMAGE_DIGEST=""
+ARG MAGI_BUILD_SHA=""
+ARG MAGI_IMAGE_REPO=""
+ARG MAGI_IMAGE_TAG=""
+ARG MAGI_EXPECTED_IMAGE_DIGEST=""
 
 # Runtime deps: bash+curl for skill scripts, git for memory repos,
 # python3 for bot-authored inline calcs (admin-bot 2026-04-20 POS trace
@@ -57,7 +57,7 @@ COPY --from=builder /build/apps/web/dist ./apps/web/
 
 # Bundled superpowers skills — see
 # docs/plans/2026-04-20-superpowers-plugin-design.md. Resolved by
-# Agent.ts via `$CORE_AGENT_SUPERPOWERS_DIR` (default `<cwd>/skills/superpowers`,
+# Agent.ts via `$MAGI_SUPERPOWERS_DIR` (default `<cwd>/skills/superpowers`,
 # which is `/app/skills/superpowers` inside the image).
 COPY skills/ ./skills/
 
@@ -76,12 +76,12 @@ USER ocuser
 # (e.g. `kb-search.sh`, `agent-run.sh`, `integration.sh`) work the same
 # way they do in existing Magi workspaces.
 ENV NODE_ENV=production \
-    CORE_AGENT_PORT=8080 \
-    CORE_AGENT_WORKSPACE=/home/ocuser/.magi/workspace \
-    CORE_AGENT_BUILT_BUILD_SHA=${CORE_AGENT_BUILD_SHA} \
-    CORE_AGENT_BUILT_IMAGE_REPO=${CORE_AGENT_IMAGE_REPO} \
-    CORE_AGENT_BUILT_IMAGE_TAG=${CORE_AGENT_IMAGE_TAG} \
-    CORE_AGENT_BUILT_IMAGE_DIGEST=${CORE_AGENT_EXPECTED_IMAGE_DIGEST} \
+    MAGI_PORT=8080 \
+    MAGI_WORKSPACE=/home/ocuser/.magi/workspace \
+    MAGI_BUILT_BUILD_SHA=${MAGI_BUILD_SHA} \
+    MAGI_BUILT_IMAGE_REPO=${MAGI_IMAGE_REPO} \
+    MAGI_BUILT_IMAGE_TAG=${MAGI_IMAGE_TAG} \
+    MAGI_BUILT_IMAGE_DIGEST=${MAGI_EXPECTED_IMAGE_DIGEST} \
     PATH=/home/ocuser/.magi/bin:/app/node_modules/.bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 
 EXPOSE 8080

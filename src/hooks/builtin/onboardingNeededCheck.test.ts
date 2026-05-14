@@ -111,13 +111,13 @@ describe("shouldSkipNudge", () => {
 });
 
 describe("makeOnboardingNeededCheckHook", () => {
-  const prevEnv = process.env.CORE_AGENT_ONBOARDING_STEER;
+  const prevEnv = process.env.MAGI_ONBOARDING_STEER;
   beforeEach(() => {
-    delete process.env.CORE_AGENT_ONBOARDING_STEER;
+    delete process.env.MAGI_ONBOARDING_STEER;
   });
   afterEach(() => {
-    if (prevEnv === undefined) delete process.env.CORE_AGENT_ONBOARDING_STEER;
-    else process.env.CORE_AGENT_ONBOARDING_STEER = prevEnv;
+    if (prevEnv === undefined) delete process.env.MAGI_ONBOARDING_STEER;
+    else process.env.MAGI_ONBOARDING_STEER = prevEnv;
   });
 
   it("declares name, point, priority, non-blocking", () => {
@@ -194,7 +194,7 @@ describe("makeOnboardingNeededCheckHook", () => {
   });
 
   it("skips entirely when env gate is off", async () => {
-    process.env.CORE_AGENT_ONBOARDING_STEER = "off";
+    process.env.MAGI_ONBOARDING_STEER = "off";
     const session = stubSession({});
     const hook = makeOnboardingNeededCheckHook({
       agent: { getSession: () => session },

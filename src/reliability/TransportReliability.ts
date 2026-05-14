@@ -69,8 +69,8 @@ export function transportReliabilityStatus(): {
   defaultBackoffSeconds: number[];
   maxAttempts: number;
 } {
-  const helperPath = process.env.CORE_AGENT_RELIABLE_REQUEST_SCRIPT || RELIABLE_REQUEST_HELPER_PATH;
-  const enabled = process.env.CORE_AGENT_TRANSPORT_RELIABILITY !== "off";
+  const helperPath = process.env.MAGI_RELIABLE_REQUEST_SCRIPT || RELIABLE_REQUEST_HELPER_PATH;
+  const enabled = process.env.MAGI_TRANSPORT_RELIABILITY !== "off";
   const helperExists = existsSync(helperPath);
   return {
     helperPath,

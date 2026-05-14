@@ -14,7 +14,7 @@ export interface TaskBoardCompletionGateOptions {
 }
 
 function isEnabled(): boolean {
-  const raw = process.env.CORE_AGENT_TASK_BOARD_COMPLETION_GATE;
+  const raw = process.env.MAGI_TASK_BOARD_COMPLETION_GATE;
   if (raw === undefined || raw === null) return true;
   const v = raw.trim().toLowerCase();
   return v === "" || v === "on" || v === "true" || v === "1";

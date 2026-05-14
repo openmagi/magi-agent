@@ -72,15 +72,15 @@ function fakeRunner(result: Partial<RunResult>): RunResult {
 }
 
 describe("benchmarkVerifier hook", () => {
-  const originalEnv = process.env.CORE_AGENT_BENCHMARK_VERIFY;
+  const originalEnv = process.env.MAGI_BENCHMARK_VERIFY;
 
   beforeEach(() => {
-    delete process.env.CORE_AGENT_BENCHMARK_VERIFY;
+    delete process.env.MAGI_BENCHMARK_VERIFY;
   });
 
   afterEach(() => {
-    if (originalEnv === undefined) delete process.env.CORE_AGENT_BENCHMARK_VERIFY;
-    else process.env.CORE_AGENT_BENCHMARK_VERIFY = originalEnv;
+    if (originalEnv === undefined) delete process.env.MAGI_BENCHMARK_VERIFY;
+    else process.env.MAGI_BENCHMARK_VERIFY = originalEnv;
   });
 
   it("no benchmark config → noop", async () => {
@@ -393,7 +393,7 @@ describe("benchmarkVerifier hook", () => {
   });
 
   it("env=off → noop regardless of config", async () => {
-    process.env.CORE_AGENT_BENCHMARK_VERIFY = "off";
+    process.env.MAGI_BENCHMARK_VERIFY = "off";
     const workspaceRoot = await tmpDir("bench-envoff-");
     await writeConfig(
       workspaceRoot,

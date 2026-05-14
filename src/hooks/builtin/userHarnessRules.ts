@@ -27,7 +27,7 @@ export interface UserHarnessRuleOptions {
 }
 
 function isEnabled(): boolean {
-  const raw = process.env.CORE_AGENT_USER_HARNESS_RULES;
+  const raw = process.env.MAGI_USER_HARNESS_RULES;
   if (raw === undefined || raw === null) return true;
   const v = raw.trim().toLowerCase();
   return v === "" || v === "on" || v === "true" || v === "1";

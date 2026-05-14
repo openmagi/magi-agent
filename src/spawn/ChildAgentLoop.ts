@@ -68,10 +68,10 @@ import {
  * 2026-04-20: bumped 25 → 40 after admin-bot POS deep-dive exhausted
  * 24 iterations on integration.sh API collection and stopped narrating
  * "Now let me write the report" without ever writing (trace-confirmed).
- * Env override: CORE_AGENT_CHILD_MAX_ITERATIONS.
+ * Env override: MAGI_CHILD_MAX_ITERATIONS.
  */
 export const CHILD_MAX_ITERATIONS = (() => {
-  const raw = process.env.CORE_AGENT_CHILD_MAX_ITERATIONS;
+  const raw = process.env.MAGI_CHILD_MAX_ITERATIONS;
   const parsed = raw !== undefined ? Number.parseInt(raw, 10) : NaN;
   // 2026-04-20 0.17.1: bumped default 40 → 200 for Claude Code parity.
   // 0.17.0 bumped 25 → 40 but POS deep-dive hit 40/40 still. Claude

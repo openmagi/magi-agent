@@ -32,7 +32,7 @@ const baseArgs = {
 };
 
 afterEach(() => {
-  delete process.env.CORE_AGENT_SELF_MODEL;
+  delete process.env.MAGI_SELF_MODEL;
 });
 
 describe("agentSelfModelHook", () => {
@@ -80,15 +80,15 @@ describe("agentSelfModelHook", () => {
     expect(result).toEqual({ action: "continue" });
   });
 
-  it("respects CORE_AGENT_SELF_MODEL=off", async () => {
-    process.env.CORE_AGENT_SELF_MODEL = "off";
+  it("respects MAGI_SELF_MODEL=off", async () => {
+    process.env.MAGI_SELF_MODEL = "off";
     const result = await agentSelfModelHook.handler(baseArgs, makeCtx());
     expect(result).toEqual({ action: "continue" });
   });
 
   it("treats 'on' / '1' / 'true' / '' as enabled", async () => {
     for (const v of ["on", "1", "true", ""]) {
-      process.env.CORE_AGENT_SELF_MODEL = v;
+      process.env.MAGI_SELF_MODEL = v;
       const result = await agentSelfModelHook.handler(baseArgs, makeCtx());
       expect(result?.action).toBe("replace");
     }

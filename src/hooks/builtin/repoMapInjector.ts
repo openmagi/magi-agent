@@ -19,14 +19,14 @@ let tagCacheRoot: string | null = null;
 let graphVersion = 0;
 
 function isEnabled(): boolean {
-  const raw = process.env.CORE_AGENT_REPO_MAP;
+  const raw = process.env.MAGI_REPO_MAP;
   if (raw === undefined || raw === null) return true;
   const v = raw.trim().toLowerCase();
   return v === "" || v === "on" || v === "true" || v === "1";
 }
 
 function getContextWindow(): number {
-  const raw = process.env.CORE_AGENT_CONTEXT_TOKENS;
+  const raw = process.env.MAGI_CONTEXT_TOKENS;
   if (raw) {
     const n = parseInt(raw, 10);
     if (!isNaN(n) && n > 0) return n;

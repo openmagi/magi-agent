@@ -43,7 +43,7 @@ async function mkTmpWorkspace(): Promise<string> {
 }
 
 afterEach(() => {
-  delete process.env.CORE_AGENT_WORKSPACE_AWARENESS;
+  delete process.env.MAGI_WORKSPACE_AWARENESS;
   _clearWorkspaceAwarenessCache();
 });
 
@@ -173,8 +173,8 @@ describe("workspaceAwarenessInjector", () => {
     }
   });
 
-  it("respects CORE_AGENT_WORKSPACE_AWARENESS=off", async () => {
-    process.env.CORE_AGENT_WORKSPACE_AWARENESS = "off";
+  it("respects MAGI_WORKSPACE_AWARENESS=off", async () => {
+    process.env.MAGI_WORKSPACE_AWARENESS = "off";
     const root = await mkTmpWorkspace();
     try {
       await fs.mkdir(path.join(root, "projects"));

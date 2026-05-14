@@ -33,7 +33,7 @@ beforeEach(async () => {
   // un-related suites). Tests that want to exercise the IO path must opt
   // in explicitly — this `on` override disables the test-workspace guard
   // inside makeTaskLifecycleHook.
-  process.env.CORE_AGENT_TASK_LIFECYCLE = "on";
+  process.env.MAGI_TASK_LIFECYCLE = "on";
 });
 
 afterEach(async () => {
@@ -130,8 +130,8 @@ describe("task-lifecycle-detect hook", () => {
 });
 
 describe("task-lifecycle env gate", () => {
-  it("performs no IO when CORE_AGENT_TASK_LIFECYCLE=off", async () => {
-    process.env.CORE_AGENT_TASK_LIFECYCLE = "off";
+  it("performs no IO when MAGI_TASK_LIFECYCLE=off", async () => {
+    process.env.MAGI_TASK_LIFECYCLE = "off";
     const { detect, activate, resolve } = makeTaskLifecycleHook({
       workspaceRoot: root,
     });

@@ -181,13 +181,13 @@ describe("isAutoTriggerEnabled", () => {
 });
 
 describe("makePlanModeAutoTriggerHook", () => {
-  const prevEnv = process.env.CORE_AGENT_PLAN_AUTOTRIGGER;
+  const prevEnv = process.env.MAGI_PLAN_AUTOTRIGGER;
   beforeEach(() => {
-    delete process.env.CORE_AGENT_PLAN_AUTOTRIGGER;
+    delete process.env.MAGI_PLAN_AUTOTRIGGER;
   });
   afterEach(() => {
-    if (prevEnv === undefined) delete process.env.CORE_AGENT_PLAN_AUTOTRIGGER;
-    else process.env.CORE_AGENT_PLAN_AUTOTRIGGER = prevEnv;
+    if (prevEnv === undefined) delete process.env.MAGI_PLAN_AUTOTRIGGER;
+    else process.env.MAGI_PLAN_AUTOTRIGGER = prevEnv;
   });
 
   it("declares name, point, priority, non-blocking", () => {
@@ -272,7 +272,7 @@ describe("makePlanModeAutoTriggerHook", () => {
   });
 
   it("skips when env gate is off", async () => {
-    process.env.CORE_AGENT_PLAN_AUTOTRIGGER = "off";
+    process.env.MAGI_PLAN_AUTOTRIGGER = "off";
     const hook = makePlanModeAutoTriggerHook({ agent: agentWith("default") });
     const result = await hook.handler(
       buildArgs("implement a new endpoint"),

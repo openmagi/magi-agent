@@ -23,7 +23,7 @@
  * with the generic resume packet. The seed is a nudge, not a
  * correctness gate.
  *
- * Toggle: `CORE_AGENT_SESSION_RESUME_SEED=off` disables globally.
+ * Toggle: `MAGI_SESSION_RESUME_SEED=off` disables globally.
  */
 
 import fs from "node:fs/promises";
@@ -99,7 +99,7 @@ Return exactly one lowercase enum and nothing else:
 Use semantic judgment from the message and prior resumed-work context.`;
 
 function isEnabled(): boolean {
-  const raw = process.env.CORE_AGENT_SESSION_RESUME_SEED;
+  const raw = process.env.MAGI_SESSION_RESUME_SEED;
   if (raw === undefined || raw === null) return true;
   const v = raw.trim().toLowerCase();
   return v === "" || v === "on" || v === "true" || v === "1";

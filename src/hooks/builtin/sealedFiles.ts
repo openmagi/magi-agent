@@ -24,7 +24,7 @@
  * `detail` starting "sealed_files_violation". First-run manifest
  * initialisation fires `detail` starting "sealed_manifest_initialized".
  *
- * Toggle: `CORE_AGENT_SEALED_FILES=off` disables globally.
+ * Toggle: `MAGI_SEALED_FILES=off` disables globally.
  * `disable_builtin_hooks: [builtin:sealed-files]` disables per-bot.
  */
 
@@ -128,7 +128,7 @@ export async function recordSystemSealedFileUpdate(
 }
 
 function isEnabledByEnv(): boolean {
-  const raw = process.env.CORE_AGENT_SEALED_FILES;
+  const raw = process.env.MAGI_SEALED_FILES;
   if (raw === undefined || raw === null) return true;
   const v = raw.trim().toLowerCase();
   if (v === "" || v === "on" || v === "true" || v === "1") return true;

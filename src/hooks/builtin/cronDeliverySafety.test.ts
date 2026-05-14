@@ -22,17 +22,17 @@ function makeCtx(): HookContext {
 }
 
 describe("cronDeliverySafety", () => {
-  const originalEnv = process.env.CORE_AGENT_CHANNEL_DELIVERY_SAFETY;
+  const originalEnv = process.env.MAGI_CHANNEL_DELIVERY_SAFETY;
 
   beforeEach(() => {
-    delete process.env.CORE_AGENT_CHANNEL_DELIVERY_SAFETY;
+    delete process.env.MAGI_CHANNEL_DELIVERY_SAFETY;
   });
 
   afterEach(() => {
     if (originalEnv === undefined) {
-      delete process.env.CORE_AGENT_CHANNEL_DELIVERY_SAFETY;
+      delete process.env.MAGI_CHANNEL_DELIVERY_SAFETY;
     } else {
-      process.env.CORE_AGENT_CHANNEL_DELIVERY_SAFETY = originalEnv;
+      process.env.MAGI_CHANNEL_DELIVERY_SAFETY = originalEnv;
     }
   });
 
@@ -72,8 +72,8 @@ describe("cronDeliverySafety", () => {
     expect(result).toEqual({ action: "continue" });
   });
 
-  it("respects CORE_AGENT_CHANNEL_DELIVERY_SAFETY=off", async () => {
-    process.env.CORE_AGENT_CHANNEL_DELIVERY_SAFETY = "off";
+  it("respects MAGI_CHANNEL_DELIVERY_SAFETY=off", async () => {
+    process.env.MAGI_CHANNEL_DELIVERY_SAFETY = "off";
     const hook = makeCronDeliverySafetyHook();
     const result = await hook.handler(
       {

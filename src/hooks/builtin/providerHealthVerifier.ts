@@ -21,7 +21,7 @@ const EXACTNESS_PATTERNS: RegExp[] = [
 ];
 
 function isEnabled(): boolean {
-  const raw = process.env.CORE_AGENT_PROVIDER_HEALTH_VERIFIER;
+  const raw = process.env.MAGI_PROVIDER_HEALTH_VERIFIER;
   if (raw === undefined || raw === null) return true;
   const value = raw.trim().toLowerCase();
   return value === "" || value === "on" || value === "true" || value === "1";

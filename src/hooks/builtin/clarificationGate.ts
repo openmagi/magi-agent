@@ -128,7 +128,7 @@ export function makeClarificationGateHook(
     blocking: true,
     timeoutMs: CLARIFICATION_HOOK_TIMEOUT_MS,
     handler: async (args, ctx: HookContext) => {
-      if (!isClarificationGateEnabled(process.env.CORE_AGENT_CLARIFICATION_GATE)) {
+      if (!isClarificationGateEnabled(process.env.MAGI_CLARIFICATION_GATE)) {
         return { action: "continue" };
       }
       if (args.iteration > 0) return { action: "continue" };

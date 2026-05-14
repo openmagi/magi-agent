@@ -59,7 +59,7 @@ export function _clearWorkspaceAwarenessCache(): void {
 }
 
 function isEnabled(): boolean {
-  const raw = process.env.CORE_AGENT_WORKSPACE_AWARENESS;
+  const raw = process.env.MAGI_WORKSPACE_AWARENESS;
   if (raw === undefined || raw === null) return true;
   const v = raw.trim().toLowerCase();
   return v === "" || v === "on" || v === "true" || v === "1";
