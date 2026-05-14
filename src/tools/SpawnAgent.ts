@@ -1515,6 +1515,7 @@ export function makeSpawnAgentTool(
         executionContract: parentExecutionContract,
         sourceLedger: ctx.sourceLedger,
         ...(modelOverride ? { modelOverride } : {}),
+        ...(ctx.traceId ? { traceId: ctx.traceId } : {}),
       };
 
       // T3-16 — tournament mode branches here. The tournament runner

@@ -265,6 +265,79 @@ export async function commit(ctx: CommitPipelineContext): Promise<CommitResult> 
   return { status: "committed", finalText };
 }
 
+export async function commitBypassHooks(ctx: CommitPipelineContext): Promise<CommitResult> {
+  ctx.setPhase("committing");
+  let finalText = ctx.emittedAssistantBlocks
+    .filter((b): b is Extract<LLMContentBlock, { type: "text" }> => b.type === "text")
+    .map((b) => b.text)
+    .join("");
+  finalText = normalizeUserVisibleRouteMetaTags(finalText).replace(/^\s+/, "");
+  const toolNames = ctx.emittedAssistantBlocks
+    .filter((b): b is Extract<LLMContentBlock, { type: "tool_use" }> => b.type === "tool_use")
+    .map((b) => b.name);
+  const filesChanged = collectFilesChanged(ctx.emittedAssistantBlocks);
+
+  await appendCanonicalAssistantMessages(ctx);
+  if (finalText.length > 0) {
+    await ctx.session.transcript.append({
+      kind: "assistant_text",
+      ts: Date.now(),
+      turnId: ctx.turnId,
+      text: finalText,
+    });
+    ctx.setAssistantText(finalText);
+  }
+  await ctx.session.transcript.append({
+    kind: "turn_committed",
+    ts: Date.now(),
+    turnId: ctx.turnId,
+    inputTokens: ctx.meta.usage.inputTokens,
+    outputTokens: ctx.meta.usage.outputTokens,
+  });
+  ctx.setPhase("committed");
+  ctx.meta.endedAt = Date.now();
+  const stopReason = ctx.meta.stopReason ?? "end_turn";
+  ctx.meta.stopReason = stopReason;
+  await appendStopReason(ctx, stopReason);
+  ctx.sse.agent({
+    type: "turn_end",
+    turnId: ctx.turnId,
+    status: "committed",
+    stopReason,
+  });
+  ctx.sse.legacyFinish();
+
+  void ctx.session.agent.hooks.runPost(
+    "afterCommit",
+    { assistantText: finalText },
+    ctx.buildHookContext("afterCommit"),
+  );
+  void ctx.session.agent.hooks.runPost(
+    "afterTurnEnd",
+    {
+      userMessage: ctx.userMessage.text,
+      assistantText: finalText,
+      status: "committed",
+    },
+    ctx.buildHookContext("afterTurnEnd"),
+  );
+  void ctx.session.agent.hooks.runPost(
+    "onTaskCheckpoint",
+    {
+      userMessage: ctx.userMessage.text,
+      assistantText: finalText,
+      toolCallCount: toolNames.length,
+      toolNames,
+      filesChanged,
+      startedAt: ctx.startedAt,
+      endedAt: ctx.meta.endedAt ?? Date.now(),
+    },
+    ctx.buildHookContext("onTaskCheckpoint"),
+  );
+
+  return { status: "committed", finalText };
+}
+
 export function isBeforeCommitBlockRetryable(reason: string): boolean {
   const normalized = reason.trim();
   if (/^\[RULE:SEALED_FILES\]/u.test(normalized)) return false;

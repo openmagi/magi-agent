@@ -25,6 +25,9 @@ import type {
 } from "../Tool.js";
 import type { UserMessage } from "../util/types.js";
 import { buildToolInputPreview, summariseToolOutput } from "../util/toolResult.js";
+import { createLogger } from "../util/logger.js";
+
+const logger = createLogger("ToolDispatcher");
 import type { ToolCallLoopDetector, LoopCheckResult } from "./ToolCallLoopDetector.js";
 import {
   decideRuntimePermission,
@@ -212,9 +215,9 @@ function shouldYieldAfterTool(
   try {
     return ctx.shouldYieldAfterTool?.(result, toolUse) === true;
   } catch (err) {
-    console.warn(
-      `[core-agent] shouldYieldAfterTool failed turnId=${ctx.turnId}: ${(err as Error).message}`,
-    );
+    logger.warn("should_yield_after_tool_failed", {
+      turnId: ctx.turnId, error: (err as Error).message,
+    });
     return false;
   }
 }
@@ -395,9 +398,10 @@ async function dispatchOne(
     const counter = ctx.unknownToolCounter;
     const currentCount = counter ? counter.inc() : 0;
     const err = access.message;
-    console.warn(
-      `[core-agent] unknown_tool=${tu.name} turnId=${turnId} count=${currentCount}`,
-    );
+    logger.warn("unknown_tool", {
+      toolName: tu.name, turnId, count: currentCount,
+      ...(ctx.traceId ? { traceId: ctx.traceId } : {}),
+    });
     sse.agent({
       type: "tool_end",
       id: tu.id,
@@ -548,6 +552,10 @@ async function dispatchOne(
     ...(ctx.currentUserMessage ? { currentUserMessage: ctx.currentUserMessage } : {}),
     emitProgress: (p) => {
       sse.agent({ type: "tool_start", id: tu.id, name: p.label });
+      logger.info("tool_dispatch", {
+        turnId, toolName: p.label, toolId: tu.id,
+        ...(ctx.traceId ? { traceId: ctx.traceId } : {}),
+      });
     },
     emitAgentEvent: (event) => {
       // Tool-emitted structured events (task_board, future
@@ -826,8 +834,8 @@ async function recordPermissionDecision(
       ...(updatedInput !== undefined ? { updatedInput } : {}),
     });
   } catch (err) {
-    console.warn(
-      `[core-agent] permission_decision event failed turnId=${ctx.turnId}: ${(err as Error).message}`,
-    );
+    logger.warn("permission_decision_event_failed", {
+      turnId: ctx.turnId, error: (err as Error).message,
+    });
   }
 }

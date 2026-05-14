@@ -227,6 +227,8 @@ export interface SpawnChildOptions {
   writeSet?: string[];
   /** Durable child lifecycle recorder wired to the parent's control ledger. */
   lifecycle?: ChildAgentLifecycle;
+  /** Parent turn's traceId for correlated logging. */
+  traceId?: string;
 }
 
 /**
