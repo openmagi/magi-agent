@@ -208,6 +208,187 @@ export async function judgeUngroundedClaims(
   return parseGroundingVerdict(output);
 }
 
+// ── Hybrid grounding — deterministic first, LLM fallback ──
+
+export interface DeterministicVerdict {
+  verdict: GroundingVerdict;
+  confidence: "high" | "low";
+  reason: string;
+}
+
+/**
+ * Mode A deterministic: cross-reference assistant claims against tool results.
+ * Returns verdict + confidence. High confidence = skip LLM, low = needs LLM.
+ */
+export function groundAgainstToolResults(
+  transcript: ReadonlyArray<TranscriptEntry>,
+  turnId: string,
+  assistantText: string,
+): DeterministicVerdict {
+  const summary = buildToolResultsSummary(transcript, turnId);
+  if (!summary.trim()) return { verdict: "GROUNDED", confidence: "high", reason: "no tool results" };
+
+  const toolOutputs = extractToolOutputValues(transcript, turnId);
+  if (toolOutputs.length === 0) return { verdict: "GROUNDED", confidence: "high", reason: "no extractable values" };
+
+  // Check identifiers (model names like "gemini-2.5-pro")
+  for (const { value, kind } of toolOutputs) {
+    if (kind === "string" && value.length >= 3) {
+      if (/^[a-z][\w.-]*$/i.test(value) && value.includes("-")) {
+        if (!assistantText.toLowerCase().includes(value.toLowerCase())) {
+          const identifiers = assistantText.match(/\b[a-zA-Z][\w.-]*-[\w.-]+\b/g) ?? [];
+          if (identifiers.length > 0) {
+            return { verdict: "DISTORTED", confidence: "high", reason: `identifier mismatch: tool has "${value}", assistant has "${identifiers[0]}"` };
+          }
+        }
+      }
+    }
+  }
+
+  const toolNumbers = new Set<number>();
+  const toolStrings = new Map<string, string>();
+  for (const { key, value, kind } of toolOutputs) {
+    if (kind === "number") {
+      const numVal = parseFloat(value);
+      if (!isNaN(numVal) && numVal > 1) toolNumbers.add(numVal);
+    }
+    if (kind === "string" && value.length >= 3) toolStrings.set(key, value);
+  }
+
+  const assistantNumbers = (assistantText.match(/\b\d+(?:\.\d+)?\b/g) ?? [])
+    .map((n) => parseFloat(n))
+    .filter((n) => !isNaN(n) && n > 1);
+
+  for (const aNum of assistantNumbers) {
+    for (const tNum of toolNumbers) {
+      const ratio = Math.abs(aNum - tNum) / Math.abs(tNum);
+      if (ratio <= 0.01) continue;
+      if (ratio > 0.1 && ratio < 5 && Math.floor(Math.log10(aNum)) === Math.floor(Math.log10(tNum))) {
+        const hasCorrect = assistantNumbers.some((n) =>
+          Math.abs(n - tNum) / Math.abs(tNum) <= 0.01,
+        );
+        if (!hasCorrect) {
+          return { verdict: "DISTORTED", confidence: "high", reason: `number mismatch: tool has ${tNum}, assistant has ${aNum}` };
+        }
+      }
+    }
+  }
+
+  // String key-value checks — lower confidence (paraphrasing possible)
+  for (const [key, value] of toolStrings) {
+    const keyPattern = key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    if (!new RegExp(keyPattern, "i").test(assistantText)) continue;
+    if (!assistantText.includes(value)) {
+      const valueWords = value.split(/[\s-]+/).filter((w) => w.length > 2);
+      if (valueWords.length > 0 && !valueWords.some((w) =>
+        assistantText.toLowerCase().includes(w.toLowerCase()),
+      )) {
+        return { verdict: "DISTORTED", confidence: "low", reason: `key "${key}" mentioned but value "${value}" not found — may be paraphrased` };
+      }
+    }
+  }
+
+  // All tool values matched or not referenced — high confidence GROUNDED
+  const allValuesPresent = toolOutputs.every(({ value, kind }) => {
+    if (kind === "string" && value.length >= 3) {
+      return assistantText.toLowerCase().includes(value.toLowerCase());
+    }
+    if (kind === "number") {
+      const num = parseFloat(value);
+      return isNaN(num) || num <= 1 || assistantNumbers.some((n) =>
+        Math.abs(n - num) / Math.abs(num) <= 0.01,
+      );
+    }
+    return true;
+  });
+
+  return {
+    verdict: "GROUNDED",
+    confidence: allValuesPresent ? "high" : "low",
+    reason: allValuesPresent ? "all tool values verified in response" : "some values not referenced — may need LLM check",
+  };
+}
+
+interface ExtractedValue {
+  key: string;
+  value: string;
+  kind: "string" | "number";
+}
+
+function extractToolOutputValues(
+  transcript: ReadonlyArray<TranscriptEntry>,
+  turnId: string,
+): ExtractedValue[] {
+  const values: ExtractedValue[] = [];
+  for (const entry of transcript) {
+    if (entry.turnId !== turnId || entry.kind !== "tool_result" || !entry.output) continue;
+    // Try to parse as JSON
+    try {
+      const parsed = JSON.parse(entry.output);
+      if (typeof parsed === "object" && parsed !== null) {
+        for (const [key, val] of Object.entries(parsed)) {
+          if (typeof val === "string" && val.length >= 2) {
+            values.push({ key, value: val, kind: "string" });
+          }
+          if (typeof val === "number" && val !== 0) {
+            values.push({ key, value: String(val), kind: "number" });
+          }
+        }
+      }
+    } catch {
+      // Not JSON — extract key-value patterns from text
+      const kvMatches = entry.output.matchAll(/["']?(\w+)["']?\s*[:=]\s*["']?([^"'\n,}]+)/g);
+      for (const m of kvMatches) {
+        const key = m[1]!;
+        const val = m[2]!.trim();
+        const num = parseFloat(val);
+        if (!isNaN(num)) {
+          values.push({ key, value: val, kind: "number" });
+        } else if (val.length >= 2) {
+          values.push({ key, value: val, kind: "string" });
+        }
+      }
+    }
+  }
+  return values;
+}
+
+const UNGROUNDED_FILE_CLAIM_PATTERNS = [
+  /(?:파일을?\s*(?:읽어|확인해|열어)\s*보니)/,
+  /(?:파일에\s*따르면)/,
+  /(?:스크립트에\s*따르면)/,
+  /(?:설정\s*(?:파일|에)\s*(?:따르면|보면|에서|에는))/,
+  /(?:config\s+(?:uses?|says?|shows?|contains?|specifies?))\b/i,
+  /(?:the\s+(?:file|config|script|document)\s+(?:says?|shows?|contains?|specifies?|uses?))\b/i,
+  /(?:according\s+to\s+(?:the\s+)?(?:file|config|script|document))\b/i,
+  /(?:I\s+(?:read|checked|looked at)\s+(?:the\s+)?(?:file|config))/i,
+];
+
+const HONEST_UNCERTAINTY_PATTERNS = [
+  /(?:확인해\s*봐야|읽어\s*보겠|확인\s*하겠|모르겠)/,
+  /(?:let\s+me\s+check|I(?:'m|\s+am)\s+not\s+sure|I\s+need\s+to\s+(?:read|check))/i,
+];
+
+/**
+ * Mode B deterministic: detect claims about file/config contents without tools.
+ */
+export function detectUngroundedFileClaims(
+  assistantText: string,
+): DeterministicVerdict {
+  if (HONEST_UNCERTAINTY_PATTERNS.some((p) => p.test(assistantText))) {
+    return { verdict: "GROUNDED", confidence: "high", reason: "honest uncertainty detected" };
+  }
+  if (UNGROUNDED_FILE_CLAIM_PATTERNS.some((p) => p.test(assistantText))) {
+    return { verdict: "FABRICATED", confidence: "high", reason: "explicit file/config claim without tool read" };
+  }
+  // No clear signal either way — short responses or general knowledge
+  const hasSpecificDetails = /\d{3,}|["'][^"']{5,}["']|\b\d+\.\d+\b/.test(assistantText);
+  if (hasSpecificDetails) {
+    return { verdict: "GROUNDED", confidence: "low", reason: "specific details present but no file claim pattern — needs LLM verification" };
+  }
+  return { verdict: "GROUNDED", confidence: "high", reason: "general knowledge or no specific claims" };
+}
+
 export interface FactGroundingAgent {
   readSessionTranscript(
     sessionKey: string,
@@ -260,17 +441,27 @@ export function makeFactGroundingVerifierHook(
         // transcript is empty.
 
         let verdict: GroundingVerdict;
+        const hybridMode = process.env.MAGI_HYBRID_GROUNDING === "1";
 
         if (!toolReadHappened) {
-          // Mode B: no read tools — ask Haiku if the response makes
-          // specific claims about file contents or workspace state
-          // without any tool verification this turn.
-          verdict = await judgeUngroundedClaims(
-            ctx.llm,
-            assistantText,
-            DEFAULT_TIMEOUT_MS,
-            ctx.agentModel,
-          );
+          // Mode B: no read tools — check for ungrounded file claims
+          if (hybridMode) {
+            const det = detectUngroundedFileClaims(assistantText);
+            if (det.confidence === "high") {
+              verdict = det.verdict;
+              ctx.log("info", `[fact-grounding] hybrid mode B: deterministic ${det.verdict} (${det.reason})`);
+            } else {
+              verdict = await judgeUngroundedClaims(ctx.llm, assistantText, DEFAULT_TIMEOUT_MS, ctx.agentModel);
+              ctx.log("info", `[fact-grounding] hybrid mode B: LLM fallback → ${verdict} (deterministic was low-confidence: ${det.reason})`);
+            }
+          } else {
+            verdict = await judgeUngroundedClaims(
+              ctx.llm,
+              assistantText,
+              DEFAULT_TIMEOUT_MS,
+              ctx.agentModel,
+            );
+          }
           // Only block on FABRICATED in mode B — DISTORTED doesn't
           // apply when there's nothing to distort.
           if (verdict === "DISTORTED") verdict = "GROUNDED";
@@ -297,13 +488,24 @@ export function makeFactGroundingVerifierHook(
             return { action: "continue" };
           }
 
-          verdict = await judgeGrounding(
-            ctx.llm,
-            summary,
-            assistantText,
-            DEFAULT_TIMEOUT_MS,
-            ctx.agentModel,
-          );
+          if (hybridMode) {
+            const det = groundAgainstToolResults(source, ctx.turnId, assistantText);
+            if (det.confidence === "high") {
+              verdict = det.verdict;
+              ctx.log("info", `[fact-grounding] hybrid mode A: deterministic ${det.verdict} (${det.reason})`);
+            } else {
+              verdict = await judgeGrounding(ctx.llm, summary, assistantText, DEFAULT_TIMEOUT_MS, ctx.agentModel);
+              ctx.log("info", `[fact-grounding] hybrid mode A: LLM fallback → ${verdict} (deterministic was low-confidence: ${det.reason})`);
+            }
+          } else {
+            verdict = await judgeGrounding(
+              ctx.llm,
+              summary,
+              assistantText,
+              DEFAULT_TIMEOUT_MS,
+              ctx.agentModel,
+            );
+          }
         }
 
         ctx.emit({
