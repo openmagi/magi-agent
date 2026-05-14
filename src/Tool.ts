@@ -170,6 +170,8 @@ export interface Tool<I = unknown, O = unknown> {
 
 export interface ToolRegistry {
   register(tool: Tool): void;
+  /** Remove a tool by name. Returns true if it existed. */
+  unregister(name: string): boolean;
   resolve(name: string): Tool | null;
   list(): Tool[];
   /** Loads SKILL.md files under `dir` as tools. Returns count loaded. */

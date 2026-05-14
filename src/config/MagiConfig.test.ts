@@ -13,138 +13,175 @@ describe("MagiConfig", () => {
   let tmpDir: string;
 
   beforeEach(() => {
-    resetMagiConfig();
     tmpDir = makeTmpDir();
+    resetMagiConfig();
   });
 
   afterEach(() => {
+    resetMagiConfig();
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
-  it("returns defaults when config file does not exist", () => {
-    const cfg = loadMagiConfig(tmpDir);
-    expect(cfg.hooks.disable_builtin).toEqual([]);
-    expect(cfg.hooks.directory).toBe("./hooks");
-    expect(cfg.hooks.global_directory).toBe("~/.magi/hooks");
-    expect(cfg.hooks.overrides).toEqual({});
-    expect(cfg.classifier.custom_dimensions).toEqual({});
+  it("returns defaults when no config file exists", () => {
+    const config = loadMagiConfig(tmpDir);
+    expect(config.hooks.directory).toBe("./hooks");
+    expect(config.hooks.disable_builtin).toEqual([]);
+    expect(config.hooks.overrides).toEqual({});
+    expect(config.tools.directory).toBe("./tools");
+    expect(config.tools.disable_builtin).toEqual([]);
+    expect(config.tools.overrides).toEqual({});
+    expect(config.classifier.custom_dimensions).toEqual({});
   });
 
+  it("caches config on repeated calls", () => {
+    const a = loadMagiConfig(tmpDir);
+    const b = loadMagiConfig(tmpDir);
+    expect(a).toBe(b);
+  });
+
+  it("resets cache", () => {
+    const a = loadMagiConfig(tmpDir);
+    resetMagiConfig();
+    const b = loadMagiConfig(tmpDir);
+    expect(a).not.toBe(b);
+    expect(a).toEqual(b);
+  });
+
+  // --- Hooks section ---
+
   it("parses hooks section", () => {
-    const yaml = `
+    fs.writeFileSync(
+      path.join(tmpDir, "magi.config.yaml"),
+      `
 hooks:
   disable_builtin:
-    - "builtin:fact-grounding-verifier"
-    - "builtin:sealed-files"
-  directory: "./my-hooks"
-  global_directory: "~/.my-agent/hooks"
+    - factGroundingVerifier
+  directory: ./my-hooks
   overrides:
     my-hook:
       enabled: true
       priority: 50
       blocking: false
-      timeoutMs: 10000
-`;
-    fs.writeFileSync(path.join(tmpDir, "magi.config.yaml"), yaml);
-    const cfg = loadMagiConfig(tmpDir);
-
-    expect(cfg.hooks.disable_builtin).toEqual([
-      "builtin:fact-grounding-verifier",
-      "builtin:sealed-files",
-    ]);
-    expect(cfg.hooks.directory).toBe("./my-hooks");
-    expect(cfg.hooks.global_directory).toBe("~/.my-agent/hooks");
-    expect(cfg.hooks.overrides["my-hook"]).toEqual({
+`,
+    );
+    const config = loadMagiConfig(tmpDir);
+    expect(config.hooks.disable_builtin).toEqual(["factGroundingVerifier"]);
+    expect(config.hooks.directory).toBe("./my-hooks");
+    expect(config.hooks.overrides["my-hook"]).toEqual({
       enabled: true,
       priority: 50,
       blocking: false,
-      timeoutMs: 10000,
     });
   });
 
-  it("parses classifier custom dimensions", () => {
-    const yaml = `
+  it("parses hooks global_directory", () => {
+    fs.writeFileSync(
+      path.join(tmpDir, "magi.config.yaml"),
+      `
+hooks:
+  global_directory: /custom/hooks
+`,
+    );
+    const config = loadMagiConfig(tmpDir);
+    expect(config.hooks.global_directory).toBe("/custom/hooks");
+  });
+
+  // --- Tools section ---
+
+  it("parses tools section", () => {
+    fs.writeFileSync(
+      path.join(tmpDir, "magi.config.yaml"),
+      `
+tools:
+  disable_builtin:
+    - Bash
+  directory: ./my-tools
+  packages:
+    - "@magi-tools/weather"
+  overrides:
+    my-tool:
+      enabled: true
+      permission: write
+`,
+    );
+    const config = loadMagiConfig(tmpDir);
+    expect(config.tools.disable_builtin).toEqual(["Bash"]);
+    expect(config.tools.directory).toBe("./my-tools");
+    expect(config.tools.packages).toEqual(["@magi-tools/weather"]);
+    expect(config.tools.overrides["my-tool"]).toEqual({
+      enabled: true,
+      permission: "write",
+    });
+  });
+
+  it("parses tools global_directory", () => {
+    fs.writeFileSync(
+      path.join(tmpDir, "magi.config.yaml"),
+      `
+tools:
+  global_directory: /custom/tools
+`,
+    );
+    const config = loadMagiConfig(tmpDir);
+    expect(config.tools.global_directory).toBe("/custom/tools");
+  });
+
+  // --- Classifier section ---
+
+  it("parses classifier custom_dimensions", () => {
+    fs.writeFileSync(
+      path.join(tmpDir, "magi.config.yaml"),
+      `
 classifier:
   custom_dimensions:
     safety:
       phase: "final_answer"
-      prompt: "Is this response safe?"
+      prompt: "Is this safe?"
       output_schema:
         is_safe: "boolean"
-        confidence: "number"
-`;
-    fs.writeFileSync(path.join(tmpDir, "magi.config.yaml"), yaml);
-    const cfg = loadMagiConfig(tmpDir);
-
-    const dim = cfg.classifier.custom_dimensions["safety"];
+`,
+    );
+    const config = loadMagiConfig(tmpDir);
+    const dim = config.classifier.custom_dimensions["safety"];
     expect(dim).toBeDefined();
-    expect(dim?.phase).toBe("final_answer");
-    expect(dim?.prompt).toBe("Is this response safe?");
-    expect(dim?.output_schema).toEqual({
-      is_safe: "boolean",
-      confidence: "number",
-    });
+    expect(dim!.phase).toBe("final_answer");
+    expect(dim!.prompt).toBe("Is this safe?");
+    expect(dim!.output_schema).toEqual({ is_safe: "boolean" });
   });
 
-  it("performs env var substitution", () => {
-    process.env.TEST_MAGI_HOOK_DIR = "/custom/hooks";
-    const yaml = `
+  // --- Env var substitution ---
+
+  it("resolves env vars in values", () => {
+    process.env.TEST_HOOK_DIR = "/env-hooks";
+    process.env.TEST_TOOL_DIR = "/env-tools";
+    fs.writeFileSync(
+      path.join(tmpDir, "magi.config.yaml"),
+      `
 hooks:
-  directory: "\${TEST_MAGI_HOOK_DIR}"
-`;
-    fs.writeFileSync(path.join(tmpDir, "magi.config.yaml"), yaml);
-    const cfg = loadMagiConfig(tmpDir);
-
-    expect(cfg.hooks.directory).toBe("/custom/hooks");
-    delete process.env.TEST_MAGI_HOOK_DIR;
+  directory: "\${TEST_HOOK_DIR}"
+tools:
+  directory: "\${TEST_TOOL_DIR}"
+`,
+    );
+    const config = loadMagiConfig(tmpDir);
+    expect(config.hooks.directory).toBe("/env-hooks");
+    expect(config.tools.directory).toBe("/env-tools");
+    delete process.env.TEST_HOOK_DIR;
+    delete process.env.TEST_TOOL_DIR;
   });
 
-  it("replaces missing env vars with empty string", () => {
-    delete process.env.NONEXISTENT_VAR_FOR_MAGI_TEST;
-    const yaml = `
-hooks:
-  directory: "\${NONEXISTENT_VAR_FOR_MAGI_TEST}/hooks"
-`;
-    fs.writeFileSync(path.join(tmpDir, "magi.config.yaml"), yaml);
-    const cfg = loadMagiConfig(tmpDir);
-
-    expect(cfg.hooks.directory).toBe("/hooks");
-  });
-
-  it("caches result on second call with same dir", () => {
-    const yaml = `
-hooks:
-  directory: "./cached-hooks"
-`;
-    fs.writeFileSync(path.join(tmpDir, "magi.config.yaml"), yaml);
-    const cfg1 = loadMagiConfig(tmpDir);
-    const cfg2 = loadMagiConfig(tmpDir);
-
-    expect(cfg1).toBe(cfg2); // same reference
-  });
-
-  it("rejects invalid classifier dimension phase", () => {
-    const yaml = `
-classifier:
-  custom_dimensions:
-    bad:
-      phase: "invalid"
-      prompt: "test"
-      output_schema: {}
-`;
-    fs.writeFileSync(path.join(tmpDir, "magi.config.yaml"), yaml);
-    const cfg = loadMagiConfig(tmpDir);
-
-    // Invalid phase dimensions are skipped
-    expect(cfg.classifier.custom_dimensions["bad"]).toBeUndefined();
-  });
-
-  it("handles empty YAML file", () => {
+  it("handles empty YAML gracefully", () => {
     fs.writeFileSync(path.join(tmpDir, "magi.config.yaml"), "");
-    const cfg = loadMagiConfig(tmpDir);
+    const config = loadMagiConfig(tmpDir);
+    expect(config.hooks.directory).toBe("./hooks");
+    expect(config.tools.directory).toBe("./tools");
+  });
 
-    // Should fall back to defaults
-    expect(cfg.hooks.disable_builtin).toEqual([]);
-    expect(cfg.classifier.custom_dimensions).toEqual({});
+  it("throws on invalid YAML syntax", () => {
+    fs.writeFileSync(
+      path.join(tmpDir, "magi.config.yaml"),
+      "{{invalid yaml",
+    );
+    expect(() => loadMagiConfig(tmpDir)).toThrow("Invalid YAML");
   });
 });

@@ -1,0 +1,9 @@
+# DatabaseQuery — basic test fixture
+#
+# Run with: magi tool test DatabaseQuery
+
+description: "Attempt a SELECT query"
+input:
+  query: "SELECT 1 as test"
+expected:
+  status: "error"  # Expected since no real DB connection

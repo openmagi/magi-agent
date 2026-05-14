@@ -29,6 +29,7 @@ import { heartbeatRoutes } from "./routes/heartbeat.js";
 import { parityRoutes } from "./routes/parity.js";
 import { skillsRoutes } from "./routes/skills.js";
 import { hooksRoutes } from "./routes/hooks.js";
+import { toolsRoutes } from "./routes/tools.js";
 import { appRoutes } from "./routes/app.js";
 import { appSocialBrowserRoutes } from "./routes/appSocialBrowser.js";
 import { appRuntimeRoutes } from "./routes/appRuntime.js";
@@ -107,6 +108,7 @@ export class HttpServer {
       ...heartbeatRoutes,
       ...skillsRoutes,
       ...hooksRoutes,
+      ...toolsRoutes,
     ];
   }
 
