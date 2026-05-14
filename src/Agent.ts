@@ -111,6 +111,7 @@ import { makeClockTool } from "./tools/Clock.js";
 import { makeDateRangeTool } from "./tools/DateRange.js";
 import { makeCalculationTool } from "./tools/Calculation.js";
 import { makeKnowledgeSearchTool } from "./tools/KnowledgeSearch.js";
+import { makeKnowledgeWriteTool } from "./tools/KnowledgeWrite.js";
 import { makeFileDeliverTool } from "./tools/FileDeliver.js";
 import { makeFileSendTool } from "./tools/FileSend.js";
 import { makeSpreadsheetWriteTool } from "./tools/SpreadsheetWrite.js";
@@ -580,6 +581,8 @@ export class Agent {
     );
     this.tools.register(makeKnowledgeSearchTool({ name: "knowledge-search" }));
     this.tools.register(makeKnowledgeSearchTool({ name: "KnowledgeSearch" }));
+    this.tools.register(makeKnowledgeWriteTool({ name: "knowledge-write" }));
+    this.tools.register(makeKnowledgeWriteTool({ name: "KnowledgeWrite" }));
     this.tools.register(makeBrowserTool(config.workspaceRoot));
     this.tools.register(makeSocialBrowserTool(config.workspaceRoot));
     this.tools.register(makeWebSearchTool({ name: "web-search" }));
@@ -1299,6 +1302,8 @@ export class Agent {
     // prompt-only skills with the same names.
     this.tools.replace(makeKnowledgeSearchTool({ name: "knowledge-search" }));
     this.tools.replace(makeKnowledgeSearchTool({ name: "KnowledgeSearch" }));
+    this.tools.replace(makeKnowledgeWriteTool({ name: "knowledge-write" }));
+    this.tools.replace(makeKnowledgeWriteTool({ name: "KnowledgeWrite" }));
     this.tools.replace(makeBrowserTool(this.config.workspaceRoot));
     this.tools.replace(makeSocialBrowserTool(this.config.workspaceRoot));
     this.tools.replace(makeWebSearchTool({ name: "web-search" }));

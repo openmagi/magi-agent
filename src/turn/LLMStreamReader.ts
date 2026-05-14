@@ -58,6 +58,8 @@ export interface LLMStreamReaderResult {
 export interface ReadOneOptions {
   /** Override thinking mode for this call (e.g. disable for empty-response recovery). */
   thinkingOverride?: { type: "adaptive" } | { type: "disabled" };
+  /** Cross-service diagnostic trace ID propagated to api-proxy. */
+  traceId?: string;
   /** Non-authoritative routing metadata passed to LLM transport/proxy logs. */
   routing?: LLMStreamRequest["routing"];
 }

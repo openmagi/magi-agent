@@ -386,6 +386,15 @@ async function dispatchOne(
   });
   const started = Date.now();
 
+  const inputRaw = JSON.stringify(tu.input ?? {});
+  logger.info("tool_dispatch", {
+    ...(ctx.traceId ? { traceId: ctx.traceId } : {}),
+    sessionKey: session.meta.sessionKey,
+    turnId, toolName: tu.name, toolId: tu.id, allowed: access.allowed,
+    inputLen: inputRaw.length,
+    inputPreview: inputRaw.slice(0, 200),
+  });
+
   // Emit tool_start with input_preview — clients render this as the
   // expandable activity card. 400 char cap keeps it light over SSE.
   const inputPreview = buildToolInputPreview(tu.name, tu.input);
@@ -658,6 +667,18 @@ async function dispatchOne(
     ? applyToolResultBudget(rawContent, tu.name)
     : rawContent;
   const isError = result.status !== "ok";
+  const durationMs = Date.now() - started;
+
+  logger.info("tool_done", {
+    ...(ctx.traceId ? { traceId: ctx.traceId } : {}),
+    sessionKey: session.meta.sessionKey,
+    turnId, toolName: tu.name, toolId: tu.id,
+    status: result.status, isError, durationMs,
+    inputLen: inputRaw.length,
+    outputLen: content.length,
+    outputPreview: content.slice(0, 200),
+    ...(retryNo > 0 ? { retries: retryNo } : {}),
+  });
 
   sse.agent({
     type: "tool_end",
