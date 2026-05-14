@@ -32,11 +32,12 @@ describe("errorResult", () => {
     expect(r.errorCode).toBe("error");
   });
 
-  it("preserves NodeJS.ErrnoException `.code` (e.g. ENOENT)", () => {
+  it("preserves NodeJS.ErrnoException `.code` (e.g. ENOENT) and adds guidance", () => {
     const err = Object.assign(new Error("not found"), { code: "ENOENT" });
     const r = errorResult(err, Date.now());
     expect(r.errorCode).toBe("ENOENT");
-    expect(r.errorMessage).toBe("not found");
+    expect(r.errorMessage).toContain("not found");
+    expect(r.errorMessage).toContain("Glob");
   });
 });
 

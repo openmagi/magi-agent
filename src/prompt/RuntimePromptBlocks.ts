@@ -163,6 +163,15 @@ export const OUTPUT_RULES_BLOCK = [
   "</output-rules>",
 ].join("\n");
 
+export const DEFERRAL_PREVENTION_BLOCK = [
+  "<deferral-prevention>",
+  "- Complete work in this turn. Do not promise future delivery or defer to a later time.",
+  "- If you cannot finish a task, explain what is blocking and what you need — do not say 'I will do this later' or 'In a future turn'.",
+  "- Do not retry failing commands in a sleep loop — diagnose the root cause.",
+  "- If waiting for a background task you started with runInBackground, you will be notified when it completes — do not poll.",
+  "</deferral-prevention>",
+].join("\n");
+
 export const SUBAGENT_EXECUTION_BASELINE_BLOCK = [
   "<subagent_execution_baseline>",
   "- You are the execution layer for one delegated work unit. Do not operate as a meta-layer orchestrator.",

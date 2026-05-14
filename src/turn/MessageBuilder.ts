@@ -28,6 +28,7 @@ import type { RouteDecision } from "../routing/types.js";
 import {
   buildRuntimeTemporalContext,
   OUTPUT_RULES_BLOCK,
+  DEFERRAL_PREVENTION_BLOCK,
 } from "../prompt/RuntimePromptBlocks.js";
 import { normalizeMemoryMode } from "../util/memoryMode.js";
 import {
@@ -384,7 +385,7 @@ export async function buildSystemPrompt(
   // only emitting a brief closing line as text. Without this, the user
   // sees a thin response while the detailed analysis lives in thinking
   // (which is ephemeral and not committed to transcript).
-  const thinkingBoundary = `\n${OUTPUT_RULES_BLOCK}`;
+  const thinkingBoundary = `\n${DEFERRAL_PREVENTION_BLOCK}\n\n${OUTPUT_RULES_BLOCK}`;
   const promptPrefix = `${sessionHeader}\n\n${temporalContext}`;
   const base = rendered ? `${promptPrefix}\n\n${rendered}` : promptPrefix;
   const memoryMode = normalizeMemoryMode(session.meta.channel?.memoryMode);

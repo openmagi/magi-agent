@@ -78,7 +78,7 @@ export function makeFileEditTool(workspaceRoot: string): Tool<FileEditInput, Fil
   return {
     name: "FileEdit",
     description:
-      "Find-and-replace within a workspace file. old_string must match exactly once unless replace_all=true. Use expected_file_sha256 from FileRead.fileSha256 to prevent stale edits. Use this instead of FileWrite when only a small change is needed.",
+      "Find-and-replace within a workspace file. You MUST FileRead the file first — this tool errors if the file hasn't been read. old_string must match exactly once unless replace_all=true. Use expected_file_sha256 from FileRead.fileSha256 to prevent stale edits. Use this instead of FileWrite for surgical changes.",
     inputSchema: INPUT_SCHEMA,
     permission: "write",
     validate(input) {
@@ -108,6 +108,16 @@ export function makeFileEditTool(workspaceRoot: string): Tool<FileEditInput, Fil
           status: "permission_denied",
           errorCode: "memory_write_blocked",
           errorMessage: protectedMemoryError(input.path),
+          durationMs: Date.now() - start,
+        };
+      }
+      // P1-1: read-before-edit hard constraint
+      if (ctx.filesRead && !hasBeenRead(ctx.filesRead, input.path)) {
+        return {
+          status: "error",
+          errorCode: "read_required",
+          errorMessage:
+            `You must read ${input.path} before editing it. Use FileRead to read the file first, then retry this edit.`,
           durationMs: Date.now() - start,
         };
       }
@@ -336,6 +346,22 @@ function changedSymbolsForHunks(
     if (name) symbols.add(name);
   }
   return [...symbols].sort();
+}
+
+/**
+ * Check if a file path has been read, considering normalized paths
+ * and directory-level reads (e.g., Grep on "src/" covers "src/app.ts").
+ */
+function hasBeenRead(filesRead: Set<string>, targetPath: string): boolean {
+  const normalized = targetPath.replace(/^\.\//, "");
+  if (filesRead.has(normalized)) return true;
+  // Check if any read entry is a parent directory prefix
+  for (const readPath of filesRead) {
+    if (readPath.endsWith("/") && normalized.startsWith(readPath)) return true;
+    // Also match without trailing slash
+    if (normalized.startsWith(readPath + "/")) return true;
+  }
+  return false;
 }
 
 function nearestSymbolBeforeLine(lines: readonly string[], oneBasedLine: number): string | null {

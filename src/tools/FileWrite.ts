@@ -12,6 +12,7 @@ import type { Tool, ToolContext, ToolResult } from "../Tool.js";
 import { Workspace } from "../storage/Workspace.js";
 import { errorResult } from "../util/toolResult.js";
 import { writeSafe, isFsSafeEscape } from "../util/fsSafe.js";
+import { statSafe } from "../util/fsSafe.js";
 import {
   isLongTermMemoryWriteDisabled,
   isProtectedMemoryPath,
@@ -37,6 +38,16 @@ const INPUT_SCHEMA = {
   },
   required: ["path", "content"],
 } as const;
+
+function hasBeenRead(filesRead: Set<string>, targetPath: string): boolean {
+  const normalized = targetPath.replace(/^\.\//, "");
+  if (filesRead.has(normalized)) return true;
+  for (const readPath of filesRead) {
+    if (readPath.endsWith("/") && normalized.startsWith(readPath)) return true;
+    if (normalized.startsWith(readPath + "/")) return true;
+  }
+  return false;
+}
 
 export function makeFileWriteTool(workspaceRoot: string): Tool<FileWriteInput, FileWriteOutput> {
   const defaultWorkspace = new Workspace(workspaceRoot);
@@ -65,6 +76,26 @@ export function makeFileWriteTool(workspaceRoot: string): Tool<FileWriteInput, F
           errorMessage: protectedMemoryError(input.path),
           durationMs: Date.now() - start,
         };
+      }
+      // P1-1: read-before-write for existing files
+      if (ctx.filesRead) {
+        const normalized = input.path.replace(/^\.\//, "");
+        const ws = ctx.spawnWorkspace ?? defaultWorkspace;
+        try {
+          const resolved = ws.resolve(normalized);
+          const stat = await fs.stat(resolved).catch(() => null);
+          if (stat && !hasBeenRead(ctx.filesRead, normalized)) {
+            return {
+              status: "error",
+              errorCode: "read_required",
+              errorMessage:
+                `${input.path} already exists. You must read it with FileRead before overwriting. Use FileEdit for surgical changes.`,
+              durationMs: Date.now() - start,
+            };
+          }
+        } catch {
+          // resolve() threw (path escape) — let writeSafe handle it below
+        }
       }
       try {
         const lineCount = input.content.split("\n").length;

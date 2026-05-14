@@ -14,17 +14,37 @@ import type { ToolResult } from "../Tool.js";
  * callers can distinguish ENOENT / EACCES / etc. from generic errors.
  */
 export function errorResult(err: unknown, startedAt: number): ToolResult<never> {
-  const msg = err instanceof Error ? err.message : String(err);
+  const raw = err instanceof Error ? err.message : String(err);
   const code =
     (err as NodeJS.ErrnoException)?.code ??
     (err as { name?: string })?.name ??
     "error";
+  const msg = toLlmFriendlyError(code, raw);
   return {
     status: "error",
     errorCode: code,
     errorMessage: msg,
     durationMs: Date.now() - startedAt,
   };
+}
+
+const ERROR_GUIDANCE: Record<string, string> = {
+  ENOENT: "File or directory does not exist. Verify the path with Glob or Grep first.",
+  EACCES: "Permission denied. The file may be read-only or outside the workspace.",
+  EISDIR: "Path is a directory, not a file. Use Glob to list its contents.",
+  ENOTDIR: "A path component is not a directory. Check the path.",
+  ENAMETOOLONG: "Path is too long. Use a shorter path.",
+  ENOSPC: "Disk full. Remove unused files or ask for help.",
+  EMFILE: "Too many open files. Close background tasks first.",
+};
+
+function toLlmFriendlyError(code: string, raw: string): string {
+  const guidance = ERROR_GUIDANCE[code];
+  if (guidance) return `${raw} — ${guidance}`;
+  if (raw.length > 10_000) {
+    return `${raw.slice(0, 5_000)}\n... [truncated ${raw.length - 10_000} chars] ...\n${raw.slice(-5_000)}`;
+  }
+  return raw;
 }
 
 /**
@@ -34,7 +54,7 @@ export function errorResult(err: unknown, startedAt: number): ToolResult<never> 
  */
 export function summariseToolOutput(result: ToolResult): string {
   if (result.status === "ok") {
-    const out = result.output;
+    const out = result.llmOutput ?? result.transcriptOutput ?? result.output;
     if (out === undefined) return "ok";
     if (typeof out === "string") return out;
     try {
