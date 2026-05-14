@@ -78,18 +78,52 @@ classifier:
 
 ### Hook points
 
-80+ built-in hooks run across the full turn lifecycle:
+90+ built-in hooks run across 15 lifecycle points:
+
+**Turn lifecycle**
+
+| Point | When | Example hooks |
+| --- | --- | --- |
+| `beforeTurnStart` | Before turn begins | Session validation, rate limiting |
+| `afterTurnEnd` | After turn completes | Hipocampus compaction, cleanup |
+| `onAbort` | When turn is aborted | Cleanup, state reset |
+
+**LLM round-trip**
 
 | Point | When | Example hooks |
 | --- | --- | --- |
 | `beforeLLMCall` | Before each model call | Memory injector, context compaction |
 | `afterLLMCall` | After model response | Stop-reason analysis |
+
+**Tool execution**
+
+| Point | When | Example hooks |
+| --- | --- | --- |
 | `beforeToolUse` | Before tool execution | Permission gates, resource boundary |
 | `afterToolUse` | After tool execution | Result verification, audit logging |
+
+**Commit**
+
+| Point | When | Example hooks |
+| --- | --- | --- |
 | `beforeCommit` | Before committing response | Answer verifier, evidence gate, deferral blocker, fact grounding, citation gate |
 | `afterCommit` | After commit | Task checkpoint, memory flush |
-| `onTurnEnd` | Turn cleanup | Hipocampus compaction |
+
+**Memory / Hipocampus**
+
+| Point | When | Example hooks |
+| --- | --- | --- |
+| `onTaskCheckpoint` | Task milestone reached | Progress logging, memory persistence |
+| `beforeCompaction` | Before memory compaction | Preserve critical context |
+| `afterCompaction` | After memory compaction | Reindex, validate summaries |
+
+**Events**
+
+| Point | When | Example hooks |
+| --- | --- | --- |
 | `onError` | Error recovery | Fallback routing |
+| `onRuleViolation` | Policy rule violated | Alert, escalate |
+| `onArtifactCreated` | New artifact produced | Register, validate |
 
 Hooks are ordered by priority band:
 
@@ -231,7 +265,7 @@ magi hook create-from-rule "Require source verification for any numerical claim"
 
 ### Disable and override built-ins
 
-Magi ships with 80+ built-in hooks. Disable any that don't fit your domain:
+Magi ships with 90+ built-in hooks. Disable any that don't fit your domain:
 
 ```yaml
 # magi.config.yaml
@@ -301,7 +335,7 @@ Works with Ollama, LM Studio, vLLM, llama.cpp, LiteLLM, or any OpenAI-compatible
 
 **Runtime:** evidence contracts, deterministic tools (Clock, DateRange, Calculation), scheduled delivery safety, child agent spawning, Hipocampus memory, execution contracts with resource bindings.
 
-**80+ hooks:** classifier, identity injection, security gates, grounding verification, completion evidence, deferral blocking, fact-checking, coding verification, citation gates, user harness rules — all overridable.
+**90+ hooks:** classifier, identity injection, security gates, grounding verification, completion evidence, deferral blocking, fact-checking, coding verification, citation gates, user harness rules — all overridable.
 
 **60+ tools:** file operations, search, code analysis, knowledge base, artifacts, browser.
 
