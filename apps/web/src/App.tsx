@@ -1,3 +1,5 @@
+"use client";
+
 import {
   useCallback,
   useEffect,
@@ -302,7 +304,7 @@ function isDashboardRoute(value: string | null): value is DashboardRoute {
 }
 
 function routeFromPathname(pathname: string): AppRoute {
-  const parts = pathname.split("/").filter(Boolean);
+  const parts = pathname.replace(/^\/app(?=\/)/, "").split("/").filter(Boolean);
   if (parts[0] !== "dashboard") return "chat";
   const section = decodePathPart(parts[2] ?? parts[1]);
   if (section === "chat") return "chat";
@@ -310,7 +312,7 @@ function routeFromPathname(pathname: string): AppRoute {
 }
 
 function channelFromPathname(pathname: string): string | null {
-  const parts = pathname.split("/").filter(Boolean);
+  const parts = pathname.replace(/^\/app(?=\/)/, "").split("/").filter(Boolean);
   if (parts[0] !== "dashboard" || parts[2] !== "chat") return null;
   const channel = decodePathPart(parts[3]);
   return channel ? normalizeChannelName(channel) : null;

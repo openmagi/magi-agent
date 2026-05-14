@@ -75,27 +75,21 @@ describe("HttpServer /app", () => {
 
     expect(res.status).toBe(200);
     expect(res.contentType).toContain("text/html");
-    expect(res.body).toContain("Magi App");
-    expect(res.body).toContain('id="root"');
-    expect(res.body).toContain("/app/app.js");
-    expect(res.body).toContain("/app/styles.css");
+    expect(res.body).toContain("Magi Agent");
+    expect(res.body).toContain("/_next/static/");
   });
 
-  it("serves static app assets", async () => {
-    const res = await requestRaw(`http://127.0.0.1:${port}/app/app.js`);
+  it("serves Next.js static assets", async () => {
+    // Find a JS chunk from the built HTML to verify asset serving
+    const htmlRes = await requestRaw(`http://127.0.0.1:${port}/app`);
+    const chunkMatch = htmlRes.body.match(/\/_next\/static\/chunks\/[^"]+\.js/);
+    expect(chunkMatch).toBeTruthy();
 
+    // Verify /_next/ route serves the chunk
+    const chunkPath = chunkMatch![0];
+    const res = await requestRaw(`http://127.0.0.1:${port}${chunkPath}`);
     expect(res.status).toBe(200);
     expect(res.contentType).toContain("text/javascript");
-    expect(res.body).toContain("createSseParser");
-    expect(res.body).toContain("modelOverride");
-    expect(res.body).toContain("/v1/chat/completions");
-    expect(res.body).toContain("/v1/chat/inject");
-    expect(res.body).toContain("/v1/chat/interrupt");
-    expect(res.body).toContain("/v1/app/knowledge");
-    expect(res.body).toContain("/v1/app/workspace?path=");
-    expect(res.body).toContain("/v1/app/workspace/file");
-    expect(res.body).toContain("magi:rightInspectorView");
-    expect(res.body).toContain("data-chat-model-picker");
   });
 
   it("serves cloud-style dashboard deep links as the self-hosted app shell", async () => {
@@ -110,9 +104,8 @@ describe("HttpServer /app", () => {
 
       expect(res.status).toBe(200);
       expect(res.contentType).toContain("text/html");
-      expect(res.body).toContain("Magi App");
-      expect(res.body).toContain('id="root"');
-      expect(res.body).toContain("/app/app.js");
+      expect(res.body).toContain("Magi Agent");
+      expect(res.body).toContain("/_next/static/");
     }
   });
 

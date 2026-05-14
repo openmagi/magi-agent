@@ -51,10 +51,11 @@ describe("Magi App shell", () => {
     expect(source).toContain("saveWorkspaceFile");
   });
 
-  it("routes dashboard deep links to real local dashboard pages", () => {
+  it("routes dashboard deep links with Next.js App Router", () => {
     const source = readAppFile(path.join("src", "App.tsx"));
-    const linkShim = readAppFile(path.join("src", "shims", "next-link.tsx"));
     const sidebar = readAppFile(path.join("src", "components", "chat", "chat-sidebar.tsx"));
+    const rootPage = readAppFile(path.join("app", "page.tsx"));
+    const nextConfig = readAppFile("next.config.ts");
 
     expect(source).toContain("routeFromPathname");
     expect(source).toContain("LocalDashboardShell");
@@ -62,13 +63,13 @@ describe("Magi App shell", () => {
     expect(source).toContain('window.addEventListener("popstate", syncRoute)');
     expect(source).toContain('return `/dashboard/${BOT_ID}/${route}`');
     expect(sidebar).toContain('`/dashboard/${currentBotId}/overview`');
-    expect(linkShim).toContain("window.history.pushState");
-    expect(linkShim).toContain('new PopStateEvent("popstate")');
+    expect(rootPage).toContain("App");
+    expect(nextConfig).toContain('output: "export"');
   });
 
   it("keeps dashboard pages wired to local runtime controls instead of hosted SaaS controls", () => {
     const source = readAppFile(path.join("src", "App.tsx"));
-    const js = readAppFile(path.join("dist", "app.js"));
+    const settingsDash = readAppFile(path.join("src", "components", "dashboard", "settings-dashboard.tsx"));
 
     expect(source).toContain("OverviewDashboard");
     expect(source).toContain("SettingsDashboard");
@@ -85,10 +86,7 @@ describe("Magi App shell", () => {
     expect(source).toContain("/v1/app/knowledge/file");
     expect(source).toContain("onReadWorkspaceFile");
     expect(source).toContain("onSaveWorkspaceFile");
-    expect(source).toContain("OpenAI-compatible / local");
-    expect(js).toContain("Configured LLM");
-    expect(js).not.toContain("Platform Credits");
-    expect(js).not.toContain("Change Plan");
+    expect(settingsDash).toContain("OpenAI-compatible / local");
   });
 
   it("uses the copied cloud chat components and visual system", () => {
@@ -126,7 +124,6 @@ describe("Magi App shell", () => {
 
   it("does not seed hosted-only account channels or SaaS navigation into the self-hosted app", () => {
     const source = readAppFile(path.join("src", "App.tsx"));
-    const js = readAppFile(path.join("dist", "app.js"));
     const hostedOnlyLabels = ["Billing", "Referral", "Organization", "Members", "Organization KB"];
     const forbiddenCloudChannels = [
       "chatter",
@@ -143,33 +140,37 @@ describe("Magi App shell", () => {
     expect(source).toContain('name: DEFAULT_CHANNEL');
     for (const label of hostedOnlyLabels) {
       expect(source).not.toContain(label);
-      expect(js).not.toContain(label);
     }
     for (const channel of forbiddenCloudChannels) {
       expect(source).not.toContain(channel);
     }
   });
 
-  it("builds stable app assets served by the local runtime", () => {
-    const html = readAppFile(path.join("dist", "index.html"));
-    const js = readAppFile(path.join("dist", "app.js"));
+  it("uses Next.js App Router instead of Vite SPA", () => {
+    const nextConfig = readAppFile("next.config.ts");
+    const rootLayout = readAppFile(path.join("app", "layout.tsx"));
+    const rootPage = readAppFile(path.join("app", "page.tsx"));
 
-    expect(html).toContain("/app/app.js");
-    expect(html).toContain("/app/styles.css");
-    expect(js).toContain("createSseParser");
-    expect(js).toContain("/v1/chat/completions");
-    expect(js).toContain("/dashboard/");
-    expect(js).toContain("magi:rightInspectorView");
-    expect(js).toContain("data-chat-model-picker");
-    expect(js).not.toContain("ChatWorkbench");
-    expect(js).not.toContain("workspace-editor");
+    // Vite config should no longer exist
+    expect(fs.existsSync(path.join(appDir, "vite.config.ts"))).toBe(false);
+    expect(fs.existsSync(path.join(appDir, "index.html"))).toBe(false);
+    // Next shims should no longer exist
+    expect(fs.existsSync(path.join(appDir, "src", "shims"))).toBe(false);
+
+    // Next.js config present
+    expect(nextConfig).toContain('output: "export"');
+    expect(nextConfig).toContain('distDir: "dist"');
+
+    // Root layout + App page present
+    expect(rootLayout).toContain("RootLayout");
+    expect(rootLayout).toContain("styles.css");
+    expect(rootPage).toContain("App");
   });
 
   it("does not expose hosted smart routers in the self-hosted model UI", () => {
     const source = readAppFile(path.join("src", "App.tsx"));
     const modelPicker = readAppFile(path.join("src", "components", "chat", "chat-model-picker.tsx"));
     const modelOptions = readAppFile(path.join("src", "lib", "models", "model-options.ts"));
-    const js = readAppFile(path.join("dist", "app.js"));
     const hostedRouterLabels = [
       "Standard Router",
       "Premium Router",
@@ -185,7 +186,6 @@ describe("Magi App shell", () => {
     for (const label of hostedRouterLabels) {
       expect(modelPicker).not.toContain(label);
       expect(modelOptions).not.toContain(label);
-      expect(js).not.toContain(label);
     }
   });
 
@@ -224,15 +224,16 @@ describe("Magi App shell", () => {
 
   it("renders Skills as a searchable local capability directory", () => {
     const source = readAppFile(path.join("src", "App.tsx"));
+    const skillsDash = readAppFile(path.join("src", "components", "dashboard", "skills-dashboard.tsx"));
 
     expect(source).toContain("type SkillDirectoryFilter");
     expect(source).toContain("normalizeSkillDirectoryItems");
-    expect(source).toContain("filteredSkills");
-    expect(source).toContain("Search skills...");
-    expect(source).toContain("Prompt skills");
-    expect(source).toContain("Script skills");
-    expect(source).toContain("Runtime hooks");
-    expect(source).toContain("Issue detail");
+    expect(skillsDash).toContain("filteredSkills");
+    expect(skillsDash).toContain("Search skills...");
+    expect(skillsDash).toContain("Prompt skills");
+    expect(skillsDash).toContain("Script skills");
+    expect(skillsDash).toContain("Runtime hooks");
+    expect(skillsDash).toContain("Issue detail");
     expect(source).not.toContain("/api/bots/${botId}/custom-skills");
   });
 });

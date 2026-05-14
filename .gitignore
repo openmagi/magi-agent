@@ -1,7 +1,6 @@
 node_modules/
 dist/
-!apps/web/dist/
-!apps/web/dist/**
+.next/
 .worktrees/
 *.tsbuildinfo
 .env
