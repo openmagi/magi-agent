@@ -20,15 +20,49 @@ This is fine when you're watching. You catch the mistake and try again. But when
 
 **Magi solves this by turning your rules into runtime enforcement.** You write a hook that says "block any response that cites a file the agent didn't read." The runtime runs it. The agent literally cannot ship that response. Not because you asked nicely — because the code won't let it.
 
-## Four layers of control
+## How it works
 
-Prompts are a single point of control that the model can ignore. Magi enforces rules across four independent layers — each one programmable, each one customizable.
+Every turn is an atomic transaction. The agent drafts a response, but the runtime decides whether to commit it. Two systems make that decision:
 
-### Layer 1: Classifier
+```
+┌───────────────────┬────────────────────┬────────┐
+│ Component         │ Role               │ Analogy│
+├───────────────────┼────────────────────┼────────┤
+│ PolicyKernel      │ Defines the rules  │ Law    │
+│ ExecutionContract │ Records the facts  │ Evidence│
+│ Hooks             │ Rules + facts → verdict │ Judge  │
+└───────────────────┴────────────────────┴────────┘
+```
 
-A fast LLM call (Haiku-class) classifies every turn at two phases — request and final answer. It detects intent, deferral patterns, completion claims, deterministic requirements (dates, calculations, data queries), and planning needs. The result is cached for the turn so all hooks share one classification — no duplicate calls.
+**PolicyKernel** compiles your rules — from `USER-RULES.md`, `harness-rules/*.md`, and dashboard safeguards — into typed `HarnessRule` objects. Rules that can't compile to typed objects fall back to prompt injection (shown as "prompt rules" in the dashboard). Typed rules are enforced deterministically.
 
-You add custom classifier dimensions in YAML. They run inside the same classification pass alongside the built-in dimensions:
+**ExecutionContract** tracks what actually happened: which tools ran, which files were read, which claims were made, what evidence was produced. It gives hooks structured facts instead of requiring each one to parse raw transcripts.
+
+**Hooks** combine the two. At every lifecycle point, they read the rules and check the facts:
+
+```
+User message
+  → Classifier (fast LLM, one call per turn)
+  → onSessionStart / onTurnStart
+  → Meta-agent plans → delegates to sub-agents
+  → beforeToolCall          ← safety gates
+  → [tool execution]
+  → afterToolCall           ← audit + verification
+  → Sub-agent results inspected by meta-agent
+  → beforeCommit            ← quality gates
+  → PolicyKernel evaluates harness rules
+  → blocked? → retry with corrective message
+  → passed? → commit to transcript, deliver
+  → afterResponse           ← compliance checks
+```
+
+When a hook blocks, the agent gets a corrective message and retries. After retries exhaust, the system fails open — the agent never gets stuck.
+
+### Classifier
+
+A fast LLM call (Haiku-class) classifies every turn at two phases — **request** (intent, deterministic requirements, planning needs) and **final answer** (deferral patterns, completion claims, ungrounded facts). The result is cached so all hooks share one classification — no duplicate calls.
+
+You add custom dimensions in YAML. They run inside the same classification pass alongside built-in dimensions:
 
 ```yaml
 # magi.config.yaml
@@ -42,17 +76,36 @@ classifier:
         containsTreatmentAdvice: boolean
 ```
 
-### Layer 2: Hooks
+### Hook points
 
-74 hooks run at every lifecycle point: `beforeLLMCall`, `beforeToolUse`, `afterToolUse`, `beforeCommit`, `afterResponse`, `onSessionStart`, `onTurnEnd`. Blocking hooks reject output and force a retry with a corrective message. After retries exhaust, the system fails open — the agent never gets stuck.
+80+ built-in hooks run across the full turn lifecycle:
+
+| Point | When | Example hooks |
+| --- | --- | --- |
+| `beforeLLMCall` | Before each model call | Memory injector, context compaction |
+| `afterLLMCall` | After model response | Stop-reason analysis |
+| `beforeToolUse` | Before tool execution | Permission gates, resource boundary |
+| `afterToolUse` | After tool execution | Result verification, audit logging |
+| `beforeCommit` | Before committing response | Answer verifier, evidence gate, deferral blocker, fact grounding, citation gate |
+| `afterCommit` | After commit | Task checkpoint, memory flush |
+| `onTurnEnd` | Turn cleanup | Hipocampus compaction |
+| `onError` | Error recovery | Fallback routing |
+
+Hooks are ordered by priority band:
+
+| Band | Range | Purpose |
+| --- | --- | --- |
+| Critical | 0–49 | Security, safety, identity, classification |
+| High | 50–99 | Compliance, verification, evidence gates |
+| Normal | 100–199 | Domain logic, custom gates |
+| Low | 200–299 | Logging, telemetry |
+| Passive | 300+ | Non-blocking observation |
 
 You write your own hooks with the same `RegisteredHook` interface. No adapters, no wrappers:
 
 ```bash
 magi hook create my-compliance-check --point beforeCommit
 ```
-
-Hooks can use simple rule-based logic, call an LLM judge, hit an external API, or combine all three — anything you can write in async TypeScript:
 
 **Rule-based** — fast, deterministic, zero cost:
 
@@ -102,21 +155,32 @@ const hook: Hook = {
 magi hook test investment-advice-gate --input "You should buy AAPL, it will go up 30%"
 ```
 
-### Layer 3: Policy engine
+### Meta-thinking layer
 
-The **PolicyKernel** compiles your rules — from `USER-RULES.md`, `harness-rules/*.md`, and dashboard safeguards — into typed `HarnessRule` objects. The **ExecutionContract** tracks what happened during the turn: which tools ran, which files were read, which claims were made, what evidence was produced.
+The main agent doesn't just execute — it plans, delegates, and verifies. This is structural separation, not a prompt suggestion.
 
-Hooks use this state to make decisions. A completion-evidence gate checks whether the agent produced the artifacts it claims to have produced. A resource-boundary gate checks whether tool calls stayed within declared scope. The policy engine gives hooks structured facts instead of requiring each hook to parse raw transcripts.
+```
+┌─────────────────────────────────────────────────┐
+│                  Meta-Agent                      │
+│  (plans, steers, inspects — never executes)      │
+│                                                  │
+│  ┌──────────┐  ┌──────────┐  ┌──────────┐      │
+│  │ Sub-agent│  │ Sub-agent│  │ Sub-agent│      │
+│  │ (search) │  │ (code)   │  │ (write)  │      │
+│  └────┬─────┘  └────┬─────┘  └────┬─────┘      │
+│       │              │              │            │
+│       ▼              ▼              ▼            │
+│  Results inspected by meta-agent                 │
+│  Accept / Retry / Reject                         │
+├─────────────────────────────────────────────────┤
+│  beforeCommit hooks verify final assembled output│
+│  PolicyKernel + ExecutionContract → verdict       │
+└─────────────────────────────────────────────────┘
+```
 
-Rules that can't be compiled into typed objects fall back to prompt-level injection — shown as "prompt rules" in the dashboard. Typed rules are enforced deterministically by hooks.
+The controller never generates the output it verifies. Sub-agents run with their own tool sets and resource bindings. The parent inspects their results, decides whether to accept or retry, and assembles the final output. Verification hooks then run on that output before it commits.
 
-### Layer 4: Meta-agent
-
-The main agent operates as a meta-thinker: it plans, verifies, and steers. Actual execution — file operations, searches, code changes, document generation — is delegated to sub-agents via `SpawnAgent`.
-
-The controller never generates the output it verifies. This structural separation is more reliable than self-policing via prompt, where the same model that produced a claim also judges whether the claim is accurate.
-
-Sub-agents run with their own tool sets and resource bindings. The parent agent inspects their results, decides whether to accept or retry, and assembles the final output. Verification hooks then run on that final output before it commits.
+This matters most for autonomous agents — overnight cron jobs, document pipelines, customer-facing bots — where no human is watching. A model that both produces and judges its own work will systematically over-trust itself. Structural separation breaks that loop.
 
 ## Quick Start
 
@@ -167,7 +231,7 @@ magi hook create-from-rule "Require source verification for any numerical claim"
 
 ### Disable and override built-ins
 
-Magi ships with 74 built-in hooks. Disable any that don't fit your domain:
+Magi ships with 80+ built-in hooks. Disable any that don't fit your domain:
 
 ```yaml
 # magi.config.yaml
@@ -206,7 +270,7 @@ const tool: Tool<MedicalLookupInput, MedicalLookupOutput> = {
 
 ## Any model
 
-Run with any provider or local model. The four control layers work the same regardless of which model generates the draft.
+Run with any provider or local model. The verification pipeline works the same regardless of which model generates the draft.
 
 ```bash
 # Hosted
@@ -221,34 +285,6 @@ OPENAI_BASE_URL=http://localhost:11434/v1 MAGI_MODEL=llama3.1
 Works with Ollama, LM Studio, vLLM, llama.cpp, LiteLLM, or any OpenAI-compatible endpoint.
 
 ## Architecture
-
-### How rules are enforced
-
-```
-User message
-  → Classifier (LLM + rule-based hybrid, + your custom dimensions)
-  → onSessionStart / onTurnStart
-  → Meta-agent plans and delegates to sub-agents
-  → beforeToolCall          ← your safety gates
-  → [tool execution]
-  → afterToolCall           ← your audit logging
-  → Sub-agent results inspected by meta-agent
-  → beforeCommit            ← your quality gates
-  → PolicyKernel evaluates harness rules
-  → blocked? → retry with corrective message
-  → passed? → commit to transcript, deliver to user
-  → afterResponse           ← your compliance checks
-```
-
-### Priority bands
-
-| Band | Range | Purpose |
-| --- | --- | --- |
-| Critical | 0-49 | Security, safety, identity, classification |
-| High | 50-99 | Compliance, verification, evidence gates |
-| Normal | 100-199 | Domain logic, custom gates |
-| Low | 200-299 | Logging, telemetry |
-| Passive | 300+ | Non-blocking observation |
 
 ### Tool permissions
 
@@ -265,7 +301,7 @@ User message
 
 **Runtime:** evidence contracts, deterministic tools (Clock, DateRange, Calculation), scheduled delivery safety, child agent spawning, Hipocampus memory, execution contracts with resource bindings.
 
-**74 hooks:** classifier, identity injection, security gates, grounding verification, completion evidence, deferral blocking, fact-checking, coding verification, citation gates, user harness rules — all overridable.
+**80+ hooks:** classifier, identity injection, security gates, grounding verification, completion evidence, deferral blocking, fact-checking, coding verification, citation gates, user harness rules — all overridable.
 
 **60+ tools:** file operations, search, code analysis, knowledge base, artifacts, browser.
 
