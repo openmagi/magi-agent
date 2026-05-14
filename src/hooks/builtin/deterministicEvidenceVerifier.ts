@@ -128,22 +128,30 @@ export async function judgeDeterministicEvidence(
   return parseDeterministicEvidenceVerdict(output);
 }
 
+export interface EvidenceSchemaResult {
+  verdict: DeterministicEvidenceVerdict;
+  confidence: "high" | "low";
+  reason: string;
+}
+
 export function judgeDeterministicEvidenceBySchema(
   assistantText: string,
   evidence: DeterministicEvidenceRecord[],
-): DeterministicEvidenceVerdict {
+): EvidenceSchemaResult {
+  let assertionsMissing = 0;
+  let assertionsChecked = 0;
+
   for (const record of evidence) {
     if (!record.assertions || record.assertions.length === 0) continue;
     for (const assertion of record.assertions) {
       if (typeof assertion !== "string") continue;
-      // Check if the assertion pattern appears in the assistant text
+      assertionsChecked++;
       try {
         const re = new RegExp(assertion, "i");
-        if (!re.test(assistantText)) return "MISSING_EVIDENCE";
+        if (!re.test(assistantText)) assertionsMissing++;
       } catch {
-        // If assertion is not a valid regex, check as literal substring
         if (!assistantText.toLowerCase().includes(assertion.toLowerCase())) {
-          return "MISSING_EVIDENCE";
+          assertionsMissing++;
         }
       }
     }
@@ -155,23 +163,33 @@ export function judgeDeterministicEvidenceBySchema(
         for (const num of numbers) {
           const val = parseFloat(num);
           if (isNaN(val) || val === 0) continue;
-          // Check if this number appears in assistant text (±1%)
           const numRe = new RegExp(`\\b${num.replace(".", "\\.")}\\b`);
           if (!numRe.test(assistantText)) {
-            // Check approximate match
             const tolerance = Math.abs(val * 0.01);
             const allNumbers = assistantText.match(/\b\d+(?:\.\d+)?\b/g) ?? [];
             const hasApproxMatch = allNumbers.some((n) => {
               const parsed = parseFloat(n);
               return !isNaN(parsed) && Math.abs(parsed - val) <= tolerance;
             });
-            if (!hasApproxMatch && val > 1) return "CONTRADICTS_EVIDENCE";
+            if (!hasApproxMatch && val > 1) {
+              return { verdict: "CONTRADICTS_EVIDENCE", confidence: "high", reason: `number ${val} contradicted` };
+            }
           }
         }
       }
     }
   }
-  return "PASS";
+
+  if (assertionsMissing > 0 && assertionsChecked > 0) {
+    // All assertions missing = high confidence, some = low
+    const allMissing = assertionsMissing === assertionsChecked;
+    return {
+      verdict: "MISSING_EVIDENCE",
+      confidence: allMissing ? "high" : "low",
+      reason: `${assertionsMissing}/${assertionsChecked} assertions not found`,
+    };
+  }
+  return { verdict: "PASS", confidence: "high", reason: "all assertions and numbers verified" };
 }
 
 function isEnabled(): boolean {
@@ -284,19 +302,35 @@ export function makeDeterministicEvidenceVerifierHook(): RegisteredHook<"beforeC
         };
       }
 
-      // P2-4: deterministic mode — schema matching, no LLM
-      const verdict = process.env.MAGI_DETERMINISTIC_EVIDENCE === "1"
-        ? judgeDeterministicEvidenceBySchema(assistantText, toolEvidence)
-        : await judgeDeterministicEvidence({
-            llm: ctx.llm,
-            model: ctx.agentModel,
-            userMessage,
-            assistantText,
-            requirements,
-            evidence: toolEvidence,
+      // Hybrid: deterministic schema match first, LLM fallback on low confidence
+      const hybridMode = process.env.MAGI_HYBRID_EVIDENCE === "1";
+      let verdict: DeterministicEvidenceVerdict;
+      if (hybridMode) {
+        const det = judgeDeterministicEvidenceBySchema(assistantText, toolEvidence);
+        if (det.confidence === "high") {
+          verdict = det.verdict;
+          ctx.log("info", `[deterministic-evidence] hybrid: deterministic ${det.verdict} (${det.reason})`);
+        } else {
+          verdict = await judgeDeterministicEvidence({
+            llm: ctx.llm, model: ctx.agentModel, userMessage, assistantText,
+            requirements, evidence: toolEvidence,
             timeoutMs: Math.min(DEFAULT_TIMEOUT_MS, ctx.deadlineMs),
             signal: ctx.abortSignal,
           });
+          ctx.log("info", `[deterministic-evidence] hybrid: LLM fallback → ${verdict} (${det.reason})`);
+        }
+      } else {
+        verdict = await judgeDeterministicEvidence({
+          llm: ctx.llm,
+          model: ctx.agentModel,
+          userMessage,
+          assistantText,
+          requirements,
+          evidence: toolEvidence,
+          timeoutMs: Math.min(DEFAULT_TIMEOUT_MS, ctx.deadlineMs),
+          signal: ctx.abortSignal,
+        });
+      }
       if (verdict === "PASS") {
         contract.recordDeterministicEvidence({
           evidenceId: `det_verify_${ctx.turnId}_${Date.now().toString(36)}`,

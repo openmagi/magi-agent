@@ -752,7 +752,9 @@ export function registerBuiltinHooks(
     registry.register(sessionCommitmentTrackerHook);
     registered++;
   }
-  if (maybe(selfClaimVerifierHook.name)) {
+  // selfClaimVerifier — migrated to builtin preset (PolicyKernel).
+  // Kept as fallback when MAGI_PRESET_VERIFIERS is not set.
+  if (!process.env.MAGI_PRESET_VERIFIERS && maybe(selfClaimVerifierHook.name)) {
     registry.register(selfClaimVerifierHook);
     registered++;
   }
@@ -785,7 +787,8 @@ export function registerBuiltinHooks(
     factGroundingEnv === "on" ||
     factGroundingEnv === "true" ||
     factGroundingEnv === "1";
-  if (factGroundingEnabled) {
+  // factGroundingVerifier — migrated to builtin preset (PolicyKernel).
+  if (!process.env.MAGI_PRESET_VERIFIERS && factGroundingEnabled) {
     const fgHook = makeFactGroundingVerifierHook({
       agent: opts.factGroundingAgent,
     });
@@ -793,7 +796,7 @@ export function registerBuiltinHooks(
       registry.register(fgHook);
       registered++;
     }
-  } else {
+  } else if (!factGroundingEnabled) {
     skipped.push("builtin:fact-grounding-verifier");
   }
 
@@ -854,10 +857,13 @@ export function registerBuiltinHooks(
     registered++;
   }
 
-  const deterministicEvidenceVerifierHook = makeDeterministicEvidenceVerifierHook();
-  if (maybe(deterministicEvidenceVerifierHook.name)) {
-    registry.register(deterministicEvidenceVerifierHook);
-    registered++;
+  // deterministicEvidenceVerifier — migrated to builtin preset (PolicyKernel).
+  if (!process.env.MAGI_PRESET_VERIFIERS) {
+    const deterministicEvidenceVerifierHook = makeDeterministicEvidenceVerifierHook();
+    if (maybe(deterministicEvidenceVerifierHook.name)) {
+      registry.register(deterministicEvidenceVerifierHook);
+      registered++;
+    }
   }
 
   const executionContractVerifierHook = makeExecutionContractVerifierHook();
@@ -867,12 +873,15 @@ export function registerBuiltinHooks(
   }
 
   if (opts.policyKernel) {
-    const responseLanguageGateHook = makeResponseLanguageGateHook({
-      policy: opts.policyKernel,
-    });
-    if (maybe(responseLanguageGateHook.name)) {
-      registry.register(responseLanguageGateHook);
-      registered++;
+    // responseLanguageGate — migrated to builtin preset (PolicyKernel).
+    if (!process.env.MAGI_PRESET_VERIFIERS) {
+      const responseLanguageGateHook = makeResponseLanguageGateHook({
+        policy: opts.policyKernel,
+      });
+      if (maybe(responseLanguageGateHook.name)) {
+        registry.register(responseLanguageGateHook);
+        registered++;
+      }
     }
 
     const userHarnessHooks = makeUserHarnessRuleHooks({
@@ -928,10 +937,8 @@ export function registerBuiltinHooks(
     registered++;
   }
 
-  // Gated by MAGI_ANSWER_VERIFY env (default on). The hook
-  // itself reads the env and no-ops when off, but skip registration
-  // entirely if the operator listed it in disable_builtin_hooks.
-  if (maybe(answerVerifierHook.name)) {
+  // answerVerifier — migrated to builtin preset (PolicyKernel).
+  if (!process.env.MAGI_PRESET_VERIFIERS && maybe(answerVerifierHook.name)) {
     registry.register(answerVerifierHook);
     registered++;
   }

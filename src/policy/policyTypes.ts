@@ -44,6 +44,20 @@ export interface HarnessRuleCondition {
   userMessageMatches?: string;
 }
 
+export type BuiltinPresetId =
+  | "fact-grounding"
+  | "answer-quality"
+  | "self-claim"
+  | "response-language"
+  | "deterministic-evidence";
+
+export type BuiltinPresetMode = "hybrid" | "deterministic" | "llm";
+
+export interface BuiltinPresetConfig {
+  enabled: boolean;
+  mode: BuiltinPresetMode;
+}
+
 export type HarnessRuleAction =
   | {
       type: "require_tool";
@@ -62,6 +76,11 @@ export type HarnessRuleAction =
   | {
       type: "block";
       reason: string;
+    }
+  | {
+      type: "builtin_preset";
+      preset: BuiltinPresetId;
+      config?: BuiltinPresetConfig;
     };
 
 export interface HarnessRule {
@@ -73,6 +92,7 @@ export interface HarnessRule {
   action: HarnessRuleAction;
   enforcement: HarnessRuleEnforcement;
   timeoutMs: number;
+  priority?: number;
 }
 
 export interface RuntimePolicy {

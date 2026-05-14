@@ -340,17 +340,28 @@ export function makeResponseLanguageGateHook(
         resolved,
         assistantText,
       );
-      // P2-1: deterministic-only mode skips LLM judge entirely
-      const deterministicOnly = process.env.MAGI_DETERMINISTIC_LANG === "1";
-      const verdict = deterministicMismatch
-        ? { pass: false, detail: deterministicMismatch }
-        : deterministicOnly
-          ? { pass: true, detail: "deterministic check passed" }
-          : await judgeResponseLanguage(ctx, {
-              language,
-              userMessage,
-              assistantText,
-            });
+      // Hybrid: deterministic mismatch = high-confidence fail (no LLM needed)
+      // No mismatch + target language confirmed = high-confidence pass
+      // No mismatch but ambiguous = LLM fallback
+      const hybridMode = process.env.MAGI_HYBRID_LANG === "1";
+      let verdict: LanguageVerdict;
+      if (deterministicMismatch) {
+        verdict = { pass: false, detail: deterministicMismatch };
+      } else if (hybridMode) {
+        const detected = detectPrimaryLanguage(assistantText);
+        if (detected === resolved.target || resolved.target === "auto") {
+          verdict = { pass: true, detail: `hybrid: deterministic confirmed ${detected ?? "auto"}` };
+          ctx.log("info", `[response-language-gate] hybrid: deterministic pass (${detected})`);
+        } else if (!detected) {
+          // Can't determine language deterministically → LLM fallback
+          verdict = await judgeResponseLanguage(ctx, { language, userMessage, assistantText });
+          ctx.log("info", `[response-language-gate] hybrid: LLM fallback → ${verdict.pass ? "PASS" : "FAIL"} (language undetectable)`);
+        } else {
+          verdict = { pass: true, detail: `hybrid: deterministic pass (${detected} vs target ${resolved.target})` };
+        }
+      } else {
+        verdict = await judgeResponseLanguage(ctx, { language, userMessage, assistantText });
+      }
 
       ctx.emit({
         type: "rule_check",

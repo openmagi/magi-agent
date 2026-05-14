@@ -122,7 +122,7 @@ describe("PolicyKernel", () => {
 
     const snapshot = await kernel.current();
 
-    expect(snapshot.policy.harnessRules).toEqual([
+    expect(snapshot.policy.harnessRules).toEqual(expect.arrayContaining([
       expect.objectContaining({
         id: "user-harness:file-delivery-after-create",
         trigger: "beforeCommit",
@@ -141,7 +141,7 @@ describe("PolicyKernel", () => {
         enforcement: "block_on_fail",
         action: expect.objectContaining({ type: "llm_verifier" }),
       }),
-    ]);
+    ]));
     expect(snapshot.status.harnessDirectives).toContain(
       "user-harness:file-delivery-after-create beforeCommit require_tool FileDeliver block_on_fail",
     );
@@ -181,14 +181,14 @@ describe("PolicyKernel", () => {
 
     const snapshot = await kernel.current();
 
-    expect(snapshot.policy.harnessRules).toEqual([
+    expect(snapshot.policy.harnessRules).toEqual(expect.arrayContaining([
       expect.objectContaining({
         id: "user-harness:file-delivery-after-create",
         sourceText: expect.stringContaining("deliver it to the chat"),
         condition: { anyToolUsed: ["DocumentWrite", "SpreadsheetWrite"] },
         action: { type: "require_tool", toolName: "FileDeliver" },
       }),
-    ]);
+    ]));
   });
 
   it("loads downloaded harness rule packs from harness-rules/*.md", async () => {
@@ -214,7 +214,7 @@ describe("PolicyKernel", () => {
 
     const snapshot = await kernel.current();
 
-    expect(snapshot.policy.harnessRules).toEqual([
+    expect(snapshot.policy.harnessRules).toEqual(expect.arrayContaining([
       expect.objectContaining({
         id: "user-harness:final-answer-verifier",
         action: expect.objectContaining({
@@ -222,7 +222,7 @@ describe("PolicyKernel", () => {
           prompt: expect.stringContaining("does not skip requested deliverables"),
         }),
       }),
-    ]);
+    ]));
   });
 
   it("loads structured harness rules that require a matching tool input", async () => {

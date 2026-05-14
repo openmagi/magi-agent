@@ -12,6 +12,9 @@ import type {
   RuntimePolicySnapshot,
   RuntimePolicyStatus,
   ResponseLanguagePolicy,
+  BuiltinPresetId,
+  BuiltinPresetConfig,
+  BuiltinPresetMode,
 } from "./policyTypes.js";
 import type { ExternalHookConfig } from "../hooks/ExternalHookLoader.js";
 import type { ClassifierDimensionDef } from "../hooks/builtin/classifierExtensions.js";
@@ -922,6 +925,111 @@ export async function loadClassifierDimensions(
   return { dimensions, warnings };
 }
 
+// ── Builtin Preset Definitions ──────────────────────────────────
+
+interface PresetDef {
+  id: BuiltinPresetId;
+  hookId: string;
+  trigger: "beforeCommit";
+  priority: number;
+  defaultEnabled: boolean;
+  defaultMode: BuiltinPresetMode;
+  envEnabledKey?: string;
+  envModeKey?: string;
+  timeoutMs: number;
+}
+
+const BUILTIN_PRESET_DEFS: PresetDef[] = [
+  {
+    id: "self-claim", hookId: "builtin-preset:self-claim",
+    trigger: "beforeCommit", priority: 80, defaultEnabled: true, defaultMode: "hybrid",
+    envEnabledKey: "MAGI_DETERMINISTIC_SELF_CLAIM", envModeKey: "MAGI_HYBRID_SELF_CLAIM",
+    timeoutMs: 5_000,
+  },
+  {
+    id: "fact-grounding", hookId: "builtin-preset:fact-grounding",
+    trigger: "beforeCommit", priority: 82, defaultEnabled: false, defaultMode: "hybrid",
+    envEnabledKey: "MAGI_FACT_GROUNDING", envModeKey: "MAGI_HYBRID_GROUNDING",
+    timeoutMs: 15_000,
+  },
+  {
+    id: "response-language", hookId: "builtin-preset:response-language",
+    trigger: "beforeCommit", priority: 85, defaultEnabled: true, defaultMode: "hybrid",
+    envEnabledKey: "MAGI_RESPONSE_LANGUAGE_GATE", envModeKey: "MAGI_HYBRID_LANG",
+    timeoutMs: 9_000,
+  },
+  {
+    id: "deterministic-evidence", hookId: "builtin-preset:deterministic-evidence",
+    trigger: "beforeCommit", priority: 88, defaultEnabled: true, defaultMode: "hybrid",
+    envEnabledKey: "MAGI_DETERMINISTIC_EVIDENCE_VERIFY", envModeKey: "MAGI_HYBRID_EVIDENCE",
+    timeoutMs: 11_000,
+  },
+  {
+    id: "answer-quality", hookId: "builtin-preset:answer-quality",
+    trigger: "beforeCommit", priority: 90, defaultEnabled: true, defaultMode: "hybrid",
+    envEnabledKey: "MAGI_ANSWER_VERIFY", envModeKey: "MAGI_HYBRID_ANSWER",
+    timeoutMs: 16_000,
+  },
+];
+
+function resolvePresetEnabled(def: PresetDef, yamlEnabled?: boolean): boolean {
+  if (def.envEnabledKey) {
+    const envVal = process.env[def.envEnabledKey]?.trim().toLowerCase();
+    if (envVal === "off" || envVal === "false" || envVal === "0") return false;
+    if (envVal === "on" || envVal === "true" || envVal === "1") return true;
+  }
+  if (yamlEnabled !== undefined) return yamlEnabled;
+  return def.defaultEnabled;
+}
+
+function resolvePresetMode(def: PresetDef, yamlMode?: string): BuiltinPresetMode {
+  if (def.envModeKey && process.env[def.envModeKey] === "1") return "hybrid";
+  if (yamlMode === "hybrid" || yamlMode === "deterministic" || yamlMode === "llm") {
+    return yamlMode;
+  }
+  return def.defaultMode;
+}
+
+export function loadBuiltinPresets(
+  yamlPresets?: Record<string, unknown>,
+): HarnessRule[] {
+  return BUILTIN_PRESET_DEFS.map((def) => {
+    const yamlConfig = isRecord(yamlPresets?.[def.id]) ? yamlPresets[def.id] as Record<string, unknown> : undefined;
+    const enabled = resolvePresetEnabled(
+      def,
+      yamlConfig ? booleanOrDefault(yamlConfig.enabled, def.defaultEnabled) : undefined,
+    );
+    const mode = resolvePresetMode(
+      def,
+      yamlConfig ? nonEmptyString(yamlConfig.mode) ?? undefined : undefined,
+    );
+    return {
+      id: def.hookId,
+      sourceText: `builtin_preset:${def.id}`,
+      enabled,
+      trigger: def.trigger,
+      action: {
+        type: "builtin_preset" as const,
+        preset: def.id,
+        config: { enabled, mode },
+      },
+      enforcement: "block_on_fail" as const,
+      timeoutMs: def.timeoutMs,
+      priority: def.priority,
+    };
+  });
+}
+
+function loadBuiltinPresetsFromYaml(
+  _workspace: Workspace,
+  parsedYaml?: unknown,
+): HarnessRule[] {
+  if (!isRecord(parsedYaml)) return loadBuiltinPresets();
+  const rawPresets = parsedYaml.builtin_presets ?? parsedYaml.builtinPresets;
+  if (!isRecord(rawPresets)) return loadBuiltinPresets();
+  return loadBuiltinPresets(rawPresets as Record<string, unknown>);
+}
+
 export class PolicyKernel {
   constructor(private readonly workspace: Workspace) {}
 
@@ -929,6 +1037,20 @@ export class PolicyKernel {
     const identity = await this.workspace.loadIdentity();
     const snapshot = parseUserRules(identity);
     const structured = await loadStructuredHarnessRules(this.workspace);
+
+    // Load parsed yaml for builtin presets
+    let parsedYaml: unknown;
+    try {
+      const raw = await fs.readFile(path.join(this.workspace.root, AGENT_CONFIG_REL), "utf8");
+      parsedYaml = parseYaml(raw);
+    } catch { /* no yaml = use defaults */ }
+
+    // Inject builtin presets as HarnessRules
+    const presets = loadBuiltinPresetsFromYaml(this.workspace, parsedYaml);
+    for (const preset of presets) {
+      addHarnessRule(snapshot.policy, preset);
+    }
+
     for (const rule of structured.rules) {
       addHarnessRule(snapshot.policy, rule);
     }
