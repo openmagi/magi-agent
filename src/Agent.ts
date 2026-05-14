@@ -28,6 +28,9 @@ import {
 } from "./tools/CommitCheckpoint.js";
 import type { DisciplineSessionCounter } from "./hooks/builtin/disciplineHook.js";
 import type { ChannelRef } from "./util/types.js";
+import { createLogger } from "./util/logger.js";
+
+const agentLogger = createLogger("Agent");
 import { LLMClient } from "./transport/LLMClient.js";
 import { DirectLLMClient } from "./transport/DirectLLMClient.js";
 import { Workspace } from "./storage/Workspace.js";
@@ -796,9 +799,11 @@ export class Agent {
 
     const session = this.sessions.get(input.sessionKey);
     if (!session) {
-      console.warn(
-        `[core-agent] background delivery skipped taskId=${input.taskId}: session not live sessionKey=${input.sessionKey}`,
-      );
+      agentLogger.warn("background_delivery_skipped", {
+        taskId: input.taskId,
+        reason: "session_not_live",
+        sessionKey: input.sessionKey,
+      });
       return false;
     }
 
@@ -806,9 +811,10 @@ export class Agent {
     try {
       if (channel.type === "app") {
         if (!this.webAppAdapter) {
-          console.warn(
-            `[core-agent] background delivery skipped taskId=${input.taskId}: webapp adapter not configured`,
-          );
+          agentLogger.warn("background_delivery_skipped", {
+            taskId: input.taskId,
+            reason: "webapp_adapter_not_configured",
+          });
           return false;
         }
         await this.webAppAdapter.send({
@@ -821,9 +827,11 @@ export class Agent {
       if (channel.type === "telegram" || channel.type === "discord") {
         const adapter = this.channelAdapters.find((a) => a.kind === channel.type);
         if (!adapter) {
-          console.warn(
-            `[core-agent] background delivery skipped taskId=${input.taskId}: ${channel.type} adapter not configured`,
-          );
+          agentLogger.warn("background_delivery_skipped", {
+            taskId: input.taskId,
+            reason: "adapter_not_configured",
+            channelType: channel.type,
+          });
           return false;
         }
         await adapter.send({
@@ -833,14 +841,19 @@ export class Agent {
         return true;
       }
 
-      console.warn(
-        `[core-agent] background delivery skipped taskId=${input.taskId}: unsupported channel=${channel.type}`,
-      );
+      agentLogger.warn("background_delivery_skipped", {
+        taskId: input.taskId,
+        reason: "unsupported_channel",
+        channelType: channel.type,
+      });
       return false;
     } catch (err) {
-      console.warn(
-        `[core-agent] background delivery failed taskId=${input.taskId} channel=${channel.type}:${channel.channelId}: ${(err as Error).message}`,
-      );
+      agentLogger.warn("background_delivery_failed", {
+        taskId: input.taskId,
+        channelType: channel.type,
+        channelId: channel.channelId,
+        error: (err as Error).message,
+      });
       return false;
     }
   }
@@ -863,9 +876,7 @@ export class Agent {
     try {
       await this.backgroundTasks.hydrate();
     } catch (err) {
-      console.warn(
-        `[core-agent] background-tasks hydrate failed: ${(err as Error).message}`,
-      );
+      agentLogger.warn("background_tasks_hydrate_failed", { error: (err as Error).message });
     }
 
     // Coding Discipline — read `.discipline.yaml` if present, seed
@@ -875,14 +886,14 @@ export class Agent {
       const cfg = await loadDisciplineConfig(this.config.workspaceRoot);
       if (cfg) {
         this.disciplineDefault = cfg;
-        console.log(
-          `[core-agent] discipline: config loaded tdd=${cfg.tdd} git=${cfg.git} enforcement=${cfg.requireCommit}`,
-        );
+        agentLogger.info("discipline_config_loaded", {
+          tdd: cfg.tdd,
+          git: cfg.git,
+          enforcement: cfg.requireCommit,
+        });
       }
     } catch (err) {
-      console.warn(
-        `[core-agent] discipline config load failed: ${(err as Error).message}`,
-      );
+      agentLogger.warn("discipline_config_load_failed", { error: (err as Error).message });
     }
 
     // Kevin's A/A/A decision: `git init` always runs on Agent.start,
@@ -1094,14 +1105,15 @@ export class Agent {
         },
       },
     });
-    console.log(
-      `[core-agent] hooks: builtin registered=${hookResult.registered} skipped=[${hookResult.skipped.join(",")}]`,
-    );
+    agentLogger.info("builtin_hooks_registered", {
+      registered: hookResult.registered,
+      skipped: hookResult.skipped,
+    });
 
     try {
       await this.reloadWorkspaceSkills();
     } catch (err) {
-      console.warn(`[core-agent] skill load failed: ${(err as Error).message}`);
+      agentLogger.warn("skill_load_failed", { error: (err as Error).message });
     }
 
     // Cron scheduler — hydrate persisted cron records then wire the
@@ -1112,21 +1124,20 @@ export class Agent {
       await this.crons.hydrate();
       this.crons.setFireHandler((record) => this.fireCron(record));
       this.crons.start();
-      console.log(
-        `[core-agent] crons hydrated=${this.crons.list().length} tickerStarted`,
-      );
+      agentLogger.info("crons_hydrated", {
+        count: this.crons.list().length,
+        tickerStarted: true,
+      });
     } catch (err) {
-      console.warn(`[core-agent] cron hydrate failed: ${(err as Error).message}`);
+      agentLogger.warn("cron_hydrate_failed", { error: (err as Error).message });
     }
 
     if (missionActionsEnabled()) {
       try {
         await this.missionActionReconciler.start();
-        console.log("[core-agent] mission action reconciler started");
+        agentLogger.info("mission_reconciler_started");
       } catch (err) {
-        console.warn(
-          `[core-agent] mission action reconciler start failed: ${(err as Error).message}`,
-        );
+        agentLogger.warn("mission_reconciler_start_failed", { error: (err as Error).message });
       }
     }
 
@@ -1142,7 +1153,7 @@ export class Agent {
           try {
             await this.hipocampus.compact();
           } catch (err) {
-            console.warn(`[core-agent] hipocampus cron failed: ${(err as Error).message}`);
+            agentLogger.warn("hipocampus_cron_failed", { error: (err as Error).message });
           }
         },
       });
@@ -1160,11 +1171,13 @@ export class Agent {
         this.config.workspaceRoot,
       );
       this.hooks.register(flushHook);
-      console.log(
-        `[core-agent] hipocampus: qmd=${this.qmdManager.isReady()} vector=${(process.env.CORE_AGENT_VECTOR_SEARCH ?? "off").trim().toLowerCase() === "on"} compactor+flush=registered`,
-      );
+      agentLogger.info("hipocampus_started", {
+        qmd: this.qmdManager.isReady(),
+        vector: (process.env.CORE_AGENT_VECTOR_SEARCH ?? "off").trim().toLowerCase() === "on",
+        compactorFlush: "registered",
+      });
     } catch (err) {
-      console.warn(`[core-agent] hipocampus init failed: ${(err as Error).message}`);
+      agentLogger.warn("hipocampus_init_failed", { error: (err as Error).message });
     }
 
     // C1 — channel adapters. Instantiated + started for each configured
@@ -1214,9 +1227,12 @@ export class Agent {
       }
     }
     this.restoreNativeToolOverrides();
-    console.log(
-      `[core-agent] skills: loaded=${loaded} issues=${issues} runtimeHooks=${runtimeHooks} from ${skillRoots.map((root) => root.skillsDir).join(",")}`,
-    );
+    agentLogger.info("skills_loaded", {
+      loaded,
+      issues,
+      runtimeHooks,
+      roots: skillRoots.map((root) => root.skillsDir),
+    });
     return { loaded, issues, runtimeHooks };
   }
 
@@ -1276,19 +1292,21 @@ export class Agent {
         try {
           await dispatchInbound(this, adapter, msg);
         } catch (err) {
-          console.warn(
-            `[core-agent] ${adapter.kind} dispatch failed: ${(err as Error).message}`,
-          );
+          agentLogger.warn("channel_dispatch_failed", {
+            kind: adapter.kind,
+            error: (err as Error).message,
+          });
         }
       });
       try {
         await adapter.start();
         this.channelAdapters.push(adapter);
-        console.log(`[core-agent] channel adapter started kind=${adapter.kind}`);
+        agentLogger.info("channel_adapter_started", { kind: adapter.kind });
       } catch (err) {
-        console.warn(
-          `[core-agent] channel adapter start failed kind=${adapter.kind}: ${(err as Error).message}`,
-        );
+        agentLogger.warn("channel_adapter_start_failed", {
+          kind: adapter.kind,
+          error: (err as Error).message,
+        });
       }
     }
   }
@@ -1321,11 +1339,9 @@ export class Agent {
       // lifecycle symmetry with Telegram/Discord.
       void adapter.start();
       this.webAppAdapter = adapter;
-      console.log(`[core-agent] webapp push adapter started`);
+      agentLogger.info("webapp_push_started");
     } catch (err) {
-      console.warn(
-        `[core-agent] webapp push adapter start failed: ${(err as Error).message}`,
-      );
+      agentLogger.warn("webapp_push_start_failed", { error: (err as Error).message });
     }
   }
 
@@ -1344,9 +1360,10 @@ export class Agent {
       try {
         await this.closeSession(key, "shutdown");
       } catch (err) {
-        console.warn(
-          `[core-agent] session close on shutdown failed sessionKey=${key}: ${(err as Error).message}`,
-        );
+        agentLogger.warn("session_close_on_shutdown_failed", {
+          sessionKey: key,
+          error: (err as Error).message,
+        });
       }
     }
 
@@ -1359,9 +1376,10 @@ export class Agent {
       try {
         await adapter.stop();
       } catch (err) {
-        console.warn(
-          `[core-agent] channel adapter stop failed kind=${adapter.kind}: ${(err as Error).message}`,
-        );
+        agentLogger.warn("channel_adapter_stop_failed", {
+          kind: adapter.kind,
+          error: (err as Error).message,
+        });
       }
     }
     // §7.15 — outbound-only web/app adapter. No-op stop but exercised
@@ -1370,9 +1388,7 @@ export class Agent {
       try {
         await this.webAppAdapter.stop();
       } catch (err) {
-        console.warn(
-          `[core-agent] webapp adapter stop failed: ${(err as Error).message}`,
-        );
+        agentLogger.warn("webapp_adapter_stop_failed", { error: (err as Error).message });
       }
       this.webAppAdapter = null;
     }
@@ -1432,9 +1448,10 @@ export class Agent {
       if (runId) record.missionRunId = runId;
       return { missionId: mission.id, ...(runId ? { missionRunId: runId } : {}) };
     } catch (err) {
-      console.warn(
-        `[core-agent] cron mission create failed cronId=${record.cronId}: ${(err as Error).message}`,
-      );
+      agentLogger.warn("cron_mission_create_failed", {
+        cronId: record.cronId,
+        error: (err as Error).message,
+      });
       return null;
     }
   }
@@ -1457,9 +1474,7 @@ export class Agent {
         payload: input.payload ?? {},
       });
     } catch (err) {
-      console.warn(
-        `[core-agent] cron mission event append failed missionId=${link.missionId}: ${(err as Error).message}`,
-      );
+      agentLogger.warn("cron_mission_event_failed", { missionId: link.missionId, error: (err as Error).message });
     }
   }
 
@@ -1600,9 +1615,7 @@ export class Agent {
         try {
           await this.closeSession(sessionKey, "cron_complete");
         } catch (err) {
-          console.warn(
-            `[core-agent] fireCron: closeSession failed cronId=${record.cronId}: ${(err as Error).message}`,
-          );
+          agentLogger.warn("cron_close_session_failed", { cronId: record.cronId, error: (err as Error).message });
         }
       }
     }
@@ -1681,9 +1694,7 @@ export class Agent {
       const init = await runGit(this.config.workspaceRoot, ["init"]);
       if (init.code !== 0) {
         this.disciplineDefault = { ...this.disciplineDefault, git: false };
-        console.warn(
-          `[core-agent] discipline: git init failed (code=${init.code}) — disabling git half. ${init.stderr.slice(0, 200)}`,
-        );
+        agentLogger.warn("discipline_git_init_failed", { code: init.code, stderr: init.stderr.slice(0, 200) });
         return;
       }
       await runGit(this.config.workspaceRoot, [
@@ -1696,14 +1707,10 @@ export class Agent {
         "user.name",
         "magi-bot",
       ]);
-      console.log(
-        `[core-agent] discipline: git repo initialised at ${this.config.workspaceRoot}`,
-      );
+      agentLogger.info("discipline_git_init", { root: this.config.workspaceRoot });
     } catch (err) {
       this.disciplineDefault = { ...this.disciplineDefault, git: false };
-      console.warn(
-        `[core-agent] discipline: git init threw — disabling git half: ${(err as Error).message}`,
-      );
+      agentLogger.warn("discipline_git_init_error", { error: (err as Error).message });
     }
   }
 
@@ -1792,9 +1799,7 @@ export class Agent {
       try {
         listener(event);
       } catch (err) {
-        console.warn(
-          `[core-agent] agent-event listener failed type=${event.type}: ${(err as Error).message}`,
-        );
+        agentLogger.warn("agent_event_listener_failed", { type: event.type, error: (err as Error).message });
       }
     }
   }

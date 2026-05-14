@@ -43,6 +43,9 @@ import { RetryController } from "./turn/RetryController.js";
 import { ToolCallLoopDetector } from "./turn/ToolCallLoopDetector.js";
 import { sanitizeMessagesForLLM } from "./turn/MessageSanitizer.js";
 import { detectPollingIteration } from "./turn/pollingDetector.js";
+import { createLogger } from "./util/logger.js";
+
+const turnLogger = createLogger("Turn");
 import type { TurnRoute, TurnStatus, TurnMeta, TurnStopReason, PlanResult, VerificationReport } from "./turn/types.js";
 import { messagesHaveImages } from "./routing/messageText.js";
 import { isRouterKeyword } from "./routing/types.js";
@@ -481,11 +484,13 @@ export class Turn {
         );
         systemPrompt = priorityContext.system;
         if (priorityContext.allocation?.droppedChunks.length) {
-          console.log(
-            `[core-agent] priority-context dropped=${JSON.stringify(priorityContext.allocation.droppedChunks)} ` +
-            `used=${priorityContext.allocation.usedTokens}/${priorityContext.allocation.totalBudget} ` +
-            `turnId=${this.meta.turnId}`,
-          );
+          turnLogger.info("priority_context_drop", {
+            dropped: priorityContext.allocation.droppedChunks,
+            used: priorityContext.allocation.usedTokens,
+            budget: priorityContext.allocation.totalBudget,
+            turnId: this.meta.turnId,
+            ...(this.traceId ? { traceId: this.traceId } : {}),
+          });
         }
         appendRuntimeModelIdentityContext(messages, {
           configuredModel: this.session.agent.config.model,
@@ -493,11 +498,12 @@ export class Turn {
           ...(this.meta.routeDecision ? { routeDecision: this.meta.routeDecision } : {}),
         });
         const payloadSize = JSON.stringify(messages).length + JSON.stringify(systemPrompt).length;
-        console.log(
-          `[core-agent] llm-call iter=${iter} payloadSize=${payloadSize}` +
-          ` msgCount=${messages.length} model=${effectiveModel}` +
-          ` turnId=${this.meta.turnId}`,
-        );
+        turnLogger.info("parent_llm_start", {
+          iter, payloadSize,
+          msgCount: messages.length, model: effectiveModel,
+          turnId: this.meta.turnId,
+          ...(this.traceId ? { traceId: this.traceId } : {}),
+        });
         sse.agent({
           type: "llm_progress",
           turnId: this.meta.turnId,
@@ -539,11 +545,13 @@ export class Turn {
               retry: this.streamRetry,
               iter,
             });
-            console.warn(
-              `[core-agent] LLM stream error, retrying iter` +
-              ` error=${retryErrorMessage} retry=${this.streamRetry}/${Turn.MAX_STREAM_RETRIES}` +
-              ` iter=${iter} turnId=${this.meta.turnId}`,
-            );
+            turnLogger.warn("parent_llm_error", {
+              error: retryErrorMessage,
+              retry: this.streamRetry,
+              maxRetries: Turn.MAX_STREAM_RETRIES,
+              iter, turnId: this.meta.turnId,
+              ...(this.traceId ? { traceId: this.traceId } : {}),
+            });
             iter -= 1;
             continue;
           }
@@ -568,7 +576,7 @@ export class Turn {
         const stateRef = { recoveryAttempt: this.recoveryAttempt, assistantTextSoFarLen: this.assistantTextSoFarLen() };
         const decision = handleStopReason(
           { stageAuditEvent: (e, d) => this.stageAuditEvent(e, d),
-            logUnknown: (raw, t) => console.warn(`[core-agent] unknown stop_reason=${String(raw)} turnId=${t}`) },
+            logUnknown: (raw, t) => turnLogger.warn("unknown_stop_reason", { raw: String(raw), turnId: t }) },
           stateRef,
           { stopReasonRaw: stopReason, blocks, iter, turnId: this.meta.turnId, messages },
         );
@@ -578,13 +586,14 @@ export class Turn {
         const textLen = this.emittedAssistantBlocks
           .filter((b) => b.type === "text")
           .reduce((sum, b) => sum + ((b as { text: string }).text?.length ?? 0), 0);
-        console.log(
-          `[core-agent] iter=${iter} stop=${String(stopReason)} decision=${decision.kind}` +
-          ` blocks=${blocks.length} textLen=${textLen}` +
-          ` in=${usage.inputTokens} out=${usage.outputTokens}` +
-          ` recovery=${this.recoveryAttempt} emptyRetry=${this.emptyResponseRetry}` +
-          ` turnId=${this.meta.turnId}`,
-        );
+        turnLogger.info("parent_llm_end", {
+          iter, stop: String(stopReason), decision: decision.kind,
+          blocks: blocks.length, textLen,
+          in: usage.inputTokens, out: usage.outputTokens,
+          recovery: this.recoveryAttempt, emptyRetry: this.emptyResponseRetry,
+          turnId: this.meta.turnId,
+          ...(this.traceId ? { traceId: this.traceId } : {}),
+        });
 
         if (decision.kind === "finalise") {
           this.acceptingSteerInjections = false;
@@ -599,10 +608,9 @@ export class Turn {
           // finishes its current response naturally, then addresses
           // the queued messages.
           if (this.session.hasPendingInjections()) {
-            console.log(
-              `[core-agent] finalise deferred — pending injections exist` +
-              ` turnId=${this.meta.turnId} iter=${iter}`,
-            );
+            turnLogger.info("finalise_deferred", {
+              reason: "pending_injection", turnId: this.meta.turnId, iter,
+            });
             this.clearUserVisibleDraftForDeferredFinalise(sse, "pending_injection");
             if (finalBlocks.length > 0) {
               messages.push({ role: "assistant", content: finalBlocks });
@@ -642,12 +650,10 @@ export class Turn {
                 to: fallbackModel,
                 retries: this.emptyResponseRetry,
               });
-              console.warn(
-                `[core-agent] empty-response fallback model activated` +
-                ` from=${currentModel} to=${fallbackModel}` +
-                ` retries=${this.emptyResponseRetry}` +
-                ` turnId=${this.meta.turnId}`,
-              );
+              turnLogger.warn("empty_response_fallback", {
+                from: currentModel, to: fallbackModel,
+                retries: this.emptyResponseRetry, turnId: this.meta.turnId,
+              });
               messages.push({
                 role: "user",
                 content:
@@ -681,10 +687,10 @@ export class Turn {
             const lastText = lastTextBlock?.text?.trimEnd() ?? "";
             const ending = truncationGuardEnding(lastText);
             if (ending.looksTruncated) {
-              console.log(
-                `[core-agent] truncation-guard fired: lastChar=${JSON.stringify(ending.lastChar)}` +
-                ` textLen=${lastText.length} retry=${this.truncationRecovery}`,
-              );
+              turnLogger.info("truncation_guard", {
+                lastChar: ending.lastChar, textLen: lastText.length,
+                retry: this.truncationRecovery, turnId: this.meta.turnId,
+              });
               if (finalBlocks.length > 0) {
                 messages.push({ role: "assistant", content: finalBlocks });
               }
@@ -803,10 +809,7 @@ export class Turn {
         // the response the verifier blocked. Do not stream a placeholder
         // either; the terminal turn_failed event lets clients show an error
         // state without committing a fake assistant answer.
-        console.warn(
-          `[core-agent] resample failed after blocked commit; clearing blocked draft` +
-          ` turnId=${this.meta.turnId}`,
-        );
+        turnLogger.warn("resample_failed", { turnId: this.meta.turnId });
         this.sse.agent({ type: "response_clear" });
         throw resampleErr;
       }
@@ -1021,11 +1024,12 @@ export class Turn {
       );
       systemPrompt = priorityContext.system;
       if (priorityContext.allocation?.droppedChunks.length) {
-        console.log(
-          `[core-agent] priority-context dropped=${JSON.stringify(priorityContext.allocation.droppedChunks)} ` +
-          `used=${priorityContext.allocation.usedTokens}/${priorityContext.allocation.totalBudget} ` +
-          `turnId=${this.meta.turnId}`,
-        );
+        turnLogger.info("priority_context_drop", {
+          dropped: priorityContext.allocation.droppedChunks,
+          used: priorityContext.allocation.usedTokens,
+          budget: priorityContext.allocation.totalBudget,
+          turnId: this.meta.turnId,
+        });
       }
       this.sse.agent({
         type: "llm_progress",
@@ -1068,7 +1072,7 @@ export class Turn {
         {
           stageAuditEvent: (e, d) => this.stageAuditEvent(e, d),
           logUnknown: (raw, t) =>
-            console.warn(`[core-agent] unknown stop_reason=${String(raw)} turnId=${t}`),
+            turnLogger.warn("unknown_stop_reason", { raw: String(raw), turnId: t }),
         },
         stateRef,
         { stopReasonRaw: stopReason, blocks, iter, turnId: this.meta.turnId, messages },
@@ -1284,11 +1288,9 @@ export class Turn {
   private clearBlockedDraftBeforeAbort(reason: string): void {
     if (this.assistantTextSoFarLen() === 0) return;
     this.sse.agent({ type: "response_clear" });
-    console.warn(
-      `[core-agent] cleared blocked draft before abort` +
-      ` reason=${JSON.stringify(reason.slice(0, 120))}` +
-      ` turnId=${this.meta.turnId}`,
-    );
+    turnLogger.warn("cleared_blocked_draft", {
+      reason: reason.slice(0, 120), turnId: this.meta.turnId,
+    });
   }
 
   private clearUserVisibleDraftForDeferredFinalise(
@@ -1310,11 +1312,10 @@ export class Turn {
       (block) => block.type !== "text" && block.type !== "thinking",
     );
     sse.agent({ type: "response_clear" });
-    console.log(
-      `[core-agent] cleared deferred visible draft reason=${reason}` +
-      ` textLen=${removedTextLen} thinkingLen=${removedThinkingLen}` +
-      ` turnId=${this.meta.turnId}`,
-    );
+    turnLogger.info("cleared_deferred_draft", {
+      reason, textLen: removedTextLen, thinkingLen: removedThinkingLen,
+      turnId: this.meta.turnId,
+    });
   }
 
   private clearUserVisibleDraftForSteerResume(
@@ -1334,11 +1335,10 @@ export class Turn {
       (block) => block.type !== "text" && block.type !== "thinking",
     );
     sse.agent({ type: "response_clear" });
-    console.log(
-      `[core-agent] cleared visible draft for steer resume source=${source}` +
-      ` textLen=${removedTextLen} thinkingLen=${removedThinkingLen}` +
-      ` turnId=${this.meta.turnId}`,
-    );
+    turnLogger.info("cleared_steer_draft", {
+      source, textLen: removedTextLen, thinkingLen: removedThinkingLen,
+      turnId: this.meta.turnId,
+    });
   }
 
   /** Fire-and-forget audit event from within the turn loop (§6.G). */
