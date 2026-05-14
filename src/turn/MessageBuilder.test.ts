@@ -655,6 +655,83 @@ describe("MessageBuilder.appendRuntimeModelIdentityContext", () => {
       text: expect.stringContaining("<runtime_model_identity hidden=\"true\">"),
     });
   });
+
+  it("walks backwards past multiple tool_use/tool_result pairs", () => {
+    // Scenario: user text → assistant(tool_use) → user(tool_result) →
+    // assistant(tool_use) → user(tool_result) → user(question)
+    // The naive splice(messages.length-1) would insert between the last
+    // tool_use/tool_result pair. The safety walk should skip back past both.
+    const messages: LLMMessage[] = [
+      { role: "user", content: "initial prompt" },
+      {
+        role: "assistant",
+        content: [
+          { type: "text", text: "Let me check." },
+          { type: "tool_use", id: "tool_1", name: "Bash", input: { command: "ls" } },
+        ],
+      },
+      {
+        role: "user",
+        content: [
+          { type: "tool_result", tool_use_id: "tool_1", content: "file.txt" },
+        ],
+      },
+      {
+        role: "assistant",
+        content: [
+          { type: "text", text: "Reading file." },
+          { type: "tool_use", id: "tool_2", name: "Read", input: { path: "file.txt" } },
+        ],
+      },
+      {
+        role: "user",
+        content: [
+          { type: "tool_result", tool_use_id: "tool_2", content: "contents" },
+        ],
+      },
+      { role: "user", content: "what did you find?" },
+    ];
+
+    appendRuntimeModelIdentityContext(messages, {
+      configuredModel: "claude-sonnet-4-6",
+      effectiveModel: "claude-sonnet-4-6",
+    });
+
+    // The identity message should be inserted before the first
+    // assistant(tool_use)/user(tool_result) pair, not between them.
+    // Original messages: 6 items, identity adds 1 = 7.
+    expect(messages).toHaveLength(7);
+
+    // Verify no tool_use/tool_result pair is split by the identity message.
+    for (let i = 0; i < messages.length - 1; i++) {
+      const curr = messages[i]!;
+      const next = messages[i + 1]!;
+      if (
+        curr.role === "assistant" &&
+        Array.isArray(curr.content) &&
+        curr.content.some((b) => b.type === "tool_use")
+      ) {
+        // The next message must be user with tool_result, not our identity.
+        expect(next.role).toBe("user");
+        if (Array.isArray(next.content)) {
+          expect(next.content.some((b) => b.type === "tool_result")).toBe(true);
+        }
+      }
+    }
+
+    // The identity message should contain the runtime_model_identity text.
+    const identityMsg = messages.find(
+      (m) =>
+        m.role === "user" &&
+        Array.isArray(m.content) &&
+        m.content.some(
+          (b) =>
+            b.type === "text" &&
+            b.text.includes("<runtime_model_identity hidden"),
+        ),
+    );
+    expect(identityMsg).toBeDefined();
+  });
 });
 
 describe("MessageBuilder.formatReplyPreamble", () => {

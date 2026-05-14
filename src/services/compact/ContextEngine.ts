@@ -683,30 +683,31 @@ function stripDanglingToolUses(messages: LLMMessage[]): LLMMessage[] {
     });
     if (toolUseIds.length === 0) continue;
 
-    // Check if the next message begins with matching tool_results.
-    // Anthropic rejects `[text, tool_result]` after an assistant
-    // `tool_use`: the tool_result blocks must be immediately after.
+    // Collect matching tool_result blocks from the next user message
+    // regardless of position (mergeConsecutiveSameRole can interleave
+    // text before tool_results). Reorder so tool_results come first —
+    // Anthropic requires tool_result immediately after tool_use.
     const next = messages[i + 1];
     const matchedIds = new Set<string>();
     if (next && next.role === "user" && Array.isArray(next.content)) {
       const nextBlocks = next.content as LLMContentBlock[];
-      const leadingResultsById = new Map<string, LLMContentBlock>();
-      let firstNonResult = 0;
+      const resultsById = new Map<string, LLMContentBlock>();
       for (const block of nextBlocks) {
-        if (block.type !== "tool_result") break;
-        if ("tool_use_id" in block) {
+        if (block.type === "tool_result" && "tool_use_id" in block) {
           const id = (block as { tool_use_id: string }).tool_use_id;
-          if (!leadingResultsById.has(id)) leadingResultsById.set(id, block);
+          if (!resultsById.has(id)) resultsById.set(id, block);
         }
-        firstNonResult += 1;
       }
       const orderedResults = toolUseIds.flatMap((id) => {
-        const block = leadingResultsById.get(id);
+        const block = resultsById.get(id);
         if (!block) return [];
         matchedIds.add(id);
         return [block];
       });
-      next.content = [...orderedResults, ...nextBlocks.slice(firstNonResult)];
+      const nonMatchedBlocks = nextBlocks.filter(
+        (b) => !(b.type === "tool_result" && matchedIds.has((b as { tool_use_id: string }).tool_use_id)),
+      );
+      next.content = [...orderedResults, ...nonMatchedBlocks];
     }
 
     // Remove unmatched tool_use blocks
@@ -744,17 +745,13 @@ function stripDanglingToolUses(messages: LLMMessage[]): LLMMessage[] {
       }
     }
 
-    // Remove tool_result blocks that don't match any tool_use, are not
-    // at the leading edge of the user message, or duplicate a prior
-    // historical result for the same tool_use id.
+    // Remove tool_result blocks that don't match any preceding tool_use
+    // or duplicate a prior result for the same id. Keep matched
+    // tool_results regardless of position — mergeConsecutiveSameRole can
+    // place text before tool_result when user messages are merged.
     const seenResultIds = new Set<string>();
-    let stillLeading = true;
     msg.content = (msg.content as LLMContentBlock[]).filter((block) => {
-      if (block.type !== "tool_result") {
-        stillLeading = false;
-        return true;
-      }
-      if (!stillLeading) return false;
+      if (block.type !== "tool_result") return true;
       const id = (block as { tool_use_id: string }).tool_use_id;
       if (!prevToolIds.has(id)) return false;
       if (seenResultIds.has(id)) return false;
