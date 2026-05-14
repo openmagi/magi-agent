@@ -161,20 +161,20 @@ describe("resolveSealedPaths", () => {
 
 describe("sealedFiles hook — integration", () => {
   let ws: string;
-  const originalEnv = process.env.CORE_AGENT_SEALED_FILES;
+  const originalEnv = process.env.MAGI_SEALED_FILES;
 
   beforeEach(async () => {
     ws = await mkTempWorkspace();
     __testing.clearPending();
-    delete process.env.CORE_AGENT_SEALED_FILES;
+    delete process.env.MAGI_SEALED_FILES;
   });
 
   afterEach(async () => {
     await fs.rm(ws, { recursive: true, force: true });
     if (originalEnv === undefined) {
-      delete process.env.CORE_AGENT_SEALED_FILES;
+      delete process.env.MAGI_SEALED_FILES;
     } else {
-      process.env.CORE_AGENT_SEALED_FILES = originalEnv;
+      process.env.MAGI_SEALED_FILES = originalEnv;
     }
   });
 
@@ -746,7 +746,7 @@ describe("sealedFiles hook — integration", () => {
 
   // 8
   it("env=off → noop (no manifest created, no block even on change)", async () => {
-    process.env.CORE_AGENT_SEALED_FILES = "off";
+    process.env.MAGI_SEALED_FILES = "off";
     await writeFileP(ws, "SOUL.md", "v1");
     const { beforeCommit } = makeSealedFilesHooks({ workspaceRoot: ws });
     const { ctx } = makeCtx();

@@ -185,15 +185,15 @@ const MAX_BACKGROUND_DELIVERY_BYTES = 15 * 1024;
 const TRUNCATED_BACKGROUND_RESULT_MARKER = "\n\n[truncated background result]";
 
 function runtimeMissionsEnabled(): boolean {
-  return process.env.CORE_AGENT_MISSIONS === "1";
+  return process.env.MAGI_MISSIONS === "1";
 }
 
 function missionActionsEnabled(): boolean {
-  return runtimeMissionsEnabled() && process.env.CORE_AGENT_MISSION_ACTIONS !== "0";
+  return runtimeMissionsEnabled() && process.env.MAGI_MISSION_ACTIONS !== "0";
 }
 
 function scriptCronEnabled(): boolean {
-  return process.env.CORE_AGENT_SCRIPT_CRON === "1";
+  return process.env.MAGI_SCRIPT_CRON === "1";
 }
 
 function truncateMissionText(value: string, limit: number): string {
@@ -479,7 +479,7 @@ export class Agent {
     // Native hipocampus — qmd search. Started in start().
     this.qmdManager = new QmdManager(
       config.workspaceRoot,
-      (process.env.CORE_AGENT_VECTOR_SEARCH ?? "off").trim().toLowerCase() === "on",
+      (process.env.MAGI_VECTOR_SEARCH ?? "off").trim().toLowerCase() === "on",
     );
     this.hipocampus = new HipocampusService({
       workspaceRoot: config.workspaceRoot,
@@ -1173,7 +1173,7 @@ export class Agent {
       this.hooks.register(flushHook);
       agentLogger.info("hipocampus_started", {
         qmd: this.qmdManager.isReady(),
-        vector: (process.env.CORE_AGENT_VECTOR_SEARCH ?? "off").trim().toLowerCase() === "on",
+        vector: (process.env.MAGI_VECTOR_SEARCH ?? "off").trim().toLowerCase() === "on",
         compactorFlush: "registered",
       });
     } catch (err) {
@@ -1210,11 +1210,11 @@ export class Agent {
     const loaded = await this.tools.loadSkillRoots(skillRoots, {
       trustedSkillRoots: splitPathListEnv(
         process.env.MAGI_TRUSTED_SKILL_ROOTS ??
-          process.env.CORE_AGENT_TRUSTED_SKILL_ROOTS,
+          process.env.MAGI_TRUSTED_SKILL_ROOTS,
       ),
       trustedSkillDirs: splitPathListEnv(
         process.env.MAGI_TRUSTED_SKILL_DIRS ??
-          process.env.CORE_AGENT_TRUSTED_SKILL_DIRS,
+          process.env.MAGI_TRUSTED_SKILL_DIRS,
       ),
     });
     const rpt = this.tools.skillReport();
@@ -1843,7 +1843,7 @@ function splitPathListEnv(value: string | undefined): string[] {
 /**
  * Locate the bundled superpowers skills directory on disk. Resolution
  * order:
- *   1. `$CORE_AGENT_SUPERPOWERS_DIR` env override.
+ *   1. `$MAGI_SUPERPOWERS_DIR` env override.
  *   2. `<cwd>/skills/superpowers` — matches the Docker WORKDIR (/app)
  *      and the repo layout (`infra/docker/magi-core-agent/`).
  *
@@ -1852,7 +1852,7 @@ function splitPathListEnv(value: string | undefined): string[] {
  * text when SKILL.md reads fail, so an unresolved path is harmless.
  */
 function resolveDefaultSuperpowersDir(): string {
-  const override = process.env.CORE_AGENT_SUPERPOWERS_DIR;
+  const override = process.env.MAGI_SUPERPOWERS_DIR;
   if (override && override.trim().length > 0) return override.trim();
   return path.resolve(process.cwd(), "skills", "superpowers");
 }

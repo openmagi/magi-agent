@@ -23,7 +23,7 @@
  * Fail-open: any delegate / lookup error → returns silently. Onboarding
  * is an ergonomic feature — a broken hook must never abort a turn.
  *
- * Env gate: `CORE_AGENT_ONBOARDING_STEER` (default "on").
+ * Env gate: `MAGI_ONBOARDING_STEER` (default "on").
  */
 
 import type { RegisteredHook, HookContext } from "../types.js";
@@ -101,7 +101,7 @@ export function makeOnboardingNeededCheckHook(
     timeoutMs: 5_000,
     handler: async ({ userMessage }, ctx: HookContext) => {
       try {
-        if (!isOnboardingSteerEnabled(process.env.CORE_AGENT_ONBOARDING_STEER)) {
+        if (!isOnboardingSteerEnabled(process.env.MAGI_ONBOARDING_STEER)) {
           return { action: "continue" };
         }
         const session = opts.agent.getSession(ctx.sessionKey);

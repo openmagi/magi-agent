@@ -53,17 +53,17 @@ function contractWithBackgroundMemory(): ExecutionContractStore {
 }
 
 describe("memoryContinuityGuard", () => {
-  const originalEnv = process.env.CORE_AGENT_MEMORY_CONTINUITY_GUARD;
+  const originalEnv = process.env.MAGI_MEMORY_CONTINUITY_GUARD;
 
   beforeEach(() => {
-    delete process.env.CORE_AGENT_MEMORY_CONTINUITY_GUARD;
+    delete process.env.MAGI_MEMORY_CONTINUITY_GUARD;
   });
 
   afterEach(() => {
     if (originalEnv === undefined) {
-      delete process.env.CORE_AGENT_MEMORY_CONTINUITY_GUARD;
+      delete process.env.MAGI_MEMORY_CONTINUITY_GUARD;
     } else {
-      process.env.CORE_AGENT_MEMORY_CONTINUITY_GUARD = originalEnv;
+      process.env.MAGI_MEMORY_CONTINUITY_GUARD = originalEnv;
     }
   });
 
@@ -140,8 +140,8 @@ describe("memoryContinuityGuard", () => {
     expect(result).toEqual({ action: "continue" });
   });
 
-  it("respects CORE_AGENT_MEMORY_CONTINUITY_GUARD=off", async () => {
-    process.env.CORE_AGENT_MEMORY_CONTINUITY_GUARD = "off";
+  it("respects MAGI_MEMORY_CONTINUITY_GUARD=off", async () => {
+    process.env.MAGI_MEMORY_CONTINUITY_GUARD = "off";
     const hook = makeMemoryContinuityGuardHook();
     const { ctx } = makeCtx(contractWithBackgroundMemory());
 

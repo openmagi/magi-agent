@@ -113,7 +113,7 @@ describe("resourceExistenceChecker hook", () => {
   const env = process.env;
 
   beforeEach(() => {
-    delete process.env.CORE_AGENT_RESOURCE_CHECK;
+    delete process.env.MAGI_RESOURCE_CHECK;
   });
 
   afterAll(() => {
@@ -217,7 +217,7 @@ describe("resourceExistenceChecker hook", () => {
   });
 
   it("skips when disabled via env", async () => {
-    process.env.CORE_AGENT_RESOURCE_CHECK = "off";
+    process.env.MAGI_RESOURCE_CHECK = "off";
     const hook = makeResourceExistenceCheckerHook();
     const result = await hook.handler(
       {

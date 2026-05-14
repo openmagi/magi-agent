@@ -370,7 +370,7 @@ async function defaultRunner(
 ): Promise<KnowledgeSearchRunResult> {
   const externalCommand =
     process.env.MAGI_KB_SEARCH_COMMAND?.trim() ||
-    process.env.CORE_AGENT_KB_SEARCH_COMMAND?.trim();
+    process.env.MAGI_KB_SEARCH_COMMAND?.trim();
   if (externalCommand) {
     return externalRunner(externalCommand, args, ctx, timeoutMs, extraEnv);
   }

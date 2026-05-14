@@ -82,13 +82,13 @@ describe("Session goal loop automation", () => {
 
   beforeEach(async () => {
     workspaceRoot = await fs.mkdtemp(path.join(os.tmpdir(), "session-goal-loop-"));
-    previousGoalLoop = process.env.CORE_AGENT_GOAL_LOOP;
-    process.env.CORE_AGENT_GOAL_LOOP = "1";
+    previousGoalLoop = process.env.MAGI_GOAL_LOOP;
+    process.env.MAGI_GOAL_LOOP = "1";
   });
 
   afterEach(async () => {
-    if (previousGoalLoop === undefined) delete process.env.CORE_AGENT_GOAL_LOOP;
-    else process.env.CORE_AGENT_GOAL_LOOP = previousGoalLoop;
+    if (previousGoalLoop === undefined) delete process.env.MAGI_GOAL_LOOP;
+    else process.env.MAGI_GOAL_LOOP = previousGoalLoop;
     await fs.rm(workspaceRoot, { recursive: true, force: true });
   });
 

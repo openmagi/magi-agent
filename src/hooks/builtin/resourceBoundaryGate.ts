@@ -19,7 +19,7 @@ export interface ResourceBoundaryGateOptions {
 }
 
 function isEnabled(): boolean {
-  const raw = process.env.CORE_AGENT_RESOURCE_BOUNDARY;
+  const raw = process.env.MAGI_RESOURCE_BOUNDARY;
   if (raw === undefined || raw === null) return true;
   const v = raw.trim().toLowerCase();
   return v === "" || v === "on" || v === "true" || v === "1";

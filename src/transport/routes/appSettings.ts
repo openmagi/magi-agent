@@ -211,7 +211,7 @@ async function handleReloadConfig(
 function restartCommand(): string | null {
   const raw =
     process.env.MAGI_AGENT_RESTART_COMMAND?.trim() ||
-    process.env.CORE_AGENT_RESTART_COMMAND?.trim() ||
+    process.env.MAGI_RESTART_COMMAND?.trim() ||
     "";
   return raw.length > 0 ? raw : null;
 }

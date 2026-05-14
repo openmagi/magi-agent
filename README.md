@@ -210,12 +210,12 @@ Run with any provider or local model. The four control layers work the same rega
 
 ```bash
 # Hosted
-ANTHROPIC_API_KEY=sk-... CORE_AGENT_MODEL=claude-sonnet-4-6
-OPENAI_API_KEY=sk-...    CORE_AGENT_MODEL=gpt-4.1
+ANTHROPIC_API_KEY=sk-... MAGI_MODEL=claude-sonnet-4-6
+OPENAI_API_KEY=sk-...    MAGI_MODEL=gpt-4.1
 
 # Local
 ollama serve && ollama pull llama3.1
-OPENAI_BASE_URL=http://localhost:11434/v1 CORE_AGENT_MODEL=llama3.1
+OPENAI_BASE_URL=http://localhost:11434/v1 MAGI_MODEL=llama3.1
 ```
 
 Works with Ollama, LM Studio, vLLM, llama.cpp, LiteLLM, or any OpenAI-compatible endpoint.

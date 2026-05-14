@@ -175,16 +175,16 @@ describe("HttpServer /health + /healthz", () => {
     tmp = await fs.mkdtemp(path.join(os.tmpdir(), "core-agent-health-"));
     helperPath = path.join(tmp, "reliable-request.mjs");
     await fs.writeFile(helperPath, "process.stdout.write('{}')\n", "utf8");
-    oldReliableScript = process.env.CORE_AGENT_RELIABLE_REQUEST_SCRIPT;
-    oldBuildSha = process.env.CORE_AGENT_BUILD_SHA;
-    oldImageRepo = process.env.CORE_AGENT_IMAGE_REPO;
-    oldImageTag = process.env.CORE_AGENT_IMAGE_TAG;
-    oldImageDigest = process.env.CORE_AGENT_EXPECTED_IMAGE_DIGEST;
-    process.env.CORE_AGENT_RELIABLE_REQUEST_SCRIPT = helperPath;
-    process.env.CORE_AGENT_BUILD_SHA = "sha-test";
-    process.env.CORE_AGENT_IMAGE_REPO = "ghcr.io/test/core-agent";
-    process.env.CORE_AGENT_IMAGE_TAG = "tag-test";
-    process.env.CORE_AGENT_EXPECTED_IMAGE_DIGEST = "sha256:digest-test";
+    oldReliableScript = process.env.MAGI_RELIABLE_REQUEST_SCRIPT;
+    oldBuildSha = process.env.MAGI_BUILD_SHA;
+    oldImageRepo = process.env.MAGI_IMAGE_REPO;
+    oldImageTag = process.env.MAGI_IMAGE_TAG;
+    oldImageDigest = process.env.MAGI_EXPECTED_IMAGE_DIGEST;
+    process.env.MAGI_RELIABLE_REQUEST_SCRIPT = helperPath;
+    process.env.MAGI_BUILD_SHA = "sha-test";
+    process.env.MAGI_IMAGE_REPO = "ghcr.io/test/core-agent";
+    process.env.MAGI_IMAGE_TAG = "tag-test";
+    process.env.MAGI_EXPECTED_IMAGE_DIGEST = "sha256:digest-test";
     const agent = makeFakeAgent(tmp) as unknown as ConstructorParameters<
       typeof HttpServer
     >[0]["agent"];
@@ -198,11 +198,11 @@ describe("HttpServer /health + /healthz", () => {
   afterEach(async () => {
     await server.stop();
     await fs.rm(tmp, { recursive: true, force: true });
-    setOrDeleteEnv("CORE_AGENT_RELIABLE_REQUEST_SCRIPT", oldReliableScript);
-    setOrDeleteEnv("CORE_AGENT_BUILD_SHA", oldBuildSha);
-    setOrDeleteEnv("CORE_AGENT_IMAGE_REPO", oldImageRepo);
-    setOrDeleteEnv("CORE_AGENT_IMAGE_TAG", oldImageTag);
-    setOrDeleteEnv("CORE_AGENT_EXPECTED_IMAGE_DIGEST", oldImageDigest);
+    setOrDeleteEnv("MAGI_RELIABLE_REQUEST_SCRIPT", oldReliableScript);
+    setOrDeleteEnv("MAGI_BUILD_SHA", oldBuildSha);
+    setOrDeleteEnv("MAGI_IMAGE_REPO", oldImageRepo);
+    setOrDeleteEnv("MAGI_IMAGE_TAG", oldImageTag);
+    setOrDeleteEnv("MAGI_EXPECTED_IMAGE_DIGEST", oldImageDigest);
   });
 
   it("GET /health returns the lean payload", async () => {
@@ -367,20 +367,20 @@ describe("HttpServer /health + /healthz", () => {
 
 describe("buildHealthPayload", () => {
   it("treats empty build identity environment variables as missing", () => {
-    const oldBuildSha = process.env.CORE_AGENT_BUILD_SHA;
-    const oldBuiltBuildSha = process.env.CORE_AGENT_BUILT_BUILD_SHA;
-    const oldBuiltImageTag = process.env.CORE_AGENT_BUILT_IMAGE_TAG;
-    const oldBuiltImageDigest = process.env.CORE_AGENT_BUILT_IMAGE_DIGEST;
-    const oldImageTag = process.env.CORE_AGENT_IMAGE_TAG;
-    const oldImageDigest = process.env.CORE_AGENT_EXPECTED_IMAGE_DIGEST;
-    const oldFallbackImageDigest = process.env.CORE_AGENT_IMAGE_DIGEST;
-    process.env.CORE_AGENT_BUILD_SHA = "";
-    process.env.CORE_AGENT_BUILT_BUILD_SHA = "";
-    process.env.CORE_AGENT_BUILT_IMAGE_TAG = "";
-    process.env.CORE_AGENT_BUILT_IMAGE_DIGEST = "";
-    process.env.CORE_AGENT_IMAGE_TAG = "";
-    process.env.CORE_AGENT_EXPECTED_IMAGE_DIGEST = "";
-    process.env.CORE_AGENT_IMAGE_DIGEST = "";
+    const oldBuildSha = process.env.MAGI_BUILD_SHA;
+    const oldBuiltBuildSha = process.env.MAGI_BUILT_BUILD_SHA;
+    const oldBuiltImageTag = process.env.MAGI_BUILT_IMAGE_TAG;
+    const oldBuiltImageDigest = process.env.MAGI_BUILT_IMAGE_DIGEST;
+    const oldImageTag = process.env.MAGI_IMAGE_TAG;
+    const oldImageDigest = process.env.MAGI_EXPECTED_IMAGE_DIGEST;
+    const oldFallbackImageDigest = process.env.MAGI_IMAGE_DIGEST;
+    process.env.MAGI_BUILD_SHA = "";
+    process.env.MAGI_BUILT_BUILD_SHA = "";
+    process.env.MAGI_BUILT_IMAGE_TAG = "";
+    process.env.MAGI_BUILT_IMAGE_DIGEST = "";
+    process.env.MAGI_IMAGE_TAG = "";
+    process.env.MAGI_EXPECTED_IMAGE_DIGEST = "";
+    process.env.MAGI_IMAGE_DIGEST = "";
 
     try {
       expect(readBuildInfo()).toMatchObject({
@@ -389,25 +389,25 @@ describe("buildHealthPayload", () => {
         imageDigest: null,
       });
     } finally {
-      setOrDeleteEnv("CORE_AGENT_BUILD_SHA", oldBuildSha);
-      setOrDeleteEnv("CORE_AGENT_BUILT_BUILD_SHA", oldBuiltBuildSha);
-      setOrDeleteEnv("CORE_AGENT_BUILT_IMAGE_TAG", oldBuiltImageTag);
-      setOrDeleteEnv("CORE_AGENT_BUILT_IMAGE_DIGEST", oldBuiltImageDigest);
-      setOrDeleteEnv("CORE_AGENT_IMAGE_TAG", oldImageTag);
-      setOrDeleteEnv("CORE_AGENT_EXPECTED_IMAGE_DIGEST", oldImageDigest);
-      setOrDeleteEnv("CORE_AGENT_IMAGE_DIGEST", oldFallbackImageDigest);
+      setOrDeleteEnv("MAGI_BUILD_SHA", oldBuildSha);
+      setOrDeleteEnv("MAGI_BUILT_BUILD_SHA", oldBuiltBuildSha);
+      setOrDeleteEnv("MAGI_BUILT_IMAGE_TAG", oldBuiltImageTag);
+      setOrDeleteEnv("MAGI_BUILT_IMAGE_DIGEST", oldBuiltImageDigest);
+      setOrDeleteEnv("MAGI_IMAGE_TAG", oldImageTag);
+      setOrDeleteEnv("MAGI_EXPECTED_IMAGE_DIGEST", oldImageDigest);
+      setOrDeleteEnv("MAGI_IMAGE_DIGEST", oldFallbackImageDigest);
     }
   });
 
   it("reports baked image identity separately from rollout expectation", () => {
-    const oldBuildSha = process.env.CORE_AGENT_BUILD_SHA;
-    const oldBuiltBuildSha = process.env.CORE_AGENT_BUILT_BUILD_SHA;
-    const oldImageTag = process.env.CORE_AGENT_IMAGE_TAG;
-    const oldBuiltImageTag = process.env.CORE_AGENT_BUILT_IMAGE_TAG;
-    process.env.CORE_AGENT_BUILD_SHA = "expected-sha";
-    process.env.CORE_AGENT_BUILT_BUILD_SHA = "baked-sha";
-    process.env.CORE_AGENT_IMAGE_TAG = "expected-tag";
-    process.env.CORE_AGENT_BUILT_IMAGE_TAG = "baked-tag";
+    const oldBuildSha = process.env.MAGI_BUILD_SHA;
+    const oldBuiltBuildSha = process.env.MAGI_BUILT_BUILD_SHA;
+    const oldImageTag = process.env.MAGI_IMAGE_TAG;
+    const oldBuiltImageTag = process.env.MAGI_BUILT_IMAGE_TAG;
+    process.env.MAGI_BUILD_SHA = "expected-sha";
+    process.env.MAGI_BUILT_BUILD_SHA = "baked-sha";
+    process.env.MAGI_IMAGE_TAG = "expected-tag";
+    process.env.MAGI_BUILT_IMAGE_TAG = "baked-tag";
     try {
       expect(readBuildInfo()).toMatchObject({
         buildSha: "baked-sha",
@@ -422,10 +422,10 @@ describe("buildHealthPayload", () => {
         },
       });
     } finally {
-      setOrDeleteEnv("CORE_AGENT_BUILD_SHA", oldBuildSha);
-      setOrDeleteEnv("CORE_AGENT_BUILT_BUILD_SHA", oldBuiltBuildSha);
-      setOrDeleteEnv("CORE_AGENT_IMAGE_TAG", oldImageTag);
-      setOrDeleteEnv("CORE_AGENT_BUILT_IMAGE_TAG", oldBuiltImageTag);
+      setOrDeleteEnv("MAGI_BUILD_SHA", oldBuildSha);
+      setOrDeleteEnv("MAGI_BUILT_BUILD_SHA", oldBuiltBuildSha);
+      setOrDeleteEnv("MAGI_IMAGE_TAG", oldImageTag);
+      setOrDeleteEnv("MAGI_BUILT_IMAGE_TAG", oldBuiltImageTag);
     }
   });
 

@@ -27,7 +27,7 @@
  * and continues. A broken verifier must never block a legitimate
  * commit.
  *
- * Toggle: `CORE_AGENT_PRE_REFUSAL_VERIFY=off` disables globally.
+ * Toggle: `MAGI_PRE_REFUSAL_VERIFY=off` disables globally.
  */
 
 import type { RegisteredHook, HookContext } from "../types.js";
@@ -52,7 +52,7 @@ export interface PreRefusalVerifierAgent {
 }
 
 function isEnabled(): boolean {
-  const raw = process.env.CORE_AGENT_PRE_REFUSAL_VERIFY;
+  const raw = process.env.MAGI_PRE_REFUSAL_VERIFY;
   if (raw === undefined || raw === null) return true;
   const v = raw.trim().toLowerCase();
   return v === "" || v === "on" || v === "true" || v === "1";

@@ -644,7 +644,7 @@ function readBoundedIntegerEnv(
 
 function spawnMaxAttempts(): number {
   return readBoundedIntegerEnv(
-    ["CORE_AGENT_SPAWN_MAX_ATTEMPTS", "CORE_AGENT_RETURN_SPAWN_MAX_ATTEMPTS"],
+    ["MAGI_SPAWN_MAX_ATTEMPTS", "MAGI_RETURN_SPAWN_MAX_ATTEMPTS"],
     3,
     1,
     5,
@@ -652,7 +652,7 @@ function spawnMaxAttempts(): number {
 }
 
 function spawnRetryBaseDelayMs(): number {
-  return readBoundedIntegerEnv(["CORE_AGENT_SPAWN_RETRY_BASE_DELAY_MS"], 250, 0, 5_000);
+  return readBoundedIntegerEnv(["MAGI_SPAWN_RETRY_BASE_DELAY_MS"], 250, 0, 5_000);
 }
 
 function spawnRetryDelayMs(attempt: number): number {
@@ -1322,7 +1322,7 @@ interface SpawnMissionLink {
 }
 
 function isMissionsEnabled(deps: SpawnAgentMissionDeps | undefined): boolean {
-  return deps?.missionsEnabled?.() ?? process.env.CORE_AGENT_MISSIONS === "1";
+  return deps?.missionsEnabled?.() ?? process.env.MAGI_MISSIONS === "1";
 }
 
 function metadataString(

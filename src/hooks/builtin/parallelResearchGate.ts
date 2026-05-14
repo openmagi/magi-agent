@@ -7,7 +7,7 @@ const BROAD_PARALLEL_RE =
   /\b(?:broad|deep|comprehensive|parallel|multi[-_\s]?source|multi[-_\s]?agent|multi[-_\s]?step|long[-_\s]?running|independent\s+subquestions?|research\s+pipeline)\b.{0,120}\b(?:research|investigat|source|synthesi[sz]e|compare|scout)\b|\b(?:research|investigat|source|synthesi[sz]e|compare|scout)\b.{0,120}\b(?:broad|deep|comprehensive|parallel|multi[-_\s]?source|multi[-_\s]?agent|multi[-_\s]?step|long[-_\s]?running|independent\s+subquestions?)\b|딥\s*리서치|심층\s*(?:조사|리서치|분석)|병렬.{0,40}(?:조사|리서치|분석)|(?:조사|리서치|분석).{0,40}병렬|복수.{0,30}출처|여러.{0,30}출처|다각도.{0,30}(?:조사|리서치|분석)/i;
 
 function isEnabled(): boolean {
-  const raw = process.env.CORE_AGENT_PARALLEL_RESEARCH_GATE;
+  const raw = process.env.MAGI_PARALLEL_RESEARCH_GATE;
   if (raw === undefined || raw === null) return true;
   const v = raw.trim().toLowerCase();
   return v === "" || v === "on" || v === "true" || v === "1";

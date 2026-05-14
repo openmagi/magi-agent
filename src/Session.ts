@@ -211,7 +211,7 @@ export interface BudgetCheckResult {
 }
 
 function goalLoopEnabled(): boolean {
-  return process.env.CORE_AGENT_GOAL_LOOP === "1";
+  return process.env.MAGI_GOAL_LOOP === "1";
 }
 
 function truncateGoalText(value: string, limit: number): string {

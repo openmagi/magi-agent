@@ -430,17 +430,17 @@ describe("artifactDeliveryGate helpers", () => {
 });
 
 describe("artifactDeliveryGate hook", () => {
-  const originalEnv = process.env.CORE_AGENT_ARTIFACT_DELIVERY_GATE;
+  const originalEnv = process.env.MAGI_ARTIFACT_DELIVERY_GATE;
 
   beforeEach(() => {
-    delete process.env.CORE_AGENT_ARTIFACT_DELIVERY_GATE;
+    delete process.env.MAGI_ARTIFACT_DELIVERY_GATE;
   });
 
   afterEach(() => {
     if (originalEnv === undefined) {
-      delete process.env.CORE_AGENT_ARTIFACT_DELIVERY_GATE;
+      delete process.env.MAGI_ARTIFACT_DELIVERY_GATE;
     } else {
-      process.env.CORE_AGENT_ARTIFACT_DELIVERY_GATE = originalEnv;
+      process.env.MAGI_ARTIFACT_DELIVERY_GATE = originalEnv;
     }
   });
 

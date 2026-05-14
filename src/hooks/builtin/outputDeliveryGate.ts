@@ -12,7 +12,7 @@ export interface OutputDeliveryGateOptions {
 }
 
 function isEnabled(): boolean {
-  const raw = process.env.CORE_AGENT_OUTPUT_DELIVERY_GATE;
+  const raw = process.env.MAGI_OUTPUT_DELIVERY_GATE;
   if (raw === undefined || raw === null) return true;
   const normalized = raw.trim().toLowerCase();
   return normalized === "" || normalized === "on" || normalized === "true" || normalized === "1";

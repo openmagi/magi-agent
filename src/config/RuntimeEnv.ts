@@ -26,6 +26,20 @@ function optionalEnv(name: string): string | undefined {
   return v && v.length > 0 ? v : undefined;
 }
 
+/** Read MAGI_* first, fall back to legacy CORE_AGENT_* for compat. */
+function envWithFallback(magiName: string, legacyName: string): string | undefined {
+  return optionalEnv(magiName) ?? optionalEnv(legacyName);
+}
+
+/** Like requireEnv but tries MAGI_* first, then CORE_AGENT_* fallback. */
+function requireEnvWithFallback(magiName: string, legacyName: string): string {
+  const v = envWithFallback(magiName, legacyName);
+  if (!v) {
+    throw new Error(`Missing required env: ${magiName} (or legacy ${legacyName})`);
+  }
+  return v;
+}
+
 function parseIntSafe(name: string, fallback: number): number {
   const raw = process.env[name];
   if (!raw) return fallback;
@@ -53,7 +67,7 @@ function parsePermissionMode(raw: string | undefined): PermissionMode | undefine
 }
 
 function parseRoutingMode(model: string): RoutingMode {
-  const explicit = optionalEnv("CORE_AGENT_ROUTING_MODE");
+  const explicit = envWithFallback("MAGI_ROUTING_MODE", "CORE_AGENT_ROUTING_MODE");
   if (explicit === "off" || explicit === "hosted-proxy" || explicit === "direct") {
     return explicit;
   }
@@ -250,26 +264,26 @@ export function loadFromConfig(config: MagiAgentConfig): RuntimeEnv {
 
 /** Load RuntimeEnv from environment variables (Magi Cloud mode). */
 export function loadRuntimeEnv(): RuntimeEnv {
-  const port = parseIntSafe("CORE_AGENT_PORT", 8080);
-  const model = optionalEnv("CORE_AGENT_MODEL") ?? "claude-opus-4-7";
+  const port = parseIntSafe("MAGI_PORT", parseIntSafe("CORE_AGENT_PORT", 8080));
+  const model = envWithFallback("MAGI_MODEL", "CORE_AGENT_MODEL") ?? "claude-opus-4-7";
   const routingMode = parseRoutingMode(model);
 
   const agentConfig: AgentConfig = {
     botId: requireEnv("BOT_ID"),
     userId: requireEnv("USER_ID"),
     workspaceRoot:
-      optionalEnv("CORE_AGENT_WORKSPACE") ?? "/home/ocuser/.magi/workspace",
+      envWithFallback("MAGI_WORKSPACE", "CORE_AGENT_WORKSPACE") ?? "/home/ocuser/.magi/workspace",
     gatewayToken: requireEnv("GATEWAY_TOKEN"),
     codexAccessToken: optionalEnv("CODEX_ACCESS_TOKEN"),
     codexRefreshToken: optionalEnv("CODEX_REFRESH_TOKEN"),
-    apiProxyUrl: requireEnv("CORE_AGENT_API_PROXY_URL"),
-    chatProxyUrl: optionalEnv("CORE_AGENT_CHAT_PROXY_URL"),
-    redisUrl: optionalEnv("CORE_AGENT_REDIS_URL"),
+    apiProxyUrl: requireEnvWithFallback("MAGI_API_PROXY_URL", "CORE_AGENT_API_PROXY_URL"),
+    chatProxyUrl: envWithFallback("MAGI_CHAT_PROXY_URL", "CORE_AGENT_CHAT_PROXY_URL"),
+    redisUrl: envWithFallback("MAGI_REDIS_URL", "CORE_AGENT_REDIS_URL"),
     model,
     defaultPermissionMode:
-      parsePermissionMode(optionalEnv("CORE_AGENT_PERMISSION_MODE")) ?? "workspace-bypass",
+      parsePermissionMode(envWithFallback("MAGI_PERMISSION_MODE", "CORE_AGENT_PERMISSION_MODE")) ?? "workspace-bypass",
     routingMode,
-    routingProfileId: optionalEnv("CORE_AGENT_ROUTING_PROFILE") ?? "standard",
+    routingProfileId: envWithFallback("MAGI_ROUTING_PROFILE", "CORE_AGENT_ROUTING_PROFILE") ?? "standard",
     directProviders: routingMode === "direct" ? directProvidersFromEnv() : undefined,
     telegramBotToken: optionalEnv("TELEGRAM_BOT_TOKEN"),
     discordBotToken: optionalEnv("DISCORD_BOT_TOKEN"),

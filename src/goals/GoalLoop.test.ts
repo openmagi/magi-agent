@@ -107,11 +107,11 @@ describe("goalLoopMaxTurns", () => {
   });
 
   it("clamps env overrides to a bounded range", () => {
-    expect(goalLoopMaxTurns({ CORE_AGENT_GOAL_MAX_TURNS: "0" })).toBe(1);
-    expect(goalLoopMaxTurns({ CORE_AGENT_GOAL_MAX_TURNS: "12" })).toBe(12);
-    expect(goalLoopMaxTurns({ CORE_AGENT_GOAL_MAX_TURNS: "30" })).toBe(30);
-    expect(goalLoopMaxTurns({ CORE_AGENT_GOAL_MAX_TURNS: "200" })).toBe(50);
-    expect(goalLoopMaxTurns({ CORE_AGENT_GOAL_MAX_TURNS: "not-a-number" })).toBe(30);
+    expect(goalLoopMaxTurns({ MAGI_GOAL_MAX_TURNS: "0" })).toBe(1);
+    expect(goalLoopMaxTurns({ MAGI_GOAL_MAX_TURNS: "12" })).toBe(12);
+    expect(goalLoopMaxTurns({ MAGI_GOAL_MAX_TURNS: "30" })).toBe(30);
+    expect(goalLoopMaxTurns({ MAGI_GOAL_MAX_TURNS: "200" })).toBe(50);
+    expect(goalLoopMaxTurns({ MAGI_GOAL_MAX_TURNS: "not-a-number" })).toBe(30);
   });
 });
 

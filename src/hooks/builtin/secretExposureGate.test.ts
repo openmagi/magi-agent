@@ -32,17 +32,17 @@ function args(assistantText: string, retryCount = 0) {
 }
 
 describe("secretExposureGate", () => {
-  const originalEnv = process.env.CORE_AGENT_SECRET_EXPOSURE;
+  const originalEnv = process.env.MAGI_SECRET_EXPOSURE;
 
   beforeEach(() => {
-    delete process.env.CORE_AGENT_SECRET_EXPOSURE;
+    delete process.env.MAGI_SECRET_EXPOSURE;
   });
 
   afterEach(() => {
     if (originalEnv === undefined) {
-      delete process.env.CORE_AGENT_SECRET_EXPOSURE;
+      delete process.env.MAGI_SECRET_EXPOSURE;
     } else {
-      process.env.CORE_AGENT_SECRET_EXPOSURE = originalEnv;
+      process.env.MAGI_SECRET_EXPOSURE = originalEnv;
     }
   });
 
@@ -68,8 +68,8 @@ describe("secretExposureGate", () => {
     }
   });
 
-  it("respects CORE_AGENT_SECRET_EXPOSURE=off", async () => {
-    process.env.CORE_AGENT_SECRET_EXPOSURE = "off";
+  it("respects MAGI_SECRET_EXPOSURE=off", async () => {
+    process.env.MAGI_SECRET_EXPOSURE = "off";
     const hook = makeSecretExposureGateHook();
     const result = await hook.handler(
       args("OPENAI_API_KEY=sk-1234567890abcdef1234567890"),

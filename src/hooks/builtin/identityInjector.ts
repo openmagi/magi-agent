@@ -33,7 +33,7 @@
  * are left intact so short rules/identity never get clipped.
  *
  * Toggle:
- *  - `CORE_AGENT_IDENTITY_INJECTION=off` (env) disables globally.
+ *  - `MAGI_IDENTITY_INJECTION=off` (env) disables globally.
  *  - `workspace/agent.config.yaml: identity_injection: off` per-bot.
  *  - `disable_builtin_hooks: [builtin:identity-injector]` per-bot.
  */
@@ -65,7 +65,7 @@ const SECTIONS: readonly SectionSpec[] = [
 const TRUNCATION_SUFFIX = "... [truncated]";
 
 function isEnabledByEnv(): boolean {
-  const raw = process.env.CORE_AGENT_IDENTITY_INJECTION;
+  const raw = process.env.MAGI_IDENTITY_INJECTION;
   if (raw === undefined || raw === null) return true;
   const v = raw.trim().toLowerCase();
   if (v === "" || v === "on" || v === "true" || v === "1") return true;

@@ -22,8 +22,8 @@
  *      turn aborted or the deferral-blocker fired.
  *
  * All three hooks are NON-blocking and fail-open. Env gates:
- *   CORE_AGENT_TASK_LIFECYCLE=off         → disables entire suite
- *   CORE_AGENT_TASK_LIFECYCLE_HAIKU=off   → disables the LLM tiebreak
+ *   MAGI_TASK_LIFECYCLE=off         → disables entire suite
+ *   MAGI_TASK_LIFECYCLE_HAIKU=off   → disables the LLM tiebreak
  */
 
 import type { RegisteredHook, HookContext } from "../types.js";
@@ -96,11 +96,11 @@ function envOn(name: string): boolean {
 }
 
 function lifecycleEnabled(): boolean {
-  return envOn("CORE_AGENT_TASK_LIFECYCLE");
+  return envOn("MAGI_TASK_LIFECYCLE");
 }
 
 function haikuEnabled(): boolean {
-  return envOn("CORE_AGENT_TASK_LIFECYCLE_HAIKU");
+  return envOn("MAGI_TASK_LIFECYCLE_HAIKU");
 }
 
 /**
@@ -126,7 +126,7 @@ function isTestWorkspace(workspaceRoot: string): boolean {
   // workspaces on purpose and still want the hooks to write. Production
   // pods leave the env unset → guard stays on and is benign (pod
   // workspace lives under /home/ocuser, never under /tmp).
-  const explicit = (process.env.CORE_AGENT_TASK_LIFECYCLE ?? "").trim().toLowerCase();
+  const explicit = (process.env.MAGI_TASK_LIFECYCLE ?? "").trim().toLowerCase();
   if (explicit === "on" || explicit === "true" || explicit === "1") return false;
 
   if (!workspaceRoot) return true;

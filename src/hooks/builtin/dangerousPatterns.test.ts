@@ -67,7 +67,7 @@ async function runHook(
   return (await handler(args, ctx)) as DPResult;
 }
 
-const ORIGINAL_ENV = process.env.CORE_AGENT_DANGEROUS_PATTERNS;
+const ORIGINAL_ENV = process.env.MAGI_DANGEROUS_PATTERNS;
 
 describe("resolveRulesFromConfig", () => {
   it("returns null when key is absent", () => {
@@ -96,15 +96,15 @@ describe("dangerousPatterns hook", () => {
 
   beforeEach(async () => {
     root = await mkTempWorkspace();
-    delete process.env.CORE_AGENT_DANGEROUS_PATTERNS;
+    delete process.env.MAGI_DANGEROUS_PATTERNS;
   });
 
   afterEach(async () => {
     await fs.rm(root, { recursive: true, force: true });
     if (ORIGINAL_ENV === undefined) {
-      delete process.env.CORE_AGENT_DANGEROUS_PATTERNS;
+      delete process.env.MAGI_DANGEROUS_PATTERNS;
     } else {
-      process.env.CORE_AGENT_DANGEROUS_PATTERNS = ORIGINAL_ENV;
+      process.env.MAGI_DANGEROUS_PATTERNS = ORIGINAL_ENV;
     }
   });
 
@@ -209,7 +209,7 @@ describe("dangerousPatterns hook", () => {
   });
 
   it("case 8: env=off → noop (continue) even for dangerous command", async () => {
-    process.env.CORE_AGENT_DANGEROUS_PATTERNS = "off";
+    process.env.MAGI_DANGEROUS_PATTERNS = "off";
     const hook = makeDangerousPatternsHook({ workspaceRoot: root });
     const { ctx } = makeCtx();
     const result = await runHook(hook.handler, ctx, {

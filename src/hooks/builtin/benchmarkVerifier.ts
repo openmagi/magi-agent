@@ -41,7 +41,7 @@
  * - `direction=max` and current > baseline → update baseline.
  * - `direction=min` and current < baseline → update baseline.
  *
- * Env toggle: `CORE_AGENT_BENCHMARK_VERIFY=off` disables the hook.
+ * Env toggle: `MAGI_BENCHMARK_VERIFY=off` disables the hook.
  */
 
 import { spawn } from "node:child_process";
@@ -84,7 +84,7 @@ interface BaselineFile {
 }
 
 function isEnabledByEnv(): boolean {
-  const raw = process.env.CORE_AGENT_BENCHMARK_VERIFY;
+  const raw = process.env.MAGI_BENCHMARK_VERIFY;
   if (raw === undefined || raw === null) return true;
   const v = raw.trim().toLowerCase();
   if (v === "" || v === "on" || v === "true" || v === "1") return true;

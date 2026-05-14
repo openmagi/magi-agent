@@ -10,7 +10,7 @@
  * writes "GPT-4o를 사용합니다" → DISTORTED → blocked.
  *
  * Retry budget: 1, then fail-open.
- * Toggle: `CORE_AGENT_FACT_GROUNDING=off` disables globally.
+ * Toggle: `MAGI_FACT_GROUNDING=off` disables globally.
  */
 
 import type { RegisteredHook, HookContext } from "../types.js";
@@ -219,7 +219,7 @@ export interface FactGroundingVerifierOptions {
 }
 
 function isEnabled(): boolean {
-  const raw = process.env.CORE_AGENT_FACT_GROUNDING;
+  const raw = process.env.MAGI_FACT_GROUNDING;
   // Default OFF — false positive rate too high in production (2026-04-21).
   // Haiku judge miscalibrates when workspace has conflicting sources
   // (.env vs DAILY_RUNBOOK vs script). Re-enable after judge prompt tuning.

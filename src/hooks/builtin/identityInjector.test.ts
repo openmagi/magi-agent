@@ -72,12 +72,12 @@ describe("identityInjector", () => {
 
   beforeEach(async () => {
     workspaceRoot = await mkTempWorkspace();
-    delete process.env.CORE_AGENT_IDENTITY_INJECTION;
+    delete process.env.MAGI_IDENTITY_INJECTION;
   });
 
   afterEach(async () => {
     await rmTree(workspaceRoot);
-    delete process.env.CORE_AGENT_IDENTITY_INJECTION;
+    delete process.env.MAGI_IDENTITY_INJECTION;
   });
 
   it("case 1: no files → noop", async () => {
@@ -169,7 +169,7 @@ describe("identityInjector", () => {
   });
 
   it("case 6: env=off → skip", async () => {
-    process.env.CORE_AGENT_IDENTITY_INJECTION = "off";
+    process.env.MAGI_IDENTITY_INJECTION = "off";
     await fs.writeFile(path.join(workspaceRoot, "identity.md"), "Role");
     const hook = makeIdentityInjectorHook({ workspaceRoot });
     const { ctx, emitted } = makeCtx();

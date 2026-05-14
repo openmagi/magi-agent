@@ -90,21 +90,21 @@ describe("memoryInjector", () => {
   const originalEnv = { ...process.env };
 
   beforeEach(() => {
-    delete process.env.CORE_AGENT_MEMORY_INJECTION;
+    delete process.env.MAGI_MEMORY_INJECTION;
     delete process.env.QMD_URL;
-    delete process.env.CORE_AGENT_MEMORY_INJECT_COLLECTION;
-    delete process.env.CORE_AGENT_MEMORY_INJECT_LIMIT;
-    delete process.env.CORE_AGENT_MEMORY_INJECT_MIN_SCORE;
+    delete process.env.MAGI_MEMORY_INJECT_COLLECTION;
+    delete process.env.MAGI_MEMORY_INJECT_LIMIT;
+    delete process.env.MAGI_MEMORY_INJECT_MIN_SCORE;
   });
 
   afterEach(() => {
     // Restore env to avoid cross-test contamination.
     for (const k of [
-      "CORE_AGENT_MEMORY_INJECTION",
+      "MAGI_MEMORY_INJECTION",
       "QMD_URL",
-      "CORE_AGENT_MEMORY_INJECT_COLLECTION",
-      "CORE_AGENT_MEMORY_INJECT_LIMIT",
-      "CORE_AGENT_MEMORY_INJECT_MIN_SCORE",
+      "MAGI_MEMORY_INJECT_COLLECTION",
+      "MAGI_MEMORY_INJECT_LIMIT",
+      "MAGI_MEMORY_INJECT_MIN_SCORE",
     ]) {
       if (originalEnv[k] === undefined) delete process.env[k];
       else process.env[k] = originalEnv[k];
@@ -112,7 +112,7 @@ describe("memoryInjector", () => {
   });
 
   it("env=off → noop", async () => {
-    process.env.CORE_AGENT_MEMORY_INJECTION = "off";
+    process.env.MAGI_MEMORY_INJECTION = "off";
     process.env.QMD_URL = "http://qmd:8080";
     const hook = makeMemoryInjectorHook();
     const { ctx, emitted } = makeCtx();

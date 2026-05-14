@@ -83,7 +83,7 @@ const DEFAULT_RESPONSE_DEADLINE_FINALIZE_BUFFER_MS = 30_000;
 
 function isToolLoopDetectionEnabled(): boolean {
   return process.env.MAGI_LOOP_DETECTION === "1" ||
-    process.env.CORE_AGENT_LOOP_DETECTION === "1";
+    process.env.MAGI_LOOP_DETECTION === "1";
 }
 
 function isCachePromptEnabled(): boolean {
@@ -104,13 +104,13 @@ function maybeCacheOptimize(systemPrompt: string, model: string): string | Syste
 }
 
 function emptyResponseFallbackModel(): string | null {
-  const raw = process.env.CORE_AGENT_EMPTY_RESPONSE_FALLBACK_MODEL?.trim();
+  const raw = process.env.MAGI_EMPTY_RESPONSE_FALLBACK_MODEL?.trim();
   if (raw && /^(?:off|none|disabled)$/i.test(raw)) return null;
   return raw && raw.length > 0 ? raw : DEFAULT_EMPTY_RESPONSE_FALLBACK_MODEL;
 }
 
 function responseDeadlineFinalizeBufferMs(): number {
-  const raw = process.env.CORE_AGENT_RESPONSE_DEADLINE_FINALIZE_BUFFER_MS;
+  const raw = process.env.MAGI_RESPONSE_DEADLINE_FINALIZE_BUFFER_MS;
   const parsed = raw !== undefined ? Number.parseInt(raw, 10) : NaN;
   if (!Number.isFinite(parsed)) return DEFAULT_RESPONSE_DEADLINE_FINALIZE_BUFFER_MS;
   return Math.min(120_000, Math.max(1_000, parsed));
@@ -221,10 +221,10 @@ export class Turn {
    * 2026-04-20 0.17.1: bumped 25 → 200 for Claude Code parity. Admin
    * bot hit 17/25 on POS deep-dive and couldn't finish analysis+report
    * after data collection. 200 matches Claude Code's effective no-cap.
-   * Env override: CORE_AGENT_MAX_TURN_ITERATIONS (clamped to 5..1000).
+   * Env override: MAGI_MAX_TURN_ITERATIONS (clamped to 5..1000).
    */
   private static readonly MAX_ITERATIONS = (() => {
-    const raw = process.env.CORE_AGENT_MAX_TURN_ITERATIONS;
+    const raw = process.env.MAGI_MAX_TURN_ITERATIONS;
     const parsed = raw !== undefined ? Number.parseInt(raw, 10) : NaN;
     return Number.isFinite(parsed) && parsed >= 5 && parsed <= 1000 ? parsed : 200;
   })();

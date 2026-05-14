@@ -102,7 +102,7 @@ describe("factGroundingVerifier hook", () => {
 
   beforeEach(() => {
     // Default is OFF in production; tests need it ON to exercise the hook.
-    process.env.CORE_AGENT_FACT_GROUNDING = "on";
+    process.env.MAGI_FACT_GROUNDING = "on";
   });
 
   afterAll(() => {
@@ -225,7 +225,7 @@ describe("factGroundingVerifier hook", () => {
   });
 
   it("skips when disabled via env", async () => {
-    process.env.CORE_AGENT_FACT_GROUNDING = "off";
+    process.env.MAGI_FACT_GROUNDING = "off";
     const transcript = makeToolPair("turn-1", "FileRead", {}, "content");
     const hook = makeFactGroundingVerifierHook();
     const result = await hook.handler(

@@ -7,7 +7,7 @@
  * memoryInjector / discipline all layer on top of this foundation.
  *
  * Why a hook, not a literal constant in buildSystemPrompt: makes the
- * block individually toggleable (CORE_AGENT_SELF_MODEL=off) for A/B
+ * block individually toggleable (MAGI_SELF_MODEL=off) for A/B
  * tests and lets us evolve the prompt without churning Turn.ts.
  *
  * Fail-open: any error here is logged and the turn continues without
@@ -25,7 +25,7 @@ import { AGENT_SELF_MODEL_BLOCK } from "../../prompt/RuntimePromptBlocks.js";
 export { AGENT_SELF_MODEL_BLOCK };
 
 function isEnabled(): boolean {
-  const raw = process.env.CORE_AGENT_SELF_MODEL;
+  const raw = process.env.MAGI_SELF_MODEL;
   if (raw === undefined || raw === null) return true;
   const v = raw.trim().toLowerCase();
   return v === "" || v === "on" || v === "true" || v === "1";

@@ -539,5 +539,5 @@ afterEach(async () => {
 
 beforeEach(() => {
   // No shared state today; placeholder for env-reset if future tests
-  // need CORE_AGENT_* toggles.
+  // need MAGI_* toggles.
 });

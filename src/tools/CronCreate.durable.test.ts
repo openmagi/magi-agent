@@ -157,8 +157,8 @@ describe("Cron durable flag", () => {
       getSession: () => session,
     });
 
-    const previous = process.env.CORE_AGENT_SCRIPT_CRON;
-    delete process.env.CORE_AGENT_SCRIPT_CRON;
+    const previous = process.env.MAGI_SCRIPT_CRON;
+    delete process.env.MAGI_SCRIPT_CRON;
     try {
       const result = await invokeCronCreate(
         tool,
@@ -176,9 +176,9 @@ describe("Cron durable flag", () => {
       expect(scheduler.list()).toHaveLength(0);
     } finally {
       if (previous === undefined) {
-        delete process.env.CORE_AGENT_SCRIPT_CRON;
+        delete process.env.MAGI_SCRIPT_CRON;
       } else {
-        process.env.CORE_AGENT_SCRIPT_CRON = previous;
+        process.env.MAGI_SCRIPT_CRON = previous;
       }
     }
   });
@@ -195,8 +195,8 @@ describe("Cron durable flag", () => {
       getSession: () => session,
     });
 
-    const previous = process.env.CORE_AGENT_SCRIPT_CRON;
-    process.env.CORE_AGENT_SCRIPT_CRON = "1";
+    const previous = process.env.MAGI_SCRIPT_CRON;
+    process.env.MAGI_SCRIPT_CRON = "1";
     try {
       const result = await invokeCronCreate(
         tool,
@@ -222,9 +222,9 @@ describe("Cron durable flag", () => {
       });
     } finally {
       if (previous === undefined) {
-        delete process.env.CORE_AGENT_SCRIPT_CRON;
+        delete process.env.MAGI_SCRIPT_CRON;
       } else {
-        process.env.CORE_AGENT_SCRIPT_CRON = previous;
+        process.env.MAGI_SCRIPT_CRON = previous;
       }
     }
   });

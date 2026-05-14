@@ -4,7 +4,7 @@ import { getOrClassifyFinalAnswerMeta } from "./turnMetaClassifier.js";
 const MAX_RETRIES = 1;
 
 function isEnabled(): boolean {
-  const raw = process.env.CORE_AGENT_SOURCE_AUTHORITY_GATE;
+  const raw = process.env.MAGI_SOURCE_AUTHORITY_GATE;
   if (raw === undefined || raw === null) return true;
   const v = raw.trim().toLowerCase();
   return v === "" || v === "on" || v === "true" || v === "1";

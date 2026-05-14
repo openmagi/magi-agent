@@ -56,17 +56,17 @@ function args(assistantText: string, retryCount = 0) {
 }
 
 describe("outputPurityGate", () => {
-  const originalEnv = process.env.CORE_AGENT_OUTPUT_PURITY;
+  const originalEnv = process.env.MAGI_OUTPUT_PURITY;
 
   beforeEach(() => {
-    delete process.env.CORE_AGENT_OUTPUT_PURITY;
+    delete process.env.MAGI_OUTPUT_PURITY;
   });
 
   afterEach(() => {
     if (originalEnv === undefined) {
-      delete process.env.CORE_AGENT_OUTPUT_PURITY;
+      delete process.env.MAGI_OUTPUT_PURITY;
     } else {
-      process.env.CORE_AGENT_OUTPUT_PURITY = originalEnv;
+      process.env.MAGI_OUTPUT_PURITY = originalEnv;
     }
   });
 
@@ -115,8 +115,8 @@ describe("outputPurityGate", () => {
     expect(result).toEqual({ action: "continue" });
   });
 
-  it("respects CORE_AGENT_OUTPUT_PURITY=off", async () => {
-    process.env.CORE_AGENT_OUTPUT_PURITY = "off";
+  it("respects MAGI_OUTPUT_PURITY=off", async () => {
+    process.env.MAGI_OUTPUT_PURITY = "off";
     const hook = makeOutputPurityGateHook();
     const result = await hook.handler(args("I should verify this first."), makeCtx());
     expect(result).toEqual({ action: "continue" });

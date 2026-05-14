@@ -13,7 +13,7 @@ import { getOrClassifyFinalAnswerMeta } from "./turnMetaClassifier.js";
 const MAX_RETRIES = 1;
 
 function isEnabled(): boolean {
-  const raw = process.env.CORE_AGENT_OUTPUT_PURITY;
+  const raw = process.env.MAGI_OUTPUT_PURITY;
   if (raw === undefined || raw === null) return true;
   const v = raw.trim().toLowerCase();
   return v === "" || v === "on" || v === "true" || v === "1";
