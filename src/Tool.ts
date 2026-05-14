@@ -156,7 +156,7 @@ export interface Tool<I = unknown, O = unknown> {
   availableInModes?: ("plan" | "act")[];
   /** "core" tools are always loaded; "skill" tools go through intent
    * filtering (§9.8 P2/P3). Defaults to "core" when unset. */
-  kind?: "core" | "skill";
+  kind?: "core" | "skill" | "external";
   /** Intent tags used by the classifier to decide whether to expose
    * this tool in a given turn's tools[] (§9.8 P2). */
   tags?: string[];
