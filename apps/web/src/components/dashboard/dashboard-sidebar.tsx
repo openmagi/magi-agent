@@ -4,7 +4,6 @@ import {
   Settings,
   BarChart3,
   Puzzle,
-  FileStack,
   FileText,
   Brain,
   FolderOpen,
@@ -18,6 +17,7 @@ import {
   type DashboardRoute,
   type RuntimeCheckStatus,
 } from "./shared";
+import { LogoIcon } from "@/components/ui/logo";
 
 const BOT_NAME = "Magi_Local";
 
@@ -27,7 +27,6 @@ const ICON_MAP: Record<string, ReactNode> = {
   settings: <Settings className="h-4 w-4" />,
   usage: <BarChart3 className="h-4 w-4" />,
   skills: <Puzzle className="h-4 w-4" />,
-  converter: <FileStack className="h-4 w-4" />,
   knowledge: <FileText className="h-4 w-4" />,
   memory: <Brain className="h-4 w-4" />,
   workspace: <FolderOpen className="h-4 w-4" />,
@@ -52,7 +51,6 @@ export function DashboardSidebar({
     { route: "settings", label: "Settings" },
     { route: "usage", label: "Usage" },
     { route: "skills", label: "Skills" },
-    { route: "converter", label: "Converter" },
   ];
   const workspaceItems: Array<{ route: AppRoute; label: string }> = [
     { route: "knowledge", label: "Knowledge" },
@@ -98,9 +96,7 @@ export function DashboardSidebar({
         className="mb-10 flex min-h-11 cursor-pointer items-center gap-3 rounded-xl text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30"
         aria-label="Open Magi dashboard"
       >
-        <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-primary text-sm font-bold text-white shadow-[0_8px_18px_rgba(124,58,237,0.18)]">
-          M
-        </span>
+        <LogoIcon className="h-9 w-9 rounded-xl" />
         <span className="min-w-0">
           <span className="block text-sm font-semibold text-foreground">
             Open Magi
