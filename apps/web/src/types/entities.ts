@@ -1,26 +1,33 @@
-// Re-export all database row types from the single source of truth
-import type { OrgRole, InviteStatus } from "@/lib/supabase/types";
+/**
+ * Entity types for OSS magi-agent web dashboard.
+ *
+ * The cloud product derives these from Supabase generated types.
+ * OSS defines them inline since there is no Supabase dependency.
+ */
 
-export type {
-  Profile,
-  Bot,
-  Subscription,
-  Credit,
-  CreditTransaction,
-  UsageLog,
-  BotInsert,
-  BotUpdate,
-  ModelSelection,
-  ApiKeyMode,
-  BotStatus,
-  HealthStatus,
-  SubscriptionPlan,
-  SubscriptionStatus,
-  TransactionType,
-  OrgRole,
-  InviteStatus,
-  KbScope,
-} from "@/lib/supabase/types";
+// ── Scalar enums ────────────────────────────────────────────────────────────
+
+export type ModelSelection = string;
+export type ApiKeyMode = "byok" | "platform_credits";
+export type BotStatus = "active" | "provisioning" | "error" | "deleted" | "suspended";
+export type HealthStatus = "healthy" | "degraded" | "down" | "unknown";
+export type SubscriptionPlan = "byok" | "pro" | "pro_plus" | "max" | "flex";
+export type SubscriptionStatus = "active" | "trialing" | "past_due" | "canceled" | "incomplete";
+export type TransactionType = "credit" | "debit" | "refund";
+export type OrgRole = "owner" | "admin" | "member";
+export type InviteStatus = "pending" | "accepted" | "expired";
+export type KbScope = "personal" | "org" | "all";
+
+// ── Row types (stubs) ───────────────────────────────────────────────────────
+
+export interface Profile { id: string; email?: string; display_name?: string }
+export interface Bot { id: string; name: string; status: BotStatus; model_selection: string }
+export interface Subscription { id: string; plan: SubscriptionPlan; status: SubscriptionStatus }
+export interface Credit { id: string; balance: number }
+export interface CreditTransaction { id: string; amount: number; type: TransactionType }
+export interface UsageLog { id: string; date: string; tokens: number }
+export type BotInsert = Partial<Bot>;
+export type BotUpdate = Partial<Bot>;
 
 // ── Organization UI Types ────────────────────────────────────────────────────
 
@@ -62,9 +69,7 @@ export interface OrgSummaryData {
 }
 
 // ── UI Projection Types ─────────────────────────────────────────────────────
-// These match the `.select()` projections returned from the API to the client.
 
-/** Fields returned by GET /api/bots and used by dashboard components */
 export interface BotCardData {
   id: string;
   name: string;
@@ -87,7 +92,6 @@ export interface BotCardData {
   agent_rules?: string | null;
 }
 
-/** Minimal bot data used by the onboarding deploy step */
 export interface BotDeployData {
   id: string;
   name: string;
@@ -95,7 +99,6 @@ export interface BotDeployData {
   telegram_bot_username?: string;
 }
 
-/** Bot data used by the settings form */
 export interface BotSettingsData {
   id: string;
   name: string;

@@ -3,25 +3,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { SidebarNav } from "@/components/dashboard/sidebar-nav";
 
-interface BotInfo {
-  id: string;
-  name: string;
-  status: string;
-}
-
-interface OrgInfo {
-  slug: string;
-  name: string;
-}
-
-interface MobileSidebarProps {
-  showAdmin?: boolean;
-  bots?: BotInfo[];
-  maxBots?: number;
-  org?: OrgInfo | null;
-}
-
-export function MobileSidebar({ showAdmin = false, bots = [], maxBots = 1, org = null }: MobileSidebarProps) {
+export function MobileSidebar() {
   const [open, setOpen] = useState(false);
 
   // Body scroll lock
@@ -80,10 +62,6 @@ export function MobileSidebar({ showAdmin = false, bots = [], maxBots = 1, org =
         }`}
       >
         <SidebarNav
-          showAdmin={showAdmin}
-          bots={bots}
-          maxBots={maxBots}
-          org={org}
           onNavigate={() => setOpen(false)}
           className="!w-full !min-h-full"
         />

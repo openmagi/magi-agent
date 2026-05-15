@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server";
-import type { createAdminClient } from "@/lib/supabase/admin";
-
-type AdminClient = ReturnType<typeof createAdminClient>;
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type AdminClient = any;
 
 interface SupabaseResult<T> {
   data: T | null;

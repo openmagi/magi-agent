@@ -6,7 +6,13 @@ import { CATEGORIES, SKILLS, CORE_SKILLS } from "@/lib/skills-catalog";
 import type { SkillDef, SkillCategory } from "@/lib/skills-catalog";
 import { useMessages, useI18n } from "@/lib/i18n";
 import { useAuthFetch } from "@/hooks/use-auth-fetch";
-import type { CustomSkillListItem } from "@/lib/custom-skills";
+/** Inline type for custom skill list items (original module deleted in OSS trim). */
+interface CustomSkillListItem {
+  name: string;
+  description?: string;
+  source?: string;
+  installed_at?: string;
+}
 
 const IS_KOREAN_RE = /[가-힣]/;
 

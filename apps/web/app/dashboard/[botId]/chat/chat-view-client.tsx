@@ -2,7 +2,8 @@
 
 import { useEffect, useCallback, useLayoutEffect, useMemo, useState, useRef } from "react";
 import { useRouter } from "next/navigation";
-import { usePrivy } from "@privy-io/react-auth";
+import { getLocalAccessToken } from "@/lib/local-auth";
+const usePrivy = () => ({ getAccessToken: getLocalAccessToken, user: { id: "local" } });
 import { ChatSidebar } from "@/components/chat/chat-sidebar";
 import { ChatMessages } from "@/components/chat/chat-messages";
 import type { ChatMessagesHandle } from "@/components/chat/chat-messages";
