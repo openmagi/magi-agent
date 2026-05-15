@@ -8,6 +8,12 @@ export interface ChatExportMessage {
   role: "user" | "assistant";
   content: string;
   timestamp: number;
+  attachments?: ChatExportAttachment[];
+}
+
+export interface ChatExportAttachment {
+  id: string;
+  filename: string;
 }
 
 export interface ChatExportMarkdownInput {
@@ -28,9 +34,29 @@ function stripAttachmentMarkers(content: string): string {
     .trim();
 }
 
+function extractAttachmentMetadata(content: string): ChatExportAttachment[] {
+  const attachments: ChatExportAttachment[] = [];
+  const seen = new Set<string>();
+
+  for (const marker of parseMarkers(content)) {
+    const id = marker.id.trim();
+    const filename = marker.filename.trim();
+    if (!id || !filename || seen.has(id)) continue;
+    seen.add(id);
+    attachments.push({ id, filename });
+  }
+
+  return attachments;
+}
+
 export function cleanChatExportContent(content: string): string {
   const withoutKbContext = parseKbContextMarker(content).text;
   return stripAttachmentMarkers(withoutKbContext).trim();
+}
+
+export function extractChatExportAttachments(content: string): ChatExportAttachment[] {
+  const withoutKbContext = parseKbContextMarker(content).text;
+  return extractAttachmentMetadata(withoutKbContext);
 }
 
 function isExportableChatMessage(
@@ -51,13 +77,17 @@ export function normalizeSelectedChatExportMessages(
         (typeof message.serverId === "string" && selectedIds.has(message.serverId)),
     )
     .sort(compareChatMessages)
-    .map((message) => ({
-      id: message.id,
-      role: message.role,
-      content: cleanChatExportContent(message.content),
-      timestamp: message.timestamp,
-    }))
-    .filter((message) => message.content.trim().length > 0);
+    .map((message) => {
+      const attachments = extractChatExportAttachments(message.content);
+      return {
+        id: message.id,
+        role: message.role,
+        content: cleanChatExportContent(message.content),
+        timestamp: message.timestamp,
+        ...(attachments.length > 0 ? { attachments } : {}),
+      };
+    })
+    .filter((message) => message.content.trim().length > 0 || (message.attachments?.length ?? 0) > 0);
 }
 
 function formatExportTimestamp(timestamp: number): string {
@@ -74,6 +104,10 @@ function roleLabel(role: ChatExportMessage["role"]): string {
   return role === "user" ? "User" : "Assistant";
 }
 
+function attachmentLine(attachment: ChatExportAttachment): string {
+  return `- ${attachment.filename} (attachment:${attachment.id})`;
+}
+
 export function buildChatExportMarkdown(input: ChatExportMarkdownInput): string {
   const lines = [
     "# Open Magi Chat Export",
@@ -88,7 +122,17 @@ export function buildChatExportMarkdown(input: ChatExportMarkdownInput): string 
   for (const message of input.messages) {
     lines.push(`## ${roleLabel(message.role)} - ${formatExportTimestamp(message.timestamp)}`);
     lines.push("");
-    lines.push(message.content.trim());
+    const content = message.content.trim();
+    if (content) {
+      lines.push(content);
+      lines.push("");
+    }
+    if (message.attachments?.length) {
+      lines.push("Attachments:");
+      for (const attachment of message.attachments) {
+        lines.push(attachmentLine(attachment));
+      }
+    }
     lines.push("");
   }
 

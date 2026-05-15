@@ -1,9 +1,4 @@
-export interface InterruptTurnResult {
-  accepted: boolean;
-  handoffRequested: boolean;
-  status?: number;
-  reason?: string;
-}
+import type { InterruptTurnResult } from "./chat-client";
 
 export interface CancelActiveTurnWithQueueHandoffOptions {
   hasQueued: () => boolean;

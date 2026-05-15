@@ -1,155 +1,149 @@
-export type WorkspaceFilePreviewKind = "text" | "image" | "pdf" | "download";
+export type WorkspaceFilePreviewKind = "markdown" | "text" | "html" | "image" | "pdf" | "download";
+export type WorkspaceFileContentMode = "content" | "inline" | "download";
+
+export interface WorkspaceFileApiRow {
+  path: string;
+  size: number;
+  modifiedAt?: string | null;
+}
 
 export interface WorkspaceFileEntry {
   path: string;
   filename: string;
   size: number;
   modifiedAt: string | null;
-  extension: string;
   previewKind: WorkspaceFilePreviewKind;
 }
 
-interface RawWorkspaceFileEntry {
-  path?: string | null;
-  name?: string | null;
-  size?: number | null;
-  sizeBytes?: number | null;
-  modifiedAt?: string | null;
-  mtimeMs?: number | null;
-  previewKind?: WorkspaceFilePreviewKind;
-}
-
-interface WorkspaceFileUrlOptions {
-  botId?: string;
+export interface WorkspaceFileTreeDirectory {
+  type: "directory";
+  name: string;
   path: string;
-  mode?: "content" | "inline" | "download";
-  maxBytes?: number;
+  fileCount: number;
+  children: WorkspaceFileTreeNode[];
 }
 
+export interface WorkspaceFileTreeFile {
+  type: "file";
+  name: string;
+  path: string;
+  file: WorkspaceFileEntry;
+}
+
+export type WorkspaceFileTreeNode = WorkspaceFileTreeDirectory | WorkspaceFileTreeFile;
+
+const MARKDOWN_EXTENSIONS = new Set(["md", "markdown"]);
 const TEXT_EXTENSIONS = new Set([
-  ".cjs",
-  ".conf",
-  ".css",
-  ".csv",
-  ".env",
-  ".gitignore",
-  ".html",
-  ".js",
-  ".json",
-  ".jsonl",
-  ".jsx",
-  ".log",
-  ".md",
-  ".mdx",
-  ".mjs",
-  ".prompt",
-  ".py",
-  ".sh",
-  ".sql",
-  ".svg",
-  ".toml",
-  ".ts",
-  ".tsx",
-  ".txt",
-  ".xml",
-  ".yaml",
-  ".yml",
+  "txt", "csv", "tsv", "json", "yaml", "yml", "log", "xml", "xhtml",
+  "py", "pyw", "rpy", "ipynb",
+  "js", "jsx", "mjs", "cjs", "ts", "tsx", "mts", "cts",
+  "c", "h", "cpp", "cc", "cxx", "hpp", "hh", "hxx",
+  "java", "kt", "kts", "swift", "go", "rs", "rb", "php", "cs",
+  "sh", "bash", "zsh", "fish", "ps1", "bat", "cmd",
+  "sql", "r", "scala", "sc", "dart", "lua", "pl", "pm",
+  "ex", "exs", "erl", "hrl", "fs", "fsx", "fsi",
+  "clj", "cljs", "edn", "hs", "lhs", "elm",
+  "vue", "svelte", "css", "scss", "sass", "less",
+  "toml", "ini", "cfg", "conf", "env", "properties",
+  "gitignore", "dockerfile", "makefile", "mk", "cmake",
+  "gradle", "proto", "graphql", "gql", "lock", "patch", "diff",
 ]);
+const HTML_EXTENSIONS = new Set(["html", "htm"]);
+const IMAGE_EXTENSIONS = new Set(["png", "jpg", "jpeg", "gif", "webp", "bmp", "ico"]);
 
-const IMAGE_EXTENSIONS = new Set([
-  ".avif",
-  ".gif",
-  ".jpeg",
-  ".jpg",
-  ".png",
-  ".webp",
-]);
-
-const DEFAULT_FILE_READ_BYTES = 256 * 1024;
-
-function normalizePath(path: string): string {
-  return path.replace(/\\/g, "/").replace(/^\/+/, "");
+function extensionFor(filePath: string): string {
+  const name = filePath.split("/").pop() ?? filePath;
+  const dot = name.lastIndexOf(".");
+  return dot >= 0 ? name.slice(dot + 1).toLowerCase() : "";
 }
 
-function basename(path: string): string {
-  const parts = normalizePath(path).split("/").filter(Boolean);
-  return parts.at(-1) || path || "file";
+export function filenameForWorkspacePath(filePath: string): string {
+  return filePath.split("/").filter(Boolean).pop() ?? filePath;
 }
 
-function extensionFor(path: string): string {
-  const name = basename(path).toLowerCase();
-  if (name === ".gitignore" || name === ".env") return name;
-  const index = name.lastIndexOf(".");
-  return index > 0 ? name.slice(index) : "";
-}
-
-export function getWorkspaceFilePreviewKind(path: string): WorkspaceFilePreviewKind {
-  const extension = extensionFor(path);
-  if (IMAGE_EXTENSIONS.has(extension)) return "image";
-  if (extension === ".pdf") return "pdf";
-  if (TEXT_EXTENSIONS.has(extension) || extension === "") return "text";
+export function getWorkspaceFilePreviewKind(filePath: string): WorkspaceFilePreviewKind {
+  const ext = extensionFor(filePath);
+  if (MARKDOWN_EXTENSIONS.has(ext)) return "markdown";
+  if (TEXT_EXTENSIONS.has(ext)) return "text";
+  if (HTML_EXTENSIONS.has(ext)) return "html";
+  if (IMAGE_EXTENSIONS.has(ext)) return "image";
+  if (ext === "pdf") return "pdf";
   return "download";
 }
 
-export function normalizeWorkspaceFileList(
-  entries: RawWorkspaceFileEntry[],
-): WorkspaceFileEntry[] {
-  const seen = new Map<string, WorkspaceFileEntry>();
+export function buildWorkspaceFileContentUrl({
+  botId,
+  path,
+  mode,
+}: {
+  botId: string;
+  path: string;
+  mode: WorkspaceFileContentMode;
+}): string {
+  const params = new URLSearchParams({ path, mode });
+  return `/api/bots/${encodeURIComponent(botId)}/workspace-files?${params.toString()}`;
+}
 
-  for (const entry of entries) {
-    const path = normalizePath(entry.path || entry.name || "");
-    if (!path || path === ".") continue;
+export function normalizeWorkspaceFileList(rows: WorkspaceFileApiRow[]): WorkspaceFileEntry[] {
+  return rows.map((row) => ({
+    path: row.path,
+    filename: filenameForWorkspacePath(row.path),
+    size: row.size,
+    modifiedAt: row.modifiedAt ?? null,
+    previewKind: getWorkspaceFilePreviewKind(row.path),
+  }));
+}
 
-    const size =
-      typeof entry.size === "number" && Number.isFinite(entry.size)
-        ? entry.size
-        : typeof entry.sizeBytes === "number" && Number.isFinite(entry.sizeBytes)
-          ? entry.sizeBytes
-          : 0;
-    const modifiedAt =
-      typeof entry.modifiedAt === "string"
-        ? entry.modifiedAt
-        : typeof entry.mtimeMs === "number" && Number.isFinite(entry.mtimeMs)
-          ? new Date(entry.mtimeMs).toISOString()
-          : null;
-    const extension = extensionFor(path);
+function createWorkspaceFileDirectory(name: string, path: string): WorkspaceFileTreeDirectory {
+  return {
+    type: "directory",
+    name,
+    path,
+    fileCount: 0,
+    children: [],
+  };
+}
 
-    seen.set(path, {
-      path,
-      filename: basename(path),
-      size,
-      modifiedAt,
-      extension,
-      previewKind: entry.previewKind ?? getWorkspaceFilePreviewKind(path),
+export function buildWorkspaceFileTree(files: WorkspaceFileEntry[]): WorkspaceFileTreeNode[] {
+  const root = createWorkspaceFileDirectory("", "");
+  const directories = new Map<string, WorkspaceFileTreeDirectory>([["", root]]);
+
+  for (const file of files) {
+    const parts = file.path.split("/").filter(Boolean);
+    const name = parts.pop() ?? file.filename;
+    const ancestorDirectories = [root];
+    let parent = root;
+    let currentPath = "";
+
+    for (const part of parts) {
+      currentPath = currentPath ? `${currentPath}/${part}` : part;
+      let directory = directories.get(currentPath);
+      if (!directory) {
+        directory = createWorkspaceFileDirectory(part, currentPath);
+        directories.set(currentPath, directory);
+        parent.children.push(directory);
+      }
+      ancestorDirectories.push(directory);
+      parent = directory;
+    }
+
+    for (const directory of ancestorDirectories) {
+      directory.fileCount += 1;
+    }
+
+    parent.children.push({
+      type: "file",
+      name,
+      path: file.path,
+      file,
     });
   }
 
-  return Array.from(seen.values()).sort((a, b) => a.path.localeCompare(b.path));
+  return root.children;
 }
 
-export function formatWorkspaceFileSize(size: number): string {
-  if (!Number.isFinite(size) || size <= 0) return "0 B";
-  const units = ["B", "KB", "MB", "GB"];
-  let value = size;
-  let unitIndex = 0;
-  while (value >= 1024 && unitIndex < units.length - 1) {
-    value /= 1024;
-    unitIndex += 1;
-  }
-  const formatted = unitIndex === 0 ? String(Math.round(value)) : value.toFixed(value >= 10 ? 1 : 2);
-  return `${formatted} ${units[unitIndex]}`;
-}
-
-export function buildWorkspaceFileContentUrl({
-  path,
-  mode = "content",
-  maxBytes = DEFAULT_FILE_READ_BYTES,
-}: WorkspaceFileUrlOptions): string {
-  const endpoint =
-    mode === "content" ? "/v1/app/workspace/file" : "/v1/app/workspace/download";
-  const params = new URLSearchParams({ path });
-  if (mode === "content") {
-    params.set("maxBytes", String(maxBytes));
-  }
-  return `${endpoint}?${params.toString()}`;
+export function formatWorkspaceFileSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }

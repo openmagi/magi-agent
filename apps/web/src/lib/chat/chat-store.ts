@@ -9,12 +9,12 @@ import type {
   ControlEvent,
   ControlRequestRecord,
   MissionActivity,
-  RuntimeTrace,
   SubagentActivity,
 } from "./types";
 import { INTERRUPTED_SUFFIX, MAX_QUEUED_MESSAGES } from "./queue-constants";
 import { compareChatMessages } from "./message-order";
 import { hasNonTextTurnWork } from "./empty-response";
+import { researchEvidenceFromChannelState } from "./research-evidence";
 
 const DEFAULT_CHANNEL_STATE: ChannelState = {
   streaming: false,
@@ -34,10 +34,13 @@ const DEFAULT_CHANNEL_STATE: ChannelState = {
   taskBoard: null,
   missions: [],
   activeGoalMissionId: null,
+  missionRefreshSeq: 0,
+  lastMissionEventMissionId: null,
   pendingGoalMissionTitle: null,
   inspectedSources: [],
   citationGate: null,
   runtimeTraces: [],
+  turnUsage: undefined,
   fileProcessing: false,
 };
 
@@ -60,15 +63,18 @@ const RESET_LIVE_RUN_STATE: Partial<ChannelState> = {
   inspectedSources: [],
   citationGate: null,
   runtimeTraces: [],
+  turnUsage: undefined,
   fileProcessing: false,
   reconnecting: false,
 };
 
 const MAX_LOCAL_MESSAGES = 200;
 const TRANSIENT_CONNECTION_ERROR_RE = /^Connecting to bot\.\.\. \(\d+\/\d+\)$/;
-const MESSAGES_CACHE_KEY = (botId: string) => `magi:messages:${botId}`;
-const RESET_COUNTERS_KEY = (botId: string) => `magi:resetCounters:${botId}`;
-const LAST_READ_KEY = (botId: string) => `magi:lastRead:${botId}`;
+const SILENT_VERIFIER_META_ERROR_RE =
+  /source-verified final answer|inspected-source context|claim[-_\s]?citation|research proof|runtime verifier stopped|promised work without completing|GOAL_PROGRESS_EXECUTE_NEXT|INTERACTIVE_TOOL_REQUIRED/i;
+const MESSAGES_CACHE_KEY = (botId: string) => `clawy:messages:${botId}`;
+const RESET_COUNTERS_KEY = (botId: string) => `clawy:resetCounters:${botId}`;
+const LAST_READ_KEY = (botId: string) => `clawy:lastRead:${botId}`;
 
 interface BotScope {
   botId?: string | null;
@@ -113,6 +119,7 @@ function compactErrorDetail(message: string): string {
 function streamErrorFallback(state: ChannelState): string {
   const language = state.responseLanguage;
   const errorDetail = state.error ? compactErrorDetail(state.error) : null;
+  if (errorDetail && isSilentVerifierMetaError(errorDetail)) return "";
   if (language === "ko") {
     if (errorDetail) {
       return `⚠️ 응답 생성이 중단되었습니다: ${errorDetail}. 다시 시도해 주세요.`;
@@ -138,8 +145,13 @@ function streamErrorFallback(state: ChannelState): string {
   return "⚠️ The response ended without visible answer text. Please try again.";
 }
 
+function isSilentVerifierMetaError(message: string | null | undefined): boolean {
+  return !!message && SILENT_VERIFIER_META_ERROR_RE.test(message);
+}
+
 function finalVisibleStreamContent(state: ChannelState, content: string): string {
   if (!state.error && state.turnPhase !== "aborted") return content;
+  if (isSilentVerifierMetaError(state.error)) return content.trimEnd();
   const suffix = streamErrorFallback({
     ...state,
     streamingText: "",
@@ -184,6 +196,12 @@ function terminalLiveRunReset(
       reset.subagents = detachedSubagents;
     }
   }
+  if (
+    partial.runtimeTraces === undefined &&
+    (partial.error || partial.turnPhase === "aborted" || current.turnPhase === "aborted")
+  ) {
+    reset.runtimeTraces = current.runtimeTraces ?? [];
+  }
   return reset;
 }
 
@@ -211,12 +229,14 @@ function isLiveStreamProgress(partial: Partial<ChannelState>): boolean {
     !!partial.thinkingText ||
     (partial.activeTools?.length ?? 0) > 0 ||
     !!partial.browserFrame ||
+    !!partial.documentDraft ||
     (partial.subagents?.length ?? 0) > 0 ||
     (partial.missions?.length ?? 0) > 0 ||
     !!partial.taskBoard?.tasks.length ||
     (partial.inspectedSources?.length ?? 0) > 0 ||
     !!partial.citationGate ||
     (partial.runtimeTraces?.length ?? 0) > 0 ||
+    !!partial.turnUsage ||
     partial.heartbeatElapsedMs !== undefined ||
     (partial.pendingInjectionCount ?? 0) > 0 ||
     (partial.turnPhase !== undefined && partial.turnPhase !== null && partial.turnPhase !== "pending")
@@ -358,32 +378,6 @@ function upsertControlRequestList(
     ...requests.filter((item) => item.requestId !== request.requestId),
     request,
   ]);
-}
-
-function appendRuntimeTrace(
-  current: RuntimeTrace[] | undefined,
-  trace: RuntimeTrace,
-): RuntimeTrace[] {
-  return [...(current ?? []), trace].slice(-12);
-}
-
-function runtimeTraceFromControlEvent(
-  event: Extract<ControlEvent, { type: "runtime_trace" }>,
-): RuntimeTrace {
-  return {
-    turnId: event.turnId,
-    phase: event.phase,
-    severity: event.severity,
-    title: event.title,
-    ...(event.detail ? { detail: event.detail } : {}),
-    ...(event.reasonCode ? { reasonCode: event.reasonCode } : {}),
-    ...(event.ruleId ? { ruleId: event.ruleId } : {}),
-    ...(typeof event.attempt === "number" ? { attempt: event.attempt } : {}),
-    ...(typeof event.maxAttempts === "number" ? { maxAttempts: event.maxAttempts } : {}),
-    ...(typeof event.retryable === "boolean" ? { retryable: event.retryable } : {}),
-    ...(event.requiredAction ? { requiredAction: event.requiredAction } : {}),
-    receivedAt: event.receivedAt ?? Date.now(),
-  };
 }
 
 function queuedPriorityRank(message: QueuedMessage): number {
@@ -586,7 +580,15 @@ export const useChatStore = create<ChatState>((set, get) => ({
     const state = get().channelStates[ch] ?? DEFAULT_CHANNEL_STATE;
     const activities = state.activeTools ?? [];
     const taskBoard = state.taskBoard ?? null;
-    if (state.streamingText || state.thinkingText || activities.length > 0 || (taskBoard && taskBoard.tasks.length > 0)) {
+    const researchEvidence = researchEvidenceFromChannelState(state);
+    const usage = state.turnUsage;
+    if (
+      state.streamingText ||
+      state.thinkingText ||
+      activities.length > 0 ||
+      (taskBoard && taskBoard.tasks.length > 0) ||
+      researchEvidence
+    ) {
       const hasThinking = !!state.thinkingText;
       const thinkingDuration = state.thinkingStartedAt
         ? Math.round((Date.now() - state.thinkingStartedAt) / 1000)
@@ -607,6 +609,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
         thinkingDuration,
         activities: activities.length > 0 ? activities : undefined,
         taskBoard: taskBoard && taskBoard.tasks.length > 0 ? taskBoard : undefined,
+        researchEvidence,
+        usage,
       });
     }
     set((s) => {
@@ -643,6 +647,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
     const hasThinking = !!state.thinkingText;
     const activities = state.activeTools ?? [];
     const taskBoard = state.taskBoard ?? null;
+    const researchEvidence = researchEvidenceFromChannelState(state);
+    const usage = state.turnUsage;
     const detachedSubagents = activeBackgroundSubagents(state);
     const missions = durableMissionState(state);
     {
@@ -667,6 +673,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
           thinkingDuration,
           activities: activities.length > 0 ? activities : undefined,
           taskBoard: taskBoard && taskBoard.tasks.length > 0 ? taskBoard : undefined,
+          researchEvidence,
+          usage,
         });
       }
     }
@@ -720,7 +728,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   markChannelRead: (channel) => {
     try {
       const botId = get().botId;
-      const key = botId ? LAST_READ_KEY(botId) : "magi:lastRead";
+      const key = botId ? LAST_READ_KEY(botId) : "clawy:lastRead";
       const raw = localStorage.getItem(key);
       const data = raw ? (JSON.parse(raw) as Record<string, number>) : {};
       data[channel] = Date.now();
@@ -733,8 +741,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
     try {
       const botId = get().botId;
       const raw = botId
-        ? (localStorage.getItem(LAST_READ_KEY(botId)) ?? localStorage.getItem("magi:lastRead"))
-        : localStorage.getItem("magi:lastRead");
+        ? (localStorage.getItem(LAST_READ_KEY(botId)) ?? localStorage.getItem("clawy:lastRead"))
+        : localStorage.getItem("clawy:lastRead");
       if (raw) {
         const data = JSON.parse(raw) as Record<string, number>;
         lastRead = data[channel] ?? 0;
@@ -918,20 +926,6 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
   applyControlEvent: (channel, event) =>
     set((state) => {
-      if (event.type === "runtime_trace") {
-        const currentState = state.channelStates[channel] ?? DEFAULT_CHANNEL_STATE;
-        return {
-          channelStates: {
-            ...state.channelStates,
-            [channel]: mergeChannelState(currentState, {
-              runtimeTraces: appendRuntimeTrace(
-                currentState.runtimeTraces,
-                runtimeTraceFromControlEvent(event),
-              ),
-            }),
-          },
-        };
-      }
       const current = state.controlRequests[channel] ?? [];
       let next = current;
       if (event.type === "control_request_created") {

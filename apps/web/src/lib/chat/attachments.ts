@@ -2,6 +2,8 @@
 
 import type { Attachment } from "./types";
 
+const CHAT_PROXY_URL = process.env.NEXT_PUBLIC_CHAT_PROXY_URL || "https://chat.openmagi.ai";
+
 const MAX_FILE_SIZE = 1024 * 1024 * 1024; // 1GB
 
 const ALLOWED_MIMETYPES = new Set([
@@ -158,11 +160,35 @@ export async function uploadAttachment(
   file: File,
   onProgress?: (percent: number) => void,
 ): Promise<Attachment> {
-  void botId;
-  void channelName;
-  void file;
-  void onProgress;
-  throw new Error("Local OSS file upload uses Knowledge context; direct chat attachments are not available.");
+  const token = await getToken();
+  const effectiveMime = getEffectiveMimeType(file);
+
+  // Step 1: Request signed upload URL from chat-proxy
+  const reqRes = await fetch(`${CHAT_PROXY_URL}/v1/chat/${botId}/attachments/request-upload`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({
+      channel_name: channelName,
+      filename: file.name,
+      mimetype: effectiveMime,
+      size_bytes: file.size,
+    }),
+  });
+
+  if (!reqRes.ok) {
+    const err = await reqRes.json().catch(() => ({ error: `HTTP ${reqRes.status}` }));
+    throw new Error(err.error || `Failed to request upload URL: ${reqRes.status}`);
+  }
+
+  const { attachment, uploadUrl } = await reqRes.json();
+
+  // Step 2: Upload file directly to Supabase Storage via signed URL
+  await directUpload(uploadUrl, file, effectiveMime, onProgress);
+
+  return attachment as Attachment;
 }
 
 /** PUT file directly to Supabase Storage signed URL with XHR for progress tracking. */
@@ -200,17 +226,11 @@ function directUpload(
 
 /** Get a download URL for an attachment (chat-proxy handles auth via redirect). */
 export function getAttachmentUrl(botId: string, attachmentId: string): string {
-  const params = new URLSearchParams({
-    botId,
-    path: attachmentId,
-    mode: "download",
-  });
-  return `/v1/app/workspace/download?${params.toString()}`;
+  return `${CHAT_PROXY_URL}/v1/chat/${botId}/attachments/${attachmentId}`;
 }
 
 export function getKnowledgeDocumentUrl(botId: string, docId: string): string {
-  const params = new URLSearchParams({ botId, path: docId });
-  return `/v1/app/knowledge/file?${params.toString()}`;
+  return `/api/knowledge/documents/${encodeURIComponent(docId)}?botId=${encodeURIComponent(botId)}&type=original`;
 }
 
 /**

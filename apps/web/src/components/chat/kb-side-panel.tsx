@@ -5,8 +5,14 @@ import Image from "next/image";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { WorkConsolePanel } from "./work-console-panel";
+import { MissionsPanel, type MissionChannelType, type MissionFocusRequest } from "./missions-panel";
+import {
+  OPEN_MISSION_LEDGER_EVENT,
+  readOpenMissionLedgerEvent,
+} from "@/lib/chat/mission-ledger-events";
 import type {
   ChannelState,
+  ChatResponseLanguage,
   ControlRequestRecord,
   KbDocReference,
   QueuedMessage,
@@ -26,25 +32,30 @@ import {
   resolveKnowledgeUploadMimeType,
 } from "@/lib/knowledge/upload-mime";
 import {
+  buildWorkspaceFileTree,
   buildWorkspaceFileContentUrl,
   formatWorkspaceFileSize,
   type WorkspaceFileEntry,
   type WorkspaceFilePreviewKind,
+  type WorkspaceFileTreeNode,
 } from "@/lib/workspace/workspace-files";
 
-const PANEL_KEY = "magi:kbPanelExpanded";
-const PANEL_WIDTH_KEY = "magi:kbPanelWidth";
-const PREVIEW_HEIGHT_KEY = "magi:kbPreviewHeight";
-const PANEL_SCOPE_KEY = "magi:kbPanelScope";
-const PANEL_VIEW_KEY = "magi:rightInspectorView";
+const PANEL_KEY = "clawy:kbPanelExpanded";
+const PANEL_WIDTH_KEY = "clawy:kbPanelWidth";
+const PREVIEW_HEIGHT_KEY = "clawy:kbPreviewHeight";
+const PANEL_SCOPE_KEY = "clawy:kbPanelScope";
+const PANEL_VIEW_KEY = "clawy:rightInspectorView";
+const PANEL_VIEW_V2_KEY = "clawy:rightInspectorView:v2";
 const MIN_PANEL_WIDTH = 200;
 const MAX_PANEL_WIDTH = 600;
 const DEFAULT_PANEL_WIDTH = 320;
+const SIDEBAR_WIDTH = 256;
+const MIN_CENTER_WIDTH = 300;
 const MIN_PREVIEW_HEIGHT = 80;
 const KB_PANEL_ROW_LIMIT = 20;
 
 type PanelScope = KbPanelScope | "workspace";
-export type RightInspectorView = "work" | "knowledge";
+export type RightInspectorView = "work" | "missions" | "knowledge";
 
 interface KbSidePanelProps {
   botId: string;
@@ -58,13 +69,15 @@ interface KbSidePanelProps {
   onToggleDoc: (doc: KbDocReference) => void;
   onRefresh: () => void;
   onWorkspaceRefresh: () => void;
-  onWorkspaceFileSave?: (path: string, content: string) => Promise<void>;
   getAccessToken?: () => Promise<string | null>;
+  missionChannelType?: MissionChannelType;
+  missionChannelId?: string | null;
   channelState?: ChannelState;
   queuedMessages?: QueuedMessage[];
   controlRequests?: ControlRequestRecord[];
   onViewChange?: (view: RightInspectorView) => void;
   onWorkOpenChange?: (open: boolean) => void;
+  uiLanguage?: ChatResponseLanguage;
 }
 
 const EMPTY_CHANNEL_STATE: ChannelState = {
@@ -80,6 +93,9 @@ const EMPTY_CHANNEL_STATE: ChannelState = {
   activeTools: [],
   subagents: [],
   taskBoard: null,
+  missions: [],
+  activeGoalMissionId: null,
+  pendingGoalMissionTitle: null,
   fileProcessing: false,
 };
 
@@ -94,7 +110,7 @@ function shouldSuppressInlineRunDetails(
   queuedMessages: QueuedMessage[],
   controlRequests: ControlRequestRecord[],
 ): boolean {
-  const hasPendingControlRequest = controlRequests.some((request) => request.state === "pending");
+  const pendingRequests = controlRequests.filter((request) => request.state === "pending");
   const hasLiveWork =
     (channelState.activeTools ?? []).length > 0 ||
     (channelState.subagents ?? []).some(
@@ -103,11 +119,29 @@ function shouldSuppressInlineRunDetails(
     hasOpenTaskState(channelState) ||
     !!channelState.browserFrame ||
     queuedMessages.length > 0 ||
-    hasPendingControlRequest ||
+    pendingRequests.length > 0 ||
     channelState.fileProcessing ||
     channelState.reconnecting;
 
   return hasLiveWork || (channelState.streaming && !channelState.streamingText);
+}
+
+function parseRightInspectorView(value: string | null): RightInspectorView | null {
+  if (value === "work" || value === "missions" || value === "knowledge") return value;
+  return null;
+}
+
+function getInitialRightInspectorView(): RightInspectorView {
+  if (typeof window === "undefined") return "knowledge";
+  try {
+    const v2 = parseRightInspectorView(localStorage.getItem(PANEL_VIEW_V2_KEY));
+    if (v2) return v2;
+
+    const legacy = parseRightInspectorView(localStorage.getItem(PANEL_VIEW_KEY));
+    return legacy === "missions" || legacy === "knowledge" ? legacy : "knowledge";
+  } catch {
+    return "knowledge";
+  }
 }
 
 interface PreviewState {
@@ -117,14 +151,118 @@ interface PreviewState {
   content: string | null;
   loading: boolean;
   error: string | null;
-  path?: string;
-  editedContent?: string;
-  saving?: boolean;
-  saveError?: string | null;
-  savedAt?: number;
   previewKind?: WorkspaceFilePreviewKind;
   url?: string;
   downloadUrl?: string;
+}
+
+function FolderIcon(): React.ReactElement {
+  return (
+    <svg className="w-3.5 h-3.5 text-secondary/45" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 12.75V12A2.25 2.25 0 014.5 9.75h15A2.25 2.25 0 0121.75 12v.75m-8.69-6.44l-2.12-2.12a1.5 1.5 0 00-1.061-.44H4.5A2.25 2.25 0 002.25 6v12a2.25 2.25 0 002.25 2.25h15A2.25 2.25 0 0021.75 18V9a2.25 2.25 0 00-2.25-2.25h-5.379a1.5 1.5 0 01-1.06-.44z" />
+    </svg>
+  );
+}
+
+function FileIcon(): React.ReactElement {
+  return (
+    <svg className="w-3.5 h-3.5 text-secondary/35" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.6}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M14.25 2.25H6.75A2.25 2.25 0 004.5 4.5v15a2.25 2.25 0 002.25 2.25h10.5a2.25 2.25 0 002.25-2.25V7.5l-5.25-5.25z" />
+      <path strokeLinecap="round" strokeLinejoin="round" d="M14.25 2.25V7.5h5.25" />
+    </svg>
+  );
+}
+
+function DownloadIcon(): React.ReactElement {
+  return (
+    <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M12 3v12m0 0l4-4m-4 4l-4-4M5 21h14" />
+    </svg>
+  );
+}
+
+function WorkspaceFileTreeRows({
+  nodes,
+  botId,
+  previewId,
+  onPreviewFile,
+}: {
+  nodes: WorkspaceFileTreeNode[];
+  botId: string;
+  previewId: string | null;
+  onPreviewFile: (file: WorkspaceFileEntry) => void;
+}): React.ReactElement {
+  return (
+    <>
+      {nodes.map((node) => {
+        if (node.type === "directory") {
+          return (
+            <div key={`dir:${node.path}`} className="mb-0.5" role="treeitem" aria-expanded="true" aria-selected="false">
+              <div className="flex min-w-0 items-center gap-1.5 rounded-md px-1.5 py-1 text-foreground/75">
+                <FolderIcon />
+                <span className="min-w-0 flex-1 truncate text-[11px] font-medium">
+                  {node.name}
+                </span>
+                <span className="text-[10px] text-secondary/35">
+                  {node.fileCount}
+                </span>
+              </div>
+              {node.children.length > 0 && (
+                <div className="ml-3 border-l border-black/[0.05] pl-2" role="group">
+                  <WorkspaceFileTreeRows
+                    nodes={node.children}
+                    botId={botId}
+                    previewId={previewId}
+                    onPreviewFile={onPreviewFile}
+                  />
+                </div>
+              )}
+            </div>
+          );
+        }
+
+        const file = node.file;
+        const currentPreviewId = `workspace:${file.path}`;
+        const isPreviewing = previewId === currentPreviewId;
+        const downloadUrl = buildWorkspaceFileContentUrl({ botId, path: file.path, mode: "download" });
+        return (
+          <div
+            key={`file:${file.path}`}
+            className={`flex items-center gap-1 rounded-md transition-colors ${
+              isPreviewing ? "bg-black/[0.05]" : "hover:bg-black/[0.03]"
+            }`}
+            role="treeitem"
+            aria-selected={isPreviewing}
+          >
+            <span className="ml-1 shrink-0">
+              <FileIcon />
+            </span>
+            <button
+              type="button"
+              onClick={() => onPreviewFile(file)}
+              className="min-w-0 flex-1 py-1 pl-1 pr-1 text-left text-foreground/70 cursor-pointer"
+              title={file.path}
+            >
+              <span className="block truncate text-[11px]">
+                {file.filename}
+              </span>
+              <span className="block truncate text-[9px] text-secondary/35">
+                {file.path} · {formatWorkspaceFileSize(file.size)}
+              </span>
+            </button>
+            <a
+              href={downloadUrl}
+              className="shrink-0 rounded-md p-1.5 text-secondary/40 hover:text-foreground hover:bg-black/[0.04] transition-colors"
+              aria-label={`Download ${file.filename}`}
+              title={`Download ${file.filename}`}
+            >
+              <DownloadIcon />
+            </a>
+          </div>
+        );
+      })}
+    </>
+  );
 }
 
 /** Collapsible Knowledge Base file-tree panel on the right side of chat. */
@@ -140,13 +278,15 @@ export function KbSidePanel({
   onToggleDoc,
   onRefresh,
   onWorkspaceRefresh,
-  onWorkspaceFileSave,
   getAccessToken,
+  missionChannelType,
+  missionChannelId,
   channelState = EMPTY_CHANNEL_STATE,
   queuedMessages = [],
   controlRequests = [],
   onViewChange,
   onWorkOpenChange,
+  uiLanguage,
 }: KbSidePanelProps): React.ReactElement {
   const [expanded, setExpanded] = useState(() => {
     if (typeof window === "undefined") return true;
@@ -171,15 +311,9 @@ export function KbSidePanel({
       return getDefaultKbPanelScope(collections);
     }
   });
-  const [activeView, setActiveView] = useState<RightInspectorView>(() => {
-    if (typeof window === "undefined") return "work";
-    try {
-      const value = localStorage.getItem(PANEL_VIEW_KEY);
-      return value === "knowledge" ? "knowledge" : "work";
-    } catch {
-      return "work";
-    }
-  });
+  const [activeView, setActiveView] =
+    useState<RightInspectorView>(getInitialRightInspectorView);
+  const [missionFocusRequest, setMissionFocusRequest] = useState<MissionFocusRequest | null>(null);
   const [search, setSearch] = useState("");
   const [openCols, setOpenCols] = useState<Set<string>>(() => new Set());
   const [expandedCollectionIds, setExpandedCollectionIds] = useState<Set<string>>(() => new Set());
@@ -192,6 +326,7 @@ export function KbSidePanel({
   const selectedIds = new Set(selectedDocs.map((d) => d.id));
   const panelRef = useRef<HTMLDivElement>(null);
   const uploadInputRef = useRef<HTMLInputElement>(null);
+  const missionFocusNonce = useRef(0);
   const isDraggingWidth = useRef(false);
   const isDraggingHeight = useRef(false);
   const scopeBuckets = useMemo(() => getKbScopeBuckets(collections), [collections]);
@@ -209,8 +344,28 @@ export function KbSidePanel({
 
   const selectView = useCallback((view: RightInspectorView) => {
     setActiveView(view);
-    try { localStorage.setItem(PANEL_VIEW_KEY, view); } catch { /* ignore */ }
+    try {
+      localStorage.setItem(PANEL_VIEW_KEY, view);
+      localStorage.setItem(PANEL_VIEW_V2_KEY, view);
+    } catch { /* ignore */ }
   }, []);
+
+  useEffect(() => {
+    const onOpenMissionLedger = (event: Event) => {
+      const detail = readOpenMissionLedgerEvent(event);
+      if (!detail) return;
+      setExpanded(true);
+      try { localStorage.setItem(PANEL_KEY, "1"); } catch { /* ignore */ }
+      selectView("missions");
+      missionFocusNonce.current += 1;
+      setMissionFocusRequest({
+        missionId: detail.missionId,
+        nonce: missionFocusNonce.current,
+      });
+    };
+    window.addEventListener(OPEN_MISSION_LEDGER_EVENT, onOpenMissionLedger);
+    return () => window.removeEventListener(OPEN_MISSION_LEDGER_EVENT, onOpenMissionLedger);
+  }, [selectView]);
 
   useEffect(() => {
     onViewChange?.(activeView);
@@ -234,6 +389,26 @@ export function KbSidePanel({
       setActiveScope("personal");
     }
   }, [activeCollections.length, activeScope, loading, scopeBuckets.org.collections.length, scopeBuckets.personal.collections.length]);
+
+  useEffect(() => {
+    if (!expanded) return;
+    const clamp = () => {
+      const maxAllowed = window.innerWidth - SIDEBAR_WIDTH - MIN_CENTER_WIDTH;
+      if (maxAllowed < MIN_PANEL_WIDTH) {
+        setExpanded(false);
+        try { localStorage.setItem(PANEL_KEY, "0"); } catch { /* */ }
+      } else {
+        setPanelWidth((w) => {
+          const clamped = Math.min(w, maxAllowed);
+          if (clamped !== w) try { localStorage.setItem(PANEL_WIDTH_KEY, String(clamped)); } catch { /* */ }
+          return clamped;
+        });
+      }
+    };
+    clamp();
+    window.addEventListener("resize", clamp);
+    return () => window.removeEventListener("resize", clamp);
+  }, [expanded]);
 
   const togglePanel = useCallback(() => {
     setExpanded((prev) => {
@@ -317,7 +492,6 @@ export function KbSidePanel({
         id,
         source: "workspace",
         filename: file.filename,
-        path: file.path,
         content: null,
         loading: false,
         error: null,
@@ -333,7 +507,6 @@ export function KbSidePanel({
         id,
         source: "workspace",
         filename: file.filename,
-        path: file.path,
         content: null,
         loading: false,
         error: null,
@@ -347,7 +520,6 @@ export function KbSidePanel({
       id,
       source: "workspace",
       filename: file.filename,
-      path: file.path,
       content: null,
       loading: true,
       error: null,
@@ -364,7 +536,7 @@ export function KbSidePanel({
       const data = await res.json();
       setPreview((prev) =>
         prev?.id === id
-          ? { ...prev, content: data.content ?? "", editedContent: data.content ?? "", loading: false }
+          ? { ...prev, content: data.content ?? "", loading: false }
           : prev,
       );
     } catch (err) {
@@ -377,50 +549,6 @@ export function KbSidePanel({
   }, [botId, preview]);
 
   const closePreview = useCallback(() => setPreview(null), []);
-
-  const saveWorkspacePreview = useCallback(async () => {
-    if (
-      !preview ||
-      preview.source !== "workspace" ||
-      !preview.path ||
-      preview.editedContent === undefined ||
-      !onWorkspaceFileSave
-    ) {
-      return;
-    }
-
-    const nextContent = preview.editedContent;
-    setPreview((prev) =>
-      prev?.id === preview.id
-        ? { ...prev, saving: true, saveError: null }
-        : prev,
-    );
-    try {
-      await onWorkspaceFileSave(preview.path, nextContent);
-      setPreview((prev) =>
-        prev?.id === preview.id
-          ? {
-              ...prev,
-              content: nextContent,
-              editedContent: nextContent,
-              saving: false,
-              saveError: null,
-              savedAt: Date.now(),
-            }
-          : prev,
-      );
-    } catch (error) {
-      setPreview((prev) =>
-        prev?.id === preview.id
-          ? {
-              ...prev,
-              saving: false,
-              saveError: error instanceof Error ? error.message : "Failed to save file",
-            }
-          : prev,
-      );
-    }
-  }, [onWorkspaceFileSave, preview]);
 
   const uploadFilesToCollection = useCallback(async (collection: KbCollectionWithDocs, files: File[]) => {
     const supportedFiles = files.filter((file) => {
@@ -438,6 +566,7 @@ export function KbSidePanel({
     }
 
     setUploadingCollectionId(collection.id);
+    const isOrgScope = collection.scope === "org" && !!collection.orgId;
     const token = await getAccessToken?.().catch(() => null);
     const authHeaders: HeadersInit = token ? { Authorization: `Bearer ${token}` } : {};
     const failures: string[] = [];
@@ -445,35 +574,74 @@ export function KbSidePanel({
 
     try {
       for (const [index, file] of supportedFiles.entries()) {
+        const contentType = resolveKnowledgeUploadMimeType(file);
+
         try {
-          setUploadStatus(`Saving ${file.name} (${index + 1}/${supportedFiles.length})...`);
-          const contentType = resolveKnowledgeUploadMimeType(file);
-          const isTextFile =
-            contentType.startsWith("text/") ||
-            ["application/json", "application/xml"].includes(contentType) ||
-            /\.(md|markdown|txt|csv|tsv|json|yaml|yml|html|htm|xml)$/i.test(file.name);
-          const content = isTextFile
-            ? await file.text()
-            : `Binary knowledge file saved from local web UI: ${file.name} (${file.size} bytes, ${contentType})`;
-          const safeName = file.name
-            .replace(/[^A-Za-z0-9._-]+/g, "-")
-            .replace(/^-+|-+$/g, "")
-            .slice(0, 120) || "document.txt";
-          const ingestRes = await fetch("/v1/app/knowledge/file", {
-            method: "PUT",
+          setUploadStatus(`Uploading ${file.name} (${index + 1}/${supportedFiles.length})...`);
+
+          const uploadUrlRes = await fetch("/api/knowledge/upload-url", {
+            method: "POST",
             headers: {
               "Content-Type": "application/json",
               ...authHeaders,
             },
             body: JSON.stringify({
-              path: `${collection.name}/${safeName}`,
-              content,
+              collection: collection.name,
+              filename: file.name,
+              content_type: contentType,
+              botId,
+              ...(isOrgScope ? { scope: "org", orgId: collection.orgId } : {}),
+            }),
+          });
+
+          if (!uploadUrlRes.ok) {
+            const body = await uploadUrlRes.json().catch(() => null);
+            failures.push(`${file.name}: ${body?.error || `Failed to prepare upload (${uploadUrlRes.status})`}`);
+            continue;
+          }
+
+          const { upload_url: uploadUrl, signedUrl, storage_path: storagePath } = await uploadUrlRes.json();
+          const directUploadUrl = uploadUrl || signedUrl;
+          if (!directUploadUrl || !storagePath) {
+            failures.push(`${file.name}: Upload URL response was incomplete`);
+            continue;
+          }
+
+          const putRes = await fetch(directUploadUrl, {
+            method: "PUT",
+            headers: {
+              "Content-Type": contentType,
+              "x-upsert": "false",
+            },
+            body: file,
+          });
+
+          if (!putRes.ok) {
+            failures.push(`${file.name}: Storage upload failed`);
+            continue;
+          }
+
+          setUploadStatus(`Processing ${file.name} (${index + 1}/${supportedFiles.length})...`);
+
+          const ingestRes = await fetch("/api/knowledge/upload", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              ...authHeaders,
+            },
+            body: JSON.stringify({
+              collection: collection.name,
+              filename: file.name,
+              mime_type: contentType,
+              storage_path: storagePath,
+              botId,
+              ...(isOrgScope ? { scope: "org", orgId: collection.orgId } : {}),
             }),
           });
 
           if (!ingestRes.ok) {
             const body = await ingestRes.json().catch(() => null);
-            failures.push(`${file.name}: ${body?.error || `Failed to save (${ingestRes.status})`}`);
+            failures.push(`${file.name}: ${body?.error || `Failed to process (${ingestRes.status})`}`);
             continue;
           }
 
@@ -525,7 +693,8 @@ export function KbSidePanel({
     const onMove = (ev: MouseEvent) => {
       // Dragging left edge: moving left = wider panel
       const delta = startX - ev.clientX;
-      const newW = Math.max(MIN_PANEL_WIDTH, Math.min(MAX_PANEL_WIDTH, startW + delta));
+      const viewportMax = window.innerWidth - SIDEBAR_WIDTH - MIN_CENTER_WIDTH;
+      const newW = Math.max(MIN_PANEL_WIDTH, Math.min(MAX_PANEL_WIDTH, viewportMax, startW + delta));
       setPanelWidth(newW);
     };
     const onUp = () => {
@@ -576,6 +745,10 @@ export function KbSidePanel({
       `${file.path} ${file.filename}`.toLowerCase().includes(searchLower),
     );
   }, [searchLower, workspaceFiles]);
+  const workspaceFileTree = useMemo(
+    () => buildWorkspaceFileTree(filteredWorkspaceFiles),
+    [filteredWorkspaceFiles],
+  );
 
   // Collapsed state — just the icon bar
   if (!expanded) {
@@ -601,7 +774,7 @@ export function KbSidePanel({
   }
 
   return (
-    <div ref={panelRef} className="hidden md:flex flex-row relative min-h-0" style={{ width: panelWidth }}>
+    <div ref={panelRef} className="hidden md:flex flex-row relative min-h-0 shrink-0" style={{ width: panelWidth }}>
       <input
         ref={uploadInputRef}
         type="file"
@@ -621,7 +794,11 @@ export function KbSidePanel({
       {/* Header */}
       <div className="flex items-center justify-between px-3 py-2.5 border-b border-black/[0.06]">
         <span className="text-[11px] font-semibold text-secondary/70 uppercase tracking-wide">
-          {activeView === "work" ? "Work" : "Knowledge Base"}
+          {activeView === "work"
+            ? "Work"
+            : activeView === "missions"
+              ? "Missions"
+              : "Knowledge Base"}
         </span>
         <div className="flex items-center gap-0.5">
           {/* Refresh button */}
@@ -658,9 +835,10 @@ export function KbSidePanel({
       </div>
 
       <div className="px-2 pt-2">
-        <div className="grid grid-cols-2 rounded-lg bg-black/[0.04] p-0.5" role="tablist" aria-label="Right inspector">
+        <div className="grid grid-cols-3 rounded-lg bg-black/[0.04] p-0.5" role="tablist" aria-label="Right inspector">
           {([
             ["work", "Work"],
+            ["missions", "Missions"],
             ["knowledge", "Knowledge"],
           ] as const).map(([view, label]) => {
             const isActive = activeView === view;
@@ -684,16 +862,39 @@ export function KbSidePanel({
         </div>
       </div>
 
-      <div className={`${activeView === "work" ? "flex" : "hidden"} min-h-0 flex-1 flex-col`}>
-        <WorkConsolePanel
-          channelState={channelState}
-          queuedMessages={queuedMessages}
-          controlRequests={controlRequests}
-          suppressInlineRunDetails={suppressInlineRunDetails}
+      {activeView === "work" && (
+        <div className="flex min-h-0 flex-1 flex-col">
+          <WorkConsolePanel
+            channelState={channelState}
+            queuedMessages={queuedMessages}
+            controlRequests={controlRequests}
+            suppressInlineRunDetails={suppressInlineRunDetails}
+            uiLanguage={uiLanguage}
+          />
+        </div>
+      )}
+
+      <div
+        className={`${activeView === "missions" ? "flex" : "hidden"} min-h-0 flex-1 flex-col`}
+        data-mission-channel-type={missionChannelType}
+        data-mission-channel-id={missionChannelId ?? undefined}
+      >
+        <MissionsPanel
+          botId={botId}
+          channelType={missionChannelType}
+          channelId={missionChannelId}
+          liveMissions={channelState.missions ?? []}
+          activeGoalMissionId={channelState.activeGoalMissionId ?? null}
+          missionRefreshSeq={channelState.missionRefreshSeq ?? 0}
+          lastMissionEventMissionId={channelState.lastMissionEventMissionId ?? null}
+          focusMissionRequest={missionFocusRequest}
+          pendingGoalTitle={channelState.pendingGoalMissionTitle ?? null}
+          getAccessToken={getAccessToken}
         />
       </div>
 
-      <div className={`${activeView === "knowledge" ? "flex" : "hidden"} min-h-0 flex-1 flex-col`}>
+      {activeView === "knowledge" && (
+      <div className="flex min-h-0 flex-1 flex-col">
 
       {/* Scope tabs */}
       <div className="px-2 pt-2">
@@ -737,20 +938,6 @@ export function KbSidePanel({
             <span className="text-[10px] font-medium text-foreground/70 truncate flex-1 mr-2">
               {preview.filename}
             </span>
-            {preview.source === "workspace" && preview.editedContent !== undefined && (
-              <button
-                type="button"
-                onClick={saveWorkspacePreview}
-                disabled={
-                  preview.saving ||
-                  preview.editedContent === preview.content ||
-                  !onWorkspaceFileSave
-                }
-                className="mr-1 rounded-md px-2 py-0.5 text-[10px] font-medium text-primary transition-colors hover:bg-primary/[0.08] disabled:cursor-not-allowed disabled:text-secondary/35 disabled:hover:bg-transparent"
-              >
-                {preview.saving ? "Saving" : preview.savedAt ? "Saved" : "Save"}
-              </button>
-            )}
             <button
               onClick={closePreview}
               className="p-0.5 rounded text-secondary/40 hover:text-foreground hover:bg-black/[0.04] transition-all cursor-pointer shrink-0"
@@ -799,25 +986,6 @@ export function KbSidePanel({
                   >
                     Download
                   </a>
-                )}
-              </div>
-            ) : preview.source === "workspace" && preview.editedContent !== undefined ? (
-              <div className="flex h-full min-h-[140px] flex-col gap-1.5">
-                <textarea
-                  value={preview.editedContent}
-                  onChange={(event) => {
-                    const value = event.target.value;
-                    setPreview((prev) =>
-                      prev?.id === preview.id
-                        ? { ...prev, editedContent: value, saveError: null, savedAt: undefined }
-                        : prev,
-                    );
-                  }}
-                  spellCheck={false}
-                  className="min-h-0 flex-1 resize-none rounded-lg border border-black/[0.06] bg-white px-2.5 py-2 font-mono text-[11px] leading-relaxed text-foreground/80 outline-none transition-colors focus:border-primary/30"
-                />
-                {preview.saveError && (
-                  <p className="text-[10px] text-red-500">{preview.saveError}</p>
                 )}
               </div>
             ) : (
@@ -896,44 +1064,14 @@ export function KbSidePanel({
                 </div>
               </div>
               <div className="ml-3 pl-2 border-l border-black/[0.05]">
-                {filteredWorkspaceFiles.map((file) => {
-                  const previewId = `workspace:${file.path}`;
-                  const isPreviewing = preview?.id === previewId;
-                  const downloadUrl = buildWorkspaceFileContentUrl({ botId, path: file.path, mode: "download" });
-                  return (
-                    <div
-                      key={file.path}
-                      className={`flex items-center gap-1 rounded-md transition-colors ${
-                        isPreviewing ? "bg-black/[0.05]" : "hover:bg-black/[0.03]"
-                      }`}
-                    >
-                      <span className="w-5 shrink-0" />
-                      <button
-                        type="button"
-                        onClick={() => openWorkspacePreview(file)}
-                        className="flex-1 min-w-0 py-1 pl-2 pr-1 text-left text-foreground/70 cursor-pointer"
-                        title={file.path}
-                      >
-                        <span className="block text-[11px] truncate">
-                          {file.filename}
-                        </span>
-                        <span className="block text-[9px] text-secondary/35 truncate">
-                          {file.path} · {formatWorkspaceFileSize(file.size)}
-                        </span>
-                      </button>
-                      <a
-                        href={downloadUrl}
-                        className="shrink-0 rounded-md p-1.5 text-secondary/40 hover:text-foreground hover:bg-black/[0.04] transition-colors"
-                        aria-label={`Download ${file.filename}`}
-                        title={`Download ${file.filename}`}
-                      >
-                        <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M12 3v12m0 0l4-4m-4 4l-4-4M5 21h14" />
-                        </svg>
-                      </a>
-                    </div>
-                  );
-                })}
+                <div role="tree" aria-label="Generated files">
+                  <WorkspaceFileTreeRows
+                    nodes={workspaceFileTree}
+                    botId={botId}
+                    previewId={preview?.id ?? null}
+                    onPreviewFile={openWorkspacePreview}
+                  />
+                </div>
               </div>
             </div>
           )
@@ -1137,6 +1275,7 @@ export function KbSidePanel({
         )}
       </div>
       </div>
+      )}
       </div>
     </div>
   );

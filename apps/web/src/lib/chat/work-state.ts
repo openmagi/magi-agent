@@ -193,6 +193,10 @@ function progressFrom(
       runningSubagents.length === 1 ? "" : "s"
     } active`;
   }
+  if (channelState.streaming && channelState.heartbeatElapsedMs && channelState.heartbeatElapsedMs >= 3000) {
+    const seconds = Math.round(channelState.heartbeatElapsedMs / 1000);
+    return isKorean(language) ? `응답 대기 중 · ${seconds}초` : `Waiting for response · ${seconds}s`;
+  }
   return undefined;
 }
 

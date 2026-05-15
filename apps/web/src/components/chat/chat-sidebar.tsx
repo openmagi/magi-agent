@@ -19,23 +19,17 @@ import {
   arrayMove,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import type { Channel } from "@/lib/chat/types";
+import type { Channel, ChannelMemoryMode } from "@/lib/chat/types";
 import { useChatStore } from "@/lib/chat/chat-store";
 import { useI18n } from "@/lib/i18n";
 import { localizeCategory, localizeChannel, DEFAULT_CHANNELS } from "@/lib/chat/channel-i18n";
 import {
+  formatChannelBaseLabel,
+  formatChannelMemoryBadgeLabel,
   formatChannelMemoryLabel,
-  getChannelMemoryMode,
-  withChannelMemoryModeSuffix,
-  type ChannelMemoryModeOption,
 } from "@/lib/chat/channel-memory-mode";
 
-const DEFAULT_CATEGORIES = ["General", "Info", "Life", "Finance", "Study", "People", "Tasks"];
-const CHANNEL_MEMORY_MODE_OPTIONS: Array<{ value: ChannelMemoryModeOption; label: string }> = [
-  { value: "normal", label: "Normal" },
-  { value: "read_only", label: "Read-only" },
-  { value: "incognito", label: "No memory" },
-];
+const DEFAULT_CATEGORIES = ["General"];
 
 type FlatItem =
   | { type: "header"; key: string; title: string }
@@ -85,6 +79,63 @@ function TrashIcon({ onClick }: { onClick: () => void }) {
         <path strokeLinecap="round" strokeLinejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0" />
       </svg>
     </button>
+  );
+}
+
+function MemoryOffIcon() {
+  return (
+    <span title="Memory off" className="shrink-0 text-secondary/45" aria-label="Memory off">
+      <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+        <path strokeLinecap="round" strokeLinejoin="round" d="M3 3l18 18" />
+        <path strokeLinecap="round" strokeLinejoin="round" d="M10.5 10.5a2.25 2.25 0 003 3" />
+        <path strokeLinecap="round" strokeLinejoin="round" d="M9.88 5.09A10.55 10.55 0 0112 4.88c5.25 0 8.25 4.62 9 6.12-.32.64-1.12 1.9-2.37 3.08" />
+        <path strokeLinecap="round" strokeLinejoin="round" d="M6.61 6.62C4.73 7.89 3.54 9.83 3 11c.75 1.5 3.75 6.12 9 6.12 1.17 0 2.25-.23 3.22-.62" />
+      </svg>
+    </span>
+  );
+}
+
+function MemoryReadOnlyIcon() {
+  return (
+    <span title="Memory read-only" className="shrink-0 text-secondary/45" aria-label="Memory read-only">
+      <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+        <path strokeLinecap="round" strokeLinejoin="round" d="M4 5.5A2.5 2.5 0 016.5 3H20v15H7a3 3 0 00-3 3V5.5z" />
+        <path strokeLinecap="round" strokeLinejoin="round" d="M8 7h8M8 10h6" />
+        <path strokeLinecap="round" strokeLinejoin="round" d="M16 17l4 4M20 17l-4 4" />
+      </svg>
+    </span>
+  );
+}
+
+function MemoryModeIcon({ mode }: { mode?: ChannelMemoryMode }) {
+  if (mode === "incognito") return <MemoryOffIcon />;
+  if (mode === "read_only") return <MemoryReadOnlyIcon />;
+  return null;
+}
+
+function MemoryModeBadge({
+  mode,
+  active = false,
+}: {
+  mode?: ChannelMemoryMode;
+  active?: boolean;
+}) {
+  const label = formatChannelMemoryLabel(mode);
+  const badgeLabel = formatChannelMemoryBadgeLabel(mode);
+  if (!label || !badgeLabel) return null;
+
+  return (
+    <span
+      title={label}
+      aria-label={label}
+      className={`shrink-0 rounded-full border px-1.5 py-0.5 text-[10px] font-medium leading-none ${
+        active
+          ? "border-primary/20 bg-white/70 text-primary-light"
+          : "border-black/[0.08] bg-black/[0.035] text-secondary/70 group-hover:text-foreground/70"
+      }`}
+    >
+      {badgeLabel}
+    </span>
   );
 }
 
@@ -219,8 +270,9 @@ function SortableChannel({ id, channel, isActive, isCustom, canDelete, isRenamin
       ) : (
         <>
           <span className="truncate flex-1">
-            {withChannelMemoryModeSuffix(channel)}
+            {formatChannelBaseLabel(channel)}
           </span>
+          <MemoryModeBadge mode={channel.memory_mode} active={isActive} />
           <div className="flex items-center gap-0.5 shrink-0">
             {isCustom && (
               <PencilIcon onClick={() => onStartRename(id, channel.display_name || channel.name)} />
@@ -252,7 +304,7 @@ interface ChatSidebarProps {
   mobileOpen: boolean;
   onChannelSelect: (name: string) => void;
   onDeleteChannel: (name: string) => void;
-  onCreateChannel: (name: string, memoryMode?: ChannelMemoryModeOption) => void;
+  onCreateChannel: (name: string, memoryMode?: ChannelMemoryMode) => void;
   onCreateCategory: (name: string) => void;
   onDeleteCategory: (name: string) => void;
   onRefreshChannels: () => void;
@@ -298,8 +350,7 @@ export function ChatSidebar({
   const router = useRouter();
   const [showNewChannel, setShowNewChannel] = useState(false);
   const [newChannelName, setNewChannelName] = useState("");
-  const [newChannelMemoryMode, setNewChannelMemoryMode] =
-    useState<ChannelMemoryModeOption>("normal");
+  const [newChannelMemoryMode, setNewChannelMemoryMode] = useState<ChannelMemoryMode>("normal");
   const [showNewCategory, setShowNewCategory] = useState(false);
   const [newCategoryName, setNewCategoryName] = useState("");
   const [showAddMenu, setShowAddMenu] = useState(false);
@@ -328,7 +379,7 @@ export function ChatSidebar({
 
   const handleAddBot = useCallback(() => {
     try {
-      sessionStorage.setItem("magi:open-add-bot", "1");
+      sessionStorage.setItem("clawy:open-add-bot", "1");
     } catch { /* ignore */ }
     setBotMenuOpen(false);
     onMobileClose();
@@ -465,7 +516,7 @@ export function ChatSidebar({
     setNewChannelMemoryMode("normal");
     setShowNewChannel(false);
     // Stay in edit mode — don't call onToggleEdit
-  }, [newChannelMemoryMode, newChannelName, onCreateChannel]);
+  }, [newChannelName, newChannelMemoryMode, onCreateChannel]);
 
   const handleCreateCategory = useCallback(() => {
     const name = newCategoryName.trim();
@@ -561,10 +612,11 @@ export function ChatSidebar({
         </div>
       </div>
 
-      {/* Channels */}
-      <nav className="flex-1 min-h-0 p-3 overflow-y-auto">
-        {/* Edit/Done/Cancel bar */}
-        <div className="sticky top-0 z-10 -mx-3 -mt-3 px-3 pt-1.5 pb-1.5 bg-background md:bg-gray-50 flex items-center justify-end gap-1.5">
+      <div
+        className="border-b border-black/8 bg-background px-3 py-2 md:bg-gray-50"
+        data-chat-sidebar-edit-bar="true"
+      >
+        <div className="flex items-center justify-end gap-1.5">
           {editing && (
             <button
               onClick={handleCancel}
@@ -580,6 +632,10 @@ export function ChatSidebar({
             {editing ? "Done" : "Edit"}
           </button>
         </div>
+      </div>
+
+      {/* Channels */}
+      <nav className="flex-1 min-h-0 p-3 overflow-y-auto" data-chat-sidebar-channel-nav="true">
         {editing ? (
           <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
             <SortableContext items={flatIds} strategy={verticalListSortingStrategy}>
@@ -638,13 +694,6 @@ export function ChatSidebar({
                 <div className="space-y-0.5">
                   {chs.map((ch) => {
                     const unread = activeChannel !== ch.name && useChatStore.getState().hasUnread(ch.name);
-                    const localizedChannel = {
-                      ...ch,
-                      display_name: localizeChannel(ch.name, ch.display_name, locale),
-                    };
-                    const memoryModeLabel = formatChannelMemoryLabel(
-                      getChannelMemoryMode(localizedChannel),
-                    );
                     return (
                       <button
                         key={ch.id}
@@ -659,15 +708,14 @@ export function ChatSidebar({
                         }`}
                       >
                         <span className="min-w-0 flex-1 truncate">
-                          # {withChannelMemoryModeSuffix(localizedChannel)}
+                          # {formatChannelBaseLabel({
+                            ...ch,
+                            display_name: localizeChannel(ch.name, ch.display_name, locale),
+                          })}
                         </span>
-                        {memoryModeLabel && (
-                          <span className="shrink-0 rounded-md border border-black/[0.08] bg-black/[0.04] px-1.5 py-0.5 text-[10px] font-medium text-secondary/70">
-                            {memoryModeLabel}
-                          </span>
-                        )}
+                        <MemoryModeBadge mode={ch.memory_mode} active={activeChannel === ch.name} />
                         {unread && (
-                          <span className="ml-auto w-2 h-2 rounded-full bg-primary shrink-0" />
+                          <span className="w-2 h-2 rounded-full bg-primary shrink-0" />
                         )}
                       </button>
                     );
@@ -798,27 +846,32 @@ export function ChatSidebar({
               onChange={(e) => setNewChannelName(e.target.value)}
               onKeyDown={(e) => {
                 if (e.key === "Enter") handleCreateChannel();
-                if (e.key === "Escape") setShowNewChannel(false);
+                if (e.key === "Escape") {
+                  setNewChannelMemoryMode("normal");
+                  setShowNewChannel(false);
+                }
               }}
               placeholder="Channel name (e.g. research)"
               className="w-full bg-black/5 border border-black/8 rounded-xl px-4 py-3 text-sm text-foreground placeholder-secondary focus:outline-none focus:border-primary/50 mb-4"
               autoFocus
             />
-            <div className="mb-4 grid grid-cols-3 gap-1 rounded-xl bg-black/[0.04] p-1">
-              {CHANNEL_MEMORY_MODE_OPTIONS.map((option) => (
-                <button
-                  key={option.value}
-                  type="button"
-                  onClick={() => setNewChannelMemoryMode(option.value)}
-                  aria-pressed={newChannelMemoryMode === option.value}
-                  className={`min-h-10 rounded-lg px-2 py-1.5 text-xs font-medium transition-colors ${
-                    newChannelMemoryMode === option.value
-                      ? "bg-white text-foreground shadow-sm"
-                      : "text-secondary hover:text-foreground"
-                  }`}
-                >
-                  {option.label}
-                </button>
+            <div className="mb-4 space-y-1.5">
+              {([
+                ["normal", "Normal memory"],
+                ["read_only", "Read-only memory"],
+                ["incognito", "No memory"],
+              ] as const).map(([mode, label]) => (
+                <label key={mode} className="flex items-center gap-2 rounded-xl border border-black/8 bg-black/[0.03] px-3 py-2.5 text-sm text-foreground">
+                  <input
+                    type="radio"
+                    name="new-channel-memory-mode"
+                    checked={newChannelMemoryMode === mode}
+                    onChange={() => setNewChannelMemoryMode(mode)}
+                    className="h-4 w-4 border-black/20 accent-primary"
+                  />
+                  <span className="min-w-0 flex-1">{label}</span>
+                  <MemoryModeIcon mode={mode} />
+                </label>
               ))}
             </div>
             <div className="flex gap-3">

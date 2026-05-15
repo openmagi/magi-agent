@@ -1,12 +1,15 @@
 "use client";
 
 import { useRef, useEffect, useLayoutEffect, useMemo, useImperativeHandle, forwardRef, useState, useCallback } from "react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import { MessageBubble } from "./message-bubble";
 import { TypingIndicator } from "./typing-indicator";
 import { ControlRequestCard } from "./control-request";
 import { compareChatMessages } from "@/lib/chat/message-order";
 import { shouldPreferServerAssistantMessage } from "@/lib/chat/server-reconcile";
 import { stripAssistantMetadataPreamble } from "@/lib/chat/visible-content";
+import { stripResearchEvidenceMarker } from "@/lib/chat/research-evidence";
 import { deriveWorkConsoleRows, type WorkConsoleRow, type WorkConsoleRowStatus } from "@/lib/chat/work-console";
 import { deriveWorkStateSummary } from "@/lib/chat/work-state";
 import { dispatchOpenMissionLedgerEvent } from "@/lib/chat/mission-ledger-events";
@@ -177,6 +180,44 @@ function InlineBrowserFramePreview({
   );
 }
 
+const ROLLING_PREVIEW_MAX_CHARS = 500;
+const ROLLING_PREVIEW_MAX_LINES = 8;
+
+function rollingPreview(text: string): string {
+  if (!text) return "";
+  const lines = text.split("\n").filter((l) => l.trim());
+  const tail = lines.slice(-ROLLING_PREVIEW_MAX_LINES).join("\n");
+  if (tail.length <= ROLLING_PREVIEW_MAX_CHARS) return tail;
+  return "…" + tail.slice(-ROLLING_PREVIEW_MAX_CHARS);
+}
+
+function isActiveWorkPhase(channelState: ChannelState): boolean {
+  const phase = channelState.turnPhase;
+  return (
+    phase === "pending" ||
+    phase === "planning" ||
+    phase === "executing" ||
+    phase === "verifying" ||
+    phase === "compacting"
+  );
+}
+
+function shouldEnterStreamingPreview(channelState: ChannelState): boolean {
+  if (!channelState.streaming || !channelState.streamingText) return false;
+  if (channelState.turnPhase === "committing" || channelState.turnPhase === "committed") {
+    return false;
+  }
+  return true;
+}
+
+function shouldExitStreamingPreview(channelState: ChannelState): boolean {
+  if (!channelState.streaming) return true;
+  if (channelState.turnPhase === "committing" || channelState.turnPhase === "committed") {
+    return true;
+  }
+  return false;
+}
+
 function hasOpenTaskState(channelState: ChannelState): boolean {
   return !!channelState.taskBoard?.tasks.some(
     (task) => task.status === "pending" || task.status === "in_progress",
@@ -204,6 +245,7 @@ function hasInlineRunStatus(
   channelState: ChannelState,
   queuedMessages: QueuedMessage[],
   pendingRequests: ControlRequestRecord[],
+  streamingPreview?: boolean,
 ): boolean {
   const hasLiveWork =
     (channelState.activeTools ?? []).some((tool) => tool.status === "running") ||
@@ -218,10 +260,10 @@ function hasInlineRunStatus(
     channelState.fileProcessing ||
     channelState.reconnecting;
 
-  return hasLiveWork || (channelState.streaming && !channelState.streamingText);
+  return hasLiveWork || !!streamingPreview || channelState.streaming;
 }
 
-const INLINE_WORK_ROW_LIMIT = 4;
+const INLINE_WORK_ROW_LIMIT = 6;
 
 function isUsefulSubagentRow(row: WorkConsoleRow): boolean {
   return !row.detail || !/^iteration\s+\d+$/i.test(row.detail.trim());
@@ -294,18 +336,76 @@ function inlineWorkRows(
   return selected.slice(0, INLINE_WORK_ROW_LIMIT);
 }
 
+function StreamingPreviewSection({
+  text,
+  language,
+}: {
+  text: string;
+  language?: ChatResponseLanguage;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const preview = rollingPreview(text);
+  const fullLineCount = text.split("\n").filter((l) => l.trim()).length;
+  const canExpand = fullLineCount > 4 || text.length > 300;
+  const displayText = expanded ? text : preview;
+
+  useEffect(() => {
+    if (expanded && scrollRef.current) {
+      requestAnimationFrame(() => {
+        if (scrollRef.current) {
+          scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+        }
+      });
+    }
+  }, [expanded, text]);
+
+  return (
+    <div
+      className="mt-2 border-t border-black/[0.06] pt-2"
+      data-chat-streaming-preview="true"
+    >
+      <div
+        ref={scrollRef}
+        className={`streaming-preview-md break-words text-[13px] leading-relaxed text-foreground/70 ${
+          expanded
+            ? "overflow-y-auto overscroll-contain"
+            : "overflow-hidden"
+        }`}
+        style={{ maxHeight: expanded ? "50vh" : "8rem" }}
+      >
+        <ReactMarkdown remarkPlugins={[remarkGfm]}>{displayText}</ReactMarkdown>
+        <span className="ml-0.5 inline-block h-3.5 w-[3px] animate-pulse rounded-full bg-foreground/30 align-middle" />
+      </div>
+      {canExpand && (
+        <button
+          type="button"
+          onClick={() => setExpanded(!expanded)}
+          className="mt-1 text-[11px] font-medium text-primary/60 hover:text-primary/80"
+        >
+          {expanded
+            ? t(language, "Collapse", "접기")
+            : t(language, "Show more", "더 보기")}
+        </button>
+      )}
+    </div>
+  );
+}
+
 function InlineRunStatus({
   channelState,
   queuedMessages,
   pendingRequests,
+  showStreamingPreview: streamingPreview,
   uiLanguage,
 }: {
   channelState: ChannelState;
   queuedMessages: QueuedMessage[];
   pendingRequests: ControlRequestRecord[];
+  showStreamingPreview?: boolean;
   uiLanguage?: ChatResponseLanguage;
 }) {
-  if (!hasInlineRunStatus(channelState, queuedMessages, pendingRequests)) return null;
+  if (!hasInlineRunStatus(channelState, queuedMessages, pendingRequests, streamingPreview)) return null;
 
   const language = uiLanguage ?? channelState.responseLanguage;
   const summary = deriveWorkStateSummary({
@@ -320,8 +420,8 @@ function InlineRunStatus({
   const mission = currentRunMission(channelState);
 
   return (
-    <div className="chat-msg-in mb-4 flex justify-start" data-chat-inline-run-status="true">
-      <div className="w-full max-w-[92%] rounded-lg border border-black/[0.08] bg-white/90 px-3 py-2.5 shadow-sm backdrop-blur sm:max-w-[82%]">
+    <div className="chat-msg-in mb-4" data-chat-inline-run-status="true">
+      <div className="w-full rounded-lg border border-black/[0.08] bg-white/90 px-3 py-2.5 shadow-sm backdrop-blur">
         <div className="flex min-w-0 items-center justify-between gap-3">
           <div className="min-w-0">
             <div className="text-[11px] font-semibold uppercase tracking-wide text-secondary/50">
@@ -363,42 +463,71 @@ function InlineRunStatus({
           </div>
         </div>
 
+        {streamingPreview && (
+          <StreamingPreviewSection
+            text={channelState.streamingText}
+            language={language}
+          />
+        )}
+
         {channelState.browserFrame && (
           <InlineBrowserFramePreview frame={channelState.browserFrame} language={language} />
         )}
 
-        {rows.length > 0 && (
-          <ul className="mt-2 space-y-1" aria-label={t(language, "Current work updates", "현재 작업 업데이트")}>
-            {rows.map((row) => (
-              <li
-                key={row.id}
-                className="flex min-w-0 items-start gap-2 rounded-md bg-black/[0.025] px-2 py-1.5"
-                data-chat-inline-run-row="true"
-                data-chat-inline-run-row-status={row.status}
-              >
-                <span
-                  className={`mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full ${statusDotClass(row.status)}`}
-                  aria-hidden="true"
-                />
-                <span className="min-w-0 flex-1">
-                  <span className="flex min-w-0 items-baseline gap-2">
-                    <span className="min-w-0 truncate text-[12px] font-medium text-foreground/80">
-                      {row.label}
-                    </span>
-                    {row.meta && (
-                      <span className="shrink-0 text-[10px] text-secondary/40">{row.meta}</span>
-                    )}
+        {(() => {
+          const subagentRows = rows.filter((r) => r.group === "subagent");
+          const otherRows = rows.filter((r) => r.group !== "subagent");
+          const renderRow = (row: WorkConsoleRow) => (
+            <li
+              key={row.id}
+              className="flex min-w-0 items-start gap-2 rounded-md bg-black/[0.025] px-2 py-1.5"
+              data-chat-inline-run-row="true"
+              data-chat-inline-run-row-status={row.status}
+            >
+              <span
+                className={`mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full ${statusDotClass(row.status)}`}
+                aria-hidden="true"
+              />
+              <span className="min-w-0 flex-1">
+                <span className="flex min-w-0 items-baseline gap-2">
+                  <span className="min-w-0 truncate text-[12px] font-medium text-foreground/80">
+                    {row.label}
                   </span>
-                  {row.detail && (
-                    <span className="mt-0.5 block truncate text-[11.5px] leading-snug text-secondary/60">
-                      {row.detail}
-                    </span>
+                  {row.meta && (
+                    <span className="shrink-0 text-[10px] text-secondary/40">{row.meta}</span>
                   )}
                 </span>
-              </li>
-            ))}
-          </ul>
-        )}
+                {row.detail && (
+                  <span className="mt-0.5 block truncate text-[11.5px] leading-snug text-secondary/60">
+                    {row.detail}
+                  </span>
+                )}
+              </span>
+            </li>
+          );
+          return (
+            <>
+              {subagentRows.length > 0 && (
+                <div className="mt-2 border-t border-black/[0.06] pt-2">
+                  <div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-secondary/45">
+                    {t(language, "Background agents", "백그라운드 도우미")}
+                  </div>
+                  <ul className="space-y-1">{subagentRows.map(renderRow)}</ul>
+                </div>
+              )}
+              {otherRows.length > 0 && (
+                <div className={subagentRows.length > 0 ? "mt-2 border-t border-black/[0.06] pt-2" : "mt-2"}>
+                  {subagentRows.length > 0 && (
+                    <div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-secondary/45">
+                      {t(language, "Actions", "실행 중")}
+                    </div>
+                  )}
+                  <ul className="space-y-1">{otherRows.map(renderRow)}</ul>
+                </div>
+              )}
+            </>
+          );
+        })()}
       </div>
     </div>
   );
@@ -411,7 +540,7 @@ const OPTIMISTIC_CONTENT_DEDUP_MIN_CHARS = 80;
 function normalizedDuplicateContent(message: ChatMessage): string | null {
   if (message.role === "system") return null;
   const content = message.role === "assistant"
-    ? stripAssistantMetadataPreamble(message.content)
+    ? stripResearchEvidenceMarker(stripAssistantMetadataPreamble(message.content))
     : message.content;
   const normalized = content.replace(/\s+/g, " ").trim();
   if (normalized.length < OPTIMISTIC_CONTENT_DEDUP_MIN_CHARS) return null;
@@ -478,16 +607,23 @@ export const ChatMessages = forwardRef<ChatMessagesHandle, ChatMessagesProps>(fu
     }
 
     const filtered = serverMessages.filter((sm) => {
-      // Exact serverId match
+      // Exact serverId match — already present locally
       if (sm.serverId && localServerIds.has(sm.serverId)) return false;
-      // Timestamp proximity: if a local message with same role exists within window, skip
       const smTs = sm.timestamp ?? 0;
-      const roleTimes = localByRole.get(sm.role);
-      if (roleTimes) {
-        for (const lt of roleTimes) {
-          if (Math.abs(smTs - lt) < TIMESTAMP_DEDUP_WINDOW_MS) return false;
+      // Timestamp-only proximity dedup: only for messages without a serverId
+      // (optimistic locally-created messages). Server messages with a serverId
+      // are authoritative records — deduping them by role+timestamp alone
+      // can false-positive against a *different* message within the window.
+      if (!sm.serverId) {
+        const roleTimes = localByRole.get(sm.role);
+        if (roleTimes) {
+          for (const lt of roleTimes) {
+            if (Math.abs(smTs - lt) < TIMESTAMP_DEDUP_WINDOW_MS) return false;
+          }
         }
       }
+      // Content-based dedup still applies to all messages (catches late-arriving
+      // server copies of optimistic streamed messages regardless of serverId).
       const contentKey = duplicateContentKey(sm);
       const contentTimes = contentKey ? optimisticByContent.get(contentKey) : undefined;
       if (contentTimes) {
@@ -552,6 +688,9 @@ export const ChatMessages = forwardRef<ChatMessagesHandle, ChatMessagesProps>(fu
     if (el) el.scrollTop = el.scrollHeight;
   }, []);
 
+  const activeToolCount = channelState.activeTools?.length ?? 0;
+  const subagentCount = channelState.subagents?.length ?? 0;
+
   // Auto-scroll on new messages or streaming — use scrollTop, not scrollIntoView
   useEffect(() => {
     if (userScrolledUp.current) return;
@@ -560,17 +699,35 @@ export const ChatMessages = forwardRef<ChatMessagesHandle, ChatMessagesProps>(fu
     requestAnimationFrame(() => {
       el.scrollTop = el.scrollHeight;
     });
-  }, [allMessages.length, channelState.streamingText, channelState.thinkingText]);
+  }, [
+    allMessages.length,
+    channelState.streaming,
+    channelState.streamingText,
+    channelState.thinkingText,
+    channelState.turnPhase,
+    activeToolCount,
+    subagentCount,
+  ]);
 
   const pendingControlRequests = useMemo(
     () => (controlRequests ?? []).filter((request) => request.state === "pending"),
     [controlRequests],
   );
   const liveQueuedMessages = queuedMessages ?? [];
+
+  const previewStickyRef = useRef(false);
+  if (shouldExitStreamingPreview(channelState)) {
+    previewStickyRef.current = false;
+  } else if (shouldEnterStreamingPreview(channelState)) {
+    previewStickyRef.current = true;
+  }
+  const showStreamingPreview = previewStickyRef.current && channelState.streaming && !!channelState.streamingText;
+
   const inlineRunVisible = hasInlineRunStatus(
     channelState,
     liveQueuedMessages,
     pendingControlRequests,
+    showStreamingPreview,
   );
 
   // Show typing dots only as a fallback. The inline run snapshot now carries
@@ -924,10 +1081,11 @@ export const ChatMessages = forwardRef<ChatMessagesHandle, ChatMessagesProps>(fu
                 </div>
               )}
 
-              {channelState.streamingText &&
+              {(channelState.streamingText || (channelState.streaming && channelState.hasTextContent)) &&
+                !showStreamingPreview &&
                 (anchoredMidTurnInjected.length > 0 ? (
                   renderAssistantWithInjected(
-                    channelState.streamingText,
+                    channelState.streamingText || "\u200B",
                     anchoredMidTurnInjected,
                     "live",
                     mainMessages.length,
@@ -936,7 +1094,7 @@ export const ChatMessages = forwardRef<ChatMessagesHandle, ChatMessagesProps>(fu
                 ) : (
                   <MessageBubble
                     role="assistant"
-                    content={channelState.streamingText}
+                    content={channelState.streamingText || "\u200B"}
                     isStreaming
                     botId={botId}
                   />
@@ -955,6 +1113,7 @@ export const ChatMessages = forwardRef<ChatMessagesHandle, ChatMessagesProps>(fu
                 channelState={channelState}
                 queuedMessages={liveQueuedMessages}
                 pendingRequests={pendingControlRequests}
+                showStreamingPreview={showStreamingPreview}
                 uiLanguage={language}
               />
             </>

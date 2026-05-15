@@ -8,11 +8,7 @@ export type KbPanelScope = "personal" | "org";
 
 export interface KbScopedDoc {
   id: string;
-  filename: string;
-  status: string;
-  collectionId: string;
-  collectionName: string;
-  path?: string | null;
+  filename?: string;
   scope: KbPanelScope;
   orgId?: string | null;
   parent_document_id?: string | null;
@@ -24,7 +20,7 @@ export interface KbScopedDoc {
 export interface KbScopedCollection<TDoc extends KbScopedDoc = KbScopedDoc> {
   id: string;
   name: string;
-  scope: KbPanelScope;
+  scope?: KbPanelScope;
   orgId?: string | null;
   docs: TDoc[];
 }
@@ -91,11 +87,16 @@ export function buildKbPreviewUrl({
 }): string {
   const params = new URLSearchParams({
     botId,
-    path: doc.path ?? doc.id,
-    maxBytes: String(256 * 1024),
+    type: "converted",
+    preview: "true",
   });
 
-  return `/v1/app/knowledge/file?${params.toString()}`;
+  if (doc.scope === "org" && doc.orgId) {
+    params.set("scope", "org");
+    params.set("orgId", doc.orgId);
+  }
+
+  return `/api/knowledge/documents/${doc.id}?${params.toString()}`;
 }
 
 export function getKbPanelDocumentRows<TDoc extends KbScopedDoc & KnowledgeDocumentTreeFields>({

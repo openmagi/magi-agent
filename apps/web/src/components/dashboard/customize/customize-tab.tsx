@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useMessages } from "@/lib/i18n";
 import { VerificationRuleModal } from "./verification-rule-modal";
 import { CustomToolModal } from "./custom-tool-modal";
 
@@ -12,6 +13,7 @@ interface CustomizeTabProps {
 }
 
 export function CustomizeTab({ botId, initialRules, initialAgentConfig, disabled = false }: CustomizeTabProps): React.ReactElement {
+  const t = useMessages();
   const [ruleModalOpen, setRuleModalOpen] = useState(false);
   const [toolModalOpen, setToolModalOpen] = useState(false);
 
@@ -29,8 +31,8 @@ export function CustomizeTab({ botId, initialRules, initialAgentConfig, disabled
             <span className="text-lg">🛡️</span>
           </div>
           <div>
-            <p className="text-sm font-semibold text-foreground">Verification Rules</p>
-            <p className="text-xs text-secondary mt-1 leading-relaxed">Define when and how the agent verifies its work</p>
+            <p className="text-sm font-semibold text-foreground">{t.customize.ruleCardTitle}</p>
+            <p className="text-xs text-secondary mt-1 leading-relaxed">{t.customize.ruleCardDesc}</p>
           </div>
         </button>
 
@@ -45,8 +47,8 @@ export function CustomizeTab({ botId, initialRules, initialAgentConfig, disabled
             <span className="text-lg">🔧</span>
           </div>
           <div>
-            <p className="text-sm font-semibold text-foreground">Custom Tools</p>
-            <p className="text-xs text-secondary mt-1 leading-relaxed">Manage and configure tools available to the agent</p>
+            <p className="text-sm font-semibold text-foreground">{t.customize.toolCardTitle}</p>
+            <p className="text-xs text-secondary mt-1 leading-relaxed">{t.customize.toolCardDesc}</p>
           </div>
         </button>
       </div>

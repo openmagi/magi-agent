@@ -17,13 +17,17 @@ const messages: ChatMessage[] = [
   {
     id: "assistant-1",
     role: "assistant",
-    content: "Result\n[Attachment: report.pdf](attachment:att-1)",
+    content: [
+      "Result",
+      "[attachment:00000000-0000-4000-8000-000000000101:browser-test-login-success.png]",
+      "[attachment:00000000-0000-4000-8000-000000000102:browser-test-dynamic-loaded.png]",
+    ].join("\n"),
     timestamp: Date.parse("2026-05-05T01:01:00.000Z"),
   },
 ];
 
 describe("chat export formatting", () => {
-  it("normalizes only selected user and assistant messages in chronological order", () => {
+  it("normalizes only selected non-system messages in chronological order", () => {
     const selected = new Set(["assistant-1", "user-1", "sys-1"]);
 
     expect(normalizeSelectedChatExportMessages(messages, selected)).toEqual([
@@ -37,6 +41,16 @@ describe("chat export formatting", () => {
         id: "assistant-1",
         role: "assistant",
         content: "Result",
+        attachments: [
+          {
+            id: "00000000-0000-4000-8000-000000000101",
+            filename: "browser-test-login-success.png",
+          },
+          {
+            id: "00000000-0000-4000-8000-000000000102",
+            filename: "browser-test-dynamic-loaded.png",
+          },
+        ],
         timestamp: Date.parse("2026-05-05T01:01:00.000Z"),
       },
     ]);
@@ -60,8 +74,11 @@ describe("chat export formatting", () => {
     expect(markdown).toContain("Hello");
     expect(markdown).toContain("## Assistant - 2026-05-05 01:01");
     expect(markdown).toContain("Result");
+    expect(markdown).toContain("Attachments:");
+    expect(markdown).toContain("browser-test-login-success.png");
+    expect(markdown).toContain("browser-test-dynamic-loaded.png");
     expect(markdown).not.toContain("KB_CONTEXT");
-    expect(markdown).not.toContain("attachment:att-1");
+    expect(markdown).not.toContain("[attachment:");
   });
 
   it("builds a safe markdown filename", () => {

@@ -1,5 +1,39 @@
 import { resolveKnowledgeUploadMimeType } from "@/lib/knowledge/upload-mime";
+import { isImageMimetype } from "./attachment-marker";
+import { createMarker } from "./attachment-marker";
+import { uploadAttachment } from "./attachments";
 import type { KbDocReference } from "./types";
+
+export interface SplitFiles {
+  imageFiles: File[];
+  otherFiles: File[];
+}
+
+export function splitImageAndOtherFiles(files: File[]): SplitFiles {
+  const imageFiles: File[] = [];
+  const otherFiles: File[] = [];
+  for (const file of files) {
+    if (isImageMimetype(file.type)) {
+      imageFiles.push(file);
+    } else {
+      otherFiles.push(file);
+    }
+  }
+  return { imageFiles, otherFiles };
+}
+
+export async function uploadImagesAsAttachmentMarkers(
+  botId: string,
+  channelName: string,
+  imageFiles: File[],
+): Promise<string> {
+  const markers: string[] = [];
+  for (const file of imageFiles) {
+    const attachment = await uploadAttachment(botId, channelName, file);
+    markers.push(createMarker(attachment.id, file.name));
+  }
+  return markers.join("\n");
+}
 
 export type PendingKbUploadPhase = "uploading" | "indexing" | "ready" | "failed";
 
