@@ -1,11 +1,13 @@
-export type Locale = "en" | "ko" | "ja" | "zh" | "es";
+export type Locale = "en" | "es" | "zh" | "ja" | "ko";
 
-export const LOCALES: Locale[] = ["en", "ko", "ja", "zh", "es"];
-export const DEFAULT_LOCALE: Locale = "en";
 export const LOCALE_LABELS: Record<Locale, string> = {
   en: "English",
-  ko: "한국어",
-  ja: "日本語",
-  zh: "中文",
   es: "Español",
+  zh: "中文",
+  ja: "日本語",
+  ko: "한국어",
 };
+
+export const LOCALES: Locale[] = ["en", "es", "zh", "ja", "ko"];
+
+export const DEFAULT_LOCALE: Locale = "en";

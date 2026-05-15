@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
+import { agentFetch } from "@/lib/local-api";
 
 interface ToolStats {
   calls: number;
@@ -59,7 +60,7 @@ export function ToolsSection({ botId, disabled = false }: ToolsSectionProps): Re
   const fetchTools = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await fetch(`/api/bots/${botId}/tools`);
+      const res = await agentFetch(`/v1/tools`);
       if (res.ok) {
         const data: { tools?: ToolMetadata[] } = await res.json();
         setTools(data.tools ?? []);
@@ -78,7 +79,7 @@ export function ToolsSection({ botId, disabled = false }: ToolsSectionProps): Re
 
   const handleToggle = async (toolName: string, currentEnabled: boolean): Promise<void> => {
     const action = currentEnabled ? "disable" : "enable";
-    await fetch(`/api/bots/${botId}/tools/${encodeURIComponent(toolName)}/${action}`, {
+    await agentFetch(`/v1/tools/${encodeURIComponent(toolName)}/${action}`, {
       method: "PUT",
     });
     setTools((prev) =>
@@ -87,7 +88,7 @@ export function ToolsSection({ botId, disabled = false }: ToolsSectionProps): Re
   };
 
   const handleDelete = async (toolName: string): Promise<void> => {
-    const res = await fetch(`/api/bots/${botId}/tools/${encodeURIComponent(toolName)}`, {
+    const res = await agentFetch(`/v1/tools/${encodeURIComponent(toolName)}`, {
       method: "DELETE",
     });
     if (res.ok) setTools((prev) => prev.filter((t) => t.name !== toolName));

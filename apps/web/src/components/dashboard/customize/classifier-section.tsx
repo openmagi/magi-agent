@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { agentFetch } from "@/lib/local-api";
 
 export interface DimensionDef {
   name: string;
@@ -31,7 +32,7 @@ export function ClassifierSection({
     setConverting(true);
     setError(null);
     try {
-      const res = await fetch("/api/hooks/nl-to-classifier", {
+      const res = await agentFetch("/v1/hooks/nl-to-classifier", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ description: nlInput }),
