@@ -22,7 +22,6 @@ export type AppRoute =
   | "settings"
   | "usage"
   | "skills"
-  | "converter"
   | "workspace"
   | "knowledge"
   | "memory";
