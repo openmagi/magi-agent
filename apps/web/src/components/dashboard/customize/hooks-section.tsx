@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
+import { agentFetch } from "@/lib/local-api";
 
 interface HookStats {
   totalRuns: number;
@@ -62,7 +63,7 @@ export function HooksSection({ botId, disabled = false }: HooksSectionProps): Re
   const fetchHooks = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await fetch(`/api/bots/${botId}/hooks`);
+      const res = await agentFetch(`/v1/hooks`);
       if (res.ok) {
         const data = (await res.json()) as { hooks?: HookInfo[] };
         setHooks(data.hooks ?? []);
@@ -85,7 +86,7 @@ export function HooksSection({ botId, disabled = false }: HooksSectionProps): Re
     setError(null);
     setPreview(null);
     try {
-      const res = await fetch("/api/hooks/nl-to-config", {
+      const res = await agentFetch("/v1/hooks/nl-to-config", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ description: nlInput }),
@@ -105,7 +106,7 @@ export function HooksSection({ botId, disabled = false }: HooksSectionProps): Re
 
   const handleToggle = async (hookName: string, currentEnabled: boolean): Promise<void> => {
     const action = currentEnabled ? "disable" : "enable";
-    await fetch(`/api/bots/${botId}/hooks/${encodeURIComponent(hookName)}/${action}`, {
+    await agentFetch(`/v1/hooks/${encodeURIComponent(hookName)}/${action}`, {
       method: "POST",
     });
     setHooks((prev) =>
@@ -114,7 +115,7 @@ export function HooksSection({ botId, disabled = false }: HooksSectionProps): Re
   };
 
   const handleDelete = async (hookName: string): Promise<void> => {
-    const res = await fetch(`/api/bots/${botId}/hooks/${encodeURIComponent(hookName)}`, {
+    const res = await agentFetch(`/v1/hooks/${encodeURIComponent(hookName)}`, {
       method: "DELETE",
     });
     if (res.ok) setHooks((prev) => prev.filter((h) => h.name !== hookName));

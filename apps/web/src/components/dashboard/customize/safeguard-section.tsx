@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { useAuthFetch } from "@/hooks/use-auth-fetch";
+import { agentFetch } from "@/lib/local-api";
 import type { DimensionDef } from "./classifier-section";
 
 const MAX_CHARS = 5000;
@@ -31,50 +31,50 @@ const PRESETS: SafeguardPreset[] = [
   {
     id: "file-delivery",
     icon: "📎",
-    title: "Deliver files in chat",
-    description: "When a file or report is created, it must be attached in chat",
+    title: "파일 만들면 꼭 첨부하기",
+    description: "파일이나 보고서를 생성하면 반드시 채팅에 첨부합니다",
     ruleText: "After creating a file or document, you must attach it in chat before saying the task is complete. If the check fails, block completion and retry the missing work.",
   },
   {
     id: "source-grounding",
     icon: "🔍",
-    title: "Source-grounded facts",
-    description: "Factual answers must include sources",
+    title: "사실 확인은 출처와 함께",
+    description: "사실 기반 답변에는 반드시 출처를 포함합니다",
     ruleText: "For research or factual answers, the agent checks that important claims have sources. If the check fails, block completion and retry the missing work.",
   },
   {
     id: "external-confirm",
     icon: "✉️",
-    title: "Confirm before external actions",
-    description: "Ask for user confirmation before external service calls",
+    title: "이메일/결제 전에 확인받기",
+    description: "외부 서비스 호출 전에 사용자 확인을 받습니다",
     ruleText: "Before sending email, uploading outside the workspace, paying, or posting, the agent asks for confirmation. If the check fails, ask the user before continuing.",
   },
   {
     id: "progress-update",
     icon: "📊",
-    title: "Progress updates for long tasks",
-    description: "Give brief progress updates during long-running work",
+    title: "10분 넘으면 중간보고",
+    description: "긴 작업 중에는 짧은 진행 상황을 알려줍니다",
     ruleText: "During long work, the agent gives short progress updates instead of going silent.",
   },
   {
     id: "final-answer",
     icon: "✅",
-    title: "Final answer quality check",
-    description: "Verify all deliverables are met before the final answer",
+    title: "최종 답변 퀄리티 체크",
+    description: "최종 답변 전에 요청사항을 모두 충족했는지 확인합니다",
     ruleText: "Before the final reply, the agent checks whether it satisfied every requested deliverable. If the check fails, block completion and retry the missing work.",
   },
   {
     id: "korean-only",
     icon: "🇰🇷",
-    title: "Always respond in English",
-    description: "Respond in English regardless of the question language",
-    ruleText: "Always respond in English regardless of the language used in the question.",
+    title: "항상 한국어로 답변",
+    description: "사용자의 언어와 관계없이 한국어로 답변합니다",
+    ruleText: "Always respond in Korean regardless of the language used in the question.",
   },
   {
     id: "backup-before-edit",
     icon: "🔒",
-    title: "Backup before code changes",
-    description: "Create a backup before modifying any file",
+    title: "코드 수정 전 백업 생성",
+    description: "파일을 수정하기 전에 원본을 백업합니다",
     ruleText: "Before modifying any code file, create a backup copy first. If the backup fails, ask the user before continuing.",
   },
 ];
@@ -91,51 +91,51 @@ const VERIFICATION_PRESETS: VerificationPreset[] = [
   {
     id: "fact-grounding",
     icon: "🔬",
-    title: "Fact Grounding",
-    description: "Cross-verifies tool results match the response",
+    title: "사실 검증",
+    description: "도구 결과와 응답이 일치하는지 교차 검증합니다",
     defaultEnabled: false,
   },
   {
     id: "answer-quality",
     icon: "✅",
-    title: "Answer Quality",
-    description: "Verifies the response actually answers the question",
+    title: "답변 품질",
+    description: "응답이 질문에 실제로 답했는지 검증합니다",
     defaultEnabled: true,
   },
   {
     id: "self-claim",
     icon: "📂",
-    title: "Self-Claim Check",
-    description: "Ensures file content claims were actually read first",
+    title: "파일 claim 검증",
+    description: "파일 내용을 주장하려면 먼저 읽었는지 확인합니다",
     defaultEnabled: true,
   },
   {
     id: "response-language",
     icon: "🌐",
-    title: "Response Language",
-    description: "Checks response matches the configured language policy",
+    title: "응답 언어",
+    description: "설정된 언어 정책에 맞게 응답하는지 확인합니다",
     defaultEnabled: true,
   },
   {
     id: "deterministic-evidence",
     icon: "🔢",
-    title: "Numeric Evidence",
-    description: "Checks numbers and dates are backed by tool evidence",
+    title: "수치 증거 검증",
+    description: "숫자/날짜 등 정확한 값은 도구 증거로 뒷받침되는지 확인합니다",
     defaultEnabled: true,
   },
 ];
 
 const SECURITY_HOOKS = [
-  { icon: "🛑", title: "Dangerous Commands", description: "Blocks dangerous commands like rm -rf, force push" },
-  { icon: "🔒", title: "Path Escape Prevention", description: "Blocks file access outside the workspace" },
-  { icon: "🔑", title: "Secret Exposure Prevention", description: "Prevents API keys and passwords from appearing in responses" },
-  { icon: "⚠️", title: "Git Safety", description: "Blocks dangerous Git operations" },
+  { icon: "🛑", title: "위험 명령 차단", description: "rm -rf, force push 등 위험한 명령을 차단합니다" },
+  { icon: "🔒", title: "경로 탈출 방지", description: "워크스페이스 외부 파일 접근을 차단합니다" },
+  { icon: "🔑", title: "비밀키 노출 방지", description: "API 키, 비밀번호가 응답에 포함되지 않게 합니다" },
+  { icon: "⚠️", title: "Git 안전 장치", description: "위험한 Git 작업을 차단합니다" },
 ];
 
 const MODE_LABELS: Record<string, string> = {
-  hybrid: "Hybrid",
-  deterministic: "Rules",
-  llm: "AI",
+  hybrid: "하이브리드",
+  deterministic: "규칙 기반",
+  llm: "AI 검증",
 };
 
 type BuilderCondition = "afterFileCreate" | "beforeExternalAction" | "beforeCommit" | "duringLongTask" | "beforeToolUse" | "afterToolUse" | string;
@@ -143,28 +143,28 @@ type BuilderAction = "verifyDeliverables" | "verifySources" | "requireFileDelive
 type BuilderEnforcement = "blockAndRetry" | "askUser" | "warnOnly" | "recordOnly";
 
 const CONDITION_OPTIONS: { value: BuilderCondition; label: string; group?: string }[] = [
-  { value: "afterFileCreate", label: "After file creation" },
-  { value: "beforeExternalAction", label: "Before external action" },
-  { value: "beforeCommit", label: "Before final answer" },
-  { value: "duringLongTask", label: "During long task (10min+)" },
-  { value: "beforeToolUse", label: "Before tool use" },
-  { value: "afterToolUse", label: "After tool use" },
+  { value: "afterFileCreate", label: "파일 생성 후" },
+  { value: "beforeExternalAction", label: "외부 작업 전" },
+  { value: "beforeCommit", label: "최종 답변 전" },
+  { value: "duringLongTask", label: "긴 작업 중 (10분+)" },
+  { value: "beforeToolUse", label: "도구 사용 전" },
+  { value: "afterToolUse", label: "도구 사용 후" },
 ];
 
 const ACTION_OPTIONS: { value: BuilderAction; label: string }[] = [
-  { value: "requireFileDelivery", label: "Verify file delivery" },
-  { value: "verifySources", label: "Verify sources" },
-  { value: "verifyDeliverables", label: "Verify deliverables" },
-  { value: "askConfirmation", label: "Ask confirmation" },
-  { value: "sendProgressUpdate", label: "Send progress update" },
-  { value: "customInstruction", label: "Custom instruction" },
+  { value: "requireFileDelivery", label: "파일 첨부 확인" },
+  { value: "verifySources", label: "출처 확인" },
+  { value: "verifyDeliverables", label: "결과물 검증" },
+  { value: "askConfirmation", label: "확인받기" },
+  { value: "sendProgressUpdate", label: "중간보고" },
+  { value: "customInstruction", label: "직접 입력" },
 ];
 
 const ENFORCEMENT_OPTIONS: { value: BuilderEnforcement; label: string }[] = [
-  { value: "blockAndRetry", label: "Block & Retry" },
-  { value: "askUser", label: "Ask User" },
-  { value: "warnOnly", label: "Warn Only" },
-  { value: "recordOnly", label: "Record Only" },
+  { value: "blockAndRetry", label: "차단 후 재시도" },
+  { value: "askUser", label: "사용자에게 확인" },
+  { value: "warnOnly", label: "경고만 표시" },
+  { value: "recordOnly", label: "기록만" },
 ];
 
 function normalizeRule(rule: string): string {
@@ -179,26 +179,26 @@ function hasRule(rules: string, rule: string): boolean {
 
 function buildPreviewText(condition: BuilderCondition, action: BuilderAction, enforcement: BuilderEnforcement, customText: string, conditionLabel: string): string {
   const condMap: Record<string, string> = {
-    afterFileCreate: "After file creation",
-    beforeExternalAction: "Before external action",
-    beforeCommit: "Before final answer",
-    duringLongTask: "During long task",
-    beforeToolUse: "Before tool use",
-    afterToolUse: "After tool use",
+    afterFileCreate: "파일 생성 후",
+    beforeExternalAction: "외부 작업 전",
+    beforeCommit: "최종 답변 전",
+    duringLongTask: "긴 작업 중",
+    beforeToolUse: "도구 사용 전",
+    afterToolUse: "도구 사용 후",
   };
   const actMap: Record<string, string> = {
-    requireFileDelivery: "verify files are attached in chat",
-    verifySources: "verify sources are included",
-    verifyDeliverables: "verify all deliverables are met",
-    askConfirmation: "ask user for confirmation",
-    sendProgressUpdate: "send progress update",
-    customInstruction: customText || "perform custom verification",
+    requireFileDelivery: "채팅에 첨부됐는지 확인합니다",
+    verifySources: "출처가 포함됐는지 확인합니다",
+    verifyDeliverables: "요청사항을 모두 충족했는지 확인합니다",
+    askConfirmation: "사용자에게 확인을 요청합니다",
+    sendProgressUpdate: "진행 상황을 알려줍니다",
+    customInstruction: customText || "커스텀 검증을 수행합니다",
   };
   const enfMap: Record<string, string> = {
-    blockAndRetry: "If failed, retry",
-    askUser: "If failed, ask user",
-    warnOnly: "If failed, warn",
-    recordOnly: "Record result only",
+    blockAndRetry: "안 되면 재시도합니다",
+    askUser: "안 되면 사용자에게 물어봅니다",
+    warnOnly: "안 되면 경고를 표시합니다",
+    recordOnly: "결과를 기록만 합니다",
   };
 
   const cond = condMap[condition] || conditionLabel;
@@ -248,7 +248,7 @@ export function SafeguardSection({
   classifierDimensions,
   disabled = false,
 }: SafeguardSectionProps): React.ReactElement {
-  const authFetch = useAuthFetch();
+  const authFetch = agentFetch;
   const [expanded, setExpanded] = useState(true);
   const [rules, setRules] = useState(initialRules ?? "");
   const [presetConfigs, setPresetConfigs] = useState<Record<string, BuiltinPresetConfig>>(
@@ -271,7 +271,7 @@ export function SafeguardSection({
     ...CONDITION_OPTIONS,
     ...(classifierDimensions.length > 0
       ? [
-          { value: "__divider__", label: "── Custom Classifiers ──", group: "classifier" },
+          { value: "__divider__", label: "── 내 분류 기준 ──", group: "classifier" },
           ...classifierDimensions.map((d) => ({
             value: `classifier:${d.name}`,
             label: `${d.description || d.name}일 때`,
@@ -320,7 +320,7 @@ export function SafeguardSection({
     setError(null);
     setSuccess(null);
     try {
-      const res = await authFetch(`/v1/config`, {
+      const res = await agentFetch(`/v1/settings`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -328,10 +328,10 @@ export function SafeguardSection({
           agent_config: { builtin_presets: presetConfigs },
         }),
       });
-      if (!res.ok) throw new Error("Failed to save");
-      setSuccess("Safeguards saved");
+      if (!res.ok) throw new Error("저장에 실패했습니다");
+      setSuccess("세이프가드가 저장되었습니다");
     } catch {
-      setError("Failed to save");
+      setError("저장에 실패했습니다");
     } finally {
       setSaving(false);
     }
@@ -567,7 +567,7 @@ export function SafeguardSection({
                     value={builderCustomText}
                     onChange={(e) => setBuilderCustomText(e.target.value)}
                     disabled={disabled}
-                    placeholder="Describe what should be verified"
+                    placeholder="검증할 내용을 자유롭게 입력하세요"
                     className="w-full rounded-xl border border-black/[0.08] bg-white px-4 py-2.5 text-sm placeholder:text-gray-400 focus:outline-none focus:ring-1 focus:ring-primary/30 disabled:opacity-50"
                   />
                 )}
@@ -609,7 +609,7 @@ export function SafeguardSection({
                 rows={6}
                 spellCheck={false}
                 className="w-full bg-gray-50/50 border border-black/[0.06] rounded-xl px-4 py-3 text-foreground placeholder:text-gray-400 focus:outline-none focus:ring-1 focus:ring-primary/20 font-mono text-sm leading-relaxed resize-y disabled:opacity-50"
-                placeholder="One rule per line..."
+                placeholder="각 줄에 하나의 규칙을 작성하세요..."
               />
               <div className="flex items-center justify-between mt-2">
                 <span className={`text-xs ${rules.length > MAX_CHARS ? "text-red-500" : "text-secondary"}`}>
@@ -630,7 +630,7 @@ export function SafeguardSection({
               disabled={disabled || saving || rules.length > MAX_CHARS}
               className="rounded-xl bg-primary px-5 py-2.5 text-sm font-medium text-white hover:bg-primary/90 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
             >
-              {saving ? "Saving..." : "Save Safeguards"}
+              {saving ? "저장 중..." : "세이프가드 저장"}
             </button>
             {rules.trim().length > 0 && (
               <button
