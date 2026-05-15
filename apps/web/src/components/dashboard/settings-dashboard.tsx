@@ -15,6 +15,7 @@ import {
 import { ToolsSettings } from "./tools-settings";
 import { HooksSettings } from "./hooks-settings";
 import { ClassifierSettings } from "./classifier-settings";
+import { CustomizeTab } from "./customize/customize-tab";
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -55,7 +56,7 @@ function asProviderName(value: unknown): ProviderName {
 /*  SettingsDashboard                                                  */
 /* ------------------------------------------------------------------ */
 
-type SettingsTab = "config" | "tools" | "hooks" | "classifier";
+type SettingsTab = "config" | "customize" | "tools" | "hooks" | "classifier";
 
 export interface SettingsDashboardProps {
   agentUrl: string;
@@ -122,6 +123,7 @@ export function SettingsDashboard({
 
   const settingsTabs: Array<{ key: SettingsTab; label: string }> = [
     { key: "config", label: "Configuration" },
+    { key: "customize", label: "Customize" },
     { key: "tools", label: "Tools" },
     { key: "hooks", label: "Hooks" },
     { key: "classifier", label: "Classifier" },
@@ -129,6 +131,7 @@ export function SettingsDashboard({
 
   const tabEyebrow: Record<SettingsTab, string> = {
     config: "Configuration",
+    customize: "Customize",
     tools: "Tool Registry",
     hooks: "Verification Hooks",
     classifier: "Classifier Dimensions",
@@ -136,6 +139,8 @@ export function SettingsDashboard({
   const tabDescription: Record<SettingsTab, string> = {
     config:
       "Configure the local runtime, provider endpoint, workspace path, and safeguards used by the self-hosted agent.",
+    customize:
+      "Unified safeguard, tool, and hook management. Configure verification rules and custom tools from a single view.",
     tools:
       "View and manage all registered tools. Enable, disable, or remove tools from the runtime.",
     hooks:
@@ -174,6 +179,14 @@ export function SettingsDashboard({
         ))}
       </div>
 
+      {settingsTab === "customize" && (
+        <CustomizeTab
+          getJson={getJson}
+          sendJson={sendJson}
+          putJson={putJson}
+          deleteJson={deleteJson}
+        />
+      )}
       {settingsTab === "tools" && (
         <ToolsSettings
           getJson={getJson}
