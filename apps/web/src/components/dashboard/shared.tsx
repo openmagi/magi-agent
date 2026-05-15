@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from "react";
+import { useState, useRef, useEffect, type ReactNode } from "react";
 import {
   ChevronDown,
   type LucideIcon,
@@ -279,7 +279,7 @@ export function SettingsInput({
 }) {
   return (
     <label className="block">
-      <span className="mb-1.5 block text-xs font-semibold uppercase tracking-[0.12em] text-secondary/75">
+      <span className="block text-sm font-medium text-secondary mb-1.5">
         {label}
       </span>
       <input
@@ -287,7 +287,7 @@ export function SettingsInput({
         type={type}
         placeholder={placeholder}
         onChange={(event) => onChange(event.target.value)}
-        className="min-h-11 w-full rounded-lg border border-black/10 bg-white px-3.5 py-2.5 text-sm font-medium text-foreground outline-none transition-colors duration-200 placeholder:text-secondary/45 focus:border-primary/45 focus:ring-4 focus:ring-primary/10"
+        className="w-full bg-white border border-black/10 rounded-xl px-4 py-3 text-sm font-medium text-foreground outline-none transition-colors duration-200 placeholder:text-secondary/45 focus:border-primary/45 focus:ring-4 focus:ring-primary/10"
       />
     </label>
   );
@@ -308,23 +308,69 @@ export function SettingsDropdown({
   onChange: (value: string) => void;
   options: Array<{ value: string; label: string }>;
 }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    function handleClick(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    }
+    document.addEventListener("mousedown", handleClick);
+    return () => document.removeEventListener("mousedown", handleClick);
+  }, [open]);
+
+  const selected = options.find((o) => o.value === value);
+
   return (
-    <label className="block">
-      <span className="mb-1.5 block text-xs font-semibold uppercase tracking-[0.12em] text-secondary/75">
-        {label}
-      </span>
-      <select
-        value={value}
-        onChange={(event) => onChange(event.target.value)}
-        className="min-h-11 w-full cursor-pointer rounded-lg border border-black/10 bg-white px-3.5 py-2.5 text-sm font-medium text-foreground outline-none transition-colors duration-200 focus:border-primary/45 focus:ring-4 focus:ring-primary/10"
+    <div ref={ref} className="relative block">
+      {label && (
+        <span className="block text-sm font-medium text-secondary mb-1.5">
+          {label}
+        </span>
+      )}
+      <button
+        type="button"
+        onClick={() => setOpen((prev) => !prev)}
+        className="w-full bg-white border border-black/10 rounded-xl px-4 py-3 text-left text-foreground focus:outline-none focus:border-primary/45 focus:ring-4 focus:ring-primary/10 transition-colors duration-200 flex items-center justify-between"
       >
-        {options.map((option) => (
-          <option key={option.value} value={option.value}>
-            {option.label}
-          </option>
-        ))}
-      </select>
-    </label>
+        <span className="truncate text-sm font-medium">{selected?.label ?? value}</span>
+        <svg
+          className={`w-4 h-4 text-gray-400 shrink-0 ml-2 transition-transform duration-200 ${open ? "rotate-180" : ""}`}
+          fill="none"
+          viewBox="0 0 24 24"
+          stroke="currentColor"
+        >
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+        </svg>
+      </button>
+      {open && (
+        <div className="absolute z-50 mt-1.5 w-full bg-white/95 backdrop-blur-xl rounded-xl shadow-lg border border-black/[0.08] py-1 max-h-60 overflow-y-auto">
+          {options.map((opt) => (
+            <button
+              key={opt.value}
+              type="button"
+              onClick={() => {
+                onChange(opt.value);
+                setOpen(false);
+              }}
+              className={`w-full text-left px-4 py-2.5 text-sm transition-colors duration-150 flex items-center gap-2.5 ${
+                opt.value === value
+                  ? "text-foreground font-medium bg-black/[0.03]"
+                  : "text-secondary hover:bg-black/[0.04] hover:text-foreground"
+              }`}
+            >
+              <span
+                className={`w-1.5 h-1.5 rounded-full shrink-0 ${
+                  opt.value === value ? "bg-primary" : "bg-transparent"
+                }`}
+              />
+              {opt.label}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
   );
 }
 

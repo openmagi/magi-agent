@@ -181,10 +181,9 @@ export function SettingsDashboard({
 
       {settingsTab === "customize" && (
         <CustomizeTab
-          getJson={getJson}
-          sendJson={sendJson}
-          putJson={putJson}
-          deleteJson={deleteJson}
+          botId="local"
+          initialRules={null}
+          initialAgentConfig={{}}
         />
       )}
       {settingsTab === "tools" && (
