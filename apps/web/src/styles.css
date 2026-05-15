@@ -488,6 +488,57 @@ body {
   font-weight: 600;
 }
 
+/* Streaming preview markdown */
+.streaming-preview-md p { margin: 0.15em 0; }
+.streaming-preview-md ol, .streaming-preview-md ul { margin: 0.15em 0; padding-left: 1.5em; }
+.streaming-preview-md li { margin: 0.1em 0; }
+.streaming-preview-md strong { font-weight: 600; color: var(--foreground); }
+
+/* Citation badges — inline research source references */
+.citation-badge {
+  display: inline;
+  cursor: pointer;
+  font-size: 0.72em;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--primary-light);
+  background: rgba(124, 58, 237, 0.08);
+  border-radius: 4px;
+  padding: 0.05em 0.35em;
+  margin: 0 0.1em;
+  vertical-align: baseline;
+  transition: background 0.15s, color 0.15s;
+  text-decoration: none;
+}
+
+.citation-badge:hover,
+.citation-badge:focus-visible {
+  background: rgba(124, 58, 237, 0.18);
+  color: var(--primary);
+  outline: none;
+}
+
+.citation-tooltip {
+  position: fixed;
+  z-index: 100;
+  transform: translateX(-50%);
+  max-width: 320px;
+  padding: 8px 10px;
+  background: rgba(23, 23, 23, 0.95);
+  color: #e5e5e5;
+  border-radius: 8px;
+  font-size: 11px;
+  line-height: 1.4;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
+  pointer-events: none;
+  animation: citation-fade-in 0.12s ease-out;
+}
+
+@keyframes citation-fade-in {
+  from { opacity: 0; transform: translateX(-50%) translateY(4px); }
+  to { opacity: 1; transform: translateX(-50%) translateY(0); }
+}
+
 /* KB preview prose styles — compact markdown in side panel */
 .prose-kb {
   word-break: break-word;
