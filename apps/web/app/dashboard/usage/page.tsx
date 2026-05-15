@@ -8,7 +8,7 @@ import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { UsageChart } from "@/components/ui/usage-chart";
 import { useMessages } from "@/lib/i18n";
-import { DISPLAY_PRICING_PER_MILLION } from "@/lib/billing/pricing";
+// Pricing display removed for OSS
 
 type Period = "7d" | "30d" | "90d";
 
@@ -369,15 +369,7 @@ export default function UsagePage() {
                 </tr>
               </thead>
               <tbody>
-                {DISPLAY_PRICING_PER_MILLION.map((p) => (
-                  <tr key={p.model} className="border-b border-black/[0.06] last:border-0">
-                    <td className="py-1.5 pr-3 font-medium text-foreground">{p.model}</td>
-                    <td className="py-1.5 pr-3 text-right text-foreground">${p.input.toFixed(2)}</td>
-                    <td className="py-1.5 pr-3 text-right text-foreground">{p.cacheCreation != null ? `$${p.cacheCreation.toFixed(2)}` : "—"}</td>
-                    <td className="py-1.5 pr-3 text-right text-foreground">${p.cacheRead.toFixed(2)}</td>
-                    <td className="py-1.5 text-right text-foreground">${p.output.toFixed(2)}</td>
-                  </tr>
-                ))}
+                <tr><td colSpan={5} className="py-3 text-center text-secondary text-xs">Pricing not available in OSS mode.</td></tr>
               </tbody>
             </table>
           </div>

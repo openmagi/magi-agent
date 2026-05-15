@@ -1,5 +1,5 @@
 import { MODEL_LABELS, type ValidRouterType } from "@/lib/constants";
-import type { ModelSelection } from "@/lib/supabase/types";
+import type { ModelSelection } from "@/types/entities";
 
 export type RouterPickerMode = "standard_router" | "premium_router" | "advanced";
 
