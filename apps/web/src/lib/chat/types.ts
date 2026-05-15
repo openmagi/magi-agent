@@ -290,6 +290,14 @@ export interface ChannelState {
   saveError?: string | null;
   /** Best-effort target language for this live turn's user-visible response/progress. */
   responseLanguage?: ChatResponseLanguage;
+  /** Token usage from the latest completed turn. */
+  turnUsage?: ResponseUsage;
+  /** Research evidence from the latest completed turn. */
+  researchEvidence?: ResearchEvidenceSnapshot | null;
+  /** Monotonically increasing mission refresh counter. */
+  missionRefreshSeq?: number;
+  /** Last processed mission event mission id for dedup. */
+  lastMissionEventMissionId?: string | null;
 }
 
 export type ControlRequestKind =
@@ -347,11 +355,30 @@ export interface ControlRequestResponse {
   answer?: string;
 }
 
+export interface ResponseUsage {
+  inputTokens?: number;
+  outputTokens?: number;
+  cacheReadTokens?: number;
+  cacheCreationTokens?: number;
+  totalCost?: number;
+  costUsd?: number;
+  model?: string;
+}
+
+export interface ResearchEvidenceSnapshot {
+  inspectedSources: InspectedSource[];
+  citationGate?: CitationGateStatus | null;
+  capturedAt: number;
+}
+
 export interface ServerMessage {
   id: string;
   role: "assistant" | "system";
   content: string;
   created_at: string;
+  usage?: ResponseUsage;
+  researchEvidence?: ResearchEvidenceSnapshot;
+  research_evidence?: ResearchEvidenceSnapshot | null;
 }
 
 export interface ReorderEntry {
