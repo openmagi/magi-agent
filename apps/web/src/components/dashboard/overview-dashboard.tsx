@@ -3,7 +3,6 @@ import {
   Database,
   FolderOpen,
   Puzzle,
-  Clock,
   ListChecks,
   CalendarClock,
   FileBox,
@@ -45,6 +44,8 @@ export function OverviewDashboard({
     (sum, collection) => sum + collection.docs.length,
     0,
   );
+  const isActive = runtimeStatus === "active";
+
   return (
     <div className="max-w-5xl space-y-6">
       <DashboardPageHeader
@@ -57,33 +58,85 @@ export function OverviewDashboard({
       />
 
       <div className="space-y-5">
-        {/* Agent card */}
-        <DashboardCard title="Agent">
-          <div className="flex flex-col gap-5 sm:flex-row sm:items-start sm:justify-between">
+        {/* Agent status card — openmagi.ai BotStatusCard style */}
+        <section className="glass rounded-2xl p-6 shadow-none">
+          {/* Header with status */}
+          <div className="flex items-start justify-between mb-6">
+            <div className="flex items-center gap-3">
+              {isActive && (
+                <div className="w-2.5 h-2.5 rounded-full bg-emerald-500 pulse-glow" />
+              )}
+              {runtimeStatus === "checking" && (
+                <div className="w-2.5 h-2.5 rounded-full bg-amber-400 animate-pulse" />
+              )}
+              {runtimeStatus === "unavailable" && (
+                <div className="w-2.5 h-2.5 rounded-full bg-red-400" />
+              )}
+              {runtimeStatus === "not_checked" && (
+                <div className="w-2.5 h-2.5 rounded-full bg-gray-300" />
+              )}
+              <h2 className="text-lg font-semibold text-foreground">
+                {BOT_NAME}
+              </h2>
+            </div>
+            <StatusPill status={runtimeStatus}>
+              {runtimeStatusLabel(runtimeStatus)}
+            </StatusPill>
+          </div>
+
+          {/* Bot info grid */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-8 gap-y-4 text-sm">
             <div>
-              <div className="flex items-center gap-3">
-                <span
-                  className={`h-2.5 w-2.5 rounded-full ${
-                    runtimeStatus === "active"
-                      ? "bg-emerald-400"
-                      : "bg-gray-300"
-                  }`}
-                />
-                <h3 className="text-xl font-semibold text-foreground">
-                  {BOT_NAME}
-                </h3>
-                <StatusPill status={runtimeStatus}>
-                  {runtimeStatusLabel(runtimeStatus)}
-                </StatusPill>
-              </div>
-              <p className="mt-2 max-w-2xl text-sm leading-6 text-secondary">
-                Self-hosted Magi runtime with local chat, workspace knowledge,
-                runtime proof, editable operator files, and your configured LLM
-                provider.
+              <p className="text-secondary text-xs uppercase tracking-wider mb-1">
+                Runtime
+              </p>
+              <p className="font-medium text-foreground">
+                Self-hosted Magi Agent
               </p>
             </div>
+            <div>
+              <p className="text-secondary text-xs uppercase tracking-wider mb-1">
+                Status
+              </p>
+              <p className="font-medium text-foreground">
+                {runtimeStatusLabel(runtimeStatus)}
+              </p>
+            </div>
+            <div>
+              <p className="text-secondary text-xs uppercase tracking-wider mb-1">
+                API Key Mode
+              </p>
+              <p className="font-medium text-foreground">Local env vars</p>
+            </div>
+            <div>
+              <p className="text-secondary text-xs uppercase tracking-wider mb-1">
+                KB Documents
+              </p>
+              <p className="font-medium text-foreground">{docCount}</p>
+            </div>
           </div>
-        </DashboardCard>
+
+          {/* Quick links */}
+          <div className="mt-6 pt-5 border-t border-gray-200">
+            <div className="flex flex-col sm:flex-row gap-3">
+              <ButtonLike
+                variant="ghost"
+                onClick={() => onNavigate("settings")}
+              >
+                Settings
+              </ButtonLike>
+              <ButtonLike variant="ghost" onClick={() => onNavigate("usage")}>
+                Usage
+              </ButtonLike>
+              <ButtonLike
+                variant="ghost"
+                onClick={() => onNavigate("workspace")}
+              >
+                Workspace
+              </ButtonLike>
+            </div>
+          </div>
+        </section>
 
         {/* Runtime metrics */}
         <DashboardCard title="Runtime">
