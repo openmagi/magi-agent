@@ -15,11 +15,11 @@ import { derivePublicToolPreview } from "./public-tool-preview";
 export type WorkConsoleRowGroup =
   | "status"
   | "mission"
+  | "trace"
   | "tool"
   | "subagent"
   | "task"
   | "queue"
-  | "trace"
   | "control";
 
 export type WorkConsoleRowStatus =
@@ -88,7 +88,7 @@ const PHASE_LABELS_KO: Record<NonNullable<ChannelState["turnPhase"]>, string> = 
   executing: "실행 중",
   verifying: "검증 중",
   committing: "답변 작성 중",
-  compacting: "컨텍스트 정리 중",
+  compacting: "압축 중",
   committed: "마무리 중",
   aborted: "중단됨",
 };
@@ -143,6 +143,20 @@ function statusFromSubagent(activity: SubagentActivity): WorkConsoleRowStatus {
   }
 }
 
+function statusFromTask(task: TaskBoardTask): WorkConsoleRowStatus {
+  switch (task.status) {
+    case "in_progress":
+      return "running";
+    case "completed":
+      return "done";
+    case "cancelled":
+      return "error";
+    case "pending":
+    default:
+      return "waiting";
+  }
+}
+
 function statusFromMission(mission: MissionActivity): WorkConsoleRowStatus {
   switch (mission.status) {
     case "running":
@@ -163,22 +177,52 @@ function statusFromMission(mission: MissionActivity): WorkConsoleRowStatus {
 
 function statusFromRuntimeTrace(trace: RuntimeTrace): WorkConsoleRowStatus {
   if (trace.severity === "error") return "error";
+  if (trace.phase === "retry_scheduled") return "running";
   if (trace.severity === "warning") return "waiting";
   return "info";
 }
 
-function statusFromTask(task: TaskBoardTask): WorkConsoleRowStatus {
-  switch (task.status) {
-    case "in_progress":
-      return "running";
-    case "completed":
-      return "done";
-    case "cancelled":
-      return "error";
-    case "pending":
+function runtimeTraceLabel(
+  trace: RuntimeTrace,
+  language?: ChatResponseLanguage,
+): string {
+  switch (trace.phase) {
+    case "verifier_blocked":
+      return t(language, "Runtime check blocked answer", "런타임 검증 차단");
+    case "retry_scheduled":
+      return t(language, "Retrying with verifier guidance", "검증 지시에 따라 재시도");
+    case "retry_aborted":
+      return t(language, "Retry limit reached", "재시도 한도 도달");
+    case "terminal_abort":
+      return t(language, "Run stopped before completion", "완료 전 실행 중단");
     default:
-      return "waiting";
+      return trace.title;
   }
+}
+
+function runtimeTraceMeta(trace: RuntimeTrace): string | undefined {
+  const attempt = typeof trace.attempt === "number" && typeof trace.maxAttempts === "number"
+    ? `${trace.attempt}/${trace.maxAttempts}`
+    : undefined;
+  return [trace.reasonCode, attempt].filter(Boolean).join(" ") || undefined;
+}
+
+function runtimeTraceRow(
+  trace: RuntimeTrace,
+  language?: ChatResponseLanguage,
+): WorkConsoleRow {
+  const detail = trace.requiredAction ?? trace.detail ?? trace.title;
+  const snippet = trace.requiredAction && trace.detail ? trace.detail : undefined;
+  const meta = runtimeTraceMeta(trace);
+  return {
+    id: `trace:${trace.turnId}:${trace.receivedAt}:${trace.phase}`,
+    group: "trace",
+    label: runtimeTraceLabel(trace, language),
+    detail,
+    ...(snippet ? { snippet } : {}),
+    status: statusFromRuntimeTrace(trace),
+    ...(meta ? { meta } : {}),
+  };
 }
 
 function taskMeta(task: TaskBoardTask, language?: ChatResponseLanguage): string {
@@ -199,44 +243,13 @@ function missionMeta(mission: MissionActivity): string {
   return `${mission.kind} ${mission.status}`;
 }
 
-function runtimeTraceLabel(
-  trace: RuntimeTrace,
-  language?: ChatResponseLanguage,
-): string {
-  switch (trace.phase) {
-    case "retry_scheduled":
-      return t(language, "Retry scheduled", "재시도 예정");
-    case "retry_aborted":
-      return t(language, "Retry stopped", "재시도 중단");
-    case "terminal_abort":
-      return t(language, "Turn stopped", "턴 중단");
-    case "verifier_blocked":
-    default:
-      return t(language, "Runtime verifier blocked completion", "런타임 검증에서 완료 차단");
-  }
-}
-
-function runtimeTraceMeta(trace: RuntimeTrace): string | undefined {
-  const attempt =
-    typeof trace.attempt === "number" && typeof trace.maxAttempts === "number"
-      ? `${trace.attempt}/${trace.maxAttempts}`
-      : undefined;
-  return [trace.reasonCode, attempt].filter(Boolean).join(" · ") || undefined;
-}
-
-function runtimeTraceRow(
-  trace: RuntimeTrace,
-  language?: ChatResponseLanguage,
-): WorkConsoleRow {
-  return {
-    id: `trace:${trace.turnId}:${trace.receivedAt}:${trace.reasonCode ?? trace.phase}`,
-    group: "trace",
-    label: runtimeTraceLabel(trace, language),
-    detail: trace.requiredAction ?? trace.detail ?? trace.title,
-    status: statusFromRuntimeTrace(trace),
-    ...(trace.detail && trace.requiredAction ? { snippet: trace.detail } : {}),
-    ...(runtimeTraceMeta(trace) ? { meta: runtimeTraceMeta(trace) } : {}),
-  };
+function formatSubagentElapsed(startedAt: number): string | undefined {
+  const seconds = Math.floor((Date.now() - startedAt) / 1000);
+  if (seconds < 3) return undefined;
+  if (seconds < 60) return `${seconds}s`;
+  const minutes = Math.floor(seconds / 60);
+  const rest = seconds % 60;
+  return rest === 0 ? `${minutes}m` : `${minutes}m ${rest}s`;
 }
 
 function subagentName(index: number): string {
@@ -436,13 +449,16 @@ export function deriveWorkConsoleRows({
   }
 
   for (const [index, subagent] of (channelState.subagents ?? []).entries()) {
+    const elapsed = subagent.status === "running" || subagent.status === "waiting"
+      ? formatSubagentElapsed(subagent.startedAt)
+      : undefined;
     rows.push({
       id: `subagent:${subagent.taskId}`,
       group: "subagent",
       label: subagentName(index),
       detail: subagentDetail(subagent, language),
       status: statusFromSubagent(subagent),
-      meta: normalizeRole(subagent.role),
+      meta: [normalizeRole(subagent.role), elapsed].filter(Boolean).join(" · "),
     });
   }
 

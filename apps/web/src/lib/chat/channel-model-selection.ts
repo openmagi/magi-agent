@@ -3,17 +3,26 @@ export interface ChannelModelSelection {
   routerType: string;
 }
 
+export interface ChannelModelPreferenceRecord {
+  model_selection?: string | null;
+  router_type?: string | null;
+  modelSelection?: string | null;
+  routerType?: string | null;
+}
+
 export const DEFAULT_CHANNEL_MODEL_SELECTION: ChannelModelSelection = {
-  modelSelection: "auto",
+  modelSelection: "clawy_smart_routing",
   routerType: "standard",
 };
 
-const STORAGE_KEY = (botId: string) => `magi:channelModelSelections:${botId}`;
+const STORAGE_KEY = (botId: string) => `clawy:channelModelSelections:${botId}`;
 
 const MODEL_SELECTION_TO_RUNTIME_MODEL: Record<string, string> = {
   haiku: "anthropic/claude-haiku-4-5",
   sonnet: "anthropic/claude-sonnet-4-6",
-  opus: "anthropic/claude-opus-4-7",
+  opus: "anthropic/claude-opus-4-6",
+  smart_routing: "anthropic/claude-sonnet-4-6",
+  gpt_smart_routing: "openai/gpt-5.4-mini",
   gpt_5_nano: "openai/gpt-5.4-nano",
   gpt_5_mini: "openai/gpt-5.4-mini",
   gpt_5_1: "openai/gpt-5.4-mini",
@@ -80,6 +89,30 @@ export function setChannelModelSelection(
 }
 
 export function channelModelSelectionToRuntimeModel(selection: ChannelModelSelection): string {
-  if (selection.modelSelection === "auto") return "auto";
+  if (selection.modelSelection === "clawy_smart_routing") {
+    return selection.routerType === "big_dic"
+      ? "big-dic-router/auto"
+      : "clawy-smart-router/auto";
+  }
   return MODEL_SELECTION_TO_RUNTIME_MODEL[selection.modelSelection] ?? selection.modelSelection;
+}
+
+export function channelModelSelectionFromChannel(
+  channel: ChannelModelPreferenceRecord | null | undefined,
+): ChannelModelSelection | null {
+  if (!channel) return null;
+  const modelSelection =
+    typeof channel.model_selection === "string"
+      ? channel.model_selection
+      : typeof channel.modelSelection === "string"
+        ? channel.modelSelection
+        : null;
+  if (!modelSelection) return null;
+  const routerType =
+    typeof channel.router_type === "string"
+      ? channel.router_type
+      : typeof channel.routerType === "string"
+        ? channel.routerType
+        : DEFAULT_CHANNEL_MODEL_SELECTION.routerType;
+  return { modelSelection, routerType };
 }

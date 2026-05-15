@@ -2,10 +2,10 @@
 
 import { useEffect, useState } from "react";
 import { AgentActivityTimeline } from "./agent-activity-timeline";
+import { BrowserFramePreview } from "./browser-frame-preview";
 import { TaskBoard } from "./task-board";
 import { deriveWorkStateSummary, type WorkStateSummary } from "@/lib/chat/work-state";
 import type {
-  BrowserFrame,
   CitationGateStatus,
   ChannelState,
   ChatResponseLanguage,
@@ -270,96 +270,6 @@ function WorkStateSummaryRows({
   );
 }
 
-function browserActionLabel(action: string, language?: ChatResponseLanguage): string {
-  switch (action) {
-    case "open":
-      return t(language, "Opening page", "페이지 여는 중");
-    case "click":
-    case "mouse_click":
-      return t(language, "Clicking", "클릭 중");
-    case "fill":
-    case "keyboard_type":
-    case "press":
-      return t(language, "Typing", "입력 중");
-    case "scroll":
-      return t(language, "Scrolling", "스크롤 중");
-    case "screenshot":
-    case "snapshot":
-      return t(language, "Inspecting page", "페이지 확인 중");
-    case "scrape":
-      return t(language, "Reading page", "페이지 읽는 중");
-    default:
-      return t(language, "Using browser", "브라우저 사용 중");
-  }
-}
-
-function BrowserFrameInline({
-  frame,
-  language,
-}: {
-  frame: BrowserFrame;
-  language?: ChatResponseLanguage;
-}) {
-  const imageSrc = `data:${frame.contentType};base64,${frame.imageBase64}`;
-  return (
-    <div
-      className="mt-2 overflow-hidden rounded-lg border border-black/[0.08] bg-white"
-      data-run-inspector-browser-frame="true"
-    >
-      <div className="flex min-w-0 items-center justify-between gap-2 border-b border-black/[0.06] px-2.5 py-1.5">
-        <span className="shrink-0 text-[10px] font-semibold uppercase tracking-wide text-secondary/45">
-          {t(language, "Live browser", "실시간 브라우저")}
-        </span>
-        <span className="min-w-0 truncate text-[10.5px] text-secondary/55">
-          {browserActionLabel(frame.action, language)}
-          {frame.url ? ` · ${frame.url}` : ""}
-        </span>
-      </div>
-      {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img
-        src={imageSrc}
-        alt={t(language, "Browser preview", "브라우저 미리보기")}
-        className="block aspect-video w-full max-h-64 bg-black/[0.03] object-contain"
-      />
-    </div>
-  );
-}
-
-function DocumentDraftInline({
-  draft,
-  language,
-}: {
-  draft: DocumentDraftPreview;
-  language?: ChatResponseLanguage;
-}) {
-  const unit = draft.contentLength === 1 ? "char" : "chars";
-  const sizeLabel = isKorean(language)
-    ? `${draft.contentLength.toLocaleString()}자`
-    : `${draft.contentLength.toLocaleString()} ${unit}`;
-
-  return (
-    <div
-      className="mt-2 overflow-hidden rounded-lg border border-[#7C3AED]/15 bg-white"
-      data-run-inspector-document-draft="true"
-    >
-      <div className="flex min-w-0 items-center justify-between gap-2 border-b border-black/[0.06] px-2.5 py-1.5">
-        <span className="shrink-0 text-[10px] font-semibold uppercase tracking-wide text-secondary/45">
-          {draft.status === "done"
-            ? t(language, "Document written", "문서 작성 완료")
-            : t(language, "Writing document", "문서 작성 중")}
-        </span>
-        <span className="min-w-0 truncate text-[10.5px] text-secondary/55">
-          {draft.filename ?? (draft.format === "md" ? "Markdown" : "Text")}
-          <span className="text-secondary/35"> · {sizeLabel}</span>
-        </span>
-      </div>
-      <pre className="max-h-52 overflow-auto bg-[#FBFBFD] px-2.5 py-2 whitespace-pre-wrap break-words text-[11px] leading-snug text-secondary/75">
-        {draft.truncated ? `...\n${draft.contentPreview}` : draft.contentPreview}
-      </pre>
-    </div>
-  );
-}
-
 function sourceKindLabel(kind: InspectedSource["kind"], language?: ChatResponseLanguage): string {
   switch (kind) {
     case "web_search":
@@ -374,10 +284,6 @@ function sourceKindLabel(kind: InspectedSource["kind"], language?: ChatResponseL
       return t(language, "file", "파일");
     case "external_repo":
       return t(language, "repo", "저장소");
-    case "external_doc":
-      return t(language, "doc", "문서");
-    case "subagent_result":
-      return t(language, "helper", "도우미");
     default:
       return t(language, "source", "출처");
   }
@@ -487,6 +393,40 @@ function ResearchEvidence({
   );
 }
 
+function DocumentDraftInline({
+  draft,
+  language,
+}: {
+  draft: DocumentDraftPreview;
+  language?: ChatResponseLanguage;
+}) {
+  const unit = draft.contentLength === 1 ? "char" : "chars";
+  const sizeLabel = isKorean(language)
+    ? `${draft.contentLength.toLocaleString()}자`
+    : `${draft.contentLength.toLocaleString()} ${unit}`;
+  return (
+    <div
+      className="mt-2 overflow-hidden rounded-lg border border-[#7C3AED]/15 bg-white"
+      data-run-inspector-document-draft="true"
+    >
+      <div className="flex min-w-0 items-center justify-between gap-2 border-b border-black/[0.06] px-2.5 py-1.5">
+        <span className="shrink-0 text-[10px] font-semibold uppercase tracking-wide text-secondary/45">
+          {draft.status === "done"
+            ? t(language, "Document written", "문서 작성 완료")
+            : t(language, "Writing document", "문서 작성 중")}
+        </span>
+        <span className="min-w-0 truncate text-[10.5px] text-secondary/55">
+          {draft.filename ?? (draft.format === "md" ? "Markdown" : "Text")}
+          <span className="text-secondary/35"> · {sizeLabel}</span>
+        </span>
+      </div>
+      <pre className="max-h-36 overflow-auto bg-[#FBFBFD] px-2.5 py-2 whitespace-pre-wrap break-words text-[11px] leading-snug text-secondary/75">
+        {draft.truncated ? `...\n${draft.contentPreview}` : draft.contentPreview}
+      </pre>
+    </div>
+  );
+}
+
 export function RunInspectorDock({
   channelState,
   queuedMessages = [],
@@ -550,6 +490,7 @@ export function RunInspectorDock({
     channelState,
     queuedMessages,
     controlRequests,
+    uiLanguage: language,
   });
 
   return (
@@ -628,9 +569,14 @@ export function RunInspectorDock({
         {compactDetails ? null : (
         <div className="mt-2 max-h-[min(50vh,34rem)] overflow-y-auto overscroll-contain pr-1 [scrollbar-gutter:stable]">
           {channelState.browserFrame && (
-            <BrowserFrameInline frame={channelState.browserFrame} language={language} />
+            <BrowserFramePreview
+              frame={channelState.browserFrame}
+              language={language}
+              surface="run-inspector"
+              className="mt-2 overflow-hidden rounded-lg border border-black/[0.08] bg-white"
+              imageClassName="block aspect-video w-full max-h-64 bg-black/[0.03] object-contain"
+            />
           )}
-
           {channelState.documentDraft && (
             <DocumentDraftInline draft={channelState.documentDraft} language={language} />
           )}

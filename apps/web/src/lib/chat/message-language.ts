@@ -51,3 +51,4 @@ export function detectMessageResponseLanguage(text: string): ChatResponseLanguag
   if (latin >= 3) return spanishSignal >= 2 ? "es" : "en";
   return "en";
 }
+

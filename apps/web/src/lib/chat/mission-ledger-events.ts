@@ -1,4 +1,4 @@
-export const OPEN_MISSION_LEDGER_EVENT = "magi:open-mission-ledger";
+export const OPEN_MISSION_LEDGER_EVENT = "clawy:open-mission-ledger";
 
 export interface OpenMissionLedgerEventDetail {
   missionId: string;

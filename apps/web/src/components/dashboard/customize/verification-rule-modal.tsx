@@ -2,7 +2,7 @@
 
 import { useState, useCallback } from "react";
 import { useAuthFetch } from "@/hooks/use-auth-fetch";
-
+import { useMessages } from "@/lib/i18n";
 import { Modal } from "@/components/ui/modal";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/input";
@@ -35,46 +35,7 @@ interface PresetCategory {
   presets: VerificationPreset[];
 }
 
-// Hardcoded English labels for preset categories, preset titles/descriptions, security hooks, and modes
-const CUSTOMIZE_LABELS: Record<string, string> = {
-  presetCatAnswer: "Answer Quality",
-  presetCatFact: "Fact Verification",
-  presetCatCoding: "Coding",
-  presetCatTask: "Task Management",
-  presetCatOutput: "Output Delivery",
-  presetCatResearch: "Research",
-  presetCatMemory: "Memory",
-  presetCatCustom: "Custom",
-  presetCatSecurity: "Security (always on)",
-  presetCustomEmpty: "No custom rules yet",
-  presetAnswerQuality: "Answer Quality", presetAnswerQualityDesc: "Verifies the response actually answers the question",
-  presetCompletionEvidence: "Completion Evidence", presetCompletionEvidenceDesc: "Checks task completion claims have supporting evidence",
-  presetPreRefusal: "Pre-Refusal Guard", presetPreRefusalDesc: "Prevents premature refusals before attempting the task",
-  presetOutputPurity: "Output Purity", presetOutputPurityDesc: "Ensures responses are clean of internal metadata",
-  presetDeferralBlocker: "Deferral Blocker", presetDeferralBlockerDesc: "Blocks empty promises of future delivery",
-  presetFactGrounding: "Fact Grounding", presetFactGroundingDesc: "Cross-verifies tool results match the response",
-  presetSelfClaim: "Self-Claim Check", presetSelfClaimDesc: "Ensures file content claims were actually read first",
-  presetResourceExistence: "Resource Existence", presetResourceExistenceDesc: "Verifies referenced resources actually exist",
-  presetClaimCitation: "Citation Gate", presetClaimCitationDesc: "Requires citations for research claims",
-  presetDeterministicEvidence: "Numeric Evidence", presetDeterministicEvidenceDesc: "Checks numbers/dates are backed by tool evidence",
-  presetCodingVerification: "Code Verification", presetCodingVerificationDesc: "Verifies code changes pass tests",
-  presetCodingContext: "Coding Context", presetCodingContextDesc: "Injects repo map and coding context",
-  presetCodingWorkspaceLock: "Workspace Lock", presetCodingWorkspaceLockDesc: "Prevents writes outside workspace",
-  presetCodingChildReview: "Child Review", presetCodingChildReviewDesc: "Reviews subagent coding output",
-  presetBenchmarkVerifier: "Benchmark Verifier", presetBenchmarkVerifierDesc: "Validates benchmark results",
-  presetTaskContract: "Task Contract", presetTaskContractDesc: "Enforces task completion contracts",
-  presetGoalProgress: "Goal Progress", presetGoalProgressDesc: "Tracks goal progress and retry limits",
-  presetTaskBoardCompletion: "Task Board", presetTaskBoardCompletionDesc: "Verifies task board items complete",
-  presetOutputDelivery: "Output Delivery", presetOutputDeliveryDesc: "Ensures created files are delivered in chat",
-  presetArtifactDelivery: "Artifact Delivery", presetArtifactDeliveryDesc: "Validates artifact delivery evidence",
-  presetResponseLanguage: "Response Language", presetResponseLanguageDesc: "Checks response matches language policy",
-  presetParallelResearch: "Parallel Research", presetParallelResearchDesc: "Coordinates parallel research workers",
-  presetSourceAuthority: "Source Authority", presetSourceAuthorityDesc: "Validates source reliability and authority",
-  presetMemoryContinuity: "Memory Continuity", presetMemoryContinuityDesc: "Ensures session memory consistency",
-  presetModeHybrid: "Hybrid", presetModeDeterministic: "Rules", presetModeLlm: "AI",
-  secDangerousPatterns: "Dangerous Commands", secPathEscape: "Path Escape", secSecretExposure: "Secret Exposure",
-  secGitSafety: "Git Safety", secSealedFiles: "Sealed Files", secArityPermission: "Arity Permission",
-};
+// i18n key mappings — actual text resolved at render time via t.customize.*
 const PRESET_CATEGORY_DEFS = [
   { id: "answer", icon: "✅", titleKey: "presetCatAnswer", presetIds: ["answer-quality", "completion-evidence", "pre-refusal", "output-purity", "deferral-blocker"] },
   { id: "fact", icon: "🔬", titleKey: "presetCatFact", presetIds: ["fact-grounding", "self-claim", "resource-existence", "claim-citation", "deterministic-evidence"] },
@@ -213,7 +174,7 @@ function OptionCard({ selected, onClick, children }: { selected?: boolean; onCli
 
 export function VerificationRuleModal({ botId, initialRules, initialAgentConfig, open, onClose }: VerificationRuleModalProps): React.ReactElement | null {
   const authFetch = useAuthFetch();
-
+  const t = useMessages();
 
   const [rules, setRules] = useState(initialRules ?? "");
   const [presetConfigs, setPresetConfigs] = useState<Record<string, BuiltinPresetConfig>>(
@@ -236,29 +197,29 @@ export function VerificationRuleModal({ botId, initialRules, initialAgentConfig,
   const [newConditionInput, setNewConditionInput] = useState("");
 
   const hookPointLabels: Record<string, string> = {
-    beforeCommit: "Before Final Answer",
-    beforeToolUse: "Before Tool Use",
-    afterToolUse: "After Tool Use",
-    beforeLLMCall: "Before LLM Call",
-    afterLLMCall: "After LLM Call",
-    beforeTurnStart: "Before Turn Start",
-    afterTurnEnd: "After Turn End",
+    beforeCommit: t.customize.hookPointBeforeCommit,
+    beforeToolUse: t.customize.hookPointBeforeToolUse,
+    afterToolUse: t.customize.hookPointAfterToolUse,
+    beforeLLMCall: t.customize.hookPointBeforeLLMCall,
+    afterLLMCall: t.customize.hookPointAfterLLMCall,
+    beforeTurnStart: t.customize.hookPointBeforeTurnStart,
+    afterTurnEnd: t.customize.hookPointAfterTurnEnd,
   };
 
   const presetConditions: SavedCondition[] = [
-    { id: "research", label: "Research/fact-sensitive", technical: "research.sourceSensitive", isPreset: true },
-    { id: "coding", label: "Coding implementation", technical: "coding.implementation", isPreset: true },
-    { id: "fileCreate", label: "After file creation", technical: "output.fileCreated", isPreset: true },
-    { id: "externalAction", label: "External action", technical: "action.external", isPreset: true },
-    { id: "longTask", label: "Long-running task", technical: "task.longRunning", isPreset: true },
-    { id: "always", label: "Always", technical: "always", isPreset: true },
+    { id: "research", label: t.customize.conditionResearch, technical: "research.sourceSensitive", isPreset: true },
+    { id: "coding", label: t.customize.conditionCoding, technical: "coding.implementation", isPreset: true },
+    { id: "fileCreate", label: t.customize.conditionFileCreate, technical: "output.fileCreated", isPreset: true },
+    { id: "externalAction", label: t.customize.conditionExternalAction, technical: "action.external", isPreset: true },
+    { id: "longTask", label: t.customize.conditionLongTask, technical: "task.longRunning", isPreset: true },
+    { id: "always", label: t.customize.conditionAlways, technical: "always", isPreset: true },
   ];
 
   const failBehaviorLabels: Record<string, string> = {
-    blockAndRetry: "Block & Retry",
-    askUser: "Ask User",
-    warnOnly: "Warn Only",
-    recordOnly: "Record Only",
+    blockAndRetry: t.customize.failBlockAndRetry,
+    askUser: t.customize.failAskUser,
+    warnOnly: t.customize.failWarnOnly,
+    recordOnly: t.customize.failRecordOnly,
   };
 
   const allConditions = [...presetConditions, ...savedConditions];
@@ -309,9 +270,9 @@ export function VerificationRuleModal({ botId, initialRules, initialAgentConfig,
   const handleSave = async (): Promise<void> => {
     setSaving(true); setSuccess(null);
     try {
-      const res = await authFetch(`/v1/config`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ agent_rules: rules, ...(presetDirty ? { agent_config: { builtin_presets: presetConfigs } } : {}) }) });
+      const res = await authFetch(`/api/bots/${botId}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ agent_rules: rules, ...(presetDirty ? { agent_config: { builtin_presets: presetConfigs } } : {}) }) });
       if (!res.ok) throw new Error();
-      setSuccess("Rules saved");
+      setSuccess(t.customize.ruleSaved);
     } catch { /* ignore */ } finally { setSaving(false); }
   };
 
@@ -322,12 +283,12 @@ export function VerificationRuleModal({ botId, initialRules, initialAgentConfig,
       <div className="p-5">
         {/* Header */}
         <div className="flex items-start justify-between mb-0.5">
-          <h2 className="text-base font-semibold text-foreground">{"Verification Rules"}</h2>
+          <h2 className="text-base font-semibold text-foreground">{t.customize.ruleModalTitle}</h2>
           <button type="button" onClick={closeModal} className="text-secondary hover:text-foreground transition-colors p-1 -mr-1 -mt-1">
             <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
           </button>
         </div>
-        <p className="text-[11px] text-secondary mb-4">{"Configure how the agent verifies its work at each step"}</p>
+        <p className="text-[11px] text-secondary mb-4">{t.customize.ruleModalDesc}</p>
 
         {step !== "list" && <StepIndicator current={currentStepIdx} total={BUILDER_STEPS.length} />}
 
@@ -339,7 +300,7 @@ export function VerificationRuleModal({ botId, initialRules, initialAgentConfig,
               {PRESET_CATEGORY_DEFS.map((cat) => {
                 const presets = cat.presetIds.map((id) => PRESET_MAP.get(id)!).filter(Boolean);
                 const catEnabled = presets.filter((p) => presetConfigs[p.id]?.enabled).length;
-                const c = CUSTOMIZE_LABELS;
+                const c = t.customize as Record<string, string>;
                 return (
                   <details key={cat.id} className="group">
                     <summary className="flex items-center gap-2 px-3 py-2 rounded-xl cursor-pointer hover:bg-black/[0.02] transition-colors select-none">
@@ -410,7 +371,7 @@ export function VerificationRuleModal({ botId, initialRules, initialAgentConfig,
               <details className="group" open={activeRules.length > 0}>
                 <summary className="flex items-center gap-2 px-3 py-2 rounded-xl cursor-pointer hover:bg-black/[0.02] transition-colors select-none">
                   <span className="text-sm">✏️</span>
-                  <span className="text-xs font-semibold text-foreground flex-1">{CUSTOMIZE_LABELS.presetCatCustom ?? "Custom"}</span>
+                  <span className="text-xs font-semibold text-foreground flex-1">{(t.customize as Record<string, string>).presetCatCustom ?? "Custom"}</span>
                   {activeRules.length > 0 && (
                     <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-blue-50 text-blue-600 font-medium">
                       {activeRules.length}
@@ -429,7 +390,7 @@ export function VerificationRuleModal({ botId, initialRules, initialAgentConfig,
                       </button>
                     </div>
                   )) : (
-                    <p className="text-[11px] text-secondary px-3 py-2">{CUSTOMIZE_LABELS.presetCustomEmpty ?? "No custom rules yet"}</p>
+                    <p className="text-[11px] text-secondary px-3 py-2">{(t.customize as Record<string, string>).presetCustomEmpty ?? "No custom rules yet"}</p>
                   )}
                 </div>
               </details>
@@ -438,7 +399,7 @@ export function VerificationRuleModal({ botId, initialRules, initialAgentConfig,
               <details className="group">
                 <summary className="flex items-center gap-2 px-3 py-2 rounded-xl cursor-pointer hover:bg-black/[0.02] transition-colors select-none">
                   <span className="text-sm">🔒</span>
-                  <span className="text-xs font-semibold text-secondary flex-1">{CUSTOMIZE_LABELS.presetCatSecurity ?? "Security (always on)"}</span>
+                  <span className="text-xs font-semibold text-secondary flex-1">{(t.customize as Record<string, string>).presetCatSecurity ?? "Security (always on)"}</span>
                   <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-gray-100 text-gray-500 font-medium">
                     {SECURITY_HOOK_KEYS.length}/{SECURITY_HOOK_KEYS.length}
                   </span>
@@ -446,7 +407,7 @@ export function VerificationRuleModal({ botId, initialRules, initialAgentConfig,
                 <div className="pl-2 pr-1 pb-2 mt-1 flex flex-wrap gap-1.5">
                   {SECURITY_HOOK_KEYS.map((h) => (
                     <span key={h.key} className="text-[11px] text-secondary/70 bg-black/[0.03] rounded-lg px-2.5 py-1">
-                      {h.icon} {CUSTOMIZE_LABELS[h.key] ?? h.key}
+                      {h.icon} {(t.customize as Record<string, string>)[h.key] ?? h.key}
                     </span>
                   ))}
                 </div>
@@ -455,12 +416,12 @@ export function VerificationRuleModal({ botId, initialRules, initialAgentConfig,
 
             {/* Custom rules as category */}
             <Button variant="secondary" className="!w-full !border-dashed !border-2 !mt-2" onClick={() => { resetBuilder(); setStep("hookPoint"); }}>
-              + {"Add Custom Rule"}
+              + {t.customize.ruleAdd}
             </Button>
 
             {(activeRules.length > 0 || presetDirty) && (
               <Button variant="cta" className="!w-full" onClick={() => void handleSave()} disabled={saving}>
-                {saving ? "Saving..." : "Save Rules"}
+                {saving ? t.customize.ruleSaving : t.customize.ruleSave}
               </Button>
             )}
             {success && <p className="text-xs text-emerald-600 text-center">{success}</p>}
@@ -470,8 +431,8 @@ export function VerificationRuleModal({ botId, initialRules, initialAgentConfig,
         {/* ─── Step 1: Hook Point ─── */}
         {step === "hookPoint" && (
           <div className="space-y-3">
-            <p className="text-sm font-semibold text-foreground">{"When should this rule run?"}</p>
-            <p className="text-xs text-secondary mb-1">{"Choose the hook point in the agent lifecycle"}</p>
+            <p className="text-sm font-semibold text-foreground">{t.customize.stepWhen}</p>
+            <p className="text-xs text-secondary mb-1">{t.customize.stepWhenDesc}</p>
             <div className="space-y-1.5">
               {HOOK_POINTS.map((hp) => (
                 <OptionCard key={hp.value} onClick={() => { setSelectedHookPoint(hp.value); setStep("condition"); }}>
@@ -487,13 +448,13 @@ export function VerificationRuleModal({ botId, initialRules, initialAgentConfig,
         {/* ─── Step 2: Condition ─── */}
         {step === "condition" && (
           <div className="space-y-3">
-            <p className="text-sm font-semibold text-foreground">{"Under what condition?"}</p>
-            <p className="text-xs text-secondary mb-1">{"Select or create a condition for this rule"}</p>
+            <p className="text-sm font-semibold text-foreground">{t.customize.stepCondition}</p>
+            <p className="text-xs text-secondary mb-1">{t.customize.stepConditionDesc}</p>
             <div className="space-y-1.5">
               {allConditions.map((cond) => (
                 <OptionCard key={cond.id} onClick={() => { setSelectedCondition(cond.id); setStep("check"); }}>
                   <span className="text-sm font-medium text-foreground flex-1">{cond.label}</span>
-                  {!cond.isPreset && <span className="text-[10px] px-2 py-0.5 rounded-full bg-primary/10 text-primary font-medium">{"Custom"}</span>}
+                  {!cond.isPreset && <span className="text-[10px] px-2 py-0.5 rounded-full bg-primary/10 text-primary font-medium">{t.customize.conditionCustomBadge}</span>}
                   <svg className="w-4 h-4 text-secondary" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" /></svg>
                 </OptionCard>
               ))}
@@ -504,33 +465,33 @@ export function VerificationRuleModal({ botId, initialRules, initialAgentConfig,
                 value={newConditionInput}
                 onChange={(e) => setNewConditionInput(e.target.value)}
                 onKeyDown={(e) => { if (e.key === "Enter" && newConditionInput.trim()) { const id = `custom_${Date.now()}`; setSavedConditions((prev) => [...prev, { id, label: newConditionInput.trim(), technical: newConditionInput.trim(), isPreset: false }]); setSelectedCondition(id); setNewConditionInput(""); setStep("check"); } }}
-                placeholder={"Type a custom condition..."}
+                placeholder={t.customize.conditionCustomPlaceholder}
                 className="flex-1 bg-white border border-black/10 rounded-xl px-4 py-3 text-sm text-foreground placeholder:text-gray-400 focus:outline-none focus:border-primary/50 focus:ring-1 focus:ring-primary/20 transition-colors duration-200"
               />
               <Button variant="secondary" size="sm" disabled={!newConditionInput.trim()} onClick={() => { if (!newConditionInput.trim()) return; const id = `custom_${Date.now()}`; setSavedConditions((prev) => [...prev, { id, label: newConditionInput.trim(), technical: newConditionInput.trim(), isPreset: false }]); setSelectedCondition(id); setNewConditionInput(""); setStep("check"); }}>
-                {"Add"}
+                {t.customize.conditionCustomAdd}
               </Button>
             </div>
-            <BackButton onClick={() => setStep("hookPoint")} label={"Back"} />
+            <BackButton onClick={() => setStep("hookPoint")} label={t.customize.stepBack} />
           </div>
         )}
 
         {/* ─── Step 3: Check (input only, no presets) ─── */}
         {step === "check" && (
           <div className="space-y-4">
-            <p className="text-sm font-semibold text-foreground">{"What should be checked?"}</p>
-            <p className="text-xs text-secondary">{"Describe the verification the agent should perform"}</p>
+            <p className="text-sm font-semibold text-foreground">{t.customize.stepCheck}</p>
+            <p className="text-xs text-secondary">{t.customize.stepCheckDesc}</p>
 
             <Textarea
               value={customCheckInput}
               onChange={(e) => { setCustomCheckInput(e.target.value); setSelectedCheck(null); }}
-              placeholder={"Describe what should be checked..."}
+              placeholder={t.customize.checkCustomPlaceholder}
               rows={3}
             />
 
             {savedChecks.length > 0 && (
               <div className="space-y-1.5">
-                <p className="text-xs text-secondary font-medium">{"Saved checks"}</p>
+                <p className="text-xs text-secondary font-medium">{t.customize.checkSavedLabel}</p>
                 {savedChecks.map((chk) => (
                   <OptionCard key={chk.id} selected={selectedCheck === chk.id} onClick={() => { setSelectedCheck(chk.id); setCustomCheckInput(chk.label); }}>
                     <span className="text-sm text-foreground flex-1">{chk.label}</span>
@@ -540,7 +501,7 @@ export function VerificationRuleModal({ botId, initialRules, initialAgentConfig,
             )}
 
             <div className="flex items-center justify-between pt-1">
-              <BackButton onClick={() => setStep("condition")} label={"Back"} />
+              <BackButton onClick={() => setStep("condition")} label={t.customize.stepBack} />
               <Button
                 variant="primary"
                 onClick={() => {
@@ -553,7 +514,7 @@ export function VerificationRuleModal({ botId, initialRules, initialAgentConfig,
                 }}
                 disabled={!customCheckInput.trim()}
               >
-                {"Next"}
+                {t.customize.stepNext}
               </Button>
             </div>
           </div>
@@ -563,8 +524,8 @@ export function VerificationRuleModal({ botId, initialRules, initialAgentConfig,
         {step === "failBehavior" && (
           <div className="space-y-5">
             <div>
-              <p className="text-sm font-semibold text-foreground">{"What happens on failure?"}</p>
-              <p className="text-xs text-secondary mt-0.5">{"Choose how the agent should respond when the check fails"}</p>
+              <p className="text-sm font-semibold text-foreground">{t.customize.stepFail}</p>
+              <p className="text-xs text-secondary mt-0.5">{t.customize.stepFailDesc}</p>
             </div>
             <div className="grid grid-cols-2 gap-2">
               {FAIL_BEHAVIORS.map((fb) => (
@@ -583,20 +544,20 @@ export function VerificationRuleModal({ botId, initialRules, initialAgentConfig,
             </div>
 
             <div>
-              <p className="text-sm font-semibold text-foreground mb-2">{"Error behavior"}</p>
+              <p className="text-sm font-semibold text-foreground mb-2">{t.customize.stepError}</p>
               <div className="grid grid-cols-2 gap-2">
                 <button type="button" onClick={() => setFailOpen(true)} className={`glass flex flex-col items-center gap-1.5 rounded-2xl px-4 py-3.5 transition-all duration-200 ${failOpen ? "!border-primary/30 !bg-primary/[0.04]" : "hover:border-primary/20"}`}>
-                  <span className="text-lg">✅</span><span className="text-xs font-medium">{"Pass through on error"}</span>
+                  <span className="text-lg">✅</span><span className="text-xs font-medium">{t.customize.failOpenLabel}</span>
                 </button>
                 <button type="button" onClick={() => setFailOpen(false)} className={`glass flex flex-col items-center gap-1.5 rounded-2xl px-4 py-3.5 transition-all duration-200 ${!failOpen ? "!border-primary/30 !bg-primary/[0.04]" : "hover:border-primary/20"}`}>
-                  <span className="text-lg">🚫</span><span className="text-xs font-medium">{"Block on error"}</span>
+                  <span className="text-lg">🚫</span><span className="text-xs font-medium">{t.customize.failClosedLabel}</span>
                 </button>
               </div>
             </div>
 
             <div className="flex items-center justify-between pt-1">
-              <BackButton onClick={() => setStep("check")} label={"Back"} />
-              <Button variant="primary" onClick={() => setStep("preview")}>{"Next"}</Button>
+              <BackButton onClick={() => setStep("check")} label={t.customize.stepBack} />
+              <Button variant="primary" onClick={() => setStep("preview")}>{t.customize.stepNext}</Button>
             </div>
           </div>
         )}
@@ -604,8 +565,8 @@ export function VerificationRuleModal({ botId, initialRules, initialAgentConfig,
         {/* ─── Step 5: Preview ─── */}
         {step === "preview" && (
           <div className="space-y-4">
-            <p className="text-sm font-semibold text-foreground">{"Review your rule"}</p>
-            <p className="text-xs text-secondary">{"Check the summary below before adding"}</p>
+            <p className="text-sm font-semibold text-foreground">{t.customize.stepPreview}</p>
+            <p className="text-xs text-secondary">{t.customize.stepPreviewDesc}</p>
 
             <div className="glass rounded-2xl p-5 !border-primary/15 space-y-3">
               <div className="flex items-center gap-2 flex-wrap">
@@ -621,19 +582,19 @@ export function VerificationRuleModal({ botId, initialRules, initialAgentConfig,
                   </span>
                 ))}
               </div>
-              <p className="text-xs text-secondary">{failOpen ? "Pass through on error" : "Block on error"}</p>
+              <p className="text-xs text-secondary">{failOpen ? t.customize.failOpenLabel : t.customize.failClosedLabel}</p>
             </div>
 
             <details className="glass rounded-2xl overflow-hidden">
-              <summary className="cursor-pointer px-4 py-2.5 text-xs font-medium text-secondary hover:text-foreground transition-colors">{"Technical details"}</summary>
+              <summary className="cursor-pointer px-4 py-2.5 text-xs font-medium text-secondary hover:text-foreground transition-colors">{t.customize.previewTechnical}</summary>
               <div className="border-t border-black/5 px-4 py-3">
                 <p className="text-xs text-foreground font-mono leading-relaxed break-all">{buildRuleText()}</p>
               </div>
             </details>
 
             <div className="flex items-center justify-between pt-1">
-              <BackButton onClick={() => setStep("failBehavior")} label={"Back"} />
-              <Button variant="cta" onClick={addRule}>{"Add Rule"}</Button>
+              <BackButton onClick={() => setStep("failBehavior")} label={t.customize.stepBack} />
+              <Button variant="cta" onClick={addRule}>{t.customize.ruleConfirmAdd}</Button>
             </div>
           </div>
         )}

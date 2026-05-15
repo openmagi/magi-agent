@@ -1,117 +1,44 @@
 import type { Channel, ChannelMemoryMode } from "./types";
 
-export type ChannelMemoryModeOption = ChannelMemoryMode;
-
-const MODE_LABELS: Record<Exclude<ChannelMemoryModeOption, "normal">, string> = {
+const MEMORY_MODE_LABELS: Partial<Record<ChannelMemoryMode, string>> = {
   read_only: "Read-only memory",
   incognito: "No memory",
 };
 
-function normalizeText(value: string | null | undefined): string {
-  return (value ?? "")
-    .toLowerCase()
-    .replace(/[_-]+/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
+const MEMORY_MODE_BADGE_LABELS: Partial<Record<ChannelMemoryMode, string>> = {
+  read_only: "Read-only",
+  incognito: "No mem",
+};
+
+const MEMORY_MODE_SUFFIX_PATTERN = /\s+[·-]\s+(?:read-only memory|read only memory|no memory)$/i;
+
+export function getChannelMemoryMode(channel: Pick<Channel, "memory_mode"> | null | undefined): ChannelMemoryMode {
+  return channel?.memory_mode ?? "normal";
 }
 
-function detectMemoryModeText(
-  value: string | null | undefined,
-): Exclude<ChannelMemoryModeOption, "normal"> | null {
-  const text = normalizeText(value);
-  if (!text) return null;
-
-  if (/\b(?:no memory|memory off|memory disabled|disabled memory)\b/.test(text)) {
-    return "incognito";
-  }
-  if (/\b(?:read only memory|readonly memory|memory read only)\b/.test(text)) {
-    return "read_only";
-  }
-  return null;
+export function formatChannelMemoryLabel(mode: ChannelMemoryMode | null | undefined): string | null {
+  return MEMORY_MODE_LABELS[mode ?? "normal"] ?? null;
 }
 
-function sanitizeChannelName(value: string): string {
-  return value
-    .toLowerCase()
-    .replace(/\s+/g, "-")
-    .replace(/[^a-z0-9-]/g, "-")
-    .replace(/-+/g, "-")
-    .replace(/^-|-$/g, "");
+export function formatChannelMemoryBadgeLabel(mode: ChannelMemoryMode | null | undefined): string | null {
+  return MEMORY_MODE_BADGE_LABELS[mode ?? "normal"] ?? null;
 }
 
-function appendSlugSuffix(slug: string, suffix: string): string {
-  if (slug === suffix || slug.endsWith(`-${suffix}`) || slug.startsWith(`${suffix}-`)) {
-    return slug;
-  }
-  return `${slug}-${suffix}`;
+export function stripChannelMemoryModeSuffix(label: string): string {
+  const stripped = label.trim().replace(MEMORY_MODE_SUFFIX_PATTERN, "").trim();
+  return stripped.length > 0 ? stripped : label.trim();
 }
 
-function hasLabel(text: string, mode: Exclude<ChannelMemoryModeOption, "normal">): boolean {
-  return detectMemoryModeText(text) === mode;
-}
-
-export function formatChannelMemoryLabel(
-  mode: ChannelMemoryModeOption | null | undefined,
-): string | null {
-  if (!mode || mode === "normal") return null;
-  return MODE_LABELS[mode];
-}
-
-export function getChannelMemoryMode(
-  channel: Pick<Channel, "name" | "display_name" | "category" | "memory_mode">,
-): Exclude<ChannelMemoryModeOption, "normal"> | null {
-  if (channel.memory_mode && channel.memory_mode !== "normal") return channel.memory_mode;
-  return (
-    detectMemoryModeText(channel.name) ??
-    detectMemoryModeText(channel.display_name) ??
-    detectMemoryModeText(channel.category)
-  );
+export function formatChannelBaseLabel(
+  channel: Pick<Channel, "name" | "display_name">,
+): string {
+  return stripChannelMemoryModeSuffix(channel.display_name?.trim() || channel.name);
 }
 
 export function withChannelMemoryModeSuffix(
-  channel: Pick<Channel, "name" | "display_name" | "category" | "memory_mode">,
+  channel: Pick<Channel, "name" | "display_name" | "memory_mode">,
 ): string {
-  const base = channel.display_name || channel.name;
-  const mode = getChannelMemoryMode(channel);
-  if (!mode) return base;
-  if (hasLabel(base, mode)) return base;
-  return `${base} · ${MODE_LABELS[mode]}`;
-}
-
-export function buildMemoryModeChannelIdentity(
-  rawName: string,
-  mode: ChannelMemoryModeOption = "normal",
-): { name: string; displayName?: string; memoryMode: ChannelMemoryModeOption } {
-  const trimmed = rawName.trim();
-  const baseSlug = sanitizeChannelName(trimmed) || `ch-${Date.now().toString(36)}`;
-  const inferredMode = mode === "normal" ? (detectMemoryModeText(trimmed) ?? "normal") : mode;
-
-  if (inferredMode === "incognito") {
-    const name = appendSlugSuffix(baseSlug, "no-memory");
-    return {
-      name,
-      displayName: hasLabel(trimmed, "incognito")
-        ? trimmed
-        : `${trimmed || name} · ${MODE_LABELS.incognito}`,
-      memoryMode: "incognito",
-    };
-  }
-
-  if (inferredMode === "read_only") {
-    const name = appendSlugSuffix(baseSlug, "read-only-memory");
-    return {
-      name,
-      displayName: hasLabel(trimmed, "read_only")
-        ? trimmed
-        : `${trimmed || name} · ${MODE_LABELS.read_only}`,
-      memoryMode: "read_only",
-    };
-  }
-
-  const normalizedInputSlug = sanitizeChannelName(trimmed);
-  return {
-    name: baseSlug,
-    ...(baseSlug !== normalizedInputSlug ? { displayName: trimmed || baseSlug } : {}),
-    memoryMode: "normal",
-  };
+  const baseLabel = formatChannelBaseLabel(channel);
+  const modeLabel = formatChannelMemoryLabel(getChannelMemoryMode(channel));
+  return modeLabel ? `${baseLabel} · ${modeLabel}` : baseLabel;
 }

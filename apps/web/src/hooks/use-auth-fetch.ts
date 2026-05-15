@@ -1,17 +1,30 @@
-export function useAuthFetch(): typeof fetch {
-  return ((input: RequestInfo | URL, init: RequestInit = {}) => {
-    const token = window.localStorage.getItem("magi.agent.app.token");
-    const headers = new Headers(init.headers);
-    if (token && !headers.has("Authorization")) {
-      headers.set("Authorization", `Bearer ${token}`);
-    }
-    const target =
-      typeof input === "string" && input.startsWith("/v1/")
-        ? new URL(
-            input,
-            window.localStorage.getItem("magi.agent.app.agentUrl") || window.location.origin,
-          ).toString()
-        : input;
-    return fetch(target, { ...init, headers });
-  }) as typeof fetch;
+"use client";
+
+import { useCallback } from "react";
+import { usePrivy } from "@privy-io/react-auth";
+import { useViewAs } from "@/lib/admin/view-as-context";
+
+export function useAuthFetch(): (url: string, options?: RequestInit) => Promise<Response> {
+  const { getAccessToken } = usePrivy();
+  const { viewAsUserId } = useViewAs();
+
+  const authFetch = useCallback(
+    async (url: string, options?: RequestInit): Promise<Response> => {
+      const token = await getAccessToken();
+      const headers: Record<string, string> = {
+        ...options?.headers as Record<string, string>,
+        Authorization: `Bearer ${token}`,
+      };
+      if (viewAsUserId) {
+        headers["x-view-as-user-id"] = viewAsUserId;
+      }
+      return fetch(url, {
+        ...options,
+        headers,
+      });
+    },
+    [getAccessToken, viewAsUserId]
+  );
+
+  return authFetch;
 }

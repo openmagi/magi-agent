@@ -5,14 +5,14 @@ import { CHAT_ATTACHMENT_ACCEPT, validateFile } from "@/lib/chat/attachments";
 import { isImageMimetype, formatFileSize } from "@/lib/chat/attachment-marker";
 import { extractClipboardImageFiles } from "@/lib/chat/clipboard-images";
 import { kbUploadKey } from "@/lib/chat/kb-uploads";
-import type { ReplyTo, KbDocReference, ChatResponseLanguage } from "@/lib/chat/types";
+import type { ChatResponseLanguage, ReplyTo, KbDocReference } from "@/lib/chat/types";
 import { isStreamingComposerBlockedByQueue } from "@/lib/chat/send-policy";
 import type { StreamingComposerMode } from "@/lib/chat/send-policy";
 import { SKILLS } from "@/lib/skills-catalog";
 import type { KbDocEntry } from "@/hooks/use-kb-docs";
 import type { PendingKbUpload } from "@/lib/chat/kb-uploads";
 
-export interface SlashEntry {
+interface SlashEntry {
   command: string;
   label: string;
   category: string;
@@ -27,7 +27,7 @@ const BUILTIN_COMMANDS: SlashEntry[] = [
   { command: "help", label: "Show help", category: "system", builtin: true },
 ];
 
-const ALL_SLASH: SlashEntry[] = (() => {
+const BUNDLED_SLASH: SlashEntry[] = (() => {
   const entries: SlashEntry[] = [...BUILTIN_COMMANDS];
   for (const skill of SKILLS) {
     if (!skill.commands?.length) continue;
@@ -47,7 +47,7 @@ export interface ChatInputCustomSkill {
 }
 
 export function buildSlashEntries(customSkills: ChatInputCustomSkill[] = []): SlashEntry[] {
-  const entries: SlashEntry[] = [...ALL_SLASH];
+  const entries: SlashEntry[] = [...BUNDLED_SLASH];
   const seenCommands = new Set(entries.map((entry) => entry.command.toLowerCase()));
 
   for (const skill of customSkills) {
@@ -120,7 +120,6 @@ interface ChatInputProps {
     files?: File[],
     options?: ChatInputSendOptions,
   ) => void | boolean | Promise<void | boolean>;
-  uiLanguage?: ChatResponseLanguage;
   onReset?: () => void;
   disabled?: boolean;
   streaming?: boolean;
@@ -153,7 +152,9 @@ interface ChatInputProps {
   uploadStates?: Record<string, PendingKbUpload>;
   /** Optional controls rendered as compact trailing controls inside the composer shell. */
   composerAccessory?: ReactNode;
-  /** Custom skills installed for the current runtime and exposed via slash autocomplete. */
+  /** App UI language. Response language can differ for the current assistant turn. */
+  uiLanguage?: ChatResponseLanguage;
+  /** Custom skills installed for the current bot and exposed via slash autocomplete. */
   customSkills?: ChatInputCustomSkill[];
 }
 
@@ -164,18 +165,6 @@ interface ComposerEnterEvent {
   nativeEvent?: {
     isComposing?: boolean;
   };
-}
-
-function isKorean(language?: ChatResponseLanguage): boolean {
-  return language === "ko";
-}
-
-function t(language: ChatResponseLanguage | undefined, en: string, ko: string): string {
-  return isKorean(language) ? ko : en;
-}
-
-function waitingCountLabel(count: number, language?: ChatResponseLanguage): string {
-  return isKorean(language) ? `${count}개 대기` : `${count} waiting`;
 }
 
 interface ComposerEnterOptions {
@@ -214,10 +203,42 @@ export function shouldCancelStopOnPointerDown(pointerType: string): boolean {
   return pointerType === "touch" || pointerType === "pen";
 }
 
+function isKorean(language?: ChatResponseLanguage): boolean {
+  return language === "ko";
+}
+
+function t(language: ChatResponseLanguage | undefined, en: string, ko: string): string {
+  return isKorean(language) ? ko : en;
+}
+
+function waitingCountLabel(count: number, language?: ChatResponseLanguage): string {
+  return isKorean(language) ? `${count}개 대기` : `${count} waiting`;
+}
+
+function slashEntryLabel(entry: SlashEntry, language?: ChatResponseLanguage): string {
+  if (!entry.builtin) return entry.label;
+  switch (entry.command) {
+    case "reset":
+      return t(language, "Reset conversation", "대화 초기화");
+    case "status":
+      return t(language, "Show bot status", "봇 상태 보기");
+    case "compact":
+      return t(language, "Compact memory", "메모리 압축");
+    case "help":
+      return t(language, "Show help", "도움말 보기");
+    default:
+      return entry.label;
+  }
+}
+
+function slashCategoryLabel(category: string, language?: ChatResponseLanguage): string {
+  if (category === "system") return t(language, "system", "시스템");
+  return category;
+}
+
 export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput(
   {
     onSend,
-    uiLanguage,
     onReset,
     disabled,
     streaming,
@@ -226,7 +247,7 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
     onCancelReply,
     queuedCount = 0,
     onCancelQueue,
-    cancelHint,
+    cancelHint: _cancelHint,
     queueFull = false,
     streamingMode = "queue",
     onStreamingModeChange,
@@ -236,6 +257,7 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
     onSelectKbDoc,
     uploadStates,
     composerAccessory,
+    uiLanguage,
     customSkills,
   },
   ref,
@@ -261,17 +283,9 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
   });
   const steeringUnavailableReason =
     pendingFiles.length > 0
-      ? t(
-        language,
-        "Attachments will send after the current run.",
-        "첨부 파일은 현재 실행이 끝난 뒤 전송됩니다.",
-      )
+      ? t(language, "Attachments will send after the current run.", "첨부파일은 현재 실행 후 전송됩니다.")
       : steeringDisabledReason
-        ?? t(
-          language,
-          "Selected context will send after the current run.",
-          "선택한 컨텍스트는 현재 실행이 끝난 뒤 전송됩니다.",
-        );
+        ?? t(language, "Selected context will send after the current run.", "선택한 컨텍스트는 현재 실행 후 전송됩니다.");
 
   // Slash autocomplete: detect "/word" token at cursor position (works mid-sentence)
   const [cursorPos, setCursorPos] = useState(0);
@@ -555,21 +569,49 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
     [addFiles, disabled, isSubmitting, queueBlocked],
   );
 
+  const showStreamingStopControl = streaming && !text.trim() && pendingFiles.length === 0;
+  const streamingStopControl = showStreamingStopControl ? (
+    <div className="flex min-w-0 shrink-0 items-center gap-1">
+      <button
+        type="button"
+        data-chat-stop-button="true"
+        onPointerDown={handleStopPointerDown}
+        onClick={handleStopClick}
+        className="flex h-8 w-8 items-center justify-center rounded-full border border-red-500/15 bg-red-500/[0.08] text-red-500 transition-colors duration-200 hover:bg-red-500/[0.13] active:scale-95 touch-manipulation cursor-pointer"
+        aria-label={t(language, "Stop", "중단")}
+        title={t(language, "Stop (ESC)", "중단 (ESC)")}
+      >
+        <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor">
+          <rect x="6" y="6" width="12" height="12" rx="2" />
+        </svg>
+      </button>
+      <kbd
+        className="hidden pointer-events-none rounded border border-black/[0.06] px-1 py-0.5 font-mono text-[10px] text-secondary/50 md:inline"
+        aria-hidden="true"
+      >
+        ESC
+      </kbd>
+    </div>
+  ) : null;
+
+  const sendEnabled = (text.trim() || pendingFiles.length > 0) && !disabled && !queueBlocked && !isSubmitting;
+
   return (
     <div
-      className="px-3 sm:px-4 md:px-8 lg:px-12 pb-4 pt-2 chat-input-glow transition-shadow duration-300"
+      className="px-3 pb-3 pt-2 sm:px-4 md:px-6 lg:px-10"
+      data-chat-composer-dock="true"
       onDrop={handleDrop}
       onDragOver={handleDragOver}
     >
-      <div className="max-w-3xl mx-auto">
+      <div className="mx-auto max-w-3xl">
         {queuedCount > 0 && (
           <div
-            className="mb-2 flex items-center justify-between gap-3 rounded-xl border border-amber-500/25 bg-amber-50 px-3 py-2 text-[11px] text-amber-900 shadow-[0_1px_8px_rgba(245,158,11,0.12)]"
+            className="mb-2.5 flex items-center justify-between gap-3 rounded-2xl border border-amber-200/60 bg-amber-50/80 px-3.5 py-2.5 text-[11px] text-amber-900 backdrop-blur-sm"
             data-chat-queue-strip="true"
           >
-            <div className="flex min-w-0 items-center gap-2" aria-live="polite">
-              <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-amber-500/15 text-amber-700">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <div className="flex min-w-0 items-center gap-2.5" aria-live="polite">
+              <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-amber-500/15 text-amber-600">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                   <path d="M6 8h9a4 4 0 0 1 0 8H9" />
                   <path d="m10 12-4-4 4-4" />
                 </svg>
@@ -577,22 +619,15 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
               <span className="min-w-0">
                 <span className="flex flex-wrap items-center gap-1.5">
                   <span className="font-semibold text-amber-950">
-                    {t(language, "Queued after current run", "현재 실행 후 대기")}
+                    {t(language, "Queued after current run", "현재 실행 후 전송 대기")}
                   </span>
-                  <span className="rounded-full bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-semibold text-amber-800">
+                  <span className="rounded-full bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-semibold text-amber-700">
                     {waitingCountLabel(queuedCount, language)}
                   </span>
                   {queueFull && (
-                    <span className="rounded-full bg-red-500/10 px-1.5 py-0.5 text-[10px] font-semibold text-red-600">
+                    <span className="rounded-full bg-red-100 px-1.5 py-0.5 text-[10px] font-semibold text-red-600">
                       {t(language, "Queue full", "대기열 가득 참")}
                     </span>
-                  )}
-                </span>
-                <span className="mt-0.5 block truncate text-[10.5px] text-amber-800/75">
-                  {t(
-                    language,
-                    "Will send automatically when this run finishes.",
-                    "현재 실행이 끝나면 자동 전송됩니다.",
                   )}
                 </span>
               </span>
@@ -601,175 +636,164 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
               <button
                 type="button"
                 onClick={onCancelQueue}
-                className="shrink-0 rounded-md px-2 py-1 text-[11px] font-semibold text-amber-800 transition-colors hover:bg-red-500/10 hover:text-red-600"
+                className="shrink-0 rounded-lg px-2.5 py-1 text-[11px] font-semibold text-amber-700 transition-colors hover:bg-red-100 hover:text-red-600"
               >
                 {t(language, "Clear queue", "대기열 비우기")}
               </button>
             )}
           </div>
         )}
-        {streaming && (
-          <div className="mb-2 flex flex-wrap items-center justify-between gap-2 text-[11px] text-secondary/70">
-            <div
-              className="inline-flex rounded-md border border-black/[0.08] bg-black/[0.04] p-0.5"
-              aria-label={t(language, "Streaming send mode", "스트리밍 전송 모드")}
-            >
-              <button
-                type="button"
-                onClick={() => onStreamingModeChange?.("queue")}
-                className={`rounded px-2 py-1 font-medium transition-colors ${
-                  effectiveStreamingMode === "queue"
-                    ? "bg-white text-foreground shadow-sm"
-                    : "text-secondary/70 hover:text-foreground"
-                }`}
-                aria-pressed={effectiveStreamingMode === "queue"}
-                title={t(
-                  language,
-                  "Send after the current run reaches a checkpoint",
-                  "현재 실행이 체크포인트에 도달하면 전송",
-                )}
-              >
-                {t(language, "Queue after run", "현재 실행 후 대기")}
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  if (!steeringUnavailable) onStreamingModeChange?.("steer");
-                }}
-                disabled={steeringUnavailable}
-                className={`rounded px-2 py-1 font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${
-                  effectiveStreamingMode === "steer"
-                    ? "bg-white text-foreground shadow-sm"
-                    : "text-secondary/70 hover:text-foreground"
-                }`}
-                aria-pressed={effectiveStreamingMode === "steer"}
-                title={
-                  steeringUnavailable
-                    ? steeringUnavailableReason
-                    : t(
-                      language,
-                      "Send now as a text-only steering update",
-                      "텍스트 지시로 지금 현재 실행 조정",
-                    )
-                }
-              >
-                {t(language, "Steer current run", "현재 실행 조정")}
-              </button>
-            </div>
-            {steeringUnavailable && (
-              <span className="text-secondary/50" aria-live="polite">
-                {steeringUnavailableReason}
-              </span>
-            )}
-          </div>
-        )}
-        {replyingTo && (
-          <div className="mb-2 flex items-start gap-2 rounded-md border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm">
-            <svg className="shrink-0 mt-0.5 text-[#7C3AED]" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-              <polyline points="9 17 4 12 9 7" />
-              <path d="M20 18v-2a4 4 0 0 0-4-4H4" />
-            </svg>
-            <div className="min-w-0 flex-1 leading-snug">
-              <div className="text-[11px] font-medium text-[#7C3AED]">
-                {t(language, "Replying to", "답장 대상")}{" "}
-                {replyingTo.role === "user"
-                  ? t(language, "You", "나")
-                  : t(language, "Bot", "봇")}
-              </div>
-              <div className="truncate text-xs text-secondary/80">{replyingTo.preview}</div>
-            </div>
-            <button
-              type="button"
-              onClick={onCancelReply}
-              aria-label={t(language, "Cancel reply", "답장 취소")}
-              className="shrink-0 p-1 -m-1 rounded-md text-secondary/60 hover:text-foreground hover:bg-black/[0.04] transition-colors cursor-pointer"
-            >
-              <svg width="14" height="14" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
-                <path d="M6.28 5.22a.75.75 0 00-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 101.06 1.06L10 11.06l3.72 3.72a.75.75 0 101.06-1.06L11.06 10l3.72-3.72a.75.75 0 00-1.06-1.06L10 8.94 6.28 5.22z" />
-              </svg>
-            </button>
-          </div>
-        )}
-        {pendingFiles.length > 0 && (
-          <div className="flex gap-2 mb-2 flex-wrap">
-            {pendingFiles.map((pf, i) => (
-              <div
-                key={i}
-                className="relative group bg-black/[0.04] border border-black/[0.08] rounded-xl p-2 flex items-center gap-2 max-w-[150px] sm:max-w-[200px]"
-              >
-                {pf.previewUrl ? (
-                  <img
-                    src={pf.previewUrl}
-                    alt={pf.file.name}
-                    className="w-10 h-10 rounded-lg object-cover"
-                  />
-                ) : (
-                  <div className="w-10 h-10 rounded-lg bg-black/[0.04] flex items-center justify-center">
-                    <svg className="w-5 h-5 text-secondary/60" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5}>
-                      <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-                      <path d="M14 2v6h6" />
-                    </svg>
-                  </div>
-                )}
-                <div className="flex-1 min-w-0">
-                  <p className="text-xs text-foreground truncate">{pf.file.name}</p>
-                  <p className="text-[10px] text-secondary/50">{formatFileSize(pf.file.size)}</p>
-                  {uploadStates?.[kbUploadKey(pf.file)] && (() => {
-                    const state = uploadStates[kbUploadKey(pf.file)];
-                    const isFailed = state?.phase === "failed";
-                    const isActive = state?.phase === "uploading" || state?.phase === "indexing";
-                    return (
-                      <>
-                        {isActive && (
-                          <div className="mt-1 h-1 w-full rounded-full bg-black/[0.06] overflow-hidden">
-                            <div
-                              className={`h-full rounded-full transition-all duration-700 ${
-                                state?.phase === "indexing" ? "w-3/4 bg-[#7C3AED]/60" : "w-1/3 bg-[#7C3AED]/40"
-                              } animate-pulse`}
-                            />
-                          </div>
-                        )}
-                        {state?.message && (
-                          <p className={`text-[10px] truncate ${isFailed ? "text-red-500" : "text-secondary/60"}`}>
-                            {state.message}
-                          </p>
-                        )}
-                      </>
-                    );
-                  })()}
-                </div>
-                <button
-                  onClick={() => removeFile(i)}
-                  disabled={isSubmitting}
-                  className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-red-500/80 text-white flex items-center justify-center text-xs opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer"
-                >
-                  x
-                </button>
-              </div>
-            ))}
-          </div>
-        )}
 
-        <div className="flex flex-col gap-2">
-          <div className="relative min-w-0" data-chat-input-shell="true">
+        <div
+          className="rounded-2xl border border-black/[0.06] bg-white shadow-[0_2px_12px_rgba(0,0,0,0.06),0_0_0_1px_rgba(0,0,0,0.03)]"
+          data-chat-composer-panel="true"
+        >
+          {streaming && (
+            <div
+              className="flex items-center gap-2 border-b border-black/[0.05] px-3 py-1.5"
+              data-chat-composer-toolbar="true"
+            >
+              <div className="min-w-0" data-streaming-composer-controls="true">
+                <div
+                  className="inline-grid grid-cols-2 rounded-md bg-black/[0.04] p-0.5"
+                  role="group"
+                  aria-label={t(language, "Streaming send mode", "실행 중 전송 방식")}
+                >
+                  <button
+                    type="button"
+                    data-streaming-mode-option="queue"
+                    onClick={() => onStreamingModeChange?.("queue")}
+                    className={`min-h-7 touch-manipulation rounded-md px-2.5 text-[11px] font-semibold transition-all ${
+                      effectiveStreamingMode === "queue"
+                        ? "bg-white text-foreground shadow-[0_1px_3px_rgba(0,0,0,0.08)]"
+                        : "text-secondary/65 hover:text-foreground"
+                    }`}
+                    aria-pressed={effectiveStreamingMode === "queue"}
+                    title={t(language, "Send after the current run reaches a checkpoint", "현재 실행이 체크포인트에 도달한 뒤 전송")}
+                  >
+                    {t(language, "Queue", "대기")}
+                  </button>
+                  <button
+                    type="button"
+                    data-streaming-mode-option="steer"
+                    onClick={() => { if (!steeringUnavailable) onStreamingModeChange?.("steer"); }}
+                    disabled={steeringUnavailable}
+                    className={`min-h-7 touch-manipulation rounded-md px-2.5 text-[11px] font-semibold transition-all disabled:cursor-not-allowed disabled:opacity-40 ${
+                      effectiveStreamingMode === "steer"
+                        ? "bg-white text-foreground shadow-[0_1px_3px_rgba(0,0,0,0.08)]"
+                        : "text-secondary/65 hover:text-foreground"
+                    }`}
+                    aria-pressed={effectiveStreamingMode === "steer"}
+                    title={steeringUnavailable ? steeringUnavailableReason : t(language, "Send now as a text-only steering update", "텍스트 전용 조정 메시지를 지금 전송")}
+                  >
+                    {t(language, "Steer", "조정")}
+                  </button>
+                </div>
+              </div>
+              {steeringUnavailable && (
+                <span className="text-[10px] leading-snug text-secondary/50" aria-live="polite">
+                  {steeringUnavailableReason}
+                </span>
+              )}
+            </div>
+          )}
+
+          {replyingTo && (
+            <div className="mx-3 mt-2 flex items-start gap-2 rounded-xl bg-primary/[0.04] px-3 py-2 text-sm">
+              <svg className="mt-0.5 shrink-0 text-primary" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <polyline points="9 17 4 12 9 7" />
+                <path d="M20 18v-2a4 4 0 0 0-4-4H4" />
+              </svg>
+              <div className="min-w-0 flex-1 leading-snug">
+                <div className="text-[11px] font-medium text-primary">
+                  {t(language, "Replying to", "답장 대상")}{" "}
+                  {replyingTo.role === "user" ? t(language, "You", "나") : t(language, "Bot", "봇")}
+                </div>
+                <div className="truncate text-xs text-secondary/70">{replyingTo.preview}</div>
+              </div>
+              <button
+                type="button"
+                onClick={onCancelReply}
+                aria-label={t(language, "Cancel reply", "답장 취소")}
+                className="-m-1 shrink-0 rounded-md p-1 text-secondary/50 transition-colors hover:bg-black/[0.04] hover:text-foreground cursor-pointer"
+              >
+                <svg width="14" height="14" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+                  <path d="M6.28 5.22a.75.75 0 00-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 101.06 1.06L10 11.06l3.72 3.72a.75.75 0 101.06-1.06L11.06 10l3.72-3.72a.75.75 0 00-1.06-1.06L10 8.94 6.28 5.22z" />
+                </svg>
+              </button>
+            </div>
+          )}
+
+          {pendingFiles.length > 0 && (
+            <div className="mx-3 mt-2 flex flex-wrap gap-2">
+              {pendingFiles.map((pf, i) => (
+                <div
+                  key={i}
+                  className="group relative flex items-center gap-2 rounded-xl border border-black/[0.06] bg-black/[0.02] p-2 max-w-[150px] sm:max-w-[200px]"
+                >
+                  {pf.previewUrl ? (
+                    <img src={pf.previewUrl} alt={pf.file.name} className="h-10 w-10 rounded-lg object-cover" />
+                  ) : (
+                    <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-black/[0.04]">
+                      <svg className="h-5 w-5 text-secondary/50" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5}>
+                        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                        <path d="M14 2v6h6" />
+                      </svg>
+                    </div>
+                  )}
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-xs text-foreground">{pf.file.name}</p>
+                    <p className="text-[10px] text-secondary/45">{formatFileSize(pf.file.size)}</p>
+                    {uploadStates?.[kbUploadKey(pf.file)] && (() => {
+                      const state = uploadStates[kbUploadKey(pf.file)];
+                      const isFailed = state?.phase === "failed";
+                      const isActive = state?.phase === "uploading" || state?.phase === "indexing";
+                      return (
+                        <>
+                          {isActive && (
+                            <div className="mt-1 h-1 w-full overflow-hidden rounded-full bg-black/[0.06]">
+                              <div className={`h-full rounded-full transition-all duration-700 ${state?.phase === "indexing" ? "w-3/4 bg-primary/60" : "w-1/3 bg-primary/40"} animate-pulse`} />
+                            </div>
+                          )}
+                          {state?.message && (
+                            <p className={`truncate text-[10px] ${isFailed ? "text-red-500" : "text-secondary/55"}`}>{state.message}</p>
+                          )}
+                        </>
+                      );
+                    })()}
+                  </div>
+                  <button
+                    onClick={() => removeFile(i)}
+                    disabled={isSubmitting}
+                    aria-label={t(language, "Remove file", "파일 제거")}
+                    className="absolute -right-1.5 -top-1.5 flex h-5 w-5 items-center justify-center rounded-full bg-red-500 text-[10px] text-white opacity-0 transition-opacity group-hover:opacity-100 cursor-pointer"
+                  >
+                    <svg className="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={3} strokeLinecap="round"><path d="M18 6L6 18M6 6l12 12" /></svg>
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+
+          <div className="relative min-w-0 px-1" data-chat-input-shell="true">
             {slashOpen && (
               <div
                 ref={slashRef}
-                className="absolute bottom-full left-0 right-0 mb-1 max-h-48 sm:max-h-64 overflow-y-auto rounded-xl border border-black/10 bg-white shadow-lg z-50"
+                className="absolute bottom-full left-0 right-0 mb-1 max-h-48 overflow-y-auto rounded-xl border border-black/[0.06] bg-white shadow-lg sm:max-h-64 z-50"
               >
                 {slashMatches.map((entry, i) => (
                   <button
                     key={`${entry.command}-${entry.label}`}
                     type="button"
                     onMouseDown={(e) => { e.preventDefault(); acceptSlash(entry); }}
-                    className={`w-full text-left px-3 py-2 flex items-center gap-3 text-sm transition-colors cursor-pointer ${
-                      i === slashIdx ? "bg-primary/10 text-foreground" : "text-secondary hover:bg-black/[0.03]"
+                    className={`flex w-full items-center gap-3 px-3 py-2 text-left text-sm transition-colors cursor-pointer ${
+                      i === slashIdx ? "bg-primary/[0.06] text-foreground" : "text-secondary hover:bg-black/[0.02]"
                     }`}
                   >
-                    <span className="font-mono text-primary-light font-medium shrink-0">/{entry.command}</span>
-                    <span className="truncate text-xs text-secondary">{entry.label}</span>
-                    <span className="ml-auto text-[10px] px-1.5 py-0.5 rounded-full bg-black/[0.04] text-secondary/70 shrink-0">
-                      {entry.category}
+                    <span className="shrink-0 font-mono text-xs font-medium text-primary">/{entry.command}</span>
+                    <span className="truncate text-xs text-secondary/70">{slashEntryLabel(entry, language)}</span>
+                    <span className="ml-auto shrink-0 rounded-full bg-black/[0.04] px-1.5 py-0.5 text-[10px] text-secondary/60">
+                      {slashCategoryLabel(entry.category, language)}
                     </span>
                   </button>
                 ))}
@@ -778,66 +802,67 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
             {kbOpen && (
               <div
                 ref={kbRef}
-                className="absolute bottom-full left-0 right-0 mb-1 max-h-48 sm:max-h-64 overflow-y-auto rounded-xl border border-black/10 bg-white shadow-lg z-50"
+                className="absolute bottom-full left-0 right-0 mb-1 max-h-48 overflow-y-auto rounded-xl border border-black/[0.06] bg-white shadow-lg sm:max-h-64 z-50"
               >
-                <div className="px-3 py-1.5 text-[10px] font-semibold text-secondary/50 uppercase tracking-wide border-b border-black/[0.05]">
-                  {t(language, "Knowledge Base", "지식베이스")}
+                <div className="border-b border-black/[0.04] px-3 py-1.5 text-[10px] font-semibold uppercase tracking-wide text-secondary/45">
+                  {t(language, "Knowledge Base", "지식 베이스")}
                 </div>
                 {kbMatches.map((entry, i) => (
                   <button
                     key={entry.id}
                     type="button"
                     onMouseDown={(e) => { e.preventDefault(); acceptKb(entry); }}
-                    className={`w-full text-left px-3 py-2 flex items-center gap-3 text-sm transition-colors cursor-pointer ${
-                      i === kbIdx ? "bg-primary/10 text-foreground" : "text-secondary hover:bg-black/[0.03]"
+                    className={`flex w-full items-center gap-3 px-3 py-2 text-left text-sm transition-colors cursor-pointer ${
+                      i === kbIdx ? "bg-primary/[0.06] text-foreground" : "text-secondary hover:bg-black/[0.02]"
                     }`}
                   >
-                    <svg className="w-3.5 h-3.5 shrink-0 text-primary/40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5}>
+                    <svg className="h-3.5 w-3.5 shrink-0 text-primary/35" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5}>
                       <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
                       <path d="M14 2v6h6" />
                     </svg>
-                    <span className="truncate text-xs text-foreground font-medium">{entry.filename}</span>
-                    <span className="ml-auto text-[10px] px-1.5 py-0.5 rounded-full bg-black/[0.04] text-secondary/70 shrink-0 truncate max-w-[100px]">
+                    <span className="truncate text-xs font-medium text-foreground">{entry.filename}</span>
+                    <span className="ml-auto max-w-[100px] shrink-0 truncate rounded-full bg-black/[0.04] px-1.5 py-0.5 text-[10px] text-secondary/60">
                       {entry.collectionName}
                     </span>
                   </button>
                 ))}
               </div>
             )}
-            <textarea
-              ref={textareaRef}
-              value={text}
-              onChange={(e) => {
-                setText(e.target.value);
-                setCursorPos(e.target.selectionStart ?? e.target.value.length);
-                handleInput();
-              }}
-              onKeyDown={handleKeyDown}
-              onKeyUp={(e) => setCursorPos((e.target as HTMLTextAreaElement).selectionStart ?? cursorPos)}
-              onClick={(e) => setCursorPos((e.target as HTMLTextAreaElement).selectionStart ?? cursorPos)}
-              onPaste={handlePaste}
-              placeholder={t(language, "Message...", "메시지...")}
-              rows={1}
-              disabled={disabled || isSubmitting}
-              data-chat-input-field="true"
-              // py-2.5 + leading-5 + text-sm -> 10+10+20 = 40px single-line,
-              // matching the 40px attach/send buttons exactly for horizontal
-              // alignment. Textarea grows up to 160px via auto-height JS.
-              className="block w-full resize-none rounded-2xl border border-black/[0.08] bg-black/[0.04] px-4 py-2.5 text-sm leading-5 text-foreground placeholder-secondary/50 transition-all duration-200 focus:border-primary/40 focus:bg-black/[0.04] focus:outline-none disabled:opacity-40"
-              style={{ maxHeight: 160 }}
-            />
+            <div className="px-3 pb-1 pt-0">
+              <textarea
+                ref={textareaRef}
+                value={text}
+                onChange={(e) => {
+                  setText(e.target.value);
+                  setCursorPos(e.target.selectionStart ?? e.target.value.length);
+                  handleInput();
+                }}
+                onKeyDown={handleKeyDown}
+                onKeyUp={(e) => setCursorPos((e.target as HTMLTextAreaElement).selectionStart ?? cursorPos)}
+                onClick={(e) => setCursorPos((e.target as HTMLTextAreaElement).selectionStart ?? cursorPos)}
+                onPaste={handlePaste}
+                placeholder={t(language, "Message...", "메시지...")}
+                rows={1}
+                disabled={disabled || isSubmitting}
+                data-chat-input-field="true"
+                className="block min-h-[44px] w-full resize-none bg-transparent py-2.5 text-[15px] leading-6 text-foreground placeholder-secondary/40 outline-none disabled:opacity-40"
+                style={{ maxHeight: 160 }}
+              />
+            </div>
           </div>
+
           <div
-            className="flex flex-wrap items-center gap-2"
+            className="flex items-center gap-1 border-t border-black/[0.04] px-2 py-1.5"
             data-chat-composer-controls="true"
+            data-chat-composer-actions="true"
           >
             <button
               onClick={() => fileInputRef.current?.click()}
               disabled={disabled || queueBlocked || isSubmitting}
-              className="w-10 h-10 flex items-center justify-center rounded-2xl bg-black/[0.04] text-secondary/60 hover:text-foreground hover:bg-black/[0.06] transition-all duration-200 cursor-pointer disabled:opacity-20 disabled:cursor-not-allowed shrink-0"
+              className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-secondary/45 transition-colors hover:bg-black/[0.04] hover:text-secondary/70 touch-manipulation cursor-pointer disabled:cursor-not-allowed disabled:opacity-25"
               aria-label={t(language, "Attach file", "파일 첨부")}
             >
-              <svg className="w-4.5 h-4.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+              <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
                 <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />
               </svg>
             </button>
@@ -859,112 +884,61 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
               disabled={disabled || isSubmitting}
               aria-pressed={runUntilDone}
               data-chat-goal-toggle="true"
-              className={`flex h-10 shrink-0 items-center gap-2 rounded-2xl border px-3 text-xs font-medium transition-all duration-200 disabled:cursor-not-allowed disabled:opacity-30 ${
+              className={`flex h-7 shrink-0 items-center gap-1 rounded-md px-2 text-[11px] font-medium transition-all touch-manipulation disabled:cursor-not-allowed disabled:opacity-30 ${
                 runUntilDone
-                  ? "border-primary/25 bg-primary/10 text-primary shadow-[0_1px_6px_rgba(124,58,237,0.10)]"
-                  : "border-black/[0.08] bg-black/[0.03] text-secondary/75 hover:bg-black/[0.05] hover:text-foreground"
+                  ? "bg-primary/[0.08] text-primary"
+                  : "text-secondary/45 hover:bg-black/[0.04] hover:text-secondary/70"
               }`}
-              title={t(
-                language,
-                "Run the next message as a goal mission",
-                "다음 메시지를 목표 미션으로 실행",
-              )}
+              title={t(language, "Run the next message as a goal mission", "다음 메시지를 목표 미션으로 실행")}
             >
-              <span
-                className={`flex h-5 w-5 items-center justify-center rounded-full ${
-                  runUntilDone ? "bg-primary text-white" : "bg-black/[0.04] text-secondary/55"
-                }`}
-                aria-hidden="true"
-              >
-                <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-                  <circle cx="12" cy="12" r="6" />
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 3v3m0 12v3m9-9h-3M6 12H3" />
-                </svg>
-              </span>
-              <span className="whitespace-nowrap">
+              <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+                <circle cx="12" cy="12" r="6" />
+                <path strokeLinecap="round" strokeLinejoin="round" d="M12 3v3m0 12v3m9-9h-3M6 12H3" />
+              </svg>
+              <span className="hidden whitespace-nowrap sm:inline">
                 {t(language, "Run until done", "완료까지 실행")}
               </span>
-              {runUntilDone && (
-                <span className="rounded-md bg-white/70 px-1.5 py-0.5 text-[10px] font-semibold text-primary/80">
-                  1x
-                </span>
-              )}
             </button>
 
             {composerAccessory && (
-              <div className="flex min-w-0 flex-1 items-center justify-end" data-composer-accessory="bottom-row">
+              <div className="flex min-w-0 items-center" data-composer-accessory="bottom-row">
                 {composerAccessory}
               </div>
             )}
 
-            {streaming && !text.trim() && pendingFiles.length === 0 ? (
-              <div className="relative shrink-0">
+            <div className="ml-auto flex shrink-0 items-center">
+              {showStreamingStopControl ? streamingStopControl : (
                 <button
-                  type="button"
-                  data-chat-stop-button="true"
-                  onPointerDown={handleStopPointerDown}
-                  onClick={handleStopClick}
-                  className="w-10 h-10 flex items-center justify-center rounded-2xl bg-red-500/15 text-red-400 hover:bg-red-500/25 active:scale-95 touch-manipulation transition-all duration-200 cursor-pointer"
-                  aria-label={t(language, "Stop", "중지")}
-                  title={t(language, "Stop (ESC)", "중지 (ESC)")}
+                  onClick={() => void handleSend()}
+                  disabled={!sendEnabled}
+                  className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full transition-all duration-200 touch-manipulation cursor-pointer disabled:cursor-not-allowed ${
+                    sendEnabled
+                      ? "bg-primary text-white shadow-[0_1px_4px_rgba(124,58,237,0.3)] hover:bg-primary/90 active:scale-95"
+                      : "bg-black/[0.06] text-secondary/30"
+                  }`}
+                  aria-label={
+                    streaming
+                      ? effectiveStreamingMode === "steer"
+                        ? t(language, "Steer current run", "현재 실행 조정")
+                        : t(language, "Queue message", "메시지 대기")
+                      : t(language, "Send", "전송")
+                  }
+                  title={
+                    queueBlocked
+                      ? t(language, "Queue full - wait for the bot to finish", "대기열이 가득 찼습니다 - 봇이 끝날 때까지 기다려 주세요")
+                      : streaming
+                        ? effectiveStreamingMode === "steer"
+                          ? t(language, "Steer current run", "현재 실행 조정")
+                          : t(language, "Queue message (fires after current response)", "메시지 대기 (현재 응답 후 전송)")
+                        : t(language, "Send", "전송")
+                  }
                 >
-                  <svg className="w-4 h-4" viewBox="0 0 24 24" fill="currentColor">
-                    <rect x="6" y="6" width="12" height="12" rx="2" />
+                  <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M5 12h14M12 5l7 7-7 7" />
                   </svg>
                 </button>
-                {/* Claude Code-style "ESC to cancel" affordance. Hidden on narrow
-                    screens so the composer layout stays clean on mobile web. */}
-                <span
-                  className="hidden sm:flex pointer-events-none absolute -top-6 right-0 items-center gap-1 rounded-md bg-black/[0.06] border border-black/[0.08] px-1.5 py-0.5 text-[10px] font-medium text-secondary whitespace-nowrap"
-                  aria-hidden="true"
-                >
-                  <kbd className="font-mono">{"\u238B"}</kbd>
-                  <span>{cancelHint ?? t(language, "ESC to cancel", "ESC로 취소")}</span>
-                </span>
-              </div>
-          ) : (
-            <button
-              onClick={() => void handleSend()}
-              disabled={(!text.trim() && pendingFiles.length === 0) || disabled || queueBlocked || isSubmitting}
-              className="w-10 h-10 flex items-center justify-center rounded-2xl bg-primary text-white disabled:opacity-20 hover:bg-primary/80 active:scale-95 transition-all duration-200 cursor-pointer disabled:cursor-not-allowed shrink-0"
-              aria-label={
-                streaming
-                  ? effectiveStreamingMode === "steer"
-                    ? t(language, "Steer current run", "현재 실행 조정")
-                    : t(language, "Queue message", "메시지 대기열에 추가")
-                  : t(language, "Send", "전송")
-              }
-              title={
-                queueBlocked
-                  ? t(
-                    language,
-                    "Queue full - wait for the bot to finish",
-                    "대기열이 가득 찼습니다 - 봇 응답 완료까지 기다려 주세요",
-                  )
-                  : streaming
-                    ? effectiveStreamingMode === "steer"
-                      ? t(language, "Steer current run", "현재 실행 조정")
-                      : t(
-                        language,
-                        "Queue message (fires after current response)",
-                        "메시지 대기열에 추가 (현재 응답 후 전송)",
-                      )
-                    : t(language, "Send", "전송")
-              }
-            >
-              <svg
-                className="w-4 h-4"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth={2}
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              >
-                <path d="M12 19V5M5 12l7-7 7 7" />
-              </svg>
-            </button>
-          )}
+              )}
+            </div>
           </div>
         </div>
       </div>

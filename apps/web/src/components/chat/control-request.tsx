@@ -6,6 +6,8 @@ import type {
   ControlRequestDecision,
   ControlRequestRecord,
   ControlRequestResponse,
+  PatchPreview,
+  PatchPreviewFile,
 } from "@/lib/chat/types";
 
 interface ControlRequestCardProps {
@@ -40,6 +42,88 @@ function choicesOf(value: unknown): Array<{ id: string; label: string }> {
       };
     })
     .filter((choice): choice is { id: string; label: string } => choice !== null);
+}
+
+function patchApprovalInput(
+  value: unknown,
+): { patchPreview?: PatchPreview; previewError?: string } | null {
+  if (!value || typeof value !== "object") return null;
+  const record = value as {
+    toolName?: unknown;
+    patchPreview?: unknown;
+    previewError?: unknown;
+  };
+  if (record.toolName !== "PatchApply") return null;
+  return {
+    ...(isPatchPreview(record.patchPreview)
+      ? { patchPreview: record.patchPreview }
+      : {}),
+    ...(typeof record.previewError === "string"
+      ? { previewError: record.previewError }
+      : {}),
+  };
+}
+
+function isPatchPreview(value: unknown): value is PatchPreview {
+  if (!value || typeof value !== "object") return false;
+  const record = value as Partial<PatchPreview>;
+  return (
+    typeof record.dryRun === "boolean" &&
+    Array.isArray(record.changedFiles) &&
+    Array.isArray(record.createdFiles) &&
+    Array.isArray(record.deletedFiles) &&
+    Array.isArray(record.files)
+  );
+}
+
+function PatchApprovalSummary({
+  patchPreview,
+  previewError,
+}: {
+  patchPreview?: PatchPreview;
+  previewError?: string;
+}) {
+  const files = patchPreview?.files ?? [];
+  const totalAdded = files.reduce((sum, file) => sum + file.addedLines, 0);
+  const totalRemoved = files.reduce((sum, file) => sum + file.removedLines, 0);
+  const fileCount = files.length || patchPreview?.changedFiles.length || 0;
+  return (
+    <div className="mt-3 rounded-md bg-black/[0.035] p-3 text-xs text-secondary/80">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <span className="font-medium text-foreground">Patch preview</span>
+        {patchPreview ? (
+          <span>
+            {fileCount} files · +{totalAdded} -{totalRemoved}
+          </span>
+        ) : (
+          <span>{previewError || "preview unavailable"}</span>
+        )}
+      </div>
+      {files.length > 0 && (
+        <div className="mt-2 grid gap-1.5">
+          {files.slice(0, 12).map((file) => (
+            <PatchFileRow key={file.path} file={file} />
+          ))}
+          {files.length > 12 && (
+            <div className="text-secondary/60">+{files.length - 12} more files</div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function PatchFileRow({ file }: { file: PatchPreviewFile }) {
+  return (
+    <div className="flex flex-wrap items-center justify-between gap-2">
+      <span className="min-w-0 truncate font-mono text-[11px] text-secondary">
+        {file.path}
+      </span>
+      <span className="shrink-0 text-secondary/70">
+        {file.operation} · +{file.addedLines} -{file.removedLines}
+      </span>
+    </div>
+  );
 }
 
 type SocialProvider = "instagram" | "x";
@@ -109,7 +193,7 @@ function SocialBrowserRequestCard({
     setBusy("start");
     setError(null);
     try {
-      const res = await authFetch("/v1/app/social-browser/session", {
+      const res = await authFetch("/api/integrations/social-browser/session", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ provider: info.provider }),
@@ -134,7 +218,7 @@ function SocialBrowserRequestCard({
     setError(null);
     try {
       const res = await authFetch(
-        `/v1/app/social-browser/session/${sessionId}/command`,
+        `/api/integrations/social-browser/session/${sessionId}/command`,
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -290,13 +374,16 @@ function SocialBrowserRequestCard({
 }
 
 export function ControlRequestCard({ request, onRespond }: ControlRequestCardProps) {
+  const patchApproval = patchApprovalInput(request.proposedInput);
   const [feedback, setFeedback] = useState("");
   const [answer, setAnswer] = useState("");
   const [selectedChoice, setSelectedChoice] = useState("");
-  const [inputText, setInputText] = useState(() => inputPreview(request.proposedInput) ?? "");
+  const [inputText, setInputText] = useState(() =>
+    patchApproval ? "" : inputPreview(request.proposedInput) ?? "",
+  );
   const [inputError, setInputError] = useState("");
   const [busy, setBusy] = useState<ControlRequestDecision | null>(null);
-  const preview = inputPreview(request.proposedInput);
+  const preview = patchApproval ? null : inputPreview(request.proposedInput);
   const pending = request.state === "pending";
   const isQuestion = request.kind === "user_question";
   const isToolPermission = request.kind === "tool_permission";
@@ -316,7 +403,7 @@ export function ControlRequestCard({ request, onRespond }: ControlRequestCardPro
   const submit = async (decision: ControlRequestDecision) => {
     let updatedInput: unknown;
     setInputError("");
-    if (decision === "approved" && isToolPermission && inputText.trim()) {
+    if (decision === "approved" && isToolPermission && !patchApproval && inputText.trim()) {
       try {
         updatedInput = JSON.parse(inputText);
       } catch (err) {
@@ -361,6 +448,12 @@ export function ControlRequestCard({ request, onRespond }: ControlRequestCardPro
             {preview}
           </pre>
         )}
+        {patchApproval && (
+          <PatchApprovalSummary
+            patchPreview={patchApproval.patchPreview}
+            previewError={patchApproval.previewError}
+          />
+        )}
 
         {pending && (
           <>
@@ -392,7 +485,7 @@ export function ControlRequestCard({ request, onRespond }: ControlRequestCardPro
                 />
               </>
             )}
-            {isToolPermission && preview && (
+            {isToolPermission && preview && !patchApproval && (
               <>
                 <textarea
                   value={inputText}

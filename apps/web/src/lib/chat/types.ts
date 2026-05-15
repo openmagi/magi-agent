@@ -25,10 +25,10 @@ export interface ChatMessage {
   activities?: ToolActivity[];
   /** Persisted TaskBoard snapshot captured during the streaming phase. */
   taskBoard?: TaskBoardSnapshot;
-  /** Persisted research evidence metadata, when the runtime attached a claim/source audit. */
-  researchEvidence?: ResearchArtifactDelta;
-  /** Token/cost usage reported at turn completion. */
-  usage?: TokenUsage;
+  /** Durable research/source evidence captured with the finalized assistant message. */
+  researchEvidence?: ResearchEvidenceSnapshot;
+  /** Token/cost totals for the turn that produced this assistant message. */
+  usage?: ResponseUsage;
   /** If present, this message was authored as a reply to another. */
   replyTo?: ReplyTo;
   /**
@@ -48,7 +48,7 @@ export interface ChatMessage {
 
 /**
  * Minimal per-task shape echoed by the core-agent `task_board` AgentEvent.
- * See infra/docker/magi-core-agent/src/tools/TaskBoard.ts and design §7.1.
+ * See infra/docker/clawy-core-agent/src/tools/TaskBoard.ts and design §7.1.
  */
 export interface TaskBoardTask {
   id: string;
@@ -64,43 +64,6 @@ export interface TaskBoardSnapshot {
   tasks: TaskBoardTask[];
   /** Client-side receive timestamp, used for sort stability only. */
   receivedAt: number;
-}
-
-export interface TokenUsage {
-  inputTokens: number;
-  outputTokens: number;
-  costUsd: number;
-}
-
-export interface ResearchClaimRecord {
-  claimId: string;
-  text: string;
-  claimType: "fact" | "uncertainty" | "inference" | "recommendation" | "limitation";
-  supportStatus: "supported" | "partial" | "unsupported" | "uncertain";
-  sourceIds: string[];
-  confidence?: number;
-  reasoning?: {
-    premiseSourceIds: string[];
-    inference: string;
-    assumptions: string[];
-    status: "source_backed" | "partial" | "missing_source_support" | "uncertain";
-  };
-}
-
-export interface ResearchArtifactDelta {
-  claims?: ResearchClaimRecord[];
-  claimSourceLinks?: Array<{
-    claimId: string;
-    sourceId: string;
-    support: "supports" | "partially_supports" | "contradicts" | "context";
-  }>;
-  contradictions?: Array<{
-    contradictionId: string;
-    claimIds: string[];
-    sourceIds: string[];
-    resolution?: string;
-    status: "handled" | "unresolved" | "not_applicable";
-  }>;
 }
 
 export type PatchPreviewOperation = "create" | "update" | "delete";
@@ -142,6 +105,8 @@ export interface Channel {
   category: string | null;
   memory_mode?: ChannelMemoryMode;
   created_at: string;
+  model_selection?: string | null;
+  router_type?: string | null;
 }
 
 export type ChannelMemoryMode = "normal" | "read_only" | "incognito";
@@ -170,6 +135,12 @@ export interface BrowserFrame {
   imageBase64: string;
   contentType: "image/png" | "image/jpeg";
   capturedAt: number;
+}
+
+export interface ResponseUsage {
+  inputTokens: number;
+  outputTokens: number;
+  costUsd: number;
 }
 
 export type InspectedSourceKind =
@@ -206,11 +177,7 @@ export interface CitationGateStatus {
 
 export interface RuntimeTrace {
   turnId: string;
-  phase:
-    | "verifier_blocked"
-    | "retry_scheduled"
-    | "retry_aborted"
-    | "terminal_abort";
+  phase: "verifier_blocked" | "retry_scheduled" | "retry_aborted" | "terminal_abort";
   severity: "info" | "warning" | "error";
   title: string;
   detail?: string;
@@ -221,6 +188,12 @@ export interface RuntimeTrace {
   retryable?: boolean;
   requiredAction?: string;
   receivedAt: number;
+}
+
+export interface ResearchEvidenceSnapshot {
+  inspectedSources: InspectedSource[];
+  citationGate?: CitationGateStatus | null;
+  capturedAt: number;
 }
 
 export type SubagentActivityStatus = "running" | "waiting" | "done" | "error" | "cancelled";
@@ -274,14 +247,20 @@ export interface ChannelState {
   missions?: MissionActivity[];
   /** Active persistent goal mission id for this channel, when present. */
   activeGoalMissionId?: string | null;
+  /** Monotonic client-side counter for mission list/detail refresh triggers. */
+  missionRefreshSeq?: number;
+  /** Last mission id mentioned by a mission SSE event, used to refresh open detail. */
+  lastMissionEventMissionId?: string | null;
   /** One-shot goal request accepted by the client while runtime mission creation is pending. */
   pendingGoalMissionTitle?: string | null;
   /** Live inspected source ledger records from the current research turn. */
   inspectedSources?: InspectedSource[];
   /** Latest claim-citation gate status for the current research turn. */
   citationGate?: CitationGateStatus | null;
-  /** Public runtime verifier/retry/abort trace for the current turn. */
+  /** Public runtime verifier/contract trace for the current live turn. */
   runtimeTraces?: RuntimeTrace[];
+  /** Final token/cost totals once the runtime commits the turn. */
+  turnUsage?: ResponseUsage;
   /** True while chat-proxy is processing file attachments (KB ingest) before bot receives the message */
   fileProcessing?: boolean;
   /** True when SSE stream dropped mid-response and client is polling active-snapshot to recover */
@@ -290,14 +269,6 @@ export interface ChannelState {
   saveError?: string | null;
   /** Best-effort target language for this live turn's user-visible response/progress. */
   responseLanguage?: ChatResponseLanguage;
-  /** Token usage from the latest completed turn. */
-  turnUsage?: ResponseUsage;
-  /** Research evidence from the latest completed turn. */
-  researchEvidence?: ResearchEvidenceSnapshot | null;
-  /** Monotonically increasing mission refresh counter. */
-  missionRefreshSeq?: number;
-  /** Last processed mission event mission id for dedup. */
-  lastMissionEventMissionId?: string | null;
 }
 
 export type ControlRequestKind =
@@ -345,8 +316,7 @@ export type ControlEvent =
       answer?: string;
     }
   | { type: "control_request_cancelled"; requestId: string; reason: string }
-  | { type: "control_request_timed_out"; requestId: string }
-  | ({ type: "runtime_trace" } & Omit<RuntimeTrace, "receivedAt"> & { receivedAt?: number });
+  | { type: "control_request_timed_out"; requestId: string };
 
 export interface ControlRequestResponse {
   decision: ControlRequestDecision;
@@ -355,30 +325,13 @@ export interface ControlRequestResponse {
   answer?: string;
 }
 
-export interface ResponseUsage {
-  inputTokens?: number;
-  outputTokens?: number;
-  cacheReadTokens?: number;
-  cacheCreationTokens?: number;
-  totalCost?: number;
-  costUsd?: number;
-  model?: string;
-}
-
-export interface ResearchEvidenceSnapshot {
-  inspectedSources: InspectedSource[];
-  citationGate?: CitationGateStatus | null;
-  capturedAt: number;
-}
-
 export interface ServerMessage {
   id: string;
   role: "assistant" | "system";
   content: string;
   created_at: string;
-  usage?: ResponseUsage;
-  researchEvidence?: ResearchEvidenceSnapshot;
   research_evidence?: ResearchEvidenceSnapshot | null;
+  researchEvidence?: ResearchEvidenceSnapshot | null;
 }
 
 export interface ReorderEntry {

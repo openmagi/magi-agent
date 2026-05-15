@@ -346,11 +346,29 @@ function commandPreview(
     };
   }
 
+  const briefTarget = extractBriefTarget(normalized);
   return {
-    action: localized(language, "Working in workspace", "워크스페이스 작업 중"),
-    target: localized(language, "Running a background step", "백그라운드 단계 실행 중"),
+    action: localized(language, "Working", "작업 중"),
+    target: briefTarget ?? localized(language, "Processing", "처리 중"),
     ...(outputSnippet ? { snippet: outputSnippet } : {}),
   };
+}
+
+function extractBriefTarget(inputPreview?: string): string | undefined {
+  if (!inputPreview) return undefined;
+  try {
+    const parsed = JSON.parse(inputPreview) as Record<string, unknown>;
+    const candidate =
+      parsed.path ?? parsed.command ?? parsed.query ?? parsed.url ??
+      parsed.prompt ?? parsed.file ?? parsed.name ?? parsed.description;
+    if (typeof candidate === "string" && candidate.trim()) {
+      const trimmed = candidate.trim();
+      return trimmed.length > 80 ? trimmed.slice(0, 80) + "…" : trimmed;
+    }
+  } catch { /* not JSON, try raw */ }
+  const trimmed = inputPreview.trim();
+  if (trimmed.length > 80) return trimmed.slice(0, 80) + "…";
+  return trimmed || undefined;
 }
 
 function cleanPromptLine(line: string): string {
@@ -762,7 +780,7 @@ function modelProgressPreview(
     ? localized(language, "Model step finished", "모델 단계 완료")
     : isHeartbeat
       ? heartbeatLabel ?? localized(language, "Still working", "계속 작업 중")
-      : localized(language, "Thinking through next step", "다음 단계 판단 중");
+    : localized(language, "Thinking through next step", "다음 단계 판단 중");
   const target = isHeartbeat
     ? elapsed
     : label && !/thinking through next step/i.test(label)
@@ -779,7 +797,7 @@ function modelProgressPreview(
 
 function activityProgressPreview(
   inputPreview?: string,
-  _outputPreview?: string,
+  outputPreview?: string,
   language?: ChatResponseLanguage,
 ): PublicToolPreview {
   const input = previewObject(inputPreview);
