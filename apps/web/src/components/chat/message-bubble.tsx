@@ -1,6 +1,6 @@
 "use client";
 
-import { Children, isValidElement, useMemo, useState, useEffect, useCallback } from "react";
+import { Children, isValidElement, useMemo, useState, useEffect, useCallback, useId } from "react";
 import { createPortal } from "react-dom";
 import type { ReactNode } from "react";
 import ReactMarkdown from "react-markdown";
@@ -12,7 +12,16 @@ import { parseMarkers } from "@/lib/chat/attachment-marker";
 import { parseKbContextMarker } from "@/lib/chat/kb-context-marker";
 import { buildMessageCopyText } from "@/lib/chat/message-copy";
 import { getAttachmentUrl, getKnowledgeDocumentUrl, fetchAttachmentBlob } from "@/lib/chat/attachments";
-import type { ReplyTo, ToolActivity, TaskBoardSnapshot, ResearchArtifactDelta, TokenUsage } from "@/lib/chat/types";
+import { stripAssistantMetadataPreamble } from "@/lib/chat/visible-content";
+import type {
+  InspectedSource,
+  ReplyTo,
+  ResearchArtifactDelta,
+  ResearchEvidenceSnapshot,
+  ResponseUsage,
+  ToolActivity,
+  TaskBoardSnapshot,
+} from "@/lib/chat/types";
 
 export type MessageContextAction = "copy" | "select" | "reply";
 
@@ -28,10 +37,10 @@ interface MessageBubbleProps {
   activities?: ToolActivity[];
   /** Persisted / live TaskBoard snapshot rendered above the message body. */
   taskBoard?: TaskBoardSnapshot;
-  /** Persisted research evidence metadata. Currently rendered in the work inspector. */
-  researchEvidence?: ResearchArtifactDelta;
-  /** Token/cost usage reported by the runtime. */
-  usage?: TokenUsage;
+  /** Durable source/citation evidence captured with the finalized assistant message. */
+  researchEvidence?: ResearchEvidenceSnapshot | ResearchArtifactDelta;
+  /** Token/cost totals for the completed assistant turn. */
+  usage?: ResponseUsage | { inputTokens: number; outputTokens: number; costUsd: number };
   botId?: string;
   /** Quoted-reply metadata (if this message is a reply to another) */
   replyTo?: ReplyTo;
@@ -74,12 +83,27 @@ function looksLikeEChartOption(source: string): boolean {
   }
 }
 
+function formatUsageCost(costUsd: number): string {
+  if (costUsd <= 0) return "$0.00";
+  if (costUsd < 0.0001) return "<$0.0001";
+  if (costUsd < 0.01) return `$${costUsd.toFixed(6)}`;
+  if (costUsd < 1) return `$${costUsd.toFixed(4)}`;
+  return `$${costUsd.toFixed(2)}`;
+}
+
+function formatUsageSummary(usage: ResponseUsage): string {
+  const input = Math.max(0, Math.floor(usage.inputTokens ?? 0));
+  const output = Math.max(0, Math.floor(usage.outputTokens ?? 0));
+  const total = input + output;
+  return `${total.toLocaleString()} tokens · ${input.toLocaleString()} in / ${output.toLocaleString()} out · ${formatUsageCost(usage.costUsd ?? 0)}`;
+}
+
 /** Download a file via auth header, then trigger browser save */
 function useAuthDownload() {
-  const [downloading, setDownloading] = useState<string | null>(null);
+  const [downloadingId, setDownloadingId] = useState<string | null>(null);
 
-  const download = useCallback(async (url: string, filename: string) => {
-    setDownloading(filename);
+  const download = useCallback(async (url: string, filename: string, id?: string) => {
+    setDownloadingId(id ?? filename);
     try {
       const blob = await fetchAttachmentBlob(url);
       const blobUrl = URL.createObjectURL(blob);
@@ -94,11 +118,11 @@ function useAuthDownload() {
       // fallback: open in new tab (will fail auth but user sees the error)
       window.open(url, "_blank");
     } finally {
-      setDownloading(null);
+      setDownloadingId(null);
     }
   }, []);
 
-  return { download, downloading };
+  return { download, downloadingId };
 }
 
 /** Image that fetches via auth header, displays as blob URL */
@@ -241,6 +265,240 @@ function ImageLightbox({
   );
 }
 
+function citationEvidenceLabel(evidence: ResearchEvidenceSnapshot): string | null {
+  if (!evidence.citationGate) return null;
+  switch (evidence.citationGate.verdict) {
+    case "ok":
+      return "Citation check passed";
+    case "violation":
+      return "Citation gaps found";
+    case "pending":
+    default:
+      return "Citation check pending";
+  }
+}
+
+function sourceDisplayName(source: InspectedSource): string {
+  if (source.title) return source.title;
+  try {
+    const url = new URL(source.uri);
+    return url.hostname || source.uri;
+  } catch {
+    return source.uri;
+  }
+}
+
+const CITATION_RE = /\[src_(\w+)\]/g;
+
+function CitationBadge({
+  sourceId,
+  source,
+}: {
+  sourceId: string;
+  source: InspectedSource | undefined;
+}) {
+  const [open, setOpen] = useState(false);
+  const [pos, setPos] = useState<{ top: number; left: number } | null>(null);
+
+  const badgeRef = useCallback(
+    (node: HTMLElement | null) => {
+      if (!node || !open) return;
+      const rect = node.getBoundingClientRect();
+      setPos({ top: rect.bottom + 4, left: rect.left + rect.width / 2 });
+    },
+    [open],
+  );
+
+  const label = `src_${sourceId}`;
+
+  return (
+    <>
+      <span
+        ref={badgeRef}
+        className="citation-badge"
+        role="button"
+        tabIndex={0}
+        aria-label={source ? `Source: ${sourceDisplayName(source)}` : label}
+        onMouseEnter={() => setOpen(true)}
+        onMouseLeave={() => setOpen(false)}
+        onFocus={() => setOpen(true)}
+        onBlur={() => setOpen(false)}
+      >
+        {label}
+      </span>
+      {open && source && pos && typeof document !== "undefined" &&
+        createPortal(
+          <div
+            className="citation-tooltip"
+            style={{ top: pos.top, left: pos.left }}
+          >
+            <div className="font-medium truncate max-w-[280px]">{sourceDisplayName(source)}</div>
+            <div className="flex items-center gap-1.5 mt-0.5 text-[10px] opacity-70">
+              <span className="uppercase tracking-wide">{sourceKindDisplayName(source.kind)}</span>
+              <span className="truncate max-w-[200px]">{sourceUriDisplayName(source.uri)}</span>
+            </div>
+            {source.snippets && source.snippets.length > 0 && (
+              <div className="mt-1 pt-1 border-t border-white/10 text-[10px] opacity-60 line-clamp-2">
+                {source.snippets[0]}
+              </div>
+            )}
+          </div>,
+          document.body,
+        )}
+    </>
+  );
+}
+
+function renderWithCitations(
+  text: string,
+  sources: InspectedSource[],
+): ReactNode[] {
+  const sourceMap = new Map(sources.map((s) => [s.sourceId, s]));
+  const parts: ReactNode[] = [];
+  let lastIndex = 0;
+  let match: RegExpExecArray | null;
+  const re = new RegExp(CITATION_RE.source, "g");
+  while ((match = re.exec(text)) !== null) {
+    if (match.index > lastIndex) {
+      parts.push(text.slice(lastIndex, match.index));
+    }
+    const id = match[1];
+    parts.push(
+      <CitationBadge
+        key={`${id}-${match.index}`}
+        sourceId={id}
+        source={sourceMap.get(`src_${id}`)}
+      />,
+    );
+    lastIndex = re.lastIndex;
+  }
+  if (lastIndex < text.length) {
+    parts.push(text.slice(lastIndex));
+  }
+  return parts;
+}
+
+function injectCitationsIntoChildren(
+  children: ReactNode,
+  sources: InspectedSource[],
+): ReactNode {
+  if (typeof children === "string") {
+    if (!CITATION_RE.test(children)) return children;
+    CITATION_RE.lastIndex = 0;
+    return <>{renderWithCitations(children, sources)}</>;
+  }
+  if (Array.isArray(children)) {
+    return children.map((child, i) => {
+      if (typeof child === "string") {
+        if (!CITATION_RE.test(child)) return child;
+        CITATION_RE.lastIndex = 0;
+        return <span key={i}>{renderWithCitations(child, sources)}</span>;
+      }
+      return child;
+    });
+  }
+  return children;
+}
+
+function sourceKindDisplayName(kind: InspectedSource["kind"]): string {
+  return kind.replace(/_/g, " ");
+}
+
+function sourceUriDisplayName(uri: string): string {
+  try {
+    const url = new URL(uri);
+    return `${url.hostname}${url.pathname}` || uri;
+  } catch {
+    return uri;
+  }
+}
+
+function isEvidenceSnapshot(
+  evidence: ResearchEvidenceSnapshot | ResearchArtifactDelta,
+): evidence is ResearchEvidenceSnapshot {
+  return "inspectedSources" in evidence;
+}
+
+function ResearchEvidenceSummary({
+  evidence,
+}: {
+  evidence?: ResearchEvidenceSnapshot | ResearchArtifactDelta;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const panelId = useId();
+  const snapshot = evidence && isEvidenceSnapshot(evidence) ? evidence : null;
+  const sources = snapshot?.inspectedSources ?? [];
+  const citationLabel = snapshot ? citationEvidenceLabel(snapshot) : null;
+  if (sources.length === 0 && !citationLabel) return null;
+  const primarySource = sources[0] ? sourceDisplayName(sources[0]) : null;
+  const extraCount = Math.max(0, sources.length - 1);
+  return (
+    <div className="mt-1 max-w-full text-[11px] leading-snug text-secondary/70">
+      <button
+        type="button"
+        className="flex max-w-full flex-wrap items-center gap-x-2 gap-y-1 rounded-lg border border-black/[0.06] bg-black/[0.025] px-2.5 py-1.5 text-left transition-colors hover:bg-black/[0.04]"
+        data-research-evidence-toggle="true"
+        aria-expanded={expanded}
+        aria-controls={panelId}
+        onClick={() => setExpanded((value) => !value)}
+      >
+        <span className="font-medium text-foreground/65">Research evidence</span>
+        {sources.length > 0 && (
+          <span className="text-secondary/60">
+            {sources.length} {sources.length === 1 ? "source" : "sources"}
+          </span>
+        )}
+        {citationLabel && (
+          <span className="inline-flex items-center gap-1 text-secondary/65">
+            <span
+              aria-hidden="true"
+              className={`h-1.5 w-1.5 rounded-full ${
+                snapshot?.citationGate?.verdict === "violation"
+                  ? "bg-amber-500"
+                  : snapshot?.citationGate?.verdict === "ok"
+                    ? "bg-emerald-500"
+                    : "bg-secondary/30"
+              }`}
+            />
+            {citationLabel}
+          </span>
+        )}
+        {primarySource && (
+          <span className="min-w-0 max-w-full truncate text-secondary/55">
+            {primarySource}
+            {extraCount > 0 ? ` +${extraCount} more` : ""}
+          </span>
+        )}
+      </button>
+
+      {expanded && (
+        <div
+          id={panelId}
+          className="mt-1.5 space-y-1 rounded-lg border border-black/[0.06] bg-white/80 px-2.5 py-2 shadow-sm"
+          data-research-evidence-sources="true"
+        >
+          {sources.map((source) => (
+            <div key={source.sourceId} className="min-w-0">
+              <div className="truncate font-medium text-foreground/65">
+                {sourceDisplayName(source)}
+              </div>
+              <div className="mt-0.5 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5 text-secondary/50">
+                <span className="shrink-0 uppercase tracking-wide">
+                  {sourceKindDisplayName(source.kind)}
+                </span>
+                <span className="min-w-0 truncate">{sourceUriDisplayName(source.uri)}</span>
+              </div>
+            </div>
+          ))}
+          {sources.length === 0 && citationLabel && (
+            <div className="text-secondary/55">{citationLabel}</div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 /** Context menu component */
 function ContextMenu({ x, y, onAction, onClose }: {
   x: number;
@@ -305,11 +563,15 @@ function ContextMenu({ x, y, onAction, onClose }: {
   );
 }
 
-export function MessageBubble({ role, content, timestamp, isStreaming, thinkingContent, thinkingDuration, activities, taskBoard, botId, replyTo, injected, selectionMode, selected, onSelect, onContextAction }: MessageBubbleProps) {
+export function MessageBubble({ role, content, timestamp, isStreaming, thinkingContent, thinkingDuration, activities, taskBoard, researchEvidence, usage, botId, replyTo, injected, selectionMode, selected, onSelect, onContextAction }: MessageBubbleProps) {
   const timeStr = useMemo(() => (timestamp ? formatTime(timestamp) : null), [timestamp]);
-  const { download, downloading } = useAuthDownload();
+  const { download, downloadingId } = useAuthDownload();
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
   const [imagePreview, setImagePreview] = useState<ImagePreview | null>(null);
+  const visibleContent = useMemo(
+    () => (role === "assistant" ? stripAssistantMetadataPreamble(content) : content),
+    [content, role],
+  );
 
   const handleContextMenu = useCallback((e: React.MouseEvent) => {
     if (isStreaming || role === "system" || selectionMode) return;
@@ -320,15 +582,15 @@ export function MessageBubble({ role, content, timestamp, isStreaming, thinkingC
   const handleContextAction = useCallback((action: MessageContextAction) => {
     setContextMenu(null);
     if (action === "copy") {
-      // Selection-aware copy (2026-04-19 fix): prefer user selection over full content.
+      // Selection-aware copy: prefer user selection over full content.
       const selection = typeof window !== "undefined" ? window.getSelection?.()?.toString() ?? "" : "";
-      const textToCopy = buildMessageCopyText({ content, selection });
+      const textToCopy = buildMessageCopyText({ content: visibleContent, selection });
       navigator.clipboard.writeText(textToCopy).catch(() => {});
     }
     onContextAction?.(action);
-  }, [content, onContextAction]);
+  }, [onContextAction, visibleContent]);
 
-  const { refs: kbRefs, text: kbTextContent } = useMemo(() => parseKbContextMarker(content), [content]);
+  const { refs: kbRefs, text: kbTextContent } = useMemo(() => parseKbContextMarker(visibleContent), [visibleContent]);
 
   const { textContent, attachments } = useMemo(() => {
     if (!botId) return { textContent: kbTextContent, attachments: [] };
@@ -358,6 +620,8 @@ export function MessageBubble({ role, content, timestamp, isStreaming, thinkingC
       (m) => `[${m}](/dashboard/${botId}/pipelines/${m})`,
     );
   }, [rawContent, botId, isUser]);
+  const evidenceSnapshot = researchEvidence && isEvidenceSnapshot(researchEvidence) ? researchEvidence : null;
+  const evidenceSources = evidenceSnapshot?.inspectedSources ?? [];
   const hasMessageBody = displayContent.trim().length > 0 || !!replyTo;
   const messageBodyClassName = isUser
     ? "rounded-2xl px-4 py-2.5 transition-colors overflow-hidden break-words min-w-0 max-w-full bg-black/[0.04] text-foreground rounded-br-md"
@@ -407,6 +671,10 @@ export function MessageBubble({ role, content, timestamp, isStreaming, thinkingC
 
         {!isUser && visibleTaskBoard && visibleTaskBoard.tasks.length > 0 && (
           <TaskBoard snapshot={visibleTaskBoard} />
+        )}
+
+        {!isUser && researchEvidence && (
+          <ResearchEvidenceSummary evidence={researchEvidence} />
         )}
 
         {hasMessageBody && (
@@ -485,6 +753,13 @@ export function MessageBubble({ role, content, timestamp, isStreaming, thinkingC
                       </code>
                     );
                   },
+                  ...(evidenceSources.length > 0 ? {
+                    p: ({ children }) => <p>{injectCitationsIntoChildren(children, evidenceSources)}</p>,
+                    li: ({ children, ...props }) => <li {...props}>{injectCitationsIntoChildren(children, evidenceSources)}</li>,
+                    td: ({ children, ...props }) => <td {...props}>{injectCitationsIntoChildren(children, evidenceSources)}</td>,
+                    th: ({ children, ...props }) => <th {...props}>{injectCitationsIntoChildren(children, evidenceSources)}</th>,
+                    strong: ({ children }) => <strong>{injectCitationsIntoChildren(children, evidenceSources)}</strong>,
+                  } : {}),
                 }}
               >
                 {displayContent}
@@ -514,7 +789,7 @@ export function MessageBubble({ role, content, timestamp, isStreaming, thinkingC
               return (
                 <button
                   key={ref.id}
-                  onClick={() => download(url, ref.filename)}
+                  onClick={() => download(url, ref.filename, ref.id)}
                   className="flex items-center gap-2 bg-black/[0.04] border border-black/[0.08] rounded-xl px-3 py-2 hover:bg-black/[0.08] transition-colors cursor-pointer"
                 >
                   <svg className="w-5 h-5 text-primary-light shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5}>
@@ -545,11 +820,11 @@ export function MessageBubble({ role, content, timestamp, isStreaming, thinkingC
                 );
               }
 
-              const isDownloading = downloading === att.filename;
+              const isDownloading = downloadingId === att.id;
               return (
                 <button
                   key={att.id}
-                  onClick={() => download(url, att.filename)}
+                  onClick={() => download(url, att.filename, att.id)}
                   disabled={isDownloading}
                   className="flex items-center gap-2 bg-black/[0.04] border border-black/[0.08] rounded-xl px-3 py-2 hover:bg-black/[0.08] transition-colors cursor-pointer disabled:opacity-50"
                 >
@@ -581,6 +856,14 @@ export function MessageBubble({ role, content, timestamp, isStreaming, thinkingC
                 </svg>
                 mid-turn
               </span>
+            )}
+            {!isUser && usage && (
+              <>
+                <span title="Estimated tokens and model cost for this response">
+                  {formatUsageSummary(usage)}
+                </span>
+                <span aria-hidden="true">·</span>
+              </>
             )}
             <span>{timeStr}</span>
           </span>
