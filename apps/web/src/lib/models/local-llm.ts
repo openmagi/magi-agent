@@ -1,4 +1,4 @@
-import type { ApiKeyMode, SubscriptionPlan } from "@/lib/supabase/types";
+import type { ApiKeyMode, SubscriptionPlan } from "@/types/entities";
 
 export type LocalLlmModelSelection =
   | "local_gemma_fast"
