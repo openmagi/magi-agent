@@ -89,7 +89,6 @@ import {
   MemoryDashboard,
   SkillsDashboard,
   UsageDashboard,
-  ConverterDashboard,
   ButtonLike,
   runtimeStatusLabel,
 } from "@/components/dashboard";
@@ -142,7 +141,6 @@ type AppRoute =
   | "settings"
   | "usage"
   | "skills"
-  | "converter"
   | "workspace"
   | "knowledge"
   | "memory";
@@ -296,7 +294,6 @@ function isDashboardRoute(value: string | null): value is DashboardRoute {
     value === "settings" ||
     value === "usage" ||
     value === "skills" ||
-    value === "converter" ||
     value === "workspace" ||
     value === "knowledge" ||
     value === "memory"
@@ -1008,7 +1005,6 @@ function LocalDashboardShell({
     { route: "settings", label: "Settings" },
     { route: "usage", label: "Usage" },
     { route: "skills", label: "Skills" },
-    { route: "converter", label: "Converter" },
     { route: "knowledge", label: "Knowledge" },
     { route: "memory", label: "Memory" },
     { route: "workspace", label: "Workspace" },
@@ -1083,7 +1079,6 @@ function LocalDashboardShell({
             />
           )}
           {route === "usage" && <UsageDashboard runtimeSnapshot={runtimeSnapshot} />}
-          {route === "converter" && <ConverterDashboard onNavigate={onNavigate} />}
           {route === "skills" && (
             <SkillsDashboard
               skillsSnapshot={skillsSnapshot}

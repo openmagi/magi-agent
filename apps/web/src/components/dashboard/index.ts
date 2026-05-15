@@ -6,7 +6,6 @@ export { WorkspaceDashboard } from "./workspace-dashboard";
 export { MemoryDashboard } from "./memory-dashboard";
 export { SkillsDashboard } from "./skills-dashboard";
 export { UsageDashboard } from "./usage-dashboard";
-export { ConverterDashboard } from "./converter-dashboard";
 export { ToolsSettings } from "./tools-settings";
 export { HooksSettings } from "./hooks-settings";
 export { ClassifierSettings } from "./classifier-settings";
