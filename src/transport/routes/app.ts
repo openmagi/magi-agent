@@ -44,6 +44,10 @@ function requestedAsset(req: IncomingMessage): string | null {
   if (pathname === "/app" || pathname === "/app/") {
     return "index.html";
   }
+  // Serve Next.js static assets from /_next/
+  if (pathname.startsWith("/_next/")) {
+    return pathname.slice(1); // strip leading /
+  }
   if (!pathname.startsWith("/app/")) {
     return null;
   }
@@ -147,6 +151,7 @@ async function handleApp(
 
 export const appRoutes: RouteHandler[] = [
   route("GET", /^\/app\/bootstrap\.json(?:\?.*)?$/, handleBootstrap),
+  route("GET", /^\/_next\/(?:[^?]*)(?:\?.*)?$/, handleApp),
   route("GET", /^\/app(?:\/[^?]*)?(?:\?.*)?$/, handleApp),
   route("GET", /^\/dashboard(?:\/[^?]*)?(?:\?.*)?$/, handleApp),
 ];
