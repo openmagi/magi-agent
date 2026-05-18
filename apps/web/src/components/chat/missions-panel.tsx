@@ -82,6 +82,10 @@ export function buildMissionListUrl({
   return `/api/bots/${encodeURIComponent(botId)}/missions?${params.toString()}`;
 }
 
+export function shouldLoadRemoteMissions(botId: string): boolean {
+  return botId !== "local";
+}
+
 function countForFilter(
   filter: MissionWorkQueueFilter,
   counts: ReturnType<typeof buildMissionWorkQueue>["counts"],
@@ -341,6 +345,12 @@ export function MissionsPanel({
 
   const loadMissions = useCallback(async () => {
     if (!botId) return;
+    if (!shouldLoadRemoteMissions(botId)) {
+      setMissions([]);
+      setError(null);
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     setError(null);
     try {

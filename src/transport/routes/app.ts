@@ -14,6 +14,14 @@ const MIME_TYPES: Record<string, string> = {
   ".ico": "image/x-icon",
 };
 
+const ROOT_PUBLIC_ASSETS = new Set([
+  "/apple-touch-icon.png",
+  "/favicon-16x16.png",
+  "/favicon-32x32.png",
+  "/favicon.ico",
+  "/openmagi-logo-lockup.png",
+]);
+
 function candidateAppRoots(): string[] {
   return [
     ...(process.env.MAGI_AGENT_APP_ROOT ? [process.env.MAGI_AGENT_APP_ROOT] : []),
@@ -62,6 +70,9 @@ function requestedAsset(req: IncomingMessage): string | { dashboardPath: string 
     return "index.html";
   }
   if (pathname.startsWith("/_next/")) {
+    return pathname.slice(1);
+  }
+  if (ROOT_PUBLIC_ASSETS.has(pathname)) {
     return pathname.slice(1);
   }
   if (!pathname.startsWith("/app/")) {
@@ -170,7 +181,7 @@ async function handleApp(
     "Content-Type": MIME_TYPES[path.extname(target)] ?? "application/octet-stream",
     "Cache-Control": "no-cache",
   });
-  res.end(body);
+  res.end(req.method === "HEAD" ? undefined : body);
 }
 
 export const appRoutes: RouteHandler[] = [
@@ -178,4 +189,11 @@ export const appRoutes: RouteHandler[] = [
   route("GET", /^\/_next\/(?:[^?]*)(?:\?.*)?$/, handleApp),
   route("GET", /^\/app(?:\/[^?]*)?(?:\?.*)?$/, handleApp),
   route("GET", /^\/dashboard(?:\/[^?]*)?(?:\?.*)?$/, handleApp),
+  route("HEAD", /^\/_next\/(?:[^?]*)(?:\?.*)?$/, handleApp),
+  route("HEAD", /^\/app(?:\/[^?]*)?(?:\?.*)?$/, handleApp),
+  route("HEAD", /^\/dashboard(?:\/[^?]*)?(?:\?.*)?$/, handleApp),
+  route("HEAD", /^\/(?:apple-touch-icon|favicon-16x16|favicon-32x32|openmagi-logo-lockup)\.png(?:\?.*)?$/, handleApp),
+  route("HEAD", /^\/favicon\.ico(?:\?.*)?$/, handleApp),
+  route("GET", /^\/(?:apple-touch-icon|favicon-16x16|favicon-32x32|openmagi-logo-lockup)\.png(?:\?.*)?$/, handleApp),
+  route("GET", /^\/favicon\.ico(?:\?.*)?$/, handleApp),
 ];

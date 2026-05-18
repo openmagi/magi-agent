@@ -30,9 +30,10 @@ function makeFakeAgent(workspaceRoot: string): FakeAgent {
 
 function requestRaw(
   url: string,
+  method = "GET",
 ): Promise<{ status: number; contentType: string; body: string }> {
   return new Promise((resolve, reject) => {
-    const req = http.request(url, { method: "GET" }, (res) => {
+    const req = http.request(url, { method }, (res) => {
       const chunks: Buffer[] = [];
       res.on("data", (chunk) => chunks.push(Buffer.from(chunk)));
       res.on("end", () => {
@@ -112,6 +113,16 @@ describe("HttpServer /app", () => {
     }
   });
 
+  it("handles dashboard HEAD prefetches", async () => {
+    const res = await requestRaw(
+      `http://127.0.0.1:${port}/dashboard/local/overview`,
+      "HEAD",
+    );
+
+    expect(res.status).toBe(200);
+    expect(res.contentType).toContain("text/html");
+  });
+
   it("serves loopback bootstrap settings so the local app can authenticate", async () => {
     const res = await requestRaw(`http://127.0.0.1:${port}/app/bootstrap.json`);
 
@@ -139,6 +150,16 @@ describe("HttpServer /app", () => {
     expect(serviceWorker.status).toBe(200);
     expect(serviceWorker.contentType).toContain("text/javascript");
     expect(serviceWorker.body).toContain("Open Magi Web Push service worker");
+  });
+
+  it("serves root public assets referenced by the exported app", async () => {
+    const logo = await requestRaw(`http://127.0.0.1:${port}/openmagi-logo-lockup.png`);
+    const favicon = await requestRaw(`http://127.0.0.1:${port}/favicon-32x32.png`);
+
+    expect(logo.status).toBe(200);
+    expect(logo.contentType).toContain("image/png");
+    expect(favicon.status).toBe(200);
+    expect(favicon.contentType).toContain("image/png");
   });
 
   it("does not allow app route path traversal", async () => {

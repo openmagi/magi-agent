@@ -28,6 +28,7 @@ import type {
 } from "./types";
 import type { ActiveSnapshot } from "./active-snapshot";
 import { getResetCounter } from "./chat-store";
+import { getLocalAgentBaseUrl } from "../local-auth";
 
 type LiveTurnPhase = NonNullable<ChannelState["turnPhase"]>;
 
@@ -37,6 +38,15 @@ const CHAT_PROXY_URL = process.env.NEXT_PUBLIC_CHAT_PROXY_URL || DEFAULT_CHAT_PR
 const CHAT_PROXY_URLS = Array.from(
   new Set([CHAT_PROXY_URL, LEGACY_CHAT_PROXY_URL, DEFAULT_CHAT_PROXY_URL]),
 );
+const LOCAL_BOT_ID = "local";
+const LOCAL_DEFAULT_CHANNEL: Channel = {
+  id: "local-default",
+  name: "default",
+  display_name: "default",
+  position: 0,
+  category: "General",
+  created_at: "1970-01-01T00:00:00.000Z",
+};
 /**
  * Phase 1 — time allotted for HTTP headers to arrive. Cleared once
  * fetch() resolves. §11.12 web watchdog (2026-04-20). Matches
@@ -120,6 +130,27 @@ function stringField(record: Record<string, unknown> | null, key: string): strin
 function numberField(record: Record<string, unknown> | null, key: string): number | null {
   const value = record?.[key];
   return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function isLocalBot(botId: string): boolean {
+  return botId === LOCAL_BOT_ID;
+}
+
+async function localRuntimeUrl(path: string): Promise<string> {
+  const baseUrl = await getLocalAgentBaseUrl().catch(() => "");
+  return baseUrl ? `${baseUrl}${path}` : path;
+}
+
+async function localRuntimeFetch(path: string, options?: RequestInit): Promise<Response> {
+  return fetch(await localRuntimeUrl(path), options);
+}
+
+function sessionKeyHeaders(sessionKey: string): Record<string, string> {
+  return {
+    "x-core-agent-session-key": sessionKey,
+    "x-magi-session-key": sessionKey,
+    "x-openclaw-session-key": sessionKey,
+  };
 }
 
 function stringArrayField(record: Record<string, unknown> | null, key: string): string[] | undefined {
@@ -561,6 +592,20 @@ async function chatFetch(path: string, options?: RequestInit): Promise<Response>
   return res;
 }
 
+async function localChatFetch(path: string, options?: RequestInit): Promise<Response> {
+  const token = await getToken();
+  const res = await localRuntimeFetch(path, {
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+      ...options?.headers,
+    },
+  });
+  if (res.status === 401) throw new AuthExpiredError();
+  return res;
+}
+
 function shouldRetryChatProxyResponse(status: number): boolean {
   return [502, 503, 504, 521, 522, 523, 524].includes(status);
 }
@@ -587,6 +632,8 @@ async function chatProxyFetch(path: string, options?: RequestInit): Promise<Resp
 // --- Channel CRUD ---
 
 export async function fetchChannels(botId: string): Promise<Channel[]> {
+  if (isLocalBot(botId)) return [LOCAL_DEFAULT_CHANNEL];
+
   const res = await chatFetch(`/v1/chat/${botId}/channels`);
   if (!res.ok) throw new Error(`Failed to fetch channels: ${res.status}`);
   const data = await res.json();
@@ -600,6 +647,17 @@ export async function createChannel(
   category?: string,
   memoryMode?: ChannelMemoryMode,
 ): Promise<Channel> {
+  if (isLocalBot(botId)) {
+    return {
+      ...LOCAL_DEFAULT_CHANNEL,
+      id: `local-${name}`,
+      name,
+      display_name: displayName ?? name,
+      category: category ?? "General",
+      ...(memoryMode ? { memory_mode: memoryMode } : {}),
+    };
+  }
+
   const res = await chatFetch(`/v1/chat/${botId}/channels`, {
     method: "POST",
     body: JSON.stringify({ name, displayName, category, memoryMode }),
@@ -613,6 +671,8 @@ export async function createChannel(
 }
 
 export async function deleteChannel(botId: string, channelName: string): Promise<void> {
+  if (isLocalBot(botId)) return;
+
   const res = await chatFetch(`/v1/chat/${botId}/channels/${encodeURIComponent(channelName)}`, {
     method: "DELETE",
   });
@@ -623,6 +683,8 @@ export async function deleteChannel(botId: string, channelName: string): Promise
 }
 
 export async function reorderChannels(botId: string, channels: ReorderEntry[]): Promise<void> {
+  if (isLocalBot(botId)) return;
+
   await chatFetch(`/v1/chat/${botId}/channels/reorder`, {
     method: "POST",
     body: JSON.stringify({ channels }),
@@ -641,6 +703,8 @@ export async function updateChannel(
     router_type?: string | null;
   },
 ): Promise<void> {
+  if (isLocalBot(botId)) return;
+
   await chatFetch(`/v1/chat/${botId}/channels/${encodeURIComponent(channelName)}`, {
     method: "PATCH",
     body: JSON.stringify(updates),
@@ -653,6 +717,8 @@ export async function fetchChannelMessages(
   since?: string,
   limit = 50,
 ): Promise<ServerMessage[]> {
+  if (isLocalBot(botId)) return [];
+
   const params = new URLSearchParams();
   if (since) params.set("since", since);
   params.set("limit", String(limit));
@@ -708,14 +774,17 @@ export async function injectMessage(
 ): Promise<InjectMessageResult> {
   try {
     const token = await getToken();
-    const res = await chatProxyFetch(`/v1/chat/${botId}/inject`, {
+    const request: RequestInit = {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         Authorization: `Bearer ${token}`,
       },
       body: JSON.stringify({ sessionKey, text, source }),
-    });
+    };
+    const res = isLocalBot(botId)
+      ? await localRuntimeFetch("/v1/chat/inject", request)
+      : await chatProxyFetch(`/v1/chat/${botId}/inject`, request);
     if (res.ok) {
       const data = (await res.json().catch(() => ({}))) as { injectionId?: string };
       return { injected: true, injectionId: data.injectionId, status: res.status };
@@ -743,14 +812,17 @@ export async function interruptTurn(
 ): Promise<InterruptTurnResult> {
   try {
     const token = await getToken();
-    const res = await chatProxyFetch(`/v1/chat/${botId}/interrupt`, {
+    const request: RequestInit = {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         Authorization: `Bearer ${token}`,
       },
       body: JSON.stringify({ sessionKey, handoffRequested, source }),
-    });
+    };
+    const res = isLocalBot(botId)
+      ? await localRuntimeFetch("/v1/chat/interrupt", request)
+      : await chatProxyFetch(`/v1/chat/${botId}/interrupt`, request);
     if (res.ok) {
       const data = (await res.json().catch(() => ({}))) as {
         status?: string;
@@ -792,6 +864,8 @@ export async function getActiveSnapshot(
   botId: string,
   channelName: string,
 ): Promise<ActiveSnapshot | null> {
+  if (isLocalBot(botId)) return null;
+
   try {
     const token = await getToken();
     const res = await fetch(
@@ -815,9 +889,9 @@ export async function fetchControlRequests(
 ): Promise<ControlRequestRecord[]> {
   const params = new URLSearchParams({ sessionKey });
   if (channelName) params.set("channelName", channelName);
-  const res = await chatFetch(
-    `/v1/chat/${botId}/control-requests?${params.toString()}`,
-  );
+  const res = isLocalBot(botId)
+    ? await localChatFetch(`/v1/control-requests?${params.toString()}`)
+    : await chatFetch(`/v1/chat/${botId}/control-requests?${params.toString()}`);
   if (!res.ok) throw new Error(`Failed to fetch control requests: ${res.status}`);
   const data = (await res.json()) as { requests?: ControlRequestRecord[] };
   return Array.isArray(data.requests) ? data.requests : [];
@@ -831,9 +905,9 @@ export async function fetchControlEvents(
 ): Promise<{ events: ControlEvent[]; lastSeq: number }> {
   const params = new URLSearchParams({ sessionKey, lastSeq: String(lastSeq) });
   if (channelName) params.set("channelName", channelName);
-  const res = await chatFetch(
-    `/v1/chat/${botId}/control-events?${params.toString()}`,
-  );
+  const res = isLocalBot(botId)
+    ? await localChatFetch(`/v1/control-events?${params.toString()}`)
+    : await chatFetch(`/v1/chat/${botId}/control-events?${params.toString()}`);
   if (!res.ok) throw new Error(`Failed to fetch control events: ${res.status}`);
   const data = (await res.json()) as {
     events?: unknown[];
@@ -857,13 +931,19 @@ export async function respondToControlRequest(
   const params = new URLSearchParams({ sessionKey: request.sessionKey });
   if (request.channelName) params.set("channelName", request.channelName);
   const payload = controlRequestResponsePayload(request, response);
-  const res = await chatFetch(
-    `/v1/chat/${botId}/control-requests/${encodeURIComponent(request.requestId)}/response?${params.toString()}`,
-    {
-      method: "POST",
-      body: JSON.stringify({ ...payload, sessionKey: request.sessionKey }),
-    },
-  );
+  const responsePath = `/v1/control-requests/${encodeURIComponent(request.requestId)}/response?${params.toString()}`;
+  const res = isLocalBot(botId)
+    ? await localChatFetch(responsePath, {
+        method: "POST",
+        body: JSON.stringify({ ...payload, sessionKey: request.sessionKey }),
+      })
+    : await chatFetch(
+        `/v1/chat/${botId}/control-requests/${encodeURIComponent(request.requestId)}/response?${params.toString()}`,
+        {
+          method: "POST",
+          body: JSON.stringify({ ...payload, sessionKey: request.sessionKey }),
+        },
+      );
   const data = (await res.json().catch(() => ({}))) as {
     ok?: boolean;
     error?: string;
@@ -2074,7 +2154,7 @@ export async function sendMessage(
   const baseHeaders = {
     "Content-Type": "application/json",
     Authorization: `Bearer ${token}`,
-    "x-openclaw-session-key": sessionKey,
+    ...sessionKeyHeaders(sessionKey),
   };
 
   // Two-phase timeout (§11.12 web watchdog, 2026-04-20):
@@ -2112,7 +2192,7 @@ export async function sendMessage(
   }
 
   try {
-    const res = await chatProxyFetch(`/v1/chat/${botId}/completions`, {
+    const request: RequestInit = {
       method: "POST",
       headers: {
         ...baseHeaders,
@@ -2121,7 +2201,10 @@ export async function sendMessage(
       },
       body: JSON.stringify(requestBody),
       signal: timeoutController.signal,
-    });
+    };
+    const res = isLocalBot(botId)
+      ? await localRuntimeFetch("/v1/chat/completions", request)
+      : await chatProxyFetch(`/v1/chat/${botId}/completions`, request);
 
     // Switch to idle phase — initial headers arrived, now rolling window.
     clearTimeout(timeoutId);
@@ -2333,12 +2416,12 @@ async function sendMessageNonStreaming(
     const sessionKey = rc > 0
       ? `agent:main:app:${channelName}:${rc}`
       : `agent:main:app:${channelName}`;
-    const res = await chatProxyFetch(`/v1/chat/${botId}/completions`, {
+    const request: RequestInit = {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         Authorization: `Bearer ${token}`,
-        "x-openclaw-session-key": sessionKey,
+        ...sessionKeyHeaders(sessionKey),
       },
       body: JSON.stringify({
         model,
@@ -2348,7 +2431,10 @@ async function sendMessageNonStreaming(
         ...(replyTo ? { replyTo } : {}),
       }),
       signal,
-    });
+    };
+    const res = isLocalBot(botId)
+      ? await localRuntimeFetch("/v1/chat/completions", request)
+      : await chatProxyFetch(`/v1/chat/${botId}/completions`, request);
 
     if (!res.ok) {
       const text = await res.text().catch(() => "");

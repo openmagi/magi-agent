@@ -2,8 +2,8 @@
 
 import { useEffect, useCallback, useLayoutEffect, useMemo, useState, useRef } from "react";
 import { useRouter } from "next/navigation";
-import { getLocalAccessToken } from "@/lib/local-auth";
-const usePrivy = () => ({ getAccessToken: getLocalAccessToken, user: { id: "local" } });
+import { useLocalPrivy } from "@/lib/local-auth";
+const usePrivy = useLocalPrivy;
 import { ChatSidebar } from "@/components/chat/chat-sidebar";
 import { ChatMessages } from "@/components/chat/chat-messages";
 import type { ChatMessagesHandle } from "@/components/chat/chat-messages";
@@ -413,6 +413,10 @@ export function ChatViewClient({
 
   useEffect(() => {
     if (!ready || !authenticated) {
+      setCustomSkills([]);
+      return;
+    }
+    if (botId === "local") {
       setCustomSkills([]);
       return;
     }

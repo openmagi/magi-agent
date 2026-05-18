@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   buildMissionListUrl,
   MissionsPanel,
+  shouldLoadRemoteMissions,
   shouldReloadMissionDetailForEvent,
 } from "./missions-panel";
 import type { MissionActivity } from "@/lib/chat/types";
@@ -201,6 +202,11 @@ describe("MissionsPanel", () => {
     })).toBe(
       "/api/bots/bot%201/missions?limit=50&channelType=app&channelId=%EB%82%B4%EC%99%B8%EB%94%94%EC%8A%A4%ED%8B%B8%EB%9F%AC",
     );
+  });
+
+  it("does not load cloud mission APIs for the OSS local bot", () => {
+    expect(shouldLoadRemoteMissions("local")).toBe(false);
+    expect(shouldLoadRemoteMissions("bot-1")).toBe(true);
   });
 
   it("renders live durable mission state as a compact work queue", () => {

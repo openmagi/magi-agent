@@ -270,6 +270,7 @@ export async function syncResetCounters(
   botId: string,
   getToken: () => Promise<string | null>,
 ): Promise<void> {
+  if (botId === "local") return;
   try {
     const token = await getToken();
     if (!token) return;

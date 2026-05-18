@@ -328,6 +328,22 @@ describe("buildSessionKey", () => {
 });
 
 describe("fetchChannels", () => {
+  it("uses a local default channel for the OSS local bot", async () => {
+    const fetchMock = vi.fn();
+    globalThis.fetch = fetchMock as unknown as typeof globalThis.fetch;
+
+    const channels = await fetchChannels("local");
+
+    expect(channels).toEqual([
+      expect.objectContaining({
+        id: "local-default",
+        name: "default",
+        display_name: "default",
+      }),
+    ]);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it("falls back to the legacy chat proxy when the Open Magi proxy is unreachable", async () => {
     const fetchMock = vi
       .fn()
@@ -357,6 +373,25 @@ describe("fetchChannels", () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(String(fetchMock.mock.calls[0]?.[0])).toBe("https://chat.openmagi.ai/v1/chat/bot-abc/channels");
     expect(String(fetchMock.mock.calls[1]?.[0])).toBe("https://chat.clawy.pro/v1/chat/bot-abc/channels");
+  });
+});
+
+describe("sendMessage local runtime", () => {
+  it("posts OSS local bot completions to the same-origin runtime endpoint", async () => {
+    const fetchMock = mockSseFetch("data: {\"choices\":[{\"delta\":{\"content\":\"ok\"}}]}\n\ndata: [DONE]\n\n");
+    const deltas: string[] = [];
+
+    await sendMessage("local", "default", [{ role: "user", content: "hello" }], {
+      onDelta: (delta) => deltas.push(delta),
+      onDone: vi.fn(),
+      onError: vi.fn(),
+    });
+
+    expect(String(fetchMock.mock.calls[0]?.[0])).toBe("/v1/chat/completions");
+    const request = fetchMock.mock.calls[0]?.[1] as RequestInit;
+    expect((request.headers as Record<string, string>)["x-magi-session-key"]).toBe("agent:main:app:default");
+    expect((request.headers as Record<string, string>)["x-core-agent-session-key"]).toBe("agent:main:app:default");
+    expect(deltas.join("")).toBe("ok");
   });
 });
 

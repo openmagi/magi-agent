@@ -131,6 +131,14 @@ export function useKbDocs(botId: string): {
     const isInitial = collections.length === 0;
 
     async function load(): Promise<void> {
+      if (botId === "local") {
+        if (!cancelled) {
+          setCollections([]);
+          setLoading(false);
+          setRefreshing(false);
+        }
+        return;
+      }
       if (isInitial) setLoading(true);
       else setRefreshing(true);
       try {

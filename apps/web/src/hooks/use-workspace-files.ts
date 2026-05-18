@@ -27,6 +27,14 @@ export function useWorkspaceFiles(botId: string): {
     const isInitial = files.length === 0;
 
     async function load(): Promise<void> {
+      if (botId === "local") {
+        if (!cancelled) {
+          setFiles([]);
+          setLoading(false);
+          setRefreshing(false);
+        }
+        return;
+      }
       if (isInitial) setLoading(true);
       else setRefreshing(true);
       try {
