@@ -75,7 +75,7 @@ describe("HttpServer /app", () => {
 
     expect(res.status).toBe(200);
     expect(res.contentType).toContain("text/html");
-    expect(res.body).toContain("Magi Agent");
+    expect(res.body).toContain("Open Magi");
     expect(res.body).toContain("/_next/static/");
   });
 
@@ -93,19 +93,22 @@ describe("HttpServer /app", () => {
   });
 
   it("serves cloud-style dashboard deep links as the self-hosted app shell", async () => {
+    const rootShell = await requestRaw(`http://127.0.0.1:${port}/app`);
+
     for (const pathname of [
       "/dashboard",
       "/dashboard/local/overview",
       "/dashboard/local/chat",
       "/dashboard/local/settings",
-      "/dashboard/local/pipelines/pipeline-1",
     ]) {
       const res = await requestRaw(`http://127.0.0.1:${port}${pathname}`);
 
       expect(res.status).toBe(200);
       expect(res.contentType).toContain("text/html");
-      expect(res.body).toContain("Magi Agent");
+      expect(res.body).toContain("Open Magi");
       expect(res.body).toContain("/_next/static/");
+      expect(res.body).not.toBe(rootShell.body);
+      expect(res.body).not.toContain("Redirecting to dashboard...");
     }
   });
 
@@ -126,16 +129,16 @@ describe("HttpServer /app", () => {
 
   it("serves installable app assets", async () => {
     const manifest = await requestRaw(
-      `http://127.0.0.1:${port}/app/manifest.webmanifest`,
+      `http://127.0.0.1:${port}/app/site.webmanifest`,
     );
     const serviceWorker = await requestRaw(`http://127.0.0.1:${port}/app/sw.js`);
 
     expect(manifest.status).toBe(200);
     expect(manifest.contentType).toContain("application/manifest+json");
-    expect(manifest.body).toContain("Magi App");
+    expect(manifest.body).toContain("Open Magi");
     expect(serviceWorker.status).toBe(200);
     expect(serviceWorker.contentType).toContain("text/javascript");
-    expect(serviceWorker.body).toContain("magi-app-shell-v3");
+    expect(serviceWorker.body).toContain("Open Magi Web Push service worker");
   });
 
   it("does not allow app route path traversal", async () => {

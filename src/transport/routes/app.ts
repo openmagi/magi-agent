@@ -35,18 +35,34 @@ async function findAppRoot(): Promise<string | null> {
   return null;
 }
 
-function requestedAsset(req: IncomingMessage): string | null {
+async function findNextHtml(root: string, pathname: string): Promise<string | null> {
+  const stripped = pathname.replace(/\/+$/, "") || "/";
+  const candidates = [
+    `${stripped}.html`,
+    `${stripped}/index.html`,
+    stripped,
+  ];
+  for (const c of candidates) {
+    const full = path.resolve(root, c.startsWith("/") ? c.slice(1) : c);
+    try {
+      const stat = await fs.stat(full);
+      if (stat.isFile()) return c.startsWith("/") ? c.slice(1) : c;
+    } catch { /* try next */ }
+  }
+  return null;
+}
+
+function requestedAsset(req: IncomingMessage): string | { dashboardPath: string } | null {
   const url = parseUrl(req.url);
   const pathname = url.pathname;
   if (pathname === "/dashboard" || pathname.startsWith("/dashboard/")) {
-    return "index.html";
+    return { dashboardPath: pathname };
   }
   if (pathname === "/app" || pathname === "/app/") {
     return "index.html";
   }
-  // Serve Next.js static assets from /_next/
   if (pathname.startsWith("/_next/")) {
-    return pathname.slice(1); // strip leading /
+    return pathname.slice(1);
   }
   if (!pathname.startsWith("/app/")) {
     return null;
@@ -121,10 +137,18 @@ async function handleApp(
   _ctx: HttpServerCtx,
 ): Promise<void> {
   const root = await findAppRoot();
-  const asset = requestedAsset(req);
-  if (!root || !asset) {
+  const rawAsset = requestedAsset(req);
+  if (!root || !rawAsset) {
     writeText(res, 404, "not found");
     return;
+  }
+
+  let asset: string;
+  if (typeof rawAsset === "object" && "dashboardPath" in rawAsset) {
+    const found = await findNextHtml(root, rawAsset.dashboardPath);
+    asset = found ?? "index.html";
+  } else {
+    asset = rawAsset;
   }
 
   const target = path.resolve(root, asset);
