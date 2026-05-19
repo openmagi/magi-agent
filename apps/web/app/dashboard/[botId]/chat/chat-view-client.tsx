@@ -17,7 +17,7 @@ import { ChatModelPicker } from "@/components/chat/chat-model-picker";
 import { KbContextBar } from "@/components/chat/kb-context-bar";
 import { KbSidePanel } from "@/components/chat/kb-side-panel";
 import { useChatStore, syncResetCounters } from "@/lib/chat/chat-store";
-import { subscribeToPushMessages } from "@/lib/chat/push-realtime";
+import { subscribeToPushMessages, type PushSubscriptionHandle } from "@/lib/chat/push-realtime";
 import * as chatApi from "@/lib/chat/chat-client";
 import { setChatTokenGetter } from "@/lib/chat/chat-client";
 import { setAttachmentTokenGetter } from "@/lib/chat/attachments";
@@ -44,6 +44,7 @@ import { shouldHandlePageFileDrop } from "@/lib/chat/file-drop";
 import type {
   Channel,
   ChannelMemoryMode,
+  ChannelState,
   ChatMessage,
   InspectedSource,
   KbDocReference,
@@ -61,6 +62,12 @@ import {
 import { buildMessageContentWithKbContext, mergeKbDocReferences } from "@/lib/chat/kb-send";
 import { detectMessageResponseLanguage } from "@/lib/chat/message-language";
 import { shouldRetryEmptyCompletion } from "@/lib/chat/empty-response";
+import {
+  appendLiveTranscriptText,
+  liveTranscriptRowsForState,
+  replaceLiveTranscriptText,
+  upsertLiveTranscriptWorkRows,
+} from "@/lib/chat/live-transcript";
 import {
   buildChatExportFilename,
   buildChatExportMarkdown,
@@ -107,6 +114,16 @@ function appendInspectedSource(
 ): InspectedSource[] {
   const deduped = (existing ?? []).filter((item) => item.sourceId !== source.sourceId);
   return [...deduped, source].slice(-MAX_INSPECTED_SOURCES);
+}
+
+function appendLiveWorkSnapshot(
+  current: ChannelState,
+  partial: Partial<ChannelState>,
+  language?: ChannelState["responseLanguage"],
+): NonNullable<ChannelState["liveTranscriptItems"]> {
+  const nextState = { ...current, ...partial };
+  const rows = liveTranscriptRowsForState(nextState, language ?? nextState.responseLanguage);
+  return upsertLiveTranscriptWorkRows(current.liveTranscriptItems, rows);
 }
 
 function getProvisioningStepLabel(step: string | null, t: ReturnType<typeof useMessages>): string {
@@ -642,6 +659,7 @@ export function ChatViewClient({
               pendingInjectionCount: 0,
               subagents: [],
               documentDraft: null,
+              liveTranscriptItems: [],
             }, { botId });
           }
           sawSnapshot = false;
@@ -706,7 +724,7 @@ export function ChatViewClient({
     const channel = store.activeChannel;
     if (!channel) return;
     let cancelled = false;
-    let handle: { unsubscribe: () => Promise<void> } | null = null;
+    let handle: PushSubscriptionHandle | null = null;
     (async () => {
       const accessToken = await getAccessToken().catch(() => null);
       if (cancelled) return;
@@ -865,6 +883,7 @@ export function ChatViewClient({
         citationGate: null,
         runtimeTraces: [],
         turnUsage: undefined,
+        liveTranscriptItems: [],
         responseLanguage,
       }, { botId });
       if (!isCurrentBot()) return;
@@ -886,6 +905,7 @@ export function ChatViewClient({
               store.setChannelState(channel, {
                 streamingText: (s?.streamingText ?? "") + delta,
                 hasTextContent: true,
+                liveTranscriptItems: appendLiveTranscriptText(s?.liveTranscriptItems, delta),
                 ...(s?.fileProcessing ? { fileProcessing: false } : {}),
               }, { botId });
             },
@@ -899,16 +919,40 @@ export function ChatViewClient({
             },
             onToolActivity: (activeTools) => {
               if (!isCurrentBot()) return;
-              store.setChannelState(channel, { activeTools }, { botId });
+              const current = store.getChannelState(channel);
+              store.setChannelState(channel, {
+                activeTools,
+                liveTranscriptItems: appendLiveWorkSnapshot(
+                  current,
+                  { activeTools },
+                  current.responseLanguage ?? responseLanguage,
+                ),
+              }, { botId });
             },
             onSubagentActivity: (subagents) => {
               if (!isCurrentBot()) return;
-              store.setChannelState(channel, { subagents }, { botId });
+              const current = store.getChannelState(channel);
+              store.setChannelState(channel, {
+                subagents,
+                liveTranscriptItems: appendLiveWorkSnapshot(
+                  current,
+                  { subagents },
+                  current.responseLanguage ?? responseLanguage,
+                ),
+              }, { botId });
             },
             onTaskBoard: (snapshot) => {
               if (!isCurrentBot()) return;
               // Full-board overwrite — server always sends complete board.
-              store.setChannelState(channel, { taskBoard: snapshot }, { botId });
+              const current = store.getChannelState(channel);
+              store.setChannelState(channel, {
+                taskBoard: snapshot,
+                liveTranscriptItems: appendLiveWorkSnapshot(
+                  current,
+                  { taskBoard: snapshot },
+                  current.responseLanguage ?? responseLanguage,
+                ),
+              }, { botId });
             },
             onBrowserFrame: (browserFrame) => {
               if (!isCurrentBot()) return;
@@ -936,9 +980,16 @@ export function ChatViewClient({
             },
             onRuntimeTrace: (trace) => {
               if (!isCurrentBot()) return;
-              const existing = useChatStore.getState().channelStates[channel]?.runtimeTraces ?? [];
+              const current = store.getChannelState(channel);
+              const existing = current.runtimeTraces ?? [];
+              const runtimeTraces = [...existing, trace].slice(-12);
               store.setChannelState(channel, {
-                runtimeTraces: [...existing, trace].slice(-12),
+                runtimeTraces,
+                liveTranscriptItems: appendLiveWorkSnapshot(
+                  current,
+                  { runtimeTraces },
+                  current.responseLanguage ?? responseLanguage,
+                ),
               }, { botId });
             },
             onTurnPhase: (phase) => {
@@ -972,6 +1023,7 @@ export function ChatViewClient({
               store.setChannelState(channel, {
                 streamingText: text,
                 hasTextContent: !!text,
+                liveTranscriptItems: replaceLiveTranscriptText(text),
               }, { botId });
             },
             onResponseClear: () => {
@@ -985,6 +1037,7 @@ export function ChatViewClient({
                 subagents: [],
                 documentDraft: null,
                 turnUsage: undefined,
+                liveTranscriptItems: [],
                 responseLanguage: currentState?.responseLanguage ?? responseLanguage,
                 thinkingText: prevThinking,
                 thinkingStartedAt: prevThinking
@@ -1012,6 +1065,7 @@ export function ChatViewClient({
                   heartbeatElapsedMs: null,
                   pendingInjectionCount: 0,
                   turnUsage: undefined,
+                  liveTranscriptItems: [],
                   error: `Connecting to bot... (${nextRetry}/${MAX_RETRIES})`,
                 }, { botId });
                 window.setTimeout(() => {
@@ -1113,6 +1167,7 @@ export function ChatViewClient({
                   subagents: [],
                   documentDraft: null,
                   turnUsage: undefined,
+                  liveTranscriptItems: [],
                   error: `Connecting to bot... (${retryCount + 1}/${MAX_RETRIES})`,
                 }, { botId });
                 await new Promise((r) => setTimeout(r, RETRY_DELAY_MS));
@@ -1145,6 +1200,7 @@ export function ChatViewClient({
                         thinkingText: "",
                         reconnecting: false,
                         turnPhase: null,
+                        liveTranscriptItems: [],
                       }, { botId });
                       recovered = true;
                       break;
@@ -1183,6 +1239,7 @@ export function ChatViewClient({
                   pendingInjectionCount: 0,
                   subagents: [],
                   documentDraft: null,
+                  liveTranscriptItems: [],
                   error: err.message,
                 }, { botId });
                 // Terminal error — drop the queue so the user isn't surprised
@@ -1209,6 +1266,7 @@ export function ChatViewClient({
             pendingInjectionCount: 0,
             subagents: [],
             documentDraft: null,
+            liveTranscriptItems: [],
             error: err instanceof Error ? err.message : "Unknown error",
           }, { botId });
           // Recovery: fetch latest server messages after SSE drop
@@ -1870,6 +1928,7 @@ export function ChatViewClient({
     streamingText: "",
     thinkingText: "",
     error: null,
+    liveTranscriptItems: [],
   };
 
   const handleStartExportSelection = useCallback(() => {
@@ -2277,7 +2336,7 @@ export function ChatViewClient({
                 </div>
               ) : (
                 /* Case A: no token — show StepTelegram auto-connect */
-                <StepTelegram onConnect={handleTelegramConnect} />
+                <StepTelegram onConnect={(token) => handleTelegramConnect(token, "")} />
               )}
             </div>
           </div>

@@ -41,6 +41,7 @@ const DEFAULT_CHANNEL_STATE: ChannelState = {
   citationGate: null,
   runtimeTraces: [],
   turnUsage: undefined,
+  liveTranscriptItems: [],
   fileProcessing: false,
 };
 
@@ -64,6 +65,7 @@ const RESET_LIVE_RUN_STATE: Partial<ChannelState> = {
   citationGate: null,
   runtimeTraces: [],
   turnUsage: undefined,
+  liveTranscriptItems: [],
   fileProcessing: false,
   reconnecting: false,
 };
@@ -237,6 +239,7 @@ function isLiveStreamProgress(partial: Partial<ChannelState>): boolean {
     !!partial.citationGate ||
     (partial.runtimeTraces?.length ?? 0) > 0 ||
     !!partial.turnUsage ||
+    (partial.liveTranscriptItems?.length ?? 0) > 0 ||
     partial.heartbeatElapsedMs !== undefined ||
     (partial.pendingInjectionCount ?? 0) > 0 ||
     (partial.turnPhase !== undefined && partial.turnPhase !== null && partial.turnPhase !== "pending")

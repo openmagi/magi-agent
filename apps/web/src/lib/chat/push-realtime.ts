@@ -22,8 +22,15 @@ export interface PushSubscriptionHandle {
   unsubscribe: () => void;
 }
 
+export interface SubscribeToPushMessagesOptions {
+  botId: string;
+  channel: string;
+  accessToken: string | null;
+  onInsert: (row: PushMessageRow) => void;
+}
+
 export async function subscribeToPushMessages(
-  _options: Record<string, unknown>,
+  _options: SubscribeToPushMessagesOptions,
 ): Promise<PushSubscriptionHandle> {
   // No-op in OSS mode — push messages are delivered via SSE
   return { unsubscribe: () => {} };

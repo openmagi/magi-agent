@@ -1,8 +1,6 @@
 "use client";
 
 import { useRef, useEffect, useLayoutEffect, useMemo, useImperativeHandle, forwardRef, useState, useCallback } from "react";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
 import { MessageBubble } from "./message-bubble";
 import { TypingIndicator } from "./typing-indicator";
 import { ControlRequestCard } from "./control-request";
@@ -10,9 +8,7 @@ import { compareChatMessages } from "@/lib/chat/message-order";
 import { shouldPreferServerAssistantMessage } from "@/lib/chat/server-reconcile";
 import { stripAssistantMetadataPreamble } from "@/lib/chat/visible-content";
 import { stripResearchEvidenceMarker } from "@/lib/chat/research-evidence";
-import { deriveWorkConsoleRows, type WorkConsoleRow, type WorkConsoleRowStatus } from "@/lib/chat/work-console";
-import { deriveWorkStateSummary } from "@/lib/chat/work-state";
-import { dispatchOpenMissionLedgerEvent } from "@/lib/chat/mission-ledger-events";
+import { deriveWorkConsoleRows, type WorkConsoleRow } from "@/lib/chat/work-console";
 import type { ReactNode } from "react";
 import type {
   ChatMessage,
@@ -22,7 +18,6 @@ import type {
   ControlRequestResponse,
   ChatResponseLanguage,
   BrowserFrame,
-  MissionActivity,
 } from "@/lib/chat/types";
 
 export interface ChatMessagesHandle {
@@ -109,22 +104,6 @@ function MessageSkeleton() {
   );
 }
 
-function statusDotClass(status: WorkConsoleRowStatus): string {
-  switch (status) {
-    case "running":
-      return "bg-[#7C3AED]";
-    case "done":
-      return "bg-emerald-500";
-    case "waiting":
-      return "bg-amber-500";
-    case "error":
-      return "bg-red-500";
-    case "info":
-    default:
-      return "bg-secondary/30";
-  }
-}
-
 function browserActionLabel(action: string, language?: ChatResponseLanguage): string {
   switch (action) {
     case "open":
@@ -191,17 +170,6 @@ function rollingPreview(text: string): string {
   return "…" + tail.slice(-ROLLING_PREVIEW_MAX_CHARS);
 }
 
-function isActiveWorkPhase(channelState: ChannelState): boolean {
-  const phase = channelState.turnPhase;
-  return (
-    phase === "pending" ||
-    phase === "planning" ||
-    phase === "executing" ||
-    phase === "verifying" ||
-    phase === "compacting"
-  );
-}
-
 function shouldEnterStreamingPreview(channelState: ChannelState): boolean {
   if (!channelState.streaming || !channelState.streamingText) return false;
   if (channelState.turnPhase === "committing" || channelState.turnPhase === "committed") {
@@ -222,23 +190,6 @@ function hasOpenTaskState(channelState: ChannelState): boolean {
   return !!channelState.taskBoard?.tasks.some(
     (task) => task.status === "pending" || task.status === "in_progress",
   );
-}
-
-function isTerminalMission(mission: MissionActivity): boolean {
-  return (
-    mission.status === "completed" ||
-    mission.status === "failed" ||
-    mission.status === "cancelled"
-  );
-}
-
-function currentRunMission(channelState: ChannelState): MissionActivity | null {
-  const missions = channelState.missions ?? [];
-  const activeGoal = channelState.activeGoalMissionId
-    ? missions.find((mission) => mission.id === channelState.activeGoalMissionId)
-    : null;
-  if (activeGoal && !isTerminalMission(activeGoal)) return activeGoal;
-  return missions.find((mission) => !isTerminalMission(mission)) ?? null;
 }
 
 function hasInlineRunStatus(
@@ -336,60 +287,26 @@ function inlineWorkRows(
   return selected.slice(0, INLINE_WORK_ROW_LIMIT);
 }
 
-function StreamingPreviewSection({
-  text,
-  language,
-}: {
-  text: string;
-  language?: ChatResponseLanguage;
-}) {
-  const [expanded, setExpanded] = useState(false);
-  const scrollRef = useRef<HTMLDivElement>(null);
-  const preview = rollingPreview(text);
-  const fullLineCount = text.split("\n").filter((l) => l.trim()).length;
-  const canExpand = fullLineCount > 4 || text.length > 300;
-  const displayText = expanded ? text : preview;
+function liveTranscriptRows(
+  channelState: ChannelState,
+  queuedMessages: QueuedMessage[],
+  pendingRequests: ControlRequestRecord[],
+  language?: ChatResponseLanguage,
+): WorkConsoleRow[] {
+  return inlineWorkRows(channelState, queuedMessages, pendingRequests, language)
+    .filter((row) => row.group !== "queue" && row.group !== "control" && row.id !== "browser-frame");
+}
 
-  useEffect(() => {
-    if (expanded && scrollRef.current) {
-      requestAnimationFrame(() => {
-        if (scrollRef.current) {
-          scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-        }
-      });
-    }
-  }, [expanded, text]);
-
-  return (
-    <div
-      className="mt-2 border-t border-black/[0.06] pt-2"
-      data-chat-streaming-preview="true"
-    >
-      <div
-        ref={scrollRef}
-        className={`streaming-preview-md break-words text-[13px] leading-relaxed text-foreground/70 ${
-          expanded
-            ? "overflow-y-auto overscroll-contain"
-            : "overflow-hidden"
-        }`}
-        style={{ maxHeight: expanded ? "50vh" : "8rem" }}
-      >
-        <ReactMarkdown remarkPlugins={[remarkGfm]}>{displayText}</ReactMarkdown>
-        <span className="ml-0.5 inline-block h-3.5 w-[3px] animate-pulse rounded-full bg-foreground/30 align-middle" />
-      </div>
-      {canExpand && (
-        <button
-          type="button"
-          onClick={() => setExpanded(!expanded)}
-          className="mt-1 text-[11px] font-medium text-primary/60 hover:text-primary/80"
-        >
-          {expanded
-            ? t(language, "Collapse", "접기")
-            : t(language, "Show more", "더 보기")}
-        </button>
-      )}
-    </div>
-  );
+function activeMissionTitle(channelState: ChannelState): string | undefined {
+  const missions = channelState.missions ?? [];
+  const isOpen = (mission: NonNullable<ChannelState["missions"]>[number]) =>
+    mission.status !== "completed" &&
+    mission.status !== "failed" &&
+    mission.status !== "cancelled";
+  const active = channelState.activeGoalMissionId
+    ? missions.find((mission) => mission.id === channelState.activeGoalMissionId && isOpen(mission))
+    : null;
+  return active?.title ?? missions.find(isOpen)?.title;
 }
 
 function InlineRunStatus({
@@ -408,127 +325,25 @@ function InlineRunStatus({
   if (!hasInlineRunStatus(channelState, queuedMessages, pendingRequests, streamingPreview)) return null;
 
   const language = uiLanguage ?? channelState.responseLanguage;
-  const summary = deriveWorkStateSummary({
-    channelState,
-    queuedMessages,
-    controlRequests: pendingRequests,
-    uiLanguage: language,
-  });
-  const rows = inlineWorkRows(channelState, queuedMessages, pendingRequests, language);
-  const genericGoal = t(language, "Working on your request", "요청 처리 중");
-  const displayGoal = summary.goal !== genericGoal ? summary.goal : null;
-  const mission = currentRunMission(channelState);
+  const rows = liveTranscriptRows(channelState, queuedMessages, pendingRequests, language);
+  const content = streamingPreview
+    ? rollingPreview(channelState.streamingText)
+    : channelState.currentGoal?.trim() ?? activeMissionTitle(channelState) ?? "";
+  if (!content && rows.length === 0 && !channelState.browserFrame) return null;
 
   return (
-    <div className="chat-msg-in mb-4" data-chat-inline-run-status="true">
-      <div className="w-full rounded-lg border border-black/[0.08] bg-white/90 px-3 py-2.5 shadow-sm backdrop-blur">
-        <div className="flex min-w-0 items-center justify-between gap-3">
-          <div className="min-w-0">
-            <div className="text-[11px] font-semibold uppercase tracking-wide text-secondary/50">
-              {summary.title}
-            </div>
-            {displayGoal && (
-              <div className="mt-1 line-clamp-2 break-words text-[12px] leading-snug text-foreground/70">
-                {displayGoal}
-              </div>
-            )}
-            <div className="mt-0.5 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-xs text-secondary/70">
-              <span className="font-medium text-foreground/75">{summary.status}</span>
-              {summary.progress && <span>{summary.progress}</span>}
-              {queuedMessages.length > 0 && (
-                <span>
-                  {isKorean(language)
-                    ? `${queuedMessages.length}개 대기`
-                    : `${queuedMessages.length} queued`}
-                </span>
-              )}
-            </div>
-          </div>
-          <div className="flex shrink-0 items-center gap-1.5">
-            {mission && (
-              <button
-                type="button"
-                onClick={() => dispatchOpenMissionLedgerEvent(mission.id)}
-                className="rounded-md border border-[#7C3AED]/15 bg-[#7C3AED]/10 px-2 py-1 text-[10px] font-semibold text-[#6D28D9] transition-colors hover:border-[#7C3AED]/25 hover:bg-[#7C3AED]/15"
-                aria-label={`Open Mission Ledger for ${mission.title}`}
-                title={t(language, "Open mission ledger", "미션 원장 열기")}
-                data-chat-open-mission-ledger={mission.id}
-              >
-                {t(language, "Open mission ledger", "미션 원장 열기")}
-              </button>
-            )}
-            <span className="rounded-full bg-[#7C3AED]/10 px-2 py-0.5 text-[10px] font-semibold text-[#7C3AED]">
-              {t(language, "Live", "실시간")}
-            </span>
-          </div>
-        </div>
-
-        {streamingPreview && (
-          <StreamingPreviewSection
-            text={channelState.streamingText}
-            language={language}
-          />
-        )}
-
-        {channelState.browserFrame && (
+    <div className="chat-msg-in" data-chat-inline-live-stream="true">
+      <MessageBubble
+        role="assistant"
+        content={content}
+        isStreaming={channelState.streaming}
+        liveWorkRows={rows}
+      />
+      {channelState.browserFrame && (
+        <div className="mb-4">
           <InlineBrowserFramePreview frame={channelState.browserFrame} language={language} />
-        )}
-
-        {(() => {
-          const subagentRows = rows.filter((r) => r.group === "subagent");
-          const otherRows = rows.filter((r) => r.group !== "subagent");
-          const renderRow = (row: WorkConsoleRow) => (
-            <li
-              key={row.id}
-              className="flex min-w-0 items-start gap-2 rounded-md bg-black/[0.025] px-2 py-1.5"
-              data-chat-inline-run-row="true"
-              data-chat-inline-run-row-status={row.status}
-            >
-              <span
-                className={`mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full ${statusDotClass(row.status)}`}
-                aria-hidden="true"
-              />
-              <span className="min-w-0 flex-1">
-                <span className="flex min-w-0 items-baseline gap-2">
-                  <span className="min-w-0 truncate text-[12px] font-medium text-foreground/80">
-                    {row.label}
-                  </span>
-                  {row.meta && (
-                    <span className="shrink-0 text-[10px] text-secondary/40">{row.meta}</span>
-                  )}
-                </span>
-                {row.detail && (
-                  <span className="mt-0.5 block truncate text-[11.5px] leading-snug text-secondary/60">
-                    {row.detail}
-                  </span>
-                )}
-              </span>
-            </li>
-          );
-          return (
-            <>
-              {subagentRows.length > 0 && (
-                <div className="mt-2 border-t border-black/[0.06] pt-2">
-                  <div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-secondary/45">
-                    {t(language, "Background agents", "백그라운드 도우미")}
-                  </div>
-                  <ul className="space-y-1">{subagentRows.map(renderRow)}</ul>
-                </div>
-              )}
-              {otherRows.length > 0 && (
-                <div className={subagentRows.length > 0 ? "mt-2 border-t border-black/[0.06] pt-2" : "mt-2"}>
-                  {subagentRows.length > 0 && (
-                    <div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-secondary/45">
-                      {t(language, "Actions", "실행 중")}
-                    </div>
-                  )}
-                  <ul className="space-y-1">{otherRows.map(renderRow)}</ul>
-                </div>
-              )}
-            </>
-          );
-        })()}
-      </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -536,6 +351,7 @@ function InlineRunStatus({
 const TIMESTAMP_DEDUP_WINDOW_MS = 10_000;
 const OPTIMISTIC_CONTENT_DEDUP_WINDOW_MS = 5 * 60_000;
 const OPTIMISTIC_CONTENT_DEDUP_MIN_CHARS = 80;
+const INJECTED_ECHO_DEDUP_WINDOW_MS = 5 * 60_000;
 
 function normalizedDuplicateContent(message: ChatMessage): string | null {
   if (message.role === "system") return null;
@@ -549,6 +365,12 @@ function normalizedDuplicateContent(message: ChatMessage): string | null {
 
 function duplicateContentKey(message: ChatMessage): string | null {
   const normalized = normalizedDuplicateContent(message);
+  return normalized ? `${message.role}\u0000${normalized}` : null;
+}
+
+function injectedEchoContentKey(message: ChatMessage): string | null {
+  if (message.role !== "user") return null;
+  const normalized = message.content.replace(/\s+/g, " ").trim();
   return normalized ? `${message.role}\u0000${normalized}` : null;
 }
 
@@ -593,6 +415,7 @@ export const ChatMessages = forwardRef<ChatMessagesHandle, ChatMessagesProps>(fu
     // Build timestamp index for proximity dedup (same role within 10s = duplicate)
     const localByRole = new Map<string, number[]>();
     const optimisticByContent = new Map<string, number[]>();
+    const injectedEchoByContent = new Map<string, number[]>();
     for (const m of localMessages) {
       const ts = m.timestamp ?? 0;
       if (!localByRole.has(m.role)) localByRole.set(m.role, []);
@@ -602,6 +425,13 @@ export const ChatMessages = forwardRef<ChatMessagesHandle, ChatMessagesProps>(fu
         if (key) {
           if (!optimisticByContent.has(key)) optimisticByContent.set(key, []);
           optimisticByContent.get(key)!.push(ts);
+        }
+      }
+      if (m.role === "user" && m.injected && !m.serverId) {
+        const key = injectedEchoContentKey(m);
+        if (key) {
+          if (!injectedEchoByContent.has(key)) injectedEchoByContent.set(key, []);
+          injectedEchoByContent.get(key)!.push(ts);
         }
       }
     }
@@ -629,6 +459,13 @@ export const ChatMessages = forwardRef<ChatMessagesHandle, ChatMessagesProps>(fu
       if (contentTimes) {
         for (const lt of contentTimes) {
           if (Math.abs(smTs - lt) < OPTIMISTIC_CONTENT_DEDUP_WINDOW_MS) return false;
+        }
+      }
+      const injectedEchoKey = injectedEchoContentKey(sm);
+      const injectedEchoTimes = injectedEchoKey ? injectedEchoByContent.get(injectedEchoKey) : undefined;
+      if (injectedEchoTimes) {
+        for (const lt of injectedEchoTimes) {
+          if (Math.abs(smTs - lt) < INJECTED_ECHO_DEDUP_WINDOW_MS) return false;
         }
       }
       return true;
@@ -894,6 +731,8 @@ export const ChatMessages = forwardRef<ChatMessagesHandle, ChatMessagesProps>(fu
               isStreaming?: boolean;
               sourceMessage?: ChatMessage;
               includeSourceMeta?: boolean;
+              liveWorkRows?: WorkConsoleRow[];
+              liveTranscriptItems?: NonNullable<ChannelState["liveTranscriptItems"]>;
             } = {},
           ) => {
             if (!content) return null;
@@ -911,6 +750,8 @@ export const ChatMessages = forwardRef<ChatMessagesHandle, ChatMessagesProps>(fu
                   taskBoard={options.includeSourceMeta ? source?.taskBoard : undefined}
                   researchEvidence={options.includeSourceMeta ? source?.researchEvidence : undefined}
                   usage={options.includeSourceMeta ? source?.usage : undefined}
+                  liveWorkRows={options.liveWorkRows}
+                  liveTranscriptItems={options.liveTranscriptItems}
                   botId={botId}
                   selectionMode={source ? selectionMode : undefined}
                   selected={source ? selectedMessages?.has(source.id) : undefined}
@@ -945,6 +786,8 @@ export const ChatMessages = forwardRef<ChatMessagesHandle, ChatMessagesProps>(fu
               timestamp?: number;
               isStreaming?: boolean;
               sourceMessage?: ChatMessage;
+              liveWorkRows?: WorkConsoleRow[];
+              liveTranscriptItems?: NonNullable<ChannelState["liveTranscriptItems"]>;
             } = {},
           ): ReactNode[] => {
             const anchored = anchoredInjected(injectedMessages);
@@ -958,6 +801,8 @@ export const ChatMessages = forwardRef<ChatMessagesHandle, ChatMessagesProps>(fu
                   isStreaming: options.isStreaming,
                   sourceMessage: options.sourceMessage,
                   includeSourceMeta: true,
+                  liveWorkRows: options.liveWorkRows,
+                  liveTranscriptItems: options.liveTranscriptItems,
                 },
               );
               return node ? [node] : [];
@@ -997,6 +842,8 @@ export const ChatMessages = forwardRef<ChatMessagesHandle, ChatMessagesProps>(fu
                 isStreaming: options.isStreaming,
                 sourceMessage: options.sourceMessage,
                 includeSourceMeta: chunkCount === 0,
+                liveWorkRows: options.liveWorkRows,
+                liveTranscriptItems: options.liveTranscriptItems,
               },
             );
             if (tailNode) nodes.push(tailNode);
@@ -1064,6 +911,24 @@ export const ChatMessages = forwardRef<ChatMessagesHandle, ChatMessagesProps>(fu
           const unanchoredMidTurnInjected = midTurnInjected.filter(
             (msg) => typeof msg.injectedAfterChars !== "number",
           );
+          const liveWorkRowsForActiveBubble = liveTranscriptRows(
+            channelState,
+            liveQueuedMessages,
+            pendingControlRequests,
+            language,
+          );
+          const liveTranscriptItemsForActiveBubble =
+            channelState.liveTranscriptItems && channelState.liveTranscriptItems.length > 0
+              ? channelState.liveTranscriptItems
+              : undefined;
+          const attachLiveWorkRowsToActiveBubble =
+            !liveTranscriptItemsForActiveBubble &&
+            !showStreamingPreview &&
+            !!(channelState.streamingText || (channelState.streaming && channelState.hasTextContent));
+          const attachLiveTranscriptToActiveBubble =
+            !showStreamingPreview &&
+            !!liveTranscriptItemsForActiveBubble &&
+            !!(channelState.streamingText || (channelState.streaming && channelState.hasTextContent));
 
           return (
             <>
@@ -1089,7 +954,15 @@ export const ChatMessages = forwardRef<ChatMessagesHandle, ChatMessagesProps>(fu
                     anchoredMidTurnInjected,
                     "live",
                     mainMessages.length,
-                    { isStreaming: true },
+                    {
+                      isStreaming: true,
+                      liveTranscriptItems: attachLiveTranscriptToActiveBubble
+                        ? liveTranscriptItemsForActiveBubble
+                        : undefined,
+                      liveWorkRows: attachLiveWorkRowsToActiveBubble
+                        ? liveWorkRowsForActiveBubble
+                        : undefined,
+                    },
                   )
                 ) : (
                   <MessageBubble
@@ -1097,6 +970,12 @@ export const ChatMessages = forwardRef<ChatMessagesHandle, ChatMessagesProps>(fu
                     content={channelState.streamingText || "\u200B"}
                     isStreaming
                     botId={botId}
+                    liveTranscriptItems={attachLiveTranscriptToActiveBubble
+                      ? liveTranscriptItemsForActiveBubble
+                      : undefined}
+                    liveWorkRows={attachLiveWorkRowsToActiveBubble
+                      ? liveWorkRowsForActiveBubble
+                      : undefined}
                   />
                 ))}
 
@@ -1109,13 +988,15 @@ export const ChatMessages = forwardRef<ChatMessagesHandle, ChatMessagesProps>(fu
                 renderMessage(msg, i, mainMessages.length),
               )}
 
-              <InlineRunStatus
-                channelState={channelState}
-                queuedMessages={liveQueuedMessages}
-                pendingRequests={pendingControlRequests}
-                showStreamingPreview={showStreamingPreview}
-                uiLanguage={language}
-              />
+              {!attachLiveWorkRowsToActiveBubble && !attachLiveTranscriptToActiveBubble && (
+                <InlineRunStatus
+                  channelState={channelState}
+                  queuedMessages={liveQueuedMessages}
+                  pendingRequests={pendingControlRequests}
+                  showStreamingPreview={showStreamingPreview}
+                  uiLanguage={language}
+                />
+              )}
             </>
           );
         })()}

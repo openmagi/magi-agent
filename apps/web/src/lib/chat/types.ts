@@ -216,6 +216,47 @@ export interface MissionActivity {
   updatedAt: number;
 }
 
+export type LiveTranscriptWorkGroup =
+  | "status"
+  | "mission"
+  | "trace"
+  | "tool"
+  | "subagent"
+  | "task"
+  | "queue"
+  | "control";
+
+export type LiveTranscriptWorkStatus =
+  | "running"
+  | "done"
+  | "waiting"
+  | "error"
+  | "info";
+
+export interface LiveTranscriptTextItem {
+  id: string;
+  kind: "text";
+  content: string;
+  receivedAt: number;
+}
+
+export interface LiveTranscriptWorkItem {
+  id: string;
+  kind: "work";
+  rowId: string;
+  group: LiveTranscriptWorkGroup;
+  label: string;
+  detail?: string;
+  snippet?: string;
+  status: LiveTranscriptWorkStatus;
+  meta?: string;
+  receivedAt: number;
+}
+
+export type LiveTranscriptItem =
+  | LiveTranscriptTextItem
+  | LiveTranscriptWorkItem;
+
 export interface ChannelState {
   streaming: boolean;
   streamingText: string;
@@ -261,6 +302,8 @@ export interface ChannelState {
   runtimeTraces?: RuntimeTrace[];
   /** Final token/cost totals once the runtime commits the turn. */
   turnUsage?: ResponseUsage;
+  /** Live public transcript items in the exact client receive order. */
+  liveTranscriptItems?: LiveTranscriptItem[];
   /** True while chat-proxy is processing file attachments (KB ingest) before bot receives the message */
   fileProcessing?: boolean;
   /** True when SSE stream dropped mid-response and client is polling active-snapshot to recover */

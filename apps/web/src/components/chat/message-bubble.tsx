@@ -20,7 +20,9 @@ import type {
   ResponseUsage,
   ToolActivity,
   TaskBoardSnapshot,
+  LiveTranscriptItem,
 } from "@/lib/chat/types";
+import type { WorkConsoleRow } from "@/lib/chat/work-console";
 
 export type MessageContextAction = "copy" | "select" | "reply";
 
@@ -40,6 +42,10 @@ interface MessageBubbleProps {
   researchEvidence?: ResearchEvidenceSnapshot;
   /** Token/cost totals for the completed assistant turn. */
   usage?: ResponseUsage;
+  /** Live public work rows appended inside the active assistant stream. */
+  liveWorkRows?: WorkConsoleRow[];
+  /** Live public text/work stream in client receive order. */
+  liveTranscriptItems?: LiveTranscriptItem[];
   botId?: string;
   /** Quoted-reply metadata (if this message is a reply to another) */
   replyTo?: ReplyTo;
@@ -489,6 +495,96 @@ function ResearchEvidenceSummary({
   );
 }
 
+function InlineWorkLog({ rows }: { rows?: WorkConsoleRow[] }) {
+  if (!rows || rows.length === 0) return null;
+
+  return (
+    <div
+      className="mt-2 space-y-1 text-[13px] leading-relaxed text-secondary/60"
+      data-chat-inline-work-log="true"
+    >
+      {rows.map((row) => (
+        <div
+          key={row.id}
+          className="min-w-0 break-words"
+          data-chat-inline-work-row="true"
+          data-chat-inline-work-row-status={row.status}
+        >
+          <span className="font-medium text-secondary/70">{row.label}</span>
+          {row.detail && <span> {row.detail}</span>}
+          {row.meta && <span className="text-secondary/40"> {row.meta}</span>}
+          {row.snippet && (
+            <span className="mt-0.5 block whitespace-pre-wrap text-secondary/50">
+              {row.snippet}
+            </span>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function InlineLiveTranscript({
+  items,
+  isStreaming,
+}: {
+  items?: LiveTranscriptItem[];
+  isStreaming?: boolean;
+}) {
+  if (!items || items.length === 0) return null;
+  const lastTextIndex = (() => {
+    for (let i = items.length - 1; i >= 0; i -= 1) {
+      if (items[i].kind === "text") return i;
+    }
+    return -1;
+  })();
+
+  return (
+    <div
+      className="space-y-1 text-sm leading-relaxed"
+      data-chat-live-transcript="true"
+    >
+      {items.map((item, index) => {
+        if (item.kind === "text") {
+          return (
+            <div
+              key={item.id}
+              className="prose-chat"
+              data-chat-live-transcript-item="text"
+            >
+              <ReactMarkdown remarkPlugins={[[remarkGfm, { singleTilde: false }]]}>
+                {item.content}
+              </ReactMarkdown>
+              {isStreaming && index === lastTextIndex && (
+                <span className="ml-0.5 inline-block h-3.5 w-[3px] animate-pulse rounded-full bg-foreground/40 align-middle" />
+              )}
+            </div>
+          );
+        }
+
+        return (
+          <div
+            key={item.id}
+            className="min-w-0 break-words text-secondary/60"
+            data-chat-live-transcript-item="work"
+            data-chat-inline-work-row="true"
+            data-chat-inline-work-row-status={item.status}
+          >
+            <span className="font-medium text-secondary/70">{item.label}</span>
+            {item.detail && <span> {item.detail}</span>}
+            {item.meta && <span className="text-secondary/40"> {item.meta}</span>}
+            {item.snippet && (
+              <span className="mt-0.5 block whitespace-pre-wrap text-secondary/50">
+                {item.snippet}
+              </span>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 /** Context menu component */
 function ContextMenu({ x, y, onAction, onClose }: {
   x: number;
@@ -553,7 +649,7 @@ function ContextMenu({ x, y, onAction, onClose }: {
   );
 }
 
-export function MessageBubble({ role, content, timestamp, isStreaming, thinkingContent, thinkingDuration, activities, taskBoard, researchEvidence, usage, botId, replyTo, injected, selectionMode, selected, onSelect, onContextAction }: MessageBubbleProps) {
+export function MessageBubble({ role, content, timestamp, isStreaming, thinkingContent, thinkingDuration, activities, taskBoard, researchEvidence, usage, liveWorkRows, liveTranscriptItems, botId, replyTo, injected, selectionMode, selected, onSelect, onContextAction }: MessageBubbleProps) {
   const timeStr = useMemo(() => (timestamp ? formatTime(timestamp) : null), [timestamp]);
   const { download, downloadingId } = useAuthDownload();
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
@@ -611,7 +707,10 @@ export function MessageBubble({ role, content, timestamp, isStreaming, thinkingC
     );
   }, [rawContent, botId, isUser]);
   const evidenceSources = researchEvidence?.inspectedSources ?? [];
-  const hasMessageBody = displayContent.trim().length > 0 || !!replyTo;
+  const hasLiveWorkRows = !isUser && !!liveWorkRows && liveWorkRows.length > 0;
+  const hasLiveTranscriptItems = !isUser && !!liveTranscriptItems && liveTranscriptItems.length > 0;
+  const hasDisplayContent = displayContent.trim().length > 0;
+  const hasMessageBody = hasDisplayContent || !!replyTo || hasLiveWorkRows || hasLiveTranscriptItems;
   const messageBodyClassName = isUser
     ? "rounded-2xl px-4 py-2.5 transition-colors overflow-hidden break-words min-w-0 max-w-full bg-black/[0.04] text-foreground rounded-br-md"
     : "w-full min-w-0 max-w-full overflow-hidden break-words py-1 text-foreground";
@@ -704,7 +803,9 @@ export function MessageBubble({ role, content, timestamp, isStreaming, thinkingC
             <p className="text-sm whitespace-pre-wrap leading-relaxed user-msg-text">
               {displayContent}
             </p>
-          ) : (
+          ) : hasLiveTranscriptItems ? (
+            <InlineLiveTranscript items={liveTranscriptItems} isStreaming={isStreaming} />
+          ) : hasDisplayContent ? (
             <div className="prose-chat">
               <ReactMarkdown
                 remarkPlugins={[[remarkGfm, { singleTilde: false }]]}
@@ -754,7 +855,8 @@ export function MessageBubble({ role, content, timestamp, isStreaming, thinkingC
                 {displayContent}
               </ReactMarkdown>
             </div>
-          )}
+          ) : null}
+          {!isUser && !hasLiveTranscriptItems && <InlineWorkLog rows={liveWorkRows} />}
         </div>
         )}
         {kbRefs.length > 0 && botId && (
