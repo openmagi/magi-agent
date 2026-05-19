@@ -207,6 +207,33 @@ export interface SubagentActivity {
   updatedAt: number;
 }
 
+export type SubagentProgressKind =
+  | "started"
+  | "progress"
+  | "permission_request"
+  | "permission_decision"
+  | "llm_start"
+  | "llm_end"
+  | "tool_batch_start"
+  | "tool_batch_end"
+  | "completed"
+  | "cancelled"
+  | "failed"
+  | "aborted";
+
+export interface SubagentProgressEvent {
+  id: string;
+  taskId: string;
+  kind: SubagentProgressKind;
+  label: string;
+  status: "running" | "waiting" | "done" | "error";
+  detail?: string;
+  model?: string;
+  iter?: number;
+  durationMs?: number;
+  receivedAt: number;
+}
+
 export interface MissionActivity {
   id: string;
   title: string;
@@ -282,6 +309,8 @@ export interface ChannelState {
   documentDraft?: DocumentDraftPreview | null;
   /** Live spawned subagent roster during streaming. */
   subagents?: SubagentActivity[];
+  /** Public per-subagent progress timeline during streaming. */
+  subagentProgress?: Record<string, SubagentProgressEvent[]>;
   /** Live TaskBoard snapshot during streaming (replaced on each emission). */
   taskBoard?: TaskBoardSnapshot | null;
   /** Durable public Mission state for long-running work. */

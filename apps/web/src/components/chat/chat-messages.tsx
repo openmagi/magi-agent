@@ -6,9 +6,11 @@ import { TypingIndicator } from "./typing-indicator";
 import { ControlRequestCard } from "./control-request";
 import { compareChatMessages } from "@/lib/chat/message-order";
 import { shouldPreferServerAssistantMessage } from "@/lib/chat/server-reconcile";
-import { stripAssistantMetadataPreamble } from "@/lib/chat/visible-content";
-import { stripResearchEvidenceMarker } from "@/lib/chat/research-evidence";
-import { deriveWorkConsoleRows, type WorkConsoleRow } from "@/lib/chat/work-console";
+import {
+  assistantContentsSubstantiallyOverlap,
+  normalizedAssistantDedupeContent,
+  shouldPreferIncomingAssistantMessageCopy,
+} from "@/lib/chat/assistant-dedupe";
 import type { ReactNode } from "react";
 import type {
   ChatMessage,
@@ -17,7 +19,6 @@ import type {
   ControlRequestRecord,
   ControlRequestResponse,
   ChatResponseLanguage,
-  BrowserFrame,
 } from "@/lib/chat/types";
 
 export interface ChatMessagesHandle {
@@ -70,12 +71,31 @@ function t(language: ChatResponseLanguage | undefined, en: string, ko: string): 
   return isKorean(language) ? ko : en;
 }
 
-function waitingCountLabel(count: number, language?: ChatResponseLanguage): string {
-  return isKorean(language) ? `${count}개 대기` : `${count} waiting`;
+function hasOpenTaskState(channelState: ChannelState): boolean {
+  return !!channelState.taskBoard?.tasks.some(
+    (task) => task.status === "pending" || task.status === "in_progress",
+  );
 }
 
-function queuedIndexLabel(index: number, language?: ChatResponseLanguage): string {
-  return isKorean(language) ? `대기 #${index}` : `Queued #${index}`;
+function hasActiveRunState(
+  channelState: ChannelState,
+  queuedMessages: QueuedMessage[] | undefined,
+  pendingRequests: ControlRequestRecord[],
+): boolean {
+  return (
+    channelState.streaming ||
+    (channelState.activeTools ?? []).some((tool) => tool.status === "running") ||
+    (channelState.subagents ?? []).some(
+      (subagent) => subagent.status === "running" || subagent.status === "waiting",
+    ) ||
+    hasOpenTaskState(channelState) ||
+    (channelState.runtimeTraces ?? []).some((trace) => trace.severity !== "info") ||
+    !!channelState.browserFrame ||
+    !!queuedMessages?.length ||
+    pendingRequests.length > 0 ||
+    !!channelState.fileProcessing ||
+    !!channelState.reconnecting
+  );
 }
 
 function MessageSkeleton() {
@@ -104,260 +124,15 @@ function MessageSkeleton() {
   );
 }
 
-function browserActionLabel(action: string, language?: ChatResponseLanguage): string {
-  switch (action) {
-    case "open":
-      return t(language, "Opening page", "페이지 여는 중");
-    case "click":
-    case "mouse_click":
-      return t(language, "Clicking", "클릭 중");
-    case "fill":
-    case "keyboard_type":
-    case "press":
-      return t(language, "Typing", "입력 중");
-    case "scroll":
-      return t(language, "Scrolling", "스크롤 중");
-    case "screenshot":
-    case "snapshot":
-      return t(language, "Inspecting page", "페이지 확인 중");
-    case "scrape":
-      return t(language, "Reading page", "페이지 읽는 중");
-    default:
-      return t(language, "Using browser", "브라우저 사용 중");
-  }
-}
-
-function InlineBrowserFramePreview({
-  frame,
-  language,
-}: {
-  frame: BrowserFrame;
-  language?: ChatResponseLanguage;
-}) {
-  const imageSrc = `data:${frame.contentType};base64,${frame.imageBase64}`;
-  return (
-    <div
-      className="mt-2 overflow-hidden rounded-md border border-black/[0.08] bg-white"
-      data-chat-inline-browser-frame="true"
-    >
-      <div className="flex min-w-0 items-center justify-between gap-2 border-b border-black/[0.06] px-2.5 py-1.5">
-        <span className="shrink-0 text-[10px] font-semibold uppercase tracking-wide text-secondary/45">
-          {t(language, "Live browser", "실시간 브라우저")}
-        </span>
-        <span className="min-w-0 truncate text-[10.5px] text-secondary/55">
-          {browserActionLabel(frame.action, language)}
-          {frame.url ? ` · ${frame.url}` : ""}
-        </span>
-      </div>
-      {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img
-        src={imageSrc}
-        alt={t(language, "Browser preview", "브라우저 미리보기")}
-        className="block aspect-video w-full max-h-56 bg-black/[0.03] object-contain"
-      />
-    </div>
-  );
-}
-
-const ROLLING_PREVIEW_MAX_CHARS = 500;
-const ROLLING_PREVIEW_MAX_LINES = 8;
-
-function rollingPreview(text: string): string {
-  if (!text) return "";
-  const lines = text.split("\n").filter((l) => l.trim());
-  const tail = lines.slice(-ROLLING_PREVIEW_MAX_LINES).join("\n");
-  if (tail.length <= ROLLING_PREVIEW_MAX_CHARS) return tail;
-  return "…" + tail.slice(-ROLLING_PREVIEW_MAX_CHARS);
-}
-
-function shouldEnterStreamingPreview(channelState: ChannelState): boolean {
-  if (!channelState.streaming || !channelState.streamingText) return false;
-  if (channelState.turnPhase === "committing" || channelState.turnPhase === "committed") {
-    return false;
-  }
-  return true;
-}
-
-function shouldExitStreamingPreview(channelState: ChannelState): boolean {
-  if (!channelState.streaming) return true;
-  if (channelState.turnPhase === "committing" || channelState.turnPhase === "committed") {
-    return true;
-  }
-  return false;
-}
-
-function hasOpenTaskState(channelState: ChannelState): boolean {
-  return !!channelState.taskBoard?.tasks.some(
-    (task) => task.status === "pending" || task.status === "in_progress",
-  );
-}
-
-function hasInlineRunStatus(
-  channelState: ChannelState,
-  queuedMessages: QueuedMessage[],
-  pendingRequests: ControlRequestRecord[],
-  streamingPreview?: boolean,
-): boolean {
-  const hasLiveWork =
-    (channelState.activeTools ?? []).some((tool) => tool.status === "running") ||
-    (channelState.subagents ?? []).some(
-      (subagent) => subagent.status === "running" || subagent.status === "waiting",
-    ) ||
-    hasOpenTaskState(channelState) ||
-    (channelState.runtimeTraces ?? []).some((trace) => trace.severity !== "info") ||
-    !!channelState.browserFrame ||
-    queuedMessages.length > 0 ||
-    pendingRequests.length > 0 ||
-    channelState.fileProcessing ||
-    channelState.reconnecting;
-
-  return hasLiveWork || !!streamingPreview || channelState.streaming;
-}
-
-const INLINE_WORK_ROW_LIMIT = 6;
-
-function isUsefulSubagentRow(row: WorkConsoleRow): boolean {
-  return !row.detail || !/^iteration\s+\d+$/i.test(row.detail.trim());
-}
-
-function inlineWorkRows(
-  channelState: ChannelState,
-  queuedMessages: QueuedMessage[],
-  pendingRequests: ControlRequestRecord[],
-  language?: ChatResponseLanguage,
-): WorkConsoleRow[] {
-  const rows = deriveWorkConsoleRows({
-    channelState,
-    queuedMessages,
-    controlRequests: pendingRequests,
-    uiLanguage: language,
-  });
-  const selected: WorkConsoleRow[] = [];
-  const appendRows = (items: WorkConsoleRow[]) => {
-    for (const item of items) {
-      if (selected.length >= INLINE_WORK_ROW_LIMIT) break;
-      selected.push(item);
-    }
-  };
-
-  appendRows(rows.filter((row) => row.group === "control" && row.status === "waiting"));
-
-  if (channelState.browserFrame && selected.length < INLINE_WORK_ROW_LIMIT) {
-    appendRows([{
-      id: "browser-frame",
-      group: "status",
-      label: t(language, "Live browser", "실시간 브라우저"),
-      detail: [
-        browserActionLabel(channelState.browserFrame.action, language),
-        channelState.browserFrame.url,
-      ].filter(Boolean).join(" - "),
-      status: "running",
-    }]);
-  }
-
-  const toolRows = rows.filter((row) => row.group === "tool").slice(-INLINE_WORK_ROW_LIMIT);
-  const traceRows = rows
-    .filter((row) => row.group === "trace" && row.status !== "info")
-    .slice(-2);
-  const taskRows = rows
-    .filter((row) => row.group === "task" && (row.status === "running" || row.status === "done"))
-    .slice(-2);
-  const subagentRows = rows
-    .filter(
-      (row) =>
-        row.group === "subagent" &&
-        (row.status === "running" || row.status === "waiting") &&
-        isUsefulSubagentRow(row),
-    )
-    .slice(-2);
-
-  appendRows(subagentRows);
-  appendRows(traceRows);
-  appendRows(toolRows);
-  appendRows(taskRows);
-
-  if (selected.length === 0) {
-    appendRows(rows.filter((row) => row.group === "status" && row.id !== "idle"));
-  }
-
-  if (selected.length === 0 && queuedMessages.length > 0) {
-    appendRows(rows.filter((row) => row.group === "queue").slice(0, 1));
-  }
-
-  return selected.slice(0, INLINE_WORK_ROW_LIMIT);
-}
-
-function liveTranscriptRows(
-  channelState: ChannelState,
-  queuedMessages: QueuedMessage[],
-  pendingRequests: ControlRequestRecord[],
-  language?: ChatResponseLanguage,
-): WorkConsoleRow[] {
-  return inlineWorkRows(channelState, queuedMessages, pendingRequests, language)
-    .filter((row) => row.group !== "queue" && row.group !== "control" && row.id !== "browser-frame");
-}
-
-function activeMissionTitle(channelState: ChannelState): string | undefined {
-  const missions = channelState.missions ?? [];
-  const isOpen = (mission: NonNullable<ChannelState["missions"]>[number]) =>
-    mission.status !== "completed" &&
-    mission.status !== "failed" &&
-    mission.status !== "cancelled";
-  const active = channelState.activeGoalMissionId
-    ? missions.find((mission) => mission.id === channelState.activeGoalMissionId && isOpen(mission))
-    : null;
-  return active?.title ?? missions.find(isOpen)?.title;
-}
-
-function InlineRunStatus({
-  channelState,
-  queuedMessages,
-  pendingRequests,
-  showStreamingPreview: streamingPreview,
-  uiLanguage,
-}: {
-  channelState: ChannelState;
-  queuedMessages: QueuedMessage[];
-  pendingRequests: ControlRequestRecord[];
-  showStreamingPreview?: boolean;
-  uiLanguage?: ChatResponseLanguage;
-}) {
-  if (!hasInlineRunStatus(channelState, queuedMessages, pendingRequests, streamingPreview)) return null;
-
-  const language = uiLanguage ?? channelState.responseLanguage;
-  const rows = liveTranscriptRows(channelState, queuedMessages, pendingRequests, language);
-  const content = streamingPreview
-    ? rollingPreview(channelState.streamingText)
-    : channelState.currentGoal?.trim() ?? activeMissionTitle(channelState) ?? "";
-  if (!content && rows.length === 0 && !channelState.browserFrame) return null;
-
-  return (
-    <div className="chat-msg-in" data-chat-inline-live-stream="true">
-      <MessageBubble
-        role="assistant"
-        content={content}
-        isStreaming={channelState.streaming}
-        liveWorkRows={rows}
-      />
-      {channelState.browserFrame && (
-        <div className="mb-4">
-          <InlineBrowserFramePreview frame={channelState.browserFrame} language={language} />
-        </div>
-      )}
-    </div>
-  );
-}
-
 const TIMESTAMP_DEDUP_WINDOW_MS = 10_000;
 const OPTIMISTIC_CONTENT_DEDUP_WINDOW_MS = 5 * 60_000;
 const OPTIMISTIC_CONTENT_DEDUP_MIN_CHARS = 80;
 const INJECTED_ECHO_DEDUP_WINDOW_MS = 5 * 60_000;
 
 function normalizedDuplicateContent(message: ChatMessage): string | null {
+  if (message.role === "assistant") return normalizedAssistantDedupeContent(message);
   if (message.role === "system") return null;
-  const content = message.role === "assistant"
-    ? stripResearchEvidenceMarker(stripAssistantMetadataPreamble(message.content))
-    : message.content;
+  const content = message.content;
   const normalized = content.replace(/\s+/g, " ").trim();
   if (normalized.length < OPTIMISTIC_CONTENT_DEDUP_MIN_CHARS) return null;
   return normalized;
@@ -368,13 +143,94 @@ function duplicateContentKey(message: ChatMessage): string | null {
   return normalized ? `${message.role}\u0000${normalized}` : null;
 }
 
+function substantiallyOverlapsAssistantContent(
+  first: ChatMessage,
+  second: ChatMessage,
+): boolean {
+  if (first.role !== "assistant" || second.role !== "assistant") return false;
+
+  const localTs = first.timestamp ?? 0;
+  const serverTs = second.timestamp ?? 0;
+  if (Math.abs(serverTs - localTs) >= OPTIMISTIC_CONTENT_DEDUP_WINDOW_MS) return false;
+
+  return assistantContentsSubstantiallyOverlap(first, second);
+}
+
+function substantiallyOverlapsOptimisticAssistant(
+  localMessage: ChatMessage,
+  serverMessage: ChatMessage,
+): boolean {
+  if (localMessage.serverId) return false;
+  return substantiallyOverlapsAssistantContent(localMessage, serverMessage);
+}
+
+function shouldDropLocalAssistantForServer(
+  localMessage: ChatMessage,
+  serverMessage: ChatMessage,
+): boolean {
+  if (shouldPreferServerAssistantMessage(localMessage, serverMessage, TIMESTAMP_DEDUP_WINDOW_MS)) {
+    return true;
+  }
+  if (!substantiallyOverlapsOptimisticAssistant(localMessage, serverMessage)) return false;
+  return shouldPreferIncomingAssistantMessageCopy(localMessage, serverMessage);
+}
+
+function preferredAssistantCopy(existing: ChatMessage, incoming: ChatMessage): ChatMessage {
+  if (!existing.serverId && incoming.serverId) return incoming;
+  if (existing.serverId && !incoming.serverId) return existing;
+  const existingContent = normalizedDuplicateContent(existing)?.length ?? 0;
+  const incomingContent = normalizedDuplicateContent(incoming)?.length ?? 0;
+  return incomingContent >= existingContent ? incoming : existing;
+}
+
+function shouldDedupeSameTurnAssistant(
+  existing: ChatMessage,
+  incoming: ChatMessage,
+): boolean {
+  if (existing.role !== "assistant" || incoming.role !== "assistant") return false;
+  if (existing.serverId && incoming.serverId) return false;
+  return substantiallyOverlapsAssistantContent(existing, incoming);
+}
+
+function dedupeOptimisticAssistantCopies(messages: ChatMessage[]): ChatMessage[] {
+  const sorted = [...messages].sort(compareChatMessages);
+  const deduped: ChatMessage[] = [];
+  let currentTurnAssistantIndexes: number[] = [];
+
+  for (const message of sorted) {
+    if (message.role === "user") currentTurnAssistantIndexes = [];
+
+    if (message.role === "assistant") {
+      let duplicateIndex: number | null = null;
+      for (const candidateIndex of currentTurnAssistantIndexes) {
+        const candidate = deduped[candidateIndex];
+        if (candidate && shouldDedupeSameTurnAssistant(candidate, message)) {
+          duplicateIndex = candidateIndex;
+          break;
+        }
+      }
+
+      if (duplicateIndex !== null) {
+        deduped[duplicateIndex] = preferredAssistantCopy(deduped[duplicateIndex], message);
+        continue;
+      }
+
+      currentTurnAssistantIndexes.push(deduped.length);
+    }
+
+    deduped.push(message);
+  }
+
+  return deduped.sort(compareChatMessages);
+}
+
 function injectedEchoContentKey(message: ChatMessage): string | null {
   if (message.role !== "user") return null;
   const normalized = message.content.replace(/\s+/g, " ").trim();
   return normalized ? `${message.role}\u0000${normalized}` : null;
 }
 
-export const ChatMessages = forwardRef<ChatMessagesHandle, ChatMessagesProps>(function ChatMessages({ messages, serverMessages, channelState, loading, botId, selectionMode, selectedMessages, onToggleSelect, onEnterSelectionMode, onSelectAll, onDeselectAll, onExportSelected, onDeleteSelected, onExitSelectionMode, onLoadOlder, hasOlderMessages, loadingOlder, onReplyTo, queuedMessages, onCancelQueued, controlRequests, onRespondControlRequest, uiLanguage }, ref) {
+export const ChatMessages = forwardRef<ChatMessagesHandle, ChatMessagesProps>(function ChatMessages({ messages, serverMessages, channelState, loading, botId, selectionMode, selectedMessages, onToggleSelect, onEnterSelectionMode, onSelectAll, onDeselectAll, onExportSelected, onDeleteSelected, onExitSelectionMode, onLoadOlder, hasOlderMessages, loadingOlder, onReplyTo, queuedMessages, controlRequests, onRespondControlRequest, uiLanguage }, ref) {
   const containerRef = useRef<HTMLDivElement>(null);
   const language = uiLanguage ?? channelState.responseLanguage;
   const [showScrollBtn, setShowScrollBtn] = useState(false);
@@ -396,16 +252,13 @@ export const ChatMessages = forwardRef<ChatMessagesHandle, ChatMessagesProps>(fu
   // Merge local + server messages, dedup by serverId, timestamp proximity,
   // or late-arriving server copies of optimistic streamed assistant messages.
   const allMessages = useMemo(() => {
-    if (serverMessages.length === 0) return [...messages].sort(compareChatMessages);
+    const dedupedMessages = dedupeOptimisticAssistantCopies(messages);
+    if (serverMessages.length === 0) return dedupedMessages;
     if (messages.length === 0) return [...serverMessages].sort(compareChatMessages);
 
-    const localMessages = messages.filter((message) => (
+    const localMessages = dedupedMessages.filter((message) => (
       !serverMessages.some((serverMessage) => (
-        shouldPreferServerAssistantMessage(
-          message,
-          serverMessage,
-          TIMESTAMP_DEDUP_WINDOW_MS,
-        )
+        shouldDropLocalAssistantForServer(message, serverMessage)
       ))
     ));
 
@@ -467,6 +320,14 @@ export const ChatMessages = forwardRef<ChatMessagesHandle, ChatMessagesProps>(fu
         for (const lt of injectedEchoTimes) {
           if (Math.abs(smTs - lt) < INJECTED_ECHO_DEDUP_WINDOW_MS) return false;
         }
+      }
+      if (
+        localMessages.some((localMessage) =>
+          substantiallyOverlapsOptimisticAssistant(localMessage, sm) &&
+          !shouldPreferIncomingAssistantMessageCopy(localMessage, sm),
+        )
+      ) {
+        return false;
       }
       return true;
     });
@@ -550,26 +411,15 @@ export const ChatMessages = forwardRef<ChatMessagesHandle, ChatMessagesProps>(fu
     () => (controlRequests ?? []).filter((request) => request.state === "pending"),
     [controlRequests],
   );
-  const liveQueuedMessages = queuedMessages ?? [];
-
-  const previewStickyRef = useRef(false);
-  if (shouldExitStreamingPreview(channelState)) {
-    previewStickyRef.current = false;
-  } else if (shouldEnterStreamingPreview(channelState)) {
-    previewStickyRef.current = true;
-  }
-  const showStreamingPreview = previewStickyRef.current && channelState.streaming && !!channelState.streamingText;
-
-  const inlineRunVisible = hasInlineRunStatus(
+  const activeRunVisible = hasActiveRunState(
     channelState,
-    liveQueuedMessages,
+    queuedMessages,
     pendingControlRequests,
-    showStreamingPreview,
   );
 
-  // Show typing dots only as a fallback. The inline run snapshot now carries
-  // active work in the transcript while the right inspector keeps details.
-  const showTyping = channelState.streaming && !inlineRunVisible && !channelState.streamingText && !channelState.thinkingText && !channelState.thinkingStartedAt;
+  // Public work progress belongs in the Work inspector. The transcript only
+  // shows answer text, injected user messages, and explicit input requests.
+  const showTyping = channelState.streaming && !channelState.streamingText && !channelState.thinkingText && !channelState.thinkingStartedAt;
 
   const selectableCount = useMemo(() => {
     return allMessages.filter((m) => m.role !== "system").length;
@@ -653,7 +503,7 @@ export const ChatMessages = forwardRef<ChatMessagesHandle, ChatMessagesProps>(fu
           <MessageSkeleton />
         )}
 
-        {!loading && allMessages.length === 0 && !channelState.streaming && (
+        {!loading && allMessages.length === 0 && !activeRunVisible && (
           <div className="flex flex-col items-center justify-center h-full min-h-[200px] gap-2">
             <div className="w-10 h-10 rounded-full bg-black/[0.04] flex items-center justify-center">
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="text-secondary/60">
@@ -731,11 +581,18 @@ export const ChatMessages = forwardRef<ChatMessagesHandle, ChatMessagesProps>(fu
               isStreaming?: boolean;
               sourceMessage?: ChatMessage;
               includeSourceMeta?: boolean;
-              liveWorkRows?: WorkConsoleRow[];
+              inlineBeforeContent?: ReactNode;
+              inlineAfterContent?: ReactNode;
               liveTranscriptItems?: NonNullable<ChannelState["liveTranscriptItems"]>;
+              liveAssistantTurn?: boolean;
             } = {},
           ) => {
-            if (!content) return null;
+            if (
+              !content &&
+              !options.inlineBeforeContent &&
+              !options.inlineAfterContent &&
+              !options.liveTranscriptItems?.length
+            ) return null;
             const source = options.sourceMessage;
             return (
               <div key={key} {...animationProps(index)}>
@@ -750,9 +607,11 @@ export const ChatMessages = forwardRef<ChatMessagesHandle, ChatMessagesProps>(fu
                   taskBoard={options.includeSourceMeta ? source?.taskBoard : undefined}
                   researchEvidence={options.includeSourceMeta ? source?.researchEvidence : undefined}
                   usage={options.includeSourceMeta ? source?.usage : undefined}
-                  liveWorkRows={options.liveWorkRows}
-                  liveTranscriptItems={options.liveTranscriptItems}
                   botId={botId}
+                  inlineBeforeContent={options.inlineBeforeContent}
+                  inlineAfterContent={options.inlineAfterContent}
+                  liveTranscriptItems={options.liveTranscriptItems}
+                  liveAssistantTurn={options.liveAssistantTurn}
                   selectionMode={source ? selectionMode : undefined}
                   selected={source ? selectedMessages?.has(source.id) : undefined}
                   onSelect={source ? () => onToggleSelect?.(source.id) : undefined}
@@ -786,8 +645,10 @@ export const ChatMessages = forwardRef<ChatMessagesHandle, ChatMessagesProps>(fu
               timestamp?: number;
               isStreaming?: boolean;
               sourceMessage?: ChatMessage;
-              liveWorkRows?: WorkConsoleRow[];
+              inlineBeforeContent?: ReactNode;
+              inlineAfterContent?: ReactNode;
               liveTranscriptItems?: NonNullable<ChannelState["liveTranscriptItems"]>;
+              liveAssistantTurn?: boolean;
             } = {},
           ): ReactNode[] => {
             const anchored = anchoredInjected(injectedMessages);
@@ -801,8 +662,10 @@ export const ChatMessages = forwardRef<ChatMessagesHandle, ChatMessagesProps>(fu
                   isStreaming: options.isStreaming,
                   sourceMessage: options.sourceMessage,
                   includeSourceMeta: true,
-                  liveWorkRows: options.liveWorkRows,
+                  inlineBeforeContent: options.inlineBeforeContent,
+                  inlineAfterContent: options.inlineAfterContent,
                   liveTranscriptItems: options.liveTranscriptItems,
+                  liveAssistantTurn: options.liveAssistantTurn,
                 },
               );
               return node ? [node] : [];
@@ -822,6 +685,9 @@ export const ChatMessages = forwardRef<ChatMessagesHandle, ChatMessagesProps>(fu
                   timestamp: options.timestamp,
                   sourceMessage: options.sourceMessage,
                   includeSourceMeta: chunkCount === 0,
+                  inlineBeforeContent: chunkCount === 0 ? options.inlineBeforeContent : undefined,
+                  liveTranscriptItems: chunkCount === 0 ? options.liveTranscriptItems : undefined,
+                  liveAssistantTurn: chunkCount === 0 ? options.liveAssistantTurn : undefined,
                 },
               );
               if (chunkNode) {
@@ -842,11 +708,60 @@ export const ChatMessages = forwardRef<ChatMessagesHandle, ChatMessagesProps>(fu
                 isStreaming: options.isStreaming,
                 sourceMessage: options.sourceMessage,
                 includeSourceMeta: chunkCount === 0,
-                liveWorkRows: options.liveWorkRows,
-                liveTranscriptItems: options.liveTranscriptItems,
+                inlineBeforeContent: chunkCount === 0 ? options.inlineBeforeContent : undefined,
+                inlineAfterContent: options.inlineAfterContent,
+                liveTranscriptItems: chunkCount === 0 ? options.liveTranscriptItems : undefined,
+                liveAssistantTurn: chunkCount === 0 ? options.liveAssistantTurn : undefined,
               },
             );
             if (tailNode) nodes.push(tailNode);
+            return nodes;
+          };
+
+          const renderLiveTranscriptWithInjected = (
+            liveTranscriptItems: NonNullable<ChannelState["liveTranscriptItems"]>,
+            injectedMessages: typeof allMessages,
+            baseIndex: number,
+          ): ReactNode[] => {
+            const nodes: ReactNode[] = [];
+            const injected = [...injectedMessages].sort(
+              (a, b) => (a.timestamp ?? 0) - (b.timestamp ?? 0),
+            );
+            let cursor = 0;
+            let segmentIndex = 0;
+
+            const pushSegment = (endExclusive: number, isStreamingSegment: boolean) => {
+              const segment = liveTranscriptItems.slice(cursor, endExclusive);
+              cursor = endExclusive;
+              if (segment.length === 0) return;
+              const node = renderAssistantChunk(
+                `live-transcript:${segmentIndex}`,
+                "",
+                baseIndex + nodes.length,
+                {
+                  isStreaming: isStreamingSegment,
+                  liveTranscriptItems: segment,
+                  liveAssistantTurn: true,
+                },
+              );
+              segmentIndex += 1;
+              if (node) nodes.push(node);
+            };
+
+            for (const msg of injected) {
+              const timestamp = msg.timestamp ?? 0;
+              let end = cursor;
+              while (
+                end < liveTranscriptItems.length &&
+                liveTranscriptItems[end].receivedAt <= timestamp
+              ) {
+                end += 1;
+              }
+              pushSegment(end, false);
+              nodes.push(renderMessage(msg, nodes.length, baseIndex, `live-transcript:inject:${msg.id}`));
+            }
+
+            pushSegment(liveTranscriptItems.length, true);
             return nodes;
           };
 
@@ -911,24 +826,28 @@ export const ChatMessages = forwardRef<ChatMessagesHandle, ChatMessagesProps>(fu
           const unanchoredMidTurnInjected = midTurnInjected.filter(
             (msg) => typeof msg.injectedAfterChars !== "number",
           );
-          const liveWorkRowsForActiveBubble = liveTranscriptRows(
-            channelState,
-            liveQueuedMessages,
-            pendingControlRequests,
-            language,
-          );
           const liveTranscriptItemsForActiveBubble =
             channelState.liveTranscriptItems && channelState.liveTranscriptItems.length > 0
-              ? channelState.liveTranscriptItems
+              ? channelState.liveTranscriptItems.filter((item) => item.kind === "text")
               : undefined;
-          const attachLiveWorkRowsToActiveBubble =
-            !liveTranscriptItemsForActiveBubble &&
-            !showStreamingPreview &&
-            !!(channelState.streamingText || (channelState.streaming && channelState.hasTextContent));
+          const hasLiveTranscriptText = !!liveTranscriptItemsForActiveBubble?.length;
+          const interleaveInjectedWithLiveTranscript =
+            hasLiveTranscriptText && anchoredMidTurnInjected.length > 0;
           const attachLiveTranscriptToActiveBubble =
-            !showStreamingPreview &&
-            !!liveTranscriptItemsForActiveBubble &&
-            !!(channelState.streamingText || (channelState.streaming && channelState.hasTextContent));
+            hasLiveTranscriptText &&
+            anchoredMidTurnInjected.length === 0;
+          const liveAssistantContent =
+            channelState.streamingText ||
+            (channelState.streaming && channelState.hasTextContent
+              ? ""
+              : "");
+          const shouldRenderLiveAssistant =
+            !!channelState.streamingText ||
+            !!channelState.hasTextContent ||
+            hasLiveTranscriptText;
+          const anchoredMidTurnRenderedInLiveAssistant =
+            shouldRenderLiveAssistant &&
+            (interleaveInjectedWithLiveTranscript || anchoredMidTurnInjected.length > 0);
 
           return (
             <>
@@ -946,40 +865,42 @@ export const ChatMessages = forwardRef<ChatMessagesHandle, ChatMessagesProps>(fu
                 </div>
               )}
 
-              {(channelState.streamingText || (channelState.streaming && channelState.hasTextContent)) &&
-                !showStreamingPreview &&
-                (anchoredMidTurnInjected.length > 0 ? (
+              {shouldRenderLiveAssistant &&
+                (interleaveInjectedWithLiveTranscript && liveTranscriptItemsForActiveBubble ? (
+                  renderLiveTranscriptWithInjected(
+                    liveTranscriptItemsForActiveBubble,
+                    anchoredMidTurnInjected,
+                    mainMessages.length,
+                  )
+                ) : anchoredMidTurnInjected.length > 0 ? (
                   renderAssistantWithInjected(
-                    channelState.streamingText || "\u200B",
+                    liveAssistantContent,
                     anchoredMidTurnInjected,
                     "live",
                     mainMessages.length,
                     {
-                      isStreaming: true,
+                      isStreaming: channelState.streaming,
                       liveTranscriptItems: attachLiveTranscriptToActiveBubble
                         ? liveTranscriptItemsForActiveBubble
                         : undefined,
-                      liveWorkRows: attachLiveWorkRowsToActiveBubble
-                        ? liveWorkRowsForActiveBubble
-                        : undefined,
+                      liveAssistantTurn: true,
                     },
                   )
                 ) : (
                   <MessageBubble
                     role="assistant"
-                    content={channelState.streamingText || "\u200B"}
-                    isStreaming
+                    content={liveAssistantContent}
+                    isStreaming={channelState.streaming}
                     botId={botId}
                     liveTranscriptItems={attachLiveTranscriptToActiveBubble
                       ? liveTranscriptItemsForActiveBubble
                       : undefined}
-                    liveWorkRows={attachLiveWorkRowsToActiveBubble
-                      ? liveWorkRowsForActiveBubble
-                      : undefined}
+                    liveAssistantTurn
                   />
                 ))}
 
-              {!channelState.streamingText &&
+              {!anchoredMidTurnRenderedInLiveAssistant &&
+                !channelState.streamingText &&
                 anchoredMidTurnInjected.map((msg, i) =>
                   renderMessage(msg, i, mainMessages.length, `pending-injected:${msg.id}`),
                 )}
@@ -988,15 +909,6 @@ export const ChatMessages = forwardRef<ChatMessagesHandle, ChatMessagesProps>(fu
                 renderMessage(msg, i, mainMessages.length),
               )}
 
-              {!attachLiveWorkRowsToActiveBubble && !attachLiveTranscriptToActiveBubble && (
-                <InlineRunStatus
-                  channelState={channelState}
-                  queuedMessages={liveQueuedMessages}
-                  pendingRequests={pendingControlRequests}
-                  showStreamingPreview={showStreamingPreview}
-                  uiLanguage={language}
-                />
-              )}
             </>
           );
         })()}
@@ -1018,53 +930,6 @@ export const ChatMessages = forwardRef<ChatMessagesHandle, ChatMessagesProps>(fu
         {!loading && showTyping && !channelState.fileProcessing && (
           <div className="chat-msg-in">
             <TypingIndicator />
-          </div>
-        )}
-
-        {/* Queued user messages (Claude Code CLI-style). Kept visually
-            distinct from sent messages so pending follow-ups are obvious. */}
-        {!loading && queuedMessages && queuedMessages.length > 0 && (
-          <div className="mt-3 flex justify-end">
-            <div className="w-full max-w-[92%] sm:max-w-[82%] rounded-2xl border border-amber-500/25 bg-amber-50 px-3 py-2 shadow-[0_1px_8px_rgba(245,158,11,0.10)]">
-              <div className="mb-1.5 flex items-center justify-between gap-2 text-[10px] font-semibold uppercase tracking-wide text-amber-800/70">
-                <span>{t(language, "Queued follow-ups", "대기 중인 후속 메시지")}</span>
-                <span className="rounded-full bg-amber-500/15 px-1.5 py-0.5 text-[9px] text-amber-800">
-                  {waitingCountLabel(queuedMessages.length, language)}
-                </span>
-              </div>
-              <div className="space-y-1.5">
-                {queuedMessages.map((q, index) => (
-                  <div key={q.id} className="flex justify-end">
-                    <div
-                      className="group w-full rounded-xl border border-dashed border-amber-500/25 bg-white/75 px-3 py-2 text-left text-[13px] text-foreground/75"
-                      data-chat-queued-card="true"
-                    >
-                      <div className="flex items-start gap-3">
-                        <div className="min-w-0 flex-1">
-                          <span className="mb-0.5 flex items-center justify-between gap-2 text-[10px] font-semibold uppercase tracking-wide text-amber-800/70">
-                            <span>{queuedIndexLabel(index + 1, language)}</span>
-                            <span className="normal-case tracking-normal">
-                              {t(language, "Waiting for current run", "현재 실행 대기 중")}
-                            </span>
-                          </span>
-                          <span className="block whitespace-pre-wrap break-words">{q.content}</span>
-                        </div>
-                        <button
-                          type="button"
-                          onClick={() => onCancelQueued?.(q.id)}
-                          className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-red-500/15 bg-red-500/10 text-lg font-semibold leading-none text-red-600 transition-colors hover:border-red-500/35 hover:bg-red-500/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-400/70 focus-visible:ring-offset-2"
-                          aria-label={t(language, `Cancel queued follow-up #${index + 1}`, `대기 중인 후속 메시지 #${index + 1} 취소`)}
-                          title={t(language, "Cancel queued follow-up", "대기 중인 후속 메시지 취소")}
-                          data-chat-queued-cancel="true"
-                        >
-                          <span aria-hidden="true">×</span>
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
           </div>
         )}
 

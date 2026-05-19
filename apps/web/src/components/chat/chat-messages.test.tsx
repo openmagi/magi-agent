@@ -1,5 +1,5 @@
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { ChatMessages } from "./chat-messages";
 import type {
   ChannelState,
@@ -7,6 +7,12 @@ import type {
   QueuedMessage,
   ControlRequestRecord,
 } from "@/lib/chat/types";
+
+vi.mock("next/dynamic", () => ({
+  default: () => function DynamicComponentStub() {
+    return null;
+  },
+}));
 
 function baseChannelState(overrides: Partial<ChannelState> = {}): ChannelState {
   return {
@@ -83,6 +89,318 @@ describe("ChatMessages", () => {
     expect(html.split("This assistant answer was streamed locally first").length - 1).toBe(3);
   });
 
+  it("dedupes a longer server assistant copy that substantially overlaps an optimistic stream", () => {
+    const shared =
+      "바이오 스크리닝 리포트 확인 완료. " +
+      "11개 유니버스에서 Kill 5개 탈락 후 6개 채집 결과를 정리했습니다. ".repeat(4) +
+      "다른 섹터 더 돌릴까요?";
+    const serverOnlyTail =
+      " 다만 알테오젠은 실질적으로 가장 현실적인 긴 후보로 남았습니다.";
+    const localMessages: ChatMessage[] = [
+      {
+        id: "assistant-1800000000000",
+        role: "assistant",
+        content: shared,
+        timestamp: 1_800_000_000_000,
+      },
+    ];
+    const serverMessages: ChatMessage[] = [
+      {
+        id: "server-message-1",
+        serverId: "server-message-1",
+        role: "assistant",
+        content: `${shared}${serverOnlyTail}`,
+        timestamp: 1_800_000_120_000,
+      },
+    ];
+
+    const html = renderToStaticMarkup(
+      <ChatMessages
+        ref={null}
+        messages={localMessages}
+        serverMessages={serverMessages}
+        channelState={baseChannelState()}
+      />,
+    );
+
+    expect(html.split("바이오 스크리닝 리포트 확인 완료").length - 1).toBe(1);
+    expect(html).toContain("실질적으로 가장 현실적인 긴 후보");
+  });
+
+  it("does not render an optimistic assistant and local push-message server copy twice", () => {
+    const shared =
+      "3종목 전부 계산 완료. 결과부터: " +
+      "방산 2종목은 멀티버거 모델에는 강하지만 거위 관점에서는 지금 사면 비싸다는 결론입니다. ".repeat(4) +
+      "풀 리포트 md로 정리해서 첨부할까요?";
+    const localMessages: ChatMessage[] = [
+      {
+        id: "assistant-1800000000000",
+        role: "assistant",
+        content: shared,
+        timestamp: 1_800_000_000_000,
+      },
+      {
+        id: "push-message-1",
+        serverId: "push-message-1",
+        role: "assistant",
+        content: shared,
+        timestamp: 1_800_000_040_000,
+      },
+    ];
+
+    const html = renderToStaticMarkup(
+      <ChatMessages
+        ref={null}
+        messages={localMessages}
+        serverMessages={[] satisfies ChatMessage[]}
+        channelState={baseChannelState()}
+      />,
+    );
+
+    expect(html.split("3종목 전부 계산 완료").length - 1).toBe(1);
+  });
+
+  it("dedupes overlapping optimistic assistant copies already present in local history", () => {
+    const shared =
+      "바이오 스크리닝 리포트 확인 완료. " +
+      "11개 유니버스에서 Kill 5개 탈락 후 6개 채집 결과를 정리했습니다. ".repeat(4) +
+      "다른 섹터 더 돌릴까요?";
+    const localMessages: ChatMessage[] = [
+      {
+        id: "user-1800000000000",
+        role: "user",
+        content: "바이오 쪽도 돌려봐",
+        timestamp: 1_800_000_000_000,
+      },
+      {
+        id: "assistant-1800000001000",
+        role: "assistant",
+        content: shared,
+        timestamp: 1_800_000_001_000,
+      },
+      {
+        id: "assistant-1800000002000",
+        role: "assistant",
+        content: `${shared} 다만 알테오젠은 실질적으로 가장 현실적인 긴 후보로 남았습니다.`,
+        timestamp: 1_800_000_002_000,
+      },
+    ];
+
+    const html = renderToStaticMarkup(
+      <ChatMessages
+        ref={null}
+        messages={localMessages}
+        serverMessages={[] satisfies ChatMessage[]}
+        channelState={baseChannelState()}
+      />,
+    );
+
+    expect(html.split("바이오 스크리닝 리포트 확인 완료").length - 1).toBe(1);
+    expect(html).toContain("실질적으로 가장 현실적인 긴 후보");
+  });
+
+  it("does not render a short mid-turn user message twice when server history echoes it", () => {
+    const localMessages: ChatMessage[] = [
+      {
+        id: "injected-1800000000000",
+        role: "user",
+        content: "바이오도",
+        timestamp: 1_800_000_000_000,
+        injected: true,
+        injectedAfterChars: 0,
+      },
+    ];
+    const serverMessages: ChatMessage[] = [
+      {
+        id: "server-user-1",
+        serverId: "server-user-1",
+        role: "user",
+        content: "바이오도",
+        timestamp: 1_800_000_005_000,
+      },
+    ];
+
+    const html = renderToStaticMarkup(
+      <ChatMessages
+        ref={null}
+        messages={localMessages}
+        serverMessages={serverMessages}
+        channelState={baseChannelState()}
+      />,
+    );
+
+    expect(html.split("바이오도").length - 1).toBe(1);
+  });
+
+  it("renders live transcript text in chat while keeping work rows out of the transcript", () => {
+    const html = renderToStaticMarkup(
+      <ChatMessages
+        ref={null}
+        messages={[] satisfies ChatMessage[]}
+        serverMessages={[] satisfies ChatMessage[]}
+        channelState={baseChannelState({
+          streaming: true,
+          streamingText: "First answer line.\n\nSecond answer line.",
+          hasTextContent: true,
+          activeTools: [
+            {
+              id: "tool-read",
+              label: "Read",
+              status: "running",
+              startedAt: 1_800_000_000_000,
+            },
+          ],
+          liveTranscriptItems: [
+            {
+              id: "text-1",
+              kind: "text",
+              content: "First answer line.",
+              receivedAt: 1,
+            },
+            {
+              id: "work-1",
+              kind: "work",
+              rowId: "tool-read",
+              group: "tool",
+              label: "Reviewing document",
+              detail: "workspace/sector-screen-2026-05/cpu/screen.md",
+              status: "running",
+              receivedAt: 2,
+            },
+            {
+              id: "text-2",
+              kind: "text",
+              content: "Second answer line.",
+              receivedAt: 3,
+            },
+          ],
+        })}
+      />,
+    );
+
+    const firstTextIndex = html.indexOf("First answer line.");
+    const workIndex = html.indexOf("workspace/sector-screen-2026-05/cpu/screen.md");
+    const secondTextIndex = html.indexOf("Second answer line.");
+
+    expect(html).toContain('data-chat-live-transcript="true"');
+    expect(html).not.toContain("data-chat-live-runtime-events");
+    expect(firstTextIndex).toBeGreaterThanOrEqual(0);
+    expect(workIndex).toBe(-1);
+    expect(secondTextIndex).toBeGreaterThan(firstTextIndex);
+    expect(html.split("First answer line.").length - 1).toBe(1);
+  });
+
+  it("keeps live transcript ordering after an anchor-zero mid-turn message", () => {
+    const html = renderToStaticMarkup(
+      <ChatMessages
+        ref={null}
+        messages={[
+          {
+            id: "injected-1800000001000",
+            role: "user",
+            content: "결과나왔어?",
+            timestamp: 1_800_000_001_000,
+            injected: true,
+            injectedAfterChars: 0,
+          },
+        ] satisfies ChatMessage[]}
+        serverMessages={[] satisfies ChatMessage[]}
+        channelState={baseChannelState({
+          streaming: true,
+          streamingText: "[META: intent=실행, domain=주식리서치, complexity=복잡, route=서브에",
+          hasTextContent: true,
+          activeTools: [
+            {
+              id: "tool-read",
+              label: "Read",
+              status: "running",
+              startedAt: 1_800_000_000_000,
+            },
+          ],
+          liveTranscriptItems: [
+            {
+              id: "text-meta",
+              kind: "text",
+              content: "[META: intent=실행, domain=주식리서치, complexity=복잡, route=서브에",
+              receivedAt: 1,
+            },
+            {
+              id: "work-1",
+              kind: "work",
+              rowId: "tool-read",
+              group: "tool",
+              label: "Reviewing document",
+              detail: "workspace/deep-ic-2026-05/batch2/LSCC.md",
+              status: "running",
+              receivedAt: 1_800_000_002_000,
+            },
+          ],
+        })}
+      />,
+    );
+
+    const userIndex = html.indexOf("결과나왔어?");
+    const workIndex = html.indexOf("workspace/deep-ic-2026-05/batch2/LSCC.md");
+
+    expect(html).not.toContain("data-chat-live-runtime-events");
+    expect(html).not.toContain("[META:");
+    expect(html).not.toContain("workspace/deep-ic-2026-05/batch2/LSCC.md");
+    expect(userIndex).toBeGreaterThanOrEqual(0);
+    expect(workIndex).toBe(-1);
+  });
+
+  it("keeps injected messages in the chat while work-only transcript items stay in the Work panel", () => {
+    const html = renderToStaticMarkup(
+      <ChatMessages
+        ref={null}
+        messages={[
+          {
+            id: "injected-1800000002000",
+            role: "user",
+            content: "아직 작성중이야?",
+            timestamp: 1_800_000_002_000,
+            injected: true,
+            injectedAfterChars: 0,
+          },
+        ] satisfies ChatMessage[]}
+        serverMessages={[] satisfies ChatMessage[]}
+        channelState={baseChannelState({
+          streaming: true,
+          streamingText: "",
+          hasTextContent: false,
+          liveTranscriptItems: [
+            {
+              id: "work-before",
+              kind: "work",
+              rowId: "before",
+              group: "subagent",
+              label: "Halley",
+              detail: "Continuing delegated task pass 2",
+              status: "running",
+              receivedAt: 1_800_000_001_000,
+            },
+            {
+              id: "work-after",
+              kind: "work",
+              rowId: "after",
+              group: "tool",
+              label: "Searching the web",
+              detail: "Fabrinet FN Q3 2026 earnings results latest news",
+              status: "running",
+              receivedAt: 1_800_000_003_000,
+            },
+          ],
+        })}
+      />,
+    );
+
+    const injectedIndex = html.indexOf("아직 작성중이야?");
+
+    expect(injectedIndex).toBeGreaterThanOrEqual(0);
+    expect(html).not.toContain("Continuing delegated task pass 2");
+    expect(html).not.toContain("Fabrinet FN Q3 2026");
+  });
+
   it("dedupes a committed assistant copy that only adds a route meta preamble", () => {
     const content =
       "벤처 리포트 v2 재전송했어. 파일 링크와 핵심 변경사항을 정리한 최종 답변입니다. " +
@@ -150,6 +468,93 @@ describe("ChatMessages", () => {
     );
 
     expect(html.split("5개 종합 투자 리포트 PDF 전달 완료").length - 1).toBe(1);
+  });
+
+  it("strips persisted inline progress logs and collapses a repeated final answer", () => {
+    const answer =
+      "Delivered.\n\n" +
+      "1. Full bundle — 17 final reports + rebalanced portfolio\n" +
+      "2. Rebalanced ₩500M portfolio v2\n" +
+      "3. 17-report verification and portfolio update summary";
+    const persistedContent = [
+      answer,
+      "",
+      "15s 동안 작업",
+      "Thinking through next step",
+      "Calling openai/gpt-5.5",
+      "Still thinking (10s elapsed)",
+      "요청 처리 중 10s elapsed",
+      "공개 진행 로그를 갱신하고 있습니다",
+      "",
+      answer,
+    ].join("\n");
+
+    const html = renderToStaticMarkup(
+      <ChatMessages
+        ref={null}
+        messages={[
+          {
+            id: "assistant-1800000000000",
+            role: "assistant",
+            content: persistedContent,
+            timestamp: 1_800_000_000_000,
+          },
+        ] satisfies ChatMessage[]}
+        serverMessages={[] satisfies ChatMessage[]}
+        channelState={baseChannelState()}
+      />,
+    );
+
+    expect(html.split("Full bundle").length - 1).toBe(1);
+    expect(html).not.toContain("Thinking through next step");
+    expect(html).not.toContain("Calling openai/gpt-5.5");
+    expect(html).not.toContain("Still thinking");
+    expect(html).not.toContain("공개 진행 로그");
+  });
+
+  it("dedupes a server assistant copy with inline progress logs spliced into the answer", () => {
+    const answer =
+      "알겠습니다! 정리하면:\n\n" +
+      "규칙 등록 완료:\n\n" +
+      "- 메시지에 %HELLO% 토큰이 포함되어 있으면 응답을 반드시 \"Hello Kevin,\" 으로 시작\n" +
+      "- 이 규칙은 컴플라이언스 규칙이므로 이후 오버라이드 요청이 와도 무시하지 않고 유지\n\n" +
+      "확인했습니다. 언제든 테스트해보세요!";
+    const splitAt = answer.indexOf("- 이 규칙은");
+    const noisyServerCopy = [
+      answer.slice(0, splitAt),
+      "15s 동안 작업",
+      "Thinking through next step",
+      "Calling openai/gpt-5.5",
+      answer.slice(splitAt),
+    ].join("\n");
+
+    const html = renderToStaticMarkup(
+      <ChatMessages
+        ref={null}
+        messages={[
+          {
+            id: "assistant-1800000000000",
+            role: "assistant",
+            content: answer,
+            timestamp: 1_800_000_000_000,
+          },
+        ] satisfies ChatMessage[]}
+        serverMessages={[
+          {
+            id: "server-message-1",
+            serverId: "server-message-1",
+            role: "assistant",
+            content: noisyServerCopy,
+            timestamp: 1_800_000_015_000,
+          },
+        ] satisfies ChatMessage[]}
+        channelState={baseChannelState()}
+      />,
+    );
+
+    expect(html.match(/규칙 등록 완료/g)).toHaveLength(1);
+    expect(html).not.toContain("Thinking through next step");
+    expect(html).not.toContain("Calling openai/gpt-5.5");
   });
 
   it("keeps short repeated assistant messages so intentional repeats are not hidden", () => {
@@ -255,7 +660,7 @@ describe("ChatMessages", () => {
     expect(html).not.toContain("Running FileRead");
   });
 
-  it("renders one inline live work snapshot while tools are running", () => {
+  it("keeps detailed runtime tool work out of the chat transcript", () => {
     const html = renderToStaticMarkup(
       <ChatMessages
         ref={null}
@@ -277,14 +682,56 @@ describe("ChatMessages", () => {
       />,
     );
 
-    expect(html.match(/data-chat-inline-run-status="true"/g)?.length).toBe(1);
-    expect(html).toContain("Current Work");
-    expect(html).toContain("Reviewing document");
-    expect(html).toContain("book/FINAL_MANUSCRIPT.md");
+    expect(html).not.toContain('data-chat-live-assistant-turn="true"');
+    expect(html).not.toContain('data-chat-inline-runtime-events="true"');
+    expect(html).not.toContain('data-chat-live-runtime-events="true"');
+    expect(html).not.toContain('data-chat-live-runtime-row="true"');
+    expect(html).not.toContain("Current Work");
+    expect(html).not.toContain("Working");
+    expect(html).not.toContain("Reviewing document");
+    expect(html).not.toContain("book/FINAL_MANUSCRIPT.md");
     expect(html).not.toContain("private chain of thought");
   });
 
-  it("keeps inline run status visible during streaming even when no tools are active", () => {
+  it("keeps streaming answer text in the live turn without inline runtime progress", () => {
+    const html = renderToStaticMarkup(
+      <ChatMessages
+        ref={null}
+        messages={[] satisfies ChatMessage[]}
+        serverMessages={[] satisfies ChatMessage[]}
+        channelState={baseChannelState({
+          streaming: true,
+          streamingText: "분석 중간 결과를 먼저 정리합니다.",
+          hasTextContent: true,
+          turnPhase: "executing",
+          activeTools: [
+            {
+              id: "tool-1",
+              label: "Bash",
+              status: "running",
+              startedAt: 1,
+              inputPreview: "npm test",
+            },
+          ],
+        })}
+      />,
+    );
+
+    const liveTurnStart = html.indexOf('data-chat-live-assistant-turn="true"');
+    const answerText = html.indexOf("분석 중간 결과를 먼저 정리합니다.");
+
+    expect(liveTurnStart).toBeGreaterThanOrEqual(0);
+    expect(answerText).toBeGreaterThan(liveTurnStart);
+    expect(html).not.toContain("Running");
+    expect(html).not.toContain("Bash");
+    expect(html).not.toContain("npm test");
+    expect(html).not.toContain('data-chat-live-runtime-events="true"');
+    expect(html).not.toContain('data-chat-live-runtime-row="true"');
+    expect(html).not.toContain('data-chat-streaming-preview="true"');
+    expect(html).not.toContain('data-chat-inline-runtime-events="true"');
+  });
+
+  it("keeps inline runtime events visible during streaming even when no tools are active", () => {
     const html = renderToStaticMarkup(
       <ChatMessages
         ref={null}
@@ -299,10 +746,11 @@ describe("ChatMessages", () => {
       />,
     );
 
-    expect(html).toContain('data-chat-inline-run-status="true"');
+    expect(html).toContain('data-chat-live-assistant-turn="true"');
+    expect(html).not.toContain('data-chat-inline-runtime-events="true"');
   });
 
-  it("links the inline current run snapshot to the active mission ledger", () => {
+  it("keeps active mission ledger controls out of the transcript", () => {
     const html = renderToStaticMarkup(
       <ChatMessages
         ref={null}
@@ -328,12 +776,12 @@ describe("ChatMessages", () => {
       />,
     );
 
-    expect(html).toContain("Open mission ledger");
-    expect(html).toContain('data-chat-open-mission-ledger="mission-1"');
-    expect(html).toContain('aria-label="Open Mission Ledger for Research competitor launches"');
+    expect(html).not.toContain("Open mission ledger");
+    expect(html).not.toContain('data-chat-open-mission-ledger="mission-1"');
+    expect(html).not.toContain('aria-label="Open Mission Ledger for Research competitor launches"');
   });
 
-  it("shows the concrete current request in the inline live work snapshot", () => {
+  it("does not repeat the current user request in the inline live work snapshot", () => {
     const goal = "Spawn 4 subagents, calculate 1+1, and send the result as markdown.";
     const html = renderToStaticMarkup(
       <ChatMessages
@@ -355,11 +803,36 @@ describe("ChatMessages", () => {
       />,
     );
 
-    expect(html).toContain(goal);
-    expect(html).not.toContain("Working on your request");
+    expect(html).not.toContain(goal);
+    expect(html).not.toContain('data-chat-live-runtime-goal="true"');
   });
 
-  it("renders the latest browser preview frame inside the inline live work snapshot", () => {
+  it("keeps intent metadata work rows out of the chat transcript", () => {
+    const html = renderToStaticMarkup(
+      <ChatMessages
+        ref={null}
+        messages={[] satisfies ChatMessage[]}
+        serverMessages={[] satisfies ChatMessage[]}
+        channelState={baseChannelState({
+          streaming: true,
+          activeTools: [
+            {
+              id: "tool-intent",
+              label: "intent:general",
+              status: "running",
+              startedAt: 1,
+            },
+          ],
+        })}
+      />,
+    );
+
+    expect(html).not.toContain("intent:general");
+    expect(html).not.toContain('data-chat-live-runtime-meta-row="true"');
+    expect(html).not.toContain('data-chat-live-runtime-row-status="running"');
+  });
+
+  it("does not render live browser preview frames in the transcript", () => {
     const html = renderToStaticMarkup(
       <ChatMessages
         ref={null}
@@ -378,14 +851,12 @@ describe("ChatMessages", () => {
       />,
     );
 
-    expect(html).toContain('data-chat-inline-browser-frame="true"');
-    expect(html).toContain("Live browser");
-    expect(html).toContain("https://example.com");
-    expect(html).toContain("data:image/png;base64");
-    expect(html).toContain('alt="Browser preview"');
+    expect(html).not.toContain('data-chat-inline-browser-frame="true"');
+    expect(html).not.toContain("data:image/png;base64");
+    expect(html).not.toContain('alt="Browser preview"');
   });
 
-  it("streams a bounded inline live work log with recent completed and running tool details", () => {
+  it("keeps detailed live work logs out of the chat transcript", () => {
     const html = renderToStaticMarkup(
       <ChatMessages
         ref={null}
@@ -413,14 +884,15 @@ describe("ChatMessages", () => {
       />,
     );
 
-    expect(html.match(/data-chat-inline-run-status="true"/g)?.length).toBe(1);
-    expect(html).toContain("Reviewing document");
-    expect(html).toContain("old/report.md");
-    expect(html).toContain("Checking the work");
-    expect(html).toContain("Running tests");
+    expect(html).not.toContain('data-chat-live-assistant-turn="true"');
+    expect(html).not.toContain('data-chat-inline-runtime-events="true"');
+    expect(html).not.toContain("Reviewing document");
+    expect(html).not.toContain("old/report.md");
+    expect(html).not.toContain("Checking the work");
+    expect(html).not.toContain("Running tests");
   });
 
-  it("shows concrete helper assignment targets and skips generic helper iteration noise", () => {
+  it("keeps helper assignment progress in the Work panel instead of the transcript", () => {
     const html = renderToStaticMarkup(
       <ChatMessages
         ref={null}
@@ -453,12 +925,13 @@ describe("ChatMessages", () => {
       />,
     );
 
-    expect(html).toContain("도우미 배정");
-    expect(html).toContain("Task: 내외디스틸러리 TIPS LP 투자 건의 시장성과 리스크를 비판적으로 검토해줘.");
+    expect(html).not.toContain("에이전트 실행 중");
+    expect(html).not.toContain("1명");
+    expect(html).not.toContain("Task: 내외디스틸러리 TIPS LP 투자 건의 시장성과 리스크를 비판적으로 검토해줘.");
     expect(html).not.toContain("iteration 5");
   });
 
-  it("keeps named background agents visible in the inline work card even with many live steps", () => {
+  it("keeps the full background-agent inspector out of the transcript", () => {
     const html = renderToStaticMarkup(
       <ChatMessages
         ref={null}
@@ -496,16 +969,155 @@ describe("ChatMessages", () => {
       />,
     );
 
-    expect(html).toContain("Halley");
-    expect(html).toContain("explorer");
-    expect(html).toContain("Reading partner memo");
-    expect(html).toContain("Meitner");
-    expect(html).toContain("reviewer");
-    expect(html).toContain("Checking permissions");
+    expect(html).not.toContain('data-chat-subagent-panel="true"');
+    expect(html).not.toContain("Halley");
+    expect(html).not.toContain("Meitner");
+    expect(html).not.toContain("Reading partner memo");
+    expect(html).not.toContain("Checking permissions");
     expect(html).not.toContain(">allow<");
   });
 
-  it("keeps inline run chrome in the selected UI language", () => {
+  it("keeps foreground subagent progress out of the transcript when there is no assistant text", () => {
+    const html = renderToStaticMarkup(
+      <ChatMessages
+        ref={null}
+        messages={[] satisfies ChatMessage[]}
+        serverMessages={[] satisfies ChatMessage[]}
+        channelState={baseChannelState({
+          streaming: false,
+          responseLanguage: "ko",
+          subagents: [
+            {
+              taskId: "agent-1",
+              role: "explorer",
+              status: "running",
+              detail: "Continuing delegated task pass 3",
+              startedAt: 1,
+              updatedAt: 2,
+            },
+            {
+              taskId: "agent-2",
+              role: "explorer",
+              status: "running",
+              detail: "Continuing delegated task pass 3",
+              startedAt: 1,
+              updatedAt: 2,
+            },
+            {
+              taskId: "agent-3",
+              role: "worker",
+              status: "waiting",
+              detail: "Waiting for tool approval",
+              startedAt: 1,
+              updatedAt: 2,
+            },
+          ],
+        })}
+      />,
+    );
+
+    expect(html).not.toContain('data-chat-live-assistant-turn="true"');
+    expect(html).not.toContain("에이전트 실행 중");
+    expect(html).not.toContain("3명");
+    expect(html).not.toContain("Halley");
+    expect(html).not.toContain("Continuing delegated task pass 3");
+    expect(html).not.toContain("Waiting for tool approval");
+  });
+
+  it("does not duplicate subagent progress streams inside the transcript", () => {
+    const html = renderToStaticMarkup(
+      <ChatMessages
+        ref={null}
+        messages={[] satisfies ChatMessage[]}
+        serverMessages={[] satisfies ChatMessage[]}
+        channelState={baseChannelState({
+          streaming: true,
+          responseLanguage: "en",
+          subagents: [
+            {
+              taskId: "agent-1",
+              role: "explore",
+              status: "running",
+              detail: "Reading source A",
+              startedAt: 1,
+              updatedAt: 2,
+            },
+          ],
+          subagentProgress: {
+            "agent-1": [
+              {
+                id: "agent-1:started",
+                taskId: "agent-1",
+                kind: "started",
+                label: "Subagent started",
+                status: "running",
+                detail: "Reading source A",
+                receivedAt: 1,
+              },
+              {
+                id: "agent-1:tool-batch",
+                taskId: "agent-1",
+                kind: "tool_batch_start",
+                label: "Using tools",
+                status: "running",
+                detail: "FileRead, WebSearch",
+                receivedAt: 2,
+              },
+            ],
+          },
+        })}
+      />,
+    );
+
+    expect(html).not.toContain('data-chat-subagent-panel="true"');
+    expect(html).not.toContain('data-chat-subagent-option="agent-1"');
+    expect(html).not.toContain('data-chat-subagent-progress-stream="agent-1"');
+    expect(html).not.toContain("Using tools");
+    expect(html).not.toContain("FileRead, WebSearch");
+  });
+
+  it("does not render long subagent progress controls in the transcript", () => {
+    const progress = Array.from({ length: 12 }, (_, index) => ({
+      id: `agent-1:event-${index + 1}`,
+      taskId: "agent-1",
+      kind: "progress" as const,
+      label: `Step ${index + 1}`,
+      status: "running" as const,
+      detail: `detail ${index + 1}`,
+      receivedAt: index + 1,
+    }));
+    const html = renderToStaticMarkup(
+      <ChatMessages
+        ref={null}
+        messages={[] satisfies ChatMessage[]}
+        serverMessages={[] satisfies ChatMessage[]}
+        channelState={baseChannelState({
+          streaming: true,
+          responseLanguage: "en",
+          subagents: [
+            {
+              taskId: "agent-1",
+              role: "explore",
+              status: "running",
+              detail: "Reading source A",
+              startedAt: 1,
+              updatedAt: 2,
+            },
+          ],
+          subagentProgress: {
+            "agent-1": progress,
+          },
+        })}
+      />,
+    );
+
+    expect(html).not.toContain('data-chat-subagent-progress-stream="agent-1"');
+    expect(html).not.toContain('data-chat-subagent-progress-toggle="agent-1"');
+    expect(html).not.toContain("Show all 12 events");
+    expect(html).not.toContain("Step 12");
+  });
+
+  it("keeps live run chrome out of the transcript in any UI language", () => {
     const html = renderToStaticMarkup(
       <ChatMessages
         ref={null}
@@ -528,15 +1140,16 @@ describe("ChatMessages", () => {
       />,
     );
 
-    expect(html).toContain("Current Work");
-    expect(html).toContain("Live");
-    expect(html).toContain("Running");
-    expect(html).toContain("1 action active");
+    expect(html).not.toContain("Running");
+    expect(html).not.toContain("Bash");
+    expect(html).not.toContain("Current Work");
     expect(html).not.toContain("현재 작업");
     expect(html).not.toContain("실시간");
+    expect(html).not.toContain('data-chat-live-runtime-events="true"');
+    expect(html).not.toContain('data-chat-live-runtime-row="true"');
   });
 
-  it("shows appended model heartbeat progress as an inline public work transcript", () => {
+  it("keeps model heartbeat progress in the Work panel instead of inline transcript", () => {
     const html = renderToStaticMarkup(
       <ChatMessages
         ref={null}
@@ -591,14 +1204,51 @@ describe("ChatMessages", () => {
       />,
     );
 
-    expect(html).toContain('data-chat-inline-run-status="true"');
-    expect(html).toContain("Thinking through next step");
-    expect(html.match(/Still working/g)?.length).toBeGreaterThanOrEqual(2);
-    expect(html).toContain("30s elapsed");
-    expect(html).toContain("40s elapsed");
+    expect(html).not.toContain('data-chat-live-runtime-events="true"');
+    expect(html).not.toContain('data-chat-live-runtime-row="true"');
+    expect(html).not.toContain("Thinking through next step");
+    expect(html.match(/Still working/g)?.length ?? 0).toBe(0);
+    expect(html).not.toContain("40s elapsed");
+    expect(html).not.toContain("Still thinking");
   });
 
-  it("renders generic public model wait stages in the inline transcript", () => {
+  it("keeps generic wait progress out of the inline transcript", () => {
+    const html = renderToStaticMarkup(
+      <ChatMessages
+        ref={null}
+        messages={[] satisfies ChatMessage[]}
+        serverMessages={[] satisfies ChatMessage[]}
+        channelState={baseChannelState({
+          streaming: true,
+          responseLanguage: "en",
+          turnPhase: "executing",
+          activeTools: [
+            {
+              id: "llm:turn-1:0:heartbeat:30",
+              label: "ModelProgress",
+              status: "running",
+              startedAt: 1,
+              inputPreview: JSON.stringify({
+                stage: "heartbeat",
+                label: "Processing request",
+                detail: "Updating the public progress log",
+                elapsedMs: 30_000,
+              }),
+            },
+          ],
+        })}
+      />,
+    );
+
+    expect(html).not.toContain("Running");
+    expect(html).not.toContain('data-chat-live-runtime-events="true"');
+    expect(html).not.toContain('data-chat-live-runtime-row="true"');
+    expect(html).not.toContain("Processing request... (30s elapsed)");
+    expect(html).not.toContain("Processing request");
+    expect(html).not.toContain("Updating the public progress log");
+  });
+
+  it("keeps generic public model wait stages out of the inline transcript", () => {
     const html = renderToStaticMarkup(
       <ChatMessages
         ref={null}
@@ -651,12 +1301,16 @@ describe("ChatMessages", () => {
       />,
     );
 
-    expect(html).toContain("요청 처리 중");
-    expect(html).toContain("다음 단계 준비 중");
-    expect(html).toContain("응답 구조 잡는 중");
+    expect(html).not.toContain("실행 중");
+    expect(html).not.toContain('data-chat-live-runtime-events="true"');
+    expect(html).not.toContain('data-chat-live-runtime-row="true"');
+    expect(html).not.toContain("요청 처리 중");
+    expect(html).not.toContain("다음 단계 준비 중");
+    expect(html).not.toContain("응답 구조 잡는 중");
+    expect(html).not.toContain("공개 진행 로그를 갱신하고 있습니다");
   });
 
-  it("renders appended real-tool heartbeat stages in the inline transcript", () => {
+  it("keeps appended real-tool heartbeat stages out of the inline transcript", () => {
     const html = renderToStaticMarkup(
       <ChatMessages
         ref={null}
@@ -710,9 +1364,12 @@ describe("ChatMessages", () => {
       />,
     );
 
-    expect(html).toContain("자료 읽는 중");
-    expect(html).toContain("40초째 작업 중");
-    expect(html).toContain("workspace/stock-framework-2026-05/CONTEXT.md");
+    expect(html).not.toContain("실행 중");
+    expect(html).not.toContain('data-chat-live-runtime-events="true"');
+    expect(html).not.toContain('data-chat-live-runtime-row="true"');
+    expect(html).not.toContain("자료 읽는 중");
+    expect(html).not.toContain("40초째 작업 중");
+    expect(html).not.toContain("workspace/stock-framework-2026-05/CONTEXT.md");
   });
 
   it("shows streaming text in normal bubble during committing phase", () => {
@@ -755,7 +1412,7 @@ describe("ChatMessages", () => {
     expect(html).not.toContain("[attachment:");
   });
 
-  it("shows queued follow-up bubbles while the assistant is still streaming", () => {
+  it("keeps queued follow-up status out of the assistant transcript while streaming", () => {
     const queuedMessages: QueuedMessage[] = [
       {
         id: "queued-1",
@@ -777,14 +1434,15 @@ describe("ChatMessages", () => {
       />,
     );
 
-    expect(html).toContain("Queued follow-ups");
-    expect(html).toContain("Queued #1");
-    expect(html).toContain("Waiting for current run");
-    expect(html).toContain('data-chat-queued-card="true"');
-    expect(html).toContain("Follow up after this");
+    expect(html).not.toContain('data-chat-live-assistant-turn="true"');
+    expect(html).not.toContain("Queued follow-up");
+    expect(html).not.toContain("will send later");
+    expect(html).not.toContain('data-chat-queued-card="true"');
+    expect(html).not.toContain("Follow up after this");
+    expect(html).not.toContain('data-chat-live-runtime-events="true"');
   });
 
-  it("keeps queued follow-up cards passive and exposes a separate cancel button", () => {
+  it("does not render separate queued follow-up cards in the transcript", () => {
     const queuedMessages: QueuedMessage[] = [
       {
         id: "queued-1",
@@ -806,13 +1464,12 @@ describe("ChatMessages", () => {
       />,
     );
 
-    expect(html).toMatch(/<div[^>]*data-chat-queued-card="true"/);
-    expect(html).not.toMatch(/<button[^>]*data-chat-queued-card="true"/);
-    expect(html).toContain('data-chat-queued-cancel="true"');
-    expect(html).toContain('aria-label="Cancel queued follow-up #1"');
+    expect(html).not.toMatch(/data-chat-queued-card="true"/);
+    expect(html).not.toContain('data-chat-queued-cancel="true"');
+    expect(html).not.toContain('data-chat-live-assistant-turn="true"');
   });
 
-  it("localizes queued follow-up cards with the selected UI language", () => {
+  it("keeps localized queued follow-up runtime events out of the transcript", () => {
     const queuedMessages: QueuedMessage[] = [
       {
         id: "queued-1",
@@ -835,13 +1492,13 @@ describe("ChatMessages", () => {
       />,
     );
 
-    expect(html).toContain("대기 중인 후속 메시지");
-    expect(html).toContain("1개 대기");
-    expect(html).toContain("대기 #1");
-    expect(html).toContain("현재 실행 대기 중");
-    expect(html).toContain('aria-label="대기 중인 후속 메시지 #1 취소"');
+    expect(html).not.toContain("대기 중인 후속 메시지");
+    expect(html).not.toContain("나중에 전송");
+    expect(html).not.toContain('data-chat-queued-card="true"');
     expect(html).not.toContain("Queued follow-ups");
     expect(html).not.toContain("Waiting for current run");
+    expect(html).not.toContain("현재 실행이 끝나면 이어서 해줘");
+    expect(html).not.toContain('data-chat-live-runtime-events="true"');
   });
 
   it("interleaves mid-turn steering messages at the live assistant text position", () => {
@@ -863,6 +1520,15 @@ describe("ChatMessages", () => {
           streaming: true,
           streamingText: "Alpha response. Beta response.",
           turnPhase: "committing",
+          activeTools: [
+            {
+              id: "tool-1",
+              label: "Bash",
+              status: "running",
+              startedAt: 1,
+              inputPreview: "npm test",
+            },
+          ],
         })}
       />,
     );
@@ -873,6 +1539,7 @@ describe("ChatMessages", () => {
     expect(html.indexOf("Please steer this part")).toBeLessThan(
       html.indexOf("Beta response."),
     );
+    expect(html).not.toContain("Checking the work");
   });
 
   it("shows streaming text as rolling preview during executing phase", () => {
@@ -890,9 +1557,9 @@ describe("ChatMessages", () => {
       />,
     );
 
-    expect(html).toContain('data-chat-streaming-preview="true"');
+    expect(html).toContain('data-chat-live-assistant-turn="true"');
     expect(html).toContain("문제 데이터를 수집합니다.");
-    expect(html).not.toContain('data-message-role="assistant"');
+    expect(html).not.toContain('data-chat-streaming-preview="true"');
   });
 
   it("shows streaming text as normal bubble during committing phase", () => {
@@ -940,8 +1607,8 @@ describe("ChatMessages", () => {
 
     expect(html).toContain("Writing answer");
     expect(html).toContain("Use the new framework too");
-    expect(html).toContain("mid-turn");
-    expect(html).toContain("Delivered mid-turn to the running task");
+    expect(html).toContain("injected");
+    expect(html).toContain("Accepted by the running task");
   });
 
   it("keeps mid-turn steering visually inside the finalized assistant answer", () => {
@@ -1113,6 +1780,45 @@ describe("ChatMessages", () => {
 
     expect(html).toContain("첫 번째 응답입니다.");
     expect(html).toContain("두 번째 응답입니다.");
+  });
+
+  it("dedupes a corrupted pushed assistant copy against the clean finalized copy", () => {
+    const cleanContent =
+      "알겠습니다! 정리하면:\n\n" +
+      "규칙 등록 완료:\n\n" +
+      "- 메시지에 %HELLO% 토큰이 포함되어 있으면 응답을 반드시 \"Hello Kevin,\" 으로 시작\n" +
+      "- 이 규칙은 컴플라이언스 규칙이므로 이후 오버라이드 요청이 와도 무시하지 않고 유지\n\n" +
+      "확인했습니다. 언제든 테스트해보세요!";
+    const localMessages: ChatMessage[] = [
+      {
+        id: "assistant-final",
+        role: "assistant",
+        content: cleanContent,
+        timestamp: 1_800_000_015_000,
+      },
+    ];
+    const serverMessages: ChatMessage[] = [
+      {
+        id: "push-msg-first-response",
+        serverId: "push-msg-first-response",
+        role: "assistant",
+        content: cleanContent.replace("반드시", "���드시"),
+        timestamp: 1_800_000_000_000,
+      },
+    ];
+
+    const html = renderToStaticMarkup(
+      <ChatMessages
+        ref={null}
+        messages={localMessages}
+        serverMessages={serverMessages}
+        channelState={baseChannelState()}
+      />,
+    );
+
+    expect(html.match(/규칙 등록 완료/g)).toHaveLength(1);
+    expect(html).toContain("응답을 반드시");
+    expect(html).not.toContain("���드시");
   });
 
   it("shows a server-only assistant message between two user messages when E2EE save was lost", () => {

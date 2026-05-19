@@ -12,7 +12,10 @@ import { parseMarkers } from "@/lib/chat/attachment-marker";
 import { parseKbContextMarker } from "@/lib/chat/kb-context-marker";
 import { buildMessageCopyText } from "@/lib/chat/message-copy";
 import { getAttachmentUrl, getKnowledgeDocumentUrl, fetchAttachmentBlob } from "@/lib/chat/attachments";
-import { stripAssistantMetadataPreamble } from "@/lib/chat/visible-content";
+import {
+  stripAssistantMetadataPreamble,
+  stripStreamingAssistantMetadataPreamble,
+} from "@/lib/chat/visible-content";
 import type {
   InspectedSource,
   ReplyTo,
@@ -22,7 +25,6 @@ import type {
   TaskBoardSnapshot,
   LiveTranscriptItem,
 } from "@/lib/chat/types";
-import type { WorkConsoleRow } from "@/lib/chat/work-console";
 
 export type MessageContextAction = "copy" | "select" | "reply";
 
@@ -31,6 +33,12 @@ interface MessageBubbleProps {
   content: string;
   timestamp?: number;
   isStreaming?: boolean;
+  /** Public live runtime/tool progress rendered in the same assistant turn as streamed text. */
+  inlineBeforeContent?: ReactNode;
+  inlineAfterContent?: ReactNode;
+  /** Live public text/work stream in client receive order. */
+  liveTranscriptItems?: LiveTranscriptItem[];
+  liveAssistantTurn?: boolean;
   /** Persisted thinking content (shown as collapsible block) */
   thinkingContent?: string;
   thinkingDuration?: number;
@@ -42,10 +50,6 @@ interface MessageBubbleProps {
   researchEvidence?: ResearchEvidenceSnapshot;
   /** Token/cost totals for the completed assistant turn. */
   usage?: ResponseUsage;
-  /** Live public work rows appended inside the active assistant stream. */
-  liveWorkRows?: WorkConsoleRow[];
-  /** Live public text/work stream in client receive order. */
-  liveTranscriptItems?: LiveTranscriptItem[];
   botId?: string;
   /** Quoted-reply metadata (if this message is a reply to another) */
   replyTo?: ReplyTo;
@@ -495,33 +499,47 @@ function ResearchEvidenceSummary({
   );
 }
 
-function InlineWorkLog({ rows }: { rows?: WorkConsoleRow[] }) {
-  if (!rows || rows.length === 0) return null;
+type DisplayLiveTranscriptItem = Extract<LiveTranscriptItem, { kind: "text" }> & {
+  displayContent?: string;
+};
 
-  return (
-    <div
-      className="mt-2 space-y-1 text-[13px] leading-relaxed text-secondary/60"
-      data-chat-inline-work-log="true"
-    >
-      {rows.map((row) => (
-        <div
-          key={row.id}
-          className="min-w-0 break-words"
-          data-chat-inline-work-row="true"
-          data-chat-inline-work-row-status={row.status}
-        >
-          <span className="font-medium text-secondary/70">{row.label}</span>
-          {row.detail && <span> {row.detail}</span>}
-          {row.meta && <span className="text-secondary/40"> {row.meta}</span>}
-          {row.snippet && (
-            <span className="mt-0.5 block whitespace-pre-wrap text-secondary/50">
-              {row.snippet}
-            </span>
-          )}
-        </div>
-      ))}
-    </div>
-  );
+function compactMetadataProbe(content: string): string {
+  return content.trimStart().replace(/\s+/g, "").toUpperCase();
+}
+
+function isPotentialRouteMetaFragment(content: string): boolean {
+  const compact = compactMetadataProbe(content);
+  return compact.length > 0 && ("[META:".startsWith(compact) || compact.startsWith("[META:"));
+}
+
+function displayLiveTranscriptItems(items: LiveTranscriptItem[]): DisplayLiveTranscriptItem[] {
+  const displayItems: DisplayLiveTranscriptItem[] = [];
+  let routeMetaBuffer = "";
+
+  for (const item of items) {
+    if (item.kind !== "text") continue;
+
+    const candidate = routeMetaBuffer ? `${routeMetaBuffer}${item.content}` : item.content;
+    if (routeMetaBuffer || isPotentialRouteMetaFragment(candidate)) {
+      if (!candidate.includes("]")) {
+        routeMetaBuffer = candidate;
+        continue;
+      }
+
+      const stripped = stripStreamingAssistantMetadataPreamble(candidate);
+      routeMetaBuffer = "";
+      if (!stripped) continue;
+      if (stripped !== candidate) {
+        displayItems.push({ ...item, content: stripped, displayContent: stripped });
+        continue;
+      }
+    }
+
+    const displayContent = stripStreamingAssistantMetadataPreamble(item.content);
+    if (displayContent) displayItems.push({ ...item, displayContent });
+  }
+
+  return displayItems;
 }
 
 function InlineLiveTranscript({
@@ -532,51 +550,29 @@ function InlineLiveTranscript({
   isStreaming?: boolean;
 }) {
   if (!items || items.length === 0) return null;
-  const lastTextIndex = (() => {
-    for (let i = items.length - 1; i >= 0; i -= 1) {
-      if (items[i].kind === "text") return i;
-    }
-    return -1;
-  })();
+  const displayItems = displayLiveTranscriptItems(items);
+  if (displayItems.length === 0) return null;
+  const lastTextIndex = displayItems.length - 1;
 
   return (
     <div
       className="space-y-1 text-sm leading-relaxed"
       data-chat-live-transcript="true"
     >
-      {items.map((item, index) => {
-        if (item.kind === "text") {
-          return (
-            <div
-              key={item.id}
-              className="prose-chat"
-              data-chat-live-transcript-item="text"
-            >
-              <ReactMarkdown remarkPlugins={[[remarkGfm, { singleTilde: false }]]}>
-                {item.content}
-              </ReactMarkdown>
-              {isStreaming && index === lastTextIndex && (
-                <span className="ml-0.5 inline-block h-3.5 w-[3px] animate-pulse rounded-full bg-foreground/40 align-middle" />
-              )}
-            </div>
-          );
-        }
-
+      {displayItems.map((item, index) => {
+        const displayContent = item.displayContent ?? item.content;
+        if (!displayContent) return null;
         return (
           <div
             key={item.id}
-            className="min-w-0 break-words text-secondary/60"
-            data-chat-live-transcript-item="work"
-            data-chat-inline-work-row="true"
-            data-chat-inline-work-row-status={item.status}
+            className="prose-chat"
+            data-chat-live-transcript-item="text"
           >
-            <span className="font-medium text-secondary/70">{item.label}</span>
-            {item.detail && <span> {item.detail}</span>}
-            {item.meta && <span className="text-secondary/40"> {item.meta}</span>}
-            {item.snippet && (
-              <span className="mt-0.5 block whitespace-pre-wrap text-secondary/50">
-                {item.snippet}
-              </span>
+            <ReactMarkdown remarkPlugins={[[remarkGfm, { singleTilde: false }]]}>
+              {displayContent}
+            </ReactMarkdown>
+            {isStreaming && index === lastTextIndex && (
+              <span className="ml-0.5 inline-block h-3.5 w-[3px] animate-pulse rounded-full bg-foreground/40 align-middle" />
             )}
           </div>
         );
@@ -649,7 +645,7 @@ function ContextMenu({ x, y, onAction, onClose }: {
   );
 }
 
-export function MessageBubble({ role, content, timestamp, isStreaming, thinkingContent, thinkingDuration, activities, taskBoard, researchEvidence, usage, liveWorkRows, liveTranscriptItems, botId, replyTo, injected, selectionMode, selected, onSelect, onContextAction }: MessageBubbleProps) {
+export function MessageBubble({ role, content, timestamp, isStreaming, inlineBeforeContent, inlineAfterContent, liveTranscriptItems, liveAssistantTurn, thinkingContent, thinkingDuration, activities, taskBoard, researchEvidence, usage, botId, replyTo, injected, selectionMode, selected, onSelect, onContextAction }: MessageBubbleProps) {
   const timeStr = useMemo(() => (timestamp ? formatTime(timestamp) : null), [timestamp]);
   const { download, downloadingId } = useAuthDownload();
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
@@ -694,7 +690,8 @@ export function MessageBubble({ role, content, timestamp, isStreaming, thinkingC
   const hasOpenArchivedTaskBoard =
     !isStreaming &&
     !!taskBoard?.tasks.some((task) => task.status === "pending" || task.status === "in_progress");
-  const visibleTaskBoard = hasOpenArchivedTaskBoard ? null : taskBoard;
+  const showLiveWorkDetails = !isUser && Boolean(liveAssistantTurn || isStreaming);
+  const visibleTaskBoard = showLiveWorkDetails && !hasOpenArchivedTaskBoard ? taskBoard : null;
   const safeTextContent = textContent ?? "";
   const rawContent = isStreaming ? safeTextContent + "\u2588" : safeTextContent;
   // Auto-link pipeline IDs → /dashboard/{botId}/pipelines/{id}
@@ -707,13 +704,29 @@ export function MessageBubble({ role, content, timestamp, isStreaming, thinkingC
     );
   }, [rawContent, botId, isUser]);
   const evidenceSources = researchEvidence?.inspectedSources ?? [];
-  const hasLiveWorkRows = !isUser && !!liveWorkRows && liveWorkRows.length > 0;
+  const hasInlineLiveContent = !!inlineBeforeContent || !!inlineAfterContent;
   const hasLiveTranscriptItems = !isUser && !!liveTranscriptItems && liveTranscriptItems.length > 0;
-  const hasDisplayContent = displayContent.trim().length > 0;
-  const hasMessageBody = hasDisplayContent || !!replyTo || hasLiveWorkRows || hasLiveTranscriptItems;
+  const displayContentWithoutCursor = isStreaming && displayContent.endsWith("\u2588")
+    ? displayContent.slice(0, -1)
+    : displayContent;
+  const hasDisplayContent = displayContentWithoutCursor.trim().length > 0;
+  const hasMessageBody = hasDisplayContent || !!replyTo || hasInlineLiveContent || hasLiveTranscriptItems;
+  const hasActivityTimeline =
+    showLiveWorkDetails &&
+    ((activities && activities.length > 0) || taskBoard || thinkingContent || (thinkingDuration && thinkingDuration > 0));
+  const hasVisiblePayload =
+    hasMessageBody ||
+    kbRefs.length > 0 ||
+    attachments.length > 0 ||
+    hasActivityTimeline ||
+    !!visibleTaskBoard ||
+    (!isUser && !!researchEvidence);
   const messageBodyClassName = isUser
     ? "rounded-2xl px-4 py-2.5 transition-colors overflow-hidden break-words min-w-0 max-w-full bg-black/[0.04] text-foreground rounded-br-md"
     : "w-full min-w-0 max-w-full overflow-hidden break-words py-1 text-foreground";
+  const attachmentListClassName = `flex w-fit max-w-full flex-wrap gap-2 mt-1 ${
+    isUser ? "self-end justify-end" : "self-start justify-start"
+  }`;
 
   // System messages render as a centered divider
   if (role === "system") {
@@ -726,9 +739,12 @@ export function MessageBubble({ role, content, timestamp, isStreaming, thinkingC
     );
   }
 
+  if (!hasVisiblePayload) return null;
+
   return (
     <div
       className={`flex ${isUser ? "justify-end" : "justify-start"} mb-4 group ${selectionMode ? "cursor-pointer" : ""}`}
+      data-chat-live-assistant-turn={liveAssistantTurn && !isUser ? "true" : undefined}
       onContextMenu={handleContextMenu}
       onClick={selectionMode ? onSelect : undefined}
     >
@@ -747,13 +763,14 @@ export function MessageBubble({ role, content, timestamp, isStreaming, thinkingC
         </div>
       )}
       <div className={`min-w-0 ${isUser ? "max-w-[88%] sm:max-w-[75%] items-end" : "w-full max-w-full items-start"} flex flex-col gap-1`}>
-        {!isUser && ((activities && activities.length > 0) || taskBoard || thinkingContent || (thinkingDuration && thinkingDuration > 0)) && (
+        {!isUser && hasActivityTimeline && (
           <AgentActivityTimeline
+            live={showLiveWorkDetails}
             thinkingContent={thinkingContent}
             thinkingDuration={thinkingDuration}
             activities={activities}
             taskBoard={taskBoard ?? null}
-            collapsedByDefault
+            collapsedByDefault={Boolean(isStreaming || liveAssistantTurn)}
           />
         )}
 
@@ -767,6 +784,7 @@ export function MessageBubble({ role, content, timestamp, isStreaming, thinkingC
 
         {hasMessageBody && (
         <div className={messageBodyClassName}>
+          {!isUser && inlineBeforeContent}
           {replyTo && (
             <div
               className={`flex items-start gap-1.5 mb-2 -mx-1 px-2 py-1 rounded-md border-l-2 text-xs ${
@@ -799,13 +817,13 @@ export function MessageBubble({ role, content, timestamp, isStreaming, thinkingC
               </span>
             </div>
           )}
-          {isUser ? (
+          {isUser && hasDisplayContent ? (
             <p className="text-sm whitespace-pre-wrap leading-relaxed user-msg-text">
               {displayContent}
             </p>
-          ) : hasLiveTranscriptItems ? (
+          ) : !isUser && hasLiveTranscriptItems ? (
             <InlineLiveTranscript items={liveTranscriptItems} isStreaming={isStreaming} />
-          ) : hasDisplayContent ? (
+          ) : !isUser && hasDisplayContent ? (
             <div className="prose-chat">
               <ReactMarkdown
                 remarkPlugins={[[remarkGfm, { singleTilde: false }]]}
@@ -856,11 +874,14 @@ export function MessageBubble({ role, content, timestamp, isStreaming, thinkingC
               </ReactMarkdown>
             </div>
           ) : null}
-          {!isUser && !hasLiveTranscriptItems && <InlineWorkLog rows={liveWorkRows} />}
+          {!isUser && inlineAfterContent}
         </div>
         )}
         {kbRefs.length > 0 && botId && (
-          <div className="flex flex-wrap gap-2 mt-1">
+          <div
+            className={attachmentListClassName}
+            data-chat-attachment-list={isUser ? "user" : "assistant"}
+          >
             {kbRefs.map((ref) => {
               const ext = ref.filename.split(".").pop()?.toLowerCase() ?? "";
               const isImage = ["jpg", "jpeg", "png", "gif", "webp"].includes(ext);
@@ -894,7 +915,10 @@ export function MessageBubble({ role, content, timestamp, isStreaming, thinkingC
           </div>
         )}
         {attachments.length > 0 && botId && (
-          <div className="flex flex-wrap gap-2 mt-1">
+          <div
+            className={attachmentListClassName}
+            data-chat-attachment-list={isUser ? "user" : "assistant"}
+          >
             {attachments.map((att) => {
               const ext = att.filename.split(".").pop()?.toLowerCase() ?? "";
               const isImage = ["jpg", "jpeg", "png", "gif", "webp"].includes(ext);
@@ -940,12 +964,12 @@ export function MessageBubble({ role, content, timestamp, isStreaming, thinkingC
             {injected && isUser && (
               <span
                 className="inline-flex items-center gap-0.5 text-[9px] uppercase tracking-wide font-medium text-[#7C3AED]/70"
-                title="Delivered mid-turn to the running task"
+                title="Accepted by the running task"
               >
                 <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                   <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" />
                 </svg>
-                mid-turn
+                injected
               </span>
             )}
             {!isUser && usage && (

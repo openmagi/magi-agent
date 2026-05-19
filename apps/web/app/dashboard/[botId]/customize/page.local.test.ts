@@ -7,10 +7,10 @@ const source = readFileSync(
 );
 
 describe("local OSS customize dashboard", () => {
-  it("edits local workspace prompt files instead of hosted bot customization", () => {
-    expect(source).toContain("/v1/app/workspace/file");
-    expect(source).toContain("Local Customization");
-    expect(source).not.toContain("CustomizeTab");
-    expect(source).not.toContain("/api/bots/");
+  it("uses the shared cloud customization surface instead of the old OSS prompt file editor", () => {
+    expect(source).toContain("CustomizeTab");
+    expect(source).not.toContain("/v1/app/workspace/file");
+    expect(source).not.toContain("Local Customization");
+    expect(source).not.toContain("Instruction Files");
   });
 });
