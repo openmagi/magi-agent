@@ -1,14 +1,12 @@
 "use client";
 
-import { DashboardOverview } from "../overview-client";
+import { useRouter } from "next/navigation";
+import { useEffect } from "react";
 
 export default function OverviewPage() {
-  return (
-    <DashboardOverview
-      bot={null}
-      sessionId={null}
-      openOnboarding={false}
-      subscriptionPlan="pro"
-    />
-  );
+  const router = useRouter();
+  useEffect(() => {
+    router.replace("/dashboard/local/overview");
+  }, [router]);
+  return null;
 }

@@ -161,6 +161,84 @@ describe("HttpServer /v1/app settings routes", () => {
     });
   });
 
+  it("preserves existing secrets and unrelated config sections when omitted from app config updates", async () => {
+    await fs.writeFile(
+      configPath,
+      [
+        "llm:",
+        "  provider: anthropic",
+        "  model: claude-sonnet-4-6",
+        "  apiKey: direct-secret",
+        "server:",
+        "  gatewayToken: server-secret",
+        "hooks:",
+        "  builtin:",
+        "    factGrounding: true",
+        "workspace: ./workspace",
+      ].join("\n"),
+      "utf8",
+    );
+
+    const res = await requestJson(`http://127.0.0.1:${port}/v1/app/config`, {
+      method: "PUT",
+      token: "local-token",
+      body: {
+        llm: {
+          provider: "anthropic",
+          model: "claude-opus-4-6",
+        },
+        workspace: "./workspace-alt",
+      },
+    });
+
+    expect(res.status).toBe(200);
+    const written = await fs.readFile(configPath, "utf8");
+    expect(JSON.stringify(res.body)).not.toContain("direct-secret");
+    expect(JSON.stringify(res.body)).not.toContain("server-secret");
+    expect(parse(written)).toMatchObject({
+      llm: {
+        provider: "anthropic",
+        model: "claude-opus-4-6",
+        apiKey: "direct-secret",
+      },
+      server: {
+        gatewayToken: "server-secret",
+      },
+      hooks: {
+        builtin: {
+          factGrounding: true,
+        },
+      },
+      workspace: "./workspace-alt",
+    });
+  });
+
+  it("can update a local raw provider key without returning it to the browser", async () => {
+    const res = await requestJson(`http://127.0.0.1:${port}/v1/app/config`, {
+      method: "PUT",
+      token: "local-token",
+      body: {
+        llm: {
+          provider: "anthropic",
+          model: "claude-sonnet-4-6",
+          apiKey: "new-direct-secret",
+        },
+        workspace: "./workspace",
+      },
+    });
+
+    expect(res.status).toBe(200);
+    expect(JSON.stringify(res.body)).not.toContain("new-direct-secret");
+    const written = await fs.readFile(configPath, "utf8");
+    expect(parse(written)).toMatchObject({
+      llm: {
+        provider: "anthropic",
+        model: "claude-sonnet-4-6",
+        apiKey: "new-direct-secret",
+      },
+    });
+  });
+
   it("reports config reload/restart status without mutating raw secrets", async () => {
     const res = await requestJson(`http://127.0.0.1:${port}/v1/app/config/reload`, {
       method: "POST",
