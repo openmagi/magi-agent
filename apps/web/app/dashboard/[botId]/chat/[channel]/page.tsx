@@ -18,7 +18,7 @@ export default function ChatChannelPage({ params }: ChatChannelPageProps) {
       modelSelection="claude-sonnet-4-20250514"
       apiKeyMode="byok"
       routerType={null}
-      subscriptionPlan="pro"
+      subscriptionPlan={null}
       bots={[]}
       maxBots={1}
       initialChannel={channel}

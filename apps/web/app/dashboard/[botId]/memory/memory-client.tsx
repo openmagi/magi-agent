@@ -5,6 +5,7 @@ import { GlassCard } from "@/components/ui/glass-card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useI18n } from "@/lib/i18n";
+import { agentFetch } from "@/lib/local-api";
 
 function t(locale: string, en: string, ko: string): string {
   return locale === "ko" ? ko : en;
@@ -20,6 +21,8 @@ interface MemoryFile {
   name: string;
   path: string;
   tier: "root" | "daily" | "weekly" | "monthly" | "system";
+  sizeBytes?: number;
+  mtimeMs?: number;
 }
 
 interface SearchResult {
@@ -30,30 +33,88 @@ interface SearchResult {
 
 type SearchMode = "filename" | "content";
 
-const TIERS = [
-  { key: "root" as const, label: "Root", dir: null, files: ["memory/ROOT.md"] },
-  { key: "system" as const, label: "System", dir: null, files: ["SCRATCHPAD.md", "WORKING.md"] },
-  { key: "daily" as const, label: "Daily", dir: "memory/daily" },
-  { key: "weekly" as const, label: "Weekly", dir: "memory/weekly" },
-  { key: "monthly" as const, label: "Monthly", dir: "memory/monthly" },
+const TIERS: Array<{ key: MemoryFile["tier"]; label: string }> = [
+  { key: "root", label: "Root" },
+  { key: "daily", label: "Daily" },
+  { key: "weekly", label: "Weekly" },
+  { key: "monthly", label: "Monthly" },
+  { key: "system", label: "Other" },
 ];
 
-async function apiFetch(botId: string, params: Record<string, string>): Promise<Record<string, unknown>> {
-  const qs = new URLSearchParams(params).toString();
-  const res = await fetch(`/api/bots/${encodeURIComponent(botId)}/memory?${qs}`);
-  return res.json();
+function memoryTier(path: string): MemoryFile["tier"] {
+  if (path === "MEMORY.md" || path === "memory/ROOT.md") return "root";
+  if (path.startsWith("memory/daily/") || /^memory\/\d{4}-\d{2}-\d{2}\.md$/.test(path)) return "daily";
+  if (path.startsWith("memory/weekly/")) return "weekly";
+  if (path.startsWith("memory/monthly/")) return "monthly";
+  return "system";
 }
 
-async function apiPost(botId: string, body: Record<string, unknown>): Promise<Record<string, unknown>> {
-  const res = await fetch(`/api/bots/${encodeURIComponent(botId)}/memory`, {
-    method: "POST",
+function filename(path: string): string {
+  return path.split("/").filter(Boolean).pop() ?? path;
+}
+
+async function readJson(res: Response): Promise<Record<string, unknown>> {
+  const data = (await res.json().catch(() => null)) as Record<string, unknown> | null;
+  if (!res.ok) {
+    throw new Error(typeof data?.error === "string" ? data.error : `Request failed: ${res.status}`);
+  }
+  return data ?? {};
+}
+
+async function listMemoryFiles(): Promise<MemoryFile[]> {
+  const data = await readJson(await agentFetch("/v1/app/memory"));
+  const files = Array.isArray(data.files) ? data.files : [];
+  return files
+    .filter((item): item is { path: string; sizeBytes?: number; mtimeMs?: number } => {
+      return typeof item === "object" && item !== null && typeof item.path === "string";
+    })
+    .map((file) => ({
+      name: filename(file.path),
+      path: file.path,
+      tier: memoryTier(file.path),
+      sizeBytes: file.sizeBytes,
+      mtimeMs: file.mtimeMs,
+    }));
+}
+
+async function readMemoryFile(path: string): Promise<string> {
+  const params = new URLSearchParams({ path });
+  const data = await readJson(await agentFetch(`/v1/app/memory/file?${params.toString()}`));
+  return typeof data.content === "string" ? data.content : "";
+}
+
+async function writeMemoryFile(path: string, content: string): Promise<void> {
+  await readJson(await agentFetch("/v1/app/workspace/file", {
+    method: "PUT",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
-  return res.json();
+    body: JSON.stringify({ path, content }),
+  }));
 }
 
-export function MemoryEditor({ botId, botName, botOnline }: MemoryEditorProps) {
+async function deleteMemoryFiles(paths: string[]): Promise<void> {
+  await readJson(await agentFetch("/v1/app/memory/files", {
+    method: "DELETE",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ paths }),
+  }));
+}
+
+async function searchMemory(query: string, limit = 15): Promise<SearchResult[]> {
+  const params = new URLSearchParams({ q: query, limit: String(limit) });
+  const data = await readJson(await agentFetch(`/v1/app/memory/search?${params.toString()}`));
+  const results = Array.isArray(data.results) ? data.results : [];
+  return results
+    .filter((item): item is { path: string; score?: number; contentPreview?: string; context?: string } => {
+      return typeof item === "object" && item !== null && typeof item.path === "string";
+    })
+    .map((item) => ({
+      path: item.path,
+      score: typeof item.score === "number" ? item.score : 0,
+      snippet: item.context ?? item.contentPreview ?? "",
+    }));
+}
+
+export function MemoryEditor({ botName, botOnline }: MemoryEditorProps) {
   const { locale } = useI18n();
   const [tree, setTree] = useState<Record<string, MemoryFile[]>>({});
   const [expandedTiers, setExpandedTiers] = useState<Set<string>>(new Set(["root", "system", "daily"]));
@@ -73,72 +134,42 @@ export function MemoryEditor({ botId, botName, botOnline }: MemoryEditorProps) {
 
   const loadTree = useCallback(async () => {
     setLoading(true);
-    const result: Record<string, MemoryFile[]> = {};
-
-    // Load root + system files individually
-    for (const tier of TIERS) {
-      if (tier.files) {
-        result[tier.key] = tier.files.map(f => ({
-          name: f.split("/").pop()!,
-          path: f,
-          tier: tier.key,
-        }));
+    try {
+      const files = await listMemoryFiles();
+      const result: Record<string, MemoryFile[]> = {};
+      for (const file of files) {
+        const bucket = result[file.tier] ?? [];
+        bucket.push(file);
+        result[file.tier] = bucket;
       }
+      for (const tier of Object.keys(result)) {
+        result[tier]?.sort((a, b) => b.path.localeCompare(a.path));
+      }
+      setTree(result);
+    } finally {
+      setLoading(false);
     }
-
-    // Load directory-based tiers in parallel
-    const dirTiers = TIERS.filter(t => t.dir);
-    const responses = await Promise.all(
-      dirTiers.map(t => apiFetch(botId, { action: "list", dir: t.dir! }))
-    );
-
-    dirTiers.forEach((tier, i) => {
-      const files = (responses[i].files as string[]) || [];
-      result[tier.key] = files
-        .filter(f => f.endsWith(".md"))
-        .sort((a, b) => b.localeCompare(a))
-        .map(f => ({
-          name: f,
-          path: `${tier.dir}/${f}`,
-          tier: tier.key,
-        }));
-    });
-
-    // Also load raw daily files (memory/YYYY-MM-DD.md)
-    const rawRes = await apiFetch(botId, { action: "list", dir: "memory" });
-    const rawFiles = ((rawRes.files as string[]) || [])
-      .filter(f => /^\d{4}-\d{2}-\d{2}\.md$/.test(f))
-      .sort((a, b) => b.localeCompare(a));
-
-    result.daily = [
-      ...rawFiles.map(f => ({ name: f, path: `memory/${f}`, tier: "daily" as const })),
-      ...(result.daily || []),
-    ];
-
-    setTree(result);
-    setLoading(false);
-  }, [botId]);
+  }, []);
 
   useEffect(() => { loadTree(); }, [loadTree]);
 
   const loadFile = useCallback(async (path: string) => {
-    const data = await apiFetch(botId, { action: "read", path });
-    const content = (data.content as string) ?? "";
+    const content = await readMemoryFile(path);
     setFileContent(content);
     setEditContent(content);
     setSelectedFile(path);
     setEditMode(false);
     setDirty(false);
-  }, [botId]);
+  }, []);
 
   const handleSave = useCallback(async () => {
     if (!selectedFile || !dirty) return;
     setSaving(true);
-    await apiPost(botId, { action: "write", path: selectedFile, content: editContent });
+    await writeMemoryFile(selectedFile, editContent);
     setFileContent(editContent);
     setDirty(false);
     setSaving(false);
-  }, [botId, selectedFile, editContent, dirty]);
+  }, [selectedFile, editContent, dirty]);
 
   const handleDelete = useCallback(async (paths: string[]) => {
     if (paths.length === 0) return;
@@ -151,7 +182,7 @@ export function MemoryEditor({ botId, botName, botOnline }: MemoryEditorProps) {
       `"${label}"을(를) 삭제하시겠습니까? 이 작업은 되돌릴 수 없습니다.`,
     );
     if (!window.confirm(confirmMsg)) return;
-    await apiPost(botId, { action: "delete", paths });
+    await deleteMemoryFiles(paths);
     if (selectedFile && paths.includes(selectedFile)) {
       setSelectedFile(null);
       setFileContent("");
@@ -159,7 +190,7 @@ export function MemoryEditor({ botId, botName, botOnline }: MemoryEditorProps) {
     }
     setSelectedFiles(new Set());
     loadTree();
-  }, [botId, selectedFile, loadTree, locale]);
+  }, [selectedFile, loadTree, locale]);
 
   const handleBulkClearDaily = useCallback(async () => {
     const dailyFiles = [...(tree.daily || [])];
@@ -170,14 +201,14 @@ export function MemoryEditor({ botId, botName, botOnline }: MemoryEditorProps) {
       `${dailyFiles.length}개의 일일 로그를 모두 삭제하시겠습니까? 이 작업은 되돌릴 수 없습니다.`,
     );
     if (!window.confirm(confirmMsg)) return;
-    await apiPost(botId, { action: "delete", paths: dailyFiles.map(f => f.path) });
+    await deleteMemoryFiles(dailyFiles.map(f => f.path));
     if (selectedFile && dailyFiles.some(f => f.path === selectedFile)) {
       setSelectedFile(null);
       setFileContent("");
       setEditContent("");
     }
     loadTree();
-  }, [botId, tree, selectedFile, loadTree, locale]);
+  }, [tree, selectedFile, loadTree, locale]);
 
   const handleResetTree = useCallback(async () => {
     const allCompaction = [
@@ -192,13 +223,13 @@ export function MemoryEditor({ botId, botName, botOnline }: MemoryEditorProps) {
       `컴팩션 트리 전체(${allCompaction.length}개 파일)를 초기화하시겠습니까? ROOT.md는 유지됩니다. 이 작업은 되돌릴 수 없습니다.`,
     );
     if (!window.confirm(confirmMsg)) return;
-    await apiPost(botId, { action: "delete", paths: allCompaction.map(f => f.path) });
+    await deleteMemoryFiles(allCompaction.map(f => f.path));
     setSelectedFile(null);
     setFileContent("");
     setEditContent("");
     setSelectedFiles(new Set());
     loadTree();
-  }, [botId, tree, loadTree, locale]);
+  }, [tree, loadTree, locale]);
 
   const handleSearch = useCallback(async () => {
     if (!searchQuery.trim()) {
@@ -220,10 +251,9 @@ export function MemoryEditor({ botId, botName, botOnline }: MemoryEditorProps) {
     }
     // QMD content search
     setSearching(true);
-    const data = await apiFetch(botId, { action: "search", query: searchQuery, limit: "15", minScore: "0.1" });
-    setSearchResults((data.results as SearchResult[]) || []);
+    setSearchResults(await searchMemory(searchQuery, 15));
     setSearching(false);
-  }, [botId, searchQuery, searchMode, tree]);
+  }, [searchQuery, searchMode, tree]);
 
   const toggleTier = (key: string) => {
     setExpandedTiers(prev => {

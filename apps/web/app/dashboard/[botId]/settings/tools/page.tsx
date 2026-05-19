@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { useParams } from "next/navigation";
+import { useAgentFetch } from "@/lib/local-api";
 
 interface ToolStats {
   calls: number;
@@ -24,8 +24,7 @@ interface ToolMetadata {
 }
 
 export default function ToolsSettingsPage() {
-  const params = useParams();
-  const botId = params.botId as string;
+  const agentFetch = useAgentFetch();
   const [tools, setTools] = useState<ToolMetadata[]>([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<"all" | "builtin" | "skill" | "external">("all");
@@ -34,17 +33,31 @@ export default function ToolsSettingsPage() {
 
   const fetchTools = useCallback(async () => {
     try {
-      const res = await fetch(`/api/bots/${botId}/tools`);
+      const res = await agentFetch("/api/tools");
       if (res.ok) {
-        const data: { tools?: ToolMetadata[] } = await res.json();
-        setTools(data.tools ?? []);
+        const data: { tools?: Array<Partial<ToolMetadata> & { kind?: string }> } = await res.json();
+        setTools((data.tools ?? []).map((tool) => {
+          const kind = tool.kind ?? "core";
+          return {
+            name: tool.name ?? "",
+            description: tool.description ?? "",
+            permission: tool.permission ?? "read",
+            kind,
+            enabled: tool.enabled !== false,
+            source: kind === "skill" ? "skill" : kind === "external" ? "external" : "builtin",
+            isConcurrencySafe: tool.isConcurrencySafe ?? true,
+            dangerous: tool.dangerous === true,
+            tags: tool.tags ?? [],
+            stats: tool.stats ?? { calls: 0, errors: 0, avgDurationMs: 0, lastCallAt: 0 },
+          };
+        }));
       }
     } catch {
       /* ignore */
     } finally {
       setLoading(false);
     }
-  }, [botId]);
+  }, [agentFetch]);
 
   useEffect(() => {
     void fetchTools();
@@ -52,19 +65,12 @@ export default function ToolsSettingsPage() {
 
   const handleToggle = async (toolName: string, currentEnabled: boolean) => {
     const action = currentEnabled ? "disable" : "enable";
-    await fetch(`/api/bots/${botId}/tools/${encodeURIComponent(toolName)}/${action}`, {
-      method: "PUT",
+    await agentFetch(`/api/tools/${encodeURIComponent(toolName)}/${action}`, {
+      method: "POST",
     });
     setTools((prev) =>
       prev.map((t) => (t.name === toolName ? { ...t, enabled: !currentEnabled } : t)),
     );
-  };
-
-  const handleDelete = async (toolName: string) => {
-    const res = await fetch(`/api/bots/${botId}/tools/${encodeURIComponent(toolName)}`, {
-      method: "DELETE",
-    });
-    if (res.ok) setTools((prev) => prev.filter((t) => t.name !== toolName));
   };
 
   const filtered = tools.filter((t) => {
@@ -243,14 +249,6 @@ export default function ToolsSettingsPage() {
                       {"\uC885\uB958"}: {tool.kind} · {"\uAD8C\uD55C"}:{" "}
                       {tool.permission}
                     </div>
-                    {tool.source !== "builtin" && (
-                      <button
-                        onClick={() => void handleDelete(tool.name)}
-                        className="text-red-500 hover:text-red-600 text-xs transition-colors"
-                      >
-                        {"\uC0AD\uC81C"}
-                      </button>
-                    )}
                   </div>
                 </div>
               )}

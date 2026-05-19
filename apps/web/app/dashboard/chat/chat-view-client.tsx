@@ -317,7 +317,7 @@ export function ChatViewClient({
       return localStorage.getItem(TELEGRAM_BANNER_KEY(botId)) === "1";
     } catch { return false; }
   });
-  const showTelegramBanner = telegramNotConnected && !bannerDismissed;
+  const showTelegramBanner = botId !== "local" && telegramNotConnected && !bannerDismissed;
 
   const handleDismissBanner = useCallback(() => {
     setBannerDismissed(true);
