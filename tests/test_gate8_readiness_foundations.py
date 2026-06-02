@@ -6,37 +6,37 @@ import json
 import pytest
 from fastapi.testclient import TestClient
 
-from openmagi_core_agent.app import create_app
-from openmagi_core_agent.config.env import RuntimeEnvError, parse_runtime_env
-from openmagi_core_agent.config.models import (
+from magi_agent.app import create_app
+from magi_agent.config.env import RuntimeEnvError, parse_runtime_env
+from magi_agent.config.models import (
     BuildInfo,
     PythonContextContinuityConfig,
     PythonGate8ReadinessConfig,
     RuntimeConfig,
 )
-from openmagi_core_agent.evidence.observed_egress import (
+from magi_agent.evidence.observed_egress import (
     LiveEgressTelemetryEvidenceProvider,
     build_gate1a_observed_egress_evidence_provider_from_env,
 )
-from openmagi_core_agent.gates.gate8_readiness import (
+from magi_agent.gates.gate8_readiness import (
     Gate8PreGate8ContinuityReceipt,
 )
-from openmagi_core_agent.gates.pregate8_continuity_canary import (
+from magi_agent.gates.pregate8_continuity_canary import (
     PreGate8ContinuityCanaryEvidence,
 )
-from openmagi_core_agent.runtime.openmagi_runtime import OpenMagiRuntime
-from openmagi_core_agent.shadow.gate5b4c3_live_runner_boundary import (
+from magi_agent.runtime.openmagi_runtime import OpenMagiRuntime
+from magi_agent.shadow.gate5b4c3_live_runner_boundary import (
     Gate5B4C3LiveAdkPrimitives,
 )
-from openmagi_core_agent.shadow.gate5b4c3_shadow_generation_contract import (
+from magi_agent.shadow.gate5b4c3_shadow_generation_contract import (
     Gate5B4C3ShadowGenerationConfig,
 )
-from openmagi_core_agent.shadow.gate5b4c3_shadow_counter_store import (
+from magi_agent.shadow.gate5b4c3_shadow_counter_store import (
     Gate5B4C3ShadowCounterStore,
 )
-from openmagi_core_agent.transport import chat as chat_module
-from openmagi_core_agent.transport.chat import Gate5BUserVisibleChatRouteConfig
-from openmagi_core_agent.transport.shadow_generations import (
+from magi_agent.transport import chat as chat_module
+from magi_agent.transport.chat import Gate5BUserVisibleChatRouteConfig
+from magi_agent.transport.shadow_generations import (
     Gate5B4C3ShadowGenerationRouteConfig,
 )
 
@@ -276,7 +276,7 @@ def test_gate8_readiness_requires_selected_scope_and_verified_continuity_evidenc
                 CORE_AGENT_PYTHON_GATE1A_EGRESS_TELEMETRY_PATH=str(telemetry_path),
                 CORE_AGENT_PYTHON_GATE1A_EGRESS_CORRELATION_MODE="proxy_connect_headers",
                 CORE_AGENT_PYTHON_GATE1A_EGRESS_PROXY_URL=(
-                    "http://gate5b-gemini-egress-proxy.clawy-system.svc.cluster.local:8080"
+                    "http://gate5b-gemini-egress-proxy.magi-system.svc.cluster.local:8080"
                 ),
             )
         )
@@ -421,7 +421,7 @@ def test_gate8_chat_route_projects_selected_metadata_without_high_risk_authority
                 CORE_AGENT_PYTHON_GATE1A_EGRESS_TELEMETRY_PATH=str(telemetry_path),
                 CORE_AGENT_PYTHON_GATE1A_EGRESS_CORRELATION_MODE="proxy_connect_headers",
                 CORE_AGENT_PYTHON_GATE1A_EGRESS_PROXY_URL=(
-                    "http://gate5b-gemini-egress-proxy.clawy-system.svc.cluster.local:8080"
+                    "http://gate5b-gemini-egress-proxy.magi-system.svc.cluster.local:8080"
                 ),
             )
         )
@@ -445,7 +445,7 @@ def test_gate8_chat_route_projects_selected_metadata_without_high_risk_authority
         LiveEgressTelemetryEvidenceProvider(
             telemetry_path,
             proxy_url=(
-                "http://gate5b-gemini-egress-proxy.clawy-system.svc.cluster.local:8080"
+                "http://gate5b-gemini-egress-proxy.magi-system.svc.cluster.local:8080"
             ),
         )
     )
@@ -510,7 +510,7 @@ def test_gate8_live_selected_path_fails_closed_without_correlated_egress(
                 CORE_AGENT_PYTHON_GATE1A_EGRESS_TELEMETRY_PATH=str(telemetry_path),
                 CORE_AGENT_PYTHON_GATE1A_EGRESS_CORRELATION_MODE="proxy_connect_headers",
                 CORE_AGENT_PYTHON_GATE1A_EGRESS_PROXY_URL=(
-                    "http://gate5b-gemini-egress-proxy.clawy-system.svc.cluster.local:8080"
+                    "http://gate5b-gemini-egress-proxy.magi-system.svc.cluster.local:8080"
                 ),
             )
         )
@@ -521,7 +521,7 @@ def test_gate8_live_selected_path_fails_closed_without_correlated_egress(
         LiveEgressTelemetryEvidenceProvider(
             telemetry_path,
             proxy_url=(
-                "http://gate5b-gemini-egress-proxy.clawy-system.svc.cluster.local:8080"
+                "http://gate5b-gemini-egress-proxy.magi-system.svc.cluster.local:8080"
             ),
         )
     )
@@ -599,7 +599,7 @@ def test_gate8_live_selected_path_reuses_egress_proxy_correlation_without_gate1a
                 CORE_AGENT_PYTHON_GATE1A_EGRESS_TELEMETRY_PATH=str(telemetry_path),
                 CORE_AGENT_PYTHON_GATE1A_EGRESS_CORRELATION_MODE="proxy_connect_headers",
                 CORE_AGENT_PYTHON_GATE1A_EGRESS_PROXY_URL=(
-                    "http://gate5b-gemini-egress-proxy.clawy-system.svc.cluster.local:8080"
+                    "http://gate5b-gemini-egress-proxy.magi-system.svc.cluster.local:8080"
                 ),
             )
         )
@@ -610,7 +610,7 @@ def test_gate8_live_selected_path_reuses_egress_proxy_correlation_without_gate1a
         LiveEgressTelemetryEvidenceProvider(
             telemetry_path,
             proxy_url=(
-                "http://gate5b-gemini-egress-proxy.clawy-system.svc.cluster.local:8080"
+                "http://gate5b-gemini-egress-proxy.magi-system.svc.cluster.local:8080"
             ),
         )
     )
@@ -707,7 +707,7 @@ def test_gate8_rejects_attempted_high_risk_authority_env_flags(tmp_path) -> None
                 CORE_AGENT_PYTHON_GATE1A_EGRESS_TELEMETRY_PATH=str(telemetry_path),
                 CORE_AGENT_PYTHON_GATE1A_EGRESS_CORRELATION_MODE="proxy_connect_headers",
                 CORE_AGENT_PYTHON_GATE1A_EGRESS_PROXY_URL=(
-                    "http://gate5b-gemini-egress-proxy.clawy-system.svc.cluster.local:8080"
+                    "http://gate5b-gemini-egress-proxy.magi-system.svc.cluster.local:8080"
                 ),
                 CORE_AGENT_PYTHON_GATE8_SELECTED_AUTHORITY_ROUTE_ATTACHED="true",
                 CORE_AGENT_PYTHON_GATE8_SELECTED_AUTHORITY_PRODUCTION_ROUTE_ATTACHED="true",
@@ -822,15 +822,15 @@ def test_gate8_readiness_import_boundary_is_pure_contract_only() -> None:
     import sys
 
     before = set(sys.modules)
-    module = importlib.import_module("openmagi_core_agent.gates.gate8_readiness")
+    module = importlib.import_module("magi_agent.gates.gate8_readiness")
     after = set(sys.modules)
 
     forbidden = {
         "google.adk",
         "google.genai",
-        "openmagi_core_agent.toolhost",
-        "openmagi_core_agent.memory.providers",
-        "openmagi_core_agent.transport.chat",
+        "magi_agent.toolhost",
+        "magi_agent.memory.providers",
+        "magi_agent.transport.chat",
     }
     assert hasattr(module, "gate8_readiness_health_metadata")
     assert forbidden.isdisjoint(after - before)

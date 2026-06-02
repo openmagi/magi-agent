@@ -19,8 +19,8 @@ def _run_fresh_python(script: str) -> subprocess.CompletedProcess[str]:
 @pytest.mark.parametrize(
     "module_name",
     (
-        "openmagi_core_agent.shadow.gate3b_bundle",
-        "openmagi_core_agent.shadow.gate3b_ingest",
+        "magi_agent.shadow.gate3b_bundle",
+        "magi_agent.shadow.gate3b_ingest",
     ),
 )
 def test_gate3b_modules_do_not_import_forbidden_production_surfaces(module_name: str) -> None:
@@ -33,34 +33,34 @@ module = importlib.import_module({module_name!r})
 assert module is not None
 
 forbidden_prefixes = (
-    "openmagi_core_agent.transport.chat",
-    "openmagi_core_agent.transport.tools",
-    "openmagi_core_agent.transport.plugins",
-    "openmagi_core_agent.channels",
-    "openmagi_core_agent.runtime.openmagi_runtime",
-    "openmagi_core_agent.runtime.turn_controller",
-    "openmagi_core_agent.routing",
-    "openmagi_core_agent.tools.dispatcher",
-    "openmagi_core_agent.workspace",
-    "openmagi_core_agent.deploy",
-    "openmagi_core_agent.provisioning",
-    "openmagi_core_agent.k8s",
-    "openmagi_core_agent.telegram",
-    "openmagi_core_agent.api",
-    "openmagi_core_agent.proxy",
-    "openmagi_core_agent.dashboard",
-    "openmagi_core_agent.database",
-    "openmagi_core_agent.billing",
-    "openmagi_core_agent.auth",
-    "openmagi_core_agent.model_routing",
-    "openmagi_core_agent.missions",
-    "openmagi_core_agent.scheduler",
-    "openmagi_core_agent.children",
-    "openmagi_core_agent.typescript_runtime",
-    "openmagi_core_agent.ts_runtime",
-    "openmagi_core_agent.signed_ack",
-    "openmagi_core_agent.evidence.extractors",
-    "openmagi_core_agent.adk_bridge.runner_adapter",
+    "magi_agent.transport.chat",
+    "magi_agent.transport.tools",
+    "magi_agent.transport.plugins",
+    "magi_agent.channels",
+    "magi_agent.runtime.openmagi_runtime",
+    "magi_agent.runtime.turn_controller",
+    "magi_agent.routing",
+    "magi_agent.tools.dispatcher",
+    "magi_agent.workspace",
+    "magi_agent.deploy",
+    "magi_agent.provisioning",
+    "magi_agent.k8s",
+    "magi_agent.telegram",
+    "magi_agent.api",
+    "magi_agent.proxy",
+    "magi_agent.dashboard",
+    "magi_agent.database",
+    "magi_agent.billing",
+    "magi_agent.auth",
+    "magi_agent.model_routing",
+    "magi_agent.missions",
+    "magi_agent.scheduler",
+    "magi_agent.children",
+    "magi_agent.typescript_runtime",
+    "magi_agent.ts_runtime",
+    "magi_agent.signed_ack",
+    "magi_agent.evidence.extractors",
+    "magi_agent.adk_bridge.runner_adapter",
 )
 loaded = [
     loaded_name
@@ -81,8 +81,8 @@ if loaded:
 def test_gate3b_modules_do_not_import_or_call_shell_code_execution_helpers() -> None:
     root = Path(__file__).parents[1]
     module_paths = (
-        root / "openmagi_core_agent" / "shadow" / "gate3b_bundle.py",
-        root / "openmagi_core_agent" / "shadow" / "gate3b_ingest.py",
+        root / "magi_agent" / "shadow" / "gate3b_bundle.py",
+        root / "magi_agent" / "shadow" / "gate3b_ingest.py",
     )
     forbidden_imports = (
         "subprocess",
@@ -112,8 +112,8 @@ def test_gate3b_conversion_does_not_import_gate3a_or_adk_runner() -> None:
 import sys
 from pathlib import Path
 
-from openmagi_core_agent.shadow.gate3b_bundle import load_gate3b_live_duplicate_bundle
-from openmagi_core_agent.shadow.gate3b_ingest import (
+from magi_agent.shadow.gate3b_bundle import load_gate3b_live_duplicate_bundle
+from magi_agent.shadow.gate3b_ingest import (
     convert_gate3b_live_duplicate_to_gate3a_recorded_bundle,
 )
 
@@ -126,11 +126,11 @@ handoff = convert_gate3b_live_duplicate_to_gate3a_recorded_bundle(bundle)
 assert handoff.recorded_bundle_payload["schemaVersion"] == "gate3a.recordedBundle.v1"
 
 forbidden_modules = (
-    "openmagi_core_agent.adk_bridge.runner_adapter",
+    "magi_agent.adk_bridge.runner_adapter",
     "google.adk.runners",
 )
 forbidden_prefixes = (
-    "openmagi_core_agent.shadow.gate3a",
+    "magi_agent.shadow.gate3a",
 )
 loaded = [
     loaded_name

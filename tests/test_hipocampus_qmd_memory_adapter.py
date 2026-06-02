@@ -8,12 +8,12 @@ from pathlib import Path
 
 import pytest
 
-from openmagi_core_agent.memory.adapters.hipocampus_readonly import (
+from magi_agent.memory.adapters.hipocampus_readonly import (
     HipocampusReadOnlyAdapter,
     HipocampusReadOnlyConfig,
 )
-from openmagi_core_agent.memory.contracts import RecallRequest, UnsupportedMemoryOperationError
-from openmagi_core_agent.memory.policy import MemoryPolicy
+from magi_agent.memory.contracts import RecallRequest, UnsupportedMemoryOperationError
+from magi_agent.memory.policy import MemoryPolicy
 
 
 FAKE_GITHUB_PAT = "github_" + "pat_" + "not_a_real_token_value"
@@ -233,21 +233,21 @@ def test_hipocampus_qmd_adapter_import_boundary_is_provider_and_network_free() -
 import importlib
 import sys
 
-importlib.import_module("openmagi_core_agent.memory.adapters.hipocampus_readonly")
-importlib.import_module("openmagi_core_agent.memory.adapters")
+importlib.import_module("magi_agent.memory.adapters.hipocampus_readonly")
+importlib.import_module("magi_agent.memory.adapters")
 
 forbidden_prefixes = (
     "google.adk",
-    "openmagi_core_agent.adk_bridge.runner_adapter",
-    "openmagi_core_agent.adk_bridge.local_runner",
-    "openmagi_core_agent.adk_bridge.memory_service",
-    "openmagi_core_agent.app",
-    "openmagi_core_agent.transport.chat",
-    "openmagi_core_agent.routes",
-    "openmagi_core_agent.plugins.agentmemory",
-    "openmagi_core_agent.services.memory",
-    "openmagi_core_agent.hipocampus",
-    "openmagi_core_agent.qmd",
+    "magi_agent.adk_bridge.runner_adapter",
+    "magi_agent.adk_bridge.local_runner",
+    "magi_agent.adk_bridge.memory_service",
+    "magi_agent.app",
+    "magi_agent.transport.chat",
+    "magi_agent.routes",
+    "magi_agent.plugins.agentmemory",
+    "magi_agent.services.memory",
+    "magi_agent.hipocampus",
+    "magi_agent.qmd",
     "supabase",
     "psycopg",
     "asyncpg",

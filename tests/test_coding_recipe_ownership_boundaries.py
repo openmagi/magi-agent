@@ -6,11 +6,11 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from openmagi_core_agent.harness.coding.ownership_projection import (
+from magi_agent.harness.coding.ownership_projection import (
     CodingRecipeOwnershipProjection,
     project_coding_recipe_ownership,
 )
-from openmagi_core_agent.recipes.first_party.coding.ownership import (
+from magi_agent.recipes.first_party.coding.ownership import (
     CodingMechanicOwnership,
     REQUIRED_CODING_MECHANICS,
     build_coding_recipe_ownership_manifest,
@@ -101,7 +101,7 @@ def test_core_references_are_generic_substrate_names_only() -> None:
     assert "ToolHost" not in _rendered_projection()
     assert "dispatcher" not in _rendered_projection()
     assert "registry" not in _rendered_projection()
-    assert "openmagi_core_agent.runtime" not in _rendered_projection()
+    assert "magi_agent.runtime" not in _rendered_projection()
 
 
 def test_manifest_rejects_live_attachment_and_raw_policy_refs() -> None:
@@ -132,7 +132,7 @@ def test_exported_projection_rejects_direct_private_or_raw_manifest_id() -> None
     for manifest_id in (
         "/Users/kevin/private/raw_prompt",
         "ToolHost:dispatcher",
-        "openmagi_core_agent.runtime",
+        "magi_agent.runtime",
     ):
         with pytest.raises(ValidationError):
             CodingRecipeOwnershipProjection.model_validate(
@@ -166,11 +166,11 @@ def test_pr1_matrix_row_is_marked_covered_by_ownership_files_and_test() -> None:
     assert row["defaultOff"] is True
     assert row["liveAuthorityAllowed"] is False
     assert row["coveredByFiles"] == [
-        "openmagi_core_agent/recipes/coding_mutation.py",
-        "openmagi_core_agent/recipes/coding_subagents.py",
-        "openmagi_core_agent/coding/meta_adapter.py",
-        "openmagi_core_agent/recipes/first_party/coding/ownership.py",
-        "openmagi_core_agent/harness/coding/ownership_projection.py",
+        "magi_agent/recipes/coding_mutation.py",
+        "magi_agent/recipes/coding_subagents.py",
+        "magi_agent/coding/meta_adapter.py",
+        "magi_agent/recipes/first_party/coding/ownership.py",
+        "magi_agent/harness/coding/ownership_projection.py",
     ]
     assert row["coveredByTests"] == [
         "tests/recipes/test_coding_mutation_recipe.py",

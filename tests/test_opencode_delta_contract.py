@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from openmagi_core_agent.shadow.opencode_delta_contract import (
+from magi_agent.shadow.opencode_delta_contract import (
     OPENCODE_LATEST_COMMIT,
     REQUIRED_OPENCODE_DELTA_ROWS,
     OpenCodeDeltaMatrix,
@@ -64,8 +64,8 @@ def test_opencode_delta_matrix_covers_required_rows_with_safe_invariants() -> No
 
     assert rows["snapshot_pre_stream_digest_boundary"].status == "covered"
     assert rows["snapshot_pre_stream_digest_boundary"].openmagi_target == (
-        "openmagi_core_agent/runtime/provider_receipts.py",
-        "openmagi_core_agent/runtime/policy_snapshot.py",
+        "magi_agent/runtime/provider_receipts.py",
+        "magi_agent/runtime/policy_snapshot.py",
         "tests/test_live_provider_receipts.py",
     )
 
@@ -75,7 +75,7 @@ def test_opencode_delta_matrix_covers_required_rows_with_safe_invariants() -> No
         "PR-A provider adapter/harness contract"
     )
     assert rows["provider_compatibility_fixtures"].openmagi_target == (
-        "openmagi_core_agent/providers/provider_compat.py",
+        "magi_agent/providers/provider_compat.py",
         "tests/fixtures/provider_compat/provider_cases.json",
         "tests/test_provider_compat.py",
         "docs/superpowers/plans/2026-05-20-python-adk-first-party-live-provider-quality-plan.md",
@@ -103,7 +103,7 @@ def test_opencode_delta_matrix_covers_required_rows_with_safe_invariants() -> No
     assert rows["runtime_event_replay_fence"].activation_gate == (
         "merged-gate-2-readiness-foundation"
     )
-    assert "openmagi_core_agent/gates/gate2_readiness.py" in rows[
+    assert "magi_agent/gates/gate2_readiness.py" in rows[
         "runtime_event_replay_fence"
     ].openmagi_target
     assert "tests/test_gate2_readiness_foundations.py" in rows[
@@ -206,7 +206,7 @@ def test_opencode_delta_contract_import_boundary_stays_runtime_free() -> None:
 import sys
 from pathlib import Path
 
-from openmagi_core_agent.shadow.opencode_delta_contract import (
+from magi_agent.shadow.opencode_delta_contract import (
     load_opencode_delta_matrix,
     project_opencode_delta_matrix,
 )
@@ -217,17 +217,17 @@ project_opencode_delta_matrix(matrix)
 
 forbidden = (
     'google.adk.runners',
-    'openmagi_core_agent.adk_bridge.local_runner',
-    'openmagi_core_agent.adk_bridge.runner_adapter',
-    'openmagi_core_agent.adk_bridge.tool_adapter',
-    'openmagi_core_agent.tools.dispatcher',
-    'openmagi_core_agent.tools.registry',
-    'openmagi_core_agent.plugins.manager',
-    'openmagi_core_agent.plugins.native_catalog',
-    'openmagi_core_agent.memory',
-    'openmagi_core_agent.app',
-    'openmagi_core_agent.transport.chat',
-    'openmagi_core_agent.routes',
+    'magi_agent.adk_bridge.local_runner',
+    'magi_agent.adk_bridge.runner_adapter',
+    'magi_agent.adk_bridge.tool_adapter',
+    'magi_agent.tools.dispatcher',
+    'magi_agent.tools.registry',
+    'magi_agent.plugins.manager',
+    'magi_agent.plugins.native_catalog',
+    'magi_agent.memory',
+    'magi_agent.app',
+    'magi_agent.transport.chat',
+    'magi_agent.routes',
 )
 loaded = [name for name in forbidden if name in sys.modules]
 if loaded:

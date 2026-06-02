@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from openmagi_core_agent.plugins.shell_testrun_safe_subset import (
+from magi_agent.plugins.shell_testrun_safe_subset import (
     ShellCommandSafetyDecision,
     ShellTestRunSafeSubsetBinding,
     ShellTestRunSafeSubsetConfig,
@@ -555,7 +555,7 @@ def test_pr11_output_budget_projection_rejects_forged_private_keys() -> None:
 
 
 def test_pr11_package_export_is_lazy_but_available() -> None:
-    import openmagi_core_agent.plugins as plugins
+    import magi_agent.plugins as plugins
 
     assert plugins.ShellTestRunSafeSubsetBinding is ShellTestRunSafeSubsetBinding
     assert plugins.ShellCommandSafetyDecision is ShellCommandSafetyDecision
@@ -564,7 +564,7 @@ def test_pr11_package_export_is_lazy_but_available() -> None:
 def test_pr11_source_has_no_live_command_or_adk_surfaces() -> None:
     source = (
         Path(__file__).parents[1]
-        / "openmagi_core_agent"
+        / "magi_agent"
         / "plugins"
         / "shell_testrun_safe_subset.py"
     ).read_text(encoding="utf-8")
@@ -586,15 +586,15 @@ def test_pr11_source_has_no_live_command_or_adk_surfaces() -> None:
 def test_pr11_clean_import_does_not_load_live_runtime_or_transport_modules() -> None:
     code = """
 import sys
-import openmagi_core_agent.plugins.shell_testrun_safe_subset
+import magi_agent.plugins.shell_testrun_safe_subset
 
 forbidden = (
-    'openmagi_core_agent.runtime',
-    'openmagi_core_agent.runtime.control',
-    'openmagi_core_agent.transport',
-    'openmagi_core_agent.transport.tool_preview',
-    'openmagi_core_agent.tools.kernel',
-    'openmagi_core_agent.tools.dispatcher',
+    'magi_agent.runtime',
+    'magi_agent.runtime.control',
+    'magi_agent.transport',
+    'magi_agent.transport.tool_preview',
+    'magi_agent.tools.kernel',
+    'magi_agent.tools.dispatcher',
     'google.adk.runners',
     'google.adk.tools',
 )

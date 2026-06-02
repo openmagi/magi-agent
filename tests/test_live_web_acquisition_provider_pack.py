@@ -62,7 +62,7 @@ class FakeWebContentProvider:
 
 
 def _config(**overrides: object) -> object:
-    from openmagi_core_agent.web_acquisition.live_provider_pack import (
+    from magi_agent.web_acquisition.live_provider_pack import (
         WebAcquisitionProviderPackConfig,
     )
 
@@ -76,7 +76,7 @@ def _config(**overrides: object) -> object:
 
 
 def _request(**overrides: object) -> object:
-    from openmagi_core_agent.web_acquisition.live_provider_pack import (
+    from magi_agent.web_acquisition.live_provider_pack import (
         WebAcquisitionProviderRequest,
     )
 
@@ -94,7 +94,7 @@ def _request(**overrides: object) -> object:
 
 
 def test_web_provider_pack_default_disabled_blocks_all_operations_without_provider_calls() -> None:
-    from openmagi_core_agent.web_acquisition.live_provider_pack import (
+    from magi_agent.web_acquisition.live_provider_pack import (
         WebAcquisitionProviderPack,
         WebAcquisitionProviderPackConfig,
     )
@@ -114,7 +114,7 @@ def test_web_provider_pack_default_disabled_blocks_all_operations_without_provid
 
 
 def test_blank_search_query_returns_deterministic_disabled_or_blocked_result() -> None:
-    from openmagi_core_agent.web_acquisition.live_provider_pack import (
+    from magi_agent.web_acquisition.live_provider_pack import (
         WebAcquisitionProviderPack,
         WebAcquisitionProviderPackConfig,
     )
@@ -139,7 +139,7 @@ def test_blank_search_query_returns_deterministic_disabled_or_blocked_result() -
 
 
 def test_fake_search_provider_returns_stable_source_records_and_receipts() -> None:
-    from openmagi_core_agent.web_acquisition.live_provider_pack import (
+    from magi_agent.web_acquisition.live_provider_pack import (
         WebAcquisitionProviderPack,
     )
 
@@ -163,7 +163,7 @@ def test_fake_search_provider_returns_stable_source_records_and_receipts() -> No
 
 
 def test_fetch_reader_and_browser_fallback_record_opened_proof_without_raw_injection() -> None:
-    from openmagi_core_agent.web_acquisition.live_provider_pack import (
+    from magi_agent.web_acquisition.live_provider_pack import (
         WebAcquisitionProviderPack,
     )
 
@@ -204,7 +204,7 @@ def test_fetch_reader_and_browser_fallback_record_opened_proof_without_raw_injec
 
 
 def test_blocked_url_classes_do_not_call_provider() -> None:
-    from openmagi_core_agent.web_acquisition.live_provider_pack import (
+    from magi_agent.web_acquisition.live_provider_pack import (
         WebAcquisitionProviderPack,
     )
 
@@ -229,7 +229,7 @@ def test_blocked_url_classes_do_not_call_provider() -> None:
 
 
 def test_citation_verifier_requires_opened_source_proof() -> None:
-    from openmagi_core_agent.web_acquisition.live_provider_pack import (
+    from magi_agent.web_acquisition.live_provider_pack import (
         WebAcquisitionProviderPack,
         require_opened_source_proof,
     )
@@ -252,7 +252,7 @@ def test_citation_verifier_requires_opened_source_proof() -> None:
 
 
 def test_provider_denial_and_timeout_fail_open_without_source_claims() -> None:
-    from openmagi_core_agent.web_acquisition.live_provider_pack import (
+    from magi_agent.web_acquisition.live_provider_pack import (
         WebAcquisitionProviderPack,
     )
 
@@ -300,13 +300,13 @@ def test_live_web_acquisition_provider_pack_import_boundary() -> None:
 import importlib
 import sys
 
-importlib.import_module("openmagi_core_agent.web_acquisition.live_provider_pack")
+importlib.import_module("magi_agent.web_acquisition.live_provider_pack")
 forbidden_prefixes = (
     "google.adk",
     "google.genai",
-    "openmagi_core_agent.transport",
-    "openmagi_core_agent.routing",
-    "openmagi_core_agent.browser.live_provider_pack",
+    "magi_agent.transport",
+    "magi_agent.routing",
+    "magi_agent.browser.live_provider_pack",
     "subprocess",
     "kubernetes",
     "requests",

@@ -8,15 +8,15 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from openmagi_core_agent.shadow.gate3b_local_consumer import (
+from magi_agent.shadow.gate3b_local_consumer import (
     Gate3BLocalConsumedBundle,
     Gate3BLocalConsumerConfig,
     consume_gate3b_local_files,
 )
-from openmagi_core_agent.shadow.gate3b_local_report import (
+from magi_agent.shadow.gate3b_local_report import (
     build_gate3b_local_comparison_reports,
 )
-from openmagi_core_agent.shadow.gate3b_metrics import (
+from magi_agent.shadow.gate3b_metrics import (
     Gate3BLocalMetricAttachmentFlags,
     Gate3BLocalMetricRecord,
     build_gate3b_local_metrics_snapshot,
@@ -155,7 +155,7 @@ def test_unknown_metric_names_are_rejected() -> None:
         "private_tool_preview: raw",
         "/workspace/bot-a/file.txt",
         "/data/bots/bot-a/transcript.jsonl",
-        "https://clawy.pro/admin/bot-a",
+        "https://openmagi.ai/admin/bot-a",
         "bot-prod-123",
         "session-key-123",
     ),
@@ -272,7 +272,7 @@ def test_metric_digest_fields_must_be_digests_not_raw_ids() -> None:
 
 
 def test_ordering_digest_fields_must_be_full_sha256_digests() -> None:
-    from openmagi_core_agent.shadow.gate3b_metrics import Gate3BLocalOrderingStats
+    from magi_agent.shadow.gate3b_metrics import Gate3BLocalOrderingStats
 
     with pytest.raises(ValidationError):
         Gate3BLocalOrderingStats(

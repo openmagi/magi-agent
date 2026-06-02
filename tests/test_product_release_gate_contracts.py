@@ -13,7 +13,7 @@ from pydantic import ConfigDict
 from pydantic import ValidationError
 from pydantic_core import PydanticSerializationError
 
-from openmagi_core_agent.evals.release_gates import (
+from magi_agent.evals.release_gates import (
     ADK_EVALUATION_BOUNDARY,
     CanaryProofRef,
     DigestOnlyProjection,
@@ -33,7 +33,7 @@ from openmagi_core_agent.evals.release_gates import (
 
 
 PYTHON_ROOT = Path(__file__).parents[1]
-MODULE_PATH = PYTHON_ROOT / "openmagi_core_agent" / "evals" / "release_gates.py"
+MODULE_PATH = PYTHON_ROOT / "magi_agent" / "evals" / "release_gates.py"
 
 
 def _thresholds() -> EvalThresholds:
@@ -1044,16 +1044,16 @@ def test_release_gate_contract_documents_local_adk_evaluation_boundary_without_i
             """
 import importlib
 import sys
-module = importlib.import_module("openmagi_core_agent.evals.release_gates")
+module = importlib.import_module("magi_agent.evals.release_gates")
 assert module.ADK_EVALUATION_BOUNDARY["adkEvaluationImported"] is False
 forbidden = (
     "google.adk.evaluation",
     "google.adk.evaluators",
     "google.adk.runners",
     "google.adk.models",
-    "openmagi_core_agent.transport",
-    "openmagi_core_agent.tools",
-    "openmagi_core_agent.runtime.control",
+    "magi_agent.transport",
+    "magi_agent.tools",
+    "magi_agent.runtime.control",
 )
 loaded = [name for name in sys.modules if any(name == item or name.startswith(f"{item}.") for item in forbidden)]
 if loaded:
@@ -1084,12 +1084,12 @@ def test_release_gate_source_has_no_model_network_tool_or_live_runtime_imports()
         "from socket",
         "import subprocess",
         "from subprocess",
-        "import openmagi_core_agent.transport",
-        "from openmagi_core_agent.transport",
-        "import openmagi_core_agent.tools",
-        "from openmagi_core_agent.tools",
-        "import openmagi_core_agent.runtime.control",
-        "from openmagi_core_agent.runtime.control",
+        "import magi_agent.transport",
+        "from magi_agent.transport",
+        "import magi_agent.tools",
+        "from magi_agent.tools",
+        "import magi_agent.runtime.control",
+        "from magi_agent.runtime.control",
         "Runner(",
         "FunctionTool",
         "ToolHost",
@@ -1099,8 +1099,8 @@ def test_release_gate_source_has_no_model_network_tool_or_live_runtime_imports()
     for fragment in forbidden_fragments:
         assert fragment not in source
 
-    module = importlib.import_module("openmagi_core_agent.evals.release_gates")
-    assert module.__name__ == "openmagi_core_agent.evals.release_gates"
+    module = importlib.import_module("magi_agent.evals.release_gates")
+    assert module.__name__ == "magi_agent.evals.release_gates"
 
 
 def test_release_gate_validation_errors_do_not_echo_private_or_secret_refs() -> None:

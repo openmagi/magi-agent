@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 
-from openmagi_core_agent.evidence.tool_boundary import (
+from magi_agent.evidence.tool_boundary import (
     ToolEvidenceBoundary,
     build_denied_tool_error_evidence,
     build_tool_call_evidence,

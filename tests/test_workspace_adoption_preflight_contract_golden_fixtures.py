@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from openmagi_core_agent.shadow.workspace_adoption_preflight_contract import (
+from magi_agent.shadow.workspace_adoption_preflight_contract import (
     WorkspaceAdoptionPreflightAttachmentFlags,
     WorkspaceAdoptionPreflightFixture,
     load_workspace_adoption_preflight_fixture,
@@ -355,26 +355,26 @@ def test_workspace_adoption_preflight_attachment_flags_remain_false_under_constr
 
 
 def test_workspace_adoption_preflight_import_boundary_stays_runtime_free() -> None:
-    module_name = "openmagi_core_agent.shadow.workspace_adoption_preflight_contract"
+    module_name = "magi_agent.shadow.workspace_adoption_preflight_contract"
     forbidden = (
         "google.adk",
-        "openmagi_core_agent.adk_bridge",
-        "openmagi_core_agent.tools.dispatcher",
-        "openmagi_core_agent.tools.registry",
-        "openmagi_core_agent.plugins.agentmemory",
-        "openmagi_core_agent.memory",
-        "openmagi_core_agent.services.memory",
-        "openmagi_core_agent.hipocampus",
-        "openmagi_core_agent.qmd",
-        "openmagi_core_agent.app",
-        "openmagi_core_agent.transport.chat",
-        "openmagi_core_agent.routes",
+        "magi_agent.adk_bridge",
+        "magi_agent.tools.dispatcher",
+        "magi_agent.tools.registry",
+        "magi_agent.plugins.agentmemory",
+        "magi_agent.memory",
+        "magi_agent.services.memory",
+        "magi_agent.hipocampus",
+        "magi_agent.qmd",
+        "magi_agent.app",
+        "magi_agent.transport.chat",
+        "magi_agent.routes",
     )
     removed_modules: dict[str, object] = {}
     for loaded_name in tuple(sys.modules):
         if (
-            loaded_name == "openmagi_core_agent"
-            or loaded_name.startswith("openmagi_core_agent.")
+            loaded_name == "magi_agent"
+            or loaded_name.startswith("magi_agent.")
             or loaded_name == "google.adk"
             or loaded_name.startswith("google.adk.")
         ):
@@ -401,8 +401,8 @@ def test_workspace_adoption_preflight_import_boundary_stays_runtime_free() -> No
     finally:
         for loaded_name in tuple(sys.modules):
             if (
-                loaded_name == "openmagi_core_agent"
-                or loaded_name.startswith("openmagi_core_agent.")
+                loaded_name == "magi_agent"
+                or loaded_name.startswith("magi_agent.")
                 or loaded_name == "google.adk"
                 or loaded_name.startswith("google.adk.")
             ):

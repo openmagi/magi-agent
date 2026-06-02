@@ -7,19 +7,19 @@ import sys
 from google.adk.events import Event
 from google.genai import types
 
-from openmagi_core_agent.adk_bridge.event_adapter import OpenMagiEventBridge
-from openmagi_core_agent.memory.projection import project_turn_summary_for_memory
-from openmagi_core_agent.runtime.control import (
+from magi_agent.adk_bridge.event_adapter import OpenMagiEventBridge
+from magi_agent.memory.projection import project_turn_summary_for_memory
+from magi_agent.runtime.control import (
     ControlRequestCreatedEvent,
     ControlRequestResolvedEvent,
 )
-from openmagi_core_agent.runtime.events import (
+from magi_agent.runtime.events import (
     NormalizedEvent,
     NormalizedProjectionContract,
     normalized_events_to_transcript,
     transcript_entries_to_agent_events,
 )
-from openmagi_core_agent.runtime.transcript import (
+from magi_agent.runtime.transcript import (
     ControlEventTranscriptEntry,
     ToolCallEntry,
     ToolResultEntry,
@@ -687,8 +687,8 @@ import importlib
 import json
 import sys
 
-importlib.import_module("openmagi_core_agent.runtime.events")
-importlib.import_module("openmagi_core_agent.memory.projection")
+importlib.import_module("magi_agent.runtime.events")
+importlib.import_module("magi_agent.memory.projection")
 
 print(json.dumps(sorted(sys.modules)))
 """

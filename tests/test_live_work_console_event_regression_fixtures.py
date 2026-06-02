@@ -5,10 +5,10 @@ from collections.abc import Iterable, Mapping
 from pathlib import Path
 from typing import Any
 
-from openmagi_core_agent.runtime.work_console_snapshot import (
+from magi_agent.runtime.work_console_snapshot import (
     build_work_console_snapshot,
 )
-from openmagi_core_agent.transport.sse import InMemorySseWriter
+from magi_agent.transport.sse import InMemorySseWriter
 
 
 FIXTURE = (

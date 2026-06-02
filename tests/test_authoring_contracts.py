@@ -6,8 +6,8 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from openmagi_core_agent.authoring import contracts as authoring_contracts
-from openmagi_core_agent.authoring.contracts import (
+from magi_agent.authoring import contracts as authoring_contracts
+from magi_agent.authoring.contracts import (
     BuilderAgentSession,
     BuilderAnswer,
     BuilderGap,

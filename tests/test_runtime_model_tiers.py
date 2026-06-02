@@ -3,7 +3,7 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
-from openmagi_core_agent.runtime.model_tiers import (
+from magi_agent.runtime.model_tiers import (
     ModelTierPolicy,
     ModelTierRegistry,
 )

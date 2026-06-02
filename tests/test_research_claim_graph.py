@@ -9,7 +9,7 @@ import pytest
 from pydantic import ValidationError
 
 from runtime_issuance_support import issue_test_runtime_authority
-from openmagi_core_agent.research.claim_graph import (
+from magi_agent.research.claim_graph import (
     ResearchClaimGraph,
     ResearchClaimNode,
     ResearchClaimSupportRef,
@@ -416,29 +416,29 @@ def test_mutated_support_refs_are_revalidated_before_projection() -> None:
 
 
 def test_claim_graph_stays_research_local_without_adk_or_generic_runtime_imports() -> None:
-    module = importlib.import_module("openmagi_core_agent.research.claim_graph")
+    module = importlib.import_module("magi_agent.research.claim_graph")
     source = inspect.getsource(module)
     source_for_layer_check = source.replace(
-        "from openmagi_core_agent.evidence.runtime_issuance import (",
+        "from magi_agent.evidence.runtime_issuance import (",
         "from allowed_domain_neutral_runtime_issuance import (",
     )
 
-    assert module.__name__ == "openmagi_core_agent.research.claim_graph"
+    assert module.__name__ == "magi_agent.research.claim_graph"
     graph = ResearchClaimGraph(claimGraphId="claim-graph:adk", claims=())
     assert "ArtifactService" in graph.adk_usage_notes
     assert "Evaluation" in graph.adk_usage_notes
     assert "runtime_issuance" in source
-    assert ResearchClaimNode.__module__.startswith("openmagi_core_agent.research")
-    assert ResearchClaimSupportRef.__module__.startswith("openmagi_core_agent.research")
+    assert ResearchClaimNode.__module__.startswith("magi_agent.research")
+    assert ResearchClaimSupportRef.__module__.startswith("magi_agent.research")
     forbidden_imports = (
-        "from openmagi_core_agent.evidence",
-        "import openmagi_core_agent.evidence",
-        "from openmagi_core_agent.harness",
-        "import openmagi_core_agent.harness",
-        "from openmagi_core_agent.runtime",
-        "import openmagi_core_agent.runtime",
-        "from openmagi_core_agent.tools",
-        "import openmagi_core_agent.tools",
+        "from magi_agent.evidence",
+        "import magi_agent.evidence",
+        "from magi_agent.harness",
+        "import magi_agent.harness",
+        "from magi_agent.runtime",
+        "import magi_agent.runtime",
+        "from magi_agent.tools",
+        "import magi_agent.tools",
         "from google.adk",
         "import google.adk",
     )

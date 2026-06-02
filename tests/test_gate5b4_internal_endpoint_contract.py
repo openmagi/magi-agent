@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from openmagi_core_agent.shadow.gate5b4_internal_endpoint_contract import (
+from magi_agent.shadow.gate5b4_internal_endpoint_contract import (
     Gate5B4EndpointAuthorityFlags,
     Gate5B4EndpointContractConfig,
     Gate5B4InternalEndpointContract,

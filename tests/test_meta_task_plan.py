@@ -3,7 +3,7 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
-from openmagi_core_agent.meta_orchestration.task_plan import (
+from magi_agent.meta_orchestration.task_plan import (
     MetaChildContextBudget,
     MetaChildTaskSpec,
     MetaTaskPlan,

@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from openmagi_core_agent.shadow.office_automation_contract import (
+from magi_agent.shadow.office_automation_contract import (
     OfficeAutomationAttachmentFlags,
     OfficeAutomationContractFixture,
     load_office_automation_contract_fixture,
@@ -255,7 +255,7 @@ def test_office_automation_import_boundary_stays_runtime_free() -> None:
 import sys
 from pathlib import Path
 
-from openmagi_core_agent.shadow.office_automation_contract import (
+from magi_agent.shadow.office_automation_contract import (
     load_office_automation_contract_fixture,
     project_office_automation_contract_fixture,
 )
@@ -266,22 +266,22 @@ project_office_automation_contract_fixture(fixture)
 
 forbidden = (
     'google.adk.runners',
-    'openmagi_core_agent.adk_bridge.local_runner',
-    'openmagi_core_agent.adk_bridge.runner_adapter',
-    'openmagi_core_agent.adk_bridge.tool_adapter',
-    'openmagi_core_agent.tools.dispatcher',
-    'openmagi_core_agent.tools.registry',
-    'openmagi_core_agent.plugins.agentmemory',
-    'openmagi_core_agent.memory',
-    'openmagi_core_agent.memory.hipocampus',
-    'openmagi_core_agent.memory.qmd',
-    'openmagi_core_agent.routes',
-    'openmagi_core_agent.proxy',
-    'openmagi_core_agent.dashboard',
-    'openmagi_core_agent.db',
-    'openmagi_core_agent.k8s',
-    'openmagi_core_agent.telegram',
-    'openmagi_core_agent.canary',
+    'magi_agent.adk_bridge.local_runner',
+    'magi_agent.adk_bridge.runner_adapter',
+    'magi_agent.adk_bridge.tool_adapter',
+    'magi_agent.tools.dispatcher',
+    'magi_agent.tools.registry',
+    'magi_agent.plugins.agentmemory',
+    'magi_agent.memory',
+    'magi_agent.memory.hipocampus',
+    'magi_agent.memory.qmd',
+    'magi_agent.routes',
+    'magi_agent.proxy',
+    'magi_agent.dashboard',
+    'magi_agent.db',
+    'magi_agent.k8s',
+    'magi_agent.telegram',
+    'magi_agent.canary',
 )
 loaded = sorted(name for name in forbidden if name in sys.modules)
 if loaded:

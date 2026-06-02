@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from openmagi_core_agent.evidence.claim_grounding import (
+from magi_agent.evidence.claim_grounding import (
     AtomicClaim,
     CitationRef,
     SupportStatus,

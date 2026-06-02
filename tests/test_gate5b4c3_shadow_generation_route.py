@@ -6,26 +6,26 @@ from types import SimpleNamespace
 from fastapi.testclient import TestClient
 import pytest
 
-from openmagi_core_agent.app import create_app
-from openmagi_core_agent.config.env import (
+from magi_agent.app import create_app
+from magi_agent.config.env import (
     RuntimeEnvError,
     parse_gate5b4c3_shadow_generation_route_env,
 )
-from openmagi_core_agent.config.models import BuildInfo, RuntimeConfig
-from openmagi_core_agent.runtime.openmagi_runtime import OpenMagiRuntime
-from openmagi_core_agent.shadow.gate5b4c3_live_runner_boundary import (
+from magi_agent.config.models import BuildInfo, RuntimeConfig
+from magi_agent.runtime.openmagi_runtime import OpenMagiRuntime
+from magi_agent.shadow.gate5b4c3_live_runner_boundary import (
     Gate5B4C3LiveAdkPrimitives,
 )
-from openmagi_core_agent.shadow.gate5b4c3_shadow_generation_contract import (
+from magi_agent.shadow.gate5b4c3_shadow_generation_contract import (
     Gate5B4C3ShadowGenerationConfig,
     Gate5B4C3ShadowGenerationProviderCredentialBinding,
     Gate5B4C3ShadowGenerationRequest,
     build_gate5b4c3_shadow_generation_diagnostic,
 )
-from openmagi_core_agent.shadow.gate5b4c3_shadow_counter_store import (
+from magi_agent.shadow.gate5b4c3_shadow_counter_store import (
     Gate5B4C3ShadowCounterStore,
 )
-from openmagi_core_agent.transport.shadow_generations import (
+from magi_agent.transport.shadow_generations import (
     Gate5B4C3MockedAdkPrimitivesLoader,
     Gate5B4C3ShadowGenerationRouteConfig,
 )
@@ -325,7 +325,7 @@ def test_shadow_generation_endpoint_is_registered_disabled_and_diagnostic_only()
 
 
 def test_shadow_generation_endpoint_default_does_not_invoke_runner(monkeypatch: pytest.MonkeyPatch) -> None:
-    from openmagi_core_agent.transport import shadow_generations
+    from magi_agent.transport import shadow_generations
 
     async def fail_if_called(*_args: object, **_kwargs: object) -> object:
         raise AssertionError("live Runner boundary must not be called by default")
@@ -596,7 +596,7 @@ def test_shadow_generation_route_uses_env_gate_config_to_enter_fake_live_boundar
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    from openmagi_core_agent.transport import shadow_generations
+    from magi_agent.transport import shadow_generations
 
     runtime = _runtime()
     runtime.gate5b4c3_shadow_generation_route_config = (
@@ -665,7 +665,7 @@ def test_shadow_generation_route_uses_env_gate_config_to_enter_fake_live_boundar
 def test_shadow_generation_live_route_without_counter_store_fails_open_before_runner(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from openmagi_core_agent.transport import shadow_generations
+    from magi_agent.transport import shadow_generations
 
     runtime = _runtime()
     runtime.gate5b4c3_shadow_generation_route_config = (
@@ -729,7 +729,7 @@ def test_shadow_generation_route_uses_store_time_for_stale_idempotency(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    from openmagi_core_agent.shadow import gate5b4c3_shadow_counter_store
+    from magi_agent.shadow import gate5b4c3_shadow_counter_store
 
     counter_store = Gate5B4C3ShadowCounterStore(
         tmp_path / "gate5b-shadow-counters.json",
@@ -1056,7 +1056,7 @@ def test_shadow_generation_endpoint_rejects_truthy_authority_strings_before_runn
 def test_shadow_generation_request_provided_gate_values_are_rejected_before_runner(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from openmagi_core_agent.transport import shadow_generations
+    from magi_agent.transport import shadow_generations
 
     async def fail_if_called(*_args: object, **_kwargs: object) -> object:
         raise AssertionError("request-controlled gate values must not invoke Runner")
@@ -1137,21 +1137,21 @@ def test_shadow_generation_endpoint_returns_422_for_malformed_json() -> None:
 def test_shadow_generation_route_import_boundary_is_schema_validation_only() -> None:
     route_path = (
         Path(__file__).parents[1]
-        / "openmagi_core_agent"
+        / "magi_agent"
         / "transport"
         / "shadow_generations.py"
     )
     source = route_path.read_text(encoding="utf-8")
     forbidden_imports = (
         "google.adk",
-        "openmagi_core_agent.adk_bridge.runner_adapter",
-        "openmagi_core_agent.tools",
-        "openmagi_core_agent.memory",
-        "openmagi_core_agent.runtime.openmagi_runtime",
-        "openmagi_core_agent.routing",
-        "openmagi_core_agent.workspace",
-        "openmagi_core_agent.channels",
-        "openmagi_core_agent.database",
+        "magi_agent.adk_bridge.runner_adapter",
+        "magi_agent.tools",
+        "magi_agent.memory",
+        "magi_agent.runtime.openmagi_runtime",
+        "magi_agent.routing",
+        "magi_agent.workspace",
+        "magi_agent.channels",
+        "magi_agent.database",
         "openai",
         "anthropic",
         "requests",

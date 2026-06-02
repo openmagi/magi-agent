@@ -8,14 +8,14 @@ from collections.abc import Mapping
 import pytest
 from pydantic import ValidationError
 
-from openmagi_core_agent.evidence.ledger import EvidenceLedger
-from openmagi_core_agent.evidence.types import (
+from magi_agent.evidence.ledger import EvidenceLedger
+from magi_agent.evidence.types import (
     EvidenceContractFailure,
     EvidenceContractVerdict,
     EvidenceRecord,
     EvidenceSource,
 )
-from openmagi_core_agent.shadow.audit_reporter import (
+from magi_agent.shadow.audit_reporter import (
     Gate2AuditEvidenceOutputFlags,
     Gate2AuditVerifierEntryReport,
     build_gate2_audit_evidence_report,
@@ -263,7 +263,7 @@ def test_report_rejects_extra_fields_on_validation_and_model_copy() -> None:
 def test_importing_shadow_audit_reporter_does_not_import_live_runtime_surfaces() -> None:
     code = """
 import sys
-import openmagi_core_agent.shadow.audit_reporter
+import magi_agent.shadow.audit_reporter
 for forbidden in (
     'routes',
     'api',

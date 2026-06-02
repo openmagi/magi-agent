@@ -6,13 +6,13 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from openmagi_core_agent.workflows.compiler import (
+from magi_agent.workflows.compiler import (
     WorkflowCompileInput,
     compile_governed_workflow,
     validate_compiled_workflow,
 )
-from openmagi_core_agent.workflows.dry_run import dry_run_governed_workflow
-from openmagi_core_agent.workflows.registry import (
+from magi_agent.workflows.dry_run import dry_run_governed_workflow
+from magi_agent.workflows.registry import (
     WorkflowRegistryEntry,
     WorkflowStatus,
     build_workflow_registry,

@@ -3,17 +3,17 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import Any, Callable
 
-from openmagi_core_agent.runtime.heartbeat_contract import RunLease
-from openmagi_core_agent.runtime.heartbeat_store import LocalFakeHeartbeatStore
-from openmagi_core_agent.runtime.heartbeat_boundary import (
+from magi_agent.runtime.heartbeat_contract import RunLease
+from magi_agent.runtime.heartbeat_store import LocalFakeHeartbeatStore
+from magi_agent.runtime.heartbeat_boundary import (
     RuntimeHeartbeatBoundary,
     RuntimeHeartbeatBoundaryConfig,
 )
-from openmagi_core_agent.runtime.stale_run_detector import (
+from magi_agent.runtime.stale_run_detector import (
     StaleRunDetectorConfig,
     evaluate_stale_run,
 )
-from openmagi_core_agent.runtime.turn_maintenance import (
+from magi_agent.runtime.turn_maintenance import (
     HEARTBEAT_INTERVAL_MS,
     HEARTBEAT_SILENCE_MS,
     HeartbeatMonitor,

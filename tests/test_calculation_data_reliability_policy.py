@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from openmagi_core_agent.evidence.calculation_policy import (
+from magi_agent.evidence.calculation_policy import (
     CalculationEvidencePolicy,
     NumericClaimRequest,
 )

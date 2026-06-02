@@ -8,8 +8,8 @@ from urllib.parse import quote
 import pytest
 from pydantic import BaseModel, ValidationError
 
-from openmagi_core_agent import authoring as authoring_module
-from openmagi_core_agent.authoring.audit_events import (
+from magi_agent import authoring as authoring_module
+from magi_agent.authoring.audit_events import (
     RecipeBuilderAuditBatch,
     RecipeBuilderAuditEvent,
     RecipeBuilderAuditEventRef,
@@ -666,7 +666,7 @@ def test_audit_event_batch_digest_is_deterministic_and_revalidates_events() -> N
 def test_audit_event_module_import_boundary_is_validate_only() -> None:
     module_path = (
         Path(__file__).resolve().parents[1]
-        / "openmagi_core_agent"
+        / "magi_agent"
         / "authoring"
         / "audit_events.py"
     )

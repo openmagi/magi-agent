@@ -4,10 +4,10 @@ import subprocess
 import sys
 from collections.abc import Mapping
 
-from openmagi_core_agent.shadow.gate5b4c3_runner_input_adapter import (
+from magi_agent.shadow.gate5b4c3_runner_input_adapter import (
     build_gate5b4c3_runner_input,
 )
-from openmagi_core_agent.shadow.gate5b4c3_shadow_generation_contract import (
+from magi_agent.shadow.gate5b4c3_shadow_generation_contract import (
     Gate5B4C3ShadowGenerationRequest,
 )
 
@@ -333,20 +333,20 @@ import importlib
 import sys
 
 module = importlib.import_module(
-    "openmagi_core_agent.shadow.gate5b4c3_runner_input_adapter"
+    "magi_agent.shadow.gate5b4c3_runner_input_adapter"
 )
 assert module is not None
 
 forbidden = (
     "google.adk",
-    "openmagi_core_agent.transport.chat",
-    "openmagi_core_agent.transport.tools",
-    "openmagi_core_agent.runtime.openmagi_runtime",
-    "openmagi_core_agent.routing",
-    "openmagi_core_agent.workspace",
-    "openmagi_core_agent.children",
-    "openmagi_core_agent.evidence",
-    "openmagi_core_agent.memory",
+    "magi_agent.transport.chat",
+    "magi_agent.transport.tools",
+    "magi_agent.runtime.openmagi_runtime",
+    "magi_agent.routing",
+    "magi_agent.workspace",
+    "magi_agent.children",
+    "magi_agent.evidence",
+    "magi_agent.memory",
     "openai",
     "anthropic",
 )

@@ -3,7 +3,7 @@ import math
 import time
 from pathlib import Path
 
-from openmagi_core_agent.transport.sse import InMemorySseWriter
+from magi_agent.transport.sse import InMemorySseWriter
 
 
 def _data_payloads(sse_body: str) -> list[dict[str, object]]:

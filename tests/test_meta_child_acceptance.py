@@ -5,17 +5,17 @@ import json
 import pytest
 from pydantic import ValidationError
 
-from openmagi_core_agent.evidence.child_runtime_envelope import (
+from magi_agent.evidence.child_runtime_envelope import (
     ChildRuntimeEnvelope,
     ChildRuntimeEnvelopeAuthorityFlags,
 )
 from runtime_issuance_support import issue_test_runtime_authority
-from openmagi_core_agent.evidence.subagent import (
+from magi_agent.evidence.subagent import (
     DelegatedEvidenceRequirement,
     EvidenceBoundaryLedgerRef,
     ExecutionBoundaryIdentity,
 )
-from openmagi_core_agent.meta_orchestration.child_acceptance import (
+from magi_agent.meta_orchestration.child_acceptance import (
     ChildAcceptancePolicy,
     ChildAcceptanceVerdict,
     RuntimeIssuedChildResult,

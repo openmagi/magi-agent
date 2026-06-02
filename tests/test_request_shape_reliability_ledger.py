@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from openmagi_core_agent.runtime.request_shape import RequestShapeLedger
+from magi_agent.runtime.request_shape import RequestShapeLedger
 
 
 def test_ledger_records_what_model_actually_saw_by_phase_without_raw_payload() -> None:

@@ -2,13 +2,13 @@ from __future__ import annotations
 
 import pytest
 
-from openmagi_core_agent.harness.resolved import build_default_resolved_harness_state
-from openmagi_core_agent.hooks.bus import HookBus, RegisteredHook
-from openmagi_core_agent.hooks.context import HookContext
-from openmagi_core_agent.hooks.manifest import HookManifest, HookPoint
-from openmagi_core_agent.hooks.result import HookResult
-from openmagi_core_agent.recipes.hook_composition import _STAGE_ORDER
-from openmagi_core_agent.tools.manifest import ToolSource
+from magi_agent.harness.resolved import build_default_resolved_harness_state
+from magi_agent.hooks.bus import HookBus, RegisteredHook
+from magi_agent.hooks.context import HookContext
+from magi_agent.hooks.manifest import HookManifest, HookPoint
+from magi_agent.hooks.result import HookResult
+from magi_agent.recipes.hook_composition import _STAGE_ORDER
+from magi_agent.tools.manifest import ToolSource
 
 
 def _context() -> HookContext:

@@ -6,14 +6,14 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from openmagi_core_agent.harness.approval_receipts import build_approval_receipt
-from openmagi_core_agent.self_improvement.drift_watch import (
+from magi_agent.harness.approval_receipts import build_approval_receipt
+from magi_agent.self_improvement.drift_watch import (
     DriftWatchConfig,
     DriftWatchRequest,
     DriftWatchResult,
     DriftWatchService,
 )
-from openmagi_core_agent.self_improvement.rollback import (
+from magi_agent.self_improvement.rollback import (
     ReplayPolicySnapshotBinding,
     RollbackConfig,
     RollbackReceipt,
@@ -363,15 +363,15 @@ def test_rollback_and_drift_import_boundary_does_not_initialize_live_runtime() -
     forbidden = {
         "google.adk.runners",
         "google.adk.agents",
-        "openmagi_core_agent.tools.host",
-        "openmagi_core_agent.transport.chat",
-        "openmagi_core_agent.memory.hipocampus",
-        "openmagi_core_agent.memory.qmd",
+        "magi_agent.tools.host",
+        "magi_agent.transport.chat",
+        "magi_agent.memory.hipocampus",
+        "magi_agent.memory.qmd",
     }
     for module_name in forbidden:
         sys.modules.pop(module_name, None)
 
-    __import__("openmagi_core_agent.self_improvement.rollback")
-    __import__("openmagi_core_agent.self_improvement.drift_watch")
+    __import__("magi_agent.self_improvement.rollback")
+    __import__("magi_agent.self_improvement.drift_watch")
 
     assert forbidden.isdisjoint(sys.modules)

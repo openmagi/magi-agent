@@ -4,7 +4,7 @@ import asyncio
 import subprocess
 import sys
 
-from openmagi_core_agent.knowledge.provider_boundary import (
+from magi_agent.knowledge.provider_boundary import (
     KnowledgeBoundary,
     KnowledgeBoundaryConfig,
     KnowledgeBoundaryDecision,
@@ -291,7 +291,7 @@ def test_knowledge_boundary_has_no_live_imports() -> None:
 import importlib
 import sys
 
-importlib.import_module("openmagi_core_agent.knowledge.provider_boundary")
+importlib.import_module("magi_agent.knowledge.provider_boundary")
 forbidden = (
     "google.adk.runners",
     "requests",

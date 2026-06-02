@@ -41,12 +41,12 @@ from typing import Any
 
 import pytest
 
-from openmagi_core_agent.workflows.compiler import (
+from magi_agent.workflows.compiler import (
     CompiledWorkflowContract,
     compile_governed_workflow,
     WorkflowCompileInput,
 )
-from openmagi_core_agent.workflows.registry import WorkflowRegistryEntry
+from magi_agent.workflows.registry import WorkflowRegistryEntry
 
 _DIGEST = "sha256:" + "a" * 64
 
@@ -190,13 +190,13 @@ def test_resume_skips_already_completed_children(
     """
     monkeypatch.setenv("MAGI_WORKFLOW_EXECUTOR_ENABLED", "1")
 
-    from openmagi_core_agent.harness.workflow_executor import (
+    from magi_agent.harness.workflow_executor import (
         WorkflowExecutorConfig,
         WorkflowExecutorResult,
         _child_cache_key,
         execute_workflow,
     )
-    from openmagi_core_agent.harness.workflow_result_cache import (
+    from magi_agent.harness.workflow_result_cache import (
         WorkflowResultCache,
         CachedChildResult,
     )
@@ -248,12 +248,12 @@ def test_partial_failure_resume_reruns_failed_not_succeeded(
     """
     monkeypatch.setenv("MAGI_WORKFLOW_EXECUTOR_ENABLED", "1")
 
-    from openmagi_core_agent.harness.workflow_executor import (
+    from magi_agent.harness.workflow_executor import (
         WorkflowExecutorConfig,
         _child_cache_key,
         execute_workflow,
     )
-    from openmagi_core_agent.harness.workflow_result_cache import (
+    from magi_agent.harness.workflow_result_cache import (
         WorkflowResultCache,
         CachedChildResult,
     )
@@ -292,11 +292,11 @@ def test_default_off_cache_has_no_effect(
     status='disabled' regardless of what the cache contains."""
     monkeypatch.delenv("MAGI_WORKFLOW_EXECUTOR_ENABLED", raising=False)
 
-    from openmagi_core_agent.harness.workflow_executor import (
+    from magi_agent.harness.workflow_executor import (
         WorkflowExecutorConfig,
         execute_workflow,
     )
-    from openmagi_core_agent.harness.workflow_result_cache import (
+    from magi_agent.harness.workflow_result_cache import (
         WorkflowResultCache,
         CachedChildResult,
     )
@@ -314,7 +314,7 @@ def test_default_off_cache_has_no_effect(
         CachedChildResult(task_id="wf-task-0-openmagi-research-cited-v1-0-0", status="accepted"),
     )
 
-    from openmagi_core_agent.harness.workflow_executor import execute_workflow
+    from magi_agent.harness.workflow_executor import execute_workflow
 
     result = asyncio.run(
         execute_workflow(contract, config=config, child_runner=fake_runner, result_cache=cache)
@@ -340,16 +340,16 @@ def test_semaphore_bounds_even_with_cached_children(
     """
     monkeypatch.setenv("MAGI_WORKFLOW_EXECUTOR_ENABLED", "1")
 
-    from openmagi_core_agent.harness.parallel_execution import (
+    from magi_agent.harness.parallel_execution import (
         ParallelExecutionScope,
         ParallelToolPolicyInput,
         build_parallel_tool_policy_decision,
     )
-    from openmagi_core_agent.harness.workflow_executor import (
+    from magi_agent.harness.workflow_executor import (
         WorkflowExecutorConfig,
         execute_workflow,
     )
-    from openmagi_core_agent.harness.workflow_result_cache import (
+    from magi_agent.harness.workflow_result_cache import (
         WorkflowResultCache,
         CachedChildResult,
     )
@@ -379,7 +379,7 @@ def test_semaphore_bounds_even_with_cached_children(
     )
 
     # Pre-cache 3 of the 8 children (indices 0, 3, 6) using stable cache keys.
-    from openmagi_core_agent.harness.workflow_executor import _child_cache_key as _cck
+    from magi_agent.harness.workflow_executor import _child_cache_key as _cck
     cache = WorkflowResultCache()
     for i in (0, 3, 6):
         recipe_id = contract.selected_recipes[i]
@@ -417,12 +417,12 @@ def test_completed_children_are_stored_in_cache(
     """
     monkeypatch.setenv("MAGI_WORKFLOW_EXECUTOR_ENABLED", "1")
 
-    from openmagi_core_agent.harness.workflow_executor import (
+    from magi_agent.harness.workflow_executor import (
         WorkflowExecutorConfig,
         _child_cache_key,
         execute_workflow,
     )
-    from openmagi_core_agent.harness.workflow_result_cache import WorkflowResultCache
+    from magi_agent.harness.workflow_result_cache import WorkflowResultCache
 
     contract = _valid_contract(n_recipes=3)
     fake_runner = _TrackingFakeRunner()
@@ -460,7 +460,7 @@ def test_no_cache_passed_behaves_like_pr1(
     in PR1 — all children are dispatched, no cache effects."""
     monkeypatch.setenv("MAGI_WORKFLOW_EXECUTOR_ENABLED", "1")
 
-    from openmagi_core_agent.harness.workflow_executor import (
+    from magi_agent.harness.workflow_executor import (
         WorkflowExecutorConfig,
         execute_workflow,
     )
@@ -493,7 +493,7 @@ def test_workflow_result_cache_unit_behaviour() -> None:
     - len() reflects the number of stored entries.
     - Storing a second entry with the same key overwrites (idempotent).
     """
-    from openmagi_core_agent.harness.workflow_result_cache import (
+    from magi_agent.harness.workflow_result_cache import (
         WorkflowResultCache,
         CachedChildResult,
     )
@@ -533,11 +533,11 @@ def test_only_accepted_results_are_cached(
     """
     monkeypatch.setenv("MAGI_WORKFLOW_EXECUTOR_ENABLED", "1")
 
-    from openmagi_core_agent.harness.workflow_executor import (
+    from magi_agent.harness.workflow_executor import (
         WorkflowExecutorConfig,
         execute_workflow,
     )
-    from openmagi_core_agent.harness.workflow_result_cache import WorkflowResultCache
+    from magi_agent.harness.workflow_result_cache import WorkflowResultCache
 
     class _BlockingRunner:
         openmagi_local_fake_provider = True
@@ -593,12 +593,12 @@ def test_event_sink_receives_cache_hit_and_cache_store_events(
     """
     monkeypatch.setenv("MAGI_WORKFLOW_EXECUTOR_ENABLED", "1")
 
-    from openmagi_core_agent.harness.workflow_executor import (
+    from magi_agent.harness.workflow_executor import (
         WorkflowExecutorConfig,
         _child_cache_key,
         execute_workflow,
     )
-    from openmagi_core_agent.harness.workflow_result_cache import (
+    from magi_agent.harness.workflow_result_cache import (
         CachedChildResult,
         WorkflowResultCache,
     )
@@ -682,12 +682,12 @@ def test_raising_event_sink_does_not_abort_run(
     """
     monkeypatch.setenv("MAGI_WORKFLOW_EXECUTOR_ENABLED", "1")
 
-    from openmagi_core_agent.harness.workflow_executor import (
+    from magi_agent.harness.workflow_executor import (
         WorkflowExecutorConfig,
         _child_cache_key,
         execute_workflow,
     )
-    from openmagi_core_agent.harness.workflow_result_cache import (
+    from magi_agent.harness.workflow_result_cache import (
         CachedChildResult,
         WorkflowResultCache,
     )
@@ -747,12 +747,12 @@ def test_all_tasks_pre_cached_returns_accepted(
     """
     monkeypatch.setenv("MAGI_WORKFLOW_EXECUTOR_ENABLED", "1")
 
-    from openmagi_core_agent.harness.workflow_executor import (
+    from magi_agent.harness.workflow_executor import (
         WorkflowExecutorConfig,
         _child_cache_key,
         execute_workflow,
     )
-    from openmagi_core_agent.harness.workflow_result_cache import (
+    from magi_agent.harness.workflow_result_cache import (
         CachedChildResult,
         WorkflowResultCache,
     )

@@ -12,7 +12,7 @@ import pytest
 
 def _boundary() -> Any:
     try:
-        return importlib.import_module("openmagi_core_agent.runtime.commit_boundary")
+        return importlib.import_module("magi_agent.runtime.commit_boundary")
     except ModuleNotFoundError as exc:
         pytest.fail(f"commit boundary module is missing: {exc}")
 
@@ -597,14 +597,14 @@ def test_public_trace_detail_redacts_private_path_fields_and_production_internal
     detail = boundary.public_trace_detail(
         'path=/data/bots/bot-123/workspace/secret.txt '
         '"path":"/workspace/private/notes.md" '
-        "callback=https://clawy.pro/internal/turns/turn-1"
+        "callback=https://openmagi.ai/internal/turns/turn-1"
     )
 
     assert "/data/bots" not in detail
     assert "/workspace" not in detail
     assert "secret.txt" not in detail
     assert "private/notes.md" not in detail
-    assert "https://clawy.pro/internal" not in detail
+    assert "https://openmagi.ai/internal" not in detail
     assert "[redacted-path]" in detail
 
 
@@ -676,7 +676,7 @@ def test_commit_boundary_import_is_local_planner_only() -> None:
 import importlib
 import sys
 
-module = importlib.import_module("openmagi_core_agent.runtime.commit_boundary")
+module = importlib.import_module("magi_agent.runtime.commit_boundary")
 assert hasattr(module, "build_commit_plan")
 
 forbidden_exact = (
@@ -694,17 +694,17 @@ forbidden_exact = (
     "supabase",
     "psycopg",
     "asyncpg",
-    "openmagi_core_agent.tools.dispatcher",
-    "openmagi_core_agent.transport.sse",
+    "magi_agent.tools.dispatcher",
+    "magi_agent.transport.sse",
 )
 forbidden_prefixes = (
     "google.adk",
-    "openmagi_core_agent.tools",
-    "openmagi_core_agent.transport",
-    "openmagi_core_agent.channels",
-    "openmagi_core_agent.adk_bridge",
-    "openmagi_core_agent.memory",
-    "openmagi_core_agent.workspace",
+    "magi_agent.tools",
+    "magi_agent.transport",
+    "magi_agent.channels",
+    "magi_agent.adk_bridge",
+    "magi_agent.memory",
+    "magi_agent.workspace",
 )
 loaded = [
     loaded_name
@@ -730,7 +730,7 @@ if loaded:
 
 def test_commit_boundary_source_forbids_runtime_side_effect_imports() -> None:
     root = Path(__file__).parents[1]
-    module_path = root / "openmagi_core_agent" / "runtime" / "commit_boundary.py"
+    module_path = root / "magi_agent" / "runtime" / "commit_boundary.py"
     source = module_path.read_text(encoding="utf-8")
     forbidden_imports = (
         "google.adk",
@@ -749,12 +749,12 @@ def test_commit_boundary_source_forbids_runtime_side_effect_imports() -> None:
         "supabase",
         "psycopg",
         "asyncpg",
-        "openmagi_core_agent.tools",
-        "openmagi_core_agent.transport",
-        "openmagi_core_agent.channels",
-        "openmagi_core_agent.adk_bridge",
-        "openmagi_core_agent.memory",
-        "openmagi_core_agent.workspace",
+        "magi_agent.tools",
+        "magi_agent.transport",
+        "magi_agent.channels",
+        "magi_agent.adk_bridge",
+        "magi_agent.memory",
+        "magi_agent.workspace",
     )
 
     for forbidden in forbidden_imports:

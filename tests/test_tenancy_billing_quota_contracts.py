@@ -7,14 +7,14 @@ import sys
 import pytest
 from pydantic import ValidationError
 
-from openmagi_core_agent.billing.quota import (
+from magi_agent.billing.quota import (
     QuotaDecision,
     QuotaEvaluationConfig,
     QuotaLimit,
     QuotaRequest,
     evaluate_quota,
 )
-from openmagi_core_agent.billing.spend_guard import (
+from magi_agent.billing.spend_guard import (
     SpendAmount,
     SpendCommitRequest,
     SpendReleaseRequest,
@@ -24,7 +24,7 @@ from openmagi_core_agent.billing.spend_guard import (
     release_spend_reservation,
     reserve_spend,
 )
-from openmagi_core_agent.tenancy.context import (
+from magi_agent.tenancy.context import (
     AuthorityScope,
     TenantContext,
     TenantRuntimeAuthorityFlags,
@@ -432,9 +432,9 @@ def test_spend_receipt_rejects_operation_outside_authority_scope() -> None:
 def test_billing_quota_import_boundary_has_no_live_system_imports() -> None:
     script = """
 import sys
-import openmagi_core_agent.billing.quota
-import openmagi_core_agent.billing.spend_guard
-import openmagi_core_agent.tenancy.context
+import magi_agent.billing.quota
+import magi_agent.billing.spend_guard
+import magi_agent.tenancy.context
 for name in (
     'stripe',
     'supabase',

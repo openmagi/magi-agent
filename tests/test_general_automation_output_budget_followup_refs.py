@@ -5,18 +5,18 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from openmagi_core_agent.harness.general_automation.followup_refs import (
+from magi_agent.harness.general_automation.followup_refs import (
     ModeledFollowupRequest,
     validate_followup_ref_request,
 )
-from openmagi_core_agent.harness.general_automation.output_budget_policy import (
+from magi_agent.harness.general_automation.output_budget_policy import (
     AutomationOutputBudgetRequest,
     apply_output_budget_policy,
 )
 
 
 PYTHON_ROOT = Path(__file__).resolve().parents[1]
-PACKAGE_DIR = PYTHON_ROOT / "openmagi_core_agent" / "harness" / "general_automation"
+PACKAGE_DIR = PYTHON_ROOT / "magi_agent" / "harness" / "general_automation"
 
 
 def _contains_fragment(value: object, fragment: str) -> bool:
@@ -196,7 +196,7 @@ def test_output_budget_followup_modules_do_not_touch_tool_result_or_live_artifac
     )
 
     forbidden_fragments = (
-        "openmagi_core_agent.tools.result",
+        "magi_agent.tools.result",
         "ToolResult",
         "google.adk",
         "ArtifactService(",

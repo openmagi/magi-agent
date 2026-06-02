@@ -18,19 +18,19 @@ from types import ModuleType
 
 import pytest
 
-from openmagi_core_agent.harness.resolved import build_default_resolved_harness_state
-from openmagi_core_agent.hooks.builtin.prompt_transforms import (
+from magi_agent.harness.resolved import build_default_resolved_harness_state
+from magi_agent.hooks.builtin.prompt_transforms import (
     language_preference_transform,
     language_preference_transform_manifest,
     model_capability_transform,
     model_capability_transform_manifest,
 )
-from openmagi_core_agent.hooks.bus import HookBus, RegisteredHook
-from openmagi_core_agent.hooks.context import HookContext
+from magi_agent.hooks.bus import HookBus, RegisteredHook
+from magi_agent.hooks.context import HookContext
 
 
 def _builder() -> ModuleType:
-    return importlib.import_module("openmagi_core_agent.runtime.message_builder")
+    return importlib.import_module("magi_agent.runtime.message_builder")
 
 
 def _utc(value: str) -> datetime:
@@ -231,7 +231,7 @@ class TestEvidenceRecordConstruction:
     def test_payload_builds_a_valid_evidence_record(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        from openmagi_core_agent.evidence.types import EvidenceRecord, EvidenceSource
+        from magi_agent.evidence.types import EvidenceRecord, EvidenceSource
 
         monkeypatch.setenv("MAGI_PROMPT_TRANSFORM_HOOKS_ENABLED", "1")
         builder = _builder()

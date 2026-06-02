@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from openmagi_core_agent.recipes.reliability_policy import (
+from magi_agent.recipes.reliability_policy import (
     RecipeReliabilityPolicyRegistry,
 )
 

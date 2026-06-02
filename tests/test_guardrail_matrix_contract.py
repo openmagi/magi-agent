@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from openmagi_core_agent.harness.guardrail_matrix import (
+from magi_agent.harness.guardrail_matrix import (
     GuardrailDefinition,
     GuardrailFailureMode,
     GuardrailResult,

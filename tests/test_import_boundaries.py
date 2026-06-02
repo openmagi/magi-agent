@@ -18,9 +18,9 @@ def _run_fresh_python(script: str, *args: str) -> subprocess.CompletedProcess[st
 @pytest.mark.parametrize(
     "module_name",
     (
-        "openmagi_core_agent.tools.manifest",
-        "openmagi_core_agent.tools.registry",
-        "openmagi_core_agent.hooks.manifest",
+        "magi_agent.tools.manifest",
+        "magi_agent.tools.registry",
+        "magi_agent.hooks.manifest",
     ),
 )
 def test_openmagi_modules_import_in_fresh_process(module_name: str) -> None:
@@ -38,16 +38,16 @@ def test_adk_bridge_package_import_does_not_load_tool_adapter() -> None:
 import importlib
 import sys
 
-importlib.import_module("openmagi_core_agent.adk_bridge")
+importlib.import_module("magi_agent.adk_bridge")
 forbidden_modules = (
-    "openmagi_core_agent.adk_bridge.policy_boundary",
-    "openmagi_core_agent.adk_bridge.runner_adapter",
-    "openmagi_core_agent.adk_bridge.tool_adapter",
-    "openmagi_core_agent.runtime.openmagi_runtime",
-    "openmagi_core_agent.tools.dispatcher",
-    "openmagi_core_agent.tools.registry",
-    "openmagi_core_agent.transport.chat",
-    "openmagi_core_agent.transport.tools",
+    "magi_agent.adk_bridge.policy_boundary",
+    "magi_agent.adk_bridge.runner_adapter",
+    "magi_agent.adk_bridge.tool_adapter",
+    "magi_agent.runtime.openmagi_runtime",
+    "magi_agent.tools.dispatcher",
+    "magi_agent.tools.registry",
+    "magi_agent.transport.chat",
+    "magi_agent.transport.tools",
 )
 loaded = [module for module in forbidden_modules if module in sys.modules]
 if loaded:
@@ -64,15 +64,15 @@ def test_adk_callback_adapter_import_stays_isolated_in_fresh_process() -> None:
 import importlib
 import sys
 
-importlib.import_module("openmagi_core_agent.adk_bridge.callback_adapter")
+importlib.import_module("magi_agent.adk_bridge.callback_adapter")
 forbidden_modules = (
-    "openmagi_core_agent.adk_bridge.policy_boundary",
-    "openmagi_core_agent.adk_bridge.runner_adapter",
-    "openmagi_core_agent.runtime.openmagi_runtime",
-    "openmagi_core_agent.tools.dispatcher",
-    "openmagi_core_agent.tools.registry",
-    "openmagi_core_agent.transport.chat",
-    "openmagi_core_agent.transport.tools",
+    "magi_agent.adk_bridge.policy_boundary",
+    "magi_agent.adk_bridge.runner_adapter",
+    "magi_agent.runtime.openmagi_runtime",
+    "magi_agent.tools.dispatcher",
+    "magi_agent.tools.registry",
+    "magi_agent.transport.chat",
+    "magi_agent.transport.tools",
 )
 loaded = [module for module in forbidden_modules if module in sys.modules]
 if loaded:
@@ -88,7 +88,7 @@ def test_adk_tool_adapter_imports_explicitly_in_fresh_process() -> None:
         """
 import importlib
 
-module = importlib.import_module("openmagi_core_agent.adk_bridge.tool_adapter")
+module = importlib.import_module("magi_agent.adk_bridge.tool_adapter")
 assert hasattr(module, "build_adk_function_tool")
 """
     )
@@ -102,7 +102,7 @@ def test_deterministic_routing_import_stays_runner_and_runtime_free() -> None:
 import importlib
 import sys
 
-module = importlib.import_module("openmagi_core_agent.routing.deterministic")
+module = importlib.import_module("magi_agent.routing.deterministic")
 assert hasattr(module, "build_baseline_shadow_route")
 
 forbidden_modules = (
@@ -110,10 +110,10 @@ forbidden_modules = (
     "google.adk.runners.runner",
     "google.adk.tools",
     "google.adk.tools.function_tool",
-    "openmagi_core_agent.adk_bridge.runner_adapter",
-    "openmagi_core_agent.adk_bridge.tool_adapter",
-    "openmagi_core_agent.runtime.openmagi_runtime",
-    "openmagi_core_agent.transport.chat",
+    "magi_agent.adk_bridge.runner_adapter",
+    "magi_agent.adk_bridge.tool_adapter",
+    "magi_agent.runtime.openmagi_runtime",
+    "magi_agent.transport.chat",
 )
 loaded = [module_name for module_name in forbidden_modules if module_name in sys.modules]
 if loaded:
@@ -130,27 +130,27 @@ def test_provider_execution_import_stays_adk_toolhost_memory_transport_and_netwo
 import importlib
 import sys
 
-execution = importlib.import_module("openmagi_core_agent.runtime.provider_execution")
-receipts = importlib.import_module("openmagi_core_agent.runtime.provider_receipts")
+execution = importlib.import_module("magi_agent.runtime.provider_execution")
+receipts = importlib.import_module("magi_agent.runtime.provider_receipts")
 assert hasattr(execution, "ProviderExecutionBoundary")
 assert hasattr(receipts, "ProviderReceipt")
 
 forbidden_prefixes = (
     "google.adk",
-    "openmagi_core_agent.adk_bridge.runner_adapter",
-    "openmagi_core_agent.adk_bridge.local_runner",
-    "openmagi_core_agent.adk_bridge.tool_adapter",
-    "openmagi_core_agent.tools.dispatcher",
-    "openmagi_core_agent.tools.kernel",
-    "openmagi_core_agent.tools.registry",
-    "openmagi_core_agent.tools.manifest",
-    "openmagi_core_agent.transport",
-    "openmagi_core_agent.memory",
-    "openmagi_core_agent.channels",
-    "openmagi_core_agent.browser",
-    "openmagi_core_agent.web_acquisition",
-    "openmagi_core_agent.deploy",
-    "openmagi_core_agent.canary",
+    "magi_agent.adk_bridge.runner_adapter",
+    "magi_agent.adk_bridge.local_runner",
+    "magi_agent.adk_bridge.tool_adapter",
+    "magi_agent.tools.dispatcher",
+    "magi_agent.tools.kernel",
+    "magi_agent.tools.registry",
+    "magi_agent.tools.manifest",
+    "magi_agent.transport",
+    "magi_agent.memory",
+    "magi_agent.channels",
+    "magi_agent.browser",
+    "magi_agent.web_acquisition",
+    "magi_agent.deploy",
+    "magi_agent.canary",
     "requests",
     "httpx",
     "socket",
@@ -179,19 +179,19 @@ import importlib
 import sys
 
 before = set(sys.modules)
-module = importlib.import_module("openmagi_core_agent.memory.adk_bridge")
+module = importlib.import_module("magi_agent.memory.adk_bridge")
 assert hasattr(module, "ADKMemoryServiceBridge")
 
 forbidden_prefixes = (
     "google.adk",
     "google.genai",
     "google.cloud",
-    "openmagi_core_agent.adk_bridge.runner_adapter",
-    "openmagi_core_agent.adk_bridge.tool_adapter",
-    "openmagi_core_agent.transport",
-    "openmagi_core_agent.routing",
-    "openmagi_core_agent.deploy",
-    "openmagi_core_agent.canary",
+    "magi_agent.adk_bridge.runner_adapter",
+    "magi_agent.adk_bridge.tool_adapter",
+    "magi_agent.transport",
+    "magi_agent.routing",
+    "magi_agent.deploy",
+    "magi_agent.canary",
     "requests",
     "httpx",
     "socket",
@@ -220,8 +220,8 @@ def test_openmagi_runtime_default_construction_does_not_inspect_or_import_adk_pr
 import sys
 
 before = set(sys.modules)
-from openmagi_core_agent.config.models import BuildInfo, RuntimeConfig
-from openmagi_core_agent.runtime.openmagi_runtime import OpenMagiRuntime
+from magi_agent.config.models import BuildInfo, RuntimeConfig
+from magi_agent.runtime.openmagi_runtime import OpenMagiRuntime
 
 runtime = OpenMagiRuntime(
     config=RuntimeConfig(
@@ -272,17 +272,17 @@ def test_file_delivery_import_stays_adk_transport_channel_sdk_and_network_free()
 import importlib
 import sys
 
-module = importlib.import_module("openmagi_core_agent.artifacts.file_delivery")
+module = importlib.import_module("magi_agent.artifacts.file_delivery")
 assert hasattr(module, "FileDeliveryBoundary")
 
 forbidden_prefixes = (
     "google.adk",
-    "openmagi_core_agent.transport",
-    "openmagi_core_agent.memory",
-    "openmagi_core_agent.browser",
-    "openmagi_core_agent.web_acquisition",
-    "openmagi_core_agent.deploy",
-    "openmagi_core_agent.canary",
+    "magi_agent.transport",
+    "magi_agent.memory",
+    "magi_agent.browser",
+    "magi_agent.web_acquisition",
+    "magi_agent.deploy",
+    "magi_agent.canary",
     "telegram",
     "discord",
     "requests",
@@ -312,19 +312,19 @@ def test_channel_dispatch_and_push_imports_stay_sdk_transport_and_network_free()
 import importlib
 import sys
 
-dispatcher = importlib.import_module("openmagi_core_agent.channels.dispatcher")
-push = importlib.import_module("openmagi_core_agent.channels.push_delivery")
+dispatcher = importlib.import_module("magi_agent.channels.dispatcher")
+push = importlib.import_module("magi_agent.channels.push_delivery")
 assert hasattr(dispatcher, "ChannelDispatcher")
 assert hasattr(push, "PushDeliveryBoundary")
 
 forbidden_prefixes = (
     "google.adk",
-    "openmagi_core_agent.transport",
-    "openmagi_core_agent.memory",
-    "openmagi_core_agent.browser",
-    "openmagi_core_agent.web_acquisition",
-    "openmagi_core_agent.deploy",
-    "openmagi_core_agent.canary",
+    "magi_agent.transport",
+    "magi_agent.memory",
+    "magi_agent.browser",
+    "magi_agent.web_acquisition",
+    "magi_agent.deploy",
+    "magi_agent.canary",
     "telegram",
     "discord",
     "requests",
@@ -354,17 +354,17 @@ def test_telegram_adapter_import_stays_sdk_transport_and_network_free() -> None:
 import importlib
 import sys
 
-module = importlib.import_module("openmagi_core_agent.channels.telegram_adapter")
+module = importlib.import_module("magi_agent.channels.telegram_adapter")
 assert hasattr(module, "TelegramAdapterBoundary")
 
 forbidden_prefixes = (
     "google.adk",
-    "openmagi_core_agent.transport",
-    "openmagi_core_agent.memory",
-    "openmagi_core_agent.browser",
-    "openmagi_core_agent.web_acquisition",
-    "openmagi_core_agent.deploy",
-    "openmagi_core_agent.canary",
+    "magi_agent.transport",
+    "magi_agent.memory",
+    "magi_agent.browser",
+    "magi_agent.web_acquisition",
+    "magi_agent.deploy",
+    "magi_agent.canary",
     "telegram",
     "discord",
     "aiohttp",
@@ -395,21 +395,21 @@ def test_discord_adapter_import_stays_sdk_transport_and_network_free() -> None:
 import importlib
 import sys
 
-module = importlib.import_module("openmagi_core_agent.channels.discord_adapter")
+module = importlib.import_module("magi_agent.channels.discord_adapter")
 assert hasattr(module, "DiscordAdapterBoundary")
 
 forbidden_prefixes = (
     "google.adk",
-    "openmagi_core_agent.transport",
-    "openmagi_core_agent.routing",
-    "openmagi_core_agent.memory",
-    "openmagi_core_agent.browser",
-    "openmagi_core_agent.web_acquisition",
-    "openmagi_core_agent.deploy",
-    "openmagi_core_agent.canary",
-    "openmagi_core_agent.runtime_selector",
-    "openmagi_core_agent.chat_proxy",
-    "openmagi_core_agent.k8s",
+    "magi_agent.transport",
+    "magi_agent.routing",
+    "magi_agent.memory",
+    "magi_agent.browser",
+    "magi_agent.web_acquisition",
+    "magi_agent.deploy",
+    "magi_agent.canary",
+    "magi_agent.runtime_selector",
+    "magi_agent.chat_proxy",
+    "magi_agent.k8s",
     "telegram",
     "discord",
     "nextcord",
@@ -442,7 +442,7 @@ def test_tool_manifest_import_stays_adk_runtime_free() -> None:
 import importlib
 import sys
 
-module = importlib.import_module("openmagi_core_agent.tools.manifest")
+module = importlib.import_module("magi_agent.tools.manifest")
 assert hasattr(module, "ToolManifest")
 
 forbidden_modules = (
@@ -450,8 +450,8 @@ forbidden_modules = (
     "google.adk.runners",
     "google.adk.tools",
     "google.adk.tools.function_tool",
-    "openmagi_core_agent.adk_bridge.runner_adapter",
-    "openmagi_core_agent.adk_bridge.tool_adapter",
+    "magi_agent.adk_bridge.runner_adapter",
+    "magi_agent.adk_bridge.tool_adapter",
 )
 loaded = [module_name for module_name in forbidden_modules if module_name in sys.modules]
 if loaded:
@@ -468,13 +468,13 @@ def test_tool_registry_import_stays_adk_and_bridge_adapter_free() -> None:
 import importlib
 import sys
 
-module = importlib.import_module("openmagi_core_agent.tools.registry")
+module = importlib.import_module("magi_agent.tools.registry")
 assert hasattr(module, "ToolRegistry")
 
 forbidden_prefixes = (
     "google.adk",
-    "openmagi_core_agent.adk_bridge.runner_adapter",
-    "openmagi_core_agent.adk_bridge.tool_adapter",
+    "magi_agent.adk_bridge.runner_adapter",
+    "magi_agent.adk_bridge.tool_adapter",
 )
 loaded = [
     module_name
@@ -498,16 +498,16 @@ def test_evidence_ledger_import_stays_adk_runner_runtime_and_route_free() -> Non
 import importlib
 import sys
 
-module = importlib.import_module("openmagi_core_agent.evidence.ledger")
+module = importlib.import_module("magi_agent.evidence.ledger")
 assert hasattr(module, "EvidenceLedger")
 
 forbidden_prefixes = (
     "google.adk",
-    "openmagi_core_agent.adk_bridge.runner_adapter",
-    "openmagi_core_agent.runtime",
-    "openmagi_core_agent.routing",
-    "openmagi_core_agent.transport.chat",
-    "openmagi_core_agent.transport.tools",
+    "magi_agent.adk_bridge.runner_adapter",
+    "magi_agent.runtime",
+    "magi_agent.routing",
+    "magi_agent.transport.chat",
+    "magi_agent.transport.tools",
 )
 loaded = [
     module_name
@@ -531,20 +531,20 @@ def test_evidence_subagent_import_stays_adk_runtime_child_execution_and_route_fr
 import importlib
 import sys
 
-module = importlib.import_module("openmagi_core_agent.evidence.subagent")
+module = importlib.import_module("magi_agent.evidence.subagent")
 assert hasattr(module, "ChildEvidenceEnvelope")
 
 forbidden_prefixes = (
     "google.adk",
-    "openmagi_core_agent.adk_bridge.runner_adapter",
-    "openmagi_core_agent.runtime",
-    "openmagi_core_agent.routing",
-    "openmagi_core_agent.transport.chat",
-    "openmagi_core_agent.transport.tools",
-    "openmagi_core_agent.session",
-    "openmagi_core_agent.artifact",
-    "openmagi_core_agent.deploy",
-    "openmagi_core_agent.canary",
+    "magi_agent.adk_bridge.runner_adapter",
+    "magi_agent.runtime",
+    "magi_agent.routing",
+    "magi_agent.transport.chat",
+    "magi_agent.transport.tools",
+    "magi_agent.session",
+    "magi_agent.artifact",
+    "magi_agent.deploy",
+    "magi_agent.canary",
 )
 loaded = [
     module_name
@@ -568,22 +568,22 @@ def test_child_runtime_envelope_import_stays_adk_toolhost_memory_and_workspace_m
 import importlib
 import sys
 
-module = importlib.import_module("openmagi_core_agent.evidence.child_runtime_envelope")
+module = importlib.import_module("magi_agent.evidence.child_runtime_envelope")
 assert hasattr(module, "ChildRuntimeEnvelope")
 
 forbidden_prefixes = (
     "google.adk",
-    "openmagi_core_agent.adk_bridge.runner_adapter",
-    "openmagi_core_agent.adk_bridge.tool_adapter",
-    "openmagi_core_agent.runtime.openmagi_runtime",
-    "openmagi_core_agent.routing",
-    "openmagi_core_agent.transport.chat",
-    "openmagi_core_agent.transport.tools",
-    "openmagi_core_agent.tools.dispatcher",
-    "openmagi_core_agent.tools.registry",
-    "openmagi_core_agent.memory",
-    "openmagi_core_agent.workspace.mutation",
-    "openmagi_core_agent.workspace.adoption",
+    "magi_agent.adk_bridge.runner_adapter",
+    "magi_agent.adk_bridge.tool_adapter",
+    "magi_agent.runtime.openmagi_runtime",
+    "magi_agent.routing",
+    "magi_agent.transport.chat",
+    "magi_agent.transport.tools",
+    "magi_agent.tools.dispatcher",
+    "magi_agent.tools.registry",
+    "magi_agent.memory",
+    "magi_agent.workspace.mutation",
+    "magi_agent.workspace.adoption",
 )
 loaded = [
     module_name
@@ -607,15 +607,15 @@ def test_observable_process_reward_import_stays_adk_runner_runtime_and_route_fre
 import importlib
 import sys
 
-module = importlib.import_module("openmagi_core_agent.harness.process_reward")
+module = importlib.import_module("magi_agent.harness.process_reward")
 assert hasattr(module, "score_observable_process_events")
 
 forbidden_prefixes = (
     "google.adk",
-    "openmagi_core_agent.adk_bridge.runner_adapter",
-    "openmagi_core_agent.runtime.openmagi_runtime",
-    "openmagi_core_agent.transport.chat",
-    "openmagi_core_agent.transport.tools",
+    "magi_agent.adk_bridge.runner_adapter",
+    "magi_agent.runtime.openmagi_runtime",
+    "magi_agent.transport.chat",
+    "magi_agent.transport.tools",
 )
 loaded = [
     module_name
@@ -639,18 +639,18 @@ def test_inference_scaling_import_stays_adk_runner_routing_proxy_and_billing_fre
 import importlib
 import sys
 
-module = importlib.import_module("openmagi_core_agent.harness.inference_scaling")
+module = importlib.import_module("magi_agent.harness.inference_scaling")
 assert hasattr(module, "build_scaling_policy_decision")
 
 forbidden_prefixes = (
     "google.adk",
-    "openmagi_core_agent.adk_bridge.runner_adapter",
-    "openmagi_core_agent.runtime.openmagi_runtime",
-    "openmagi_core_agent.routing",
-    "openmagi_core_agent.transport.chat",
-    "openmagi_core_agent.transport.tools",
-    "openmagi_core_agent.transport.plugins",
-    "openmagi_core_agent.config.models",
+    "magi_agent.adk_bridge.runner_adapter",
+    "magi_agent.runtime.openmagi_runtime",
+    "magi_agent.routing",
+    "magi_agent.transport.chat",
+    "magi_agent.transport.tools",
+    "magi_agent.transport.plugins",
+    "magi_agent.config.models",
 )
 loaded = [
     module_name
@@ -674,21 +674,21 @@ def test_parallel_execution_import_stays_adk_runner_tool_execution_scheduler_rou
 import importlib
 import sys
 
-module = importlib.import_module("openmagi_core_agent.harness.parallel_execution")
+module = importlib.import_module("magi_agent.harness.parallel_execution")
 assert hasattr(module, "build_parallel_tool_policy_decision")
 
 forbidden_prefixes = (
     "google.adk",
-    "openmagi_core_agent.adk_bridge.runner_adapter",
-    "openmagi_core_agent.adk_bridge.tool_adapter",
-    "openmagi_core_agent.runtime.openmagi_runtime",
-    "openmagi_core_agent.tools.dispatcher",
-    "openmagi_core_agent.routing",
-    "openmagi_core_agent.transport.chat",
-    "openmagi_core_agent.transport.tools",
-    "openmagi_core_agent.workspace",
-    "openmagi_core_agent.deploy",
-    "openmagi_core_agent.canary",
+    "magi_agent.adk_bridge.runner_adapter",
+    "magi_agent.adk_bridge.tool_adapter",
+    "magi_agent.runtime.openmagi_runtime",
+    "magi_agent.tools.dispatcher",
+    "magi_agent.routing",
+    "magi_agent.transport.chat",
+    "magi_agent.transport.tools",
+    "magi_agent.workspace",
+    "magi_agent.deploy",
+    "magi_agent.canary",
 )
 loaded = [
     module_name
@@ -709,19 +709,19 @@ if loaded:
 @pytest.mark.parametrize(
     "module_name",
     (
-        "openmagi_core_agent.runtime.model_tiers",
-        "openmagi_core_agent.recipes.reliability_policy",
-        "openmagi_core_agent.runtime.phase_routing",
-        "openmagi_core_agent.runtime.context_budget",
-        "openmagi_core_agent.runtime.request_shape",
-        "openmagi_core_agent.runtime.streaming",
-        "openmagi_core_agent.evidence.calculation_policy",
-        "openmagi_core_agent.runtime.evidence_first_projection",
-        "openmagi_core_agent.runtime.uncertainty_policy",
-        "openmagi_core_agent.evidence.final_output_gate",
-        "openmagi_core_agent.harness.long_context_eval",
-        "openmagi_core_agent.runtime.reliability_budget",
-        "openmagi_core_agent.recipes.materializer",
+        "magi_agent.runtime.model_tiers",
+        "magi_agent.recipes.reliability_policy",
+        "magi_agent.runtime.phase_routing",
+        "magi_agent.runtime.context_budget",
+        "magi_agent.runtime.request_shape",
+        "magi_agent.runtime.streaming",
+        "magi_agent.evidence.calculation_policy",
+        "magi_agent.runtime.evidence_first_projection",
+        "magi_agent.runtime.uncertainty_policy",
+        "magi_agent.evidence.final_output_gate",
+        "magi_agent.harness.long_context_eval",
+        "magi_agent.runtime.reliability_budget",
+        "magi_agent.recipes.materializer",
     ),
 )
 def test_reliability_policy_modules_import_without_live_runtime_side_effects(
@@ -756,15 +756,15 @@ forbidden_prefixes = (
     "subprocess",
     "socket",
     "git",
-    "openmagi_core_agent.adk_bridge.runner_adapter",
-    "openmagi_core_agent.adk_bridge.local_runner",
-    "openmagi_core_agent.adk_bridge.tool_adapter",
-    "openmagi_core_agent.transport.chat",
-    "openmagi_core_agent.transport.tools",
-    "openmagi_core_agent.channels",
-    "openmagi_core_agent.workspace",
-    "openmagi_core_agent.deploy",
-    "openmagi_core_agent.canary",
+    "magi_agent.adk_bridge.runner_adapter",
+    "magi_agent.adk_bridge.local_runner",
+    "magi_agent.adk_bridge.tool_adapter",
+    "magi_agent.transport.chat",
+    "magi_agent.transport.tools",
+    "magi_agent.channels",
+    "magi_agent.workspace",
+    "magi_agent.deploy",
+    "magi_agent.canary",
 )
 loaded = [
     module_name

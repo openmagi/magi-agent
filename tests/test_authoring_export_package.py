@@ -5,8 +5,8 @@ from urllib.parse import quote
 import pytest
 from pydantic import BaseModel, ValidationError
 
-from openmagi_core_agent import authoring as authoring_module
-from openmagi_core_agent.authoring.export_package import (
+from magi_agent import authoring as authoring_module
+from magi_agent.authoring.export_package import (
     RecipeExportGeneratedProposalRef,
     RecipeExportPackageArtifactRef,
     RecipeExportPackageManifest,
@@ -17,7 +17,7 @@ from openmagi_core_agent.authoring.export_package import (
     digest_recipe_export_package_manifest,
     validate_recipe_export_package_import,
 )
-from openmagi_core_agent.authoring.generated_proposals import (
+from magi_agent.authoring.generated_proposals import (
     GeneratedProposalManifest,
     digest_generated_proposal_manifest,
 )
@@ -290,7 +290,7 @@ def test_export_package_rejects_unsafe_refs_and_summaries_but_allows_no_authorit
             subjectType="recipe_pack_draft",
             ref="draft.safe",
             digest=DIGEST_A,
-            summary="References infra/docker/clawy-core-agent-python/secret.py",
+            summary="References /private/magi-agent/secret.py",
         )
 
     with pytest.raises(ValidationError, match="raw source code"):
@@ -573,7 +573,7 @@ def test_export_package_boundary_has_no_runtime_tool_model_network_or_deploy_imp
     import ast
     from pathlib import Path
 
-    source = Path("openmagi_core_agent/authoring/export_package.py").read_text()
+    source = Path("magi_agent/authoring/export_package.py").read_text()
     tree = ast.parse(source)
     forbidden = (
         "tool_host",

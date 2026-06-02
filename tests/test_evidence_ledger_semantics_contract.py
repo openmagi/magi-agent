@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from openmagi_core_agent.evidence.ledger_semantics import (
+from magi_agent.evidence.ledger_semantics import (
     AuditLedgerMode,
     ContentAddressedLedger,
     ContentAddressedLedgerRecord,

@@ -9,7 +9,7 @@ from typing import Any
 
 
 def _admission_module() -> Any:
-    return importlib.import_module("openmagi_core_agent.runtime.admission")
+    return importlib.import_module("magi_agent.runtime.admission")
 
 
 def _with_digest(payload: dict[str, object]) -> dict[str, object]:
@@ -397,7 +397,7 @@ def test_valid_compiled_snapshot_is_accepted() -> None:
 def test_runtime_admission_does_not_duplicate_compiler_only_diagnostics() -> None:
     source = (
         Path(__file__).parents[1]
-        / "openmagi_core_agent"
+        / "magi_agent"
         / "runtime"
         / "admission.py"
     ).read_text(encoding="utf-8")
@@ -425,31 +425,31 @@ def test_runtime_admission_import_is_authoring_and_execution_free() -> None:
 import importlib
 import sys
 
-module = importlib.import_module("openmagi_core_agent.runtime.admission")
+module = importlib.import_module("magi_agent.runtime.admission")
 assert module is not None
 
 forbidden_exact = (
-    "openmagi_core_agent.authoring.compiler",
-    "openmagi_core_agent.authoring.dry_run",
-    "openmagi_core_agent.adk_bridge.local_runner",
-    "openmagi_core_agent.runtime.adk_turn_runner",
-    "openmagi_core_agent.runtime.openmagi_runtime",
-    "openmagi_core_agent.tools.dispatcher",
+    "magi_agent.authoring.compiler",
+    "magi_agent.authoring.dry_run",
+    "magi_agent.adk_bridge.local_runner",
+    "magi_agent.runtime.adk_turn_runner",
+    "magi_agent.runtime.openmagi_runtime",
+    "magi_agent.tools.dispatcher",
     "google.adk.runners",
     "google.adk.sessions",
     "fastapi",
     "uvicorn",
 )
 forbidden_prefixes = (
-    "openmagi_core_agent.authoring.compiler",
-    "openmagi_core_agent.authoring.dry_run",
-    "openmagi_core_agent.tools",
-    "openmagi_core_agent.transport",
-    "openmagi_core_agent.memory",
-    "openmagi_core_agent.database",
-    "openmagi_core_agent.db",
-    "openmagi_core_agent.app",
-    "openmagi_core_agent.main",
+    "magi_agent.authoring.compiler",
+    "magi_agent.authoring.dry_run",
+    "magi_agent.tools",
+    "magi_agent.transport",
+    "magi_agent.memory",
+    "magi_agent.database",
+    "magi_agent.db",
+    "magi_agent.app",
+    "magi_agent.main",
     "google.adk",
     "supabase",
     "psycopg",

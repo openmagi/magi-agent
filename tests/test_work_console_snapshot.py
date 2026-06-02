@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import json
 
-from openmagi_core_agent.runtime.public_events import authorize_rule_check_event
-from openmagi_core_agent.runtime.work_console_snapshot import (
+from magi_agent.runtime.public_events import authorize_rule_check_event
+from magi_agent.runtime.work_console_snapshot import (
     build_work_console_snapshot,
 )
 

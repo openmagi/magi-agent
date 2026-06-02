@@ -71,15 +71,15 @@
       ],
       "latestMainCoveredRefs": [
         {
-          "path": "openmagi_core_agent/telemetry/deterministic_events.py",
+          "path": "magi_agent/telemetry/deterministic_events.py",
           "state": "existing"
         },
         {
-          "path": "openmagi_core_agent/telemetry/logging.py",
+          "path": "magi_agent/telemetry/logging.py",
           "state": "existing"
         },
         {
-          "path": "openmagi_core_agent/transport/health.py",
+          "path": "magi_agent/transport/health.py",
           "state": "existing"
         },
         {
@@ -87,35 +87,35 @@
           "state": "existing"
         },
         {
-          "path": "openmagi_core_agent/ops/__init__.py",
+          "path": "magi_agent/ops/__init__.py",
           "state": "existing"
         },
         {
-          "path": "openmagi_core_agent/ops/contracts.py",
+          "path": "magi_agent/ops/contracts.py",
           "state": "existing"
         },
         {
-          "path": "openmagi_core_agent/ops/health.py",
+          "path": "magi_agent/ops/health.py",
           "state": "existing"
         },
         {
-          "path": "openmagi_core_agent/ops/metrics.py",
+          "path": "magi_agent/ops/metrics.py",
           "state": "existing"
         },
         {
-          "path": "openmagi_core_agent/ops/recorder.py",
+          "path": "magi_agent/ops/recorder.py",
           "state": "existing"
         },
         {
-          "path": "openmagi_core_agent/ops/runtime_events.py",
+          "path": "magi_agent/ops/runtime_events.py",
           "state": "existing"
         },
         {
-          "path": "openmagi_core_agent/ops/safety.py",
+          "path": "magi_agent/ops/safety.py",
           "state": "existing"
         },
         {
-          "path": "openmagi_core_agent/ops/traces.py",
+          "path": "magi_agent/ops/traces.py",
           "state": "existing"
         },
         {
@@ -159,11 +159,11 @@
       ],
       "latestMainCoveredRefs": [
         {
-          "path": "openmagi_core_agent/runtime/long_running_activity.py",
+          "path": "magi_agent/runtime/long_running_activity.py",
           "state": "existing"
         },
         {
-          "path": "openmagi_core_agent/missions/background_tasks.py",
+          "path": "magi_agent/missions/background_tasks.py",
           "state": "existing"
         },
         {
@@ -171,7 +171,7 @@
           "state": "existing"
         },
         {
-          "path": "openmagi_core_agent/ops/job_queue.py",
+          "path": "magi_agent/ops/job_queue.py",
           "state": "existing"
         },
         {
@@ -216,11 +216,11 @@
       ],
       "latestMainCoveredRefs": [
         {
-          "path": "openmagi_core_agent/plugins/sandbox_policy.py",
+          "path": "magi_agent/plugins/sandbox_policy.py",
           "state": "existing"
         },
         {
-          "path": "openmagi_core_agent/tools/permission.py",
+          "path": "magi_agent/tools/permission.py",
           "state": "existing"
         },
         {
@@ -232,31 +232,31 @@
           "state": "existing"
         },
         {
-          "path": "openmagi_core_agent/sandbox/__init__.py",
+          "path": "magi_agent/sandbox/__init__.py",
           "state": "existing"
         },
         {
-          "path": "openmagi_core_agent/sandbox/policy.py",
+          "path": "magi_agent/sandbox/policy.py",
           "state": "existing"
         },
         {
-          "path": "openmagi_core_agent/sandbox/filesystem.py",
+          "path": "magi_agent/sandbox/filesystem.py",
           "state": "existing"
         },
         {
-          "path": "openmagi_core_agent/sandbox/network.py",
+          "path": "magi_agent/sandbox/network.py",
           "state": "existing"
         },
         {
-          "path": "openmagi_core_agent/sandbox/process.py",
+          "path": "magi_agent/sandbox/process.py",
           "state": "existing"
         },
         {
-          "path": "openmagi_core_agent/sandbox/browser.py",
+          "path": "magi_agent/sandbox/browser.py",
           "state": "existing"
         },
         {
-          "path": "openmagi_core_agent/sandbox/child_workspace.py",
+          "path": "magi_agent/sandbox/child_workspace.py",
           "state": "existing"
         },
         {
@@ -301,19 +301,19 @@
       ],
       "latestMainCoveredRefs": [
         {
-          "path": "openmagi_core_agent/storage/durable_store.py",
+          "path": "magi_agent/storage/durable_store.py",
           "state": "existing"
         },
         {
-          "path": "openmagi_core_agent/storage/memory_store.py",
+          "path": "magi_agent/storage/memory_store.py",
           "state": "existing"
         },
         {
-          "path": "openmagi_core_agent/storage/sqlite_store.py",
+          "path": "magi_agent/storage/sqlite_store.py",
           "state": "existing"
         },
         {
-          "path": "openmagi_core_agent/storage/content_addressed.py",
+          "path": "magi_agent/storage/content_addressed.py",
           "state": "existing"
         },
         {
@@ -373,11 +373,11 @@
       ],
       "latestMainCoveredRefs": [
         {
-          "path": "openmagi_core_agent/runtime/checkpointing.py",
+          "path": "magi_agent/runtime/checkpointing.py",
           "state": "existing"
         },
         {
-          "path": "openmagi_core_agent/evidence/ledger_semantics.py",
+          "path": "magi_agent/evidence/ledger_semantics.py",
           "state": "existing"
         },
         {
@@ -389,7 +389,7 @@
           "state": "existing"
         },
         {
-          "path": "openmagi_core_agent/storage/content_addressed.py",
+          "path": "magi_agent/storage/content_addressed.py",
           "state": "existing"
         },
         {
@@ -441,11 +441,11 @@
       ],
       "latestMainCoveredRefs": [
         {
-          "path": "openmagi_core_agent/runtime/request_shape.py",
+          "path": "magi_agent/runtime/request_shape.py",
           "state": "existing"
         },
         {
-          "path": "openmagi_core_agent/gates/gate1a_readonly_tools.py",
+          "path": "magi_agent/gates/gate1a_readonly_tools.py",
           "state": "existing"
         },
         {
@@ -453,23 +453,23 @@
           "state": "existing"
         },
         {
-          "path": "openmagi_core_agent/tenancy/__init__.py",
+          "path": "magi_agent/tenancy/__init__.py",
           "state": "existing"
         },
         {
-          "path": "openmagi_core_agent/tenancy/context.py",
+          "path": "magi_agent/tenancy/context.py",
           "state": "existing"
         },
         {
-          "path": "openmagi_core_agent/billing/__init__.py",
+          "path": "magi_agent/billing/__init__.py",
           "state": "existing"
         },
         {
-          "path": "openmagi_core_agent/billing/quota.py",
+          "path": "magi_agent/billing/quota.py",
           "state": "existing"
         },
         {
-          "path": "openmagi_core_agent/billing/spend_guard.py",
+          "path": "magi_agent/billing/spend_guard.py",
           "state": "existing"
         },
         {
@@ -516,11 +516,11 @@
       ],
       "latestMainCoveredRefs": [
         {
-          "path": "openmagi_core_agent/plugins/manifest.py",
+          "path": "magi_agent/plugins/manifest.py",
           "state": "existing"
         },
         {
-          "path": "openmagi_core_agent/plugins/manager.py",
+          "path": "magi_agent/plugins/manager.py",
           "state": "existing"
         },
         {
@@ -532,15 +532,15 @@
           "state": "existing"
         },
         {
-          "path": "openmagi_core_agent/connectors/__init__.py",
+          "path": "magi_agent/connectors/__init__.py",
           "state": "existing"
         },
         {
-          "path": "openmagi_core_agent/connectors/registry.py",
+          "path": "magi_agent/connectors/registry.py",
           "state": "existing"
         },
         {
-          "path": "openmagi_core_agent/connectors/credential_lease.py",
+          "path": "magi_agent/connectors/credential_lease.py",
           "state": "existing"
         },
         {
@@ -588,23 +588,23 @@
       ],
       "latestMainCoveredRefs": [
         {
-          "path": "openmagi_core_agent/artifacts/delivery_boundary.py",
+          "path": "magi_agent/artifacts/delivery_boundary.py",
           "state": "existing"
         },
         {
-          "path": "openmagi_core_agent/artifacts/file_delivery.py",
+          "path": "magi_agent/artifacts/file_delivery.py",
           "state": "existing"
         },
         {
-          "path": "openmagi_core_agent/artifacts/local_result_store.py",
+          "path": "magi_agent/artifacts/local_result_store.py",
           "state": "existing"
         },
         {
-          "path": "openmagi_core_agent/artifacts/render_verification.py",
+          "path": "magi_agent/artifacts/render_verification.py",
           "state": "existing"
         },
         {
-          "path": "openmagi_core_agent/artifacts/delivery_receipts.py",
+          "path": "magi_agent/artifacts/delivery_receipts.py",
           "state": "existing"
         },
         {
@@ -661,15 +661,15 @@
       ],
       "latestMainCoveredRefs": [
         {
-          "path": "openmagi_core_agent/runtime/control.py",
+          "path": "magi_agent/runtime/control.py",
           "state": "existing"
         },
         {
-          "path": "openmagi_core_agent/tools/permission.py",
+          "path": "magi_agent/tools/permission.py",
           "state": "existing"
         },
         {
-          "path": "openmagi_core_agent/permissions/auto_control.py",
+          "path": "magi_agent/permissions/auto_control.py",
           "state": "existing"
         },
         {
@@ -725,11 +725,11 @@
       ],
       "latestMainCoveredRefs": [
         {
-          "path": "openmagi_core_agent/evals/regression_gates.py",
+          "path": "magi_agent/evals/regression_gates.py",
           "state": "existing"
         },
         {
-          "path": "openmagi_core_agent/shadow/adk_eval_fixture_contract.py",
+          "path": "magi_agent/shadow/adk_eval_fixture_contract.py",
           "state": "existing"
         },
         {
@@ -741,7 +741,7 @@
           "state": "existing"
         },
         {
-          "path": "openmagi_core_agent/evals/release_gates.py",
+          "path": "magi_agent/evals/release_gates.py",
           "state": "existing"
         },
         {
@@ -788,15 +788,15 @@
       ],
       "latestMainCoveredRefs": [
         {
-          "path": "openmagi_core_agent/plugins/extension_boundary.py",
+          "path": "magi_agent/plugins/extension_boundary.py",
           "state": "existing"
         },
         {
-          "path": "openmagi_core_agent/plugins/mcp_adapter.py",
+          "path": "magi_agent/plugins/mcp_adapter.py",
           "state": "existing"
         },
         {
-          "path": "openmagi_core_agent/plugins/native_catalog.py",
+          "path": "magi_agent/plugins/native_catalog.py",
           "state": "existing"
         },
         {
@@ -808,7 +808,7 @@
           "state": "existing"
         },
         {
-          "path": "openmagi_core_agent/connectors/marketplace.py",
+          "path": "magi_agent/connectors/marketplace.py",
           "state": "existing"
         },
         {
@@ -855,11 +855,11 @@
       ],
       "latestMainCoveredRefs": [
         {
-          "path": "openmagi_core_agent/transport/health.py",
+          "path": "magi_agent/transport/health.py",
           "state": "existing"
         },
         {
-          "path": "openmagi_core_agent/transport/plugins.py",
+          "path": "magi_agent/transport/plugins.py",
           "state": "existing"
         },
         {
@@ -871,7 +871,7 @@
           "state": "existing"
         },
         {
-          "path": "openmagi_core_agent/transport/product_admin.py",
+          "path": "magi_agent/transport/product_admin.py",
           "state": "existing"
         },
         {
@@ -919,7 +919,7 @@
       ],
       "latestMainCoveredRefs": [
         {
-          "path": "openmagi_core_agent/plugins/audit.py",
+          "path": "magi_agent/plugins/audit.py",
           "state": "existing"
         },
         {
@@ -931,7 +931,7 @@
           "state": "existing"
         },
         {
-          "path": "openmagi_core_agent/security/compliance.py",
+          "path": "magi_agent/security/compliance.py",
           "state": "existing"
         },
         {

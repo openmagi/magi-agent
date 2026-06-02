@@ -4,35 +4,35 @@ import json
 import subprocess
 import sys
 
-from openmagi_core_agent.evidence.citation_audit import (
+from magi_agent.evidence.citation_audit import (
     CitationAuditRequest,
     audit_citations,
 )
-from openmagi_core_agent.evidence.event_projection import (
+from magi_agent.evidence.event_projection import (
     project_evidence_verdict_rule_event,
     project_source_ledger_events,
     project_verifier_result_rule_event,
 )
 from runtime_issuance_support import issue_test_runtime_authority
-from openmagi_core_agent.evidence.source_ledger import LocalResearchSourceLedger
-from openmagi_core_agent.evidence.types import (
+from magi_agent.evidence.source_ledger import LocalResearchSourceLedger
+from magi_agent.evidence.types import (
     EvidenceContractFailure,
     EvidenceContractVerdict,
     EvidenceRecord,
     EvidenceRequirement,
     EvidenceSource,
 )
-from openmagi_core_agent.harness.verifier_bus import VerifierResultMetadata
-from openmagi_core_agent.research.event_projection import (
+from magi_agent.harness.verifier_bus import VerifierResultMetadata
+from magi_agent.research.event_projection import (
     project_citation_audit_rule_events,
     project_source_proof_rule_events,
 )
-from openmagi_core_agent.research.source_proof import (
+from magi_agent.research.source_proof import (
     ResearchSourceOpenReceiptRef,
     ResearchSourceProofRequirement,
     verify_research_source_proof,
 )
-from openmagi_core_agent.transport.sse import InMemorySseWriter
+from magi_agent.transport.sse import InMemorySseWriter
 
 
 def _digest(char: str = "a") -> str:
@@ -518,22 +518,22 @@ def test_evidence_event_projection_import_stays_live_authority_free() -> None:
 import importlib
 import sys
 
-module = importlib.import_module("openmagi_core_agent.evidence.event_projection")
+module = importlib.import_module("magi_agent.evidence.event_projection")
 assert hasattr(module, "project_source_ledger_events")
 
 forbidden_prefixes = (
     "google.adk",
-    "openmagi_core_agent.adk_bridge.runner_adapter",
-    "openmagi_core_agent.browser",
-    "openmagi_core_agent.fetch",
-    "openmagi_core_agent.memory",
-    "openmagi_core_agent.research",
-    "openmagi_core_agent.routing",
-    "openmagi_core_agent.search",
-    "openmagi_core_agent.tools.dispatcher",
-    "openmagi_core_agent.tools.registry",
-    "openmagi_core_agent.transport.chat",
-    "openmagi_core_agent.transport.tools",
+    "magi_agent.adk_bridge.runner_adapter",
+    "magi_agent.browser",
+    "magi_agent.fetch",
+    "magi_agent.memory",
+    "magi_agent.research",
+    "magi_agent.routing",
+    "magi_agent.search",
+    "magi_agent.tools.dispatcher",
+    "magi_agent.tools.registry",
+    "magi_agent.transport.chat",
+    "magi_agent.transport.tools",
 )
 loaded = [
     name

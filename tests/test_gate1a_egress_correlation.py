@@ -2,7 +2,7 @@ import json
 
 import pytest
 
-from openmagi_core_agent.evidence.gate1a_egress_correlation import (
+from magi_agent.evidence.gate1a_egress_correlation import (
     Gate1AEgressCorrelationContext,
     build_gate1a_proxy_http_options,
     gate1a_correlation_headers,
@@ -76,7 +76,7 @@ def test_build_gate1a_proxy_http_options_sets_proxy_connect_headers_only() -> No
 
     http_options = build_gate1a_proxy_http_options(
         context,
-        proxy_url="http://gate5b-gemini-egress-proxy.clawy-system.svc.cluster.local:8080",
+        proxy_url="http://gate5b-gemini-egress-proxy.magi-system.svc.cluster.local:8080",
     )
 
     for args_name in ("client_args", "async_client_args"):
@@ -122,7 +122,7 @@ def test_build_gate1a_proxy_http_options_uses_httpx_transports_for_async_calls()
 
     http_options = build_gate1a_proxy_http_options(
         context,
-        proxy_url="http://gate5b-gemini-egress-proxy.clawy-system.svc.cluster.local:8080",
+        proxy_url="http://gate5b-gemini-egress-proxy.magi-system.svc.cluster.local:8080",
     )
 
     assert "proxy" not in (http_options.async_client_args or {})

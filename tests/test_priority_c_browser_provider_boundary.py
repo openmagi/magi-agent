@@ -31,7 +31,7 @@ class FakeBrowserProvider:
 
 
 def test_browser_provider_defaults_off_and_never_calls_provider() -> None:
-    from openmagi_core_agent.browser.provider_boundary import (
+    from magi_agent.browser.provider_boundary import (
         BrowserProviderConfig,
         BrowserRequest,
         LocalBrowserProviderRuntime,
@@ -50,7 +50,7 @@ def test_browser_provider_defaults_off_and_never_calls_provider() -> None:
 
 
 def test_browser_open_snapshot_scrape_and_screenshot_emit_only_safe_refs() -> None:
-    from openmagi_core_agent.browser.provider_boundary import (
+    from magi_agent.browser.provider_boundary import (
         BrowserProviderConfig,
         BrowserRequest,
         LocalBrowserProviderRuntime,
@@ -113,7 +113,7 @@ def test_browser_open_snapshot_scrape_and_screenshot_emit_only_safe_refs() -> No
 
 
 def test_browser_provider_blocks_private_auth_captcha_and_cluster_urls_before_calls() -> None:
-    from openmagi_core_agent.browser.provider_boundary import (
+    from magi_agent.browser.provider_boundary import (
         BrowserProviderConfig,
         BrowserRequest,
         LocalBrowserProviderRuntime,
@@ -143,7 +143,7 @@ def test_browser_provider_blocks_private_auth_captcha_and_cluster_urls_before_ca
 
 
 def test_browser_provider_rejects_unmarked_local_fake_provider() -> None:
-    from openmagi_core_agent.browser.provider_boundary import (
+    from magi_agent.browser.provider_boundary import (
         BrowserProviderConfig,
         BrowserRequest,
         LocalBrowserProviderRuntime,
@@ -166,7 +166,7 @@ def test_browser_provider_rejects_unmarked_local_fake_provider() -> None:
 
 
 def test_browser_mutating_actions_are_approval_gated_and_sanitized() -> None:
-    from openmagi_core_agent.browser.provider_boundary import (
+    from magi_agent.browser.provider_boundary import (
         BrowserProviderConfig,
         BrowserRequest,
         LocalBrowserProviderRuntime,
@@ -215,7 +215,7 @@ def test_browser_mutating_actions_are_approval_gated_and_sanitized() -> None:
 
 
 def test_browser_screenshot_path_and_scroll_validation_happen_before_calls() -> None:
-    from openmagi_core_agent.browser.provider_boundary import (
+    from magi_agent.browser.provider_boundary import (
         BrowserProviderConfig,
         BrowserRequest,
         LocalBrowserProviderRuntime,
@@ -246,7 +246,7 @@ def test_browser_screenshot_path_and_scroll_validation_happen_before_calls() -> 
 
 
 def test_browser_session_lease_blocks_out_of_order_actions_and_budgets() -> None:
-    from openmagi_core_agent.browser.provider_boundary import (
+    from magi_agent.browser.provider_boundary import (
         BrowserRequest,
         BrowserSessionLease,
         evaluate_browser_session_action,
@@ -364,7 +364,7 @@ def test_browser_session_lease_blocks_out_of_order_actions_and_budgets() -> None
 
 
 def test_browser_public_projection_redacts_forged_frame_preview_and_refs() -> None:
-    from openmagi_core_agent.browser.provider_boundary import (
+    from magi_agent.browser.provider_boundary import (
         BrowserProviderResult,
         BrowserSourceRecord,
     )
@@ -426,7 +426,7 @@ def test_browser_public_projection_redacts_forged_frame_preview_and_refs() -> No
 
 
 def test_browser_local_runtime_rejects_records_when_sanitized_output_has_no_public_evidence() -> None:
-    from openmagi_core_agent.browser.provider_boundary import (
+    from magi_agent.browser.provider_boundary import (
         BrowserProviderConfig,
         BrowserRequest,
         LocalBrowserProviderRuntime,
@@ -459,7 +459,7 @@ def test_browser_local_runtime_rejects_records_when_sanitized_output_has_no_publ
 def test_browser_import_boundary_has_no_live_browser_or_runtime_imports() -> None:
     module_path = (
         Path(__file__).parents[1]
-        / "openmagi_core_agent"
+        / "magi_agent"
         / "browser"
         / "provider_boundary.py"
     )
@@ -474,9 +474,9 @@ def test_browser_import_boundary_has_no_live_browser_or_runtime_imports() -> Non
 
     forbidden_prefixes = (
         "google.adk.runners",
-        "openmagi_core_agent.adk_bridge",
-        "openmagi_core_agent.tools",
-        "openmagi_core_agent.transport",
+        "magi_agent.adk_bridge",
+        "magi_agent.tools",
+        "magi_agent.transport",
         "socket",
         "subprocess",
         "httpx",
@@ -496,7 +496,7 @@ def test_browser_import_boundary_has_no_live_browser_or_runtime_imports() -> Non
 
 
 def test_browser_local_runtime_uses_shared_provider_execution_boundary(monkeypatch) -> None:
-    from openmagi_core_agent.browser import provider_boundary
+    from magi_agent.browser import provider_boundary
 
     calls: list[tuple[str, str]] = []
     original_execute = provider_boundary.ProviderExecutionBoundary.execute

@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from openmagi_core_agent.shadow.gate4_bridge import (
+from magi_agent.shadow.gate4_bridge import (
     Gate4LocalBridgeConfig,
     Gate4LocalBridgeError,
     run_gate4_local_bridge,

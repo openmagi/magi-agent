@@ -8,9 +8,9 @@ from types import SimpleNamespace
 import pytest
 from google.adk.events import Event
 
-from openmagi_core_agent.config.env import parse_gate3a_recorded_replay_env
-from openmagi_core_agent.shadow.gate3a_bundle import Gate3ARecordedBundle
-from openmagi_core_agent.shadow.gate3a_replay import (
+from magi_agent.config.env import parse_gate3a_recorded_replay_env
+from magi_agent.shadow.gate3a_bundle import Gate3ARecordedBundle
+from magi_agent.shadow.gate3a_replay import (
     Gate3ALocalReplayRunner,
     Gate3AReplayError,
     RecordedOutputToolPolicy,
@@ -84,9 +84,9 @@ def test_gate3a_recorded_replay_flags_are_disabled_by_default() -> None:
         "/mnt/pvc/core-agent",
         "supabase://project/transcripts",
         "s3://prod-bucket/shadow",
-        "https://clawy.pro/shadow",
+        "https://openmagi.ai/shadow",
         "file:///tmp/gate3a",
-        "clawy.pro/local-shadow",
+        "openmagi.ai/local-shadow",
         "./infra/k8s/prod",
         "./k3s/prod",
         "~/.kube/config",
@@ -304,7 +304,7 @@ def test_replay_sanitizes_runner_exception_details_before_report_failures(
 def test_replay_sanitizes_general_absolute_runner_exception_paths(
     tmp_path: Path,
 ) -> None:
-    raw_detail = "failed at /Users/kevin/Desktop/clawy/private.txt and C:\\Users\\kevin\\secret.txt"
+    raw_detail = "failed at /Users/kevin/Desktop/openmagi/private.txt and C:\\Users\\kevin\\secret.txt"
 
     report = asyncio.run(
         run_gate3a_recorded_replay_async(
@@ -315,7 +315,7 @@ def test_replay_sanitizes_general_absolute_runner_exception_paths(
     )
 
     failures_text = " ".join(report.failures)
-    assert "/Users/kevin/Desktop/clawy/private.txt" not in failures_text
+    assert "/Users/kevin/Desktop/openmagi/private.txt" not in failures_text
     assert "C:\\Users\\kevin\\secret.txt" not in failures_text
     assert report.parity.event_projection == "runner_failure"
 

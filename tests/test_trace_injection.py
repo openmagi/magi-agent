@@ -9,8 +9,8 @@ import asyncio
 
 import pytest
 
-from openmagi_core_agent.telemetry.execution_trace import ExecutionTrace
-from openmagi_core_agent.telemetry.trace_context import get_trace, set_trace
+from magi_agent.telemetry.execution_trace import ExecutionTrace
+from magi_agent.telemetry.trace_context import get_trace, set_trace
 
 
 # ---------------------------------------------------------------------------
@@ -47,11 +47,11 @@ class TestToolDispatcherTraceInjection:
     """Verify trace points in ToolDispatcher.dispatch()."""
 
     def _make_dispatcher(self) -> object:
-        from openmagi_core_agent.tools.context import ToolContext
-        from openmagi_core_agent.tools.dispatcher import ToolDispatcher
-        from openmagi_core_agent.tools.manifest import ToolManifest, ToolSource
-        from openmagi_core_agent.tools.registry import ToolRegistry
-        from openmagi_core_agent.tools.result import ToolResult
+        from magi_agent.tools.context import ToolContext
+        from magi_agent.tools.dispatcher import ToolDispatcher
+        from magi_agent.tools.manifest import ToolManifest, ToolSource
+        from magi_agent.tools.registry import ToolRegistry
+        from magi_agent.tools.result import ToolResult
 
         registry = ToolRegistry()
         source = ToolSource(kind="builtin", package="test")
@@ -143,12 +143,12 @@ class TestConcurrentDispatcherTraceInjection:
     """Verify trace points in ConcurrentToolDispatcher.dispatch_batch()."""
 
     def _make_concurrent_dispatcher(self, *, enabled: bool = True):
-        from openmagi_core_agent.tools.concurrency import ConcurrencyConfig, ToolCall
-        from openmagi_core_agent.tools.concurrent_dispatcher import ConcurrentToolDispatcher
-        from openmagi_core_agent.tools.context import ToolContext
-        from openmagi_core_agent.tools.manifest import ToolManifest, ToolSource
-        from openmagi_core_agent.tools.registry import ToolRegistry
-        from openmagi_core_agent.tools.result import ToolResult
+        from magi_agent.tools.concurrency import ConcurrencyConfig, ToolCall
+        from magi_agent.tools.concurrent_dispatcher import ConcurrentToolDispatcher
+        from magi_agent.tools.context import ToolContext
+        from magi_agent.tools.manifest import ToolManifest, ToolSource
+        from magi_agent.tools.registry import ToolRegistry
+        from magi_agent.tools.result import ToolResult
 
         registry = ToolRegistry()
         source = ToolSource(kind="builtin", package="test")
@@ -235,12 +235,12 @@ class TestHookBusTraceInjection:
     """Verify trace points in HookBus.run() and run_async()."""
 
     def _make_bus(self, *, hook_count: int = 1):
-        from openmagi_core_agent.harness.resolved import build_default_resolved_harness_state
-        from openmagi_core_agent.hooks.bus import HookBus, RegisteredHook
-        from openmagi_core_agent.hooks.context import HookContext
-        from openmagi_core_agent.hooks.manifest import HookManifest, HookPoint, HookScope
-        from openmagi_core_agent.hooks.result import HookResult
-        from openmagi_core_agent.tools.manifest import ToolSource
+        from magi_agent.harness.resolved import build_default_resolved_harness_state
+        from magi_agent.hooks.bus import HookBus, RegisteredHook
+        from magi_agent.hooks.context import HookContext
+        from magi_agent.hooks.manifest import HookManifest, HookPoint, HookScope
+        from magi_agent.hooks.result import HookResult
+        from magi_agent.tools.manifest import ToolSource
 
         hooks = []
         for i in range(hook_count):
@@ -266,7 +266,7 @@ class TestHookBusTraceInjection:
         return bus, context, harness_state
 
     def test_run_trace_recorded(self) -> None:
-        from openmagi_core_agent.hooks.manifest import HookPoint
+        from magi_agent.hooks.manifest import HookPoint
 
         trace = _setup_trace()
         try:
@@ -280,7 +280,7 @@ class TestHookBusTraceInjection:
             _teardown_trace()
 
     def test_run_async_trace_recorded(self) -> None:
-        from openmagi_core_agent.hooks.manifest import HookPoint
+        from magi_agent.hooks.manifest import HookPoint
 
         trace = _setup_trace()
         try:
@@ -295,7 +295,7 @@ class TestHookBusTraceInjection:
             _teardown_trace()
 
     def test_no_crash_when_trace_disabled(self) -> None:
-        from openmagi_core_agent.hooks.manifest import HookPoint
+        from magi_agent.hooks.manifest import HookPoint
 
         set_trace(None)
         bus, context, harness_state = self._make_bus()
@@ -312,8 +312,8 @@ class TestEvidenceContractTraceInjection:
     """Verify trace points in evaluate_evidence_contract()."""
 
     def test_evaluate_trace_recorded(self) -> None:
-        from openmagi_core_agent.evidence.contracts import evaluate_evidence_contract
-        from openmagi_core_agent.evidence.types import (
+        from magi_agent.evidence.contracts import evaluate_evidence_contract
+        from magi_agent.evidence.types import (
             EvidenceContract,
             EvidenceRecord,
             EvidenceRequirement,
@@ -346,8 +346,8 @@ class TestEvidenceContractTraceInjection:
             _teardown_trace()
 
     def test_evaluate_failing_contract_trace(self) -> None:
-        from openmagi_core_agent.evidence.contracts import evaluate_evidence_contract
-        from openmagi_core_agent.evidence.types import (
+        from magi_agent.evidence.contracts import evaluate_evidence_contract
+        from magi_agent.evidence.types import (
             EvidenceContract,
             EvidenceRequirement,
         )
@@ -370,8 +370,8 @@ class TestEvidenceContractTraceInjection:
             _teardown_trace()
 
     def test_no_crash_when_trace_disabled(self) -> None:
-        from openmagi_core_agent.evidence.contracts import evaluate_evidence_contract
-        from openmagi_core_agent.evidence.types import (
+        from magi_agent.evidence.contracts import evaluate_evidence_contract
+        from magi_agent.evidence.types import (
             EvidenceContract,
             EvidenceRequirement,
         )
@@ -398,9 +398,9 @@ class TestHarnessEngineTraceInjection:
     """Verify trace points in HarnessEngine.resolve()."""
 
     def test_resolve_trace_recorded(self) -> None:
-        from openmagi_core_agent.harness.engine import HarnessEngine, HarnessResolutionRequest
-        from openmagi_core_agent.hooks.manifest import HookManifest, HookPoint, HookScope
-        from openmagi_core_agent.tools.manifest import ToolSource
+        from magi_agent.harness.engine import HarnessEngine, HarnessResolutionRequest
+        from magi_agent.hooks.manifest import HookManifest, HookPoint, HookScope
+        from magi_agent.tools.manifest import ToolSource
 
         trace = _setup_trace()
         try:
@@ -440,7 +440,7 @@ class TestHarnessEngineTraceInjection:
             _teardown_trace()
 
     def test_no_crash_when_trace_disabled(self) -> None:
-        from openmagi_core_agent.harness.engine import HarnessEngine, HarnessResolutionRequest
+        from magi_agent.harness.engine import HarnessEngine, HarnessResolutionRequest
 
         set_trace(None)
         engine = HarnessEngine()

@@ -7,16 +7,16 @@ import subprocess
 import sys
 from pathlib import Path
 
-from openmagi_core_agent.evidence.source_ledger import (
+from magi_agent.evidence.source_ledger import (
     LocalResearchSourceLedger,
     public_source_ledger_report,
 )
-from openmagi_core_agent.tools.context import ToolContext
-from openmagi_core_agent.web_acquisition.provider_boundary import (
+from magi_agent.tools.context import ToolContext
+from magi_agent.web_acquisition.provider_boundary import (
     LocalWebAcquisitionRuntime,
     WebAcquisitionConfig,
 )
-from openmagi_core_agent.web_acquisition.research_tools import (
+from magi_agent.web_acquisition.research_tools import (
     LocalWebResearchToolBoundary,
     project_web_acquisition_result_to_source_ledger,
 )
@@ -293,7 +293,7 @@ def test_project_web_acquisition_result_records_current_turn_source_ledger_metad
 def test_web_research_tools_import_boundary_has_no_live_or_network_imports() -> None:
     module_path = (
         Path(__file__).parents[1]
-        / "openmagi_core_agent"
+        / "magi_agent"
         / "web_acquisition"
         / "research_tools.py"
     )
@@ -307,10 +307,10 @@ def test_web_research_tools_import_boundary_has_no_live_or_network_imports() -> 
             imported_modules.add(node.module)
 
     forbidden_prefixes = (
-        "openmagi_core_agent.adk_bridge",
-        "openmagi_core_agent.browser",
-        "openmagi_core_agent.transport",
-        "openmagi_core_agent.web_acquisition.live_provider_pack",
+        "magi_agent.adk_bridge",
+        "magi_agent.browser",
+        "magi_agent.transport",
+        "magi_agent.web_acquisition.live_provider_pack",
         "socket",
         "subprocess",
         "httpx",
@@ -335,12 +335,12 @@ def test_web_research_tools_import_boundary_has_no_live_or_network_imports() -> 
 import importlib
 import sys
 
-module = importlib.import_module("openmagi_core_agent.web_acquisition.research_tools")
+module = importlib.import_module("magi_agent.web_acquisition.research_tools")
 assert hasattr(module, "LocalWebResearchToolBoundary")
 
 forbidden_loaded = (
-    "openmagi_core_agent.adk_bridge.local_toolhost",
-    "openmagi_core_agent.web_acquisition.live_provider_pack",
+    "magi_agent.adk_bridge.local_toolhost",
+    "magi_agent.web_acquisition.live_provider_pack",
 )
 loaded = [name for name in forbidden_loaded if name in sys.modules]
 if loaded:

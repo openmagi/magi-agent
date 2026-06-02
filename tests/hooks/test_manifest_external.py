@@ -15,17 +15,17 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
-from openmagi_core_agent.hooks.context import HookContext
-from openmagi_core_agent.hooks.executors import HookExecutor, ExecutionType, get_executor
-from openmagi_core_agent.hooks.manifest import HookManifest, HookPoint
-from openmagi_core_agent.hooks.result import HookResult
-from openmagi_core_agent.tools.manifest import ToolSource
+from magi_agent.hooks.context import HookContext
+from magi_agent.hooks.executors import HookExecutor, ExecutionType, get_executor
+from magi_agent.hooks.manifest import HookManifest, HookPoint
+from magi_agent.hooks.result import HookResult
+from magi_agent.tools.manifest import ToolSource
 
 # ---------------------------------------------------------------------------
 # Shared fixtures
 # ---------------------------------------------------------------------------
 
-_SOURCE = ToolSource(kind="builtin", package="openmagi_core_agent.hooks.tests")
+_SOURCE = ToolSource(kind="builtin", package="magi_agent.hooks.tests")
 
 _BASE = dict(
     name="test-hook",

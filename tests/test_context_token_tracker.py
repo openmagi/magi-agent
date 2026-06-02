@@ -1,15 +1,15 @@
-"""Tests for openmagi_core_agent.context.token_tracker.TokenBudgetTracker."""
+"""Tests for magi_agent.context.token_tracker.TokenBudgetTracker."""
 from __future__ import annotations
 
 import json
 
 import pytest
 
-from openmagi_core_agent.context.token_tracker import (
+from magi_agent.context.token_tracker import (
     _DEFAULT_CONTEXT_WINDOW,
     TokenBudgetTracker,
 )
-from openmagi_core_agent.context.types import (
+from magi_agent.context.types import (
     ContextManagementConfig,
     WarningLevel,
 )

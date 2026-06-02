@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 
-from openmagi_core_agent.runtime.evidence_first_projection import (
+from magi_agent.runtime.evidence_first_projection import (
     EvidenceFirstProjection,
     EvidenceFirstProjectionRequest,
 )

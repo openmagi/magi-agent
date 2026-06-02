@@ -6,13 +6,13 @@ from collections.abc import Callable
 
 import pytest
 
-from openmagi_core_agent.tools import (
+from magi_agent.tools import (
     ToolDispatcher,
     ToolRegistry,
     ToolResult,
     register_core_tool_manifests,
 )
-from openmagi_core_agent.tools.context import ToolContext as OpenMagiToolContext
+from magi_agent.tools.context import ToolContext as OpenMagiToolContext
 
 
 LOCAL_READ_TOOLS = ("FileRead", "Glob", "Grep")
@@ -61,7 +61,7 @@ def enabled_core_registry(*tool_names: str) -> ToolRegistry:
 
 
 def test_explore_research_agent_grants_no_mutation_shell_test_git_or_artifact_write_tools() -> None:
-    from openmagi_core_agent.recipes.research_agents import materialize_research_agent
+    from magi_agent.recipes.research_agents import materialize_research_agent
 
     decision = materialize_research_agent(
         "explore",
@@ -78,7 +78,7 @@ def test_explore_research_agent_grants_no_mutation_shell_test_git_or_artifact_wr
 
 
 def test_plan_research_agent_grants_no_mutation_shell_test_git_or_artifact_write_tools() -> None:
-    from openmagi_core_agent.recipes.research_agents import materialize_research_agent
+    from magi_agent.recipes.research_agents import materialize_research_agent
 
     decision = materialize_research_agent(
         "plan",
@@ -94,7 +94,7 @@ def test_plan_research_agent_grants_no_mutation_shell_test_git_or_artifact_write
 
 
 def test_verifier_research_agent_has_structured_pass_fail_partial_output_schema() -> None:
-    from openmagi_core_agent.recipes.research_agents import materialize_research_agent
+    from magi_agent.recipes.research_agents import materialize_research_agent
 
     decision = materialize_research_agent("verifier", available_tools=LOCAL_READ_TOOLS)
 
@@ -108,7 +108,7 @@ def test_verifier_research_agent_has_structured_pass_fail_partial_output_schema(
 
 
 def test_scout_research_profile_is_fixture_only_default_off_metadata() -> None:
-    from openmagi_core_agent.recipes.research_agents import (
+    from magi_agent.recipes.research_agents import (
         materialize_scout_research_profile,
     )
 
@@ -146,7 +146,7 @@ def test_scout_research_profile_is_fixture_only_default_off_metadata() -> None:
 def test_scout_research_profile_rejects_live_tool_names_and_adk_attachment() -> None:
     from pydantic import ValidationError
 
-    from openmagi_core_agent.recipes.research_agents import (
+    from magi_agent.recipes.research_agents import (
         ScoutResearchAgentProfile,
         materialize_scout_research_profile,
     )
@@ -203,14 +203,14 @@ def test_scout_research_profile_rejects_live_tool_names_and_adk_attachment() -> 
 
 
 def test_scout_profile_does_not_add_live_route_type() -> None:
-    from openmagi_core_agent.recipes.research_agents import materialize_research_agent
+    from magi_agent.recipes.research_agents import materialize_research_agent
 
     with pytest.raises(ValueError, match="unsupported research route"):
         materialize_research_agent("scout", available_tools=SCOUT_FIXTURE_TOOLS)
 
 
 def test_direct_route_never_spawns_child_agents() -> None:
-    from openmagi_core_agent.recipes.research_agents import materialize_research_agent
+    from magi_agent.recipes.research_agents import materialize_research_agent
 
     decision = materialize_research_agent("direct", available_tools=LOCAL_READ_TOOLS)
 
@@ -222,7 +222,7 @@ def test_direct_route_never_spawns_child_agents() -> None:
 
 
 def test_broad_codebase_route_selects_explore() -> None:
-    from openmagi_core_agent.harness.research_routing import classify_research_route
+    from magi_agent.harness.research_routing import classify_research_route
 
     route = classify_research_route(
         "Investigate how auth state flows across the repo and summarize the key files.",
@@ -235,7 +235,7 @@ def test_broad_codebase_route_selects_explore() -> None:
 
 
 def test_implementation_planning_route_selects_plan() -> None:
-    from openmagi_core_agent.harness.research_routing import classify_research_route
+    from magi_agent.harness.research_routing import classify_research_route
 
     route = classify_research_route(
         "Create an implementation plan and architecture proposal for the retry layer.",
@@ -247,14 +247,14 @@ def test_implementation_planning_route_selects_plan() -> None:
 
 
 def test_known_file_lookup_with_check_and_current_changes_stays_direct() -> None:
-    from openmagi_core_agent.harness.research_routing import classify_research_route
+    from magi_agent.harness.research_routing import classify_research_route
 
     generic_check = classify_research_route(
         "Check README.md for the package instructions.",
         available_tools=LOCAL_READ_TOOLS,
     )
     current_changes = classify_research_route(
-        "Check current changes under infra/docker/clawy-core-agent-python/openmagi_core_agent/recipes/research_agents.py.",
+        "Check current changes under magi-agent/magi_agent/recipes/research_agents.py.",
         available_tools=LOCAL_READ_TOOLS,
     )
 
@@ -265,8 +265,8 @@ def test_known_file_lookup_with_check_and_current_changes_stays_direct() -> None
 
 
 def test_web_current_route_blocks_with_missing_web_tools_until_web_tools_exist() -> None:
-    from openmagi_core_agent.harness.research_routing import classify_research_route
-    from openmagi_core_agent.recipes.research_agents import materialize_research_agent
+    from magi_agent.harness.research_routing import classify_research_route
+    from magi_agent.recipes.research_agents import materialize_research_agent
 
     route = classify_research_route(
         "Find the latest public facts about the current OpenAI API model lineup.",
@@ -286,8 +286,8 @@ def test_web_current_route_blocks_with_missing_web_tools_until_web_tools_exist()
 
 
 def test_route_carried_available_tools_are_used_for_materialization() -> None:
-    from openmagi_core_agent.harness.research_routing import classify_research_route
-    from openmagi_core_agent.recipes.research_agents import materialize_research_agent
+    from magi_agent.harness.research_routing import classify_research_route
+    from magi_agent.recipes.research_agents import materialize_research_agent
 
     route = classify_research_route(
         "Find the latest public facts about OpenMagi.",
@@ -301,7 +301,7 @@ def test_route_carried_available_tools_are_used_for_materialization() -> None:
 
 
 def test_research_contract_payloads_are_deeply_immutable() -> None:
-    from openmagi_core_agent.recipes.research_agents import materialize_research_agent
+    from magi_agent.recipes.research_agents import materialize_research_agent
 
     decision = materialize_research_agent("verifier", available_tools=LOCAL_READ_TOOLS)
 
@@ -329,7 +329,7 @@ def test_research_contract_payloads_are_deeply_immutable() -> None:
 
 
 def test_attach_enabled_false_yields_no_adk_tools_even_when_registry_is_available() -> None:
-    from openmagi_core_agent.recipes.research_agents import materialize_research_agent
+    from magi_agent.recipes.research_agents import materialize_research_agent
 
     registry = enabled_core_registry(*LOCAL_READ_TOOLS)
     decision = materialize_research_agent(
@@ -348,7 +348,7 @@ def test_attach_enabled_false_yields_no_adk_tools_even_when_registry_is_availabl
 
 
 def test_granted_tool_attachment_preserves_grant_order() -> None:
-    from openmagi_core_agent.adk_bridge.tool_adapter import build_adk_function_tools_for_granted_names
+    from magi_agent.adk_bridge.tool_adapter import build_adk_function_tools_for_granted_names
 
     registry = enabled_core_registry(*LOCAL_READ_TOOLS)
 
@@ -365,7 +365,7 @@ def test_granted_tool_attachment_preserves_grant_order() -> None:
 
 
 def test_attach_enabled_true_exposes_only_granted_local_readonly_tools() -> None:
-    from openmagi_core_agent.recipes.research_agents import materialize_research_agent
+    from magi_agent.recipes.research_agents import materialize_research_agent
 
     registry = enabled_core_registry(
         *LOCAL_READ_TOOLS,
@@ -396,15 +396,15 @@ def test_attach_enabled_true_exposes_only_granted_local_readonly_tools() -> None
 def test_research_route_and_recipe_import_boundaries_do_not_load_adk_or_runtime_surfaces() -> None:
     script = """
 import sys
-import openmagi_core_agent.harness.research_routing  # noqa: F401
-import openmagi_core_agent.recipes.research_agents  # noqa: F401
+import magi_agent.harness.research_routing  # noqa: F401
+import magi_agent.recipes.research_agents  # noqa: F401
 
 forbidden_prefixes = (
     "google.adk",
-    "openmagi_core_agent.adk_bridge",
-    "openmagi_core_agent.deploy",
-    "openmagi_core_agent.runtime",
-    "openmagi_core_agent.transport",
+    "magi_agent.adk_bridge",
+    "magi_agent.deploy",
+    "magi_agent.runtime",
+    "magi_agent.transport",
 )
 loaded = sorted(
     name for name in sys.modules

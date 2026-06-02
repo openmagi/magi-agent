@@ -6,8 +6,8 @@ from pathlib import Path
 import pytest
 from pydantic import BaseModel, ValidationError
 
-from openmagi_core_agent.recipes.composition import AdmittedRecipeSnapshot
-from openmagi_core_agent.recipes.merge_algebra import (
+from magi_agent.recipes.composition import AdmittedRecipeSnapshot
+from magi_agent.recipes.merge_algebra import (
     EffectiveRecipeMergeContract,
     RetryMergePolicy,
     merge_admitted_recipe_snapshots,

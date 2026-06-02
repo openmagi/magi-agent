@@ -1,4 +1,4 @@
-from openmagi_core_agent.tools import ToolResult
+from magi_agent.tools import ToolResult
 
 
 def test_tool_result_accepts_prd_aliases_and_dumps_prd_wire_shape() -> None:

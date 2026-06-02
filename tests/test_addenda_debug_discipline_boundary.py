@@ -3,7 +3,7 @@ from __future__ import annotations
 import subprocess
 import sys
 
-from openmagi_core_agent.harness.discipline_boundary import (
+from magi_agent.harness.discipline_boundary import (
     DisciplineBoundary,
     DisciplineBoundaryConfig,
     DisciplineRequest,
@@ -145,7 +145,7 @@ def test_discipline_boundary_has_no_live_imports() -> None:
 import importlib
 import sys
 
-importlib.import_module("openmagi_core_agent.harness.discipline_boundary")
+importlib.import_module("magi_agent.harness.discipline_boundary")
 forbidden = (
     "google.adk.runners",
     "google.adk.evals",

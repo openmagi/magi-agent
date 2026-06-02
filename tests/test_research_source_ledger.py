@@ -7,7 +7,7 @@ import sys
 import pytest
 from pydantic import ValidationError
 
-from openmagi_core_agent.evidence.source_ledger import (
+from magi_agent.evidence.source_ledger import (
     LocalResearchSourceLedger,
     SourceLedgerAttachmentFlags,
     SourceLedgerRecord,
@@ -16,7 +16,7 @@ from openmagi_core_agent.evidence.source_ledger import (
     public_source_ledger_report,
     source_ledger_record_from_source_inspected_event,
 )
-from openmagi_core_agent.evidence.reports import public_evidence_record_report
+from magi_agent.evidence.reports import public_evidence_record_report
 
 
 def _fixture_token() -> str:
@@ -871,22 +871,22 @@ def test_source_ledger_import_stays_adk_toolhost_fetch_memory_route_free() -> No
 import importlib
 import sys
 
-module = importlib.import_module("openmagi_core_agent.evidence.source_ledger")
+module = importlib.import_module("magi_agent.evidence.source_ledger")
 assert hasattr(module, "LocalResearchSourceLedger")
 
 forbidden_prefixes = (
     "google.adk",
-    "openmagi_core_agent.adk_bridge.runner_adapter",
-    "openmagi_core_agent.tools.dispatcher",
-    "openmagi_core_agent.tools.registry",
-    "openmagi_core_agent.runtime",
-    "openmagi_core_agent.routing",
-    "openmagi_core_agent.transport.chat",
-    "openmagi_core_agent.transport.tools",
-    "openmagi_core_agent.memory",
-    "openmagi_core_agent.browser",
-    "openmagi_core_agent.search",
-    "openmagi_core_agent.fetch",
+    "magi_agent.adk_bridge.runner_adapter",
+    "magi_agent.tools.dispatcher",
+    "magi_agent.tools.registry",
+    "magi_agent.runtime",
+    "magi_agent.routing",
+    "magi_agent.transport.chat",
+    "magi_agent.transport.tools",
+    "magi_agent.memory",
+    "magi_agent.browser",
+    "magi_agent.search",
+    "magi_agent.fetch",
 )
 loaded = [
     module_name

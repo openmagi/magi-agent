@@ -5,8 +5,8 @@ import asyncio
 
 import pytest
 
-from openmagi_core_agent.context.auto_compact import AutoCompactResult, AutoCompactionEngine
-from openmagi_core_agent.context.types import WarningLevel
+from magi_agent.context.auto_compact import AutoCompactResult, AutoCompactionEngine
+from magi_agent.context.types import WarningLevel
 
 
 # ---------------------------------------------------------------------------

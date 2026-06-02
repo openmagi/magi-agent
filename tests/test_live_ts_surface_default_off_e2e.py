@@ -3,14 +3,14 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from openmagi_core_agent.channels.contract import ChannelRef
-from openmagi_core_agent.recipes.compiler import (
+from magi_agent.channels.contract import ChannelRef
+from magi_agent.recipes.compiler import (
     AgentRecipeCompiler,
     PackRegistry,
     ProfileResolutionRequest,
 )
-from openmagi_core_agent.recipes.materializer import RecipeMaterializer
-from openmagi_core_agent.runtime.request_shape import RequestShapeLedger
+from magi_agent.recipes.materializer import RecipeMaterializer
+from magi_agent.runtime.request_shape import RequestShapeLedger
 
 
 FIXTURE = Path(__file__).parent / "fixtures" / "live_ts_surface_parity" / "full_surface_matrix.json"
@@ -68,7 +68,7 @@ def _materialize(row: dict[str, object]) -> object:
 def _exercise_default_off_boundary(boundary: str) -> tuple[object, _FakeProvider]:
     provider = _FakeProvider()
     if boundary == "web_acquisition":
-        from openmagi_core_agent.web_acquisition.live_provider_pack import (
+        from magi_agent.web_acquisition.live_provider_pack import (
             WebAcquisitionProviderPack,
             WebAcquisitionProviderPackConfig,
             WebAcquisitionProviderRequest,
@@ -88,7 +88,7 @@ def _exercise_default_off_boundary(boundary: str) -> tuple[object, _FakeProvider
         )
         return result, provider
     if boundary == "browser":
-        from openmagi_core_agent.browser.live_provider_pack import (
+        from magi_agent.browser.live_provider_pack import (
             BrowserProviderPack,
             BrowserProviderPackConfig,
             BrowserProviderPackRequest,
@@ -108,7 +108,7 @@ def _exercise_default_off_boundary(boundary: str) -> tuple[object, _FakeProvider
         )
         return result, provider
     if boundary == "file_delivery":
-        from openmagi_core_agent.artifacts.file_delivery import (
+        from magi_agent.artifacts.file_delivery import (
             FileDeliveryBoundary,
             FileDeliveryConfig,
             FileDeliveryRequest,
@@ -130,7 +130,7 @@ def _exercise_default_off_boundary(boundary: str) -> tuple[object, _FakeProvider
         )
         return result, provider
     if boundary == "scheduler":
-        from openmagi_core_agent.harness.scheduler_runtime import (
+        from magi_agent.harness.scheduler_runtime import (
             SchedulerRuntimeBoundary,
             SchedulerRuntimeConfig,
             SchedulerTickRequest,
@@ -146,7 +146,7 @@ def _exercise_default_off_boundary(boundary: str) -> tuple[object, _FakeProvider
         )
         return result, provider
     if boundary == "background_task":
-        from openmagi_core_agent.harness.background_tasks import (
+        from magi_agent.harness.background_tasks import (
             BackgroundTaskBoundary,
             BackgroundTaskConfig,
             BackgroundTaskRequest,
@@ -165,7 +165,7 @@ def _exercise_default_off_boundary(boundary: str) -> tuple[object, _FakeProvider
         )
         return result, provider
     if boundary == "channel_dispatch":
-        from openmagi_core_agent.channels.dispatcher import (
+        from magi_agent.channels.dispatcher import (
             ChannelDispatchConfig,
             ChannelDispatchRequest,
             ChannelDispatcher,

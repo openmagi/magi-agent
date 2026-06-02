@@ -2,10 +2,10 @@ from __future__ import annotations
 
 import pytest
 
-from openmagi_core_agent.shadow.gate4c0_shadow_config import (
+from magi_agent.shadow.gate4c0_shadow_config import (
     Gate4C0ModelRoutingMetadata,
 )
-from openmagi_core_agent.shadow.gate5b_user_visible_routing_canary import (
+from magi_agent.shadow.gate5b_user_visible_routing_canary import (
     Gate5BNoMemoryRoutingCanaryAuthorityFlags,
     Gate5BNoMemoryRoutingCanaryConfig,
     Gate5BNoMemoryRoutingCanaryPolicy,

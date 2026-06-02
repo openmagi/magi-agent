@@ -11,26 +11,26 @@ from types import ModuleType
 
 def _types_module() -> ModuleType:
     try:
-        return importlib.import_module("openmagi_core_agent.prompt.types")
+        return importlib.import_module("magi_agent.prompt.types")
     except ModuleNotFoundError as exc:
         import pytest
-        pytest.fail(f"openmagi_core_agent.prompt.types module is missing: {exc}")
+        pytest.fail(f"magi_agent.prompt.types module is missing: {exc}")
 
 
 def _splitter_module() -> ModuleType:
     try:
-        return importlib.import_module("openmagi_core_agent.prompt.splitter")
+        return importlib.import_module("magi_agent.prompt.splitter")
     except ModuleNotFoundError as exc:
         import pytest
-        pytest.fail(f"openmagi_core_agent.prompt.splitter module is missing: {exc}")
+        pytest.fail(f"magi_agent.prompt.splitter module is missing: {exc}")
 
 
 def _prompt_module() -> ModuleType:
     try:
-        return importlib.import_module("openmagi_core_agent.prompt")
+        return importlib.import_module("magi_agent.prompt")
     except ModuleNotFoundError as exc:
         import pytest
-        pytest.fail(f"openmagi_core_agent.prompt module is missing: {exc}")
+        pytest.fail(f"magi_agent.prompt module is missing: {exc}")
 
 
 # ---------------------------------------------------------------------------

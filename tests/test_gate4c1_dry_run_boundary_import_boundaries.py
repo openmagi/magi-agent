@@ -20,40 +20,40 @@ def test_gate4c1_dry_run_boundary_imports_no_runner_model_or_live_surfaces() -> 
 import importlib
 import sys
 
-module = importlib.import_module("openmagi_core_agent.shadow.gate4c1_dry_run_boundary")
+module = importlib.import_module("magi_agent.shadow.gate4c1_dry_run_boundary")
 assert module is not None
 
 forbidden_exact = (
     "google.adk.runners",
-    "openmagi_core_agent.adk_bridge.runner_adapter",
-    "openmagi_core_agent.tools.dispatcher",
+    "magi_agent.adk_bridge.runner_adapter",
+    "magi_agent.tools.dispatcher",
     "openai",
     "google.genai",
 )
 forbidden_prefixes = (
-    "openmagi_core_agent.transport.chat",
-    "openmagi_core_agent.transport.tools",
-    "openmagi_core_agent.runtime.openmagi_runtime",
-    "openmagi_core_agent.routing",
-    "openmagi_core_agent.workspace",
-    "openmagi_core_agent.deploy",
-    "openmagi_core_agent.provisioning",
-    "openmagi_core_agent.k8s",
-    "openmagi_core_agent.telegram",
-    "openmagi_core_agent.api",
-    "openmagi_core_agent.proxy",
-    "openmagi_core_agent.dashboard",
-    "openmagi_core_agent.database",
-    "openmagi_core_agent.billing",
-    "openmagi_core_agent.auth",
-    "openmagi_core_agent.model_routing",
-    "openmagi_core_agent.missions",
-    "openmagi_core_agent.scheduler",
-    "openmagi_core_agent.children",
-    "openmagi_core_agent.memory.providers",
-    "openmagi_core_agent.agentmemory",
-    "openmagi_core_agent.hipocampus",
-    "openmagi_core_agent.qmd",
+    "magi_agent.transport.chat",
+    "magi_agent.transport.tools",
+    "magi_agent.runtime.openmagi_runtime",
+    "magi_agent.routing",
+    "magi_agent.workspace",
+    "magi_agent.deploy",
+    "magi_agent.provisioning",
+    "magi_agent.k8s",
+    "magi_agent.telegram",
+    "magi_agent.api",
+    "magi_agent.proxy",
+    "magi_agent.dashboard",
+    "magi_agent.database",
+    "magi_agent.billing",
+    "magi_agent.auth",
+    "magi_agent.model_routing",
+    "magi_agent.missions",
+    "magi_agent.scheduler",
+    "magi_agent.children",
+    "magi_agent.memory.providers",
+    "magi_agent.agentmemory",
+    "magi_agent.hipocampus",
+    "magi_agent.qmd",
 )
 loaded = [
     loaded_name
@@ -75,12 +75,12 @@ if loaded:
 
 def test_gate4c1_dry_run_boundary_source_has_no_runner_or_model_execution() -> None:
     root = Path(__file__).parents[1]
-    module_path = root / "openmagi_core_agent" / "shadow" / "gate4c1_dry_run_boundary.py"
+    module_path = root / "magi_agent" / "shadow" / "gate4c1_dry_run_boundary.py"
     source = module_path.read_text(encoding="utf-8")
     forbidden_imports = (
         "google.adk.runners",
-        "openmagi_core_agent.adk_bridge.runner_adapter",
-        "openmagi_core_agent.tools.dispatcher",
+        "magi_agent.adk_bridge.runner_adapter",
+        "magi_agent.tools.dispatcher",
         "subprocess",
         "asyncio.subprocess",
         "pexpect",

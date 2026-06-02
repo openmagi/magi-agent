@@ -5,12 +5,12 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from openmagi_core_agent.evidence.child_runtime_envelope import ChildRuntimeEnvelope
+from magi_agent.evidence.child_runtime_envelope import ChildRuntimeEnvelope
 from runtime_issuance_support import issue_test_runtime_authority
-from openmagi_core_agent.evidence.subagent import OPENMAGI_RUNTIME_ENVELOPE_ISSUER
-from openmagi_core_agent.meta_orchestration.child_acceptance import issue_runtime_child_result
-from openmagi_core_agent.meta_orchestration.child_roles import MetaChildRoleRegistry
-from openmagi_core_agent.research.meta_adapter import (
+from magi_agent.evidence.subagent import OPENMAGI_RUNTIME_ENVELOPE_ISSUER
+from magi_agent.meta_orchestration.child_acceptance import issue_runtime_child_result
+from magi_agent.meta_orchestration.child_roles import MetaChildRoleRegistry
+from magi_agent.research.meta_adapter import (
     RESEARCH_META_ROLE_NAMES,
     ResearchMetaEvidencePolicy,
     ResearchMetaHarnessPlan,
@@ -335,12 +335,12 @@ def test_url_only_citation_in_child_audit_refs_cannot_satisfy_research_evidence(
 
 def test_generic_meta_modules_do_not_import_research_adapter() -> None:
     repo_root = Path(__file__).resolve().parents[1]
-    meta_dir = repo_root / "openmagi_core_agent" / "meta_orchestration"
+    meta_dir = repo_root / "magi_agent" / "meta_orchestration"
 
     for path in meta_dir.glob("*.py"):
         source = path.read_text()
-        assert "openmagi_core_agent.research.meta_adapter" not in source, path
-        assert "from openmagi_core_agent.research import meta_adapter" not in source, path
+        assert "magi_agent.research.meta_adapter" not in source, path
+        assert "from magi_agent.research import meta_adapter" not in source, path
         assert "research_searcher" not in source, path
         assert "source_inspector" not in source, path
         assert "claim_mapper" not in source, path

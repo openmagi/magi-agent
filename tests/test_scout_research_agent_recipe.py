@@ -3,12 +3,12 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
-from openmagi_core_agent.recipes.compiler import (
+from magi_agent.recipes.compiler import (
     AgentRecipeCompiler,
     PackRegistry,
     ProfileResolutionRequest,
 )
-from openmagi_core_agent.recipes.research_agents import (
+from magi_agent.recipes.research_agents import (
     materialize_scout_research_agent,
 )
 

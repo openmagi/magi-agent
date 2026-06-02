@@ -2,12 +2,12 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from openmagi_core_agent.recipes.first_party.general_automation.preset_projection import (
+from magi_agent.recipes.first_party.general_automation.preset_projection import (
     MUTATION_TOOL_CATEGORIES,
     compile_general_automation_presets,
     project_general_automation_preset,
 )
-from openmagi_core_agent.recipes.first_party.general_automation.presets import (
+from magi_agent.recipes.first_party.general_automation.presets import (
     GENERAL_AUTOMATION_PRESET_IDS,
     general_automation_preset_catalog,
     get_general_automation_preset,
@@ -17,7 +17,7 @@ from openmagi_core_agent.recipes.first_party.general_automation.presets import (
 PYTHON_ROOT = Path(__file__).resolve().parents[1]
 PACKAGE_DIR = (
     PYTHON_ROOT
-    / "openmagi_core_agent"
+    / "magi_agent"
     / "recipes"
     / "first_party"
     / "general_automation"
@@ -118,10 +118,10 @@ def test_general_automation_preset_modules_do_not_spawn_or_import_core_runtime()
     source = "\n".join(path.read_text(encoding="utf-8") for path in PACKAGE_DIR.glob("*.py"))
 
     forbidden_fragments = (
-        "openmagi_core_agent.adk_bridge",
-        "openmagi_core_agent.runtime",
-        "openmagi_core_agent.tools.dispatcher",
-        "openmagi_core_agent.tools.registry",
+        "magi_agent.adk_bridge",
+        "magi_agent.runtime",
+        "magi_agent.tools.dispatcher",
+        "magi_agent.tools.registry",
         "google.adk.runners",
         "Runner(",
         "subprocess",

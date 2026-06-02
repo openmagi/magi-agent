@@ -2,11 +2,11 @@ from __future__ import annotations
 
 import pytest
 
-from openmagi_core_agent.adk_bridge.event_adapter import EventProjection
-from openmagi_core_agent.transport.sse import InMemorySseWriter
-from openmagi_core_agent.transport.sse_buffer import SseEventBuffer
-from openmagi_core_agent.runtime.stream_withholding import StreamWithholdingFilter
-from openmagi_core_agent.runtime.stream_fallback import (
+from magi_agent.adk_bridge.event_adapter import EventProjection
+from magi_agent.transport.sse import InMemorySseWriter
+from magi_agent.transport.sse_buffer import SseEventBuffer
+from magi_agent.runtime.stream_withholding import StreamWithholdingFilter
+from magi_agent.runtime.stream_fallback import (
     StreamFallbackController,
 )
 

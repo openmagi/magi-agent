@@ -1,14 +1,14 @@
 import pytest
 
-from openmagi_core_agent.config.env import RuntimeEnvError, parse_python_memory_adapter_env
-from openmagi_core_agent.memory.contracts import (
+from magi_agent.config.env import RuntimeEnvError, parse_python_memory_adapter_env
+from magi_agent.memory.contracts import (
     MemoryProviderCapabilities,
     MemoryRecord,
     RecallResult,
     RecallRequest,
     UnsupportedMemoryOperationError,
 )
-from openmagi_core_agent.memory.policy import MemoryPolicy, evaluate_memory_policy
+from magi_agent.memory.policy import MemoryPolicy, evaluate_memory_policy
 
 
 def test_memory_adapter_env_defaults_off_and_blocks_prompt_projection() -> None:

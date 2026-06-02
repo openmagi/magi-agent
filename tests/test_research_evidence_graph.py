@@ -6,40 +6,40 @@ from hashlib import sha256
 
 import pytest
 
-from openmagi_core_agent.evidence.child_runtime_envelope import (
+from magi_agent.evidence.child_runtime_envelope import (
     ChildRuntimeEnvelope,
     ChildRuntimeEnvelopeAuthorityFlags,
 )
 from runtime_issuance_support import issue_test_runtime_authority
-from openmagi_core_agent.evidence.subagent import (
+from magi_agent.evidence.subagent import (
     OPENMAGI_RUNTIME_ENVELOPE_ISSUER,
     DelegatedEvidenceRequirement,
     EvidenceBoundaryLedgerRef,
     ExecutionBoundaryIdentity,
 )
-from openmagi_core_agent.research.acceptance_criteria import (
+from magi_agent.research.acceptance_criteria import (
     ResearchAcceptanceCriterion,
     ResearchAcceptanceCriteriaSet,
     ResearchAcceptanceEvidenceRef,
 )
-from openmagi_core_agent.research.action_claims import (
+from magi_agent.research.action_claims import (
     ResearchActionProofReceiptRef,
     ResearchActionProofRequirement,
     detect_research_action_claims,
     project_research_action_proof_verdicts,
     verify_research_action_claims,
 )
-from openmagi_core_agent.research.claim_graph import (
+from magi_agent.research.claim_graph import (
     ResearchClaimGraph,
     ResearchClaimSupportRef,
     build_research_claim_node,
 )
-from openmagi_core_agent.research.evidence_graph import (
+from magi_agent.research.evidence_graph import (
     ResearchChildEvidenceRef,
     ResearchEvidenceGraph,
     ResearchMissingEvidenceReason,
 )
-from openmagi_core_agent.research.source_proof import (
+from magi_agent.research.source_proof import (
     ResearchSourceOpenReceiptRef,
     ResearchSourceProofRequirement,
     verify_research_source_proof,

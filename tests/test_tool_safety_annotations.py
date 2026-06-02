@@ -8,8 +8,8 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
-from openmagi_core_agent.tools.catalog import _manifest, core_tool_manifests
-from openmagi_core_agent.tools.manifest import Budget, ToolManifest, ToolSource
+from magi_agent.tools.catalog import _manifest, core_tool_manifests
+from magi_agent.tools.manifest import Budget, ToolManifest, ToolSource
 
 
 CORE_TOOL_SOURCE = ToolSource(kind="builtin", package="openmagi.core")

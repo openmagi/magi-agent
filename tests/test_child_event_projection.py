@@ -5,32 +5,32 @@ import json
 
 import pytest
 
-from openmagi_core_agent.evidence.child_runtime_envelope import (
+from magi_agent.evidence.child_runtime_envelope import (
     ChildRuntimeEnvelope,
     ChildRuntimeEnvelopeAuthorityFlags,
 )
-from openmagi_core_agent.evidence.subagent import (
+from magi_agent.evidence.subagent import (
     DelegatedEvidenceRequirement,
     EvidenceBoundaryLedgerRef,
     ExecutionBoundaryIdentity,
 )
-from openmagi_core_agent.meta_orchestration.child_acceptance import (
+from magi_agent.meta_orchestration.child_acceptance import (
     ChildAcceptancePolicy,
     RuntimeIssuedChildResult,
     accept_child_result,
     issue_runtime_child_result,
 )
-from openmagi_core_agent.runtime.child_event_projection import (
+from magi_agent.runtime.child_event_projection import (
     project_child_acceptance_verdict_event,
     project_child_runner_result_events,
     project_child_runtime_envelope_events,
 )
-from openmagi_core_agent.runtime.child_runner_boundary import (
+from magi_agent.runtime.child_runner_boundary import (
     ChildRunnerEnvelopeRef,
     ChildRunnerResult,
     ChildTaskRequest,
 )
-from openmagi_core_agent.transport.sse import InMemorySseWriter
+from magi_agent.transport.sse import InMemorySseWriter
 
 from runtime_issuance_support import issue_test_runtime_authority
 

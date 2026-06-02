@@ -10,7 +10,7 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from openmagi_core_agent.shadow.research_runner_capture import (
+from magi_agent.shadow.research_runner_capture import (
     ClaimRecord,
     ClaimSourceLinkRecord,
     ResearchArtifactAuthorityFlags,
@@ -329,18 +329,18 @@ import json
 import sys
 
 before = set(sys.modules)
-importlib.import_module("openmagi_core_agent.shadow.research_runner_capture")
+importlib.import_module("magi_agent.shadow.research_runner_capture")
 after = set(sys.modules) - before
 forbidden = [
     "google.adk",
-    "openmagi_core_agent.adk_bridge.runner_adapter",
-    "openmagi_core_agent.transport",
-    "openmagi_core_agent.web_acquisition.provider_boundary",
-    "openmagi_core_agent.browser.provider_boundary",
-    "openmagi_core_agent.knowledge.provider_boundary",
-    "openmagi_core_agent.memory",
-    "openmagi_core_agent.tools.dispatcher",
-    "openmagi_core_agent.tools.kernel",
+    "magi_agent.adk_bridge.runner_adapter",
+    "magi_agent.transport",
+    "magi_agent.web_acquisition.provider_boundary",
+    "magi_agent.browser.provider_boundary",
+    "magi_agent.knowledge.provider_boundary",
+    "magi_agent.memory",
+    "magi_agent.tools.dispatcher",
+    "magi_agent.tools.kernel",
 ]
 print(json.dumps(sorted(name for name in after if any(name == prefix or name.startswith(prefix + ".") for prefix in forbidden))))
 """,
@@ -354,6 +354,6 @@ print(json.dumps(sorted(name for name in after if any(name == prefix or name.sta
 
 
 def test_module_import_is_side_effect_free() -> None:
-    module = importlib.import_module("openmagi_core_agent.shadow.research_runner_capture")
+    module = importlib.import_module("magi_agent.shadow.research_runner_capture")
 
     assert module.RESEARCH_CAPTURE_DEFAULT_ENABLED is False

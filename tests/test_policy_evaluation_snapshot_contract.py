@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from openmagi_core_agent.runtime.policy_snapshot import (
+from magi_agent.runtime.policy_snapshot import (
     EffectivePolicySnapshot,
     PolicyDecisionBinding,
     PolicySourceRef,

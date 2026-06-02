@@ -9,7 +9,7 @@ from typing import Any
 
 
 def _boundary_module() -> Any:
-    return importlib.import_module("openmagi_core_agent.memory.write_boundary")
+    return importlib.import_module("magi_agent.memory.write_boundary")
 
 
 def test_memory_write_redact_delete_intents_are_denied_by_default() -> None:
@@ -252,7 +252,7 @@ def test_direct_receipt_models_sanitize_public_projection_paths_and_messages() -
             target_sha256="/Users/kevin/private-bot/memory/ROOT.md?token=sk-memory-secret",
             target_byte_length=9,
             path_refs=(
-                "/Users/kevin/Desktop/claude_code/clawy/memory/ROOT.md",
+                "/Users/kevin/Desktop/openmagi/memory/ROOT.md",
                 "/data/bots/private/credential.env",
             ),
         ),
@@ -702,7 +702,7 @@ def test_public_projections_redact_sensitive_payloads_and_private_paths() -> Non
             "targetText": "raw target with sk-memory-secret",
             "content": "memory body with Authorization: Bearer unsafe-token",
             "pathRefs": (
-                "/Users/kevin/Desktop/claude_code/clawy/memory/ROOT.md",
+                "/Users/kevin/Desktop/openmagi/memory/ROOT.md",
                 "/data/bots/private/memory/daily/2026-05-20.md",
             ),
             "childPrompt": "child prompt should not project",
@@ -736,7 +736,7 @@ import sys
 import importlib.util
 from pathlib import Path
 
-module_path = Path("openmagi_core_agent/memory/write_boundary.py")
+module_path = Path("magi_agent/memory/write_boundary.py")
 spec = importlib.util.spec_from_file_location(
     "_memory_write_boundary_import_check",
     module_path,
@@ -749,23 +749,23 @@ assert module is not None
 
 forbidden_prefixes = (
     "google.adk",
-    "openmagi_core_agent.adk_bridge",
-    "openmagi_core_agent.tools",
-    "openmagi_core_agent.transport",
-    "openmagi_core_agent.app",
-    "openmagi_core_agent.main",
-    "openmagi_core_agent.routes",
-    "openmagi_core_agent.database",
-    "openmagi_core_agent.db",
-    "openmagi_core_agent.chat_proxy",
-    "openmagi_core_agent.proxy",
-    "openmagi_core_agent.frontend",
-    "openmagi_core_agent.deploy",
-    "openmagi_core_agent.plugins.agentmemory",
-    "openmagi_core_agent.memory.providers",
-    "openmagi_core_agent.services.memory",
-    "openmagi_core_agent.hipocampus",
-    "openmagi_core_agent.qmd",
+    "magi_agent.adk_bridge",
+    "magi_agent.tools",
+    "magi_agent.transport",
+    "magi_agent.app",
+    "magi_agent.main",
+    "magi_agent.routes",
+    "magi_agent.database",
+    "magi_agent.db",
+    "magi_agent.chat_proxy",
+    "magi_agent.proxy",
+    "magi_agent.frontend",
+    "magi_agent.deploy",
+    "magi_agent.plugins.agentmemory",
+    "magi_agent.memory.providers",
+    "magi_agent.services.memory",
+    "magi_agent.hipocampus",
+    "magi_agent.qmd",
     "agentmemory",
     "openai",
     "anthropic",
@@ -802,7 +802,7 @@ if loaded:
 
     module_path = (
         Path(__file__).parents[1]
-        / "openmagi_core_agent"
+        / "magi_agent"
         / "memory"
         / "write_boundary.py"
     )
@@ -811,23 +811,23 @@ if loaded:
         "google.adk",
         "AgentMemory(",
         "agentmemory.",
-        "openmagi_core_agent.adk_bridge",
-        "openmagi_core_agent.tools",
-        "openmagi_core_agent.transport",
-        "openmagi_core_agent.app",
-        "openmagi_core_agent.main",
-        "openmagi_core_agent.routes",
-        "openmagi_core_agent.database",
-        "openmagi_core_agent.db",
-        "openmagi_core_agent.chat_proxy",
-        "openmagi_core_agent.proxy",
-        "openmagi_core_agent.frontend",
-        "openmagi_core_agent.deploy",
-        "openmagi_core_agent.plugins.agentmemory",
-        "openmagi_core_agent.memory.providers",
-        "openmagi_core_agent.services.memory",
-        "openmagi_core_agent.hipocampus",
-        "openmagi_core_agent.qmd",
+        "magi_agent.adk_bridge",
+        "magi_agent.tools",
+        "magi_agent.transport",
+        "magi_agent.app",
+        "magi_agent.main",
+        "magi_agent.routes",
+        "magi_agent.database",
+        "magi_agent.db",
+        "magi_agent.chat_proxy",
+        "magi_agent.proxy",
+        "magi_agent.frontend",
+        "magi_agent.deploy",
+        "magi_agent.plugins.agentmemory",
+        "magi_agent.memory.providers",
+        "magi_agent.services.memory",
+        "magi_agent.hipocampus",
+        "magi_agent.qmd",
         "openai",
         "anthropic",
         "google.genai",

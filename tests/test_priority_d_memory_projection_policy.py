@@ -3,9 +3,9 @@ from __future__ import annotations
 import ast
 from pathlib import Path
 
-from openmagi_core_agent.memory.contracts import MemoryRecord, RecallResult
-from openmagi_core_agent.memory.policy import MemoryPolicy
-from openmagi_core_agent.memory.projection import (
+from magi_agent.memory.contracts import MemoryRecord, RecallResult
+from magi_agent.memory.policy import MemoryPolicy
+from magi_agent.memory.projection import (
     MemoryRecallRecord,
     SourceAuthorityEnvelope,
     classify_memory_continuity,
@@ -782,7 +782,7 @@ def test_continuity_helpers_match_active_related_background_and_stale_promotion_
 def test_projection_module_keeps_import_boundary_free_of_live_runtime_surfaces() -> None:
     source = (
         Path(__file__).resolve().parents[1]
-        / "openmagi_core_agent"
+        / "magi_agent"
         / "memory"
         / "projection.py"
     ).read_text()
@@ -796,12 +796,12 @@ def test_projection_module_keeps_import_boundary_free_of_live_runtime_surfaces()
 
     forbidden_prefixes = (
         "google.adk",
-        "openmagi_core_agent.transport.routes",
-        "openmagi_core_agent.deploy",
-        "openmagi_core_agent.frontend",
-        "openmagi_core_agent.db",
-        "openmagi_core_agent.memory.adapters",
-        "openmagi_core_agent.services",
+        "magi_agent.transport.routes",
+        "magi_agent.deploy",
+        "magi_agent.frontend",
+        "magi_agent.db",
+        "magi_agent.memory.adapters",
+        "magi_agent.services",
     )
     forbidden_exact = {
         "subprocess",

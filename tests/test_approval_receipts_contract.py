@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from openmagi_core_agent.harness.approval_receipts import (
+from magi_agent.harness.approval_receipts import (
     ApprovalReceipt,
     ApprovalScope,
     build_approval_receipt,

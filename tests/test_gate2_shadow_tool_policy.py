@@ -11,16 +11,16 @@ from typing import Literal
 import pytest
 from pydantic_core import PydanticSerializationError
 
-from openmagi_core_agent.shadow.tool_policy import (
+from magi_agent.shadow.tool_policy import (
     Gate2ShadowToolOutputFlags,
     Gate2ShadowToolPolicyError,
     Gate2ShadowToolReport,
     run_gate2_recorded_tool_output,
     run_gate2_synthetic_local_tool,
 )
-from openmagi_core_agent.tools import ToolDispatcher, ToolRegistry, ToolResult, ToolSource
-from openmagi_core_agent.tools.context import ToolContext
-from openmagi_core_agent.tools.manifest import ToolManifest
+from magi_agent.tools import ToolDispatcher, ToolRegistry, ToolResult, ToolSource
+from magi_agent.tools.context import ToolContext
+from magi_agent.tools.manifest import ToolManifest
 
 
 class SpyDispatcher(ToolDispatcher):
@@ -473,7 +473,7 @@ def test_shadow_policy_rejects_external_source_before_dispatch(tmp_path: Path) -
 @pytest.mark.parametrize(
     "workspace_root",
     (
-        "/Users/kevin/Desktop/claude_code/clawy",
+        "/Users/kevin/Desktop/openmagi",
         "/data/bots/bot-123/workspace",
         "/workspace/bot-123",
         "/tmp/pvc-bot-123/workspace",
@@ -1823,33 +1823,33 @@ def test_shadow_tool_policy_import_stays_production_runtime_free() -> None:
 import importlib
 import sys
 
-module = importlib.import_module("openmagi_core_agent.shadow.tool_policy")
+module = importlib.import_module("magi_agent.shadow.tool_policy")
 assert hasattr(module, "run_gate2_synthetic_local_tool")
 
 forbidden_exact = (
-    "openmagi_core_agent.app",
-    "openmagi_core_agent.main",
-    "openmagi_core_agent.runtime.openmagi_runtime",
-    "openmagi_core_agent.runtime.turn_controller",
-    "openmagi_core_agent.transport.chat",
-    "openmagi_core_agent.transport.health",
-    "openmagi_core_agent.transport.plugins",
-    "openmagi_core_agent.transport.tools",
-    "openmagi_core_agent.adk_bridge.runner_adapter",
-    "openmagi_core_agent.adk_bridge.local_runner",
+    "magi_agent.app",
+    "magi_agent.main",
+    "magi_agent.runtime.openmagi_runtime",
+    "magi_agent.runtime.turn_controller",
+    "magi_agent.transport.chat",
+    "magi_agent.transport.health",
+    "magi_agent.transport.plugins",
+    "magi_agent.transport.tools",
+    "magi_agent.adk_bridge.runner_adapter",
+    "magi_agent.adk_bridge.local_runner",
 )
 forbidden_prefixes = (
-    "openmagi_core_agent.api",
-    "openmagi_core_agent.proxy",
-    "openmagi_core_agent.dashboard",
-    "openmagi_core_agent.database",
-    "openmagi_core_agent.db",
-    "openmagi_core_agent.supabase",
-    "openmagi_core_agent.billing",
-    "openmagi_core_agent.auth",
-    "openmagi_core_agent.model_routing",
-    "openmagi_core_agent.transport.api",
-    "openmagi_core_agent.transport.proxy",
+    "magi_agent.api",
+    "magi_agent.proxy",
+    "magi_agent.dashboard",
+    "magi_agent.database",
+    "magi_agent.db",
+    "magi_agent.supabase",
+    "magi_agent.billing",
+    "magi_agent.auth",
+    "magi_agent.model_routing",
+    "magi_agent.transport.api",
+    "magi_agent.transport.proxy",
 )
 forbidden_terms = (
     "api_proxy",
@@ -1878,7 +1878,7 @@ loaded_prefixes = [
 loaded_terms = [
     name
     for name in sys.modules
-    if name.startswith("openmagi_core_agent.")
+    if name.startswith("magi_agent.")
     and any(term in name.lower() for term in forbidden_terms)
 ]
 if loaded_exact or loaded_prefixes or loaded_terms:

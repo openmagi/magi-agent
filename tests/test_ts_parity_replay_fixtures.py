@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from openmagi_core_agent.shadow.ts_parity_replay import (
+from magi_agent.shadow.ts_parity_replay import (
     TsParityReplayFixture,
     load_ts_parity_replay_fixture,
     replay_ts_parity_fixture,
@@ -158,18 +158,18 @@ def test_ts_parity_fixture_rejects_false_memory_claims_and_live_flags(
 def test_ts_parity_fixture_import_boundary_stays_runner_tool_and_memory_provider_free() -> None:
     code = """
 import sys
-import openmagi_core_agent.shadow.ts_parity_replay  # noqa: F401
+import magi_agent.shadow.ts_parity_replay  # noqa: F401
 
 forbidden = (
     'google.adk.runners',
-    'openmagi_core_agent.adk_bridge.local_runner',
-    'openmagi_core_agent.adk_bridge.runner_adapter',
-    'openmagi_core_agent.tools.dispatcher',
-    'openmagi_core_agent.tools.registry',
-    'openmagi_core_agent.plugins.agentmemory',
-    'openmagi_core_agent.memory',
-    'openmagi_core_agent.app',
-    'openmagi_core_agent.transport.chat',
+    'magi_agent.adk_bridge.local_runner',
+    'magi_agent.adk_bridge.runner_adapter',
+    'magi_agent.tools.dispatcher',
+    'magi_agent.tools.registry',
+    'magi_agent.plugins.agentmemory',
+    'magi_agent.memory',
+    'magi_agent.app',
+    'magi_agent.transport.chat',
 )
 loaded = [name for name in forbidden if name in sys.modules]
 if loaded:

@@ -32,7 +32,7 @@ import os
 
 import pytest
 
-from openmagi_core_agent.harness.inference_scaling import BestOfNEligibilityMetadata
+from magi_agent.harness.inference_scaling import BestOfNEligibilityMetadata
 
 
 # ---------------------------------------------------------------------------
@@ -67,7 +67,7 @@ def _supported_topology() -> tuple[dict[str, object], ...]:
 # ---------------------------------------------------------------------------
 
 def test_best_of_n_produces_n_variants_and_a_selection() -> None:
-    from openmagi_core_agent.harness.cross_review import generate_best_of_n_variants
+    from magi_agent.harness.cross_review import generate_best_of_n_variants
 
     eligibility = BestOfNEligibilityMetadata(
         verifierCanRankOutcomes=True,
@@ -97,7 +97,7 @@ def test_best_of_n_produces_n_variants_and_a_selection() -> None:
 
 def test_best_of_n_disabled_metadata_yields_single_variant() -> None:
     """When eligibility is not met (maxVariants=1), only one variant is made."""
-    from openmagi_core_agent.harness.cross_review import generate_best_of_n_variants
+    from magi_agent.harness.cross_review import generate_best_of_n_variants
 
     eligibility = BestOfNEligibilityMetadata(
         verifierCanRankOutcomes=False,
@@ -120,7 +120,7 @@ def test_best_of_n_disabled_metadata_yields_single_variant() -> None:
 
 def test_best_of_n_respects_concurrency_cap() -> None:
     """N is clamped to the executor concurrency cap (bounded variant explosion)."""
-    from openmagi_core_agent.harness.cross_review import generate_best_of_n_variants
+    from magi_agent.harness.cross_review import generate_best_of_n_variants
 
     eligibility = BestOfNEligibilityMetadata(
         verifierCanRankOutcomes=True,
@@ -144,7 +144,7 @@ def test_best_of_n_respects_concurrency_cap() -> None:
 # ---------------------------------------------------------------------------
 
 def test_unsupported_claim_is_filtered_via_verifier_bus() -> None:
-    from openmagi_core_agent.harness.cross_review import run_cross_review
+    from magi_agent.harness.cross_review import run_cross_review
 
     review = run_cross_review(
         review_id="cross-review-1",
@@ -178,7 +178,7 @@ def test_filtering_routes_through_source_claim_link_verifier() -> None:
     filtered); the supported claims' verdict status must be 'pass'.  Verdicts
     are produced via the verifier_bus ``source_claim_link`` verifier id.
     """
-    from openmagi_core_agent.harness.cross_review import run_cross_review
+    from magi_agent.harness.cross_review import run_cross_review
 
     review = run_cross_review(
         review_id="cross-review-2",
@@ -198,7 +198,7 @@ def test_filtering_routes_through_source_claim_link_verifier() -> None:
 
 def test_all_claims_supported_none_filtered() -> None:
     """When every claim is cross-supported, the surviving set is unchanged."""
-    from openmagi_core_agent.harness.cross_review import run_cross_review
+    from magi_agent.harness.cross_review import run_cross_review
 
     attestations = (
         {"agent_ref": "peer:a", "claim_refs": ("claim:x", "claim:y")},
@@ -218,7 +218,7 @@ def test_all_claims_supported_none_filtered() -> None:
 # ---------------------------------------------------------------------------
 
 def test_evidence_records_review_outcome() -> None:
-    from openmagi_core_agent.harness.cross_review import run_cross_review
+    from magi_agent.harness.cross_review import run_cross_review
 
     review = run_cross_review(
         review_id="cross-review-4",
@@ -239,7 +239,7 @@ def test_evidence_records_review_outcome() -> None:
 def test_evidence_warns_when_claims_are_filtered() -> None:
     """A run that filters at least one claim records a 'warning' severity
     evidence event (a quality signal), while a clean run records 'info'."""
-    from openmagi_core_agent.harness.cross_review import run_cross_review
+    from magi_agent.harness.cross_review import run_cross_review
 
     filtered_run = run_cross_review(
         review_id="cross-review-5",
@@ -269,7 +269,7 @@ def test_cross_review_rejects_raw_transcript_in_attestation() -> None:
     A claim ref that looks like a raw transcript / private path must be
     rejected, never silently accepted into the surviving set.
     """
-    from openmagi_core_agent.harness.cross_review import run_cross_review
+    from magi_agent.harness.cross_review import run_cross_review
 
     with pytest.raises(ValueError):
         run_cross_review(
@@ -290,7 +290,7 @@ def test_cross_review_rejects_raw_transcript_in_attestation() -> None:
 # ---------------------------------------------------------------------------
 
 def test_cross_review_rejects_invalid_min_peer_support() -> None:
-    from openmagi_core_agent.harness.cross_review import run_cross_review
+    from magi_agent.harness.cross_review import run_cross_review
 
     with pytest.raises(ValueError):
         run_cross_review(
@@ -309,8 +309,8 @@ def test_cross_review_filtered_claims_drive_critic_escalation() -> None:
     to the verifier_bus — and the escalation admits the llm_critic verifier that
     is otherwise disabled.  This proves the escalation is a real metadata-driven
     decision, not a static field."""
-    from openmagi_core_agent.harness.cross_review import run_cross_review
-    from openmagi_core_agent.harness.verifier_bus import build_default_verifier_bus_metadata
+    from magi_agent.harness.cross_review import run_cross_review
+    from magi_agent.harness.verifier_bus import build_default_verifier_bus_metadata
 
     review = run_cross_review(
         review_id="cross-review-escalation",
@@ -351,7 +351,7 @@ def test_cross_review_filtered_claims_drive_critic_escalation() -> None:
 def test_clean_cross_review_records_no_escalation() -> None:
     """A cross-review with nothing filtered records a NON-eligible escalation —
     proving the escalation tracks real review quality, not a constant."""
-    from openmagi_core_agent.harness.cross_review import run_cross_review
+    from magi_agent.harness.cross_review import run_cross_review
 
     review = run_cross_review(
         review_id="cross-review-clean",
@@ -371,7 +371,7 @@ def test_clean_cross_review_records_no_escalation() -> None:
 def test_cross_review_escalation_surfaced_in_evidence_detail() -> None:
     """The recorded escalation decision flows into the evidence detail string so
     downstream final assembly can consume it."""
-    from openmagi_core_agent.harness.cross_review import run_cross_review
+    from magi_agent.harness.cross_review import run_cross_review
 
     filtered = run_cross_review(
         review_id="cross-review-evidence-escalation",
@@ -396,7 +396,7 @@ def test_cross_review_escalation_surfaced_in_evidence_detail() -> None:
 def test_best_of_n_ineligible_drives_critic_escalation() -> None:
     """When best-of-N cannot rank multiple variants (ineligible), the outcome
     records an eligible critic escalation anchored to the verifier_bus."""
-    from openmagi_core_agent.harness.cross_review import generate_best_of_n_variants
+    from magi_agent.harness.cross_review import generate_best_of_n_variants
 
     eligibility = BestOfNEligibilityMetadata(
         verifierCanRankOutcomes=False,
@@ -422,7 +422,7 @@ def test_best_of_n_low_confidence_selection_drives_escalation() -> None:
     """An eligible best-of-N whose top-ranked variant is below the
     low-confidence threshold still escalates — the recorded decision tracks the
     real selection score, deterministically."""
-    from openmagi_core_agent.harness.cross_review import (
+    from magi_agent.harness.cross_review import (
         _LOW_CONFIDENCE_SELECTION_THRESHOLD,
         generate_best_of_n_variants,
     )
@@ -450,7 +450,7 @@ def test_best_of_n_high_confidence_selection_records_no_escalation() -> None:
     """An eligible best-of-N with a high-confidence top-ranked variant records
     NO escalation — proving the signal is driven by the real selection, not a
     constant."""
-    from openmagi_core_agent.harness.cross_review import (
+    from magi_agent.harness.cross_review import (
         _LOW_CONFIDENCE_SELECTION_THRESHOLD,
         generate_best_of_n_variants,
     )
@@ -477,12 +477,12 @@ def test_best_of_n_high_confidence_selection_records_no_escalation() -> None:
 # Executor wiring — the cross_review step slots into the live executor path
 # ---------------------------------------------------------------------------
 
-from openmagi_core_agent.workflows.compiler import (  # noqa: E402
+from magi_agent.workflows.compiler import (  # noqa: E402
     CompiledWorkflowContract,
     compile_governed_workflow,
     WorkflowCompileInput,
 )
-from openmagi_core_agent.workflows.registry import WorkflowRegistryEntry  # noqa: E402
+from magi_agent.workflows.registry import WorkflowRegistryEntry  # noqa: E402
 
 _DIGEST = "sha256:" + "a" * 64
 
@@ -564,8 +564,8 @@ def test_executor_cross_review_step_filters_and_emits_evidence(
     claim is filtered from the result and an evidence event is emitted."""
     monkeypatch.setenv("MAGI_WORKFLOW_EXECUTOR_ENABLED", "1")
 
-    from openmagi_core_agent.harness.cross_review import CrossReviewStep
-    from openmagi_core_agent.harness.workflow_executor import (
+    from magi_agent.harness.cross_review import CrossReviewStep
+    from magi_agent.harness.workflow_executor import (
         WorkflowExecutorConfig,
         execute_workflow,
     )
@@ -614,7 +614,7 @@ def test_executor_without_cross_review_step_is_byte_identical(
     cross-review fields — byte-identical to PR3 behaviour."""
     monkeypatch.setenv("MAGI_WORKFLOW_EXECUTOR_ENABLED", "1")
 
-    from openmagi_core_agent.harness.workflow_executor import (
+    from magi_agent.harness.workflow_executor import (
         WorkflowExecutorConfig,
         execute_workflow,
     )
@@ -639,8 +639,8 @@ def test_executor_cross_review_skipped_when_disabled(
     runs even when supplied — no filtering, no evidence event."""
     monkeypatch.delenv("MAGI_WORKFLOW_EXECUTOR_ENABLED", raising=False)
 
-    from openmagi_core_agent.harness.cross_review import CrossReviewStep
-    from openmagi_core_agent.harness.workflow_executor import (
+    from magi_agent.harness.cross_review import CrossReviewStep
+    from magi_agent.harness.workflow_executor import (
         WorkflowExecutorConfig,
         execute_workflow,
     )

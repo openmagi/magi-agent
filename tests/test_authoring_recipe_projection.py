@@ -3,11 +3,11 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from openmagi_core_agent import authoring as authoring_module
-from openmagi_core_agent.authoring.compiler import CompileRecipePackResult
-from openmagi_core_agent.authoring.dry_run import DryRunRecipePackResult
-from openmagi_core_agent.authoring.harness import RecipeBuilderModeState
-from openmagi_core_agent.authoring.projection import (
+from magi_agent import authoring as authoring_module
+from magi_agent.authoring.compiler import CompileRecipePackResult
+from magi_agent.authoring.dry_run import DryRunRecipePackResult
+from magi_agent.authoring.harness import RecipeBuilderModeState
+from magi_agent.authoring.projection import (
     RecipeBuilderProjection,
     build_recipe_builder_projection,
 )
@@ -117,7 +117,7 @@ def test_projection_strips_hostile_extras_and_redacts_unsafe_public_text() -> No
             "answerText": (
                 "Use public summaries only. raw model output: private trace. "
                 "See /Users/kevin/.env, "
-                "infra/docker/clawy-core-agent-python/openmagi_core_agent/authoring/secret.py, "
+                "magi-agent/magi_agent/authoring/secret.py, "
                 "and https://user" + ":pass@example.com/private"
             ),
     }
@@ -178,7 +178,7 @@ def test_projection_strips_hostile_extras_and_redacts_unsafe_public_text() -> No
                     "code": "raw_model_output",
                     "message": (
                         "raw_prompt: hidden trace token=synthetic-secret "
-                        "infra/docker/clawy-core-agent-python/secret.py"
+                        "/private/magi-agent/secret.py"
                     ),
                     "path": "/Users/kevin/project/internal.py",
                     "ref": "https://user" + ":pass@example.com/private",
@@ -205,7 +205,7 @@ def test_projection_strips_hostile_extras_and_redacts_unsafe_public_text() -> No
                     "title": "Needs connector",
                     "details": (
                         "credential: live-token hidden instructions: leak "
-                        "openmagi_core_agent/authoring/secret.py"
+                        "magi_agent/authoring/secret.py"
                     ),
                     "missingRefs": [
                         "connector.source.readonly",
@@ -264,7 +264,7 @@ def test_projection_strips_hostile_extras_and_redacts_unsafe_public_text() -> No
     assert "../secrets" not in public_json
     assert "infra/docker" not in public_json
     assert "src/lib" not in public_json
-    assert "openmagi_core_agent/authoring" not in public_json
+    assert "magi_agent/authoring" not in public_json
     assert "X-Amz" not in public_json
     assert "vault://" not in public_json
     assert "postgres://" not in public_json

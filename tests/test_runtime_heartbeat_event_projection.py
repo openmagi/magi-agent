@@ -4,25 +4,25 @@ from datetime import UTC, datetime, timedelta
 import hashlib
 import json
 
-from openmagi_core_agent.runtime.events import (
+from magi_agent.runtime.events import (
     normalized_events_to_agent_events,
     runtime_heartbeat_status_event,
     runtime_resume_status_event,
     runtime_stale_status_event,
     runtime_watchdog_status_event,
 )
-from openmagi_core_agent.runtime.heartbeat_contract import (
+from magi_agent.runtime.heartbeat_contract import (
     HeartbeatReceipt,
     ResumeDecision,
     StaleRunVerdict,
     heartbeat_receipt_digest,
 )
-from openmagi_core_agent.runtime.no_agent_watchdog import (
+from magi_agent.runtime.no_agent_watchdog import (
     NoAgentWatchdogRequest,
     evaluate_no_agent_watchdog,
 )
-from openmagi_core_agent.runtime.work_console_snapshot import build_work_console_snapshot
-from openmagi_core_agent.transport.sse import InMemorySseWriter
+from magi_agent.runtime.work_console_snapshot import build_work_console_snapshot
+from magi_agent.transport.sse import InMemorySseWriter
 
 
 NOW = datetime(2026, 5, 28, 21, 5, tzinfo=UTC)

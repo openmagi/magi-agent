@@ -17,18 +17,18 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from pydantic import ValidationError
 
-from openmagi_core_agent.harness.resolved import build_default_resolved_harness_state
-from openmagi_core_agent.hooks.bus import HookBus, RegisteredHook
-from openmagi_core_agent.hooks.context import HookContext
-from openmagi_core_agent.hooks.executors import HookExecutor, get_executor
-from openmagi_core_agent.hooks.executors.llm_executor import LLMHookExecutor
-from openmagi_core_agent.hooks.external_config import (
+from magi_agent.harness.resolved import build_default_resolved_harness_state
+from magi_agent.hooks.bus import HookBus, RegisteredHook
+from magi_agent.hooks.context import HookContext
+from magi_agent.hooks.executors import HookExecutor, get_executor
+from magi_agent.hooks.executors.llm_executor import LLMHookExecutor
+from magi_agent.hooks.external_config import (
     ExternalHookConfig,
     load_external_hooks_from_yaml,
 )
-from openmagi_core_agent.hooks.manifest import HookManifest, HookPoint
-from openmagi_core_agent.hooks.result import HookResult
-from openmagi_core_agent.tools.manifest import ToolSource
+from magi_agent.hooks.manifest import HookManifest, HookPoint
+from magi_agent.hooks.result import HookResult
+from magi_agent.tools.manifest import ToolSource
 
 # ---------------------------------------------------------------------------
 # Shared fixtures
@@ -201,7 +201,7 @@ def test_llm_hook_skipped_in_sync_run_with_warning(caplog):
     hook = RegisteredHook(manifest=_llm_manifest("sync-llm-hook"), handler=MagicMock())
     bus = HookBus(hooks=(hook,))
 
-    with caplog.at_level(logging.WARNING, logger="openmagi_core_agent.hooks.bus"):
+    with caplog.at_level(logging.WARNING, logger="magi_agent.hooks.bus"):
         result = bus.run(
             point=HookPoint.BEFORE_TOOL_USE, context=_CONTEXT, harness_state=_HARNESS
         )
@@ -217,12 +217,12 @@ async def test_missing_llm_executor_returns_continue(caplog):
 
     hook = RegisteredHook(manifest=_llm_manifest("no-executor-llm"), handler=AsyncMock())
     with patch(
-        "openmagi_core_agent.hooks.bus.get_executor",
+        "magi_agent.hooks.bus.get_executor",
         side_effect=lambda t: None,
     ):
         bus = HookBus(hooks=(hook,))
 
-    with caplog.at_level(logging.WARNING, logger="openmagi_core_agent.hooks.bus"):
+    with caplog.at_level(logging.WARNING, logger="magi_agent.hooks.bus"):
         result = await bus.run_async(
             point=HookPoint.BEFORE_TOOL_USE, context=_CONTEXT, harness_state=_HARNESS
         )

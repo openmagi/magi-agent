@@ -18,34 +18,34 @@ from types import ModuleType
 
 def _injection_module() -> ModuleType:
     try:
-        return importlib.import_module("openmagi_core_agent.prompt.injection")
+        return importlib.import_module("magi_agent.prompt.injection")
     except ModuleNotFoundError as exc:
         import pytest
 
-        pytest.fail(f"openmagi_core_agent.prompt.injection module is missing: {exc}")
+        pytest.fail(f"magi_agent.prompt.injection module is missing: {exc}")
 
 
 def _providers_module() -> ModuleType:
     try:
-        return importlib.import_module("openmagi_core_agent.prompt.providers")
+        return importlib.import_module("magi_agent.prompt.providers")
     except ModuleNotFoundError as exc:
         import pytest
 
-        pytest.fail(f"openmagi_core_agent.prompt.providers module is missing: {exc}")
+        pytest.fail(f"magi_agent.prompt.providers module is missing: {exc}")
 
 
 def _prompt_module() -> ModuleType:
     try:
-        return importlib.import_module("openmagi_core_agent.prompt")
+        return importlib.import_module("magi_agent.prompt")
     except ModuleNotFoundError as exc:
         import pytest
 
-        pytest.fail(f"openmagi_core_agent.prompt module is missing: {exc}")
+        pytest.fail(f"magi_agent.prompt module is missing: {exc}")
 
 
 def _make_block(text: str, cache_scope: str | None):  # type: ignore[return]
     """Create a PromptBlock using the live types module."""
-    types = importlib.import_module("openmagi_core_agent.prompt.types")
+    types = importlib.import_module("magi_agent.prompt.types")
     return types.PromptBlock(text=text, cache_scope=cache_scope)
 
 
@@ -83,9 +83,9 @@ class TestDetectProvider:
         detect = _injection_module().detect_provider
         assert detect("kimi-k2.5") == "unknown"
 
-    def test_clawy_smart_router_returns_unknown(self) -> None:
+    def test_magi_smart_router_returns_unknown(self) -> None:
         detect = _injection_module().detect_provider
-        assert detect("clawy-smart-router/auto") == "unknown"
+        assert detect("magi-smart-router/auto") == "unknown"
 
     def test_fireworks_kimi_returns_unknown(self) -> None:
         detect = _injection_module().detect_provider

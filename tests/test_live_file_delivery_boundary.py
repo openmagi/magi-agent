@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from openmagi_core_agent.channels.contract import ChannelDeliveryReceipt, ChannelRef
+from magi_agent.channels.contract import ChannelDeliveryReceipt, ChannelRef
 
 
 class FakeFileArtifactProvider:
@@ -75,7 +75,7 @@ def _request(
     filename: str = "market-brief.md",
     mime_type: str = "text/markdown",
 ) -> object:
-    from openmagi_core_agent.artifacts.file_delivery import FileDeliveryRequest
+    from magi_agent.artifacts.file_delivery import FileDeliveryRequest
 
     return FileDeliveryRequest(
         operation=operation,
@@ -95,7 +95,7 @@ def _request(
 
 
 def test_file_delivery_is_disabled_by_default_and_calls_no_provider() -> None:
-    from openmagi_core_agent.artifacts.file_delivery import (
+    from magi_agent.artifacts.file_delivery import (
         FileDeliveryBoundary,
         FileDeliveryConfig,
     )
@@ -124,7 +124,7 @@ def test_file_delivery_is_disabled_by_default_and_calls_no_provider() -> None:
 
 
 def test_file_delivery_metadata_keys_are_sanitized_even_when_default_disabled() -> None:
-    from openmagi_core_agent.artifacts.file_delivery import (
+    from magi_agent.artifacts.file_delivery import (
         FileDeliveryBoundary,
         FileDeliveryConfig,
     )
@@ -157,7 +157,7 @@ def test_file_delivery_metadata_keys_are_sanitized_even_when_default_disabled() 
 
 
 def test_fake_artifact_write_is_digest_addressed_and_not_success_without_channel_receipt() -> None:
-    from openmagi_core_agent.artifacts.file_delivery import (
+    from magi_agent.artifacts.file_delivery import (
         FileDeliveryBoundary,
         FileDeliveryConfig,
     )
@@ -186,7 +186,7 @@ def test_fake_artifact_write_is_digest_addressed_and_not_success_without_channel
 
 
 def test_file_deliver_to_chat_requires_delivery_receipt_before_success() -> None:
-    from openmagi_core_agent.artifacts.file_delivery import (
+    from magi_agent.artifacts.file_delivery import (
         FileDeliveryBoundary,
         FileDeliveryConfig,
     )
@@ -225,7 +225,7 @@ def test_file_deliver_to_chat_requires_delivery_receipt_before_success() -> None
     ),
 )
 def test_file_send_refuses_unsafe_inputs_before_provider(kwargs: dict[str, object], reason: str) -> None:
-    from openmagi_core_agent.artifacts.file_delivery import (
+    from magi_agent.artifacts.file_delivery import (
         FileDeliveryBoundary,
         FileDeliveryConfig,
     )
@@ -255,7 +255,7 @@ def test_file_send_refuses_unsafe_inputs_before_provider(kwargs: dict[str, objec
 
 
 def test_channel_delivery_cannot_claim_success_without_provider_receipt() -> None:
-    from openmagi_core_agent.artifacts.file_delivery import (
+    from magi_agent.artifacts.file_delivery import (
         FileDeliveryBoundary,
         FileDeliveryConfig,
     )
@@ -278,7 +278,7 @@ def test_channel_delivery_cannot_claim_success_without_provider_receipt() -> Non
 
 
 def test_channel_delivery_requires_correlated_receipt_and_artifact_provider_receipt() -> None:
-    from openmagi_core_agent.artifacts.file_delivery import (
+    from magi_agent.artifacts.file_delivery import (
         FileDeliveryBoundary,
         FileDeliveryConfig,
     )
@@ -309,7 +309,7 @@ def test_channel_delivery_requires_correlated_receipt_and_artifact_provider_rece
 
 
 def test_file_delivery_projection_omits_raw_content_and_paths() -> None:
-    from openmagi_core_agent.artifacts.file_delivery import (
+    from magi_agent.artifacts.file_delivery import (
         FileDeliveryBoundary,
         FileDeliveryConfig,
     )
@@ -336,12 +336,12 @@ def test_file_delivery_projection_omits_raw_content_and_paths() -> None:
 
 
 def test_artifact_channel_boundary_consumes_file_delivery_decision_receipts() -> None:
-    from openmagi_core_agent.artifacts.delivery_boundary import (
+    from magi_agent.artifacts.delivery_boundary import (
         ArtifactChannelDeliveryBoundary,
         ArtifactChannelDeliveryConfig,
         ArtifactChannelDeliveryRequest,
     )
-    from openmagi_core_agent.artifacts.file_delivery import (
+    from magi_agent.artifacts.file_delivery import (
         FileDeliveryBoundary,
         FileDeliveryConfig,
     )
@@ -385,12 +385,12 @@ def test_artifact_channel_boundary_consumes_file_delivery_decision_receipts() ->
 
 
 def test_artifact_channel_boundary_rejects_forged_or_mismatched_file_delivery_decisions() -> None:
-    from openmagi_core_agent.artifacts.delivery_boundary import (
+    from magi_agent.artifacts.delivery_boundary import (
         ArtifactChannelDeliveryBoundary,
         ArtifactChannelDeliveryConfig,
         ArtifactChannelDeliveryRequest,
     )
-    from openmagi_core_agent.artifacts.file_delivery import (
+    from magi_agent.artifacts.file_delivery import (
         FileDeliveryBoundary,
         FileDeliveryConfig,
     )
@@ -480,7 +480,7 @@ def test_artifact_channel_boundary_rejects_forged_or_mismatched_file_delivery_de
 
 
 def test_legacy_artifact_channel_file_send_requires_file_delivery_boundary() -> None:
-    from openmagi_core_agent.artifacts.delivery_boundary import (
+    from magi_agent.artifacts.delivery_boundary import (
         ArtifactChannelDeliveryBoundary,
         ArtifactChannelDeliveryConfig,
         ArtifactChannelDeliveryRequest,
@@ -515,7 +515,7 @@ def test_legacy_artifact_channel_file_send_requires_file_delivery_boundary() -> 
 
 
 def test_file_delivery_config_false_fields_are_hardened_against_copy_and_construct() -> None:
-    from openmagi_core_agent.artifacts.file_delivery import FileDeliveryConfig
+    from magi_agent.artifacts.file_delivery import FileDeliveryConfig
 
     copied = FileDeliveryConfig().model_copy(
         update={
@@ -574,13 +574,13 @@ def test_file_delivery_boundary_has_no_live_imports() -> None:
 import importlib
 import sys
 
-importlib.import_module("openmagi_core_agent.artifacts.file_delivery")
+importlib.import_module("magi_agent.artifacts.file_delivery")
 forbidden_prefixes = (
     "google.adk",
-    "openmagi_core_agent.transport",
-    "openmagi_core_agent.memory",
-    "openmagi_core_agent.browser",
-    "openmagi_core_agent.web_acquisition",
+    "magi_agent.transport",
+    "magi_agent.memory",
+    "magi_agent.browser",
+    "magi_agent.web_acquisition",
     "telegram",
     "discord",
     "requests",

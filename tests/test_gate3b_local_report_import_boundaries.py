@@ -20,40 +20,40 @@ def test_gate3b_local_report_does_not_import_runner_or_live_surfaces() -> None:
 import importlib
 import sys
 
-module = importlib.import_module("openmagi_core_agent.shadow.gate3b_local_report")
+module = importlib.import_module("magi_agent.shadow.gate3b_local_report")
 assert module is not None
 
 forbidden_exact = (
     "google.adk.runners",
-    "openmagi_core_agent.adk_bridge.runner_adapter",
-    "openmagi_core_agent.shadow.gate3a_replay",
-    "openmagi_core_agent.tools.dispatcher",
+    "magi_agent.adk_bridge.runner_adapter",
+    "magi_agent.shadow.gate3a_replay",
+    "magi_agent.tools.dispatcher",
 )
 forbidden_prefixes = (
-    "openmagi_core_agent.transport.chat",
-    "openmagi_core_agent.transport.tools",
-    "openmagi_core_agent.channels",
-    "openmagi_core_agent.runtime.openmagi_runtime",
-    "openmagi_core_agent.routing",
-    "openmagi_core_agent.workspace",
-    "openmagi_core_agent.deploy",
-    "openmagi_core_agent.provisioning",
-    "openmagi_core_agent.k8s",
-    "openmagi_core_agent.telegram",
-    "openmagi_core_agent.api",
-    "openmagi_core_agent.proxy",
-    "openmagi_core_agent.dashboard",
-    "openmagi_core_agent.database",
-    "openmagi_core_agent.billing",
-    "openmagi_core_agent.auth",
-    "openmagi_core_agent.model_routing",
-    "openmagi_core_agent.missions",
-    "openmagi_core_agent.scheduler",
-    "openmagi_core_agent.children",
-    "openmagi_core_agent.typescript_runtime",
-    "openmagi_core_agent.ts_runtime",
-    "openmagi_core_agent.signed_ack",
-    "openmagi_core_agent.evidence.extractors",
+    "magi_agent.transport.chat",
+    "magi_agent.transport.tools",
+    "magi_agent.channels",
+    "magi_agent.runtime.openmagi_runtime",
+    "magi_agent.routing",
+    "magi_agent.workspace",
+    "magi_agent.deploy",
+    "magi_agent.provisioning",
+    "magi_agent.k8s",
+    "magi_agent.telegram",
+    "magi_agent.api",
+    "magi_agent.proxy",
+    "magi_agent.dashboard",
+    "magi_agent.database",
+    "magi_agent.billing",
+    "magi_agent.auth",
+    "magi_agent.model_routing",
+    "magi_agent.missions",
+    "magi_agent.scheduler",
+    "magi_agent.children",
+    "magi_agent.typescript_runtime",
+    "magi_agent.ts_runtime",
+    "magi_agent.signed_ack",
+    "magi_agent.evidence.extractors",
 )
 loaded = [
     loaded_name
@@ -77,7 +77,7 @@ def test_gate3b_local_report_source_has_no_shell_or_code_execution_helpers() -> 
     root = Path(__file__).parents[1]
     source = (
         root
-        / "openmagi_core_agent"
+        / "magi_agent"
         / "shadow"
         / "gate3b_local_report.py"
     ).read_text(encoding="utf-8")

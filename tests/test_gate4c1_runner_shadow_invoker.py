@@ -8,8 +8,8 @@ from google.adk.events import Event
 from google.genai import types
 import pytest
 
-import openmagi_core_agent.shadow.gate4c1_runner_shadow_invoker as runner_invoker_module
-from openmagi_core_agent.shadow.gate4c0_shadow_config import (
+import magi_agent.shadow.gate4c1_runner_shadow_invoker as runner_invoker_module
+from magi_agent.shadow.gate4c0_shadow_config import (
     Gate4C0AllowlistMetadata,
     Gate4C0BudgetPolicy,
     Gate4C0InputEnvelopeMetadata,
@@ -22,7 +22,7 @@ from openmagi_core_agent.shadow.gate4c0_shadow_config import (
     Gate4C0ShadowConfig,
     Gate4C0ToolPolicy,
 )
-from openmagi_core_agent.shadow.gate4c1_runner_shadow_invoker import (
+from magi_agent.shadow.gate4c1_runner_shadow_invoker import (
     Gate4C1AdkPrimitives,
     Gate4C1RunnerAuthorityFlags,
     Gate4C1RunnerShadowInvocationConfig,

@@ -7,7 +7,7 @@ from typing import Any
 
 import pytest
 
-from openmagi_core_agent.channels.contract import ChannelRef
+from magi_agent.channels.contract import ChannelRef
 
 
 class FakeDiscordProvider:
@@ -62,7 +62,7 @@ class FakeDiscordProvider:
 
 
 def _config(**overrides: object) -> object:
-    from openmagi_core_agent.channels.discord_adapter import DiscordAdapterConfig
+    from magi_agent.channels.discord_adapter import DiscordAdapterConfig
 
     payload = {
         "enabled": True,
@@ -75,7 +75,7 @@ def _config(**overrides: object) -> object:
 
 
 def _event_request(**overrides: object) -> object:
-    from openmagi_core_agent.channels.discord_adapter import DiscordEventRequest
+    from magi_agent.channels.discord_adapter import DiscordEventRequest
 
     payload = {
         "requestId": "events-1",
@@ -90,7 +90,7 @@ def _event_request(**overrides: object) -> object:
 
 
 def _send_request(**overrides: object) -> object:
-    from openmagi_core_agent.channels.discord_adapter import DiscordSendRequest
+    from magi_agent.channels.discord_adapter import DiscordSendRequest
 
     payload = {
         "operation": "send_message",
@@ -108,7 +108,7 @@ def _send_request(**overrides: object) -> object:
 
 
 def test_discord_adapter_default_disabled_blocks_events_and_sends() -> None:
-    from openmagi_core_agent.channels.discord_adapter import (
+    from magi_agent.channels.discord_adapter import (
         DiscordAdapterBoundary,
         DiscordAdapterConfig,
     )
@@ -127,7 +127,7 @@ def test_discord_adapter_default_disabled_blocks_events_and_sends() -> None:
 
 
 def test_discord_events_normalize_message_create_thread_reply_attachments_and_author() -> None:
-    from openmagi_core_agent.channels.discord_adapter import DiscordAdapterBoundary
+    from magi_agent.channels.discord_adapter import DiscordAdapterBoundary
 
     provider = FakeDiscordProvider(
         events=[
@@ -198,7 +198,7 @@ def test_discord_events_normalize_message_create_thread_reply_attachments_and_au
 
 
 def test_discord_public_projection_redacts_snowflake_ids_in_text_and_reply_preview() -> None:
-    from openmagi_core_agent.channels.discord_adapter import DiscordAdapterBoundary
+    from magi_agent.channels.discord_adapter import DiscordAdapterBoundary
 
     provider = FakeDiscordProvider(
         events=[
@@ -243,7 +243,7 @@ def test_discord_public_projection_redacts_snowflake_ids_in_text_and_reply_previ
 
 
 def test_discord_events_filter_bots_empty_guild_chatter_and_unmentioned_guild_messages() -> None:
-    from openmagi_core_agent.channels.discord_adapter import DiscordAdapterBoundary
+    from magi_agent.channels.discord_adapter import DiscordAdapterBoundary
 
     provider = FakeDiscordProvider(
         events=[
@@ -285,7 +285,7 @@ def test_discord_events_filter_bots_empty_guild_chatter_and_unmentioned_guild_me
 
 
 def test_discord_send_message_chunks_to_content_limit() -> None:
-    from openmagi_core_agent.channels.discord_adapter import DiscordAdapterBoundary
+    from magi_agent.channels.discord_adapter import DiscordAdapterBoundary
 
     provider = FakeDiscordProvider()
     text = "A" * 4300
@@ -303,7 +303,7 @@ def test_discord_send_message_chunks_to_content_limit() -> None:
 
 
 def test_discord_file_delivery_requires_artifact_receipt() -> None:
-    from openmagi_core_agent.channels.discord_adapter import DiscordAdapterBoundary
+    from magi_agent.channels.discord_adapter import DiscordAdapterBoundary
 
     provider = FakeDiscordProvider()
     boundary = DiscordAdapterBoundary(_config())
@@ -329,7 +329,7 @@ def test_discord_file_delivery_requires_artifact_receipt() -> None:
 
 
 def test_discord_file_delivery_blocks_secret_shaped_refs_without_throwing() -> None:
-    from openmagi_core_agent.channels.discord_adapter import DiscordAdapterBoundary
+    from magi_agent.channels.discord_adapter import DiscordAdapterBoundary
 
     provider = FakeDiscordProvider()
 
@@ -353,7 +353,7 @@ def test_discord_file_delivery_blocks_secret_shaped_refs_without_throwing() -> N
 
 
 def test_discord_file_delivery_blocks_private_caption_before_provider_call() -> None:
-    from openmagi_core_agent.channels.discord_adapter import DiscordAdapterBoundary
+    from magi_agent.channels.discord_adapter import DiscordAdapterBoundary
 
     provider = FakeDiscordProvider()
 
@@ -388,7 +388,7 @@ def test_discord_provider_failures_produce_deterministic_redacted_receipts(
     provider: FakeDiscordProvider,
     reason: str,
 ) -> None:
-    from openmagi_core_agent.channels.discord_adapter import DiscordAdapterBoundary
+    from magi_agent.channels.discord_adapter import DiscordAdapterBoundary
 
     first = DiscordAdapterBoundary(_config()).send(_send_request(), provider=provider)
     second = DiscordAdapterBoundary(_config()).send(_send_request(), provider=provider)
@@ -405,7 +405,7 @@ def test_discord_provider_failures_produce_deterministic_redacted_receipts(
 
 @pytest.mark.parametrize("channel_type", ("web", "app", "telegram"))
 def test_discord_adapter_cannot_be_selected_by_non_discord_channels(channel_type: str) -> None:
-    from openmagi_core_agent.channels.discord_adapter import DiscordAdapterBoundary
+    from magi_agent.channels.discord_adapter import DiscordAdapterBoundary
 
     provider = FakeDiscordProvider()
 
@@ -420,11 +420,11 @@ def test_discord_adapter_cannot_be_selected_by_non_discord_channels(channel_type
 
 
 def test_discord_dispatch_provider_adapter_feeds_channel_dispatcher_receipts() -> None:
-    from openmagi_core_agent.channels.discord_adapter import (
+    from magi_agent.channels.discord_adapter import (
         DiscordAdapterBoundary,
         DiscordChannelDispatchProviderAdapter,
     )
-    from openmagi_core_agent.channels.dispatcher import (
+    from magi_agent.channels.dispatcher import (
         ChannelDispatchConfig,
         ChannelDispatchRequest,
         ChannelDispatcher,
@@ -464,7 +464,7 @@ def test_discord_dispatch_provider_adapter_feeds_channel_dispatcher_receipts() -
 
 
 def test_discord_adapter_diagnostic_metadata_redacts_sensitive_keys_and_flags() -> None:
-    from openmagi_core_agent.channels.discord_adapter import DiscordAdapterBoundary
+    from magi_agent.channels.discord_adapter import DiscordAdapterBoundary
 
     provider = FakeDiscordProvider()
 
@@ -508,7 +508,7 @@ def test_discord_adapter_diagnostic_metadata_redacts_sensitive_keys_and_flags() 
 
 
 def test_discord_adapter_config_and_decision_cannot_forge_live_flags() -> None:
-    from openmagi_core_agent.channels.discord_adapter import (
+    from magi_agent.channels.discord_adapter import (
         DiscordAdapterAuthorityFlags,
         DiscordAdapterConfig,
         DiscordAdapterDecision,

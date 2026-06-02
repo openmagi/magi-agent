@@ -6,23 +6,23 @@ from pathlib import Path
 
 import pytest
 
-from openmagi_core_agent.harness.verifier_bus import VerifierResultMetadata
-from openmagi_core_agent.meta_orchestration.child_acceptance import ChildAcceptanceVerdict
-from openmagi_core_agent.meta_orchestration.commit_adapter import (
+from magi_agent.harness.verifier_bus import VerifierResultMetadata
+from magi_agent.meta_orchestration.child_acceptance import ChildAcceptanceVerdict
+from magi_agent.meta_orchestration.commit_adapter import (
     MetaBeforeCommitVerdict,
     RuntimeIssuedMetaVerifierResult,
     evaluate_before_commit_for_assembly,
     issue_runtime_verifier_result_for_assembly,
 )
-from openmagi_core_agent.meta_orchestration.final_assembly import (
+from magi_agent.meta_orchestration.final_assembly import (
     MetaFinalAssemblyPlan,
     assemble_final_output_from_inspection,
 )
-from openmagi_core_agent.meta_orchestration.inspection_loop import (
+from magi_agent.meta_orchestration.inspection_loop import (
     MetaInspectedChildVerdict,
     inspect_child_verdicts,
 )
-from openmagi_core_agent.runtime import commit_boundary
+from magi_agent.runtime import commit_boundary
 
 
 def _accepted(task_id: str, *evidence_refs: str) -> MetaInspectedChildVerdict:
@@ -300,9 +300,9 @@ def test_generic_commit_boundary_remains_domain_neutral() -> None:
     assert "meta_orchestration" not in source
     for path in generic_sources:
         module_source = path.read_text()
-        assert "openmagi_core_agent.meta_orchestration" not in module_source, path
-        assert "from openmagi_core_agent import meta_orchestration" not in module_source, path
-        assert "import openmagi_core_agent.meta_orchestration" not in module_source, path
+        assert "magi_agent.meta_orchestration" not in module_source, path
+        assert "from magi_agent import meta_orchestration" not in module_source, path
+        assert "import magi_agent.meta_orchestration" not in module_source, path
     for forbidden in (
         "research_searcher",
         "source_inspector",

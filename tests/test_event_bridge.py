@@ -4,7 +4,7 @@ import math
 from google.adk.events import Event, EventActions
 from google.genai import types
 
-from openmagi_core_agent.adk_bridge.event_adapter import OpenMagiEventBridge
+from magi_agent.adk_bridge.event_adapter import OpenMagiEventBridge
 
 
 def text_event(text: str, *, partial: bool, turn_complete: bool = False) -> Event:

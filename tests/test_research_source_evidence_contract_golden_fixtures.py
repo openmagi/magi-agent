@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from openmagi_core_agent.shadow.research_source_evidence_contract import (
+from magi_agent.shadow.research_source_evidence_contract import (
     ResearchSourceAttachmentFlags,
     ResearchSourceEvidenceFixture,
     load_research_source_evidence_fixture,
@@ -337,19 +337,19 @@ def test_research_source_attachment_flags_remain_false_under_construct_and_copy(
 def test_research_source_evidence_import_boundary_stays_runtime_free() -> None:
     forbidden = (
         "google.adk.runners",
-        "openmagi_core_agent.adk_bridge.local_runner",
-        "openmagi_core_agent.adk_bridge.runner_adapter",
-        "openmagi_core_agent.adk_bridge.tool_adapter",
-        "openmagi_core_agent.tools.dispatcher",
-        "openmagi_core_agent.tools.registry",
-        "openmagi_core_agent.plugins.agentmemory",
-        "openmagi_core_agent.memory",
-        "openmagi_core_agent.services.memory",
-        "openmagi_core_agent.hipocampus",
-        "openmagi_core_agent.qmd",
-        "openmagi_core_agent.app",
-        "openmagi_core_agent.transport.chat",
-        "openmagi_core_agent.routes",
+        "magi_agent.adk_bridge.local_runner",
+        "magi_agent.adk_bridge.runner_adapter",
+        "magi_agent.adk_bridge.tool_adapter",
+        "magi_agent.tools.dispatcher",
+        "magi_agent.tools.registry",
+        "magi_agent.plugins.agentmemory",
+        "magi_agent.memory",
+        "magi_agent.services.memory",
+        "magi_agent.hipocampus",
+        "magi_agent.qmd",
+        "magi_agent.app",
+        "magi_agent.transport.chat",
+        "magi_agent.routes",
     )
     loaded_before = set(sys.modules)
 

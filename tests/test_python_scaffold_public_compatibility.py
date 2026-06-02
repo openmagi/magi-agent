@@ -4,13 +4,13 @@ import importlib
 
 
 def test_recipe_compiler_exports_pack_digest_builder() -> None:
-    compiler = importlib.import_module("openmagi_core_agent.recipes.compiler")
+    compiler = importlib.import_module("magi_agent.recipes.compiler")
 
     assert callable(compiler.build_recipe_pack_digest)
 
 
 def test_runtime_events_exports_normalized_event_contract() -> None:
-    events = importlib.import_module("openmagi_core_agent.runtime.events")
+    events = importlib.import_module("magi_agent.runtime.events")
 
     assert hasattr(events, "NormalizedEvent")
     assert hasattr(events, "normalized_events_to_agent_events")

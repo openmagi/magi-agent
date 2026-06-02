@@ -2,15 +2,15 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from openmagi_core_agent.shadow.gate4_consumer import Gate4LocalHandoff
-from openmagi_core_agent.shadow.gate4c1_runner_shadow_invoker import (
+from magi_agent.shadow.gate4_consumer import Gate4LocalHandoff
+from magi_agent.shadow.gate4c1_runner_shadow_invoker import (
     Gate4C1RunnerShadowInvocationResult,
 )
-from openmagi_core_agent.shadow.gate4c2_shadow_comparison_report import (
+from magi_agent.shadow.gate4c2_shadow_comparison_report import (
     Gate4C2ShadowComparisonConfig,
     build_gate4c2_shadow_comparison_report,
 )
-from openmagi_core_agent.shadow.gate4d_local_shadow_diagnostics import (
+from magi_agent.shadow.gate4d_local_shadow_diagnostics import (
     Gate4DLocalShadowDiagnosticsConfig,
     Gate4DShadowAuthorityFlags,
     build_gate4d_local_shadow_diagnostics,

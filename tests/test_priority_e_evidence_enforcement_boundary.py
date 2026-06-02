@@ -3,12 +3,12 @@ from __future__ import annotations
 import subprocess
 import sys
 
-from openmagi_core_agent.evidence.enforcement_boundary import (
+from magi_agent.evidence.enforcement_boundary import (
     EvidenceEnforcementBoundary,
     EvidenceEnforcementConfig,
     EvidenceEnforcementRequest,
 )
-from openmagi_core_agent.evidence.types import EvidenceContract, EvidenceRecord
+from magi_agent.evidence.types import EvidenceContract, EvidenceRecord
 
 
 def _record(
@@ -202,13 +202,13 @@ def test_evidence_enforcement_boundary_has_no_live_imports() -> None:
 import importlib
 import sys
 
-importlib.import_module("openmagi_core_agent.evidence.enforcement_boundary")
+importlib.import_module("magi_agent.evidence.enforcement_boundary")
 forbidden = (
     "subprocess",
     "git",
     "google.adk.runners",
-    "openmagi_core_agent.runtime.runner",
-    "openmagi_core_agent.tools.dispatcher",
+    "magi_agent.runtime.runner",
+    "magi_agent.tools.dispatcher",
 )
 loaded = [name for name in forbidden if name in sys.modules]
 if loaded:

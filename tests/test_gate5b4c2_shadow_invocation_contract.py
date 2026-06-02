@@ -3,10 +3,10 @@ from __future__ import annotations
 from fastapi.testclient import TestClient
 import pytest
 
-from openmagi_core_agent.app import create_app
-from openmagi_core_agent.config.models import BuildInfo, RuntimeConfig
-from openmagi_core_agent.runtime.openmagi_runtime import OpenMagiRuntime
-from openmagi_core_agent.shadow.gate5b4c2_shadow_invocation_contract import (
+from magi_agent.app import create_app
+from magi_agent.config.models import BuildInfo, RuntimeConfig
+from magi_agent.runtime.openmagi_runtime import OpenMagiRuntime
+from magi_agent.shadow.gate5b4c2_shadow_invocation_contract import (
     Gate5B4C2ShadowAuthorityFlags,
     Gate5B4C2ShadowGateConfig,
     Gate5B4C2ShadowInvocationRequest,

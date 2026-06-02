@@ -5,7 +5,7 @@ import json
 import pytest
 from pydantic import BaseModel, ValidationError
 
-from openmagi_core_agent.recipes.composition import (
+from magi_agent.recipes.composition import (
     AdmittedRecipeSnapshot,
     RecipeAdmissionRequest,
     RecipeAdmissionResult,

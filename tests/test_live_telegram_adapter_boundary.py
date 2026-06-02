@@ -7,7 +7,7 @@ from typing import Any
 
 import pytest
 
-from openmagi_core_agent.channels.contract import ChannelRef
+from magi_agent.channels.contract import ChannelRef
 
 
 class FakeTelegramAdapterProvider:
@@ -63,7 +63,7 @@ class FakeTelegramAdapterProvider:
 
 
 def _config(**overrides: object) -> object:
-    from openmagi_core_agent.channels.telegram_adapter import TelegramAdapterConfig
+    from magi_agent.channels.telegram_adapter import TelegramAdapterConfig
 
     payload = {
         "enabled": True,
@@ -76,7 +76,7 @@ def _config(**overrides: object) -> object:
 
 
 def _poll_request(**overrides: object) -> object:
-    from openmagi_core_agent.channels.telegram_adapter import TelegramPollRequest
+    from magi_agent.channels.telegram_adapter import TelegramPollRequest
 
     payload = {
         "requestId": "poll-1",
@@ -91,7 +91,7 @@ def _poll_request(**overrides: object) -> object:
 
 
 def _send_request(**overrides: object) -> object:
-    from openmagi_core_agent.channels.telegram_adapter import TelegramSendRequest
+    from magi_agent.channels.telegram_adapter import TelegramSendRequest
 
     payload = {
         "operation": "send_message",
@@ -109,7 +109,7 @@ def _send_request(**overrides: object) -> object:
 
 
 def _download_request(**overrides: object) -> object:
-    from openmagi_core_agent.channels.telegram_adapter import TelegramDownloadRequest
+    from magi_agent.channels.telegram_adapter import TelegramDownloadRequest
 
     payload = {
         "requestId": "download-1",
@@ -127,7 +127,7 @@ def _download_request(**overrides: object) -> object:
 
 
 def test_telegram_adapter_default_disabled_blocks_polling_and_sending() -> None:
-    from openmagi_core_agent.channels.telegram_adapter import (
+    from magi_agent.channels.telegram_adapter import (
         TelegramAdapterBoundary,
         TelegramAdapterConfig,
     )
@@ -146,7 +146,7 @@ def test_telegram_adapter_default_disabled_blocks_polling_and_sending() -> None:
 
 
 def test_telegram_get_updates_normalizes_text_media_replies_captions_and_attachments() -> None:
-    from openmagi_core_agent.channels.telegram_adapter import TelegramAdapterBoundary
+    from magi_agent.channels.telegram_adapter import TelegramAdapterBoundary
 
     provider = FakeTelegramAdapterProvider(
         updates=[
@@ -197,7 +197,7 @@ def test_telegram_get_updates_normalizes_text_media_replies_captions_and_attachm
 
 
 def test_telegram_offset_persistence_is_digest_addressed_and_idempotent() -> None:
-    from openmagi_core_agent.channels.telegram_adapter import TelegramAdapterBoundary
+    from magi_agent.channels.telegram_adapter import TelegramAdapterBoundary
 
     provider = FakeTelegramAdapterProvider(
         updates=[
@@ -219,7 +219,7 @@ def test_telegram_offset_persistence_is_digest_addressed_and_idempotent() -> Non
 
 @pytest.mark.parametrize("method_name", ("poll_updates", "download_file"))
 def test_telegram_poll_and_download_require_selected_telegram_route(method_name: str) -> None:
-    from openmagi_core_agent.channels.telegram_adapter import TelegramAdapterBoundary
+    from magi_agent.channels.telegram_adapter import TelegramAdapterBoundary
 
     provider = FakeTelegramAdapterProvider(
         updates=[
@@ -238,7 +238,7 @@ def test_telegram_poll_and_download_require_selected_telegram_route(method_name:
 
 
 def test_telegram_stale_webhook_mitigation_is_intent_not_execution() -> None:
-    from openmagi_core_agent.channels.telegram_adapter import (
+    from magi_agent.channels.telegram_adapter import (
         TelegramAdapterBoundary,
         TelegramWebhookMitigationRequest,
     )
@@ -263,7 +263,7 @@ def test_telegram_stale_webhook_mitigation_is_intent_not_execution() -> None:
 
 
 def test_telegram_send_message_chunks_to_telegram_limits() -> None:
-    from openmagi_core_agent.channels.telegram_adapter import TelegramAdapterBoundary
+    from magi_agent.channels.telegram_adapter import TelegramAdapterBoundary
 
     provider = FakeTelegramAdapterProvider()
     text = "A" * 7600
@@ -283,7 +283,7 @@ def test_telegram_send_message_chunks_to_telegram_limits() -> None:
 
 
 def test_telegram_send_document_and_photo_require_artifact_receipts() -> None:
-    from openmagi_core_agent.channels.telegram_adapter import TelegramAdapterBoundary
+    from magi_agent.channels.telegram_adapter import TelegramAdapterBoundary
 
     provider = FakeTelegramAdapterProvider()
     boundary = TelegramAdapterBoundary(_config())
@@ -321,7 +321,7 @@ def test_telegram_send_document_and_photo_require_artifact_receipts() -> None:
 
 
 def test_telegram_typing_errors_are_swallowed_and_redacted() -> None:
-    from openmagi_core_agent.channels.telegram_adapter import TelegramAdapterBoundary
+    from magi_agent.channels.telegram_adapter import TelegramAdapterBoundary
 
     provider = FakeTelegramAdapterProvider(fail_typing=True)
 
@@ -338,7 +338,7 @@ def test_telegram_typing_errors_are_swallowed_and_redacted() -> None:
 
 
 def test_telegram_adapter_diagnostic_metadata_redacts_sensitive_keys() -> None:
-    from openmagi_core_agent.channels.telegram_adapter import TelegramAdapterBoundary
+    from magi_agent.channels.telegram_adapter import TelegramAdapterBoundary
 
     provider = FakeTelegramAdapterProvider()
 
@@ -375,7 +375,7 @@ def test_telegram_adapter_diagnostic_metadata_redacts_sensitive_keys() -> None:
 
 
 def test_telegram_adapter_decision_copy_cannot_forge_authority_flags() -> None:
-    from openmagi_core_agent.channels.telegram_adapter import (
+    from magi_agent.channels.telegram_adapter import (
         TelegramAdapterAuthorityFlags,
         TelegramAdapterDecision,
     )
@@ -410,7 +410,7 @@ def test_telegram_adapter_decision_copy_cannot_forge_authority_flags() -> None:
 
 
 def test_telegram_adapter_config_construct_and_copy_cannot_enable_live_flags() -> None:
-    from openmagi_core_agent.channels.telegram_adapter import TelegramAdapterConfig
+    from magi_agent.channels.telegram_adapter import TelegramAdapterConfig
 
     constructed = TelegramAdapterConfig.model_construct(
         enabled=True,
@@ -474,7 +474,7 @@ def test_telegram_download_blocks_unsafe_inputs_before_provider_call(
     overrides: dict[str, object],
     reason: str,
 ) -> None:
-    from openmagi_core_agent.channels.telegram_adapter import TelegramAdapterBoundary
+    from magi_agent.channels.telegram_adapter import TelegramAdapterBoundary
 
     provider = FakeTelegramAdapterProvider()
 
@@ -498,7 +498,7 @@ def test_telegram_download_blocks_unsafe_inputs_before_provider_call(
     ),
 )
 def test_telegram_download_blocks_loopback_ipv6_and_integer_private_urls(file_url: str) -> None:
-    from openmagi_core_agent.channels.telegram_adapter import TelegramAdapterBoundary
+    from magi_agent.channels.telegram_adapter import TelegramAdapterBoundary
 
     provider = FakeTelegramAdapterProvider()
 
@@ -514,7 +514,7 @@ def test_telegram_download_blocks_loopback_ipv6_and_integer_private_urls(file_ur
 
 @pytest.mark.parametrize("channel_type", ("web", "app", "discord"))
 def test_telegram_adapter_never_calls_provider_for_non_telegram_channel(channel_type: str) -> None:
-    from openmagi_core_agent.channels.telegram_adapter import TelegramAdapterBoundary
+    from magi_agent.channels.telegram_adapter import TelegramAdapterBoundary
 
     provider = FakeTelegramAdapterProvider()
 
@@ -529,12 +529,12 @@ def test_telegram_adapter_never_calls_provider_for_non_telegram_channel(channel_
 
 
 def test_telegram_dispatch_provider_adapter_feeds_channel_dispatcher_receipts() -> None:
-    from openmagi_core_agent.channels.dispatcher import (
+    from magi_agent.channels.dispatcher import (
         ChannelDispatchConfig,
         ChannelDispatchRequest,
         ChannelDispatcher,
     )
-    from openmagi_core_agent.channels.telegram_adapter import (
+    from magi_agent.channels.telegram_adapter import (
         TelegramAdapterBoundary,
         TelegramChannelDispatchProviderAdapter,
     )

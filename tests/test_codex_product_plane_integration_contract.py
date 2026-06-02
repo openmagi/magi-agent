@@ -4,24 +4,24 @@ import json
 from pathlib import Path
 from typing import Any
 
-from openmagi_core_agent.artifacts.delivery_receipts import ArtifactDeliveryAuthorityFlags
-from openmagi_core_agent.artifacts.file_delivery import FileDeliveryAuthorityFlags
-from openmagi_core_agent.artifacts.local_result_store import ResultStoreAuthorityFlags
-from openmagi_core_agent.artifacts.output_registry_boundary import OutputArtifactAuthorityFlags
-from openmagi_core_agent.artifacts.render_verification import RenderVerificationAuthorityFlags
-from openmagi_core_agent.config.models import BuildInfo, RuntimeConfig
-from openmagi_core_agent.connectors.credential_lease import CredentialLeaseAuthorityFlags
-from openmagi_core_agent.connectors.marketplace import MarketplaceAuthorityFlags
-from openmagi_core_agent.connectors.registry import ConnectorAuthorityFlags
-from openmagi_core_agent.evals.release_gates import ReleaseGateAuthorityFlags
-from openmagi_core_agent.ops.metrics import RuntimeOpsAttachmentFlags
-from openmagi_core_agent.ops.job_queue import JobQueueAuthorityFlags
-from openmagi_core_agent.permissions.auto_control import AutoPermissionAuthorityFlags
-from openmagi_core_agent.runtime.openmagi_runtime import OpenMagiRuntime
-from openmagi_core_agent.sandbox.policy import SandboxAuthorityFlags
-from openmagi_core_agent.security.compliance import ComplianceAuthorityFlags
-from openmagi_core_agent.tenancy.context import TenantRuntimeAuthorityFlags
-from openmagi_core_agent.transport.product_admin import build_product_admin_contract_snapshot
+from magi_agent.artifacts.delivery_receipts import ArtifactDeliveryAuthorityFlags
+from magi_agent.artifacts.file_delivery import FileDeliveryAuthorityFlags
+from magi_agent.artifacts.local_result_store import ResultStoreAuthorityFlags
+from magi_agent.artifacts.output_registry_boundary import OutputArtifactAuthorityFlags
+from magi_agent.artifacts.render_verification import RenderVerificationAuthorityFlags
+from magi_agent.config.models import BuildInfo, RuntimeConfig
+from magi_agent.connectors.credential_lease import CredentialLeaseAuthorityFlags
+from magi_agent.connectors.marketplace import MarketplaceAuthorityFlags
+from magi_agent.connectors.registry import ConnectorAuthorityFlags
+from magi_agent.evals.release_gates import ReleaseGateAuthorityFlags
+from magi_agent.ops.metrics import RuntimeOpsAttachmentFlags
+from magi_agent.ops.job_queue import JobQueueAuthorityFlags
+from magi_agent.permissions.auto_control import AutoPermissionAuthorityFlags
+from magi_agent.runtime.openmagi_runtime import OpenMagiRuntime
+from magi_agent.sandbox.policy import SandboxAuthorityFlags
+from magi_agent.security.compliance import ComplianceAuthorityFlags
+from magi_agent.tenancy.context import TenantRuntimeAuthorityFlags
+from magi_agent.transport.product_admin import build_product_admin_contract_snapshot
 
 
 PYTHON_ROOT = Path(__file__).resolve().parents[1]

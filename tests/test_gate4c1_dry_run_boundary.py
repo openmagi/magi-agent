@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from openmagi_core_agent.shadow.gate4c0_shadow_config import (
+from magi_agent.shadow.gate4c0_shadow_config import (
     Gate4C0AllowlistMetadata,
     Gate4C0BudgetPolicy,
     Gate4C0InputEnvelopeMetadata,
@@ -13,7 +13,7 @@ from openmagi_core_agent.shadow.gate4c0_shadow_config import (
     Gate4C0ShadowConfig,
     Gate4C0ToolPolicy,
 )
-from openmagi_core_agent.shadow.gate4c1_dry_run_boundary import (
+from magi_agent.shadow.gate4c1_dry_run_boundary import (
     Gate4C1DryRunBoundaryConfig,
     Gate4C1DryRunBoundaryFlags,
     evaluate_gate4c1_dry_run_boundary,

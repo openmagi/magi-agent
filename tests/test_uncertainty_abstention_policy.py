@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from openmagi_core_agent.runtime.uncertainty_policy import (
+from magi_agent.runtime.uncertainty_policy import (
     UncertaintyDecisionEngine,
     UncertaintyDecisionRequest,
 )

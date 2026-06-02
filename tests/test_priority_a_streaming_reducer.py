@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import asdict, is_dataclass
 from typing import Any
 
-from openmagi_core_agent.runtime.streaming import reduce_streaming_events
+from magi_agent.runtime.streaming import reduce_streaming_events
 
 
 def _dump(value: Any) -> Any:

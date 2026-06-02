@@ -5,18 +5,18 @@ import json
 import pytest
 from pydantic import ValidationError
 
-from openmagi_core_agent.evidence.child_runtime_envelope import (
+from magi_agent.evidence.child_runtime_envelope import (
     ChildRuntimeEnvelope,
     ChildRuntimeEnvelopeAuthorityFlags,
 )
 from runtime_issuance_support import issue_test_runtime_authority
-from openmagi_core_agent.evidence.subagent import (
+from magi_agent.evidence.subagent import (
     OPENMAGI_RUNTIME_ENVELOPE_ISSUER,
     DelegatedEvidenceRequirement,
     EvidenceBoundaryLedgerRef,
     ExecutionBoundaryIdentity,
 )
-from openmagi_core_agent.research.child_roles import (
+from magi_agent.research.child_roles import (
     RESEARCH_CHILD_ROLE_NAMES,
     ResearchChildEnvelopeEvidenceRef,
     ResearchChildEvidenceAdmissionDecision,
@@ -27,14 +27,14 @@ from openmagi_core_agent.research.child_roles import (
     issue_runtime_research_child_proof_ref,
     research_child_role_policy,
 )
-from openmagi_core_agent.research.action_claims import (
+from magi_agent.research.action_claims import (
     ResearchActionProofReceiptRef,
     ResearchActionProofRequirement,
     detect_research_action_claims,
     verify_research_action_claims,
 )
-from openmagi_core_agent.research.claim_graph import ResearchClaimSupportRef
-from openmagi_core_agent.research.source_proof import (
+from magi_agent.research.claim_graph import ResearchClaimSupportRef
+from magi_agent.research.source_proof import (
     ResearchSourceOpenReceiptRef,
     ResearchSourceProofRequirement,
     verify_research_source_proof,

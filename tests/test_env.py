@@ -1,6 +1,6 @@
 import pytest
 
-from openmagi_core_agent.config.env import RuntimeEnvError, parse_runtime_env
+from magi_agent.config.env import RuntimeEnvError, parse_runtime_env
 
 
 def sha256_digest(value: str) -> str:
@@ -28,7 +28,7 @@ def test_parse_runtime_env_preserves_existing_contract_and_sets_python_engine() 
 
     assert config.bot_id == "bot-test"
     assert config.user_id == "user-test"
-    assert config.runtime == "core-agent"
+    assert config.runtime == "magi-agent"
     assert config.runtime_engine == "adk-python"
     assert config.model == "gpt-5.2"
     assert str(config.api_proxy_url) == "http://api-proxy.local/"

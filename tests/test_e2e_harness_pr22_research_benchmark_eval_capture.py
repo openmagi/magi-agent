@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from openmagi_core_agent.shadow.research_runner_capture import (
+from magi_agent.shadow.research_runner_capture import (
     RESEARCH_CAPTURE_DEFAULT_ENABLED,
     build_local_sample_capture,
 )
@@ -40,7 +40,7 @@ def test_pr22_matrix_row_references_capture_module_and_tests() -> None:
     row = _pr22_row()
     refs = [ref["path"] for ref in row["latestMainCoveredRefs"]]
 
-    assert "openmagi_core_agent/shadow/research_runner_capture.py" in refs
+    assert "magi_agent/shadow/research_runner_capture.py" in refs
     assert "tests/test_research_runner_capture.py" in refs
     assert "tests/test_e2e_harness_pr22_research_benchmark_eval_capture.py" in refs
     assert "research-artifact-v1" in row["notes"]

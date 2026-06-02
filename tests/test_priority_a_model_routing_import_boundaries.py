@@ -20,7 +20,7 @@ def test_priority_a_model_routing_import_is_metadata_only() -> None:
 import importlib
 import sys
 
-module = importlib.import_module("openmagi_core_agent.runtime.model_routing")
+module = importlib.import_module("magi_agent.runtime.model_routing")
 assert hasattr(module, "build_turn_model_routing_decision")
 
 forbidden_exact = (
@@ -37,20 +37,20 @@ forbidden_exact = (
     "socket",
     "fastapi",
     "starlette.routing",
-    "openmagi_core_agent.adk_bridge.runner_adapter",
-    "openmagi_core_agent.adk_bridge.local_runner",
-    "openmagi_core_agent.tools.dispatcher",
+    "magi_agent.adk_bridge.runner_adapter",
+    "magi_agent.adk_bridge.local_runner",
+    "magi_agent.tools.dispatcher",
 )
 forbidden_prefixes = (
-    "openmagi_core_agent.tools",
-    "openmagi_core_agent.memory",
-    "openmagi_core_agent.workspace",
-    "openmagi_core_agent.transport",
-    "openmagi_core_agent.channels",
-    "openmagi_core_agent.shadow.gate4c1_runner_shadow_invoker",
-    "openmagi_core_agent.children",
-    "openmagi_core_agent.missions",
-    "openmagi_core_agent.scheduler",
+    "magi_agent.tools",
+    "magi_agent.memory",
+    "magi_agent.workspace",
+    "magi_agent.transport",
+    "magi_agent.channels",
+    "magi_agent.shadow.gate4c1_runner_shadow_invoker",
+    "magi_agent.children",
+    "magi_agent.missions",
+    "magi_agent.scheduler",
 )
 loaded = [
     loaded_name
@@ -72,7 +72,7 @@ if loaded:
 
 def test_priority_a_model_routing_source_forbids_runtime_side_effect_imports() -> None:
     root = Path(__file__).parents[1]
-    module_path = root / "openmagi_core_agent" / "runtime" / "model_routing.py"
+    module_path = root / "magi_agent" / "runtime" / "model_routing.py"
     source = module_path.read_text(encoding="utf-8")
     forbidden_imports = (
         "google.adk",
@@ -87,15 +87,15 @@ def test_priority_a_model_routing_source_forbids_runtime_side_effect_imports() -
         "asyncio",
         "fastapi",
         "starlette",
-        "openmagi_core_agent.adk_bridge.runner_adapter",
-        "openmagi_core_agent.adk_bridge.local_runner",
-        "openmagi_core_agent.tools",
-        "openmagi_core_agent.memory",
-        "openmagi_core_agent.workspace",
-        "openmagi_core_agent.transport",
-        "openmagi_core_agent.channels",
-        "openmagi_core_agent.children",
-        "openmagi_core_agent.missions",
+        "magi_agent.adk_bridge.runner_adapter",
+        "magi_agent.adk_bridge.local_runner",
+        "magi_agent.tools",
+        "magi_agent.memory",
+        "magi_agent.workspace",
+        "magi_agent.transport",
+        "magi_agent.channels",
+        "magi_agent.children",
+        "magi_agent.missions",
     )
 
     for forbidden in forbidden_imports:

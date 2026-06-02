@@ -6,7 +6,7 @@ from pathlib import Path
 
 
 def test_acquisition_plan_is_default_off_and_never_executes_provider_or_browser() -> None:
-    from openmagi_core_agent.web_acquisition.acquisition_plan import (
+    from magi_agent.web_acquisition.acquisition_plan import (
         WebAcquisitionPlanRequest,
         build_web_acquisition_plan,
     )
@@ -42,7 +42,7 @@ def test_acquisition_plan_is_default_off_and_never_executes_provider_or_browser(
 
 
 def test_acquisition_plan_orders_phases_and_records_retry_budget_quality_and_source_refs() -> None:
-    from openmagi_core_agent.web_acquisition.acquisition_plan import (
+    from magi_agent.web_acquisition.acquisition_plan import (
         WebAcquisitionPlanConfig,
         WebAcquisitionPlanRequest,
         build_web_acquisition_plan,
@@ -88,7 +88,7 @@ def test_acquisition_plan_orders_phases_and_records_retry_budget_quality_and_sou
 
 
 def test_acquisition_plan_blocks_private_urls_and_does_not_emit_raw_url_context() -> None:
-    from openmagi_core_agent.web_acquisition.acquisition_plan import (
+    from magi_agent.web_acquisition.acquisition_plan import (
         WebAcquisitionPlanConfig,
         WebAcquisitionPlanRequest,
         build_web_acquisition_plan,
@@ -115,7 +115,7 @@ def test_acquisition_plan_blocks_private_urls_and_does_not_emit_raw_url_context(
 
 
 def test_acquisition_plan_blocks_blank_query_without_source_records() -> None:
-    from openmagi_core_agent.web_acquisition.acquisition_plan import (
+    from magi_agent.web_acquisition.acquisition_plan import (
         WebAcquisitionPlanConfig,
         WebAcquisitionPlanRequest,
         build_web_acquisition_plan,
@@ -134,7 +134,7 @@ def test_acquisition_plan_blocks_blank_query_without_source_records() -> None:
 
 
 def test_acquisition_plan_redacts_provider_tokens_from_query_diagnostics() -> None:
-    from openmagi_core_agent.web_acquisition.acquisition_plan import (
+    from magi_agent.web_acquisition.acquisition_plan import (
         WebAcquisitionPlanConfig,
         WebAcquisitionPlanRequest,
         build_web_acquisition_plan,
@@ -166,7 +166,7 @@ def test_acquisition_plan_redacts_provider_tokens_from_query_diagnostics() -> No
 
 
 def test_acquisition_plan_drops_key_named_metadata_credentials() -> None:
-    from openmagi_core_agent.web_acquisition.acquisition_plan import (
+    from magi_agent.web_acquisition.acquisition_plan import (
         WebAcquisitionPlanConfig,
         WebAcquisitionPlanRequest,
         build_web_acquisition_plan,
@@ -199,7 +199,7 @@ def test_acquisition_plan_drops_key_named_metadata_credentials() -> None:
 def test_acquisition_plan_import_boundary_has_no_live_provider_runtime_imports() -> None:
     module_path = (
         Path(__file__).parents[1]
-        / "openmagi_core_agent"
+        / "magi_agent"
         / "web_acquisition"
         / "acquisition_plan.py"
     )
@@ -214,9 +214,9 @@ def test_acquisition_plan_import_boundary_has_no_live_provider_runtime_imports()
 
     forbidden_prefixes = (
         "google.adk",
-        "openmagi_core_agent.adk_bridge",
-        "openmagi_core_agent.tools",
-        "openmagi_core_agent.transport",
+        "magi_agent.adk_bridge",
+        "magi_agent.tools",
+        "magi_agent.transport",
         "socket",
         "subprocess",
         "httpx",

@@ -5,20 +5,20 @@ import json
 
 from fastapi.testclient import TestClient
 
-from openmagi_core_agent.app import create_app
-from openmagi_core_agent.config.env import (
+from magi_agent.app import create_app
+from magi_agent.config.env import (
     parse_gate5b4c3_shadow_generation_route_env,
     parse_runtime_env,
 )
-from openmagi_core_agent.evidence.observed_egress import (
+from magi_agent.evidence.observed_egress import (
     build_gate1a_observed_egress_evidence_provider_from_env,
 )
-from openmagi_core_agent.research.research_first_canary import (
+from magi_agent.research.research_first_canary import (
     build_research_first_selected_response,
     research_first_selected_canary_active,
 )
-from openmagi_core_agent.runtime.openmagi_runtime import OpenMagiRuntime
-from openmagi_core_agent.transport.chat import (
+from magi_agent.runtime.openmagi_runtime import OpenMagiRuntime
+from magi_agent.transport.chat import (
     build_gate5b_user_visible_chat_route_config_from_env,
 )
 
@@ -175,7 +175,7 @@ def test_research_first_selected_endpoint_returns_no_write_authority_or_live_mod
         CORE_AGENT_PYTHON_GATE1A_EGRESS_TELEMETRY_PATH=str(telemetry_path),
         CORE_AGENT_PYTHON_GATE1A_EGRESS_CORRELATION_MODE="proxy_connect_headers",
         CORE_AGENT_PYTHON_GATE1A_EGRESS_PROXY_URL=(
-            "http://gate5b-gemini-egress-proxy.clawy-system.svc.cluster.local:8080"
+            "http://gate5b-gemini-egress-proxy.magi-system.svc.cluster.local:8080"
         ),
     )
     monkeypatch.setenv("CORE_AGENT_PYTHON_CHAT_ROUTE", "on")
@@ -312,7 +312,7 @@ def test_research_first_delivery_receipt_requires_durable_evidence_categories(
         CORE_AGENT_PYTHON_GATE1A_EGRESS_TELEMETRY_PATH=str(telemetry_path),
         CORE_AGENT_PYTHON_GATE1A_EGRESS_CORRELATION_MODE="proxy_connect_headers",
         CORE_AGENT_PYTHON_GATE1A_EGRESS_PROXY_URL=(
-            "http://gate5b-gemini-egress-proxy.clawy-system.svc.cluster.local:8080"
+            "http://gate5b-gemini-egress-proxy.magi-system.svc.cluster.local:8080"
         ),
     )
     monkeypatch.setenv("CORE_AGENT_PYTHON_CHAT_ROUTE", "on")
@@ -387,7 +387,7 @@ def test_research_first_fallback_receipt_cannot_satisfy_delivery_evidence(
         CORE_AGENT_PYTHON_GATE1A_EGRESS_TELEMETRY_PATH=str(telemetry_path),
         CORE_AGENT_PYTHON_GATE1A_EGRESS_CORRELATION_MODE="proxy_connect_headers",
         CORE_AGENT_PYTHON_GATE1A_EGRESS_PROXY_URL=(
-            "http://gate5b-gemini-egress-proxy.clawy-system.svc.cluster.local:8080"
+            "http://gate5b-gemini-egress-proxy.magi-system.svc.cluster.local:8080"
         ),
     )
     monkeypatch.setenv("CORE_AGENT_PYTHON_CHAT_ROUTE", "on")

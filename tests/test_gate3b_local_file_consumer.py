@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from openmagi_core_agent.shadow.gate3b_local_consumer import (
+from magi_agent.shadow.gate3b_local_consumer import (
     Gate3BLocalConsumerAttachmentFlags,
     Gate3BLocalConsumerConfig,
     Gate3BLocalConsumerError,

@@ -7,8 +7,8 @@ from pathlib import Path
 from google.adk.events import Event
 from google.genai import types
 
-from openmagi_core_agent.adk_bridge.session_service import WorkspaceSessionService
-from openmagi_core_agent.runtime.transcript import (
+from magi_agent.adk_bridge.session_service import WorkspaceSessionService
+from magi_agent.runtime.transcript import (
     AssistantTextEntry,
     CompactionBoundaryEntry,
     ControlEventTranscriptEntry,
@@ -77,7 +77,7 @@ def _copy_fixture(tmp_path: Path, name: str) -> Path:
 
 
 def test_disabled_default_does_not_read_transcript_or_mutate_session() -> None:
-    from openmagi_core_agent.runtime.session_continuity import (
+    from magi_agent.runtime.session_continuity import (
         SessionContinuityBoundary,
     )
 
@@ -104,7 +104,7 @@ def test_disabled_default_does_not_read_transcript_or_mutate_session() -> None:
 
 
 def test_multi_turn_continuity_imports_prior_turn_order_and_role_mapping() -> None:
-    from openmagi_core_agent.runtime.session_continuity import (
+    from magi_agent.runtime.session_continuity import (
         SessionContinuityBoundary,
         SessionContinuityConfig,
     )
@@ -180,7 +180,7 @@ def test_multi_turn_continuity_imports_prior_turn_order_and_role_mapping() -> No
 
 
 def test_repeated_continuity_import_is_idempotent_for_existing_adk_session() -> None:
-    from openmagi_core_agent.runtime.session_continuity import (
+    from magi_agent.runtime.session_continuity import (
         SessionContinuityBoundary,
         SessionContinuityConfig,
     )
@@ -223,7 +223,7 @@ def test_repeated_continuity_import_is_idempotent_for_existing_adk_session() -> 
 
 
 def test_expanded_import_window_replaces_existing_continuity_context_in_order() -> None:
-    from openmagi_core_agent.runtime.session_continuity import (
+    from magi_agent.runtime.session_continuity import (
         SessionContinuityBoundary,
         SessionContinuityConfig,
     )
@@ -266,7 +266,7 @@ def test_expanded_import_window_replaces_existing_continuity_context_in_order() 
 
 
 def test_memory_only_overlap_does_not_suppress_new_committed_transcript() -> None:
-    from openmagi_core_agent.runtime.session_continuity import (
+    from magi_agent.runtime.session_continuity import (
         MemoryRecallProjection,
         SessionContinuityBoundary,
         SessionContinuityConfig,
@@ -325,7 +325,7 @@ def test_memory_only_overlap_does_not_suppress_new_committed_transcript() -> Non
 
 
 def test_late_compaction_replaces_previously_imported_raw_pre_boundary_context() -> None:
-    from openmagi_core_agent.runtime.session_continuity import (
+    from magi_agent.runtime.session_continuity import (
         SessionContinuityBoundary,
         SessionContinuityConfig,
     )
@@ -393,7 +393,7 @@ def test_late_compaction_replaces_previously_imported_raw_pre_boundary_context()
 
 
 def test_safe_ref_compaction_boundary_does_not_import_unsafe_summary_text() -> None:
-    from openmagi_core_agent.runtime.session_continuity import (
+    from magi_agent.runtime.session_continuity import (
         SessionContinuityBoundary,
         SessionContinuityConfig,
     )
@@ -438,7 +438,7 @@ def test_safe_ref_compaction_boundary_does_not_import_unsafe_summary_text() -> N
 
 
 def test_stale_raw_transcript_does_not_downgrade_compacted_session_context() -> None:
-    from openmagi_core_agent.runtime.session_continuity import (
+    from magi_agent.runtime.session_continuity import (
         SessionContinuityBoundary,
         SessionContinuityConfig,
     )
@@ -506,7 +506,7 @@ def test_stale_raw_transcript_does_not_downgrade_compacted_session_context() -> 
 
 
 def test_forged_compaction_marker_cannot_block_replacement_or_leak_raw_text() -> None:
-    from openmagi_core_agent.runtime.session_continuity import (
+    from magi_agent.runtime.session_continuity import (
         SessionContinuityBoundary,
         SessionContinuityConfig,
     )
@@ -562,7 +562,7 @@ def test_forged_compaction_marker_cannot_block_replacement_or_leak_raw_text() ->
 
 
 def test_forged_marker_cannot_make_stale_raw_downgrade_valid_compacted_session() -> None:
-    from openmagi_core_agent.runtime.session_continuity import (
+    from magi_agent.runtime.session_continuity import (
         SessionContinuityBoundary,
         SessionContinuityConfig,
     )
@@ -648,7 +648,7 @@ def test_forged_marker_cannot_make_stale_raw_downgrade_valid_compacted_session()
 
 
 def test_copied_valid_pre_boundary_event_cannot_rejoin_compacted_session_batch() -> None:
-    from openmagi_core_agent.runtime.session_continuity import (
+    from magi_agent.runtime.session_continuity import (
         SessionContinuityBoundary,
         SessionContinuityConfig,
     )
@@ -726,7 +726,7 @@ def test_copied_valid_pre_boundary_event_cannot_rejoin_compacted_session_batch()
 
 
 def test_duplicate_valid_compacted_batch_event_does_not_reopen_raw_context() -> None:
-    from openmagi_core_agent.runtime.session_continuity import (
+    from magi_agent.runtime.session_continuity import (
         SessionContinuityBoundary,
         SessionContinuityConfig,
     )
@@ -793,7 +793,7 @@ def test_duplicate_valid_compacted_batch_event_does_not_reopen_raw_context() -> 
 
 
 def test_partial_compacted_batch_does_not_reopen_stale_raw_context() -> None:
-    from openmagi_core_agent.runtime.session_continuity import (
+    from magi_agent.runtime.session_continuity import (
         SessionContinuityBoundary,
         SessionContinuityConfig,
     )
@@ -854,7 +854,7 @@ def test_partial_compacted_batch_does_not_reopen_stale_raw_context() -> None:
 
 
 def test_reordered_compacted_batch_does_not_reopen_stale_raw_context() -> None:
-    from openmagi_core_agent.runtime.session_continuity import (
+    from magi_agent.runtime.session_continuity import (
         SessionContinuityBoundary,
         SessionContinuityConfig,
     )
@@ -915,7 +915,7 @@ def test_reordered_compacted_batch_does_not_reopen_stale_raw_context() -> None:
 
 
 def test_latest_approved_compaction_survives_subsequent_rejected_boundary() -> None:
-    from openmagi_core_agent.runtime.session_continuity import (
+    from magi_agent.runtime.session_continuity import (
         SessionContinuityBoundary,
         SessionContinuityConfig,
     )
@@ -975,7 +975,7 @@ def test_latest_approved_compaction_survives_subsequent_rejected_boundary() -> N
 def test_late_compaction_replacement_persists_through_adk_in_memory_service() -> None:
     from google.adk.sessions import InMemorySessionService
 
-    from openmagi_core_agent.runtime.session_continuity import (
+    from magi_agent.runtime.session_continuity import (
         SessionContinuityBoundary,
         SessionContinuityConfig,
     )
@@ -1072,7 +1072,7 @@ def test_late_compaction_replacement_persists_through_adk_in_memory_service() ->
 
 
 def test_compaction_boundary_suppresses_pre_boundary_raw_and_imports_summary_ref() -> None:
-    from openmagi_core_agent.runtime.session_continuity import (
+    from magi_agent.runtime.session_continuity import (
         SessionContinuityBoundary,
         SessionContinuityConfig,
     )
@@ -1121,7 +1121,7 @@ def test_compaction_boundary_suppresses_pre_boundary_raw_and_imports_summary_ref
 
 
 def test_compaction_boundary_with_ref_does_not_import_unsafe_summary_text() -> None:
-    from openmagi_core_agent.runtime.session_continuity import (
+    from magi_agent.runtime.session_continuity import (
         SessionContinuityBoundary,
         SessionContinuityConfig,
     )
@@ -1170,7 +1170,7 @@ def test_compaction_boundary_with_ref_does_not_import_unsafe_summary_text() -> N
 
 
 def test_subsequent_unapproved_compaction_boundary_cannot_reopen_pre_boundary_raw() -> None:
-    from openmagi_core_agent.runtime.session_continuity import (
+    from magi_agent.runtime.session_continuity import (
         SessionContinuityBoundary,
         SessionContinuityConfig,
     )
@@ -1231,7 +1231,7 @@ def test_subsequent_unapproved_compaction_boundary_cannot_reopen_pre_boundary_ra
 def test_typescript_compaction_fixture_imports_summary_and_drops_pre_boundary_raw(
     tmp_path: Path,
 ) -> None:
-    from openmagi_core_agent.runtime.session_continuity import (
+    from magi_agent.runtime.session_continuity import (
         SessionContinuityBoundary,
         SessionContinuityConfig,
     )
@@ -1267,7 +1267,7 @@ def test_typescript_compaction_fixture_imports_summary_and_drops_pre_boundary_ra
 
 
 def test_unapproved_noncanonical_compaction_boundary_is_rejected_without_suppression() -> None:
-    from openmagi_core_agent.runtime.session_continuity import (
+    from magi_agent.runtime.session_continuity import (
         SessionContinuityBoundary,
         SessionContinuityConfig,
     )
@@ -1314,7 +1314,7 @@ def test_unapproved_noncanonical_compaction_boundary_is_rejected_without_suppres
 
 
 def test_incognito_mode_does_not_inject_long_term_or_private_memory() -> None:
-    from openmagi_core_agent.runtime.session_continuity import (
+    from magi_agent.runtime.session_continuity import (
         MemoryRecallProjection,
         SessionContinuityBoundary,
         SessionContinuityConfig,
@@ -1352,7 +1352,7 @@ def test_incognito_mode_does_not_inject_long_term_or_private_memory() -> None:
 
 
 def test_read_only_memory_mode_may_represent_recall_refs_without_write_intent() -> None:
-    from openmagi_core_agent.runtime.session_continuity import (
+    from magi_agent.runtime.session_continuity import (
         MemoryRecallProjection,
         SessionContinuityBoundary,
         SessionContinuityConfig,
@@ -1390,7 +1390,7 @@ def test_read_only_memory_mode_may_represent_recall_refs_without_write_intent() 
 
 
 def test_child_isolation_rejects_raw_child_payloads_and_allows_sanitized_refs() -> None:
-    from openmagi_core_agent.runtime.session_continuity import (
+    from magi_agent.runtime.session_continuity import (
         SessionContinuityBoundary,
         SessionContinuityConfig,
     )
@@ -1451,7 +1451,7 @@ def test_child_isolation_rejects_raw_child_payloads_and_allows_sanitized_refs() 
 
 
 def test_sanitized_ref_validation_is_field_specific_and_rejects_unsafe_schemes() -> None:
-    from openmagi_core_agent.runtime.session_continuity import (
+    from magi_agent.runtime.session_continuity import (
         MemoryRecallProjection,
         SessionContinuityBoundary,
         SessionContinuityConfig,
@@ -1575,7 +1575,7 @@ def test_sanitized_ref_validation_is_field_specific_and_rejects_unsafe_schemes()
 
 
 def test_sanitized_ref_validation_rejects_nested_blocked_refs_inside_allowed_wrappers() -> None:
-    from openmagi_core_agent.runtime.session_continuity import (
+    from magi_agent.runtime.session_continuity import (
         MemoryRecallProjection,
         SessionContinuityBoundary,
         SessionContinuityConfig,
@@ -1692,7 +1692,7 @@ def test_sanitized_ref_validation_rejects_nested_blocked_refs_inside_allowed_wra
 
 
 def test_sanitized_ref_validation_rejects_scoped_private_memory_refs_inside_allowed_wrappers() -> None:
-    from openmagi_core_agent.runtime.session_continuity import (
+    from magi_agent.runtime.session_continuity import (
         MemoryRecallProjection,
         SessionContinuityBoundary,
         SessionContinuityConfig,
@@ -1799,7 +1799,7 @@ def test_sanitized_ref_validation_rejects_scoped_private_memory_refs_inside_allo
 
 
 def test_tool_and_control_boundary_rejects_raw_payloads_and_allows_sanitized_refs() -> None:
-    from openmagi_core_agent.runtime.session_continuity import (
+    from magi_agent.runtime.session_continuity import (
         SessionContinuityBoundary,
         SessionContinuityConfig,
     )
@@ -1865,7 +1865,7 @@ def test_tool_and_control_boundary_rejects_raw_payloads_and_allows_sanitized_ref
 
 
 def test_oversized_history_is_bounded_with_diagnostic_metadata() -> None:
-    from openmagi_core_agent.runtime.session_continuity import (
+    from magi_agent.runtime.session_continuity import (
         SessionContinuityBoundary,
         SessionContinuityConfig,
     )
@@ -1899,7 +1899,7 @@ def test_oversized_history_is_bounded_with_diagnostic_metadata() -> None:
 
 
 def test_import_boundary_has_no_production_writes_or_live_runtime_activation() -> None:
-    from openmagi_core_agent.runtime.session_continuity import (
+    from magi_agent.runtime.session_continuity import (
         SessionContinuityBoundary,
         SessionContinuityConfig,
     )

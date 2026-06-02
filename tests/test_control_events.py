@@ -3,7 +3,7 @@ import json
 import sys
 from pathlib import Path
 
-from openmagi_core_agent.runtime.control import (
+from magi_agent.runtime.control import (
     CONTROL_EVENT_TYPES,
     ControlEventLedger,
     ControlEventBase,
@@ -71,7 +71,7 @@ def _assert_control_input_is_redacted(value: object) -> None:
 
 
 def _load_control_fixture(name: str) -> list[ControlEventBase]:
-    from openmagi_core_agent.runtime.transcript import TranscriptStore
+    from magi_agent.runtime.transcript import TranscriptStore
 
     store = TranscriptStore(
         file_path=Path(__file__).parent / "fixtures" / "transcript" / name
@@ -96,12 +96,12 @@ def _load_control_fixture(name: str) -> list[ControlEventBase]:
 
 
 def test_control_import_does_not_load_write_capable_transcript_module() -> None:
-    sys.modules.pop("openmagi_core_agent.runtime.control", None)
-    sys.modules.pop("openmagi_core_agent.runtime.transcript", None)
+    sys.modules.pop("magi_agent.runtime.control", None)
+    sys.modules.pop("magi_agent.runtime.transcript", None)
 
-    importlib.import_module("openmagi_core_agent.runtime.control")
+    importlib.import_module("magi_agent.runtime.control")
 
-    assert "openmagi_core_agent.runtime.transcript" not in sys.modules
+    assert "magi_agent.runtime.transcript" not in sys.modules
 
 
 def test_permission_decision_event_preserves_envelope_and_reference_shape() -> None:

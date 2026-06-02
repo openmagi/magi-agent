@@ -5,9 +5,9 @@ from pathlib import Path
 
 import pytest
 
-import openmagi_core_agent.tools.spreadsheet_tools as spreadsheet_module
-from openmagi_core_agent.tools.context import ToolContext
-from openmagi_core_agent.tools.spreadsheet_tools import (
+import magi_agent.tools.spreadsheet_tools as spreadsheet_module
+from magi_agent.tools.context import ToolContext
+from magi_agent.tools.spreadsheet_tools import (
     csv_read,
     csv_write,
     spreadsheet_preview,

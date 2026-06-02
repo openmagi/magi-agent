@@ -1,6 +1,6 @@
 """Tests for scripts/generate_module_map.py.
 
-Runs the generator on the actual openmagi_core_agent codebase and validates
+Runs the generator on the actual magi_agent codebase and validates
 the output structure, completeness, and known module relationships.
 """
 from __future__ import annotations
@@ -18,7 +18,7 @@ import pytest
 # ---------------------------------------------------------------------------
 
 ROOT_DIR = Path(__file__).resolve().parent.parent
-PACKAGE_DIR = ROOT_DIR / "openmagi_core_agent"
+PACKAGE_DIR = ROOT_DIR / "magi_agent"
 SCRIPT = ROOT_DIR / "scripts" / "generate_module_map.py"
 
 

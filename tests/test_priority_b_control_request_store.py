@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 
-from openmagi_core_agent.runtime.control import ControlRequestStore
+from magi_agent.runtime.control import ControlRequestStore
 
 
 LEAKY_INPUT = {

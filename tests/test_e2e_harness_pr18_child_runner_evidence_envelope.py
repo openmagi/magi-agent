@@ -9,7 +9,7 @@ import sys
 import pytest
 from pydantic import ValidationError
 
-from openmagi_core_agent.evidence.child_runtime_envelope import (
+from magi_agent.evidence.child_runtime_envelope import (
     ChildRuntimeEnvelope,
     ChildRuntimeEnvelopeAuthorityFlags,
     ChildRuntimeWorkspacePolicy,
@@ -17,14 +17,14 @@ from openmagi_core_agent.evidence.child_runtime_envelope import (
     runtime_envelope_satisfies_delegated_evidence_metadata,
 )
 from runtime_issuance_support import issue_test_runtime_authority
-from openmagi_core_agent.evidence.subagent import (
+from magi_agent.evidence.subagent import (
     OPENMAGI_RUNTIME_ENVELOPE_ISSUER,
     DelegatedEvidenceRequirement,
     EvidenceBoundaryLedgerRef,
     ExecutionBoundaryIdentity,
 )
-from openmagi_core_agent.evidence.types import EvidenceAgentRole
-from openmagi_core_agent.runtime import (
+from magi_agent.evidence.types import EvidenceAgentRole
+from magi_agent.runtime import (
     ChildRunnerConfig,
     ChildTaskRequest,
     LocalChildRunnerBoundary,
@@ -296,17 +296,17 @@ def test_pr18_runtime_package_lazy_exports_child_runner_boundary_without_live_im
 import importlib
 import sys
 
-runtime = importlib.import_module("openmagi_core_agent.runtime")
+runtime = importlib.import_module("magi_agent.runtime")
 assert runtime.LocalChildRunnerBoundary
 forbidden_prefixes = (
     "google.adk.runners",
     "google.adk.models",
-    "openmagi_core_agent.adk_bridge.runner_adapter",
-    "openmagi_core_agent.adk_bridge.local_runner",
-    "openmagi_core_agent.tools.dispatcher",
-    "openmagi_core_agent.transport.chat",
-    "openmagi_core_agent.memory.adapters",
-    "openmagi_core_agent.workspace",
+    "magi_agent.adk_bridge.runner_adapter",
+    "magi_agent.adk_bridge.local_runner",
+    "magi_agent.tools.dispatcher",
+    "magi_agent.transport.chat",
+    "magi_agent.memory.adapters",
+    "magi_agent.workspace",
     "socket",
     "subprocess",
     "requests",

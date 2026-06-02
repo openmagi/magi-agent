@@ -72,7 +72,7 @@ class FakeBrowserWorkerProvider:
 
 
 def _config(**overrides: object) -> object:
-    from openmagi_core_agent.browser.live_provider_pack import BrowserProviderPackConfig
+    from magi_agent.browser.live_provider_pack import BrowserProviderPackConfig
 
     payload = {
         "enabled": True,
@@ -84,7 +84,7 @@ def _config(**overrides: object) -> object:
 
 
 def _request(**overrides: object) -> object:
-    from openmagi_core_agent.browser.live_provider_pack import BrowserProviderPackRequest
+    from magi_agent.browser.live_provider_pack import BrowserProviderPackRequest
 
     payload = {
         "action": "browser.open",
@@ -102,7 +102,7 @@ def _request(**overrides: object) -> object:
 
 
 def _approval_receipt(request: object) -> object:
-    from openmagi_core_agent.browser.live_provider_pack import (
+    from magi_agent.browser.live_provider_pack import (
         BrowserProviderPackApprovalReceipt,
         browser_provider_pack_request_digest,
     )
@@ -116,7 +116,7 @@ def _approval_receipt(request: object) -> object:
 
 
 def test_browser_provider_pack_default_disabled_blocks_actions_without_provider_calls() -> None:
-    from openmagi_core_agent.browser.live_provider_pack import (
+    from magi_agent.browser.live_provider_pack import (
         BrowserProviderPack,
         BrowserProviderPackConfig,
     )
@@ -151,7 +151,7 @@ def test_browser_provider_pack_default_disabled_blocks_actions_without_provider_
 
 
 def test_fake_browser_provider_runs_all_actions_only_when_local_fake_enabled() -> None:
-    from openmagi_core_agent.browser.live_provider_pack import BrowserProviderPack
+    from magi_agent.browser.live_provider_pack import BrowserProviderPack
 
     provider = FakeBrowserWorkerProvider()
     pack = BrowserProviderPack(_config())
@@ -226,7 +226,7 @@ def test_fake_browser_provider_runs_all_actions_only_when_local_fake_enabled() -
 
 
 def test_browser_provider_pack_approval_and_private_payload_gates_happen_before_provider_calls() -> None:
-    from openmagi_core_agent.browser.live_provider_pack import BrowserProviderPack
+    from magi_agent.browser.live_provider_pack import BrowserProviderPack
 
     provider = FakeBrowserWorkerProvider()
     pack = BrowserProviderPack(_config())
@@ -254,7 +254,7 @@ def test_browser_provider_pack_approval_and_private_payload_gates_happen_before_
 
 
 def test_browser_provider_pack_request_approval_granted_is_not_trusted() -> None:
-    from openmagi_core_agent.browser.live_provider_pack import BrowserProviderPack
+    from magi_agent.browser.live_provider_pack import BrowserProviderPack
 
     provider = FakeBrowserWorkerProvider()
     pack = BrowserProviderPack(_config())
@@ -288,7 +288,7 @@ def test_browser_provider_pack_request_approval_granted_is_not_trusted() -> None
 
 
 def test_browser_fill_request_digest_includes_public_text() -> None:
-    from openmagi_core_agent.browser.live_provider_pack import BrowserProviderPack
+    from magi_agent.browser.live_provider_pack import BrowserProviderPack
 
     provider = FakeBrowserWorkerProvider()
     pack = BrowserProviderPack(_config())
@@ -325,7 +325,7 @@ def test_browser_fill_request_digest_includes_public_text() -> None:
 
 
 def test_browser_approval_receipt_binds_raw_text_digest_not_redacted_text() -> None:
-    from openmagi_core_agent.browser.live_provider_pack import BrowserProviderPack
+    from magi_agent.browser.live_provider_pack import BrowserProviderPack
 
     provider = FakeBrowserWorkerProvider()
     pack = BrowserProviderPack(_config())
@@ -355,7 +355,7 @@ def test_browser_approval_receipt_binds_raw_text_digest_not_redacted_text() -> N
 
 
 def test_browser_provider_output_records_only_after_sanitizer_passes() -> None:
-    from openmagi_core_agent.browser.live_provider_pack import BrowserProviderPack
+    from magi_agent.browser.live_provider_pack import BrowserProviderPack
 
     provider = FakeBrowserWorkerProvider(private_only=True)
     pack = BrowserProviderPack(_config())
@@ -374,7 +374,7 @@ def test_browser_provider_output_records_only_after_sanitizer_passes() -> None:
 
 
 def test_browser_provider_pack_blocks_research_use_without_web_acquisition_policy() -> None:
-    from openmagi_core_agent.browser.live_provider_pack import BrowserProviderPack
+    from magi_agent.browser.live_provider_pack import BrowserProviderPack
 
     provider = FakeBrowserWorkerProvider()
     blocked_unselected = BrowserProviderPack(_config(browserFallbackEnabled=True)).run(
@@ -408,7 +408,7 @@ def test_browser_provider_pack_blocks_research_use_without_web_acquisition_polic
 
 
 def test_browser_provider_pack_blocks_web_acquisition_context_without_selected_fallback_policy() -> None:
-    from openmagi_core_agent.browser.live_provider_pack import BrowserProviderPack
+    from magi_agent.browser.live_provider_pack import BrowserProviderPack
 
     provider = FakeBrowserWorkerProvider()
     blocked_unselected = BrowserProviderPack(_config(browserFallbackEnabled=True)).run(
@@ -450,21 +450,21 @@ def test_live_browser_provider_pack_import_boundary() -> None:
 import importlib
 import sys
 
-importlib.import_module("openmagi_core_agent.browser.live_provider_pack")
+importlib.import_module("magi_agent.browser.live_provider_pack")
 forbidden_prefixes = (
     "google.adk",
     "google.genai",
-    "openmagi_core_agent.adk_bridge",
-    "openmagi_core_agent.tools",
-    "openmagi_core_agent.transport",
-    "openmagi_core_agent.routing",
-    "openmagi_core_agent.memory",
-    "openmagi_core_agent.channels",
-    "openmagi_core_agent.deploy",
-    "openmagi_core_agent.canary",
-    "openmagi_core_agent.runtime_selector",
-    "openmagi_core_agent.chat_proxy",
-    "openmagi_core_agent.k8s",
+    "magi_agent.adk_bridge",
+    "magi_agent.tools",
+    "magi_agent.transport",
+    "magi_agent.routing",
+    "magi_agent.memory",
+    "magi_agent.channels",
+    "magi_agent.deploy",
+    "magi_agent.canary",
+    "magi_agent.runtime_selector",
+    "magi_agent.chat_proxy",
+    "magi_agent.k8s",
     "kubernetes",
     "subprocess",
     "socket",

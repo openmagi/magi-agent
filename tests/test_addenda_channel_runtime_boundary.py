@@ -4,8 +4,8 @@ import asyncio
 import subprocess
 import sys
 
-from openmagi_core_agent.channels.contract import ChannelRef
-from openmagi_core_agent.channels.runtime_boundary import (
+from magi_agent.channels.contract import ChannelRef
+from magi_agent.channels.runtime_boundary import (
     ChannelRuntimeBoundary,
     ChannelRuntimeConfig,
     ChannelRuntimeRequest,
@@ -328,7 +328,7 @@ def test_channel_runtime_boundary_has_no_live_imports() -> None:
 import importlib
 import sys
 
-importlib.import_module("openmagi_core_agent.channels.runtime_boundary")
+importlib.import_module("magi_agent.channels.runtime_boundary")
 forbidden = (
     "discord",
     "telegram",

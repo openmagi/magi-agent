@@ -58,7 +58,7 @@ class FailingProvider:
 
 
 def _scope(*, selected: bool = True, environment: str = "test") -> object:
-    from openmagi_core_agent.runtime.provider_execution import ProviderExecutionScope
+    from magi_agent.runtime.provider_execution import ProviderExecutionScope
 
     return ProviderExecutionScope(
         environment=environment,
@@ -69,7 +69,7 @@ def _scope(*, selected: bool = True, environment: str = "test") -> object:
 
 
 def _request(*, provider_name: str = "fake-search", operation: str = "search") -> object:
-    from openmagi_core_agent.runtime.provider_execution import ProviderExecutionRequest
+    from magi_agent.runtime.provider_execution import ProviderExecutionRequest
 
     return ProviderExecutionRequest(
         providerName=provider_name,
@@ -86,7 +86,7 @@ def _request(*, provider_name: str = "fake-search", operation: str = "search") -
 
 
 def test_disabled_provider_execution_never_calls_provider() -> None:
-    from openmagi_core_agent.runtime.provider_execution import (
+    from magi_agent.runtime.provider_execution import (
         ProviderExecutionBoundary,
         ProviderExecutionConfig,
     )
@@ -108,7 +108,7 @@ def test_disabled_provider_execution_never_calls_provider() -> None:
 
 
 def test_local_fake_provider_requires_explicit_fake_enablement() -> None:
-    from openmagi_core_agent.runtime.provider_execution import (
+    from magi_agent.runtime.provider_execution import (
         ProviderExecutionBoundary,
         ProviderExecutionConfig,
     )
@@ -146,7 +146,7 @@ def test_local_fake_provider_requires_explicit_fake_enablement() -> None:
 
 
 def test_production_provider_call_requires_all_server_side_gates() -> None:
-    from openmagi_core_agent.runtime.provider_execution import (
+    from magi_agent.runtime.provider_execution import (
         ProviderExecutionBoundary,
         ProviderExecutionConfig,
         ProviderExecutionRequest,
@@ -207,7 +207,7 @@ def test_production_provider_call_requires_all_server_side_gates() -> None:
 
 
 def test_selected_scope_gate_cannot_be_configured_away() -> None:
-    from openmagi_core_agent.runtime.provider_execution import ProviderExecutionConfig
+    from magi_agent.runtime.provider_execution import ProviderExecutionConfig
 
     with pytest.raises(ValidationError):
         ProviderExecutionConfig(
@@ -219,7 +219,7 @@ def test_selected_scope_gate_cannot_be_configured_away() -> None:
 
 
 def test_provider_exception_diagnostics_are_redacted_without_raw_exception_text() -> None:
-    from openmagi_core_agent.runtime.provider_execution import (
+    from magi_agent.runtime.provider_execution import (
         ProviderExecutionBoundary,
         ProviderExecutionConfig,
     )
@@ -244,7 +244,7 @@ def test_provider_exception_diagnostics_are_redacted_without_raw_exception_text(
 
 
 def test_request_controlled_identifiers_are_not_raw_diagnostics_or_receipt_status() -> None:
-    from openmagi_core_agent.runtime.provider_execution import (
+    from magi_agent.runtime.provider_execution import (
         ProviderExecutionBoundary,
         ProviderExecutionConfig,
         ProviderExecutionRequest,
@@ -281,7 +281,7 @@ def test_request_controlled_identifiers_are_not_raw_diagnostics_or_receipt_statu
 
 
 def test_provider_execution_result_copy_cannot_forge_authority_flags() -> None:
-    from openmagi_core_agent.runtime.provider_execution import (
+    from magi_agent.runtime.provider_execution import (
         ProviderExecutionBoundary,
         ProviderExecutionConfig,
     )

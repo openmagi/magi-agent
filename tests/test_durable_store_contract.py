@@ -9,7 +9,7 @@ import sys
 
 import pytest
 
-from openmagi_core_agent.storage.durable_store import (
+from magi_agent.storage.durable_store import (
     ArtifactIndexRecord,
     DurableStoreConfig,
     DurableRecord,
@@ -20,8 +20,8 @@ from openmagi_core_agent.storage.durable_store import (
     ReplayDecision,
     durable_store_config_from_env,
 )
-from openmagi_core_agent.storage.memory_store import InMemoryDurableStore
-from openmagi_core_agent.storage.sqlite_store import SQLiteDurableStore
+from magi_agent.storage.memory_store import InMemoryDurableStore
+from magi_agent.storage.sqlite_store import SQLiteDurableStore
 
 
 DIGEST_A = "sha256:" + "a" * 64
@@ -1536,7 +1536,7 @@ def test_sqlite_store_corruption_report_is_explicit(tmp_path: Path) -> None:
 
 
 def test_corruption_report_cannot_be_forged_to_claim_external_tamper_evidence() -> None:
-    from openmagi_core_agent.storage.durable_store import CorruptionReport
+    from magi_agent.storage.durable_store import CorruptionReport
 
     forged = CorruptionReport.model_construct(
         ok=True,
@@ -1577,9 +1577,9 @@ def test_durable_store_env_rejects_bad_timeout() -> None:
 def test_storage_import_boundary_has_no_live_provider_or_route_imports() -> None:
     script = """
 import sys
-import openmagi_core_agent.storage.durable_store
-import openmagi_core_agent.storage.memory_store
-import openmagi_core_agent.storage.sqlite_store
+import magi_agent.storage.durable_store
+import magi_agent.storage.memory_store
+import magi_agent.storage.sqlite_store
 for name in (
     'supabase',
     'psycopg',
@@ -1589,7 +1589,7 @@ for name in (
     'kubernetes',
     'httpx',
     'google.adk.runners',
-    'openmagi_core_agent.chat',
+    'magi_agent.chat',
 ):
     if name in sys.modules:
         raise SystemExit(name)

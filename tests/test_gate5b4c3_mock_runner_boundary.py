@@ -6,10 +6,10 @@ import subprocess
 import sys
 from pathlib import Path
 
-from openmagi_core_agent.shadow.gate5b4c3_mock_runner_boundary import (
+from magi_agent.shadow.gate5b4c3_mock_runner_boundary import (
     run_gate5b4c3_mock_runner_boundary,
 )
-from openmagi_core_agent.shadow.gate5b4c3_shadow_generation_contract import (
+from magi_agent.shadow.gate5b4c3_shadow_generation_contract import (
     Gate5B4C3ShadowGenerationConfig,
     Gate5B4C3ShadowGenerationRequest,
 )
@@ -321,7 +321,7 @@ import importlib
 import sys
 
 module = importlib.import_module(
-    "openmagi_core_agent.shadow.gate5b4c3_mock_runner_boundary"
+    "magi_agent.shadow.gate5b4c3_mock_runner_boundary"
 )
 assert module is not None
 
@@ -331,24 +331,24 @@ forbidden_exact = (
     "anthropic",
 )
 forbidden_prefixes = (
-    "openmagi_core_agent.adk_bridge",
-    "openmagi_core_agent.tools",
-    "openmagi_core_agent.memory",
-    "openmagi_core_agent.runtime",
-    "openmagi_core_agent.routing",
-    "openmagi_core_agent.workspace",
-    "openmagi_core_agent.children",
-    "openmagi_core_agent.evidence",
-    "openmagi_core_agent.missions",
-    "openmagi_core_agent.transport",
-    "openmagi_core_agent.channels",
-    "openmagi_core_agent.deploy",
-    "openmagi_core_agent.provisioning",
-    "openmagi_core_agent.k8s",
-    "openmagi_core_agent.telegram",
-    "openmagi_core_agent.database",
-    "openmagi_core_agent.api",
-    "openmagi_core_agent.dashboard",
+    "magi_agent.adk_bridge",
+    "magi_agent.tools",
+    "magi_agent.memory",
+    "magi_agent.runtime",
+    "magi_agent.routing",
+    "magi_agent.workspace",
+    "magi_agent.children",
+    "magi_agent.evidence",
+    "magi_agent.missions",
+    "magi_agent.transport",
+    "magi_agent.channels",
+    "magi_agent.deploy",
+    "magi_agent.provisioning",
+    "magi_agent.k8s",
+    "magi_agent.telegram",
+    "magi_agent.database",
+    "magi_agent.api",
+    "magi_agent.dashboard",
 )
 loaded = [
     loaded_name
@@ -375,7 +375,7 @@ if loaded:
 def test_mock_runner_boundary_source_forbids_real_runner_model_tool_memory_imports() -> None:
     source = (
         Path(__file__).parents[1]
-        / "openmagi_core_agent"
+        / "magi_agent"
         / "shadow"
         / "gate5b4c3_mock_runner_boundary.py"
     ).read_text(encoding="utf-8")
@@ -383,17 +383,17 @@ def test_mock_runner_boundary_source_forbids_real_runner_model_tool_memory_impor
         "google.adk",
         "openai",
         "anthropic",
-        "openmagi_core_agent.adk_bridge",
-        "openmagi_core_agent.tools",
-        "openmagi_core_agent.memory",
-        "openmagi_core_agent.runtime",
-        "openmagi_core_agent.routing",
-        "openmagi_core_agent.workspace",
-        "openmagi_core_agent.children",
-        "openmagi_core_agent.evidence",
-        "openmagi_core_agent.missions",
-        "openmagi_core_agent.transport",
-        "openmagi_core_agent.channels",
+        "magi_agent.adk_bridge",
+        "magi_agent.tools",
+        "magi_agent.memory",
+        "magi_agent.runtime",
+        "magi_agent.routing",
+        "magi_agent.workspace",
+        "magi_agent.children",
+        "magi_agent.evidence",
+        "magi_agent.missions",
+        "magi_agent.transport",
+        "magi_agent.channels",
     )
 
     for forbidden in forbidden_imports:

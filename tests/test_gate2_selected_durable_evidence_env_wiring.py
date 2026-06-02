@@ -26,10 +26,10 @@ from pathlib import Path
 
 from fastapi.testclient import TestClient
 
-from openmagi_core_agent.app import create_app
-from openmagi_core_agent.config.env import parse_runtime_env
-from openmagi_core_agent.runtime.openmagi_runtime import OpenMagiRuntime
-from openmagi_core_agent.shadow.gate2_recipe_profile_resolver import (
+from magi_agent.app import create_app
+from magi_agent.config.env import parse_runtime_env
+from magi_agent.runtime.openmagi_runtime import OpenMagiRuntime
+from magi_agent.shadow.gate2_recipe_profile_resolver import (
     resolve_gate2_recipe_profile,
 )
 
@@ -376,7 +376,7 @@ def test_env_built_selected_path_fails_closed_if_file_vanishes(
 ) -> None:
     """If the evidence file is deleted between write and readback (e.g. sandbox
     cleanup wiping the path), the disk-readback verification must fail-close."""
-    import openmagi_core_agent.transport.chat as chat_module
+    import magi_agent.transport.chat as chat_module
 
     sandbox_root = tmp_path / "gate2-sandboxes" / "gate2-sandbox"
     env = _base_env(

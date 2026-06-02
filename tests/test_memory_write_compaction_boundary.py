@@ -24,7 +24,7 @@ class SpyMemoryAdapter:
 
 
 def test_memory_write_disabled_by_default_and_does_not_call_adapter() -> None:
-    from openmagi_core_agent.harness.memory_write import (
+    from magi_agent.harness.memory_write import (
         MemoryWriteHarness,
         MemoryWritePolicy,
         MemoryWriteRequest,
@@ -81,7 +81,7 @@ def test_memory_write_disabled_by_default_and_does_not_call_adapter() -> None:
 
 
 def test_memory_write_requires_explicit_policy_evidence_and_approval_when_configured() -> None:
-    from openmagi_core_agent.harness.memory_write import (
+    from magi_agent.harness.memory_write import (
         MemoryWriteHarness,
         MemoryWriteHarnessConfig,
         MemoryWritePolicy,
@@ -124,13 +124,13 @@ def test_memory_write_requires_explicit_policy_evidence_and_approval_when_config
 
 
 def test_approved_local_fake_memory_write_returns_local_test_receipt_only() -> None:
-    from openmagi_core_agent.harness.memory_write import (
+    from magi_agent.harness.memory_write import (
         MemoryWriteHarness,
         MemoryWriteHarnessConfig,
         MemoryWritePolicy,
         MemoryWriteRequest,
     )
-    from openmagi_core_agent.memory.write_boundary import evaluate_memory_write_claim
+    from magi_agent.memory.write_boundary import evaluate_memory_write_claim
 
     adapter = SpyMemoryAdapter()
     result = asyncio.run(
@@ -175,7 +175,7 @@ def test_approved_local_fake_memory_write_returns_local_test_receipt_only() -> N
 
 
 def test_memory_write_denies_erase_delete_retention_unredacted_private_and_child_cases() -> None:
-    from openmagi_core_agent.harness.memory_write import (
+    from magi_agent.harness.memory_write import (
         MemoryWriteHarness,
         MemoryWriteHarnessConfig,
         MemoryWritePolicy,
@@ -281,7 +281,7 @@ def test_memory_write_denies_erase_delete_retention_unredacted_private_and_child
 
 
 def test_compaction_default_off_and_receipt_schema_is_digest_only() -> None:
-    from openmagi_core_agent.harness.memory_compaction import (
+    from magi_agent.harness.memory_compaction import (
         MemoryCompactionHarness,
         MemoryCompactionHarnessConfig,
         MemoryCompactionPolicy,
@@ -362,7 +362,7 @@ def test_compaction_default_off_and_receipt_schema_is_digest_only() -> None:
 
 
 def test_compaction_denies_missing_policy_evidence_approval_and_unsafe_sources() -> None:
-    from openmagi_core_agent.harness.memory_compaction import (
+    from magi_agent.harness.memory_compaction import (
         MemoryCompactionHarness,
         MemoryCompactionHarnessConfig,
         MemoryCompactionPolicy,
@@ -441,11 +441,11 @@ def test_compaction_denies_missing_policy_evidence_approval_and_unsafe_sources()
 
 
 def test_forged_config_and_authority_flags_cannot_enable_production_or_provider_calls() -> None:
-    from openmagi_core_agent.harness.memory_compaction import (
+    from magi_agent.harness.memory_compaction import (
         MemoryCompactionHarnessConfig,
         MemoryCompactionPolicy,
     )
-    from openmagi_core_agent.harness.memory_write import (
+    from magi_agent.harness.memory_write import (
         MemoryWriteHarnessConfig,
         MemoryWritePolicy,
     )
@@ -532,13 +532,13 @@ def test_forged_config_and_authority_flags_cannot_enable_production_or_provider_
 
 
 def test_public_projections_redact_sensitive_write_and_compaction_strings() -> None:
-    from openmagi_core_agent.harness.memory_compaction import (
+    from magi_agent.harness.memory_compaction import (
         MemoryCompactionHarness,
         MemoryCompactionHarnessConfig,
         MemoryCompactionPolicy,
         MemoryCompactionRequest,
     )
-    from openmagi_core_agent.harness.memory_write import (
+    from magi_agent.harness.memory_write import (
         MemoryWriteHarness,
         MemoryWriteHarnessConfig,
         MemoryWritePolicy,
@@ -649,8 +649,8 @@ def test_public_projections_redact_sensitive_write_and_compaction_strings() -> N
 def test_memory_harness_import_boundary_has_no_live_adk_model_provider_or_network_imports() -> None:
     python_root = Path(__file__).resolve().parents[1]
     module_paths = [
-        python_root / "openmagi_core_agent/harness/memory_write.py",
-        python_root / "openmagi_core_agent/harness/memory_compaction.py",
+        python_root / "magi_agent/harness/memory_write.py",
+        python_root / "magi_agent/harness/memory_compaction.py",
     ]
     banned_roots = {
         "google",
@@ -681,8 +681,8 @@ def test_memory_harness_import_boundary_has_no_live_adk_model_provider_or_networ
 
     code = """
 import sys
-import openmagi_core_agent.harness.memory_write
-import openmagi_core_agent.harness.memory_compaction
+import magi_agent.harness.memory_write
+import magi_agent.harness.memory_compaction
 for name in (
     'google.adk',
     'google.genai',
@@ -694,9 +694,9 @@ for name in (
     'supabase',
     'psycopg',
     'asyncpg',
-    'openmagi_core_agent.runtime.adk_turn_runner',
-    'openmagi_core_agent.runtime.provider_execution',
-    'openmagi_core_agent.app',
+    'magi_agent.runtime.adk_turn_runner',
+    'magi_agent.runtime.provider_execution',
+    'magi_agent.app',
 ):
     if name in sys.modules:
         raise SystemExit(name)

@@ -9,14 +9,14 @@ from pathlib import Path
 
 import pytest
 
-from openmagi_core_agent.authoring.compiler import CompileRecipePackResult
-from openmagi_core_agent.authoring.dry_run import DryRunRecipePackResult
-from openmagi_core_agent.authoring.harness import (
+from magi_agent.authoring.compiler import CompileRecipePackResult
+from magi_agent.authoring.dry_run import DryRunRecipePackResult
+from magi_agent.authoring.harness import (
     RecipeBuilderModeConfig,
     RecipeBuilderModeState,
     advance_recipe_builder_mode,
 )
-from openmagi_core_agent.authoring.tool_contracts import SaveRecipePackDraft
+from magi_agent.authoring.tool_contracts import SaveRecipePackDraft
 
 
 FIXTURES = Path(__file__).parent / "fixtures" / "authoring"
@@ -360,7 +360,7 @@ def test_activation_is_denied_for_every_harness_projection() -> None:
 
 
 def test_generic_harness_core_has_no_domain_specific_hard_coded_verticals() -> None:
-    import openmagi_core_agent.authoring.harness as harness
+    import magi_agent.authoring.harness as harness
 
     source = inspect.getsource(harness).lower()
 
@@ -407,11 +407,11 @@ import sys
 
 forbidden_prefixes = (
     "google.adk",
-    "openmagi_core_agent.adk_bridge",
-    "openmagi_core_agent.runtime",
-    "openmagi_core_agent.tools.dispatcher",
-    "openmagi_core_agent.tools.kernel",
-    "openmagi_core_agent.transport",
+    "magi_agent.adk_bridge",
+    "magi_agent.runtime",
+    "magi_agent.tools.dispatcher",
+    "magi_agent.tools.kernel",
+    "magi_agent.transport",
     "openai",
     "google.genai",
     "requests",
@@ -424,7 +424,7 @@ baseline = {
     if any(name == prefix or name.startswith(f"{prefix}.") for prefix in forbidden_prefixes)
 }
 
-module = importlib.import_module("openmagi_core_agent.authoring.harness")
+module = importlib.import_module("magi_agent.authoring.harness")
 assert hasattr(module, "advance_recipe_builder_mode")
 
 loaded = [

@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from openmagi_core_agent.shadow.mission_operator_goaljudge_contract import (
+from magi_agent.shadow.mission_operator_goaljudge_contract import (
     MissionOperatorGoalJudgeAttachmentFlags,
     MissionOperatorGoalJudgeContractFixture,
     load_mission_operator_goaljudge_contract_fixture,
@@ -294,24 +294,24 @@ def test_mission_operator_goaljudge_attachment_flags_remain_false_under_construc
 
 
 def test_mission_operator_goaljudge_import_boundary_stays_runtime_free() -> None:
-    module_name = "openmagi_core_agent.shadow.mission_operator_goaljudge_contract"
+    module_name = "magi_agent.shadow.mission_operator_goaljudge_contract"
     forbidden = (
         "google.adk",
-        "openmagi_core_agent.adk_bridge",
-        "openmagi_core_agent.tools.dispatcher",
-        "openmagi_core_agent.memory",
-        "openmagi_core_agent.missions",
-        "openmagi_core_agent.scheduler",
-        "openmagi_core_agent.app",
-        "openmagi_core_agent.transport.chat",
-        "openmagi_core_agent.routes",
-        "openmagi_core_agent.runtime",
+        "magi_agent.adk_bridge",
+        "magi_agent.tools.dispatcher",
+        "magi_agent.memory",
+        "magi_agent.missions",
+        "magi_agent.scheduler",
+        "magi_agent.app",
+        "magi_agent.transport.chat",
+        "magi_agent.routes",
+        "magi_agent.runtime",
     )
     removed_modules: dict[str, object] = {}
     for loaded_name in tuple(sys.modules):
         if (
-            loaded_name == "openmagi_core_agent"
-            or loaded_name.startswith("openmagi_core_agent.")
+            loaded_name == "magi_agent"
+            or loaded_name.startswith("magi_agent.")
             or loaded_name == "google.adk"
             or loaded_name.startswith("google.adk.")
         ):
@@ -338,8 +338,8 @@ def test_mission_operator_goaljudge_import_boundary_stays_runtime_free() -> None
     finally:
         for loaded_name in tuple(sys.modules):
             if (
-                loaded_name == "openmagi_core_agent"
-                or loaded_name.startswith("openmagi_core_agent.")
+                loaded_name == "magi_agent"
+                or loaded_name.startswith("magi_agent.")
                 or loaded_name == "google.adk"
                 or loaded_name.startswith("google.adk.")
             ):

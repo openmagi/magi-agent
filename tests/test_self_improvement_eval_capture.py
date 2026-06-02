@@ -6,7 +6,7 @@ import sys
 import pytest
 from pydantic import ValidationError
 
-from openmagi_core_agent.self_improvement.eval_capture import (
+from magi_agent.self_improvement.eval_capture import (
     EvalCaptureConfig,
     EvalCaptureRequest,
     EvalCaptureResult,
@@ -14,7 +14,7 @@ from openmagi_core_agent.self_improvement.eval_capture import (
     EvalValidatorResult,
     SelfImprovementEvalCapture,
 )
-from openmagi_core_agent.self_improvement.failure_cluster import FailureClusterer
+from magi_agent.self_improvement.failure_cluster import FailureClusterer
 
 
 def _unsafe_value(*parts: str) -> str:
@@ -528,16 +528,16 @@ def test_eval_capture_import_boundary_does_not_initialize_live_adk_or_tools() ->
     forbidden = {
         "google.adk.runners",
         "google.adk.agents",
-        "openmagi_core_agent.tools.host",
-        "openmagi_core_agent.transport.chat",
-        "openmagi_core_agent.memory.hipocampus",
-        "openmagi_core_agent.memory.qmd",
+        "magi_agent.tools.host",
+        "magi_agent.transport.chat",
+        "magi_agent.memory.hipocampus",
+        "magi_agent.memory.qmd",
     }
     for module_name in forbidden:
         sys.modules.pop(module_name, None)
 
-    __import__("openmagi_core_agent.self_improvement.eval_capture")
-    __import__("openmagi_core_agent.self_improvement.failure_cluster")
+    __import__("magi_agent.self_improvement.eval_capture")
+    __import__("magi_agent.self_improvement.failure_cluster")
 
     assert forbidden.isdisjoint(sys.modules)
 

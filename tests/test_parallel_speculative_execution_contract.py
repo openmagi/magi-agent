@@ -3,7 +3,7 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
-from openmagi_core_agent.harness.parallel_execution import (
+from magi_agent.harness.parallel_execution import (
     ATTACHMENT_FLAGS,
     FailureAggregationMetadata,
     ParallelBatchMetadata,

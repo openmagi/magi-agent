@@ -7,24 +7,24 @@ import pytest
 from google.genai import types
 from pydantic import ValidationError
 
-from openmagi_core_agent.adk_bridge.runner_adapter import (
+from magi_agent.adk_bridge.runner_adapter import (
     OpenMagiRunnerAdapter,
     RunnerTurnInput,
 )
-from openmagi_core_agent.evidence.rollout import EvidenceRolloutMetadata
-from openmagi_core_agent.harness.engine import HarnessEngine, HarnessResolutionRequest
-from openmagi_core_agent.harness.evidence_scope import (
+from magi_agent.evidence.rollout import EvidenceRolloutMetadata
+from magi_agent.harness.engine import HarnessEngine, HarnessResolutionRequest
+from magi_agent.harness.evidence_scope import (
     EvidenceContractScope,
     SpawnDepthRange,
 )
-from openmagi_core_agent.harness.resolved import (
+from magi_agent.harness.resolved import (
     ResolvedEvidenceContractSnapshot,
     ResolvedHarnessPresetState,
     build_default_resolved_harness_state,
 )
-from openmagi_core_agent.hooks.bus import HookBus
-from openmagi_core_agent.hooks.context import HookContext
-from openmagi_core_agent.hooks.manifest import HookPoint
+from magi_agent.hooks.bus import HookBus
+from magi_agent.hooks.context import HookContext
+from magi_agent.hooks.manifest import HookPoint
 
 
 def _contract(
@@ -547,15 +547,15 @@ def test_resolved_harness_import_stays_runner_route_and_dispatcher_free() -> Non
 import importlib
 import sys
 
-importlib.import_module("openmagi_core_agent.harness.resolved")
+importlib.import_module("magi_agent.harness.resolved")
 forbidden_modules = (
     "google.adk.runners",
-    "openmagi_core_agent.adk_bridge.runner_adapter",
-    "openmagi_core_agent.runtime.openmagi_runtime",
-    "openmagi_core_agent.transport.chat",
-    "openmagi_core_agent.transport.tools",
-    "openmagi_core_agent.tools.dispatcher",
-    "openmagi_core_agent.hooks.bus",
+    "magi_agent.adk_bridge.runner_adapter",
+    "magi_agent.runtime.openmagi_runtime",
+    "magi_agent.transport.chat",
+    "magi_agent.transport.tools",
+    "magi_agent.tools.dispatcher",
+    "magi_agent.hooks.bus",
 )
 loaded = [module for module in forbidden_modules if module in sys.modules]
 if loaded:

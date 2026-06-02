@@ -1,18 +1,18 @@
 from __future__ import annotations
 
-from openmagi_core_agent.config.models import (
+from magi_agent.config.models import (
     PythonMemoryAdapterConfig,
     PythonRuntimeAuthorityConfig,
     PythonToolHostAttachmentConfig,
 )
-from openmagi_core_agent.harness.mission_runtime_boundary import MissionChildTaskIntent
-from openmagi_core_agent.memory.policy import MemoryPolicy, MemoryPolicyDecision
-from openmagi_core_agent.memory.projection import TurnMemorySummaryProjection
-from openmagi_core_agent.memory.write_boundary import (
+from magi_agent.harness.mission_runtime_boundary import MissionChildTaskIntent
+from magi_agent.memory.policy import MemoryPolicy, MemoryPolicyDecision
+from magi_agent.memory.projection import TurnMemorySummaryProjection
+from magi_agent.memory.write_boundary import (
     MemoryBackendCapabilities,
     MemoryBackendDescriptor,
 )
-from openmagi_core_agent.workspace.adoption_boundary import WorkspaceMutationConfig
+from magi_agent.workspace.adoption_boundary import WorkspaceMutationConfig
 
 
 DIGEST = "sha256:" + "a" * 64

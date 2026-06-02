@@ -16,7 +16,7 @@ import pytest
 
 def _builder() -> ModuleType:
     try:
-        return importlib.import_module("openmagi_core_agent.runtime.message_builder")
+        return importlib.import_module("magi_agent.runtime.message_builder")
     except ModuleNotFoundError as exc:
         pytest.fail(f"message_builder module is missing: {exc}")
 

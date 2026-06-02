@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-from openmagi_core_agent.recipes.composition import (
+from magi_agent.recipes.composition import (
     AdmittedRecipeSnapshot,
     RecipeStackInput,
 )
-from openmagi_core_agent.recipes.effective_contract import (
+from magi_agent.recipes.effective_contract import (
     build_effective_recipe_contract,
 )
 

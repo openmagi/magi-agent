@@ -8,7 +8,7 @@ ARG CORE_AGENT_EXPECTED_IMAGE_DIGEST=""
 WORKDIR /app
 
 COPY pyproject.toml README.md ./
-COPY openmagi_core_agent/ ./openmagi_core_agent/
+COPY magi_agent/ ./magi_agent/
 
 RUN python -m pip install --no-cache-dir --upgrade pip \
   && python -m pip install --no-cache-dir ".[cli]"
@@ -22,4 +22,4 @@ ENV CORE_AGENT_PORT=8080 \
 
 EXPOSE 8080
 
-CMD ["python", "-m", "openmagi_core_agent"]
+CMD ["python", "-m", "magi_agent"]

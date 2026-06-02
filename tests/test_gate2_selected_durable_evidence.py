@@ -18,22 +18,22 @@ from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 
-from openmagi_core_agent.app import create_app
-from openmagi_core_agent.config.env import parse_runtime_env
-from openmagi_core_agent.evidence.gate2_durable_evidence import (
+from magi_agent.app import create_app
+from magi_agent.config.env import parse_runtime_env
+from magi_agent.evidence.gate2_durable_evidence import (
     Gate2DurableEvidenceStore,
 )
-from openmagi_core_agent.runtime.openmagi_runtime import OpenMagiRuntime
-from openmagi_core_agent.shadow.gate2_recipe_profile_resolver import (
+from magi_agent.runtime.openmagi_runtime import OpenMagiRuntime
+from magi_agent.shadow.gate2_recipe_profile_resolver import (
     resolve_gate2_recipe_profile,
 )
-from openmagi_core_agent.shadow.gate5b4c3_shadow_counter_store import (
+from magi_agent.shadow.gate5b4c3_shadow_counter_store import (
     Gate5B4C3ShadowCounterStore,
 )
-from openmagi_core_agent.transport.chat import (
+from magi_agent.transport.chat import (
     build_gate2_sandbox_workspace_canary_config_from_env,
 )
-from openmagi_core_agent.transport.shadow_generations import (
+from magi_agent.transport.shadow_generations import (
     Gate5B4C3ShadowGenerationRouteConfig,
 )
 
@@ -137,7 +137,7 @@ def _runtime_with_evidence(
 
     config = build_gate2_sandbox_workspace_canary_config_from_env(env, runtime.config)
     # Rebuild with evidence store attached
-    from openmagi_core_agent.transport.chat import Gate2SandboxWorkspaceCanaryConfig
+    from magi_agent.transport.chat import Gate2SandboxWorkspaceCanaryConfig
 
     runtime.gate2_sandbox_workspace_canary_config = Gate2SandboxWorkspaceCanaryConfig(
         enabled=config.enabled,
@@ -597,7 +597,7 @@ def test_evidence_store_handles_write_failure(tmp_path: Path) -> None:
 
 def test_evidence_record_missing_evidence_list(tmp_path: Path) -> None:
     """Gate2EvidenceRecord.missing_evidence lists what's missing."""
-    from openmagi_core_agent.evidence.gate2_durable_evidence import Gate2EvidenceRecord
+    from magi_agent.evidence.gate2_durable_evidence import Gate2EvidenceRecord
 
     record = Gate2EvidenceRecord(
         request_digest="sha256:abc",

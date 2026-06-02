@@ -2,7 +2,7 @@ import asyncio
 
 from google.adk.events import Event
 
-from openmagi_core_agent.adk_bridge.session_service import (
+from magi_agent.adk_bridge.session_service import (
     SessionDeletionRequiresReviewError,
     WorkspaceSessionService,
 )

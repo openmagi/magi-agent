@@ -2,13 +2,13 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from openmagi_core_agent.runtime.transcript import (
+from magi_agent.runtime.transcript import (
     AssistantTextEntry,
     CompactionBoundaryEntry,
     TurnCommittedEntry,
     UserMessageEntry,
 )
-from openmagi_core_agent.runtime.transcript import TranscriptStore
+from magi_agent.runtime.transcript import TranscriptStore
 
 
 FIXTURES = Path(__file__).parent / "fixtures" / "context_continuity"
@@ -61,7 +61,7 @@ class _FakeContinuityResult:
 
 
 def test_context_packet_disabled_default_imports_no_events(tmp_path: Path) -> None:
-    from openmagi_core_agent.runtime.context_packet import (
+    from magi_agent.runtime.context_packet import (
         ContextContinuityConfig,
         build_context_packet_from_transcript,
         render_context_packet_for_model,
@@ -90,7 +90,7 @@ def test_context_packet_disabled_default_imports_no_events(tmp_path: Path) -> No
 def test_context_packet_keeps_recent_antecedent_for_ambiguous_followup(
     tmp_path: Path,
 ) -> None:
-    from openmagi_core_agent.runtime.context_packet import (
+    from magi_agent.runtime.context_packet import (
         ContextContinuityConfig,
         build_context_packet_from_transcript,
         render_context_packet_for_model,
@@ -117,7 +117,7 @@ def test_context_packet_keeps_recent_antecedent_for_ambiguous_followup(
 def test_context_packet_uses_approved_compact_summary_and_recent_tail(
     tmp_path: Path,
 ) -> None:
-    from openmagi_core_agent.runtime.context_packet import (
+    from magi_agent.runtime.context_packet import (
         ContextContinuityConfig,
         build_context_packet_from_transcript,
         render_context_packet_for_model,
@@ -141,7 +141,7 @@ def test_context_packet_uses_approved_compact_summary_and_recent_tail(
 
 
 def test_context_packet_compaction_ref_does_not_render_unsafe_summary_text() -> None:
-    from openmagi_core_agent.runtime.context_packet import (
+    from magi_agent.runtime.context_packet import (
         ContextContinuityConfig,
         build_context_packet_from_transcript,
         render_context_packet_for_model,
@@ -189,7 +189,7 @@ def test_context_packet_compaction_ref_does_not_render_unsafe_summary_text() -> 
 
 
 def test_context_packet_subsequent_unapproved_compaction_keeps_old_raw_context_closed() -> None:
-    from openmagi_core_agent.runtime.context_packet import (
+    from magi_agent.runtime.context_packet import (
         ContextContinuityConfig,
         build_context_packet_from_transcript,
         render_context_packet_for_model,
@@ -260,7 +260,7 @@ def test_context_packet_subsequent_unapproved_compaction_keeps_old_raw_context_c
 
 
 def test_session_context_packet_rejects_forged_continuity_event_marker() -> None:
-    from openmagi_core_agent.runtime.context_packet import (
+    from magi_agent.runtime.context_packet import (
         ContextContinuityConfig,
         build_context_packet_from_session_continuity,
         render_context_packet_for_model,
@@ -296,16 +296,16 @@ def test_session_context_packet_rejects_forged_continuity_event_marker() -> None
 
 
 def test_session_context_packet_closes_corrupt_compacted_batch() -> None:
-    from openmagi_core_agent.runtime.context_packet import (
+    from magi_agent.runtime.context_packet import (
         ContextContinuityConfig,
         build_context_packet_from_session_continuity,
         render_context_packet_for_model,
     )
-    from openmagi_core_agent.runtime.session_continuity import (
+    from magi_agent.runtime.session_continuity import (
         SessionContinuityBoundary,
         SessionContinuityConfig,
     )
-    from openmagi_core_agent.adk_bridge.session_service import WorkspaceSessionService
+    from magi_agent.adk_bridge.session_service import WorkspaceSessionService
 
     service = WorkspaceSessionService(app_name="openmagi")
 
@@ -385,7 +385,7 @@ def test_session_context_packet_closes_corrupt_compacted_batch() -> None:
 def test_context_packet_rejects_raw_tool_and_private_payloads(
     tmp_path: Path,
 ) -> None:
-    from openmagi_core_agent.runtime.context_packet import (
+    from magi_agent.runtime.context_packet import (
         ContextContinuityConfig,
         build_context_packet_from_transcript,
         render_context_packet_for_model,
@@ -411,7 +411,7 @@ def test_context_packet_rejects_raw_tool_and_private_payloads(
 
 
 def test_context_packet_digest_changes_when_safe_context_changes(tmp_path: Path) -> None:
-    from openmagi_core_agent.runtime.context_packet import (
+    from magi_agent.runtime.context_packet import (
         ContextContinuityConfig,
         build_context_packet_from_transcript,
     )

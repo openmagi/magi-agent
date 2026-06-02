@@ -5,7 +5,7 @@ import sys
 
 
 def _request(**overrides: object) -> object:
-    from openmagi_core_agent.runtime.long_running_activity import LongRunningActivityRequest
+    from magi_agent.runtime.long_running_activity import LongRunningActivityRequest
 
     payload = {
         "requestId": "activity-request",
@@ -24,7 +24,7 @@ def _request(**overrides: object) -> object:
 
 
 def _policy(**overrides: object) -> object:
-    from openmagi_core_agent.runtime.long_running_activity import LongRunningActivityPolicy
+    from magi_agent.runtime.long_running_activity import LongRunningActivityPolicy
 
     payload = {
         "policyRef": "policy:background-activity",
@@ -48,7 +48,7 @@ def _policy(**overrides: object) -> object:
 
 
 def test_background_activity_default_off_records_digest_only_receipt() -> None:
-    from openmagi_core_agent.missions.background_tasks import BackgroundTaskActivityBoundary
+    from magi_agent.missions.background_tasks import BackgroundTaskActivityBoundary
 
     result = BackgroundTaskActivityBoundary().record_activity(
         request=_request(
@@ -93,8 +93,8 @@ def test_background_activity_default_off_records_digest_only_receipt() -> None:
 
 
 def test_all_activity_events_emit_local_fake_receipts_without_execution() -> None:
-    from openmagi_core_agent.missions.background_tasks import BackgroundTaskActivityBoundary
-    from openmagi_core_agent.runtime.long_running_activity import ADK_LONG_RUNNING_FUNCTION_TOOL_REF
+    from magi_agent.missions.background_tasks import BackgroundTaskActivityBoundary
+    from magi_agent.runtime.long_running_activity import ADK_LONG_RUNNING_FUNCTION_TOOL_REF
 
     boundary = BackgroundTaskActivityBoundary(
         {"enabled": True, "localFakeActivityEnabled": True},
@@ -138,7 +138,7 @@ def test_all_activity_events_emit_local_fake_receipts_without_execution() -> Non
 
 
 def test_side_effect_surfaces_block_until_policy_explicitly_allows_local_fake_receipt() -> None:
-    from openmagi_core_agent.missions.background_tasks import BackgroundTaskActivityBoundary
+    from magi_agent.missions.background_tasks import BackgroundTaskActivityBoundary
 
     boundary = BackgroundTaskActivityBoundary(
         {"enabled": True, "localFakeActivityEnabled": True},
@@ -178,7 +178,7 @@ def test_side_effect_surfaces_block_until_policy_explicitly_allows_local_fake_re
 
 
 def test_evidence_cancellation_approval_policy_and_local_fake_admission_are_required() -> None:
-    from openmagi_core_agent.missions.background_tasks import BackgroundTaskActivityBoundary
+    from magi_agent.missions.background_tasks import BackgroundTaskActivityBoundary
 
     boundary = BackgroundTaskActivityBoundary(
         {"enabled": True, "localFakeActivityEnabled": True},
@@ -220,7 +220,7 @@ def test_evidence_cancellation_approval_policy_and_local_fake_admission_are_requ
 
 
 def test_activity_idempotency_duplicate_and_conflict_are_deterministic() -> None:
-    from openmagi_core_agent.missions.background_tasks import BackgroundTaskActivityBoundary
+    from magi_agent.missions.background_tasks import BackgroundTaskActivityBoundary
 
     boundary = BackgroundTaskActivityBoundary(
         {"enabled": True, "localFakeActivityEnabled": True},
@@ -242,7 +242,7 @@ def test_activity_idempotency_duplicate_and_conflict_are_deterministic() -> None
 
 
 def test_idempotency_is_scoped_by_activity_scope_and_run() -> None:
-    from openmagi_core_agent.missions.background_tasks import BackgroundTaskActivityBoundary
+    from magi_agent.missions.background_tasks import BackgroundTaskActivityBoundary
 
     boundary = BackgroundTaskActivityBoundary(
         {"enabled": True, "localFakeActivityEnabled": True},
@@ -280,7 +280,7 @@ def test_idempotency_is_scoped_by_activity_scope_and_run() -> None:
 
 
 def test_policy_snapshot_digest_binds_effective_side_effect_policy() -> None:
-    from openmagi_core_agent.missions.background_tasks import BackgroundTaskActivityBoundary
+    from magi_agent.missions.background_tasks import BackgroundTaskActivityBoundary
 
     boundary = BackgroundTaskActivityBoundary(
         {"enabled": True, "localFakeActivityEnabled": True},
@@ -307,7 +307,7 @@ def test_policy_snapshot_digest_binds_effective_side_effect_policy() -> None:
 
 
 def test_receipt_digest_fields_are_hash_only_even_when_constructed_directly() -> None:
-    from openmagi_core_agent.runtime.long_running_activity import LongRunningActivityReceipt
+    from magi_agent.runtime.long_running_activity import LongRunningActivityReceipt
 
     receipt = LongRunningActivityReceipt(
         receiptId="activity-receipt:direct",
@@ -365,7 +365,7 @@ def test_request_repr_does_not_leak_raw_private_fields() -> None:
 
 
 def test_authority_and_attachment_flags_cannot_be_forged_by_construct_or_copy() -> None:
-    from openmagi_core_agent.runtime.long_running_activity import (
+    from magi_agent.runtime.long_running_activity import (
         LongRunningActivityAuthorityFlags,
         LongRunningActivityConfig,
         LongRunningActivityReceipt,
@@ -483,18 +483,18 @@ def test_background_activity_modules_have_no_live_imports() -> None:
 import importlib
 import sys
 
-importlib.import_module("openmagi_core_agent.runtime.long_running_activity")
-importlib.import_module("openmagi_core_agent.missions.background_tasks")
+importlib.import_module("magi_agent.runtime.long_running_activity")
+importlib.import_module("magi_agent.missions.background_tasks")
 forbidden_prefixes = (
     "google.adk",
     "google.genai",
-    "openmagi_core_agent.adk_bridge",
-    "openmagi_core_agent.transport",
-    "openmagi_core_agent.routing",
-    "openmagi_core_agent.deploy",
-    "openmagi_core_agent.chat_proxy",
-    "openmagi_core_agent.runtime_selector",
-    "openmagi_core_agent.k8s",
+    "magi_agent.adk_bridge",
+    "magi_agent.transport",
+    "magi_agent.routing",
+    "magi_agent.deploy",
+    "magi_agent.chat_proxy",
+    "magi_agent.runtime_selector",
+    "magi_agent.k8s",
     "subprocess",
     "kubernetes",
     "telegram",

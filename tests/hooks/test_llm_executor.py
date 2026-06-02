@@ -26,17 +26,17 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from openmagi_core_agent.hooks.context import HookContext
-from openmagi_core_agent.hooks.executors import get_executor
-from openmagi_core_agent.hooks.executors.llm_executor import (
+from magi_agent.hooks.context import HookContext
+from magi_agent.hooks.executors import get_executor
+from magi_agent.hooks.executors.llm_executor import (
     LLMHookExecutor,
     _parse_llm_decision,
     _render_prompt,
     _truncate_prompt,
 )
-from openmagi_core_agent.hooks.manifest import HookManifest, HookPoint
-from openmagi_core_agent.hooks.result import HookResult
-from openmagi_core_agent.tools.manifest import ToolSource
+from magi_agent.hooks.manifest import HookManifest, HookPoint
+from magi_agent.hooks.result import HookResult
+from magi_agent.tools.manifest import ToolSource
 
 _SOURCE = ToolSource(kind="builtin", package="test.fixtures")
 
@@ -165,7 +165,7 @@ class TestPromptRendering:
 def _mock_classifier(response_text: str) -> MagicMock:
     """Create a mock that patches _call_classifier to return response_text."""
     return patch(
-        "openmagi_core_agent.hooks.executors.llm_executor._call_classifier",
+        "magi_agent.hooks.executors.llm_executor._call_classifier",
         new_callable=AsyncMock,
         return_value=response_text,
     )
@@ -202,7 +202,7 @@ class TestLLMExecutorFlow:
     async def test_timeout_fail_open(self) -> None:
         manifest = _manifest(failOpen=True, timeoutMs=100)
         with patch(
-            "openmagi_core_agent.hooks.executors.llm_executor._call_classifier",
+            "magi_agent.hooks.executors.llm_executor._call_classifier",
             side_effect=asyncio.TimeoutError(),
         ):
             result = await LLMHookExecutor().execute(_CONTEXT, manifest)
@@ -212,7 +212,7 @@ class TestLLMExecutorFlow:
     async def test_timeout_fail_closed(self) -> None:
         manifest = _manifest(failOpen=False, timeoutMs=100)
         with patch(
-            "openmagi_core_agent.hooks.executors.llm_executor._call_classifier",
+            "magi_agent.hooks.executors.llm_executor._call_classifier",
             side_effect=asyncio.TimeoutError(),
         ):
             result = await LLMHookExecutor().execute(_CONTEXT, manifest)
@@ -223,7 +223,7 @@ class TestLLMExecutorFlow:
     async def test_exception_fail_open(self) -> None:
         manifest = _manifest(failOpen=True)
         with patch(
-            "openmagi_core_agent.hooks.executors.llm_executor._call_classifier",
+            "magi_agent.hooks.executors.llm_executor._call_classifier",
             side_effect=RuntimeError("API key invalid"),
         ):
             result = await LLMHookExecutor().execute(_CONTEXT, manifest)
@@ -233,7 +233,7 @@ class TestLLMExecutorFlow:
     async def test_exception_fail_closed(self) -> None:
         manifest = _manifest(failOpen=False)
         with patch(
-            "openmagi_core_agent.hooks.executors.llm_executor._call_classifier",
+            "magi_agent.hooks.executors.llm_executor._call_classifier",
             side_effect=RuntimeError("API key invalid"),
         ):
             result = await LLMHookExecutor().execute(_CONTEXT, manifest)
@@ -261,14 +261,14 @@ class TestLLMExecutorFlow:
 
 class TestModelResolution:
     def test_env_var_takes_precedence(self) -> None:
-        from openmagi_core_agent.hooks.executors.llm_executor import _resolve_classifier_model
+        from magi_agent.hooks.executors.llm_executor import _resolve_classifier_model
 
         ctx = HookContext(botId="b", classifierModel="ctx-model")
         with patch.dict("os.environ", {"MAGI_LLM_HOOK_CLASSIFIER_MODEL": "env-model"}):
             assert _resolve_classifier_model(ctx) == "env-model"
 
     def test_context_model_used_when_no_env(self) -> None:
-        from openmagi_core_agent.hooks.executors.llm_executor import _resolve_classifier_model
+        from magi_agent.hooks.executors.llm_executor import _resolve_classifier_model
 
         ctx = HookContext(botId="b", classifierModel="ctx-model")
         with patch.dict("os.environ", {}, clear=False):
@@ -276,7 +276,7 @@ class TestModelResolution:
             assert _resolve_classifier_model(ctx) == "ctx-model"
 
     def test_default_model_fallback(self) -> None:
-        from openmagi_core_agent.hooks.executors.llm_executor import _resolve_classifier_model
+        from magi_agent.hooks.executors.llm_executor import _resolve_classifier_model
 
         ctx = HookContext(botId="b")
         with patch.dict("os.environ", {}, clear=False):

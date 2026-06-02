@@ -10,16 +10,16 @@ from pathlib import Path
 import pytest
 
 from runtime_issuance_support import issue_test_runtime_authority
-from openmagi_core_agent.evidence.source_ledger import (
+from magi_agent.evidence.source_ledger import (
     LocalResearchSourceLedger,
     public_source_ledger_report,
 )
-from openmagi_core_agent.research.source_proof import (
+from magi_agent.research.source_proof import (
     ResearchSourceOpenReceiptRef,
     ResearchSourceProofRequirement,
     verify_research_source_proof,
 )
-from openmagi_core_agent.tools.context import ToolContext
+from magi_agent.tools.context import ToolContext
 
 
 class FakeRepoResearchProvider:
@@ -185,7 +185,7 @@ def _repo_source_receipt(
 
 
 def test_repo_research_tools_default_off_returns_blocked_without_provider_call() -> None:
-    from openmagi_core_agent.web_acquisition.repo_research_tools import (
+    from magi_agent.web_acquisition.repo_research_tools import (
         LocalRepoResearchRuntime,
         LocalRepoResearchToolBoundary,
         RepoResearchConfig,
@@ -218,7 +218,7 @@ def test_repo_research_tools_default_off_returns_blocked_without_provider_call()
 
 
 def test_repo_research_tool_boundary_declares_fixture_only_without_live_authority() -> None:
-    from openmagi_core_agent.web_acquisition.repo_research_tools import (
+    from magi_agent.web_acquisition.repo_research_tools import (
         LocalRepoResearchToolBoundary,
     )
 
@@ -243,7 +243,7 @@ def test_repo_research_tool_boundary_declares_fixture_only_without_live_authorit
 def test_repo_research_tools_block_url_only_private_or_ssh_locators_before_provider_call(
     arguments: dict[str, object],
 ) -> None:
-    from openmagi_core_agent.web_acquisition.repo_research_tools import (
+    from magi_agent.web_acquisition.repo_research_tools import (
         LocalRepoResearchRuntime,
         LocalRepoResearchToolBoundary,
         RepoResearchConfig,
@@ -274,7 +274,7 @@ def test_repo_research_tools_block_url_only_private_or_ssh_locators_before_provi
 
 
 def test_repo_clone_fake_provider_returns_sanitized_digest_only_result() -> None:
-    from openmagi_core_agent.web_acquisition.repo_research_tools import (
+    from magi_agent.web_acquisition.repo_research_tools import (
         LocalRepoResearchRuntime,
         LocalRepoResearchToolBoundary,
         RepoResearchConfig,
@@ -338,7 +338,7 @@ def test_repo_clone_fake_provider_returns_sanitized_digest_only_result() -> None
 
 
 def test_repo_research_tools_reject_unmarked_local_fake_provider_before_call() -> None:
-    from openmagi_core_agent.web_acquisition.repo_research_tools import (
+    from magi_agent.web_acquisition.repo_research_tools import (
         LocalRepoResearchRuntime,
         LocalRepoResearchToolBoundary,
         RepoResearchConfig,
@@ -369,7 +369,7 @@ def test_repo_research_tools_reject_unmarked_local_fake_provider_before_call() -
 
 
 def test_repo_research_provider_exception_does_not_project_private_error_text() -> None:
-    from openmagi_core_agent.web_acquisition.repo_research_tools import (
+    from magi_agent.web_acquisition.repo_research_tools import (
         LocalRepoResearchRuntime,
         LocalRepoResearchToolBoundary,
         RepoResearchConfig,
@@ -407,7 +407,7 @@ def test_repo_research_provider_exception_does_not_project_private_error_text() 
 
 
 def test_repo_overview_fake_provider_returns_digest_safe_overview_refs_only() -> None:
-    from openmagi_core_agent.web_acquisition.repo_research_tools import (
+    from magi_agent.web_acquisition.repo_research_tools import (
         LocalRepoResearchRuntime,
         LocalRepoResearchToolBoundary,
         RepoResearchConfig,
@@ -456,7 +456,7 @@ def test_repo_overview_fake_provider_returns_digest_safe_overview_refs_only() ->
 
 
 def test_repo_overview_projection_drops_token_session_callback_and_private_path_output() -> None:
-    from openmagi_core_agent.web_acquisition.repo_research_tools import (
+    from magi_agent.web_acquisition.repo_research_tools import (
         LocalRepoResearchRuntime,
         LocalRepoResearchToolBoundary,
         RepoResearchConfig,
@@ -504,7 +504,7 @@ def test_repo_overview_projection_drops_token_session_callback_and_private_path_
 
 
 def test_repo_record_digest_ignores_private_summary_lines() -> None:
-    from openmagi_core_agent.web_acquisition.repo_research_tools import (
+    from magi_agent.web_acquisition.repo_research_tools import (
         RepoResearchRequest,
         _records_from_provider_output,
     )
@@ -550,7 +550,7 @@ def test_repo_record_digest_ignores_private_summary_lines() -> None:
 
 
 def test_repo_source_record_direct_construction_drops_unsafe_branch_and_metadata() -> None:
-    from openmagi_core_agent.web_acquisition.repo_research_tools import (
+    from magi_agent.web_acquisition.repo_research_tools import (
         RepoResearchSourceRecord,
     )
 
@@ -581,7 +581,7 @@ def test_repo_source_record_direct_construction_drops_unsafe_branch_and_metadata
 
 
 def test_repo_source_record_metadata_is_immutable_after_validation() -> None:
-    from openmagi_core_agent.web_acquisition.repo_research_tools import (
+    from magi_agent.web_acquisition.repo_research_tools import (
         RepoResearchSourceRecord,
     )
 
@@ -603,7 +603,7 @@ def test_repo_source_record_metadata_is_immutable_after_validation() -> None:
 
 
 def test_repo_source_record_disables_construct_and_revalidates_copy_updates() -> None:
-    from openmagi_core_agent.web_acquisition.repo_research_tools import (
+    from magi_agent.web_acquisition.repo_research_tools import (
         RepoResearchSourceRecord,
     )
 
@@ -650,7 +650,7 @@ def test_repo_source_record_disables_construct_and_revalidates_copy_updates() ->
 
 
 def test_project_repo_research_result_requires_runtime_opened_receipt_for_ledger_authority() -> None:
-    from openmagi_core_agent.web_acquisition.repo_research_tools import (
+    from magi_agent.web_acquisition.repo_research_tools import (
         LocalRepoResearchRuntime,
         LocalRepoResearchToolBoundary,
         RepoResearchConfig,
@@ -741,7 +741,7 @@ def test_project_repo_research_result_requires_runtime_opened_receipt_for_ledger
 
 
 def test_project_repo_research_result_rejects_forged_source_receipt_object() -> None:
-    from openmagi_core_agent.web_acquisition.repo_research_tools import (
+    from magi_agent.web_acquisition.repo_research_tools import (
         LocalRepoResearchRuntime,
         LocalRepoResearchToolBoundary,
         RepoResearchConfig,
@@ -834,7 +834,7 @@ def test_external_repo_source_proof_requires_runtime_issued_opened_snapshot_not_
 def test_repo_research_tools_import_boundary_has_no_live_git_network_or_toolhost_imports() -> None:
     module_path = (
         Path(__file__).parents[1]
-        / "openmagi_core_agent"
+        / "magi_agent"
         / "web_acquisition"
         / "repo_research_tools.py"
     )
@@ -848,14 +848,14 @@ def test_repo_research_tools_import_boundary_has_no_live_git_network_or_toolhost
             imported_modules.add(node.module)
 
     forbidden_prefixes = (
-        "openmagi_core_agent.adk_bridge",
-        "openmagi_core_agent.browser",
-        "openmagi_core_agent.tools.catalog",
-        "openmagi_core_agent.tools.dispatcher",
-        "openmagi_core_agent.tools.kernel",
-        "openmagi_core_agent.tools.registry",
-        "openmagi_core_agent.transport",
-        "openmagi_core_agent.web_acquisition.live_provider_pack",
+        "magi_agent.adk_bridge",
+        "magi_agent.browser",
+        "magi_agent.tools.catalog",
+        "magi_agent.tools.dispatcher",
+        "magi_agent.tools.kernel",
+        "magi_agent.tools.registry",
+        "magi_agent.transport",
+        "magi_agent.web_acquisition.live_provider_pack",
         "git",
         "dulwich",
         "gitpython",
@@ -883,14 +883,14 @@ def test_repo_research_tools_import_boundary_has_no_live_git_network_or_toolhost
 import importlib
 import sys
 
-module = importlib.import_module("openmagi_core_agent.web_acquisition.repo_research_tools")
+module = importlib.import_module("magi_agent.web_acquisition.repo_research_tools")
 assert hasattr(module, "LocalRepoResearchToolBoundary")
 
 forbidden_loaded = (
-    "openmagi_core_agent.adk_bridge.local_toolhost",
-    "openmagi_core_agent.tools.dispatcher",
-    "openmagi_core_agent.tools.kernel",
-    "openmagi_core_agent.web_acquisition.live_provider_pack",
+    "magi_agent.adk_bridge.local_toolhost",
+    "magi_agent.tools.dispatcher",
+    "magi_agent.tools.kernel",
+    "magi_agent.web_acquisition.live_provider_pack",
 )
 loaded = [name for name in forbidden_loaded if name in sys.modules]
 if loaded:

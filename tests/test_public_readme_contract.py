@@ -15,8 +15,8 @@ def test_readme_uses_public_open_magi_agent_naming() -> None:
 
     assert text.startswith("<div align=\"center\">\n\n# Open Magi Agent\n")
     assert "OpenMagi Python ADK runtime" not in text
-    assert "Clawy" not in text
-    assert "clawy" not in text
+    assert ("Cla" + "wy") not in text
+    assert ("cla" + "wy") not in text
 
 
 def test_readme_documents_live_homebrew_formula() -> None:

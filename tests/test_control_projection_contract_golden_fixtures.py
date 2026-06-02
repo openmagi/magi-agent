@@ -4,7 +4,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from openmagi_core_agent.shadow.control_projection_contract import (
+from magi_agent.shadow.control_projection_contract import (
     ControlProjectionAttachmentFlags,
     load_control_projection_fixture,
     project_control_projection_fixture,
@@ -115,7 +115,7 @@ def test_control_projection_import_boundary_stays_local_diagnostic_only() -> Non
 import sys
 from pathlib import Path
 
-from openmagi_core_agent.shadow.control_projection_contract import (
+from magi_agent.shadow.control_projection_contract import (
     load_control_projection_fixture,
     project_control_projection_fixture,
 )
@@ -126,18 +126,18 @@ project_control_projection_fixture(fixture)
 
 forbidden = (
     'google.adk.runners',
-    'openmagi_core_agent.adk_bridge.local_runner',
-    'openmagi_core_agent.adk_bridge.runner_adapter',
-    'openmagi_core_agent.tools.dispatcher',
-    'openmagi_core_agent.tools.registry',
-    'openmagi_core_agent.transport.chat',
-    'openmagi_core_agent.transport.routes.chat',
-    'openmagi_core_agent.db',
-    'openmagi_core_agent.database',
-    'openmagi_core_agent.proxy',
-    'openmagi_core_agent.canary',
-    'openmagi_core_agent.memory',
-    'openmagi_core_agent.plugins.agentmemory',
+    'magi_agent.adk_bridge.local_runner',
+    'magi_agent.adk_bridge.runner_adapter',
+    'magi_agent.tools.dispatcher',
+    'magi_agent.tools.registry',
+    'magi_agent.transport.chat',
+    'magi_agent.transport.routes.chat',
+    'magi_agent.db',
+    'magi_agent.database',
+    'magi_agent.proxy',
+    'magi_agent.canary',
+    'magi_agent.memory',
+    'magi_agent.plugins.agentmemory',
 )
 loaded = [name for name in forbidden if name in sys.modules]
 if loaded:

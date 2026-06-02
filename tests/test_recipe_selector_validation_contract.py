@@ -5,8 +5,8 @@ import inspect
 import pytest
 from pydantic import ValidationError
 
-import openmagi_core_agent.recipes.selector_validation as selector_validation
-from openmagi_core_agent.recipes.selector_validation import (
+import magi_agent.recipes.selector_validation as selector_validation
+from magi_agent.recipes.selector_validation import (
     RecipeSelectorFixture,
     evaluate_recipe_selector_fixture,
 )

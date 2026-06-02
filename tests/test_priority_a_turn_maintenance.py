@@ -9,7 +9,7 @@ from typing import Any, Callable
 
 import pytest
 
-from openmagi_core_agent.runtime.turn_maintenance import (
+from magi_agent.runtime.turn_maintenance import (
     HEARTBEAT_INTERVAL_MS,
     HEARTBEAT_SILENCE_MS,
     HeartbeatMonitor,
@@ -438,7 +438,7 @@ def test_turn_maintenance_import_is_pure_local_only() -> None:
 import importlib
 import sys
 
-module = importlib.import_module("openmagi_core_agent.runtime.turn_maintenance")
+module = importlib.import_module("magi_agent.runtime.turn_maintenance")
 assert hasattr(module, "HeartbeatMonitor")
 assert hasattr(module, "compact_messages_inline")
 
@@ -457,20 +457,20 @@ forbidden_exact = (
     "subprocess",
     "fastapi",
     "starlette.routing",
-    "openmagi_core_agent.adk_bridge.runner_adapter",
-    "openmagi_core_agent.adk_bridge.local_runner",
-    "openmagi_core_agent.tools.dispatcher",
-    "openmagi_core_agent.transport.sse",
+    "magi_agent.adk_bridge.runner_adapter",
+    "magi_agent.adk_bridge.local_runner",
+    "magi_agent.tools.dispatcher",
+    "magi_agent.transport.sse",
 )
 forbidden_prefixes = (
     "google.adk",
-    "openmagi_core_agent.tools",
-    "openmagi_core_agent.memory",
-    "openmagi_core_agent.workspace",
-    "openmagi_core_agent.transport",
-    "openmagi_core_agent.channels",
-    "openmagi_core_agent.children",
-    "openmagi_core_agent.missions",
+    "magi_agent.tools",
+    "magi_agent.memory",
+    "magi_agent.workspace",
+    "magi_agent.transport",
+    "magi_agent.channels",
+    "magi_agent.children",
+    "magi_agent.missions",
     "kubernetes",
     "supabase",
 )
@@ -494,7 +494,7 @@ if loaded:
 
 def test_turn_maintenance_source_forbids_runtime_side_effect_imports() -> None:
     root = Path(__file__).parents[1]
-    module_path = root / "openmagi_core_agent" / "runtime" / "turn_maintenance.py"
+    module_path = root / "magi_agent" / "runtime" / "turn_maintenance.py"
     source = module_path.read_text(encoding="utf-8")
     forbidden_imports = (
         "google",
@@ -511,14 +511,14 @@ def test_turn_maintenance_source_forbids_runtime_side_effect_imports() -> None:
         "starlette",
         "kubernetes",
         "supabase",
-        "openmagi_core_agent.adk_bridge",
-        "openmagi_core_agent.tools",
-        "openmagi_core_agent.memory",
-        "openmagi_core_agent.workspace",
-        "openmagi_core_agent.transport",
-        "openmagi_core_agent.channels",
-        "openmagi_core_agent.children",
-        "openmagi_core_agent.missions",
+        "magi_agent.adk_bridge",
+        "magi_agent.tools",
+        "magi_agent.memory",
+        "magi_agent.workspace",
+        "magi_agent.transport",
+        "magi_agent.channels",
+        "magi_agent.children",
+        "magi_agent.missions",
     )
 
     for forbidden in forbidden_imports:

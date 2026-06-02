@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from openmagi_core_agent.tools.context import ToolContext
+from magi_agent.tools.context import ToolContext
 
 
 def _context(
@@ -28,7 +28,7 @@ def _context(
 
 
 def test_reference_research_tools_default_off_and_no_handler_call(tmp_path: Path) -> None:
-    from openmagi_core_agent.web_acquisition.reference_research_tools import (
+    from magi_agent.web_acquisition.reference_research_tools import (
         ManagedReferenceCache,
         ReferenceAwareResearchToolBoundary,
     )
@@ -52,7 +52,7 @@ def test_reference_research_tools_default_off_and_no_handler_call(tmp_path: Path
 
 
 def test_reference_config_construct_cannot_enable_live_authority() -> None:
-    from openmagi_core_agent.web_acquisition.reference_research_tools import (
+    from magi_agent.web_acquisition.reference_research_tools import (
         ReferenceResearchConfig,
     )
 
@@ -81,7 +81,7 @@ def test_reference_config_construct_cannot_enable_live_authority() -> None:
 def test_reference_read_uses_toolhost_read_ledger_and_projects_digest_safe_output(
     tmp_path: Path,
 ) -> None:
-    from openmagi_core_agent.web_acquisition.reference_research_tools import (
+    from magi_agent.web_acquisition.reference_research_tools import (
         ManagedReferenceCache,
         ReferenceAwareResearchToolBoundary,
         ReferenceResearchConfig,
@@ -128,7 +128,7 @@ def test_reference_read_uses_toolhost_read_ledger_and_projects_digest_safe_outpu
 
 
 def test_reference_tools_reject_unissued_ref_before_toolhost_call(tmp_path: Path) -> None:
-    from openmagi_core_agent.web_acquisition.reference_research_tools import (
+    from magi_agent.web_acquisition.reference_research_tools import (
         ManagedReferenceCache,
         ReferenceAwareResearchToolBoundary,
         ReferenceResearchConfig,
@@ -151,7 +151,7 @@ def test_reference_tools_reject_unissued_ref_before_toolhost_call(tmp_path: Path
 
 
 def test_reference_tools_reject_stale_ref_before_toolhost_call(tmp_path: Path) -> None:
-    from openmagi_core_agent.web_acquisition.reference_research_tools import (
+    from magi_agent.web_acquisition.reference_research_tools import (
         ManagedReferenceCache,
         ReferenceAwareResearchToolBoundary,
         ReferenceResearchConfig,
@@ -176,7 +176,7 @@ def test_reference_tools_reject_stale_ref_before_toolhost_call(tmp_path: Path) -
 
 
 def test_reference_tools_reject_unscoped_ref_before_toolhost_call(tmp_path: Path) -> None:
-    from openmagi_core_agent.web_acquisition.reference_research_tools import (
+    from magi_agent.web_acquisition.reference_research_tools import (
         ManagedReferenceCache,
         ReferenceAwareResearchToolBoundary,
         ReferenceResearchConfig,
@@ -207,7 +207,7 @@ def test_reference_tools_reject_unscoped_ref_before_toolhost_call(tmp_path: Path
 def test_reference_tools_reject_same_workspace_ref_on_different_root(
     tmp_path: Path,
 ) -> None:
-    from openmagi_core_agent.web_acquisition.reference_research_tools import (
+    from magi_agent.web_acquisition.reference_research_tools import (
         ManagedReferenceCache,
         ReferenceAwareResearchToolBoundary,
         ReferenceResearchConfig,
@@ -262,7 +262,7 @@ def test_reference_cache_rejects_toolhost_denied_private_or_protected_paths(
     tmp_path: Path,
     unsafe_path: str,
 ) -> None:
-    from openmagi_core_agent.web_acquisition.reference_research_tools import (
+    from magi_agent.web_acquisition.reference_research_tools import (
         ManagedReferenceCache,
     )
 
@@ -285,7 +285,7 @@ def test_reference_cache_rejects_toolhost_denied_private_or_protected_paths(
 def test_reference_directory_digest_skips_toolhost_denied_nested_paths(
     tmp_path: Path,
 ) -> None:
-    from openmagi_core_agent.web_acquisition.reference_research_tools import (
+    from magi_agent.web_acquisition.reference_research_tools import (
         ManagedReferenceCache,
         ReferenceAwareResearchToolBoundary,
         ReferenceResearchConfig,
@@ -321,7 +321,7 @@ def test_reference_directory_digest_skips_toolhost_denied_nested_paths(
 def test_reference_grep_and_glob_route_through_toolhost_without_private_paths(
     tmp_path: Path,
 ) -> None:
-    from openmagi_core_agent.web_acquisition.reference_research_tools import (
+    from magi_agent.web_acquisition.reference_research_tools import (
         ManagedReferenceCache,
         ReferenceAwareResearchToolBoundary,
         ReferenceResearchConfig,
@@ -376,7 +376,7 @@ def test_reference_tools_block_unsafe_glob_before_toolhost_call(
     tmp_path: Path,
     unsafe_pattern: str,
 ) -> None:
-    from openmagi_core_agent.web_acquisition.reference_research_tools import (
+    from magi_agent.web_acquisition.reference_research_tools import (
         ManagedReferenceCache,
         ReferenceAwareResearchToolBoundary,
         ReferenceResearchConfig,
@@ -410,7 +410,7 @@ def test_reference_tools_block_unsafe_glob_before_toolhost_call(
 def test_reference_directory_stale_blocks_search_before_toolhost_call(
     tmp_path: Path,
 ) -> None:
-    from openmagi_core_agent.web_acquisition.reference_research_tools import (
+    from magi_agent.web_acquisition.reference_research_tools import (
         ManagedReferenceCache,
         ReferenceAwareResearchToolBoundary,
         ReferenceResearchConfig,
@@ -443,7 +443,7 @@ def test_reference_directory_stale_blocks_search_before_toolhost_call(
 def test_reference_tools_do_not_echo_raw_private_forged_ref(
     tmp_path: Path,
 ) -> None:
-    from openmagi_core_agent.web_acquisition.reference_research_tools import (
+    from magi_agent.web_acquisition.reference_research_tools import (
         ManagedReferenceCache,
         ReferenceAwareResearchToolBoundary,
         ReferenceResearchConfig,
@@ -474,7 +474,7 @@ def test_reference_tools_do_not_echo_raw_private_forged_ref(
 def test_reference_grep_preserves_toolhost_handler_error_code(
     tmp_path: Path,
 ) -> None:
-    from openmagi_core_agent.web_acquisition.reference_research_tools import (
+    from magi_agent.web_acquisition.reference_research_tools import (
         ManagedReferenceCache,
         ReferenceAwareResearchToolBoundary,
         ReferenceResearchConfig,

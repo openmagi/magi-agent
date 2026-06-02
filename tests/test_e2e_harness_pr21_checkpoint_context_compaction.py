@@ -9,16 +9,16 @@ import sys
 
 import pytest
 
-from openmagi_core_agent.adk_bridge.session_service import WorkspaceSessionService
-from openmagi_core_agent.runtime.cache_safe_params import CacheSafeParams
-from openmagi_core_agent.runtime.context_lifecycle import (
+from magi_agent.adk_bridge.session_service import WorkspaceSessionService
+from magi_agent.runtime.cache_safe_params import CacheSafeParams
+from magi_agent.runtime.context_lifecycle import (
     ContextLifecycleBoundary,
     ContextLifecycleConfig,
     ContextLifecycleEvent,
     RestoreContextRequest,
 )
-from openmagi_core_agent.runtime.content_replacement import replace_content_with_ref
-from openmagi_core_agent.runtime.query_state import QueryState
+from magi_agent.runtime.content_replacement import replace_content_with_ref
+from magi_agent.runtime.query_state import QueryState
 
 
 DIGEST_A = "sha256:" + "a" * 64
@@ -130,10 +130,10 @@ def test_pr21_core_contains_no_domain_specific_policy_branches() -> None:
     source = "\n".join(
         inspect.getsource(importlib.import_module(module))
         for module in (
-            "openmagi_core_agent.runtime.query_state",
-            "openmagi_core_agent.runtime.context_lifecycle",
-            "openmagi_core_agent.runtime.content_replacement",
-            "openmagi_core_agent.runtime.cache_safe_params",
+            "magi_agent.runtime.query_state",
+            "magi_agent.runtime.context_lifecycle",
+            "magi_agent.runtime.content_replacement",
+            "magi_agent.runtime.cache_safe_params",
         )
     )
 
@@ -156,20 +156,20 @@ import sys
 
 before = set(sys.modules)
 for name in (
-    "openmagi_core_agent.runtime.query_state",
-    "openmagi_core_agent.runtime.context_lifecycle",
-    "openmagi_core_agent.runtime.content_replacement",
-    "openmagi_core_agent.runtime.cache_safe_params",
+    "magi_agent.runtime.query_state",
+    "magi_agent.runtime.context_lifecycle",
+    "magi_agent.runtime.content_replacement",
+    "magi_agent.runtime.cache_safe_params",
 ):
     importlib.import_module(name)
 after = set(sys.modules) - before
 forbidden = [
     "google.adk.runners",
-    "openmagi_core_agent.tools",
-    "openmagi_core_agent.memory",
-    "openmagi_core_agent.transport",
-    "openmagi_core_agent.routing",
-    "openmagi_core_agent.main",
+    "magi_agent.tools",
+    "magi_agent.memory",
+    "magi_agent.transport",
+    "magi_agent.routing",
+    "magi_agent.main",
     "kubernetes",
     "supabase",
 ]

@@ -5,13 +5,13 @@ from pathlib import Path
 from google.adk.events import Event
 from google.genai import types
 
-from openmagi_core_agent.adk_bridge.event_adapter import OpenMagiEventBridge
-from openmagi_core_agent.runtime.control import (
+from magi_agent.adk_bridge.event_adapter import OpenMagiEventBridge
+from magi_agent.runtime.control import (
     ControlRequestCreatedEvent,
     make_transcript_reference,
 )
-from openmagi_core_agent.runtime.transcript import TranscriptStore
-from openmagi_core_agent.transport.sse import InMemorySseWriter
+from magi_agent.runtime.transcript import TranscriptStore
+from magi_agent.transport.sse import InMemorySseWriter
 
 
 FIXTURES = Path(__file__).parent / "fixtures" / "gate1"

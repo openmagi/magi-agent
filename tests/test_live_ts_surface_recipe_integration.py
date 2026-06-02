@@ -4,14 +4,14 @@ import json
 import subprocess
 import sys
 
-from openmagi_core_agent.recipes.compiler import (
+from magi_agent.recipes.compiler import (
     AgentRecipeCompiler,
     PackRegistry,
     ProfileResolutionRequest,
     RecipeSnapshot,
     build_recipe_snapshot_id,
 )
-from openmagi_core_agent.recipes.materializer import RecipeMaterializer
+from magi_agent.recipes.materializer import RecipeMaterializer
 
 
 def _plan(
@@ -234,20 +234,20 @@ def test_recipe_materializer_integration_import_boundary() -> None:
 import importlib
 import sys
 
-importlib.import_module("openmagi_core_agent.recipes.materializer")
+importlib.import_module("magi_agent.recipes.materializer")
 forbidden_prefixes = (
     "google.adk.runners",
     "google.adk.agents",
     "google.adk.sessions",
     "google.adk.tools",
-    "openmagi_core_agent.adk_bridge.runner_adapter",
-    "openmagi_core_agent.adk_bridge.tool_adapter",
-    "openmagi_core_agent.transport",
-    "openmagi_core_agent.channels",
-    "openmagi_core_agent.browser.live_provider_pack",
-    "openmagi_core_agent.web_acquisition.live_provider_pack",
-    "openmagi_core_agent.deploy",
-    "openmagi_core_agent.canary",
+    "magi_agent.adk_bridge.runner_adapter",
+    "magi_agent.adk_bridge.tool_adapter",
+    "magi_agent.transport",
+    "magi_agent.channels",
+    "magi_agent.browser.live_provider_pack",
+    "magi_agent.web_acquisition.live_provider_pack",
+    "magi_agent.deploy",
+    "magi_agent.canary",
     "openai",
     "anthropic",
     "requests",

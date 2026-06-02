@@ -5,20 +5,20 @@ from pathlib import Path
 
 import pytest
 
-from openmagi_core_agent.harness.general_automation.shell_policy import (
+from magi_agent.harness.general_automation.shell_policy import (
     ShellPolicyRequest,
     classify_shell_policy,
 )
-from openmagi_core_agent.harness.general_automation.shell_receipts import (
+from magi_agent.harness.general_automation.shell_receipts import (
     build_shell_policy_receipt,
 )
-from openmagi_core_agent.plugins.shell_testrun_safe_subset import (
+from magi_agent.plugins.shell_testrun_safe_subset import (
     ShellCommandSafetyDecision,
     ShellTestRunSafeSubsetBinding,
     ShellTestRunSafeSubsetConfig,
     ShellTestRunSafeSubsetRequest,
 )
-from openmagi_core_agent.shadow.path_shell_policy_contract import (
+from magi_agent.shadow.path_shell_policy_contract import (
     load_path_shell_policy_contract_fixture,
     project_path_shell_policy_contract_fixture,
 )
@@ -26,8 +26,8 @@ from openmagi_core_agent.shadow.path_shell_policy_contract import (
 
 PYTHON_ROOT = Path(__file__).resolve().parents[1]
 PATH_POLICY_FIXTURES = Path(__file__).parent / "fixtures" / "path_shell_policy"
-PLUGIN_PATH = PYTHON_ROOT / "openmagi_core_agent" / "plugins" / "shell_testrun_safe_subset.py"
-GENERAL_POLICY_DIR = PYTHON_ROOT / "openmagi_core_agent" / "harness" / "general_automation"
+PLUGIN_PATH = PYTHON_ROOT / "magi_agent" / "plugins" / "shell_testrun_safe_subset.py"
+GENERAL_POLICY_DIR = PYTHON_ROOT / "magi_agent" / "harness" / "general_automation"
 
 
 def _contains_fragment(value: object, fragment: str) -> bool:
@@ -347,12 +347,12 @@ def test_pr4_policy_sources_have_no_live_process_toolhost_or_runtime_activation(
         "httpx",
         "requests.",
         "urllib.request",
-        "openmagi_core_agent.browser",
-        "openmagi_core_agent.mcp",
-        "openmagi_core_agent.lsp",
-        "openmagi_core_agent.tools.dispatcher",
-        "openmagi_core_agent.tools.registry",
-        "openmagi_core_agent.tools.permission",
+        "magi_agent.browser",
+        "magi_agent.mcp",
+        "magi_agent.lsp",
+        "magi_agent.tools.dispatcher",
+        "magi_agent.tools.registry",
+        "magi_agent.tools.permission",
         "ToolHost",
         "google.adk.runners",
         "FunctionTool(",
@@ -376,9 +376,9 @@ def test_pr4_matrix_row_is_complete_default_off_and_records_shell_policy_files()
     assert row["liveAuthorityAllowed"] is False
     assert row["coreTouchAllowed"] is False
     assert row["coveredByFiles"] == [
-        "openmagi_core_agent/harness/general_automation/shell_policy.py",
-        "openmagi_core_agent/harness/general_automation/shell_receipts.py",
-        "openmagi_core_agent/plugins/shell_testrun_safe_subset.py",
-        "openmagi_core_agent/shadow/path_shell_policy_contract.py",
+        "magi_agent/harness/general_automation/shell_policy.py",
+        "magi_agent/harness/general_automation/shell_receipts.py",
+        "magi_agent/plugins/shell_testrun_safe_subset.py",
+        "magi_agent/shadow/path_shell_policy_contract.py",
     ]
     assert "tests/test_coding_bash_safe_subset.py" in row["coveredByTests"]

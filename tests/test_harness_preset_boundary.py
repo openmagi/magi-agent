@@ -1,5 +1,5 @@
-from openmagi_core_agent.harness.resolved import build_default_resolved_harness_state
-from openmagi_core_agent.runtime.turn_controller import TurnControllerInput
+from magi_agent.harness.resolved import build_default_resolved_harness_state
+from magi_agent.runtime.turn_controller import TurnControllerInput
 
 
 def test_default_resolved_harness_state_keeps_opinionated_packs_default_on() -> None:

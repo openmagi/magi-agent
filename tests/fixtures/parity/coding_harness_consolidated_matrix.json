@@ -18,10 +18,10 @@
       "coveredByFiles": [
         "docs/superpowers/plans/2026-05-27-python-adk-coding-harness-consolidated-safe-queue-plan.md",
         "docs/notes/2026-05-27-python-adk-coding-harness-consolidated-reconciliation.md",
-        "infra/docker/clawy-core-agent-python/tests/fixtures/parity/coding_harness_consolidated_matrix.json"
+        "magi-agent/tests/fixtures/parity/coding_harness_consolidated_matrix.json"
       ],
       "coveredByTests": [
-        "infra/docker/clawy-core-agent-python/tests/test_coding_harness_consolidated_matrix.py"
+        "magi-agent/tests/test_coding_harness_consolidated_matrix.py"
       ],
       "missingImplementation": [
         "gap-tests-docs-only"
@@ -45,11 +45,11 @@
       ],
       "alreadyCovered": true,
       "coveredByFiles": [
-        "openmagi_core_agent/recipes/coding_mutation.py",
-        "openmagi_core_agent/recipes/coding_subagents.py",
-        "openmagi_core_agent/coding/meta_adapter.py",
-        "openmagi_core_agent/recipes/first_party/coding/ownership.py",
-        "openmagi_core_agent/harness/coding/ownership_projection.py"
+        "magi_agent/recipes/coding_mutation.py",
+        "magi_agent/recipes/coding_subagents.py",
+        "magi_agent/coding/meta_adapter.py",
+        "magi_agent/recipes/first_party/coding/ownership.py",
+        "magi_agent/harness/coding/ownership_projection.py"
       ],
       "coveredByTests": [
         "tests/recipes/test_coding_mutation_recipe.py",
@@ -82,9 +82,9 @@
       ],
       "alreadyCovered": true,
       "coveredByFiles": [
-        "openmagi_core_agent/tools/read_ledger.py",
-        "openmagi_core_agent/recipes/coding_mutation.py",
-        "openmagi_core_agent/shadow/patch_file_policy_contract.py"
+        "magi_agent/tools/read_ledger.py",
+        "magi_agent/recipes/coding_mutation.py",
+        "magi_agent/shadow/patch_file_policy_contract.py"
       ],
       "coveredByTests": [
         "tests/tools/test_read_ledger.py",
@@ -117,9 +117,9 @@
       ],
       "alreadyCovered": true,
       "coveredByFiles": [
-        "openmagi_core_agent/recipes/coding_evidence_gate.py",
-        "openmagi_core_agent/evidence/coding_verification.py",
-        "openmagi_core_agent/coding/meta_adapter.py"
+        "magi_agent/recipes/coding_evidence_gate.py",
+        "magi_agent/evidence/coding_verification.py",
+        "magi_agent/coding/meta_adapter.py"
       ],
       "coveredByTests": [
         "tests/recipes/test_coding_evidence_gate_recipe.py",
@@ -152,10 +152,10 @@
       ],
       "alreadyCovered": true,
       "coveredByFiles": [
-        "openmagi_core_agent/harness/general_automation/shell_policy.py",
-        "openmagi_core_agent/harness/general_automation/shell_receipts.py",
-        "openmagi_core_agent/plugins/shell_testrun_safe_subset.py",
-        "openmagi_core_agent/shadow/path_shell_policy_contract.py"
+        "magi_agent/harness/general_automation/shell_policy.py",
+        "magi_agent/harness/general_automation/shell_receipts.py",
+        "magi_agent/plugins/shell_testrun_safe_subset.py",
+        "magi_agent/shadow/path_shell_policy_contract.py"
       ],
       "coveredByTests": [
         "tests/test_coding_bash_safe_subset.py",
@@ -187,13 +187,13 @@
       ],
       "alreadyCovered": true,
       "coveredByFiles": [
-        "openmagi_core_agent/recipes/coding_subagents.py",
-        "openmagi_core_agent/coding/meta_adapter.py",
-        "openmagi_core_agent/meta_orchestration/child_roles.py",
-        "openmagi_core_agent/meta_orchestration/child_acceptance.py",
-        "openmagi_core_agent/meta_orchestration/inspection_loop.py",
-        "openmagi_core_agent/meta_orchestration/final_assembly.py",
-        "openmagi_core_agent/harness/repair_policy.py"
+        "magi_agent/recipes/coding_subagents.py",
+        "magi_agent/coding/meta_adapter.py",
+        "magi_agent/meta_orchestration/child_roles.py",
+        "magi_agent/meta_orchestration/child_acceptance.py",
+        "magi_agent/meta_orchestration/inspection_loop.py",
+        "magi_agent/meta_orchestration/final_assembly.py",
+        "magi_agent/harness/repair_policy.py"
       ],
       "coveredByTests": [
         "tests/recipes/test_coding_subagent_recipe.py",
@@ -226,12 +226,12 @@
       ],
       "alreadyCovered": true,
       "coveredByFiles": [
-        "openmagi_core_agent/runtime/context_packet.py",
-        "openmagi_core_agent/runtime/session_continuity_projection.py",
-        "openmagi_core_agent/runtime/query_state.py",
-        "openmagi_core_agent/runtime/context_lifecycle.py",
-        "openmagi_core_agent/runtime/checkpointing.py",
-        "openmagi_core_agent/harness/memory_compaction.py"
+        "magi_agent/runtime/context_packet.py",
+        "magi_agent/runtime/session_continuity_projection.py",
+        "magi_agent/runtime/query_state.py",
+        "magi_agent/runtime/context_lifecycle.py",
+        "magi_agent/runtime/checkpointing.py",
+        "magi_agent/harness/memory_compaction.py"
       ],
       "coveredByTests": [
         "tests/test_coding_compaction_session_continuity.py",
@@ -264,7 +264,7 @@
       ],
       "alreadyCovered": true,
       "coveredByFiles": [
-        "openmagi_core_agent/harness/coding/code_intelligence_contracts.py"
+        "magi_agent/harness/coding/code_intelligence_contracts.py"
       ],
       "coveredByTests": [
         "tests/test_coding_code_intelligence_contracts.py"
@@ -294,9 +294,9 @@
       ],
       "alreadyCovered": true,
       "coveredByFiles": [
-        "openmagi_core_agent/evals/regression_gates.py",
-        "openmagi_core_agent/evals/release_gates.py",
-        "openmagi_core_agent/self_improvement/eval_capture.py",
+        "magi_agent/evals/regression_gates.py",
+        "magi_agent/evals/release_gates.py",
+        "magi_agent/self_improvement/eval_capture.py",
         "docs/notes/coding-parity/benchmark-v1.json",
         "tests/fixtures/coding_eval/reliability_matrix.json"
       ],
@@ -331,12 +331,12 @@
       "alreadyCovered": true,
       "coveredByFiles": [
         "docs/superpowers/plans/2026-05-26-python-adk-opencode-latest-harness-delta-addendum.md",
-        "infra/docker/clawy-core-agent-python/tests/fixtures/opencode_delta/harness_delta_matrix.json",
+        "magi-agent/tests/fixtures/opencode_delta/harness_delta_matrix.json",
         "docs/notes/2026-05-27-python-adk-coding-harness-opencode-delta-reconciliation.md"
       ],
       "coveredByTests": [
-        "infra/docker/clawy-core-agent-python/tests/test_coding_harness_consolidated_matrix.py",
-        "infra/docker/clawy-core-agent-python/tests/test_opencode_delta_contract.py"
+        "magi-agent/tests/test_coding_harness_consolidated_matrix.py",
+        "magi-agent/tests/test_opencode_delta_contract.py"
       ],
       "missingImplementation": [
         "gap-tests-docs-only"
@@ -368,7 +368,7 @@
         "docs/notes/2026-05-27-python-adk-coding-harness-consolidated-final-review.md"
       ],
       "coveredByTests": [
-        "infra/docker/clawy-core-agent-python/tests/test_coding_harness_consolidated_matrix.py"
+        "magi-agent/tests/test_coding_harness_consolidated_matrix.py"
       ],
       "missingImplementation": [
         "complete"

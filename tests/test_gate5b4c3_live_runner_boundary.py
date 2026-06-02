@@ -7,12 +7,12 @@ from pathlib import Path
 
 import pytest
 
-from openmagi_core_agent.shadow.gate5b4c3_live_runner_boundary import (
+from magi_agent.shadow.gate5b4c3_live_runner_boundary import (
     Gate5B4C3LiveAdkPrimitives,
     Gate5B4C3LiveRunnerBoundary,
     Gate5B4C3LiveRunnerBoundaryResult,
 )
-from openmagi_core_agent.shadow.gate5b4c3_shadow_generation_contract import (
+from magi_agent.shadow.gate5b4c3_shadow_generation_contract import (
     Gate5B4C3ShadowGenerationConfig,
     Gate5B4C3ShadowGenerationRequest,
 )
@@ -398,7 +398,7 @@ def test_live_boundary_attaches_gate1a_readonly_tools_only_when_policy_matches()
 
 
 def test_live_boundary_attaches_gate1a_proxy_connect_headers_only_with_context() -> None:
-    from openmagi_core_agent.evidence.gate1a_egress_correlation import (
+    from magi_agent.evidence.gate1a_egress_correlation import (
         Gate1AEgressCorrelationContext,
     )
 
@@ -415,7 +415,7 @@ def test_live_boundary_attaches_gate1a_proxy_connect_headers_only_with_context()
         adk_tools=(readonly_tool,),
         gate1a_egress_correlation_context=context,
         gate1a_egress_proxy_url=(
-            "http://gate5b-gemini-egress-proxy.clawy-system.svc.cluster.local:8080"
+            "http://gate5b-gemini-egress-proxy.magi-system.svc.cluster.local:8080"
         ),
     ).invoke(request, config=_gate1a_google_config())
 
@@ -739,7 +739,7 @@ import importlib
 import sys
 
 module = importlib.import_module(
-    "openmagi_core_agent.shadow.gate5b4c3_live_runner_boundary"
+    "magi_agent.shadow.gate5b4c3_live_runner_boundary"
 )
 assert module is not None
 
@@ -752,26 +752,26 @@ forbidden_exact = (
     "anthropic",
 )
 forbidden_prefixes = (
-    "openmagi_core_agent.transport.shadow_generations",
-    "openmagi_core_agent.transport.shadow_invocations",
-    "openmagi_core_agent.transport.chat",
-    "openmagi_core_agent.routing",
-    "openmagi_core_agent.workspace",
-    "openmagi_core_agent.deploy",
-    "openmagi_core_agent.provisioning",
-    "openmagi_core_agent.k8s",
-    "openmagi_core_agent.telegram",
-    "openmagi_core_agent.database",
-    "openmagi_core_agent.api",
-    "openmagi_core_agent.dashboard",
-    "openmagi_core_agent.model_routing",
-    "openmagi_core_agent.missions",
-    "openmagi_core_agent.scheduler",
-    "openmagi_core_agent.children",
-    "openmagi_core_agent.memory",
-    "openmagi_core_agent.agentmemory",
-    "openmagi_core_agent.hipocampus",
-    "openmagi_core_agent.qmd",
+    "magi_agent.transport.shadow_generations",
+    "magi_agent.transport.shadow_invocations",
+    "magi_agent.transport.chat",
+    "magi_agent.routing",
+    "magi_agent.workspace",
+    "magi_agent.deploy",
+    "magi_agent.provisioning",
+    "magi_agent.k8s",
+    "magi_agent.telegram",
+    "magi_agent.database",
+    "magi_agent.api",
+    "magi_agent.dashboard",
+    "magi_agent.model_routing",
+    "magi_agent.missions",
+    "magi_agent.scheduler",
+    "magi_agent.children",
+    "magi_agent.memory",
+    "magi_agent.agentmemory",
+    "magi_agent.hipocampus",
+    "magi_agent.qmd",
 )
 loaded = [
     loaded_name
@@ -799,7 +799,7 @@ def test_live_boundary_source_keeps_adk_imports_inside_boundary_loader_only() ->
     root = Path(__file__).parents[1]
     module_path = (
         root
-        / "openmagi_core_agent"
+        / "magi_agent"
         / "shadow"
         / "gate5b4c3_live_runner_boundary.py"
     )
@@ -810,11 +810,11 @@ def test_live_boundary_source_keeps_adk_imports_inside_boundary_loader_only() ->
     assert "from google.adk" in source
     assert "import openai" not in source
     assert "import anthropic" not in source
-    assert "from openmagi_core_agent.tools" not in source
-    assert "from openmagi_core_agent.memory" not in source
-    assert "from openmagi_core_agent.workspace" not in source
-    assert "from openmagi_core_agent.children" not in source
-    assert "from openmagi_core_agent.missions" not in source
+    assert "from magi_agent.tools" not in source
+    assert "from magi_agent.memory" not in source
+    assert "from magi_agent.workspace" not in source
+    assert "from magi_agent.children" not in source
+    assert "from magi_agent.missions" not in source
     assert "from fastapi" not in source
     assert "APIRouter" not in source
     assert "add_api_route" not in source

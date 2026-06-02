@@ -5,7 +5,7 @@ from pathlib import Path
 
 
 def test_ladder_registry_defines_gate_0_to_9_with_precise_activation_stages() -> None:
-    from openmagi_core_agent.gates.api_canary_ladder import build_canary_gate_registry
+    from magi_agent.gates.api_canary_ladder import build_canary_gate_registry
 
     registry = build_canary_gate_registry()
 
@@ -26,7 +26,7 @@ def test_ladder_registry_defines_gate_0_to_9_with_precise_activation_stages() ->
 
 
 def test_ladder_default_off_run_restores_closed_gate_without_api_call() -> None:
-    from openmagi_core_agent.gates.api_canary_ladder import (
+    from magi_agent.gates.api_canary_ladder import (
         CanaryHarnessConfig,
         SyntheticCanaryHarness,
         build_canary_gate_registry,
@@ -53,7 +53,7 @@ def test_ladder_default_off_run_restores_closed_gate_without_api_call() -> None:
 def test_ladder_gate0_and_gate1_mocked_api_loop_validate_receipts_and_restore_defaults(
     tmp_path: Path,
 ) -> None:
-    from openmagi_core_agent.gates.api_canary_ladder import (
+    from magi_agent.gates.api_canary_ladder import (
         CanaryHarnessConfig,
         SyntheticCanaryHarness,
         build_canary_gate_registry,
@@ -118,7 +118,7 @@ def test_ladder_gate0_and_gate1_mocked_api_loop_validate_receipts_and_restore_de
 
 
 def test_ladder_can_build_scoped_chat_proxy_synthetic_request_without_user_credentials() -> None:
-    from openmagi_core_agent.gates.api_canary_ladder import (
+    from magi_agent.gates.api_canary_ladder import (
         build_scoped_canary_test_request,
     )
 
@@ -158,7 +158,7 @@ def test_ladder_can_build_scoped_chat_proxy_synthetic_request_without_user_crede
 
 
 def test_gate2_to_gate9_readiness_packages_are_precise_not_vague() -> None:
-    from openmagi_core_agent.gates.api_canary_ladder import build_canary_gate_registry
+    from magi_agent.gates.api_canary_ladder import build_canary_gate_registry
 
     registry = build_canary_gate_registry()
 
@@ -181,7 +181,7 @@ def test_gate2_to_gate9_readiness_packages_are_precise_not_vague() -> None:
 
 
 def test_gate8_requires_session_continuity_canary_before_full_authority() -> None:
-    from openmagi_core_agent.gates.api_canary_ladder import build_canary_gate_registry
+    from magi_agent.gates.api_canary_ladder import build_canary_gate_registry
 
     gate8 = build_canary_gate_registry().by_id(8)
     package = gate8.readiness_package
@@ -220,19 +220,19 @@ def test_gate8_requires_session_continuity_canary_before_full_authority() -> Non
 def test_ladder_import_boundary_avoids_deploy_routing_browser_and_network_imports() -> None:
     module_path = (
         Path(__file__).parents[1]
-        / "openmagi_core_agent"
+        / "magi_agent"
         / "gates"
         / "api_canary_ladder.py"
     )
     source = module_path.read_text(encoding="utf-8")
 
     for forbidden in (
-        "openmagi_core_agent.transport.chat",
-        "openmagi_core_agent.transport.sse",
-        "openmagi_core_agent.browser",
-        "openmagi_core_agent.web_acquisition",
-        "openmagi_core_agent.memory",
-        "openmagi_core_agent.channels",
+        "magi_agent.transport.chat",
+        "magi_agent.transport.sse",
+        "magi_agent.browser",
+        "magi_agent.web_acquisition",
+        "magi_agent.memory",
+        "magi_agent.channels",
         "requests",
         "httpx",
         "kubectl",

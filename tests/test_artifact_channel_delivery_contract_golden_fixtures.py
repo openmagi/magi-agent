@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from openmagi_core_agent.shadow.artifact_channel_delivery_contract import (
+from magi_agent.shadow.artifact_channel_delivery_contract import (
     ArtifactChannelDeliveryAttachmentFlags,
     ArtifactChannelDeliveryContractFixture,
     ArtifactChannelTsMetadataParityFixture,
@@ -476,7 +476,7 @@ def test_artifact_channel_delivery_import_boundary_stays_runtime_free() -> None:
 import sys
 from pathlib import Path
 
-from openmagi_core_agent.shadow.artifact_channel_delivery_contract import (
+from magi_agent.shadow.artifact_channel_delivery_contract import (
     load_artifact_channel_delivery_contract_fixture,
     project_artifact_channel_delivery_contract_fixture,
 )
@@ -488,18 +488,18 @@ project_artifact_channel_delivery_contract_fixture(fixture)
 forbidden = (
     'google.adk.runners',
     'google.adk.artifacts',
-    'openmagi_core_agent.adk_bridge.local_runner',
-    'openmagi_core_agent.adk_bridge.runner_adapter',
-    'openmagi_core_agent.tools.dispatcher',
-    'openmagi_core_agent.tools.registry',
-    'openmagi_core_agent.channels.delivery',
-    'openmagi_core_agent.telegram',
-    'openmagi_core_agent.routes',
-    'openmagi_core_agent.proxy',
-    'openmagi_core_agent.dashboard',
-    'openmagi_core_agent.db',
-    'openmagi_core_agent.k8s',
-    'openmagi_core_agent.canary',
+    'magi_agent.adk_bridge.local_runner',
+    'magi_agent.adk_bridge.runner_adapter',
+    'magi_agent.tools.dispatcher',
+    'magi_agent.tools.registry',
+    'magi_agent.channels.delivery',
+    'magi_agent.telegram',
+    'magi_agent.routes',
+    'magi_agent.proxy',
+    'magi_agent.dashboard',
+    'magi_agent.db',
+    'magi_agent.k8s',
+    'magi_agent.canary',
 )
 loaded = sorted(name for name in forbidden if name in sys.modules)
 if loaded:

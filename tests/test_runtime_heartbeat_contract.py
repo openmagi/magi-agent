@@ -7,7 +7,7 @@ import json
 import pytest
 from pydantic import ValidationError
 
-from openmagi_core_agent.runtime.heartbeat_contract import (
+from magi_agent.runtime.heartbeat_contract import (
     ActivityReceipt,
     HeartbeatReceipt,
     ResumeDecision,

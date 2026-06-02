@@ -4,10 +4,10 @@ from pathlib import Path
 
 import pytest
 
-from openmagi_core_agent.harness.general_automation.web_source_receipts import (
+from magi_agent.harness.general_automation.web_source_receipts import (
     build_web_source_receipt,
 )
-from openmagi_core_agent.recipes.first_party.general_automation.web_acquisition_contracts import (
+from magi_agent.recipes.first_party.general_automation.web_acquisition_contracts import (
     WebAcquisitionContractRequest,
     classify_web_acquisition_request,
     web_fetch_function_tool_metadata,
@@ -15,10 +15,10 @@ from openmagi_core_agent.recipes.first_party.general_automation.web_acquisition_
 
 
 PYTHON_ROOT = Path(__file__).resolve().parents[1]
-HARNESS_DIR = PYTHON_ROOT / "openmagi_core_agent" / "harness" / "general_automation"
+HARNESS_DIR = PYTHON_ROOT / "magi_agent" / "harness" / "general_automation"
 RECIPE_DIR = (
     PYTHON_ROOT
-    / "openmagi_core_agent"
+    / "magi_agent"
     / "recipes"
     / "first_party"
     / "general_automation"
@@ -195,11 +195,11 @@ def test_web_acquisition_contract_modules_do_not_touch_core_or_live_surfaces() -
     )
 
     forbidden_fragments = (
-        "openmagi_core_agent.adk_bridge",
-        "openmagi_core_agent.runtime",
-        "openmagi_core_agent.tools.dispatcher",
-        "openmagi_core_agent.tools.registry",
-        "openmagi_core_agent.tools.permission",
+        "magi_agent.adk_bridge",
+        "magi_agent.runtime",
+        "magi_agent.tools.dispatcher",
+        "magi_agent.tools.registry",
+        "magi_agent.tools.permission",
         "google.adk.runners",
         "requests",
         "httpx",

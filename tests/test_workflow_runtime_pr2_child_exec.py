@@ -24,24 +24,24 @@ import json
 
 import pytest
 
-from openmagi_core_agent.evidence.child_runtime_envelope import (
+from magi_agent.evidence.child_runtime_envelope import (
     ChildRuntimeEnvelope,
     ChildRuntimeEnvelopeAuthorityFlags,
 )
-from openmagi_core_agent.evidence.subagent import (
+from magi_agent.evidence.subagent import (
     DelegatedEvidenceRequirement,
     EvidenceBoundaryLedgerRef,
     ExecutionBoundaryIdentity,
 )
-from openmagi_core_agent.meta_orchestration.child_acceptance import (
+from magi_agent.meta_orchestration.child_acceptance import (
     ChildAcceptancePolicy,
     accept_real_child_envelope,
 )
-from openmagi_core_agent.runtime.adk_turn_runner import (
+from magi_agent.runtime.adk_turn_runner import (
     LocalAdkReplayRunner,
     LocalAdkTurnRunnerBoundary,
 )
-from openmagi_core_agent.runtime.child_runner_boundary import (
+from magi_agent.runtime.child_runner_boundary import (
     REAL_ADK_CHILD_RUNNER_SURFACE,
     ChildRunnerConfig,
     ChildTaskRequest,
@@ -361,7 +361,7 @@ def test_spawn_depth_cap_blocks_over_depth_child() -> None:
 
 
 def test_total_agents_per_run_cap_is_bounded_at_or_below_1000() -> None:
-    from openmagi_core_agent.runtime.child_runner_boundary import (
+    from magi_agent.runtime.child_runner_boundary import (
         MAX_TOTAL_AGENTS_PER_RUN,
         clamp_total_agents_per_run,
     )
@@ -474,7 +474,7 @@ def test_pack_disabled_is_byte_identical_to_pr1_local_fake() -> None:
 
 
 def test_real_child_execution_pack_is_default_off_and_not_opt_out() -> None:
-    from openmagi_core_agent.harness.profiles import (
+    from magi_agent.harness.profiles import (
         REAL_CHILD_EXECUTION_PACK_NAME,
         build_default_profile,
         real_child_execution_pack_enabled,

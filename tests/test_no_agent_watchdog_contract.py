@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pydantic import ValidationError
 
-from openmagi_core_agent.runtime.no_agent_watchdog import (
+from magi_agent.runtime.no_agent_watchdog import (
     NoAgentWatchdogAuthorityFlags,
     NoAgentWatchdogDecision,
     NoAgentWatchdogRequest,

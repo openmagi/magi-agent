@@ -4,16 +4,16 @@ import json
 
 from fastapi.testclient import TestClient
 
-from openmagi_core_agent.app import create_app
-from openmagi_core_agent.config.models import (
+from magi_agent.app import create_app
+from magi_agent.config.models import (
     BuildInfo,
     PythonContextContinuityConfig,
     RuntimeConfig,
 )
-from openmagi_core_agent.gates.pregate8_continuity_canary import (
+from magi_agent.gates.pregate8_continuity_canary import (
     PreGate8ContinuityCanaryEvidence,
 )
-from openmagi_core_agent.runtime.openmagi_runtime import OpenMagiRuntime
+from magi_agent.runtime.openmagi_runtime import OpenMagiRuntime
 
 
 def _digest(label: str) -> str:
@@ -330,7 +330,7 @@ def test_healthz_reports_pre_gate8_verified_pass_without_user_visible_authority(
 
 
 def test_context_continuity_env_can_run_default_off_local_readiness_harness() -> None:
-    from openmagi_core_agent.config.env import parse_runtime_env
+    from magi_agent.config.env import parse_runtime_env
 
     config = parse_runtime_env(
         {
@@ -369,7 +369,7 @@ def test_context_continuity_env_can_run_default_off_local_readiness_harness() ->
 
 
 def test_context_continuity_local_readiness_harness_still_rejects_authority_forgery() -> None:
-    from openmagi_core_agent.config.env import RuntimeEnvError, parse_runtime_env
+    from magi_agent.config.env import RuntimeEnvError, parse_runtime_env
 
     try:
         parse_runtime_env(

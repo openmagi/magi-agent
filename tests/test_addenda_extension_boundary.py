@@ -3,7 +3,7 @@ from __future__ import annotations
 import subprocess
 import sys
 
-from openmagi_core_agent.plugins.extension_boundary import (
+from magi_agent.plugins.extension_boundary import (
     ExtensionBoundary,
     ExtensionBoundaryConfig,
     ExtensionBoundaryRequest,
@@ -135,7 +135,7 @@ def test_extension_boundary_has_no_live_imports() -> None:
 import importlib
 import sys
 
-importlib.import_module("openmagi_core_agent.plugins.extension_boundary")
+importlib.import_module("magi_agent.plugins.extension_boundary")
 forbidden = (
     "google.adk.runners",
     "mcp",

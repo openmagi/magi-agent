@@ -6,11 +6,11 @@ from pathlib import Path
 
 import pytest
 
-from openmagi_core_agent.tools import ToolDispatcher, ToolRegistry, ToolResult, ToolSource
-from openmagi_core_agent.tools.context import ToolContext
-from openmagi_core_agent.tools.manifest import RuntimeMode, ToolManifest
-from openmagi_core_agent.tools.permission import ToolPermissionPolicy
-from openmagi_core_agent.tools.safety import RuntimePermissionArbiter
+from magi_agent.tools import ToolDispatcher, ToolRegistry, ToolResult, ToolSource
+from magi_agent.tools.context import ToolContext
+from magi_agent.tools.manifest import RuntimeMode, ToolManifest
+from magi_agent.tools.permission import ToolPermissionPolicy
+from magi_agent.tools.safety import RuntimePermissionArbiter
 
 
 def make_manifest(
@@ -553,7 +553,7 @@ def test_dispatcher_returns_policy_decision_before_handler_executes(
 def test_runtime_permission_arbiter_is_pure_import_boundary() -> None:
     safety_path = (
         Path(__file__).parents[1]
-        / "openmagi_core_agent"
+        / "magi_agent"
         / "tools"
         / "safety.py"
     )

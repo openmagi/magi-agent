@@ -5,12 +5,12 @@ import subprocess
 import sys
 from pathlib import Path
 
-from openmagi_core_agent.transport.public_event_parity import (
+from magi_agent.transport.public_event_parity import (
     PublicEventParityStatus,
     audit_public_event_projection,
     load_public_event_parity_matrix,
 )
-from openmagi_core_agent.transport.sse import InMemorySseWriter
+from magi_agent.transport.sse import InMemorySseWriter
 
 
 FIXTURE = Path(__file__).parent / "fixtures" / "public_event_parity" / "matrix.json"
@@ -389,17 +389,17 @@ def test_channel_delivery_receipt_stance_is_deferred_until_gate4() -> None:
 def test_public_event_parity_matrix_import_boundary_is_contract_only() -> None:
     forbidden_modules = (
         "google.adk.runners",
-        "openmagi_core_agent.adk_bridge.local_runner",
-        "openmagi_core_agent.tools.dispatcher",
-        "openmagi_core_agent.memory.adk_bridge",
-        "openmagi_core_agent.browser.provider_boundary",
-        "openmagi_core_agent.channels.telegram_adapter",
-        "openmagi_core_agent.web_acquisition.provider_boundary",
+        "magi_agent.adk_bridge.local_runner",
+        "magi_agent.tools.dispatcher",
+        "magi_agent.memory.adk_bridge",
+        "magi_agent.browser.provider_boundary",
+        "magi_agent.channels.telegram_adapter",
+        "magi_agent.web_acquisition.provider_boundary",
     )
     code = f"""
 import json
 import sys
-import openmagi_core_agent.transport.public_event_parity  # noqa: F401
+import magi_agent.transport.public_event_parity  # noqa: F401
 
 forbidden = {json.dumps(forbidden_modules)}
 print(json.dumps([name for name in forbidden if name in sys.modules]))

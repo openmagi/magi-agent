@@ -33,7 +33,7 @@ def _guard(
 
 
 def _request(**overrides: object) -> object:
-    from openmagi_core_agent.permissions.auto_control import AutoPermissionDecisionRequest
+    from magi_agent.permissions.auto_control import AutoPermissionDecisionRequest
 
     data = {
         "requestId": "auto-permission:request-1",
@@ -51,7 +51,7 @@ def _request(**overrides: object) -> object:
 
 
 def _self_review(**overrides: object) -> object:
-    from openmagi_core_agent.permissions.auto_control import AutoPermissionSelfReviewRecord
+    from magi_agent.permissions.auto_control import AutoPermissionSelfReviewRecord
 
     data = {
         "reviewId": "auto-permission-review:1",
@@ -68,7 +68,7 @@ def _self_review(**overrides: object) -> object:
 
 
 def test_auto_permission_default_off_has_no_authority_flags() -> None:
-    from openmagi_core_agent.permissions.auto_control import (
+    from magi_agent.permissions.auto_control import (
         AutoPermissionConfig,
         evaluate_auto_permission,
     )
@@ -89,7 +89,7 @@ def test_auto_permission_default_off_has_no_authority_flags() -> None:
 
 
 def test_hard_guard_denial_is_non_bypassable_by_admin_or_self_review() -> None:
-    from openmagi_core_agent.permissions.auto_control import (
+    from magi_agent.permissions.auto_control import (
         AutoPermissionConfig,
         evaluate_auto_permission,
     )
@@ -116,7 +116,7 @@ def test_hard_guard_denial_is_non_bypassable_by_admin_or_self_review() -> None:
 
 
 def test_hard_invariant_configured_as_log_only_or_disabled_blocks_policy() -> None:
-    from openmagi_core_agent.permissions.auto_control import (
+    from magi_agent.permissions.auto_control import (
         AutoPermissionConfig,
         evaluate_auto_permission,
     )
@@ -137,7 +137,7 @@ def test_hard_invariant_configured_as_log_only_or_disabled_blocks_policy() -> No
 
 
 def test_hard_invariant_deny_blocks_even_in_uncertain_fail_passthrough_mode() -> None:
-    from openmagi_core_agent.permissions.auto_control import (
+    from magi_agent.permissions.auto_control import (
         AutoPermissionConfig,
         evaluate_auto_permission,
     )
@@ -167,7 +167,7 @@ def test_hard_invariant_deny_blocks_even_in_uncertain_fail_passthrough_mode() ->
 
 
 def test_non_hard_uncertain_guard_can_passthrough_only_when_configured() -> None:
-    from openmagi_core_agent.permissions.auto_control import (
+    from magi_agent.permissions.auto_control import (
         AutoPermissionConfig,
         evaluate_auto_permission,
     )
@@ -208,7 +208,7 @@ def test_non_hard_uncertain_guard_can_passthrough_only_when_configured() -> None
 
 
 def test_admin_policy_cannot_bypass_hard_guard_or_forbidden_permissions() -> None:
-    from openmagi_core_agent.permissions.auto_control import (
+    from magi_agent.permissions.auto_control import (
         AutoPermissionConfig,
         evaluate_auto_permission,
     )
@@ -231,7 +231,7 @@ def test_admin_policy_cannot_bypass_hard_guard_or_forbidden_permissions() -> Non
 
 
 def test_passing_guards_still_require_approval_for_mutating_permissions() -> None:
-    from openmagi_core_agent.permissions.auto_control import (
+    from magi_agent.permissions.auto_control import (
         AutoPermissionConfig,
         evaluate_auto_permission,
     )
@@ -249,7 +249,7 @@ def test_passing_guards_still_require_approval_for_mutating_permissions() -> Non
 
 
 def test_passing_guards_still_require_approval_for_mutating_action_ref() -> None:
-    from openmagi_core_agent.permissions.auto_control import (
+    from magi_agent.permissions.auto_control import (
         AutoPermissionConfig,
         evaluate_auto_permission,
     )
@@ -274,7 +274,7 @@ def test_passing_guards_still_require_approval_for_mutating_action_ref() -> None
 
 
 def test_passing_guards_still_require_approval_for_workspace_authority_refs() -> None:
-    from openmagi_core_agent.permissions.auto_control import (
+    from magi_agent.permissions.auto_control import (
         AutoPermissionConfig,
         evaluate_auto_permission,
     )
@@ -298,7 +298,7 @@ def test_passing_guards_still_require_approval_for_workspace_authority_refs() ->
 
 
 def test_passing_guards_still_require_approval_for_mutating_action_aliases() -> None:
-    from openmagi_core_agent.permissions.auto_control import (
+    from magi_agent.permissions.auto_control import (
         AutoPermissionConfig,
         evaluate_auto_permission,
     )
@@ -322,7 +322,7 @@ def test_passing_guards_still_require_approval_for_mutating_action_aliases() -> 
 
 
 def test_explicit_read_permission_can_be_allowed_when_all_guards_pass() -> None:
-    from openmagi_core_agent.permissions.auto_control import (
+    from magi_agent.permissions.auto_control import (
         AutoPermissionConfig,
         evaluate_auto_permission,
     )
@@ -346,7 +346,7 @@ def test_explicit_read_permission_can_be_allowed_when_all_guards_pass() -> None:
 
 
 def test_auto_permission_rejects_private_refs_and_raw_self_review() -> None:
-    from openmagi_core_agent.permissions.auto_control import (
+    from magi_agent.permissions.auto_control import (
         AutoPermissionConfig,
         AutoPermissionDecision,
         AutoPermissionDecisionRequest,
@@ -434,12 +434,12 @@ def test_auto_permission_metadata_is_immutable_after_validation() -> None:
 
 
 def test_auto_permission_decision_cannot_be_forged_by_public_constructor() -> None:
-    from openmagi_core_agent.permissions.auto_control import (
+    from magi_agent.permissions.auto_control import (
         AutoPermissionConfig,
         AutoPermissionDecision,
         evaluate_auto_permission,
     )
-    import openmagi_core_agent.permissions.auto_control as auto_control_module
+    import magi_agent.permissions.auto_control as auto_control_module
 
     legitimate = evaluate_auto_permission(
         _request(
@@ -480,8 +480,8 @@ def test_auto_permission_decision_cannot_be_forged_by_public_constructor() -> No
 
 
 def test_auto_permission_projection_rejects_privately_forged_mutating_authority() -> None:
-    import openmagi_core_agent.permissions.auto_control as auto_control_module
-    from openmagi_core_agent.permissions.auto_control import AutoPermissionDecision
+    import magi_agent.permissions.auto_control as auto_control_module
+    from magi_agent.permissions.auto_control import AutoPermissionDecision
 
     issued_at = datetime(2026, 5, 26, tzinfo=UTC)
     forged_state = auto_control_module._DecisionState(  # noqa: SLF001
@@ -554,8 +554,8 @@ def test_auto_permission_projection_rejects_privately_forged_mutating_authority(
 
 
 def test_auto_permission_decision_issuer_resists_module_global_rebinding() -> None:
-    import openmagi_core_agent.permissions.auto_control as auto_control_module
-    from openmagi_core_agent.permissions.auto_control import (
+    import magi_agent.permissions.auto_control as auto_control_module
+    from magi_agent.permissions.auto_control import (
         AutoPermissionConfig,
         evaluate_auto_permission,
     )
@@ -598,7 +598,7 @@ def test_auto_permission_decision_issuer_resists_module_global_rebinding() -> No
 
 
 def test_auto_permission_records_have_no_mutable_public_dict_backing() -> None:
-    from openmagi_core_agent.permissions.auto_control import (
+    from magi_agent.permissions.auto_control import (
         AutoPermissionConfig,
         evaluate_auto_permission,
     )
@@ -623,7 +623,7 @@ def test_auto_permission_records_have_no_mutable_public_dict_backing() -> None:
 
 
 def test_require_approval_guard_mode_blocks_auto_allow_even_when_guard_passes() -> None:
-    from openmagi_core_agent.permissions.auto_control import (
+    from magi_agent.permissions.auto_control import (
         AutoPermissionConfig,
         evaluate_auto_permission,
     )
@@ -653,7 +653,7 @@ def test_require_approval_guard_mode_blocks_auto_allow_even_when_guard_passes() 
 
 
 def test_non_hard_enforce_deny_blocks_auto_allow() -> None:
-    from openmagi_core_agent.permissions.auto_control import (
+    from magi_agent.permissions.auto_control import (
         AutoPermissionConfig,
         evaluate_auto_permission,
     )
@@ -686,12 +686,12 @@ def test_non_hard_enforce_deny_blocks_auto_allow() -> None:
 def test_auto_permission_import_boundary_has_no_live_runtime_imports() -> None:
     script = """
 import sys
-import openmagi_core_agent.permissions.auto_control
+import magi_agent.permissions.auto_control
 for name in (
     'google.adk.runners',
     'google.adk.agents',
-    'openmagi_core_agent.transport',
-    'openmagi_core_agent.deploy',
+    'magi_agent.transport',
+    'magi_agent.deploy',
     'kubernetes',
     'requests',
     'httpx',

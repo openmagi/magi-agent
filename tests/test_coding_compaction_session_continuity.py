@@ -4,20 +4,20 @@ import asyncio
 import re
 from dataclasses import dataclass
 
-from openmagi_core_agent.adk_bridge.session_service import WorkspaceSessionService
-from openmagi_core_agent.runtime.context_lifecycle import (
+from magi_agent.adk_bridge.session_service import WorkspaceSessionService
+from magi_agent.runtime.context_lifecycle import (
     ContextLifecycleBoundary,
     ContextLifecycleConfig,
     ContextLifecycleEvent,
     RestoreContextRequest,
 )
-from openmagi_core_agent.runtime.context_packet import (
+from magi_agent.runtime.context_packet import (
     ContextContinuityConfig,
     build_context_packet_from_transcript,
     render_context_packet_for_model,
 )
-from openmagi_core_agent.runtime.query_state import QueryState
-from openmagi_core_agent.runtime.transcript import (
+from magi_agent.runtime.query_state import QueryState
+from magi_agent.runtime.transcript import (
     CompactionBoundaryEntry,
     ControlEventTranscriptEntry,
     ToolCallEntry,

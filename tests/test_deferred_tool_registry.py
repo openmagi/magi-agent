@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import pytest
 
-from openmagi_core_agent.tools.manifest import Budget, ToolManifest, ToolSource
-from openmagi_core_agent.tools.registry import ToolRegistry
-from openmagi_core_agent.tools.deferred import DeferredToolRegistry
+from magi_agent.tools.manifest import Budget, ToolManifest, ToolSource
+from magi_agent.tools.registry import ToolRegistry
+from magi_agent.tools.deferred import DeferredToolRegistry
 
 
 def _source() -> ToolSource:

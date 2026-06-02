@@ -1,10 +1,10 @@
 from fastapi.testclient import TestClient
 
-from openmagi_core_agent.app import create_app
-from openmagi_core_agent.config.models import BuildInfo, RuntimeConfig
-from openmagi_core_agent.runtime.openmagi_runtime import OpenMagiRuntime
-from openmagi_core_agent.tools import ToolRegistry, ToolSource
-from openmagi_core_agent.tools.manifest import ToolManifest
+from magi_agent.app import create_app
+from magi_agent.config.models import BuildInfo, RuntimeConfig
+from magi_agent.runtime.openmagi_runtime import OpenMagiRuntime
+from magi_agent.tools import ToolRegistry, ToolSource
+from magi_agent.tools.manifest import ToolManifest
 
 
 EXPECTED_CORE_TOOL_NAMES = {

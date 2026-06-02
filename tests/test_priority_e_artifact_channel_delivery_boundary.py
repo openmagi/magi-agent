@@ -7,14 +7,14 @@ from typing import Any
 import pytest
 from pydantic import ValidationError
 
-from openmagi_core_agent.artifacts.delivery_boundary import (
+from magi_agent.artifacts.delivery_boundary import (
     ArtifactChannelDeliveryBoundary,
     ArtifactChannelDeliveryConfig,
     ArtifactChannelDeliveryRequest,
     ArtifactRecord,
     ArtifactServiceResult,
 )
-from openmagi_core_agent.channels.contract import ChannelDeliveryReceipt, ChannelRef
+from magi_agent.channels.contract import ChannelDeliveryReceipt, ChannelRef
 
 
 class FakeArtifactService:
@@ -366,7 +366,7 @@ def test_artifact_channel_delivery_rejects_path_and_digest_bypass_attempts() -> 
 
 
 def test_artifact_channel_forged_projection_redacts_nested_payloads() -> None:
-    from openmagi_core_agent.artifacts.delivery_boundary import (
+    from magi_agent.artifacts.delivery_boundary import (
         ArtifactChannelDeliveryDecision,
         ArtifactChannelAuthorityFlags,
     )
@@ -424,7 +424,7 @@ def test_artifact_channel_boundary_has_no_live_imports() -> None:
 import importlib
 import sys
 
-importlib.import_module("openmagi_core_agent.artifacts.delivery_boundary")
+importlib.import_module("magi_agent.artifacts.delivery_boundary")
 forbidden = (
     "google.adk.artifacts",
     "google.adk.runners",

@@ -5,8 +5,8 @@ import json
 import pytest
 from pydantic import ValidationError
 
-from openmagi_core_agent.meta_orchestration.child_acceptance import ChildAcceptanceVerdict
-from openmagi_core_agent.meta_orchestration.inspection_loop import (
+from magi_agent.meta_orchestration.child_acceptance import ChildAcceptanceVerdict
+from magi_agent.meta_orchestration.inspection_loop import (
     MetaInspectedChildVerdict,
     MetaInspectionLoopResult,
     inspect_child_verdicts,

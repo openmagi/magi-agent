@@ -3,14 +3,14 @@ from copy import deepcopy
 
 import pytest
 
-from openmagi_core_agent.tools import (
+from magi_agent.tools import (
     ToolDispatcher,
     ToolRegistry,
     ToolResult,
     ToolSource,
 )
-from openmagi_core_agent.tools.context import ToolContext
-from openmagi_core_agent.tools.manifest import ToolManifest
+from magi_agent.tools.context import ToolContext
+from magi_agent.tools.manifest import ToolManifest
 
 
 def make_manifest(

@@ -7,30 +7,30 @@ from hashlib import sha256
 
 import pytest
 
-import openmagi_core_agent.research.boundary_enforcement as boundary_module
+import magi_agent.research.boundary_enforcement as boundary_module
 from runtime_issuance_support import issue_test_runtime_authority
-from openmagi_core_agent.research.acceptance_criteria import (
+from magi_agent.research.acceptance_criteria import (
     ResearchAcceptanceCriterion,
     ResearchAcceptanceCriteriaSet,
 )
-from openmagi_core_agent.research.action_claims import (
+from magi_agent.research.action_claims import (
     ResearchActionProofReceiptRef,
     ResearchActionProofRequirement,
     detect_research_action_claims,
     verify_research_action_claims,
 )
-from openmagi_core_agent.research.boundary_enforcement import (
+from magi_agent.research.boundary_enforcement import (
     ResearchBoundaryRequest,
     ResearchBoundarySequenceRef,
     enforce_research_boundary,
 )
-from openmagi_core_agent.research.claim_graph import (
+from magi_agent.research.claim_graph import (
     ResearchClaimGraph,
     ResearchClaimSupportRef,
     build_research_claim_node,
 )
-from openmagi_core_agent.research.evidence_graph import ResearchEvidenceGraph
-from openmagi_core_agent.research.source_proof import (
+from magi_agent.research.evidence_graph import ResearchEvidenceGraph
+from magi_agent.research.source_proof import (
     ResearchSourceOpenReceiptRef,
     ResearchSourceProofRequirement,
     ResearchSourceProofVerdict,
@@ -999,7 +999,7 @@ def test_before_commit_cannot_bypass_failed_intermediate_boundary() -> None:
 
 
 def test_non_research_harnesses_are_unaffected_and_module_stays_research_local() -> None:
-    module = importlib.import_module("openmagi_core_agent.research.boundary_enforcement")
+    module = importlib.import_module("magi_agent.research.boundary_enforcement")
     source = inspect.getsource(module)
 
     decision = enforce_research_boundary(
@@ -1015,6 +1015,6 @@ def test_non_research_harnesses_are_unaffected_and_module_stays_research_local()
     assert decision.action == "pass"
     assert decision.reason_codes == ("non_research_harness",)
     assert "from google.adk" not in source
-    assert "from openmagi_core_agent.runtime" not in source
-    assert "from openmagi_core_agent.harness" not in source
-    assert "from openmagi_core_agent.tools" not in source
+    assert "from magi_agent.runtime" not in source
+    assert "from magi_agent.harness" not in source
+    assert "from magi_agent.tools" not in source

@@ -6,22 +6,22 @@ from pathlib import Path
 
 from fastapi.testclient import TestClient
 
-from openmagi_core_agent.app import create_app
-from openmagi_core_agent.config.models import (
+from magi_agent.app import create_app
+from magi_agent.config.models import (
     BuildInfo,
     PythonContextContinuityConfig,
     PythonRuntimeAuthorityConfig,
     RuntimeConfig,
 )
-from openmagi_core_agent.runtime.openmagi_runtime import OpenMagiRuntime
-from openmagi_core_agent.transport.chat import Gate5BUserVisibleChatRouteConfig
-from openmagi_core_agent.shadow.gate5b4c3_shadow_counter_store import (
+from magi_agent.runtime.openmagi_runtime import OpenMagiRuntime
+from magi_agent.transport.chat import Gate5BUserVisibleChatRouteConfig
+from magi_agent.shadow.gate5b4c3_shadow_counter_store import (
     Gate5B4C3ShadowCounterStore,
 )
-from openmagi_core_agent.shadow.gate5b4c3_shadow_generation_contract import (
+from magi_agent.shadow.gate5b4c3_shadow_generation_contract import (
     Gate5B4C3ShadowGenerationConfig,
 )
-from openmagi_core_agent.transport.shadow_generations import (
+from magi_agent.transport.shadow_generations import (
     Gate5B4C3ShadowGenerationRouteConfig,
 )
 

@@ -5,24 +5,24 @@ import json
 from collections.abc import Callable
 from typing import Any
 
-from openmagi_core_agent.artifacts.local_result_store import (
+from magi_agent.artifacts.local_result_store import (
     LocalResultStore,
     LocalResultStoreConfig,
 )
-from openmagi_core_agent.tools.context import ToolContext
-from openmagi_core_agent.tools.event_projection import (
+from magi_agent.tools.context import ToolContext
+from magi_agent.tools.event_projection import (
     project_tool_execution_events,
     project_tool_terminal_events,
 )
-from openmagi_core_agent.tools.kernel import (
+from magi_agent.tools.kernel import (
     ToolExecutionKernel,
     ToolExecutionKernelConfig,
     ToolExecutionRequest,
 )
-from openmagi_core_agent.tools.manifest import Budget, ToolManifest, ToolSource
-from openmagi_core_agent.tools.registry import ToolRegistry
-from openmagi_core_agent.tools.result import ToolResult
-from openmagi_core_agent.transport.sse import InMemorySseWriter
+from magi_agent.tools.manifest import Budget, ToolManifest, ToolSource
+from magi_agent.tools.registry import ToolRegistry
+from magi_agent.tools.result import ToolResult
+from magi_agent.transport.sse import InMemorySseWriter
 
 
 class FakeToolExecutor:

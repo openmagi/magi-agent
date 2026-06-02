@@ -5,8 +5,8 @@ import json
 import pytest
 from pydantic import ValidationError
 
-from openmagi_core_agent.evidence.ledger import EvidenceLedger, EvidenceLedgerEntry
-from openmagi_core_agent.evidence.types import (
+from magi_agent.evidence.ledger import EvidenceLedger, EvidenceLedgerEntry
+from magi_agent.evidence.types import (
     EvidenceContractFailure,
     EvidenceContractVerdict,
     EvidenceRecord,

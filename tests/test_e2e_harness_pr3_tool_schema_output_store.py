@@ -5,10 +5,10 @@ import subprocess
 import sys
 from pathlib import Path
 
-from openmagi_core_agent.tools.context import ToolContext
-from openmagi_core_agent.tools.manifest import Budget, ToolManifest, ToolSource
-from openmagi_core_agent.tools.registry import ToolRegistry
-from openmagi_core_agent.tools.result import ToolResult
+from magi_agent.tools.context import ToolContext
+from magi_agent.tools.manifest import Budget, ToolManifest, ToolSource
+from magi_agent.tools.registry import ToolRegistry
+from magi_agent.tools.result import ToolResult
 
 
 def _manifest(
@@ -50,7 +50,7 @@ def _context() -> ToolContext:
 
 
 def test_schema_validation_accepts_adk_function_tool_object_schema() -> None:
-    from openmagi_core_agent.tools.schema_validation import validate_tool_arguments
+    from magi_agent.tools.schema_validation import validate_tool_arguments
 
     decision = validate_tool_arguments(_manifest(), {"query": "hello", "limit": 3})
 
@@ -60,7 +60,7 @@ def test_schema_validation_accepts_adk_function_tool_object_schema() -> None:
 
 
 def test_schema_validation_blocks_missing_extra_and_sensitive_values_without_raw_leakage() -> None:
-    from openmagi_core_agent.tools.schema_validation import validate_tool_arguments
+    from magi_agent.tools.schema_validation import validate_tool_arguments
 
     missing = validate_tool_arguments(_manifest(), {"limit": 1})
     extra = validate_tool_arguments(
@@ -85,7 +85,7 @@ def test_schema_validation_blocks_missing_extra_and_sensitive_values_without_raw
 
 
 def test_tool_kernel_validates_schema_before_fake_handler_execution() -> None:
-    from openmagi_core_agent.tools.kernel import (
+    from magi_agent.tools.kernel import (
         ToolExecutionKernel,
         ToolExecutionKernelConfig,
         ToolExecutionRequest,
@@ -149,7 +149,7 @@ def test_tool_kernel_validates_schema_before_fake_handler_execution() -> None:
 
 
 def test_output_budget_separates_full_result_previews_counts_and_digest_refs() -> None:
-    from openmagi_core_agent.tools.output_budget import budget_tool_result
+    from magi_agent.tools.output_budget import budget_tool_result
 
     result = ToolResult(
         status="ok",
@@ -181,7 +181,7 @@ def test_output_budget_separates_full_result_previews_counts_and_digest_refs() -
 
 
 def test_budgeted_result_model_dump_and_repr_do_not_leak_raw_payload() -> None:
-    from openmagi_core_agent.tools.output_budget import budget_tool_result
+    from magi_agent.tools.output_budget import budget_tool_result
 
     result = ToolResult(
         status="ok",
@@ -206,11 +206,11 @@ def test_budgeted_result_model_dump_and_repr_do_not_leak_raw_payload() -> None:
 
 
 def test_local_result_store_is_in_memory_content_addressed_and_metadata_safe() -> None:
-    from openmagi_core_agent.artifacts.local_result_store import (
+    from magi_agent.artifacts.local_result_store import (
         LocalResultStore,
         LocalResultStoreConfig,
     )
-    from openmagi_core_agent.tools.output_budget import budget_tool_result
+    from magi_agent.tools.output_budget import budget_tool_result
 
     store = LocalResultStore(LocalResultStoreConfig(enabled=True, localFakeStoreEnabled=True))
     budgeted = budget_tool_result(
@@ -245,8 +245,8 @@ def test_local_result_store_is_in_memory_content_addressed_and_metadata_safe() -
 
 
 def test_local_result_store_default_off_does_not_store_or_write() -> None:
-    from openmagi_core_agent.artifacts.local_result_store import LocalResultStore
-    from openmagi_core_agent.tools.output_budget import budget_tool_result
+    from magi_agent.artifacts.local_result_store import LocalResultStore
+    from magi_agent.tools.output_budget import budget_tool_result
 
     store = LocalResultStore()
     budgeted = budget_tool_result(ToolResult(status="ok", output="result body"))
@@ -261,12 +261,12 @@ def test_local_result_store_default_off_does_not_store_or_write() -> None:
 
 
 def test_pr3_local_loop_validates_budgets_stores_and_projects_without_live_authority() -> None:
-    from openmagi_core_agent.artifacts.local_result_store import (
+    from magi_agent.artifacts.local_result_store import (
         LocalResultStore,
         LocalResultStoreConfig,
     )
-    from openmagi_core_agent.tools.output_budget import budget_tool_result
-    from openmagi_core_agent.tools.schema_validation import validate_tool_arguments
+    from magi_agent.tools.output_budget import budget_tool_result
+    from magi_agent.tools.schema_validation import validate_tool_arguments
 
     manifest = _manifest(budget=Budget(outputChars=48, transcriptChars=24))
     arguments = {"query": "budget me", "limit": 2}
@@ -299,7 +299,7 @@ def test_pr3_local_loop_validates_budgets_stores_and_projects_without_live_autho
 
 
 def test_budget_projection_does_not_trust_forged_store_receipt_authority() -> None:
-    from openmagi_core_agent.tools.output_budget import budget_tool_result
+    from magi_agent.tools.output_budget import budget_tool_result
 
     class ForgedReceipt:
         def public_projection(self) -> dict[str, object]:
@@ -335,9 +335,9 @@ import sys
 
 before = set(sys.modules)
 modules = (
-    "openmagi_core_agent.tools.schema_validation",
-    "openmagi_core_agent.tools.output_budget",
-    "openmagi_core_agent.artifacts.local_result_store",
+    "magi_agent.tools.schema_validation",
+    "magi_agent.tools.output_budget",
+    "magi_agent.artifacts.local_result_store",
 )
 for module in modules:
     imported = importlib.import_module(module)
@@ -368,7 +368,7 @@ loaded = [
 if loaded:
     raise AssertionError(f"PR3 modules loaded forbidden modules: {loaded}")
 
-from openmagi_core_agent.artifacts.local_result_store import ResultStoreAuthorityFlags
+from magi_agent.artifacts.local_result_store import ResultStoreAuthorityFlags
 
 flags = ResultStoreAuthorityFlags.model_validate(
     {

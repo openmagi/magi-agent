@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from openmagi_core_agent.security.external_surface import (
+from magi_agent.security.external_surface import (
     ExternalSurfacePolicy,
     ExternalSurfaceRequest,
     evaluate_external_surface,

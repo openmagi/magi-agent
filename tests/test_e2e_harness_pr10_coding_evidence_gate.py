@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from openmagi_core_agent.evidence.types import EvidenceRecord, EvidenceSource
-from openmagi_core_agent.recipes.coding_evidence_gate import (
+from magi_agent.evidence.types import EvidenceRecord, EvidenceSource
+from magi_agent.recipes.coding_evidence_gate import (
     CodingEvidenceGate,
     CodingEvidenceGateConfig,
     CodingEvidenceGateHarnessBinding,
@@ -78,7 +78,7 @@ def test_pr10_e2e_coding_completion_claim_gate_uses_recipe_owned_policy() -> Non
 
 
 def test_pr10_package_export_is_lazy_but_available_for_recipe_binding() -> None:
-    import openmagi_core_agent.recipes as recipes
+    import magi_agent.recipes as recipes
 
     assert recipes.CodingEvidenceGate is CodingEvidenceGate
     assert recipes.CodingEvidenceGateHarnessBinding is CodingEvidenceGateHarnessBinding

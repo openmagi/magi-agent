@@ -2,7 +2,7 @@ import json
 
 import pytest
 
-from openmagi_core_agent.evidence.observed_egress import (
+from magi_agent.evidence.observed_egress import (
     LiveEgressTelemetryEvidenceProvider,
     LocalObservedEgressEvidenceProvider,
     NoObservedEgressEvidenceProvider,
@@ -221,7 +221,7 @@ def test_live_egress_telemetry_source_reports_ready_with_proxy_connect_header_so
             "CORE_AGENT_PYTHON_GATE1A_EGRESS_TELEMETRY_PATH": str(telemetry_path),
             "CORE_AGENT_PYTHON_GATE1A_EGRESS_CORRELATION_MODE": "proxy_connect_headers",
             "HTTPS_PROXY": (
-                "http://gate5b-gemini-egress-proxy.clawy-system.svc.cluster.local:8080"
+                "http://gate5b-gemini-egress-proxy.magi-system.svc.cluster.local:8080"
             ),
         }
     )
@@ -246,7 +246,7 @@ def test_live_egress_telemetry_source_rejects_malformed_telemetry_readiness(
             "CORE_AGENT_PYTHON_GATE1A_EGRESS_TELEMETRY_PATH": str(telemetry_path),
             "CORE_AGENT_PYTHON_GATE1A_EGRESS_CORRELATION_MODE": "proxy_connect_headers",
             "HTTPS_PROXY": (
-                "http://gate5b-gemini-egress-proxy.clawy-system.svc.cluster.local:8080"
+                "http://gate5b-gemini-egress-proxy.magi-system.svc.cluster.local:8080"
             ),
         }
     )

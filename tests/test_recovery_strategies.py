@@ -4,7 +4,7 @@ import json
 
 import pytest
 
-from openmagi_core_agent.runtime.error_recovery.types import (
+from magi_agent.runtime.error_recovery.types import (
     ErrorKind,
     ErrorRecoveryConfig,
     MessageDict,
@@ -13,7 +13,7 @@ from openmagi_core_agent.runtime.error_recovery.types import (
     RecoveryContext,
     RecoveryResult,
 )
-from openmagi_core_agent.runtime.error_recovery.strategies import (
+from magi_agent.runtime.error_recovery.strategies import (
     CollapseDrainStrategy,
     MediaRemovalStrategy,
     OutputEscalationStrategy,

@@ -3,12 +3,12 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from openmagi_core_agent.evidence.extraction import (
+from magi_agent.evidence.extraction import (
     evidence_from_projected_event,
     evidence_from_tool_result,
 )
-from openmagi_core_agent.evidence.ledger import EvidenceLedger
-from openmagi_core_agent.tools.result import ToolResult
+from magi_agent.evidence.ledger import EvidenceLedger
+from magi_agent.tools.result import ToolResult
 
 
 FIXTURES = Path(__file__).parent / "fixtures" / "gate1"

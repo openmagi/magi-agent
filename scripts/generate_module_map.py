@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
-"""Generate ARCHITECTURE.md from openmagi_core_agent source tree.
+"""Generate ARCHITECTURE.md from magi_agent source tree.
 
 Parses all .py files via AST to extract module docstrings and import graphs,
 then emits a Markdown document with a Mermaid dependency diagram and per-package
 module tables.
 
-Usage (from infra/docker/clawy-core-agent-python/):
-    python3 scripts/generate_module_map.py > openmagi_core_agent/ARCHITECTURE.md
+Usage (from magi-agent/):
+    python3 scripts/generate_module_map.py > magi_agent/ARCHITECTURE.md
 """
 from __future__ import annotations
 
@@ -21,7 +21,7 @@ from pathlib import Path
 # Configuration
 # ---------------------------------------------------------------------------
 
-ROOT_PACKAGE = "openmagi_core_agent"
+ROOT_PACKAGE = "magi_agent"
 SKIP_IMPORTS = frozenset({"__future__"})
 
 
@@ -62,7 +62,7 @@ def _resolve_relative_import(
 def _module_to_package(dotted: str) -> str | None:
     """Extract the top-level sub-package from a dotted module path.
 
-    e.g. ``openmagi_core_agent.tools.dispatcher`` -> ``tools``
+    e.g. ``magi_agent.tools.dispatcher`` -> ``tools``
     """
     parts = dotted.split(".")
     if len(parts) < 2 or parts[0] != ROOT_PACKAGE:
@@ -73,7 +73,7 @@ def _module_to_package(dotted: str) -> str | None:
 def _parse_file(filepath: Path, root_dir: Path) -> tuple[str | None, list[str]]:
     """Parse a single .py file and return (docstring, list_of_import_targets).
 
-    ``root_dir`` is the package root (e.g. ``openmagi_core_agent/``).
+    ``root_dir`` is the package root (e.g. ``magi_agent/``).
     Returns (None, []) for empty or unparseable files.
     """
     try:
@@ -256,7 +256,7 @@ def build_reverse_deps(modules: list[ModuleInfo]) -> dict[str, set[str]]:
             # Check if import target is in our package
             target_id = path_to_id.get(imp)
             if not target_id:
-                # Try matching init: e.g. openmagi_core_agent.tools -> openmagi_core_agent/tools/__init__.py
+                # Try matching init: e.g. magi_agent.tools -> magi_agent/tools/__init__.py
                 init_try = imp + ".__init__"
                 target_id = path_to_id.get(init_try)
             if target_id and target_id != src_id:
@@ -327,13 +327,13 @@ def render_markdown(modules: list[ModuleInfo], graph: dict[str, set[str]]) -> st
 def main() -> None:
     """Entry point."""
     # Determine root directory: script expects to run from
-    # infra/docker/clawy-core-agent-python/
+    # magi-agent/
     cwd = Path.cwd()
     root = cwd / ROOT_PACKAGE
     if not root.is_dir():
         print(
             f"ERROR: Cannot find {ROOT_PACKAGE}/ in {cwd}. "
-            f"Run from infra/docker/clawy-core-agent-python/.",
+            f"Run from magi-agent/.",
             file=sys.stderr,
         )
         sys.exit(1)

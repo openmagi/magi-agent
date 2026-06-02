@@ -40,7 +40,7 @@ ATTACHMENT_FLAGS = (
 
 
 def _expected_adk_mapping() -> dict[str, str]:
-    from openmagi_core_agent.adk_bridge.callback_adapter import ADK_CALLBACK_HOOK_POINTS
+    from magi_agent.adk_bridge.callback_adapter import ADK_CALLBACK_HOOK_POINTS
 
     return {
         callback_name: hook_point.value
@@ -68,7 +68,7 @@ def _assert_all_attachment_flags_false(container: dict[str, object]) -> None:
 
 
 def _assert_concrete_hook_point(value: object) -> None:
-    from openmagi_core_agent.hooks.manifest import HookPoint
+    from magi_agent.hooks.manifest import HookPoint
 
     assert value in {hook_point.value for hook_point in HookPoint}
     assert value != "custom"

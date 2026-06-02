@@ -3,14 +3,14 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
-from openmagi_core_agent.recipes.composition import (
+from magi_agent.recipes.composition import (
     AdmittedRecipeSnapshot,
     RecipeStackInput,
 )
-from openmagi_core_agent.recipes.effective_contract import (
+from magi_agent.recipes.effective_contract import (
     build_effective_recipe_contract,
 )
-from openmagi_core_agent.recipes.projection import (
+from magi_agent.recipes.projection import (
     RecipeCompositionMergeDecision,
     RecipeCompositionProjection,
     project_effective_recipe_contract,

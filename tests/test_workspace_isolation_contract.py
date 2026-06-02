@@ -7,7 +7,7 @@ import sys
 import pytest
 from pydantic import ValidationError
 
-from openmagi_core_agent.workspace.isolation import (
+from magi_agent.workspace.isolation import (
     ExternalSandboxImportMetadata,
     WorkspaceAdoptionMetadata,
     WorkspaceChangePreview,
@@ -177,7 +177,7 @@ def test_tournament_variants_require_one_isolated_workspace_per_variant() -> Non
 def test_adoption_preview_records_changed_files_and_diff_metadata_without_applying_changes() -> None:
     preview = WorkspaceChangePreview(
         proposal_id="proposal-1",
-        changed_files=("openmagi_core_agent/workspace/isolation.py",),
+        changed_files=("magi_agent/workspace/isolation.py",),
         diff=WorkspaceDiffMetadata(
             summary="adds metadata-only workspace policy models",
             added_lines=12,
@@ -186,14 +186,14 @@ def test_adoption_preview_records_changed_files_and_diff_metadata_without_applyi
     )
 
     assert preview.applied is False
-    assert preview.changed_files == ("openmagi_core_agent/workspace/isolation.py",)
+    assert preview.changed_files == ("magi_agent/workspace/isolation.py",)
     assert preview.diff.added_lines == 12
 
 
 def test_adoption_refuses_dirty_parent_overwrite_without_explicit_conflict_path() -> None:
     preview = WorkspaceChangePreview(
         proposal_id="proposal-1",
-        changed_files=("openmagi_core_agent/workspace/isolation.py",),
+        changed_files=("magi_agent/workspace/isolation.py",),
         diff=WorkspaceDiffMetadata(summary="candidate", added_lines=1, removed_lines=0),
     )
 
@@ -201,7 +201,7 @@ def test_adoption_refuses_dirty_parent_overwrite_without_explicit_conflict_path(
         WorkspaceAdoptionMetadata(
             adoption_id="adopt-1",
             preview=preview,
-            dirty_parent_files=("openmagi_core_agent/workspace/isolation.py",),
+            dirty_parent_files=("magi_agent/workspace/isolation.py",),
             explicit_conflict_path=False,
             explicit_adoption_metadata=True,
         )
@@ -210,7 +210,7 @@ def test_adoption_refuses_dirty_parent_overwrite_without_explicit_conflict_path(
 def test_adoption_rejects_parent_evidence_for_different_adoption_id() -> None:
     preview = WorkspaceChangePreview(
         proposal_id="proposal-1",
-        changed_files=("openmagi_core_agent/workspace/isolation.py",),
+        changed_files=("magi_agent/workspace/isolation.py",),
         diff=WorkspaceDiffMetadata(summary="candidate", added_lines=1, removed_lines=0),
     )
 
@@ -345,14 +345,14 @@ def test_workspace_import_boundary_stays_adk_runner_runtime_route_free() -> None
 import importlib
 import sys
 
-importlib.import_module("openmagi_core_agent.workspace.isolation")
+importlib.import_module("magi_agent.workspace.isolation")
 forbidden_modules = (
     "google.adk.runners",
     "google.adk.agents",
-    "openmagi_core_agent.adk_bridge.runner_adapter",
-    "openmagi_core_agent.runtime.openmagi_runtime",
-    "openmagi_core_agent.transport.chat",
-    "openmagi_core_agent.transport.tools",
+    "magi_agent.adk_bridge.runner_adapter",
+    "magi_agent.runtime.openmagi_runtime",
+    "magi_agent.transport.chat",
+    "magi_agent.transport.tools",
 )
 loaded = [module for module in forbidden_modules if module in sys.modules]
 if loaded:
@@ -365,5 +365,5 @@ if loaded:
     )
 
     assert completed.returncode == 0, completed.stderr
-    module = importlib.import_module("openmagi_core_agent.workspace.isolation")
+    module = importlib.import_module("magi_agent.workspace.isolation")
     assert hasattr(module, "WorkspaceIsolationPolicy")

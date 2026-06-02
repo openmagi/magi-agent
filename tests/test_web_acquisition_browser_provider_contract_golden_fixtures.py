@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from openmagi_core_agent.shadow.web_acquisition_browser_provider_contract import (
+from magi_agent.shadow.web_acquisition_browser_provider_contract import (
     WebAcquisitionAttachmentFlags,
     WebAcquisitionBrowserProviderFixture,
     load_web_acquisition_browser_provider_fixture,
@@ -332,7 +332,7 @@ def test_web_acquisition_browser_provider_fixture_rejects_live_and_unsafe_states
 def test_public_metadata_allows_local_checkout_workspace_path_text() -> None:
     payload = json.loads((FIXTURES / "policy_matrix.json").read_text(encoding="utf-8"))
     payload["cases"][0]["publicPreview"] = (
-        "fixture was validated from /Users/dev/workspace/clawy checkout notes"
+        "fixture was validated from /Users/dev/workspace/magi checkout notes"
     )
 
     fixture = WebAcquisitionBrowserProviderFixture.model_validate(payload)
@@ -360,7 +360,7 @@ def test_web_acquisition_browser_provider_import_boundary_stays_runtime_free() -
 import sys
 from pathlib import Path
 
-from openmagi_core_agent.shadow.web_acquisition_browser_provider_contract import (
+from magi_agent.shadow.web_acquisition_browser_provider_contract import (
     load_web_acquisition_browser_provider_fixture,
     project_web_acquisition_browser_provider_fixture,
 )
@@ -372,23 +372,23 @@ project_web_acquisition_browser_provider_fixture(fixture)
 forbidden = (
     'google.adk.runners',
     'google.adk.tools',
-    'openmagi_core_agent.adk_bridge.local_runner',
-    'openmagi_core_agent.adk_bridge.runner_adapter',
-    'openmagi_core_agent.adk_bridge.tool_adapter',
-    'openmagi_core_agent.tools.dispatcher',
-    'openmagi_core_agent.tools.registry',
-    'openmagi_core_agent.plugins.native_catalog',
-    'openmagi_core_agent.recipes.compiler',
-    'openmagi_core_agent.browser',
-    'openmagi_core_agent.agent_browser',
-    'openmagi_core_agent.browser_worker',
-    'openmagi_core_agent.routes',
-    'openmagi_core_agent.app',
-    'openmagi_core_agent.transport.chat',
-    'openmagi_core_agent.proxy',
-    'openmagi_core_agent.dashboard',
-    'openmagi_core_agent.db',
-    'openmagi_core_agent.k8s',
+    'magi_agent.adk_bridge.local_runner',
+    'magi_agent.adk_bridge.runner_adapter',
+    'magi_agent.adk_bridge.tool_adapter',
+    'magi_agent.tools.dispatcher',
+    'magi_agent.tools.registry',
+    'magi_agent.plugins.native_catalog',
+    'magi_agent.recipes.compiler',
+    'magi_agent.browser',
+    'magi_agent.agent_browser',
+    'magi_agent.browser_worker',
+    'magi_agent.routes',
+    'magi_agent.app',
+    'magi_agent.transport.chat',
+    'magi_agent.proxy',
+    'magi_agent.dashboard',
+    'magi_agent.db',
+    'magi_agent.k8s',
     'httpx',
     'requests',
     'playwright',

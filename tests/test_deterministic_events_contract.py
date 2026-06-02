@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 from pydantic import BaseModel, ValidationError
 
-from openmagi_core_agent.telemetry.deterministic_events import (
+from magi_agent.telemetry.deterministic_events import (
     DeterministicRuntimeEvent,
     RuntimeEventType,
     project_event_for_dashboard,

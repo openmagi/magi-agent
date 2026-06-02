@@ -8,7 +8,7 @@ from typing import Any
 
 import pytest
 
-from openmagi_core_agent.runtime.llm_stream_reader import (
+from magi_agent.runtime.llm_stream_reader import (
     LLMStreamReader,
     LLMStreamReaderConfig,
     LLMStreamReaderError,
@@ -393,7 +393,7 @@ def test_llm_stream_reader_import_boundary_is_local_fake_stream_only() -> None:
 import importlib
 import sys
 
-module = importlib.import_module("openmagi_core_agent.runtime.llm_stream_reader")
+module = importlib.import_module("magi_agent.runtime.llm_stream_reader")
 assert hasattr(module, "LLMStreamReader")
 
 forbidden_exact = (
@@ -413,19 +413,19 @@ forbidden_exact = (
     "asyncpg",
     "psycopg",
     "sqlalchemy",
-    "openmagi_core_agent.tools.dispatcher",
-    "openmagi_core_agent.tools.tool_host",
+    "magi_agent.tools.dispatcher",
+    "magi_agent.tools.tool_host",
 )
 forbidden_prefixes = (
     "google.adk",
-    "openmagi_core_agent.adk_bridge",
-    "openmagi_core_agent.tools",
-    "openmagi_core_agent.transport",
-    "openmagi_core_agent.channels",
-    "openmagi_core_agent.db",
-    "openmagi_core_agent.supabase",
-    "openmagi_core_agent.deployment",
-    "openmagi_core_agent.k8s",
+    "magi_agent.adk_bridge",
+    "magi_agent.tools",
+    "magi_agent.transport",
+    "magi_agent.channels",
+    "magi_agent.db",
+    "magi_agent.supabase",
+    "magi_agent.deployment",
+    "magi_agent.k8s",
 )
 loaded = [
     name
@@ -448,7 +448,7 @@ if loaded:
     root = Path(__file__).parents[1]
     source = (
         root
-        / "openmagi_core_agent"
+        / "magi_agent"
         / "runtime"
         / "llm_stream_reader.py"
     ).read_text(encoding="utf-8")

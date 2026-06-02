@@ -6,14 +6,14 @@ import sys
 from types import ModuleType
 from typing import Any
 
-from openmagi_core_agent.plugins.manager import (
+from magi_agent.plugins.manager import (
     PluginOptOutRecord,
     PluginStatus,
     ResolvedPluginState,
     resolve_plugin_state,
 )
-from openmagi_core_agent.plugins.manifest import PluginKind, parse_plugin_manifest
-from openmagi_core_agent.plugins.native_catalog import native_plugin_manifests
+from magi_agent.plugins.manifest import PluginKind, parse_plugin_manifest
+from magi_agent.plugins.native_catalog import native_plugin_manifests
 
 
 EXPECTED_NATIVE_PLUGIN_IDS = (
@@ -40,7 +40,7 @@ DEFAULT_DISABLED_PLUGIN_IDS = {
 
 
 def _audit_module() -> ModuleType:
-    import openmagi_core_agent.plugins.audit as audit
+    import magi_agent.plugins.audit as audit
 
     return audit
 
@@ -378,18 +378,18 @@ def test_audit_import_boundary_does_not_load_adk_runtime_execution_routes_or_nat
 import importlib
 import sys
 
-importlib.import_module("openmagi_core_agent.plugins.audit")
+importlib.import_module("magi_agent.plugins.audit")
 forbidden_prefixes = (
     "google.adk",
-    "openmagi_core_agent.adk_bridge",
-    "openmagi_core_agent.runtime",
-    "openmagi_core_agent.transport",
-    "openmagi_core_agent.tools.dispatcher",
-    "openmagi_core_agent.tools.registry",
-    "openmagi_core_agent.hooks.bus",
-    "openmagi_core_agent.plugins.native",
-    "openmagi_core_agent.app",
-    "openmagi_core_agent.main",
+    "magi_agent.adk_bridge",
+    "magi_agent.runtime",
+    "magi_agent.transport",
+    "magi_agent.tools.dispatcher",
+    "magi_agent.tools.registry",
+    "magi_agent.hooks.bus",
+    "magi_agent.plugins.native",
+    "magi_agent.app",
+    "magi_agent.main",
 )
 loaded = [
     name
@@ -414,24 +414,24 @@ def test_plugins_package_import_keeps_audit_exports_lazy_and_does_not_load_runti
 import importlib
 import sys
 
-package = importlib.import_module("openmagi_core_agent.plugins")
+package = importlib.import_module("magi_agent.plugins")
 assert "build_plugin_audit_snapshot" in package.__all__
 forbidden_exact = (
-    "openmagi_core_agent.plugins.audit",
-    "openmagi_core_agent.plugins.manager",
-    "openmagi_core_agent.plugins.native_catalog",
+    "magi_agent.plugins.audit",
+    "magi_agent.plugins.manager",
+    "magi_agent.plugins.native_catalog",
 )
 forbidden_prefixes = (
     "google.adk",
-    "openmagi_core_agent.adk_bridge",
-    "openmagi_core_agent.runtime",
-    "openmagi_core_agent.transport",
-    "openmagi_core_agent.tools.dispatcher",
-    "openmagi_core_agent.tools.registry",
-    "openmagi_core_agent.hooks.bus",
-    "openmagi_core_agent.plugins.native",
-    "openmagi_core_agent.app",
-    "openmagi_core_agent.main",
+    "magi_agent.adk_bridge",
+    "magi_agent.runtime",
+    "magi_agent.transport",
+    "magi_agent.tools.dispatcher",
+    "magi_agent.tools.registry",
+    "magi_agent.hooks.bus",
+    "magi_agent.plugins.native",
+    "magi_agent.app",
+    "magi_agent.main",
 )
 loaded = [
     name

@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from openmagi_core_agent.evidence.child_runtime_envelope import (
+from magi_agent.evidence.child_runtime_envelope import (
     ChildRuntimeEnvelope,
     ChildRuntimeEnvelopeAuthorityFlags,
     PublicChildRuntimeEnvelopeProjection,
@@ -18,7 +18,7 @@ from openmagi_core_agent.evidence.child_runtime_envelope import (
     runtime_envelope_satisfies_delegated_evidence_metadata,
 )
 from runtime_issuance_support import issue_test_runtime_authority
-from openmagi_core_agent.evidence.subagent import (
+from magi_agent.evidence.subagent import (
     DelegatedEvidenceRequirement,
     EvidenceBoundaryLedgerRef,
     ExecutionBoundaryIdentity,
@@ -543,23 +543,23 @@ def test_import_boundary_has_no_adk_runner_routes_toolhost_memory_or_workspace_m
 import importlib
 import sys
 
-module = importlib.import_module("openmagi_core_agent.evidence.child_runtime_envelope")
+module = importlib.import_module("magi_agent.evidence.child_runtime_envelope")
 assert hasattr(module, "ChildRuntimeEnvelope")
 
 forbidden_prefixes = (
     "google.adk",
-    "openmagi_core_agent.adk_bridge.runner_adapter",
-    "openmagi_core_agent.adk_bridge.tool_adapter",
-    "openmagi_core_agent.runtime.openmagi_runtime",
-    "openmagi_core_agent.routing",
-    "openmagi_core_agent.transport.chat",
-    "openmagi_core_agent.transport.tools",
-    "openmagi_core_agent.tools.dispatcher",
-    "openmagi_core_agent.tools.registry",
-    "openmagi_core_agent.memory",
-    "openmagi_core_agent.workspace.mutation",
-    "openmagi_core_agent.workspace.adoption",
-    "openmagi_core_agent.shadow.mission_lifecycle_contract",
+    "magi_agent.adk_bridge.runner_adapter",
+    "magi_agent.adk_bridge.tool_adapter",
+    "magi_agent.runtime.openmagi_runtime",
+    "magi_agent.routing",
+    "magi_agent.transport.chat",
+    "magi_agent.transport.tools",
+    "magi_agent.tools.dispatcher",
+    "magi_agent.tools.registry",
+    "magi_agent.memory",
+    "magi_agent.workspace.mutation",
+    "magi_agent.workspace.adoption",
+    "magi_agent.shadow.mission_lifecycle_contract",
 )
 loaded = [
     module_name
@@ -582,6 +582,6 @@ if loaded:
 
 
 def test_evidence_package_lazy_export_for_child_runtime_envelope() -> None:
-    evidence = importlib.import_module("openmagi_core_agent.evidence")
+    evidence = importlib.import_module("magi_agent.evidence")
 
     assert evidence.ChildRuntimeEnvelope is ChildRuntimeEnvelope

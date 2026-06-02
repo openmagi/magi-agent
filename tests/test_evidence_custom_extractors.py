@@ -7,8 +7,8 @@ from copy import deepcopy
 import pytest
 from pydantic import ValidationError
 
-from openmagi_core_agent.evidence import CustomEvidenceExtractor
-from openmagi_core_agent.evidence.extractors import (
+from magi_agent.evidence import CustomEvidenceExtractor
+from magi_agent.evidence.extractors import (
     CustomEvidenceExtractorConfig,
     CustomEvidenceExtractorSource,
     CustomEvidenceFieldMapping,
@@ -682,15 +682,15 @@ def test_evidence_extractors_import_stays_adk_runner_runtime_and_route_free() ->
 import importlib
 import sys
 
-importlib.import_module("openmagi_core_agent.evidence.extractors")
+importlib.import_module("magi_agent.evidence.extractors")
 forbidden_modules = (
     "google.adk.runners",
     "google.adk.sessions",
     "google.adk.artifacts",
-    "openmagi_core_agent.adk_bridge.runner_adapter",
-    "openmagi_core_agent.runtime.openmagi_runtime",
-    "openmagi_core_agent.transport.chat",
-    "openmagi_core_agent.transport.tools",
+    "magi_agent.adk_bridge.runner_adapter",
+    "magi_agent.runtime.openmagi_runtime",
+    "magi_agent.transport.chat",
+    "magi_agent.transport.tools",
 )
 loaded = [module for module in forbidden_modules if module in sys.modules]
 if loaded:

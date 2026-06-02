@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from openmagi_core_agent.harness.mission_runtime_boundary import (
+from magi_agent.harness.mission_runtime_boundary import (
     GoalRecord,
     MissionRuntimeAuthorityFlags,
     MissionRuntimeBoundary,

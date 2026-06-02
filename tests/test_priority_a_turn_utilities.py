@@ -7,8 +7,8 @@ from typing import Any
 
 import pytest
 
-from openmagi_core_agent.recipes.retry_repair_policies import default_recipe_retry_repair_rules
-from openmagi_core_agent.runtime.turn_utilities import (
+from magi_agent.recipes.retry_repair_policies import default_recipe_retry_repair_rules
+from magi_agent.runtime.turn_utilities import (
     RetryController,
     classify_retry_taxonomy,
     detect_polling_iteration,
@@ -352,7 +352,7 @@ def test_turn_utilities_import_boundary_stays_pure_local_metadata_only() -> None
 import importlib
 import sys
 
-module = importlib.import_module("openmagi_core_agent.runtime.turn_utilities")
+module = importlib.import_module("magi_agent.runtime.turn_utilities")
 assert hasattr(module, "RetryController")
 
 forbidden_exact = (
@@ -373,19 +373,19 @@ forbidden_exact = (
     "starlette.routing",
 )
 forbidden_prefixes = (
-    "openmagi_core_agent.adk_bridge",
-    "openmagi_core_agent.transport",
-    "openmagi_core_agent.channels",
-    "openmagi_core_agent.tools",
-    "openmagi_core_agent.deploy",
-    "openmagi_core_agent.provisioning",
-    "openmagi_core_agent.k8s",
-    "openmagi_core_agent.database",
-    "openmagi_core_agent.supabase",
-    "openmagi_core_agent.api",
-    "openmagi_core_agent.proxy",
-    "openmagi_core_agent.dashboard",
-    "openmagi_core_agent.scheduler",
+    "magi_agent.adk_bridge",
+    "magi_agent.transport",
+    "magi_agent.channels",
+    "magi_agent.tools",
+    "magi_agent.deploy",
+    "magi_agent.provisioning",
+    "magi_agent.k8s",
+    "magi_agent.database",
+    "magi_agent.supabase",
+    "magi_agent.api",
+    "magi_agent.proxy",
+    "magi_agent.dashboard",
+    "magi_agent.scheduler",
 )
 loaded = [
     loaded_name
@@ -409,7 +409,7 @@ if loaded:
     assert completed.returncode == 0, completed.stderr
 
     root = Path(__file__).parents[1]
-    module_path = root / "openmagi_core_agent" / "runtime" / "turn_utilities.py"
+    module_path = root / "magi_agent" / "runtime" / "turn_utilities.py"
     source = module_path.read_text(encoding="utf-8")
     forbidden_source_imports = (
         "google",
@@ -424,19 +424,19 @@ if loaded:
         "subprocess",
         "fastapi",
         "starlette",
-        "openmagi_core_agent.adk_bridge",
-        "openmagi_core_agent.transport",
-        "openmagi_core_agent.channels",
-        "openmagi_core_agent.tools",
-        "openmagi_core_agent.deploy",
-        "openmagi_core_agent.provisioning",
-        "openmagi_core_agent.k8s",
-        "openmagi_core_agent.database",
-        "openmagi_core_agent.supabase",
-        "openmagi_core_agent.api",
-        "openmagi_core_agent.proxy",
-        "openmagi_core_agent.dashboard",
-        "openmagi_core_agent.scheduler",
+        "magi_agent.adk_bridge",
+        "magi_agent.transport",
+        "magi_agent.channels",
+        "magi_agent.tools",
+        "magi_agent.deploy",
+        "magi_agent.provisioning",
+        "magi_agent.k8s",
+        "magi_agent.database",
+        "magi_agent.supabase",
+        "magi_agent.api",
+        "magi_agent.proxy",
+        "magi_agent.dashboard",
+        "magi_agent.scheduler",
     )
     for forbidden in forbidden_source_imports:
         assert f"import {forbidden}" not in source

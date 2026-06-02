@@ -1,8 +1,8 @@
 from fastapi.testclient import TestClient
 
-from openmagi_core_agent.app import create_app
-from openmagi_core_agent.adk_bridge.primitives import AdkPrimitiveBoundary
-from openmagi_core_agent.config.models import (
+from magi_agent.app import create_app
+from magi_agent.adk_bridge.primitives import AdkPrimitiveBoundary
+from magi_agent.config.models import (
     BuildInfo,
     PythonContextContinuityConfig,
     PythonMemoryAdapterConfig,
@@ -10,13 +10,13 @@ from openmagi_core_agent.config.models import (
     PythonToolHostAttachmentConfig,
     RuntimeConfig,
 )
-from openmagi_core_agent.evidence.observed_egress import (
+from magi_agent.evidence.observed_egress import (
     LiveEgressTelemetryEvidenceProvider,
     LocalObservedEgressEvidenceProvider,
     ObservedEgressEvidence,
 )
-from openmagi_core_agent.runtime.openmagi_runtime import OpenMagiRuntime
-from openmagi_core_agent.transport.chat import Gate5BUserVisibleChatRouteConfig
+from magi_agent.runtime.openmagi_runtime import OpenMagiRuntime
+from magi_agent.transport.chat import Gate5BUserVisibleChatRouteConfig
 
 
 def make_runtime() -> OpenMagiRuntime:
@@ -42,7 +42,7 @@ def test_health_returns_ts_compatible_lean_payload() -> None:
     assert response.json() == {
         "ok": True,
         "botId": "bot-test",
-        "runtime": "core-agent",
+        "runtime": "magi-agent",
         "version": "0.1.0-adk-scaffold",
         "buildSha": "sha-test",
     }
@@ -57,7 +57,7 @@ def test_healthz_adds_runtime_engine_without_changing_runtime_identity() -> None
     body = response.json()
     assert body["ok"] is True
     assert body["botId"] == "bot-test"
-    assert body["runtime"] == "core-agent"
+    assert body["runtime"] == "magi-agent"
     assert body["runtimeEngine"] == "adk-python"
     assert body["adk"]["available"] is True
     assert body["adk"]["invoked"] is False
@@ -383,7 +383,7 @@ def test_healthz_live_egress_telemetry_reports_ready_only_when_source_is_availab
     runtime = make_runtime()
     runtime.gate1a_observed_egress_evidence_provider = LiveEgressTelemetryEvidenceProvider(
         telemetry_path,
-        proxy_url="http://gate5b-gemini-egress-proxy.clawy-system.svc.cluster.local:8080",
+        proxy_url="http://gate5b-gemini-egress-proxy.magi-system.svc.cluster.local:8080",
     )
     client = TestClient(create_app(runtime))
 
@@ -433,7 +433,7 @@ def test_healthz_composio_metadata_does_not_leak_api_key(monkeypatch) -> None:
     monkeypatch.setenv("USER_ID", "user-test")
     monkeypatch.setenv("BOT_ID", "bot-test")
     monkeypatch.setattr(
-        "openmagi_core_agent.composio.health.composio_package_available",
+        "magi_agent.composio.health.composio_package_available",
         lambda: True,
     )
     client = TestClient(create_app(make_runtime()))
@@ -450,7 +450,7 @@ def test_healthz_reports_composio_package_missing_without_crashing(monkeypatch) 
     monkeypatch.setenv("COMPOSIO_API_KEY", "cp_test_secret")
     monkeypatch.setenv("MAGI_COMPOSIO_ENABLED", "on")
     monkeypatch.setattr(
-        "openmagi_core_agent.composio.health.composio_package_available",
+        "magi_agent.composio.health.composio_package_available",
         lambda: False,
     )
     client = TestClient(create_app(make_runtime()))

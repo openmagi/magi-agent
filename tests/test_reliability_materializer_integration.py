@@ -2,14 +2,14 @@ from __future__ import annotations
 
 import pytest
 
-from openmagi_core_agent.recipes.compiler import (
+from magi_agent.recipes.compiler import (
     AgentRecipeCompiler,
     PackRegistry,
     ProfileResolutionRequest,
     RecipeSnapshot,
     build_recipe_snapshot_id,
 )
-from openmagi_core_agent.recipes.materializer import RecipeMaterializer
+from magi_agent.recipes.materializer import RecipeMaterializer
 
 
 def test_materializer_adds_reliability_policy_for_research_on_cheap_model() -> None:

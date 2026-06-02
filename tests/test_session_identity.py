@@ -1,4 +1,4 @@
-from openmagi_core_agent.runtime.session_identity import (
+from magi_agent.runtime.session_identity import (
     MemoryMode,
     parse_session_identity,
 )

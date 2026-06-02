@@ -11,7 +11,7 @@ import pytest
 from pydantic import ValidationError
 from pydantic import BaseModel
 
-from openmagi_core_agent.security.compliance import (
+from magi_agent.security.compliance import (
     ComplianceAuthorityFlags,
     ComplianceReportRef,
     PolicyKernelDecisionRecord,
@@ -22,7 +22,7 @@ from openmagi_core_agent.security.compliance import (
 
 
 PYTHON_ROOT = Path(__file__).parents[1]
-MODULE_PATH = PYTHON_ROOT / "openmagi_core_agent" / "security" / "compliance.py"
+MODULE_PATH = PYTHON_ROOT / "magi_agent" / "security" / "compliance.py"
 
 
 def _digest(character: str) -> str:
@@ -221,14 +221,14 @@ def test_forged_nested_compliance_refs_do_not_project_raw_material() -> None:
 
 
 def test_compliance_contract_import_boundary_has_no_live_runtime_imports() -> None:
-    module = importlib.import_module("openmagi_core_agent.security.compliance")
+    module = importlib.import_module("magi_agent.security.compliance")
 
     assert not hasattr(module, "Runner")
     assert not hasattr(module, "ToolHost")
 
     script = (
         "import sys\n"
-        "import openmagi_core_agent.security.compliance\n"
+        "import magi_agent.security.compliance\n"
         "forbidden=('google.adk','kubernetes','supabase','stripe','httpx','requests')\n"
         "loaded=[name for name in forbidden if name in sys.modules]\n"
         "raise SystemExit(1 if loaded else 0)\n"

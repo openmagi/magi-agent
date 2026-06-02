@@ -6,20 +6,20 @@ from pathlib import Path
 import pytest
 from google.adk.tools import FunctionTool, LongRunningFunctionTool
 
-from openmagi_core_agent.adk_bridge import tool_adapter
-from openmagi_core_agent.adk_bridge.tool_adapter import (
+from magi_agent.adk_bridge import tool_adapter
+from magi_agent.adk_bridge.tool_adapter import (
     build_adk_function_tool,
     build_adk_function_tools_for_registry,
 )
-from openmagi_core_agent.tools import (
+from magi_agent.tools import (
     ToolDispatcher,
     ToolRegistry,
     ToolResult,
     ToolSource,
     register_core_tool_manifests,
 )
-from openmagi_core_agent.tools.context import ToolContext as OpenMagiToolContext
-from openmagi_core_agent.tools.manifest import ToolManifest
+from magi_agent.tools.context import ToolContext as OpenMagiToolContext
+from magi_agent.tools.manifest import ToolManifest
 
 
 def make_manifest(
@@ -352,7 +352,7 @@ def test_adapter_returns_tool_result_alias_keys_for_errors() -> None:
 def test_tool_adapter_does_not_import_production_or_implementation_tool_modules() -> None:
     adapter_path = (
         Path(__file__).parents[1]
-        / "openmagi_core_agent"
+        / "magi_agent"
         / "adk_bridge"
         / "tool_adapter.py"
     )
@@ -365,14 +365,14 @@ def test_tool_adapter_does_not_import_production_or_implementation_tool_modules(
             imported_modules.add(node.module)
 
     forbidden_prefixes = (
-        "openmagi_core_agent.artifact",
-        "openmagi_core_agent.channels",
-        "openmagi_core_agent.deploy",
-        "openmagi_core_agent.plugins",
-        "openmagi_core_agent.runtime",
-        "openmagi_core_agent.transport",
-        "openmagi_core_agent.workspace",
-        "openmagi_core_agent.tools.catalog",
+        "magi_agent.artifact",
+        "magi_agent.channels",
+        "magi_agent.deploy",
+        "magi_agent.plugins",
+        "magi_agent.runtime",
+        "magi_agent.transport",
+        "magi_agent.workspace",
+        "magi_agent.tools.catalog",
     )
     assert not [
         module

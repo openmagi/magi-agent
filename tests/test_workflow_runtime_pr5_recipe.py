@@ -85,20 +85,20 @@ def test_recipe_materialize_validate_execute_round_trip(
     """A recipe-defined workflow materializes, passes validation, and executes."""
     monkeypatch.setenv("MAGI_WORKFLOW_EXECUTOR_ENABLED", "1")
 
-    from openmagi_core_agent.recipes.compiler import (
+    from magi_agent.recipes.compiler import (
         AgentRecipeCompiler,
         PackRegistry,
         ProfileResolutionRequest,
     )
-    from openmagi_core_agent.recipes.materializer import RecipeMaterializer
-    from openmagi_core_agent.recipes.workflow_recipe import (
+    from magi_agent.recipes.materializer import RecipeMaterializer
+    from magi_agent.recipes.workflow_recipe import (
         compile_workflow_from_recipe,
     )
-    from openmagi_core_agent.harness.workflow_executor import (
+    from magi_agent.harness.workflow_executor import (
         WorkflowExecutorConfig,
         execute_workflow,
     )
-    from openmagi_core_agent.workflows.compiler import (
+    from magi_agent.workflows.compiler import (
         CompiledWorkflowContract,
         validate_compiled_workflow,
     )
@@ -143,16 +143,16 @@ def test_recipe_that_fails_validation_does_not_execute(
     """A bridged contract that fails validation must NOT dispatch any children."""
     monkeypatch.setenv("MAGI_WORKFLOW_EXECUTOR_ENABLED", "1")
 
-    from openmagi_core_agent.recipes.compiler import (
+    from magi_agent.recipes.compiler import (
         AgentRecipeCompiler,
         PackRegistry,
         ProfileResolutionRequest,
     )
-    from openmagi_core_agent.recipes.materializer import RecipeMaterializer
-    from openmagi_core_agent.recipes.workflow_recipe import (
+    from magi_agent.recipes.materializer import RecipeMaterializer
+    from magi_agent.recipes.workflow_recipe import (
         compile_workflow_from_recipe,
     )
-    from openmagi_core_agent.harness.workflow_executor import (
+    from magi_agent.harness.workflow_executor import (
         WorkflowExecutorConfig,
         execute_workflow,
     )
@@ -194,20 +194,20 @@ def test_saved_workflow_reinvocable_by_name(monkeypatch: pytest.MonkeyPatch) -> 
     """Register a workflow, look it up by name, re-materialize/validate/execute."""
     monkeypatch.setenv("MAGI_WORKFLOW_EXECUTOR_ENABLED", "1")
 
-    from openmagi_core_agent.recipes.compiler import (
+    from magi_agent.recipes.compiler import (
         AgentRecipeCompiler,
         PackRegistry,
         ProfileResolutionRequest,
     )
-    from openmagi_core_agent.recipes.workflow_recipe import (
+    from magi_agent.recipes.workflow_recipe import (
         SavedWorkflowEntry,
         SavedWorkflowRegistry,
     )
-    from openmagi_core_agent.harness.workflow_executor import (
+    from magi_agent.harness.workflow_executor import (
         WorkflowExecutorConfig,
         execute_workflow,
     )
-    from openmagi_core_agent.workflows.compiler import validate_compiled_workflow
+    from magi_agent.workflows.compiler import validate_compiled_workflow
 
     snapshot = AgentRecipeCompiler(PackRegistry.with_first_party_packs()).compile(
         ProfileResolutionRequest(taskProfile={"taskType": "research"})
@@ -250,12 +250,12 @@ def test_saved_workflow_reinvocable_by_name(monkeypatch: pytest.MonkeyPatch) -> 
 def test_saved_registry_promotes_slash_command_import_metadata() -> None:
     """The live registry entry carries the slash-command import provenance that
     the recipe compiler's superpowers-compat pack declared as metadata-only."""
-    from openmagi_core_agent.recipes.compiler import (
+    from magi_agent.recipes.compiler import (
         AgentRecipeCompiler,
         PackRegistry,
         ProfileResolutionRequest,
     )
-    from openmagi_core_agent.recipes.workflow_recipe import (
+    from magi_agent.recipes.workflow_recipe import (
         SavedWorkflowEntry,
         SavedWorkflowRegistry,
         SLASH_COMMAND_IMPORT_CALLBACK_REF,
@@ -283,12 +283,12 @@ def test_saved_registry_promotes_slash_command_import_metadata() -> None:
 
 
 def test_saved_registry_rejects_duplicate_name_version() -> None:
-    from openmagi_core_agent.recipes.compiler import (
+    from magi_agent.recipes.compiler import (
         AgentRecipeCompiler,
         PackRegistry,
         ProfileResolutionRequest,
     )
-    from openmagi_core_agent.recipes.workflow_recipe import (
+    from magi_agent.recipes.workflow_recipe import (
         SavedWorkflowEntry,
         SavedWorkflowRegistry,
     )
@@ -314,7 +314,7 @@ def test_saved_registry_rejects_duplicate_name_version() -> None:
 
 
 def test_unknown_saved_workflow_name_raises() -> None:
-    from openmagi_core_agent.recipes.workflow_recipe import SavedWorkflowRegistry
+    from magi_agent.recipes.workflow_recipe import SavedWorkflowRegistry
 
     registry = SavedWorkflowRegistry.empty()
     with pytest.raises(KeyError):
@@ -328,12 +328,12 @@ def test_registry_get_returns_last_registered_not_highest_version() -> None:
     Register out-of-order (v3.0 then v1.1) — default lookup returns v1.1.
     Explicit version lookup always resolves the requested version.
     """
-    from openmagi_core_agent.recipes.compiler import (
+    from magi_agent.recipes.compiler import (
         AgentRecipeCompiler,
         PackRegistry,
         ProfileResolutionRequest,
     )
-    from openmagi_core_agent.recipes.workflow_recipe import (
+    from magi_agent.recipes.workflow_recipe import (
         SavedWorkflowEntry,
         SavedWorkflowRegistry,
     )
@@ -373,12 +373,12 @@ def test_registry_get_returns_last_registered_not_highest_version() -> None:
 def test_from_recipe_rejects_leading_slash_in_name() -> None:
     """from_recipe must reject names that already start with '/' to prevent
     invocation_name returning '//...'."""
-    from openmagi_core_agent.recipes.compiler import (
+    from magi_agent.recipes.compiler import (
         AgentRecipeCompiler,
         PackRegistry,
         ProfileResolutionRequest,
     )
-    from openmagi_core_agent.recipes.workflow_recipe import SavedWorkflowEntry
+    from magi_agent.recipes.workflow_recipe import SavedWorkflowEntry
 
     snapshot = AgentRecipeCompiler(PackRegistry.with_first_party_packs()).compile(
         ProfileResolutionRequest(taskProfile={"taskType": "research"})
@@ -424,15 +424,15 @@ def test_deep_research_recipe_produces_cited_cross_checked_result(
     """
     monkeypatch.setenv("MAGI_WORKFLOW_EXECUTOR_ENABLED", "1")
 
-    from openmagi_core_agent.recipes.workflow_recipe import (
+    from magi_agent.recipes.workflow_recipe import (
         build_deep_research_workflow,
         assemble_cited_synthesis,
     )
-    from openmagi_core_agent.harness.workflow_executor import (
+    from magi_agent.harness.workflow_executor import (
         WorkflowExecutorConfig,
         execute_workflow,
     )
-    from openmagi_core_agent.workflows.compiler import validate_compiled_workflow
+    from magi_agent.workflows.compiler import validate_compiled_workflow
 
     bundle = build_deep_research_workflow(
         peer_attestations=_deep_research_topology(),
@@ -486,8 +486,8 @@ def test_deep_research_recipe_default_off_does_not_execute(
     neither fans out nor runs cross_review."""
     monkeypatch.delenv("MAGI_WORKFLOW_EXECUTOR_ENABLED", raising=False)
 
-    from openmagi_core_agent.recipes.workflow_recipe import build_deep_research_workflow
-    from openmagi_core_agent.harness.workflow_executor import (
+    from magi_agent.recipes.workflow_recipe import build_deep_research_workflow
+    from magi_agent.harness.workflow_executor import (
         WorkflowExecutorConfig,
         execute_workflow,
     )

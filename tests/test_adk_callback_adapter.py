@@ -10,12 +10,12 @@ from typing import Any
 import pytest
 from google.adk.agents import Agent
 
-from openmagi_core_agent.harness.resolved import build_default_resolved_harness_state
-from openmagi_core_agent.hooks.bus import HookBus, HookBusRunResult, RegisteredHook
-from openmagi_core_agent.hooks.context import HookContext
-from openmagi_core_agent.hooks.manifest import HookManifest, HookPoint
-from openmagi_core_agent.hooks.result import HookResult
-from openmagi_core_agent.tools.manifest import ToolSource
+from magi_agent.harness.resolved import build_default_resolved_harness_state
+from magi_agent.hooks.bus import HookBus, HookBusRunResult, RegisteredHook
+from magi_agent.hooks.context import HookContext
+from magi_agent.hooks.manifest import HookManifest, HookPoint
+from magi_agent.hooks.result import HookResult
+from magi_agent.tools.manifest import ToolSource
 
 
 ADK_CALLBACK_MAPPING = {
@@ -290,7 +290,7 @@ def assert_invocation_payload(invocation: object, expected: Mapping[str, Any]) -
 
 
 def test_all_adk_callbacks_map_to_openmagi_hook_points() -> None:
-    from openmagi_core_agent.adk_bridge.callback_adapter import build_adk_callback_adapter
+    from magi_agent.adk_bridge.callback_adapter import build_adk_callback_adapter
 
     calls: list[tuple[HookPoint, HookContext]] = []
     invocations: list[object] = []
@@ -315,7 +315,7 @@ def test_all_adk_callbacks_map_to_openmagi_hook_points() -> None:
 
 
 def test_official_adk_agent_accepts_adapter_callbacks_without_runner() -> None:
-    from openmagi_core_agent.adk_bridge.callback_adapter import build_adk_callback_adapter
+    from magi_agent.adk_bridge.callback_adapter import build_adk_callback_adapter
 
     adapter = build_adk_callback_adapter(
         hook_bus=RecordingHookBus(result=continue_result(), calls=[]),
@@ -340,7 +340,7 @@ def test_official_adk_agent_accepts_adapter_callbacks_without_runner() -> None:
 def test_before_tool_non_continue_actions_raise_explicit_openmagi_exception(
     final_action: str,
 ) -> None:
-    from openmagi_core_agent.adk_bridge.callback_adapter import (
+    from magi_agent.adk_bridge.callback_adapter import (
         OpenMagiAdkCallbackBlocked,
         build_adk_callback_adapter,
     )
@@ -385,7 +385,7 @@ def test_before_tool_non_continue_actions_raise_explicit_openmagi_exception(
 
 def test_non_blocking_observer_does_not_delay_callback_and_telemetry_fails_open() -> None:
     async def scenario() -> None:
-        from openmagi_core_agent.adk_bridge.callback_adapter import build_adk_callback_adapter
+        from magi_agent.adk_bridge.callback_adapter import build_adk_callback_adapter
 
         observer_started = asyncio.Event()
         release_observer = asyncio.Event()
@@ -440,11 +440,11 @@ def test_callback_adapter_import_does_not_connect_runner_traffic_or_routes() -> 
 import importlib
 import sys
 
-importlib.import_module("openmagi_core_agent.adk_bridge.callback_adapter")
+importlib.import_module("magi_agent.adk_bridge.callback_adapter")
 forbidden_modules = (
-    "openmagi_core_agent.adk_bridge.runner_adapter",
-    "openmagi_core_agent.transport.chat",
-    "openmagi_core_agent.transport.tools",
+    "magi_agent.adk_bridge.runner_adapter",
+    "magi_agent.transport.chat",
+    "magi_agent.transport.tools",
 )
 loaded = [module for module in forbidden_modules if module in sys.modules]
 if loaded:

@@ -3,7 +3,7 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
-from openmagi_core_agent.evidence.rollout import (
+from magi_agent.evidence.rollout import (
     EvidenceRolloutMetadata,
     default_audit_before_block_rollout_metadata,
 )

@@ -4,7 +4,7 @@ import json
 
 
 def test_provider_digest_is_stable_for_equivalent_sanitized_payloads() -> None:
-    from openmagi_core_agent.runtime.provider_receipts import (
+    from magi_agent.runtime.provider_receipts import (
         provider_digest,
         sanitize_provider_payload,
     )
@@ -33,7 +33,7 @@ def test_provider_digest_is_stable_for_equivalent_sanitized_payloads() -> None:
 
 
 def test_provider_receipt_public_fields_are_digest_addressed_and_redacted() -> None:
-    from openmagi_core_agent.runtime.provider_receipts import build_provider_receipt
+    from magi_agent.runtime.provider_receipts import build_provider_receipt
 
     receipt = build_provider_receipt(
         provider_name="fake-search",
@@ -77,7 +77,7 @@ def test_provider_receipt_public_fields_are_digest_addressed_and_redacted() -> N
 
 
 def test_direct_provider_receipt_construction_sanitizes_public_identifiers() -> None:
-    from openmagi_core_agent.runtime.provider_receipts import ProviderReceipt
+    from magi_agent.runtime.provider_receipts import ProviderReceipt
 
     receipt = ProviderReceipt(
         receiptId="/Users/kevin/private/receipt.txt",
@@ -106,7 +106,7 @@ def test_direct_provider_receipt_construction_sanitizes_public_identifiers() -> 
 
 
 def test_evidence_refs_and_forged_receipt_paths_are_sanitized() -> None:
-    from openmagi_core_agent.runtime.provider_receipts import ProviderReceipt
+    from magi_agent.runtime.provider_receipts import ProviderReceipt
 
     receipt = ProviderReceipt(
         receiptId="provider-receipt:safe",

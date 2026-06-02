@@ -7,41 +7,41 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from openmagi_core_agent.evidence.child_runtime_envelope import (
+from magi_agent.evidence.child_runtime_envelope import (
     ChildRuntimeEnvelope,
     ChildRuntimeEnvelopeAuthorityFlags,
 )
 from runtime_issuance_support import issue_test_runtime_authority
-from openmagi_core_agent.evidence.subagent import (
+from magi_agent.evidence.subagent import (
     DelegatedEvidenceRequirement,
     EvidenceBoundaryLedgerRef,
     ExecutionBoundaryIdentity,
 )
-from openmagi_core_agent.harness.verifier_bus import VerifierResultMetadata
-from openmagi_core_agent.meta_orchestration.child_acceptance import (
+from magi_agent.harness.verifier_bus import VerifierResultMetadata
+from magi_agent.meta_orchestration.child_acceptance import (
     ChildAcceptancePolicy,
     ChildAcceptanceVerdict,
     accept_child_result,
     issue_runtime_child_result,
 )
-from openmagi_core_agent.meta_orchestration.commit_adapter import (
+from magi_agent.meta_orchestration.commit_adapter import (
     evaluate_before_commit_for_assembly,
     issue_runtime_verifier_result_for_assembly,
 )
-from openmagi_core_agent.meta_orchestration.final_assembly import (
+from magi_agent.meta_orchestration.final_assembly import (
     assemble_final_output_from_inspection,
 )
-from openmagi_core_agent.meta_orchestration.inspection_loop import (
+from magi_agent.meta_orchestration.inspection_loop import (
     MetaInspectedChildVerdict,
     inspect_child_verdicts,
 )
-from openmagi_core_agent.meta_orchestration.projection import (
+from magi_agent.meta_orchestration.projection import (
     MetaProjectionActivationFlags,
     meta_projection_assembly_id_for_inspection,
     meta_projection_loop_id_for_plan,
     project_meta_orchestration_status,
 )
-from openmagi_core_agent.meta_orchestration.task_plan import (
+from magi_agent.meta_orchestration.task_plan import (
     MetaChildTaskSpec,
     MetaTaskPlan,
 )

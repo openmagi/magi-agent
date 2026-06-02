@@ -4,8 +4,8 @@ import inspect
 
 import pytest
 
-from openmagi_core_agent.evidence import runtime_issuance as runtime_issuance_module
-from openmagi_core_agent.evidence.runtime_issuance import (
+from magi_agent.evidence import runtime_issuance as runtime_issuance_module
+from magi_agent.evidence.runtime_issuance import (
     RuntimeIssueAuthority,
     require_runtime_issue_authority,
 )

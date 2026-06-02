@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from openmagi_core_agent.harness.long_context_eval import (
+from magi_agent.harness.long_context_eval import (
     LongContextReliabilityCase,
     evaluate_long_context_case,
 )

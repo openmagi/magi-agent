@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from openmagi_core_agent.transport.sse import InMemorySseWriter
+from magi_agent.transport.sse import InMemorySseWriter
 
 
 FIXTURE_PATH = (

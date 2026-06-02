@@ -14,24 +14,24 @@ def test_memory_contract_import_stays_adk_runner_toolhost_route_and_provider_fre
 import importlib
 import sys
 
-importlib.import_module("openmagi_core_agent.memory.contracts")
-importlib.import_module("openmagi_core_agent.memory.policy")
-importlib.import_module("openmagi_core_agent.memory.adapters.hipocampus_readonly")
+importlib.import_module("magi_agent.memory.contracts")
+importlib.import_module("magi_agent.memory.policy")
+importlib.import_module("magi_agent.memory.adapters.hipocampus_readonly")
 
 forbidden_prefixes = (
     "google.adk",
-    "openmagi_core_agent.adk_bridge.runner_adapter",
-    "openmagi_core_agent.adk_bridge.local_runner",
-    "openmagi_core_agent.adk_bridge.tool_adapter",
-    "openmagi_core_agent.tools.dispatcher",
-    "openmagi_core_agent.tools.registry",
-    "openmagi_core_agent.plugins.agentmemory",
-    "openmagi_core_agent.services.memory",
-    "openmagi_core_agent.hipocampus",
-    "openmagi_core_agent.qmd",
-    "openmagi_core_agent.app",
-    "openmagi_core_agent.transport.chat",
-    "openmagi_core_agent.routes",
+    "magi_agent.adk_bridge.runner_adapter",
+    "magi_agent.adk_bridge.local_runner",
+    "magi_agent.adk_bridge.tool_adapter",
+    "magi_agent.tools.dispatcher",
+    "magi_agent.tools.registry",
+    "magi_agent.plugins.agentmemory",
+    "magi_agent.services.memory",
+    "magi_agent.hipocampus",
+    "magi_agent.qmd",
+    "magi_agent.app",
+    "magi_agent.transport.chat",
+    "magi_agent.routes",
     "subprocess",
 )
 loaded = [

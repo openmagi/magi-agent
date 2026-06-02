@@ -5,17 +5,17 @@ import asyncio
 import pytest
 from google.adk.events import Event
 
-from openmagi_core_agent.adk_bridge.artifact_service import (
+from magi_agent.adk_bridge.artifact_service import (
     ArtifactAuthorityFlags,
     ArtifactBoundaryConfig,
     ArtifactServiceBoundary,
 )
-from openmagi_core_agent.adk_bridge.memory_service import (
+from magi_agent.adk_bridge.memory_service import (
     MemoryAuthorityFlags,
     MemoryBoundaryConfig,
     MemoryServiceBoundary,
 )
-from openmagi_core_agent.adk_bridge.session_service import (
+from magi_agent.adk_bridge.session_service import (
     WorkspaceSessionService,
     project_session_for_durable_store,
 )

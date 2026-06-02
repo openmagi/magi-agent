@@ -5,8 +5,8 @@ from typing import Any
 
 import pytest
 
-from openmagi_core_agent.shadow.gate4_consumer import Gate4LocalHandoff
-from openmagi_core_agent.shadow.gate4c0_shadow_config import (
+from magi_agent.shadow.gate4_consumer import Gate4LocalHandoff
+from magi_agent.shadow.gate4c0_shadow_config import (
     Gate4C0AllowlistMetadata,
     Gate4C0BudgetPolicy,
     Gate4C0InputEnvelopeMetadata,
@@ -19,11 +19,11 @@ from openmagi_core_agent.shadow.gate4c0_shadow_config import (
     Gate4C0ShadowConfig,
     Gate4C0ToolPolicy,
 )
-from openmagi_core_agent.shadow.gate4c1_runner_shadow_invoker import (
+from magi_agent.shadow.gate4c1_runner_shadow_invoker import (
     Gate4C1RunnerShadowInvocationConfig,
     Gate4C1RunnerShadowInvocationResult,
 )
-from openmagi_core_agent.shadow.gate5a_no_memory_shadow_canary import (
+from magi_agent.shadow.gate5a_no_memory_shadow_canary import (
     Gate5ANoMemoryShadowCanaryAuthorityFlags,
     Gate5ANoMemoryShadowCanaryConfig,
     Gate5ANoMemoryShadowCanaryPolicy,

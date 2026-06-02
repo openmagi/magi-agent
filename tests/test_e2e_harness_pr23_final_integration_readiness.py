@@ -6,7 +6,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from openmagi_core_agent.harness.e2e_readiness import (
+from magi_agent.harness.e2e_readiness import (
     DEPLOYMENT_CANARY_ACTIVATION_BLOCKERS,
     E2E_AUTHORITY_FLAG_ALIASES,
     E2E_HARNESS_REQUIRED_ROW_IDS,
@@ -17,7 +17,7 @@ from openmagi_core_agent.harness.e2e_readiness import (
 
 PYTHON_ROOT = Path(__file__).resolve().parents[1]
 MATRIX_PATH = PYTHON_ROOT / "tests/fixtures/parity/e2e_harness_parity_matrix.json"
-MODULE_PATH = PYTHON_ROOT / "openmagi_core_agent/harness/e2e_readiness.py"
+MODULE_PATH = PYTHON_ROOT / "magi_agent/harness/e2e_readiness.py"
 
 
 def _load_rows() -> list[dict[str, object]]:
@@ -119,7 +119,7 @@ def test_pr23_rows_are_default_off_activation_blocked_and_no_longer_missing() ->
         ref["path"] for ref in deployment_row["latestMainCoveredRefs"]  # type: ignore[index]
     }
     expected_refs = {
-        "openmagi_core_agent/harness/e2e_readiness.py",
+        "magi_agent/harness/e2e_readiness.py",
         "tests/test_e2e_harness_pr23_final_integration_readiness.py",
     }
 
@@ -190,7 +190,7 @@ def test_public_projection_sanitizes_raw_private_inputs() -> None:
     )
     final_row["notes"] = "raw secret token /workspace/private session key=abc api key=abc"
     final_row["latestMainCoveredRefs"] = [
-        {"path": "openmagi_core_agent/harness/e2e_readiness.py", "state": "existing"},
+        {"path": "magi_agent/harness/e2e_readiness.py", "state": "existing"},
         {"path": "/Users/kevin/private/raw.txt", "state": "existing"},
         {"path": "/home/sam/.ssh/id_rsa", "state": "existing"},
         {"path": "id_rsa", "state": "existing"},
@@ -269,7 +269,7 @@ def test_e2e_readiness_import_boundary_stays_metadata_only() -> None:
 import importlib
 import sys
 
-module = importlib.import_module("openmagi_core_agent.harness.e2e_readiness")
+module = importlib.import_module("magi_agent.harness.e2e_readiness")
 assert module.build_final_integration_readiness_report([])
 
 forbidden_exact = (
@@ -279,30 +279,30 @@ forbidden_exact = (
     "google.adk.sessions",
     "google.adk.events",
     "google.adk.tools",
-    "openmagi_core_agent.adk_bridge.runner_adapter",
-    "openmagi_core_agent.adk_bridge.local_runner",
-    "openmagi_core_agent.adk_bridge.local_toolhost",
-    "openmagi_core_agent.tools.dispatcher",
-    "openmagi_core_agent.tools.kernel",
-    "openmagi_core_agent.browser.live_provider_pack",
-    "openmagi_core_agent.memory.write_boundary",
-    "openmagi_core_agent.memory.adapters.hipocampus_readonly",
-    "openmagi_core_agent.web_acquisition.live_provider_pack",
+    "magi_agent.adk_bridge.runner_adapter",
+    "magi_agent.adk_bridge.local_runner",
+    "magi_agent.adk_bridge.local_toolhost",
+    "magi_agent.tools.dispatcher",
+    "magi_agent.tools.kernel",
+    "magi_agent.browser.live_provider_pack",
+    "magi_agent.memory.write_boundary",
+    "magi_agent.memory.adapters.hipocampus_readonly",
+    "magi_agent.web_acquisition.live_provider_pack",
 )
 forbidden_prefixes = (
     "google.adk",
-    "openmagi_core_agent.routes",
-    "openmagi_core_agent.transport",
-    "openmagi_core_agent.chat_proxy",
-    "openmagi_core_agent.proxy",
-    "openmagi_core_agent.deploy",
-    "openmagi_core_agent.provisioning",
-    "openmagi_core_agent.k8s",
-    "openmagi_core_agent.database",
-    "openmagi_core_agent.supabase",
-    "openmagi_core_agent.browser",
-    "openmagi_core_agent.web_acquisition",
-    "openmagi_core_agent.memory",
+    "magi_agent.routes",
+    "magi_agent.transport",
+    "magi_agent.chat_proxy",
+    "magi_agent.proxy",
+    "magi_agent.deploy",
+    "magi_agent.provisioning",
+    "magi_agent.k8s",
+    "magi_agent.database",
+    "magi_agent.supabase",
+    "magi_agent.browser",
+    "magi_agent.web_acquisition",
+    "magi_agent.memory",
 )
 loaded = [
     name
@@ -327,21 +327,21 @@ def test_e2e_readiness_source_has_no_runtime_or_provider_imports() -> None:
     source = MODULE_PATH.read_text(encoding="utf-8")
     forbidden_imports = (
         "google.adk",
-        "openmagi_core_agent.adk_bridge.runner_adapter",
-        "openmagi_core_agent.adk_bridge.local_runner",
-        "openmagi_core_agent.adk_bridge.local_toolhost",
-        "openmagi_core_agent.tools.dispatcher",
-        "openmagi_core_agent.tools.kernel",
-        "openmagi_core_agent.routes",
-        "openmagi_core_agent.transport",
-        "openmagi_core_agent.chat_proxy",
-        "openmagi_core_agent.proxy",
-        "openmagi_core_agent.deploy",
-        "openmagi_core_agent.provisioning",
-        "openmagi_core_agent.k8s",
-        "openmagi_core_agent.browser",
-        "openmagi_core_agent.web_acquisition",
-        "openmagi_core_agent.memory",
+        "magi_agent.adk_bridge.runner_adapter",
+        "magi_agent.adk_bridge.local_runner",
+        "magi_agent.adk_bridge.local_toolhost",
+        "magi_agent.tools.dispatcher",
+        "magi_agent.tools.kernel",
+        "magi_agent.routes",
+        "magi_agent.transport",
+        "magi_agent.chat_proxy",
+        "magi_agent.proxy",
+        "magi_agent.deploy",
+        "magi_agent.provisioning",
+        "magi_agent.k8s",
+        "magi_agent.browser",
+        "magi_agent.web_acquisition",
+        "magi_agent.memory",
         "fastapi",
         "subprocess",
         "socket",

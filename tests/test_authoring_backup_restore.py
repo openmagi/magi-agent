@@ -5,8 +5,8 @@ from urllib.parse import quote
 import pytest
 from pydantic import BaseModel, ValidationError
 
-from openmagi_core_agent import authoring as authoring_module
-from openmagi_core_agent.authoring.backup_restore import (
+from magi_agent import authoring as authoring_module
+from magi_agent.authoring.backup_restore import (
     RecipeBackupArtifactRef,
     RecipeBackupLedgerRef,
     RecipeBackupManifest,
@@ -349,7 +349,7 @@ def test_backup_manifest_rejects_unsafe_refs_summaries_and_status_tokens() -> No
             byteSize=1,
             mediaType="application/json",
             redactionStatus="public_safe",
-            summary="References infra/docker/clawy-core-agent-python/secret.py",
+            summary="References /private/magi-agent/secret.py",
         )
 
     with pytest.raises(ValidationError, match="raw source code"):
@@ -547,7 +547,7 @@ def test_backup_restore_boundary_has_no_runtime_tool_model_network_deploy_or_sto
     import ast
     from pathlib import Path
 
-    source = Path("openmagi_core_agent/authoring/backup_restore.py").read_text()
+    source = Path("magi_agent/authoring/backup_restore.py").read_text()
     tree = ast.parse(source)
     forbidden = (
         "tool_host",

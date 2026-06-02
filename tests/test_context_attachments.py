@@ -2,7 +2,7 @@ from __future__ import annotations
 
 
 def test_context_attachments_include_channel_memory_and_safe_file_label() -> None:
-    from openmagi_core_agent.runtime.context_attachments import (
+    from magi_agent.runtime.context_attachments import (
         build_current_turn_context_attachments,
     )
 
@@ -29,7 +29,7 @@ def test_context_attachments_include_channel_memory_and_safe_file_label() -> Non
 
 
 def test_context_attachments_reject_private_payload_markers() -> None:
-    from openmagi_core_agent.runtime.context_attachments import (
+    from magi_agent.runtime.context_attachments import (
         build_current_turn_context_attachments,
     )
 

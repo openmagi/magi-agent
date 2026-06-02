@@ -6,7 +6,7 @@ import sys
 import pytest
 from pydantic import ValidationError
 
-from openmagi_core_agent.harness.goal_loop import (
+from magi_agent.harness.goal_loop import (
     DEFAULT_GOAL_LOOP_MAX_SPAWN_DEPTH,
     GoalLoopOptOutState,
     GoalLoopOwnershipScope,
@@ -234,15 +234,15 @@ def test_goal_loop_import_boundary_does_not_load_adk_runner_routes_dispatcher_or
 import importlib
 import sys
 
-importlib.import_module("openmagi_core_agent.harness.goal_loop")
+importlib.import_module("magi_agent.harness.goal_loop")
 forbidden_prefixes = ("google.adk",)
 forbidden_modules = (
-    "openmagi_core_agent.adk_bridge.runner_adapter",
-    "openmagi_core_agent.adk_bridge.tool_adapter",
-    "openmagi_core_agent.transport.chat",
-    "openmagi_core_agent.transport.tools",
-    "openmagi_core_agent.tools.dispatcher",
-    "openmagi_core_agent.hooks.bus",
+    "magi_agent.adk_bridge.runner_adapter",
+    "magi_agent.adk_bridge.tool_adapter",
+    "magi_agent.transport.chat",
+    "magi_agent.transport.tools",
+    "magi_agent.tools.dispatcher",
+    "magi_agent.hooks.bus",
 )
 loaded = [
     module

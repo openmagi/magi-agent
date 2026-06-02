@@ -5,7 +5,7 @@ import json
 import pytest
 from pydantic import ValidationError
 
-from openmagi_core_agent.recipes.hook_composition import (
+from magi_agent.recipes.hook_composition import (
     EffectiveRecipeHookContract,
     HookContribution,
     compose_hook_contributions,

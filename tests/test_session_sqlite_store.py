@@ -7,8 +7,8 @@ from pathlib import Path
 
 import pytest
 
-from openmagi_core_agent.storage.migrations import MIGRATIONS, run_migrations
-from openmagi_core_agent.storage.session_store import (
+from magi_agent.storage.migrations import MIGRATIONS, run_migrations
+from magi_agent.storage.session_store import (
     SessionSqliteStore,
     SessionStoreConfig,
     SessionUsage,

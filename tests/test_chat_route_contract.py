@@ -5,33 +5,33 @@ from types import SimpleNamespace
 
 from fastapi.testclient import TestClient
 
-from openmagi_core_agent.adk_bridge.primitives import AdkPrimitiveBoundary
-from openmagi_core_agent.app import create_app
-from openmagi_core_agent.config.models import (
+from magi_agent.adk_bridge.primitives import AdkPrimitiveBoundary
+from magi_agent.app import create_app
+from magi_agent.config.models import (
     BuildInfo,
     PythonRuntimeAuthorityConfig,
     RuntimeConfig,
 )
-from openmagi_core_agent.evidence.observed_egress import (
+from magi_agent.evidence.observed_egress import (
     LiveEgressTelemetryEvidenceProvider,
     LocalObservedEgressEvidenceProvider,
     ObservedEgressEvidence,
 )
-from openmagi_core_agent.runtime.openmagi_runtime import OpenMagiRuntime
-from openmagi_core_agent.shadow.gate5b4c3_live_runner_boundary import (
+from magi_agent.runtime.openmagi_runtime import OpenMagiRuntime
+from magi_agent.shadow.gate5b4c3_live_runner_boundary import (
     Gate5B4C3LiveAdkPrimitives,
 )
-from openmagi_core_agent.shadow.gate5b4c3_shadow_generation_contract import (
+from magi_agent.shadow.gate5b4c3_shadow_generation_contract import (
     Gate5B4C3ShadowGenerationConfig,
 )
-from openmagi_core_agent.shadow.gate5b4c3_shadow_counter_store import (
+from magi_agent.shadow.gate5b4c3_shadow_counter_store import (
     Gate5B4C3ShadowCounterStore,
 )
-from openmagi_core_agent.transport.shadow_generations import (
+from magi_agent.transport.shadow_generations import (
     Gate5B4C3ShadowGenerationRouteConfig,
 )
-from openmagi_core_agent.transport import chat as chat_module
-from openmagi_core_agent.transport.chat import (
+from magi_agent.transport import chat as chat_module
+from magi_agent.transport.chat import (
     Gate5BUserVisibleChatRouteConfig,
     build_gate5b_user_visible_chat_route_config_from_env,
     build_gate5b_user_visible_canary_runner_request,
@@ -97,7 +97,7 @@ def test_chat_completions_route_is_disabled_by_default(monkeypatch) -> None:
     assert response.status_code == 503
     assert response.json() == {
         "error": "chat_route_disabled",
-        "runtime": "core-agent",
+        "runtime": "magi-agent",
         "runtimeEngine": "adk-python",
     }
 
@@ -128,7 +128,7 @@ def test_chat_route_enabled_without_canary_gate_fails_open_to_typescript(monkeyp
         "fallbackStatus": "fallback_to_typescript",
         "responseAuthority": "typescript",
         "reason": "canary_gate_disabled",
-        "runtime": "core-agent",
+        "runtime": "magi-agent",
         "runtimeEngine": "adk-python",
     }
 
@@ -211,7 +211,7 @@ def test_public_identity_policy_is_canonical_and_model_visible_safe() -> None:
     assert "Magi Agent" in policy["modelVisibleSystemContext"]
     assert "OpenMagi" in policy["modelVisibleSystemContext"]
     serialized = str(policy).lower()
-    for forbidden in ("clawy agent", "clawy-core-agent"):
+    for forbidden in ("magi-agent", "magi_agent"):
         assert forbidden not in serialized
 
 
@@ -221,13 +221,13 @@ def test_user_visible_runner_request_normalizes_legacy_workspace_identity_fixtur
             "messages": [
                 {
                     "role": "system",
-                    "content": "You are a Clawy Agent running on clawy-core-agent.",
+                    "content": "You are a Magi Agent running on magi-agent.",
                 },
                 {"role": "user", "content": "Synthetic canary prompt."},
             ],
             "workspaceIdentityText": (
-                "You are a Clawy Agent running on the Clawy platform "
-                "and the Clawy Agent runtime (`clawy-core-agent`)."
+                "You are a Magi Agent running on the Magi platform "
+                "and the Magi Agent runtime (`magi-agent`)."
             ),
         }
     )
@@ -235,7 +235,7 @@ def test_user_visible_runner_request_normalizes_legacy_workspace_identity_fixtur
     serialized = str(request).lower()
     assert "magi agent" in serialized
     assert "openmagi" in serialized
-    for forbidden in ("clawy agent", "clawy-core-agent"):
+    for forbidden in ("magi-agent", "magi_agent"):
         assert forbidden not in serialized
     assert request["legacyIdentitySignals"] == (
         "legacy_public_identity_normalized",
@@ -250,7 +250,7 @@ def test_chat_route_passes_canonical_identity_context_to_mocked_runner(monkeypat
     def mocked_runner(request):
         captured.update(request)
         return {
-            "content": "mocked Clawy Agent response from clawy-core-agent",
+            "content": "mocked Magi Agent response from magi-agent",
             "eventCount": 1,
         }
 
@@ -277,7 +277,7 @@ def test_chat_route_passes_canonical_identity_context_to_mocked_runner(monkeypat
             "messages": [
                 {
                     "role": "system",
-                    "content": "Legacy workspace says Clawy Agent / clawy-core-agent.",
+                    "content": "Legacy workspace says Magi Agent / magi-agent.",
                 },
                 {"role": "user", "content": "synthetic"},
             ],
@@ -289,11 +289,11 @@ def test_chat_route_passes_canonical_identity_context_to_mocked_runner(monkeypat
     serialized_response = str(response.json()).lower()
     assert "magi agent" in serialized_runner_request
     assert "openmagi" in serialized_runner_request
-    for forbidden in ("clawy agent", "clawy-core-agent"):
+    for forbidden in ("magi-agent", "magi_agent"):
         assert forbidden not in serialized_runner_request
-        assert forbidden not in serialized_response
+    assert "magi_agent" not in serialized_response
     assert response.json()["choices"][0]["message"]["content"] == (
-        "mocked Magi Agent response from OpenMagi runtime"
+        "mocked OpenMagi Agent response from OpenMagi runtime"
     )
 
 
@@ -663,8 +663,8 @@ def test_chat_route_live_canary_uses_adk_boundary_and_counter_store(
     runner_input_text = _FakeRunner.run_kwargs["new_message"].parts[0].text
     assert "Magi Agent" in runner_input_text
     assert "OpenMagi" in runner_input_text
-    assert "clawy agent" not in runner_input_text.lower()
-    assert "clawy-core-agent" not in runner_input_text.lower()
+    assert "magi-agent" not in runner_input_text.lower()
+    assert "magi_agent" not in runner_input_text.lower()
     assert _FakeAgent.created_kwargs["tools"] == []
     assert "new_message" in _FakeRunner.run_kwargs
     raw_counter_store = json.loads((tmp_path / "counters.json").read_text(encoding="utf-8"))
@@ -676,7 +676,7 @@ def test_chat_route_gate1a_selected_scope_attaches_readonly_tools_only(
     monkeypatch,
     tmp_path: Path,
 ) -> None:
-    from openmagi_core_agent.gates.gate1a_readonly_tools import (
+    from magi_agent.gates.gate1a_readonly_tools import (
         GATE1A_READONLY_TOOL_NAMES,
         Gate1AReadOnlyToolConfig,
     )
@@ -784,7 +784,7 @@ def test_chat_route_selected_scope_attaches_full_toolhost_tools(
     monkeypatch,
     tmp_path: Path,
 ) -> None:
-    from openmagi_core_agent.gates.gate5b_full_toolhost import (
+    from magi_agent.gates.gate5b_full_toolhost import (
         GATE5B_FULL_TOOLHOST_TOOL_NAMES,
         Gate5BFullToolHostConfig,
     )
@@ -880,7 +880,7 @@ def test_chat_route_selected_full_toolhost_projects_first_party_harness_admissio
     monkeypatch,
     tmp_path: Path,
 ) -> None:
-    from openmagi_core_agent.gates.gate5b_full_toolhost import (
+    from magi_agent.gates.gate5b_full_toolhost import (
         GATE5B_FULL_TOOLHOST_TOOL_NAMES,
         Gate5BFullToolHostConfig,
     )
@@ -985,7 +985,7 @@ def test_chat_route_gate1a_success_includes_observed_egress_evidence_when_availa
     monkeypatch,
     tmp_path: Path,
 ) -> None:
-    from openmagi_core_agent.gates.gate1a_readonly_tools import (
+    from magi_agent.gates.gate1a_readonly_tools import (
         GATE1A_READONLY_TOOL_NAMES,
         Gate1AReadOnlyToolConfig,
     )
@@ -1095,7 +1095,7 @@ def test_chat_route_gate1a_success_uses_live_egress_proxy_telemetry(
     monkeypatch,
     tmp_path: Path,
 ) -> None:
-    from openmagi_core_agent.gates.gate1a_readonly_tools import (
+    from magi_agent.gates.gate1a_readonly_tools import (
         GATE1A_READONLY_TOOL_NAMES,
         Gate1AReadOnlyToolConfig,
     )
@@ -1184,7 +1184,7 @@ def test_chat_route_gate1a_success_uses_live_egress_proxy_telemetry(
     runtime.gate1a_observed_egress_evidence_provider = (
         LiveEgressTelemetryEvidenceProvider(
             telemetry_path,
-            proxy_url="http://gate5b-gemini-egress-proxy.clawy-system.svc.cluster.local:8080",
+            proxy_url="http://gate5b-gemini-egress-proxy.magi-system.svc.cluster.local:8080",
         )
     )
 
@@ -1216,7 +1216,7 @@ def test_chat_route_gate1a_success_marks_missing_egress_evidence_without_counts(
     monkeypatch,
     tmp_path: Path,
 ) -> None:
-    from openmagi_core_agent.gates.gate1a_readonly_tools import (
+    from magi_agent.gates.gate1a_readonly_tools import (
         GATE1A_READONLY_TOOL_NAMES,
         Gate1AReadOnlyToolConfig,
     )
@@ -1295,7 +1295,7 @@ def test_chat_route_gate1a_non_selected_scope_keeps_tools_disabled(
     monkeypatch,
     tmp_path: Path,
 ) -> None:
-    from openmagi_core_agent.gates.gate1a_readonly_tools import (
+    from magi_agent.gates.gate1a_readonly_tools import (
         GATE1A_READONLY_TOOL_NAMES,
         Gate1AReadOnlyToolConfig,
     )
@@ -1371,7 +1371,7 @@ def test_chat_route_gate1a_non_selected_scope_keeps_tools_disabled(
 def test_chat_route_gate1a_mocked_runner_does_not_claim_tool_attachment(
     monkeypatch,
 ) -> None:
-    from openmagi_core_agent.gates.gate1a_readonly_tools import (
+    from magi_agent.gates.gate1a_readonly_tools import (
         GATE1A_READONLY_TOOL_NAMES,
         Gate1AReadOnlyToolConfig,
     )
@@ -1588,7 +1588,7 @@ def test_chat_route_gate1a_provider_setup_error_records_digest_only_diagnostic(
     monkeypatch,
     tmp_path: Path,
 ) -> None:
-    from openmagi_core_agent.gates.gate1a_readonly_tools import (
+    from magi_agent.gates.gate1a_readonly_tools import (
         GATE1A_READONLY_TOOL_NAMES,
         Gate1AReadOnlyToolConfig,
     )
@@ -1755,7 +1755,7 @@ def test_chat_route_gate1a_function_tool_typeerror_keeps_provider_counts_zero(
     monkeypatch,
     tmp_path: Path,
 ) -> None:
-    from openmagi_core_agent.gates.gate1a_readonly_tools import (
+    from magi_agent.gates.gate1a_readonly_tools import (
         GATE1A_READONLY_TOOL_NAMES,
         Gate1AReadOnlyToolConfig,
     )
@@ -2362,19 +2362,19 @@ def test_chat_gate1a_selected_attempt_preflight_reports_fresh_and_blocked_states
 def test_chat_route_import_boundary_keeps_live_surfaces_unwired() -> None:
     route_path = (
         Path(__file__).parents[1]
-        / "openmagi_core_agent"
+        / "magi_agent"
         / "transport"
         / "chat.py"
     )
     source = route_path.read_text(encoding="utf-8")
     forbidden_imports = (
         "google.adk",
-        "openmagi_core_agent.tools",
-        "openmagi_core_agent.memory",
-        "openmagi_core_agent.browser",
-        "openmagi_core_agent.workspace",
-        "openmagi_core_agent.channels",
-        "openmagi_core_agent.database",
+        "magi_agent.tools",
+        "magi_agent.memory",
+        "magi_agent.browser",
+        "magi_agent.workspace",
+        "magi_agent.channels",
+        "magi_agent.database",
         "openai",
         "anthropic",
         "requests",

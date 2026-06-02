@@ -6,14 +6,14 @@ import sys
 import pytest
 from pydantic import ValidationError
 
-from openmagi_core_agent.recipes.coding_mutation import (
+from magi_agent.recipes.coding_mutation import (
     CodingMutationConfig,
     CodingMutationMaterialization,
     CodingMutationRecipe,
     CodingMutationRequest,
     materialize_coding_mutation_recipe,
 )
-from openmagi_core_agent.tools.read_ledger import (
+from magi_agent.tools.read_ledger import (
     ReadLedger,
     ReadLedgerConfig,
     workspace_content_digest,
@@ -466,7 +466,7 @@ def test_coding_mutation_recipe_has_no_live_runtime_imports() -> None:
 import importlib
 import sys
 
-importlib.import_module("openmagi_core_agent.recipes.coding_mutation")
+importlib.import_module("magi_agent.recipes.coding_mutation")
 forbidden = (
     "subprocess",
     "git",
@@ -477,8 +477,8 @@ forbidden = (
     "google.adk.sessions",
     "google.adk.models",
     "google.genai",
-    "openmagi_core_agent.runtime.runner",
-    "openmagi_core_agent.toolhost.runtime",
+    "magi_agent.runtime.runner",
+    "magi_agent.toolhost.runtime",
 )
 loaded = [name for name in forbidden if name in sys.modules]
 if loaded:

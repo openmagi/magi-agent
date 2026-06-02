@@ -8,7 +8,7 @@ import pytest
 
 
 def test_mission_lifecycle_state_set_is_explicit_and_default_off() -> None:
-    from openmagi_core_agent.missions.lifecycle import (
+    from magi_agent.missions.lifecycle import (
         MISSION_LIFECYCLE_STATES,
         MissionLifecycleConfig,
         MissionLifecyclePolicy,
@@ -53,7 +53,7 @@ def test_mission_lifecycle_state_set_is_explicit_and_default_off() -> None:
 
 
 def test_allowed_transition_records_local_fake_receipt_with_policy_and_receipt_digest() -> None:
-    from openmagi_core_agent.missions.lifecycle import (
+    from magi_agent.missions.lifecycle import (
         MissionLifecycleConfig,
         MissionLifecyclePolicy,
         MissionLifecycleStateMachine,
@@ -113,7 +113,7 @@ def test_denied_transitions_are_blocked_before_local_fake_recording(
     to_state: str,
     reason: str,
 ) -> None:
-    from openmagi_core_agent.missions.lifecycle import (
+    from magi_agent.missions.lifecycle import (
         MissionLifecycleConfig,
         MissionLifecyclePolicy,
         MissionLifecycleStateMachine,
@@ -146,7 +146,7 @@ def test_denied_transitions_are_blocked_before_local_fake_recording(
 
 
 def test_policy_evidence_and_approval_are_required_when_configured() -> None:
-    from openmagi_core_agent.missions.lifecycle import (
+    from magi_agent.missions.lifecycle import (
         MissionLifecycleConfig,
         MissionLifecyclePolicy,
         MissionLifecycleStateMachine,
@@ -188,12 +188,12 @@ def test_policy_evidence_and_approval_are_required_when_configured() -> None:
 
 
 def test_authority_flags_cannot_be_forged_by_construct_copy_or_payload() -> None:
-    from openmagi_core_agent.missions.lifecycle import (
+    from magi_agent.missions.lifecycle import (
         MissionLifecycleConfig,
         MissionTransitionResult,
         MissionLifecycleStateMachine,
     )
-    from openmagi_core_agent.missions.receipts import (
+    from magi_agent.missions.receipts import (
         MissionLifecycleAuthorityFlags,
         MissionTransitionReceipt,
         sha256_ref,
@@ -282,7 +282,7 @@ def test_authority_flags_cannot_be_forged_by_construct_copy_or_payload() -> None
 
 
 def test_receipt_and_projection_redact_raw_private_mission_payloads() -> None:
-    from openmagi_core_agent.missions.lifecycle import (
+    from magi_agent.missions.lifecycle import (
         MissionLifecycleConfig,
         MissionLifecyclePolicy,
         MissionLifecycleStateMachine,
@@ -344,7 +344,7 @@ def test_receipt_and_projection_redact_raw_private_mission_payloads() -> None:
 
 
 def test_direct_receipt_construction_sanitizes_unsafe_reason_codes() -> None:
-    from openmagi_core_agent.missions.receipts import MissionTransitionReceipt, sha256_ref
+    from magi_agent.missions.receipts import MissionTransitionReceipt, sha256_ref
 
     receipt = MissionTransitionReceipt(
         receiptId="mission-transition:reason",
@@ -382,8 +382,8 @@ def test_direct_receipt_construction_sanitizes_unsafe_reason_codes() -> None:
 
 def test_mission_lifecycle_modules_have_no_live_imports() -> None:
     for module_name in (
-        "openmagi_core_agent.missions.lifecycle",
-        "openmagi_core_agent.missions.receipts",
+        "magi_agent.missions.lifecycle",
+        "magi_agent.missions.receipts",
     ):
         importlib.import_module(module_name)
 
@@ -398,16 +398,16 @@ import importlib
 import sys
 
 for module_name in (
-    "openmagi_core_agent.missions.lifecycle",
-    "openmagi_core_agent.missions.receipts",
+    "magi_agent.missions.lifecycle",
+    "magi_agent.missions.receipts",
 ):
     importlib.import_module(module_name)
 
 forbidden = (
     "google.adk.runners",
     "google.adk.agents",
-    "openmagi_core_agent.runtime.runner",
-    "openmagi_core_agent.tools.host",
+    "magi_agent.runtime.runner",
+    "magi_agent.tools.host",
     "subprocess",
     "telegram",
     "requests",

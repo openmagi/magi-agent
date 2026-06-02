@@ -9,8 +9,8 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from openmagi_core_agent.shadow.fixture_runner import Gate2ShadowOutputFlags
-from openmagi_core_agent.shadow.redacted_ts_bundle import (
+from magi_agent.shadow.fixture_runner import Gate2ShadowOutputFlags
+from magi_agent.shadow.redacted_ts_bundle import (
     RedactedTypeScriptBundle,
     compare_redacted_ts_bundle,
     load_redacted_ts_bundle,
@@ -349,26 +349,26 @@ def test_redacted_ts_bundle_import_boundary_stays_production_runtime_free() -> N
 import importlib
 import sys
 
-module = importlib.import_module("openmagi_core_agent.shadow.redacted_ts_bundle")
+module = importlib.import_module("magi_agent.shadow.redacted_ts_bundle")
 assert hasattr(module, "load_redacted_ts_bundle")
 
 forbidden_prefixes = (
-    "openmagi_core_agent.transport.chat",
-    "openmagi_core_agent.transport.tools",
-    "openmagi_core_agent.transport.plugins",
-    "openmagi_core_agent.routing",
-    "openmagi_core_agent.runtime.openmagi_runtime",
-    "openmagi_core_agent.runtime.turn_controller",
-    "openmagi_core_agent.channels",
-    "openmagi_core_agent.deploy",
-    "openmagi_core_agent.provisioning",
-    "openmagi_core_agent.k8s",
-    "openmagi_core_agent.telegram",
-    "openmagi_core_agent.api",
-    "openmagi_core_agent.proxy",
-    "openmagi_core_agent.dashboard",
-    "openmagi_core_agent.typescript_runtime",
-    "openmagi_core_agent.ts_runtime",
+    "magi_agent.transport.chat",
+    "magi_agent.transport.tools",
+    "magi_agent.transport.plugins",
+    "magi_agent.routing",
+    "magi_agent.runtime.openmagi_runtime",
+    "magi_agent.runtime.turn_controller",
+    "magi_agent.channels",
+    "magi_agent.deploy",
+    "magi_agent.provisioning",
+    "magi_agent.k8s",
+    "magi_agent.telegram",
+    "magi_agent.api",
+    "magi_agent.proxy",
+    "magi_agent.dashboard",
+    "magi_agent.typescript_runtime",
+    "magi_agent.ts_runtime",
 )
 loaded = [
     module_name
@@ -388,4 +388,4 @@ if loaded:
     )
 
     assert completed.returncode == 0, completed.stderr
-    assert importlib.import_module("openmagi_core_agent.shadow.redacted_ts_bundle")
+    assert importlib.import_module("magi_agent.shadow.redacted_ts_bundle")

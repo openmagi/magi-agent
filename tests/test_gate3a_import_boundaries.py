@@ -19,9 +19,9 @@ def _run_fresh_python(script: str) -> subprocess.CompletedProcess[str]:
 @pytest.mark.parametrize(
     "module_name",
     (
-        "openmagi_core_agent.shadow.gate3a_bundle",
-        "openmagi_core_agent.shadow.gate3a_replay",
-        "openmagi_core_agent.shadow.gate3a_report",
+        "magi_agent.shadow.gate3a_bundle",
+        "magi_agent.shadow.gate3a_replay",
+        "magi_agent.shadow.gate3a_report",
     ),
 )
 def test_gate3a_modules_do_not_import_forbidden_production_surfaces(
@@ -36,33 +36,33 @@ module = importlib.import_module({module_name!r})
 assert module is not None
 
 forbidden_prefixes = (
-    "openmagi_core_agent.transport.chat",
-    "openmagi_core_agent.transport.tools",
-    "openmagi_core_agent.transport.plugins",
-    "openmagi_core_agent.channels",
-    "openmagi_core_agent.runtime.openmagi_runtime",
-    "openmagi_core_agent.runtime.turn_controller",
-    "openmagi_core_agent.routing",
-    "openmagi_core_agent.tools.dispatcher",
-    "openmagi_core_agent.workspace",
-    "openmagi_core_agent.deploy",
-    "openmagi_core_agent.provisioning",
-    "openmagi_core_agent.k8s",
-    "openmagi_core_agent.telegram",
-    "openmagi_core_agent.api",
-    "openmagi_core_agent.proxy",
-    "openmagi_core_agent.dashboard",
-    "openmagi_core_agent.database",
-    "openmagi_core_agent.billing",
-    "openmagi_core_agent.auth",
-    "openmagi_core_agent.model_routing",
-    "openmagi_core_agent.missions",
-    "openmagi_core_agent.scheduler",
-    "openmagi_core_agent.children",
-    "openmagi_core_agent.typescript_runtime",
-    "openmagi_core_agent.ts_runtime",
-    "openmagi_core_agent.signed_ack",
-    "openmagi_core_agent.evidence.extractors",
+    "magi_agent.transport.chat",
+    "magi_agent.transport.tools",
+    "magi_agent.transport.plugins",
+    "magi_agent.channels",
+    "magi_agent.runtime.openmagi_runtime",
+    "magi_agent.runtime.turn_controller",
+    "magi_agent.routing",
+    "magi_agent.tools.dispatcher",
+    "magi_agent.workspace",
+    "magi_agent.deploy",
+    "magi_agent.provisioning",
+    "magi_agent.k8s",
+    "magi_agent.telegram",
+    "magi_agent.api",
+    "magi_agent.proxy",
+    "magi_agent.dashboard",
+    "magi_agent.database",
+    "magi_agent.billing",
+    "magi_agent.auth",
+    "magi_agent.model_routing",
+    "magi_agent.missions",
+    "magi_agent.scheduler",
+    "magi_agent.children",
+    "magi_agent.typescript_runtime",
+    "magi_agent.ts_runtime",
+    "magi_agent.signed_ack",
+    "magi_agent.evidence.extractors",
 )
 loaded = [
     module_name
@@ -84,11 +84,11 @@ def test_disabled_gate3a_env_parse_does_not_import_replay_module() -> None:
     completed = _run_fresh_python(
         """
 import sys
-from openmagi_core_agent.config.env import parse_gate3a_recorded_replay_env
+from magi_agent.config.env import parse_gate3a_recorded_replay_env
 
 config = parse_gate3a_recorded_replay_env({})
 assert config.enabled is False
-assert "openmagi_core_agent.shadow.gate3a_replay" not in sys.modules
+assert "magi_agent.shadow.gate3a_replay" not in sys.modules
 """
     )
 
@@ -99,7 +99,7 @@ def test_disabled_gate3a_env_parse_ignores_dirs_without_importing_replay_module(
     completed = _run_fresh_python(
         """
 import sys
-from openmagi_core_agent.config.env import parse_gate3a_recorded_replay_env
+from magi_agent.config.env import parse_gate3a_recorded_replay_env
 
 config = parse_gate3a_recorded_replay_env({
     "CORE_AGENT_PYTHON_GATE3A_RECORDED_REPLAY": "false",
@@ -109,7 +109,7 @@ config = parse_gate3a_recorded_replay_env({
 assert config.enabled is False
 assert config.input_dir is None
 assert config.output_dir is None
-assert "openmagi_core_agent.shadow.gate3a_replay" not in sys.modules
+assert "magi_agent.shadow.gate3a_replay" not in sys.modules
 """
     )
 
@@ -119,10 +119,10 @@ assert "openmagi_core_agent.shadow.gate3a_replay" not in sys.modules
 def test_gate3a_runtime_modules_do_not_import_shell_or_code_execution_helpers() -> None:
     root = Path(__file__).parents[1]
     module_paths = (
-        root / "openmagi_core_agent" / "shadow" / "gate3a_bundle.py",
-        root / "openmagi_core_agent" / "shadow" / "gate3a_replay.py",
-        root / "openmagi_core_agent" / "shadow" / "gate3a_report.py",
-        root / "openmagi_core_agent" / "config" / "env.py",
+        root / "magi_agent" / "shadow" / "gate3a_bundle.py",
+        root / "magi_agent" / "shadow" / "gate3a_replay.py",
+        root / "magi_agent" / "shadow" / "gate3a_report.py",
+        root / "magi_agent" / "config" / "env.py",
     )
     forbidden_imports = (
         "subprocess",

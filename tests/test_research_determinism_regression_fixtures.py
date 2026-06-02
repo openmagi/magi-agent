@@ -5,7 +5,7 @@ import re
 from pathlib import Path
 from typing import Any, get_args
 
-from openmagi_core_agent.research.final_projection_gate import (
+from magi_agent.research.final_projection_gate import (
     ResearchFinalProjectionRepairAction,
 )
 

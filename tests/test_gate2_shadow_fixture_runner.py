@@ -11,7 +11,7 @@ import pytest
 from pydantic import ValidationError
 from pydantic_core import PydanticSerializationError
 
-from openmagi_core_agent.shadow.fixture_runner import (
+from magi_agent.shadow.fixture_runner import (
     Gate2ShadowFixtureInput,
     Gate2ShadowOutputFlags,
     Gate2ShadowFixtureReport,
@@ -741,7 +741,7 @@ def test_gate2_shadow_fixture_report_requires_exact_adk_primitives(
 
 
 def test_gate2_shadow_fixture_report_context_token_cannot_forge_report_owned_metadata() -> None:
-    from openmagi_core_agent.shadow import fixture_runner
+    from magi_agent.shadow import fixture_runner
 
     context: dict[str, object] = {}
     context_key = getattr(fixture_runner, "_RUNNER_GENERATED_REPORT_CONTEXT_KEY", None)
@@ -808,7 +808,7 @@ def test_gate2_shadow_fixture_report_context_token_cannot_forge_report_owned_met
 def test_gate2_shadow_fixture_runner_generated_report_rejects_nested_report_owned_metadata(
     comparison_metadata: dict[str, object],
 ) -> None:
-    from openmagi_core_agent.shadow import fixture_runner
+    from magi_agent.shadow import fixture_runner
 
     build_report = getattr(
         fixture_runner,
@@ -836,7 +836,7 @@ def test_gate2_shadow_fixture_runner_generated_report_rejects_nested_report_owne
 def test_gate2_shadow_fixture_runner_generated_report_rejects_compound_output_attachment_metadata_keys(
     comparison_metadata: dict[str, object],
 ) -> None:
-    from openmagi_core_agent.shadow import fixture_runner
+    from magi_agent.shadow import fixture_runner
 
     build_report = getattr(
         fixture_runner,
@@ -864,7 +864,7 @@ def test_gate2_shadow_fixture_runner_generated_report_rejects_compound_output_at
 def test_gate2_shadow_fixture_runner_generated_report_rejects_compact_output_attachment_metadata_keys(
     comparison_metadata: dict[str, object],
 ) -> None:
-    from openmagi_core_agent.shadow import fixture_runner
+    from magi_agent.shadow import fixture_runner
 
     build_report = getattr(
         fixture_runner,
@@ -892,7 +892,7 @@ def test_gate2_shadow_fixture_runner_generated_report_rejects_compact_output_att
 def test_gate2_shadow_fixture_runner_generated_report_rejects_composed_compact_output_attachment_metadata_keys(
     comparison_metadata: dict[str, object],
 ) -> None:
-    from openmagi_core_agent.shadow import fixture_runner
+    from magi_agent.shadow import fixture_runner
 
     build_report = getattr(
         fixture_runner,
@@ -929,7 +929,7 @@ def test_gate2_shadow_fixture_runner_generated_report_rejects_composed_compact_o
 def test_gate2_shadow_fixture_runner_generated_report_serialization_rejects_compound_output_attachment_snapshot(
     comparison_metadata: dict[str, object],
 ) -> None:
-    from openmagi_core_agent.shadow import fixture_runner
+    from magi_agent.shadow import fixture_runner
 
     report = run_gate2_shadow_fixture(
         Gate2ShadowFixtureInput(
@@ -955,7 +955,7 @@ def test_gate2_shadow_fixture_runner_generated_report_serialization_rejects_comp
 def test_gate2_shadow_fixture_runner_generated_report_serialization_rejects_compact_output_attachment_snapshot(
     comparison_metadata: dict[str, object],
 ) -> None:
-    from openmagi_core_agent.shadow import fixture_runner
+    from magi_agent.shadow import fixture_runner
 
     report = run_gate2_shadow_fixture(
         Gate2ShadowFixtureInput(
@@ -981,7 +981,7 @@ def test_gate2_shadow_fixture_runner_generated_report_serialization_rejects_comp
 def test_gate2_shadow_fixture_runner_generated_report_serialization_rejects_composed_compact_output_attachment_snapshot(
     comparison_metadata: dict[str, object],
 ) -> None:
-    from openmagi_core_agent.shadow import fixture_runner
+    from magi_agent.shadow import fixture_runner
 
     report = run_gate2_shadow_fixture(
         Gate2ShadowFixtureInput(
@@ -1021,7 +1021,7 @@ def test_gate2_shadow_fixture_report_serialization_rejects_unsafe_output_snapsho
     field_name: str,
     unsafe_value: object,
 ) -> None:
-    from openmagi_core_agent.shadow import fixture_runner
+    from magi_agent.shadow import fixture_runner
 
     report = run_gate2_shadow_fixture(
         Gate2ShadowFixtureInput(
@@ -1239,7 +1239,7 @@ def test_gate2_shadow_fixture_sync_runner_fails_cleanly_inside_active_event_loop
 
 def test_gate2_shadow_fixture_async_runner_works_inside_active_event_loop() -> None:
     async def run_inside_active_loop() -> None:
-        from openmagi_core_agent.shadow.fixture_runner import run_gate2_shadow_fixture_async
+        from magi_agent.shadow.fixture_runner import run_gate2_shadow_fixture_async
 
         fixture = Gate2ShadowFixtureInput(
             source="synthetic_local",
@@ -1673,7 +1673,7 @@ def test_gate2_shadow_fixture_runner_rejects_mutated_bundle_kind_comparison_meta
 def test_gate2_shadow_fixture_runner_generated_report_rejects_bundle_kind_metadata(
     comparison_metadata: dict[str, object],
 ) -> None:
-    from openmagi_core_agent.shadow import fixture_runner
+    from magi_agent.shadow import fixture_runner
 
     build_report = getattr(
         fixture_runner,
@@ -2249,7 +2249,7 @@ def test_gate2_shadow_fixture_input_model_copy_revalidates_source() -> None:
         ("userPrompt", "-----BEGIN PRIVATE KEY-----"),
         ("userPrompt", "-----BEGIN RSA PRIVATE KEY-----"),
         ("userPrompt", "xoxb-1234567890-secret"),
-        ("userPrompt", "clawy.pro/api/shadow"),
+        ("userPrompt", "openmagi.ai/api/shadow"),
         ("userPrompt", "evidenceBlockMode enabled"),
         ("userPrompt", "blockFinalAnswer enabled"),
         ("userPrompt", "customExtractor enabled"),
@@ -2266,7 +2266,7 @@ def test_gate2_shadow_fixture_input_model_copy_revalidates_source() -> None:
         ("comparisonMetadata", {"nested": {"serviceRole": "raw-service-role"}}),
         ("comparisonMetadata", {"privateKey": "-----BEGIN PRIVATE KEY-----"}),
         ("comparisonMetadata", {"slackToken": "xoxb-1234567890-secret"}),
-        ("comparisonMetadata", {"host": "clawy.pro"}),
+        ("comparisonMetadata", {"host": "openmagi.ai"}),
         ("comparisonMetadata", {"evidenceBlockMode": False}),
         ("comparisonMetadata", {"blockFinalAnswer": False}),
         ("comparisonMetadata", {"customExtractor": "disabled"}),
@@ -2731,7 +2731,7 @@ def test_gate2_shadow_fixture_rejects_token_like_bare_sk_dash_values(value: str)
         ("userPrompt", "local absolute path /etc/passwd"),
         ("userPrompt", "see C:\\Users\\kevin\\secret.txt"),
         ("userPrompt", "log at C:/prod/workspace/file"),
-        ("userPrompt", "https://clawy.pro/api/proxy/chat"),
+        ("userPrompt", "https://openmagi.ai/api/proxy/chat"),
         ("userPrompt", "see https://example.com/path"),
         ("userPrompt", "stream wss://example.com/events"),
         ("userPrompt", "database postgresql://user:pass@localhost/db"),
@@ -2825,9 +2825,9 @@ def test_gate2_shadow_fixture_rejects_production_looking_content(
 def test_gate2_shadow_fixture_restores_local_runner_env_before_async_collection(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from openmagi_core_agent.adk_bridge import local_runner
-    from openmagi_core_agent.adk_bridge.runner_adapter import RunnerTurnInput
-    from openmagi_core_agent.shadow import fixture_runner
+    from magi_agent.adk_bridge import local_runner
+    from magi_agent.adk_bridge.runner_adapter import RunnerTurnInput
+    from magi_agent.shadow import fixture_runner
 
     adapter_calls: list[object] = []
 
@@ -2882,31 +2882,31 @@ def test_gate2_shadow_module_import_boundary_stays_route_infra_and_ts_runtime_fr
 import importlib
 import sys
 
-module = importlib.import_module("openmagi_core_agent.shadow.fixture_runner")
+module = importlib.import_module("magi_agent.shadow.fixture_runner")
 assert hasattr(module, "run_gate2_shadow_fixture")
 
 forbidden_prefixes = (
-    "openmagi_core_agent.api",
-    "openmagi_core_agent.app",
-    "openmagi_core_agent.dashboard",
-    "openmagi_core_agent.database",
-    "openmagi_core_agent.db",
-    "openmagi_core_agent.runtime.openmagi_runtime",
-    "openmagi_core_agent.routing",
-    "openmagi_core_agent.supabase",
-    "openmagi_core_agent.transport.chat",
-    "openmagi_core_agent.transport.api",
-    "openmagi_core_agent.transport.tools",
-    "openmagi_core_agent.transport.plugins",
-    "openmagi_core_agent.workspace",
-    "openmagi_core_agent.web",
-    "openmagi_core_agent.deploy",
-    "openmagi_core_agent.canary",
-    "openmagi_core_agent.proxy",
-    "openmagi_core_agent.provisioning",
-    "openmagi_core_agent.k8s",
-    "openmagi_core_agent.telegram",
-    "openmagi_core_agent.runtime_selector",
+    "magi_agent.api",
+    "magi_agent.app",
+    "magi_agent.dashboard",
+    "magi_agent.database",
+    "magi_agent.db",
+    "magi_agent.runtime.openmagi_runtime",
+    "magi_agent.routing",
+    "magi_agent.supabase",
+    "magi_agent.transport.chat",
+    "magi_agent.transport.api",
+    "magi_agent.transport.tools",
+    "magi_agent.transport.plugins",
+    "magi_agent.workspace",
+    "magi_agent.web",
+    "magi_agent.deploy",
+    "magi_agent.canary",
+    "magi_agent.proxy",
+    "magi_agent.provisioning",
+    "magi_agent.k8s",
+    "magi_agent.telegram",
+    "magi_agent.runtime_selector",
     "src.",
 )
 loaded = [
@@ -2935,7 +2935,7 @@ def test_gate2_shadow_fixture_run_in_fresh_process_does_not_load_forbidden_runti
 import sys
 from pathlib import Path
 
-from openmagi_core_agent.shadow.fixture_runner import (
+from magi_agent.shadow.fixture_runner import (
     load_gate2_shadow_fixture,
     run_gate2_shadow_fixture,
 )
@@ -2945,17 +2945,17 @@ report = run_gate2_shadow_fixture(fixture, base_fixture_dir=Path({str(FIXTURES.p
 assert report.projected_adk_event_ids == ("evt-text-partial", "evt-text-final")
 
 forbidden = (
-    "openmagi_core_agent.evidence",
-    "openmagi_core_agent.harness.audit",
-    "openmagi_core_agent.harness.engine",
-    "openmagi_core_agent.hooks",
-    "openmagi_core_agent.runtime.openmagi_runtime",
-    "openmagi_core_agent.app",
-    "openmagi_core_agent.main",
-    "openmagi_core_agent.transport.chat",
-    "openmagi_core_agent.transport.api",
-    "openmagi_core_agent.transport.plugins",
-    "openmagi_core_agent.transport.tools",
+    "magi_agent.evidence",
+    "magi_agent.harness.audit",
+    "magi_agent.harness.engine",
+    "magi_agent.hooks",
+    "magi_agent.runtime.openmagi_runtime",
+    "magi_agent.app",
+    "magi_agent.main",
+    "magi_agent.transport.chat",
+    "magi_agent.transport.api",
+    "magi_agent.transport.plugins",
+    "magi_agent.transport.tools",
 )
 loaded = [
     name

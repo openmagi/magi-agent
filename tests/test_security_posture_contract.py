@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from openmagi_core_agent.security.posture import (
+from magi_agent.security.posture import (
     SecurityControl,
     SecurityPostureRequest,
     evaluate_security_posture,

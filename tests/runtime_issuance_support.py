@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from openmagi_core_agent.testing.runtime_issuance_support import (
+from magi_agent.testing.runtime_issuance_support import (
     issue_test_runtime_authority,
 )
 

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from openmagi_core_agent.shadow.gate5b4c3_shadow_generation_contract import (
+from magi_agent.shadow.gate5b4c3_shadow_generation_contract import (
     Gate5B4C3ShadowGenerationAuthorityFlags,
     Gate5B4C3ShadowGenerationConfig,
     Gate5B4C3ShadowGenerationDiagnostic,

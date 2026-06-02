@@ -7,14 +7,14 @@ from typing import Any, Literal, cast
 import pytest
 from pydantic import ValidationError
 
-from openmagi_core_agent.recipes.coding_mutation import (
+from magi_agent.recipes.coding_mutation import (
     CodingMutationConfig,
     CodingMutationRecipe,
     CodingMutationRequest,
     materialize_coding_mutation_recipe,
 )
-from openmagi_core_agent.tools import core_tool_manifests
-from openmagi_core_agent.tools.read_ledger import (
+from magi_agent.tools import core_tool_manifests
+from magi_agent.tools.read_ledger import (
     ReadLedger,
     ReadLedgerConfig,
     ReadMode,

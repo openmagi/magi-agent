@@ -21,7 +21,7 @@ def _scope() -> dict[str, object]:
 
 
 def _enabled_config(**overrides: object) -> object:
-    from openmagi_core_agent.gates.gate1a_readonly_tools import (
+    from magi_agent.gates.gate1a_readonly_tools import (
         Gate1AReadOnlyToolConfig,
     )
 
@@ -57,7 +57,7 @@ def _enabled_config(**overrides: object) -> object:
 
 
 def test_gate1a_defaults_off_and_exposes_no_tools(tmp_path: Path) -> None:
-    from openmagi_core_agent.gates.gate1a_readonly_tools import (
+    from magi_agent.gates.gate1a_readonly_tools import (
         Gate1AReadOnlyToolConfig,
         build_gate1a_readonly_tool_bundle,
     )
@@ -97,7 +97,7 @@ def test_gate1a_selected_scope_attaches_allowlisted_readonly_function_tools_only
     from google.adk.sessions import InMemorySessionService
     from google.adk.tools import FunctionTool
 
-    from openmagi_core_agent.gates.gate1a_readonly_tools import (
+    from magi_agent.gates.gate1a_readonly_tools import (
         build_gate1a_readonly_tool_bundle,
     )
 
@@ -159,7 +159,7 @@ def test_gate1a_adk_function_tools_use_concrete_schemas_and_reach_fake_provider_
     from google.adk.sessions import InMemorySessionService
     from google.genai import types
 
-    from openmagi_core_agent.gates.gate1a_readonly_tools import (
+    from magi_agent.gates.gate1a_readonly_tools import (
         build_gate1a_readonly_tool_bundle,
     )
 
@@ -274,7 +274,7 @@ def test_gate1a_adk_function_tools_use_concrete_schemas_and_reach_fake_provider_
 def test_gate1a_adk_function_tool_dispatches_flat_args_through_toolhost(
     tmp_path: Path,
 ) -> None:
-    from openmagi_core_agent.gates.gate1a_readonly_tools import (
+    from magi_agent.gates.gate1a_readonly_tools import (
         build_gate1a_readonly_tool_bundle,
     )
 
@@ -310,7 +310,7 @@ def test_gate1a_adk_function_tool_dispatches_flat_args_through_toolhost(
 def test_gate1a_route_attachment_flag_is_explicit_and_keeps_production_off(
     tmp_path: Path,
 ) -> None:
-    from openmagi_core_agent.gates.gate1a_readonly_tools import (
+    from magi_agent.gates.gate1a_readonly_tools import (
         build_gate1a_readonly_tool_bundle,
     )
 
@@ -332,7 +332,7 @@ def test_gate1a_route_attachment_flag_is_explicit_and_keeps_production_off(
 
 
 def test_gate1a_non_selected_scope_exposes_no_tools(tmp_path: Path) -> None:
-    from openmagi_core_agent.gates.gate1a_readonly_tools import (
+    from magi_agent.gates.gate1a_readonly_tools import (
         build_gate1a_readonly_tool_bundle,
     )
 
@@ -378,7 +378,7 @@ def test_gate1a_forbidden_tools_rejected_before_invocation(
     tmp_path: Path,
     tool_name: str,
 ) -> None:
-    from openmagi_core_agent.gates.gate1a_readonly_tools import (
+    from magi_agent.gates.gate1a_readonly_tools import (
         build_gate1a_readonly_tool_bundle,
     )
 
@@ -405,7 +405,7 @@ def test_gate1a_forbidden_tools_rejected_before_invocation(
 
 
 def test_gate1a_handlers_cap_redact_and_receipt_outputs(tmp_path: Path) -> None:
-    from openmagi_core_agent.gates.gate1a_readonly_tools import (
+    from magi_agent.gates.gate1a_readonly_tools import (
         build_gate1a_readonly_tool_bundle,
     )
 
@@ -445,7 +445,7 @@ def test_gate1a_handlers_cap_redact_and_receipt_outputs(tmp_path: Path) -> None:
 def test_gate1a_glob_and_grep_reject_parent_traversal_and_symlink_escape(
     tmp_path: Path,
 ) -> None:
-    from openmagi_core_agent.gates.gate1a_readonly_tools import (
+    from magi_agent.gates.gate1a_readonly_tools import (
         build_gate1a_readonly_tool_bundle,
     )
 
@@ -545,7 +545,7 @@ def test_gate1a_glob_and_grep_reject_parent_traversal_and_symlink_escape(
 def test_gate1a_blocks_sensitive_workspace_paths_and_skips_them_in_search(
     tmp_path: Path,
 ) -> None:
-    from openmagi_core_agent.gates.gate1a_readonly_tools import (
+    from magi_agent.gates.gate1a_readonly_tools import (
         build_gate1a_readonly_tool_bundle,
     )
 
@@ -617,7 +617,7 @@ def test_gate1a_blocks_sensitive_workspace_paths_and_skips_them_in_search(
 def test_gate1a_glob_implementation_does_not_call_pathlib_glob_with_raw_pattern() -> None:
     module_path = (
         Path(__file__).parents[1]
-        / "openmagi_core_agent"
+        / "magi_agent"
         / "gates"
         / "gate1a_readonly_tools.py"
     )
@@ -630,7 +630,7 @@ def test_gate1a_glob_implementation_does_not_call_pathlib_glob_with_raw_pattern(
 
 
 def test_gate1a_duplicate_same_digest_does_not_call_handler_twice(tmp_path: Path) -> None:
-    from openmagi_core_agent.gates.gate1a_readonly_tools import (
+    from magi_agent.gates.gate1a_readonly_tools import (
         build_gate1a_readonly_tool_bundle,
     )
 
@@ -666,7 +666,7 @@ def test_gate1a_duplicate_same_digest_does_not_call_handler_twice(tmp_path: Path
 
 
 def test_gate1a_counter_conflicts_and_limits_fail_closed(tmp_path: Path) -> None:
-    from openmagi_core_agent.gates.gate1a_readonly_tools import (
+    from magi_agent.gates.gate1a_readonly_tools import (
         build_gate1a_readonly_tool_bundle,
     )
 
@@ -713,19 +713,19 @@ def test_gate1a_counter_conflicts_and_limits_fail_closed(tmp_path: Path) -> None
 def test_gate1a_import_boundary_has_no_route_deploy_network_provider_imports() -> None:
     module_path = (
         Path(__file__).parents[1]
-        / "openmagi_core_agent"
+        / "magi_agent"
         / "gates"
         / "gate1a_readonly_tools.py"
     )
     source = module_path.read_text(encoding="utf-8")
 
     for forbidden in (
-        "openmagi_core_agent.transport.chat",
-        "openmagi_core_agent.transport.sse",
-        "openmagi_core_agent.memory",
-        "openmagi_core_agent.browser",
-        "openmagi_core_agent.channels",
-        "openmagi_core_agent.web_acquisition",
+        "magi_agent.transport.chat",
+        "magi_agent.transport.sse",
+        "magi_agent.memory",
+        "magi_agent.browser",
+        "magi_agent.channels",
+        "magi_agent.web_acquisition",
         "requests",
         "httpx",
         "kubectl",

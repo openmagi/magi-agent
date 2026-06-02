@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from openmagi_core_agent.harness.coding.code_intelligence_contracts import (
+from magi_agent.harness.coding.code_intelligence_contracts import (
     CodeActionProjection,
     CodeIntelligenceAuthorityFlags,
     CodeIntelligenceObservation,
@@ -382,7 +382,7 @@ def test_pr7_matrix_row_is_marked_complete_by_contract_module_and_tests() -> Non
     assert row["liveAuthorityAllowed"] is False
     assert row["coreTouchAllowed"] is False
     assert row["coveredByFiles"] == [
-        "openmagi_core_agent/harness/coding/code_intelligence_contracts.py",
+        "magi_agent/harness/coding/code_intelligence_contracts.py",
     ]
     assert row["coveredByTests"] == [
         "tests/test_coding_code_intelligence_contracts.py",

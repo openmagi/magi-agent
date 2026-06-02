@@ -6,7 +6,7 @@ from collections.abc import Callable
 import pytest
 from pydantic import BaseModel, ValidationError
 
-from openmagi_core_agent.harness.process_reward import (
+from magi_agent.harness.process_reward import (
     OBSERVABLE_PROCESS_SIGNAL_CATALOG,
     ObservableProcessEvent,
     ObservableProcessScoredEvent,
