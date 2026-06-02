@@ -8,16 +8,16 @@ from pathlib import Path
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from openmagi_core_agent.config.models import BuildInfo, RuntimeConfig
-from openmagi_core_agent.runtime.openmagi_runtime import OpenMagiRuntime
-from openmagi_core_agent.transport.product_admin import (
+from magi_agent.config.models import BuildInfo, RuntimeConfig
+from magi_agent.runtime.openmagi_runtime import OpenMagiRuntime
+from magi_agent.transport.product_admin import (
     build_product_admin_contract_snapshot,
     register_product_admin_contract_routes,
 )
 
 
 PYTHON_ROOT = Path(__file__).parents[1]
-MODULE_PATH = PYTHON_ROOT / "openmagi_core_agent" / "transport" / "product_admin.py"
+MODULE_PATH = PYTHON_ROOT / "magi_agent" / "transport" / "product_admin.py"
 ADMIN_SECTIONS = {
     "ops",
     "policy",
@@ -169,7 +169,7 @@ def test_product_admin_contract_routes_do_not_register_mutating_admin_actions() 
 def test_product_admin_transport_import_boundary_has_no_live_runtime_imports() -> None:
     script = (
         "import sys\n"
-        "import openmagi_core_agent.transport.product_admin\n"
+        "import magi_agent.transport.product_admin\n"
         "forbidden=('google.adk','kubernetes','supabase','stripe','httpx','requests')\n"
         "loaded=[name for name in forbidden if name in sys.modules]\n"
         "raise SystemExit(1 if loaded else 0)\n"

@@ -8,7 +8,7 @@ from typing import Any
 
 import pytest
 
-from openmagi_core_agent.runtime.turn_policy import (
+from magi_agent.runtime.turn_policy import (
     MAX_OUTPUT_TOKENS_RECOVERY_LIMIT,
     ContextOverflowError,
     StopReasonHandlerState,
@@ -492,7 +492,7 @@ def test_turn_policy_import_is_pure_local_metadata_only() -> None:
 import importlib
 import sys
 
-module = importlib.import_module("openmagi_core_agent.runtime.turn_policy")
+module = importlib.import_module("magi_agent.runtime.turn_policy")
 assert hasattr(module, "handle_stop_reason")
 assert hasattr(module, "sanitize_messages_for_llm")
 
@@ -510,19 +510,19 @@ forbidden_exact = (
     "socket",
     "fastapi",
     "starlette.routing",
-    "openmagi_core_agent.adk_bridge.runner_adapter",
-    "openmagi_core_agent.adk_bridge.local_runner",
-    "openmagi_core_agent.tools.dispatcher",
+    "magi_agent.adk_bridge.runner_adapter",
+    "magi_agent.adk_bridge.local_runner",
+    "magi_agent.tools.dispatcher",
 )
 forbidden_prefixes = (
     "google.adk",
-    "openmagi_core_agent.tools",
-    "openmagi_core_agent.memory",
-    "openmagi_core_agent.workspace",
-    "openmagi_core_agent.transport",
-    "openmagi_core_agent.channels",
-    "openmagi_core_agent.children",
-    "openmagi_core_agent.missions",
+    "magi_agent.tools",
+    "magi_agent.memory",
+    "magi_agent.workspace",
+    "magi_agent.transport",
+    "magi_agent.channels",
+    "magi_agent.children",
+    "magi_agent.missions",
     "kubernetes",
     "supabase",
 )
@@ -546,7 +546,7 @@ if loaded:
 
 def test_turn_policy_source_forbids_runtime_side_effect_imports() -> None:
     root = Path(__file__).parents[1]
-    module_path = root / "openmagi_core_agent" / "runtime" / "turn_policy.py"
+    module_path = root / "magi_agent" / "runtime" / "turn_policy.py"
     source = module_path.read_text(encoding="utf-8")
     forbidden_imports = (
         "google.adk",
@@ -563,14 +563,14 @@ def test_turn_policy_source_forbids_runtime_side_effect_imports() -> None:
         "starlette",
         "kubernetes",
         "supabase",
-        "openmagi_core_agent.adk_bridge",
-        "openmagi_core_agent.tools",
-        "openmagi_core_agent.memory",
-        "openmagi_core_agent.workspace",
-        "openmagi_core_agent.transport",
-        "openmagi_core_agent.channels",
-        "openmagi_core_agent.children",
-        "openmagi_core_agent.missions",
+        "magi_agent.adk_bridge",
+        "magi_agent.tools",
+        "magi_agent.memory",
+        "magi_agent.workspace",
+        "magi_agent.transport",
+        "magi_agent.channels",
+        "magi_agent.children",
+        "magi_agent.missions",
     )
 
     for forbidden in forbidden_imports:

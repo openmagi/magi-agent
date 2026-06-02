@@ -1,18 +1,18 @@
 import pytest
 from pydantic import ValidationError
 
-from openmagi_core_agent.harness.profiles import (
+from magi_agent.harness.profiles import (
     DEFAULT_PROFILE_NAME,
     build_default_profile,
 )
-from openmagi_core_agent.hooks.manifest import HookManifest, HookPoint
-from openmagi_core_agent.hooks.result import HookResult
-from openmagi_core_agent.plugins.manifest import (
+from magi_agent.hooks.manifest import HookManifest, HookPoint
+from magi_agent.hooks.result import HookResult
+from magi_agent.plugins.manifest import (
     PluginCapability,
     PluginKind,
     PluginManifest,
 )
-from openmagi_core_agent.tools.manifest import Budget, ToolManifest, ToolSource
+from magi_agent.tools.manifest import Budget, ToolManifest, ToolSource
 
 
 def _base_tool_manifest_kwargs(**overrides: object) -> dict[str, object]:

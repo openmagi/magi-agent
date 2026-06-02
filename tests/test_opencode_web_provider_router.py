@@ -47,7 +47,7 @@ class FakeOpenCodeWebProvider:
 
 
 def test_opencode_web_router_is_default_off_without_provider_route() -> None:
-    from openmagi_core_agent.web_acquisition.opencode_provider_router import (
+    from magi_agent.web_acquisition.opencode_provider_router import (
         build_opencode_web_research_tool_boundary,
         materialize_opencode_web_provider_router,
     )
@@ -72,7 +72,7 @@ def test_opencode_web_router_is_default_off_without_provider_route() -> None:
 
 
 def test_opencode_web_router_fails_closed_without_fake_provider_boundary() -> None:
-    from openmagi_core_agent.web_acquisition.opencode_provider_router import (
+    from magi_agent.web_acquisition.opencode_provider_router import (
         materialize_opencode_web_provider_router,
     )
 
@@ -93,7 +93,7 @@ def test_opencode_web_router_fails_closed_without_fake_provider_boundary() -> No
 
 
 def test_opencode_web_router_does_not_route_repo_or_external_profiles() -> None:
-    from openmagi_core_agent.web_acquisition.opencode_provider_router import (
+    from magi_agent.web_acquisition.opencode_provider_router import (
         materialize_opencode_web_provider_router,
     )
 
@@ -119,7 +119,7 @@ def test_opencode_web_router_does_not_route_repo_or_external_profiles() -> None:
 
 
 def test_opencode_web_router_ready_builds_fake_provider_boundary_only() -> None:
-    from openmagi_core_agent.web_acquisition.opencode_provider_router import (
+    from magi_agent.web_acquisition.opencode_provider_router import (
         OPENCODE_WEB_FAKE_PROVIDER_ID,
         OpenCodeLocalFixtureWebProvider,
         build_opencode_web_research_tool_boundary,
@@ -228,7 +228,7 @@ def test_opencode_web_router_ready_builds_fake_provider_boundary_only() -> None:
 
 
 def test_opencode_web_router_rejects_marker_spoofed_provider_before_call() -> None:
-    from openmagi_core_agent.web_acquisition.opencode_provider_router import (
+    from magi_agent.web_acquisition.opencode_provider_router import (
         build_opencode_web_research_tool_boundary,
         issue_opencode_fixture_provider_handle,
         materialize_opencode_web_provider_router,
@@ -250,7 +250,7 @@ def test_opencode_web_router_rejects_marker_spoofed_provider_before_call() -> No
 
 
 def test_opencode_web_router_rejects_url_only_search_results_as_evidence() -> None:
-    from openmagi_core_agent.web_acquisition.opencode_provider_router import (
+    from magi_agent.web_acquisition.opencode_provider_router import (
         OpenCodeLocalFixtureWebProvider,
         build_opencode_web_research_tool_boundary,
         issue_opencode_fixture_provider_handle,
@@ -291,7 +291,7 @@ def test_opencode_web_router_rejects_url_only_search_results_as_evidence() -> No
 
 
 def test_opencode_web_router_rejects_url_only_fetch_results_as_evidence() -> None:
-    from openmagi_core_agent.web_acquisition.opencode_provider_router import (
+    from magi_agent.web_acquisition.opencode_provider_router import (
         OpenCodeLocalFixtureWebProvider,
         build_opencode_web_research_tool_boundary,
         issue_opencode_fixture_provider_handle,
@@ -332,7 +332,7 @@ def test_opencode_web_router_rejects_url_only_fetch_results_as_evidence() -> Non
 
 
 def test_opencode_web_router_rejects_empty_or_redaction_only_source_content() -> None:
-    from openmagi_core_agent.web_acquisition.opencode_provider_router import (
+    from magi_agent.web_acquisition.opencode_provider_router import (
         OpenCodeLocalFixtureWebProvider,
         build_opencode_web_research_tool_boundary,
         issue_opencode_fixture_provider_handle,
@@ -398,7 +398,7 @@ def test_opencode_web_router_rejects_empty_or_redaction_only_source_content() ->
 
 
 def test_opencode_web_router_rejects_mixed_supported_and_unsupported_search_results() -> None:
-    from openmagi_core_agent.web_acquisition.opencode_provider_router import (
+    from magi_agent.web_acquisition.opencode_provider_router import (
         OpenCodeLocalFixtureWebProvider,
         build_opencode_web_research_tool_boundary,
         issue_opencode_fixture_provider_handle,
@@ -455,7 +455,7 @@ def test_opencode_web_router_rejects_mixed_supported_and_unsupported_search_resu
 
 
 def test_opencode_web_router_strips_nested_direct_tool_claim_metadata() -> None:
-    from openmagi_core_agent.web_acquisition.opencode_provider_router import (
+    from magi_agent.web_acquisition.opencode_provider_router import (
         OpenCodeLocalFixtureWebProvider,
         build_opencode_web_research_tool_boundary,
         issue_opencode_fixture_provider_handle,
@@ -514,12 +514,12 @@ def test_opencode_web_router_strips_nested_direct_tool_claim_metadata() -> None:
 
 
 def test_opencode_web_router_decision_rejects_forged_live_authority_and_refs() -> None:
-    from openmagi_core_agent.web_acquisition.opencode_provider_router import (
+    from magi_agent.web_acquisition.opencode_provider_router import (
         OPENCODE_WEB_FAKE_PROVIDER_ID,
         OpenCodeWebProviderRouterDecision,
         materialize_opencode_web_provider_router,
     )
-    from openmagi_core_agent.web_acquisition.provider_boundary import (
+    from magi_agent.web_acquisition.provider_boundary import (
         WebAcquisitionConfig,
     )
 
@@ -566,7 +566,7 @@ def test_opencode_web_router_decision_rejects_forged_live_authority_and_refs() -
 def test_opencode_web_router_import_boundary_has_no_live_provider_or_network_imports() -> None:
     module_path = (
         Path(__file__).parents[1]
-        / "openmagi_core_agent"
+        / "magi_agent"
         / "web_acquisition"
         / "opencode_provider_router.py"
     )
@@ -581,9 +581,9 @@ def test_opencode_web_router_import_boundary_has_no_live_provider_or_network_imp
 
     forbidden_prefixes = (
         "google.adk.runners",
-        "openmagi_core_agent.adk_bridge",
-        "openmagi_core_agent.runtime.provider_execution",
-        "openmagi_core_agent.web_acquisition.live_provider_pack",
+        "magi_agent.adk_bridge",
+        "magi_agent.runtime.provider_execution",
+        "magi_agent.web_acquisition.live_provider_pack",
         "socket",
         "subprocess",
         "httpx",

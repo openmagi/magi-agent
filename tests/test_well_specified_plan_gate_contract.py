@@ -7,11 +7,11 @@ import sys
 import pytest
 from pydantic import ValidationError
 
-from openmagi_core_agent.transport.tool_preview import sanitize_tool_preview
+from magi_agent.transport.tool_preview import sanitize_tool_preview
 
 
 def _plan_gate_module():
-    return importlib.import_module("openmagi_core_agent.harness.plan_gate")
+    return importlib.import_module("magi_agent.harness.plan_gate")
 
 
 def _build_snapshot(**overrides: object):
@@ -301,16 +301,16 @@ def test_plan_gate_contract_import_stays_traffic_free_in_fresh_process() -> None
 import importlib
 import sys
 
-importlib.import_module("openmagi_core_agent.harness.plan_gate")
+importlib.import_module("magi_agent.harness.plan_gate")
 forbidden_prefixes = (
     "google.adk",
 )
 forbidden_modules = (
-    "openmagi_core_agent.adk_bridge.runner_adapter",
-    "openmagi_core_agent.transport.chat",
-    "openmagi_core_agent.transport.tools",
-    "openmagi_core_agent.tools.dispatcher",
-    "openmagi_core_agent.hooks.bus",
+    "magi_agent.adk_bridge.runner_adapter",
+    "magi_agent.transport.chat",
+    "magi_agent.transport.tools",
+    "magi_agent.tools.dispatcher",
+    "magi_agent.hooks.bus",
 )
 loaded = [
     module

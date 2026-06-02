@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from openmagi_core_agent.runtime.error_recovery.types import (
+from magi_agent.runtime.error_recovery.types import (
     ErrorKind,
     ErrorRecoveryConfig,
     MessageDict,
@@ -17,11 +17,11 @@ from openmagi_core_agent.runtime.error_recovery.types import (
     RecoveryStrategy,
     TerminalError,
 )
-from openmagi_core_agent.runtime.error_recovery.engine import (
+from magi_agent.runtime.error_recovery.engine import (
     DEFAULT_STRATEGIES,
     RecoveryEngine,
 )
-from openmagi_core_agent.runtime.error_recovery.resilient_boundary import (
+from magi_agent.runtime.error_recovery.resilient_boundary import (
     ResilientRunnerSessionBoundary,
 )
 

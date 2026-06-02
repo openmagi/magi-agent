@@ -5,7 +5,7 @@ from collections.abc import Mapping
 
 import pytest
 
-from openmagi_core_agent.channels.contract import ChannelRef
+from magi_agent.channels.contract import ChannelRef
 
 
 class FakeDispatchProvider:
@@ -26,7 +26,7 @@ class FakeDispatchProvider:
 
 
 def _request(**overrides: object) -> object:
-    from openmagi_core_agent.channels.dispatcher import ChannelDispatchRequest
+    from magi_agent.channels.dispatcher import ChannelDispatchRequest
 
     payload = {
         "operation": "dispatch.message",
@@ -47,7 +47,7 @@ def _request(**overrides: object) -> object:
 
 
 def test_channel_dispatcher_default_disabled_never_calls_provider() -> None:
-    from openmagi_core_agent.channels.dispatcher import ChannelDispatchConfig, ChannelDispatcher
+    from magi_agent.channels.dispatcher import ChannelDispatchConfig, ChannelDispatcher
 
     provider = FakeDispatchProvider()
     decision = ChannelDispatcher(ChannelDispatchConfig()).dispatch(
@@ -80,7 +80,7 @@ def test_selected_channel_dispatch_requires_scope_and_provider_allowlist(
     overrides: dict[str, object],
     reason: str,
 ) -> None:
-    from openmagi_core_agent.channels.dispatcher import ChannelDispatchConfig, ChannelDispatcher
+    from magi_agent.channels.dispatcher import ChannelDispatchConfig, ChannelDispatcher
 
     provider = FakeDispatchProvider()
     decision = ChannelDispatcher(
@@ -98,7 +98,7 @@ def test_selected_channel_dispatch_requires_scope_and_provider_allowlist(
 
 
 def test_duplicate_request_digest_returns_idempotent_receipt_without_second_provider_call() -> None:
-    from openmagi_core_agent.channels.dispatcher import ChannelDispatchConfig, ChannelDispatcher
+    from magi_agent.channels.dispatcher import ChannelDispatchConfig, ChannelDispatcher
 
     provider = FakeDispatchProvider()
     dispatcher = ChannelDispatcher(
@@ -124,7 +124,7 @@ def test_duplicate_request_digest_returns_idempotent_receipt_without_second_prov
 
 
 def test_channel_dispatcher_projects_sanitized_runtime_receipt() -> None:
-    from openmagi_core_agent.channels.dispatcher import ChannelDispatchConfig, ChannelDispatcher
+    from magi_agent.channels.dispatcher import ChannelDispatchConfig, ChannelDispatcher
 
     decision = ChannelDispatcher(
         ChannelDispatchConfig(
@@ -146,7 +146,7 @@ def test_channel_dispatcher_projects_sanitized_runtime_receipt() -> None:
 
 
 def test_channel_dispatcher_projection_redacts_home_paths_from_chunks() -> None:
-    from openmagi_core_agent.channels.dispatcher import ChannelDispatchConfig, ChannelDispatcher
+    from magi_agent.channels.dispatcher import ChannelDispatchConfig, ChannelDispatcher
 
     decision = ChannelDispatcher(
         ChannelDispatchConfig(
@@ -176,7 +176,7 @@ def test_channel_dispatcher_projection_redacts_home_paths_from_chunks() -> None:
     ),
 )
 def test_channel_dispatcher_projection_redacts_common_token_families(secret: str) -> None:
-    from openmagi_core_agent.channels.dispatcher import ChannelDispatchConfig, ChannelDispatcher
+    from magi_agent.channels.dispatcher import ChannelDispatchConfig, ChannelDispatcher
 
     decision = ChannelDispatcher(
         ChannelDispatchConfig(
@@ -195,7 +195,7 @@ def test_channel_dispatcher_projection_redacts_common_token_families(secret: str
 
 
 def test_non_web_channels_do_not_attach_web_app_canary() -> None:
-    from openmagi_core_agent.channels.dispatcher import ChannelDispatchConfig, ChannelDispatcher
+    from magi_agent.channels.dispatcher import ChannelDispatchConfig, ChannelDispatcher
 
     decision = ChannelDispatcher(
         ChannelDispatchConfig(
@@ -211,8 +211,8 @@ def test_non_web_channels_do_not_attach_web_app_canary() -> None:
 
 
 def test_channel_runtime_boundary_consumes_correlated_dispatch_decision_only() -> None:
-    from openmagi_core_agent.channels.dispatcher import ChannelDispatchConfig, ChannelDispatcher
-    from openmagi_core_agent.channels.runtime_boundary import (
+    from magi_agent.channels.dispatcher import ChannelDispatchConfig, ChannelDispatcher
+    from magi_agent.channels.runtime_boundary import (
         ChannelRuntimeBoundary,
         ChannelRuntimeConfig,
         ChannelRuntimeRequest,

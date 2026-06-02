@@ -1,7 +1,7 @@
 # magi CLI
 
 Magi is the headless and interactive CLI for the OpenMagi Python agent runtime.
-It is the third consumer of the `openmagi_core_agent` package alongside the
+It is the third consumer of the `magi_agent` package alongside the
 FastAPI server and the ADK session layer.
 
 ## Installation

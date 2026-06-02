@@ -3,18 +3,18 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from openmagi_core_agent.harness.general_automation.control_projection import (
+from magi_agent.harness.general_automation.control_projection import (
     GeneralAutomationControlProjectionRequest,
     build_general_automation_control_projection,
 )
-from openmagi_core_agent.harness.general_automation.event_projection import (
+from magi_agent.harness.general_automation.event_projection import (
     GeneralAutomationEventProjectionRequest,
     build_general_automation_event_projection,
 )
 
 
 PYTHON_ROOT = Path(__file__).resolve().parents[1]
-HARNESS_DIR = PYTHON_ROOT / "openmagi_core_agent" / "harness" / "general_automation"
+HARNESS_DIR = PYTHON_ROOT / "magi_agent" / "harness" / "general_automation"
 
 
 def _digest(char: str) -> str:
@@ -210,14 +210,14 @@ def test_general_automation_event_control_modules_do_not_touch_core_or_live_surf
 
     forbidden_fragments = (
         "google.adk",
-        "openmagi_core_agent.adk_bridge",
-        "openmagi_core_agent.runtime",
-        "openmagi_core_agent.transport",
-        "openmagi_core_agent.routing",
-        "openmagi_core_agent.tools.dispatcher",
-        "openmagi_core_agent.tools.registry",
-        "openmagi_core_agent.tools.permission",
-        "openmagi_core_agent.tools.result",
+        "magi_agent.adk_bridge",
+        "magi_agent.runtime",
+        "magi_agent.transport",
+        "magi_agent.routing",
+        "magi_agent.tools.dispatcher",
+        "magi_agent.tools.registry",
+        "magi_agent.tools.permission",
+        "magi_agent.tools.result",
         "requests",
         "httpx",
         "aiohttp",

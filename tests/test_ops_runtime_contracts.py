@@ -7,7 +7,7 @@ import sys
 import pytest
 from pydantic import ValidationError
 
-from openmagi_core_agent.ops import (
+from magi_agent.ops import (
     InMemoryRuntimeOpsRecorder,
     RuntimeMetricRecord,
     RuntimeMetricsSnapshot,
@@ -385,21 +385,21 @@ def test_runtime_ops_health_metadata_is_default_off() -> None:
 
 def test_ops_import_boundary_does_not_load_live_runtime_paths() -> None:
     for module_name in list(sys.modules):
-        if module_name.startswith("openmagi_core_agent.ops"):
+        if module_name.startswith("magi_agent.ops"):
             sys.modules.pop(module_name)
 
     before = set(sys.modules)
-    importlib.import_module("openmagi_core_agent.ops.contracts")
+    importlib.import_module("magi_agent.ops.contracts")
     newly_loaded = set(sys.modules) - before
     forbidden_prefixes = (
         "google.adk.runners",
         "google.adk.models",
-        "openmagi_core_agent.tools.kernel",
-        "openmagi_core_agent.memory.adapters",
-        "openmagi_core_agent.providers",
-        "openmagi_core_agent.transport.chat",
-        "openmagi_core_agent.workspace",
-        "openmagi_core_agent.channels.telegram_adapter",
+        "magi_agent.tools.kernel",
+        "magi_agent.memory.adapters",
+        "magi_agent.providers",
+        "magi_agent.transport.chat",
+        "magi_agent.workspace",
+        "magi_agent.channels.telegram_adapter",
     )
 
     assert not any(name.startswith(prefix) for prefix in forbidden_prefixes for name in newly_loaded)

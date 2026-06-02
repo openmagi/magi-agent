@@ -6,7 +6,7 @@ import sys
 import pytest
 from pydantic import ValidationError
 
-from openmagi_core_agent.channels.contract import (
+from magi_agent.channels.contract import (
     ChannelAdapterManifest,
     ChannelDeliveryReceipt,
     ChannelDeliveryRequest,
@@ -311,16 +311,16 @@ def test_channel_contract_import_stays_traffic_free_in_fresh_process() -> None:
 import importlib
 import sys
 
-importlib.import_module("openmagi_core_agent.channels")
-importlib.import_module("openmagi_core_agent.channels.contract")
+importlib.import_module("magi_agent.channels")
+importlib.import_module("magi_agent.channels.contract")
 forbidden_modules = (
     "google.adk",
-    "openmagi_core_agent.adk_bridge",
-    "openmagi_core_agent.runtime.openmagi_runtime",
-    "openmagi_core_agent.transport",
-    "openmagi_core_agent.tools.dispatcher",
-    "openmagi_core_agent.hooks.bus",
-    "openmagi_core_agent.plugins",
+    "magi_agent.adk_bridge",
+    "magi_agent.runtime.openmagi_runtime",
+    "magi_agent.transport",
+    "magi_agent.tools.dispatcher",
+    "magi_agent.hooks.bus",
+    "magi_agent.plugins",
 )
 loaded = [module for module in forbidden_modules if module in sys.modules]
 if loaded:

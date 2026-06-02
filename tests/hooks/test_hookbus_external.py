@@ -24,18 +24,18 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from openmagi_core_agent.harness.resolved import build_default_resolved_harness_state
-from openmagi_core_agent.hooks.bus import HookBus, RegisteredHook
-from openmagi_core_agent.hooks.context import HookContext
-from openmagi_core_agent.hooks.executors import HookExecutor, get_executor
-from openmagi_core_agent.hooks.external_config import (
+from magi_agent.harness.resolved import build_default_resolved_harness_state
+from magi_agent.hooks.bus import HookBus, RegisteredHook
+from magi_agent.hooks.context import HookContext
+from magi_agent.hooks.executors import HookExecutor, get_executor
+from magi_agent.hooks.external_config import (
     ExternalHookConfig,
     _resolve_env_vars,
     load_external_hooks_from_yaml,
 )
-from openmagi_core_agent.hooks.manifest import HookManifest, HookPoint
-from openmagi_core_agent.hooks.result import HookResult
-from openmagi_core_agent.tools.manifest import ToolSource
+from magi_agent.hooks.manifest import HookManifest, HookPoint
+from magi_agent.hooks.result import HookResult
+from magi_agent.tools.manifest import ToolSource
 
 # ---------------------------------------------------------------------------
 # Shared fixtures
@@ -181,7 +181,7 @@ def test_command_hook_skipped_in_run_with_warning(caplog):
     hook = RegisteredHook(manifest=_command_manifest(), handler=MagicMock())
     bus = HookBus(hooks=(hook,))
 
-    with caplog.at_level(logging.WARNING, logger="openmagi_core_agent.hooks.bus"):
+    with caplog.at_level(logging.WARNING, logger="magi_agent.hooks.bus"):
         result = bus.run(
             point=HookPoint.BEFORE_TOOL_USE, context=_CONTEXT, harness_state=_HARNESS
         )
@@ -202,7 +202,7 @@ def test_http_hook_skipped_in_run_with_warning(caplog):
     hook = RegisteredHook(manifest=_http_manifest(), handler=MagicMock())
     bus = HookBus(hooks=(hook,))
 
-    with caplog.at_level(logging.WARNING, logger="openmagi_core_agent.hooks.bus"):
+    with caplog.at_level(logging.WARNING, logger="magi_agent.hooks.bus"):
         result = bus.run(
             point=HookPoint.BEFORE_TOOL_USE, context=_CONTEXT, harness_state=_HARNESS
         )
@@ -223,12 +223,12 @@ async def test_missing_command_executor_returns_continue(caplog):
     hook = RegisteredHook(manifest=_command_manifest("no-executor-cmd"), handler=AsyncMock())
     # Patch the registry to return None so auto-resolve gives None for all executor types.
     with patch(
-        "openmagi_core_agent.hooks.bus.get_executor",
+        "magi_agent.hooks.bus.get_executor",
         side_effect=lambda t: None,
     ):
         bus = HookBus(hooks=(hook,))
 
-    with caplog.at_level(logging.WARNING, logger="openmagi_core_agent.hooks.bus"):
+    with caplog.at_level(logging.WARNING, logger="magi_agent.hooks.bus"):
         result = await bus.run_async(
             point=HookPoint.BEFORE_TOOL_USE, context=_CONTEXT, harness_state=_HARNESS
         )
@@ -248,12 +248,12 @@ async def test_missing_http_executor_returns_continue(caplog):
 
     hook = RegisteredHook(manifest=_http_manifest("no-executor-http"), handler=AsyncMock())
     with patch(
-        "openmagi_core_agent.hooks.bus.get_executor",
+        "magi_agent.hooks.bus.get_executor",
         side_effect=lambda t: None,
     ):
         bus = HookBus(hooks=(hook,))
 
-    with caplog.at_level(logging.WARNING, logger="openmagi_core_agent.hooks.bus"):
+    with caplog.at_level(logging.WARNING, logger="magi_agent.hooks.bus"):
         result = await bus.run_async(
             point=HookPoint.BEFORE_TOOL_USE, context=_CONTEXT, harness_state=_HARNESS
         )
@@ -389,8 +389,8 @@ def test_load_yaml_missing_file_returns_empty():
 
 def test_hookbus_auto_resolves_executors_from_registry():
     """HookBus() with no executor kwargs must pick up executors from get_executor()."""
-    from openmagi_core_agent.hooks.executors.command_executor import CommandHookExecutor
-    from openmagi_core_agent.hooks.executors.http_executor import HttpHookExecutor
+    from magi_agent.hooks.executors.command_executor import CommandHookExecutor
+    from magi_agent.hooks.executors.http_executor import HttpHookExecutor
 
     bus = HookBus()
     assert isinstance(bus._command_executor, CommandHookExecutor)
@@ -412,7 +412,7 @@ def test_resolve_env_vars_rejects_non_magi_hook_vars_with_warning(caplog):
     """_resolve_env_vars must leave ${NON_MAGI_HOOK_VAR} as-is and log a warning."""
     import logging
 
-    with caplog.at_level(logging.WARNING, logger="openmagi_core_agent.hooks.external_config"):
+    with caplog.at_level(logging.WARNING, logger="magi_agent.hooks.external_config"):
         result = _resolve_env_vars("prefix-${MY_TOKEN}-suffix")
     # Token should be left unchanged (not substituted) to prevent secret leakage
     assert result == "prefix-${MY_TOKEN}-suffix"
@@ -424,7 +424,7 @@ def test_resolve_env_vars_missing_magi_hook_var_substitutes_empty_with_warning(c
     import logging
 
     env_without = {k: v for k, v in os.environ.items() if k != "MAGI_HOOK_DEFINITELY_MISSING_XYZ"}
-    with caplog.at_level(logging.WARNING, logger="openmagi_core_agent.hooks.external_config"):
+    with caplog.at_level(logging.WARNING, logger="magi_agent.hooks.external_config"):
         with patch.dict(os.environ, env_without, clear=True):
             result = _resolve_env_vars("prefix-${MAGI_HOOK_DEFINITELY_MISSING_XYZ}-suffix")
     assert result == "prefix--suffix"

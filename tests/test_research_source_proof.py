@@ -9,7 +9,7 @@ import pytest
 from pydantic import ValidationError
 
 from runtime_issuance_support import issue_test_runtime_authority
-from openmagi_core_agent.research.source_proof import (
+from magi_agent.research.source_proof import (
     ResearchSourceOpenReceiptRef,
     ResearchSourceProofRequirement,
     ResearchSourceProofVerdict,
@@ -333,20 +333,20 @@ def test_default_off_local_only_fake_provider_posture_is_projected() -> None:
 
 
 def test_research_source_proof_stays_in_research_layer_without_live_adk_imports() -> None:
-    module = importlib.import_module("openmagi_core_agent.research.source_proof")
+    module = importlib.import_module("magi_agent.research.source_proof")
     source = inspect.getsource(module)
 
-    assert module.__name__ == "openmagi_core_agent.research.source_proof"
-    assert ResearchSourceOpenReceiptRef.__module__.startswith("openmagi_core_agent.research")
+    assert module.__name__ == "magi_agent.research.source_proof"
+    assert ResearchSourceOpenReceiptRef.__module__.startswith("magi_agent.research")
     forbidden_imports = (
         "from google.adk",
         "import google.adk",
-        "from openmagi_core_agent.runtime",
-        "import openmagi_core_agent.runtime",
-        "from openmagi_core_agent.tools",
-        "import openmagi_core_agent.tools",
-        "from openmagi_core_agent.transport",
-        "import openmagi_core_agent.transport",
+        "from magi_agent.runtime",
+        "import magi_agent.runtime",
+        "from magi_agent.tools",
+        "import magi_agent.tools",
+        "from magi_agent.transport",
+        "import magi_agent.transport",
     )
     for forbidden in forbidden_imports:
         assert forbidden not in source

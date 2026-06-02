@@ -2,18 +2,18 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from openmagi_core_agent.harness.general_automation.shell_policy import (
+from magi_agent.harness.general_automation.shell_policy import (
     ShellPolicyRequest,
     classify_shell_policy,
     shell_policy_function_tool_metadata,
 )
-from openmagi_core_agent.harness.general_automation.shell_receipts import (
+from magi_agent.harness.general_automation.shell_receipts import (
     build_shell_policy_receipt,
 )
 
 
 PYTHON_ROOT = Path(__file__).resolve().parents[1]
-PACKAGE_DIR = PYTHON_ROOT / "openmagi_core_agent" / "harness" / "general_automation"
+PACKAGE_DIR = PYTHON_ROOT / "magi_agent" / "harness" / "general_automation"
 
 
 def _contains_fragment(value: object, fragment: str) -> bool:
@@ -157,9 +157,9 @@ def test_shell_policy_modules_do_not_import_or_execute_live_process_surfaces() -
         "import pty",
         "pexpect",
         "asyncio",
-        "openmagi_core_agent.tools.dispatcher",
-        "openmagi_core_agent.tools.registry",
-        "openmagi_core_agent.tools.permission",
+        "magi_agent.tools.dispatcher",
+        "magi_agent.tools.registry",
+        "magi_agent.tools.permission",
         "google.adk.runners",
         ".write_text(",
         ".read_text(",

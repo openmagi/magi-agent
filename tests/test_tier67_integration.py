@@ -14,15 +14,15 @@ import asyncio
 import os
 from unittest.mock import AsyncMock
 
-from openmagi_core_agent.context.hook import (
+from magi_agent.context.hook import (
     ContextManagementHook,
     PipelineResult,
     load_config_from_env,
 )
-from openmagi_core_agent.context.token_tracker import TokenBudgetTracker
-from openmagi_core_agent.context.types import ContextManagementConfig, WarningLevel
-from openmagi_core_agent.runtime.error_recovery.types import RecoveryResult
-from openmagi_core_agent.shared.token_estimation import (
+from magi_agent.context.token_tracker import TokenBudgetTracker
+from magi_agent.context.types import ContextManagementConfig, WarningLevel
+from magi_agent.runtime.error_recovery.types import RecoveryResult
+from magi_agent.shared.token_estimation import (
     estimate_message_tokens,
     estimate_messages_tokens,
 )

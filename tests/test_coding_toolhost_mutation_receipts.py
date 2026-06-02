@@ -15,14 +15,14 @@ import json
 
 import pytest
 
-from openmagi_core_agent.evidence.coding_tool_receipts import (
+from magi_agent.evidence.coding_tool_receipts import (
     CodingToolReceiptBoundary,
     CodingToolReceiptConfig,
     CodingToolReceiptRecord,
     is_coding_mutation_tool,
     text_claim_is_not_receipt,
 )
-from openmagi_core_agent.tools.result import ToolResult
+from magi_agent.tools.result import ToolResult
 
 
 # ---------------------------------------------------------------------------

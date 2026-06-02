@@ -1,6 +1,6 @@
 import pytest
 
-from openmagi_core_agent.gates.gate5b_full_toolhost import (
+from magi_agent.gates.gate5b_full_toolhost import (
     GATE5B_FULL_TOOLHOST_TOOL_NAMES,
     Gate5BFullToolHostConfig,
     build_gate5b_full_toolhost_bundle,

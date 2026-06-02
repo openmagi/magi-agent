@@ -4,12 +4,12 @@ import asyncio
 
 import pytest
 
-from openmagi_core_agent.browser.provider_boundary import (
+from magi_agent.browser.provider_boundary import (
     BrowserProviderConfig,
     BrowserRequest,
     LocalBrowserProviderRuntime,
 )
-from openmagi_core_agent.web_acquisition.policy import url_policy_error
+from magi_agent.web_acquisition.policy import url_policy_error
 
 
 class FakeBrowserProvider:

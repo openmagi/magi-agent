@@ -4,7 +4,7 @@ import math
 from google.adk.events import Event
 from google.genai import types
 
-from openmagi_core_agent.adk_bridge.event_adapter import (
+from magi_agent.adk_bridge.event_adapter import (
     OpenMagiEventBridge,
     project_runner_end_event,
     project_runner_heartbeat_event,
@@ -14,7 +14,7 @@ from openmagi_core_agent.adk_bridge.event_adapter import (
     project_runner_retry_event,
     project_runner_start_event,
 )
-from openmagi_core_agent.transport.sse import InMemorySseWriter
+from magi_agent.transport.sse import InMemorySseWriter
 
 
 def _render(events: list[dict[str, object]]) -> str:

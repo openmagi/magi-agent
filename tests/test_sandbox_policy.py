@@ -8,12 +8,12 @@ import sys
 import pytest
 from pydantic import ValidationError
 
-from openmagi_core_agent.sandbox.browser import evaluate_browser_request
-from openmagi_core_agent.sandbox.child_workspace import evaluate_child_workspace_request
-from openmagi_core_agent.sandbox.filesystem import evaluate_filesystem_access
-from openmagi_core_agent.sandbox.network import evaluate_network_access
-from openmagi_core_agent.sandbox.policy import SandboxAuthorityFlags, SandboxDecision, SandboxPolicy
-from openmagi_core_agent.sandbox.process import evaluate_process_request
+from magi_agent.sandbox.browser import evaluate_browser_request
+from magi_agent.sandbox.child_workspace import evaluate_child_workspace_request
+from magi_agent.sandbox.filesystem import evaluate_filesystem_access
+from magi_agent.sandbox.network import evaluate_network_access
+from magi_agent.sandbox.policy import SandboxAuthorityFlags, SandboxDecision, SandboxPolicy
+from magi_agent.sandbox.process import evaluate_process_request
 
 
 def test_filesystem_policy_blocks_workspace_escape_and_sealed_file_write() -> None:
@@ -494,27 +494,27 @@ import sys
 
 before = set(sys.modules)
 for module_name in (
-    "openmagi_core_agent.sandbox.policy",
-    "openmagi_core_agent.sandbox.filesystem",
-    "openmagi_core_agent.sandbox.network",
-    "openmagi_core_agent.sandbox.process",
-    "openmagi_core_agent.sandbox.browser",
-    "openmagi_core_agent.sandbox.child_workspace",
+    "magi_agent.sandbox.policy",
+    "magi_agent.sandbox.filesystem",
+    "magi_agent.sandbox.network",
+    "magi_agent.sandbox.process",
+    "magi_agent.sandbox.browser",
+    "magi_agent.sandbox.child_workspace",
 ):
     importlib.import_module(module_name)
 imported = set(sys.modules) - before
 forbidden_prefixes = (
     "google.adk",
-    "openmagi_core_agent.adk_bridge",
-    "openmagi_core_agent.browser",
-    "openmagi_core_agent.channels",
-    "openmagi_core_agent.memory",
-    "openmagi_core_agent.plugins",
-    "openmagi_core_agent.tools",
-    "openmagi_core_agent.transport",
-    "openmagi_core_agent.web_acquisition",
-    "openmagi_core_agent.workspace",
-    "openmagi_core_agent.shadow",
+    "magi_agent.adk_bridge",
+    "magi_agent.browser",
+    "magi_agent.channels",
+    "magi_agent.memory",
+    "magi_agent.plugins",
+    "magi_agent.tools",
+    "magi_agent.transport",
+    "magi_agent.web_acquisition",
+    "magi_agent.workspace",
+    "magi_agent.shadow",
     "kubernetes",
     "requests",
     "httpx",

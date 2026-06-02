@@ -3,7 +3,7 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
-from openmagi_core_agent.security.sandbox_preflight import (
+from magi_agent.security.sandbox_preflight import (
     SandboxPreflightReport,
     SandboxPreflightRequest,
     evaluate_sandbox_preflight,

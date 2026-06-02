@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from openmagi_core_agent.harness.repair_policy import RepairPlan, next_repair_action
+from magi_agent.harness.repair_policy import RepairPlan, next_repair_action
 
 
 def test_repair_plan_advances_through_named_actions() -> None:

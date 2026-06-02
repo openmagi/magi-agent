@@ -5,18 +5,18 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from openmagi_core_agent.coding.meta_adapter import (
+from magi_agent.coding.meta_adapter import (
     CODING_META_ROLE_NAMES,
     CodingMetaEvidencePolicy,
     CodingMetaHarnessPlan,
     accept_coding_child_result,
     build_coding_meta_harness_plan,
 )
-from openmagi_core_agent.evidence.child_runtime_envelope import ChildRuntimeEnvelope
+from magi_agent.evidence.child_runtime_envelope import ChildRuntimeEnvelope
 from runtime_issuance_support import issue_test_runtime_authority
-from openmagi_core_agent.evidence.subagent import OPENMAGI_RUNTIME_ENVELOPE_ISSUER
-from openmagi_core_agent.meta_orchestration.child_acceptance import issue_runtime_child_result
-from openmagi_core_agent.meta_orchestration.child_roles import MetaChildRoleRegistry
+from magi_agent.evidence.subagent import OPENMAGI_RUNTIME_ENVELOPE_ISSUER
+from magi_agent.meta_orchestration.child_acceptance import issue_runtime_child_result
+from magi_agent.meta_orchestration.child_roles import MetaChildRoleRegistry
 
 
 def _runtime_authority(*scopes: str):
@@ -332,12 +332,12 @@ def test_coding_harness_rejects_smuggled_roles_tasks_and_policy_targets() -> Non
 
 def test_generic_meta_modules_do_not_import_coding_adapter() -> None:
     repo_root = Path(__file__).resolve().parents[1]
-    meta_dir = repo_root / "openmagi_core_agent" / "meta_orchestration"
+    meta_dir = repo_root / "magi_agent" / "meta_orchestration"
 
     for path in meta_dir.glob("*.py"):
         source = path.read_text()
-        assert "openmagi_core_agent.coding.meta_adapter" not in source, path
-        assert "from openmagi_core_agent.coding import meta_adapter" not in source, path
+        assert "magi_agent.coding.meta_adapter" not in source, path
+        assert "from magi_agent.coding import meta_adapter" not in source, path
         assert "code_reader" not in source, path
         assert "code_editor" not in source, path
         assert "test_runner" not in source, path

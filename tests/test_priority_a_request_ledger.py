@@ -38,7 +38,7 @@ def _assert_no_private_payload(value: object) -> None:
 
 
 def test_request_shape_ledger_defaults_off_and_records_only_sanitized_refs() -> None:
-    from openmagi_core_agent.runtime.request_ledger import (
+    from magi_agent.runtime.request_ledger import (
         RequestLedgerConfig,
         RequestShapeLedger,
         RequestShapeLedgerEntry,
@@ -96,7 +96,7 @@ def test_request_shape_ledger_defaults_off_and_records_only_sanitized_refs() -> 
 
 
 def test_request_shape_ledger_rejects_unsafe_refs_and_keeps_diagnostics() -> None:
-    from openmagi_core_agent.runtime.request_ledger import (
+    from magi_agent.runtime.request_ledger import (
         RequestLedgerConfig,
         RequestShapeLedger,
         RequestShapeLedgerEntry,
@@ -138,7 +138,7 @@ def test_request_shape_ledger_rejects_unsafe_refs_and_keeps_diagnostics() -> Non
 
 
 def test_request_shape_ledger_rejects_private_home_and_kubelet_uri_refs() -> None:
-    from openmagi_core_agent.runtime.request_ledger import (
+    from magi_agent.runtime.request_ledger import (
         RequestLedgerConfig,
         RequestShapeLedger,
         RequestShapeLedgerEntry,
@@ -179,7 +179,7 @@ def test_runtime_control_decision_models_fail_policy_without_side_effects(
     validator_status: str,
     expected_action: str,
 ) -> None:
-    from openmagi_core_agent.runtime.request_ledger import build_runtime_control_decision
+    from magi_agent.runtime.request_ledger import build_runtime_control_decision
 
     decision = build_runtime_control_decision(
         recipePolicy=recipe_policy,
@@ -197,7 +197,7 @@ def test_runtime_control_decision_models_fail_policy_without_side_effects(
 
 
 def test_approval_gate_result_records_pending_resolved_denied_and_timeout_states() -> None:
-    from openmagi_core_agent.runtime.request_ledger import ApprovalGateResult
+    from magi_agent.runtime.request_ledger import ApprovalGateResult
 
     pending = ApprovalGateResult(
         requestId="control-1",
@@ -220,7 +220,7 @@ def test_approval_gate_result_records_pending_resolved_denied_and_timeout_states
 
 
 def test_approval_gate_result_cannot_forge_execute_authority_or_private_ids() -> None:
-    from openmagi_core_agent.runtime.request_ledger import ApprovalGateResult
+    from magi_agent.runtime.request_ledger import ApprovalGateResult
 
     forged = ApprovalGateResult(
         requestId="tool-permission:turn-/workspace/private-sk-live-secret:FileWrite",
@@ -242,7 +242,7 @@ def test_approval_gate_result_cannot_forge_execute_authority_or_private_ids() ->
 
 
 def test_request_ledger_redacts_private_turn_ids() -> None:
-    from openmagi_core_agent.runtime.request_ledger import (
+    from magi_agent.runtime.request_ledger import (
         RequestLedgerConfig,
         RequestShapeLedger,
         RequestShapeLedgerEntry,
@@ -266,7 +266,7 @@ def test_request_ledger_redacts_private_turn_ids() -> None:
 
 
 def test_authority_flags_cannot_be_enabled_by_construct_copy_or_payload() -> None:
-    from openmagi_core_agent.runtime.request_ledger import (
+    from magi_agent.runtime.request_ledger import (
         RequestLedgerAuthorityFlags,
         RequestShapeLedgerResult,
     )
@@ -317,7 +317,7 @@ import importlib
 import sys
 
 before = set(sys.modules)
-module = importlib.import_module("openmagi_core_agent.runtime.request_ledger")
+module = importlib.import_module("magi_agent.runtime.request_ledger")
 assert hasattr(module, "RequestShapeLedger")
 
 forbidden_exact = (
@@ -333,12 +333,12 @@ forbidden_exact = (
     "kubernetes",
     "httpx",
     "requests",
-    "openmagi_core_agent.adk_bridge.runner_adapter",
-    "openmagi_core_agent.tools.dispatcher",
-    "openmagi_core_agent.transport.chat",
-    "openmagi_core_agent.transport.sse",
-    "openmagi_core_agent.memory.adk_bridge",
-    "openmagi_core_agent.workspace.adoption_boundary",
+    "magi_agent.adk_bridge.runner_adapter",
+    "magi_agent.tools.dispatcher",
+    "magi_agent.transport.chat",
+    "magi_agent.transport.sse",
+    "magi_agent.memory.adk_bridge",
+    "magi_agent.workspace.adoption_boundary",
 )
 loaded = [
     name

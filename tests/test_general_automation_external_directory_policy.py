@@ -4,18 +4,18 @@ from pathlib import Path
 
 import pytest
 
-from openmagi_core_agent.harness.general_automation.external_directory_receipts import (
+from magi_agent.harness.general_automation.external_directory_receipts import (
     build_external_directory_approval_receipt,
     project_external_directory_denial,
 )
-from openmagi_core_agent.harness.general_automation.path_policy import (
+from magi_agent.harness.general_automation.path_policy import (
     PathAccessRequest,
     classify_path_access,
 )
 
 
 PYTHON_ROOT = Path(__file__).resolve().parents[1]
-PACKAGE_DIR = PYTHON_ROOT / "openmagi_core_agent" / "harness" / "general_automation"
+PACKAGE_DIR = PYTHON_ROOT / "magi_agent" / "harness" / "general_automation"
 
 
 def _contains_fragment(value: object, fragment: str) -> bool:

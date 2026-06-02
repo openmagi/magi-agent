@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from openmagi_core_agent.shadow.office_recipe_tool_alias_contract import (
+from magi_agent.shadow.office_recipe_tool_alias_contract import (
     OfficeRecipeToolAliasAttachmentFlags,
     OfficeRecipeToolAliasFixture,
     load_office_recipe_tool_alias_fixture,
@@ -251,7 +251,7 @@ def test_office_recipe_tool_alias_import_boundary_stays_metadata_only() -> None:
 import sys
 from pathlib import Path
 
-from openmagi_core_agent.shadow.office_recipe_tool_alias_contract import (
+from magi_agent.shadow.office_recipe_tool_alias_contract import (
     load_office_recipe_tool_alias_fixture,
     project_office_recipe_tool_alias_fixture,
 )
@@ -262,17 +262,17 @@ project_office_recipe_tool_alias_fixture(fixture)
 
 forbidden_prefixes = (
     'google.adk',
-    'openmagi_core_agent.adk_bridge',
-    'openmagi_core_agent.tools.dispatcher',
-    'openmagi_core_agent.tools.registry',
-    'openmagi_core_agent.routes',
-    'openmagi_core_agent.browser',
-    'openmagi_core_agent.plugins.native.browser',
-    'openmagi_core_agent.memory',
-    'openmagi_core_agent.channels.delivery',
-    'openmagi_core_agent.db',
-    'openmagi_core_agent.k8s',
-    'openmagi_core_agent.canary',
+    'magi_agent.adk_bridge',
+    'magi_agent.tools.dispatcher',
+    'magi_agent.tools.registry',
+    'magi_agent.routes',
+    'magi_agent.browser',
+    'magi_agent.plugins.native.browser',
+    'magi_agent.memory',
+    'magi_agent.channels.delivery',
+    'magi_agent.db',
+    'magi_agent.k8s',
+    'magi_agent.canary',
 )
 loaded = sorted(
     name

@@ -5,7 +5,7 @@ import json
 import pytest
 from pydantic import ValidationError
 
-from openmagi_core_agent.harness.inference_scaling import (
+from magi_agent.harness.inference_scaling import (
     ATTACHMENT_FLAGS,
     BestOfNEligibilityMetadata,
     InferenceScalingScope,

@@ -16,7 +16,7 @@ def test_composio_config_import_is_sdk_and_adk_clean() -> None:
         import json
         import sys
 
-        import openmagi_core_agent.composio.config as config_module
+        import magi_agent.composio.config as config_module
 
         print(json.dumps({
             "config_imported": config_module is not None,
@@ -53,7 +53,7 @@ def test_composio_config_import_is_sdk_and_adk_clean() -> None:
 
 
 def test_default_without_key_is_inactive_disabled_by_config() -> None:
-    from openmagi_core_agent.composio.config import resolve_composio_config
+    from magi_agent.composio.config import resolve_composio_config
 
     cfg = resolve_composio_config({})
 
@@ -65,7 +65,7 @@ def test_default_without_key_is_inactive_disabled_by_config() -> None:
 
 
 def test_explicit_on_without_key_is_inactive_missing_api_key() -> None:
-    from openmagi_core_agent.composio.config import resolve_composio_config
+    from magi_agent.composio.config import resolve_composio_config
 
     cfg = resolve_composio_config({"MAGI_COMPOSIO_ENABLED": "on"})
 
@@ -78,7 +78,7 @@ def test_explicit_on_without_key_is_inactive_missing_api_key() -> None:
 
 
 def test_default_with_key_stays_inactive_until_explicitly_enabled() -> None:
-    from openmagi_core_agent.composio.config import resolve_composio_config
+    from magi_agent.composio.config import resolve_composio_config
 
     cfg = resolve_composio_config({"COMPOSIO_API_KEY": "cp_test_secret"})
 
@@ -92,7 +92,7 @@ def test_default_with_key_stays_inactive_until_explicitly_enabled() -> None:
 
 
 def test_explicit_on_with_key_uses_default_oss_entity() -> None:
-    from openmagi_core_agent.composio.config import resolve_composio_config
+    from magi_agent.composio.config import resolve_composio_config
 
     cfg = resolve_composio_config(
         {
@@ -111,7 +111,7 @@ def test_explicit_on_with_key_uses_default_oss_entity() -> None:
 
 
 def test_explicit_auto_with_key_is_active() -> None:
-    from openmagi_core_agent.composio.config import resolve_composio_config
+    from magi_agent.composio.config import resolve_composio_config
 
     cfg = resolve_composio_config(
         {
@@ -126,7 +126,7 @@ def test_explicit_auto_with_key_is_active() -> None:
 
 
 def test_explicit_off_wins_over_key() -> None:
-    from openmagi_core_agent.composio.config import resolve_composio_config
+    from magi_agent.composio.config import resolve_composio_config
 
     cfg = resolve_composio_config(
         {"MAGI_COMPOSIO_ENABLED": "off", "COMPOSIO_API_KEY": "cp_test_secret"}
@@ -138,7 +138,7 @@ def test_explicit_off_wins_over_key() -> None:
 
 
 def test_explicit_on_without_key_is_required_missing() -> None:
-    from openmagi_core_agent.composio.config import resolve_composio_config
+    from magi_agent.composio.config import resolve_composio_config
 
     cfg = resolve_composio_config({"MAGI_COMPOSIO_ENABLED": "on"})
 
@@ -149,7 +149,7 @@ def test_explicit_on_without_key_is_required_missing() -> None:
 
 
 def test_runtime_identity_derives_entity_id_from_user_and_bot() -> None:
-    from openmagi_core_agent.composio.config import resolve_composio_config
+    from magi_agent.composio.config import resolve_composio_config
 
     cfg = resolve_composio_config(
         {
@@ -164,7 +164,7 @@ def test_runtime_identity_derives_entity_id_from_user_and_bot() -> None:
 
 
 def test_hosted_source_refuses_default_entity() -> None:
-    from openmagi_core_agent.composio.config import resolve_composio_config
+    from magi_agent.composio.config import resolve_composio_config
 
     cfg = resolve_composio_config(
         {
@@ -181,7 +181,7 @@ def test_hosted_source_refuses_default_entity() -> None:
 
 
 def test_toolkits_are_normalized_deduped_and_safe() -> None:
-    from openmagi_core_agent.composio.config import resolve_composio_config
+    from magi_agent.composio.config import resolve_composio_config
 
     cfg = resolve_composio_config(
         {
@@ -195,7 +195,7 @@ def test_toolkits_are_normalized_deduped_and_safe() -> None:
 
 
 def test_invalid_enabled_value_with_api_key_is_inactive_invalid_config() -> None:
-    from openmagi_core_agent.composio.config import resolve_composio_config
+    from magi_agent.composio.config import resolve_composio_config
 
     cfg = resolve_composio_config(
         {
@@ -210,7 +210,7 @@ def test_invalid_enabled_value_with_api_key_is_inactive_invalid_config() -> None
 
 
 def test_invalid_credential_source_with_api_key_is_inactive_invalid_config() -> None:
-    from openmagi_core_agent.composio.config import resolve_composio_config
+    from magi_agent.composio.config import resolve_composio_config
 
     cfg = resolve_composio_config(
         {
@@ -226,7 +226,7 @@ def test_invalid_credential_source_with_api_key_is_inactive_invalid_config() -> 
 
 
 def test_explicit_entity_id_with_spaces_and_newlines_is_sanitized() -> None:
-    from openmagi_core_agent.composio.config import resolve_composio_config
+    from magi_agent.composio.config import resolve_composio_config
 
     cfg = resolve_composio_config(
         {
@@ -243,7 +243,7 @@ def test_explicit_entity_id_with_spaces_and_newlines_is_sanitized() -> None:
 
 
 def test_explicit_blank_entity_id_is_inactive_invalid_config() -> None:
-    from openmagi_core_agent.composio.config import resolve_composio_config
+    from magi_agent.composio.config import resolve_composio_config
 
     cfg = resolve_composio_config(
         {
@@ -259,7 +259,7 @@ def test_explicit_blank_entity_id_is_inactive_invalid_config() -> None:
 
 
 def test_runtime_identity_replaces_colons_inside_user_and_bot_segments() -> None:
-    from openmagi_core_agent.composio.config import resolve_composio_config
+    from magi_agent.composio.config import resolve_composio_config
 
     cfg = resolve_composio_config(
         {
@@ -274,7 +274,7 @@ def test_runtime_identity_replaces_colons_inside_user_and_bot_segments() -> None
 
 
 def test_explicit_toolkit_env_with_only_unsafe_tokens_is_inactive_invalid_config() -> None:
-    from openmagi_core_agent.composio.config import resolve_composio_config
+    from magi_agent.composio.config import resolve_composio_config
 
     cfg = resolve_composio_config(
         {
@@ -309,7 +309,7 @@ def test_explicit_toolkit_env_with_only_unsafe_tokens_is_inactive_invalid_config
     ),
 )
 def test_mcp_url_override_rejects_invalid_or_credentialed_urls(override: str) -> None:
-    from openmagi_core_agent.composio.config import resolve_composio_config
+    from magi_agent.composio.config import resolve_composio_config
 
     cfg = resolve_composio_config(
         {
@@ -335,7 +335,7 @@ def test_mcp_url_override_rejects_invalid_or_credentialed_urls(override: str) ->
 def test_mcp_url_override_rejects_camel_case_credential_query_keys(
     query_key: str,
 ) -> None:
-    from openmagi_core_agent.composio.config import resolve_composio_config
+    from magi_agent.composio.config import resolve_composio_config
 
     cfg = resolve_composio_config(
         {
@@ -363,7 +363,7 @@ def test_mcp_url_override_rejects_camel_case_credential_query_keys(
 def test_mcp_url_override_rejects_nested_or_prefixed_credential_query_keys(
     query: str,
 ) -> None:
-    from openmagi_core_agent.composio.config import resolve_composio_config
+    from magi_agent.composio.config import resolve_composio_config
 
     cfg = resolve_composio_config(
         {
@@ -394,7 +394,7 @@ def test_mcp_url_override_rejects_nested_or_prefixed_credential_query_keys(
 def test_mcp_url_override_rejects_generic_credential_query_keys(
     query: str,
 ) -> None:
-    from openmagi_core_agent.composio.config import resolve_composio_config
+    from magi_agent.composio.config import resolve_composio_config
 
     cfg = resolve_composio_config(
         {
@@ -409,7 +409,7 @@ def test_mcp_url_override_rejects_generic_credential_query_keys(
 
 
 def test_mcp_url_override_accepts_composio_https_url() -> None:
-    from openmagi_core_agent.composio.config import resolve_composio_config
+    from magi_agent.composio.config import resolve_composio_config
 
     cfg = resolve_composio_config(
         {
@@ -425,7 +425,7 @@ def test_mcp_url_override_accepts_composio_https_url() -> None:
 
 
 def test_mcp_url_override_is_not_serialized_or_represented() -> None:
-    from openmagi_core_agent.composio.config import resolve_composio_config
+    from magi_agent.composio.config import resolve_composio_config
 
     cfg = resolve_composio_config(
         {
@@ -452,7 +452,7 @@ def test_mcp_url_override_is_not_serialized_or_represented() -> None:
 
 
 def test_missing_python_package_disabled_reason_is_preserved() -> None:
-    from openmagi_core_agent.composio.config import ComposioConfig
+    from magi_agent.composio.config import ComposioConfig
 
     cfg = ComposioConfig(disabledReason="missing_python_package")
 
@@ -460,7 +460,7 @@ def test_missing_python_package_disabled_reason_is_preserved() -> None:
 
 
 def test_config_repr_and_json_do_not_expose_api_key() -> None:
-    from openmagi_core_agent.composio.config import resolve_composio_config
+    from magi_agent.composio.config import resolve_composio_config
 
     cfg = resolve_composio_config({"COMPOSIO_API_KEY": "cp_test_secret_123456"})
     rendered = repr(cfg) + cfg.model_dump_json()
@@ -471,7 +471,7 @@ def test_config_repr_and_json_do_not_expose_api_key() -> None:
 
 
 def test_redaction_removes_keys_bearers_connect_urls_and_connected_account_ids() -> None:
-    from openmagi_core_agent.composio.redaction import redact_composio_value
+    from magi_agent.composio.redaction import redact_composio_value
 
     value = {
         "message": (
@@ -489,7 +489,7 @@ def test_redaction_removes_keys_bearers_connect_urls_and_connected_account_ids()
 
 
 def test_redaction_removes_connected_account_and_session_mapping_keys() -> None:
-    from openmagi_core_agent.composio.redaction import redact_composio_value
+    from magi_agent.composio.redaction import redact_composio_value
 
     value = {
         "connectedAccountId": "acct_live_12345",
@@ -532,7 +532,7 @@ def test_redaction_removes_connected_account_and_session_mapping_keys() -> None:
     ),
 )
 def test_redaction_removes_connected_account_and_session_text_forms(source: str) -> None:
-    from openmagi_core_agent.composio.redaction import redact_composio_text
+    from magi_agent.composio.redaction import redact_composio_text
 
     redacted = redact_composio_text(source)
 
@@ -562,7 +562,7 @@ def test_redaction_removes_connected_account_and_session_text_forms(source: str)
     ),
 )
 def test_redaction_collapses_composio_marker_suffix_artifacts(source: str) -> None:
-    from openmagi_core_agent.composio.redaction import (
+    from magi_agent.composio.redaction import (
         redact_composio_text,
         redact_composio_value,
     )
@@ -581,7 +581,7 @@ def test_redaction_collapses_composio_marker_suffix_artifacts(source: str) -> No
     ),
 )
 def test_redaction_preserves_normal_punctuation_after_markers(source: str) -> None:
-    from openmagi_core_agent.composio.redaction import redact_composio_text
+    from magi_agent.composio.redaction import redact_composio_text
 
     assert redact_composio_text(source) == source
 
@@ -594,7 +594,7 @@ def test_composio_redaction_import_is_sdk_and_adk_clean() -> None:
         import json
         import sys
 
-        import openmagi_core_agent.composio.redaction as redaction_module
+        import magi_agent.composio.redaction as redaction_module
 
         print(json.dumps({
             "redaction_imported": redaction_module is not None,
@@ -639,7 +639,7 @@ def test_composio_redaction_import_is_sdk_and_adk_clean() -> None:
     ),
 )
 def test_redaction_removes_composio_api_key_aliases_quotes_and_colons(source: str) -> None:
-    from openmagi_core_agent.composio.redaction import redact_composio_text
+    from magi_agent.composio.redaction import redact_composio_text
 
     redacted = redact_composio_text(source)
 
@@ -656,7 +656,7 @@ def test_redaction_removes_composio_api_key_aliases_quotes_and_colons(source: st
     ),
 )
 def test_redaction_removes_quoted_composio_api_key_log_fields(source: str) -> None:
-    from openmagi_core_agent.composio.redaction import redact_composio_text
+    from magi_agent.composio.redaction import redact_composio_text
 
     redacted = redact_composio_text(source)
 
@@ -674,7 +674,7 @@ def test_redaction_removes_quoted_composio_api_key_log_fields(source: str) -> No
     ),
 )
 def test_redaction_removes_full_api_key_values_with_punctuation(source: str) -> None:
-    from openmagi_core_agent.composio.redaction import redact_composio_text
+    from magi_agent.composio.redaction import redact_composio_text
 
     redacted = redact_composio_text(source)
 
@@ -684,7 +684,7 @@ def test_redaction_removes_full_api_key_values_with_punctuation(source: str) -> 
 
 
 def test_redaction_removes_generic_api_key_mapping_values() -> None:
-    from openmagi_core_agent.composio.redaction import redact_composio_value
+    from magi_agent.composio.redaction import redact_composio_value
 
     redacted = redact_composio_value({"api_key": "cp_test_secret"})
 

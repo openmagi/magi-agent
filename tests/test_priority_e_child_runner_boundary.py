@@ -12,7 +12,7 @@ def _is_runtime_ref(value: object, namespace: str) -> bool:
 
 
 def _request() -> object:
-    from openmagi_core_agent.runtime.child_runner_boundary import ChildTaskRequest
+    from magi_agent.runtime.child_runner_boundary import ChildTaskRequest
 
     return ChildTaskRequest(
         parentExecutionId="parent-exec-1",
@@ -69,7 +69,7 @@ class ThrowingChildRunner(FakeChildRunner):
 
 
 def test_child_runner_boundary_defaults_off_and_never_calls_fake_runner() -> None:
-    from openmagi_core_agent.runtime.child_runner_boundary import (
+    from magi_agent.runtime.child_runner_boundary import (
         ChildRunnerConfig,
         LocalChildRunnerBoundary,
     )
@@ -89,7 +89,7 @@ def test_child_runner_boundary_defaults_off_and_never_calls_fake_runner() -> Non
 
 
 def test_child_runner_boundary_calls_only_local_fake_runner_when_explicitly_enabled() -> None:
-    from openmagi_core_agent.runtime.child_runner_boundary import (
+    from magi_agent.runtime.child_runner_boundary import (
         ChildRunnerConfig,
         LocalChildRunnerBoundary,
     )
@@ -135,7 +135,7 @@ def test_child_runner_boundary_calls_only_local_fake_runner_when_explicitly_enab
 
 
 def test_child_runner_boundary_enabled_without_local_fake_runner_stays_disabled() -> None:
-    from openmagi_core_agent.runtime.child_runner_boundary import (
+    from magi_agent.runtime.child_runner_boundary import (
         ChildRunnerConfig,
         LocalChildRunnerBoundary,
     )
@@ -151,7 +151,7 @@ def test_child_runner_boundary_enabled_without_local_fake_runner_stays_disabled(
 
 
 def test_child_runner_boundary_rejects_unmarked_fake_runner() -> None:
-    from openmagi_core_agent.runtime.child_runner_boundary import (
+    from magi_agent.runtime.child_runner_boundary import (
         ChildRunnerConfig,
         LocalChildRunnerBoundary,
     )
@@ -173,7 +173,7 @@ def test_child_runner_boundary_rejects_unmarked_fake_runner() -> None:
 
 
 def test_child_runner_boundary_catches_fake_runner_errors_without_raw_leakage() -> None:
-    from openmagi_core_agent.runtime.child_runner_boundary import (
+    from magi_agent.runtime.child_runner_boundary import (
         ChildRunnerConfig,
         LocalChildRunnerBoundary,
     )
@@ -202,7 +202,7 @@ def test_child_runner_boundary_catches_fake_runner_errors_without_raw_leakage() 
 
 
 def test_child_runner_projection_bypasses_cannot_inject_raw_context_or_authority() -> None:
-    from openmagi_core_agent.runtime.child_runner_boundary import (
+    from magi_agent.runtime.child_runner_boundary import (
         ChildRunnerAuthorityFlags,
         ChildRunnerEnvelopeRef,
         ChildRunnerResult,
@@ -294,7 +294,7 @@ def test_child_runner_projection_bypasses_cannot_inject_raw_context_or_authority
 
 
 def test_child_runner_public_projection_revalidates_mutated_child_envelope() -> None:
-    from openmagi_core_agent.runtime.child_runner_boundary import (
+    from magi_agent.runtime.child_runner_boundary import (
         ChildRunnerAuthorityFlags,
         ChildRunnerEnvelopeRef,
         ChildRunnerResult,
@@ -359,7 +359,7 @@ def test_child_runner_public_projection_revalidates_mutated_child_envelope() -> 
 
 
 def test_child_runner_public_projection_redacts_provider_token_formats() -> None:
-    from openmagi_core_agent.runtime.child_runner_boundary import (
+    from magi_agent.runtime.child_runner_boundary import (
         ChildRunnerEnvelopeRef,
         ChildRunnerResult,
     )
@@ -391,7 +391,7 @@ def test_child_runner_public_projection_redacts_provider_token_formats() -> None
 
 
 def test_child_runner_public_projection_drops_key_named_credentials() -> None:
-    from openmagi_core_agent.runtime.child_runner_boundary import ChildRunnerResult
+    from magi_agent.runtime.child_runner_boundary import ChildRunnerResult
 
     result = ChildRunnerResult(
         status="disabled",
@@ -420,7 +420,7 @@ def test_child_runner_public_projection_drops_key_named_credentials() -> None:
 def test_child_runner_boundary_imports_no_live_runner_or_runtime_surfaces() -> None:
     module_path = (
         Path(__file__).parents[1]
-        / "openmagi_core_agent"
+        / "magi_agent"
         / "runtime"
         / "child_runner_boundary.py"
     )
@@ -436,10 +436,10 @@ def test_child_runner_boundary_imports_no_live_runner_or_runtime_surfaces() -> N
     forbidden_prefixes = (
         "google.adk.runners",
         "google.adk.sessions",
-        "openmagi_core_agent.adk_bridge",
-        "openmagi_core_agent.tools",
-        "openmagi_core_agent.transport",
-        "openmagi_core_agent.memory.adapters",
+        "magi_agent.adk_bridge",
+        "magi_agent.tools",
+        "magi_agent.transport",
+        "magi_agent.memory.adapters",
         "subprocess",
         "socket",
         "httpx",

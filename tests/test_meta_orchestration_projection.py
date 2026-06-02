@@ -6,30 +6,30 @@ from pathlib import Path
 
 import pytest
 
-from openmagi_core_agent.harness.verifier_bus import VerifierResultMetadata
-from openmagi_core_agent.meta_orchestration.child_acceptance import ChildAcceptanceVerdict
-from openmagi_core_agent.meta_orchestration.commit_adapter import (
+from magi_agent.harness.verifier_bus import VerifierResultMetadata
+from magi_agent.meta_orchestration.child_acceptance import ChildAcceptanceVerdict
+from magi_agent.meta_orchestration.commit_adapter import (
     MetaBeforeCommitVerdict,
     RuntimeIssuedMetaVerifierResult,
     evaluate_before_commit_for_assembly,
     issue_runtime_verifier_result_for_assembly,
 )
-from openmagi_core_agent.meta_orchestration.final_assembly import (
+from magi_agent.meta_orchestration.final_assembly import (
     MetaFinalAssemblyPlan,
     assemble_final_output_from_inspection,
 )
-from openmagi_core_agent.meta_orchestration.inspection_loop import (
+from magi_agent.meta_orchestration.inspection_loop import (
     MetaInspectedChildVerdict,
     MetaInspectionLoopResult,
     inspect_child_verdicts,
 )
-from openmagi_core_agent.meta_orchestration.projection import (
+from magi_agent.meta_orchestration.projection import (
     MetaOrchestrationPublicProjection,
     meta_projection_assembly_id_for_inspection,
     meta_projection_loop_id_for_plan,
     project_meta_orchestration_status,
 )
-from openmagi_core_agent.meta_orchestration.task_plan import (
+from magi_agent.meta_orchestration.task_plan import (
     MetaChildTaskSpec,
     MetaTaskPlan,
 )
@@ -410,7 +410,7 @@ def test_projection_rejects_stale_plan_with_same_task_ids_and_verifier_refs() ->
 
 
 def test_passed_projection_requires_exact_required_verifier_result_refs() -> None:
-    import openmagi_core_agent.meta_orchestration.commit_adapter as commit_adapter
+    import magi_agent.meta_orchestration.commit_adapter as commit_adapter
 
     plan = _plan(verifier_refs=("verifier:meta-before-commit", "verifier:second"))
     inspection = _inspection(plan=plan)
@@ -615,7 +615,7 @@ def test_public_projection_normalizes_semantic_task_and_verifier_refs() -> None:
 
 
 def test_public_projection_normalizes_unknown_blocked_reason_refs() -> None:
-    import openmagi_core_agent.meta_orchestration.commit_adapter as commit_adapter
+    import magi_agent.meta_orchestration.commit_adapter as commit_adapter
 
     plan = _plan()
     inspection = _inspection(plan=plan)
@@ -701,7 +701,7 @@ def test_projection_model_cannot_be_forged_or_runtime_enabled_directly() -> None
                 "projectionDigest": "sha256:" + "b" * 64,
             }
         )
-    import openmagi_core_agent.meta_orchestration.projection as projection_module
+    import magi_agent.meta_orchestration.projection as projection_module
 
     forged = MetaOrchestrationPublicProjection(
         _projection_token=getattr(projection_module, "_PUBLIC_PROJECTION_TOKEN"),
@@ -857,14 +857,14 @@ def test_public_projection_detects_post_issue_mutation() -> None:
 
 
 def test_meta_projection_module_remains_domain_neutral() -> None:
-    import openmagi_core_agent.meta_orchestration.projection as projection_module
+    import magi_agent.meta_orchestration.projection as projection_module
 
     source = inspect.getsource(projection_module)
     package_root = Path(projection_module.__file__).resolve().parents[1]
     generic_sources = tuple((package_root / "meta_orchestration").rglob("*.py"))
 
-    assert "openmagi_core_agent.research" not in source
-    assert "openmagi_core_agent.coding" not in source
+    assert "magi_agent.research" not in source
+    assert "magi_agent.coding" not in source
     for path in generic_sources:
         module_source = path.read_text()
         for forbidden in (

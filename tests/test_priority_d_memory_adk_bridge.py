@@ -12,13 +12,13 @@ from google.adk.memory.base_memory_service import SearchMemoryResponse
 from google.adk.memory.memory_entry import MemoryEntry
 from google.genai import types
 
-from openmagi_core_agent.memory.contracts import (
+from magi_agent.memory.contracts import (
     MemoryRecord,
     RecallRequest,
     RecallResult,
     UnsupportedMemoryOperationError,
 )
-from openmagi_core_agent.memory.policy import MemoryPolicy
+from magi_agent.memory.policy import MemoryPolicy
 
 
 def recall_request() -> RecallRequest:
@@ -136,7 +136,7 @@ class FakeADKMemoryService(BaseMemoryService):
 
 
 def test_bridge_defaults_off_and_never_calls_provider_or_adk_service() -> None:
-    from openmagi_core_agent.memory.adk_bridge import (
+    from magi_agent.memory.adk_bridge import (
         ADKMemoryBridgeConfig,
         ADKMemoryServiceBridge,
     )
@@ -171,7 +171,7 @@ def test_bridge_defaults_off_and_never_calls_provider_or_adk_service() -> None:
 
 
 def test_bridge_local_fake_provider_path_respects_policy_and_sanitizes_public_projection() -> None:
-    from openmagi_core_agent.memory.adk_bridge import (
+    from magi_agent.memory.adk_bridge import (
         ADKMemoryBridgeConfig,
         ADKMemoryServiceBridge,
     )
@@ -234,7 +234,7 @@ def test_bridge_blocks_recall_before_calls_when_policy_disallows_memory(
     policy: MemoryPolicy,
     reason: str,
 ) -> None:
-    from openmagi_core_agent.memory.adk_bridge import (
+    from magi_agent.memory.adk_bridge import (
         ADKMemoryBridgeConfig,
         ADKMemoryServiceBridge,
     )
@@ -263,7 +263,7 @@ def test_bridge_blocks_recall_before_calls_when_policy_disallows_memory(
 
 
 def test_bridge_local_fake_adk_memory_service_path_converts_memory_entries_safely() -> None:
-    from openmagi_core_agent.memory.adk_bridge import (
+    from magi_agent.memory.adk_bridge import (
         ADKMemoryBridgeConfig,
         ADKMemoryServiceBridge,
     )
@@ -306,7 +306,7 @@ def test_bridge_local_fake_adk_memory_service_path_converts_memory_entries_safel
 
 
 def test_bridge_write_methods_stay_disabled_even_when_enabled_for_local_recall() -> None:
-    from openmagi_core_agent.memory.adk_bridge import (
+    from magi_agent.memory.adk_bridge import (
         ADKMemoryBridgeConfig,
         ADKMemoryServiceBridge,
     )
@@ -325,7 +325,7 @@ def test_bridge_write_methods_stay_disabled_even_when_enabled_for_local_recall()
 
 
 def test_bridge_import_boundary_allows_only_adk_memory_primitives() -> None:
-    module = importlib.import_module("openmagi_core_agent.memory.adk_bridge")
+    module = importlib.import_module("magi_agent.memory.adk_bridge")
     source = Path(module.__file__).read_text(encoding="utf-8")
     parsed = ast.parse(source)
 
@@ -342,16 +342,16 @@ def test_bridge_import_boundary_allows_only_adk_memory_primitives() -> None:
         "google.adk.runners",
         "google.adk.sessions",
         "google.adk.tools",
-        "openmagi_core_agent.adk_bridge.local_runner",
-        "openmagi_core_agent.adk_bridge.runner_adapter",
-        "openmagi_core_agent.adk_bridge.tool_adapter",
-        "openmagi_core_agent.adk_bridge.local_toolhost",
-        "openmagi_core_agent.transport",
-        "openmagi_core_agent.routes",
-        "openmagi_core_agent.plugins.agentmemory",
-        "openmagi_core_agent.services.memory",
-        "openmagi_core_agent.hipocampus",
-        "openmagi_core_agent.qmd",
+        "magi_agent.adk_bridge.local_runner",
+        "magi_agent.adk_bridge.runner_adapter",
+        "magi_agent.adk_bridge.tool_adapter",
+        "magi_agent.adk_bridge.local_toolhost",
+        "magi_agent.transport",
+        "magi_agent.routes",
+        "magi_agent.plugins.agentmemory",
+        "magi_agent.services.memory",
+        "magi_agent.hipocampus",
+        "magi_agent.qmd",
         "subprocess",
         "socket",
         "http",
@@ -425,7 +425,7 @@ class PublicSafeProvider:
 
 
 def test_bridge_public_safe_records_strip_xml_tool_child_cookie_and_telegram_tokens() -> None:
-    from openmagi_core_agent.memory.adk_bridge import (
+    from magi_agent.memory.adk_bridge import (
         ADKMemoryBridgeConfig,
         ADKMemoryServiceBridge,
     )
@@ -495,7 +495,7 @@ class StandaloneUrlPayloadProvider:
 
 
 def test_bridge_public_projection_redacts_standalone_url_payload_blocks() -> None:
-    from openmagi_core_agent.memory.adk_bridge import (
+    from magi_agent.memory.adk_bridge import (
         ADKMemoryBridgeConfig,
         ADKMemoryServiceBridge,
     )
@@ -572,7 +572,7 @@ class PublicSafePathProvider:
 
 
 def test_bridge_public_projection_redacts_home_and_exact_kubelet_paths() -> None:
-    from openmagi_core_agent.memory.adk_bridge import (
+    from magi_agent.memory.adk_bridge import (
         ADKMemoryBridgeConfig,
         ADKMemoryServiceBridge,
     )
@@ -629,7 +629,7 @@ class PathShapedIdProvider:
 
 
 def test_bridge_sanitizes_path_shaped_record_ids_before_result_and_public_projection() -> None:
-    from openmagi_core_agent.memory.adk_bridge import (
+    from magi_agent.memory.adk_bridge import (
         ADKMemoryBridgeConfig,
         ADKMemoryServiceBridge,
     )
@@ -685,7 +685,7 @@ class SecretShapedProviderIdProvider:
 
 
 def test_bridge_public_projection_sanitizes_secret_and_path_shaped_provider_ids() -> None:
-    from openmagi_core_agent.memory.adk_bridge import (
+    from magi_agent.memory.adk_bridge import (
         ADKMemoryBridgeConfig,
         ADKMemoryServiceBridge,
     )
@@ -765,7 +765,7 @@ class RawChildToolIdentifierProvider:
 
 
 def test_bridge_public_projection_sanitizes_raw_child_and_tool_identifier_shapes() -> None:
-    from openmagi_core_agent.memory.adk_bridge import (
+    from magi_agent.memory.adk_bridge import (
         ADKMemoryBridgeConfig,
         ADKMemoryServiceBridge,
     )
@@ -838,7 +838,7 @@ class PathShapedIdADKMemoryService(FakeADKMemoryService):
 
 
 def test_bridge_sanitizes_path_shaped_adk_memory_entry_ids() -> None:
-    from openmagi_core_agent.memory.adk_bridge import (
+    from magi_agent.memory.adk_bridge import (
         ADKMemoryBridgeConfig,
         ADKMemoryServiceBridge,
     )
@@ -863,7 +863,7 @@ def test_bridge_sanitizes_path_shaped_adk_memory_entry_ids() -> None:
 
 
 def test_bridge_public_projection_sanitizes_diagnostic_metadata() -> None:
-    from openmagi_core_agent.memory.adk_bridge import ADKMemoryBridgeRecallOutcome
+    from magi_agent.memory.adk_bridge import ADKMemoryBridgeRecallOutcome
 
     outcome = ADKMemoryBridgeRecallOutcome(
         result=RecallResult(
@@ -935,7 +935,7 @@ def test_bridge_public_projection_sanitizes_diagnostic_metadata() -> None:
 
 
 def test_bridge_rejects_unmarked_local_fake_provider_and_adk_service() -> None:
-    from openmagi_core_agent.memory.adk_bridge import (
+    from magi_agent.memory.adk_bridge import (
         ADKMemoryBridgeConfig,
         ADKMemoryServiceBridge,
     )
@@ -977,7 +977,7 @@ def test_bridge_rejects_unmarked_local_fake_provider_and_adk_service() -> None:
 
 
 def test_bridge_provider_records_honor_request_max_bytes_before_projection() -> None:
-    from openmagi_core_agent.memory.adk_bridge import (
+    from magi_agent.memory.adk_bridge import (
         ADKMemoryBridgeConfig,
         ADKMemoryServiceBridge,
     )

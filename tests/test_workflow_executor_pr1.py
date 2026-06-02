@@ -18,22 +18,22 @@ from collections.abc import Sequence
 
 import pytest
 
-from openmagi_core_agent.harness.parallel_execution import (
+from magi_agent.harness.parallel_execution import (
     ParallelExecutionScope,
     ParallelToolPolicyInput,
     ToolLimitMetadata,
     build_parallel_tool_policy_decision,
 )
-from openmagi_core_agent.workflows.compiler import (
+from magi_agent.workflows.compiler import (
     CompiledWorkflowContract,
     compile_governed_workflow,
     WorkflowCompileInput,
 )
-from openmagi_core_agent.workflows.dry_run import (
+from magi_agent.workflows.dry_run import (
     WorkflowDryRunReport,
     dry_run_governed_workflow,
 )
-from openmagi_core_agent.workflows.registry import WorkflowRegistryEntry
+from magi_agent.workflows.registry import WorkflowRegistryEntry
 
 
 # ---------------------------------------------------------------------------
@@ -245,7 +245,7 @@ def test_validation_fail_causes_no_dispatch(monkeypatch: pytest.MonkeyPatch) -> 
     zero child dispatches and a clear refusal result."""
     monkeypatch.setenv("MAGI_WORKFLOW_EXECUTOR_ENABLED", "1")
 
-    from openmagi_core_agent.harness.workflow_executor import (
+    from magi_agent.harness.workflow_executor import (
         WorkflowExecutorConfig,
         WorkflowExecutorResult,
         execute_workflow,
@@ -289,7 +289,7 @@ def test_executor_per_child_dispatch_is_bounded(monkeypatch: pytest.MonkeyPatch)
     """
     monkeypatch.setenv("MAGI_WORKFLOW_EXECUTOR_ENABLED", "1")
 
-    from openmagi_core_agent.harness.workflow_executor import (
+    from magi_agent.harness.workflow_executor import (
         WorkflowExecutorConfig,
         WorkflowExecutorResult,
         _bounded_semaphore_cap,
@@ -342,7 +342,7 @@ def test_disabled_env_gate_causes_no_execution(monkeypatch: pytest.MonkeyPatch) 
     must return a dry-run/disabled result without dispatching children."""
     monkeypatch.delenv("MAGI_WORKFLOW_EXECUTOR_ENABLED", raising=False)
 
-    from openmagi_core_agent.harness.workflow_executor import (
+    from magi_agent.harness.workflow_executor import (
         WorkflowExecutorConfig,
         WorkflowExecutorResult,
         execute_workflow,
@@ -373,7 +373,7 @@ def test_dry_run_parity_with_existing_module(monkeypatch: pytest.MonkeyPatch) ->
     that is consistent with dry_run_governed_workflow() for the same contract."""
     monkeypatch.setenv("MAGI_WORKFLOW_EXECUTOR_ENABLED", "1")
 
-    from openmagi_core_agent.harness.workflow_executor import (
+    from magi_agent.harness.workflow_executor import (
         WorkflowExecutorConfig,
         WorkflowExecutorResult,
         execute_workflow,
@@ -439,7 +439,7 @@ def test_semaphore_cap_derived_from_parallel_policy_decision(
     """
     monkeypatch.setenv("MAGI_WORKFLOW_EXECUTOR_ENABLED", "1")
 
-    from openmagi_core_agent.harness.workflow_executor import (
+    from magi_agent.harness.workflow_executor import (
         WorkflowExecutorConfig,
         WorkflowExecutorResult,
         _cap_from_policy,
@@ -534,7 +534,7 @@ def test_partial_child_status_is_not_misreported_as_blocked(
     """
     monkeypatch.setenv("MAGI_WORKFLOW_EXECUTOR_ENABLED", "1")
 
-    from openmagi_core_agent.harness.workflow_executor import (
+    from magi_agent.harness.workflow_executor import (
         WorkflowExecutorConfig,
         WorkflowExecutorResult,
         execute_workflow,

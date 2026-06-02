@@ -7,7 +7,7 @@ from typing import Any
 
 import pytest
 
-from openmagi_core_agent.channels.telegram_boundary import (
+from magi_agent.channels.telegram_boundary import (
     TelegramRuntimeBoundary,
     TelegramRuntimeConfig,
     TelegramRuntimeRequest,
@@ -508,7 +508,7 @@ def test_telegram_boundary_rejects_unmarked_local_fake_provider() -> None:
 
 
 def test_telegram_forged_projection_redacts_nested_payloads_and_refs() -> None:
-    from openmagi_core_agent.channels.telegram_boundary import (
+    from magi_agent.channels.telegram_boundary import (
         TelegramDeliveryReceipt,
         TelegramInboundMessage,
         TelegramRuntimeDecision,
@@ -558,14 +558,14 @@ def test_telegram_boundary_has_no_live_imports() -> None:
 import importlib
 import sys
 
-importlib.import_module("openmagi_core_agent.channels.telegram_boundary")
+importlib.import_module("magi_agent.channels.telegram_boundary")
 forbidden = (
     "telegram",
     "aiohttp",
     "httpx",
     "requests",
     "google.adk.runners",
-    "openmagi_core_agent.runtime.runner",
+    "magi_agent.runtime.runner",
 )
 loaded = [name for name in forbidden if name in sys.modules]
 if loaded:

@@ -3,12 +3,12 @@ from __future__ import annotations
 import subprocess
 import sys
 
-from openmagi_core_agent.shadow.gate5b4c3_shadow_generation_contract import (
+from magi_agent.shadow.gate5b4c3_shadow_generation_contract import (
     Gate5B4C3ShadowGenerationConfig,
     Gate5B4C3ShadowGenerationRequest,
     build_gate5b4c3_shadow_generation_diagnostic,
 )
-from openmagi_core_agent.shadow.gate5b4c3_shadow_generation_report import (
+from magi_agent.shadow.gate5b4c3_shadow_generation_report import (
     Gate5B4C3ShadowGenerationRunnerReport,
     build_gate5b4c3_shadow_generation_report,
 )
@@ -293,20 +293,20 @@ import importlib
 import sys
 
 module = importlib.import_module(
-    "openmagi_core_agent.shadow.gate5b4c3_shadow_generation_report"
+    "magi_agent.shadow.gate5b4c3_shadow_generation_report"
 )
 assert module is not None
 
 forbidden = (
     "google.adk",
-    "openmagi_core_agent.transport.chat",
-    "openmagi_core_agent.transport.tools",
-    "openmagi_core_agent.runtime.openmagi_runtime",
-    "openmagi_core_agent.routing",
-    "openmagi_core_agent.workspace",
-    "openmagi_core_agent.children",
-    "openmagi_core_agent.evidence",
-    "openmagi_core_agent.memory",
+    "magi_agent.transport.chat",
+    "magi_agent.transport.tools",
+    "magi_agent.runtime.openmagi_runtime",
+    "magi_agent.routing",
+    "magi_agent.workspace",
+    "magi_agent.children",
+    "magi_agent.evidence",
+    "magi_agent.memory",
     "openai",
     "anthropic",
 )

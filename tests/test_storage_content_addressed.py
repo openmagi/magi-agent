@@ -8,18 +8,18 @@ import sys
 import pytest
 from pydantic import ValidationError
 
-from openmagi_core_agent.storage.content_addressed import (
+from magi_agent.storage.content_addressed import (
     ContentAddressedJSONRecord,
     StoredTurnCheckpoint,
     content_digest_for_payload,
 )
-from openmagi_core_agent.storage.durable_store import (
+from magi_agent.storage.durable_store import (
     DurableRecord,
     DurableStoreSafetyError,
     RuntimeMetadataIndexRecord,
     runtime_metadata_collections,
 )
-from openmagi_core_agent.storage.memory_store import InMemoryDurableStore
+from magi_agent.storage.memory_store import InMemoryDurableStore
 
 
 DIGEST_A = "sha256:" + "a" * 64
@@ -190,12 +190,12 @@ def test_runtime_metadata_index_rejects_unregistered_collection_or_secret_metada
 def test_content_addressed_storage_import_boundary_has_no_live_provider_imports() -> None:
     script = """
 import sys
-import openmagi_core_agent.storage.content_addressed
+import magi_agent.storage.content_addressed
 for name in (
     'google.adk.runners',
-    'openmagi_core_agent.chat',
-    'openmagi_core_agent.tools',
-    'openmagi_core_agent.web_acquisition',
+    'magi_agent.chat',
+    'magi_agent.tools',
+    'magi_agent.web_acquisition',
     'supabase',
     'psycopg',
     'kubernetes',

@@ -19,7 +19,7 @@
       "opencodeSource": "anomalyco/opencode@34b1045a016e22aafbaf0719fd7c8553defebdc4:packages/opencode/src/provider/provider.ts",
       "plannedSlice": "PR-A",
       "openmagiTarget": [
-        "openmagi_core_agent/providers/provider_compat.py",
+        "magi_agent/providers/provider_compat.py",
         "tests/fixtures/provider_compat/provider_cases.json",
         "tests/test_provider_compat.py",
         "docs/superpowers/plans/2026-05-20-python-adk-first-party-live-provider-quality-plan.md"
@@ -39,8 +39,8 @@
       "opencodeSource": "anomalyco/opencode@34b1045a016e22aafbaf0719fd7c8553defebdc4:packages/opencode/src/snapshot/index.ts",
       "plannedSlice": "PR-B",
       "openmagiTarget": [
-        "openmagi_core_agent/runtime/provider_receipts.py",
-        "openmagi_core_agent/runtime/policy_snapshot.py",
+        "magi_agent/runtime/provider_receipts.py",
+        "magi_agent/runtime/policy_snapshot.py",
         "tests/test_live_provider_receipts.py"
       ],
       "owningLayer": "Python ADK runtime receipts",
@@ -58,8 +58,8 @@
       "opencodeSource": "anomalyco/opencode@34b1045a016e22aafbaf0719fd7c8553defebdc4:packages/opencode/src/tool/truncate.ts",
       "plannedSlice": "PR-C",
       "openmagiTarget": [
-        "openmagi_core_agent/tools/output_budget.py",
-        "openmagi_core_agent/artifacts/local_result_store.py",
+        "magi_agent/tools/output_budget.py",
+        "magi_agent/artifacts/local_result_store.py",
         "tests/test_e2e_harness_pr3_tool_schema_output_store.py"
       ],
       "owningLayer": "ToolHost output contract",
@@ -77,9 +77,9 @@
       "opencodeSource": "anomalyco/opencode@34b1045a016e22aafbaf0719fd7c8553defebdc4:packages/opencode/src/permission/evaluate.ts",
       "plannedSlice": "PR-D",
       "openmagiTarget": [
-        "openmagi_core_agent/harness/approval_receipts.py",
-        "openmagi_core_agent/permissions/auto_control.py",
-        "openmagi_core_agent/shadow/permission_arbiter_contract.py",
+        "magi_agent/harness/approval_receipts.py",
+        "magi_agent/permissions/auto_control.py",
+        "magi_agent/shadow/permission_arbiter_contract.py",
         "tests/test_approval_receipts_contract.py",
         "tests/test_permission_arbiter_contract_golden_fixtures.py"
       ],
@@ -98,9 +98,9 @@
       "opencodeSource": "anomalyco/opencode@34b1045a016e22aafbaf0719fd7c8553defebdc4:packages/opencode/src/tool/shell.ts",
       "plannedSlice": "PR-E",
       "openmagiTarget": [
-        "openmagi_core_agent/tools/safety.py",
-        "openmagi_core_agent/plugins/shell_testrun_safe_subset.py",
-        "openmagi_core_agent/shadow/path_shell_policy_contract.py",
+        "magi_agent/tools/safety.py",
+        "magi_agent/plugins/shell_testrun_safe_subset.py",
+        "magi_agent/shadow/path_shell_policy_contract.py",
         "tests/test_path_shell_policy_contract_golden_fixtures.py",
         "tests/test_e2e_harness_pr11_shell_testrun_bash_safe_subset.py"
       ],
@@ -119,7 +119,7 @@
       "opencodeSource": "anomalyco/opencode@34b1045a016e22aafbaf0719fd7c8553defebdc4:packages/opencode/src/session/processor.ts",
       "plannedSlice": "PR-F",
       "openmagiTarget": [
-        "openmagi_core_agent/runtime/loop_detectors.py",
+        "magi_agent/runtime/loop_detectors.py",
         "tests/test_priority_a_loop_detectors.py"
       ],
       "owningLayer": "Runtime loop detector",
@@ -137,8 +137,8 @@
       "opencodeSource": "anomalyco/opencode@34b1045a016e22aafbaf0719fd7c8553defebdc4:packages/opencode/src/session/processor.ts",
       "plannedSlice": "PR-G",
       "openmagiTarget": [
-        "openmagi_core_agent/harness/plan_gate.py",
-        "openmagi_core_agent/shadow/permission_arbiter_contract.py",
+        "magi_agent/harness/plan_gate.py",
+        "magi_agent/shadow/permission_arbiter_contract.py",
         "tests/test_well_specified_plan_gate_contract.py",
         "tests/test_permission_arbiter_contract_golden_fixtures.py"
       ],
@@ -157,8 +157,8 @@
       "opencodeSource": "anomalyco/opencode@34b1045a016e22aafbaf0719fd7c8553defebdc4:packages/opencode/src/tool/apply_patch.ts",
       "plannedSlice": "PR-H",
       "openmagiTarget": [
-        "openmagi_core_agent/shadow/patch_file_policy_contract.py",
-        "openmagi_core_agent/tools/read_ledger.py",
+        "magi_agent/shadow/patch_file_policy_contract.py",
+        "magi_agent/tools/read_ledger.py",
         "tests/test_patch_file_policy_contract_golden_fixtures.py",
         "tests/tools/test_read_ledger.py"
       ],
@@ -195,10 +195,10 @@
       "opencodeSource": "anomalyco/opencode@34b1045a016e22aafbaf0719fd7c8553defebdc4:packages/opencode/src/cli/cmd/run/session-replay.ts",
       "plannedSlice": "PR-J",
       "openmagiTarget": [
-        "openmagi_core_agent/shadow/ts_parity_replay.py",
-        "openmagi_core_agent/shadow/redacted_ts_bundle.py",
-        "openmagi_core_agent/gates/gate2_readiness.py",
-        "openmagi_core_agent/shadow/gate2_shadow_tool_policy.py",
+        "magi_agent/shadow/ts_parity_replay.py",
+        "magi_agent/shadow/redacted_ts_bundle.py",
+        "magi_agent/gates/gate2_readiness.py",
+        "magi_agent/shadow/gate2_shadow_tool_policy.py",
         "tests/test_ts_parity_replay_fixtures.py",
         "tests/test_gate2_redacted_ts_bundle_comparator.py",
         "tests/test_gate2_readiness_foundations.py"
@@ -218,8 +218,8 @@
       "opencodeSource": "anomalyco/opencode@34b1045a016e22aafbaf0719fd7c8553defebdc4:packages/opencode/src/session/todo.ts",
       "plannedSlice": "PR-K",
       "openmagiTarget": [
-        "openmagi_core_agent/meta_orchestration/task_plan.py",
-        "openmagi_core_agent/harness/goal_loop.py",
+        "magi_agent/meta_orchestration/task_plan.py",
+        "magi_agent/harness/goal_loop.py",
         "docs/superpowers/plans/2026-05-25-python-adk-conversation-context-continuity.md",
         "tests/test_meta_task_plan.py",
         "tests/test_persistent_goal_loop_contract.py"
@@ -239,8 +239,8 @@
       "opencodeSource": "anomalyco/opencode@34b1045a016e22aafbaf0719fd7c8553defebdc4:packages/opencode/src/server/routes/instance/httpapi/groups/v2/session.ts",
       "plannedSlice": "PR-L",
       "openmagiTarget": [
-        "openmagi_core_agent/transport/public_event_parity.py",
-        "openmagi_core_agent/runtime/public_events.py",
+        "magi_agent/transport/public_event_parity.py",
+        "magi_agent/runtime/public_events.py",
         "tests/test_public_event_parity_matrix.py",
         "tests/test_public_event_golden_fixtures.py",
         "docs/notes/2026-05-27-python-adk-frontend-ts-production-compatibility-audit.md"
@@ -260,7 +260,7 @@
       "opencodeSource": "anomalyco/opencode@34b1045a016e22aafbaf0719fd7c8553defebdc4:packages/opencode/src/mcp/index.ts",
       "plannedSlice": "PR-M",
       "openmagiTarget": [
-        "openmagi_core_agent/plugins/mcp_adapter.py",
+        "magi_agent/plugins/mcp_adapter.py",
         "tests/test_mcp_adapter.py"
       ],
       "owningLayer": "MCP adapter boundary",
@@ -278,9 +278,9 @@
       "opencodeSource": "anomalyco/opencode@34b1045a016e22aafbaf0719fd7c8553defebdc4:packages/opencode/src/session/llm/native-request.ts",
       "plannedSlice": "PR-M",
       "openmagiTarget": [
-        "openmagi_core_agent/runtime/provider_execution.py",
-        "openmagi_core_agent/web_acquisition/provider_boundary.py",
-        "openmagi_core_agent/browser/provider_boundary.py",
+        "magi_agent/runtime/provider_execution.py",
+        "magi_agent/web_acquisition/provider_boundary.py",
+        "magi_agent/browser/provider_boundary.py",
         "tests/test_live_provider_execution_boundary.py",
         "tests/test_priority_c_web_acquisition_provider_boundary.py",
         "tests/test_priority_c_browser_provider_boundary.py"

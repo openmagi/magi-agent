@@ -5,14 +5,14 @@ from datetime import UTC, datetime
 
 import pytest
 
-from openmagi_core_agent.runtime.heartbeat_contract import (
+from magi_agent.runtime.heartbeat_contract import (
     ActivityReceipt,
     HeartbeatReceipt,
     RunLease,
     activity_receipt_digest,
     heartbeat_receipt_digest,
 )
-from openmagi_core_agent.runtime.heartbeat_store import (
+from magi_agent.runtime.heartbeat_store import (
     HeartbeatStoreError,
     LocalFakeHeartbeatStore,
     require_local_fake_heartbeat_store,

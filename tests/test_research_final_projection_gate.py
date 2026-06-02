@@ -5,35 +5,35 @@ from hashlib import sha256
 
 import pytest
 
-import openmagi_core_agent.research.boundary_enforcement as boundary_module
+import magi_agent.research.boundary_enforcement as boundary_module
 from runtime_issuance_support import issue_test_runtime_authority
-from openmagi_core_agent.research.acceptance_criteria import (
+from magi_agent.research.acceptance_criteria import (
     ResearchAcceptanceCriterion,
     ResearchAcceptanceCriteriaSet,
     ResearchAcceptanceEvidenceRef,
 )
-from openmagi_core_agent.research.action_claims import (
+from magi_agent.research.action_claims import (
     ResearchActionProofReceiptRef,
     ResearchActionProofRequirement,
     detect_research_action_claims,
     verify_research_action_claims,
 )
-from openmagi_core_agent.research.claim_graph import (
+from magi_agent.research.claim_graph import (
     ResearchClaimGraph,
     ResearchClaimSupportRef,
     build_research_claim_node,
 )
-from openmagi_core_agent.research.boundary_enforcement import (
+from magi_agent.research.boundary_enforcement import (
     ResearchBoundaryRequest,
     ResearchBoundarySequenceRef,
     enforce_research_boundary,
 )
-from openmagi_core_agent.research.evidence_graph import ResearchEvidenceGraph
-from openmagi_core_agent.research.final_projection_gate import (
+from magi_agent.research.evidence_graph import ResearchEvidenceGraph
+from magi_agent.research.final_projection_gate import (
     ResearchFinalProjectionGateRequest,
     evaluate_research_final_projection_gate,
 )
-from openmagi_core_agent.research.source_proof import (
+from magi_agent.research.source_proof import (
     ResearchSourceOpenReceiptRef,
     ResearchSourceProofRequirement,
     ResearchSourceProofVerdict,

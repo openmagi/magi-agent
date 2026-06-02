@@ -6,8 +6,8 @@ import json
 import pytest
 from pydantic import ValidationError
 
-from openmagi_core_agent.adk_bridge.session_service import WorkspaceSessionService
-from openmagi_core_agent.runtime.context_lifecycle import (
+from magi_agent.adk_bridge.session_service import WorkspaceSessionService
+from magi_agent.runtime.context_lifecycle import (
     ContextLifecycleBoundary,
     ContextLifecycleConfig,
     ContextLifecycleEvent,
@@ -16,7 +16,7 @@ from openmagi_core_agent.runtime.context_lifecycle import (
     RestoreContextRequest,
     _restore_provenance_digest,
 )
-from openmagi_core_agent.runtime.query_state import QueryState
+from magi_agent.runtime.query_state import QueryState
 
 
 DIGEST_A = "sha256:" + "a" * 64

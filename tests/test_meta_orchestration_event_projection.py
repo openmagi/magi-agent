@@ -4,35 +4,35 @@ import json
 
 import pytest
 
-from openmagi_core_agent.harness.verifier_bus import VerifierResultMetadata
-from openmagi_core_agent.meta_orchestration.child_acceptance import ChildAcceptanceVerdict
-from openmagi_core_agent.meta_orchestration.commit_adapter import (
+from magi_agent.harness.verifier_bus import VerifierResultMetadata
+from magi_agent.meta_orchestration.child_acceptance import ChildAcceptanceVerdict
+from magi_agent.meta_orchestration.commit_adapter import (
     evaluate_before_commit_for_assembly,
     issue_runtime_verifier_result_for_assembly,
 )
-from openmagi_core_agent.meta_orchestration.event_projection import (
+from magi_agent.meta_orchestration.event_projection import (
     project_meta_before_commit_event,
     project_meta_child_task_scheduled_event,
     project_meta_final_assembly_events,
     project_meta_parent_inspection_events,
     project_meta_plan_created_events,
 )
-from openmagi_core_agent.meta_orchestration.final_assembly import (
+from magi_agent.meta_orchestration.final_assembly import (
     assemble_final_output_from_inspection,
 )
-from openmagi_core_agent.meta_orchestration.inspection_loop import (
+from magi_agent.meta_orchestration.inspection_loop import (
     MetaInspectedChildVerdict,
     inspect_child_verdicts,
 )
-from openmagi_core_agent.meta_orchestration.projection import (
+from magi_agent.meta_orchestration.projection import (
     meta_projection_assembly_id_for_inspection,
     meta_projection_loop_id_for_plan,
 )
-from openmagi_core_agent.meta_orchestration.task_plan import (
+from magi_agent.meta_orchestration.task_plan import (
     MetaChildTaskSpec,
     MetaTaskPlan,
 )
-from openmagi_core_agent.transport.sse import InMemorySseWriter
+from magi_agent.transport.sse import InMemorySseWriter
 
 
 def _child(

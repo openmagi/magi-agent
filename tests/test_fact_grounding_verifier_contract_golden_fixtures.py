@@ -10,7 +10,7 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from openmagi_core_agent.shadow.fact_grounding_verifier_contract import (
+from magi_agent.shadow.fact_grounding_verifier_contract import (
     FactGroundingVerifierAttachmentFlags,
     FactGroundingVerifierFixture,
     load_fact_grounding_verifier_fixture,
@@ -288,7 +288,7 @@ def test_fact_grounding_verifier_import_boundary_stays_runtime_free() -> None:
 import sys
 from pathlib import Path
 
-from openmagi_core_agent.shadow.fact_grounding_verifier_contract import (
+from magi_agent.shadow.fact_grounding_verifier_contract import (
     load_fact_grounding_verifier_fixture,
     project_fact_grounding_verifier_fixture,
 )
@@ -302,23 +302,23 @@ project_fact_grounding_verifier_fixture(fixture)
 forbidden = (
     'google.adk.evaluation',
     'google.adk.runners',
-    'openmagi_core_agent.adk_bridge.local_runner',
-    'openmagi_core_agent.adk_bridge.runner_adapter',
-    'openmagi_core_agent.adk_bridge.tool_adapter',
-    'openmagi_core_agent.shadow.toolhost_contract',
-    'openmagi_core_agent.tools.dispatcher',
-    'openmagi_core_agent.tools.registry',
-    'openmagi_core_agent.plugins.agentmemory',
-    'openmagi_core_agent.memory',
-    'openmagi_core_agent.services.memory',
-    'openmagi_core_agent.hipocampus',
-    'openmagi_core_agent.qmd',
-    'openmagi_core_agent.browser',
-    'openmagi_core_agent.search',
-    'openmagi_core_agent.fetch',
-    'openmagi_core_agent.app',
-    'openmagi_core_agent.transport.chat',
-    'openmagi_core_agent.routes',
+    'magi_agent.adk_bridge.local_runner',
+    'magi_agent.adk_bridge.runner_adapter',
+    'magi_agent.adk_bridge.tool_adapter',
+    'magi_agent.shadow.toolhost_contract',
+    'magi_agent.tools.dispatcher',
+    'magi_agent.tools.registry',
+    'magi_agent.plugins.agentmemory',
+    'magi_agent.memory',
+    'magi_agent.services.memory',
+    'magi_agent.hipocampus',
+    'magi_agent.qmd',
+    'magi_agent.browser',
+    'magi_agent.search',
+    'magi_agent.fetch',
+    'magi_agent.app',
+    'magi_agent.transport.chat',
+    'magi_agent.routes',
 )
 loaded = [
     module_name
@@ -341,7 +341,7 @@ if loaded:
 
     source = (
         Path(__file__).parents[1]
-        / "openmagi_core_agent"
+        / "magi_agent"
         / "shadow"
         / "fact_grounding_verifier_contract.py"
     ).read_text(encoding="utf-8")
@@ -350,18 +350,18 @@ if loaded:
     )
     forbidden_import_fragments = (
         "google.adk",
-        "openmagi_core_agent.adk_bridge",
-        "openmagi_core_agent.shadow.toolhost_contract",
-        "openmagi_core_agent.tools",
-        "openmagi_core_agent.plugins.agentmemory",
-        "openmagi_core_agent.memory",
-        "openmagi_core_agent.hipocampus",
-        "openmagi_core_agent.qmd",
-        "openmagi_core_agent.browser",
-        "openmagi_core_agent.search",
-        "openmagi_core_agent.fetch",
-        "openmagi_core_agent.transport.chat",
-        "openmagi_core_agent.routes",
+        "magi_agent.adk_bridge",
+        "magi_agent.shadow.toolhost_contract",
+        "magi_agent.tools",
+        "magi_agent.plugins.agentmemory",
+        "magi_agent.memory",
+        "magi_agent.hipocampus",
+        "magi_agent.qmd",
+        "magi_agent.browser",
+        "magi_agent.search",
+        "magi_agent.fetch",
+        "magi_agent.transport.chat",
+        "magi_agent.routes",
     )
     for fragment in forbidden_import_fragments:
         assert fragment not in import_lines

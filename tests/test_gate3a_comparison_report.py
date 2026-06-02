@@ -3,7 +3,7 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
-from openmagi_core_agent.shadow.gate3a_report import (
+from magi_agent.shadow.gate3a_report import (
     Gate3AAttachmentFlags,
     Gate3AComparisonReport,
     Gate3AParityStatus,
@@ -195,14 +195,14 @@ def test_constructed_report_dump_forces_safe_public_boundary() -> None:
 
 def test_constructed_report_dump_sanitizes_ids_and_redaction_violations() -> None:
     constructed = Gate3AComparisonReport.model_construct(
-        bundle_id="bundle /Users/kevin/Desktop/clawy/secret.txt sk-abcdefghijklmnop",
+        bundle_id="bundle /Users/kevin/Desktop/openmagi/secret.txt sk-abcdefghijklmnop",
         shadow_run_id="shadow C:\\Users\\kevin\\secret.txt",
         recipe_snapshot_id="recipe_local_research_v1",
         redaction={
             "inputVerified": True,
             "outputVerified": True,
             "violations": (
-                "/Users/kevin/Desktop/clawy/private.txt",
+                "/Users/kevin/Desktop/openmagi/private.txt",
                 "Authorization: Bearer abcdefghijklmnop",
                 "GITHUB_TOKEN='custom-token-value'",
                 'STRIPE_SECRET_KEY="custom-secret-value"',

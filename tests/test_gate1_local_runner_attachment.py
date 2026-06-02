@@ -16,13 +16,13 @@ from google.adk.runners import Runner
 from google.adk.tools import FunctionTool
 from google.genai import types
 
-from openmagi_core_agent.adk_bridge.runner_adapter import (
+from magi_agent.adk_bridge.runner_adapter import (
     ADK_RUNNER_KWARG_ALLOWLIST,
     OpenMagiRunnerAdapter,
     RunnerTurnInput,
 )
-from openmagi_core_agent.adk_bridge.session_service import WorkspaceSessionService
-from openmagi_core_agent.harness.resolved import build_default_resolved_harness_state
+from magi_agent.adk_bridge.session_service import WorkspaceSessionService
+from magi_agent.harness.resolved import build_default_resolved_harness_state
 
 
 class ProviderLikeLlm(BaseLlm):
@@ -71,7 +71,7 @@ def _run_fresh_python(script: str) -> subprocess.CompletedProcess[str]:
 def test_factory_disabled_by_default(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("CORE_AGENT_PYTHON_LOCAL_ADK_RUNNER", raising=False)
 
-    local_runner = importlib.import_module("openmagi_core_agent.adk_bridge.local_runner")
+    local_runner = importlib.import_module("magi_agent.adk_bridge.local_runner")
 
     with pytest.raises(local_runner.LocalAdkRunnerDisabled):
         local_runner.build_local_adk_runner()
@@ -84,7 +84,7 @@ def test_trueish_flag_values_enable_local_runner_construction(
 ) -> None:
     monkeypatch.setenv("CORE_AGENT_PYTHON_LOCAL_ADK_RUNNER", flag_value)
 
-    local_runner = importlib.import_module("openmagi_core_agent.adk_bridge.local_runner")
+    local_runner = importlib.import_module("magi_agent.adk_bridge.local_runner")
     bundle = local_runner.build_local_adk_runner()
 
     assert isinstance(bundle.agent, Agent)
@@ -113,7 +113,7 @@ def test_enabled_local_runner_rejects_arbitrary_official_function_tools(
 
     tool = FunctionTool(local_receipt, require_confirmation=False)
 
-    local_runner = importlib.import_module("openmagi_core_agent.adk_bridge.local_runner")
+    local_runner = importlib.import_module("magi_agent.adk_bridge.local_runner")
 
     with pytest.raises(TypeError, match="LocalToolHostAdkBundle"):
         local_runner.build_local_adk_runner(tools=(tool,))
@@ -126,7 +126,7 @@ def test_default_factory_agent_model_is_local_inert_adk_llm(
 ) -> None:
     monkeypatch.setenv("CORE_AGENT_PYTHON_LOCAL_ADK_RUNNER", "1")
 
-    local_runner = importlib.import_module("openmagi_core_agent.adk_bridge.local_runner")
+    local_runner = importlib.import_module("magi_agent.adk_bridge.local_runner")
     bundle = local_runner.build_local_adk_runner()
 
     assert isinstance(bundle.agent.model, BaseLlm)
@@ -141,7 +141,7 @@ def test_factory_rejects_model_identifier_override_before_agent_construction(
 ) -> None:
     monkeypatch.setenv("CORE_AGENT_PYTHON_LOCAL_ADK_RUNNER", "1")
 
-    local_runner = importlib.import_module("openmagi_core_agent.adk_bridge.local_runner")
+    local_runner = importlib.import_module("magi_agent.adk_bridge.local_runner")
 
     with pytest.raises(TypeError, match="model"):
         local_runner.build_local_adk_runner(model="gemini-2.5-flash")  # type: ignore[arg-type]
@@ -152,7 +152,7 @@ def test_factory_rejects_base_llm_model_override_before_agent_construction(
 ) -> None:
     monkeypatch.setenv("CORE_AGENT_PYTHON_LOCAL_ADK_RUNNER", "1")
 
-    local_runner = importlib.import_module("openmagi_core_agent.adk_bridge.local_runner")
+    local_runner = importlib.import_module("magi_agent.adk_bridge.local_runner")
 
     with pytest.raises(TypeError, match="model"):
         local_runner.build_local_adk_runner(model=ProviderLikeLlm(model="provider-backed"))
@@ -163,7 +163,7 @@ def test_default_local_inert_model_generation_fails_without_provider_output(
 ) -> None:
     monkeypatch.setenv("CORE_AGENT_PYTHON_LOCAL_ADK_RUNNER", "1")
 
-    local_runner = importlib.import_module("openmagi_core_agent.adk_bridge.local_runner")
+    local_runner = importlib.import_module("magi_agent.adk_bridge.local_runner")
     bundle = local_runner.build_local_adk_runner()
 
     async def collect_generation() -> list[object]:
@@ -189,7 +189,7 @@ def test_adapter_with_official_local_runner_uses_adk_runner_and_blocks_provider_
     for key, value in fake_secret_env.items():
         monkeypatch.setenv(key, value)
 
-    local_runner = importlib.import_module("openmagi_core_agent.adk_bridge.local_runner")
+    local_runner = importlib.import_module("magi_agent.adk_bridge.local_runner")
     bundle = local_runner.build_local_adk_runner()
     runner_spy = DelegatingRunnerSpy(bundle.runner)
     adapter = OpenMagiRunnerAdapter(runner=runner_spy)
@@ -261,7 +261,7 @@ def test_local_runner_construction_does_not_touch_cwd_or_expose_workspace_paths(
     monkeypatch.setenv("CORE_AGENT_PYTHON_LOCAL_ADK_RUNNER", "1")
     monkeypatch.chdir(tmp_path)
 
-    local_runner = importlib.import_module("openmagi_core_agent.adk_bridge.local_runner")
+    local_runner = importlib.import_module("magi_agent.adk_bridge.local_runner")
     bundle = local_runner.build_local_adk_runner()
 
     assert list(tmp_path.iterdir()) == []
@@ -294,7 +294,7 @@ def test_false_flag_values_keep_factory_disabled(
 ) -> None:
     monkeypatch.setenv("CORE_AGENT_PYTHON_LOCAL_ADK_RUNNER", flag_value)
 
-    local_runner = importlib.import_module("openmagi_core_agent.adk_bridge.local_runner")
+    local_runner = importlib.import_module("magi_agent.adk_bridge.local_runner")
 
     with pytest.raises(local_runner.LocalAdkRunnerDisabled):
         local_runner.build_local_adk_runner()
@@ -307,32 +307,32 @@ import importlib
 import os
 import sys
 
-module = importlib.import_module("openmagi_core_agent.adk_bridge.local_runner")
+module = importlib.import_module("magi_agent.adk_bridge.local_runner")
 bundle = module.build_local_adk_runner()
 assert bundle.local_only is True
 
 forbidden_prefixes = (
-    "openmagi_core_agent.api",
-    "openmagi_core_agent.app",
-    "openmagi_core_agent.dashboard",
-    "openmagi_core_agent.database",
-    "openmagi_core_agent.db",
-    "openmagi_core_agent.runtime.openmagi_runtime",
-    "openmagi_core_agent.routing",
-    "openmagi_core_agent.supabase",
-    "openmagi_core_agent.transport.chat",
-    "openmagi_core_agent.transport.api",
-    "openmagi_core_agent.transport.tools",
-    "openmagi_core_agent.transport.plugins",
-    "openmagi_core_agent.workspace",
-    "openmagi_core_agent.web",
-    "openmagi_core_agent.deploy",
-    "openmagi_core_agent.canary",
-    "openmagi_core_agent.proxy",
-    "openmagi_core_agent.provisioning",
-    "openmagi_core_agent.k8s",
-    "openmagi_core_agent.telegram",
-    "openmagi_core_agent.runtime_selector",
+    "magi_agent.api",
+    "magi_agent.app",
+    "magi_agent.dashboard",
+    "magi_agent.database",
+    "magi_agent.db",
+    "magi_agent.runtime.openmagi_runtime",
+    "magi_agent.routing",
+    "magi_agent.supabase",
+    "magi_agent.transport.chat",
+    "magi_agent.transport.api",
+    "magi_agent.transport.tools",
+    "magi_agent.transport.plugins",
+    "magi_agent.workspace",
+    "magi_agent.web",
+    "magi_agent.deploy",
+    "magi_agent.canary",
+    "magi_agent.proxy",
+    "magi_agent.provisioning",
+    "magi_agent.k8s",
+    "magi_agent.telegram",
+    "magi_agent.runtime_selector",
     "src.",
 )
 loaded = [
@@ -400,7 +400,7 @@ for forbidden_env in (
     if forbidden_env in os.environ:
         raise AssertionError(f"fresh process inherited forbidden env before import: {forbidden_env}")
 
-module = importlib.import_module("openmagi_core_agent.adk_bridge.local_runner")
+module = importlib.import_module("magi_agent.adk_bridge.local_runner")
 bundle = module.build_local_adk_runner()
 assert bundle.local_only is True
 
@@ -443,7 +443,7 @@ def test_fresh_process_disabled_build_stays_runtime_route_and_infra_free() -> No
 import importlib
 import sys
 
-module = importlib.import_module("openmagi_core_agent.adk_bridge.local_runner")
+module = importlib.import_module("magi_agent.adk_bridge.local_runner")
 try:
     module.build_local_adk_runner()
 except module.LocalAdkRunnerDisabled:
@@ -452,27 +452,27 @@ else:
     raise AssertionError("local runner build unexpectedly succeeded while disabled")
 
 forbidden_prefixes = (
-    "openmagi_core_agent.api",
-    "openmagi_core_agent.app",
-    "openmagi_core_agent.dashboard",
-    "openmagi_core_agent.database",
-    "openmagi_core_agent.db",
-    "openmagi_core_agent.runtime.openmagi_runtime",
-    "openmagi_core_agent.routing",
-    "openmagi_core_agent.supabase",
-    "openmagi_core_agent.transport.chat",
-    "openmagi_core_agent.transport.api",
-    "openmagi_core_agent.transport.tools",
-    "openmagi_core_agent.transport.plugins",
-    "openmagi_core_agent.workspace",
-    "openmagi_core_agent.web",
-    "openmagi_core_agent.deploy",
-    "openmagi_core_agent.canary",
-    "openmagi_core_agent.proxy",
-    "openmagi_core_agent.provisioning",
-    "openmagi_core_agent.k8s",
-    "openmagi_core_agent.telegram",
-    "openmagi_core_agent.runtime_selector",
+    "magi_agent.api",
+    "magi_agent.app",
+    "magi_agent.dashboard",
+    "magi_agent.database",
+    "magi_agent.db",
+    "magi_agent.runtime.openmagi_runtime",
+    "magi_agent.routing",
+    "magi_agent.supabase",
+    "magi_agent.transport.chat",
+    "magi_agent.transport.api",
+    "magi_agent.transport.tools",
+    "magi_agent.transport.plugins",
+    "magi_agent.workspace",
+    "magi_agent.web",
+    "magi_agent.deploy",
+    "magi_agent.canary",
+    "magi_agent.proxy",
+    "magi_agent.provisioning",
+    "magi_agent.k8s",
+    "magi_agent.telegram",
+    "magi_agent.runtime_selector",
     "src.",
 )
 loaded = [

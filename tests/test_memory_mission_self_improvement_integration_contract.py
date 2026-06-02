@@ -4,20 +4,20 @@ import json
 from collections.abc import Mapping
 from pathlib import Path
 
-from openmagi_core_agent.harness.memory_compaction import MemoryCompactionHarnessConfig
-from openmagi_core_agent.harness.memory_recall import MemoryRecallHarnessConfig
-from openmagi_core_agent.harness.memory_write import MemoryWriteHarnessConfig
-from openmagi_core_agent.memory.adk_bridge import ADKMemoryBridgeConfig
-from openmagi_core_agent.missions.cron_policy import CronSchedulerMutationConfig
-from openmagi_core_agent.missions.events import MissionEventProjectionConfig
-from openmagi_core_agent.missions.lifecycle import MissionLifecycleConfig
-from openmagi_core_agent.runtime.long_running_activity import LongRunningActivityConfig
-from openmagi_core_agent.self_improvement.drift_watch import DriftWatchConfig
-from openmagi_core_agent.self_improvement.eval_capture import EvalCaptureConfig
-from openmagi_core_agent.self_improvement.promotion_gate import SelfImprovementPromotionConfig
-from openmagi_core_agent.self_improvement.proposals import SelfImprovementProposalConfig
-from openmagi_core_agent.self_improvement.review_gate import SelfImprovementReviewConfig
-from openmagi_core_agent.self_improvement.rollback import RollbackConfig
+from magi_agent.harness.memory_compaction import MemoryCompactionHarnessConfig
+from magi_agent.harness.memory_recall import MemoryRecallHarnessConfig
+from magi_agent.harness.memory_write import MemoryWriteHarnessConfig
+from magi_agent.memory.adk_bridge import ADKMemoryBridgeConfig
+from magi_agent.missions.cron_policy import CronSchedulerMutationConfig
+from magi_agent.missions.events import MissionEventProjectionConfig
+from magi_agent.missions.lifecycle import MissionLifecycleConfig
+from magi_agent.runtime.long_running_activity import LongRunningActivityConfig
+from magi_agent.self_improvement.drift_watch import DriftWatchConfig
+from magi_agent.self_improvement.eval_capture import EvalCaptureConfig
+from magi_agent.self_improvement.promotion_gate import SelfImprovementPromotionConfig
+from magi_agent.self_improvement.proposals import SelfImprovementProposalConfig
+from magi_agent.self_improvement.review_gate import SelfImprovementReviewConfig
+from magi_agent.self_improvement.rollback import RollbackConfig
 
 
 PYTHON_ROOT = Path(__file__).resolve().parents[1]
@@ -47,11 +47,11 @@ DOMAIN_LAYER_EXPECTATIONS = {
     "rollback_regression_drift_watch": "Self-improvement recipe/harness/plugin",
 }
 GENERIC_CORE_DIRECTORIES = (
-    PYTHON_ROOT / "openmagi_core_agent/runtime",
-    PYTHON_ROOT / "openmagi_core_agent/storage",
-    PYTHON_ROOT / "openmagi_core_agent/adk_bridge",
-    PYTHON_ROOT / "openmagi_core_agent/evidence",
-    PYTHON_ROOT / "openmagi_core_agent/artifacts",
+    PYTHON_ROOT / "magi_agent/runtime",
+    PYTHON_ROOT / "magi_agent/storage",
+    PYTHON_ROOT / "magi_agent/adk_bridge",
+    PYTHON_ROOT / "magi_agent/evidence",
+    PYTHON_ROOT / "magi_agent/artifacts",
 )
 DOMAIN_SPECIFIC_CORE_MARKERS = (
     "hermes",

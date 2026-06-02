@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import pytest
 
-from openmagi_core_agent.adk_bridge.event_adapter import EventProjection
-from openmagi_core_agent.transport.sse_buffer import SseEventBuffer
-from openmagi_core_agent.runtime.stream_withholding import (
+from magi_agent.adk_bridge.event_adapter import EventProjection
+from magi_agent.transport.sse_buffer import SseEventBuffer
+from magi_agent.runtime.stream_withholding import (
     StreamWithholdingFilter,
     _extract_error_from_projection,
 )

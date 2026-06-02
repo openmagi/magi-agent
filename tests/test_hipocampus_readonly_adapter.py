@@ -4,13 +4,13 @@ from pathlib import Path
 
 import pytest
 
-from openmagi_core_agent.memory.adapters.hipocampus_readonly import (
+from magi_agent.memory.adapters.hipocampus_readonly import (
     HipocampusReadOnlyAdapter,
     HipocampusReadOnlyConfig,
     UnsafeMemoryPathError,
 )
-from openmagi_core_agent.memory.contracts import RecallRequest, UnsupportedMemoryOperationError
-from openmagi_core_agent.memory.policy import MemoryPolicy
+from magi_agent.memory.contracts import RecallRequest, UnsupportedMemoryOperationError
+from magi_agent.memory.policy import MemoryPolicy
 
 
 def write_memory_fixture(root: Path) -> None:

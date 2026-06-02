@@ -14,7 +14,7 @@ def test_context_packet_import_is_pure_local_only() -> None:
 import importlib
 import sys
 
-module = importlib.import_module("openmagi_core_agent.runtime.context_packet")
+module = importlib.import_module("magi_agent.runtime.context_packet")
 assert hasattr(module, "ConversationContextPacket")
 
 forbidden_prefixes = (
@@ -26,9 +26,9 @@ forbidden_prefixes = (
     "subprocess",
     "google.adk.runners",
     "google.adk.agents",
-    "openmagi_core_agent.tools",
-    "openmagi_core_agent.transport",
-    "openmagi_core_agent.workspace",
+    "magi_agent.tools",
+    "magi_agent.transport",
+    "magi_agent.workspace",
     "kubernetes",
     "supabase",
 )
@@ -51,7 +51,7 @@ if loaded:
 def test_context_packet_source_forbids_live_runtime_imports() -> None:
     source = (
         Path(__file__).parents[1]
-        / "openmagi_core_agent"
+        / "magi_agent"
         / "runtime"
         / "context_packet.py"
     ).read_text(encoding="utf-8")

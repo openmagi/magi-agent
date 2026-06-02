@@ -5,11 +5,11 @@ import sys
 
 import pytest
 
-from openmagi_core_agent.plugins.manager import PluginOptOutRecord, resolve_plugin_state
-from openmagi_core_agent.plugins.manifest import parse_plugin_manifest
-from openmagi_core_agent.plugins.native_catalog import native_plugin_manifests
-from openmagi_core_agent.plugins.tool_projection import project_native_plugin_tool_manifests
-from openmagi_core_agent.channels.contract import channel_adapter_manifests
+from magi_agent.plugins.manager import PluginOptOutRecord, resolve_plugin_state
+from magi_agent.plugins.manifest import parse_plugin_manifest
+from magi_agent.plugins.native_catalog import native_plugin_manifests
+from magi_agent.plugins.tool_projection import project_native_plugin_tool_manifests
+from magi_agent.channels.contract import channel_adapter_manifests
 
 
 def _opt_out(plugin_id: str) -> PluginOptOutRecord:
@@ -153,7 +153,7 @@ def test_projected_tool_manifests_are_metadata_only_and_execution_free() -> None
     assert "configSchema" not in dumped
     assert "GATEWAY_TOKEN" not in dumped
     assert "FIRECRAWL_API_KEY" not in dumped
-    assert "openmagi_core_agent.plugins.native" not in dumped
+    assert "magi_agent.plugins.native" not in dumped
 
 
 def test_file_delivery_projection_is_disabled_metadata_only_and_channel_traffic_free() -> None:
@@ -252,16 +252,16 @@ def test_tool_projection_import_boundary_stays_metadata_only() -> None:
 import importlib
 import sys
 
-importlib.import_module("openmagi_core_agent.plugins.tool_projection")
+importlib.import_module("magi_agent.plugins.tool_projection")
 forbidden_prefixes = (
     "google.adk",
-    "openmagi_core_agent.adk_bridge",
-    "openmagi_core_agent.runtime",
-    "openmagi_core_agent.tools.dispatcher",
-    "openmagi_core_agent.tools.registry",
-    "openmagi_core_agent.hooks.bus",
-    "openmagi_core_agent.transport",
-    "openmagi_core_agent.plugins.native.",
+    "magi_agent.adk_bridge",
+    "magi_agent.runtime",
+    "magi_agent.tools.dispatcher",
+    "magi_agent.tools.registry",
+    "magi_agent.hooks.bus",
+    "magi_agent.transport",
+    "magi_agent.plugins.native.",
 )
 loaded = [
     name

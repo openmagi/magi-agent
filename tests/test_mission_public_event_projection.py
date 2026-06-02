@@ -7,13 +7,13 @@ from typing import Any
 
 import pytest
 
-from openmagi_core_agent.missions.events import (
+from magi_agent.missions.events import (
     MissionEventProjectionConfig,
     MissionPublicEventProjectionResult,
     MissionPublicEventProjection,
     MissionRuntimeEventRequest,
 )
-from openmagi_core_agent.transport.sse import InMemorySseWriter
+from magi_agent.transport.sse import InMemorySseWriter
 
 
 def _agent_payloads(sse_body: str) -> list[dict[str, object]]:
@@ -322,7 +322,7 @@ def test_projected_sse_sink_requires_valid_projection_result() -> None:
         "MissionPublicEventProjectionResult",
         (),
         {
-            "__module__": "openmagi_core_agent.missions.events",
+            "__module__": "magi_agent.missions.events",
             "has_projection_capability": lambda self: True,
             "model_dump": lambda self, **_kwargs: {
                 "projectionBoundary": "mission_public_event_projection.v1",
@@ -683,20 +683,20 @@ def test_result_copy_and_construct_cannot_forge_public_event_leaks() -> None:
 def test_mission_public_event_projection_import_boundary_is_local_contract_only() -> None:
     forbidden_modules = (
         "google.adk.runners",
-        "openmagi_core_agent.adk_bridge.local_runner",
-        "openmagi_core_agent.adk_bridge.runner_adapter",
-        "openmagi_core_agent.tools.dispatcher",
-        "openmagi_core_agent.tools.registry",
-        "openmagi_core_agent.browser.provider_boundary",
-        "openmagi_core_agent.channels.telegram_adapter",
-        "openmagi_core_agent.web_acquisition.provider_boundary",
+        "magi_agent.adk_bridge.local_runner",
+        "magi_agent.adk_bridge.runner_adapter",
+        "magi_agent.tools.dispatcher",
+        "magi_agent.tools.registry",
+        "magi_agent.browser.provider_boundary",
+        "magi_agent.channels.telegram_adapter",
+        "magi_agent.web_acquisition.provider_boundary",
     )
     code = f"""
 import importlib
 import json
 import sys
 
-importlib.import_module("openmagi_core_agent.missions.events")
+importlib.import_module("magi_agent.missions.events")
 
 forbidden = {json.dumps(forbidden_modules)}
 print(json.dumps([name for name in forbidden if name in sys.modules]))

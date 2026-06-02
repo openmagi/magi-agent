@@ -19,7 +19,7 @@ EXPECTED_GROUP_A_PATHS = (
 
 
 def _readiness_module() -> ModuleType:
-    return importlib.import_module("openmagi_core_agent.runtime.readiness")
+    return importlib.import_module("magi_agent.runtime.readiness")
 
 
 def _run_fresh_python(script: str) -> subprocess.CompletedProcess[str]:
@@ -182,7 +182,7 @@ import importlib
 import sys
 
 before = set(sys.modules)
-module = importlib.import_module("openmagi_core_agent.runtime.readiness")
+module = importlib.import_module("magi_agent.runtime.readiness")
 assert hasattr(module, "build_priority_a_readiness_snapshot")
 
 forbidden_prefixes = (
@@ -198,12 +198,12 @@ forbidden_prefixes = (
     "psycopg",
     "asyncpg",
     "kubernetes",
-    "openmagi_core_agent.app",
-    "openmagi_core_agent.adk_bridge.runner_adapter",
-    "openmagi_core_agent.transport",
-    "openmagi_core_agent.tools.dispatcher",
-    "openmagi_core_agent.memory",
-    "openmagi_core_agent.workspace",
+    "magi_agent.app",
+    "magi_agent.adk_bridge.runner_adapter",
+    "magi_agent.transport",
+    "magi_agent.tools.dispatcher",
+    "magi_agent.memory",
+    "magi_agent.workspace",
 )
 loaded = [
     module_name

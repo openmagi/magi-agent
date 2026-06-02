@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from openmagi_core_agent.runtime.activity_boundary import (
+from magi_agent.runtime.activity_boundary import (
     ActivityRequest,
     ActivityStore,
     evaluate_activity_request,

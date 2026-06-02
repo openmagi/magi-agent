@@ -3,7 +3,7 @@ from __future__ import annotations
 import subprocess
 import sys
 
-from openmagi_core_agent.runtime.structured_output_boundary import (
+from magi_agent.runtime.structured_output_boundary import (
     StructuredOutputBoundary,
     StructuredOutputConfig,
     StructuredOutputRequest,
@@ -131,7 +131,7 @@ def test_structured_output_boundary_has_no_live_imports() -> None:
 import importlib
 import sys
 
-importlib.import_module("openmagi_core_agent.runtime.structured_output_boundary")
+importlib.import_module("magi_agent.runtime.structured_output_boundary")
 forbidden = (
     "google.adk.runners",
     "requests",

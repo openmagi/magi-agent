@@ -8,7 +8,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from openmagi_core_agent.context.hook import (
+from magi_agent.context.hook import (
     HOOK_NAME,
     HOOK_PRIORITY,
     ContextManagementHook,
@@ -16,9 +16,9 @@ from openmagi_core_agent.context.hook import (
     load_config_from_env,
     make_context_management_manifest,
 )
-from openmagi_core_agent.context.types import ContextManagementConfig, WarningLevel
-from openmagi_core_agent.hooks.context import HookContext
-from openmagi_core_agent.hooks.manifest import HookPoint
+from magi_agent.context.types import ContextManagementConfig, WarningLevel
+from magi_agent.hooks.context import HookContext
+from magi_agent.hooks.manifest import HookPoint
 
 
 # ---------------------------------------------------------------------------

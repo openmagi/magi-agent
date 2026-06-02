@@ -6,7 +6,7 @@ from pathlib import Path
 
 
 def test_memory_recall_ledger_dedupes_provider_and_adk_records_without_projection() -> None:
-    from openmagi_core_agent.memory.recall_ledger import (
+    from magi_agent.memory.recall_ledger import (
         MemoryRecallLedgerConfig,
         MemoryRecallRecordInput,
         build_memory_recall_ledger,
@@ -45,7 +45,7 @@ def test_memory_recall_ledger_dedupes_provider_and_adk_records_without_projectio
 
 
 def test_memory_recall_ledger_records_source_authority_and_private_suppression() -> None:
-    from openmagi_core_agent.memory.recall_ledger import (
+    from magi_agent.memory.recall_ledger import (
         MemoryRecallLedgerConfig,
         MemoryRecallRecordInput,
         build_memory_recall_ledger,
@@ -91,7 +91,7 @@ def test_memory_recall_ledger_records_source_authority_and_private_suppression()
 
 
 def test_memory_recall_ledger_redacts_bearer_snippets_and_secret_record_ids() -> None:
-    from openmagi_core_agent.memory.recall_ledger import (
+    from magi_agent.memory.recall_ledger import (
         MemoryRecallLedgerConfig,
         MemoryRecallRecordInput,
         build_memory_recall_ledger,
@@ -123,7 +123,7 @@ def test_memory_recall_ledger_redacts_bearer_snippets_and_secret_record_ids() ->
 
 
 def test_memory_recall_ledger_redacts_provider_tokens_in_ids_and_snippets() -> None:
-    from openmagi_core_agent.memory.recall_ledger import (
+    from magi_agent.memory.recall_ledger import (
         MemoryRecallLedgerConfig,
         MemoryRecallRecordInput,
         build_memory_recall_ledger,
@@ -162,7 +162,7 @@ def test_memory_recall_ledger_redacts_provider_tokens_in_ids_and_snippets() -> N
 
 
 def test_memory_recall_ledger_redacts_raw_child_and_tool_snippet_blocks() -> None:
-    from openmagi_core_agent.memory.recall_ledger import (
+    from magi_agent.memory.recall_ledger import (
         MemoryRecallLedgerConfig,
         MemoryRecallRecordInput,
         build_memory_recall_ledger,
@@ -226,7 +226,7 @@ def test_memory_recall_ledger_redacts_raw_child_and_tool_snippet_blocks() -> Non
 
 
 def test_memory_recall_ledger_redacts_generic_api_key_ids_and_snippets() -> None:
-    from openmagi_core_agent.memory.recall_ledger import (
+    from magi_agent.memory.recall_ledger import (
         MemoryRecallLedgerConfig,
         MemoryRecallRecordInput,
         build_memory_recall_ledger,
@@ -255,7 +255,7 @@ def test_memory_recall_ledger_redacts_generic_api_key_ids_and_snippets() -> None
 
 
 def test_memory_recall_ledger_redacts_telegram_bot_url_snippets_and_payload_blocks() -> None:
-    from openmagi_core_agent.memory.recall_ledger import (
+    from magi_agent.memory.recall_ledger import (
         MemoryRecallLedgerConfig,
         MemoryRecallRecordInput,
         build_memory_recall_ledger,
@@ -288,7 +288,7 @@ def test_memory_recall_ledger_redacts_telegram_bot_url_snippets_and_payload_bloc
 
 
 def test_memory_recall_ledger_redacts_plain_object_storage_urls_and_payload_blocks() -> None:
-    from openmagi_core_agent.memory.recall_ledger import (
+    from magi_agent.memory.recall_ledger import (
         MemoryRecallLedgerConfig,
         MemoryRecallRecordInput,
         build_memory_recall_ledger,
@@ -321,7 +321,7 @@ def test_memory_recall_ledger_redacts_plain_object_storage_urls_and_payload_bloc
 
 
 def test_memory_recall_ledger_redacts_json_shaped_api_key_snippets() -> None:
-    from openmagi_core_agent.memory.recall_ledger import (
+    from magi_agent.memory.recall_ledger import (
         MemoryRecallLedgerConfig,
         MemoryRecallRecordInput,
         build_memory_recall_ledger,
@@ -347,7 +347,7 @@ def test_memory_recall_ledger_redacts_json_shaped_api_key_snippets() -> None:
 
 
 def test_memory_recall_ledger_redacts_home_and_exact_kubelet_paths() -> None:
-    from openmagi_core_agent.memory.recall_ledger import (
+    from magi_agent.memory.recall_ledger import (
         MemoryRecallLedgerConfig,
         MemoryRecallRecordInput,
         build_memory_recall_ledger,
@@ -387,14 +387,14 @@ import importlib
 import sys
 
 before = set(sys.modules)
-module = importlib.import_module("openmagi_core_agent.memory.recall_ledger")
+module = importlib.import_module("magi_agent.memory.recall_ledger")
 assert hasattr(module, "build_memory_recall_ledger")
 
 forbidden_exact = (
     "google.adk.memory",
     "google.adk.sessions",
-    "openmagi_core_agent.memory.adk_bridge",
-    "openmagi_core_agent.memory.adapters.hipocampus_readonly",
+    "magi_agent.memory.adk_bridge",
+    "magi_agent.memory.adapters.hipocampus_readonly",
     "httpx",
     "requests",
     "supabase",

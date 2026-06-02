@@ -1,7 +1,7 @@
 # Magi Agent CLI — Design & Mapping (informed by Claude Code CLI teardown)
 
 > **Goal:** give Magi Agent a first-class CLI with **two equal surfaces** — a full interactive **Textual/Rich TUI** and a **headless NDJSON** mode — both driving the *same* runtime engine.
-> **Method:** reverse-engineered the leaked Claude Code CLI (`../cc-workspace/claude-code`) layer-by-layer (see `docs/architecture/claude-code-cli/00-overview.md` + the 7 deep-dive docs), then mapped each subsystem onto Magi's existing Python/google-ADK runtime (`infra/docker/clawy-core-agent-python/openmagi_core_agent/`, server-only today).
+> **Method:** reverse-engineered the leaked Claude Code CLI (`../cc-workspace/claude-code`) layer-by-layer (see `docs/architecture/claude-code-cli/00-overview.md` + the 7 deep-dive docs), then mapped each subsystem onto Magi's existing Python/google-ADK runtime (`magi-agent/magi_agent/`, server-only today).
 > **Companion execution plan:** `docs/plans/prompts/magi-track-18-cli.md` (subagent-driven PR track).
 > Date: 2026-05-30. Status: design (no code yet).
 
@@ -197,7 +197,7 @@ class ToolRenderer(Protocol):
 
 ## 10. Phased roadmap (→ see `magi-track-18-cli.md` for the PR-by-PR execution plan)
 
-All CLI code lands under a new `openmagi_core_agent/cli/` package, **default-OFF / additive** (the server entrypoint `main.py` is untouched). No engine changes.
+All CLI code lands under a new `magi_agent/cli/` package, **default-OFF / additive** (the server entrypoint `main.py` is untouched). No engine changes.
 
 | Phase | PR | Deliverable | Gate/flag |
 |---|---|---|---|

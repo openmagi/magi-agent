@@ -5,7 +5,7 @@ from collections.abc import Mapping
 
 import pytest
 
-from openmagi_core_agent.channels.contract import ChannelRef
+from magi_agent.channels.contract import ChannelRef
 
 
 class FakePushProvider:
@@ -27,7 +27,7 @@ class FakePushProvider:
 
 
 def _request(**overrides: object) -> object:
-    from openmagi_core_agent.channels.push_delivery import PushDeliveryRequest
+    from magi_agent.channels.push_delivery import PushDeliveryRequest
 
     payload = {
         "requestId": "push-1",
@@ -49,7 +49,7 @@ def _request(**overrides: object) -> object:
 
 
 def test_push_delivery_default_disabled_never_calls_provider() -> None:
-    from openmagi_core_agent.channels.push_delivery import PushDeliveryBoundary, PushDeliveryConfig
+    from magi_agent.channels.push_delivery import PushDeliveryBoundary, PushDeliveryConfig
 
     provider = FakePushProvider()
     decision = PushDeliveryBoundary(PushDeliveryConfig()).deliver(
@@ -69,7 +69,7 @@ def test_push_delivery_default_disabled_never_calls_provider() -> None:
 
 
 def test_push_delivery_requires_explicit_route_and_blocks_unrelated_channel() -> None:
-    from openmagi_core_agent.channels.push_delivery import PushDeliveryBoundary, PushDeliveryConfig
+    from magi_agent.channels.push_delivery import PushDeliveryBoundary, PushDeliveryConfig
 
     boundary = PushDeliveryBoundary(
         PushDeliveryConfig(
@@ -92,7 +92,7 @@ def test_push_delivery_requires_explicit_route_and_blocks_unrelated_channel() ->
 
 
 def test_push_delivery_records_local_fake_intent_without_web_app_canary_for_external_channel() -> None:
-    from openmagi_core_agent.channels.push_delivery import PushDeliveryBoundary, PushDeliveryConfig
+    from magi_agent.channels.push_delivery import PushDeliveryBoundary, PushDeliveryConfig
 
     provider = FakePushProvider()
     decision = PushDeliveryBoundary(
@@ -124,7 +124,7 @@ def test_push_delivery_records_local_fake_intent_without_web_app_canary_for_exte
 
 
 def test_push_delivery_projection_redacts_home_paths_from_chunks() -> None:
-    from openmagi_core_agent.channels.push_delivery import PushDeliveryBoundary, PushDeliveryConfig
+    from magi_agent.channels.push_delivery import PushDeliveryBoundary, PushDeliveryConfig
 
     decision = PushDeliveryBoundary(
         PushDeliveryConfig(
@@ -154,7 +154,7 @@ def test_push_delivery_projection_redacts_home_paths_from_chunks() -> None:
     ),
 )
 def test_push_delivery_projection_redacts_common_token_families(secret: str) -> None:
-    from openmagi_core_agent.channels.push_delivery import PushDeliveryBoundary, PushDeliveryConfig
+    from magi_agent.channels.push_delivery import PushDeliveryBoundary, PushDeliveryConfig
 
     decision = PushDeliveryBoundary(
         PushDeliveryConfig(
@@ -173,7 +173,7 @@ def test_push_delivery_projection_redacts_common_token_families(secret: str) -> 
 
 
 def test_push_delivery_failure_notice_is_generated_once_and_redacted() -> None:
-    from openmagi_core_agent.channels.push_delivery import PushDeliveryBoundary, PushDeliveryConfig
+    from magi_agent.channels.push_delivery import PushDeliveryBoundary, PushDeliveryConfig
 
     provider = FakePushProvider(fail=True)
     boundary = PushDeliveryBoundary(

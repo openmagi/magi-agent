@@ -7,10 +7,10 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from openmagi_core_agent.adk_bridge.session_service import (
+from magi_agent.adk_bridge.session_service import (
     WorkspaceSessionService,
 )
-from openmagi_core_agent.storage.session_store import (
+from magi_agent.storage.session_store import (
     SessionSqliteStore,
     SessionStoreConfig,
 )
@@ -220,7 +220,7 @@ class TestCreateWithPersistence:
     def test_fallback_on_init_error(self) -> None:
         with patch.dict(os.environ, {"MAGI_SESSION_PERSISTENCE_ENABLED": "1"}):
             with patch(
-                "openmagi_core_agent.adk_bridge.session_service.SessionSqliteStore",
+                "magi_agent.adk_bridge.session_service.SessionSqliteStore",
                 side_effect=RuntimeError("boom"),
             ):
                 service = WorkspaceSessionService.create_with_persistence(

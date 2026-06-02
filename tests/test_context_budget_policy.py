@@ -3,7 +3,7 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
-from openmagi_core_agent.runtime.context_budget import (
+from magi_agent.runtime.context_budget import (
     ContextBudgetPlanner,
     ContextBudgetRequest,
 )

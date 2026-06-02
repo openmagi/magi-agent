@@ -7,7 +7,7 @@ from pathlib import Path
 
 
 def _module():
-    return importlib.import_module("openmagi_core_agent.runtime.loop_detectors")
+    return importlib.import_module("magi_agent.runtime.loop_detectors")
 
 
 def test_repetition_detector_does_not_trigger_on_normal_text() -> None:
@@ -329,7 +329,7 @@ def test_loop_detectors_import_boundary_is_pure_local() -> None:
 import importlib
 import sys
 
-module = importlib.import_module("openmagi_core_agent.runtime.loop_detectors")
+module = importlib.import_module("magi_agent.runtime.loop_detectors")
 assert hasattr(module, "RepetitionDetector")
 assert hasattr(module, "ToolCallLoopDetector")
 
@@ -354,16 +354,16 @@ forbidden_exact = (
 )
 forbidden_prefixes = (
     "google.adk",
-    "openmagi_core_agent.adk_bridge",
-    "openmagi_core_agent.tools",
-    "openmagi_core_agent.memory",
-    "openmagi_core_agent.workspace",
-    "openmagi_core_agent.transport",
-    "openmagi_core_agent.channels",
-    "openmagi_core_agent.shadow",
-    "openmagi_core_agent.children",
-    "openmagi_core_agent.missions",
-    "openmagi_core_agent.scheduler",
+    "magi_agent.adk_bridge",
+    "magi_agent.tools",
+    "magi_agent.memory",
+    "magi_agent.workspace",
+    "magi_agent.transport",
+    "magi_agent.channels",
+    "magi_agent.shadow",
+    "magi_agent.children",
+    "magi_agent.missions",
+    "magi_agent.scheduler",
 )
 loaded = [
     loaded_name
@@ -392,7 +392,7 @@ def test_loop_detectors_source_forbids_runtime_side_effect_imports() -> None:
     root = Path(__file__).parents[1]
     source = (
         root
-        / "openmagi_core_agent"
+        / "magi_agent"
         / "runtime"
         / "loop_detectors.py"
     ).read_text(encoding="utf-8")
@@ -412,14 +412,14 @@ def test_loop_detectors_source_forbids_runtime_side_effect_imports() -> None:
         "supabase",
         "psycopg",
         "kubernetes",
-        "openmagi_core_agent.adk_bridge",
-        "openmagi_core_agent.tools",
-        "openmagi_core_agent.memory",
-        "openmagi_core_agent.workspace",
-        "openmagi_core_agent.transport",
-        "openmagi_core_agent.channels",
-        "openmagi_core_agent.children",
-        "openmagi_core_agent.missions",
+        "magi_agent.adk_bridge",
+        "magi_agent.tools",
+        "magi_agent.memory",
+        "magi_agent.workspace",
+        "magi_agent.transport",
+        "magi_agent.channels",
+        "magi_agent.children",
+        "magi_agent.missions",
     )
 
     for forbidden in forbidden_imports:

@@ -25,22 +25,22 @@ import hashlib
 
 import pytest
 
-from openmagi_core_agent.gates.workflow_executor_readiness import (
+from magi_agent.gates.workflow_executor_readiness import (
     WorkflowExecutorReadinessConfig,
     resolve_workflow_execution_mode,
     workflow_executor_readiness_health_metadata,
 )
-from openmagi_core_agent.harness.workflow_executor import (
+from magi_agent.harness.workflow_executor import (
     WorkflowExecutorConfig,
     WorkflowExecutorTelemetry,
     execute_workflow,
 )
-from openmagi_core_agent.workflows.compiler import (
+from magi_agent.workflows.compiler import (
     CompiledWorkflowContract,
     compile_governed_workflow,
     WorkflowCompileInput,
 )
-from openmagi_core_agent.workflows.registry import WorkflowRegistryEntry
+from magi_agent.workflows.registry import WorkflowRegistryEntry
 
 
 _DIGEST = "sha256:" + "a" * 64
@@ -441,7 +441,7 @@ def test_telemetry_filtered_claims_counts_cross_review_filtered(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Filtered-claims counter reflects cross-review filtered claim refs."""
-    from openmagi_core_agent.harness.cross_review import CrossReviewStep
+    from magi_agent.harness.cross_review import CrossReviewStep
 
     monkeypatch.setenv("MAGI_WORKFLOW_EXECUTOR_ENABLED", "1")
     contract = _valid_contract(n_recipes=1)
@@ -569,7 +569,7 @@ def test_telemetry_runs_zero_for_validation_failed(
 ) -> None:
     """validation_failed path does NOT count as a run — runs counter stays 0."""
     import unittest.mock as mock
-    from openmagi_core_agent.workflows.compiler import WorkflowValidationVerdict
+    from magi_agent.workflows.compiler import WorkflowValidationVerdict
 
     monkeypatch.setenv("MAGI_WORKFLOW_EXECUTOR_ENABLED", "1")
     contract = _valid_contract(n_recipes=1)
@@ -582,7 +582,7 @@ def test_telemetry_runs_zero_for_validation_failed(
         reason_codes=("test_forced_failure",),
     )
     with mock.patch(
-        "openmagi_core_agent.harness.workflow_executor.validate_compiled_workflow",
+        "magi_agent.harness.workflow_executor.validate_compiled_workflow",
         return_value=failing_verdict,
     ):
         result = asyncio.run(

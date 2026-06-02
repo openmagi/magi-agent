@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from openmagi_core_agent.shadow.coding_child_conflict_resolution_contract import (
+from magi_agent.shadow.coding_child_conflict_resolution_contract import (
     CodingChildConflictResolutionAttachmentFlags,
     CodingChildConflictResolutionFixture,
     load_coding_child_conflict_resolution_fixture,
@@ -327,32 +327,32 @@ def test_coding_child_conflict_resolution_attachment_flags_remain_false_under_co
 
 
 def test_coding_child_conflict_resolution_import_boundary_stays_runtime_free() -> None:
-    module_name = "openmagi_core_agent.shadow.coding_child_conflict_resolution_contract"
+    module_name = "magi_agent.shadow.coding_child_conflict_resolution_contract"
     forbidden = (
         "google.adk",
-        "openmagi_core_agent.adk_bridge",
-        "openmagi_core_agent.tools.dispatcher",
-        "openmagi_core_agent.tools.registry",
-        "openmagi_core_agent.plugins.agentmemory",
-        "openmagi_core_agent.memory",
-        "openmagi_core_agent.services.memory",
-        "openmagi_core_agent.hipocampus",
-        "openmagi_core_agent.qmd",
-        "openmagi_core_agent.git",
-        "openmagi_core_agent.shell",
-        "openmagi_core_agent.test",
-        "openmagi_core_agent.tests",
-        "openmagi_core_agent.workspace.mutation",
-        "openmagi_core_agent.workspace.adoption",
-        "openmagi_core_agent.app",
-        "openmagi_core_agent.transport.chat",
-        "openmagi_core_agent.routes",
+        "magi_agent.adk_bridge",
+        "magi_agent.tools.dispatcher",
+        "magi_agent.tools.registry",
+        "magi_agent.plugins.agentmemory",
+        "magi_agent.memory",
+        "magi_agent.services.memory",
+        "magi_agent.hipocampus",
+        "magi_agent.qmd",
+        "magi_agent.git",
+        "magi_agent.shell",
+        "magi_agent.test",
+        "magi_agent.tests",
+        "magi_agent.workspace.mutation",
+        "magi_agent.workspace.adoption",
+        "magi_agent.app",
+        "magi_agent.transport.chat",
+        "magi_agent.routes",
     )
     removed_modules: dict[str, object] = {}
     for loaded_name in tuple(sys.modules):
         if (
-            loaded_name == "openmagi_core_agent"
-            or loaded_name.startswith("openmagi_core_agent.")
+            loaded_name == "magi_agent"
+            or loaded_name.startswith("magi_agent.")
             or loaded_name == "google.adk"
             or loaded_name.startswith("google.adk.")
         ):
@@ -379,8 +379,8 @@ def test_coding_child_conflict_resolution_import_boundary_stays_runtime_free() -
     finally:
         for loaded_name in tuple(sys.modules):
             if (
-                loaded_name == "openmagi_core_agent"
-                or loaded_name.startswith("openmagi_core_agent.")
+                loaded_name == "magi_agent"
+                or loaded_name.startswith("magi_agent.")
                 or loaded_name == "google.adk"
                 or loaded_name.startswith("google.adk.")
             ):

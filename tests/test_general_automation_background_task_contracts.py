@@ -3,10 +3,10 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from openmagi_core_agent.harness.general_automation.background_task_projection import (
+from magi_agent.harness.general_automation.background_task_projection import (
     build_background_task_completion_projection,
 )
-from openmagi_core_agent.recipes.first_party.general_automation.background_task_contracts import (
+from magi_agent.recipes.first_party.general_automation.background_task_contracts import (
     BackgroundTaskResumeRequest,
     background_task_long_running_tool_metadata,
     classify_background_task_resume_request,
@@ -14,10 +14,10 @@ from openmagi_core_agent.recipes.first_party.general_automation.background_task_
 
 
 PYTHON_ROOT = Path(__file__).resolve().parents[1]
-HARNESS_DIR = PYTHON_ROOT / "openmagi_core_agent" / "harness" / "general_automation"
+HARNESS_DIR = PYTHON_ROOT / "magi_agent" / "harness" / "general_automation"
 RECIPE_DIR = (
     PYTHON_ROOT
-    / "openmagi_core_agent"
+    / "magi_agent"
     / "recipes"
     / "first_party"
     / "general_automation"
@@ -152,12 +152,12 @@ def test_background_task_contract_modules_do_not_touch_core_or_live_surfaces() -
         "google.adk",
         "LongRunningFunctionTool(",
         "SessionService(",
-        "openmagi_core_agent.adk_bridge",
-        "openmagi_core_agent.runtime",
-        "openmagi_core_agent.transport",
-        "openmagi_core_agent.routing",
-        "openmagi_core_agent.harness.background_tasks",
-        "openmagi_core_agent.evidence.child_runtime_envelope",
+        "magi_agent.adk_bridge",
+        "magi_agent.runtime",
+        "magi_agent.transport",
+        "magi_agent.routing",
+        "magi_agent.harness.background_tasks",
+        "magi_agent.evidence.child_runtime_envelope",
         "requests",
         "httpx",
         "aiohttp",

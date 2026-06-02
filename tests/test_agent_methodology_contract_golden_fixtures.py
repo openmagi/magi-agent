@@ -10,7 +10,7 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from openmagi_core_agent.shadow.agent_methodology_contract import (
+from magi_agent.shadow.agent_methodology_contract import (
     AgentMethodologyAttachmentFlags,
     AgentMethodologyCase,
     AgentMethodologyFixture,
@@ -294,18 +294,18 @@ def test_agent_methodology_contract_import_boundary_has_no_runtime_attachment() 
 import importlib
 import sys
 
-module = importlib.import_module("openmagi_core_agent.shadow.agent_methodology_contract")
+module = importlib.import_module("magi_agent.shadow.agent_methodology_contract")
 assert hasattr(module, "AgentMethodologyFixture")
 
 forbidden_prefixes = (
     "google.adk",
-    "openmagi_core_agent.adk_bridge",
-    "openmagi_core_agent.runtime",
-    "openmagi_core_agent.transport",
-    "openmagi_core_agent.tools.dispatcher",
-    "openmagi_core_agent.tools.registry",
-    "openmagi_core_agent.memory",
-    "openmagi_core_agent.workspace.mutation",
+    "magi_agent.adk_bridge",
+    "magi_agent.runtime",
+    "magi_agent.transport",
+    "magi_agent.tools.dispatcher",
+    "magi_agent.tools.registry",
+    "magi_agent.memory",
+    "magi_agent.workspace.mutation",
 )
 loaded = [
     module_name
@@ -325,6 +325,6 @@ if loaded:
 
 
 def test_shadow_package_lazy_export_for_agent_methodology_contract() -> None:
-    shadow = importlib.import_module("openmagi_core_agent.shadow")
+    shadow = importlib.import_module("magi_agent.shadow")
 
     assert shadow.AgentMethodologyFixture is AgentMethodologyFixture

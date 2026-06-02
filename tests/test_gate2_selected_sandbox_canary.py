@@ -23,13 +23,13 @@ from pathlib import Path
 
 from fastapi.testclient import TestClient
 
-from openmagi_core_agent.app import create_app
-from openmagi_core_agent.config.env import parse_runtime_env
-from openmagi_core_agent.runtime.openmagi_runtime import OpenMagiRuntime
-from openmagi_core_agent.shadow.gate2_recipe_profile_resolver import (
+from magi_agent.app import create_app
+from magi_agent.config.env import parse_runtime_env
+from magi_agent.runtime.openmagi_runtime import OpenMagiRuntime
+from magi_agent.shadow.gate2_recipe_profile_resolver import (
     resolve_gate2_recipe_profile,
 )
-from openmagi_core_agent.transport.chat import (
+from magi_agent.transport.chat import (
     build_gate2_sandbox_workspace_canary_config_from_env,
 )
 

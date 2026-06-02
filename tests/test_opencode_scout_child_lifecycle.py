@@ -4,24 +4,24 @@ import json
 import subprocess
 import sys
 
-from openmagi_core_agent.evidence.child_runtime_envelope import (
+from magi_agent.evidence.child_runtime_envelope import (
     ChildRuntimeEnvelope,
     ChildRuntimeEnvelopeAuthorityFlags,
 )
-from openmagi_core_agent.evidence.subagent import (
+from magi_agent.evidence.subagent import (
     OPENMAGI_RUNTIME_ENVELOPE_ISSUER,
     ChildEvidenceEnvelope,
     DelegatedEvidenceRequirement,
     EvidenceBoundaryLedgerRef,
     ExecutionBoundaryIdentity,
 )
-from openmagi_core_agent.evidence.types import EvidenceContractVerdict, EvidenceRecord
-from openmagi_core_agent.research.child_roles import (
+from magi_agent.evidence.types import EvidenceContractVerdict, EvidenceRecord
+from magi_agent.research.child_roles import (
     ResearchChildProofRef,
     issue_runtime_research_child_proof_ref,
     research_child_role_policy,
 )
-from openmagi_core_agent.research.source_proof import (
+from magi_agent.research.source_proof import (
     ResearchSourceOpenReceiptRef,
     ResearchSourceProofRequirement,
     verify_research_source_proof,
@@ -273,7 +273,7 @@ def _source_proof_ref(envelope: ChildRuntimeEnvelope) -> ResearchChildProofRef:
 
 
 def test_opencode_scout_child_lifecycle_is_default_off_and_metadata_only() -> None:
-    from openmagi_core_agent.recipes.opencode_child_lifecycle import (
+    from magi_agent.recipes.opencode_child_lifecycle import (
         materialize_opencode_scout_child_lifecycle,
     )
 
@@ -294,7 +294,7 @@ def test_opencode_scout_child_lifecycle_is_default_off_and_metadata_only() -> No
 
 
 def test_opencode_scout_child_lifecycle_rejects_raw_child_text_and_summary_only_output() -> None:
-    from openmagi_core_agent.recipes.opencode_child_lifecycle import (
+    from magi_agent.recipes.opencode_child_lifecycle import (
         admit_opencode_scout_child_lifecycle,
     )
 
@@ -319,7 +319,7 @@ def test_opencode_scout_child_lifecycle_rejects_raw_child_text_and_summary_only_
 
 
 def test_opencode_scout_child_lifecycle_requires_runtime_issued_child_evidence_envelope() -> None:
-    from openmagi_core_agent.recipes.opencode_child_lifecycle import (
+    from magi_agent.recipes.opencode_child_lifecycle import (
         admit_opencode_scout_child_lifecycle,
     )
 
@@ -350,7 +350,7 @@ def test_opencode_scout_child_lifecycle_requires_runtime_issued_child_evidence_e
 
 
 def test_opencode_scout_child_lifecycle_rejects_subclass_spoofed_runtime_envelopes() -> None:
-    from openmagi_core_agent.recipes.opencode_child_lifecycle import (
+    from magi_agent.recipes.opencode_child_lifecycle import (
         admit_opencode_scout_child_lifecycle,
     )
 
@@ -395,7 +395,7 @@ def test_opencode_scout_child_lifecycle_rejects_subclass_spoofed_runtime_envelop
 
 
 def test_opencode_scout_child_lifecycle_rejects_mismatched_child_evidence_boundary() -> None:
-    from openmagi_core_agent.recipes.opencode_child_lifecycle import (
+    from magi_agent.recipes.opencode_child_lifecycle import (
         admit_opencode_scout_child_lifecycle,
     )
 
@@ -417,7 +417,7 @@ def test_opencode_scout_child_lifecycle_rejects_mismatched_child_evidence_bounda
 
 
 def test_opencode_scout_child_lifecycle_accepts_only_envelope_and_proof_backed_child_evidence() -> None:
-    from openmagi_core_agent.recipes.opencode_child_lifecycle import (
+    from magi_agent.recipes.opencode_child_lifecycle import (
         admit_opencode_scout_child_lifecycle,
     )
 
@@ -449,7 +449,7 @@ def test_opencode_scout_child_lifecycle_accepts_only_envelope_and_proof_backed_c
 
 
 def test_opencode_scout_child_lifecycle_projection_drops_callback_query_and_session_metadata() -> None:
-    from openmagi_core_agent.recipes.opencode_child_lifecycle import (
+    from magi_agent.recipes.opencode_child_lifecycle import (
         admit_opencode_scout_child_lifecycle,
     )
 
@@ -543,7 +543,7 @@ def test_opencode_scout_child_lifecycle_projection_drops_callback_query_and_sess
 
 
 def test_opencode_scout_child_lifecycle_rejects_unrelated_child_evidence_type() -> None:
-    from openmagi_core_agent.recipes.opencode_child_lifecycle import (
+    from magi_agent.recipes.opencode_child_lifecycle import (
         admit_opencode_scout_child_lifecycle,
     )
 
@@ -563,7 +563,7 @@ def test_opencode_scout_child_lifecycle_rejects_unrelated_child_evidence_type() 
 
 
 def test_opencode_scout_child_lifecycle_missing_proof_is_retry_not_acceptance() -> None:
-    from openmagi_core_agent.recipes.opencode_child_lifecycle import (
+    from magi_agent.recipes.opencode_child_lifecycle import (
         admit_opencode_scout_child_lifecycle,
     )
 
@@ -589,15 +589,15 @@ def test_opencode_scout_child_lifecycle_import_boundary_has_no_live_runtime_surf
 import importlib
 import sys
 
-importlib.import_module("openmagi_core_agent.recipes.opencode_child_lifecycle")
+importlib.import_module("magi_agent.recipes.opencode_child_lifecycle")
 forbidden = (
     "google.adk.runners",
     "google.adk.sessions",
     "google.adk.models",
-    "openmagi_core_agent.adk_bridge.runner_adapter",
-    "openmagi_core_agent.tools.dispatcher",
-    "openmagi_core_agent.transport.chat",
-    "openmagi_core_agent.memory.adapters",
+    "magi_agent.adk_bridge.runner_adapter",
+    "magi_agent.tools.dispatcher",
+    "magi_agent.transport.chat",
+    "magi_agent.memory.adapters",
     "socket",
     "subprocess",
     "requests",

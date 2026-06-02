@@ -6,7 +6,7 @@ import sys
 import pytest
 from pydantic import ValidationError
 
-from openmagi_core_agent.transport.tool_preview import MAX_TOOL_PREVIEW, sanitize_tool_preview
+from magi_agent.transport.tool_preview import MAX_TOOL_PREVIEW, sanitize_tool_preview
 
 
 def _secret_heavy_preview() -> str:
@@ -27,7 +27,7 @@ def _secret_heavy_preview() -> str:
 
 
 def test_public_report_projection_redacts_and_truncates_all_preview_fields() -> None:
-    from openmagi_core_agent.harness.slop_cleaner import (
+    from magi_agent.harness.slop_cleaner import (
         SlopCleanerFinding,
         project_slop_cleaner_public_report,
     )
@@ -82,7 +82,7 @@ def test_public_report_projection_redacts_and_truncates_all_preview_fields() -> 
 
 
 def test_public_report_accepts_aliases_and_forces_unattached_flags() -> None:
-    from openmagi_core_agent.harness.slop_cleaner import SlopCleanerPublicReport
+    from magi_agent.harness.slop_cleaner import SlopCleanerPublicReport
 
     report = SlopCleanerPublicReport.model_validate(
         {
@@ -135,7 +135,7 @@ def test_public_report_accepts_aliases_and_forces_unattached_flags() -> None:
 
 @pytest.mark.parametrize("extra_field", ("runnerAttached", "route"))
 def test_public_report_rejects_unexpected_runtime_fields(extra_field: str) -> None:
-    from openmagi_core_agent.harness.slop_cleaner import SlopCleanerPublicFinding, SlopCleanerPublicReport
+    from magi_agent.harness.slop_cleaner import SlopCleanerPublicFinding, SlopCleanerPublicReport
 
     report_payload: dict[str, object] = {
         "reportId": "slop-report-extra",
@@ -161,7 +161,7 @@ def test_public_report_rejects_unexpected_runtime_fields(extra_field: str) -> No
 
 
 def test_sse_event_projection_contains_public_shape_only() -> None:
-    from openmagi_core_agent.harness.slop_cleaner import (
+    from magi_agent.harness.slop_cleaner import (
         SLOP_CLEANER_EXECUTION_ATTACHED,
         SLOP_CLEANER_SSE_EVENT_TYPE,
         SLOP_CLEANER_TRAFFIC_ATTACHED,
@@ -202,7 +202,7 @@ def test_sse_event_projection_contains_public_shape_only() -> None:
 
 
 def test_sse_event_revalidates_copied_report_and_finding_before_serializing() -> None:
-    from openmagi_core_agent.harness.slop_cleaner import (
+    from magi_agent.harness.slop_cleaner import (
         SlopCleanerFinding,
         project_slop_cleaner_public_report,
         slop_cleaner_sse_event,
@@ -268,16 +268,16 @@ def test_slop_cleaner_import_stays_traffic_free_in_fresh_process() -> None:
 import importlib
 import sys
 
-importlib.import_module("openmagi_core_agent.harness.slop_cleaner")
+importlib.import_module("magi_agent.harness.slop_cleaner")
 forbidden_modules = (
     "google.adk",
     "google.adk.runners",
-    "openmagi_core_agent.adk_bridge.runner_adapter",
-    "openmagi_core_agent.runtime.openmagi_runtime",
-    "openmagi_core_agent.transport.chat",
-    "openmagi_core_agent.transport.tools",
-    "openmagi_core_agent.tools.dispatcher",
-    "openmagi_core_agent.hooks.bus",
+    "magi_agent.adk_bridge.runner_adapter",
+    "magi_agent.runtime.openmagi_runtime",
+    "magi_agent.transport.chat",
+    "magi_agent.transport.tools",
+    "magi_agent.tools.dispatcher",
+    "magi_agent.hooks.bus",
 )
 loaded = [module for module in forbidden_modules if module in sys.modules]
 if loaded:

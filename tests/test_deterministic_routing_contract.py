@@ -3,7 +3,7 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
-from openmagi_core_agent.routing.deterministic import (
+from magi_agent.routing.deterministic import (
     BaselineShadowMeasurementMetadata,
     DeterministicClassificationMetadata,
     DeterministicRoutePlanMetadata,
@@ -51,7 +51,7 @@ def test_current_fact_source_claims_require_search_and_source_inspection_evidenc
 
 def test_coding_file_state_route_metadata_requires_workspace_diff_tests_checkpoint_only() -> None:
     route = build_baseline_shadow_route(
-        "Edit openmagi_core_agent/tools/base.py and run the tests before committing.",
+        "Edit magi_agent/tools/base.py and run the tests before committing.",
         scope=DeterministicRoutingScope(agentRole="coding", runOn="child", spawnDepth=2),
     )
 

@@ -164,7 +164,7 @@ def test_child_spawn_background_producer_row_does_not_overclaim_child_control_ev
         "background_task",
     }
     assert spawn_row["pythonProducer"]["status"] == "producer"
-    assert "openmagi_core_agent/runtime/child_event_projection.py" in (
+    assert "magi_agent/runtime/child_event_projection.py" in (
         spawn_row["pythonProducer"]["evidence"]
     )
 
@@ -173,7 +173,7 @@ def test_child_spawn_background_producer_row_does_not_overclaim_child_control_ev
         "child_permission_decision",
     }
     assert control_row["pythonProducer"]["status"] == "fixture_producer"
-    assert "openmagi_core_agent/runtime/child_event_projection.py" not in (
+    assert "magi_agent/runtime/child_event_projection.py" not in (
         control_row["pythonProducer"]["evidence"]
     )
 

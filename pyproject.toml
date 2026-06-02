@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "magi-agent"
-version = "0.1.0"
+version = "0.1.1"
 description = "Open Magi agent runtime and CLI for personal AI agents"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -31,12 +31,11 @@ composio = [
 ]
 
 [project.scripts]
-magi-agent = "openmagi_core_agent.main:main"
-openmagi-core-agent = "openmagi_core_agent.main:main"
-magi = "openmagi_core_agent.cli.__main__:main"
+magi-agent = "magi_agent.main:main"
+magi = "magi_agent.cli.__main__:main"
 
 [tool.setuptools.packages.find]
-include = ["openmagi_core_agent*"]
+include = ["magi_agent*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

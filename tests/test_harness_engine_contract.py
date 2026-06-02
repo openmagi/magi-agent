@@ -1,10 +1,10 @@
 import pytest
 from pydantic import ValidationError
 
-from openmagi_core_agent.harness.engine import HarnessEngine, HarnessResolutionRequest
-from openmagi_core_agent.hooks.manifest import HookManifest, HookPoint
-from openmagi_core_agent.hooks.scope import HookScope, HookScopeContext
-from openmagi_core_agent.tools.manifest import ToolSource
+from magi_agent.harness.engine import HarnessEngine, HarnessResolutionRequest
+from magi_agent.hooks.manifest import HookManifest, HookPoint
+from magi_agent.hooks.scope import HookScope, HookScopeContext
+from magi_agent.tools.manifest import ToolSource
 
 
 def hook(

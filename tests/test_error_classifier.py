@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from openmagi_core_agent.runtime.error_recovery.types import (
+from magi_agent.runtime.error_recovery.types import (
     ErrorKind,
     ErrorRecoveryConfig,
     RecoverableError,
@@ -11,7 +11,7 @@ from openmagi_core_agent.runtime.error_recovery.types import (
     RecoveryResult,
     TerminalError,
 )
-from openmagi_core_agent.runtime.error_recovery.classifier import ErrorClassifier
+from magi_agent.runtime.error_recovery.classifier import ErrorClassifier
 
 
 # ---------------------------------------------------------------------------

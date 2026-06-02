@@ -4,7 +4,7 @@ from pathlib import Path
 
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
-README_PATH = REPO_ROOT / "infra" / "docker" / "clawy-core-agent-python" / "README.md"
+README_PATH = REPO_ROOT / "infra" / "docker" / "magi-agent" / "README.md"
 READINESS_NOTE_PATH = (
     REPO_ROOT
     / "docs"

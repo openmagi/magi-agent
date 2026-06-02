@@ -4,13 +4,13 @@ import json
 import subprocess
 import sys
 
-from openmagi_core_agent.memory.contracts import MemoryRecord, RecallResult
-from openmagi_core_agent.memory.namespaces import (
+from magi_agent.memory.contracts import MemoryRecord, RecallResult
+from magi_agent.memory.namespaces import (
     MemoryNamespacePolicy,
     admit_recall_result_to_namespace,
     evaluate_memory_record_namespace,
 )
-from openmagi_core_agent.memory.projection import project_namespaced_memory_boundary
+from magi_agent.memory.projection import project_namespaced_memory_boundary
 
 
 NAMESPACE_A = "memory-ns:tenant-a.bot-a"
@@ -235,16 +235,16 @@ def test_namespace_admission_fails_closed_for_unknown_present_safety_states() ->
 def test_namespace_projection_import_boundary_has_no_live_memory_or_route_imports() -> None:
     code = """
 import sys
-import openmagi_core_agent.memory.namespaces
-import openmagi_core_agent.memory.projection
+import magi_agent.memory.namespaces
+import magi_agent.memory.projection
 for name in (
     'google.adk.runners',
     'google.adk.memory',
-    'openmagi_core_agent.adk_bridge.runner_adapter',
-    'openmagi_core_agent.adk_bridge.local_runner',
-    'openmagi_core_agent.app',
-    'openmagi_core_agent.transport.chat',
-    'openmagi_core_agent.routes',
+    'magi_agent.adk_bridge.runner_adapter',
+    'magi_agent.adk_bridge.local_runner',
+    'magi_agent.app',
+    'magi_agent.transport.chat',
+    'magi_agent.routes',
     'supabase',
     'psycopg',
     'asyncpg',

@@ -5,12 +5,12 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from openmagi_core_agent.shadow.gate3b_bundle import (
+from magi_agent.shadow.gate3b_bundle import (
     Gate3BLiveDuplicateBundle,
     Gate3BProductionAuthorityFlags,
     load_gate3b_live_duplicate_bundle,
 )
-from openmagi_core_agent.shadow.gate3b_ingest import (
+from magi_agent.shadow.gate3b_ingest import (
     convert_gate3b_live_duplicate_to_gate3a_recorded_bundle,
 )
 

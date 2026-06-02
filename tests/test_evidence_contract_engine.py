@@ -4,7 +4,7 @@ import subprocess
 import sys
 from collections.abc import Iterator, Mapping
 
-from openmagi_core_agent.evidence import (
+from magi_agent.evidence import (
     EVIDENCE_REGEX_CANDIDATE_LIMIT,
     EvidenceContract,
     EvidenceContractEngine,
@@ -894,16 +894,16 @@ def test_contracts_module_import_boundary_stays_adk_and_runtime_free() -> None:
 import importlib
 import sys
 
-contracts = importlib.import_module("openmagi_core_agent.evidence.contracts")
+contracts = importlib.import_module("magi_agent.evidence.contracts")
 assert contracts.EVIDENCE_REGEX_CANDIDATE_LIMIT == 1000
 
 forbidden_prefixes = (
     "google.adk",
-    "openmagi_core_agent.adk_bridge",
-    "openmagi_core_agent.runtime",
-    "openmagi_core_agent.transport",
-    "openmagi_core_agent.tools.dispatcher",
-    "openmagi_core_agent.hooks.bus",
+    "magi_agent.adk_bridge",
+    "magi_agent.runtime",
+    "magi_agent.transport",
+    "magi_agent.tools.dispatcher",
+    "magi_agent.hooks.bus",
 )
 loaded = [
     name

@@ -3,7 +3,7 @@ from __future__ import annotations
 from pydantic import ValidationError
 import pytest
 
-from openmagi_core_agent.evidence.validator_taxonomy import (
+from magi_agent.evidence.validator_taxonomy import (
     ValidatorPolicy,
     ValidatorResult,
     apply_validator_policy,

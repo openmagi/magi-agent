@@ -16,7 +16,7 @@ import pytest
 
 def _builder() -> ModuleType:
     try:
-        return importlib.import_module("openmagi_core_agent.runtime.message_builder")
+        return importlib.import_module("magi_agent.runtime.message_builder")
     except ModuleNotFoundError as exc:
         pytest.fail(f"message_builder module is missing: {exc}")
 
@@ -570,7 +570,7 @@ def test_runtime_model_identity_insertion_redacts_request_controlled_data_and_re
 
     builder.append_runtime_model_identity_context(
         messages,
-        configured_model="clawy-smart-router/auto",
+        configured_model="magi-smart-router/auto",
         effective_model="gpt-5.5",
         route_decision={
             "profileId": "premium",
@@ -603,7 +603,7 @@ def test_runtime_model_identity_insertion_redacts_request_controlled_data_and_re
     assert len(identity_messages) == 1
     text = identity_messages[0]["content"][0]["text"]
     assert "router: Premium Router" in text
-    assert "configured_model: clawy-smart-router/auto" in text
+    assert "configured_model: magi-smart-router/auto" in text
     assert "answering_model: openai/gpt-5.5" in text
     assert "classifier_model: claude-sonnet-4-6" in text
     assert "When the user asks what model you are" in text
@@ -958,7 +958,7 @@ def test_message_builder_import_stays_local_and_default_off() -> None:
 import importlib
 import sys
 
-module = importlib.import_module("openmagi_core_agent.runtime.message_builder")
+module = importlib.import_module("magi_agent.runtime.message_builder")
 assert hasattr(module, "build_system_prompt")
 assert hasattr(module, "build_current_user_message")
 
@@ -979,21 +979,21 @@ forbidden_exact = (
     "starlette",
     "supabase",
     "kubernetes",
-    "openmagi_core_agent.adk_bridge.runner_adapter",
-    "openmagi_core_agent.adk_bridge.local_runner",
-    "openmagi_core_agent.tools.dispatcher",
-    "openmagi_core_agent.transport.chat",
-    "openmagi_core_agent.transport.sse",
-    "openmagi_core_agent.channels.contract",
-    "openmagi_core_agent.runtime.openmagi_runtime",
-    "openmagi_core_agent.runtime.turn_controller",
+    "magi_agent.adk_bridge.runner_adapter",
+    "magi_agent.adk_bridge.local_runner",
+    "magi_agent.tools.dispatcher",
+    "magi_agent.transport.chat",
+    "magi_agent.transport.sse",
+    "magi_agent.channels.contract",
+    "magi_agent.runtime.openmagi_runtime",
+    "magi_agent.runtime.turn_controller",
 )
 forbidden_prefixes = (
     "google.adk",
-    "openmagi_core_agent.tools",
-    "openmagi_core_agent.transport",
-    "openmagi_core_agent.channels",
-    "openmagi_core_agent.adk_bridge",
+    "magi_agent.tools",
+    "magi_agent.transport",
+    "magi_agent.channels",
+    "magi_agent.adk_bridge",
 )
 loaded = [
     loaded_name
@@ -1014,7 +1014,7 @@ if loaded:
 
 def test_message_builder_source_forbids_live_runtime_side_effect_boundaries() -> None:
     root = Path(__file__).parents[1]
-    module_path = root / "openmagi_core_agent" / "runtime" / "message_builder.py"
+    module_path = root / "magi_agent" / "runtime" / "message_builder.py"
     source = module_path.read_text(encoding="utf-8")
     tree = ast.parse(source)
 
@@ -1041,12 +1041,12 @@ def test_message_builder_source_forbids_live_runtime_side_effect_boundaries() ->
         "starlette",
         "supabase",
         "kubernetes",
-        "openmagi_core_agent.adk_bridge",
-        "openmagi_core_agent.tools",
-        "openmagi_core_agent.transport",
-        "openmagi_core_agent.channels",
-        "openmagi_core_agent.runtime.openmagi_runtime",
-        "openmagi_core_agent.runtime.turn_controller",
+        "magi_agent.adk_bridge",
+        "magi_agent.tools",
+        "magi_agent.transport",
+        "magi_agent.channels",
+        "magi_agent.runtime.openmagi_runtime",
+        "magi_agent.runtime.turn_controller",
     )
     for module_name in imported:
         assert not any(

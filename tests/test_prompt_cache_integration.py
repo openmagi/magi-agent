@@ -33,7 +33,7 @@ from types import ModuleType
 def _message_builder() -> ModuleType:
     try:
         return importlib.import_module(
-            "openmagi_core_agent.runtime.message_builder"
+            "magi_agent.runtime.message_builder"
         )
     except ModuleNotFoundError as exc:
         import pytest
@@ -43,20 +43,20 @@ def _message_builder() -> ModuleType:
 
 def _metrics_module() -> ModuleType:
     try:
-        return importlib.import_module("openmagi_core_agent.prompt.metrics")
+        return importlib.import_module("magi_agent.prompt.metrics")
     except ModuleNotFoundError as exc:
         import pytest
 
-        pytest.fail(f"openmagi_core_agent.prompt.metrics module is missing: {exc}")
+        pytest.fail(f"magi_agent.prompt.metrics module is missing: {exc}")
 
 
 def _prompt_package() -> ModuleType:
     try:
-        return importlib.import_module("openmagi_core_agent.prompt")
+        return importlib.import_module("magi_agent.prompt")
     except ModuleNotFoundError as exc:
         import pytest
 
-        pytest.fail(f"openmagi_core_agent.prompt package is missing: {exc}")
+        pytest.fail(f"magi_agent.prompt package is missing: {exc}")
 
 
 # ---------------------------------------------------------------------------

@@ -6,7 +6,7 @@ import sys
 import pytest
 from pydantic import ValidationError
 
-from openmagi_core_agent.evidence.runtime_receipts import (
+from magi_agent.evidence.runtime_receipts import (
     CalculationEvidenceReceipt,
     ReceiptAuthorityFlags,
     SourceEvidenceReceipt,
@@ -177,7 +177,7 @@ def test_receipts_reject_private_refs_and_unsafe_authority_flags() -> None:
 def test_runtime_receipts_import_boundary_is_schema_only() -> None:
     code = (
         "import sys;"
-        "import openmagi_core_agent.evidence.runtime_receipts;"
+        "import magi_agent.evidence.runtime_receipts;"
         "print('\\n'.join(sorted(sys.modules)))"
     )
     completed = subprocess.run(
@@ -188,10 +188,10 @@ def test_runtime_receipts_import_boundary_is_schema_only() -> None:
     )
     forbidden_fragments = (
         "google.adk",
-        "openmagi_core_agent.transport",
-        "openmagi_core_agent.tools.dispatcher",
-        "openmagi_core_agent.memory",
-        "openmagi_core_agent.channels",
+        "magi_agent.transport",
+        "magi_agent.tools.dispatcher",
+        "magi_agent.memory",
+        "magi_agent.channels",
         "kubernetes",
         "fastapi",
         "supabase",

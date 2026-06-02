@@ -7,8 +7,8 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from openmagi_core_agent.evidence.contracts import evaluate_evidence_contract
-from openmagi_core_agent.evidence.subagent import (
+from magi_agent.evidence.contracts import evaluate_evidence_contract
+from magi_agent.evidence.subagent import (
     ChildEvidenceEnvelope,
     DelegatedEvidenceRequirement,
     EvidenceBoundaryLedgerRef,
@@ -19,7 +19,7 @@ from openmagi_core_agent.evidence.subagent import (
     natural_language_summary_as_evidence,
     public_child_aggregate_report,
 )
-from openmagi_core_agent.evidence.types import EvidenceContract, EvidenceRecord
+from magi_agent.evidence.types import EvidenceContract, EvidenceRecord
 
 from runtime_issuance_support import issue_test_runtime_authority
 

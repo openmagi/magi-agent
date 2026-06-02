@@ -6,7 +6,7 @@ import json
 
 import pytest
 
-from openmagi_core_agent.research.policy_pack import (
+from magi_agent.research.policy_pack import (
     DEFAULT_RESEARCH_POLICY_PACK_KEY,
     ResearchClaimSupportPolicy,
     ResearchCriteriaTemplateRef,
@@ -300,7 +300,7 @@ def test_research_policy_pack_projection_rejects_post_creation_mutation() -> Non
 
 
 def test_research_policy_pack_import_has_no_live_adk_or_provider_attachment() -> None:
-    module = importlib.import_module("openmagi_core_agent.research.policy_pack")
+    module = importlib.import_module("magi_agent.research.policy_pack")
     source = inspect.getsource(module)
 
     assert "Runner(" not in source
@@ -310,4 +310,4 @@ def test_research_policy_pack_import_has_no_live_adk_or_provider_attachment() ->
     assert "requests." not in source
     assert "httpx." not in source
     assert "browser" in source
-    assert "openmagi_core_agent.harness.presets" not in source
+    assert "magi_agent.harness.presets" not in source

@@ -8,13 +8,13 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from openmagi_core_agent.tools.context import ToolContext
-from openmagi_core_agent.tools.manifest import Budget, ToolManifest, ToolSource
-from openmagi_core_agent.tools.result import ToolResult
-from openmagi_core_agent.tools.registry import ToolRegistry
-from openmagi_core_agent.tools.deferred import DeferredToolRegistry
-from openmagi_core_agent.tools.tool_search import ToolSearchTool
-from openmagi_core_agent.adk_bridge.tool_adapter import (
+from magi_agent.tools.context import ToolContext
+from magi_agent.tools.manifest import Budget, ToolManifest, ToolSource
+from magi_agent.tools.result import ToolResult
+from magi_agent.tools.registry import ToolRegistry
+from magi_agent.tools.deferred import DeferredToolRegistry
+from magi_agent.tools.tool_search import ToolSearchTool
+from magi_agent.adk_bridge.tool_adapter import (
     DeferredToolManager,
     build_adk_function_tools_for_registry,
     build_deferred_adk_tools,

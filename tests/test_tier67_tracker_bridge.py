@@ -15,9 +15,9 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
-from openmagi_core_agent.context.token_tracker import TokenBudgetTracker
-from openmagi_core_agent.context.types import TokenBudgetSnapshot, WarningLevel
-from openmagi_core_agent.runtime.error_recovery.types import (
+from magi_agent.context.token_tracker import TokenBudgetTracker
+from magi_agent.context.types import TokenBudgetSnapshot, WarningLevel
+from magi_agent.runtime.error_recovery.types import (
     ErrorKind,
     RecoverableError,
     RecoveryContext,

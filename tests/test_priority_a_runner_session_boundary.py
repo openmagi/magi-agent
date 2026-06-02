@@ -9,8 +9,8 @@ from pathlib import Path
 from google.adk.events import Event
 from google.genai import types
 
-from openmagi_core_agent.harness.resolved import build_default_resolved_harness_state
-from openmagi_core_agent.runtime.turn_controller import TurnControllerInput
+from magi_agent.harness.resolved import build_default_resolved_harness_state
+from magi_agent.runtime.turn_controller import TurnControllerInput
 
 
 CONTEXT_FIXTURES = Path(__file__).parent / "fixtures" / "context_continuity"
@@ -172,7 +172,7 @@ def _assert_no_context_authority(result: object) -> None:
 
 
 def test_disabled_default_does_not_invoke_runner_or_claim_authority() -> None:
-    from openmagi_core_agent.runtime.runner_session_boundary import (
+    from magi_agent.runtime.runner_session_boundary import (
         RunnerSessionBoundary,
     )
 
@@ -198,7 +198,7 @@ def test_disabled_default_does_not_invoke_runner_or_claim_authority() -> None:
 
 
 def test_fake_runner_success_emits_local_public_events_and_turn_end_only() -> None:
-    from openmagi_core_agent.runtime.runner_session_boundary import (
+    from magi_agent.runtime.runner_session_boundary import (
         RunnerSessionBoundary,
         RunnerSessionBoundaryConfig,
     )
@@ -255,12 +255,12 @@ def test_fake_runner_success_emits_local_public_events_and_turn_end_only() -> No
 def test_runner_context_continuity_imports_committed_history_before_runner_call(
     tmp_path: Path,
 ) -> None:
-    from openmagi_core_agent.adk_bridge.session_service import WorkspaceSessionService
-    from openmagi_core_agent.runtime.runner_session_boundary import (
+    from magi_agent.adk_bridge.session_service import WorkspaceSessionService
+    from magi_agent.runtime.runner_session_boundary import (
         RunnerSessionBoundary,
         RunnerSessionBoundaryConfig,
     )
-    from openmagi_core_agent.runtime.transcript import TranscriptStore
+    from magi_agent.runtime.transcript import TranscriptStore
 
     session_service = WorkspaceSessionService(app_name="openmagi")
     runner = _ContinuityObservingRunner(
@@ -322,12 +322,12 @@ def test_runner_context_continuity_imports_committed_history_before_runner_call(
 def test_runner_context_continuity_reuses_session_without_duplicate_imports(
     tmp_path: Path,
 ) -> None:
-    from openmagi_core_agent.adk_bridge.session_service import WorkspaceSessionService
-    from openmagi_core_agent.runtime.runner_session_boundary import (
+    from magi_agent.adk_bridge.session_service import WorkspaceSessionService
+    from magi_agent.runtime.runner_session_boundary import (
         RunnerSessionBoundary,
         RunnerSessionBoundaryConfig,
     )
-    from openmagi_core_agent.runtime.transcript import TranscriptStore
+    from magi_agent.runtime.transcript import TranscriptStore
 
     session_service = WorkspaceSessionService(app_name="openmagi")
     runner = _ContinuityObservingRunner(
@@ -410,12 +410,12 @@ def test_runner_context_continuity_reuses_session_without_duplicate_imports(
 def test_runner_context_projection_uses_compacted_session_when_transcript_read_is_stale(
     tmp_path: Path,
 ) -> None:
-    from openmagi_core_agent.adk_bridge.session_service import WorkspaceSessionService
-    from openmagi_core_agent.runtime.runner_session_boundary import (
+    from magi_agent.adk_bridge.session_service import WorkspaceSessionService
+    from magi_agent.runtime.runner_session_boundary import (
         RunnerSessionBoundary,
         RunnerSessionBoundaryConfig,
     )
-    from openmagi_core_agent.runtime.transcript import (
+    from magi_agent.runtime.transcript import (
         AssistantTextEntry,
         CompactionBoundaryEntry,
         TranscriptStore,
@@ -510,12 +510,12 @@ def test_runner_context_projection_uses_compacted_session_when_transcript_read_i
 def test_runner_context_continuity_respects_compaction_boundary(
     tmp_path: Path,
 ) -> None:
-    from openmagi_core_agent.adk_bridge.session_service import WorkspaceSessionService
-    from openmagi_core_agent.runtime.runner_session_boundary import (
+    from magi_agent.adk_bridge.session_service import WorkspaceSessionService
+    from magi_agent.runtime.runner_session_boundary import (
         RunnerSessionBoundary,
         RunnerSessionBoundaryConfig,
     )
-    from openmagi_core_agent.runtime.transcript import TranscriptStore
+    from magi_agent.runtime.transcript import TranscriptStore
 
     session_service = WorkspaceSessionService(app_name="openmagi")
     runner = _ContinuityObservingRunner(
@@ -561,12 +561,12 @@ def test_runner_context_continuity_respects_compaction_boundary(
 def test_runner_context_continuity_rejects_private_payloads_from_session_and_projection(
     tmp_path: Path,
 ) -> None:
-    from openmagi_core_agent.adk_bridge.session_service import WorkspaceSessionService
-    from openmagi_core_agent.runtime.runner_session_boundary import (
+    from magi_agent.adk_bridge.session_service import WorkspaceSessionService
+    from magi_agent.runtime.runner_session_boundary import (
         RunnerSessionBoundary,
         RunnerSessionBoundaryConfig,
     )
-    from openmagi_core_agent.runtime.transcript import TranscriptStore
+    from magi_agent.runtime.transcript import TranscriptStore
 
     session_service = WorkspaceSessionService(app_name="openmagi")
     runner = _ContinuityObservingRunner(
@@ -609,7 +609,7 @@ def test_runner_context_continuity_rejects_private_payloads_from_session_and_pro
 
 
 def test_fake_runner_exception_is_classified_without_public_write_authority() -> None:
-    from openmagi_core_agent.runtime.runner_session_boundary import (
+    from magi_agent.runtime.runner_session_boundary import (
         RunnerSessionBoundary,
         RunnerSessionBoundaryConfig,
     )
@@ -642,7 +642,7 @@ def test_fake_runner_exception_is_classified_without_public_write_authority() ->
 
 
 def test_runner_timeout_cancels_fake_runner_and_classifies_timeout() -> None:
-    from openmagi_core_agent.runtime.runner_session_boundary import (
+    from magi_agent.runtime.runner_session_boundary import (
         RunnerSessionBoundary,
         RunnerSessionBoundaryConfig,
     )
@@ -667,7 +667,7 @@ def test_runner_timeout_cancels_fake_runner_and_classifies_timeout() -> None:
 
 
 def test_cancellation_before_run_does_not_invoke_runner() -> None:
-    from openmagi_core_agent.runtime.runner_session_boundary import (
+    from magi_agent.runtime.runner_session_boundary import (
         RunnerCancellationToken,
         RunnerSessionBoundary,
         RunnerSessionBoundaryConfig,
@@ -696,7 +696,7 @@ def test_cancellation_before_run_does_not_invoke_runner() -> None:
 
 
 def test_cancellation_during_run_cancels_runner_task() -> None:
-    from openmagi_core_agent.runtime.runner_session_boundary import (
+    from magi_agent.runtime.runner_session_boundary import (
         RunnerCancellationToken,
         RunnerSessionBoundary,
         RunnerSessionBoundaryConfig,
@@ -729,7 +729,7 @@ def test_cancellation_during_run_cancels_runner_task() -> None:
 
 
 def test_cancellation_during_run_returns_when_runner_swallows_cancellation() -> None:
-    from openmagi_core_agent.runtime.runner_session_boundary import (
+    from magi_agent.runtime.runner_session_boundary import (
         RunnerCancellationToken,
         RunnerSessionBoundary,
         RunnerSessionBoundaryConfig,
@@ -786,7 +786,7 @@ def test_cancellation_during_run_returns_when_runner_swallows_cancellation() -> 
 
 
 def test_cancellation_keeps_same_session_active_until_swallowed_runner_exits() -> None:
-    from openmagi_core_agent.runtime.runner_session_boundary import (
+    from magi_agent.runtime.runner_session_boundary import (
         RunnerCancellationToken,
         RunnerSessionBoundary,
         RunnerSessionBoundaryConfig,
@@ -861,7 +861,7 @@ def test_cancellation_keeps_same_session_active_until_swallowed_runner_exits() -
 
 
 def test_runner_timeout_returns_when_runner_swallows_cancellation() -> None:
-    from openmagi_core_agent.runtime.runner_session_boundary import (
+    from magi_agent.runtime.runner_session_boundary import (
         RunnerSessionBoundary,
         RunnerSessionBoundaryConfig,
     )
@@ -908,7 +908,7 @@ def test_runner_timeout_returns_when_runner_swallows_cancellation() -> None:
 
 
 def test_timeout_keeps_same_session_active_until_swallowed_runner_exits() -> None:
-    from openmagi_core_agent.runtime.runner_session_boundary import (
+    from magi_agent.runtime.runner_session_boundary import (
         RunnerSessionBoundary,
         RunnerSessionBoundaryConfig,
     )
@@ -975,7 +975,7 @@ def test_timeout_keeps_same_session_active_until_swallowed_runner_exits() -> Non
 
 
 def test_same_tick_cancellation_wins_over_runner_completion() -> None:
-    from openmagi_core_agent.runtime.runner_session_boundary import (
+    from magi_agent.runtime.runner_session_boundary import (
         RunnerCancellationToken,
         RunnerSessionBoundary,
         RunnerSessionBoundaryConfig,
@@ -1021,7 +1021,7 @@ def test_same_tick_cancellation_wins_over_runner_completion() -> None:
 
 
 def test_concurrent_same_session_turn_is_denied_without_invoking_second_runner() -> None:
-    from openmagi_core_agent.runtime.runner_session_boundary import (
+    from magi_agent.runtime.runner_session_boundary import (
         RunnerCancellationToken,
         RunnerSessionBoundary,
         RunnerSessionBoundaryConfig,
@@ -1074,7 +1074,7 @@ import sys
 
 before = set(sys.modules)
 module = importlib.import_module(
-    "openmagi_core_agent.runtime.runner_session_boundary"
+    "magi_agent.runtime.runner_session_boundary"
 )
 assert hasattr(module, "RunnerSessionBoundary")
 
@@ -1090,20 +1090,20 @@ forbidden_exact = (
     "psycopg",
     "asyncpg",
     "kubernetes",
-    "openmagi_core_agent.tools.dispatcher",
-    "openmagi_core_agent.transport.sse",
-    "openmagi_core_agent.runtime.control",
+    "magi_agent.tools.dispatcher",
+    "magi_agent.transport.sse",
+    "magi_agent.runtime.control",
 )
 forbidden_prefixes = (
-    "openmagi_core_agent.memory",
-    "openmagi_core_agent.workspace",
-    "openmagi_core_agent.children",
-    "openmagi_core_agent.missions",
-    "openmagi_core_agent.scheduler",
-    "openmagi_core_agent.transport.chat",
-    "openmagi_core_agent.transport.routes",
-    "openmagi_core_agent.app",
-    "openmagi_core_agent.main",
+    "magi_agent.memory",
+    "magi_agent.workspace",
+    "magi_agent.children",
+    "magi_agent.missions",
+    "magi_agent.scheduler",
+    "magi_agent.transport.chat",
+    "magi_agent.transport.routes",
+    "magi_agent.app",
+    "magi_agent.main",
 )
 loaded = [
     module_name
@@ -1131,7 +1131,7 @@ if loaded:
 def test_runner_session_boundary_source_uses_adapter_bridge_and_no_production_activators() -> None:
     module_path = (
         Path(__file__).parents[1]
-        / "openmagi_core_agent"
+        / "magi_agent"
         / "runtime"
         / "runner_session_boundary.py"
     )

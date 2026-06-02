@@ -6,13 +6,13 @@ import sys
 import pytest
 from pydantic import ValidationError
 
-from openmagi_core_agent.harness.audit import (
+from magi_agent.harness.audit import (
     HarnessRuleViolationAuditEvent,
     HarnessVerifierAuditEvent,
     make_rule_violation_audit_event,
     make_verifier_audit_event,
 )
-from openmagi_core_agent.harness.presets import builtin_preset_by_key
+from magi_agent.harness.presets import builtin_preset_by_key
 
 
 def test_verifier_audit_event_alias_serialization_uses_stable_started_type() -> None:
@@ -231,19 +231,19 @@ def test_audit_module_import_does_not_load_runtime_adk_or_writer_boundaries() ->
 import importlib
 import sys
 
-importlib.import_module("openmagi_core_agent.harness.audit")
+importlib.import_module("magi_agent.harness.audit")
 forbidden_prefixes = (
     "google.adk",
 )
 forbidden_modules = (
-    "openmagi_core_agent.adk_bridge.runner_adapter",
-    "openmagi_core_agent.adk_bridge.tool_adapter",
-    "openmagi_core_agent.transport.chat",
-    "openmagi_core_agent.transport.tools",
-    "openmagi_core_agent.hooks.bus",
-    "openmagi_core_agent.tools.dispatcher",
-    "openmagi_core_agent.runtime.transcript",
-    "openmagi_core_agent.runtime.openmagi_runtime",
+    "magi_agent.adk_bridge.runner_adapter",
+    "magi_agent.adk_bridge.tool_adapter",
+    "magi_agent.transport.chat",
+    "magi_agent.transport.tools",
+    "magi_agent.hooks.bus",
+    "magi_agent.tools.dispatcher",
+    "magi_agent.runtime.transcript",
+    "magi_agent.runtime.openmagi_runtime",
 )
 loaded = [
     module

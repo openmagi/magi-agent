@@ -8,7 +8,7 @@ the Python ADK runtime.
 ## TL;DR
 
 Magi now has a `magi` CLI under
-`infra/docker/clawy-core-agent-python/openmagi_core_agent/cli/`.
+`magi-agent/magi_agent/cli/`.
 
 It supports both:
 
@@ -35,7 +35,7 @@ CLI projection and permission wiring at the same time.
 - Entrypoint: `magi` console script via `pyproject.toml`.
 - Optional CLI dependencies: `.[cli]` installs Textual, Rich, RapidFuzz, and
   Typer.
-- Tests: `openmagi_core_agent/cli/tests` collects 347 tests on `origin/main`.
+- Tests: `magi_agent/cli/tests` collects 347 tests on `origin/main`.
 
 ## ADK-coupled surfaces to watch
 
@@ -90,11 +90,11 @@ be explicit before promoting it in install docs.
 
 ## Migration verification checklist
 
-Run from `infra/docker/clawy-core-agent-python` after any ADK bump or runtime
+Run from `magi-agent` after any ADK bump or runtime
 event/callback change:
 
 ```bash
-uv run --extra dev --extra cli pytest openmagi_core_agent/cli/tests -q
+uv run --extra dev --extra cli pytest magi_agent/cli/tests -q
 uv run --extra cli magi --version
 uv run --extra cli magi -h
 ```
@@ -118,6 +118,6 @@ commands.
 - Design: `docs/plans/2026-05-30-magi-cli-design.md`
 - Claude Code CLI teardown: `docs/architecture/claude-code-cli/00-overview.md`
 - Execution prompts: `docs/plans/prompts/magi-track-18-*.md`
-- Landed code: `infra/docker/clawy-core-agent-python/openmagi_core_agent/cli/`
+- Landed code: `magi-agent/magi_agent/cli/`
 - Roadmap context:
   `docs/plans/2026-05-27-magi-python-adk-improvement-plans.md`

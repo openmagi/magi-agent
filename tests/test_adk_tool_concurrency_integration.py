@@ -19,19 +19,19 @@ from unittest.mock import patch
 
 import pytest
 
-from openmagi_core_agent.adk_bridge.tool_adapter import (
+from magi_agent.adk_bridge.tool_adapter import (
     build_adk_function_tools_for_registry,
     build_adk_tool_for_manifest,
     build_concurrency_config,
     build_concurrent_dispatcher,
 )
-from openmagi_core_agent.tools.concurrency import ConcurrencyConfig, ToolCall
-from openmagi_core_agent.tools.concurrent_dispatcher import ConcurrentToolDispatcher
-from openmagi_core_agent.tools.context import ToolContext as OpenMagiToolContext
-from openmagi_core_agent.tools.dispatcher import ToolDispatcher
-from openmagi_core_agent.tools.manifest import ToolManifest, ToolSource
-from openmagi_core_agent.tools.registry import ToolRegistry
-from openmagi_core_agent.tools.result import ToolResult
+from magi_agent.tools.concurrency import ConcurrencyConfig, ToolCall
+from magi_agent.tools.concurrent_dispatcher import ConcurrentToolDispatcher
+from magi_agent.tools.context import ToolContext as OpenMagiToolContext
+from magi_agent.tools.dispatcher import ToolDispatcher
+from magi_agent.tools.manifest import ToolManifest, ToolSource
+from magi_agent.tools.registry import ToolRegistry
+from magi_agent.tools.result import ToolResult
 
 
 # ---------------------------------------------------------------------------

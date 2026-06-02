@@ -15,7 +15,7 @@ class TestTraceEntry:
     """TraceEntry dataclass tests."""
 
     def test_create_entry_with_required_fields(self) -> None:
-        from openmagi_core_agent.telemetry.execution_trace import TraceEntry
+        from magi_agent.telemetry.execution_trace import TraceEntry
 
         entry = TraceEntry(
             timestamp=datetime(2026, 5, 27, tzinfo=timezone.utc),
@@ -30,7 +30,7 @@ class TestTraceEntry:
         assert entry.duration_ms is None
 
     def test_create_entry_with_all_fields(self) -> None:
-        from openmagi_core_agent.telemetry.execution_trace import TraceEntry
+        from magi_agent.telemetry.execution_trace import TraceEntry
 
         entry = TraceEntry(
             timestamp=datetime(2026, 5, 27, tzinfo=timezone.utc),
@@ -44,7 +44,7 @@ class TestTraceEntry:
         assert entry.duration_ms == 42
 
     def test_entry_is_frozen(self) -> None:
-        from openmagi_core_agent.telemetry.execution_trace import TraceEntry
+        from magi_agent.telemetry.execution_trace import TraceEntry
 
         entry = TraceEntry(
             timestamp=datetime(2026, 5, 27, tzinfo=timezone.utc),
@@ -60,7 +60,7 @@ class TestExecutionTrace:
     """ExecutionTrace recording and export tests."""
 
     def test_record_entries(self) -> None:
-        from openmagi_core_agent.telemetry.execution_trace import ExecutionTrace
+        from magi_agent.telemetry.execution_trace import ExecutionTrace
 
         trace = ExecutionTrace(turn_id="turn-001")
         trace.record(layer="turn", module="TurnManager", action="start")
@@ -73,7 +73,7 @@ class TestExecutionTrace:
         assert entries[1]["duration_ms"] == 15
 
     def test_summary_formatting(self) -> None:
-        from openmagi_core_agent.telemetry.execution_trace import ExecutionTrace
+        from magi_agent.telemetry.execution_trace import ExecutionTrace
 
         trace = ExecutionTrace(turn_id="turn-002")
         trace.record(layer="hook", module="HookBus", action="run", detail="point=beforeToolUse, effective=3", duration_ms=5)
@@ -89,7 +89,7 @@ class TestExecutionTrace:
         assert "\n" in summary
 
     def test_json_export_keys(self) -> None:
-        from openmagi_core_agent.telemetry.execution_trace import ExecutionTrace
+        from magi_agent.telemetry.execution_trace import ExecutionTrace
 
         trace = ExecutionTrace(turn_id="turn-003")
         trace.record(layer="evidence", module="EvidenceLedger", action="evaluate", duration_ms=8)
@@ -102,7 +102,7 @@ class TestExecutionTrace:
         datetime.fromisoformat(entry["timestamp"])
 
     def test_json_is_serializable(self) -> None:
-        from openmagi_core_agent.telemetry.execution_trace import ExecutionTrace
+        from magi_agent.telemetry.execution_trace import ExecutionTrace
 
         trace = ExecutionTrace(turn_id="turn-json")
         trace.record(layer="context", module="ContextManager", action="compress", duration_ms=50)
@@ -110,7 +110,7 @@ class TestExecutionTrace:
         json.dumps(trace.to_json())
 
     def test_duration_breakdown_per_layer(self) -> None:
-        from openmagi_core_agent.telemetry.execution_trace import ExecutionTrace
+        from magi_agent.telemetry.execution_trace import ExecutionTrace
 
         trace = ExecutionTrace(turn_id="turn-004")
         trace.record(layer="hook", module="HookBus", action="run", duration_ms=10)
@@ -124,7 +124,7 @@ class TestExecutionTrace:
         assert "turn" not in breakdown  # None durations excluded
 
     def test_empty_trace_summary(self) -> None:
-        from openmagi_core_agent.telemetry.execution_trace import ExecutionTrace
+        from magi_agent.telemetry.execution_trace import ExecutionTrace
 
         trace = ExecutionTrace(turn_id="turn-empty")
         summary = trace.summary()
@@ -132,19 +132,19 @@ class TestExecutionTrace:
         assert isinstance(summary, str)
 
     def test_empty_trace_json(self) -> None:
-        from openmagi_core_agent.telemetry.execution_trace import ExecutionTrace
+        from magi_agent.telemetry.execution_trace import ExecutionTrace
 
         trace = ExecutionTrace(turn_id="turn-empty-json")
         assert trace.to_json() == []
 
     def test_empty_trace_duration_breakdown(self) -> None:
-        from openmagi_core_agent.telemetry.execution_trace import ExecutionTrace
+        from magi_agent.telemetry.execution_trace import ExecutionTrace
 
         trace = ExecutionTrace(turn_id="turn-empty-bd")
         assert trace.duration_breakdown() == {}
 
     def test_turn_id_stored(self) -> None:
-        from openmagi_core_agent.telemetry.execution_trace import ExecutionTrace
+        from magi_agent.telemetry.execution_trace import ExecutionTrace
 
         trace = ExecutionTrace(turn_id="my-turn-123")
         assert trace.turn_id == "my-turn-123"
@@ -154,14 +154,14 @@ class TestTraceContext:
     """trace_context.py contextvars and env gate tests."""
 
     def test_get_trace_returns_none_by_default(self) -> None:
-        from openmagi_core_agent.telemetry.trace_context import get_trace
+        from magi_agent.telemetry.trace_context import get_trace
 
         # In a fresh context, should be None
         assert get_trace() is None
 
     def test_set_and_get_trace(self) -> None:
-        from openmagi_core_agent.telemetry.execution_trace import ExecutionTrace
-        from openmagi_core_agent.telemetry.trace_context import get_trace, set_trace
+        from magi_agent.telemetry.execution_trace import ExecutionTrace
+        from magi_agent.telemetry.trace_context import get_trace, set_trace
 
         trace = ExecutionTrace(turn_id="ctx-test")
         set_trace(trace)
@@ -171,7 +171,7 @@ class TestTraceContext:
         set_trace(None)  # type: ignore[arg-type]
 
     def test_trace_enabled_reads_env(self) -> None:
-        from openmagi_core_agent.telemetry.trace_context import trace_enabled
+        from magi_agent.telemetry.trace_context import trace_enabled
 
         old = os.environ.get("MAGI_EXECUTION_TRACE")
         try:
@@ -199,7 +199,7 @@ class TestTraceContext:
                 os.environ["MAGI_EXECUTION_TRACE"] = old
 
     def test_trace_enabled_default_false(self) -> None:
-        from openmagi_core_agent.telemetry.trace_context import trace_enabled
+        from magi_agent.telemetry.trace_context import trace_enabled
 
         old = os.environ.pop("MAGI_EXECUTION_TRACE", None)
         try:
@@ -210,8 +210,8 @@ class TestTraceContext:
 
     def test_concurrent_traces_via_contextvars(self) -> None:
         """Verify that concurrent async tasks each see their own trace."""
-        from openmagi_core_agent.telemetry.execution_trace import ExecutionTrace
-        from openmagi_core_agent.telemetry.trace_context import get_trace, set_trace
+        from magi_agent.telemetry.execution_trace import ExecutionTrace
+        from magi_agent.telemetry.trace_context import get_trace, set_trace
 
         results: dict[str, str | None] = {}
 

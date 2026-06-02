@@ -4,11 +4,11 @@ import json
 import subprocess
 import sys
 
-from openmagi_core_agent.channels.contract import ChannelRef
+from magi_agent.channels.contract import ChannelRef
 
 
 def _cron(**overrides: object) -> object:
-    from openmagi_core_agent.harness.cron_runtime import CronDefinition
+    from magi_agent.harness.cron_runtime import CronDefinition
 
     payload = {
         "cronId": "cron:daily",
@@ -27,7 +27,7 @@ def _cron(**overrides: object) -> object:
 
 
 def test_cron_hydration_disabled_does_not_emit_due_turns() -> None:
-    from openmagi_core_agent.harness.cron_runtime import (
+    from magi_agent.harness.cron_runtime import (
         CronHydrationRequest,
         CronRuntimeBoundary,
         CronRuntimeConfig,
@@ -44,7 +44,7 @@ def test_cron_hydration_disabled_does_not_emit_due_turns() -> None:
 
 
 def test_cron_hydration_handles_timezone_missed_window_duplicate_and_resume() -> None:
-    from openmagi_core_agent.harness.cron_runtime import (
+    from magi_agent.harness.cron_runtime import (
         CronHydrationRequest,
         CronRuntimeBoundary,
         CronRuntimeConfig,
@@ -75,7 +75,7 @@ def test_cron_hydration_handles_timezone_missed_window_duplicate_and_resume() ->
 
 
 def test_cron_next_fire_respects_expression_interval_and_timezone() -> None:
-    from openmagi_core_agent.harness.cron_runtime import (
+    from magi_agent.harness.cron_runtime import (
         CronHydrationRequest,
         CronRuntimeBoundary,
         CronRuntimeConfig,
@@ -130,7 +130,7 @@ def test_cron_next_fire_respects_expression_interval_and_timezone() -> None:
 
 
 def test_cron_next_fire_respects_range_and_step_expressions() -> None:
-    from openmagi_core_agent.harness.cron_runtime import (
+    from magi_agent.harness.cron_runtime import (
         CronHydrationRequest,
         CronRuntimeBoundary,
         CronRuntimeConfig,
@@ -171,7 +171,7 @@ def test_cron_next_fire_respects_range_and_step_expressions() -> None:
 
 
 def test_cron_pause_resume_cancel_are_metadata_only() -> None:
-    from openmagi_core_agent.harness.cron_runtime import (
+    from magi_agent.harness.cron_runtime import (
         CronMutationRequest,
         CronRuntimeBoundary,
         CronRuntimeConfig,
@@ -190,7 +190,7 @@ def test_cron_pause_resume_cancel_are_metadata_only() -> None:
 
 
 def test_cron_config_and_authority_flags_cannot_be_forged_with_model_copy() -> None:
-    from openmagi_core_agent.harness.cron_runtime import (
+    from magi_agent.harness.cron_runtime import (
         CronAuthorityFlags,
         CronRuntimeConfig,
     )
@@ -223,7 +223,7 @@ def test_cron_config_and_authority_flags_cannot_be_forged_with_model_copy() -> N
 
 
 def test_cron_hydration_blocks_stale_lease_and_redacts_prompt() -> None:
-    from openmagi_core_agent.harness.cron_runtime import (
+    from magi_agent.harness.cron_runtime import (
         CronHydrationRequest,
         CronLease,
         CronRuntimeBoundary,
@@ -251,7 +251,7 @@ def test_cron_hydration_blocks_stale_lease_and_redacts_prompt() -> None:
 
 
 def test_cron_diagnostic_metadata_cannot_forge_authority_claims() -> None:
-    from openmagi_core_agent.harness.cron_runtime import (
+    from magi_agent.harness.cron_runtime import (
         CronHydrationRequest,
         CronRuntimeBoundary,
         CronRuntimeConfig,
@@ -291,17 +291,17 @@ def test_cron_runtime_boundary_has_no_live_imports() -> None:
 import importlib
 import sys
 
-importlib.import_module("openmagi_core_agent.harness.cron_runtime")
+importlib.import_module("magi_agent.harness.cron_runtime")
 forbidden_prefixes = (
     "google.adk",
     "google.genai",
-    "openmagi_core_agent.adk_bridge",
-    "openmagi_core_agent.transport",
-    "openmagi_core_agent.routing",
-    "openmagi_core_agent.deploy",
-    "openmagi_core_agent.chat_proxy",
-    "openmagi_core_agent.runtime_selector",
-    "openmagi_core_agent.k8s",
+    "magi_agent.adk_bridge",
+    "magi_agent.transport",
+    "magi_agent.routing",
+    "magi_agent.deploy",
+    "magi_agent.chat_proxy",
+    "magi_agent.runtime_selector",
+    "magi_agent.k8s",
     "subprocess",
     "kubernetes",
     "telegram",

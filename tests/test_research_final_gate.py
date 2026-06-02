@@ -4,13 +4,13 @@ import json
 import subprocess
 import sys
 
-from openmagi_core_agent.evidence.research_final_gate import (
+from magi_agent.evidence.research_final_gate import (
     ResearchClaimRef,
     ResearchFinalGateRequest,
     evaluate_research_final_gate,
 )
-from openmagi_core_agent.evidence.source_ledger import LocalResearchSourceLedger
-from openmagi_core_agent.evidence.citation_audit import (
+from magi_agent.evidence.source_ledger import LocalResearchSourceLedger
+from magi_agent.evidence.citation_audit import (
     CitationAuditItem,
     CitationAuditRequest,
     CitationAuditResult,
@@ -574,24 +574,24 @@ def test_research_final_gate_import_stays_live_runtime_free() -> None:
 import importlib
 import sys
 
-module = importlib.import_module("openmagi_core_agent.evidence.research_final_gate")
+module = importlib.import_module("magi_agent.evidence.research_final_gate")
 assert hasattr(module, "evaluate_research_final_gate")
 
 forbidden_prefixes = (
     "google.adk",
-    "openmagi_core_agent.adk_bridge.runner_adapter",
-    "openmagi_core_agent.tools.dispatcher",
-    "openmagi_core_agent.tools.registry",
-    "openmagi_core_agent.runtime",
-    "openmagi_core_agent.routing",
-    "openmagi_core_agent.transport.chat",
-    "openmagi_core_agent.transport.tools",
-    "openmagi_core_agent.memory",
-    "openmagi_core_agent.browser",
-    "openmagi_core_agent.search",
-    "openmagi_core_agent.fetch",
-    "openmagi_core_agent.channels",
-    "openmagi_core_agent.workspace",
+    "magi_agent.adk_bridge.runner_adapter",
+    "magi_agent.tools.dispatcher",
+    "magi_agent.tools.registry",
+    "magi_agent.runtime",
+    "magi_agent.routing",
+    "magi_agent.transport.chat",
+    "magi_agent.transport.tools",
+    "magi_agent.memory",
+    "magi_agent.browser",
+    "magi_agent.search",
+    "magi_agent.fetch",
+    "magi_agent.channels",
+    "magi_agent.workspace",
 )
 loaded = [
     module_name

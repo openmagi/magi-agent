@@ -11,19 +11,19 @@ from typing import Any, cast
 
 import pytest
 
-from openmagi_core_agent.recipes.coding_mutation import (
+from magi_agent.recipes.coding_mutation import (
     CodingMutationConfig,
     CodingMutationRecipe,
     CodingMutationRequest,
 )
-from openmagi_core_agent.tools.read_ledger import (
+from magi_agent.tools.read_ledger import (
     ReadLedger,
     ReadLedgerConfig,
     ReadMode,
     WorkspaceMutationReadCheck,
     workspace_content_digest,
 )
-from openmagi_core_agent.workspace.read_ledger import (
+from magi_agent.workspace.read_ledger import (
     ReadLedgerHardGate,
     ReadLedgerHardGateConfig,
     ReadLedgerHardGateDecision,

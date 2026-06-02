@@ -3,7 +3,7 @@ from __future__ import annotations
 import subprocess
 import sys
 
-from openmagi_core_agent.harness.mission_runtime_boundary import (
+from magi_agent.harness.mission_runtime_boundary import (
     BackgroundTaskRecord,
     GoalBudget,
     GoalRecord,
@@ -223,7 +223,7 @@ def test_scheduler_tick_records_metadata_without_background_execution() -> None:
 
 
 def test_mission_scheduler_decision_emits_child_intent_only_without_execution() -> None:
-    from openmagi_core_agent.harness.mission_runtime_boundary import (
+    from magi_agent.harness.mission_runtime_boundary import (
         build_mission_scheduler_decision,
     )
 
@@ -248,7 +248,7 @@ def test_mission_scheduler_decision_emits_child_intent_only_without_execution() 
 
 
 def test_mission_scheduler_decision_suppresses_paused_completed_and_exhausted_goals() -> None:
-    from openmagi_core_agent.harness.mission_runtime_boundary import (
+    from magi_agent.harness.mission_runtime_boundary import (
         build_mission_scheduler_decision,
     )
 
@@ -590,7 +590,7 @@ def test_mission_runtime_config_cannot_enable_live_authority_by_construct_or_cop
 
 
 def test_mission_runtime_forged_projection_redacts_nested_goal_and_task_payloads() -> None:
-    from openmagi_core_agent.harness.mission_runtime_boundary import (
+    from magi_agent.harness.mission_runtime_boundary import (
         MissionRuntimeAuthorityFlags,
         MissionRuntimeDecision,
     )
@@ -643,11 +643,11 @@ def test_mission_runtime_boundary_has_no_live_imports() -> None:
 import importlib
 import sys
 
-importlib.import_module("openmagi_core_agent.harness.mission_runtime_boundary")
+importlib.import_module("magi_agent.harness.mission_runtime_boundary")
 forbidden = (
     "google.adk.runners",
     "google.adk.agents",
-    "openmagi_core_agent.runtime.runner",
+    "magi_agent.runtime.runner",
     "subprocess",
     "telegram",
 )

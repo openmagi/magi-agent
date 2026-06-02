@@ -7,7 +7,7 @@ import sys
 import pytest
 from pydantic import ValidationError
 
-from openmagi_core_agent.recipes.compiler import (
+from magi_agent.recipes.compiler import (
     AgentRecipeCompiler,
     MissionLifecycleMetadata,
     PackRegistry,
@@ -1158,19 +1158,19 @@ def test_importing_recipe_compiler_stays_runtime_route_and_adk_runner_free() -> 
 import importlib
 import sys
 
-module = importlib.import_module("openmagi_core_agent.recipes.compiler")
+module = importlib.import_module("magi_agent.recipes.compiler")
 assert hasattr(module, "AgentRecipeCompiler")
 
 forbidden_prefixes = (
     "google.adk",
-    "openmagi_core_agent.adk_bridge.runner_adapter",
-    "openmagi_core_agent.adk_bridge.local_runner",
-    "openmagi_core_agent.adk_bridge.tool_adapter",
-    "openmagi_core_agent.runtime",
-    "openmagi_core_agent.routing",
-    "openmagi_core_agent.transport",
-    "openmagi_core_agent.channels",
-    "openmagi_core_agent.workspace",
+    "magi_agent.adk_bridge.runner_adapter",
+    "magi_agent.adk_bridge.local_runner",
+    "magi_agent.adk_bridge.tool_adapter",
+    "magi_agent.runtime",
+    "magi_agent.routing",
+    "magi_agent.transport",
+    "magi_agent.channels",
+    "magi_agent.workspace",
 )
 loaded = [
     module_name
@@ -1200,7 +1200,7 @@ def test_multi_recipe_composition_import_boundary_stays_metadata_only() -> None:
             """
 import sys
 
-from openmagi_core_agent.recipes.compiler import (
+from magi_agent.recipes.compiler import (
     AgentRecipeCompiler,
     PackRegistry,
     ProfileResolutionRequest,
@@ -1218,14 +1218,14 @@ assert "openmagi.artifact-delivery" in snapshot.selected_pack_ids
 
 forbidden_prefixes = (
     "google.adk",
-    "openmagi_core_agent.adk_bridge",
-    "openmagi_core_agent.channels",
-    "openmagi_core_agent.tools.dispatcher",
-    "openmagi_core_agent.memory",
-    "openmagi_core_agent.runtime",
-    "openmagi_core_agent.routing",
-    "openmagi_core_agent.transport",
-    "openmagi_core_agent.workspace",
+    "magi_agent.adk_bridge",
+    "magi_agent.channels",
+    "magi_agent.tools.dispatcher",
+    "magi_agent.memory",
+    "magi_agent.runtime",
+    "magi_agent.routing",
+    "magi_agent.transport",
+    "magi_agent.workspace",
 )
 loaded = [
     module_name

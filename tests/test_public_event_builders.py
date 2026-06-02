@@ -4,7 +4,7 @@ import json
 
 import pytest
 
-from openmagi_core_agent.runtime.public_events import (
+from magi_agent.runtime.public_events import (
     child_progress_event,
     heartbeat_event,
     rule_check_event,
@@ -17,7 +17,7 @@ from openmagi_core_agent.runtime.public_events import (
     tool_start_event,
     turn_phase_event,
 )
-from openmagi_core_agent.transport.sse import InMemorySseWriter
+from magi_agent.transport.sse import InMemorySseWriter
 
 
 def _agent_payload(event: dict[str, object]) -> dict[str, object]:

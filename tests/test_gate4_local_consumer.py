@@ -8,11 +8,11 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from openmagi_core_agent.shadow.gate4_bridge import (
+from magi_agent.shadow.gate4_bridge import (
     Gate4LocalBridgeConfig,
     run_gate4_local_bridge,
 )
-from openmagi_core_agent.shadow.gate4_consumer import (
+from magi_agent.shadow.gate4_consumer import (
     Gate4LocalConsumerConfig,
     Gate4LocalConsumerError,
     consume_gate4_local_bridge_outputs,

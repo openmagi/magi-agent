@@ -5,20 +5,20 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from openmagi_core_agent.harness.general_automation.package_boundary import (
+from magi_agent.harness.general_automation.package_boundary import (
     AutomationPackageBoundary,
     PackageBoundaryDecision,
 )
-from openmagi_core_agent.harness.general_automation.package_manifest import (
+from magi_agent.harness.general_automation.package_manifest import (
     AutomationPackageManifest,
 )
-from openmagi_core_agent.harness.general_automation.package_tool_projection import (
+from magi_agent.harness.general_automation.package_tool_projection import (
     project_automation_package_tools,
 )
 
 
 PYTHON_ROOT = Path(__file__).resolve().parents[1]
-PACKAGE_DIR = PYTHON_ROOT / "openmagi_core_agent" / "harness" / "general_automation"
+PACKAGE_DIR = PYTHON_ROOT / "magi_agent" / "harness" / "general_automation"
 
 
 def _base_manifest() -> dict[str, object]:

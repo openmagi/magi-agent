@@ -1,9 +1,9 @@
-from openmagi_core_agent.adk_bridge.policy_boundary import (
+from magi_agent.adk_bridge.policy_boundary import (
     AdkCallbackBoundary,
     AdkPluginBoundary,
     AdkToolConfirmationBoundary,
 )
-from openmagi_core_agent.runtime.control import ControlRequest
+from magi_agent.runtime.control import ControlRequest
 
 
 def test_adk_boundaries_reference_official_primitives_without_owning_product_policy() -> None:

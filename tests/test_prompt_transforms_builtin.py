@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-from openmagi_core_agent.hooks.builtin.prompt_transforms import (
+from magi_agent.hooks.builtin.prompt_transforms import (
     language_preference_transform,
     language_preference_transform_manifest,
     model_capability_transform,
@@ -20,8 +20,8 @@ from openmagi_core_agent.hooks.builtin.prompt_transforms import (
     project_context_transform,
     project_context_transform_manifest,
 )
-from openmagi_core_agent.hooks.context import HookContext
-from openmagi_core_agent.hooks.manifest import HookPoint
+from magi_agent.hooks.context import HookContext
+from magi_agent.hooks.manifest import HookPoint
 
 
 _BASE_SECTIONS = ("identity body", "safety body")

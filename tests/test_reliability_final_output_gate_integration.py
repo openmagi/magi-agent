@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from openmagi_core_agent.evidence.final_output_gate import (
+from magi_agent.evidence.final_output_gate import (
     FinalOutputGate,
     FinalOutputGateConfig,
     FinalOutputGateRequest,

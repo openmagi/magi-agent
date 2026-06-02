@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from openmagi_core_agent.runtime.checkpointing import (
+from magi_agent.runtime.checkpointing import (
     ExecutionCheckpoint,
     ForkedRunLineage,
     ReplayModeDecision,

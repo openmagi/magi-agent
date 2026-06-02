@@ -25,7 +25,7 @@ def _sample_assistant_message() -> dict[str, object]:
 
 class TestFrozenPromptSnapshot:
     def test_capture_restore_byte_identical(self) -> None:
-        from openmagi_core_agent.runtime.prompt_snapshot import FrozenPromptSnapshot
+        from magi_agent.runtime.prompt_snapshot import FrozenPromptSnapshot
 
         blocks = _sample_system_prompt_blocks()
         snapshot = FrozenPromptSnapshot.capture(blocks)
@@ -36,7 +36,7 @@ class TestFrozenPromptSnapshot:
         assert json.dumps(restored_a, sort_keys=True) == json.dumps(blocks, sort_keys=True)
 
     def test_fingerprint_deterministic(self) -> None:
-        from openmagi_core_agent.runtime.prompt_snapshot import FrozenPromptSnapshot
+        from magi_agent.runtime.prompt_snapshot import FrozenPromptSnapshot
 
         blocks = _sample_system_prompt_blocks()
         snap_a = FrozenPromptSnapshot.capture(blocks)
@@ -44,7 +44,7 @@ class TestFrozenPromptSnapshot:
         assert snap_a.fingerprint == snap_b.fingerprint
 
     def test_fingerprint_changes_on_different_input(self) -> None:
-        from openmagi_core_agent.runtime.prompt_snapshot import FrozenPromptSnapshot
+        from magi_agent.runtime.prompt_snapshot import FrozenPromptSnapshot
 
         blocks_a = [{"type": "text", "text": "A"}]
         blocks_b = [{"type": "text", "text": "B"}]
@@ -53,7 +53,7 @@ class TestFrozenPromptSnapshot:
         assert snap_a.fingerprint != snap_b.fingerprint
 
     def test_mutation_does_not_affect_snapshot(self) -> None:
-        from openmagi_core_agent.runtime.prompt_snapshot import FrozenPromptSnapshot
+        from magi_agent.runtime.prompt_snapshot import FrozenPromptSnapshot
 
         blocks = _sample_system_prompt_blocks()
         snapshot = FrozenPromptSnapshot.capture(blocks)
@@ -62,7 +62,7 @@ class TestFrozenPromptSnapshot:
         assert restored[0]["text"] == "You are a helpful assistant."
 
     def test_cache_control_preserved(self) -> None:
-        from openmagi_core_agent.runtime.prompt_snapshot import FrozenPromptSnapshot
+        from magi_agent.runtime.prompt_snapshot import FrozenPromptSnapshot
 
         blocks = _sample_system_prompt_blocks()
         snapshot = FrozenPromptSnapshot.capture(blocks)
@@ -72,7 +72,7 @@ class TestFrozenPromptSnapshot:
 
 class TestBuildForkedMessages:
     def test_shared_prefix_identical_across_children(self) -> None:
-        from openmagi_core_agent.runtime.fork_messages import build_forked_messages
+        from magi_agent.runtime.fork_messages import build_forked_messages
 
         assistant = _sample_assistant_message()
         msgs_a = build_forked_messages(
@@ -88,7 +88,7 @@ class TestBuildForkedMessages:
         assert json.dumps(msgs_a[1], sort_keys=True) == json.dumps(msgs_b[1], sort_keys=True)
 
     def test_only_directive_differs(self) -> None:
-        from openmagi_core_agent.runtime.fork_messages import build_forked_messages
+        from magi_agent.runtime.fork_messages import build_forked_messages
 
         msgs = build_forked_messages(
             parent_assistant_message=_sample_assistant_message(),
@@ -98,7 +98,7 @@ class TestBuildForkedMessages:
         assert msgs[2]["content"] == "do something specific"
 
     def test_tool_results_use_placeholder(self) -> None:
-        from openmagi_core_agent.runtime.fork_messages import (
+        from magi_agent.runtime.fork_messages import (
             FORK_PLACEHOLDER_RESULT,
             build_forked_messages,
         )
@@ -114,7 +114,7 @@ class TestBuildForkedMessages:
             assert result["content"] == FORK_PLACEHOLDER_RESULT
 
     def test_tool_use_ids_match(self) -> None:
-        from openmagi_core_agent.runtime.fork_messages import build_forked_messages
+        from magi_agent.runtime.fork_messages import build_forked_messages
 
         msgs = build_forked_messages(
             parent_assistant_message=_sample_assistant_message(),
@@ -125,7 +125,7 @@ class TestBuildForkedMessages:
         assert tool_results[1]["tool_use_id"] == "tool_2"
 
     def test_rejects_non_assistant_message(self) -> None:
-        from openmagi_core_agent.runtime.fork_messages import build_forked_messages
+        from magi_agent.runtime.fork_messages import build_forked_messages
         import pytest
 
         with pytest.raises(ValueError, match="role 'assistant'"):
@@ -135,7 +135,7 @@ class TestBuildForkedMessages:
             )
 
     def test_rejects_non_list_content(self) -> None:
-        from openmagi_core_agent.runtime.fork_messages import build_forked_messages
+        from magi_agent.runtime.fork_messages import build_forked_messages
         import pytest
 
         with pytest.raises(ValueError, match="list content"):
@@ -149,7 +149,7 @@ class TestForkRunner:
     def test_disabled_by_default(self) -> None:
         import os
         os.environ.pop("MAGI_FORK_CACHE_ENABLED", None)
-        from openmagi_core_agent.runtime.fork_runner import ForkRunner
+        from magi_agent.runtime.fork_runner import ForkRunner
 
         runner = ForkRunner()
         assert not runner.enabled
@@ -157,7 +157,7 @@ class TestForkRunner:
     def test_disabled_returns_empty(self) -> None:
         import os
         os.environ.pop("MAGI_FORK_CACHE_ENABLED", None)
-        from openmagi_core_agent.runtime.fork_runner import ForkRunner
+        from magi_agent.runtime.fork_runner import ForkRunner
 
         runner = ForkRunner()
         results, evidence = asyncio.run(runner.fork(
@@ -174,7 +174,7 @@ class TestForkRunner:
         import os
         os.environ["MAGI_FORK_CACHE_ENABLED"] = "true"
         try:
-            from openmagi_core_agent.runtime.fork_runner import ForkRunner
+            from magi_agent.runtime.fork_runner import ForkRunner
 
             call_log: list[str] = []
 
@@ -203,7 +203,7 @@ class TestForkRunner:
         import os
         os.environ["MAGI_FORK_CACHE_ENABLED"] = "true"
         try:
-            from openmagi_core_agent.runtime.fork_runner import ForkRunner
+            from magi_agent.runtime.fork_runner import ForkRunner
 
             captured_blocks: list[list[dict]] = []
 
@@ -231,7 +231,7 @@ class TestForkRunner:
         import os
         os.environ["MAGI_FORK_CACHE_ENABLED"] = "true"
         try:
-            from openmagi_core_agent.runtime.fork_runner import ForkRunner
+            from magi_agent.runtime.fork_runner import ForkRunner
 
             async def failing_executor(*, system_prompt_blocks, messages, directive):
                 if directive == "fail":
@@ -259,7 +259,7 @@ class TestForkRunner:
         import os
         os.environ["MAGI_FORK_CACHE_ENABLED"] = "true"
         try:
-            from openmagi_core_agent.runtime.fork_runner import ForkRunner
+            from magi_agent.runtime.fork_runner import ForkRunner
 
             async def noop_executor(*, system_prompt_blocks, messages, directive):
                 return "done"
@@ -281,7 +281,7 @@ class TestForkRunner:
         import os
         os.environ["MAGI_FORK_CACHE_ENABLED"] = "true"
         try:
-            from openmagi_core_agent.runtime.fork_runner import ForkRunner
+            from magi_agent.runtime.fork_runner import ForkRunner
 
             runner = ForkRunner()
             results, evidence = asyncio.run(runner.fork(

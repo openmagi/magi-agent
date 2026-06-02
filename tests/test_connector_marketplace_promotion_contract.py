@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from openmagi_core_agent.connectors.marketplace import (
+from magi_agent.connectors.marketplace import (
     MarketplaceAuthorityFlags,
     MarketplacePromotionRequest,
     MarketplacePromotionReceipt,
@@ -17,11 +17,11 @@ from openmagi_core_agent.connectors.marketplace import (
     plugin_manifest_content_digest,
     validate_plugin_runtime_permission_request,
 )
-from openmagi_core_agent.connectors.registry import (
+from magi_agent.connectors.registry import (
     ConnectorManifest,
     connector_manifest_content_digest,
 )
-from openmagi_core_agent.plugins.manifest import PluginManifest
+from magi_agent.plugins.manifest import PluginManifest
 
 
 PYTHON_ROOT = Path(__file__).resolve().parents[1]
@@ -637,17 +637,17 @@ def test_authority_flags_cannot_be_forged_by_constructor_validate_construct_or_c
 def test_marketplace_import_boundary_has_no_live_provider_or_runtime_imports() -> None:
     script = """
 import sys
-import openmagi_core_agent.connectors.marketplace
+import magi_agent.connectors.marketplace
 forbidden_prefixes = (
     'google.adk.runners',
     'google.adk.agents',
     'google.adk.tools',
-    'openmagi_core_agent.adk_bridge',
-    'openmagi_core_agent.runtime',
-    'openmagi_core_agent.tools.dispatcher',
-    'openmagi_core_agent.tools.registry',
-    'openmagi_core_agent.transport.plugins',
-    'openmagi_core_agent.plugins.manager',
+    'magi_agent.adk_bridge',
+    'magi_agent.runtime',
+    'magi_agent.tools.dispatcher',
+    'magi_agent.tools.registry',
+    'magi_agent.transport.plugins',
+    'magi_agent.plugins.manager',
     'stripe',
     'supabase',
     'psycopg',
@@ -688,8 +688,8 @@ def test_pr11_matrix_row_refs_point_to_implemented_contract_files() -> None:
         item["path"] if isinstance(item, dict) else item for item in row["missingImplementation"]
     }
 
-    assert "openmagi_core_agent/connectors/marketplace.py" in covered_paths
+    assert "magi_agent/connectors/marketplace.py" in covered_paths
     assert "tests/test_connector_marketplace_promotion_contract.py" in covered_paths
-    assert "openmagi_core_agent/connectors/marketplace.py" not in missing_paths
+    assert "magi_agent/connectors/marketplace.py" not in missing_paths
     assert "tests/test_connector_marketplace_promotion_contract.py" not in missing_paths
     assert row["implementationStatus"] == "local_fake"

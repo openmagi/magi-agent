@@ -14,7 +14,7 @@ def _request(
     resource_ref: str = "docs:adk",
     request_id: str = "perm:req:1",
 ):
-    from openmagi_core_agent.recipes.opencode_permission_patterns import (
+    from magi_agent.recipes.opencode_permission_patterns import (
         OpenCodeResearchPermissionRequest,
     )
 
@@ -27,7 +27,7 @@ def _request(
 
 
 def _profile(*, soft_rules=(), hard_denies=()):
-    from openmagi_core_agent.recipes.opencode_permission_patterns import (
+    from magi_agent.recipes.opencode_permission_patterns import (
         OpenCodeResearchPermissionProfile,
     )
 
@@ -39,7 +39,7 @@ def _profile(*, soft_rules=(), hard_denies=()):
 
 
 def test_research_permission_pattern_soft_wildcard_last_match_wins() -> None:
-    from openmagi_core_agent.recipes.opencode_permission_patterns import (
+    from magi_agent.recipes.opencode_permission_patterns import (
         OpenCodeResearchPermissionRule,
         decide_opencode_research_permission,
     )
@@ -90,7 +90,7 @@ def test_research_permission_pattern_soft_wildcard_last_match_wins() -> None:
 
 
 def test_hard_safety_deny_beats_wildcards_and_always_approval() -> None:
-    from openmagi_core_agent.recipes.opencode_permission_patterns import (
+    from magi_agent.recipes.opencode_permission_patterns import (
         OpenCodeResearchHardDeny,
         OpenCodeResearchPermissionRule,
         add_opencode_research_always_approval,
@@ -129,13 +129,13 @@ def test_hard_safety_deny_beats_wildcards_and_always_approval() -> None:
 
 
 def test_always_approval_adds_scoped_future_allow_only() -> None:
-    from openmagi_core_agent.recipes.opencode_permission_patterns import (
+    from magi_agent.recipes.opencode_permission_patterns import (
         add_opencode_research_always_approval,
         decide_opencode_research_permission,
     )
 
     profile = _profile()
-    request = _request(permission="repo.clone", resource_ref="repo:openmagi/clawy")
+    request = _request(permission="repo.clone", resource_ref="repo:openmagi/magi")
     other_repo = _request(
         permission="repo.clone",
         resource_ref="repo:other/project",
@@ -155,7 +155,7 @@ def test_always_approval_adds_scoped_future_allow_only() -> None:
 
 
 def test_repo_clone_scope_and_external_repo_narrower_than_external_directory() -> None:
-    from openmagi_core_agent.recipes.opencode_permission_patterns import (
+    from magi_agent.recipes.opencode_permission_patterns import (
         OpenCodeResearchPermissionRule,
         decide_opencode_research_permission,
     )
@@ -164,13 +164,13 @@ def test_repo_clone_scope_and_external_repo_narrower_than_external_directory() -
         soft_rules=(
             OpenCodeResearchPermissionRule(
                 permissionPattern="repo.clone",
-                resourcePattern="repo:openmagi/clawy",
+                resourcePattern="repo:openmagi/magi",
                 action="allow",
                 reasonCode="single_repo_clone_allow",
             ),
             OpenCodeResearchPermissionRule(
                 permissionPattern="read.external_repo",
-                resourcePattern="repo:openmagi/clawy",
+                resourcePattern="repo:openmagi/magi",
                 action="allow",
                 reasonCode="single_external_repo_read_allow",
             ),
@@ -178,7 +178,7 @@ def test_repo_clone_scope_and_external_repo_narrower_than_external_directory() -
     )
 
     clone_same = decide_opencode_research_permission(
-        _request(permission="repo.clone", resource_ref="repo:openmagi/clawy"),
+        _request(permission="repo.clone", resource_ref="repo:openmagi/magi"),
         profile,
     )
     clone_other = decide_opencode_research_permission(
@@ -192,7 +192,7 @@ def test_repo_clone_scope_and_external_repo_narrower_than_external_directory() -
     external_repo = decide_opencode_research_permission(
         _request(
             permission="read.external_repo",
-            resource_ref="repo:openmagi/clawy",
+            resource_ref="repo:openmagi/magi",
             request_id="perm:req:external-repo",
         ),
         profile,
@@ -200,7 +200,7 @@ def test_repo_clone_scope_and_external_repo_narrower_than_external_directory() -
     external_directory = decide_opencode_research_permission(
         _request(
             permission="read.external_directory",
-            resource_ref="repo:openmagi/clawy",
+            resource_ref="repo:openmagi/magi",
             request_id="perm:req:external-directory",
         ),
         profile,
@@ -213,10 +213,10 @@ def test_repo_clone_scope_and_external_repo_narrower_than_external_directory() -
 
 
 def test_rejecting_permission_request_cancels_sibling_pending_requests_in_session() -> None:
-    from openmagi_core_agent.recipes.opencode_permission_patterns import (
+    from magi_agent.recipes.opencode_permission_patterns import (
         reject_opencode_research_permission_request,
     )
-    from openmagi_core_agent.runtime.control import ControlRequestStore
+    from magi_agent.runtime.control import ControlRequestStore
 
     store = ControlRequestStore()
     first = store.create_tool_permission_request(
@@ -225,7 +225,7 @@ def test_rejecting_permission_request_cancels_sibling_pending_requests_in_sessio
         channel_name=None,
         source="turn",
         prompt="approve repo clone",
-        proposed_input={"repo": "repo:openmagi/clawy"},
+        proposed_input={"repo": "repo:openmagi/magi"},
         idempotency_key="session-alpha:first",
         now=1,
         timeout_ms=100,
@@ -267,7 +267,7 @@ def test_rejecting_permission_request_cancels_sibling_pending_requests_in_sessio
 
 
 def test_default_profile_has_no_production_or_broad_authority() -> None:
-    from openmagi_core_agent.recipes.opencode_permission_patterns import (
+    from magi_agent.recipes.opencode_permission_patterns import (
         build_default_opencode_research_permission_profile,
         decide_opencode_research_permission,
     )
@@ -303,7 +303,7 @@ def test_default_profile_has_no_production_or_broad_authority() -> None:
 
 
 def test_permission_request_rejects_globs_raw_paths_and_auth_callback_refs() -> None:
-    from openmagi_core_agent.recipes.opencode_permission_patterns import (
+    from magi_agent.recipes.opencode_permission_patterns import (
         OpenCodeResearchPermissionRequest,
     )
 
@@ -312,13 +312,13 @@ def test_permission_request_rejects_globs_raw_paths_and_auth_callback_refs() -> 
         "repo:foo?bar",
         "/Users/kevin/.ssh/id_rsa",
         "https://oauth.example.test/callback?code-secret-token",
-        "repo:openmagi/clawy?token=unsafe",
+        "repo:openmagi/magi?token=unsafe",
         "repo:openmagi/session-cookie",
         "repo:../../.ssh/id_rsa",
         "../.ssh/id_rsa",
-        "repo:openmagi/clawy/.env",
-        "repo:openmagi/clawy/auth.json",
-        "repo:openmagi/clawy/keys.json",
+        "repo:openmagi/magi/.env",
+        "repo:openmagi/magi/auth.json",
+        "repo:openmagi/magi/keys.json",
         "docs:private",
         "repo:openmagi/private",
         "docs:password",
@@ -344,7 +344,7 @@ def test_permission_request_rejects_globs_raw_paths_and_auth_callback_refs() -> 
 
 
 def test_permission_projection_models_revalidate_copy_and_construct_updates() -> None:
-    from openmagi_core_agent.recipes.opencode_permission_patterns import (
+    from magi_agent.recipes.opencode_permission_patterns import (
         OpenCodeResearchPermissionDecision,
         OpenCodeResearchPermissionProfile,
         build_default_opencode_research_permission_profile,
@@ -383,16 +383,16 @@ def test_research_permission_pattern_import_boundary_has_no_live_runtime_surface
 import importlib
 import sys
 
-importlib.import_module("openmagi_core_agent.recipes.opencode_permission_patterns")
+importlib.import_module("magi_agent.recipes.opencode_permission_patterns")
 forbidden = (
     "google.adk.runners",
     "google.adk.sessions",
     "google.adk.models",
-    "openmagi_core_agent.adk_bridge.runner_adapter",
-    "openmagi_core_agent.tools.dispatcher",
-    "openmagi_core_agent.tools.registry",
-    "openmagi_core_agent.transport.chat",
-    "openmagi_core_agent.memory.adapters",
+    "magi_agent.adk_bridge.runner_adapter",
+    "magi_agent.tools.dispatcher",
+    "magi_agent.tools.registry",
+    "magi_agent.transport.chat",
+    "magi_agent.memory.adapters",
     "socket",
     "requests",
     "httpx",

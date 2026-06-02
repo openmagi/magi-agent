@@ -8,19 +8,19 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-from openmagi_core_agent.app import create_app
-from openmagi_core_agent.config.env import parse_runtime_env
-from openmagi_core_agent.runtime.openmagi_runtime import OpenMagiRuntime
-from openmagi_core_agent.shadow.gate5b4c3_shadow_counter_store import (
+from magi_agent.app import create_app
+from magi_agent.config.env import parse_runtime_env
+from magi_agent.runtime.openmagi_runtime import OpenMagiRuntime
+from magi_agent.shadow.gate5b4c3_shadow_counter_store import (
     Gate5B4C3ShadowCounterStore,
 )
-from openmagi_core_agent.shadow.gate2_recipe_profile_resolver import (
+from magi_agent.shadow.gate2_recipe_profile_resolver import (
     resolve_gate2_recipe_profile,
 )
-from openmagi_core_agent.transport.chat import (
+from magi_agent.transport.chat import (
     build_gate2_sandbox_workspace_canary_config_from_env,
 )
-from openmagi_core_agent.transport.shadow_generations import (
+from magi_agent.transport.shadow_generations import (
     Gate5B4C3ShadowGenerationRouteConfig,
 )
 
@@ -332,7 +332,7 @@ def test_gate2_selected_parent_create_failure_chain_exposes_safe_root_diagnostic
     monkeypatch,
     tmp_path: Path,
 ) -> None:
-    import openmagi_core_agent.shadow.gate2_activation_loop_a as gate2_module
+    import magi_agent.shadow.gate2_activation_loop_a as gate2_module
 
     monkeypatch.setenv("CORE_AGENT_PYTHON_CHAT_ROUTE", "on")
     env = _base_env(
@@ -450,7 +450,7 @@ def test_gate2_selected_python_exception_exposes_digest_safe_failure_chain(
     monkeypatch,
     tmp_path: Path,
 ) -> None:
-    from openmagi_core_agent.transport import chat as chat_transport
+    from magi_agent.transport import chat as chat_transport
 
     monkeypatch.setenv("CORE_AGENT_PYTHON_CHAT_ROUTE", "on")
     env = _base_env(
@@ -521,7 +521,7 @@ def test_gate2_selected_exception_chain_build_failure_returns_minimal_chain(
     monkeypatch,
     tmp_path: Path,
 ) -> None:
-    from openmagi_core_agent.transport import chat as chat_transport
+    from magi_agent.transport import chat as chat_transport
 
     monkeypatch.setenv("CORE_AGENT_PYTHON_CHAT_ROUTE", "on")
     env = _base_env(
@@ -767,7 +767,7 @@ def test_gate2_sandbox_canary_denies_forbidden_path_before_mutation(
 
 
 def test_gate2_sandbox_canary_fails_closed_without_rollback_proof(tmp_path: Path) -> None:
-    from openmagi_core_agent.shadow.gate2_activation_loop_a import (
+    from magi_agent.shadow.gate2_activation_loop_a import (
         Gate2SandboxCanaryRequest,
         run_gate2_sandbox_workspace_canary,
     )
@@ -797,7 +797,7 @@ def test_gate2_sandbox_canary_fails_closed_without_rollback_proof(tmp_path: Path
 def test_gate2_loop_a_accepts_env_wiring_synthetic_path_without_broadening(
     tmp_path: Path,
 ) -> None:
-    from openmagi_core_agent.shadow.gate2_activation_loop_a import (
+    from magi_agent.shadow.gate2_activation_loop_a import (
         Gate2SandboxCanaryRequest,
         run_gate2_sandbox_workspace_canary,
     )
@@ -835,7 +835,7 @@ def test_gate2_loop_a_accepts_env_wiring_synthetic_path_without_broadening(
 def test_gate2_loop_a_creates_missing_safe_root_namespace_and_loop_dirs(
     tmp_path: Path,
 ) -> None:
-    from openmagi_core_agent.shadow.gate2_activation_loop_a import (
+    from magi_agent.shadow.gate2_activation_loop_a import (
         Gate2SandboxCanaryRequest,
         run_gate2_sandbox_workspace_canary,
     )
@@ -882,7 +882,7 @@ def test_gate2_loop_a_creates_missing_live_like_root_variants(
     tmp_path: Path,
     root_parts: tuple[str, ...],
 ) -> None:
-    from openmagi_core_agent.shadow.gate2_activation_loop_a import (
+    from magi_agent.shadow.gate2_activation_loop_a import (
         Gate2SandboxCanaryRequest,
         run_gate2_sandbox_workspace_canary,
     )
@@ -916,7 +916,7 @@ def test_gate2_loop_a_creates_missing_live_like_root_variants(
 def test_gate2_loop_a_root_readiness_creates_approved_namespaced_root(
     tmp_path: Path,
 ) -> None:
-    from openmagi_core_agent.shadow.gate2_activation_loop_a import (
+    from magi_agent.shadow.gate2_activation_loop_a import (
         check_gate2_sandbox_root_readiness,
     )
 
@@ -964,9 +964,9 @@ def test_gate2_loop_a_root_readiness_fails_before_gate_on_sandbox_parent_mkdir(
     error: OSError,
     expected_denied_reason: str,
 ) -> None:
-    import openmagi_core_agent.shadow.gate2_activation_loop_a as gate2_module
+    import magi_agent.shadow.gate2_activation_loop_a as gate2_module
 
-    from openmagi_core_agent.shadow.gate2_activation_loop_a import (
+    from magi_agent.shadow.gate2_activation_loop_a import (
         check_gate2_sandbox_root_readiness,
     )
 
@@ -1013,7 +1013,7 @@ def test_gate2_loop_a_root_readiness_fails_before_gate_on_sandbox_parent_mkdir(
 def test_gate2_loop_a_rejects_broad_missing_root_namespace_chain(
     tmp_path: Path,
 ) -> None:
-    from openmagi_core_agent.shadow.gate2_activation_loop_a import (
+    from magi_agent.shadow.gate2_activation_loop_a import (
         Gate2SandboxCanaryRequest,
         run_gate2_sandbox_workspace_canary,
     )
@@ -1055,7 +1055,7 @@ def test_gate2_loop_a_rejects_broad_missing_root_namespace_chain(
 def test_gate2_loop_a_rejects_long_namespace_chain_with_safe_diagnostics(
     tmp_path: Path,
 ) -> None:
-    from openmagi_core_agent.shadow.gate2_activation_loop_a import (
+    from magi_agent.shadow.gate2_activation_loop_a import (
         Gate2SandboxCanaryRequest,
         run_gate2_sandbox_workspace_canary,
     )
@@ -1092,7 +1092,7 @@ def test_gate2_loop_a_rejects_long_namespace_chain_with_safe_diagnostics(
 def test_gate2_loop_a_rejects_nested_sandbox_parent_root_chain(
     tmp_path: Path,
 ) -> None:
-    from openmagi_core_agent.shadow.gate2_activation_loop_a import (
+    from magi_agent.shadow.gate2_activation_loop_a import (
         Gate2SandboxCanaryRequest,
         run_gate2_sandbox_workspace_canary,
     )
@@ -1133,7 +1133,7 @@ def test_gate2_loop_a_rejects_nested_sandbox_parent_root_chain(
 def test_gate2_loop_a_root_file_fails_closed_without_oserror(
     tmp_path: Path,
 ) -> None:
-    from openmagi_core_agent.shadow.gate2_activation_loop_a import (
+    from magi_agent.shadow.gate2_activation_loop_a import (
         Gate2SandboxCanaryRequest,
         run_gate2_sandbox_workspace_canary,
     )
@@ -1166,9 +1166,9 @@ def test_gate2_loop_a_write_oserror_fails_closed_with_safe_reason(
     monkeypatch,
     tmp_path: Path,
 ) -> None:
-    import openmagi_core_agent.shadow.gate2_activation_loop_a as gate2_module
+    import magi_agent.shadow.gate2_activation_loop_a as gate2_module
 
-    from openmagi_core_agent.shadow.gate2_activation_loop_a import (
+    from magi_agent.shadow.gate2_activation_loop_a import (
         Gate2SandboxCanaryRequest,
         run_gate2_sandbox_workspace_canary,
     )
@@ -1205,9 +1205,9 @@ def test_gate2_loop_a_parent_create_oserror_reports_specific_safe_reason(
     monkeypatch,
     tmp_path: Path,
 ) -> None:
-    import openmagi_core_agent.shadow.gate2_activation_loop_a as gate2_module
+    import magi_agent.shadow.gate2_activation_loop_a as gate2_module
 
-    from openmagi_core_agent.shadow.gate2_activation_loop_a import (
+    from magi_agent.shadow.gate2_activation_loop_a import (
         Gate2SandboxCanaryRequest,
         run_gate2_sandbox_workspace_canary,
     )
@@ -1264,9 +1264,9 @@ def test_gate2_loop_a_open_oserror_reports_specific_safe_reason(
     monkeypatch,
     tmp_path: Path,
 ) -> None:
-    import openmagi_core_agent.shadow.gate2_activation_loop_a as gate2_module
+    import magi_agent.shadow.gate2_activation_loop_a as gate2_module
 
-    from openmagi_core_agent.shadow.gate2_activation_loop_a import (
+    from magi_agent.shadow.gate2_activation_loop_a import (
         Gate2SandboxCanaryRequest,
         run_gate2_sandbox_workspace_canary,
     )
@@ -1306,9 +1306,9 @@ def test_gate2_loop_a_flush_oserror_reports_specific_safe_reason(
     monkeypatch,
     tmp_path: Path,
 ) -> None:
-    import openmagi_core_agent.shadow.gate2_activation_loop_a as gate2_module
+    import magi_agent.shadow.gate2_activation_loop_a as gate2_module
 
-    from openmagi_core_agent.shadow.gate2_activation_loop_a import (
+    from magi_agent.shadow.gate2_activation_loop_a import (
         Gate2SandboxCanaryRequest,
         run_gate2_sandbox_workspace_canary,
     )
@@ -1352,7 +1352,7 @@ def test_gate2_loop_a_flush_oserror_reports_specific_safe_reason(
 def test_gate2_loop_a_intermediate_file_reports_parent_create_failure(
     tmp_path: Path,
 ) -> None:
-    from openmagi_core_agent.shadow.gate2_activation_loop_a import (
+    from magi_agent.shadow.gate2_activation_loop_a import (
         Gate2SandboxCanaryRequest,
         run_gate2_sandbox_workspace_canary,
     )
@@ -1397,7 +1397,7 @@ def test_gate2_loop_a_root_parent_regular_file_reports_safe_component_role(
     obstacle_role: str,
     expected_component_role: str,
 ) -> None:
-    from openmagi_core_agent.shadow.gate2_activation_loop_a import (
+    from magi_agent.shadow.gate2_activation_loop_a import (
         Gate2SandboxCanaryRequest,
         run_gate2_sandbox_workspace_canary,
     )
@@ -1449,9 +1449,9 @@ def test_gate2_loop_a_parent_symlink_swap_before_open_fails_closed(
     monkeypatch,
     tmp_path: Path,
 ) -> None:
-    import openmagi_core_agent.shadow.gate2_activation_loop_a as gate2_module
+    import magi_agent.shadow.gate2_activation_loop_a as gate2_module
 
-    from openmagi_core_agent.shadow.gate2_activation_loop_a import (
+    from magi_agent.shadow.gate2_activation_loop_a import (
         Gate2SandboxCanaryRequest,
         run_gate2_sandbox_workspace_canary,
     )
@@ -1514,9 +1514,9 @@ def test_gate2_loop_a_readback_oserror_reports_specific_reason_without_path_cont
     monkeypatch,
     tmp_path: Path,
 ) -> None:
-    import openmagi_core_agent.shadow.gate2_activation_loop_a as gate2_module
+    import magi_agent.shadow.gate2_activation_loop_a as gate2_module
 
-    from openmagi_core_agent.shadow.gate2_activation_loop_a import (
+    from magi_agent.shadow.gate2_activation_loop_a import (
         Gate2SandboxCanaryRequest,
         run_gate2_sandbox_workspace_canary,
     )
@@ -1556,9 +1556,9 @@ def test_gate2_loop_a_unlink_before_write_oserror_fails_closed_without_path_cont
     monkeypatch,
     tmp_path: Path,
 ) -> None:
-    import openmagi_core_agent.shadow.gate2_activation_loop_a as gate2_module
+    import magi_agent.shadow.gate2_activation_loop_a as gate2_module
 
-    from openmagi_core_agent.shadow.gate2_activation_loop_a import (
+    from magi_agent.shadow.gate2_activation_loop_a import (
         Gate2SandboxCanaryRequest,
         run_gate2_sandbox_workspace_canary,
     )
@@ -1608,9 +1608,9 @@ def test_gate2_loop_a_hardlink_race_before_unlink_fails_before_content_write(
     monkeypatch,
     tmp_path: Path,
 ) -> None:
-    import openmagi_core_agent.shadow.gate2_activation_loop_a as gate2_module
+    import magi_agent.shadow.gate2_activation_loop_a as gate2_module
 
-    from openmagi_core_agent.shadow.gate2_activation_loop_a import (
+    from magi_agent.shadow.gate2_activation_loop_a import (
         Gate2SandboxCanaryRequest,
         run_gate2_sandbox_workspace_canary,
     )
@@ -1657,9 +1657,9 @@ def test_gate2_loop_a_open_fd_race_observes_public_payload_only(
     monkeypatch,
     tmp_path: Path,
 ) -> None:
-    import openmagi_core_agent.shadow.gate2_activation_loop_a as gate2_module
+    import magi_agent.shadow.gate2_activation_loop_a as gate2_module
 
-    from openmagi_core_agent.shadow.gate2_activation_loop_a import (
+    from magi_agent.shadow.gate2_activation_loop_a import (
         Gate2SandboxCanaryRequest,
         run_gate2_sandbox_workspace_canary,
     )
@@ -1715,9 +1715,9 @@ def test_gate2_loop_a_sandbox_root_parent_symlink_swap_fails_closed(
 ) -> None:
     import shutil
 
-    import openmagi_core_agent.shadow.gate2_activation_loop_a as gate2_module
+    import magi_agent.shadow.gate2_activation_loop_a as gate2_module
 
-    from openmagi_core_agent.shadow.gate2_activation_loop_a import (
+    from magi_agent.shadow.gate2_activation_loop_a import (
         Gate2SandboxCanaryRequest,
         run_gate2_sandbox_workspace_canary,
     )
@@ -1772,9 +1772,9 @@ def test_gate2_loop_a_sandbox_root_parent_symlink_after_validation_fails_closed(
     monkeypatch,
     tmp_path: Path,
 ) -> None:
-    import openmagi_core_agent.shadow.gate2_activation_loop_a as gate2_module
+    import magi_agent.shadow.gate2_activation_loop_a as gate2_module
 
-    from openmagi_core_agent.shadow.gate2_activation_loop_a import (
+    from magi_agent.shadow.gate2_activation_loop_a import (
         Gate2SandboxCanaryRequest,
         run_gate2_sandbox_workspace_canary,
     )

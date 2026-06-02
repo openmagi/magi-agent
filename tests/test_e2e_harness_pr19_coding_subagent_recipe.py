@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 
-from openmagi_core_agent.recipes.coding_subagents import (
+from magi_agent.recipes.coding_subagents import (
     CodingSubagentConfig,
     CodingSubagentModeRequest,
     CodingSubagentRecipe,

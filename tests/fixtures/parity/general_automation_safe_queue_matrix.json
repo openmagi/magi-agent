@@ -99,27 +99,27 @@
       "alreadyCovered": true,
       "currentFiles": [
         {
-          "path": "openmagi_core_agent/harness/general_automation/package_manifest.py",
+          "path": "magi_agent/harness/general_automation/package_manifest.py",
           "state": "existing"
         },
         {
-          "path": "openmagi_core_agent/harness/general_automation/package_boundary.py",
+          "path": "magi_agent/harness/general_automation/package_boundary.py",
           "state": "existing"
         },
         {
-          "path": "openmagi_core_agent/harness/general_automation/package_tool_projection.py",
+          "path": "magi_agent/harness/general_automation/package_tool_projection.py",
           "state": "existing"
         },
         {
-          "path": "openmagi_core_agent/plugins/manifest.py",
+          "path": "magi_agent/plugins/manifest.py",
           "state": "existing"
         },
         {
-          "path": "openmagi_core_agent/plugins/tool_projection.py",
+          "path": "magi_agent/plugins/tool_projection.py",
           "state": "existing"
         },
         {
-          "path": "openmagi_core_agent/plugins/sandbox_policy.py",
+          "path": "magi_agent/plugins/sandbox_policy.py",
           "state": "existing"
         }
       ],
@@ -162,19 +162,19 @@
       "alreadyCovered": true,
       "currentFiles": [
         {
-          "path": "openmagi_core_agent/harness/general_automation/path_policy.py",
+          "path": "magi_agent/harness/general_automation/path_policy.py",
           "state": "existing"
         },
         {
-          "path": "openmagi_core_agent/harness/general_automation/external_directory_receipts.py",
+          "path": "magi_agent/harness/general_automation/external_directory_receipts.py",
           "state": "existing"
         },
         {
-          "path": "openmagi_core_agent/plugins/shell_testrun_safe_subset.py",
+          "path": "magi_agent/plugins/shell_testrun_safe_subset.py",
           "state": "existing"
         },
         {
-          "path": "openmagi_core_agent/artifacts/delivery_receipts.py",
+          "path": "magi_agent/artifacts/delivery_receipts.py",
           "state": "existing"
         }
       ],
@@ -214,23 +214,23 @@
       "alreadyCovered": true,
       "currentFiles": [
         {
-          "path": "openmagi_core_agent/harness/general_automation/output_budget_policy.py",
+          "path": "magi_agent/harness/general_automation/output_budget_policy.py",
           "state": "existing"
         },
         {
-          "path": "openmagi_core_agent/harness/general_automation/followup_refs.py",
+          "path": "magi_agent/harness/general_automation/followup_refs.py",
           "state": "existing"
         },
         {
-          "path": "openmagi_core_agent/tools/output_budget.py",
+          "path": "magi_agent/tools/output_budget.py",
           "state": "existing"
         },
         {
-          "path": "openmagi_core_agent/artifacts/local_result_store.py",
+          "path": "magi_agent/artifacts/local_result_store.py",
           "state": "existing"
         },
         {
-          "path": "openmagi_core_agent/artifacts/output_registry_boundary.py",
+          "path": "magi_agent/artifacts/output_registry_boundary.py",
           "state": "existing"
         }
       ],
@@ -270,15 +270,15 @@
       "alreadyCovered": true,
       "currentFiles": [
         {
-          "path": "openmagi_core_agent/harness/general_automation/shell_policy.py",
+          "path": "magi_agent/harness/general_automation/shell_policy.py",
           "state": "existing"
         },
         {
-          "path": "openmagi_core_agent/harness/general_automation/shell_receipts.py",
+          "path": "magi_agent/harness/general_automation/shell_receipts.py",
           "state": "existing"
         },
         {
-          "path": "openmagi_core_agent/plugins/shell_testrun_safe_subset.py",
+          "path": "magi_agent/plugins/shell_testrun_safe_subset.py",
           "state": "existing"
         }
       ],
@@ -315,27 +315,27 @@
       "alreadyCovered": true,
       "currentFiles": [
         {
-          "path": "openmagi_core_agent/recipes/first_party/general_automation/__init__.py",
+          "path": "magi_agent/recipes/first_party/general_automation/__init__.py",
           "state": "existing"
         },
         {
-          "path": "openmagi_core_agent/recipes/first_party/general_automation/presets.py",
+          "path": "magi_agent/recipes/first_party/general_automation/presets.py",
           "state": "existing"
         },
         {
-          "path": "openmagi_core_agent/recipes/first_party/general_automation/preset_projection.py",
+          "path": "magi_agent/recipes/first_party/general_automation/preset_projection.py",
           "state": "existing"
         },
         {
-          "path": "openmagi_core_agent/harness/presets.py",
+          "path": "magi_agent/harness/presets.py",
           "state": "existing"
         },
         {
-          "path": "openmagi_core_agent/recipes/coding_subagents.py",
+          "path": "magi_agent/recipes/coding_subagents.py",
           "state": "existing"
         },
         {
-          "path": "openmagi_core_agent/recipes/research_child_runner.py",
+          "path": "magi_agent/recipes/research_child_runner.py",
           "state": "existing"
         }
       ],
@@ -380,19 +380,19 @@
       "alreadyCovered": true,
       "currentFiles": [
         {
-          "path": "openmagi_core_agent/tools/spreadsheet_tools.py",
+          "path": "magi_agent/tools/spreadsheet_tools.py",
           "state": "existing"
         },
         {
-          "path": "openmagi_core_agent/artifacts/delivery_boundary.py",
+          "path": "magi_agent/artifacts/delivery_boundary.py",
           "state": "existing"
         },
         {
-          "path": "openmagi_core_agent/recipes/first_party/general_automation/spreadsheet_contracts.py",
+          "path": "magi_agent/recipes/first_party/general_automation/spreadsheet_contracts.py",
           "state": "implemented_pr6"
         },
         {
-          "path": "openmagi_core_agent/harness/general_automation/spreadsheet_evidence.py",
+          "path": "magi_agent/harness/general_automation/spreadsheet_evidence.py",
           "state": "implemented_pr6"
         }
       ],
@@ -432,23 +432,23 @@
       "alreadyCovered": true,
       "currentFiles": [
         {
-          "path": "openmagi_core_agent/web_acquisition/policy.py",
+          "path": "magi_agent/web_acquisition/policy.py",
           "state": "existing"
         },
         {
-          "path": "openmagi_core_agent/web_acquisition/provider_boundary.py",
+          "path": "magi_agent/web_acquisition/provider_boundary.py",
           "state": "existing"
         },
         {
-          "path": "openmagi_core_agent/web_acquisition/research_tools.py",
+          "path": "magi_agent/web_acquisition/research_tools.py",
           "state": "existing"
         },
         {
-          "path": "openmagi_core_agent/recipes/first_party/general_automation/web_acquisition_contracts.py",
+          "path": "magi_agent/recipes/first_party/general_automation/web_acquisition_contracts.py",
           "state": "implemented_pr7"
         },
         {
-          "path": "openmagi_core_agent/harness/general_automation/web_source_receipts.py",
+          "path": "magi_agent/harness/general_automation/web_source_receipts.py",
           "state": "implemented_pr7"
         }
       ],
@@ -488,23 +488,23 @@
       "alreadyCovered": true,
       "currentFiles": [
         {
-          "path": "openmagi_core_agent/browser/provider_boundary.py",
+          "path": "magi_agent/browser/provider_boundary.py",
           "state": "existing"
         },
         {
-          "path": "openmagi_core_agent/browser/source_tools.py",
+          "path": "magi_agent/browser/source_tools.py",
           "state": "existing"
         },
         {
-          "path": "openmagi_core_agent/browser/live_provider_pack.py",
+          "path": "magi_agent/browser/live_provider_pack.py",
           "state": "existing"
         },
         {
-          "path": "openmagi_core_agent/recipes/first_party/general_automation/browser_contracts.py",
+          "path": "magi_agent/recipes/first_party/general_automation/browser_contracts.py",
           "state": "implemented_pr8"
         },
         {
-          "path": "openmagi_core_agent/harness/general_automation/browser_evidence.py",
+          "path": "magi_agent/harness/general_automation/browser_evidence.py",
           "state": "implemented_pr8"
         }
       ],
@@ -549,19 +549,19 @@
       "alreadyCovered": true,
       "currentFiles": [
         {
-          "path": "openmagi_core_agent/harness/background_tasks.py",
+          "path": "magi_agent/harness/background_tasks.py",
           "state": "existing"
         },
         {
-          "path": "openmagi_core_agent/evidence/child_runtime_envelope.py",
+          "path": "magi_agent/evidence/child_runtime_envelope.py",
           "state": "existing"
         },
         {
-          "path": "openmagi_core_agent/recipes/first_party/general_automation/background_task_contracts.py",
+          "path": "magi_agent/recipes/first_party/general_automation/background_task_contracts.py",
           "state": "implemented_pr9"
         },
         {
-          "path": "openmagi_core_agent/harness/general_automation/background_task_projection.py",
+          "path": "magi_agent/harness/general_automation/background_task_projection.py",
           "state": "implemented_pr9"
         }
       ],
@@ -605,23 +605,23 @@
       "alreadyCovered": true,
       "currentFiles": [
         {
-          "path": "openmagi_core_agent/plugins/mcp_adapter.py",
+          "path": "magi_agent/plugins/mcp_adapter.py",
           "state": "existing"
         },
         {
-          "path": "openmagi_core_agent/plugins/extension_boundary.py",
+          "path": "magi_agent/plugins/extension_boundary.py",
           "state": "existing"
         },
         {
-          "path": "openmagi_core_agent/plugins/tool_projection.py",
+          "path": "magi_agent/plugins/tool_projection.py",
           "state": "existing"
         },
         {
-          "path": "openmagi_core_agent/plugins/general_automation/mcp_projection.py",
+          "path": "magi_agent/plugins/general_automation/mcp_projection.py",
           "state": "implemented_pr10"
         },
         {
-          "path": "openmagi_core_agent/plugins/general_automation/hook_projection.py",
+          "path": "magi_agent/plugins/general_automation/hook_projection.py",
           "state": "implemented_pr10"
         }
       ],
@@ -665,23 +665,23 @@
       "alreadyCovered": true,
       "currentFiles": [
         {
-          "path": "openmagi_core_agent/harness/approval_receipts.py",
+          "path": "magi_agent/harness/approval_receipts.py",
           "state": "existing"
         },
         {
-          "path": "openmagi_core_agent/harness/audit.py",
+          "path": "magi_agent/harness/audit.py",
           "state": "existing"
         },
         {
-          "path": "openmagi_core_agent/artifacts/delivery_receipts.py",
+          "path": "magi_agent/artifacts/delivery_receipts.py",
           "state": "existing"
         },
         {
-          "path": "openmagi_core_agent/harness/general_automation/control_projection.py",
+          "path": "magi_agent/harness/general_automation/control_projection.py",
           "state": "implemented_pr11"
         },
         {
-          "path": "openmagi_core_agent/harness/general_automation/event_projection.py",
+          "path": "magi_agent/harness/general_automation/event_projection.py",
           "state": "implemented_pr11"
         }
       ],
@@ -723,7 +723,7 @@
       "alreadyCovered": true,
       "currentFiles": [
         {
-          "path": "openmagi_core_agent/harness/e2e_readiness.py",
+          "path": "magi_agent/harness/e2e_readiness.py",
           "state": "existing"
         },
         {

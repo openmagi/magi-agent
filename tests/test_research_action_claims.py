@@ -9,7 +9,7 @@ import pytest
 from pydantic import ValidationError
 
 from runtime_issuance_support import issue_test_runtime_authority
-from openmagi_core_agent.research.action_claims import (
+from magi_agent.research.action_claims import (
     ResearchActionClaim,
     ResearchActionProofReceiptRef,
     ResearchActionProofRequirement,
@@ -672,25 +672,25 @@ def test_model_construct_and_model_copy_cannot_bypass_receipt_validation() -> No
 
 
 def test_research_action_claims_stay_in_research_layer_without_generic_core_policy_imports() -> None:
-    module = importlib.import_module("openmagi_core_agent.research.action_claims")
+    module = importlib.import_module("magi_agent.research.action_claims")
     source = inspect.getsource(module)
     source_for_layer_check = source.replace(
-        "from openmagi_core_agent.evidence.runtime_issuance import (",
+        "from magi_agent.evidence.runtime_issuance import (",
         "from allowed_domain_neutral_runtime_issuance import (",
     )
 
-    assert module.__name__ == "openmagi_core_agent.research.action_claims"
-    assert ResearchActionClaim.__module__.startswith("openmagi_core_agent.research")
+    assert module.__name__ == "magi_agent.research.action_claims"
+    assert ResearchActionClaim.__module__.startswith("magi_agent.research")
     assert "runtime_issuance" in source
     forbidden_imports = (
-        "from openmagi_core_agent.evidence",
-        "import openmagi_core_agent.evidence",
-        "from openmagi_core_agent.harness",
-        "import openmagi_core_agent.harness",
-        "from openmagi_core_agent.runtime",
-        "import openmagi_core_agent.runtime",
-        "from openmagi_core_agent.tools",
-        "import openmagi_core_agent.tools",
+        "from magi_agent.evidence",
+        "import magi_agent.evidence",
+        "from magi_agent.harness",
+        "import magi_agent.harness",
+        "from magi_agent.runtime",
+        "import magi_agent.runtime",
+        "from magi_agent.tools",
+        "import magi_agent.tools",
         "from google.adk",
         "import google.adk",
     )

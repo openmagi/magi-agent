@@ -2,15 +2,15 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
-from openmagi_core_agent.evidence.ledger_semantics import (
+from magi_agent.evidence.ledger_semantics import (
     ContentAddressedLedger,
     append_ledger_record,
     verify_ledger_chain,
 )
-from openmagi_core_agent.harness.approval_receipts import build_approval_receipt
-from openmagi_core_agent.plugins.manifest import PluginManifest
-from openmagi_core_agent.plugins.sandbox_policy import evaluate_plugin_sandbox
-from openmagi_core_agent.runtime.policy_snapshot import (
+from magi_agent.harness.approval_receipts import build_approval_receipt
+from magi_agent.plugins.manifest import PluginManifest
+from magi_agent.plugins.sandbox_policy import evaluate_plugin_sandbox
+from magi_agent.runtime.policy_snapshot import (
     PolicySourceRef,
     build_effective_policy_snapshot,
 )

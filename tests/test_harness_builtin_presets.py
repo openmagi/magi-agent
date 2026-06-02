@@ -6,13 +6,13 @@ import sys
 import pytest
 from pydantic import ValidationError
 
-from openmagi_core_agent.harness.presets import (
+from magi_agent.harness.presets import (
     PresetCategory,
     builtin_preset_by_key,
     builtin_preset_catalog,
     builtin_preset_keys,
 )
-from openmagi_core_agent.harness.profiles import build_default_profile
+from magi_agent.harness.profiles import build_default_profile
 
 
 REQUIRED_PRESET_KEYS = {
@@ -341,13 +341,13 @@ def test_preset_catalog_import_does_not_connect_adk_runtime_primitives() -> None
 import importlib
 import sys
 
-importlib.import_module("openmagi_core_agent.harness.presets")
+importlib.import_module("magi_agent.harness.presets")
 forbidden = (
     "google.adk.runners",
     "google.adk.evaluation",
     "google.adk.plugins",
-    "openmagi_core_agent.adk_bridge.callback_adapter",
-    "openmagi_core_agent.adk_bridge.runner_adapter",
+    "magi_agent.adk_bridge.callback_adapter",
+    "magi_agent.adk_bridge.runner_adapter",
 )
 loaded = [module for module in forbidden if module in sys.modules]
 if loaded:

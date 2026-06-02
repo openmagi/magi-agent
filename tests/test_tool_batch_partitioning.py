@@ -12,14 +12,14 @@ from __future__ import annotations
 
 import pytest
 
-from openmagi_core_agent.tools.catalog import register_core_tool_manifests
-from openmagi_core_agent.tools.concurrency import (
+from magi_agent.tools.catalog import register_core_tool_manifests
+from magi_agent.tools.concurrency import (
     ConcurrencyConfig,
     ToolBatch,
     ToolCall,
     partition_tool_calls,
 )
-from openmagi_core_agent.tools.registry import ToolRegistry
+from magi_agent.tools.registry import ToolRegistry
 
 
 # ---------------------------------------------------------------------------

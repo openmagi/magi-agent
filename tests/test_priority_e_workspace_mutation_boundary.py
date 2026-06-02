@@ -6,7 +6,7 @@ import sys
 import pytest
 from pydantic import ValidationError
 
-from openmagi_core_agent.workspace.adoption_boundary import (
+from magi_agent.workspace.adoption_boundary import (
     WorkspaceChange,
     WorkspaceMutationBoundary,
     WorkspaceMutationConfig,
@@ -223,14 +223,14 @@ def test_workspace_mutation_boundary_has_no_live_runtime_imports() -> None:
 import importlib
 import sys
 
-importlib.import_module("openmagi_core_agent.workspace.adoption_boundary")
+importlib.import_module("magi_agent.workspace.adoption_boundary")
 forbidden = (
     "subprocess",
     "git",
     "google.adk.runners",
     "google.adk.sessions",
-    "openmagi_core_agent.runtime.runner",
-    "openmagi_core_agent.toolhost.runtime",
+    "magi_agent.runtime.runner",
+    "magi_agent.toolhost.runtime",
 )
 loaded = [name for name in forbidden if name in sys.modules]
 if loaded:

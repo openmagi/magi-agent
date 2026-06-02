@@ -1,14 +1,14 @@
 from __future__ import annotations
 
-from openmagi_core_agent.shadow.gate5b4c3_shadow_comparison import (
+from magi_agent.shadow.gate5b4c3_shadow_comparison import (
     build_gate5b4c3_shadow_comparison_artifact,
 )
-from openmagi_core_agent.shadow.gate5b4c3_shadow_generation_contract import (
+from magi_agent.shadow.gate5b4c3_shadow_generation_contract import (
     Gate5B4C3ShadowGenerationConfig,
     Gate5B4C3ShadowGenerationRequest,
     build_gate5b4c3_shadow_generation_diagnostic,
 )
-from openmagi_core_agent.shadow.gate5b4c3_shadow_generation_report import (
+from magi_agent.shadow.gate5b4c3_shadow_generation_report import (
     build_gate5b4c3_shadow_generation_report,
 )
 

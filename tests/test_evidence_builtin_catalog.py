@@ -3,13 +3,13 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
-from openmagi_core_agent.evidence.builtin import (
+from magi_agent.evidence.builtin import (
     BuiltInEvidenceType,
     builtin_evidence_by_type,
     builtin_evidence_catalog,
     builtin_evidence_types,
 )
-from openmagi_core_agent.evidence.types import EvidenceContract
+from magi_agent.evidence.types import EvidenceContract
 
 
 EXPECTED_BUILTIN_TYPES = (

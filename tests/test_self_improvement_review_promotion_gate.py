@@ -6,15 +6,15 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from openmagi_core_agent.harness.approval_receipts import build_approval_receipt
-from openmagi_core_agent.self_improvement.promotion_gate import (
+from magi_agent.harness.approval_receipts import build_approval_receipt
+from magi_agent.self_improvement.promotion_gate import (
     SelfImprovementPromotionConfig,
     SelfImprovementPromotionGate,
     SelfImprovementPromotionRequest,
     SelfImprovementPromotionResult,
     compute_self_improvement_promotion_action_digest,
 )
-from openmagi_core_agent.self_improvement.review_gate import (
+from magi_agent.self_improvement.review_gate import (
     SelfImprovementReviewConfig,
     SelfImprovementReviewGate,
     SelfImprovementReviewRequest,
@@ -346,16 +346,16 @@ def test_review_and_promotion_import_boundary_does_not_initialize_live_runtime()
     forbidden = {
         "google.adk.runners",
         "google.adk.agents",
-        "openmagi_core_agent.tools.host",
-        "openmagi_core_agent.transport.chat",
-        "openmagi_core_agent.memory.hipocampus",
-        "openmagi_core_agent.memory.qmd",
+        "magi_agent.tools.host",
+        "magi_agent.transport.chat",
+        "magi_agent.memory.hipocampus",
+        "magi_agent.memory.qmd",
     }
     for module_name in forbidden:
         sys.modules.pop(module_name, None)
 
-    __import__("openmagi_core_agent.self_improvement.review_gate")
-    __import__("openmagi_core_agent.self_improvement.promotion_gate")
+    __import__("magi_agent.self_improvement.review_gate")
+    __import__("magi_agent.self_improvement.promotion_gate")
 
     assert forbidden.isdisjoint(sys.modules)
 

@@ -65,18 +65,18 @@ ROW_FIELDS = {
 }
 
 FORBIDDEN_IMPLEMENTATION_PREFIXES = (
-    "openmagi_core_agent/adk_bridge/",
-    "openmagi_core_agent/runtime/",
-    "openmagi_core_agent/transport/",
-    "openmagi_core_agent/config/",
-    "openmagi_core_agent/routing/",
+    "magi_agent/adk_bridge/",
+    "magi_agent/runtime/",
+    "magi_agent/transport/",
+    "magi_agent/config/",
+    "magi_agent/routing/",
     "infra/docker/chat-proxy/",
 )
 FORBIDDEN_IMPLEMENTATION_FILES = {
-    "openmagi_core_agent/tools/registry.py",
-    "openmagi_core_agent/tools/dispatcher.py",
-    "openmagi_core_agent/tools/permission.py",
-    "openmagi_core_agent/tools/result.py",
+    "magi_agent/tools/registry.py",
+    "magi_agent/tools/dispatcher.py",
+    "magi_agent/tools/permission.py",
+    "magi_agent/tools/result.py",
 }
 FORBIDDEN_IMPLEMENTATION_FRAGMENTS = (
     "infra/k8s/",
@@ -189,7 +189,7 @@ def test_covered_rows_have_file_and_test_refs_while_missing_rows_have_targets() 
 
     assert rows["lsp_code_intelligence_contracts"]["alreadyCovered"] is True
     assert rows["lsp_code_intelligence_contracts"]["coveredByFiles"] == [
-        "openmagi_core_agent/harness/coding/code_intelligence_contracts.py",
+        "magi_agent/harness/coding/code_intelligence_contracts.py",
     ]
     assert rows["lsp_code_intelligence_contracts"]["coveredByTests"] == [
         "tests/test_coding_code_intelligence_contracts.py",
@@ -225,12 +225,12 @@ def test_opencode_rows_delegate_to_dedicated_delta_matrix_without_duplicate_work
     assert row["alreadyCovered"] is True
     assert row["coveredByFiles"] == [
         "docs/superpowers/plans/2026-05-26-python-adk-opencode-latest-harness-delta-addendum.md",
-        "infra/docker/clawy-core-agent-python/tests/fixtures/opencode_delta/harness_delta_matrix.json",
+        "magi-agent/tests/fixtures/opencode_delta/harness_delta_matrix.json",
         "docs/notes/2026-05-27-python-adk-coding-harness-opencode-delta-reconciliation.md",
     ]
     assert row["coveredByTests"] == [
-        "infra/docker/clawy-core-agent-python/tests/test_coding_harness_consolidated_matrix.py",
-        "infra/docker/clawy-core-agent-python/tests/test_opencode_delta_contract.py",
+        "magi-agent/tests/test_coding_harness_consolidated_matrix.py",
+        "magi-agent/tests/test_opencode_delta_contract.py",
     ]
     assert row["missingImplementation"] == ["gap-tests-docs-only"]
     assert row["activationGate"] == "PR9-points-to-dedicated-opencode-delta-matrix"
@@ -275,7 +275,7 @@ def test_final_coding_harness_review_row_is_complete_and_non_live() -> None:
         in row["coveredByFiles"]
     )
     assert (
-        "infra/docker/clawy-core-agent-python/tests/test_coding_harness_consolidated_matrix.py"
+        "magi-agent/tests/test_coding_harness_consolidated_matrix.py"
         in row["coveredByTests"]
     )
 
@@ -297,7 +297,7 @@ def test_final_coding_harness_review_note_covers_matrix_prs_and_activation_bound
         assert f"`{row_id}`" in note
 
     for pr_number in ("1157", "1171", "1185", "1191", "1199", "1202", "1204", "1205", "1207", "1210"):
-        assert f"https://github.com/kevin-hs-sohn/clawy/pull/{pr_number}" in note
+        assert f"https://github.com/kevin-hs-sohn/magi/pull/{pr_number}" in note
 
     for deferred_row in (
         "provider_compatibility_fixtures",

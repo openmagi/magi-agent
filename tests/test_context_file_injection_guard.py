@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from openmagi_core_agent.security.context_guard import (
+from magi_agent.security.context_guard import (
     ContextGuardResult,
     scan_context_file,
 )

@@ -6,7 +6,7 @@ import sys
 
 import pytest
 
-from openmagi_core_agent.channels.contract import ChannelRef
+from magi_agent.channels.contract import ChannelRef
 
 
 class FakeTaskStore:
@@ -63,7 +63,7 @@ class ThrowingTaskStore(FakeTaskStore):
 
 
 def _request(**overrides: object) -> object:
-    from openmagi_core_agent.harness.background_tasks import BackgroundTaskRequest
+    from magi_agent.harness.background_tasks import BackgroundTaskRequest
 
     payload = {
         "operation": "TaskList",
@@ -75,7 +75,7 @@ def _request(**overrides: object) -> object:
 
 
 def _seed_task(store: FakeTaskStore) -> None:
-    from openmagi_core_agent.harness.background_tasks import BackgroundTaskRecord
+    from magi_agent.harness.background_tasks import BackgroundTaskRecord
 
     store.records["task-throw"] = BackgroundTaskRecord(
         taskId="task-throw",
@@ -90,7 +90,7 @@ def _seed_task(store: FakeTaskStore) -> None:
 
 
 def test_background_task_disabled_never_calls_store() -> None:
-    from openmagi_core_agent.harness.background_tasks import (
+    from magi_agent.harness.background_tasks import (
         BackgroundTaskBoundary,
         BackgroundTaskConfig,
     )
@@ -108,7 +108,7 @@ def test_background_task_disabled_never_calls_store() -> None:
 
 
 def test_background_task_create_records_metadata_cancel_token_and_digest() -> None:
-    from openmagi_core_agent.harness.background_tasks import (
+    from magi_agent.harness.background_tasks import (
         BackgroundTaskBoundary,
         BackgroundTaskConfig,
     )
@@ -140,7 +140,7 @@ def test_background_task_create_records_metadata_cancel_token_and_digest() -> No
 
 
 def test_background_task_config_and_authority_flags_cannot_be_forged_with_model_copy() -> None:
-    from openmagi_core_agent.harness.background_tasks import (
+    from magi_agent.harness.background_tasks import (
         BackgroundTaskAuthorityFlags,
         BackgroundTaskConfig,
     )
@@ -175,7 +175,7 @@ def test_background_task_config_and_authority_flags_cannot_be_forged_with_model_
 
 
 def test_task_list_get_wait_output_stop_match_ts_compatible_shapes() -> None:
-    from openmagi_core_agent.harness.background_tasks import (
+    from magi_agent.harness.background_tasks import (
         BackgroundTaskBoundary,
         BackgroundTaskConfig,
     )
@@ -214,7 +214,7 @@ def test_task_list_get_wait_output_stop_match_ts_compatible_shapes() -> None:
 
 
 def test_background_task_reads_and_stops_are_owner_scoped() -> None:
-    from openmagi_core_agent.harness.background_tasks import (
+    from magi_agent.harness.background_tasks import (
         BackgroundTaskBoundary,
         BackgroundTaskConfig,
     )
@@ -275,7 +275,7 @@ def test_background_task_store_errors_fail_closed_with_redacted_metadata(
     throwing_method: str,
     overrides: dict[str, object],
 ) -> None:
-    from openmagi_core_agent.harness.background_tasks import (
+    from magi_agent.harness.background_tasks import (
         BackgroundTaskBoundary,
         BackgroundTaskConfig,
     )
@@ -308,7 +308,7 @@ def test_background_task_store_errors_fail_closed_with_redacted_metadata(
 
 
 def test_background_task_rejects_untrusted_store_and_redacts_prompt_output() -> None:
-    from openmagi_core_agent.harness.background_tasks import (
+    from magi_agent.harness.background_tasks import (
         BackgroundTaskBoundary,
         BackgroundTaskConfig,
     )
@@ -344,7 +344,7 @@ def test_background_task_rejects_untrusted_store_and_redacts_prompt_output() -> 
 
 
 def test_background_task_diagnostic_metadata_cannot_forge_authority_claims() -> None:
-    from openmagi_core_agent.harness.background_tasks import (
+    from magi_agent.harness.background_tasks import (
         BackgroundTaskBoundary,
         BackgroundTaskConfig,
     )
@@ -383,17 +383,17 @@ def test_background_task_boundary_has_no_live_imports() -> None:
 import importlib
 import sys
 
-importlib.import_module("openmagi_core_agent.harness.background_tasks")
+importlib.import_module("magi_agent.harness.background_tasks")
 forbidden_prefixes = (
     "google.adk",
     "google.genai",
-    "openmagi_core_agent.adk_bridge",
-    "openmagi_core_agent.transport",
-    "openmagi_core_agent.routing",
-    "openmagi_core_agent.deploy",
-    "openmagi_core_agent.chat_proxy",
-    "openmagi_core_agent.runtime_selector",
-    "openmagi_core_agent.k8s",
+    "magi_agent.adk_bridge",
+    "magi_agent.transport",
+    "magi_agent.routing",
+    "magi_agent.deploy",
+    "magi_agent.chat_proxy",
+    "magi_agent.runtime_selector",
+    "magi_agent.k8s",
     "subprocess",
     "kubernetes",
     "telegram",

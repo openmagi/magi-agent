@@ -6,43 +6,43 @@ import json
 
 import pytest
 
-import openmagi_core_agent.research.repair as repair_module
-from openmagi_core_agent.evidence.child_runtime_envelope import (
+import magi_agent.research.repair as repair_module
+from magi_agent.evidence.child_runtime_envelope import (
     ChildRuntimeEnvelope,
     ChildRuntimeEnvelopeAuthorityFlags,
 )
 from runtime_issuance_support import issue_test_runtime_authority
-from openmagi_core_agent.evidence.subagent import (
+from magi_agent.evidence.subagent import (
     OPENMAGI_RUNTIME_ENVELOPE_ISSUER,
     DelegatedEvidenceRequirement,
     EvidenceBoundaryLedgerRef,
     ExecutionBoundaryIdentity,
 )
-from openmagi_core_agent.research.acceptance_criteria import (
+from magi_agent.research.acceptance_criteria import (
     ResearchAcceptanceCriterion,
     ResearchAcceptanceCriteriaSet,
 )
-from openmagi_core_agent.research.action_claims import (
+from magi_agent.research.action_claims import (
     ResearchActionProofReceiptRef,
     ResearchActionProofRequirement,
     detect_research_action_claims,
     verify_research_action_claims,
 )
-from openmagi_core_agent.research.claim_graph import (
+from magi_agent.research.claim_graph import (
     ResearchClaimGraph,
     ResearchClaimSupportRef,
     build_research_claim_node,
 )
-from openmagi_core_agent.research.evidence_graph import (
+from magi_agent.research.evidence_graph import (
     ResearchEvidenceGraph,
     ResearchMissingEvidenceReason,
 )
-from openmagi_core_agent.research.repair import (
+from magi_agent.research.repair import (
     RESEARCH_REPAIR_ACTIONS,
     ResearchRepairPolicy,
     plan_research_repairs,
 )
-from openmagi_core_agent.research.source_proof import (
+from magi_agent.research.source_proof import (
     ResearchSourceOpenReceiptRef,
     ResearchSourceProofRequirement,
     verify_research_source_proof,
@@ -897,7 +897,7 @@ def test_post_validation_same_class_missing_reason_mutation_cannot_drive_repair_
 
 
 def test_repair_module_has_no_live_tool_or_adk_runner_attachment() -> None:
-    module = importlib.import_module("openmagi_core_agent.research.repair")
+    module = importlib.import_module("magi_agent.research.repair")
     source = inspect.getsource(module)
 
     assert "Runner(" not in source

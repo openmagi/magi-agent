@@ -7,7 +7,7 @@ import sys
 import pytest
 from pydantic import ValidationError
 
-from openmagi_core_agent.harness.verifier_bus import (
+from magi_agent.harness.verifier_bus import (
     ApprovalRequestMetadata,
     FailureRoutingMetadata,
     VerifierBusMetadata,
@@ -568,15 +568,15 @@ def test_verifier_bus_import_stays_adk_runner_runtime_and_route_free() -> None:
 import importlib
 import sys
 
-module = importlib.import_module("openmagi_core_agent.harness.verifier_bus")
+module = importlib.import_module("magi_agent.harness.verifier_bus")
 assert hasattr(module, "build_default_verifier_bus_metadata")
 
 forbidden_prefixes = (
     "google.adk",
-    "openmagi_core_agent.adk_bridge.runner_adapter",
-    "openmagi_core_agent.runtime.openmagi_runtime",
-    "openmagi_core_agent.transport.chat",
-    "openmagi_core_agent.transport.tools",
+    "magi_agent.adk_bridge.runner_adapter",
+    "magi_agent.runtime.openmagi_runtime",
+    "magi_agent.transport.chat",
+    "magi_agent.transport.tools",
 )
 loaded = [
     module_name

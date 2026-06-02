@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 
-from openmagi_core_agent.shadow.gate5b4c3_shadow_counter_store import (
+from magi_agent.shadow.gate5b4c3_shadow_counter_store import (
     Gate5B4C3ShadowCounterStore,
 )
 
@@ -222,7 +222,7 @@ def test_counter_store_persists_public_safe_runner_error_diagnostic(tmp_path) ->
             "tracebackMarkers": [
                 "google.adk.runners:run_async",
                 "/private/path",
-                "openmagi_core_agent.shadow.gate5b4c3_live_runner_boundary:_invoke",
+                "magi_agent.shadow.gate5b4c3_live_runner_boundary:_invoke",
             ],
             "adkInvoked": True,
             "runnerAttempted": True,
@@ -258,7 +258,7 @@ def test_counter_store_persists_public_safe_runner_error_diagnostic(tmp_path) ->
         "traceIdDigest": "sha256:" + "1" * 64,
         "tracebackMarkers": [
             "google.adk.runners:run_async",
-            "openmagi_core_agent.shadow.gate5b4c3_live_runner_boundary:_invoke",
+            "magi_agent.shadow.gate5b4c3_live_runner_boundary:_invoke",
         ],
     }
     serialized = json.dumps(record)
@@ -1560,7 +1560,7 @@ def test_counter_store_treats_stale_same_request_as_idempotent_replay(tmp_path) 
 
 def test_counter_store_uses_advisory_lock_for_read_modify_write() -> None:
     import inspect
-    from openmagi_core_agent.shadow import gate5b4c3_shadow_counter_store
+    from magi_agent.shadow import gate5b4c3_shadow_counter_store
 
     source = inspect.getsource(gate5b4c3_shadow_counter_store.Gate5B4C3ShadowCounterStore)
 

@@ -5,12 +5,12 @@ import json
 import pytest
 from pydantic import ValidationError
 
-from openmagi_core_agent.meta_orchestration.child_acceptance import ChildAcceptanceVerdict
-from openmagi_core_agent.meta_orchestration.final_assembly import (
+from magi_agent.meta_orchestration.child_acceptance import ChildAcceptanceVerdict
+from magi_agent.meta_orchestration.final_assembly import (
     MetaFinalAssemblyPlan,
     assemble_final_output_from_inspection,
 )
-from openmagi_core_agent.meta_orchestration.inspection_loop import (
+from magi_agent.meta_orchestration.inspection_loop import (
     MetaInspectedChildVerdict,
     inspect_child_verdicts,
 )

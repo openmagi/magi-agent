@@ -14,7 +14,7 @@ import hashlib
 import pytest
 from pydantic import ValidationError
 
-from openmagi_core_agent.coding.repair_loop import (
+from magi_agent.coding.repair_loop import (
     CodingRepairDecision,
     CodingRepairLoopConfig,
     CodingRepairLoopResult,

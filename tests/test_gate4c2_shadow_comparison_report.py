@@ -4,11 +4,11 @@ from pathlib import Path
 
 import pytest
 
-from openmagi_core_agent.shadow.gate4_consumer import Gate4LocalHandoff
-from openmagi_core_agent.shadow.gate4c1_runner_shadow_invoker import (
+from magi_agent.shadow.gate4_consumer import Gate4LocalHandoff
+from magi_agent.shadow.gate4c1_runner_shadow_invoker import (
     Gate4C1RunnerShadowInvocationResult,
 )
-from openmagi_core_agent.shadow.gate4c2_shadow_comparison_report import (
+from magi_agent.shadow.gate4c2_shadow_comparison_report import (
     Gate4C2AuthorityFlags,
     Gate4C2ShadowComparisonConfig,
     build_gate4c2_shadow_comparison_report,

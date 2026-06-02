@@ -8,14 +8,14 @@ import sys
 import pytest
 from pydantic import ValidationError
 
-from openmagi_core_agent.connectors.credential_lease import (
+from magi_agent.connectors.credential_lease import (
     ConnectorCredentialLeaseRequest,
     ConnectorCredentialLeaseReceipt,
     CredentialLeaseReplayLedger,
     CredentialLeaseAuthorityFlags,
     issue_credential_lease,
 )
-from openmagi_core_agent.connectors.registry import (
+from magi_agent.connectors.registry import (
     ConnectorManifest,
     ConnectorPermission,
     ConnectorRegistry,
@@ -566,8 +566,8 @@ def test_credential_lease_metadata_record_is_digest_only_for_durable_store() -> 
 def test_connectors_import_boundary_has_no_live_secret_or_provider_imports() -> None:
     script = """
 import sys
-import openmagi_core_agent.connectors.registry
-import openmagi_core_agent.connectors.credential_lease
+import magi_agent.connectors.registry
+import magi_agent.connectors.credential_lease
 for name in (
     'stripe',
     'supabase',

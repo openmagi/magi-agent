@@ -3,14 +3,14 @@ import asyncio
 import pytest
 from pydantic import ValidationError
 
-from openmagi_core_agent.tools import (
+from magi_agent.tools import (
     ToolDispatcher,
     ToolRegistry,
     core_tool_manifests,
     register_core_tool_manifests,
 )
-from openmagi_core_agent.tools.context import ToolContext
-from openmagi_core_agent.tools.manifest import ToolManifest
+from magi_agent.tools.context import ToolContext
+from magi_agent.tools.manifest import ToolManifest
 
 
 EXPECTED_CORE_TOOL_NAMES = (

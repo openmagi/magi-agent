@@ -7,8 +7,8 @@ import subprocess
 import sys
 from pathlib import Path
 
-from openmagi_core_agent.memory.contracts import MemoryRecord, RecallRequest, RecallResult
-from openmagi_core_agent.memory.namespaces import MemoryNamespacePolicy
+from magi_agent.memory.contracts import MemoryRecord, RecallRequest, RecallResult
+from magi_agent.memory.namespaces import MemoryNamespacePolicy
 
 
 NAMESPACE_A = "memory-ns:tenant-a.bot-a"
@@ -74,7 +74,7 @@ def _record(
 
 
 def _projection_policy(latest_user_text: str = "continue the launch plan") -> object:
-    from openmagi_core_agent.recipes.first_party.memory_recall import (
+    from magi_agent.recipes.first_party.memory_recall import (
         MemoryRecallProjectionPolicy,
     )
 
@@ -86,7 +86,7 @@ def _projection_policy(latest_user_text: str = "continue the launch plan") -> ob
 
 
 def _enabled_harness(adapter: object) -> object:
-    from openmagi_core_agent.harness.memory_recall import (
+    from magi_agent.harness.memory_recall import (
         MemoryRecallHarness,
         MemoryRecallHarnessConfig,
     )
@@ -98,7 +98,7 @@ def _enabled_harness(adapter: object) -> object:
 
 
 def test_memory_recall_recipe_is_disabled_by_default_and_does_not_call_adapter() -> None:
-    from openmagi_core_agent.harness.memory_recall import MemoryRecallHarness
+    from magi_agent.harness.memory_recall import MemoryRecallHarness
 
     adapter = FakeMemoryRecallAdapter(_record("allowed"))
     result = asyncio.run(
@@ -446,7 +446,7 @@ def test_memory_recall_public_output_sanitizes_non_token_sensitive_reason_string
 
 
 def test_memory_recall_authority_flags_are_forge_hardened() -> None:
-    from openmagi_core_agent.recipes.first_party.memory_recall import (
+    from magi_agent.recipes.first_party.memory_recall import (
         MemoryRecallAuthorityFlags,
     )
 
@@ -482,8 +482,8 @@ def test_memory_recall_authority_flags_are_forge_hardened() -> None:
 def test_memory_recall_import_boundary_has_no_live_adk_model_provider_or_network_imports() -> None:
     python_root = Path(__file__).resolve().parents[1]
     module_paths = [
-        python_root / "openmagi_core_agent/recipes/first_party/memory_recall.py",
-        python_root / "openmagi_core_agent/harness/memory_recall.py",
+        python_root / "magi_agent/recipes/first_party/memory_recall.py",
+        python_root / "magi_agent/harness/memory_recall.py",
     ]
     banned_roots = {
         "google",
@@ -514,8 +514,8 @@ def test_memory_recall_import_boundary_has_no_live_adk_model_provider_or_network
 
     code = """
 import sys
-import openmagi_core_agent.recipes.first_party.memory_recall
-import openmagi_core_agent.harness.memory_recall
+import magi_agent.recipes.first_party.memory_recall
+import magi_agent.harness.memory_recall
 for name in (
     'google.adk',
     'google.genai',
@@ -527,9 +527,9 @@ for name in (
     'supabase',
     'psycopg',
     'asyncpg',
-    'openmagi_core_agent.runtime.adk_turn_runner',
-    'openmagi_core_agent.runtime.provider_execution',
-    'openmagi_core_agent.app',
+    'magi_agent.runtime.adk_turn_runner',
+    'magi_agent.runtime.provider_execution',
+    'magi_agent.app',
 ):
     if name in sys.modules:
         raise SystemExit(name)

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from openmagi_core_agent.runtime.reliability_budget import (
+from magi_agent.runtime.reliability_budget import (
     ReliabilityBudgetPolicy,
     ReliabilityBudgetRequest,
 )

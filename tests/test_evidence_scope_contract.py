@@ -10,7 +10,7 @@ from pydantic import ValidationError
 
 def _evidence_scope_module() -> ModuleType:
     try:
-        from openmagi_core_agent.harness import evidence_scope
+        from magi_agent.harness import evidence_scope
     except ModuleNotFoundError as exc:
         pytest.fail(f"missing evidence scope scaffold module: {exc}")
     return evidence_scope
@@ -390,15 +390,15 @@ def test_evidence_scope_import_stays_traffic_and_execution_free_in_fresh_process
 import importlib
 import sys
 
-importlib.import_module("openmagi_core_agent.harness.evidence_scope")
+importlib.import_module("magi_agent.harness.evidence_scope")
 forbidden_modules = (
     "google.adk",
-    "openmagi_core_agent.adk_bridge.runner_adapter",
-    "openmagi_core_agent.runtime.openmagi_runtime",
-    "openmagi_core_agent.transport.chat",
-    "openmagi_core_agent.transport.tools",
-    "openmagi_core_agent.tools.dispatcher",
-    "openmagi_core_agent.hooks.bus",
+    "magi_agent.adk_bridge.runner_adapter",
+    "magi_agent.runtime.openmagi_runtime",
+    "magi_agent.transport.chat",
+    "magi_agent.transport.tools",
+    "magi_agent.tools.dispatcher",
+    "magi_agent.hooks.bus",
 )
 loaded = [module for module in forbidden_modules if module in sys.modules]
 if loaded:

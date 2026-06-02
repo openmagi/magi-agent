@@ -10,7 +10,7 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from openmagi_core_agent.authoring.compiler import (
+from magi_agent.authoring.compiler import (
     CompileRecipePackCatalog,
     compile_recipe_pack,
 )
@@ -296,12 +296,12 @@ import sys
 
 forbidden_prefixes = (
     "google.adk",
-    "openmagi_core_agent.adk_bridge",
-    "openmagi_core_agent.recipes.compiler",
-    "openmagi_core_agent.runtime",
-    "openmagi_core_agent.tools.dispatcher",
-    "openmagi_core_agent.tools.kernel",
-    "openmagi_core_agent.transport",
+    "magi_agent.adk_bridge",
+    "magi_agent.recipes.compiler",
+    "magi_agent.runtime",
+    "magi_agent.tools.dispatcher",
+    "magi_agent.tools.kernel",
+    "magi_agent.transport",
     "requests",
     "httpx",
     "urllib",
@@ -314,7 +314,7 @@ baseline = {
 # Python/uv bootstrap may preload stdlib modules such as urllib on some
 # versions; this assertion is about new imports caused by authoring.compiler.
 
-module = importlib.import_module("openmagi_core_agent.authoring.compiler")
+module = importlib.import_module("magi_agent.authoring.compiler")
 assert hasattr(module, "compile_recipe_pack")
 
 loaded = [

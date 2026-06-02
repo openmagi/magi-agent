@@ -10,7 +10,7 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from openmagi_core_agent.shadow.adk_eval_fixture_contract import (
+from magi_agent.shadow.adk_eval_fixture_contract import (
     AdkEvalFixtureAttachmentFlags,
     AdkEvalFixtureContract,
     load_adk_eval_fixture_contract,
@@ -354,7 +354,7 @@ def test_adk_eval_contract_import_boundary_stays_eval_runner_toolhost_route_memo
 import sys
 from pathlib import Path
 
-from openmagi_core_agent.shadow.adk_eval_fixture_contract import (
+from magi_agent.shadow.adk_eval_fixture_contract import (
     load_adk_eval_fixture_contract,
     project_adk_eval_fixture_contract,
 )
@@ -371,20 +371,20 @@ project_adk_eval_fixture_contract(
 forbidden = (
     'google.adk.evaluation',
     'google.adk.runners',
-    'openmagi_core_agent.adk_bridge.local_runner',
-    'openmagi_core_agent.adk_bridge.runner_adapter',
-    'openmagi_core_agent.adk_bridge.tool_adapter',
-    'openmagi_core_agent.shadow.toolhost_contract',
-    'openmagi_core_agent.tools.dispatcher',
-    'openmagi_core_agent.tools.registry',
-    'openmagi_core_agent.plugins.agentmemory',
-    'openmagi_core_agent.memory',
-    'openmagi_core_agent.services.memory',
-    'openmagi_core_agent.hipocampus',
-    'openmagi_core_agent.qmd',
-    'openmagi_core_agent.app',
-    'openmagi_core_agent.transport.chat',
-    'openmagi_core_agent.routes',
+    'magi_agent.adk_bridge.local_runner',
+    'magi_agent.adk_bridge.runner_adapter',
+    'magi_agent.adk_bridge.tool_adapter',
+    'magi_agent.shadow.toolhost_contract',
+    'magi_agent.tools.dispatcher',
+    'magi_agent.tools.registry',
+    'magi_agent.plugins.agentmemory',
+    'magi_agent.memory',
+    'magi_agent.services.memory',
+    'magi_agent.hipocampus',
+    'magi_agent.qmd',
+    'magi_agent.app',
+    'magi_agent.transport.chat',
+    'magi_agent.routes',
 )
 loaded = [
     module_name
@@ -407,7 +407,7 @@ if loaded:
 
     source = (
         Path(__file__).parents[1]
-        / "openmagi_core_agent"
+        / "magi_agent"
         / "shadow"
         / "adk_eval_fixture_contract.py"
     ).read_text(encoding="utf-8")
@@ -417,11 +417,11 @@ if loaded:
     forbidden_import_fragments = (
         "google.adk.evaluation",
         "google.adk.runners",
-        "openmagi_core_agent.adk_bridge",
-        "openmagi_core_agent.shadow.toolhost_contract",
-        "openmagi_core_agent.memory",
-        "openmagi_core_agent.transport.chat",
-        "openmagi_core_agent.routes",
+        "magi_agent.adk_bridge",
+        "magi_agent.shadow.toolhost_contract",
+        "magi_agent.memory",
+        "magi_agent.transport.chat",
+        "magi_agent.routes",
     )
     for fragment in forbidden_import_fragments:
         assert fragment not in import_lines

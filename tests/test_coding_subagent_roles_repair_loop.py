@@ -9,39 +9,39 @@ from pathlib import Path
 from pydantic import ValidationError
 import pytest
 
-from openmagi_core_agent.coding.meta_adapter import (
+from magi_agent.coding.meta_adapter import (
     CODING_META_ROLE_NAMES,
     CodingMetaEvidencePolicy,
     accept_coding_child_result,
     build_coding_meta_harness_plan,
 )
-from openmagi_core_agent.evidence.child_runtime_envelope import ChildRuntimeEnvelope
+from magi_agent.evidence.child_runtime_envelope import ChildRuntimeEnvelope
 from runtime_issuance_support import issue_test_runtime_authority
-from openmagi_core_agent.evidence.subagent import OPENMAGI_RUNTIME_ENVELOPE_ISSUER
-from openmagi_core_agent.harness.repair_policy import RepairPlan, next_repair_action
-from openmagi_core_agent.harness.verifier_bus import VerifierResultMetadata
-from openmagi_core_agent.meta_orchestration.child_acceptance import (
+from magi_agent.evidence.subagent import OPENMAGI_RUNTIME_ENVELOPE_ISSUER
+from magi_agent.harness.repair_policy import RepairPlan, next_repair_action
+from magi_agent.harness.verifier_bus import VerifierResultMetadata
+from magi_agent.meta_orchestration.child_acceptance import (
     ChildAcceptanceVerdict,
     issue_runtime_child_result,
 )
-from openmagi_core_agent.meta_orchestration.commit_adapter import (
+from magi_agent.meta_orchestration.commit_adapter import (
     evaluate_before_commit_for_assembly,
     issue_runtime_verifier_result_for_assembly,
 )
-from openmagi_core_agent.meta_orchestration.final_assembly import (
+from magi_agent.meta_orchestration.final_assembly import (
     assemble_final_output_from_inspection,
 )
-from openmagi_core_agent.meta_orchestration.inspection_loop import (
+from magi_agent.meta_orchestration.inspection_loop import (
     MetaInspectedChildVerdict,
     inspect_child_verdicts,
 )
-from openmagi_core_agent.recipes.coding_subagents import (
+from magi_agent.recipes.coding_subagents import (
     CodingSubagentConfig,
     CodingSubagentModeRequest,
     CodingSubagentRecipe,
     CodingSubagentToolScope,
 )
-from openmagi_core_agent.tools.read_ledger import (
+from magi_agent.tools.read_ledger import (
     ReadLedger,
     ReadLedgerConfig,
     workspace_content_digest,
@@ -577,8 +577,8 @@ import importlib
 import sys
 
 for name in (
-    "openmagi_core_agent.coding.meta_adapter",
-    "openmagi_core_agent.recipes.coding_subagents",
+    "magi_agent.coding.meta_adapter",
+    "magi_agent.recipes.coding_subagents",
 ):
     importlib.import_module(name)
 
@@ -587,9 +587,9 @@ forbidden = (
     "google.adk.sessions",
     "google.adk.models",
     "google.adk.tools.mcp_tool",
-    "openmagi_core_agent.adk_bridge",
-    "openmagi_core_agent.runtime.adk_turn_runner",
-    "openmagi_core_agent.tools.dispatcher",
+    "magi_agent.adk_bridge",
+    "magi_agent.runtime.adk_turn_runner",
+    "magi_agent.tools.dispatcher",
 )
 loaded = [name for name in forbidden if name in sys.modules]
 if loaded:

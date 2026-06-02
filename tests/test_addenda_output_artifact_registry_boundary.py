@@ -6,7 +6,7 @@ import sys
 
 import pytest
 
-from openmagi_core_agent.artifacts.output_registry_boundary import (
+from magi_agent.artifacts.output_registry_boundary import (
     OutputArtifactRegistryBoundary,
     OutputArtifactRegistryConfig,
     OutputArtifactRegistryRequest,
@@ -245,7 +245,7 @@ def test_output_artifact_registry_boundary_has_no_live_imports() -> None:
 import importlib
 import sys
 
-importlib.import_module("openmagi_core_agent.artifacts.output_registry_boundary")
+importlib.import_module("magi_agent.artifacts.output_registry_boundary")
 forbidden = (
     "google.adk.artifacts",
     "subprocess",

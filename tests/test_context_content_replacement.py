@@ -4,12 +4,12 @@ from __future__ import annotations
 import json
 import pytest
 
-from openmagi_core_agent.context.content_replacement import (
+from magi_agent.context.content_replacement import (
     MAX_RESULT_TOKENS,
     ContentReplacer,
     SnipResult,
 )
-from openmagi_core_agent.context.types import WarningLevel
+from magi_agent.context.types import WarningLevel
 
 
 # ---------------------------------------------------------------------------

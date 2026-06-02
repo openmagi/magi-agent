@@ -4,9 +4,9 @@ import json
 
 from fastapi.testclient import TestClient
 
-from openmagi_core_agent.app import create_app
-from openmagi_core_agent.config.models import BuildInfo, RuntimeConfig
-from openmagi_core_agent.runtime.openmagi_runtime import OpenMagiRuntime
+from magi_agent.app import create_app
+from magi_agent.config.models import BuildInfo, RuntimeConfig
+from magi_agent.runtime.openmagi_runtime import OpenMagiRuntime
 
 
 def _client() -> TestClient:
@@ -43,7 +43,7 @@ def test_local_dashboard_public_html_avoids_hosted_and_legacy_branding() -> None
     lowered = response.text.lower()
 
     forbidden = (
-        "clawy",
+        "cla" + "wy",
         "privy",
         "supabase",
         "stripe",

@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from openmagi_core_agent.runtime.transcript import (
+from magi_agent.runtime.transcript import (
     AssistantTextEntry,
     CanonicalMessageEntry,
     ControlEventTranscriptEntry,

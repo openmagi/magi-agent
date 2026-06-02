@@ -2,13 +2,13 @@ from __future__ import annotations
 
 import pytest
 
-from openmagi_core_agent.evidence.reports import (
+from magi_agent.evidence.reports import (
     public_evidence_metadata_report,
     public_evidence_record_report,
     public_evidence_verdict_report,
 )
-from openmagi_core_agent.evidence.rollout import default_audit_before_block_rollout_metadata
-from openmagi_core_agent.evidence.types import (
+from magi_agent.evidence.rollout import default_audit_before_block_rollout_metadata
+from magi_agent.evidence.types import (
     EvidenceContractFailure,
     EvidenceContractScopeMetadata,
     EvidenceContractVerdict,

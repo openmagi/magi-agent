@@ -6,12 +6,12 @@ import pytest
 from google.genai import types
 from pydantic import ValidationError
 
-from openmagi_core_agent.adk_bridge.runner_adapter import (
+from magi_agent.adk_bridge.runner_adapter import (
     ADK_RUNNER_KWARG_ALLOWLIST,
     OpenMagiRunnerAdapter,
     RunnerTurnInput,
 )
-from openmagi_core_agent.harness.resolved import build_default_resolved_harness_state
+from magi_agent.harness.resolved import build_default_resolved_harness_state
 
 
 class FakeRunner:
@@ -191,16 +191,16 @@ def test_runner_adapter_import_does_not_load_evidence_or_heavy_harness_modules()
 import importlib
 import sys
 
-module = importlib.import_module("openmagi_core_agent.adk_bridge.runner_adapter")
+module = importlib.import_module("magi_agent.adk_bridge.runner_adapter")
 assert hasattr(module, "OpenMagiRunnerAdapter")
 assert hasattr(module, "RunnerTurnInput")
 
 forbidden = (
-    "openmagi_core_agent.evidence",
-    "openmagi_core_agent.harness.audit",
-    "openmagi_core_agent.harness.engine",
-    "openmagi_core_agent.harness.resolved",
-    "openmagi_core_agent.hooks",
+    "magi_agent.evidence",
+    "magi_agent.harness.audit",
+    "magi_agent.harness.engine",
+    "magi_agent.harness.resolved",
+    "magi_agent.hooks",
 )
 loaded = [
     name

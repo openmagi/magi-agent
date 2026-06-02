@@ -49,8 +49,8 @@ def _erroring_toolset(message: str) -> type:
 
 
 def test_inactive_config_builds_no_toolsets() -> None:
-    from openmagi_core_agent.composio.config import resolve_composio_config
-    from openmagi_core_agent.composio.mcp import build_composio_toolset_bundle
+    from magi_agent.composio.config import resolve_composio_config
+    from magi_agent.composio.mcp import build_composio_toolset_bundle
 
     cfg = resolve_composio_config({})
     bundle = build_composio_toolset_bundle(
@@ -67,8 +67,8 @@ def test_inactive_config_builds_no_toolsets() -> None:
 
 
 def test_active_config_creates_session_and_toolset_without_real_network() -> None:
-    from openmagi_core_agent.composio.config import resolve_composio_config
-    from openmagi_core_agent.composio.mcp import build_composio_toolset_bundle
+    from magi_agent.composio.config import resolve_composio_config
+    from magi_agent.composio.mcp import build_composio_toolset_bundle
 
     client = FakeComposioClient()
     cfg = resolve_composio_config(
@@ -98,8 +98,8 @@ def test_active_config_creates_session_and_toolset_without_real_network() -> Non
 
 
 def test_default_active_config_creates_unrestricted_session() -> None:
-    from openmagi_core_agent.composio.config import resolve_composio_config
-    from openmagi_core_agent.composio.mcp import build_composio_toolset_bundle
+    from magi_agent.composio.config import resolve_composio_config
+    from magi_agent.composio.mcp import build_composio_toolset_bundle
 
     client = FakeComposioClient()
     cfg = resolve_composio_config(
@@ -118,8 +118,8 @@ def test_default_active_config_creates_unrestricted_session() -> None:
 
 
 def test_ready_bundle_json_dump_excludes_runtime_toolsets_and_session_secrets() -> None:
-    from openmagi_core_agent.composio.config import resolve_composio_config
-    from openmagi_core_agent.composio.mcp import build_composio_toolset_bundle
+    from magi_agent.composio.config import resolve_composio_config
+    from magi_agent.composio.mcp import build_composio_toolset_bundle
 
     cfg = resolve_composio_config(
         {
@@ -150,8 +150,8 @@ def test_ready_bundle_json_dump_excludes_runtime_toolsets_and_session_secrets() 
 
 
 def test_endpoint_override_skips_composio_session_creation() -> None:
-    from openmagi_core_agent.composio.config import resolve_composio_config
-    from openmagi_core_agent.composio.mcp import build_composio_toolset_bundle
+    from magi_agent.composio.config import resolve_composio_config
+    from magi_agent.composio.mcp import build_composio_toolset_bundle
 
     client = FakeComposioClient()
     cfg = resolve_composio_config(
@@ -176,8 +176,8 @@ def test_endpoint_override_skips_composio_session_creation() -> None:
 
 
 def test_ready_override_bundle_json_dump_excludes_endpoint_and_auth() -> None:
-    from openmagi_core_agent.composio.config import resolve_composio_config
-    from openmagi_core_agent.composio.mcp import build_composio_toolset_bundle
+    from magi_agent.composio.config import resolve_composio_config
+    from magi_agent.composio.mcp import build_composio_toolset_bundle
 
     cfg = resolve_composio_config(
         {
@@ -205,8 +205,8 @@ def test_ready_override_bundle_json_dump_excludes_endpoint_and_auth() -> None:
 
 
 def test_builder_error_is_sanitized() -> None:
-    from openmagi_core_agent.composio.config import resolve_composio_config
-    from openmagi_core_agent.composio.mcp import build_composio_toolset_bundle
+    from magi_agent.composio.config import resolve_composio_config
+    from magi_agent.composio.mcp import build_composio_toolset_bundle
 
     def boom(_api_key: str) -> FakeComposioClient:
         raise RuntimeError("Authorization: Bearer unsafe-token cp_test_secret")
@@ -229,8 +229,8 @@ def test_builder_error_is_sanitized() -> None:
 
 
 def test_toolset_error_redacts_mcp_session_url_and_query_credentials() -> None:
-    from openmagi_core_agent.composio.config import resolve_composio_config
-    from openmagi_core_agent.composio.mcp import build_composio_toolset_bundle
+    from magi_agent.composio.config import resolve_composio_config
+    from magi_agent.composio.mcp import build_composio_toolset_bundle
 
     cfg = resolve_composio_config(
         {"COMPOSIO_API_KEY": "cp_secret", "MAGI_COMPOSIO_ENABLED": "on"}
@@ -254,8 +254,8 @@ def test_toolset_error_redacts_mcp_session_url_and_query_credentials() -> None:
 
 
 def test_toolset_error_redacts_override_url_query_values() -> None:
-    from openmagi_core_agent.composio.config import resolve_composio_config
-    from openmagi_core_agent.composio.mcp import build_composio_toolset_bundle
+    from magi_agent.composio.config import resolve_composio_config
+    from magi_agent.composio.mcp import build_composio_toolset_bundle
 
     class ErroringToolset:
         def __init__(self, **kwargs: object) -> None:
@@ -286,8 +286,8 @@ def test_toolset_error_redacts_override_url_query_values() -> None:
 
 
 def test_toolset_error_redacts_composio_session_header_values() -> None:
-    from openmagi_core_agent.composio.config import resolve_composio_config
-    from openmagi_core_agent.composio.mcp import build_composio_toolset_bundle
+    from magi_agent.composio.config import resolve_composio_config
+    from magi_agent.composio.mcp import build_composio_toolset_bundle
 
     class ErroringToolset:
         def __init__(self, **kwargs: object) -> None:
@@ -314,8 +314,8 @@ def test_toolset_error_redacts_composio_session_header_values() -> None:
 
 
 def test_missing_optional_composio_package_is_nonfatal() -> None:
-    from openmagi_core_agent.composio.config import resolve_composio_config
-    from openmagi_core_agent.composio.mcp import build_composio_toolset_bundle
+    from magi_agent.composio.config import resolve_composio_config
+    from magi_agent.composio.mcp import build_composio_toolset_bundle
 
     def missing_package(_api_key: str) -> FakeComposioClient:
         raise ImportError("No module named 'composio'")
@@ -337,8 +337,8 @@ def test_missing_optional_composio_package_is_nonfatal() -> None:
 
 
 def test_attach_composio_toolsets_to_runner_is_idempotent() -> None:
-    from openmagi_core_agent.composio.config import resolve_composio_config
-    from openmagi_core_agent.composio.mcp import (
+    from magi_agent.composio.config import resolve_composio_config
+    from magi_agent.composio.mcp import (
         attach_composio_toolsets_to_runner,
         build_composio_toolset_bundle,
     )
@@ -371,7 +371,7 @@ class FakeRunnerWithList:
 
 
 def test_attach_composio_toolsets_to_runner_extends_agent_tools() -> None:
-    from openmagi_core_agent.composio.mcp import (
+    from magi_agent.composio.mcp import (
         ComposioToolsetBundle,
         attach_composio_toolsets_to_runner,
     )

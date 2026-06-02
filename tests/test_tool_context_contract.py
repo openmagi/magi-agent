@@ -3,8 +3,8 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
-from openmagi_core_agent.runtime.session_identity import MemoryMode
-from openmagi_core_agent.tools.context import ToolContext
+from magi_agent.runtime.session_identity import MemoryMode
+from magi_agent.tools.context import ToolContext
 
 
 def test_minimal_tool_context_remains_backwards_compatible() -> None:

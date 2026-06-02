@@ -3,9 +3,9 @@ from __future__ import annotations
 import subprocess
 import sys
 
-from openmagi_core_agent.plugins.manager import PluginOptOutRecord, resolve_plugin_state
-from openmagi_core_agent.plugins.manifest import PluginKind, PluginManifest
-from openmagi_core_agent.plugins.native_catalog import (
+from magi_agent.plugins.manager import PluginOptOutRecord, resolve_plugin_state
+from magi_agent.plugins.manifest import PluginKind, PluginManifest
+from magi_agent.plugins.native_catalog import (
     native_plugin_by_id,
     native_plugin_ids,
     native_plugin_manifests,
@@ -558,17 +558,17 @@ def test_native_catalog_import_boundary_does_not_load_adk_runtime_routes_or_nati
 import importlib
 import sys
 
-importlib.import_module("openmagi_core_agent.plugins.native_catalog")
+importlib.import_module("magi_agent.plugins.native_catalog")
 forbidden_prefixes = (
     "google.adk",
-    "openmagi_core_agent.adk_bridge",
-    "openmagi_core_agent.runtime",
-    "openmagi_core_agent.tools.dispatcher",
-    "openmagi_core_agent.tools.registry",
-    "openmagi_core_agent.hooks.bus",
-    "openmagi_core_agent.transport",
-    "openmagi_core_agent.plugins.manager",
-    "openmagi_core_agent.plugins.native.",
+    "magi_agent.adk_bridge",
+    "magi_agent.runtime",
+    "magi_agent.tools.dispatcher",
+    "magi_agent.tools.registry",
+    "magi_agent.hooks.bus",
+    "magi_agent.transport",
+    "magi_agent.plugins.manager",
+    "magi_agent.plugins.native.",
 )
 loaded = [
     name

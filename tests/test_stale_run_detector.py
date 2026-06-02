@@ -2,18 +2,18 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
-from openmagi_core_agent.runtime.heartbeat_contract import (
+from magi_agent.runtime.heartbeat_contract import (
     ActivityReceipt,
     HeartbeatReceipt,
     RunLease,
     activity_receipt_digest,
     heartbeat_receipt_digest,
 )
-from openmagi_core_agent.runtime.heartbeat_store import (
+from magi_agent.runtime.heartbeat_store import (
     HeartbeatRunRecord,
     LocalFakeHeartbeatStore,
 )
-from openmagi_core_agent.runtime.stale_run_detector import (
+from magi_agent.runtime.stale_run_detector import (
     StaleRunDetectorConfig,
     evaluate_stale_run,
 )

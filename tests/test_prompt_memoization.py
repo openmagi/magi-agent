@@ -21,18 +21,18 @@ from types import ModuleType
 
 def _memoizer_module() -> ModuleType:
     try:
-        return importlib.import_module("openmagi_core_agent.prompt.memoizer")
+        return importlib.import_module("magi_agent.prompt.memoizer")
     except ModuleNotFoundError as exc:
         import pytest
-        pytest.fail(f"openmagi_core_agent.prompt.memoizer module is missing: {exc}")
+        pytest.fail(f"magi_agent.prompt.memoizer module is missing: {exc}")
 
 
 def _prompt_module() -> ModuleType:
     try:
-        return importlib.import_module("openmagi_core_agent.prompt")
+        return importlib.import_module("magi_agent.prompt")
     except ModuleNotFoundError as exc:
         import pytest
-        pytest.fail(f"openmagi_core_agent.prompt module is missing: {exc}")
+        pytest.fail(f"magi_agent.prompt module is missing: {exc}")
 
 
 # ---------------------------------------------------------------------------
@@ -372,7 +372,7 @@ def test_compute_fn_called_again_after_invalidate_and_then_cached() -> None:
 def test_prompt_package_exports_prompt_section_cache() -> None:
     prompt = _prompt_module()
     assert hasattr(prompt, "PromptSectionCache"), (
-        "PromptSectionCache must be exported from openmagi_core_agent.prompt"
+        "PromptSectionCache must be exported from magi_agent.prompt"
     )
 
 

@@ -20,7 +20,7 @@ def _content(text: str = "hello") -> types.Content:
 
 
 def _request(**overrides: object):
-    from openmagi_core_agent.runtime.adk_turn_runner import AdkTurnRequest
+    from magi_agent.runtime.adk_turn_runner import AdkTurnRequest
 
     payload = {
         "turnId": "turn-pr2",
@@ -38,7 +38,7 @@ def _request(**overrides: object):
 
 
 def _local_runner(runner: object):
-    from openmagi_core_agent.runtime.adk_turn_runner import LocalAdkTurnRunnerBoundary
+    from magi_agent.runtime.adk_turn_runner import LocalAdkTurnRunnerBoundary
 
     return LocalAdkTurnRunnerBoundary.from_local_test_runner(runner)
 
@@ -49,7 +49,7 @@ def _fake_runner(
     error: BaseException | None = None,
     wait_until_cancelled: bool = False,
 ):
-    from openmagi_core_agent.runtime.adk_turn_runner import LocalAdkReplayRunner
+    from magi_agent.runtime.adk_turn_runner import LocalAdkReplayRunner
 
     return LocalAdkReplayRunner(
         events=tuple(events or ()),
@@ -71,7 +71,7 @@ def _assert_false_authority_and_writes(result: object) -> None:
 
 
 def test_default_config_is_disabled_and_does_not_invoke_fake_runner() -> None:
-    from openmagi_core_agent.runtime.adk_turn_runner import AdkTurnRunner
+    from magi_agent.runtime.adk_turn_runner import AdkTurnRunner
 
     runner = _fake_runner(events=[{"type": "unused"}])
 
@@ -86,7 +86,7 @@ def test_default_config_is_disabled_and_does_not_invoke_fake_runner() -> None:
 
 
 def test_enabled_fake_runner_success_records_request_shape_and_returns_events() -> None:
-    from openmagi_core_agent.runtime.adk_turn_runner import (
+    from magi_agent.runtime.adk_turn_runner import (
         AdkTurnRunner,
         AdkTurnRunnerConfig,
     )
@@ -121,7 +121,7 @@ def test_enabled_fake_runner_success_records_request_shape_and_returns_events() 
 
 
 def test_fake_runner_exception_returns_failed_without_raw_sensitive_text() -> None:
-    from openmagi_core_agent.runtime.adk_turn_runner import (
+    from magi_agent.runtime.adk_turn_runner import (
         AdkTurnRunner,
         AdkTurnRunnerConfig,
     )
@@ -156,7 +156,7 @@ def test_fake_runner_exception_returns_failed_without_raw_sensitive_text() -> No
 
 
 def test_enabled_runner_rejects_missing_local_attestation_before_invocation() -> None:
-    from openmagi_core_agent.runtime.adk_turn_runner import (
+    from magi_agent.runtime.adk_turn_runner import (
         AdkTurnRunner,
         AdkTurnRunnerConfig,
     )
@@ -192,7 +192,7 @@ def test_enabled_runner_rejects_missing_local_attestation_before_invocation() ->
 
 
 def test_local_runner_boundary_refuses_arbitrary_runner_objects() -> None:
-    from openmagi_core_agent.runtime.adk_turn_runner import LocalAdkTurnRunnerBoundary
+    from magi_agent.runtime.adk_turn_runner import LocalAdkTurnRunnerBoundary
 
     class ArbitraryRunner:
         async def run_async(self, **_kwargs: object):
@@ -203,7 +203,7 @@ def test_local_runner_boundary_refuses_arbitrary_runner_objects() -> None:
 
 
 def test_enabled_runner_rejects_boundary_subclass_spoof_before_invocation() -> None:
-    from openmagi_core_agent.runtime.adk_turn_runner import LocalAdkTurnRunnerBoundary
+    from magi_agent.runtime.adk_turn_runner import LocalAdkTurnRunnerBoundary
 
     with pytest.raises(TypeError, match="does not support subclassing"):
 
@@ -218,7 +218,7 @@ def test_local_runner_boundary_is_not_directly_invocable() -> None:
 
 
 def test_enabled_runner_rejects_mutated_boundary_runner_before_invocation() -> None:
-    from openmagi_core_agent.runtime.adk_turn_runner import (
+    from magi_agent.runtime.adk_turn_runner import (
         AdkTurnRunner,
         AdkTurnRunnerConfig,
     )
@@ -253,7 +253,7 @@ def test_enabled_runner_rejects_mutated_boundary_runner_before_invocation() -> N
 
 
 def test_enabled_runner_rejects_live_attached_runner_before_invocation() -> None:
-    from openmagi_core_agent.runtime.adk_turn_runner import (
+    from magi_agent.runtime.adk_turn_runner import (
         AdkTurnRunner,
         AdkTurnRunnerConfig,
     )
@@ -278,7 +278,7 @@ def test_enabled_runner_rejects_live_attached_runner_before_invocation() -> None
 
 
 def test_unknown_but_safe_model_route_fails_before_runner_invocation() -> None:
-    from openmagi_core_agent.runtime.adk_turn_runner import (
+    from magi_agent.runtime.adk_turn_runner import (
         AdkTurnRunner,
         AdkTurnRunnerConfig,
     )
@@ -309,7 +309,7 @@ def test_unknown_but_safe_model_route_fails_before_runner_invocation() -> None:
 
 
 def test_invalid_model_routing_config_fails_closed_before_runner_invocation() -> None:
-    from openmagi_core_agent.runtime.adk_turn_runner import (
+    from magi_agent.runtime.adk_turn_runner import (
         AdkTurnRunner,
         AdkTurnRunnerConfig,
     )
@@ -342,7 +342,7 @@ def test_invalid_model_routing_config_fails_closed_before_runner_invocation() ->
 
 
 def test_forbidden_adk_message_state_fails_closed_before_runner_invocation() -> None:
-    from openmagi_core_agent.runtime.adk_turn_runner import (
+    from magi_agent.runtime.adk_turn_runner import (
         AdkTurnRunner,
         AdkTurnRunnerConfig,
     )
@@ -380,7 +380,7 @@ def test_forbidden_adk_message_state_fails_closed_before_runner_invocation() -> 
 
 
 def test_spoofed_adk_message_object_is_not_dumped_before_real_validation() -> None:
-    from openmagi_core_agent.runtime.adk_turn_runner import (
+    from magi_agent.runtime.adk_turn_runner import (
         AdkTurnRunner,
         AdkTurnRunnerConfig,
     )
@@ -424,7 +424,7 @@ def test_spoofed_adk_message_object_is_not_dumped_before_real_validation() -> No
 
 
 def test_adk_content_subclass_is_rejected_before_model_dump_side_effect() -> None:
-    from openmagi_core_agent.runtime.adk_turn_runner import (
+    from magi_agent.runtime.adk_turn_runner import (
         AdkTurnRunner,
         AdkTurnRunnerConfig,
     )
@@ -460,7 +460,7 @@ def test_adk_content_subclass_is_rejected_before_model_dump_side_effect() -> Non
 
 
 def test_run_turn_rejects_non_exact_request_before_attribute_access() -> None:
-    from openmagi_core_agent.runtime.adk_turn_runner import (
+    from magi_agent.runtime.adk_turn_runner import (
         AdkTurnRunner,
         AdkTurnRunnerConfig,
     )
@@ -492,7 +492,7 @@ def test_run_turn_rejects_non_exact_request_before_attribute_access() -> None:
 
 
 def test_run_turn_rejects_non_exact_config_before_attribute_access() -> None:
-    from openmagi_core_agent.runtime.adk_turn_runner import AdkTurnRunner
+    from magi_agent.runtime.adk_turn_runner import AdkTurnRunner
 
     side_effects = {"count": 0}
 
@@ -521,7 +521,7 @@ def test_run_turn_rejects_non_exact_config_before_attribute_access() -> None:
 
 
 def test_run_turn_rejects_constructed_request_before_ref_coercion() -> None:
-    from openmagi_core_agent.runtime.adk_turn_runner import (
+    from magi_agent.runtime.adk_turn_runner import (
         AdkTurnRequest,
         AdkTurnRunner,
         AdkTurnRunnerConfig,
@@ -567,7 +567,7 @@ def test_run_turn_rejects_constructed_request_before_ref_coercion() -> None:
 
 
 def test_run_turn_rejects_constructed_config_before_truthiness() -> None:
-    from openmagi_core_agent.runtime.adk_turn_runner import (
+    from magi_agent.runtime.adk_turn_runner import (
         AdkTurnRunner,
         AdkTurnRunnerConfig,
     )
@@ -607,7 +607,7 @@ def test_run_turn_rejects_constructed_config_before_truthiness() -> None:
 
 
 def test_run_turn_rejects_constructed_config_with_nonfinite_timeout() -> None:
-    from openmagi_core_agent.runtime.adk_turn_runner import (
+    from magi_agent.runtime.adk_turn_runner import (
         AdkTurnRunner,
         AdkTurnRunnerConfig,
     )
@@ -638,7 +638,7 @@ def test_run_turn_rejects_constructed_config_with_nonfinite_timeout() -> None:
 
 
 def test_run_turn_rejects_constructed_config_timeout_subclass_before_comparison() -> None:
-    from openmagi_core_agent.runtime.adk_turn_runner import (
+    from magi_agent.runtime.adk_turn_runner import (
         AdkTurnRunner,
         AdkTurnRunnerConfig,
     )
@@ -676,7 +676,7 @@ def test_run_turn_rejects_constructed_config_timeout_subclass_before_comparison(
 
 
 def test_config_rejects_enabled_and_timeout_coercion() -> None:
-    from openmagi_core_agent.runtime.adk_turn_runner import AdkTurnRunnerConfig
+    from magi_agent.runtime.adk_turn_runner import AdkTurnRunnerConfig
 
     class EvilFloat(float):
         pass
@@ -699,7 +699,7 @@ def test_config_rejects_enabled_and_timeout_coercion() -> None:
 
 
 def test_bool_timeout_normal_construction_cannot_invoke_runner() -> None:
-    from openmagi_core_agent.runtime.adk_turn_runner import AdkTurnRunnerConfig
+    from magi_agent.runtime.adk_turn_runner import AdkTurnRunnerConfig
 
     fake_runner = _fake_runner(events=[{"type": "must-not-run"}])
 
@@ -710,7 +710,7 @@ def test_bool_timeout_normal_construction_cannot_invoke_runner() -> None:
 
 
 def test_result_public_projection_sanitizes_constructed_request_shape() -> None:
-    from openmagi_core_agent.runtime.adk_turn_runner import AdkTurnResult
+    from magi_agent.runtime.adk_turn_runner import AdkTurnResult
 
     result = AdkTurnResult(
         status="failed",
@@ -804,7 +804,7 @@ def test_result_public_projection_sanitizes_constructed_request_shape() -> None:
 
 
 def test_result_model_construct_cannot_forge_local_or_user_visible_fields() -> None:
-    from openmagi_core_agent.runtime.adk_turn_runner import AdkTurnResult
+    from magi_agent.runtime.adk_turn_runner import AdkTurnResult
 
     result = AdkTurnResult.model_construct(
         status="failed",
@@ -831,7 +831,7 @@ def test_result_model_construct_cannot_forge_local_or_user_visible_fields() -> N
 
 
 def test_run_turn_request_shape_sanitizes_raw_auth_session_and_tool_refs() -> None:
-    from openmagi_core_agent.runtime.adk_turn_runner import (
+    from magi_agent.runtime.adk_turn_runner import (
         AdkTurnRunner,
         AdkTurnRunnerConfig,
     )
@@ -878,7 +878,7 @@ def test_run_turn_request_shape_sanitizes_raw_auth_session_and_tool_refs() -> No
 
 
 def test_timeout_returns_timed_out_and_cancels_fake_runner() -> None:
-    from openmagi_core_agent.runtime.adk_turn_runner import (
+    from magi_agent.runtime.adk_turn_runner import (
         AdkTurnRunner,
         AdkTurnRunnerConfig,
     )
@@ -901,7 +901,7 @@ def test_timeout_returns_timed_out_and_cancels_fake_runner() -> None:
 
 
 def test_runner_cancellation_returns_cancelled_status() -> None:
-    from openmagi_core_agent.runtime.adk_turn_runner import (
+    from magi_agent.runtime.adk_turn_runner import (
         AdkTurnRunner,
         AdkTurnRunnerConfig,
     )
@@ -923,7 +923,7 @@ def test_runner_cancellation_returns_cancelled_status() -> None:
 
 
 def test_payload_cannot_forge_production_authority_or_adk_kwargs() -> None:
-    from openmagi_core_agent.runtime.adk_turn_runner import (
+    from magi_agent.runtime.adk_turn_runner import (
         AdkTurnRunner,
         AdkTurnRunnerConfig,
     )
@@ -967,7 +967,7 @@ def test_payload_cannot_forge_production_authority_or_adk_kwargs() -> None:
 
 
 def test_public_projection_and_string_exclude_raw_user_text_and_private_material() -> None:
-    from openmagi_core_agent.runtime.adk_turn_runner import (
+    from magi_agent.runtime.adk_turn_runner import (
         AdkTurnRunner,
         AdkTurnRunnerConfig,
     )
@@ -1031,7 +1031,7 @@ def test_import_boundary_does_not_import_live_runtime_modules_or_construct_adk_r
 import json
 import sys
 
-import openmagi_core_agent.runtime.adk_turn_runner  # noqa: F401
+import magi_agent.runtime.adk_turn_runner  # noqa: F401
 
 forbidden = [
     "google.genai",
@@ -1040,12 +1040,12 @@ forbidden = [
     "google.genai.models",
     "google.adk.runners",
     "google.adk.agents",
-    "openmagi_core_agent.adk_bridge.local_runner",
-    "openmagi_core_agent.chat_proxy",
-    "openmagi_core_agent.supabase",
-    "openmagi_core_agent.deploy",
-    "openmagi_core_agent.k8s",
-    "openmagi_core_agent.frontend",
+    "magi_agent.adk_bridge.local_runner",
+    "magi_agent.chat_proxy",
+    "magi_agent.supabase",
+    "magi_agent.deploy",
+    "magi_agent.k8s",
+    "magi_agent.frontend",
 ]
 print(json.dumps({name: name in sys.modules for name in forbidden}, sort_keys=True))
 """

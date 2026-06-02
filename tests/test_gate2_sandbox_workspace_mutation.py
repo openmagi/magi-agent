@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from openmagi_core_agent.workspace.sandbox_mutation import (
+from magi_agent.workspace.sandbox_mutation import (
     Gate2SandboxWorkspaceMutationProvider,
     SandboxMutationOutcome,
     SandboxMutationReceipt,

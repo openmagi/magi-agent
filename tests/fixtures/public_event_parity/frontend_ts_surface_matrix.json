@@ -16,7 +16,7 @@
       "python_adk_parser_sanitizer_support": {
         "status": "not_applicable",
         "evidence": [
-          "infra/docker/clawy-core-agent-python/openmagi_core_agent/transport/chat.py"
+          "magi-agent/magi_agent/transport/chat.py"
         ],
         "notes": "Composer input is a frontend request surface; Python accepts chat request shapes only when the Python route is selected."
       },
@@ -53,15 +53,15 @@
       "python_adk_parser_sanitizer_support": {
         "status": "contract_only",
         "evidence": [
-          "infra/docker/clawy-core-agent-python/openmagi_core_agent/routing/deterministic.py",
-          "infra/docker/clawy-core-agent-python/tests/test_priority_a_model_routing_import_boundaries.py"
+          "magi-agent/magi_agent/routing/deterministic.py",
+          "magi-agent/tests/test_priority_a_model_routing_import_boundaries.py"
         ],
         "notes": "Model selection is represented in routing contracts, but production selection remains TS-owned."
       },
       "python_adk_live_producer_support": {
         "status": "default_off",
         "evidence": [
-          "infra/docker/clawy-core-agent-python/openmagi_core_agent/adk_bridge/runner_adapter.py"
+          "magi-agent/magi_agent/adk_bridge/runner_adapter.py"
         ],
         "notes": "Python model routing is not a live authority for frontend traffic."
       },
@@ -93,16 +93,16 @@
       "python_adk_parser_sanitizer_support": {
         "status": "contract_only",
         "evidence": [
-          "infra/docker/clawy-core-agent-python/openmagi_core_agent/adk_bridge/artifact_service.py",
-          "infra/docker/clawy-core-agent-python/tests/test_gate1_local_runner_attachment.py"
+          "magi-agent/magi_agent/adk_bridge/artifact_service.py",
+          "magi-agent/tests/test_gate1_local_runner_attachment.py"
         ],
         "notes": "Attachment contracts exist for local projection and artifact handling."
       },
       "python_adk_live_producer_support": {
         "status": "default_off",
         "evidence": [
-          "infra/docker/clawy-core-agent-python/openmagi_core_agent/artifacts/file_delivery.py",
-          "infra/docker/clawy-core-agent-python/tests/fixtures/artifact_channel_delivery/ts_metadata_parity_matrix.json"
+          "magi-agent/magi_agent/artifacts/file_delivery.py",
+          "magi-agent/tests/fixtures/artifact_channel_delivery/ts_metadata_parity_matrix.json"
         ],
         "notes": "Live file delivery and artifact writes are not attached to production traffic."
       },
@@ -136,15 +136,15 @@
       "python_adk_parser_sanitizer_support": {
         "status": "contract_only",
         "evidence": [
-          "infra/docker/clawy-core-agent-python/openmagi_core_agent/knowledge/provider_boundary.py",
-          "infra/docker/clawy-core-agent-python/openmagi_core_agent/knowledge/source_tools.py"
+          "magi-agent/magi_agent/knowledge/provider_boundary.py",
+          "magi-agent/magi_agent/knowledge/source_tools.py"
         ],
         "notes": "Knowledge provider boundaries and source tools exist, but do not replace TS KB context routing."
       },
       "python_adk_live_producer_support": {
         "status": "default_off",
         "evidence": [
-          "infra/docker/clawy-core-agent-python/tests/test_knowledge_browser_source_tools_boundary.py"
+          "magi-agent/tests/test_knowledge_browser_source_tools_boundary.py"
         ],
         "notes": "Provider-backed knowledge use is gated and not live for production frontend turns."
       },
@@ -172,21 +172,21 @@
       "ts_production_source_path": [
         "src/lib/chat/chat-client.ts",
         "infra/docker/chat-proxy/chat-proxy.js",
-        "infra/docker/clawy-core-agent/src/transport/SseWriter.ts"
+        "magi-agent/src/transport/SseWriter.ts"
       ],
       "python_adk_parser_sanitizer_support": {
         "status": "supported",
         "evidence": [
-          "infra/docker/clawy-core-agent-python/openmagi_core_agent/transport/sse.py",
-          "infra/docker/clawy-core-agent-python/tests/test_public_event_parity_matrix.py"
+          "magi-agent/magi_agent/transport/sse.py",
+          "magi-agent/tests/test_public_event_parity_matrix.py"
         ],
         "notes": "text_delta is covered by Python public event projection tests."
       },
       "python_adk_live_producer_support": {
         "status": "supported",
         "evidence": [
-          "infra/docker/clawy-core-agent-python/openmagi_core_agent/adk_bridge/event_adapter.py",
-          "infra/docker/clawy-core-agent-python/tests/test_event_bridge.py"
+          "magi-agent/magi_agent/adk_bridge/event_adapter.py",
+          "magi-agent/tests/test_event_bridge.py"
         ],
         "notes": "The event adapter can emit text_delta from ADK turn events."
       },
@@ -219,15 +219,15 @@
       "python_adk_parser_sanitizer_support": {
         "status": "supported",
         "evidence": [
-          "infra/docker/clawy-core-agent-python/tests/fixtures/live_work_console_event_parity/matrix.json",
-          "infra/docker/clawy-core-agent-python/tests/test_public_event_parity_matrix.py"
+          "magi-agent/tests/fixtures/live_work_console_event_parity/matrix.json",
+          "magi-agent/tests/test_public_event_parity_matrix.py"
         ],
         "notes": "Public event families used by Work Console have sanitizer and matrix coverage."
       },
       "python_adk_live_producer_support": {
         "status": "contract_only",
         "evidence": [
-          "infra/docker/clawy-core-agent-python/openmagi_core_agent/adk_bridge/event_adapter.py"
+          "magi-agent/magi_agent/adk_bridge/event_adapter.py"
         ],
         "notes": "Producer coverage is partial and does not cover every Work Console family as live authority."
       },
@@ -259,15 +259,15 @@
       "python_adk_parser_sanitizer_support": {
         "status": "supported",
         "evidence": [
-          "infra/docker/clawy-core-agent-python/openmagi_core_agent/telemetry/deterministic_events.py",
-          "infra/docker/clawy-core-agent-python/tests/test_deterministic_events_contract.py"
+          "magi-agent/magi_agent/telemetry/deterministic_events.py",
+          "magi-agent/tests/test_deterministic_events_contract.py"
         ],
         "notes": "Deterministic runtime events have typed frontend parsing and Python contract tests."
       },
       "python_adk_live_producer_support": {
         "status": "default_off",
         "evidence": [
-          "infra/docker/clawy-core-agent-python/openmagi_core_agent/ops/runtime_events.py"
+          "magi-agent/magi_agent/ops/runtime_events.py"
         ],
         "notes": "Runtime event production is diagnostic and not production frontend authority."
       },
@@ -298,14 +298,14 @@
       "python_adk_parser_sanitizer_support": {
         "status": "supported",
         "evidence": [
-          "infra/docker/clawy-core-agent-python/tests/test_public_event_parity_matrix.py"
+          "magi-agent/tests/test_public_event_parity_matrix.py"
         ],
         "notes": "Activity timeline consumes the same sanitized public event families as Work Console."
       },
       "python_adk_live_producer_support": {
         "status": "contract_only",
         "evidence": [
-          "infra/docker/clawy-core-agent-python/openmagi_core_agent/adk_bridge/event_adapter.py"
+          "magi-agent/magi_agent/adk_bridge/event_adapter.py"
         ],
         "notes": "Tool and phase events are present, but child/background/activity coverage is not complete as live producer."
       },
@@ -337,14 +337,14 @@
       "python_adk_parser_sanitizer_support": {
         "status": "supported",
         "evidence": [
-          "infra/docker/clawy-core-agent-python/tests/test_public_event_parity_matrix.py"
+          "magi-agent/tests/test_public_event_parity_matrix.py"
         ],
         "notes": "active_snapshot is represented in public event parity coverage."
       },
       "python_adk_live_producer_support": {
         "status": "default_off",
         "evidence": [
-          "infra/docker/clawy-core-agent-python/openmagi_core_agent/runtime/events.py"
+          "magi-agent/magi_agent/runtime/events.py"
         ],
         "notes": "Python reconnect snapshots are not the production source."
       },
@@ -377,7 +377,7 @@
       "python_adk_parser_sanitizer_support": {
         "status": "contract_only",
         "evidence": [
-          "infra/docker/clawy-core-agent-python/tests/test_public_event_parity_matrix.py"
+          "magi-agent/tests/test_public_event_parity_matrix.py"
         ],
         "notes": "inject and interrupt public event shapes are covered as contracts."
       },
@@ -408,21 +408,21 @@
       ],
       "ts_production_source_path": [
         "src/lib/chat/openmagi-runtime-events.ts",
-        "infra/docker/clawy-core-agent/src/transport/safeAgentEvent.ts"
+        "magi-agent/src/transport/safeAgentEvent.ts"
       ],
       "python_adk_parser_sanitizer_support": {
         "status": "supported",
         "evidence": [
-          "infra/docker/clawy-core-agent-python/openmagi_core_agent/transport/sse.py",
-          "infra/docker/clawy-core-agent-python/tests/test_public_event_parity_matrix.py"
+          "magi-agent/magi_agent/transport/sse.py",
+          "magi-agent/tests/test_public_event_parity_matrix.py"
         ],
         "notes": "recipe_selection projection sanitizes public recipe refs and omission reasons."
       },
       "python_adk_live_producer_support": {
         "status": "contract_only",
         "evidence": [
-          "infra/docker/clawy-core-agent-python/openmagi_core_agent/recipes/selector_validation.py",
-          "infra/docker/clawy-core-agent-python/tests/test_recipe_selector_validation_contract.py"
+          "magi-agent/magi_agent/recipes/selector_validation.py",
+          "magi-agent/tests/test_recipe_selector_validation_contract.py"
         ],
         "notes": "Selector validation exists; production explicit selection is not enabled."
       },
@@ -454,16 +454,16 @@
       "python_adk_parser_sanitizer_support": {
         "status": "contract_only",
         "evidence": [
-          "infra/docker/clawy-core-agent-python/openmagi_core_agent/authoring/contracts.py",
-          "infra/docker/clawy-core-agent-python/openmagi_core_agent/authoring/projection.py"
+          "magi-agent/magi_agent/authoring/contracts.py",
+          "magi-agent/magi_agent/authoring/projection.py"
         ],
         "notes": "Python authoring contracts project recipe metadata, but do not own TS customization routes."
       },
       "python_adk_live_producer_support": {
         "status": "default_off",
         "evidence": [
-          "infra/docker/clawy-core-agent-python/openmagi_core_agent/authoring/dry_run.py",
-          "infra/docker/clawy-core-agent-python/tests/test_authoring_recipe_dry_run.py"
+          "magi-agent/magi_agent/authoring/dry_run.py",
+          "magi-agent/tests/test_authoring_recipe_dry_run.py"
         ],
         "notes": "Authoring dry-run is gated and not production builder authority."
       },
@@ -496,16 +496,16 @@
       "python_adk_parser_sanitizer_support": {
         "status": "supported",
         "evidence": [
-          "infra/docker/clawy-core-agent-python/openmagi_core_agent/transport/product_admin.py",
-          "infra/docker/clawy-core-agent-python/tests/test_product_admin_api_contracts.py"
+          "magi-agent/magi_agent/transport/product_admin.py",
+          "magi-agent/tests/test_product_admin_api_contracts.py"
         ],
         "notes": "Admin product-plane projections are typed and read-only."
       },
       "python_adk_live_producer_support": {
         "status": "default_off",
         "evidence": [
-          "infra/docker/clawy-core-agent-python/openmagi_core_agent/ops/health.py",
-          "infra/docker/clawy-core-agent-python/openmagi_core_agent/ops/runtime_events.py"
+          "magi-agent/magi_agent/ops/health.py",
+          "magi-agent/magi_agent/ops/runtime_events.py"
         ],
         "notes": "Admin diagnostics remain gated and read-only; no production runtime authority is granted."
       },
@@ -531,21 +531,21 @@
       ],
       "ts_production_source_path": [
         "src/lib/chat/chat-client.ts",
-        "infra/docker/clawy-core-agent/src/transport/safeAgentEvent.ts"
+        "magi-agent/src/transport/safeAgentEvent.ts"
       ],
       "python_adk_parser_sanitizer_support": {
         "status": "supported",
         "evidence": [
-          "infra/docker/clawy-core-agent-python/tests/test_public_event_parity_matrix.py",
-          "infra/docker/clawy-core-agent-python/tests/test_research_source_proof.py"
+          "magi-agent/tests/test_public_event_parity_matrix.py",
+          "magi-agent/tests/test_research_source_proof.py"
         ],
         "notes": "source_inspected, rule_check, and citation_gate public shapes are covered."
       },
       "python_adk_live_producer_support": {
         "status": "default_off",
         "evidence": [
-          "infra/docker/clawy-core-agent-python/openmagi_core_agent/recipes/research_agents.py",
-          "infra/docker/clawy-core-agent-python/openmagi_core_agent/harness/evidence_scope.py"
+          "magi-agent/magi_agent/recipes/research_agents.py",
+          "magi-agent/magi_agent/harness/evidence_scope.py"
         ],
         "notes": "Research evidence production remains gated and is not live frontend authority."
       },
@@ -571,19 +571,19 @@
       ],
       "ts_production_source_path": [
         "src/lib/chat/chat-client.ts",
-        "infra/docker/clawy-core-agent/src/tools/TaskBoard.ts"
+        "magi-agent/src/tools/TaskBoard.ts"
       ],
       "python_adk_parser_sanitizer_support": {
         "status": "supported",
         "evidence": [
-          "infra/docker/clawy-core-agent-python/tests/test_public_event_parity_matrix.py"
+          "magi-agent/tests/test_public_event_parity_matrix.py"
         ],
         "notes": "task_board public projection is covered by parity matrix tests."
       },
       "python_adk_live_producer_support": {
         "status": "contract_only",
         "evidence": [
-          "infra/docker/clawy-core-agent-python/openmagi_core_agent/meta_orchestration/task_plan.py"
+          "magi-agent/magi_agent/meta_orchestration/task_plan.py"
         ],
         "notes": "Task planning exists, but no production task_board live producer is attached."
       },
@@ -614,16 +614,16 @@
       "python_adk_parser_sanitizer_support": {
         "status": "supported",
         "evidence": [
-          "infra/docker/clawy-core-agent-python/tests/test_public_event_parity_matrix.py",
-          "infra/docker/clawy-core-agent-python/tests/test_gate1_child_envelope_fixtures.py"
+          "magi-agent/tests/test_public_event_parity_matrix.py",
+          "magi-agent/tests/test_gate1_child_envelope_fixtures.py"
         ],
         "notes": "Child and background public events have sanitizer and envelope fixture coverage."
       },
       "python_adk_live_producer_support": {
         "status": "default_off",
         "evidence": [
-          "infra/docker/clawy-core-agent-python/openmagi_core_agent/harness/background_tasks.py",
-          "infra/docker/clawy-core-agent-python/openmagi_core_agent/recipes/coding_subagents.py"
+          "magi-agent/magi_agent/harness/background_tasks.py",
+          "magi-agent/magi_agent/recipes/coding_subagents.py"
         ],
         "notes": "Child execution and background activity are default-off for production frontend traffic."
       },
@@ -655,16 +655,16 @@
       "python_adk_parser_sanitizer_support": {
         "status": "supported",
         "evidence": [
-          "infra/docker/clawy-core-agent-python/openmagi_core_agent/missions/events.py",
-          "infra/docker/clawy-core-agent-python/tests/test_mission_public_event_projection.py"
+          "magi-agent/magi_agent/missions/events.py",
+          "magi-agent/tests/test_mission_public_event_projection.py"
         ],
         "notes": "Mission, cron, and goal public projections are covered by Python tests."
       },
       "python_adk_live_producer_support": {
         "status": "default_off",
         "evidence": [
-          "infra/docker/clawy-core-agent-python/openmagi_core_agent/harness/cron_runtime.py",
-          "infra/docker/clawy-core-agent-python/openmagi_core_agent/harness/goal_loop.py"
+          "magi-agent/magi_agent/harness/cron_runtime.py",
+          "magi-agent/magi_agent/harness/goal_loop.py"
         ],
         "notes": "Live scheduler and goal loop authority remain default-off."
       },
@@ -696,15 +696,15 @@
       "python_adk_parser_sanitizer_support": {
         "status": "supported",
         "evidence": [
-          "infra/docker/clawy-core-agent-python/tests/test_public_event_parity_matrix.py",
-          "infra/docker/clawy-core-agent-python/tests/test_live_browser_provider_pack.py"
+          "magi-agent/tests/test_public_event_parity_matrix.py",
+          "magi-agent/tests/test_live_browser_provider_pack.py"
         ],
         "notes": "browser_frame shape is covered; browser provider packs remain gated."
       },
       "python_adk_live_producer_support": {
         "status": "default_off",
         "evidence": [
-          "infra/docker/clawy-core-agent-python/openmagi_core_agent/browser/live_provider_pack.py"
+          "magi-agent/magi_agent/browser/live_provider_pack.py"
         ],
         "notes": "Browser provider execution is not enabled for production frontend turns."
       },
@@ -730,20 +730,20 @@
       ],
       "ts_production_source_path": [
         "src/lib/chat/chat-client.ts",
-        "infra/docker/clawy-core-agent/src/transport/safeAgentEvent.ts"
+        "magi-agent/src/transport/safeAgentEvent.ts"
       ],
       "python_adk_parser_sanitizer_support": {
         "status": "supported",
         "evidence": [
-          "infra/docker/clawy-core-agent-python/tests/test_public_event_parity_matrix.py"
+          "magi-agent/tests/test_public_event_parity_matrix.py"
         ],
         "notes": "document_draft public preview projection is covered."
       },
       "python_adk_live_producer_support": {
         "status": "contract_only",
         "evidence": [
-          "infra/docker/clawy-core-agent-python/openmagi_core_agent/authoring/projection.py",
-          "infra/docker/clawy-core-agent-python/openmagi_core_agent/artifacts/output_registry_boundary.py"
+          "magi-agent/magi_agent/authoring/projection.py",
+          "magi-agent/magi_agent/artifacts/output_registry_boundary.py"
         ],
         "notes": "Draft metadata projection exists, but live document authoring is not a production frontend producer."
       },
@@ -775,15 +775,15 @@
       "python_adk_parser_sanitizer_support": {
         "status": "contract_only",
         "evidence": [
-          "infra/docker/clawy-core-agent-python/openmagi_core_agent/artifacts/output_registry_boundary.py",
-          "infra/docker/clawy-core-agent-python/tests/test_priority_e_artifact_channel_delivery_boundary.py"
+          "magi-agent/magi_agent/artifacts/output_registry_boundary.py",
+          "magi-agent/tests/test_priority_e_artifact_channel_delivery_boundary.py"
         ],
         "notes": "Artifact metadata contracts exist, but production artifact panel data remains TS-owned."
       },
       "python_adk_live_producer_support": {
         "status": "default_off",
         "evidence": [
-          "infra/docker/clawy-core-agent-python/openmagi_core_agent/artifacts/delivery_boundary.py"
+          "magi-agent/magi_agent/artifacts/delivery_boundary.py"
         ],
         "notes": "Artifact writes and channel delivery are not attached to production frontend routes."
       },
@@ -816,16 +816,16 @@
       "python_adk_parser_sanitizer_support": {
         "status": "supported",
         "evidence": [
-          "infra/docker/clawy-core-agent-python/openmagi_core_agent/adk_bridge/policy_boundary.py",
-          "infra/docker/clawy-core-agent-python/tests/test_control_events.py"
+          "magi-agent/magi_agent/adk_bridge/policy_boundary.py",
+          "magi-agent/tests/test_control_events.py"
         ],
         "notes": "Control event projection and approval receipt contracts exist."
       },
       "python_adk_live_producer_support": {
         "status": "default_off",
         "evidence": [
-          "infra/docker/clawy-core-agent-python/openmagi_core_agent/harness/approval_receipts.py",
-          "infra/docker/clawy-core-agent-python/openmagi_core_agent/runtime/approval_resume.py"
+          "magi-agent/magi_agent/harness/approval_receipts.py",
+          "magi-agent/magi_agent/runtime/approval_resume.py"
         ],
         "notes": "Approval resume authority is not live for production frontend turns."
       },
@@ -857,16 +857,16 @@
       "python_adk_parser_sanitizer_support": {
         "status": "supported",
         "evidence": [
-          "infra/docker/clawy-core-agent-python/tests/fixtures/live_work_console_event_parity/matrix.json",
-          "infra/docker/clawy-core-agent-python/tests/fixtures/ts_parity_replay/public_event_golden.json"
+          "magi-agent/tests/fixtures/live_work_console_event_parity/matrix.json",
+          "magi-agent/tests/fixtures/ts_parity_replay/public_event_golden.json"
         ],
         "notes": "heartbeat and retry projections have public fixture coverage."
       },
       "python_adk_live_producer_support": {
         "status": "contract_only",
         "evidence": [
-          "infra/docker/clawy-core-agent-python/openmagi_core_agent/recipes/retry_repair_policies.py",
-          "infra/docker/clawy-core-agent-python/openmagi_core_agent/harness/repair_policy.py"
+          "magi-agent/magi_agent/recipes/retry_repair_policies.py",
+          "magi-agent/magi_agent/harness/repair_policy.py"
         ],
         "notes": "Retry policy contracts exist; production fallback remains TS-owned."
       },

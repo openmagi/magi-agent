@@ -6,10 +6,10 @@ import sys
 import pytest
 from pydantic import ValidationError
 
-from openmagi_core_agent.recipes.first_party.self_improvement import (
+from magi_agent.recipes.first_party.self_improvement import (
     build_self_improvement_proposal_recipe_manifest,
 )
-from openmagi_core_agent.self_improvement.proposals import (
+from magi_agent.self_improvement.proposals import (
     SelfImprovementProposal,
     SelfImprovementProposalConfig,
     SelfImprovementProposalRequest,
@@ -316,15 +316,15 @@ def test_proposal_import_boundary_does_not_initialize_live_runner_or_toolhost() 
     forbidden = {
         "google.adk.runners",
         "google.adk.agents",
-        "openmagi_core_agent.tools.host",
-        "openmagi_core_agent.transport.chat",
-        "openmagi_core_agent.memory.hipocampus",
-        "openmagi_core_agent.memory.qmd",
+        "magi_agent.tools.host",
+        "magi_agent.transport.chat",
+        "magi_agent.memory.hipocampus",
+        "magi_agent.memory.qmd",
     }
     for module_name in forbidden:
         sys.modules.pop(module_name, None)
 
-    __import__("openmagi_core_agent.self_improvement.proposals")
-    __import__("openmagi_core_agent.recipes.first_party.self_improvement")
+    __import__("magi_agent.self_improvement.proposals")
+    __import__("magi_agent.recipes.first_party.self_improvement")
 
     assert forbidden.isdisjoint(sys.modules)

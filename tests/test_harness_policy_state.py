@@ -6,8 +6,8 @@ import sys
 import pytest
 from pydantic import ValidationError
 
-from openmagi_core_agent.harness.policy_state import build_harness_policy_state
-from openmagi_core_agent.harness.presets import builtin_preset_by_key, builtin_preset_catalog
+from magi_agent.harness.policy_state import build_harness_policy_state
+from magi_agent.harness.presets import builtin_preset_by_key, builtin_preset_catalog
 
 
 EXPECTED_SOURCE_PRECEDENCE = (
@@ -152,17 +152,17 @@ def test_policy_state_import_does_not_load_runtime_or_route_modules() -> None:
 import importlib
 import sys
 
-importlib.import_module("openmagi_core_agent.harness.policy_state")
+importlib.import_module("magi_agent.harness.policy_state")
 forbidden_prefixes = (
     "google.adk",
 )
 forbidden_modules = (
-    "openmagi_core_agent.adk_bridge.runner_adapter",
-    "openmagi_core_agent.adk_bridge.tool_adapter",
-    "openmagi_core_agent.transport.chat",
-    "openmagi_core_agent.transport.tools",
-    "openmagi_core_agent.hooks.bus",
-    "openmagi_core_agent.tools.dispatcher",
+    "magi_agent.adk_bridge.runner_adapter",
+    "magi_agent.adk_bridge.tool_adapter",
+    "magi_agent.transport.chat",
+    "magi_agent.transport.tools",
+    "magi_agent.hooks.bus",
+    "magi_agent.tools.dispatcher",
 )
 loaded = [
     module

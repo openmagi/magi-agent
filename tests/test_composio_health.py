@@ -4,8 +4,8 @@ import json
 
 
 def test_composio_health_for_default_disabled_is_safe_and_actionable() -> None:
-    from openmagi_core_agent.composio.config import resolve_composio_config
-    from openmagi_core_agent.composio.health import composio_health_metadata
+    from magi_agent.composio.config import resolve_composio_config
+    from magi_agent.composio.health import composio_health_metadata
 
     metadata = composio_health_metadata(resolve_composio_config({}), package_available=False)
 
@@ -18,9 +18,9 @@ def test_composio_health_for_default_disabled_is_safe_and_actionable() -> None:
 
 
 def test_composio_health_redacts_secret_and_url() -> None:
-    from openmagi_core_agent.composio.config import resolve_composio_config
-    from openmagi_core_agent.composio.health import composio_health_metadata
-    from openmagi_core_agent.composio.mcp import ComposioToolsetBundle
+    from magi_agent.composio.config import resolve_composio_config
+    from magi_agent.composio.health import composio_health_metadata
+    from magi_agent.composio.mcp import ComposioToolsetBundle
 
     cfg = resolve_composio_config({"COMPOSIO_API_KEY": "cp_test_secret"})
     metadata = composio_health_metadata(
@@ -42,9 +42,9 @@ def test_composio_health_redacts_secret_and_url() -> None:
 
 
 def test_composio_health_redacts_composio_account_session_and_connect_url() -> None:
-    from openmagi_core_agent.composio.config import resolve_composio_config
-    from openmagi_core_agent.composio.health import composio_health_metadata
-    from openmagi_core_agent.composio.mcp import ComposioToolsetBundle
+    from magi_agent.composio.config import resolve_composio_config
+    from magi_agent.composio.health import composio_health_metadata
+    from magi_agent.composio.mcp import ComposioToolsetBundle
 
     cfg = resolve_composio_config({"COMPOSIO_API_KEY": "cp_test_secret"})
     metadata = composio_health_metadata(
@@ -73,8 +73,8 @@ def test_composio_health_redacts_composio_account_session_and_connect_url() -> N
 
 
 def test_composio_health_reports_missing_optional_package() -> None:
-    from openmagi_core_agent.composio.config import resolve_composio_config
-    from openmagi_core_agent.composio.health import composio_health_metadata
+    from magi_agent.composio.config import resolve_composio_config
+    from magi_agent.composio.health import composio_health_metadata
 
     metadata = composio_health_metadata(
         resolve_composio_config(

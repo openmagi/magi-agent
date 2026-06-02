@@ -8,11 +8,11 @@ from typing import Any
 
 from fastapi.testclient import TestClient
 
-from openmagi_core_agent.app import create_app
-from openmagi_core_agent.config.models import BuildInfo, RuntimeConfig
-from openmagi_core_agent.plugins.manager import PluginOptOutRecord, resolve_plugin_state
-from openmagi_core_agent.plugins.native_catalog import native_plugin_manifests
-from openmagi_core_agent.runtime.openmagi_runtime import OpenMagiRuntime
+from magi_agent.app import create_app
+from magi_agent.config.models import BuildInfo, RuntimeConfig
+from magi_agent.plugins.manager import PluginOptOutRecord, resolve_plugin_state
+from magi_agent.plugins.native_catalog import native_plugin_manifests
+from magi_agent.runtime.openmagi_runtime import OpenMagiRuntime
 
 
 EXPECTED_NATIVE_PLUGIN_IDS = (
@@ -90,7 +90,7 @@ def assert_no_executable_metadata(value: object) -> None:
     dumped = json.dumps(value, sort_keys=True)
     assert "entrypoint" not in dumped
     assert "configSchema" not in dumped
-    assert "openmagi_core_agent.plugins.native" not in dumped
+    assert "magi_agent.plugins.native" not in dumped
     assert "handler" not in dumped
     assert "super-secret" not in dumped
 
@@ -469,14 +469,14 @@ import importlib.abc
 
 forbidden_prefixes = (
     "google.adk",
-    "openmagi_core_agent.adk_bridge",
-    "openmagi_core_agent.runtime",
-    "openmagi_core_agent.tools.dispatcher",
-    "openmagi_core_agent.tools.registry",
-    "openmagi_core_agent.hooks.bus",
-    "openmagi_core_agent.plugins.native",
-    "openmagi_core_agent.app",
-    "openmagi_core_agent.main",
+    "magi_agent.adk_bridge",
+    "magi_agent.runtime",
+    "magi_agent.tools.dispatcher",
+    "magi_agent.tools.registry",
+    "magi_agent.hooks.bus",
+    "magi_agent.plugins.native",
+    "magi_agent.app",
+    "magi_agent.main",
 )
 
 
@@ -493,7 +493,7 @@ class ForbiddenImportFinder(importlib.abc.MetaPathFinder):
 import sys
 
 sys.meta_path.insert(0, ForbiddenImportFinder())
-importlib.import_module("openmagi_core_agent.transport.plugins")
+importlib.import_module("magi_agent.transport.plugins")
 """
     completed = subprocess.run(
         [sys.executable, "-c", textwrap.dedent(script)],
@@ -510,9 +510,9 @@ def test_plugin_admin_import_does_not_delete_preloaded_forbidden_modules() -> No
 import importlib
 import sys
 
-preloaded = importlib.import_module("openmagi_core_agent.runtime.openmagi_runtime")
-importlib.import_module("openmagi_core_agent.transport.plugins")
-current = sys.modules.get("openmagi_core_agent.runtime.openmagi_runtime")
+preloaded = importlib.import_module("magi_agent.runtime.openmagi_runtime")
+importlib.import_module("magi_agent.transport.plugins")
+current = sys.modules.get("magi_agent.runtime.openmagi_runtime")
 if current is not preloaded:
     raise AssertionError("plugin admin import deleted a preloaded runtime module")
 """
@@ -531,13 +531,13 @@ def test_transport_package_import_is_lazy_until_health_export_access() -> None:
 import importlib
 import sys
 
-transport = importlib.import_module("openmagi_core_agent.transport")
+transport = importlib.import_module("magi_agent.transport")
 eagerly_loaded = [
     module_name
     for module_name in (
-        "openmagi_core_agent.transport.health",
-        "openmagi_core_agent.runtime",
-        "openmagi_core_agent.runtime.openmagi_runtime",
+        "magi_agent.transport.health",
+        "magi_agent.runtime",
+        "magi_agent.runtime.openmagi_runtime",
     )
     if module_name in sys.modules
 ]
@@ -545,14 +545,14 @@ if eagerly_loaded:
     raise AssertionError(f"transport package import eagerly loaded: {eagerly_loaded}")
 
 health_payload = transport.health_payload
-from openmagi_core_agent.transport import health_payload as imported_health_payload
-from openmagi_core_agent.transport import healthz_payload
+from magi_agent.transport import health_payload as imported_health_payload
+from magi_agent.transport import healthz_payload
 
 if health_payload is not imported_health_payload:
     raise AssertionError("lazy health_payload export is not stable")
 if not callable(health_payload) or not callable(healthz_payload):
     raise AssertionError("lazy health exports must be callable")
-if "openmagi_core_agent.runtime.openmagi_runtime" not in sys.modules:
+if "magi_agent.runtime.openmagi_runtime" not in sys.modules:
     raise AssertionError("accessing health exports should load the health implementation")
 """
     completed = subprocess.run(

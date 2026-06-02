@@ -3,7 +3,7 @@ from __future__ import annotations
 import subprocess
 import sys
 
-from openmagi_core_agent.runtime.slash_control_boundary import (
+from magi_agent.runtime.slash_control_boundary import (
     SlashControlBoundary,
     SlashControlConfig,
     SlashControlRequest,
@@ -81,7 +81,7 @@ def test_slash_control_boundary_blocks_raw_private_payloads_and_redacts_metadata
 
 
 def test_slash_control_boundary_forged_authority_cannot_turn_on() -> None:
-    from openmagi_core_agent.runtime.slash_control_boundary import (
+    from magi_agent.runtime.slash_control_boundary import (
         SlashCommandIntent,
         SlashControlAuthorityFlags,
         SlashControlDecision,
@@ -121,7 +121,7 @@ def test_slash_control_boundary_has_no_live_imports() -> None:
 import importlib
 import sys
 
-importlib.import_module("openmagi_core_agent.runtime.slash_control_boundary")
+importlib.import_module("magi_agent.runtime.slash_control_boundary")
 forbidden = (
     "google.adk.runners",
     "google.adk.agents",

@@ -2,15 +2,15 @@ from __future__ import annotations
 
 import json
 
-from openmagi_core_agent.runtime.events import (
+from magi_agent.runtime.events import (
     NormalizedEvent,
     normalized_events_to_agent_events,
 )
-from openmagi_core_agent.runtime.public_events import (
+from magi_agent.runtime.public_events import (
     authorize_rule_check_event,
     authorize_rule_check_metadata,
 )
-from openmagi_core_agent.transport.sse import InMemorySseWriter
+from magi_agent.transport.sse import InMemorySseWriter
 
 
 def _sse_payloads(events: list[dict[str, object]]) -> list[dict[str, object]]:

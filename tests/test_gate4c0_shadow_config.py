@@ -3,7 +3,7 @@ from __future__ import annotations
 from pydantic import ValidationError
 import pytest
 
-from openmagi_core_agent.shadow.gate4c0_shadow_config import (
+from magi_agent.shadow.gate4c0_shadow_config import (
     Gate4C0AllowlistMetadata,
     Gate4C0AuthorityFlags,
     Gate4C0BudgetPolicy,

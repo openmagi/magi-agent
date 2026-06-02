@@ -5,7 +5,7 @@ import json
 import subprocess
 import sys
 
-from openmagi_core_agent.evidence.source_ledger import (
+from magi_agent.evidence.source_ledger import (
     LocalResearchSourceLedger,
     public_source_ledger_report,
 )
@@ -68,11 +68,11 @@ def _ledger() -> LocalResearchSourceLedger:
 
 
 def test_knowledge_search_tool_projects_refs_and_keeps_private_snippets_ref_only() -> None:
-    from openmagi_core_agent.knowledge.provider_boundary import (
+    from magi_agent.knowledge.provider_boundary import (
         KnowledgeBoundary,
         KnowledgeBoundaryConfig,
     )
-    from openmagi_core_agent.knowledge.source_tools import (
+    from magi_agent.knowledge.source_tools import (
         LocalKnowledgeSourceToolBoundary,
         project_knowledge_result_to_source_ledger,
     )
@@ -140,11 +140,11 @@ def test_knowledge_search_tool_projects_refs_and_keeps_private_snippets_ref_only
 
 def test_browser_source_tool_projects_artifact_refs_without_raw_snapshot_or_binary_context(
 ) -> None:
-    from openmagi_core_agent.browser.provider_boundary import (
+    from magi_agent.browser.provider_boundary import (
         BrowserProviderConfig,
         LocalBrowserProviderRuntime,
     )
-    from openmagi_core_agent.browser.source_tools import (
+    from magi_agent.browser.source_tools import (
         LocalBrowserSourceToolBoundary,
         project_browser_result_to_source_ledger,
     )
@@ -208,11 +208,11 @@ def test_browser_source_tool_projects_artifact_refs_without_raw_snapshot_or_bina
 
 
 def test_browser_tool_arguments_cannot_grant_approval() -> None:
-    from openmagi_core_agent.browser.provider_boundary import (
+    from magi_agent.browser.provider_boundary import (
         BrowserProviderConfig,
         LocalBrowserProviderRuntime,
     )
-    from openmagi_core_agent.browser.source_tools import LocalBrowserSourceToolBoundary
+    from magi_agent.browser.source_tools import LocalBrowserSourceToolBoundary
 
     provider = FakeBrowserProvider()
     tool = LocalBrowserSourceToolBoundary(
@@ -245,11 +245,11 @@ def test_browser_tool_arguments_cannot_grant_approval() -> None:
 
 
 def test_browser_auth_flow_open_uses_host_approval_not_tool_arguments() -> None:
-    from openmagi_core_agent.browser.provider_boundary import (
+    from magi_agent.browser.provider_boundary import (
         BrowserProviderConfig,
         LocalBrowserProviderRuntime,
     )
-    from openmagi_core_agent.browser.source_tools import LocalBrowserSourceToolBoundary
+    from magi_agent.browser.source_tools import LocalBrowserSourceToolBoundary
 
     provider = FakeBrowserProvider()
     tool = LocalBrowserSourceToolBoundary(
@@ -281,12 +281,12 @@ def test_browser_auth_flow_open_uses_host_approval_not_tool_arguments() -> None:
 
 
 def test_source_tool_boundaries_are_default_off_even_with_fake_providers() -> None:
-    from openmagi_core_agent.browser.provider_boundary import (
+    from magi_agent.browser.provider_boundary import (
         BrowserProviderConfig,
         LocalBrowserProviderRuntime,
     )
-    from openmagi_core_agent.browser.source_tools import LocalBrowserSourceToolBoundary
-    from openmagi_core_agent.knowledge.source_tools import LocalKnowledgeSourceToolBoundary
+    from magi_agent.browser.source_tools import LocalBrowserSourceToolBoundary
+    from magi_agent.knowledge.source_tools import LocalKnowledgeSourceToolBoundary
 
     knowledge_provider = FakeKnowledgeProvider()
     browser_provider = FakeBrowserProvider()
@@ -327,8 +327,8 @@ import importlib
 import sys
 
 for module_name in (
-    "openmagi_core_agent.knowledge.source_tools",
-    "openmagi_core_agent.browser.source_tools",
+    "magi_agent.knowledge.source_tools",
+    "magi_agent.browser.source_tools",
 ):
     module = importlib.import_module(module_name)
     assert module is not None
@@ -342,13 +342,13 @@ forbidden_prefixes = (
     "browser_use",
     "requests",
     "httpx",
-    "openmagi_core_agent.adk_bridge.runner_adapter",
-    "openmagi_core_agent.tools.dispatcher",
-    "openmagi_core_agent.transport",
-    "openmagi_core_agent.routing",
-    "openmagi_core_agent.channels",
-    "openmagi_core_agent.memory",
-    "openmagi_core_agent.workspace",
+    "magi_agent.adk_bridge.runner_adapter",
+    "magi_agent.tools.dispatcher",
+    "magi_agent.transport",
+    "magi_agent.routing",
+    "magi_agent.channels",
+    "magi_agent.memory",
+    "magi_agent.workspace",
 )
 loaded = [
     module_name

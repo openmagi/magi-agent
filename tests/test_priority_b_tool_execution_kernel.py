@@ -8,10 +8,10 @@ from typing import Any
 
 import pytest
 
-from openmagi_core_agent.tools.context import ToolContext
-from openmagi_core_agent.tools.manifest import ToolManifest, ToolSource
-from openmagi_core_agent.tools.registry import ToolRegistry
-from openmagi_core_agent.tools.result import ToolResult
+from magi_agent.tools.context import ToolContext
+from magi_agent.tools.manifest import ToolManifest, ToolSource
+from magi_agent.tools.registry import ToolRegistry
+from magi_agent.tools.result import ToolResult
 
 
 class FakeToolExecutor:
@@ -67,7 +67,7 @@ def _context() -> ToolContext:
 
 
 def test_kernel_is_default_off_and_does_not_call_handler() -> None:
-    from openmagi_core_agent.tools.kernel import (
+    from magi_agent.tools.kernel import (
         ToolExecutionKernel,
         ToolExecutionRequest,
     )
@@ -104,7 +104,7 @@ def test_kernel_is_default_off_and_does_not_call_handler() -> None:
 
 
 def test_kernel_records_request_shape_and_runs_fake_handler_only_when_enabled() -> None:
-    from openmagi_core_agent.tools.kernel import (
+    from magi_agent.tools.kernel import (
         ToolExecutionKernel,
         ToolExecutionKernelConfig,
         ToolExecutionRequest,
@@ -169,7 +169,7 @@ def test_kernel_records_request_shape_and_runs_fake_handler_only_when_enabled() 
 
 
 def test_kernel_redacts_approval_metadata_and_fake_result_payloads() -> None:
-    from openmagi_core_agent.tools.kernel import (
+    from magi_agent.tools.kernel import (
         ToolExecutionKernel,
         ToolExecutionKernelConfig,
         ToolExecutionRequest,
@@ -234,7 +234,7 @@ def test_kernel_redacts_approval_metadata_and_fake_result_payloads() -> None:
 
 
 def test_kernel_redacts_tool_call_and_control_identifier_side_channels() -> None:
-    from openmagi_core_agent.tools.kernel import (
+    from magi_agent.tools.kernel import (
         ToolExecutionKernel,
         ToolExecutionKernelConfig,
         ToolExecutionRequest,
@@ -298,7 +298,7 @@ def test_kernel_redacts_tool_call_and_control_identifier_side_channels() -> None
 
 
 def test_kernel_redacts_private_path_tails_in_tool_results() -> None:
-    from openmagi_core_agent.tools.kernel import (
+    from magi_agent.tools.kernel import (
         ToolExecutionKernel,
         ToolExecutionKernelConfig,
         ToolExecutionRequest,
@@ -339,7 +339,7 @@ def test_kernel_redacts_private_path_tails_in_tool_results() -> None:
 
 
 def test_kernel_redacts_home_and_kubelet_paths_in_tool_results() -> None:
-    from openmagi_core_agent.tools.kernel import (
+    from magi_agent.tools.kernel import (
         ToolExecutionKernel,
         ToolExecutionKernelConfig,
         ToolExecutionRequest,
@@ -379,7 +379,7 @@ def test_kernel_redacts_home_and_kubelet_paths_in_tool_results() -> None:
 
 
 def test_kernel_redacts_private_evidence_summary_keys() -> None:
-    from openmagi_core_agent.tools.kernel import (
+    from magi_agent.tools.kernel import (
         ToolExecutionKernel,
         ToolExecutionKernelConfig,
         ToolExecutionRequest,
@@ -429,7 +429,7 @@ def test_kernel_redacts_private_evidence_summary_keys() -> None:
 
 
 def test_kernel_redacts_key_named_tool_result_credentials() -> None:
-    from openmagi_core_agent.tools.kernel import (
+    from magi_agent.tools.kernel import (
         ToolExecutionKernel,
         ToolExecutionKernelConfig,
         ToolExecutionRequest,
@@ -487,7 +487,7 @@ def test_kernel_redacts_key_named_tool_result_credentials() -> None:
 
 
 def test_kernel_blocks_before_handler_for_policy_failures() -> None:
-    from openmagi_core_agent.tools.kernel import (
+    from magi_agent.tools.kernel import (
         ToolExecutionKernel,
         ToolExecutionKernelConfig,
         ToolExecutionRequest,
@@ -558,7 +558,7 @@ def test_kernel_blocks_before_handler_for_policy_failures() -> None:
 
 
 def test_kernel_normalizes_handler_exception_and_timeout_without_raw_leakage() -> None:
-    from openmagi_core_agent.tools.kernel import (
+    from magi_agent.tools.kernel import (
         ToolExecutionKernel,
         ToolExecutionKernelConfig,
         ToolExecutionRequest,
@@ -616,7 +616,7 @@ def test_kernel_normalizes_handler_exception_and_timeout_without_raw_leakage() -
 
 
 def test_kernel_propagates_cancellation_without_normalizing_as_tool_failure() -> None:
-    from openmagi_core_agent.tools.kernel import (
+    from magi_agent.tools.kernel import (
         ToolExecutionKernel,
         ToolExecutionKernelConfig,
         ToolExecutionRequest,
@@ -660,7 +660,7 @@ import importlib
 import sys
 
 before = set(sys.modules)
-module = importlib.import_module("openmagi_core_agent.tools.kernel")
+module = importlib.import_module("magi_agent.tools.kernel")
 assert hasattr(module, "ToolExecutionKernel")
 
 forbidden_exact = (
@@ -676,11 +676,11 @@ forbidden_exact = (
     "kubernetes",
     "httpx",
     "requests",
-    "openmagi_core_agent.adk_bridge.runner_adapter",
-    "openmagi_core_agent.transport.chat",
-    "openmagi_core_agent.transport.sse",
-    "openmagi_core_agent.memory.adk_bridge",
-    "openmagi_core_agent.workspace.adoption_boundary",
+    "magi_agent.adk_bridge.runner_adapter",
+    "magi_agent.transport.chat",
+    "magi_agent.transport.sse",
+    "magi_agent.memory.adk_bridge",
+    "magi_agent.workspace.adoption_boundary",
 )
 loaded = [
     name
@@ -701,7 +701,7 @@ if loaded:
     assert completed.returncode == 0, completed.stderr
     source = (
         Path(__file__).parents[1]
-        / "openmagi_core_agent"
+        / "magi_agent"
         / "tools"
         / "kernel.py"
     ).read_text(encoding="utf-8")

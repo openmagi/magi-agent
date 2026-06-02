@@ -3,8 +3,8 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
-from openmagi_core_agent.recipes.phase_routing_defaults import recipe_phase_routing_planner
-from openmagi_core_agent.runtime.phase_routing import (
+from magi_agent.recipes.phase_routing_defaults import recipe_phase_routing_planner
+from magi_agent.runtime.phase_routing import (
     PhaseRoutingPlanner,
     PhaseRoutingRequest,
 )

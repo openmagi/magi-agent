@@ -1,9 +1,9 @@
 from importlib.util import find_spec
 
-from openmagi_core_agent.adk_bridge.primitives import AdkPrimitiveBoundary
-from openmagi_core_agent.config.models import BuildInfo, RuntimeConfig
-from openmagi_core_agent.harness.profiles import DEFAULT_PROFILE_NAME
-from openmagi_core_agent.runtime.openmagi_runtime import OpenMagiRuntime
+from magi_agent.adk_bridge.primitives import AdkPrimitiveBoundary
+from magi_agent.config.models import BuildInfo, RuntimeConfig
+from magi_agent.harness.profiles import DEFAULT_PROFILE_NAME
+from magi_agent.runtime.openmagi_runtime import OpenMagiRuntime
 
 
 def make_config() -> RuntimeConfig:

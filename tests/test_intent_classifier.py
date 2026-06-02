@@ -6,7 +6,7 @@ import threading
 import time
 from pathlib import Path
 
-from openmagi_core_agent.rules.intent_classifier import (
+from magi_agent.rules.intent_classifier import (
     ClassificationRequest,
     IntentClassifier,
     filter_tools_by_intent,
@@ -259,7 +259,7 @@ def test_intent_classifier_import_stays_adk_model_network_and_deployment_free() 
 import importlib
 import sys
 
-module = importlib.import_module("openmagi_core_agent.rules.intent_classifier")
+module = importlib.import_module("magi_agent.rules.intent_classifier")
 assert hasattr(module, "IntentClassifier")
 
 forbidden_exact = (
@@ -282,18 +282,18 @@ forbidden_exact = (
     "asyncio",
 )
 forbidden_prefixes = (
-    "openmagi_core_agent.adk_bridge",
-    "openmagi_core_agent.runtime.openmagi_runtime",
-    "openmagi_core_agent.transport",
-    "openmagi_core_agent.tools",
-    "openmagi_core_agent.workspace",
-    "openmagi_core_agent.deploy",
-    "openmagi_core_agent.provisioning",
-    "openmagi_core_agent.k8s",
-    "openmagi_core_agent.telegram",
-    "openmagi_core_agent.database",
-    "openmagi_core_agent.billing",
-    "openmagi_core_agent.auth",
+    "magi_agent.adk_bridge",
+    "magi_agent.runtime.openmagi_runtime",
+    "magi_agent.transport",
+    "magi_agent.tools",
+    "magi_agent.workspace",
+    "magi_agent.deploy",
+    "magi_agent.provisioning",
+    "magi_agent.k8s",
+    "magi_agent.telegram",
+    "magi_agent.database",
+    "magi_agent.billing",
+    "magi_agent.auth",
 )
 loaded = [
     loaded_name
@@ -315,7 +315,7 @@ if loaded:
 
 def test_intent_classifier_source_forbids_runner_model_network_and_exec_imports() -> None:
     root = Path(__file__).parents[1]
-    module_path = root / "openmagi_core_agent" / "rules" / "intent_classifier.py"
+    module_path = root / "magi_agent" / "rules" / "intent_classifier.py"
     source = module_path.read_text(encoding="utf-8")
     forbidden_imports = (
         "google.adk",
@@ -330,13 +330,13 @@ def test_intent_classifier_source_forbids_runner_model_network_and_exec_imports(
         "asyncio",
         "fastapi",
         "uvicorn",
-        "openmagi_core_agent.adk_bridge",
-        "openmagi_core_agent.runtime",
-        "openmagi_core_agent.transport",
-        "openmagi_core_agent.tools",
-        "openmagi_core_agent.deploy",
-        "openmagi_core_agent.provisioning",
-        "openmagi_core_agent.k8s",
+        "magi_agent.adk_bridge",
+        "magi_agent.runtime",
+        "magi_agent.transport",
+        "magi_agent.tools",
+        "magi_agent.deploy",
+        "magi_agent.provisioning",
+        "magi_agent.k8s",
     )
 
     for forbidden in forbidden_imports:

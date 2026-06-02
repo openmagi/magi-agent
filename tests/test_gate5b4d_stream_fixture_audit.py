@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from openmagi_core_agent.shadow.gate5b4d_stream_fixture_audit import (
+from magi_agent.shadow.gate5b4d_stream_fixture_audit import (
     audit_gate5b4d_stream_fixture,
     load_gate5b4d_stream_fixture,
 )
@@ -207,12 +207,12 @@ def test_gate5b4d_stream_fixture_boundaries_are_false_and_isolated() -> None:
     "forbidden_module",
     (
         "google.adk.runners",
-        "openmagi_core_agent.adk_bridge.local_runner",
-        "openmagi_core_agent.adk_bridge.runner_adapter",
-        "openmagi_core_agent.tools.dispatcher",
-        "openmagi_core_agent.memory",
-        "openmagi_core_agent.app",
-        "openmagi_core_agent.transport.chat",
+        "magi_agent.adk_bridge.local_runner",
+        "magi_agent.adk_bridge.runner_adapter",
+        "magi_agent.tools.dispatcher",
+        "magi_agent.memory",
+        "magi_agent.app",
+        "magi_agent.transport.chat",
         "supabase",
         "postgrest",
         "kubernetes",
@@ -225,7 +225,7 @@ def test_gate5b4d_stream_fixture_import_boundary_stays_shadow_only(
     code = f"""
 import sys
 
-from openmagi_core_agent.shadow.gate5b4d_stream_fixture_audit import (
+from magi_agent.shadow.gate5b4d_stream_fixture_audit import (
     audit_gate5b4d_stream_fixture,
     load_gate5b4d_stream_fixture,
 )

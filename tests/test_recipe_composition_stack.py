@@ -7,7 +7,7 @@ import sys
 import pytest
 from pydantic import ValidationError
 
-from openmagi_core_agent.recipes.composition import RecipeStackInput
+from magi_agent.recipes.composition import RecipeStackInput
 
 
 def _secret_fixture(*parts: str) -> str:
@@ -587,21 +587,21 @@ def test_importing_composition_module_does_not_load_runtime_toolhost_or_transpor
 import importlib
 import sys
 
-module = importlib.import_module("openmagi_core_agent.recipes.composition")
+module = importlib.import_module("magi_agent.recipes.composition")
 assert hasattr(module, "RecipeStackInput")
 
 forbidden_prefixes = (
     "google.adk",
-    "openmagi_core_agent.adk_bridge",
-    "openmagi_core_agent.browser",
-    "openmagi_core_agent.channels",
-    "openmagi_core_agent.memory",
-    "openmagi_core_agent.runtime",
-    "openmagi_core_agent.routing",
-    "openmagi_core_agent.tools",
-    "openmagi_core_agent.toolhost",
-    "openmagi_core_agent.transport",
-    "openmagi_core_agent.workspace",
+    "magi_agent.adk_bridge",
+    "magi_agent.browser",
+    "magi_agent.channels",
+    "magi_agent.memory",
+    "magi_agent.runtime",
+    "magi_agent.routing",
+    "magi_agent.tools",
+    "magi_agent.toolhost",
+    "magi_agent.transport",
+    "magi_agent.workspace",
 )
 loaded = [
     module_name

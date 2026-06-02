@@ -4,23 +4,23 @@ from pathlib import Path
 
 import pytest
 
-from openmagi_core_agent.harness.general_automation.spreadsheet_evidence import (
+from magi_agent.harness.general_automation.spreadsheet_evidence import (
     build_spreadsheet_read_evidence,
     build_spreadsheet_validation_evidence,
     build_spreadsheet_write_evidence,
     evaluate_spreadsheet_delivery_claim,
 )
-from openmagi_core_agent.recipes.first_party.general_automation.spreadsheet_contracts import (
+from magi_agent.recipes.first_party.general_automation.spreadsheet_contracts import (
     get_spreadsheet_operation_contract,
     spreadsheet_contract_catalog,
 )
 
 
 PYTHON_ROOT = Path(__file__).resolve().parents[1]
-HARNESS_DIR = PYTHON_ROOT / "openmagi_core_agent" / "harness" / "general_automation"
+HARNESS_DIR = PYTHON_ROOT / "magi_agent" / "harness" / "general_automation"
 RECIPE_DIR = (
     PYTHON_ROOT
-    / "openmagi_core_agent"
+    / "magi_agent"
     / "recipes"
     / "first_party"
     / "general_automation"
@@ -221,12 +221,12 @@ def test_spreadsheet_contract_modules_do_not_touch_core_or_live_services() -> No
     )
 
     forbidden_fragments = (
-        "openmagi_core_agent.adk_bridge",
-        "openmagi_core_agent.runtime",
-        "openmagi_core_agent.tools.dispatcher",
-        "openmagi_core_agent.tools.registry",
-        "openmagi_core_agent.tools.permission",
-        "openmagi_core_agent.tools.result",
+        "magi_agent.adk_bridge",
+        "magi_agent.runtime",
+        "magi_agent.tools.dispatcher",
+        "magi_agent.tools.registry",
+        "magi_agent.tools.permission",
+        "magi_agent.tools.result",
         "google.adk.runners",
         "ArtifactService(",
         _fragment("sub", "process"),

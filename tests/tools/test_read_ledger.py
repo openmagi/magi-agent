@@ -7,8 +7,8 @@ from datetime import UTC, datetime
 import pytest
 from pydantic import ValidationError
 
-from openmagi_core_agent.tools.manifest import ToolManifest, ToolSource
-from openmagi_core_agent.tools.read_ledger import (
+from magi_agent.tools.manifest import ToolManifest, ToolSource
+from magi_agent.tools.read_ledger import (
     ReadLedger,
     ReadLedgerAuthorityFlags,
     ReadLedgerConfig,
@@ -18,8 +18,8 @@ from openmagi_core_agent.tools.read_ledger import (
     workspace_content_digest,
     workspace_path_ref,
 )
-from openmagi_core_agent.tools.safety import RuntimePermissionArbiter
-from openmagi_core_agent.tools.context import ToolContext
+from magi_agent.tools.safety import RuntimePermissionArbiter
+from magi_agent.tools.context import ToolContext
 
 
 def _ledger() -> ReadLedger:
@@ -629,7 +629,7 @@ def test_read_ledger_uses_no_live_runtime_imports() -> None:
 import importlib
 import sys
 
-importlib.import_module("openmagi_core_agent.tools.read_ledger")
+importlib.import_module("magi_agent.tools.read_ledger")
 forbidden = (
     "subprocess",
     "git",
@@ -640,10 +640,10 @@ forbidden = (
     "google.adk.sessions",
     "google.adk.models",
     "google.genai",
-    "openmagi_core_agent.runtime.runner",
-    "openmagi_core_agent.routes",
-    "openmagi_core_agent.transport.chat",
-    "openmagi_core_agent.toolhost.runtime",
+    "magi_agent.runtime.runner",
+    "magi_agent.routes",
+    "magi_agent.transport.chat",
+    "magi_agent.toolhost.runtime",
 )
 loaded = [name for name in forbidden if name in sys.modules]
 if loaded:

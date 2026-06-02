@@ -1,11 +1,11 @@
-from openmagi_core_agent.harness.resolved import (
+from magi_agent.harness.resolved import (
     build_default_resolved_harness_state,
     filter_hooks_for_harness,
     resolve_scoped_harness_hooks,
 )
-from openmagi_core_agent.hooks.manifest import HookManifest, HookPoint
-from openmagi_core_agent.hooks.scope import HookScope
-from openmagi_core_agent.tools.manifest import ToolSource
+from magi_agent.hooks.manifest import HookManifest, HookPoint
+from magi_agent.hooks.scope import HookScope
+from magi_agent.tools.manifest import ToolSource
 
 
 def hook(

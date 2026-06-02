@@ -6,13 +6,13 @@ import subprocess
 import sys
 from pathlib import Path
 
-from openmagi_core_agent.recipes.coding_subagents import (
+from magi_agent.recipes.coding_subagents import (
     CodingSubagentConfig,
     CodingSubagentModeRequest,
     CodingSubagentRecipe,
     CodingSubagentToolScope,
 )
-from openmagi_core_agent.tools.read_ledger import (
+from magi_agent.tools.read_ledger import (
     ReadLedger,
     ReadLedgerConfig,
     workspace_content_digest,
@@ -278,7 +278,7 @@ def test_disabled_defaults_and_forged_authority_flags_remain_inert() -> None:
 def test_coding_subagent_recipe_import_boundary_has_no_live_runtime_surfaces() -> None:
     source = (
         Path(__file__).parents[2]
-        / "openmagi_core_agent"
+        / "magi_agent"
         / "recipes"
         / "coding_subagents.py"
     ).read_text(encoding="utf-8")
@@ -301,15 +301,15 @@ def test_coding_subagent_recipe_import_boundary_has_no_live_runtime_surfaces() -
 import importlib
 import sys
 
-importlib.import_module("openmagi_core_agent.recipes.coding_subagents")
+importlib.import_module("magi_agent.recipes.coding_subagents")
 forbidden = (
     "google.adk.runners",
     "google.adk.sessions",
     "google.adk.models",
-    "openmagi_core_agent.adk_bridge",
-    "openmagi_core_agent.runtime.adk_turn_runner",
-    "openmagi_core_agent.transport.chat",
-    "openmagi_core_agent.tools.dispatcher",
+    "magi_agent.adk_bridge",
+    "magi_agent.runtime.adk_turn_runner",
+    "magi_agent.transport.chat",
+    "magi_agent.tools.dispatcher",
 )
 loaded = [name for name in forbidden if name in sys.modules]
 if loaded:

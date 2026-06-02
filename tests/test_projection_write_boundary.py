@@ -11,7 +11,7 @@ from pydantic import ValidationError
 
 
 def _boundary_module() -> Any:
-    return importlib.import_module("openmagi_core_agent.runtime.projection_write_boundary")
+    return importlib.import_module("magi_agent.runtime.projection_write_boundary")
 
 
 def test_projection_write_intents_are_denied_by_default() -> None:
@@ -110,7 +110,7 @@ import importlib
 import sys
 
 module = importlib.import_module(
-    "openmagi_core_agent.runtime.projection_write_boundary"
+    "magi_agent.runtime.projection_write_boundary"
 )
 assert module is not None
 
@@ -118,29 +118,29 @@ forbidden_exact = (
     "google.adk.runners",
     "google.adk.sessions",
     "google.adk.events",
-    "openmagi_core_agent.adk_bridge.runner_adapter",
-    "openmagi_core_agent.adk_bridge.local_runner",
-    "openmagi_core_agent.tools.dispatcher",
-    "openmagi_core_agent.runtime.transcript",
-    "openmagi_core_agent.runtime.control",
-    "openmagi_core_agent.transport.sse",
+    "magi_agent.adk_bridge.runner_adapter",
+    "magi_agent.adk_bridge.local_runner",
+    "magi_agent.tools.dispatcher",
+    "magi_agent.runtime.transcript",
+    "magi_agent.runtime.control",
+    "magi_agent.transport.sse",
     "fastapi",
     "uvicorn",
 )
 forbidden_prefixes = (
     "google.adk",
-    "openmagi_core_agent.tools",
-    "openmagi_core_agent.memory",
-    "openmagi_core_agent.database",
-    "openmagi_core_agent.db",
-    "openmagi_core_agent.telegram",
-    "openmagi_core_agent.k8s",
-    "openmagi_core_agent.transport.chat",
-    "openmagi_core_agent.transport.routes",
-    "openmagi_core_agent.chat_proxy",
-    "openmagi_core_agent.proxy",
-    "openmagi_core_agent.app",
-    "openmagi_core_agent.main",
+    "magi_agent.tools",
+    "magi_agent.memory",
+    "magi_agent.database",
+    "magi_agent.db",
+    "magi_agent.telegram",
+    "magi_agent.k8s",
+    "magi_agent.transport.chat",
+    "magi_agent.transport.routes",
+    "magi_agent.chat_proxy",
+    "magi_agent.proxy",
+    "magi_agent.app",
+    "magi_agent.main",
     "supabase",
     "psycopg",
     "asyncpg",
@@ -172,7 +172,7 @@ if loaded:
 def test_projection_write_boundary_source_forbids_live_writers_and_transports() -> None:
     module_path = (
         Path(__file__).parents[1]
-        / "openmagi_core_agent"
+        / "magi_agent"
         / "runtime"
         / "projection_write_boundary.py"
     )
@@ -182,16 +182,16 @@ def test_projection_write_boundary_source_forbids_live_writers_and_transports() 
         "TranscriptStore",
         "InMemorySseWriter",
         "ControlEventLedger",
-        "openmagi_core_agent.runtime.transcript",
-        "openmagi_core_agent.runtime.control",
-        "openmagi_core_agent.transport.sse",
-        "openmagi_core_agent.transport.chat",
-        "openmagi_core_agent.tools",
-        "openmagi_core_agent.memory",
-        "openmagi_core_agent.database",
-        "openmagi_core_agent.db",
-        "openmagi_core_agent.telegram",
-        "openmagi_core_agent.k8s",
+        "magi_agent.runtime.transcript",
+        "magi_agent.runtime.control",
+        "magi_agent.transport.sse",
+        "magi_agent.transport.chat",
+        "magi_agent.tools",
+        "magi_agent.memory",
+        "magi_agent.database",
+        "magi_agent.db",
+        "magi_agent.telegram",
+        "magi_agent.k8s",
         "supabase",
         "psycopg",
         "asyncpg",

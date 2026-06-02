@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from openmagi_core_agent.prompt.provider_adapter import (
+from magi_agent.prompt.provider_adapter import (
     AnthropicAdapter,
     DefaultAdapter,
     GoogleAdapter,
@@ -305,7 +305,7 @@ class TestProviderFamily:
 
 class TestBuildSystemPromptIntegration:
     def test_disabled_by_default(self) -> None:
-        from openmagi_core_agent.runtime.message_builder import build_system_prompt
+        from magi_agent.runtime.message_builder import build_system_prompt
 
         identity = {"soul": "<rules>Be safe</rules>"}
         prompt = build_system_prompt(
@@ -317,7 +317,7 @@ class TestBuildSystemPromptIntegration:
         assert "<rules>" in prompt
 
     def test_enabled_strips_xml_for_gpt(self) -> None:
-        from openmagi_core_agent.runtime.message_builder import build_system_prompt
+        from magi_agent.runtime.message_builder import build_system_prompt
 
         identity = {"soul": "<rules>Be safe</rules>"}
         prompt = build_system_prompt(
@@ -331,7 +331,7 @@ class TestBuildSystemPromptIntegration:
         assert "Be safe" in prompt
 
     def test_enabled_preserves_xml_for_claude(self) -> None:
-        from openmagi_core_agent.runtime.message_builder import build_system_prompt
+        from magi_agent.runtime.message_builder import build_system_prompt
 
         identity = {"soul": "<rules>Be safe</rules>"}
         prompt = build_system_prompt(
@@ -344,7 +344,7 @@ class TestBuildSystemPromptIntegration:
         assert "<rules>" in prompt
 
     def test_no_model_string_skips_adaptation(self) -> None:
-        from openmagi_core_agent.runtime.message_builder import build_system_prompt
+        from magi_agent.runtime.message_builder import build_system_prompt
 
         identity = {"soul": "<rules>Be safe</rules>"}
         prompt = build_system_prompt(
@@ -357,7 +357,7 @@ class TestBuildSystemPromptIntegration:
         assert "<rules>" in prompt
 
     def test_same_identity_different_output_per_provider(self) -> None:
-        from openmagi_core_agent.runtime.message_builder import build_system_prompt
+        from magi_agent.runtime.message_builder import build_system_prompt
 
         identity = {
             "soul": "<identity>You are helpful.</identity>\n<rules>Follow instructions carefully.</rules>",

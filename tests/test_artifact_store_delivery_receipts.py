@@ -8,7 +8,7 @@ import sys
 import pytest
 from pydantic import ValidationError
 
-from openmagi_core_agent.channels.contract import ChannelDeliveryReceipt, ChannelRef
+from magi_agent.channels.contract import ChannelDeliveryReceipt, ChannelRef
 
 
 DIGEST_A = "sha256:" + "a" * 64
@@ -32,7 +32,7 @@ class ForgeableRenderer:
 
 
 def _fake_renderer(**overrides: object) -> object:
-    from openmagi_core_agent.artifacts.render_verification import (
+    from magi_agent.artifacts.render_verification import (
         LocalFakeRenderVerificationProvider,
     )
 
@@ -48,7 +48,7 @@ def _fake_renderer(**overrides: object) -> object:
 
 
 def _render_request(**overrides: object) -> object:
-    from openmagi_core_agent.artifacts.render_verification import ArtifactRenderRequest
+    from magi_agent.artifacts.render_verification import ArtifactRenderRequest
 
     data = {
         "requestId": "render-request:1",
@@ -65,7 +65,7 @@ def _render_request(**overrides: object) -> object:
 
 
 def _delivery_request(**overrides: object) -> object:
-    from openmagi_core_agent.artifacts.delivery_receipts import ArtifactDeliveryReceiptRequest
+    from magi_agent.artifacts.delivery_receipts import ArtifactDeliveryReceiptRequest
 
     data = {
         "requestId": "delivery-request:1",
@@ -151,7 +151,7 @@ def _file_delivery_decision(
     provider_message_id: str | None = "message:1",
     status: str = "sent",
 ) -> object:
-    from openmagi_core_agent.artifacts.file_delivery import (
+    from magi_agent.artifacts.file_delivery import (
         FileDeliveryBoundary,
         FileDeliveryConfig,
         FileDeliveryRequest,
@@ -188,7 +188,7 @@ def _file_delivery_decision(
 
 
 def test_render_verification_default_off_calls_no_renderer() -> None:
-    from openmagi_core_agent.artifacts.render_verification import (
+    from magi_agent.artifacts.render_verification import (
         RenderVerificationBoundary,
         RenderVerificationConfig,
     )
@@ -212,7 +212,7 @@ def test_render_verification_default_off_calls_no_renderer() -> None:
 
 
 def test_local_fake_render_verification_records_digest_only_receipt() -> None:
-    from openmagi_core_agent.artifacts.render_verification import (
+    from magi_agent.artifacts.render_verification import (
         RenderVerificationBoundary,
         RenderVerificationConfig,
     )
@@ -244,7 +244,7 @@ def test_local_fake_render_verification_records_digest_only_receipt() -> None:
 
 
 def test_render_verification_blocks_untrusted_or_missing_renderer() -> None:
-    from openmagi_core_agent.artifacts.render_verification import (
+    from magi_agent.artifacts.render_verification import (
         RenderVerificationBoundary,
         RenderVerificationConfig,
     )
@@ -263,7 +263,7 @@ def test_render_verification_blocks_untrusted_or_missing_renderer() -> None:
 
 
 def test_render_verification_blocks_malformed_local_fake_receipts() -> None:
-    from openmagi_core_agent.artifacts.render_verification import (
+    from magi_agent.artifacts.render_verification import (
         RenderVerificationBoundary,
         RenderVerificationConfig,
     )
@@ -288,7 +288,7 @@ def test_render_verification_blocks_malformed_local_fake_receipts() -> None:
 
 
 def test_render_verification_rejects_private_refs_and_inline_blob_metadata() -> None:
-    from openmagi_core_agent.artifacts.render_verification import (
+    from magi_agent.artifacts.render_verification import (
         RenderVerificationReceipt,
     )
 
@@ -332,7 +332,7 @@ def test_render_verification_rejects_private_refs_and_inline_blob_metadata() -> 
 
 
 def test_delivery_receipt_default_off_blocks_delivery_claim_without_receipt() -> None:
-    from openmagi_core_agent.artifacts.delivery_receipts import (
+    from magi_agent.artifacts.delivery_receipts import (
         ArtifactDeliveryReceiptBoundary,
         ArtifactDeliveryReceiptConfig,
     )
@@ -356,7 +356,7 @@ def test_delivery_receipt_default_off_blocks_delivery_claim_without_receipt() ->
 
 
 def test_local_fake_delivery_receipt_allows_claim_only_with_matching_channel_receipt() -> None:
-    from openmagi_core_agent.artifacts.delivery_receipts import (
+    from magi_agent.artifacts.delivery_receipts import (
         ArtifactDeliveryReceiptBoundary,
         ArtifactDeliveryReceiptConfig,
     )
@@ -388,7 +388,7 @@ def test_local_fake_delivery_receipt_allows_claim_only_with_matching_channel_rec
 
 def test_delivery_receipt_blocks_missing_or_mismatched_channel_receipt(
 ) -> None:
-    from openmagi_core_agent.artifacts.delivery_receipts import (
+    from magi_agent.artifacts.delivery_receipts import (
         ArtifactDeliveryReceiptBoundary,
         ArtifactDeliveryReceiptConfig,
     )
@@ -422,11 +422,11 @@ def test_delivery_receipt_blocks_missing_or_mismatched_channel_receipt(
 
 
 def test_delivery_receipt_requires_boundary_issued_delivery_decision() -> None:
-    from openmagi_core_agent.artifacts.delivery_receipts import (
+    from magi_agent.artifacts.delivery_receipts import (
         ArtifactDeliveryReceiptBoundary,
         ArtifactDeliveryReceiptConfig,
     )
-    from openmagi_core_agent.artifacts.file_delivery import FileDeliveryDecision
+    from magi_agent.artifacts.file_delivery import FileDeliveryDecision
 
     boundary = ArtifactDeliveryReceiptBoundary(
         ArtifactDeliveryReceiptConfig(enabled=True, localFakeReceiptIndexEnabled=True)
@@ -489,7 +489,7 @@ def test_delivery_receipt_requires_boundary_issued_delivery_decision() -> None:
 
 
 def test_delivery_receipt_rejects_private_payloads_and_authority_forgery() -> None:
-    from openmagi_core_agent.artifacts.delivery_receipts import (
+    from magi_agent.artifacts.delivery_receipts import (
         ArtifactDeliveryAuthorityFlags,
         ArtifactDeliveryReceipt,
     )
@@ -528,7 +528,7 @@ def test_delivery_receipt_rejects_private_payloads_and_authority_forgery() -> No
 
 
 def test_delivery_claim_cannot_be_allowed_when_status_is_blocked() -> None:
-    from openmagi_core_agent.artifacts.delivery_receipts import ArtifactDeliveryReceipt
+    from magi_agent.artifacts.delivery_receipts import ArtifactDeliveryReceipt
 
     with pytest.raises(ValidationError, match="recorded receipt requires channel receipt"):
         ArtifactDeliveryReceipt(
@@ -583,8 +583,8 @@ def test_delivery_claim_cannot_be_allowed_when_status_is_blocked() -> None:
 def test_artifact_delivery_import_boundary_has_no_live_provider_imports() -> None:
     script = """
 import sys
-import openmagi_core_agent.artifacts.render_verification
-import openmagi_core_agent.artifacts.delivery_receipts
+import magi_agent.artifacts.render_verification
+import magi_agent.artifacts.delivery_receipts
 for name in (
     'stripe',
     'supabase',

@@ -5,7 +5,7 @@ import json
 import pytest
 from pydantic import ValidationError
 
-from openmagi_core_agent.runtime.cache_safe_params import CacheSafeParams
+from magi_agent.runtime.cache_safe_params import CacheSafeParams
 
 
 def test_cache_safe_params_keep_model_runtime_config_separate_from_content() -> None:

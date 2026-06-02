@@ -6,7 +6,7 @@ import sys
 import pytest
 from pydantic import ValidationError
 
-from openmagi_core_agent.runtime.governed_projection import (
+from magi_agent.runtime.governed_projection import (
     GovernedClaim,
     GovernedDraft,
     ProjectionDecision,
@@ -236,7 +236,7 @@ def test_projection_decision_public_projection_sanitizes_constructed_private_sta
 def test_governed_projection_import_boundary_is_schema_only() -> None:
     code = (
         "import sys;"
-        "import openmagi_core_agent.runtime.governed_projection;"
+        "import magi_agent.runtime.governed_projection;"
         "print('\\n'.join(sorted(sys.modules)))"
     )
     completed = subprocess.run(
@@ -247,10 +247,10 @@ def test_governed_projection_import_boundary_is_schema_only() -> None:
     )
     forbidden_fragments = (
         "google.adk",
-        "openmagi_core_agent.transport",
-        "openmagi_core_agent.tools.dispatcher",
-        "openmagi_core_agent.memory",
-        "openmagi_core_agent.channels",
+        "magi_agent.transport",
+        "magi_agent.tools.dispatcher",
+        "magi_agent.memory",
+        "magi_agent.channels",
         "kubernetes",
         "fastapi",
         "supabase",
@@ -260,8 +260,8 @@ def test_governed_projection_import_boundary_is_schema_only() -> None:
 
 
 def test_runtime_package_lazy_exports_projection_contracts() -> None:
-    from openmagi_core_agent.runtime import ProjectionPolicy as ExportedPolicy
-    from openmagi_core_agent.runtime import ProjectionRenderer as ExportedRenderer
+    from magi_agent.runtime import ProjectionPolicy as ExportedPolicy
+    from magi_agent.runtime import ProjectionRenderer as ExportedRenderer
 
     assert ExportedPolicy is ProjectionPolicy
     assert ExportedRenderer is ProjectionRenderer

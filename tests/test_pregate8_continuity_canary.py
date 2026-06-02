@@ -10,14 +10,14 @@ import pytest
 from google.adk.events import Event
 from google.genai import types
 
-from openmagi_core_agent.adk_bridge.session_service import WorkspaceSessionService
-from openmagi_core_agent.harness.resolved import build_default_resolved_harness_state
-from openmagi_core_agent.runtime.runner_session_boundary import (
+from magi_agent.adk_bridge.session_service import WorkspaceSessionService
+from magi_agent.harness.resolved import build_default_resolved_harness_state
+from magi_agent.runtime.runner_session_boundary import (
     RunnerSessionBoundary,
     RunnerSessionBoundaryConfig,
 )
-from openmagi_core_agent.runtime.transcript import TranscriptStore
-from openmagi_core_agent.runtime.turn_controller import TurnControllerInput
+from magi_agent.runtime.transcript import TranscriptStore
+from magi_agent.runtime.turn_controller import TurnControllerInput
 
 
 CONTEXT_FIXTURES = Path(__file__).parent / "fixtures" / "context_continuity"
@@ -117,7 +117,7 @@ def _run_continuity_turn(
 def test_pregate8_canary_records_ambiguous_followup_context_as_digest_only_evidence(
     tmp_path: Path,
 ) -> None:
-    from openmagi_core_agent.gates.pregate8_continuity_canary import (
+    from magi_agent.gates.pregate8_continuity_canary import (
         build_pre_gate8_continuity_canary_evidence,
     )
 
@@ -166,7 +166,7 @@ def test_pregate8_canary_records_ambiguous_followup_context_as_digest_only_evide
 def test_pregate8_canary_proves_compaction_suppresses_pre_boundary_raw_transcript(
     tmp_path: Path,
 ) -> None:
-    from openmagi_core_agent.gates.pregate8_continuity_canary import (
+    from magi_agent.gates.pregate8_continuity_canary import (
         build_pre_gate8_continuity_canary_evidence,
     )
 
@@ -212,7 +212,7 @@ def test_pregate8_canary_proves_compaction_suppresses_pre_boundary_raw_transcrip
 def test_pregate8_canary_records_private_payload_rejection_without_leaking_raw_values(
     tmp_path: Path,
 ) -> None:
-    from openmagi_core_agent.gates.pregate8_continuity_canary import (
+    from magi_agent.gates.pregate8_continuity_canary import (
         build_pre_gate8_continuity_canary_evidence,
     )
 
@@ -257,7 +257,7 @@ def test_pregate8_canary_records_private_payload_rejection_without_leaking_raw_v
 
 
 def test_pregate8_canary_fails_closed_when_antecedent_is_missing(tmp_path: Path) -> None:
-    from openmagi_core_agent.gates.pregate8_continuity_canary import (
+    from magi_agent.gates.pregate8_continuity_canary import (
         build_pre_gate8_continuity_canary_evidence,
     )
 
@@ -287,7 +287,7 @@ def test_pregate8_canary_fails_closed_when_antecedent_is_missing(tmp_path: Path)
 
 
 def test_pregate8_canary_evidence_cannot_forge_authority_flags() -> None:
-    from openmagi_core_agent.gates.pregate8_continuity_canary import (
+    from magi_agent.gates.pregate8_continuity_canary import (
         PreGate8ContinuityCanaryEvidence,
     )
 
@@ -325,7 +325,7 @@ def test_pregate8_canary_evidence_cannot_forge_authority_flags() -> None:
 
 
 def test_pregate8_canary_evidence_rejects_raw_text_in_digest_fields() -> None:
-    from openmagi_core_agent.gates.pregate8_continuity_canary import (
+    from magi_agent.gates.pregate8_continuity_canary import (
         PreGate8ContinuityCanaryEvidence,
     )
 
@@ -368,7 +368,7 @@ def test_pregate8_canary_import_boundary_is_pure_local_contract_only() -> None:
 import importlib
 import sys
 
-module = importlib.import_module("openmagi_core_agent.gates.pregate8_continuity_canary")
+module = importlib.import_module("magi_agent.gates.pregate8_continuity_canary")
 assert hasattr(module, "build_pre_gate8_continuity_canary_evidence")
 
 forbidden_prefixes = (
@@ -380,13 +380,13 @@ forbidden_prefixes = (
     "socket",
     "google.adk",
     "google.genai",
-    "openmagi_core_agent.transport",
-    "openmagi_core_agent.tools",
-    "openmagi_core_agent.toolhost",
-    "openmagi_core_agent.memory",
-    "openmagi_core_agent.workspace",
-    "openmagi_core_agent.browser",
-    "openmagi_core_agent.channels",
+    "magi_agent.transport",
+    "magi_agent.tools",
+    "magi_agent.toolhost",
+    "magi_agent.memory",
+    "magi_agent.workspace",
+    "magi_agent.browser",
+    "magi_agent.channels",
 )
 
 loaded = tuple(sys.modules)

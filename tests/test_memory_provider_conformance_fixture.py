@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from openmagi_core_agent.memory.conformance import (
+from magi_agent.memory.conformance import (
     MemoryProviderConformanceFixture,
     load_memory_provider_conformance_fixture,
     project_memory_provider_conformance_fixture,
@@ -198,7 +198,7 @@ import json
 import sys
 from pathlib import Path
 
-conformance = importlib.import_module('openmagi_core_agent.memory.conformance')
+conformance = importlib.import_module('magi_agent.memory.conformance')
 fixture = conformance.load_memory_provider_conformance_fixture(
     'provider_conformance_matrix.json',
     fixture_root=Path('tests/fixtures/memory_contract'),
@@ -208,17 +208,17 @@ assert fixture.fixture_id == 'memory_provider_conformance_matrix_0001'
 forbidden_prefixes = (
     'google.adk.memory',
     'google.adk.runners',
-    'openmagi_core_agent.adk_bridge.local_runner',
-    'openmagi_core_agent.adk_bridge.runner_adapter',
-    'openmagi_core_agent.routes',
-    'openmagi_core_agent.proxy',
-    'openmagi_core_agent.transport.chat',
-    'openmagi_core_agent.providers',
-    'openmagi_core_agent.plugins.agentmemory',
-    'openmagi_core_agent.memory.providers',
-    'openmagi_core_agent.services.memory',
-    'openmagi_core_agent.hipocampus',
-    'openmagi_core_agent.qmd',
+    'magi_agent.adk_bridge.local_runner',
+    'magi_agent.adk_bridge.runner_adapter',
+    'magi_agent.routes',
+    'magi_agent.proxy',
+    'magi_agent.transport.chat',
+    'magi_agent.providers',
+    'magi_agent.plugins.agentmemory',
+    'magi_agent.memory.providers',
+    'magi_agent.services.memory',
+    'magi_agent.hipocampus',
+    'magi_agent.qmd',
     'agentmemory',
     'openai',
     'anthropic',

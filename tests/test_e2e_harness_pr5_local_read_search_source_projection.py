@@ -9,14 +9,14 @@ from pathlib import Path
 
 import pytest
 
-from openmagi_core_agent.tools.catalog import register_core_tool_manifests
-from openmagi_core_agent.tools.context import ToolContext
-from openmagi_core_agent.tools.kernel import (
+from magi_agent.tools.catalog import register_core_tool_manifests
+from magi_agent.tools.context import ToolContext
+from magi_agent.tools.kernel import (
     ToolExecutionKernel,
     ToolExecutionKernelConfig,
     ToolExecutionRequest,
 )
-from openmagi_core_agent.tools.registry import ToolRegistry
+from magi_agent.tools.registry import ToolRegistry
 
 
 def _context(workspace_root: Path) -> ToolContext:
@@ -47,7 +47,7 @@ def _execute(
     exposed_tool_names: tuple[str, ...] | None = ("FileRead", "Glob", "Grep", "GitDiff"),
     host: object | None = None,
 ) -> object:
-    from openmagi_core_agent.tools.local_readonly import LocalReadOnlyToolHost
+    from magi_agent.tools.local_readonly import LocalReadOnlyToolHost
 
     registry = _registry(*enabled_tools)
     safe_host = host or LocalReadOnlyToolHost()
@@ -76,7 +76,7 @@ def _execute(
 def test_pr5_local_readonly_tools_remain_default_off_until_registry_and_kernel_enable(
     tmp_path: Path,
 ) -> None:
-    from openmagi_core_agent.tools.local_readonly import LocalReadOnlyToolHost
+    from magi_agent.tools.local_readonly import LocalReadOnlyToolHost
 
     (tmp_path / "notes.txt").write_text("visible\n", encoding="utf-8")
     registry = _registry()
@@ -110,7 +110,7 @@ def test_pr5_local_readonly_tools_remain_default_off_until_registry_and_kernel_e
 def test_pr5_toolhost_allowlist_blocks_hidden_enabled_tool_before_local_read(
     tmp_path: Path,
 ) -> None:
-    from openmagi_core_agent.tools.local_readonly import LocalReadOnlyToolHost
+    from magi_agent.tools.local_readonly import LocalReadOnlyToolHost
 
     (tmp_path / "notes.txt").write_text("visible\n", encoding="utf-8")
     registry = _registry("FileRead", "Glob")
@@ -448,7 +448,7 @@ def test_pr5_grep_redacts_session_key_variants_from_output_and_evidence(
 
 
 def test_pr5_shared_tool_preview_redacts_session_key_values_not_public_refs() -> None:
-    from openmagi_core_agent.transport.tool_preview import sanitize_tool_preview
+    from magi_agent.transport.tool_preview import sanitize_tool_preview
 
     sanitized = sanitize_tool_preview(
         "sessionKey=unsafe-session-key session_id=unsafe-session-id SESSION=unsafe-session "
@@ -487,7 +487,7 @@ def test_pr5_redacts_all_authorization_header_schemes_and_public_context_refs(
         encoding="utf-8",
     )
 
-    from openmagi_core_agent.tools.local_readonly import LocalReadOnlyToolHost
+    from magi_agent.tools.local_readonly import LocalReadOnlyToolHost
 
     registry = _registry("FileRead", "Grep")
     host = LocalReadOnlyToolHost()
@@ -545,7 +545,7 @@ def test_pr5_source_ledger_role_is_harness_context_driven(
         workspaceRoot=str(tmp_path),
         executionContract={"agentRole": "research"},
     )
-    from openmagi_core_agent.tools.local_readonly import LocalReadOnlyToolHost
+    from magi_agent.tools.local_readonly import LocalReadOnlyToolHost
 
     registry = _registry("FileRead")
     host = LocalReadOnlyToolHost(agent_role="coding")
@@ -576,7 +576,7 @@ def test_pr5_file_read_and_grep_read_only_bounded_bytes_from_large_files(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from openmagi_core_agent.tools import local_readonly
+    from magi_agent.tools import local_readonly
 
     read_sizes: list[int] = []
     original_read = local_readonly._read_bounded_bytes
@@ -622,7 +622,7 @@ def test_pr5_gitdiff_is_fixture_local_subprocess_free_capped_and_source_projecte
         ]
     )
 
-    from openmagi_core_agent.tools.local_readonly import LocalReadOnlyToolHost
+    from magi_agent.tools.local_readonly import LocalReadOnlyToolHost
 
     diff_ref = f"diff-fixture:{hashlib.sha256(diff.encode('utf-8')).hexdigest()}"
     outcome = _execute(
@@ -671,7 +671,7 @@ def test_pr5_gitdiff_raw_fixture_body_not_recorded_in_tool_call_evidence(
         ]
     )
 
-    from openmagi_core_agent.tools.local_readonly import LocalReadOnlyToolHost
+    from magi_agent.tools.local_readonly import LocalReadOnlyToolHost
 
     diff_ref = f"diff-fixture:{hashlib.sha256(diff.encode('utf-8')).hexdigest()}"
     outcome = _execute(
@@ -715,7 +715,7 @@ def test_pr5_gitdiff_raw_diff_text_argument_is_redacted_before_blocked_handler_r
 def test_pr5_gitdiff_diffref_alias_is_redacted_in_tool_call_evidence(
     tmp_path: Path,
 ) -> None:
-    from openmagi_core_agent.tools.local_readonly import LocalReadOnlyToolHost
+    from magi_agent.tools.local_readonly import LocalReadOnlyToolHost
 
     (tmp_path / "src").mkdir()
     (tmp_path / "src" / "app.py").write_text("print('hello')\n", encoding="utf-8")
@@ -747,7 +747,7 @@ import importlib
 import sys
 
 before = set(sys.modules)
-importlib.import_module("openmagi_core_agent.tools.local_readonly")
+importlib.import_module("magi_agent.tools.local_readonly")
 
 forbidden_exact = (
     "google.adk.runners",
@@ -765,9 +765,9 @@ forbidden_exact = (
     "requests",
     "socket",
     "subprocess",
-    "openmagi_core_agent.runtime.openmagi_runtime",
-    "openmagi_core_agent.transport.chat",
-    "openmagi_core_agent.memory.adk_bridge",
+    "magi_agent.runtime.openmagi_runtime",
+    "magi_agent.transport.chat",
+    "magi_agent.memory.adk_bridge",
 )
 loaded = [
     name

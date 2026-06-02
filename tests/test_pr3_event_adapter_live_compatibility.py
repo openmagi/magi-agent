@@ -3,8 +3,8 @@ import json
 from google.adk.events import Event
 from google.genai import types
 
-from openmagi_core_agent.adk_bridge.event_adapter import OpenMagiEventBridge
-from openmagi_core_agent.transport.sse import InMemorySseWriter
+from magi_agent.adk_bridge.event_adapter import OpenMagiEventBridge
+from magi_agent.transport.sse import InMemorySseWriter
 
 
 def test_event_bridge_live_compatible_tool_events_include_event_ids_and_digest_refs() -> None:

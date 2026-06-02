@@ -10,10 +10,10 @@ import sys
 from fastapi.testclient import TestClient
 import pytest
 
-from openmagi_core_agent.app import create_app
-from openmagi_core_agent.config.env import parse_runtime_env
-from openmagi_core_agent.runtime.openmagi_runtime import OpenMagiRuntime
-from openmagi_core_agent.transport.chat import (
+from magi_agent.app import create_app
+from magi_agent.config.env import parse_runtime_env
+from magi_agent.runtime.openmagi_runtime import OpenMagiRuntime
+from magi_agent.transport.chat import (
     build_gate2_sandbox_workspace_canary_config_from_env,
 )
 
@@ -23,7 +23,7 @@ def _digest(value: str) -> str:
 
 
 def _gate2_profile_digest() -> str:
-    from openmagi_core_agent.shadow.gate2_recipe_profile_resolver import (
+    from magi_agent.shadow.gate2_recipe_profile_resolver import (
         resolve_gate2_recipe_profile,
     )
 
@@ -185,7 +185,7 @@ def test_gate2_readiness_blocks_selected_sandbox_when_parent_cannot_be_created(
     monkeypatch,
     tmp_path: Path,
 ) -> None:
-    import openmagi_core_agent.shadow.gate2_activation_loop_a as gate2_module
+    import magi_agent.shadow.gate2_activation_loop_a as gate2_module
 
     original_mkdir = gate2_module.os.mkdir
 
@@ -431,7 +431,7 @@ def test_gate2_healthz_redacts_secret_shaped_profile_refs() -> None:
 
 
 def test_gate2_profile_resolver_uses_recipe_layer_not_core_runtime() -> None:
-    from openmagi_core_agent.shadow.gate2_recipe_profile_resolver import (
+    from magi_agent.shadow.gate2_recipe_profile_resolver import (
         resolve_gate2_recipe_profile,
     )
 
@@ -454,7 +454,7 @@ def test_gate2_profile_resolver_uses_recipe_layer_not_core_runtime() -> None:
 
 
 def test_gate2_shadow_policy_denies_real_actions_and_emits_digest_receipts() -> None:
-    from openmagi_core_agent.shadow.gate2_shadow_tool_policy import (
+    from magi_agent.shadow.gate2_shadow_tool_policy import (
         Gate2SandboxMutationProvider,
         Gate2ShadowWorkspaceToolPolicy,
     )
@@ -539,7 +539,7 @@ def test_gate2_shadow_policy_denies_real_actions_and_emits_digest_receipts() -> 
 
 
 def test_gate2_shadow_policy_hard_denies_forbidden_actions_even_if_overridden() -> None:
-    from openmagi_core_agent.shadow.gate2_shadow_tool_policy import (
+    from magi_agent.shadow.gate2_shadow_tool_policy import (
         Gate2MutationReceipt,
         Gate2SandboxMutationProvider,
         Gate2ShadowWorkspaceToolPolicy,
@@ -663,7 +663,7 @@ def test_gate2_shadow_policy_hard_denies_forbidden_actions_even_if_overridden() 
 
 
 def test_gate2_shadow_policy_accepts_only_synthetic_loop_a_env_wiring_path() -> None:
-    from openmagi_core_agent.shadow.gate2_shadow_tool_policy import (
+    from magi_agent.shadow.gate2_shadow_tool_policy import (
         Gate2ShadowWorkspaceToolPolicy,
     )
 
@@ -705,18 +705,18 @@ def test_gate2_shadow_policy_accepts_only_synthetic_loop_a_env_wiring_path() -> 
 def test_gate2_import_boundary_does_not_load_live_runtime_surfaces() -> None:
     script = r"""
 import sys
-import openmagi_core_agent.shadow.gate2_recipe_profile_resolver
-import openmagi_core_agent.shadow.gate2_shadow_tool_policy
+import magi_agent.shadow.gate2_recipe_profile_resolver
+import magi_agent.shadow.gate2_shadow_tool_policy
 
 forbidden = {
     "google.adk.runners",
     "google.adk.models",
     "google.genai",
-    "openmagi_core_agent.transport.chat",
-    "openmagi_core_agent.workspace.adoption_boundary",
-    "openmagi_core_agent.memory.write_boundary",
-    "openmagi_core_agent.browser.live_provider_pack",
-    "openmagi_core_agent.channels.dispatcher",
+    "magi_agent.transport.chat",
+    "magi_agent.workspace.adoption_boundary",
+    "magi_agent.memory.write_boundary",
+    "magi_agent.browser.live_provider_pack",
+    "magi_agent.channels.dispatcher",
 }
 loaded = sorted(name for name in forbidden if name in sys.modules)
 if loaded:

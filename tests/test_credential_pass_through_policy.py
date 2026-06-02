@@ -3,7 +3,7 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
-from openmagi_core_agent.security.credentials import (
+from magi_agent.security.credentials import (
     CredentialDecision,
     CredentialPassThroughPolicy,
     CredentialRequest,

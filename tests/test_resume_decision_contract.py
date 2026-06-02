@@ -5,13 +5,13 @@ from datetime import UTC, datetime, timedelta
 import pytest
 from pydantic import ValidationError
 
-from openmagi_core_agent.runtime.heartbeat_contract import (
+from magi_agent.runtime.heartbeat_contract import (
     HeartbeatReceipt,
     RunLease,
     StaleRunVerdict,
     heartbeat_receipt_digest,
 )
-from openmagi_core_agent.runtime.resume_decision import (
+from magi_agent.runtime.resume_decision import (
     ResumeDecisionConfig,
     ResumeDecisionContext,
     evaluate_resume_decision,

@@ -9,15 +9,15 @@ from typing import Any
 import pytest
 from pydantic import ValidationError
 
-from openmagi_core_agent.artifacts.local_result_store import (
+from magi_agent.artifacts.local_result_store import (
     LocalResultStore,
     LocalResultStoreConfig,
 )
-from openmagi_core_agent.tools.catalog import register_core_tool_manifests
-from openmagi_core_agent.tools.context import ToolContext
-from openmagi_core_agent.tools.manifest import Budget, ToolManifest, ToolSource
-from openmagi_core_agent.tools.registry import ToolRegistry
-from openmagi_core_agent.tools.result import ToolResult
+from magi_agent.tools.catalog import register_core_tool_manifests
+from magi_agent.tools.context import ToolContext
+from magi_agent.tools.manifest import Budget, ToolManifest, ToolSource
+from magi_agent.tools.registry import ToolRegistry
+from magi_agent.tools.result import ToolResult
 
 
 class FakeToolExecutor:
@@ -177,7 +177,7 @@ def test_protected_handler_binding_is_one_way_without_audited_policy_path() -> N
 
 
 def test_kernel_budget_store_hook_projects_local_fake_receipt_without_live_authority() -> None:
-    from openmagi_core_agent.tools.kernel import (
+    from magi_agent.tools.kernel import (
         ToolExecutionKernel,
         ToolExecutionKernelConfig,
         ToolExecutionRequest,
@@ -231,7 +231,7 @@ def test_kernel_budget_store_hook_projects_local_fake_receipt_without_live_autho
 
 
 def test_kernel_budget_store_hook_rejects_untrusted_store_before_raw_result_handoff() -> None:
-    from openmagi_core_agent.tools.kernel import (
+    from magi_agent.tools.kernel import (
         ToolExecutionKernel,
         ToolExecutionKernelConfig,
         ToolExecutionRequest,
@@ -300,7 +300,7 @@ def test_kernel_budget_store_hook_rejects_untrusted_store_before_raw_result_hand
 
 
 def test_kernel_budget_store_hook_ignores_instance_method_rebinding() -> None:
-    from openmagi_core_agent.tools.kernel import (
+    from magi_agent.tools.kernel import (
         ToolExecutionKernel,
         ToolExecutionKernelConfig,
         ToolExecutionRequest,
@@ -351,7 +351,7 @@ def test_kernel_budget_store_hook_ignores_instance_method_rebinding() -> None:
 
 
 def test_scheduler_default_off_and_rejects_live_config() -> None:
-    from openmagi_core_agent.tools.scheduler import ToolScheduler, ToolSchedulerConfig
+    from magi_agent.tools.scheduler import ToolScheduler, ToolSchedulerConfig
 
     with pytest.raises(ValidationError):
         ToolSchedulerConfig(enabled=True, liveExecutionEnabled=True)
@@ -366,12 +366,12 @@ def test_scheduler_default_off_and_rejects_live_config() -> None:
 
 
 def test_scheduler_groups_safe_tasks_serializes_unsafe_and_preserves_input_order() -> None:
-    from openmagi_core_agent.tools.kernel import (
+    from magi_agent.tools.kernel import (
         ToolExecutionKernel,
         ToolExecutionKernelConfig,
         ToolExecutionRequest,
     )
-    from openmagi_core_agent.tools.scheduler import (
+    from magi_agent.tools.scheduler import (
         ToolScheduleTask,
         ToolScheduler,
         ToolSchedulerConfig,
@@ -458,12 +458,12 @@ def test_scheduler_groups_safe_tasks_serializes_unsafe_and_preserves_input_order
 
 
 def test_scheduler_max_parallel_budget_serializes_without_claiming_failure() -> None:
-    from openmagi_core_agent.tools.kernel import (
+    from magi_agent.tools.kernel import (
         ToolExecutionKernel,
         ToolExecutionKernelConfig,
         ToolExecutionRequest,
     )
-    from openmagi_core_agent.tools.scheduler import (
+    from magi_agent.tools.scheduler import (
         ToolScheduleTask,
         ToolScheduler,
         ToolSchedulerConfig,
@@ -510,12 +510,12 @@ def test_scheduler_max_parallel_budget_serializes_without_claiming_failure() -> 
 
 
 def test_scheduler_result_status_degrades_when_handler_outcome_is_not_ok() -> None:
-    from openmagi_core_agent.tools.kernel import (
+    from magi_agent.tools.kernel import (
         ToolExecutionKernel,
         ToolExecutionKernelConfig,
         ToolExecutionRequest,
     )
-    from openmagi_core_agent.tools.scheduler import (
+    from magi_agent.tools.scheduler import (
         ToolScheduleTask,
         ToolScheduler,
         ToolSchedulerConfig,
@@ -563,12 +563,12 @@ def test_scheduler_result_status_degrades_when_handler_outcome_is_not_ok() -> No
 
 
 def test_scheduler_blocks_invalid_schema_before_planning_or_handler() -> None:
-    from openmagi_core_agent.tools.kernel import (
+    from magi_agent.tools.kernel import (
         ToolExecutionKernel,
         ToolExecutionKernelConfig,
         ToolExecutionRequest,
     )
-    from openmagi_core_agent.tools.scheduler import (
+    from magi_agent.tools.scheduler import (
         ToolScheduleTask,
         ToolScheduler,
         ToolSchedulerConfig,
@@ -623,12 +623,12 @@ def test_scheduler_blocks_invalid_schema_before_planning_or_handler() -> None:
 
 
 def test_scheduler_duplicate_and_conflict_statuses_are_deterministic() -> None:
-    from openmagi_core_agent.tools.kernel import (
+    from magi_agent.tools.kernel import (
         ToolExecutionKernel,
         ToolExecutionKernelConfig,
         ToolExecutionRequest,
     )
-    from openmagi_core_agent.tools.scheduler import (
+    from magi_agent.tools.scheduler import (
         ToolScheduleTask,
         ToolScheduler,
         ToolSchedulerConfig,
@@ -707,7 +707,7 @@ def test_scheduler_duplicate_and_conflict_statuses_are_deterministic() -> None:
 
 
 def test_strategy_metadata_is_injected_by_harness_not_core_scheduler() -> None:
-    from openmagi_core_agent.tools.scheduler import (
+    from magi_agent.tools.scheduler import (
         ToolScheduleTask,
         ToolScheduler,
         ToolSchedulerConfig,
@@ -747,8 +747,8 @@ import sys
 
 before = set(sys.modules)
 for module_name in (
-    "openmagi_core_agent.tools.kernel",
-    "openmagi_core_agent.tools.scheduler",
+    "magi_agent.tools.kernel",
+    "magi_agent.tools.scheduler",
 ):
     imported = importlib.import_module(module_name)
     assert imported is not None
@@ -767,10 +767,10 @@ forbidden_exact = (
     "kubernetes",
     "httpx",
     "requests",
-    "openmagi_core_agent.adk_bridge.runner_adapter",
-    "openmagi_core_agent.runtime.openmagi_runtime",
-    "openmagi_core_agent.transport.chat",
-    "openmagi_core_agent.memory.adk_bridge",
+    "magi_agent.adk_bridge.runner_adapter",
+    "magi_agent.runtime.openmagi_runtime",
+    "magi_agent.transport.chat",
+    "magi_agent.memory.adk_bridge",
 )
 loaded = [
     name

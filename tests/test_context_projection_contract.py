@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from openmagi_core_agent.runtime.context_projection import (
+from magi_agent.runtime.context_projection import (
     ContextProjection,
     ContextProjectionMode,
     build_context_projection,

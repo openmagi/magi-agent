@@ -5,12 +5,12 @@ from pathlib import Path
 
 import pytest
 
-from openmagi_core_agent.evidence.coding_verification import (
+from magi_agent.evidence.coding_verification import (
     CodingVerificationAuditRequest,
     evaluate_coding_verification_audit,
 )
-from openmagi_core_agent.evidence.types import EvidenceRecord, EvidenceSource
-from openmagi_core_agent.recipes.coding_evidence_gate import (
+from magi_agent.evidence.types import EvidenceRecord, EvidenceSource
+from magi_agent.recipes.coding_evidence_gate import (
     CodingEvidenceGate,
     CodingEvidenceGateConfig,
     CodingEvidenceGateHarnessBinding,
@@ -319,8 +319,8 @@ def test_harness_binding_is_default_off_local_only_and_does_not_attach_live_surf
     assert set(materialized["attachmentFlags"].values()) == {False}
 
     for relative_path in (
-        "openmagi_core_agent/evidence/coding_verification.py",
-        "openmagi_core_agent/recipes/coding_evidence_gate.py",
+        "magi_agent/evidence/coding_verification.py",
+        "magi_agent/recipes/coding_evidence_gate.py",
     ):
         source = (PYTHON_ROOT / relative_path).read_text(encoding="utf-8")
         for forbidden in (

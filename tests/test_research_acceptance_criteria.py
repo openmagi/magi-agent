@@ -7,7 +7,7 @@ import json
 import pytest
 from pydantic import ValidationError
 
-from openmagi_core_agent.research.acceptance_criteria import (
+from magi_agent.research.acceptance_criteria import (
     ResearchAcceptanceCriterion,
     ResearchAcceptanceCriteriaSet,
     ResearchAcceptanceEvidenceRef,
@@ -381,23 +381,23 @@ def test_forbidden_evidence_type_names_cannot_satisfy_criteria(
 
 
 def test_research_contract_stays_in_research_layer_not_generic_core_policy() -> None:
-    module = importlib.import_module("openmagi_core_agent.research.acceptance_criteria")
+    module = importlib.import_module("magi_agent.research.acceptance_criteria")
     source = inspect.getsource(module)
 
-    assert module.__name__ == "openmagi_core_agent.research.acceptance_criteria"
-    assert ResearchAcceptanceCriteriaSet.__module__.startswith("openmagi_core_agent.research")
-    assert ResearchAcceptanceCriterion.__module__.startswith("openmagi_core_agent.research")
+    assert module.__name__ == "magi_agent.research.acceptance_criteria"
+    assert ResearchAcceptanceCriteriaSet.__module__.startswith("magi_agent.research")
+    assert ResearchAcceptanceCriterion.__module__.startswith("magi_agent.research")
     assert not ResearchAcceptanceCriteriaSet.__module__.startswith(
-        "openmagi_core_agent.evidence"
+        "magi_agent.evidence"
     )
     assert not ResearchAcceptanceCriteriaSet.__module__.startswith(
-        "openmagi_core_agent.harness"
+        "magi_agent.harness"
     )
     forbidden_imports = (
-        "openmagi_core_agent.evidence",
-        "openmagi_core_agent.harness",
-        "openmagi_core_agent.runtime",
-        "openmagi_core_agent.tools",
+        "magi_agent.evidence",
+        "magi_agent.harness",
+        "magi_agent.runtime",
+        "magi_agent.tools",
     )
     for forbidden in forbidden_imports:
         assert forbidden not in source

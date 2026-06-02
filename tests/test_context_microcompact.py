@@ -4,12 +4,12 @@ from __future__ import annotations
 import json
 import pytest
 
-from openmagi_core_agent.context.microcompact import (
+from magi_agent.context.microcompact import (
     MIN_RESULT_TOKENS_FOR_COMPACT,
     MicrocompactEngine,
     MicrocompactResult,
 )
-from openmagi_core_agent.context.types import WarningLevel
+from magi_agent.context.types import WarningLevel
 
 
 # ---------------------------------------------------------------------------

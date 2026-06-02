@@ -16,19 +16,19 @@ from __future__ import annotations
 
 import asyncio
 
-from openmagi_core_agent.tools.concurrency import (
+from magi_agent.tools.concurrency import (
     ConcurrencyConfig,
     ToolCall,
 )
-from openmagi_core_agent.tools.concurrent_dispatcher import (
+from magi_agent.tools.concurrent_dispatcher import (
     ConcurrentToolDispatcher,
     ToolBatchExecution,
     _with_duration,
 )
-from openmagi_core_agent.tools.context import ToolContext
-from openmagi_core_agent.tools.manifest import ToolManifest, ToolSource
-from openmagi_core_agent.tools.registry import ToolRegistry
-from openmagi_core_agent.tools.result import ToolResult
+from magi_agent.tools.context import ToolContext
+from magi_agent.tools.manifest import ToolManifest, ToolSource
+from magi_agent.tools.registry import ToolRegistry
+from magi_agent.tools.result import ToolResult
 
 
 # ---------------------------------------------------------------------------

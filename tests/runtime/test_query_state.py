@@ -5,7 +5,7 @@ import json
 import pytest
 from pydantic import ValidationError
 
-from openmagi_core_agent.runtime.query_state import (
+from magi_agent.runtime.query_state import (
     QueryState,
     QueryStateAuthorityFlags,
 )

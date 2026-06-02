@@ -1,4 +1,4 @@
-"""Tests for openmagi_core_agent.facades and transport.debug_trace."""
+"""Tests for magi_agent.facades and transport.debug_trace."""
 
 from __future__ import annotations
 
@@ -9,24 +9,24 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from openmagi_core_agent.facades import execute_tool_with_hooks
-from openmagi_core_agent.harness.resolved import (
+from magi_agent.facades import execute_tool_with_hooks
+from magi_agent.harness.resolved import (
     ResolvedHarnessPresetState,
     build_default_resolved_harness_state,
 )
-from openmagi_core_agent.hooks.bus import (
+from magi_agent.hooks.bus import (
     HookBus,
     HookBusObservation,
     HookBusRunResult,
 )
-from openmagi_core_agent.hooks.context import HookContext
-from openmagi_core_agent.hooks.manifest import HookPoint
-from openmagi_core_agent.hooks.result import HookResult
-from openmagi_core_agent.telemetry.execution_trace import ExecutionTrace
-from openmagi_core_agent.tools.context import ToolContext
-from openmagi_core_agent.tools.dispatcher import ToolDispatcher
-from openmagi_core_agent.tools.result import ToolResult
-from openmagi_core_agent.transport.debug_trace import router as debug_trace_router
+from magi_agent.hooks.context import HookContext
+from magi_agent.hooks.manifest import HookPoint
+from magi_agent.hooks.result import HookResult
+from magi_agent.telemetry.execution_trace import ExecutionTrace
+from magi_agent.tools.context import ToolContext
+from magi_agent.tools.dispatcher import ToolDispatcher
+from magi_agent.tools.result import ToolResult
+from magi_agent.transport.debug_trace import router as debug_trace_router
 
 
 # ---------------------------------------------------------------------------
@@ -209,7 +209,7 @@ class TestDebugTraceEndpoint:
         client = TestClient(_test_app())
         with patch.dict(os.environ, {"MAGI_EXECUTION_TRACE": "1"}):
             with patch(
-                "openmagi_core_agent.transport.debug_trace.get_trace",
+                "magi_agent.transport.debug_trace.get_trace",
                 return_value=None,
             ):
                 resp = client.get("/v1/debug/trace")
@@ -222,7 +222,7 @@ class TestDebugTraceEndpoint:
         client = TestClient(_test_app())
         with patch.dict(os.environ, {"MAGI_EXECUTION_TRACE": "1"}):
             with patch(
-                "openmagi_core_agent.transport.debug_trace.get_trace",
+                "magi_agent.transport.debug_trace.get_trace",
                 return_value=trace,
             ):
                 resp = client.get("/v1/debug/trace")

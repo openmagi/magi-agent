@@ -5,8 +5,8 @@ from urllib.parse import quote
 import pytest
 from pydantic import BaseModel, ValidationError
 
-from openmagi_core_agent import authoring as authoring_module
-from openmagi_core_agent.authoring.generated_proposals import (
+from magi_agent import authoring as authoring_module
+from magi_agent.authoring.generated_proposals import (
     GeneratedProposalArtifactFileRef,
     GeneratedProposalDigestSummaryRef,
     GeneratedProposalManifest,
@@ -226,7 +226,7 @@ def test_generated_proposal_manifest_rejects_unsafe_refs_and_summaries() -> None
             digest=DIGEST_B,
             summary=(
                 "Review notes reference "
-                "infra/docker/clawy-core-agent-python/openmagi_core_agent/secret.py"
+                "magi-agent/magi_agent/secret.py"
             ),
         )
 

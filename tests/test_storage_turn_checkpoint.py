@@ -5,15 +5,15 @@ import json
 import pytest
 from pydantic import ValidationError
 
-from openmagi_core_agent.storage.content_addressed import StoredTurnCheckpoint
-from openmagi_core_agent.storage.durable_store import (
+from magi_agent.storage.content_addressed import StoredTurnCheckpoint
+from magi_agent.storage.durable_store import (
     DurableStoreBackupContract,
     DurableStoreSafetyError,
     HostedDurableStoreAdapterBoundary,
     ReplayDecision,
 )
-from openmagi_core_agent.storage.memory_store import InMemoryDurableStore
-from openmagi_core_agent.storage.sqlite_store import SQLiteDurableStore
+from magi_agent.storage.memory_store import InMemoryDurableStore
+from magi_agent.storage.sqlite_store import SQLiteDurableStore
 
 
 DIGEST_A = "sha256:" + "a" * 64
@@ -216,7 +216,7 @@ def test_backup_contract_rejects_private_or_secret_destinations() -> None:
 
 
 def test_sqlite_runtime_metadata_indexes_round_trip_all_required_collections(tmp_path) -> None:
-    from openmagi_core_agent.storage.durable_store import RuntimeMetadataIndexRecord, runtime_metadata_collections
+    from magi_agent.storage.durable_store import RuntimeMetadataIndexRecord, runtime_metadata_collections
 
     store = SQLiteDurableStore(tmp_path / "durable.sqlite")
     for index, collection in enumerate(runtime_metadata_collections(), start=1):
@@ -236,7 +236,7 @@ def test_sqlite_runtime_metadata_indexes_round_trip_all_required_collections(tmp
 
 
 def test_durable_config_blocks_sqlite_multi_writer_and_hosted_postgres_from_env(tmp_path) -> None:
-    from openmagi_core_agent.storage.durable_store import DurableStoreConfig, durable_store_config_from_env
+    from magi_agent.storage.durable_store import DurableStoreConfig, durable_store_config_from_env
 
     config = DurableStoreConfig.model_construct(
         kind="sqlite",
@@ -252,7 +252,7 @@ def test_durable_config_blocks_sqlite_multi_writer_and_hosted_postgres_from_env(
 
 
 def test_runtime_metadata_index_model_construct_and_copy_revalidate_sensitive_metadata() -> None:
-    from openmagi_core_agent.storage.durable_store import RuntimeMetadataIndexRecord
+    from magi_agent.storage.durable_store import RuntimeMetadataIndexRecord
 
     with pytest.raises(ValueError, match="raw or sensitive"):
         RuntimeMetadataIndexRecord.model_construct(

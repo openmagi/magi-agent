@@ -7,7 +7,7 @@ import sys
 import pytest
 from pydantic import ValidationError
 
-from openmagi_core_agent.ops.job_queue import (
+from magi_agent.ops.job_queue import (
     AgentJobQueue,
     JobQueueAuthorityFlags,
     JobQueueConfig,
@@ -413,20 +413,20 @@ import json
 import sys
 
 before = set(sys.modules)
-importlib.import_module("openmagi_core_agent.ops.job_queue")
+importlib.import_module("magi_agent.ops.job_queue")
 imported = set(sys.modules) - before
 forbidden_prefixes = (
     "google.adk",
-    "openmagi_core_agent.adk_bridge",
-    "openmagi_core_agent.browser",
-    "openmagi_core_agent.channels",
-    "openmagi_core_agent.memory",
-    "openmagi_core_agent.plugins",
-    "openmagi_core_agent.tools",
-    "openmagi_core_agent.transport",
-    "openmagi_core_agent.web_acquisition",
-    "openmagi_core_agent.workspace",
-    "openmagi_core_agent.shadow",
+    "magi_agent.adk_bridge",
+    "magi_agent.browser",
+    "magi_agent.channels",
+    "magi_agent.memory",
+    "magi_agent.plugins",
+    "magi_agent.tools",
+    "magi_agent.transport",
+    "magi_agent.web_acquisition",
+    "magi_agent.workspace",
+    "magi_agent.shadow",
     "kubernetes",
 )
 blocked = sorted(

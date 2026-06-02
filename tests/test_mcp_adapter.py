@@ -24,7 +24,7 @@ class FakeMcpProvider:
     def list_tools(self, server_ref: str) -> list[dict[str, object]]:
         self.list_calls += 1
         if self.auth_fail:
-            from openmagi_core_agent.plugins.mcp_adapter import McpAuthError
+            from magi_agent.plugins.mcp_adapter import McpAuthError
 
             raise McpAuthError("Authorization: Bearer unsafe-token")
         return [
@@ -81,7 +81,7 @@ def _security_manifest(*, permissions: tuple[str, ...] = ("read", "write")) -> d
 
 
 def test_mcp_adapter_default_off_does_not_call_provider() -> None:
-    from openmagi_core_agent.plugins.mcp_adapter import McpAdapter, McpAdapterConfig
+    from magi_agent.plugins.mcp_adapter import McpAdapter, McpAdapterConfig
 
     provider = FakeMcpProvider()
     decision = McpAdapter(McpAdapterConfig()).list_tools("mcp:notes", provider=provider)
@@ -94,7 +94,7 @@ def test_mcp_adapter_default_off_does_not_call_provider() -> None:
 
 
 def test_mcp_tools_list_converts_to_tool_manifests_with_permission_annotations() -> None:
-    from openmagi_core_agent.plugins.mcp_adapter import McpAdapter, McpAdapterConfig
+    from magi_agent.plugins.mcp_adapter import McpAdapter, McpAdapterConfig
 
     provider = FakeMcpProvider()
     decision = McpAdapter(
@@ -125,7 +125,7 @@ def test_mcp_tools_list_converts_to_tool_manifests_with_permission_annotations()
 
 
 def test_mcp_tools_list_requires_security_manifest_before_provider_call() -> None:
-    from openmagi_core_agent.plugins.mcp_adapter import McpAdapter, McpAdapterConfig
+    from magi_agent.plugins.mcp_adapter import McpAdapter, McpAdapterConfig
 
     provider = FakeMcpProvider()
     decision = McpAdapter(
@@ -139,7 +139,7 @@ def test_mcp_tools_list_requires_security_manifest_before_provider_call() -> Non
 
 
 def test_mcp_tools_list_blocks_tools_outside_permission_manifest() -> None:
-    from openmagi_core_agent.plugins.mcp_adapter import McpAdapter, McpAdapterConfig
+    from magi_agent.plugins.mcp_adapter import McpAdapter, McpAdapterConfig
 
     provider = FakeMcpProvider()
     decision = McpAdapter(
@@ -156,7 +156,7 @@ def test_mcp_tools_list_blocks_tools_outside_permission_manifest() -> None:
 
 
 def test_mcp_tools_list_blocks_unavailable_sandbox_before_provider_call() -> None:
-    from openmagi_core_agent.plugins.mcp_adapter import McpAdapter, McpAdapterConfig
+    from magi_agent.plugins.mcp_adapter import McpAdapter, McpAdapterConfig
 
     provider = FakeMcpProvider()
     decision = McpAdapter(
@@ -173,7 +173,7 @@ def test_mcp_tools_list_blocks_unavailable_sandbox_before_provider_call() -> Non
 
 
 def test_mcp_tools_list_requires_net_permission_for_open_world_tools() -> None:
-    from openmagi_core_agent.plugins.mcp_adapter import McpAdapter, McpAdapterConfig
+    from magi_agent.plugins.mcp_adapter import McpAdapter, McpAdapterConfig
 
     class OpenWorldProvider(FakeMcpProvider):
         def list_tools(self, server_ref: str) -> list[dict[str, object]]:
@@ -200,8 +200,8 @@ def test_mcp_tools_list_requires_net_permission_for_open_world_tools() -> None:
 
 
 def test_mcp_tools_list_digests_private_tool_names_before_projection() -> None:
-    from openmagi_core_agent.plugins.mcp_adapter import McpAdapter, McpAdapterConfig
-    from openmagi_core_agent.tools.tool_search import ToolSearchBoundary, ToolSearchConfig, ToolSearchRequest
+    from magi_agent.plugins.mcp_adapter import McpAdapter, McpAdapterConfig
+    from magi_agent.tools.tool_search import ToolSearchBoundary, ToolSearchConfig, ToolSearchRequest
 
     class PrivateNameProvider(FakeMcpProvider):
         def list_tools(self, server_ref: str) -> list[dict[str, object]]:
@@ -234,8 +234,8 @@ def test_mcp_tools_list_digests_private_tool_names_before_projection() -> None:
 
 
 def test_tool_search_public_projection_omits_raw_tool_names() -> None:
-    from openmagi_core_agent.tools.manifest import Budget, ToolManifest, ToolSource
-    from openmagi_core_agent.tools.tool_search import ToolSearchBoundary, ToolSearchConfig, ToolSearchRequest
+    from magi_agent.tools.manifest import Budget, ToolManifest, ToolSource
+    from magi_agent.tools.tool_search import ToolSearchBoundary, ToolSearchConfig, ToolSearchRequest
 
     manifest = ToolManifest(
         name="internal_runtime_only_tool",
@@ -271,7 +271,7 @@ def test_tool_search_public_projection_omits_raw_tool_names() -> None:
 
 
 def test_mcp_tools_list_drops_sensitive_schema_property_names() -> None:
-    from openmagi_core_agent.plugins.mcp_adapter import McpAdapter, McpAdapterConfig
+    from magi_agent.plugins.mcp_adapter import McpAdapter, McpAdapterConfig
 
     manifest = McpAdapter(
         McpAdapterConfig(enabled=True, localFakeProviderEnabled=True),
@@ -288,7 +288,7 @@ def test_mcp_tools_list_drops_sensitive_schema_property_names() -> None:
 
 
 def test_mcp_tools_without_explicit_readonly_annotation_are_conservative() -> None:
-    from openmagi_core_agent.plugins.mcp_adapter import McpAdapter, McpAdapterConfig
+    from magi_agent.plugins.mcp_adapter import McpAdapter, McpAdapterConfig
 
     class AmbiguousProvider(FakeMcpProvider):
         def list_tools(self, server_ref: str) -> list[dict[str, object]]:
@@ -316,7 +316,7 @@ def test_mcp_tools_without_explicit_readonly_annotation_are_conservative() -> No
 
 
 def test_mcp_tools_list_blocks_untrusted_fake_provider() -> None:
-    from openmagi_core_agent.plugins.mcp_adapter import McpAdapter, McpAdapterConfig
+    from magi_agent.plugins.mcp_adapter import McpAdapter, McpAdapterConfig
 
     provider = UntrustedMcpProvider()
     decision = McpAdapter(
@@ -329,7 +329,7 @@ def test_mcp_tools_list_blocks_untrusted_fake_provider() -> None:
 
 
 def test_mcp_call_result_is_budgeted_and_auth_failure_is_non_crashing() -> None:
-    from openmagi_core_agent.plugins.mcp_adapter import McpAdapter, McpAdapterConfig
+    from magi_agent.plugins.mcp_adapter import McpAdapter, McpAdapterConfig
 
     adapter = McpAdapter(McpAdapterConfig(enabled=True, localFakeProviderEnabled=True))
     provider = FakeMcpProvider()
@@ -377,7 +377,7 @@ def test_mcp_call_result_is_budgeted_and_auth_failure_is_non_crashing() -> None:
 
 
 def test_mcp_call_requires_manifest_and_blocks_permission_mismatch_before_provider() -> None:
-    from openmagi_core_agent.plugins.mcp_adapter import McpAdapter, McpAdapterConfig
+    from magi_agent.plugins.mcp_adapter import McpAdapter, McpAdapterConfig
 
     adapter = McpAdapter(McpAdapterConfig(enabled=True, localFakeProviderEnabled=True))
     provider = FakeMcpProvider()
@@ -404,7 +404,7 @@ def test_mcp_call_requires_manifest_and_blocks_permission_mismatch_before_provid
 
 
 def test_mcp_call_blocks_manifest_server_ref_mismatch_before_provider() -> None:
-    from openmagi_core_agent.plugins.mcp_adapter import McpAdapter, McpAdapterConfig
+    from magi_agent.plugins.mcp_adapter import McpAdapter, McpAdapterConfig
 
     adapter = McpAdapter(McpAdapterConfig(enabled=True, localFakeProviderEnabled=True))
     provider = FakeMcpProvider()
@@ -428,7 +428,7 @@ def test_mcp_call_blocks_manifest_server_ref_mismatch_before_provider() -> None:
 
 
 def test_mcp_call_blocks_unavailable_sandbox_before_provider_call() -> None:
-    from openmagi_core_agent.plugins.mcp_adapter import McpAdapter, McpAdapterConfig
+    from magi_agent.plugins.mcp_adapter import McpAdapter, McpAdapterConfig
 
     adapter = McpAdapter(McpAdapterConfig(enabled=True, localFakeProviderEnabled=True))
     provider = FakeMcpProvider()
@@ -452,7 +452,7 @@ def test_mcp_call_blocks_unavailable_sandbox_before_provider_call() -> None:
 
 
 def test_mcp_call_default_off_does_not_execute_provider() -> None:
-    from openmagi_core_agent.plugins.mcp_adapter import McpAdapter, McpAdapterConfig
+    from magi_agent.plugins.mcp_adapter import McpAdapter, McpAdapterConfig
 
     adapter = McpAdapter(McpAdapterConfig())
     provider = FakeMcpProvider()
@@ -473,7 +473,7 @@ def test_mcp_call_default_off_does_not_execute_provider() -> None:
 
 
 def test_mcp_decision_projection_ignores_forged_authority_flags() -> None:
-    from openmagi_core_agent.plugins.mcp_adapter import McpListDecision
+    from magi_agent.plugins.mcp_adapter import McpListDecision
 
     forged = McpListDecision.model_construct(
         status="ok",
@@ -494,7 +494,7 @@ def test_mcp_adapter_imports_no_live_mcp_or_network_clients() -> None:
 import importlib
 import sys
 
-importlib.import_module("openmagi_core_agent.plugins.mcp_adapter")
+importlib.import_module("magi_agent.plugins.mcp_adapter")
 forbidden = (
     "mcp",
     "subprocess",
@@ -505,20 +505,20 @@ forbidden = (
     "openai",
     "anthropic",
     "google.adk.runners",
-    "openmagi_core_agent.runtime.route_activation",
-    "openmagi_core_agent.runtime.adk_turn_runner",
-    "openmagi_core_agent.runtime.model_routing",
-    "openmagi_core_agent.transport.chat",
-    "openmagi_core_agent.transport.chat_route",
-    "openmagi_core_agent.tools.kernel",
-    "openmagi_core_agent.tools.dispatcher",
-    "openmagi_core_agent.deploy",
-    "openmagi_core_agent.provisioning",
+    "magi_agent.runtime.route_activation",
+    "magi_agent.runtime.adk_turn_runner",
+    "magi_agent.runtime.model_routing",
+    "magi_agent.transport.chat",
+    "magi_agent.transport.chat_route",
+    "magi_agent.tools.kernel",
+    "magi_agent.tools.dispatcher",
+    "magi_agent.deploy",
+    "magi_agent.provisioning",
 )
 forbidden_prefixes = (
-    "openmagi_core_agent.adk_bridge.",
-    "openmagi_core_agent.deploy.",
-    "openmagi_core_agent.provisioning.",
+    "magi_agent.adk_bridge.",
+    "magi_agent.deploy.",
+    "magi_agent.provisioning.",
 )
 loaded = [
     name

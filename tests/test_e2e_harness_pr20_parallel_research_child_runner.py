@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 
-from openmagi_core_agent.recipes.research_child_runner import (
+from magi_agent.recipes.research_child_runner import (
     ResearchChildRunnerConfig,
     ResearchChildRunnerRecipe,
     ResearchChildTaskSpec,

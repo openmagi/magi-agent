@@ -7,11 +7,11 @@ from pathlib import Path
 
 import pytest
 
-from openmagi_core_agent.shadow.ts_parity_replay import (
+from magi_agent.shadow.ts_parity_replay import (
     load_ts_parity_replay_fixture,
     replay_ts_parity_fixture,
 )
-from openmagi_core_agent.transport.sse import InMemorySseWriter
+from magi_agent.transport.sse import InMemorySseWriter
 
 
 FIXTURES = Path(__file__).parent / "fixtures" / "ts_parity_replay"
@@ -31,7 +31,7 @@ def _by_type(payloads: list[dict[str, object]], event_type: str) -> list[dict[st
 
 def _typescript_safe_agent_event_payloads(fixture_name: str) -> list[dict[str, object]]:
     repo_root = Path(__file__).resolve().parents[4]
-    ts_root = repo_root / "infra" / "docker" / "clawy-core-agent"
+    ts_root = repo_root / "infra" / "docker" / "magi-agent"
     tsx = ts_root / "node_modules" / ".bin" / "tsx"
     if not tsx.exists():
         pytest.skip("TypeScript safeAgentEvent parity replay requires local tsx install")
@@ -65,7 +65,7 @@ def _typescript_safe_agent_event_payloads_from_events(
     agent_events: list[dict[str, object]],
 ) -> list[dict[str, object]]:
     repo_root = Path(__file__).resolve().parents[4]
-    ts_root = repo_root / "infra" / "docker" / "clawy-core-agent"
+    ts_root = repo_root / "infra" / "docker" / "magi-agent"
     tsx = ts_root / "node_modules" / ".bin" / "tsx"
     if not tsx.exists():
         pytest.skip("TypeScript safeAgentEvent parity replay requires local tsx install")
@@ -248,7 +248,7 @@ def test_public_event_golden_fixture_import_boundary_stays_local_diagnostic_only
 import sys
 from pathlib import Path
 
-from openmagi_core_agent.shadow.ts_parity_replay import (
+from magi_agent.shadow.ts_parity_replay import (
     load_ts_parity_replay_fixture,
     replay_ts_parity_fixture,
 )
@@ -259,15 +259,15 @@ replay_ts_parity_fixture(fixture)
 
 forbidden = (
     'google.adk.runners',
-    'openmagi_core_agent.adk_bridge.local_runner',
-    'openmagi_core_agent.adk_bridge.runner_adapter',
-    'openmagi_core_agent.tools.dispatcher',
-    'openmagi_core_agent.tools.registry',
-    'openmagi_core_agent.plugins.agentmemory',
-    'openmagi_core_agent.memory',
-    'openmagi_core_agent.app',
-    'openmagi_core_agent.transport.chat',
-    'openmagi_core_agent.routes',
+    'magi_agent.adk_bridge.local_runner',
+    'magi_agent.adk_bridge.runner_adapter',
+    'magi_agent.tools.dispatcher',
+    'magi_agent.tools.registry',
+    'magi_agent.plugins.agentmemory',
+    'magi_agent.memory',
+    'magi_agent.app',
+    'magi_agent.transport.chat',
+    'magi_agent.routes',
 )
 loaded = [name for name in forbidden if name in sys.modules]
 if loaded:

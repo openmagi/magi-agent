@@ -6,8 +6,8 @@ import sys
 import pytest
 from pydantic import ValidationError
 
-from openmagi_core_agent.plugins.manifest import parse_plugin_manifest
-from openmagi_core_agent.plugins.manager import (
+from magi_agent.plugins.manifest import parse_plugin_manifest
+from magi_agent.plugins.manager import (
     PluginOptOutRecord,
     resolve_plugin_state,
 )
@@ -381,15 +381,15 @@ def test_manager_import_boundary_does_not_load_adk_runtime_or_execution_modules(
 import importlib
 import sys
 
-importlib.import_module("openmagi_core_agent.plugins.manager")
+importlib.import_module("magi_agent.plugins.manager")
 forbidden_prefixes = (
     "google.adk",
-    "openmagi_core_agent.adk_bridge",
-    "openmagi_core_agent.runtime",
-    "openmagi_core_agent.tools.dispatcher",
-    "openmagi_core_agent.tools.registry",
-    "openmagi_core_agent.hooks.bus",
-    "openmagi_core_agent.transport",
+    "magi_agent.adk_bridge",
+    "magi_agent.runtime",
+    "magi_agent.tools.dispatcher",
+    "magi_agent.tools.registry",
+    "magi_agent.hooks.bus",
+    "magi_agent.transport",
 )
 loaded = [name for name in sys.modules if name == forbidden_prefixes[0] or name.startswith(forbidden_prefixes)]
 if loaded:

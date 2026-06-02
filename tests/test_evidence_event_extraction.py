@@ -5,14 +5,14 @@ import sys
 
 import pytest
 
-from openmagi_core_agent.evidence.extraction import (
+from magi_agent.evidence.extraction import (
     evidence_from_artifact_metadata,
     evidence_from_projected_event,
     evidence_from_tool_result,
     evidence_from_transcript_tool_result,
 )
-from openmagi_core_agent.runtime.transcript import ToolResultEntry
-from openmagi_core_agent.tools.result import ToolResult
+from magi_agent.runtime.transcript import ToolResultEntry
+from magi_agent.tools.result import ToolResult
 
 
 def test_projected_tool_start_without_explicit_evidence_returns_none() -> None:
@@ -532,16 +532,16 @@ def test_evidence_extraction_import_boundary_stays_runner_hook_route_and_db_free
 import importlib
 import sys
 
-module = importlib.import_module("openmagi_core_agent.evidence.extraction")
+module = importlib.import_module("magi_agent.evidence.extraction")
 assert hasattr(module, "evidence_from_projected_event")
 
 forbidden_prefixes = (
     "google.adk",
-    "openmagi_core_agent.adk_bridge.runner_adapter",
-    "openmagi_core_agent.hooks",
-    "openmagi_core_agent.routes",
-    "openmagi_core_agent.db",
-    "openmagi_core_agent.proxy",
+    "magi_agent.adk_bridge.runner_adapter",
+    "magi_agent.hooks",
+    "magi_agent.routes",
+    "magi_agent.db",
+    "magi_agent.proxy",
 )
 loaded = sorted(
     name

@@ -4,9 +4,9 @@ import hashlib
 
 from fastapi.testclient import TestClient
 
-from openmagi_core_agent.app import create_app
-from openmagi_core_agent.config.env import parse_runtime_env
-from openmagi_core_agent.runtime.openmagi_runtime import OpenMagiRuntime
+from magi_agent.app import create_app
+from magi_agent.config.env import parse_runtime_env
+from magi_agent.runtime.openmagi_runtime import OpenMagiRuntime
 
 
 def _digest(value: str) -> str:

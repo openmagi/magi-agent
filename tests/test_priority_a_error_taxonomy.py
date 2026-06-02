@@ -10,7 +10,7 @@ import pytest
 
 def _taxonomy_module():
     try:
-        return importlib.import_module("openmagi_core_agent.runtime.error_taxonomy")
+        return importlib.import_module("magi_agent.runtime.error_taxonomy")
     except ModuleNotFoundError as exc:
         pytest.fail(f"A6 taxonomy module is missing: {exc}")
 
@@ -290,7 +290,7 @@ def test_prefixed_or_suffixed_validator_codes_fail_closed(source: dict[str, obje
 
 
 def test_policy_import_and_source_stay_runner_provider_shell_and_write_free() -> None:
-    module_name = "openmagi_core_agent.runtime.error_taxonomy"
+    module_name = "magi_agent.runtime.error_taxonomy"
     before_modules = set(sys.modules)
     module = importlib.import_module(module_name)
     new_modules = set(sys.modules) - before_modules

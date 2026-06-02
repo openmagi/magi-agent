@@ -3,18 +3,18 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from openmagi_core_agent.plugins.general_automation.hook_projection import (
+from magi_agent.plugins.general_automation.hook_projection import (
     PluginLifecycleHookProjectionRequest,
     project_plugin_lifecycle_hooks,
 )
-from openmagi_core_agent.plugins.general_automation.mcp_projection import (
+from magi_agent.plugins.general_automation.mcp_projection import (
     McpToolProjectionRequest,
     project_mcp_tool_metadata,
 )
 
 
 PYTHON_ROOT = Path(__file__).resolve().parents[1]
-PLUGIN_DIR = PYTHON_ROOT / "openmagi_core_agent" / "plugins" / "general_automation"
+PLUGIN_DIR = PYTHON_ROOT / "magi_agent" / "plugins" / "general_automation"
 
 
 def _fragment(*parts: str) -> str:
@@ -175,16 +175,16 @@ def test_general_automation_plugin_modules_do_not_touch_live_surfaces() -> None:
     forbidden_fragments = (
         "google.adk",
         "FunctionTool(",
-        "openmagi_core_agent.adk_bridge",
-        "openmagi_core_agent.runtime",
-        "openmagi_core_agent.transport",
-        "openmagi_core_agent.routing",
-        "openmagi_core_agent.tools.dispatcher",
-        "openmagi_core_agent.tools.registry",
-        "openmagi_core_agent.tools.permission",
-        "openmagi_core_agent.tools.result",
-        "openmagi_core_agent.plugins.mcp_adapter",
-        "openmagi_core_agent.plugins.extension_boundary",
+        "magi_agent.adk_bridge",
+        "magi_agent.runtime",
+        "magi_agent.transport",
+        "magi_agent.routing",
+        "magi_agent.tools.dispatcher",
+        "magi_agent.tools.registry",
+        "magi_agent.tools.permission",
+        "magi_agent.tools.result",
+        "magi_agent.plugins.mcp_adapter",
+        "magi_agent.plugins.extension_boundary",
         "requests",
         "httpx",
         "aiohttp",

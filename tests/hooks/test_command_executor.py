@@ -25,18 +25,18 @@ import sys
 
 import pytest
 
-from openmagi_core_agent.hooks.context import HookContext
-from openmagi_core_agent.hooks.executors import get_executor
-from openmagi_core_agent.hooks.executors.command_executor import (
+from magi_agent.hooks.context import HookContext
+from magi_agent.hooks.executors import get_executor
+from magi_agent.hooks.executors.command_executor import (
     CommandHookExecutor,
     _build_env,
     _build_sanitized_hook_input,
     _parse_hook_output,
     _sanitize_value,
 )
-from openmagi_core_agent.hooks.manifest import HookManifest, HookPoint
-from openmagi_core_agent.hooks.result import HookResult
-from openmagi_core_agent.tools.manifest import ToolSource
+from magi_agent.hooks.manifest import HookManifest, HookPoint
+from magi_agent.hooks.result import HookResult
+from magi_agent.tools.manifest import ToolSource
 
 # ---------------------------------------------------------------------------
 # Shared fixtures
@@ -235,7 +235,7 @@ async def test_env_vars_optional_fields_empty_when_absent():
 # ---------------------------------------------------------------------------
 
 def test_sanitize_value_redacts_users_path():
-    result = _sanitize_value("/Users/kevin/projects/clawy/secret.txt")
+    result = _sanitize_value("/Users/kevin/projects/magi/secret.txt")
     assert "<redacted_path>" in result
     assert "kevin" not in result
 

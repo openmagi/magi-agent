@@ -69,7 +69,7 @@ class FakeWebProvider:
 
 
 def test_web_acquisition_defaults_off_and_never_calls_provider() -> None:
-    from openmagi_core_agent.web_acquisition.provider_boundary import (
+    from magi_agent.web_acquisition.provider_boundary import (
         LocalWebAcquisitionRuntime,
         WebAcquisitionConfig,
         WebAcquisitionRequest,
@@ -90,7 +90,7 @@ def test_web_acquisition_defaults_off_and_never_calls_provider() -> None:
 
 
 def test_web_search_fake_provider_records_sanitized_source_refs_and_budget_metadata() -> None:
-    from openmagi_core_agent.web_acquisition.provider_boundary import (
+    from magi_agent.web_acquisition.provider_boundary import (
         LocalWebAcquisitionRuntime,
         WebAcquisitionConfig,
         WebAcquisitionRequest,
@@ -130,7 +130,7 @@ def test_web_search_fake_provider_records_sanitized_source_refs_and_budget_metad
 
 
 def test_web_fetch_reader_and_metadata_paths_use_fake_provider_only_and_strip_raw_payloads() -> None:
-    from openmagi_core_agent.web_acquisition.provider_boundary import (
+    from magi_agent.web_acquisition.provider_boundary import (
         LocalWebAcquisitionRuntime,
         WebAcquisitionConfig,
         WebAcquisitionRequest,
@@ -184,7 +184,7 @@ def test_web_fetch_reader_and_metadata_paths_use_fake_provider_only_and_strip_ra
 
 
 def test_web_acquisition_blocks_private_auth_captcha_and_cluster_urls_before_provider_calls() -> None:
-    from openmagi_core_agent.web_acquisition.provider_boundary import (
+    from magi_agent.web_acquisition.provider_boundary import (
         LocalWebAcquisitionRuntime,
         WebAcquisitionConfig,
         WebAcquisitionRequest,
@@ -225,7 +225,7 @@ def test_web_acquisition_blocks_private_auth_captcha_and_cluster_urls_before_pro
 
 
 def test_provider_returned_blocked_urls_are_not_recorded_raw_or_projected() -> None:
-    from openmagi_core_agent.web_acquisition.provider_boundary import (
+    from magi_agent.web_acquisition.provider_boundary import (
         LocalWebAcquisitionRuntime,
         WebAcquisitionConfig,
         WebAcquisitionRequest,
@@ -267,7 +267,7 @@ def test_provider_returned_blocked_urls_are_not_recorded_raw_or_projected() -> N
 
 
 def test_web_acquisition_rejects_unmarked_local_fake_provider() -> None:
-    from openmagi_core_agent.web_acquisition.provider_boundary import (
+    from magi_agent.web_acquisition.provider_boundary import (
         LocalWebAcquisitionRuntime,
         WebAcquisitionConfig,
         WebAcquisitionRequest,
@@ -292,7 +292,7 @@ def test_web_acquisition_rejects_unmarked_local_fake_provider() -> None:
 
 
 def test_public_projection_redacts_diagnostic_metadata_and_provider_log_aliases() -> None:
-    from openmagi_core_agent.web_acquisition.provider_boundary import (
+    from magi_agent.web_acquisition.provider_boundary import (
         WebAcquisitionResult,
     )
 
@@ -322,7 +322,7 @@ def test_public_projection_redacts_diagnostic_metadata_and_provider_log_aliases(
 
 
 def test_public_projection_redacts_forged_preview_records_and_parent_refs() -> None:
-    from openmagi_core_agent.web_acquisition.provider_boundary import (
+    from magi_agent.web_acquisition.provider_boundary import (
         WebAcquisitionResult,
         WebAcquisitionSourceRecord,
     )
@@ -362,7 +362,7 @@ def test_public_projection_redacts_forged_preview_records_and_parent_refs() -> N
 
 
 def test_browser_fallback_requires_approval_before_fake_acquire_provider_call() -> None:
-    from openmagi_core_agent.web_acquisition.provider_boundary import (
+    from magi_agent.web_acquisition.provider_boundary import (
         LocalWebAcquisitionRuntime,
         WebAcquisitionConfig,
         WebAcquisitionRequest,
@@ -404,7 +404,7 @@ def test_browser_fallback_requires_approval_before_fake_acquire_provider_call() 
 def test_web_acquisition_import_boundary_has_no_live_network_or_runtime_imports() -> None:
     module_path = (
         Path(__file__).parents[1]
-        / "openmagi_core_agent"
+        / "magi_agent"
         / "web_acquisition"
         / "provider_boundary.py"
     )
@@ -419,9 +419,9 @@ def test_web_acquisition_import_boundary_has_no_live_network_or_runtime_imports(
 
     forbidden_prefixes = (
         "google.adk.runners",
-        "openmagi_core_agent.adk_bridge",
-        "openmagi_core_agent.tools",
-        "openmagi_core_agent.transport",
+        "magi_agent.adk_bridge",
+        "magi_agent.tools",
+        "magi_agent.transport",
         "socket",
         "subprocess",
         "httpx",

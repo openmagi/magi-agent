@@ -6,11 +6,11 @@ from pathlib import Path
 import pytest
 from google.adk.tools import FunctionTool
 
-from openmagi_core_agent.adk_bridge.tool_adapter import build_adk_function_tools_for_registry
-from openmagi_core_agent.config.env import parse_python_toolhost_attachment_env
-from openmagi_core_agent.tools import ToolDispatcher, ToolRegistry, ToolResult, ToolSource
-from openmagi_core_agent.tools.context import ToolContext
-from openmagi_core_agent.tools.manifest import ToolManifest
+from magi_agent.adk_bridge.tool_adapter import build_adk_function_tools_for_registry
+from magi_agent.config.env import parse_python_toolhost_attachment_env
+from magi_agent.tools import ToolDispatcher, ToolRegistry, ToolResult, ToolSource
+from magi_agent.tools.context import ToolContext
+from magi_agent.tools.manifest import ToolManifest
 
 
 def make_manifest(name: str, *, enabled_by_default: bool = True) -> ToolManifest:
@@ -44,7 +44,7 @@ def test_toolhost_attachment_env_defaults_off() -> None:
 
 
 def test_local_toolhost_adk_attachment_defaults_to_no_tools_and_no_authority() -> None:
-    from openmagi_core_agent.adk_bridge.local_toolhost import build_local_toolhost_adk_tools
+    from magi_agent.adk_bridge.local_toolhost import build_local_toolhost_adk_tools
 
     bundle = build_local_toolhost_adk_tools()
 
@@ -65,7 +65,7 @@ def test_local_toolhost_adk_attachment_defaults_to_no_tools_and_no_authority() -
 
 
 def test_local_toolhost_enabled_exposes_only_requested_fake_function_tools() -> None:
-    from openmagi_core_agent.adk_bridge.local_toolhost import build_local_toolhost_adk_tools
+    from magi_agent.adk_bridge.local_toolhost import build_local_toolhost_adk_tools
 
     bundle = build_local_toolhost_adk_tools(
         attach_enabled=True,
@@ -78,7 +78,7 @@ def test_local_toolhost_enabled_exposes_only_requested_fake_function_tools() -> 
 
 
 def test_local_toolhost_hidden_tool_fails_closed_without_handler_call() -> None:
-    from openmagi_core_agent.adk_bridge.local_toolhost import build_local_toolhost_adk_tools
+    from magi_agent.adk_bridge.local_toolhost import build_local_toolhost_adk_tools
 
     bundle = build_local_toolhost_adk_tools(
         attach_enabled=True,
@@ -101,7 +101,7 @@ def test_local_toolhost_hidden_tool_fails_closed_without_handler_call() -> None:
 
 
 def test_local_toolhost_fake_handler_runs_only_through_direct_adk_tool_call_and_sanitizes_receipt() -> None:
-    from openmagi_core_agent.adk_bridge.local_toolhost import build_local_toolhost_adk_tools
+    from magi_agent.adk_bridge.local_toolhost import build_local_toolhost_adk_tools
 
     bundle = build_local_toolhost_adk_tools(
         attach_enabled=True,
@@ -144,7 +144,7 @@ def test_local_toolhost_fake_handler_runs_only_through_direct_adk_tool_call_and_
 
 
 def test_local_toolhost_receipts_are_not_stable_raw_argument_oracles() -> None:
-    from openmagi_core_agent.adk_bridge.local_toolhost import build_local_toolhost_adk_tools
+    from magi_agent.adk_bridge.local_toolhost import build_local_toolhost_adk_tools
 
     bundle = build_local_toolhost_adk_tools(
         attach_enabled=True,
@@ -166,7 +166,7 @@ def test_local_toolhost_receipts_are_not_stable_raw_argument_oracles() -> None:
 def test_local_toolhost_module_stays_self_contained_without_dispatch_runtime_or_transport_imports() -> None:
     module_path = (
         Path(__file__).parents[1]
-        / "openmagi_core_agent"
+        / "magi_agent"
         / "adk_bridge"
         / "local_toolhost.py"
     )
@@ -179,10 +179,10 @@ def test_local_toolhost_module_stays_self_contained_without_dispatch_runtime_or_
             imported_modules.add(node.module)
 
     forbidden_prefixes = (
-        "openmagi_core_agent.runtime",
-        "openmagi_core_agent.transport",
-        "openmagi_core_agent.tools",
-        "openmagi_core_agent.control",
+        "magi_agent.runtime",
+        "magi_agent.transport",
+        "magi_agent.tools",
+        "magi_agent.control",
     )
     assert not [
         module
@@ -194,8 +194,8 @@ def test_local_toolhost_module_stays_self_contained_without_dispatch_runtime_or_
 def test_local_runner_accepts_fake_toolhost_function_tools_without_model_or_prod_authority(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from openmagi_core_agent.adk_bridge.local_runner import build_local_adk_runner
-    from openmagi_core_agent.adk_bridge.local_toolhost import build_local_toolhost_adk_tools
+    from magi_agent.adk_bridge.local_runner import build_local_adk_runner
+    from magi_agent.adk_bridge.local_toolhost import build_local_toolhost_adk_tools
 
     monkeypatch.setenv("CORE_AGENT_PYTHON_LOCAL_ADK_RUNNER", "1")
     toolhost_bundle = build_local_toolhost_adk_tools(

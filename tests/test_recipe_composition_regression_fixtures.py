@@ -6,20 +6,20 @@ from typing import Any
 
 import pytest
 
-from openmagi_core_agent.recipes.composition import (
+from magi_agent.recipes.composition import (
     AdmittedRecipeSnapshot,
     RecipeStackInput,
 )
-from openmagi_core_agent.recipes.effective_contract import (
+from magi_agent.recipes.effective_contract import (
     EffectiveRecipeContract,
     build_effective_recipe_contract,
 )
-from openmagi_core_agent.recipes.hook_composition import (
+from magi_agent.recipes.hook_composition import (
     EffectiveRecipeHookContract,
     HookContribution,
     compose_hook_contributions,
 )
-from openmagi_core_agent.recipes.projection import (
+from magi_agent.recipes.projection import (
     RecipeCompositionProjection,
     project_effective_recipe_contract,
 )

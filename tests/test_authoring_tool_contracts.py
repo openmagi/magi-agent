@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from openmagi_core_agent.authoring import (
+from magi_agent.authoring import (
     CompileRecipePack,
     DryRunRecipePack,
     DraftEvalFixtures,
@@ -25,22 +25,22 @@ from openmagi_core_agent.authoring import (
     ReadMagiDocs,
     SaveRecipePackDraft,
 )
-from openmagi_core_agent.authoring import tool_contracts as tool_contracts_module
-from openmagi_core_agent.authoring.contracts import (
+from magi_agent.authoring import tool_contracts as tool_contracts_module
+from magi_agent.authoring.contracts import (
     DraftRecipePack as DraftRecipePackData,
     RecipeBuilderSession,
     RecipePackDraft,
 )
-from openmagi_core_agent.authoring.compiler import (
+from magi_agent.authoring.compiler import (
     CompileRecipePackCatalog,
     CompileRecipePackResult,
 )
-from openmagi_core_agent.authoring.dry_run import (
+from magi_agent.authoring.dry_run import (
     DryRunRecipePackCatalog,
     DryRunRecipePackRequest,
     DryRunRecipePackResult,
 )
-from openmagi_core_agent.authoring.tool_contracts import (
+from magi_agent.authoring.tool_contracts import (
     DraftEvalFixtures as DraftEvalFixturesContract,
     DraftHarnessPolicy as DraftHarnessPolicyContract,
     DraftRecipePack as DraftRecipePackContract,
@@ -616,15 +616,15 @@ def test_authoring_tool_contract_import_is_runtime_free() -> None:
 import importlib
 import sys
 
-importlib.import_module("openmagi_core_agent.authoring.tool_contracts")
+importlib.import_module("magi_agent.authoring.tool_contracts")
 
 forbidden_exact = (
     "google.adk",
     "openai",
-    "openmagi_core_agent.runtime",
-    "openmagi_core_agent.tools.dispatcher",
-    "openmagi_core_agent.tools.host",
-    "openmagi_core_agent.tools.toolhost",
+    "magi_agent.runtime",
+    "magi_agent.tools.dispatcher",
+    "magi_agent.tools.host",
+    "magi_agent.tools.toolhost",
     "google.generativeai",
     "requests",
     "httpx",
@@ -648,7 +648,7 @@ if loaded:
 
 
 def test_tool_contracts_are_publicly_importable_from_authoring_package() -> None:
-    from openmagi_core_agent import authoring
+    from magi_agent import authoring
 
     assert authoring.ReadMagiDocs is ReadMagiDocs
     assert authoring.InspectRecipeRegistry is InspectRecipeRegistry
@@ -679,12 +679,12 @@ def test_authoring_package_exports_tool_contracts_lazily() -> None:
 import importlib
 import sys
 
-import openmagi_core_agent.authoring.compiler
+import magi_agent.authoring.compiler
 
-if "openmagi_core_agent.authoring.tool_contracts" in sys.modules:
+if "magi_agent.authoring.tool_contracts" in sys.modules:
     raise AssertionError("tool_contracts should remain unloaded after compiler import")
 
-from openmagi_core_agent import authoring
+from magi_agent import authoring
 
 _ = authoring.CompileRecipePack
 _ = authoring.DraftRecipePackTool
@@ -693,12 +693,12 @@ _ = authoring.DraftEvalFixtures
 _ = authoring.GenerateGapReport
 _ = authoring.GenerateActivationPlan
 
-if "openmagi_core_agent.authoring.tool_contracts" not in sys.modules:
+if "magi_agent.authoring.tool_contracts" not in sys.modules:
     raise AssertionError("tool_contracts should load when accessing tool contract attribute")
 
-importlib.reload(importlib.import_module("openmagi_core_agent.authoring.compiler"))
+importlib.reload(importlib.import_module("magi_agent.authoring.compiler"))
 
-if "openmagi_core_agent.authoring.tool_contracts" in sys.modules:
+if "magi_agent.authoring.tool_contracts" in sys.modules:
     # keep boundary tests behavior: it was allowed to be imported later via tools
     pass
 ''',

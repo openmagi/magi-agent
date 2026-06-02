@@ -3,8 +3,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from openmagi_core_agent.plugins.manifest import PluginKind, PluginManifest
-from openmagi_core_agent.plugins.sandbox_policy import (
+from magi_agent.plugins.manifest import PluginKind, PluginManifest
+from magi_agent.plugins.sandbox_policy import (
     PluginTrustLevel,
     evaluate_plugin_sandbox,
 )

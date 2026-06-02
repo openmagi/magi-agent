@@ -6,14 +6,14 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from openmagi_core_agent.authoring.contracts import (
+from magi_agent.authoring.contracts import (
     GeneratedPluginProposal,
     RecipeBuilderSession,
     RecipePackDraft,
     RecipePackVersion,
 )
-from openmagi_core_agent import authoring as authoring_module
-from openmagi_core_agent.authoring.storage import (
+from magi_agent import authoring as authoring_module
+from magi_agent.authoring.storage import (
     CompiledSnapshotRef,
     EvalResultRef,
     GeneratedPluginProposalArtifactRef,

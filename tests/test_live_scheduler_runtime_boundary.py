@@ -3,11 +3,11 @@ from __future__ import annotations
 import subprocess
 import sys
 
-from openmagi_core_agent.channels.contract import ChannelRef
+from magi_agent.channels.contract import ChannelRef
 
 
 def test_scheduler_disabled_selects_no_due_turns() -> None:
-    from openmagi_core_agent.harness.scheduler_runtime import (
+    from magi_agent.harness.scheduler_runtime import (
         SchedulerRuntimeBoundary,
         SchedulerRuntimeConfig,
         SchedulerTickRequest,
@@ -29,7 +29,7 @@ def test_scheduler_disabled_selects_no_due_turns() -> None:
 
 
 def test_scheduler_tick_requires_fresh_lease_and_deduplicates_due_refs() -> None:
-    from openmagi_core_agent.harness.scheduler_runtime import (
+    from magi_agent.harness.scheduler_runtime import (
         SchedulerLease,
         SchedulerRuntimeBoundary,
         SchedulerRuntimeConfig,
@@ -60,7 +60,7 @@ def test_scheduler_tick_requires_fresh_lease_and_deduplicates_due_refs() -> None
 
 
 def test_scheduler_tick_blocks_stale_or_mismatched_lease() -> None:
-    from openmagi_core_agent.harness.scheduler_runtime import (
+    from magi_agent.harness.scheduler_runtime import (
         SchedulerLease,
         SchedulerRuntimeBoundary,
         SchedulerRuntimeConfig,
@@ -106,7 +106,7 @@ def test_scheduler_tick_blocks_stale_or_mismatched_lease() -> None:
 
 
 def test_scheduler_config_and_authority_flags_cannot_be_forged_with_model_copy() -> None:
-    from openmagi_core_agent.harness.scheduler_runtime import (
+    from magi_agent.harness.scheduler_runtime import (
         SchedulerAuthorityFlags,
         SchedulerRuntimeConfig,
     )
@@ -143,13 +143,13 @@ def test_scheduler_config_and_authority_flags_cannot_be_forged_with_model_copy()
 
 
 def test_scheduled_channel_delivery_requires_dispatcher_receipt() -> None:
-    from openmagi_core_agent.channels.dispatcher import (
+    from magi_agent.channels.dispatcher import (
         ChannelDispatchConfig,
         ChannelDispatchDecision,
         ChannelDispatchRequest,
         ChannelDispatcher,
     )
-    from openmagi_core_agent.harness.scheduler_runtime import (
+    from magi_agent.harness.scheduler_runtime import (
         SchedulerDeliveryRequest,
         SchedulerRuntimeBoundary,
         SchedulerRuntimeConfig,
@@ -228,17 +228,17 @@ def test_scheduler_runtime_boundary_has_no_live_imports() -> None:
 import importlib
 import sys
 
-importlib.import_module("openmagi_core_agent.harness.scheduler_runtime")
+importlib.import_module("magi_agent.harness.scheduler_runtime")
 forbidden_prefixes = (
     "google.adk",
     "google.genai",
-    "openmagi_core_agent.adk_bridge",
-    "openmagi_core_agent.transport",
-    "openmagi_core_agent.routing",
-    "openmagi_core_agent.deploy",
-    "openmagi_core_agent.chat_proxy",
-    "openmagi_core_agent.runtime_selector",
-    "openmagi_core_agent.k8s",
+    "magi_agent.adk_bridge",
+    "magi_agent.transport",
+    "magi_agent.routing",
+    "magi_agent.deploy",
+    "magi_agent.chat_proxy",
+    "magi_agent.runtime_selector",
+    "magi_agent.k8s",
     "subprocess",
     "kubernetes",
     "telegram",

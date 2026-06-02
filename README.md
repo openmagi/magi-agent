@@ -383,7 +383,7 @@ Build-system pins:
 - CLI reference: `docs/cli/magi.md`
 - CLI handoff: `docs/notes/2026-05-31-magi-cli-track18-handoff-for-adk-migration.md`
 - CLI design: `docs/plans/2026-05-30-magi-cli-design.md`
-- Runtime architecture: `openmagi_core_agent/ARCHITECTURE.md`
+- Runtime architecture: `magi_agent/ARCHITECTURE.md`
 
 ## License
 

@@ -2,33 +2,33 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
-from openmagi_core_agent.evals.regression_gates import (
+from magi_agent.evals.regression_gates import (
     EvalGateThresholds,
     RecipeEvalMetrics,
     evaluate_recipe_promotion_gate,
 )
-from openmagi_core_agent.evidence.claim_grounding import (
+from magi_agent.evidence.claim_grounding import (
     AtomicClaim,
     CitationRef,
     validate_claim_projection_eligibility,
 )
-from openmagi_core_agent.harness.guardrail_matrix import GuardrailDefinition, GuardrailResult
-from openmagi_core_agent.runtime.activity_boundary import ActivityRequest, ActivityStore, evaluate_activity_request
-from openmagi_core_agent.runtime.checkpointing import (
+from magi_agent.harness.guardrail_matrix import GuardrailDefinition, GuardrailResult
+from magi_agent.runtime.activity_boundary import ActivityRequest, ActivityStore, evaluate_activity_request
+from magi_agent.runtime.checkpointing import (
     ExecutionCheckpoint,
     ForkedRunLineage,
     ReplayModeDecision,
     verify_resume_request,
 )
-from openmagi_core_agent.runtime.context_projection import build_context_projection
-from openmagi_core_agent.telemetry.deterministic_events import DeterministicRuntimeEvent, project_event_for_dashboard
-from openmagi_core_agent.workflows.compiler import (
+from magi_agent.runtime.context_projection import build_context_projection
+from magi_agent.telemetry.deterministic_events import DeterministicRuntimeEvent, project_event_for_dashboard
+from magi_agent.workflows.compiler import (
     WorkflowCompileInput,
     compile_governed_workflow,
     validate_compiled_workflow,
 )
-from openmagi_core_agent.workflows.dry_run import dry_run_governed_workflow
-from openmagi_core_agent.workflows.registry import WorkflowRegistryEntry
+from magi_agent.workflows.dry_run import dry_run_governed_workflow
+from magi_agent.workflows.registry import WorkflowRegistryEntry
 
 
 def test_governed_research_workflow_contract_chain_is_default_off_and_auditable() -> None:

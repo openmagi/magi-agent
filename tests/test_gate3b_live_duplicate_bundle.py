@@ -7,8 +7,8 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from openmagi_core_agent.shadow.gate3a_bundle import Gate3ARecordedBundle
-from openmagi_core_agent.shadow.gate3b_bundle import (
+from magi_agent.shadow.gate3a_bundle import Gate3ARecordedBundle
+from magi_agent.shadow.gate3b_bundle import (
     Gate3BAttachmentFlags,
     Gate3BJsonRecord,
     Gate3BLiveDuplicateBundle,

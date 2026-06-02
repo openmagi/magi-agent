@@ -5,8 +5,8 @@ import json
 import pytest
 from pydantic import ValidationError
 
-from openmagi_core_agent.runtime.content_replacement import ContentReplacement
-from openmagi_core_agent.runtime.content_replacement import replace_content_with_ref
+from magi_agent.runtime.content_replacement import ContentReplacement
+from magi_agent.runtime.content_replacement import replace_content_with_ref
 
 
 def test_content_replacement_projects_digest_ref_preview_only_for_large_content() -> None:

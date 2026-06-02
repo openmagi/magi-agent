@@ -7,13 +7,13 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from openmagi_core_agent.context.hook import (
+from magi_agent.context.hook import (
     ContextManagementHook,
     PipelineResult,
     _make_proactive_recovery_context,
 )
-from openmagi_core_agent.context.types import ContextManagementConfig, WarningLevel
-from openmagi_core_agent.runtime.error_recovery.types import (
+from magi_agent.context.types import ContextManagementConfig, WarningLevel
+from magi_agent.runtime.error_recovery.types import (
     ErrorKind,
     RecoveryContext,
     RecoveryResult,
@@ -373,7 +373,7 @@ class TestMakeProactiveRecoveryContext:
 class TestProactiveConfigFromEnv:
     def test_proactive_env_var_enables(self) -> None:
         """MAGI_CONTEXT_PROACTIVE_RECOVERY_ENABLED=1 enables proactive recovery."""
-        from openmagi_core_agent.context.hook import load_config_from_env
+        from magi_agent.context.hook import load_config_from_env
 
         env = {
             "MAGI_CONTEXT_MGMT_ENABLED": "1",
@@ -385,7 +385,7 @@ class TestProactiveConfigFromEnv:
 
     def test_proactive_env_var_default_disabled(self) -> None:
         """MAGI_CONTEXT_PROACTIVE_RECOVERY_ENABLED absent -> disabled."""
-        from openmagi_core_agent.context.hook import load_config_from_env
+        from magi_agent.context.hook import load_config_from_env
 
         env = {"MAGI_CONTEXT_MGMT_ENABLED": "1"}
         with patch("os.environ", env):

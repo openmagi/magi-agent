@@ -6,7 +6,7 @@ import sys
 
 
 def _request(**overrides: object) -> object:
-    from openmagi_core_agent.missions.cron_policy import CronMutationRequest
+    from magi_agent.missions.cron_policy import CronMutationRequest
 
     payload = {
         "requestId": "cron-mutation-request",
@@ -28,7 +28,7 @@ def _request(**overrides: object) -> object:
 
 
 def _policy(**overrides: object) -> object:
-    from openmagi_core_agent.missions.cron_policy import CronMutationPolicy
+    from magi_agent.missions.cron_policy import CronMutationPolicy
 
     payload = {
         "policyRef": "policy:cron-mutation",
@@ -46,7 +46,7 @@ def _policy(**overrides: object) -> object:
 
 
 def test_cron_scheduler_mutation_is_default_off_and_digest_only() -> None:
-    from openmagi_core_agent.missions.scheduler_adapter import CronSchedulerMutationBoundary
+    from magi_agent.missions.scheduler_adapter import CronSchedulerMutationBoundary
 
     result = CronSchedulerMutationBoundary().plan_mutation(
         request=_request(
@@ -82,8 +82,8 @@ def test_cron_scheduler_mutation_is_default_off_and_digest_only() -> None:
 
 
 def test_policy_requires_idempotency_evidence_approval_and_local_fake_admission() -> None:
-    from openmagi_core_agent.missions.cron_policy import CronSchedulerMutationConfig
-    from openmagi_core_agent.missions.scheduler_adapter import CronSchedulerMutationBoundary
+    from magi_agent.missions.cron_policy import CronSchedulerMutationConfig
+    from magi_agent.missions.scheduler_adapter import CronSchedulerMutationBoundary
 
     boundary = CronSchedulerMutationBoundary(
         CronSchedulerMutationConfig(enabled=True, localFakeSchedulerReceiptsEnabled=True),
@@ -119,8 +119,8 @@ def test_policy_requires_idempotency_evidence_approval_and_local_fake_admission(
 
 
 def test_approved_create_update_delete_return_local_fake_receipts_with_preview() -> None:
-    from openmagi_core_agent.missions.cron_policy import CronSchedulerMutationConfig
-    from openmagi_core_agent.missions.scheduler_adapter import CronSchedulerMutationBoundary
+    from magi_agent.missions.cron_policy import CronSchedulerMutationConfig
+    from magi_agent.missions.scheduler_adapter import CronSchedulerMutationBoundary
 
     boundary = CronSchedulerMutationBoundary(
         CronSchedulerMutationConfig(enabled=True, localFakeSchedulerReceiptsEnabled=True),
@@ -171,8 +171,8 @@ def test_approved_create_update_delete_return_local_fake_receipts_with_preview()
 
 
 def test_invalid_timezone_and_operation_are_blocked_without_scheduler_loop() -> None:
-    from openmagi_core_agent.missions.cron_policy import CronSchedulerMutationConfig
-    from openmagi_core_agent.missions.scheduler_adapter import CronSchedulerMutationBoundary
+    from magi_agent.missions.cron_policy import CronSchedulerMutationConfig
+    from magi_agent.missions.scheduler_adapter import CronSchedulerMutationBoundary
 
     boundary = CronSchedulerMutationBoundary(
         CronSchedulerMutationConfig(enabled=True, localFakeSchedulerReceiptsEnabled=True),
@@ -224,8 +224,8 @@ def test_invalid_timezone_and_operation_are_blocked_without_scheduler_loop() -> 
 
 
 def test_idempotency_duplicate_and_conflict_are_deterministic() -> None:
-    from openmagi_core_agent.missions.cron_policy import CronSchedulerMutationConfig
-    from openmagi_core_agent.missions.scheduler_adapter import CronSchedulerMutationBoundary
+    from magi_agent.missions.cron_policy import CronSchedulerMutationConfig
+    from magi_agent.missions.scheduler_adapter import CronSchedulerMutationBoundary
 
     boundary = CronSchedulerMutationBoundary(
         CronSchedulerMutationConfig(enabled=True, localFakeSchedulerReceiptsEnabled=True),
@@ -249,7 +249,7 @@ def test_idempotency_duplicate_and_conflict_are_deterministic() -> None:
 
 
 def test_authority_flags_cannot_be_forged_by_payload_construct_or_copy() -> None:
-    from openmagi_core_agent.missions.cron_policy import (
+    from magi_agent.missions.cron_policy import (
         CronSchedulerMutationAuthorityFlags,
         CronSchedulerMutationConfig,
         CronSchedulerMutationReceipt,
@@ -325,8 +325,8 @@ def test_authority_flags_cannot_be_forged_by_payload_construct_or_copy() -> None
 
 
 def test_receipts_redact_raw_private_scheduler_payloads_and_safe_looking_refs() -> None:
-    from openmagi_core_agent.missions.cron_policy import CronSchedulerMutationConfig
-    from openmagi_core_agent.missions.scheduler_adapter import CronSchedulerMutationBoundary
+    from magi_agent.missions.cron_policy import CronSchedulerMutationConfig
+    from magi_agent.missions.scheduler_adapter import CronSchedulerMutationBoundary
 
     result = CronSchedulerMutationBoundary(
         CronSchedulerMutationConfig(enabled=True, localFakeSchedulerReceiptsEnabled=True),
@@ -386,20 +386,20 @@ import importlib
 import sys
 
 for module_name in (
-    "openmagi_core_agent.missions.cron_policy",
-    "openmagi_core_agent.missions.scheduler_adapter",
+    "magi_agent.missions.cron_policy",
+    "magi_agent.missions.scheduler_adapter",
 ):
     importlib.import_module(module_name)
 forbidden_prefixes = (
     "google.adk",
     "google.genai",
-    "openmagi_core_agent.adk_bridge.runner",
-    "openmagi_core_agent.transport",
-    "openmagi_core_agent.routing",
-    "openmagi_core_agent.deploy",
-    "openmagi_core_agent.chat_proxy",
-    "openmagi_core_agent.runtime_selector",
-    "openmagi_core_agent.k8s",
+    "magi_agent.adk_bridge.runner",
+    "magi_agent.transport",
+    "magi_agent.routing",
+    "magi_agent.deploy",
+    "magi_agent.chat_proxy",
+    "magi_agent.runtime_selector",
+    "magi_agent.k8s",
     "subprocess",
     "kubernetes",
     "telegram",

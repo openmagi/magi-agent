@@ -15,14 +15,14 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from openmagi_core_agent.hooks.builtin.llm_safety_hooks import (
+from magi_agent.hooks.builtin.llm_safety_hooks import (
     bash_safety_classifier,
     edit_scope_classifier,
     response_quality_gate,
 )
-from openmagi_core_agent.hooks.context import HookContext
-from openmagi_core_agent.hooks.executors.llm_executor import LLMHookExecutor
-from openmagi_core_agent.hooks.manifest import HookManifest, HookPoint
+from magi_agent.hooks.context import HookContext
+from magi_agent.hooks.executors.llm_executor import LLMHookExecutor
+from magi_agent.hooks.manifest import HookManifest, HookPoint
 
 
 _CONTEXT = HookContext(botId="test-bot")
@@ -70,7 +70,7 @@ class TestBashSafetyClassifier:
     def test_source(self) -> None:
         m = bash_safety_classifier()
         assert m.source.kind == "builtin"
-        assert m.source.package == "openmagi_core_agent.hooks.builtin"
+        assert m.source.package == "magi_agent.hooks.builtin"
 
 
 class TestEditScopeClassifier:
@@ -110,7 +110,7 @@ class TestEditScopeClassifier:
     def test_source(self) -> None:
         m = edit_scope_classifier()
         assert m.source.kind == "builtin"
-        assert m.source.package == "openmagi_core_agent.hooks.builtin"
+        assert m.source.package == "magi_agent.hooks.builtin"
 
 
 class TestResponseQualityGate:
@@ -150,7 +150,7 @@ class TestResponseQualityGate:
     def test_source(self) -> None:
         m = response_quality_gate()
         assert m.source.kind == "builtin"
-        assert m.source.package == "openmagi_core_agent.hooks.builtin"
+        assert m.source.package == "magi_agent.hooks.builtin"
 
 
 # ---------------------------------------------------------------------------
@@ -163,7 +163,7 @@ class TestPresetsWithLLMExecutor:
     async def test_bash_safety_allow(self) -> None:
         manifest = bash_safety_classifier()
         with patch(
-            "openmagi_core_agent.hooks.executors.llm_executor._call_classifier",
+            "magi_agent.hooks.executors.llm_executor._call_classifier",
             new_callable=AsyncMock,
             return_value="ALLOW — safe command",
         ):
@@ -175,7 +175,7 @@ class TestPresetsWithLLMExecutor:
     async def test_bash_safety_deny(self) -> None:
         manifest = bash_safety_classifier()
         with patch(
-            "openmagi_core_agent.hooks.executors.llm_executor._call_classifier",
+            "magi_agent.hooks.executors.llm_executor._call_classifier",
             new_callable=AsyncMock,
             return_value="DENY — rm -rf is destructive",
         ):
@@ -187,7 +187,7 @@ class TestPresetsWithLLMExecutor:
     async def test_edit_scope_allow(self) -> None:
         manifest = edit_scope_classifier()
         with patch(
-            "openmagi_core_agent.hooks.executors.llm_executor._call_classifier",
+            "magi_agent.hooks.executors.llm_executor._call_classifier",
             new_callable=AsyncMock,
             return_value="ALLOW — edit is within scope",
         ):
@@ -199,7 +199,7 @@ class TestPresetsWithLLMExecutor:
     async def test_edit_scope_ask(self) -> None:
         manifest = edit_scope_classifier()
         with patch(
-            "openmagi_core_agent.hooks.executors.llm_executor._call_classifier",
+            "magi_agent.hooks.executors.llm_executor._call_classifier",
             new_callable=AsyncMock,
             return_value="ASK — unclear if config change was requested",
         ):
@@ -211,7 +211,7 @@ class TestPresetsWithLLMExecutor:
     async def test_response_quality_allow(self) -> None:
         manifest = response_quality_gate()
         with patch(
-            "openmagi_core_agent.hooks.executors.llm_executor._call_classifier",
+            "magi_agent.hooks.executors.llm_executor._call_classifier",
             new_callable=AsyncMock,
             return_value="ALLOW — response is complete and correct",
         ):
@@ -223,7 +223,7 @@ class TestPresetsWithLLMExecutor:
     async def test_response_quality_deny(self) -> None:
         manifest = response_quality_gate()
         with patch(
-            "openmagi_core_agent.hooks.executors.llm_executor._call_classifier",
+            "magi_agent.hooks.executors.llm_executor._call_classifier",
             new_callable=AsyncMock,
             return_value="DENY — response is empty",
         ):
@@ -235,7 +235,7 @@ class TestPresetsWithLLMExecutor:
     async def test_metadata_includes_classification(self) -> None:
         manifest = bash_safety_classifier()
         with patch(
-            "openmagi_core_agent.hooks.executors.llm_executor._call_classifier",
+            "magi_agent.hooks.executors.llm_executor._call_classifier",
             new_callable=AsyncMock,
             return_value="ALLOW — safe",
         ):

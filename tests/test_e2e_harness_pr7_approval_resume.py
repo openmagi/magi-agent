@@ -6,10 +6,10 @@ import subprocess
 import sys
 from typing import Any
 
-from openmagi_core_agent.tools.context import ToolContext
-from openmagi_core_agent.tools.manifest import ToolManifest, ToolSource
-from openmagi_core_agent.tools.registry import ToolRegistry
-from openmagi_core_agent.tools.result import ToolResult
+from magi_agent.tools.context import ToolContext
+from magi_agent.tools.manifest import ToolManifest, ToolSource
+from magi_agent.tools.registry import ToolRegistry
+from magi_agent.tools.result import ToolResult
 
 
 def _context() -> ToolContext:
@@ -67,7 +67,7 @@ def _read_manifest_named_write_file() -> ToolManifest:
 
 
 def _tool_request(*, content: object = "safe content") -> Any:
-    from openmagi_core_agent.tools.kernel import ToolExecutionRequest
+    from magi_agent.tools.kernel import ToolExecutionRequest
 
     return ToolExecutionRequest(
         toolName="WriteFile",
@@ -106,7 +106,7 @@ def _needs_approval_result() -> ToolResult:
 
 
 def _pending_store() -> tuple[Any, Any]:
-    from openmagi_core_agent.runtime.approval_resume import ApprovalResumeStore
+    from magi_agent.runtime.approval_resume import ApprovalResumeStore
 
     store = ApprovalResumeStore()
     pending = store.create_pending_from_needs_approval(
@@ -142,7 +142,7 @@ def test_pause_request_preserves_safe_identity_digests_and_order_refs() -> None:
 
 
 def test_request_digest_binds_full_execution_snapshot_and_does_not_overwrite() -> None:
-    from openmagi_core_agent.runtime.approval_resume import ApprovalResumeStore
+    from magi_agent.runtime.approval_resume import ApprovalResumeStore
 
     store = ApprovalResumeStore()
     first_request = _tool_request().model_copy(
@@ -188,7 +188,7 @@ def test_request_digest_binds_full_execution_snapshot_and_does_not_overwrite() -
 
 
 def test_request_digest_binds_permission_scope_and_exposed_tool_presence() -> None:
-    from openmagi_core_agent.runtime.approval_resume import ApprovalResumeStore
+    from magi_agent.runtime.approval_resume import ApprovalResumeStore
 
     base_request = _tool_request().model_copy(
         update={"arguments": {"path": "README.md", "content": "safe content"}}
@@ -252,7 +252,7 @@ def test_request_digest_binds_permission_scope_and_exposed_tool_presence() -> No
 
 
 def test_approve_resume_token_is_single_use_and_builds_request_with_control_refs() -> None:
-    from openmagi_core_agent.runtime.approval_resume import ApprovalResumeStore
+    from magi_agent.runtime.approval_resume import ApprovalResumeStore
 
     store = ApprovalResumeStore()
     pending = store.create_pending_from_needs_approval(
@@ -296,7 +296,7 @@ def test_approve_resume_token_is_single_use_and_builds_request_with_control_refs
     assert derived_public_ref.status == "blocked"
     assert derived_public_ref.reason_codes == ("invalid_resume_token",)
 
-    from openmagi_core_agent.runtime.approval_resume import (
+    from magi_agent.runtime.approval_resume import (
         build_tool_execution_request_for_resume,
     )
 
@@ -417,11 +417,11 @@ def test_transcript_order_continuity_is_retained_on_resume_decision() -> None:
 
 
 def test_schema_validation_still_blocks_bad_args_after_approval_resume() -> None:
-    from openmagi_core_agent.runtime.approval_resume import (
+    from magi_agent.runtime.approval_resume import (
         ApprovalResumeStore,
         build_tool_execution_request_for_resume,
     )
-    from openmagi_core_agent.tools.kernel import (
+    from magi_agent.tools.kernel import (
         ToolExecutionKernel,
         ToolExecutionKernelConfig,
     )
@@ -482,11 +482,11 @@ def test_schema_validation_still_blocks_bad_args_after_approval_resume() -> None
 
 
 def test_approved_resume_executes_fake_handler_once_after_policy_ask() -> None:
-    from openmagi_core_agent.runtime.approval_resume import (
+    from magi_agent.runtime.approval_resume import (
         ApprovalResumeStore,
         build_tool_execution_request_for_resume,
     )
-    from openmagi_core_agent.tools.kernel import (
+    from magi_agent.tools.kernel import (
         ToolExecutionKernel,
         ToolExecutionKernelConfig,
     )
@@ -559,7 +559,7 @@ def test_approved_resume_executes_fake_handler_once_after_policy_ask() -> None:
 
 
 def test_forged_approval_control_refs_do_not_bypass_private_resume_grant() -> None:
-    from openmagi_core_agent.tools.kernel import (
+    from magi_agent.tools.kernel import (
         ToolExecutionKernel,
         ToolExecutionKernelConfig,
     )
@@ -611,11 +611,11 @@ def test_forged_approval_control_refs_do_not_bypass_private_resume_grant() -> No
 
 
 def test_mutated_resumed_request_does_not_match_approval_snapshot() -> None:
-    from openmagi_core_agent.runtime.approval_resume import (
+    from magi_agent.runtime.approval_resume import (
         ApprovalResumeStore,
         build_tool_execution_request_for_resume,
     )
-    from openmagi_core_agent.tools.kernel import (
+    from magi_agent.tools.kernel import (
         ToolExecutionKernel,
         ToolExecutionKernelConfig,
     )
@@ -681,11 +681,11 @@ def test_mutated_resumed_request_does_not_match_approval_snapshot() -> None:
 
 
 def test_resume_decision_is_single_use_even_if_current_policy_allows_tool() -> None:
-    from openmagi_core_agent.runtime.approval_resume import (
+    from magi_agent.runtime.approval_resume import (
         ApprovalResumeStore,
         build_tool_execution_request_for_resume,
     )
-    from openmagi_core_agent.tools.kernel import (
+    from magi_agent.tools.kernel import (
         ToolExecutionKernel,
         ToolExecutionKernelConfig,
     )
@@ -788,9 +788,9 @@ def test_public_model_dumps_do_not_expose_raw_private_metadata() -> None:
 
 
 def test_auth_payload_variants_are_fully_redacted_from_public_dumps() -> None:
-    from openmagi_core_agent.runtime.approval_resume import ApprovalResumeStore
-    from openmagi_core_agent.runtime.request_ledger import RequestShapeLedgerResult
-    from openmagi_core_agent.tools.kernel import ToolExecutionKernel
+    from magi_agent.runtime.approval_resume import ApprovalResumeStore
+    from magi_agent.runtime.request_ledger import RequestShapeLedgerResult
+    from magi_agent.tools.kernel import ToolExecutionKernel
 
     store = ApprovalResumeStore()
     pending = store.create_pending_from_needs_approval(
@@ -869,19 +869,19 @@ def test_approval_resume_module_import_boundary_stays_live_runner_free() -> None
 import importlib
 import sys
 
-importlib.import_module("openmagi_core_agent.runtime.approval_resume")
+importlib.import_module("magi_agent.runtime.approval_resume")
 forbidden_prefixes = (
     "google.adk",
     "google.genai",
-    "openmagi_core_agent.adk_bridge",
-    "openmagi_core_agent.providers",
-    "openmagi_core_agent.transport",
-    "openmagi_core_agent.routing",
-    "openmagi_core_agent.deploy",
-    "openmagi_core_agent.chat_proxy",
-    "openmagi_core_agent.runtime_selector",
-    "openmagi_core_agent.k8s",
-    "openmagi_core_agent.tools.kernel",
+    "magi_agent.adk_bridge",
+    "magi_agent.providers",
+    "magi_agent.transport",
+    "magi_agent.routing",
+    "magi_agent.deploy",
+    "magi_agent.chat_proxy",
+    "magi_agent.runtime_selector",
+    "magi_agent.k8s",
+    "magi_agent.tools.kernel",
     "requests",
     "httpx",
     "aiohttp",

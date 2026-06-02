@@ -74,10 +74,10 @@ OWNING_LAYERS = {
 STATUSES = {"already_covered", "partially_covered", "missing", "activation_blocked"}
 FORBIDDEN_PLACEHOLDERS = ("unknown", "tbd", "later")
 STALE_REFS = (
-    "openmagi_core_agent/tools/execution_kernel.py",
-    "openmagi_core_agent/tools/local_read.py",
-    "openmagi_core_agent/tools/local_workspace.py",
-    "openmagi_core_agent/providers/",
+    "magi_agent/tools/execution_kernel.py",
+    "magi_agent/tools/local_read.py",
+    "magi_agent/tools/local_workspace.py",
+    "magi_agent/providers/",
 )
 EXPECTED_PR_ASSIGNMENTS = {
     "combined_matrix": "PR1",
@@ -243,8 +243,8 @@ def test_stale_paths_are_remapped_not_canonical() -> None:
         if any(stale in text for stale in STALE_REFS):
             top = "\n".join(text.splitlines()[:18])
             assert "Consolidated PR1 reconciliation note" in top
-            assert "openmagi_core_agent/tools/kernel.py" in top
-            assert "openmagi_core_agent/gates/gate1a_readonly_tools.py" in top
+            assert "magi_agent/tools/kernel.py" in top
+            assert "magi_agent/gates/gate1a_readonly_tools.py" in top
             assert "provider_boundary.py" in top
 
 
@@ -273,7 +273,7 @@ def test_pr22_research_benchmark_capture_row_is_implemented_but_activation_block
     assert row["missingImplementation"] == []
     assert row["defaultOff"] is True
     assert row["trafficAttached"] is False
-    assert "openmagi_core_agent/shadow/research_runner_capture.py" in refs
+    assert "magi_agent/shadow/research_runner_capture.py" in refs
     assert "tests/test_research_runner_capture.py" in refs
     assert "tests/test_e2e_harness_pr22_research_benchmark_eval_capture.py" in refs
 
@@ -290,8 +290,8 @@ def test_pr21_checkpoint_context_compaction_row_is_activation_blocked_default_of
     assert row["missingImplementation"] == []
     assert "production replay remains blocked" in row["activationGate"]
     assert "tests/test_e2e_harness_pr21_checkpoint_context_compaction.py" in refs
-    assert "openmagi_core_agent/runtime/context_lifecycle.py" in refs
-    assert "openmagi_core_agent/runtime/query_state.py" in refs
+    assert "magi_agent/runtime/context_lifecycle.py" in refs
+    assert "magi_agent/runtime/query_state.py" in refs
     assert "production" in row["notes"]
 
 
@@ -335,7 +335,7 @@ def test_pr23_final_integration_rows_are_metadata_only_activation_blocked() -> N
     final_row = rows["final_integration_readiness"]
     deployment_row = rows["deployment_canary_activation_blocker"]
     expected_refs = {
-        "openmagi_core_agent/harness/e2e_readiness.py",
+        "magi_agent/harness/e2e_readiness.py",
         "tests/test_e2e_harness_pr23_final_integration_readiness.py",
     }
 
@@ -371,9 +371,9 @@ def test_parallel_research_child_runner_row_stays_recipe_owned_and_activation_bl
     assert research_row["defaultOff"] is True
     assert research_row["trafficAttached"] is False
     assert "live ADK Runner activation blocked" in research_row["adkPrimitive"]
-    assert "openmagi_core_agent/recipes/research_child_runner.py" not in {
+    assert "magi_agent/recipes/research_child_runner.py" not in {
         ref["path"] for ref in core_row["latestMainCoveredRefs"]
     }
-    assert "openmagi_core_agent/recipes/research_child_runner.py" in {
+    assert "magi_agent/recipes/research_child_runner.py" in {
         ref["path"] for ref in research_row["latestMainCoveredRefs"]
     }

@@ -10,7 +10,7 @@ import hashlib
 
 import pytest
 
-from openmagi_core_agent.coding.final_projection import (
+from magi_agent.coding.final_projection import (
     CodingFinalProjection,
     CodingFinalProjectionResult,
     EvidenceGap,
@@ -597,7 +597,7 @@ class TestPublicProjectionDigestSafety:
 class TestProjectionBoundaryIntegration:
     def test_final_projection_respects_write_boundary(self) -> None:
         """Final projection must not claim any write authority."""
-        from openmagi_core_agent.runtime.projection_write_boundary import (
+        from magi_agent.runtime.projection_write_boundary import (
             ProjectionWriteAuthorityFlags,
         )
         flags = ProjectionWriteAuthorityFlags()
@@ -611,7 +611,7 @@ class TestProjectionBoundaryIntegration:
 
     def test_coding_final_projection_write_boundary_denies(self) -> None:
         """evaluate_coding_final_projection_write always denies."""
-        from openmagi_core_agent.runtime.projection_write_boundary import (
+        from magi_agent.runtime.projection_write_boundary import (
             evaluate_coding_final_projection_write,
         )
         result = evaluate_coding_final_projection_write({
@@ -630,7 +630,7 @@ class TestProjectionBoundaryIntegration:
 
 class TestSSESanitizerIntegration:
     def test_sse_sanitizer_strips_raw_paths(self) -> None:
-        from openmagi_core_agent.transport.sse import _sanitize_coding_final_projection_event
+        from magi_agent.transport.sse import _sanitize_coding_final_projection_event
 
         event: dict[str, object] = {
             "type": "coding_final_projection",
@@ -667,7 +667,7 @@ class TestSSESanitizerIntegration:
         assert "/home/" not in serialized
 
     def test_sse_sanitizer_redacts_private_next_action(self) -> None:
-        from openmagi_core_agent.transport.sse import _sanitize_coding_final_projection_event
+        from magi_agent.transport.sse import _sanitize_coding_final_projection_event
 
         event: dict[str, object] = {
             "type": "coding_final_projection",
@@ -682,7 +682,7 @@ class TestSSESanitizerIntegration:
         assert "/Users/kevin" not in str(result.get("nextAction", ""))
 
     def test_sse_sanitizer_rejects_unknown_status(self) -> None:
-        from openmagi_core_agent.transport.sse import _sanitize_coding_final_projection_event
+        from magi_agent.transport.sse import _sanitize_coding_final_projection_event
 
         event: dict[str, object] = {
             "type": "coding_final_projection",
@@ -693,7 +693,7 @@ class TestSSESanitizerIntegration:
         assert "status" not in result  # invalid status stripped
 
     def test_sse_sanitizer_drops_invalid_digest(self) -> None:
-        from openmagi_core_agent.transport.sse import _sanitize_coding_final_projection_event
+        from magi_agent.transport.sse import _sanitize_coding_final_projection_event
 
         event: dict[str, object] = {
             "type": "coding_final_projection",

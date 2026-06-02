@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import pytest
 
-from openmagi_core_agent.adk_bridge.event_adapter import EventProjection
-from openmagi_core_agent.transport.sse import InMemorySseWriter
-from openmagi_core_agent.transport.sse_buffer import SseEventBuffer
+from magi_agent.adk_bridge.event_adapter import EventProjection
+from magi_agent.transport.sse import InMemorySseWriter
+from magi_agent.transport.sse_buffer import SseEventBuffer
 
 
 def _text_projection(text: str) -> EventProjection:
@@ -155,7 +155,7 @@ class TestSseEventBufferTombstones:
 
 class TestSseEventBufferTranscript:
     def test_collect_transcript_entries_from_buffer(self) -> None:
-        from openmagi_core_agent.runtime.transcript import AssistantTextEntry
+        from magi_agent.runtime.transcript import AssistantTextEntry
 
         projection = EventProjection(
             agent_events=[{"type": "text_delta", "delta": "hi"}],

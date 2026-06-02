@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from openmagi_core_agent.runtime.error_recovery.types import (
+from magi_agent.runtime.error_recovery.types import (
     ErrorKind,
     ErrorRecoveryConfig,
     MessageDict,
@@ -10,7 +10,7 @@ from openmagi_core_agent.runtime.error_recovery.types import (
     RecoveryAttemptState,
     RecoveryContext,
 )
-from openmagi_core_agent.runtime.error_recovery.strategies.reactive_compact import (
+from magi_agent.runtime.error_recovery.strategies.reactive_compact import (
     LLMCompactCaller,
     ReactiveCompactStrategy,
     StubLLMCompactCaller,

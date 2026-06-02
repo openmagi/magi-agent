@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import pytest
 
-from openmagi_core_agent.config.env import RuntimeEnvError, parse_runtime_env
-from openmagi_core_agent.config.models import PythonSecurityPostureConfig
+from magi_agent.config.env import RuntimeEnvError, parse_runtime_env
+from magi_agent.config.models import PythonSecurityPostureConfig
 
 
 def _base_env() -> dict[str, str]:

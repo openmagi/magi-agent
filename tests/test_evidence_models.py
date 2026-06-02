@@ -6,7 +6,7 @@ import sys
 import pytest
 from pydantic import ValidationError
 
-from openmagi_core_agent.evidence.types import (
+from magi_agent.evidence.types import (
     EvidenceContract,
     EvidenceContractFailure,
     EvidenceContractScopeMetadata,
@@ -1022,17 +1022,17 @@ def test_evidence_package_import_boundary_stays_adk_and_runtime_free() -> None:
 import importlib
 import sys
 
-importlib.import_module("openmagi_core_agent.evidence")
-importlib.import_module("openmagi_core_agent.evidence.types")
-importlib.import_module("openmagi_core_agent.evidence.builtin")
+importlib.import_module("magi_agent.evidence")
+importlib.import_module("magi_agent.evidence.types")
+importlib.import_module("magi_agent.evidence.builtin")
 
 forbidden_prefixes = (
     "google.adk",
-    "openmagi_core_agent.adk_bridge",
-    "openmagi_core_agent.runtime",
-    "openmagi_core_agent.transport",
-    "openmagi_core_agent.tools.dispatcher",
-    "openmagi_core_agent.hooks.bus",
+    "magi_agent.adk_bridge",
+    "magi_agent.runtime",
+    "magi_agent.transport",
+    "magi_agent.tools.dispatcher",
+    "magi_agent.hooks.bus",
 )
 loaded = [
     name

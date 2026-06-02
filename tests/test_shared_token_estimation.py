@@ -1,4 +1,4 @@
-"""Tests for openmagi_core_agent.shared.token_estimation."""
+"""Tests for magi_agent.shared.token_estimation."""
 from __future__ import annotations
 
 import json
@@ -6,7 +6,7 @@ from datetime import datetime
 
 import pytest
 
-from openmagi_core_agent.shared.token_estimation import (
+from magi_agent.shared.token_estimation import (
     estimate_message_tokens,
     estimate_messages_tokens,
 )
@@ -90,7 +90,7 @@ def test_non_serializable_datetime_handled():
 # ---------------------------------------------------------------------------
 
 def test_context_token_tracker_uses_shared():
-    from openmagi_core_agent.context.token_tracker import TokenBudgetTracker
+    from magi_agent.context.token_tracker import TokenBudgetTracker
 
     msg = {"role": "user", "content": "hi"}
     tracker_result = TokenBudgetTracker.estimate_tokens(msg)
@@ -103,7 +103,7 @@ def test_context_token_tracker_uses_shared():
 # ---------------------------------------------------------------------------
 
 def test_error_recovery_token_utils_uses_shared():
-    from openmagi_core_agent.runtime.error_recovery.strategies._token_utils import (
+    from magi_agent.runtime.error_recovery.strategies._token_utils import (
         _estimate_tokens,
     )
 

@@ -5,12 +5,12 @@ import subprocess
 import sys
 from pathlib import Path
 
-from openmagi_core_agent.evidence.coding_verification import (
+from magi_agent.evidence.coding_verification import (
     CodingVerificationAuditRequest,
     evaluate_coding_verification_audit,
 )
-from openmagi_core_agent.evidence.reports import public_evidence_record_report
-from openmagi_core_agent.evidence.types import EvidenceRecord, EvidenceSource
+from magi_agent.evidence.reports import public_evidence_record_report
+from magi_agent.evidence.types import EvidenceRecord, EvidenceSource
 
 
 def _record(
@@ -195,7 +195,7 @@ def test_public_projection_redacts_paths_secrets_and_raw_output() -> None:
 def test_coding_verification_audit_import_boundary_has_no_runtime_execution_surfaces() -> None:
     source = (
         Path(__file__).parents[1]
-        / "openmagi_core_agent"
+        / "magi_agent"
         / "evidence"
         / "coding_verification.py"
     ).read_text(encoding="utf-8")
@@ -217,19 +217,19 @@ def test_coding_verification_audit_import_boundary_has_no_runtime_execution_surf
 import importlib
 import sys
 
-module = importlib.import_module("openmagi_core_agent.evidence.coding_verification")
+module = importlib.import_module("magi_agent.evidence.coding_verification")
 assert hasattr(module, "evaluate_coding_verification_audit")
 
 forbidden_prefixes = (
     "subprocess",
     "google.adk",
-    "openmagi_core_agent.adk_bridge",
-    "openmagi_core_agent.tools.dispatcher",
-    "openmagi_core_agent.tools.registry",
-    "openmagi_core_agent.runtime",
-    "openmagi_core_agent.routing",
-    "openmagi_core_agent.transport.chat",
-    "openmagi_core_agent.transport.tools",
+    "magi_agent.adk_bridge",
+    "magi_agent.tools.dispatcher",
+    "magi_agent.tools.registry",
+    "magi_agent.runtime",
+    "magi_agent.routing",
+    "magi_agent.transport.chat",
+    "magi_agent.transport.tools",
 )
 loaded = [
     name

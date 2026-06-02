@@ -36,16 +36,16 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import httpx
 import pytest
 
-from openmagi_core_agent.hooks.context import HookContext
-from openmagi_core_agent.hooks.executors import get_executor
-from openmagi_core_agent.hooks.executors.http_executor import (
+from magi_agent.hooks.context import HookContext
+from magi_agent.hooks.executors import get_executor
+from magi_agent.hooks.executors.http_executor import (
     HttpHookExecutor,
     _parse_http_response_body,
     _tls_verify,
 )
-from openmagi_core_agent.hooks.manifest import HookManifest, HookPoint
-from openmagi_core_agent.hooks.result import HookResult
-from openmagi_core_agent.tools.manifest import ToolSource
+from magi_agent.hooks.manifest import HookManifest, HookPoint
+from magi_agent.hooks.result import HookResult
+from magi_agent.tools.manifest import ToolSource
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -119,7 +119,7 @@ def _make_async_client_cm(response: MagicMock) -> MagicMock:
 @pytest.mark.anyio
 async def test_200_continue_json():
     cm, client = _make_async_client_cm(_mock_response(200, json.dumps({"continue": True})))
-    with patch("openmagi_core_agent.hooks.executors.http_executor.httpx.AsyncClient", return_value=cm):
+    with patch("magi_agent.hooks.executors.http_executor.httpx.AsyncClient", return_value=cm):
         result = await HttpHookExecutor().execute(_CONTEXT, _make_manifest())
     assert result.action == "continue"
 
@@ -132,7 +132,7 @@ async def test_200_continue_json():
 async def test_200_stop_reason_returns_block():
     body = json.dumps({"stopReason": "policy violation"})
     cm, client = _make_async_client_cm(_mock_response(200, body))
-    with patch("openmagi_core_agent.hooks.executors.http_executor.httpx.AsyncClient", return_value=cm):
+    with patch("magi_agent.hooks.executors.http_executor.httpx.AsyncClient", return_value=cm):
         result = await HttpHookExecutor().execute(_CONTEXT, _make_manifest())
     assert result.action == "block"
     assert result.reason == "policy violation"
@@ -146,7 +146,7 @@ async def test_200_stop_reason_returns_block():
 async def test_200_updated_input_returns_replace():
     body = json.dumps({"updatedInput": {"newKey": "newValue"}})
     cm, client = _make_async_client_cm(_mock_response(200, body))
-    with patch("openmagi_core_agent.hooks.executors.http_executor.httpx.AsyncClient", return_value=cm):
+    with patch("magi_agent.hooks.executors.http_executor.httpx.AsyncClient", return_value=cm):
         result = await HttpHookExecutor().execute(_CONTEXT, _make_manifest())
     assert result.action == "replace"
     assert result.value == {"newKey": "newValue"}
@@ -160,7 +160,7 @@ async def test_200_updated_input_returns_replace():
 async def test_200_permission_decision_approve():
     body = json.dumps({"permissionDecision": "approve"})
     cm, client = _make_async_client_cm(_mock_response(200, body))
-    with patch("openmagi_core_agent.hooks.executors.http_executor.httpx.AsyncClient", return_value=cm):
+    with patch("magi_agent.hooks.executors.http_executor.httpx.AsyncClient", return_value=cm):
         result = await HttpHookExecutor().execute(_CONTEXT, _make_manifest())
     assert result.action == "permission_decision"
     assert result.decision == "approve"
@@ -170,7 +170,7 @@ async def test_200_permission_decision_approve():
 async def test_200_permission_decision_deny_with_reason():
     body = json.dumps({"permissionDecision": "deny", "reason": "not allowed"})
     cm, client = _make_async_client_cm(_mock_response(200, body))
-    with patch("openmagi_core_agent.hooks.executors.http_executor.httpx.AsyncClient", return_value=cm):
+    with patch("magi_agent.hooks.executors.http_executor.httpx.AsyncClient", return_value=cm):
         result = await HttpHookExecutor().execute(_CONTEXT, _make_manifest())
     assert result.action == "permission_decision"
     assert result.decision == "deny"
@@ -185,7 +185,7 @@ async def test_200_permission_decision_deny_with_reason():
 async def test_200_additional_context_in_metadata():
     body = json.dumps({"additionalContext": "some extra info"})
     cm, client = _make_async_client_cm(_mock_response(200, body))
-    with patch("openmagi_core_agent.hooks.executors.http_executor.httpx.AsyncClient", return_value=cm):
+    with patch("magi_agent.hooks.executors.http_executor.httpx.AsyncClient", return_value=cm):
         result = await HttpHookExecutor().execute(_CONTEXT, _make_manifest())
     assert result.action == "continue"
     assert result.metadata.get("additionalContext") == "some extra info"
@@ -198,7 +198,7 @@ async def test_200_additional_context_in_metadata():
 @pytest.mark.anyio
 async def test_204_returns_continue():
     cm, client = _make_async_client_cm(_mock_response(204, ""))
-    with patch("openmagi_core_agent.hooks.executors.http_executor.httpx.AsyncClient", return_value=cm):
+    with patch("magi_agent.hooks.executors.http_executor.httpx.AsyncClient", return_value=cm):
         result = await HttpHookExecutor().execute(_CONTEXT, _make_manifest())
     assert result.action == "continue"
 
@@ -210,7 +210,7 @@ async def test_204_returns_continue():
 @pytest.mark.anyio
 async def test_404_fail_open_returns_continue():
     cm, client = _make_async_client_cm(_mock_response(404))
-    with patch("openmagi_core_agent.hooks.executors.http_executor.httpx.AsyncClient", return_value=cm):
+    with patch("magi_agent.hooks.executors.http_executor.httpx.AsyncClient", return_value=cm):
         result = await HttpHookExecutor().execute(_CONTEXT, _make_manifest(fail_open=True))
     assert result.action == "continue"
 
@@ -218,7 +218,7 @@ async def test_404_fail_open_returns_continue():
 @pytest.mark.anyio
 async def test_400_fail_open_returns_continue():
     cm, client = _make_async_client_cm(_mock_response(400))
-    with patch("openmagi_core_agent.hooks.executors.http_executor.httpx.AsyncClient", return_value=cm):
+    with patch("magi_agent.hooks.executors.http_executor.httpx.AsyncClient", return_value=cm):
         result = await HttpHookExecutor().execute(_CONTEXT, _make_manifest(fail_open=True))
     assert result.action == "continue"
 
@@ -230,7 +230,7 @@ async def test_400_fail_open_returns_continue():
 @pytest.mark.anyio
 async def test_401_fail_closed_returns_block():
     cm, client = _make_async_client_cm(_mock_response(401))
-    with patch("openmagi_core_agent.hooks.executors.http_executor.httpx.AsyncClient", return_value=cm):
+    with patch("magi_agent.hooks.executors.http_executor.httpx.AsyncClient", return_value=cm):
         result = await HttpHookExecutor().execute(_CONTEXT, _make_manifest(fail_open=False))
     assert result.action == "block"
     assert result.reason is not None
@@ -240,7 +240,7 @@ async def test_401_fail_closed_returns_block():
 @pytest.mark.anyio
 async def test_403_fail_closed_returns_block():
     cm, client = _make_async_client_cm(_mock_response(403))
-    with patch("openmagi_core_agent.hooks.executors.http_executor.httpx.AsyncClient", return_value=cm):
+    with patch("magi_agent.hooks.executors.http_executor.httpx.AsyncClient", return_value=cm):
         result = await HttpHookExecutor().execute(_CONTEXT, _make_manifest(fail_open=False))
     assert result.action == "block"
 
@@ -252,7 +252,7 @@ async def test_403_fail_closed_returns_block():
 @pytest.mark.anyio
 async def test_500_fail_open_returns_continue():
     cm, client = _make_async_client_cm(_mock_response(500))
-    with patch("openmagi_core_agent.hooks.executors.http_executor.httpx.AsyncClient", return_value=cm):
+    with patch("magi_agent.hooks.executors.http_executor.httpx.AsyncClient", return_value=cm):
         result = await HttpHookExecutor().execute(_CONTEXT, _make_manifest(fail_open=True))
     assert result.action == "continue"
 
@@ -260,7 +260,7 @@ async def test_500_fail_open_returns_continue():
 @pytest.mark.anyio
 async def test_503_fail_open_returns_continue():
     cm, client = _make_async_client_cm(_mock_response(503))
-    with patch("openmagi_core_agent.hooks.executors.http_executor.httpx.AsyncClient", return_value=cm):
+    with patch("magi_agent.hooks.executors.http_executor.httpx.AsyncClient", return_value=cm):
         result = await HttpHookExecutor().execute(_CONTEXT, _make_manifest(fail_open=True))
     assert result.action == "continue"
 
@@ -272,7 +272,7 @@ async def test_503_fail_open_returns_continue():
 @pytest.mark.anyio
 async def test_502_fail_closed_returns_block():
     cm, client = _make_async_client_cm(_mock_response(502))
-    with patch("openmagi_core_agent.hooks.executors.http_executor.httpx.AsyncClient", return_value=cm):
+    with patch("magi_agent.hooks.executors.http_executor.httpx.AsyncClient", return_value=cm):
         result = await HttpHookExecutor().execute(_CONTEXT, _make_manifest(fail_open=False))
     assert result.action == "block"
     assert result.reason is not None
@@ -290,7 +290,7 @@ async def test_timeout_fail_open_returns_continue():
     cm = MagicMock()
     cm.__aenter__ = AsyncMock(return_value=client_mock)
     cm.__aexit__ = AsyncMock(return_value=False)
-    with patch("openmagi_core_agent.hooks.executors.http_executor.httpx.AsyncClient", return_value=cm):
+    with patch("magi_agent.hooks.executors.http_executor.httpx.AsyncClient", return_value=cm):
         result = await HttpHookExecutor().execute(_CONTEXT, _make_manifest(fail_open=True))
     assert result.action == "continue"
 
@@ -306,7 +306,7 @@ async def test_timeout_fail_closed_returns_block():
     cm = MagicMock()
     cm.__aenter__ = AsyncMock(return_value=client_mock)
     cm.__aexit__ = AsyncMock(return_value=False)
-    with patch("openmagi_core_agent.hooks.executors.http_executor.httpx.AsyncClient", return_value=cm):
+    with patch("magi_agent.hooks.executors.http_executor.httpx.AsyncClient", return_value=cm):
         result = await HttpHookExecutor().execute(_CONTEXT, _make_manifest(fail_open=False))
     assert result.action == "block"
     assert result.reason is not None
@@ -320,7 +320,7 @@ async def test_timeout_fail_closed_returns_block():
 @pytest.mark.anyio
 async def test_200_malformed_json_returns_continue():
     cm, client = _make_async_client_cm(_mock_response(200, "not-valid-json"))
-    with patch("openmagi_core_agent.hooks.executors.http_executor.httpx.AsyncClient", return_value=cm):
+    with patch("magi_agent.hooks.executors.http_executor.httpx.AsyncClient", return_value=cm):
         result = await HttpHookExecutor().execute(_CONTEXT, _make_manifest())
     assert result.action == "continue"
 
@@ -332,7 +332,7 @@ async def test_200_malformed_json_returns_continue():
 @pytest.mark.anyio
 async def test_200_json_array_returns_continue():
     cm, client = _make_async_client_cm(_mock_response(200, json.dumps([1, 2, 3])))
-    with patch("openmagi_core_agent.hooks.executors.http_executor.httpx.AsyncClient", return_value=cm):
+    with patch("magi_agent.hooks.executors.http_executor.httpx.AsyncClient", return_value=cm):
         result = await HttpHookExecutor().execute(_CONTEXT, _make_manifest())
     assert result.action == "continue"
 
@@ -345,7 +345,7 @@ async def test_200_json_array_returns_continue():
 async def test_custom_headers_are_forwarded():
     custom_headers = {"X-Magi-Hook-Secret": "abc123", "X-Custom": "value"}
     cm, client = _make_async_client_cm(_mock_response(204))
-    with patch("openmagi_core_agent.hooks.executors.http_executor.httpx.AsyncClient", return_value=cm):
+    with patch("magi_agent.hooks.executors.http_executor.httpx.AsyncClient", return_value=cm):
         await HttpHookExecutor().execute(_CONTEXT, _make_manifest(http_headers=custom_headers))
 
     call_kwargs = client.request.call_args
@@ -361,7 +361,7 @@ async def test_custom_headers_are_forwarded():
 @pytest.mark.anyio
 async def test_custom_http_method_put():
     cm, client = _make_async_client_cm(_mock_response(204))
-    with patch("openmagi_core_agent.hooks.executors.http_executor.httpx.AsyncClient", return_value=cm):
+    with patch("magi_agent.hooks.executors.http_executor.httpx.AsyncClient", return_value=cm):
         await HttpHookExecutor().execute(_CONTEXT, _make_manifest(http_method="PUT"))
 
     call_kwargs = client.request.call_args
@@ -371,7 +371,7 @@ async def test_custom_http_method_put():
 @pytest.mark.anyio
 async def test_custom_http_method_patch():
     cm, client = _make_async_client_cm(_mock_response(204))
-    with patch("openmagi_core_agent.hooks.executors.http_executor.httpx.AsyncClient", return_value=cm):
+    with patch("magi_agent.hooks.executors.http_executor.httpx.AsyncClient", return_value=cm):
         await HttpHookExecutor().execute(_CONTEXT, _make_manifest(http_method="PATCH"))
 
     call_kwargs = client.request.call_args
@@ -385,7 +385,7 @@ async def test_custom_http_method_patch():
 @pytest.mark.anyio
 async def test_default_content_type_header():
     cm, client = _make_async_client_cm(_mock_response(204))
-    with patch("openmagi_core_agent.hooks.executors.http_executor.httpx.AsyncClient", return_value=cm):
+    with patch("magi_agent.hooks.executors.http_executor.httpx.AsyncClient", return_value=cm):
         await HttpHookExecutor().execute(_CONTEXT, _make_manifest())
 
     call_kwargs = client.request.call_args
@@ -401,7 +401,7 @@ async def test_default_content_type_header():
 async def test_operator_headers_override_content_type():
     custom_headers = {"Content-Type": "application/json; charset=utf-8"}
     cm, client = _make_async_client_cm(_mock_response(204))
-    with patch("openmagi_core_agent.hooks.executors.http_executor.httpx.AsyncClient", return_value=cm):
+    with patch("magi_agent.hooks.executors.http_executor.httpx.AsyncClient", return_value=cm):
         await HttpHookExecutor().execute(_CONTEXT, _make_manifest(http_headers=custom_headers))
 
     call_kwargs = client.request.call_args
@@ -433,7 +433,7 @@ async def test_sanitized_body_no_secrets():
     cm.__aenter__ = AsyncMock(return_value=client_mock)
     cm.__aexit__ = AsyncMock(return_value=False)
 
-    with patch("openmagi_core_agent.hooks.executors.http_executor.httpx.AsyncClient", return_value=cm):
+    with patch("magi_agent.hooks.executors.http_executor.httpx.AsyncClient", return_value=cm):
         await HttpHookExecutor().execute(ctx_with_secret, _make_manifest())
 
     body_str = captured_body[0].decode()
@@ -465,7 +465,7 @@ async def test_sanitized_body_no_paths():
     cm.__aenter__ = AsyncMock(return_value=client_mock)
     cm.__aexit__ = AsyncMock(return_value=False)
 
-    with patch("openmagi_core_agent.hooks.executors.http_executor.httpx.AsyncClient", return_value=cm):
+    with patch("magi_agent.hooks.executors.http_executor.httpx.AsyncClient", return_value=cm):
         await HttpHookExecutor().execute(ctx_with_path, _make_manifest())
 
     body_str = captured_body[0].decode()
@@ -505,7 +505,7 @@ def test_tls_verify_not_disabled_env_true(monkeypatch):
 async def test_tls_verify_param_passed_to_client(monkeypatch):
     monkeypatch.setenv("MAGI_HOOK_HTTP_VERIFY_TLS", "false")
     cm, client = _make_async_client_cm(_mock_response(204))
-    with patch("openmagi_core_agent.hooks.executors.http_executor.httpx.AsyncClient", return_value=cm) as mock_cls:
+    with patch("magi_agent.hooks.executors.http_executor.httpx.AsyncClient", return_value=cm) as mock_cls:
         await HttpHookExecutor().execute(_CONTEXT, _make_manifest())
     call_kwargs = mock_cls.call_args
     assert call_kwargs.kwargs.get("verify") is False
@@ -518,7 +518,7 @@ async def test_tls_verify_param_passed_to_client(monkeypatch):
 @pytest.mark.anyio
 async def test_200_empty_body_returns_continue():
     cm, client = _make_async_client_cm(_mock_response(200, ""))
-    with patch("openmagi_core_agent.hooks.executors.http_executor.httpx.AsyncClient", return_value=cm):
+    with patch("magi_agent.hooks.executors.http_executor.httpx.AsyncClient", return_value=cm):
         result = await HttpHookExecutor().execute(_CONTEXT, _make_manifest())
     assert result.action == "continue"
 
@@ -529,7 +529,7 @@ async def test_200_empty_body_returns_continue():
 
 def test_http_executor_registered():
     """Importing the module must register HttpHookExecutor in the global registry."""
-    from openmagi_core_agent.hooks.executors.http_executor import HttpHookExecutor as _Exec
+    from magi_agent.hooks.executors.http_executor import HttpHookExecutor as _Exec
     executor = get_executor("http")
     assert executor is not None
     assert isinstance(executor, _Exec)
@@ -543,7 +543,7 @@ def test_http_executor_registered():
 async def test_redirect_3xx_fail_open_returns_continue():
     # httpx follows redirects by default but if it surfaces a 3xx to us, treat as error
     cm, client = _make_async_client_cm(_mock_response(302))
-    with patch("openmagi_core_agent.hooks.executors.http_executor.httpx.AsyncClient", return_value=cm):
+    with patch("magi_agent.hooks.executors.http_executor.httpx.AsyncClient", return_value=cm):
         result = await HttpHookExecutor().execute(_CONTEXT, _make_manifest(fail_open=True))
     assert result.action == "continue"
 
@@ -551,7 +551,7 @@ async def test_redirect_3xx_fail_open_returns_continue():
 @pytest.mark.anyio
 async def test_redirect_3xx_fail_closed_returns_block():
     cm, client = _make_async_client_cm(_mock_response(302))
-    with patch("openmagi_core_agent.hooks.executors.http_executor.httpx.AsyncClient", return_value=cm):
+    with patch("magi_agent.hooks.executors.http_executor.httpx.AsyncClient", return_value=cm):
         result = await HttpHookExecutor().execute(_CONTEXT, _make_manifest(fail_open=False))
     assert result.action == "block"
 
@@ -600,7 +600,7 @@ async def test_network_error_fail_open_returns_continue():
     cm = MagicMock()
     cm.__aenter__ = AsyncMock(return_value=client_mock)
     cm.__aexit__ = AsyncMock(return_value=False)
-    with patch("openmagi_core_agent.hooks.executors.http_executor.httpx.AsyncClient", return_value=cm):
+    with patch("magi_agent.hooks.executors.http_executor.httpx.AsyncClient", return_value=cm):
         result = await HttpHookExecutor().execute(_CONTEXT, _make_manifest(fail_open=True))
     assert result.action == "continue"
 
@@ -612,6 +612,6 @@ async def test_network_error_fail_closed_returns_block():
     cm = MagicMock()
     cm.__aenter__ = AsyncMock(return_value=client_mock)
     cm.__aexit__ = AsyncMock(return_value=False)
-    with patch("openmagi_core_agent.hooks.executors.http_executor.httpx.AsyncClient", return_value=cm):
+    with patch("magi_agent.hooks.executors.http_executor.httpx.AsyncClient", return_value=cm):
         result = await HttpHookExecutor().execute(_CONTEXT, _make_manifest(fail_open=False))
     assert result.action == "block"

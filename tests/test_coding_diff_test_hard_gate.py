@@ -14,17 +14,17 @@ from typing import Any
 
 import pytest
 
-from openmagi_core_agent.evidence.coding_verification import (
+from magi_agent.evidence.coding_verification import (
     CodingVerificationAuditRequest,
     build_coding_verification_hard_gate_contract,
     evaluate_coding_verification_audit,
     evaluate_coding_verification_hard_gate,
 )
-from openmagi_core_agent.evidence.contracts import (
+from magi_agent.evidence.contracts import (
     evaluate_evidence_contract,
     evidence_command_digest,
 )
-from openmagi_core_agent.evidence.types import (
+from magi_agent.evidence.types import (
     EvidenceContract,
     EvidenceContractVerdict,
     EvidenceFieldMatcher,
@@ -32,12 +32,12 @@ from openmagi_core_agent.evidence.types import (
     EvidenceRequirement,
     EvidenceSource,
 )
-from openmagi_core_agent.recipes.coding_evidence_gate import (
+from magi_agent.recipes.coding_evidence_gate import (
     CodingEvidenceGate,
     CodingEvidenceGateConfig,
     CodingEvidenceGateRequest,
 )
-from openmagi_core_agent.shadow.coding_verification_evidence_contract import (
+from magi_agent.shadow.coding_verification_evidence_contract import (
     CodingVerificationEvidenceCase,
     CodingVerificationEvidenceFixture,
     CodingVerificationEvidenceProjection,
@@ -390,7 +390,7 @@ class TestAuditOnlyCannotProjectSuccess:
         assert result.audit_only is True
 
     def test_audit_contract_on_missing_is_audit(self) -> None:
-        from openmagi_core_agent.evidence.coding_verification import (
+        from magi_agent.evidence.coding_verification import (
             build_coding_verification_audit_contract,
         )
         contract = build_coding_verification_audit_contract(

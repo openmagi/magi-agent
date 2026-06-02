@@ -2,14 +2,14 @@
   "schemaVersion": "liveWorkConsoleEventParityGapMatrix.v1",
   "scope": "PR0 producer/projection parity gap audit only; tests and docs only",
   "sourceMatrices": [
-    "infra/docker/clawy-core-agent-python/tests/fixtures/public_event_parity/matrix.json"
+    "magi-agent/tests/fixtures/public_event_parity/matrix.json"
   ],
   "sourceFiles": [
-    "infra/docker/clawy-core-agent/src/transport/SseWriter.ts",
-    "infra/docker/clawy-core-agent/src/transport/safeAgentEvent.ts",
-    "infra/docker/clawy-core-agent-python/openmagi_core_agent/transport/sse.py",
-    "infra/docker/clawy-core-agent-python/openmagi_core_agent/adk_bridge/event_adapter.py",
-    "infra/docker/clawy-core-agent-python/openmagi_core_agent/missions/events.py"
+    "magi-agent/src/transport/SseWriter.ts",
+    "magi-agent/src/transport/safeAgentEvent.ts",
+    "magi-agent/magi_agent/transport/sse.py",
+    "magi-agent/magi_agent/adk_bridge/event_adapter.py",
+    "magi-agent/magi_agent/missions/events.py"
   ],
   "boundary": {
     "liveAuthorityEnabled": false,
@@ -46,8 +46,8 @@
       "pythonProducer": {
         "status": "producer",
         "evidence": [
-          "openmagi_core_agent/adk_bridge/event_adapter.py",
-          "openmagi_core_agent/meta_orchestration/event_projection.py",
+          "magi_agent/adk_bridge/event_adapter.py",
+          "magi_agent/meta_orchestration/event_projection.py",
           "tests/test_meta_orchestration_event_projection.py",
           "tests/test_event_bridge.py"
         ],
@@ -145,8 +145,8 @@
       "pythonProducer": {
         "status": "producer",
         "evidence": [
-          "openmagi_core_agent/adk_bridge/event_adapter.py",
-          "openmagi_core_agent/tools/event_projection.py",
+          "magi_agent/adk_bridge/event_adapter.py",
+          "magi_agent/tools/event_projection.py",
           "tests/test_event_bridge.py",
           "tests/test_tool_event_projection.py"
         ],
@@ -171,7 +171,7 @@
       "pythonProducer": {
         "status": "producer",
         "evidence": [
-          "openmagi_core_agent/tools/event_projection.py",
+          "magi_agent/tools/event_projection.py",
           "tests/test_tool_event_projection.py",
           "tests/test_sse_writer.py"
         ],
@@ -196,8 +196,8 @@
       "pythonProducer": {
         "status": "producer",
         "evidence": [
-          "openmagi_core_agent/adk_bridge/event_adapter.py",
-          "openmagi_core_agent/tools/event_projection.py",
+          "magi_agent/adk_bridge/event_adapter.py",
+          "magi_agent/tools/event_projection.py",
           "tests/test_event_bridge.py",
           "tests/test_tool_event_projection.py"
         ],
@@ -222,8 +222,8 @@
       "pythonProducer": {
         "status": "producer",
         "evidence": [
-          "openmagi_core_agent/adk_bridge/event_adapter.py",
-          "openmagi_core_agent/tools/event_projection.py",
+          "magi_agent/adk_bridge/event_adapter.py",
+          "magi_agent/tools/event_projection.py",
           "tests/test_event_bridge.py",
           "tests/test_tool_event_projection.py"
         ],
@@ -249,7 +249,7 @@
       "pythonProducer": {
         "status": "producer",
         "evidence": [
-          "openmagi_core_agent/tools/event_projection.py",
+          "magi_agent/tools/event_projection.py",
           "tests/test_tool_event_projection.py",
           "tests/fixtures/ts_parity_replay/public_event_union_golden.json"
         ],
@@ -274,8 +274,8 @@
       "pythonProducer": {
         "status": "producer",
         "evidence": [
-          "openmagi_core_agent/evidence/event_projection.py",
-          "openmagi_core_agent/evidence/source_ledger.py",
+          "magi_agent/evidence/event_projection.py",
+          "magi_agent/evidence/source_ledger.py",
           "tests/test_evidence_event_projection.py",
           "tests/test_research_source_ledger.py"
         ],
@@ -300,11 +300,11 @@
       "pythonProducer": {
         "status": "producer",
         "evidence": [
-          "openmagi_core_agent/evidence/event_projection.py",
-          "openmagi_core_agent/evidence/citation_audit.py",
-          "openmagi_core_agent/harness/verifier_bus.py",
-          "openmagi_core_agent/meta_orchestration/event_projection.py",
-          "openmagi_core_agent/research/source_proof.py",
+          "magi_agent/evidence/event_projection.py",
+          "magi_agent/evidence/citation_audit.py",
+          "magi_agent/harness/verifier_bus.py",
+          "magi_agent/meta_orchestration/event_projection.py",
+          "magi_agent/research/source_proof.py",
           "tests/test_evidence_event_projection.py",
           "tests/test_meta_orchestration_event_projection.py"
         ],
@@ -329,8 +329,8 @@
       "pythonProducer": {
         "status": "producer",
         "evidence": [
-          "openmagi_core_agent/evidence/event_projection.py",
-          "openmagi_core_agent/evidence/citation_audit.py",
+          "magi_agent/evidence/event_projection.py",
+          "magi_agent/evidence/citation_audit.py",
           "tests/test_evidence_event_projection.py",
           "tests/test_research_citation_audit.py"
         ],
@@ -356,9 +356,9 @@
       "pythonProducer": {
         "status": "producer",
         "evidence": [
-          "openmagi_core_agent/adk_bridge/event_adapter.py",
-          "openmagi_core_agent/meta_orchestration/event_projection.py",
-          "openmagi_core_agent/runtime/commit_boundary.py",
+          "magi_agent/adk_bridge/event_adapter.py",
+          "magi_agent/meta_orchestration/event_projection.py",
+          "magi_agent/runtime/commit_boundary.py",
           "tests/test_event_bridge.py",
           "tests/test_meta_orchestration_event_projection.py"
         ],
@@ -383,7 +383,7 @@
       "pythonProducer": {
         "status": "producer",
         "evidence": [
-          "openmagi_core_agent/meta_orchestration/event_projection.py",
+          "magi_agent/meta_orchestration/event_projection.py",
           "tests/test_meta_orchestration_event_projection.py",
           "tests/fixtures/public_event_parity/matrix.json"
         ],
@@ -412,8 +412,8 @@
       "pythonProducer": {
         "status": "producer",
         "evidence": [
-          "openmagi_core_agent/meta_orchestration/event_projection.py",
-          "openmagi_core_agent/runtime/child_event_projection.py",
+          "magi_agent/meta_orchestration/event_projection.py",
+          "magi_agent/runtime/child_event_projection.py",
           "tests/test_meta_orchestration_event_projection.py",
           "tests/test_child_event_projection.py",
           "tests/fixtures/public_event_parity/matrix.json",
@@ -473,7 +473,7 @@
       "pythonProducer": {
         "status": "producer",
         "evidence": [
-          "openmagi_core_agent/runtime/child_event_projection.py",
+          "magi_agent/runtime/child_event_projection.py",
           "tests/test_child_event_projection.py"
         ],
         "notes": "Projection-only child lifecycle rows are emitted only from runtime-issued child envelopes, child runner envelope refs, or evaluated acceptance verdicts; they do not attach live child execution."
@@ -658,7 +658,7 @@
       "pythonProducer": {
         "status": "producer",
         "evidence": [
-          "openmagi_core_agent/runtime/llm_stream_reader.py",
+          "magi_agent/runtime/llm_stream_reader.py",
           "tests/test_priority_a_llm_stream_reader.py"
         ],
         "notes": "Document draft projection is bounded to preview metadata."
@@ -754,7 +754,7 @@
       "pythonProducer": {
         "status": "producer",
         "evidence": [
-          "openmagi_core_agent/runtime/work_console_snapshot.py",
+          "magi_agent/runtime/work_console_snapshot.py",
           "tests/test_work_console_snapshot.py"
         ],
         "notes": "Default-off reconnect snapshot reducer rebuilds deterministic Work Console state from already-public AgentEvent dictionaries only; it does not emit active_snapshot SSE events or enable production snapshot writes."

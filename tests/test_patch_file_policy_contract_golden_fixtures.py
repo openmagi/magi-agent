@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from openmagi_core_agent.shadow.patch_file_policy_contract import (
+from magi_agent.shadow.patch_file_policy_contract import (
     PatchFilePolicyAttachmentFlags,
     PatchFilePolicyContractFixture,
     load_patch_file_policy_contract_fixture,
@@ -240,7 +240,7 @@ def test_patch_file_policy_contract_import_boundary_stays_runtime_free() -> None
 import sys
 from pathlib import Path
 
-from openmagi_core_agent.shadow.patch_file_policy_contract import (
+from magi_agent.shadow.patch_file_policy_contract import (
     load_patch_file_policy_contract_fixture,
     project_patch_file_policy_contract_fixture,
 )
@@ -251,19 +251,19 @@ project_patch_file_policy_contract_fixture(fixture)
 
 forbidden = (
     'google.adk.runners',
-    'openmagi_core_agent.adk_bridge.local_runner',
-    'openmagi_core_agent.adk_bridge.runner_adapter',
-    'openmagi_core_agent.adk_bridge.tool_adapter',
-    'openmagi_core_agent.tools.dispatcher',
-    'openmagi_core_agent.tools.registry',
-    'openmagi_core_agent.plugins.agentmemory',
-    'openmagi_core_agent.memory',
-    'openmagi_core_agent.services.memory',
-    'openmagi_core_agent.hipocampus',
-    'openmagi_core_agent.qmd',
-    'openmagi_core_agent.app',
-    'openmagi_core_agent.transport.chat',
-    'openmagi_core_agent.routes',
+    'magi_agent.adk_bridge.local_runner',
+    'magi_agent.adk_bridge.runner_adapter',
+    'magi_agent.adk_bridge.tool_adapter',
+    'magi_agent.tools.dispatcher',
+    'magi_agent.tools.registry',
+    'magi_agent.plugins.agentmemory',
+    'magi_agent.memory',
+    'magi_agent.services.memory',
+    'magi_agent.hipocampus',
+    'magi_agent.qmd',
+    'magi_agent.app',
+    'magi_agent.transport.chat',
+    'magi_agent.routes',
 )
 loaded = [name for name in forbidden if name in sys.modules]
 if loaded:

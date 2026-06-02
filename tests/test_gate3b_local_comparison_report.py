@@ -5,12 +5,12 @@ import os
 import shutil
 from pathlib import Path
 
-from openmagi_core_agent.shadow.gate3b_local_consumer import (
+from magi_agent.shadow.gate3b_local_consumer import (
     Gate3BLocalConsumedBundle,
     Gate3BLocalConsumerConfig,
     consume_gate3b_local_files,
 )
-from openmagi_core_agent.shadow.gate3b_local_report import (
+from magi_agent.shadow.gate3b_local_report import (
     Gate3BLocalReportAttachmentFlags,
     build_gate3b_local_comparison_reports,
 )
@@ -227,14 +227,14 @@ def test_unsafe_source_path_is_redacted_from_public_report_payload(
 ) -> None:
     consumed = _consume_one(tmp_path)
     unsafe = consumed.model_copy(
-        update={"source_path": "/private/tmp/clawy.pro/bot-abc/local.json"}
+        update={"source_path": "/private/tmp/openmagi.ai/bot-abc/local.json"}
     )
 
     report = build_gate3b_local_comparison_reports((unsafe,))[0]
     dumped = report.model_dump(by_alias=True, mode="json")
 
     assert "/private/tmp" not in repr(dumped)
-    assert "clawy.pro" not in repr(dumped)
+    assert "openmagi.ai" not in repr(dumped)
     assert "[REDACTED]" in repr(dumped)
 
 
