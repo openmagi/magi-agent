@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import argparse
 import os
+import sys
+from collections.abc import Mapping, Sequence
 
 import uvicorn
 
@@ -17,7 +20,28 @@ from .transport.chat import (
 )
 
 
-def main() -> None:
+def resolve_server_port(
+    argv: Sequence[str] | None = None,
+    *,
+    environ: Mapping[str, str] | None = None,
+) -> int:
+    env = os.environ if environ is None else environ
+    default_port = int(env.get("CORE_AGENT_PORT", "8080"))
+    raw_args = list(sys.argv[1:] if argv is None else argv)
+
+    parser = argparse.ArgumentParser(prog="magi-agent")
+    parser.add_argument("--port", type=int, default=default_port)
+
+    if raw_args and raw_args[0] == "serve":
+        raw_args = raw_args[1:]
+    elif raw_args and not raw_args[0].startswith("-"):
+        parser.error(f"unknown command: {raw_args[0]}")
+
+    return int(parser.parse_args(raw_args).port)
+
+
+def main(argv: Sequence[str] | None = None) -> None:
+    port = resolve_server_port(argv)
     config = parse_runtime_env(os.environ)
     runtime = OpenMagiRuntime(config=config)
     runtime.gate5b4c3_shadow_generation_route_config = (
@@ -38,5 +62,4 @@ def main() -> None:
         build_gate1a_observed_egress_evidence_provider_from_env(os.environ)
     )
     app = create_app(runtime)
-    port = int(os.environ.get("CORE_AGENT_PORT", "8080"))
     uvicorn.run(app, host="0.0.0.0", port=port)
