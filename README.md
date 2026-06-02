@@ -1,6 +1,6 @@
 # Magi Agent
 
-OpenMagi Python ADK runtime and CLI for personal AI agents.
+OpenMagi agent runtime and CLI for personal AI agents.
 
 Magi Agent is a programmable AI agent runtime that actually gets things done.
 Instead of relying on prompts and hoping the model follows every instruction,
@@ -8,11 +8,10 @@ Magi lets users configure the runtime around the model: which context it sees,
 which tools it can use, what evidence must be recorded, what requires approval,
 how failures are repaired, and what can be projected to the user.
 
-This repository tracks the Python Google ADK implementation used by OpenMagi's
-hosted runtime. Google ADK provides the official Agent, Runner, tool, session,
-memory, artifact, callback, plugin, and evaluation primitives. Magi owns the
-product contract around those primitives: policy, ToolHost, evidence, approval,
-projection, fallback, audit, and rollout gates.
+Magi builds on Google's Agent Development Kit primitives for agents, runners,
+tools, sessions, memory, artifacts, callbacks, plugins, and evaluation. Magi
+adds the product contract around those primitives: policy, ToolHost, evidence,
+approval, projection, fallback, and audit.
 
 ## The Problem
 
@@ -55,7 +54,21 @@ inspection harness without rewriting the agent core for every workflow.
 
 ## Install And Run Locally
 
-Install development and CLI dependencies:
+Install with Homebrew:
+
+```bash
+brew install openmagi/tap/magi-agent
+magi --help
+```
+
+Run the CLI:
+
+```bash
+magi chat
+magi --output text "Summarize this repository"
+```
+
+Run from source when developing Magi itself:
 
 ```bash
 uv sync --extra dev --extra cli
@@ -67,22 +80,21 @@ Run tests:
 uv run --extra dev pytest -q
 ```
 
-Run the HTTP runtime:
+Run the local HTTP runtime from source:
 
 ```bash
 uv run magi-agent
 ```
 
-Run the CLI:
+Run the source checkout CLI:
 
 ```bash
 uv run --extra cli magi --help
 uv run --extra cli magi --output text "Summarize this repository"
 ```
 
-The local smoke path should not require production secrets, database
-credentials, hosted workspace volumes, live ToolHost dispatch, or model provider
-calls.
+The local smoke path should not require service secrets, database credentials,
+workspace volumes, live ToolHost dispatch, or model provider calls.
 
 ## Architecture
 
@@ -149,9 +161,9 @@ deterministic checkpoints:
 - child-agent, delegation, fork, replay, and compaction continuity;
 - evidence-first projection and audit reporting.
 
-Hosted deployments can enable these surfaces gradually with selected-bot
-rollout gates. Local development can run the contracts and fixture suites
-without opening production authority.
+You can enable these surfaces explicitly for the workflows you want to run.
+Local development can run the contracts and fixture suites without granting live
+tool authority.
 
 ## Example: Verify Source Before Claim
 
@@ -259,16 +271,16 @@ uv run --extra cli magi --output ndjson "Inspect this repository and summarize t
 ```
 
 The CLI supports headless output modes for automation and interactive modes for
-local operator workflows. The CLI does not require hosted production authority
-to run local fixture or development paths.
+local operator workflows. The CLI can run local fixture and development paths
+without granting live tool authority.
 
 ## Optional External Integrations
 
 External integration support, including Composio-backed connector surfaces, is
 optional and default-off. Installing optional dependencies or setting a single
-API key must not grant live tool authority by itself. Hosted or cloud
-deployments should require explicit toolkit scope, credential scope, rollout
-approval, and leak-safe evidence before any external action is enabled.
+API key must not grant live tool authority by itself. Any deployment should
+require explicit toolkit scope, credential scope, user approval, and leak-safe
+evidence before an external action is enabled.
 
 Install optional Composio dependencies only when you are working on that surface:
 
@@ -276,18 +288,12 @@ Install optional Composio dependencies only when you are working on that surface
 uv sync --extra composio
 ```
 
-## Hosted Runtime Safety Posture
+## Safety Model
 
-Most high-authority surfaces are default-off until an explicit rollout gate
-opens them. Readiness metadata, local fixtures, fake providers, diagnostic
-replay, and canary scaffolds can exist without giving Python user-visible
-authority.
-
-High-authority behavior such as selected-bot Python response authority, live
-model calls, tool execution, memory writes, workspace mutation, browser/channel
-delivery, mission execution, scheduled work, database writes, billing mutation,
-and external integrations stays behind separate gates, preflights, canaries,
-rollback rules, and evidence checks.
+High-authority behavior such as live model calls, tool execution, memory writes,
+workspace mutation, browser or channel delivery, scheduled work, database
+writes, billing mutation, and external integrations should stay behind explicit
+configuration, preflight checks, approvals, and durable evidence.
 
 Operators should treat HTTP success and SSE completion as transport evidence
 only. Acceptance for governed workflows comes from durable records: delivery
