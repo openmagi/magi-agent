@@ -1,0 +1,50 @@
+{
+  "schemaVersion": "recipeCompositionRegressionFixture.v1",
+  "caseId": "hard_invariant_log_only",
+  "description": "A hard-safety recipe cannot configure its invariant mode as log_only.",
+  "activationMode": {
+    "defaultOff": true,
+    "trafficAttached": false,
+    "executionAttached": false,
+    "liveActivation": false
+  },
+  "stack": {
+    "hardSafetyRefs": [
+      "recipe.safety.log_only"
+    ],
+    "turnId": "turn-regression-hard-log-only",
+    "sessionId": "session-regression-hard-log-only"
+  },
+  "globalRetryCap": 3,
+  "snapshots": [
+    {
+      "recipeRef": "recipe.safety.log_only",
+      "hardSafety": true,
+      "projectionRules": [
+        "hardSafety.mode:log_only"
+      ]
+    }
+  ],
+  "expected": {
+    "blocked": true,
+    "effectiveRecipeRefs": [],
+    "includedExplicitRefs": [],
+    "includedAutoRefs": [],
+    "conflictCodes": [
+      "hard_safety_invalid_mode"
+    ],
+    "effectiveRetryPolicy": {
+      "maxAttempts": 0,
+      "repairAttempts": 0,
+      "globalCap": 3
+    },
+    "projection": {
+      "conflictStatus": "blocked",
+      "hardSafetyStatus": "blocked",
+      "publicSafeCounts": {
+        "toolGrantCount": 0,
+        "toolDenialCount": 0
+      }
+    }
+  }
+}

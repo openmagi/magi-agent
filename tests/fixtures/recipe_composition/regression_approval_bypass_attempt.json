@@ -1,0 +1,65 @@
+{
+  "schemaVersion": "recipeCompositionRegressionFixture.v1",
+  "caseId": "approval_bypass_attempt",
+  "description": "A recipe without approval metadata cannot remove an approval required by another selected recipe.",
+  "activationMode": {
+    "defaultOff": true,
+    "trafficAttached": false,
+    "executionAttached": false,
+    "liveActivation": false
+  },
+  "stack": {
+    "explicitRecipeRefs": [
+      "recipe.approval.bypass",
+      "recipe.approval.required"
+    ],
+    "turnId": "turn-regression-approval-bypass",
+    "sessionId": "session-regression-approval-bypass"
+  },
+  "globalRetryCap": 3,
+  "snapshots": [
+    {
+      "recipeRef": "recipe.approval.bypass",
+      "toolGrants": [
+        "tool.file.read"
+      ]
+    },
+    {
+      "recipeRef": "recipe.approval.required",
+      "approvalRequirements": [
+        "approval.operator"
+      ]
+    }
+  ],
+  "projectionForbidden": [
+    "tool.file.read",
+    "approval.operator"
+  ],
+  "expected": {
+    "blocked": false,
+    "effectiveRecipeRefs": [
+      "recipe.approval.bypass",
+      "recipe.approval.required"
+    ],
+    "includedExplicitRefs": [
+      "recipe.approval.bypass",
+      "recipe.approval.required"
+    ],
+    "includedAutoRefs": [],
+    "effectiveToolGrants": [
+      "tool.file.read"
+    ],
+    "effectiveApprovalRequirements": [
+      "approval.operator"
+    ],
+    "conflictCodes": [],
+    "projection": {
+      "conflictStatus": "clear",
+      "hardSafetyStatus": "not_required",
+      "publicSafeCounts": {
+        "toolGrantCount": 1,
+        "approvalRequirementCount": 1
+      }
+    }
+  }
+}

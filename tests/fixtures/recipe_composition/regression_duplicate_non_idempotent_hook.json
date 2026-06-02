@@ -1,0 +1,87 @@
+{
+  "schemaVersion": "recipeCompositionRegressionFixture.v1",
+  "caseId": "duplicate_non_idempotent_hook",
+  "description": "Duplicate blocking hooks without an idempotency key fail closed instead of running duplicate side effects.",
+  "activationMode": {
+    "defaultOff": true,
+    "trafficAttached": false,
+    "executionAttached": false,
+    "liveActivation": false
+  },
+  "stack": {
+    "explicitRecipeRefs": [
+      "recipe.hook.alpha",
+      "recipe.hook.beta"
+    ],
+    "turnId": "turn-regression-hook-duplicate",
+    "sessionId": "session-regression-hook-duplicate"
+  },
+  "globalRetryCap": 3,
+  "snapshots": [
+    {
+      "recipeRef": "recipe.hook.alpha",
+      "hookContributions": [
+        "hook.policy"
+      ]
+    },
+    {
+      "recipeRef": "recipe.hook.beta",
+      "hookContributions": [
+        "hook.policy"
+      ]
+    }
+  ],
+  "hookContributions": [
+    {
+      "recipeRef": "recipe.hook.alpha",
+      "hookId": "hook.policy",
+      "stage": "beforeToolUse",
+      "priority": 10,
+      "scope": [
+        "turn"
+      ],
+      "blocking": true,
+      "failureMode": "fail_closed",
+      "sideEffectful": true
+    },
+    {
+      "recipeRef": "recipe.hook.beta",
+      "hookId": "hook.policy",
+      "stage": "beforeToolUse",
+      "priority": 20,
+      "scope": [
+        "turn"
+      ],
+      "blocking": true,
+      "failureMode": "fail_closed",
+      "sideEffectful": true
+    }
+  ],
+  "expected": {
+    "blocked": true,
+    "effectiveRecipeRefs": [],
+    "includedExplicitRefs": [],
+    "includedAutoRefs": [],
+    "conflictCodes": [
+      "hook_contract_blocked",
+      "non_idempotent_hook_duplicate"
+    ],
+    "hookContractBlocked": true,
+    "hookContractHookCount": 0,
+    "hookConflictCodes": [
+      "non_idempotent_hook_duplicate"
+    ],
+    "effectiveRetryPolicy": {
+      "maxAttempts": 0,
+      "repairAttempts": 0,
+      "globalCap": 3
+    },
+    "projection": {
+      "conflictStatus": "blocked",
+      "hardSafetyStatus": "not_required",
+      "publicSafeCounts": {
+        "hookCount": 0
+      }
+    }
+  }
+}

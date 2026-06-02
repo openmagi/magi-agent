@@ -1,0 +1,371 @@
+{
+  "schemaVersion": "memoryProviderConformanceMatrix.v1",
+  "fixtureId": "memory_provider_conformance_matrix_0001",
+  "sourceRuntime": "python-adk-parity-fixture",
+  "recordingMode": "local_diagnostic_fixture",
+  "phase": "phase_0_1_metadata_only",
+  "adkFirst": {
+    "adkOwns": [
+      "MemoryService",
+      "provider_lifecycle_attachment"
+    ],
+    "openMagiOwns": [
+      "provider_neutral_policy",
+      "tenant_scope",
+      "source_authority",
+      "redaction",
+      "receipt_semantics",
+      "lifecycle_metadata",
+      "audit_evidence_refs",
+      "provider_conformance_gates"
+    ],
+    "memoryServiceReplacementAllowed": false,
+    "providerAttachmentAllowed": false
+  },
+  "importBoundary": {
+    "adkMemoryServiceReplaced": false,
+    "adkMemoryServiceAttached": false,
+    "liveProviderCalls": false,
+    "providerSdkImports": false,
+    "agentMemoryCalls": false,
+    "hipocampusQmdCalls": false,
+    "promptProjection": false,
+    "memoryWrites": false,
+    "routesAttached": false,
+    "productionStorage": false
+  },
+  "providers": [
+    {
+      "providerId": "hipocampus-qmd-readonly",
+      "phase": "phase_0",
+      "storageModel": "file_snapshot",
+      "providerCallAllowed": false,
+      "importOrSdkAllowed": false,
+      "promptProjectionAllowed": false,
+      "memoryWriteAllowed": false,
+      "factContract": {
+        "bitemporal": true,
+        "validTime": "declared",
+        "transactionTime": "declared",
+        "tenantScope": "required",
+        "sourceAuthority": "required",
+        "redactionStatus": "required_before_projection",
+        "receiptSemantics": "required_before_write_claim",
+        "auditEvidenceRef": "evidence:hipocampus-qmd:metadata-only"
+      },
+      "lifecycleTiers": [
+        "hot",
+        "warm",
+        "cold",
+        "tombstone"
+      ],
+      "dryRunMaintenance": {
+        "compaction": "supported_dry_run_only",
+        "decay": "supported_dry_run_only",
+        "delete": "supported_dry_run_only"
+      },
+      "operationEnvelopes": [
+        {
+          "operation": "remember",
+          "support": "unsupported",
+          "failureCode": "memory_provider_write_disabled",
+          "dryRun": false,
+          "executesProvider": false,
+          "mutatesMemory": false,
+          "reasonCodes": [
+            "metadata_only_slice",
+            "write_requires_future_receipt_contract"
+          ]
+        },
+        {
+          "operation": "search",
+          "support": "metadata_only",
+          "failureCode": "memory_provider_live_calls_disabled",
+          "dryRun": true,
+          "executesProvider": false,
+          "mutatesMemory": false,
+          "reasonCodes": [
+            "capability_declared_without_provider_call"
+          ]
+        },
+        {
+          "operation": "compact",
+          "support": "metadata_only",
+          "failureCode": "memory_provider_compaction_dry_run_only",
+          "dryRun": true,
+          "executesProvider": false,
+          "mutatesMemory": false,
+          "reasonCodes": [
+            "maintenance_envelope_declared_only"
+          ]
+        },
+        {
+          "operation": "decay",
+          "support": "metadata_only",
+          "failureCode": "memory_provider_decay_dry_run_only",
+          "dryRun": true,
+          "executesProvider": false,
+          "mutatesMemory": false,
+          "reasonCodes": [
+            "maintenance_envelope_declared_only"
+          ]
+        },
+        {
+          "operation": "delete",
+          "support": "metadata_only",
+          "failureCode": "memory_provider_delete_dry_run_only",
+          "dryRun": true,
+          "executesProvider": false,
+          "mutatesMemory": false,
+          "reasonCodes": [
+            "maintenance_envelope_declared_only",
+            "redaction_authority_owned_by_openmagi_policy"
+          ]
+        },
+        {
+          "operation": "export",
+          "support": "metadata_only",
+          "failureCode": "memory_provider_export_dry_run_only",
+          "dryRun": true,
+          "executesProvider": false,
+          "mutatesMemory": false,
+          "reasonCodes": [
+            "audit_export_shape_declared_only"
+          ]
+        },
+        {
+          "operation": "conflict_resolve",
+          "support": "metadata_only",
+          "failureCode": "memory_provider_conflict_resolution_metadata_only",
+          "dryRun": true,
+          "executesProvider": false,
+          "mutatesMemory": false,
+          "reasonCodes": [
+            "current_source_authority_precedes_background_memory"
+          ]
+        }
+      ]
+    },
+    {
+      "providerId": "agentmemory-metadata-gate",
+      "phase": "phase_1",
+      "storageModel": "external",
+      "providerCallAllowed": false,
+      "importOrSdkAllowed": false,
+      "promptProjectionAllowed": false,
+      "memoryWriteAllowed": false,
+      "factContract": {
+        "bitemporal": true,
+        "validTime": "declared",
+        "transactionTime": "declared",
+        "tenantScope": "required",
+        "sourceAuthority": "required",
+        "redactionStatus": "required_before_projection",
+        "receiptSemantics": "required_before_write_claim",
+        "auditEvidenceRef": "evidence:agentmemory:metadata-only"
+      },
+      "lifecycleTiers": [
+        "hot",
+        "warm",
+        "cold",
+        "tombstone"
+      ],
+      "dryRunMaintenance": {
+        "compaction": "supported_dry_run_only",
+        "decay": "supported_dry_run_only",
+        "delete": "supported_dry_run_only"
+      },
+      "operationEnvelopes": [
+        {
+          "operation": "remember",
+          "support": "unsupported",
+          "failureCode": "memory_provider_write_disabled",
+          "dryRun": false,
+          "executesProvider": false,
+          "mutatesMemory": false,
+          "reasonCodes": [
+            "provider_sdk_imports_disabled",
+            "write_requires_future_receipt_contract"
+          ]
+        },
+        {
+          "operation": "search",
+          "support": "metadata_only",
+          "failureCode": "memory_provider_live_calls_disabled",
+          "dryRun": true,
+          "executesProvider": false,
+          "mutatesMemory": false,
+          "reasonCodes": [
+            "provider_sdk_imports_disabled",
+            "capability_declared_without_provider_call"
+          ]
+        },
+        {
+          "operation": "compact",
+          "support": "metadata_only",
+          "failureCode": "memory_provider_compaction_dry_run_only",
+          "dryRun": true,
+          "executesProvider": false,
+          "mutatesMemory": false,
+          "reasonCodes": [
+            "maintenance_envelope_declared_only"
+          ]
+        },
+        {
+          "operation": "decay",
+          "support": "metadata_only",
+          "failureCode": "memory_provider_decay_dry_run_only",
+          "dryRun": true,
+          "executesProvider": false,
+          "mutatesMemory": false,
+          "reasonCodes": [
+            "maintenance_envelope_declared_only"
+          ]
+        },
+        {
+          "operation": "delete",
+          "support": "metadata_only",
+          "failureCode": "memory_provider_delete_dry_run_only",
+          "dryRun": true,
+          "executesProvider": false,
+          "mutatesMemory": false,
+          "reasonCodes": [
+            "redaction_authority_owned_by_openmagi_policy"
+          ]
+        },
+        {
+          "operation": "export",
+          "support": "metadata_only",
+          "failureCode": "memory_provider_export_dry_run_only",
+          "dryRun": true,
+          "executesProvider": false,
+          "mutatesMemory": false,
+          "reasonCodes": [
+            "audit_export_shape_declared_only"
+          ]
+        },
+        {
+          "operation": "conflict_resolve",
+          "support": "metadata_only",
+          "failureCode": "memory_provider_conflict_resolution_metadata_only",
+          "dryRun": true,
+          "executesProvider": false,
+          "mutatesMemory": false,
+          "reasonCodes": [
+            "current_source_authority_precedes_background_memory"
+          ]
+        }
+      ]
+    },
+    {
+      "providerId": "external-vector-metadata-gate",
+      "phase": "phase_1",
+      "storageModel": "vector",
+      "providerCallAllowed": false,
+      "importOrSdkAllowed": false,
+      "promptProjectionAllowed": false,
+      "memoryWriteAllowed": false,
+      "factContract": {
+        "bitemporal": true,
+        "validTime": "declared",
+        "transactionTime": "declared",
+        "tenantScope": "required",
+        "sourceAuthority": "required",
+        "redactionStatus": "required_before_projection",
+        "receiptSemantics": "required_before_write_claim",
+        "auditEvidenceRef": "evidence:external-vector:metadata-only"
+      },
+      "lifecycleTiers": [
+        "hot",
+        "warm",
+        "cold",
+        "tombstone"
+      ],
+      "dryRunMaintenance": {
+        "compaction": "supported_dry_run_only",
+        "decay": "supported_dry_run_only",
+        "delete": "supported_dry_run_only"
+      },
+      "operationEnvelopes": [
+        {
+          "operation": "remember",
+          "support": "unsupported",
+          "failureCode": "memory_provider_write_disabled",
+          "dryRun": false,
+          "executesProvider": false,
+          "mutatesMemory": false,
+          "reasonCodes": [
+            "provider_sdk_imports_disabled",
+            "write_requires_future_receipt_contract"
+          ]
+        },
+        {
+          "operation": "search",
+          "support": "metadata_only",
+          "failureCode": "memory_provider_live_calls_disabled",
+          "dryRun": true,
+          "executesProvider": false,
+          "mutatesMemory": false,
+          "reasonCodes": [
+            "capability_declared_without_provider_call"
+          ]
+        },
+        {
+          "operation": "compact",
+          "support": "metadata_only",
+          "failureCode": "memory_provider_compaction_dry_run_only",
+          "dryRun": true,
+          "executesProvider": false,
+          "mutatesMemory": false,
+          "reasonCodes": [
+            "maintenance_envelope_declared_only"
+          ]
+        },
+        {
+          "operation": "decay",
+          "support": "metadata_only",
+          "failureCode": "memory_provider_decay_dry_run_only",
+          "dryRun": true,
+          "executesProvider": false,
+          "mutatesMemory": false,
+          "reasonCodes": [
+            "maintenance_envelope_declared_only"
+          ]
+        },
+        {
+          "operation": "delete",
+          "support": "metadata_only",
+          "failureCode": "memory_provider_delete_dry_run_only",
+          "dryRun": true,
+          "executesProvider": false,
+          "mutatesMemory": false,
+          "reasonCodes": [
+            "redaction_authority_owned_by_openmagi_policy"
+          ]
+        },
+        {
+          "operation": "export",
+          "support": "metadata_only",
+          "failureCode": "memory_provider_export_dry_run_only",
+          "dryRun": true,
+          "executesProvider": false,
+          "mutatesMemory": false,
+          "reasonCodes": [
+            "audit_export_shape_declared_only"
+          ]
+        },
+        {
+          "operation": "conflict_resolve",
+          "support": "metadata_only",
+          "failureCode": "memory_provider_conflict_resolution_metadata_only",
+          "dryRun": true,
+          "executesProvider": false,
+          "mutatesMemory": false,
+          "reasonCodes": [
+            "current_source_authority_precedes_background_memory"
+          ]
+        }
+      ]
+    }
+  ]
+}

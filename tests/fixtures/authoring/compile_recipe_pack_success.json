@@ -1,0 +1,120 @@
+{
+  "sessionId": "builder.session.source-review",
+  "botId": "bot_source_review_001",
+  "ownerId": "owner_source_review_001",
+  "mode": "recipe_builder",
+  "temporary": true,
+  "separateAgentIdentity": false,
+  "title": "Source review recipe builder session",
+  "currentPhase": "review",
+  "activationEnabled": false,
+  "activationEligibility": false,
+  "authoringToolAllowlist": [
+    "ask_question",
+    "record_answer",
+    "save_draft",
+    "report_gap",
+    "propose_generated_plugin"
+  ],
+  "phases": [
+    {
+      "phaseId": "intake",
+      "title": "Intake",
+      "status": "completed",
+      "questionIds": ["question.source-review.objective"]
+    },
+    {
+      "phaseId": "review",
+      "title": "Review",
+      "status": "in_progress",
+      "questionIds": ["question.source-review.policy"]
+    }
+  ],
+  "questions": [
+    {
+      "questionId": "question.source-review.objective",
+      "phaseId": "intake",
+      "questionText": "What source-review workflow should this bot draft?",
+      "required": true,
+      "answerKind": "free_text"
+    },
+    {
+      "questionId": "question.source-review.policy",
+      "phaseId": "review",
+      "questionText": "Which review policy should the draft enforce?",
+      "required": true,
+      "answerKind": "single_select"
+    }
+  ],
+  "answers": [
+    {
+      "questionId": "question.source-review.objective",
+      "answerText": "Draft a local-only source review recipe pack with evidence and human approval gates."
+    },
+    {
+      "questionId": "question.source-review.policy",
+      "selectedRefs": ["policy.default-human-review"]
+    }
+  ],
+  "draft": {
+    "draftId": "draft.source-review.001",
+    "botId": "bot_source_review_001",
+    "ownerId": "owner_source_review_001",
+    "authoringSessionId": "builder.session.source-review",
+    "status": "draft",
+    "activationEnabled": false,
+    "activationEligibility": false,
+    "saveTarget": "current_bot_draft_store",
+    "pack": {
+      "packId": "draft.pack.source-review",
+      "title": "Source review assistant",
+      "summary": "Authoring-only draft for source review with local validation and no runtime activation.",
+      "recipeRefs": ["recipe.source-review.collect", "recipe.source-review.verify"],
+      "harnessPolicy": {
+        "harnessRefs": ["harness:authoring-static@1"]
+      },
+      "toolPolicy": {
+        "allowedConnectorRefs": ["connector.source.readonly"],
+        "allowedToolRefs": ["SourceOpen", "CitationVerify"],
+        "allowedPluginRefs": ["plugin.source-review.readonly"],
+        "deniedToolRefs": ["BrowserLive", "FileWrite"]
+      },
+      "evidencePolicy": {
+        "requiredEvidenceRefs": ["openedSourceSnapshot", "quoteDigest"],
+        "evidenceProducerRefs": ["evidence:source-opened@1", "evidence:quote-digest@1"]
+      },
+      "validatorPolicy": {
+        "validatorRefs": ["validator:sourceOpened@1", "validator:quoteExactMatch@1"]
+      },
+      "approvalPolicy": {
+        "requiresHumanReview": true,
+        "authorityRefs": ["authority:owner-human@1"]
+      },
+      "projectionPolicy": {
+        "mode": "structured_summary",
+        "rawGovernedProjectionEnabled": false
+      },
+      "repairPolicy": {
+        "maxRepairAttempts": 1,
+        "terminalStates": ["resolved", "blocked"]
+      },
+      "budgetPolicy": {
+        "maxToolCalls": 8,
+        "maxValidatorCalls": 6,
+        "maxRepairAttempts": 1
+      },
+      "hardInvariants": [
+        {
+          "invariantId": "invariant.no-live-execution",
+          "description": "Draft compilation must remain validation-only.",
+          "mode": "enforced"
+        },
+        {
+          "invariantId": "invariant.no-activation",
+          "description": "Compilation must not activate or save the draft.",
+          "mode": "enforced"
+        }
+      ]
+    }
+  }
+}

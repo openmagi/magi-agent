@@ -1,0 +1,379 @@
+{
+  "schemaVersion": "metaOrchestrationHarnessGapMatrix.v1",
+  "generatedFor": "openmagi-python-adk-first-party-meta-orchestration-harness-pr0",
+  "auditDate": "2026-05-26",
+  "activationMode": "metadata-only-default-off",
+  "rows": [
+    {
+      "id": "parent_plan_contract",
+      "capability": "Parent plan contract records the parent objective, child request boundaries, evidence requirements, and assembly policy before delegation.",
+      "owningLayer": "OpenMagi first-party harness",
+      "status": "openmagi_owned_required",
+      "activationGate": "PR0 metadata audit only; future execution remains behind an explicit harness rollout gate.",
+      "requiresLiveActivation": false,
+      "trafficAttached": false,
+      "defaultOff": true,
+      "primitiveOwnership": {
+        "adkOwns": [
+          "Agent",
+          "Runner"
+        ],
+        "openMagiOwns": [
+          "approval/control",
+          "rollout gates"
+        ],
+        "notes": "ADK supplies the agent and runner substrate; OpenMagi owns the first-party parent contract and activation control."
+      },
+      "notes": "This row is harness metadata, not a generic core planner rewrite."
+    },
+    {
+      "id": "child_role_registry",
+      "capability": "Child role registry declares allowed first-party role families while keeping domain role examples adapter-owned.",
+      "owningLayer": "OpenMagi first-party harness",
+      "status": "openmagi_owned_required",
+      "activationGate": "Registry is advisory metadata until a future harness gate attaches a runner.",
+      "requiresLiveActivation": false,
+      "trafficAttached": false,
+      "defaultOff": true,
+      "roleExamples": [
+        {
+          "id": "research_scout",
+          "owner": "adapter",
+          "coreRequirement": false,
+          "notes": "Research role example belongs to a research adapter recipe."
+        },
+        {
+          "id": "coding_patch_worker",
+          "owner": "adapter",
+          "coreRequirement": false,
+          "notes": "Coding role example belongs to a coding adapter recipe."
+        },
+        {
+          "id": "backoffice_sheet_operator",
+          "owner": "adapter",
+          "coreRequirement": false,
+          "notes": "Backoffice role example belongs to a backoffice adapter recipe."
+        }
+      ],
+      "primitiveOwnership": {
+        "adkOwns": [
+          "Agent"
+        ],
+        "openMagiOwns": [
+          "approval/control",
+          "rollout gates"
+        ],
+        "notes": "ADK owns the reusable Agent primitive; OpenMagi owns first-party role policy and adapters own domain examples."
+      },
+      "notes": "The core harness requires a registry shape, not research, coding, or backoffice behavior."
+    },
+    {
+      "id": "child_tool_grants",
+      "capability": "Child tool grants define least-authority tool scopes for child requests and require grant receipts before any future dispatch.",
+      "owningLayer": "OpenMagi first-party harness",
+      "status": "openmagi_owned_required",
+      "activationGate": "Grant rows are metadata-only until tool authority is separately approved.",
+      "requiresLiveActivation": false,
+      "trafficAttached": false,
+      "defaultOff": true,
+      "primitiveOwnership": {
+        "adkOwns": [
+          "FunctionTool",
+          "LongRunningFunctionTool"
+        ],
+        "openMagiOwns": [
+          "ledger/receipts",
+          "approval/control"
+        ],
+        "notes": "ADK owns tool primitives; OpenMagi owns grant receipts and control policy."
+      },
+      "notes": "No tool is attached by this matrix."
+    },
+    {
+      "id": "child_context_budget",
+      "capability": "Child context budget caps parent-to-child context projection and requires explicit summary, evidence, and omission boundaries.",
+      "owningLayer": "OpenMagi first-party harness",
+      "status": "openmagi_owned_required",
+      "activationGate": "Budget policy is enforced first as fixture metadata.",
+      "requiresLiveActivation": false,
+      "trafficAttached": false,
+      "defaultOff": true,
+      "primitiveOwnership": {
+        "adkOwns": [
+          "SessionService",
+          "MemoryService"
+        ],
+        "openMagiOwns": [
+          "privacy/redaction",
+          "projection"
+        ],
+        "notes": "ADK owns session and memory substrate; OpenMagi owns projected context budgeting and privacy boundaries."
+      },
+      "notes": "The budget forbids raw transcript dependence and keeps parent context projection explicit."
+    },
+    {
+      "id": "child_completion_contract",
+      "capability": "Child completion contract requires a structured result with status, evidence references, limitations, and requested parent action.",
+      "owningLayer": "OpenMagi first-party harness",
+      "status": "openmagi_owned_required",
+      "activationGate": "Completion shape is a fixture contract before child execution is attached.",
+      "requiresLiveActivation": false,
+      "trafficAttached": false,
+      "defaultOff": true,
+      "primitiveOwnership": {
+        "adkOwns": [
+          "Runner",
+          "ArtifactService"
+        ],
+        "openMagiOwns": [
+          "evidence envelopes",
+          "ledger/receipts"
+        ],
+        "notes": "ADK owns runner output and artifact substrate; OpenMagi owns the child completion envelope."
+      },
+      "notes": "A child is complete only when structured evidence is present."
+    },
+    {
+      "id": "runtime_issued_child_evidence_envelope",
+      "capability": "Runtime-issued child evidence envelope binds child outputs to signed-by-runtime evidence ids, receipts, and visibility metadata.",
+      "owningLayer": "OpenMagi first-party harness",
+      "status": "openmagi_owned_required",
+      "activationGate": "Envelope schema is metadata-only until a future runtime signing gate is approved.",
+      "requiresLiveActivation": false,
+      "trafficAttached": false,
+      "defaultOff": true,
+      "primitiveOwnership": {
+        "adkOwns": [
+          "ArtifactService",
+          "callback"
+        ],
+        "openMagiOwns": [
+          "evidence envelopes",
+          "ledger/receipts"
+        ],
+        "notes": "ADK owns artifact and callback substrate; OpenMagi owns runtime evidence envelope semantics."
+      },
+      "notes": "Parent synthesis must consume this envelope rather than child free text."
+    },
+    {
+      "id": "raw_child_transcript_rejection",
+      "capability": "Raw child transcript rejection prevents parent context from depending on child message logs, private tool traces, or hidden reasoning.",
+      "owningLayer": "OpenMagi first-party harness",
+      "status": "openmagi_owned_required",
+      "activationGate": "Rejection rule is fixture-enforced before any parent context projection path is added.",
+      "requiresLiveActivation": false,
+      "trafficAttached": false,
+      "defaultOff": true,
+      "primitiveOwnership": {
+        "adkOwns": [
+          "SessionService"
+        ],
+        "openMagiOwns": [
+          "privacy/redaction",
+          "projection"
+        ],
+        "notes": "ADK owns session substrate; OpenMagi owns transcript rejection and redacted projection policy."
+      },
+      "notes": "Accepted evidence is structured and sanitized."
+    },
+    {
+      "id": "parent_accept_retry_reject_verdict",
+      "capability": "Parent accept/retry/reject verdict records whether each child envelope can be used, retried with bounded changes, or rejected.",
+      "owningLayer": "OpenMagi verifier/projection",
+      "status": "openmagi_owned_required",
+      "activationGate": "Verdict rows remain offline verifier metadata until approval/control enables orchestration.",
+      "requiresLiveActivation": false,
+      "trafficAttached": false,
+      "defaultOff": true,
+      "primitiveOwnership": {
+        "adkOwns": [
+          "Evaluation",
+          "callback"
+        ],
+        "openMagiOwns": [
+          "verifier verdicts",
+          "approval/control"
+        ],
+        "notes": "ADK owns evaluation and callback substrate; OpenMagi owns verifier verdict semantics."
+      },
+      "notes": "The parent never treats child completion as acceptance without a verdict."
+    },
+    {
+      "id": "bounded_retry",
+      "capability": "Bounded retry policy limits child retry count, retry reasons, and retry context expansion.",
+      "owningLayer": "OpenMagi first-party harness",
+      "status": "openmagi_owned_required",
+      "activationGate": "Retry policy is default-off metadata until future harness counters exist.",
+      "requiresLiveActivation": false,
+      "trafficAttached": false,
+      "defaultOff": true,
+      "primitiveOwnership": {
+        "adkOwns": [
+          "Runner"
+        ],
+        "openMagiOwns": [
+          "approval/control",
+          "rollout gates"
+        ],
+        "notes": "ADK owns runner substrate; OpenMagi owns retry counters and authority boundaries."
+      },
+      "notes": "Retries require a prior reject or retry verdict and may not expand authority by default."
+    },
+    {
+      "id": "final_assembly_from_accepted_evidence_only",
+      "capability": "Final assembly may cite or synthesize only child evidence envelopes that received an accept verdict.",
+      "owningLayer": "OpenMagi verifier/projection",
+      "status": "openmagi_owned_required",
+      "activationGate": "Assembly rule is enforced as metadata before final response integration is wired.",
+      "requiresLiveActivation": false,
+      "trafficAttached": false,
+      "defaultOff": true,
+      "primitiveOwnership": {
+        "adkOwns": [
+          "ArtifactService",
+          "Evaluation"
+        ],
+        "openMagiOwns": [
+          "evidence envelopes",
+          "verifier verdicts",
+          "projection"
+        ],
+        "notes": "ADK owns artifact and evaluation substrate; OpenMagi owns accepted-evidence-only assembly."
+      },
+      "notes": "Rejected and retry-pending child outputs are not source material."
+    },
+    {
+      "id": "verifier_chain_selection",
+      "capability": "Verifier chain selection maps parent plan risk and adapter family to ordered evidence, citation, safety, and projection checks.",
+      "owningLayer": "OpenMagi verifier/projection",
+      "status": "openmagi_owned_required",
+      "activationGate": "Selection matrix is offline metadata until verifier bus integration is approved.",
+      "requiresLiveActivation": false,
+      "trafficAttached": false,
+      "defaultOff": true,
+      "primitiveOwnership": {
+        "adkOwns": [
+          "Evaluation",
+          "callback"
+        ],
+        "openMagiOwns": [
+          "verifier verdicts",
+          "rollout gates"
+        ],
+        "notes": "ADK owns evaluation and callback substrate; OpenMagi owns verifier chain policy."
+      },
+      "notes": "Adapter families may request verifier chains, but the harness owns the first-party selection contract."
+    },
+    {
+      "id": "before_commit_projection_gate",
+      "capability": "beforeCommit/projection gate validates accepted evidence, redaction, and parent verdicts before public or durable projection.",
+      "owningLayer": "OpenMagi verifier/projection",
+      "status": "openmagi_owned_required",
+      "activationGate": "Projection gate is a documented contract only in PR0.",
+      "requiresLiveActivation": false,
+      "trafficAttached": false,
+      "defaultOff": true,
+      "primitiveOwnership": {
+        "adkOwns": [
+          "callback",
+          "ArtifactService"
+        ],
+        "openMagiOwns": [
+          "projection",
+          "privacy/redaction",
+          "approval/control"
+        ],
+        "notes": "ADK owns callback and artifact substrate; OpenMagi owns beforeCommit projection policy."
+      },
+      "notes": "The gate is named for future callback placement, not attached behavior."
+    },
+    {
+      "id": "public_projection_redaction",
+      "capability": "Public projection redaction strips private child context, nonaccepted evidence, secrets, and internal receipts from public events.",
+      "owningLayer": "OpenMagi verifier/projection",
+      "status": "openmagi_owned_required",
+      "activationGate": "Redaction matrix is documentation and fixture coverage only.",
+      "requiresLiveActivation": false,
+      "trafficAttached": false,
+      "defaultOff": true,
+      "primitiveOwnership": {
+        "adkOwns": [
+          "ArtifactService"
+        ],
+        "openMagiOwns": [
+          "privacy/redaction",
+          "projection",
+          "ledger/receipts"
+        ],
+        "notes": "ADK owns artifact substrate; OpenMagi owns public projection redaction."
+      },
+      "notes": "Receipts can exist privately without becoming public event payload."
+    },
+    {
+      "id": "default_off_authority_flags",
+      "capability": "Default-off authority flags enumerate orchestration, child dispatch, tool grant, memory write, workspace write, and public projection authority.",
+      "owningLayer": "OpenMagi first-party harness",
+      "status": "openmagi_owned_required",
+      "activationGate": "Every authority flag starts false and requires a later explicit rollout gate.",
+      "requiresLiveActivation": false,
+      "trafficAttached": false,
+      "defaultOff": true,
+      "authorityFlags": {
+        "orchestrationEnabled": false,
+        "childDispatchEnabled": false,
+        "toolGrantEnabled": false,
+        "memoryWriteEnabled": false,
+        "workspaceWriteEnabled": false,
+        "publicProjectionEnabled": false
+      },
+      "primitiveOwnership": {
+        "adkOwns": [
+          "Runner",
+          "FunctionTool",
+          "MemoryService"
+        ],
+        "openMagiOwns": [
+          "approval/control",
+          "privacy/redaction",
+          "rollout gates"
+        ],
+        "notes": "ADK owns reusable runner, tool, and memory primitives; OpenMagi owns authority flags and rollout gates."
+      },
+      "notes": "This row is the PR0 safeguard against accidental runtime authority."
+    },
+    {
+      "id": "adk_primitive_ownership",
+      "capability": "ADK primitive ownership records which substrate belongs to ADK and which orchestration semantics remain OpenMagi-owned.",
+      "owningLayer": "Tests/docs only",
+      "status": "audit_only",
+      "activationGate": "Ownership row is documentation-only and cannot enable behavior.",
+      "requiresLiveActivation": false,
+      "trafficAttached": false,
+      "defaultOff": true,
+      "primitiveOwnership": {
+        "adkOwns": [
+          "Agent",
+          "Runner",
+          "FunctionTool",
+          "LongRunningFunctionTool",
+          "callback",
+          "SessionService",
+          "MemoryService",
+          "ArtifactService",
+          "Evaluation"
+        ],
+        "openMagiOwns": [
+          "evidence envelopes",
+          "ledger/receipts",
+          "verifier verdicts",
+          "projection",
+          "approval/control",
+          "privacy/redaction",
+          "rollout gates"
+        ],
+        "notes": "ADK owns Agent, Runner, FunctionTool, LongRunningFunctionTool, callback, SessionService, MemoryService, ArtifactService, and Evaluation substrate. OpenMagi owns evidence envelopes, ledger/receipts, verifier verdicts, projection, approval/control, privacy/redaction, and rollout gates."
+      },
+      "notes": "This row prevents the first-party harness from becoming a generic core meta-agent rewrite."
+    }
+  ]
+}

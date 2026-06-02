@@ -1,0 +1,59 @@
+{
+  "schemaVersion": "recipeCompositionRegressionFixture.v1",
+  "caseId": "grant_deny_collision",
+  "description": "A denial for a tool beats a grant for the same tool and produces a blocking conflict.",
+  "activationMode": {
+    "defaultOff": true,
+    "trafficAttached": false,
+    "executionAttached": false,
+    "liveActivation": false
+  },
+  "stack": {
+    "explicitRecipeRefs": [
+      "recipe.tool.denying",
+      "recipe.tool.granting"
+    ],
+    "turnId": "turn-regression-grant-deny",
+    "sessionId": "session-regression-grant-deny"
+  },
+  "globalRetryCap": 3,
+  "snapshots": [
+    {
+      "recipeRef": "recipe.tool.granting",
+      "toolGrants": [
+        "tool.web.fetch"
+      ]
+    },
+    {
+      "recipeRef": "recipe.tool.denying",
+      "toolDenials": [
+        "tool.web.fetch"
+      ]
+    }
+  ],
+  "projectionForbidden": [
+    "tool.web.fetch"
+  ],
+  "expected": {
+    "blocked": true,
+    "effectiveRecipeRefs": [],
+    "includedExplicitRefs": [],
+    "includedAutoRefs": [],
+    "conflictCodes": [
+      "tool_denied_grant"
+    ],
+    "effectiveRetryPolicy": {
+      "maxAttempts": 0,
+      "repairAttempts": 0,
+      "globalCap": 3
+    },
+    "projection": {
+      "conflictStatus": "blocked",
+      "hardSafetyStatus": "not_required",
+      "publicSafeCounts": {
+        "toolGrantCount": 0,
+        "toolDenialCount": 0
+      }
+    }
+  }
+}

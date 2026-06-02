@@ -1,0 +1,45 @@
+{
+  "event": {
+    "approvalGateRefs": [
+      "approval:none"
+    ],
+    "checkpointId": "checkpoint-001",
+    "effectivePolicySnapshotDigest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+    "eventId": "evt-001",
+    "eventType": "guardrail_result",
+    "ledgerHeadDigest": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+    "projectionMode": "structured_claims_only",
+    "redactionStatus": "redacted",
+    "repairAttempt": 0,
+    "routeDecision": "python_selected_gate",
+    "runId": "run-001",
+    "stepId": "step-001",
+    "terminalState": null,
+    "validatorStatuses": [
+      "validator:quoteExactMatch=pass"
+    ],
+    "workflowId": "openmagi.research.cited-market-brief"
+  },
+  "expectedDashboardProjection": {
+    "activationEnabled": false,
+    "approvalGateRefs": [
+      "approval:none"
+    ],
+    "checkpointId": "checkpoint-001",
+    "effectivePolicySnapshotDigest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+    "eventId": "evt-001",
+    "eventType": "guardrail_result",
+    "ledgerHeadDigest": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+    "projectionMode": "structured_claims_only",
+    "redactionStatus": "redacted",
+    "repairAttempt": 0,
+    "routeDecision": "python_selected_gate",
+    "runId": "run-001",
+    "stepId": "step-001",
+    "terminalState": null,
+    "validatorStatuses": [
+      "validator:quoteExactMatch=pass"
+    ],
+    "workflowId": "openmagi.research.cited-market-brief"
+  }
+}

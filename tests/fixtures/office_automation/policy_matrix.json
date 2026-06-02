@@ -1,0 +1,1097 @@
+{
+  "fixtureId": "office_automation_matrix_0001",
+  "version": 1,
+  "localDiagnostic": true,
+  "attachmentFlags": {
+    "adkRunnerInvoked": false,
+    "liveToolDispatched": false,
+    "shellOrCodeExecuted": false,
+    "generatedCodeExecuted": false,
+    "browserSessionAttached": false,
+    "connectorCalled": false,
+    "artifactWritten": false,
+    "externalWritePerformed": false,
+    "memoryProviderCalled": false,
+    "productionStorageWritten": false,
+    "routeOrApiAttached": false,
+    "telegramAttached": false,
+    "canaryTrafficAttached": false,
+    "evidenceBlockEnabled": false,
+    "productionAuthority": false
+  },
+  "cases": [
+    {
+      "caseId": "spreadsheet_cleanup_validation_metadata",
+      "category": "spreadsheet_cleanup_validation",
+      "recipePackId": "openmagi.spreadsheet-automation",
+      "taskProfile": "spreadsheet.cleanup",
+      "executionSurface": "controlled_composable",
+      "tool": {
+        "name": "SpreadsheetValidate",
+        "description": "Validate spreadsheet metadata without opening a live connector.",
+        "kind": "native",
+        "source": {
+          "kind": "native-plugin",
+          "package": "openmagi.spreadsheet-automation"
+        },
+        "permission": "read",
+        "inputSchema": {
+          "type": "object"
+        },
+        "outputSchema": {
+          "type": "object"
+        },
+        "dangerous": false,
+        "isConcurrencySafe": true,
+        "mutatesWorkspace": false,
+        "availableInModes": [
+          "plan",
+          "act"
+        ],
+        "capabilityTags": [
+          "spreadsheet",
+          "validation"
+        ],
+        "sideEffectClass": "none",
+        "parallelSafety": "readonly",
+        "emitsEvidenceTypes": [],
+        "costClass": "free",
+        "latencyClass": "inline",
+        "adkToolType": "FunctionTool",
+        "timeoutMs": 60000,
+        "enabledByDefault": false,
+        "opt_out": true
+      },
+      "decision": "allow_metadata_only",
+      "unitOfWork": "metadata_only",
+      "publicPreview": "spreadsheet cleanup metadata: input hash and row counts recorded",
+      "domainAllowlisted": false,
+      "networkIntent": false,
+      "networkWriteIntent": false,
+      "externalWriteIntent": false,
+      "requiresExternalAck": false,
+      "externalAckReceived": false,
+      "longRunningToolEligible": false,
+      "generatedCodeMetadataOnly": false,
+      "shellOrCodeExecutionAllowed": false,
+      "artifactRefs": [
+        "artifact:spreadsheet-input"
+      ],
+      "sourceRefs": [],
+      "composedPackIds": [],
+      "evidenceRequirements": [
+        "spreadsheet.input_hash",
+        "spreadsheet.row_count_consistency"
+      ],
+      "renderVerificationRequired": false,
+      "renderVerificationPassed": false,
+      "deliveryClaimAllowed": false,
+      "reasonCodes": [
+        "metadata_only_fixture"
+      ],
+      "attachmentFlags": {
+        "adkRunnerInvoked": false,
+        "liveToolDispatched": false,
+        "shellOrCodeExecuted": false,
+        "generatedCodeExecuted": false,
+        "browserSessionAttached": false,
+        "connectorCalled": false,
+        "artifactWritten": false,
+        "externalWritePerformed": false,
+        "memoryProviderCalled": false,
+        "productionStorageWritten": false,
+        "routeOrApiAttached": false,
+        "telegramAttached": false,
+        "canaryTrafficAttached": false,
+        "evidenceBlockEnabled": false,
+        "productionAuthority": false
+      }
+    },
+    {
+      "caseId": "spreadsheet_reconciliation_preview",
+      "category": "spreadsheet_reconciliation_preview",
+      "recipePackId": "openmagi.spreadsheet-automation",
+      "taskProfile": "spreadsheet.reconciliation",
+      "executionSurface": "controlled_composable",
+      "tool": {
+        "name": "SpreadsheetReconcilePreview",
+        "description": "Compare spreadsheet totals and unmatched row metadata.",
+        "kind": "native",
+        "source": {
+          "kind": "native-plugin",
+          "package": "openmagi.spreadsheet-automation"
+        },
+        "permission": "read",
+        "inputSchema": {
+          "type": "object"
+        },
+        "outputSchema": {
+          "type": "object"
+        },
+        "dangerous": false,
+        "isConcurrencySafe": true,
+        "mutatesWorkspace": false,
+        "availableInModes": [
+          "plan",
+          "act"
+        ],
+        "capabilityTags": [
+          "spreadsheet",
+          "reconciliation"
+        ],
+        "sideEffectClass": "none",
+        "parallelSafety": "readonly",
+        "emitsEvidenceTypes": [],
+        "costClass": "free",
+        "latencyClass": "inline",
+        "adkToolType": "FunctionTool",
+        "timeoutMs": 60000,
+        "enabledByDefault": false,
+        "opt_out": true
+      },
+      "decision": "allow_metadata_only",
+      "unitOfWork": "metadata_only",
+      "publicPreview": "reconciliation preview: totals and unmatched rows summarized",
+      "domainAllowlisted": false,
+      "networkIntent": false,
+      "networkWriteIntent": false,
+      "externalWriteIntent": false,
+      "requiresExternalAck": false,
+      "externalAckReceived": false,
+      "longRunningToolEligible": false,
+      "generatedCodeMetadataOnly": false,
+      "shellOrCodeExecutionAllowed": false,
+      "artifactRefs": [
+        "artifact:invoice-sheet",
+        "artifact:payout-sheet"
+      ],
+      "sourceRefs": [],
+      "composedPackIds": [],
+      "evidenceRequirements": [
+        "spreadsheet.total_reconciliation"
+      ],
+      "renderVerificationRequired": false,
+      "renderVerificationPassed": false,
+      "deliveryClaimAllowed": false,
+      "reasonCodes": [
+        "metadata_only_fixture"
+      ],
+      "attachmentFlags": {
+        "adkRunnerInvoked": false,
+        "liveToolDispatched": false,
+        "shellOrCodeExecuted": false,
+        "generatedCodeExecuted": false,
+        "browserSessionAttached": false,
+        "connectorCalled": false,
+        "artifactWritten": false,
+        "externalWritePerformed": false,
+        "memoryProviderCalled": false,
+        "productionStorageWritten": false,
+        "routeOrApiAttached": false,
+        "telegramAttached": false,
+        "canaryTrafficAttached": false,
+        "evidenceBlockEnabled": false,
+        "productionAuthority": false
+      }
+    },
+    {
+      "caseId": "spreadsheet_external_write_requires_approval",
+      "category": "spreadsheet_external_write_approval",
+      "recipePackId": "openmagi.spreadsheet-automation",
+      "taskProfile": "spreadsheet.bulk-update-preview",
+      "executionSurface": "connector_tool",
+      "tool": {
+        "name": "SpreadsheetUploadPreview",
+        "description": "Prepare an upload preview for a connected workbook.",
+        "kind": "native",
+        "source": {
+          "kind": "native-plugin",
+          "package": "openmagi.spreadsheet-automation"
+        },
+        "permission": "write",
+        "inputSchema": {
+          "type": "object"
+        },
+        "outputSchema": {
+          "type": "object"
+        },
+        "dangerous": true,
+        "isConcurrencySafe": false,
+        "mutatesWorkspace": false,
+        "availableInModes": [
+          "act"
+        ],
+        "capabilityTags": [
+          "spreadsheet",
+          "connector"
+        ],
+        "sideEffectClass": "external",
+        "parallelSafety": "unsafe",
+        "emitsEvidenceTypes": [],
+        "costClass": "low",
+        "latencyClass": "interactive",
+        "adkToolType": "FunctionTool",
+        "timeoutMs": 60000,
+        "enabledByDefault": false,
+        "opt_out": true
+      },
+      "decision": "approval_required",
+      "unitOfWork": "inline_tool_call",
+      "publicPreview": "external workbook upload preview requires approval",
+      "domainAllowlisted": true,
+      "networkIntent": true,
+      "networkWriteIntent": true,
+      "externalWriteIntent": true,
+      "requiresExternalAck": true,
+      "externalAckReceived": false,
+      "longRunningToolEligible": false,
+      "generatedCodeMetadataOnly": false,
+      "shellOrCodeExecutionAllowed": false,
+      "artifactRefs": [
+        "artifact:bulk-update-preview"
+      ],
+      "sourceRefs": [],
+      "composedPackIds": [],
+      "evidenceRequirements": [
+        "spreadsheet.bulk_update_preview"
+      ],
+      "renderVerificationRequired": false,
+      "renderVerificationPassed": false,
+      "deliveryClaimAllowed": false,
+      "reasonCodes": [
+        "external_write_requires_approval"
+      ],
+      "controlRequest": {
+        "requestId": "office-approval:turn-office-1:spreadsheet-upload",
+        "turnId": "turn-office-1",
+        "toolName": "SpreadsheetUploadPreview",
+        "arguments": {},
+        "reason": "external workbook upload requires approval"
+      },
+      "attachmentFlags": {
+        "adkRunnerInvoked": false,
+        "liveToolDispatched": false,
+        "shellOrCodeExecuted": false,
+        "generatedCodeExecuted": false,
+        "browserSessionAttached": false,
+        "connectorCalled": false,
+        "artifactWritten": false,
+        "externalWritePerformed": false,
+        "memoryProviderCalled": false,
+        "productionStorageWritten": false,
+        "routeOrApiAttached": false,
+        "telegramAttached": false,
+        "canaryTrafficAttached": false,
+        "evidenceBlockEnabled": false,
+        "productionAuthority": false
+      }
+    },
+    {
+      "caseId": "browser_extract_domain_allowlisted",
+      "category": "browser_extract_domain_allowlisted",
+      "recipePackId": "openmagi.browser-automation",
+      "taskProfile": "browser.extract",
+      "executionSurface": "atomic_tool",
+      "tool": {
+        "name": "BrowserExtractSnapshot",
+        "description": "Record browser extraction metadata for an allowlisted domain.",
+        "kind": "native",
+        "source": {
+          "kind": "native-plugin",
+          "package": "openmagi.browser-automation"
+        },
+        "permission": "net",
+        "inputSchema": {
+          "type": "object"
+        },
+        "outputSchema": {
+          "type": "object"
+        },
+        "dangerous": false,
+        "isConcurrencySafe": false,
+        "mutatesWorkspace": false,
+        "availableInModes": [
+          "act"
+        ],
+        "capabilityTags": [
+          "browser",
+          "extract"
+        ],
+        "sideEffectClass": "none",
+        "parallelSafety": "unsafe",
+        "emitsEvidenceTypes": [],
+        "costClass": "medium",
+        "latencyClass": "interactive",
+        "adkToolType": "FunctionTool",
+        "timeoutMs": 120000,
+        "enabledByDefault": false,
+        "opt_out": true
+      },
+      "decision": "allow_metadata_only",
+      "unitOfWork": "metadata_only",
+      "publicPreview": "browser extract metadata: portal dashboard table snapshot",
+      "domainAllowlisted": true,
+      "networkIntent": true,
+      "networkWriteIntent": false,
+      "externalWriteIntent": false,
+      "requiresExternalAck": false,
+      "externalAckReceived": false,
+      "longRunningToolEligible": false,
+      "generatedCodeMetadataOnly": false,
+      "shellOrCodeExecutionAllowed": false,
+      "artifactRefs": [
+        "artifact:browser-dom-snapshot"
+      ],
+      "sourceRefs": [
+        "source:browser:portal-dashboard"
+      ],
+      "composedPackIds": [],
+      "evidenceRequirements": [
+        "browser.domain_allowlist",
+        "browser.screenshot_or_dom_evidence"
+      ],
+      "renderVerificationRequired": false,
+      "renderVerificationPassed": false,
+      "deliveryClaimAllowed": false,
+      "reasonCodes": [
+        "domain_allowlisted"
+      ],
+      "attachmentFlags": {
+        "adkRunnerInvoked": false,
+        "liveToolDispatched": false,
+        "shellOrCodeExecuted": false,
+        "generatedCodeExecuted": false,
+        "browserSessionAttached": false,
+        "connectorCalled": false,
+        "artifactWritten": false,
+        "externalWritePerformed": false,
+        "memoryProviderCalled": false,
+        "productionStorageWritten": false,
+        "routeOrApiAttached": false,
+        "telegramAttached": false,
+        "canaryTrafficAttached": false,
+        "evidenceBlockEnabled": false,
+        "productionAuthority": false
+      }
+    },
+    {
+      "caseId": "browser_download_long_tool_metadata",
+      "category": "browser_download_long_tool_metadata",
+      "recipePackId": "openmagi.browser-automation",
+      "taskProfile": "browser.download",
+      "executionSurface": "atomic_tool",
+      "tool": {
+        "name": "BrowserDownloadReport",
+        "description": "Represent a long browser download job without running it.",
+        "kind": "native",
+        "source": {
+          "kind": "native-plugin",
+          "package": "openmagi.browser-automation"
+        },
+        "permission": "net",
+        "inputSchema": {
+          "type": "object"
+        },
+        "outputSchema": {
+          "type": "object"
+        },
+        "dangerous": false,
+        "isConcurrencySafe": false,
+        "mutatesWorkspace": false,
+        "availableInModes": [
+          "act"
+        ],
+        "capabilityTags": [
+          "browser",
+          "download"
+        ],
+        "sideEffectClass": "none",
+        "parallelSafety": "unsafe",
+        "emitsEvidenceTypes": [],
+        "costClass": "medium",
+        "latencyClass": "long_running",
+        "adkToolType": "LongRunningFunctionTool",
+        "shouldDefer": true,
+        "timeoutMs": 120000,
+        "enabledByDefault": false,
+        "opt_out": true
+      },
+      "decision": "approval_required",
+      "unitOfWork": "long_tool_job",
+      "publicPreview": "download report metadata requires approval before account access",
+      "domainAllowlisted": true,
+      "networkIntent": true,
+      "networkWriteIntent": false,
+      "externalWriteIntent": false,
+      "requiresExternalAck": false,
+      "externalAckReceived": false,
+      "longRunningToolEligible": true,
+      "generatedCodeMetadataOnly": false,
+      "shellOrCodeExecutionAllowed": false,
+      "artifactRefs": [
+        "artifact:download-redacted-sample"
+      ],
+      "sourceRefs": [
+        "source:browser:report-page"
+      ],
+      "composedPackIds": [],
+      "evidenceRequirements": [
+        "browser.download_metadata"
+      ],
+      "renderVerificationRequired": false,
+      "renderVerificationPassed": false,
+      "deliveryClaimAllowed": false,
+      "reasonCodes": [
+        "long_tool_job_not_mission_control"
+      ],
+      "controlRequest": {
+        "requestId": "office-approval:turn-office-1:browser-download",
+        "turnId": "turn-office-1",
+        "toolName": "BrowserDownloadReport",
+        "arguments": {},
+        "reason": "browser account download requires approval"
+      },
+      "attachmentFlags": {
+        "adkRunnerInvoked": false,
+        "liveToolDispatched": false,
+        "shellOrCodeExecuted": false,
+        "generatedCodeExecuted": false,
+        "browserSessionAttached": false,
+        "connectorCalled": false,
+        "artifactWritten": false,
+        "externalWritePerformed": false,
+        "memoryProviderCalled": false,
+        "productionStorageWritten": false,
+        "routeOrApiAttached": false,
+        "telegramAttached": false,
+        "canaryTrafficAttached": false,
+        "evidenceBlockEnabled": false,
+        "productionAuthority": false
+      }
+    },
+    {
+      "caseId": "browser_form_submit_requires_approval_ack",
+      "category": "browser_form_submit_approval_ack",
+      "recipePackId": "openmagi.browser-automation",
+      "taskProfile": "browser.form-submit",
+      "executionSurface": "atomic_tool",
+      "tool": {
+        "name": "BrowserSubmitForm",
+        "description": "Submit a prepared browser form after approval.",
+        "kind": "native",
+        "source": {
+          "kind": "native-plugin",
+          "package": "openmagi.browser-automation"
+        },
+        "permission": "net",
+        "inputSchema": {
+          "type": "object"
+        },
+        "outputSchema": {
+          "type": "object"
+        },
+        "dangerous": true,
+        "isConcurrencySafe": false,
+        "mutatesWorkspace": false,
+        "availableInModes": [
+          "act"
+        ],
+        "capabilityTags": [
+          "browser",
+          "external-write"
+        ],
+        "sideEffectClass": "external",
+        "parallelSafety": "unsafe",
+        "emitsEvidenceTypes": [],
+        "costClass": "medium",
+        "latencyClass": "interactive",
+        "adkToolType": "FunctionTool",
+        "timeoutMs": 60000,
+        "enabledByDefault": false,
+        "opt_out": true
+      },
+      "decision": "approval_required",
+      "unitOfWork": "inline_tool_call",
+      "publicPreview": "form submit metadata requires approval and external acknowledgement",
+      "domainAllowlisted": true,
+      "networkIntent": true,
+      "networkWriteIntent": true,
+      "externalWriteIntent": true,
+      "requiresExternalAck": true,
+      "externalAckReceived": false,
+      "longRunningToolEligible": false,
+      "generatedCodeMetadataOnly": false,
+      "shellOrCodeExecutionAllowed": false,
+      "artifactRefs": [
+        "artifact:form-draft-preview"
+      ],
+      "sourceRefs": [
+        "source:browser:form-page"
+      ],
+      "composedPackIds": [],
+      "evidenceRequirements": [
+        "browser.external_write_ack"
+      ],
+      "renderVerificationRequired": false,
+      "renderVerificationPassed": false,
+      "deliveryClaimAllowed": false,
+      "reasonCodes": [
+        "external_write_requires_approval",
+        "external_ack_required"
+      ],
+      "controlRequest": {
+        "requestId": "office-approval:turn-office-1:browser-submit",
+        "turnId": "turn-office-1",
+        "toolName": "BrowserSubmitForm",
+        "arguments": {},
+        "reason": "browser form submit requires approval"
+      },
+      "attachmentFlags": {
+        "adkRunnerInvoked": false,
+        "liveToolDispatched": false,
+        "shellOrCodeExecuted": false,
+        "generatedCodeExecuted": false,
+        "browserSessionAttached": false,
+        "connectorCalled": false,
+        "artifactWritten": false,
+        "externalWritePerformed": false,
+        "memoryProviderCalled": false,
+        "productionStorageWritten": false,
+        "routeOrApiAttached": false,
+        "telegramAttached": false,
+        "canaryTrafficAttached": false,
+        "evidenceBlockEnabled": false,
+        "productionAuthority": false
+      }
+    },
+    {
+      "caseId": "document_extract_fields_source_refs",
+      "category": "document_extract_fields_source_refs",
+      "recipePackId": "openmagi.document-review",
+      "taskProfile": "document.extract-fields",
+      "executionSurface": "atomic_tool",
+      "tool": {
+        "name": "DocumentExtractFields",
+        "description": "Extract fields from an artifact with source refs.",
+        "kind": "native",
+        "source": {
+          "kind": "native-plugin",
+          "package": "openmagi.document-review"
+        },
+        "permission": "read",
+        "inputSchema": {
+          "type": "object"
+        },
+        "outputSchema": {
+          "type": "object"
+        },
+        "dangerous": false,
+        "isConcurrencySafe": true,
+        "mutatesWorkspace": false,
+        "availableInModes": [
+          "act"
+        ],
+        "capabilityTags": [
+          "document",
+          "extract"
+        ],
+        "sideEffectClass": "none",
+        "parallelSafety": "readonly",
+        "emitsEvidenceTypes": [],
+        "costClass": "free",
+        "latencyClass": "inline",
+        "adkToolType": "FunctionTool",
+        "timeoutMs": 60000,
+        "enabledByDefault": false,
+        "opt_out": true
+      },
+      "decision": "allow_metadata_only",
+      "unitOfWork": "metadata_only",
+      "publicPreview": "document fields extracted from source refs metadata",
+      "domainAllowlisted": false,
+      "networkIntent": false,
+      "networkWriteIntent": false,
+      "externalWriteIntent": false,
+      "requiresExternalAck": false,
+      "externalAckReceived": false,
+      "longRunningToolEligible": false,
+      "generatedCodeMetadataOnly": false,
+      "shellOrCodeExecutionAllowed": false,
+      "artifactRefs": [
+        "artifact:contract-v1"
+      ],
+      "sourceRefs": [
+        "artifact:contract-v1#page=4"
+      ],
+      "composedPackIds": [],
+      "evidenceRequirements": [
+        "document.source_ref_coverage"
+      ],
+      "renderVerificationRequired": false,
+      "renderVerificationPassed": false,
+      "deliveryClaimAllowed": false,
+      "reasonCodes": [
+        "source_refs_required"
+      ],
+      "attachmentFlags": {
+        "adkRunnerInvoked": false,
+        "liveToolDispatched": false,
+        "shellOrCodeExecuted": false,
+        "generatedCodeExecuted": false,
+        "browserSessionAttached": false,
+        "connectorCalled": false,
+        "artifactWritten": false,
+        "externalWritePerformed": false,
+        "memoryProviderCalled": false,
+        "productionStorageWritten": false,
+        "routeOrApiAttached": false,
+        "telegramAttached": false,
+        "canaryTrafficAttached": false,
+        "evidenceBlockEnabled": false,
+        "productionAuthority": false
+      }
+    },
+    {
+      "caseId": "document_redline_no_source_mutation",
+      "category": "document_redline_no_source_mutation",
+      "recipePackId": "openmagi.document-review",
+      "taskProfile": "document.redline-suggestions",
+      "executionSurface": "atomic_tool",
+      "tool": {
+        "name": "DocumentRedlineSuggest",
+        "description": "Create redline suggestion metadata without source mutation.",
+        "kind": "native",
+        "source": {
+          "kind": "native-plugin",
+          "package": "openmagi.document-review"
+        },
+        "permission": "write",
+        "inputSchema": {
+          "type": "object"
+        },
+        "outputSchema": {
+          "type": "object"
+        },
+        "dangerous": false,
+        "isConcurrencySafe": false,
+        "mutatesWorkspace": false,
+        "availableInModes": [
+          "act"
+        ],
+        "capabilityTags": [
+          "document",
+          "redline"
+        ],
+        "sideEffectClass": "none",
+        "parallelSafety": "unsafe",
+        "emitsEvidenceTypes": [],
+        "costClass": "free",
+        "latencyClass": "inline",
+        "adkToolType": "FunctionTool",
+        "timeoutMs": 60000,
+        "enabledByDefault": false,
+        "opt_out": true
+      },
+      "decision": "dry_run_only",
+      "unitOfWork": "metadata_only",
+      "publicPreview": "redline suggestions artifact planned; source document unchanged",
+      "domainAllowlisted": false,
+      "networkIntent": false,
+      "networkWriteIntent": false,
+      "externalWriteIntent": false,
+      "requiresExternalAck": false,
+      "externalAckReceived": false,
+      "longRunningToolEligible": false,
+      "generatedCodeMetadataOnly": false,
+      "shellOrCodeExecutionAllowed": false,
+      "artifactRefs": [
+        "artifact:redline-suggestions"
+      ],
+      "sourceRefs": [
+        "artifact:contract-v1#section=termination"
+      ],
+      "composedPackIds": [],
+      "evidenceRequirements": [
+        "document.no_source_mutation"
+      ],
+      "renderVerificationRequired": false,
+      "renderVerificationPassed": false,
+      "deliveryClaimAllowed": false,
+      "reasonCodes": [
+        "source_mutation_disabled"
+      ],
+      "attachmentFlags": {
+        "adkRunnerInvoked": false,
+        "liveToolDispatched": false,
+        "shellOrCodeExecuted": false,
+        "generatedCodeExecuted": false,
+        "browserSessionAttached": false,
+        "connectorCalled": false,
+        "artifactWritten": false,
+        "externalWritePerformed": false,
+        "memoryProviderCalled": false,
+        "productionStorageWritten": false,
+        "routeOrApiAttached": false,
+        "telegramAttached": false,
+        "canaryTrafficAttached": false,
+        "evidenceBlockEnabled": false,
+        "productionAuthority": false
+      }
+    },
+    {
+      "caseId": "document_deliverable_render_required",
+      "category": "document_deliverable_render_required",
+      "recipePackId": "openmagi.document-review",
+      "taskProfile": "document.deliverable-review",
+      "executionSurface": "adk_artifact_service",
+      "tool": {
+        "name": "DocumentDeliverableReview",
+        "description": "Require render verification before a document delivery claim.",
+        "kind": "native",
+        "source": {
+          "kind": "native-plugin",
+          "package": "openmagi.document-review"
+        },
+        "permission": "read",
+        "inputSchema": {
+          "type": "object"
+        },
+        "outputSchema": {
+          "type": "object"
+        },
+        "dangerous": false,
+        "isConcurrencySafe": true,
+        "mutatesWorkspace": false,
+        "availableInModes": [
+          "act"
+        ],
+        "capabilityTags": [
+          "document",
+          "render"
+        ],
+        "sideEffectClass": "none",
+        "parallelSafety": "readonly",
+        "emitsEvidenceTypes": [],
+        "costClass": "free",
+        "latencyClass": "inline",
+        "adkToolType": "FunctionTool",
+        "timeoutMs": 60000,
+        "enabledByDefault": false,
+        "opt_out": true
+      },
+      "decision": "block_until_evidence",
+      "unitOfWork": "metadata_only",
+      "publicPreview": "generated document delivery blocked until render verification passes",
+      "domainAllowlisted": false,
+      "networkIntent": false,
+      "networkWriteIntent": false,
+      "externalWriteIntent": false,
+      "requiresExternalAck": false,
+      "externalAckReceived": false,
+      "longRunningToolEligible": false,
+      "generatedCodeMetadataOnly": false,
+      "shellOrCodeExecutionAllowed": false,
+      "artifactRefs": [
+        "artifact:generated-document"
+      ],
+      "sourceRefs": [],
+      "composedPackIds": [],
+      "evidenceRequirements": [
+        "document.render_verification"
+      ],
+      "renderVerificationRequired": true,
+      "renderVerificationPassed": false,
+      "deliveryClaimAllowed": false,
+      "reasonCodes": [
+        "render_verification_missing"
+      ],
+      "attachmentFlags": {
+        "adkRunnerInvoked": false,
+        "liveToolDispatched": false,
+        "shellOrCodeExecuted": false,
+        "generatedCodeExecuted": false,
+        "browserSessionAttached": false,
+        "connectorCalled": false,
+        "artifactWritten": false,
+        "externalWritePerformed": false,
+        "memoryProviderCalled": false,
+        "productionStorageWritten": false,
+        "routeOrApiAttached": false,
+        "telegramAttached": false,
+        "canaryTrafficAttached": false,
+        "evidenceBlockEnabled": false,
+        "productionAuthority": false
+      }
+    },
+    {
+      "caseId": "lightweight_script_scratch_metadata",
+      "category": "lightweight_script_scratch_metadata",
+      "recipePackId": "openmagi.lightweight-scripting",
+      "taskProfile": "script.csv-transform",
+      "executionSurface": "generated_script",
+      "tool": {
+        "name": "LightweightScriptPlan",
+        "description": "Represent bounded script metadata without executing code.",
+        "kind": "native",
+        "source": {
+          "kind": "native-plugin",
+          "package": "openmagi.lightweight-scripting"
+        },
+        "permission": "execute",
+        "inputSchema": {
+          "type": "object"
+        },
+        "outputSchema": {
+          "type": "object"
+        },
+        "dangerous": true,
+        "isConcurrencySafe": false,
+        "mutatesWorkspace": false,
+        "availableInModes": [
+          "plan"
+        ],
+        "capabilityTags": [
+          "script",
+          "csv"
+        ],
+        "sideEffectClass": "local_process",
+        "parallelSafety": "unsafe",
+        "emitsEvidenceTypes": [],
+        "costClass": "free",
+        "latencyClass": "interactive",
+        "adkToolType": "FunctionTool",
+        "timeoutMs": 120000,
+        "enabledByDefault": false,
+        "opt_out": true
+      },
+      "decision": "dry_run_only",
+      "unitOfWork": "metadata_only",
+      "publicPreview": "bounded CSV helper script represented as artifact metadata only",
+      "domainAllowlisted": false,
+      "networkIntent": false,
+      "networkWriteIntent": false,
+      "externalWriteIntent": false,
+      "requiresExternalAck": false,
+      "externalAckReceived": false,
+      "longRunningToolEligible": false,
+      "generatedCodeMetadataOnly": true,
+      "shellOrCodeExecutionAllowed": false,
+      "scriptArtifactRef": "artifact:script-csv-transform",
+      "scriptHash": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "artifactRefs": [
+        "artifact:script-csv-transform"
+      ],
+      "sourceRefs": [],
+      "composedPackIds": [],
+      "evidenceRequirements": [
+        "script.artifact_hash"
+      ],
+      "renderVerificationRequired": false,
+      "renderVerificationPassed": false,
+      "deliveryClaimAllowed": false,
+      "reasonCodes": [
+        "script_metadata_only"
+      ],
+      "attachmentFlags": {
+        "adkRunnerInvoked": false,
+        "liveToolDispatched": false,
+        "shellOrCodeExecuted": false,
+        "generatedCodeExecuted": false,
+        "browserSessionAttached": false,
+        "connectorCalled": false,
+        "artifactWritten": false,
+        "externalWritePerformed": false,
+        "memoryProviderCalled": false,
+        "productionStorageWritten": false,
+        "routeOrApiAttached": false,
+        "telegramAttached": false,
+        "canaryTrafficAttached": false,
+        "evidenceBlockEnabled": false,
+        "productionAuthority": false
+      }
+    },
+    {
+      "caseId": "lightweight_script_network_write_denied",
+      "category": "lightweight_script_network_write_denied",
+      "recipePackId": "openmagi.lightweight-scripting",
+      "taskProfile": "script.api-glue",
+      "executionSurface": "generated_script",
+      "tool": {
+        "name": "LightweightApiGluePlan",
+        "description": "Represent API glue script metadata with network writes disabled.",
+        "kind": "native",
+        "source": {
+          "kind": "native-plugin",
+          "package": "openmagi.lightweight-scripting"
+        },
+        "permission": "execute",
+        "inputSchema": {
+          "type": "object"
+        },
+        "outputSchema": {
+          "type": "object"
+        },
+        "dangerous": true,
+        "isConcurrencySafe": false,
+        "mutatesWorkspace": false,
+        "availableInModes": [
+          "plan"
+        ],
+        "capabilityTags": [
+          "script",
+          "api-glue"
+        ],
+        "sideEffectClass": "local_process",
+        "parallelSafety": "unsafe",
+        "emitsEvidenceTypes": [],
+        "costClass": "free",
+        "latencyClass": "interactive",
+        "adkToolType": "FunctionTool",
+        "timeoutMs": 120000,
+        "enabledByDefault": false,
+        "opt_out": true
+      },
+      "decision": "deny",
+      "unitOfWork": "metadata_only",
+      "publicPreview": "API glue network write denied until approval phase",
+      "domainAllowlisted": false,
+      "networkIntent": true,
+      "networkWriteIntent": true,
+      "externalWriteIntent": false,
+      "requiresExternalAck": false,
+      "externalAckReceived": false,
+      "longRunningToolEligible": false,
+      "generatedCodeMetadataOnly": true,
+      "shellOrCodeExecutionAllowed": false,
+      "scriptArtifactRef": "artifact:api-glue-plan",
+      "scriptHash": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+      "artifactRefs": [
+        "artifact:api-glue-plan"
+      ],
+      "sourceRefs": [],
+      "composedPackIds": [],
+      "evidenceRequirements": [
+        "script.network_policy"
+      ],
+      "renderVerificationRequired": false,
+      "renderVerificationPassed": false,
+      "deliveryClaimAllowed": false,
+      "reasonCodes": [
+        "script_network_write_not_approved"
+      ],
+      "attachmentFlags": {
+        "adkRunnerInvoked": false,
+        "liveToolDispatched": false,
+        "shellOrCodeExecuted": false,
+        "generatedCodeExecuted": false,
+        "browserSessionAttached": false,
+        "connectorCalled": false,
+        "artifactWritten": false,
+        "externalWritePerformed": false,
+        "memoryProviderCalled": false,
+        "productionStorageWritten": false,
+        "routeOrApiAttached": false,
+        "telegramAttached": false,
+        "canaryTrafficAttached": false,
+        "evidenceBlockEnabled": false,
+        "productionAuthority": false
+      }
+    },
+    {
+      "caseId": "office_composite_report_pack",
+      "category": "office_composite_report_pack",
+      "recipePackId": "openmagi.office-automation",
+      "taskProfile": "office.report-from-sources",
+      "executionSurface": "adk_artifact_service",
+      "tool": {
+        "name": "OfficeReportPack",
+        "description": "Represent composed office report artifacts without delivery.",
+        "kind": "native",
+        "source": {
+          "kind": "native-plugin",
+          "package": "openmagi.office-automation"
+        },
+        "permission": "read",
+        "inputSchema": {
+          "type": "object"
+        },
+        "outputSchema": {
+          "type": "object"
+        },
+        "dangerous": false,
+        "isConcurrencySafe": true,
+        "mutatesWorkspace": false,
+        "availableInModes": [
+          "plan",
+          "act"
+        ],
+        "capabilityTags": [
+          "office",
+          "report"
+        ],
+        "sideEffectClass": "none",
+        "parallelSafety": "readonly",
+        "emitsEvidenceTypes": [],
+        "costClass": "free",
+        "latencyClass": "inline",
+        "adkToolType": "FunctionTool",
+        "timeoutMs": 60000,
+        "enabledByDefault": false,
+        "opt_out": true
+      },
+      "decision": "allow_metadata_only",
+      "unitOfWork": "metadata_only",
+      "publicPreview": "office report pack composes browser, spreadsheet, and document artifacts",
+      "domainAllowlisted": false,
+      "networkIntent": false,
+      "networkWriteIntent": false,
+      "externalWriteIntent": false,
+      "requiresExternalAck": false,
+      "externalAckReceived": false,
+      "longRunningToolEligible": false,
+      "generatedCodeMetadataOnly": false,
+      "shellOrCodeExecutionAllowed": false,
+      "artifactRefs": [
+        "artifact:portal-export",
+        "artifact:analysis-workbook",
+        "artifact:weekly-report"
+      ],
+      "sourceRefs": [
+        "source:browser:portal-dashboard"
+      ],
+      "composedPackIds": [
+        "openmagi.browser-automation",
+        "openmagi.spreadsheet-automation",
+        "openmagi.document-review"
+      ],
+      "evidenceRequirements": [
+        "browser.screenshot_or_dom_evidence",
+        "spreadsheet.formula_recalc",
+        "document.render_verification"
+      ],
+      "renderVerificationRequired": true,
+      "renderVerificationPassed": true,
+      "deliveryClaimAllowed": true,
+      "reasonCodes": [
+        "artifact_report_metadata_only"
+      ],
+      "attachmentFlags": {
+        "adkRunnerInvoked": false,
+        "liveToolDispatched": false,
+        "shellOrCodeExecuted": false,
+        "generatedCodeExecuted": false,
+        "browserSessionAttached": false,
+        "connectorCalled": false,
+        "artifactWritten": false,
+        "externalWritePerformed": false,
+        "memoryProviderCalled": false,
+        "productionStorageWritten": false,
+        "routeOrApiAttached": false,
+        "telegramAttached": false,
+        "canaryTrafficAttached": false,
+        "evidenceBlockEnabled": false,
+        "productionAuthority": false
+      }
+    }
+  ]
+}

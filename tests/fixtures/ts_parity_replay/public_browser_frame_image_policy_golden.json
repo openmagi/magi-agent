@@ -1,0 +1,107 @@
+{
+  "schemaVersion": "tsParityReplayFixture.v1",
+  "fixtureId": "ts_public_browser_frame_image_policy_0001",
+  "sourceRuntime": "typescript-core-agent",
+  "recordingMode": "local_diagnostic_fixture",
+  "redactionStatus": "verified",
+  "localDiagnostic": true,
+  "attachmentFlags": {
+    "adkRunnerInvoked": false,
+    "liveToolDispatched": false,
+    "shellOrCodeExecuted": false,
+    "memoryProviderCalled": false,
+    "agentMemoryImported": false,
+    "hipocampusQmdLiveCalled": false,
+    "productionStorageWritten": false,
+    "routeOrApiAttached": false,
+    "telegramAttached": false,
+    "canaryTrafficAttached": false,
+    "evidenceBlockEnabled": false
+  },
+  "transcriptEntries": [
+    {
+      "kind": "turn_started",
+      "ts": 1,
+      "turnId": "turn-browser-frame-image-policy",
+      "declaredRoute": "direct"
+    },
+    {
+      "kind": "assistant_text",
+      "ts": 2,
+      "turnId": "turn-browser-frame-image-policy",
+      "text": "Browser frame image policy replay completed."
+    },
+    {
+      "kind": "turn_committed",
+      "ts": 3,
+      "turnId": "turn-browser-frame-image-policy",
+      "inputTokens": 4,
+      "outputTokens": 5
+    }
+  ],
+  "agentEvents": [
+    {
+      "type": "browser_frame",
+      "action": "observe",
+      "url": "https://example.test/frame",
+      "imageBase64": "dGlueS1mcmFtZQ==",
+      "contentType": "image/png",
+      "capturedAt": 1710000200,
+      "sessionId": "browser-session-secret",
+      "cdpEndpoint": "ws://browser-worker/cdp/browser-session-secret",
+      "cdpToken": "browser-session-secret"
+    },
+    {
+      "type": "browser_frame",
+      "action": "screenshot",
+      "url": "https://example.test/photo",
+      "imageBase64": "YWJjZA==",
+      "contentType": "image/jpeg",
+      "capturedAt": 1710000201
+    },
+    {
+      "type": "browser_frame",
+      "imageBase64": "aW1hZ2VPbmx5"
+    },
+    {
+      "type": "browser_frame",
+      "action": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "url": "https://example.test/truncated-action",
+      "imageBase64": "dHJ1bmNhdGVkQWN0aW9u",
+      "contentType": "image/png",
+      "capturedAt": 1710000205
+    },
+    {
+      "type": "browser_frame",
+      "action": "observe",
+      "url": "https://example.test/missing-image",
+      "contentType": "image/png",
+      "capturedAt": 1710000202
+    },
+    {
+      "type": "browser_frame",
+      "action": "observe",
+      "url": "https://example.test/malformed-image",
+      "imageBase64": "not base64?",
+      "contentType": "image/png",
+      "capturedAt": 1710000203
+    }
+  ],
+  "controlEvents": [],
+  "memoryFences": [
+    {
+      "fenceId": "fence-browser-frame-image-policy",
+      "memoryMode": "normal",
+      "sourceAuthority": "memory_disabled",
+      "recallClaimed": false,
+      "writeClaimed": false,
+      "providerCallMade": false
+    }
+  ],
+  "compactionBoundaries": [],
+  "sourceAuthority": {
+    "policy": "memory_disabled",
+    "sourceIds": [],
+    "memoryMayOverrideCurrentTurn": false
+  }
+}

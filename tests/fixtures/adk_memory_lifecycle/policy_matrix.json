@@ -1,0 +1,318 @@
+{
+  "schemaVersion": "adkMemoryLifecycleCallbackMetadataFixture.v1",
+  "fixtureId": "adk_memory_lifecycle_callback_metadata_matrix_0001",
+  "sourceRuntime": "python-adk-parity-fixture",
+  "recordingMode": "local_diagnostic_fixture",
+  "redactionStatus": "verified",
+  "adkFirst": {
+    "adkOwns": [
+      "MemoryService",
+      "callback_lifecycle_primitives"
+    ],
+    "openMagiOwns": [
+      "memory_mode",
+      "source_authority",
+      "continuity",
+      "receipts",
+      "redaction",
+      "tenant_scope",
+      "audit_metadata"
+    ],
+    "memoryEnabledApproval": false
+  },
+  "attachmentFlags": {
+    "adkRunnerInvoked": false,
+    "adkMemoryServiceReplaced": false,
+    "liveProviderCalls": false,
+    "hipocampusQmdCalls": false,
+    "agentMemoryCalls": false,
+    "promptInjection": false,
+    "memoryWrites": false,
+    "routesAttached": false,
+    "productionStorage": false,
+    "canaryTraffic": false,
+    "userVisibleAuthority": false
+  },
+  "cases": [
+    {
+      "caseId": "before_agent_callback_before_turn_start_snapshot_only",
+      "adkCallback": "before_agent_callback",
+      "lifecyclePoint": "beforeTurnStart",
+      "metadataKind": "memory_mode_source_scope_snapshot",
+      "decision": "allow_metadata_only",
+      "memoryMode": "normal",
+      "sourceAuthority": "long_term_allowed",
+      "providerStatus": "not_attached",
+      "redactionStatus": "verified",
+      "writeIntent": false,
+      "writeReceiptRef": null,
+      "writeClaimAllowed": false,
+      "noUserFacingMemoryClaim": true,
+      "liveMemoryAttached": false,
+      "memoryServiceReplacementAllowed": false,
+      "promptProjectionAllowed": false,
+      "memoryWriteAllowed": false,
+      "routeOrProxyAttached": false,
+      "productionStorageWritten": false,
+      "canaryTrafficAttached": false,
+      "userVisibleAuthority": false,
+      "metadata": {
+        "memoryMode": "normal",
+        "sourceScope": "tenant_bot_session",
+        "continuity": "snapshot_only",
+        "liveMemoryAttached": false
+      },
+      "scope": {
+        "tenantId": "tenant-redacted",
+        "botId": "bot-redacted",
+        "sessionKey": "session-redacted",
+        "turnId": "turn-adk-memory-1",
+        "agentRole": "main"
+      },
+      "reasonCodes": [
+        "memory_mode_and_source_scope_snapshot_only"
+      ],
+      "auditRefs": [
+        "audit:adk-memory-lifecycle:before-agent:snapshot"
+      ],
+      "attachmentFlags": {
+        "adkRunnerInvoked": false,
+        "adkMemoryServiceReplaced": false,
+        "liveProviderCalls": false,
+        "hipocampusQmdCalls": false,
+        "agentMemoryCalls": false,
+        "promptInjection": false,
+        "memoryWrites": false,
+        "routesAttached": false,
+        "productionStorage": false,
+        "canaryTraffic": false,
+        "userVisibleAuthority": false
+      }
+    },
+    {
+      "caseId": "before_model_callback_before_llm_call_source_authority_no_projection",
+      "adkCallback": "before_model_callback",
+      "lifecyclePoint": "beforeLLMCall",
+      "metadataKind": "source_authority",
+      "decision": "allow_metadata_only",
+      "memoryMode": "normal",
+      "sourceAuthority": "current_turn_authoritative",
+      "providerStatus": "not_attached",
+      "redactionStatus": "verified",
+      "writeIntent": false,
+      "writeReceiptRef": null,
+      "writeClaimAllowed": false,
+      "noUserFacingMemoryClaim": true,
+      "liveMemoryAttached": false,
+      "memoryServiceReplacementAllowed": false,
+      "promptProjectionAllowed": false,
+      "memoryWriteAllowed": false,
+      "routeOrProxyAttached": false,
+      "productionStorageWritten": false,
+      "canaryTrafficAttached": false,
+      "userVisibleAuthority": false,
+      "metadata": {
+        "sourceAuthority": "current_turn_authoritative",
+        "sourceScope": "tenant_bot_session",
+        "currentSources": [
+          "user_instruction",
+          "selected_context"
+        ],
+        "promptProjection": "disabled"
+      },
+      "scope": {
+        "tenantId": "tenant-redacted",
+        "botId": "bot-redacted",
+        "sessionKey": "session-redacted",
+        "turnId": "turn-adk-memory-1",
+        "agentRole": "main"
+      },
+      "reasonCodes": [
+        "source_authority_recorded_no_prompt_projection"
+      ],
+      "auditRefs": [
+        "audit:adk-memory-lifecycle:before-model:source-authority"
+      ],
+      "attachmentFlags": {
+        "adkRunnerInvoked": false,
+        "adkMemoryServiceReplaced": false,
+        "liveProviderCalls": false,
+        "hipocampusQmdCalls": false,
+        "agentMemoryCalls": false,
+        "promptInjection": false,
+        "memoryWrites": false,
+        "routesAttached": false,
+        "productionStorage": false,
+        "canaryTraffic": false,
+        "userVisibleAuthority": false
+      }
+    },
+    {
+      "caseId": "after_model_callback_after_llm_call_redacted_audit_only",
+      "adkCallback": "after_model_callback",
+      "lifecyclePoint": "afterLLMCall",
+      "metadataKind": "redacted_audit",
+      "decision": "allow_metadata_only",
+      "memoryMode": "normal",
+      "sourceAuthority": "audit_only",
+      "providerStatus": "not_attached",
+      "redactionStatus": "verified",
+      "writeIntent": false,
+      "writeReceiptRef": null,
+      "writeClaimAllowed": false,
+      "noUserFacingMemoryClaim": true,
+      "liveMemoryAttached": false,
+      "memoryServiceReplacementAllowed": false,
+      "promptProjectionAllowed": false,
+      "memoryWriteAllowed": false,
+      "routeOrProxyAttached": false,
+      "productionStorageWritten": false,
+      "canaryTrafficAttached": false,
+      "userVisibleAuthority": false,
+      "metadata": {
+        "auditRef": "audit:adk-memory-lifecycle:after-model:redacted",
+        "redacted": true,
+        "rawModelResponseCaptured": false,
+        "rawMemoryPayloadCaptured": false
+      },
+      "scope": {
+        "tenantId": "tenant-redacted",
+        "botId": "bot-redacted",
+        "sessionKey": "session-redacted",
+        "turnId": "turn-adk-memory-1",
+        "agentRole": "main"
+      },
+      "reasonCodes": [
+        "redacted_audit_metadata_only"
+      ],
+      "auditRefs": [
+        "audit:adk-memory-lifecycle:after-model:redacted"
+      ],
+      "attachmentFlags": {
+        "adkRunnerInvoked": false,
+        "adkMemoryServiceReplaced": false,
+        "liveProviderCalls": false,
+        "hipocampusQmdCalls": false,
+        "agentMemoryCalls": false,
+        "promptInjection": false,
+        "memoryWrites": false,
+        "routesAttached": false,
+        "productionStorage": false,
+        "canaryTraffic": false,
+        "userVisibleAuthority": false
+      }
+    },
+    {
+      "caseId": "after_agent_callback_after_turn_end_write_intent_requires_receipt",
+      "adkCallback": "after_agent_callback",
+      "lifecyclePoint": "afterTurnEnd",
+      "metadataKind": "observe_write_intent_requires_receipt",
+      "decision": "approval_required",
+      "memoryMode": "normal",
+      "sourceAuthority": "receipt_required",
+      "providerStatus": "not_attached",
+      "redactionStatus": "verified",
+      "writeIntent": true,
+      "writeReceiptRef": null,
+      "writeClaimAllowed": false,
+      "noUserFacingMemoryClaim": true,
+      "liveMemoryAttached": false,
+      "memoryServiceReplacementAllowed": false,
+      "promptProjectionAllowed": false,
+      "memoryWriteAllowed": false,
+      "routeOrProxyAttached": false,
+      "productionStorageWritten": false,
+      "canaryTrafficAttached": false,
+      "userVisibleAuthority": false,
+      "metadata": {
+        "observedWriteIntent": true,
+        "receiptRequired": true,
+        "writeClaim": "disabled_without_receipt",
+        "receiptRef": null
+      },
+      "scope": {
+        "tenantId": "tenant-redacted",
+        "botId": "bot-redacted",
+        "sessionKey": "session-redacted",
+        "turnId": "turn-adk-memory-1",
+        "agentRole": "main"
+      },
+      "reasonCodes": [
+        "write_intent_observed_receipt_required",
+        "no_write_claim_without_receipt"
+      ],
+      "auditRefs": [
+        "audit:adk-memory-lifecycle:after-agent:write-intent"
+      ],
+      "attachmentFlags": {
+        "adkRunnerInvoked": false,
+        "adkMemoryServiceReplaced": false,
+        "liveProviderCalls": false,
+        "hipocampusQmdCalls": false,
+        "agentMemoryCalls": false,
+        "promptInjection": false,
+        "memoryWrites": false,
+        "routesAttached": false,
+        "productionStorage": false,
+        "canaryTraffic": false,
+        "userVisibleAuthority": false
+      }
+    },
+    {
+      "caseId": "on_model_error_callback_on_error_provider_failure_fail_open_no_claim",
+      "adkCallback": "on_model_error_callback",
+      "lifecyclePoint": "onError",
+      "metadataKind": "provider_failure_fail_open",
+      "decision": "fail_open_no_claim",
+      "memoryMode": "normal",
+      "sourceAuthority": "provider_failure_no_claim",
+      "providerStatus": "failed",
+      "redactionStatus": "verified",
+      "writeIntent": false,
+      "writeReceiptRef": null,
+      "writeClaimAllowed": false,
+      "noUserFacingMemoryClaim": true,
+      "liveMemoryAttached": false,
+      "memoryServiceReplacementAllowed": false,
+      "promptProjectionAllowed": false,
+      "memoryWriteAllowed": false,
+      "routeOrProxyAttached": false,
+      "productionStorageWritten": false,
+      "canaryTrafficAttached": false,
+      "userVisibleAuthority": false,
+      "metadata": {
+        "providerFailure": true,
+        "failureHandling": "fail_open",
+        "claim": "disabled",
+        "continuationAllowed": true
+      },
+      "scope": {
+        "tenantId": "tenant-redacted",
+        "botId": "bot-redacted",
+        "sessionKey": "session-redacted",
+        "turnId": "turn-adk-memory-1",
+        "agentRole": "main"
+      },
+      "reasonCodes": [
+        "provider_failure_fail_open",
+        "no_memory_claim_on_provider_error"
+      ],
+      "auditRefs": [
+        "audit:adk-memory-lifecycle:on-error:provider-failure"
+      ],
+      "attachmentFlags": {
+        "adkRunnerInvoked": false,
+        "adkMemoryServiceReplaced": false,
+        "liveProviderCalls": false,
+        "hipocampusQmdCalls": false,
+        "agentMemoryCalls": false,
+        "promptInjection": false,
+        "memoryWrites": false,
+        "routesAttached": false,
+        "productionStorage": false,
+        "canaryTraffic": false,
+        "userVisibleAuthority": false
+      }
+    }
+  ]
+}

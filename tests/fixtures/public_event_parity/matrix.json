@@ -1,0 +1,1113 @@
+{
+  "schemaVersion": "publicAgentEventParity.v1",
+  "sourceFiles": [
+    "infra/docker/clawy-core-agent/src/transport/SseWriter.ts",
+    "infra/docker/clawy-core-agent/src/transport/safeAgentEvent.ts",
+    "infra/docker/clawy-core-agent-python/openmagi_core_agent/missions/events.py",
+    "infra/docker/clawy-core-agent-python/openmagi_core_agent/transport/sse.py",
+    "src/lib/chat/chat-client.ts"
+  ],
+  "rows": [
+    {
+      "eventType": "turn_start",
+      "classification": "supported_now",
+      "frontendContract": "event: agent",
+      "sourceFiles": ["infra/docker/clawy-core-agent/src/transport/SseWriter.ts"],
+      "sampleEvent": {
+        "type": "turn_start",
+        "eventId": "evt-raw-turn-start",
+        "turnId": "turn-public-1",
+        "declaredRoute": "private-route",
+        "rawAdkEvent": "raw adk provider detail"
+      },
+      "expectedPublic": {
+        "type": "turn_start",
+        "turnId": "turn-public-1",
+        "declaredRoute": "direct"
+      }
+    },
+    {
+      "eventType": "turn_phase",
+      "classification": "supported_now",
+      "frontendContract": "event: agent",
+      "sourceFiles": ["infra/docker/clawy-core-agent/src/transport/safeAgentEvent.ts"],
+      "sampleEvent": {
+        "type": "turn_phase",
+        "turnId": "turn-public-1",
+        "phase": "provider-private-invalid",
+        "status": "ignored",
+        "label": "private active snapshot"
+      },
+      "expectedPublic": {
+        "type": "turn_phase",
+        "turnId": "turn-public-1",
+        "phase": "pending"
+      }
+    },
+    {
+      "eventType": "turn_end",
+      "classification": "supported_now",
+      "frontendContract": "event: agent",
+      "sourceFiles": ["infra/docker/clawy-core-agent/src/transport/safeAgentEvent.ts"],
+      "sampleEvent": {
+        "type": "turn_end",
+        "turnId": "turn-public-1",
+        "status": "committed",
+        "stopReason": "private active snapshot",
+        "receiptRef": "receipt:sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+        "usage": {
+          "inputTokens": 12,
+          "outputTokens": 4,
+          "costUsd": 0.25
+        }
+      },
+      "expectedPublic": {
+        "type": "turn_end",
+        "turnId": "turn-public-1",
+        "status": "committed",
+        "receiptRef": "receipt:sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+        "usage": {
+          "inputTokens": 12,
+          "outputTokens": 4,
+          "costUsd": 0.25
+        }
+      }
+    },
+    {
+      "eventType": "text_delta",
+      "classification": "supported_now",
+      "frontendContract": "event: agent",
+      "sourceFiles": ["infra/docker/clawy-core-agent/src/transport/SseWriter.ts"],
+      "sampleEvent": {"type": "text_delta", "delta": "Hello from OpenMagi."},
+      "expectedPublic": {"type": "text_delta", "delta": "Hello from OpenMagi."}
+    },
+    {
+      "eventType": "recipe_selection",
+      "classification": "supported_now",
+      "frontendContract": "event: agent",
+      "sourceFiles": ["infra/docker/clawy-core-agent-python/openmagi_core_agent/transport/sse.py"],
+      "sampleEvent": {
+        "type": "recipe_selection",
+        "status": "blocked",
+        "selectionSource": "mixed",
+        "requestedRecipeRefs": [
+          {
+            "recipeId": "openmagi.research",
+            "version": "1",
+            "digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+            "hiddenPrompt": "private active snapshot"
+          }
+        ],
+        "appliedRecipeRefs": [
+          {
+            "recipeId": "openmagi.context-safety",
+            "version": "1",
+            "digest": "sha256:2222222222222222222222222222222222222222222222222222222222222222"
+          }
+        ],
+        "omittedRecipeRefs": [
+          {
+            "recipeId": "openmagi.research",
+            "version": "1",
+            "digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+          }
+        ],
+        "omissionReasons": {
+          "openmagi.research": ["explicit_recipe_disabled"],
+          "private active snapshot": ["raw_private_policy"]
+        },
+        "policySnapshotDigest": "sha256:3333333333333333333333333333333333333333333333333333333333333333",
+        "rawPolicySnapshot": "private active snapshot"
+      },
+      "expectedPublic": {
+        "type": "recipe_selection",
+        "status": "blocked",
+        "selectionSource": "mixed",
+        "requestedRecipeRefs": [
+          {
+            "recipeId": "openmagi.research",
+            "version": "1",
+            "digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+          }
+        ],
+        "appliedRecipeRefs": [
+          {
+            "recipeId": "openmagi.context-safety",
+            "version": "1",
+            "digest": "sha256:2222222222222222222222222222222222222222222222222222222222222222"
+          }
+        ],
+        "omittedRecipeRefs": [
+          {
+            "recipeId": "openmagi.research",
+            "version": "1",
+            "digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+          }
+        ],
+        "omissionReasons": {
+          "openmagi.research": ["explicit_recipe_disabled"]
+        },
+        "policySnapshotDigest": "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+      }
+    },
+    {
+      "eventType": "response_clear",
+      "classification": "supported_now",
+      "frontendContract": "event: agent",
+      "sourceFiles": ["infra/docker/clawy-core-agent/src/transport/SseWriter.ts", "src/lib/chat/chat-client.ts"],
+      "sampleEvent": {
+        "type": "response_clear",
+        "eventId": "evt-clear-1",
+        "turnId": "turn-public-1",
+        "reason": "replace duplicate legacy rendering"
+      },
+      "expectedPublic": {
+        "type": "response_clear"
+      }
+    },
+    {
+      "eventType": "control_replay_complete",
+      "classification": "supported_now",
+      "frontendContract": "event: agent",
+      "sourceFiles": ["infra/docker/clawy-core-agent/src/transport/SseWriter.ts", "src/lib/chat/chat-client.ts"],
+      "sampleEvent": {
+        "type": "control_replay_complete",
+        "lastSeq": 7,
+        "rawLedgerState": "private active snapshot"
+      },
+      "expectedPublic": {"type": "control_replay_complete", "lastSeq": 7}
+    },
+    {
+      "eventType": "document_draft",
+      "classification": "supported_now",
+      "frontendContract": "event: agent",
+      "sourceFiles": ["infra/docker/clawy-core-agent/src/transport/safeAgentEvent.ts", "src/lib/chat/chat-client.ts"],
+      "sampleEvent": {
+        "type": "document_draft",
+        "id": "draft-public-1",
+        "filename": "reports/public.html",
+        "format": "html",
+        "contentPreview": "<p>Safe public preview</p>",
+        "contentLength": 26,
+        "truncated": false,
+        "content": "private active snapshot"
+      },
+      "expectedPublic": {
+        "type": "document_draft",
+        "id": "draft-public-1",
+        "filename": "reports/public.html",
+        "format": "html",
+        "contentPreview": "<p>Safe public preview</p>",
+        "contentLength": 26,
+        "truncated": false
+      }
+    },
+    {
+      "eventType": "llm_progress",
+      "classification": "supported_now",
+      "frontendContract": "event: agent",
+      "sourceFiles": ["infra/docker/clawy-core-agent/src/transport/safeAgentEvent.ts", "src/lib/chat/chat-client.ts"],
+      "sampleEvent": {
+        "type": "llm_progress",
+        "turnId": "turn-public-1",
+        "iter": 2,
+        "stage": "waiting",
+        "label": "Thinking through next step",
+        "detail": "Checking visible context",
+        "elapsedMs": 44,
+        "rawAdkEvent": "raw adk provider detail"
+      },
+      "expectedPublic": {
+        "type": "llm_progress",
+        "turnId": "turn-public-1",
+        "stage": "waiting",
+        "label": "Thinking through next step",
+        "detail": "Checking visible context",
+        "iter": 2,
+        "elapsedMs": 44
+      }
+    },
+    {
+      "eventType": "tool_start",
+      "classification": "supported_now",
+      "frontendContract": "event: agent",
+      "sourceFiles": ["infra/docker/clawy-core-agent/src/transport/SseWriter.ts", "src/lib/chat/chat-client.ts"],
+      "sampleEvent": {"type": "tool_start", "id": "tool-1", "name": "Clock", "inputPreview": "now"},
+      "expectedPublic": {"type": "tool_start", "id": "tool-1", "name": "Clock", "input_preview": "now"}
+    },
+    {
+      "eventType": "tool_progress",
+      "classification": "supported_now",
+      "frontendContract": "event: agent",
+      "sourceFiles": ["infra/docker/clawy-core-agent/src/transport/SseWriter.ts", "src/lib/chat/chat-client.ts"],
+      "sampleEvent": {"type": "tool_progress", "id": "tool-1", "label": "Reading status"},
+      "expectedPublic": {"type": "tool_progress", "id": "tool-1", "label": "Reading status"}
+    },
+    {
+      "eventType": "tool_end",
+      "classification": "supported_now",
+      "frontendContract": "event: agent",
+      "sourceFiles": ["infra/docker/clawy-core-agent/src/transport/SseWriter.ts", "src/lib/chat/chat-client.ts"],
+      "sampleEvent": {
+        "type": "tool_end",
+        "id": "tool-1",
+        "status": "done",
+        "outputPreview": "Completed",
+        "durationMs": 8,
+        "rawArguments": "private tool arguments"
+      },
+      "expectedPublic": {
+        "type": "tool_end",
+        "id": "tool-1",
+        "status": "done",
+        "output_preview": "Completed",
+        "durationMs": 8
+      }
+    },
+    {
+      "eventType": "patch_preview",
+      "classification": "supported_now",
+      "frontendContract": "event: agent",
+      "sourceFiles": ["infra/docker/clawy-core-agent/src/transport/safeAgentEvent.ts", "src/lib/chat/chat-client.ts"],
+      "sampleEvent": {
+        "type": "patch_preview",
+        "toolUseId": "tool-patch-1",
+        "dryRun": true,
+        "changedFiles": ["src/public.ts"],
+        "createdFiles": [],
+        "deletedFiles": [],
+        "files": [
+          {"path": "src/public.ts", "operation": "update", "hunks": 1, "addedLines": 2, "removedLines": 0}
+        ],
+        "patch": "private active snapshot"
+      },
+      "expectedPublic": {
+        "type": "patch_preview",
+        "toolUseId": "tool-patch-1",
+        "dryRun": true,
+        "changedFiles": ["src/public.ts"],
+        "createdFiles": [],
+        "deletedFiles": [],
+        "files": [
+          {"path": "src/public.ts", "operation": "update", "hunks": 1, "addedLines": 2, "removedLines": 0}
+        ]
+      }
+    },
+    {
+      "eventType": "source_inspected",
+      "classification": "supported_now",
+      "frontendContract": "event: agent",
+      "sourceFiles": ["infra/docker/clawy-core-agent/src/transport/safeAgentEvent.ts", "src/lib/chat/chat-client.ts"],
+      "sampleEvent": {
+        "type": "source_inspected",
+        "source": {
+          "sourceId": "src-public-1",
+          "kind": "browser",
+          "uri": "https://example.test/docs",
+          "title": "Example docs",
+          "contentHash": "evidence:web:src-public-1",
+          "trustTier": "official",
+          "inspectedAt": 1710000001,
+          "snippets": ["Visible excerpt"],
+          "metadata": {"raw": "private active snapshot"}
+        }
+      },
+      "expectedPublic": {
+        "type": "source_inspected",
+        "source": {
+          "sourceId": "src-public-1",
+          "kind": "browser",
+          "uri": "https://example.test/docs",
+          "title": "Example docs",
+          "contentHash": "evidence:web:src-public-1",
+          "trustTier": "official",
+          "inspectedAt": 1710000001,
+          "snippets": ["Visible excerpt"]
+        }
+      }
+    },
+    {
+      "eventType": "browser_frame",
+      "classification": "supported_now",
+      "frontendContract": "event: agent",
+      "sourceFiles": ["infra/docker/clawy-core-agent/src/transport/safeAgentEvent.ts", "src/lib/chat/chat-client.ts"],
+      "sampleEvent": {
+        "type": "browser_frame",
+        "action": "observe",
+        "url": "https://example.test/",
+        "imageBase64": "dGlueQnJvd3Nlcg==",
+        "contentType": "image/png",
+        "capturedAt": 1710000002,
+        "cdpEndpoint": "private browser cdp"
+      },
+      "expectedPublic": {
+        "type": "browser_frame",
+        "action": "observe",
+        "imageBase64": "dGlueQnJvd3Nlcg==",
+        "contentType": "image/png",
+        "capturedAt": 1710000002,
+        "url": "https://example.test/"
+      }
+    },
+    {
+      "eventType": "rule_check",
+      "classification": "supported_now",
+      "frontendContract": "event: agent",
+      "sourceFiles": ["infra/docker/clawy-core-agent/src/transport/safeAgentEvent.ts", "src/lib/chat/chat-client.ts"],
+      "sampleEvent": {
+        "type": "rule_check",
+        "ruleId": "citation",
+        "verdict": "pending",
+        "detail": "Citation verification pending",
+        "evidenceRef": "receipt:sha256:1111111111111111111111111111111111111111111111111111111111111111",
+        "checkedAt": 1710000002
+      },
+      "expectedPublic": {
+        "type": "rule_check",
+        "ruleId": "citation",
+        "verdict": "pending",
+        "detail": "Citation verification pending",
+        "evidenceRef": "receipt:sha256:1111111111111111111111111111111111111111111111111111111111111111",
+        "checkedAt": 1710000002
+      }
+    },
+    {
+      "eventType": "citation_gate",
+      "classification": "projected_alias",
+      "projectedAlias": "rule_check",
+      "frontendContract": "event: agent",
+      "sourceFiles": ["src/lib/chat/chat-client.ts"],
+      "sampleEvent": {
+        "type": "citation_gate",
+        "ruleId": "citation",
+        "verdict": "pending",
+        "detail": "Citation verification pending",
+        "evidenceRef": "receipt:sha256:1111111111111111111111111111111111111111111111111111111111111111",
+        "checkedAt": 1710000003
+      },
+      "expectedPublic": {
+        "type": "rule_check",
+        "ruleId": "citation",
+        "verdict": "pending",
+        "detail": "Citation verification pending",
+        "evidenceRef": "receipt:sha256:1111111111111111111111111111111111111111111111111111111111111111",
+        "checkedAt": 1710000003
+      }
+    },
+    {
+      "eventType": "control_event",
+      "classification": "supported_now",
+      "frontendContract": "event: agent",
+      "sourceFiles": ["infra/docker/clawy-core-agent/src/transport/safeAgentEvent.ts", "src/lib/chat/chat-client.ts"],
+      "sampleEvent": {
+        "type": "control_event",
+        "seq": 3,
+        "event": {
+          "type": "control_request_created",
+          "request": {
+            "requestId": "req-public-1",
+            "kind": "tool_permission",
+            "state": "pending",
+            "sessionKey": "session-public",
+            "source": "turn",
+            "prompt": "Approve patch preview?",
+            "createdAt": 11,
+            "expiresAt": 71,
+            "proposedInput": {
+              "toolName": "PatchApply",
+              "patchPreview": {
+                "dryRun": true,
+                "changedFiles": ["src/public.ts"],
+                "createdFiles": [],
+                "deletedFiles": [],
+                "files": [
+                  {"path": "src/public.ts", "operation": "update", "hunks": 1, "addedLines": 1, "removedLines": 0}
+                ]
+              },
+              "rawPatch": "private tool arguments"
+            }
+          }
+        }
+      },
+      "expectedPublic": {
+        "type": "control_event",
+        "seq": 3,
+        "event": {
+          "type": "control_request_created",
+          "request": {
+            "requestId": "req-public-1",
+            "kind": "tool_permission",
+            "state": "pending",
+            "sessionKey": "session-public",
+            "source": "turn",
+            "prompt": "Approve patch preview?",
+            "createdAt": 11,
+            "expiresAt": 71,
+            "proposedInput": {
+              "toolName": "PatchApply",
+              "patchPreview": {
+                "dryRun": true,
+                "changedFiles": ["src/public.ts"],
+                "createdFiles": [],
+                "deletedFiles": [],
+                "files": [
+                  {"path": "src/public.ts", "operation": "update", "hunks": 1, "addedLines": 1, "removedLines": 0}
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "eventType": "task_board",
+      "classification": "supported_now",
+      "frontendContract": "event: agent",
+      "sourceFiles": ["infra/docker/clawy-core-agent/src/transport/safeAgentEvent.ts", "src/lib/chat/chat-client.ts"],
+      "sampleEvent": {
+        "type": "task_board",
+        "tasks": [{"id": "task-1", "title": "Check parity", "description": "Public task", "status": "in_progress"}],
+        "rawBoard": "private active snapshot"
+      },
+      "expectedPublic": {
+        "type": "task_board",
+        "tasks": [{"id": "task-1", "title": "Check parity", "description": "Public task", "status": "in_progress"}]
+      }
+    },
+    {
+      "eventType": "runtime_trace",
+      "classification": "supported_now",
+      "frontendContract": "event: agent",
+      "sourceFiles": ["infra/docker/clawy-core-agent/src/transport/safeAgentEvent.ts", "src/lib/chat/chat-client.ts"],
+      "sampleEvent": {
+        "type": "runtime_trace",
+        "turnId": "turn-public-1",
+        "phase": "retry_scheduled",
+        "severity": "warning",
+        "title": "Retry scheduled",
+        "detail": "Retry after bounded failure",
+        "hiddenReasoning": "private active snapshot"
+      },
+      "expectedPublic": {
+        "type": "runtime_trace",
+        "turnId": "turn-public-1",
+        "phase": "retry_scheduled",
+        "severity": "warning",
+        "title": "Retry scheduled",
+        "detail": "Retry after bounded failure"
+      }
+    },
+    {
+      "eventType": "child_tool_request",
+      "classification": "supported_now",
+      "frontendContract": "event: agent",
+      "sourceFiles": ["infra/docker/clawy-core-agent/src/transport/safeAgentEvent.ts", "src/lib/chat/chat-client.ts"],
+      "sampleEvent": {
+        "type": "child_tool_request",
+        "taskId": "child-1",
+        "requestId": "req-child-1",
+        "toolName": "PatchApply",
+        "arguments": "private tool arguments"
+      },
+      "expectedPublic": {
+        "type": "child_tool_request",
+        "taskId": "child-1",
+        "requestId": "req-child-1",
+        "toolName": "PatchApply"
+      }
+    },
+    {
+      "eventType": "child_permission_decision",
+      "classification": "supported_now",
+      "frontendContract": "event: agent",
+      "sourceFiles": ["infra/docker/clawy-core-agent/src/transport/safeAgentEvent.ts", "src/lib/chat/chat-client.ts"],
+      "sampleEvent": {
+        "type": "child_permission_decision",
+        "taskId": "child-1",
+        "decision": "allow",
+        "reason": "Safe preview only",
+        "updatedInput": "private tool arguments"
+      },
+      "expectedPublic": {
+        "type": "child_permission_decision",
+        "taskId": "child-1",
+        "decision": "allow",
+        "reason": "Safe preview only"
+      }
+    },
+    {
+      "eventType": "ask_user",
+      "classification": "supported_now",
+      "frontendContract": "event: agent",
+      "sourceFiles": ["infra/docker/clawy-core-agent/src/transport/safeAgentEvent.ts", "src/lib/chat/chat-client.ts"],
+      "sampleEvent": {
+        "type": "ask_user",
+        "questionId": "question-1",
+        "question": "Proceed?",
+        "choices": [{"id": "yes", "label": "Yes"}],
+        "allowFreeText": false,
+        "rawPrompt": "private child output"
+      },
+      "expectedPublic": {
+        "type": "ask_user",
+        "questionId": "question-1",
+        "question": "Proceed?",
+        "allowFreeText": false,
+        "choices": [{"id": "yes", "label": "Yes"}]
+      }
+    },
+    {
+      "eventType": "plan_ready",
+      "classification": "supported_now",
+      "frontendContract": "event: agent",
+      "sourceFiles": ["infra/docker/clawy-core-agent/src/transport/safeAgentEvent.ts", "src/lib/chat/chat-client.ts"],
+      "sampleEvent": {
+        "type": "plan_ready",
+        "planId": "plan-1",
+        "requestId": "req-plan-1",
+        "state": "awaiting_approval",
+        "plan": "1. Inspect\n2. Report",
+        "rawPlan": "private child output"
+      },
+      "expectedPublic": {
+        "type": "plan_ready",
+        "planId": "plan-1",
+        "requestId": "req-plan-1",
+        "state": "awaiting_approval",
+        "plan": "1. Inspect\n2. Report"
+      }
+    },
+    {
+      "eventType": "spawn_started",
+      "classification": "supported_now",
+      "frontendContract": "event: agent",
+      "sourceFiles": ["infra/docker/clawy-core-agent/src/transport/safeAgentEvent.ts", "src/lib/chat/chat-client.ts"],
+      "sampleEvent": {
+        "type": "spawn_started",
+        "taskId": "spawn-1",
+        "persona": "reviewer",
+        "deliver": "background",
+        "detail": "Reviewing public event contract",
+        "prompt": "private child output"
+      },
+      "expectedPublic": {
+        "type": "spawn_started",
+        "taskId": "spawn-1",
+        "persona": "reviewer",
+        "deliver": "background",
+        "detail": "Reviewing public event contract"
+      }
+    },
+    {
+      "eventType": "spawn_result",
+      "classification": "supported_now",
+      "frontendContract": "event: agent",
+      "sourceFiles": ["infra/docker/clawy-core-agent/src/transport/safeAgentEvent.ts", "src/lib/chat/chat-client.ts"],
+      "sampleEvent": {
+        "type": "spawn_result",
+        "taskId": "spawn-1",
+        "status": "ok",
+        "toolCallCount": 2,
+        "finalText": "private child output"
+      },
+      "expectedPublic": {
+        "type": "spawn_result",
+        "taskId": "spawn-1",
+        "status": "ok",
+        "toolCallCount": 2
+      }
+    },
+    {
+      "eventType": "background_task",
+      "classification": "supported_now",
+      "frontendContract": "event: agent",
+      "sourceFiles": ["infra/docker/clawy-core-agent/src/transport/safeAgentEvent.ts", "src/lib/chat/chat-client.ts"],
+      "sampleEvent": {
+        "type": "background_task",
+        "taskId": "task-bg-1",
+        "persona": "reviewer",
+        "status": "running",
+        "detail": "Checking fixtures",
+        "rawTranscript": "private child output"
+      },
+      "expectedPublic": {
+        "type": "background_task",
+        "taskId": "task-bg-1",
+        "persona": "reviewer",
+        "status": "running",
+        "detail": "Checking fixtures"
+      }
+    },
+    {
+      "eventType": "heartbeat",
+      "classification": "supported_now",
+      "frontendContract": "event: agent",
+      "sourceFiles": ["infra/docker/clawy-core-agent/src/transport/safeAgentEvent.ts", "src/lib/chat/chat-client.ts"],
+      "sampleEvent": {
+        "type": "heartbeat",
+        "turnId": "turn-public-1",
+        "iter": 4,
+        "elapsedMs": 1200,
+        "lastEventAt": 1710000003,
+        "raw": "private active snapshot"
+      },
+      "expectedPublic": {
+        "type": "heartbeat",
+        "turnId": "turn-public-1",
+        "iter": 4,
+        "elapsedMs": 1200,
+        "lastEventAt": 1710000003
+      }
+    },
+    {
+      "eventType": "retry",
+      "classification": "supported_now",
+      "frontendContract": "event: agent",
+      "sourceFiles": ["infra/docker/clawy-core-agent/src/transport/safeAgentEvent.ts", "src/lib/chat/chat-client.ts"],
+      "sampleEvent": {
+        "type": "retry",
+        "reason": "Transient provider failure",
+        "retryNo": 2,
+        "toolUseId": "tool-1",
+        "toolName": "Clock",
+        "rawInput": "private tool arguments"
+      },
+      "expectedPublic": {
+        "type": "retry",
+        "reason": "Transient provider failure",
+        "toolUseId": "tool-1",
+        "toolName": "Clock",
+        "retryNo": 2
+      }
+    },
+    {
+      "eventType": "inject",
+      "classification": "projected_alias",
+      "projectedAlias": "injection_queued",
+      "frontendContract": "event: agent",
+      "sourceFiles": ["src/lib/chat/chat-client.ts"],
+      "sampleEvent": {
+        "type": "inject",
+        "injectionId": "inject-1",
+        "queuedCount": 1,
+        "rawPayload": "private active snapshot"
+      },
+      "expectedPublic": {"type": "injection_queued", "injectionId": "inject-1", "queuedCount": 1}
+    },
+    {
+      "eventType": "interrupt",
+      "classification": "projected_alias",
+      "projectedAlias": "turn_interrupted",
+      "frontendContract": "event: agent",
+      "sourceFiles": ["src/lib/chat/chat-client.ts"],
+      "sampleEvent": {
+        "type": "interrupt",
+        "turnId": "turn-public-1",
+        "handoffRequested": true,
+        "source": "api",
+        "rawPayload": "private active snapshot"
+      },
+      "expectedPublic": {
+        "type": "turn_interrupted",
+        "turnId": "turn-public-1",
+        "source": "api",
+        "handoffRequested": true
+      }
+    },
+    {
+      "eventType": "error",
+      "classification": "supported_now",
+      "frontendContract": "event: agent",
+      "sourceFiles": ["infra/docker/clawy-core-agent/src/transport/safeAgentEvent.ts"],
+      "sampleEvent": {
+        "type": "error",
+        "code": "runtime_error",
+        "message": "Provider failed safely",
+        "rawProviderError": "raw adk provider detail"
+      },
+      "expectedPublic": {"type": "error", "code": "runtime_error", "message": "Provider failed safely"}
+    },
+    {
+      "eventType": "thinking_delta",
+      "classification": "intentionally_unsupported",
+      "frontendContract": "event: agent",
+      "sourceFiles": ["infra/docker/clawy-core-agent/src/transport/safeAgentEvent.ts"],
+      "followUpGateReason": "Hidden reasoning deltas are intentionally dropped from public event projection."
+    },
+    {
+      "eventType": "research_artifact_delta",
+      "classification": "default_off_boundary_only",
+      "frontendContract": "event: agent",
+      "sourceFiles": ["infra/docker/clawy-core-agent/src/transport/safeAgentEvent.ts"],
+      "followUpGateReason": "Research artifact projection is contract-covered, but live generation remains blocked until research/web gates."
+    },
+    {
+      "eventType": "context_end",
+      "classification": "default_off_boundary_only",
+      "frontendContract": "event: agent",
+      "sourceFiles": ["infra/docker/clawy-core-agent/src/transport/SseWriter.ts"],
+      "followUpGateReason": "Context lifecycle events are default-off until the user-visible Python route owns the turn."
+    },
+    {
+      "eventType": "mission_created",
+      "classification": "default_off_boundary_only",
+      "frontendContract": "event: agent",
+      "sourceFiles": [
+        "infra/docker/clawy-core-agent/src/transport/safeAgentEvent.ts",
+        "infra/docker/clawy-core-agent-python/openmagi_core_agent/transport/sse.py"
+      ],
+      "followUpGateReason": "Mission runtime public event projection is default-off and must pass through the mission projector before user-visible activation."
+    },
+    {
+      "eventType": "mission_event",
+      "classification": "default_off_boundary_only",
+      "frontendContract": "event: agent",
+      "sourceFiles": [
+        "infra/docker/clawy-core-agent/src/transport/safeAgentEvent.ts",
+        "infra/docker/clawy-core-agent-python/openmagi_core_agent/transport/sse.py"
+      ],
+      "followUpGateReason": "Mission runtime public event projection is default-off and must pass through the mission projector before user-visible activation."
+    },
+    {
+      "eventType": "mission_progress",
+      "classification": "default_off_boundary_only",
+      "frontendContract": "event: agent",
+      "sourceFiles": ["infra/docker/clawy-core-agent-python/openmagi_core_agent/missions/events.py"],
+      "followUpGateReason": "Mission progress is projected only through the mission local-fake projector; generic SSE drops raw aliases until the mission gate.",
+      "sampleEvent": {
+        "type": "mission_progress",
+        "missionId": "mission:daily-report",
+        "status": "running",
+        "detail": "drafting final section",
+        "rawMissionPayload": "private mission payload"
+      }
+    },
+    {
+      "eventType": "cron_run",
+      "classification": "blocked_until_gate",
+      "frontendContract": "event: agent",
+      "sourceFiles": [
+        "infra/docker/clawy-core-agent-python/openmagi_core_agent/missions/events.py",
+        "src/lib/chat/chat-client.ts"
+      ],
+      "followUpGateReason": "Cron run aliases are projected only through the mission local-fake projector until Gate 5 scheduler activation.",
+      "sampleEvent": {
+        "type": "cron_run",
+        "missionId": "mission:daily-report",
+        "cronId": "cron:daily",
+        "status": "running",
+        "detail": "daily tick started",
+        "rawCronPayload": "private mission payload"
+      }
+    },
+    {
+      "eventType": "goal_created",
+      "classification": "default_off_boundary_only",
+      "frontendContract": "event: agent",
+      "sourceFiles": [
+        "infra/docker/clawy-core-agent-python/openmagi_core_agent/missions/events.py",
+        "src/lib/chat/chat-client.ts"
+      ],
+      "followUpGateReason": "Goal aliases are projected only through the mission local-fake projector until goal runtime activation.",
+      "sampleEvent": {
+        "type": "goal_created",
+        "missionId": "mission:daily-report",
+        "goalId": "goal:ship-report",
+        "status": "running",
+        "detail": "goal recorded",
+        "rawGoalPayload": "private goal payload"
+      }
+    },
+    {
+      "eventType": "goal_progress",
+      "classification": "default_off_boundary_only",
+      "frontendContract": "event: agent",
+      "sourceFiles": [
+        "infra/docker/clawy-core-agent-python/openmagi_core_agent/missions/events.py",
+        "src/lib/chat/chat-client.ts"
+      ],
+      "followUpGateReason": "Goal aliases are projected only through the mission local-fake projector until goal runtime activation.",
+      "sampleEvent": {
+        "type": "goal_progress",
+        "missionId": "mission:daily-report",
+        "goalId": "goal:ship-report",
+        "status": "running",
+        "detail": "outline complete",
+        "rawGoalPayload": "private goal payload"
+      }
+    },
+    {
+      "eventType": "goal_completed",
+      "classification": "default_off_boundary_only",
+      "frontendContract": "event: agent",
+      "sourceFiles": [
+        "infra/docker/clawy-core-agent-python/openmagi_core_agent/missions/events.py",
+        "src/lib/chat/chat-client.ts"
+      ],
+      "followUpGateReason": "Goal aliases are projected only through the mission local-fake projector until goal runtime activation.",
+      "sampleEvent": {
+        "type": "goal_completed",
+        "missionId": "mission:daily-report",
+        "goalId": "goal:ship-report",
+        "status": "completed",
+        "detail": "report delivered",
+        "rawGoalPayload": "private goal payload"
+      }
+    },
+    {
+      "eventType": "goal_cancelled",
+      "classification": "default_off_boundary_only",
+      "frontendContract": "event: agent",
+      "sourceFiles": [
+        "infra/docker/clawy-core-agent-python/openmagi_core_agent/missions/events.py",
+        "src/lib/chat/chat-client.ts"
+      ],
+      "followUpGateReason": "Goal aliases are projected only through the mission local-fake projector until goal runtime activation.",
+      "sampleEvent": {
+        "type": "goal_cancelled",
+        "missionId": "mission:daily-report",
+        "goalId": "goal:ship-report",
+        "status": "cancelled",
+        "detail": "cancelled by policy",
+        "rawGoalPayload": "private goal payload"
+      }
+    },
+    {
+      "eventType": "active_snapshot",
+      "classification": "default_off_boundary_only",
+      "frontendContract": "event: agent",
+      "sourceFiles": ["src/lib/chat/chat-client.ts"],
+      "followUpGateReason": "Active snapshot compatibility is recorded as reconnect contract metadata; production snapshot writes remain disabled."
+    },
+    {
+      "eventType": "channel_delivery_receipt",
+      "classification": "blocked_until_gate",
+      "frontendContract": "event: agent",
+      "sourceFiles": ["src/lib/chat/chat-client.ts"],
+      "followUpGateReason": "Channel delivery receipt projection is blocked until Gate 4 delivery/channel activation."
+    },
+    {
+      "eventType": "spawn_worktree_conflict",
+      "classification": "default_off_boundary_only",
+      "frontendContract": "event: agent",
+      "sourceFiles": ["infra/docker/clawy-core-agent/src/transport/safeAgentEvent.ts"],
+      "followUpGateReason": "Workspace adoption/mutation public events stay default-off until workspace gate activation."
+    },
+    {
+      "eventType": "structured_output",
+      "classification": "default_off_boundary_only",
+      "frontendContract": "event: agent",
+      "sourceFiles": ["infra/docker/clawy-core-agent/src/transport/safeAgentEvent.ts"],
+      "followUpGateReason": "Structured output events are contract-covered but inactive until runtime authority owns final validation."
+    },
+    {
+      "eventType": "turn_interrupted",
+      "classification": "default_off_boundary_only",
+      "frontendContract": "event: agent",
+      "sourceFiles": ["infra/docker/clawy-core-agent/src/transport/safeAgentEvent.ts"],
+      "followUpGateReason": "Top-level interrupt events are default-off; inject/interrupt route compatibility uses projected aliases."
+    },
+    {
+      "eventType": "child_started",
+      "classification": "default_off_boundary_only",
+      "frontendContract": "event: agent",
+      "sourceFiles": ["infra/docker/clawy-core-agent/src/transport/safeAgentEvent.ts"],
+      "followUpGateReason": "Child runtime event sources stay disabled until child Runner activation."
+    },
+    {
+      "eventType": "child_progress",
+      "classification": "default_off_boundary_only",
+      "frontendContract": "event: agent",
+      "sourceFiles": ["infra/docker/clawy-core-agent/src/transport/safeAgentEvent.ts"],
+      "followUpGateReason": "Child runtime event sources stay disabled until child Runner activation."
+    },
+    {
+      "eventType": "child_cancelled",
+      "classification": "default_off_boundary_only",
+      "frontendContract": "event: agent",
+      "sourceFiles": ["infra/docker/clawy-core-agent/src/transport/safeAgentEvent.ts"],
+      "followUpGateReason": "Child runtime event sources stay disabled until child Runner activation."
+    },
+    {
+      "eventType": "child_failed",
+      "classification": "default_off_boundary_only",
+      "frontendContract": "event: agent",
+      "sourceFiles": ["infra/docker/clawy-core-agent/src/transport/safeAgentEvent.ts"],
+      "followUpGateReason": "Child runtime event sources stay disabled until child Runner activation."
+    },
+    {
+      "eventType": "child_completed",
+      "classification": "default_off_boundary_only",
+      "frontendContract": "event: agent",
+      "sourceFiles": ["infra/docker/clawy-core-agent/src/transport/safeAgentEvent.ts"],
+      "followUpGateReason": "Child runtime event sources stay disabled until child Runner activation."
+    },
+    {
+      "eventType": "child_llm_start",
+      "classification": "default_off_boundary_only",
+      "frontendContract": "event: agent",
+      "sourceFiles": ["infra/docker/clawy-core-agent/src/transport/safeAgentEvent.ts"],
+      "followUpGateReason": "Child telemetry events stay disabled until child Runner activation."
+    },
+    {
+      "eventType": "child_llm_end",
+      "classification": "default_off_boundary_only",
+      "frontendContract": "event: agent",
+      "sourceFiles": ["infra/docker/clawy-core-agent/src/transport/safeAgentEvent.ts"],
+      "followUpGateReason": "Child telemetry events stay disabled until child Runner activation."
+    },
+    {
+      "eventType": "child_tool_batch_start",
+      "classification": "default_off_boundary_only",
+      "frontendContract": "event: agent",
+      "sourceFiles": ["infra/docker/clawy-core-agent/src/transport/safeAgentEvent.ts"],
+      "followUpGateReason": "Child telemetry events stay disabled until child Runner activation."
+    },
+    {
+      "eventType": "child_tool_batch_end",
+      "classification": "default_off_boundary_only",
+      "frontendContract": "event: agent",
+      "sourceFiles": ["infra/docker/clawy-core-agent/src/transport/safeAgentEvent.ts"],
+      "followUpGateReason": "Child telemetry events stay disabled until child Runner activation."
+    },
+    {
+      "eventType": "child_abort",
+      "classification": "default_off_boundary_only",
+      "frontendContract": "event: agent",
+      "sourceFiles": ["infra/docker/clawy-core-agent/src/transport/safeAgentEvent.ts"],
+      "followUpGateReason": "Child telemetry events stay disabled until child Runner activation."
+    },
+    {
+      "eventType": "tournament_result",
+      "classification": "default_off_boundary_only",
+      "frontendContract": "event: agent",
+      "sourceFiles": ["infra/docker/clawy-core-agent/src/transport/safeAgentEvent.ts"],
+      "followUpGateReason": "Tournament events are projection-only until local runtime authority enables child evaluation."
+    },
+    {
+      "eventType": "plan_lifecycle",
+      "classification": "default_off_boundary_only",
+      "frontendContract": "event: agent",
+      "sourceFiles": ["infra/docker/clawy-core-agent/src/transport/safeAgentEvent.ts"],
+      "followUpGateReason": "Plan lifecycle events stay default-off until methodology runtime activation."
+    },
+    {
+      "eventType": "session_stop",
+      "classification": "default_off_boundary_only",
+      "frontendContract": "event: agent",
+      "sourceFiles": ["infra/docker/clawy-core-agent/src/transport/safeAgentEvent.ts"],
+      "followUpGateReason": "Long-running session stop events stay default-off until mission/runtime activation."
+    },
+    {
+      "eventType": "context_activated",
+      "classification": "default_off_boundary_only",
+      "frontendContract": "event: agent",
+      "sourceFiles": ["infra/docker/clawy-core-agent/src/transport/safeAgentEvent.ts"],
+      "followUpGateReason": "Context activation events stay default-off until context/session route activation."
+    },
+    {
+      "eventType": "compaction_impossible",
+      "classification": "default_off_boundary_only",
+      "frontendContract": "event: agent",
+      "sourceFiles": ["infra/docker/clawy-core-agent/src/transport/safeAgentEvent.ts"],
+      "followUpGateReason": "Context overflow public events are contract-covered but blocked until Python owns session context."
+    },
+    {
+      "eventType": "injection_queued",
+      "classification": "default_off_boundary_only",
+      "frontendContract": "event: agent",
+      "sourceFiles": ["infra/docker/clawy-core-agent/src/transport/safeAgentEvent.ts", "src/lib/chat/chat-client.ts"],
+      "followUpGateReason": "Native injection events are default-off; route compatibility is covered by inject projected alias."
+    },
+    {
+      "eventType": "injection_drained",
+      "classification": "default_off_boundary_only",
+      "frontendContract": "event: agent",
+      "sourceFiles": ["infra/docker/clawy-core-agent/src/transport/safeAgentEvent.ts", "src/lib/chat/chat-client.ts"],
+      "followUpGateReason": "Injection drain events stay default-off until inject route activation."
+    }
+  ],
+  "activeSnapshotContracts": [
+    {
+      "scenario": "response_clear_ordering",
+      "expectedOrder": ["response_clear", "text_delta", "turn_end"],
+      "productionWriteEnabled": false,
+      "routeActivationEnabled": false,
+      "userVisibleOutputEnabled": false,
+      "followUpGateReason": "Reconnect repair remains local contract-only until selected-bot route activation."
+    },
+    {
+      "scenario": "partial_utf8_frame",
+      "expectedOrder": ["buffer", "decode", "emit_text_delta"],
+      "productionWriteEnabled": false,
+      "routeActivationEnabled": false,
+      "userVisibleOutputEnabled": false,
+      "followUpGateReason": "Partial frame handling remains local fixture coverage before route activation."
+    },
+    {
+      "scenario": "running_snapshot",
+      "expectedOrder": ["active_snapshot_fetch", "resume_from_running_state"],
+      "productionWriteEnabled": false,
+      "routeActivationEnabled": false,
+      "userVisibleOutputEnabled": false,
+      "followUpGateReason": "Running snapshots remain default-off until selected-bot Python route activation."
+    },
+    {
+      "scenario": "final_snapshot",
+      "expectedOrder": ["active_snapshot_fetch", "final_state", "no_duplicate_render"],
+      "productionWriteEnabled": false,
+      "routeActivationEnabled": false,
+      "userVisibleOutputEnabled": false,
+      "followUpGateReason": "Final snapshots remain default-off until selected-bot Python route activation."
+    },
+    {
+      "scenario": "detached_background_work",
+      "expectedOrder": ["active_snapshot_fetch", "background_task_ref", "no_raw_child_transcript"],
+      "productionWriteEnabled": false,
+      "routeActivationEnabled": false,
+      "userVisibleOutputEnabled": false,
+      "followUpGateReason": "Detached work snapshots remain default-off until child/background gate activation."
+    },
+    {
+      "scenario": "snapshot_deleted",
+      "expectedOrder": ["active_snapshot_fetch", "not_found", "typescript_fallback"],
+      "productionWriteEnabled": false,
+      "routeActivationEnabled": false,
+      "userVisibleOutputEnabled": false,
+      "followUpGateReason": "Snapshot deletion is compatibility metadata only until route activation."
+    },
+    {
+      "scenario": "snapshot_finalized",
+      "expectedOrder": ["active_snapshot_fetch", "finalized", "no_production_write"],
+      "productionWriteEnabled": false,
+      "routeActivationEnabled": false,
+      "userVisibleOutputEnabled": false,
+      "followUpGateReason": "Snapshot finalization remains default-off and receipt-only before selected canary."
+    }
+  ],
+  "routeCompatibilityContracts": [
+    {
+      "route": "/v1/chat/:botId/inject",
+      "method": "POST",
+      "eventType": "inject",
+      "selectedBotAuthorityRequired": true,
+      "tsFallbackOnPythonUnavailable": true,
+      "noRawPayloadProjection": true,
+      "defaultOff": true
+    },
+    {
+      "route": "/v1/chat/:botId/interrupt",
+      "method": "POST",
+      "eventType": "interrupt",
+      "selectedBotAuthorityRequired": true,
+      "tsFallbackOnPythonUnavailable": true,
+      "noRawPayloadProjection": true,
+      "defaultOff": true
+    }
+  ],
+  "channelDeliveryReceiptStance": {
+    "classification": "blocked_until_gate",
+    "followUpGateReason": "Public channel delivery receipts stay deferred until Gate 4 delivery/channel activation.",
+    "publicReceiptProjectionEnabled": false
+  }
+}

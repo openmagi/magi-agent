@@ -1,0 +1,90 @@
+{
+  "schemaVersion": "gate3b.liveDuplicateBundle.v1",
+  "bundleId": "bundle_local_sink_a",
+  "captureSurface": "selected_bot_post_turn_bundle",
+  "sourceRuntime": "typescript-core-agent",
+  "responseAuthority": "typescript-only",
+  "recordingMode": "live_duplicate_redacted",
+  "redactionStatus": "verified",
+  "createdAt": "2026-05-16T12:00:00Z",
+  "sourceProvenance": {
+    "sourceKind": "live_duplicate_validation_metadata",
+    "captureId": "capture_local_sink_a",
+    "captureSurface": "selected_bot_post_turn_bundle",
+    "capturePoint": "post_turn_redacted_duplicate",
+    "sourcePath": "local-fixtures/gate3b/local-sink-a.json",
+    "productionPathIncluded": false,
+    "liveTrafficConsumed": false
+  },
+  "recipe": {
+    "recipeSnapshotId": "recipe_snapshot_gate3b_local_sink_a",
+    "immutableSnapshotId": "recipe_snapshot_gate3b_local_sink_a",
+    "packIds": ["openmagi.research"],
+    "hardSafetyEnabled": true
+  },
+  "transcriptEntries": [
+    {
+      "entryId": "transcript_local_sink_a",
+      "role": "assistant",
+      "publicText": "Redacted public answer A."
+    }
+  ],
+  "agentEvents": [
+    {
+      "eventId": "agent_event_local_sink_a",
+      "eventType": "text",
+      "publicText": "Redacted public answer A."
+    }
+  ],
+  "controlEvents": [
+    {
+      "eventId": "control_event_local_sink_a",
+      "eventType": "none",
+      "summary": "No control action."
+    }
+  ],
+  "recordedToolResults": [
+    {
+      "toolCallId": "tool_call_local_sink_a",
+      "toolName": "search.readonly",
+      "status": "recorded",
+      "outputMetadata": {
+        "resultCount": 1,
+        "executionSurface": {
+          "declaredSurface": "recorded_metadata_only",
+          "recordedOnly": true,
+          "shellExecuted": false,
+          "codeExecuted": false,
+          "packageManagerExecuted": false,
+          "externalSideEffects": false
+        }
+      },
+      "dispatchedLive": false
+    }
+  ],
+  "evidenceAuditMetadata": {
+    "auditId": "audit_local_sink_a",
+    "redactionReview": "verified",
+    "externalAckIncluded": false
+  },
+  "attachmentFlags": {
+    "productionRouteAttached": false,
+    "productionTranscriptAttached": false,
+    "productionSseAttached": false,
+    "userOutputAttached": false,
+    "telegramAttached": false,
+    "liveToolAttached": false,
+    "liveRunnerAttached": false,
+    "productionStorageAttached": false,
+    "productionQueueAttached": false,
+    "evidenceBlockAttached": false
+  },
+  "productionAuthorityFlags": {
+    "canDelayTypescriptResponse": false,
+    "canAlterTypescriptResponse": false,
+    "canBlockTypescriptResponse": false,
+    "canInfluenceUserOutput": false,
+    "pythonResponseAuthority": false,
+    "typescriptResponseAuthorityOnly": true
+  }
+}

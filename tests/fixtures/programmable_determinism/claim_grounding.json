@@ -1,0 +1,26 @@
+{
+  "claims": [
+    {
+      "citationRefs": [
+        {
+          "contentDigest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+          "fetchedAt": "2026-05-22T12:00:00Z",
+          "openedProof": true,
+          "quoteDigest": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+          "snapshotRef": "snapshot-1",
+          "sourceDate": "2026-05-20",
+          "sourceRef": "source-1",
+          "spanRef": "source-1-span-2"
+        }
+      ],
+      "claimId": "claim-001",
+      "claimType": "numeric_date",
+      "supportStatus": "supported",
+      "text": "Revenue grew 18 percent in 2025."
+    }
+  ],
+  "expectedEligibility": {
+    "ok": true,
+    "reasonCodes": []
+  }
+}

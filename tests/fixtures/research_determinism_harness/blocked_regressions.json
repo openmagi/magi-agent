@@ -1,0 +1,865 @@
+{
+  "fixtureId": "research_determinism_blocked_regressions_20260527",
+  "scope": "tests-fixtures-only",
+  "track": "Python ADK first-party research determinism harness",
+  "defaultOff": true,
+  "noLiveExecution": true,
+  "liveAuthorityAllowed": false,
+  "trafficAttached": false,
+  "cases": [
+    {
+      "id": "agent_claims_searched_without_receipt",
+      "title": "Agent says it searched without a runtime action receipt.",
+      "regressionSignal": "action_claim_missing_runtime_receipt",
+      "researchDeterminismRows": [
+        "action_proof_matrix"
+      ],
+      "owningLayer": "Research eval/harness",
+      "selector": {
+        "route": "research_determinism_harness",
+        "governedResearchHarness": true,
+        "fallbackRoute": null,
+        "fallbackToGeneralChatAllowed": false
+      },
+      "enforcement": {
+        "hardInvariant": true,
+        "mode": "block",
+        "defaultOff": true,
+        "localOnly": true,
+        "fakeProviderOnly": true,
+        "liveAuthorityAllowed": false
+      },
+      "executionPosture": {
+        "defaultOff": true,
+        "localOnly": true,
+        "fakeProviderOnly": true,
+        "liveExecutionAllowed": false,
+        "providerCallsAllowed": false,
+        "browserExecutionAllowed": false,
+        "toolExecutionAllowed": false,
+        "modelCallsAllowed": false,
+        "memoryWritesAllowed": false,
+        "channelDeliveryAllowed": false,
+        "productionRoutingAllowed": false,
+        "routeActivationAllowed": false,
+        "userVisiblePythonActivationAllowed": false
+      },
+      "authorityFlags": {
+        "liveToolDispatched": false,
+        "providerCalled": false,
+        "browserOpened": false,
+        "modelCalled": false,
+        "memoryWritten": false,
+        "channelDeliveryPerformed": false,
+        "productionRouteActivated": false,
+        "routeActivated": false,
+        "userVisiblePythonActivated": false,
+        "liveAuthorityExercised": false
+      },
+      "expectedOutcome": {
+        "mustBlock": true,
+        "acceptableProjection": false,
+        "allowedStatuses": [
+          "repair_required",
+          "blocked"
+        ],
+        "repairAction": "omit_unsupported_claim",
+        "boundaryAction": "block",
+        "boundaryStatus": "blocked"
+      },
+      "publicProjection": {
+        "metadataOnly": true,
+        "digestSafe": true,
+        "rawGovernedProjection": false,
+        "rawSourceProjected": false,
+        "privateDataProjected": false,
+        "outputContainsFactsWithoutSupport": false
+      },
+      "adkUsageNotes": "Evaluation fixture only; no Runner, FunctionTool, provider, browser, model, memory, channel, or ToolHost execution is attached."
+    },
+    {
+      "id": "read_pricing_page_from_search_url_only",
+      "title": "Agent claims it read a pricing page from a search link only.",
+      "regressionSignal": "read_claim_has_discovered_link_without_opened_snapshot",
+      "researchDeterminismRows": [
+        "action_proof_matrix",
+        "source_proof_matrix",
+        "url_only_citation_rejection"
+      ],
+      "owningLayer": "Research eval/harness",
+      "selector": {
+        "route": "research_determinism_harness",
+        "governedResearchHarness": true,
+        "fallbackRoute": null,
+        "fallbackToGeneralChatAllowed": false
+      },
+      "enforcement": {
+        "hardInvariant": true,
+        "mode": "block",
+        "defaultOff": true,
+        "localOnly": true,
+        "fakeProviderOnly": true,
+        "liveAuthorityAllowed": false
+      },
+      "executionPosture": {
+        "defaultOff": true,
+        "localOnly": true,
+        "fakeProviderOnly": true,
+        "liveExecutionAllowed": false,
+        "providerCallsAllowed": false,
+        "browserExecutionAllowed": false,
+        "toolExecutionAllowed": false,
+        "modelCallsAllowed": false,
+        "memoryWritesAllowed": false,
+        "channelDeliveryAllowed": false,
+        "productionRoutingAllowed": false,
+        "routeActivationAllowed": false,
+        "userVisiblePythonActivationAllowed": false
+      },
+      "authorityFlags": {
+        "liveToolDispatched": false,
+        "providerCalled": false,
+        "browserOpened": false,
+        "modelCalled": false,
+        "memoryWritten": false,
+        "channelDeliveryPerformed": false,
+        "productionRouteActivated": false,
+        "routeActivated": false,
+        "userVisiblePythonActivated": false,
+        "liveAuthorityExercised": false
+      },
+      "expectedOutcome": {
+        "mustBlock": true,
+        "acceptableProjection": false,
+        "allowedStatuses": [
+          "repair_required",
+          "blocked"
+        ],
+        "repairAction": "inspect_missing_source",
+        "boundaryAction": "block",
+        "boundaryStatus": "blocked"
+      },
+      "publicProjection": {
+        "metadataOnly": true,
+        "digestSafe": true,
+        "rawGovernedProjection": false,
+        "rawSourceProjected": false,
+        "privateDataProjected": false,
+        "outputContainsFactsWithoutSupport": false
+      },
+      "adkUsageNotes": "Evaluation fixture only; source acquisition remains fixture-only and metadata-only."
+    },
+    {
+      "id": "competitor_comparison_single_source_only",
+      "title": "Agent compares competitors using one inspected source only.",
+      "regressionSignal": "comparative_claim_lacks_second_source_or_single_source_policy",
+      "researchDeterminismRows": [
+        "claim_graph_support_mapping",
+        "weak_claim_downgrade"
+      ],
+      "owningLayer": "Research eval/harness",
+      "selector": {
+        "route": "research_determinism_harness",
+        "governedResearchHarness": true,
+        "fallbackRoute": null,
+        "fallbackToGeneralChatAllowed": false
+      },
+      "enforcement": {
+        "hardInvariant": true,
+        "mode": "block",
+        "defaultOff": true,
+        "localOnly": true,
+        "fakeProviderOnly": true,
+        "liveAuthorityAllowed": false
+      },
+      "executionPosture": {
+        "defaultOff": true,
+        "localOnly": true,
+        "fakeProviderOnly": true,
+        "liveExecutionAllowed": false,
+        "providerCallsAllowed": false,
+        "browserExecutionAllowed": false,
+        "toolExecutionAllowed": false,
+        "modelCallsAllowed": false,
+        "memoryWritesAllowed": false,
+        "channelDeliveryAllowed": false,
+        "productionRoutingAllowed": false,
+        "routeActivationAllowed": false,
+        "userVisiblePythonActivationAllowed": false
+      },
+      "authorityFlags": {
+        "liveToolDispatched": false,
+        "providerCalled": false,
+        "browserOpened": false,
+        "modelCalled": false,
+        "memoryWritten": false,
+        "channelDeliveryPerformed": false,
+        "productionRouteActivated": false,
+        "routeActivated": false,
+        "userVisiblePythonActivated": false,
+        "liveAuthorityExercised": false
+      },
+      "expectedOutcome": {
+        "mustBlock": true,
+        "acceptableProjection": false,
+        "allowedStatuses": [
+          "repair_required",
+          "blocked"
+        ],
+        "repairAction": "qualify_weak_claim",
+        "boundaryAction": "block",
+        "boundaryStatus": "blocked"
+      },
+      "publicProjection": {
+        "metadataOnly": true,
+        "digestSafe": true,
+        "rawGovernedProjection": false,
+        "rawSourceProjected": false,
+        "privateDataProjected": false,
+        "outputContainsFactsWithoutSupport": false
+      },
+      "adkUsageNotes": "Evaluation fixture only; no live comparison source lookup is attached."
+    },
+    {
+      "id": "citation_to_unopened_source",
+      "title": "Final answer cites a source that was discovered but not opened.",
+      "regressionSignal": "source_ref_unopened",
+      "researchDeterminismRows": [
+        "source_proof_matrix",
+        "unopened_source_rejection",
+        "final_projection_boundary"
+      ],
+      "owningLayer": "Research eval/harness",
+      "selector": {
+        "route": "research_determinism_harness",
+        "governedResearchHarness": true,
+        "fallbackRoute": null,
+        "fallbackToGeneralChatAllowed": false
+      },
+      "enforcement": {
+        "hardInvariant": true,
+        "mode": "block",
+        "defaultOff": true,
+        "localOnly": true,
+        "fakeProviderOnly": true,
+        "liveAuthorityAllowed": false
+      },
+      "executionPosture": {
+        "defaultOff": true,
+        "localOnly": true,
+        "fakeProviderOnly": true,
+        "liveExecutionAllowed": false,
+        "providerCallsAllowed": false,
+        "browserExecutionAllowed": false,
+        "toolExecutionAllowed": false,
+        "modelCallsAllowed": false,
+        "memoryWritesAllowed": false,
+        "channelDeliveryAllowed": false,
+        "productionRoutingAllowed": false,
+        "routeActivationAllowed": false,
+        "userVisiblePythonActivationAllowed": false
+      },
+      "authorityFlags": {
+        "liveToolDispatched": false,
+        "providerCalled": false,
+        "browserOpened": false,
+        "modelCalled": false,
+        "memoryWritten": false,
+        "channelDeliveryPerformed": false,
+        "productionRouteActivated": false,
+        "routeActivated": false,
+        "userVisiblePythonActivated": false,
+        "liveAuthorityExercised": false
+      },
+      "expectedOutcome": {
+        "mustBlock": true,
+        "acceptableProjection": false,
+        "allowedStatuses": [
+          "repair_required",
+          "blocked"
+        ],
+        "repairAction": "inspect_missing_source",
+        "boundaryAction": "block",
+        "boundaryStatus": "blocked"
+      },
+      "publicProjection": {
+        "metadataOnly": true,
+        "digestSafe": true,
+        "rawGovernedProjection": false,
+        "rawSourceProjected": false,
+        "privateDataProjected": false,
+        "outputContainsFactsWithoutSupport": false
+      },
+      "adkUsageNotes": "Evaluation fixture only; source proof uses local metadata handles."
+    },
+    {
+      "id": "citation_span_mismatch",
+      "title": "Final answer cites a source whose verified span does not support the claim.",
+      "regressionSignal": "support_span_not_in_source_verdict",
+      "researchDeterminismRows": [
+        "source_proof_matrix",
+        "claim_graph_support_mapping",
+        "unsupported_claim_block"
+      ],
+      "owningLayer": "Research eval/harness",
+      "selector": {
+        "route": "research_determinism_harness",
+        "governedResearchHarness": true,
+        "fallbackRoute": null,
+        "fallbackToGeneralChatAllowed": false
+      },
+      "enforcement": {
+        "hardInvariant": true,
+        "mode": "block",
+        "defaultOff": true,
+        "localOnly": true,
+        "fakeProviderOnly": true,
+        "liveAuthorityAllowed": false
+      },
+      "executionPosture": {
+        "defaultOff": true,
+        "localOnly": true,
+        "fakeProviderOnly": true,
+        "liveExecutionAllowed": false,
+        "providerCallsAllowed": false,
+        "browserExecutionAllowed": false,
+        "toolExecutionAllowed": false,
+        "modelCallsAllowed": false,
+        "memoryWritesAllowed": false,
+        "channelDeliveryAllowed": false,
+        "productionRoutingAllowed": false,
+        "routeActivationAllowed": false,
+        "userVisiblePythonActivationAllowed": false
+      },
+      "authorityFlags": {
+        "liveToolDispatched": false,
+        "providerCalled": false,
+        "browserOpened": false,
+        "modelCalled": false,
+        "memoryWritten": false,
+        "channelDeliveryPerformed": false,
+        "productionRouteActivated": false,
+        "routeActivated": false,
+        "userVisiblePythonActivated": false,
+        "liveAuthorityExercised": false
+      },
+      "expectedOutcome": {
+        "mustBlock": true,
+        "acceptableProjection": false,
+        "allowedStatuses": [
+          "repair_required",
+          "blocked"
+        ],
+        "repairAction": "omit_unsupported_claim",
+        "boundaryAction": "block",
+        "boundaryStatus": "blocked"
+      },
+      "publicProjection": {
+        "metadataOnly": true,
+        "digestSafe": true,
+        "rawGovernedProjection": false,
+        "rawSourceProjected": false,
+        "privateDataProjected": false,
+        "outputContainsFactsWithoutSupport": false
+      },
+      "adkUsageNotes": "Evaluation fixture only; spans are digest-safe ids, not page content."
+    },
+    {
+      "id": "numeric_claim_mismatch",
+      "title": "Numeric claim value does not match the observed support value.",
+      "regressionSignal": "claim_value_digest_mismatch",
+      "researchDeterminismRows": [
+        "claim_graph_support_mapping",
+        "unsupported_claim_block"
+      ],
+      "owningLayer": "Research eval/harness",
+      "selector": {
+        "route": "research_determinism_harness",
+        "governedResearchHarness": true,
+        "fallbackRoute": null,
+        "fallbackToGeneralChatAllowed": false
+      },
+      "enforcement": {
+        "hardInvariant": true,
+        "mode": "block",
+        "defaultOff": true,
+        "localOnly": true,
+        "fakeProviderOnly": true,
+        "liveAuthorityAllowed": false
+      },
+      "executionPosture": {
+        "defaultOff": true,
+        "localOnly": true,
+        "fakeProviderOnly": true,
+        "liveExecutionAllowed": false,
+        "providerCallsAllowed": false,
+        "browserExecutionAllowed": false,
+        "toolExecutionAllowed": false,
+        "modelCallsAllowed": false,
+        "memoryWritesAllowed": false,
+        "channelDeliveryAllowed": false,
+        "productionRoutingAllowed": false,
+        "routeActivationAllowed": false,
+        "userVisiblePythonActivationAllowed": false
+      },
+      "authorityFlags": {
+        "liveToolDispatched": false,
+        "providerCalled": false,
+        "browserOpened": false,
+        "modelCalled": false,
+        "memoryWritten": false,
+        "channelDeliveryPerformed": false,
+        "productionRouteActivated": false,
+        "routeActivated": false,
+        "userVisiblePythonActivated": false,
+        "liveAuthorityExercised": false
+      },
+      "expectedOutcome": {
+        "mustBlock": true,
+        "acceptableProjection": false,
+        "allowedStatuses": [
+          "repair_required",
+          "blocked"
+        ],
+        "repairAction": "omit_unsupported_claim",
+        "boundaryAction": "block",
+        "boundaryStatus": "blocked"
+      },
+      "publicProjection": {
+        "metadataOnly": true,
+        "digestSafe": true,
+        "rawGovernedProjection": false,
+        "rawSourceProjected": false,
+        "privateDataProjected": false,
+        "outputContainsFactsWithoutSupport": false
+      },
+      "adkUsageNotes": "Evaluation fixture only; numeric values are represented by digests."
+    },
+    {
+      "id": "weak_inference_rendered_as_fact",
+      "title": "Weak inference is projected as a confirmed factual statement.",
+      "regressionSignal": "weak_claim_render_as_fact",
+      "researchDeterminismRows": [
+        "weak_claim_downgrade",
+        "final_projection_boundary"
+      ],
+      "owningLayer": "Research eval/harness",
+      "selector": {
+        "route": "research_determinism_harness",
+        "governedResearchHarness": true,
+        "fallbackRoute": null,
+        "fallbackToGeneralChatAllowed": false
+      },
+      "enforcement": {
+        "hardInvariant": true,
+        "mode": "block",
+        "defaultOff": true,
+        "localOnly": true,
+        "fakeProviderOnly": true,
+        "liveAuthorityAllowed": false
+      },
+      "executionPosture": {
+        "defaultOff": true,
+        "localOnly": true,
+        "fakeProviderOnly": true,
+        "liveExecutionAllowed": false,
+        "providerCallsAllowed": false,
+        "browserExecutionAllowed": false,
+        "toolExecutionAllowed": false,
+        "modelCallsAllowed": false,
+        "memoryWritesAllowed": false,
+        "channelDeliveryAllowed": false,
+        "productionRoutingAllowed": false,
+        "routeActivationAllowed": false,
+        "userVisiblePythonActivationAllowed": false
+      },
+      "authorityFlags": {
+        "liveToolDispatched": false,
+        "providerCalled": false,
+        "browserOpened": false,
+        "modelCalled": false,
+        "memoryWritten": false,
+        "channelDeliveryPerformed": false,
+        "productionRouteActivated": false,
+        "routeActivated": false,
+        "userVisiblePythonActivated": false,
+        "liveAuthorityExercised": false
+      },
+      "expectedOutcome": {
+        "mustBlock": true,
+        "acceptableProjection": false,
+        "allowedStatuses": [
+          "repair_required",
+          "blocked"
+        ],
+        "repairAction": "qualify_weak_claim",
+        "boundaryAction": "block",
+        "boundaryStatus": "blocked"
+      },
+      "publicProjection": {
+        "metadataOnly": true,
+        "digestSafe": true,
+        "rawGovernedProjection": false,
+        "rawSourceProjected": false,
+        "privateDataProjected": false,
+        "outputContainsFactsWithoutSupport": false
+      },
+      "adkUsageNotes": "Evaluation fixture only; weak claim handling remains projection policy."
+    },
+    {
+      "id": "stale_source_accepted_as_current",
+      "title": "Stale source proof is treated as current evidence.",
+      "regressionSignal": "stale_source_current_projection",
+      "researchDeterminismRows": [
+        "source_proof_matrix",
+        "stale_source_rejection",
+        "final_projection_boundary"
+      ],
+      "owningLayer": "Research eval/harness",
+      "selector": {
+        "route": "research_determinism_harness",
+        "governedResearchHarness": true,
+        "fallbackRoute": null,
+        "fallbackToGeneralChatAllowed": false
+      },
+      "enforcement": {
+        "hardInvariant": true,
+        "mode": "block",
+        "defaultOff": true,
+        "localOnly": true,
+        "fakeProviderOnly": true,
+        "liveAuthorityAllowed": false
+      },
+      "executionPosture": {
+        "defaultOff": true,
+        "localOnly": true,
+        "fakeProviderOnly": true,
+        "liveExecutionAllowed": false,
+        "providerCallsAllowed": false,
+        "browserExecutionAllowed": false,
+        "toolExecutionAllowed": false,
+        "modelCallsAllowed": false,
+        "memoryWritesAllowed": false,
+        "channelDeliveryAllowed": false,
+        "productionRoutingAllowed": false,
+        "routeActivationAllowed": false,
+        "userVisiblePythonActivationAllowed": false
+      },
+      "authorityFlags": {
+        "liveToolDispatched": false,
+        "providerCalled": false,
+        "browserOpened": false,
+        "modelCalled": false,
+        "memoryWritten": false,
+        "channelDeliveryPerformed": false,
+        "productionRouteActivated": false,
+        "routeActivated": false,
+        "userVisiblePythonActivated": false,
+        "liveAuthorityExercised": false
+      },
+      "expectedOutcome": {
+        "mustBlock": true,
+        "acceptableProjection": false,
+        "allowedStatuses": [
+          "repair_required",
+          "blocked"
+        ],
+        "repairAction": "refresh_stale_source",
+        "boundaryAction": "block",
+        "boundaryStatus": "blocked"
+      },
+      "publicProjection": {
+        "metadataOnly": true,
+        "digestSafe": true,
+        "rawGovernedProjection": false,
+        "rawSourceProjected": false,
+        "privateDataProjected": false,
+        "outputContainsFactsWithoutSupport": false
+      },
+      "adkUsageNotes": "Evaluation fixture only; freshness is checked against fixture timestamps."
+    },
+    {
+      "id": "child_summary_without_envelope",
+      "title": "Child result text is trusted without a runtime-issued evidence envelope.",
+      "regressionSignal": "child_completion_text_without_envelope",
+      "researchDeterminismRows": [
+        "child_raw_summary_rejection",
+        "intermediate_synthesis_boundary"
+      ],
+      "owningLayer": "Research eval/harness",
+      "selector": {
+        "route": "research_determinism_harness",
+        "governedResearchHarness": true,
+        "fallbackRoute": null,
+        "fallbackToGeneralChatAllowed": false
+      },
+      "enforcement": {
+        "hardInvariant": true,
+        "mode": "block",
+        "defaultOff": true,
+        "localOnly": true,
+        "fakeProviderOnly": true,
+        "liveAuthorityAllowed": false
+      },
+      "executionPosture": {
+        "defaultOff": true,
+        "localOnly": true,
+        "fakeProviderOnly": true,
+        "liveExecutionAllowed": false,
+        "providerCallsAllowed": false,
+        "browserExecutionAllowed": false,
+        "toolExecutionAllowed": false,
+        "modelCallsAllowed": false,
+        "memoryWritesAllowed": false,
+        "channelDeliveryAllowed": false,
+        "productionRoutingAllowed": false,
+        "routeActivationAllowed": false,
+        "userVisiblePythonActivationAllowed": false
+      },
+      "authorityFlags": {
+        "liveToolDispatched": false,
+        "providerCalled": false,
+        "browserOpened": false,
+        "modelCalled": false,
+        "memoryWritten": false,
+        "channelDeliveryPerformed": false,
+        "productionRouteActivated": false,
+        "routeActivated": false,
+        "userVisiblePythonActivated": false,
+        "liveAuthorityExercised": false
+      },
+      "expectedOutcome": {
+        "mustBlock": true,
+        "acceptableProjection": false,
+        "allowedStatuses": [
+          "repair_required",
+          "blocked"
+        ],
+        "repairAction": "return_partial_with_missing_work_report",
+        "boundaryAction": "block",
+        "boundaryStatus": "blocked"
+      },
+      "publicProjection": {
+        "metadataOnly": true,
+        "digestSafe": true,
+        "rawGovernedProjection": false,
+        "rawSourceProjected": false,
+        "privateDataProjected": false,
+        "outputContainsFactsWithoutSupport": false
+      },
+      "adkUsageNotes": "Evaluation fixture only; child result evidence must be envelope metadata."
+    },
+    {
+      "id": "missing_requested_criterion_accepted",
+      "title": "Task is accepted even though a required user criterion is missing.",
+      "regressionSignal": "acceptance_criterion_missing_but_completion_passes",
+      "researchDeterminismRows": [
+        "task_completion_proof",
+        "final_projection_boundary"
+      ],
+      "owningLayer": "Research eval/harness",
+      "selector": {
+        "route": "research_determinism_harness",
+        "governedResearchHarness": true,
+        "fallbackRoute": null,
+        "fallbackToGeneralChatAllowed": false
+      },
+      "enforcement": {
+        "hardInvariant": true,
+        "mode": "block",
+        "defaultOff": true,
+        "localOnly": true,
+        "fakeProviderOnly": true,
+        "liveAuthorityAllowed": false
+      },
+      "executionPosture": {
+        "defaultOff": true,
+        "localOnly": true,
+        "fakeProviderOnly": true,
+        "liveExecutionAllowed": false,
+        "providerCallsAllowed": false,
+        "browserExecutionAllowed": false,
+        "toolExecutionAllowed": false,
+        "modelCallsAllowed": false,
+        "memoryWritesAllowed": false,
+        "channelDeliveryAllowed": false,
+        "productionRoutingAllowed": false,
+        "routeActivationAllowed": false,
+        "userVisiblePythonActivationAllowed": false
+      },
+      "authorityFlags": {
+        "liveToolDispatched": false,
+        "providerCalled": false,
+        "browserOpened": false,
+        "modelCalled": false,
+        "memoryWritten": false,
+        "channelDeliveryPerformed": false,
+        "productionRouteActivated": false,
+        "routeActivated": false,
+        "userVisiblePythonActivated": false,
+        "liveAuthorityExercised": false
+      },
+      "expectedOutcome": {
+        "mustBlock": true,
+        "acceptableProjection": false,
+        "allowedStatuses": [
+          "repair_required",
+          "blocked"
+        ],
+        "repairAction": "return_partial_with_missing_work_report",
+        "boundaryAction": "block",
+        "boundaryStatus": "blocked"
+      },
+      "publicProjection": {
+        "metadataOnly": true,
+        "digestSafe": true,
+        "rawGovernedProjection": false,
+        "rawSourceProjected": false,
+        "privateDataProjected": false,
+        "outputContainsFactsWithoutSupport": false
+      },
+      "adkUsageNotes": "Evaluation fixture only; missing work report remains public metadata."
+    },
+    {
+      "id": "private_projection_leakage",
+      "title": "Governed public projection includes protected source or workspace material.",
+      "regressionSignal": "protected_material_projection_attempt",
+      "researchDeterminismRows": [
+        "source_proof_matrix",
+        "final_projection_boundary"
+      ],
+      "owningLayer": "Research eval/harness",
+      "selector": {
+        "route": "research_determinism_harness",
+        "governedResearchHarness": true,
+        "fallbackRoute": null,
+        "fallbackToGeneralChatAllowed": false
+      },
+      "enforcement": {
+        "hardInvariant": true,
+        "mode": "block",
+        "defaultOff": true,
+        "localOnly": true,
+        "fakeProviderOnly": true,
+        "liveAuthorityAllowed": false
+      },
+      "executionPosture": {
+        "defaultOff": true,
+        "localOnly": true,
+        "fakeProviderOnly": true,
+        "liveExecutionAllowed": false,
+        "providerCallsAllowed": false,
+        "browserExecutionAllowed": false,
+        "toolExecutionAllowed": false,
+        "modelCallsAllowed": false,
+        "memoryWritesAllowed": false,
+        "channelDeliveryAllowed": false,
+        "productionRoutingAllowed": false,
+        "routeActivationAllowed": false,
+        "userVisiblePythonActivationAllowed": false
+      },
+      "authorityFlags": {
+        "liveToolDispatched": false,
+        "providerCalled": false,
+        "browserOpened": false,
+        "modelCalled": false,
+        "memoryWritten": false,
+        "channelDeliveryPerformed": false,
+        "productionRouteActivated": false,
+        "routeActivated": false,
+        "userVisiblePythonActivated": false,
+        "liveAuthorityExercised": false
+      },
+      "expectedOutcome": {
+        "mustBlock": true,
+        "acceptableProjection": false,
+        "allowedStatuses": [
+          "repair_required",
+          "blocked"
+        ],
+        "repairAction": "omit_unsupported_claim",
+        "boundaryAction": "block",
+        "boundaryStatus": "blocked"
+      },
+      "publicProjection": {
+        "metadataOnly": true,
+        "digestSafe": true,
+        "rawGovernedProjection": false,
+        "rawSourceProjected": false,
+        "privateDataProjected": false,
+        "outputContainsFactsWithoutSupport": false
+      },
+      "adkUsageNotes": "Evaluation fixture only; protected material is represented by blocked metadata flags only."
+    },
+    {
+      "id": "final_answer_bypasses_failed_intermediate_boundary",
+      "title": "Final answer is projected after an intermediate research boundary failed.",
+      "regressionSignal": "failed_intermediate_boundary_ignored",
+      "researchDeterminismRows": [
+        "intermediate_synthesis_boundary",
+        "final_projection_boundary"
+      ],
+      "owningLayer": "Research eval/harness",
+      "selector": {
+        "route": "research_determinism_harness",
+        "governedResearchHarness": true,
+        "fallbackRoute": null,
+        "fallbackToGeneralChatAllowed": false
+      },
+      "enforcement": {
+        "hardInvariant": true,
+        "mode": "block",
+        "defaultOff": true,
+        "localOnly": true,
+        "fakeProviderOnly": true,
+        "liveAuthorityAllowed": false
+      },
+      "executionPosture": {
+        "defaultOff": true,
+        "localOnly": true,
+        "fakeProviderOnly": true,
+        "liveExecutionAllowed": false,
+        "providerCallsAllowed": false,
+        "browserExecutionAllowed": false,
+        "toolExecutionAllowed": false,
+        "modelCallsAllowed": false,
+        "memoryWritesAllowed": false,
+        "channelDeliveryAllowed": false,
+        "productionRoutingAllowed": false,
+        "routeActivationAllowed": false,
+        "userVisiblePythonActivationAllowed": false
+      },
+      "authorityFlags": {
+        "liveToolDispatched": false,
+        "providerCalled": false,
+        "browserOpened": false,
+        "modelCalled": false,
+        "memoryWritten": false,
+        "channelDeliveryPerformed": false,
+        "productionRouteActivated": false,
+        "routeActivated": false,
+        "userVisiblePythonActivated": false,
+        "liveAuthorityExercised": false
+      },
+      "expectedOutcome": {
+        "mustBlock": true,
+        "acceptableProjection": false,
+        "allowedStatuses": [
+          "blocked"
+        ],
+        "repairAction": "return_partial_with_missing_work_report",
+        "boundaryAction": "block",
+        "boundaryStatus": "blocked"
+      },
+      "publicProjection": {
+        "metadataOnly": true,
+        "digestSafe": true,
+        "rawGovernedProjection": false,
+        "rawSourceProjected": false,
+        "privateDataProjected": false,
+        "outputContainsFactsWithoutSupport": false
+      },
+      "adkUsageNotes": "Evaluation fixture only; final projection must honor prior boundary history."
+    }
+  ]
+}

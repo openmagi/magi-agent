@@ -1,0 +1,310 @@
+{
+  "schemaVersion": "tsParityReplayFixture.v1",
+  "fixtureId": "ts_public_event_union_golden_0001",
+  "sourceRuntime": "typescript-core-agent",
+  "recordingMode": "local_diagnostic_fixture",
+  "redactionStatus": "verified",
+  "localDiagnostic": true,
+  "attachmentFlags": {
+    "adkRunnerInvoked": false,
+    "liveToolDispatched": false,
+    "shellOrCodeExecuted": false,
+    "memoryProviderCalled": false,
+    "agentMemoryImported": false,
+    "hipocampusQmdLiveCalled": false,
+    "productionStorageWritten": false,
+    "routeOrApiAttached": false,
+    "telegramAttached": false,
+    "canaryTrafficAttached": false,
+    "evidenceBlockEnabled": false
+  },
+  "transcriptEntries": [
+    {
+      "kind": "turn_started",
+      "ts": 1,
+      "turnId": "turn-union-events-1",
+      "declaredRoute": "direct"
+    },
+    {
+      "kind": "user_message",
+      "ts": 2,
+      "turnId": "turn-union-events-1",
+      "text": "Replay safeAgentEvent union projection fixtures."
+    },
+    {
+      "kind": "assistant_text",
+      "ts": 3,
+      "turnId": "turn-union-events-1",
+      "text": "Union projection completed."
+    },
+    {
+      "kind": "turn_committed",
+      "ts": 4,
+      "turnId": "turn-union-events-1",
+      "inputTokens": 18,
+      "outputTokens": 7
+    }
+  ],
+  "agentEvents": [
+    {
+      "type": "research_artifact_delta",
+      "claims": [
+        {
+          "claimId": "claim-public-1",
+          "text": "Public claim with token=ghp_unionsecret",
+          "claimType": "fact",
+          "supportStatus": "supported",
+          "sourceIds": ["src-public-1"],
+          "confidence": 0.75,
+          "reasoning": {
+            "premiseSourceIds": ["src-public-1"],
+            "inference": "Public inference with key=sk-union-secret",
+            "assumptions": ["Public assumption path=/data/bots/bot-union"],
+            "status": "source_backed",
+            "rawPrompt": "private research raw payload"
+          },
+          "rawPayload": "private research raw payload"
+        }
+      ],
+      "claimSourceLinks": [
+        {
+          "claimId": "claim-public-1",
+          "sourceId": "src-public-1",
+          "support": "supports",
+          "rawQuote": "private research raw payload"
+        }
+      ],
+      "contradictions": [
+        {
+          "contradictionId": "contra-public-1",
+          "claimIds": ["claim-public-1"],
+          "sourceIds": ["src-public-2"],
+          "resolution": "Public resolution token=ghp_unionsecret",
+          "status": "handled",
+          "rawPayload": "private research raw payload"
+        }
+      ],
+      "rawPayload": "private research raw payload"
+    },
+    {
+      "type": "mission_created",
+      "mission": {
+        "id": "mission-public-1",
+        "title": "Public mission",
+        "kind": "manual",
+        "status": "running",
+        "payload": "mission payload internals"
+      }
+    },
+    {
+      "type": "mission_event",
+      "missionId": "mission-public-1",
+      "eventType": "checkpoint",
+      "message": "Public mission event token=ghp_unionsecret",
+      "payload": "mission payload internals"
+    },
+    {
+      "type": "retry",
+      "reason": "Transient public failure token=ghp_unionsecret",
+      "retryNo": 2,
+      "toolUseId": "toolu-public-1",
+      "toolName": "WebFetch",
+      "rawInput": "private proposed command"
+    },
+    {
+      "type": "spawn_worktree_conflict",
+      "action": "apply",
+      "spawnDir": "/workspace/private-union/spawn",
+      "conflictKind": "parent_dirty",
+      "conflictedFiles": ["src/public.ts"],
+      "changedFiles": ["src/public.ts", "/data/bots/bot-union/secret.ts"],
+      "mergeStrategy": "copy",
+      "adoptedCommit": "abc123",
+      "summary": "Public conflict summary token=ghp_unionsecret",
+      "suggestedActions": ["Review src/public.ts"],
+      "rawPatch": "private proposed command"
+    },
+    {
+      "type": "structured_output",
+      "status": "invalid",
+      "schemaName": "PublicSchema",
+      "reason": "missing public field token=ghp_unionsecret",
+      "rawOutput": "private research raw payload"
+    },
+    {
+      "type": "turn_interrupted",
+      "turnId": "turn-union-events-1",
+      "handoffRequested": true,
+      "source": "api",
+      "sessionTransport": "session transport internals"
+    },
+    {
+      "type": "spawn_started",
+      "taskId": "spawn-public-1",
+      "persona": "researcher",
+      "prompt": "private spawn prompt",
+      "detail": "Inspect public source token=ghp_unionsecret",
+      "deliver": "background"
+    },
+    {
+      "type": "spawn_result",
+      "taskId": "spawn-public-1",
+      "status": "ok",
+      "finalText": "final child text should stay private",
+      "toolCallCount": 2,
+      "rawTranscript": "raw child transcript"
+    },
+    {
+      "type": "background_task",
+      "taskId": "spawn-public-1",
+      "persona": "researcher",
+      "status": "running",
+      "detail": "Working on public task token=ghp_unionsecret",
+      "transport": "browser transport detail"
+    },
+    {
+      "type": "child_llm_start",
+      "taskId": "child-public-1",
+      "parentTurnId": "turn-union-events-1",
+      "childTurnId": "child-turn-public-1",
+      "traceId": "trace-public-1",
+      "iter": 1,
+      "model": "public-model",
+      "prompt": "private spawn prompt"
+    },
+    {
+      "type": "child_llm_end",
+      "taskId": "child-public-1",
+      "parentTurnId": "turn-union-events-1",
+      "childTurnId": "child-turn-public-1",
+      "traceId": "trace-public-1",
+      "iter": 1,
+      "model": "public-model",
+      "stopReason": "end_turn",
+      "durationMs": 33,
+      "finalText": "final child text should stay private"
+    },
+    {
+      "type": "child_tool_batch_start",
+      "taskId": "child-public-1",
+      "iter": 1,
+      "toolCount": 2,
+      "toolNames": ["WebFetch", "SourceInspect"],
+      "rawInput": "private proposed command"
+    },
+    {
+      "type": "child_tool_batch_end",
+      "taskId": "child-public-1",
+      "iter": 1,
+      "status": "error",
+      "toolCount": 2,
+      "errorCount": 1,
+      "durationMs": 44,
+      "errorName": "ToolError",
+      "errorMessage": "tool failed token=ghp_unionsecret",
+      "rawOutput": "raw child transcript"
+    },
+    {
+      "type": "child_abort",
+      "taskId": "child-public-1",
+      "source": "parent",
+      "rawTranscript": "raw child transcript"
+    },
+    {
+      "type": "tournament_result",
+      "variants": [
+        {"variantIndex": 0, "score": 0.1, "rawText": "final child text should stay private"},
+        {"variantIndex": 1, "score": 0.9, "rawText": "raw child transcript"}
+      ],
+      "winnerIndex": 1
+    },
+    {
+      "type": "ask_user",
+      "questionId": "question-public-1",
+      "question": "Choose a public path token=ghp_unionsecret",
+      "choices": [
+        {
+          "id": "choice-a",
+          "label": "Proceed",
+          "description": "Use safe public summary path=/workspace/private-union"
+        }
+      ],
+      "allowFreeText": false,
+      "rawPrompt": "private spawn prompt"
+    },
+    {
+      "type": "plan_ready",
+      "planId": "plan-public-1",
+      "requestId": "req-plan-public-1",
+      "state": "awaiting_approval",
+      "plan": "1. Inspect public source\n2. Report safe summary token=ghp_unionsecret",
+      "proposedInput": "private proposed command"
+    },
+    {
+      "type": "plan_lifecycle",
+      "state": "approved",
+      "previousMode": "plan",
+      "rawPlan": "private proposed command"
+    },
+    {
+      "type": "session_stop",
+      "taskId": "task-public-1",
+      "reason": "target_met",
+      "round": 3,
+      "lastScore": 0.88,
+      "sessionTransport": "session transport internals"
+    },
+    {
+      "type": "context_activated",
+      "contextId": "context-public-1",
+      "title": "Public context token=ghp_unionsecret",
+      "payload": "session transport internals"
+    },
+    {
+      "type": "compaction_impossible",
+      "model": "public-model",
+      "contextWindow": 128000,
+      "effectiveReserveTokens": 4096,
+      "effectiveBudgetTokens": 120000,
+      "minViableBudgetTokens": 16000,
+      "rawPrompt": "private spawn prompt"
+    },
+    {
+      "type": "injection_queued",
+      "injectionId": "inject-public-1",
+      "queuedCount": 2,
+      "payload": "private proposed command"
+    },
+    {
+      "type": "injection_drained",
+      "count": 2,
+      "iteration": 4,
+      "payload": "private proposed command"
+    },
+    {
+      "type": "heartbeat",
+      "turnId": "turn-union-events-1",
+      "iter": 4,
+      "elapsedMs": 1200,
+      "lastEventAt": 1710000100,
+      "payload": "session transport internals"
+    }
+  ],
+  "controlEvents": [],
+  "memoryFences": [
+    {
+      "fenceId": "memory-union-public",
+      "memoryMode": "incognito",
+      "sourceAuthority": "memory_disabled",
+      "recallClaimed": false,
+      "writeClaimed": false,
+      "providerCallMade": false
+    }
+  ],
+  "compactionBoundaries": [],
+  "sourceAuthority": {
+    "policy": "memory_disabled",
+    "sourceIds": [],
+    "memoryMayOverrideCurrentTurn": false
+  }
+}

@@ -1,0 +1,56 @@
+{
+  "schemaVersion": "recipeCompositionRegressionFixture.v1",
+  "caseId": "explicit_recipe_omitted",
+  "description": "An explicitly selected recipe must be admitted or the effective contract fails closed.",
+  "activationMode": {
+    "defaultOff": true,
+    "trafficAttached": false,
+    "executionAttached": false,
+    "liveActivation": false
+  },
+  "stack": {
+    "explicitRecipeRefs": [
+      "recipe.explicit.required"
+    ],
+    "autoRecipeRefs": [
+      "recipe.auto.unrelated"
+    ],
+    "allowAdditionalAutoRecipes": true,
+    "turnId": "turn-regression-explicit-omitted",
+    "sessionId": "session-regression-explicit-omitted"
+  },
+  "globalRetryCap": 3,
+  "snapshots": [
+    {
+      "recipeRef": "recipe.auto.unrelated"
+    }
+  ],
+  "expected": {
+    "blocked": true,
+    "effectiveRecipeRefs": [],
+    "includedExplicitRefs": [],
+    "includedAutoRefs": [],
+    "excludedRefs": [
+      {
+        "recipeRef": "recipe.explicit.required",
+        "reason": "explicit_recipe_missing",
+        "blocking": true
+      }
+    ],
+    "conflictCodes": [
+      "explicit_recipe_missing"
+    ],
+    "effectiveRetryPolicy": {
+      "maxAttempts": 0,
+      "repairAttempts": 0,
+      "globalCap": 3
+    },
+    "projection": {
+      "conflictStatus": "blocked",
+      "hardSafetyStatus": "not_required",
+      "excludedReasonCodes": [
+        "explicit_recipe_missing"
+      ]
+    }
+  }
+}

@@ -1,0 +1,16 @@
+{
+  "expectedReceiptDigest": "sha256:9484f7bf6966884e3395aa6408ec2068c2eac08912a030fe2344a52bad168b8c",
+  "request": {
+    "actionDigest": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+    "activityId": "activity-007",
+    "approvalReceiptDigest": "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+    "compensationPolicyRef": "compensate:provider-cancel",
+    "idempotencyKey": "idem-api-1",
+    "kind": "external_api_call",
+    "retryPolicy": "none",
+    "reversible": true,
+    "sideEffecting": true,
+    "targetSystemRef": "provider:public-digest",
+    "timeoutMs": 5000
+  }
+}

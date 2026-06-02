@@ -1,0 +1,60 @@
+{
+  "schemaVersion": "gate3b.liveDuplicateBundle.v1",
+  "bundleId": "bundle_local_sink_unsafe",
+  "captureSurface": "selected_bot_post_turn_bundle",
+  "sourceRuntime": "typescript-core-agent",
+  "responseAuthority": "typescript-only",
+  "recordingMode": "live_duplicate_redacted",
+  "redactionStatus": "verified",
+  "createdAt": "2026-05-16T12:02:00Z",
+  "sourceProvenance": {
+    "sourceKind": "live_duplicate_validation_metadata",
+    "captureId": "capture_local_sink_unsafe",
+    "captureSurface": "selected_bot_post_turn_bundle",
+    "capturePoint": "post_turn_redacted_duplicate",
+    "sourcePath": "local-fixtures/gate3b/local-sink-unsafe.json",
+    "productionPathIncluded": false,
+    "liveTrafficConsumed": false
+  },
+  "recipe": {
+    "recipeSnapshotId": "recipe_snapshot_gate3b_local_sink_unsafe",
+    "immutableSnapshotId": "recipe_snapshot_gate3b_local_sink_unsafe",
+    "packIds": ["openmagi.research"],
+    "hardSafetyEnabled": true
+  },
+  "transcriptEntries": [
+    {
+      "entryId": "transcript_local_sink_unsafe",
+      "role": "assistant",
+      "publicText": "Authorization: Bearer unsafe-token"
+    }
+  ],
+  "agentEvents": [],
+  "controlEvents": [],
+  "recordedToolResults": [],
+  "evidenceAuditMetadata": {
+    "auditId": "audit_local_sink_unsafe",
+    "redactionReview": "verified",
+    "externalAckIncluded": false
+  },
+  "attachmentFlags": {
+    "productionRouteAttached": false,
+    "productionTranscriptAttached": false,
+    "productionSseAttached": false,
+    "userOutputAttached": false,
+    "telegramAttached": false,
+    "liveToolAttached": false,
+    "liveRunnerAttached": false,
+    "productionStorageAttached": false,
+    "productionQueueAttached": false,
+    "evidenceBlockAttached": false
+  },
+  "productionAuthorityFlags": {
+    "canDelayTypescriptResponse": false,
+    "canAlterTypescriptResponse": false,
+    "canBlockTypescriptResponse": false,
+    "canInfluenceUserOutput": false,
+    "pythonResponseAuthority": false,
+    "typescriptResponseAuthorityOnly": true
+  }
+}

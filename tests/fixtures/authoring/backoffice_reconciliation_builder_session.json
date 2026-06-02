@@ -1,0 +1,105 @@
+{
+  "sessionId": "builder.session.backoffice-reconciliation",
+  "botId": "bot_backoffice_reconciliation_001",
+  "ownerId": "owner_backoffice_reconciliation_001",
+  "mode": "recipe_builder",
+  "temporary": true,
+  "separateAgentIdentity": false,
+  "title": "Backoffice reconciliation builder session",
+  "currentPhase": "review_gaps",
+  "activationEnabled": false,
+  "activationEligibility": false,
+  "authoringToolAllowlist": [
+    "ask_question",
+    "record_answer",
+    "save_draft",
+    "report_gap",
+    "propose_generated_plugin"
+  ],
+  "phases": [
+    {
+      "phaseId": "intake",
+      "title": "Intake",
+      "status": "completed",
+      "questionIds": ["question.backoffice.systems", "question.backoffice.outputs"]
+    },
+    {
+      "phaseId": "review_gaps",
+      "title": "Review gaps",
+      "status": "blocked",
+      "questionIds": ["question.backoffice.connector-gap"]
+    }
+  ],
+  "questions": [
+    {
+      "questionId": "question.backoffice.systems",
+      "phaseId": "intake",
+      "questionText": "Which backoffice systems should be reconciled?",
+      "required": true,
+      "answerKind": "multi_select"
+    },
+    {
+      "questionId": "question.backoffice.outputs",
+      "phaseId": "intake",
+      "questionText": "What review artifact should the draft produce?",
+      "required": true,
+      "answerKind": "free_text"
+    },
+    {
+      "questionId": "question.backoffice.connector-gap",
+      "phaseId": "review_gaps",
+      "questionText": "Which readonly connector approval is missing?",
+      "required": true,
+      "answerKind": "connector_ref"
+    }
+  ],
+  "answers": [
+    {
+      "questionId": "question.backoffice.systems",
+      "selectedRefs": ["system.erp", "system.payment-processor", "system.ticketing"]
+    },
+    {
+      "questionId": "question.backoffice.outputs",
+      "answerText": "Produce an exception report with evidence references and human approval before any writeback."
+    },
+    {
+      "questionId": "question.backoffice.connector-gap",
+      "selectedRefs": ["connector.erp.readonly", "connector.processor.readonly"]
+    }
+  ],
+  "draft": {
+    "draftId": "draft.backoffice-reconciliation.001",
+    "botId": "bot_backoffice_reconciliation_001",
+    "ownerId": "owner_backoffice_reconciliation_001",
+    "authoringSessionId": "builder.session.backoffice-reconciliation",
+    "status": "blocked",
+    "activationEnabled": false,
+    "activationEligibility": false,
+    "saveTarget": "current_bot_draft_store",
+    "pack": {
+      "packId": "draft.pack.backoffice-reconciliation",
+      "title": "Backoffice reconciliation assistant",
+      "summary": "Authoring-only draft for exception review. It cannot mutate ledgers, schedules, memory, or workspaces.",
+      "recipeRefs": ["recipe.backoffice.collect-evidence", "recipe.backoffice.exception-review"],
+      "harnessPolicy": {},
+      "toolPolicy": {
+        "allowedConnectorRefs": ["connector.erp.readonly", "connector.processor.readonly"],
+        "allowedToolRefs": ["SourceOpen", "SpreadsheetRead"],
+        "deniedToolRefs": ["FileWrite", "BrowserLive", "LedgerWrite", "ScheduleMutate"]
+      },
+      "evidencePolicy": {
+        "requiredEvidenceRefs": ["sourceRowDigest", "reconciliationDelta", "approvalReceipt"]
+      },
+      "validatorPolicy": {
+        "validatorRefs": ["validator:rowDigest@1", "validator:balancedTotals@1"]
+      },
+      "approvalPolicy": {
+        "requiresHumanReview": true
+      },
+      "projectionPolicy": {},
+      "repairPolicy": {
+        "maxRepairAttempts": 0
+      }
+    }
+  }
+}

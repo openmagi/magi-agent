@@ -1,0 +1,61 @@
+{
+  "schemaVersion": "recipeCompositionRegressionFixture.v1",
+  "caseId": "unsafe_context_widening",
+  "description": "A broad context request cannot widen the least-privilege context selected by another recipe.",
+  "activationMode": {
+    "defaultOff": true,
+    "trafficAttached": false,
+    "executionAttached": false,
+    "liveActivation": false
+  },
+  "stack": {
+    "explicitRecipeRefs": [
+      "recipe.context.broad",
+      "recipe.context.narrow"
+    ],
+    "turnId": "turn-regression-context-widening",
+    "sessionId": "session-regression-context-widening"
+  },
+  "globalRetryCap": 3,
+  "snapshots": [
+    {
+      "recipeRef": "recipe.context.broad",
+      "contextRequirements": [
+        "context.workspace:full"
+      ]
+    },
+    {
+      "recipeRef": "recipe.context.narrow",
+      "contextRequirements": [
+        "context.workspace:refs_only"
+      ]
+    }
+  ],
+  "projectionForbidden": [
+    "context.workspace:full",
+    "context.workspace:refs_only"
+  ],
+  "expected": {
+    "blocked": false,
+    "effectiveRecipeRefs": [
+      "recipe.context.broad",
+      "recipe.context.narrow"
+    ],
+    "includedExplicitRefs": [
+      "recipe.context.broad",
+      "recipe.context.narrow"
+    ],
+    "includedAutoRefs": [],
+    "effectiveContextPolicy": [
+      "context.workspace:refs_only"
+    ],
+    "conflictCodes": [],
+    "projection": {
+      "conflictStatus": "clear",
+      "hardSafetyStatus": "not_required",
+      "publicSafeCounts": {
+        "contextPolicyCount": 1
+      }
+    }
+  }
+}

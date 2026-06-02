@@ -1,0 +1,7 @@
+{"kind":"user_message","ts":1,"turnId":"turn-old","text":"Raw pre-boundary detail that must be suppressed."}
+{"kind":"assistant_text","ts":2,"turnId":"turn-old","text":"Raw old answer that must be suppressed."}
+{"kind":"compaction_boundary","ts":3,"turnId":"turn-compact","boundaryId":"compact-context-1","beforeTokenCount":90000,"afterTokenCount":1200,"summaryHash":"sha256:context-summary","summaryText":"User is working on Python ADK context continuity. Preserve the current task: make vague follow-up prompts resolve from recent transcript, approved compact summaries, and safe current-turn context.","createdAt":3}
+{"kind":"turn_started","ts":4,"turnId":"turn-new","declaredRoute":"gpt-5.5:anthropic"}
+{"kind":"user_message","ts":5,"turnId":"turn-new","text":"After compact, keep this recent detail too."}
+{"kind":"assistant_text","ts":6,"turnId":"turn-new","text":"Recent detail remains verbatim after the compact boundary."}
+{"kind":"turn_committed","ts":7,"turnId":"turn-new","inputTokens":4,"outputTokens":4}

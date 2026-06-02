@@ -1,0 +1,314 @@
+{
+  "schemaVersion": "tsParityReplayFixture.v1",
+  "fixtureId": "ts_public_event_golden_0001",
+  "sourceRuntime": "typescript-core-agent",
+  "recordingMode": "local_diagnostic_fixture",
+  "redactionStatus": "verified",
+  "localDiagnostic": true,
+  "attachmentFlags": {
+    "adkRunnerInvoked": false,
+    "liveToolDispatched": false,
+    "shellOrCodeExecuted": false,
+    "memoryProviderCalled": false,
+    "agentMemoryImported": false,
+    "hipocampusQmdLiveCalled": false,
+    "productionStorageWritten": false,
+    "routeOrApiAttached": false,
+    "telegramAttached": false,
+    "canaryTrafficAttached": false,
+    "evidenceBlockEnabled": false
+  },
+  "transcriptEntries": [
+    {
+      "kind": "turn_started",
+      "ts": 1,
+      "turnId": "turn-public-events-1",
+      "declaredRoute": "direct"
+    },
+    {
+      "kind": "user_message",
+      "ts": 2,
+      "turnId": "turn-public-events-1",
+      "text": "Replay public event projection fixtures."
+    },
+    {
+      "kind": "tool_call",
+      "ts": 3,
+      "turnId": "turn-public-events-1",
+      "toolUseId": "toolu_browser_1",
+      "name": "BrowserObserve",
+      "input": {
+        "url": "https://example.test/dashboard"
+      }
+    },
+    {
+      "kind": "tool_result",
+      "ts": 4,
+      "turnId": "turn-public-events-1",
+      "toolUseId": "toolu_browser_1",
+      "status": "error",
+      "output": "Browser observation failed with redacted public error.",
+      "isError": true,
+      "metadata": {
+        "sourceAuthority": "current_turn_over_memory",
+        "memoryRecallClaimed": false,
+        "memoryWriteClaimed": false
+      }
+    },
+    {
+      "kind": "assistant_text",
+      "ts": 5,
+      "turnId": "turn-public-events-1",
+      "text": "Public event projection completed."
+    },
+    {
+      "kind": "turn_committed",
+      "ts": 6,
+      "turnId": "turn-public-events-1",
+      "inputTokens": 22,
+      "outputTokens": 9
+    },
+    {
+      "kind": "compaction_boundary",
+      "ts": 7,
+      "turnId": "turn-public-events-1",
+      "boundaryId": "compact-public-1",
+      "beforeTokenCount": 18000,
+      "afterTokenCount": 1600,
+      "summaryHash": "sha256:public-event-redacted-summary",
+      "summaryText": "Redacted public event compaction summary.",
+      "createdAt": 7
+    },
+    {
+      "kind": "control_event",
+      "ts": 8,
+      "turnId": "turn-public-events-1",
+      "seq": 11,
+      "eventId": "ctrl-public-created-1",
+      "eventType": "control_request_created"
+    },
+    {
+      "kind": "control_event",
+      "ts": 9,
+      "turnId": "turn-public-events-1",
+      "seq": 12,
+      "eventId": "ctrl-public-resolved-1",
+      "eventType": "control_request_resolved"
+    }
+  ],
+  "agentEvents": [
+    {
+      "type": "browser_frame",
+      "action": "observe",
+      "url": "https://example.test/dashboard",
+      "imageBase64": "dGlueS1mcmFtZQ==",
+      "contentType": "image/png",
+      "capturedAt": 1710000000,
+      "sessionId": "browser-session-secret",
+      "cdpEndpoint": "ws://browser-worker/cdp/browser-session-secret",
+      "cdpToken": "browser-session-secret"
+    },
+    {
+      "type": "source_inspected",
+      "source": {
+        "sourceId": "src_public_1",
+        "turnId": "turn-public-events-1",
+        "toolName": "BrowserObserve",
+        "toolUseId": "toolu_browser_1",
+        "kind": "browser",
+        "uri": "https://example.test/docs",
+        "title": "Example docs",
+        "contentHash": "evidence:web:src_public_1",
+        "contentType": "text/html",
+        "trustTier": "official",
+        "snippets": [
+          "Visible excerpt token=ghp_publicsecret"
+        ],
+        "inspectedAt": 1710000001,
+        "metadata": {
+          "rawResponse": "raw transport details",
+          "memoryProviderPayload": "hipocampusMemory"
+        }
+      }
+    },
+    {
+      "type": "child_started",
+      "taskId": "child-public-1",
+      "parentTurnId": "turn-public-events-1",
+      "childReceiptRef": "receipt:sha256:1111111111111111111111111111111111111111111111111111111111111111",
+      "prompt": "private child prompt",
+      "detail": "Task: inspect public event surfaces"
+    },
+    {
+      "type": "child_completed",
+      "taskId": "child-public-1",
+      "childReceiptRef": "receipt:sha256:1111111111111111111111111111111111111111111111111111111111111111",
+      "summary": {
+        "text": "private child answer",
+        "rawOutput": "raw child stdout"
+      }
+    },
+    {
+      "type": "child_failed",
+      "taskId": "child-public-2",
+      "parentTurnId": "turn-public-events-1",
+      "childReceiptRef": "receipt:sha256:2222222222222222222222222222222222222222222222222222222222222222",
+      "error": "child failed with token=ghp_publicsecret",
+      "prompt": "private child prompt",
+      "rawOutput": "raw child stdout"
+    },
+    {
+      "type": "tool_end",
+      "id": "toolu_browser_1",
+      "status": "error",
+      "output_preview": "Browser failed. Authorization: Bearer public-secret path=/data/bots/bot-secret",
+      "durationMs": 31,
+      "rawArguments": "private tool args rm -rf /workspace/private"
+    },
+    {
+      "type": "runtime_trace",
+      "turnId": "turn-public-events-1",
+      "phase": "model_fallback",
+      "severity": "warning",
+      "title": "Model fallback selected",
+      "detail": "fallback used STRIPE_SECRET_KEY=stripe-live-secret and hidden reasoning",
+      "hiddenReasoning": "hidden reasoning"
+    },
+    {
+      "type": "error",
+      "code": "provider_error",
+      "message": "provider failed with SUPABASE_SERVICE_ROLE_KEY=supabase-service-role",
+      "rawProviderError": {
+        "authorization": "Bearer public-secret"
+      }
+    },
+    {
+      "type": "model_fallback",
+      "turnId": "turn-public-events-1",
+      "fromModel": "primary-model",
+      "toModel": "fallback-model",
+      "reason": "provider unavailable with sk-public-secret",
+      "pythonResponseAuthority": true
+    },
+    {
+      "type": "control_event",
+      "seq": 11,
+      "event": {
+        "type": "control_request_created",
+        "request": {
+          "requestId": "req-public-1",
+          "kind": "tool_permission",
+          "state": "pending",
+          "sessionKey": "redacted-session",
+          "source": "turn",
+          "prompt": "Allow browser observation?",
+          "proposedInput": {
+            "command": "rm -rf /workspace/private",
+            "authorization": "Bearer public-secret"
+          },
+          "createdAt": 11,
+          "expiresAt": 71
+        }
+      }
+    },
+    {
+      "type": "control_event",
+      "seq": 12,
+      "event": {
+        "type": "control_request_resolved",
+        "requestId": "req-public-1",
+        "decision": "approved",
+        "feedback": "approved with redacted preview",
+        "updatedInput": {
+          "authorization": "Bearer public-secret"
+        }
+      }
+    },
+    {
+      "type": "compaction_boundary",
+      "eventId": "evt-public-compaction",
+      "boundaryId": "compact-public-1",
+      "summaryText": "redacted public compaction marker"
+    }
+  ],
+  "controlEvents": [
+    {
+      "v": 1,
+      "type": "control_request_created",
+      "eventId": "ctrl-public-created-1",
+      "seq": 11,
+      "ts": 8,
+      "sessionKey": "redacted-session",
+      "turnId": "turn-public-events-1",
+      "idempotencyKey": "idem-public-control-1",
+      "request": {
+        "requestId": "req-public-1",
+        "kind": "tool_permission",
+        "state": "pending",
+        "sessionKey": "redacted-session",
+        "turnId": "turn-public-events-1",
+        "channelName": "local_replay",
+        "source": "turn",
+        "prompt": "Allow browser observation?",
+        "proposedInput": {
+          "tool": "BrowserObserve"
+        },
+        "createdAt": 11,
+        "expiresAt": 71
+      }
+    },
+    {
+      "v": 1,
+      "type": "control_request_resolved",
+      "eventId": "ctrl-public-resolved-1",
+      "seq": 12,
+      "ts": 9,
+      "sessionKey": "redacted-session",
+      "turnId": "turn-public-events-1",
+      "requestId": "req-public-1",
+      "decision": "approved",
+      "feedback": "approved with redacted preview"
+    }
+  ],
+  "memoryFences": [
+    {
+      "fenceId": "memory-normal-public",
+      "memoryMode": "normal",
+      "sourceAuthority": "current_turn_over_memory",
+      "recallClaimed": false,
+      "writeClaimed": false,
+      "providerCallMade": false
+    },
+    {
+      "fenceId": "memory-read-only-public",
+      "memoryMode": "read_only",
+      "sourceAuthority": "current_turn_over_memory",
+      "recallClaimed": false,
+      "writeClaimed": false,
+      "providerCallMade": false
+    },
+    {
+      "fenceId": "memory-incognito-public",
+      "memoryMode": "incognito",
+      "sourceAuthority": "memory_disabled",
+      "recallClaimed": false,
+      "writeClaimed": false,
+      "providerCallMade": false
+    }
+  ],
+  "compactionBoundaries": [
+    {
+      "boundaryId": "compact-public-1",
+      "transcriptTurnId": "turn-public-events-1",
+      "transcriptKind": "compaction_boundary",
+      "summaryHash": "sha256:public-event-redacted-summary"
+    }
+  ],
+  "sourceAuthority": {
+    "policy": "current_turn_over_memory",
+    "sourceIds": [
+      "src_public_1"
+    ],
+    "memoryMayOverrideCurrentTurn": false
+  }
+}

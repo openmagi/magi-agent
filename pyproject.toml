@@ -1,0 +1,43 @@
+[build-system]
+requires = ["setuptools==80.9.0", "wheel==0.45.1"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "magi-agent"
+version = "0.1.0"
+description = "OpenMagi Python ADK runtime and CLI for personal AI agents"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+  "fastapi==0.136.1",
+  "google-adk==1.33.0",
+  "pydantic==2.13.4",
+  "uvicorn==0.47.0",
+]
+
+[project.optional-dependencies]
+dev = [
+  "httpx==0.28.1",
+  "pytest==9.0.3",
+]
+cli = [
+  "textual==8.2.7",
+  "rich==15.0.0",
+  "rapidfuzz==3.14.5",
+  "typer==0.26.4",
+]
+composio = [
+  "composio==0.13.1",
+]
+
+[project.scripts]
+magi-agent = "openmagi_core_agent.main:main"
+openmagi-core-agent = "openmagi_core_agent.main:main"
+magi = "openmagi_core_agent.cli.__main__:main"
+
+[tool.setuptools.packages.find]
+include = ["openmagi_core_agent*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"

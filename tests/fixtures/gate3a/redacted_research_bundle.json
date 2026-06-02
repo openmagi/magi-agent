@@ -1,0 +1,59 @@
+{
+  "schemaVersion": "gate3a.recordedBundle.v1",
+  "bundleId": "bundle_local_fixture_research",
+  "sourceRuntime": "typescript-core-agent",
+  "recordingMode": "recorded_redacted",
+  "redactionStatus": "verified",
+  "createdAt": "2026-05-16T00:00:00Z",
+  "sourceProvenance": {
+    "sourceKind": "local_fixture",
+    "sourcePath": "local-fixtures/research-basic.jsonl",
+    "productionPathIncluded": false,
+    "liveCaptureIncluded": false
+  },
+  "turn": {
+    "sessionRef": "redacted-session",
+    "turnId": "turn_local_fixture_research",
+    "agentRole": "research",
+    "spawnDepth": 0,
+    "channel": "local_replay"
+  },
+  "recipe": {
+    "recipeSnapshotId": "recipe_local_research_v1",
+    "packIds": ["openmagi.research"],
+    "hardSafetyEnabled": true
+  },
+  "transcriptEntries": [
+    {
+      "entryId": "transcript_local_0001",
+      "role": "assistant",
+      "publicText": "Redacted public research answer."
+    }
+  ],
+  "agentEvents": [
+    {
+      "eventId": "evt_local_0001",
+      "eventType": "text",
+      "publicText": "Redacted public research answer."
+    }
+  ],
+  "recordedToolResults": [
+    {
+      "toolCallId": "tool_call_local_0001",
+      "toolName": "search.readonly",
+      "status": "recorded",
+      "outputMetadata": {
+        "resultCount": 1,
+        "preview": "Redacted source metadata."
+      },
+      "dispatchedLive": false
+    }
+  ],
+  "controlEvents": [],
+  "evidenceRecords": [
+    {
+      "recordId": "evidence_local_0001",
+      "summary": "Redacted evidence summary."
+    }
+  ]
+}

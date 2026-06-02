@@ -1,0 +1,126 @@
+{
+  "matrixVersion": "0.1.0",
+  "description": "Coding live mutation performance tracking matrix. Every row tracks a boundary authority that must remain default-off and production-mutation-disallowed until explicit canary activation.",
+  "rows": [
+    {
+      "id": "gate2_relay",
+      "label": "Gate 2 Relay Path",
+      "description": "Gate 2 selected sandbox canary response is fully handled by the Python relay path and cannot fall through to TypeScript core-agent.",
+      "defaultOff": true,
+      "productionWorkspaceMutationAllowed": false,
+      "prSlice": "PR1",
+      "testProofs": [
+        "test_priority_e_workspace_mutation_boundary::test_gate2_metadata_not_in_public_projection"
+      ],
+      "status": "not_started"
+    },
+    {
+      "id": "sandbox_rollback",
+      "label": "Sandbox Workspace Rollback",
+      "description": "Sandbox FileCreate/FileEdit/PatchApply produce mutation receipts with rollback/delete receipts. Sandbox root cannot escape workspace root.",
+      "defaultOff": true,
+      "productionWorkspaceMutationAllowed": false,
+      "prSlice": "PR2",
+      "testProofs": [
+        "test_priority_e_workspace_mutation_boundary::test_workspace_mutation_boundary_rejects_unknown_gate"
+      ],
+      "status": "not_started"
+    },
+    {
+      "id": "toolhost_mutation_receipt",
+      "label": "ToolHost Coding Mutation Receipt",
+      "description": "Every write-like tool action produces a durable receipt with digest-only public projection.",
+      "defaultOff": true,
+      "productionWorkspaceMutationAllowed": false,
+      "prSlice": "PR3",
+      "testProofs": [
+        "test_priority_e_workspace_mutation_boundary::test_mutation_receipt_requires_digest_fields"
+      ],
+      "status": "not_started"
+    },
+    {
+      "id": "read_before_edit",
+      "label": "Read-Before-Edit Gate",
+      "description": "FileEdit/PatchApply must reject operations when no prior read state exists for the target file.",
+      "defaultOff": true,
+      "productionWorkspaceMutationAllowed": false,
+      "prSlice": "PR4",
+      "testProofs": [
+        "test_coding_verification_evidence_contract_golden_fixtures::test_edit_without_read_is_rejected"
+      ],
+      "status": "not_started"
+    },
+    {
+      "id": "stale_edit_reject",
+      "label": "Stale Edit Rejection",
+      "description": "FileEdit/PatchApply must reject stale file versions where the read digest no longer matches the current file.",
+      "defaultOff": true,
+      "productionWorkspaceMutationAllowed": false,
+      "prSlice": "PR4",
+      "testProofs": [
+        "test_coding_verification_evidence_contract_golden_fixtures::test_stale_edit_version_is_rejected"
+      ],
+      "status": "not_started"
+    },
+    {
+      "id": "diff_evidence",
+      "label": "Diff Evidence Gate",
+      "description": "Diff claims must not be projected as facts without matching evidence from actual git diff output.",
+      "defaultOff": true,
+      "productionWorkspaceMutationAllowed": false,
+      "prSlice": "PR5",
+      "testProofs": [
+        "test_coding_verification_evidence_contract_golden_fixtures::test_diff_claim_without_evidence_blocked"
+      ],
+      "status": "not_started"
+    },
+    {
+      "id": "test_evidence",
+      "label": "Test Evidence Gate",
+      "description": "Test pass/fail claims must not be projected as facts without matching evidence from actual test runner output.",
+      "defaultOff": true,
+      "productionWorkspaceMutationAllowed": false,
+      "prSlice": "PR5",
+      "testProofs": [
+        "test_coding_verification_evidence_contract_golden_fixtures::test_test_claim_without_evidence_blocked"
+      ],
+      "status": "not_started"
+    },
+    {
+      "id": "repair_loop",
+      "label": "Bounded Coding Repair Loop",
+      "description": "Repair loops must be bounded and must stop/ask when evidence cannot be produced within the budget.",
+      "defaultOff": true,
+      "productionWorkspaceMutationAllowed": false,
+      "prSlice": "PR6",
+      "testProofs": [
+        "test_priority_e_workspace_mutation_boundary::test_repair_loop_budget_enforced"
+      ],
+      "status": "not_started"
+    },
+    {
+      "id": "final_projection",
+      "label": "Governed Final Projection",
+      "description": "Final coding output projection is sanitized: no raw paths, no auth tokens, no file contents in public events.",
+      "defaultOff": true,
+      "productionWorkspaceMutationAllowed": false,
+      "prSlice": "PR7",
+      "testProofs": [
+        "test_priority_e_workspace_mutation_boundary::test_final_projection_sanitization"
+      ],
+      "status": "not_started"
+    },
+    {
+      "id": "benchmark",
+      "label": "Claude Code Comparable Benchmark",
+      "description": "Benchmark fixture suite measuring coding task performance against Claude Code baselines.",
+      "defaultOff": true,
+      "productionWorkspaceMutationAllowed": false,
+      "prSlice": "PR8",
+      "testProofs": [
+        "test_coding_benchmark_contract::test_benchmark_fixture_schema_valid"
+      ],
+      "status": "not_started"
+    }
+  ]
+}

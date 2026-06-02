@@ -1,0 +1,73 @@
+{
+  "availableRenderers": [
+    "structured_claims_only"
+  ],
+  "availableTools": [
+    "SourceOpen",
+    "CitationVerify"
+  ],
+  "availableValidators": [
+    "validator:sourceOpened@1",
+    "validator:quoteExactMatch@1"
+  ],
+  "budgets": {
+    "maxIterations": 3,
+    "wallClockTimeoutMs": 30000
+  },
+  "approvalPolicy": "readonly_no_external_write",
+  "contextProjectionPolicy": "explicit",
+  "effectivePolicySnapshotDigest": "sha256:3333333333333333333333333333333333333333333333333333333333333333",
+  "evidenceProducers": [
+    "openedSourceSnapshot",
+    "spanRef",
+    "quoteDigest"
+  ],
+  "evidenceRequirements": [
+    "openedSourceSnapshot",
+    "spanRef",
+    "quoteDigest"
+  ],
+  "hardInvariants": {
+    "rawDraftStreamingForbidden": true,
+    "toolhostOnlyExecution": true,
+    "validatorBeforeProjection": true
+  },
+  "noMatchTerminalState": "ask_user",
+  "projectionPolicy": "structured_claims_only",
+  "repairPolicy": "bounded_terminal",
+  "registeredWorkflows": [
+    {
+      "compatibleRuntimeContractVersion": "programmable-determinism.v1",
+      "ownerRef": "team-digest:research",
+      "promotionHistory": [
+        "draft:2026-05-22",
+        "staging:2026-05-22"
+      ],
+      "sourceDigest": "sha256:4444444444444444444444444444444444444444444444444444444444444444",
+      "status": "staging",
+      "version": "1.0.0",
+      "workflowId": "openmagi.research.cited-market-brief"
+    }
+  ],
+  "routePrecedence": [
+    "research",
+    "general"
+  ],
+  "selectedRecipes": [
+    "openmagi.research.cited-market-brief.v1.0.0"
+  ],
+  "toolAllowlist": [
+    "SourceOpen",
+    "CitationVerify"
+  ],
+  "toolDenylist": [
+    "Bash",
+    "FileWrite"
+  ],
+  "validatorRefs": [
+    "validator:sourceOpened@1",
+    "validator:quoteExactMatch@1"
+  ],
+  "version": "1.0.0",
+  "workflowId": "openmagi.research.cited-market-brief"
+}

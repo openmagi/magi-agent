@@ -1,0 +1,281 @@
+{
+  "schemaVersion": "runtimeHeartbeatMatrix.v1",
+  "fixtureId": "runtime_heartbeat_pr0_matrix_20260527",
+  "scope": "docs-tests-only",
+  "track": "magi-agent-runtime-heartbeat-lease-pr0",
+  "auditDate": "2026-05-27",
+  "defaultOff": true,
+  "noLiveExecution": true,
+  "trafficAttached": false,
+  "publicSseHeartbeatMonitorUnchanged": true,
+  "expectedConcepts": [
+    "RunLease",
+    "HeartbeatReceipt",
+    "ActivityReceipt",
+    "StaleRunVerdict",
+    "ResumeDecision",
+    "NoAgentWatchdog"
+  ],
+  "hermesPatternsReviewed": [
+    "cron storage",
+    "gateway ticker",
+    "no-agent watchdog",
+    "inactivity timeout",
+    "restart resume",
+    "cron toolset restrictions"
+  ],
+  "rows": [
+    {
+      "id": "durable_run_lease_ownership",
+      "targetBehavior": "Durable run lease ownership records one active owner for a runtime work item.",
+      "hermesPatterns": [
+        "cron storage",
+        "gateway ticker"
+      ],
+      "openMagiConcepts": [
+        "RunLease"
+      ],
+      "owner": "runtime_lease_contract",
+      "alreadyCovered": false,
+      "missingImplementation": [
+        "Define RunLease identity, owner, epoch, acquired_at, renewed_at, expires_at, and release reason contract.",
+        "Define compare-and-swap lease renewal and transfer expectations for future storage implementation."
+      ],
+      "activationRequired": true,
+      "defaultOff": true,
+      "trafficAttached": false,
+      "liveAuthority": false,
+      "publicSseHeartbeatMonitorImpact": "none",
+      "notes": "PR0 records the contract only; it does not acquire, renew, or release runtime leases."
+    },
+    {
+      "id": "durable_heartbeat_receipt_records",
+      "targetBehavior": "Runtime heartbeats are durable receipts rather than transient process observations.",
+      "hermesPatterns": [
+        "gateway ticker",
+        "cron storage"
+      ],
+      "openMagiConcepts": [
+        "HeartbeatReceipt",
+        "RunLease"
+      ],
+      "owner": "runtime_receipt_contract",
+      "alreadyCovered": false,
+      "missingImplementation": [
+        "Define HeartbeatReceipt schema keyed by run lease and monotonic receipt sequence.",
+        "Define receipt writer idempotency and stale-write rejection expectations.",
+        "Document that heartbeat receipts alone cannot reset inactivity timers or prove activity.",
+        "Define rejection rules for forged, unauthenticated, or wrong-lease heartbeat receipts through future lease-owner validation."
+      ],
+      "activationRequired": true,
+      "defaultOff": true,
+      "trafficAttached": false,
+      "liveAuthority": false,
+      "publicSseHeartbeatMonitorImpact": "none",
+      "notes": "Receipts are planned runtime evidence, not public UI heartbeat events. Forged, unauthenticated, or wrong-lease heartbeat receipts cannot prove activity and must fail future lease-owner validation."
+    },
+    {
+      "id": "stale_run_detector",
+      "targetBehavior": "Stale-run detector produces an explicit verdict from lease and heartbeat evidence.",
+      "hermesPatterns": [
+        "gateway ticker",
+        "inactivity timeout"
+      ],
+      "openMagiConcepts": [
+        "RunLease",
+        "HeartbeatReceipt",
+        "StaleRunVerdict"
+      ],
+      "owner": "runtime_stale_detector_contract",
+      "alreadyCovered": false,
+      "missingImplementation": [
+        "Define StaleRunVerdict inputs, thresholds, verdict reasons, and evidence references.",
+        "Define detector output as a recorded decision with no automatic recovery side effects in PR0.",
+        "Define that wrong-lease heartbeat receipts cannot prove activity or suppress a stale verdict."
+      ],
+      "activationRequired": true,
+      "defaultOff": true,
+      "trafficAttached": false,
+      "liveAuthority": false,
+      "publicSseHeartbeatMonitorImpact": "none",
+      "notes": "The detector contract is inert until a later approved activation track supplies storage and scheduler authority. Heartbeat receipts alone do not prove activity."
+    },
+    {
+      "id": "inactivity_timeout_recorded_activity",
+      "targetBehavior": "Inactivity timeout uses recorded activity evidence instead of process-local idle state.",
+      "hermesPatterns": [
+        "inactivity timeout",
+        "cron storage"
+      ],
+      "openMagiConcepts": [
+        "ActivityReceipt",
+        "StaleRunVerdict"
+      ],
+      "owner": "runtime_stale_detector_contract",
+      "alreadyCovered": false,
+      "missingImplementation": [
+        "Define ActivityReceipt schema for user, tool, child-run, write, and mission activity classes.",
+        "Define inactivity threshold evaluation over durable activity receipts.",
+        "Define that heartbeat receipts alone cannot prove activity or reset inactivity timers without a matching ActivityReceipt."
+      ],
+      "activationRequired": true,
+      "defaultOff": true,
+      "trafficAttached": false,
+      "liveAuthority": false,
+      "publicSseHeartbeatMonitorImpact": "none",
+      "notes": "Activity receipts are future runtime inputs and are not emitted by PR0. Inactivity timeout must ignore heartbeat-only evidence when no validated activity receipt exists."
+    },
+    {
+      "id": "restart_resume_decision_record",
+      "targetBehavior": "Restart handling records a resume, abandon, or manual-review decision from durable evidence.",
+      "hermesPatterns": [
+        "restart resume",
+        "cron storage"
+      ],
+      "openMagiConcepts": [
+        "RunLease",
+        "HeartbeatReceipt",
+        "ActivityReceipt",
+        "StaleRunVerdict",
+        "ResumeDecision"
+      ],
+      "owner": "runtime_resume_contract",
+      "alreadyCovered": false,
+      "missingImplementation": [
+        "Define ResumeDecision schema with evidence links, selected action, and operator-visible reason.",
+        "Define restart evaluation ordering without starting or resuming work in PR0."
+      ],
+      "activationRequired": true,
+      "defaultOff": true,
+      "trafficAttached": false,
+      "liveAuthority": false,
+      "publicSseHeartbeatMonitorImpact": "none",
+      "notes": "PR0 creates no resume executor and changes no Gate 2 or Gate 8 activation behavior."
+    },
+    {
+      "id": "no_agent_watchdog_contract",
+      "targetBehavior": "No-agent watchdog detects configured work with no active agent lease or heartbeat evidence.",
+      "hermesPatterns": [
+        "no-agent watchdog",
+        "gateway ticker"
+      ],
+      "openMagiConcepts": [
+        "RunLease",
+        "HeartbeatReceipt",
+        "StaleRunVerdict",
+        "NoAgentWatchdog"
+      ],
+      "owner": "runtime_watchdog_contract",
+      "alreadyCovered": false,
+      "missingImplementation": [
+        "Define NoAgentWatchdog scope, evidence inputs, grace periods, and verdict output.",
+        "Define no-agent reporting contract without provisioning, spawning, or recovery authority."
+      ],
+      "activationRequired": true,
+      "defaultOff": true,
+      "trafficAttached": false,
+      "liveAuthority": false,
+      "publicSseHeartbeatMonitorImpact": "none",
+      "notes": "The watchdog is a planning contract only and does not create agents."
+    },
+    {
+      "id": "scheduler_tick_lock_overlap_prevention",
+      "targetBehavior": "Scheduler tick lock contract prevents overlapping stale checks and recovery decisions.",
+      "hermesPatterns": [
+        "gateway ticker",
+        "cron storage",
+        "cron toolset restrictions"
+      ],
+      "openMagiConcepts": [
+        "RunLease",
+        "StaleRunVerdict",
+        "ResumeDecision"
+      ],
+      "owner": "runtime_scheduler_contract",
+      "alreadyCovered": false,
+      "missingImplementation": [
+        "Define tick lock key, lease duration, renewal rule, and overlap rejection contract.",
+        "Define restricted tick responsibilities for future scheduler attachment."
+      ],
+      "activationRequired": true,
+      "defaultOff": true,
+      "trafficAttached": false,
+      "liveAuthority": false,
+      "publicSseHeartbeatMonitorImpact": "none",
+      "notes": "The matrix does not attach a scheduler or permit tick execution."
+    },
+    {
+      "id": "model_visible_heartbeat_projection_boundary",
+      "targetBehavior": "Model-visible heartbeat projection is a bounded summary, not raw lease or receipt authority.",
+      "hermesPatterns": [
+        "cron toolset restrictions",
+        "inactivity timeout"
+      ],
+      "openMagiConcepts": [
+        "HeartbeatReceipt",
+        "ActivityReceipt",
+        "StaleRunVerdict"
+      ],
+      "owner": "runtime_projection_contract",
+      "alreadyCovered": false,
+      "missingImplementation": [
+        "Define projection fields allowed in model context and fields kept runtime-private.",
+        "Define digest-safe summary rules for stale and activity state."
+      ],
+      "activationRequired": true,
+      "defaultOff": true,
+      "trafficAttached": false,
+      "liveAuthority": false,
+      "publicSseHeartbeatMonitorImpact": "none",
+      "notes": "PR0 does not call models or project heartbeat state into prompts."
+    },
+    {
+      "id": "fail_closed_recovery_stale_write_child_mission_runs",
+      "targetBehavior": "Recovery semantics fail closed for stale write, child-run, and mission-run evidence.",
+      "hermesPatterns": [
+        "restart resume",
+        "inactivity timeout",
+        "cron toolset restrictions"
+      ],
+      "openMagiConcepts": [
+        "ActivityReceipt",
+        "StaleRunVerdict",
+        "ResumeDecision"
+      ],
+      "owner": "runtime_recovery_contract",
+      "alreadyCovered": false,
+      "missingImplementation": [
+        "Define fail-closed verdict reasons for stale write, child-run, and mission-run cases.",
+        "Define manual-review requirement before destructive or externally visible recovery."
+      ],
+      "activationRequired": true,
+      "defaultOff": true,
+      "trafficAttached": false,
+      "liveAuthority": false,
+      "publicSseHeartbeatMonitorImpact": "none",
+      "notes": "Future recovery must record a decision before action; PR0 records only the required contract gap."
+    },
+    {
+      "id": "public_sse_heartbeat_monitor_separation",
+      "targetBehavior": "Runtime heartbeat and lease planning stays separate from existing public SSE HeartbeatMonitor behavior.",
+      "hermesPatterns": [
+        "gateway ticker"
+      ],
+      "openMagiConcepts": [
+        "HeartbeatReceipt",
+        "StaleRunVerdict"
+      ],
+      "owner": "public_ui_heartbeat_boundary",
+      "alreadyCovered": true,
+      "missingImplementation": [
+        "complete in PR0 audit matrix; no public UI heartbeat implementation change required"
+      ],
+      "activationRequired": false,
+      "defaultOff": true,
+      "trafficAttached": false,
+      "liveAuthority": false,
+      "publicSseHeartbeatMonitorImpact": "separate-contract-only",
+      "notes": "Public SSE HeartbeatMonitor remains a user-visible connection/UI signal; runtime lease receipts are a separate future contract."
+    }
+  ]
+}

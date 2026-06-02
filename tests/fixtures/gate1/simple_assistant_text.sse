@@ -1,0 +1,11 @@
+:ok
+
+event: agent
+data: {"type":"text_delta","delta":"Hello from Gate 1."}
+
+data: {"choices":[{"index":0,"delta":{"role":"assistant","content":"Hello from Gate 1."}}]}
+
+data: {"choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}
+
+data: [DONE]
+

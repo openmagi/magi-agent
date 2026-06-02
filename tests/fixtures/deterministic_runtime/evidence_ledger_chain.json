@@ -1,0 +1,22 @@
+{
+  "appendOnly": true,
+  "contentAddressed": true,
+  "ledgerId": "ledger-test-001",
+  "mode": "live",
+  "records": [
+    {
+      "kind": "tool_receipt",
+      "metadata": {},
+      "payloadDigest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+      "payloadRef": "artifact:tool-output-1",
+      "policySnapshotDigest": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+      "previousRecordDigest": null,
+      "recordDigest": "sha256:e52e15e1791c22bbcc029b2c12746617e1a60bd89ba8408c2bc144076bde9213",
+      "sequence": 1,
+      "targetRecordDigest": null
+    }
+  ],
+  "sessionId": "session-test",
+  "sourceLedgerDigest": null,
+  "turnId": "turn-test"
+}

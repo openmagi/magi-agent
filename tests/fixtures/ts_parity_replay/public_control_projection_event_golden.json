@@ -1,0 +1,225 @@
+{
+  "schemaVersion": "tsParityReplayFixture.v1",
+  "fixtureId": "ts_public_control_projection_event_golden_0001",
+  "sourceRuntime": "typescript-core-agent",
+  "recordingMode": "local_diagnostic_fixture",
+  "redactionStatus": "verified",
+  "localDiagnostic": true,
+  "attachmentFlags": {
+    "adkRunnerInvoked": false,
+    "liveToolDispatched": false,
+    "shellOrCodeExecuted": false,
+    "memoryProviderCalled": false,
+    "agentMemoryImported": false,
+    "hipocampusQmdLiveCalled": false,
+    "productionStorageWritten": false,
+    "routeOrApiAttached": false,
+    "telegramAttached": false,
+    "canaryTrafficAttached": false,
+    "evidenceBlockEnabled": false
+  },
+  "transcriptEntries": [
+    {
+      "kind": "turn_started",
+      "ts": 1,
+      "turnId": "turn-control-projection-1",
+      "declaredRoute": "direct"
+    },
+    {
+      "kind": "user_message",
+      "ts": 2,
+      "turnId": "turn-control-projection-1",
+      "text": "Replay supplemental public control projection events."
+    },
+    {
+      "kind": "assistant_text",
+      "ts": 3,
+      "turnId": "turn-control-projection-1",
+      "text": "Supplemental control projection completed."
+    },
+    {
+      "kind": "turn_committed",
+      "ts": 4,
+      "turnId": "turn-control-projection-1",
+      "inputTokens": 20,
+      "outputTokens": 8
+    }
+  ],
+  "agentEvents": [
+    {
+      "type": "control_replay_complete",
+      "lastSeq": 99,
+      "seq": 98,
+      "rawLedgerState": "provider replay metadata"
+    },
+    {
+      "type": "document_draft",
+      "id": "draft-public-1",
+      "filename": "docs/public-report.md",
+      "format": "md",
+      "contentPreview": "# Public draft\nstatus=ready\nartifact=reports/public-control-summary.md",
+      "contentLength": 70,
+      "truncated": true,
+      "content": "full raw document internal body",
+      "privatePrompt": "internal child prompt"
+    },
+    {
+      "type": "llm_progress",
+      "turnId": "turn-control-projection-1",
+      "iter": 2,
+      "stage": "started",
+      "label": "Calling public model",
+      "detail": "provider call completed for public-model route",
+      "elapsedMs": 1200,
+      "model": "internal-provider-model",
+      "providerPayload": "internal provider payload",
+      "toolArguments": "internal tool arguments"
+    },
+    {
+      "type": "patch_preview",
+      "toolUseId": "toolu-patch-public-1",
+      "dryRun": false,
+      "changedFiles": ["src/public.ts", "src/control-summary.ts"],
+      "createdFiles": ["src/new-public.ts"],
+      "deletedFiles": [],
+      "files": [
+        {
+          "path": "src/public.ts",
+          "operation": "update",
+          "hunks": 1,
+          "addedLines": 2,
+          "removedLines": 1,
+          "oldSha256": "old-public",
+          "newSha256": "new-public",
+          "before": "internal patch before content",
+          "after": "+status=ready"
+        }
+      ],
+      "patch": "--- a/src/public.ts\n+++ b/src/public.ts\n@@\n-status=pending\n+status=ready"
+    },
+    {
+      "type": "task_board",
+      "eventId": "evt-task-board-public-1",
+      "turnId": "turn-control-projection-1",
+      "boardId": "board-public-1",
+      "status": "running",
+      "title": "Public task board",
+      "summaryText": "Public board summary ready",
+      "createdAt": 1710000200,
+      "tasks": [
+        {
+          "id": "task-public-1",
+          "title": "Inspect fixture",
+          "description": "Review safe public fields",
+          "status": "completed",
+          "parallelGroup": "group-a",
+          "internalState": "internal task board state"
+        },
+        {
+          "id": "task-public-2",
+          "title": "Verify sanitizer",
+          "description": "Confirm projection parity",
+          "status": "in_progress",
+          "dependsOn": ["task-public-1"]
+        }
+      ],
+      "rawBoard": "internal task board state"
+    },
+    {
+      "type": "control_event",
+      "seq": 100,
+      "event": {
+        "type": "task_board_snapshot",
+        "turnId": "turn-control-projection-1",
+        "taskBoard": {
+          "rawBoard": "internal task board state",
+          "tasks": [
+            {
+              "id": "task-internal",
+              "notes": "internal task note"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": "control_event",
+      "seq": 101,
+      "event": {
+        "type": "verification",
+        "status": "passed",
+        "reason": "pytest passed for supplemental projection",
+        "evidence": {
+          "body": "internal evidence body",
+          "stdout": "pytest stdout internal detail",
+          "path": "logs/control-projection.log"
+        }
+      }
+    },
+    {
+      "type": "control_event",
+      "seq": 102,
+      "event": {
+        "type": "child_progress",
+        "taskId": "child-public-1",
+        "detail": "Child is checking public fixture fields",
+        "prompt": "internal child prompt",
+        "summary": "internal child summary"
+      }
+    },
+    {
+      "type": "control_event",
+      "seq": 103,
+      "event": {
+        "type": "child_tool_request",
+        "taskId": "child-public-1",
+        "requestId": "req-child-tool-1",
+        "toolName": "PatchApply",
+        "arguments": {
+          "patch": "+status=ready",
+          "note": "internal tool arguments"
+        }
+      }
+    },
+    {
+      "type": "control_event",
+      "seq": 104,
+      "event": {
+        "type": "child_permission_decision",
+        "taskId": "child-public-1",
+        "decision": "allow",
+        "reason": "Allowed bounded patch preview",
+        "updatedInput": {
+          "note": "internal updated input"
+        }
+      }
+    },
+    {
+      "type": "control_event",
+      "seq": 105,
+      "event": {
+        "type": "child_cancelled",
+        "taskId": "child-public-2",
+        "reason": "cancelled after public projection check",
+        "summary": "internal child summary"
+      }
+    }
+  ],
+  "controlEvents": [],
+  "memoryFences": [
+    {
+      "fenceId": "memory-control-projection-public",
+      "memoryMode": "incognito",
+      "sourceAuthority": "memory_disabled",
+      "recallClaimed": false,
+      "writeClaimed": false,
+      "providerCallMade": false
+    }
+  ],
+  "compactionBoundaries": [],
+  "sourceAuthority": {
+    "policy": "memory_disabled",
+    "sourceIds": [],
+    "memoryMayOverrideCurrentTurn": false
+  }
+}

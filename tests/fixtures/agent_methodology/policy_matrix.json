@@ -1,0 +1,425 @@
+{
+  "fixtureId": "agent_methodology_matrix_0001",
+  "localDiagnostic": true,
+  "recipePackIds": [
+    "openmagi.agent-methodology",
+    "openmagi.superpowers-compat"
+  ],
+  "futureLiveSurfaces": [
+    "ADK callbacks/plugins/evals/session primitives"
+  ],
+  "attachmentFlags": {
+    "adkRunnerInvoked": false,
+    "childExecutionAttached": false,
+    "liveSlashRuntimeAttached": false,
+    "toolHostDispatched": false,
+    "sessionControllerBranchAttached": false,
+    "runnerRouteAttached": false,
+    "workspaceMutated": false,
+    "productionAuthority": false,
+    "trafficAttached": false,
+    "evidenceBlockEnabled": false
+  },
+  "cases": [
+    {
+      "caseId": "using_superpowers_onboarding_import",
+      "category": "onboarding",
+      "capabilityRefs": [
+        "using-superpowers",
+        "onboarding"
+      ],
+      "modeledAs": [
+        "recipe-hook",
+        "checkpoint"
+      ],
+      "instructionRefs": [
+        "instruction:agent-methodology:using-superpowers"
+      ],
+      "callbackRefs": [
+        "callback:agent-methodology:onboarding-needed-check"
+      ],
+      "checkpointRefs": [
+        "checkpoint:agent-methodology:onboarding"
+      ],
+      "validatorRefs": [],
+      "evidenceRefs": [],
+      "auditRefs": [
+        "audit:agent-methodology:onboarding-nudge"
+      ],
+      "liveBehaviorApprovalGated": true,
+      "liveSlashRuntimeAttached": false,
+      "runnerRouteRefs": [],
+      "attachmentFlags": {}
+    },
+    {
+      "caseId": "brainstorming_design_refinement_checkpoint",
+      "category": "design_refinement",
+      "capabilityRefs": [
+        "brainstorming",
+        "design-refinement"
+      ],
+      "modeledAs": [
+        "instruction",
+        "checkpoint"
+      ],
+      "instructionRefs": [
+        "instruction:agent-methodology:brainstorming-design-refinement"
+      ],
+      "callbackRefs": [],
+      "checkpointRefs": [
+        "checkpoint:agent-methodology:design-refinement"
+      ],
+      "validatorRefs": [],
+      "evidenceRefs": [],
+      "auditRefs": [
+        "audit:agent-methodology:design-refinement"
+      ],
+      "liveBehaviorApprovalGated": true,
+      "liveSlashRuntimeAttached": false,
+      "runnerRouteRefs": [],
+      "attachmentFlags": {}
+    },
+    {
+      "caseId": "writing_and_executing_plans_checkpoints",
+      "category": "planning",
+      "capabilityRefs": [
+        "writing-plans",
+        "executing-plans"
+      ],
+      "modeledAs": [
+        "checkpoint",
+        "approval-gate"
+      ],
+      "instructionRefs": [
+        "instruction:agent-methodology:writing-plans",
+        "instruction:agent-methodology:executing-plans"
+      ],
+      "callbackRefs": [],
+      "checkpointRefs": [
+        "checkpoint:agent-methodology:plan-before-act",
+        "checkpoint:agent-methodology:execute-approved-plan"
+      ],
+      "validatorRefs": [
+        "validator:agent-methodology:plan-evidence-before-execution"
+      ],
+      "evidenceRefs": [
+        "evidence:agent-methodology:approved-plan"
+      ],
+      "auditRefs": [
+        "audit:agent-methodology:plan-lifecycle"
+      ],
+      "liveBehaviorApprovalGated": true,
+      "liveSlashRuntimeAttached": false,
+      "runnerRouteRefs": [],
+      "attachmentFlags": {}
+    },
+    {
+      "caseId": "tdd_red_green_refactor_validator",
+      "category": "tdd",
+      "capabilityRefs": [
+        "test-driven-development",
+        "red-green-refactor"
+      ],
+      "modeledAs": [
+        "validator",
+        "evidence",
+        "checkpoint"
+      ],
+      "instructionRefs": [
+        "instruction:agent-methodology:tdd-red-green-refactor"
+      ],
+      "callbackRefs": [],
+      "checkpointRefs": [
+        "checkpoint:agent-methodology:tdd-red",
+        "checkpoint:agent-methodology:tdd-green"
+      ],
+      "validatorRefs": [
+        "validator:agent-methodology:tdd-red-green-refactor"
+      ],
+      "evidenceRefs": [
+        "evidence:agent-methodology:test-run"
+      ],
+      "auditRefs": [
+        "audit:agent-methodology:tdd-cycle"
+      ],
+      "liveBehaviorApprovalGated": true,
+      "liveSlashRuntimeAttached": false,
+      "runnerRouteRefs": [],
+      "attachmentFlags": {}
+    },
+    {
+      "caseId": "systematic_debugging_validator",
+      "category": "debugging",
+      "capabilityRefs": [
+        "systematic-debugging"
+      ],
+      "modeledAs": [
+        "validator",
+        "checkpoint"
+      ],
+      "instructionRefs": [
+        "instruction:agent-methodology:systematic-debugging"
+      ],
+      "callbackRefs": [],
+      "checkpointRefs": [
+        "checkpoint:agent-methodology:root-cause-before-fix"
+      ],
+      "validatorRefs": [
+        "validator:agent-methodology:systematic-debugging"
+      ],
+      "evidenceRefs": [
+        "evidence:agent-methodology:debug-root-cause"
+      ],
+      "auditRefs": [
+        "audit:agent-methodology:debugging"
+      ],
+      "liveBehaviorApprovalGated": true,
+      "liveSlashRuntimeAttached": false,
+      "runnerRouteRefs": [],
+      "attachmentFlags": {}
+    },
+    {
+      "caseId": "verification_before_completion_evidence",
+      "category": "verification",
+      "capabilityRefs": [
+        "verification-before-completion"
+      ],
+      "modeledAs": [
+        "validator",
+        "evidence",
+        "checkpoint"
+      ],
+      "instructionRefs": [
+        "instruction:agent-methodology:verification-before-completion"
+      ],
+      "callbackRefs": [],
+      "checkpointRefs": [
+        "checkpoint:agent-methodology:verification-before-completion"
+      ],
+      "validatorRefs": [
+        "validator:agent-methodology:verification-before-completion"
+      ],
+      "evidenceRefs": [
+        "evidence:agent-methodology:test-run",
+        "evidence:agent-methodology:git-diff"
+      ],
+      "auditRefs": [
+        "audit:agent-methodology:verification-before-completion"
+      ],
+      "liveBehaviorApprovalGated": true,
+      "liveSlashRuntimeAttached": false,
+      "runnerRouteRefs": [],
+      "attachmentFlags": {}
+    },
+    {
+      "caseId": "code_review_request_receive_checkpoints",
+      "category": "code_review",
+      "capabilityRefs": [
+        "requesting-code-review",
+        "receiving-code-review"
+      ],
+      "modeledAs": [
+        "validator",
+        "evidence",
+        "checkpoint"
+      ],
+      "instructionRefs": [
+        "instruction:agent-methodology:requesting-code-review",
+        "instruction:agent-methodology:receiving-code-review"
+      ],
+      "callbackRefs": [],
+      "checkpointRefs": [
+        "checkpoint:agent-methodology:request-code-review",
+        "checkpoint:agent-methodology:receive-code-review"
+      ],
+      "validatorRefs": [
+        "validator:agent-methodology:requesting-code-review",
+        "validator:agent-methodology:receiving-code-review"
+      ],
+      "evidenceRefs": [
+        "evidence:agent-methodology:review-record"
+      ],
+      "auditRefs": [
+        "audit:agent-methodology:code-review"
+      ],
+      "liveBehaviorApprovalGated": true,
+      "liveSlashRuntimeAttached": false,
+      "runnerRouteRefs": [],
+      "attachmentFlags": {}
+    },
+    {
+      "caseId": "subagent_driven_development_parent_context_isolation",
+      "category": "subagent_development",
+      "capabilityRefs": [
+        "subagent-driven-development"
+      ],
+      "modeledAs": [
+        "checkpoint",
+        "evidence",
+        "validator"
+      ],
+      "instructionRefs": [
+        "instruction:agent-methodology:subagent-driven-development"
+      ],
+      "callbackRefs": [],
+      "checkpointRefs": [
+        "checkpoint:agent-methodology:subagent-parent-context-isolation"
+      ],
+      "validatorRefs": [
+        "validator:agent-methodology:child-envelope-sanitized-upward-only"
+      ],
+      "evidenceRefs": [
+        "evidence:agent-methodology:sanitized-child-envelope"
+      ],
+      "auditRefs": [
+        "audit:agent-methodology:subagent-driven-development"
+      ],
+      "liveBehaviorApprovalGated": true,
+      "liveSlashRuntimeAttached": false,
+      "runnerRouteRefs": [],
+      "attachmentFlags": {},
+      "parentContextIsolation": {
+        "rawChildTranscriptInjected": false,
+        "toolLogsInjected": false,
+        "hiddenReasoningInjected": false,
+        "sanitizedStructuredEnvelopeOnly": true
+      },
+      "sanitizedChildEnvelope": {
+        "envelopeRef": "child-envelope:methodology-1",
+        "status": "accepted",
+        "preview": "child completed review checkpoint with evidence refs only",
+        "evidenceRefs": [
+          "evidence:agent-methodology:sanitized-child-envelope"
+        ],
+        "privateRefs": [
+          "private:raw-child-transcript",
+          "private:child-tool-log",
+          "private:hidden-reasoning"
+        ]
+      }
+    },
+    {
+      "caseId": "git_worktree_workflow_checkpoint",
+      "category": "git_worktree",
+      "capabilityRefs": [
+        "using-git-worktrees"
+      ],
+      "modeledAs": [
+        "approval-gate",
+        "checkpoint"
+      ],
+      "instructionRefs": [
+        "instruction:agent-methodology:git-worktree-workflow"
+      ],
+      "callbackRefs": [],
+      "checkpointRefs": [
+        "checkpoint:agent-methodology:git-worktree-isolation"
+      ],
+      "validatorRefs": [
+        "validator:agent-methodology:git-worktree-safety"
+      ],
+      "evidenceRefs": [
+        "evidence:agent-methodology:git-diff"
+      ],
+      "auditRefs": [
+        "audit:agent-methodology:git-worktree"
+      ],
+      "liveBehaviorApprovalGated": true,
+      "liveSlashRuntimeAttached": false,
+      "runnerRouteRefs": [],
+      "attachmentFlags": {}
+    },
+    {
+      "caseId": "finishing_development_branch_checkpoint",
+      "category": "branch_finish",
+      "capabilityRefs": [
+        "finishing-a-development-branch"
+      ],
+      "modeledAs": [
+        "checkpoint",
+        "approval-gate"
+      ],
+      "instructionRefs": [
+        "instruction:agent-methodology:finishing-development-branch"
+      ],
+      "callbackRefs": [],
+      "checkpointRefs": [
+        "checkpoint:agent-methodology:finishing-development-branch"
+      ],
+      "validatorRefs": [
+        "validator:agent-methodology:verification-before-completion"
+      ],
+      "evidenceRefs": [
+        "evidence:agent-methodology:test-run",
+        "evidence:agent-methodology:review-record"
+      ],
+      "auditRefs": [
+        "audit:agent-methodology:finishing-development-branch"
+      ],
+      "liveBehaviorApprovalGated": true,
+      "liveSlashRuntimeAttached": false,
+      "runnerRouteRefs": [],
+      "attachmentFlags": {}
+    },
+    {
+      "caseId": "plan_auto_trigger_recipe_hook",
+      "category": "plan_auto_trigger",
+      "capabilityRefs": [
+        "plan-auto-trigger"
+      ],
+      "modeledAs": [
+        "recipe-hook",
+        "checkpoint"
+      ],
+      "instructionRefs": [
+        "instruction:agent-methodology:writing-plans"
+      ],
+      "callbackRefs": [
+        "callback:agent-methodology:plan-mode-auto-trigger"
+      ],
+      "checkpointRefs": [
+        "checkpoint:agent-methodology:plan-mode-auto-trigger"
+      ],
+      "validatorRefs": [
+        "validator:agent-methodology:plan-evidence-before-execution"
+      ],
+      "evidenceRefs": [
+        "evidence:agent-methodology:approved-plan"
+      ],
+      "auditRefs": [
+        "audit:agent-methodology:plan-auto-trigger"
+      ],
+      "liveBehaviorApprovalGated": true,
+      "liveSlashRuntimeAttached": false,
+      "runnerRouteRefs": [],
+      "attachmentFlags": {}
+    },
+    {
+      "caseId": "live_behavior_approval_gate",
+      "category": "approval_gate",
+      "capabilityRefs": [
+        "approval-gated-live-behavior"
+      ],
+      "modeledAs": [
+        "approval-gate",
+        "validator"
+      ],
+      "instructionRefs": [],
+      "callbackRefs": [],
+      "checkpointRefs": [
+        "checkpoint:agent-methodology:live-behavior-approval"
+      ],
+      "validatorRefs": [
+        "validator:agent-methodology:no-live-runtime-without-approval"
+      ],
+      "evidenceRefs": [],
+      "auditRefs": [
+        "audit:agent-methodology:live-behavior-approval"
+      ],
+      "liveBehaviorApprovalGated": true,
+      "liveSlashRuntimeAttached": false,
+      "runnerRouteRefs": [],
+      "attachmentFlags": {}
+    }
+  ]
+}

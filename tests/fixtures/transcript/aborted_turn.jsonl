@@ -1,0 +1,3 @@
+{"kind":"turn_started","ts":1,"turnId":"turn-1","declaredRoute":"direct"}
+{"kind":"user_message","ts":2,"turnId":"turn-1","text":"hello"}
+{"kind":"turn_aborted","ts":3,"turnId":"turn-1","reason":"verifier_blocked"}

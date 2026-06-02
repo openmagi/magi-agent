@@ -1,0 +1,493 @@
+{
+  "schemaVersion": "factGroundingVerifierFixture.v1",
+  "fixtureId": "fact_grounding_verifier_matrix_0001",
+  "sourceRuntime": "typescript-core-agent",
+  "targetRuntime": "python-adk-future",
+  "recordingMode": "local_diagnostic_fixture",
+  "redactionStatus": "verified",
+  "localDiagnostic": true,
+  "metadataOnly": true,
+  "defaultOff": true,
+  "futureAdkTarget": "ValidatorSet_or_AgentEvaluator_metadata",
+  "attachmentFlags": {
+    "llmJudgeCalled": false,
+    "promptMutated": false,
+    "hookAttached": false,
+    "blockModeEnabled": false,
+    "adkEvalAttached": false,
+    "adkRunnerInvoked": false,
+    "toolHostDispatched": false,
+    "transcriptRead": false,
+    "sourceFetched": false,
+    "browserExecuted": false,
+    "webSearchExecuted": false,
+    "providerCalled": false
+  },
+  "cases": [
+    {
+      "caseId": "mode_a_grounded_json_tool_values_match",
+      "mode": "A",
+      "category": "grounded_json_tool_values_match",
+      "assistantText": "config.json에 따르면 모델은 gpt-4o이고 temperature는 0.7입니다",
+      "assistantTextDigest": "assistant:mode-a-values-match",
+      "toolOutputs": [
+        {
+          "toolName": "FileRead",
+          "rawOutput": "{\"model\": \"gpt-4o\", \"temperature\": 0.7}",
+          "digest": "tool:config-json-values"
+        }
+      ],
+      "expectedVerdict": "GROUNDED",
+      "expectedConfidence": "high",
+      "expectedReasonCode": "all_tool_values_verified",
+      "deterministicOnly": true,
+      "metadataOnly": true,
+      "defaultOff": true,
+      "futureAdkTarget": "ValidatorSet_or_AgentEvaluator_metadata",
+      "metadata": {
+        "tsFunction": "groundAgainstToolResults",
+        "recordedOnly": true
+      },
+      "attachmentFlags": {
+        "llmJudgeCalled": false,
+        "promptMutated": false,
+        "hookAttached": false,
+        "blockModeEnabled": false,
+        "adkEvalAttached": false,
+        "adkRunnerInvoked": false,
+        "toolHostDispatched": false,
+        "transcriptRead": false,
+        "sourceFetched": false,
+        "browserExecuted": false,
+        "webSearchExecuted": false,
+        "providerCalled": false
+      }
+    },
+    {
+      "caseId": "mode_a_distorted_identifier_mismatch",
+      "mode": "A",
+      "category": "distorted_identifier_mismatch",
+      "assistantText": "config.json에 따르면 모델은 GPT-4o이고 temperature는 0.7입니다",
+      "assistantTextDigest": "assistant:mode-a-identifier-mismatch",
+      "toolOutputs": [
+        {
+          "toolName": "FileRead",
+          "rawOutput": "{\"model\": \"gemini-2.5-pro\", \"temperature\": 0.3}",
+          "digest": "tool:config-json-gemini"
+        }
+      ],
+      "expectedVerdict": "DISTORTED",
+      "expectedConfidence": "high",
+      "expectedReasonCode": "identifier_mismatch",
+      "deterministicOnly": true,
+      "metadataOnly": true,
+      "defaultOff": true,
+      "futureAdkTarget": "ValidatorSet_or_AgentEvaluator_metadata",
+      "metadata": {
+        "tsFunction": "groundAgainstToolResults",
+        "recordedOnly": true
+      },
+      "attachmentFlags": {
+        "llmJudgeCalled": false,
+        "promptMutated": false,
+        "hookAttached": false,
+        "blockModeEnabled": false,
+        "adkEvalAttached": false,
+        "adkRunnerInvoked": false,
+        "toolHostDispatched": false,
+        "transcriptRead": false,
+        "sourceFetched": false,
+        "browserExecuted": false,
+        "webSearchExecuted": false,
+        "providerCalled": false
+      }
+    },
+    {
+      "caseId": "mode_a_grounded_no_tool_results",
+      "mode": "A",
+      "category": "grounded_no_tool_results",
+      "assistantText": "some text",
+      "assistantTextDigest": "assistant:mode-a-no-tool-results",
+      "toolOutputs": [],
+      "expectedVerdict": "GROUNDED",
+      "expectedConfidence": "high",
+      "expectedReasonCode": "no_tool_results",
+      "deterministicOnly": true,
+      "metadataOnly": true,
+      "defaultOff": true,
+      "futureAdkTarget": "ValidatorSet_or_AgentEvaluator_metadata",
+      "metadata": {
+        "tsFunction": "groundAgainstToolResults",
+        "recordedOnly": true
+      },
+      "attachmentFlags": {
+        "llmJudgeCalled": false,
+        "promptMutated": false,
+        "hookAttached": false,
+        "blockModeEnabled": false,
+        "adkEvalAttached": false,
+        "adkRunnerInvoked": false,
+        "toolHostDispatched": false,
+        "transcriptRead": false,
+        "sourceFetched": false,
+        "browserExecuted": false,
+        "webSearchExecuted": false,
+        "providerCalled": false
+      }
+    },
+    {
+      "caseId": "mode_a_grounded_general_knowledge_despite_tool_output",
+      "mode": "A",
+      "category": "grounded_general_knowledge_despite_tool_output",
+      "assistantText": "React는 Virtual DOM을 사용합니다.",
+      "assistantTextDigest": "assistant:mode-a-general-knowledge",
+      "toolOutputs": [
+        {
+          "toolName": "FileRead",
+          "rawOutput": "{\"count\": 42}",
+          "digest": "tool:data-count"
+        }
+      ],
+      "expectedVerdict": "GROUNDED",
+      "expectedConfidence": "low",
+      "expectedReasonCode": "values_not_referenced_needs_llm",
+      "deterministicOnly": true,
+      "metadataOnly": true,
+      "defaultOff": true,
+      "futureAdkTarget": "ValidatorSet_or_AgentEvaluator_metadata",
+      "metadata": {
+        "tsFunction": "groundAgainstToolResults",
+        "recordedOnly": true
+      },
+      "attachmentFlags": {
+        "llmJudgeCalled": false,
+        "promptMutated": false,
+        "hookAttached": false,
+        "blockModeEnabled": false,
+        "adkEvalAttached": false,
+        "adkRunnerInvoked": false,
+        "toolHostDispatched": false,
+        "transcriptRead": false,
+        "sourceFetched": false,
+        "browserExecuted": false,
+        "webSearchExecuted": false,
+        "providerCalled": false
+      }
+    },
+    {
+      "caseId": "mode_a_grounded_numbers_within_tolerance",
+      "mode": "A",
+      "category": "grounded_numbers_within_tolerance",
+      "assistantText": "사용자는 1500명이고 매출은 45001달러입니다",
+      "assistantTextDigest": "assistant:mode-a-numbers-tolerance",
+      "toolOutputs": [
+        {
+          "toolName": "FileRead",
+          "rawOutput": "{\"users\": 1500, \"revenue\": 45000.50}",
+          "digest": "tool:stats-numbers"
+        }
+      ],
+      "expectedVerdict": "GROUNDED",
+      "expectedConfidence": "high",
+      "expectedReasonCode": "numbers_within_tolerance",
+      "deterministicOnly": true,
+      "metadataOnly": true,
+      "defaultOff": true,
+      "futureAdkTarget": "ValidatorSet_or_AgentEvaluator_metadata",
+      "metadata": {
+        "tsFunction": "groundAgainstToolResults",
+        "recordedOnly": true
+      },
+      "attachmentFlags": {
+        "llmJudgeCalled": false,
+        "promptMutated": false,
+        "hookAttached": false,
+        "blockModeEnabled": false,
+        "adkEvalAttached": false,
+        "adkRunnerInvoked": false,
+        "toolHostDispatched": false,
+        "transcriptRead": false,
+        "sourceFetched": false,
+        "browserExecuted": false,
+        "webSearchExecuted": false,
+        "providerCalled": false
+      }
+    },
+    {
+      "caseId": "mode_a_distorted_significant_number_mismatch",
+      "mode": "A",
+      "category": "distorted_significant_number_mismatch",
+      "assistantText": "사용자는 3000명입니다",
+      "assistantTextDigest": "assistant:mode-a-number-mismatch",
+      "toolOutputs": [
+        {
+          "toolName": "FileRead",
+          "rawOutput": "{\"users\": 1500}",
+          "digest": "tool:stats-users-1500"
+        }
+      ],
+      "expectedVerdict": "DISTORTED",
+      "expectedConfidence": "high",
+      "expectedReasonCode": "significant_number_mismatch",
+      "deterministicOnly": true,
+      "metadataOnly": true,
+      "defaultOff": true,
+      "futureAdkTarget": "ValidatorSet_or_AgentEvaluator_metadata",
+      "metadata": {
+        "tsFunction": "groundAgainstToolResults",
+        "recordedOnly": true
+      },
+      "attachmentFlags": {
+        "llmJudgeCalled": false,
+        "promptMutated": false,
+        "hookAttached": false,
+        "blockModeEnabled": false,
+        "adkEvalAttached": false,
+        "adkRunnerInvoked": false,
+        "toolHostDispatched": false,
+        "transcriptRead": false,
+        "sourceFetched": false,
+        "browserExecuted": false,
+        "webSearchExecuted": false,
+        "providerCalled": false
+      }
+    },
+    {
+      "caseId": "mode_a_low_confidence_grounded_values_not_referenced",
+      "mode": "A",
+      "category": "low_confidence_grounded_values_not_referenced",
+      "assistantText": "설정을 확인했습니다. 정상적으로 동작 중입니다.",
+      "assistantTextDigest": "assistant:mode-a-values-not-referenced",
+      "toolOutputs": [
+        {
+          "toolName": "FileRead",
+          "rawOutput": "{\"model\": \"gemini-2.5-pro\", \"replicas\": 3}",
+          "digest": "tool:config-values-unmentioned"
+        }
+      ],
+      "expectedVerdict": "GROUNDED",
+      "expectedConfidence": "low",
+      "expectedReasonCode": "values_not_referenced_needs_llm",
+      "deterministicOnly": true,
+      "metadataOnly": true,
+      "defaultOff": true,
+      "futureAdkTarget": "ValidatorSet_or_AgentEvaluator_metadata",
+      "metadata": {
+        "tsFunction": "groundAgainstToolResults",
+        "recordedOnly": true
+      },
+      "attachmentFlags": {
+        "llmJudgeCalled": false,
+        "promptMutated": false,
+        "hookAttached": false,
+        "blockModeEnabled": false,
+        "adkEvalAttached": false,
+        "adkRunnerInvoked": false,
+        "toolHostDispatched": false,
+        "transcriptRead": false,
+        "sourceFetched": false,
+        "browserExecuted": false,
+        "webSearchExecuted": false,
+        "providerCalled": false
+      }
+    },
+    {
+      "caseId": "mode_b_fabricated_explicit_file_config_claim_without_read_tool",
+      "mode": "B",
+      "category": "fabricated_explicit_file_config_claim_without_read_tool",
+      "assistantText": "파일을 읽어보니 이미지 리사이즈는 1200픽셀로 설정되어 있습니다",
+      "assistantTextDigest": "assistant:mode-b-file-claim",
+      "toolOutputs": [],
+      "expectedVerdict": "FABRICATED",
+      "expectedConfidence": "high",
+      "expectedReasonCode": "explicit_file_config_claim_without_read_tool",
+      "deterministicOnly": true,
+      "metadataOnly": true,
+      "defaultOff": true,
+      "futureAdkTarget": "ValidatorSet_or_AgentEvaluator_metadata",
+      "metadata": {
+        "tsFunction": "detectUngroundedFileClaims",
+        "recordedOnly": true
+      },
+      "attachmentFlags": {
+        "llmJudgeCalled": false,
+        "promptMutated": false,
+        "hookAttached": false,
+        "blockModeEnabled": false,
+        "adkEvalAttached": false,
+        "adkRunnerInvoked": false,
+        "toolHostDispatched": false,
+        "transcriptRead": false,
+        "sourceFetched": false,
+        "browserExecuted": false,
+        "webSearchExecuted": false,
+        "providerCalled": false
+      }
+    },
+    {
+      "caseId": "mode_b_grounded_general_knowledge_no_tools",
+      "mode": "B",
+      "category": "grounded_general_knowledge_no_tools",
+      "assistantText": "React는 Virtual DOM을 사용합니다.",
+      "assistantTextDigest": "assistant:mode-b-general-knowledge-korean-react",
+      "toolOutputs": [],
+      "expectedVerdict": "GROUNDED",
+      "expectedConfidence": "high",
+      "expectedReasonCode": "general_knowledge_or_no_specific_claims",
+      "deterministicOnly": true,
+      "metadataOnly": true,
+      "defaultOff": true,
+      "futureAdkTarget": "ValidatorSet_or_AgentEvaluator_metadata",
+      "metadata": {
+        "tsFunction": "detectUngroundedFileClaims",
+        "recordedOnly": true
+      },
+      "attachmentFlags": {
+        "llmJudgeCalled": false,
+        "promptMutated": false,
+        "hookAttached": false,
+        "blockModeEnabled": false,
+        "adkEvalAttached": false,
+        "adkRunnerInvoked": false,
+        "toolHostDispatched": false,
+        "transcriptRead": false,
+        "sourceFetched": false,
+        "browserExecuted": false,
+        "webSearchExecuted": false,
+        "providerCalled": false
+      }
+    },
+    {
+      "caseId": "mode_b_fabricated_english_config_claim_without_read_tool",
+      "mode": "B",
+      "category": "fabricated_english_config_claim_without_read_tool",
+      "assistantText": "The config uses GPT-4o with temperature 0.7",
+      "assistantTextDigest": "assistant:mode-b-english-config-claim",
+      "toolOutputs": [],
+      "expectedVerdict": "FABRICATED",
+      "expectedConfidence": "high",
+      "expectedReasonCode": "explicit_file_config_claim_without_read_tool",
+      "deterministicOnly": true,
+      "metadataOnly": true,
+      "defaultOff": true,
+      "futureAdkTarget": "ValidatorSet_or_AgentEvaluator_metadata",
+      "metadata": {
+        "tsFunction": "detectUngroundedFileClaims",
+        "recordedOnly": true
+      },
+      "attachmentFlags": {
+        "llmJudgeCalled": false,
+        "promptMutated": false,
+        "hookAttached": false,
+        "blockModeEnabled": false,
+        "adkEvalAttached": false,
+        "adkRunnerInvoked": false,
+        "toolHostDispatched": false,
+        "transcriptRead": false,
+        "sourceFetched": false,
+        "browserExecuted": false,
+        "webSearchExecuted": false,
+        "providerCalled": false
+      }
+    },
+    {
+      "caseId": "mode_b_fabricated_korean_script_reference_without_read_tool",
+      "mode": "B",
+      "category": "fabricated_korean_script_reference_without_read_tool",
+      "assistantText": "스크립트에 따르면 3단계로 구성됩니다",
+      "assistantTextDigest": "assistant:mode-b-korean-script-reference",
+      "toolOutputs": [],
+      "expectedVerdict": "FABRICATED",
+      "expectedConfidence": "high",
+      "expectedReasonCode": "explicit_file_config_claim_without_read_tool",
+      "deterministicOnly": true,
+      "metadataOnly": true,
+      "defaultOff": true,
+      "futureAdkTarget": "ValidatorSet_or_AgentEvaluator_metadata",
+      "metadata": {
+        "tsFunction": "detectUngroundedFileClaims",
+        "recordedOnly": true
+      },
+      "attachmentFlags": {
+        "llmJudgeCalled": false,
+        "promptMutated": false,
+        "hookAttached": false,
+        "blockModeEnabled": false,
+        "adkEvalAttached": false,
+        "adkRunnerInvoked": false,
+        "toolHostDispatched": false,
+        "transcriptRead": false,
+        "sourceFetched": false,
+        "browserExecuted": false,
+        "webSearchExecuted": false,
+        "providerCalled": false
+      }
+    },
+    {
+      "caseId": "mode_b_grounded_honest_uncertainty",
+      "mode": "B",
+      "category": "grounded_honest_uncertainty",
+      "assistantText": "확인해봐야 알 수 있을 것 같습니다. 파일을 읽어보겠습니다.",
+      "assistantTextDigest": "assistant:mode-b-honest-uncertainty",
+      "toolOutputs": [],
+      "expectedVerdict": "GROUNDED",
+      "expectedConfidence": "high",
+      "expectedReasonCode": "honest_uncertainty",
+      "deterministicOnly": true,
+      "metadataOnly": true,
+      "defaultOff": true,
+      "futureAdkTarget": "ValidatorSet_or_AgentEvaluator_metadata",
+      "metadata": {
+        "tsFunction": "detectUngroundedFileClaims",
+        "recordedOnly": true
+      },
+      "attachmentFlags": {
+        "llmJudgeCalled": false,
+        "promptMutated": false,
+        "hookAttached": false,
+        "blockModeEnabled": false,
+        "adkEvalAttached": false,
+        "adkRunnerInvoked": false,
+        "toolHostDispatched": false,
+        "transcriptRead": false,
+        "sourceFetched": false,
+        "browserExecuted": false,
+        "webSearchExecuted": false,
+        "providerCalled": false
+      }
+    },
+    {
+      "caseId": "mode_b_low_confidence_specific_details_without_file_claim_pattern",
+      "mode": "B",
+      "category": "low_confidence_specific_details_without_file_claim_pattern",
+      "assistantText": "총 1500개의 엔트리가 있고 각각 45000바이트입니다",
+      "assistantTextDigest": "assistant:mode-b-specific-details",
+      "toolOutputs": [],
+      "expectedVerdict": "GROUNDED",
+      "expectedConfidence": "low",
+      "expectedReasonCode": "specific_details_without_file_claim_needs_llm",
+      "deterministicOnly": true,
+      "metadataOnly": true,
+      "defaultOff": true,
+      "futureAdkTarget": "ValidatorSet_or_AgentEvaluator_metadata",
+      "metadata": {
+        "tsFunction": "detectUngroundedFileClaims",
+        "recordedOnly": true
+      },
+      "attachmentFlags": {
+        "llmJudgeCalled": false,
+        "promptMutated": false,
+        "hookAttached": false,
+        "blockModeEnabled": false,
+        "adkEvalAttached": false,
+        "adkRunnerInvoked": false,
+        "toolHostDispatched": false,
+        "transcriptRead": false,
+        "sourceFetched": false,
+        "browserExecuted": false,
+        "webSearchExecuted": false,
+        "providerCalled": false
+      }
+    }
+  ]
+}

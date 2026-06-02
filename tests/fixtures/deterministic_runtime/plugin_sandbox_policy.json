@@ -1,0 +1,48 @@
+{
+  "expectedDecision": {
+    "effectivePermissions": [
+      "read"
+    ],
+    "ok": true,
+    "reasonCodes": [],
+    "sandbox": {
+      "channelDelivery": false,
+      "filesystem": "none",
+      "mode": "in_process_contract_only",
+      "network": "none",
+      "process": "none",
+      "protectedBindingAccess": "none",
+      "workspaceMutation": false
+    },
+    "trustLevel": "first_party"
+  },
+  "manifest": {
+    "capabilities": [
+      {
+        "name": "quoteExactMatch",
+        "type": "verifier"
+      }
+    ],
+    "defaultEnabled": false,
+    "defaultInstalled": true,
+    "id": "openmagi.test-validator",
+    "kind": "native",
+    "name": "Test Validator",
+    "optOutAllowed": true,
+    "permissions": [
+      "read"
+    ],
+    "sandbox": {
+      "channelDelivery": false,
+      "filesystem": "none",
+      "mode": "in_process_contract_only",
+      "network": "none",
+      "process": "none",
+      "protectedBindingAccess": "none",
+      "workspaceMutation": false
+    },
+    "supplyChainDigest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+    "trustLevel": "first_party",
+    "version": "1.0.0"
+  }
+}

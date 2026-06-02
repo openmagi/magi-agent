@@ -1,0 +1,334 @@
+{
+  "schemaVersion": "frontend-ts-compatibility.fixture.v1",
+  "name": "python-adk-frontend-ts-compatibility-canary",
+  "providerKind": "local_fake_python_adk",
+  "fixtureOnly": true,
+  "defaultOff": true,
+  "liveProviderInvoked": false,
+  "adkRunnerInvoked": false,
+  "liveToolsInvoked": false,
+  "productionRoutingActivated": false,
+  "privateMarkers": [
+    "raw adk provider detail",
+    "private active snapshot",
+    "private child output",
+    "private mission payload",
+    "private goal payload",
+    "private browser cdp",
+    "private tool arguments",
+    "fixture private token"
+  ],
+  "maliciousPrivatePayloadAttempts": [
+    {
+      "type": "adk_event",
+      "expectedDrop": true,
+      "functionCall": {
+        "args": {
+          "token": "fixture private token"
+        }
+      },
+      "rawAdkEvent": "raw adk provider detail"
+    },
+    {
+      "type": "google.adk.events.event",
+      "expectedDrop": true,
+      "event": {
+        "invocationId": "private active snapshot"
+      }
+    },
+    {
+      "type": "tool_result",
+      "expectedDrop": true,
+      "toolResult": {
+        "output": "private active snapshot"
+      }
+    },
+    {
+      "type": "thinking_delta",
+      "expectedDrop": true,
+      "delta": "private active snapshot",
+      "rawAdkEvent": "raw adk provider detail"
+    }
+  ],
+  "events": [
+    {
+      "type": "turn_start",
+      "turnId": "turn-python-adk-compat-1",
+      "declaredRoute": "direct",
+      "rawAdkEvent": "raw adk provider detail"
+    },
+    {
+      "type": "turn_phase",
+      "turnId": "turn-python-adk-compat-1",
+      "phase": "planning"
+    },
+    {
+      "type": "tool_start",
+      "id": "py_adk_tool_search",
+      "name": "Browser",
+      "input_preview": "Inspect official compatibility contract summary",
+      "rawArguments": "private tool arguments"
+    },
+    {
+      "type": "tool_progress",
+      "id": "py_adk_tool_search",
+      "label": "Inspecting source"
+    },
+    {
+      "type": "turn_phase",
+      "turnId": "turn-python-adk-compat-1",
+      "phase": "executing"
+    },
+    {
+      "type": "source_inspected",
+      "source": {
+        "sourceId": "src-python-adk-docs-1",
+        "kind": "browser",
+        "uri": "https://example.test/python-adk/frontend-contract",
+        "title": "Python ADK frontend contract canary source",
+        "contentHash": "receipt:sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "trustTier": "official",
+        "inspectedAt": 1779908400000,
+        "snippets": [
+          "Public source preview for frontend contract replay."
+        ],
+        "metadata": {
+          "raw": "private active snapshot"
+        }
+      }
+    },
+    {
+      "type": "tool_end",
+      "id": "py_adk_tool_search",
+      "status": "ok",
+      "durationMs": 19,
+      "output_preview": "Source inspection summarized",
+      "rawOutput": "private active snapshot"
+    },
+    {
+      "type": "runtime_trace",
+      "turnId": "turn-python-adk-compat-1",
+      "phase": "retry_scheduled",
+      "severity": "warning",
+      "title": "Local fake retry scheduled",
+      "detail": "Compatibility replay exercised retry trace without a provider call.",
+      "reasonCode": "local_fake_retry",
+      "attempt": 1,
+      "maxAttempts": 2,
+      "retryable": true,
+      "hiddenReasoning": "private active snapshot"
+    },
+    {
+      "type": "rule_check",
+      "ruleId": "claim-citation-gate",
+      "verdict": "pending",
+      "evidenceRef": "receipt:sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "checkedAt": 1779908400001,
+      "detail": "Public claim awaits runtime-issued rule authority."
+    },
+    {
+      "type": "task_board",
+      "tasks": [
+        {
+          "id": "task-fixture-inspect",
+          "title": "Inspect source",
+          "description": "Replay source inspection through public event callbacks.",
+          "status": "completed"
+        },
+        {
+          "id": "task-fixture-report",
+          "title": "Report compatibility",
+          "description": "Emit final sanitized preview and usage.",
+          "status": "in_progress",
+          "dependsOn": [
+            "task-fixture-inspect"
+          ]
+        }
+      ],
+      "rawBoard": "private active snapshot"
+    },
+    {
+      "type": "child_abort",
+      "taskId": "child-default-off-1",
+      "source": "default_off_child_blocked"
+    },
+    {
+      "type": "document_draft",
+      "id": "artifact-preview-python-adk-1",
+      "filename": "reports/python-adk-compatibility.md",
+      "format": "md",
+      "contentPreview": "# Compatibility preview\nPublic artifact metadata only.",
+      "contentLength": 53,
+      "truncated": false,
+      "content": "private active snapshot"
+    },
+    {
+      "type": "tool_end",
+      "id": "artifact-preview-python-adk-1",
+      "status": "ok",
+      "durationMs": 3
+    },
+    {
+      "type": "deterministic_fallback",
+      "fromAuthority": "python",
+      "toAuthority": "typescript",
+      "reasonCode": "compatibility_canary_default_off",
+      "requestDigest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    {
+      "type": "response_clear",
+      "reason": "replace fake-provider setup text"
+    },
+    {
+      "type": "text_delta",
+      "delta": "Python ADK compatibility canary complete."
+    },
+    {
+      "type": "turn_end",
+      "turnId": "turn-python-adk-compat-1",
+      "status": "committed",
+      "receiptRef": "receipt:sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "usage": {
+        "inputTokens": 128,
+        "outputTokens": 37,
+        "costUsd": 0.0042
+      },
+      "stopReason": "private active snapshot"
+    }
+  ],
+  "expectedSanitizedEvents": [
+    {
+      "type": "turn_start",
+      "turnId": "turn-python-adk-compat-1",
+      "declaredRoute": "direct"
+    },
+    {
+      "type": "turn_phase",
+      "turnId": "turn-python-adk-compat-1",
+      "phase": "planning"
+    },
+    {
+      "type": "tool_start",
+      "id": "py_adk_tool_search",
+      "name": "Browser",
+      "input_preview": "Inspect official compatibility contract summary"
+    },
+    {
+      "type": "tool_progress",
+      "id": "py_adk_tool_search",
+      "label": "Inspecting source"
+    },
+    {
+      "type": "turn_phase",
+      "turnId": "turn-python-adk-compat-1",
+      "phase": "executing"
+    },
+    {
+      "type": "source_inspected",
+      "source": {
+        "sourceId": "src-python-adk-docs-1",
+        "kind": "browser",
+        "uri": "https://example.test/python-adk/frontend-contract",
+        "title": "Python ADK frontend contract canary source",
+        "contentHash": "receipt:sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "trustTier": "official",
+        "inspectedAt": 1779908400000,
+        "snippets": [
+          "Public source preview for frontend contract replay."
+        ]
+      }
+    },
+    {
+      "type": "tool_end",
+      "id": "py_adk_tool_search",
+      "status": "ok",
+      "output_preview": "Source inspection summarized",
+      "durationMs": 19
+    },
+    {
+      "type": "runtime_trace",
+      "turnId": "turn-python-adk-compat-1",
+      "phase": "retry_scheduled",
+      "severity": "warning",
+      "title": "Local fake retry scheduled",
+      "detail": "Compatibility replay exercised retry trace without a provider call.",
+      "reasonCode": "local_fake_retry",
+      "attempt": 1,
+      "maxAttempts": 2,
+      "retryable": true
+    },
+    {
+      "type": "rule_check",
+      "ruleId": "claim-citation-gate",
+      "verdict": "pending",
+      "detail": "Public claim awaits runtime-issued rule authority.",
+      "evidenceRef": "receipt:sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "checkedAt": 1779908400001
+    },
+    {
+      "type": "task_board",
+      "tasks": [
+        {
+          "id": "task-fixture-inspect",
+          "title": "Inspect source",
+          "description": "Replay source inspection through public event callbacks.",
+          "status": "completed"
+        },
+        {
+          "id": "task-fixture-report",
+          "title": "Report compatibility",
+          "description": "Emit final sanitized preview and usage.",
+          "status": "in_progress",
+          "dependsOn": [
+            "task-fixture-inspect"
+          ]
+        }
+      ]
+    },
+    {
+      "type": "child_abort",
+      "taskId": "child-default-off-1",
+      "source": "default_off_child_blocked"
+    },
+    {
+      "type": "document_draft",
+      "id": "artifact-preview-python-adk-1",
+      "filename": "reports/python-adk-compatibility.md",
+      "format": "md",
+      "contentPreview": "# Compatibility preview\nPublic artifact metadata only.",
+      "contentLength": 53,
+      "truncated": false
+    },
+    {
+      "type": "tool_end",
+      "id": "artifact-preview-python-adk-1",
+      "status": "ok",
+      "durationMs": 3
+    },
+    {
+      "type": "deterministic_fallback",
+      "fromAuthority": "python",
+      "toAuthority": "typescript",
+      "reasonCode": "compatibility_canary_default_off",
+      "requestDigest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    {
+      "type": "response_clear"
+    },
+    {
+      "type": "text_delta",
+      "delta": "Python ADK compatibility canary complete."
+    },
+    {
+      "type": "turn_end",
+      "turnId": "turn-python-adk-compat-1",
+      "status": "committed",
+      "receiptRef": "receipt:sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "usage": {
+        "inputTokens": 128,
+        "outputTokens": 37,
+        "costUsd": 0.0042
+      }
+    }
+  ]
+}

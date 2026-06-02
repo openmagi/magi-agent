@@ -1,0 +1,887 @@
+{
+  "schema_version": "frontendTsSurfaceParity.v1",
+  "generated_for": "PR0 Python ADK frontend TS production compatibility audit",
+  "rows": [
+    {
+      "frontend_surface": "chat_composer",
+      "frontend_files_tests": [
+        "src/components/chat/chat-input.tsx",
+        "src/components/chat/chat-input.test.tsx",
+        "src/app/dashboard/[botId]/chat/chat-view-client.tsx"
+      ],
+      "ts_production_source_path": [
+        "src/lib/chat/chat-client.ts",
+        "infra/docker/chat-proxy/chat-proxy.js"
+      ],
+      "python_adk_parser_sanitizer_support": {
+        "status": "not_applicable",
+        "evidence": [
+          "infra/docker/clawy-core-agent-python/openmagi_core_agent/transport/chat.py"
+        ],
+        "notes": "Composer input is a frontend request surface; Python accepts chat request shapes only when the Python route is selected."
+      },
+      "python_adk_live_producer_support": {
+        "status": "not_applicable",
+        "evidence": [],
+        "notes": "No agent event producer is required for the composer itself."
+      },
+      "chat_proxy_compatibility": {
+        "status": "supported",
+        "evidence": [
+          "infra/docker/chat-proxy/chat-proxy.js",
+          "infra/docker/chat-proxy/runtime-selector.js"
+        ],
+        "notes": "Current web composer posts through the existing chat-proxy route."
+      },
+      "current_status": "contract_only",
+      "owning_layer": "Chat proxy",
+      "pr_slice_assignment": "PR8 End-To-End Compatibility Canary Harness - chat composer request replay",
+      "activation_gate": "Python route selection remains off until request parity and shadow replay pass."
+    },
+    {
+      "frontend_surface": "model_picker",
+      "frontend_files_tests": [
+        "src/components/chat/chat-model-picker.tsx",
+        "src/components/chat/chat-model-picker.test.tsx",
+        "src/lib/chat/channel-model-selection.ts",
+        "src/lib/chat/channel-model-selection.test.ts"
+      ],
+      "ts_production_source_path": [
+        "src/lib/chat/chat-client.ts",
+        "infra/docker/chat-proxy/runtime-selector.js"
+      ],
+      "python_adk_parser_sanitizer_support": {
+        "status": "contract_only",
+        "evidence": [
+          "infra/docker/clawy-core-agent-python/openmagi_core_agent/routing/deterministic.py",
+          "infra/docker/clawy-core-agent-python/tests/test_priority_a_model_routing_import_boundaries.py"
+        ],
+        "notes": "Model selection is represented in routing contracts, but production selection remains TS-owned."
+      },
+      "python_adk_live_producer_support": {
+        "status": "default_off",
+        "evidence": [
+          "infra/docker/clawy-core-agent-python/openmagi_core_agent/adk_bridge/runner_adapter.py"
+        ],
+        "notes": "Python model routing is not a live authority for frontend traffic."
+      },
+      "chat_proxy_compatibility": {
+        "status": "supported",
+        "evidence": [
+          "infra/docker/chat-proxy/runtime-selector.test.js"
+        ],
+        "notes": "Runtime selection has TS tests and remains the production path."
+      },
+      "current_status": "default_off",
+      "owning_layer": "Python ADK core",
+      "pr_slice_assignment": "PR8 End-To-End Compatibility Canary Harness - model picker request replay",
+      "activation_gate": "Enable only after Python routing shadow parity matches TS model picker behavior."
+    },
+    {
+      "frontend_surface": "attachments",
+      "frontend_files_tests": [
+        "src/lib/chat/attachments.ts",
+        "src/lib/chat/attachments.test.ts",
+        "src/lib/chat/kb-uploads.ts",
+        "src/lib/chat/kb-uploads.test.ts"
+      ],
+      "ts_production_source_path": [
+        "infra/docker/chat-proxy/chat-proxy.js",
+        "infra/docker/chat-proxy/file-dispatcher.js",
+        "infra/docker/chat-proxy/bot-file-delivery.js"
+      ],
+      "python_adk_parser_sanitizer_support": {
+        "status": "contract_only",
+        "evidence": [
+          "infra/docker/clawy-core-agent-python/openmagi_core_agent/adk_bridge/artifact_service.py",
+          "infra/docker/clawy-core-agent-python/tests/test_gate1_local_runner_attachment.py"
+        ],
+        "notes": "Attachment contracts exist for local projection and artifact handling."
+      },
+      "python_adk_live_producer_support": {
+        "status": "default_off",
+        "evidence": [
+          "infra/docker/clawy-core-agent-python/openmagi_core_agent/artifacts/file_delivery.py",
+          "infra/docker/clawy-core-agent-python/tests/fixtures/artifact_channel_delivery/ts_metadata_parity_matrix.json"
+        ],
+        "notes": "Live file delivery and artifact writes are not attached to production traffic."
+      },
+      "chat_proxy_compatibility": {
+        "status": "supported",
+        "evidence": [
+          "infra/docker/chat-proxy/attachments-config.test.js",
+          "infra/docker/chat-proxy/file-dispatcher.test.js"
+        ],
+        "notes": "Upload and delivery routes are TS production surfaces."
+      },
+      "current_status": "default_off",
+      "owning_layer": "Python ADK harness/recipe/plugin",
+      "pr_slice_assignment": "PR7 Artifact, Browser Frame, And Document Draft Compatibility - attachments",
+      "activation_gate": "Attach only after receipt parity, file safety checks, and channel delivery canary pass."
+    },
+    {
+      "frontend_surface": "kb_context",
+      "frontend_files_tests": [
+        "src/components/chat/kb-context-bar.tsx",
+        "src/components/chat/kb-side-panel.tsx",
+        "src/components/chat/kb-side-panel.test.tsx",
+        "src/lib/chat/kb-send.ts",
+        "src/lib/chat/kb-send.test.ts"
+      ],
+      "ts_production_source_path": [
+        "infra/docker/chat-proxy/kb-context.js",
+        "infra/docker/chat-proxy/knowledge-manifest.js",
+        "infra/docker/chat-proxy/knowledge-search-scope.js"
+      ],
+      "python_adk_parser_sanitizer_support": {
+        "status": "contract_only",
+        "evidence": [
+          "infra/docker/clawy-core-agent-python/openmagi_core_agent/knowledge/provider_boundary.py",
+          "infra/docker/clawy-core-agent-python/openmagi_core_agent/knowledge/source_tools.py"
+        ],
+        "notes": "Knowledge provider boundaries and source tools exist, but do not replace TS KB context routing."
+      },
+      "python_adk_live_producer_support": {
+        "status": "default_off",
+        "evidence": [
+          "infra/docker/clawy-core-agent-python/tests/test_knowledge_browser_source_tools_boundary.py"
+        ],
+        "notes": "Provider-backed knowledge use is gated and not live for production frontend turns."
+      },
+      "chat_proxy_compatibility": {
+        "status": "supported",
+        "evidence": [
+          "infra/docker/chat-proxy/kb-context.test.js",
+          "infra/docker/chat-proxy/knowledge-search-scope.test.js"
+        ],
+        "notes": "Chat proxy owns current KB manifest and scoped search behavior."
+      },
+      "current_status": "default_off",
+      "owning_layer": "Chat proxy",
+      "pr_slice_assignment": "PR8 End-To-End Compatibility Canary Harness - KB context request replay",
+      "activation_gate": "Keep Python KB route off until scoped KB context replay matches TS request assembly."
+    },
+    {
+      "frontend_surface": "streaming_text",
+      "frontend_files_tests": [
+        "src/lib/chat/chat-client.ts",
+        "src/lib/chat/chat-client.test.ts",
+        "src/lib/chat/streaming-delta-buffer.ts",
+        "src/lib/chat/streaming-delta-buffer.test.ts"
+      ],
+      "ts_production_source_path": [
+        "src/lib/chat/chat-client.ts",
+        "infra/docker/chat-proxy/chat-proxy.js",
+        "infra/docker/clawy-core-agent/src/transport/SseWriter.ts"
+      ],
+      "python_adk_parser_sanitizer_support": {
+        "status": "supported",
+        "evidence": [
+          "infra/docker/clawy-core-agent-python/openmagi_core_agent/transport/sse.py",
+          "infra/docker/clawy-core-agent-python/tests/test_public_event_parity_matrix.py"
+        ],
+        "notes": "text_delta is covered by Python public event projection tests."
+      },
+      "python_adk_live_producer_support": {
+        "status": "supported",
+        "evidence": [
+          "infra/docker/clawy-core-agent-python/openmagi_core_agent/adk_bridge/event_adapter.py",
+          "infra/docker/clawy-core-agent-python/tests/test_event_bridge.py"
+        ],
+        "notes": "The event adapter can emit text_delta from ADK turn events."
+      },
+      "chat_proxy_compatibility": {
+        "status": "supported",
+        "evidence": [
+          "infra/docker/chat-proxy/chat-proxy.coreagent-bypass.test.js",
+          "infra/docker/chat-proxy/stream-snapshot.test.js"
+        ],
+        "notes": "The web client already consumes text_delta through the agent SSE channel."
+      },
+      "current_status": "compatible",
+      "owning_layer": "Tests/docs only",
+      "pr_slice_assignment": "PR0 Reconciliation Matrix And Gap Audit - compatibility table",
+      "activation_gate": "PR0 records parity only; it does not enable Python routing."
+    },
+    {
+      "frontend_surface": "work_console",
+      "frontend_files_tests": [
+        "src/components/chat/work-console-panel.tsx",
+        "src/components/chat/work-console-panel.test.tsx",
+        "src/lib/chat/work-console.ts",
+        "src/lib/chat/work-console.test.ts"
+      ],
+      "ts_production_source_path": [
+        "src/lib/chat/chat-client.ts",
+        "src/lib/chat/live-transcript.ts",
+        "infra/docker/chat-proxy/chat-proxy.js"
+      ],
+      "python_adk_parser_sanitizer_support": {
+        "status": "supported",
+        "evidence": [
+          "infra/docker/clawy-core-agent-python/tests/fixtures/live_work_console_event_parity/matrix.json",
+          "infra/docker/clawy-core-agent-python/tests/test_public_event_parity_matrix.py"
+        ],
+        "notes": "Public event families used by Work Console have sanitizer and matrix coverage."
+      },
+      "python_adk_live_producer_support": {
+        "status": "contract_only",
+        "evidence": [
+          "infra/docker/clawy-core-agent-python/openmagi_core_agent/adk_bridge/event_adapter.py"
+        ],
+        "notes": "Producer coverage is partial and does not cover every Work Console family as live authority."
+      },
+      "chat_proxy_compatibility": {
+        "status": "supported",
+        "evidence": [
+          "infra/docker/chat-proxy/stream-snapshot.js",
+          "infra/docker/chat-proxy/chat-proxy.js"
+        ],
+        "notes": "TS stream events already hydrate Work Console rows."
+      },
+      "current_status": "contract_only",
+      "owning_layer": "Python ADK core",
+      "pr_slice_assignment": "PR3 Python ADK Live Producer Parity Bridge - Work Console",
+      "activation_gate": "Promote only after all Work Console event families have live Python producer coverage."
+    },
+    {
+      "frontend_surface": "run_inspector",
+      "frontend_files_tests": [
+        "src/components/chat/run-inspector-dock.tsx",
+        "src/components/chat/run-inspector-dock.test.tsx",
+        "src/components/chat/run-inspector-determinism.test.tsx"
+      ],
+      "ts_production_source_path": [
+        "src/lib/chat/openmagi-runtime-events.ts",
+        "src/lib/chat/openmagi-determinism-state.ts",
+        "src/app/api/internal/python-runtime/events/route.ts"
+      ],
+      "python_adk_parser_sanitizer_support": {
+        "status": "supported",
+        "evidence": [
+          "infra/docker/clawy-core-agent-python/openmagi_core_agent/telemetry/deterministic_events.py",
+          "infra/docker/clawy-core-agent-python/tests/test_deterministic_events_contract.py"
+        ],
+        "notes": "Deterministic runtime events have typed frontend parsing and Python contract tests."
+      },
+      "python_adk_live_producer_support": {
+        "status": "default_off",
+        "evidence": [
+          "infra/docker/clawy-core-agent-python/openmagi_core_agent/ops/runtime_events.py"
+        ],
+        "notes": "Runtime event production is diagnostic and not production frontend authority."
+      },
+      "chat_proxy_compatibility": {
+        "status": "not_applicable",
+        "evidence": [
+          "src/app/api/internal/python-runtime/events/route.ts"
+        ],
+        "notes": "Run Inspector uses internal web routes, not chat-proxy streaming."
+      },
+      "current_status": "default_off",
+      "owning_layer": "Python ADK core",
+      "pr_slice_assignment": "PR5 Product-Plane And Admin Dashboard Live Projection Readiness - Run Inspector",
+      "activation_gate": "Enable only behind admin/read-only gates after runtime event route canary passes."
+    },
+    {
+      "frontend_surface": "agent_activity_timeline",
+      "frontend_files_tests": [
+        "src/components/chat/agent-activity-timeline.tsx",
+        "src/components/chat/agent-activity-timeline.test.tsx",
+        "src/lib/chat/agent-activity.ts",
+        "src/lib/chat/agent-activity.test.ts"
+      ],
+      "ts_production_source_path": [
+        "src/lib/chat/chat-client.ts",
+        "src/lib/chat/types.ts"
+      ],
+      "python_adk_parser_sanitizer_support": {
+        "status": "supported",
+        "evidence": [
+          "infra/docker/clawy-core-agent-python/tests/test_public_event_parity_matrix.py"
+        ],
+        "notes": "Activity timeline consumes the same sanitized public event families as Work Console."
+      },
+      "python_adk_live_producer_support": {
+        "status": "contract_only",
+        "evidence": [
+          "infra/docker/clawy-core-agent-python/openmagi_core_agent/adk_bridge/event_adapter.py"
+        ],
+        "notes": "Tool and phase events are present, but child/background/activity coverage is not complete as live producer."
+      },
+      "chat_proxy_compatibility": {
+        "status": "supported",
+        "evidence": [
+          "infra/docker/chat-proxy/chat-proxy.js"
+        ],
+        "notes": "The TS stream path already delivers activity events."
+      },
+      "current_status": "contract_only",
+      "owning_layer": "Python ADK core",
+      "pr_slice_assignment": "PR3 Python ADK Live Producer Parity Bridge - activity timeline",
+      "activation_gate": "Require full live producer coverage for timeline event families before activation."
+    },
+    {
+      "frontend_surface": "active_snapshot_reconnect",
+      "frontend_files_tests": [
+        "src/lib/chat/active-snapshot.ts",
+        "src/lib/chat/active-snapshot.test.ts",
+        "src/lib/chat/channel-runtime-cache.ts",
+        "src/lib/chat/channel-runtime-cache.test.ts"
+      ],
+      "ts_production_source_path": [
+        "infra/docker/chat-proxy/core-agent-resume.js",
+        "infra/docker/chat-proxy/stream-snapshot.js",
+        "src/app/dashboard/[botId]/chat/chat-view-client.tsx"
+      ],
+      "python_adk_parser_sanitizer_support": {
+        "status": "supported",
+        "evidence": [
+          "infra/docker/clawy-core-agent-python/tests/test_public_event_parity_matrix.py"
+        ],
+        "notes": "active_snapshot is represented in public event parity coverage."
+      },
+      "python_adk_live_producer_support": {
+        "status": "default_off",
+        "evidence": [
+          "infra/docker/clawy-core-agent-python/openmagi_core_agent/runtime/events.py"
+        ],
+        "notes": "Python reconnect snapshots are not the production source."
+      },
+      "chat_proxy_compatibility": {
+        "status": "supported",
+        "evidence": [
+          "infra/docker/chat-proxy/core-agent-resume.test.js",
+          "infra/docker/chat-proxy/stream-snapshot.test.js"
+        ],
+        "notes": "Reconnect and stream snapshots are TS chat-proxy features."
+      },
+      "current_status": "default_off",
+      "owning_layer": "Chat proxy",
+      "pr_slice_assignment": "PR4 Active Snapshot, Inject, Interrupt Compatibility - reconnect",
+      "activation_gate": "Python snapshots remain off until resume replay exactly matches TS snapshot semantics."
+    },
+    {
+      "frontend_surface": "inject_interrupt",
+      "frontend_files_tests": [
+        "src/lib/chat/accepted-injections.ts",
+        "src/lib/chat/accepted-injections.test.ts",
+        "src/lib/chat/interrupt-handoff.ts",
+        "src/lib/chat/interrupt-handoff.test.ts"
+      ],
+      "ts_production_source_path": [
+        "src/lib/chat/chat-client.ts",
+        "infra/docker/chat-proxy/inject-handler.js",
+        "infra/docker/chat-proxy/interrupt-handler.js"
+      ],
+      "python_adk_parser_sanitizer_support": {
+        "status": "contract_only",
+        "evidence": [
+          "infra/docker/clawy-core-agent-python/tests/test_public_event_parity_matrix.py"
+        ],
+        "notes": "inject and interrupt public event shapes are covered as contracts."
+      },
+      "python_adk_live_producer_support": {
+        "status": "missing",
+        "evidence": [],
+        "notes": "No Python production handler currently owns mid-turn inject or interrupt semantics."
+      },
+      "chat_proxy_compatibility": {
+        "status": "supported",
+        "evidence": [
+          "infra/docker/chat-proxy/inject-handler.test.js",
+          "infra/docker/chat-proxy/interrupt-handler.test.js"
+        ],
+        "notes": "TS chat-proxy endpoints remain the production implementation."
+      },
+      "current_status": "blocked_until_gate",
+      "owning_layer": "Chat proxy",
+      "pr_slice_assignment": "PR4 Active Snapshot, Inject, Interrupt Compatibility - inject interrupt bridge",
+      "activation_gate": "Do not route Python traffic until inject and interrupt parity tests pass against queued-turn replay."
+    },
+    {
+      "frontend_surface": "explicit_recipe_selection",
+      "frontend_files_tests": [
+        "src/lib/agent-runtime/recipe-selection.ts",
+        "src/lib/agent-runtime/recipe-selection.test.ts",
+        "src/lib/chat/chat-client.ts"
+      ],
+      "ts_production_source_path": [
+        "src/lib/chat/openmagi-runtime-events.ts",
+        "infra/docker/clawy-core-agent/src/transport/safeAgentEvent.ts"
+      ],
+      "python_adk_parser_sanitizer_support": {
+        "status": "supported",
+        "evidence": [
+          "infra/docker/clawy-core-agent-python/openmagi_core_agent/transport/sse.py",
+          "infra/docker/clawy-core-agent-python/tests/test_public_event_parity_matrix.py"
+        ],
+        "notes": "recipe_selection projection sanitizes public recipe refs and omission reasons."
+      },
+      "python_adk_live_producer_support": {
+        "status": "contract_only",
+        "evidence": [
+          "infra/docker/clawy-core-agent-python/openmagi_core_agent/recipes/selector_validation.py",
+          "infra/docker/clawy-core-agent-python/tests/test_recipe_selector_validation_contract.py"
+        ],
+        "notes": "Selector validation exists; production explicit selection is not enabled."
+      },
+      "chat_proxy_compatibility": {
+        "status": "contract_only",
+        "evidence": [
+          "src/lib/chat/chat-client.ts"
+        ],
+        "notes": "Frontend request shaping exists, but Python route selection is still off."
+      },
+      "current_status": "frontend_bug",
+      "owning_layer": "Frontend",
+      "pr_slice_assignment": "PR1 Production Recipe Selector Gating Fix - explicit recipe selection",
+      "activation_gate": "Recipe selection stays hidden unless real bot-scoped availability exists."
+    },
+    {
+      "frontend_surface": "recipe_pack_customize_builder",
+      "frontend_files_tests": [
+        "src/components/dashboard/customize/recipe-pack-modal.tsx",
+        "src/components/dashboard/customize/recipe-builder-advanced-editor-panel.tsx",
+        "src/components/dashboard/customize/recipe-builder-mode-integration.test.tsx",
+        "src/app/api/bots/[botId]/recipe-packs/route.test.ts"
+      ],
+      "ts_production_source_path": [
+        "src/lib/recipe-packs/types.ts",
+        "src/lib/recipe-packs/storage.ts",
+        "src/app/api/bots/[botId]/recipe-packs/route.ts"
+      ],
+      "python_adk_parser_sanitizer_support": {
+        "status": "contract_only",
+        "evidence": [
+          "infra/docker/clawy-core-agent-python/openmagi_core_agent/authoring/contracts.py",
+          "infra/docker/clawy-core-agent-python/openmagi_core_agent/authoring/projection.py"
+        ],
+        "notes": "Python authoring contracts project recipe metadata, but do not own TS customization routes."
+      },
+      "python_adk_live_producer_support": {
+        "status": "default_off",
+        "evidence": [
+          "infra/docker/clawy-core-agent-python/openmagi_core_agent/authoring/dry_run.py",
+          "infra/docker/clawy-core-agent-python/tests/test_authoring_recipe_dry_run.py"
+        ],
+        "notes": "Authoring dry-run is gated and not production builder authority."
+      },
+      "chat_proxy_compatibility": {
+        "status": "not_applicable",
+        "evidence": [
+          "src/app/api/bots/[botId]/recipe-packs/route.ts"
+        ],
+        "notes": "Customize and builder flows use web API routes, not chat-proxy streaming."
+      },
+      "current_status": "default_off",
+      "owning_layer": "Python ADK harness/recipe/plugin",
+      "pr_slice_assignment": "PR5 Product-Plane And Admin Dashboard Live Projection Readiness - recipe pack builder",
+      "activation_gate": "Keep Python authoring off until dry-run, review, and persistence parity are proven."
+    },
+    {
+      "frontend_surface": "product_plane_admin_runtime_services",
+      "frontend_files_tests": [
+        "src/app/dashboard/admin/runtime/page.tsx",
+        "src/app/dashboard/admin/runtime/page.test.tsx",
+        "src/app/dashboard/admin/services/services-dashboard.tsx",
+        "src/app/dashboard/admin/services/services-dashboard.test.tsx"
+      ],
+      "ts_production_source_path": [
+        "src/app/api/internal/python-runtime/product-plane/route.ts",
+        "src/app/api/internal/python-runtime/status/route.ts",
+        "src/lib/agent-runtime/product-plane-types.ts",
+        "src/lib/agent-runtime/hermes-dashboard-types.ts"
+      ],
+      "python_adk_parser_sanitizer_support": {
+        "status": "supported",
+        "evidence": [
+          "infra/docker/clawy-core-agent-python/openmagi_core_agent/transport/product_admin.py",
+          "infra/docker/clawy-core-agent-python/tests/test_product_admin_api_contracts.py"
+        ],
+        "notes": "Admin product-plane projections are typed and read-only."
+      },
+      "python_adk_live_producer_support": {
+        "status": "default_off",
+        "evidence": [
+          "infra/docker/clawy-core-agent-python/openmagi_core_agent/ops/health.py",
+          "infra/docker/clawy-core-agent-python/openmagi_core_agent/ops/runtime_events.py"
+        ],
+        "notes": "Admin diagnostics remain gated and read-only; no production runtime authority is granted."
+      },
+      "chat_proxy_compatibility": {
+        "status": "not_applicable",
+        "evidence": [
+          "src/app/api/internal/python-runtime/product-plane/route.ts"
+        ],
+        "notes": "Admin surfaces use internal web routes."
+      },
+      "current_status": "default_off",
+      "owning_layer": "Python ADK core",
+      "pr_slice_assignment": "PR5 Product-Plane And Admin Dashboard Live Projection Readiness - admin services",
+      "activation_gate": "Require admin-only read-only route gates and diagnostics canary before any production visibility expansion."
+    },
+    {
+      "frontend_surface": "source_citation_research_evidence",
+      "frontend_files_tests": [
+        "src/lib/chat/research-evidence.ts",
+        "src/lib/chat/research-evidence.strip.test.ts",
+        "src/lib/chat/chat-client.public-event-parity.test.ts",
+        "src/components/chat/message-bubble.test.tsx"
+      ],
+      "ts_production_source_path": [
+        "src/lib/chat/chat-client.ts",
+        "infra/docker/clawy-core-agent/src/transport/safeAgentEvent.ts"
+      ],
+      "python_adk_parser_sanitizer_support": {
+        "status": "supported",
+        "evidence": [
+          "infra/docker/clawy-core-agent-python/tests/test_public_event_parity_matrix.py",
+          "infra/docker/clawy-core-agent-python/tests/test_research_source_proof.py"
+        ],
+        "notes": "source_inspected, rule_check, and citation_gate public shapes are covered."
+      },
+      "python_adk_live_producer_support": {
+        "status": "default_off",
+        "evidence": [
+          "infra/docker/clawy-core-agent-python/openmagi_core_agent/recipes/research_agents.py",
+          "infra/docker/clawy-core-agent-python/openmagi_core_agent/harness/evidence_scope.py"
+        ],
+        "notes": "Research evidence production remains gated and is not live frontend authority."
+      },
+      "chat_proxy_compatibility": {
+        "status": "supported",
+        "evidence": [
+          "infra/docker/chat-proxy/chat-proxy.js"
+        ],
+        "notes": "The TS stream path already forwards evidence public events."
+      },
+      "current_status": "default_off",
+      "owning_layer": "Python ADK harness/recipe/plugin",
+      "pr_slice_assignment": "PR3 Python ADK Live Producer Parity Bridge - research evidence",
+      "activation_gate": "Enable only after citation, source proof, and research fallback gates pass."
+    },
+    {
+      "frontend_surface": "task_board",
+      "frontend_files_tests": [
+        "src/components/chat/task-board.tsx",
+        "src/components/chat/pinned-task-board.tsx",
+        "src/components/chat/pinned-task-board.test.tsx",
+        "src/lib/chat/types.ts"
+      ],
+      "ts_production_source_path": [
+        "src/lib/chat/chat-client.ts",
+        "infra/docker/clawy-core-agent/src/tools/TaskBoard.ts"
+      ],
+      "python_adk_parser_sanitizer_support": {
+        "status": "supported",
+        "evidence": [
+          "infra/docker/clawy-core-agent-python/tests/test_public_event_parity_matrix.py"
+        ],
+        "notes": "task_board public projection is covered by parity matrix tests."
+      },
+      "python_adk_live_producer_support": {
+        "status": "contract_only",
+        "evidence": [
+          "infra/docker/clawy-core-agent-python/openmagi_core_agent/meta_orchestration/task_plan.py"
+        ],
+        "notes": "Task planning exists, but no production task_board live producer is attached."
+      },
+      "chat_proxy_compatibility": {
+        "status": "supported",
+        "evidence": [
+          "infra/docker/chat-proxy/task-planner.test.js"
+        ],
+        "notes": "TS task planning and stream forwarding remain current production behavior."
+      },
+      "current_status": "contract_only",
+      "owning_layer": "Python ADK core",
+      "pr_slice_assignment": "PR3 Python ADK Live Producer Parity Bridge - task board",
+      "activation_gate": "Require live task_board producer replay before frontend production routing."
+    },
+    {
+      "frontend_surface": "subagent_child_background",
+      "frontend_files_tests": [
+        "src/components/chat/subagent-work-panel.tsx",
+        "src/lib/chat/live-run.ts",
+        "src/lib/chat/chat-client.ts",
+        "src/lib/chat/types.ts"
+      ],
+      "ts_production_source_path": [
+        "src/lib/chat/chat-client.ts",
+        "infra/docker/chat-proxy/durable-tasks.js"
+      ],
+      "python_adk_parser_sanitizer_support": {
+        "status": "supported",
+        "evidence": [
+          "infra/docker/clawy-core-agent-python/tests/test_public_event_parity_matrix.py",
+          "infra/docker/clawy-core-agent-python/tests/test_gate1_child_envelope_fixtures.py"
+        ],
+        "notes": "Child and background public events have sanitizer and envelope fixture coverage."
+      },
+      "python_adk_live_producer_support": {
+        "status": "default_off",
+        "evidence": [
+          "infra/docker/clawy-core-agent-python/openmagi_core_agent/harness/background_tasks.py",
+          "infra/docker/clawy-core-agent-python/openmagi_core_agent/recipes/coding_subagents.py"
+        ],
+        "notes": "Child execution and background activity are default-off for production frontend traffic."
+      },
+      "chat_proxy_compatibility": {
+        "status": "supported",
+        "evidence": [
+          "infra/docker/chat-proxy/durable-tasks.test.js"
+        ],
+        "notes": "TS durable task support remains the production path."
+      },
+      "current_status": "default_off",
+      "owning_layer": "Python ADK harness/recipe/plugin",
+      "pr_slice_assignment": "PR6 Mission/Cron/Goal/Background Surface Compatibility - child background work",
+      "activation_gate": "Enable only after child lifecycle, durable task, and cancellation replay pass."
+    },
+    {
+      "frontend_surface": "mission_cron_goal",
+      "frontend_files_tests": [
+        "src/components/chat/missions-panel.tsx",
+        "src/components/chat/missions-panel.test.tsx",
+        "src/lib/chat/missions.ts",
+        "src/lib/chat/missions.test.ts"
+      ],
+      "ts_production_source_path": [
+        "src/lib/chat/chat-client.ts",
+        "infra/docker/chat-proxy/missions.js",
+        "infra/docker/chat-proxy/durable-tasks.js"
+      ],
+      "python_adk_parser_sanitizer_support": {
+        "status": "supported",
+        "evidence": [
+          "infra/docker/clawy-core-agent-python/openmagi_core_agent/missions/events.py",
+          "infra/docker/clawy-core-agent-python/tests/test_mission_public_event_projection.py"
+        ],
+        "notes": "Mission, cron, and goal public projections are covered by Python tests."
+      },
+      "python_adk_live_producer_support": {
+        "status": "default_off",
+        "evidence": [
+          "infra/docker/clawy-core-agent-python/openmagi_core_agent/harness/cron_runtime.py",
+          "infra/docker/clawy-core-agent-python/openmagi_core_agent/harness/goal_loop.py"
+        ],
+        "notes": "Live scheduler and goal loop authority remain default-off."
+      },
+      "chat_proxy_compatibility": {
+        "status": "supported",
+        "evidence": [
+          "infra/docker/chat-proxy/missions.test.js",
+          "infra/docker/chat-proxy/durable-tasks.test.js"
+        ],
+        "notes": "TS mission and durable work routes remain production behavior."
+      },
+      "current_status": "default_off",
+      "owning_layer": "Python ADK harness/recipe/plugin",
+      "pr_slice_assignment": "PR6 Mission/Cron/Goal/Background Surface Compatibility - mission cron goal",
+      "activation_gate": "Require scheduler, mission ledger, and goal continuation replay before activation."
+    },
+    {
+      "frontend_surface": "browser_frame",
+      "frontend_files_tests": [
+        "src/components/chat/browser-frame-preview.tsx",
+        "src/components/chat/browser-frame-preview.test.tsx",
+        "src/lib/chat/chat-client.public-event-parity.test.ts"
+      ],
+      "ts_production_source_path": [
+        "src/lib/chat/chat-client.ts",
+        "infra/docker/chat-proxy/social-browser.js",
+        "infra/docker/chat-proxy/browser-credit-gate.js"
+      ],
+      "python_adk_parser_sanitizer_support": {
+        "status": "supported",
+        "evidence": [
+          "infra/docker/clawy-core-agent-python/tests/test_public_event_parity_matrix.py",
+          "infra/docker/clawy-core-agent-python/tests/test_live_browser_provider_pack.py"
+        ],
+        "notes": "browser_frame shape is covered; browser provider packs remain gated."
+      },
+      "python_adk_live_producer_support": {
+        "status": "default_off",
+        "evidence": [
+          "infra/docker/clawy-core-agent-python/openmagi_core_agent/browser/live_provider_pack.py"
+        ],
+        "notes": "Browser provider execution is not enabled for production frontend turns."
+      },
+      "chat_proxy_compatibility": {
+        "status": "supported",
+        "evidence": [
+          "infra/docker/chat-proxy/social-browser.test.js",
+          "infra/docker/chat-proxy/browser-credit-gate.test.js"
+        ],
+        "notes": "TS browser and credit gates remain production authority."
+      },
+      "current_status": "default_off",
+      "owning_layer": "Python ADK harness/recipe/plugin",
+      "pr_slice_assignment": "PR7 Artifact, Browser Frame, And Document Draft Compatibility - browser frame",
+      "activation_gate": "Require browser provider, credit gate, and frame redaction replay before activation."
+    },
+    {
+      "frontend_surface": "document_draft",
+      "frontend_files_tests": [
+        "src/components/chat/document-draft-preview.tsx",
+        "src/lib/chat/chat-client.public-event-parity.test.ts",
+        "src/lib/chat/types.ts"
+      ],
+      "ts_production_source_path": [
+        "src/lib/chat/chat-client.ts",
+        "infra/docker/clawy-core-agent/src/transport/safeAgentEvent.ts"
+      ],
+      "python_adk_parser_sanitizer_support": {
+        "status": "supported",
+        "evidence": [
+          "infra/docker/clawy-core-agent-python/tests/test_public_event_parity_matrix.py"
+        ],
+        "notes": "document_draft public preview projection is covered."
+      },
+      "python_adk_live_producer_support": {
+        "status": "contract_only",
+        "evidence": [
+          "infra/docker/clawy-core-agent-python/openmagi_core_agent/authoring/projection.py",
+          "infra/docker/clawy-core-agent-python/openmagi_core_agent/artifacts/output_registry_boundary.py"
+        ],
+        "notes": "Draft metadata projection exists, but live document authoring is not a production frontend producer."
+      },
+      "chat_proxy_compatibility": {
+        "status": "supported",
+        "evidence": [
+          "infra/docker/chat-proxy/chat-proxy.js"
+        ],
+        "notes": "The TS stream path can deliver document_draft events."
+      },
+      "current_status": "contract_only",
+      "owning_layer": "Python ADK harness/recipe/plugin",
+      "pr_slice_assignment": "PR7 Artifact, Browser Frame, And Document Draft Compatibility - document draft",
+      "activation_gate": "Require output registry and document preview replay before production activation."
+    },
+    {
+      "frontend_surface": "artifact_panel",
+      "frontend_files_tests": [
+        "src/components/chat/artifact-panel.tsx",
+        "src/components/chat/artifact-panel.test.tsx",
+        "src/lib/consultations/artifacts.ts",
+        "src/lib/consultations/artifacts.test.ts"
+      ],
+      "ts_production_source_path": [
+        "infra/docker/chat-proxy/bot-file-delivery.js",
+        "infra/docker/chat-proxy/file-dispatcher.js",
+        "src/app/api/consultations/jobs/[jobId]/artifacts/[artifactId]/route.ts"
+      ],
+      "python_adk_parser_sanitizer_support": {
+        "status": "contract_only",
+        "evidence": [
+          "infra/docker/clawy-core-agent-python/openmagi_core_agent/artifacts/output_registry_boundary.py",
+          "infra/docker/clawy-core-agent-python/tests/test_priority_e_artifact_channel_delivery_boundary.py"
+        ],
+        "notes": "Artifact metadata contracts exist, but production artifact panel data remains TS-owned."
+      },
+      "python_adk_live_producer_support": {
+        "status": "default_off",
+        "evidence": [
+          "infra/docker/clawy-core-agent-python/openmagi_core_agent/artifacts/delivery_boundary.py"
+        ],
+        "notes": "Artifact writes and channel delivery are not attached to production frontend routes."
+      },
+      "chat_proxy_compatibility": {
+        "status": "supported",
+        "evidence": [
+          "infra/docker/chat-proxy/bot-file-delivery.test.js",
+          "infra/docker/chat-proxy/file-dispatcher.test.js"
+        ],
+        "notes": "TS delivery and file dispatch remain active."
+      },
+      "current_status": "default_off",
+      "owning_layer": "Python ADK harness/recipe/plugin",
+      "pr_slice_assignment": "PR7 Artifact, Browser Frame, And Document Draft Compatibility - artifact panel",
+      "activation_gate": "Enable only after render receipts, delivery receipts, and panel metadata parity pass."
+    },
+    {
+      "frontend_surface": "control_approval",
+      "frontend_files_tests": [
+        "src/components/chat/control-request.tsx",
+        "src/components/chat/control-request.test.tsx",
+        "src/lib/chat/control-questions.ts",
+        "src/lib/chat/control-questions.test.ts"
+      ],
+      "ts_production_source_path": [
+        "src/lib/chat/chat-client.ts",
+        "infra/docker/chat-proxy/control-request-routes.js",
+        "infra/docker/chat-proxy/pending-approval.js"
+      ],
+      "python_adk_parser_sanitizer_support": {
+        "status": "supported",
+        "evidence": [
+          "infra/docker/clawy-core-agent-python/openmagi_core_agent/adk_bridge/policy_boundary.py",
+          "infra/docker/clawy-core-agent-python/tests/test_control_events.py"
+        ],
+        "notes": "Control event projection and approval receipt contracts exist."
+      },
+      "python_adk_live_producer_support": {
+        "status": "default_off",
+        "evidence": [
+          "infra/docker/clawy-core-agent-python/openmagi_core_agent/harness/approval_receipts.py",
+          "infra/docker/clawy-core-agent-python/openmagi_core_agent/runtime/approval_resume.py"
+        ],
+        "notes": "Approval resume authority is not live for production frontend turns."
+      },
+      "chat_proxy_compatibility": {
+        "status": "supported",
+        "evidence": [
+          "infra/docker/chat-proxy/control-request-routes.test.js"
+        ],
+        "notes": "TS control routes remain production approval behavior."
+      },
+      "current_status": "default_off",
+      "owning_layer": "Python ADK core",
+      "pr_slice_assignment": "PR3 Python ADK Live Producer Parity Bridge - control approval",
+      "activation_gate": "Require approval replay, pending-state reconciliation, and denial handling parity before activation."
+    },
+    {
+      "frontend_surface": "heartbeat_retry_fallback",
+      "frontend_files_tests": [
+        "src/lib/chat/chat-client.ts",
+        "src/lib/chat/empty-response.ts",
+        "src/lib/chat/empty-response.test.ts",
+        "src/lib/chat/work-console.ts"
+      ],
+      "ts_production_source_path": [
+        "src/lib/chat/chat-client.ts",
+        "infra/docker/chat-proxy/chat-proxy.js",
+        "infra/docker/chat-proxy/fmp-fallback.js"
+      ],
+      "python_adk_parser_sanitizer_support": {
+        "status": "supported",
+        "evidence": [
+          "infra/docker/clawy-core-agent-python/tests/fixtures/live_work_console_event_parity/matrix.json",
+          "infra/docker/clawy-core-agent-python/tests/fixtures/ts_parity_replay/public_event_golden.json"
+        ],
+        "notes": "heartbeat and retry projections have public fixture coverage."
+      },
+      "python_adk_live_producer_support": {
+        "status": "contract_only",
+        "evidence": [
+          "infra/docker/clawy-core-agent-python/openmagi_core_agent/recipes/retry_repair_policies.py",
+          "infra/docker/clawy-core-agent-python/openmagi_core_agent/harness/repair_policy.py"
+        ],
+        "notes": "Retry policy contracts exist; production fallback remains TS-owned."
+      },
+      "chat_proxy_compatibility": {
+        "status": "supported",
+        "evidence": [
+          "infra/docker/chat-proxy/fmp-fallback.test.js",
+          "src/lib/chat/chat-client.test.ts"
+        ],
+        "notes": "TS stream heartbeat comments and fallback behavior remain active."
+      },
+      "current_status": "contract_only",
+      "owning_layer": "Python ADK core",
+      "pr_slice_assignment": "PR3 Python ADK Live Producer Parity Bridge - retry fallback",
+      "activation_gate": "Promote only after Python retry events, fallback metadata, and empty-response recovery replay match TS behavior."
+    }
+  ]
+}

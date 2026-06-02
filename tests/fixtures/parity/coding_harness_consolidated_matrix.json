@@ -1,0 +1,389 @@
+{
+  "schemaVersion": "codingHarnessConsolidatedMatrix.v1",
+  "generatedFor": "python-adk-coding-harness-consolidated-safe-queue-pr0",
+  "rows": [
+    {
+      "id": "coding_latest_main_reconciliation",
+      "capability": "Latest-main reconciliation for consolidated coding harness source plans",
+      "sourceDocuments": [
+        "docs/superpowers/plans/2026-05-23-python-adk-claude-code-harness-parity-execution-plan.md",
+        "docs/superpowers/plans/2026-05-20-python-adk-claude-code-parity-full-master-plan.md",
+        "docs/superpowers/plans/2026-05-26-python-adk-opencode-latest-harness-delta-addendum.md",
+        "docs/superpowers/plans/2026-05-20-python-adk-opencode-parity-recipes.md",
+        "docs/superpowers/plans/2026-05-20-python-adk-claude-code-parity-recipes.md",
+        "docs/superpowers/plans/2026-05-12-coding-harness-reliability-train.md",
+        "docs/superpowers/plans/2026-05-10-coding-parity-measurement-evidence.md"
+      ],
+      "alreadyCovered": true,
+      "coveredByFiles": [
+        "docs/superpowers/plans/2026-05-27-python-adk-coding-harness-consolidated-safe-queue-plan.md",
+        "docs/notes/2026-05-27-python-adk-coding-harness-consolidated-reconciliation.md",
+        "infra/docker/clawy-core-agent-python/tests/fixtures/parity/coding_harness_consolidated_matrix.json"
+      ],
+      "coveredByTests": [
+        "infra/docker/clawy-core-agent-python/tests/test_coding_harness_consolidated_matrix.py"
+      ],
+      "missingImplementation": [
+        "gap-tests-docs-only"
+      ],
+      "owningLayer": "Tests/docs only",
+      "adkPrimitive": "audit fixture only",
+      "prSlice": "PR0",
+      "dependencies": [
+        "none"
+      ],
+      "activationGate": "PR0-docs-fixture-only",
+      "coreTouchAllowed": false,
+      "coreGapIfBlocked": ""
+    },
+    {
+      "id": "coding_recipe_ownership_boundaries",
+      "capability": "Coding workflow ownership stays in first-party coding recipe and harness layers",
+      "sourceDocuments": [
+        "docs/superpowers/plans/2026-05-20-python-adk-claude-code-parity-recipes.md",
+        "docs/superpowers/plans/2026-05-20-python-adk-opencode-parity-recipes.md"
+      ],
+      "alreadyCovered": true,
+      "coveredByFiles": [
+        "openmagi_core_agent/recipes/coding_mutation.py",
+        "openmagi_core_agent/recipes/coding_subagents.py",
+        "openmagi_core_agent/coding/meta_adapter.py",
+        "openmagi_core_agent/recipes/first_party/coding/ownership.py",
+        "openmagi_core_agent/harness/coding/ownership_projection.py"
+      ],
+      "coveredByTests": [
+        "tests/recipes/test_coding_mutation_recipe.py",
+        "tests/recipes/test_coding_subagent_recipe.py",
+        "tests/test_coding_meta_adapter.py",
+        "tests/test_coding_recipe_ownership_boundaries.py"
+      ],
+      "missingImplementation": [
+        "complete"
+      ],
+      "owningLayer": "Coding recipe/harness",
+      "adkPrimitive": "ADK Agent metadata and FunctionTool naming only",
+      "prSlice": "PR1",
+      "dependencies": [
+        "coding_latest_main_reconciliation"
+      ],
+      "activationGate": "PR1-coding-ownership-fixture-only",
+      "defaultOff": true,
+      "liveAuthorityAllowed": false,
+      "coreTouchAllowed": false,
+      "coreGapIfBlocked": "If ownership cannot be expressed without core dispatch changes, stop with a core-gap report."
+    },
+    {
+      "id": "read_before_edit_and_stale_rejection",
+      "capability": "Read-before-edit and stale workspace rejection for coding mutations",
+      "sourceDocuments": [
+        "docs/superpowers/plans/2026-05-23-python-adk-claude-code-harness-parity-execution-plan.md",
+        "docs/superpowers/plans/2026-05-20-python-adk-claude-code-parity-recipes.md",
+        "docs/superpowers/plans/2026-05-20-python-adk-opencode-parity-recipes.md"
+      ],
+      "alreadyCovered": true,
+      "coveredByFiles": [
+        "openmagi_core_agent/tools/read_ledger.py",
+        "openmagi_core_agent/recipes/coding_mutation.py",
+        "openmagi_core_agent/shadow/patch_file_policy_contract.py"
+      ],
+      "coveredByTests": [
+        "tests/tools/test_read_ledger.py",
+        "tests/recipes/test_coding_mutation_recipe.py",
+        "tests/test_patch_file_policy_contract_golden_fixtures.py",
+        "tests/test_coding_read_before_edit_contracts.py"
+      ],
+      "missingImplementation": [
+        "complete"
+      ],
+      "owningLayer": "Coding recipe/harness",
+      "adkPrimitive": "ADK FunctionTool metadata for FileRead/FileEdit/FileWrite",
+      "prSlice": "PR2",
+      "dependencies": [
+        "coding_recipe_ownership_boundaries"
+      ],
+      "activationGate": "PR2-gap-tests-docs-only",
+      "defaultOff": true,
+      "liveAuthorityAllowed": false,
+      "coreTouchAllowed": false,
+      "coreGapIfBlocked": ""
+    },
+    {
+      "id": "patch_apply_diff_test_checkpoint_evidence",
+      "capability": "Patch, diff, test, and checkpoint evidence before coding completion claims",
+      "sourceDocuments": [
+        "docs/superpowers/plans/2026-05-23-python-adk-claude-code-harness-parity-execution-plan.md",
+        "docs/superpowers/plans/2026-05-12-coding-harness-reliability-train.md",
+        "docs/superpowers/plans/2026-05-10-coding-parity-measurement-evidence.md"
+      ],
+      "alreadyCovered": true,
+      "coveredByFiles": [
+        "openmagi_core_agent/recipes/coding_evidence_gate.py",
+        "openmagi_core_agent/evidence/coding_verification.py",
+        "openmagi_core_agent/coding/meta_adapter.py"
+      ],
+      "coveredByTests": [
+        "tests/recipes/test_coding_evidence_gate_recipe.py",
+        "tests/test_coding_verification_evidence_audit_path.py",
+        "tests/test_coding_meta_adapter.py",
+        "tests/test_coding_patch_diff_test_checkpoint_evidence.py"
+      ],
+      "missingImplementation": [
+        "complete"
+      ],
+      "owningLayer": "Coding evidence harness",
+      "adkPrimitive": "ADK ArtifactService refs and ADK Evaluation pass/fail vocabulary",
+      "prSlice": "PR3",
+      "dependencies": [
+        "read_before_edit_and_stale_rejection"
+      ],
+      "activationGate": "PR3-coding-evidence-gate-local-only",
+      "defaultOff": true,
+      "liveAuthorityAllowed": false,
+      "coreTouchAllowed": false,
+      "coreGapIfBlocked": ""
+    },
+    {
+      "id": "bash_safe_subset_and_shell_policy",
+      "capability": "Coding shell behavior modeled as safe-subset policy without raw subprocess execution",
+      "sourceDocuments": [
+        "docs/superpowers/plans/2026-05-23-python-adk-claude-code-harness-parity-execution-plan.md",
+        "docs/superpowers/plans/2026-05-20-python-adk-claude-code-parity-full-master-plan.md",
+        "docs/superpowers/plans/2026-05-20-python-adk-opencode-parity-recipes.md"
+      ],
+      "alreadyCovered": true,
+      "coveredByFiles": [
+        "openmagi_core_agent/harness/general_automation/shell_policy.py",
+        "openmagi_core_agent/harness/general_automation/shell_receipts.py",
+        "openmagi_core_agent/plugins/shell_testrun_safe_subset.py",
+        "openmagi_core_agent/shadow/path_shell_policy_contract.py"
+      ],
+      "coveredByTests": [
+        "tests/test_coding_bash_safe_subset.py",
+        "tests/test_e2e_harness_pr11_shell_testrun_bash_safe_subset.py",
+        "tests/test_path_shell_policy_contract_golden_fixtures.py"
+      ],
+      "missingImplementation": [
+        "complete"
+      ],
+      "owningLayer": "Coding plugin/harness",
+      "adkPrimitive": "ADK FunctionTool schema metadata for Bash and TestRun",
+      "prSlice": "PR4",
+      "dependencies": [
+        "patch_apply_diff_test_checkpoint_evidence"
+      ],
+      "activationGate": "PR4-coding-shell-policy-fixture-only",
+      "defaultOff": true,
+      "liveAuthorityAllowed": false,
+      "coreTouchAllowed": false,
+      "coreGapIfBlocked": ""
+    },
+    {
+      "id": "coding_subagent_roles_and_repair_loop",
+      "capability": "Coding subagent role separation and bounded repair loop",
+      "sourceDocuments": [
+        "docs/superpowers/plans/2026-05-23-python-adk-claude-code-harness-parity-execution-plan.md",
+        "docs/superpowers/plans/2026-05-20-python-adk-claude-code-parity-recipes.md",
+        "docs/superpowers/plans/2026-05-20-python-adk-opencode-parity-recipes.md"
+      ],
+      "alreadyCovered": true,
+      "coveredByFiles": [
+        "openmagi_core_agent/recipes/coding_subagents.py",
+        "openmagi_core_agent/coding/meta_adapter.py",
+        "openmagi_core_agent/meta_orchestration/child_roles.py",
+        "openmagi_core_agent/meta_orchestration/child_acceptance.py",
+        "openmagi_core_agent/meta_orchestration/inspection_loop.py",
+        "openmagi_core_agent/meta_orchestration/final_assembly.py",
+        "openmagi_core_agent/harness/repair_policy.py"
+      ],
+      "coveredByTests": [
+        "tests/recipes/test_coding_subagent_recipe.py",
+        "tests/test_coding_meta_adapter.py",
+        "tests/test_evidence_subagent_propagation.py",
+        "tests/test_coding_subagent_roles_repair_loop.py"
+      ],
+      "missingImplementation": [
+        "complete"
+      ],
+      "owningLayer": "Coding recipe/meta-orchestration",
+      "adkPrimitive": "ADK Agent metadata and LongRunningFunctionTool shape only",
+      "prSlice": "PR5",
+      "dependencies": [
+        "bash_safe_subset_and_shell_policy"
+      ],
+      "activationGate": "PR5-coding-subagent-fixture-only",
+      "defaultOff": true,
+      "liveAuthorityAllowed": false,
+      "coreTouchAllowed": false,
+      "coreGapIfBlocked": ""
+    },
+    {
+      "id": "coding_compaction_and_session_continuity",
+      "capability": "Coding session continuity across compaction with safe refs only",
+      "sourceDocuments": [
+        "docs/superpowers/plans/2026-05-23-python-adk-claude-code-harness-parity-execution-plan.md",
+        "docs/superpowers/plans/2026-05-20-python-adk-claude-code-parity-full-master-plan.md",
+        "docs/superpowers/plans/2026-05-12-coding-harness-reliability-train.md"
+      ],
+      "alreadyCovered": true,
+      "coveredByFiles": [
+        "openmagi_core_agent/runtime/context_packet.py",
+        "openmagi_core_agent/runtime/session_continuity_projection.py",
+        "openmagi_core_agent/runtime/query_state.py",
+        "openmagi_core_agent/runtime/context_lifecycle.py",
+        "openmagi_core_agent/runtime/checkpointing.py",
+        "openmagi_core_agent/harness/memory_compaction.py"
+      ],
+      "coveredByTests": [
+        "tests/test_coding_compaction_session_continuity.py",
+        "tests/runtime/test_context_lifecycle.py",
+        "tests/test_checkpoint_resume_replay_fork_contract.py",
+        "tests/test_memory_write_compaction_boundary.py"
+      ],
+      "missingImplementation": [
+        "complete"
+      ],
+      "owningLayer": "Coding session harness",
+      "adkPrimitive": "ADK SessionService boundary names only",
+      "prSlice": "PR6",
+      "dependencies": [
+        "coding_subagent_roles_and_repair_loop"
+      ],
+      "activationGate": "PR6-coding-compaction-fixture-only",
+      "defaultOff": true,
+      "liveAuthorityAllowed": false,
+      "coreTouchAllowed": false,
+      "coreGapIfBlocked": ""
+    },
+    {
+      "id": "lsp_code_intelligence_contracts",
+      "capability": "LSP and code-intelligence contracts without starting language servers",
+      "sourceDocuments": [
+        "docs/superpowers/plans/2026-05-26-python-adk-opencode-latest-harness-delta-addendum.md",
+        "docs/superpowers/plans/2026-05-20-python-adk-opencode-parity-recipes.md",
+        "docs/superpowers/plans/2026-05-10-coding-parity-measurement-evidence.md"
+      ],
+      "alreadyCovered": true,
+      "coveredByFiles": [
+        "openmagi_core_agent/harness/coding/code_intelligence_contracts.py"
+      ],
+      "coveredByTests": [
+        "tests/test_coding_code_intelligence_contracts.py"
+      ],
+      "missingImplementation": [
+        "complete"
+      ],
+      "owningLayer": "Coding harness code-intelligence contracts",
+      "adkPrimitive": "ADK tool metadata and ArtifactService refs for diagnostics reports",
+      "prSlice": "PR7",
+      "dependencies": [
+        "coding_compaction_and_session_continuity"
+      ],
+      "activationGate": "PR7-local-lsp-fixture-contract-only",
+      "defaultOff": true,
+      "liveAuthorityAllowed": false,
+      "coreTouchAllowed": false,
+      "coreGapIfBlocked": "If LSP lifecycle requires modifying runtime or provider execution, stop with a core-gap report."
+    },
+    {
+      "id": "coding_measurement_eval_and_reliability_train",
+      "capability": "Coding measurement, eval, and reliability-train fixtures",
+      "sourceDocuments": [
+        "docs/superpowers/plans/2026-05-12-coding-harness-reliability-train.md",
+        "docs/superpowers/plans/2026-05-10-coding-parity-measurement-evidence.md",
+        "docs/superpowers/plans/2026-05-20-python-adk-claude-code-parity-full-master-plan.md"
+      ],
+      "alreadyCovered": true,
+      "coveredByFiles": [
+        "openmagi_core_agent/evals/regression_gates.py",
+        "openmagi_core_agent/evals/release_gates.py",
+        "openmagi_core_agent/self_improvement/eval_capture.py",
+        "docs/notes/coding-parity/benchmark-v1.json",
+        "tests/fixtures/coding_eval/reliability_matrix.json"
+      ],
+      "coveredByTests": [
+        "tests/test_eval_regression_gates_contract.py",
+        "tests/test_self_improvement_eval_capture.py",
+        "tests/test_adk_eval_contract_golden_fixtures.py",
+        "tests/test_coding_eval_reliability_contracts.py"
+      ],
+      "missingImplementation": [
+        "complete"
+      ],
+      "owningLayer": "Coding eval harness",
+      "adkPrimitive": "ADK Evaluation vocabulary and artifact refs",
+      "prSlice": "PR8",
+      "dependencies": [
+        "lsp_code_intelligence_contracts"
+      ],
+      "activationGate": "PR8-gap-tests-docs-only",
+      "defaultOff": true,
+      "liveAuthorityAllowed": false,
+      "coreTouchAllowed": false,
+      "coreGapIfBlocked": "If coding eval reliability requires runtime, provider, model, tool, live capture, or workspace mutation changes, stop with a core-gap report."
+    },
+    {
+      "id": "opencode_delta_coding_rows",
+      "capability": "OpenCode delta coding rows point at the dedicated OpenCode matrix without duplicate implementation",
+      "sourceDocuments": [
+        "docs/superpowers/plans/2026-05-26-python-adk-opencode-latest-harness-delta-addendum.md",
+        "docs/superpowers/plans/2026-05-20-python-adk-opencode-parity-recipes.md"
+      ],
+      "alreadyCovered": true,
+      "coveredByFiles": [
+        "docs/superpowers/plans/2026-05-26-python-adk-opencode-latest-harness-delta-addendum.md",
+        "infra/docker/clawy-core-agent-python/tests/fixtures/opencode_delta/harness_delta_matrix.json",
+        "docs/notes/2026-05-27-python-adk-coding-harness-opencode-delta-reconciliation.md"
+      ],
+      "coveredByTests": [
+        "infra/docker/clawy-core-agent-python/tests/test_coding_harness_consolidated_matrix.py",
+        "infra/docker/clawy-core-agent-python/tests/test_opencode_delta_contract.py"
+      ],
+      "missingImplementation": [
+        "gap-tests-docs-only"
+      ],
+      "owningLayer": "OpenCode delta matrix",
+      "adkPrimitive": "audit fixture only",
+      "prSlice": "PR9",
+      "dependencies": [
+        "coding_measurement_eval_and_reliability_train"
+      ],
+      "activationGate": "PR9-points-to-dedicated-opencode-delta-matrix",
+      "defaultOff": true,
+      "liveAuthorityAllowed": false,
+      "coreTouchAllowed": false,
+      "coreGapIfBlocked": ""
+    },
+    {
+      "id": "final_coding_harness_review",
+      "capability": "Final coding harness review package for no-core-touch and ADK-first compliance",
+      "sourceDocuments": [
+        "docs/superpowers/plans/2026-05-23-python-adk-claude-code-harness-parity-execution-plan.md",
+        "docs/superpowers/plans/2026-05-26-python-adk-opencode-latest-harness-delta-addendum.md",
+        "docs/superpowers/plans/2026-05-12-coding-harness-reliability-train.md"
+      ],
+      "alreadyCovered": true,
+      "coveredByFiles": [
+        "docs/notes/2026-05-27-python-adk-coding-harness-consolidated-reconciliation.md",
+        "docs/notes/2026-05-27-python-adk-coding-harness-opencode-delta-reconciliation.md",
+        "docs/notes/2026-05-27-python-adk-coding-harness-consolidated-final-review.md"
+      ],
+      "coveredByTests": [
+        "infra/docker/clawy-core-agent-python/tests/test_coding_harness_consolidated_matrix.py"
+      ],
+      "missingImplementation": [
+        "complete"
+      ],
+      "owningLayer": "Tests/docs only",
+      "adkPrimitive": "review checklist only",
+      "prSlice": "PR10",
+      "dependencies": [
+        "opencode_delta_coding_rows"
+      ],
+      "activationGate": "PR10-final-review-no-activation",
+      "defaultOff": true,
+      "liveAuthorityAllowed": false,
+      "coreTouchAllowed": false,
+      "coreGapIfBlocked": ""
+    }
+  ]
+}

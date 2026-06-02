@@ -1,0 +1,33 @@
+{
+  "policyId": "openmagi.research.cited-market-brief.v1",
+  "customerConfigurable": {
+    "requireCitations": true,
+    "requireCalculationRefs": false,
+    "maxRepairAttempts": 3,
+    "validatorRefs": [
+      "allClaimsHaveCitation",
+      "citationsWereOpened",
+      "quoteExactMatch",
+      "numericClaimsMatchSource",
+      "dateClaimsMatchSource",
+      "paraphraseSupportCheck",
+      "contradictionCheck"
+    ],
+    "evidenceRefs": [
+      "sourceRef",
+      "openedProof",
+      "contentDigest",
+      "sourceSpanRef",
+      "claimSupportStatus"
+    ]
+  },
+  "runtimeInvariants": {
+    "governedRawDraftStreamingForbidden": true,
+    "toolHostOnlyExecution": true,
+    "minimumReceiptSchemaRequired": true,
+    "sourceSnapshotDigestSpanRequired": true,
+    "authorityAntiForgeryRequired": true,
+    "secretRedactionRequired": true,
+    "validatorBeforeProjectionRequired": true
+  }
+}

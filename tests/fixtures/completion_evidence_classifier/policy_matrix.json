@@ -1,0 +1,269 @@
+{
+  "fixtureId": "completion_evidence_classifier_matrix_0001",
+  "scope": "ts_verification_evidence_recorded_policy",
+  "localDiagnostic": true,
+  "metadataOnly": true,
+  "noRuntimeExecution": true,
+  "noHookBusExecution": true,
+  "noToolHostDispatch": true,
+  "noFinalAnswerBlocking": true,
+  "noAdkRunner": true,
+  "noShellGitTestFileMutationRuntime": true,
+  "noRouteApiDashboard": true,
+  "noProductionStorage": true,
+  "noEvidenceBlockMode": true,
+  "noUserVisibleOutput": true,
+  "attachmentFlags": {
+    "artifactAttached": false,
+    "attachmentWritten": false,
+    "adkArtifactServiceCalled": false,
+    "adkFunctionResponseAttached": false,
+    "adkFunctionToolInvoked": false
+  },
+  "adkFirstNotes": {
+    "futureProducers": "ADK FunctionTool/FunctionResponse events only after ToolHost approval",
+    "futureGate": "OpenMagi dev-coding validator/eval metadata around ADK events",
+    "futureArtifactDelivery": "ADK ArtifactService plus OpenMagi receipt policy",
+    "attachmentBehavior": "none"
+  },
+  "cases": [
+    {
+      "caseId": "file_edit_is_work_not_verification",
+      "toolName": "FileEdit",
+      "localDiagnostic": true,
+      "metadataOnly": true,
+      "attachedToRuntime": false,
+      "isWorkEvidence": true,
+      "isVerificationEvidence": false,
+      "evidenceRole": "work",
+      "verificationKind": null,
+      "deliveryAck": null,
+      "inputMetadata": {
+        "operation": "edit",
+        "pathPreview": "src/app.ts"
+      }
+    },
+    {
+      "caseId": "bash_npm_test_is_verification_metadata_only",
+      "toolName": "Bash",
+      "localDiagnostic": true,
+      "metadataOnly": true,
+      "attachedToRuntime": false,
+      "isWorkEvidence": false,
+      "isVerificationEvidence": true,
+      "evidenceRole": "verification_metadata",
+      "verificationKind": "coding",
+      "deliveryAck": null,
+      "command": "npm test",
+      "inputMetadata": {
+        "exitCode": 0,
+        "commandKind": "test"
+      }
+    },
+    {
+      "caseId": "bash_failed_npm_test_is_not_verification",
+      "toolName": "Bash",
+      "localDiagnostic": true,
+      "metadataOnly": true,
+      "attachedToRuntime": false,
+      "isWorkEvidence": false,
+      "isVerificationEvidence": false,
+      "evidenceRole": "ignored_metadata",
+      "verificationKind": null,
+      "deliveryAck": null,
+      "command": "npm test",
+      "inputMetadata": {
+        "exitCode": 1,
+        "commandKind": "test",
+        "toolResultStatus": "error"
+      }
+    },
+    {
+      "caseId": "bash_pnpm_test_and_build_is_verification_metadata_only",
+      "toolName": "Bash",
+      "localDiagnostic": true,
+      "metadataOnly": true,
+      "attachedToRuntime": false,
+      "isWorkEvidence": false,
+      "isVerificationEvidence": true,
+      "evidenceRole": "verification_metadata",
+      "verificationKind": "coding",
+      "deliveryAck": null,
+      "command": "pnpm test && npm run build",
+      "inputMetadata": {
+        "exitCode": 0,
+        "commandKind": "test_and_build"
+      }
+    },
+    {
+      "caseId": "bash_npm_run_build_is_verification_metadata_only",
+      "toolName": "Bash",
+      "localDiagnostic": true,
+      "metadataOnly": true,
+      "attachedToRuntime": false,
+      "isWorkEvidence": false,
+      "isVerificationEvidence": true,
+      "evidenceRole": "verification_metadata",
+      "verificationKind": "coding",
+      "deliveryAck": null,
+      "command": "npm run build",
+      "inputMetadata": {
+        "exitCode": 0,
+        "commandKind": "build"
+      }
+    },
+    {
+      "caseId": "file_deliver_attachment_marker_is_delivery_work_only",
+      "toolName": "FileDeliver",
+      "localDiagnostic": true,
+      "metadataOnly": true,
+      "attachedToRuntime": false,
+      "isWorkEvidence": true,
+      "isVerificationEvidence": false,
+      "evidenceRole": "delivery_work",
+      "verificationKind": null,
+      "deliveryAck": "attachment_marker",
+      "inputMetadata": {
+        "target": "chat",
+        "markerPreview": "[attachment:id:report.pdf]"
+      }
+    },
+    {
+      "caseId": "file_deliver_provider_message_receipt_is_delivery_work_only",
+      "toolName": "FileDeliver",
+      "localDiagnostic": true,
+      "metadataOnly": true,
+      "attachedToRuntime": false,
+      "isWorkEvidence": true,
+      "isVerificationEvidence": false,
+      "evidenceRole": "delivery_work",
+      "verificationKind": null,
+      "deliveryAck": "provider_message_receipt",
+      "inputMetadata": {
+        "target": "chat",
+        "providerMessageIdPreview": "msg-987"
+      }
+    },
+    {
+      "caseId": "file_deliver_kb_write_receipt_is_delivery_work_only",
+      "toolName": "FileDeliver",
+      "localDiagnostic": true,
+      "metadataOnly": true,
+      "attachedToRuntime": false,
+      "isWorkEvidence": true,
+      "isVerificationEvidence": false,
+      "evidenceRole": "delivery_work",
+      "verificationKind": null,
+      "deliveryAck": "kb_write_receipt",
+      "inputMetadata": {
+        "target": "kb",
+        "kbPathPreview": "artifacts/report.pdf"
+      }
+    },
+    {
+      "caseId": "file_deliver_without_delivery_ack_is_not_work",
+      "toolName": "FileDeliver",
+      "localDiagnostic": true,
+      "metadataOnly": true,
+      "attachedToRuntime": false,
+      "isWorkEvidence": false,
+      "isVerificationEvidence": false,
+      "evidenceRole": "ignored_metadata",
+      "verificationKind": null,
+      "deliveryAck": null,
+      "inputMetadata": {
+        "target": "chat",
+        "status": "pending"
+      }
+    },
+    {
+      "caseId": "document_preview_is_document_verification",
+      "toolName": "DocumentPreview",
+      "localDiagnostic": true,
+      "metadataOnly": true,
+      "attachedToRuntime": false,
+      "isWorkEvidence": false,
+      "isVerificationEvidence": true,
+      "evidenceRole": "verification_metadata",
+      "verificationKind": "document",
+      "deliveryAck": null,
+      "inputMetadata": {
+        "operation": "render-preview",
+        "artifactKind": "document"
+      }
+    },
+    {
+      "caseId": "web_search_is_source_verification",
+      "toolName": "WebSearch",
+      "localDiagnostic": true,
+      "metadataOnly": true,
+      "attachedToRuntime": false,
+      "isWorkEvidence": false,
+      "isVerificationEvidence": true,
+      "evidenceRole": "verification_metadata",
+      "verificationKind": "source",
+      "deliveryAck": null,
+      "inputMetadata": {
+        "operation": "search",
+        "queryPreview": "OpenMagi evidence policy"
+      }
+    },
+    {
+      "caseId": "clock_is_exactness_verification",
+      "toolName": "Clock",
+      "localDiagnostic": true,
+      "metadataOnly": true,
+      "attachedToRuntime": false,
+      "isWorkEvidence": false,
+      "isVerificationEvidence": true,
+      "evidenceRole": "verification_metadata",
+      "verificationKind": "exactness",
+      "deliveryAck": null,
+      "inputMetadata": {
+        "operation": "now",
+        "timezone": "America/Los_Angeles"
+      }
+    },
+    {
+      "caseId": "calculation_is_exactness_verification",
+      "toolName": "Calculation",
+      "localDiagnostic": true,
+      "metadataOnly": true,
+      "attachedToRuntime": false,
+      "isWorkEvidence": false,
+      "isVerificationEvidence": true,
+      "evidenceRole": "verification_metadata",
+      "verificationKind": "exactness",
+      "deliveryAck": null,
+      "inputMetadata": {
+        "operation": "evaluate",
+        "expressionPreview": "2 + 2"
+      }
+    },
+    {
+      "caseId": "transcript_call_result_pair_preserves_tool_metadata",
+      "toolName": "web-search",
+      "localDiagnostic": true,
+      "metadataOnly": true,
+      "attachedToRuntime": false,
+      "isWorkEvidence": false,
+      "isVerificationEvidence": true,
+      "evidenceRole": "verification_metadata",
+      "verificationKind": "source",
+      "deliveryAck": null,
+      "transcriptPair": {
+        "callEventType": "tool_call",
+        "resultEventType": "tool_result",
+        "callId": "call_src_001",
+        "resultForCallId": "call_src_001"
+      },
+      "classifierInputMetadata": {
+        "toolName": "web-search",
+        "normalizedToolName": "WebSearch",
+        "operation": "search",
+        "provider": "recorded-ts-transcript",
+        "queryPreview": "OpenMagi ADK artifact delivery policy"
+      }
+    }
+  ]
+}

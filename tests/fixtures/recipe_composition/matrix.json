@@ -1,0 +1,383 @@
+{
+  "schemaVersion": "recipeCompositionMatrix.v1",
+  "generatedFor": "multi-recipe-composition-pr0",
+  "auditDate": "2026-05-26",
+  "activationMode": {
+    "defaultOff": true,
+    "trafficAttached": false,
+    "executionAttached": false,
+    "liveActivation": false
+  },
+  "rows": [
+    {
+      "id": "approval_union",
+      "semantic": "Approval requirements from selected recipes merge by union.",
+      "currentSupport": "Supported at metadata level through aggregated approval refs and union policy metadata.",
+      "gap": "Needs generic duplicate-ref replay and public projection checks outside named domain recipes.",
+      "targetSlice": "PR3",
+      "defaultOff": true,
+      "trafficAttached": false,
+      "executionAttached": false,
+      "selectedRefs": ["recipe.alpha", "recipe.beta"],
+      "autoRefs": [],
+      "hardSafetyRefs": [],
+      "expectedDecision": "admit with sorted approval ref union",
+      "expectedOutcome": {
+        "status": "admit",
+        "approvalMerge": "union",
+        "includedRefs": ["recipe.alpha", "recipe.beta"]
+      },
+      "expectedConflicts": [],
+      "projection": {
+        "publicSafe": true,
+        "decisionRef": "decision.approval.union",
+        "visibleRefs": ["approval.operator", "approval.owner"]
+      }
+    },
+    {
+      "id": "auto_recipe_compatibility",
+      "semantic": "Automatic recipe candidates require selector and runtime compatibility.",
+      "currentSupport": "Supported by profile selection and compatibility checks before automatic admission.",
+      "gap": "Needs multi-candidate generic omissions for incompatible automatic candidates.",
+      "targetSlice": "PR2",
+      "defaultOff": true,
+      "trafficAttached": false,
+      "executionAttached": false,
+      "selectedRefs": ["recipe.auto.compatible"],
+      "autoRefs": ["recipe.auto.compatible", "recipe.auto.incompatible"],
+      "hardSafetyRefs": [],
+      "expectedDecision": "admit compatible automatic recipe and omit incompatible candidates",
+      "expectedOutcome": {
+        "status": "admit",
+        "includedRefs": ["recipe.auto.compatible"],
+        "omittedRefs": ["recipe.auto.incompatible"],
+        "omissionReasons": {
+          "recipe.auto.incompatible": "runtime_incompatible"
+        }
+      },
+      "expectedConflicts": [],
+      "projection": {
+        "publicSafe": true,
+        "decisionRef": "decision.auto.compatible",
+        "visibleRefs": ["recipe.auto.compatible"]
+      }
+    },
+    {
+      "id": "conflict_projection",
+      "semantic": "Composition conflicts project as stable public refs only.",
+      "currentSupport": "Partial support exists for provider and tool-provider conflict blocking metadata.",
+      "gap": "Needs stable public conflict refs for every conflict family without exposing internal detail.",
+      "targetSlice": "PR7",
+      "defaultOff": true,
+      "trafficAttached": false,
+      "executionAttached": false,
+      "selectedRefs": ["recipe.alpha", "recipe.beta"],
+      "autoRefs": [],
+      "hardSafetyRefs": [],
+      "expectedDecision": "block and project conflict refs",
+      "expectedOutcome": {
+        "status": "block",
+        "includedRefs": [],
+        "omittedRefs": ["recipe.beta"]
+      },
+      "expectedConflicts": ["conflict.provider.choice"],
+      "projection": {
+        "publicSafe": true,
+        "decisionRef": "decision.conflict.projected",
+        "visibleRefs": ["conflict.provider.choice"]
+      }
+    },
+    {
+      "id": "context_least_privilege",
+      "semantic": "Context policy composition chooses the least-privilege effective context.",
+      "currentSupport": "Partial support exists where materialization chooses stricter context posture and lower caps.",
+      "gap": "Needs resolver-level generic fixtures independent of recipe families.",
+      "targetSlice": "PR3",
+      "defaultOff": true,
+      "trafficAttached": false,
+      "executionAttached": false,
+      "selectedRefs": ["recipe.context.broad", "recipe.context.narrow"],
+      "autoRefs": [],
+      "hardSafetyRefs": [],
+      "expectedDecision": "admit with refs-only context and smallest ref cap",
+      "expectedOutcome": {
+        "status": "admit",
+        "contextExposure": "refs_only",
+        "includedRefs": ["recipe.context.broad", "recipe.context.narrow"]
+      },
+      "expectedConflicts": [],
+      "projection": {
+        "publicSafe": true,
+        "decisionRef": "decision.context.leastPrivilege",
+        "visibleRefs": ["context.refsOnly", "context.cap.min"]
+      }
+    },
+    {
+      "id": "default_off_flags",
+      "semantic": "All composition fixtures remain default-off and detached.",
+      "currentSupport": "Supported by metadata-only recipe attachment flags and boundary tests.",
+      "gap": "Later rollout work must keep any live path behind an explicit activation gate.",
+      "targetSlice": "PR9",
+      "defaultOff": true,
+      "trafficAttached": false,
+      "executionAttached": false,
+      "selectedRefs": ["recipe.metadata.only"],
+      "autoRefs": [],
+      "hardSafetyRefs": [],
+      "expectedDecision": "keep metadata-only fixture detached",
+      "expectedOutcome": {
+        "status": "metadata_only",
+        "includedRefs": ["recipe.metadata.only"]
+      },
+      "expectedConflicts": [],
+      "projection": {
+        "publicSafe": true,
+        "decisionRef": "decision.defaultOff.detached",
+        "visibleRefs": ["flag.defaultOff", "flag.detached"]
+      }
+    },
+    {
+      "id": "deny_beats_grant",
+      "semantic": "A deny from any layer overrides a grant for the same tool ref.",
+      "currentSupport": "Partial support exists where forbidden tool refs omit packs and block executable exposure.",
+      "gap": "Needs generic deny-over-grant merge metadata with deterministic conflict reporting.",
+      "targetSlice": "PR3",
+      "defaultOff": true,
+      "trafficAttached": false,
+      "executionAttached": false,
+      "selectedRefs": ["recipe.granting", "recipe.denying"],
+      "autoRefs": [],
+      "hardSafetyRefs": [],
+      "expectedDecision": "deny tool grant and expose no executable tool",
+      "expectedOutcome": {
+        "status": "block",
+        "toolDecision": "deny",
+        "includedRefs": [],
+        "omittedRefs": ["recipe.granting"]
+      },
+      "expectedConflicts": ["conflict.tool.deniedGrant"],
+      "projection": {
+        "publicSafe": true,
+        "decisionRef": "decision.tool.denied",
+        "visibleRefs": ["tool.ref.sample", "conflict.tool.deniedGrant"]
+      }
+    },
+    {
+      "id": "effective_digest",
+      "semantic": "The composed effective policy has one deterministic digest.",
+      "currentSupport": "Partial support exists through selection digests and authoring effective-policy digests.",
+      "gap": "Needs one canonical composed-policy payload and replay-stable digest contract.",
+      "targetSlice": "PR5",
+      "defaultOff": true,
+      "trafficAttached": false,
+      "executionAttached": false,
+      "selectedRefs": ["recipe.alpha", "recipe.beta"],
+      "autoRefs": [],
+      "hardSafetyRefs": [],
+      "expectedDecision": "admit with stable effective digest",
+      "expectedOutcome": {
+        "status": "admit",
+        "digestRequired": true,
+        "includedRefs": ["recipe.alpha", "recipe.beta"]
+      },
+      "expectedConflicts": [],
+      "projection": {
+        "publicSafe": true,
+        "decisionRef": "decision.digest.effective",
+        "visibleRefs": ["digest.effectivePolicy"]
+      }
+    },
+    {
+      "id": "evidence_stricter_merge",
+      "semantic": "Evidence policies merge by union while the strictest missing-evidence action wins.",
+      "currentSupport": "Partial support exists in materialization reliability policy merging.",
+      "gap": "Needs generic multi-recipe evidence fixtures at the composition boundary.",
+      "targetSlice": "PR3",
+      "defaultOff": true,
+      "trafficAttached": false,
+      "executionAttached": false,
+      "selectedRefs": ["recipe.evidence.base", "recipe.evidence.strict"],
+      "autoRefs": [],
+      "hardSafetyRefs": [],
+      "expectedDecision": "admit with evidence union and strictest missing-evidence action",
+      "expectedOutcome": {
+        "status": "admit",
+        "evidenceMerge": "union_strictest_missing_blocks",
+        "includedRefs": ["recipe.evidence.base", "recipe.evidence.strict"]
+      },
+      "expectedConflicts": [],
+      "projection": {
+        "publicSafe": true,
+        "decisionRef": "decision.evidence.strict",
+        "visibleRefs": ["evidence.union", "evidence.missing.blocks"]
+      }
+    },
+    {
+      "id": "explicit_recipe_inclusion",
+      "semantic": "Explicitly requested recipes must be included or fail closed with omission metadata.",
+      "currentSupport": "Supported by explicit recipe selection, dependency checks, and blocked omission handling.",
+      "gap": "Needs generic replay fixtures without first-party recipe assumptions.",
+      "targetSlice": "PR6",
+      "defaultOff": true,
+      "trafficAttached": false,
+      "executionAttached": false,
+      "selectedRefs": ["recipe.explicit.included", "recipe.explicit.omitted"],
+      "autoRefs": [],
+      "hardSafetyRefs": [],
+      "expectedDecision": "admit explicit recipe when compatible and fail closed when omitted",
+      "expectedOutcome": {
+        "status": "partial_admit_with_fail_closed_omission",
+        "requestedRefs": ["recipe.explicit.included", "recipe.explicit.omitted"],
+        "includedRefs": ["recipe.explicit.included"],
+        "omittedRefs": ["recipe.explicit.omitted"],
+        "omissionReasons": {
+          "recipe.explicit.omitted": "required_dependency_disabled"
+        }
+      },
+      "expectedConflicts": [],
+      "projection": {
+        "publicSafe": true,
+        "decisionRef": "decision.explicit.included",
+        "visibleRefs": ["recipe.explicit.included", "recipe.explicit.omitted"]
+      }
+    },
+    {
+      "id": "global_retry_cap",
+      "semantic": "Retry policy composition uses the strictest global retry cap.",
+      "currentSupport": "Gap; adjacent reliability surfaces mention retry posture but generic composition does not merge caps.",
+      "gap": "Define retry cap scope, precedence, and composed policy projection.",
+      "targetSlice": "PR3",
+      "defaultOff": true,
+      "trafficAttached": false,
+      "executionAttached": false,
+      "selectedRefs": ["recipe.retry.wide", "recipe.retry.tight"],
+      "autoRefs": [],
+      "hardSafetyRefs": [],
+      "expectedDecision": "admit with strictest global retry cap",
+      "expectedOutcome": {
+        "status": "admit",
+        "retryCap": 1,
+        "includedRefs": ["recipe.retry.wide", "recipe.retry.tight"]
+      },
+      "expectedConflicts": [],
+      "projection": {
+        "publicSafe": true,
+        "decisionRef": "decision.retry.strictestCap",
+        "visibleRefs": ["retry.cap.min"]
+      }
+    },
+    {
+      "id": "hard_safety_wins",
+      "semantic": "Hard safety recipes override conflicting non-safety composition requests.",
+      "currentSupport": "Supported for non-opt-out hard-safety selection when admitted.",
+      "gap": "Needs generic override conflict refs that are independent of specific pack ids.",
+      "targetSlice": "PR3",
+      "defaultOff": true,
+      "trafficAttached": false,
+      "executionAttached": false,
+      "selectedRefs": ["recipe.safety.hard", "recipe.regular"],
+      "autoRefs": [],
+      "hardSafetyRefs": ["recipe.safety.hard"],
+      "expectedDecision": "admit hard safety policy and override weaker conflicting request",
+      "expectedOutcome": {
+        "status": "admit",
+        "hardSafetyDecision": "enforce",
+        "overrideAction": "hard_safety_overrides_weaker_request",
+        "effectiveHardSafetyRefs": ["recipe.safety.hard"],
+        "overriddenRefs": ["recipe.regular"],
+        "downgradeAllowed": false,
+        "includedRefs": ["recipe.safety.hard", "recipe.regular"]
+      },
+      "expectedConflicts": ["conflict.hardSafety.override"],
+      "projection": {
+        "publicSafe": true,
+        "decisionRef": "decision.safety.override",
+        "visibleRefs": ["recipe.safety.hard", "conflict.hardSafety.override"]
+      }
+    },
+    {
+      "id": "hook_ordering_dedupe",
+      "semantic": "Hook refs are deduped and ordered deterministically by phase and recipe order.",
+      "currentSupport": "Partial support exists for callback ref aggregation in selected-pack order.",
+      "gap": "Needs explicit hook phases, dedupe keys, and idempotency class handling.",
+      "targetSlice": "PR4",
+      "defaultOff": true,
+      "trafficAttached": false,
+      "executionAttached": false,
+      "selectedRefs": ["recipe.hook.alpha", "recipe.hook.beta"],
+      "autoRefs": [],
+      "hardSafetyRefs": [],
+      "expectedDecision": "admit with deterministic hook ordering and dedupe",
+      "expectedOutcome": {
+        "status": "admit",
+        "includedRefs": ["recipe.hook.alpha", "recipe.hook.beta"]
+      },
+      "expectedConflicts": [],
+      "projection": {
+        "publicSafe": true,
+        "decisionRef": "decision.hook.ordered",
+        "visibleRefs": ["hook.beforeModel.alpha", "hook.afterTool.beta"]
+      }
+    },
+    {
+      "id": "non_idempotent_hook_conflict",
+      "semantic": "Conflicting non-idempotent hooks block unless an explicit composed hook is declared.",
+      "currentSupport": "Gap; resolver metadata does not model non-idempotent hook classes.",
+      "gap": "Add hook idempotency classes and conflict projection before live hook composition.",
+      "targetSlice": "PR4",
+      "defaultOff": true,
+      "trafficAttached": false,
+      "executionAttached": false,
+      "selectedRefs": ["recipe.hook.first", "recipe.hook.second"],
+      "autoRefs": [],
+      "hardSafetyRefs": [],
+      "expectedDecision": "block conflicting non-idempotent hooks",
+      "expectedOutcome": {
+        "status": "block",
+        "includedRefs": [],
+        "omittedRefs": ["recipe.hook.second"]
+      },
+      "expectedConflicts": ["conflict.hook.nonIdempotent"],
+      "projection": {
+        "publicSafe": true,
+        "decisionRef": "decision.hook.conflict",
+        "visibleRefs": ["conflict.hook.nonIdempotent"]
+      }
+    },
+    {
+      "id": "selector_fallback_block",
+      "semantic": "Failed governed selection cannot silently fall back to a default recipe.",
+      "currentSupport": "Supported for explicit selection failures that fail closed instead of optional fallback.",
+      "gap": "Needs generic fallback conflict row with public conflict projection.",
+      "targetSlice": "PR6",
+      "defaultOff": true,
+      "trafficAttached": false,
+      "executionAttached": false,
+      "selectedRefs": ["recipe.governed.required"],
+      "autoRefs": ["recipe.fallback.candidate", "general_chat"],
+      "hardSafetyRefs": [],
+      "expectedDecision": "block selector fallback and require explicit resolution",
+      "expectedOutcome": {
+        "status": "block",
+        "governedSelector": {
+          "required": true,
+          "prohibitedFallbackTarget": "general_chat"
+        },
+        "fallbackAllowed": false,
+        "blockingReason": "governed_selector_required",
+        "includedRefs": [],
+        "omittedRefs": ["recipe.governed.required", "general_chat"],
+        "omissionReasons": {
+          "recipe.governed.required": "governed_selector_required",
+          "general_chat": "governed_selector_fallback_prohibited"
+        }
+      },
+      "expectedConflicts": ["conflict.selector.fallbackBlocked"],
+      "projection": {
+        "publicSafe": true,
+        "decisionRef": "decision.selector.fallbackBlocked",
+        "visibleRefs": ["conflict.selector.fallbackBlocked"]
+      }
+    }
+  ]
+}

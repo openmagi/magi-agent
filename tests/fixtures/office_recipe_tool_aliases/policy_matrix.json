@@ -1,0 +1,271 @@
+{
+  "fixtureId": "office_recipe_tool_alias_matrix_0001",
+  "version": 1,
+  "localDiagnostic": true,
+  "adkFirstContract": {
+    "recipeRefsRemainAgentRecipeCompilerMetadata": true,
+    "futureAtomicToolsMapTo": "ADK FunctionTool through OpenMagi ToolHost policy",
+    "futureLongJobsMayMapTo": "LongRunningFunctionTool after approval",
+    "missionsSchedulerModeledAsLongRunningFunctionTool": false,
+    "importsAdkPrimitives": false
+  },
+  "attachmentFlags": {
+    "trafficAttached": false,
+    "executionAttached": false,
+    "toolHostDispatchAttached": false,
+    "adkRunnerInvoked": false,
+    "browserSessionAttached": false,
+    "externalSubmitAttached": false,
+    "externalDownloadAttached": false,
+    "artifactWriteAttached": false,
+    "artifactDeliveryAttached": false,
+    "connectorCallAttached": false,
+    "schedulerRuntimeAttached": false,
+    "missionRuntimeAttached": false
+  },
+  "cases": [
+    {
+      "caseId": "spreadsheet_read_alias_metadata",
+      "abstractToolRef": "tool:spreadsheet.read",
+      "recipeCompilerSurface": "AgentRecipeCompiler",
+      "metadataOnly": true,
+      "executableAuthority": false,
+      "liveToolSatisfiedByTsSurface": false,
+      "tsPluginSurfaces": [
+        "SpreadsheetWrite",
+        "SpreadsheetValidate",
+        "SpreadsheetReconcilePreview"
+      ],
+      "diagnosticMetadataSurfaces": [
+        "spreadsheet.read.metadata",
+        "spreadsheet.validate.metadata",
+        "spreadsheet.reconcile-preview.metadata"
+      ],
+      "externalSubmitOrDownloadIntent": false,
+      "externalSubmitOrDownloadAttached": false,
+      "artifactWriteOrDeliveryAttached": false,
+      "connectorCallAttached": false,
+      "schedulerOrMissionRuntimeAttached": false,
+      "reasonCodes": [
+        "recipe_ref_metadata_only",
+        "spreadsheet_write_does_not_satisfy_live_read_validate_reconcile"
+      ],
+      "attachmentFlags": {
+        "trafficAttached": false,
+        "executionAttached": false,
+        "toolHostDispatchAttached": false,
+        "adkRunnerInvoked": false,
+        "browserSessionAttached": false,
+        "externalSubmitAttached": false,
+        "externalDownloadAttached": false,
+        "artifactWriteAttached": false,
+        "artifactDeliveryAttached": false,
+        "connectorCallAttached": false,
+        "schedulerRuntimeAttached": false,
+        "missionRuntimeAttached": false
+      }
+    },
+    {
+      "caseId": "spreadsheet_plan_write_alias_metadata",
+      "abstractToolRef": "tool:spreadsheet.plan-write",
+      "recipeCompilerSurface": "AgentRecipeCompiler",
+      "metadataOnly": true,
+      "executableAuthority": false,
+      "liveToolSatisfiedByTsSurface": false,
+      "tsPluginSurfaces": [
+        "SpreadsheetWrite",
+        "FileDeliver",
+        "FileSend"
+      ],
+      "diagnosticMetadataSurfaces": [
+        "spreadsheet.plan-write.metadata",
+        "file.delivery.metadata"
+      ],
+      "externalSubmitOrDownloadIntent": false,
+      "externalSubmitOrDownloadAttached": false,
+      "artifactWriteOrDeliveryAttached": false,
+      "connectorCallAttached": false,
+      "schedulerOrMissionRuntimeAttached": false,
+      "reasonCodes": [
+        "recipe_ref_metadata_only",
+        "spreadsheet_write_plan_has_no_artifact_delivery_authority"
+      ],
+      "attachmentFlags": {
+        "trafficAttached": false,
+        "executionAttached": false,
+        "toolHostDispatchAttached": false,
+        "adkRunnerInvoked": false,
+        "browserSessionAttached": false,
+        "externalSubmitAttached": false,
+        "externalDownloadAttached": false,
+        "artifactWriteAttached": false,
+        "artifactDeliveryAttached": false,
+        "connectorCallAttached": false,
+        "schedulerRuntimeAttached": false,
+        "missionRuntimeAttached": false
+      }
+    },
+    {
+      "caseId": "browser_inspect_alias_metadata",
+      "abstractToolRef": "tool:browser.inspect",
+      "recipeCompilerSurface": "AgentRecipeCompiler",
+      "metadataOnly": true,
+      "executableAuthority": false,
+      "liveToolSatisfiedByTsSurface": false,
+      "tsPluginSurfaces": [
+        "Browser",
+        "SocialBrowser",
+        "BrowserExtractSnapshot"
+      ],
+      "diagnosticMetadataSurfaces": [
+        "browser.inspect.metadata",
+        "browser.extract.metadata"
+      ],
+      "externalSubmitOrDownloadIntent": false,
+      "externalSubmitOrDownloadAttached": false,
+      "artifactWriteOrDeliveryAttached": false,
+      "connectorCallAttached": false,
+      "schedulerOrMissionRuntimeAttached": false,
+      "reasonCodes": [
+        "recipe_ref_metadata_only",
+        "browser_inspect_no_browser_session"
+      ],
+      "attachmentFlags": {
+        "trafficAttached": false,
+        "executionAttached": false,
+        "toolHostDispatchAttached": false,
+        "adkRunnerInvoked": false,
+        "browserSessionAttached": false,
+        "externalSubmitAttached": false,
+        "externalDownloadAttached": false,
+        "artifactWriteAttached": false,
+        "artifactDeliveryAttached": false,
+        "connectorCallAttached": false,
+        "schedulerRuntimeAttached": false,
+        "missionRuntimeAttached": false
+      }
+    },
+    {
+      "caseId": "browser_plan_action_alias_metadata",
+      "abstractToolRef": "tool:browser.plan-action",
+      "recipeCompilerSurface": "AgentRecipeCompiler",
+      "metadataOnly": true,
+      "executableAuthority": false,
+      "liveToolSatisfiedByTsSurface": false,
+      "tsPluginSurfaces": [
+        "Browser",
+        "SocialBrowser",
+        "BrowserExtractSnapshot",
+        "BrowserDownloadReport",
+        "BrowserSubmitForm"
+      ],
+      "diagnosticMetadataSurfaces": [
+        "browser.extract.metadata",
+        "browser.download.metadata",
+        "browser.submit.metadata"
+      ],
+      "externalSubmitOrDownloadIntent": true,
+      "externalSubmitOrDownloadAttached": false,
+      "artifactWriteOrDeliveryAttached": false,
+      "connectorCallAttached": false,
+      "schedulerOrMissionRuntimeAttached": false,
+      "reasonCodes": [
+        "recipe_ref_metadata_only",
+        "browser_plan_no_submit_download_authority"
+      ],
+      "attachmentFlags": {
+        "trafficAttached": false,
+        "executionAttached": false,
+        "toolHostDispatchAttached": false,
+        "adkRunnerInvoked": false,
+        "browserSessionAttached": false,
+        "externalSubmitAttached": false,
+        "externalDownloadAttached": false,
+        "artifactWriteAttached": false,
+        "artifactDeliveryAttached": false,
+        "connectorCallAttached": false,
+        "schedulerRuntimeAttached": false,
+        "missionRuntimeAttached": false
+      }
+    },
+    {
+      "caseId": "document_inspect_alias_metadata",
+      "abstractToolRef": "tool:document.inspect",
+      "recipeCompilerSurface": "AgentRecipeCompiler",
+      "metadataOnly": true,
+      "executableAuthority": false,
+      "liveToolSatisfiedByTsSurface": false,
+      "tsPluginSurfaces": [
+        "DocumentWrite",
+        "DocumentExtractFields",
+        "DocumentRedlineSuggest",
+        "DocumentDeliverableReview"
+      ],
+      "diagnosticMetadataSurfaces": [
+        "document.extraction.metadata",
+        "document.redline.metadata",
+        "document.render.metadata"
+      ],
+      "externalSubmitOrDownloadIntent": false,
+      "externalSubmitOrDownloadAttached": false,
+      "artifactWriteOrDeliveryAttached": false,
+      "connectorCallAttached": false,
+      "schedulerOrMissionRuntimeAttached": false,
+      "reasonCodes": [
+        "recipe_ref_metadata_only",
+        "document_inspect_no_artifact_write_or_delivery"
+      ],
+      "attachmentFlags": {
+        "trafficAttached": false,
+        "executionAttached": false,
+        "toolHostDispatchAttached": false,
+        "adkRunnerInvoked": false,
+        "browserSessionAttached": false,
+        "externalSubmitAttached": false,
+        "externalDownloadAttached": false,
+        "artifactWriteAttached": false,
+        "artifactDeliveryAttached": false,
+        "connectorCallAttached": false,
+        "schedulerRuntimeAttached": false,
+        "missionRuntimeAttached": false
+      }
+    },
+    {
+      "caseId": "script_plan_run_alias_metadata",
+      "abstractToolRef": "tool:script.plan-run",
+      "recipeCompilerSurface": "AgentRecipeCompiler",
+      "metadataOnly": true,
+      "executableAuthority": false,
+      "liveToolSatisfiedByTsSurface": false,
+      "tsPluginSurfaces": [
+        "LightweightScriptPlan"
+      ],
+      "diagnosticMetadataSurfaces": [
+        "script.plan-run.metadata"
+      ],
+      "externalSubmitOrDownloadIntent": false,
+      "externalSubmitOrDownloadAttached": false,
+      "artifactWriteOrDeliveryAttached": false,
+      "connectorCallAttached": false,
+      "schedulerOrMissionRuntimeAttached": false,
+      "reasonCodes": [
+        "recipe_ref_metadata_only",
+        "script_plan_no_shell_or_scheduler_runtime"
+      ],
+      "attachmentFlags": {
+        "trafficAttached": false,
+        "executionAttached": false,
+        "toolHostDispatchAttached": false,
+        "adkRunnerInvoked": false,
+        "browserSessionAttached": false,
+        "externalSubmitAttached": false,
+        "externalDownloadAttached": false,
+        "artifactWriteAttached": false,
+        "artifactDeliveryAttached": false,
+        "connectorCallAttached": false,
+        "schedulerRuntimeAttached": false,
+        "missionRuntimeAttached": false
+      }
+    }
+  ]
+}

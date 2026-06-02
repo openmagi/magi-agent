@@ -1,0 +1,210 @@
+{
+  "schemaVersion": "codingEvalReliabilityMatrix.v1",
+  "fixtureId": "coding_eval_reliability_matrix_0001",
+  "sourceRuntime": "typescript-core-agent",
+  "recordingMode": "local_fixture",
+  "captureMode": "fixture_only_no_live_capture",
+  "redactionStatus": "verified",
+  "adkPrimitive": "ADK Evaluation vocabulary and artifact refs",
+  "artifactRefPrefix": "adk-eval-artifact://coding-eval-reliability/",
+  "authority": {
+    "defaultOff": true,
+    "localOnly": true,
+    "liveAuthorityAllowed": false,
+    "coreTouchAllowed": false,
+    "workspaceMutationAllowed": false,
+    "providerModelToolMcpBrowserShellActivationAllowed": false
+  },
+  "scoringCategories": [
+    "pass",
+    "fail",
+    "manual-review",
+    "infra-unavailable"
+  ],
+  "benchmarkEvidenceRequirements": [
+    "changedFiles",
+    "GitDiff",
+    "TestRun",
+    "Checkpoint",
+    "DeliveryAck"
+  ],
+  "rows": [
+    {
+      "id": "scoring_categories",
+      "kind": "adk_evaluation_scoring_contract",
+      "description": "Coding benchmark capture outcomes use explicit ADK Evaluation scoring categories.",
+      "categories": [
+        "pass",
+        "fail",
+        "manual-review",
+        "infra-unavailable"
+      ],
+      "pass": {
+        "publicMeaning": "All required evidence is present and the quality gate passed.",
+        "terminal": true
+      },
+      "fail": {
+        "publicMeaning": "Required evidence is present and the quality gate failed.",
+        "terminal": true
+      },
+      "manualReview": {
+        "publicMeaning": "Evidence is incomplete, ambiguous, or conflicted and needs human triage.",
+        "requiresReviewerReason": true
+      },
+      "infraUnavailable": {
+        "publicMeaning": "Evaluation could not run because local infrastructure was unavailable.",
+        "countsAsQualityFailure": false
+      },
+      "artifactRefs": [
+        "adk-eval-artifact://coding-eval-reliability/scoring/pass",
+        "adk-eval-artifact://coding-eval-reliability/scoring/fail",
+        "adk-eval-artifact://coding-eval-reliability/scoring/manual-review",
+        "adk-eval-artifact://coding-eval-reliability/scoring/infra-unavailable"
+      ]
+    },
+    {
+      "id": "benchmark_evidence_requirements",
+      "kind": "adk_evaluation_benchmark_contract",
+      "description": "Coding benchmark rows require file, diff, test, checkpoint, and delivery evidence before a pass.",
+      "capturePolicy": "local_fixture_only",
+      "liveBenchmarkCapture": false,
+      "requiredEvidence": [
+        {
+          "type": "changedFiles",
+          "artifactRef": "adk-eval-artifact://coding-eval-reliability/evidence/changed-files",
+          "fields": [
+            "paths",
+            "count"
+          ]
+        },
+        {
+          "type": "GitDiff",
+          "artifactRef": "adk-eval-artifact://coding-eval-reliability/evidence/git-diff",
+          "fields": [
+            "summary",
+            "files",
+            "stat"
+          ]
+        },
+        {
+          "type": "TestRun",
+          "artifactRef": "adk-eval-artifact://coding-eval-reliability/evidence/test-run",
+          "fields": [
+            "command",
+            "exitCode",
+            "passed"
+          ]
+        },
+        {
+          "type": "Checkpoint",
+          "artifactRef": "adk-eval-artifact://coding-eval-reliability/evidence/checkpoint",
+          "fields": [
+            "checkpointId",
+            "afterEvidenceTypes"
+          ]
+        },
+        {
+          "type": "DeliveryAck",
+          "artifactRef": "adk-eval-artifact://coding-eval-reliability/evidence/delivery-ack",
+          "fields": [
+            "messageId",
+            "deliveredAt",
+            "channel"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "worktree_apply_conflict_metadata",
+      "kind": "worktree_apply_conflict_contract",
+      "description": "Worktree apply conflicts are scored as manual review with structured conflict metadata.",
+      "scoreCategory": "manual-review",
+      "artifactRefs": [
+        "adk-eval-artifact://coding-eval-reliability/conflicts/worktree-apply"
+      ],
+      "conflictMetadata": {
+        "baseSha": "d51d3ebe155dc32d6d5864cf266e9263c2874ba9",
+        "worktreePath": ".worktrees/coding-harness-pr8-eval-reliability-20260527",
+        "targetBranch": "codex/coding-harness-pr8-eval-reliability",
+        "conflictedFiles": [
+          "src/app.py",
+          "tests/test_app.py"
+        ],
+        "hunks": [
+          {
+            "file": "src/app.py",
+            "startLine": 42,
+            "endLine": 57,
+            "reason": "overlapping_edit"
+          }
+        ],
+        "resolutionState": "manual-review",
+        "retryable": false
+      }
+    },
+    {
+      "id": "repo_task_lock_contract",
+      "kind": "repo_task_lock_contract",
+      "description": "Repo task locks are represented as local fake contract data and do not acquire shared locks.",
+      "localFakeContract": true,
+      "authority": "local_lock_fixture_only",
+      "artifactRefs": [
+        "adk-eval-artifact://coding-eval-reliability/locks/repo-task"
+      ],
+      "lockFields": [
+        "repo",
+        "taskId",
+        "owner",
+        "expiresAt",
+        "scope",
+        "conflictPolicy"
+      ],
+      "sample": {
+        "repo": "openmagi.ai",
+        "taskId": "coding_measurement_eval_and_reliability_train",
+        "owner": "local-fixture",
+        "expiresAt": "2026-05-27T23:59:59Z",
+        "scope": "tests-and-fixtures-only",
+        "conflictPolicy": "report-conflict"
+      }
+    },
+    {
+      "id": "commit_unit_boundary_contract",
+      "kind": "commit_unit_boundary_contract",
+      "description": "Commit-unit boundaries bind changed files to evidence, checkpoint, and delivery artifacts.",
+      "localFakeContract": true,
+      "artifactRefs": [
+        "adk-eval-artifact://coding-eval-reliability/commit-units/pr8"
+      ],
+      "boundaryFields": [
+        "changedFiles",
+        "evidenceRefs",
+        "checkpointRef",
+        "deliveryAckRef",
+        "commitMessageSubject"
+      ],
+      "requiresEvidenceTypes": [
+        "changedFiles",
+        "GitDiff",
+        "TestRun",
+        "Checkpoint",
+        "DeliveryAck"
+      ],
+      "sample": {
+        "changedFiles": [
+          "tests/fixtures/coding_eval/reliability_matrix.json",
+          "tests/test_coding_eval_reliability_contracts.py",
+          "tests/fixtures/parity/coding_harness_consolidated_matrix.json"
+        ],
+        "evidenceRefs": [
+          "adk-eval-artifact://coding-eval-reliability/evidence/changed-files",
+          "adk-eval-artifact://coding-eval-reliability/evidence/git-diff",
+          "adk-eval-artifact://coding-eval-reliability/evidence/test-run"
+        ],
+        "checkpointRef": "adk-eval-artifact://coding-eval-reliability/evidence/checkpoint",
+        "deliveryAckRef": "adk-eval-artifact://coding-eval-reliability/evidence/delivery-ack",
+        "commitMessageSubject": "Add local coding eval reliability fixture"
+      }
+    }
+  ]
+}
