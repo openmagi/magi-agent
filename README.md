@@ -73,6 +73,26 @@ inspection harness without rewriting the agent core for every workflow.
 
 ## Install And Run Locally
 
+Install with Homebrew:
+
+```bash
+brew install openmagi/tap/magi-agent
+magi --help
+magi-agent --help
+```
+
+Run the local HTTP API and app surface after installing:
+
+```bash
+magi-agent serve --port 8080
+```
+
+Then open:
+
+```text
+http://localhost:8080/dashboard
+```
+
 Run from source:
 
 ```bash
