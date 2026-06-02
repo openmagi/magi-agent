@@ -83,7 +83,7 @@ def _parse_runtime_config(environ: Mapping[str, str]):
             "CORE_AGENT_CHAT_PROXY_URL": "http://127.0.0.1:0",
             "CORE_AGENT_REDIS_URL": "redis://127.0.0.1:0/0",
             "CORE_AGENT_MODEL": "local-dev",
-            "CORE_AGENT_VERSION": "0.1.1-local",
+            "CORE_AGENT_VERSION": "0.1.2-local",
             **dict(environ),
         }
         return parse_runtime_env(local_env)
