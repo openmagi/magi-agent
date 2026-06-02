@@ -2,44 +2,341 @@
 
 OpenMagi Python ADK runtime and CLI for personal AI agents.
 
-This repository now tracks the Python ADK implementation used by OpenMagi's hosted runtime. It includes:
+Magi Agent is a programmable AI agent runtime that actually gets things done.
+Instead of relying on prompts and hoping the model follows every instruction,
+Magi lets users configure the runtime around the model: which context it sees,
+which tools it can use, what evidence must be recorded, what requires approval,
+how failures are repaired, and what can be projected to the user.
 
-- `openmagi-core-agent` / `magi-agent` HTTP runtime entrypoints
-- `magi` CLI for local/headless/TUI workflows
-- first-party harness and recipe-pack contracts for research, coding, general automation, memory, scheduler, channel delivery, browser automation, document/spreadsheet automation, and evidence gates
-- selected full-toolhost runtime boundaries for Clock, Calculation, FileRead, Glob, Grep, FileWrite, FileEdit, PatchApply, and Bash
+This repository tracks the Python Google ADK implementation used by OpenMagi's
+hosted runtime. Google ADK provides the official Agent, Runner, tool, session,
+memory, artifact, callback, plugin, and evaluation primitives. Magi owns the
+product contract around those primitives: policy, ToolHost, evidence, approval,
+projection, fallback, audit, and rollout gates.
 
-## Install for local development
+## The Problem
+
+Modern agents are powerful, but prompt-only control is weak for real work.
+
+An agent can say it read a document without reading it. It can cite a source
+that does not support the claim. It can skip an approval step, write to the
+wrong channel, carry an unsupported intermediate summary into the next step, or
+produce something that looks plausible but is hard to trust.
+
+Coding agents worked because the coding loop is unusually structured: read
+files, edit, diff, typecheck, test, and commit. The workflow itself gives the
+agent deterministic checkpoints. Most research, operations, finance, document
+review, and general automation work does not have that structure by default.
+
+Magi adds that structure at runtime.
+
+## The Solution: Composable Determinism
+
+Magi does not make the model deterministic. The model can still be creative,
+incomplete, or wrong. Magi makes the state transitions around the model
+deterministic.
+
+A workflow can define:
+
+- what context is visible to the model;
+- which tools are allowed and which require approval;
+- which actions must write receipts;
+- which claims require source, file, calculation, test, or delivery evidence;
+- which validators run before a tool call, child result, memory write, final
+  answer, artifact, or external delivery;
+- how the runtime repairs, retries, downgrades, falls back, or abstains;
+- what becomes user-visible output;
+- what is recorded in the audit ledger.
+
+The important part is that this behavior is composable. A user or platform team
+can attach a source-verification harness, an approval harness, a coding
+verification harness, a spreadsheet reconciliation harness, or a meta-agent
+inspection harness without rewriting the agent core for every workflow.
+
+## Install And Run Locally
+
+Install development and CLI dependencies:
 
 ```bash
 uv sync --extra dev --extra cli
-uv run --extra cli magi --version
+```
+
+Run tests:
+
+```bash
 uv run --extra dev pytest -q
 ```
 
-## Run the runtime
+Run the HTTP runtime:
 
 ```bash
-uv run openmagi-core-agent
-# or
 uv run magi-agent
 ```
 
-The production hosted service still controls live authority with explicit environment gates. External integrations, broad production DB writes, billing mutations, channel delivery, browser automation, and scheduler authority must remain default-off unless explicitly configured and verified by the deployment operator.
-
-## CLI
+Run the CLI:
 
 ```bash
 uv run --extra cli magi --help
 uv run --extra cli magi --output text "Summarize this repository"
 ```
 
+The local smoke path should not require production secrets, database
+credentials, hosted workspace volumes, live ToolHost dispatch, or model provider
+calls.
+
+## Architecture
+
+Magi controls the loop around ADK. The model sees a bounded context packet and
+proposes work. Runtime-only policy, evidence, validation, and projection state
+decide which proposals can continue.
+
+```text
+MODEL-VISIBLE LOOP                  RUNTIME-ONLY CONTROL PLANE
+
+User request
+    |
+    v
+Allowed context packet   <--------- Policy snapshot
+    |                               tools, approvals, evidence rules,
+    v                               repair rules, projection rules
+ADK model proposal
+    |  action / claim / draft
+    v
+Boundary checks          ---------> ToolHost / activity boundary
+    |                               source, file, delivery, child,
+    v                               memory, artifact, workspace
+Model can continue       <--------- Receipts + evidence ledger
+                                    source spans, approval receipts,
+                                    file/test/calculation/delivery proof
+
+Final answer/artifact     <-------- Validators + repair/fallback policy
+                                    unsupported claim -> repair, downgrade,
+                                    abstain, block, or ask approval
+
+User-visible projection   <-------- Output projector + audit checkpoint
+```
+
+| Component | Job |
+| --- | --- |
+| Workflow config | Selects the runtime policy for a class of work |
+| Harness | Adds reusable enforcement behavior to runtime stages |
+| Policy snapshot | Freezes the effective rules for the current run |
+| Context projector | Decides what the model is allowed to see |
+| ADK Runner boundary | Lets the model propose text, actions, and tool calls |
+| ToolHost | Owns tool execution, permission checks, and approvals |
+| Evidence ledger | Records source, file, calculation, test, approval, and delivery receipts |
+| Validators | Check whether claims and actions satisfy the policy |
+| Repair policy | Defines retry, downgrade, fallback, abstention, or block behavior |
+| Output projector | Renders only public-safe, policy-compliant output |
+| Audit/checkpoint | Preserves digest-safe evidence for review and replay |
+
+The model proposes work inside this loop. The runtime decides when model text
+becomes state, evidence, memory, artifact content, external side effect, or
+user-visible output.
+
+## First-Party Harnesses
+
+Magi ships first-party harness contracts for the common work classes that need
+deterministic checkpoints:
+
+- research-first source inspection, citation, verifier, rule-check, and final
+  projection;
+- coding read-before-edit, patch/diff/test evidence, mutation receipts, rollback
+  receipts, and false-success blocking;
+- general automation queueing, approval, and delivery boundaries;
+- memory, scheduler, mission, channel, and browser authority boundaries;
+- document and spreadsheet authoring evidence;
+- child-agent, delegation, fork, replay, and compaction continuity;
+- evidence-first projection and audit reporting.
+
+Hosted deployments can enable these surfaces gradually with selected-bot
+rollout gates. Local development can run the contracts and fixture suites
+without opening production authority.
+
+## Example: Verify Source Before Claim
+
+Suppose the user asks:
+
+```text
+Read the uploaded product spec, market report, and competitor pricing table.
+Answer the competitive positioning questions. If something is not in the
+documents, say so clearly.
+```
+
+In a prompt-only agent, "only use the documents" is just text in the prompt. In
+Magi, a source-verified research workflow changes the loop.
+
+1. **Policy snapshot.** The runtime records that source-sensitive claims require
+   inspected-source evidence, the uploaded documents are the allowed source set,
+   and unsupported claims must be repaired, downgraded, or blocked.
+2. **Context projection.** The model receives the user request, allowed document
+   refs, committed public context, and evidence requirements. It does not
+   receive raw private logs, hidden tool data, or arbitrary workspace paths.
+3. **Source boundary.** If the model proposes reading `market_report.pdf`, the
+   source read goes through ToolHost or a source-inspection boundary. The
+   runtime writes a receipt with fields like `sourceId`, document ref,
+   `snapshotDigest`, `contentDigest`, `retrievedAt`, and citeable span refs.
+4. **Claim boundary.** If the model extracts "Competitor A charges $99 per
+   seat", the research harness can represent that as a claim linked to the exact
+   source span. The claim is not trusted just because the model wrote it.
+5. **Intermediate validation.** The same validators can run before a child-agent
+   result is accepted, before a summary becomes next-step context, before a
+   memory write, before a Slack draft, and before the final answer. Unsupported
+   claims do not have to wait until the final response to be caught.
+6. **Repair or abstain.** If the model later writes "Competitor A is cheaper
+   than us" but the ledger does not contain enough pricing evidence to derive
+   that comparison, the runtime can ask for another allowed source inspection,
+   weaken the wording, remove the claim, say the documents do not support it, or
+   block the step.
+7. **Governed projection.** The final projector renders supported claims,
+   citation refs, uncertainty, and explicit gaps. Raw tool output, private
+   paths, auth material, hidden reasoning, and unsupported claims stay out of
+   the user-visible answer.
+
+That is the difference between "please cite sources" and runtime enforcement.
+The source ledger, claim graph, validators, repair policy, and output projector
+all participate in the run.
+
+## Example: Coding With Receipts
+
+For coding work, Magi treats the workflow as an evidence-producing transaction:
+
+1. The runtime records the files read before an edit is proposed.
+2. Stale edits are rejected when the file changed after the read receipt.
+3. Patch application creates a mutation receipt.
+4. Rollback/delete proof is recorded for sandboxed mutation paths.
+5. Diff and test evidence gates run before a completion claim is projected.
+6. Final output cannot claim success unless the required verification evidence
+   exists.
+
+The same pattern can be applied to analysis, operations, document generation,
+or channel delivery: define the evidence, then make the runtime enforce it.
+
+## Why Hooks Alone Are Not Enough
+
+Hooks are useful. They can observe lifecycle events, add context, block a step,
+or run checks before and after tool calls.
+
+But strong deterministic guarantees usually require owning runtime state
+transitions, not just seeing lifecycle payloads.
+
+For example, imagine trying to build the source-verification workflow above as a
+third-party hook around an existing agent. A `before_reply` hook may see the
+draft answer, but it may not know which intermediate summaries were fed into the
+next model call. An `after_tool` hook may see a tool result, but it usually
+cannot define a structured source ledger, decide which claims become verified
+runtime state, or prevent unsupported claims from entering future context. Even
+if the hook can inspect raw logs, it has to reconstruct the whole run after the
+fact, which is expensive and imprecise.
+
+First-party coding agents can be reliable because their core loop owns internal
+state such as file reads, edits, diffs, test runs, stale-edit checks, and final
+commit gates. If that behavior is not built into the agent core, a hook-based
+extension can only approximate it from the outside.
+
+Magi exposes that first-party level of control as configurable runtime surfaces:
+
+- model-visible context;
+- runtime-only evidence and claim state;
+- tool and activity boundaries;
+- transition gates;
+- repair and fallback behavior;
+- governed output projection;
+- append-only audit/checkpoint state.
+
+So the harness is not merely "a hook that checks the final answer." It can
+declare the state it needs, the evidence it requires, the boundaries where
+validation runs, and the transitions that are allowed to continue.
+
+## CLI
+
+The `magi` CLI is the local interface for the same runtime contracts.
+
+```bash
+uv run --extra cli magi --help
+uv run --extra cli magi chat
+uv run --extra cli magi --output ndjson "Inspect this repository and summarize the test surface"
+```
+
+The CLI supports headless output modes for automation and interactive modes for
+local operator workflows. The CLI does not require hosted production authority
+to run local fixture or development paths.
+
+## Optional External Integrations
+
+External integration support, including Composio-backed connector surfaces, is
+optional and default-off. Installing optional dependencies or setting a single
+API key must not grant live tool authority by itself. Hosted or cloud
+deployments should require explicit toolkit scope, credential scope, rollout
+approval, and leak-safe evidence before any external action is enabled.
+
+Install optional Composio dependencies only when you are working on that surface:
+
+```bash
+uv sync --extra composio
+```
+
+## Hosted Runtime Safety Posture
+
+Most high-authority surfaces are default-off until an explicit rollout gate
+opens them. Readiness metadata, local fixtures, fake providers, diagnostic
+replay, and canary scaffolds can exist without giving Python user-visible
+authority.
+
+High-authority behavior such as selected-bot Python response authority, live
+model calls, tool execution, memory writes, workspace mutation, browser/channel
+delivery, mission execution, scheduled work, database writes, billing mutation,
+and external integrations stays behind separate gates, preflights, canaries,
+rollback rules, and evidence checks.
+
+Operators should treat HTTP success and SSE completion as transport evidence
+only. Acceptance for governed workflows comes from durable records: delivery
+receipts, source ledgers, mutation receipts, rollback receipts, verifier events,
+and audit checkpoints.
+
+## Development Commands
+
+```bash
+# install all development extras
+uv sync --extra dev --extra cli
+
+# run the full scaffold test suite
+uv run --extra dev pytest -q
+
+# run CLI help
+uv run --extra cli magi --help
+
+# run runtime entrypoint
+uv run magi-agent
+```
+
+## Dependencies
+
+Pinned dependency lines are intentional; no floating latest versions are used.
+
+| Dependency | Version | Purpose |
+| --- | ---: | --- |
+| `google-adk` | `1.33.0` | Official ADK primitive boundary |
+| `fastapi` | `0.136.1` | Health and internal route surface |
+| `uvicorn` | `0.47.0` | Local/container ASGI server |
+| `pydantic` | `2.13.4` | Strict runtime models |
+| `pytest` | `9.0.3` | Dev/test runner |
+| `httpx` | `0.28.1` | FastAPI test transport |
+| `textual` | `8.2.7` | Optional interactive CLI UI |
+| `rich` | `15.0.0` | Optional CLI rendering |
+
+Build-system pins:
+
+- `setuptools==80.9.0`
+- `wheel==0.45.1`
+
+## More Docs
+
+- CLI reference: `docs/cli/magi.md`
+- CLI handoff: `docs/notes/2026-05-31-magi-cli-track18-handoff-for-adk-migration.md`
+- CLI design: `docs/plans/2026-05-30-magi-cli-design.md`
+- Runtime architecture: `openmagi_core_agent/ARCHITECTURE.md`
+
 ## License
 
 Apache-2.0.
-
-## More docs
-
-- CLI handoff: `docs/notes/2026-05-31-magi-cli-track18-handoff-for-adk-migration.md`
-- CLI design: `docs/plans/2026-05-30-magi-cli-design.md`
-- Python ADK architecture: `docs/architecture/magi-agent-python-adk-architecture.md`
