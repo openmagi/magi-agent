@@ -99,6 +99,15 @@ Run the local HTTP API and app surface:
 uv run magi-agent serve --port 8080
 ```
 
+Local web dashboard:
+
+```text
+http://localhost:8080/dashboard
+```
+
+The dashboard is served by the same local runtime. It does not need a separate
+Node or Next.js process.
+
 Run the source checkout CLI:
 
 ```bash
