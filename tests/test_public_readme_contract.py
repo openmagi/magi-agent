@@ -19,10 +19,10 @@ def test_readme_uses_public_open_magi_agent_naming() -> None:
     assert "clawy" not in text
 
 
-def test_readme_does_not_claim_homebrew_before_formula_is_live() -> None:
+def test_readme_documents_live_homebrew_formula() -> None:
     text = _readme()
 
-    assert "brew install openmagi/tap/magi-agent" not in text
+    assert "brew install openmagi/tap/magi-agent" in text
     assert "Homebrew Tap" not in text
     assert "install-Homebrew" not in text
 
