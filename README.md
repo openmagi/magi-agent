@@ -1,18 +1,16 @@
 <div align="center">
 
-# Magi Agent
+# Open Magi Agent
 
-**OpenMagi's local-first agent runtime and CLI: memory, tools, evidence gates, and simple install.**
+**Local-first agent runtime and CLI: memory, tools, evidence gates, and simple setup.**
 
 [Website](https://openmagi.ai) ·
 [Docs](docs/cli/magi.md) ·
-[Releases](https://github.com/openmagi/magi-agent/releases) ·
-[Homebrew Tap](https://github.com/openmagi/homebrew-tap)
+[Releases](https://github.com/openmagi/magi-agent/releases)
 
 ![status](https://img.shields.io/badge/status-early%20beta-f97316)
 ![latest](https://img.shields.io/badge/latest-v0.1.0-2563eb)
 ![license](https://img.shields.io/badge/license-Apache--2.0-111827)
-![install](https://img.shields.io/badge/install-Homebrew-0f766e)
 ![runtime](https://img.shields.io/badge/runtime-Magi%20Agent-7c3aed)
 
 </div>
@@ -75,23 +73,11 @@ inspection harness without rewriting the agent core for every workflow.
 
 ## Install And Run Locally
 
-Install with Homebrew:
+Run from source:
 
 ```bash
-brew install openmagi/tap/magi-agent
-magi --help
-```
-
-Run the CLI:
-
-```bash
-magi chat
-magi --output text "Summarize this repository"
-```
-
-Run from source when developing Magi itself:
-
-```bash
+git clone https://github.com/openmagi/magi-agent.git
+cd magi-agent
 uv sync --extra dev --extra cli
 ```
 
@@ -105,6 +91,12 @@ Run the local HTTP runtime from source:
 
 ```bash
 uv run magi-agent
+```
+
+Run the local HTTP API and app surface:
+
+```bash
+uv run magi-agent serve --port 8080
 ```
 
 Run the source checkout CLI:
