@@ -1,0 +1,5 @@
+{"kind":"turn_started","ts":1,"turnId":"turn-1","declaredRoute":"direct"}
+{"kind":"user_message","ts":2,"turnId":"turn-1","text":"hello"}
+{"kind":"turn_committed","ts":3,"turnId":"turn-1","inputTokens":1,"outputTokens":0}
+{"kind":"turn_started","ts":4,"turnId":"turn-2","declaredRoute":"direct"}
+{"kind":"assistant_text","ts":5,"turnId":"turn-2","text":"partial"}

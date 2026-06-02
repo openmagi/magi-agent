@@ -1,0 +1,64 @@
+{
+  "schemaVersion": "recipeCompositionRegressionFixture.v1",
+  "caseId": "evidence_weakening_attempt",
+  "description": "A weaker evidence declaration cannot downgrade a stricter evidence requirement for the same class.",
+  "activationMode": {
+    "defaultOff": true,
+    "trafficAttached": false,
+    "executionAttached": false,
+    "liveActivation": false
+  },
+  "stack": {
+    "explicitRecipeRefs": [
+      "recipe.evidence.strict",
+      "recipe.evidence.weak"
+    ],
+    "turnId": "turn-regression-evidence-weakening",
+    "sessionId": "session-regression-evidence-weakening"
+  },
+  "globalRetryCap": 3,
+  "snapshots": [
+    {
+      "recipeRef": "recipe.evidence.strict",
+      "evidenceRequirements": [
+        "evidence.claim:blocking"
+      ]
+    },
+    {
+      "recipeRef": "recipe.evidence.weak",
+      "evidenceRequirements": [
+        "evidence.claim:optional",
+        "evidence.audit:optional"
+      ]
+    }
+  ],
+  "projectionForbidden": [
+    "evidence.claim:blocking",
+    "evidence.claim:optional",
+    "evidence.audit:optional"
+  ],
+  "expected": {
+    "blocked": false,
+    "effectiveRecipeRefs": [
+      "recipe.evidence.strict",
+      "recipe.evidence.weak"
+    ],
+    "includedExplicitRefs": [
+      "recipe.evidence.strict",
+      "recipe.evidence.weak"
+    ],
+    "includedAutoRefs": [],
+    "effectiveEvidenceRequirements": [
+      "evidence.audit:optional",
+      "evidence.claim:blocking"
+    ],
+    "conflictCodes": [],
+    "projection": {
+      "conflictStatus": "clear",
+      "hardSafetyStatus": "not_required",
+      "publicSafeCounts": {
+        "evidenceRequirementCount": 2
+      }
+    }
+  }
+}

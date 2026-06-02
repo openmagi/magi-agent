@@ -1,0 +1,615 @@
+{
+  "schemaVersion": "toolhostContractFixture.v1",
+  "fixtureId": "toolhost_contract_matrix_0001",
+  "sourceRuntime": "typescript-core-agent",
+  "recordingMode": "local_diagnostic_fixture",
+  "redactionStatus": "verified",
+  "localDiagnostic": true,
+  "attachmentFlags": {
+    "adkRunnerInvoked": false,
+    "liveToolDispatched": false,
+    "shellOrCodeExecuted": false,
+    "memoryProviderCalled": false,
+    "agentMemoryImported": false,
+    "hipocampusQmdLiveCalled": false,
+    "productionStorageWritten": false,
+    "routeOrApiAttached": false,
+    "telegramAttached": false,
+    "canaryTrafficAttached": false,
+    "evidenceBlockEnabled": false
+  },
+  "cases": [
+    {
+      "caseId": "allowed_readonly",
+      "outcome": "allowed",
+      "mode": "act",
+      "tool": {
+        "name": "FileRead",
+        "description": "Read a workspace file",
+        "kind": "core",
+        "source": {
+          "kind": "builtin",
+          "package": "openmagi.core"
+        },
+        "permission": "read",
+        "inputSchema": {
+          "type": "object",
+          "additionalProperties": true
+        },
+        "dangerous": false,
+        "isConcurrencySafe": true,
+        "mutatesWorkspace": false,
+        "availableInModes": [
+          "plan",
+          "act"
+        ],
+        "tags": [
+          "readonly"
+        ],
+        "sideEffectClass": "none",
+        "parallelSafety": "readonly",
+        "timeoutMs": 5000,
+        "budget": {
+          "outputChars": 4000,
+          "transcriptChars": 2000
+        },
+        "enabled_by_default": false,
+        "opt_out": true
+      },
+      "enabled": true,
+      "handlerAvailable": true,
+      "protected": true,
+      "policyAction": "allow",
+      "blocking": false,
+      "failOpen": true,
+      "failClosed": false,
+      "timeoutBudgetMs": 5000,
+      "result": {
+        "status": "ok",
+        "output": {
+          "bytes": 128
+        },
+        "metadata": {
+          "fixture": "recorded_contract"
+        }
+      },
+      "recordedOutputPreview": "read ok path=src/redacted.md",
+      "evidenceRefs": [
+        "evidence:file-read:1"
+      ],
+      "auditRefs": [
+        "audit:file-read:1"
+      ],
+      "attachmentFlags": {
+        "adkRunnerInvoked": false,
+        "liveToolDispatched": false,
+        "shellOrCodeExecuted": false,
+        "memoryProviderCalled": false,
+        "agentMemoryImported": false,
+        "hipocampusQmdLiveCalled": false,
+        "productionStorageWritten": false,
+        "routeOrApiAttached": false,
+        "telegramAttached": false,
+        "canaryTrafficAttached": false,
+        "evidenceBlockEnabled": false
+      }
+    },
+    {
+      "caseId": "denied_dangerous",
+      "outcome": "denied",
+      "mode": "act",
+      "tool": {
+        "name": "Bash",
+        "description": "Run a shell command",
+        "kind": "core",
+        "source": {
+          "kind": "builtin",
+          "package": "openmagi.core"
+        },
+        "permission": "execute",
+        "inputSchema": {
+          "type": "object",
+          "additionalProperties": true
+        },
+        "dangerous": true,
+        "isConcurrencySafe": false,
+        "mutatesWorkspace": true,
+        "availableInModes": [
+          "act"
+        ],
+        "tags": [
+          "requires-approval"
+        ],
+        "sideEffectClass": "local_workspace",
+        "parallelSafety": "unsafe",
+        "timeoutMs": 120000,
+        "enabled_by_default": false,
+        "opt_out": true
+      },
+      "enabled": true,
+      "handlerAvailable": true,
+      "protected": true,
+      "policyAction": "deny",
+      "blocking": true,
+      "failOpen": false,
+      "failClosed": true,
+      "timeoutBudgetMs": 120000,
+      "result": {
+        "status": "blocked",
+        "errorCode": "permission_denied",
+        "errorMessage": "dangerous tool denied",
+        "metadata": {
+          "reason": "dangerous tool denied"
+        }
+      },
+      "recordedOutputPreview": "denied command",
+      "attachmentFlags": {
+        "adkRunnerInvoked": false,
+        "liveToolDispatched": false,
+        "shellOrCodeExecuted": false,
+        "memoryProviderCalled": false,
+        "agentMemoryImported": false,
+        "hipocampusQmdLiveCalled": false,
+        "productionStorageWritten": false,
+        "routeOrApiAttached": false,
+        "telegramAttached": false,
+        "canaryTrafficAttached": false,
+        "evidenceBlockEnabled": false
+      }
+    },
+    {
+      "caseId": "approval_required",
+      "outcome": "approval_required",
+      "mode": "act",
+      "tool": {
+        "name": "FileWrite",
+        "description": "Write a workspace file",
+        "kind": "core",
+        "source": {
+          "kind": "builtin",
+          "package": "openmagi.core"
+        },
+        "permission": "write",
+        "inputSchema": {
+          "type": "object",
+          "additionalProperties": true
+        },
+        "dangerous": false,
+        "isConcurrencySafe": false,
+        "mutatesWorkspace": true,
+        "availableInModes": [
+          "act"
+        ],
+        "tags": [
+          "requires-approval"
+        ],
+        "sideEffectClass": "local_workspace",
+        "parallelSafety": "unsafe",
+        "timeoutMs": 5000,
+        "enabled_by_default": false,
+        "opt_out": true
+      },
+      "enabled": true,
+      "handlerAvailable": true,
+      "protected": true,
+      "policyAction": "ask",
+      "blocking": true,
+      "failOpen": false,
+      "failClosed": true,
+      "timeoutBudgetMs": 5000,
+      "controlRequest": {
+        "requestId": "tool-permission:turn-tool-contract-1:FileWrite",
+        "turnId": "turn-tool-contract-1",
+        "toolName": "FileWrite",
+        "arguments": {
+          "path": "src/redacted.txt",
+          "contentPreview": "[redacted]"
+        },
+        "reason": "workspace mutation requires approval"
+      },
+      "result": {
+        "status": "needs_approval",
+        "metadata": {
+          "reason": "workspace mutation requires approval"
+        }
+      },
+      "recordedOutputPreview": "approval requested",
+      "attachmentFlags": {
+        "adkRunnerInvoked": false,
+        "liveToolDispatched": false,
+        "shellOrCodeExecuted": false,
+        "memoryProviderCalled": false,
+        "agentMemoryImported": false,
+        "hipocampusQmdLiveCalled": false,
+        "productionStorageWritten": false,
+        "routeOrApiAttached": false,
+        "telegramAttached": false,
+        "canaryTrafficAttached": false,
+        "evidenceBlockEnabled": false
+      }
+    },
+    {
+      "caseId": "missing_handler",
+      "outcome": "missing_handler",
+      "mode": "plan",
+      "tool": {
+        "name": "GitDiff",
+        "description": "Inspect git diff",
+        "kind": "core",
+        "source": {
+          "kind": "builtin",
+          "package": "openmagi.core"
+        },
+        "permission": "read",
+        "inputSchema": {
+          "type": "object",
+          "additionalProperties": true
+        },
+        "dangerous": false,
+        "isConcurrencySafe": true,
+        "mutatesWorkspace": false,
+        "availableInModes": [
+          "plan",
+          "act"
+        ],
+        "sideEffectClass": "none",
+        "parallelSafety": "readonly",
+        "timeoutMs": 10000,
+        "enabled_by_default": false,
+        "opt_out": true
+      },
+      "enabled": true,
+      "handlerAvailable": false,
+      "protected": true,
+      "policyAction": "error",
+      "blocking": true,
+      "failOpen": false,
+      "failClosed": true,
+      "timeoutBudgetMs": 10000,
+      "result": {
+        "status": "error",
+        "errorCode": "tool_handler_missing",
+        "errorMessage": "tool handler missing",
+        "metadata": {
+          "reason": "tool handler missing"
+        }
+      },
+      "recordedOutputPreview": "handler missing",
+      "attachmentFlags": {
+        "adkRunnerInvoked": false,
+        "liveToolDispatched": false,
+        "shellOrCodeExecuted": false,
+        "memoryProviderCalled": false,
+        "agentMemoryImported": false,
+        "hipocampusQmdLiveCalled": false,
+        "productionStorageWritten": false,
+        "routeOrApiAttached": false,
+        "telegramAttached": false,
+        "canaryTrafficAttached": false,
+        "evidenceBlockEnabled": false
+      }
+    },
+    {
+      "caseId": "timeout",
+      "outcome": "timeout",
+      "mode": "act",
+      "tool": {
+        "name": "Grep",
+        "description": "Search files",
+        "kind": "core",
+        "source": {
+          "kind": "builtin",
+          "package": "openmagi.core"
+        },
+        "permission": "read",
+        "inputSchema": {
+          "type": "object",
+          "additionalProperties": true
+        },
+        "dangerous": false,
+        "isConcurrencySafe": true,
+        "mutatesWorkspace": false,
+        "availableInModes": [
+          "plan",
+          "act"
+        ],
+        "sideEffectClass": "none",
+        "parallelSafety": "readonly",
+        "timeoutMs": 30000,
+        "enabled_by_default": false,
+        "opt_out": true
+      },
+      "enabled": true,
+      "handlerAvailable": true,
+      "protected": true,
+      "policyAction": "allow",
+      "blocking": true,
+      "failOpen": false,
+      "failClosed": true,
+      "timeoutBudgetMs": 30000,
+      "result": {
+        "status": "error",
+        "errorCode": "tool_timeout",
+        "errorMessage": "tool timed out",
+        "durationMs": 30000,
+        "retryable": true,
+        "metadata": {
+          "reason": "timeout"
+        }
+      },
+      "recordedOutputPreview": "timeout after 30000ms",
+      "attachmentFlags": {
+        "adkRunnerInvoked": false,
+        "liveToolDispatched": false,
+        "shellOrCodeExecuted": false,
+        "memoryProviderCalled": false,
+        "agentMemoryImported": false,
+        "hipocampusQmdLiveCalled": false,
+        "productionStorageWritten": false,
+        "routeOrApiAttached": false,
+        "telegramAttached": false,
+        "canaryTrafficAttached": false,
+        "evidenceBlockEnabled": false
+      }
+    },
+    {
+      "caseId": "handler_error",
+      "outcome": "handler_error",
+      "mode": "act",
+      "tool": {
+        "name": "Calculation",
+        "description": "Calculate deterministic expression",
+        "kind": "core",
+        "source": {
+          "kind": "builtin",
+          "package": "openmagi.core"
+        },
+        "permission": "meta",
+        "inputSchema": {
+          "type": "object",
+          "additionalProperties": true
+        },
+        "dangerous": false,
+        "isConcurrencySafe": true,
+        "mutatesWorkspace": false,
+        "availableInModes": [
+          "plan",
+          "act"
+        ],
+        "sideEffectClass": "none",
+        "parallelSafety": "concurrency_safe",
+        "timeoutMs": 5000,
+        "enabled_by_default": false,
+        "opt_out": true
+      },
+      "enabled": true,
+      "handlerAvailable": true,
+      "protected": true,
+      "policyAction": "allow",
+      "blocking": true,
+      "failOpen": false,
+      "failClosed": true,
+      "timeoutBudgetMs": 5000,
+      "result": {
+        "status": "error",
+        "errorCode": "handler_error",
+        "errorMessage": "handler error",
+        "metadata": {
+          "reason": "handler exception"
+        }
+      },
+      "recordedOutputPreview": "error=sk-handler-error-secret",
+      "attachmentFlags": {
+        "adkRunnerInvoked": false,
+        "liveToolDispatched": false,
+        "shellOrCodeExecuted": false,
+        "memoryProviderCalled": false,
+        "agentMemoryImported": false,
+        "hipocampusQmdLiveCalled": false,
+        "productionStorageWritten": false,
+        "routeOrApiAttached": false,
+        "telegramAttached": false,
+        "canaryTrafficAttached": false,
+        "evidenceBlockEnabled": false
+      }
+    },
+    {
+      "caseId": "redaction_failure",
+      "outcome": "redaction_failure",
+      "mode": "act",
+      "tool": {
+        "name": "WebFetch",
+        "description": "Fetch a web URL",
+        "kind": "core",
+        "source": {
+          "kind": "builtin",
+          "package": "openmagi.core"
+        },
+        "permission": "read",
+        "inputSchema": {
+          "type": "object",
+          "additionalProperties": true
+        },
+        "dangerous": false,
+        "isConcurrencySafe": true,
+        "mutatesWorkspace": false,
+        "availableInModes": [
+          "plan",
+          "act"
+        ],
+        "sideEffectClass": "none",
+        "parallelSafety": "readonly",
+        "timeoutMs": 10000,
+        "enabled_by_default": false,
+        "opt_out": true
+      },
+      "enabled": true,
+      "handlerAvailable": true,
+      "protected": true,
+      "policyAction": "allow",
+      "blocking": true,
+      "failOpen": false,
+      "failClosed": true,
+      "timeoutBudgetMs": 10000,
+      "result": {
+        "status": "blocked",
+        "errorCode": "public_redaction_failed",
+        "errorMessage": "unsafe output rejected",
+        "metadata": {
+          "reason": "unsafe output"
+        }
+      },
+      "recordedOutputPreview": "Authorization: Bearer unsafe-output",
+      "attachmentFlags": {
+        "adkRunnerInvoked": false,
+        "liveToolDispatched": false,
+        "shellOrCodeExecuted": false,
+        "memoryProviderCalled": false,
+        "agentMemoryImported": false,
+        "hipocampusQmdLiveCalled": false,
+        "productionStorageWritten": false,
+        "routeOrApiAttached": false,
+        "telegramAttached": false,
+        "canaryTrafficAttached": false,
+        "evidenceBlockEnabled": false
+      }
+    },
+    {
+      "caseId": "disabled_tool",
+      "outcome": "disabled",
+      "mode": "plan",
+      "tool": {
+        "name": "Clock",
+        "description": "Read current time",
+        "kind": "core",
+        "source": {
+          "kind": "builtin",
+          "package": "openmagi.core"
+        },
+        "permission": "meta",
+        "inputSchema": {
+          "type": "object",
+          "additionalProperties": true
+        },
+        "dangerous": false,
+        "isConcurrencySafe": true,
+        "mutatesWorkspace": false,
+        "availableInModes": [
+          "plan",
+          "act"
+        ],
+        "sideEffectClass": "none",
+        "parallelSafety": "concurrency_safe",
+        "timeoutMs": 1000,
+        "enabled_by_default": false,
+        "opt_out": true
+      },
+      "enabled": false,
+      "handlerAvailable": true,
+      "protected": true,
+      "policyAction": "block",
+      "blocking": true,
+      "failOpen": false,
+      "failClosed": true,
+      "timeoutBudgetMs": 1000,
+      "result": {
+        "status": "blocked",
+        "metadata": {
+          "reason": "tool disabled"
+        }
+      },
+      "recordedOutputPreview": "tool disabled",
+      "attachmentFlags": {
+        "adkRunnerInvoked": false,
+        "liveToolDispatched": false,
+        "shellOrCodeExecuted": false,
+        "memoryProviderCalled": false,
+        "agentMemoryImported": false,
+        "hipocampusQmdLiveCalled": false,
+        "productionStorageWritten": false,
+        "routeOrApiAttached": false,
+        "telegramAttached": false,
+        "canaryTrafficAttached": false,
+        "evidenceBlockEnabled": false
+      }
+    },
+    {
+      "caseId": "protected_replacement_attempt",
+      "outcome": "protected_replacement_attempt",
+      "mode": "act",
+      "tool": {
+        "name": "Bash",
+        "description": "Run a shell command",
+        "kind": "core",
+        "source": {
+          "kind": "builtin",
+          "package": "openmagi.core"
+        },
+        "permission": "execute",
+        "inputSchema": {
+          "type": "object",
+          "additionalProperties": true
+        },
+        "dangerous": true,
+        "isConcurrencySafe": false,
+        "mutatesWorkspace": true,
+        "availableInModes": [
+          "act"
+        ],
+        "tags": [
+          "requires-approval"
+        ],
+        "sideEffectClass": "local_workspace",
+        "parallelSafety": "unsafe",
+        "timeoutMs": 120000,
+        "enabled_by_default": false,
+        "opt_out": true
+      },
+      "enabled": true,
+      "handlerAvailable": true,
+      "protected": true,
+      "policyAction": "deny",
+      "blocking": true,
+      "failOpen": false,
+      "failClosed": true,
+      "timeoutBudgetMs": 120000,
+      "replacementAttempt": {
+        "attemptedKind": "custom",
+        "attemptedSourceKind": "external",
+        "attemptedPermission": "read",
+        "attemptedDangerous": false,
+        "attemptedMutatesWorkspace": false,
+        "downgradeReasons": [
+          "kind",
+          "source",
+          "permission",
+          "dangerous",
+          "mutatesWorkspace"
+        ],
+        "preservedHandler": true
+      },
+      "result": {
+        "status": "blocked",
+        "errorCode": "protected_metadata_downgrade",
+        "errorMessage": "cannot downgrade protected tool metadata",
+        "metadata": {
+          "reason": "protected replacement rejected"
+        }
+      },
+      "recordedOutputPreview": "protected replacement rejected",
+      "attachmentFlags": {
+        "adkRunnerInvoked": false,
+        "liveToolDispatched": false,
+        "shellOrCodeExecuted": false,
+        "memoryProviderCalled": false,
+        "agentMemoryImported": false,
+        "hipocampusQmdLiveCalled": false,
+        "productionStorageWritten": false,
+        "routeOrApiAttached": false,
+        "telegramAttached": false,
+        "canaryTrafficAttached": false,
+        "evidenceBlockEnabled": false
+      }
+    }
+  ]
+}

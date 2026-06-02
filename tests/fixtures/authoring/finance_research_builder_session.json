@@ -1,0 +1,103 @@
+{
+  "sessionId": "builder.session.finance-research",
+  "botId": "bot_finance_research_001",
+  "ownerId": "owner_finance_research_001",
+  "mode": "recipe_builder",
+  "temporary": true,
+  "separateAgentIdentity": false,
+  "title": "Finance research recipe builder session",
+  "currentPhase": "draft_constraints",
+  "activationEnabled": false,
+  "activationEligibility": false,
+  "authoringToolAllowlist": [
+    "ask_question",
+    "record_answer",
+    "save_draft",
+    "report_gap",
+    "propose_generated_plugin"
+  ],
+  "phases": [
+    {
+      "phaseId": "intake",
+      "title": "Intake",
+      "status": "completed",
+      "questionIds": ["question.finance.objective", "question.finance.sources"]
+    },
+    {
+      "phaseId": "draft_constraints",
+      "title": "Draft constraints",
+      "status": "in_progress",
+      "questionIds": ["question.finance.connector"]
+    }
+  ],
+  "questions": [
+    {
+      "questionId": "question.finance.objective",
+      "phaseId": "intake",
+      "questionText": "What recurring research job should the recipe support?",
+      "required": true,
+      "answerKind": "free_text"
+    },
+    {
+      "questionId": "question.finance.sources",
+      "phaseId": "intake",
+      "questionText": "Which source classes must be cited?",
+      "required": true,
+      "answerKind": "multi_select"
+    },
+    {
+      "questionId": "question.finance.connector",
+      "phaseId": "draft_constraints",
+      "questionText": "Which approved readonly connectors are available?",
+      "required": true,
+      "answerKind": "connector_ref"
+    }
+  ],
+  "answers": [
+    {
+      "questionId": "question.finance.objective",
+      "answerText": "Build an authoring-only draft for weekly public-company source triage with quote-backed claims."
+    },
+    {
+      "questionId": "question.finance.sources",
+      "selectedRefs": ["source.sec-filings", "source.earnings-transcripts", "source.market-data"]
+    },
+    {
+      "questionId": "question.finance.connector",
+      "selectedRefs": ["connector.sec-filings.readonly", "connector.market-data.readonly"]
+    }
+  ],
+  "draft": {
+    "draftId": "draft.finance-research.001",
+    "botId": "bot_finance_research_001",
+    "ownerId": "owner_finance_research_001",
+    "authoringSessionId": "builder.session.finance-research",
+    "status": "draft",
+    "activationEnabled": false,
+    "activationEligibility": false,
+    "saveTarget": "current_bot_draft_store",
+    "pack": {
+      "packId": "draft.pack.finance-research",
+      "title": "Finance research analyst",
+      "summary": "Authoring-only draft for public finance research with cited evidence requirements.",
+      "recipeRefs": ["recipe.finance.source-triage", "recipe.finance.claim-audit"],
+      "harnessPolicy": {},
+      "toolPolicy": {
+        "allowedConnectorRefs": ["connector.sec-filings.readonly", "connector.market-data.readonly"],
+        "allowedToolRefs": ["SourceOpen", "CitationVerify"],
+        "deniedToolRefs": ["Bash", "FileWrite", "BrowserLive"]
+      },
+      "evidencePolicy": {
+        "requiredEvidenceRefs": ["openedSourceSnapshot", "quoteDigest", "citationSpanRef"]
+      },
+      "validatorPolicy": {
+        "validatorRefs": ["validator:sourceOpened@1", "validator:quoteExactMatch@1"]
+      },
+      "approvalPolicy": {},
+      "projectionPolicy": {},
+      "repairPolicy": {
+        "maxRepairAttempts": 1
+      }
+    }
+  }
+}

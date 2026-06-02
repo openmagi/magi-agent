@@ -1,0 +1,46 @@
+{
+  "fixtureId": "child_runtime_envelope_matrix_0001",
+  "localDiagnostic": true,
+  "attachmentFlags": {
+    "runnerAttached": false,
+    "childExecutionAttached": false,
+    "toolHostDispatched": false,
+    "workspaceMutated": false,
+    "missionStoreWritten": false,
+    "backgroundRuntimeAttached": false,
+    "memoryProviderCalled": false,
+    "routeAttached": false,
+    "productionAuthority": false,
+    "evidenceBlockEnabled": false
+  },
+  "cases": [
+    {
+      "caseId": "return_child_runtime_envelope",
+      "mode": "return",
+      "expectedPublicStatus": "accepted"
+    },
+    {
+      "caseId": "background_child_runtime_envelope",
+      "mode": "background",
+      "expectedPublicStatus": "accepted"
+    },
+    {
+      "caseId": "blocked_child_runtime_envelope",
+      "mode": "blocked",
+      "expectedPublicStatus": "blocked"
+    },
+    {
+      "caseId": "workspace_isolated_child_runtime_envelope",
+      "mode": "return",
+      "workspacePolicy": "git_worktree",
+      "expectedPublicStatus": "accepted"
+    },
+    {
+      "caseId": "task_local_policy_snapshot_child_runtime_envelope",
+      "mode": "return",
+      "childPolicySnapshotId": "policy-child-task-local",
+      "compatibilityRef": "policy-compat:task-1:policy-parent-1:policy-child-task-local",
+      "expectedPublicStatus": "accepted"
+    }
+  ]
+}

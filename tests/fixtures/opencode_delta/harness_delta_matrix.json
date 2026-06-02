@@ -1,0 +1,298 @@
+{
+  "schemaVersion": "opencodeHarnessDeltaMatrix.v1",
+  "matrixId": "opencode_harness_delta_pr0_20260526",
+  "generatedFor": "python-adk-opencode-latest-harness-delta-pr0-safe-reconciliation",
+  "sourcePolicy": "Rows are pinned to anomalyco/opencode commit 34b1045a016e22aafbaf0719fd7c8553defebdc4 from 2026-05-27T04:58:46Z, subject chore: generate; PR-0 records latest-main OpenMagi targets and safety gates only.",
+  "authorityFlags": {
+    "liveAuthorityAllowed": false,
+    "defaultOnAllowed": false,
+    "coreTouchAllowed": false,
+    "modelMetadataAuthorityAllowed": false,
+    "toolHostBypassAllowed": false,
+    "rawWorkspaceSnapshotAllowed": false,
+    "liveProviderHeaderActivationAllowed": false
+  },
+  "rows": [
+    {
+      "rowId": "provider_compatibility_fixtures",
+      "opencodeCommit": "34b1045a016e22aafbaf0719fd7c8553defebdc4",
+      "opencodeSource": "anomalyco/opencode@34b1045a016e22aafbaf0719fd7c8553defebdc4:packages/opencode/src/provider/provider.ts",
+      "plannedSlice": "PR-A",
+      "openmagiTarget": [
+        "openmagi_core_agent/providers/provider_compat.py",
+        "tests/fixtures/provider_compat/provider_cases.json",
+        "tests/test_provider_compat.py",
+        "docs/superpowers/plans/2026-05-20-python-adk-first-party-live-provider-quality-plan.md"
+      ],
+      "owningLayer": "PR-A provider adapter/harness contract",
+      "coreTouchAllowed": false,
+      "coreTouchReason": null,
+      "status": "missing",
+      "activationGate": "PR-A-provider-compatibility-fixtures",
+      "defaultOff": true,
+      "liveAuthorityAllowed": false,
+      "notes": "PR-A owns provider compatibility fixtures in the provider adapter/harness layer; external source/scout research may inform cases separately, but it is not the implementation target."
+    },
+    {
+      "rowId": "snapshot_pre_stream_digest_boundary",
+      "opencodeCommit": "34b1045a016e22aafbaf0719fd7c8553defebdc4",
+      "opencodeSource": "anomalyco/opencode@34b1045a016e22aafbaf0719fd7c8553defebdc4:packages/opencode/src/snapshot/index.ts",
+      "plannedSlice": "PR-B",
+      "openmagiTarget": [
+        "openmagi_core_agent/runtime/provider_receipts.py",
+        "openmagi_core_agent/runtime/policy_snapshot.py",
+        "tests/test_live_provider_receipts.py"
+      ],
+      "owningLayer": "Python ADK runtime receipts",
+      "coreTouchAllowed": false,
+      "coreTouchReason": null,
+      "status": "covered",
+      "activationGate": "local-fixture-only",
+      "defaultOff": true,
+      "liveAuthorityAllowed": false,
+      "notes": "Latest main already has digest-style provider receipts and policy snapshot surfaces; PR-0 records the boundary without changing stream behavior."
+    },
+    {
+      "rowId": "output_budgeting_artifact_contract",
+      "opencodeCommit": "34b1045a016e22aafbaf0719fd7c8553defebdc4",
+      "opencodeSource": "anomalyco/opencode@34b1045a016e22aafbaf0719fd7c8553defebdc4:packages/opencode/src/tool/truncate.ts",
+      "plannedSlice": "PR-C",
+      "openmagiTarget": [
+        "openmagi_core_agent/tools/output_budget.py",
+        "openmagi_core_agent/artifacts/local_result_store.py",
+        "tests/test_e2e_harness_pr3_tool_schema_output_store.py"
+      ],
+      "owningLayer": "ToolHost output contract",
+      "coreTouchAllowed": false,
+      "coreTouchReason": null,
+      "status": "covered",
+      "activationGate": "local-result-store-only",
+      "defaultOff": true,
+      "liveAuthorityAllowed": false,
+      "notes": "OpenMagi already budgets tool results into digest-backed previews and public projections with false authority flags."
+    },
+    {
+      "rowId": "auto_permission_receipts_no_behavior_drift",
+      "opencodeCommit": "34b1045a016e22aafbaf0719fd7c8553defebdc4",
+      "opencodeSource": "anomalyco/opencode@34b1045a016e22aafbaf0719fd7c8553defebdc4:packages/opencode/src/permission/evaluate.ts",
+      "plannedSlice": "PR-D",
+      "openmagiTarget": [
+        "openmagi_core_agent/harness/approval_receipts.py",
+        "openmagi_core_agent/permissions/auto_control.py",
+        "openmagi_core_agent/shadow/permission_arbiter_contract.py",
+        "tests/test_approval_receipts_contract.py",
+        "tests/test_permission_arbiter_contract_golden_fixtures.py"
+      ],
+      "owningLayer": "Permission and approval contracts",
+      "coreTouchAllowed": false,
+      "coreTouchReason": null,
+      "status": "covered",
+      "activationGate": "receipt-validation-only",
+      "defaultOff": true,
+      "liveAuthorityAllowed": false,
+      "notes": "Approval receipts and permission arbiter fixtures prove metadata-only decisions; no permission behavior is changed by this matrix."
+    },
+    {
+      "rowId": "shell_metadata_contract",
+      "opencodeCommit": "34b1045a016e22aafbaf0719fd7c8553defebdc4",
+      "opencodeSource": "anomalyco/opencode@34b1045a016e22aafbaf0719fd7c8553defebdc4:packages/opencode/src/tool/shell.ts",
+      "plannedSlice": "PR-E",
+      "openmagiTarget": [
+        "openmagi_core_agent/tools/safety.py",
+        "openmagi_core_agent/plugins/shell_testrun_safe_subset.py",
+        "openmagi_core_agent/shadow/path_shell_policy_contract.py",
+        "tests/test_path_shell_policy_contract_golden_fixtures.py",
+        "tests/test_e2e_harness_pr11_shell_testrun_bash_safe_subset.py"
+      ],
+      "owningLayer": "Shell policy shadow contract",
+      "coreTouchAllowed": false,
+      "coreTouchReason": null,
+      "status": "covered",
+      "activationGate": "safe-subset-fixture-only",
+      "defaultOff": true,
+      "liveAuthorityAllowed": false,
+      "notes": "Latest main has read-only and approval-required shell classification fixtures with output budgets and false execution flags."
+    },
+    {
+      "rowId": "repetition_guard_contract",
+      "opencodeCommit": "34b1045a016e22aafbaf0719fd7c8553defebdc4",
+      "opencodeSource": "anomalyco/opencode@34b1045a016e22aafbaf0719fd7c8553defebdc4:packages/opencode/src/session/processor.ts",
+      "plannedSlice": "PR-F",
+      "openmagiTarget": [
+        "openmagi_core_agent/runtime/loop_detectors.py",
+        "tests/test_priority_a_loop_detectors.py"
+      ],
+      "owningLayer": "Runtime loop detector",
+      "coreTouchAllowed": false,
+      "coreTouchReason": null,
+      "status": "covered",
+      "activationGate": "local-detector-only",
+      "defaultOff": true,
+      "liveAuthorityAllowed": false,
+      "notes": "Existing repetition and tool-call loop detectors cover the contract as a local runtime utility."
+    },
+    {
+      "rowId": "runtime_plan_mode_capability",
+      "opencodeCommit": "34b1045a016e22aafbaf0719fd7c8553defebdc4",
+      "opencodeSource": "anomalyco/opencode@34b1045a016e22aafbaf0719fd7c8553defebdc4:packages/opencode/src/session/processor.ts",
+      "plannedSlice": "PR-G",
+      "openmagiTarget": [
+        "openmagi_core_agent/harness/plan_gate.py",
+        "openmagi_core_agent/shadow/permission_arbiter_contract.py",
+        "tests/test_well_specified_plan_gate_contract.py",
+        "tests/test_permission_arbiter_contract_golden_fixtures.py"
+      ],
+      "owningLayer": "Python ADK harness",
+      "coreTouchAllowed": false,
+      "coreTouchReason": null,
+      "status": "covered",
+      "activationGate": "plan-gate-metadata-only",
+      "defaultOff": true,
+      "liveAuthorityAllowed": false,
+      "notes": "Plan-gate snapshots and plan-mode permission fixtures provide read-only capability signals with no execution attachment."
+    },
+    {
+      "rowId": "edit_patch_fidelity_contract",
+      "opencodeCommit": "34b1045a016e22aafbaf0719fd7c8553defebdc4",
+      "opencodeSource": "anomalyco/opencode@34b1045a016e22aafbaf0719fd7c8553defebdc4:packages/opencode/src/tool/apply_patch.ts",
+      "plannedSlice": "PR-H",
+      "openmagiTarget": [
+        "openmagi_core_agent/shadow/patch_file_policy_contract.py",
+        "openmagi_core_agent/tools/read_ledger.py",
+        "tests/test_patch_file_policy_contract_golden_fixtures.py",
+        "tests/tools/test_read_ledger.py"
+      ],
+      "owningLayer": "Patch and read-ledger shadow contract",
+      "coreTouchAllowed": false,
+      "coreTouchReason": null,
+      "status": "covered",
+      "activationGate": "dry-run-and-approval-fixtures-only",
+      "defaultOff": true,
+      "liveAuthorityAllowed": false,
+      "notes": "Patch policy fixtures cover stale version, dry-run preflight, sealed file denial, path traversal rejection, and approval-required mutation paths."
+    },
+    {
+      "rowId": "lsp_lifecycle_contract",
+      "opencodeCommit": "34b1045a016e22aafbaf0719fd7c8553defebdc4",
+      "opencodeSource": "anomalyco/opencode@34b1045a016e22aafbaf0719fd7c8553defebdc4:packages/opencode/src/lsp/client.ts",
+      "plannedSlice": "PR-I",
+      "openmagiTarget": [
+        "docs/notes/coding-parity/benchmark-v1.json",
+        "tests/planned_opencode_delta/lsp_lifecycle_contract.py"
+      ],
+      "owningLayer": "Future coding intelligence harness",
+      "coreTouchAllowed": false,
+      "coreTouchReason": null,
+      "status": "missing",
+      "activationGate": "future-lsp-contract-plan-required",
+      "defaultOff": true,
+      "liveAuthorityAllowed": false,
+      "notes": "Coding benchmark tasks require code-intelligence LSP capability, but latest main has no local lifecycle contract; PR-0 records the missing row only."
+    },
+    {
+      "rowId": "runtime_event_replay_fence",
+      "opencodeCommit": "34b1045a016e22aafbaf0719fd7c8553defebdc4",
+      "opencodeSource": "anomalyco/opencode@34b1045a016e22aafbaf0719fd7c8553defebdc4:packages/opencode/src/cli/cmd/run/session-replay.ts",
+      "plannedSlice": "PR-J",
+      "openmagiTarget": [
+        "openmagi_core_agent/shadow/ts_parity_replay.py",
+        "openmagi_core_agent/shadow/redacted_ts_bundle.py",
+        "openmagi_core_agent/gates/gate2_readiness.py",
+        "openmagi_core_agent/shadow/gate2_shadow_tool_policy.py",
+        "tests/test_ts_parity_replay_fixtures.py",
+        "tests/test_gate2_redacted_ts_bundle_comparator.py",
+        "tests/test_gate2_readiness_foundations.py"
+      ],
+      "owningLayer": "Merged Gate 2 readiness foundation",
+      "coreTouchAllowed": false,
+      "coreTouchReason": null,
+      "status": "delegated",
+      "activationGate": "merged-gate-2-readiness-foundation",
+      "defaultOff": true,
+      "liveAuthorityAllowed": false,
+      "notes": "Latest main 50f40a4bb includes the merged Gate 2 readiness foundation with redacted replay fixtures and digest-only shadow mutation receipts; PR-J remains delegated so PR-0 does not duplicate or activate write-canary behavior."
+    },
+    {
+      "rowId": "todo_projection_contract",
+      "opencodeCommit": "34b1045a016e22aafbaf0719fd7c8553defebdc4",
+      "opencodeSource": "anomalyco/opencode@34b1045a016e22aafbaf0719fd7c8553defebdc4:packages/opencode/src/session/todo.ts",
+      "plannedSlice": "PR-K",
+      "openmagiTarget": [
+        "openmagi_core_agent/meta_orchestration/task_plan.py",
+        "openmagi_core_agent/harness/goal_loop.py",
+        "docs/superpowers/plans/2026-05-25-python-adk-conversation-context-continuity.md",
+        "tests/test_meta_task_plan.py",
+        "tests/test_persistent_goal_loop_contract.py"
+      ],
+      "owningLayer": "Meta orchestration projection",
+      "coreTouchAllowed": false,
+      "coreTouchReason": null,
+      "status": "delegated",
+      "activationGate": "context-continuity-and-goal-loop-follow-up",
+      "defaultOff": true,
+      "liveAuthorityAllowed": false,
+      "notes": "Task and goal state exist, but OpenCode-style todo projection belongs to the context-continuity or goal-loop follow-up rather than PR-0."
+    },
+    {
+      "rowId": "client_protocol_boundary",
+      "opencodeCommit": "34b1045a016e22aafbaf0719fd7c8553defebdc4",
+      "opencodeSource": "anomalyco/opencode@34b1045a016e22aafbaf0719fd7c8553defebdc4:packages/opencode/src/server/routes/instance/httpapi/groups/v2/session.ts",
+      "plannedSlice": "PR-L",
+      "openmagiTarget": [
+        "openmagi_core_agent/transport/public_event_parity.py",
+        "openmagi_core_agent/runtime/public_events.py",
+        "tests/test_public_event_parity_matrix.py",
+        "tests/test_public_event_golden_fixtures.py",
+        "docs/notes/2026-05-27-python-adk-frontend-ts-production-compatibility-audit.md"
+      ],
+      "owningLayer": "Public event protocol boundary",
+      "coreTouchAllowed": false,
+      "coreTouchReason": null,
+      "status": "delegated",
+      "activationGate": "frontend-ts-compatibility-track",
+      "defaultOff": true,
+      "liveAuthorityAllowed": false,
+      "notes": "Public event protocol compatibility is tracked in the frontend TypeScript compatibility audit; PR-0 does not alter client protocol shapes."
+    },
+    {
+      "rowId": "mcp_lifecycle_status_config",
+      "opencodeCommit": "34b1045a016e22aafbaf0719fd7c8553defebdc4",
+      "opencodeSource": "anomalyco/opencode@34b1045a016e22aafbaf0719fd7c8553defebdc4:packages/opencode/src/mcp/index.ts",
+      "plannedSlice": "PR-M",
+      "openmagiTarget": [
+        "openmagi_core_agent/plugins/mcp_adapter.py",
+        "tests/test_mcp_adapter.py"
+      ],
+      "owningLayer": "MCP adapter boundary",
+      "coreTouchAllowed": false,
+      "coreTouchReason": null,
+      "status": "covered",
+      "activationGate": "local-fake-mcp-provider-only",
+      "defaultOff": true,
+      "liveAuthorityAllowed": false,
+      "notes": "The MCP adapter is default-off, local-fake gated, and exposes disabled, blocked, auth-required, and ok status paths without external server attachment."
+    },
+    {
+      "rowId": "provider_header_provenance_allowlist",
+      "opencodeCommit": "34b1045a016e22aafbaf0719fd7c8553defebdc4",
+      "opencodeSource": "anomalyco/opencode@34b1045a016e22aafbaf0719fd7c8553defebdc4:packages/opencode/src/session/llm/native-request.ts",
+      "plannedSlice": "PR-M",
+      "openmagiTarget": [
+        "openmagi_core_agent/runtime/provider_execution.py",
+        "openmagi_core_agent/web_acquisition/provider_boundary.py",
+        "openmagi_core_agent/browser/provider_boundary.py",
+        "tests/test_live_provider_execution_boundary.py",
+        "tests/test_priority_c_web_acquisition_provider_boundary.py",
+        "tests/test_priority_c_browser_provider_boundary.py"
+      ],
+      "owningLayer": "Provider provenance policy",
+      "coreTouchAllowed": false,
+      "coreTouchReason": null,
+      "status": "missing",
+      "activationGate": "PR-M-provider-header-provenance-allowlist",
+      "defaultOff": true,
+      "liveAuthorityAllowed": false,
+      "notes": "PR-M remains targeted to provider header provenance allowlists; source scouting details may feed the separate research queue, but this implementation slice is not delegated away."
+    }
+  ]
+}

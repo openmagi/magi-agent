@@ -1,0 +1,21 @@
+{
+  "approvalDigest": "sha256:529a3333a5dfcd84d74b46cde52815dfc67319481cd63c2af5ada0922c6dbc31",
+  "approvalId": "approval-001",
+  "approvalSource": "human_operator",
+  "approvedActionDigest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+  "approvedActionKind": "tool_call",
+  "approvedScope": "single_tool_call",
+  "approverRef": "user-digest:owner",
+  "constraints": {
+    "maxBytes": 16384,
+    "tool": "FileRead"
+  },
+  "effectivePolicySnapshotDigest": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+  "expiresAt": "2026-05-21T12:05:00Z",
+  "issuedAt": "2026-05-21T12:00:00Z",
+  "policyDecisionId": "decision-001",
+  "reasonCode": null,
+  "revokedAt": null,
+  "revokedByRef": null,
+  "revokesApprovalDigest": null
+}

@@ -1,0 +1,24 @@
+{
+  "builderInput": {
+    "byteBudget": 8192,
+    "excludedContextClasses": [
+      "raw_transcript",
+      "child_raw_tool_log",
+      "hidden_reasoning"
+    ],
+    "governed": true,
+    "includedContextRefs": [
+      "source:snapshot-1",
+      "artifact:calc-1"
+    ],
+    "mode": "explicit",
+    "projectionId": "ctx-proj-fixture",
+    "redactionStatus": "redacted",
+    "sourceDigests": [
+      "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+      "sha256:2222222222222222222222222222222222222222222222222222222222222222"
+    ],
+    "tokenBudget": 2048
+  },
+  "expectedModelVisibleDigest": "sha256:2f57c4f02ea3b2aad722fa2d7b76f717b61fa6aaed5b4c5c8b9862722ea08766"
+}

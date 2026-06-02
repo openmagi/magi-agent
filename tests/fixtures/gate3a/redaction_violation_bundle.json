@@ -1,0 +1,48 @@
+{
+  "schemaVersion": "gate3a.recordedBundle.v1",
+  "bundleId": "bundle_local_fixture_violation",
+  "sourceRuntime": "typescript-core-agent",
+  "recordingMode": "recorded_redacted",
+  "redactionStatus": "verified",
+  "createdAt": "2026-05-16T00:00:00Z",
+  "sourceProvenance": {
+    "sourceKind": "local_fixture",
+    "sourcePath": "/data/bots/bot-123/workspace/transcript.jsonl",
+    "productionPathIncluded": false,
+    "liveCaptureIncluded": false
+  },
+  "turn": {
+    "sessionRef": "redacted-session",
+    "turnId": "turn_local_fixture_violation",
+    "agentRole": "research",
+    "spawnDepth": 0,
+    "channel": "local_replay"
+  },
+  "recipe": {
+    "recipeSnapshotId": "recipe_local_research_v1",
+    "packIds": ["openmagi.research"],
+    "hardSafetyEnabled": true
+  },
+  "transcriptEntries": [],
+  "agentEvents": [
+    {
+      "eventId": "evt_local_violation",
+      "hiddenReasoning": "private chain of thought",
+      "publicText": "Authorization: Bearer abcdefghijklmnop"
+    }
+  ],
+  "recordedToolResults": [
+    {
+      "toolCallId": "tool_call_local_violation",
+      "toolName": "search.readonly",
+      "status": "recorded",
+      "privateToolPreview": "raw private preview",
+      "outputMetadata": {
+        "apiKey": "sk-abcdefghijklmnop"
+      },
+      "dispatchedLive": false
+    }
+  ],
+  "controlEvents": [],
+  "evidenceRecords": []
+}

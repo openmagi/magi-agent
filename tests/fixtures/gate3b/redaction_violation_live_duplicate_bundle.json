@@ -1,0 +1,70 @@
+{
+  "schemaVersion": "gate3b.liveDuplicateBundle.v1",
+  "bundleId": "bundle_live_duplicate_fixture_unsafe_0001",
+  "captureSurface": "selected_bot_post_turn_bundle",
+  "sourceRuntime": "typescript-core-agent",
+  "responseAuthority": "typescript-only",
+  "recordingMode": "live_duplicate_redacted",
+  "redactionStatus": "verified",
+  "createdAt": "2026-05-16T12:00:00Z",
+  "sourceProvenance": {
+    "sourceKind": "live_duplicate_validation_metadata",
+    "captureId": "capture_selected_post_turn_unsafe_0001",
+    "captureSurface": "selected_bot_post_turn_bundle",
+    "capturePoint": "post_turn_redacted_duplicate",
+    "sourcePath": "local-fixtures/gate3b/redacted-live-duplicate.json",
+    "productionPathIncluded": false,
+    "liveTrafficConsumed": false
+  },
+  "recipe": {
+    "recipeSnapshotId": "recipe_snapshot_gate3b_redacted_v1",
+    "immutableSnapshotId": "recipe_snapshot_gate3b_redacted_v1",
+    "packIds": ["openmagi.research"],
+    "hardSafetyEnabled": true
+  },
+  "transcriptEntries": [
+    {
+      "entryId": "transcript_redacted_0001",
+      "role": "assistant",
+      "publicText": "Redacted public answer.",
+      "hiddenReasoning": "private chain of thought"
+    }
+  ],
+  "agentEvents": [],
+  "controlEvents": [],
+  "recordedToolResults": [
+    {
+      "toolCallId": "tool_call_redacted_0001",
+      "toolName": "search.readonly",
+      "status": "recorded",
+      "outputMetadata": {
+        "telegramToken": "123456:ABCDEFabcdef123456"
+      },
+      "dispatchedLive": false
+    }
+  ],
+  "evidenceAuditMetadata": {
+    "auditId": "audit_redacted_0001",
+    "signedExternalAck": "raw signed acknowledgement payload"
+  },
+  "attachmentFlags": {
+    "productionRouteAttached": false,
+    "productionTranscriptAttached": true,
+    "productionSseAttached": true,
+    "userOutputAttached": false,
+    "telegramAttached": false,
+    "liveToolAttached": true,
+    "liveRunnerAttached": false,
+    "productionStorageAttached": false,
+    "productionQueueAttached": false,
+    "evidenceBlockAttached": true
+  },
+  "productionAuthorityFlags": {
+    "canDelayTypescriptResponse": true,
+    "canAlterTypescriptResponse": false,
+    "canBlockTypescriptResponse": false,
+    "canInfluenceUserOutput": false,
+    "pythonResponseAuthority": false,
+    "typescriptResponseAuthorityOnly": true
+  }
+}

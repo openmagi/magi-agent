@@ -1,0 +1,86 @@
+{
+  "schemaVersion": "recipeCompositionRegressionFixture.v1",
+  "caseId": "raw_private_config_projection",
+  "description": "Raw private hook config contributes only digests and redaction flags to public projections.",
+  "activationMode": {
+    "defaultOff": true,
+    "trafficAttached": false,
+    "executionAttached": false,
+    "liveActivation": false
+  },
+  "stack": {
+    "explicitRecipeRefs": [
+      "recipe.private.projection"
+    ],
+    "turnId": "turn-regression-private-projection",
+    "sessionId": "session-regression-private-projection"
+  },
+  "globalRetryCap": 3,
+  "snapshots": [
+    {
+      "recipeRef": "recipe.private.projection",
+      "hookContributions": [
+        "hook.redacted"
+      ]
+    }
+  ],
+  "hookContributions": [
+    {
+      "recipeRef": "recipe.private.projection",
+      "hookId": "hook.redacted",
+      "stage": "beforeLLMCall",
+      "priority": 20,
+      "scope": [
+        "turn"
+      ],
+      "idempotencyKey": "hook.redacted:turn",
+      "blocking": false,
+      "failureMode": "fail_open",
+      "privateConfig": {
+        "rawPrompt": "raw prompt fixture text",
+        "path": "/Users/alice/private/config.json",
+        "token": "sk-proj-fake-example-token",
+        "toolArgs": {
+          "query": "private fixture query"
+        },
+        "toolResult": "private fixture result",
+        "hiddenConfig": {
+          "mode": "fixture"
+        },
+        "rawPluginConfig": {
+          "provider": "fixture"
+        }
+      }
+    }
+  ],
+  "projectionForbidden": [
+    "raw prompt fixture text",
+    "/Users/alice/private/config.json",
+    "sk-proj-fake-example-token",
+    "private fixture query",
+    "private fixture result",
+    "rawPrompt",
+    "toolArgs",
+    "toolResult",
+    "hiddenConfig",
+    "rawPluginConfig"
+  ],
+  "expected": {
+    "blocked": false,
+    "effectiveRecipeRefs": [
+      "recipe.private.projection"
+    ],
+    "includedExplicitRefs": [
+      "recipe.private.projection"
+    ],
+    "includedAutoRefs": [],
+    "conflictCodes": [],
+    "projection": {
+      "conflictStatus": "clear",
+      "hardSafetyStatus": "not_required",
+      "publicSafeCounts": {
+        "hookCount": 1
+      }
+    }
+  }
+}

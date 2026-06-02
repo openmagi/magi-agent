@@ -1,0 +1,18 @@
+{
+  "reportId": "gap-report.missing-connector-capability",
+  "sessionId": "builder.session.backoffice-reconciliation",
+  "draftId": "draft.backoffice-reconciliation.001",
+  "localOnly": true,
+  "nonProduction": true,
+  "gaps": [
+    {
+      "gapId": "gap.missing-erp-ledger-readonly",
+      "kind": "missing_capability",
+      "status": "open",
+      "title": "Missing readonly ERP ledger connector",
+      "details": "Authoring cannot proceed to review until a readonly connector reference is approved.",
+      "missingRefs": ["connector.erp-ledger.readonly"],
+      "blockedActivation": true
+    }
+  ]
+}

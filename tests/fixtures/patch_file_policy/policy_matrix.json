@@ -1,0 +1,1080 @@
+{
+  "schemaVersion": "patchFilePolicyFixture.v1",
+  "fixtureId": "patch_file_policy_matrix_0001",
+  "sourceRuntime": "typescript-core-agent",
+  "recordingMode": "local_diagnostic_fixture",
+  "redactionStatus": "verified",
+  "localDiagnostic": true,
+  "attachmentFlags": {
+    "adkRunnerInvoked": false,
+    "liveToolDispatched": false,
+    "shellOrCodeExecuted": false,
+    "fileMutated": false,
+    "patchApplied": false,
+    "workspaceWritten": false,
+    "memoryProviderCalled": false,
+    "agentMemoryImported": false,
+    "hipocampusQmdLiveCalled": false,
+    "productionStorageWritten": false,
+    "routeOrApiAttached": false,
+    "telegramAttached": false,
+    "canaryTrafficAttached": false,
+    "evidenceBlockEnabled": false
+  },
+  "cases": [
+    {
+      "caseId": "file_read_allowed_inside_workspace",
+      "category": "file_read_allowed",
+      "mode": "act",
+      "tool": {
+        "name": "FileRead",
+        "description": "Read a workspace file",
+        "kind": "core",
+        "source": {
+          "kind": "builtin",
+          "package": "openmagi.core"
+        },
+        "permission": "read",
+        "inputSchema": {
+          "type": "object",
+          "additionalProperties": true
+        },
+        "dangerous": false,
+        "isConcurrencySafe": true,
+        "mutatesWorkspace": false,
+        "availableInModes": [
+          "plan",
+          "act"
+        ],
+        "tags": [
+          "readonly"
+        ],
+        "sideEffectClass": "none",
+        "parallelSafety": "readonly",
+        "timeoutMs": 5000,
+        "budget": {
+          "outputChars": 4000,
+          "transcriptChars": 2000
+        },
+        "enabled_by_default": false,
+        "opt_out": true
+      },
+      "requestedPathPreview": "path=src/app.ts",
+      "normalizedWorkspaceRelative": "src/app.ts",
+      "pathClassification": "workspace_safe",
+      "permissionClass": "read",
+      "decision": "allow",
+      "hardSafety": true,
+      "securityCritical": true,
+      "blocking": false,
+      "failOpen": true,
+      "failClosed": false,
+      "mutatesWorkspace": false,
+      "dangerous": false,
+      "isConcurrencySafe": true,
+      "sealedPath": false,
+      "protectedPath": false,
+      "reasonCodes": [
+        "workspace_safe"
+      ],
+      "timeoutBudgetMs": 5000,
+      "budgetMetadata": {
+        "timeoutMs": 5000,
+        "outputChars": 4000,
+        "transcriptChars": 2000
+      },
+      "resultStatus": "ok",
+      "evidenceRefs": [
+        "evidence:file-policy:read-ok"
+      ],
+      "auditRefs": [
+        "audit:file-policy:read-ok"
+      ],
+      "attachmentFlags": {
+        "adkRunnerInvoked": false,
+        "liveToolDispatched": false,
+        "shellOrCodeExecuted": false,
+        "fileMutated": false,
+        "patchApplied": false,
+        "workspaceWritten": false,
+        "memoryProviderCalled": false,
+        "agentMemoryImported": false,
+        "hipocampusQmdLiveCalled": false,
+        "productionStorageWritten": false,
+        "routeOrApiAttached": false,
+        "telegramAttached": false,
+        "canaryTrafficAttached": false,
+        "evidenceBlockEnabled": false
+      }
+    },
+    {
+      "caseId": "file_read_workspace_escape_denied",
+      "category": "file_read_workspace_escape",
+      "mode": "act",
+      "tool": {
+        "name": "FileRead",
+        "description": "Read a workspace file",
+        "kind": "core",
+        "source": {
+          "kind": "builtin",
+          "package": "openmagi.core"
+        },
+        "permission": "read",
+        "inputSchema": {
+          "type": "object",
+          "additionalProperties": true
+        },
+        "dangerous": false,
+        "isConcurrencySafe": true,
+        "mutatesWorkspace": false,
+        "availableInModes": [
+          "plan",
+          "act"
+        ],
+        "tags": [
+          "readonly"
+        ],
+        "sideEffectClass": "none",
+        "parallelSafety": "readonly",
+        "timeoutMs": 5000,
+        "enabled_by_default": false,
+        "opt_out": true
+      },
+      "requestedPathPreview": "path=[outside-workspace]",
+      "normalizedWorkspaceRelative": "[outside-workspace]",
+      "pathClassification": "outside_workspace",
+      "permissionClass": "read",
+      "decision": "deny",
+      "hardSafety": true,
+      "securityCritical": true,
+      "blocking": true,
+      "failOpen": false,
+      "failClosed": true,
+      "mutatesWorkspace": false,
+      "dangerous": false,
+      "isConcurrencySafe": true,
+      "sealedPath": false,
+      "protectedPath": false,
+      "reasonCodes": [
+        "path_escapes_workspace"
+      ],
+      "timeoutBudgetMs": 5000,
+      "budgetMetadata": {
+        "timeoutMs": 5000,
+        "outputChars": 4000,
+        "transcriptChars": 2000
+      },
+      "resultStatus": "blocked",
+      "evidenceRefs": [
+        "evidence:file-policy:read-escape"
+      ],
+      "auditRefs": [
+        "audit:file-policy:read-escape"
+      ],
+      "attachmentFlags": {
+        "adkRunnerInvoked": false,
+        "liveToolDispatched": false,
+        "shellOrCodeExecuted": false,
+        "fileMutated": false,
+        "patchApplied": false,
+        "workspaceWritten": false,
+        "memoryProviderCalled": false,
+        "agentMemoryImported": false,
+        "hipocampusQmdLiveCalled": false,
+        "productionStorageWritten": false,
+        "routeOrApiAttached": false,
+        "telegramAttached": false,
+        "canaryTrafficAttached": false,
+        "evidenceBlockEnabled": false
+      }
+    },
+    {
+      "caseId": "file_read_protected_memory_denied",
+      "category": "file_read_protected_path",
+      "mode": "act",
+      "tool": {
+        "name": "FileRead",
+        "description": "Read a protected memory path",
+        "kind": "core",
+        "source": {
+          "kind": "builtin",
+          "package": "openmagi.core"
+        },
+        "permission": "read",
+        "inputSchema": {
+          "type": "object",
+          "additionalProperties": true
+        },
+        "dangerous": false,
+        "isConcurrencySafe": true,
+        "mutatesWorkspace": false,
+        "availableInModes": [
+          "plan",
+          "act"
+        ],
+        "tags": [
+          "readonly",
+          "memory-fence"
+        ],
+        "sideEffectClass": "none",
+        "parallelSafety": "readonly",
+        "timeoutMs": 5000,
+        "enabled_by_default": false,
+        "opt_out": true
+      },
+      "requestedPathPreview": "path=memory/ROOT.md",
+      "normalizedWorkspaceRelative": "memory/ROOT.md",
+      "pathClassification": "protected_memory",
+      "permissionClass": "read",
+      "decision": "deny",
+      "hardSafety": true,
+      "securityCritical": true,
+      "blocking": true,
+      "failOpen": false,
+      "failClosed": true,
+      "mutatesWorkspace": false,
+      "dangerous": false,
+      "isConcurrencySafe": true,
+      "sealedPath": false,
+      "protectedPath": true,
+      "reasonCodes": [
+        "protected_memory_path"
+      ],
+      "timeoutBudgetMs": 5000,
+      "budgetMetadata": {
+        "timeoutMs": 5000,
+        "outputChars": 4000,
+        "transcriptChars": 2000
+      },
+      "resultStatus": "blocked",
+      "evidenceRefs": [
+        "evidence:file-policy:protected-memory"
+      ],
+      "auditRefs": [
+        "audit:file-policy:protected-memory"
+      ],
+      "attachmentFlags": {
+        "adkRunnerInvoked": false,
+        "liveToolDispatched": false,
+        "shellOrCodeExecuted": false,
+        "fileMutated": false,
+        "patchApplied": false,
+        "workspaceWritten": false,
+        "memoryProviderCalled": false,
+        "agentMemoryImported": false,
+        "hipocampusQmdLiveCalled": false,
+        "productionStorageWritten": false,
+        "routeOrApiAttached": false,
+        "telegramAttached": false,
+        "canaryTrafficAttached": false,
+        "evidenceBlockEnabled": false
+      }
+    },
+    {
+      "caseId": "file_write_requires_approval",
+      "category": "file_write_requires_approval",
+      "mode": "act",
+      "tool": {
+        "name": "FileWrite",
+        "description": "Write a workspace file",
+        "kind": "core",
+        "source": {
+          "kind": "builtin",
+          "package": "openmagi.core"
+        },
+        "permission": "write",
+        "inputSchema": {
+          "type": "object",
+          "additionalProperties": true
+        },
+        "dangerous": false,
+        "isConcurrencySafe": false,
+        "mutatesWorkspace": true,
+        "availableInModes": [
+          "act"
+        ],
+        "tags": [
+          "requires-approval"
+        ],
+        "sideEffectClass": "local_workspace",
+        "parallelSafety": "unsafe",
+        "timeoutMs": 5000,
+        "enabled_by_default": false,
+        "opt_out": true
+      },
+      "requestedPathPreview": "path=src/new-note.md",
+      "normalizedWorkspaceRelative": "src/new-note.md",
+      "pathClassification": "workspace_safe",
+      "permissionClass": "write",
+      "decision": "approval_required",
+      "hardSafety": false,
+      "securityCritical": false,
+      "blocking": true,
+      "failOpen": false,
+      "failClosed": true,
+      "mutatesWorkspace": true,
+      "dangerous": false,
+      "isConcurrencySafe": false,
+      "sealedPath": false,
+      "protectedPath": false,
+      "reasonCodes": [
+        "workspace_mutation_requires_approval"
+      ],
+      "timeoutBudgetMs": 5000,
+      "budgetMetadata": {
+        "timeoutMs": 5000,
+        "outputChars": 4000,
+        "transcriptChars": 2000
+      },
+      "controlRequest": {
+        "requestId": "tool-permission:turn-patch-file-1:FileWrite",
+        "turnId": "turn-patch-file-1",
+        "toolName": "FileWrite",
+        "arguments": {
+          "pathPreview": "src/new-note.md",
+          "contentPreview": "[redacted]"
+        },
+        "reason": "workspace mutation requires approval"
+      },
+      "resultStatus": "needs_approval",
+      "evidenceRefs": [
+        "evidence:file-policy:write-approval"
+      ],
+      "auditRefs": [
+        "audit:file-policy:write-approval"
+      ],
+      "attachmentFlags": {
+        "adkRunnerInvoked": false,
+        "liveToolDispatched": false,
+        "shellOrCodeExecuted": false,
+        "fileMutated": false,
+        "patchApplied": false,
+        "workspaceWritten": false,
+        "memoryProviderCalled": false,
+        "agentMemoryImported": false,
+        "hipocampusQmdLiveCalled": false,
+        "productionStorageWritten": false,
+        "routeOrApiAttached": false,
+        "telegramAttached": false,
+        "canaryTrafficAttached": false,
+        "evidenceBlockEnabled": false
+      }
+    },
+    {
+      "caseId": "file_write_sealed_denied",
+      "category": "file_write_sealed_denied",
+      "mode": "act",
+      "tool": {
+        "name": "FileWrite",
+        "description": "Write a workspace file",
+        "kind": "core",
+        "source": {
+          "kind": "builtin",
+          "package": "openmagi.core"
+        },
+        "permission": "write",
+        "inputSchema": {
+          "type": "object",
+          "additionalProperties": true
+        },
+        "dangerous": false,
+        "isConcurrencySafe": false,
+        "mutatesWorkspace": true,
+        "availableInModes": [
+          "act"
+        ],
+        "tags": [
+          "requires-approval"
+        ],
+        "sideEffectClass": "local_workspace",
+        "parallelSafety": "unsafe",
+        "timeoutMs": 5000,
+        "enabled_by_default": false,
+        "opt_out": true
+      },
+      "requestedPathPreview": "path=AGENTS.md",
+      "normalizedWorkspaceRelative": "AGENTS.md",
+      "pathClassification": "sealed_file",
+      "permissionClass": "write",
+      "decision": "deny",
+      "hardSafety": true,
+      "securityCritical": true,
+      "blocking": true,
+      "failOpen": false,
+      "failClosed": true,
+      "mutatesWorkspace": true,
+      "dangerous": false,
+      "isConcurrencySafe": false,
+      "sealedPath": true,
+      "protectedPath": false,
+      "reasonCodes": [
+        "sealed_file_write_blocked"
+      ],
+      "timeoutBudgetMs": 5000,
+      "budgetMetadata": {
+        "timeoutMs": 5000,
+        "outputChars": 4000,
+        "transcriptChars": 2000
+      },
+      "resultStatus": "blocked",
+      "evidenceRefs": [
+        "evidence:file-policy:sealed-write"
+      ],
+      "auditRefs": [
+        "audit:file-policy:sealed-write"
+      ],
+      "attachmentFlags": {
+        "adkRunnerInvoked": false,
+        "liveToolDispatched": false,
+        "shellOrCodeExecuted": false,
+        "fileMutated": false,
+        "patchApplied": false,
+        "workspaceWritten": false,
+        "memoryProviderCalled": false,
+        "agentMemoryImported": false,
+        "hipocampusQmdLiveCalled": false,
+        "productionStorageWritten": false,
+        "routeOrApiAttached": false,
+        "telegramAttached": false,
+        "canaryTrafficAttached": false,
+        "evidenceBlockEnabled": false
+      }
+    },
+    {
+      "caseId": "file_edit_stale_version_mismatch",
+      "category": "file_edit_stale_version",
+      "mode": "act",
+      "tool": {
+        "name": "FileEdit",
+        "description": "Edit a workspace file",
+        "kind": "core",
+        "source": {
+          "kind": "builtin",
+          "package": "openmagi.core"
+        },
+        "permission": "write",
+        "inputSchema": {
+          "type": "object",
+          "additionalProperties": true
+        },
+        "dangerous": false,
+        "isConcurrencySafe": false,
+        "mutatesWorkspace": true,
+        "availableInModes": [
+          "act"
+        ],
+        "tags": [
+          "requires-approval",
+          "read-guard"
+        ],
+        "sideEffectClass": "local_workspace",
+        "parallelSafety": "unsafe",
+        "timeoutMs": 5000,
+        "enabled_by_default": false,
+        "opt_out": true
+      },
+      "requestedPathPreview": "path=src/stale.ts",
+      "normalizedWorkspaceRelative": "src/stale.ts",
+      "pathClassification": "workspace_safe",
+      "permissionClass": "write",
+      "decision": "preflight_failed",
+      "hardSafety": true,
+      "securityCritical": true,
+      "blocking": true,
+      "failOpen": false,
+      "failClosed": true,
+      "mutatesWorkspace": true,
+      "dangerous": false,
+      "isConcurrencySafe": false,
+      "sealedPath": false,
+      "protectedPath": false,
+      "reasonCodes": [
+        "stale_file_version_mismatch"
+      ],
+      "timeoutBudgetMs": 5000,
+      "budgetMetadata": {
+        "timeoutMs": 5000,
+        "outputChars": 4000,
+        "transcriptChars": 2000
+      },
+      "preflight": {
+        "dryRun": false,
+        "preflightPassed": false,
+        "changedFiles": [
+          "src/stale.ts"
+        ],
+        "hunks": 1,
+        "expectedSha256": "0000000000000000000000000000000000000000000000000000000000000000",
+        "currentSha256": "1111111111111111111111111111111111111111111111111111111111111111",
+        "versionMismatch": true,
+        "errorCode": "stale_file"
+      },
+      "resultStatus": "error",
+      "evidenceRefs": [
+        "evidence:file-policy:stale-edit"
+      ],
+      "auditRefs": [
+        "audit:file-policy:stale-edit"
+      ],
+      "attachmentFlags": {
+        "adkRunnerInvoked": false,
+        "liveToolDispatched": false,
+        "shellOrCodeExecuted": false,
+        "fileMutated": false,
+        "patchApplied": false,
+        "workspaceWritten": false,
+        "memoryProviderCalled": false,
+        "agentMemoryImported": false,
+        "hipocampusQmdLiveCalled": false,
+        "productionStorageWritten": false,
+        "routeOrApiAttached": false,
+        "telegramAttached": false,
+        "canaryTrafficAttached": false,
+        "evidenceBlockEnabled": false
+      }
+    },
+    {
+      "caseId": "file_edit_dry_run_preflight_success",
+      "category": "file_edit_dry_run_preflight",
+      "mode": "act",
+      "tool": {
+        "name": "FileEdit",
+        "description": "Edit a workspace file",
+        "kind": "core",
+        "source": {
+          "kind": "builtin",
+          "package": "openmagi.core"
+        },
+        "permission": "write",
+        "inputSchema": {
+          "type": "object",
+          "additionalProperties": true
+        },
+        "dangerous": false,
+        "isConcurrencySafe": false,
+        "mutatesWorkspace": true,
+        "availableInModes": [
+          "act"
+        ],
+        "tags": [
+          "requires-approval",
+          "read-guard"
+        ],
+        "sideEffectClass": "local_workspace",
+        "parallelSafety": "unsafe",
+        "timeoutMs": 5000,
+        "enabled_by_default": false,
+        "opt_out": true
+      },
+      "requestedPathPreview": "path=src/app.ts",
+      "normalizedWorkspaceRelative": "src/app.ts",
+      "pathClassification": "workspace_safe",
+      "permissionClass": "write",
+      "decision": "dry_run_only",
+      "hardSafety": true,
+      "securityCritical": true,
+      "blocking": false,
+      "failOpen": true,
+      "failClosed": false,
+      "mutatesWorkspace": true,
+      "dangerous": false,
+      "isConcurrencySafe": false,
+      "sealedPath": false,
+      "protectedPath": false,
+      "reasonCodes": [
+        "file_edit_preflight_ok"
+      ],
+      "timeoutBudgetMs": 5000,
+      "budgetMetadata": {
+        "timeoutMs": 5000,
+        "outputChars": 4000,
+        "transcriptChars": 2000
+      },
+      "preflight": {
+        "dryRun": true,
+        "preflightPassed": true,
+        "changedFiles": [
+          "src/app.ts"
+        ],
+        "hunks": 1,
+        "expectedSha256": "2222222222222222222222222222222222222222222222222222222222222222",
+        "currentSha256": "2222222222222222222222222222222222222222222222222222222222222222",
+        "versionMismatch": false
+      },
+      "resultStatus": "ok",
+      "evidenceRefs": [
+        "evidence:file-policy:edit-dry-run"
+      ],
+      "auditRefs": [
+        "audit:file-policy:edit-dry-run"
+      ],
+      "attachmentFlags": {
+        "adkRunnerInvoked": false,
+        "liveToolDispatched": false,
+        "shellOrCodeExecuted": false,
+        "fileMutated": false,
+        "patchApplied": false,
+        "workspaceWritten": false,
+        "memoryProviderCalled": false,
+        "agentMemoryImported": false,
+        "hipocampusQmdLiveCalled": false,
+        "productionStorageWritten": false,
+        "routeOrApiAttached": false,
+        "telegramAttached": false,
+        "canaryTrafficAttached": false,
+        "evidenceBlockEnabled": false
+      }
+    },
+    {
+      "caseId": "file_edit_workspace_escape_denied",
+      "category": "file_edit_workspace_escape",
+      "mode": "act",
+      "tool": {
+        "name": "FileEdit",
+        "description": "Edit a workspace file",
+        "kind": "core",
+        "source": {
+          "kind": "builtin",
+          "package": "openmagi.core"
+        },
+        "permission": "write",
+        "inputSchema": {
+          "type": "object",
+          "additionalProperties": true
+        },
+        "dangerous": false,
+        "isConcurrencySafe": false,
+        "mutatesWorkspace": true,
+        "availableInModes": [
+          "act"
+        ],
+        "tags": [
+          "requires-approval"
+        ],
+        "sideEffectClass": "local_workspace",
+        "parallelSafety": "unsafe",
+        "timeoutMs": 5000,
+        "enabled_by_default": false,
+        "opt_out": true
+      },
+      "requestedPathPreview": "path=[outside-workspace]",
+      "normalizedWorkspaceRelative": "[outside-workspace]",
+      "pathClassification": "outside_workspace",
+      "permissionClass": "write",
+      "decision": "deny",
+      "hardSafety": true,
+      "securityCritical": true,
+      "blocking": true,
+      "failOpen": false,
+      "failClosed": true,
+      "mutatesWorkspace": true,
+      "dangerous": false,
+      "isConcurrencySafe": false,
+      "sealedPath": false,
+      "protectedPath": false,
+      "reasonCodes": [
+        "path_escapes_workspace"
+      ],
+      "timeoutBudgetMs": 5000,
+      "budgetMetadata": {
+        "timeoutMs": 5000,
+        "outputChars": 4000,
+        "transcriptChars": 2000
+      },
+      "resultStatus": "blocked",
+      "evidenceRefs": [
+        "evidence:file-policy:edit-escape"
+      ],
+      "auditRefs": [
+        "audit:file-policy:edit-escape"
+      ],
+      "attachmentFlags": {
+        "adkRunnerInvoked": false,
+        "liveToolDispatched": false,
+        "shellOrCodeExecuted": false,
+        "fileMutated": false,
+        "patchApplied": false,
+        "workspaceWritten": false,
+        "memoryProviderCalled": false,
+        "agentMemoryImported": false,
+        "hipocampusQmdLiveCalled": false,
+        "productionStorageWritten": false,
+        "routeOrApiAttached": false,
+        "telegramAttached": false,
+        "canaryTrafficAttached": false,
+        "evidenceBlockEnabled": false
+      }
+    },
+    {
+      "caseId": "patch_apply_dry_run_preflight_success",
+      "category": "patch_apply_dry_run_preflight",
+      "mode": "act",
+      "tool": {
+        "name": "PatchApply",
+        "description": "Apply a multi-file unified diff safely inside the workspace",
+        "kind": "core",
+        "source": {
+          "kind": "builtin",
+          "package": "openmagi.core"
+        },
+        "permission": "write",
+        "inputSchema": {
+          "type": "object",
+          "additionalProperties": true
+        },
+        "dangerous": false,
+        "isConcurrencySafe": false,
+        "mutatesWorkspace": true,
+        "availableInModes": [
+          "plan",
+          "act"
+        ],
+        "tags": [
+          "requires-approval",
+          "patch"
+        ],
+        "sideEffectClass": "local_workspace",
+        "parallelSafety": "unsafe",
+        "timeoutMs": 5000,
+        "enabled_by_default": false,
+        "opt_out": true
+      },
+      "requestedPathPreview": "patch path=src/app.ts",
+      "normalizedWorkspaceRelative": "src/app.ts",
+      "pathClassification": "workspace_safe",
+      "permissionClass": "write",
+      "decision": "dry_run_only",
+      "hardSafety": true,
+      "securityCritical": true,
+      "blocking": false,
+      "failOpen": true,
+      "failClosed": false,
+      "mutatesWorkspace": true,
+      "dangerous": false,
+      "isConcurrencySafe": false,
+      "sealedPath": false,
+      "protectedPath": false,
+      "reasonCodes": [
+        "patch_dry_run_preflight_ok"
+      ],
+      "timeoutBudgetMs": 5000,
+      "budgetMetadata": {
+        "timeoutMs": 5000,
+        "outputChars": 4000,
+        "transcriptChars": 2000
+      },
+      "preflight": {
+        "dryRun": true,
+        "preflightPassed": true,
+        "changedFiles": [
+          "src/app.ts"
+        ],
+        "createdFiles": [],
+        "deletedFiles": [],
+        "hunks": 1,
+        "versionMismatch": false
+      },
+      "resultStatus": "ok",
+      "evidenceRefs": [
+        "evidence:patch-policy:dry-run"
+      ],
+      "auditRefs": [
+        "audit:patch-policy:dry-run"
+      ],
+      "attachmentFlags": {
+        "adkRunnerInvoked": false,
+        "liveToolDispatched": false,
+        "shellOrCodeExecuted": false,
+        "fileMutated": false,
+        "patchApplied": false,
+        "workspaceWritten": false,
+        "memoryProviderCalled": false,
+        "agentMemoryImported": false,
+        "hipocampusQmdLiveCalled": false,
+        "productionStorageWritten": false,
+        "routeOrApiAttached": false,
+        "telegramAttached": false,
+        "canaryTrafficAttached": false,
+        "evidenceBlockEnabled": false
+      }
+    },
+    {
+      "caseId": "patch_apply_sealed_denied",
+      "category": "patch_apply_sealed_denied",
+      "mode": "act",
+      "tool": {
+        "name": "PatchApply",
+        "description": "Apply a multi-file unified diff safely inside the workspace",
+        "kind": "core",
+        "source": {
+          "kind": "builtin",
+          "package": "openmagi.core"
+        },
+        "permission": "write",
+        "inputSchema": {
+          "type": "object",
+          "additionalProperties": true
+        },
+        "dangerous": false,
+        "isConcurrencySafe": false,
+        "mutatesWorkspace": true,
+        "availableInModes": [
+          "plan",
+          "act"
+        ],
+        "tags": [
+          "requires-approval",
+          "patch"
+        ],
+        "sideEffectClass": "local_workspace",
+        "parallelSafety": "unsafe",
+        "timeoutMs": 5000,
+        "enabled_by_default": false,
+        "opt_out": true
+      },
+      "requestedPathPreview": "patch path=AGENTS.md",
+      "normalizedWorkspaceRelative": "AGENTS.md",
+      "pathClassification": "sealed_file",
+      "permissionClass": "write",
+      "decision": "deny",
+      "hardSafety": true,
+      "securityCritical": true,
+      "blocking": true,
+      "failOpen": false,
+      "failClosed": true,
+      "mutatesWorkspace": true,
+      "dangerous": false,
+      "isConcurrencySafe": false,
+      "sealedPath": true,
+      "protectedPath": false,
+      "reasonCodes": [
+        "sealed_file_write_blocked"
+      ],
+      "timeoutBudgetMs": 5000,
+      "budgetMetadata": {
+        "timeoutMs": 5000,
+        "outputChars": 4000,
+        "transcriptChars": 2000
+      },
+      "resultStatus": "blocked",
+      "evidenceRefs": [
+        "evidence:patch-policy:sealed"
+      ],
+      "auditRefs": [
+        "audit:patch-policy:sealed"
+      ],
+      "attachmentFlags": {
+        "adkRunnerInvoked": false,
+        "liveToolDispatched": false,
+        "shellOrCodeExecuted": false,
+        "fileMutated": false,
+        "patchApplied": false,
+        "workspaceWritten": false,
+        "memoryProviderCalled": false,
+        "agentMemoryImported": false,
+        "hipocampusQmdLiveCalled": false,
+        "productionStorageWritten": false,
+        "routeOrApiAttached": false,
+        "telegramAttached": false,
+        "canaryTrafficAttached": false,
+        "evidenceBlockEnabled": false
+      }
+    },
+    {
+      "caseId": "patch_apply_path_traversal_rejected",
+      "category": "patch_apply_path_traversal",
+      "mode": "act",
+      "tool": {
+        "name": "PatchApply",
+        "description": "Apply a multi-file unified diff safely inside the workspace",
+        "kind": "core",
+        "source": {
+          "kind": "builtin",
+          "package": "openmagi.core"
+        },
+        "permission": "write",
+        "inputSchema": {
+          "type": "object",
+          "additionalProperties": true
+        },
+        "dangerous": false,
+        "isConcurrencySafe": false,
+        "mutatesWorkspace": true,
+        "availableInModes": [
+          "plan",
+          "act"
+        ],
+        "tags": [
+          "requires-approval",
+          "patch"
+        ],
+        "sideEffectClass": "local_workspace",
+        "parallelSafety": "unsafe",
+        "timeoutMs": 5000,
+        "enabled_by_default": false,
+        "opt_out": true
+      },
+      "requestedPathPreview": "patch path=[redacted-path]",
+      "normalizedWorkspaceRelative": "[outside-workspace]",
+      "pathClassification": "absolute_production_path",
+      "permissionClass": "write",
+      "decision": "preflight_failed",
+      "hardSafety": true,
+      "securityCritical": true,
+      "blocking": true,
+      "failOpen": false,
+      "failClosed": true,
+      "mutatesWorkspace": true,
+      "dangerous": false,
+      "isConcurrencySafe": false,
+      "sealedPath": false,
+      "protectedPath": false,
+      "reasonCodes": [
+        "patch_path_traversal"
+      ],
+      "timeoutBudgetMs": 5000,
+      "budgetMetadata": {
+        "timeoutMs": 5000,
+        "outputChars": 4000,
+        "transcriptChars": 2000
+      },
+      "preflight": {
+        "dryRun": true,
+        "preflightPassed": false,
+        "changedFiles": [],
+        "hunks": 0,
+        "errorCode": "path_escape"
+      },
+      "resultStatus": "error",
+      "evidenceRefs": [
+        "evidence:patch-policy:path-traversal"
+      ],
+      "auditRefs": [
+        "audit:patch-policy:path-traversal"
+      ],
+      "attachmentFlags": {
+        "adkRunnerInvoked": false,
+        "liveToolDispatched": false,
+        "shellOrCodeExecuted": false,
+        "fileMutated": false,
+        "patchApplied": false,
+        "workspaceWritten": false,
+        "memoryProviderCalled": false,
+        "agentMemoryImported": false,
+        "hipocampusQmdLiveCalled": false,
+        "productionStorageWritten": false,
+        "routeOrApiAttached": false,
+        "telegramAttached": false,
+        "canaryTrafficAttached": false,
+        "evidenceBlockEnabled": false
+      }
+    },
+    {
+      "caseId": "patch_apply_requires_approval",
+      "category": "patch_apply_requires_approval",
+      "mode": "act",
+      "tool": {
+        "name": "PatchApply",
+        "description": "Apply a multi-file unified diff safely inside the workspace",
+        "kind": "core",
+        "source": {
+          "kind": "builtin",
+          "package": "openmagi.core"
+        },
+        "permission": "write",
+        "inputSchema": {
+          "type": "object",
+          "additionalProperties": true
+        },
+        "dangerous": false,
+        "isConcurrencySafe": false,
+        "mutatesWorkspace": true,
+        "availableInModes": [
+          "plan",
+          "act"
+        ],
+        "tags": [
+          "requires-approval",
+          "patch"
+        ],
+        "sideEffectClass": "local_workspace",
+        "parallelSafety": "unsafe",
+        "timeoutMs": 5000,
+        "enabled_by_default": false,
+        "opt_out": true
+      },
+      "requestedPathPreview": "patch path=src/app.ts",
+      "normalizedWorkspaceRelative": "src/app.ts",
+      "pathClassification": "workspace_safe",
+      "permissionClass": "write",
+      "decision": "approval_required",
+      "hardSafety": false,
+      "securityCritical": false,
+      "blocking": true,
+      "failOpen": false,
+      "failClosed": true,
+      "mutatesWorkspace": true,
+      "dangerous": false,
+      "isConcurrencySafe": false,
+      "sealedPath": false,
+      "protectedPath": false,
+      "reasonCodes": [
+        "patch_workspace_mutation_requires_approval"
+      ],
+      "timeoutBudgetMs": 5000,
+      "budgetMetadata": {
+        "timeoutMs": 5000,
+        "outputChars": 4000,
+        "transcriptChars": 2000
+      },
+      "preflight": {
+        "dryRun": false,
+        "preflightPassed": true,
+        "changedFiles": [
+          "src/app.ts"
+        ],
+        "createdFiles": [],
+        "deletedFiles": [],
+        "hunks": 1,
+        "versionMismatch": false
+      },
+      "controlRequest": {
+        "requestId": "tool-permission:turn-patch-file-1:PatchApply",
+        "turnId": "turn-patch-file-1",
+        "toolName": "PatchApply",
+        "arguments": {
+          "patchPreview": {
+            "changedFiles": [
+              "src/app.ts"
+            ],
+            "dryRun": false
+          }
+        },
+        "reason": "patch workspace mutation requires approval"
+      },
+      "resultStatus": "needs_approval",
+      "evidenceRefs": [
+        "evidence:patch-policy:approval"
+      ],
+      "auditRefs": [
+        "audit:patch-policy:approval"
+      ],
+      "attachmentFlags": {
+        "adkRunnerInvoked": false,
+        "liveToolDispatched": false,
+        "shellOrCodeExecuted": false,
+        "fileMutated": false,
+        "patchApplied": false,
+        "workspaceWritten": false,
+        "memoryProviderCalled": false,
+        "agentMemoryImported": false,
+        "hipocampusQmdLiveCalled": false,
+        "productionStorageWritten": false,
+        "routeOrApiAttached": false,
+        "telegramAttached": false,
+        "canaryTrafficAttached": false,
+        "evidenceBlockEnabled": false
+      }
+    }
+  ]
+}

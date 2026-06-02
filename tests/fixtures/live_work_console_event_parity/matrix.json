@@ -1,0 +1,792 @@
+{
+  "schemaVersion": "liveWorkConsoleEventParityGapMatrix.v1",
+  "scope": "PR0 producer/projection parity gap audit only; tests and docs only",
+  "sourceMatrices": [
+    "infra/docker/clawy-core-agent-python/tests/fixtures/public_event_parity/matrix.json"
+  ],
+  "sourceFiles": [
+    "infra/docker/clawy-core-agent/src/transport/SseWriter.ts",
+    "infra/docker/clawy-core-agent/src/transport/safeAgentEvent.ts",
+    "infra/docker/clawy-core-agent-python/openmagi_core_agent/transport/sse.py",
+    "infra/docker/clawy-core-agent-python/openmagi_core_agent/adk_bridge/event_adapter.py",
+    "infra/docker/clawy-core-agent-python/openmagi_core_agent/missions/events.py"
+  ],
+  "boundary": {
+    "liveAuthorityEnabled": false,
+    "liveToolsEnabled": false,
+    "liveChildExecutionEnabled": false,
+    "browserEnabled": false,
+    "memoryWriteEnabled": false,
+    "channelDeliveryEnabled": false,
+    "workspaceMutationEnabled": false,
+    "pythonUserVisibleAuthorityEnabled": false
+  },
+  "rows": [
+    {
+      "eventFamily": "turn_lifecycle_public_stream",
+      "auditArea": "turn_lifecycle",
+      "tsEventTypes": [
+        "turn_start",
+        "turn_phase",
+        "turn_end",
+        "text_delta",
+        "llm_progress",
+        "response_clear"
+      ],
+      "status": "supported",
+      "liveSupported": false,
+      "pythonSseSanitizer": {
+        "status": "covered",
+        "evidence": [
+          "tests/test_sse_writer.py",
+          "tests/test_public_event_parity_matrix.py",
+          "tests/test_public_event_golden_fixtures.py"
+        ]
+      },
+      "pythonProducer": {
+        "status": "producer",
+        "evidence": [
+          "openmagi_core_agent/adk_bridge/event_adapter.py",
+          "openmagi_core_agent/meta_orchestration/event_projection.py",
+          "tests/test_meta_orchestration_event_projection.py",
+          "tests/test_event_bridge.py"
+        ],
+        "notes": "Python ADK event bridge and meta harness projection can produce bounded turn lifecycle phases for local diagnostic streams; live authority remains off."
+      },
+      "reason": null,
+      "followUp": null
+    },
+    {
+      "eventFamily": "turn_lifecycle_default_off",
+      "auditArea": "turn_lifecycle",
+      "tsEventTypes": [
+        "context_end",
+        "turn_interrupted",
+        "session_stop",
+        "context_activated",
+        "compaction_impossible"
+      ],
+      "status": "deferred",
+      "liveSupported": false,
+      "pythonSseSanitizer": {
+        "status": "covered",
+        "evidence": [
+          "tests/test_public_event_parity_matrix.py",
+          "tests/test_public_event_golden_fixtures.py"
+        ]
+      },
+      "pythonProducer": {
+        "status": "none",
+        "evidence": [],
+        "notes": "Default-off lifecycle shapes are sanitizer/fixture covered only."
+      },
+      "reason": "These lifecycle rows are marked default-off in the TS public matrix and do not have PR0 Python producer authority.",
+      "followUp": "Add producer evidence in the lifecycle/control authority PR before moving these rows to supported."
+    },
+    {
+      "eventFamily": "heartbeat_progress",
+      "auditArea": "heartbeat",
+      "tsEventTypes": ["heartbeat"],
+      "status": "supported",
+      "liveSupported": false,
+      "pythonSseSanitizer": {
+        "status": "covered",
+        "evidence": [
+          "tests/test_public_event_golden_fixtures.py"
+        ]
+      },
+      "pythonProducer": {
+        "status": "fixture_producer",
+        "evidence": [
+          "tests/fixtures/ts_parity_replay/public_event_union_golden.json"
+        ],
+        "notes": "Fixture producer validates projection shape without starting a live heartbeat loop."
+      },
+      "reason": null,
+      "followUp": null
+    },
+    {
+      "eventFamily": "retry_and_model_fallback",
+      "auditArea": "retry_model_fallback",
+      "tsEventTypes": ["retry"],
+      "status": "supported",
+      "liveSupported": false,
+      "pythonSseSanitizer": {
+        "status": "covered",
+        "evidence": [
+          "tests/test_public_event_golden_fixtures.py",
+          "tests/fixtures/ts_parity_replay/public_event_golden.json"
+        ]
+      },
+      "pythonProducer": {
+        "status": "fixture_producer",
+        "evidence": [
+          "tests/fixtures/ts_parity_replay/public_event_golden.json",
+          "tests/fixtures/ts_parity_replay/public_event_union_golden.json"
+        ],
+        "notes": "Retry public projection is fixture-covered; model fallback remains outside the TS public matrix coverage list."
+      },
+      "reason": null,
+      "followUp": null
+    },
+    {
+      "eventFamily": "tool_start",
+      "auditArea": "tool_start",
+      "tsEventTypes": ["tool_start"],
+      "status": "supported",
+      "liveSupported": false,
+      "pythonSseSanitizer": {
+        "status": "covered",
+        "evidence": [
+          "tests/test_sse_writer.py",
+          "tests/test_event_bridge.py"
+        ]
+      },
+      "pythonProducer": {
+        "status": "producer",
+        "evidence": [
+          "openmagi_core_agent/adk_bridge/event_adapter.py",
+          "openmagi_core_agent/tools/event_projection.py",
+          "tests/test_event_bridge.py",
+          "tests/test_tool_event_projection.py"
+        ],
+        "notes": "ADK function-call projection and default-off local fake ToolHost projection emit digest-safe tool_start records."
+      },
+      "reason": null,
+      "followUp": null
+    },
+    {
+      "eventFamily": "tool_progress",
+      "auditArea": "tool_progress",
+      "tsEventTypes": ["tool_progress"],
+      "status": "supported",
+      "liveSupported": false,
+      "pythonSseSanitizer": {
+        "status": "covered",
+        "evidence": [
+          "tests/test_sse_writer.py",
+          "tests/test_public_event_parity_matrix.py"
+        ]
+      },
+      "pythonProducer": {
+        "status": "producer",
+        "evidence": [
+          "openmagi_core_agent/tools/event_projection.py",
+          "tests/test_tool_event_projection.py",
+          "tests/test_sse_writer.py"
+        ],
+        "notes": "Default-off local fake ToolHost projection emits bounded tool_progress from sanitized result metadata; no live tool dispatcher is enabled."
+      },
+      "reason": null,
+      "followUp": null
+    },
+    {
+      "eventFamily": "tool_end_success",
+      "auditArea": "tool_end",
+      "tsEventTypes": ["tool_end"],
+      "status": "supported",
+      "liveSupported": false,
+      "pythonSseSanitizer": {
+        "status": "covered",
+        "evidence": [
+          "tests/test_sse_writer.py",
+          "tests/test_event_bridge.py"
+        ]
+      },
+      "pythonProducer": {
+        "status": "producer",
+        "evidence": [
+          "openmagi_core_agent/adk_bridge/event_adapter.py",
+          "openmagi_core_agent/tools/event_projection.py",
+          "tests/test_event_bridge.py",
+          "tests/test_tool_event_projection.py"
+        ],
+        "notes": "ADK function-response projection and default-off local fake ToolHost projection emit digest-safe tool_end records."
+      },
+      "reason": null,
+      "followUp": null
+    },
+    {
+      "eventFamily": "tool_end_error",
+      "auditArea": "tool_error",
+      "tsEventTypes": ["tool_end"],
+      "status": "supported",
+      "liveSupported": false,
+      "pythonSseSanitizer": {
+        "status": "covered",
+        "evidence": [
+          "tests/test_sse_writer.py",
+          "tests/test_public_event_golden_fixtures.py"
+        ]
+      },
+      "pythonProducer": {
+        "status": "producer",
+        "evidence": [
+          "openmagi_core_agent/adk_bridge/event_adapter.py",
+          "openmagi_core_agent/tools/event_projection.py",
+          "tests/test_event_bridge.py",
+          "tests/test_tool_event_projection.py"
+        ],
+        "notes": "Error status is represented as sanitized tool_end error codes/output summaries, not raw tool payload."
+      },
+      "reason": null,
+      "followUp": null
+    },
+    {
+      "eventFamily": "tool_blocked_or_permission_denied",
+      "auditArea": "tool_blocked",
+      "tsEventTypes": ["tool_end", "rule_check", "child_permission_decision"],
+      "status": "supported",
+      "liveSupported": false,
+      "pythonSseSanitizer": {
+        "status": "covered",
+        "evidence": [
+          "tests/test_sse_writer.py",
+          "tests/test_public_event_golden_fixtures.py",
+          "tests/test_public_event_parity_matrix.py"
+        ]
+      },
+      "pythonProducer": {
+        "status": "producer",
+        "evidence": [
+          "openmagi_core_agent/tools/event_projection.py",
+          "tests/test_tool_event_projection.py",
+          "tests/fixtures/ts_parity_replay/public_event_union_golden.json"
+        ],
+        "notes": "Blocked local fake ToolHost state is projected through receipt-backed tool_end records only; no live permission authority is enabled."
+      },
+      "reason": null,
+      "followUp": null
+    },
+    {
+      "eventFamily": "source_inspected",
+      "auditArea": "source_inspected",
+      "tsEventTypes": ["source_inspected"],
+      "status": "supported",
+      "liveSupported": false,
+      "pythonSseSanitizer": {
+        "status": "covered",
+        "evidence": [
+          "tests/test_public_event_golden_fixtures.py",
+          "tests/test_public_event_parity_matrix.py"
+        ]
+      },
+      "pythonProducer": {
+        "status": "producer",
+        "evidence": [
+          "openmagi_core_agent/evidence/event_projection.py",
+          "openmagi_core_agent/evidence/source_ledger.py",
+          "tests/test_evidence_event_projection.py",
+          "tests/test_research_source_ledger.py"
+        ],
+        "notes": "Source ledger records with inspected SourceInspection evidence and safe digest/evidence refs project source_inspected events using ref-only URI placeholders; raw source URI/snippets are omitted and live web/browser acquisition remains disabled."
+      },
+      "reason": null,
+      "followUp": null
+    },
+    {
+      "eventFamily": "rule_check",
+      "auditArea": "rule_citation_gate",
+      "tsEventTypes": ["rule_check"],
+      "status": "supported",
+      "liveSupported": false,
+      "pythonSseSanitizer": {
+        "status": "covered",
+        "evidence": [
+          "tests/test_public_event_parity_matrix.py",
+          "tests/test_gate5b4d_stream_fixture_audit.py"
+        ]
+      },
+      "pythonProducer": {
+        "status": "producer",
+        "evidence": [
+          "openmagi_core_agent/evidence/event_projection.py",
+          "openmagi_core_agent/evidence/citation_audit.py",
+          "openmagi_core_agent/harness/verifier_bus.py",
+          "openmagi_core_agent/meta_orchestration/event_projection.py",
+          "openmagi_core_agent/research/source_proof.py",
+          "tests/test_evidence_event_projection.py",
+          "tests/test_meta_orchestration_event_projection.py"
+        ],
+        "notes": "Citation audits, evidence contract verdicts, source proof verifier verdicts, verifier bus results, meta inspection, and beforeCommit verdicts project bounded rule_check events with digest-derived rule ids and count/status details only."
+      },
+      "reason": null,
+      "followUp": null
+    },
+    {
+      "eventFamily": "citation_gate_alias",
+      "auditArea": "rule_citation_gate",
+      "tsEventTypes": ["citation_gate"],
+      "status": "projected_alias",
+      "liveSupported": false,
+      "pythonSseSanitizer": {
+        "status": "covered",
+        "evidence": [
+          "tests/test_public_event_parity_matrix.py",
+          "tests/test_gate5b4d_stream_fixture_audit.py"
+        ]
+      },
+      "pythonProducer": {
+        "status": "producer",
+        "evidence": [
+          "openmagi_core_agent/evidence/event_projection.py",
+          "openmagi_core_agent/evidence/citation_audit.py",
+          "tests/test_evidence_event_projection.py",
+          "tests/test_research_citation_audit.py"
+        ],
+        "notes": "Citation audit results project through the existing citation_gate_alias rule_check shape with the frontend-recognized claim-citation-gate rule id and pass/failure/missing counts only."
+      },
+      "reason": null,
+      "followUp": null
+    },
+    {
+      "eventFamily": "runtime_trace_and_error",
+      "auditArea": "runtime_trace",
+      "tsEventTypes": ["runtime_trace", "error"],
+      "status": "supported",
+      "liveSupported": false,
+      "pythonSseSanitizer": {
+        "status": "covered",
+        "evidence": [
+          "tests/test_sse_writer.py",
+          "tests/test_event_bridge.py",
+          "tests/test_public_event_golden_fixtures.py"
+        ]
+      },
+      "pythonProducer": {
+        "status": "producer",
+        "evidence": [
+          "openmagi_core_agent/adk_bridge/event_adapter.py",
+          "openmagi_core_agent/meta_orchestration/event_projection.py",
+          "openmagi_core_agent/runtime/commit_boundary.py",
+          "tests/test_event_bridge.py",
+          "tests/test_meta_orchestration_event_projection.py"
+        ],
+        "notes": "Runtime/error diagnostics and meta retry/block progress are projected as bounded public diagnostics."
+      },
+      "reason": null,
+      "followUp": null
+    },
+    {
+      "eventFamily": "task_board",
+      "auditArea": "task_board",
+      "tsEventTypes": ["task_board"],
+      "status": "supported",
+      "liveSupported": false,
+      "pythonSseSanitizer": {
+        "status": "covered",
+        "evidence": [
+          "tests/test_public_event_golden_fixtures.py",
+          "tests/test_public_event_parity_matrix.py"
+        ]
+      },
+      "pythonProducer": {
+        "status": "producer",
+        "evidence": [
+          "openmagi_core_agent/meta_orchestration/event_projection.py",
+          "tests/test_meta_orchestration_event_projection.py",
+          "tests/fixtures/public_event_parity/matrix.json"
+        ],
+        "notes": "Meta plan creation projects task_board snapshots from bounded plan metadata only; no workspace task mutation is enabled."
+      },
+      "reason": null,
+      "followUp": null
+    },
+    {
+      "eventFamily": "child_spawn_background_supported_core",
+      "auditArea": "child_spawn_background",
+      "tsEventTypes": [
+        "spawn_started",
+        "spawn_result",
+        "background_task"
+      ],
+      "status": "supported",
+      "liveSupported": false,
+      "pythonSseSanitizer": {
+        "status": "covered",
+        "evidence": [
+          "tests/test_public_event_golden_fixtures.py",
+          "tests/test_public_event_parity_matrix.py"
+        ]
+      },
+      "pythonProducer": {
+        "status": "producer",
+        "evidence": [
+          "openmagi_core_agent/meta_orchestration/event_projection.py",
+          "openmagi_core_agent/runtime/child_event_projection.py",
+          "tests/test_meta_orchestration_event_projection.py",
+          "tests/test_child_event_projection.py",
+          "tests/fixtures/public_event_parity/matrix.json",
+          "tests/fixtures/ts_parity_replay/public_event_union_golden.json"
+        ],
+        "notes": "Child receipt projection emits spawn/background aliases from runtime-issued child envelope metadata, child runner envelope refs, or meta schedule receipt/evidence refs only; live child execution remains disabled."
+      },
+      "reason": null,
+      "followUp": null
+    },
+    {
+      "eventFamily": "child_tool_permission_fixture_projection",
+      "auditArea": "child_spawn_background",
+      "tsEventTypes": [
+        "child_tool_request",
+        "child_permission_decision"
+      ],
+      "status": "supported",
+      "liveSupported": false,
+      "pythonSseSanitizer": {
+        "status": "covered",
+        "evidence": [
+          "tests/test_public_event_golden_fixtures.py",
+          "tests/test_public_event_parity_matrix.py"
+        ]
+      },
+      "pythonProducer": {
+        "status": "fixture_producer",
+        "evidence": [
+          "tests/fixtures/public_event_parity/matrix.json",
+          "tests/fixtures/ts_parity_replay/public_control_projection_event_golden.json"
+        ],
+        "notes": "Child tool request and permission decision shapes remain fixture-covered only; PR5 does not produce these rows or enable child tool/permission authority."
+      },
+      "reason": null,
+      "followUp": null
+    },
+    {
+      "eventFamily": "child_execution_projection_default_off",
+      "auditArea": "child_spawn_background",
+      "tsEventTypes": [
+        "child_started",
+        "child_progress",
+        "child_completed",
+        "child_failed",
+        "child_cancelled"
+      ],
+      "status": "deferred",
+      "liveSupported": false,
+      "pythonSseSanitizer": {
+        "status": "covered",
+        "evidence": [
+          "tests/test_public_event_golden_fixtures.py",
+          "tests/test_public_event_parity_matrix.py"
+        ]
+      },
+      "pythonProducer": {
+        "status": "producer",
+        "evidence": [
+          "openmagi_core_agent/runtime/child_event_projection.py",
+          "tests/test_child_event_projection.py"
+        ],
+        "notes": "Projection-only child lifecycle rows are emitted only from runtime-issued child envelopes, child runner envelope refs, or evaluated acceptance verdicts; they do not attach live child execution."
+      },
+      "reason": "TS classifies direct child runtime rows as default-off boundary-only, so Python producer coverage remains projection-only until child Runner authority is separately activated.",
+      "followUp": "Promote only after child execution authority tests prove live child Runner support, receipt ownership, and public-safe projection."
+    },
+    {
+      "eventFamily": "child_workspace_default_off",
+      "auditArea": "child_spawn_background",
+      "tsEventTypes": [
+        "spawn_worktree_conflict"
+      ],
+      "status": "deferred",
+      "liveSupported": false,
+      "pythonSseSanitizer": {
+        "status": "covered",
+        "evidence": [
+          "tests/test_public_event_golden_fixtures.py",
+          "tests/test_public_event_parity_matrix.py"
+        ]
+      },
+      "pythonProducer": {
+        "status": "none",
+        "evidence": [],
+        "notes": "Workspace conflict public shape is sanitizer-covered only; PR5 does not enable workspace mutation."
+      },
+      "reason": "TS classifies workspace rows as default-off boundary-only, and PR5 has no Python producer authority for workspace mutation.",
+      "followUp": "Promote only after workspace authority tests prove producer support and public-safe projection."
+    },
+    {
+      "eventFamily": "child_spawn_background_telemetry_deferred",
+      "auditArea": "child_spawn_background",
+      "tsEventTypes": [
+        "child_llm_start",
+        "child_llm_end",
+        "child_tool_batch_start",
+        "child_tool_batch_end",
+        "child_abort",
+        "tournament_result"
+      ],
+      "status": "deferred",
+      "liveSupported": false,
+      "pythonSseSanitizer": {
+        "status": "covered",
+        "evidence": [
+          "tests/test_public_event_golden_fixtures.py"
+        ]
+      },
+      "pythonProducer": {
+        "status": "none",
+        "evidence": [],
+        "notes": "Telemetry rows are sanitizer-covered but not producer-supported in PR0."
+      },
+      "reason": "Child telemetry depends on child Runner activation, which is outside PR0 and explicitly disabled.",
+      "followUp": "Revisit in the child execution authority gate with live child execution, tool batching, and transcript ownership tests."
+    },
+    {
+      "eventFamily": "control_ask_plan_supported",
+      "auditArea": "control_ask_plan",
+      "tsEventTypes": [
+        "control_event",
+        "control_replay_complete",
+        "ask_user",
+        "plan_ready"
+      ],
+      "status": "supported",
+      "liveSupported": false,
+      "pythonSseSanitizer": {
+        "status": "covered",
+        "evidence": [
+          "tests/test_public_event_golden_fixtures.py",
+          "tests/test_public_event_parity_matrix.py"
+        ]
+      },
+      "pythonProducer": {
+        "status": "fixture_producer",
+        "evidence": [
+          "tests/fixtures/public_event_parity/matrix.json",
+          "tests/fixtures/ts_parity_replay/public_control_projection_event_golden.json"
+        ],
+        "notes": "Supported control/ask/plan projection shapes are fixture-covered; live control authority remains local diagnostic only."
+      },
+      "reason": null,
+      "followUp": null
+    },
+    {
+      "eventFamily": "control_injection_aliases",
+      "auditArea": "control_ask_plan",
+      "tsEventTypes": [
+        "inject",
+        "interrupt"
+      ],
+      "status": "projected_alias",
+      "liveSupported": false,
+      "pythonSseSanitizer": {
+        "status": "covered",
+        "evidence": [
+          "tests/test_public_event_golden_fixtures.py",
+          "tests/test_public_event_parity_matrix.py"
+        ]
+      },
+      "pythonProducer": {
+        "status": "fixture_producer",
+        "evidence": [
+          "tests/fixtures/public_event_parity/matrix.json",
+          "tests/fixtures/ts_parity_replay/public_control_projection_event_golden.json"
+        ],
+        "notes": "inject and interrupt use existing Python aliases."
+      },
+      "reason": null,
+      "followUp": null
+    },
+    {
+      "eventFamily": "control_native_default_off",
+      "auditArea": "control_ask_plan",
+      "tsEventTypes": [
+        "plan_lifecycle",
+        "injection_queued",
+        "injection_drained"
+      ],
+      "status": "deferred",
+      "liveSupported": false,
+      "pythonSseSanitizer": {
+        "status": "covered",
+        "evidence": [
+          "tests/test_public_event_golden_fixtures.py",
+          "tests/test_public_event_parity_matrix.py"
+        ]
+      },
+      "pythonProducer": {
+        "status": "none",
+        "evidence": [],
+        "notes": "Native default-off control lifecycle/injection rows are not aliases and have no PR0 Python producer."
+      },
+      "reason": "TS classifies native plan lifecycle and injection queue/drain rows as default-off boundary-only.",
+      "followUp": "Add producer-backed control lifecycle and injection tests in a future control authority PR before marking supported."
+    },
+    {
+      "eventFamily": "mission_cron_goal_public_projection",
+      "auditArea": "mission_cron_goal",
+      "tsEventTypes": [
+        "mission_created",
+        "mission_event",
+        "mission_progress",
+        "cron_run",
+        "goal_created",
+        "goal_progress",
+        "goal_completed",
+        "goal_cancelled"
+      ],
+      "status": "deferred",
+      "liveSupported": false,
+      "pythonSseSanitizer": {
+        "status": "covered",
+        "evidence": [
+          "tests/test_mission_public_event_projection.py",
+          "tests/test_public_event_parity_matrix.py"
+        ]
+      },
+      "pythonProducer": {
+        "status": "none",
+        "evidence": [],
+        "notes": "Mission projection helper exists, but scheduler/cron/goal live production is not part of PR0."
+      },
+      "reason": "Mission, cron, and goal rows require scheduler/live goal authority not enabled by this producer gap audit.",
+      "followUp": "Add live scheduler and goal producer tests only in the mission/cron authority PR."
+    },
+    {
+      "eventFamily": "document_draft",
+      "auditArea": "document_draft",
+      "tsEventTypes": ["document_draft"],
+      "status": "supported",
+      "liveSupported": false,
+      "pythonSseSanitizer": {
+        "status": "covered",
+        "evidence": [
+          "tests/test_public_event_golden_fixtures.py",
+          "tests/test_priority_a_llm_stream_reader.py"
+        ]
+      },
+      "pythonProducer": {
+        "status": "producer",
+        "evidence": [
+          "openmagi_core_agent/runtime/llm_stream_reader.py",
+          "tests/test_priority_a_llm_stream_reader.py"
+        ],
+        "notes": "Document draft projection is bounded to preview metadata."
+      },
+      "reason": null,
+      "followUp": null
+    },
+    {
+      "eventFamily": "patch_preview",
+      "auditArea": "patch_preview",
+      "tsEventTypes": ["patch_preview"],
+      "status": "supported",
+      "liveSupported": false,
+      "pythonSseSanitizer": {
+        "status": "covered",
+        "evidence": [
+          "tests/test_public_event_golden_fixtures.py",
+          "tests/test_public_event_parity_matrix.py"
+        ]
+      },
+      "pythonProducer": {
+        "status": "fixture_producer",
+        "evidence": [
+          "tests/fixtures/public_event_parity/matrix.json",
+          "tests/fixtures/ts_parity_replay/public_control_projection_event_golden.json"
+        ],
+        "notes": "Patch preview is projection-covered only; no patch application or workspace mutation is enabled."
+      },
+      "reason": null,
+      "followUp": null
+    },
+    {
+      "eventFamily": "browser_frame",
+      "auditArea": "browser_frame",
+      "tsEventTypes": ["browser_frame"],
+      "status": "supported",
+      "liveSupported": false,
+      "pythonSseSanitizer": {
+        "status": "covered",
+        "evidence": [
+          "tests/test_sse_writer.py",
+          "tests/test_public_event_golden_fixtures.py",
+          "tests/test_ts_parity_replay_fixtures.py"
+        ]
+      },
+      "pythonProducer": {
+        "status": "fixture_producer",
+        "evidence": [
+          "tests/fixtures/ts_parity_replay/public_browser_frame_image_policy_golden.json"
+        ],
+        "notes": "Only bounded image policy fixtures are covered; live browser/web acquisition remains disabled."
+      },
+      "reason": null,
+      "followUp": null
+    },
+    {
+      "eventFamily": "recipe_selection",
+      "auditArea": "unsupported_deferred",
+      "tsEventTypes": ["recipe_selection"],
+      "status": "supported",
+      "liveSupported": false,
+      "pythonSseSanitizer": {
+        "status": "covered",
+        "evidence": [
+          "tests/test_public_event_parity_matrix.py"
+        ]
+      },
+      "pythonProducer": {
+        "status": "fixture_producer",
+        "evidence": [
+          "tests/fixtures/public_event_parity/matrix.json"
+        ],
+        "notes": "Recipe selection is sanitizer-covered as public metadata only."
+      },
+      "reason": null,
+      "followUp": null
+    },
+    {
+      "eventFamily": "active_snapshot_reconnect_contract",
+      "auditArea": "unsupported_deferred",
+      "tsEventTypes": [
+        "active_snapshot"
+      ],
+      "status": "deferred",
+      "liveSupported": false,
+      "pythonSseSanitizer": {
+        "status": "blocked_or_dropped",
+        "evidence": [
+          "tests/test_sse_writer.py",
+          "tests/test_public_event_parity_matrix.py"
+        ]
+      },
+      "pythonProducer": {
+        "status": "producer",
+        "evidence": [
+          "openmagi_core_agent/runtime/work_console_snapshot.py",
+          "tests/test_work_console_snapshot.py"
+        ],
+        "notes": "Default-off reconnect snapshot reducer rebuilds deterministic Work Console state from already-public AgentEvent dictionaries only; it does not emit active_snapshot SSE events or enable production snapshot writes."
+      },
+      "reason": "The active_snapshot event type remains default-off boundary-only; PR7 adds a local public-safe reconnect snapshot contract without route activation or user-visible Python authority.",
+      "followUp": "Promote only after route activation tests prove production snapshot storage, replay ordering, and public-safe reconnect semantics."
+    },
+    {
+      "eventFamily": "unsupported_or_deferred_public_events",
+      "auditArea": "unsupported_deferred",
+      "tsEventTypes": [
+        "thinking_delta",
+        "research_artifact_delta",
+        "channel_delivery_receipt",
+        "structured_output"
+      ],
+      "status": "unsupported",
+      "liveSupported": false,
+      "pythonSseSanitizer": {
+        "status": "blocked_or_dropped",
+        "evidence": [
+          "tests/test_sse_writer.py",
+          "tests/test_public_event_parity_matrix.py"
+        ]
+      },
+      "pythonProducer": {
+        "status": "none",
+        "evidence": [],
+        "notes": "These rows either intentionally drop private reasoning/state or require delivery/structured-output authority outside PR0; active_snapshot reconnect is tracked separately as a deferred contract row."
+      },
+      "reason": "Rows are intentionally unsupported or deferred to avoid exposing private reasoning, channel delivery, or unresolved structured-output authority.",
+      "followUp": "Create separate authority-gated PRs with sanitizer, producer, and user-visible semantics before changing these rows."
+    }
+  ]
+}

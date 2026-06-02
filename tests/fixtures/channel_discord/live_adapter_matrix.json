@@ -1,0 +1,27 @@
+{
+  "surface": "openmagi.discord-adapter",
+  "defaultOff": true,
+  "liveProviderCalls": "fake-provider-only",
+  "rows": [
+    {
+      "operation": "handle_events",
+      "expectedStatus": "inbound_projected_local_fake",
+      "requires": ["selected discord route", "fake provider", "scope digests"]
+    },
+    {
+      "operation": "send_message",
+      "expectedStatus": "sent_local_fake",
+      "requires": ["selected discord route", "fake provider", "provider allowlist"]
+    },
+    {
+      "operation": "send_file",
+      "expectedStatus": "sent_local_fake",
+      "requires": ["artifact ref", "artifact receipt ref", "fake provider"]
+    },
+    {
+      "operation": "send_typing",
+      "expectedStatus": "typing_recorded_local_fake",
+      "requires": ["selected discord route", "fake provider"]
+    }
+  ]
+}

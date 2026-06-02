@@ -1,0 +1,825 @@
+from __future__ import annotations
+
+import json
+import subprocess
+import sys
+from pathlib import Path
+
+import pytest
+
+from openmagi_core_agent.shadow.gate5b4c3_live_runner_boundary import (
+    Gate5B4C3LiveAdkPrimitives,
+    Gate5B4C3LiveRunnerBoundary,
+    Gate5B4C3LiveRunnerBoundaryResult,
+)
+from openmagi_core_agent.shadow.gate5b4c3_shadow_generation_contract import (
+    Gate5B4C3ShadowGenerationConfig,
+    Gate5B4C3ShadowGenerationRequest,
+)
+
+
+BOT_DIGEST = "sha256:" + "a" * 64
+OWNER_DIGEST = "sha256:" + "b" * 64
+TURN_DIGEST = "sha256:" + "c" * 64
+REQUEST_DIGEST = "sha256:" + "d" * 64
+TRACE_DIGEST = "sha256:" + "e" * 64
+SESSION_DIGEST = "sha256:" + "f" * 64
+SANITIZED_DIGEST = "sha256:" + "1" * 64
+ROUTER_DIGEST = "sha256:" + "2" * 64
+PROFILE_DIGEST = "sha256:" + "3" * 64
+BOT_CONFIG_DIGEST = "sha256:" + "4" * 64
+MODEL_ATTEMPT_DIGEST = "sha256:" + "5" * 64
+
+
+def _payload(**overrides: object) -> dict[str, object]:
+    base: dict[str, object] = {
+        "schemaVersion": "gate5b4c3.chatProxyShadowGeneration.v1",
+        "mode": "shadow_generation_diagnostic",
+        "responseAuthority": "typescript",
+        "shadowGenerationId": "shadow_gen_001",
+        "requestIdDigest": REQUEST_DIGEST,
+        "traceIdDigest": TRACE_DIGEST,
+        "createdAt": 1779200000000,
+        "selection": {
+            "botIdDigest": BOT_DIGEST,
+            "ownerUserIdDigest": OWNER_DIGEST,
+            "environment": "production",
+            "selectedTarget": "gate5b_selected_bot",
+            "sessionKeyDigest": SESSION_DIGEST,
+        },
+        "turn": {
+            "turnId": "turn_opaque_001",
+            "turnDigest": TURN_DIGEST,
+            "sanitizedCurrentTurnText": "Please summarize the approved redacted note.",
+            "sanitizedInputTextDigest": SANITIZED_DIGEST,
+            "channelName": "app_channel",
+            "tsResponseCorrelationId": "ts_corr_001",
+        },
+        "modelRouting": {
+            "routingSource": "per_turn_injected",
+            "providerLabel": "anthropic",
+            "modelLabel": "claude-3-5-sonnet-latest",
+            "routerDecisionDigest": ROUTER_DIGEST,
+            "routingProfileDigest": PROFILE_DIGEST,
+            "botConfigModelDigest": BOT_CONFIG_DIGEST,
+            "shadowCredentialRef": "server-shadow-ref",
+            "credentialRefSource": "server_config",
+            "temperature": 0.2,
+            "maxOutputTokens": 512,
+        },
+        "recipeProfile": {
+            "recipeId": "office-assistant",
+            "recipeVersion": "2026-05-19",
+            "profileId": "selected-bot-shadow",
+            "profileVersion": "v1",
+            "runtimeEngine": "adk-python",
+            "toolsPolicy": "disabled",
+            "memoryMode": "disabled",
+            "sourceAuthority": "current_turn_only",
+        },
+        "policy": {
+            "typeScriptResponseAuthority": True,
+            "pythonDiagnosticOnly": True,
+            "outputIsolation": "local_diagnostic_only",
+            "toolsDisabled": True,
+            "toolHostDispatchAllowed": False,
+            "memoryProviderCallsAllowed": False,
+            "memoryWritesAllowed": False,
+            "promptMemoryInjectionAllowed": False,
+            "workspaceMutationAllowed": False,
+            "childExecutionAllowed": False,
+            "missionRuntimeAllowed": False,
+            "evidenceBlockModeAllowed": False,
+        },
+        "budgets": {},
+        "redaction": {
+            "sanitizerId": "chat-proxy-sanitizer",
+            "sanitizerVersion": "v1",
+            "policyId": "gate5b4c3-redaction",
+            "status": "passed",
+            "redactedAt": 1779200000001,
+            "redactedByteCount": 47,
+            "forbiddenFieldScan": "passed",
+            "sanitizedPayloadDigest": SANITIZED_DIGEST,
+        },
+        "authority": {},
+    }
+    base.update(overrides)
+    return base
+
+
+def _request() -> Gate5B4C3ShadowGenerationRequest:
+    return Gate5B4C3ShadowGenerationRequest.model_validate(_payload())
+
+
+def _readonly_request() -> Gate5B4C3ShadowGenerationRequest:
+    return Gate5B4C3ShadowGenerationRequest.model_validate(
+        _payload(
+            recipeProfile={
+                **_payload()["recipeProfile"],  # type: ignore[arg-type]
+                "toolsPolicy": "shadow_readonly",
+            },
+            policy={
+                **_payload()["policy"],  # type: ignore[arg-type]
+                "toolsDisabled": False,
+                "toolHostDispatchAllowed": True,
+            },
+        )
+    )
+
+
+def _gate1a_google_request() -> Gate5B4C3ShadowGenerationRequest:
+    return Gate5B4C3ShadowGenerationRequest.model_validate(
+        _payload(
+            modelRouting={
+                **_payload()["modelRouting"],  # type: ignore[arg-type]
+                "providerLabel": "google",
+                "modelLabel": "gemini-3.5-flash",
+                "shadowCredentialRef": "gate5b-google-api-key-smoke-v1",
+            },
+            recipeProfile={
+                **_payload()["recipeProfile"],  # type: ignore[arg-type]
+                "toolsPolicy": "shadow_readonly",
+            },
+            policy={
+                **_payload()["policy"],  # type: ignore[arg-type]
+                "toolsDisabled": False,
+                "toolHostDispatchAllowed": True,
+            },
+        )
+    )
+
+
+def _enabled_config() -> Gate5B4C3ShadowGenerationConfig:
+    return Gate5B4C3ShadowGenerationConfig(
+        enabled=True,
+        killSwitchActive=False,
+        capStateInitialized=True,
+        providerProjectSpendControlsVerified=True,
+        selectedBotDigest=BOT_DIGEST,
+        trustedOwnerUserIdDigest=OWNER_DIGEST,
+        environment="production",
+        allowedProviderLabels=("anthropic",),
+        allowedModelLabels=("claude-3-5-sonnet-latest",),
+        allowedModelRoutes=("anthropic:claude-3-5-sonnet-latest",),
+        allowedShadowCredentialRefs=("server-shadow-ref",),
+    )
+
+
+def _gate1a_google_config() -> Gate5B4C3ShadowGenerationConfig:
+    return Gate5B4C3ShadowGenerationConfig(
+        enabled=True,
+        killSwitchActive=False,
+        capStateInitialized=True,
+        providerProjectSpendControlsVerified=True,
+        selectedBotDigest=BOT_DIGEST,
+        trustedOwnerUserIdDigest=OWNER_DIGEST,
+        environment="production",
+        allowedProviderLabels=("google",),
+        allowedModelLabels=("gemini-3.5-flash",),
+        allowedModelRoutes=("google:gemini-3.5-flash",),
+        allowedShadowCredentialRefs=("gate5b-google-api-key-smoke-v1",),
+    )
+
+
+class _FakePart:
+    def __init__(self, text: str) -> None:
+        self.text = text
+
+    @classmethod
+    def from_text(cls, *, text: str) -> "_FakePart":
+        return cls(text)
+
+
+class _FakeContent:
+    def __init__(self, *, parts: list[_FakePart], role: str | None = None) -> None:
+        self.parts = parts
+        self.role = role
+
+
+class _FakeAgent:
+    created_kwargs: dict[str, object] = {}
+
+    def __init__(self, **kwargs: object) -> None:
+        type(self).created_kwargs = kwargs
+
+
+class _FakeSessionService:
+    pass
+
+
+class _FakeGenerateContentConfig:
+    created_kwargs: dict[str, object] = {}
+
+    def __init__(self, **kwargs: object) -> None:
+        type(self).created_kwargs = kwargs
+
+
+class _FakeRunner:
+    created_kwargs: dict[str, object] = {}
+    run_kwargs: dict[str, object] = {}
+    fail: bool = False
+
+    def __init__(self, **kwargs: object) -> None:
+        type(self).created_kwargs = kwargs
+
+    async def run_async(self, **kwargs: object) -> object:
+        type(self).run_kwargs = kwargs
+        if type(self).fail:
+            raise RuntimeError("provider failed with Authorization: Bearer unsafe-token")
+        yield {"text": "local diagnostic event only"}
+
+
+class _ProviderSetupFailRunner(_FakeRunner):
+    async def run_async(self, **kwargs: object) -> object:
+        type(self).run_kwargs = kwargs
+        raise RuntimeError(
+            "No API key configured at /Users/kevin/private with "
+            "Authorization: Bearer raw-token prompt=secret-output"
+        )
+        yield {"text": "must not happen"}
+
+
+class _GenericProxyFailRunner(_FakeRunner):
+    async def run_async(self, **kwargs: object) -> object:
+        type(self).run_kwargs = kwargs
+        raise RuntimeError("ProxyError: upstream tunnel reset after CONNECT")
+        yield {"text": "must not happen"}
+
+
+class _FunctionToolSchemaTypeErrorRunner(_FakeRunner):
+    async def run_async(self, **kwargs: object) -> object:
+        type(self).run_kwargs = kwargs
+        raise TypeError(
+            "FunctionTool schema signature mismatch at /Users/kevin/private "
+            "Authorization: Bearer raw-token prompt=secret-output"
+        )
+        yield {"text": "must not happen"}
+
+
+class _RunnerConstructionFail:
+    def __init__(self, **_kwargs: object) -> None:
+        raise RuntimeError(
+            "Runner construction failed at /Users/kevin/private with token=secret"
+        )
+
+
+class _ToolHostAttachmentFailAgent:
+    created_kwargs: dict[str, object] = {}
+
+    def __init__(self, **kwargs: object) -> None:
+        type(self).created_kwargs = kwargs
+        raise RuntimeError(
+            "ToolHost attachment failed with Cookie: session=secret and /private/path"
+        )
+
+
+def _fake_primitives() -> Gate5B4C3LiveAdkPrimitives:
+    _FakeAgent.created_kwargs = {}
+    _FakeRunner.created_kwargs = {}
+    _FakeRunner.run_kwargs = {}
+    _FakeRunner.fail = False
+    _FakeGenerateContentConfig.created_kwargs = {}
+    return Gate5B4C3LiveAdkPrimitives(
+        Agent=_FakeAgent,
+        Runner=_FakeRunner,
+        InMemorySessionService=_FakeSessionService,
+        Content=_FakeContent,
+        Part=_FakePart,
+        GenerateContentConfig=_FakeGenerateContentConfig,
+    )
+
+
+def _loader_that_must_not_run() -> Gate5B4C3LiveAdkPrimitives:
+    raise AssertionError("ADK primitives must not load unless generation is accepted")
+
+
+def test_live_boundary_default_disabled_does_not_load_adk_and_keeps_typescript_authority() -> None:
+    result = Gate5B4C3LiveRunnerBoundary(_loader_that_must_not_run).invoke(
+        _request(),
+        config=Gate5B4C3ShadowGenerationConfig(),
+    )
+
+    assert result.status == "skipped"
+    assert result.reason == "not_accepted"
+    assert result.diagnostic.reason == "disabled"
+    assert result.response_authority == "typescript"
+    assert result.diagnostic_only is True
+    assert result.local_only is True
+    assert result.adk_invoked is False
+    assert result.runner_attempted is False
+    assert result.model_call_via_adk_runner_attempted is False
+    assert result.user_visible_output is None
+    assert result.authority.user_visible_output_allowed is False
+    assert result.authority.tool_dispatch_allowed is False
+    assert result.authority.memory_write_allowed is False
+    assert result.authority.child_execution_allowed is False
+    assert result.authority.mission_runtime_allowed is False
+
+
+def test_live_boundary_invokes_runner_with_allowlisted_kwargs_and_disabled_tools() -> None:
+    result = Gate5B4C3LiveRunnerBoundary(_fake_primitives).invoke(
+        _request(),
+        config=_enabled_config(),
+    )
+
+    assert result.status == "completed"
+    assert result.reason == "runner_completed"
+    assert result.response_authority == "typescript"
+    assert result.adk_invoked is True
+    assert result.runner_attempted is True
+    assert result.model_call_via_adk_runner_attempted is True
+    assert result.event_count == 1
+    assert result.agent_kwargs_keys == (
+        "description",
+        "generate_content_config",
+        "instruction",
+        "model",
+        "name",
+        "tools",
+    )
+    assert result.runner_kwargs_keys == (
+        "agent",
+        "app_name",
+        "auto_create_session",
+        "session_service",
+    )
+    assert result.run_async_kwargs_keys == ("new_message", "session_id", "user_id")
+    assert set(_FakeAgent.created_kwargs) == set(result.agent_kwargs_keys)
+    assert _FakeAgent.created_kwargs["model"] == "claude-3-5-sonnet-latest"
+    assert _FakeAgent.created_kwargs["tools"] == []
+    assert _FakeGenerateContentConfig.created_kwargs == {"maxOutputTokens": 512}
+    assert set(_FakeRunner.created_kwargs) == set(result.runner_kwargs_keys)
+    assert set(_FakeRunner.run_kwargs) == set(result.run_async_kwargs_keys)
+    assert "state_delta" not in _FakeRunner.run_kwargs
+    assert "run_config" not in _FakeRunner.run_kwargs
+    message = _FakeRunner.run_kwargs["new_message"]
+    assert isinstance(message, _FakeContent)
+    assert message.parts[0].text == "Please summarize the approved redacted note."
+    assert result.user_visible_output is None
+    assert result.authority.db_writes_allowed is False
+    assert result.authority.workspace_mutation_allowed is False
+
+
+def test_live_boundary_fails_closed_on_tool_policy_mismatch_before_adk_load() -> None:
+    readonly_without_tools = Gate5B4C3LiveRunnerBoundary(_loader_that_must_not_run).invoke(
+        _readonly_request(),
+        config=_enabled_config(),
+    )
+    disabled_with_tools = Gate5B4C3LiveRunnerBoundary(
+        _loader_that_must_not_run,
+        adk_tools=(object(),),
+    ).invoke(_request(), config=_enabled_config())
+
+    for result in (readonly_without_tools, disabled_with_tools):
+        assert result.status == "dropped"
+        assert result.reason == "input_adapter_drop"
+        assert result.error_preview == "tool_policy_mismatch"
+        assert result.adk_invoked is False
+        assert result.runner_attempted is False
+        assert result.model_call_via_adk_runner_attempted is False
+
+
+def test_live_boundary_attaches_gate1a_readonly_tools_only_when_policy_matches() -> None:
+    readonly_tool = object()
+
+    result = Gate5B4C3LiveRunnerBoundary(
+        _fake_primitives,
+        adk_tools=(readonly_tool,),
+    ).invoke(_readonly_request(), config=_enabled_config())
+
+    assert result.status == "completed"
+    assert result.reason == "runner_completed"
+    assert _FakeAgent.created_kwargs["tools"] == [readonly_tool]
+    instruction = str(_FakeAgent.created_kwargs["instruction"])
+    assert "read-only tools" in instruction
+    assert "no-tools" not in instruction.lower()
+    assert "Do not request tools" not in instruction
+
+
+def test_live_boundary_attaches_gate1a_proxy_connect_headers_only_with_context() -> None:
+    from openmagi_core_agent.evidence.gate1a_egress_correlation import (
+        Gate1AEgressCorrelationContext,
+    )
+
+    readonly_tool = object()
+    request = _gate1a_google_request()
+    context = Gate1AEgressCorrelationContext(
+        request_digest=request.request_id_digest,
+        correlation_digest=request.request_id_digest,
+        model_attempt_digest=MODEL_ATTEMPT_DIGEST,
+    )
+
+    result = Gate5B4C3LiveRunnerBoundary(
+        _fake_primitives,
+        adk_tools=(readonly_tool,),
+        gate1a_egress_correlation_context=context,
+        gate1a_egress_proxy_url=(
+            "http://gate5b-gemini-egress-proxy.clawy-system.svc.cluster.local:8080"
+        ),
+    ).invoke(request, config=_gate1a_google_config())
+
+    assert result.status == "completed"
+    assert result.reason == "runner_completed"
+    model = _FakeAgent.created_kwargs["model"]
+    assert model != "gemini-3.5-flash"
+    assert getattr(model, "model") == "gemini-3.5-flash"
+    assert getattr(model, "openmagi_gate1a_proxy_connect_headers_enabled") is True
+    assert set(_FakeRunner.run_kwargs) == {"new_message", "session_id", "user_id"}
+    assert "x-gate1a-request-digest" not in json.dumps(_FakeRunner.run_kwargs, default=str)
+
+
+def test_live_boundary_does_not_attach_gate1a_proxy_connect_headers_without_context() -> None:
+    readonly_tool = object()
+    request = _gate1a_google_request()
+
+    result = Gate5B4C3LiveRunnerBoundary(
+        _fake_primitives,
+        adk_tools=(readonly_tool,),
+    ).invoke(
+        request,
+        config=_gate1a_google_config(),
+    )
+
+    assert result.status == "completed"
+    assert _FakeAgent.created_kwargs["model"] == "gemini-3.5-flash"
+    assert set(_FakeRunner.run_kwargs) == {"new_message", "session_id", "user_id"}
+
+
+def test_live_boundary_uses_adapter_resolved_per_turn_output_cap() -> None:
+    request = Gate5B4C3ShadowGenerationRequest.model_validate(
+        _payload(
+            modelRouting={
+                **_payload()["modelRouting"],  # type: ignore[arg-type]
+                "maxOutputTokens": 128,
+            }
+        )
+    )
+
+    result = Gate5B4C3LiveRunnerBoundary(_fake_primitives).invoke(
+        request,
+        config=_enabled_config(),
+    )
+
+    assert result.status == "completed"
+    assert _FakeGenerateContentConfig.created_kwargs == {"maxOutputTokens": 128}
+
+
+def test_live_boundary_uses_input_adapter_and_does_not_load_adk_on_budget_drop() -> None:
+    request = Gate5B4C3ShadowGenerationRequest.model_validate(
+        _payload(
+            turn={
+                **_payload()["turn"],  # type: ignore[arg-type]
+                "sanitizedCurrentTurnText": "x" * 80,
+            },
+            budgets={"maxEstimatedInputTokens": 10},
+        )
+    )
+
+    result = Gate5B4C3LiveRunnerBoundary(_loader_that_must_not_run).invoke(
+        request,
+        config=_enabled_config(),
+    )
+
+    assert result.status == "dropped"
+    assert result.reason == "input_adapter_drop"
+    assert result.adk_invoked is False
+    assert result.runner_attempted is False
+    assert result.model_call_via_adk_runner_attempted is False
+    assert result.user_visible_output is None
+
+
+def test_live_boundary_runner_error_fails_open_and_redacts_error_preview() -> None:
+    def failing_primitives() -> Gate5B4C3LiveAdkPrimitives:
+        primitives = _fake_primitives()
+        _FakeRunner.fail = True
+        return primitives
+
+    result = Gate5B4C3LiveRunnerBoundary(failing_primitives).invoke(
+        _request(),
+        config=_enabled_config(),
+    )
+
+    assert result.status == "error"
+    assert result.reason == "runner_error"
+    assert result.response_authority == "typescript"
+    assert result.adk_invoked is True
+    assert result.runner_attempted is True
+    assert result.model_call_via_adk_runner_attempted is True
+    assert result.error_class == "RuntimeError"
+    assert result.error_preview is not None
+    assert "unsafe-token" not in result.error_preview
+    assert "Authorization:" not in result.error_preview
+    assert "[REDACTED]" in result.error_preview
+    assert result.user_visible_output is None
+
+
+def test_live_boundary_provider_setup_failure_has_sanitized_stage_diagnostic() -> None:
+    def failing_primitives() -> Gate5B4C3LiveAdkPrimitives:
+        primitives = _fake_primitives()
+        return Gate5B4C3LiveAdkPrimitives(
+            Agent=primitives.Agent,
+            Runner=_ProviderSetupFailRunner,
+            InMemorySessionService=primitives.InMemorySessionService,
+            Content=primitives.Content,
+            Part=primitives.Part,
+            GenerateContentConfig=primitives.GenerateContentConfig,
+        )
+
+    result = Gate5B4C3LiveRunnerBoundary(failing_primitives).invoke(
+        _request(),
+        config=_enabled_config(),
+    )
+
+    assert result.status == "error"
+    assert result.reason == "runner_error"
+    assert result.runner_error_diagnostic is not None
+    assert result.runner_error_diagnostic.stage == "provider_client_setup"
+    assert result.runner_error_diagnostic.reason_code == "provider_client_setup_failed"
+    assert result.runner_error_diagnostic.exception_class == "RuntimeError"
+    assert result.runner_error_diagnostic.exception_category == (
+        "provider_client_setup_failure"
+    )
+    assert result.adk_invoked is True
+    assert result.runner_attempted is True
+    assert result.model_call_via_adk_runner_attempted is False
+    serialized = json.dumps(result.model_dump(by_alias=True, mode="json"))
+    for forbidden in (
+        "raw-token",
+        "prompt=secret-output",
+        "Authorization:",
+        "/Users/kevin",
+        "/private/path",
+    ):
+        assert forbidden not in serialized
+
+
+def test_live_boundary_generic_proxy_failure_stays_model_attempted() -> None:
+    def failing_primitives() -> Gate5B4C3LiveAdkPrimitives:
+        primitives = _fake_primitives()
+        return Gate5B4C3LiveAdkPrimitives(
+            Agent=primitives.Agent,
+            Runner=_GenericProxyFailRunner,
+            InMemorySessionService=primitives.InMemorySessionService,
+            Content=primitives.Content,
+            Part=primitives.Part,
+            GenerateContentConfig=primitives.GenerateContentConfig,
+        )
+
+    result = Gate5B4C3LiveRunnerBoundary(failing_primitives).invoke(
+        _request(),
+        config=_enabled_config(),
+    )
+
+    assert result.status == "error"
+    assert result.reason == "runner_error"
+    assert result.runner_error_diagnostic is not None
+    assert result.runner_error_diagnostic.stage == "runner_execution"
+    assert result.runner_error_diagnostic.reason_code == "runner_execution_failed"
+    assert result.runner_error_diagnostic.exception_category == "unexpected_exception"
+    assert result.model_call_via_adk_runner_attempted is True
+
+
+def test_live_boundary_function_tool_typeerror_reports_pre_provider_substage() -> None:
+    def failing_primitives() -> Gate5B4C3LiveAdkPrimitives:
+        primitives = _fake_primitives()
+        return Gate5B4C3LiveAdkPrimitives(
+            Agent=primitives.Agent,
+            Runner=_FunctionToolSchemaTypeErrorRunner,
+            InMemorySessionService=primitives.InMemorySessionService,
+            Content=primitives.Content,
+            Part=primitives.Part,
+            GenerateContentConfig=primitives.GenerateContentConfig,
+        )
+
+    readonly_tool = type("ReadableTool", (), {"name": "Clock"})()
+    result = Gate5B4C3LiveRunnerBoundary(
+        failing_primitives,
+        adk_tools=(readonly_tool,),
+    ).invoke(_readonly_request(), config=_enabled_config())
+
+    assert result.status == "error"
+    assert result.reason == "runner_error"
+    assert result.runner_error_diagnostic is not None
+    assert result.runner_error_diagnostic.stage == "adk_tool_schema"
+    assert result.runner_error_diagnostic.reason_code == "adk_function_tool_schema_mismatch"
+    assert result.runner_error_diagnostic.exception_class == "TypeError"
+    assert result.runner_error_diagnostic.exception_category == (
+        "adk_function_tool_schema_mismatch"
+    )
+    assert result.runner_error_diagnostic.error_preview is not None
+    assert "[REDACTED]" in result.runner_error_diagnostic.error_preview
+    assert result.runner_error_diagnostic.traceback_markers
+    assert result.adk_invoked is True
+    assert result.runner_attempted is True
+    assert result.model_call_via_adk_runner_attempted is False
+    assert result.runner_error_diagnostic.model_call_attempted is False
+    assert result.runner_error_diagnostic.active_tool_names == ("Clock",)
+    serialized = json.dumps(result.model_dump(by_alias=True, mode="json"))
+    for forbidden in (
+        "raw-token",
+        "prompt=secret-output",
+        "Authorization:",
+        "/Users/kevin",
+        "/private/path",
+    ):
+        assert forbidden not in serialized
+
+
+def test_live_boundary_runner_construction_failure_has_no_model_attempt() -> None:
+    def failing_primitives() -> Gate5B4C3LiveAdkPrimitives:
+        primitives = _fake_primitives()
+        return Gate5B4C3LiveAdkPrimitives(
+            Agent=primitives.Agent,
+            Runner=_RunnerConstructionFail,
+            InMemorySessionService=primitives.InMemorySessionService,
+            Content=primitives.Content,
+            Part=primitives.Part,
+            GenerateContentConfig=primitives.GenerateContentConfig,
+        )
+
+    result = Gate5B4C3LiveRunnerBoundary(failing_primitives).invoke(
+        _request(),
+        config=_enabled_config(),
+    )
+
+    assert result.status == "error"
+    assert result.reason == "runner_error"
+    assert result.runner_error_diagnostic is not None
+    assert result.runner_error_diagnostic.stage == "adk_runner_construction"
+    assert result.runner_error_diagnostic.reason_code == "adk_runner_construction_failed"
+    assert result.runner_error_diagnostic.exception_category == (
+        "adk_runner_construction_failure"
+    )
+    assert result.runner_attempted is False
+    assert result.model_call_via_adk_runner_attempted is False
+    serialized = json.dumps(result.model_dump(by_alias=True, mode="json"))
+    assert "token=secret" not in serialized
+    assert "/Users/kevin" not in serialized
+
+
+def test_live_boundary_toolhost_attachment_failure_has_public_safe_diagnostic() -> None:
+    def failing_primitives() -> Gate5B4C3LiveAdkPrimitives:
+        primitives = _fake_primitives()
+        return Gate5B4C3LiveAdkPrimitives(
+            Agent=_ToolHostAttachmentFailAgent,
+            Runner=primitives.Runner,
+            InMemorySessionService=primitives.InMemorySessionService,
+            Content=primitives.Content,
+            Part=primitives.Part,
+            GenerateContentConfig=primitives.GenerateContentConfig,
+        )
+
+    result = Gate5B4C3LiveRunnerBoundary(
+        failing_primitives,
+        adk_tools=(object(),),
+    ).invoke(_readonly_request(), config=_enabled_config())
+
+    assert result.status == "error"
+    assert result.reason == "runner_error"
+    assert result.runner_error_diagnostic is not None
+    assert result.runner_error_diagnostic.stage == "toolhost_attachment"
+    assert result.runner_error_diagnostic.reason_code == "toolhost_attachment_failed"
+    assert result.runner_error_diagnostic.exception_category == "toolhost_attachment_failure"
+    assert result.runner_error_diagnostic.tools_policy == "shadow_readonly"
+    assert result.runner_error_diagnostic.tools_enabled is True
+    assert result.runner_error_diagnostic.tool_host_dispatch_allowed is True
+    assert result.runner_attempted is False
+    assert result.model_call_via_adk_runner_attempted is False
+    serialized = json.dumps(result.model_dump(by_alias=True, mode="json"))
+    assert "Cookie:" not in serialized
+    assert "session=secret" not in serialized
+    assert "/private/path" not in serialized
+
+
+def test_live_boundary_result_copy_and_construct_cannot_create_authority_or_user_output() -> None:
+    result = Gate5B4C3LiveRunnerBoundary(_loader_that_must_not_run).invoke(
+        _request(),
+        config=Gate5B4C3ShadowGenerationConfig(),
+    )
+    copied = result.model_copy(
+        update={
+            "responseAuthority": "python",
+            "diagnosticOnly": False,
+            "localOnly": False,
+            "userVisibleOutput": "leak",
+            "authority": {"userVisibleOutputAllowed": True},
+        }
+    )
+    constructed = Gate5B4C3LiveRunnerBoundaryResult.model_construct(
+        diagnostic=result.diagnostic,
+        status="completed",
+        reason="runner_completed",
+        selectedProvider="anthropic",
+        selectedModel="claude-3-5-sonnet-latest",
+        routingSource="per_turn_injected",
+        responseAuthority="python",
+        diagnosticOnly=False,
+        localOnly=False,
+        userVisibleOutput="leak",
+        authority={"userVisibleOutputAllowed": True, "toolDispatchAllowed": True},
+    )
+
+    for candidate in (copied, constructed):
+        assert candidate.response_authority == "typescript"
+        assert candidate.diagnostic_only is True
+        assert candidate.local_only is True
+        assert candidate.user_visible_output is None
+        assert candidate.authority.user_visible_output_allowed is False
+        assert candidate.authority.tool_dispatch_allowed is False
+
+
+def test_live_boundary_import_is_lazy_and_does_not_activate_route_or_runtime_modules() -> None:
+    completed = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            """
+import importlib
+import sys
+
+module = importlib.import_module(
+    "openmagi_core_agent.shadow.gate5b4c3_live_runner_boundary"
+)
+assert module is not None
+
+forbidden_exact = (
+    "google.adk.runners",
+    "google.adk.agents",
+    "google.adk.sessions",
+    "google.adk.events",
+    "openai",
+    "anthropic",
+)
+forbidden_prefixes = (
+    "openmagi_core_agent.transport.shadow_generations",
+    "openmagi_core_agent.transport.shadow_invocations",
+    "openmagi_core_agent.transport.chat",
+    "openmagi_core_agent.routing",
+    "openmagi_core_agent.workspace",
+    "openmagi_core_agent.deploy",
+    "openmagi_core_agent.provisioning",
+    "openmagi_core_agent.k8s",
+    "openmagi_core_agent.telegram",
+    "openmagi_core_agent.database",
+    "openmagi_core_agent.api",
+    "openmagi_core_agent.dashboard",
+    "openmagi_core_agent.model_routing",
+    "openmagi_core_agent.missions",
+    "openmagi_core_agent.scheduler",
+    "openmagi_core_agent.children",
+    "openmagi_core_agent.memory",
+    "openmagi_core_agent.agentmemory",
+    "openmagi_core_agent.hipocampus",
+    "openmagi_core_agent.qmd",
+)
+loaded = [
+    loaded_name
+    for loaded_name in sys.modules
+    if loaded_name in forbidden_exact
+    or any(loaded_name.startswith(f"{name}.") for name in forbidden_exact)
+    or any(
+        loaded_name == prefix or loaded_name.startswith(f"{prefix}.")
+        for prefix in forbidden_prefixes
+    )
+]
+if loaded:
+    raise AssertionError(f"Gate 5B-4c-3d live boundary loaded forbidden modules: {loaded}")
+""",
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert completed.returncode == 0, completed.stderr
+
+
+def test_live_boundary_source_keeps_adk_imports_inside_boundary_loader_only() -> None:
+    root = Path(__file__).parents[1]
+    module_path = (
+        root
+        / "openmagi_core_agent"
+        / "shadow"
+        / "gate5b4c3_live_runner_boundary.py"
+    )
+    source = module_path.read_text(encoding="utf-8")
+    before_loader = source.split("def load_gate5b4c3_live_adk_primitives", 1)[0]
+
+    assert "google.adk" not in before_loader
+    assert "from google.adk" in source
+    assert "import openai" not in source
+    assert "import anthropic" not in source
+    assert "from openmagi_core_agent.tools" not in source
+    assert "from openmagi_core_agent.memory" not in source
+    assert "from openmagi_core_agent.workspace" not in source
+    assert "from openmagi_core_agent.children" not in source
+    assert "from openmagi_core_agent.missions" not in source
+    assert "from fastapi" not in source
+    assert "APIRouter" not in source
+    assert "add_api_route" not in source
+    assert "@app." not in source
+    assert "subprocess" not in source
+    assert "os.system" not in source
+    assert "exec(" not in source
+    assert "eval(" not in source

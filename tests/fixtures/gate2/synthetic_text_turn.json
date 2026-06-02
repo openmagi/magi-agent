@@ -1,0 +1,32 @@
+{
+  "source": "synthetic_local",
+  "turnId": "gate2-turn-text",
+  "userPrompt": "Hello from the Gate 2 synthetic local fixture.",
+  "projectedAdkEventIds": ["evt-text-partial", "evt-text-final"],
+  "projectedAdkEvents": [
+    {
+      "id": "evt-text-partial",
+      "author": "model",
+      "role": "model",
+      "text": "Hello from Gate 1.",
+      "partial": true,
+      "invocationId": "gate1-turn-text"
+    },
+    {
+      "id": "evt-text-final",
+      "author": "model",
+      "role": "model",
+      "text": "Hello from Gate 1.",
+      "partial": false,
+      "turnComplete": true,
+      "invocationId": "gate1-turn-text",
+      "timestamp": 1779000001
+    }
+  ],
+  "projectionTurnId": "gate1-turn-text",
+  "transcriptRefs": ["gate1/simple_assistant_text.jsonl"],
+  "sseRefs": ["gate1/simple_assistant_text.sse"],
+  "comparisonMetadata": {
+    "gate1Fixture": "simple_assistant_text"
+  }
+}

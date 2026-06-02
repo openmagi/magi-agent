@@ -1,0 +1,112 @@
+[
+  {
+    "caseId": "middle_fact_retrieval",
+    "recipeIds": ["openmagi.research"],
+    "modelTier": "cheap",
+    "phase": "final_answer_drafting",
+    "sourceRefs": ["source:web:1", "source:web:2", "source:web:middle", "source:web:4"],
+    "summaryRefs": ["summary:research:middle"],
+    "evidenceRecords": [
+      {"type": "SourceInspection", "evidenceRef": "evidence:web:middle", "sourceRef": "source:web:middle"}
+    ],
+    "citations": ["source:web:middle"],
+    "outputText": "The middle fact is supported by the opened source.",
+    "expectedValidatorOutcome": "passed",
+    "expectedFinalGateAction": "passed"
+  },
+  {
+    "caseId": "scattered_multi_doc_evidence",
+    "recipeIds": ["openmagi.research"],
+    "modelTier": "standard",
+    "phase": "final_answer_drafting",
+    "sourceRefs": ["source:web:a", "source:web:b", "source:web:c"],
+    "summaryRefs": ["summary:research:a", "summary:research:b", "summary:research:c"],
+    "evidenceRecords": [
+      {"type": "SourceInspection", "evidenceRef": "evidence:web:a", "sourceRef": "source:web:a"},
+      {"type": "SourceInspection", "evidenceRef": "evidence:web:b", "sourceRef": "source:web:b"},
+      {"type": "SourceInspection", "evidenceRef": "evidence:web:c", "sourceRef": "source:web:c"}
+    ],
+    "citations": ["source:web:a", "source:web:b", "source:web:c"],
+    "outputText": "The answer combines three opened sources.",
+    "expectedValidatorOutcome": "passed",
+    "expectedFinalGateAction": "passed"
+  },
+  {
+    "caseId": "unsupported_source_claim",
+    "recipeIds": ["openmagi.research"],
+    "modelTier": "cheap",
+    "phase": "final_answer_drafting",
+    "sourceRefs": ["source:web:opened"],
+    "summaryRefs": ["summary:research:opened"],
+    "evidenceRecords": [
+      {"type": "SourceInspection", "evidenceRef": "evidence:web:opened", "sourceRef": "source:web:opened"}
+    ],
+    "citations": ["source:web:missing"],
+    "outputText": "The missing source supports this.",
+    "expectedValidatorOutcome": "repair_required",
+    "expectedFinalGateAction": "repair_required"
+  },
+  {
+    "caseId": "distant_code_dependency",
+    "recipeIds": ["openmagi.dev-coding"],
+    "modelTier": "standard",
+    "phase": "patch_planning",
+    "sourceRefs": ["file:src:a", "file:src:z"],
+    "summaryRefs": ["summary:code:a", "summary:code:z"],
+    "evidenceRecords": [
+      {"type": "SourceInspection", "evidenceRef": "evidence:file:a", "sourceRef": "file:src:a"},
+      {"type": "SourceInspection", "evidenceRef": "evidence:file:z", "sourceRef": "file:src:z"}
+    ],
+    "citations": ["file:src:a", "file:src:z"],
+    "outputText": "The patch needs both distant files.",
+    "expectedValidatorOutcome": "passed",
+    "expectedFinalGateAction": "passed"
+  },
+  {
+    "caseId": "chunk_synthesis_coverage",
+    "recipeIds": ["openmagi.research"],
+    "modelTier": "cheap",
+    "phase": "final_answer_drafting",
+    "sourceRefs": ["source:web:chunk1", "source:web:chunk2"],
+    "summaryRefs": ["summary:research:chunk1"],
+    "evidenceRecords": [
+      {"type": "SourceInspection", "evidenceRef": "evidence:web:chunk1", "sourceRef": "source:web:chunk1"}
+    ],
+    "citations": ["source:web:chunk1", "source:web:chunk2"],
+    "outputText": "The synthesis covers both chunks.",
+    "expectedValidatorOutcome": "repair_required",
+    "expectedFinalGateAction": "repair_required"
+  },
+  {
+    "caseId": "cheap_model_context_budget",
+    "recipeIds": ["openmagi.research"],
+    "modelTier": "cheap",
+    "phase": "final_answer_drafting",
+    "sourceRefs": ["source:web:1", "source:web:2", "source:web:3", "source:web:4", "source:web:5", "source:web:6", "source:web:7"],
+    "summaryRefs": ["summary:research:1"],
+    "rawInputBytes": 120000,
+    "evidenceRecords": [
+      {"type": "SourceInspection", "evidenceRef": "evidence:web:1", "sourceRef": "source:web:1"}
+    ],
+    "citations": ["source:web:1"],
+    "outputText": "Cheap model uses refs.",
+    "expectedValidatorOutcome": "passed",
+    "expectedFinalGateAction": "passed"
+  },
+  {
+    "caseId": "long_context_model_still_requires_refs",
+    "recipeIds": ["openmagi.research"],
+    "modelTier": "long_context",
+    "phase": "final_answer_drafting",
+    "sourceRefs": ["source:web:long1", "source:web:long2"],
+    "summaryRefs": ["summary:research:long"],
+    "rawInputBytes": 200000,
+    "evidenceRecords": [
+      {"type": "SourceInspection", "evidenceRef": "evidence:web:long1", "sourceRef": "source:web:long1"}
+    ],
+    "citations": ["source:web:long1"],
+    "outputText": "Long context still records refs.",
+    "expectedValidatorOutcome": "passed",
+    "expectedFinalGateAction": "passed"
+  }
+]

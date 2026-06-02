@@ -1,0 +1,64 @@
+{
+  "schemaVersion": "recipeCompositionRegressionFixture.v1",
+  "caseId": "governed_selector_general_chat_fallback",
+  "description": "A governed required fixture cannot pass by falling through to an ungoverned general chat recipe.",
+  "activationMode": {
+    "defaultOff": true,
+    "trafficAttached": false,
+    "executionAttached": false,
+    "liveActivation": false
+  },
+  "stack": {
+    "explicitRecipeRefs": [
+      "recipe.governed.required"
+    ],
+    "autoRecipeRefs": [
+      "recipe.fallback.general_chat"
+    ],
+    "allowAdditionalAutoRecipes": true,
+    "selectionSource": "selector.fixture",
+    "turnId": "turn-regression-governed-fallback",
+    "sessionId": "session-regression-governed-fallback"
+  },
+  "requiredGovernedRecipeRefs": [
+    "recipe.governed.required",
+    "recipe.fallback.general_chat"
+  ],
+  "globalRetryCap": 3,
+  "snapshots": [
+    {
+      "recipeRef": "recipe.fallback.general_chat",
+      "governed": false
+    }
+  ],
+  "expected": {
+    "blocked": true,
+    "effectiveRecipeRefs": [],
+    "includedExplicitRefs": [],
+    "includedAutoRefs": [],
+    "excludedRefs": [
+      {
+        "recipeRef": "recipe.governed.required",
+        "reason": "explicit_recipe_missing",
+        "blocking": true
+      }
+    ],
+    "conflictCodes": [
+      "explicit_recipe_missing",
+      "required_governed_recipe_missing",
+      "required_governed_recipe_resolved_ungoverned"
+    ],
+    "effectiveRetryPolicy": {
+      "maxAttempts": 0,
+      "repairAttempts": 0,
+      "globalCap": 3
+    },
+    "projection": {
+      "conflictStatus": "blocked",
+      "hardSafetyStatus": "not_required",
+      "excludedReasonCodes": [
+        "explicit_recipe_missing"
+      ]
+    }
+  }
+}

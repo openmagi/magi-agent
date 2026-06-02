@@ -1,0 +1,46 @@
+{
+  "fixtureId": "live_file_delivery_matrix_0001",
+  "version": 1,
+  "localDiagnostic": true,
+  "attachmentFlags": {
+    "adkArtifactServiceAttached": false,
+    "artifactWritten": false,
+    "channelDeliveryPerformed": false,
+    "productionStorageWritten": false,
+    "productionChannelWrite": false,
+    "routeAttached": false,
+    "rawContentInjected": false
+  },
+  "cases": [
+    {
+      "caseId": "disabled_no_provider_call",
+      "operation": "file.deliver",
+      "status": "disabled",
+      "deliveryClaimAllowed": false,
+      "providerCallAllowed": false,
+      "reasonCodes": [
+        "file_delivery_disabled"
+      ]
+    },
+    {
+      "caseId": "file_deliver_requires_channel_receipt",
+      "operation": "file.deliver",
+      "status": "delivery_intent",
+      "deliveryClaimAllowed": false,
+      "providerCallAllowed": true,
+      "reasonCodes": [
+        "channel_delivery_receipt_required"
+      ]
+    },
+    {
+      "caseId": "file_send_local_fake_receipt_only",
+      "operation": "file.send",
+      "status": "delivered_local_fake",
+      "deliveryClaimAllowed": true,
+      "providerCallAllowed": true,
+      "reasonCodes": [
+        "local_fake_delivery_receipt_recorded"
+      ]
+    }
+  ]
+}

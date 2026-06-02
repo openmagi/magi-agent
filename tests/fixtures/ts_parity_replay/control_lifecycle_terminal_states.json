@@ -1,0 +1,188 @@
+{
+  "schemaVersion": "tsParityReplayFixture.v1",
+  "fixtureId": "ts_parity_control_lifecycle_terminal_states_0001",
+  "sourceRuntime": "typescript-core-agent",
+  "recordingMode": "local_diagnostic_fixture",
+  "redactionStatus": "verified",
+  "localDiagnostic": true,
+  "attachmentFlags": {
+    "adkRunnerInvoked": false,
+    "liveToolDispatched": false,
+    "shellOrCodeExecuted": false,
+    "memoryProviderCalled": false,
+    "agentMemoryImported": false,
+    "hipocampusQmdLiveCalled": false,
+    "productionStorageWritten": false,
+    "routeOrApiAttached": false,
+    "telegramAttached": false,
+    "canaryTrafficAttached": false,
+    "evidenceBlockEnabled": false
+  },
+  "transcriptEntries": [
+    {
+      "kind": "turn_started",
+      "ts": 1,
+      "turnId": "turn-control-terminal-1",
+      "declaredRoute": "direct"
+    },
+    {
+      "kind": "user_message",
+      "ts": 2,
+      "turnId": "turn-control-terminal-1",
+      "text": "Record terminal control request lifecycle compatibility metadata."
+    },
+    {
+      "kind": "assistant_text",
+      "ts": 3,
+      "turnId": "turn-control-terminal-1",
+      "text": "Recorded local diagnostic lifecycle metadata only."
+    },
+    {
+      "kind": "turn_committed",
+      "ts": 4,
+      "turnId": "turn-control-terminal-1",
+      "inputTokens": 10,
+      "outputTokens": 8
+    },
+    {
+      "kind": "control_event",
+      "ts": 5,
+      "turnId": "turn-control-terminal-1",
+      "seq": 1,
+      "eventId": "ctrl-cancel-created-1",
+      "eventType": "control_request_created"
+    },
+    {
+      "kind": "control_event",
+      "ts": 6,
+      "turnId": "turn-control-terminal-1",
+      "seq": 2,
+      "eventId": "ctrl-cancel-cancelled-1",
+      "eventType": "control_request_cancelled"
+    },
+    {
+      "kind": "control_event",
+      "ts": 7,
+      "turnId": "turn-control-terminal-1",
+      "seq": 3,
+      "eventId": "ctrl-timeout-created-1",
+      "eventType": "control_request_created"
+    },
+    {
+      "kind": "control_event",
+      "ts": 8,
+      "turnId": "turn-control-terminal-1",
+      "seq": 4,
+      "eventId": "ctrl-timeout-timed-out-1",
+      "eventType": "control_request_timed_out"
+    }
+  ],
+  "agentEvents": [],
+  "controlEvents": [
+    {
+      "v": 1,
+      "type": "control_request_created",
+      "eventId": "ctrl-cancel-created-1",
+      "seq": 1,
+      "ts": 5,
+      "sessionKey": "redacted-session",
+      "turnId": "turn-control-terminal-1",
+      "idempotencyKey": "idem-cancel-created-1",
+      "request": {
+        "requestId": "req-cancel-1",
+        "kind": "user_question",
+        "state": "pending",
+        "sessionKey": "redacted-session",
+        "turnId": "turn-control-terminal-1",
+        "channelName": "local_replay",
+        "source": "turn",
+        "prompt": "Fixture-only cancellation prompt.",
+        "proposedInput": {
+          "diagnostic": "control_lifecycle_cancel"
+        },
+        "createdAt": 5,
+        "expiresAt": 65
+      }
+    },
+    {
+      "v": 1,
+      "type": "control_request_cancelled",
+      "eventId": "ctrl-cancel-cancelled-1",
+      "seq": 2,
+      "ts": 6,
+      "sessionKey": "redacted-session",
+      "turnId": "turn-control-terminal-1",
+      "idempotencyKey": "idem-cancel-cancelled-1",
+      "requestId": "req-cancel-1",
+      "reason": "turn_cancelled"
+    },
+    {
+      "v": 1,
+      "type": "control_request_created",
+      "eventId": "ctrl-timeout-created-1",
+      "seq": 3,
+      "ts": 7,
+      "sessionKey": "redacted-session",
+      "turnId": "turn-control-terminal-1",
+      "idempotencyKey": "idem-timeout-created-1",
+      "request": {
+        "requestId": "req-timeout-1",
+        "kind": "user_question",
+        "state": "pending",
+        "sessionKey": "redacted-session",
+        "turnId": "turn-control-terminal-1",
+        "channelName": "local_replay",
+        "source": "turn",
+        "prompt": "Fixture-only timeout prompt.",
+        "proposedInput": {
+          "diagnostic": "control_lifecycle_timeout"
+        },
+        "createdAt": 7,
+        "expiresAt": 8
+      }
+    },
+    {
+      "v": 1,
+      "type": "control_request_timed_out",
+      "eventId": "ctrl-timeout-timed-out-1",
+      "seq": 4,
+      "ts": 8,
+      "sessionKey": "redacted-session",
+      "turnId": "turn-control-terminal-1",
+      "idempotencyKey": "idem-timeout-timed-out-1",
+      "requestId": "req-timeout-1"
+    }
+  ],
+  "memoryFences": [
+    {
+      "fenceId": "memory-normal",
+      "memoryMode": "normal",
+      "sourceAuthority": "current_turn_over_memory",
+      "recallClaimed": false,
+      "writeClaimed": false,
+      "providerCallMade": false
+    },
+    {
+      "fenceId": "memory-read-only",
+      "memoryMode": "read_only",
+      "sourceAuthority": "current_turn_over_memory",
+      "recallClaimed": false,
+      "writeClaimed": false,
+      "providerCallMade": false
+    },
+    {
+      "fenceId": "memory-incognito",
+      "memoryMode": "incognito",
+      "sourceAuthority": "memory_disabled",
+      "recallClaimed": false,
+      "writeClaimed": false,
+      "providerCallMade": false
+    }
+  ],
+  "compactionBoundaries": [],
+  "sourceAuthority": {
+    "policy": "current_turn_over_memory",
+    "sourceIds": [],
+    "memoryMayOverrideCurrentTurn": false
+  }
+}

@@ -1,0 +1,774 @@
+{
+  "schemaVersion": "generalAutomationSafeQueueMatrix.v1",
+  "generatedFor": "python-adk-general-automation-harness-safe-queue",
+  "reconciledAgainstMainSha": "719392dd2b8aa6c5c212ff371a3e2ea4b676c2ba",
+  "sourceDocuments": [
+    "docs/superpowers/plans/2026-05-27-python-adk-general-automation-harness-safe-queue-plan.md",
+    "docs/superpowers/plans/2026-05-23-python-adk-claude-code-general-automation-harness.md",
+    "docs/notes/2026-05-26-opencode-general-automation-harness-audit.md",
+    "docs/notes/python-adk-opencode-parity-matrix.md"
+  ],
+  "defaultOff": true,
+  "trafficAttached": false,
+  "productionAuthority": false,
+  "inspectedMergedPrs": [
+    {
+      "pr": "#999",
+      "coverage": "CSV-first spreadsheet boundary"
+    },
+    {
+      "pr": "#1007",
+      "coverage": "web research source receipts"
+    },
+    {
+      "pr": "#1011",
+      "coverage": "browser and knowledge provider boundaries"
+    },
+    {
+      "pr": "#1015",
+      "coverage": "MCP and ToolSearch metadata boundaries"
+    },
+    {
+      "pr": "#1018",
+      "coverage": "coding child recipe"
+    },
+    {
+      "pr": "#1019",
+      "coverage": "research child recipe"
+    },
+    {
+      "pr": "#1024",
+      "coverage": "final broad harness review fixes"
+    }
+  ],
+  "rows": [
+    {
+      "id": "general_automation_matrix",
+      "capability": "Latest-main reconciliation matrix for safe-queue general automation ownership",
+      "sourceDocuments": [
+        "safe_queue_plan",
+        "claude_code_general_automation_plan",
+        "opencode_general_automation_audit",
+        "opencode_parity_matrix"
+      ],
+      "alreadyCovered": true,
+      "currentFiles": [
+        {
+          "path": "pyproject.toml",
+          "state": "existing"
+        },
+        {
+          "path": "tests/fixtures/parity/e2e_harness_parity_matrix.json",
+          "state": "existing"
+        },
+        {
+          "path": "tests/fixtures/parity/general_automation_safe_queue_matrix.json",
+          "state": "implemented_pr0"
+        }
+      ],
+      "currentTests": [
+        {
+          "path": "tests/test_e2e_harness_parity_matrix.py",
+          "state": "existing"
+        },
+        {
+          "path": "tests/test_general_automation_safe_queue_matrix.py",
+          "state": "implemented_pr0"
+        },
+        {
+          "path": "tests/test_general_automation_final_integration_review.py",
+          "state": "implemented_pr12"
+        }
+      ],
+      "missingImplementation": [],
+      "owningLayer": "Tests/docs only",
+      "adkPrimitive": "audit fixture only",
+      "prSlice": "PR0",
+      "dependencies": [],
+      "activationGate": "default-off documentation and fixture gate",
+      "coreTouchAllowed": false,
+      "coreGapIfBlocked": "none"
+    },
+    {
+      "id": "automation_package_boundary",
+      "capability": "Metadata-only automation package manifests and disabled tool projection",
+      "sourceDocuments": [
+        "safe_queue_plan",
+        "opencode_general_automation_audit"
+      ],
+      "alreadyCovered": true,
+      "currentFiles": [
+        {
+          "path": "openmagi_core_agent/harness/general_automation/package_manifest.py",
+          "state": "existing"
+        },
+        {
+          "path": "openmagi_core_agent/harness/general_automation/package_boundary.py",
+          "state": "existing"
+        },
+        {
+          "path": "openmagi_core_agent/harness/general_automation/package_tool_projection.py",
+          "state": "existing"
+        },
+        {
+          "path": "openmagi_core_agent/plugins/manifest.py",
+          "state": "existing"
+        },
+        {
+          "path": "openmagi_core_agent/plugins/tool_projection.py",
+          "state": "existing"
+        },
+        {
+          "path": "openmagi_core_agent/plugins/sandbox_policy.py",
+          "state": "existing"
+        }
+      ],
+      "currentTests": [
+        {
+          "path": "tests/test_general_automation_package_boundary.py",
+          "state": "existing"
+        },
+        {
+          "path": "tests/test_plugin_manifest_contract.py",
+          "state": "existing"
+        },
+        {
+          "path": "tests/test_plugin_tool_projection.py",
+          "state": "existing"
+        },
+        {
+          "path": "tests/test_plugin_sandbox_trust_boundary_contract.py",
+          "state": "existing"
+        }
+      ],
+      "missingImplementation": [],
+      "owningLayer": "First-party harness",
+      "adkPrimitive": "FunctionTool metadata shape only",
+      "prSlice": "PR1",
+      "dependencies": [
+        "general_automation_matrix"
+      ],
+      "activationGate": "default-off metadata-only package gate",
+      "coreTouchAllowed": false,
+      "coreGapIfBlocked": "none"
+    },
+    {
+      "id": "external_directory_policy",
+      "capability": "External directory approval receipts for workspace-adjacent paths",
+      "sourceDocuments": [
+        "safe_queue_plan",
+        "opencode_general_automation_audit"
+      ],
+      "alreadyCovered": true,
+      "currentFiles": [
+        {
+          "path": "openmagi_core_agent/harness/general_automation/path_policy.py",
+          "state": "existing"
+        },
+        {
+          "path": "openmagi_core_agent/harness/general_automation/external_directory_receipts.py",
+          "state": "existing"
+        },
+        {
+          "path": "openmagi_core_agent/plugins/shell_testrun_safe_subset.py",
+          "state": "existing"
+        },
+        {
+          "path": "openmagi_core_agent/artifacts/delivery_receipts.py",
+          "state": "existing"
+        }
+      ],
+      "currentTests": [
+        {
+          "path": "tests/test_general_automation_external_directory_policy.py",
+          "state": "existing"
+        },
+        {
+          "path": "tests/test_e2e_harness_pr11_shell_testrun_bash_safe_subset.py",
+          "state": "existing"
+        },
+        {
+          "path": "tests/test_artifact_store_delivery_receipts.py",
+          "state": "existing"
+        }
+      ],
+      "missingImplementation": [],
+      "owningLayer": "First-party harness",
+      "adkPrimitive": "callback and tool control request vocabulary",
+      "prSlice": "PR2",
+      "dependencies": [
+        "general_automation_matrix"
+      ],
+      "activationGate": "default-off approval metadata gate",
+      "coreTouchAllowed": false,
+      "coreGapIfBlocked": "core approval arbiter would be needed only for actual enforcement"
+    },
+    {
+      "id": "output_budget_followup_refs",
+      "capability": "Preview plus follow-up refs for large automation results",
+      "sourceDocuments": [
+        "safe_queue_plan",
+        "claude_code_general_automation_plan",
+        "opencode_general_automation_audit"
+      ],
+      "alreadyCovered": true,
+      "currentFiles": [
+        {
+          "path": "openmagi_core_agent/harness/general_automation/output_budget_policy.py",
+          "state": "existing"
+        },
+        {
+          "path": "openmagi_core_agent/harness/general_automation/followup_refs.py",
+          "state": "existing"
+        },
+        {
+          "path": "openmagi_core_agent/tools/output_budget.py",
+          "state": "existing"
+        },
+        {
+          "path": "openmagi_core_agent/artifacts/local_result_store.py",
+          "state": "existing"
+        },
+        {
+          "path": "openmagi_core_agent/artifacts/output_registry_boundary.py",
+          "state": "existing"
+        }
+      ],
+      "currentTests": [
+        {
+          "path": "tests/test_general_automation_output_budget_followup_refs.py",
+          "state": "existing"
+        },
+        {
+          "path": "tests/test_e2e_harness_pr3_tool_schema_output_store.py",
+          "state": "existing"
+        },
+        {
+          "path": "tests/test_addenda_output_artifact_registry_boundary.py",
+          "state": "existing"
+        }
+      ],
+      "missingImplementation": [],
+      "owningLayer": "First-party harness",
+      "adkPrimitive": "ArtifactService boundary names",
+      "prSlice": "PR3",
+      "dependencies": [
+        "general_automation_matrix"
+      ],
+      "activationGate": "default-off ref-only result gate",
+      "coreTouchAllowed": false,
+      "coreGapIfBlocked": "changing the generic tool result object is out of scope"
+    },
+    {
+      "id": "shell_command_path_policy",
+      "capability": "Command and path policy metadata for non-executing shell requests",
+      "sourceDocuments": [
+        "safe_queue_plan",
+        "claude_code_general_automation_plan",
+        "opencode_general_automation_audit"
+      ],
+      "alreadyCovered": true,
+      "currentFiles": [
+        {
+          "path": "openmagi_core_agent/harness/general_automation/shell_policy.py",
+          "state": "existing"
+        },
+        {
+          "path": "openmagi_core_agent/harness/general_automation/shell_receipts.py",
+          "state": "existing"
+        },
+        {
+          "path": "openmagi_core_agent/plugins/shell_testrun_safe_subset.py",
+          "state": "existing"
+        }
+      ],
+      "currentTests": [
+        {
+          "path": "tests/test_general_automation_shell_policy.py",
+          "state": "existing"
+        },
+        {
+          "path": "tests/test_e2e_harness_pr11_shell_testrun_bash_safe_subset.py",
+          "state": "existing"
+        }
+      ],
+      "missingImplementation": [],
+      "owningLayer": "First-party harness",
+      "adkPrimitive": "FunctionTool schema metadata shape",
+      "prSlice": "PR4",
+      "dependencies": [
+        "external_directory_policy",
+        "output_budget_followup_refs"
+      ],
+      "activationGate": "default-off command classification gate",
+      "coreTouchAllowed": false,
+      "coreGapIfBlocked": "actual command runner attachment requires a separate core approval"
+    },
+    {
+      "id": "general_automation_agent_presets",
+      "capability": "Recipe-owned role presets for plan, research, files, office, browser, and scout automation",
+      "sourceDocuments": [
+        "safe_queue_plan",
+        "opencode_general_automation_audit",
+        "opencode_parity_matrix"
+      ],
+      "alreadyCovered": true,
+      "currentFiles": [
+        {
+          "path": "openmagi_core_agent/recipes/first_party/general_automation/__init__.py",
+          "state": "existing"
+        },
+        {
+          "path": "openmagi_core_agent/recipes/first_party/general_automation/presets.py",
+          "state": "existing"
+        },
+        {
+          "path": "openmagi_core_agent/recipes/first_party/general_automation/preset_projection.py",
+          "state": "existing"
+        },
+        {
+          "path": "openmagi_core_agent/harness/presets.py",
+          "state": "existing"
+        },
+        {
+          "path": "openmagi_core_agent/recipes/coding_subagents.py",
+          "state": "existing"
+        },
+        {
+          "path": "openmagi_core_agent/recipes/research_child_runner.py",
+          "state": "existing"
+        }
+      ],
+      "currentTests": [
+        {
+          "path": "tests/test_general_automation_agent_presets.py",
+          "state": "existing"
+        },
+        {
+          "path": "tests/test_harness_builtin_presets.py",
+          "state": "existing"
+        },
+        {
+          "path": "tests/recipes/test_coding_subagent_recipe.py",
+          "state": "existing"
+        },
+        {
+          "path": "tests/recipes/test_research_child_runner_recipe.py",
+          "state": "existing"
+        }
+      ],
+      "missingImplementation": [],
+      "owningLayer": "First-party recipe",
+      "adkPrimitive": "Agent role metadata",
+      "prSlice": "PR5",
+      "dependencies": [
+        "shell_command_path_policy",
+        "web_acquisition_provider_contract",
+        "browser_inspect_act_boundary"
+      ],
+      "activationGate": "default-off recipe preset gate",
+      "coreTouchAllowed": false,
+      "coreGapIfBlocked": "none"
+    },
+    {
+      "id": "spreadsheet_read_validate_reconcile",
+      "capability": "CSV-compatible read, validation, reconciliation, and delivery-claim separation contracts",
+      "sourceDocuments": [
+        "safe_queue_plan",
+        "claude_code_general_automation_plan"
+      ],
+      "alreadyCovered": true,
+      "currentFiles": [
+        {
+          "path": "openmagi_core_agent/tools/spreadsheet_tools.py",
+          "state": "existing"
+        },
+        {
+          "path": "openmagi_core_agent/artifacts/delivery_boundary.py",
+          "state": "existing"
+        },
+        {
+          "path": "openmagi_core_agent/recipes/first_party/general_automation/spreadsheet_contracts.py",
+          "state": "implemented_pr6"
+        },
+        {
+          "path": "openmagi_core_agent/harness/general_automation/spreadsheet_evidence.py",
+          "state": "implemented_pr6"
+        }
+      ],
+      "currentTests": [
+        {
+          "path": "tests/test_spreadsheet_tools.py",
+          "state": "existing"
+        },
+        {
+          "path": "tests/test_e2e_harness_parity_matrix.py",
+          "state": "existing"
+        },
+        {
+          "path": "tests/test_general_automation_spreadsheet_contracts.py",
+          "state": "implemented_pr6"
+        }
+      ],
+      "missingImplementation": [],
+      "owningLayer": "Mixed first-party contracts",
+      "adkPrimitive": "ArtifactService boundary names",
+      "prSlice": "PR6",
+      "dependencies": [
+        "output_budget_followup_refs"
+      ],
+      "activationGate": "default-off artifact evidence gate",
+      "coreTouchAllowed": false,
+      "coreGapIfBlocked": "none"
+    },
+    {
+      "id": "web_acquisition_provider_contract",
+      "capability": "URL-policy-safe web acquisition contracts and source receipts",
+      "sourceDocuments": [
+        "safe_queue_plan",
+        "claude_code_general_automation_plan",
+        "opencode_general_automation_audit"
+      ],
+      "alreadyCovered": true,
+      "currentFiles": [
+        {
+          "path": "openmagi_core_agent/web_acquisition/policy.py",
+          "state": "existing"
+        },
+        {
+          "path": "openmagi_core_agent/web_acquisition/provider_boundary.py",
+          "state": "existing"
+        },
+        {
+          "path": "openmagi_core_agent/web_acquisition/research_tools.py",
+          "state": "existing"
+        },
+        {
+          "path": "openmagi_core_agent/recipes/first_party/general_automation/web_acquisition_contracts.py",
+          "state": "implemented_pr7"
+        },
+        {
+          "path": "openmagi_core_agent/harness/general_automation/web_source_receipts.py",
+          "state": "implemented_pr7"
+        }
+      ],
+      "currentTests": [
+        {
+          "path": "tests/test_web_research_tools_boundary.py",
+          "state": "existing"
+        },
+        {
+          "path": "tests/test_priority_c_web_acquisition_provider_boundary.py",
+          "state": "existing"
+        },
+        {
+          "path": "tests/test_general_automation_web_acquisition_contracts.py",
+          "state": "implemented_pr7"
+        }
+      ],
+      "missingImplementation": [],
+      "owningLayer": "Provider/tool adapter contract",
+      "adkPrimitive": "FunctionTool metadata for WebFetch shape",
+      "prSlice": "PR7",
+      "dependencies": [
+        "output_budget_followup_refs"
+      ],
+      "activationGate": "default-off URL policy and source-ref gate",
+      "coreTouchAllowed": false,
+      "coreGapIfBlocked": "none"
+    },
+    {
+      "id": "browser_inspect_act_boundary",
+      "capability": "Browser inspect versus action contract with approval and evidence separation",
+      "sourceDocuments": [
+        "safe_queue_plan",
+        "claude_code_general_automation_plan",
+        "opencode_general_automation_audit"
+      ],
+      "alreadyCovered": true,
+      "currentFiles": [
+        {
+          "path": "openmagi_core_agent/browser/provider_boundary.py",
+          "state": "existing"
+        },
+        {
+          "path": "openmagi_core_agent/browser/source_tools.py",
+          "state": "existing"
+        },
+        {
+          "path": "openmagi_core_agent/browser/live_provider_pack.py",
+          "state": "existing"
+        },
+        {
+          "path": "openmagi_core_agent/recipes/first_party/general_automation/browser_contracts.py",
+          "state": "implemented_pr8"
+        },
+        {
+          "path": "openmagi_core_agent/harness/general_automation/browser_evidence.py",
+          "state": "implemented_pr8"
+        }
+      ],
+      "currentTests": [
+        {
+          "path": "tests/test_live_browser_provider_pack.py",
+          "state": "existing"
+        },
+        {
+          "path": "tests/test_knowledge_browser_source_tools_boundary.py",
+          "state": "existing"
+        },
+        {
+          "path": "tests/test_priority_c_browser_provider_boundary.py",
+          "state": "existing"
+        },
+        {
+          "path": "tests/test_general_automation_browser_boundary.py",
+          "state": "implemented_pr8"
+        }
+      ],
+      "missingImplementation": [],
+      "owningLayer": "Provider/tool adapter contract",
+      "adkPrimitive": "FunctionTool metadata and ArtifactService boundary names",
+      "prSlice": "PR8",
+      "dependencies": [
+        "external_directory_policy",
+        "output_budget_followup_refs"
+      ],
+      "activationGate": "default-off browser evidence gate",
+      "coreTouchAllowed": false,
+      "coreGapIfBlocked": "browser worker attachment requires a separate provider track"
+    },
+    {
+      "id": "durable_background_task_resume_contract",
+      "capability": "Session-scoped background task resume and completion projections",
+      "sourceDocuments": [
+        "safe_queue_plan",
+        "opencode_general_automation_audit",
+        "opencode_parity_matrix"
+      ],
+      "alreadyCovered": true,
+      "currentFiles": [
+        {
+          "path": "openmagi_core_agent/harness/background_tasks.py",
+          "state": "existing"
+        },
+        {
+          "path": "openmagi_core_agent/evidence/child_runtime_envelope.py",
+          "state": "existing"
+        },
+        {
+          "path": "openmagi_core_agent/recipes/first_party/general_automation/background_task_contracts.py",
+          "state": "implemented_pr9"
+        },
+        {
+          "path": "openmagi_core_agent/harness/general_automation/background_task_projection.py",
+          "state": "implemented_pr9"
+        }
+      ],
+      "currentTests": [
+        {
+          "path": "tests/test_background_task_activity_boundary.py",
+          "state": "existing"
+        },
+        {
+          "path": "tests/test_live_background_task_boundary.py",
+          "state": "existing"
+        },
+        {
+          "path": "tests/test_child_runtime_envelope_contract.py",
+          "state": "existing"
+        },
+        {
+          "path": "tests/test_general_automation_background_task_contracts.py",
+          "state": "implemented_pr9"
+        }
+      ],
+      "missingImplementation": [],
+      "owningLayer": "Mixed first-party contracts",
+      "adkPrimitive": "LongRunningFunctionTool contract shape and SessionService boundary names",
+      "prSlice": "PR9",
+      "dependencies": [
+        "event_control_projection_contract"
+      ],
+      "activationGate": "default-off durable-session metadata gate",
+      "coreTouchAllowed": false,
+      "coreGapIfBlocked": "actual child runner resume needs a separate runtime approval"
+    },
+    {
+      "id": "mcp_plugin_projection_contract",
+      "capability": "MCP and plugin metadata projection through OpenMagi policy",
+      "sourceDocuments": [
+        "safe_queue_plan",
+        "opencode_general_automation_audit",
+        "opencode_parity_matrix"
+      ],
+      "alreadyCovered": true,
+      "currentFiles": [
+        {
+          "path": "openmagi_core_agent/plugins/mcp_adapter.py",
+          "state": "existing"
+        },
+        {
+          "path": "openmagi_core_agent/plugins/extension_boundary.py",
+          "state": "existing"
+        },
+        {
+          "path": "openmagi_core_agent/plugins/tool_projection.py",
+          "state": "existing"
+        },
+        {
+          "path": "openmagi_core_agent/plugins/general_automation/mcp_projection.py",
+          "state": "implemented_pr10"
+        },
+        {
+          "path": "openmagi_core_agent/plugins/general_automation/hook_projection.py",
+          "state": "implemented_pr10"
+        }
+      ],
+      "currentTests": [
+        {
+          "path": "tests/test_mcp_adapter.py",
+          "state": "existing"
+        },
+        {
+          "path": "tests/test_addenda_extension_boundary.py",
+          "state": "existing"
+        },
+        {
+          "path": "tests/test_plugin_tool_projection.py",
+          "state": "existing"
+        },
+        {
+          "path": "tests/test_general_automation_mcp_plugin_projection.py",
+          "state": "implemented_pr10"
+        }
+      ],
+      "missingImplementation": [],
+      "owningLayer": "First-party plugin",
+      "adkPrimitive": "plugin lifecycle callback names and FunctionTool metadata shape",
+      "prSlice": "PR10",
+      "dependencies": [
+        "automation_package_boundary",
+        "output_budget_followup_refs"
+      ],
+      "activationGate": "default-off external-tool metadata gate",
+      "coreTouchAllowed": false,
+      "coreGapIfBlocked": "server lifecycle attachment is out of scope"
+    },
+    {
+      "id": "event_control_projection_contract",
+      "capability": "Public-safe approval, blocked, resume, artifact, source, and verifier state projections",
+      "sourceDocuments": [
+        "safe_queue_plan",
+        "opencode_general_automation_audit"
+      ],
+      "alreadyCovered": true,
+      "currentFiles": [
+        {
+          "path": "openmagi_core_agent/harness/approval_receipts.py",
+          "state": "existing"
+        },
+        {
+          "path": "openmagi_core_agent/harness/audit.py",
+          "state": "existing"
+        },
+        {
+          "path": "openmagi_core_agent/artifacts/delivery_receipts.py",
+          "state": "existing"
+        },
+        {
+          "path": "openmagi_core_agent/harness/general_automation/control_projection.py",
+          "state": "implemented_pr11"
+        },
+        {
+          "path": "openmagi_core_agent/harness/general_automation/event_projection.py",
+          "state": "implemented_pr11"
+        }
+      ],
+      "currentTests": [
+        {
+          "path": "tests/test_harness_audit_contract.py",
+          "state": "existing"
+        },
+        {
+          "path": "tests/test_evidence_harness_boundary.py",
+          "state": "existing"
+        },
+        {
+          "path": "tests/test_artifact_store_delivery_receipts.py",
+          "state": "existing"
+        },
+        {
+          "path": "tests/test_general_automation_event_control_projection.py",
+          "state": "implemented_pr11"
+        }
+      ],
+      "missingImplementation": [],
+      "owningLayer": "First-party harness",
+      "adkPrimitive": "callback event vocabulary",
+      "prSlice": "PR11",
+      "dependencies": [
+        "output_budget_followup_refs"
+      ],
+      "activationGate": "default-off projection fixture gate",
+      "coreTouchAllowed": false,
+      "coreGapIfBlocked": "none"
+    },
+    {
+      "id": "final_integration_review",
+      "capability": "Final composition review for no core drift and no accidental activation",
+      "sourceDocuments": [
+        "safe_queue_plan"
+      ],
+      "alreadyCovered": true,
+      "currentFiles": [
+        {
+          "path": "openmagi_core_agent/harness/e2e_readiness.py",
+          "state": "existing"
+        },
+        {
+          "path": "tests/fixtures/parity/e2e_harness_parity_matrix.json",
+          "state": "existing"
+        },
+        {
+          "path": "tests/fixtures/parity/general_automation_safe_queue_matrix.json",
+          "state": "existing"
+        }
+      ],
+      "currentTests": [
+        {
+          "path": "tests/test_e2e_harness_pr23_final_integration_readiness.py",
+          "state": "existing"
+        },
+        {
+          "path": "tests/test_general_automation_safe_queue_matrix.py",
+          "state": "existing"
+        },
+        {
+          "path": "tests/test_general_automation_final_integration_review.py",
+          "state": "implemented_pr12"
+        }
+      ],
+      "missingImplementation": [],
+      "owningLayer": "Tests/docs only",
+      "adkPrimitive": "ADK Evaluation vocabulary and audit fixture only",
+      "prSlice": "PR12",
+      "dependencies": [
+        "automation_package_boundary",
+        "external_directory_policy",
+        "output_budget_followup_refs",
+        "shell_command_path_policy",
+        "general_automation_agent_presets",
+        "spreadsheet_read_validate_reconcile",
+        "web_acquisition_provider_contract",
+        "browser_inspect_act_boundary",
+        "durable_background_task_resume_contract",
+        "mcp_plugin_projection_contract",
+        "event_control_projection_contract"
+      ],
+      "activationGate": "default-off final audit gate",
+      "coreTouchAllowed": false,
+      "coreGapIfBlocked": "none"
+    }
+  ]
+}

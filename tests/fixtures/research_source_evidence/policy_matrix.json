@@ -1,0 +1,1293 @@
+{
+  "schemaVersion": "researchSourceEvidenceFixture.v1",
+  "fixtureId": "research_source_evidence_matrix_0001",
+  "sourceRuntime": "typescript-core-agent",
+  "recordingMode": "local_diagnostic_fixture",
+  "redactionStatus": "verified",
+  "localDiagnostic": true,
+  "attachmentFlags": {
+    "adkRunnerInvoked": false,
+    "liveToolDispatched": false,
+    "webSearchExecuted": false,
+    "browserExecuted": false,
+    "sourceFetched": false,
+    "shellOrCodeExecuted": false,
+    "memoryProviderCalled": false,
+    "agentMemoryImported": false,
+    "hipocampusQmdLiveCalled": false,
+    "productionStorageWritten": false,
+    "productionAuthority": false,
+    "routeOrApiAttached": false,
+    "telegramAttached": false,
+    "canaryTrafficAttached": false,
+    "evidenceBlockEnabled": false
+  },
+  "cases": [
+    {
+      "caseId": "web_search_and_source_inspection_pass",
+      "category": "web_search_source_inspection_pass",
+      "agentRole": "research",
+      "runOn": "main",
+      "spawnDepth": 0,
+      "turnId": "turn-research-1",
+      "contractStart": 10,
+      "sourceSensitive": true,
+      "researchClaim": "The docs.example guide supports connector approvals.",
+      "citationRefs": ["src_1"],
+      "authority": "citation_gate_block_ready_policy",
+      "publicPreview": "WebSearch and SourceInspection recorded src_1 for docs.example",
+      "expectedOk": true,
+      "expectedVerdictState": "pass",
+      "expectedMissingTypes": [],
+      "expectedMatchedTypes": ["WebSearch", "SourceInspection"],
+      "expectedFailureCodes": [],
+      "contract": {
+        "id": "research.web_search_source_inspection",
+        "description": "Require recorded WebSearch and inspected source evidence for source-sensitive claims.",
+        "triggers": ["beforeCommit"],
+        "when": {
+          "contractStart": 10,
+          "taskType": "research",
+          "sourceSensitive": true
+        },
+        "requirements": [
+          {
+            "type": "WebSearch",
+            "after": "contract_start",
+            "fields": {
+              "query": {
+                "matches": "connector approvals"
+              },
+              "resultCount": {
+                "equals": 4
+              }
+            }
+          },
+          {
+            "type": "SourceInspection",
+            "after": "contract_start",
+            "fields": {
+              "sourceIds": {
+                "equals": ["src_1"]
+              },
+              "sourceKind": {
+                "equals": "web_fetch"
+              },
+              "inspected": {
+                "equals": true
+              }
+            }
+          }
+        ],
+        "onMissing": "block_final_answer",
+        "retryMessage": "Inspect a source and cite its source id before finalizing.",
+        "trafficAttached": false,
+        "executionAttached": false
+      },
+      "records": [
+        {
+          "type": "WebSearch",
+          "status": "ok",
+          "observedAt": 20,
+          "source": {
+            "kind": "tool_trace",
+            "toolName": "WebSearch",
+            "toolCallId": "tool-websearch-1",
+            "transcriptEntryId": "tr-websearch-1",
+            "metadata": {
+              "recordedOnly": true
+            }
+          },
+          "fields": {
+            "query": "connector approvals",
+            "resultCount": 4,
+            "sourceKind": "web_search",
+            "sourceIds": ["src_1"]
+          },
+          "preview": "WebSearch connector approvals returned 4 recorded results",
+          "metadata": {
+            "contractStart": 10,
+            "publicSafeFields": ["query", "resultCount", "sourceKind", "sourceIds"]
+          }
+        },
+        {
+          "type": "SourceInspection",
+          "status": "ok",
+          "observedAt": 30,
+          "source": {
+            "kind": "tool_trace",
+            "toolName": "WebFetch",
+            "toolCallId": "tool-webfetch-1",
+            "transcriptEntryId": "tr-webfetch-1",
+            "metadata": {
+              "recordedOnly": true
+            }
+          },
+          "fields": {
+            "sourceIds": ["src_1"],
+            "sourceKind": "web_fetch",
+            "host": "docs.example",
+            "inspected": true,
+            "trustTier": "official"
+          },
+          "preview": "SourceInspection src_1 docs.example",
+          "metadata": {
+            "contractStart": 10,
+            "publicSafeFields": ["sourceIds", "sourceKind", "host", "inspected", "trustTier"]
+          }
+        }
+      ],
+      "attachmentFlags": {
+        "adkRunnerInvoked": false,
+        "liveToolDispatched": false,
+        "webSearchExecuted": false,
+        "browserExecuted": false,
+        "sourceFetched": false,
+        "shellOrCodeExecuted": false,
+        "memoryProviderCalled": false,
+        "agentMemoryImported": false,
+        "hipocampusQmdLiveCalled": false,
+        "productionStorageWritten": false,
+        "productionAuthority": false,
+        "routeOrApiAttached": false,
+        "telegramAttached": false,
+        "canaryTrafficAttached": false,
+        "evidenceBlockEnabled": false
+      }
+    },
+    {
+      "caseId": "missing_source_inspection_blocks_claim",
+      "category": "missing_source_inspection",
+      "agentRole": "research",
+      "runOn": "main",
+      "spawnDepth": 0,
+      "turnId": "turn-research-2",
+      "contractStart": 10,
+      "sourceSensitive": true,
+      "researchClaim": "The current release changed connector approval behavior.",
+      "citationRefs": ["src_2"],
+      "authority": "citation_gate_block_ready_policy",
+      "publicPreview": "WebSearch exists, but SourceInspection is missing",
+      "expectedOk": false,
+      "expectedVerdictState": "block_ready",
+      "expectedMissingTypes": ["SourceInspection"],
+      "expectedMatchedTypes": ["WebSearch"],
+      "expectedFailureCodes": ["EVIDENCE_CONTRACT_MISSING"],
+      "contract": {
+        "id": "research.missing_source_inspection",
+        "description": "Require inspected source evidence after search before source-sensitive claims.",
+        "triggers": ["beforeCommit"],
+        "when": {
+          "contractStart": 10,
+          "taskType": "research",
+          "sourceSensitive": true
+        },
+        "requirements": [
+          {
+            "type": "WebSearch",
+            "after": "contract_start",
+            "fields": {
+              "query": {
+                "exists": true
+              }
+            }
+          },
+          {
+            "type": "SourceInspection",
+            "after": "contract_start",
+            "fields": {
+              "sourceIds": {
+                "equals": ["src_2"]
+              },
+              "inspected": {
+                "equals": true
+              }
+            }
+          }
+        ],
+        "onMissing": "block_final_answer",
+        "retryMessage": "Fetch or inspect the cited source id before finalizing.",
+        "trafficAttached": false,
+        "executionAttached": false
+      },
+      "records": [
+        {
+          "type": "WebSearch",
+          "status": "ok",
+          "observedAt": 20,
+          "source": {
+            "kind": "tool_trace",
+            "toolName": "WebSearch",
+            "toolCallId": "tool-websearch-2",
+            "transcriptEntryId": "tr-websearch-2",
+            "metadata": {
+              "recordedOnly": true
+            }
+          },
+          "fields": {
+            "query": "current release connector approvals",
+            "resultCount": 3,
+            "sourceKind": "web_search",
+            "sourceIds": ["src_2"]
+          },
+          "preview": "WebSearch current release connector approvals",
+          "metadata": {
+            "contractStart": 10,
+            "publicSafeFields": ["query", "resultCount", "sourceKind", "sourceIds"]
+          }
+        }
+      ],
+      "attachmentFlags": {
+        "adkRunnerInvoked": false,
+        "liveToolDispatched": false,
+        "webSearchExecuted": false,
+        "browserExecuted": false,
+        "sourceFetched": false,
+        "shellOrCodeExecuted": false,
+        "memoryProviderCalled": false,
+        "agentMemoryImported": false,
+        "hipocampusQmdLiveCalled": false,
+        "productionStorageWritten": false,
+        "productionAuthority": false,
+        "routeOrApiAttached": false,
+        "telegramAttached": false,
+        "canaryTrafficAttached": false,
+        "evidenceBlockEnabled": false
+      }
+    },
+    {
+      "caseId": "citation_to_uninspected_source_blocks",
+      "category": "citation_uninspected_source",
+      "agentRole": "research",
+      "runOn": "main",
+      "spawnDepth": 0,
+      "turnId": "turn-research-3",
+      "contractStart": 10,
+      "sourceSensitive": true,
+      "researchClaim": "The cited source says the policy changed.",
+      "citationRefs": ["src_2"],
+      "authority": "citation_gate_block_ready_policy",
+      "publicPreview": "Claim cites src_2, but only src_1 was inspected",
+      "expectedOk": false,
+      "expectedVerdictState": "block_ready",
+      "expectedMissingTypes": [],
+      "expectedMatchedTypes": ["WebSearch"],
+      "expectedFailureCodes": ["EVIDENCE_CONTRACT_FIELD_MISMATCH"],
+      "contract": {
+        "id": "research.citation_uninspected_source",
+        "description": "Citations must point to inspected source ids.",
+        "triggers": ["beforeCommit"],
+        "when": {
+          "contractStart": 10,
+          "taskType": "research",
+          "sourceSensitive": true
+        },
+        "requirements": [
+          {
+            "type": "WebSearch",
+            "after": "contract_start",
+            "fields": {
+              "sourceIds": {
+                "equals": ["src_1"]
+              }
+            }
+          },
+          {
+            "type": "SourceInspection",
+            "after": "contract_start",
+            "fields": {
+              "sourceIds": {
+                "equals": ["src_2"]
+              },
+              "inspected": {
+                "equals": true
+              }
+            }
+          }
+        ],
+        "onMissing": "block_final_answer",
+        "retryMessage": "Use only inspected source ids in citations.",
+        "trafficAttached": false,
+        "executionAttached": false
+      },
+      "records": [
+        {
+          "type": "WebSearch",
+          "status": "ok",
+          "observedAt": 20,
+          "source": {
+            "kind": "tool_trace",
+            "toolName": "WebSearch",
+            "toolCallId": "tool-websearch-3",
+            "transcriptEntryId": "tr-websearch-3",
+            "metadata": {
+              "recordedOnly": true
+            }
+          },
+          "fields": {
+            "query": "policy changed cited source",
+            "resultCount": 2,
+            "sourceKind": "web_search",
+            "sourceIds": ["src_1"]
+          },
+          "preview": "WebSearch policy changed cited source",
+          "metadata": {
+            "contractStart": 10,
+            "publicSafeFields": ["query", "resultCount", "sourceKind", "sourceIds"]
+          }
+        },
+        {
+          "type": "SourceInspection",
+          "status": "ok",
+          "observedAt": 30,
+          "source": {
+            "kind": "tool_trace",
+            "toolName": "WebFetch",
+            "toolCallId": "tool-webfetch-3",
+            "transcriptEntryId": "tr-webfetch-3",
+            "metadata": {
+              "recordedOnly": true
+            }
+          },
+          "fields": {
+            "sourceIds": ["src_1"],
+            "sourceKind": "web_fetch",
+            "host": "docs.example",
+            "inspected": true
+          },
+          "preview": "SourceInspection src_1 docs.example",
+          "metadata": {
+            "contractStart": 10,
+            "publicSafeFields": ["sourceIds", "sourceKind", "host", "inspected"]
+          }
+        }
+      ],
+      "attachmentFlags": {
+        "adkRunnerInvoked": false,
+        "liveToolDispatched": false,
+        "webSearchExecuted": false,
+        "browserExecuted": false,
+        "sourceFetched": false,
+        "shellOrCodeExecuted": false,
+        "memoryProviderCalled": false,
+        "agentMemoryImported": false,
+        "hipocampusQmdLiveCalled": false,
+        "productionStorageWritten": false,
+        "productionAuthority": false,
+        "routeOrApiAttached": false,
+        "telegramAttached": false,
+        "canaryTrafficAttached": false,
+        "evidenceBlockEnabled": false
+      }
+    },
+    {
+      "caseId": "knowledge_search_source_ledger_pass",
+      "category": "knowledge_search_source_ledger_pass",
+      "agentRole": "research",
+      "runOn": "main",
+      "spawnDepth": 0,
+      "turnId": "turn-research-4",
+      "contractStart": 10,
+      "sourceSensitive": true,
+      "researchClaim": "The workspace policy names approval requirements.",
+      "citationRefs": ["src_4"],
+      "authority": "source_ledger_required",
+      "publicPreview": "KnowledgeSearch and SourceInspection recorded src_4",
+      "expectedOk": true,
+      "expectedVerdictState": "pass",
+      "expectedMissingTypes": [],
+      "expectedMatchedTypes": ["KnowledgeSearch", "SourceInspection"],
+      "expectedFailureCodes": [],
+      "contract": {
+        "id": "research.knowledge_search_source_ledger",
+        "description": "Require KB search and inspected KB source evidence.",
+        "triggers": ["beforeCommit"],
+        "when": {
+          "contractStart": 10,
+          "taskType": "research",
+          "sourceSensitive": true
+        },
+        "requirements": [
+          {
+            "type": "KnowledgeSearch",
+            "after": "contract_start",
+            "fields": {
+              "sourceIds": {
+                "equals": ["src_4"]
+              },
+              "sourceKind": {
+                "equals": "kb"
+              }
+            }
+          },
+          {
+            "type": "SourceInspection",
+            "after": "contract_start",
+            "fields": {
+              "sourceIds": {
+                "equals": ["src_4"]
+              },
+              "sourceKind": {
+                "equals": "kb"
+              },
+              "inspected": {
+                "equals": true
+              }
+            }
+          }
+        ],
+        "onMissing": "block_final_answer",
+        "retryMessage": "Tie KB claims to inspected source ids.",
+        "trafficAttached": false,
+        "executionAttached": false
+      },
+      "records": [
+        {
+          "type": "KnowledgeSearch",
+          "status": "ok",
+          "observedAt": 20,
+          "source": {
+            "kind": "transcript",
+            "toolName": "KnowledgeSearch",
+            "transcriptEntryId": "tr-kb-4",
+            "metadata": {
+              "recordedOnly": true
+            }
+          },
+          "fields": {
+            "query": "workspace policy approvals",
+            "resultCount": 2,
+            "sourceKind": "kb",
+            "sourceIds": ["src_4"]
+          },
+          "preview": "KnowledgeSearch workspace policy approvals",
+          "metadata": {
+            "contractStart": 10,
+            "publicSafeFields": ["query", "resultCount", "sourceKind", "sourceIds"]
+          }
+        },
+        {
+          "type": "SourceInspection",
+          "status": "ok",
+          "observedAt": 25,
+          "source": {
+            "kind": "transcript",
+            "toolName": "KnowledgeSearch",
+            "transcriptEntryId": "tr-kb-inspect-4",
+            "metadata": {
+              "recordedOnly": true
+            }
+          },
+          "fields": {
+            "sourceIds": ["src_4"],
+            "sourceKind": "kb",
+            "host": "knowledge.local",
+            "inspected": true
+          },
+          "preview": "SourceInspection src_4 knowledge.local",
+          "metadata": {
+            "contractStart": 10,
+            "publicSafeFields": ["sourceIds", "sourceKind", "host", "inspected"]
+          }
+        }
+      ],
+      "attachmentFlags": {
+        "adkRunnerInvoked": false,
+        "liveToolDispatched": false,
+        "webSearchExecuted": false,
+        "browserExecuted": false,
+        "sourceFetched": false,
+        "shellOrCodeExecuted": false,
+        "memoryProviderCalled": false,
+        "agentMemoryImported": false,
+        "hipocampusQmdLiveCalled": false,
+        "productionStorageWritten": false,
+        "productionAuthority": false,
+        "routeOrApiAttached": false,
+        "telegramAttached": false,
+        "canaryTrafficAttached": false,
+        "evidenceBlockEnabled": false
+      }
+    },
+    {
+      "caseId": "temporal_research_clock_pass",
+      "category": "temporal_context_clock_pass",
+      "agentRole": "research",
+      "runOn": "main",
+      "spawnDepth": 0,
+      "turnId": "turn-research-5",
+      "contractStart": 10,
+      "sourceSensitive": true,
+      "researchClaim": "The current docs were checked on May 17, 2026.",
+      "citationRefs": ["src_5"],
+      "authority": "source_ledger_required",
+      "publicPreview": "WebSearch, SourceInspection, and Clock recorded current-source metadata",
+      "expectedOk": true,
+      "expectedVerdictState": "pass",
+      "expectedMissingTypes": [],
+      "expectedMatchedTypes": ["WebSearch", "SourceInspection", "Clock"],
+      "expectedFailureCodes": [],
+      "contract": {
+        "id": "research.temporal_context_clock",
+        "description": "Require current-source evidence and clock metadata for temporal claims.",
+        "triggers": ["beforeCommit"],
+        "when": {
+          "contractStart": 10,
+          "taskType": "research",
+          "sourceSensitive": true
+        },
+        "requirements": [
+          {
+            "type": "WebSearch",
+            "after": "contract_start",
+            "fields": {
+              "sourceIds": {
+                "equals": ["src_5"]
+              }
+            }
+          },
+          {
+            "type": "SourceInspection",
+            "after": "contract_start",
+            "fields": {
+              "sourceIds": {
+                "equals": ["src_5"]
+              },
+              "sourceKind": {
+                "equals": "web_fetch"
+              },
+              "inspected": {
+                "equals": true
+              }
+            }
+          },
+          {
+            "type": "Clock",
+            "after": "contract_start",
+            "fields": {
+              "sourceKind": {
+                "equals": "clock"
+              },
+              "date": {
+                "equals": "2026-05-17"
+              }
+            }
+          }
+        ],
+        "onMissing": "block_final_answer",
+        "retryMessage": "Capture source and clock evidence for temporal claims.",
+        "trafficAttached": false,
+        "executionAttached": false
+      },
+      "records": [
+        {
+          "type": "WebSearch",
+          "status": "ok",
+          "observedAt": 20,
+          "source": {
+            "kind": "tool_trace",
+            "toolName": "WebSearch",
+            "toolCallId": "tool-websearch-5",
+            "transcriptEntryId": "tr-websearch-5",
+            "metadata": {
+              "recordedOnly": true
+            }
+          },
+          "fields": {
+            "query": "current docs May 2026",
+            "resultCount": 5,
+            "sourceKind": "web_search",
+            "sourceIds": ["src_5"]
+          },
+          "preview": "WebSearch current docs May 2026",
+          "metadata": {
+            "contractStart": 10,
+            "publicSafeFields": ["query", "resultCount", "sourceKind", "sourceIds"]
+          }
+        },
+        {
+          "type": "SourceInspection",
+          "status": "ok",
+          "observedAt": 30,
+          "source": {
+            "kind": "tool_trace",
+            "toolName": "WebFetch",
+            "toolCallId": "tool-webfetch-5",
+            "transcriptEntryId": "tr-webfetch-5",
+            "metadata": {
+              "recordedOnly": true
+            }
+          },
+          "fields": {
+            "sourceIds": ["src_5"],
+            "sourceKind": "web_fetch",
+            "host": "docs.example",
+            "inspected": true,
+            "retrievedAt": "2026-05-17T12:00:00Z"
+          },
+          "preview": "SourceInspection src_5 docs.example",
+          "metadata": {
+            "contractStart": 10,
+            "publicSafeFields": ["sourceIds", "sourceKind", "host", "inspected", "retrievedAt"]
+          }
+        },
+        {
+          "type": "Clock",
+          "status": "ok",
+          "observedAt": 35,
+          "source": {
+            "kind": "transcript",
+            "toolName": "Clock",
+            "transcriptEntryId": "tr-clock-5",
+            "metadata": {
+              "recordedOnly": true
+            }
+          },
+          "fields": {
+            "sourceKind": "clock",
+            "date": "2026-05-17",
+            "timezone": "America/Los_Angeles"
+          },
+          "preview": "Clock recorded 2026-05-17 America/Los_Angeles",
+          "metadata": {
+            "contractStart": 10,
+            "publicSafeFields": ["sourceKind", "date", "timezone"]
+          }
+        }
+      ],
+      "attachmentFlags": {
+        "adkRunnerInvoked": false,
+        "liveToolDispatched": false,
+        "webSearchExecuted": false,
+        "browserExecuted": false,
+        "sourceFetched": false,
+        "shellOrCodeExecuted": false,
+        "memoryProviderCalled": false,
+        "agentMemoryImported": false,
+        "hipocampusQmdLiveCalled": false,
+        "productionStorageWritten": false,
+        "productionAuthority": false,
+        "routeOrApiAttached": false,
+        "telegramAttached": false,
+        "canaryTrafficAttached": false,
+        "evidenceBlockEnabled": false
+      }
+    },
+    {
+      "caseId": "audit_only_missing_source_does_not_block",
+      "category": "audit_only_missing_source",
+      "agentRole": "research",
+      "runOn": "main",
+      "spawnDepth": 0,
+      "turnId": "turn-research-6",
+      "contractStart": 10,
+      "sourceSensitive": true,
+      "researchClaim": "The draft contains a source-sensitive claim without inspection.",
+      "citationRefs": ["src_6"],
+      "authority": "audit_only_no_block",
+      "publicPreview": "Audit-only citation contract records missing SourceInspection",
+      "expectedOk": false,
+      "expectedVerdictState": "missing",
+      "expectedMissingTypes": ["SourceInspection"],
+      "expectedMatchedTypes": ["WebSearch"],
+      "expectedFailureCodes": ["EVIDENCE_CONTRACT_MISSING"],
+      "contract": {
+        "id": "research.audit_only_missing_source",
+        "description": "Audit-only research citation evidence gap.",
+        "triggers": ["beforeCommit"],
+        "when": {
+          "contractStart": 10,
+          "taskType": "research",
+          "sourceSensitive": true
+        },
+        "requirements": [
+          {
+            "type": "WebSearch",
+            "after": "contract_start",
+            "fields": {
+              "query": {
+                "exists": true
+              }
+            }
+          },
+          {
+            "type": "SourceInspection",
+            "after": "contract_start",
+            "fields": {
+              "sourceIds": {
+                "equals": ["src_6"]
+              },
+              "inspected": {
+                "equals": true
+              }
+            }
+          }
+        ],
+        "onMissing": "audit",
+        "retryMessage": "Audit-only: cite an inspected source before finalizing.",
+        "trafficAttached": false,
+        "executionAttached": false
+      },
+      "records": [
+        {
+          "type": "WebSearch",
+          "status": "ok",
+          "observedAt": 20,
+          "source": {
+            "kind": "tool_trace",
+            "toolName": "WebSearch",
+            "toolCallId": "tool-websearch-6",
+            "transcriptEntryId": "tr-websearch-6",
+            "metadata": {
+              "recordedOnly": true
+            }
+          },
+          "fields": {
+            "query": "source-sensitive audit example",
+            "resultCount": 1,
+            "sourceKind": "web_search",
+            "sourceIds": ["src_6"]
+          },
+          "preview": "WebSearch source-sensitive audit example",
+          "metadata": {
+            "contractStart": 10,
+            "publicSafeFields": ["query", "resultCount", "sourceKind", "sourceIds"]
+          }
+        }
+      ],
+      "attachmentFlags": {
+        "adkRunnerInvoked": false,
+        "liveToolDispatched": false,
+        "webSearchExecuted": false,
+        "browserExecuted": false,
+        "sourceFetched": false,
+        "shellOrCodeExecuted": false,
+        "memoryProviderCalled": false,
+        "agentMemoryImported": false,
+        "hipocampusQmdLiveCalled": false,
+        "productionStorageWritten": false,
+        "productionAuthority": false,
+        "routeOrApiAttached": false,
+        "telegramAttached": false,
+        "canaryTrafficAttached": false,
+        "evidenceBlockEnabled": false
+      }
+    },
+    {
+      "caseId": "child_research_source_scoped_child",
+      "category": "child_research_source_scoped_child",
+      "agentRole": "research",
+      "runOn": "child",
+      "spawnDepth": 1,
+      "turnId": "turn-research-7::spawn::child-1",
+      "contractStart": 10,
+      "sourceSensitive": true,
+      "researchClaim": "The child gathered an inspected research source.",
+      "citationRefs": ["src_7"],
+      "authority": "child_local_source_evidence_only",
+      "publicPreview": "Child transcript records WebSearch and SourceInspection for src_7",
+      "expectedOk": true,
+      "expectedVerdictState": "pass",
+      "expectedMissingTypes": [],
+      "expectedMatchedTypes": ["WebSearch", "SourceInspection"],
+      "expectedFailureCodes": [],
+      "contract": {
+        "id": "research.child_source_scoped_child",
+        "description": "Child research evidence remains child-scoped until parent aggregation.",
+        "triggers": ["beforeCommit"],
+        "when": {
+          "contractStart": 10,
+          "taskType": "research",
+          "sourceSensitive": true,
+          "executionBoundary": "child"
+        },
+        "requirements": [
+          {
+            "type": "WebSearch",
+            "after": "contract_start",
+            "fields": {
+              "sourceIds": {
+                "equals": ["src_7"]
+              }
+            }
+          },
+          {
+            "type": "SourceInspection",
+            "after": "contract_start",
+            "fields": {
+              "sourceIds": {
+                "equals": ["src_7"]
+              },
+              "inspected": {
+                "equals": true
+              }
+            }
+          }
+        ],
+        "onMissing": "block_final_answer",
+        "retryMessage": "Child source evidence must preserve child execution boundary metadata.",
+        "trafficAttached": false,
+        "executionAttached": false
+      },
+      "records": [
+        {
+          "type": "WebSearch",
+          "status": "ok",
+          "observedAt": 20,
+          "source": {
+            "kind": "transcript",
+            "toolName": "WebSearch",
+            "transcriptEntryId": "tr-child-websearch-7",
+            "metadata": {
+              "recordedOnly": true,
+              "executionBoundary": "child"
+            }
+          },
+          "fields": {
+            "query": "child research source",
+            "resultCount": 2,
+            "sourceKind": "web_search",
+            "sourceIds": ["src_7"]
+          },
+          "preview": "Child WebSearch child research source",
+          "metadata": {
+            "contractStart": 10,
+            "publicSafeFields": ["query", "resultCount", "sourceKind", "sourceIds"]
+          }
+        },
+        {
+          "type": "SourceInspection",
+          "status": "ok",
+          "observedAt": 25,
+          "source": {
+            "kind": "transcript",
+            "toolName": "WebFetch",
+            "transcriptEntryId": "tr-child-source-7",
+            "metadata": {
+              "recordedOnly": true,
+              "executionBoundary": "child"
+            }
+          },
+          "fields": {
+            "sourceIds": ["src_7"],
+            "sourceKind": "web_fetch",
+            "host": "child.docs.example",
+            "inspected": true
+          },
+          "preview": "Child SourceInspection src_7 child.docs.example",
+          "metadata": {
+            "contractStart": 10,
+            "publicSafeFields": ["sourceIds", "sourceKind", "host", "inspected"]
+          }
+        }
+      ],
+      "attachmentFlags": {
+        "adkRunnerInvoked": false,
+        "liveToolDispatched": false,
+        "webSearchExecuted": false,
+        "browserExecuted": false,
+        "sourceFetched": false,
+        "shellOrCodeExecuted": false,
+        "memoryProviderCalled": false,
+        "agentMemoryImported": false,
+        "hipocampusQmdLiveCalled": false,
+        "productionStorageWritten": false,
+        "productionAuthority": false,
+        "routeOrApiAttached": false,
+        "telegramAttached": false,
+        "canaryTrafficAttached": false,
+        "evidenceBlockEnabled": false
+      }
+    },
+    {
+      "caseId": "browser_source_schema_pass",
+      "category": "browser_source_schema_pass",
+      "agentRole": "research",
+      "runOn": "main",
+      "spawnDepth": 0,
+      "turnId": "turn-research-8",
+      "contractStart": 10,
+      "sourceSensitive": true,
+      "researchClaim": "The recorded browser observation supports the diagnostics-only schema.",
+      "citationRefs": ["src_8"],
+      "authority": "citation_gate_block_ready_policy",
+      "publicPreview": "Recorded browser metadata and SourceInspection for src_8",
+      "expectedOk": true,
+      "expectedVerdictState": "pass",
+      "expectedMissingTypes": [],
+      "expectedMatchedTypes": ["WebSearch", "SourceInspection"],
+      "expectedFailureCodes": [],
+      "contract": {
+        "id": "research.browser_source_schema",
+        "description": "Recorded browser source metadata must satisfy source-inspection schema without live browser execution.",
+        "triggers": ["beforeCommit"],
+        "when": {
+          "contractStart": 10,
+          "taskType": "research",
+          "sourceSensitive": true
+        },
+        "requirements": [
+          {
+            "type": "WebSearch",
+            "after": "contract_start",
+            "fields": {
+              "sourceIds": {
+                "equals": ["src_8"]
+              },
+              "sourceKind": {
+                "equals": "browser"
+              }
+            }
+          },
+          {
+            "type": "SourceInspection",
+            "after": "contract_start",
+            "fields": {
+              "sourceIds": {
+                "equals": ["src_8"]
+              },
+              "sourceKind": {
+                "equals": "browser"
+              },
+              "inspected": {
+                "equals": true
+              }
+            }
+          }
+        ],
+        "onMissing": "block_final_answer",
+        "retryMessage": "Recorded browser metadata must include an inspected source id before finalizing.",
+        "trafficAttached": false,
+        "executionAttached": false
+      },
+      "records": [
+        {
+          "type": "WebSearch",
+          "status": "ok",
+          "observedAt": 20,
+          "source": {
+            "kind": "adk_event",
+            "toolName": "BrowserObservation",
+            "transcriptEntryId": "tr-browser-source-8",
+            "metadata": {
+              "recordedOnly": true
+            }
+          },
+          "fields": {
+            "query": "browser source schema parity",
+            "resultCount": 1,
+            "sourceKind": "browser",
+            "sourceIds": ["src_8"]
+          },
+          "preview": "Recorded browser source schema parity",
+          "metadata": {
+            "contractStart": 10,
+            "publicSafeFields": ["query", "resultCount", "sourceKind", "sourceIds"]
+          }
+        },
+        {
+          "type": "SourceInspection",
+          "status": "ok",
+          "observedAt": 25,
+          "source": {
+            "kind": "adk_event",
+            "toolName": "BrowserObservation",
+            "transcriptEntryId": "tr-browser-inspection-8",
+            "metadata": {
+              "recordedOnly": true
+            }
+          },
+          "fields": {
+            "sourceIds": ["src_8"],
+            "sourceKind": "browser",
+            "host": "browser.example",
+            "inspected": true,
+            "trustTier": "recorded"
+          },
+          "preview": "SourceInspection src_8 browser.example",
+          "metadata": {
+            "contractStart": 10,
+            "publicSafeFields": ["sourceIds", "sourceKind", "host", "inspected", "trustTier"]
+          }
+        }
+      ],
+      "attachmentFlags": {
+        "adkRunnerInvoked": false,
+        "liveToolDispatched": false,
+        "webSearchExecuted": false,
+        "browserExecuted": false,
+        "sourceFetched": false,
+        "shellOrCodeExecuted": false,
+        "memoryProviderCalled": false,
+        "agentMemoryImported": false,
+        "hipocampusQmdLiveCalled": false,
+        "productionStorageWritten": false,
+        "productionAuthority": false,
+        "routeOrApiAttached": false,
+        "telegramAttached": false,
+        "canaryTrafficAttached": false,
+        "evidenceBlockEnabled": false
+      }
+    },
+    {
+      "caseId": "external_repo_source_schema_pass",
+      "category": "external_repo_source_schema_pass",
+      "agentRole": "research",
+      "runOn": "main",
+      "spawnDepth": 0,
+      "turnId": "turn-research-9",
+      "contractStart": 10,
+      "sourceSensitive": true,
+      "researchClaim": "The recorded external repository metadata supports the schema.",
+      "citationRefs": ["src_9"],
+      "authority": "source_ledger_required",
+      "publicPreview": "Recorded external repo metadata and SourceInspection for src_9",
+      "expectedOk": true,
+      "expectedVerdictState": "pass",
+      "expectedMissingTypes": [],
+      "expectedMatchedTypes": ["KnowledgeSearch", "SourceInspection"],
+      "expectedFailureCodes": [],
+      "contract": {
+        "id": "research.external_repo_source_schema",
+        "description": "Recorded external repo source metadata must satisfy source-inspection schema without shell or fetch execution.",
+        "triggers": ["beforeCommit"],
+        "when": {
+          "contractStart": 10,
+          "taskType": "research",
+          "sourceSensitive": true
+        },
+        "requirements": [
+          {
+            "type": "KnowledgeSearch",
+            "after": "contract_start",
+            "fields": {
+              "sourceIds": {
+                "equals": ["src_9"]
+              },
+              "sourceKind": {
+                "equals": "external_repo"
+              }
+            }
+          },
+          {
+            "type": "SourceInspection",
+            "after": "contract_start",
+            "fields": {
+              "sourceIds": {
+                "equals": ["src_9"]
+              },
+              "sourceKind": {
+                "equals": "external_repo"
+              },
+              "inspected": {
+                "equals": true
+              }
+            }
+          }
+        ],
+        "onMissing": "block_final_answer",
+        "retryMessage": "Recorded external repo metadata must include an inspected source id before finalizing.",
+        "trafficAttached": false,
+        "executionAttached": false
+      },
+      "records": [
+        {
+          "type": "KnowledgeSearch",
+          "status": "ok",
+          "observedAt": 20,
+          "source": {
+            "kind": "transcript",
+            "toolName": "ExternalRepoIndex",
+            "transcriptEntryId": "tr-external-repo-9",
+            "metadata": {
+              "recordedOnly": true
+            }
+          },
+          "fields": {
+            "query": "external repo source schema parity",
+            "resultCount": 1,
+            "sourceKind": "external_repo",
+            "sourceIds": ["src_9"]
+          },
+          "preview": "Recorded external repo source schema parity",
+          "metadata": {
+            "contractStart": 10,
+            "publicSafeFields": ["query", "resultCount", "sourceKind", "sourceIds"]
+          }
+        },
+        {
+          "type": "SourceInspection",
+          "status": "ok",
+          "observedAt": 25,
+          "source": {
+            "kind": "transcript",
+            "toolName": "ExternalRepoIndex",
+            "transcriptEntryId": "tr-external-repo-inspection-9",
+            "metadata": {
+              "recordedOnly": true
+            }
+          },
+          "fields": {
+            "sourceIds": ["src_9"],
+            "sourceKind": "external_repo",
+            "host": "repo.example",
+            "inspected": true,
+            "trustTier": "recorded"
+          },
+          "preview": "SourceInspection src_9 repo.example",
+          "metadata": {
+            "contractStart": 10,
+            "publicSafeFields": ["sourceIds", "sourceKind", "host", "inspected", "trustTier"]
+          }
+        }
+      ],
+      "attachmentFlags": {
+        "adkRunnerInvoked": false,
+        "liveToolDispatched": false,
+        "webSearchExecuted": false,
+        "browserExecuted": false,
+        "sourceFetched": false,
+        "shellOrCodeExecuted": false,
+        "memoryProviderCalled": false,
+        "agentMemoryImported": false,
+        "hipocampusQmdLiveCalled": false,
+        "productionStorageWritten": false,
+        "productionAuthority": false,
+        "routeOrApiAttached": false,
+        "telegramAttached": false,
+        "canaryTrafficAttached": false,
+        "evidenceBlockEnabled": false
+      }
+    },
+    {
+      "caseId": "external_doc_source_schema_pass",
+      "category": "external_doc_source_schema_pass",
+      "agentRole": "research",
+      "runOn": "main",
+      "spawnDepth": 0,
+      "turnId": "turn-research-10",
+      "contractStart": 10,
+      "sourceSensitive": true,
+      "researchClaim": "The recorded external document metadata supports the schema.",
+      "citationRefs": ["src_10"],
+      "authority": "source_ledger_required",
+      "publicPreview": "Recorded external doc metadata and SourceInspection for src_10",
+      "expectedOk": true,
+      "expectedVerdictState": "pass",
+      "expectedMissingTypes": [],
+      "expectedMatchedTypes": ["WebSearch", "SourceInspection"],
+      "expectedFailureCodes": [],
+      "contract": {
+        "id": "research.external_doc_source_schema",
+        "description": "Recorded external document source metadata must satisfy source-inspection schema without fetch execution.",
+        "triggers": ["beforeCommit"],
+        "when": {
+          "contractStart": 10,
+          "taskType": "research",
+          "sourceSensitive": true
+        },
+        "requirements": [
+          {
+            "type": "WebSearch",
+            "after": "contract_start",
+            "fields": {
+              "sourceIds": {
+                "equals": ["src_10"]
+              },
+              "sourceKind": {
+                "equals": "external_doc"
+              }
+            }
+          },
+          {
+            "type": "SourceInspection",
+            "after": "contract_start",
+            "fields": {
+              "sourceIds": {
+                "equals": ["src_10"]
+              },
+              "sourceKind": {
+                "equals": "external_doc"
+              },
+              "inspected": {
+                "equals": true
+              }
+            }
+          }
+        ],
+        "onMissing": "block_final_answer",
+        "retryMessage": "Recorded external doc metadata must include an inspected source id before finalizing.",
+        "trafficAttached": false,
+        "executionAttached": false
+      },
+      "records": [
+        {
+          "type": "WebSearch",
+          "status": "ok",
+          "observedAt": 20,
+          "source": {
+            "kind": "transcript",
+            "toolName": "ExternalDocIndex",
+            "transcriptEntryId": "tr-external-doc-10",
+            "metadata": {
+              "recordedOnly": true
+            }
+          },
+          "fields": {
+            "query": "external doc source schema parity",
+            "resultCount": 1,
+            "sourceKind": "external_doc",
+            "sourceIds": ["src_10"]
+          },
+          "preview": "Recorded external doc source schema parity",
+          "metadata": {
+            "contractStart": 10,
+            "publicSafeFields": ["query", "resultCount", "sourceKind", "sourceIds"]
+          }
+        },
+        {
+          "type": "SourceInspection",
+          "status": "ok",
+          "observedAt": 25,
+          "source": {
+            "kind": "transcript",
+            "toolName": "ExternalDocIndex",
+            "transcriptEntryId": "tr-external-doc-inspection-10",
+            "metadata": {
+              "recordedOnly": true
+            }
+          },
+          "fields": {
+            "sourceIds": ["src_10"],
+            "sourceKind": "external_doc",
+            "host": "docs.external.example",
+            "inspected": true,
+            "trustTier": "recorded"
+          },
+          "preview": "SourceInspection src_10 docs.external.example",
+          "metadata": {
+            "contractStart": 10,
+            "publicSafeFields": ["sourceIds", "sourceKind", "host", "inspected", "trustTier"]
+          }
+        }
+      ],
+      "attachmentFlags": {
+        "adkRunnerInvoked": false,
+        "liveToolDispatched": false,
+        "webSearchExecuted": false,
+        "browserExecuted": false,
+        "sourceFetched": false,
+        "shellOrCodeExecuted": false,
+        "memoryProviderCalled": false,
+        "agentMemoryImported": false,
+        "hipocampusQmdLiveCalled": false,
+        "productionStorageWritten": false,
+        "productionAuthority": false,
+        "routeOrApiAttached": false,
+        "telegramAttached": false,
+        "canaryTrafficAttached": false,
+        "evidenceBlockEnabled": false
+      }
+    }
+  ]
+}

@@ -1,0 +1,28 @@
+{
+  "rows": [
+    {
+      "operation": "search",
+      "expectedStatus": "ok",
+      "proofType": "observed",
+      "providerCallsDefaultOff": false
+    },
+    {
+      "operation": "fetch",
+      "expectedStatus": "ok",
+      "proofType": "opened",
+      "providerCallsDefaultOff": false
+    },
+    {
+      "operation": "reader",
+      "expectedStatus": "ok",
+      "proofType": "opened",
+      "providerCallsDefaultOff": false
+    },
+    {
+      "operation": "browser_fallback",
+      "expectedStatus": "ok",
+      "proofType": "observed",
+      "providerCallsDefaultOff": false
+    }
+  ]
+}

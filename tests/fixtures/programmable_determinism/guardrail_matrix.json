@@ -1,0 +1,24 @@
+{
+  "definition": {
+    "failureMode": "block",
+    "guardrailId": "guardrail-before-tool-denylist",
+    "hardInvariant": true,
+    "stage": "before_tool_call",
+    "validatorTrustClass": "deterministic"
+  },
+  "result": {
+    "evidenceRefs": [
+      "evidence:tool-policy"
+    ],
+    "guardrailId": "guardrail-before-tool-denylist",
+    "policyDecisionId": "decision-tool-denied",
+    "reasonCodes": [
+      "tool_denied"
+    ],
+    "recommendedTransition": "block",
+    "redactionStatus": "redacted",
+    "stage": "before_tool_call",
+    "status": "failed",
+    "validatorTrustClass": "deterministic"
+  }
+}

@@ -1,0 +1,1082 @@
+{
+  "childEnvelope": {
+    "apiAttached": false,
+    "artifactRuntimeAttached": false,
+    "boundary": {
+      "agentId": "gate1-child-agent",
+      "agentRole": "coding",
+      "apiAttached": false,
+      "artifactRuntimeAttached": false,
+      "canaryAttached": false,
+      "childExecutionAttached": false,
+      "dashboardAttached": false,
+      "enforcementAttached": false,
+      "executionAttached": false,
+      "executionId": "gate1-child-exec-fixture",
+      "parentExecutionId": "gate1-root-exec-fixture",
+      "policyScope": "gate1-local-synthetic",
+      "policySnapshotId": "gate1-child-policy-snapshot",
+      "routeAttached": false,
+      "runOn": "child",
+      "runnerAttached": false,
+      "sessionRuntimeAttached": false,
+      "spawnDepth": 1,
+      "taskId": "gate1-task-local-child-envelope",
+      "trafficAttached": false,
+      "turnId": "gate1-turn-fixture"
+    },
+    "canaryAttached": false,
+    "childExecutionAttached": false,
+    "contractDefinitions": [
+      {
+        "description": null,
+        "executionAttached": false,
+        "id": "gate1-child-local-contract",
+        "onMissing": "block_final_answer",
+        "requirements": [
+          {
+            "after": null,
+            "commandPattern": null,
+            "exitCode": null,
+            "fields": {},
+            "type": "GitDiff"
+          },
+          {
+            "after": null,
+            "commandPattern": "^pytest synthetic_child_test\\.py$",
+            "exitCode": 0,
+            "fields": {},
+            "type": "TestRun"
+          }
+        ],
+        "retryMessage": null,
+        "scope": null,
+        "trafficAttached": false,
+        "triggers": [
+          "afterToolUse"
+        ],
+        "when": null
+      }
+    ],
+    "contractVerdicts": [
+      {
+        "contractId": "gate1-child-local-contract",
+        "enforcement": "block_final_answer",
+        "failures": [],
+        "matchedEvidence": [
+          {
+            "fields": {
+              "changedFiles": [
+                "synthetic_child.py"
+              ],
+              "status": "changed"
+            },
+            "metadata": {
+              "publicSafeFields": [
+                "status",
+                "changedFiles"
+              ]
+            },
+            "observedAt": 1800000001,
+            "preview": "synthetic child diff recorded",
+            "source": {
+              "acknowledgementId": null,
+              "artifactId": null,
+              "channel": null,
+              "contractId": null,
+              "eventId": null,
+              "extractorId": null,
+              "kind": "tool_trace",
+              "metadata": {
+                "agentId": "gate1-child-agent",
+                "executionId": "gate1-child-exec-fixture",
+                "parentExecutionId": "gate1-root-exec-fixture",
+                "policySnapshotId": "gate1-child-policy-snapshot",
+                "publicSafeFields": [
+                  "status",
+                  "changedFiles"
+                ],
+                "taskId": "gate1-task-local-child-envelope"
+              },
+              "toolCallId": "gate1-call-GitDiff",
+              "toolName": "SyntheticGate1Tool",
+              "transcriptEntryId": null,
+              "verifierName": null
+            },
+            "status": "ok",
+            "type": "GitDiff"
+          },
+          {
+            "fields": {
+              "command": "pytest synthetic_child_test.py",
+              "exitCode": 0,
+              "status": "passed"
+            },
+            "metadata": {
+              "publicSafeFields": [
+                "command",
+                "exitCode",
+                "status"
+              ]
+            },
+            "observedAt": 1800000001,
+            "preview": "synthetic child tests passed",
+            "source": {
+              "acknowledgementId": null,
+              "artifactId": null,
+              "channel": null,
+              "contractId": null,
+              "eventId": null,
+              "extractorId": null,
+              "kind": "tool_trace",
+              "metadata": {
+                "agentId": "gate1-child-agent",
+                "executionId": "gate1-child-exec-fixture",
+                "parentExecutionId": "gate1-root-exec-fixture",
+                "policySnapshotId": "gate1-child-policy-snapshot",
+                "publicSafeFields": [
+                  "command",
+                  "exitCode",
+                  "status"
+                ],
+                "taskId": "gate1-task-local-child-envelope"
+              },
+              "toolCallId": "gate1-call-TestRun",
+              "toolName": "SyntheticGate1Tool",
+              "transcriptEntryId": null,
+              "verifierName": null
+            },
+            "status": "ok",
+            "type": "TestRun"
+          }
+        ],
+        "missingRequirements": [],
+        "ok": true,
+        "requirementCoverage": [
+          "GitDiff",
+          "TestRun"
+        ],
+        "retryMessage": null,
+        "state": "pass"
+      }
+    ],
+    "contractsApply": true,
+    "dashboardAttached": false,
+    "enforcementAttached": false,
+    "evidenceRecords": [
+      {
+        "fields": {
+          "changedFiles": [
+            "synthetic_child.py"
+          ],
+          "status": "changed"
+        },
+        "metadata": {
+          "publicSafeFields": [
+            "status",
+            "changedFiles"
+          ]
+        },
+        "observedAt": 1800000001,
+        "preview": "synthetic child diff recorded",
+        "source": {
+          "acknowledgementId": null,
+          "artifactId": null,
+          "channel": null,
+          "contractId": null,
+          "eventId": null,
+          "extractorId": null,
+          "kind": "tool_trace",
+          "metadata": {
+            "agentId": "gate1-child-agent",
+            "executionId": "gate1-child-exec-fixture",
+            "parentExecutionId": "gate1-root-exec-fixture",
+            "policySnapshotId": "gate1-child-policy-snapshot",
+            "publicSafeFields": [
+              "status",
+              "changedFiles"
+            ],
+            "taskId": "gate1-task-local-child-envelope"
+          },
+          "toolCallId": "gate1-call-GitDiff",
+          "toolName": "SyntheticGate1Tool",
+          "transcriptEntryId": null,
+          "verifierName": null
+        },
+        "status": "ok",
+        "type": "GitDiff"
+      },
+      {
+        "fields": {
+          "command": "pytest synthetic_child_test.py",
+          "exitCode": 0,
+          "status": "passed"
+        },
+        "metadata": {
+          "publicSafeFields": [
+            "command",
+            "exitCode",
+            "status"
+          ]
+        },
+        "observedAt": 1800000001,
+        "preview": "synthetic child tests passed",
+        "source": {
+          "acknowledgementId": null,
+          "artifactId": null,
+          "channel": null,
+          "contractId": null,
+          "eventId": null,
+          "extractorId": null,
+          "kind": "tool_trace",
+          "metadata": {
+            "agentId": "gate1-child-agent",
+            "executionId": "gate1-child-exec-fixture",
+            "parentExecutionId": "gate1-root-exec-fixture",
+            "policySnapshotId": "gate1-child-policy-snapshot",
+            "publicSafeFields": [
+              "command",
+              "exitCode",
+              "status"
+            ],
+            "taskId": "gate1-task-local-child-envelope"
+          },
+          "toolCallId": "gate1-call-TestRun",
+          "toolName": "SyntheticGate1Tool",
+          "transcriptEntryId": null,
+          "verifierName": null
+        },
+        "status": "ok",
+        "type": "TestRun"
+      }
+    ],
+    "executionAttached": false,
+    "issuedBy": "openmagi_runtime_boundary",
+    "ledgerRef": {
+      "agentId": "gate1-child-agent",
+      "apiAttached": false,
+      "artifactRuntimeAttached": false,
+      "canaryAttached": false,
+      "childExecutionAttached": false,
+      "childLedgerRefs": [],
+      "dashboardAttached": false,
+      "enforcementAttached": false,
+      "executionAttached": false,
+      "executionId": "gate1-child-exec-fixture",
+      "ledgerId": "gate1-ledger-gate1-child-exec-fixture",
+      "parentExecutionId": "gate1-root-exec-fixture",
+      "policySnapshotId": "gate1-child-policy-snapshot",
+      "routeAttached": false,
+      "runnerAttached": false,
+      "sessionRuntimeAttached": false,
+      "taskId": "gate1-task-local-child-envelope",
+      "trafficAttached": false
+    },
+    "report": {
+      "auditFailures": [],
+      "blockingFailures": [],
+      "matchedTypes": [
+        "GitDiff",
+        "TestRun"
+      ],
+      "missingTypes": []
+    },
+    "routeAttached": false,
+    "runnerAttached": false,
+    "sessionRuntimeAttached": false,
+    "status": "completed",
+    "summary": "Synthetic child reports task success after contract verdict.",
+    "trafficAttached": false
+  },
+  "delegatedRequirementMatches": {
+    "aggregateRequired": {
+      "matchedEvidence": [],
+      "mode": "aggregate_required",
+      "reason": "aggregate_required requirement was not satisfied",
+      "requirement": {
+        "delegation": "aggregate_required",
+        "type": "TestRun"
+      },
+      "satisfied": false
+    },
+    "delegatedRequired": {
+      "matchedEvidence": [
+        {
+          "producedByParent": false,
+          "provenance": {
+            "agentId": "gate1-child-agent",
+            "executionId": "gate1-child-exec-fixture",
+            "ledgerId": "gate1-ledger-gate1-child-exec-fixture",
+            "parentExecutionId": "gate1-root-exec-fixture",
+            "policySnapshotId": "gate1-child-policy-snapshot",
+            "taskId": "gate1-task-local-child-envelope"
+          },
+          "record": {
+            "fields": {
+              "command": "pytest synthetic_child_test.py",
+              "exitCode": 0,
+              "status": "passed"
+            },
+            "metadata": {
+              "publicSafeFields": [
+                "command",
+                "exitCode",
+                "status"
+              ]
+            },
+            "observedAt": 1800000001,
+            "preview": "synthetic child tests passed",
+            "source": {
+              "acknowledgementId": null,
+              "artifactId": null,
+              "channel": null,
+              "contractId": null,
+              "eventId": null,
+              "extractorId": null,
+              "kind": "tool_trace",
+              "metadata": {
+                "agentId": "gate1-child-agent",
+                "executionId": "gate1-child-exec-fixture",
+                "parentExecutionId": "gate1-root-exec-fixture",
+                "policySnapshotId": "gate1-child-policy-snapshot",
+                "publicSafeFields": [
+                  "command",
+                  "exitCode",
+                  "status"
+                ],
+                "taskId": "gate1-task-local-child-envelope"
+              },
+              "toolCallId": "gate1-call-TestRun",
+              "toolName": "SyntheticGate1Tool",
+              "transcriptEntryId": null,
+              "verifierName": null
+            },
+            "status": "ok",
+            "type": "TestRun"
+          }
+        }
+      ],
+      "mode": "delegated_required",
+      "reason": null,
+      "requirement": {
+        "delegation": "delegated_required",
+        "type": "TestRun"
+      },
+      "satisfied": true
+    }
+  },
+  "naturalLanguageSummaryAsEvidence": {
+    "matchedEvidence": [],
+    "mode": null,
+    "reason": "Natural-language subagent summaries are never evidence.",
+    "requirement": null,
+    "satisfied": false
+  },
+  "parentAggregation": {
+    "apiAttached": false,
+    "artifactRuntimeAttached": false,
+    "auditChildFailures": [],
+    "blockingChildFailures": [],
+    "canaryAttached": false,
+    "childEnvelopes": [
+      {
+        "apiAttached": false,
+        "artifactRuntimeAttached": false,
+        "boundary": {
+          "agentId": "gate1-child-agent",
+          "agentRole": "coding",
+          "apiAttached": false,
+          "artifactRuntimeAttached": false,
+          "canaryAttached": false,
+          "childExecutionAttached": false,
+          "dashboardAttached": false,
+          "enforcementAttached": false,
+          "executionAttached": false,
+          "executionId": "gate1-child-exec-fixture",
+          "parentExecutionId": "gate1-root-exec-fixture",
+          "policyScope": "gate1-local-synthetic",
+          "policySnapshotId": "gate1-child-policy-snapshot",
+          "routeAttached": false,
+          "runOn": "child",
+          "runnerAttached": false,
+          "sessionRuntimeAttached": false,
+          "spawnDepth": 1,
+          "taskId": "gate1-task-local-child-envelope",
+          "trafficAttached": false,
+          "turnId": "gate1-turn-fixture"
+        },
+        "canaryAttached": false,
+        "childExecutionAttached": false,
+        "contractDefinitions": [
+          {
+            "description": null,
+            "executionAttached": false,
+            "id": "gate1-child-local-contract",
+            "onMissing": "block_final_answer",
+            "requirements": [
+              {
+                "after": null,
+                "commandPattern": null,
+                "exitCode": null,
+                "fields": {},
+                "type": "GitDiff"
+              },
+              {
+                "after": null,
+                "commandPattern": "^pytest synthetic_child_test\\.py$",
+                "exitCode": 0,
+                "fields": {},
+                "type": "TestRun"
+              }
+            ],
+            "retryMessage": null,
+            "scope": null,
+            "trafficAttached": false,
+            "triggers": [
+              "afterToolUse"
+            ],
+            "when": null
+          }
+        ],
+        "contractVerdicts": [
+          {
+            "contractId": "gate1-child-local-contract",
+            "enforcement": "block_final_answer",
+            "failures": [],
+            "matchedEvidence": [
+              {
+                "fields": {
+                  "changedFiles": [
+                    "synthetic_child.py"
+                  ],
+                  "status": "changed"
+                },
+                "metadata": {
+                  "publicSafeFields": [
+                    "status",
+                    "changedFiles"
+                  ]
+                },
+                "observedAt": 1800000001,
+                "preview": "synthetic child diff recorded",
+                "source": {
+                  "acknowledgementId": null,
+                  "artifactId": null,
+                  "channel": null,
+                  "contractId": null,
+                  "eventId": null,
+                  "extractorId": null,
+                  "kind": "tool_trace",
+                  "metadata": {
+                    "agentId": "gate1-child-agent",
+                    "executionId": "gate1-child-exec-fixture",
+                    "parentExecutionId": "gate1-root-exec-fixture",
+                    "policySnapshotId": "gate1-child-policy-snapshot",
+                    "publicSafeFields": [
+                      "status",
+                      "changedFiles"
+                    ],
+                    "taskId": "gate1-task-local-child-envelope"
+                  },
+                  "toolCallId": "gate1-call-GitDiff",
+                  "toolName": "SyntheticGate1Tool",
+                  "transcriptEntryId": null,
+                  "verifierName": null
+                },
+                "status": "ok",
+                "type": "GitDiff"
+              },
+              {
+                "fields": {
+                  "command": "pytest synthetic_child_test.py",
+                  "exitCode": 0,
+                  "status": "passed"
+                },
+                "metadata": {
+                  "publicSafeFields": [
+                    "command",
+                    "exitCode",
+                    "status"
+                  ]
+                },
+                "observedAt": 1800000001,
+                "preview": "synthetic child tests passed",
+                "source": {
+                  "acknowledgementId": null,
+                  "artifactId": null,
+                  "channel": null,
+                  "contractId": null,
+                  "eventId": null,
+                  "extractorId": null,
+                  "kind": "tool_trace",
+                  "metadata": {
+                    "agentId": "gate1-child-agent",
+                    "executionId": "gate1-child-exec-fixture",
+                    "parentExecutionId": "gate1-root-exec-fixture",
+                    "policySnapshotId": "gate1-child-policy-snapshot",
+                    "publicSafeFields": [
+                      "command",
+                      "exitCode",
+                      "status"
+                    ],
+                    "taskId": "gate1-task-local-child-envelope"
+                  },
+                  "toolCallId": "gate1-call-TestRun",
+                  "toolName": "SyntheticGate1Tool",
+                  "transcriptEntryId": null,
+                  "verifierName": null
+                },
+                "status": "ok",
+                "type": "TestRun"
+              }
+            ],
+            "missingRequirements": [],
+            "ok": true,
+            "requirementCoverage": [
+              "GitDiff",
+              "TestRun"
+            ],
+            "retryMessage": null,
+            "state": "pass"
+          }
+        ],
+        "contractsApply": true,
+        "dashboardAttached": false,
+        "enforcementAttached": false,
+        "evidenceRecords": [
+          {
+            "fields": {
+              "changedFiles": [
+                "synthetic_child.py"
+              ],
+              "status": "changed"
+            },
+            "metadata": {
+              "publicSafeFields": [
+                "status",
+                "changedFiles"
+              ]
+            },
+            "observedAt": 1800000001,
+            "preview": "synthetic child diff recorded",
+            "source": {
+              "acknowledgementId": null,
+              "artifactId": null,
+              "channel": null,
+              "contractId": null,
+              "eventId": null,
+              "extractorId": null,
+              "kind": "tool_trace",
+              "metadata": {
+                "agentId": "gate1-child-agent",
+                "executionId": "gate1-child-exec-fixture",
+                "parentExecutionId": "gate1-root-exec-fixture",
+                "policySnapshotId": "gate1-child-policy-snapshot",
+                "publicSafeFields": [
+                  "status",
+                  "changedFiles"
+                ],
+                "taskId": "gate1-task-local-child-envelope"
+              },
+              "toolCallId": "gate1-call-GitDiff",
+              "toolName": "SyntheticGate1Tool",
+              "transcriptEntryId": null,
+              "verifierName": null
+            },
+            "status": "ok",
+            "type": "GitDiff"
+          },
+          {
+            "fields": {
+              "command": "pytest synthetic_child_test.py",
+              "exitCode": 0,
+              "status": "passed"
+            },
+            "metadata": {
+              "publicSafeFields": [
+                "command",
+                "exitCode",
+                "status"
+              ]
+            },
+            "observedAt": 1800000001,
+            "preview": "synthetic child tests passed",
+            "source": {
+              "acknowledgementId": null,
+              "artifactId": null,
+              "channel": null,
+              "contractId": null,
+              "eventId": null,
+              "extractorId": null,
+              "kind": "tool_trace",
+              "metadata": {
+                "agentId": "gate1-child-agent",
+                "executionId": "gate1-child-exec-fixture",
+                "parentExecutionId": "gate1-root-exec-fixture",
+                "policySnapshotId": "gate1-child-policy-snapshot",
+                "publicSafeFields": [
+                  "command",
+                  "exitCode",
+                  "status"
+                ],
+                "taskId": "gate1-task-local-child-envelope"
+              },
+              "toolCallId": "gate1-call-TestRun",
+              "toolName": "SyntheticGate1Tool",
+              "transcriptEntryId": null,
+              "verifierName": null
+            },
+            "status": "ok",
+            "type": "TestRun"
+          }
+        ],
+        "executionAttached": false,
+        "issuedBy": "openmagi_runtime_boundary",
+        "ledgerRef": {
+          "agentId": "gate1-child-agent",
+          "apiAttached": false,
+          "artifactRuntimeAttached": false,
+          "canaryAttached": false,
+          "childExecutionAttached": false,
+          "childLedgerRefs": [],
+          "dashboardAttached": false,
+          "enforcementAttached": false,
+          "executionAttached": false,
+          "executionId": "gate1-child-exec-fixture",
+          "ledgerId": "gate1-ledger-gate1-child-exec-fixture",
+          "parentExecutionId": "gate1-root-exec-fixture",
+          "policySnapshotId": "gate1-child-policy-snapshot",
+          "routeAttached": false,
+          "runnerAttached": false,
+          "sessionRuntimeAttached": false,
+          "taskId": "gate1-task-local-child-envelope",
+          "trafficAttached": false
+        },
+        "report": {
+          "auditFailures": [],
+          "blockingFailures": [],
+          "matchedTypes": [
+            "GitDiff",
+            "TestRun"
+          ],
+          "missingTypes": []
+        },
+        "routeAttached": false,
+        "runnerAttached": false,
+        "sessionRuntimeAttached": false,
+        "status": "completed",
+        "summary": "Synthetic child reports task success after contract verdict.",
+        "trafficAttached": false
+      }
+    ],
+    "childExecutionAttached": false,
+    "compatiblePolicySnapshots": [
+      {
+        "apiAttached": false,
+        "artifactRuntimeAttached": false,
+        "canaryAttached": false,
+        "childExecutionAttached": false,
+        "childExecutionId": "gate1-child-exec-fixture",
+        "childPolicySnapshotId": "gate1-child-policy-snapshot",
+        "dashboardAttached": false,
+        "enforcementAttached": false,
+        "executionAttached": false,
+        "parentPolicySnapshotId": "gate1-parent-policy-snapshot",
+        "reason": "task_local_contracts",
+        "routeAttached": false,
+        "runnerAttached": false,
+        "sessionRuntimeAttached": false,
+        "taskId": "gate1-task-local-child-envelope",
+        "trafficAttached": false
+      }
+    ],
+    "dashboardAttached": false,
+    "enforcementAttached": false,
+    "executionAttached": false,
+    "parentBoundary": {
+      "agentId": "gate1-root-agent",
+      "agentRole": "coding",
+      "apiAttached": false,
+      "artifactRuntimeAttached": false,
+      "canaryAttached": false,
+      "childExecutionAttached": false,
+      "dashboardAttached": false,
+      "enforcementAttached": false,
+      "executionAttached": false,
+      "executionId": "gate1-root-exec-fixture",
+      "parentExecutionId": null,
+      "policyScope": "gate1-local-synthetic",
+      "policySnapshotId": "gate1-parent-policy-snapshot",
+      "routeAttached": false,
+      "runOn": "main",
+      "runnerAttached": false,
+      "sessionRuntimeAttached": false,
+      "spawnDepth": 0,
+      "taskId": null,
+      "trafficAttached": false,
+      "turnId": "gate1-turn-fixture"
+    },
+    "propagatedEvidence": [
+      {
+        "producedByParent": false,
+        "provenance": {
+          "agentId": "gate1-child-agent",
+          "executionId": "gate1-child-exec-fixture",
+          "ledgerId": "gate1-ledger-gate1-child-exec-fixture",
+          "parentExecutionId": "gate1-root-exec-fixture",
+          "policySnapshotId": "gate1-child-policy-snapshot",
+          "taskId": "gate1-task-local-child-envelope"
+        },
+        "record": {
+          "fields": {
+            "changedFiles": [
+              "synthetic_child.py"
+            ],
+            "status": "changed"
+          },
+          "metadata": {
+            "publicSafeFields": [
+              "status",
+              "changedFiles"
+            ]
+          },
+          "observedAt": 1800000001,
+          "preview": "synthetic child diff recorded",
+          "source": {
+            "acknowledgementId": null,
+            "artifactId": null,
+            "channel": null,
+            "contractId": null,
+            "eventId": null,
+            "extractorId": null,
+            "kind": "tool_trace",
+            "metadata": {
+              "agentId": "gate1-child-agent",
+              "executionId": "gate1-child-exec-fixture",
+              "parentExecutionId": "gate1-root-exec-fixture",
+              "policySnapshotId": "gate1-child-policy-snapshot",
+              "publicSafeFields": [
+                "status",
+                "changedFiles"
+              ],
+              "taskId": "gate1-task-local-child-envelope"
+            },
+            "toolCallId": "gate1-call-GitDiff",
+            "toolName": "SyntheticGate1Tool",
+            "transcriptEntryId": null,
+            "verifierName": null
+          },
+          "status": "ok",
+          "type": "GitDiff"
+        }
+      },
+      {
+        "producedByParent": false,
+        "provenance": {
+          "agentId": "gate1-child-agent",
+          "executionId": "gate1-child-exec-fixture",
+          "ledgerId": "gate1-ledger-gate1-child-exec-fixture",
+          "parentExecutionId": "gate1-root-exec-fixture",
+          "policySnapshotId": "gate1-child-policy-snapshot",
+          "taskId": "gate1-task-local-child-envelope"
+        },
+        "record": {
+          "fields": {
+            "command": "pytest synthetic_child_test.py",
+            "exitCode": 0,
+            "status": "passed"
+          },
+          "metadata": {
+            "publicSafeFields": [
+              "command",
+              "exitCode",
+              "status"
+            ]
+          },
+          "observedAt": 1800000001,
+          "preview": "synthetic child tests passed",
+          "source": {
+            "acknowledgementId": null,
+            "artifactId": null,
+            "channel": null,
+            "contractId": null,
+            "eventId": null,
+            "extractorId": null,
+            "kind": "tool_trace",
+            "metadata": {
+              "agentId": "gate1-child-agent",
+              "executionId": "gate1-child-exec-fixture",
+              "parentExecutionId": "gate1-root-exec-fixture",
+              "policySnapshotId": "gate1-child-policy-snapshot",
+              "publicSafeFields": [
+                "command",
+                "exitCode",
+                "status"
+              ],
+              "taskId": "gate1-task-local-child-envelope"
+            },
+            "toolCallId": "gate1-call-TestRun",
+            "toolName": "SyntheticGate1Tool",
+            "transcriptEntryId": null,
+            "verifierName": null
+          },
+          "status": "ok",
+          "type": "TestRun"
+        }
+      }
+    ],
+    "routeAttached": false,
+    "runnerAttached": false,
+    "sessionRuntimeAttached": false,
+    "state": "pass",
+    "trafficAttached": false
+  },
+  "parentApprovedPolicySnapshotCompatibility": {
+    "apiAttached": false,
+    "artifactRuntimeAttached": false,
+    "canaryAttached": false,
+    "childExecutionAttached": false,
+    "childExecutionId": "gate1-child-exec-fixture",
+    "childPolicySnapshotId": "gate1-child-policy-snapshot",
+    "dashboardAttached": false,
+    "enforcementAttached": false,
+    "executionAttached": false,
+    "parentPolicySnapshotId": "gate1-parent-policy-snapshot",
+    "reason": "task_local_contracts",
+    "routeAttached": false,
+    "runnerAttached": false,
+    "sessionRuntimeAttached": false,
+    "taskId": "gate1-task-local-child-envelope",
+    "trafficAttached": false
+  },
+  "publicAggregateReport": {
+    "apiAttached": false,
+    "artifactRuntimeAttached": false,
+    "canaryAttached": false,
+    "childExecutionAttached": false,
+    "children": [
+      {
+        "agentId": "agent:sha256:8a4db323593d980e812e77eb3041e8551d2e83afb2784d7927b19769cd432814",
+        "auditFailures": [],
+        "blockingFailures": [],
+        "evidence": [
+          {
+            "fields": {
+              "changedFiles": [
+                "synthetic_child.py"
+              ],
+              "status": "changed"
+            },
+            "metadata": {
+              "publicSafeFields": [
+                "status",
+                "changedFiles"
+              ]
+            },
+            "observedAt": 1800000001,
+            "preview": "synthetic child diff recorded",
+            "source": {
+              "kind": "tool_trace",
+              "metadata": {
+                "agentId": "agent:sha256:8a4db323593d980e812e77eb3041e8551d2e83afb2784d7927b19769cd432814",
+                "executionId": "exec:sha256:33d1992dcaf4f4bbd0fc0e30d2b9f1ef475a9d4f7dca3fa555c082bb07bfde27",
+                "parentExecutionId": "exec:sha256:206a338fb598d41fbfe6d494c600ce2349e0e3b86c1c001b327de7b20ce9edb1",
+                "policySnapshotId": "policy:sha256:cc639d9bbc487cc3886b913226ad50b07a77d3d0643367fdfe716d2c03939bd7",
+                "publicSafeFields": [
+                  "status",
+                  "changedFiles"
+                ],
+                "taskId": "task:sha256:acdb6ba1d2fc5c486e5a63b4104644bef62f9b1996944892261cc869a53593b1"
+              },
+              "toolCallId": "gate1-call-GitDiff",
+              "toolName": "SyntheticGate1Tool"
+            },
+            "status": "ok",
+            "type": "GitDiff"
+          },
+          {
+            "fields": {
+              "command": "pytest synthetic_child_test.py",
+              "exitCode": 0,
+              "status": "passed"
+            },
+            "metadata": {
+              "publicSafeFields": [
+                "command",
+                "exitCode",
+                "status"
+              ]
+            },
+            "observedAt": 1800000001,
+            "preview": "synthetic child tests passed",
+            "source": {
+              "kind": "tool_trace",
+              "metadata": {
+                "agentId": "agent:sha256:8a4db323593d980e812e77eb3041e8551d2e83afb2784d7927b19769cd432814",
+                "executionId": "exec:sha256:33d1992dcaf4f4bbd0fc0e30d2b9f1ef475a9d4f7dca3fa555c082bb07bfde27",
+                "parentExecutionId": "exec:sha256:206a338fb598d41fbfe6d494c600ce2349e0e3b86c1c001b327de7b20ce9edb1",
+                "policySnapshotId": "policy:sha256:cc639d9bbc487cc3886b913226ad50b07a77d3d0643367fdfe716d2c03939bd7",
+                "publicSafeFields": [
+                  "command",
+                  "exitCode",
+                  "status"
+                ],
+                "taskId": "task:sha256:acdb6ba1d2fc5c486e5a63b4104644bef62f9b1996944892261cc869a53593b1"
+              },
+              "toolCallId": "gate1-call-TestRun",
+              "toolName": "SyntheticGate1Tool"
+            },
+            "status": "ok",
+            "type": "TestRun"
+          }
+        ],
+        "executionId": "exec:sha256:33d1992dcaf4f4bbd0fc0e30d2b9f1ef475a9d4f7dca3fa555c082bb07bfde27",
+        "matchedTypes": [
+          "GitDiff",
+          "TestRun"
+        ],
+        "missingTypes": [],
+        "parentExecutionId": "exec:sha256:206a338fb598d41fbfe6d494c600ce2349e0e3b86c1c001b327de7b20ce9edb1",
+        "policySnapshotId": "policy:sha256:cc639d9bbc487cc3886b913226ad50b07a77d3d0643367fdfe716d2c03939bd7",
+        "status": "completed",
+        "taskId": "task:sha256:acdb6ba1d2fc5c486e5a63b4104644bef62f9b1996944892261cc869a53593b1",
+        "verdicts": [
+          {
+            "contractId": "gate1-child-local-contract",
+            "enforcement": "block_final_answer",
+            "executionAttached": false,
+            "failures": [],
+            "matchedEvidence": [
+              {
+                "fields": {
+                  "changedFiles": [
+                    "synthetic_child.py"
+                  ],
+                  "status": "changed"
+                },
+                "metadata": {
+                  "publicSafeFields": [
+                    "status",
+                    "changedFiles"
+                  ]
+                },
+                "observedAt": 1800000001,
+                "preview": "synthetic child diff recorded",
+                "source": {
+                  "kind": "tool_trace",
+                  "metadata": {
+                    "agentId": "agent:sha256:8a4db323593d980e812e77eb3041e8551d2e83afb2784d7927b19769cd432814",
+                    "executionId": "exec:sha256:33d1992dcaf4f4bbd0fc0e30d2b9f1ef475a9d4f7dca3fa555c082bb07bfde27",
+                    "parentExecutionId": "exec:sha256:206a338fb598d41fbfe6d494c600ce2349e0e3b86c1c001b327de7b20ce9edb1",
+                    "policySnapshotId": "policy:sha256:cc639d9bbc487cc3886b913226ad50b07a77d3d0643367fdfe716d2c03939bd7",
+                    "publicSafeFields": [
+                      "status",
+                      "changedFiles"
+                    ],
+                    "taskId": "task:sha256:acdb6ba1d2fc5c486e5a63b4104644bef62f9b1996944892261cc869a53593b1"
+                  },
+                  "toolCallId": "gate1-call-GitDiff",
+                  "toolName": "SyntheticGate1Tool"
+                },
+                "status": "ok",
+                "type": "GitDiff"
+              },
+              {
+                "fields": {
+                  "command": "pytest synthetic_child_test.py",
+                  "exitCode": 0,
+                  "status": "passed"
+                },
+                "metadata": {
+                  "publicSafeFields": [
+                    "command",
+                    "exitCode",
+                    "status"
+                  ]
+                },
+                "observedAt": 1800000001,
+                "preview": "synthetic child tests passed",
+                "source": {
+                  "kind": "tool_trace",
+                  "metadata": {
+                    "agentId": "agent:sha256:8a4db323593d980e812e77eb3041e8551d2e83afb2784d7927b19769cd432814",
+                    "executionId": "exec:sha256:33d1992dcaf4f4bbd0fc0e30d2b9f1ef475a9d4f7dca3fa555c082bb07bfde27",
+                    "parentExecutionId": "exec:sha256:206a338fb598d41fbfe6d494c600ce2349e0e3b86c1c001b327de7b20ce9edb1",
+                    "policySnapshotId": "policy:sha256:cc639d9bbc487cc3886b913226ad50b07a77d3d0643367fdfe716d2c03939bd7",
+                    "publicSafeFields": [
+                      "command",
+                      "exitCode",
+                      "status"
+                    ],
+                    "taskId": "task:sha256:acdb6ba1d2fc5c486e5a63b4104644bef62f9b1996944892261cc869a53593b1"
+                  },
+                  "toolCallId": "gate1-call-TestRun",
+                  "toolName": "SyntheticGate1Tool"
+                },
+                "status": "ok",
+                "type": "TestRun"
+              }
+            ],
+            "missingRequirements": [],
+            "ok": true,
+            "retryMessage": null,
+            "state": "pass",
+            "trafficAttached": false
+          }
+        ]
+      }
+    ],
+    "dashboardAttached": false,
+    "enforcementAttached": false,
+    "executionAttached": false,
+    "parentExecutionId": "exec:sha256:206a338fb598d41fbfe6d494c600ce2349e0e3b86c1c001b327de7b20ce9edb1",
+    "routeAttached": false,
+    "runnerAttached": false,
+    "sessionRuntimeAttached": false,
+    "state": "pass",
+    "trafficAttached": false
+  },
+  "rootBoundary": {
+    "agentId": "gate1-root-agent",
+    "agentRole": "coding",
+    "apiAttached": false,
+    "artifactRuntimeAttached": false,
+    "canaryAttached": false,
+    "childExecutionAttached": false,
+    "dashboardAttached": false,
+    "enforcementAttached": false,
+    "executionAttached": false,
+    "executionId": "gate1-root-exec-fixture",
+    "parentExecutionId": null,
+    "policyScope": "gate1-local-synthetic",
+    "policySnapshotId": "gate1-parent-policy-snapshot",
+    "routeAttached": false,
+    "runOn": "main",
+    "runnerAttached": false,
+    "sessionRuntimeAttached": false,
+    "spawnDepth": 0,
+    "taskId": null,
+    "trafficAttached": false,
+    "turnId": "gate1-turn-fixture"
+  },
+  "rootLedgerRef": {
+    "agentId": "gate1-root-agent",
+    "apiAttached": false,
+    "artifactRuntimeAttached": false,
+    "canaryAttached": false,
+    "childExecutionAttached": false,
+    "childLedgerRefs": [],
+    "dashboardAttached": false,
+    "enforcementAttached": false,
+    "executionAttached": false,
+    "executionId": "gate1-root-exec-fixture",
+    "ledgerId": "gate1-ledger-gate1-root-exec-fixture",
+    "parentExecutionId": null,
+    "policySnapshotId": "gate1-parent-policy-snapshot",
+    "routeAttached": false,
+    "runnerAttached": false,
+    "sessionRuntimeAttached": false,
+    "taskId": null,
+    "trafficAttached": false
+  }
+}

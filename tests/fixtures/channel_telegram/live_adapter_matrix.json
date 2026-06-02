@@ -1,0 +1,42 @@
+{
+  "surface": "openmagi.telegram-adapter",
+  "defaultOff": true,
+  "liveProviderCalls": "fake-provider-only",
+  "rows": [
+    {
+      "operation": "poll_updates",
+      "expectedStatus": "inbound_projected_local_fake",
+      "requires": ["selected telegram route", "fake provider", "scope digests"]
+    },
+    {
+      "operation": "send_message",
+      "expectedStatus": "sent_local_fake",
+      "requires": ["selected telegram route", "fake provider", "provider allowlist"]
+    },
+    {
+      "operation": "send_document",
+      "expectedStatus": "sent_local_fake",
+      "requires": ["artifact ref", "artifact receipt ref", "fake provider"]
+    },
+    {
+      "operation": "send_photo",
+      "expectedStatus": "sent_local_fake",
+      "requires": ["artifact ref", "artifact receipt ref", "fake provider"]
+    },
+    {
+      "operation": "send_typing",
+      "expectedStatus": "typing_recorded_local_fake",
+      "requires": ["selected telegram route", "fake provider"]
+    },
+    {
+      "operation": "download_file",
+      "expectedStatus": "download_intent",
+      "requires": ["safe filename", "allowed mime", "non-private URL", "fake provider"]
+    },
+    {
+      "operation": "mitigate_stale_webhook",
+      "expectedStatus": "webhook_mitigation_intent",
+      "requires": ["intent only", "no provider execution"]
+    }
+  ]
+}

@@ -1,0 +1,36 @@
+{
+  "approvalPolicyRef": "approval:research-readonly@1",
+  "effectivePolicySnapshotDigest": "sha256:e69f87df8be64db891cc8713ea9637023ce2db525c8f6b77652ea781b5984c0a",
+  "gateRefs": [
+    "gate:research-readonly"
+  ],
+  "modelTierPolicyRef": "model-tier:cheap-research@1",
+  "policyId": "policy:research-cited-brief",
+  "policyVersion": "1.0.0",
+  "projectionPolicyRef": "projection:evidence-first@1",
+  "recipeRefs": [
+    "recipe:research.cited-brief@1.0.0"
+  ],
+  "repairPolicyRef": "repair:bounded-3@1",
+  "sources": [
+    {
+      "authoritative": true,
+      "sourceDigest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+      "sourceName": "platform hard safety policy",
+      "sourceVersion": "2026-05-21.1"
+    },
+    {
+      "authoritative": true,
+      "sourceDigest": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+      "sourceName": "user agent.config.yaml",
+      "sourceVersion": "2026-05-21.1"
+    }
+  ],
+  "toolAllowlist": [
+    "SourceOpen",
+    "CitationVerify"
+  ],
+  "validatorRefs": [
+    "validator:quoteExactMatch@1"
+  ]
+}

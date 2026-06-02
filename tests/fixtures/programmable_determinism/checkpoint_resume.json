@@ -1,0 +1,25 @@
+{
+  "checkpoint": {
+    "checkpointId": "checkpoint-001",
+    "contextProjectionDigest": "sha256:4444444444444444444444444444444444444444444444444444444444444444",
+    "createdAt": "2026-05-22T12:00:00Z",
+    "effectivePolicySnapshotDigest": "sha256:3333333333333333333333333333333333333333333333333333333333333333",
+    "ledgerHeadDigest": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+    "pendingApprovalRefs": [
+      "approval:read-file"
+    ],
+    "resumable": true,
+    "runId": "run-001",
+    "stateDigest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+    "stepId": "step-003",
+    "workflowVersion": "1.0.0"
+  },
+  "resumeRequest": {
+    "authorityScopeWouldExpand": false,
+    "effectivePolicySnapshotAvailable": true,
+    "effectivePolicySnapshotDigest": "sha256:3333333333333333333333333333333333333333333333333333333333333333",
+    "ledgerHeadDigest": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+    "pendingApprovalExpired": false,
+    "requiredEvidenceMissing": false
+  }
+}

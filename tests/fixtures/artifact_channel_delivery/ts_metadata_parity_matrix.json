@@ -1,0 +1,362 @@
+{
+  "fixtureId": "artifact_channel_ts_metadata_parity_0001",
+  "version": 1,
+  "localDiagnostic": true,
+  "attachmentFlags": {
+    "adkRunnerInvoked": false,
+    "adkArtifactServiceCalled": false,
+    "liveToolDispatched": false,
+    "artifactWritten": false,
+    "channelDeliveryPerformed": false,
+    "telegramPollingAttached": false,
+    "telegramAttached": false,
+    "memoryProviderCalled": false,
+    "productionStorageWritten": false,
+    "routeOrApiAttached": false,
+    "canaryTrafficAttached": false,
+    "evidenceBlockEnabled": false,
+    "productionAuthority": false
+  },
+  "cases": [
+    {
+      "caseId": "output_registry_document_metadata",
+      "caseType": "output_registry_metadata",
+      "toolName": "OutputArtifactRegistry",
+      "outputArtifact": {
+        "artifactId": "artifact_market_brief_pdf",
+        "sessionKey": "agent:main:app:general:metadata",
+        "turnId": "turn-ts-metadata-001",
+        "kind": "document",
+        "format": "pdf",
+        "title": "Market Brief",
+        "filename": "market-brief.pdf",
+        "mimeType": "application/pdf",
+        "workspacePathPreview": "outputs/market-brief.pdf",
+        "previewKind": "download-only",
+        "createdByTool": "DocumentWrite",
+        "sourceKind": "tool",
+        "createdAt": 1779120000000,
+        "updatedAt": 1779120000100
+      },
+      "artifactProvenance": {
+        "title": "Market Brief",
+        "slug": "market-brief",
+        "producedBy": "DocumentWrite",
+        "sources": [
+          "src_1",
+          "artifact:prior-analysis"
+        ],
+        "spawnTaskId": "spawn_task_market_research",
+        "importedFromArtifactId": "child_artifact_market_brief"
+      },
+      "deliveryClaimAllowed": false,
+      "reasonCodes": [
+        "output_registry_metadata_only"
+      ],
+      "attachmentFlags": {
+        "adkRunnerInvoked": false,
+        "adkArtifactServiceCalled": false,
+        "liveToolDispatched": false,
+        "artifactWritten": false,
+        "channelDeliveryPerformed": false,
+        "telegramPollingAttached": false,
+        "telegramAttached": false,
+        "memoryProviderCalled": false,
+        "productionStorageWritten": false,
+        "routeOrApiAttached": false,
+        "canaryTrafficAttached": false,
+        "evidenceBlockEnabled": false,
+        "productionAuthority": false
+      }
+    },
+    {
+      "caseId": "file_deliver_chat_attachment_marker",
+      "caseType": "file_deliver_attachment_marker",
+      "toolName": "FileDeliver",
+      "deliveryRecord": {
+        "target": "chat",
+        "status": "sent",
+        "attemptCount": 1,
+        "externalId": "00000000-0000-4000-8000-000000000001",
+        "marker": "[attachment:00000000-0000-4000-8000-000000000001:market-brief.pdf]",
+        "deliveryAck": "attachment_marker",
+        "deliveredAt": 1779120010000,
+        "updatedAt": 1779120010000
+      },
+      "deliveryClaimAllowed": true,
+      "reasonCodes": [
+        "attachment_marker_receipt"
+      ],
+      "attachmentFlags": {
+        "adkRunnerInvoked": false,
+        "adkArtifactServiceCalled": false,
+        "liveToolDispatched": false,
+        "artifactWritten": false,
+        "channelDeliveryPerformed": false,
+        "telegramPollingAttached": false,
+        "telegramAttached": false,
+        "memoryProviderCalled": false,
+        "productionStorageWritten": false,
+        "routeOrApiAttached": false,
+        "canaryTrafficAttached": false,
+        "evidenceBlockEnabled": false,
+        "productionAuthority": false
+      }
+    },
+    {
+      "caseId": "file_send_direct_provider_receipt",
+      "caseType": "file_send_provider_receipt",
+      "toolName": "FileSend",
+      "deliveryRecord": {
+        "target": "chat",
+        "status": "sent",
+        "attemptCount": 1,
+        "externalId": "telegram:1234:987",
+        "providerMessageId": "987",
+        "deliveryAck": "provider_message_receipt",
+        "deliveredAt": 1779120020000,
+        "updatedAt": 1779120020000
+      },
+      "deliveryClaimAllowed": true,
+      "reasonCodes": [
+        "provider_message_receipt"
+      ],
+      "attachmentFlags": {
+        "adkRunnerInvoked": false,
+        "adkArtifactServiceCalled": false,
+        "liveToolDispatched": false,
+        "artifactWritten": false,
+        "channelDeliveryPerformed": false,
+        "telegramPollingAttached": false,
+        "telegramAttached": false,
+        "memoryProviderCalled": false,
+        "productionStorageWritten": false,
+        "routeOrApiAttached": false,
+        "canaryTrafficAttached": false,
+        "evidenceBlockEnabled": false,
+        "productionAuthority": false
+      }
+    },
+    {
+      "caseId": "file_deliver_kb_write_receipt",
+      "caseType": "file_deliver_kb_write_receipt",
+      "toolName": "FileDeliver",
+      "deliveryRecord": {
+        "target": "kb",
+        "status": "sent",
+        "attemptCount": 1,
+        "externalId": "artifacts/market-brief.pdf",
+        "deliveryAck": "kb_write_receipt",
+        "deliveredAt": 1779120030000,
+        "updatedAt": 1779120030000
+      },
+      "deliveryClaimAllowed": true,
+      "reasonCodes": [
+        "kb_write_receipt"
+      ],
+      "attachmentFlags": {
+        "adkRunnerInvoked": false,
+        "adkArtifactServiceCalled": false,
+        "liveToolDispatched": false,
+        "artifactWritten": false,
+        "channelDeliveryPerformed": false,
+        "telegramPollingAttached": false,
+        "telegramAttached": false,
+        "memoryProviderCalled": false,
+        "productionStorageWritten": false,
+        "routeOrApiAttached": false,
+        "canaryTrafficAttached": false,
+        "evidenceBlockEnabled": false,
+        "productionAuthority": false
+      }
+    },
+    {
+      "caseId": "file_deliver_path_escape_rejected",
+      "caseType": "file_deliver_path_escape",
+      "toolName": "FileDeliver",
+      "outputArtifact": {
+        "artifactId": "artifact_rejected_path_escape",
+        "sessionKey": "agent:main:app:general:metadata",
+        "turnId": "turn-ts-metadata-005",
+        "kind": "file",
+        "format": "txt",
+        "title": "Rejected Path Escape",
+        "filename": "rejected-path-escape.txt",
+        "mimeType": "text/plain",
+        "workspacePathPreview": "outputs/rejected-path-escape.txt",
+        "previewKind": "none",
+        "createdByTool": "FileDeliver",
+        "sourceKind": "path_safety_probe",
+        "createdAt": 1779120040000,
+        "updatedAt": 1779120040000
+      },
+      "deliveryRecord": {
+        "target": "chat",
+        "status": "failed",
+        "attemptCount": 1,
+        "externalId": "path-safety:rejected",
+        "errorMessage": "path escape rejected before delivery",
+        "updatedAt": 1779120040000
+      },
+      "deliveryClaimAllowed": false,
+      "reasonCodes": [
+        "path_escape_rejected"
+      ],
+      "attachmentFlags": {
+        "adkRunnerInvoked": false,
+        "adkArtifactServiceCalled": false,
+        "liveToolDispatched": false,
+        "artifactWritten": false,
+        "channelDeliveryPerformed": false,
+        "telegramPollingAttached": false,
+        "telegramAttached": false,
+        "memoryProviderCalled": false,
+        "productionStorageWritten": false,
+        "routeOrApiAttached": false,
+        "canaryTrafficAttached": false,
+        "evidenceBlockEnabled": false,
+        "productionAuthority": false
+      }
+    },
+    {
+      "caseId": "file_send_missing_provider_receipt",
+      "caseType": "file_send_missing_provider_receipt",
+      "toolName": "FileSend",
+      "deliveryRecord": {
+        "target": "chat",
+        "status": "sent",
+        "attemptCount": 1,
+        "externalId": "telegram:1234:987",
+        "deliveredAt": 1779120050000,
+        "updatedAt": 1779120050000
+      },
+      "deliveryClaimAllowed": false,
+      "reasonCodes": [
+        "provider_message_receipt_missing"
+      ],
+      "attachmentFlags": {
+        "adkRunnerInvoked": false,
+        "adkArtifactServiceCalled": false,
+        "liveToolDispatched": false,
+        "artifactWritten": false,
+        "channelDeliveryPerformed": false,
+        "telegramPollingAttached": false,
+        "telegramAttached": false,
+        "memoryProviderCalled": false,
+        "productionStorageWritten": false,
+        "routeOrApiAttached": false,
+        "canaryTrafficAttached": false,
+        "evidenceBlockEnabled": false,
+        "productionAuthority": false
+      }
+    },
+    {
+      "caseId": "source_delivery_channel_identity",
+      "caseType": "channel_identity",
+      "toolName": "ChannelDispatcher",
+      "sourceChannel": {
+        "type": "telegram",
+        "channelId": "telegram-chat-1234",
+        "messageId": "upstream-message-55",
+        "userId": "telegram-user-77"
+      },
+      "deliveryChannel": {
+        "type": "telegram",
+        "channelId": "telegram-chat-1234"
+      },
+      "deliveryClaimAllowed": false,
+      "reasonCodes": [
+        "source_channel_matches_delivery_channel"
+      ],
+      "attachmentFlags": {
+        "adkRunnerInvoked": false,
+        "adkArtifactServiceCalled": false,
+        "liveToolDispatched": false,
+        "artifactWritten": false,
+        "channelDeliveryPerformed": false,
+        "telegramPollingAttached": false,
+        "telegramAttached": false,
+        "memoryProviderCalled": false,
+        "productionStorageWritten": false,
+        "routeOrApiAttached": false,
+        "canaryTrafficAttached": false,
+        "evidenceBlockEnabled": false,
+        "productionAuthority": false
+      }
+    },
+    {
+      "caseId": "web_app_file_send_unsupported_metadata",
+      "caseType": "web_app_file_send_unsupported",
+      "toolName": "FileSend",
+      "unsupportedFileSendChannels": [
+        "web",
+        "app"
+      ],
+      "deliveryClaimAllowed": false,
+      "reasonCodes": [
+        "web_app_file_send_unsupported_without_delivery"
+      ],
+      "attachmentFlags": {
+        "adkRunnerInvoked": false,
+        "adkArtifactServiceCalled": false,
+        "liveToolDispatched": false,
+        "artifactWritten": false,
+        "channelDeliveryPerformed": false,
+        "telegramPollingAttached": false,
+        "telegramAttached": false,
+        "memoryProviderCalled": false,
+        "productionStorageWritten": false,
+        "routeOrApiAttached": false,
+        "canaryTrafficAttached": false,
+        "evidenceBlockEnabled": false,
+        "productionAuthority": false
+      }
+    },
+    {
+      "caseId": "file_deliver_both_chat_and_kb_receipts",
+      "caseType": "file_deliver_both_chat_and_kb_receipts",
+      "toolName": "FileDeliver",
+      "requestedTarget": "both",
+      "deliveryRecords": [
+        {
+          "target": "chat",
+          "status": "sent",
+          "attemptCount": 1,
+          "externalId": "00000000-0000-4000-8000-000000000002",
+          "marker": "[attachment:00000000-0000-4000-8000-000000000002:market-brief.pdf]",
+          "deliveryAck": "attachment_marker",
+          "deliveredAt": 1779120060000,
+          "updatedAt": 1779120060000
+        },
+        {
+          "target": "kb",
+          "status": "sent",
+          "attemptCount": 1,
+          "externalId": "artifacts/market-brief-both.pdf",
+          "deliveryAck": "kb_write_receipt",
+          "deliveredAt": 1779120060100,
+          "updatedAt": 1779120060100
+        }
+      ],
+      "deliveryClaimAllowed": true,
+      "reasonCodes": [
+        "file_deliver_both_chat_and_kb_receipts"
+      ],
+      "attachmentFlags": {
+        "adkRunnerInvoked": false,
+        "adkArtifactServiceCalled": false,
+        "liveToolDispatched": false,
+        "artifactWritten": false,
+        "channelDeliveryPerformed": false,
+        "telegramPollingAttached": false,
+        "telegramAttached": false,
+        "memoryProviderCalled": false,
+        "productionStorageWritten": false,
+        "routeOrApiAttached": false,
+        "canaryTrafficAttached": false,
+        "evidenceBlockEnabled": false,
+        "productionAuthority": false
+      }
+    }
+  ]
+}

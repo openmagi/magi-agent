@@ -1,0 +1,1141 @@
+{
+  "schemaVersion": "codexClassWorkAgentProductPlaneMatrix.v1",
+  "generatedFor": "python-adk-codex-class-product-plane-composable-rollout",
+  "rows": [
+    {
+      "id": "product_plane_matrix_overlap_audit",
+      "capability": "Latest-main product-plane reconciliation matrix and overlap audit",
+      "requestedBySourcePlan": [
+        "product_plane_composable_rollout",
+        "codex_class_work_agent_product_plane"
+      ],
+      "sourcePlanAnchors": [
+        "P0 complete product-plane gap matrix",
+        "PR1 Product-Plane Matrix And Overlap Audit"
+      ],
+      "latestMainCoveredRefs": [
+        {
+          "path": "README.md",
+          "state": "existing"
+        },
+        {
+          "path": "pyproject.toml",
+          "state": "existing"
+        },
+        {
+          "path": "tests/fixtures/parity/e2e_harness_parity_matrix.json",
+          "state": "existing"
+        },
+        {
+          "path": "tests/fixtures/parity/memory_self_improvement_mission_matrix.json",
+          "state": "existing"
+        }
+      ],
+      "overlapWithQueuedLoops": [
+        "coding_research_general_automation",
+        "memory_mission_self_improvement"
+      ],
+      "missingImplementation": [
+        {
+          "path": "tests/planned_product_plane/pr01_no_runtime_behavior_change.py",
+          "state": "planned_missing"
+        }
+      ],
+      "owningLayer": "Tests/docs only",
+      "adkPrimitive": "audit fixture only",
+      "prSliceAssignment": "PR1",
+      "dependencies": [],
+      "activationGate": "documentation-only audit gate",
+      "implementationStatus": "contract_only",
+      "defaultOff": true,
+      "trafficAttached": false,
+      "productionAuthority": false,
+      "requiredProofs": [
+        "matrix_rows_have_owning_layer_activation_gate_required_proofs_default_off_state_and_status",
+        "no_runtime_behavior_change"
+      ],
+      "frontendAdminFollowUp": false,
+      "deploymentDbOpsFollowUp": false,
+      "notes": "PR1 records product-plane ownership and overlap with prior loops without changing runtime behavior."
+    },
+    {
+      "id": "runtime_ops_events_metrics",
+      "capability": "Sanitized runtime operation events, trace envelopes, metrics, and public projections",
+      "requestedBySourcePlan": [
+        "production_operating_plane",
+        "runtime_ops_traces_metrics"
+      ],
+      "sourcePlanAnchors": [
+        "Product operations: structured runtime events, trace envelopes, metrics",
+        "PR2 Runtime Operations Events And Metrics"
+      ],
+      "latestMainCoveredRefs": [
+        {
+          "path": "openmagi_core_agent/telemetry/deterministic_events.py",
+          "state": "existing"
+        },
+        {
+          "path": "openmagi_core_agent/telemetry/logging.py",
+          "state": "existing"
+        },
+        {
+          "path": "openmagi_core_agent/transport/health.py",
+          "state": "existing"
+        },
+        {
+          "path": "tests/test_deterministic_events_contract.py",
+          "state": "existing"
+        },
+        {
+          "path": "openmagi_core_agent/ops/__init__.py",
+          "state": "existing"
+        },
+        {
+          "path": "openmagi_core_agent/ops/contracts.py",
+          "state": "existing"
+        },
+        {
+          "path": "openmagi_core_agent/ops/health.py",
+          "state": "existing"
+        },
+        {
+          "path": "openmagi_core_agent/ops/metrics.py",
+          "state": "existing"
+        },
+        {
+          "path": "openmagi_core_agent/ops/recorder.py",
+          "state": "existing"
+        },
+        {
+          "path": "openmagi_core_agent/ops/runtime_events.py",
+          "state": "existing"
+        },
+        {
+          "path": "openmagi_core_agent/ops/safety.py",
+          "state": "existing"
+        },
+        {
+          "path": "openmagi_core_agent/ops/traces.py",
+          "state": "existing"
+        },
+        {
+          "path": "tests/test_ops_runtime_contracts.py",
+          "state": "existing"
+        }
+      ],
+      "overlapWithQueuedLoops": [
+        "deterministic_runtime_contracts",
+        "memory_mission_self_improvement"
+      ],
+      "missingImplementation": [],
+      "owningLayer": "Core substrate",
+      "adkPrimitive": "ADK callbacks for operation, guardrail, approval, and tool lifecycle observation",
+      "prSliceAssignment": "PR2",
+      "dependencies": [
+        "product_plane_matrix_overlap_audit"
+      ],
+      "activationGate": "default-off local projection only; no public telemetry authority",
+      "implementationStatus": "local_fake",
+      "defaultOff": true,
+      "trafficAttached": false,
+      "productionAuthority": false,
+      "requiredProofs": [
+        "reject_raw_prompt_hidden_reasoning_credentials_tokens_cookies_auth_headers_private_paths_and_raw_tool_output",
+        "digest_or_ref_only_public_projection"
+      ],
+      "frontendAdminFollowUp": true,
+      "deploymentDbOpsFollowUp": true,
+      "notes": "PR2 adds default-off local runtime operation events, trace snapshots, metrics, and digest-only public projections without production telemetry authority."
+    },
+    {
+      "id": "durable_job_queue_lifecycle",
+      "capability": "Durable job lifecycle records, leases, retries, idempotency, cancellation, timeout, and dead-letter states",
+      "requestedBySourcePlan": [
+        "durable_job_queue_and_lifecycle"
+      ],
+      "sourcePlanAnchors": [
+        "Durable job lifecycle: queue records, leases, retries, dead-letter states",
+        "PR3 Durable Job Queue Lifecycle Contracts"
+      ],
+      "latestMainCoveredRefs": [
+        {
+          "path": "openmagi_core_agent/runtime/long_running_activity.py",
+          "state": "existing"
+        },
+        {
+          "path": "openmagi_core_agent/missions/background_tasks.py",
+          "state": "existing"
+        },
+        {
+          "path": "tests/test_background_task_activity_boundary.py",
+          "state": "existing"
+        },
+        {
+          "path": "openmagi_core_agent/ops/job_queue.py",
+          "state": "existing"
+        },
+        {
+          "path": "tests/test_ops_job_queue.py",
+          "state": "existing"
+        }
+      ],
+      "overlapWithQueuedLoops": [
+        "memory_mission_self_improvement"
+      ],
+      "missingImplementation": [],
+      "owningLayer": "Core substrate",
+      "adkPrimitive": "ADK LongRunningFunctionTool for individual long tool jobs where applicable",
+      "prSliceAssignment": "PR3",
+      "dependencies": [
+        "runtime_ops_events_metrics",
+        "oss_durable_store_sqlite_runtime_state"
+      ],
+      "activationGate": "local fake queue only; no production workers or background ticks",
+      "implementationStatus": "local_fake",
+      "defaultOff": true,
+      "trafficAttached": false,
+      "productionAuthority": false,
+      "requiredProofs": [
+        "disabled_queued_duplicate_running_completed_failed_dead_letter_states",
+        "idempotency_kill_switch_cancel_timeout_receipts",
+        "no_worker_attachment"
+      ],
+      "frontendAdminFollowUp": true,
+      "deploymentDbOpsFollowUp": true,
+      "notes": "PR3 adds a default-off local in-memory job queue lifecycle contract with deterministic receipts; durable SQLite read model remains PR5 work."
+    },
+    {
+      "id": "sandbox_isolation_contracts",
+      "capability": "Filesystem, network, process, browser, and child-workspace sandbox decision contracts",
+      "requestedBySourcePlan": [
+        "sandbox_and_isolation"
+      ],
+      "sourcePlanAnchors": [
+        "Sandbox policy: filesystem, network, process, browser, and child-workspace decisions",
+        "PR4 Sandbox And Isolation Contracts"
+      ],
+      "latestMainCoveredRefs": [
+        {
+          "path": "openmagi_core_agent/plugins/sandbox_policy.py",
+          "state": "existing"
+        },
+        {
+          "path": "openmagi_core_agent/tools/permission.py",
+          "state": "existing"
+        },
+        {
+          "path": "tests/test_plugin_sandbox_trust_boundary_contract.py",
+          "state": "existing"
+        },
+        {
+          "path": "tests/test_workspace_isolation_contract.py",
+          "state": "existing"
+        },
+        {
+          "path": "openmagi_core_agent/sandbox/__init__.py",
+          "state": "existing"
+        },
+        {
+          "path": "openmagi_core_agent/sandbox/policy.py",
+          "state": "existing"
+        },
+        {
+          "path": "openmagi_core_agent/sandbox/filesystem.py",
+          "state": "existing"
+        },
+        {
+          "path": "openmagi_core_agent/sandbox/network.py",
+          "state": "existing"
+        },
+        {
+          "path": "openmagi_core_agent/sandbox/process.py",
+          "state": "existing"
+        },
+        {
+          "path": "openmagi_core_agent/sandbox/browser.py",
+          "state": "existing"
+        },
+        {
+          "path": "openmagi_core_agent/sandbox/child_workspace.py",
+          "state": "existing"
+        },
+        {
+          "path": "tests/test_sandbox_policy.py",
+          "state": "existing"
+        }
+      ],
+      "overlapWithQueuedLoops": [
+        "coding_research_general_automation",
+        "memory_mission_self_improvement"
+      ],
+      "missingImplementation": [],
+      "owningLayer": "Core substrate",
+      "adkPrimitive": "ADK FunctionTool callback guard boundary",
+      "prSliceAssignment": "PR4",
+      "dependencies": [
+        "runtime_ops_events_metrics"
+      ],
+      "activationGate": "decision contracts only; no commands, sockets, browser workers, or child workspace execution",
+      "implementationStatus": "local_fake",
+      "defaultOff": true,
+      "trafficAttached": false,
+      "productionAuthority": false,
+      "requiredProofs": [
+        "deny_workspace_escape_sealed_writes_secret_env_private_network_metadata_endpoints_credential_urls_process_escape",
+        "decision_only_no_execution"
+      ],
+      "frontendAdminFollowUp": true,
+      "deploymentDbOpsFollowUp": true,
+      "notes": "PR4 adds default-off decision-only sandbox contracts for filesystem, network, process, browser, and child workspace isolation. No commands, sockets, browser workers, child execution, or production authority are attached."
+    },
+    {
+      "id": "oss_durable_store_sqlite_runtime_state",
+      "capability": "OSS-first DurableStore abstraction with in-memory tests, PVC-backed SQLite default, optional hosted adapter, and filesystem/object artifact blobs",
+      "requestedBySourcePlan": [
+        "durable_state",
+        "oss_first_durable_runtime_storage"
+      ],
+      "sourcePlanAnchors": [
+        "Additional OSS-first DurableStore requirement",
+        "PR5 Content-Addressed Durable State And Checkpoint Contracts"
+      ],
+      "latestMainCoveredRefs": [
+        {
+          "path": "openmagi_core_agent/storage/durable_store.py",
+          "state": "existing"
+        },
+        {
+          "path": "openmagi_core_agent/storage/memory_store.py",
+          "state": "existing"
+        },
+        {
+          "path": "openmagi_core_agent/storage/sqlite_store.py",
+          "state": "existing"
+        },
+        {
+          "path": "openmagi_core_agent/storage/content_addressed.py",
+          "state": "existing"
+        },
+        {
+          "path": "tests/test_durable_store_contract.py",
+          "state": "existing"
+        },
+        {
+          "path": "tests/test_storage_content_addressed.py",
+          "state": "existing"
+        },
+        {
+          "path": "tests/test_storage_turn_checkpoint.py",
+          "state": "existing"
+        }
+      ],
+      "overlapWithQueuedLoops": [
+        "memory_mission_self_improvement"
+      ],
+      "missingImplementation": [],
+      "owningLayer": "Core substrate",
+      "adkPrimitive": "ADK SessionService, MemoryService, and ArtifactService boundaries plus OpenMagi DurableStore metadata interface",
+      "prSliceAssignment": "PR5",
+      "dependencies": [
+        "product_plane_matrix_overlap_audit"
+      ],
+      "activationGate": "memory or per-bot PVC-backed SQLite only; hosted sync optional; SQLite multi-writer across pods blocked",
+      "implementationStatus": "local_fake",
+      "defaultOff": true,
+      "trafficAttached": false,
+      "productionAuthority": false,
+      "requiredProofs": [
+        "OPENMAGI_DURABLE_STORE_sqlite_postgres_memory_config_model",
+        "OPENMAGI_DURABLE_SQLITE_PATH_OPENMAGI_DURABLE_SQLITE_WAL_OPENMAGI_DURABLE_SQLITE_BUSY_TIMEOUT_MS_config_model",
+        "OPENMAGI_ARTIFACT_STORE_filesystem_object_config_model",
+        "OPENMAGI_ARTIFACT_PATH_and_OPENMAGI_RUNTIME_EXPORT_PATH_config_model",
+        "sessions_checkpoints_replay_fork_receipts_evidence_job_policy_artifact_eval_delivery_credential_lease_metadata_indexes",
+        "artifact_blobs_not_stored_in_sqlite",
+        "no_raw_prompts_outputs_auth_cookies_session_keys_tokens_secret_material_or_large_artifact_blobs_in_sqlite",
+        "hosted_postgres_adapter_disabled_boundary",
+        "backup_export_digest_only_no_blob_or_secret_material",
+        "sqlite_multi_writer_blocker",
+        "explicit_schema_migration_backup_export_corruption_contracts"
+      ],
+      "frontendAdminFollowUp": false,
+      "deploymentDbOpsFollowUp": true,
+      "notes": "PR5 closes product-plane DurableStore proofs with runtime metadata indexes, disabled hosted adapter boundary, backup/export contracts, and content-addressed checkpoint records. SQLite remains per-bot/PVC local metadata only; artifact blobs stay outside SQLite."
+    },
+    {
+      "id": "content_addressed_state_checkpoint_replay",
+      "capability": "Content-addressed state records, checkpoint lineage, replay, fork, append-only semantics, and no replay side effects",
+      "requestedBySourcePlan": [
+        "content_addressed_state_checkpoints_replay"
+      ],
+      "sourcePlanAnchors": [
+        "Durable state: content-addressed state records, checkpoint links, replay/fork semantics",
+        "PR5 Content-Addressed Durable State And Checkpoint Contracts"
+      ],
+      "latestMainCoveredRefs": [
+        {
+          "path": "openmagi_core_agent/runtime/checkpointing.py",
+          "state": "existing"
+        },
+        {
+          "path": "openmagi_core_agent/evidence/ledger_semantics.py",
+          "state": "existing"
+        },
+        {
+          "path": "tests/test_checkpoint_resume_replay_fork_contract.py",
+          "state": "existing"
+        },
+        {
+          "path": "tests/test_policy_evaluation_snapshot_contract.py",
+          "state": "existing"
+        },
+        {
+          "path": "openmagi_core_agent/storage/content_addressed.py",
+          "state": "existing"
+        },
+        {
+          "path": "tests/test_storage_content_addressed.py",
+          "state": "existing"
+        },
+        {
+          "path": "tests/test_storage_turn_checkpoint.py",
+          "state": "existing"
+        }
+      ],
+      "overlapWithQueuedLoops": [
+        "coding_research_general_automation",
+        "memory_mission_self_improvement"
+      ],
+      "missingImplementation": [],
+      "owningLayer": "Core substrate",
+      "adkPrimitive": "ADK SessionService checkpoint boundary",
+      "prSliceAssignment": "PR5",
+      "dependencies": [
+        "oss_durable_store_sqlite_runtime_state"
+      ],
+      "activationGate": "local store only; replay/fork is read-only and side-effect free",
+      "implementationStatus": "local_fake",
+      "defaultOff": true,
+      "trafficAttached": false,
+      "productionAuthority": false,
+      "requiredProofs": [
+        "content_digest_parent_ledger_policy_snapshot_context_projection",
+        "append_only_records",
+        "safe_content_payload_rehydration_by_digest",
+        "replay_side_effect_denial",
+        "fork_side_effect_denial",
+        "old_runs_keep_original_effective_policy_snapshot"
+      ],
+      "frontendAdminFollowUp": true,
+      "deploymentDbOpsFollowUp": true,
+      "notes": "PR5 adds content-addressed JSON and stored turn checkpoint contracts that bind parent ledger, policy snapshot, context projection, replay/fork lineage, and side-effect-free replay decisions."
+    },
+    {
+      "id": "tenant_auth_billing_quota_spend_guard",
+      "capability": "Tenant context, authority scope, quota decisions, spend reservation, commit, release, and fail-closed denial states",
+      "requestedBySourcePlan": [
+        "tenant_auth_billing_quota_spend_guard"
+      ],
+      "sourcePlanAnchors": [
+        "Tenant/billing/quota: tenant context, spend reservation, quota decisions",
+        "PR6 Tenant, Billing, Quota, And Spend Guard Contracts"
+      ],
+      "latestMainCoveredRefs": [
+        {
+          "path": "openmagi_core_agent/runtime/request_shape.py",
+          "state": "existing"
+        },
+        {
+          "path": "openmagi_core_agent/gates/gate1a_readonly_tools.py",
+          "state": "existing"
+        },
+        {
+          "path": "tests/test_request_shape_reliability_ledger.py",
+          "state": "existing"
+        },
+        {
+          "path": "openmagi_core_agent/tenancy/__init__.py",
+          "state": "existing"
+        },
+        {
+          "path": "openmagi_core_agent/tenancy/context.py",
+          "state": "existing"
+        },
+        {
+          "path": "openmagi_core_agent/billing/__init__.py",
+          "state": "existing"
+        },
+        {
+          "path": "openmagi_core_agent/billing/quota.py",
+          "state": "existing"
+        },
+        {
+          "path": "openmagi_core_agent/billing/spend_guard.py",
+          "state": "existing"
+        },
+        {
+          "path": "tests/test_tenancy_billing_quota_contracts.py",
+          "state": "existing"
+        }
+      ],
+      "overlapWithQueuedLoops": [
+        "coding_research_general_automation"
+      ],
+      "missingImplementation": [],
+      "owningLayer": "Core substrate",
+      "adkPrimitive": "ADK callback admission boundary with OpenMagi product authority",
+      "prSliceAssignment": "PR6",
+      "dependencies": [
+        "runtime_ops_events_metrics",
+        "oss_durable_store_sqlite_runtime_state"
+      ],
+      "activationGate": "local fake contract only; no Stripe, Supabase, live billing, hosted billing adapter, or production quota calls",
+      "implementationStatus": "local_fake",
+      "defaultOff": true,
+      "trafficAttached": false,
+      "productionAuthority": false,
+      "requiredProofs": [
+        "tenant_context_and_authority_scope_required",
+        "reservation_commit_release_fail_closed",
+        "no_live_billing_system_imports_or_calls",
+        "default_off_quota_evaluation_fails_closed",
+        "spend_receipts_digest_only_and_non_production"
+      ],
+      "frontendAdminFollowUp": true,
+      "deploymentDbOpsFollowUp": true,
+      "notes": "PR6 adds generic tenant context, authority scope, quota decision, and spend reservation/commit/release receipt contracts. Local fake quota evaluation is explicit and default-off; live billing, Stripe, Supabase, hosted billing adapters, production quota mutation, traffic authority, and user-visible output remain disabled."
+    },
+    {
+      "id": "credential_broker_connector_registry",
+      "capability": "Scoped credential lease contracts and connector registry metadata without secret material",
+      "requestedBySourcePlan": [
+        "credential_broker_connector_registry"
+      ],
+      "sourcePlanAnchors": [
+        "Credential leasing: scoped, time-bound connector credentials with no raw secret projection",
+        "PR7 Credential Broker And Connector Registry Contracts"
+      ],
+      "latestMainCoveredRefs": [
+        {
+          "path": "openmagi_core_agent/plugins/manifest.py",
+          "state": "existing"
+        },
+        {
+          "path": "openmagi_core_agent/plugins/manager.py",
+          "state": "existing"
+        },
+        {
+          "path": "tests/test_plugin_manifest_contract.py",
+          "state": "existing"
+        },
+        {
+          "path": "tests/test_plugin_manager_contract.py",
+          "state": "existing"
+        },
+        {
+          "path": "openmagi_core_agent/connectors/__init__.py",
+          "state": "existing"
+        },
+        {
+          "path": "openmagi_core_agent/connectors/registry.py",
+          "state": "existing"
+        },
+        {
+          "path": "openmagi_core_agent/connectors/credential_lease.py",
+          "state": "existing"
+        },
+        {
+          "path": "tests/test_connector_credential_contracts.py",
+          "state": "existing"
+        }
+      ],
+      "overlapWithQueuedLoops": [
+        "general_automation",
+        "memory_mission_self_improvement"
+      ],
+      "missingImplementation": [],
+      "owningLayer": "Plugin/connector",
+      "adkPrimitive": "ADK FunctionTool connector boundary with OpenMagi credential lease policy",
+      "prSliceAssignment": "PR7",
+      "dependencies": [
+        "tenant_auth_billing_quota_spend_guard",
+        "sandbox_isolation_contracts"
+      ],
+      "activationGate": "local fake metadata-only leases; no real secret read, write, projection, provider call, plugin execution, or registry live sync",
+      "implementationStatus": "local_fake",
+      "defaultOff": true,
+      "trafficAttached": false,
+      "productionAuthority": false,
+      "requiredProofs": [
+        "lease_ttl_audience_connector_id_tool_id_policy_digest_redaction_status",
+        "raw_secret_projection_rejected",
+        "credential_lease_metadata_only_in_durable_store",
+        "connector_registry_default_off_and_metadata_only",
+        "no_live_secret_provider_imports_or_calls"
+      ],
+      "frontendAdminFollowUp": true,
+      "deploymentDbOpsFollowUp": true,
+      "notes": "PR7 adds connector manifest registry and scoped credential lease receipt contracts. Local fake leases are metadata-only and separately enabled in tests; real secret reads, raw secret projection, network/provider calls, plugin execution, registry sync, production authority, and user-visible output remain disabled."
+    },
+    {
+      "id": "artifact_store_render_delivery_receipts",
+      "capability": "Artifact refs, filesystem/object blob stance, render verification receipts, and delivery receipts",
+      "requestedBySourcePlan": [
+        "artifact_store_render_verification_delivery_receipts"
+      ],
+      "sourcePlanAnchors": [
+        "Artifact plane: artifact refs, render verification receipts, delivery receipts",
+        "PR8 Artifact Store, Render Verification, And Delivery Receipts"
+      ],
+      "latestMainCoveredRefs": [
+        {
+          "path": "openmagi_core_agent/artifacts/delivery_boundary.py",
+          "state": "existing"
+        },
+        {
+          "path": "openmagi_core_agent/artifacts/file_delivery.py",
+          "state": "existing"
+        },
+        {
+          "path": "openmagi_core_agent/artifacts/local_result_store.py",
+          "state": "existing"
+        },
+        {
+          "path": "openmagi_core_agent/artifacts/render_verification.py",
+          "state": "existing"
+        },
+        {
+          "path": "openmagi_core_agent/artifacts/delivery_receipts.py",
+          "state": "existing"
+        },
+        {
+          "path": "tests/test_live_file_delivery_boundary.py",
+          "state": "existing"
+        },
+        {
+          "path": "tests/test_artifact_store_delivery_receipts.py",
+          "state": "existing"
+        },
+        {
+          "path": "tests/test_artifact_channel_delivery_contract_golden_fixtures.py",
+          "state": "existing"
+        }
+      ],
+      "overlapWithQueuedLoops": [
+        "coding_research_general_automation",
+        "memory_mission_self_improvement"
+      ],
+      "missingImplementation": [],
+      "owningLayer": "Core substrate",
+      "adkPrimitive": "ADK ArtifactService boundary",
+      "prSliceAssignment": "PR8",
+      "dependencies": [
+        "oss_durable_store_sqlite_runtime_state",
+        "credential_broker_connector_registry"
+      ],
+      "activationGate": "fake/local renderers only; no live channel delivery or blob writes outside configured artifact store",
+      "implementationStatus": "local_fake",
+      "defaultOff": true,
+      "trafficAttached": false,
+      "productionAuthority": false,
+      "requiredProofs": [
+        "block_delivery_claim_without_receipt",
+        "artifact_blobs_not_stored_in_sqlite",
+        "render_verification_receipt_digest_only",
+        "delivery_action_receipt_digest_only",
+        "default_off_no_live_renderer_or_channel_execution"
+      ],
+      "frontendAdminFollowUp": true,
+      "deploymentDbOpsFollowUp": true,
+      "notes": "PR8 adds digest-only render verification and delivery action receipt contracts. Local fake renderers and channel receipts are accepted only under explicit local fake config; live channel delivery, production storage writes, user-visible delivery claims without receipts, and blob persistence in SQLite remain blocked."
+    },
+    {
+      "id": "auto_permission_control_admin_policy",
+      "capability": "Auto permission self-review records, deterministic hard guards, uncertain fail-passthrough, and admin policy boundary",
+      "requestedBySourcePlan": [
+        "auto_permission_control",
+        "policy_admin_console"
+      ],
+      "sourcePlanAnchors": [
+        "Auto permission control: deterministic hard guards, agent self-review, admin overrides",
+        "PR9 Auto Permission Control Contracts"
+      ],
+      "latestMainCoveredRefs": [
+        {
+          "path": "openmagi_core_agent/runtime/control.py",
+          "state": "existing"
+        },
+        {
+          "path": "openmagi_core_agent/tools/permission.py",
+          "state": "existing"
+        },
+        {
+          "path": "openmagi_core_agent/permissions/auto_control.py",
+          "state": "existing"
+        },
+        {
+          "path": "tests/test_permission_arbiter_contract_golden_fixtures.py",
+          "state": "existing"
+        },
+        {
+          "path": "tests/test_audit_policy_approval_plugin_binding_contract.py",
+          "state": "existing"
+        },
+        {
+          "path": "tests/test_auto_permission_control_contract.py",
+          "state": "existing"
+        }
+      ],
+      "overlapWithQueuedLoops": [
+        "coding_research_general_automation",
+        "memory_mission_self_improvement"
+      ],
+      "missingImplementation": [],
+      "owningLayer": "Core substrate",
+      "adkPrimitive": "ADK callback guardrail boundary with OpenMagi permission arbiter",
+      "prSliceAssignment": "PR9",
+      "dependencies": [
+        "sandbox_isolation_contracts",
+        "tenant_auth_billing_quota_spend_guard"
+      ],
+      "activationGate": "contract only; hard guards cannot be bypassed by recipe or admin config",
+      "implementationStatus": "contract_only",
+      "defaultOff": true,
+      "trafficAttached": false,
+      "productionAuthority": false,
+      "requiredProofs": [
+        "hard_guard_denial_non_bypassable",
+        "uncertain_fail_passthrough_for_configured_non_hard_guard_only",
+        "auto_permission_decision_digest_required",
+        "authority_flags_false_default_off",
+        "no_frontend_admin_ux_in_core_pr"
+      ],
+      "frontendAdminFollowUp": true,
+      "deploymentDbOpsFollowUp": false,
+      "notes": "PR9 adds digest-only auto-permission self-review, guard decision, and deterministic decision contracts. Hard invariants cannot be downgraded by admin policy, non-hard uncertainty can only request approval/passthrough, and frontend/admin UX remains a separate product-plane follow-up."
+    },
+    {
+      "id": "evaluation_release_gate_contracts",
+      "capability": "Promotion gate records, eval thresholds, canary proofs, rollback refs, and owner approval refs",
+      "requestedBySourcePlan": [
+        "evaluation_release_gates"
+      ],
+      "sourcePlanAnchors": [
+        "Evaluation/release gates: promotion requirements, rollback requirements, eval thresholds",
+        "PR10 Evaluation And Release Gate Contracts"
+      ],
+      "latestMainCoveredRefs": [
+        {
+          "path": "openmagi_core_agent/evals/regression_gates.py",
+          "state": "existing"
+        },
+        {
+          "path": "openmagi_core_agent/shadow/adk_eval_fixture_contract.py",
+          "state": "existing"
+        },
+        {
+          "path": "tests/test_eval_regression_gates_contract.py",
+          "state": "existing"
+        },
+        {
+          "path": "tests/test_adk_eval_contract_golden_fixtures.py",
+          "state": "existing"
+        },
+        {
+          "path": "openmagi_core_agent/evals/release_gates.py",
+          "state": "existing"
+        },
+        {
+          "path": "tests/test_product_release_gate_contracts.py",
+          "state": "existing"
+        }
+      ],
+      "overlapWithQueuedLoops": [
+        "programmable_determinism",
+        "memory_mission_self_improvement"
+      ],
+      "missingImplementation": [],
+      "owningLayer": "Core substrate",
+      "adkPrimitive": "ADK Evaluation where applicable",
+      "prSliceAssignment": "PR10",
+      "dependencies": [
+        "runtime_ops_events_metrics",
+        "auto_permission_control_admin_policy"
+      ],
+      "activationGate": "contract only; no promotion, deploy, canary switch, or rollback execution",
+      "implementationStatus": "contract_only",
+      "defaultOff": true,
+      "trafficAttached": false,
+      "productionAuthority": false,
+      "requiredProofs": [
+        "block_promotion_on_raw_projection_selector_fallback_approval_bypass_plugin_overreach_hard_invariant_downgrade_missing_rollback",
+        "adk_evaluation_usage_or_documented_gap",
+        "canary_rollback_owner_approval_refs_required",
+        "digest_only_projection_and_default_off_authority_flags"
+      ],
+      "frontendAdminFollowUp": true,
+      "deploymentDbOpsFollowUp": true,
+      "notes": "PR10 adds digest-only product release gate records, eval thresholds, canary proof refs, rollback refs, owner approval refs, plugin sandbox observations, and hard invariant evaluation contracts. ADK Evaluation is documented as a future primitive boundary; this slice remains contract-only with no promotion, deploy, canary switch, rollback execution, model call, live tool execution, or production authority."
+    },
+    {
+      "id": "connector_marketplace_plugin_runtime_promotion",
+      "capability": "Connector marketplace install/update/remove records, supply-chain digests, permission subsets, sandbox mode, version pin, and revocation checks",
+      "requestedBySourcePlan": [
+        "connector_marketplace_plugin_runtime"
+      ],
+      "sourcePlanAnchors": [
+        "Connector marketplace/plugin runtime: install/update/remove trust contracts",
+        "PR11 Connector Marketplace And Plugin Runtime Promotion Contracts"
+      ],
+      "latestMainCoveredRefs": [
+        {
+          "path": "openmagi_core_agent/plugins/extension_boundary.py",
+          "state": "existing"
+        },
+        {
+          "path": "openmagi_core_agent/plugins/mcp_adapter.py",
+          "state": "existing"
+        },
+        {
+          "path": "openmagi_core_agent/plugins/native_catalog.py",
+          "state": "existing"
+        },
+        {
+          "path": "tests/test_plugin_tool_projection.py",
+          "state": "existing"
+        },
+        {
+          "path": "tests/test_native_plugin_catalog.py",
+          "state": "existing"
+        },
+        {
+          "path": "openmagi_core_agent/connectors/marketplace.py",
+          "state": "existing"
+        },
+        {
+          "path": "tests/test_connector_marketplace_promotion_contract.py",
+          "state": "existing"
+        }
+      ],
+      "overlapWithQueuedLoops": [
+        "general_automation"
+      ],
+      "missingImplementation": [],
+      "owningLayer": "Plugin/connector",
+      "adkPrimitive": "ADK FunctionTool and MCP adapter boundaries",
+      "prSliceAssignment": "PR11",
+      "dependencies": [
+        "credential_broker_connector_registry",
+        "sandbox_isolation_contracts",
+        "evaluation_release_gate_contracts"
+      ],
+      "activationGate": "manifest and policy records only; no external plugin code execution",
+      "implementationStatus": "local_fake",
+      "defaultOff": true,
+      "trafficAttached": false,
+      "productionAuthority": false,
+      "requiredProofs": [
+        "plugin_runtime_cannot_request_permissions_outside_manifest",
+        "supply_chain_digest_and_version_pin_required",
+        "revocation_check_contract"
+      ],
+      "frontendAdminFollowUp": true,
+      "deploymentDbOpsFollowUp": true,
+      "notes": "PR11 adds default-off local fake marketplace promotion contracts for install/update/remove records, supply-chain digest and version pin checks, sandbox evaluation, revocation checks, plugin runtime permission subset enforcement, and digest-only public projections."
+    },
+    {
+      "id": "product_admin_api_contract_stubs",
+      "capability": "Read-only backend contract stubs for ops, policy, artifacts, release gates, connector registry, and digest-only projections",
+      "requestedBySourcePlan": [
+        "backend_admin_api_contract_stubs",
+        "policy_admin_console"
+      ],
+      "sourcePlanAnchors": [
+        "Product Admin API Contract Stubs",
+        "PR12 Product Admin API Contract Stubs"
+      ],
+      "latestMainCoveredRefs": [
+        {
+          "path": "openmagi_core_agent/transport/health.py",
+          "state": "existing"
+        },
+        {
+          "path": "openmagi_core_agent/transport/plugins.py",
+          "state": "existing"
+        },
+        {
+          "path": "tests/test_plugin_admin_routes.py",
+          "state": "existing"
+        },
+        {
+          "path": "tests/test_tool_admin_routes.py",
+          "state": "existing"
+        },
+        {
+          "path": "openmagi_core_agent/transport/product_admin.py",
+          "state": "existing"
+        },
+        {
+          "path": "tests/test_product_admin_api_contracts.py",
+          "state": "existing"
+        }
+      ],
+      "overlapWithQueuedLoops": [
+        "live_ts_surface_parity"
+      ],
+      "missingImplementation": [],
+      "owningLayer": "Product/admin policy",
+      "adkPrimitive": "FastAPI read-only projection around ADK/OpenMagi records",
+      "prSliceAssignment": "PR12",
+      "dependencies": [
+        "runtime_ops_events_metrics",
+        "artifact_store_render_delivery_receipts",
+        "evaluation_release_gate_contracts",
+        "connector_marketplace_plugin_runtime_promotion"
+      ],
+      "activationGate": "default-off read-only contract stubs; no frontend routes, live data, or mutations",
+      "implementationStatus": "contract_only",
+      "defaultOff": true,
+      "trafficAttached": false,
+      "productionAuthority": false,
+      "requiredProofs": [
+        "digest_only_no_live_data_projection",
+        "no_frontend_nextjs_route",
+        "no_mutation_or_admin_override_execution"
+      ],
+      "frontendAdminFollowUp": true,
+      "deploymentDbOpsFollowUp": true,
+      "notes": "PR12 adds read-only product admin contract stubs for ops, policy, artifacts, release gates, connector registry, and security/compliance with default-off digest-only projections."
+    },
+    {
+      "id": "security_compliance_audit_reporting",
+      "capability": "Security, compliance, policy/kernel decision audit, rollback/fallback diagnostics, and digest-only audit reporting",
+      "requestedBySourcePlan": [
+        "security_compliance_plane",
+        "compliance_audit_observability"
+      ],
+      "sourcePlanAnchors": [
+        "audit log/reporting, compliance route parity, health/readiness/metrics, policy/kernel decision audit",
+        "Product plane integration acceptance"
+      ],
+      "latestMainCoveredRefs": [
+        {
+          "path": "openmagi_core_agent/plugins/audit.py",
+          "state": "existing"
+        },
+        {
+          "path": "tests/test_plugin_audit_contract.py",
+          "state": "existing"
+        },
+        {
+          "path": "tests/test_audit_policy_approval_plugin_binding_contract.py",
+          "state": "existing"
+        },
+        {
+          "path": "openmagi_core_agent/security/compliance.py",
+          "state": "existing"
+        },
+        {
+          "path": "tests/test_security_compliance_contracts.py",
+          "state": "existing"
+        }
+      ],
+      "overlapWithQueuedLoops": [
+        "programmable_determinism",
+        "memory_mission_self_improvement"
+      ],
+      "missingImplementation": [],
+      "owningLayer": "Core substrate",
+      "adkPrimitive": "ADK callback observation plus OpenMagi audit ledger",
+      "prSliceAssignment": "PR12",
+      "dependencies": [
+        "runtime_ops_events_metrics",
+        "evaluation_release_gate_contracts"
+      ],
+      "activationGate": "digest-only local security/compliance contracts; no public compliance route activation",
+      "implementationStatus": "contract_only",
+      "defaultOff": true,
+      "trafficAttached": false,
+      "productionAuthority": false,
+      "requiredProofs": [
+        "policy_kernel_decision_audit_digest_only",
+        "rollback_fallback_diagnostics_without_raw_prompt_output_secret_private_path",
+        "no_public_route_activation"
+      ],
+      "frontendAdminFollowUp": true,
+      "deploymentDbOpsFollowUp": true,
+      "notes": "PR12 adds digest-only security/compliance decision, rollback/fallback diagnostic, and compliance report reference contracts without public route activation."
+    },
+    {
+      "id": "product_plane_integration_readiness",
+      "capability": "Integration contracts proving product-plane primitives are generic, default-off, and separated from frontend, DB, K8s, secrets, deploy, and activation tracks",
+      "requestedBySourcePlan": [
+        "integration_acceptance",
+        "product_plane_readiness_report"
+      ],
+      "sourcePlanAnchors": [
+        "PR13 Product Plane Integration Readiness Report"
+      ],
+      "latestMainCoveredRefs": [
+        {
+          "path": "tests/test_programmable_determinism_integration_contract.py",
+          "state": "existing"
+        },
+        {
+          "path": "tests/test_memory_mission_self_improvement_integration_contract.py",
+          "state": "existing"
+        },
+        {
+          "path": "tests/test_codex_product_plane_integration_contract.py",
+          "state": "existing"
+        },
+        {
+          "path": "README.md",
+          "state": "existing"
+        },
+        {
+          "path": "docs/superpowers/plans/2026-05-23-python-adk-codex-product-plane-composable-rollout.md",
+          "state": "existing"
+        }
+      ],
+      "overlapWithQueuedLoops": [
+        "coding_research_general_automation",
+        "memory_mission_self_improvement"
+      ],
+      "missingImplementation": [],
+      "owningLayer": "Tests/docs only",
+      "adkPrimitive": "integration audit only",
+      "prSliceAssignment": "PR13",
+      "dependencies": [
+        "product_admin_api_contract_stubs",
+        "security_compliance_audit_reporting"
+      ],
+      "activationGate": "readiness report only; no rollout, deploy, DB, frontend, or public authority",
+      "implementationStatus": "contract_only",
+      "defaultOff": true,
+      "trafficAttached": false,
+      "productionAuthority": false,
+      "requiredProofs": [
+        "core_primitives_are_generic",
+        "product_policies_external_to_core",
+        "live_attachment_flags_false",
+        "frontend_admin_db_k8s_secrets_deploy_activation_followups_recorded"
+      ],
+      "frontendAdminFollowUp": true,
+      "deploymentDbOpsFollowUp": true,
+      "notes": "PR13 adds integration readiness contract tests and README/plan readiness notes proving common substrate is shared, product policies stay external to core, all live authority flags remain false, and frontend/admin plus DB/K8s/deploy activation remain separate tracks."
+    },
+    {
+      "id": "frontend_admin_product_surface_followup",
+      "capability": "Work Console, Run Inspector, Control Request UI, Admin Services, bot harness rules, Customize, Tools/Hooks/Verification, mission/activity projection, artifact and receipt panels, policy/admin console, auto-permission UX, release/eval gate UI, and connector marketplace UI",
+      "requestedBySourcePlan": [
+        "end_user_product_surface_plane",
+        "frontend_admin_product_surface"
+      ],
+      "sourcePlanAnchors": [
+        "Frontend/Admin Track",
+        "end-user product/admin surfaces"
+      ],
+      "latestMainCoveredRefs": [
+        {
+          "path": "README.md",
+          "state": "existing"
+        }
+      ],
+      "overlapWithQueuedLoops": [],
+      "missingImplementation": [
+        {
+          "path": "src/planned_product_plane_frontend/work_console.tsx",
+          "state": "planned_missing"
+        },
+        {
+          "path": "src/planned_product_plane_frontend/run_inspector.tsx",
+          "state": "planned_missing"
+        },
+        {
+          "path": "src/planned_product_plane_frontend/control_request_ui.tsx",
+          "state": "planned_missing"
+        },
+        {
+          "path": "src/planned_product_plane_frontend/admin_services.tsx",
+          "state": "planned_missing"
+        },
+        {
+          "path": "src/planned_product_plane_frontend/customize_harness_rules.tsx",
+          "state": "planned_missing"
+        },
+        {
+          "path": "src/planned_product_plane_frontend/tools_hooks_verification.tsx",
+          "state": "planned_missing"
+        }
+      ],
+      "owningLayer": "Frontend/admin",
+      "adkPrimitive": "none; frontend consumes digest-only backend projections",
+      "prSliceAssignment": "PR13",
+      "dependencies": [
+        "product_admin_api_contract_stubs"
+      ],
+      "activationGate": "separate frontend session approval; no frontend files in core implementation loop",
+      "implementationStatus": "contract_only",
+      "defaultOff": true,
+      "trafficAttached": false,
+      "productionAuthority": false,
+      "requiredProofs": [
+        "frontend_followup_rows_identified",
+        "work_console_run_inspector_control_request_admin_services_customize_tools_hooks_verification_and_mission_activity_surfaces_tracked",
+        "no_nextjs_or_dashboard_files_touched_by_core_prs"
+      ],
+      "frontendAdminFollowUp": true,
+      "deploymentDbOpsFollowUp": false,
+      "notes": "This row is explicitly out of scope for core PRs and prevents hidden frontend work in product-plane core slices."
+    },
+    {
+      "id": "deployment_db_ops_activation_followup",
+      "capability": "DB migrations, K8s resources, secrets, Vercel changes, Supabase schema, provisioning, chat-proxy activation, runtime selector activation, billing contracts, connector credentials, production rollout, hosted DurableStore adapter, and activation runbooks",
+      "requestedBySourcePlan": [
+        "deployment_database_track",
+        "infra_ops_activation"
+      ],
+      "sourcePlanAnchors": [
+        "Deployment/Database Track",
+        "integration acceptance activation blockers"
+      ],
+      "latestMainCoveredRefs": [
+        {
+          "path": "README.md",
+          "state": "existing"
+        }
+      ],
+      "overlapWithQueuedLoops": [
+        "gate_canary_execution_track"
+      ],
+      "missingImplementation": [
+        {
+          "path": "infra/planned_product_plane_activation/k8s_env_db_secret_patch.md",
+          "state": "planned_missing"
+        },
+        {
+          "path": "infra/planned_product_plane_activation/vercel_supabase_provisioning_chat_proxy_runtime_selector.md",
+          "state": "planned_missing"
+        }
+      ],
+      "owningLayer": "Deployment/DB/ops",
+      "adkPrimitive": "none; execution-session approval boundary",
+      "prSliceAssignment": "PR13",
+      "dependencies": [
+        "product_plane_integration_readiness"
+      ],
+      "activationGate": "separate DB/K8s/env/secrets/Vercel/Supabase schema/provisioning/chat-proxy/runtime-selector/deploy/billing approval; no implementation-session activation",
+      "implementationStatus": "contract_only",
+      "defaultOff": true,
+      "trafficAttached": false,
+      "productionAuthority": false,
+      "requiredProofs": [
+        "db_k8s_env_secret_vercel_supabase_schema_provisioning_chat_proxy_runtime_selector_deploy_billing_connector_credential_followups_identified",
+        "no_activation_paths_in_core_prs"
+      ],
+      "frontendAdminFollowUp": false,
+      "deploymentDbOpsFollowUp": true,
+      "notes": "This row explicitly blocks hosted DB/Supabase/Postgres assumptions from becoming required for OSS local runtime state."
+    }
+  ]
+}

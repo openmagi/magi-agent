@@ -1,0 +1,36 @@
+{
+  "sourceRuntime": "TypeScript",
+  "bundleKind": "redacted_ts_capture",
+  "redacted": true,
+  "fixture": {
+    "turnId": "gate2-ts-bundle-text",
+    "userPrompt": "Hello from a redacted TypeScript bundle fixture.",
+    "projectedAdkEventIds": ["evt-ts-text-partial", "evt-ts-text-final"],
+    "projectedAdkEvents": [
+      {
+        "id": "evt-ts-text-partial",
+        "author": "model",
+        "role": "model",
+        "text": "Hello from Gate 1.",
+        "partial": true,
+        "invocationId": "gate1-turn-text"
+      },
+      {
+        "id": "evt-ts-text-final",
+        "author": "model",
+        "role": "model",
+        "text": "Hello from Gate 1.",
+        "partial": false,
+        "turnComplete": true,
+        "invocationId": "gate1-turn-text",
+        "timestamp": 1779000001
+      }
+    ],
+    "projectionTurnId": "gate1-turn-text",
+    "transcriptRefs": ["gate1/simple_assistant_text.jsonl"],
+    "sseRefs": ["gate1/simple_assistant_text.sse"],
+    "comparisonMetadata": {
+      "bundleFixture": "text_turn"
+    }
+  }
+}

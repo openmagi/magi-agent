@@ -1,0 +1,378 @@
+{
+  "schemaVersion": "gate5b4dStreamFixtureAudit.v1",
+  "fixtureId": "gate5b4d-stream-coverage-golden",
+  "recordingMode": "local_diagnostic_fixture",
+  "redactionStatus": "verified",
+  "localDiagnostic": true,
+  "liveAuthorityFlags": {
+    "adkRunnerInvoked": false,
+    "liveUserVisibleStreaming": false,
+    "runtimeSelectorActivated": false,
+    "productionTranscriptWritten": false,
+    "productionSseWritten": false,
+    "durableStoreWritten": false,
+    "frontendSwitchEnabled": false,
+    "liveToolDispatched": false,
+    "memoryProviderCalled": false,
+    "chatProxyRouteAttached": false,
+    "telegramAttached": false,
+    "k8sOrProvisioningTouched": false
+  },
+  "coverageMatrix": [
+    {
+      "gapId": "tool",
+      "adkSource": "ADK function call request/progress/result",
+      "safeAgentEventTarget": "tool_start/tool_progress/tool_end",
+      "firstCanaryPosture": "fixture_only"
+    },
+    {
+      "gapId": "control",
+      "adkSource": "ControlRequest pending/resolved lifecycle",
+      "safeAgentEventTarget": "control_event",
+      "firstCanaryPosture": "fixture_only"
+    },
+    {
+      "gapId": "child",
+      "adkSource": "child start/progress/complete/error",
+      "safeAgentEventTarget": "spawn_started/child_started/child_progress/child_completed",
+      "firstCanaryPosture": "fixture_only"
+    },
+    {
+      "gapId": "source",
+      "adkSource": "source and citation observation",
+      "safeAgentEventTarget": "source_inspected/research_artifact_delta/rule_check",
+      "firstCanaryPosture": "fixture_only"
+    },
+    {
+      "gapId": "browser",
+      "adkSource": "browser observation",
+      "safeAgentEventTarget": "browser_frame",
+      "firstCanaryPosture": "fixture_only"
+    },
+    {
+      "gapId": "artifact",
+      "adkSource": "artifact preview metadata",
+      "safeAgentEventTarget": "document_draft/patch_preview",
+      "firstCanaryPosture": "fixture_only"
+    },
+    {
+      "gapId": "intermediate",
+      "adkSource": "intermediate answer rewrite",
+      "safeAgentEventTarget": "response_clear/text_delta",
+      "firstCanaryPosture": "shadow_internal_only"
+    },
+    {
+      "gapId": "final",
+      "adkSource": "model final response",
+      "safeAgentEventTarget": "turn_end plus local transport [DONE]",
+      "firstCanaryPosture": "shadow_internal_only"
+    },
+    {
+      "gapId": "error",
+      "adkSource": "ADK error event",
+      "safeAgentEventTarget": "error/runtime_trace",
+      "firstCanaryPosture": "shadow_internal_only"
+    },
+    {
+      "gapId": "provider_fallback",
+      "adkSource": "provider fallback metadata",
+      "safeAgentEventTarget": "model_fallback/runtime_trace",
+      "firstCanaryPosture": "shadow_internal_only"
+    },
+    {
+      "gapId": "temporal_progress",
+      "adkSource": "temporal and intermediate progress metadata",
+      "safeAgentEventTarget": "llm_progress/heartbeat/turn_phase",
+      "firstCanaryPosture": "shadow_internal_only"
+    },
+    {
+      "gapId": "channel_delivery_absent",
+      "adkSource": "channel delivery metadata",
+      "safeAgentEventTarget": "absent",
+      "firstCanaryPosture": "absent"
+    }
+  ],
+  "agentEvents": [
+    {
+      "type": "tool_start",
+      "eventId": "evt-tool-start-1",
+      "id": "toolu_fixture_1",
+      "name": "FixtureTool",
+      "inputPreview": "sanitized input preview"
+    },
+    {
+      "type": "tool_progress",
+      "eventId": "evt-tool-progress-1",
+      "id": "toolu_fixture_1",
+      "label": "Inspecting fixture",
+      "status": "running",
+      "message": "Local diagnostic progress",
+      "progress": 0.5,
+      "createdAt": 1710000001
+    },
+    {
+      "type": "tool_end",
+      "eventId": "evt-tool-end-1",
+      "id": "toolu_fixture_1",
+      "status": "done",
+      "outputPreview": "sanitized output preview",
+      "durationMs": 17
+    },
+    {
+      "type": "control_event",
+      "seq": 1,
+      "event": {
+        "type": "control_request_created",
+        "request": {
+          "requestId": "req-gate5b4d-1",
+          "kind": "tool_permission",
+          "state": "pending",
+          "sessionKey": "redacted-session",
+          "source": "turn",
+          "prompt": "Allow diagnostic fixture action?",
+          "createdAt": 1710000002,
+          "expiresAt": 1710000062
+        }
+      }
+    },
+    {
+      "type": "control_event",
+      "seq": 2,
+      "event": {
+        "type": "control_request_resolved",
+        "requestId": "req-gate5b4d-1",
+        "decision": "approved",
+        "feedback": "Approved diagnostic fixture action"
+      }
+    },
+    {
+      "type": "control_event",
+      "seq": 3,
+      "event": {
+        "type": "control_request_cancelled",
+        "requestId": "req-gate5b4d-2",
+        "reason": "cancelled diagnostic fixture"
+      }
+    },
+    {
+      "type": "control_event",
+      "seq": 4,
+      "event": {
+        "type": "control_request_timed_out",
+        "requestId": "req-gate5b4d-3"
+      }
+    },
+    {
+      "type": "spawn_started",
+      "taskId": "spawn-gate5b4d-1",
+      "persona": "research",
+      "deliver": "background",
+      "detail": "Diagnostic child envelope only"
+    },
+    {
+      "type": "child_started",
+      "taskId": "child-gate5b4d-1",
+      "parentTurnId": "turn-gate5b4d-1",
+      "childReceiptRef": "receipt:sha256:3333333333333333333333333333333333333333333333333333333333333333",
+      "detail": "Diagnostic child started"
+    },
+    {
+      "type": "child_progress",
+      "taskId": "child-gate5b4d-1",
+      "childReceiptRef": "receipt:sha256:3333333333333333333333333333333333333333333333333333333333333333",
+      "detail": "Diagnostic child progress"
+    },
+    {
+      "type": "child_completed",
+      "taskId": "child-gate5b4d-1",
+      "childReceiptRef": "receipt:sha256:3333333333333333333333333333333333333333333333333333333333333333"
+    },
+    {
+      "type": "child_failed",
+      "taskId": "child-gate5b4d-2",
+      "childReceiptRef": "receipt:sha256:4444444444444444444444444444444444444444444444444444444444444444",
+      "errorMessage": "Diagnostic child failed safely"
+    },
+    {
+      "type": "child_cancelled",
+      "taskId": "child-gate5b4d-3",
+      "childReceiptRef": "receipt:sha256:5555555555555555555555555555555555555555555555555555555555555555",
+      "reason": "cancelled diagnostic child"
+    },
+    {
+      "type": "source_inspected",
+      "source": {
+        "sourceId": "src-gate5b4d-1",
+        "turnId": "turn-gate5b4d-1",
+        "toolName": "BrowserObserve",
+        "toolUseId": "toolu_fixture_1",
+        "kind": "browser",
+        "uri": "https://example.test/gate5b4d",
+        "title": "Gate 5B-4d fixture",
+        "contentHash": "evidence:web:src-gate5b4d-1",
+        "contentType": "text/html",
+        "trustTier": "diagnostic",
+        "snippets": ["Visible fixture excerpt"],
+        "inspectedAt": 1710000003
+      }
+    },
+    {
+      "type": "research_artifact_delta",
+      "claims": [
+        {
+          "claimId": "claim-gate5b4d-1",
+          "text": "Fixture source coverage is represented.",
+          "claimType": "coverage",
+          "supportStatus": "supported",
+          "sourceIds": ["src-gate5b4d-1"],
+          "confidence": 1
+        }
+      ],
+      "claimSourceLinks": [
+        {
+          "claimId": "claim-gate5b4d-1",
+          "sourceId": "src-gate5b4d-1",
+          "support": "supports"
+        }
+      ]
+    },
+    {
+      "type": "rule_check",
+      "eventId": "evt-rule-check-1",
+      "turnId": "turn-gate5b4d-1",
+      "ruleId": "claim-citation-gate",
+      "verdict": "pending",
+      "detail": "No live authority attached",
+      "evidenceRef": "receipt:sha256:6666666666666666666666666666666666666666666666666666666666666666",
+      "checkedAt": 1710000004,
+      "createdAt": 1710000004
+    },
+    {
+      "type": "browser_frame",
+      "action": "observe",
+      "url": "https://example.test/gate5b4d",
+      "imageBase64": "Zml4dHVyZQ==",
+      "contentType": "image/png",
+      "capturedAt": 1710000005
+    },
+    {
+      "type": "document_draft",
+      "id": "draft-gate5b4d-1",
+      "filename": "diagnostic.md",
+      "format": "md",
+      "contentPreview": "# Diagnostic artifact preview\n\nThis is not delivered.",
+      "contentLength": 52,
+      "truncated": false
+    },
+    {
+      "type": "patch_preview",
+      "toolUseId": "toolu_fixture_1",
+      "dryRun": true,
+      "changedFiles": ["diagnostic/example.txt"],
+      "createdFiles": [],
+      "deletedFiles": [],
+      "files": [
+        {
+          "path": "diagnostic/example.txt",
+          "operation": "update",
+          "hunks": 1,
+          "addedLines": 1,
+          "removedLines": 0
+        }
+      ]
+    },
+    {
+      "type": "response_clear",
+      "eventId": "evt-response-clear-1",
+      "turnId": "turn-gate5b4d-1",
+      "reason": "diagnostic_rewrite"
+    },
+    {
+      "type": "turn_phase",
+      "eventId": "evt-turn-phase-1",
+      "turnId": "turn-gate5b4d-1",
+      "phase": "executing",
+      "createdAt": 1710000005
+    },
+    {
+      "type": "llm_progress",
+      "turnId": "turn-gate5b4d-1",
+      "iter": 1,
+      "stage": "waiting",
+      "label": "Diagnostic shadow progress",
+      "detail": "Internal progress only",
+      "elapsedMs": 42
+    },
+    {
+      "type": "text_delta",
+      "delta": "안녕, stream 🌊"
+    },
+    {
+      "type": "turn_end",
+      "eventId": "evt-turn-end-1",
+      "turnId": "turn-gate5b4d-1",
+      "status": "committed",
+      "stopReason": "end_turn",
+      "durationMs": 25,
+      "createdAt": 1710000006
+    },
+    {
+      "type": "error",
+      "code": "diagnostic_error",
+      "message": "Sanitized diagnostic error"
+    },
+    {
+      "type": "model_fallback",
+      "fromModel": "primary-model",
+      "toModel": "fallback-model",
+      "reason": "Diagnostic provider fallback metadata",
+      "attempt": 1
+    },
+    {
+      "type": "runtime_trace",
+      "turnId": "turn-gate5b4d-1",
+      "phase": "terminal_abort",
+      "severity": "warning",
+      "title": "Diagnostic runtime trace",
+      "detail": "Error projection is local only",
+      "reasonCode": "fixture_error_projection",
+      "attempt": 1,
+      "maxAttempts": 1,
+      "retryable": false
+    },
+    {
+      "type": "heartbeat",
+      "turnId": "turn-gate5b4d-1",
+      "iter": 1,
+      "elapsedMs": 64,
+      "lastEventAt": 1710000007
+    }
+  ],
+  "transport": {
+    "emitLegacyFinish": true,
+    "legacyDeltaText": "안녕, stream 🌊"
+  },
+  "utf8Chunking": {
+    "splitByteSequences": 2,
+    "replacementCharactersObserved": false,
+    "reassembledText": "안녕, stream 🌊"
+  },
+  "duplicateLegacyRenderingPrevention": {
+    "agentChannelAuthoritative": true,
+    "legacyDeltaMirrored": true,
+    "duplicateLegacyDeltaSuppressed": true,
+    "visibleTextSource": "agent_text_delta"
+  },
+  "activeSnapshotBoundary": {
+    "attached": false,
+    "isolated": true,
+    "snapshotAuthority": false,
+    "source": "fixture_metadata_only"
+  },
+  "durableWriteBoundary": {
+    "productionTranscriptWritten": false,
+    "productionSseWritten": false,
+    "durableStoreWritten": false,
+    "activeSnapshotWritten": false
+  }
+}

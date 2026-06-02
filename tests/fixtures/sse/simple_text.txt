@@ -1,0 +1,16 @@
+:ok
+
+event: agent
+data: {"type":"turn_start","turnId":"turn-1","declaredRoute":"direct"}
+
+event: agent
+data: {"type":"text_delta","delta":"hi"}
+
+data: {"choices":[{"index":0,"delta":{"role":"assistant","content":"hi"}}]}
+
+event: agent
+data: {"type":"turn_end","turnId":"turn-1","status":"committed","receiptRef":"receipt:sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}
+
+data: {"choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}
+
+data: [DONE]

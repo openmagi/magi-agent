@@ -1,0 +1,30 @@
+{
+  "policyId": "openmagi.backoffice.finance-summary.v1",
+  "customerConfigurable": {
+    "requireCitations": false,
+    "requireCalculationRefs": true,
+    "maxRepairAttempts": 3,
+    "validatorRefs": [
+      "noBareNumbers",
+      "calculationReceiptsRequired",
+      "spreadsheetRangeUsed",
+      "totalsReconcile"
+    ],
+    "evidenceRefs": [
+      "inputFileDigest",
+      "spreadsheetRangeRef",
+      "calculationRef",
+      "formulaDigest",
+      "resultDigest"
+    ]
+  },
+  "runtimeInvariants": {
+    "governedRawDraftStreamingForbidden": true,
+    "toolHostOnlyExecution": true,
+    "minimumReceiptSchemaRequired": true,
+    "sourceSnapshotDigestSpanRequired": true,
+    "authorityAntiForgeryRequired": true,
+    "secretRedactionRequired": true,
+    "validatorBeforeProjectionRequired": true
+  }
+}

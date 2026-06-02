@@ -1,0 +1,343 @@
+{
+  "schemaVersion": "controlProjectionContractFixture.v1",
+  "fixtureId": "control_projection_policy_matrix_0001",
+  "sourceRuntime": "typescript-core-agent",
+  "recordingMode": "local_diagnostic_fixture",
+  "redactionStatus": "verified",
+  "localDiagnostic": true,
+  "explicitNow": 40,
+  "attachmentFlags": {
+    "adkRunnerInvoked": false,
+    "toolHostAttached": false,
+    "dispatcherAttached": false,
+    "routeOrApiAttached": false,
+    "databaseOrProxyAttached": false,
+    "canaryTrafficAttached": false,
+    "productionStorageWritten": false,
+    "memoryProviderCalled": false,
+    "childRunnerInvoked": false,
+    "workspaceMutated": false,
+    "schedulerAttached": false,
+    "artifactDeliveryAttached": false,
+    "evidenceBlockEnabled": false,
+    "userVisibleOutputAttached": false
+  },
+  "controlEvents": [
+    {
+      "v": 1,
+      "eventId": "ctrl-001",
+      "seq": 1,
+      "ts": 10,
+      "sessionKey": "agent:fixture:control-projection",
+      "turnId": "turn-requests",
+      "type": "control_request_created",
+      "request": {
+        "requestId": "req-approved-1",
+        "kind": "tool_permission",
+        "state": "pending",
+        "sessionKey": "agent:fixture:control-projection",
+        "turnId": "turn-requests",
+        "source": "turn",
+        "prompt": "Allow fixture command?",
+        "proposedInput": {"command": "inspect fixture"},
+        "createdAt": 10,
+        "expiresAt": 100
+      }
+    },
+    {
+      "v": 1,
+      "eventId": "ctrl-002",
+      "seq": 2,
+      "ts": 20,
+      "sessionKey": "agent:fixture:control-projection",
+      "turnId": "turn-requests",
+      "type": "control_request_resolved",
+      "requestId": "req-approved-1",
+      "decision": "approved",
+      "feedback": "approved once",
+      "updatedInput": {"command": "inspect fixture --read-only"}
+    },
+    {
+      "v": 1,
+      "eventId": "ctrl-003",
+      "seq": 3,
+      "ts": 21,
+      "sessionKey": "agent:fixture:control-projection",
+      "turnId": "turn-requests",
+      "type": "control_request_cancelled",
+      "requestId": "req-approved-1",
+      "reason": "late_duplicate_ignored"
+    },
+    {
+      "v": 1,
+      "eventId": "ctrl-004",
+      "seq": 4,
+      "ts": 11,
+      "sessionKey": "agent:fixture:control-projection",
+      "turnId": "turn-requests",
+      "type": "control_request_created",
+      "request": {
+        "requestId": "req-cancelled-1",
+        "kind": "user_question",
+        "state": "pending",
+        "sessionKey": "agent:fixture:control-projection",
+        "turnId": "turn-requests",
+        "source": "turn",
+        "prompt": "Continue fixture?",
+        "createdAt": 11,
+        "expiresAt": 100
+      }
+    },
+    {
+      "v": 1,
+      "eventId": "ctrl-005",
+      "seq": 5,
+      "ts": 22,
+      "sessionKey": "agent:fixture:control-projection",
+      "turnId": "turn-requests",
+      "type": "control_request_cancelled",
+      "requestId": "req-cancelled-1",
+      "reason": "operator_cancelled"
+    },
+    {
+      "v": 1,
+      "eventId": "ctrl-006",
+      "seq": 6,
+      "ts": 23,
+      "sessionKey": "agent:fixture:control-projection",
+      "turnId": "turn-requests",
+      "type": "control_request_resolved",
+      "requestId": "req-cancelled-1",
+      "decision": "approved",
+      "feedback": "late duplicate ignored"
+    },
+    {
+      "v": 1,
+      "eventId": "ctrl-007",
+      "seq": 7,
+      "ts": 12,
+      "sessionKey": "agent:fixture:control-projection",
+      "turnId": "turn-requests",
+      "type": "control_request_created",
+      "request": {
+        "requestId": "req-timeout-event-1",
+        "kind": "plan_approval",
+        "state": "pending",
+        "sessionKey": "agent:fixture:control-projection",
+        "turnId": "turn-requests",
+        "source": "plan",
+        "prompt": "Approve fixture plan?",
+        "createdAt": 12,
+        "expiresAt": 100
+      }
+    },
+    {
+      "v": 1,
+      "eventId": "ctrl-008",
+      "seq": 8,
+      "ts": 24,
+      "sessionKey": "agent:fixture:control-projection",
+      "turnId": "turn-requests",
+      "type": "control_request_timed_out",
+      "requestId": "req-timeout-event-1"
+    },
+    {
+      "v": 1,
+      "eventId": "ctrl-009",
+      "seq": 9,
+      "ts": 25,
+      "sessionKey": "agent:fixture:control-projection",
+      "turnId": "turn-requests",
+      "type": "control_request_resolved",
+      "requestId": "req-timeout-event-1",
+      "decision": "approved",
+      "feedback": "late duplicate ignored"
+    },
+    {
+      "v": 1,
+      "eventId": "ctrl-010",
+      "seq": 10,
+      "ts": 13,
+      "sessionKey": "agent:fixture:control-projection",
+      "turnId": "turn-requests",
+      "type": "control_request_created",
+      "request": {
+        "requestId": "req-explicit-now-1",
+        "kind": "tool_permission",
+        "state": "pending",
+        "sessionKey": "agent:fixture:control-projection",
+        "turnId": "turn-requests",
+        "source": "turn",
+        "prompt": "Allow stale fixture request?",
+        "createdAt": 13,
+        "expiresAt": 30
+      }
+    },
+    {
+      "v": 1,
+      "eventId": "ctrl-011",
+      "seq": 11,
+      "ts": 14,
+      "sessionKey": "agent:fixture:control-projection",
+      "turnId": "turn-requests",
+      "type": "control_request_created",
+      "request": {
+        "requestId": "req-pending-live",
+        "kind": "user_question",
+        "state": "pending",
+        "sessionKey": "agent:fixture:control-projection",
+        "turnId": "turn-requests",
+        "source": "turn",
+        "prompt": "Pending fixture question?",
+        "createdAt": 14,
+        "expiresAt": 90
+      }
+    },
+    {
+      "v": 1,
+      "eventId": "ctrl-012",
+      "seq": 12,
+      "ts": 26,
+      "sessionKey": "agent:fixture:control-projection",
+      "turnId": "turn-retry",
+      "type": "retry",
+      "reason": "fixture_retry",
+      "attempt": 1,
+      "maxAttempts": 3,
+      "visibleToUser": true
+    },
+    {
+      "v": 1,
+      "eventId": "ctrl-013",
+      "seq": 13,
+      "ts": 27,
+      "sessionKey": "agent:fixture:control-projection",
+      "turnId": "turn-retry",
+      "type": "retry",
+      "reason": "fixture_retry",
+      "attempt": 2,
+      "maxAttempts": 3,
+      "visibleToUser": true
+    },
+    {
+      "v": 1,
+      "eventId": "ctrl-014",
+      "seq": 14,
+      "ts": 28,
+      "sessionKey": "agent:fixture:control-projection",
+      "turnId": "turn-stop",
+      "type": "stop_reason",
+      "reason": "max_turns"
+    },
+    {
+      "v": 1,
+      "eventId": "ctrl-015",
+      "seq": 15,
+      "ts": 29,
+      "sessionKey": "agent:fixture:control-projection",
+      "turnId": "turn-plan",
+      "type": "stop_reason",
+      "reason": "end_turn"
+    },
+    {
+      "v": 1,
+      "eventId": "ctrl-016",
+      "seq": 16,
+      "ts": 31,
+      "sessionKey": "agent:fixture:control-projection",
+      "turnId": "turn-plan",
+      "type": "plan_lifecycle",
+      "planId": "plan-1",
+      "state": "approved",
+      "requestId": "req-approved-1",
+      "plan": "Fixture-only plan.",
+      "feedback": "approved once"
+    },
+    {
+      "v": 1,
+      "eventId": "ctrl-017",
+      "seq": 17,
+      "ts": 32,
+      "sessionKey": "agent:fixture:control-projection",
+      "turnId": "turn-plan",
+      "type": "verification",
+      "status": "pending",
+      "reason": "approved plan requires verification"
+    },
+    {
+      "v": 1,
+      "eventId": "ctrl-018",
+      "seq": 18,
+      "ts": 33,
+      "sessionKey": "agent:fixture:control-projection",
+      "turnId": "turn-plan",
+      "type": "plan_lifecycle",
+      "planId": "plan-1",
+      "state": "verification_pending",
+      "requestId": "req-approved-1",
+      "plan": "Fixture-only plan.",
+      "feedback": "approved once"
+    },
+    {
+      "v": 1,
+      "eventId": "ctrl-019",
+      "seq": 19,
+      "ts": 34,
+      "sessionKey": "agent:fixture:control-projection",
+      "turnId": "turn-plan",
+      "type": "task_board_snapshot",
+      "taskBoard": {
+        "tasks": [
+          {"id": "task-1", "title": "Implement fixture", "status": "completed"},
+          {"id": "task-2", "title": "Run verification", "status": "pending"}
+        ]
+      }
+    },
+    {
+      "v": 1,
+      "eventId": "ctrl-020",
+      "seq": 20,
+      "ts": 35,
+      "sessionKey": "agent:fixture:control-projection",
+      "turnId": "turn-plan",
+      "type": "child_started",
+      "taskId": "child-running",
+      "parentTurnId": "turn-plan",
+      "detail": "running child fixture"
+    },
+    {
+      "v": 1,
+      "eventId": "ctrl-021",
+      "seq": 21,
+      "ts": 36,
+      "sessionKey": "agent:fixture:control-projection",
+      "turnId": "turn-plan",
+      "type": "child_started",
+      "taskId": "child-completed",
+      "parentTurnId": "turn-plan",
+      "detail": "completed child fixture"
+    },
+    {
+      "v": 1,
+      "eventId": "ctrl-022",
+      "seq": 22,
+      "ts": 37,
+      "sessionKey": "agent:fixture:control-projection",
+      "turnId": "turn-plan",
+      "type": "child_completed",
+      "taskId": "child-completed",
+      "summary": {"status": "ok", "finalText": "done", "toolCallCount": 1}
+    },
+    {
+      "v": 1,
+      "eventId": "ctrl-023",
+      "seq": 23,
+      "ts": 38,
+      "sessionKey": "agent:fixture:control-projection",
+      "turnId": "turn-plan",
+      "type": "child_failed",
+      "taskId": "child-failed",
+      "errorMessage": "redacted failure"
+    }
+  ]
+}

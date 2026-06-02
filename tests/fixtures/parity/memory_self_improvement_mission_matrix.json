@@ -1,0 +1,902 @@
+{
+  "schemaVersion": "memorySelfImprovementMissionParityMatrix.v1",
+  "generatedFor": "python-adk-memory-self-improvement-mission-control-e2e",
+  "rows": [
+    {
+      "id": "memory_mission_self_improvement_gap_matrix",
+      "capability": "Latest-main reconciliation matrix for memory, mission, background work, and self-improvement",
+      "requestedBy": [
+        "typescript_parity",
+        "memory_parity",
+        "mission_control_parity",
+        "hermes_self_improvement_parity"
+      ],
+      "latestMainCoveredRefs": [
+        {
+          "path": "README.md",
+          "state": "existing"
+        },
+        {
+          "path": "docs/superpowers/plans/2026-05-23-python-adk-memory-self-improvement-mission-parity.md",
+          "state": "existing"
+        }
+      ],
+      "missingImplementation": [
+        {
+          "path": "tests/planned_memory_mission/pr01_no_runtime_behavior_change.py",
+          "state": "planned_missing"
+        }
+      ],
+      "owningLayer": "Tests/docs only",
+      "adkPrimitive": "audit fixture only",
+      "prSliceAssignment": "PR1",
+      "dependencies": [],
+      "activationGate": "documentation-only audit gate",
+      "implementationStatus": "contract_only",
+      "defaultOff": true,
+      "trafficAttached": false,
+      "productionAuthority": false,
+      "notes": "PR1 records row ownership, activation gates, and current implementation status without changing runtime behavior."
+    },
+    {
+      "id": "durable_store_sqlite_oss_runtime_state",
+      "capability": "OSS-first DurableStore with in-memory tests, PVC-backed SQLite, and optional hosted adapter boundary",
+      "requestedBy": [
+        "typescript_parity",
+        "memory_parity",
+        "mission_control_parity",
+        "hermes_self_improvement_parity",
+        "oss_durable_runtime"
+      ],
+      "latestMainCoveredRefs": [
+        {
+          "path": "openmagi_core_agent/runtime/checkpointing.py",
+          "state": "existing"
+        },
+        {
+          "path": "openmagi_core_agent/evidence/ledger_semantics.py",
+          "state": "existing"
+        },
+        {
+          "path": "openmagi_core_agent/artifacts/local_result_store.py",
+          "state": "existing"
+        },
+        {
+          "path": "tests/test_checkpoint_resume_replay_fork_contract.py",
+          "state": "existing"
+        },
+        {
+          "path": "openmagi_core_agent/storage/durable_store.py",
+          "state": "existing"
+        },
+        {
+          "path": "openmagi_core_agent/storage/memory_store.py",
+          "state": "existing"
+        },
+        {
+          "path": "openmagi_core_agent/storage/sqlite_store.py",
+          "state": "existing"
+        },
+        {
+          "path": "tests/test_durable_store_contract.py",
+          "state": "existing"
+        }
+      ],
+      "missingImplementation": [
+        {
+          "path": "tests/planned_memory_mission/pr02_hosted_durable_store_adapter.py",
+          "state": "planned_missing"
+        }
+      ],
+      "owningLayer": "Core substrate",
+      "adkPrimitive": "ADK SessionService, MemoryService, ArtifactService boundaries plus OpenMagi DurableStore metadata interface",
+      "prSliceAssignment": "PR2",
+      "dependencies": [
+        "memory_mission_self_improvement_gap_matrix"
+      ],
+      "activationGate": "local memory or sqlite adapter only; hosted sync and multi-pod writers blocked",
+      "implementationStatus": "local_fake",
+      "defaultOff": true,
+      "trafficAttached": false,
+      "productionAuthority": false,
+      "notes": "PR2 adds in-memory and PVC-backed SQLite metadata adapters; hosted Postgres/Supabase sync remains optional and planned missing."
+    },
+    {
+      "id": "adk_session_memory_artifact_boundaries",
+      "capability": "Generic ADK SessionService, MemoryService, and ArtifactService adapter contracts",
+      "requestedBy": [
+        "memory_parity",
+        "mission_control_parity",
+        "hermes_self_improvement_parity"
+      ],
+      "latestMainCoveredRefs": [
+        {
+          "path": "openmagi_core_agent/adk_bridge/session_service.py",
+          "state": "existing"
+        },
+        {
+          "path": "openmagi_core_agent/memory/adk_bridge.py",
+          "state": "existing"
+        },
+        {
+          "path": "openmagi_core_agent/artifacts/delivery_boundary.py",
+          "state": "existing"
+        },
+        {
+          "path": "tests/test_session_service.py",
+          "state": "existing"
+        },
+        {
+          "path": "tests/test_priority_d_memory_adk_bridge.py",
+          "state": "existing"
+        },
+        {
+          "path": "openmagi_core_agent/adk_bridge/memory_service.py",
+          "state": "existing"
+        },
+        {
+          "path": "openmagi_core_agent/adk_bridge/artifact_service.py",
+          "state": "existing"
+        },
+        {
+          "path": "tests/test_adk_session_memory_artifact_boundaries.py",
+          "state": "existing"
+        }
+      ],
+      "missingImplementation": [
+        {
+          "path": "tests/planned_memory_mission/pr02_live_adk_service_attachment.py",
+          "state": "planned_missing"
+        }
+      ],
+      "owningLayer": "Core substrate",
+      "adkPrimitive": "ADK SessionService, MemoryService, ArtifactService",
+      "prSliceAssignment": "PR2",
+      "dependencies": [
+        "durable_store_sqlite_oss_runtime_state"
+      ],
+      "activationGate": "default-off no-op or local fake adapters only",
+      "implementationStatus": "local_fake",
+      "defaultOff": true,
+      "trafficAttached": false,
+      "productionAuthority": false,
+      "notes": "PR2 adds default-off ADK Session/Memory/Artifact boundary projections; live ADK service attachment remains planned missing behind future gate."
+    },
+    {
+      "id": "memory_namespace_projection_redaction",
+      "capability": "Memory namespace, source-authority, projection, retention, erase, and redaction primitives",
+      "requestedBy": [
+        "memory_parity"
+      ],
+      "latestMainCoveredRefs": [
+        {
+          "path": "openmagi_core_agent/memory/contracts.py",
+          "state": "existing"
+        },
+        {
+          "path": "openmagi_core_agent/memory/projection.py",
+          "state": "existing"
+        },
+        {
+          "path": "openmagi_core_agent/memory/policy.py",
+          "state": "existing"
+        },
+        {
+          "path": "tests/test_priority_d_memory_projection_policy.py",
+          "state": "existing"
+        },
+        {
+          "path": "openmagi_core_agent/memory/namespaces.py",
+          "state": "existing"
+        },
+        {
+          "path": "tests/test_memory_projection_namespace_contract.py",
+          "state": "existing"
+        }
+      ],
+      "missingImplementation": [
+        {
+          "path": "tests/planned_memory_mission/pr03_live_memory_projection_activation.py",
+          "state": "planned_missing"
+        }
+      ],
+      "owningLayer": "Core substrate",
+      "adkPrimitive": "ADK MemoryService boundary",
+      "prSliceAssignment": "PR3",
+      "dependencies": [
+        "adk_session_memory_artifact_boundaries"
+      ],
+      "activationGate": "memory projection disabled unless recipe policy admits safe refs",
+      "implementationStatus": "local_fake",
+      "defaultOff": true,
+      "trafficAttached": false,
+      "productionAuthority": false,
+      "notes": "PR3 adds generic namespace admission, source-authority projection, retention/erase/redaction state denial, stale-ref denial, and default-off prompt/write protections. Hipocampus/QMD ranking remains PR4/plugin-owned."
+    },
+    {
+      "id": "hipocampus_qmd_compatibility_adapter",
+      "capability": "Hipocampus daily/root memory and QMD search compatibility adapter",
+      "requestedBy": [
+        "typescript_parity",
+        "memory_parity"
+      ],
+      "latestMainCoveredRefs": [
+        {
+          "path": "openmagi_core_agent/memory/adapters/hipocampus_readonly.py",
+          "state": "existing"
+        },
+        {
+          "path": "openmagi_core_agent/memory/conformance.py",
+          "state": "existing"
+        },
+        {
+          "path": "tests/test_memory_provider_conformance_fixture.py",
+          "state": "existing"
+        },
+        {
+          "path": "tests/test_hipocampus_qmd_memory_adapter.py",
+          "state": "existing"
+        }
+      ],
+      "missingImplementation": [],
+      "owningLayer": "Memory recipe/harness/plugin",
+      "adkPrimitive": "ADK MemoryService boundary with provider adapter",
+      "prSliceAssignment": "PR4",
+      "dependencies": [
+        "memory_namespace_projection_redaction"
+      ],
+      "activationGate": "local fake/read-only provider only",
+      "implementationStatus": "local_fake",
+      "defaultOff": true,
+      "trafficAttached": false,
+      "productionAuthority": false,
+      "notes": "PR4 keeps the existing read-only adapter path, adds local fake daily/root and QMD refs, digest-only source refs, budgeted safe snippets, and explicit write, compaction, and erase denial."
+    },
+    {
+      "id": "readonly_memory_recall_recipe",
+      "capability": "Read-only memory recall recipe with namespace, source authority, projection, and recall receipts",
+      "requestedBy": [
+        "memory_parity"
+      ],
+      "latestMainCoveredRefs": [
+        {
+          "path": "openmagi_core_agent/memory/recall_ledger.py",
+          "state": "existing"
+        },
+        {
+          "path": "tests/test_priority_d_memory_recall_ledger.py",
+          "state": "existing"
+        },
+        {
+          "path": "openmagi_core_agent/recipes/first_party/memory_recall.py",
+          "state": "existing"
+        },
+        {
+          "path": "openmagi_core_agent/harness/memory_recall.py",
+          "state": "existing"
+        },
+        {
+          "path": "tests/test_memory_recall_recipe_harness.py",
+          "state": "existing"
+        }
+      ],
+      "missingImplementation": [
+        {
+          "path": "tests/planned_memory_mission/pr05_live_selected_memory_canary.py",
+          "state": "planned_missing"
+        },
+        {
+          "path": "tests/planned_memory_mission/pr05_production_memory_write_attachment.py",
+          "state": "planned_missing"
+        },
+        {
+          "path": "tests/planned_memory_mission/pr05_memory_compaction_activation.py",
+          "state": "planned_missing"
+        }
+      ],
+      "owningLayer": "Memory recipe/harness/plugin",
+      "adkPrimitive": "ADK MemoryService recall boundary",
+      "prSliceAssignment": "PR5",
+      "dependencies": [
+        "hipocampus_qmd_compatibility_adapter"
+      ],
+      "activationGate": "default-off local fake adapter only; selected read-only memory canary approval required before live attachment",
+      "implementationStatus": "local_fake",
+      "defaultOff": true,
+      "trafficAttached": false,
+      "productionAuthority": false,
+      "notes": "PR5 adds default-off read-only recall over injected local fake adapters, explicit namespace/projection policy, deny-by-policy checks, and digest-only receipts. Live selected memory canary, production write, and compaction remain explicit future blockers."
+    },
+    {
+      "id": "memory_write_compaction_approval_boundary",
+      "capability": "Memory write, erase, retention, and compaction approval boundary",
+      "requestedBy": [
+        "memory_parity",
+        "hermes_self_improvement_parity"
+      ],
+      "latestMainCoveredRefs": [
+        {
+          "path": "openmagi_core_agent/memory/write_boundary.py",
+          "state": "existing"
+        },
+        {
+          "path": "tests/test_priority_d_memory_write_boundary.py",
+          "state": "existing"
+        },
+        {
+          "path": "openmagi_core_agent/harness/memory_write.py",
+          "state": "existing"
+        },
+        {
+          "path": "openmagi_core_agent/harness/memory_compaction.py",
+          "state": "existing"
+        },
+        {
+          "path": "tests/test_memory_write_compaction_boundary.py",
+          "state": "existing"
+        }
+      ],
+      "missingImplementation": [
+        {
+          "path": "tests/planned_memory_mission/pr06_live_adk_memory_service_write_attachment.py",
+          "state": "planned_missing"
+        },
+        {
+          "path": "tests/planned_memory_mission/pr06_production_memory_write_activation.py",
+          "state": "planned_missing"
+        },
+        {
+          "path": "tests/planned_memory_mission/pr06_memory_compaction_persistent_store_activation.py",
+          "state": "planned_missing"
+        }
+      ],
+      "owningLayer": "Memory recipe/harness/plugin",
+      "adkPrimitive": "ADK MemoryService write boundary",
+      "prSliceAssignment": "PR6",
+      "dependencies": [
+        "durable_store_sqlite_oss_runtime_state",
+        "readonly_memory_recall_recipe"
+      ],
+      "activationGate": "default-off local fake receipts only; production writes and live ADK MemoryService attachment blocked pending explicit approval",
+      "implementationStatus": "local_fake",
+      "defaultOff": true,
+      "trafficAttached": false,
+      "productionAuthority": false,
+      "notes": "PR6 adds harness-layer write approval policy and digest-only compaction receipts with source refs, excluded refs, redaction status, output digest, and policy snapshot digest. Local fake success is test-only; production writes, provider calls, filesystem/database/network mutation, and live ADK MemoryService writes remain disabled."
+    },
+    {
+      "id": "mission_lifecycle_state_machine",
+      "capability": "Generic mission lifecycle state machine and transition receipts",
+      "requestedBy": [
+        "typescript_parity",
+        "mission_control_parity"
+      ],
+      "latestMainCoveredRefs": [
+        {
+          "path": "openmagi_core_agent/harness/mission_runtime_boundary.py",
+          "state": "existing"
+        },
+        {
+          "path": "openmagi_core_agent/shadow/mission_lifecycle_contract.py",
+          "state": "existing"
+        },
+        {
+          "path": "tests/test_mission_lifecycle_contract_golden_fixtures.py",
+          "state": "existing"
+        },
+        {
+          "path": "tests/test_priority_e_mission_runtime_boundary.py",
+          "state": "existing"
+        },
+        {
+          "path": "openmagi_core_agent/missions/__init__.py",
+          "state": "existing"
+        },
+        {
+          "path": "openmagi_core_agent/missions/lifecycle.py",
+          "state": "existing"
+        },
+        {
+          "path": "openmagi_core_agent/missions/receipts.py",
+          "state": "existing"
+        },
+        {
+          "path": "tests/test_mission_lifecycle_state_machine.py",
+          "state": "existing"
+        }
+      ],
+      "missingImplementation": [
+        {
+          "path": "tests/planned_memory_mission/pr07_selected_mission_lifecycle_canary.py",
+          "state": "planned_missing"
+        },
+        {
+          "path": "tests/planned_memory_mission/pr07_live_adk_runner_callback_attachment.py",
+          "state": "planned_missing"
+        },
+        {
+          "path": "tests/planned_memory_mission/pr07_production_mission_store_activation.py",
+          "state": "planned_missing"
+        }
+      ],
+      "owningLayer": "Mission recipe/harness/plugin",
+      "adkPrimitive": "ADK Runner lifecycle callbacks where applicable",
+      "prSliceAssignment": "PR7",
+      "dependencies": [
+        "durable_store_sqlite_oss_runtime_state"
+      ],
+      "activationGate": "default-off local fake transition receipts only; selected mission canary and production mission store activation require separate approval",
+      "implementationStatus": "local_fake",
+      "defaultOff": true,
+      "trafficAttached": false,
+      "productionAuthority": false,
+      "notes": "PR7 adds mission-owned lifecycle state transitions, allowed/denied transition receipts, policy snapshot digest binding, receipt digest binding, and authority-forced-false projections. Production mission mutation, live ADK Runner callback attachment, scheduler/cron/background/tool/channel/workspace/memory mutation, and selected mission canary activation remain disabled."
+    },
+    {
+      "id": "cron_scheduler_mutation_boundary",
+      "capability": "Cron create/update/delete and scheduler mutation boundary with idempotency and approval",
+      "requestedBy": [
+        "typescript_parity",
+        "mission_control_parity"
+      ],
+      "latestMainCoveredRefs": [
+        {
+          "path": "openmagi_core_agent/harness/cron_runtime.py",
+          "state": "existing"
+        },
+        {
+          "path": "openmagi_core_agent/harness/scheduler_runtime.py",
+          "state": "existing"
+        },
+        {
+          "path": "openmagi_core_agent/tools/scheduler.py",
+          "state": "existing"
+        },
+        {
+          "path": "tests/test_live_cron_runtime_boundary.py",
+          "state": "existing"
+        },
+        {
+          "path": "tests/test_live_scheduler_runtime_boundary.py",
+          "state": "existing"
+        },
+        {
+          "path": "openmagi_core_agent/missions/cron_policy.py",
+          "state": "existing"
+        },
+        {
+          "path": "openmagi_core_agent/missions/scheduler_adapter.py",
+          "state": "existing"
+        },
+        {
+          "path": "tests/test_cron_scheduler_mutation_boundary.py",
+          "state": "existing"
+        }
+      ],
+      "missingImplementation": [
+        {
+          "path": "tests/planned_memory_mission/pr08_live_cron_scheduler_activation.py",
+          "state": "planned_missing"
+        }
+      ],
+      "owningLayer": "Mission recipe/harness/plugin",
+      "adkPrimitive": "ADK LongRunningFunctionTool boundary for long scheduler jobs when applicable",
+      "prSliceAssignment": "PR8",
+      "dependencies": [
+        "mission_lifecycle_state_machine"
+      ],
+      "activationGate": "live cron mutation disabled; local fake receipts only",
+      "implementationStatus": "local_fake",
+      "defaultOff": true,
+      "trafficAttached": false,
+      "productionAuthority": false,
+      "notes": "PR8 adds mission-owned cron create/update/delete policy contracts, idempotency key admission, approval ref admission, timezone validation, next-run preview receipts, compensation policy, duplicate/conflict behavior, digest-only projections, and local fake scheduler receipts. Live cron mutation, scheduler attachment, background execution, provider/network/filesystem/database writes, ToolHost/channel/workspace/memory mutation, and selected canary activation remain disabled."
+    },
+    {
+      "id": "background_long_running_activity_boundary",
+      "capability": "Background task and long-running activity boundary with heartbeat, cancel, timeout, and failure receipts",
+      "requestedBy": [
+        "typescript_parity",
+        "mission_control_parity"
+      ],
+      "latestMainCoveredRefs": [
+        {
+          "path": "openmagi_core_agent/harness/background_tasks.py",
+          "state": "existing"
+        },
+        {
+          "path": "tests/test_live_background_task_boundary.py",
+          "state": "existing"
+        },
+        {
+          "path": "openmagi_core_agent/runtime/long_running_activity.py",
+          "state": "existing"
+        },
+        {
+          "path": "openmagi_core_agent/runtime/receipt_utils.py",
+          "state": "existing"
+        },
+        {
+          "path": "openmagi_core_agent/missions/background_tasks.py",
+          "state": "existing"
+        },
+        {
+          "path": "tests/test_background_task_activity_boundary.py",
+          "state": "existing"
+        }
+      ],
+      "missingImplementation": [
+        {
+          "path": "tests/planned_memory_mission/pr09_live_adk_long_running_function_tool_attachment.py",
+          "state": "planned_missing"
+        },
+        {
+          "path": "tests/planned_memory_mission/pr09_production_background_execution_activation.py",
+          "state": "planned_missing"
+        },
+        {
+          "path": "tests/planned_memory_mission/pr09_production_background_task_store_activation.py",
+          "state": "planned_missing"
+        }
+      ],
+      "owningLayer": "Mission recipe/harness/plugin",
+      "adkPrimitive": "ADK LongRunningFunctionTool",
+      "prSliceAssignment": "PR9",
+      "dependencies": [
+        "durable_store_sqlite_oss_runtime_state",
+        "mission_lifecycle_state_machine"
+      ],
+      "activationGate": "local fake receipts only; production background execution and live ADK LongRunningFunctionTool attachment disabled",
+      "implementationStatus": "local_fake",
+      "defaultOff": true,
+      "trafficAttached": false,
+      "productionAuthority": false,
+      "notes": "PR9 adds generic long-running activity receipts for start, heartbeat, progress, completion, cancellation, timeout, and failure, plus mission-owned scoped idempotency and side-effect surface policy. Local fake receipts may record requested surfaces only when policy allows them, but production background execution, ADK LongRunningFunctionTool attachment, workspace/memory/channel/cron/artifact mutation, provider calls, network, filesystem, database writes, traffic, and user-visible output remain disabled."
+    },
+    {
+      "id": "mission_progress_public_event_projection",
+      "capability": "Mission, cron, background task, goal, and progress event projection to TS public event contract",
+      "requestedBy": [
+        "typescript_parity",
+        "mission_control_parity"
+      ],
+      "latestMainCoveredRefs": [
+        {
+          "path": "openmagi_core_agent/transport/sse.py",
+          "state": "existing"
+        },
+        {
+          "path": "openmagi_core_agent/transport/public_event_parity.py",
+          "state": "existing"
+        },
+        {
+          "path": "tests/test_public_event_parity_matrix.py",
+          "state": "existing"
+        },
+        {
+          "path": "tests/test_public_event_golden_fixtures.py",
+          "state": "existing"
+        },
+        {
+          "path": "openmagi_core_agent/missions/events.py",
+          "state": "existing"
+        },
+        {
+          "path": "tests/test_mission_public_event_projection.py",
+          "state": "existing"
+        },
+        {
+          "path": "tests/fixtures/public_event_parity/matrix.json",
+          "state": "existing"
+        }
+      ],
+      "missingImplementation": [
+        {
+          "path": "tests/planned_memory_mission/pr10_production_sse_write_activation.py",
+          "state": "planned_missing"
+        },
+        {
+          "path": "tests/planned_memory_mission/pr10_selected_mission_event_canary.py",
+          "state": "planned_missing"
+        }
+      ],
+      "owningLayer": "Mission recipe/harness/plugin",
+      "adkPrimitive": "ADK Event projection boundary",
+      "prSliceAssignment": "PR10",
+      "dependencies": [
+        "background_long_running_activity_boundary"
+      ],
+      "activationGate": "local fake event projection only; no production SSE/transcript/DB writes or user-visible route activation",
+      "implementationStatus": "local_fake",
+      "defaultOff": true,
+      "trafficAttached": false,
+      "productionAuthority": false,
+      "notes": "PR10 adds mission-owned local fake event projection for mission_created, mission_event, mission_progress, cron_run, goal lifecycle, background_task, and progress-compatible events. Mission alias events must pass through the mission projection boundary before the existing SSE sanitizer; generic SSE does not activate mission aliases by itself. Raw prompt/output/tool args/logs, private paths, auth headers, cookies, secrets, hidden reasoning, and raw mission/goal/task payloads are redacted. Production SSE/transcript/DB writes, route activation, channel delivery, workspace/memory/cron mutation, live background execution, and user-visible output remain disabled."
+    },
+    {
+      "id": "self_improvement_eval_capture",
+      "capability": "Self-improvement eval observation capture and failure clustering",
+      "requestedBy": [
+        "hermes_self_improvement_parity"
+      ],
+      "latestMainCoveredRefs": [
+        {
+          "path": "openmagi_core_agent/evals/regression_gates.py",
+          "state": "existing"
+        },
+        {
+          "path": "openmagi_core_agent/shadow/adk_eval_fixture_contract.py",
+          "state": "existing"
+        },
+        {
+          "path": "tests/test_adk_eval_contract_golden_fixtures.py",
+          "state": "existing"
+        },
+        {
+          "path": "tests/test_eval_regression_gates_contract.py",
+          "state": "existing"
+        },
+        {
+          "path": "openmagi_core_agent/self_improvement/__init__.py",
+          "state": "existing"
+        },
+        {
+          "path": "openmagi_core_agent/self_improvement/eval_capture.py",
+          "state": "existing"
+        },
+        {
+          "path": "openmagi_core_agent/self_improvement/failure_cluster.py",
+          "state": "existing"
+        },
+        {
+          "path": "tests/test_self_improvement_eval_capture.py",
+          "state": "existing"
+        }
+      ],
+      "missingImplementation": [],
+      "owningLayer": "Self-improvement recipe/harness/plugin",
+      "adkPrimitive": "google.adk.evaluation.AgentEvaluator boundary",
+      "prSliceAssignment": "PR11",
+      "dependencies": [
+        "durable_store_sqlite_oss_runtime_state"
+      ],
+      "activationGate": "eval capture local only; automatic code/config mutation denied",
+      "implementationStatus": "local_fake",
+      "defaultOff": true,
+      "trafficAttached": false,
+      "productionAuthority": false,
+      "notes": "PR11 adds local fake self-improvement eval capture and deterministic failure clustering. Eval observations are digest-only and bind policy snapshot digest, recipe id, validator results, terminal state, ADK Evaluation boundary ref, and denied mutation refs. Raw prompt/output/tool logs, private paths, auth headers, cookies, hidden reasoning, and secret material are excluded or sanitized. Automatic code/config/deploy/secret mutation, live ADK Evaluation execution, model calls, ToolHost execution, production writes, and user-visible output remain disabled."
+    },
+    {
+      "id": "self_improvement_proposal_recipe",
+      "capability": "Self-improvement structured proposal recipe",
+      "requestedBy": [
+        "hermes_self_improvement_parity"
+      ],
+      "latestMainCoveredRefs": [
+        {
+          "path": "openmagi_core_agent/harness/self_debug.py",
+          "state": "existing"
+        },
+        {
+          "path": "tests/test_self_debug_state_machine_contract.py",
+          "state": "existing"
+        },
+        {
+          "path": "openmagi_core_agent/recipes/first_party/self_improvement.py",
+          "state": "existing"
+        },
+        {
+          "path": "openmagi_core_agent/self_improvement/__init__.py",
+          "state": "existing"
+        },
+        {
+          "path": "openmagi_core_agent/self_improvement/proposals.py",
+          "state": "existing"
+        },
+        {
+          "path": "tests/test_self_improvement_proposal_recipe.py",
+          "state": "existing"
+        }
+      ],
+      "missingImplementation": [],
+      "owningLayer": "Self-improvement recipe/harness/plugin",
+      "adkPrimitive": "ADK Runner for proposal generation only when separately gated",
+      "prSliceAssignment": "PR12",
+      "dependencies": [
+        "self_improvement_eval_capture"
+      ],
+      "activationGate": "proposal-only dry run; no direct production changes",
+      "implementationStatus": "local_fake",
+      "defaultOff": true,
+      "trafficAttached": false,
+      "productionAuthority": false,
+      "notes": "PR12 adds a default-off structured proposal recipe and local fake proposal-only dry run. Proposals require eval observation digest refs and policy snapshot digest binding, emit denied direct-change refs for production/code/config/deploy/secret/DB/sealed-file requests, and only allow recipe change, harness config change, plugin config change, test fixture addition, docs note, or blocked proposal types. Live ADK Runner, model calls, ToolHost execution, deploy/secret/DB/sealed-file mutation, production writes, and user-visible output remain disabled."
+    },
+    {
+      "id": "self_improvement_review_promotion_gate",
+      "capability": "Self-improvement review, approval receipt binding, and promotion hard blocks",
+      "requestedBy": [
+        "hermes_self_improvement_parity"
+      ],
+      "latestMainCoveredRefs": [
+        {
+          "path": "openmagi_core_agent/harness/approval_receipts.py",
+          "state": "existing"
+        },
+        {
+          "path": "tests/test_approval_receipts_contract.py",
+          "state": "existing"
+        },
+        {
+          "path": "tests/test_eval_regression_gates_contract.py",
+          "state": "existing"
+        },
+        {
+          "path": "openmagi_core_agent/self_improvement/__init__.py",
+          "state": "existing"
+        },
+        {
+          "path": "openmagi_core_agent/self_improvement/review_gate.py",
+          "state": "existing"
+        },
+        {
+          "path": "openmagi_core_agent/self_improvement/promotion_gate.py",
+          "state": "existing"
+        },
+        {
+          "path": "tests/test_self_improvement_review_promotion_gate.py",
+          "state": "existing"
+        }
+      ],
+      "missingImplementation": [],
+      "owningLayer": "Self-improvement recipe/harness/plugin",
+      "adkPrimitive": "google.adk.evaluation.AgentEvaluator plus approval receipt boundary",
+      "prSliceAssignment": "PR13",
+      "dependencies": [
+        "self_improvement_proposal_recipe"
+      ],
+      "activationGate": "promotion dry run only; owner approval required for any real promotion",
+      "implementationStatus": "local_fake",
+      "defaultOff": true,
+      "trafficAttached": false,
+      "productionAuthority": false,
+      "notes": "PR13 adds default-off local fake self-improvement review and promotion gates. Promotion action digests bind proposal digest, affected recipe/plugin digest, promotion scope, and policy snapshot digest to an approval receipt. Promotion blocks on eval regression, approval mismatch, selector fallback, raw projection, plugin sandbox overreach, or hard invariant downgrade. Actual repo/config/deploy/secret/DB mutation, model calls, ToolHost execution, production writes, and user-visible output remain disabled."
+    },
+    {
+      "id": "rollback_regression_drift_watch",
+      "capability": "Rollback receipts for recipe, harness, and plugin config promotions plus regression tracking and drift watch for recipe, harness, plugin, model, policy, and threshold changes",
+      "requestedBy": [
+        "hermes_self_improvement_parity"
+      ],
+      "latestMainCoveredRefs": [
+        {
+          "path": "openmagi_core_agent/evals/regression_gates.py",
+          "state": "existing"
+        },
+        {
+          "path": "tests/test_policy_evaluation_snapshot_contract.py",
+          "state": "existing"
+        },
+        {
+          "path": "openmagi_core_agent/self_improvement/__init__.py",
+          "state": "existing"
+        },
+        {
+          "path": "openmagi_core_agent/self_improvement/rollback.py",
+          "state": "existing"
+        },
+        {
+          "path": "openmagi_core_agent/self_improvement/drift_watch.py",
+          "state": "existing"
+        },
+        {
+          "path": "tests/test_self_improvement_rollback_drift.py",
+          "state": "existing"
+        }
+      ],
+      "missingImplementation": [],
+      "owningLayer": "Self-improvement recipe/harness/plugin",
+      "adkPrimitive": "google.adk.evaluation.AgentEvaluator for regression observations",
+      "prSliceAssignment": "PR14",
+      "dependencies": [
+        "self_improvement_review_promotion_gate"
+      ],
+      "activationGate": "automatic rollback denied except local fake test mode",
+      "implementationStatus": "local_fake",
+      "defaultOff": true,
+      "trafficAttached": false,
+      "productionAuthority": false,
+      "notes": "PR14 adds default-off rollback receipts for recipe, harness config, and plugin config promotions; replay policy snapshot binding; and drift watch for recipe digest, harness config digest, plugin config digest, model tier, policy snapshot, eval threshold, and plugin supply-chain digest changes. Old runs retain their original effective policy snapshot through an original run receipt digest and replay creates no side effects. Automatic rollback execution is denied unless a bound approval receipt is present, constraints verify, and local fake rollback execution is explicitly enabled. Production rollback, repo/config/deploy/secret/DB mutation, model calls, ToolHost execution, production writes, and user-visible output remain disabled."
+    },
+    {
+      "id": "integrated_memory_mission_self_improvement_readiness",
+      "capability": "Integrated readiness report for memory, mission, cron, background, and self-improvement parity",
+      "requestedBy": [
+        "typescript_parity",
+        "memory_parity",
+        "mission_control_parity",
+        "hermes_self_improvement_parity",
+        "oss_durable_runtime"
+      ],
+      "latestMainCoveredRefs": [
+        {
+          "path": "README.md",
+          "state": "existing"
+        },
+        {
+          "path": "docs/superpowers/plans/2026-05-23-python-adk-memory-self-improvement-mission-parity.md",
+          "state": "existing"
+        },
+        {
+          "path": "tests/test_e2e_harness_pr23_final_integration_readiness.py",
+          "state": "existing"
+        },
+        {
+          "path": "tests/fixtures/parity/memory_self_improvement_mission_matrix.json",
+          "state": "existing"
+        },
+        {
+          "path": "tests/test_memory_mission_self_improvement_integration_contract.py",
+          "state": "existing"
+        }
+      ],
+      "missingImplementation": [],
+      "owningLayer": "Tests/docs only",
+      "adkPrimitive": "integration audit only",
+      "prSliceAssignment": "PR15",
+      "dependencies": [
+        "rollback_regression_drift_watch",
+        "mission_progress_public_event_projection",
+        "memory_write_compaction_approval_boundary"
+      ],
+      "activationGate": "final readiness report only; activation requires separate approval",
+      "implementationStatus": "contract_only",
+      "defaultOff": true,
+      "trafficAttached": false,
+      "productionAuthority": false,
+      "notes": "PR15 final readiness report proves memory, mission, and self-improvement behavior is recipe/harness/plugin driven; generic core substrate does not hard-code Hermes, Hipocampus/QMD, mission, cron, or self-evolution policy; live attachment and authority flags remain false by default; covered rows, remaining gaps, canary blockers, and next activation boundary are explicit. Python ADK remains default-off and TypeScript remains response authority."
+    },
+    {
+      "id": "activation_ladder_blockers",
+      "capability": "Explicit activation blockers for selected canaries and production parity",
+      "requestedBy": [
+        "typescript_parity",
+        "memory_parity",
+        "mission_control_parity",
+        "hermes_self_improvement_parity"
+      ],
+      "latestMainCoveredRefs": [
+        {
+          "path": "tests/test_gate5a_no_memory_shadow_canary.py",
+          "state": "existing"
+        },
+        {
+          "path": "openmagi_core_agent/shadow/gate5a_no_memory_shadow_canary.py",
+          "state": "existing"
+        },
+        {
+          "path": "docs/superpowers/plans/2026-05-23-python-adk-memory-self-improvement-mission-parity.md",
+          "state": "existing"
+        },
+        {
+          "path": "tests/test_memory_mission_self_improvement_integration_contract.py",
+          "state": "existing"
+        }
+      ],
+      "missingImplementation": [],
+      "owningLayer": "Tests/docs only",
+      "adkPrimitive": "activation ledger only",
+      "prSliceAssignment": "PR15",
+      "dependencies": [
+        "integrated_memory_mission_self_improvement_readiness"
+      ],
+      "activationGate": "separate deploy, env, credential, canary, and user-visible approval boundary",
+      "implementationStatus": "contract_only",
+      "defaultOff": true,
+      "trafficAttached": false,
+      "productionAuthority": false,
+      "notes": "PR15 activation blocker ledger keeps remaining live steps outside this implementation package: separate approval boundary, selected-bot canary, K8s/env changes, provider credentials, production memory writes, cron mutation, background execution, self-improvement promotion, user-visible Python output, route activation, production transcript/SSE/DB/channel writes, and production traffic authority."
+    }
+  ]
+}

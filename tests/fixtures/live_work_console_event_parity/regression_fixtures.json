@@ -1,0 +1,199 @@
+{
+  "schemaVersion": "liveWorkConsoleRegressionFixtures.v1",
+  "blockedPublicFragments": [
+    "SECRET_DO_NOT_PROJECT",
+    "provider private payload",
+    "hidden chain trace",
+    "rawToolUseInput",
+    "toolUseResponse",
+    "raw source body",
+    "/Users/kevin/private/project",
+    "sk-test-regression",
+    "private active snapshot"
+  ],
+  "cases": [
+    {
+      "id": "raw_adk_event_payload_leak",
+      "description": "Unknown raw ADK payload-shaped events must not project raw provider payloads.",
+      "events": [
+        {
+          "type": "raw_adk_event",
+          "eventId": "evt-raw-adk",
+          "rawPayload": "provider private payload SECRET_DO_NOT_PROJECT",
+          "prompt": "private active snapshot"
+        }
+      ]
+    },
+    {
+      "id": "hidden_reasoning_leak",
+      "description": "Hidden reasoning deltas remain unsupported and are never replayed.",
+      "events": [
+        {
+          "type": "turn_start",
+          "eventId": "evt-hidden-turn",
+          "turnId": "turn-hidden"
+        },
+        {
+          "type": "thinking_delta",
+          "eventId": "evt-hidden-thinking",
+          "delta": "hidden chain trace SECRET_DO_NOT_PROJECT"
+        }
+      ]
+    },
+    {
+      "id": "raw_tool_args_results_leak",
+      "description": "Tool arg/result shaped previews are redacted by SSE and omitted by reconnect snapshots.",
+      "events": [
+        {
+          "type": "tool_start",
+          "eventId": "evt-tool-start",
+          "id": "tool-fixture-1",
+          "name": "Shell",
+          "input_preview": "rawToolUseInput: SECRET_DO_NOT_PROJECT",
+          "inputDigest": "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+        },
+        {
+          "type": "tool_end",
+          "eventId": "evt-tool-end",
+          "id": "tool-fixture-1",
+          "status": "ok",
+          "output_preview": "toolUseResponse: SECRET_DO_NOT_PROJECT",
+          "receiptRef": "receipt:sha256:2222222222222222222222222222222222222222222222222222222222222222"
+        }
+      ]
+    },
+    {
+      "id": "source_snapshot_leak",
+      "description": "Raw source snapshots must be omitted while safe source evidence remains visible.",
+      "events": [
+        {
+          "type": "source_inspected",
+          "eventId": "evt-source-safe",
+          "source": {
+            "sourceId": "src-safe",
+            "kind": "web_fetch",
+            "uri": "source://digest-safe",
+            "contentHash": "sha256:3333333333333333333333333333333333333333333333333333333333333333",
+            "rawSourceSnapshot": "raw source body SECRET_DO_NOT_PROJECT"
+          }
+        }
+      ]
+    },
+    {
+      "id": "private_path_leak",
+      "description": "Private paths, bearer text, and token-shaped strings must not be replayed in public output.",
+      "events": [
+        {
+          "type": "text_delta",
+          "eventId": "evt-private-path",
+          "delta": "Read /Users/kevin/private/project with token=sk-test-regression"
+        }
+      ]
+    },
+    {
+      "id": "source_inspected_without_receipt",
+      "description": "Source inspected claims without public evidence receipts project as blocked traces and do not increment snapshot source counts.",
+      "events": [
+        {
+          "type": "source_inspected",
+          "eventId": "evt-source-missing-ref",
+          "source": {
+            "sourceId": "src-missing-ref",
+            "kind": "web_fetch",
+            "uri": "source://missing-ref",
+            "turnId": "turn-source-missing-ref"
+          }
+        }
+      ]
+    },
+    {
+      "id": "child_completed_without_envelope",
+      "description": "Child completion without a child receipt/envelope projects as blocked and does not create subagent completion state.",
+      "events": [
+        {
+          "type": "child_completed",
+          "eventId": "evt-child-missing-envelope",
+          "taskId": "child-missing-envelope",
+          "turnId": "turn-child-missing-envelope",
+          "detail": "completed without envelope"
+        }
+      ]
+    },
+    {
+      "id": "unsupported_event_marked_supported",
+      "description": "A supported row without producer and sanitizer evidence is rejected by the regression validator.",
+      "events": [],
+      "matrixRow": {
+        "eventFamily": "unsupported_fixture_row",
+        "auditArea": "unsupported_deferred",
+        "tsEventTypes": [
+          "structured_output"
+        ],
+        "status": "supported",
+        "liveSupported": false,
+        "pythonSseSanitizer": {
+          "status": "blocked_or_dropped",
+          "evidence": []
+        },
+        "pythonProducer": {
+          "status": "none",
+          "evidence": [],
+          "notes": "Fixture-only invalid row."
+        },
+        "reason": null,
+        "followUp": null
+      }
+    },
+    {
+      "id": "unbounded_heartbeat_progress_spam",
+      "description": "Snapshot rebuilding remains bounded under repeated heartbeat/progress event spam.",
+      "events": [
+        {
+          "type": "turn_start",
+          "eventId": "evt-spam-turn",
+          "turnId": "turn-spam"
+        },
+        {
+          "type": "tool_start",
+          "eventId": "evt-spam-tool-start",
+          "id": "tool-spam",
+          "name": "Verifier",
+          "inputDigest": "sha256:4444444444444444444444444444444444444444444444444444444444444444"
+        },
+        {
+          "type": "heartbeat",
+          "eventId": "evt-spam-heartbeat",
+          "turnId": "turn-spam",
+          "elapsedMs": 1000000
+        },
+        {
+          "repeat": 1200,
+          "event": {
+            "type": "tool_progress",
+            "eventId": "evt-spam-progress-{index}",
+            "id": "tool-spam",
+            "label": "Progress {index}",
+            "receiptRef": "receipt:sha256:5555555555555555555555555555555555555555555555555555555555555555"
+          }
+        }
+      ]
+    },
+    {
+      "id": "projection_digest_mismatch",
+      "description": "Fixture intentionally carries a stale digest so tests prove digest drift is detected.",
+      "expectedProjectionDigest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+      "events": [
+        {
+          "type": "turn_start",
+          "eventId": "evt-digest-turn",
+          "turnId": "turn-digest"
+        },
+        {
+          "type": "text_delta",
+          "eventId": "evt-digest-text",
+          "delta": "digest-safe"
+        }
+      ]
+    }
+  ]
+}

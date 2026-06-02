@@ -1,0 +1,5 @@
+{"kind":"turn_started","ts":1,"turnId":"turn-1","declaredRoute":"direct"}
+{"kind":"user_message","ts":2,"turnId":"turn-1","text":"hello"}
+{"kind":"turn_aborted","ts":3,"turnId":"turn-1","reason":"approval_required"}
+{"kind":"control_event","ts":4,"turnId":"turn-1","seq":1,"eventId":"evt-1","eventType":"control_request_created"}
+{"kind":"canonical_message","ts":5,"turnId":"turn-1","messageId":"msg-1","role":"user","content":[{"type":"text","text":"hello"}]}

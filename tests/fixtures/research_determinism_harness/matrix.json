@@ -1,0 +1,371 @@
+{
+  "fixtureId": "research_determinism_harness_pr0_matrix_20260526",
+  "scope": "docs-tests-only",
+  "track": "Python ADK first-party research determinism harness",
+  "noLiveExecution": true,
+  "defaultOff": true,
+  "trafficAttached": false,
+  "rows": [
+    {
+      "id": "action_proof_matrix",
+      "requirement": "Require deterministic action proof for research verbs before the recipe may project a result.",
+      "owningLayer": "Research recipe/harness/plugin",
+      "behaviorOwner": "research_harness_recipe_plugin",
+      "genericCoreRole": "reused substrate only",
+      "testOwner": "tests/test_research_determinism_harness_matrix.py",
+      "status": "planned",
+      "liveCapable": true,
+      "activationGate": "default-off local-only fake-provider matrix row; live web, browser, provider, model, and delivery activation blocked",
+      "defaultOff": true,
+      "trafficAttached": false,
+      "localOnly": true,
+      "fakeProviderOnly": true,
+      "actionProofVerbs": [
+        "searched",
+        "read",
+        "reviewed",
+        "compared",
+        "confirmed",
+        "analyzed",
+        "summarized"
+      ],
+      "reservedActionClaimVerbs": [
+        "checked",
+        "verified"
+      ],
+      "adkPrimitives": [
+        "callbacks planned for action proof capture points",
+        "Runner planned for replay-only turn boundaries",
+        "Evaluation planned for fixture assertions"
+      ],
+      "notes": "Digest-safe row for action evidence names only; first-party research recipe owns verb semantics.",
+      "publicProjection": "digest-safe"
+    },
+    {
+      "id": "source_proof_matrix",
+      "requirement": "Require opened source proof with snapshot, digest, timestamp, and span metadata.",
+      "owningLayer": "Research recipe/harness/plugin",
+      "behaviorOwner": "research_harness_recipe_plugin",
+      "genericCoreRole": "reused substrate only",
+      "testOwner": "tests/test_research_determinism_harness_matrix.py",
+      "status": "planned",
+      "liveCapable": true,
+      "activationGate": "default-off local-only fake-provider matrix row; live web, browser, provider, model, and delivery activation blocked",
+      "defaultOff": true,
+      "trafficAttached": false,
+      "localOnly": true,
+      "fakeProviderOnly": true,
+      "sourceProofFields": [
+        "opened",
+        "snapshot",
+        "digest",
+        "timestamp",
+        "span"
+      ],
+      "adkPrimitives": [
+        "ArtifactService planned for local snapshot handles",
+        "SessionService planned for fixture-scoped source ledger",
+        "callbacks planned for opened-source proof capture"
+      ],
+      "notes": "Digest-safe row records handles and spans only; no page bodies or local paths are projected.",
+      "publicProjection": "digest-safe"
+    },
+    {
+      "id": "url_only_citation_rejection",
+      "requirement": "Reject citations that only provide a URL-shaped string without opened-source proof.",
+      "owningLayer": "Research recipe/harness/plugin",
+      "behaviorOwner": "research_harness_recipe_plugin",
+      "genericCoreRole": "reused substrate only",
+      "testOwner": "tests/test_research_determinism_harness_matrix.py",
+      "status": "planned",
+      "liveCapable": true,
+      "activationGate": "default-off local-only fake-provider matrix row; live web, browser, provider, model, and delivery activation blocked",
+      "defaultOff": true,
+      "trafficAttached": false,
+      "localOnly": true,
+      "fakeProviderOnly": true,
+      "adkPrimitives": [
+        "Evaluation planned for rejection fixture",
+        "callbacks planned for citation gate inputs"
+      ],
+      "notes": "Research final gate should require evidence handles, not link text alone.",
+      "publicProjection": "digest-safe"
+    },
+    {
+      "id": "unopened_source_rejection",
+      "requirement": "Reject source references that were discovered but not opened in the research evidence ledger.",
+      "owningLayer": "Research recipe/harness/plugin",
+      "behaviorOwner": "research_harness_recipe_plugin",
+      "genericCoreRole": "reused substrate only",
+      "testOwner": "tests/test_research_determinism_harness_matrix.py",
+      "status": "planned",
+      "liveCapable": true,
+      "activationGate": "default-off local-only fake-provider matrix row; live web, browser, provider, model, and delivery activation blocked",
+      "defaultOff": true,
+      "trafficAttached": false,
+      "localOnly": true,
+      "fakeProviderOnly": true,
+      "adkPrimitives": [
+        "SessionService planned for opened-state ledger",
+        "Evaluation planned for unopened-source rejection"
+      ],
+      "notes": "Discovery evidence is not enough for claim support until the source is opened in the recipe harness.",
+      "publicProjection": "digest-safe"
+    },
+    {
+      "id": "stale_source_rejection",
+      "requirement": "Reject source proof outside the allowed freshness window for the claim context.",
+      "owningLayer": "Research recipe/harness/plugin",
+      "behaviorOwner": "research_harness_recipe_plugin",
+      "genericCoreRole": "reused substrate only",
+      "testOwner": "tests/test_research_determinism_harness_matrix.py",
+      "status": "planned",
+      "liveCapable": true,
+      "activationGate": "default-off local-only fake-provider matrix row; live web, browser, provider, model, and delivery activation blocked",
+      "defaultOff": true,
+      "trafficAttached": false,
+      "localOnly": true,
+      "fakeProviderOnly": true,
+      "adkPrimitives": [
+        "callbacks planned for clock evidence capture",
+        "Evaluation planned for stale-source fixture"
+      ],
+      "notes": "Freshness policy remains recipe-owned and is represented by deterministic fixture times.",
+      "publicProjection": "digest-safe"
+    },
+    {
+      "id": "claim_graph_support_mapping",
+      "requirement": "Map each answer claim to supporting source proof nodes before final projection.",
+      "owningLayer": "Research recipe/harness/plugin",
+      "behaviorOwner": "research_harness_recipe_plugin",
+      "genericCoreRole": "reused substrate only",
+      "testOwner": "tests/test_research_determinism_harness_matrix.py",
+      "status": "planned",
+      "liveCapable": true,
+      "activationGate": "default-off local-only fake-provider matrix row; live web, browser, provider, model, and delivery activation blocked",
+      "defaultOff": true,
+      "trafficAttached": false,
+      "localOnly": true,
+      "fakeProviderOnly": true,
+      "adkPrimitives": [
+        "ArtifactService planned for claim graph artifact handles",
+        "Evaluation planned for support coverage checks"
+      ],
+      "notes": "Projection should include only claim ids, evidence ids, and digest-safe support status.",
+      "publicProjection": "digest-safe"
+    },
+    {
+      "id": "weak_claim_downgrade",
+      "requirement": "Downgrade weakly supported claims rather than presenting them as confirmed.",
+      "owningLayer": "Research recipe/harness/plugin",
+      "behaviorOwner": "research_harness_recipe_plugin",
+      "genericCoreRole": "reused substrate only",
+      "testOwner": "tests/test_research_determinism_harness_matrix.py",
+      "status": "planned",
+      "liveCapable": true,
+      "activationGate": "default-off local-only fake-provider matrix row; live web, browser, provider, model, and delivery activation blocked",
+      "defaultOff": true,
+      "trafficAttached": false,
+      "localOnly": true,
+      "fakeProviderOnly": true,
+      "adkPrimitives": [
+        "Evaluation planned for downgrade verdicts",
+        "callbacks planned for final gate repair hints"
+      ],
+      "notes": "Recipe gate owns the confidence label transition from confirmed to qualified.",
+      "publicProjection": "digest-safe"
+    },
+    {
+      "id": "unsupported_claim_block",
+      "requirement": "Block unsupported claims from final research projection.",
+      "owningLayer": "Research recipe/harness/plugin",
+      "behaviorOwner": "research_harness_recipe_plugin",
+      "genericCoreRole": "reused substrate only",
+      "testOwner": "tests/test_research_determinism_harness_matrix.py",
+      "status": "planned",
+      "liveCapable": true,
+      "activationGate": "default-off local-only fake-provider matrix row; live web, browser, provider, model, and delivery activation blocked",
+      "defaultOff": true,
+      "trafficAttached": false,
+      "localOnly": true,
+      "fakeProviderOnly": true,
+      "adkPrimitives": [
+        "Evaluation planned for unsupported-claim block fixtures",
+        "callbacks planned for before-final-output gate"
+      ],
+      "notes": "Only claim ids and reason codes are exposed in public projections.",
+      "publicProjection": "digest-safe"
+    },
+    {
+      "id": "acceptance_criteria_extraction",
+      "requirement": "Extract user-visible acceptance criteria into deterministic research task checks.",
+      "owningLayer": "Research recipe/harness/plugin",
+      "behaviorOwner": "research_harness_recipe_plugin",
+      "genericCoreRole": "reused substrate only",
+      "testOwner": "tests/test_research_determinism_harness_matrix.py",
+      "status": "planned",
+      "liveCapable": true,
+      "activationGate": "default-off local-only fake-provider matrix row; live web, browser, provider, model, and delivery activation blocked",
+      "defaultOff": true,
+      "trafficAttached": false,
+      "localOnly": true,
+      "fakeProviderOnly": true,
+      "adkPrimitives": [
+        "Runner planned for replay-only request envelope",
+        "Evaluation planned for criteria extraction fixtures"
+      ],
+      "notes": "Criteria text should be normalized into ids and brief digest-safe labels.",
+      "publicProjection": "digest-safe"
+    },
+    {
+      "id": "task_completion_proof",
+      "requirement": "Require completion proof that each acceptance criterion was satisfied or explicitly blocked.",
+      "owningLayer": "Research recipe/harness/plugin",
+      "behaviorOwner": "research_harness_recipe_plugin",
+      "genericCoreRole": "reused substrate only",
+      "testOwner": "tests/test_research_determinism_harness_matrix.py",
+      "status": "planned",
+      "liveCapable": true,
+      "activationGate": "default-off local-only fake-provider matrix row; live web, browser, provider, model, and delivery activation blocked",
+      "defaultOff": true,
+      "trafficAttached": false,
+      "localOnly": true,
+      "fakeProviderOnly": true,
+      "adkPrimitives": [
+        "SessionService planned for criterion status ledger",
+        "Evaluation planned for completion proof checks"
+      ],
+      "notes": "Completion proof is a digest-safe checklist of criterion ids, statuses, and evidence handles.",
+      "publicProjection": "digest-safe"
+    },
+    {
+      "id": "child_evidence_envelope_acceptance",
+      "requirement": "Accept child research output only when it arrives as a structured evidence envelope.",
+      "owningLayer": "Research recipe/harness/plugin",
+      "behaviorOwner": "research_harness_recipe_plugin",
+      "genericCoreRole": "reused substrate only",
+      "testOwner": "tests/test_research_determinism_harness_matrix.py",
+      "status": "planned",
+      "liveCapable": true,
+      "activationGate": "default-off local-only fake-provider matrix row; live web, browser, provider, model, and delivery activation blocked",
+      "defaultOff": true,
+      "trafficAttached": false,
+      "localOnly": true,
+      "fakeProviderOnly": true,
+      "adkPrimitives": [
+        "Runner planned for local child replay fixtures",
+        "SessionService planned for child envelope handoff",
+        "ArtifactService planned for envelope artifact handles"
+      ],
+      "notes": "Child evidence is accepted by envelope schema and digest handles, not by prose alone.",
+      "publicProjection": "digest-safe"
+    },
+    {
+      "id": "child_raw_summary_rejection",
+      "requirement": "Reject child research summaries that lack structured evidence envelope fields.",
+      "owningLayer": "Research recipe/harness/plugin",
+      "behaviorOwner": "research_harness_recipe_plugin",
+      "genericCoreRole": "reused substrate only",
+      "testOwner": "tests/test_research_determinism_harness_matrix.py",
+      "status": "planned",
+      "liveCapable": true,
+      "activationGate": "default-off local-only fake-provider matrix row; live web, browser, provider, model, and delivery activation blocked",
+      "defaultOff": true,
+      "trafficAttached": false,
+      "localOnly": true,
+      "fakeProviderOnly": true,
+      "adkPrimitives": [
+        "Runner planned for local child replay fixtures",
+        "Evaluation planned for child summary rejection"
+      ],
+      "notes": "Unstructured child prose cannot satisfy research evidence requirements.",
+      "publicProjection": "digest-safe"
+    },
+    {
+      "id": "intermediate_synthesis_boundary",
+      "requirement": "Keep intermediate synthesis as an internal research artifact until support checks pass.",
+      "owningLayer": "Research recipe/harness/plugin",
+      "behaviorOwner": "research_harness_recipe_plugin",
+      "genericCoreRole": "reused substrate only",
+      "testOwner": "tests/test_research_determinism_harness_matrix.py",
+      "status": "planned",
+      "liveCapable": true,
+      "activationGate": "default-off local-only fake-provider matrix row; live web, browser, provider, model, and delivery activation blocked",
+      "defaultOff": true,
+      "trafficAttached": false,
+      "localOnly": true,
+      "fakeProviderOnly": true,
+      "adkPrimitives": [
+        "ArtifactService planned for internal synthesis artifact handles",
+        "callbacks planned for projection boundary checks"
+      ],
+      "notes": "Intermediate synthesis must not be delivered or projected as final output.",
+      "publicProjection": "digest-safe"
+    },
+    {
+      "id": "final_projection_boundary",
+      "requirement": "Project only final digest-safe research output after all deterministic gates pass.",
+      "owningLayer": "Research recipe/harness/plugin",
+      "behaviorOwner": "research_harness_recipe_plugin",
+      "genericCoreRole": "reused substrate only",
+      "testOwner": "tests/test_research_determinism_harness_matrix.py",
+      "status": "planned",
+      "liveCapable": true,
+      "activationGate": "default-off local-only fake-provider matrix row; live web, browser, provider, model, and delivery activation blocked",
+      "defaultOff": true,
+      "trafficAttached": false,
+      "localOnly": true,
+      "fakeProviderOnly": true,
+      "adkPrimitives": [
+        "callbacks planned for final projection gate",
+        "Evaluation planned for projection boundary fixtures"
+      ],
+      "notes": "Final projection contains answer text, citation handles, claim status, and no acquisition payloads.",
+      "publicProjection": "digest-safe"
+    },
+    {
+      "id": "repair_action_result",
+      "requirement": "Represent repair actions and their results before retrying or blocking research projection.",
+      "owningLayer": "Research recipe/harness/plugin",
+      "behaviorOwner": "research_harness_recipe_plugin",
+      "genericCoreRole": "reused substrate only",
+      "testOwner": "tests/test_research_determinism_harness_matrix.py",
+      "status": "planned",
+      "liveCapable": true,
+      "activationGate": "default-off local-only fake-provider matrix row; live web, browser, provider, model, and delivery activation blocked",
+      "defaultOff": true,
+      "trafficAttached": false,
+      "localOnly": true,
+      "fakeProviderOnly": true,
+      "adkPrimitives": [
+        "callbacks planned for repair verdict capture",
+        "FunctionTool exposure planned only through ToolHost-mediated fake local repair fixtures; direct ADK tool execution rejected",
+        "Evaluation planned for repair outcome assertions"
+      ],
+      "notes": "Repair rows record action ids, result ids, and reason codes without live dispatch; ToolHost remains the only tool boundary.",
+      "publicProjection": "digest-safe"
+    },
+    {
+      "id": "default_off_authority_flags",
+      "requirement": "Keep all authority, provider, browser, and delivery flags default-off for PR0.",
+      "owningLayer": "Tests/docs only",
+      "behaviorOwner": "research_harness_recipe_plugin",
+      "genericCoreRole": "none",
+      "testOwner": "tests/test_research_determinism_harness_matrix.py",
+      "status": "planned",
+      "liveCapable": true,
+      "activationGate": "default-off local-only fake-provider matrix row; live web, browser, provider, model, and delivery activation blocked",
+      "defaultOff": true,
+      "trafficAttached": false,
+      "localOnly": true,
+      "fakeProviderOnly": true,
+      "adkPrimitives": [
+        "Evaluation used for docs-only matrix validation",
+        "Runner not used in PR0",
+        "FunctionTool and LongRunningFunctionTool not used in PR0; future exposure must be ToolHost-mediated and direct ADK tool execution rejected"
+      ],
+      "notes": "PR0 is fixture validation only; any live-capable authority remains unattached.",
+      "publicProjection": "digest-safe"
+    }
+  ]
+}

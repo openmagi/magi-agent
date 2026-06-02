@@ -1,0 +1,970 @@
+{
+  "schemaVersion": "delegatedWorkflowEvidenceFixture.v1",
+  "fixtureId": "delegated_workflow_evidence_matrix_0001",
+  "sourceRuntime": "typescript-core-agent",
+  "recordingMode": "local_diagnostic_fixture",
+  "redactionStatus": "verified",
+  "localDiagnostic": true,
+  "attachmentFlags": {
+    "adkRunnerInvoked": false,
+    "liveToolDispatched": false,
+    "childExecutionAttached": false,
+    "shellOrCodeExecuted": false,
+    "workspaceMutated": false,
+    "memoryProviderCalled": false,
+    "agentMemoryImported": false,
+    "hipocampusQmdLiveCalled": false,
+    "productionStorageWritten": false,
+    "productionAuthority": false,
+    "routeOrApiAttached": false,
+    "telegramAttached": false,
+    "canaryTrafficAttached": false,
+    "evidenceBlockEnabled": false
+  },
+  "cases": [
+    {
+      "caseId": "research_child_source_evidence_pass",
+      "category": "delegated_research_child_source_pass",
+      "summaryClaimedAsEvidence": false,
+      "parentBoundary": {
+        "executionId": "parent-research-1",
+        "agentId": "parent-research-agent",
+        "turnId": "turn-delegated-research-1",
+        "policyScope": "openmagi.research",
+        "policySnapshotId": "research-parent-policy",
+        "agentRole": "research",
+        "runOn": "main",
+        "spawnDepth": 0
+      },
+      "childEnvelopes": [
+        {
+          "boundary": {
+            "executionId": "child-research-1",
+            "agentId": "child-research-agent",
+            "parentExecutionId": "parent-research-1",
+            "taskId": "research-task-1",
+            "turnId": "turn-delegated-research-1::spawn::research-task-1",
+            "policyScope": "openmagi.research",
+            "policySnapshotId": "research-parent-policy",
+            "agentRole": "research",
+            "runOn": "child",
+            "spawnDepth": 1
+          },
+          "ledgerRef": {
+            "ledgerId": "ledger-child-research-1",
+            "executionId": "child-research-1",
+            "agentId": "child-research-agent",
+            "parentExecutionId": "parent-research-1",
+            "taskId": "research-task-1",
+            "policySnapshotId": "research-parent-policy"
+          },
+          "status": "completed",
+          "evidenceRecords": [
+            {
+              "type": "WebSearch",
+              "status": "ok",
+              "observedAt": 1800000100,
+              "source": {
+                "kind": "tool_trace",
+                "toolName": "WebSearch",
+                "toolCallId": "child-search-1",
+                "metadata": {
+                  "executionId": "child-research-1",
+                  "agentId": "child-research-agent",
+                  "parentExecutionId": "parent-research-1",
+                  "taskId": "research-task-1",
+                  "policySnapshotId": "research-parent-policy",
+                  "publicSafeFields": ["query", "sourceIds", "status"]
+                }
+              },
+              "fields": {
+                "query": "delegated research source",
+                "sourceIds": ["src_1"],
+                "status": "searched"
+              },
+              "preview": "child WebSearch recorded src_1",
+              "metadata": {
+                "publicSafeFields": ["query", "sourceIds", "status"]
+              }
+            },
+            {
+              "type": "SourceInspection",
+              "status": "ok",
+              "observedAt": 1800000101,
+              "source": {
+                "kind": "tool_trace",
+                "toolName": "WebFetch",
+                "toolCallId": "child-fetch-1",
+                "metadata": {
+                  "executionId": "child-research-1",
+                  "agentId": "child-research-agent",
+                  "parentExecutionId": "parent-research-1",
+                  "taskId": "research-task-1",
+                  "policySnapshotId": "research-parent-policy",
+                  "publicSafeFields": ["sourceIds", "status", "host"]
+                }
+              },
+              "fields": {
+                "sourceIds": ["src_1"],
+                "status": "inspected",
+                "host": "docs.example"
+              },
+              "preview": "child SourceInspection recorded src_1",
+              "metadata": {
+                "publicSafeFields": ["sourceIds", "status", "host"]
+              }
+            }
+          ],
+          "contractVerdicts": [
+            {
+              "contractId": "child-research-websearch",
+              "ok": true,
+              "state": "pass",
+              "enforcement": "block_final_answer",
+              "missingRequirements": [],
+              "matchedEvidence": [
+                {
+                  "type": "WebSearch",
+                  "status": "ok",
+                  "observedAt": 1800000100,
+                  "source": {
+                    "kind": "tool_trace",
+                    "toolName": "WebSearch",
+                    "toolCallId": "child-search-1",
+                    "metadata": {
+                      "executionId": "child-research-1",
+                      "agentId": "child-research-agent",
+                      "parentExecutionId": "parent-research-1",
+                      "taskId": "research-task-1",
+                      "policySnapshotId": "research-parent-policy",
+                      "publicSafeFields": ["query", "sourceIds", "status"]
+                    }
+                  },
+                  "fields": {
+                    "query": "delegated research source",
+                    "sourceIds": ["src_1"],
+                    "status": "searched"
+                  },
+                  "preview": "child WebSearch recorded src_1",
+                  "metadata": {
+                    "publicSafeFields": ["query", "sourceIds", "status"]
+                  }
+                }
+              ],
+              "failures": []
+            },
+            {
+              "contractId": "child-research-source-inspection",
+              "ok": true,
+              "state": "pass",
+              "enforcement": "block_final_answer",
+              "missingRequirements": [],
+              "matchedEvidence": [
+                {
+                  "type": "SourceInspection",
+                  "status": "ok",
+                  "observedAt": 1800000101,
+                  "source": {
+                    "kind": "tool_trace",
+                    "toolName": "WebFetch",
+                    "toolCallId": "child-fetch-1",
+                    "metadata": {
+                      "executionId": "child-research-1",
+                      "agentId": "child-research-agent",
+                      "parentExecutionId": "parent-research-1",
+                      "taskId": "research-task-1",
+                      "policySnapshotId": "research-parent-policy",
+                      "publicSafeFields": ["sourceIds", "status", "host"]
+                    }
+                  },
+                  "fields": {
+                    "sourceIds": ["src_1"],
+                    "status": "inspected",
+                    "host": "docs.example"
+                  },
+                  "preview": "child SourceInspection recorded src_1",
+                  "metadata": {
+                    "publicSafeFields": ["sourceIds", "status", "host"]
+                  }
+                }
+              ],
+              "failures": []
+            }
+          ],
+          "contractsApply": true,
+          "report": {
+            "matchedTypes": ["WebSearch", "SourceInspection"],
+            "missingTypes": [],
+            "blockingFailures": [],
+            "auditFailures": []
+          },
+          "summary": "Child research envelope recorded source evidence.",
+          "issuedBy": "openmagi_runtime_boundary"
+        }
+      ],
+      "compatiblePolicySnapshots": [],
+      "localRecords": [],
+      "requirementExpectations": [
+        {
+          "requirement": {
+            "type": "SourceInspection",
+            "delegation": "delegated_required"
+          },
+          "expectedSatisfied": true,
+          "expectedMatchedTypes": ["SourceInspection"]
+        }
+      ],
+      "expectedParentState": "pass",
+      "expectedPropagatedTypes": ["WebSearch", "SourceInspection"],
+      "expectedBlockingFailureCount": 0,
+      "expectedAuditFailureCount": 0,
+      "attachmentFlags": {
+        "adkRunnerInvoked": false,
+        "liveToolDispatched": false,
+        "childExecutionAttached": false,
+        "shellOrCodeExecuted": false,
+        "workspaceMutated": false,
+        "memoryProviderCalled": false,
+        "agentMemoryImported": false,
+        "hipocampusQmdLiveCalled": false,
+        "productionStorageWritten": false,
+        "productionAuthority": false,
+        "routeOrApiAttached": false,
+        "telegramAttached": false,
+        "canaryTrafficAttached": false,
+        "evidenceBlockEnabled": false
+      }
+    },
+    {
+      "caseId": "coding_child_verification_evidence_pass",
+      "category": "delegated_coding_child_verification_pass",
+      "summaryClaimedAsEvidence": false,
+      "parentBoundary": {
+        "executionId": "parent-coding-1",
+        "agentId": "parent-coding-agent",
+        "turnId": "turn-delegated-coding-1",
+        "policyScope": "openmagi.dev-coding",
+        "policySnapshotId": "coding-parent-policy",
+        "agentRole": "coding",
+        "runOn": "main",
+        "spawnDepth": 0
+      },
+      "childEnvelopes": [
+        {
+          "boundary": {
+            "executionId": "child-coding-1",
+            "agentId": "child-coding-agent",
+            "parentExecutionId": "parent-coding-1",
+            "taskId": "coding-task-1",
+            "turnId": "turn-delegated-coding-1::spawn::coding-task-1",
+            "policyScope": "openmagi.dev-coding",
+            "policySnapshotId": "coding-parent-policy",
+            "agentRole": "coding",
+            "runOn": "child",
+            "spawnDepth": 1
+          },
+          "ledgerRef": {
+            "ledgerId": "ledger-child-coding-1",
+            "executionId": "child-coding-1",
+            "agentId": "child-coding-agent",
+            "parentExecutionId": "parent-coding-1",
+            "taskId": "coding-task-1",
+            "policySnapshotId": "coding-parent-policy"
+          },
+          "status": "completed",
+          "evidenceRecords": [
+            {
+              "type": "GitDiff",
+              "status": "ok",
+              "observedAt": 1800000200,
+              "source": {
+                "kind": "tool_trace",
+                "toolName": "GitDiff",
+                "toolCallId": "child-gitdiff-1",
+                "metadata": {
+                  "executionId": "child-coding-1",
+                  "agentId": "child-coding-agent",
+                  "parentExecutionId": "parent-coding-1",
+                  "taskId": "coding-task-1",
+                  "policySnapshotId": "coding-parent-policy",
+                  "publicSafeFields": ["changedFiles", "status"]
+                }
+              },
+              "fields": {
+                "changedFiles": ["src/child_impl.py"],
+                "status": "changed"
+              },
+              "preview": "child GitDiff recorded src/child_impl.py",
+              "metadata": {
+                "publicSafeFields": ["changedFiles", "status"]
+              }
+            },
+            {
+              "type": "TestRun",
+              "status": "ok",
+              "observedAt": 1800000201,
+              "source": {
+                "kind": "tool_trace",
+                "toolName": "TestRun",
+                "toolCallId": "child-testrun-1",
+                "metadata": {
+                  "executionId": "child-coding-1",
+                  "agentId": "child-coding-agent",
+                  "parentExecutionId": "parent-coding-1",
+                  "taskId": "coding-task-1",
+                  "policySnapshotId": "coding-parent-policy",
+                  "publicSafeFields": ["command", "exitCode", "status"]
+                }
+              },
+              "fields": {
+                "command": "pytest child_tests.py",
+                "exitCode": 0,
+                "status": "passed"
+              },
+              "preview": "child TestRun recorded pytest child_tests.py",
+              "metadata": {
+                "publicSafeFields": ["command", "exitCode", "status"]
+              }
+            }
+          ],
+          "contractVerdicts": [
+            {
+              "contractId": "child-coding-gitdiff",
+              "ok": true,
+              "state": "pass",
+              "enforcement": "block_final_answer",
+              "missingRequirements": [],
+              "matchedEvidence": [
+                {
+                  "type": "GitDiff",
+                  "status": "ok",
+                  "observedAt": 1800000200,
+                  "source": {
+                    "kind": "tool_trace",
+                    "toolName": "GitDiff",
+                    "toolCallId": "child-gitdiff-1",
+                    "metadata": {
+                      "executionId": "child-coding-1",
+                      "agentId": "child-coding-agent",
+                      "parentExecutionId": "parent-coding-1",
+                      "taskId": "coding-task-1",
+                      "policySnapshotId": "coding-parent-policy",
+                      "publicSafeFields": ["changedFiles", "status"]
+                    }
+                  },
+                  "fields": {
+                    "changedFiles": ["src/child_impl.py"],
+                    "status": "changed"
+                  },
+                  "preview": "child GitDiff recorded src/child_impl.py",
+                  "metadata": {
+                    "publicSafeFields": ["changedFiles", "status"]
+                  }
+                }
+              ],
+              "failures": []
+            },
+            {
+              "contractId": "child-coding-testrun",
+              "ok": true,
+              "state": "pass",
+              "enforcement": "block_final_answer",
+              "missingRequirements": [],
+              "matchedEvidence": [
+                {
+                  "type": "TestRun",
+                  "status": "ok",
+                  "observedAt": 1800000201,
+                  "source": {
+                    "kind": "tool_trace",
+                    "toolName": "TestRun",
+                    "toolCallId": "child-testrun-1",
+                    "metadata": {
+                      "executionId": "child-coding-1",
+                      "agentId": "child-coding-agent",
+                      "parentExecutionId": "parent-coding-1",
+                      "taskId": "coding-task-1",
+                      "policySnapshotId": "coding-parent-policy",
+                      "publicSafeFields": ["command", "exitCode", "status"]
+                    }
+                  },
+                  "fields": {
+                    "command": "pytest child_tests.py",
+                    "exitCode": 0,
+                    "status": "passed"
+                  },
+                  "preview": "child TestRun recorded pytest child_tests.py",
+                  "metadata": {
+                    "publicSafeFields": ["command", "exitCode", "status"]
+                  }
+                }
+              ],
+              "failures": []
+            }
+          ],
+          "contractsApply": true,
+          "report": {
+            "matchedTypes": ["GitDiff", "TestRun"],
+            "missingTypes": [],
+            "blockingFailures": [],
+            "auditFailures": []
+          },
+          "summary": "Child coding envelope recorded diff and verification evidence.",
+          "issuedBy": "openmagi_runtime_boundary"
+        }
+      ],
+      "compatiblePolicySnapshots": [],
+      "localRecords": [
+        {
+          "type": "TestRun",
+          "status": "ok",
+          "observedAt": 1800000202,
+          "source": {
+            "kind": "tool_trace",
+            "toolName": "TestRun",
+            "toolCallId": "parent-testrun-1",
+            "metadata": {
+              "executionId": "parent-coding-1",
+              "agentId": "parent-coding-agent",
+              "policySnapshotId": "coding-parent-policy",
+              "publicSafeFields": ["command", "exitCode", "status"]
+            }
+          },
+          "fields": {
+            "command": "pytest parent_tests.py",
+            "exitCode": 0,
+            "status": "passed"
+          },
+          "preview": "parent TestRun recorded pytest parent_tests.py",
+          "metadata": {
+            "publicSafeFields": ["command", "exitCode", "status"]
+          }
+        }
+      ],
+      "requirementExpectations": [
+        {
+          "requirement": {
+            "type": "GitDiff",
+            "delegation": "delegated_required"
+          },
+          "expectedSatisfied": true,
+          "expectedMatchedTypes": ["GitDiff"]
+        },
+        {
+          "requirement": {
+            "type": "GitDiff",
+            "delegation": "delegated_allowed"
+          },
+          "expectedSatisfied": true,
+          "expectedMatchedTypes": ["GitDiff"]
+        },
+        {
+          "requirement": {
+            "type": "TestRun",
+            "delegation": "local_only"
+          },
+          "expectedSatisfied": true,
+          "expectedMatchedTypes": ["TestRun"]
+        },
+        {
+          "requirement": {
+            "type": "TestRun",
+            "delegation": "delegated_required"
+          },
+          "expectedSatisfied": true,
+          "expectedMatchedTypes": ["TestRun"]
+        }
+      ],
+      "expectedParentState": "pass",
+      "expectedPropagatedTypes": ["GitDiff", "TestRun"],
+      "expectedBlockingFailureCount": 0,
+      "expectedAuditFailureCount": 0,
+      "attachmentFlags": {
+        "adkRunnerInvoked": false,
+        "liveToolDispatched": false,
+        "childExecutionAttached": false,
+        "shellOrCodeExecuted": false,
+        "workspaceMutated": false,
+        "memoryProviderCalled": false,
+        "agentMemoryImported": false,
+        "hipocampusQmdLiveCalled": false,
+        "productionStorageWritten": false,
+        "productionAuthority": false,
+        "routeOrApiAttached": false,
+        "telegramAttached": false,
+        "canaryTrafficAttached": false,
+        "evidenceBlockEnabled": false
+      }
+    },
+    {
+      "caseId": "child_blocking_failure_propagates",
+      "category": "child_blocking_failure_propagates",
+      "summaryClaimedAsEvidence": false,
+      "parentBoundary": {
+        "executionId": "parent-coding-2",
+        "agentId": "parent-coding-agent",
+        "turnId": "turn-delegated-coding-2",
+        "policyScope": "openmagi.dev-coding",
+        "policySnapshotId": "coding-parent-policy",
+        "agentRole": "coding",
+        "runOn": "main",
+        "spawnDepth": 0
+      },
+      "childEnvelopes": [
+        {
+          "boundary": {
+            "executionId": "child-coding-blocked",
+            "agentId": "child-coding-agent",
+            "parentExecutionId": "parent-coding-2",
+            "taskId": "coding-task-blocked",
+            "turnId": "turn-delegated-coding-2::spawn::coding-task-blocked",
+            "policyScope": "openmagi.dev-coding",
+            "policySnapshotId": "coding-parent-policy",
+            "agentRole": "coding",
+            "runOn": "child",
+            "spawnDepth": 1
+          },
+          "ledgerRef": {
+            "ledgerId": "ledger-child-coding-blocked",
+            "executionId": "child-coding-blocked",
+            "agentId": "child-coding-agent",
+            "parentExecutionId": "parent-coding-2",
+            "taskId": "coding-task-blocked",
+            "policySnapshotId": "coding-parent-policy"
+          },
+          "status": "blocked",
+          "evidenceRecords": [],
+          "contractVerdicts": [
+            {
+              "contractId": "child-coding-missing-test",
+              "ok": false,
+              "state": "block_ready",
+              "enforcement": "block_final_answer",
+              "missingRequirements": [
+                {
+                  "type": "TestRun"
+                }
+              ],
+              "matchedEvidence": [],
+              "failures": [
+                {
+                  "code": "EVIDENCE_CONTRACT_MISSING",
+                  "contractId": "child-coding-missing-test",
+                  "requirementType": "TestRun",
+                  "message": "Child TestRun evidence is missing."
+                }
+              ],
+              "retryMessage": "Child must report TestRun evidence before success."
+            }
+          ],
+          "contractsApply": true,
+          "report": {
+            "matchedTypes": [],
+            "missingTypes": ["TestRun"],
+            "blockingFailures": ["TestRun"],
+            "auditFailures": []
+          },
+          "summary": "Child blocked because verification evidence was missing.",
+          "issuedBy": "openmagi_runtime_boundary"
+        }
+      ],
+      "compatiblePolicySnapshots": [],
+      "localRecords": [],
+      "requirementExpectations": [
+        {
+          "requirement": {
+            "type": "TestRun",
+            "delegation": "delegated_required"
+          },
+          "expectedSatisfied": false,
+          "expectedMatchedTypes": [],
+          "expectedReasonContains": "child aggregation state is blocked"
+        }
+      ],
+      "expectedParentState": "blocked",
+      "expectedPropagatedTypes": [],
+      "expectedBlockingFailureCount": 1,
+      "expectedAuditFailureCount": 0,
+      "attachmentFlags": {
+        "adkRunnerInvoked": false,
+        "liveToolDispatched": false,
+        "childExecutionAttached": false,
+        "shellOrCodeExecuted": false,
+        "workspaceMutated": false,
+        "memoryProviderCalled": false,
+        "agentMemoryImported": false,
+        "hipocampusQmdLiveCalled": false,
+        "productionStorageWritten": false,
+        "productionAuthority": false,
+        "routeOrApiAttached": false,
+        "telegramAttached": false,
+        "canaryTrafficAttached": false,
+        "evidenceBlockEnabled": false
+      }
+    },
+    {
+      "caseId": "natural_language_child_summary_rejected",
+      "category": "natural_language_summary_rejected",
+      "summaryClaimedAsEvidence": false,
+      "naturalLanguageSummary": "I checked the sources and tests and everything passed.",
+      "parentBoundary": {
+        "executionId": "parent-summary-1",
+        "agentId": "parent-summary-agent",
+        "turnId": "turn-summary-1",
+        "policyScope": "openmagi.research",
+        "policySnapshotId": "summary-parent-policy",
+        "agentRole": "research",
+        "runOn": "main",
+        "spawnDepth": 0
+      },
+      "childEnvelopes": [],
+      "compatiblePolicySnapshots": [],
+      "localRecords": [],
+      "requirementExpectations": [
+        {
+          "requirement": {
+            "type": "SourceInspection",
+            "delegation": "delegated_required"
+          },
+          "expectedSatisfied": false,
+          "expectedMatchedTypes": [],
+          "expectedReasonContains": "delegated_required requirement was not satisfied"
+        }
+      ],
+      "expectedParentState": "pass",
+      "expectedPropagatedTypes": [],
+      "expectedBlockingFailureCount": 0,
+      "expectedAuditFailureCount": 0,
+      "attachmentFlags": {
+        "adkRunnerInvoked": false,
+        "liveToolDispatched": false,
+        "childExecutionAttached": false,
+        "shellOrCodeExecuted": false,
+        "workspaceMutated": false,
+        "memoryProviderCalled": false,
+        "agentMemoryImported": false,
+        "hipocampusQmdLiveCalled": false,
+        "productionStorageWritten": false,
+        "productionAuthority": false,
+        "routeOrApiAttached": false,
+        "telegramAttached": false,
+        "canaryTrafficAttached": false,
+        "evidenceBlockEnabled": false
+      }
+    },
+    {
+      "caseId": "task_local_policy_snapshot_compatible",
+      "category": "task_local_policy_snapshot_compatible",
+      "summaryClaimedAsEvidence": false,
+      "parentBoundary": {
+        "executionId": "parent-research-2",
+        "agentId": "parent-research-agent",
+        "turnId": "turn-delegated-research-2",
+        "policyScope": "openmagi.research",
+        "policySnapshotId": "research-parent-policy-v2",
+        "agentRole": "research",
+        "runOn": "main",
+        "spawnDepth": 0
+      },
+      "childEnvelopes": [
+        {
+          "boundary": {
+            "executionId": "child-research-task-local",
+            "agentId": "child-research-agent",
+            "parentExecutionId": "parent-research-2",
+            "taskId": "research-task-local",
+            "turnId": "turn-delegated-research-2::spawn::research-task-local",
+            "policyScope": "openmagi.research",
+            "policySnapshotId": "research-child-task-local-policy",
+            "agentRole": "research",
+            "runOn": "child",
+            "spawnDepth": 1
+          },
+          "ledgerRef": {
+            "ledgerId": "ledger-child-research-task-local",
+            "executionId": "child-research-task-local",
+            "agentId": "child-research-agent",
+            "parentExecutionId": "parent-research-2",
+            "taskId": "research-task-local",
+            "policySnapshotId": "research-child-task-local-policy"
+          },
+          "status": "completed",
+          "evidenceRecords": [
+            {
+              "type": "SourceInspection",
+              "status": "ok",
+              "observedAt": 1800000300,
+              "source": {
+                "kind": "tool_trace",
+                "toolName": "WebFetch",
+                "toolCallId": "child-task-local-fetch",
+                "metadata": {
+                  "executionId": "child-research-task-local",
+                  "agentId": "child-research-agent",
+                  "parentExecutionId": "parent-research-2",
+                  "taskId": "research-task-local",
+                  "policySnapshotId": "research-child-task-local-policy",
+                  "publicSafeFields": ["sourceIds", "status"]
+                }
+              },
+              "fields": {
+                "sourceIds": ["src_2"],
+                "status": "inspected"
+              },
+              "preview": "task-local child SourceInspection recorded src_2",
+              "metadata": {
+                "publicSafeFields": ["sourceIds", "status"]
+              }
+            }
+          ],
+          "contractVerdicts": [
+            {
+              "contractId": "child-task-local-source-inspection",
+              "ok": true,
+              "state": "pass",
+              "enforcement": "block_final_answer",
+              "missingRequirements": [],
+              "matchedEvidence": [
+                {
+                  "type": "SourceInspection",
+                  "status": "ok",
+                  "observedAt": 1800000300,
+                  "source": {
+                    "kind": "tool_trace",
+                    "toolName": "WebFetch",
+                    "toolCallId": "child-task-local-fetch",
+                    "metadata": {
+                      "executionId": "child-research-task-local",
+                      "agentId": "child-research-agent",
+                      "parentExecutionId": "parent-research-2",
+                      "taskId": "research-task-local",
+                      "policySnapshotId": "research-child-task-local-policy",
+                      "publicSafeFields": ["sourceIds", "status"]
+                    }
+                  },
+                  "fields": {
+                    "sourceIds": ["src_2"],
+                    "status": "inspected"
+                  },
+                  "preview": "task-local child SourceInspection recorded src_2",
+                  "metadata": {
+                    "publicSafeFields": ["sourceIds", "status"]
+                  }
+                }
+              ],
+              "failures": []
+            }
+          ],
+          "contractsApply": true,
+          "report": {
+            "matchedTypes": ["SourceInspection"],
+            "missingTypes": [],
+            "blockingFailures": [],
+            "auditFailures": []
+          },
+          "summary": "Task-local child policy snapshot is parent-approved.",
+          "issuedBy": "openmagi_runtime_boundary"
+        }
+      ],
+      "compatiblePolicySnapshots": [
+        {
+          "parentPolicySnapshotId": "research-parent-policy-v2",
+          "childPolicySnapshotId": "research-child-task-local-policy",
+          "childExecutionId": "child-research-task-local",
+          "taskId": "research-task-local",
+          "reason": "task_local_contracts"
+        }
+      ],
+      "localRecords": [],
+      "requirementExpectations": [
+        {
+          "requirement": {
+            "type": "SourceInspection",
+            "delegation": "delegated_required"
+          },
+          "expectedSatisfied": true,
+          "expectedMatchedTypes": ["SourceInspection"]
+        }
+      ],
+      "expectedParentState": "pass",
+      "expectedPropagatedTypes": ["SourceInspection"],
+      "expectedBlockingFailureCount": 0,
+      "expectedAuditFailureCount": 0,
+      "attachmentFlags": {
+        "adkRunnerInvoked": false,
+        "liveToolDispatched": false,
+        "childExecutionAttached": false,
+        "shellOrCodeExecuted": false,
+        "workspaceMutated": false,
+        "memoryProviderCalled": false,
+        "agentMemoryImported": false,
+        "hipocampusQmdLiveCalled": false,
+        "productionStorageWritten": false,
+        "productionAuthority": false,
+        "routeOrApiAttached": false,
+        "telegramAttached": false,
+        "canaryTrafficAttached": false,
+        "evidenceBlockEnabled": false
+      }
+    },
+    {
+      "caseId": "aggregate_required_rejects_child_only_evidence",
+      "category": "aggregate_required_parent_scope",
+      "summaryClaimedAsEvidence": false,
+      "parentBoundary": {
+        "executionId": "parent-aggregate-1",
+        "agentId": "parent-aggregate-agent",
+        "turnId": "turn-aggregate-1",
+        "policyScope": "openmagi.dev-coding",
+        "policySnapshotId": "aggregate-parent-policy",
+        "agentRole": "coding",
+        "runOn": "main",
+        "spawnDepth": 0
+      },
+      "childEnvelopes": [
+        {
+          "boundary": {
+            "executionId": "child-aggregate-1",
+            "agentId": "child-aggregate-agent",
+            "parentExecutionId": "parent-aggregate-1",
+            "taskId": "aggregate-task-1",
+            "turnId": "turn-aggregate-1::spawn::aggregate-task-1",
+            "policyScope": "openmagi.dev-coding",
+            "policySnapshotId": "aggregate-parent-policy",
+            "agentRole": "coding",
+            "runOn": "child",
+            "spawnDepth": 2
+          },
+          "ledgerRef": {
+            "ledgerId": "ledger-child-aggregate-1",
+            "executionId": "child-aggregate-1",
+            "agentId": "child-aggregate-agent",
+            "parentExecutionId": "parent-aggregate-1",
+            "taskId": "aggregate-task-1",
+            "policySnapshotId": "aggregate-parent-policy"
+          },
+          "status": "completed",
+          "evidenceRecords": [
+            {
+              "type": "TestRun",
+              "status": "ok",
+              "observedAt": 1800000400,
+              "source": {
+                "kind": "tool_trace",
+                "toolName": "TestRun",
+                "toolCallId": "child-aggregate-test",
+                "metadata": {
+                  "executionId": "child-aggregate-1",
+                  "agentId": "child-aggregate-agent",
+                  "parentExecutionId": "parent-aggregate-1",
+                  "taskId": "aggregate-task-1",
+                  "policySnapshotId": "aggregate-parent-policy",
+                  "publicSafeFields": ["command", "exitCode", "status"]
+                }
+              },
+              "fields": {
+                "command": "pytest aggregate_child.py",
+                "exitCode": 0,
+                "status": "passed"
+              },
+              "preview": "child TestRun recorded aggregate_child.py",
+              "metadata": {
+                "publicSafeFields": ["command", "exitCode", "status"]
+              }
+            }
+          ],
+          "contractVerdicts": [
+            {
+              "contractId": "child-aggregate-testrun",
+              "ok": true,
+              "state": "pass",
+              "enforcement": "block_final_answer",
+              "missingRequirements": [],
+              "matchedEvidence": [
+                {
+                  "type": "TestRun",
+                  "status": "ok",
+                  "observedAt": 1800000400,
+                  "source": {
+                    "kind": "tool_trace",
+                    "toolName": "TestRun",
+                    "toolCallId": "child-aggregate-test",
+                    "metadata": {
+                      "executionId": "child-aggregate-1",
+                      "agentId": "child-aggregate-agent",
+                      "parentExecutionId": "parent-aggregate-1",
+                      "taskId": "aggregate-task-1",
+                      "policySnapshotId": "aggregate-parent-policy",
+                      "publicSafeFields": ["command", "exitCode", "status"]
+                    }
+                  },
+                  "fields": {
+                    "command": "pytest aggregate_child.py",
+                    "exitCode": 0,
+                    "status": "passed"
+                  },
+                  "preview": "child TestRun recorded aggregate_child.py",
+                  "metadata": {
+                    "publicSafeFields": ["command", "exitCode", "status"]
+                  }
+                }
+              ],
+              "failures": []
+            }
+          ],
+          "contractsApply": true,
+          "report": {
+            "matchedTypes": ["TestRun"],
+            "missingTypes": [],
+            "blockingFailures": [],
+            "auditFailures": []
+          },
+          "summary": "Child-only evidence cannot satisfy aggregate_required parent scope.",
+          "issuedBy": "openmagi_runtime_boundary"
+        }
+      ],
+      "compatiblePolicySnapshots": [],
+      "localRecords": [],
+      "requirementExpectations": [
+        {
+          "requirement": {
+            "type": "TestRun",
+            "delegation": "local_only"
+          },
+          "expectedSatisfied": false,
+          "expectedMatchedTypes": [],
+          "expectedReasonContains": "local_only requirement was not satisfied"
+        },
+        {
+          "requirement": {
+            "type": "TestRun",
+            "delegation": "aggregate_required"
+          },
+          "expectedSatisfied": false,
+          "expectedMatchedTypes": [],
+          "expectedReasonContains": "aggregate_required requirement was not satisfied"
+        }
+      ],
+      "expectedParentState": "pass",
+      "expectedPropagatedTypes": ["TestRun"],
+      "expectedBlockingFailureCount": 0,
+      "expectedAuditFailureCount": 0,
+      "attachmentFlags": {
+        "adkRunnerInvoked": false,
+        "liveToolDispatched": false,
+        "childExecutionAttached": false,
+        "shellOrCodeExecuted": false,
+        "workspaceMutated": false,
+        "memoryProviderCalled": false,
+        "agentMemoryImported": false,
+        "hipocampusQmdLiveCalled": false,
+        "productionStorageWritten": false,
+        "productionAuthority": false,
+        "routeOrApiAttached": false,
+        "telegramAttached": false,
+        "canaryTrafficAttached": false,
+        "evidenceBlockEnabled": false
+      }
+    }
+  ]
+}

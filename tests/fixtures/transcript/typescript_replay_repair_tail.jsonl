@@ -1,0 +1,9 @@
+{"kind":"turn_started","ts":1,"turnId":"turn-repair-1","declaredRoute":"direct"}
+{"kind":"user_message","ts":2,"turnId":"turn-repair-1","text":"Replay the committed TypeScript-compatible tail."}
+{"kind":"assistant_text","ts":3,"turnId":"turn-repair-1","text":"Visible answer preserved."}
+{"kind":"turn_committed","ts":4,"turnId":"turn-repair-1","inputTokens":16,"outputTokens":9}
+{"kind":"partial_tail","ts":
+{"kind":"canonical_message","ts":5,"turnId":"turn-repair-1","messageId":"cm-hidden-thinking-1","role":"assistant","content":[{"type":"thinking","thinking":"redacted hidden reasoning fixture only","signature":"sig-redacted"},{"type":"text","text":"Visible answer preserved."}],"fixtureOnly":true,"expectedProjection":"metadata_only_no_hidden_thinking_projection_claim"}
+{"kind":"compaction_boundary","ts":6,"turnId":"turn-repair-1","boundaryId":"compact-post-commit-1","beforeTokenCount":2048,"afterTokenCount":256,"summaryHash":"sha256:redacted-tail-summary","summaryText":"Fixture-only structural post-commit summary.","createdAt":6,"fixtureOnly":true}
+{"kind":"control_event","ts":7,"turnId":"turn-repair-1","seq":3,"eventId":"ctrl-timeout-1","eventType":"control_request_timed_out","sessionKey":"redacted-session","idempotencyKey":"control:req-timeout-1:timed_out","requestId":"req-timeout-1","fixtureOnly":true}
+{"kind":"crash_tail","ts":

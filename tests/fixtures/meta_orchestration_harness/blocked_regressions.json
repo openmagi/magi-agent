@@ -1,0 +1,107 @@
+{
+  "schemaVersion": "metaOrchestrationHarnessBlockedRegressions.v1",
+  "generatedFor": "openmagi-python-adk-first-party-meta-orchestration-harness-pr10",
+  "auditDate": "2026-05-26",
+  "activationMode": "metadata-only-default-off",
+  "cases": [
+    {
+      "id": "parent_executes_child_tool_directly",
+      "description": "Parent/meta-controller attempts to execute child tools directly rather than inspecting child evidence verdicts.",
+      "expectedDisposition": "blocked",
+      "guard": "parent_executes_child_tool_directly",
+      "requiresLiveActivation": false,
+      "trafficAttached": false,
+      "defaultOff": true
+    },
+    {
+      "id": "raw_child_transcript_accepted",
+      "description": "Raw child transcript or natural-language child summary is accepted as completion evidence.",
+      "expectedDisposition": "blocked",
+      "guard": "raw_child_transcript_accepted",
+      "requiresLiveActivation": false,
+      "trafficAttached": false,
+      "defaultOff": true
+    },
+    {
+      "id": "forged_child_envelope_accepted",
+      "description": "A child-authored or raw envelope-shaped mapping is accepted without a runtime-issued child result wrapper.",
+      "expectedDisposition": "blocked",
+      "guard": "forged_child_envelope_accepted",
+      "requiresLiveActivation": false,
+      "trafficAttached": false,
+      "defaultOff": true
+    },
+    {
+      "id": "wrong_parent_child_result_accepted",
+      "description": "A runtime-issued child result bound to a different parent execution is accepted for the current parent.",
+      "expectedDisposition": "blocked",
+      "guard": "wrong_parent_child_result_accepted",
+      "requiresLiveActivation": false,
+      "trafficAttached": false,
+      "defaultOff": true
+    },
+    {
+      "id": "retry_loops_unbounded",
+      "description": "A retry verdict projects retry authority beyond the parent plan retry budget.",
+      "expectedDisposition": "blocked",
+      "guard": "retry_loops_unbounded",
+      "requiresLiveActivation": false,
+      "trafficAttached": false,
+      "defaultOff": true
+    },
+    {
+      "id": "rejected_child_enters_final_assembly",
+      "description": "Rejected child partial evidence is allowed into final assembly accepted evidence refs.",
+      "expectedDisposition": "blocked",
+      "guard": "rejected_child_enters_final_assembly",
+      "requiresLiveActivation": false,
+      "trafficAttached": false,
+      "defaultOff": true
+    },
+    {
+      "id": "final_assembly_bypasses_verifier",
+      "description": "Final assembly becomes projection-ready while required verifier refs are missing.",
+      "expectedDisposition": "blocked",
+      "guard": "final_assembly_bypasses_verifier",
+      "requiresLiveActivation": false,
+      "trafficAttached": false,
+      "defaultOff": true
+    },
+    {
+      "id": "before_commit_failure_ignored",
+      "description": "A failing beforeCommit verifier result is ignored and public projection is marked eligible.",
+      "expectedDisposition": "blocked",
+      "guard": "before_commit_failure_ignored",
+      "requiresLiveActivation": false,
+      "trafficAttached": false,
+      "defaultOff": true
+    },
+    {
+      "id": "public_projection_leaks_raw_child_data",
+      "description": "Public projection leaks raw child transcript, tool args, private paths, or raw evidence refs.",
+      "expectedDisposition": "blocked",
+      "guard": "public_projection_leaks_raw_child_data",
+      "requiresLiveActivation": false,
+      "trafficAttached": false,
+      "defaultOff": true
+    },
+    {
+      "id": "authority_flag_forged_true",
+      "description": "A plan, child envelope, or projection authority flag is forged true.",
+      "expectedDisposition": "blocked",
+      "guard": "authority_flag_forged_true",
+      "requiresLiveActivation": false,
+      "trafficAttached": false,
+      "defaultOff": true
+    },
+    {
+      "id": "domain_role_hard_coded_in_core_matrix_row",
+      "description": "Domain-specific research, coding, or backoffice role semantics are treated as generic core matrix requirements.",
+      "expectedDisposition": "blocked",
+      "guard": "domain_role_hard_coded_in_core_matrix_row",
+      "requiresLiveActivation": false,
+      "trafficAttached": false,
+      "defaultOff": true
+    }
+  ]
+}

@@ -1,0 +1,95 @@
+{
+  "fixtureId": "live_ts_surface_default_off_matrix_0001",
+  "rows": [
+    {
+      "caseId": "research_citations_web_search",
+      "taskProfile": {
+        "taskTypes": ["research", "web-acquisition"]
+      },
+      "expectedPacks": ["openmagi.web-acquisition", "openmagi.research"],
+      "expectedProviderIntents": ["provider:web.search", "provider:web.fetch"],
+      "expectedApprovals": ["approval:web-acquisition:provider-opt-in", "approval:research:external-source-use"],
+      "boundary": "web_acquisition"
+    },
+    {
+      "caseId": "browse_website_summarize",
+      "taskProfile": {
+        "taskTypes": ["browser-automation", "web-acquisition"]
+      },
+      "expectedPacks": ["openmagi.web-acquisition", "openmagi.browser-automation"],
+      "expectedProviderIntents": ["provider:browser.snapshot_fallback", "provider:browser.worker"],
+      "expectedApprovals": ["approval:web-acquisition:browser-fallback", "approval:browser-automation:external-action"],
+      "boundary": "browser"
+    },
+    {
+      "caseId": "send_generated_file_to_telegram",
+      "taskProfile": {
+        "taskTypes": ["artifact-delivery"],
+        "taskIntents": ["telegram"]
+      },
+      "runtimeContext": {
+        "channel": "telegram"
+      },
+      "expectedPacks": ["openmagi.artifact-delivery", "openmagi.channel-delivery"],
+      "expectedToolIntents": ["tool:FileDeliver", "tool:FileSend"],
+      "expectedChannelIntents": ["channel:telegram.send_message", "channel:telegram.send_document"],
+      "expectedApprovals": ["approval:artifact-delivery:channel-send", "approval:channel-delivery:external-send"],
+      "boundary": "file_delivery"
+    },
+    {
+      "caseId": "scheduled_reminder",
+      "taskProfile": {
+        "taskTypes": ["scheduled-work"],
+        "taskIntents": ["notify-user"]
+      },
+      "runtimeContext": {
+        "channel": "web"
+      },
+      "expectedPacks": ["openmagi.scheduled-work", "openmagi.channel-delivery"],
+      "expectedSchedulerIntents": ["scheduler:cron.create", "scheduler:task.wait", "scheduler:notify-user"],
+      "expectedChannelIntents": ["channel:web.push"],
+      "expectedApprovals": ["approval:scheduled-work:resume-or-notify"],
+      "boundary": "scheduler"
+    },
+    {
+      "caseId": "long_running_goal_subtask_notification",
+      "taskProfile": {
+        "taskTypes": ["mission", "scheduled-work"],
+        "taskIntents": ["notify-user"]
+      },
+      "runtimeContext": {
+        "channel": "web"
+      },
+      "expectedPacks": ["openmagi.missions", "openmagi.scheduled-work", "openmagi.channel-delivery"],
+      "expectedSchedulerIntents": ["scheduler:cron.create", "scheduler:notify-user"],
+      "expectedApprovals": ["approval:missions:cancel-retry-resume-control", "approval:scheduled-work:resume-or-notify"],
+      "boundary": "background_task"
+    },
+    {
+      "caseId": "coding_test_run_file_delivery",
+      "taskProfile": {
+        "taskTypes": ["coding", "artifact-delivery"]
+      },
+      "expectedPacks": ["openmagi.dev-coding", "openmagi.artifact-delivery"],
+      "expectedToolIntents": ["tool:file.read", "tool:test.run", "tool:FileDeliver"],
+      "expectedArtifactIntents": ["artifact:file-deliver", "artifact:file-send"],
+      "expectedApprovals": ["approval:dev-coding:workspace-mutation", "approval:artifact-delivery:channel-send"],
+      "boundary": "file_delivery"
+    },
+    {
+      "caseId": "discord_reply_with_attachment",
+      "taskProfile": {
+        "taskTypes": ["artifact-delivery"],
+        "taskIntents": ["discord"]
+      },
+      "runtimeContext": {
+        "channel": "discord"
+      },
+      "expectedPacks": ["openmagi.artifact-delivery", "openmagi.channel-delivery"],
+      "expectedChannelIntents": ["channel:discord.send_message", "channel:discord.send_file"],
+      "expectedArtifactIntents": ["artifact:file-deliver", "artifact:file-send"],
+      "expectedApprovals": ["approval:channel-delivery:external-send"],
+      "boundary": "channel_dispatch"
+    }
+  ]
+}

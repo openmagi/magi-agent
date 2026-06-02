@@ -1,0 +1,65 @@
+{
+  "schemaVersion": "recipeCompositionRegressionFixture.v1",
+  "caseId": "governed_selector_auto_fallback_with_required_ref_present",
+  "description": "A governed required fixture fails closed when selector output also includes an ungoverned auto fallback, even if the required governed recipe was admitted.",
+  "activationMode": {
+    "defaultOff": true,
+    "trafficAttached": false,
+    "executionAttached": false,
+    "liveActivation": false
+  },
+  "stack": {
+    "explicitRecipeRefs": [
+      "recipe.governed.required"
+    ],
+    "autoRecipeRefs": [
+      "recipe.fallback.general_chat"
+    ],
+    "allowAdditionalAutoRecipes": true,
+    "selectionSource": "selector.fixture",
+    "turnId": "turn-regression-governed-auto-fallback",
+    "sessionId": "session-regression-governed-auto-fallback"
+  },
+  "requiredGovernedRecipeRefs": [
+    "recipe.governed.required"
+  ],
+  "globalRetryCap": 3,
+  "snapshots": [
+    {
+      "recipeRef": "recipe.governed.required",
+      "governed": true
+    },
+    {
+      "recipeRef": "recipe.fallback.general_chat",
+      "governed": false
+    }
+  ],
+  "expected": {
+    "blocked": true,
+    "effectiveRecipeRefs": [],
+    "includedExplicitRefs": [],
+    "includedAutoRefs": [],
+    "excludedRefs": [
+      {
+        "recipeRef": "recipe.fallback.general_chat",
+        "reason": "auto_recipe_ungoverned_for_required_governance",
+        "blocking": true
+      }
+    ],
+    "conflictCodes": [
+      "auto_recipe_ungoverned_for_required_governance"
+    ],
+    "effectiveRetryPolicy": {
+      "maxAttempts": 0,
+      "repairAttempts": 0,
+      "globalCap": 3
+    },
+    "projection": {
+      "conflictStatus": "blocked",
+      "hardSafetyStatus": "not_required",
+      "excludedReasonCodes": [
+        "auto_recipe_ungoverned_for_required_governance"
+      ]
+    }
+  }
+}

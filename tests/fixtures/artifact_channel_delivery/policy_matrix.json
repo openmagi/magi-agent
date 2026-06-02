@@ -1,0 +1,589 @@
+{
+  "fixtureId": "artifact_channel_delivery_matrix_0001",
+  "version": 1,
+  "localDiagnostic": true,
+  "attachmentFlags": {
+    "adkRunnerInvoked": false,
+    "adkArtifactServiceCalled": false,
+    "liveToolDispatched": false,
+    "artifactWritten": false,
+    "channelDeliveryPerformed": false,
+    "telegramPollingAttached": false,
+    "telegramAttached": false,
+    "memoryProviderCalled": false,
+    "productionStorageWritten": false,
+    "routeOrApiAttached": false,
+    "canaryTrafficAttached": false,
+    "evidenceBlockEnabled": false,
+    "productionAuthority": false
+  },
+  "cases": [
+    {
+      "caseId": "artifact_index_l0_declared_output",
+      "category": "artifact_index_l0_declared",
+      "artifactRef": "artifact:report-draft",
+      "artifactKind": "document",
+      "artifactIndexLevel": "L0",
+      "artifactServiceOwner": "adk-artifact-service",
+      "openmagiIndexOwner": "openmagi-artifact-index",
+      "operation": "create",
+      "storageScope": "openmagi_artifact_index_metadata",
+      "contentType": "text/markdown",
+      "byteSize": 4096,
+      "artifactHash": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "outputPathPreview": "outputs/report-draft.md",
+      "publicPreview": "declared report artifact metadata only",
+      "renderVerificationRequired": false,
+      "renderVerificationPassed": false,
+      "providerReceiptRequired": false,
+      "deliveryClaimAllowed": false,
+      "deliveryState": "not_requested",
+      "channelType": "none",
+      "retryCount": 0,
+      "maxRetries": 0,
+      "transientRetryAllowed": false,
+      "telegramPollingAttached": false,
+      "evidenceRefs": [
+        "evidence:artifact-declared"
+      ],
+      "auditRefs": [
+        "audit:artifact-index-l0"
+      ],
+      "reasonCodes": [
+        "declared_output_metadata"
+      ],
+      "artifactWritten": false,
+      "attachmentFlags": {
+        "adkRunnerInvoked": false,
+        "adkArtifactServiceCalled": false,
+        "liveToolDispatched": false,
+        "artifactWritten": false,
+        "channelDeliveryPerformed": false,
+        "telegramPollingAttached": false,
+        "telegramAttached": false,
+        "memoryProviderCalled": false,
+        "productionStorageWritten": false,
+        "routeOrApiAttached": false,
+        "canaryTrafficAttached": false,
+        "evidenceBlockEnabled": false,
+        "productionAuthority": false
+      }
+    },
+    {
+      "caseId": "artifact_index_l1_rendered_metadata",
+      "category": "artifact_index_l1_rendered",
+      "artifactRef": "artifact:report-rendered",
+      "artifactKind": "rendered_preview",
+      "artifactIndexLevel": "L1",
+      "artifactServiceOwner": "adk-artifact-service",
+      "openmagiIndexOwner": "openmagi-artifact-index",
+      "operation": "render",
+      "storageScope": "adk_artifact_service_metadata",
+      "contentType": "application/pdf",
+      "byteSize": 65536,
+      "artifactHash": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "outputPathPreview": "outputs/report-rendered.pdf",
+      "publicPreview": "render verification metadata recorded",
+      "renderVerificationRequired": true,
+      "renderVerificationPassed": true,
+      "providerReceiptRequired": false,
+      "deliveryClaimAllowed": false,
+      "deliveryState": "not_requested",
+      "channelType": "none",
+      "retryCount": 0,
+      "maxRetries": 0,
+      "transientRetryAllowed": false,
+      "telegramPollingAttached": false,
+      "evidenceRefs": [
+        "evidence:render-opened"
+      ],
+      "auditRefs": [
+        "audit:artifact-index-l1"
+      ],
+      "reasonCodes": [
+        "render_verified_metadata"
+      ],
+      "artifactWritten": false,
+      "attachmentFlags": {
+        "adkRunnerInvoked": false,
+        "adkArtifactServiceCalled": false,
+        "liveToolDispatched": false,
+        "artifactWritten": false,
+        "channelDeliveryPerformed": false,
+        "telegramPollingAttached": false,
+        "telegramAttached": false,
+        "memoryProviderCalled": false,
+        "productionStorageWritten": false,
+        "routeOrApiAttached": false,
+        "canaryTrafficAttached": false,
+        "evidenceBlockEnabled": false,
+        "productionAuthority": false
+      }
+    },
+    {
+      "caseId": "artifact_index_l2_delivery_receipt_metadata",
+      "category": "artifact_index_l2_delivery_receipt",
+      "artifactRef": "artifact:report-rendered",
+      "artifactKind": "delivery_receipt",
+      "artifactIndexLevel": "L2",
+      "artifactServiceOwner": "adk-artifact-service",
+      "openmagiIndexOwner": "openmagi-artifact-index",
+      "operation": "deliver",
+      "storageScope": "channel_delivery_metadata",
+      "contentType": "application/pdf",
+      "byteSize": 65536,
+      "artifactHash": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "outputPathPreview": "outputs/report-rendered.pdf",
+      "publicPreview": "delivery receipt metadata recorded",
+      "renderVerificationRequired": true,
+      "renderVerificationPassed": true,
+      "providerReceiptRequired": true,
+      "deliveryClaimAllowed": true,
+      "deliveryState": "sent",
+      "channelType": "web",
+      "receipt": {
+        "receiptId": "receipt-artifact-report-1",
+        "requestId": "deliver-artifact-report-1",
+        "channel": {
+          "type": "web",
+          "channelId": "web-channel-1"
+        },
+        "status": "sent",
+        "providerMessageId": "web-message-1",
+        "deliveredAt": "2026-05-17T18:00:00Z",
+        "artifactRefs": [
+          "artifact:report-rendered"
+        ],
+        "fileRefs": [],
+        "transcriptEventId": "evt-delivery-report-1"
+      },
+      "retryCount": 0,
+      "maxRetries": 0,
+      "transientRetryAllowed": false,
+      "telegramPollingAttached": false,
+      "evidenceRefs": [
+        "evidence:delivery-receipt"
+      ],
+      "auditRefs": [
+        "audit:artifact-index-l2"
+      ],
+      "reasonCodes": [
+        "provider_receipt_present"
+      ],
+      "artifactWritten": false,
+      "attachmentFlags": {
+        "adkRunnerInvoked": false,
+        "adkArtifactServiceCalled": false,
+        "liveToolDispatched": false,
+        "artifactWritten": false,
+        "channelDeliveryPerformed": false,
+        "telegramPollingAttached": false,
+        "telegramAttached": false,
+        "memoryProviderCalled": false,
+        "productionStorageWritten": false,
+        "routeOrApiAttached": false,
+        "canaryTrafficAttached": false,
+        "evidenceBlockEnabled": false,
+        "productionAuthority": false
+      }
+    },
+    {
+      "caseId": "document_render_pending_blocks_delivery_claim",
+      "category": "document_render_pending",
+      "artifactRef": "artifact:contract-summary",
+      "artifactKind": "document",
+      "artifactIndexLevel": "L1",
+      "artifactServiceOwner": "adk-artifact-service",
+      "openmagiIndexOwner": "openmagi-artifact-index",
+      "operation": "render",
+      "storageScope": "adk_artifact_service_metadata",
+      "contentType": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "byteSize": 32768,
+      "artifactHash": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "outputPathPreview": "outputs/contract-summary.docx",
+      "publicPreview": "document render pending; delivery claim blocked",
+      "renderVerificationRequired": true,
+      "renderVerificationPassed": false,
+      "providerReceiptRequired": false,
+      "deliveryClaimAllowed": false,
+      "deliveryState": "not_requested",
+      "channelType": "none",
+      "retryCount": 0,
+      "maxRetries": 0,
+      "transientRetryAllowed": false,
+      "telegramPollingAttached": false,
+      "evidenceRefs": [],
+      "auditRefs": [
+        "audit:render-pending"
+      ],
+      "reasonCodes": [
+        "render_verification_missing"
+      ],
+      "artifactWritten": false,
+      "attachmentFlags": {
+        "adkRunnerInvoked": false,
+        "adkArtifactServiceCalled": false,
+        "liveToolDispatched": false,
+        "artifactWritten": false,
+        "channelDeliveryPerformed": false,
+        "telegramPollingAttached": false,
+        "telegramAttached": false,
+        "memoryProviderCalled": false,
+        "productionStorageWritten": false,
+        "routeOrApiAttached": false,
+        "canaryTrafficAttached": false,
+        "evidenceBlockEnabled": false,
+        "productionAuthority": false
+      }
+    },
+    {
+      "caseId": "spreadsheet_output_validation_metadata",
+      "category": "spreadsheet_output_validation",
+      "artifactRef": "artifact:analysis-workbook",
+      "artifactKind": "spreadsheet",
+      "artifactIndexLevel": "L1",
+      "artifactServiceOwner": "adk-artifact-service",
+      "openmagiIndexOwner": "openmagi-artifact-index",
+      "operation": "render",
+      "storageScope": "adk_artifact_service_metadata",
+      "contentType": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      "byteSize": 49152,
+      "artifactHash": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+      "outputPathPreview": "outputs/analysis-workbook.xlsx",
+      "publicPreview": "spreadsheet output validation metadata recorded",
+      "renderVerificationRequired": true,
+      "renderVerificationPassed": true,
+      "providerReceiptRequired": false,
+      "deliveryClaimAllowed": false,
+      "deliveryState": "not_requested",
+      "channelType": "none",
+      "retryCount": 0,
+      "maxRetries": 0,
+      "transientRetryAllowed": false,
+      "telegramPollingAttached": false,
+      "evidenceRefs": [
+        "evidence:spreadsheet-formula-recalc"
+      ],
+      "auditRefs": [
+        "audit:spreadsheet-output-validation"
+      ],
+      "reasonCodes": [
+        "formula_recalc_verified"
+      ],
+      "artifactWritten": false,
+      "attachmentFlags": {
+        "adkRunnerInvoked": false,
+        "adkArtifactServiceCalled": false,
+        "liveToolDispatched": false,
+        "artifactWritten": false,
+        "channelDeliveryPerformed": false,
+        "telegramPollingAttached": false,
+        "telegramAttached": false,
+        "memoryProviderCalled": false,
+        "productionStorageWritten": false,
+        "routeOrApiAttached": false,
+        "canaryTrafficAttached": false,
+        "evidenceBlockEnabled": false,
+        "productionAuthority": false
+      }
+    },
+    {
+      "caseId": "web_file_delivery_pending_request",
+      "category": "web_file_delivery_pending",
+      "artifactRef": "artifact:web-export",
+      "artifactKind": "file",
+      "artifactIndexLevel": "L2",
+      "artifactServiceOwner": "adk-artifact-service",
+      "openmagiIndexOwner": "openmagi-artifact-index",
+      "operation": "deliver",
+      "storageScope": "channel_delivery_metadata",
+      "contentType": "application/zip",
+      "byteSize": 131072,
+      "artifactHash": "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+      "outputPathPreview": "outputs/web-export.zip",
+      "publicPreview": "web file delivery request pending provider receipt",
+      "renderVerificationRequired": false,
+      "renderVerificationPassed": false,
+      "providerReceiptRequired": true,
+      "deliveryClaimAllowed": false,
+      "deliveryState": "pending",
+      "channelType": "web",
+      "deliveryRequest": {
+        "requestId": "deliver-web-export-1",
+        "channel": {
+          "type": "web",
+          "channelId": "web-channel-1"
+        },
+        "sessionKey": "session-artifact-delivery-1",
+        "text": "web export ready",
+        "artifactRefs": [
+          "artifact:web-export"
+        ],
+        "fileRefs": [],
+        "metadata": {
+          "localDiagnostic": true
+        }
+      },
+      "retryCount": 0,
+      "maxRetries": 2,
+      "transientRetryAllowed": true,
+      "telegramPollingAttached": false,
+      "evidenceRefs": [],
+      "auditRefs": [
+        "audit:delivery-pending"
+      ],
+      "reasonCodes": [
+        "awaiting_provider_receipt"
+      ],
+      "artifactWritten": false,
+      "attachmentFlags": {
+        "adkRunnerInvoked": false,
+        "adkArtifactServiceCalled": false,
+        "liveToolDispatched": false,
+        "artifactWritten": false,
+        "channelDeliveryPerformed": false,
+        "telegramPollingAttached": false,
+        "telegramAttached": false,
+        "memoryProviderCalled": false,
+        "productionStorageWritten": false,
+        "routeOrApiAttached": false,
+        "canaryTrafficAttached": false,
+        "evidenceBlockEnabled": false,
+        "productionAuthority": false
+      }
+    },
+    {
+      "caseId": "app_delivery_retrying_transient_failure",
+      "category": "app_delivery_retry_transient",
+      "artifactRef": "artifact:mobile-summary",
+      "artifactKind": "file",
+      "artifactIndexLevel": "L2",
+      "artifactServiceOwner": "adk-artifact-service",
+      "openmagiIndexOwner": "openmagi-artifact-index",
+      "operation": "deliver",
+      "storageScope": "channel_delivery_metadata",
+      "contentType": "application/pdf",
+      "byteSize": 24576,
+      "artifactHash": "sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+      "outputPathPreview": "outputs/mobile-summary.pdf",
+      "publicPreview": "app delivery retry metadata after transient failure",
+      "renderVerificationRequired": true,
+      "renderVerificationPassed": true,
+      "providerReceiptRequired": true,
+      "deliveryClaimAllowed": false,
+      "deliveryState": "retrying",
+      "channelType": "app",
+      "deliveryRequest": {
+        "requestId": "deliver-mobile-summary-1",
+        "channel": {
+          "type": "app",
+          "channelId": "app-channel-1"
+        },
+        "sessionKey": "session-artifact-delivery-1",
+        "text": "mobile summary ready",
+        "artifactRefs": [
+          "artifact:mobile-summary"
+        ],
+        "fileRefs": [],
+        "metadata": {
+          "retry": 1,
+          "localDiagnostic": true
+        }
+      },
+      "retryCount": 1,
+      "maxRetries": 3,
+      "transientRetryAllowed": true,
+      "telegramPollingAttached": false,
+      "evidenceRefs": [],
+      "auditRefs": [
+        "audit:delivery-retrying"
+      ],
+      "reasonCodes": [
+        "transient_delivery_failure"
+      ],
+      "artifactWritten": false,
+      "attachmentFlags": {
+        "adkRunnerInvoked": false,
+        "adkArtifactServiceCalled": false,
+        "liveToolDispatched": false,
+        "artifactWritten": false,
+        "channelDeliveryPerformed": false,
+        "telegramPollingAttached": false,
+        "telegramAttached": false,
+        "memoryProviderCalled": false,
+        "productionStorageWritten": false,
+        "routeOrApiAttached": false,
+        "canaryTrafficAttached": false,
+        "evidenceBlockEnabled": false,
+        "productionAuthority": false
+      }
+    },
+    {
+      "caseId": "discord_delivery_failed_explicit_error",
+      "category": "discord_delivery_failed",
+      "artifactRef": "artifact:discord-export",
+      "artifactKind": "file",
+      "artifactIndexLevel": "L2",
+      "artifactServiceOwner": "adk-artifact-service",
+      "openmagiIndexOwner": "openmagi-artifact-index",
+      "operation": "deliver",
+      "storageScope": "channel_delivery_metadata",
+      "contentType": "text/csv",
+      "byteSize": 8192,
+      "artifactHash": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+      "outputPathPreview": "outputs/discord-export.csv",
+      "publicPreview": "discord delivery failed with explicit provider error metadata",
+      "renderVerificationRequired": false,
+      "renderVerificationPassed": false,
+      "providerReceiptRequired": true,
+      "deliveryClaimAllowed": false,
+      "deliveryState": "failed",
+      "channelType": "discord",
+      "receipt": {
+        "receiptId": "receipt-discord-export-1",
+        "requestId": "deliver-discord-export-1",
+        "channel": {
+          "type": "discord",
+          "channelId": "discord-channel-1"
+        },
+        "status": "failed",
+        "errorCode": "provider_error",
+        "errorMessage": "provider rejected attachment",
+        "artifactRefs": [
+          "artifact:discord-export"
+        ],
+        "fileRefs": [],
+        "transcriptEventId": "evt-delivery-discord-1"
+      },
+      "retryCount": 0,
+      "maxRetries": 0,
+      "transientRetryAllowed": false,
+      "telegramPollingAttached": false,
+      "evidenceRefs": [],
+      "auditRefs": [
+        "audit:delivery-failed"
+      ],
+      "reasonCodes": [
+        "provider_delivery_failed"
+      ],
+      "artifactWritten": false,
+      "attachmentFlags": {
+        "adkRunnerInvoked": false,
+        "adkArtifactServiceCalled": false,
+        "liveToolDispatched": false,
+        "artifactWritten": false,
+        "channelDeliveryPerformed": false,
+        "telegramPollingAttached": false,
+        "telegramAttached": false,
+        "memoryProviderCalled": false,
+        "productionStorageWritten": false,
+        "routeOrApiAttached": false,
+        "canaryTrafficAttached": false,
+        "evidenceBlockEnabled": false,
+        "productionAuthority": false
+      }
+    },
+    {
+      "caseId": "telegram_delivery_metadata_excluded",
+      "category": "telegram_delivery_excluded",
+      "artifactRef": "artifact:telegram-summary",
+      "artifactKind": "file",
+      "artifactIndexLevel": "L2",
+      "artifactServiceOwner": "adk-artifact-service",
+      "openmagiIndexOwner": "openmagi-artifact-index",
+      "operation": "deliver",
+      "storageScope": "channel_delivery_metadata",
+      "contentType": "application/pdf",
+      "byteSize": 12288,
+      "artifactHash": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+      "outputPathPreview": "outputs/telegram-summary.pdf",
+      "publicPreview": "Telegram delivery metadata excluded until channel approval",
+      "renderVerificationRequired": true,
+      "renderVerificationPassed": true,
+      "providerReceiptRequired": true,
+      "deliveryClaimAllowed": false,
+      "deliveryState": "skipped",
+      "channelType": "telegram",
+      "retryCount": 0,
+      "maxRetries": 0,
+      "transientRetryAllowed": false,
+      "telegramPollingAttached": false,
+      "evidenceRefs": [],
+      "auditRefs": [
+        "audit:telegram-delivery-excluded"
+      ],
+      "reasonCodes": [
+        "telegram_channel_not_approved"
+      ],
+      "artifactWritten": false,
+      "attachmentFlags": {
+        "adkRunnerInvoked": false,
+        "adkArtifactServiceCalled": false,
+        "liveToolDispatched": false,
+        "artifactWritten": false,
+        "channelDeliveryPerformed": false,
+        "telegramPollingAttached": false,
+        "telegramAttached": false,
+        "memoryProviderCalled": false,
+        "productionStorageWritten": false,
+        "routeOrApiAttached": false,
+        "canaryTrafficAttached": false,
+        "evidenceBlockEnabled": false,
+        "productionAuthority": false
+      }
+    },
+    {
+      "caseId": "child_artifact_handoff_metadata",
+      "category": "child_artifact_handoff",
+      "artifactRef": "artifact:child-review-packet",
+      "artifactKind": "child_handoff",
+      "artifactIndexLevel": "L0",
+      "artifactServiceOwner": "adk-artifact-service",
+      "openmagiIndexOwner": "openmagi-artifact-index",
+      "operation": "handoff",
+      "storageScope": "openmagi_artifact_index_metadata",
+      "contentType": "application/json",
+      "byteSize": 2048,
+      "artifactHash": "sha256:3333333333333333333333333333333333333333333333333333333333333333",
+      "outputPathPreview": "outputs/child-review-packet.json",
+      "publicPreview": "child artifact handoff metadata recorded for parent aggregation",
+      "renderVerificationRequired": false,
+      "renderVerificationPassed": false,
+      "providerReceiptRequired": false,
+      "deliveryClaimAllowed": false,
+      "deliveryState": "not_requested",
+      "channelType": "none",
+      "retryCount": 0,
+      "maxRetries": 0,
+      "transientRetryAllowed": false,
+      "telegramPollingAttached": false,
+      "childExecutionId": "child-artifact-1",
+      "parentExecutionId": "root-artifact-1",
+      "evidenceRefs": [
+        "evidence:child-artifact-proposed"
+      ],
+      "auditRefs": [
+        "audit:child-artifact-handoff"
+      ],
+      "reasonCodes": [
+        "child_handoff_requires_parent_adoption"
+      ],
+      "artifactWritten": false,
+      "attachmentFlags": {
+        "adkRunnerInvoked": false,
+        "adkArtifactServiceCalled": false,
+        "liveToolDispatched": false,
+        "artifactWritten": false,
+        "channelDeliveryPerformed": false,
+        "telegramPollingAttached": false,
+        "telegramAttached": false,
+        "memoryProviderCalled": false,
+        "productionStorageWritten": false,
+        "routeOrApiAttached": false,
+        "canaryTrafficAttached": false,
+        "evidenceBlockEnabled": false,
+        "productionAuthority": false
+      }
+    }
+  ]
+}

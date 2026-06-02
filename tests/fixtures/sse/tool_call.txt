@@ -1,0 +1,25 @@
+:ok
+
+event: agent
+data: {"type":"turn_start","turnId":"turn-tool-1","declaredRoute":"direct"}
+
+event: agent
+data: {"type":"tool_start","id":"call-weather-1","name":"get_weather","input_preview":"{\"city\":\"Seoul\"}"}
+
+event: agent
+data: {"type":"tool_progress","id":"call-weather-1","label":"Fetching weather"}
+
+event: agent
+data: {"type":"tool_end","id":"call-weather-1","status":"ok","output_preview":"{\"temperatureC\":21}","durationMs":37}
+
+event: agent
+data: {"type":"text_delta","delta":"It is 21C in Seoul."}
+
+data: {"choices":[{"index":0,"delta":{"role":"assistant","content":"It is 21C in Seoul."}}]}
+
+event: agent
+data: {"type":"turn_end","turnId":"turn-tool-1","status":"committed","receiptRef":"receipt:sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"}
+
+data: {"choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}
+
+data: [DONE]

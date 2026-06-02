@@ -1,0 +1,8 @@
+{"kind":"turn_started","ts":1,"turnId":"turn-tool-pairing-1","declaredRoute":"direct"}
+{"kind":"user_message","ts":2,"turnId":"turn-tool-pairing-1","text":"Inspect tool pairing metadata."}
+{"kind":"tool_call","ts":3,"turnId":"turn-tool-pairing-1","toolUseId":"toolu-read-1","name":"FileRead","input":{"path":"README.md"},"eventId":"tool-call-1","fixtureOnly":true}
+{"kind":"tool_result","ts":4,"turnId":"turn-tool-pairing-1","toolUseId":"toolu-read-1","status":"ok","output":"README excerpt.","isError":false,"metadata":{"pairing":"matched","callEventId":"tool-call-1","resultEventId":"tool-result-1"}}
+{"kind":"tool_result","ts":5,"turnId":"turn-tool-pairing-1","toolUseId":"toolu-read-1","status":"ok","output":"Duplicate README excerpt.","isError":false,"metadata":{"pairing":"duplicate_result","callEventId":"tool-call-1","resultEventId":"tool-result-1-duplicate","expectedRepair":"keep_first_result"}}
+{"kind":"tool_result","ts":6,"turnId":"turn-tool-pairing-1","toolUseId":"toolu-orphan-1","status":"error","output":"Result arrived without a visible call in this fixture.","isError":true,"metadata":{"pairing":"orphan_result","resultEventId":"tool-result-orphan-1","expectedRepair":"project_unknown_call"}}
+{"kind":"assistant_text","ts":7,"turnId":"turn-tool-pairing-1","text":"Pairing expectations are recorded as fixture metadata only."}
+{"kind":"turn_committed","ts":8,"turnId":"turn-tool-pairing-1","inputTokens":20,"outputTokens":12}

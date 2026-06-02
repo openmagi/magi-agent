@@ -1,0 +1,8 @@
+{"kind":"turn_started","ts":1,"turnId":"turn-1","declaredRoute":"gpt-5.5:anthropic","routingMetadata":{"providerLabel":"anthropic","modelLabel":"claude-opus-4-7","credentialRef":"server-config-main"}}
+{"kind":"user_message","ts":2,"turnId":"turn-1","text":"We need to fix onboarding step 3 Telegram-to-provisioning handoff."}
+{"kind":"assistant_text","ts":3,"turnId":"turn-1","text":"The key is to make the web app write the bot state that the in-cluster provisioning worker reconciles. Do not make Vercel call Kubernetes directly."}
+{"kind":"turn_committed","ts":4,"turnId":"turn-1","inputTokens":42,"outputTokens":21}
+{"kind":"turn_started","ts":5,"turnId":"turn-2","declaredRoute":"gpt-5.5:anthropic"}
+{"kind":"user_message","ts":6,"turnId":"turn-2","text":"Also remember stale Telegram webhooks can break polling."}
+{"kind":"assistant_text","ts":7,"turnId":"turn-2","text":"Right. Clear stale webhooks before relying on polling in core-agent."}
+{"kind":"turn_committed","ts":8,"turnId":"turn-2","inputTokens":16,"outputTokens":12}

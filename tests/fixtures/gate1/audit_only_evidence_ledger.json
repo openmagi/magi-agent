@@ -1,0 +1,114 @@
+{
+  "agentRole": "coding",
+  "compactionRef": null,
+  "entries": [
+    {
+      "agentRole": "coding",
+      "evidenceRef": "gate1-ledger-audit:0001:evidence_record",
+      "executionAttached": false,
+      "kind": "evidence_record",
+      "metadata": {
+        "source": "projected-event"
+      },
+      "payload": {
+        "record": {
+          "fields": {
+            "command": "python -m pytest tests/test_gate1_local_event_projection.py",
+            "exitCode": 0
+          },
+          "metadata": {
+            "lastCodeMutation": 1779000000
+          },
+          "observedAt": 1779000040,
+          "preview": "pytest passed with token=[redacted]",
+          "source": {
+            "acknowledgementId": null,
+            "artifactId": null,
+            "channel": null,
+            "contractId": null,
+            "eventId": "evt-evidence-tool-end",
+            "extractorId": null,
+            "kind": "tool_trace",
+            "metadata": {},
+            "toolCallId": "tool-test-synthetic-1",
+            "toolName": "SyntheticTest",
+            "transcriptEntryId": null,
+            "verifierName": null
+          },
+          "status": "ok",
+          "type": "TestRun"
+        }
+      },
+      "producerSurface": "tool_host",
+      "routeAttached": false,
+      "runOn": "main",
+      "sequence": 1,
+      "sessionId": "gate1-session",
+      "sourceKind": "tool_trace",
+      "spawnDepth": 0,
+      "trafficAttached": false,
+      "turnId": "gate1-turn-evidence"
+    },
+    {
+      "agentRole": "coding",
+      "evidenceRef": "gate1-ledger-audit:0002:evidence_record",
+      "executionAttached": false,
+      "kind": "evidence_record",
+      "metadata": {
+        "source": "tool-result"
+      },
+      "payload": {
+        "record": {
+          "fields": {
+            "changedFiles": 2,
+            "productionImpact": false
+          },
+          "metadata": {
+            "contractStart": 1779000000
+          },
+          "observedAt": 0,
+          "preview": "git diff inspected locally",
+          "source": {
+            "acknowledgementId": null,
+            "artifactId": null,
+            "channel": null,
+            "contractId": null,
+            "eventId": null,
+            "extractorId": null,
+            "kind": "tool_trace",
+            "metadata": {},
+            "toolCallId": "tool-diff-synthetic-1",
+            "toolName": "SyntheticDiff",
+            "transcriptEntryId": null,
+            "verifierName": null
+          },
+          "status": "ok",
+          "type": "GitDiff"
+        }
+      },
+      "producerSurface": "tool_host",
+      "routeAttached": false,
+      "runOn": "main",
+      "sequence": 2,
+      "sessionId": "gate1-session",
+      "sourceKind": "tool_trace",
+      "spawnDepth": 0,
+      "trafficAttached": false,
+      "turnId": "gate1-turn-evidence"
+    }
+  ],
+  "executionAttached": false,
+  "ledgerId": "gate1-ledger-audit",
+  "metadata": {
+    "mode": "audit-only"
+  },
+  "producerSurface": "tool_host",
+  "replayRef": null,
+  "routeAttached": false,
+  "runOn": "main",
+  "sessionId": "gate1-session",
+  "sourceKind": "tool_trace",
+  "spawnDepth": 0,
+  "trafficAttached": false,
+  "turnId": "gate1-turn-evidence"
+}

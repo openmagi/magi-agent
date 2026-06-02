@@ -1,0 +1,1214 @@
+{
+  "schemaVersion": "e2eHarnessParityMatrix.v1",
+  "generatedFor": "python-adk-consolidated-coding-research-general-automation-e2e",
+  "rows": [
+    {
+      "id": "combined_matrix",
+      "capability": "Combined latest-main parity matrix and source-plan reconciliation",
+      "requestedBy": [
+        "coding",
+        "research",
+        "general_automation"
+      ],
+      "latestMainCoveredRefs": [
+        {
+          "path": "README.md",
+          "state": "existing"
+        },
+        {
+          "path": "pyproject.toml",
+          "state": "existing"
+        }
+      ],
+      "missingImplementation": [
+        {
+          "path": "tests/planned_harness_e2e/pr01_runtime_activation_guard.py",
+          "state": "planned_missing"
+        }
+      ],
+      "owningLayer": "Tests/docs only",
+      "adkPrimitive": "audit fixture only",
+      "prSliceAssignment": "PR1",
+      "dependencies": [],
+      "activationGate": "documentation-only audit gate",
+      "status": "partially_covered",
+      "defaultOff": true,
+      "trafficAttached": false,
+      "notes": "PR1 records the consolidated order and remaps stale source-plan paths to latest-main anchors without changing runtime behavior."
+    },
+    {
+      "id": "request_shape_snapshot",
+      "capability": "Request shape snapshot and false-authority audit",
+      "requestedBy": [
+        "coding",
+        "research",
+        "general_automation"
+      ],
+      "latestMainCoveredRefs": [
+        {
+          "path": "openmagi_core_agent/runtime/request_shape.py",
+          "state": "existing"
+        },
+        {
+          "path": "tests/test_request_shape_reliability_ledger.py",
+          "state": "existing"
+        }
+      ],
+      "missingImplementation": [
+        {
+          "path": "tests/planned_harness_e2e/pr02_request_shape_snapshot_e2e.py",
+          "state": "planned_missing"
+        }
+      ],
+      "owningLayer": "Core substrate",
+      "adkPrimitive": "RequestShapeLedger",
+      "prSliceAssignment": "PR2",
+      "dependencies": [
+        "combined_matrix"
+      ],
+      "activationGate": "false-authority proof remains enforced",
+      "status": "already_covered",
+      "defaultOff": true,
+      "trafficAttached": false,
+      "notes": "Latest main already includes the request-shape ledger surface; this slice audits it before any live turn authority."
+    },
+    {
+      "id": "local_adk_turn_runner",
+      "capability": "Local ADK turn runner with no live tool authority",
+      "requestedBy": [
+        "coding",
+        "research",
+        "general_automation"
+      ],
+      "latestMainCoveredRefs": [
+        {
+          "path": "openmagi_core_agent/adk_bridge/local_runner.py",
+          "state": "existing"
+        },
+        {
+          "path": "openmagi_core_agent/adk_bridge/runner_adapter.py",
+          "state": "existing"
+        },
+        {
+          "path": "openmagi_core_agent/runtime/adk_turn_runner.py",
+          "state": "existing"
+        },
+        {
+          "path": "openmagi_core_agent/runtime/turn_controller.py",
+          "state": "existing"
+        },
+        {
+          "path": "tests/test_e2e_harness_pr2_adk_turn_runner.py",
+          "state": "existing"
+        }
+      ],
+      "missingImplementation": [],
+      "owningLayer": "Core substrate",
+      "adkPrimitive": "ADK Runner and local runner adapter",
+      "prSliceAssignment": "PR2",
+      "dependencies": [
+        "request_shape_snapshot"
+      ],
+      "activationGate": "local-only runner gate",
+      "status": "already_covered",
+      "defaultOff": true,
+      "trafficAttached": false,
+      "notes": "PR2 adds the generic local-only ADK turn runner primitive with request-shape recording, adapter allowlist enforcement, and false-authority results."
+    },
+    {
+      "id": "tool_schema_output_artifact_store",
+      "capability": "Tool schema validation, result normalization, and output artifact receipts",
+      "requestedBy": [
+        "coding",
+        "general_automation"
+      ],
+      "latestMainCoveredRefs": [
+        {
+          "path": "openmagi_core_agent/tools/manifest.py",
+          "state": "existing"
+        },
+        {
+          "path": "openmagi_core_agent/tools/result.py",
+          "state": "existing"
+        },
+        {
+          "path": "tests/test_addenda_output_artifact_registry_boundary.py",
+          "state": "existing"
+        },
+        {
+          "path": "openmagi_core_agent/tools/schema_validation.py",
+          "state": "existing"
+        },
+        {
+          "path": "openmagi_core_agent/tools/output_budget.py",
+          "state": "existing"
+        },
+        {
+          "path": "openmagi_core_agent/artifacts/local_result_store.py",
+          "state": "existing"
+        },
+        {
+          "path": "tests/test_e2e_harness_pr3_tool_schema_output_store.py",
+          "state": "existing"
+        }
+      ],
+      "missingImplementation": [],
+      "owningLayer": "Core substrate",
+      "adkPrimitive": "ADK FunctionTool schema and ArtifactService boundary",
+      "prSliceAssignment": "PR3",
+      "dependencies": [
+        "local_adk_turn_runner"
+      ],
+      "activationGate": "tool exposure remains local and default-off",
+      "status": "already_covered",
+      "defaultOff": true,
+      "trafficAttached": false,
+      "notes": "PR3 adds generic schema validation, output preview budgeting, and a local fake result store while keeping live attachment and production writes disabled."
+    },
+    {
+      "id": "toolhost_kernel_scheduler",
+      "capability": "ToolHost kernel and deterministic scheduler ordering",
+      "requestedBy": [
+        "coding",
+        "research",
+        "general_automation"
+      ],
+      "latestMainCoveredRefs": [
+        {
+          "path": "openmagi_core_agent/tools/kernel.py",
+          "state": "existing"
+        },
+        {
+          "path": "openmagi_core_agent/tools/dispatcher.py",
+          "state": "existing"
+        },
+        {
+          "path": "openmagi_core_agent/tools/scheduler.py",
+          "state": "existing"
+        },
+        {
+          "path": "openmagi_core_agent/harness/scheduler_runtime.py",
+          "state": "existing"
+        },
+        {
+          "path": "tests/test_priority_b_tool_execution_kernel.py",
+          "state": "existing"
+        },
+        {
+          "path": "tests/test_live_scheduler_runtime_boundary.py",
+          "state": "existing"
+        },
+        {
+          "path": "tests/test_e2e_harness_pr4_toolhost_scheduler.py",
+          "state": "existing"
+        }
+      ],
+      "missingImplementation": [],
+      "owningLayer": "Core substrate",
+      "adkPrimitive": "FunctionTool callback execution boundary",
+      "prSliceAssignment": "PR4",
+      "dependencies": [
+        "tool_schema_output_artifact_store"
+      ],
+      "activationGate": "kernel enabled only in local fake mode",
+      "status": "already_covered",
+      "defaultOff": true,
+      "trafficAttached": false,
+      "notes": "PR4 adds protected handler binding, generic local-fake ToolHost kernel hooks, and deterministic scheduler ordering while keeping live execution default-off."
+    },
+    {
+      "id": "local_read_search_source_projection",
+      "capability": "Local read/search source projection through Gate 1A",
+      "requestedBy": [
+        "coding",
+        "research",
+        "general_automation"
+      ],
+      "latestMainCoveredRefs": [
+        {
+          "path": "openmagi_core_agent/tools/local_readonly.py",
+          "state": "existing"
+        },
+        {
+          "path": "openmagi_core_agent/gates/gate1a_readonly_tools.py",
+          "state": "existing"
+        },
+        {
+          "path": "openmagi_core_agent/evidence/source_ledger.py",
+          "state": "existing"
+        },
+        {
+          "path": "tests/test_gate1_local_evidence_ledger.py",
+          "state": "existing"
+        },
+        {
+          "path": "tests/test_research_source_ledger.py",
+          "state": "existing"
+        },
+        {
+          "path": "tests/test_e2e_harness_pr5_local_read_search_source_projection.py",
+          "state": "existing"
+        }
+      ],
+      "missingImplementation": [],
+      "owningLayer": "Core substrate",
+      "adkPrimitive": "ADK FunctionTool read-only projection",
+      "prSliceAssignment": "PR5",
+      "dependencies": [
+        "toolhost_kernel_scheduler"
+      ],
+      "activationGate": "ToolExecutionKernel local fake ToolHost exposure",
+      "status": "already_covered",
+      "defaultOff": true,
+      "trafficAttached": false,
+      "notes": "PR5 adds generic local-only FileRead, Glob, Grep, and GitDiff fixture boundaries through ToolExecutionKernel with source ledger and receipt projections; Gate 1A remains default-off."
+    },
+    {
+      "id": "event_transcript_projection",
+      "capability": "ADK event and transcript projection with stable IDs",
+      "requestedBy": [
+        "coding",
+        "research",
+        "general_automation"
+      ],
+      "latestMainCoveredRefs": [
+        {
+          "path": "openmagi_core_agent/adk_bridge/event_adapter.py",
+          "state": "existing"
+        },
+        {
+          "path": "openmagi_core_agent/runtime/events.py",
+          "state": "existing"
+        },
+        {
+          "path": "openmagi_core_agent/runtime/transcript.py",
+          "state": "existing"
+        },
+        {
+          "path": "openmagi_core_agent/memory/projection.py",
+          "state": "existing"
+        },
+        {
+          "path": "openmagi_core_agent/transport/sse.py",
+          "state": "existing"
+        },
+        {
+          "path": "tests/test_event_bridge.py",
+          "state": "existing"
+        },
+        {
+          "path": "tests/test_e2e_harness_pr6_event_transcript_projection.py",
+          "state": "existing"
+        },
+        {
+          "path": "tests/test_public_event_golden_fixtures.py",
+          "state": "existing"
+        }
+      ],
+      "missingImplementation": [],
+      "owningLayer": "Core substrate",
+      "adkPrimitive": "ADK event stream projection",
+      "prSliceAssignment": "PR6",
+      "dependencies": [
+        "local_read_search_source_projection"
+      ],
+      "activationGate": "projection write boundary remains false",
+      "status": "already_covered",
+      "defaultOff": true,
+      "trafficAttached": false,
+      "notes": "PR6 adds generic normalized event projection over ADK events, deterministic transcript/public-event projection helpers, stable tool call/result pairing, and digest-only default-off memory summaries."
+    },
+    {
+      "id": "approval_pause_resume",
+      "capability": "Approval pause, resume, denial, and receipt lifecycle",
+      "requestedBy": [
+        "coding",
+        "general_automation"
+      ],
+      "latestMainCoveredRefs": [
+        {
+          "path": "openmagi_core_agent/runtime/approval_resume.py",
+          "state": "existing"
+        },
+        {
+          "path": "tests/test_e2e_harness_pr7_approval_resume.py",
+          "state": "existing"
+        },
+        {
+          "path": "openmagi_core_agent/harness/approval_receipts.py",
+          "state": "existing"
+        },
+        {
+          "path": "openmagi_core_agent/runtime/control.py",
+          "state": "existing"
+        },
+        {
+          "path": "openmagi_core_agent/tools/permission.py",
+          "state": "existing"
+        },
+        {
+          "path": "tests/test_approval_receipts_contract.py",
+          "state": "existing"
+        }
+      ],
+      "missingImplementation": [],
+      "owningLayer": "Core substrate",
+      "adkPrimitive": "LongRunningFunctionTool approval handoff",
+      "prSliceAssignment": "PR7",
+      "dependencies": [
+        "event_transcript_projection"
+      ],
+      "activationGate": "approval-required tools cannot auto-execute",
+      "status": "already_covered",
+      "defaultOff": true,
+      "trafficAttached": false,
+      "notes": "PR7 adds the generic approval pause/resume primitive with in-memory-only pending tool call records, single-use resume decisions, denial projection, and schema/safety preservation while live execution remains unattached."
+    },
+    {
+      "id": "read_ledger_workspace_mutation_safety",
+      "capability": "Read ledger and workspace mutation safety for write-capable tools",
+      "requestedBy": [
+        "coding",
+        "general_automation"
+      ],
+      "latestMainCoveredRefs": [
+        {
+          "path": "openmagi_core_agent/tools/context.py",
+          "state": "existing"
+        },
+        {
+          "path": "openmagi_core_agent/workspace/adoption_boundary.py",
+          "state": "existing"
+        },
+        {
+          "path": "openmagi_core_agent/tools/safety.py",
+          "state": "existing"
+        },
+        {
+          "path": "openmagi_core_agent/tools/read_ledger.py",
+          "state": "existing"
+        },
+        {
+          "path": "tests/test_priority_e_workspace_mutation_boundary.py",
+          "state": "existing"
+        },
+        {
+          "path": "tests/test_workspace_adoption_preflight_contract_golden_fixtures.py",
+          "state": "existing"
+        },
+        {
+          "path": "tests/tools/test_read_ledger.py",
+          "state": "existing"
+        }
+      ],
+      "missingImplementation": [],
+      "owningLayer": "Core substrate",
+      "adkPrimitive": "ToolContext workspace read ledger",
+      "prSliceAssignment": "PR8",
+      "dependencies": [
+        "approval_pause_resume"
+      ],
+      "activationGate": "workspace mutation authority remains denied",
+      "status": "already_covered",
+      "defaultOff": true,
+      "trafficAttached": false,
+      "notes": "PR8 adds a generic session/workspace-scoped read ledger and safety preflight integration for future mutation tools while workspace mutation authority remains denied."
+    },
+    {
+      "id": "coding_read_before_edit_mutation_recipe",
+      "capability": "Coding recipe for read-before-edit and exact mutation matching",
+      "requestedBy": [
+        "coding"
+      ],
+      "latestMainCoveredRefs": [
+        {
+          "path": "openmagi_core_agent/evidence/coding_verification.py",
+          "state": "existing"
+        },
+        {
+          "path": "tests/test_patch_file_policy_contract_golden_fixtures.py",
+          "state": "existing"
+        },
+        {
+          "path": "tests/test_priority_e_workspace_mutation_boundary.py",
+          "state": "existing"
+        },
+        {
+          "path": "openmagi_core_agent/recipes/coding_mutation.py",
+          "state": "existing"
+        },
+        {
+          "path": "tests/recipes/test_coding_mutation_recipe.py",
+          "state": "existing"
+        }
+      ],
+      "missingImplementation": [
+        {
+          "path": "tests/planned_harness_e2e/pr09_coding_mutation_recipe_materializer_e2e.py",
+          "state": "planned_missing"
+        }
+      ],
+      "owningLayer": "Coding recipe/harness/plugin",
+      "adkPrimitive": "recipe materialization plus tool ledger",
+      "prSliceAssignment": "PR9",
+      "dependencies": [
+        "read_ledger_workspace_mutation_safety"
+      ],
+      "activationGate": "mutation tools require explicit local approval",
+      "status": "partially_covered",
+      "defaultOff": true,
+      "trafficAttached": false,
+      "notes": "PR9 adds the coding-owned FileEdit recipe boundary above the shared mutation substrate: read-before-edit, stale-read rejection, exact old-string matching, multi-match/no-op denial, approval-required output, and local-fake receipt-only behavior. Full E2E materializer composition proof remains tracked as planned missing."
+    },
+    {
+      "id": "coding_evidence_gate",
+      "capability": "Coding evidence gate for completion claims",
+      "requestedBy": [
+        "coding"
+      ],
+      "latestMainCoveredRefs": [
+        {
+          "path": "openmagi_core_agent/evidence/coding_verification.py",
+          "state": "existing"
+        },
+        {
+          "path": "openmagi_core_agent/evidence/final_output_gate.py",
+          "state": "existing"
+        },
+        {
+          "path": "tests/test_priority_b_tool_evidence_boundary.py",
+          "state": "existing"
+        },
+        {
+          "path": "tests/test_reliability_final_output_gate_integration.py",
+          "state": "existing"
+        },
+        {
+          "path": "openmagi_core_agent/recipes/coding_evidence_gate.py",
+          "state": "existing"
+        },
+        {
+          "path": "tests/recipes/test_coding_evidence_gate_recipe.py",
+          "state": "existing"
+        },
+        {
+          "path": "tests/test_e2e_harness_pr10_coding_evidence_gate.py",
+          "state": "existing"
+        }
+      ],
+      "missingImplementation": [],
+      "owningLayer": "Coding recipe/harness/plugin",
+      "adkPrimitive": "final output validator callback",
+      "prSliceAssignment": "PR10",
+      "dependencies": [
+        "coding_read_before_edit_mutation_recipe"
+      ],
+      "activationGate": "claim blocking remains local-audit only",
+      "status": "already_covered",
+      "defaultOff": true,
+      "trafficAttached": false,
+      "notes": "PR10 adds the coding-owned completion-claim evidence gate over already-recorded GitDiff, TestRun, and CommitCheckpoint evidence, with local audit/block semantics and no production final-answer authority."
+    },
+    {
+      "id": "shell_testrun_bash_safe_subset",
+      "capability": "Shell and test-run safe subset with approval and output caps",
+      "requestedBy": [
+        "coding",
+        "general_automation"
+      ],
+      "latestMainCoveredRefs": [
+        {
+          "path": "openmagi_core_agent/tools/safety.py",
+          "state": "existing"
+        },
+        {
+          "path": "openmagi_core_agent/harness/discipline_boundary.py",
+          "state": "existing"
+        },
+        {
+          "path": "tests/test_path_shell_policy_contract_golden_fixtures.py",
+          "state": "existing"
+        },
+        {
+          "path": "openmagi_core_agent/plugins/shell_testrun_safe_subset.py",
+          "state": "existing"
+        },
+        {
+          "path": "tests/test_e2e_harness_pr11_shell_testrun_bash_safe_subset.py",
+          "state": "existing"
+        }
+      ],
+      "missingImplementation": [
+        {
+          "path": "tests/planned_harness_e2e/pr11_shell_testrun_functiontool_attachment.py",
+          "state": "planned_missing"
+        }
+      ],
+      "owningLayer": "General automation plugin/harness",
+      "adkPrimitive": "future approval-gated FunctionTool through ToolHost; PR11 covers default-off plugin policy contract only",
+      "prSliceAssignment": "PR11",
+      "dependencies": [
+        "approval_pause_resume",
+        "tool_schema_output_artifact_store"
+      ],
+      "activationGate": "Bash and TestRun remain approval-required",
+      "status": "partially_covered",
+      "defaultOff": true,
+      "trafficAttached": false,
+      "notes": "PR11 adds a default-off Shell/TestRun safe-subset plugin contract that consumes ToolHost safety-decision refs, records digest-only local fake receipts after explicit approval, and keeps Bash/TestRun FunctionTool attachment as a future ToolHost-owned activation blocker."
+    },
+    {
+      "id": "csv_spreadsheet_backoffice",
+      "capability": "CSV and spreadsheet backoffice automation through artifacts",
+      "requestedBy": [
+        "general_automation"
+      ],
+      "latestMainCoveredRefs": [
+        {
+          "path": "tests/fixtures/office_automation",
+          "state": "existing"
+        },
+        {
+          "path": "openmagi_core_agent/tools/spreadsheet_tools.py",
+          "state": "existing"
+        },
+        {
+          "path": "tests/test_spreadsheet_tools.py",
+          "state": "existing"
+        },
+        {
+          "path": "tests/test_office_automation_contract_golden_fixtures.py",
+          "state": "existing"
+        },
+        {
+          "path": "tests/test_addenda_output_artifact_registry_boundary.py",
+          "state": "existing"
+        },
+        {
+          "path": "openmagi_core_agent/evidence/calculation_policy.py",
+          "state": "existing"
+        }
+      ],
+      "missingImplementation": [
+        {
+          "path": "tests/planned_harness_e2e/pr12_csv_spreadsheet_backoffice_e2e.py",
+          "state": "planned_missing"
+        }
+      ],
+      "owningLayer": "General automation plugin/harness",
+      "adkPrimitive": "artifact-backed FunctionTool",
+      "prSliceAssignment": "PR12",
+      "dependencies": [
+        "tool_schema_output_artifact_store"
+      ],
+      "activationGate": "artifact receipt required before delivery claim",
+      "status": "partially_covered",
+      "defaultOff": true,
+      "trafficAttached": false,
+      "notes": "PR12 has local CSV read/write/preview, office fixture, output-artifact, and calculation-policy anchors; the planned live backoffice E2E gap remains default-off and traffic-detached."
+    },
+    {
+      "id": "research_routing_agent_materialization",
+      "capability": "Research routing and read-only agent materialization",
+      "requestedBy": [
+        "research"
+      ],
+      "latestMainCoveredRefs": [
+        {
+          "path": "openmagi_core_agent/recipes/materializer.py",
+          "state": "existing"
+        },
+        {
+          "path": "openmagi_core_agent/recipes/compiler.py",
+          "state": "existing"
+        },
+        {
+          "path": "tests/test_recipe_selector_validation_contract.py",
+          "state": "existing"
+        },
+        {
+          "path": "tests/test_recipe_reliability_policy.py",
+          "state": "existing"
+        }
+      ],
+      "missingImplementation": [
+        {
+          "path": "tests/planned_harness_e2e/pr13_research_routing_agent_materialization_e2e.py",
+          "state": "planned_missing"
+        }
+      ],
+      "owningLayer": "Research recipe/harness/plugin",
+      "adkPrimitive": "ADK Agent recipe materialization",
+      "prSliceAssignment": "PR13",
+      "dependencies": [
+        "local_read_search_source_projection"
+      ],
+      "activationGate": "read-only research recipe only",
+      "status": "partially_covered",
+      "defaultOff": true,
+      "trafficAttached": false,
+      "notes": "Recipe surfaces exist, while research route selection and materialized agents need a consolidated E2E proof."
+    },
+    {
+      "id": "research_citation_final_gate",
+      "capability": "Research citation audit and final output gate",
+      "requestedBy": [
+        "research"
+      ],
+      "latestMainCoveredRefs": [
+        {
+          "path": "openmagi_core_agent/evidence/source_ledger.py",
+          "state": "existing"
+        },
+        {
+          "path": "openmagi_core_agent/evidence/citation_audit.py",
+          "state": "existing"
+        },
+        {
+          "path": "openmagi_core_agent/evidence/final_output_gate.py",
+          "state": "existing"
+        },
+        {
+          "path": "tests/test_reliability_final_output_gate_integration.py",
+          "state": "existing"
+        }
+      ],
+      "missingImplementation": [
+        {
+          "path": "tests/planned_harness_e2e/pr14_research_citation_final_gate_e2e.py",
+          "state": "planned_missing"
+        }
+      ],
+      "owningLayer": "Research recipe/harness/plugin",
+      "adkPrimitive": "final response validator callback",
+      "prSliceAssignment": "PR14",
+      "dependencies": [
+        "research_routing_agent_materialization"
+      ],
+      "activationGate": "citation block mode stays local-audit only",
+      "status": "partially_covered",
+      "defaultOff": true,
+      "trafficAttached": false,
+      "notes": "Source ledger, citation audit, and final gate anchors exist and must be wired into the research recipe loop."
+    },
+    {
+      "id": "web_search_fetch_provider_boundary",
+      "capability": "Web search and fetch provider boundary with source records",
+      "requestedBy": [
+        "research",
+        "general_automation"
+      ],
+      "latestMainCoveredRefs": [
+        {
+          "path": "openmagi_core_agent/web_acquisition/provider_boundary.py",
+          "state": "existing"
+        },
+        {
+          "path": "openmagi_core_agent/web_acquisition/policy.py",
+          "state": "existing"
+        },
+        {
+          "path": "tests/test_priority_c_web_acquisition_provider_boundary.py",
+          "state": "existing"
+        },
+        {
+          "path": "tests/test_live_provider_execution_boundary.py",
+          "state": "existing"
+        }
+      ],
+      "missingImplementation": [
+        {
+          "path": "tests/planned_harness_e2e/pr15_web_search_fetch_provider_boundary_e2e.py",
+          "state": "planned_missing"
+        }
+      ],
+      "owningLayer": "Provider boundary",
+      "adkPrimitive": "provider-isolated FunctionTool",
+      "prSliceAssignment": "PR15",
+      "dependencies": [
+        "research_citation_final_gate"
+      ],
+      "activationGate": "network provider egress requires explicit provider approval",
+      "status": "activation_blocked",
+      "defaultOff": true,
+      "trafficAttached": false,
+      "notes": "The canonical latest-main boundary is web_acquisition/provider_boundary.py; no generic provider package is authoritative."
+    },
+    {
+      "id": "knowledge_browser_source_boundary",
+      "capability": "Knowledge and browser source boundary with sanitized receipts",
+      "requestedBy": [
+        "research",
+        "general_automation"
+      ],
+      "latestMainCoveredRefs": [
+        {
+          "path": "openmagi_core_agent/knowledge/provider_boundary.py",
+          "state": "existing"
+        },
+        {
+          "path": "openmagi_core_agent/browser/provider_boundary.py",
+          "state": "existing"
+        },
+        {
+          "path": "tests/test_addenda_knowledge_provider_boundary.py",
+          "state": "existing"
+        },
+        {
+          "path": "tests/test_priority_c_browser_provider_boundary.py",
+          "state": "existing"
+        }
+      ],
+      "missingImplementation": [
+        {
+          "path": "tests/planned_harness_e2e/pr16_knowledge_browser_source_boundary_e2e.py",
+          "state": "planned_missing"
+        }
+      ],
+      "owningLayer": "Provider boundary",
+      "adkPrimitive": "provider-isolated FunctionTool",
+      "prSliceAssignment": "PR16",
+      "dependencies": [
+        "web_search_fetch_provider_boundary"
+      ],
+      "activationGate": "browser and knowledge providers require explicit provider approval",
+      "status": "activation_blocked",
+      "defaultOff": true,
+      "trafficAttached": false,
+      "notes": "Knowledge and browser source tools must remain behind their existing provider_boundary.py modules."
+    },
+    {
+      "id": "mcp_toolsearch_adapter",
+      "capability": "MCP and ToolSearch adapter discovery through the same tool boundary",
+      "requestedBy": [
+        "coding",
+        "research",
+        "general_automation"
+      ],
+      "latestMainCoveredRefs": [
+        {
+          "path": "openmagi_core_agent/tools/catalog.py",
+          "state": "existing"
+        },
+        {
+          "path": "openmagi_core_agent/tools/registry.py",
+          "state": "existing"
+        },
+        {
+          "path": "tests/test_plugin_manifest_contract.py",
+          "state": "existing"
+        },
+        {
+          "path": "tests/test_plugin_manager_contract.py",
+          "state": "existing"
+        },
+        {
+          "path": "openmagi_core_agent/plugins/mcp_adapter.py",
+          "state": "existing"
+        },
+        {
+          "path": "openmagi_core_agent/tools/tool_search.py",
+          "state": "existing"
+        },
+        {
+          "path": "tests/test_mcp_adapter.py",
+          "state": "existing"
+        },
+        {
+          "path": "tests/test_tool_search.py",
+          "state": "existing"
+        }
+      ],
+      "missingImplementation": [
+        {
+          "path": "tests/planned_harness_e2e/pr17_live_mcp_activation_e2e.py",
+          "state": "planned_missing"
+        }
+      ],
+      "owningLayer": "Provider boundary",
+      "adkPrimitive": "deferred FunctionTool discovery",
+      "prSliceAssignment": "PR17",
+      "dependencies": [
+        "toolhost_kernel_scheduler"
+      ],
+      "activationGate": "external tool discovery is metadata-only",
+      "status": "activation_blocked",
+      "defaultOff": true,
+      "trafficAttached": false,
+      "notes": "PR17 adds metadata-only MCP descriptor conversion and ToolSearch deferred schema projection; live MCP server lifecycle and external tool execution remain activation blocked."
+    },
+    {
+      "id": "child_runner_evidence_envelope",
+      "capability": "Child runner boundary and evidence envelope contract",
+      "requestedBy": [
+        "coding",
+        "research",
+        "general_automation"
+      ],
+      "latestMainCoveredRefs": [
+        {
+          "path": "openmagi_core_agent/runtime/child_runner_boundary.py",
+          "state": "existing"
+        },
+        {
+          "path": "openmagi_core_agent/evidence/child_runtime_envelope.py",
+          "state": "existing"
+        },
+        {
+          "path": "tests/test_priority_e_child_runner_boundary.py",
+          "state": "existing"
+        },
+        {
+          "path": "tests/test_child_runtime_envelope_contract.py",
+          "state": "existing"
+        },
+        {
+          "path": "tests/test_e2e_harness_pr18_child_runner_evidence_envelope.py",
+          "state": "existing"
+        }
+      ],
+      "missingImplementation": [
+        {
+          "path": "tests/planned_harness_e2e/pr18_live_child_runner_activation_e2e.py",
+          "state": "planned_missing"
+        }
+      ],
+      "owningLayer": "Core substrate",
+      "adkPrimitive": "child ADK Runner boundary",
+      "prSliceAssignment": "PR18",
+      "dependencies": [
+        "event_transcript_projection",
+        "toolhost_kernel_scheduler"
+      ],
+      "activationGate": "child runner local fake only",
+      "status": "activation_blocked",
+      "defaultOff": true,
+      "trafficAttached": false,
+      "notes": "PR18 issues digest-bound child/evidence/artifact/audit refs from local fake child runner results and proves compatibility with runtime-issued metadata-only child evidence envelopes for coding, research, and general automation roles; live child ADK Runner execution and production envelope attachment remain activation blocked."
+    },
+    {
+      "id": "coding_subagent_recipe",
+      "capability": "Coding subagent recipe with scoped tools and child evidence",
+      "requestedBy": [
+        "coding"
+      ],
+      "latestMainCoveredRefs": [
+        {
+          "path": "openmagi_core_agent/recipes/coding_subagents.py",
+          "state": "existing"
+        },
+        {
+          "path": "openmagi_core_agent/runtime/child_runner_boundary.py",
+          "state": "existing"
+        },
+        {
+          "path": "tests/recipes/test_coding_subagent_recipe.py",
+          "state": "existing"
+        },
+        {
+          "path": "tests/test_e2e_harness_pr19_coding_subagent_recipe.py",
+          "state": "existing"
+        }
+      ],
+      "missingImplementation": [
+        {
+          "path": "tests/planned_harness_e2e/pr19_live_coding_subagent_activation_e2e.py",
+          "state": "planned_missing"
+        }
+      ],
+      "owningLayer": "Coding recipe/harness/plugin",
+      "adkPrimitive": "child ADK Runner recipe",
+      "prSliceAssignment": "PR19",
+      "dependencies": [
+        "child_runner_evidence_envelope",
+        "coding_evidence_gate"
+      ],
+      "activationGate": "local fake coding child recipe only; child workspace mutation and live ADK Runner execution remain disabled",
+      "status": "activation_blocked",
+      "defaultOff": true,
+      "trafficAttached": false,
+      "notes": "PR19 adds recipe-owned coding subagent mode policy, scoped tool exposure, local fake child evidence refs, sanitized failure metadata, and approval/read-ledger mutation intent contracts while keeping live child execution, background mode, workspace adoption, and parent-visible raw child transcripts blocked."
+    },
+    {
+      "id": "parallel_research_child_runner",
+      "capability": "Parallel research child runner and parent synthesis evidence",
+      "requestedBy": [
+        "research"
+      ],
+      "latestMainCoveredRefs": [
+        {
+          "path": "openmagi_core_agent/recipes/research_child_runner.py",
+          "state": "existing"
+        },
+        {
+          "path": "openmagi_core_agent/runtime/child_runner_boundary.py",
+          "state": "existing"
+        },
+        {
+          "path": "openmagi_core_agent/evidence/child_runtime_envelope.py",
+          "state": "existing"
+        },
+        {
+          "path": "openmagi_core_agent/harness/parallel_execution.py",
+          "state": "existing"
+        },
+        {
+          "path": "tests/test_priority_e_child_runner_boundary.py",
+          "state": "existing"
+        },
+        {
+          "path": "tests/recipes/test_research_child_runner_recipe.py",
+          "state": "existing"
+        },
+        {
+          "path": "tests/test_e2e_harness_pr20_parallel_research_child_runner.py",
+          "state": "existing"
+        }
+      ],
+      "missingImplementation": [
+        {
+          "path": "tests/planned_harness_e2e/pr20_live_parallel_research_child_runner_activation_e2e.py",
+          "state": "planned_missing"
+        }
+      ],
+      "owningLayer": "Research recipe/harness/plugin",
+      "adkPrimitive": "recipe policy over local child runner boundary; live ADK Runner activation blocked",
+      "prSliceAssignment": "PR20",
+      "dependencies": [
+        "child_runner_evidence_envelope",
+        "research_citation_final_gate"
+      ],
+      "activationGate": "parallel research child recipe remains local fake only; live child execution and provider/tool dispatch remain disabled",
+      "status": "activation_blocked",
+      "defaultOff": true,
+      "trafficAttached": false,
+      "notes": "PR20 adds research-owned parallel child synthesis inputs with task id, child role, parent ledger/source refs, runtime-issued child evidence refs, claim refs, unsupported-claim counts, sanitized child status, and public child summaries while blocking raw child prompts, transcripts, tool logs, hidden reasoning, nested spawn depth, live provider/tool dispatch, workspace mutation, and natural-language-only child evidence."
+    },
+    {
+      "id": "checkpoint_context_compaction",
+      "capability": "Checkpointing, context compaction, and replay continuity",
+      "requestedBy": [
+        "coding",
+        "research",
+        "general_automation"
+      ],
+      "latestMainCoveredRefs": [
+        {
+          "path": "openmagi_core_agent/runtime/checkpointing.py",
+          "state": "existing"
+        },
+        {
+          "path": "openmagi_core_agent/runtime/query_state.py",
+          "state": "existing"
+        },
+        {
+          "path": "openmagi_core_agent/runtime/context_lifecycle.py",
+          "state": "existing"
+        },
+        {
+          "path": "openmagi_core_agent/runtime/content_replacement.py",
+          "state": "existing"
+        },
+        {
+          "path": "openmagi_core_agent/runtime/cache_safe_params.py",
+          "state": "existing"
+        },
+        {
+          "path": "openmagi_core_agent/runtime/context_budget.py",
+          "state": "existing"
+        },
+        {
+          "path": "openmagi_core_agent/runtime/session_continuity.py",
+          "state": "existing"
+        },
+        {
+          "path": "tests/test_checkpoint_resume_replay_fork_contract.py",
+          "state": "existing"
+        },
+        {
+          "path": "tests/test_context_budget_policy.py",
+          "state": "existing"
+        },
+        {
+          "path": "tests/runtime/test_query_state.py",
+          "state": "existing"
+        },
+        {
+          "path": "tests/runtime/test_context_lifecycle.py",
+          "state": "existing"
+        },
+        {
+          "path": "tests/runtime/test_content_replacement.py",
+          "state": "existing"
+        },
+        {
+          "path": "tests/runtime/test_cache_safe_params.py",
+          "state": "existing"
+        },
+        {
+          "path": "tests/test_e2e_harness_pr21_checkpoint_context_compaction.py",
+          "state": "existing"
+        }
+      ],
+      "missingImplementation": [],
+      "owningLayer": "Core substrate",
+      "adkPrimitive": "ADK SessionService restore boundary with model, tool, memory, and transport activation blocked",
+      "prSliceAssignment": "PR21",
+      "dependencies": [
+        "event_transcript_projection",
+        "child_runner_evidence_envelope"
+      ],
+      "activationGate": "production replay remains blocked until live model calls, ToolHost execution, memory provider writes, transport routing, and transcript or channel writes receive separate activation approval",
+      "status": "activation_blocked",
+      "defaultOff": true,
+      "trafficAttached": false,
+      "notes": "PR21 proves generic local checkpoint, query-state, content-replacement, cache-param, and context lifecycle contracts for shared long-loop compaction replay while keeping production memory, tool, model, transport, transcript, and user-visible writes disabled."
+    },
+    {
+      "id": "research_benchmark_eval_capture",
+      "capability": "Research benchmark capture and eval report",
+      "requestedBy": [
+        "research"
+      ],
+      "latestMainCoveredRefs": [
+        {
+          "path": "openmagi_core_agent/harness/audit.py",
+          "state": "existing"
+        },
+        {
+          "path": "openmagi_core_agent/evidence/reports.py",
+          "state": "existing"
+        },
+        {
+          "path": "tests/test_eval_regression_gates_contract.py",
+          "state": "existing"
+        },
+        {
+          "path": "tests/test_harness_audit_contract.py",
+          "state": "existing"
+        },
+        {
+          "path": "openmagi_core_agent/shadow/research_runner_capture.py",
+          "state": "existing"
+        },
+        {
+          "path": "tests/test_research_runner_capture.py",
+          "state": "existing"
+        },
+        {
+          "path": "tests/test_e2e_harness_pr22_research_benchmark_eval_capture.py",
+          "state": "existing"
+        }
+      ],
+      "missingImplementation": [],
+      "owningLayer": "Research recipe/harness/plugin",
+      "adkPrimitive": "eval artifact capture boundary",
+      "prSliceAssignment": "PR22",
+      "dependencies": [
+        "research_citation_final_gate",
+        "parallel_research_child_runner"
+      ],
+      "activationGate": "benchmark capture writes only local artifacts",
+      "status": "activation_blocked",
+      "defaultOff": true,
+      "trafficAttached": false,
+      "notes": "PR22 adds a local-only default-off research-artifact-v1 capture/export boundary with safe snippets, digest-only gate metadata, evaluator-visible missing evidence, unused child evidence, and follow-up gate overreach while keeping live network, model calls, tool dispatch, production writes, and user-visible authority disabled."
+    },
+    {
+      "id": "final_integration_readiness",
+      "capability": "Final combined readiness audit across coding, research, and automation",
+      "requestedBy": [
+        "coding",
+        "research",
+        "general_automation"
+      ],
+      "latestMainCoveredRefs": [
+        {
+          "path": "openmagi_core_agent/harness/e2e_readiness.py",
+          "state": "existing"
+        },
+        {
+          "path": "openmagi_core_agent/runtime/readiness.py",
+          "state": "existing"
+        },
+        {
+          "path": "openmagi_core_agent/evidence/rollout.py",
+          "state": "existing"
+        },
+        {
+          "path": "tests/test_live_ts_surface_default_off_e2e.py",
+          "state": "existing"
+        },
+        {
+          "path": "tests/test_live_ts_surface_recipe_integration.py",
+          "state": "existing"
+        },
+        {
+          "path": "tests/test_e2e_harness_pr23_final_integration_readiness.py",
+          "state": "existing"
+        }
+      ],
+      "missingImplementation": [],
+      "owningLayer": "Mixed",
+      "adkPrimitive": "readiness and rollout evidence boundary",
+      "prSliceAssignment": "PR23",
+      "dependencies": [
+        "coding_evidence_gate",
+        "research_benchmark_eval_capture",
+        "csv_spreadsheet_backoffice"
+      ],
+      "activationGate": "readiness/report metadata only; no activation",
+      "status": "activation_blocked",
+      "defaultOff": true,
+      "trafficAttached": false,
+      "notes": "PR23 adds a sanitized local readiness/report metadata contract across coding, research, and general automation rows while keeping production authority, user-visible output, live execution, model calls, network, browser, memory, workspace, channel, scheduler, database, transcript, and SSE writes disabled."
+    },
+    {
+      "id": "deployment_canary_activation_blocker",
+      "capability": "Deployment and selected-bot canary activation blocker",
+      "requestedBy": [
+        "coding",
+        "research",
+        "general_automation"
+      ],
+      "latestMainCoveredRefs": [
+        {
+          "path": "openmagi_core_agent/harness/e2e_readiness.py",
+          "state": "existing"
+        },
+        {
+          "path": "openmagi_core_agent/gates/api_canary_ladder.py",
+          "state": "existing"
+        },
+        {
+          "path": "openmagi_core_agent/runtime/readiness.py",
+          "state": "existing"
+        },
+        {
+          "path": "tests/test_api_canary_verification_ladder.py",
+          "state": "existing"
+        },
+        {
+          "path": "tests/test_gate5b_user_visible_routing_canary.py",
+          "state": "existing"
+        },
+        {
+          "path": "tests/test_e2e_harness_pr23_final_integration_readiness.py",
+          "state": "existing"
+        }
+      ],
+      "missingImplementation": [],
+      "owningLayer": "Mixed",
+      "adkPrimitive": "none; activation gate and deployment evidence only",
+      "prSliceAssignment": "PR23",
+      "dependencies": [
+        "final_integration_readiness"
+      ],
+      "activationGate": "deployment/routing/secrets/model/live traffic blocked",
+      "status": "activation_blocked",
+      "defaultOff": true,
+      "trafficAttached": false,
+      "notes": "PR23 documents exact activation blockers for deployment, routing, secrets, model calls, and live traffic only; it does not approve production rollout, selected-bot routing, Kubernetes changes, provider credentials, model calls, or user-visible parity."
+    }
+  ]
+}

@@ -1,0 +1,228 @@
+{
+  "schemaVersion": "tsParityReplayFixture.v1",
+  "fixtureId": "ts_parity_fixture_0001",
+  "sourceRuntime": "typescript-core-agent",
+  "recordingMode": "local_diagnostic_fixture",
+  "redactionStatus": "verified",
+  "localDiagnostic": true,
+  "attachmentFlags": {
+    "adkRunnerInvoked": false,
+    "liveToolDispatched": false,
+    "shellOrCodeExecuted": false,
+    "memoryProviderCalled": false,
+    "agentMemoryImported": false,
+    "hipocampusQmdLiveCalled": false,
+    "productionStorageWritten": false,
+    "routeOrApiAttached": false,
+    "telegramAttached": false,
+    "canaryTrafficAttached": false,
+    "evidenceBlockEnabled": false
+  },
+  "transcriptEntries": [
+    {
+      "kind": "turn_started",
+      "ts": 1,
+      "turnId": "turn-ts-parity-1",
+      "declaredRoute": "direct"
+    },
+    {
+      "kind": "user_message",
+      "ts": 2,
+      "turnId": "turn-ts-parity-1",
+      "text": "Please inspect the redacted source."
+    },
+    {
+      "kind": "tool_call",
+      "ts": 3,
+      "turnId": "turn-ts-parity-1",
+      "toolUseId": "toolu_read_1",
+      "name": "WebFetch",
+      "input": {
+        "url": "https://example.test/redacted"
+      }
+    },
+    {
+      "kind": "tool_result",
+      "ts": 4,
+      "turnId": "turn-ts-parity-1",
+      "toolUseId": "toolu_read_1",
+      "status": "ok",
+      "output": "Fetched redacted source.",
+      "isError": false,
+      "metadata": {
+        "sourceId": "src_1",
+        "sourceAuthority": "current_turn_over_memory",
+        "memoryRecallClaimed": false,
+        "memoryWriteClaimed": false
+      }
+    },
+    {
+      "kind": "assistant_text",
+      "ts": 5,
+      "turnId": "turn-ts-parity-1",
+      "text": "The redacted source was inspected."
+    },
+    {
+      "kind": "turn_committed",
+      "ts": 6,
+      "turnId": "turn-ts-parity-1",
+      "inputTokens": 12,
+      "outputTokens": 8
+    },
+    {
+      "kind": "compaction_boundary",
+      "ts": 7,
+      "turnId": "turn-ts-parity-1",
+      "boundaryId": "compact-1",
+      "beforeTokenCount": 12000,
+      "afterTokenCount": 1200,
+      "summaryHash": "sha256:redacted-summary",
+      "summaryText": "Redacted compacted summary.",
+      "createdAt": 7
+    },
+    {
+      "kind": "control_event",
+      "ts": 8,
+      "turnId": "turn-ts-parity-1",
+      "seq": 1,
+      "eventId": "ctrl-created-1",
+      "eventType": "control_request_created"
+    },
+    {
+      "kind": "control_event",
+      "ts": 9,
+      "turnId": "turn-ts-parity-1",
+      "seq": 2,
+      "eventId": "ctrl-resolved-1",
+      "eventType": "control_request_resolved"
+    }
+  ],
+  "agentEvents": [
+    {
+      "type": "turn_start",
+      "eventId": "evt-turn-start",
+      "turnId": "turn-ts-parity-1",
+      "transcriptRefs": [
+        "turn-ts-parity-1"
+      ],
+      "declaredRoute": "direct"
+    },
+    {
+      "type": "tool_start",
+      "eventId": "evt-tool-start",
+      "id": "toolu_read_1",
+      "name": "WebFetch",
+      "input_preview": "{\"authorization\":\"Bearer unsafe-token\",\"url\":\"https://example.test/redacted\"}",
+      "transcriptRefs": [
+        "toolu_read_1"
+      ]
+    },
+    {
+      "type": "tool_end",
+      "eventId": "evt-tool-end",
+      "id": "toolu_read_1",
+      "status": "ok",
+      "output_preview": "{\"api_key\":\"sk-unsafe-secret\",\"sourceId\":\"src_1\"}",
+      "durationMs": 23,
+      "transcriptRefs": [
+        "toolu_read_1"
+      ]
+    },
+    {
+      "type": "control_event",
+      "eventId": "evt-control-created",
+      "seq": 1,
+      "controlEventId": "ctrl-created-1",
+      "transcriptRefs": [
+        "ctrl-created-1"
+      ]
+    },
+    {
+      "type": "compaction_boundary",
+      "eventId": "evt-compaction",
+      "boundaryId": "compact-1",
+      "transcriptRefs": [
+        "compact-1"
+      ]
+    }
+  ],
+  "controlEvents": [
+    {
+      "v": 1,
+      "type": "control_request_created",
+      "eventId": "ctrl-created-1",
+      "seq": 1,
+      "ts": 8,
+      "sessionKey": "redacted-session",
+      "turnId": "turn-ts-parity-1",
+      "idempotencyKey": "idem-ctrl-1",
+      "request": {
+        "requestId": "req-1",
+        "kind": "tool_permission",
+        "state": "pending",
+        "sessionKey": "redacted-session",
+        "turnId": "turn-ts-parity-1",
+        "channelName": "local_replay",
+        "source": "turn",
+        "prompt": "Allow read-only tool?",
+        "proposedInput": {
+          "tool": "WebFetch"
+        },
+        "createdAt": 8,
+        "expiresAt": 68
+      }
+    },
+    {
+      "v": 1,
+      "type": "control_request_resolved",
+      "eventId": "ctrl-resolved-1",
+      "seq": 2,
+      "ts": 9,
+      "sessionKey": "redacted-session",
+      "turnId": "turn-ts-parity-1",
+      "requestId": "req-1",
+      "decision": "approved"
+    }
+  ],
+  "memoryFences": [
+    {
+      "fenceId": "memory-normal",
+      "memoryMode": "normal",
+      "sourceAuthority": "current_turn_over_memory",
+      "recallClaimed": false,
+      "writeClaimed": false,
+      "providerCallMade": false
+    },
+    {
+      "fenceId": "memory-read-only",
+      "memoryMode": "read_only",
+      "sourceAuthority": "current_turn_over_memory",
+      "recallClaimed": false,
+      "writeClaimed": false,
+      "providerCallMade": false
+    },
+    {
+      "fenceId": "memory-incognito",
+      "memoryMode": "incognito",
+      "sourceAuthority": "memory_disabled",
+      "recallClaimed": false,
+      "writeClaimed": false,
+      "providerCallMade": false
+    }
+  ],
+  "compactionBoundaries": [
+    {
+      "boundaryId": "compact-1",
+      "transcriptTurnId": "turn-ts-parity-1",
+      "transcriptKind": "compaction_boundary",
+      "summaryHash": "sha256:redacted-summary"
+    }
+  ],
+  "sourceAuthority": {
+    "policy": "current_turn_over_memory",
+    "sourceIds": [
+      "src_1"
+    ],
+    "memoryMayOverrideCurrentTurn": false
+  }
+}

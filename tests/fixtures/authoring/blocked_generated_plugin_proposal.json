@@ -1,0 +1,46 @@
+{
+  "draftId": "draft.generated-plugin.001",
+  "botId": "bot_generated_plugin_001",
+  "ownerId": "owner_generated_plugin_001",
+  "authoringSessionId": "builder.session.generated-plugin",
+  "status": "blocked",
+  "activationEnabled": false,
+  "activationEligibility": false,
+  "saveTarget": "current_bot_draft_store",
+  "pack": {
+    "packId": "draft.pack.generated-plugin",
+    "title": "Generated connector proposal",
+    "summary": "Authoring-only draft holding a non-executable generated plugin proposal for later sandbox review.",
+    "recipeRefs": ["recipe.authoring.connector-gap"],
+    "harnessPolicy": {},
+    "toolPolicy": {
+      "allowedConnectorRefs": [],
+      "allowedToolRefs": [],
+      "deniedToolRefs": ["PluginExecute", "FileWrite", "BrowserLive"]
+    },
+    "evidencePolicy": {
+      "requiredEvidenceRefs": ["humanReviewReceipt", "sandboxPlan"]
+    },
+    "validatorPolicy": {
+      "validatorRefs": ["validator:proposalNonExecutable@1"]
+    },
+    "approvalPolicy": {
+      "requiresHumanReview": true
+    },
+    "projectionPolicy": {},
+    "repairPolicy": {
+      "maxRepairAttempts": 0
+    }
+  },
+  "generatedPluginProposals": [
+    {
+      "proposalId": "proposal.generated.crm-readonly",
+      "status": "blocked",
+      "name": "CRM readonly connector proposal",
+      "reason": "Missing approved connector capability. Generated material is retained only as review metadata.",
+      "executable": false,
+      "runtimeEntrypoint": null,
+      "reviewRequired": true
+    }
+  ]
+}

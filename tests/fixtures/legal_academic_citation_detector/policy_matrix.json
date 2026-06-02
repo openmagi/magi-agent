@@ -1,0 +1,175 @@
+{
+  "schemaVersion": "legalAcademicCitationDetectorFixture.v1",
+  "fixtureId": "legal_academic_citation_detector_matrix_0001",
+  "sourceRuntime": "typescript-core-agent",
+  "targetRuntime": "python-adk-future",
+  "recordingMode": "local_diagnostic_fixture",
+  "redactionStatus": "verified",
+  "localDiagnostic": true,
+  "metadataOnly": true,
+  "attachmentFlags": {
+    "webSearchExecuted": false,
+    "sourceFetched": false,
+    "browserExecuted": false,
+    "toolHostDispatched": false,
+    "evaluationAttached": false,
+    "promptGateAttached": false,
+    "evidenceBlockEnabled": false
+  },
+  "cases": [
+    {
+      "caseId": "kr_case_number_detects_legal",
+      "category": "kr_case_number",
+      "inputText": "사건번호 2024다12345는 손해배상 책임 범위를 다룹니다.",
+      "promptText": "이 문장을 사용자에게 그대로 보여주지 마세요. kr case number detector prompt fixture.",
+      "classification": "legal",
+      "expectedSignals": ["kr_case_number"],
+      "requiredSourceFamilies": ["korean_court"],
+      "metadata": {
+        "recordedOnly": true,
+        "futureSourceFamily": "Korean court"
+      },
+      "attachmentFlags": {
+        "webSearchExecuted": false,
+        "sourceFetched": false,
+        "browserExecuted": false,
+        "toolHostDispatched": false,
+        "evaluationAttached": false,
+        "promptGateAttached": false,
+        "evidenceBlockEnabled": false
+      }
+    },
+    {
+      "caseId": "kr_legal_cue_detects_legal",
+      "category": "kr_legal_cue",
+      "inputText": "헌법재판소 결정 취지를 비교해 주세요.",
+      "promptText": "이 문장을 사용자에게 그대로 보여주지 마세요. Korean legal cue detector prompt fixture.",
+      "classification": "legal",
+      "expectedSignals": ["kr_legal_cue"],
+      "requiredSourceFamilies": ["korean_court"],
+      "metadata": {
+        "recordedOnly": true,
+        "futureSourceFamily": "Korean court"
+      },
+      "attachmentFlags": {
+        "webSearchExecuted": false,
+        "sourceFetched": false,
+        "browserExecuted": false,
+        "toolHostDispatched": false,
+        "evaluationAttached": false,
+        "promptGateAttached": false,
+        "evidenceBlockEnabled": false
+      }
+    },
+    {
+      "caseId": "statute_article_detects_legal",
+      "category": "statute_article",
+      "inputText": "민법 제750조의 요건을 설명해 주세요.",
+      "promptText": "이 문장을 사용자에게 그대로 보여주지 마세요. statute article detector prompt fixture.",
+      "classification": "legal",
+      "expectedSignals": ["statute_article"],
+      "requiredSourceFamilies": ["korean_statute"],
+      "metadata": {
+        "recordedOnly": true,
+        "futureSourceFamily": "Korean statute"
+      },
+      "attachmentFlags": {
+        "webSearchExecuted": false,
+        "sourceFetched": false,
+        "browserExecuted": false,
+        "toolHostDispatched": false,
+        "evaluationAttached": false,
+        "promptGateAttached": false,
+        "evidenceBlockEnabled": false
+      }
+    },
+    {
+      "caseId": "doi_detects_academic",
+      "category": "doi",
+      "inputText": "This article cites DOI 10.1145/3544548.3580708 for the method.",
+      "promptText": "이 문장을 사용자에게 그대로 보여주지 마세요. DOI detector prompt fixture.",
+      "classification": "academic",
+      "expectedSignals": ["doi"],
+      "requiredSourceFamilies": ["doi"],
+      "metadata": {
+        "recordedOnly": true,
+        "futureSourceFamily": "DOI"
+      },
+      "attachmentFlags": {
+        "webSearchExecuted": false,
+        "sourceFetched": false,
+        "browserExecuted": false,
+        "toolHostDispatched": false,
+        "evaluationAttached": false,
+        "promptGateAttached": false,
+        "evidenceBlockEnabled": false
+      }
+    },
+    {
+      "caseId": "arxiv_detects_academic",
+      "category": "arxiv",
+      "inputText": "Summarize arXiv:2401.01234v2 without fetching it.",
+      "promptText": "이 문장을 사용자에게 그대로 보여주지 마세요. arXiv detector prompt fixture.",
+      "classification": "academic",
+      "expectedSignals": ["arxiv"],
+      "requiredSourceFamilies": ["arxiv"],
+      "metadata": {
+        "recordedOnly": true,
+        "futureSourceFamily": "arXiv"
+      },
+      "attachmentFlags": {
+        "webSearchExecuted": false,
+        "sourceFetched": false,
+        "browserExecuted": false,
+        "toolHostDispatched": false,
+        "evaluationAttached": false,
+        "promptGateAttached": false,
+        "evidenceBlockEnabled": false
+      }
+    },
+    {
+      "caseId": "kr_case_and_doi_detects_mixed",
+      "category": "mixed",
+      "inputText": "사건번호 2023다45678과 DOI 10.1038/s41586-020-2649-2를 함께 비교합니다.",
+      "promptText": "이 문장을 사용자에게 그대로 보여주지 마세요. mixed detector prompt fixture.",
+      "classification": "mixed",
+      "expectedSignals": ["kr_case_number", "doi"],
+      "requiredSourceFamilies": ["korean_court", "doi"],
+      "metadata": {
+        "recordedOnly": true,
+        "futureSourceFamilies": ["Korean court", "DOI"]
+      },
+      "attachmentFlags": {
+        "webSearchExecuted": false,
+        "sourceFetched": false,
+        "browserExecuted": false,
+        "toolHostDispatched": false,
+        "evaluationAttached": false,
+        "promptGateAttached": false,
+        "evidenceBlockEnabled": false
+      }
+    },
+    {
+      "caseId": "plain_text_detects_none",
+      "category": "none",
+      "inputText": "Summarize this general planning note with no formal source marker.",
+      "promptText": "이 문장을 사용자에게 그대로 보여주지 마세요. none detector prompt fixture.",
+      "classification": "none",
+      "expectedSignals": [],
+      "requiredSourceFamilies": [],
+      "metadata": {
+        "recordedOnly": true,
+        "futureSourceFamilies": []
+      },
+      "attachmentFlags": {
+        "webSearchExecuted": false,
+        "sourceFetched": false,
+        "browserExecuted": false,
+        "toolHostDispatched": false,
+        "evaluationAttached": false,
+        "promptGateAttached": false,
+        "evidenceBlockEnabled": false
+      }
+    }
+  ]
+}

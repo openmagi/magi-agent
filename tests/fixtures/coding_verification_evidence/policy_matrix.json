@@ -1,0 +1,1743 @@
+{
+  "schemaVersion": "codingVerificationEvidenceFixture.v1",
+  "fixtureId": "coding_verification_evidence_matrix_0001",
+  "sourceRuntime": "typescript-core-agent",
+  "recordingMode": "local_diagnostic_fixture",
+  "redactionStatus": "verified",
+  "localDiagnostic": true,
+  "attachmentFlags": {
+    "adkRunnerInvoked": false,
+    "liveToolDispatched": false,
+    "shellOrCodeExecuted": false,
+    "gitExecuted": false,
+    "testExecuted": false,
+    "fileMutated": false,
+    "patchApplied": false,
+    "workspaceWritten": false,
+    "memoryProviderCalled": false,
+    "agentMemoryImported": false,
+    "hipocampusQmdLiveCalled": false,
+    "productionStorageWritten": false,
+    "productionAuthority": false,
+    "routeOrApiAttached": false,
+    "telegramAttached": false,
+    "canaryTrafficAttached": false,
+    "evidenceBlockEnabled": false
+  },
+  "cases": [
+    {
+      "caseId": "post_edit_gitdiff_and_testrun_pass",
+      "category": "post_edit_verification_pass",
+      "agentRole": "coding",
+      "runOn": "main",
+      "spawnDepth": 0,
+      "turnId": "turn-code-1",
+      "lastCodeMutationAt": 10,
+      "completionClaim": "implemented and tests pass",
+      "authority": "block_ready_policy",
+      "publicPreview": "GitDiff captured src/app.ts; TestRun pytest exited 0",
+      "expectedOk": true,
+      "expectedVerdictState": "pass",
+      "expectedMissingTypes": [],
+      "expectedMatchedTypes": ["GitDiff", "TestRun"],
+      "expectedFailureCodes": [],
+      "contract": {
+        "id": "coding.post_edit_verification",
+        "description": "Require GitDiff and successful TestRun after last code mutation.",
+        "triggers": ["beforeCommit"],
+        "when": {
+          "lastCodeMutation": 10,
+          "taskType": "coding"
+        },
+        "requirements": [
+          {
+            "type": "GitDiff",
+            "after": "last_code_mutation",
+            "fields": {
+              "changedFiles": {
+                "equals": ["src/app.ts"]
+              }
+            }
+          },
+          {
+            "type": "TestRun",
+            "after": "last_code_mutation",
+            "commandPattern": "pytest",
+            "exitCode": 0,
+            "fields": {
+              "passed": {
+                "equals": true
+              }
+            }
+          }
+        ],
+        "onMissing": "block_final_answer",
+        "retryMessage": "Run GitDiff and TestRun after the last code edit before claiming completion.",
+        "trafficAttached": false,
+        "executionAttached": false
+      },
+      "records": [
+        {
+          "type": "GitDiff",
+          "status": "ok",
+          "observedAt": 20,
+          "source": {
+            "kind": "tool_trace",
+            "toolName": "GitDiff",
+            "toolCallId": "tool-gitdiff-1",
+            "transcriptEntryId": "tr-gitdiff-1",
+            "metadata": {
+              "recordedOnly": true
+            }
+          },
+          "fields": {
+            "changedFiles": ["src/app.ts"],
+            "fileCount": 1,
+            "statOnly": true
+          },
+          "preview": "GitDiff changed files: src/app.ts",
+          "metadata": {
+            "lastCodeMutation": 10,
+            "publicSafeFields": ["changedFiles", "fileCount", "statOnly"]
+          }
+        },
+        {
+          "type": "TestRun",
+          "status": "ok",
+          "observedAt": 30,
+          "source": {
+            "kind": "tool_trace",
+            "toolName": "TestRun",
+            "toolCallId": "tool-testrun-1",
+            "transcriptEntryId": "tr-testrun-1",
+            "metadata": {
+              "recordedOnly": true
+            }
+          },
+          "fields": {
+            "command": "pytest",
+            "exitCode": 0,
+            "passed": true,
+            "durationMs": 1200
+          },
+          "preview": "TestRun pytest exit 0",
+          "metadata": {
+            "lastCodeMutation": 10,
+            "publicSafeFields": ["command", "exitCode", "passed", "durationMs"]
+          }
+        }
+      ],
+      "attachmentFlags": {
+        "adkRunnerInvoked": false,
+        "liveToolDispatched": false,
+        "shellOrCodeExecuted": false,
+        "gitExecuted": false,
+        "testExecuted": false,
+        "fileMutated": false,
+        "patchApplied": false,
+        "workspaceWritten": false,
+        "memoryProviderCalled": false,
+        "agentMemoryImported": false,
+        "hipocampusQmdLiveCalled": false,
+        "productionStorageWritten": false,
+        "productionAuthority": false,
+        "routeOrApiAttached": false,
+        "telegramAttached": false,
+        "canaryTrafficAttached": false,
+        "evidenceBlockEnabled": false
+      }
+    },
+    {
+      "caseId": "post_edit_gitdiff_and_diagnostics_pass",
+      "category": "diagnostics_verification_pass",
+      "agentRole": "coding",
+      "runOn": "main",
+      "spawnDepth": 0,
+      "turnId": "turn-code-diagnostics-1",
+      "lastCodeMutationAt": 10,
+      "completionClaim": "implemented and TypeScript diagnostics are clean",
+      "authority": "block_ready_policy",
+      "publicPreview": "GitDiff captured src/app.ts; CodeDiagnostics typescript reported zero diagnostics",
+      "expectedOk": true,
+      "expectedVerdictState": "pass",
+      "expectedMissingTypes": [],
+      "expectedMatchedTypes": ["GitDiff", "CodeDiagnostics"],
+      "expectedFailureCodes": [],
+      "contract": {
+        "id": "coding.diagnostics_verification_pass",
+        "description": "Allow GitDiff and successful CodeDiagnostics metadata after last code mutation.",
+        "triggers": ["beforeCommit"],
+        "when": {
+          "lastCodeMutation": 10,
+          "taskType": "coding"
+        },
+        "requirements": [
+          {
+            "type": "GitDiff",
+            "after": "last_code_mutation",
+            "fields": {
+              "changedFiles": {
+                "equals": ["src/app.ts"]
+              }
+            }
+          },
+          {
+            "type": "CodeDiagnostics",
+            "after": "last_code_mutation",
+            "fields": {
+              "checker": {
+                "oneOf": ["typescript", "python", "go"]
+              },
+              "passed": {
+                "equals": true
+              },
+              "exitCode": {
+                "equals": 0
+              },
+              "diagnosticCount": {
+                "equals": 0
+              }
+            }
+          }
+        ],
+        "onMissing": "block_final_answer",
+        "retryMessage": "Record GitDiff and CodeDiagnostics metadata after the last code edit before claiming diagnostics verification.",
+        "trafficAttached": false,
+        "executionAttached": false
+      },
+      "records": [
+        {
+          "type": "GitDiff",
+          "status": "ok",
+          "observedAt": 20,
+          "source": {
+            "kind": "tool_trace",
+            "toolName": "GitDiff",
+            "toolCallId": "tool-gitdiff-diagnostics-1",
+            "transcriptEntryId": "tr-gitdiff-diagnostics-1",
+            "metadata": {
+              "recordedOnly": true
+            }
+          },
+          "fields": {
+            "changedFiles": ["src/app.ts"],
+            "fileCount": 1,
+            "statOnly": true
+          },
+          "preview": "GitDiff changed files: src/app.ts",
+          "metadata": {
+            "lastCodeMutation": 10,
+            "publicSafeFields": ["changedFiles", "fileCount", "statOnly"]
+          }
+        },
+        {
+          "type": "CodeDiagnostics",
+          "status": "ok",
+          "observedAt": 30,
+          "source": {
+            "kind": "tool_trace",
+            "toolName": "CodeDiagnostics",
+            "toolCallId": "tool-code-diagnostics-1",
+            "transcriptEntryId": "tr-code-diagnostics-1",
+            "metadata": {
+              "recordedOnly": true,
+              "evidenceKind": "diagnostics",
+              "action": "diagnostics"
+            }
+          },
+          "fields": {
+            "checker": "typescript",
+            "exitCode": 0,
+            "passed": true,
+            "diagnosticCount": 0
+          },
+          "preview": "CodeDiagnostics typescript exit 0; diagnosticCount 0",
+          "metadata": {
+            "lastCodeMutation": 10,
+            "publicSafeFields": ["checker", "exitCode", "passed", "diagnosticCount"]
+          }
+        }
+      ],
+      "attachmentFlags": {
+        "adkRunnerInvoked": false,
+        "liveToolDispatched": false,
+        "shellOrCodeExecuted": false,
+        "gitExecuted": false,
+        "testExecuted": false,
+        "fileMutated": false,
+        "patchApplied": false,
+        "workspaceWritten": false,
+        "memoryProviderCalled": false,
+        "agentMemoryImported": false,
+        "hipocampusQmdLiveCalled": false,
+        "productionStorageWritten": false,
+        "productionAuthority": false,
+        "routeOrApiAttached": false,
+        "telegramAttached": false,
+        "canaryTrafficAttached": false,
+        "evidenceBlockEnabled": false
+      }
+    },
+    {
+      "caseId": "missing_gitdiff_blocks_coding_claim",
+      "category": "missing_gitdiff",
+      "agentRole": "coding",
+      "runOn": "main",
+      "spawnDepth": 0,
+      "turnId": "turn-code-2",
+      "lastCodeMutationAt": 10,
+      "completionClaim": "implemented and tests pass",
+      "authority": "block_ready_policy",
+      "publicPreview": "TestRun exists, but GitDiff evidence is missing",
+      "expectedOk": false,
+      "expectedVerdictState": "block_ready",
+      "expectedMissingTypes": ["GitDiff"],
+      "expectedMatchedTypes": ["TestRun"],
+      "expectedFailureCodes": ["EVIDENCE_CONTRACT_MISSING"],
+      "contract": {
+        "id": "coding.missing_gitdiff",
+        "description": "Require GitDiff and TestRun for coding completion claims.",
+        "triggers": ["beforeCommit"],
+        "when": {
+          "lastCodeMutation": 10,
+          "taskType": "coding"
+        },
+        "requirements": [
+          {
+            "type": "GitDiff",
+            "after": "last_code_mutation"
+          },
+          {
+            "type": "TestRun",
+            "after": "last_code_mutation",
+            "commandPattern": "pytest",
+            "exitCode": 0
+          }
+        ],
+        "onMissing": "block_final_answer",
+        "retryMessage": "Capture GitDiff evidence after the last code edit.",
+        "trafficAttached": false,
+        "executionAttached": false
+      },
+      "records": [
+        {
+          "type": "TestRun",
+          "status": "ok",
+          "observedAt": 25,
+          "source": {
+            "kind": "tool_trace",
+            "toolName": "TestRun",
+            "toolCallId": "tool-testrun-2",
+            "transcriptEntryId": "tr-testrun-2",
+            "metadata": {
+              "recordedOnly": true
+            }
+          },
+          "fields": {
+            "command": "pytest",
+            "exitCode": 0,
+            "passed": true
+          },
+          "preview": "TestRun pytest exit 0",
+          "metadata": {
+            "lastCodeMutation": 10,
+            "publicSafeFields": ["command", "exitCode", "passed"]
+          }
+        }
+      ],
+      "attachmentFlags": {
+        "adkRunnerInvoked": false,
+        "liveToolDispatched": false,
+        "shellOrCodeExecuted": false,
+        "gitExecuted": false,
+        "testExecuted": false,
+        "fileMutated": false,
+        "patchApplied": false,
+        "workspaceWritten": false,
+        "memoryProviderCalled": false,
+        "agentMemoryImported": false,
+        "hipocampusQmdLiveCalled": false,
+        "productionStorageWritten": false,
+        "productionAuthority": false,
+        "routeOrApiAttached": false,
+        "telegramAttached": false,
+        "canaryTrafficAttached": false,
+        "evidenceBlockEnabled": false
+      }
+    },
+    {
+      "caseId": "failed_testrun_blocks_completion_claim",
+      "category": "failed_testrun",
+      "agentRole": "coding",
+      "runOn": "main",
+      "spawnDepth": 0,
+      "turnId": "turn-code-3",
+      "lastCodeMutationAt": 10,
+      "completionClaim": "fixed and verified",
+      "authority": "block_ready_policy",
+      "publicPreview": "GitDiff exists, but TestRun pytest failed",
+      "expectedOk": false,
+      "expectedVerdictState": "block_ready",
+      "expectedMissingTypes": [],
+      "expectedMatchedTypes": ["GitDiff"],
+      "expectedFailureCodes": ["EVIDENCE_CONTRACT_FIELD_MISMATCH"],
+      "contract": {
+        "id": "coding.failed_testrun",
+        "triggers": ["beforeCommit"],
+        "when": {
+          "lastCodeMutation": 10
+        },
+        "requirements": [
+          {
+            "type": "GitDiff",
+            "after": "last_code_mutation"
+          },
+          {
+            "type": "TestRun",
+            "after": "last_code_mutation",
+            "commandPattern": "pytest",
+            "exitCode": 0,
+            "fields": {
+              "passed": {
+                "equals": true
+              }
+            }
+          }
+        ],
+        "onMissing": "block_final_answer",
+        "trafficAttached": false,
+        "executionAttached": false
+      },
+      "records": [
+        {
+          "type": "GitDiff",
+          "status": "ok",
+          "observedAt": 20,
+          "source": {
+            "kind": "tool_trace",
+            "toolName": "GitDiff",
+            "toolCallId": "tool-gitdiff-3",
+            "metadata": {
+              "recordedOnly": true
+            }
+          },
+          "fields": {
+            "changedFiles": ["src/app.ts"]
+          },
+          "preview": "GitDiff changed files: src/app.ts",
+          "metadata": {
+            "lastCodeMutation": 10,
+            "publicSafeFields": ["changedFiles"]
+          }
+        },
+        {
+          "type": "TestRun",
+          "status": "failed",
+          "observedAt": 25,
+          "source": {
+            "kind": "tool_trace",
+            "toolName": "TestRun",
+            "toolCallId": "tool-testrun-3",
+            "metadata": {
+              "recordedOnly": true
+            }
+          },
+          "fields": {
+            "command": "pytest",
+            "exitCode": 1,
+            "passed": false
+          },
+          "preview": "TestRun pytest exit 1",
+          "metadata": {
+            "lastCodeMutation": 10,
+            "publicSafeFields": ["command", "exitCode", "passed"]
+          }
+        }
+      ],
+      "attachmentFlags": {
+        "adkRunnerInvoked": false,
+        "liveToolDispatched": false,
+        "shellOrCodeExecuted": false,
+        "gitExecuted": false,
+        "testExecuted": false,
+        "fileMutated": false,
+        "patchApplied": false,
+        "workspaceWritten": false,
+        "memoryProviderCalled": false,
+        "agentMemoryImported": false,
+        "hipocampusQmdLiveCalled": false,
+        "productionStorageWritten": false,
+        "productionAuthority": false,
+        "routeOrApiAttached": false,
+        "telegramAttached": false,
+        "canaryTrafficAttached": false,
+        "evidenceBlockEnabled": false
+      }
+    },
+    {
+      "caseId": "stale_testrun_after_last_edit_blocks",
+      "category": "stale_verification",
+      "agentRole": "coding",
+      "runOn": "main",
+      "spawnDepth": 0,
+      "turnId": "turn-code-4",
+      "lastCodeMutationAt": 40,
+      "completionClaim": "updated after tests and done",
+      "authority": "block_ready_policy",
+      "publicPreview": "TestRun was recorded before the last code edit",
+      "expectedOk": false,
+      "expectedVerdictState": "block_ready",
+      "expectedMissingTypes": [],
+      "expectedMatchedTypes": ["GitDiff"],
+      "expectedFailureCodes": ["EVIDENCE_CONTRACT_STALE"],
+      "contract": {
+        "id": "coding.stale_testrun",
+        "triggers": ["beforeCommit"],
+        "when": {
+          "lastCodeMutation": 40
+        },
+        "requirements": [
+          {
+            "type": "GitDiff",
+            "after": "last_code_mutation"
+          },
+          {
+            "type": "TestRun",
+            "after": "last_code_mutation",
+            "commandPattern": "pytest",
+            "exitCode": 0
+          }
+        ],
+        "onMissing": "block_final_answer",
+        "trafficAttached": false,
+        "executionAttached": false
+      },
+      "records": [
+        {
+          "type": "TestRun",
+          "status": "ok",
+          "observedAt": 30,
+          "source": {
+            "kind": "tool_trace",
+            "toolName": "TestRun",
+            "toolCallId": "tool-testrun-4",
+            "metadata": {
+              "recordedOnly": true
+            }
+          },
+          "fields": {
+            "command": "pytest",
+            "exitCode": 0,
+            "passed": true
+          },
+          "preview": "TestRun pytest exit 0 before final edit",
+          "metadata": {
+            "lastCodeMutation": 40,
+            "publicSafeFields": ["command", "exitCode", "passed"]
+          }
+        },
+        {
+          "type": "GitDiff",
+          "status": "ok",
+          "observedAt": 50,
+          "source": {
+            "kind": "tool_trace",
+            "toolName": "GitDiff",
+            "toolCallId": "tool-gitdiff-4",
+            "metadata": {
+              "recordedOnly": true
+            }
+          },
+          "fields": {
+            "changedFiles": ["src/app.ts"]
+          },
+          "preview": "GitDiff changed files after final edit",
+          "metadata": {
+            "lastCodeMutation": 40,
+            "publicSafeFields": ["changedFiles"]
+          }
+        }
+      ],
+      "attachmentFlags": {
+        "adkRunnerInvoked": false,
+        "liveToolDispatched": false,
+        "shellOrCodeExecuted": false,
+        "gitExecuted": false,
+        "testExecuted": false,
+        "fileMutated": false,
+        "patchApplied": false,
+        "workspaceWritten": false,
+        "memoryProviderCalled": false,
+        "agentMemoryImported": false,
+        "hipocampusQmdLiveCalled": false,
+        "productionStorageWritten": false,
+        "productionAuthority": false,
+        "routeOrApiAttached": false,
+        "telegramAttached": false,
+        "canaryTrafficAttached": false,
+        "evidenceBlockEnabled": false
+      }
+    },
+    {
+      "caseId": "audit_only_unverified_claim_does_not_block",
+      "category": "audit_only_unverified_claim",
+      "agentRole": "coding",
+      "runOn": "main",
+      "spawnDepth": 0,
+      "turnId": "turn-code-5",
+      "lastCodeMutationAt": 10,
+      "completionClaim": "implemented but verification not run",
+      "authority": "audit_only_no_block",
+      "publicPreview": "Audit-only coding claim records missing TestRun without blocking",
+      "expectedOk": false,
+      "expectedVerdictState": "missing",
+      "expectedMissingTypes": ["TestRun"],
+      "expectedMatchedTypes": ["GitDiff"],
+      "expectedFailureCodes": ["EVIDENCE_CONTRACT_MISSING"],
+      "contract": {
+        "id": "coding.audit_only_completion_evidence",
+        "triggers": ["beforeCommit"],
+        "when": {
+          "lastCodeMutation": 10
+        },
+        "requirements": [
+          {
+            "type": "GitDiff",
+            "after": "last_code_mutation"
+          },
+          {
+            "type": "TestRun",
+            "after": "last_code_mutation",
+            "commandPattern": "pytest",
+            "exitCode": 0
+          }
+        ],
+        "onMissing": "audit",
+        "trafficAttached": false,
+        "executionAttached": false
+      },
+      "records": [
+        {
+          "type": "GitDiff",
+          "status": "ok",
+          "observedAt": 20,
+          "source": {
+            "kind": "tool_trace",
+            "toolName": "GitDiff",
+            "toolCallId": "tool-gitdiff-5",
+            "metadata": {
+              "recordedOnly": true
+            }
+          },
+          "fields": {
+            "changedFiles": ["src/app.ts"]
+          },
+          "preview": "GitDiff changed files: src/app.ts",
+          "metadata": {
+            "lastCodeMutation": 10,
+            "publicSafeFields": ["changedFiles"]
+          }
+        }
+      ],
+      "attachmentFlags": {
+        "adkRunnerInvoked": false,
+        "liveToolDispatched": false,
+        "shellOrCodeExecuted": false,
+        "gitExecuted": false,
+        "testExecuted": false,
+        "fileMutated": false,
+        "patchApplied": false,
+        "workspaceWritten": false,
+        "memoryProviderCalled": false,
+        "agentMemoryImported": false,
+        "hipocampusQmdLiveCalled": false,
+        "productionStorageWritten": false,
+        "productionAuthority": false,
+        "routeOrApiAttached": false,
+        "telegramAttached": false,
+        "canaryTrafficAttached": false,
+        "evidenceBlockEnabled": false
+      }
+    },
+    {
+      "caseId": "child_coding_evidence_scoped_child",
+      "category": "child_scoped_verification",
+      "agentRole": "coding",
+      "runOn": "child",
+      "spawnDepth": 1,
+      "turnId": "turn-code-child-1",
+      "lastCodeMutationAt": 10,
+      "completionClaim": "child changed files and verified",
+      "authority": "child_local_evidence_only",
+      "publicPreview": "Child-local GitDiff and TestRun metadata are scoped to child",
+      "expectedOk": true,
+      "expectedVerdictState": "pass",
+      "expectedMissingTypes": [],
+      "expectedMatchedTypes": ["GitDiff", "TestRun"],
+      "expectedFailureCodes": [],
+      "contract": {
+        "id": "coding.child_local_verification",
+        "triggers": ["beforeCommit"],
+        "when": {
+          "lastCodeMutation": 10,
+          "executionBoundary": "child"
+        },
+        "requirements": [
+          {
+            "type": "GitDiff",
+            "after": "last_code_mutation"
+          },
+          {
+            "type": "TestRun",
+            "after": "last_code_mutation",
+            "commandPattern": "pytest",
+            "exitCode": 0
+          }
+        ],
+        "onMissing": "block_final_answer",
+        "trafficAttached": false,
+        "executionAttached": false
+      },
+      "records": [
+        {
+          "type": "GitDiff",
+          "status": "ok",
+          "observedAt": 20,
+          "source": {
+            "kind": "transcript",
+            "toolName": "GitDiff",
+            "toolCallId": "child-tool-gitdiff-1",
+            "transcriptEntryId": "child-tr-gitdiff-1",
+            "metadata": {
+              "executionBoundary": "child",
+              "recordedOnly": true
+            }
+          },
+          "fields": {
+            "changedFiles": ["src/child.ts"]
+          },
+          "preview": "Child GitDiff changed files: src/child.ts",
+          "metadata": {
+            "lastCodeMutation": 10,
+            "publicSafeFields": ["changedFiles"]
+          }
+        },
+        {
+          "type": "TestRun",
+          "status": "ok",
+          "observedAt": 30,
+          "source": {
+            "kind": "transcript",
+            "toolName": "TestRun",
+            "toolCallId": "child-tool-testrun-1",
+            "transcriptEntryId": "child-tr-testrun-1",
+            "metadata": {
+              "executionBoundary": "child",
+              "recordedOnly": true
+            }
+          },
+          "fields": {
+            "command": "pytest",
+            "exitCode": 0,
+            "passed": true
+          },
+          "preview": "Child TestRun pytest exit 0",
+          "metadata": {
+            "lastCodeMutation": 10,
+            "publicSafeFields": ["command", "exitCode", "passed"]
+          }
+        }
+      ],
+      "attachmentFlags": {
+        "adkRunnerInvoked": false,
+        "liveToolDispatched": false,
+        "shellOrCodeExecuted": false,
+        "gitExecuted": false,
+        "testExecuted": false,
+        "fileMutated": false,
+        "patchApplied": false,
+        "workspaceWritten": false,
+        "memoryProviderCalled": false,
+        "agentMemoryImported": false,
+        "hipocampusQmdLiveCalled": false,
+        "productionStorageWritten": false,
+        "productionAuthority": false,
+        "routeOrApiAttached": false,
+        "telegramAttached": false,
+        "canaryTrafficAttached": false,
+        "evidenceBlockEnabled": false
+      }
+    },
+    {
+      "caseId": "stale_reviewer_before_latest_child_mutation_blocks",
+      "category": "coding_child_review_freshness",
+      "agentRole": "coding",
+      "runOn": "main",
+      "spawnDepth": 0,
+      "turnId": "turn-code-review-1",
+      "lastCodeMutationAt": 40,
+      "completionClaim": "coding child changes implemented and verified",
+      "authority": "block_ready_policy",
+      "publicPreview": "Reviewer SpawnAgent metadata is older than the latest child mutation",
+      "expectedOk": false,
+      "expectedVerdictState": "block_ready",
+      "expectedMissingTypes": [],
+      "expectedMatchedTypes": ["GitDiff", "TestRun"],
+      "expectedFailureCodes": ["EVIDENCE_CONTRACT_STALE"],
+      "contract": {
+        "id": "coding.child_review_freshness.stale",
+        "description": "Require reviewer child evidence after the latest coding child mutation before completion claims.",
+        "triggers": ["beforeCommit"],
+        "when": {
+          "lastCodeMutation": 40,
+          "taskType": "coding",
+          "latestMutationSource": "coding_child"
+        },
+        "requirements": [
+          {
+            "type": "GitDiff",
+            "after": "last_code_mutation"
+          },
+          {
+            "type": "TestRun",
+            "after": "last_code_mutation",
+            "commandPattern": "pytest",
+            "exitCode": 0
+          },
+          {
+            "type": "custom:CodingChildReview",
+            "after": "last_code_mutation",
+            "fields": {
+              "reviewerPersona": {
+                "equals": "reviewer"
+              },
+              "reviewedMutationAt": {
+                "equals": 40
+              },
+              "toolCallCount": {
+                "equals": 1
+              }
+            }
+          }
+        ],
+        "onMissing": "block_final_answer",
+        "retryMessage": "Record reviewer child evidence after the latest coding child mutation before claiming completion.",
+        "trafficAttached": false,
+        "executionAttached": false
+      },
+      "records": [
+        {
+          "type": "GitDiff",
+          "status": "ok",
+          "observedAt": 50,
+          "source": {
+            "kind": "tool_trace",
+            "toolName": "GitDiff",
+            "toolCallId": "tool-gitdiff-review-stale",
+            "metadata": {
+              "recordedOnly": true
+            }
+          },
+          "fields": {
+            "changedFiles": ["src/app.ts"]
+          },
+          "preview": "GitDiff changed files: src/app.ts",
+          "metadata": {
+            "lastCodeMutation": 40,
+            "publicSafeFields": ["changedFiles"]
+          }
+        },
+        {
+          "type": "TestRun",
+          "status": "ok",
+          "observedAt": 60,
+          "source": {
+            "kind": "tool_trace",
+            "toolName": "TestRun",
+            "toolCallId": "tool-testrun-review-stale",
+            "metadata": {
+              "recordedOnly": true
+            }
+          },
+          "fields": {
+            "command": "pytest",
+            "exitCode": 0,
+            "passed": true
+          },
+          "preview": "TestRun pytest exit 0",
+          "metadata": {
+            "lastCodeMutation": 40,
+            "publicSafeFields": ["command", "exitCode", "passed"]
+          }
+        },
+        {
+          "type": "custom:CodingChildReview",
+          "status": "ok",
+          "observedAt": 30,
+          "source": {
+            "kind": "transcript",
+            "toolName": "SpawnAgent",
+            "toolCallId": "tool-reviewer-stale",
+            "transcriptEntryId": "tr-reviewer-stale",
+            "metadata": {
+              "persona": "reviewer",
+              "recordedOnly": true
+            }
+          },
+          "fields": {
+            "reviewerPersona": "reviewer",
+            "reviewedMutationAt": 40,
+            "toolCallCount": 1,
+            "finalTextPresent": true
+          },
+          "preview": "Reviewer SpawnAgent evidence before latest child mutation",
+          "metadata": {
+            "lastCodeMutation": 40,
+            "publicSafeFields": [
+              "reviewerPersona",
+              "reviewedMutationAt",
+              "toolCallCount",
+              "finalTextPresent"
+            ]
+          }
+        }
+      ],
+      "attachmentFlags": {
+        "adkRunnerInvoked": false,
+        "liveToolDispatched": false,
+        "shellOrCodeExecuted": false,
+        "gitExecuted": false,
+        "testExecuted": false,
+        "fileMutated": false,
+        "patchApplied": false,
+        "workspaceWritten": false,
+        "memoryProviderCalled": false,
+        "agentMemoryImported": false,
+        "hipocampusQmdLiveCalled": false,
+        "productionStorageWritten": false,
+        "productionAuthority": false,
+        "routeOrApiAttached": false,
+        "telegramAttached": false,
+        "canaryTrafficAttached": false,
+        "evidenceBlockEnabled": false
+      }
+    },
+    {
+      "caseId": "equal_reviewer_at_latest_child_mutation_blocks",
+      "category": "coding_child_review_freshness",
+      "agentRole": "coding",
+      "runOn": "main",
+      "spawnDepth": 0,
+      "turnId": "turn-code-review-equal",
+      "lastCodeMutationAt": 40,
+      "completionClaim": "coding child changes implemented and verified",
+      "authority": "block_ready_policy",
+      "publicPreview": "Reviewer SpawnAgent metadata is exactly at the latest child mutation",
+      "expectedOk": false,
+      "expectedVerdictState": "block_ready",
+      "expectedMissingTypes": [],
+      "expectedMatchedTypes": ["GitDiff", "TestRun"],
+      "expectedFailureCodes": ["EVIDENCE_CONTRACT_STALE"],
+      "contract": {
+        "id": "coding.child_review_freshness.equal",
+        "description": "Require reviewer child evidence strictly after the latest coding child mutation before completion claims.",
+        "triggers": ["beforeCommit"],
+        "when": {
+          "lastCodeMutation": 40,
+          "taskType": "coding",
+          "latestMutationSource": "coding_child"
+        },
+        "requirements": [
+          {
+            "type": "GitDiff",
+            "after": "last_code_mutation"
+          },
+          {
+            "type": "TestRun",
+            "after": "last_code_mutation",
+            "commandPattern": "pytest",
+            "exitCode": 0
+          },
+          {
+            "type": "custom:CodingChildReview",
+            "after": "last_code_mutation",
+            "fields": {
+              "reviewerPersona": {
+                "equals": "reviewer"
+              },
+              "reviewedMutationAt": {
+                "equals": 40
+              },
+              "toolCallCount": {
+                "equals": 1
+              }
+            }
+          }
+        ],
+        "onMissing": "block_final_answer",
+        "retryMessage": "Record reviewer child evidence strictly after the latest coding child mutation before claiming completion.",
+        "trafficAttached": false,
+        "executionAttached": false
+      },
+      "records": [
+        {
+          "type": "GitDiff",
+          "status": "ok",
+          "observedAt": 50,
+          "source": {
+            "kind": "tool_trace",
+            "toolName": "GitDiff",
+            "toolCallId": "tool-gitdiff-review-equal",
+            "metadata": {
+              "recordedOnly": true
+            }
+          },
+          "fields": {
+            "changedFiles": ["src/app.ts"]
+          },
+          "preview": "GitDiff changed files: src/app.ts",
+          "metadata": {
+            "lastCodeMutation": 40,
+            "publicSafeFields": ["changedFiles"]
+          }
+        },
+        {
+          "type": "TestRun",
+          "status": "ok",
+          "observedAt": 60,
+          "source": {
+            "kind": "tool_trace",
+            "toolName": "TestRun",
+            "toolCallId": "tool-testrun-review-equal",
+            "metadata": {
+              "recordedOnly": true
+            }
+          },
+          "fields": {
+            "command": "pytest",
+            "exitCode": 0,
+            "passed": true
+          },
+          "preview": "TestRun pytest exit 0",
+          "metadata": {
+            "lastCodeMutation": 40,
+            "publicSafeFields": ["command", "exitCode", "passed"]
+          }
+        },
+        {
+          "type": "custom:CodingChildReview",
+          "status": "ok",
+          "observedAt": 40,
+          "source": {
+            "kind": "transcript",
+            "toolName": "SpawnAgent",
+            "toolCallId": "tool-reviewer-equal",
+            "transcriptEntryId": "tr-reviewer-equal",
+            "metadata": {
+              "persona": "reviewer",
+              "recordedOnly": true
+            }
+          },
+          "fields": {
+            "reviewerPersona": "reviewer",
+            "reviewedMutationAt": 40,
+            "toolCallCount": 1,
+            "finalTextPresent": true
+          },
+          "preview": "Reviewer SpawnAgent evidence at latest child mutation",
+          "metadata": {
+            "lastCodeMutation": 40,
+            "publicSafeFields": [
+              "reviewerPersona",
+              "reviewedMutationAt",
+              "toolCallCount",
+              "finalTextPresent"
+            ]
+          }
+        }
+      ],
+      "attachmentFlags": {
+        "adkRunnerInvoked": false,
+        "liveToolDispatched": false,
+        "shellOrCodeExecuted": false,
+        "gitExecuted": false,
+        "testExecuted": false,
+        "fileMutated": false,
+        "patchApplied": false,
+        "workspaceWritten": false,
+        "memoryProviderCalled": false,
+        "agentMemoryImported": false,
+        "hipocampusQmdLiveCalled": false,
+        "productionStorageWritten": false,
+        "productionAuthority": false,
+        "routeOrApiAttached": false,
+        "telegramAttached": false,
+        "canaryTrafficAttached": false,
+        "evidenceBlockEnabled": false
+      }
+    },
+    {
+      "caseId": "fresh_reviewer_after_latest_child_mutation_passes",
+      "category": "coding_child_review_freshness",
+      "agentRole": "coding",
+      "runOn": "main",
+      "spawnDepth": 0,
+      "turnId": "turn-code-review-2",
+      "lastCodeMutationAt": 40,
+      "completionClaim": "coding child changes implemented and verified",
+      "authority": "block_ready_policy",
+      "publicPreview": "Reviewer SpawnAgent inspected the latest child mutation metadata",
+      "expectedOk": true,
+      "expectedVerdictState": "pass",
+      "expectedMissingTypes": [],
+      "expectedMatchedTypes": [
+        "GitDiff",
+        "TestRun",
+        "custom:CodingChildReview"
+      ],
+      "expectedFailureCodes": [],
+      "contract": {
+        "id": "coding.child_review_freshness.fresh",
+        "description": "Require reviewer child evidence after the latest coding child mutation before completion claims.",
+        "triggers": ["beforeCommit"],
+        "when": {
+          "lastCodeMutation": 40,
+          "taskType": "coding",
+          "latestMutationSource": "coding_child"
+        },
+        "requirements": [
+          {
+            "type": "GitDiff",
+            "after": "last_code_mutation"
+          },
+          {
+            "type": "TestRun",
+            "after": "last_code_mutation",
+            "commandPattern": "pytest",
+            "exitCode": 0
+          },
+          {
+            "type": "custom:CodingChildReview",
+            "after": "last_code_mutation",
+            "fields": {
+              "reviewerPersona": {
+                "equals": "reviewer"
+              },
+              "reviewedMutationAt": {
+                "equals": 40
+              },
+              "toolCallCount": {
+                "equals": 1
+              }
+            }
+          }
+        ],
+        "onMissing": "block_final_answer",
+        "retryMessage": "Record reviewer child evidence after the latest coding child mutation before claiming completion.",
+        "trafficAttached": false,
+        "executionAttached": false
+      },
+      "records": [
+        {
+          "type": "GitDiff",
+          "status": "ok",
+          "observedAt": 50,
+          "source": {
+            "kind": "tool_trace",
+            "toolName": "GitDiff",
+            "toolCallId": "tool-gitdiff-review-fresh",
+            "metadata": {
+              "recordedOnly": true
+            }
+          },
+          "fields": {
+            "changedFiles": ["src/app.ts"]
+          },
+          "preview": "GitDiff changed files: src/app.ts",
+          "metadata": {
+            "lastCodeMutation": 40,
+            "publicSafeFields": ["changedFiles"]
+          }
+        },
+        {
+          "type": "TestRun",
+          "status": "ok",
+          "observedAt": 60,
+          "source": {
+            "kind": "tool_trace",
+            "toolName": "TestRun",
+            "toolCallId": "tool-testrun-review-fresh",
+            "metadata": {
+              "recordedOnly": true
+            }
+          },
+          "fields": {
+            "command": "pytest",
+            "exitCode": 0,
+            "passed": true
+          },
+          "preview": "TestRun pytest exit 0",
+          "metadata": {
+            "lastCodeMutation": 40,
+            "publicSafeFields": ["command", "exitCode", "passed"]
+          }
+        },
+        {
+          "type": "custom:CodingChildReview",
+          "status": "ok",
+          "observedAt": 70,
+          "source": {
+            "kind": "transcript",
+            "toolName": "SpawnAgent",
+            "toolCallId": "tool-reviewer-fresh",
+            "transcriptEntryId": "tr-reviewer-fresh",
+            "metadata": {
+              "persona": "reviewer",
+              "recordedOnly": true
+            }
+          },
+          "fields": {
+            "reviewerPersona": "reviewer",
+            "reviewedMutationAt": 40,
+            "toolCallCount": 1,
+            "finalTextPresent": true
+          },
+          "preview": "Reviewer SpawnAgent evidence after latest child mutation",
+          "metadata": {
+            "lastCodeMutation": 40,
+            "publicSafeFields": [
+              "reviewerPersona",
+              "reviewedMutationAt",
+              "toolCallCount",
+              "finalTextPresent"
+            ]
+          }
+        }
+      ],
+      "attachmentFlags": {
+        "adkRunnerInvoked": false,
+        "liveToolDispatched": false,
+        "shellOrCodeExecuted": false,
+        "gitExecuted": false,
+        "testExecuted": false,
+        "fileMutated": false,
+        "patchApplied": false,
+        "workspaceWritten": false,
+        "memoryProviderCalled": false,
+        "agentMemoryImported": false,
+        "hipocampusQmdLiveCalled": false,
+        "productionStorageWritten": false,
+        "productionAuthority": false,
+        "routeOrApiAttached": false,
+        "telegramAttached": false,
+        "canaryTrafficAttached": false,
+        "evidenceBlockEnabled": false
+      }
+    },
+    {
+      "caseId": "equal_then_fresh_reviewer_after_latest_child_mutation_passes",
+      "category": "coding_child_review_freshness",
+      "agentRole": "coding",
+      "runOn": "main",
+      "spawnDepth": 0,
+      "turnId": "turn-code-review-3",
+      "lastCodeMutationAt": 40,
+      "completionClaim": "coding child changes implemented and verified",
+      "authority": "block_ready_policy",
+      "publicPreview": "Later reviewer SpawnAgent inspected the latest child mutation metadata",
+      "expectedOk": true,
+      "expectedVerdictState": "pass",
+      "expectedMissingTypes": [],
+      "expectedMatchedTypes": [
+        "GitDiff",
+        "TestRun",
+        "custom:CodingChildReview"
+      ],
+      "expectedFailureCodes": [],
+      "contract": {
+        "id": "coding.child_review_freshness.equal_then_fresh",
+        "description": "Accept any reviewer child evidence strictly after the latest coding child mutation, even when equal reviewer evidence appears first.",
+        "triggers": ["beforeCommit"],
+        "when": {
+          "lastCodeMutation": 40,
+          "taskType": "coding",
+          "latestMutationSource": "coding_child"
+        },
+        "requirements": [
+          {
+            "type": "GitDiff",
+            "after": "last_code_mutation"
+          },
+          {
+            "type": "TestRun",
+            "after": "last_code_mutation",
+            "commandPattern": "pytest",
+            "exitCode": 0
+          },
+          {
+            "type": "custom:CodingChildReview",
+            "after": "last_code_mutation",
+            "fields": {
+              "reviewerPersona": {
+                "equals": "reviewer"
+              },
+              "reviewedMutationAt": {
+                "equals": 40
+              },
+              "toolCallCount": {
+                "equals": 1
+              }
+            }
+          }
+        ],
+        "onMissing": "block_final_answer",
+        "retryMessage": "Record reviewer child evidence after the latest coding child mutation before claiming completion.",
+        "trafficAttached": false,
+        "executionAttached": false
+      },
+      "records": [
+        {
+          "type": "GitDiff",
+          "status": "ok",
+          "observedAt": 50,
+          "source": {
+            "kind": "tool_trace",
+            "toolName": "GitDiff",
+            "toolCallId": "tool-gitdiff-review-equal-then-fresh",
+            "metadata": {
+              "recordedOnly": true
+            }
+          },
+          "fields": {
+            "changedFiles": ["src/app.ts"]
+          },
+          "preview": "GitDiff changed files: src/app.ts",
+          "metadata": {
+            "lastCodeMutation": 40,
+            "publicSafeFields": ["changedFiles"]
+          }
+        },
+        {
+          "type": "TestRun",
+          "status": "ok",
+          "observedAt": 60,
+          "source": {
+            "kind": "tool_trace",
+            "toolName": "TestRun",
+            "toolCallId": "tool-testrun-review-equal-then-fresh",
+            "metadata": {
+              "recordedOnly": true
+            }
+          },
+          "fields": {
+            "command": "pytest",
+            "exitCode": 0,
+            "passed": true
+          },
+          "preview": "TestRun pytest exit 0",
+          "metadata": {
+            "lastCodeMutation": 40,
+            "publicSafeFields": ["command", "exitCode", "passed"]
+          }
+        },
+        {
+          "type": "custom:CodingChildReview",
+          "status": "ok",
+          "observedAt": 40,
+          "source": {
+            "kind": "transcript",
+            "toolName": "SpawnAgent",
+            "toolCallId": "tool-reviewer-equal-then-fresh-equal",
+            "transcriptEntryId": "tr-reviewer-equal-then-fresh-equal",
+            "metadata": {
+              "persona": "reviewer",
+              "recordedOnly": true
+            }
+          },
+          "fields": {
+            "reviewerPersona": "reviewer",
+            "reviewedMutationAt": 40,
+            "toolCallCount": 1,
+            "finalTextPresent": true
+          },
+          "preview": "Reviewer SpawnAgent evidence at latest child mutation",
+          "metadata": {
+            "lastCodeMutation": 40,
+            "publicSafeFields": [
+              "reviewerPersona",
+              "reviewedMutationAt",
+              "toolCallCount",
+              "finalTextPresent"
+            ]
+          }
+        },
+        {
+          "type": "custom:CodingChildReview",
+          "status": "ok",
+          "observedAt": 70,
+          "source": {
+            "kind": "transcript",
+            "toolName": "SpawnAgent",
+            "toolCallId": "tool-reviewer-equal-then-fresh-fresh",
+            "transcriptEntryId": "tr-reviewer-equal-then-fresh-fresh",
+            "metadata": {
+              "persona": "reviewer",
+              "recordedOnly": true
+            }
+          },
+          "fields": {
+            "reviewerPersona": "reviewer",
+            "reviewedMutationAt": 40,
+            "toolCallCount": 1,
+            "finalTextPresent": true
+          },
+          "preview": "Reviewer SpawnAgent evidence after latest child mutation",
+          "metadata": {
+            "lastCodeMutation": 40,
+            "publicSafeFields": [
+              "reviewerPersona",
+              "reviewedMutationAt",
+              "toolCallCount",
+              "finalTextPresent"
+            ]
+          }
+        }
+      ],
+      "attachmentFlags": {
+        "adkRunnerInvoked": false,
+        "liveToolDispatched": false,
+        "shellOrCodeExecuted": false,
+        "gitExecuted": false,
+        "testExecuted": false,
+        "fileMutated": false,
+        "patchApplied": false,
+        "workspaceWritten": false,
+        "memoryProviderCalled": false,
+        "agentMemoryImported": false,
+        "hipocampusQmdLiveCalled": false,
+        "productionStorageWritten": false,
+        "productionAuthority": false,
+        "routeOrApiAttached": false,
+        "telegramAttached": false,
+        "canaryTrafficAttached": false,
+        "evidenceBlockEnabled": false
+      }
+    },
+    {
+      "caseId": "commit_checkpoint_requires_diff_and_tests",
+      "category": "commit_checkpoint_verification",
+      "agentRole": "coding",
+      "runOn": "main",
+      "spawnDepth": 0,
+      "turnId": "turn-code-6",
+      "lastCodeMutationAt": 10,
+      "completionClaim": "checkpoint recorded after lint",
+      "authority": "block_ready_policy",
+      "publicPreview": "GitDiff, TestRun, and CommitCheckpoint metadata are present",
+      "expectedOk": true,
+      "expectedVerdictState": "pass",
+      "expectedMissingTypes": [],
+      "expectedMatchedTypes": ["GitDiff", "TestRun", "CommitCheckpoint"],
+      "expectedFailureCodes": [],
+      "contract": {
+        "id": "coding.commit_checkpoint",
+        "triggers": ["beforeCommit"],
+        "when": {
+          "lastCodeMutation": 10
+        },
+        "requirements": [
+          {
+            "type": "GitDiff",
+            "after": "last_code_mutation"
+          },
+          {
+            "type": "TestRun",
+            "after": "last_code_mutation",
+            "commandPattern": "npm run lint",
+            "exitCode": 0
+          },
+          {
+            "type": "CommitCheckpoint",
+            "after": "last_code_mutation",
+            "fields": {
+              "checkpointId": {
+                "exists": true
+              }
+            }
+          }
+        ],
+        "onMissing": "block_final_answer",
+        "trafficAttached": false,
+        "executionAttached": false
+      },
+      "records": [
+        {
+          "type": "GitDiff",
+          "status": "ok",
+          "observedAt": 20,
+          "source": {
+            "kind": "tool_trace",
+            "toolName": "GitDiff",
+            "toolCallId": "tool-gitdiff-6",
+            "metadata": {
+              "recordedOnly": true
+            }
+          },
+          "fields": {
+            "changedFiles": ["src/app.ts"]
+          },
+          "preview": "GitDiff changed files: src/app.ts",
+          "metadata": {
+            "lastCodeMutation": 10,
+            "publicSafeFields": ["changedFiles"]
+          }
+        },
+        {
+          "type": "TestRun",
+          "status": "ok",
+          "observedAt": 30,
+          "source": {
+            "kind": "tool_trace",
+            "toolName": "TestRun",
+            "toolCallId": "tool-testrun-6",
+            "metadata": {
+              "recordedOnly": true
+            }
+          },
+          "fields": {
+            "command": "npm run lint",
+            "exitCode": 0,
+            "passed": true
+          },
+          "preview": "TestRun npm run lint exit 0",
+          "metadata": {
+            "lastCodeMutation": 10,
+            "publicSafeFields": ["command", "exitCode", "passed"]
+          }
+        },
+        {
+          "type": "CommitCheckpoint",
+          "status": "ok",
+          "observedAt": 40,
+          "source": {
+            "kind": "transcript",
+            "transcriptEntryId": "tr-commit-checkpoint-6",
+            "metadata": {
+              "recordedOnly": true
+            }
+          },
+          "fields": {
+            "checkpointId": "checkpoint-6",
+            "changedFiles": ["src/app.ts"]
+          },
+          "preview": "CommitCheckpoint checkpoint-6",
+          "metadata": {
+            "lastCodeMutation": 10,
+            "publicSafeFields": ["checkpointId", "changedFiles"]
+          }
+        }
+      ],
+      "attachmentFlags": {
+        "adkRunnerInvoked": false,
+        "liveToolDispatched": false,
+        "shellOrCodeExecuted": false,
+        "gitExecuted": false,
+        "testExecuted": false,
+        "fileMutated": false,
+        "patchApplied": false,
+        "workspaceWritten": false,
+        "memoryProviderCalled": false,
+        "agentMemoryImported": false,
+        "hipocampusQmdLiveCalled": false,
+        "productionStorageWritten": false,
+        "productionAuthority": false,
+        "routeOrApiAttached": false,
+        "telegramAttached": false,
+        "canaryTrafficAttached": false,
+        "evidenceBlockEnabled": false
+      }
+    },
+    {
+      "caseId": "planner_recommends_test_command_then_testrun_passes",
+      "category": "planner_recommended_verification",
+      "agentRole": "coding",
+      "runOn": "main",
+      "spawnDepth": 0,
+      "turnId": "turn-code-7",
+      "lastCodeMutationAt": 10,
+      "completionClaim": "planner-recommended test command passed",
+      "authority": "block_ready_policy",
+      "publicPreview": "ProjectVerificationPlanner recommended python -m pytest and python -m compileall .; TestRun passed",
+      "expectedOk": true,
+      "expectedVerdictState": "pass",
+      "expectedMissingTypes": [],
+      "expectedMatchedTypes": [
+        "custom:ProjectVerificationPlanner",
+        "GitDiff",
+        "TestRun"
+      ],
+      "expectedFailureCodes": [],
+      "contract": {
+        "id": "coding.planner_recommended_verification",
+        "description": "Require recorded planner metadata, GitDiff, and a successful matching TestRun after last code mutation.",
+        "triggers": ["beforeCommit"],
+        "when": {
+          "lastCodeMutation": 10,
+          "taskType": "coding"
+        },
+        "requirements": [
+          {
+            "type": "custom:ProjectVerificationPlanner",
+            "after": "last_code_mutation",
+            "fields": {
+              "commandCount": {
+                "equals": 2
+              },
+              "cwd": {
+                "equals": "."
+              },
+              "projectTypes": {
+                "equals": ["python"]
+              }
+            }
+          },
+          {
+            "type": "GitDiff",
+            "after": "last_code_mutation",
+            "fields": {
+              "changedFiles": {
+                "equals": ["src/app.py"]
+              }
+            }
+          },
+          {
+            "type": "TestRun",
+            "after": "last_code_mutation",
+            "commandPattern": "python -m pytest",
+            "exitCode": 0,
+            "fields": {
+              "passed": {
+                "equals": true
+              }
+            }
+          }
+        ],
+        "onMissing": "block_final_answer",
+        "retryMessage": "Record planner metadata, GitDiff, and the selected TestRun after the last code edit.",
+        "trafficAttached": false,
+        "executionAttached": false
+      },
+      "records": [
+        {
+          "type": "custom:ProjectVerificationPlanner",
+          "status": "ok",
+          "observedAt": 20,
+          "source": {
+            "kind": "transcript",
+            "toolName": "ProjectVerificationPlanner",
+            "transcriptEntryId": "tr-planner-7",
+            "metadata": {
+              "evidenceKind": "verification_plan",
+              "recordedOnly": true
+            }
+          },
+          "fields": {
+            "cwd": ".",
+            "projectTypes": ["python"],
+            "commands": [
+              {
+                "kind": "test",
+                "command": "python -m pytest",
+                "cwd": ".",
+                "runner": "TestRun",
+                "confidence": "high",
+                "reason": "Python project metadata references pytest"
+              },
+              {
+                "kind": "compile",
+                "command": "python -m compileall .",
+                "cwd": ".",
+                "runner": "TestRun",
+                "confidence": "medium",
+                "reason": "Python project metadata exists"
+              }
+            ],
+            "warnings": [],
+            "commandCount": 2
+          },
+          "preview": "ProjectVerificationPlanner recommended python -m pytest and python -m compileall .",
+          "metadata": {
+            "lastCodeMutation": 10,
+            "publicSafeFields": ["cwd", "projectTypes", "commands", "warnings", "commandCount"]
+          }
+        },
+        {
+          "type": "GitDiff",
+          "status": "ok",
+          "observedAt": 25,
+          "source": {
+            "kind": "tool_trace",
+            "toolName": "GitDiff",
+            "toolCallId": "tool-gitdiff-7",
+            "metadata": {
+              "recordedOnly": true
+            }
+          },
+          "fields": {
+            "changedFiles": ["src/app.py"],
+            "fileCount": 1,
+            "statOnly": true
+          },
+          "preview": "GitDiff changed files: src/app.py",
+          "metadata": {
+            "lastCodeMutation": 10,
+            "publicSafeFields": ["changedFiles", "fileCount", "statOnly"]
+          }
+        },
+        {
+          "type": "TestRun",
+          "status": "ok",
+          "observedAt": 30,
+          "source": {
+            "kind": "tool_trace",
+            "toolName": "TestRun",
+            "toolCallId": "tool-testrun-7",
+            "metadata": {
+              "recordedOnly": true
+            }
+          },
+          "fields": {
+            "command": "python -m pytest",
+            "exitCode": 0,
+            "passed": true,
+            "durationMs": 900
+          },
+          "preview": "TestRun python -m pytest exit 0",
+          "metadata": {
+            "lastCodeMutation": 10,
+            "publicSafeFields": ["command", "exitCode", "passed", "durationMs"]
+          }
+        }
+      ],
+      "attachmentFlags": {
+        "adkRunnerInvoked": false,
+        "liveToolDispatched": false,
+        "shellOrCodeExecuted": false,
+        "gitExecuted": false,
+        "testExecuted": false,
+        "fileMutated": false,
+        "patchApplied": false,
+        "workspaceWritten": false,
+        "memoryProviderCalled": false,
+        "agentMemoryImported": false,
+        "hipocampusQmdLiveCalled": false,
+        "productionStorageWritten": false,
+        "productionAuthority": false,
+        "routeOrApiAttached": false,
+        "telegramAttached": false,
+        "canaryTrafficAttached": false,
+        "evidenceBlockEnabled": false
+      }
+    }
+  ]
+}

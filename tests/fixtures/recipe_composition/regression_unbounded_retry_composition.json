@@ -1,0 +1,48 @@
+{
+  "schemaVersion": "recipeCompositionRegressionFixture.v1",
+  "caseId": "unbounded_retry_composition",
+  "description": "An unbounded recipe-local retry declaration blocks instead of expanding the global retry budget.",
+  "activationMode": {
+    "defaultOff": true,
+    "trafficAttached": false,
+    "executionAttached": false,
+    "liveActivation": false
+  },
+  "stack": {
+    "explicitRecipeRefs": [
+      "recipe.retry.bounded",
+      "recipe.retry.unbounded"
+    ],
+    "turnId": "turn-regression-retry-unbounded",
+    "sessionId": "session-regression-retry-unbounded"
+  },
+  "globalRetryCap": 2,
+  "snapshots": [
+    {
+      "recipeRef": "recipe.retry.bounded",
+      "retryPolicy": "retry:max:2:repair:1"
+    },
+    {
+      "recipeRef": "recipe.retry.unbounded",
+      "retryPolicy": "retry:unbounded"
+    }
+  ],
+  "expected": {
+    "blocked": true,
+    "effectiveRecipeRefs": [],
+    "includedExplicitRefs": [],
+    "includedAutoRefs": [],
+    "conflictCodes": [
+      "retry_policy_unbounded"
+    ],
+    "effectiveRetryPolicy": {
+      "maxAttempts": 0,
+      "repairAttempts": 0,
+      "globalCap": 2
+    },
+    "projection": {
+      "conflictStatus": "blocked",
+      "hardSafetyStatus": "not_required"
+    }
+  }
+}
