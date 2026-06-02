@@ -137,9 +137,13 @@ def build_headless_runtime(
     _ = model  # reserved seam, not yet wired
 
     effective_cwd = str(cwd) if cwd is not None else os.getcwd()
+    effective_runner = runner if runner is not None else _build_default_runner(model=model)
     composio_config = resolve_composio_config(os.environ)
     composio_bundle = build_composio_toolset_bundle(composio_config)
-    composio_attached = attach_composio_toolsets_to_runner(runner, composio_bundle)
+    composio_attached = attach_composio_toolsets_to_runner(
+        effective_runner,
+        composio_bundle,
+    )
     mcp_servers = (
         (composio_bundle.mcp_server_label,)
         if composio_bundle.active and composio_attached
@@ -148,7 +152,7 @@ def build_headless_runtime(
 
     # (A) Engine — MagiEngineDriver lazy-imports ADK only when a turn is
     #     iterated; construction is free/cheap.
-    engine = MagiEngineDriver(runner=runner)
+    engine = MagiEngineDriver(runner=effective_runner)
 
     # (C) Permission gate — RulesPermissionGate with no sinks (headless
     #     ``default`` path will fall back to deny on ask; the HeadlessSink
@@ -172,6 +176,12 @@ def build_headless_runtime(
         composio=composio_bundle,
         mcp_servers=mcp_servers,
     )
+
+
+def _build_default_runner(*, model: str | None = None) -> object:
+    from magi_agent.cli.local_runner import build_local_cli_runner  # noqa: PLC0415
+
+    return build_local_cli_runner(model=model)
 
 
 def build_tui_app(

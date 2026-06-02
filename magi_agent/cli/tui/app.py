@@ -50,6 +50,7 @@ from textual.widgets.option_list import Option
 
 from magi_agent.cli.contracts import (
     CommandRegistry,
+    CommandSurface,
     ControlRequest,
     EngineDriver,
     EngineResult,
@@ -346,6 +347,9 @@ class TextualSink(PromptSink):
 class MagiTuiApp(App[None]):
     """Interactive REPL driving turns through the injected engine driver."""
 
+    TITLE = "Open Magi Agent"
+    SUB_TITLE = "Local runtime"
+
     CSS = """
     #transcript { height: 1fr; }
     #live { height: auto; }
@@ -433,6 +437,7 @@ class MagiTuiApp(App[None]):
     def on_mount(self) -> None:
         assert self._log is not None and self._live is not None
         self._controller = TranscriptController(log=self._log, live=self._live)
+        self._render_welcome()
         # Coalescing flush timer: repaint buffered token deltas on a fixed
         # cadence so a pure token stream renders incrementally (not just at
         # finalize). ``flush`` is a no-op when the buffer is empty, and clears
@@ -444,6 +449,33 @@ class MagiTuiApp(App[None]):
     def _on_flush_tick(self) -> None:
         if self._controller is not None:
             self._controller.flush()
+
+    def _render_welcome(self) -> None:
+        """Render the initial TUI state so bare ``magi`` never opens blank."""
+
+        if self._controller is None:
+            return
+        command_names = [
+            getattr(command, "name", "")
+            for command in self._commands.list_for(CommandSurface(tui=True, headless=False))
+        ]
+        commands = ", ".join(f"/{name}" for name in command_names[:5] if name)
+        command_line = (
+            f"Commands: {commands}"
+            if commands
+            else "Commands: type / for local commands"
+        )
+        self._controller.commit_block(
+            "\n".join(
+                (
+                    "Open Magi Agent",
+                    "Local ADK runtime ready. Type a task below and press Enter.",
+                    "Use Ctrl+C to cancel an active turn.",
+                    command_line,
+                    "Headless examples: magi --help | magi --output text \"Summarize this repository\"",
+                )
+            )
+        )
 
     @property
     def controller(self) -> TranscriptController:

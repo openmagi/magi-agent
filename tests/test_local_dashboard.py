@@ -25,7 +25,7 @@ def _client() -> TestClient:
     return TestClient(create_app(runtime))
 
 
-def test_local_dashboard_route_serves_self_contained_html() -> None:
+def test_local_dashboard_route_serves_adk_local_app_shell() -> None:
     response = _client().get("/dashboard")
 
     assert response.status_code == 200
@@ -33,9 +33,39 @@ def test_local_dashboard_route_serves_self_contained_html() -> None:
     html = response.text
     assert "Open Magi Agent" in html
     assert 'id="chat-form"' in html
+    assert 'class="app"' in html
+    assert 'class="sidebar"' in html
+    assert 'class="inspector"' in html
+    assert 'id="panel-work"' in html
+    assert 'id="panel-knowledge"' in html
+    assert 'id="panel-settings"' in html
+    assert "Work Stream" in html
+    assert "Run local agent work from one dashboard." in html
     assert "/v1/chat/completions" in html
     assert "/healthz" in html
-    assert "event: agent" in html
+    assert "ADK events" in html
+
+
+def test_local_dashboard_deep_links_serve_same_app_shell() -> None:
+    for path in (
+        "/dashboard/local/chat",
+        "/dashboard/local/knowledge",
+        "/dashboard/local/settings",
+    ):
+        response = _client().get(path)
+
+        assert response.status_code == 200
+        assert response.headers["content-type"].startswith("text/html")
+        assert "Open Magi Agent Dashboard" in response.text
+        assert 'id="runtime-bootstrap"' in response.text
+        assert 'class="app"' in response.text
+
+
+def test_root_redirects_to_dashboard() -> None:
+    response = _client().get("/", follow_redirects=False)
+
+    assert response.status_code == 307
+    assert response.headers["location"] == "/dashboard"
 
 
 def test_local_dashboard_public_html_avoids_hosted_and_legacy_branding() -> None:
@@ -78,5 +108,6 @@ def test_local_dashboard_exposes_digest_safe_runtime_bootstrap() -> None:
         "botId": "local-bot",
         "model": "gpt-5.2",
         "runtime": "magi-agent",
+        "runtimeEngine": "adk-python",
         "version": "0.1.0",
     }

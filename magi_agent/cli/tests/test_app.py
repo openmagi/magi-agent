@@ -71,6 +71,12 @@ class TestBuildHeadlessRuntime:
         # The engine should hold the injected runner.
         assert rt.engine._runner is mock_runner
 
+    def test_builds_default_local_runner_when_not_injected(self, tmp_path) -> None:
+        """The installed CLI must not construct a no-runner engine by default."""
+        rt = build_headless_runtime(cwd=tmp_path, session_id="sid-local-runner")
+        assert rt.engine._runner is not None
+        assert hasattr(rt.engine._runner, "run_async")
+
     def test_no_textual_imported(self) -> None:
         """build_headless_runtime must not import textual."""
         for key in list(sys.modules.keys()):
@@ -360,6 +366,26 @@ class TestAgentDefaultCommand:
         assert result.exit_code == 0, f"exit_code={result.exit_code}\n{result.output}"
         assert "stub reply" in buf.getvalue()
 
+    def test_real_default_cli_prompt_does_not_return_no_runner(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path,
+    ) -> None:
+        """Regression: the shipped CLI must run a turn without injected mocks."""
+        monkeypatch.setenv("MAGI_CLI_ENABLED", "1")
+        monkeypatch.setenv("MAGI_CLI_SESSION_DIR", str(tmp_path))
+
+        runner = CliRunner()
+        result = runner.invoke(
+            _make_app(),
+            ["--output", "json", "hello"],
+            catch_exceptions=False,
+        )
+
+        assert result.exit_code == 0, result.output
+        assert "no_runner" not in result.output
+        assert "Local ADK runtime" in result.output
+
 
 # ---------------------------------------------------------------------------
 # Stub subcommands
@@ -527,7 +553,10 @@ def test_build_headless_runtime_attaches_composio_to_injected_runner(monkeypatch
     assert rt.mcp_servers == ("composio",)
 
 
-def test_build_headless_runtime_does_not_report_mcp_when_no_runner(monkeypatch, tmp_path) -> None:
+def test_build_headless_runtime_attaches_composio_to_default_local_runner(
+    monkeypatch,
+    tmp_path,
+) -> None:
     class FakeBundle:
         active = True
         status = "ready"
@@ -544,7 +573,8 @@ def test_build_headless_runtime_does_not_report_mcp_when_no_runner(monkeypatch, 
         rt = build_headless_runtime(cwd=tmp_path, session_id="sid-composio-none")
 
     assert rt.composio.status == "ready"
-    assert rt.mcp_servers == ()
+    assert rt.mcp_servers == ("composio",)
+    assert getattr(rt.engine._runner, "agent").tools == ["composio-toolset"]
 
 
 def test_build_headless_runtime_does_not_report_mcp_when_runner_has_no_agent(

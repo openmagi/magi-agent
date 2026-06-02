@@ -9,7 +9,7 @@
 [Releases](https://github.com/openmagi/magi-agent/releases)
 
 ![status](https://img.shields.io/badge/status-early%20beta-f97316)
-![latest](https://img.shields.io/badge/latest-v0.1.0-2563eb)
+![latest](https://img.shields.io/badge/latest-v0.1.2-2563eb)
 ![license](https://img.shields.io/badge/license-Apache--2.0-111827)
 ![runtime](https://img.shields.io/badge/runtime-Magi%20Agent-7c3aed)
 
@@ -66,77 +66,40 @@ A workflow can define:
 - what becomes user-visible output;
 - what is recorded in the audit ledger.
 
-The important part is that this behavior is composable. A user or platform team
+The important part is that this behavior is composable. A user or project team
 can attach a source-verification harness, an approval harness, a coding
 verification harness, a spreadsheet reconciliation harness, or a meta-agent
 inspection harness without rewriting the agent core for every workflow.
 
 ## Install And Run Locally
 
-Install with Homebrew:
+Install Magi Agent with Homebrew:
 
 ```bash
 brew install openmagi/tap/magi-agent
-magi --help
-magi-agent --help
 ```
 
-Run the local HTTP API and app surface after installing:
+Start the local HTTP runtime and dashboard:
 
 ```bash
 magi-agent serve --port 8080
 ```
 
-Then open:
-
-```text
-http://localhost:8080/dashboard
-```
-
-Run from source:
+Open the Local web dashboard:
 
 ```bash
-git clone https://github.com/openmagi/magi-agent.git
-cd magi-agent
-uv sync --extra dev --extra cli
+open http://localhost:8080/dashboard
 ```
 
-Run tests:
+Check the CLI commands:
 
 ```bash
-uv run --extra dev pytest -q
-```
-
-Run the local HTTP runtime from source:
-
-```bash
-uv run magi-agent
-```
-
-Run the local HTTP API and app surface:
-
-```bash
-uv run magi-agent serve --port 8080
-```
-
-Local web dashboard:
-
-```text
-http://localhost:8080/dashboard
+magi --help
+magi-agent --help
 ```
 
 The dashboard is served by the same local runtime. It does not need a separate
 Node or Next.js process.
-
-Run the source checkout CLI:
-
-```bash
-uv run --extra cli magi --help
-uv run --extra cli magi --output text "Summarize this repository"
-```
-
-The local smoke path should not require service secrets, database credentials,
-workspace volumes, live ToolHost dispatch, or model provider calls.
 
 ## Architecture
 
@@ -283,10 +246,10 @@ runtime state, or prevent unsupported claims from entering future context. Even
 if the hook can inspect raw logs, it has to reconstruct the whole run after the
 fact, which is expensive and imprecise.
 
-First-party coding agents can be reliable because their core loop owns internal
-state such as file reads, edits, diffs, test runs, stale-edit checks, and final
-commit gates. If that behavior is not built into the agent core, a hook-based
-extension can only approximate it from the outside.
+First-party coding agents can be reliable because their core loop owns state
+such as file reads, edits, diffs, test runs, stale-edit checks, and final commit
+gates. If that behavior is not built into the agent core, a hook-based extension
+can only approximate it from the outside.
 
 Magi exposes that first-party level of control as configurable runtime surfaces:
 
@@ -307,9 +270,9 @@ validation runs, and the transitions that are allowed to continue.
 The `magi` CLI is the local interface for the same runtime contracts.
 
 ```bash
-uv run --extra cli magi --help
-uv run --extra cli magi chat
-uv run --extra cli magi --output ndjson "Inspect this repository and summarize the test surface"
+magi --help
+magi --output text "Inspect this repository and summarize the test surface"
+magi --output stream-json "Inspect this repository and summarize the test surface"
 ```
 
 The CLI supports headless output modes for automation and interactive modes for
@@ -320,9 +283,9 @@ without granting live tool authority.
 
 External integration support, including Composio-backed connector surfaces, is
 optional and default-off. Installing optional dependencies or setting a single
-API key must not grant live tool authority by itself. Any deployment should
-require explicit toolkit scope, credential scope, user approval, and leak-safe
-evidence before an external action is enabled.
+API key must not grant live tool authority by itself. Enabling integrations
+should require explicit toolkit scope, credential scope, user approval, and
+leak-safe evidence before an external action is enabled.
 
 Install optional Composio dependencies only when you are working on that surface:
 
@@ -344,19 +307,28 @@ and audit checkpoints.
 
 ## Development Commands
 
+Use these only when developing Magi Agent from a source checkout:
+
 ```bash
-# install all development extras
+git clone https://github.com/openmagi/magi-agent.git
+cd magi-agent
+
+# install development extras
 uv sync --extra dev --extra cli
 
 # run the full scaffold test suite
 uv run --extra dev pytest -q
 
-# run CLI help
+# run the source checkout CLI
 uv run --extra cli magi --help
+uv run --extra cli magi --output text "Summarize this repository"
 
-# run runtime entrypoint
-uv run magi-agent
+# run the local HTTP API and dashboard from source
+uv run magi-agent serve --port 8080
 ```
+
+The local smoke path should not require service secrets, database credentials,
+workspace volumes, live ToolHost dispatch, or model provider calls.
 
 ## Dependencies
 
@@ -365,7 +337,7 @@ Pinned dependency lines are intentional; no floating latest versions are used.
 | Dependency | Version | Purpose |
 | --- | ---: | --- |
 | `google-adk` | `1.33.0` | Official ADK primitive boundary |
-| `fastapi` | `0.136.1` | Health and internal route surface |
+| `fastapi` | `0.136.1` | Health and HTTP route surface |
 | `uvicorn` | `0.47.0` | Local/container ASGI server |
 | `pydantic` | `2.13.4` | Strict runtime models |
 | `pytest` | `9.0.3` | Dev/test runner |
