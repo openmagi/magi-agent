@@ -1,6 +1,27 @@
+<div align="center">
+
 # Magi Agent
 
-OpenMagi agent runtime and CLI for personal AI agents.
+**OpenMagi's local-first agent runtime and CLI: memory, tools, evidence gates, and simple install.**
+
+[Website](https://openmagi.ai) ·
+[Docs](docs/cli/magi.md) ·
+[Releases](https://github.com/openmagi/magi-agent/releases) ·
+[Homebrew Tap](https://github.com/openmagi/homebrew-tap)
+
+![status](https://img.shields.io/badge/status-early%20beta-f97316)
+![latest](https://img.shields.io/badge/latest-v0.1.0-2563eb)
+![license](https://img.shields.io/badge/license-Apache--2.0-111827)
+![install](https://img.shields.io/badge/install-Homebrew-0f766e)
+![runtime](https://img.shields.io/badge/runtime-Magi%20Agent-7c3aed)
+
+</div>
+
+> **Early beta:** Magi Agent is under active development. Expect rough edges.
+
+> **Local-first runtime:** Magi keeps memory, workspace state, configuration,
+> and audit evidence close to the agent. Optional services and external
+> integrations stay explicit and default-off.
 
 Magi Agent is a programmable AI agent runtime that actually gets things done.
 Instead of relying on prompts and hoping the model follows every instruction,
