@@ -30,10 +30,11 @@ def test_readme_does_not_claim_homebrew_before_formula_is_live() -> None:
 def test_readme_documents_local_web_dashboard() -> None:
     text = _readme()
 
-    assert "Local web dashboard" not in text
+    assert "Local web dashboard" in text
+    assert "http://localhost:8080/dashboard" in text
+    assert "magi-agent serve --port 8080" in text
     assert "npm run web:dev" not in text
     assert "http://localhost:3001" not in text
-    assert "magi-agent serve --port 8080" in text
 
 
 def test_readme_avoids_hosted_rollout_language() -> None:
