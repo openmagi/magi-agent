@@ -33,3 +33,10 @@ def test_model_construct_disabled():
 def test_dispatcher_seam_defaults_to_none():
     from magi_agent.channels.dispatcher import maybe_route_to_workflow
     assert maybe_route_to_workflow(eligible=False, confirmed=False, enabled=False) is None
+
+
+def test_model_copy_cannot_set_authority_flags_true():
+    d = decide_workflow_route(eligible=True, confirmed=True, enabled=True)
+    copied = d.model_copy(update={"route_attached": True, "execution_attached": True})
+    assert copied.route_attached is False
+    assert copied.execution_attached is False

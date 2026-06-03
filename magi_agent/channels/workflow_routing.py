@@ -1,8 +1,11 @@
 from __future__ import annotations
 
-from typing import Literal, Self
+from collections.abc import Mapping
+from typing import Any, Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field
+
+__all__ = ["WorkflowRouteDecision", "decide_workflow_route"]
 
 _MODEL_CONFIG = ConfigDict(
     frozen=True,
@@ -22,8 +25,22 @@ class WorkflowRouteDecision(BaseModel):
     execution_attached: Literal[False] = Field(default=False, alias="executionAttached")
 
     @classmethod
-    def model_construct(cls, _fields_set: set[str] | None = None, **values: object) -> Self:
+    def model_construct(cls, _fields_set: set[str] | None = None, **values: Any) -> Self:
         raise TypeError("model_construct is disabled for WorkflowRouteDecision")
+
+    def model_copy(self, *, update: Mapping[str, Any] | None = None, deep: bool = False) -> Self:
+        data = self.model_dump(by_alias=False, mode="python", warnings=False)
+        if update:
+            alias_to_name = {
+                field.alias: name
+                for name, field in self.__class__.model_fields.items()
+                if field.alias is not None
+            }
+            data.update({alias_to_name.get(str(key), str(key)): value for key, value in update.items()})
+        data["route_attached"] = False
+        data["execution_attached"] = False
+        _ = deep
+        return type(self).model_validate(data)
 
 
 def decide_workflow_route(
