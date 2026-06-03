@@ -1,19 +1,25 @@
 # magi CLI
 
-Magi is the headless and interactive CLI for the OpenMagi Python agent runtime.
-It is the third consumer of the `magi_agent` package alongside the
-FastAPI server and the ADK session layer.
+Magi is the headless and interactive CLI for Magi Agent. It uses the same
+`magi_agent` package as the local HTTP API, dashboard, and ADK session layer.
 
 ## Installation
 
-The CLI deps (`textual`, `rich`, `rapidfuzz`, `typer`) are an optional extra so
-the headless/server core stays lean.
+Install Magi Agent with Homebrew:
 
 ```sh
-pip install ".[cli]"
+brew install openmagi/tap/magi-agent
 ```
 
-After installation the `magi` console-script is available on your PATH.
+That installs both commands:
+
+```sh
+magi --help
+magi-agent --help
+```
+
+For source checkout development, install the optional CLI extra with `uv` or
+`pip`.
 
 ## Running
 
