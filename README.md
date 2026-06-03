@@ -2,10 +2,11 @@
 
 # Open Magi Agent
 
-**Programmable agents that run on evidence, tools, and memory, not prompt hope.**
+**Your personal AI agent: local memory, real tools, evidence gates, simple and
+powerful.**
 
 [Website](https://openmagi.ai) ·
-[Docs](docs/cli/magi.md) ·
+[CLI](docs/cli/magi.md) ·
 [Releases](https://github.com/openmagi/magi-agent/releases)
 
 ![status](https://img.shields.io/badge/status-early%20beta-f97316)
@@ -17,9 +18,9 @@
 
 > **Early beta:** Magi Agent is under active development. Expect rough edges.
 
-> **Local-first runtime:** Magi keeps memory, workspace state, configuration,
-> and audit evidence close to the agent. Optional services and external
-> integrations stay explicit and default-off.
+> **Local-first, explicit when managed:** Magi keeps memory, workspace state,
+> configuration, and audit evidence close to the agent. Optional services and
+> external integrations stay explicit and default-off.
 
 Magi Agent is a programmable AI agent runtime that actually gets things done.
 Instead of relying on prompts and hoping the model follows every instruction,
@@ -71,35 +72,35 @@ can attach a source-verification harness, an approval harness, a coding
 verification harness, a spreadsheet reconciliation harness, or a meta-agent
 inspection harness without rewriting the agent core for every workflow.
 
-## Install And Run Locally
+## Install
 
-Install Magi Agent with Homebrew:
+Install with Homebrew:
 
 ```bash
 brew install openmagi/tap/magi-agent
 ```
 
-Start the local HTTP runtime and dashboard:
+Start the local API and web dashboard:
 
 ```bash
 magi-agent serve --port 8080
-```
-
-Open the Local web dashboard:
-
-```bash
 open http://localhost:8080/dashboard
 ```
 
-Check the CLI commands:
+Use the CLI:
 
 ```bash
 magi --help
-magi-agent --help
 magi --output text "Summarize this repository"
 ```
 
-The dashboard is served by the same local runtime. It does not need a separate
+Both commands are installed by the same formula:
+
+```bash
+magi-agent --help
+```
+
+The dashboard is served by the same local agent. It does not need a separate
 Node or Next.js process.
 
 ## Architecture
@@ -170,6 +171,20 @@ deterministic checkpoints:
 You can enable these surfaces explicitly for the workflows you want to run.
 Local development can run the contracts and fixture suites without granting live
 tool authority.
+
+## Local Web Dashboard
+
+`magi-agent serve` includes a browser dashboard for local work:
+
+```bash
+magi-agent serve --port 8080
+open http://localhost:8080/dashboard
+```
+
+The dashboard streams public agent events, tool progress, evidence, and SSE
+transport state when the runtime emits them. Use it for local research, coding,
+document review, planning, and automation experiments without starting a
+separate frontend project.
 
 ## Example: Verify Source Before Claim
 
@@ -306,10 +321,10 @@ only. Acceptance for governed workflows comes from durable records: delivery
 receipts, source ledgers, mutation receipts, rollback receipts, verifier events,
 and audit checkpoints.
 
-## Source Checkout Development
+## Source Development
 
-Homebrew is the normal install path. Use these commands only when developing
-Magi Agent from a source checkout:
+Homebrew is the normal install path. Use `uv` only when developing Magi Agent
+from a source checkout:
 
 ```bash
 git clone https://github.com/openmagi/magi-agent.git
