@@ -474,4 +474,5 @@ __all__ = [
     "ChannelDispatchProviderPort",
     "ChannelDispatchRequest",
     "ChannelDispatcher",
+    "maybe_route_to_workflow",
 ]
