@@ -446,9 +446,11 @@ MAX_USER_VISIBLE_SANITIZED_INPUT_BYTES = 1_000_000
 MAX_USER_VISIBLE_ESTIMATED_INPUT_TOKENS = 1_000_000
 MAX_USER_VISIBLE_OUTPUT_TOKENS = 4096
 MAX_USER_VISIBLE_TOTAL_ESTIMATED_TOKENS = 1_004_096
-MAX_USER_VISIBLE_DAILY_GENERATION_RUNS = 100
-MAX_USER_VISIBLE_COST_USD = 5.0
-MAX_USER_VISIBLE_DAILY_COST_USD = 50.0
+MAX_USER_VISIBLE_CONCURRENT_GENERATION_RUNS = 4
+MAX_USER_VISIBLE_PENDING_GENERATION_RUNS = 16
+MAX_USER_VISIBLE_DAILY_GENERATION_RUNS = 1000
+MAX_USER_VISIBLE_COST_USD = 1000.0
+MAX_USER_VISIBLE_DAILY_COST_USD = 100_000.0
 
 
 class Gate5B4C3ShadowGenerationBudgets(_Gate5B4C3Model):
@@ -519,10 +521,10 @@ class Gate5B4C3ShadowGenerationBudgets(_Gate5B4C3Model):
             raise ValueError("diagnostic preview budget exceeds first-slice limit")
         if self.max_diagnostic_artifact_bytes > 16_384:
             raise ValueError("diagnostic artifact budget exceeds first-slice limit")
-        if self.max_concurrent_generation_runs > 1:
-            raise ValueError("concurrency cap exceeds first-slice limit")
-        if self.max_pending_generation_runs > 1:
-            raise ValueError("pending cap exceeds first-slice limit")
+        if self.max_concurrent_generation_runs > MAX_USER_VISIBLE_CONCURRENT_GENERATION_RUNS:
+            raise ValueError("concurrency cap exceeds selected user-visible limit")
+        if self.max_pending_generation_runs > MAX_USER_VISIBLE_PENDING_GENERATION_RUNS:
+            raise ValueError("pending cap exceeds selected user-visible limit")
         if self.max_daily_generation_runs > MAX_USER_VISIBLE_DAILY_GENERATION_RUNS:
             raise ValueError("daily generation cap exceeds selected user-visible limit")
         if self.retry_policy != "none":

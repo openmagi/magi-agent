@@ -388,6 +388,28 @@ def test_shadow_generation_live_smoke_env_accepts_full_toolhost_runner_timeout()
     assert route_config.generation_config.approved_budgets.python_runner_timeout_ms == 600_000
 
 
+def test_shadow_generation_live_smoke_env_accepts_selected_production_caps() -> None:
+    route_config = parse_gate5b4c3_shadow_generation_route_env(
+        _live_smoke_env(
+            CORE_AGENT_PYTHON_GATE5B_SHADOW_GENERATION_COST_OWNER_WAIVER="1",
+            CORE_AGENT_PYTHON_GATE5B_SHADOW_GENERATION_MAX_CONCURRENT="4",
+            CORE_AGENT_PYTHON_GATE5B_SHADOW_GENERATION_MAX_PENDING="16",
+            CORE_AGENT_PYTHON_GATE5B_SHADOW_GENERATION_MAX_DAILY="1000",
+            CORE_AGENT_PYTHON_GATE5B_SHADOW_GENERATION_MAX_COST_USD="1000",
+            CORE_AGENT_PYTHON_GATE5B_SHADOW_GENERATION_MAX_DAILY_COST_USD="100000",
+        )
+    )
+
+    budgets = route_config.generation_config.approved_budgets
+
+    assert route_config.generation_config.cost_owner_waiver is True
+    assert budgets.max_concurrent_generation_runs == 4
+    assert budgets.max_pending_generation_runs == 16
+    assert budgets.max_daily_generation_runs == 1000
+    assert budgets.max_cost_usd == pytest.approx(1000)
+    assert budgets.max_daily_generation_cost_usd == pytest.approx(100000)
+
+
 def test_shadow_generation_live_smoke_env_rejects_unsupported_provider() -> None:
     env = _live_smoke_env(
         CORE_AGENT_PYTHON_GATE5B_SHADOW_GENERATION_PROVIDER_LABEL="anthropic",
