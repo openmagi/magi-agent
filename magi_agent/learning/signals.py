@@ -137,6 +137,10 @@ def _redirect_signals(trace: SessionTrace) -> list[Signal]:
     the turn at ``i-1`` is an assistant turn AND there is at least one user turn
     before index ``i-1`` (i.e. the assistant had already responded to an
     original request, and the user is now steering).
+
+    Intentionally over-extracts in multi-turn conversations (fires on routine
+    follow-ups, not only corrections); the PR7 LLM labeler is responsible for
+    distinguishing true corrections from conversational follow-ups.
     """
     out: list[Signal] = []
     turns = trace.turns
@@ -188,10 +192,15 @@ def _retry_signals(trace: SessionTrace) -> list[Signal]:
 
 
 def _acceptance_signal(
-    trace: SessionTrace, *, has_redirect: bool
+    trace: SessionTrace, *, has_redirect: bool, has_retry: bool
 ) -> Signal | None:
-    """Positive signal: output accepted as-is (no edit, no redirect)."""
-    if has_redirect:
+    """Positive signal: output accepted as-is (no edit, no redirect, no retry).
+
+    A ``retry`` means the session had a problem (a tool/research had to be
+    re-run), so emitting ``acceptance`` ("sent unedited, no redirect") at the
+    same time would be contradictory — gate it out.
+    """
+    if has_redirect or has_retry:
         return None
     draft = trace.draft_output
     accepted = draft is None or draft == trace.final_output
@@ -226,9 +235,12 @@ def extract_signals(trace: SessionTrace) -> tuple[Signal, ...]:
     redirects = _redirect_signals(trace)
     by_kind["redirect"].extend(redirects)
 
-    by_kind["retry"].extend(_retry_signals(trace))
+    retries = _retry_signals(trace)
+    by_kind["retry"].extend(retries)
 
-    acceptance = _acceptance_signal(trace, has_redirect=bool(redirects))
+    acceptance = _acceptance_signal(
+        trace, has_redirect=bool(redirects), has_retry=bool(retries)
+    )
     if acceptance is not None:
         by_kind["acceptance"].append(acceptance)
 
