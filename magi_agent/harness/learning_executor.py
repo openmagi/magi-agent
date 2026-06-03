@@ -41,6 +41,7 @@ from magi_agent.learning.candidates import (
     SessionTrace,
     TranscriptSource,
 )
+from magi_agent.learning.labeler import Labeler
 from magi_agent.learning.eval_gate import (
     MIN_EVAL_SAMPLE_SIZE,
     CheckSet,
@@ -231,6 +232,7 @@ async def run_reflection(
     store: LearningStore | None = None,
     checkset: CheckSet | None = None,
     eval_gate_config: EvalGateConfig | None = None,
+    labeler: Labeler | None = None,
 ) -> LearningReflectionResult:
     """Run a reflection pass over session transcripts.
 
@@ -262,6 +264,11 @@ async def run_reflection(
             consulted when *store* is provided.
         eval_gate_config: Optional eval-gate thresholds.  Only consulted when
             *store* is provided.
+        labeler: Optional injected ``Labeler``.  When ``None`` (default) the
+            deterministic ``LocalFakeLabeler`` is used — byte-identical to
+            PR1–PR6.  PR7's gated live layer injects the real
+            ``LlmBackedLabeler`` here (behind ``MAGI_LEARNING_LIVE_ENABLED`` +
+            readiness); the frozen authority flags stay ``Literal[False]``.
 
     Returns:
         ``LearningReflectionResult`` with ``status``, ``candidates``,
@@ -305,12 +312,17 @@ async def run_reflection(
     traces = await source.read_since(since)
     traces_read = len(traces)
 
-    # --- Step 3: deterministic signal extraction + labeling (no LLM) ---
+    # --- Step 3: signal extraction + labeling ---
     # extract → chronological split (no leakage) → label → noise-filter →
-    # aggregate (train only) → dedup.  Labeler is the deterministic
-    # ``LocalFakeLabeler``; PR7 swaps in an LLM-backed ``Labeler``.
+    # aggregate (train only) → dedup.  The labeler is injected via the *labeler*
+    # DI seam: when ``None`` (default / OFF / PR1–PR6 path) it is the
+    # deterministic ``LocalFakeLabeler`` — byte-identical behaviour.  PR7's gated
+    # live layer (``learning/live.py``) injects the real ``LlmBackedLabeler``
+    # here behind the ``MAGI_LEARNING_LIVE_ENABLED`` gate + readiness stage; the
+    # frozen authority flags stay ``Literal[False]`` regardless.
     # Candidates ONLY — the store is never touched here.
-    labeler = LocalFakeLabeler()
+    if labeler is None:
+        labeler = LocalFakeLabeler()
     train_traces, holdout_traces = chronological_split(traces)
 
     # Signals are extracted exactly once (inside build_candidates) per split;

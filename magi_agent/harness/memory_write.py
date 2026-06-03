@@ -543,10 +543,46 @@ def _has_unsafe_ref_marker(value: str) -> bool:
     return _UNSAFE_REF_MARKER_RE.search(value) is not None
 
 
+def build_gated_live_learning_write_harness(
+    *,
+    readiness: object,
+    bot_id: str,
+    user_id: str,
+) -> "MemoryWriteHarness | None":
+    """PR7 — gated REAL learning store-write binding.
+
+    Returns an ENABLED ``MemoryWriteHarness`` (the real proposed-candidate
+    store-write path) ONLY when the learning-live readiness gate
+    (``gates/learning_live_readiness``) resolves to ``live`` for the given
+    scope.  Otherwise returns ``None`` — the caller keeps the disabled / shadow
+    path, byte-identical to PR1–PR6 (shadow is observe-only: no store write).
+
+    Even when enabled, every ``Literal[False]`` authority flag on
+    ``MemoryWriteHarnessConfig`` stays frozen-False (the model validator coerces
+    them), so the live store-write still flows through the local-fake receipt
+    boundary — the promotion is recorded in the ``learning/live`` audit, never by
+    flipping a flag.  Imports are lazy to keep the default import path unchanged.
+    """
+    from magi_agent.gates.learning_live_readiness import (  # lazy: keep seam thin
+        LearningLiveReadinessConfig,
+        resolve_learning_live_execution_mode,
+    )
+
+    if not isinstance(readiness, LearningLiveReadinessConfig):
+        return None
+    mode = resolve_learning_live_execution_mode(
+        readiness, bot_id=bot_id, user_id=user_id
+    )
+    if mode != "live":
+        return None
+    return MemoryWriteHarness({"enabled": True, "localFakeAdapterEnabled": True})
+
+
 __all__ = [
     "MemoryWriteHarness",
     "MemoryWriteHarnessConfig",
     "MemoryWriteHarnessResult",
+    "build_gated_live_learning_write_harness",
     "MemoryWritePolicy",
     "MemoryWriteRequest",
     "MemoryWriteHarnessStatus",
