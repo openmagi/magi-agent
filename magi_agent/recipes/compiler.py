@@ -2514,6 +2514,9 @@ def _first_party_packs() -> tuple[RecipePackManifest, ...]:
 
 
 def _build_learning_usage_pack() -> RecipePackManifest:
+    # Lazy import breaks the compiler ↔ learning_usage circular import:
+    # ``learning_usage`` imports ``RecipePackManifest`` from this module, so a
+    # top-level import here would form a cycle at module load.
     from magi_agent.recipes.first_party.learning_usage import build_learning_usage_pack
 
     return build_learning_usage_pack()

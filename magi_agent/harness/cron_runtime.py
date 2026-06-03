@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime, timedelta
 import hashlib
+import logging
 import os
 import re
 from typing import Any, Literal, Self
@@ -17,6 +18,9 @@ from magi_agent.harness.learning_executor import (
     run_reflection,
 )
 from magi_agent.runtime.provider_receipts import provider_digest
+
+
+logger = logging.getLogger(__name__)
 
 
 #: Env gate shared with the reflection executor; OFF → reflection job not
@@ -533,14 +537,36 @@ class LearningReflectionCronJob:
 
     @property
     def interval_seconds(self) -> int:
-        """Interval between fires — from env, default 24h, positive only."""
+        """Interval between fires in SECONDS — from env, default 24h, positive only.
+
+        Convenience accessor only.  ``next_fire_at`` MUST add ``interval_ms`` (not
+        this value) so the result stays in the ms-since-epoch unit the rest of
+        the cron module uses.
+        """
         return _reflection_interval_seconds()
 
+    @property
+    def interval_ms(self) -> int:
+        """Interval between fires in MILLISECONDS.
+
+        This is the unit ``next_fire_at`` adds: the surrounding cron module's
+        ``now`` is ms-since-epoch (see ``CronDefinition.next_fire_at`` /
+        ``datetime.fromtimestamp((now+1)/1000, ...)`` / ``timestamp()*1000``), so
+        the reflection interval must be expressed in ms to compose with it.
+        """
+        return _reflection_interval_seconds() * 1000
+
     def next_fire_at(self, *, now: int) -> int | None:
-        """Next scheduled fire time, or ``None`` when not scheduled (OFF)."""
+        """Next scheduled fire time, or ``None`` when not scheduled (OFF).
+
+        ``now`` is milliseconds since epoch — matching the ms contract used by
+        the rest of this module (``CronDefinition`` / ``CronHydrationRequest``).
+        The interval is therefore added as ``interval_ms``, NOT seconds, so a
+        24h interval advances ~86_400_000 ms rather than ~86 seconds.
+        """
         if not self.scheduled:
             return None
-        return now + self.interval_seconds
+        return now + self.interval_ms  # now: milliseconds since epoch
 
     async def trigger_now(self) -> LearningReflectionResult:
         """Run one incremental reflection pass on demand.
@@ -548,7 +574,12 @@ class LearningReflectionCronJob:
         Calls ``run_reflection`` seeded with the current watermark.  Advances
         ``self.watermark`` when the pass returns ``status="ok"`` with a
         non-``None`` watermark.  When the env gate is OFF, ``run_reflection``
-        returns the disabled no-op and the watermark is left unchanged.
+        returns the disabled no-op and the watermark is left unchanged.  On
+        ``status="error"`` the watermark is left unchanged and the error is
+        logged at WARNING (forward-compat for PR7's error path).
+
+        NOT re-entrant: it mutates ``self.watermark`` without a lock, so a real
+        scheduler (PR7/PR8) MUST serialize concurrent ``trigger_now`` calls.
         """
         result = await run_reflection(
             source=self._source,
@@ -560,6 +591,12 @@ class LearningReflectionCronJob:
         )
         if result.status == "ok" and result.watermark is not None:
             self.watermark = result.watermark
+        elif result.status == "error":
+            logger.warning(
+                "learning reflection pass returned status=error; "
+                "watermark unchanged (still %r)",
+                self.watermark,
+            )
         return result
 
 
