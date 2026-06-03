@@ -117,19 +117,46 @@ class SessionSqliteStore:
         }
 
     def list_sync(
-        self, app_name: str, user_id: str | None = None
+        self,
+        app_name: str,
+        user_id: str | None = None,
+        *,
+        since: str | None = None,
+        limit: int | None = None,
     ) -> list[dict[str, Any]]:
+        """List persisted sessions for an app (optionally scoped to a user).
+
+        Default behavior is unchanged: all matching rows ordered by
+        ``updated_at DESC``.  Two OPTIONAL, backward-compatible refinements are
+        available for watermark-incremental readers (e.g. learning reflection):
+
+        * ``since`` — when set, only rows with ``updated_at > since`` are
+          returned, applied at the SQL layer (``WHERE updated_at > ?``) so the
+          whole table is never loaded into Python just to be filtered out.
+        * ``limit`` — when set, caps the number of rows returned
+          (``LIMIT ?``).  When ``since`` is supplied the ordering switches to
+          ``updated_at ASC`` so the cap keeps the OLDEST-after-watermark rows
+          (the next incremental batch) rather than the newest.
+        """
         conn = self._get_conn()
+        clauses = ["app_name = ?"]
+        params: list[Any] = [app_name]
         if user_id is not None:
-            rows = conn.execute(
-                "SELECT * FROM sessions WHERE app_name = ? AND user_id = ? ORDER BY updated_at DESC",
-                (app_name, user_id),
-            ).fetchall()
-        else:
-            rows = conn.execute(
-                "SELECT * FROM sessions WHERE app_name = ? ORDER BY updated_at DESC",
-                (app_name,),
-            ).fetchall()
+            clauses.append("user_id = ?")
+            params.append(user_id)
+        if since is not None:
+            clauses.append("updated_at > ?")
+            params.append(since)
+        order = "ASC" if since is not None else "DESC"
+        sql = (
+            "SELECT * FROM sessions WHERE "
+            + " AND ".join(clauses)
+            + f" ORDER BY updated_at {order}"
+        )
+        if limit is not None:
+            sql += " LIMIT ?"
+            params.append(int(limit))
+        rows = conn.execute(sql, tuple(params)).fetchall()
         return [
             {
                 "id": r["id"],
@@ -229,9 +256,16 @@ class SessionSqliteStore:
         return await asyncio.to_thread(self.load_sync, app_name, user_id, session_id)
 
     async def list(
-        self, app_name: str, user_id: str | None = None
+        self,
+        app_name: str,
+        user_id: str | None = None,
+        *,
+        since: str | None = None,
+        limit: int | None = None,
     ) -> list[dict[str, Any]]:
-        return await asyncio.to_thread(self.list_sync, app_name, user_id)
+        return await asyncio.to_thread(
+            lambda: self.list_sync(app_name, user_id, since=since, limit=limit)
+        )
 
     async def delete(self, session_id: str) -> bool:
         return await asyncio.to_thread(self.delete_sync, session_id)

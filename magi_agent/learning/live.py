@@ -42,6 +42,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from magi_agent.gates.learning_live_readiness import (
     LearningLiveExecutionMode,
     LearningLiveReadinessConfig,
+    _sha256_text_digest,
     learning_live_readiness_health_metadata,
 )
 from magi_agent.learning.candidates import (
@@ -56,13 +57,19 @@ from magi_agent.learning.labeler import (
     LocalFakeLabeler,
     _SIGNAL_LABEL_MAP,
 )
-from magi_agent.learning.models import LearningKind
 from magi_agent.learning.signals import Signal
 
 
 # ---------------------------------------------------------------------------
 # Real transcript source — reads persisted sessions (real durable surface)
 # ---------------------------------------------------------------------------
+
+
+# Default cap on how many sessions a single reflection read pulls from the
+# durable store.  Without this the watermark was applied in Python AFTER a
+# ``SELECT *`` of the whole sessions table; the cap + ``WHERE updated_at > ?``
+# push the bound to SQL so reflection never scans the full table.
+_DEFAULT_REFLECTION_READ_CAP = 500
 
 
 @runtime_checkable
@@ -76,7 +83,12 @@ class SessionPersistenceReader(Protocol):
     """
 
     def list_sync(
-        self, app_name: str, user_id: str | None = None
+        self,
+        app_name: str,
+        user_id: str | None = None,
+        *,
+        since: str | None = None,
+        limit: int | None = None,
     ) -> list[dict[str, Any]]:
         ...  # pragma: no cover
 
@@ -101,15 +113,27 @@ class RealTranscriptSource:
         store: SessionPersistenceReader,
         app_name: str = "magi",
         user_id: str | None = None,
+        read_cap: int = _DEFAULT_REFLECTION_READ_CAP,
     ) -> None:
         self._store = store
         self._app_name = app_name
         self._user_id = user_id
+        self._read_cap = read_cap
 
     async def read_since(
         self, watermark: str | None
     ) -> tuple[SessionTrace, ...]:
-        rows = self._store.list_sync(self._app_name, self._user_id)
+        # Push the watermark + cap to the SQL layer so reflection never scans
+        # the whole sessions table.  ``since`` is a COARSE pre-filter (the DB's
+        # persisted ``updated_at`` precision may differ from the normalized
+        # watermark); the precise ``trace.ts > watermark`` check below is the
+        # authority and never lets an equal/older trace through.
+        rows = self._store.list_sync(
+            self._app_name,
+            self._user_id,
+            since=watermark,
+            limit=self._read_cap,
+        )
         traces: list[SessionTrace] = []
         for row in rows:
             trace = _row_to_trace(row)
@@ -129,10 +153,14 @@ def _normalize_ts(raw: object) -> str | None:
     """
     if not isinstance(raw, str) or not raw:
         return None
-    if raw.endswith("Z"):
-        return raw
+    # Always re-parse and re-emit canonical 6-digit-microsecond ``Z`` form so a
+    # ``Z`` timestamp WITHOUT microseconds (``...:00Z``) compares correctly,
+    # lexicographically, against one WITH (``...:00.000000Z``).  A naive
+    # short-circuit on ``endswith("Z")`` mis-filters same-second sessions
+    # because ``Z`` (0x5A) sorts after ``.`` (0x2E).
+    candidate = raw[:-1] + "+00:00" if raw.endswith("Z") else raw
     try:
-        parsed = datetime.fromisoformat(raw)
+        parsed = datetime.fromisoformat(candidate)
     except ValueError:
         return None
     if parsed.tzinfo is None:
@@ -188,7 +216,9 @@ class LabelerModelClient(Protocol):
         ...  # pragma: no cover
 
 
-_VALID_LABEL_TYPES: frozenset[str] = frozenset(("fact", "citation", "style", "strategy"))
+_VALID_LABEL_TYPES: frozenset[LabelType] = frozenset(
+    ("fact", "citation", "style", "strategy")
+)
 
 
 class LlmBackedLabeler:
@@ -262,6 +292,11 @@ class LearningLiveAuditRecord(BaseModel):
     promoted_adapters: tuple[str, ...] = Field(alias="promotedAdapters")
     promoted_at: str = Field(alias="promotedAt")
     reason_codes: tuple[str, ...] = Field(default=(), alias="reasonCodes")
+    # Scope identity for PR8 fleet/canary rollout telemetry — never the raw
+    # user_id (only a sha256 digest), so audit logs stay PII-free.
+    bot_id: str = Field(alias="botId")
+    tenant_id: str = Field(alias="tenantId")
+    user_id_digest: str = Field(alias="userIdDigest")
 
 
 # ---------------------------------------------------------------------------
@@ -374,7 +409,9 @@ def build_live_learning_binding(
             enabled=True,
             local_fake_adapter_enabled=True,
         )
-        write_harness = MemoryWriteHarness({"enabled": True})
+        write_harness = MemoryWriteHarness(
+            {"enabled": True, "localFakeAdapterEnabled": True}
+        )
         promoted.extend(["memory_recall", "memory_write"])
 
     audit = LearningLiveAuditRecord(
@@ -384,6 +421,9 @@ def build_live_learning_binding(
         promotedAdapters=tuple(promoted),
         promotedAt=_now_iso(),
         reasonCodes=reason_codes,
+        botId=bot_id,
+        tenantId=tenant_id,
+        userIdDigest=_sha256_text_digest(user_id),
     )
 
     return LearningLiveBinding(
