@@ -706,6 +706,21 @@ def build_default_verifier_bus_metadata() -> VerifierBusMetadata:
                 disabled=True,
             ),
             VerifierMetadata(
+                verifierId="learning-eval",
+                stage="task_plan_completion",
+                phase="deterministic",
+                priority=55,
+                description="Learning-layer eval-gate regression metadata (default-off).",
+                inputDeclarations=(
+                    VerifierInputDeclaration(
+                        transcriptRefs=("transcript:learning-reflection",),
+                    ),
+                ),
+                failureRouting=FailureRoutingMetadata(actions=("audit",), failOpen=True),
+                defaultEnabled=False,
+                disabled=True,
+            ),
+            VerifierMetadata(
                 verifierId="security-policy-hard-safety",
                 stage="security_policy",
                 phase="deterministic",
