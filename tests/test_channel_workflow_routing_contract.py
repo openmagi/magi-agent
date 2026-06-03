@@ -40,3 +40,11 @@ def test_model_copy_cannot_set_authority_flags_true():
     copied = d.model_copy(update={"route_attached": True, "execution_attached": True})
     assert copied.route_attached is False
     assert copied.execution_attached is False
+
+
+def test_dispatcher_seam_returns_decision_when_all_true():
+    from magi_agent.channels.dispatcher import maybe_route_to_workflow
+    from magi_agent.channels.workflow_routing import WorkflowRouteDecision
+    decision = maybe_route_to_workflow(eligible=True, confirmed=True, enabled=True)
+    assert isinstance(decision, WorkflowRouteDecision)
+    assert decision.routed is True
