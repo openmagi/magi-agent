@@ -705,6 +705,9 @@ def build_default_verifier_bus_metadata() -> VerifierBusMetadata:
                 defaultEnabled=False,
                 disabled=True,
             ),
+            # Placed in task_plan_completion for catalog compatibility only; this
+            # is a learning-layer regression check with no task/plan semantics.
+            # Move to a dedicated memory/learning stage if one is added.
             VerifierMetadata(
                 verifierId="learning-eval",
                 stage="task_plan_completion",
