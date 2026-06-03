@@ -426,6 +426,26 @@ def build_live_learning_binding(
         userIdDigest=_sha256_text_digest(user_id),
     )
 
+    # PR8 rollout staging telemetry: surface the promotion + the readiness
+    # ladder stage as tenant-scoped, PII-free (hashed owner) events.  Both
+    # emitters are default-OFF (``MAGI_LEARNING_TELEMETRY_ENABLED``) so a
+    # disabled telemetry surface stays byte-quiet; emission NEVER flips a frozen
+    # authority flag and NEVER carries a raw user id.
+    from magi_agent.learning.telemetry import (
+        emit_learning_promotion_event,
+        emit_learning_rollout_staging_event,
+    )
+
+    emit_learning_promotion_event(audit)
+    emit_learning_rollout_staging_event(
+        tenant_id=tenant_id,
+        bot_id=bot_id,
+        execution_mode=mode,
+        promoted_gate=int(meta["promotedGate"]),  # type: ignore[arg-type]
+        canary_live_gate=int(meta["canaryLiveGate"]),  # type: ignore[arg-type]
+        user_id_digest=_sha256_text_digest(user_id),
+    )
+
     return LearningLiveBinding(
         mode=mode,
         transcriptSource=real_source,

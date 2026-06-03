@@ -203,10 +203,16 @@ def _candidate_item_id(candidate: LearningCandidate) -> str:
     return f"learning:{candidate.kind}:{digest}"
 
 
-def _to_item(candidate: LearningCandidate) -> LearningItem:
-    """Promote a ``LearningCandidate`` to a proposed ``LearningItem``."""
+def _to_item(candidate: LearningCandidate, *, tenant_id: str = "local") -> LearningItem:
+    """Promote a ``LearningCandidate`` to a proposed ``LearningItem``.
+
+    The proposed item is stamped with *tenant_id* so the whole eval-gate flow
+    (propose → get → record_eval_observation → auto_activate) stays inside one
+    tenant.  Defaults to ``"local"`` so the OSS single-tenant path is unchanged.
+    """
     return LearningItem(
         id=_candidate_item_id(candidate),
+        tenantId=tenant_id,
         kind=candidate.kind,
         status="proposed",
         scope=candidate.scope,
@@ -227,6 +233,7 @@ def run_eval_gate(
     store: LearningStore,
     checkset: CheckSet,
     config: EvalGateConfig | None = None,
+    tenant_id: str = "local",
 ) -> tuple[EvalGateDecision, ...]:
     """Run each candidate through propose → A/B eval → policy-gated activation.
 
@@ -249,13 +256,14 @@ def run_eval_gate(
 
     decisions: list[EvalGateDecision] = []
     for candidate in candidates:
-        proposed_item = _to_item(candidate)
+        proposed_item = _to_item(candidate, tenant_id=tenant_id)
 
         # Idempotency guard: store.propose() raises if the item already exists
         # in a non-``proposed`` status.  On a re-run over overlapping sessions
         # an already-active/archived candidate must be SKIPPED gracefully —
         # never re-proposed, never re-activated, and never aborting the batch.
-        existing = store.get(proposed_item.id)
+        # Tenant-scoped read so the guard only sees this tenant's items.
+        existing = store.get(proposed_item.id, tenant_id=tenant_id)
         if existing is not None and existing.status != "proposed":
             decisions.append(
                 EvalGateDecision(
@@ -301,6 +309,7 @@ def run_eval_gate(
             after={"mean": _mean(after), "n": len(after)},
             sample_n=sample_n,
             passed=passed,
+            tenant_id=tenant_id,
         )
 
         activated = False
@@ -310,7 +319,9 @@ def run_eval_gate(
             # store's auto_activate (defense in depth) — call it here too so the
             # gate is unambiguously the policy-enforcement point.
             assert_activation_allowed(item, eval_observation_ref=eval_ref)
-            store.auto_activate(item.id, eval_observation_ref=eval_ref)
+            store.auto_activate(
+                item.id, eval_observation_ref=eval_ref, tenant_id=tenant_id
+            )
             activated = True
         # rule  → leave proposed (no-direct-mutation: human approval in PR6).
         # eval  → register as holdout (proposed); not activated as behavior.
