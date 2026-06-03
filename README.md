@@ -10,7 +10,7 @@ powerful.**
 [Releases](https://github.com/openmagi/magi-agent/releases)
 
 ![status](https://img.shields.io/badge/status-early%20beta-f97316)
-![latest](https://img.shields.io/badge/latest-v0.1.6-2563eb)
+![latest](https://img.shields.io/badge/latest-v0.1.7-2563eb)
 ![license](https://img.shields.io/badge/license-Apache--2.0-111827)
 ![runtime](https://img.shields.io/badge/runtime-Magi%20Agent-7c3aed)
 
@@ -172,7 +172,7 @@ You can enable these surfaces explicitly for the workflows you want to run.
 Local development can run the contracts and fixture suites without granting live
 tool authority.
 
-## Local Web Dashboard
+## Local web dashboard
 
 `magi-agent serve` includes a browser dashboard for local work:
 
