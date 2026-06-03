@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import sqlite3
 import uuid
 from dataclasses import dataclass, field
@@ -97,6 +98,20 @@ _MIGRATIONS: list[tuple[int, str]] = [
     ),
 ]
 
+# Statements inside these migrations require special idempotency handling
+# because SQLite's ALTER TABLE does not support IF NOT EXISTS.  Each entry
+# maps (migration_version, statement_prefix) -> a callable that returns True
+# when the statement should be SKIPPED (already applied).
+#
+# Note: PRAGMA table_info omits VIRTUAL generated columns; use table_xinfo
+# (available since SQLite 3.26.0) which includes all column types.
+_MIGRATION_SKIP_GUARDS: dict[tuple[int, str], object] = {
+    (4, "ALTER TABLE learning_items"): lambda conn: any(
+        row[1] == "scope_task_kind"
+        for row in conn.execute("PRAGMA table_xinfo(learning_items)").fetchall()
+    ),
+}
+
 
 def _run_migrations(conn: sqlite3.Connection) -> int:
     conn.execute(
@@ -121,10 +136,19 @@ def _run_migrations(conn: sqlite3.Connection) -> int:
         # process crashes after executescript but before the INSERT, the
         # next startup would see current < version and re-run — idempotent
         # because every statement uses IF NOT EXISTS.
+        # Statements registered in _MIGRATION_SKIP_GUARDS are checked first
+        # and skipped when their guard returns True (already applied), making
+        # them safe to re-run after a crash mid-migration.
         with conn:
             for statement in sql.split(";"):
                 statement = statement.strip()
-                if statement:
+                if not statement:
+                    continue
+                for (guard_ver, guard_prefix), should_skip in _MIGRATION_SKIP_GUARDS.items():
+                    if guard_ver == version and statement.startswith(guard_prefix):
+                        if should_skip(conn):  # type: ignore[operator]
+                            break
+                else:
                     conn.execute(statement)
             conn.execute(
                 "INSERT INTO _learning_schema_version (version) VALUES (?)", (version,)
@@ -302,6 +326,17 @@ class SqliteLearningStore:
                 demote an active/archived item, which violates the
                 policy-gated status-transition contract.
         """
+        # Guard: reject ids that use the reserved version-chain suffix.
+        # IDs ending in :v<digits> are owned by edit() and must not be
+        # proposed directly, or edit() would clobber legitimately-versioned
+        # items whose root id happens to end in that pattern.
+        if re.search(r":v\d+$", item.id):
+            raise ValueError(
+                f"Cannot propose learning item with id {item.id!r}: "
+                "the ':v<digits>' suffix is reserved for the version chain "
+                "managed by edit(). Use a plain id without that suffix."
+            )
+
         conn = self._get_conn()
 
         # Guard: reject propose() if the item already exists in a
@@ -605,8 +640,7 @@ class SqliteLearningStore:
         #   learning:item → learning:item:v2 → learning:item:v3
         # instead of cascading:
         #   learning:item → learning:item:v2 → learning:item:v2:v3
-        import re as _re
-        root_id = _re.sub(r":v\d+$", "", item_id)
+        root_id = re.sub(r":v\d+$", "", item_id)
         new_id = f"{root_id}:v{original.version + 1}"
         new_data = original.model_dump(by_alias=True) | patch | {
             "id": new_id,

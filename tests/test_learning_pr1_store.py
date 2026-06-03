@@ -1130,3 +1130,108 @@ class TestActivationPathBehavioral:
         # Confirm assert_activation_allowed was the gate
         assert activated.eval_observation_ref == eval_ref
         assert activated.approval_ref is not None
+
+
+# ---------------------------------------------------------------------------
+# Fix-specific regression tests
+# ---------------------------------------------------------------------------
+
+
+class TestMigration4Idempotent:
+    """Migration 4 ALTER TABLE must be crash-idempotent.
+
+    Simulates the scenario where the column was added (by ALTER TABLE) but
+    the version row was not yet recorded — e.g. process crashed between the
+    ALTER and the INSERT INTO _learning_schema_version.  Re-running migrations
+    must NOT raise OperationalError: duplicate column name.
+    """
+
+    def test_migration4_idempotent_when_column_exists_but_version_not_recorded(
+        self, tmp_path: Path
+    ) -> None:
+        import sqlite3 as _sqlite3
+
+        from magi_agent.learning.store import _run_migrations
+
+        db_path = tmp_path / "crash_sim.db"
+        conn = _sqlite3.connect(str(db_path))
+        conn.row_factory = _sqlite3.Row
+
+        # Apply migrations 1–3 normally so the base schema is present.
+        _run_migrations(conn)
+
+        # Manually execute the ALTER TABLE (simulating crash after DDL but
+        # before version INSERT), then delete the version-4 row to simulate
+        # the version not being recorded yet.
+        try:
+            conn.execute(
+                """
+                ALTER TABLE learning_items
+                    ADD COLUMN scope_task_kind TEXT
+                        GENERATED ALWAYS AS (json_extract(scope_json, '$.taskKind')) VIRTUAL
+                """
+            )
+            conn.commit()
+        except _sqlite3.OperationalError:
+            # Column already present (migrations ran fully) — that's fine for
+            # the simulation; we just need version-4 row gone.
+            pass
+
+        conn.execute(
+            "DELETE FROM _learning_schema_version WHERE version = 4"
+        )
+        conn.commit()
+
+        # Now re-running migrations must succeed without raising.
+        try:
+            _run_migrations(conn)
+        except _sqlite3.OperationalError as exc:
+            raise AssertionError(
+                f"Migration 4 is not idempotent — re-run raised: {exc}"
+            ) from exc
+        finally:
+            conn.close()
+
+
+class TestProposeRejectsVersionSuffix:
+    """propose() must reject ids that end in :v<digits> (reserved for edit())."""
+
+    def test_propose_with_version_suffix_raises_value_error(
+        self, store: object
+    ) -> None:
+        from magi_agent.learning.models import LearningItem
+
+        item = LearningItem.model_validate(
+            {**_base_payload("rule"), "id": "learning:item-root:v2"}
+        )
+        with pytest.raises(ValueError, match=r":v\d+"):
+            store.propose(item)
+
+    def test_propose_without_version_suffix_still_works(
+        self, store: object
+    ) -> None:
+        """Plain ids must not be affected by the guard."""
+        from magi_agent.learning.models import LearningItem
+
+        item = LearningItem.model_validate(
+            {**_base_payload("rule"), "id": "learning:item-root-v2-plain"}
+        )
+        result = store.propose(item)
+        assert result.id == "learning:item-root-v2-plain"
+
+    def test_propose_rejects_various_version_suffixes(
+        self, store: object
+    ) -> None:
+        from magi_agent.learning.models import LearningItem
+
+        for bad_id in (
+            "learning:item:v1",
+            "learning:item:v10",
+            "learning:item:v999",
+        ):
+            item = LearningItem.model_validate(
+                {**_base_payload("eval"), "id": bad_id,
+                 "content": {"input": "I", "expected": "E"}}
+            )
+            with pytest.raises(ValueError, match=r":v\d+"):
+                store.propose(item)
