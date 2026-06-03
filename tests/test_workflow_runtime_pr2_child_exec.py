@@ -289,6 +289,52 @@ def test_pack_enabled_routes_child_through_real_adk_surface() -> None:
     assert "/workspace" not in encoded
 
 
+def test_real_child_surface_requires_token_validated_acceptance(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A real child ADK turn must not become parent-visible without acceptance."""
+    from magi_agent.meta_orchestration.child_acceptance import ChildAcceptanceVerdict
+
+    def reject_acceptance(*_args: object, **_kwargs: object) -> ChildAcceptanceVerdict:
+        return ChildAcceptanceVerdict._from_evaluation(
+            status="rejected",
+            reason_codes=("runtime_receipt_mismatch",),
+            accepted_evidence_refs=(),
+            missing_evidence_refs=(),
+            retryable=False,
+            retry_budget_remaining=0,
+        )
+
+    monkeypatch.setattr(
+        "magi_agent.runtime.child_runner_boundary.accept_real_child_envelope",
+        reject_acceptance,
+    )
+
+    fake = _LocalFakeRunner()
+    boundary = LocalChildRunnerBoundary(
+        ChildRunnerConfig(
+            enabled=True,
+            localFakeChildRunnerEnabled=True,
+            realChildExecutionPackEnabled=True,
+        ),
+        child_runner=fake,
+        adk_turn_boundary=_adk_boundary(),
+    )
+
+    result = asyncio.run(boundary.run(_request()))
+    projection = result.public_projection()
+
+    assert result.status == "blocked"
+    assert result.error_code == "real_child_acceptance_rejected"
+    assert projection["diagnosticMetadata"]["realChildRunnerExecuted"] is True
+    assert projection["diagnosticMetadata"]["childAcceptanceStatus"] == "rejected"
+    assert projection["diagnosticMetadata"]["childAcceptanceReason"] == (
+        "runtime_receipt_mismatch"
+    )
+    assert projection["childEnvelope"] is None
+    assert fake.calls == 0
+
+
 # ---------------------------------------------------------------------------
 # Test 2 — token / envelope tamper rejection
 # ---------------------------------------------------------------------------

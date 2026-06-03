@@ -54,6 +54,7 @@ from magi_agent.harness.workflow_result_cache import (
     CachedChildResult,
     WorkflowResultCache,
 )
+from magi_agent.runtime.child_runner_boundary import MAX_TOTAL_AGENTS_PER_RUN
 from magi_agent.runtime.public_events import runtime_trace_event as _trace_event
 from magi_agent.recipes.research_child_runner import (
     ResearchChildRunnerConfig,
@@ -256,6 +257,27 @@ class WorkflowExecutorConfig(BaseModel):
         default=False,
         alias="productionChildExecutionEnabled",
     )
+    #: Opt-in local real-child execution pack.  Default remains OFF; callers
+    #: must also supply an ``adk_turn_boundary`` to ``execute_workflow``.
+    real_child_execution_pack_enabled: bool = Field(
+        default=False,
+        alias="realChildExecutionPackEnabled",
+    )
+    #: Run-level spawn budget.  The semaphore bounds concurrent children; this
+    #: separately bounds the total number of child agents spawned in a parent run.
+    max_total_agents_per_run: int = Field(
+        default=MAX_TOTAL_AGENTS_PER_RUN,
+        alias="maxTotalAgentsPerRun",
+        ge=1,
+        le=MAX_TOTAL_AGENTS_PER_RUN,
+    )
+    #: Number of child agents already spawned earlier in this parent run.
+    agents_spawned_so_far: int = Field(
+        default=0,
+        alias="agentsSpawnedSoFar",
+        ge=0,
+        le=MAX_TOTAL_AGENTS_PER_RUN,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -397,6 +419,7 @@ async def execute_workflow(
     *,
     config: WorkflowExecutorConfig | None = None,
     child_runner: object | None = None,
+    adk_turn_boundary: object | None = None,
     result_cache: WorkflowResultCache | None = None,
     event_sink: Callable[[dict[str, object]], None] | None = None,
     cross_review_step: CrossReviewStep | None = None,
@@ -554,9 +577,14 @@ async def execute_workflow(
     recipe_config = ResearchChildRunnerConfig(
         enabled=config.enabled and config.local_fake_child_runner_enabled,
         localFakeChildRunnerEnabled=config.local_fake_child_runner_enabled,
+        realChildExecutionPackEnabled=config.real_child_execution_pack_enabled,
         maxChildTasks=1,  # one task per dispatch call → per-child semaphore works correctly
     )
-    recipe = ResearchChildRunnerRecipe(recipe_config, child_runner=child_runner)
+    recipe = ResearchChildRunnerRecipe(
+        recipe_config,
+        child_runner=child_runner,
+        adk_turn_boundary=adk_turn_boundary,
+    )
 
     parent_execution_id = _execution_id(contract)
     turn_id = _turn_id(contract)
@@ -616,6 +644,24 @@ async def execute_workflow(
         or (cached_entry := result_cache.get(recipe_cache_keys[index])) is None
         or cached_entry.status != "accepted"
     )
+
+    if (
+        pending_indexed_tasks
+        and config.agents_spawned_so_far + len(pending_indexed_tasks)
+        > config.max_total_agents_per_run
+    ):
+        _emit_telemetry_event(event_sink, telemetry, evidence_ref, contract, "live")
+        return WorkflowExecutorResult(
+            status="blocked",
+            workflowId=contract.workflow_id,
+            version=contract.version,
+            validationReasonCodes=("total_agents_per_run_exceeded",),
+            childTasksDispatched=0,
+            dryRunReport=dry_run_report,
+            workflowRunEvidenceRef=evidence_ref,
+            executionMode="live",
+            telemetrySnapshot=_snapshot(telemetry),
+        )
 
     # Dispatch each pending child task under the semaphore.
     async def _dispatch_child(

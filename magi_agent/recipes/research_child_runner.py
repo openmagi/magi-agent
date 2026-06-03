@@ -79,6 +79,10 @@ class ResearchChildRunnerConfig(BaseModel):
         alias="workspaceMutationEnabled",
     )
     user_visible_activation: Literal[False] = Field(default=False, alias="userVisibleActivation")
+    real_child_execution_pack_enabled: bool = Field(
+        default=False,
+        alias="realChildExecutionPackEnabled",
+    )
 
     @field_validator("additional_allowed_tools", mode="before")
     @classmethod
@@ -381,9 +385,11 @@ class ResearchChildRunnerRecipe:
         config: ResearchChildRunnerConfig | None = None,
         *,
         child_runner: object | None = None,
+        adk_turn_boundary: object | None = None,
     ) -> None:
         self.config = config or ResearchChildRunnerConfig()
         self.child_runner = child_runner
+        self.adk_turn_boundary = adk_turn_boundary
 
     async def run(
         self,
@@ -478,8 +484,12 @@ class ResearchChildRunnerRecipe:
             ChildRunnerConfig(
                 enabled=self.config.enabled,
                 localFakeChildRunnerEnabled=self.config.local_fake_child_runner_enabled,
+                realChildExecutionPackEnabled=(
+                    self.config.real_child_execution_pack_enabled
+                ),
             ),
             child_runner=self.child_runner,
+            adk_turn_boundary=self.adk_turn_boundary,
         ).run(child_request)
 
 

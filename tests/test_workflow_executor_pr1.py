@@ -557,3 +557,85 @@ def test_partial_child_status_is_not_misreported_as_blocked(
     )
     assert result.child_tasks_dispatched > 0
     assert partial_runner.calls > 0
+
+
+# ---------------------------------------------------------------------------
+# Test 7 — total-agents-per-run cap is enforced by the executor
+# ---------------------------------------------------------------------------
+
+def test_executor_blocks_before_dispatch_when_total_agent_budget_exhausted(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The executor must enforce the run-level ≤1000 total-agent cap.
+
+    The child boundary has its own cap helper, but the workflow executor is the
+    orchestrator that fans out child tasks.  If the run-level budget is already
+    exhausted, no child should be dispatched at all.
+    """
+    monkeypatch.setenv("MAGI_WORKFLOW_EXECUTOR_ENABLED", "1")
+
+    from magi_agent.harness.workflow_executor import (
+        WorkflowExecutorConfig,
+        WorkflowExecutorResult,
+        execute_workflow,
+    )
+    from magi_agent.runtime.child_runner_boundary import MAX_TOTAL_AGENTS_PER_RUN
+
+    runner = _FakeChildRunner()
+    contract = _valid_contract(n_recipes=1)
+    config = WorkflowExecutorConfig(
+        enabled=True,
+        local_fake_child_runner_enabled=True,
+        maxTotalAgentsPerRun=MAX_TOTAL_AGENTS_PER_RUN,
+        agentsSpawnedSoFar=MAX_TOTAL_AGENTS_PER_RUN,
+    )
+
+    result: WorkflowExecutorResult = asyncio.run(
+        execute_workflow(contract, config=config, child_runner=runner)
+    )
+
+    assert result.status == "blocked"
+    assert result.validation_reason_codes == ("total_agents_per_run_exceeded",)
+    assert result.child_tasks_dispatched == 0
+    assert runner.calls == 0
+
+
+def test_executor_opt_in_can_route_child_through_real_adk_surface(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The executor should wire the opt-in real-child ADK surface end to end."""
+    monkeypatch.setenv("MAGI_WORKFLOW_EXECUTOR_ENABLED", "1")
+
+    from magi_agent.harness.workflow_executor import (
+        WorkflowExecutorConfig,
+        WorkflowExecutorResult,
+        execute_workflow,
+    )
+    from magi_agent.runtime.adk_turn_runner import (
+        LocalAdkReplayRunner,
+        LocalAdkTurnRunnerBoundary,
+    )
+
+    fake_runner = _FakeChildRunner()
+    replay_runner = LocalAdkReplayRunner()
+    adk_boundary = LocalAdkTurnRunnerBoundary.from_local_test_runner(replay_runner)
+    contract = _valid_contract(n_recipes=1)
+    config = WorkflowExecutorConfig(
+        enabled=True,
+        local_fake_child_runner_enabled=True,
+        realChildExecutionPackEnabled=True,
+    )
+
+    result: WorkflowExecutorResult = asyncio.run(
+        execute_workflow(
+            contract,
+            config=config,
+            child_runner=fake_runner,
+            adk_turn_boundary=adk_boundary,
+        )
+    )
+
+    assert result.status == "accepted"
+    assert result.child_tasks_dispatched == 1
+    assert fake_runner.calls == 0
+    assert len(replay_runner.calls) == 1

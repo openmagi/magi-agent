@@ -90,6 +90,33 @@ class RuntimeIssueAuthority(BaseModel):
         }
 
 
+def issue_runtime_authority(
+    *,
+    authority_id: str,
+    scopes: tuple[RuntimeIssueScope, ...],
+) -> RuntimeIssueAuthority:
+    """Issue a domain-neutral runtime authority for runtime-boundary code.
+
+    The authority only proves that the in-process runtime boundary produced the
+    object.  Domain policy is still enforced by the caller-specific contract
+    that consumes the authority.
+    """
+    authority = RuntimeIssueAuthority(
+        authorityId=authority_id,
+        scopes=tuple(dict.fromkeys(scopes)),
+    )
+    object_id = id(authority)
+    authority.__pydantic_private__["_issued_by_runtime_boundary"] = True
+    _AUTHORITY_OBJECT_IDS.add(object_id)
+    _AUTHORITY_FINGERPRINTS[object_id] = _authority_fingerprint(authority)
+    _AUTHORITY_FINALIZERS[object_id] = finalize(
+        authority,
+        _discard_authority_object_id,
+        object_id,
+    )
+    return authority
+
+
 def require_runtime_issue_authority(
     authority: RuntimeIssueAuthority | None,
     *,
@@ -132,5 +159,6 @@ def _public_ref(value: str, field_name: str) -> str:
 __all__ = [
     "RuntimeIssueAuthority",
     "RuntimeIssueScope",
+    "issue_runtime_authority",
     "require_runtime_issue_authority",
 ]
