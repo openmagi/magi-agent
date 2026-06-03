@@ -111,6 +111,19 @@ def _propose_with_eval(store: SqliteLearningStore, item: LearningItem) -> str:
     )
 
 
+def _record_eval(
+    store: SqliteLearningStore, item_id: str, *, passed: bool
+) -> str:
+    """Record an eval observation (passing or failing) for *item_id*."""
+    return store.record_eval_observation(
+        item_id=item_id,
+        before={"score": 0.0},
+        after={"score": 1.0 if passed else 0.0},
+        sample_n=4,
+        passed=passed,
+    )
+
+
 # ---------------------------------------------------------------------------
 # List
 # ---------------------------------------------------------------------------
@@ -254,6 +267,220 @@ def test_approve_non_proposed_item_4xx(tmp_path) -> None:
         headers=_auth(approver=True),
     )
     assert 400 <= resp.status_code < 500
+    store.close()
+
+
+# ---------------------------------------------------------------------------
+# C1 — failing eval observation must NOT satisfy the approval gate
+# ---------------------------------------------------------------------------
+#
+# Semantics implemented: "the latest eval observation overall must be passing".
+# A passing observation must exist AND not be superseded by a newer failing one.
+
+
+def test_approve_with_only_failing_eval_422_stays_proposed(tmp_path) -> None:
+    store = _store(tmp_path)
+    store.propose(_rule(item_id="learning:rule-fail"))
+    _record_eval(store, "learning:rule-fail", passed=False)
+    client = _client(store)
+
+    resp = client.post(
+        "/v1/learning/learnings/learning:rule-fail/approve",
+        headers=_auth(approver=True),
+    )
+    assert resp.status_code == 422
+    assert "passing eval observation" in resp.json()["message"]
+    assert store.get("learning:rule-fail").status == "proposed"
+    store.close()
+
+
+def test_approve_with_failing_then_passing_eval_succeeds(tmp_path) -> None:
+    store = _store(tmp_path)
+    store.propose(_rule(item_id="learning:rule-recovered"))
+    _record_eval(store, "learning:rule-recovered", passed=False)
+    _record_eval(store, "learning:rule-recovered", passed=True)
+    client = _client(store)
+
+    resp = client.post(
+        "/v1/learning/learnings/learning:rule-recovered/approve",
+        headers=_auth(approver=True),
+    )
+    assert resp.status_code == 200
+    assert resp.json()["status"] == "active"
+    assert store.get("learning:rule-recovered").status == "active"
+    store.close()
+
+
+def test_approve_with_passing_then_failing_eval_blocked_422(tmp_path) -> None:
+    # strict semantics: a later failing observation supersedes the passing one
+    store = _store(tmp_path)
+    store.propose(_rule(item_id="learning:rule-regressed"))
+    _record_eval(store, "learning:rule-regressed", passed=True)
+    _record_eval(store, "learning:rule-regressed", passed=False)
+    client = _client(store)
+
+    resp = client.post(
+        "/v1/learning/learnings/learning:rule-regressed/approve",
+        headers=_auth(approver=True),
+    )
+    assert resp.status_code == 422
+    assert "passing eval observation" in resp.json()["message"]
+    assert store.get("learning:rule-regressed").status == "proposed"
+    store.close()
+
+
+# ---------------------------------------------------------------------------
+# I1 — empty gateway token refused at construction
+# ---------------------------------------------------------------------------
+
+
+def test_empty_gateway_token_rejected_at_build(tmp_path) -> None:
+    import pytest
+
+    store = _store(tmp_path)
+    service = LearningGovernanceService(store)
+    with pytest.raises(ValueError):
+        build_learning_dashboard_router(service, gateway_token="")
+    store.close()
+
+
+# ---------------------------------------------------------------------------
+# I3 — unbounded limit is clamped at the transport layer
+# ---------------------------------------------------------------------------
+
+
+def test_list_limit_clamped_to_200(tmp_path, monkeypatch) -> None:
+    store = _store(tmp_path)
+    service = LearningGovernanceService(store)
+    app = FastAPI()
+    app.include_router(
+        build_learning_dashboard_router(service, gateway_token=GATEWAY_TOKEN)
+    )
+    client = TestClient(app)
+
+    seen: dict[str, int] = {}
+    original = service.list_items
+
+    def _spy(*args, **kwargs):
+        seen["limit"] = kwargs.get("limit")
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(service, "list_items", _spy)
+
+    resp = client.get(
+        "/v1/learning/learnings", headers=_auth(), params={"limit": 10_000}
+    )
+    assert resp.status_code == 200
+    assert seen["limit"] == 200
+    store.close()
+
+
+# ---------------------------------------------------------------------------
+# I4 — cross-tenant get/detail leak guarded at the service layer
+# ---------------------------------------------------------------------------
+
+
+def test_cross_tenant_get_returns_404(tmp_path) -> None:
+    store = _store(tmp_path)
+    other = LearningItem(
+        id="learning:rule-other-tenant",
+        tenantId="other-tenant",
+        kind="rule",
+        scope=LearningScope(taskKind="general", tags=("style",)),
+        content={"when": "x", "then": "y"},
+        rationale="r",
+        provenance=Provenance(
+            sessionIds=("sess-x",),
+            derivedBy="reflection",
+            createdAt="2026-06-03T10:00:00Z",
+        ),
+    )
+    store.propose(other)
+    client = _client(store)
+
+    resp = client.get(
+        "/v1/learning/learnings/learning:rule-other-tenant", headers=_auth()
+    )
+    assert resp.status_code == 404
+    store.close()
+
+
+# ---------------------------------------------------------------------------
+# MINOR — injected reflection job, 404 on missing id, double-archive
+# ---------------------------------------------------------------------------
+
+
+def test_injected_reflection_job_is_used(tmp_path) -> None:
+    from magi_agent.harness.cron_runtime import LearningReflectionCronJob
+
+    store = _store(tmp_path)
+    job = LearningReflectionCronJob(store=store)
+    service = LearningGovernanceService(store, reflection_job=job)
+    assert service._reflection_job is job
+
+    calls: list[bool] = []
+    original = job.trigger_now
+
+    async def _spy():
+        calls.append(True)
+        return await original()
+
+    job.trigger_now = _spy  # type: ignore[method-assign]
+    asyncio.run(service.run_reflection())
+    assert calls == [True]
+    store.close()
+
+
+def test_approve_missing_id_returns_404(tmp_path) -> None:
+    store = _store(tmp_path)
+    client = _client(store)
+    resp = client.post(
+        "/v1/learning/learnings/nope/approve", headers=_auth(approver=True)
+    )
+    assert resp.status_code == 404
+    store.close()
+
+
+def test_edit_missing_id_returns_404(tmp_path) -> None:
+    store = _store(tmp_path)
+    client = _client(store)
+    resp = client.patch(
+        "/v1/learning/learnings/nope",
+        headers=_auth(approver=True),
+        json={"patch": {"rationale": "x"}},
+    )
+    assert resp.status_code == 404
+    store.close()
+
+
+def test_delete_missing_id_returns_404(tmp_path) -> None:
+    store = _store(tmp_path)
+    client = _client(store)
+    resp = client.delete(
+        "/v1/learning/learnings/nope", headers=_auth(approver=True)
+    )
+    assert resp.status_code == 404
+    store.close()
+
+
+def test_double_archive_is_idempotent(tmp_path) -> None:
+    store = _store(tmp_path)
+    store.propose(_rule(item_id="learning:rule-archive-twice"))
+    client = _client(store)
+
+    resp1 = client.delete(
+        "/v1/learning/learnings/learning:rule-archive-twice",
+        headers=_auth(approver=True),
+    )
+    assert resp1.status_code == 200
+    assert resp1.json()["status"] == "archived"
+
+    resp2 = client.delete(
+        "/v1/learning/learnings/learning:rule-archive-twice",
+        headers=_auth(approver=True),
+    )
+    assert resp2.status_code == 200
+    assert resp2.json()["status"] == "archived"
     store.close()
 
 

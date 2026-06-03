@@ -157,6 +157,11 @@ class LearningGovernanceService:
         item = self._store.get(item_id)
         if item is None:
             raise LearningNotFoundError(f"learning item not found: {item_id!r}")
+        # Tenant guard: ``store.get`` is NOT tenant-scoped, so an item belonging
+        # to another tenant must read as "not found" to avoid a cross-tenant
+        # information leak (404, never 200/500).
+        if item.tenant_id != self._tenant_id:
+            raise LearningNotFoundError(f"learning item not found: {item_id!r}")
         return item
 
     def detail(self, item_id: str) -> tuple[LearningItem, str | None, ConflictInfo]:
@@ -204,7 +209,17 @@ class LearningGovernanceService:
                     conflicting_ids=conflict.conflicting_ids,
                 )
 
-        eval_ref = self._resolve_eval_observation_ref(item)
+        # Governance gate: a rule may only be activated if its *latest* eval
+        # observation is PASSING.  A failing observation (even if a passing one
+        # existed earlier) must NOT satisfy the approval gate — a regression
+        # supersedes prior passes.  We never hand a failing ref to the store.
+        eval_ref = self._resolve_passing_eval_observation_ref(item)
+        if eval_ref is None:
+            raise LearningPolicyError(
+                "approval requires a passing eval observation "
+                "(eval-observation-required): the latest recorded eval for "
+                f"item {item_id!r} is missing or failing"
+            )
         try:
             return self._store.approve(
                 item_id,
@@ -248,7 +263,12 @@ class LearningGovernanceService:
             raise LearningApiError(str(exc)) from exc
 
     def delete(self, item_id: str, *, actor: str) -> LearningItem:
-        """Soft-delete (archive) an item.  Never hard-deletes."""
+        """Soft-delete (archive) an item.  Never hard-deletes.
+
+        Idempotent: archiving an already-archived item succeeds and returns the
+        archived item.  Missing / cross-tenant ids raise 404 via ``get_item``.
+        """
+        self.get_item(item_id)  # 404 + tenant guard before mutating
         try:
             return self._store.archive(item_id, actor=actor)
         except KeyError as exc:
@@ -297,6 +317,36 @@ class LearningGovernanceService:
             (item.id,),
         ).fetchone()
         if row is None:
+            return None
+        return row["ref"]
+
+    def _resolve_passing_eval_observation_ref(
+        self, item: LearningItem
+    ) -> str | None:
+        """Return the ref of the *latest* eval observation IFF it is passing.
+
+        Strict governance semantics: the most recent observation overall must
+        be passing.  If the latest observation failed — even when an earlier
+        one passed — approval is refused (a regression supersedes prior passes).
+        Returns ``None`` when there is no observation or the latest one failed.
+
+        A ref already stamped on the item row (set at a prior activation) is
+        treated as a passing ref — the store only stamps refs that passed the
+        policy gate at activation time.
+        """
+        if item.eval_observation_ref:
+            return item.eval_observation_ref
+        conn = self._store._get_conn()  # noqa: SLF001 — sibling read of store conn
+        row = conn.execute(
+            """
+            SELECT ref, passed FROM learning_eval_observations
+            WHERE item_id = ?
+            ORDER BY created_at DESC, rowid DESC
+            LIMIT 1
+            """,
+            (item.id,),
+        ).fetchone()
+        if row is None or not row["passed"]:
             return None
         return row["ref"]
 

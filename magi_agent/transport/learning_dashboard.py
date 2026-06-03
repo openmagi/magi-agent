@@ -186,6 +186,14 @@ def build_learning_dashboard_router(
     *,
     gateway_token: str,
 ) -> APIRouter:
+    # I1: refuse to build an unauthenticated dashboard.  An empty/None token
+    # would let a blank ``x-gateway-token: `` header authenticate via
+    # ``compare_digest("", "")`` — a silent auth bypass.  Fail loud at build.
+    if not gateway_token:
+        raise ValueError(
+            "build_learning_dashboard_router requires a non-empty gateway_token; "
+            "refusing to mount an unauthenticated learning dashboard"
+        )
     router = APIRouter(prefix="/v1/learning", tags=["learning"])
 
     def _authorized(request: Request) -> bool:
@@ -219,6 +227,9 @@ def build_learning_dashboard_router(
         if not _authorized(request):
             return _unauthorized()
         scope = LearningScope(taskKind=taskKind) if taskKind is not None else None
+        # I3: clamp caller-supplied limit to a sane window so a hostile/buggy
+        # client cannot request an unbounded page.
+        limit = min(max(limit, 1), 200)
         page = service.list_items(
             kind=kind,  # type: ignore[arg-type]
             status=status,  # type: ignore[arg-type]
@@ -309,6 +320,9 @@ def build_learning_dashboard_router(
 
     @router.post("/reflection/run")
     async def run_reflection(request: Request) -> JSONResponse:
+        # I2: an approver is required even though this is not a pure read —
+        # triggering reflection writes proposed candidates into the store, so it
+        # mutates the proposed queue and must carry an accountable actor.
         if not _authorized(request):
             return _unauthorized()
         if _approver(request) is None:
