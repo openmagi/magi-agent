@@ -242,6 +242,7 @@ def test_approver_role_allowed_and_recorded(tmp_path) -> None:
     ).fetchone()
     assert row is not None
     assert APPROVER in row["approver"]
+    assert "role=approver" in row["approver"]
 
 
 def test_anonymous_mutation_still_401(tmp_path) -> None:
@@ -386,3 +387,193 @@ def test_eval_gate_threads_explicit_tenant(tmp_path) -> None:
     assert store.get(item_id, tenant_id="tenant-a").status == "active"
     assert store.get(item_id, tenant_id="local") is None
     assert store.get(item_id, tenant_id="tenant-b") is None
+
+
+# ---------------------------------------------------------------------------
+# 6. C1 — cross-tenant propose() clobber is impossible
+# ---------------------------------------------------------------------------
+
+
+def _content_candidate(*, ref: str, behavior: str) -> LearningCandidate:
+    return LearningCandidate(
+        kind="example",
+        scope=LearningScope(taskKind="general"),
+        content={"situation": "s", "behavior": behavior},
+        rationale="r",
+        provenance=Provenance(
+            sessionIds=("sess-1",),
+            derivedBy="reflection",
+            createdAt="2026-06-03T00:00:00.000000Z",
+        ),
+        sourceSignalRef=ref,
+    )
+
+
+def test_propose_no_cross_tenant_clobber(tmp_path) -> None:
+    """Cross-tenant content with the same source_signal_ref cannot clobber.
+
+    tenant-a proposes (via the eval gate) content with a ``source_signal_ref``;
+    tenant-b proposes DIFFERENT content with the SAME ``source_signal_ref``.
+    Because the candidate id is tenant-unique (sha1 over ``tenant_id`` +
+    ``source_signal_ref``) and propose() is tenant-scoped, tenant-a's row stays
+    intact (owned by tenant-a, original content) and tenant-b gets a DISTINCT
+    row — cross-tenant clobber is impossible.
+    """
+    store = _store(tmp_path)
+    checkset = StaticCheckSet(before=(0.5, 0.5, 0.5, 0.5), after=(0.9, 0.9, 0.9, 0.9))
+
+    a = run_eval_gate(
+        (_content_candidate(ref="signal-shared", behavior="tenant-a-original"),),
+        store=store,
+        checkset=checkset,
+        tenant_id="tenant-a",
+    )
+    b = run_eval_gate(
+        (_content_candidate(ref="signal-shared", behavior="tenant-b-hijack"),),
+        store=store,
+        checkset=checkset,
+        tenant_id="tenant-b",
+    )
+
+    a_id, b_id = a[0].item_id, b[0].item_id
+    # Distinct rows despite identical source_signal_ref.
+    assert a_id != b_id
+
+    # tenant-a's row is intact: owned by tenant-a, original content untouched.
+    a_item = store.get(a_id, tenant_id="tenant-a")
+    assert a_item is not None
+    assert a_item.tenant_id == "tenant-a"
+    assert a_item.content["behavior"] == "tenant-a-original"
+
+    # tenant-b owns its OWN distinct row with its own content.
+    b_item = store.get(b_id, tenant_id="tenant-b")
+    assert b_item is not None
+    assert b_item.tenant_id == "tenant-b"
+    assert b_item.content["behavior"] == "tenant-b-hijack"
+
+    # No cross-tenant visibility either way.
+    assert store.get(a_id, tenant_id="tenant-b") is None
+    assert store.get(b_id, tenant_id="tenant-a") is None
+
+
+def test_eval_gate_candidate_ids_are_tenant_unique(tmp_path) -> None:
+    """Same source_signal_ref + different tenants → DISTINCT store rows.
+
+    Defense in depth: the candidate id is derived from ``tenant_id`` +
+    ``source_signal_ref``, so cross-tenant content can never share an id and the
+    upsert path can never be reached across tenants.
+    """
+    store = _store(tmp_path)
+    checkset = StaticCheckSet(before=(0.5, 0.5, 0.5, 0.5), after=(0.9, 0.9, 0.9, 0.9))
+
+    a = run_eval_gate(
+        (_candidate(ref="same-signal"),), store=store, checkset=checkset, tenant_id="tenant-a"
+    )
+    b = run_eval_gate(
+        (_candidate(ref="same-signal"),), store=store, checkset=checkset, tenant_id="tenant-b"
+    )
+
+    # Distinct ids despite identical source_signal_ref.
+    assert a[0].item_id != b[0].item_id
+    # Each tenant owns its own row; neither bleeds across.
+    assert store.get(a[0].item_id, tenant_id="tenant-a") is not None
+    assert store.get(a[0].item_id, tenant_id="tenant-b") is None
+    assert store.get(b[0].item_id, tenant_id="tenant-b") is not None
+    assert store.get(b[0].item_id, tenant_id="tenant-a") is None
+
+
+# ---------------------------------------------------------------------------
+# 7. I1 — reflection-run is tenant-scoped (no longer always "local")
+# ---------------------------------------------------------------------------
+
+
+def test_reflection_run_writes_under_request_tenant(tmp_path, monkeypatch) -> None:
+    """A non-local tenant's reflection run writes under ITS tenant, not "local"."""
+    from magi_agent.harness.cron_runtime import LearningReflectionCronJob
+    from magi_agent.harness.learning_executor import LearningReflectionConfig
+    from magi_agent.learning.candidates import LocalFakeTranscriptSource, SessionTrace
+
+    monkeypatch.setenv("MAGI_LEARNING_REFLECTION_ENABLED", "1")
+
+    store = _store(tmp_path)
+    trace = SessionTrace(
+        session_id="sess-xyz",
+        turns=({"role": "user", "text": "hi"}, {"role": "agent", "text": "done"}),
+        final_output="done",
+        ts="2026-06-03T10:00:00Z",
+    )
+    job = LearningReflectionCronJob(
+        source=LocalFakeTranscriptSource(traces=(trace,)),
+        store=store,
+        config=LearningReflectionConfig(enabled=True),
+    )
+    service = LearningGovernanceService(store, tenant_id="tenant-a", reflection_job=job)
+
+    summary = asyncio.run(service.run_reflection())
+    assert summary.status == "ok"
+    # At least one item was written (proposed and/or activated).
+    written = summary.items_proposed + summary.items_activated
+    assert written >= 1
+
+    # Items are visible under tenant-a, and NOT under "local".
+    tenant_a_items = store.list(tenant_id="tenant-a").items
+    assert len(tenant_a_items) == written
+    assert all(i.tenant_id == "tenant-a" for i in tenant_a_items)
+    assert store.list(tenant_id="local").items == ()
+
+
+# ---------------------------------------------------------------------------
+# 8. I2 — is_approver resolver raising → clean 503 (not 500)
+# ---------------------------------------------------------------------------
+
+
+def test_resolver_exception_returns_503(tmp_path) -> None:
+    store = _store(tmp_path)
+    store.propose(_rule(item_id="r-503", tenant_id="tenant-a"))
+    _record_passing_obs(store, "r-503", tenant_id="tenant-a")
+
+    def _raising_resolver(tenant_id: str, approver: str) -> bool:
+        raise RuntimeError("role store unreachable")
+
+    app = FastAPI()
+    router = build_learning_dashboard_router(
+        store=store, gateway_token=GATEWAY_TOKEN, is_approver=_raising_resolver
+    )
+    app.include_router(router)
+    client = TestClient(app)
+
+    r = client.post(
+        "/v1/learning/learnings/r-503/approve",
+        headers=_headers(tenant="tenant-a", approver=APPROVER),
+    )
+    assert r.status_code == 503
+    assert r.json() == {"error": "role_check_unavailable"}
+
+
+# ---------------------------------------------------------------------------
+# 9. MINOR — telemetry never crashes the caller
+# ---------------------------------------------------------------------------
+
+
+def test_telemetry_construction_failure_returns_none(monkeypatch) -> None:
+    """An emit that fails model construction logs WARNING and returns None."""
+    monkeypatch.setenv("MAGI_LEARNING_TELEMETRY_ENABLED", "1")
+    from magi_agent.learning import telemetry as tel
+
+    # Force DeterministicRuntimeEvent construction to raise, simulating an
+    # odd/protected token reaching the strict event model.
+    def _boom(*args, **kwargs):
+        raise ValueError("protected token rejected")
+
+    monkeypatch.setattr(tel, "DeterministicRuntimeEvent", _boom)
+
+    sink: list = []
+    ev = tel.emit_learning_approval_event(
+        tenant_id="tenant-a",
+        item_id="approval:odd",
+        approver_role="approver",
+        user_id="bot::weird\x00token",
+        sink=sink.append,
+    )
+    assert ev is None
+    assert sink == []

@@ -289,7 +289,17 @@ def build_learning_dashboard_router(
             return None, JSONResponse(
                 status_code=401, content={"error": "approver_required"}
             )
-        if not resolver(_tenant(request), approver):
+        # A hosted role resolver may reach an external role store; if that lookup
+        # raises, surface a clean 503 (role check unavailable) rather than
+        # letting the exception bubble into an opaque 500.
+        try:
+            is_approver_role = resolver(_tenant(request), approver)
+        except Exception:
+            return None, JSONResponse(
+                status_code=503,
+                content={"error": "role_check_unavailable"},
+            )
+        if not is_approver_role:
             return None, JSONResponse(
                 status_code=403,
                 content={"error": "approver_role_required"},

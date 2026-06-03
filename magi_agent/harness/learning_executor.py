@@ -233,6 +233,7 @@ async def run_reflection(
     checkset: CheckSet | None = None,
     eval_gate_config: EvalGateConfig | None = None,
     labeler: Labeler | None = None,
+    tenant_id: str = "local",
 ) -> LearningReflectionResult:
     """Run a reflection pass over session transcripts.
 
@@ -269,6 +270,10 @@ async def run_reflection(
             PR1–PR6.  PR7's gated live layer injects the real
             ``LlmBackedLabeler`` here (behind ``MAGI_LEARNING_LIVE_ENABLED`` +
             readiness); the frozen authority flags stay ``Literal[False]``.
+        tenant_id: Tenant the proposed/activated items are written under.
+            Threaded into ``run_eval_gate`` so a non-``"local"`` tenant's
+            reflection run writes inside its own tenant.  Defaults to ``"local"``
+            so the single-tenant path stays byte-identical.
 
     Returns:
         ``LearningReflectionResult`` with ``status``, ``candidates``,
@@ -358,6 +363,7 @@ async def run_reflection(
             store=store,
             checkset=gate_checkset,
             config=eval_gate_config,
+            tenant_id=tenant_id,
         )
 
     # --- Step 4: advance watermark ---

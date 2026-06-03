@@ -348,7 +348,8 @@ class SqliteLearningStore:
         # Guard: reject propose() if the item already exists in a
         # non-proposed state (active or archived).
         existing_row = conn.execute(
-            "SELECT status FROM learning_items WHERE id = ?", (item.id,)
+            "SELECT status FROM learning_items WHERE id = ? AND tenant_id = ?",
+            (item.id, item.tenant_id),
         ).fetchone()
         if existing_row is not None and existing_row["status"] != "proposed":
             raise ValueError(
@@ -381,7 +382,6 @@ class SqliteLearningStore:
                 :stats_json, :eval_observation_ref, :approval_ref, :updated_at
             )
             ON CONFLICT(id) DO UPDATE SET
-                tenant_id = excluded.tenant_id,
                 kind       = excluded.kind,
                 status     = excluded.status,
                 scope_json = excluded.scope_json,

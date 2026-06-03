@@ -568,7 +568,7 @@ class LearningReflectionCronJob:
             return None
         return now + self.interval_ms  # now: milliseconds since epoch
 
-    async def trigger_now(self) -> LearningReflectionResult:
+    async def trigger_now(self, *, tenant_id: str = "local") -> LearningReflectionResult:
         """Run one incremental reflection pass on demand.
 
         Calls ``run_reflection`` seeded with the current watermark.  Advances
@@ -577,6 +577,12 @@ class LearningReflectionCronJob:
         returns the disabled no-op and the watermark is left unchanged.  On
         ``status="error"`` the watermark is left unchanged and the error is
         logged at WARNING (forward-compat for PR7's error path).
+
+        Args:
+            tenant_id: Tenant the reflection pass writes under.  Threaded into
+                ``run_reflection`` so a non-``"local"`` tenant's run stays inside
+                its own tenant.  Defaults to ``"local"`` (single-tenant path
+                byte-identical).
 
         NOT re-entrant: it mutates ``self.watermark`` without a lock, so a real
         scheduler (PR7/PR8) MUST serialize concurrent ``trigger_now`` calls.
@@ -588,6 +594,7 @@ class LearningReflectionCronJob:
             store=self._store,
             checkset=self._checkset,
             eval_gate_config=self._eval_gate_config,
+            tenant_id=tenant_id,
         )
         if result.status == "ok" and result.watermark is not None:
             self.watermark = result.watermark

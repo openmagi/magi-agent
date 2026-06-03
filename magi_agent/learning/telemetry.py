@@ -29,6 +29,7 @@ them to an injected ``sink`` (default: a module-level logger record builder).
 from __future__ import annotations
 
 import hashlib
+import logging
 import os
 from collections.abc import Callable, Mapping
 from typing import TYPE_CHECKING
@@ -38,6 +39,9 @@ from magi_agent.telemetry.logging import log_record
 
 if TYPE_CHECKING:
     from magi_agent.learning.live import LearningLiveAuditRecord
+
+
+logger = logging.getLogger(__name__)
 
 
 _TELEMETRY_ENV_VAR = "MAGI_LEARNING_TELEMETRY_ENABLED"
@@ -89,20 +93,32 @@ def _emit(
     """
     if not learning_telemetry_enabled():
         return None
-    event = DeterministicRuntimeEvent(
-        eventId=event_id,
-        runId="learning.rollout",
-        workflowId="openmagi.learning",
-        stepId=step_id,
-        eventType=event_type,
-        routeDecision=route_decision,
-        effectivePolicySnapshotDigest=_NULL_DIGEST,
-        ledgerHeadDigest=_NULL_DIGEST,
-        repairAttempt=0,
-        projectionMode="learning_rollout_staging",
-        redactionStatus="redacted",
-        metadata=dict(metadata),
-    )
+    # Telemetry must never crash the caller: if the strict event model rejects
+    # any field (e.g. an operator/bot id carrying an odd or model-protected
+    # token), log a WARNING and return None instead of propagating.
+    try:
+        event = DeterministicRuntimeEvent(
+            eventId=event_id,
+            runId="learning.rollout",
+            workflowId="openmagi.learning",
+            stepId=step_id,
+            eventType=event_type,
+            routeDecision=route_decision,
+            effectivePolicySnapshotDigest=_NULL_DIGEST,
+            ledgerHeadDigest=_NULL_DIGEST,
+            repairAttempt=0,
+            projectionMode="learning_rollout_staging",
+            redactionStatus="redacted",
+            metadata=dict(metadata),
+        )
+    except Exception:
+        logger.warning(
+            "learning telemetry event construction failed; dropping event "
+            "(event_type=%s, route_decision=%s)",
+            event_type,
+            route_decision,
+        )
+        return None
     (sink or _default_sink)(event)
     return event
 
