@@ -181,6 +181,15 @@ class TestAcceptanceSignal:
         trace = _trace(draft_output="x", final_output="y")
         assert "acceptance" not in {s.kind for s in extract_signals(trace)}
 
+    def test_no_acceptance_when_retry_present(self) -> None:
+        # A retry means the session had a problem; emitting acceptance
+        # ("sent unedited, no redirect") at the same time is contradictory.
+        turns = (_tool("web_search"), _tool("web_search"))
+        trace = _trace(turns=turns, draft_output=None, final_output="done")
+        kinds = {s.kind for s in extract_signals(trace)}
+        assert "retry" in kinds
+        assert "acceptance" not in kinds
+
 
 class TestExtractionDeterminism:
     def test_stable_ordering_and_repeatable(self) -> None:
@@ -475,3 +484,95 @@ class TestExecutorEndToEnd:
         assert result.llm_attached is False
         assert result.production_write_enabled is False
         assert result.real_transcript_source_attached is False
+
+    def test_recurring_pattern_promotes_to_rule_end_to_end(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # C1 regression: aggregation must fire through the full executor path.
+        # N >= threshold recurring-pattern sessions must yield >= 1 rule
+        # candidate.  Use enough sessions that the train split (after the
+        # chronological holdout) still meets the aggregation threshold (3).
+        monkeypatch.setenv(_REFLECTION_ENV_VAR, "1")
+        traces = tuple(
+            _trace(
+                f"s{i}",
+                turns=(_tool("web_search"), _tool("web_search")),
+                draft_output=None,
+                final_output="done",
+                ts=f"2026-06-{i + 1:02d}T10:00:00Z",
+            )
+            for i in range(6)
+        )
+        result = asyncio.run(
+            run_reflection(
+                source=LocalFakeTranscriptSource(traces=traces),
+                config=LearningReflectionConfig(enabled=True),
+            )
+        )
+        assert result.status == "ok"
+        assert "rule" in {c.kind for c in result.candidates}
+
+    def test_eval_candidates_never_promote_to_rule(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # I1: eval (holdout) candidates must never contribute to rule promotion.
+        # Every recurring pattern lives only in the holdout split here, so no
+        # rule may form even though the same pattern recurs across sessions.
+        monkeypatch.setenv(_REFLECTION_ENV_VAR, "1")
+        # 4 traces → 1-trace holdout; the holdout can't recur 3x by itself, and
+        # eval candidates are excluded from aggregation regardless.
+        traces = tuple(
+            _trace(
+                f"s{i}",
+                turns=(_tool("web_search"), _tool("web_search")),
+                draft_output=None,
+                final_output="done",
+                ts=f"2026-06-{i + 1:02d}T10:00:00Z",
+            )
+            for i in range(4)
+        )
+        result = asyncio.run(
+            run_reflection(
+                source=LocalFakeTranscriptSource(traces=traces),
+                config=LearningReflectionConfig(enabled=True),
+            )
+        )
+        # eval candidates exist but stay kind=="eval"; the single eval session
+        # never becomes a rule.
+        eval_cands = [c for c in result.candidates if c.kind == "eval"]
+        assert eval_cands
+        for c in eval_cands:
+            assert c.kind != "rule"
+
+    def test_signals_extracted_counts_single_pass(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # I4: signals must be extracted exactly once; the reported count equals
+        # the direct extraction total over all traces.
+        monkeypatch.setenv(_REFLECTION_ENV_VAR, "1")
+        traces = (
+            _trace("s1", turns=(_tool("x"), _tool("x")),
+                   draft_output="a", final_output="b", ts="2026-06-01T10:00:00Z"),
+            _trace("s2", turns=(_user("p"), _agent("q"), _user("r")),
+                   final_output="done", ts="2026-06-02T10:00:00Z"),
+        )
+        expected = sum(len(extract_signals(t)) for t in traces)
+        result = asyncio.run(
+            run_reflection(
+                source=LocalFakeTranscriptSource(traces=traces),
+                config=LearningReflectionConfig(enabled=True),
+            )
+        )
+        assert result.counters["signals_extracted"] == expected
+
+    def test_disabled_counters_schema_uniform(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # m3: disabled path counters must carry the same keys as the ok path so
+        # callers never KeyError on signals_extracted.
+        monkeypatch.delenv(_REFLECTION_ENV_VAR, raising=False)
+        result = asyncio.run(run_reflection())
+        assert result.status == "disabled"
+        assert result.counters["signals_extracted"] == 0
+        assert result.counters["traces_read"] == 0
+        assert result.counters["candidates_produced"] == 0

@@ -216,6 +216,7 @@ def _candidate_from_label(
     content = _content_for_kind(kind, label)
     return LearningCandidate(
         kind=kind,
+        # TODO(PR5): derive task_kind from trace/signal for scope-based retrieval routing
         scope=LearningScope(taskKind="general", tags=(label.type,)),
         content=content,
         rationale=label.lesson,
@@ -239,10 +240,35 @@ def build_candidates(
     When ``as_eval`` is True every produced candidate is forced to kind
     ``"eval"`` (used for the chronological holdout split).  Otherwise the
     candidate uses the label's own ``candidate_kind``.
+
+    Thin wrapper over :func:`build_candidates_with_signal_count` that discards
+    the signal count for callers that only need the candidates.
+    """
+    candidates, _signal_count = build_candidates_with_signal_count(
+        traces, labeler=labeler, as_eval=as_eval
+    )
+    return candidates
+
+
+def build_candidates_with_signal_count(
+    traces: tuple[SessionTrace, ...],
+    *,
+    labeler: Labeler,
+    as_eval: bool = False,
+) -> tuple[tuple[LearningCandidate, ...], int]:
+    """Like :func:`build_candidates`, but also return the total signal count.
+
+    Signals are extracted exactly ONCE per trace here; the returned count is the
+    number of extracted (pre-noise-filter) signals summed over all traces, so
+    callers can report ``signals_extracted`` without a second extraction pass.
+    Behavior is otherwise identical and deterministic.
     """
     out: list[LearningCandidate] = []
+    total_signals = 0
     for trace in traces:
-        signals = filter_noise(extract_signals(trace), trace)
+        extracted = extract_signals(trace)
+        total_signals += len(extracted)
+        signals = filter_noise(extracted, trace)
         for signal in signals:
             label = labeler.label(signal, trace)
             if label is None:
@@ -253,7 +279,7 @@ def build_candidates(
                     trace=trace, signal=signal, label=label, kind=kind
                 )
             )
-    return tuple(out)
+    return tuple(out), total_signals
 
 
 # ---------------------------------------------------------------------------
@@ -261,6 +287,8 @@ def build_candidates(
 # ---------------------------------------------------------------------------
 
 #: Two candidates with Jaccard similarity >= this are treated as duplicates.
+#: Chosen for the deterministic fake-labeler output; reassess at PR7 when the
+#: LLM-authored rationale introduces natural wording variation.
 _DEDUP_THRESHOLD: float = 0.85
 
 
@@ -283,7 +311,8 @@ def _jaccard(a: frozenset[str], b: frozenset[str]) -> float:
         return 0.0
     inter = len(a & b)
     union = len(a | b)
-    return inter / union if union else 0.0
+    # both-empty (union == 0) is already handled above, so union > 0 here.
+    return inter / union
 
 
 def dedup_candidates(
@@ -397,6 +426,7 @@ __all__ = [
     "LocalFakeLabeler",
     "aggregate_candidates",
     "build_candidates",
+    "build_candidates_with_signal_count",
     "chronological_split",
     "dedup_candidates",
     "filter_noise",

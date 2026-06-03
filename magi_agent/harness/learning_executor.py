@@ -8,7 +8,7 @@ Architecture:
             ├─ extract_signals  (deterministic, structural — no LLM)
             ├─ chronological_split → train / eval-holdout (no leakage)
             ├─ LocalFakeLabeler  (deterministic — PR7 swaps in LLM-backed)
-            ├─ filter_noise / dedup / cross-session aggregate
+            ├─ filter_noise / aggregate (train only) / dedup
             └─ LearningReflectionResult{status, candidates, watermark, counters}
 
 Env gate: ``MAGI_LEARNING_REFLECTION_ENABLED`` (default OFF).
@@ -44,11 +44,10 @@ from magi_agent.learning.candidates import (
 from magi_agent.learning.labeler import (
     LocalFakeLabeler,
     aggregate_candidates,
-    build_candidates,
+    build_candidates_with_signal_count,
     chronological_split,
     dedup_candidates,
 )
-from magi_agent.learning.signals import extract_signals
 
 
 # ---------------------------------------------------------------------------
@@ -238,7 +237,13 @@ async def run_reflection(
             status="disabled",
             candidates=(),
             watermark=None,
-            counters={"traces_read": 0, "candidates_produced": 0},
+            # Keep the disabled-path counter schema uniform with the ok path so
+            # callers never KeyError on, e.g., ``signals_extracted``.
+            counters={
+                "traces_read": 0,
+                "signals_extracted": 0,
+                "candidates_produced": 0,
+            },
         )
 
     # --- Step 2: read traces (local-fake only in PR2) ---
@@ -248,6 +253,9 @@ async def run_reflection(
     # we still fall back to an empty local-fake so the executor remains safe;
     # PR7 will replace this branch with a real source attachment.
     if source is None:
+        # Both branches are intentionally identical until PR7 wires the real
+        # transcript source; until then we always fall back to an empty
+        # local-fake so the executor stays safe regardless of the flag.
         if config.local_fake_enabled:
             source = LocalFakeTranscriptSource(traces=())
         else:
@@ -259,23 +267,31 @@ async def run_reflection(
 
     # --- Step 3: deterministic signal extraction + labeling (no LLM) ---
     # extract → chronological split (no leakage) → label → noise-filter →
-    # dedup → cross-session aggregate.  Labeler is the deterministic
+    # aggregate (train only) → dedup.  Labeler is the deterministic
     # ``LocalFakeLabeler``; PR7 swaps in an LLM-backed ``Labeler``.
     # Candidates ONLY — the store is never touched here.
-    signals_extracted = sum(len(extract_signals(t)) for t in traces)
-
     labeler = LocalFakeLabeler()
     train_traces, holdout_traces = chronological_split(traces)
 
-    train_candidates = build_candidates(train_traces, labeler=labeler)
-    eval_candidates = build_candidates(
+    # Signals are extracted exactly once (inside build_candidates) per split;
+    # sum the two split counts for the reported ``signals_extracted``.
+    train_candidates, train_signals = build_candidates_with_signal_count(
+        train_traces, labeler=labeler
+    )
+    eval_candidates, eval_signals = build_candidates_with_signal_count(
         holdout_traces, labeler=labeler, as_eval=True
     )
+    signals_extracted = train_signals + eval_signals
 
-    combined = dedup_candidates(train_candidates + eval_candidates)
-    candidates = aggregate_candidates(
-        combined, threshold=_AGGREGATION_THRESHOLD
+    # Aggregate TRAIN candidates first so recurring per-session copies merge
+    # (provenance/diversity) before dedup collapses them — otherwise dedup
+    # would erase the recurrence and aggregation could never reach threshold.
+    # Eval (holdout) candidates are kept OUT of aggregation so they never
+    # contribute to rule promotion (train/eval isolation).
+    aggregated_train = aggregate_candidates(
+        train_candidates, threshold=_AGGREGATION_THRESHOLD
     )
+    candidates = dedup_candidates(aggregated_train + eval_candidates)
 
     # --- Step 4: advance watermark ---
     new_watermark: str | None = _max_ts(traces) if traces else since
