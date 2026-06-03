@@ -33,3 +33,11 @@ def test_model_construct_disabled():
     import pytest
     with pytest.raises(TypeError):
         WorkflowCostEstimate.model_construct()
+
+
+def test_basis_is_immutable():
+    c = _contract()
+    e = estimate_workflow_cost(c, per_child_token_estimate=8000, model_microcents_per_1k=120)
+    import pytest
+    with pytest.raises(Exception):
+        e.basis["perChildTokenEstimate"] = 0  # type: ignore[index]

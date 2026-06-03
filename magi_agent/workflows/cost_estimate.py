@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from typing import Any, Self
+from types import MappingProxyType
+from typing import Self
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from magi_agent.workflows.compiler import CompiledWorkflowContract
 
@@ -25,8 +26,13 @@ class WorkflowCostEstimate(BaseModel):
     estimated_credits_microcents: int = Field(alias="estimatedCreditsMicrocents", ge=0)
     basis: Mapping[str, object]
 
+    @field_validator("basis")
     @classmethod
-    def model_construct(cls, _fields_set: set[str] | None = None, **values: Any) -> Self:
+    def _freeze_basis(cls, value: Mapping[str, object]) -> Mapping[str, object]:
+        return MappingProxyType(dict(value))
+
+    @classmethod
+    def model_construct(cls, _fields_set: set[str] | None = None, **values: object) -> Self:
         raise TypeError("model_construct is disabled for WorkflowCostEstimate")
 
 
@@ -37,8 +43,8 @@ def estimate_workflow_cost(
     model_microcents_per_1k: int,
 ) -> WorkflowCostEstimate:
     children = len(contract.selected_recipes)
-    total_tokens = children * max(0, per_child_token_estimate)
-    credits = (total_tokens // 1000) * max(0, model_microcents_per_1k)
+    total_tokens = children * per_child_token_estimate
+    credits = (total_tokens // 1000) * model_microcents_per_1k
     return WorkflowCostEstimate(
         workflowId=contract.workflow_id,
         estimatedChildAgents=children,
