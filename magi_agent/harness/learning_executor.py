@@ -41,6 +41,14 @@ from magi_agent.learning.candidates import (
     SessionTrace,
     TranscriptSource,
 )
+from magi_agent.learning.eval_gate import (
+    MIN_EVAL_SAMPLE_SIZE,
+    CheckSet,
+    EvalGateConfig,
+    StaticCheckSet,
+    run_eval_gate,
+)
+from magi_agent.learning.store import LearningStore
 from magi_agent.learning.labeler import (
     LocalFakeLabeler,
     aggregate_candidates,
@@ -61,6 +69,15 @@ _TRUE_STRINGS = frozenset({"1", "true", "yes", "on"})
 
 #: Default number of distinct sessions a pattern must recur in to become a rule.
 _AGGREGATION_THRESHOLD: int = 3
+
+#: Default deterministic checkset used by the eval gate when a store is injected
+#: but no explicit checkset is supplied.  Neutral (no regression) over the
+#: minimum sample size so the gate's sample-size guard is satisfied; the real
+#: agent-driven evaluator is injected by callers (and lands in PR7).
+_DEFAULT_GATE_CHECKSET: StaticCheckSet = StaticCheckSet(
+    before=(1.0,) * MIN_EVAL_SAMPLE_SIZE,
+    after=(1.0,) * MIN_EVAL_SAMPLE_SIZE,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -203,6 +220,9 @@ async def run_reflection(
     source: TranscriptSource | None = None,
     since: str | None = None,
     config: LearningReflectionConfig | None = None,
+    store: LearningStore | None = None,
+    checkset: CheckSet | None = None,
+    eval_gate_config: EvalGateConfig | None = None,
 ) -> LearningReflectionResult:
     """Run a reflection pass over session transcripts.
 
@@ -222,6 +242,18 @@ async def run_reflection(
             are processed.  ``None`` reads all available traces.
         config: Executor configuration.  Defaults to
             ``LearningReflectionConfig()`` when ``None``.
+        store: Optional injected learning store.  When ``None`` (default) the
+            executor is candidates-only with ZERO store writes — byte-identical
+            to PR3 / the OFF path.  When a store is injected AND the executor is
+            gated ON, candidates are run through the PR4 eval gate
+            (``eval_gate.run_eval_gate``), which proposes them and policy-gates
+            activation.  Writing proposed candidates to the injected (local)
+            store is intended local behavior; the ``production_write_enabled`` /
+            ``llm_attached`` authority flags stay frozen (live mutation is PR7).
+        checkset: Injected deterministic checkset used by the eval gate.  Only
+            consulted when *store* is provided.
+        eval_gate_config: Optional eval-gate thresholds.  Only consulted when
+            *store* is provided.
 
     Returns:
         ``LearningReflectionResult`` with ``status``, ``candidates``,
@@ -292,6 +324,20 @@ async def run_reflection(
         train_candidates, threshold=_AGGREGATION_THRESHOLD
     )
     candidates = dedup_candidates(aggregated_train + eval_candidates)
+
+    # --- Step 3b: optional eval gate (DI-gated; OFF path never reaches here) ---
+    # When a store is injected, run candidates through the PR4 eval gate so
+    # they are proposed and (for passing examples) policy-gated activated in the
+    # *local* store.  When ``store is None`` this block is skipped entirely and
+    # the executor stays candidates-only — byte-identical to PR3.
+    if store is not None:
+        gate_checkset = checkset if checkset is not None else _DEFAULT_GATE_CHECKSET
+        run_eval_gate(
+            candidates,
+            store=store,
+            checkset=gate_checkset,
+            config=eval_gate_config,
+        )
 
     # --- Step 4: advance watermark ---
     new_watermark: str | None = _max_ts(traces) if traces else since

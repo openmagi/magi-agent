@@ -268,7 +268,7 @@ _BUILTIN_PRESETS: tuple[BuiltinHarnessPreset, ...] = tuple(
             _preset("response-language", PresetCategory.OUTPUT, hook_points=("afterLLMCall",), config_gates=("response-language-policy",), scope_hints=("configured-policy",)),
             _preset("parallel-research", PresetCategory.RESEARCH, default_on=False, hook_points=("beforeTurnStart",), scope_hints=("research-agent",)),
             _preset("source-authority", PresetCategory.RESEARCH, hook_points=("afterToolUse", "afterLLMCall"), contributed_ledgers=("source-ledger",), verifier_gates=("source-authority",)),
-            _preset("memory-continuity", PresetCategory.MEMORY, hook_points=("beforeCompaction", "afterCompaction"), contributed_ledgers=("memory-ledger",)),
+            _preset("memory-continuity", PresetCategory.MEMORY, hook_points=("beforeCompaction", "afterCompaction"), contributed_ledgers=("memory-ledger",), verifier_gates=("learning-eval",)),
             _security_preset(
                 "dangerous-patterns",
                 hook_points=("beforeToolUse",),
