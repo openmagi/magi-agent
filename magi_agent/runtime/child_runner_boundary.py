@@ -8,6 +8,15 @@ from typing import Any, Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, field_serializer, field_validator
 
+from magi_agent.evidence.child_runtime_envelope import (
+    ChildRuntimeEnvelope,
+    ChildRuntimeEnvelopeAuthorityFlags,
+)
+from magi_agent.evidence.runtime_issuance import issue_runtime_authority
+from magi_agent.evidence.subagent import DelegatedEvidenceRequirement
+
+from ..meta_orchestration.child_acceptance import accept_real_child_envelope
+
 
 ChildRunnerStatus = Literal["disabled", "blocked", "ok", "error"]
 ChildDeliveryMode = Literal["return", "background"]
@@ -22,10 +31,9 @@ REAL_ADK_CHILD_RUNNER_SURFACE = "local_adk_turn_runner"
 #: Hard cap on the number of child agents that may be spawned within a single
 #: parent run.  This bounds runaway fan-out independently of the per-child
 #: in-flight Semaphore (which bounds concurrency, not the total count).
-#: NOTE: The cap is enforced inside ``LocalChildRunnerBoundary.run()`` via the
-#: ``agents_spawned_so_far`` parameter, but no production orchestrator
-#: increments or passes that counter yet.  Executor wiring is deferred to a
-#: later Track 17 PR.
+#: The workflow executor also enforces this as a parent-run preflight before
+#: dispatching pending children; the boundary keeps the same cap as a final
+#: per-child guard for real-child execution.
 MAX_TOTAL_AGENTS_PER_RUN = 1000
 
 
@@ -33,9 +41,9 @@ def clamp_total_agents_per_run(requested: int) -> int:
     """Clamp a requested total-agents budget to ``[1, MAX_TOTAL_AGENTS_PER_RUN]``.
 
     Used by callers to validate a config-supplied budget before constructing a
-    ``LocalChildRunnerBoundary``.  The boundary itself enforces the cap at
-    runtime via ``agents_spawned_so_far``; no production orchestrator
-    increments that counter yet (deferred to a later Track 17 PR).
+    ``LocalChildRunnerBoundary``.  The workflow executor enforces the parent-run
+    budget before fan-out, and the boundary keeps the same guard at runtime via
+    ``agents_spawned_so_far``.
     """
     if not isinstance(requested, int) or isinstance(requested, bool):
         return MAX_TOTAL_AGENTS_PER_RUN
@@ -514,21 +522,54 @@ class LocalChildRunnerBoundary:
                 diagnostics=diagnostics,
             )
 
-        # Build the sanitised envelope from the REAL turn result only.  No raw
-        # transcript/events are read — we emit a single runtime-issued evidence
-        # ref keyed off the child + turn so the parent gets a verifiable, opaque
-        # pointer rather than any child content.
+        child_execution_id = f"child-exec-{_digest(f'{request.parent_execution_id}:{request.task_id}')}"
+        receipt_ref = f"receipt:{_digest(f'{request.parent_execution_id}:{request.task_id}:receipt')}"
+        audit_ref = f"audit:{_digest(f'{request.parent_execution_id}:{request.task_id}:adk-turn')}"
+        envelope = _runtime_child_acceptance_envelope(
+            request,
+            child_execution_id=child_execution_id,
+            receipt_ref=receipt_ref,
+            audit_ref=audit_ref,
+            prompt_ref=prompt_ref,
+        )
+        policy = _runtime_child_acceptance_policy(
+            request,
+            child_execution_id=child_execution_id,
+            receipt_ref=receipt_ref,
+            audit_ref=audit_ref,
+        )
+        verdict = accept_real_child_envelope(
+            envelope,
+            receipt_ref=receipt_ref,
+            policy=policy,
+        )
+        diagnostics["childAcceptanceStatus"] = verdict.status
+        diagnostics["childAcceptanceReason"] = ",".join(verdict.reason_codes)
+        if verdict.status != "accepted":
+            return _result(
+                request,
+                prompt_ref,
+                "blocked",
+                error_code="real_child_acceptance_rejected",
+                diagnostics=diagnostics,
+            )
+
+        diagnostics["childAcceptanceAcceptedEvidenceCount"] = len(
+            verdict.accepted_evidence_refs
+        )
+
+        # Build the sanitised parent-visible envelope from accepted REAL turn
+        # evidence.  No raw transcript/events are read; the parent sees only
+        # opaque runtime refs, and token-validated acceptance has already passed.
         real_output: dict[str, object] = {
-            "childExecutionId": f"child:{_digest(f'{request.parent_execution_id}:{request.task_id}')}",
+            "childExecutionId": child_execution_id,
             "status": "completed",
             "summary": "",
             "evidenceRefs": (
                 f"evidence:{_digest(f'{request.turn_id}:{request.task_id}:adk-turn')}",
             ),
             "artifactRefs": (),
-            "auditEventRefs": (
-                f"audit:{_digest(f'{request.parent_execution_id}:{request.task_id}:adk-turn')}",
-            ),
+            "auditEventRefs": (audit_ref,),
         }
         return ChildRunnerResult(
             status="ok",
@@ -549,6 +590,164 @@ class LocalChildRunnerBoundary:
         if inspect.isawaitable(value):
             return await value
         return value
+
+
+def _runtime_child_acceptance_envelope(
+    request: ChildTaskRequest,
+    *,
+    child_execution_id: str,
+    receipt_ref: str,
+    audit_ref: str,
+    prompt_ref: str,
+) -> ChildRuntimeEnvelope:
+    role = _evidence_agent_role(request.role)
+    task_id = _acceptance_task_id(request)
+    policy_snapshot_id = "policy:child-runner-boundary"
+    runtime_authority = issue_runtime_authority(
+        authority_id="authority:child-runner-boundary",
+        scopes=("child_runtime_envelope",),
+    )
+    return ChildRuntimeEnvelope.issue_runtime_envelope(
+        runtime_authority=runtime_authority,
+        issuer="openmagi_runtime_boundary",
+        mode="return",
+        status="accepted",
+        parentBoundary={
+            "executionId": request.parent_execution_id,
+            "agentId": "parent-agent",
+            "turnId": request.turn_id,
+            "policyScope": role,
+            "policySnapshotId": policy_snapshot_id,
+            "agentRole": role,
+            "runOn": "main",
+            "spawnDepth": 0,
+        },
+        childBoundary={
+            "executionId": child_execution_id,
+            "agentId": "child-agent",
+            "parentExecutionId": request.parent_execution_id,
+            "taskId": task_id,
+            "turnId": request.turn_id,
+            "policyScope": role,
+            "policySnapshotId": policy_snapshot_id,
+            "agentRole": role,
+            "runOn": "child",
+            "spawnDepth": _requested_spawn_depth(request),
+        },
+        task={
+            "taskId": task_id,
+            "persona": role,
+            "role": role,
+            "spawnDepth": _requested_spawn_depth(request),
+            "deliver": request.delivery,
+            "promptRef": prompt_ref,
+        },
+        policySnapshot={
+            "parentPolicySnapshotId": policy_snapshot_id,
+            "childPolicySnapshotId": policy_snapshot_id,
+            "taskLocalPolicyCompatibilityRefs": (),
+            "allowedToolNames": tuple(
+                item
+                for item in _metadata_str_tuple(request.metadata.get("allowedTools"))
+                if _PUBLIC_REF_RE.fullmatch(item)
+            ),
+            "permissionRefs": ("permission:child-runner-boundary",),
+            "callbackHookRefs": ("callback:child-acceptance",),
+        },
+        ledgerRef={
+            "ledgerId": f"ledger:{child_execution_id}",
+            "executionId": child_execution_id,
+            "agentId": "child-agent",
+            "parentExecutionId": request.parent_execution_id,
+            "taskId": task_id,
+            "policySnapshotId": policy_snapshot_id,
+            "childLedgerRefs": ("ledger:adk-turn",),
+        },
+        delegatedEvidenceRequirements=(
+            DelegatedEvidenceRequirement(type="TestRun", delegation="delegated_required"),
+        ),
+        workspaceIsolation={
+            "workspacePolicy": "trusted",
+            "isolationRef": f"workspace-isolation:{request.task_id}",
+            "parentWorkspaceRef": "workspace:parent-redacted",
+            "childWorkspaceRef": "workspace:child-redacted",
+            "descriptiveOnly": True,
+            "adoptionAttached": False,
+            "workspaceMutated": False,
+            "privateNotes": (),
+        },
+        completionContract={
+            "requiredEvidence": "tool_call",
+            "requiredFiles": (),
+            "requireNonEmptyResult": True,
+            "summaryIsEvidence": False,
+            "acceptedEvidenceMetadataOnly": True,
+        },
+        auditEventRefs=(audit_ref,),
+        adkPrimitiveOwnership={
+            "agentOwner": "adk_future_agent",
+            "runnerOwner": "adk_future_runner",
+            "eventOwner": "adk_event_bridge",
+            "toolOwner": "adk_function_tool_future",
+            "callbackOwner": "adk_callbacks_future",
+            "runnerAttached": False,
+            "childExecutionAttached": False,
+            "allowedToolNames": tuple(
+                item
+                for item in _metadata_str_tuple(request.metadata.get("allowedTools"))
+                if _PUBLIC_REF_RE.fullmatch(item)
+            ),
+            "callbackHookRefs": ("callback:child-acceptance",),
+        },
+        authorityFlags=ChildRuntimeEnvelopeAuthorityFlags(),
+        rawTranscriptRef=None,
+        privateMetadata={},
+    )
+
+
+def _runtime_child_acceptance_policy(
+    request: ChildTaskRequest,
+    *,
+    child_execution_id: str,
+    receipt_ref: str,
+    audit_ref: str,
+) -> dict[str, object]:
+    policy_snapshot_id = "policy:child-runner-boundary"
+    return {
+        "parentExecutionId": request.parent_execution_id,
+        "childExecutionId": child_execution_id,
+        "taskId": _acceptance_task_id(request),
+        "parentPolicySnapshotId": policy_snapshot_id,
+        "childPolicySnapshotId": policy_snapshot_id,
+        "runtimeReceiptRef": receipt_ref,
+        "requiredEvidenceRefs": (
+            f"ledger:{child_execution_id}",
+            receipt_ref,
+            audit_ref,
+        ),
+        "maxRetryBudget": 0,
+        "currentAttempt": 0,
+    }
+
+
+def _acceptance_task_id(request: ChildTaskRequest) -> str:
+    return f"task:{_digest(f'{request.parent_execution_id}:{request.task_id}')}"
+
+
+def _evidence_agent_role(role: ChildRole) -> Literal["general", "coding", "research"]:
+    if role == "research":
+        return "research"
+    if role in {"coding", "reviewer", "implementer", "debugging"}:
+        return "coding"
+    return "general"
+
+
+def _metadata_str_tuple(value: object) -> tuple[str, ...]:
+    if isinstance(value, str):
+        return (value,)
+    if isinstance(value, Sequence) and not isinstance(value, bytes):
+        return tuple(item for item in value if isinstance(item, str))
+    return ()
 
 
 def _requested_spawn_depth(request: ChildTaskRequest) -> int:
