@@ -89,6 +89,11 @@ def _scope_matches(item: LearningItem, scope: LearningScope) -> bool:
     task_kind must match exactly.  When the request scope pins a ``channel``,
     the item's channel (if set) must match.  Item tags, when the request scope
     pins tags, must intersect.  Unpinned request facets do not constrain.
+
+    Tagless-item scoping policy: an item with no tags (``tags=()``) is treated
+    as narrowly scoped and is EXCLUDED when the request pins tags (empty
+    intersection); a learning intended to apply globally must carry an explicit
+    wildcard/sentinel tag.
     """
     if item.scope.task_kind != scope.task_kind:
         return False
@@ -111,7 +116,8 @@ def build_learning_recall_payload(
 ) -> tuple[LearningRecallEntry, ...]:
     """Map a request *scope* to active, scope-matching learning entries.
 
-    Deterministic and side-effect-free.  Returns an empty tuple when *store* is
+    Side-effect-free and stable for a fixed store state (ordering follows the
+    store's ``updated_at DESC``).  Returns an empty tuple when *store* is
     ``None`` (the default / disabled case).  Only ``active`` items are returned
     (``store.retrieve`` enforces ``status='active'``); ``proposed``/``archived``
     items never surface.  Cross-scope items are excluded by ``_scope_matches``.

@@ -29,6 +29,33 @@ LEARNING_USAGE_INSTRUCTION_REF: str = "instruction:learning:usage"
 #: The pack id (dotted, safe recipe id).
 LEARNING_USAGE_PACK_ID: str = "openmagi.learning-usage"
 
+#: Common ADK primitive-ownership tuple shared by every first-party pack (see
+#: ``_first_party_packs`` in ``recipes/compiler.py``).  Duplicated verbatim here
+#: so the learning-usage pack carries the same catalog-consistency metadata as
+#: its siblings (metadata-only — no live refs).
+_COMMON_ADK_OWNERS: tuple[str, ...] = (
+    "ADK Agent owns execution shape",
+    "ADK Runner owns invocation",
+    "ADK Event owns event stream",
+    "ADK FunctionTool owns tool call surface",
+    "ADK LongRunningFunctionTool owns long tool/job calls only",
+    "ADK SessionService owns session state",
+    "ADK MemoryService owns memory state",
+    "ADK ArtifactService owns artifact state",
+    "ADK callbacks/plugins own lifecycle attachment",
+    "ADK evals own evaluator execution",
+)
+
+#: Common OpenMagi boundary-ownership tuple shared by every first-party pack.
+_COMMON_OPENMAGI_OWNERS: tuple[str, ...] = (
+    "OpenMagi ProfileResolver owns deterministic metadata merge",
+    "OpenMagi AgentRecipeCompiler owns immutable recipe metadata snapshots",
+    "OpenMagi PackRegistry owns first-party pack metadata catalog",
+    "OpenMagi ApprovalGate metadata owns product approval compatibility",
+    "OpenMagi Evidence/Audit refs own diagnostic compatibility metadata",
+    "OpenMagi redaction metadata owns public safety compatibility",
+)
+
 #: Concise, instructional, model-agnostic guidance text associated with the
 #: ``instruction:learning:usage`` ref.  Kept here (next to the pack that owns
 #: the ref) so a future prompt-text resolver / dashboard can surface it without
@@ -57,6 +84,8 @@ def build_learning_usage_pack() -> RecipePackManifest:
         ),
         instructionRefs=(LEARNING_USAGE_INSTRUCTION_REF,),
         auditRefs=("audit:learning-usage:recipe-boundary",),
+        adkPrimitiveOwnership=_COMMON_ADK_OWNERS,
+        openmagiBoundaryOwnership=_COMMON_OPENMAGI_OWNERS,
     )
 
 

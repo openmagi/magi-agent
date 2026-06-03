@@ -152,6 +152,23 @@ def test_learning_usage_pack_carries_instruction_ref() -> None:
     assert "learning" in pack.task_profile_selectors
 
 
+def test_learning_usage_pack_sets_common_ownership_tuples() -> None:
+    """M4 — the pack sets ADK/OpenMagi ownership tuples like sibling packs.
+
+    Every other first-party pack carries ``adkPrimitiveOwnership`` /
+    ``openmagiBoundaryOwnership``.  For catalog consistency the learning-usage
+    pack must too (metadata-only — no live refs).
+    """
+    pack = build_learning_usage_pack()
+    assert pack.adk_primitive_ownership, "missing adkPrimitiveOwnership"
+    assert pack.openmagi_boundary_ownership, "missing openmagiBoundaryOwnership"
+    # uses the same common tuples a sibling first-party pack declares.
+    registry = PackRegistry.with_first_party_packs()
+    sibling = registry.get("openmagi.context-safety")
+    assert pack.adk_primitive_ownership == sibling.adk_primitive_ownership
+    assert pack.openmagi_boundary_ownership == sibling.openmagi_boundary_ownership
+
+
 def test_instruction_text_is_concise_and_model_agnostic() -> None:
     text = LEARNING_USAGE_INSTRUCTION_TEXT
     lowered = text.lower()
@@ -245,6 +262,53 @@ def test_injection_no_store_returns_empty() -> None:
     payload = build_learning_recall_payload(
         None, tenant_id="local", scope=LearningScope(taskKind="general")
     )
+    assert payload == ()
+
+
+def test_injection_excludes_tagless_item_when_request_pins_tags(tmp_path) -> None:
+    """I3 — tagless items are narrowly scoped and excluded when tags pinned.
+
+    An active item carrying no tags (``tags=()``) must NOT surface when the
+    request scope pins specific tags, because an empty tag set never intersects
+    a pinned tag set.  A learning intended to apply globally must carry an
+    explicit wildcard/sentinel tag.
+    """
+    store = _store(tmp_path)
+    # Seed an active item whose scope has NO tags (taskKind matches request),
+    # via the genuine propose → eval-observation → auto_activate pipeline.
+    from magi_agent.learning.models import LearningItem, Provenance
+
+    item = LearningItem(
+        id="tagless-1",
+        kind="example",
+        scope=LearningScope(taskKind="general", tags=()),
+        content={"situation": "user asks", "behavior": "global guidance"},
+        rationale="global guidance",
+        provenance=Provenance(
+            sessionIds=("sess-tagless",),
+            derivedBy="reflection",
+            createdAt="2026-06-03T10:00:00Z",
+        ),
+    )
+    proposed = store.propose(item)
+    obs_ref = store.record_eval_observation(
+        item_id=proposed.id,
+        before={"score": 1.0},
+        after={"score": 1.0},
+        sample_n=4,
+        passed=True,
+    )
+    activated = store.auto_activate(proposed.id, eval_observation_ref=obs_ref)
+    assert activated.status == "active"
+    assert activated.scope.tags == ()
+
+    payload = build_learning_recall_payload(
+        store,
+        tenant_id="local",
+        scope=LearningScope(taskKind="general", tags=("style",)),
+    )
+    store.close()
+    # tagless item is excluded under strict opt-in scoping.
     assert payload == ()
 
 
@@ -377,6 +441,13 @@ def test_reflection_cron_not_scheduled_when_off(monkeypatch) -> None:
 
 
 def test_reflection_cron_interval_default_24h_when_on(monkeypatch) -> None:
+    """I2 — ``next_fire_at`` adds the interval in MS to a ms-epoch ``now``.
+
+    The surrounding cron module's ``now`` is ms-since-epoch (see
+    ``CronDefinition.next_fire_at`` / ``datetime.fromtimestamp((now+1)/1000)``),
+    so the reflection job must add the 24h interval as MILLISECONDS, not
+    seconds.  A realistic ms-epoch ``now`` exercises the unit.
+    """
     from magi_agent.harness.cron_runtime import (
         DEFAULT_REFLECTION_INTERVAL_SECONDS,
         LearningReflectionCronJob,
@@ -388,7 +459,12 @@ def test_reflection_cron_interval_default_24h_when_on(monkeypatch) -> None:
     assert job.scheduled is True
     assert DEFAULT_REFLECTION_INTERVAL_SECONDS == 86_400
     assert job.interval_seconds == 86_400
-    assert job.next_fire_at(now=1_000) == 1_000 + 86_400
+    assert job.interval_ms == 86_400 * 1000
+    now_ms = 1_780_000_000_000  # realistic ms-since-epoch
+    # 24h = 86_400_000 ms, NOT 86_400 ms.
+    assert job.next_fire_at(now=now_ms) == now_ms + 86_400_000
+    # the value added is ms, so it advances ~24h, not ~86 seconds.
+    assert job.next_fire_at(now=now_ms) - now_ms == 86_400_000
 
 
 def test_reflection_cron_interval_from_env(monkeypatch) -> None:
@@ -398,9 +474,21 @@ def test_reflection_cron_interval_from_env(monkeypatch) -> None:
     monkeypatch.setenv("MAGI_LEARNING_REFLECTION_INTERVAL", "3600")
     job = LearningReflectionCronJob()
     assert job.interval_seconds == 3_600
+    assert job.interval_ms == 3_600 * 1000
+    now_ms = 1_780_000_000_000
+    assert job.next_fire_at(now=now_ms) == now_ms + 3_600_000
     # bad value falls back to default.
     monkeypatch.setenv("MAGI_LEARNING_REFLECTION_INTERVAL", "not-a-number")
     assert LearningReflectionCronJob().interval_seconds == 86_400
+    # M6 — non-positive values also fall back to the default (seconds AND ms).
+    monkeypatch.setenv("MAGI_LEARNING_REFLECTION_INTERVAL", "0")
+    zero_job = LearningReflectionCronJob()
+    assert zero_job.interval_seconds == 86_400
+    assert zero_job.interval_ms == 86_400 * 1000
+    monkeypatch.setenv("MAGI_LEARNING_REFLECTION_INTERVAL", "-3")
+    neg_job = LearningReflectionCronJob()
+    assert neg_job.interval_seconds == 86_400
+    assert neg_job.interval_ms == 86_400 * 1000
 
 
 def test_manual_trigger_runs_one_incremental_pass(monkeypatch, tmp_path) -> None:
@@ -440,6 +528,47 @@ def test_manual_trigger_runs_one_incremental_pass(monkeypatch, tmp_path) -> None
     result2 = asyncio.run(job.trigger_now())
     store.close()
     assert result2.counters["traces_read"] == 0
+
+
+def test_manual_trigger_error_leaves_watermark_unchanged_and_warns(
+    monkeypatch, tmp_path, caplog
+) -> None:
+    """M7 — an error result logs at WARNING and leaves the watermark unchanged.
+
+    Forward-compat for PR7's error path: ``status="error"`` is an existing,
+    valid reflection status.  ``trigger_now`` must not advance the watermark and
+    must surface the error at WARNING level.
+    """
+    import logging
+
+    from magi_agent.harness import cron_runtime
+    from magi_agent.harness.cron_runtime import LearningReflectionCronJob
+    from magi_agent.harness.learning_executor import LearningReflectionResult
+
+    monkeypatch.setenv(_REFLECTION_ENV_VAR, "1")
+
+    async def _fake_run_reflection(**_kwargs):
+        return LearningReflectionResult(
+            status="error",
+            candidates=(),
+            watermark="2099-01-01T00:00:00Z",  # must be ignored
+            counters={
+                "traces_read": 0,
+                "signals_extracted": 0,
+                "candidates_produced": 0,
+            },
+        )
+
+    monkeypatch.setattr(cron_runtime, "run_reflection", _fake_run_reflection)
+
+    job = LearningReflectionCronJob(watermark="2026-06-03T10:00:00Z")
+    with caplog.at_level(logging.WARNING, logger=cron_runtime.__name__):
+        result = asyncio.run(job.trigger_now())
+
+    assert result.status == "error"
+    # watermark unchanged — the error result's watermark is ignored.
+    assert job.watermark == "2026-06-03T10:00:00Z"
+    assert any(rec.levelno >= logging.WARNING for rec in caplog.records)
 
 
 def test_manual_trigger_off_is_disabled_noop(monkeypatch, tmp_path) -> None:
