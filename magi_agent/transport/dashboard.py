@@ -213,16 +213,16 @@ def _dashboard_html(runtime: OpenMagiRuntime) -> str:
       gap: 18px;
     }}
     .empty-state {{
-      max-width: 720px;
+      max-width: 880px;
       width: 100%;
-      margin: 12px auto 0;
+      margin: 0 auto;
       color: var(--muted);
       text-align: left;
     }}
     .empty-state h3 {{
       margin: 0 0 8px;
       color: var(--ink);
-      font-size: 22px;
+      font-size: 18px;
       line-height: 1.2;
     }}
     .empty-state p {{
@@ -234,7 +234,7 @@ def _dashboard_html(runtime: OpenMagiRuntime) -> str:
       border-radius: var(--radius);
       background: var(--surface);
       box-shadow: 0 5px 22px rgba(31, 38, 52, 0.05);
-      padding: 18px;
+      padding: 16px;
     }}
     .trace-grid {{
       display: grid;
@@ -264,7 +264,7 @@ def _dashboard_html(runtime: OpenMagiRuntime) -> str:
       display: grid;
       grid-template-columns: repeat(2, minmax(0, 1fr));
       gap: 10px;
-      margin-top: 22px;
+      margin-top: 14px;
     }}
     .starter {{
       border: 1px solid var(--line);
@@ -440,6 +440,45 @@ def _dashboard_html(runtime: OpenMagiRuntime) -> str:
     .panel {{
       overflow: auto;
       padding: 0 14px 18px;
+    }}
+    .agent-card {{
+      border: 1px solid #d9ccff;
+      border-radius: var(--radius);
+      background: #fbf9ff;
+      padding: 12px;
+      margin-bottom: 12px;
+    }}
+    .agent-card-head {{
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+    }}
+    .agent-card strong {{
+      color: var(--ink);
+      font-size: 14px;
+    }}
+    .agent-card span {{
+      color: var(--muted);
+      font-size: 12px;
+    }}
+    .agent-card small {{
+      display: block;
+      margin-top: 8px;
+      color: var(--soft);
+      line-height: 1.4;
+    }}
+    .mini-pill {{
+      display: inline-flex;
+      align-items: center;
+      min-height: 24px;
+      padding: 0 8px;
+      border-radius: 999px;
+      background: #eefaf4;
+      color: #257756;
+      font-size: 11px;
+      font-weight: 700;
+      white-space: nowrap;
     }}
     .timeline {{
       display: flex;
@@ -644,6 +683,16 @@ def _dashboard_html(runtime: OpenMagiRuntime) -> str:
       </div>
       <div class="panel">
         <div id="panel-work" class="timeline">
+          <div class="agent-card">
+            <div class="agent-card-head">
+              <div>
+                <strong>Main</strong>
+                <span>current local session</span>
+              </div>
+              <span class="mini-pill" id="agent-state-pill">ready</span>
+            </div>
+            <small>Public ADK events, tool progress, evidence receipts, and transport state appear here during a run.</small>
+          </div>
           <div class="event pending"><strong>Runtime check</strong><code>Waiting for /healthz</code></div>
         </div>
         <div id="panel-knowledge" class="hidden">
@@ -681,6 +730,7 @@ def _dashboard_html(runtime: OpenMagiRuntime) -> str:
     const chatRoutePill = document.getElementById("chat-route-pill");
     const tileRuntime = document.getElementById("tile-runtime");
     const tileState = document.getElementById("tile-state");
+    const agentStatePill = document.getElementById("agent-state-pill");
     const tokenKey = "magi-agent:gateway-token";
 
     document.getElementById("footer-runtime").textContent = `${{bootstrap.runtime}} / ${{bootstrap.botId}}`;
@@ -755,6 +805,7 @@ def _dashboard_html(runtime: OpenMagiRuntime) -> str:
       }}
       chatRoutePill.textContent = ok ? "runtime ready" : "runtime blocked";
       tileState.textContent = ok ? "ready" : "blocked";
+      agentStatePill.textContent = ok ? "ready" : "blocked";
     }}
 
     async function checkHealth() {{
@@ -768,6 +819,7 @@ def _dashboard_html(runtime: OpenMagiRuntime) -> str:
         setHealth(false, "unavailable");
         chatRoutePill.textContent = "runtime unavailable";
         tileState.textContent = "unavailable";
+        agentStatePill.textContent = "unavailable";
         addEvent("Runtime unavailable", "Could not reach /healthz", "error");
       }}
     }}

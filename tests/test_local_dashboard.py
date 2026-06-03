@@ -42,6 +42,8 @@ def test_local_dashboard_route_serves_adk_local_app_shell() -> None:
     assert "Work Stream" in html
     assert "Open Magi Agent is ready." in html
     assert "Runtime surfaces" in html
+    assert "current local session" in html
+    assert 'id="agent-state-pill"' in html
     assert "class=\"status-band\"" in html
     assert "/v1/chat/completions" in html
     assert "/healthz" in html
