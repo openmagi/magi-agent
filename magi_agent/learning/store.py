@@ -172,7 +172,7 @@ class LearningStore(Protocol):
     """Protocol for learning KB stores."""
 
     def propose(self, item: LearningItem) -> LearningItem: ...
-    def get(self, item_id: str) -> LearningItem | None: ...
+    def get(self, item_id: str, *, tenant_id: str = "local") -> LearningItem | None: ...
     def list(
         self,
         *,
@@ -199,6 +199,7 @@ class LearningStore(Protocol):
         after: dict[str, object],
         sample_n: int,
         passed: bool,
+        tenant_id: str = "local",
     ) -> str: ...
     def approve(
         self,
@@ -206,12 +207,14 @@ class LearningStore(Protocol):
         *,
         approver: str,
         eval_observation_ref: str | None,
+        tenant_id: str = "local",
     ) -> LearningItem: ...
     def auto_activate(
         self,
         item_id: str,
         *,
         eval_observation_ref: str | None,
+        tenant_id: str = "local",
     ) -> LearningItem: ...
     def edit(
         self,
@@ -219,8 +222,11 @@ class LearningStore(Protocol):
         *,
         patch: dict[str, object],
         editor: str,
+        tenant_id: str = "local",
     ) -> LearningItem: ...
-    def archive(self, item_id: str, *, actor: str) -> LearningItem: ...
+    def archive(
+        self, item_id: str, *, actor: str, tenant_id: str = "local"
+    ) -> LearningItem: ...
 
 
 def _now_iso() -> str:
@@ -395,10 +401,14 @@ class SqliteLearningStore:
         conn.commit()
         return safe
 
-    def get(self, item_id: str) -> LearningItem | None:
+    def get(self, item_id: str, *, tenant_id: str = "local") -> LearningItem | None:
+        # Tenant-scoped by-id read: the ``AND tenant_id = ?`` clause makes a
+        # cross-tenant id read as "not found" at the query level — another
+        # tenant's row is never returned.
         conn = self._get_conn()
         row = conn.execute(
-            "SELECT * FROM learning_items WHERE id = ?", (item_id,)
+            "SELECT * FROM learning_items WHERE id = ? AND tenant_id = ?",
+            (item_id, tenant_id),
         ).fetchone()
         if row is None:
             return None
@@ -498,9 +508,17 @@ class SqliteLearningStore:
         after: dict[str, object],
         sample_n: int,
         passed: bool,
+        tenant_id: str = "local",
     ) -> str:
-        """Persist an eval observation and return its ref string."""
+        """Persist an eval observation and return its ref string.
+
+        Tenant-scoped: the target item must exist under *tenant_id* or a
+        ``KeyError`` is raised — an observation can never be recorded against
+        another tenant's item by id.
+        """
         conn = self._get_conn()
+        # Tenant guard at the query level — never touch another tenant's row.
+        self._require_item(conn, item_id, tenant_id=tenant_id)
         ref = f"eval-obs:{uuid.uuid4().hex}"
         conn.execute(
             """
@@ -526,19 +544,24 @@ class SqliteLearningStore:
         *,
         approver: str,
         eval_observation_ref: str | None,
+        tenant_id: str = "local",
     ) -> LearningItem:
         """Activate a proposed rule item after human approval.
 
         Enforces both policy invariants:
         - eval_observation_ref must be present
         - approval_ref is generated from the approver record
+
+        Tenant-scoped: the item must exist under *tenant_id* (``_require_item``
+        raises ``KeyError`` otherwise) and the activating UPDATE carries
+        ``AND tenant_id = ?`` so another tenant's row is never mutated.
         """
         if not approver or not approver.strip():
             raise ValueError("approver must be a non-empty, non-blank string")
 
         conn = self._get_conn()
 
-        item = self._require_item(conn, item_id)
+        item = self._require_item(conn, item_id, tenant_id=tenant_id)
 
         if item.status != "proposed":
             raise ValueError(
@@ -571,27 +594,32 @@ class SqliteLearningStore:
                 eval_observation_ref = ?,
                 approval_ref = ?,
                 updated_at = ?
-            WHERE id = ?
+            WHERE id = ? AND tenant_id = ?
             """,
-            (eval_observation_ref, approval_ref, _now_iso(), item_id),
+            (eval_observation_ref, approval_ref, _now_iso(), item_id, tenant_id),
         )
         conn.commit()
 
-        return self._require_item(conn, item_id)
+        return self._require_item(conn, item_id, tenant_id=tenant_id)
 
     def auto_activate(
         self,
         item_id: str,
         *,
         eval_observation_ref: str | None,
+        tenant_id: str = "local",
     ) -> LearningItem:
         """Activate a proposed non-rule item automatically via eval gate.
 
         Enforces policy:self-improvement.eval-observation-required@1.
         For rule items, also enforces no-direct-mutation (raises PolicyViolation).
+
+        Tenant-scoped: ``_require_item`` + the activating UPDATE carry
+        ``AND tenant_id = ?`` so another tenant's item can never be activated
+        by id.
         """
         conn = self._get_conn()
-        item = self._require_item(conn, item_id)
+        item = self._require_item(conn, item_id, tenant_id=tenant_id)
 
         if item.status != "proposed":
             raise ValueError(
@@ -612,13 +640,13 @@ class SqliteLearningStore:
             SET status = 'active',
                 eval_observation_ref = ?,
                 updated_at = ?
-            WHERE id = ?
+            WHERE id = ? AND tenant_id = ?
             """,
-            (eval_observation_ref, _now_iso(), item_id),
+            (eval_observation_ref, _now_iso(), item_id, tenant_id),
         )
         conn.commit()
 
-        return self._require_item(conn, item_id)
+        return self._require_item(conn, item_id, tenant_id=tenant_id)
 
     def edit(
         self,
@@ -626,14 +654,20 @@ class SqliteLearningStore:
         *,
         patch: dict[str, object],
         editor: str,
+        tenant_id: str = "local",
     ) -> LearningItem:
         """Create a new version with *patch* applied.
 
         The original item is preserved; the new version has
         version+1 and supersedes pointing to the original id.
+
+        Tenant-scoped: the source item must exist under *tenant_id*
+        (``_require_item`` raises ``KeyError`` otherwise), so another tenant's
+        item can never be edited/forked by id.  The new version inherits the
+        source item's tenant_id.
         """
         conn = self._get_conn()
-        original = self._require_item(conn, item_id)
+        original = self._require_item(conn, item_id, tenant_id=tenant_id)
 
         # Derive the new id from the ROOT id, not the current node id.
         # Strip any trailing `:v{n}` suffix so that chains stay flat:
@@ -671,28 +705,42 @@ class SqliteLearningStore:
         conn.commit()
         return new_item
 
-    def archive(self, item_id: str, *, actor: str) -> LearningItem:
+    def archive(
+        self, item_id: str, *, actor: str, tenant_id: str = "local"
+    ) -> LearningItem:
+        # Tenant-scoped: ``AND tenant_id = ?`` makes a cross-tenant archive a
+        # no-op (rowcount 0 → KeyError); another tenant's row is never touched.
         conn = self._get_conn()
         cur = conn.execute(
             """
             UPDATE learning_items
             SET status = 'archived', updated_at = ?
-            WHERE id = ?
+            WHERE id = ? AND tenant_id = ?
             """,
-            (_now_iso(), item_id),
+            (_now_iso(), item_id, tenant_id),
         )
         if cur.rowcount == 0:
             raise KeyError(f"LearningItem not found: {item_id!r}")
         conn.commit()
-        return self._require_item(conn, item_id)
+        return self._require_item(conn, item_id, tenant_id=tenant_id)
 
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
 
-    def _require_item(self, conn: sqlite3.Connection, item_id: str) -> LearningItem:
+    def _require_item(
+        self,
+        conn: sqlite3.Connection,
+        item_id: str,
+        *,
+        tenant_id: str = "local",
+    ) -> LearningItem:
+        # Tenant-scoped by-id read for every mutation path — the ``AND
+        # tenant_id = ?`` clause is the single chokepoint that makes a
+        # cross-tenant by-id mutation impossible (it reads as not-found).
         row = conn.execute(
-            "SELECT * FROM learning_items WHERE id = ?", (item_id,)
+            "SELECT * FROM learning_items WHERE id = ? AND tenant_id = ?",
+            (item_id, tenant_id),
         ).fetchone()
         if row is None:
             raise KeyError(f"LearningItem not found: {item_id!r}")
