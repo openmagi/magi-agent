@@ -25,7 +25,7 @@ class LocalCliRunner:
         from google.genai import types  # noqa: PLC0415
 
         prompt = _message_text(kwargs.get("new_message"))
-        text = _local_response(prompt, model=self.model)
+        text = build_local_response(prompt, model=self.model)
         yield Event(
             author="model",
             partial=True,
@@ -52,7 +52,7 @@ def _message_text(value: object) -> str:
     return "".join(text_parts).strip()
 
 
-def _local_response(prompt: str, *, model: str) -> str:
+def build_local_response(prompt: str, *, model: str) -> str:
     if prompt:
         return (
             "Local ADK runtime ready. I received your request, but no live model "
@@ -65,4 +65,4 @@ def _local_response(prompt: str, *, model: str) -> str:
     )
 
 
-__all__ = ["LocalCliRunner", "build_local_cli_runner"]
+__all__ = ["LocalCliRunner", "build_local_cli_runner", "build_local_response"]
