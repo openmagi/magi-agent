@@ -380,12 +380,12 @@ def test_shadow_generation_live_smoke_env_requires_provider_credential_presence(
 
 def test_shadow_generation_live_smoke_env_accepts_full_toolhost_runner_timeout() -> None:
     env = _live_smoke_env(
-        CORE_AGENT_PYTHON_GATE5B_SHADOW_GENERATION_RUNNER_TIMEOUT_MS="120000",
+        CORE_AGENT_PYTHON_GATE5B_SHADOW_GENERATION_RUNNER_TIMEOUT_MS="600000",
     )
 
     route_config = parse_gate5b4c3_shadow_generation_route_env(env)
 
-    assert route_config.generation_config.approved_budgets.python_runner_timeout_ms == 120_000
+    assert route_config.generation_config.approved_budgets.python_runner_timeout_ms == 600_000
 
 
 def test_shadow_generation_live_smoke_env_rejects_unsupported_provider() -> None:
@@ -513,9 +513,9 @@ def test_shadow_generation_bot_config_fallback_requires_server_fallback_approval
     assert diagnostic.reason == "model_routing_source_not_allowed"
 
 
-def test_shadow_generation_live_smoke_env_rejects_cap_raising() -> None:
+def test_shadow_generation_live_smoke_env_rejects_caps_above_selected_user_visible_limit() -> None:
     env = _live_smoke_env(
-        CORE_AGENT_PYTHON_GATE5B_SHADOW_GENERATION_MAX_OUTPUT_TOKENS="513",
+        CORE_AGENT_PYTHON_GATE5B_SHADOW_GENERATION_MAX_OUTPUT_TOKENS="4097",
     )
 
     with pytest.raises(RuntimeEnvError) as excinfo:
@@ -1098,7 +1098,7 @@ def test_shadow_generation_request_provided_gate_values_are_rejected_before_runn
                 "memoryProviderCallsAllowed": True,
             }
         ),
-        _payload(budgets={"maxOutputTokens": 513}),
+        _payload(budgets={"maxOutputTokens": 4097}),
         _payload(
             modelRouting={
                 **_payload()["modelRouting"],  # type: ignore[arg-type]

@@ -4,6 +4,8 @@ import asyncio
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from functools import cached_property
+import hashlib
+import json
 import re
 import time
 from typing import Any, ClassVar, Literal, Self, TypeAlias
@@ -33,6 +35,7 @@ Gate5B4C3LiveRunnerReason: TypeAlias = Literal[
     "input_adapter_drop",
     "adk_primitives_error",
     "runner_completed",
+    "runner_output_missing",
     "runner_timeout",
     "runner_error",
 ]
@@ -53,6 +56,7 @@ Gate5B4C3LiveRunnerDiagnosticStage: TypeAlias = Literal[
     "adk_tool_invocation_adapter",
     "provider_request_serialization",
     "runner_execution",
+    "runner_output_projection",
     "unexpected_exception",
 ]
 
@@ -77,6 +81,8 @@ _ALLOWED_AGENT_KWARGS = (
 )
 _ALLOWED_RUNNER_KWARGS = ("agent", "app_name", "auto_create_session", "session_service")
 _ALLOWED_RUN_ASYNC_KWARGS = ("new_message", "session_id", "user_id")
+_MAX_MANUAL_TOOL_CONTINUATIONS = 4
+_MAX_MANUAL_TOOL_RESULTS_BYTES = 8192
 _ERROR_REDACTION_RE = re.compile(
     r"(?:"
     r"Authorization:\s*Bearer\s+\S+|"
@@ -603,15 +609,53 @@ class Gate5B4C3LiveRunnerBoundary:
 
         event_count = 0
         output_chunks: list[str] = []
+        manual_continuations = 0
         try:
             async with asyncio.timeout(request.budgets.python_runner_timeout_ms / 1000):
-                async for event in runner.run_async(
-                    **_allowlist_kwargs(run_kwargs, _ALLOWED_RUN_ASYNC_KWARGS)
-                ):
-                    event_count += 1
-                    chunk = _event_text(event)
-                    if chunk:
-                        output_chunks.append(chunk)
+                next_message: object = message
+                while True:
+                    function_calls: list[Mapping[str, object]] = []
+                    current_run_kwargs = {**run_kwargs, "new_message": next_message}
+                    async for event in runner.run_async(
+                        **_allowlist_kwargs(
+                            current_run_kwargs,
+                            _ALLOWED_RUN_ASYNC_KWARGS,
+                        )
+                    ):
+                        event_count += 1
+                        chunk = _event_text(event)
+                        if chunk:
+                            output_chunks.append(chunk)
+                        function_calls.extend(_event_function_calls(event))
+                        if event_count >= 64:
+                            break
+                    selected_full_toolhost = (
+                        request.recipe_profile.tools_policy == "selected_full_toolhost"
+                    )
+                    if (
+                        output_chunks
+                        or not function_calls
+                        or not self._adk_tools
+                        or not selected_full_toolhost
+                    ):
+                        break
+                    if manual_continuations >= _MAX_MANUAL_TOOL_CONTINUATIONS:
+                        break
+                    manual_results = await _run_manual_tool_calls(
+                        function_calls,
+                        self._adk_tools,
+                    )
+                    if not manual_results:
+                        break
+                    manual_continuations += 1
+                    next_message = primitives.Content(
+                        parts=[
+                            primitives.Part.from_text(
+                                text=_manual_tool_followup_text(manual_results),
+                            )
+                        ],
+                        role="user",
+                    )
                     if event_count >= 64:
                         break
         except TimeoutError:
@@ -686,6 +730,37 @@ class Gate5B4C3LiveRunnerBoundary:
                 output_text=_joined_output(output_chunks),
             )
 
+        output_text = _joined_output(output_chunks)
+        if output_text is None:
+            return _result(
+                request,
+                diagnostic,
+                status="error",
+                reason="runner_output_missing",
+                started=started,
+                adk_invoked=True,
+                runner_attempted=True,
+                model_attempted=True,
+                event_count=event_count,
+                agent_kwargs_keys=tuple(sorted(agent_kwargs)),
+                runner_kwargs_keys=tuple(sorted(runner_kwargs)),
+                run_async_kwargs_keys=tuple(sorted(run_kwargs)),
+                runner_error_diagnostic=_runner_error_diagnostic(
+                    request,
+                    stage="runner_output_projection",
+                    reason_code="runner_output_missing",
+                    exception_category="runner_output_projection_failure",
+                    adk_invoked=True,
+                    runner_attempted=True,
+                    model_attempted=True,
+                    active_tools=self._adk_tools,
+                    gate1a_egress_correlation_context=(
+                        self._gate1a_egress_correlation_context
+                    ),
+                    gate1a_egress_proxy_url=self._gate1a_egress_proxy_url,
+                ),
+            )
+
         return _result(
             request,
             diagnostic,
@@ -699,7 +774,7 @@ class Gate5B4C3LiveRunnerBoundary:
             agent_kwargs_keys=tuple(sorted(agent_kwargs)),
             runner_kwargs_keys=tuple(sorted(runner_kwargs)),
             run_async_kwargs_keys=tuple(sorted(run_kwargs)),
-            output_text=_joined_output(output_chunks),
+            output_text=output_text,
         )
 
 
@@ -1073,15 +1148,258 @@ def _event_text(event: object) -> str | None:
         value = event.get("text")
         if isinstance(value, str):
             return value
+        content = event.get("content")
+    else:
+        content = getattr(event, "content", None)
     value = getattr(event, "text", None)
     if isinstance(value, str):
         return value
-    content = getattr(event, "content", None)
-    parts = getattr(content, "parts", None)
-    if isinstance(parts, list):
-        chunks = [part.text for part in parts if isinstance(getattr(part, "text", None), str)]
+    if isinstance(content, Mapping):
+        parts = content.get("parts")
+    else:
+        parts = getattr(content, "parts", None)
+    if isinstance(parts, (list, tuple)):
+        chunks = []
+        for part in parts:
+            text = part.get("text") if isinstance(part, Mapping) else getattr(part, "text", None)
+            if isinstance(text, str):
+                chunks.append(text)
         return "".join(chunks) or None
     return None
+
+
+def _event_function_calls(event: object) -> list[Mapping[str, object]]:
+    calls: list[Mapping[str, object]] = []
+    seen: set[str] = set()
+    for part in _event_parts(event):
+        for normalized in _part_function_calls(part):
+            key = _json_dumps(normalized)
+            if key not in seen:
+                seen.add(key)
+                calls.append(normalized)
+    for function_call in _event_direct_function_calls(event):
+        normalized = _normalize_function_call(function_call)
+        if normalized is None:
+            continue
+        key = _json_dumps(normalized)
+        if key not in seen:
+            seen.add(key)
+            calls.append(normalized)
+    return calls
+
+
+def _event_parts(
+    event: object,
+    *,
+    depth: int = 0,
+    seen_ids: frozenset[int] = frozenset(),
+) -> list[object]:
+    if depth > 3:
+        return []
+    object_id = id(event)
+    if object_id in seen_ids:
+        return []
+    next_seen_ids = seen_ids | {object_id}
+    parts: list[object] = []
+    content = _mapping_or_attr(event, "content")
+    parts.extend(_content_parts(content))
+    for candidate in _sequence_from(_mapping_or_attr(event, "candidates")):
+        parts.extend(_content_parts(_mapping_or_attr(candidate, "content")))
+    response = _mapping_or_attr(event, "response")
+    if response is not None:
+        parts.extend(_event_parts(response, depth=depth + 1, seen_ids=next_seen_ids))
+    llm_response = _mapping_or_attr(event, "llm_response")
+    if llm_response is not None:
+        parts.extend(_event_parts(llm_response, depth=depth + 1, seen_ids=next_seen_ids))
+    return parts
+
+
+def _content_parts(content: object) -> list[object]:
+    if content is None:
+        return []
+    parts = _mapping_or_attr(content, "parts")
+    return list(_sequence_from(parts))
+
+
+def _part_function_calls(part: object) -> list[Mapping[str, object]]:
+    function_calls = (
+        _sequence_from(_mapping_or_attr(part, "function_calls"))
+        or _sequence_from(_mapping_or_attr(part, "functionCalls"))
+    )
+    direct = (
+        _mapping_or_attr(part, "function_call")
+        or _mapping_or_attr(part, "functionCall")
+    )
+    if direct is not None:
+        function_calls = (*function_calls, direct)
+    normalized_calls: list[Mapping[str, object]] = []
+    for function_call in function_calls:
+        normalized = _normalize_function_call(function_call)
+        if normalized is not None:
+            normalized_calls.append(normalized)
+    if normalized_calls:
+        return normalized_calls
+    normalized = _normalize_function_call(part)
+    return [normalized] if normalized is not None else []
+
+
+def _event_direct_function_calls(event: object) -> tuple[object, ...]:
+    return (
+        *_safe_function_call_method(event),
+        *_sequence_from(_mapping_or_attr(event, "function_calls")),
+        *_sequence_from(_mapping_or_attr(event, "functionCalls")),
+        *_sequence_from(_mapping_or_attr(event, "tool_calls")),
+        *_sequence_from(_mapping_or_attr(event, "toolCalls")),
+    )
+
+
+def _safe_function_call_method(event: object) -> tuple[object, ...]:
+    get_function_calls = _mapping_or_attr(event, "get_function_calls")
+    if not callable(get_function_calls):
+        return ()
+    try:
+        return _sequence_from(get_function_calls())
+    except Exception:
+        return ()
+
+
+def _sequence_from(value: object) -> tuple[object, ...]:
+    if isinstance(value, Sequence) and not isinstance(
+        value,
+        (str, bytes, bytearray),
+    ):
+        return tuple(value)
+    return ()
+
+
+def _mapping_or_attr(value: object, name: str) -> object:
+    if isinstance(value, Mapping):
+        return value.get(name)
+    try:
+        return getattr(value, name, None)
+    except Exception:
+        return None
+
+
+def _normalize_function_call(function_call: object) -> Mapping[str, object] | None:
+    if function_call is None:
+        return None
+    if isinstance(function_call, Mapping):
+        name = function_call.get("name")
+        args = function_call.get("args")
+        call_id = function_call.get("id")
+    else:
+        model_dump = getattr(function_call, "model_dump", None)
+        if callable(model_dump):
+            try:
+                dumped = model_dump(by_alias=True)
+            except Exception:
+                dumped = None
+            if isinstance(dumped, Mapping):
+                return _normalize_function_call(dumped)
+        name = getattr(function_call, "name", None)
+        args = getattr(function_call, "args", None)
+        call_id = getattr(function_call, "id", None)
+    if not isinstance(name, str) or not _SAFE_TOOL_NAME_RE.match(name):
+        return None
+    safe_args = dict(args) if isinstance(args, Mapping) else {}
+    safe_call_id = str(call_id or "")
+    return {"name": name, "args": safe_args, "id": safe_call_id}
+
+
+async def _run_manual_tool_calls(
+    function_calls: Sequence[Mapping[str, object]],
+    tools: Sequence[object],
+) -> list[Mapping[str, object]]:
+    tool_by_name = {
+        str(getattr(tool, "name", "")): tool
+        for tool in tools
+        if _SAFE_TOOL_NAME_RE.match(str(getattr(tool, "name", "")))
+    }
+    results: list[Mapping[str, object]] = []
+    for call in function_calls:
+        name = str(call.get("name", ""))
+        tool = tool_by_name.get(name)
+        if tool is None:
+            results.append(
+                {
+                    "toolName": name,
+                    "status": "blocked",
+                    "reason": "tool_not_registered",
+                }
+            )
+            continue
+        args = call.get("args")
+        safe_args = dict(args) if isinstance(args, Mapping) else {}
+        try:
+            result = await _invoke_manual_tool(tool, safe_args)
+        except Exception:
+            result = {"status": "error", "reason": "tool_execution_failed"}
+        results.append(
+            {
+                "toolName": name,
+                "status": _manual_tool_status(result),
+                "resultDigest": _digest(result),
+                "result": _bounded_manual_tool_result(result),
+            }
+        )
+    return results
+
+
+async def _invoke_manual_tool(tool: object, args: Mapping[str, object]) -> object:
+    run_async = getattr(tool, "run_async", None)
+    if callable(run_async):
+        return await run_async(args=dict(args), tool_context=object())
+    func = getattr(tool, "func", None)
+    if callable(func):
+        result = func(**dict(args))
+        if hasattr(result, "__await__"):
+            return await result
+        return result
+    raise TypeError("manual tool is not invocable")
+
+
+def _manual_tool_status(result: object) -> str:
+    if isinstance(result, Mapping):
+        status = result.get("status")
+        if isinstance(status, str) and _SAFE_LABEL_RE.match(status):
+            return status
+    return "ok"
+
+
+def _bounded_manual_tool_result(result: object) -> object:
+    return _bounded_json_value(result, max_bytes=_MAX_MANUAL_TOOL_RESULTS_BYTES)
+
+
+def _manual_tool_followup_text(results: Sequence[Mapping[str, object]]) -> str:
+    payload = _bounded_json_value(tuple(results), max_bytes=_MAX_MANUAL_TOOL_RESULTS_BYTES)
+    return (
+        "Tool execution results for the previous model-requested function calls. "
+        "Use these results to produce the final answer for the user. "
+        "Do not mention hidden chain-of-thought or private policy. "
+        f"Results: {_json_dumps(payload)}"
+    )
+
+
+def _bounded_json_value(value: object, *, max_bytes: int) -> object:
+    encoded = _json_dumps(value).encode("utf-8")
+    if len(encoded) <= max_bytes:
+        return value
+    return {"truncated": True, "digest": _digest(value)}
+
+
+def _json_dumps(value: object) -> str:
+    return json.dumps(
+        value,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=True,
+        default=repr,
+    )
+
+
+def _digest(value: object) -> str:
+    return "sha256:" + hashlib.sha256(_json_dumps(value).encode("utf-8")).hexdigest()
 
 
 def _joined_output(chunks: list[str]) -> str | None:

@@ -35,7 +35,7 @@ _PRODUCTION_PATH_RE = re.compile(
     re.IGNORECASE,
 )
 _URI_SCHEME_RE = re.compile(r"^[a-z][a-z0-9+.-]*://", re.IGNORECASE)
-_PRODUCTION_HOST_RE = re.compile(r"\bmagi\.pro\b", re.IGNORECASE)
+_PRODUCTION_HOST_RE = re.compile(r"\b(?:magi\.pro|openmagi\.ai)\b", re.IGNORECASE)
 _LOCAL_ADK_PRIMITIVES = ("Agent", "Runner", "Event")
 _RUNNER_ATTACHMENT_FLAGS = (
     "live_capture_attached",

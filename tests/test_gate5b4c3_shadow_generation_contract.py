@@ -7,6 +7,8 @@ from magi_agent.shadow.gate5b4c3_shadow_generation_contract import (
     Gate5B4C3ShadowGenerationConfig,
     Gate5B4C3ShadowGenerationDiagnostic,
     Gate5B4C3ShadowGenerationRequest,
+    MAX_USER_VISIBLE_OUTPUT_TOKENS,
+    MAX_USER_VISIBLE_SANITIZED_INPUT_BYTES,
     build_gate5b4c3_shadow_generation_diagnostic,
 )
 
@@ -178,12 +180,46 @@ def test_generation_config_defaults_disable_and_use_first_slice_budgets() -> Non
 def test_generation_budget_allows_selected_full_toolhost_runner_timeout_ceiling() -> None:
     budget = {
         **_payload()["budgets"],
-        "pythonRunnerTimeoutMs": 120_000,
+        "pythonRunnerTimeoutMs": 600_000,
     }
 
     request = Gate5B4C3ShadowGenerationRequest.model_validate(_payload(budgets=budget))
 
-    assert request.budgets.python_runner_timeout_ms == 120_000
+    assert request.budgets.python_runner_timeout_ms == 600_000
+
+
+def test_generation_contract_accepts_selected_user_visible_cap_ceilings() -> None:
+    sanitized_text = "x" * 9000
+    payload = _payload(
+        turn={
+            **_payload()["turn"],
+            "sanitizedCurrentTurnText": sanitized_text,
+        },
+        modelRouting={
+            **_payload()["modelRouting"],
+            "maxOutputTokens": MAX_USER_VISIBLE_OUTPUT_TOKENS,
+        },
+        budgets={
+            "maxSanitizedInputBytes": MAX_USER_VISIBLE_SANITIZED_INPUT_BYTES,
+            "maxEstimatedInputTokens": 1_000_000,
+            "maxOutputTokens": MAX_USER_VISIBLE_OUTPUT_TOKENS,
+            "maxTotalEstimatedTokens": 1_004_096,
+            "maxDailyGenerationRuns": 100,
+            "maxCostUsd": 5,
+            "maxDailyGenerationCostUsd": 50,
+        },
+        redaction={
+            **_payload()["redaction"],
+            "redactedByteCount": len(sanitized_text.encode("utf-8")),
+        },
+    )
+
+    request = Gate5B4C3ShadowGenerationRequest.model_validate(payload)
+
+    assert len(request.turn.sanitized_current_turn_text.encode("utf-8")) > 8192
+    assert request.budgets.max_sanitized_input_bytes == MAX_USER_VISIBLE_SANITIZED_INPUT_BYTES
+    assert request.model_routing.max_output_tokens == MAX_USER_VISIBLE_OUTPUT_TOKENS
+    assert request.budgets.max_output_tokens == MAX_USER_VISIBLE_OUTPUT_TOKENS
 
 
 @pytest.mark.parametrize(
@@ -501,18 +537,18 @@ def test_model_route_allowlist_rejects_ambiguous_colon_components() -> None:
 
 def test_budget_limits_cannot_be_raised_by_request_payload() -> None:
     for key, value in (
-        ("pythonRunnerTimeoutMs", 120_001),
-        ("maxSanitizedInputBytes", 8193),
-        ("maxEstimatedInputTokens", 2049),
-        ("maxOutputTokens", 513),
-        ("maxTotalEstimatedTokens", 2561),
+        ("pythonRunnerTimeoutMs", 600_001),
+        ("maxSanitizedInputBytes", 1_000_001),
+        ("maxEstimatedInputTokens", 1_000_001),
+        ("maxOutputTokens", 4097),
+        ("maxTotalEstimatedTokens", 1_004_097),
         ("maxDiagnosticOutputPreviewBytes", 2049),
         ("maxDiagnosticArtifactBytes", 16_385),
         ("maxConcurrentGenerationRuns", 2),
         ("maxPendingGenerationRuns", 2),
-        ("maxDailyGenerationRuns", 11),
-        ("maxCostUsd", 0.06),
-        ("maxDailyGenerationCostUsd", 0.51),
+        ("maxDailyGenerationRuns", 101),
+        ("maxCostUsd", 5.01),
+        ("maxDailyGenerationCostUsd", 50.01),
     ):
         budget = {
             **_payload()["budgets"],
@@ -520,6 +556,31 @@ def test_budget_limits_cannot_be_raised_by_request_payload() -> None:
         }
         with pytest.raises(ValueError):
             Gate5B4C3ShadowGenerationRequest.model_validate(_payload(budgets=budget))
+
+
+def test_budget_limits_accept_selected_user_visible_large_context_caps() -> None:
+    request = Gate5B4C3ShadowGenerationRequest.model_validate(
+        _payload(
+            budgets={
+                **_payload()["budgets"],
+                "maxSanitizedInputBytes": 1_000_000,
+                "maxEstimatedInputTokens": 1_000_000,
+                "maxOutputTokens": 4096,
+                "maxTotalEstimatedTokens": 1_004_096,
+                "maxDailyGenerationRuns": 100,
+                "maxCostUsd": 5,
+                "maxDailyGenerationCostUsd": 50,
+            }
+        )
+    )
+
+    assert request.budgets.max_sanitized_input_bytes == 1_000_000
+    assert request.budgets.max_estimated_input_tokens == 1_000_000
+    assert request.budgets.max_output_tokens == 4096
+    assert request.budgets.max_total_estimated_tokens == 1_004_096
+    assert request.budgets.max_daily_generation_runs == 100
+    assert request.budgets.max_cost_usd == pytest.approx(5)
+    assert request.budgets.max_daily_generation_cost_usd == pytest.approx(50)
 
 
 def test_spend_controls_or_cost_owner_waiver_are_required_before_acceptance() -> None:

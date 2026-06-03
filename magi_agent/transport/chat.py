@@ -47,6 +47,12 @@ from magi_agent.gates.gate5b_full_toolhost import (
 from magi_agent.gates.gate2_readiness import gate2_readiness_health_metadata
 from magi_agent.gates.gate8_readiness import gate8_readiness_health_metadata
 from magi_agent.runtime.openmagi_runtime import OpenMagiRuntime
+from magi_agent.runtime.public_events import (
+    tool_end_event,
+    tool_progress_event,
+    tool_start_event,
+    turn_phase_event,
+)
 from magi_agent.research.research_first_canary import (
     build_research_first_selected_response,
     research_first_selected_canary_active,
@@ -727,17 +733,12 @@ _LEGACY_IDENTITY_PATTERNS: tuple[tuple[re.Pattern[str], str, str], ...] = (
         "legacy_public_identity_normalized",
     ),
     (
-        re.compile(r"\bmagi-agent\b", re.IGNORECASE),
+        re.compile(r"\bmagi[-_]agent\b|\bmagi-core-agent\b", re.IGNORECASE),
         "OpenMagi runtime",
         "legacy_runtime_identity_normalized",
     ),
-    (
-        re.compile(r"\bmagi\b", re.IGNORECASE),
-        "OpenMagi",
-        "legacy_public_identity_normalized",
-    ),
 )
-_MODEL_VISIBLE_CONTEXT_MAX_CHARS = 8192
+_MODEL_VISIBLE_CONTEXT_MAX_CHARS = 1_000_000
 
 
 def register_chat_routes(app: FastAPI, runtime: OpenMagiRuntime) -> None:
@@ -2237,6 +2238,7 @@ async def _run_live_chat_runner(
         max_concurrent_generation_runs=generation.budgets.max_concurrent_generation_runs,
         max_pending_generation_runs=generation.budgets.max_pending_generation_runs,
         cost_cap_usd=generation.budgets.max_cost_usd,
+        cost_owner_waiver=generation_config.cost_owner_waiver,
     )
     if reservation.status != "reserved":
         return _fallback_response(
@@ -2375,19 +2377,30 @@ async def _run_live_chat_runner(
         runtime=runtime,
         boundary_result=boundary_result,
     )
-    counter_status = "runner_completed" if boundary_result.status == "completed" else "error"
+    runner_output_missing = (
+        boundary_result.status == "completed"
+        and not boundary_result.output_text_internal
+    )
+    counter_status = (
+        "runner_completed"
+        if boundary_result.status == "completed" and not runner_output_missing
+        else "error"
+    )
+    counter_reason = (
+        "runner_output_missing" if runner_output_missing else boundary_result.reason
+    )
     counter_state = shadow_config.counter_store.finish(
         reservation,
         status=counter_status,
-        reason=boundary_result.reason,
+        reason=counter_reason,
         report_digest=report_digest,
         runner_error_diagnostic=runner_error_diagnostic,
     )
-    if boundary_result.status != "completed" or not boundary_result.output_text_internal:
+    if boundary_result.status != "completed" or runner_output_missing:
         return _fallback_response(
             status_code=502,
             status="python_error",
-            reason=boundary_result.reason,
+            reason=counter_reason,
             runtime=runtime,
             counter_state=counter_state,
             counter_status=counter_status,
@@ -2440,11 +2453,63 @@ async def _run_live_chat_runner(
         gate1a_bundle=gate1a_bundle,
         model_attempt_digest=model_attempt_digest,
         observed_egress_evidence=observed_egress_evidence,
+        public_events=_gate5b_full_toolhost_public_events(gate1a_bundle),
         first_party_harness_metadata=_first_party_harness_metadata(
             payload=payload,
             gate1a_bundle=gate1a_bundle,
         ),
     )
+
+
+def _gate5b_full_toolhost_public_events(
+    gate1a_bundle: Gate1AReadOnlyToolBundle | Gate5BFullToolBundle,
+) -> tuple[Mapping[str, object], ...]:
+    if not _route_tool_bundle_full(gate1a_bundle):
+        return ()
+    turn_id = "turn-gate5b-full-toolhost"
+    events: list[Mapping[str, object]] = [
+        turn_phase_event(turn_id=turn_id, phase="executing"),
+        {
+            "type": "llm_progress",
+            "turnId": turn_id,
+            "stage": "started",
+            "label": "Running Python ADK",
+            "detail": "Selected first-party toolhost active",
+        },
+    ]
+    receipts = getattr(gate1a_bundle.host.counter, "receipts", ())
+    for index, receipt in enumerate(receipts[:8], start=1):
+        tool_id = _gate5b_full_toolhost_tool_event_id(receipt, index)
+        tool_name = str(getattr(receipt, "tool_name", "") or "Tool")
+        events.append(tool_start_event(tool_id=tool_id, name=tool_name))
+        events.append(
+            tool_progress_event(
+                tool_id=tool_id,
+                label=tool_name,
+                status="complete",
+                message="Tool receipt recorded",
+            )
+        )
+        events.append(
+            tool_end_event(
+                tool_id=tool_id,
+                status="ok" if getattr(receipt, "status", "") == "ok" else "error",
+                output_preview=(
+                    f"bytes={getattr(receipt, 'output_byte_count', 0)} "
+                    f"result={getattr(receipt, 'bounded_output_digest', '')}"
+                ),
+                receipt_refs=(f"receipt:{getattr(receipt, 'bounded_output_digest', '')}",),
+            )
+        )
+    events.append(turn_phase_event(turn_id=turn_id, phase="committed"))
+    return tuple(events[:25])
+
+
+def _gate5b_full_toolhost_tool_event_id(receipt: object, index: int) -> str:
+    digest = str(getattr(receipt, "tool_call_digest", "") or "")
+    if digest.startswith("sha256:") and len(digest) >= 19:
+        return f"tu_{digest[7:19]}"
+    return f"tu_{index}"
 
 
 def _finish_counter_error(
