@@ -138,8 +138,55 @@ def build_learning_recall_harness(
     return MemoryRecallHarness(config, adapter=adapter)
 
 
+def build_gated_live_learning_recall_harness(
+    *,
+    store: object | None = None,
+    readiness: object,
+    bot_id: str,
+    user_id: str,
+    tenant_id: str = "local",
+    namespace_ref: str | None = None,
+    k: int = 8,
+) -> MemoryRecallHarness | None:
+    """PR7 — gated REAL learning-recall binding.
+
+    Promotes the PR5 ``build_learning_recall_harness`` local-fake to a real
+    (live) recall binding ONLY when the learning-live readiness gate
+    (``gates/learning_live_readiness``) resolves to ``live`` for the given
+    scope.  Otherwise returns ``None`` — the caller keeps the local-fake /
+    disabled path, byte-identical to PR1–PR6.
+
+    Authority flags on the underlying ``MemoryRecallHarnessConfig`` stay
+    frozen-``Literal[False]``; live behaviour is gate-derived and recorded in the
+    ``learning/live`` audit, NOT by flipping a flag.  The import of the readiness
+    gate + live binding is lazy so this module's default import path is unchanged.
+    """
+    from magi_agent.gates.learning_live_readiness import (  # lazy: keep seam thin
+        LearningLiveReadinessConfig,
+        resolve_learning_live_execution_mode,
+    )
+
+    if not isinstance(readiness, LearningLiveReadinessConfig):
+        return None
+    mode = resolve_learning_live_execution_mode(
+        readiness, bot_id=bot_id, user_id=user_id
+    )
+    if mode != "live":
+        # disabled / shadow → no live recall binding (shadow is observe-only).
+        return None
+    return build_learning_recall_harness(
+        store=store,
+        tenant_id=tenant_id,
+        enabled=True,
+        local_fake_adapter_enabled=True,
+        namespace_ref=namespace_ref,
+        k=k,
+    )
+
+
 __all__ = [
     "MemoryRecallHarness",
     "MemoryRecallHarnessConfig",
+    "build_gated_live_learning_recall_harness",
     "build_learning_recall_harness",
 ]
