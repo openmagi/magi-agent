@@ -1,14 +1,15 @@
-"use client";
-
-import { use } from "react";
 import { ChatViewClient } from "../chat-view-client";
+
+export function generateStaticParams() {
+  return [{ channel: "general" }];
+}
 
 interface ChatChannelPageProps {
   params: Promise<{ channel: string }>;
 }
 
-export default function ChatChannelPage({ params }: ChatChannelPageProps) {
-  const { channel } = use(params);
+export default async function ChatChannelPage({ params }: ChatChannelPageProps) {
+  const { channel } = await params;
 
   return (
     <ChatViewClient

@@ -40,9 +40,9 @@ const CHAT_PROXY_URLS = Array.from(
 );
 const LOCAL_BOT_ID = "local";
 const LOCAL_DEFAULT_CHANNEL: Channel = {
-  id: "local-default",
-  name: "default",
-  display_name: "default",
+  id: "local-general",
+  name: "general",
+  display_name: "General",
   position: 0,
   category: "General",
   created_at: "1970-01-01T00:00:00.000Z",

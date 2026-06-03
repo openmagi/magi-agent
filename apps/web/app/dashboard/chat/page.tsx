@@ -6,7 +6,7 @@ import { useEffect } from "react";
 export default function ChatIndexPage() {
   const router = useRouter();
   useEffect(() => {
-    router.replace("/dashboard/local/chat/default");
+    router.replace("/dashboard/local/chat/general");
   }, [router]);
   return null;
 }

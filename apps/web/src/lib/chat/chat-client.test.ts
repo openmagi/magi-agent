@@ -336,9 +336,9 @@ describe("fetchChannels", () => {
 
     expect(channels).toEqual([
       expect.objectContaining({
-        id: "local-default",
-        name: "default",
-        display_name: "default",
+        id: "local-general",
+        name: "general",
+        display_name: "General",
       }),
     ]);
     expect(fetchMock).not.toHaveBeenCalled();
@@ -381,7 +381,7 @@ describe("sendMessage local runtime", () => {
     const fetchMock = mockSseFetch("data: {\"choices\":[{\"delta\":{\"content\":\"ok\"}}]}\n\ndata: [DONE]\n\n");
     const deltas: string[] = [];
 
-    await sendMessage("local", "default", [{ role: "user", content: "hello" }], {
+    await sendMessage("local", "general", [{ role: "user", content: "hello" }], {
       onDelta: (delta) => deltas.push(delta),
       onDone: vi.fn(),
       onError: vi.fn(),
@@ -389,8 +389,8 @@ describe("sendMessage local runtime", () => {
 
     expect(String(fetchMock.mock.calls[0]?.[0])).toBe("/v1/chat/completions");
     const request = fetchMock.mock.calls[0]?.[1] as RequestInit;
-    expect((request.headers as Record<string, string>)["x-magi-session-key"]).toBe("agent:main:app:default");
-    expect((request.headers as Record<string, string>)["x-core-agent-session-key"]).toBe("agent:main:app:default");
+    expect((request.headers as Record<string, string>)["x-magi-session-key"]).toBe("agent:main:app:general");
+    expect((request.headers as Record<string, string>)["x-core-agent-session-key"]).toBe("agent:main:app:general");
     expect(deltas.join("")).toBe("ok");
   });
 });

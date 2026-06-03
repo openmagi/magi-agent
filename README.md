@@ -1,14 +1,63 @@
-# Magi
+# Open Magi Agent
 
 **The programmable agent that runs on rules you write — not prompts you pray it follows.**
 
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
-[![TypeScript](https://img.shields.io/badge/TypeScript-5.x-3178C6.svg)](https://www.typescriptlang.org/)
-[![Node.js](https://img.shields.io/badge/Node.js-%3E%3D20-339933.svg)](https://nodejs.org/)
+[![Node.js](https://img.shields.io/badge/Node.js-%3E%3D22-339933.svg)](https://nodejs.org/)
+
+## Quickstart
+
+### Homebrew
+
+```bash
+brew install openmagi/tap/magi-agent
+magi-agent serve --port 8080
+open http://localhost:8080/dashboard
+```
+
+Use the CLI from another terminal:
+
+```bash
+magi --help
+magi-agent --help
+```
+
+| Command | Use it for |
+| --- | --- |
+| `magi-agent init` | Generate `magi-agent.yaml` for your model provider |
+| `magi-agent chat` | Persistent interactive terminal session |
+| `magi-agent run "task"` | Single task with streamed output |
+| `magi-agent run --model name "task"` | Override model for one task |
+| `magi-agent serve --port 8080` | Self-hosted app and HTTP API |
+
+### From source
+
+Use this path when you are contributing to Magi Agent or the local dashboard:
+
+```bash
+git clone https://github.com/openmagi/magi-agent.git
+cd magi-agent
+npm install
+npm run build
+npx tsx src/cli/index.ts init
+npx tsx src/cli/index.ts serve --port 8080
+```
+
+Open `http://localhost:8080/dashboard`.
+
+### Docker for development
+
+```bash
+git clone https://github.com/openmagi/magi-agent.git
+cd magi-agent
+cp .env.example .env
+cp magi-agent.yaml.example magi-agent.yaml
+docker compose up --build
+```
 
 Stop praying your agent follows the prompt. Enforce them.
 
-Magi is an open-source AI agent where **you** define verification rules in code — hooks, classifiers, gates — and the runtime enforces them on every response. The agent can't skip them. Any model, any provider.
+Magi Agent is an open-source AI agent where **you** define verification rules in code — hooks, classifiers, gates — and the runtime enforces them on every response. The agent can't skip them. Any model, any provider.
 
 ## The problem with every other agent
 
@@ -216,42 +265,6 @@ The controller never generates the output it verifies. Sub-agents run with their
 
 This matters most for autonomous agents — overnight cron jobs, document pipelines, customer-facing bots — where no human is watching. A model that both produces and judges its own work will systematically over-trust itself. Structural separation breaks that loop.
 
-## Quick Start
-
-### Docker (recommended)
-
-```bash
-git clone https://github.com/openmagi/magi-agent.git
-cd magi-agent
-cp .env.example .env
-cp magi-agent.yaml.example magi-agent.yaml
-docker compose up --build
-```
-
-Open `http://localhost:8080/app` and paste the server token from `.env`.
-
-### CLI
-
-```bash
-npm install
-npm run build
-npx tsx src/cli/index.ts init
-```
-
-```bash
-npx tsx src/cli/index.ts chat                              # interactive session
-npx tsx src/cli/index.ts run "summarize workspace/knowledge" # one-shot task
-npx tsx src/cli/index.ts serve --port 8080                  # browser app + API
-```
-
-| Command | Use it for |
-| --- | --- |
-| `magi-agent init` | Generate `magi-agent.yaml` for hosted or local LLMs |
-| `magi-agent chat` | Persistent interactive terminal session |
-| `magi-agent run "task"` | Single task with streamed output |
-| `magi-agent run --model name "task"` | Override model for one task |
-| `magi-agent serve --port 8080` | Self-hosted app and HTTP API |
-
 ## Customize everything
 
 ### Natural language rules
@@ -353,9 +366,9 @@ workspace/
   harness-rules/   Markdown runtime rules
 ```
 
-## Managed platform
+## Managed Open Magi
 
-[openmagi.ai](https://openmagi.ai) adds managed accounts, billing, encrypted secrets, hosted runtimes, Knowledge Base storage, and support. The open-source version gives you the part that matters: the runtime, the hooks, the tools, and the workspace.
+[openmagi.ai](https://openmagi.ai) offers a managed Open Magi experience. This repository gives you Magi Agent itself: the runtime, the hooks, the tools, and the workspace.
 
 ## Docs
 

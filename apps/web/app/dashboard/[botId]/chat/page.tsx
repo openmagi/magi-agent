@@ -12,7 +12,7 @@ export default function ChatIndexPage({ params }: ChatIndexPageProps) {
   const { botId } = use(params);
   const router = useRouter();
   useEffect(() => {
-    router.replace(`/dashboard/${botId}/chat/default`);
+    router.replace(`/dashboard/${botId}/chat/general`);
   }, [router, botId]);
   return null;
 }

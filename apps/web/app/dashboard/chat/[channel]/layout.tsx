@@ -1,5 +1,5 @@
 export function generateStaticParams() {
-  return [{ channel: "default" }];
+  return [{ channel: "general" }];
 }
 
 export default function ChannelLayout({ children }: { children: React.ReactNode }) {
