@@ -23,6 +23,8 @@ from magi_agent.learning.policy import (
     assert_activation_allowed,
 )
 from magi_agent.learning.store import (
+    DEFAULT_LEARNING_DB_PATH,
+    LearningStore,
     Page,
     SqliteLearningStore,
 )
@@ -45,6 +47,8 @@ __all__ = [
     "PolicyViolation",
     "assert_activation_allowed",
     # store
+    "DEFAULT_LEARNING_DB_PATH",
+    "LearningStore",
     "Page",
     "SqliteLearningStore",
     # vector

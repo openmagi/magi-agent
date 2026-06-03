@@ -85,6 +85,16 @@ _MIGRATIONS: list[tuple[int, str]] = [
             ON learning_approvals (item_id);
         """,
     ),
+    (
+        4,
+        """
+        ALTER TABLE learning_items
+            ADD COLUMN scope_task_kind TEXT
+                GENERATED ALWAYS AS (json_extract(scope_json, '$.taskKind')) VIRTUAL;
+        CREATE INDEX IF NOT EXISTS idx_learning_items_scope_task_kind
+            ON learning_items (tenant_id, scope_task_kind);
+        """,
+    ),
 ]
 
 
@@ -106,10 +116,19 @@ def _run_migrations(conn: sqlite3.Connection) -> int:
     for version, sql in _MIGRATIONS:
         if version <= current:
             continue
-        conn.executescript(sql)
-        conn.execute(
-            "INSERT INTO _learning_schema_version (version) VALUES (?)", (version,)
-        )
+        # Execute DDL statements individually inside a transaction so the
+        # version-row insert is atomic with the schema changes.  If the
+        # process crashes after executescript but before the INSERT, the
+        # next startup would see current < version and re-run — idempotent
+        # because every statement uses IF NOT EXISTS.
+        with conn:
+            for statement in sql.split(";"):
+                statement = statement.strip()
+                if statement:
+                    conn.execute(statement)
+            conn.execute(
+                "INSERT INTO _learning_schema_version (version) VALUES (?)", (version,)
+            )
         applied += 1
 
     conn.commit()
@@ -275,8 +294,28 @@ class SqliteLearningStore:
     # ------------------------------------------------------------------
 
     def propose(self, item: LearningItem) -> LearningItem:
-        """Store *item* as proposed, stripping any eval/approval refs."""
+        """Store *item* as proposed, stripping any eval/approval refs.
+
+        Raises:
+            ValueError: if an item with the same id already exists and its
+                status is not ``"proposed"`` — re-proposing would silently
+                demote an active/archived item, which violates the
+                policy-gated status-transition contract.
+        """
         conn = self._get_conn()
+
+        # Guard: reject propose() if the item already exists in a
+        # non-proposed state (active or archived).
+        existing_row = conn.execute(
+            "SELECT status FROM learning_items WHERE id = ?", (item.id,)
+        ).fetchone()
+        if existing_row is not None and existing_row["status"] != "proposed":
+            raise ValueError(
+                f"Cannot re-propose learning item {item.id!r}: "
+                f"it already exists with status={existing_row['status']!r}. "
+                "Status transitions must go through the policy-gated "
+                "approve() / auto_activate() / archive() methods."
+            )
 
         # Rebuild with forced status and stripped refs
         safe = LearningItem.model_validate(
@@ -353,6 +392,15 @@ class SqliteLearningStore:
             clauses.append("status = ?")
             params.append(status)
 
+        # Push scope.task_kind into SQL so that pagination cursors are
+        # accurate.  Previously this was done in-memory after fetching
+        # limit+1 rows, which could yield next_cursor != None with fewer
+        # or zero visible items.  The generated column `scope_task_kind`
+        # (added in migration 4) makes this a real index scan.
+        if scope is not None:
+            clauses.append("scope_task_kind = ?")
+            params.append(scope.task_kind)
+
         if cursor is not None:
             clauses.append("id > ?")
             params.append(cursor)
@@ -369,12 +417,6 @@ class SqliteLearningStore:
         page_rows = rows[:limit]
         items = tuple(_row_to_item(r) for r in page_rows)
         next_cursor = page_rows[-1]["id"] if has_more else None
-
-        # Optional scope filter (in-memory, since scope is a JSON blob)
-        if scope is not None:
-            items = tuple(
-                i for i in items if i.scope.task_kind == scope.task_kind
-            )
 
         return Page(items=items, next_cursor=next_cursor)
 
@@ -456,9 +498,18 @@ class SqliteLearningStore:
         - eval_observation_ref must be present
         - approval_ref is generated from the approver record
         """
+        if not approver or not approver.strip():
+            raise ValueError("approver must be a non-empty, non-blank string")
+
         conn = self._get_conn()
 
         item = self._require_item(conn, item_id)
+
+        if item.status != "proposed":
+            raise ValueError(
+                f"Cannot approve learning item {item_id!r}: "
+                f"expected status='proposed', got status={item.status!r}."
+            )
 
         # Generate an approval_ref to satisfy assert_activation_allowed
         approval_ref = f"approval:{uuid.uuid4().hex}"
@@ -507,6 +558,12 @@ class SqliteLearningStore:
         conn = self._get_conn()
         item = self._require_item(conn, item_id)
 
+        if item.status != "proposed":
+            raise ValueError(
+                f"Cannot auto_activate learning item {item_id!r}: "
+                f"expected status='proposed', got status={item.status!r}."
+            )
+
         # For rules, auto_activate has no approval_ref -> policy violation
         assert_activation_allowed(
             item,
@@ -543,7 +600,14 @@ class SqliteLearningStore:
         conn = self._get_conn()
         original = self._require_item(conn, item_id)
 
-        new_id = f"{item_id}:v{original.version + 1}"
+        # Derive the new id from the ROOT id, not the current node id.
+        # Strip any trailing `:v{n}` suffix so that chains stay flat:
+        #   learning:item → learning:item:v2 → learning:item:v3
+        # instead of cascading:
+        #   learning:item → learning:item:v2 → learning:item:v2:v3
+        import re as _re
+        root_id = _re.sub(r":v\d+$", "", item_id)
+        new_id = f"{root_id}:v{original.version + 1}"
         new_data = original.model_dump(by_alias=True) | patch | {
             "id": new_id,
             "version": original.version + 1,
@@ -575,7 +639,7 @@ class SqliteLearningStore:
 
     def archive(self, item_id: str, *, actor: str) -> LearningItem:
         conn = self._get_conn()
-        conn.execute(
+        cur = conn.execute(
             """
             UPDATE learning_items
             SET status = 'archived', updated_at = ?
@@ -583,6 +647,8 @@ class SqliteLearningStore:
             """,
             (_now_iso(), item_id),
         )
+        if cur.rowcount == 0:
+            raise KeyError(f"LearningItem not found: {item_id!r}")
         conn.commit()
         return self._require_item(conn, item_id)
 

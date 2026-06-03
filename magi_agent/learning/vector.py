@@ -47,6 +47,11 @@ class BruteForceVectorIndex:
 
         scores: list[tuple[str, float]] = []
         for item_id, stored in self._store.items():
+            if len(stored) != len(embedding):
+                raise ValueError(
+                    f"Embedding dimension mismatch for {item_id!r}: "
+                    f"expected {len(embedding)}, got {len(stored)}"
+                )
             stored_norm = _l2_norm(stored)
             if stored_norm == 0.0:
                 continue

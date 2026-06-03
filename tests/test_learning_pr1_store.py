@@ -721,3 +721,412 @@ class TestVectorIndex:
             index.add(f"item-{i}", [float(i), 1.0])
         results = index.query([5.0, 1.0], k=3)
         assert len(results) == 3
+
+    # Issue 9 — dimension mismatch raises instead of silently truncating
+    def test_query_dimension_mismatch_raises(self) -> None:
+        from magi_agent.learning.vector import BruteForceVectorIndex
+
+        index = BruteForceVectorIndex()
+        index.add("item-3d", [1.0, 0.0, 0.0])  # 3-dim
+        with pytest.raises(ValueError, match="dimension mismatch"):
+            index.query([1.0, 0.0], k=1)  # query with 2-dim
+
+
+# ---------------------------------------------------------------------------
+# Guard tests for Issues 1–8 and 10
+# ---------------------------------------------------------------------------
+
+
+class TestProposeGuards:
+    """Issue 1: propose() must reject re-proposing a non-proposed item."""
+
+    def _activate_rule(self, store: object, item_id: str) -> object:
+        """Helper: propose + approve a rule item, return the active item."""
+        from magi_agent.learning.models import LearningItem
+
+        item = LearningItem.model_validate({**_base_payload("rule"), "id": item_id})
+        proposed = store.propose(item)
+        eval_ref = store.record_eval_observation(
+            item_id=proposed.id,
+            before={},
+            after={},
+            sample_n=5,
+            passed=True,
+        )
+        return store.approve(proposed.id, approver="human:alice", eval_observation_ref=eval_ref)
+
+    def test_propose_onto_active_item_raises(self, store: object) -> None:
+        """Re-proposing an active item must raise ValueError, not silently demote it."""
+        from magi_agent.learning.models import LearningItem
+
+        active = self._activate_rule(store, "learning:item-active-guard")
+        assert active.status == "active"
+
+        # Attempt to re-propose using the same id
+        duplicate = LearningItem.model_validate(
+            {**_base_payload("rule"), "id": active.id}
+        )
+        with pytest.raises(ValueError, match="active"):
+            store.propose(duplicate)
+
+        # Original item is unchanged
+        still_active = store.get(active.id)
+        assert still_active is not None
+        assert still_active.status == "active"
+
+    def test_propose_onto_archived_item_raises(self, store: object) -> None:
+        """Re-proposing an archived item must raise ValueError."""
+        from magi_agent.learning.models import LearningItem
+
+        active = self._activate_rule(store, "learning:item-archived-guard")
+        store.archive(active.id, actor="human:alice")
+
+        duplicate = LearningItem.model_validate(
+            {**_base_payload("rule"), "id": active.id}
+        )
+        with pytest.raises(ValueError, match="archived"):
+            store.propose(duplicate)
+
+    def test_propose_onto_proposed_item_is_idempotent(self, store: object) -> None:
+        """Re-proposing onto an existing proposed item should succeed (update case)."""
+        from magi_agent.learning.models import LearningItem
+
+        item = LearningItem.model_validate(_base_payload("rule"))
+        v1 = store.propose(item)
+        assert v1.status == "proposed"
+
+        # Re-propose with updated rationale — should NOT raise
+        updated = LearningItem.model_validate(
+            {**_base_payload("rule"), "rationale": "updated rationale"}
+        )
+        v2 = store.propose(updated)
+        assert v2.status == "proposed"
+        assert v2.rationale == "updated rationale"
+
+
+class TestApproveGuards:
+    """Issues 2 + 7: approve() must reject archived items and blank approvers."""
+
+    def test_approve_on_archived_item_raises(self, store: object) -> None:
+        """approve() on an already-archived item must raise ValueError."""
+        from magi_agent.learning.models import LearningItem
+
+        item = LearningItem.model_validate(_base_payload("rule"))
+        proposed = store.propose(item)
+        store.archive(proposed.id, actor="human:alice")
+
+        eval_ref = store.record_eval_observation(
+            item_id=proposed.id,
+            before={},
+            after={},
+            sample_n=5,
+            passed=True,
+        )
+        with pytest.raises(ValueError, match="proposed"):
+            store.approve(proposed.id, approver="human:bob", eval_observation_ref=eval_ref)
+
+    def test_approve_on_already_active_item_raises(self, store: object) -> None:
+        """approve() on an already-active item must raise ValueError."""
+        from magi_agent.learning.models import LearningItem
+
+        item = LearningItem.model_validate(
+            {**_base_payload("rule"), "id": "learning:approve-active-guard"}
+        )
+        proposed = store.propose(item)
+        eval_ref = store.record_eval_observation(
+            item_id=proposed.id, before={}, after={}, sample_n=5, passed=True
+        )
+        store.approve(proposed.id, approver="human:alice", eval_observation_ref=eval_ref)
+
+        # Second approve must fail
+        eval_ref2 = store.record_eval_observation(
+            item_id=proposed.id, before={}, after={}, sample_n=5, passed=True
+        )
+        with pytest.raises(ValueError, match="proposed"):
+            store.approve(proposed.id, approver="human:bob", eval_observation_ref=eval_ref2)
+
+    def test_approve_empty_approver_raises(self, store: object) -> None:
+        """approve() with an empty approver must raise ValueError."""
+        from magi_agent.learning.models import LearningItem
+
+        item = LearningItem.model_validate(_base_payload("rule"))
+        proposed = store.propose(item)
+        eval_ref = store.record_eval_observation(
+            item_id=proposed.id, before={}, after={}, sample_n=5, passed=True
+        )
+        with pytest.raises(ValueError, match="approver"):
+            store.approve(proposed.id, approver="", eval_observation_ref=eval_ref)
+
+    def test_approve_blank_approver_raises(self, store: object) -> None:
+        """approve() with a whitespace-only approver must raise ValueError."""
+        from magi_agent.learning.models import LearningItem
+
+        item = LearningItem.model_validate(
+            {**_base_payload("rule"), "id": "learning:blank-approver-guard"}
+        )
+        proposed = store.propose(item)
+        eval_ref = store.record_eval_observation(
+            item_id=proposed.id, before={}, after={}, sample_n=5, passed=True
+        )
+        with pytest.raises(ValueError, match="approver"):
+            store.approve(proposed.id, approver="   ", eval_observation_ref=eval_ref)
+
+
+class TestAutoActivateGuards:
+    """Issue 2: auto_activate() must reject non-proposed items."""
+
+    def test_auto_activate_on_archived_item_raises(self, store: object) -> None:
+        """auto_activate() on an archived example item must raise ValueError."""
+        from magi_agent.learning.models import LearningItem
+
+        item = LearningItem.model_validate(_base_payload("example"))
+        proposed = store.propose(item)
+        store.archive(proposed.id, actor="human:alice")
+
+        eval_ref = store.record_eval_observation(
+            item_id=proposed.id, before={}, after={}, sample_n=5, passed=True
+        )
+        with pytest.raises(ValueError, match="proposed"):
+            store.auto_activate(proposed.id, eval_observation_ref=eval_ref)
+
+    def test_auto_activate_on_already_active_item_raises(self, store: object) -> None:
+        """auto_activate() on an already-active item must raise ValueError."""
+        from magi_agent.learning.models import LearningItem
+
+        item = LearningItem.model_validate(
+            {**_base_payload("example"), "id": "learning:aa-active-guard"}
+        )
+        proposed = store.propose(item)
+        eval_ref = store.record_eval_observation(
+            item_id=proposed.id, before={}, after={}, sample_n=5, passed=True
+        )
+        store.auto_activate(proposed.id, eval_observation_ref=eval_ref)
+
+        # Second auto_activate must fail
+        eval_ref2 = store.record_eval_observation(
+            item_id=proposed.id, before={}, after={}, sample_n=5, passed=True
+        )
+        with pytest.raises(ValueError, match="proposed"):
+            store.auto_activate(proposed.id, eval_observation_ref=eval_ref2)
+
+
+class TestEditVersionChain:
+    """Issue 3: edit() must derive new ids from root, not cascade."""
+
+    def test_edit_v3_id_is_not_cascaded(self, store: object) -> None:
+        """v3 id must be root:v3, NOT root:v2:v3."""
+        from magi_agent.learning.models import LearningItem
+
+        item = LearningItem.model_validate(
+            {**_base_payload("rule"), "id": "learning:chain-root"}
+        )
+        v1 = store.propose(item)
+        v2 = store.edit(v1.id, patch={"rationale": "v2"}, editor="human:carol")
+        v3 = store.edit(v2.id, patch={"rationale": "v3"}, editor="human:carol")
+
+        assert v2.id == "learning:chain-root:v2", f"Unexpected v2 id: {v2.id}"
+        assert v3.id == "learning:chain-root:v3", f"Unexpected v3 id: {v3.id!r} (should not cascade)"
+        assert v3.version == 3
+        assert v3.supersedes == v2.id
+
+    def test_edit_v4_id_is_not_cascaded(self, store: object) -> None:
+        """A four-level chain must stay flat: root:v4 not root:v2:v3:v4."""
+        from magi_agent.learning.models import LearningItem
+
+        item = LearningItem.model_validate(
+            {**_base_payload("example"), "id": "learning:deep-chain"}
+        )
+        v1 = store.propose(item)
+        v2 = store.edit(v1.id, patch={"rationale": "v2"}, editor="human:a")
+        v3 = store.edit(v2.id, patch={"rationale": "v3"}, editor="human:a")
+        v4 = store.edit(v3.id, patch={"rationale": "v4"}, editor="human:a")
+
+        assert v4.id == "learning:deep-chain:v4"
+        assert v4.version == 4
+
+
+class TestListPaginationWithScope:
+    """Issue 5: scope filter in list() must not break pagination cursor."""
+
+    def test_scope_filter_pagination_cursor_accurate(self, store: object) -> None:
+        """Paginating with a scope filter must return accurate next_cursor semantics.
+
+        If all items on a page match the scope filter, next_cursor should be
+        set only when more matching items actually exist.
+        """
+        from magi_agent.learning.models import LearningItem
+
+        # Insert 5 items with scope 'coding' and 5 with scope 'research'
+        for i in range(5):
+            store.propose(
+                LearningItem.model_validate(
+                    {
+                        **_base_payload("rule"),
+                        "id": f"learning:scope-page-coding-{i:02d}",
+                        "scope": {"taskKind": "coding"},
+                    }
+                )
+            )
+            store.propose(
+                LearningItem.model_validate(
+                    {
+                        **_base_payload("rule"),
+                        "id": f"learning:scope-page-research-{i:02d}",
+                        "scope": {"taskKind": "research"},
+                    }
+                )
+            )
+
+        from magi_agent.learning.models import LearningScope
+
+        coding_scope = LearningScope.model_validate({"taskKind": "coding"})
+
+        # Fetch all coding items with a small page size to exercise cursor
+        seen_ids: list[str] = []
+        cursor: str | None = None
+        pages_fetched = 0
+        while True:
+            page = store.list(
+                tenant_id="local",
+                scope=coding_scope,
+                limit=2,
+                cursor=cursor,
+            )
+            # All returned items must be coding scope
+            for item in page.items:
+                assert item.scope.task_kind == "coding", (
+                    f"Non-coding item leaked through scope filter: {item.id}"
+                )
+                seen_ids.append(item.id)
+
+            pages_fetched += 1
+            if page.next_cursor is None:
+                break
+            cursor = page.next_cursor
+            assert pages_fetched <= 10, "Pagination did not terminate"
+
+        # We should have found all 5 coding items (no more, no less)
+        assert len(seen_ids) == 5
+        # No next_cursor when exhausted
+        assert page.next_cursor is None
+
+    def test_scope_filter_no_spurious_next_cursor(self, store: object) -> None:
+        """next_cursor must be None when all remaining items are filtered out."""
+        from magi_agent.learning.models import LearningItem, LearningScope
+
+        # Insert 3 'research' items and 1 'coding' item (in id order: coding comes first)
+        store.propose(
+            LearningItem.model_validate(
+                {
+                    **_base_payload("rule"),
+                    "id": "learning:cursor-a-coding",
+                    "scope": {"taskKind": "coding"},
+                }
+            )
+        )
+        for i in range(3):
+            store.propose(
+                LearningItem.model_validate(
+                    {
+                        **_base_payload("rule"),
+                        "id": f"learning:cursor-b-research-{i}",
+                        "scope": {"taskKind": "research"},
+                    }
+                )
+            )
+
+        research_scope = LearningScope.model_validate({"taskKind": "research"})
+        # Fetch research items with limit=10; should see exactly 3 with no cursor
+        page = store.list(tenant_id="local", scope=research_scope, limit=10)
+        assert len(page.items) == 3
+        assert page.next_cursor is None
+
+
+class TestArchiveGuards:
+    """Issue 8: archive() on nonexistent id must raise KeyError."""
+
+    def test_archive_nonexistent_raises_key_error(self, store: object) -> None:
+        with pytest.raises(KeyError, match="no-such-item"):
+            store.archive("learning:no-such-item", actor="human:alice")
+
+
+class TestExportsAndProtocol:
+    """Issue 4: LearningStore protocol + DEFAULT_LEARNING_DB_PATH must be exported."""
+
+    def test_default_learning_db_path_exported(self) -> None:
+        from magi_agent.learning import DEFAULT_LEARNING_DB_PATH
+
+        assert isinstance(DEFAULT_LEARNING_DB_PATH, str)
+        assert DEFAULT_LEARNING_DB_PATH  # non-empty
+
+    def test_learning_store_protocol_exported(self) -> None:
+        from magi_agent.learning import LearningStore
+
+        assert LearningStore is not None
+
+    def test_sqlite_store_satisfies_protocol(self, store: object) -> None:
+        """SqliteLearningStore must be recognised as a LearningStore at runtime."""
+        from magi_agent.learning import LearningStore
+
+        assert isinstance(store, LearningStore)
+
+
+class TestActivationPathBehavioral:
+    """Issue 10: behavioral proof that only approve/auto_activate reach status=active."""
+
+    def test_only_approve_and_auto_activate_can_reach_status_active(
+        self, store: object
+    ) -> None:
+        """Prove by exhaustion: every public store method that is NOT approve or
+        auto_activate cannot produce a status='active' item."""
+        from magi_agent.learning.models import LearningItem
+        from magi_agent.learning.policy import PolicyViolation
+
+        # Helper: propose a fresh item each time
+        def fresh(suffix: str) -> LearningItem:
+            return LearningItem.model_validate(
+                {**_base_payload("example"), "id": f"learning:behav-{suffix}"}
+            )
+
+        # 1. propose() must always produce status='proposed'
+        result = store.propose(fresh("propose"))
+        assert result.status == "proposed"
+
+        # 2. edit() must produce status='proposed'
+        v1 = store.propose(LearningItem.model_validate(
+            {**_base_payload("rule"), "id": "learning:behav-edit-root"}
+        ))
+        v2 = store.edit(v1.id, patch={"rationale": "x"}, editor="human:a")
+        assert v2.status == "proposed"
+
+        # 3. archive() must produce status='archived'
+        p = store.propose(fresh("archive"))
+        archived = store.archive(p.id, actor="human:a")
+        assert archived.status == "archived"
+
+        # 4. auto_activate without eval_observation_ref raises PolicyViolation
+        p2 = store.propose(fresh("aa-no-ref"))
+        with pytest.raises(PolicyViolation):
+            store.auto_activate(p2.id, eval_observation_ref=None)
+        assert store.get(p2.id).status == "proposed"  # type: ignore[union-attr]
+
+        # 5. approve without eval_observation_ref raises PolicyViolation
+        p3 = store.propose(fresh("appr-no-ref"))
+        with pytest.raises(PolicyViolation):
+            store.approve(p3.id, approver="human:a", eval_observation_ref=None)
+        assert store.get(p3.id).status == "proposed"  # type: ignore[union-attr]
+
+        # 6. Only approve with both refs can reach status='active' for rules
+        p4 = store.propose(LearningItem.model_validate(
+            {**_base_payload("rule"), "id": "learning:behav-active-only"}
+        ))
+        eval_ref = store.record_eval_observation(
+            item_id=p4.id, before={}, after={}, sample_n=5, passed=True
+        )
+        activated = store.approve(
+            p4.id, approver="human:alice", eval_observation_ref=eval_ref
+        )
+        assert activated.status == "active"
+        # Confirm assert_activation_allowed was the gate
+        assert activated.eval_observation_ref == eval_ref
+        assert activated.approval_ref is not None
