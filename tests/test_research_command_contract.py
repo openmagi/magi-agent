@@ -26,3 +26,22 @@ def test_model_construct_disabled():
     import pytest
     with pytest.raises(TypeError):
         ResearchCommandResult.model_construct()
+
+
+def test_query_is_stripped():
+    out = prepare_research_command(
+        query="   compare X vs Y   ",
+        per_child_token_estimate=8000,
+        model_microcents_per_1k=120,
+    )
+    assert out.query == "compare X vs Y"
+
+
+def test_compiled_bundle_is_carried_for_execution():
+    out = prepare_research_command(
+        query="q",
+        per_child_token_estimate=8000,
+        model_microcents_per_1k=120,
+    )
+    # the bundle's contract must match the contract the cost estimate was computed from
+    assert out.compiled_bundle.contract.workflow_id == out.cost_estimate.workflow_id

@@ -4,7 +4,10 @@ from typing import Any, Self
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from magi_agent.recipes.workflow_recipe import build_deep_research_workflow
+from magi_agent.recipes.workflow_recipe import (
+    DeepResearchWorkflowBundle,
+    build_deep_research_workflow,
+)
 from magi_agent.workflows.cost_estimate import (
     WorkflowCostEstimate,
     estimate_workflow_cost,
@@ -26,6 +29,7 @@ class ResearchCommandResult(BaseModel):
 
     query: str
     cost_estimate: WorkflowCostEstimate = Field(alias="costEstimate")
+    compiled_bundle: DeepResearchWorkflowBundle = Field(alias="compiledBundle")
     confirm_prompt: str = Field(alias="confirmPrompt")
     awaiting_confirmation: bool = Field(default=True, alias="awaitingConfirmation")
 
@@ -60,6 +64,7 @@ def prepare_research_command(
     return ResearchCommandResult(
         query=cleaned,
         costEstimate=estimate,
+        compiledBundle=bundle,
         confirmPrompt=prompt,
         awaitingConfirmation=True,
     )
