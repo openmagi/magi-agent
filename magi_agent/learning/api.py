@@ -305,7 +305,14 @@ class LearningGovernanceService:
     async def run_reflection(self) -> ReflectionRunSummary:
         """Trigger one reflection pass via the cron job (or a default job)."""
         job = self._reflection_job or LearningReflectionCronJob(store=self._store)
-        result = await job.trigger_now()
+        # Thread the service's tenant into the reflection run so a non-local
+        # tenant writes under its OWN tenant.  The single-tenant ("local") path
+        # omits the kwarg entirely, keeping the call byte-identical to PR6 (and
+        # compatible with any zero-arg ``trigger_now`` test double).
+        if self._tenant_id == "local":
+            result = await job.trigger_now()
+        else:
+            result = await job.trigger_now(tenant_id=self._tenant_id)
         counters = result.counters or {}
         return ReflectionRunSummary(
             status=result.status,

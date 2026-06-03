@@ -189,17 +189,23 @@ def _mean(scores: tuple[float, ...]) -> float:
     return sum(scores) / len(scores) if scores else 0.0
 
 
-def _candidate_item_id(candidate: LearningCandidate) -> str:
+def _candidate_item_id(candidate: LearningCandidate, *, tenant_id: str = "local") -> str:
     """Derive a stable, collision-free store id for *candidate*.
 
-    The id is a content hash of the (opaque) source signal ref, so re-running
-    reflection over the same trace produces the same id (idempotent propose)
-    while two genuinely-different refs — even ones differing only by a trailing
-    ``:v<n>`` — get distinct ids.  A hex digest can never end in the store's
+    The id is a content hash of ``tenant_id`` + the (opaque) source signal ref,
+    so re-running reflection over the same trace produces the same id
+    (idempotent propose) while two genuinely-different refs — even ones
+    differing only by a trailing ``:v<n>`` — get distinct ids.  Mixing the
+    tenant id into the digest makes the id tenant-unique: two different tenants
+    proposing content with the same ``source_signal_ref`` derive DISTINCT ids,
+    so cross-tenant clobber is impossible even before the store's tenant-scoped
+    guards run (defense in depth).  A hex digest can never end in the store's
     reserved ``:v<digits>`` version suffix, so there is no fragile strip logic
     and no collision with ``store.edit()``'s version chain.
     """
-    digest = hashlib.sha1(candidate.source_signal_ref.encode()).hexdigest()[:16]
+    digest = hashlib.sha1(
+        f"{tenant_id}\x00{candidate.source_signal_ref}".encode()
+    ).hexdigest()[:16]
     return f"learning:{candidate.kind}:{digest}"
 
 
@@ -211,7 +217,7 @@ def _to_item(candidate: LearningCandidate, *, tenant_id: str = "local") -> Learn
     tenant.  Defaults to ``"local"`` so the OSS single-tenant path is unchanged.
     """
     return LearningItem(
-        id=_candidate_item_id(candidate),
+        id=_candidate_item_id(candidate, tenant_id=tenant_id),
         tenantId=tenant_id,
         kind=candidate.kind,
         status="proposed",
