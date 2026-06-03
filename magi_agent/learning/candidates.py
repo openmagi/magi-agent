@@ -7,9 +7,9 @@ produced by the reflection executor.  It reuses PR1 types (``LearningKind``,
 
 ``TranscriptSource`` is a read-only async Protocol sufficient for the
 reflection executor.  ``LocalFakeTranscriptSource`` is the injected-fixture
-implementation used in local-fake / test runs.  Wiring to the REAL transcript
-source (``runtime/transcript.py`` / ``commit_boundary``) is explicitly deferred
-to PR7.
+implementation used in local-fake / test runs.  The REAL transcript source
+(``RealTranscriptSource`` in ``learning/live.py``) shipped in PR7 and is
+selected by the gated live layer.
 
 Env gate: ``MAGI_LEARNING_REFLECTION_ENABLED`` — see ``harness/learning_executor.py``.
 
@@ -85,10 +85,10 @@ class TranscriptSource(Protocol):
 class SessionTrace(BaseModel):
     """Minimal session-trace shape sufficient for PR3 signal extraction.
 
-    PR3 will consume ``turns``, ``final_output``, and ``draft_output`` to
-    extract learning signals (including the draft-vs-final diff signal).
-    The ``ts`` field is an ISO-8601 timestamp string used for watermark-based
-    incremental filtering.
+    Signal extraction (``signals.extract_signals``) consumes ``turns``,
+    ``final_output``, and ``draft_output`` (including the draft-vs-final diff
+    signal).  The ``ts`` field is an ISO-8601 timestamp string used for
+    watermark-based incremental filtering.
 
     **Timezone requirement**: ``ts`` MUST be normalized to UTC and end with
     ``"Z"`` (e.g. ``"2026-06-03T10:00:00Z"``).  This is enforced by a
@@ -96,8 +96,10 @@ class SessionTrace(BaseModel):
     sound (all strings share the same UTC offset).  Producers MUST normalize
     to ``Z`` before constructing a ``SessionTrace``.
 
-    TODO(PR7): replace LocalFakeTranscriptSource with a real source that reads
-    persisted transcripts from ``runtime/transcript.py`` / ``commit_boundary``.
+    A real transcript source reading persisted transcripts
+    (``RealTranscriptSource`` in ``learning/live.py``) shipped in PR7 and is
+    selected by the gated live layer; ``LocalFakeTranscriptSource`` remains the
+    default for the OSS / test path.
     """
 
     model_config = ConfigDict(
@@ -111,9 +113,9 @@ class SessionTrace(BaseModel):
     #: Sequence of turn dicts — kept as plain dicts so PR3 can parse freely.
     turns: tuple[dict[str, Any], ...]
     final_output: str = Field(alias="finalOutput")
-    #: AI's first-pass draft, to be diffed against ``final_output`` in PR3 for
-    #: the draft-vs-final diff signal.  ``None`` when no draft was captured.
-    #: TODO(PR3): implement diff signal extraction using this field.
+    #: AI's first-pass draft, diffed against ``final_output`` by the
+    #: draft-vs-final diff signal (``signals.extract_signals``).  ``None`` when no
+    #: draft was captured.
     draft_output: str | None = Field(default=None, alias="draftOutput")
     #: ISO-8601 UTC timestamp string (MUST end with "Z"); used for watermark
     #: comparison (lexicographic).  Producers must normalize to "Z".

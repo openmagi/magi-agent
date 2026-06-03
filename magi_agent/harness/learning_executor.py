@@ -298,21 +298,14 @@ async def run_reflection(
             },
         )
 
-    # --- Step 2: read traces (local-fake only in PR2) ---
-    # ``local_fake_enabled`` gates whether the default source is the local-fake
-    # stub or the real transcript source (deferred to PR7).  Until PR7 lands,
-    # the real source is unavailable, so when ``local_fake_enabled`` is False
-    # we still fall back to an empty local-fake so the executor remains safe;
-    # PR7 will replace this branch with a real source attachment.
+    # --- Step 2: read traces ---
+    # When no *source* is injected, the executor falls back to an empty
+    # local-fake source.  The real transcript source (``RealTranscriptSource``,
+    # PR7) is selected by the gated live layer and passed in via *source*; the
+    # ``local_fake_enabled`` config flag no longer branches the default here
+    # (both arms were identical), so it is left to the live layer's selection.
     if source is None:
-        # Both branches are intentionally identical until PR7 wires the real
-        # transcript source; until then we always fall back to an empty
-        # local-fake so the executor stays safe regardless of the flag.
-        if config.local_fake_enabled:
-            source = LocalFakeTranscriptSource(traces=())
-        else:
-            # TODO(PR7): attach real transcript source when local_fake_enabled=False.
-            source = LocalFakeTranscriptSource(traces=())
+        source = LocalFakeTranscriptSource(traces=())
 
     traces = await source.read_since(since)
     traces_read = len(traces)

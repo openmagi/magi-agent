@@ -414,6 +414,76 @@ def test_one_skipped_candidate_does_not_abort_batch(tmp_path) -> None:
     assert fresh_decision.activated is True
 
 
+def test_propose_toctou_race_skips_candidate_not_aborts_batch(tmp_path) -> None:
+    """TOCTOU: a candidate that flips to active BETWEEN the gate's skip-check
+    ``store.get`` and its ``store.propose`` must be skipped, not abort the batch.
+
+    run_eval_gate does ``store.get`` (sees proposed/None) then ``store.propose``.
+    If a concurrent activation lands in that window, propose() raises ValueError;
+    the gate must catch it, mark that candidate skipped, and continue so the rest
+    of the batch still completes.
+    """
+    racy_candidate = _candidate(kind="example", rationale="a", sid="s-race")
+    fresh_candidate = _candidate(kind="example", rationale="b", sid="s-fresh")
+
+    base = _store(tmp_path)
+
+    class _RacyStore:
+        """Delegates to a real store but, on the FIRST propose, simulates a
+        concurrent flip-to-active in the get→propose window by activating the
+        item first — so the real propose() then raises ValueError."""
+
+        def __init__(self, inner: SqliteLearningStore) -> None:
+            self._inner = inner
+            self._raced = False
+
+        def __getattr__(self, name):
+            return getattr(self._inner, name)
+
+        def get(self, item_id, *, tenant_id="local"):
+            return self._inner.get(item_id, tenant_id=tenant_id)
+
+        def propose(self, item):
+            if not self._raced and item.rationale == "a":
+                self._raced = True
+                # Concurrent activation lands in the window: propose then raises.
+                self._inner.propose(item)
+                ref = self._inner.record_eval_observation(
+                    item_id=item.id,
+                    before={"mean": 0.5, "n": 4},
+                    after={"mean": 0.9, "n": 4},
+                    sample_n=4,
+                    passed=True,
+                )
+                self._inner.auto_activate(item.id, eval_observation_ref=ref)
+            return self._inner.propose(item)
+
+    racy = _RacyStore(base)
+    decisions = run_eval_gate(
+        (racy_candidate, fresh_candidate),
+        store=racy,
+        checkset=_passing_checkset(),
+    )
+    base.close()
+
+    assert len(decisions) == 2
+    by_rationale = {d.item_id: d for d in decisions}
+    raced = next(
+        d for d in decisions if d.item_id == _racy_item_id(racy_candidate, base)
+    )
+    assert raced.skipped is True
+    assert raced.activated is False
+    # The other candidate still processes normally — batch was not aborted.
+    fresh = next(d for d in decisions if d.item_id != raced.item_id)
+    assert fresh.activated is True
+
+
+def _racy_item_id(candidate, store) -> str:
+    from magi_agent.learning.eval_gate import _candidate_item_id
+
+    return _candidate_item_id(candidate)
+
+
 def test_item_ids_differ_for_refs_differing_only_by_version_suffix(tmp_path) -> None:
     """CRITICAL #2: two candidates whose source refs differ only by a ``:v1``
     suffix must get DISTINCT item ids (no collapse / no collision), and neither

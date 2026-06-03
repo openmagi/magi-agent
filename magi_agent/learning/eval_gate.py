@@ -288,7 +288,31 @@ def run_eval_gate(
 
         # Re-proposing a still-``proposed`` item is idempotent (ON CONFLICT
         # upsert in the store), so this is safe.
-        item = store.propose(proposed_item)
+        #
+        # TOCTOU guard: the ``store.get`` skip-check above and this ``propose``
+        # are not atomic.  If a concurrent activation flips the item to active in
+        # that window, ``propose`` raises ``ValueError`` (re-proposing a
+        # non-proposed item is forbidden).  Treat that exactly like the
+        # already-active skip case — mark the candidate skipped and continue so
+        # the rest of the batch is never aborted by a single racing item.
+        try:
+            item = store.propose(proposed_item)
+        except ValueError:
+            decisions.append(
+                EvalGateDecision(
+                    itemId=proposed_item.id,
+                    kind=proposed_item.kind,
+                    passed=False,
+                    activated=False,
+                    skipped=True,
+                    reason=(
+                        "item flipped to a non-proposed status concurrently "
+                        "between the skip-check and propose; skipped (not "
+                        "re-proposed / not re-activated)"
+                    ),
+                )
+            )
+            continue
 
         before, after = checkset.run(candidate)
         # Guard: a mismatched evaluator that returns different-length before/after

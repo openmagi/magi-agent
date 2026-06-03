@@ -96,6 +96,65 @@ _MIGRATIONS: list[tuple[int, str]] = [
             ON learning_items (tenant_id, scope_task_kind);
         """,
     ),
+    (
+        5,
+        # Rebuild learning_items with a COMPOSITE primary key (id, tenant_id) for
+        # true cross-tenant isolation.  With the old single-column PK on `id`,
+        # propose()'s ``ON CONFLICT(id) DO UPDATE`` could clobber another
+        # tenant's row when two tenants proposed a colliding id.  The composite
+        # PK makes a same-id different-tenant propose a SEPARATE row.
+        #
+        # SQLite cannot ALTER a primary key in place, so we create a new table
+        # with the composite PK + identical columns/indexes, copy the rows over,
+        # drop the old table, and rename.  Every statement is guarded so the
+        # whole migration is idempotent and safe to re-run after a crash:
+        #   * the new table is only created/copied when the live `learning_items`
+        #     PK is still single-column (see the skip guard below);
+        #   * a stale `learning_items_new` from a crashed prior run is dropped
+        #     first so the CREATE never collides.
+        """
+        DROP TABLE IF EXISTS learning_items_new;
+        CREATE TABLE learning_items_new (
+            id          TEXT NOT NULL,
+            tenant_id   TEXT NOT NULL DEFAULT 'local',
+            kind        TEXT NOT NULL,
+            status      TEXT NOT NULL DEFAULT 'proposed',
+            scope_json  TEXT NOT NULL DEFAULT '{}',
+            content_json TEXT NOT NULL DEFAULT '{}',
+            rationale   TEXT NOT NULL DEFAULT '',
+            provenance_json TEXT NOT NULL DEFAULT '{}',
+            version     INTEGER NOT NULL DEFAULT 1,
+            supersedes  TEXT,
+            embedding_ref TEXT,
+            stats_json  TEXT NOT NULL DEFAULT '{}',
+            eval_observation_ref TEXT,
+            approval_ref TEXT,
+            created_at  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+            updated_at  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+            scope_task_kind TEXT
+                GENERATED ALWAYS AS (json_extract(scope_json, '$.taskKind')) VIRTUAL,
+            PRIMARY KEY (id, tenant_id)
+        );
+        INSERT INTO learning_items_new (
+            id, tenant_id, kind, status, scope_json, content_json,
+            rationale, provenance_json, version, supersedes, embedding_ref,
+            stats_json, eval_observation_ref, approval_ref, created_at, updated_at
+        )
+        SELECT
+            id, tenant_id, kind, status, scope_json, content_json,
+            rationale, provenance_json, version, supersedes, embedding_ref,
+            stats_json, eval_observation_ref, approval_ref, created_at, updated_at
+        FROM learning_items;
+        DROP TABLE learning_items;
+        ALTER TABLE learning_items_new RENAME TO learning_items;
+        CREATE INDEX IF NOT EXISTS idx_learning_items_tenant_kind_status
+            ON learning_items (tenant_id, kind, status);
+        CREATE INDEX IF NOT EXISTS idx_learning_items_tenant_status
+            ON learning_items (tenant_id, status);
+        CREATE INDEX IF NOT EXISTS idx_learning_items_scope_task_kind
+            ON learning_items (tenant_id, scope_task_kind);
+        """,
+    ),
 ]
 
 # Statements inside these migrations require special idempotency handling
@@ -105,11 +164,36 @@ _MIGRATIONS: list[tuple[int, str]] = [
 #
 # Note: PRAGMA table_info omits VIRTUAL generated columns; use table_xinfo
 # (available since SQLite 3.26.0) which includes all column types.
+def _has_composite_pk(conn: sqlite3.Connection) -> bool:
+    """True when ``learning_items`` already has a composite (id, tenant_id) PK.
+
+    ``PRAGMA table_xinfo`` exposes a ``pk`` ordinal (>0) for primary-key
+    columns; a composite PK shows >1 such column.  Used to skip the migration-5
+    table-rebuild statements when they have already been applied (idempotent /
+    crash-safe re-run).
+    """
+    pk_cols = [
+        row[1]  # column name
+        for row in conn.execute("PRAGMA table_xinfo(learning_items)").fetchall()
+        if row[5]  # pk ordinal (0 == not part of the PK)
+    ]
+    return "id" in pk_cols and "tenant_id" in pk_cols
+
+
 _MIGRATION_SKIP_GUARDS: dict[tuple[int, str], object] = {
     (4, "ALTER TABLE learning_items"): lambda conn: any(
         row[1] == "scope_task_kind"
         for row in conn.execute("PRAGMA table_xinfo(learning_items)").fetchall()
     ),
+    # Migration 5 rebuilds the table for a composite PK.  Skip the CREATE/INSERT/
+    # DROP/RENAME statements when the live table already has the composite PK so
+    # a re-run (e.g. after a crash between the rename and the version insert) is a
+    # no-op.  The leading ``DROP TABLE IF EXISTS learning_items_new`` is always
+    # safe to run.
+    (5, "CREATE TABLE learning_items_new"): _has_composite_pk,
+    (5, "INSERT INTO learning_items_new"): _has_composite_pk,
+    (5, "DROP TABLE learning_items"): _has_composite_pk,
+    (5, "ALTER TABLE learning_items_new RENAME TO learning_items"): _has_composite_pk,
 }
 
 
@@ -381,7 +465,7 @@ class SqliteLearningStore:
                 :rationale, :provenance_json, :version, :supersedes, :embedding_ref,
                 :stats_json, :eval_observation_ref, :approval_ref, :updated_at
             )
-            ON CONFLICT(id) DO UPDATE SET
+            ON CONFLICT(id, tenant_id) DO UPDATE SET
                 kind       = excluded.kind,
                 status     = excluded.status,
                 scope_json = excluded.scope_json,
@@ -569,6 +653,12 @@ class SqliteLearningStore:
                 f"expected status='proposed', got status={item.status!r}."
             )
 
+        # Store-level governance guard: an activation may only reference a
+        # PASSING eval observation.  The api.py service already enforces this,
+        # but enforcing it here too makes the invariant hold for ANY caller
+        # (a non-service caller cannot activate on a failing observation's ref).
+        self._require_passing_eval_observation(conn, eval_observation_ref)
+
         # Generate an approval_ref to satisfy assert_activation_allowed
         approval_ref = f"approval:{uuid.uuid4().hex}"
 
@@ -626,6 +716,10 @@ class SqliteLearningStore:
                 f"Cannot auto_activate learning item {item_id!r}: "
                 f"expected status='proposed', got status={item.status!r}."
             )
+
+        # Store-level governance guard (see approve()): refuse activation on a
+        # failing eval observation regardless of caller.
+        self._require_passing_eval_observation(conn, eval_observation_ref)
 
         # For rules, auto_activate has no approval_ref -> policy violation
         assert_activation_allowed(
@@ -745,6 +839,36 @@ class SqliteLearningStore:
         if row is None:
             raise KeyError(f"LearningItem not found: {item_id!r}")
         return _row_to_item(row)
+
+    @staticmethod
+    def _require_passing_eval_observation(
+        conn: sqlite3.Connection, eval_observation_ref: str | None
+    ) -> None:
+        """Reject activation unless *eval_observation_ref* names a PASSING obs.
+
+        ``policy.assert_activation_allowed`` only checks the ref is non-empty;
+        this store-level guard additionally looks up the observation row and
+        refuses activation when its ``passed`` column is falsy.  This makes the
+        passing-eval governance invariant hold for ANY caller, not just the
+        api.py service.  A ``None``/empty ref is left to
+        ``assert_activation_allowed`` (eval-observation-required).
+        """
+        if not eval_observation_ref:
+            return
+        row = conn.execute(
+            "SELECT passed FROM learning_eval_observations WHERE ref = ?",
+            (eval_observation_ref,),
+        ).fetchone()
+        if row is None:
+            raise ValueError(
+                f"unknown eval observation ref {eval_observation_ref!r}: "
+                "cannot activate against a non-existent observation."
+            )
+        if not row["passed"]:
+            raise ValueError(
+                f"eval observation {eval_observation_ref!r} did not pass "
+                "(passed=False): activation requires a passing eval observation."
+            )
 
 
 __all__ = [

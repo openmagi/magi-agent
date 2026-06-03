@@ -192,6 +192,47 @@ def test_dashboard_list_is_tenant_scoped(tmp_path) -> None:
     assert ids == {"a-1"}
 
 
+def test_dashboard_default_resolver_pins_tenant_to_local(tmp_path) -> None:
+    """Multi-tenant mount WITHOUT an injected resolver pins the tenant to "local".
+
+    When the router is built in store/multi-tenant mode but no real approver-role
+    resolver is supplied, a caller-chosen ``x-tenant`` MUST be ignored and
+    treated as ``local`` — otherwise the default resolver authorizes any approver
+    for any tenant, giving name-only isolation.  This proves a caller cannot
+    reach ``tenant-a``'s data by sending ``x-tenant: tenant-a``.
+    """
+    store = _store(tmp_path)
+    # An item under tenant-a, and one under the pinned "local" tenant.
+    store.propose(_rule(item_id="a-only", tenant_id="tenant-a"))
+    store.propose(_rule(item_id="local-item", tenant_id="local"))
+
+    # NO is_approver injected → default resolver → tenant pinned to "local".
+    app = FastAPI()
+    router = build_learning_dashboard_router(
+        store=store, gateway_token=GATEWAY_TOKEN
+    )
+    app.include_router(router)
+    client = TestClient(app)
+
+    # x-tenant: tenant-a is refused/ignored → request is treated as "local",
+    # so tenant-a's item is NOT reachable (404).
+    r = client.get(
+        "/v1/learning/learnings/a-only", headers=_headers(tenant="tenant-a")
+    )
+    assert r.status_code == 404
+    # The pinned "local" tenant's own item IS reachable even with an x-tenant
+    # header set (the header is ignored).
+    r = client.get(
+        "/v1/learning/learnings/local-item", headers=_headers(tenant="tenant-a")
+    )
+    assert r.status_code == 200
+    # A list call cannot see tenant-a's data either.
+    r = client.get("/v1/learning/learnings", headers=_headers(tenant="tenant-a"))
+    ids = {i["id"] for i in r.json()["items"]}
+    assert "a-only" not in ids
+    assert ids == {"local-item"}
+
+
 # ---------------------------------------------------------------------------
 # 3. Approver role authz (beyond header presence)
 # ---------------------------------------------------------------------------
@@ -454,6 +495,72 @@ def test_propose_no_cross_tenant_clobber(tmp_path) -> None:
     # No cross-tenant visibility either way.
     assert store.get(a_id, tenant_id="tenant-b") is None
     assert store.get(b_id, tenant_id="tenant-a") is None
+
+
+def test_propose_cannot_clobber_other_tenant(tmp_path) -> None:
+    """A same-id propose from a different tenant cannot overwrite a tenant's row.
+
+    With a composite primary key ``(id, tenant_id)`` a cross-tenant caller who
+    proposes a COLLIDING id INSERTS a separate row instead of clobbering — the
+    victim tenant's status/content/scope stay byte-for-byte intact and the
+    attacker gets its OWN independent row under its own tenant.
+    """
+    store = _store(tmp_path)
+    # tenant-a has an ACTIVE item id="X".
+    store.propose(
+        _rule(item_id="X", tenant_id="tenant-a", when="orig-when", then="orig-then")
+    )
+    eval_ref = _record_passing_obs(store, "X", tenant_id="tenant-a")
+    a_active = store.approve(
+        "X", approver="a", eval_observation_ref=eval_ref, tenant_id="tenant-a"
+    )
+    assert a_active.status == "active"
+
+    a_before = store.get("X", tenant_id="tenant-a")
+    assert a_before is not None
+
+    # tenant-b proposes id="X" with DIFFERENT content/scope.
+    store.propose(
+        _rule(
+            item_id="X",
+            tenant_id="tenant-b",
+            when="hijack-when",
+            then="hijack-then",
+        )
+    )
+
+    # tenant-a's row is byte-for-byte intact: status/content/scope unchanged.
+    a_after = store.get("X", tenant_id="tenant-a")
+    assert a_after is not None
+    assert a_after.status == "active"
+    assert a_after.content == a_before.content
+    assert a_after.content["when"] == "orig-when"
+    assert a_after.content["then"] == "orig-then"
+    assert a_after.scope == a_before.scope
+    assert a_after.tenant_id == "tenant-a"
+
+    # tenant-b has its OWN independent id="X" row under tenant-b.
+    b_item = store.get("X", tenant_id="tenant-b")
+    assert b_item is not None
+    assert b_item.tenant_id == "tenant-b"
+    assert b_item.status == "proposed"
+    assert b_item.content["when"] == "hijack-when"
+    assert b_item.content["then"] == "hijack-then"
+
+
+def test_propose_same_tenant_is_idempotent_upsert(tmp_path) -> None:
+    """Re-proposing a still-proposed item under the SAME tenant upserts in place."""
+    store = _store(tmp_path)
+    store.propose(_rule(item_id="Y", tenant_id="tenant-a", then="v1"))
+    store.propose(_rule(item_id="Y", tenant_id="tenant-a", then="v2"))
+
+    # Exactly one row for (Y, tenant-a); content reflects the latest propose.
+    page = store.list(tenant_id="tenant-a")
+    ids = [i.id for i in page.items]
+    assert ids.count("Y") == 1
+    item = store.get("Y", tenant_id="tenant-a")
+    assert item is not None
+    assert item.content["then"] == "v2"
 
 
 def test_eval_gate_candidate_ids_are_tenant_unique(tmp_path) -> None:

@@ -449,6 +449,72 @@ class TestStoreActivation:
         with pytest.raises(PolicyViolation, match="eval-observation-required"):
             store.auto_activate(proposed.id, eval_observation_ref=None)
 
+    def test_approve_rejects_failing_eval_observation_ref(self, store: object) -> None:
+        """A FAILING eval observation's ref must not be activatable at the store.
+
+        The store-level guard makes the passing-eval governance invariant hold
+        regardless of caller (not just the api.py service): approving with a ref
+        whose observation row has ``passed=False`` is rejected and the rule stays
+        proposed.
+        """
+        from magi_agent.learning.models import LearningItem
+
+        item = LearningItem.model_validate(_base_payload("rule"))
+        proposed = store.propose(item)
+        failing_ref = store.record_eval_observation(
+            item_id=proposed.id,
+            before={"pass_rate": 0.9},
+            after={"pass_rate": 0.3},
+            sample_n=50,
+            passed=False,
+        )
+        with pytest.raises((ValueError,)) as exc:
+            store.approve(
+                proposed.id,
+                approver="human:alice",
+                eval_observation_ref=failing_ref,
+            )
+        assert "fail" in str(exc.value).lower() or "passing" in str(exc.value).lower()
+        # Rule stays proposed — never activated on a failing observation.
+        assert store.get(proposed.id).status == "proposed"
+
+    def test_approve_accepts_passing_eval_observation_ref(self, store: object) -> None:
+        """A PASSING eval observation's ref still activates (positive control)."""
+        from magi_agent.learning.models import LearningItem
+
+        item = LearningItem.model_validate(_base_payload("rule"))
+        proposed = store.propose(item)
+        passing_ref = store.record_eval_observation(
+            item_id=proposed.id,
+            before={"pass_rate": 0.5},
+            after={"pass_rate": 0.9},
+            sample_n=50,
+            passed=True,
+        )
+        active = store.approve(
+            proposed.id, approver="human:alice", eval_observation_ref=passing_ref
+        )
+        assert active.status == "active"
+
+    def test_auto_activate_rejects_failing_eval_observation_ref(
+        self, store: object
+    ) -> None:
+        """auto_activate also refuses a failing observation's ref at the store."""
+        from magi_agent.learning.models import LearningItem
+
+        item = LearningItem.model_validate(_base_payload("example"))
+        proposed = store.propose(item)
+        failing_ref = store.record_eval_observation(
+            item_id=proposed.id,
+            before={"pass_rate": 0.9},
+            after={"pass_rate": 0.2},
+            sample_n=30,
+            passed=False,
+        )
+        with pytest.raises((ValueError,)):
+            store.auto_activate(proposed.id, eval_observation_ref=failing_ref)
+        assert store.get(proposed.id).status == "proposed"
+
     def test_no_direct_status_active_method_exists(self, store: object) -> None:
         """No public method may write status=active directly without going through approve/auto_activate."""
         import inspect

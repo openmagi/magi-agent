@@ -103,7 +103,9 @@ class LocalFakeLabeler:
     the signal's structured evidence.  Given the same signal it always returns
     the same ``LabeledLearning``.
 
-    TODO(PR7): replace with an LLM-backed labeler implementing ``Labeler``.
+    The LLM-backed labeler (``LlmBackedLabeler`` in ``learning/live.py``) shipped
+    in PR7 and is selected by the gated live layer; this deterministic fake
+    remains the default for the OSS / test path.
     """
 
     def label(self, signal: Signal, trace: SessionTrace) -> LabeledLearning | None:

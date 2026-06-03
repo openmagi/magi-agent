@@ -244,13 +244,25 @@ def build_learning_dashboard_router(
     # resolver was injected (hosted multi-tenant).  In the default single-tenant
     # mode the bare identity is recorded — byte-identical to PR6's audit row.
     approval_role: str | None = _APPROVER_ROLE if is_approver is not None else None
+    # I-2: a store/multi-tenant mount WITHOUT an injected approver-role resolver
+    # has no way to authorize an approver per-tenant — the default resolver would
+    # authorize ANY approver for ANY tenant, so honoring a caller-chosen
+    # ``x-tenant`` would be name-only isolation.  In that case PIN the tenant to
+    # the single-tenant default ("local") and refuse to honor a non-local
+    # ``x-tenant``.  A hosted deployment that injects a real resolver keeps full
+    # multi-tenant behavior; single-tenant OSS is byte-identical.
+    _multi_tenant_authz = is_approver is not None
     router = APIRouter(prefix="/v1/learning", tags=["learning"])
 
     def _tenant(request: Request) -> str:
         # Legacy single-tenant mode pins the tenant to the injected service and
-        # ignores the header; multi-tenant mode derives it from ``x-tenant``.
+        # ignores the header.
         if service is not None:
             return service._tenant_id  # noqa: SLF001 — sibling read
+        # Store mode WITHOUT a real role resolver: pin to "local" (ignore the
+        # caller-chosen header) so a request cannot reach another tenant's data.
+        if not _multi_tenant_authz:
+            return _DEFAULT_TENANT
         raw = request.headers.get(_TENANT_HEADER)
         if raw is None or not raw.strip():
             return _DEFAULT_TENANT
@@ -447,11 +459,12 @@ def register_learning_dashboard_routes(app: FastAPI, runtime: OpenMagiRuntime) -
     # workspace root is supplied — matching the reflection executor / cron job,
     # which construct ``SqliteLearningStore`` the same way.
     #
-    # Built in MULTI-TENANT mode (PR8): a single store serves every tenant, each
-    # request scoped to its ``x-tenant`` header (default ``"local"``) with
-    # query-level isolation.  No ``is_approver`` resolver is injected here, so the
-    # default single-tenant resolver (any present approver authorized) applies —
-    # a hosted deployment injects a real role-store-backed resolver.
+    # Built in store mode (PR8).  No ``is_approver`` role resolver is injected
+    # here, so per the I-2 hardening the tenant is PINNED to ``"local"`` (a
+    # caller-chosen ``x-tenant`` is ignored) — the default-mount therefore gives
+    # real single-tenant isolation, never name-only isolation.  A hosted
+    # deployment that injects a real role-store-backed resolver gets full
+    # multi-tenant behavior with per-tenant ``x-tenant`` scoping.
     store = SqliteLearningStore()
     router = build_learning_dashboard_router(
         store=store, gateway_token=runtime.config.gateway_token
