@@ -85,9 +85,7 @@ class TestReflectionDisabledByDefault:
     ) -> None:
         monkeypatch.delenv(_REFLECTION_ENV_VAR, raising=False)
         source = LocalFakeTranscriptSource(traces=(_make_trace(),))
-        result = asyncio.get_event_loop().run_until_complete(
-            run_reflection(source=source)
-        )
+        result = asyncio.run(run_reflection(source=source))
         assert result.status == "disabled"
 
     def test_disabled_returns_empty_candidates(
@@ -95,9 +93,7 @@ class TestReflectionDisabledByDefault:
     ) -> None:
         monkeypatch.delenv(_REFLECTION_ENV_VAR, raising=False)
         source = LocalFakeTranscriptSource(traces=(_make_trace(),))
-        result = asyncio.get_event_loop().run_until_complete(
-            run_reflection(source=source)
-        )
+        result = asyncio.run(run_reflection(source=source))
         assert result.candidates == ()
 
     def test_disabled_does_zero_work(self, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -111,7 +107,7 @@ class TestReflectionDisabledByDefault:
                 return await super().read_since(watermark)
 
         source = TrackingSource(traces=(_make_trace(),))
-        asyncio.get_event_loop().run_until_complete(run_reflection(source=source))
+        asyncio.run(run_reflection(source=source))
         assert read_calls == [], "Transcript source was read despite gate being OFF"
 
     def test_disabled_counters_are_zero(
@@ -119,9 +115,7 @@ class TestReflectionDisabledByDefault:
     ) -> None:
         monkeypatch.delenv(_REFLECTION_ENV_VAR, raising=False)
         source = LocalFakeTranscriptSource(traces=(_make_trace(),))
-        result = asyncio.get_event_loop().run_until_complete(
-            run_reflection(source=source)
-        )
+        result = asyncio.run(run_reflection(source=source))
         assert result.counters["traces_read"] == 0
         assert result.counters["candidates_produced"] == 0
 
@@ -135,7 +129,7 @@ class TestReflectionEnabledLocalFake:
     def test_on_returns_ok_status(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv(_REFLECTION_ENV_VAR, "1")
         source = LocalFakeTranscriptSource(traces=(_make_trace("s1"), _make_trace("s2")))
-        result = asyncio.get_event_loop().run_until_complete(
+        result = asyncio.run(
             run_reflection(source=source, config=LearningReflectionConfig(enabled=True))
         )
         assert result.status == "ok"
@@ -143,7 +137,7 @@ class TestReflectionEnabledLocalFake:
     def test_on_produces_candidates_tuple(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv(_REFLECTION_ENV_VAR, "1")
         source = LocalFakeTranscriptSource(traces=(_make_trace("s1"), _make_trace("s2")))
-        result = asyncio.get_event_loop().run_until_complete(
+        result = asyncio.run(
             run_reflection(source=source, config=LearningReflectionConfig(enabled=True))
         )
         # At least zero — it's a tuple, not None
@@ -156,10 +150,10 @@ class TestReflectionEnabledLocalFake:
         source_a = LocalFakeTranscriptSource(traces=traces)
         source_b = LocalFakeTranscriptSource(traces=traces)
 
-        result_a = asyncio.get_event_loop().run_until_complete(
+        result_a = asyncio.run(
             run_reflection(source=source_a, config=LearningReflectionConfig(enabled=True))
         )
-        result_b = asyncio.get_event_loop().run_until_complete(
+        result_b = asyncio.run(
             run_reflection(source=source_b, config=LearningReflectionConfig(enabled=True))
         )
         assert result_a.candidates == result_b.candidates
@@ -168,7 +162,7 @@ class TestReflectionEnabledLocalFake:
         """Each candidate carries the required fields from the spec."""
         monkeypatch.setenv(_REFLECTION_ENV_VAR, "1")
         source = LocalFakeTranscriptSource(traces=(_make_trace("s1"),))
-        result = asyncio.get_event_loop().run_until_complete(
+        result = asyncio.run(
             run_reflection(source=source, config=LearningReflectionConfig(enabled=True))
         )
         for c in result.candidates:
@@ -184,7 +178,7 @@ class TestReflectionEnabledLocalFake:
         monkeypatch.setenv(_REFLECTION_ENV_VAR, "1")
         traces = (_make_trace("s1"), _make_trace("s2"))
         source = LocalFakeTranscriptSource(traces=traces)
-        result = asyncio.get_event_loop().run_until_complete(
+        result = asyncio.run(
             run_reflection(source=source, config=LearningReflectionConfig(enabled=True))
         )
         assert result.counters["traces_read"] == len(traces)
@@ -195,7 +189,7 @@ class TestReflectionEnabledLocalFake:
     ) -> None:
         monkeypatch.setenv(_REFLECTION_ENV_VAR, "1")
         source = LocalFakeTranscriptSource(traces=())
-        result = asyncio.get_event_loop().run_until_complete(
+        result = asyncio.run(
             run_reflection(source=source, config=LearningReflectionConfig(enabled=True))
         )
         assert result.status == "ok"
@@ -212,7 +206,7 @@ class TestWatermarkBehavior:
         monkeypatch.setenv(_REFLECTION_ENV_VAR, "1")
         traces = (_make_trace("s1", ts="2026-06-03T10:00:00Z"),)
         source = LocalFakeTranscriptSource(traces=traces)
-        result = asyncio.get_event_loop().run_until_complete(
+        result = asyncio.run(
             run_reflection(source=source, config=LearningReflectionConfig(enabled=True))
         )
         # Watermark must be returned (not None) after a successful run with traces
@@ -223,43 +217,46 @@ class TestWatermarkBehavior:
     ) -> None:
         monkeypatch.delenv(_REFLECTION_ENV_VAR, raising=False)
         source = LocalFakeTranscriptSource(traces=(_make_trace(),))
-        result = asyncio.get_event_loop().run_until_complete(
-            run_reflection(source=source)
-        )
+        result = asyncio.run(run_reflection(source=source))
         assert result.watermark is None
 
     def test_incremental_only_reads_after_since(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """Traces with ts <= watermark must be excluded."""
+        """Traces with ts <= watermark must be excluded.
+
+        After the first run over (old, new), the watermark advances to
+        new.ts = "2026-06-03T12:00:00Z".  The second run filters with
+        ``ts > watermark``; both traces are <= watermark so zero are read.
+        """
         monkeypatch.setenv(_REFLECTION_ENV_VAR, "1")
         old = _make_trace("old", ts="2026-06-01T00:00:00Z")
         new = _make_trace("new", ts="2026-06-03T12:00:00Z")
         source = LocalFakeTranscriptSource(traces=(old, new))
         # First run — read all
-        result1 = asyncio.get_event_loop().run_until_complete(
+        result1 = asyncio.run(
             run_reflection(source=source, config=LearningReflectionConfig(enabled=True))
         )
         assert result1.counters["traces_read"] == 2
 
-        # Second run — pass watermark from first result; only "new" should be read
+        # Second run — pass watermark from first result; watermark == new.ts so
+        # ``ts > watermark`` excludes both old and new (strict inequality).
         source2 = LocalFakeTranscriptSource(traces=(old, new))
-        result2 = asyncio.get_event_loop().run_until_complete(
+        result2 = asyncio.run(
             run_reflection(
                 source=source2,
                 since=result1.watermark,
                 config=LearningReflectionConfig(enabled=True),
             )
         )
-        # "old" trace ts is before the watermark produced by the first run
-        assert result2.counters["traces_read"] <= 1
+        assert result2.counters["traces_read"] == 0
 
     def test_watermark_string_type(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv(_REFLECTION_ENV_VAR, "1")
         source = LocalFakeTranscriptSource(
             traces=(_make_trace("s1", ts="2026-06-03T10:00:00Z"),)
         )
-        result = asyncio.get_event_loop().run_until_complete(
+        result = asyncio.run(
             run_reflection(source=source, config=LearningReflectionConfig(enabled=True))
         )
         if result.watermark is not None:
@@ -332,9 +329,7 @@ class TestTranscriptSource:
     def test_local_fake_returns_all_traces_when_no_watermark(self) -> None:
         traces = (_make_trace("s1"), _make_trace("s2"))
         source = LocalFakeTranscriptSource(traces=traces)
-        result = asyncio.get_event_loop().run_until_complete(
-            source.read_since(None)
-        )
+        result = asyncio.run(source.read_since(None))
         assert len(result) == 2
 
     def test_local_fake_filters_by_watermark(self) -> None:
@@ -343,9 +338,7 @@ class TestTranscriptSource:
             _make_trace("new", ts="2026-06-03T12:00:00Z"),
         )
         source = LocalFakeTranscriptSource(traces=traces)
-        result = asyncio.get_event_loop().run_until_complete(
-            source.read_since("2026-06-02T00:00:00Z")
-        )
+        result = asyncio.run(source.read_since("2026-06-02T00:00:00Z"))
         assert len(result) == 1
         assert result[0].session_id == "new"
 
@@ -371,26 +364,20 @@ class TestResultModel:
     def test_result_is_frozen(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.delenv(_REFLECTION_ENV_VAR, raising=False)
         source = LocalFakeTranscriptSource(traces=())
-        result = asyncio.get_event_loop().run_until_complete(
-            run_reflection(source=source)
-        )
+        result = asyncio.run(run_reflection(source=source))
         with pytest.raises((ValidationError, TypeError)):
             result.status = "ok"  # type: ignore[misc]
 
     def test_result_status_literal(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.delenv(_REFLECTION_ENV_VAR, raising=False)
         source = LocalFakeTranscriptSource(traces=())
-        result = asyncio.get_event_loop().run_until_complete(
-            run_reflection(source=source)
-        )
+        result = asyncio.run(run_reflection(source=source))
         assert result.status in ("disabled", "ok", "error")
 
     def test_result_candidates_is_tuple(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.delenv(_REFLECTION_ENV_VAR, raising=False)
         source = LocalFakeTranscriptSource(traces=())
-        result = asyncio.get_event_loop().run_until_complete(
-            run_reflection(source=source)
-        )
+        result = asyncio.run(run_reflection(source=source))
         assert isinstance(result.candidates, tuple)
 
     def test_result_counters_has_required_keys(
@@ -398,9 +385,7 @@ class TestResultModel:
     ) -> None:
         monkeypatch.delenv(_REFLECTION_ENV_VAR, raising=False)
         source = LocalFakeTranscriptSource(traces=())
-        result = asyncio.get_event_loop().run_until_complete(
-            run_reflection(source=source)
-        )
+        result = asyncio.run(run_reflection(source=source))
         assert "traces_read" in result.counters
         assert "candidates_produced" in result.counters
 
@@ -454,3 +439,211 @@ class TestLearningReadinessGate:
         cfg = LearningReadinessConfig()
         meta = learning_readiness_health_metadata(cfg)
         assert isinstance(meta["reasonCodes"], list)
+
+
+# ---------------------------------------------------------------------------
+# 8. LearningReflectionResult authority flags — coercer pair (issue #1)
+# ---------------------------------------------------------------------------
+
+
+class TestResultAuthorityFlagsLockedFalse:
+    """LearningReflectionResult must have the same coercer pair as the config.
+
+    model_construct() bypasses validators, so the field_serializer must still
+    ensure the serialized form never leaks True for authority flags.
+    """
+
+    def test_result_authority_flags_default_false(self) -> None:
+        result = LearningReflectionResult(
+            status="disabled",
+            candidates=(),
+            watermark=None,
+            counters={"traces_read": 0, "candidates_produced": 0},
+        )
+        assert result.llm_attached is False
+        assert result.production_write_enabled is False
+        assert result.real_transcript_source_attached is False
+
+    def test_result_llm_attached_coerced_false_via_validate(self) -> None:
+        result = LearningReflectionResult.model_validate(
+            {
+                "status": "disabled",
+                "candidates": [],
+                "watermark": None,
+                "counters": {"traces_read": 0, "candidates_produced": 0},
+                "llmAttached": True,
+            }
+        )
+        assert result.llm_attached is False
+
+    def test_result_production_write_coerced_false_via_validate(self) -> None:
+        result = LearningReflectionResult.model_validate(
+            {
+                "status": "disabled",
+                "candidates": [],
+                "watermark": None,
+                "counters": {"traces_read": 0, "candidates_produced": 0},
+                "productionWriteEnabled": True,
+            }
+        )
+        assert result.production_write_enabled is False
+
+    def test_result_real_transcript_coerced_false_via_validate(self) -> None:
+        result = LearningReflectionResult.model_validate(
+            {
+                "status": "disabled",
+                "candidates": [],
+                "watermark": None,
+                "counters": {"traces_read": 0, "candidates_produced": 0},
+                "realTranscriptSourceAttached": True,
+            }
+        )
+        assert result.real_transcript_source_attached is False
+
+    def test_result_model_construct_bypass_serializes_false(self) -> None:
+        """model_construct() bypass → serialized form must still show False."""
+        result = LearningReflectionResult.model_construct(
+            status="disabled",
+            candidates=(),
+            watermark=None,
+            counters={"traces_read": 0, "candidates_produced": 0},
+            llm_attached=True,
+            production_write_enabled=True,
+            real_transcript_source_attached=True,
+        )
+        dumped = result.model_dump(by_alias=True)
+        assert dumped.get("llmAttached") is False
+        assert dumped.get("productionWriteEnabled") is False
+        assert dumped.get("realTranscriptSourceAttached") is False
+
+
+# ---------------------------------------------------------------------------
+# 9. Double-gate: config.enabled must be True for executor to run (issue #2)
+# ---------------------------------------------------------------------------
+
+
+class TestDoubleGate:
+    """Both env gate AND config.enabled must be True for the executor to run."""
+
+    def test_env_on_config_disabled_returns_disabled(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Env gate ON but config.enabled=False → disabled no-op."""
+        monkeypatch.setenv(_REFLECTION_ENV_VAR, "1")
+        source = LocalFakeTranscriptSource(traces=(_make_trace("s1"),))
+        result = asyncio.run(
+            run_reflection(
+                source=source,
+                config=LearningReflectionConfig(enabled=False),
+            )
+        )
+        assert result.status == "disabled"
+        assert result.candidates == ()
+        assert result.counters["traces_read"] == 0
+
+    def test_env_off_config_enabled_returns_disabled(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Env gate OFF but config.enabled=True → disabled no-op."""
+        monkeypatch.delenv(_REFLECTION_ENV_VAR, raising=False)
+        source = LocalFakeTranscriptSource(traces=(_make_trace("s1"),))
+        result = asyncio.run(
+            run_reflection(
+                source=source,
+                config=LearningReflectionConfig(enabled=True),
+            )
+        )
+        assert result.status == "disabled"
+        assert result.candidates == ()
+        assert result.counters["traces_read"] == 0
+
+    def test_env_on_config_enabled_returns_ok(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Both gates ON → executor runs normally."""
+        monkeypatch.setenv(_REFLECTION_ENV_VAR, "1")
+        source = LocalFakeTranscriptSource(traces=(_make_trace("s1"),))
+        result = asyncio.run(
+            run_reflection(
+                source=source,
+                config=LearningReflectionConfig(enabled=True),
+            )
+        )
+        assert result.status == "ok"
+
+
+# ---------------------------------------------------------------------------
+# 10. SessionTrace.ts timezone normalization (issue #3)
+# ---------------------------------------------------------------------------
+
+
+class TestSessionTraceTsNormalization:
+    def test_ts_must_end_with_z(self) -> None:
+        """Timestamps not ending with 'Z' must be rejected."""
+        with pytest.raises(ValueError, match="must end with 'Z'"):
+            SessionTrace(
+                session_id="s1",
+                turns=(),
+                final_output="x",
+                ts="2026-06-03T10:00:00+00:00",
+            )
+
+    def test_ts_numeric_offset_rejected(self) -> None:
+        with pytest.raises(ValueError, match="must end with 'Z'"):
+            SessionTrace(
+                session_id="s1",
+                turns=(),
+                final_output="x",
+                ts="2026-06-03T10:00:00+09:00",
+            )
+
+    def test_ts_missing_timezone_rejected(self) -> None:
+        with pytest.raises(ValueError, match="must end with 'Z'"):
+            SessionTrace(
+                session_id="s1",
+                turns=(),
+                final_output="x",
+                ts="2026-06-03T10:00:00",
+            )
+
+    def test_ts_z_suffix_accepted(self) -> None:
+        trace = SessionTrace(
+            session_id="s1",
+            turns=(),
+            final_output="x",
+            ts="2026-06-03T10:00:00Z",
+        )
+        assert trace.ts == "2026-06-03T10:00:00Z"
+
+
+# ---------------------------------------------------------------------------
+# 11. SessionTrace.draft_output field present (issue #4)
+# ---------------------------------------------------------------------------
+
+
+class TestSessionTraceDraftOutput:
+    def test_draft_output_defaults_none(self) -> None:
+        trace = _make_trace("s1")
+        assert trace.draft_output is None
+
+    def test_draft_output_can_be_set(self) -> None:
+        trace = SessionTrace(
+            session_id="s1",
+            turns=(),
+            final_output="final",
+            draft_output="draft first pass",
+            ts="2026-06-03T10:00:00Z",
+        )
+        assert trace.draft_output == "draft first pass"
+
+    def test_draft_output_via_alias(self) -> None:
+        trace = SessionTrace.model_validate(
+            {
+                "sessionId": "s1",
+                "turns": [],
+                "finalOutput": "final",
+                "draftOutput": "draft via alias",
+                "ts": "2026-06-03T10:00:00Z",
+            }
+        )
+        assert trace.draft_output == "draft via alias"

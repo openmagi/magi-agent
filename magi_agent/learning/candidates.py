@@ -20,7 +20,7 @@ from __future__ import annotations
 
 from typing import Any, Protocol, runtime_checkable
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from magi_agent.learning.models import LearningKind, LearningScope, Provenance
 
@@ -85,9 +85,16 @@ class TranscriptSource(Protocol):
 class SessionTrace(BaseModel):
     """Minimal session-trace shape sufficient for PR3 signal extraction.
 
-    PR3 will consume ``turns`` and ``final_output`` to extract learning
-    signals.  The ``ts`` field is an ISO-8601 timestamp string used for
-    watermark-based incremental filtering.
+    PR3 will consume ``turns``, ``final_output``, and ``draft_output`` to
+    extract learning signals (including the draft-vs-final diff signal).
+    The ``ts`` field is an ISO-8601 timestamp string used for watermark-based
+    incremental filtering.
+
+    **Timezone requirement**: ``ts`` MUST be normalized to UTC and end with
+    ``"Z"`` (e.g. ``"2026-06-03T10:00:00Z"``).  This is enforced by a
+    ``field_validator`` so that lexicographic comparison of ``ts`` values is
+    sound (all strings share the same UTC offset).  Producers MUST normalize
+    to ``Z`` before constructing a ``SessionTrace``.
 
     TODO(PR7): replace LocalFakeTranscriptSource with a real source that reads
     persisted transcripts from ``runtime/transcript.py`` / ``commit_boundary``.
@@ -104,8 +111,29 @@ class SessionTrace(BaseModel):
     #: Sequence of turn dicts — kept as plain dicts so PR3 can parse freely.
     turns: tuple[dict[str, Any], ...]
     final_output: str = Field(alias="finalOutput")
-    #: ISO-8601 timestamp string; used for watermark comparison (lexicographic).
+    #: AI's first-pass draft, to be diffed against ``final_output`` in PR3 for
+    #: the draft-vs-final diff signal.  ``None`` when no draft was captured.
+    #: TODO(PR3): implement diff signal extraction using this field.
+    draft_output: str | None = Field(default=None, alias="draftOutput")
+    #: ISO-8601 UTC timestamp string (MUST end with "Z"); used for watermark
+    #: comparison (lexicographic).  Producers must normalize to "Z".
     ts: str
+
+    @field_validator("ts", mode="after")
+    @classmethod
+    def _require_utc_z_suffix(cls, value: str) -> str:
+        """Enforce that ``ts`` ends with ``"Z"`` for sound lexicographic comparison.
+
+        Rejects any timestamp that uses a numeric UTC offset (e.g. ``+00:00``)
+        because mixed-format strings cannot be compared lexicographically.
+        Producers must normalize to the ``Z`` form before constructing a trace.
+        """
+        if not value.endswith("Z"):
+            raise ValueError(
+                f"SessionTrace.ts must end with 'Z' (UTC); got {value!r}. "
+                "Normalize to UTC 'Z' form before constructing a SessionTrace."
+            )
+        return value
 
 
 # ---------------------------------------------------------------------------

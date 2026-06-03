@@ -162,6 +162,25 @@ class LearningReflectionResult(BaseModel):
         alias="realTranscriptSourceAttached",
     )
 
+    @field_validator("llm_attached", mode="before")
+    @classmethod
+    def _force_llm_attached_false(cls, _value: object) -> bool:
+        return False
+
+    @field_validator("production_write_enabled", mode="before")
+    @classmethod
+    def _force_production_write_false(cls, _value: object) -> bool:
+        return False
+
+    @field_validator("real_transcript_source_attached", mode="before")
+    @classmethod
+    def _force_real_transcript_false(cls, _value: object) -> bool:
+        return False
+
+    @field_serializer("llm_attached", "production_write_enabled", "real_transcript_source_attached")
+    def _serialize_false(self, _value: object) -> bool:
+        return False
+
 
 # ---------------------------------------------------------------------------
 # Main executor
@@ -199,8 +218,9 @@ async def run_reflection(
     if config is None:
         config = LearningReflectionConfig()
 
-    # --- Step 1: env gate ---
-    if not _reflection_enabled():
+    # --- Step 1: double gate — env AND config.enabled must both be true ---
+    # Either condition being false results in an immediate disabled no-op.
+    if not _reflection_enabled() or not config.enabled:
         return LearningReflectionResult(
             status="disabled",
             candidates=(),
@@ -209,8 +229,17 @@ async def run_reflection(
         )
 
     # --- Step 2: read traces (local-fake only in PR2) ---
+    # ``local_fake_enabled`` gates whether the default source is the local-fake
+    # stub or the real transcript source (deferred to PR7).  Until PR7 lands,
+    # the real source is unavailable, so when ``local_fake_enabled`` is False
+    # we still fall back to an empty local-fake so the executor remains safe;
+    # PR7 will replace this branch with a real source attachment.
     if source is None:
-        source = LocalFakeTranscriptSource(traces=())
+        if config.local_fake_enabled:
+            source = LocalFakeTranscriptSource(traces=())
+        else:
+            # TODO(PR7): attach real transcript source when local_fake_enabled=False.
+            source = LocalFakeTranscriptSource(traces=())
 
     traces = await source.read_since(since)
     traces_read = len(traces)
@@ -296,7 +325,5 @@ __all__ = [
     "LearningReflectionConfig",
     "LearningReflectionResult",
     "LearningReflectionStatus",
-    "_REFLECTION_ENV_VAR",
-    "_reflection_enabled",
     "run_reflection",
 ]
