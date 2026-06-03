@@ -289,8 +289,11 @@ class Gate5B4C3ShadowGenerationTurn(_Gate5B4C3Model):
             self.sanitized_input_text_digest,
             "sanitized turn text digest must be a sha256 digest",
         )
-        if len(self.sanitized_current_turn_text.encode("utf-8")) > 8192:
-            raise ValueError("sanitized current turn text exceeds first-slice byte limit")
+        if (
+            len(self.sanitized_current_turn_text.encode("utf-8"))
+            > MAX_USER_VISIBLE_SANITIZED_INPUT_BYTES
+        ):
+            raise ValueError("sanitized current turn text exceeds selected user-visible limit")
         if self.redacted_bundle_ref is not None:
             _validate_safe_label(
                 self.redacted_bundle_ref,
@@ -371,8 +374,11 @@ class Gate5B4C3ShadowGenerationModelRouting(_Gate5B4C3Model):
         if self.temperature is not None and (self.temperature < 0 or self.temperature > 2):
             raise ValueError("temperature metadata must be between 0 and 2")
         if self.max_output_tokens is not None:
-            if self.max_output_tokens < 1 or self.max_output_tokens > 512:
-                raise ValueError("max output token metadata exceeds first-slice limit")
+            if (
+                self.max_output_tokens < 1
+                or self.max_output_tokens > MAX_USER_VISIBLE_OUTPUT_TOKENS
+            ):
+                raise ValueError("max output token metadata exceeds selected user-visible limit")
         return self
 
 
@@ -435,7 +441,14 @@ class Gate5B4C3ShadowGenerationPolicy(_Gate5B4C3Model):
     )
 
 
-MAX_PYTHON_RUNNER_TIMEOUT_MS = 120_000
+MAX_PYTHON_RUNNER_TIMEOUT_MS = 600_000
+MAX_USER_VISIBLE_SANITIZED_INPUT_BYTES = 1_000_000
+MAX_USER_VISIBLE_ESTIMATED_INPUT_TOKENS = 1_000_000
+MAX_USER_VISIBLE_OUTPUT_TOKENS = 4096
+MAX_USER_VISIBLE_TOTAL_ESTIMATED_TOKENS = 1_004_096
+MAX_USER_VISIBLE_DAILY_GENERATION_RUNS = 100
+MAX_USER_VISIBLE_COST_USD = 5.0
+MAX_USER_VISIBLE_DAILY_COST_USD = 50.0
 
 
 class Gate5B4C3ShadowGenerationBudgets(_Gate5B4C3Model):
@@ -492,16 +505,16 @@ class Gate5B4C3ShadowGenerationBudgets(_Gate5B4C3Model):
             raise ValueError("generation acceptance timeout must remain 750 ms")
         if self.python_runner_timeout_ms > MAX_PYTHON_RUNNER_TIMEOUT_MS:
             raise ValueError("Python generation timeout exceeds selected runner limit")
-        if self.max_sanitized_input_bytes > 8192:
-            raise ValueError("sanitized input budget exceeds first-slice limit")
-        if self.max_estimated_input_tokens > 2048:
-            raise ValueError("input token budget exceeds first-slice limit")
+        if self.max_sanitized_input_bytes > MAX_USER_VISIBLE_SANITIZED_INPUT_BYTES:
+            raise ValueError("sanitized input budget exceeds selected user-visible limit")
+        if self.max_estimated_input_tokens > MAX_USER_VISIBLE_ESTIMATED_INPUT_TOKENS:
+            raise ValueError("input token budget exceeds selected user-visible limit")
         if self.max_sanitized_history_messages != 0:
             raise ValueError("first generation slice cannot include history")
-        if self.max_output_tokens > 512:
-            raise ValueError("output token budget exceeds first-slice limit")
-        if self.max_total_estimated_tokens > 2560:
-            raise ValueError("total token budget exceeds first-slice limit")
+        if self.max_output_tokens > MAX_USER_VISIBLE_OUTPUT_TOKENS:
+            raise ValueError("output token budget exceeds selected user-visible limit")
+        if self.max_total_estimated_tokens > MAX_USER_VISIBLE_TOTAL_ESTIMATED_TOKENS:
+            raise ValueError("total token budget exceeds selected user-visible limit")
         if self.max_diagnostic_output_preview_bytes > 2048:
             raise ValueError("diagnostic preview budget exceeds first-slice limit")
         if self.max_diagnostic_artifact_bytes > 16_384:
@@ -510,14 +523,17 @@ class Gate5B4C3ShadowGenerationBudgets(_Gate5B4C3Model):
             raise ValueError("concurrency cap exceeds first-slice limit")
         if self.max_pending_generation_runs > 1:
             raise ValueError("pending cap exceeds first-slice limit")
-        if self.max_daily_generation_runs > 10:
-            raise ValueError("daily generation cap exceeds first-slice limit")
+        if self.max_daily_generation_runs > MAX_USER_VISIBLE_DAILY_GENERATION_RUNS:
+            raise ValueError("daily generation cap exceeds selected user-visible limit")
         if self.retry_policy != "none":
             raise ValueError("first generation slice cannot retry")
-        if self.max_cost_usd < 0 or self.max_cost_usd > 0.05:
-            raise ValueError("per-generation cost cap exceeds first-slice limit")
-        if self.max_daily_generation_cost_usd < 0 or self.max_daily_generation_cost_usd > 0.50:
-            raise ValueError("daily generation cost cap exceeds first-slice limit")
+        if self.max_cost_usd < 0 or self.max_cost_usd > MAX_USER_VISIBLE_COST_USD:
+            raise ValueError("per-generation cost cap exceeds selected user-visible limit")
+        if (
+            self.max_daily_generation_cost_usd < 0
+            or self.max_daily_generation_cost_usd > MAX_USER_VISIBLE_DAILY_COST_USD
+        ):
+            raise ValueError("daily generation cost cap exceeds selected user-visible limit")
         return self
 
 

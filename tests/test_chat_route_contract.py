@@ -293,7 +293,7 @@ def test_chat_route_passes_canonical_identity_context_to_mocked_runner(monkeypat
         assert forbidden not in serialized_runner_request
     assert "magi_agent" not in serialized_response
     assert response.json()["choices"][0]["message"]["content"] == (
-        "mocked OpenMagi Agent response from OpenMagi runtime"
+        "mocked Magi Agent response from OpenMagi runtime"
     )
 
 

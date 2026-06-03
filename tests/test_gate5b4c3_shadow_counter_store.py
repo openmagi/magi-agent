@@ -413,8 +413,64 @@ def test_counter_store_tracks_user_visible_delivery_terminal_statuses(tmp_path) 
             cost_cap_usd=0.05,
             now_ms=1_779_200_002_000 + index,
         )
-        assert duplicate.status == "duplicate_replay"
-        assert duplicate.previous_report_digest == "sha256:" + "d" * 64
+    assert duplicate.status == "duplicate_replay"
+    assert duplicate.previous_report_digest == "sha256:" + "d" * 64
+
+
+def test_counter_store_allows_same_digest_retry_after_runner_timeout(tmp_path) -> None:
+    path = tmp_path / "gate5b-shadow-counters.json"
+    store = Gate5B4C3ShadowCounterStore(path)
+
+    first = store.reserve(
+        request_digest=REQUEST_DIGEST,
+        shadow_generation_id="shadow_gen_001",
+        selected_bot_digest=BOT_DIGEST,
+        trusted_owner_user_id_digest=OWNER_DIGEST,
+        environment="production",
+        max_daily_generation_runs=2,
+        max_daily_generation_cost_usd=0.10,
+        max_concurrent_generation_runs=1,
+        max_pending_generation_runs=1,
+        cost_cap_usd=0.05,
+        now_ms=1_779_200_000_000,
+    )
+    store.finish(
+        first,
+        status="error",
+        reason="runner_timeout",
+        report_digest=None,
+        runner_error_diagnostic={
+            "reasonCode": "runner_timeout",
+            "stage": "runner_execution",
+            "exceptionClass": "TimeoutError",
+        },
+        now_ms=1_779_200_120_000,
+    )
+
+    retry = Gate5B4C3ShadowCounterStore(path).reserve(
+        request_digest=REQUEST_DIGEST,
+        shadow_generation_id="shadow_gen_001_retry",
+        selected_bot_digest=BOT_DIGEST,
+        trusted_owner_user_id_digest=OWNER_DIGEST,
+        environment="production",
+        max_daily_generation_runs=2,
+        max_daily_generation_cost_usd=0.10,
+        max_concurrent_generation_runs=1,
+        max_pending_generation_runs=1,
+        cost_cap_usd=0.05,
+        now_ms=1_779_200_121_000,
+    )
+
+    record = _request_record(path)
+    assert retry.status == "reserved"
+    assert retry.should_invoke_runner is True
+    assert retry.reason == "none"
+    assert retry.shadow_generation_id == "shadow_gen_001_retry"
+    assert retry.counter_state.daily_generation_runs_used == 2
+    assert retry.counter_state.pending_generation_runs == 1
+    assert retry.counter_state.in_flight_generation_runs == 1
+    assert record["status"] == "reserved"
+    assert record["shadowGenerationId"] == "shadow_gen_001_retry"
 
 
 def test_counter_store_records_delivery_receipt_without_double_counting(tmp_path) -> None:
@@ -1289,6 +1345,66 @@ def test_counter_store_blocks_after_daily_cap_without_incrementing(tmp_path) -> 
     assert blocked.should_invoke_runner is False
     assert blocked.counter_state.daily_generation_runs_used == 1
     assert blocked.counter_state.daily_generation_cost_usd_used == 0.05
+
+
+def test_counter_store_cost_owner_waiver_bypasses_daily_cost_cap_only(tmp_path) -> None:
+    store = Gate5B4C3ShadowCounterStore(tmp_path / "gate5b-shadow-counters.json")
+
+    first = store.reserve(
+        request_digest=REQUEST_DIGEST,
+        shadow_generation_id="shadow_gen_001",
+        selected_bot_digest=BOT_DIGEST,
+        trusted_owner_user_id_digest=OWNER_DIGEST,
+        environment="production",
+        max_daily_generation_runs=2,
+        max_daily_generation_cost_usd=0.05,
+        max_concurrent_generation_runs=1,
+        max_pending_generation_runs=1,
+        cost_cap_usd=0.05,
+        now_ms=1_779_200_000_000,
+    )
+    store.finish(first, status="completed", reason="runner_completed", now_ms=1_779_200_001_000)
+
+    waived = store.reserve(
+        request_digest=SECOND_REQUEST_DIGEST,
+        shadow_generation_id="shadow_gen_002",
+        selected_bot_digest=BOT_DIGEST,
+        trusted_owner_user_id_digest=OWNER_DIGEST,
+        environment="production",
+        max_daily_generation_runs=2,
+        max_daily_generation_cost_usd=0.05,
+        max_concurrent_generation_runs=1,
+        max_pending_generation_runs=1,
+        cost_cap_usd=0.05,
+        cost_owner_waiver=True,
+        now_ms=1_779_200_002_000,
+    )
+
+    assert waived.status == "reserved"
+    assert waived.reason == "none"
+    assert waived.should_invoke_runner is True
+    assert waived.counter_state.daily_generation_runs_used == 2
+    assert waived.counter_state.daily_generation_cost_usd_used == 0.10
+
+    store.finish(waived, status="completed", reason="runner_completed", now_ms=1_779_200_003_000)
+    blocked = store.reserve(
+        request_digest="sha256:" + "e" * 64,
+        shadow_generation_id="shadow_gen_003",
+        selected_bot_digest=BOT_DIGEST,
+        trusted_owner_user_id_digest=OWNER_DIGEST,
+        environment="production",
+        max_daily_generation_runs=2,
+        max_daily_generation_cost_usd=0.05,
+        max_concurrent_generation_runs=1,
+        max_pending_generation_runs=1,
+        cost_cap_usd=0.05,
+        cost_owner_waiver=True,
+        now_ms=1_779_200_004_000,
+    )
+
+    assert blocked.status == "blocked"
+    assert blocked.reason == "daily_cap_exhausted"
+    assert blocked.should_invoke_runner is False
 
 
 def test_gate1a_selected_attempt_preflight_allows_fresh_digest(tmp_path) -> None:

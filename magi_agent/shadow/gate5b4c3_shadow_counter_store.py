@@ -212,6 +212,13 @@ _TERMINAL_REQUEST_STATUSES = frozenset(
         "stale_released",
     }
 )
+_RETRYABLE_TERMINAL_ERROR_REASONS = frozenset(
+    {
+        "runner_error",
+        "runner_output_missing",
+        "runner_timeout",
+    }
+)
 _FALLBACK_RECEIPT_GATES = frozenset(
     {
         "gate1a_readonly_tools",
@@ -529,6 +536,7 @@ class Gate5B4C3ShadowCounterStore:
         max_concurrent_generation_runs: int,
         max_pending_generation_runs: int,
         cost_cap_usd: float,
+        cost_owner_waiver: bool = False,
         now_ms: int | None = None,
     ) -> Gate5B4C3ShadowCounterReservation:
         now = _coerce_now_ms(now_ms)
@@ -577,7 +585,10 @@ class Gate5B4C3ShadowCounterStore:
 
         existing = requests.get(request_digest)
         if isinstance(existing, dict):
-            if existing.get("status") in _TERMINAL_REQUEST_STATUSES:
+            if (
+                existing.get("status") in _TERMINAL_REQUEST_STATUSES
+                and not _is_retryable_terminal_request_record(existing)
+            ):
                 reservation = Gate5B4C3ShadowCounterReservation(
                     status="duplicate_replay",
                     reason="none",
@@ -613,6 +624,7 @@ class Gate5B4C3ShadowCounterStore:
             max_concurrent_generation_runs=max_concurrent_generation_runs,
             max_pending_generation_runs=max_pending_generation_runs,
             reserved_cost_usd=cost_cap_usd,
+            cost_owner_waiver=cost_owner_waiver,
         )
         if reason != "none":
             reservation = Gate5B4C3ShadowCounterReservation(
@@ -1868,10 +1880,13 @@ def _cap_block_reason(
     max_concurrent_generation_runs: int,
     max_pending_generation_runs: int,
     reserved_cost_usd: float,
+    cost_owner_waiver: bool = False,
 ) -> Gate5B4C3ShadowCounterBlockReason:
     if int(state.get("dailyGenerationRunsUsed") or 0) >= max_daily_generation_runs:
         return "daily_cap_exhausted"
     if (
+        not cost_owner_waiver
+        and
         float(state.get("dailyGenerationCostUsdUsed") or 0) + reserved_cost_usd
         > max_daily_generation_cost_usd
     ):
@@ -2185,6 +2200,14 @@ def _find_request_scope(
     if not candidates:
         return None
     return sorted(candidates, key=lambda item: item[0])[-1][1]
+
+
+def _is_retryable_terminal_request_record(record: Mapping[str, object]) -> bool:
+    status = str(record.get("status") or "")
+    reason = str(record.get("reason") or "")
+    if status == "error" and reason in _RETRYABLE_TERMINAL_ERROR_REASONS:
+        return True
+    return False
 
 
 def _counter_date(now_ms: int) -> str:

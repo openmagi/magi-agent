@@ -9,7 +9,7 @@
 [Releases](https://github.com/openmagi/magi-agent/releases)
 
 ![status](https://img.shields.io/badge/status-early%20beta-f97316)
-![latest](https://img.shields.io/badge/latest-v0.1.3-2563eb)
+![latest](https://img.shields.io/badge/latest-v0.1.4-2563eb)
 ![license](https://img.shields.io/badge/license-Apache--2.0-111827)
 ![runtime](https://img.shields.io/badge/runtime-Magi%20Agent-7c3aed)
 

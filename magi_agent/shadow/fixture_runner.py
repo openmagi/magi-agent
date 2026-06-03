@@ -158,7 +158,7 @@ _COMPACT_LIVE_SURFACE_LONG_SUBTOKENS = frozenset(
         "schedulerrun",
     }
 )
-_PRIVATE_HOST_RE = re.compile(r"\bmagi\.pro\b", re.IGNORECASE)
+_MAGI_PRO_RE = re.compile(r"\b(?:magi\.pro|openmagi\.ai)\b", re.IGNORECASE)
 _URL_RE = re.compile(r"\b[a-z][a-z0-9+.-]*://", re.IGNORECASE)
 _UNIX_ABSOLUTE_PATH_RE = re.compile(r"(?:^|[\s('\"`=:;,])/(?!/)\S+")
 _WINDOWS_ABSOLUTE_PATH_RE = re.compile(r"(?:^|[\s('\"`=:;,])[a-zA-Z]:[\\/]\S*")
@@ -581,7 +581,7 @@ def _reject_production_like_string(value: str) -> None:
         raise ValueError("fixture content must not contain parent path traversal")
     if _URL_RE.search(normalized):
         raise ValueError("fixture content must not contain URLs")
-    if _PRIVATE_HOST_RE.search(normalized):
+    if _MAGI_PRO_RE.search(normalized):
         raise ValueError("fixture content must not contain production hostnames")
     if "/data" in lowered or "/workspace" in lowered:
         raise ValueError("fixture content must not contain data/workspace paths")

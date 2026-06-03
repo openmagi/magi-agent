@@ -150,7 +150,7 @@ _PRODUCTION_WORKSPACE_MARKERS = (
     "/var/lib/longhorn",
     "/mnt/",
     "bot-",
-    "magi-",
+    "openmagi-",
     "k8s",
     "kubernetes",
     "longhorn",

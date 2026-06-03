@@ -128,6 +128,22 @@ def _readonly_request() -> Gate5B4C3ShadowGenerationRequest:
     )
 
 
+def _selected_full_toolhost_request() -> Gate5B4C3ShadowGenerationRequest:
+    return Gate5B4C3ShadowGenerationRequest.model_validate(
+        _payload(
+            recipeProfile={
+                **_payload()["recipeProfile"],  # type: ignore[arg-type]
+                "toolsPolicy": "selected_full_toolhost",
+            },
+            policy={
+                **_payload()["policy"],  # type: ignore[arg-type]
+                "toolsDisabled": False,
+                "toolHostDispatchAllowed": True,
+            },
+        )
+    )
+
+
 def _gate1a_google_request() -> Gate5B4C3ShadowGenerationRequest:
     return Gate5B4C3ShadowGenerationRequest.model_validate(
         _payload(
@@ -230,6 +246,107 @@ class _FakeRunner:
         yield {"text": "local diagnostic event only"}
 
 
+class _FakeEvent:
+    def __init__(self, text: str) -> None:
+        self.content = _FakeContent(parts=[_FakePart(text)], role="model")
+
+
+class _FunctionCallOnlyPart:
+    function_call = {"name": "Calculation", "args": {"expression": "1 + 1"}}
+
+
+class _FunctionCallOnlyEvent:
+    class _Content:
+        parts = [_FunctionCallOnlyPart()]
+
+    content = _Content()
+
+
+class _CandidateFunctionCallOnlyEvent:
+    candidates = [
+        {
+            "content": {
+                "parts": [
+                    {
+                        "functionCall": {
+                            "name": "Calculation",
+                            "args": {"expression": "2 + 3"},
+                        }
+                    }
+                ]
+            }
+        }
+    ]
+
+    @property
+    def text(self) -> str:
+        return ""
+
+
+class _MethodFunctionCall:
+    name = "Calculation"
+    args = {"expression": "3 + 4"}
+    id = "call_method"
+
+
+class _MethodFunctionCallOnlyEvent:
+    @property
+    def text(self) -> str:
+        return ""
+
+    def get_function_calls(self) -> list[object]:
+        return [_MethodFunctionCall()]
+
+
+class _FunctionCallOnlyRunner(_FakeRunner):
+    async def run_async(self, **kwargs: object) -> object:
+        type(self).run_kwargs = kwargs
+        yield _FunctionCallOnlyEvent()
+
+
+class _FunctionCallThenFinalRunner(_FakeRunner):
+    calls: list[dict[str, object]] = []
+    event_factory: object = _FunctionCallOnlyEvent
+
+    async def run_async(self, **kwargs: object) -> object:
+        type(self).run_kwargs = kwargs
+        type(self).calls.append(kwargs)
+        if len(type(self).calls) == 1:
+            factory = type(self).event_factory
+            yield factory() if callable(factory) else factory
+            return
+        message = kwargs["new_message"]
+        assert isinstance(message, _FakeContent)
+        assert "Tool execution results" in message.parts[0].text
+        yield _FakeEvent("final answer after manual tool execution")
+
+
+class _ManualCalculationTool:
+    name = "Calculation"
+    calls: list[dict[str, object]] = []
+
+    @classmethod
+    async def run_async(
+        cls,
+        *,
+        args: dict[str, object],
+        tool_context: object,
+    ) -> dict[str, object]:
+        del tool_context
+        cls.calls.append(args)
+        return {
+            "status": "ok",
+            "reason": "tool_completed",
+            "outputPreview": {"value": 2},
+        }
+
+
+class _MappingContentPartsRunner(_FakeRunner):
+    async def run_async(self, **kwargs: object) -> object:
+        type(self).run_kwargs = kwargs
+        yield {"content": {"parts": ({"text": "live ADK text from mapping parts"},)}}
+
+
 class _ProviderSetupFailRunner(_FakeRunner):
     async def run_async(self, **kwargs: object) -> object:
         type(self).run_kwargs = kwargs
@@ -283,6 +400,54 @@ def _fake_primitives() -> Gate5B4C3LiveAdkPrimitives:
     return Gate5B4C3LiveAdkPrimitives(
         Agent=_FakeAgent,
         Runner=_FakeRunner,
+        InMemorySessionService=_FakeSessionService,
+        Content=_FakeContent,
+        Part=_FakePart,
+        GenerateContentConfig=_FakeGenerateContentConfig,
+    )
+
+
+def _function_call_only_primitives() -> Gate5B4C3LiveAdkPrimitives:
+    _FakeAgent.created_kwargs = {}
+    _FunctionCallOnlyRunner.created_kwargs = {}
+    _FunctionCallOnlyRunner.run_kwargs = {}
+    _FakeGenerateContentConfig.created_kwargs = {}
+    return Gate5B4C3LiveAdkPrimitives(
+        Agent=_FakeAgent,
+        Runner=_FunctionCallOnlyRunner,
+        InMemorySessionService=_FakeSessionService,
+        Content=_FakeContent,
+        Part=_FakePart,
+        GenerateContentConfig=_FakeGenerateContentConfig,
+    )
+
+
+def _function_call_then_final_primitives() -> Gate5B4C3LiveAdkPrimitives:
+    _FakeAgent.created_kwargs = {}
+    _FunctionCallThenFinalRunner.created_kwargs = {}
+    _FunctionCallThenFinalRunner.run_kwargs = {}
+    _FunctionCallThenFinalRunner.calls = []
+    _FunctionCallThenFinalRunner.event_factory = _FunctionCallOnlyEvent
+    _ManualCalculationTool.calls = []
+    _FakeGenerateContentConfig.created_kwargs = {}
+    return Gate5B4C3LiveAdkPrimitives(
+        Agent=_FakeAgent,
+        Runner=_FunctionCallThenFinalRunner,
+        InMemorySessionService=_FakeSessionService,
+        Content=_FakeContent,
+        Part=_FakePart,
+        GenerateContentConfig=_FakeGenerateContentConfig,
+    )
+
+
+def _mapping_content_parts_primitives() -> Gate5B4C3LiveAdkPrimitives:
+    _FakeAgent.created_kwargs = {}
+    _MappingContentPartsRunner.created_kwargs = {}
+    _MappingContentPartsRunner.run_kwargs = {}
+    _FakeGenerateContentConfig.created_kwargs = {}
+    return Gate5B4C3LiveAdkPrimitives(
+        Agent=_FakeAgent,
+        Runner=_MappingContentPartsRunner,
         InMemorySessionService=_FakeSessionService,
         Content=_FakeContent,
         Part=_FakePart,
@@ -361,6 +526,89 @@ def test_live_boundary_invokes_runner_with_allowlisted_kwargs_and_disabled_tools
     assert result.authority.workspace_mutation_allowed is False
 
 
+def test_live_boundary_rejects_completed_runner_without_text_output() -> None:
+    result = Gate5B4C3LiveRunnerBoundary(_function_call_only_primitives).invoke(
+        _request(),
+        config=_enabled_config(),
+    )
+
+    assert result.status == "error"
+    assert result.reason == "runner_output_missing"
+    assert result.adk_invoked is True
+    assert result.runner_attempted is True
+    assert result.model_call_via_adk_runner_attempted is True
+    assert result.event_count == 1
+    assert result.output_text_internal is None
+    assert result.runner_error_diagnostic is not None
+    assert result.runner_error_diagnostic.stage == "runner_output_projection"
+    assert result.runner_error_diagnostic.reason_code == "runner_output_missing"
+    assert result.runner_error_diagnostic.exception_category == (
+        "runner_output_projection_failure"
+    )
+    assert result.user_visible_output is None
+    assert result.authority.user_visible_output_allowed is False
+
+
+def test_live_boundary_runs_manual_full_toolhost_continuation_for_function_call_only_event() -> None:
+    result = Gate5B4C3LiveRunnerBoundary(
+        _function_call_then_final_primitives,
+        adk_tools=(_ManualCalculationTool,),
+    ).invoke(_selected_full_toolhost_request(), config=_enabled_config())
+
+    assert result.status == "completed"
+    assert result.reason == "runner_completed"
+    assert result.event_count == 2
+    assert result.output_text_internal == "final answer after manual tool execution"
+    assert _ManualCalculationTool.calls == [{"expression": "1 + 1"}]
+    assert len(_FunctionCallThenFinalRunner.calls) == 2
+    assert result.runner_error_diagnostic is None
+
+
+def test_live_boundary_runs_manual_full_toolhost_continuation_for_candidate_function_call_event() -> None:
+    primitives = _function_call_then_final_primitives()
+    _FunctionCallThenFinalRunner.event_factory = _CandidateFunctionCallOnlyEvent
+
+    result = Gate5B4C3LiveRunnerBoundary(
+        lambda: primitives,
+        adk_tools=(_ManualCalculationTool,),
+    ).invoke(_selected_full_toolhost_request(), config=_enabled_config())
+
+    assert result.status == "completed"
+    assert result.reason == "runner_completed"
+    assert result.output_text_internal == "final answer after manual tool execution"
+    assert _ManualCalculationTool.calls == [{"expression": "2 + 3"}]
+    assert len(_FunctionCallThenFinalRunner.calls) == 2
+
+
+def test_live_boundary_runs_manual_full_toolhost_continuation_for_method_function_calls() -> None:
+    primitives = _function_call_then_final_primitives()
+    _FunctionCallThenFinalRunner.event_factory = _MethodFunctionCallOnlyEvent
+
+    result = Gate5B4C3LiveRunnerBoundary(
+        lambda: primitives,
+        adk_tools=(_ManualCalculationTool,),
+    ).invoke(_selected_full_toolhost_request(), config=_enabled_config())
+
+    assert result.status == "completed"
+    assert result.reason == "runner_completed"
+    assert result.output_text_internal == "final answer after manual tool execution"
+    assert _ManualCalculationTool.calls == [{"expression": "3 + 4"}]
+    assert len(_FunctionCallThenFinalRunner.calls) == 2
+
+
+def test_live_boundary_extracts_mapping_content_parts_text_output() -> None:
+    result = Gate5B4C3LiveRunnerBoundary(_mapping_content_parts_primitives).invoke(
+        _request(),
+        config=_enabled_config(),
+    )
+
+    assert result.status == "completed"
+    assert result.reason == "runner_completed"
+    assert result.event_count == 1
+    assert result.output_text_internal == "live ADK text from mapping parts"
+    assert result.runner_error_diagnostic is None
+
+
 def test_live_boundary_fails_closed_on_tool_policy_mismatch_before_adk_load() -> None:
     readonly_without_tools = Gate5B4C3LiveRunnerBoundary(_loader_that_must_not_run).invoke(
         _readonly_request(),
@@ -415,7 +663,7 @@ def test_live_boundary_attaches_gate1a_proxy_connect_headers_only_with_context()
         adk_tools=(readonly_tool,),
         gate1a_egress_correlation_context=context,
         gate1a_egress_proxy_url=(
-            "http://gate5b-gemini-egress-proxy.magi-system.svc.cluster.local:8080"
+            "http://gate5b-gemini-egress-proxy.openmagi-system.svc.cluster.local:8080"
         ),
     ).invoke(request, config=_gate1a_google_config())
 
