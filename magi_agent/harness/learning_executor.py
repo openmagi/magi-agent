@@ -1,20 +1,26 @@
-"""Learning reflection executor — PR2 skeleton.
+"""Learning reflection executor — PR3 (real signal extraction + labeling).
 
 Architecture:
     TranscriptSource ──read_since(watermark)──> SessionTrace tuple
             ▼
       harness/learning_executor  ── env gate ──> disabled no-op
-            ├─ LocalFakeTranscriptSource (PR2 only; real source deferred to PR7)
-            ├─ deterministic local-fake candidate mapping (no LLM in PR2)
+            ├─ LocalFakeTranscriptSource (real source deferred to PR7)
+            ├─ extract_signals  (deterministic, structural — no LLM)
+            ├─ chronological_split → train / eval-holdout (no leakage)
+            ├─ LocalFakeLabeler  (deterministic — PR7 swaps in LLM-backed)
+            ├─ filter_noise / dedup / cross-session aggregate
             └─ LearningReflectionResult{status, candidates, watermark, counters}
 
 Env gate: ``MAGI_LEARNING_REFLECTION_ENABLED`` (default OFF).
 When off the executor returns ``status="disabled"`` with empty candidates and
-**zero work** — no transcript read, no dispatch.
+**zero work** — no transcript read, no dispatch.  The OFF path is byte-identical
+to PR2.
 
-PR3 will replace the trivial deterministic mapping with real signal extraction
-and labeling.  PR7 will replace ``LocalFakeTranscriptSource`` with the real
-transcript source (reading ``runtime/transcript.py`` / ``commit_boundary``).
+PR3 replaces the PR2 trivial candidate stub with real signal extraction +
+labeling.  Candidates ONLY — no store writes, no policy activation.  PR7 will
+replace ``LocalFakeTranscriptSource`` with the real transcript source (reading
+``runtime/transcript.py`` / ``commit_boundary``) and ``LocalFakeLabeler`` with
+an LLM-backed ``Labeler``.
 
 No ``Literal[False]`` authority flags are flipped here.
 No store writes.  No LLM calls.
@@ -24,7 +30,6 @@ requiredPolicyRefs = eval-observation-required + no-direct-mutation).
 """
 from __future__ import annotations
 
-import hashlib
 import os
 from typing import Literal
 
@@ -36,7 +41,14 @@ from magi_agent.learning.candidates import (
     SessionTrace,
     TranscriptSource,
 )
-from magi_agent.learning.models import LearningScope, Provenance
+from magi_agent.learning.labeler import (
+    LocalFakeLabeler,
+    aggregate_candidates,
+    build_candidates,
+    chronological_split,
+    dedup_candidates,
+)
+from magi_agent.learning.signals import extract_signals
 
 
 # ---------------------------------------------------------------------------
@@ -48,8 +60,8 @@ _REFLECTION_ENV_VAR: str = "MAGI_LEARNING_REFLECTION_ENABLED"
 
 _TRUE_STRINGS = frozenset({"1", "true", "yes", "on"})
 
-#: Candidate kind emitted by the local-fake stub.  PR3 will generalise this.
-_FAKE_CANDIDATE_KIND: Literal["example"] = "example"
+#: Default number of distinct sessions a pattern must recur in to become a rule.
+_AGGREGATION_THRESHOLD: int = 3
 
 
 # ---------------------------------------------------------------------------
@@ -199,9 +211,10 @@ async def run_reflection(
     1. If ``MAGI_LEARNING_REFLECTION_ENABLED`` is falsy, returns
        ``status="disabled"`` immediately — zero work, no transcript read.
     2. Otherwise reads traces via *source* (filtered by *since* watermark),
-       maps each trace to zero-or-one deterministic local-fake candidate stub
-       (PR3 replaces this with real signal extraction), and returns
-       ``status="ok"`` with the candidates tuple and an advanced watermark.
+       runs the deterministic signal-extraction + labeling pipeline
+       (extract → split → label → noise-filter → dedup → aggregate), and
+       returns ``status="ok"`` with the candidates tuple and advanced watermark.
+       Candidates ONLY — no store writes.
 
     Args:
         source: Transcript source to read from.  Defaults to an empty
@@ -244,25 +257,36 @@ async def run_reflection(
     traces = await source.read_since(since)
     traces_read = len(traces)
 
-    # --- Step 3: deterministic local-fake candidate mapping (no LLM) ---
-    # PR3 REPLACES this trivial stub with real signal extraction + labeling.
-    # The skeleton maps each trace to exactly one trivial candidate so the
-    # pipeline SHAPE is exercised end-to-end in PR2 tests.
-    candidates: list[LearningCandidate] = []
-    for trace in traces:
-        candidate = _local_fake_candidate_from_trace(trace)
-        if candidate is not None:
-            candidates.append(candidate)
+    # --- Step 3: deterministic signal extraction + labeling (no LLM) ---
+    # extract → chronological split (no leakage) → label → noise-filter →
+    # dedup → cross-session aggregate.  Labeler is the deterministic
+    # ``LocalFakeLabeler``; PR7 swaps in an LLM-backed ``Labeler``.
+    # Candidates ONLY — the store is never touched here.
+    signals_extracted = sum(len(extract_signals(t)) for t in traces)
+
+    labeler = LocalFakeLabeler()
+    train_traces, holdout_traces = chronological_split(traces)
+
+    train_candidates = build_candidates(train_traces, labeler=labeler)
+    eval_candidates = build_candidates(
+        holdout_traces, labeler=labeler, as_eval=True
+    )
+
+    combined = dedup_candidates(train_candidates + eval_candidates)
+    candidates = aggregate_candidates(
+        combined, threshold=_AGGREGATION_THRESHOLD
+    )
 
     # --- Step 4: advance watermark ---
     new_watermark: str | None = _max_ts(traces) if traces else since
 
     return LearningReflectionResult(
         status="ok",
-        candidates=tuple(candidates),
+        candidates=candidates,
         watermark=new_watermark,
         counters={
             "traces_read": traces_read,
+            "signals_extracted": signals_extracted,
             "candidates_produced": len(candidates),
         },
     )
@@ -271,47 +295,6 @@ async def run_reflection(
 # ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
-
-
-def _local_fake_candidate_from_trace(
-    trace: SessionTrace,
-) -> LearningCandidate | None:
-    """Map a single trace to a deterministic local-fake candidate stub.
-
-    The stub always produces an ``example`` candidate so the pipeline shape
-    is exercised.  PR3 replaces this with real signal extraction.
-
-    Returns ``None`` only for empty traces (zero turns and empty output),
-    ensuring the mapping is deterministic and never raises.
-    """
-    # Trivial guard: skip completely empty traces
-    if not trace.turns and not trace.final_output:
-        return None
-
-    # Deterministic content derived from the trace — no randomness, no LLM.
-    # PR3 will replace this with real extraction logic.
-    session_hash = hashlib.sha1(
-        trace.session_id.encode("utf-8")
-    ).hexdigest()[:12]
-
-    return LearningCandidate(
-        kind="example",
-        scope=LearningScope(taskKind="general"),
-        content={
-            "situation": f"Session {trace.session_id} produced output",
-            "behavior": trace.final_output[:120] or "(empty)",
-        },
-        rationale=(
-            f"Local-fake stub candidate derived from session {trace.session_id}. "
-            "PR3 replaces this with real signal extraction."
-        ),
-        provenance=Provenance(
-            sessionIds=(trace.session_id,),
-            derivedBy="reflection",
-            createdAt=trace.ts,
-        ),
-        sourceSignalRef=f"trace:{session_hash}@{trace.ts}",
-    )
 
 
 def _max_ts(traces: tuple[SessionTrace, ...]) -> str | None:
