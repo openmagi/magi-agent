@@ -113,3 +113,24 @@ def test_local_dashboard_exposes_digest_safe_runtime_bootstrap() -> None:
         "runtimeEngine": "adk-python",
         "version": "0.1.0",
     }
+
+
+def test_local_dashboard_chat_route_streams_local_adk_events(monkeypatch) -> None:
+    monkeypatch.setenv("MAGI_AGENT_LOCAL_CHAT_ROUTE", "on")
+    client = _client()
+
+    response = client.post(
+        "/v1/chat/completions",
+        headers={"authorization": "Bearer local-token"},
+        json={
+            "stream": True,
+            "messages": [{"role": "user", "content": "hello"}],
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/event-stream")
+    text = response.text
+    assert "Running local ADK" in text
+    assert "Local ADK runtime ready" in text
+    assert "data: [DONE]" in text

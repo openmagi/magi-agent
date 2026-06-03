@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Awaitable, Callable, Mapping, Sequence
+from collections.abc import Awaitable, Callable, Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timezone
 import hashlib
@@ -15,9 +15,10 @@ import time
 from typing import Any, Literal
 
 from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
+from magi_agent.cli.local_runner import build_local_response
 from magi_agent.evidence.gate2_durable_evidence import (
     Gate2DurableEvidenceStore,
 )
@@ -741,9 +742,94 @@ _LEGACY_IDENTITY_PATTERNS: tuple[tuple[re.Pattern[str], str, str], ...] = (
 _MODEL_VISIBLE_CONTEXT_MAX_CHARS = 1_000_000
 
 
+def _local_chat_route_enabled() -> bool:
+    return os.environ.get("MAGI_AGENT_LOCAL_CHAT_ROUTE", "off").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+
+
+def _local_adk_chat_response(
+    runtime: OpenMagiRuntime,
+    payload: object,
+) -> StreamingResponse:
+    prompt = _local_chat_prompt_text(payload)
+    content = build_local_response(prompt, model=runtime.config.model)
+    return StreamingResponse(
+        _local_adk_chat_sse(content),
+        media_type="text/event-stream",
+    )
+
+
+def _local_adk_chat_sse(content: str) -> Iterator[str]:
+    turn_id = "turn-local-dashboard"
+    yield _sse_data({"choices": [{"index": 0, "delta": {"role": "assistant"}}]})
+    yield _sse_event(
+        "agent",
+        {
+            "type": "turn_phase",
+            "turnId": turn_id,
+            "phase": "executing",
+        },
+    )
+    yield _sse_event(
+        "agent",
+        {
+            "type": "llm_progress",
+            "turnId": turn_id,
+            "stage": "started",
+            "label": "Running local ADK",
+            "detail": "Model-free local runner active",
+        },
+    )
+    yield _sse_event(
+        "agent",
+        {
+            "type": "turn_phase",
+            "turnId": turn_id,
+            "phase": "committed",
+        },
+    )
+    yield _sse_data({"choices": [{"index": 0, "delta": {"content": content}}]})
+    yield _sse_data({"choices": [{"index": 0, "finish_reason": "stop"}]})
+    yield "data: [DONE]\n\n"
+
+
+def _sse_data(payload: Mapping[str, object]) -> str:
+    return f"data: {json.dumps(payload, separators=(',', ':'))}\n\n"
+
+
+def _sse_event(name: str, payload: Mapping[str, object]) -> str:
+    return f"event: {name}\n{_sse_data(payload)}"
+
+
+def _local_chat_prompt_text(payload: object) -> str:
+    if not isinstance(payload, Mapping):
+        return ""
+    messages = payload.get("messages")
+    if not isinstance(messages, Sequence) or isinstance(messages, (str, bytes)):
+        return ""
+    text_parts: list[str] = []
+    for message in messages:
+        if not isinstance(message, Mapping):
+            continue
+        content = message.get("content")
+        if isinstance(content, str):
+            text_parts.append(content)
+        elif isinstance(content, Sequence) and not isinstance(content, (str, bytes)):
+            for block in content:
+                if isinstance(block, Mapping):
+                    text = block.get("text")
+                    if isinstance(text, str):
+                        text_parts.append(text)
+    return "\n".join(part.strip() for part in text_parts if part.strip())
+
+
 def register_chat_routes(app: FastAPI, runtime: OpenMagiRuntime) -> None:
     @app.post("/v1/chat/completions")
-    async def chat_completions(request: Request) -> JSONResponse:
+    async def chat_completions(request: Request):
         auth = request.headers.get("authorization", "")
         expected = f"Bearer {runtime.config.gateway_token}"
         if auth != expected:
@@ -751,6 +837,15 @@ def register_chat_routes(app: FastAPI, runtime: OpenMagiRuntime) -> None:
                 status_code=401,
                 content={"error": "unauthorized"},
             )
+        if _local_chat_route_enabled():
+            try:
+                payload = await request.json()
+            except (JSONDecodeError, ValueError):
+                return JSONResponse(
+                    status_code=400,
+                    content={"error": "malformed_json"},
+                )
+            return _local_adk_chat_response(runtime, payload)
         if os.environ.get("CORE_AGENT_PYTHON_CHAT_ROUTE", "off").lower() != "on":
             return JSONResponse(
                 status_code=503,

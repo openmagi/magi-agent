@@ -13,6 +13,7 @@ from .config.env import (
     parse_gate5b4c3_shadow_generation_route_env,
     parse_runtime_env,
 )
+from .config.models import RuntimeConfig
 from .evidence.observed_egress import (
     build_gate1a_observed_egress_evidence_provider_from_env,
 )
@@ -47,6 +48,8 @@ def resolve_server_port(
 def main(argv: Sequence[str] | None = None) -> None:
     port = resolve_server_port(argv)
     config = _parse_runtime_config(os.environ)
+    if _local_runtime_defaults_active(config):
+        os.environ.setdefault("MAGI_AGENT_LOCAL_CHAT_ROUTE", "on")
     runtime = OpenMagiRuntime(config=config)
     runtime.gate5b4c3_shadow_generation_route_config = (
         parse_gate5b4c3_shadow_generation_route_env(os.environ)
@@ -91,3 +94,11 @@ def _parse_runtime_config(environ: Mapping[str, str]):
 
 def _env_enabled(value: str | None) -> bool:
     return value is not None and value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _local_runtime_defaults_active(config: RuntimeConfig) -> bool:
+    return (
+        config.bot_id == "local-bot"
+        and config.user_id == "local-user"
+        and config.gateway_token == "local-dev-token"
+    )
