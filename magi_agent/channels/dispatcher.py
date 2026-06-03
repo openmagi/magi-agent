@@ -12,6 +12,7 @@ from magi_agent.channels.runtime_boundary import (
     ChannelRuntimeOperation,
     ChannelRuntimeReceipt,
 )
+from magi_agent.channels.workflow_routing import WorkflowRouteDecision, decide_workflow_route
 from magi_agent.runtime.provider_execution import (
     ProviderExecutionBoundary,
     ProviderExecutionConfig,
@@ -453,6 +454,19 @@ def _contains_private_text(value: str) -> bool:
     return bool(_SECRET_TEXT_RE.search(value) or _PRIVATE_PATH_RE.search(value))
 
 
+def maybe_route_to_workflow(
+    *,
+    eligible: bool,
+    confirmed: bool,
+    enabled: bool,
+) -> WorkflowRouteDecision | None:
+    """Pre-execute() seam: return a routing decision when an inbound message
+    should become a workflow, else None (normal LLM turn). Default None keeps
+    today's behaviour byte-identical."""
+    decision = decide_workflow_route(eligible=eligible, confirmed=confirmed, enabled=enabled)
+    return decision if decision.routed else None
+
+
 __all__ = [
     "ChannelDispatchAuthorityFlags",
     "ChannelDispatchConfig",
@@ -460,4 +474,5 @@ __all__ = [
     "ChannelDispatchProviderPort",
     "ChannelDispatchRequest",
     "ChannelDispatcher",
+    "maybe_route_to_workflow",
 ]
