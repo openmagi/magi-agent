@@ -2,7 +2,7 @@
 
 # Open Magi Agent
 
-**Local-first agent runtime and CLI: memory, tools, evidence gates, and simple setup.**
+**Programmable agents that run on evidence, tools, and memory, not prompt hope.**
 
 [Website](https://openmagi.ai) ·
 [Docs](docs/cli/magi.md) ·
@@ -96,6 +96,7 @@ Check the CLI commands:
 ```bash
 magi --help
 magi-agent --help
+magi --output text "Summarize this repository"
 ```
 
 The dashboard is served by the same local runtime. It does not need a separate
@@ -305,9 +306,10 @@ only. Acceptance for governed workflows comes from durable records: delivery
 receipts, source ledgers, mutation receipts, rollback receipts, verifier events,
 and audit checkpoints.
 
-## Development Commands
+## Source Checkout Development
 
-Use these only when developing Magi Agent from a source checkout:
+Homebrew is the normal install path. Use these commands only when developing
+Magi Agent from a source checkout:
 
 ```bash
 git clone https://github.com/openmagi/magi-agent.git
@@ -319,7 +321,7 @@ uv sync --extra dev --extra cli
 # run the full scaffold test suite
 uv run --extra dev pytest -q
 
-# run the source checkout CLI
+# run the source checkout CLI through uv
 uv run --extra cli magi --help
 uv run --extra cli magi --output text "Summarize this repository"
 
