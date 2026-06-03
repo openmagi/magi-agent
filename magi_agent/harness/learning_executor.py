@@ -45,6 +45,7 @@ from magi_agent.learning.eval_gate import (
     MIN_EVAL_SAMPLE_SIZE,
     CheckSet,
     EvalGateConfig,
+    EvalGateDecision,
     StaticCheckSet,
     run_eval_gate,
 )
@@ -175,6 +176,13 @@ class LearningReflectionResult(BaseModel):
     watermark: str | None
     #: Best-effort ops counters: ``traces_read``, ``candidates_produced``.
     counters: dict[str, int]
+
+    #: Eval-gate decisions, one per candidate, when a store was injected (the
+    #: PR4 ON path).  ``None`` on the candidates-only / OFF path so that path
+    #: stays byte-identical to PR3.  Surfaced for the PR6 dashboard.
+    eval_gate_decisions: tuple[EvalGateDecision, ...] | None = Field(
+        default=None, alias="evalGateDecisions"
+    )
 
     #: Authority flags — all False in PR2
     llm_attached: Literal[False] = Field(
@@ -330,9 +338,10 @@ async def run_reflection(
     # they are proposed and (for passing examples) policy-gated activated in the
     # *local* store.  When ``store is None`` this block is skipped entirely and
     # the executor stays candidates-only — byte-identical to PR3.
+    gate_decisions: tuple[EvalGateDecision, ...] | None = None
     if store is not None:
         gate_checkset = checkset if checkset is not None else _DEFAULT_GATE_CHECKSET
-        run_eval_gate(
+        gate_decisions = run_eval_gate(
             candidates,
             store=store,
             checkset=gate_checkset,
@@ -342,15 +351,23 @@ async def run_reflection(
     # --- Step 4: advance watermark ---
     new_watermark: str | None = _max_ts(traces) if traces else since
 
+    counters = {
+        "traces_read": traces_read,
+        "signals_extracted": signals_extracted,
+        "candidates_produced": len(candidates),
+    }
+    # Learning-layer counters are added ONLY on the ON+store path, so the
+    # candidates-only / OFF path stays byte-identical to PR3.
+    if gate_decisions is not None:
+        counters["items_activated"] = sum(1 for d in gate_decisions if d.activated)
+        counters["items_proposed"] = sum(1 for d in gate_decisions if not d.activated)
+
     return LearningReflectionResult(
         status="ok",
         candidates=candidates,
         watermark=new_watermark,
-        counters={
-            "traces_read": traces_read,
-            "signals_extracted": signals_extracted,
-            "candidates_produced": len(candidates),
-        },
+        counters=counters,
+        eval_gate_decisions=gate_decisions,
     )
 
 

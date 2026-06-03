@@ -40,8 +40,7 @@ mutation is PR7).
 """
 from __future__ import annotations
 
-import re
-import uuid
+import hashlib
 from typing import Protocol, runtime_checkable
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -67,6 +66,8 @@ MIN_EVAL_SAMPLE_SIZE: int = 4
 #: Maximum tolerated regression (before_mean - after_mean).  A non-negative
 #: regression up to this value is acceptable; anything larger fails.  ``0.0``
 #: means "no measurable degradation allowed"; raise to allow small noise.
+# NOTE(PR7): real LLM scores carry float noise (~1e-9..1e-6); revisit this strict
+# 0.0 band / introduce an epsilon when the live evaluator lands.
 MAX_REGRESSION_BAND: float = 0.0
 
 
@@ -164,10 +165,19 @@ class EvalGateDecision(BaseModel):
     #: Whether the item was activated (status -> "active").  Only ``example``
     #: candidates that pass are activated; rules/evals never auto-activate.
     activated: bool
-    #: The eval observation ref recorded for this candidate (always present).
-    eval_observation_ref: str = Field(alias="evalObservationRef")
-    sample_n: int = Field(alias="sampleN")
-    regression: float
+    #: The eval observation ref recorded for this candidate.  Present on every
+    #: evaluated path; empty string when the candidate was *skipped* (it already
+    #: exists in a non-proposed status, so no new observation is recorded).
+    eval_observation_ref: str = Field(default="", alias="evalObservationRef")
+    sample_n: int = Field(default=0, alias="sampleN")
+    regression: float = 0.0
+    #: Whether the candidate was skipped without evaluation because it already
+    #: exists in the store as ``active`` / ``archived`` (re-running reflection
+    #: over overlapping sessions).  Skipped candidates are never re-proposed or
+    #: re-activated.
+    skipped: bool = False
+    #: Human-readable explanation when ``skipped`` is True (else empty).
+    reason: str = ""
 
 
 # ---------------------------------------------------------------------------
@@ -180,15 +190,17 @@ def _mean(scores: tuple[float, ...]) -> float:
 
 
 def _candidate_item_id(candidate: LearningCandidate) -> str:
-    """Derive a store id for *candidate*.
+    """Derive a stable, collision-free store id for *candidate*.
 
-    Built from the (opaque) source signal ref so re-running reflection over the
-    same trace produces the same id (idempotent propose).  The ``:v<digits>``
-    suffix is reserved by ``store.edit()`` so we sanitize it out of the slug.
+    The id is a content hash of the (opaque) source signal ref, so re-running
+    reflection over the same trace produces the same id (idempotent propose)
+    while two genuinely-different refs — even ones differing only by a trailing
+    ``:v<n>`` — get distinct ids.  A hex digest can never end in the store's
+    reserved ``:v<digits>`` version suffix, so there is no fragile strip logic
+    and no collision with ``store.edit()``'s version chain.
     """
-    slug = re.sub(r"[^a-zA-Z0-9_.@:-]", "-", candidate.source_signal_ref)
-    slug = re.sub(r":v\d+$", "", slug)
-    return f"learning:{candidate.kind}:{slug}"
+    digest = hashlib.sha1(candidate.source_signal_ref.encode()).hexdigest()[:16]
+    return f"learning:{candidate.kind}:{digest}"
 
 
 def _to_item(candidate: LearningCandidate) -> LearningItem:
@@ -237,10 +249,45 @@ def run_eval_gate(
 
     decisions: list[EvalGateDecision] = []
     for candidate in candidates:
-        item = store.propose(_to_item(candidate))
+        proposed_item = _to_item(candidate)
+
+        # Idempotency guard: store.propose() raises if the item already exists
+        # in a non-``proposed`` status.  On a re-run over overlapping sessions
+        # an already-active/archived candidate must be SKIPPED gracefully —
+        # never re-proposed, never re-activated, and never aborting the batch.
+        existing = store.get(proposed_item.id)
+        if existing is not None and existing.status != "proposed":
+            decisions.append(
+                EvalGateDecision(
+                    itemId=proposed_item.id,
+                    kind=proposed_item.kind,
+                    passed=False,
+                    activated=False,
+                    skipped=True,
+                    reason=(
+                        f"item already exists with status={existing.status!r}; "
+                        "skipped (not re-proposed / not re-activated)"
+                    ),
+                )
+            )
+            continue
+
+        # Re-proposing a still-``proposed`` item is idempotent (ON CONFLICT
+        # upsert in the store), so this is safe.
+        item = store.propose(proposed_item)
 
         before, after = checkset.run(candidate)
-        sample_n = min(len(before), len(after))
+        # Guard: a mismatched evaluator that returns different-length before/after
+        # tuples would make mean(before) - mean(after) compare different sample
+        # populations.  Surface the broken evaluator early rather than silently
+        # averaging over a min-length slice.
+        if len(before) != len(after):
+            raise ValueError(
+                "eval checkset returned mismatched before/after lengths "
+                f"({len(before)} != {len(after)}) for item {item.id!r}; "
+                "the evaluator is producing incomparable samples."
+            )
+        sample_n = len(before)
         regression = _mean(before) - _mean(after)
 
         passed = (

@@ -239,8 +239,9 @@ def test_eval_candidate_registered(tmp_path) -> None:
     item = store.get(decision.item_id)
     store.close()
     assert item is not None
-    # eval cases are the holdout; they are registered (proposed), not activated
-    # as behavior.
+    # eval cases get no special handling: like every candidate they are simply
+    # proposed (never auto-activated as behavior).  "registered" here just means
+    # "written to the store as a proposed item".
     assert item.kind == "eval"
     assert item.status == "proposed"
     assert decision.eval_observation_ref  # observation recorded on every path
@@ -350,3 +351,222 @@ def test_executor_with_store_writes_through_gate(monkeypatch, tmp_path) -> None:
 
 def test_static_checkset_is_a_checkset() -> None:
     assert isinstance(_passing_checkset(), CheckSet)
+
+
+# ---------------------------------------------------------------------------
+# PR4 code-review fixes
+# ---------------------------------------------------------------------------
+
+
+def test_rerun_over_active_example_skips_cleanly(tmp_path) -> None:
+    """CRITICAL #1: re-running the gate over an already-active example must not
+    crash (store.propose would raise on a non-proposed item).  The second run
+    skips the candidate gracefully: item stays ``active``, no exception, the
+    decision is marked skipped/not-activated, and nothing is re-proposed."""
+    candidate = _candidate(kind="example")
+
+    store = _store(tmp_path)
+    first = run_eval_gate(
+        (candidate,), store=store, checkset=_passing_checkset()
+    )
+    store.close()
+    assert first[0].activated is True
+
+    # Second run over the same now-active candidate must not raise.
+    store2 = _store(tmp_path)
+    second = run_eval_gate(
+        (candidate,), store=store2, checkset=_passing_checkset()
+    )
+    decision = second[0]
+    assert decision.skipped is True
+    assert decision.activated is False
+    assert decision.passed is False
+    assert decision.reason
+    # Item is untouched: still active, single version.
+    item = store2.get(decision.item_id)
+    store2.close()
+    assert item is not None
+    assert item.status == "active"
+
+
+def test_one_skipped_candidate_does_not_abort_batch(tmp_path) -> None:
+    """CRITICAL #1: a skipped (already-active) candidate must not abort the
+    rest of the batch — later candidates are still processed."""
+    active_candidate = _candidate(kind="example", rationale="a", sid="s-a")
+    fresh_candidate = _candidate(kind="example", rationale="b", sid="s-b")
+
+    store = _store(tmp_path)
+    run_eval_gate((active_candidate,), store=store, checkset=_passing_checkset())
+    store.close()
+
+    store2 = _store(tmp_path)
+    decisions = run_eval_gate(
+        (active_candidate, fresh_candidate),
+        store=store2,
+        checkset=_passing_checkset(),
+    )
+    store2.close()
+    assert len(decisions) == 2
+    by_id = {d.item_id: d for d in decisions}
+    active_decision = next(d for d in decisions if d.skipped)
+    fresh_decision = next(d for d in decisions if not d.skipped)
+    assert active_decision.activated is False
+    assert fresh_decision.activated is True
+
+
+def test_item_ids_differ_for_refs_differing_only_by_version_suffix(tmp_path) -> None:
+    """CRITICAL #2: two candidates whose source refs differ only by a ``:v1``
+    suffix must get DISTINCT item ids (no collapse / no collision), and neither
+    id may end in the reserved ``:v<n>`` suffix."""
+    c_plain = _candidate(kind="example")
+    c_versioned = c_plain.model_copy(
+        update={"source_signal_ref": c_plain.source_signal_ref + ":v1"}
+    )
+    assert c_plain.source_signal_ref != c_versioned.source_signal_ref
+
+    store = _store(tmp_path)
+    decisions = run_eval_gate(
+        (c_plain, c_versioned), store=store, checkset=_passing_checkset()
+    )
+    store.close()
+    ids = {d.item_id for d in decisions}
+    assert len(ids) == 2  # distinct ids, no collision
+    import re as _re
+
+    assert all(not _re.search(r":v\d+$", i) for i in ids)
+
+
+def test_unequal_length_checkset_raises(tmp_path) -> None:
+    """IMPORTANT #6: a mismatched evaluator (different before/after lengths)
+    must raise ValueError rather than silently averaging over a min slice."""
+
+    class _MismatchedCheckSet(StaticCheckSet):
+        def run(self, candidate):  # type: ignore[override]
+            return (1.0, 1.0, 1.0, 1.0), (1.0, 1.0)
+
+    store = _store(tmp_path)
+    with pytest.raises(ValueError):
+        run_eval_gate(
+            (_candidate(kind="example"),),
+            store=store,
+            checkset=_MismatchedCheckSet(before=(1.0,) * 4, after=(1.0,) * 4),
+        )
+    store.close()
+
+
+def test_empty_checkset_fails_not_activated_observation_recorded(tmp_path) -> None:
+    """MINOR: empty checkset → sample_n=0 → gate fails, not activated, but an
+    eval observation is still recorded."""
+    store = _store(tmp_path)
+    decisions = run_eval_gate(
+        (_candidate(kind="example"),),
+        store=store,
+        checkset=StaticCheckSet(before=(), after=()),
+    )
+    decision = decisions[0]
+    assert decision.sample_n == 0
+    assert decision.passed is False
+    assert decision.activated is False
+    assert decision.eval_observation_ref  # still recorded
+    item = store.get(decision.item_id)
+    store.close()
+    assert item is not None
+    assert item.status == "proposed"
+
+
+def test_custom_regression_band_boundary(tmp_path) -> None:
+    """MINOR: custom maxRegressionBand=0.1 — regression exactly 0.1 passes
+    (``<=``), regression just over 0.1 fails."""
+    config = EvalGateConfig(maxRegressionBand=0.1)
+
+    # before mean 1.0, after mean 0.9 → regression 0.1 (== band) → passes.
+    at_band = StaticCheckSet(
+        before=(1.0, 1.0, 1.0, 1.0), after=(0.9, 0.9, 0.9, 0.9)
+    )
+    store = _store(tmp_path)
+    d_at = run_eval_gate(
+        (_candidate(kind="example", sid="s-at"),),
+        store=store,
+        checkset=at_band,
+        config=config,
+    )[0]
+    store.close()
+    assert d_at.passed is True
+    assert d_at.activated is True
+
+    # before mean 1.0, after mean 0.8 → regression 0.2 (> band) → fails.
+    over_band = StaticCheckSet(
+        before=(1.0, 1.0, 1.0, 1.0), after=(0.8, 0.8, 0.8, 0.8)
+    )
+    store2 = _store(tmp_path)
+    d_over = run_eval_gate(
+        (_candidate(kind="example", sid="s-over"),),
+        store=store2,
+        checkset=over_band,
+        config=config,
+    )[0]
+    store2.close()
+    assert d_over.passed is False
+    assert d_over.activated is False
+
+
+# ---------------------------------------------------------------------------
+# IMPORTANT #3 — gate decisions surfaced on the reflection result
+# ---------------------------------------------------------------------------
+
+
+def _reflecting_traces() -> tuple[SessionTrace, ...]:
+    return (
+        SessionTrace(
+            sessionId="s1",
+            turns=(
+                {"role": "user", "text": "no"},
+                {"role": "assistant", "text": "draft"},
+                {"role": "user", "text": "actually do X instead"},
+                {"role": "assistant", "text": "final"},
+            ),
+            finalOutput="final",
+            draftOutput="draft",
+            ts="2026-06-03T10:00:00Z",
+        ),
+    )
+
+
+def test_result_carries_gate_decisions_when_store_injected(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv(_REFLECTION_ENV_VAR, "1")
+    source = LocalFakeTranscriptSource(traces=_reflecting_traces())
+    store = _store(tmp_path)
+    result = asyncio.run(
+        run_reflection(
+            source=source,
+            config=LearningReflectionConfig(enabled=True),
+            store=store,
+            checkset=_passing_checkset(),
+        )
+    )
+    store.close()
+    assert result.eval_gate_decisions is not None
+    assert all(isinstance(d, EvalGateDecision) for d in result.eval_gate_decisions)
+    activated = sum(1 for d in result.eval_gate_decisions if d.activated)
+    proposed = sum(1 for d in result.eval_gate_decisions if not d.activated)
+    assert result.counters["items_activated"] == activated
+    assert result.counters["items_proposed"] == proposed
+    assert result.counters["items_activated"] + result.counters["items_proposed"] == len(
+        result.eval_gate_decisions
+    )
+
+
+def test_result_store_none_has_no_gate_decisions(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv(_REFLECTION_ENV_VAR, "1")
+    source = LocalFakeTranscriptSource(traces=_reflecting_traces())
+    result = asyncio.run(
+        run_reflection(
+            source=source,
+            config=LearningReflectionConfig(enabled=True),
+            store=None,
+        )
+    )
+    assert result.eval_gate_decisions is None
+    # counters unchanged from PR3 parity — no learning-layer keys added.
+    assert "items_activated" not in result.counters
+    assert "items_proposed" not in result.counters
