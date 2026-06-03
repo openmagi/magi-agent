@@ -41,3 +41,11 @@ def test_basis_is_immutable():
     import pytest
     with pytest.raises(Exception):
         e.basis["perChildTokenEstimate"] = 0  # type: ignore[index]
+
+
+def test_token_arithmetic_relationship():
+    c = _contract()
+    per_child = 8000
+    e = estimate_workflow_cost(c, per_child_token_estimate=per_child, model_microcents_per_1k=120)
+    assert e.estimated_total_tokens == e.estimated_child_agents * per_child
+    assert e.estimated_credits_microcents == (e.estimated_total_tokens // 1000) * 120
