@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import hashlib
-from ipaddress import IPv4Address, ip_address, ip_network
 import re
+from datetime import datetime, timezone
+from ipaddress import IPv4Address, ip_address, ip_network
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 
@@ -80,13 +81,31 @@ _RAW_PRIVATE_LINE_RE = re.compile(
     r"captcha|cookie|authorization",
     re.IGNORECASE,
 )
+_RECENCY_INTENT_RE = re.compile(
+    r"\b(?:latest|recent|today|this\s+year|newest|up\s+to\s+date)\b",
+    re.IGNORECASE,
+)
+_EXISTING_YEAR_RE = re.compile(r"\b(?:19|20)\d{2}\b")
 
 
-def normalize_query(query: str, *, max_chars: int = 512) -> str:
+def normalize_query(
+    query: str,
+    *,
+    max_chars: int = 512,
+    inject_recency_year: bool = False,
+    now: datetime | None = None,
+) -> str:
     normalized = " ".join(query.strip().split())
     if not normalized:
         raise ValueError("query is required")
-    return redact_public_text(normalized)[:max_chars]
+    result = redact_public_text(normalized)[:max_chars]
+    if inject_recency_year:
+        if _RECENCY_INTENT_RE.search(result) and not _EXISTING_YEAR_RE.search(result):
+            effective_now = now if now is not None else datetime.now(timezone.utc)
+            year_suffix = f" {effective_now.year}"
+            if len(result) + len(year_suffix) <= max_chars:
+                result = result + year_suffix
+    return result
 
 
 def url_policy_error(url: str) -> str | None:
