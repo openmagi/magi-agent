@@ -379,7 +379,6 @@ class TestNextRunAtCron:
 
         # now = 2026-06-03 12:00 UTC — next should be 12:15
         now = _utc(2026, 6, 3, 12, 0)
-        now_ms = int(now.timestamp() * 1000)
         spec = parse_schedule("*/15 * * * *")
         result = next_run_at(spec, now=now)
 
@@ -433,6 +432,96 @@ class TestNextRunAtCron:
         result_without = next_run_at(spec, now=now)
 
         assert result_with == result_without
+
+
+# ---------------------------------------------------------------------------
+# TDD: stale last_fire advances to next FUTURE fire (#3)
+# ---------------------------------------------------------------------------
+
+class TestNextRunAtIntervalStaleFix:
+    def test_stale_last_fire_multiple_intervals_behind(self) -> None:
+        """last_fire several intervals behind now → result must be strictly >= now."""
+        from magi_agent.missions.schedule_grammar import next_run_at, parse_schedule
+
+        # last_fire=09:00, now=12:00, interval=30m
+        # naive anchor+1 would give 09:30 (past). Must advance to 12:00 or 12:30.
+        last_fire = _utc(2026, 6, 3, 9, 0)
+        now = _utc(2026, 6, 3, 12, 0)
+        spec = parse_schedule("every 30m")
+        result = next_run_at(spec, now=now, last_fire=last_fire)
+
+        assert result is not None
+        assert result >= now, f"Expected result >= now, got {result} < {now}"
+        # Also must be exactly one interval ahead of some multiple: 12:00 or 12:30
+        assert result == _utc(2026, 6, 3, 12, 0) or result == _utc(2026, 6, 3, 12, 30)
+
+    def test_stale_last_fire_exactly_one_interval_ago(self) -> None:
+        """last_fire exactly one interval ago → next fire is now (or next slot)."""
+        from magi_agent.missions.schedule_grammar import next_run_at, parse_schedule
+
+        # last_fire=11:30, now=12:00, interval=30m → next = 12:00
+        last_fire = _utc(2026, 6, 3, 11, 30)
+        now = _utc(2026, 6, 3, 12, 0)
+        spec = parse_schedule("every 30m")
+        result = next_run_at(spec, now=now, last_fire=last_fire)
+
+        assert result is not None
+        # 11:30 + 30m = 12:00 which equals now exactly — should return now (not past)
+        assert result >= now
+
+
+# ---------------------------------------------------------------------------
+# TDD: zero/negative duration rejected (#7)
+# ---------------------------------------------------------------------------
+
+class TestParseDurationZeroRejected:
+    def test_zero_minutes_raises(self) -> None:
+        from magi_agent.missions.schedule_grammar import parse_schedule
+
+        with pytest.raises(ValueError, match=r"non-positive|zero|must be > 0|positive"):
+            parse_schedule("0m")
+
+    def test_zero_seconds_raises(self) -> None:
+        from magi_agent.missions.schedule_grammar import parse_schedule
+
+        with pytest.raises(ValueError, match=r"non-positive|zero|must be > 0|positive"):
+            parse_schedule("0s")
+
+    def test_zero_hours_raises(self) -> None:
+        from magi_agent.missions.schedule_grammar import parse_schedule
+
+        with pytest.raises(ValueError, match=r"non-positive|zero|must be > 0|positive"):
+            parse_schedule("0h")
+
+    def test_zero_days_raises(self) -> None:
+        from magi_agent.missions.schedule_grammar import parse_schedule
+
+        with pytest.raises(ValueError, match=r"non-positive|zero|must be > 0|positive"):
+            parse_schedule("0d")
+
+    def test_zero_interval_raises(self) -> None:
+        from magi_agent.missions.schedule_grammar import parse_schedule
+
+        with pytest.raises(ValueError):
+            parse_schedule("every 0m")
+
+
+# ---------------------------------------------------------------------------
+# TDD: every5m (no space) raises ValueError (#2)
+# ---------------------------------------------------------------------------
+
+class TestEveryNoSpaceRejected:
+    def test_every5m_no_space_raises(self) -> None:
+        from magi_agent.missions.schedule_grammar import parse_schedule
+
+        with pytest.raises(ValueError):
+            parse_schedule("every5m")
+
+    def test_everything_raises(self) -> None:
+        from magi_agent.missions.schedule_grammar import parse_schedule
+
+        with pytest.raises(ValueError):
+            parse_schedule("everything")
 
 
 # ---------------------------------------------------------------------------

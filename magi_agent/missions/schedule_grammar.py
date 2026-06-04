@@ -12,6 +12,7 @@ from __future__ import annotations
 import re
 from datetime import UTC, datetime, timedelta
 from typing import Literal
+from zoneinfo import ZoneInfoNotFoundError
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -48,6 +49,10 @@ def _parse_duration(raw: str) -> timedelta:
         )
     value = int(m.group(1))
     unit = m.group(2)
+    if value <= 0:
+        raise ValueError(
+            f"invalid duration '{raw}': value must be > 0 (non-positive durations are not allowed)"
+        )
     return timedelta(seconds=value * _UNIT_SECONDS[unit])
 
 
@@ -82,7 +87,7 @@ class ScheduleSpec(BaseModel):
     model_config = _MODEL_CONFIG
 
     kind: ScheduleKind
-    expression: str = Field(alias="expression")
+    expression: str = Field()
     # For 'once' with ISO timestamp: the absolute fire time (UTC).
     fire_at: datetime | None = Field(default=None, alias="fireAt")
     # For 'once' with relative duration, or 'interval': timedelta in seconds.
@@ -110,9 +115,9 @@ def parse_schedule(expr: str) -> ScheduleSpec:
     if not raw:
         raise ValueError("schedule expression must not be empty")
 
-    # --- interval: starts with "every " ---
-    if raw.lower().startswith("every"):
-        rest = raw[len("every"):].strip()
+    # --- interval: starts with "every " (space required) ---
+    if raw.lower().startswith("every "):
+        rest = raw[len("every "):].strip()
         if not rest:
             raise ValueError(
                 f"invalid interval schedule '{expr}': missing duration after 'every'"
@@ -234,7 +239,8 @@ def _next_run_once(spec: ScheduleSpec, *, now: datetime) -> datetime | None:
         return fire_utc
 
     # Relative duration: always in the future relative to now.
-    assert spec.interval_seconds is not None
+    if spec.interval_seconds is None:
+        raise ValueError("ScheduleSpec of kind 'once' with relative duration must have interval_seconds set")
     return now.astimezone(UTC) + timedelta(seconds=spec.interval_seconds)
 
 
@@ -244,11 +250,23 @@ def _next_run_interval(
     now: datetime,
     last_fire: datetime | None,
 ) -> datetime | None:
-    """'interval' kind: last_fire + interval, or now + interval if never fired."""
-    assert spec.interval_seconds is not None
+    """'interval' kind: next fire strictly >= now, advancing whole intervals from anchor."""
+    if spec.interval_seconds is None:
+        raise ValueError("ScheduleSpec of kind 'interval' must have interval_seconds set")
     td = timedelta(seconds=spec.interval_seconds)
-    anchor = last_fire.astimezone(UTC) if last_fire is not None else now.astimezone(UTC)
-    return anchor + td
+    now_utc = now.astimezone(UTC)
+    if last_fire is None:
+        return now_utc + td
+    anchor = last_fire.astimezone(UTC)
+    candidate = anchor + td
+    # Advance by whole intervals until candidate is strictly >= now.
+    if candidate < now_utc:
+        elapsed = (now_utc - anchor).total_seconds()
+        intervals_needed = int(elapsed / spec.interval_seconds)
+        candidate = anchor + td * intervals_needed
+        if candidate < now_utc:
+            candidate += td
+    return candidate
 
 
 def _next_run_cron(
@@ -258,14 +276,13 @@ def _next_run_cron(
     timezone: str,
 ) -> datetime | None:
     """'cron' kind: delegate to the existing _next_fire_after parser."""
-    now_ms = int(now.astimezone(UTC).timestamp() * 1000)
     try:
         next_ms = _next_fire_after(
             expression=spec.expression,
             timezone=timezone,
-            now=now_ms,
+            now=int(now.astimezone(UTC).timestamp() * 1000),
         )
-    except (ValueError, Exception):
+    except (ValueError, ZoneInfoNotFoundError):
         return None
     return datetime.fromtimestamp(next_ms / 1000, tz=UTC)
 
