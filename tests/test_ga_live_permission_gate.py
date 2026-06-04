@@ -425,3 +425,55 @@ def test_no_execution_contract_dispatch_byte_identical_to_baseline(
         _registry_with_handler("Bash"), "Bash", dict(args), _no_contract_context()
     )
     assert _normalize(live.model_dump()) == _normalize(baseline.model_dump())
+
+
+# ---------------------------------------------------------------------------
+# 7. Flag-ON + general + path classifier "blocked" (/proc/cpuinfo) → deny, no receipt
+# ---------------------------------------------------------------------------
+
+
+def test_path_blocked_yields_deny_no_receipt(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Flag-ON + general + path that is neither workspace-local nor external mount.
+
+    ``/proc/cpuinfo`` is not under the workspace root and is not an external
+    directory mount, so the path classifier returns ``blocked``.  The gate must
+    produce decision=``deny`` with NO receipt (the blocked branch carries no
+    ``ExternalDirectoryApprovalReceipt`` or ``ShellPolicyReceipt``, unlike the
+    shell-deny and external-dir-ask paths).
+    """
+    monkeypatch.setenv("MAGI_GA_LIVE_ENABLED", "1")
+    gate = GeneralAutomationLiveGate()
+    outcome = gate.classify_pre(
+        "FileRead",
+        {"path": "/proc/cpuinfo", "operationClass": "read"},
+        _general_context(),
+        mode="act",
+    )
+
+    assert outcome.active is True
+    assert outcome.decision == "deny"
+    assert outcome.receipt is None  # blocked path carries no receipt
+    assert isinstance(outcome.permission_boundary, HookPermissionBoundary)
+    assert outcome.permission_boundary.decision == "deny"
+    assert outcome.control_projection is None
+
+
+def test_path_blocked_yields_blocked_status_via_dispatcher(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Flag-ON + general + blocked path: dispatcher surfaces status=``blocked``."""
+    monkeypatch.setenv("MAGI_GA_LIVE_ENABLED", "1")
+    registry = _registry_with_handler("FileRead", permission="read")
+    dispatcher = ToolDispatcher(registry)
+    result = asyncio.run(
+        dispatcher.dispatch(
+            "FileRead",
+            {"path": "/proc/cpuinfo", "operationClass": "read"},
+            _general_context(),
+            mode="act",
+        )
+    )
+    assert result.status == "blocked"
+    assert result.output != {"ran": "FileRead"}  # handler must NOT have run

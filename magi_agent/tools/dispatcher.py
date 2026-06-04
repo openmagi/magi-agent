@@ -13,7 +13,7 @@ from magi_agent.harness.general_automation.live_gate import (
 from magi_agent.telemetry.trace_context import get_trace
 
 from .context import ToolContext
-from .manifest import RuntimeMode
+from .manifest import RuntimeMode, ToolManifest
 from .permission import ToolPermissionPolicy
 from .registry import ToolRegistry
 from .result import ToolResult
@@ -203,7 +203,7 @@ class ToolDispatcher:
 
 
 def _general_automation_gate_result(
-    manifest: object,
+    manifest: ToolManifest,
     mode: RuntimeMode,
     outcome: GeneralAutomationGateOutcome,
 ) -> ToolResult:
@@ -215,10 +215,12 @@ def _general_automation_gate_result(
     downstream consumers can record the evidence. The classifiers are never
     bypassed — this only *projects* their decision onto the existing control flow.
     """
-    tool_name = getattr(manifest, "name", "unknown")
     metadata: dict[str, object] = {
-        "toolName": tool_name,
+        "toolName": manifest.name,
+        "permissionClass": manifest.permission,
         "mode": mode,
+        "dangerous": manifest.dangerous,
+        "mutatesWorkspace": manifest.mutates_workspace,
         "reason": outcome.reason or f"general_automation_{outcome.decision}",
         "generalAutomationLiveGate": True,
     }

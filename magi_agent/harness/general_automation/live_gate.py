@@ -122,6 +122,7 @@ class GeneralAutomationLiveGate:
         mode: str,
     ) -> GeneralAutomationGateOutcome:
         """Classify a pending tool call. Pure bypass when the gate is inactive."""
+        # tool_name/mode reserved for per-tool or plan-mode policy in a later PR
         _ = tool_name, mode
         if not self.is_active(context):
             return _BYPASS_OUTCOME
@@ -188,7 +189,7 @@ class GeneralAutomationLiveGate:
                 receipt=receipt,
                 permission_boundary=HookPermissionBoundary(
                     source_hook=_SOURCE_HOOK,
-                    decision="deny",
+                    decision="deny",  # HookPermissionBoundary uses approve/deny/ask (not the gate's allow/ask/deny)
                     reason="general_automation_shell_policy_denied",
                 ),
                 reason="general_automation_shell_policy_denied",
@@ -211,7 +212,7 @@ class GeneralAutomationLiveGate:
                 receipt=receipt,
                 permission_boundary=HookPermissionBoundary(
                     source_hook=_SOURCE_HOOK,
-                    decision="ask",
+                    decision="ask",  # HookPermissionBoundary uses approve/deny/ask (not the gate's allow/ask/deny)
                     requires_control_request=True,
                     reason="general_automation_shell_policy_approval_required",
                 ),
@@ -255,7 +256,7 @@ class GeneralAutomationLiveGate:
                 receipt=receipt,
                 permission_boundary=HookPermissionBoundary(
                     source_hook=_SOURCE_HOOK,
-                    decision="ask",
+                    decision="ask",  # HookPermissionBoundary uses approve/deny/ask (not the gate's allow/ask/deny)
                     requires_control_request=True,
                     reason="general_automation_external_directory_approval_required",
                 ),
@@ -269,7 +270,7 @@ class GeneralAutomationLiveGate:
             decision="deny",
             permission_boundary=HookPermissionBoundary(
                 source_hook=_SOURCE_HOOK,
-                decision="deny",
+                decision="deny",  # HookPermissionBoundary uses approve/deny/ask (not the gate's allow/ask/deny)
                 reason="general_automation_path_blocked",
             ),
             reason="general_automation_path_blocked",
