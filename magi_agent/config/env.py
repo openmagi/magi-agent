@@ -1268,6 +1268,18 @@ def ripgrep_enabled(env: Mapping[str, str] | None = None) -> bool:
     return _is_true(source.get(_RIPGREP_ENABLED_ENV))
 
 
+def apply_patch_enabled(env: Mapping[str, str]) -> bool:
+    """Single source of truth for the ``MAGI_APPLY_PATCH_ENABLED`` flag.
+
+    Default OFF. When ON, gate5b ``PatchApply`` accepts Codex-style envelope
+    patches (add/update/delete/move) via the 4-pass matcher in
+    ``magi_agent.coding.patch_apply`` and GPT-5-class models are offered
+    apply_patch in place of edit/write.
+    """
+
+    return _is_true(env.get("MAGI_APPLY_PATCH_ENABLED"))
+
+
 def _is_true(value: str | None) -> bool:
     return (value or "").strip().lower() in _TRUE_VALUES
 

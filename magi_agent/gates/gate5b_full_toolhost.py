@@ -280,6 +280,8 @@ class Gate5BFullToolHostConfig(_Gate5BFullModel):
     read_quality_enabled: bool = Field(default=False, alias="readQualityEnabled")
     read_max_lines: int = Field(default=2000, ge=1, le=100000, alias="readMaxLines")
     ripgrep_enabled: bool = Field(default=False, alias="ripgrepEnabled")
+    apply_patch_enabled: bool = Field(default=False, alias="applyPatchEnabled")
+    apply_patch_model_id: str = Field(default="", alias="applyPatchModelId")
 
     @field_validator("environment_allowlist", "allowed_tool_names", mode="before")
     @classmethod
@@ -801,13 +803,13 @@ class Gate5BFullToolHost:
                     edit_result["contentDigest"] = content_digest
             return edit_result
         if tool_name == "PatchApply":
-            target = _safe_child_path(
-                self.workspace_root,
-                str(args.get("path", "")),
-                allow_missing=True,
-            )
-            self._enforce_read_before_mutation(target)
             if "content" in args:
+                target = _safe_child_path(
+                    self.workspace_root,
+                    str(args.get("path", "")),
+                    allow_missing=True,
+                )
+                self._enforce_read_before_mutation(target)
                 content = str(args.get("content", ""))
                 target.parent.mkdir(parents=True, exist_ok=True)
                 target.write_text(content, encoding="utf-8")
@@ -822,6 +824,11 @@ class Gate5BFullToolHost:
                     if content_digest is not None:
                         patch_result["contentDigest"] = content_digest
                 return patch_result
+            patch_text = args.get("patch")
+            if isinstance(patch_text, str) and patch_text.strip():
+                if not self.config.apply_patch_enabled:
+                    raise ValueError("unsupported_patch_shape")
+                return self._apply_envelope_patch(patch_text)
             raise ValueError("unsupported_patch_shape")
         if tool_name == "Bash":
             command = str(args.get("command", "")).strip()
@@ -1025,6 +1032,58 @@ class Gate5BFullToolHost:
             return
         primary = decision.reason_codes[0] if decision.reason_codes else "blocked"
         raise Gate5BFullToolReadLedgerError(f"read_ledger_{primary}")
+
+    def _apply_envelope_patch(self, patch_text: str) -> object:
+        from magi_agent.coding.patch_apply import (
+            PatchApplyError,
+            PatchParseError,
+            apply_patch,
+            parse_patch_envelope,
+        )
+
+        try:
+            files = parse_patch_envelope(patch_text)
+        except PatchParseError as exc:
+            raise ValueError(f"patch_parse_error:{exc.args[0]}") from exc
+
+        # Preflight every source and move target before any IO so the patch is
+        # atomic with respect to workspace path policy.
+        for file_op in files:
+            _safe_child_path(
+                self.workspace_root,
+                file_op.path,
+                allow_missing=file_op.kind == "add",
+            )
+            if file_op.move_to:
+                _safe_child_path(
+                    self.workspace_root,
+                    file_op.move_to,
+                    allow_missing=True,
+                )
+
+        filesystem = _WorkspaceFilesystem(self.workspace_root)
+        try:
+            changes = apply_patch(patch_text, filesystem)
+        except PatchParseError as exc:
+            raise ValueError(f"patch_parse_error:{exc.args[0]}") from exc
+        except PatchApplyError as exc:
+            detail = exc.reason if exc.path is None else f"{exc.path}:{exc.reason}"
+            raise ValueError(f"patch_apply_error:{detail}") from exc
+
+        return {
+            "patchMode": "envelope",
+            "fileCount": len(changes),
+            "files": [
+                {
+                    "op": change.kind,
+                    "pathDigest": _digest(change.path),
+                    "moveToDigest": (
+                        _digest(change.move_to) if change.move_to else None
+                    ),
+                }
+                for change in changes
+            ],
+        }
 
     def _format_after_write(self, target: Path) -> None:
         """Run the matching formatter on a just-written file (flag-gated, fail-open).
@@ -1265,6 +1324,36 @@ def _diagnostics_checker_label(path: Path) -> str:
     return "lsp"
 
 
+class _WorkspaceFilesystem:
+    """Path-policy-enforcing Filesystem adapter for envelope patch application.
+
+    Every read/write/delete/exists re-runs ``_safe_child_path`` so that no
+    operation can escape the workspace or touch a sealed/secret path, even if
+    the parser were ever tricked into emitting an unsafe relative path.
+    """
+
+    def __init__(self, workspace_root: Path) -> None:
+        self._root = workspace_root
+
+    def read(self, relative_path: str) -> str:
+        target = _safe_child_path(self._root, relative_path)
+        return target.read_text(encoding="utf-8")
+
+    def exists(self, relative_path: str) -> bool:
+        target = _safe_child_path(self._root, relative_path, allow_missing=True)
+        return target.is_file()
+
+    def write(self, relative_path: str, content: str) -> None:
+        target = _safe_child_path(self._root, relative_path, allow_missing=True)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(content, encoding="utf-8")
+
+    def delete(self, relative_path: str) -> None:
+        target = _safe_child_path(self._root, relative_path, allow_missing=True)
+        if target.is_file():
+            target.unlink()
+
+
 def build_gate5b_full_toolhost_bundle(
     *,
     config: Gate5BFullToolHostConfig | Mapping[str, object] | None = None,
@@ -1279,7 +1368,10 @@ def build_gate5b_full_toolhost_bundle(
     workspace = Path(workspace_root)
     selected_scope_error = _selected_scope_error(safe_config, scope or {}, workspace)
     exposed = (
-        _selected_tool_names(safe_config.allowed_tool_names)
+        _apply_patch_tool_swap(
+            _selected_tool_names(safe_config.allowed_tool_names),
+            safe_config,
+        )
         if selected_scope_error is None
         else ()
     )
@@ -1433,6 +1525,54 @@ def _permission_reason_code(metadata: Mapping[str, object]) -> str:
     if isinstance(reason, str) and reason.strip():
         return _safe_reason_label(reason)
     return "tool_permission_blocked"
+
+
+_GPT5_CLASS_RE = re.compile(r"(?:^|[/:-])gpt-?5", re.IGNORECASE)
+_NON_GPT5_RE = re.compile(r"gpt-?4|gpt-?3|oss", re.IGNORECASE)
+_EDIT_WRITE_TOOLS = frozenset({"FileWrite", "FileEdit"})
+
+
+def _is_gpt5_class_model(model_id: str) -> bool:
+    """Detect GPT-5-class model ids (``gpt-5``, ``gpt5.5``, ``openai:gpt-5``).
+
+    GPT-4/GPT-3/oss labels are explicitly excluded. This mirrors the existing
+    tier registry where ``openai/gpt-5.5`` is the ``sota`` coding tier, but is
+    kept as a thin string check so the gate5b toolhost (which only receives a
+    model id string) does not need to construct a ModelTierRegistry per turn.
+    """
+
+    text = (model_id or "").strip()
+    if not text or _NON_GPT5_RE.search(text):
+        return False
+    return bool(_GPT5_CLASS_RE.search(text))
+
+
+def _apply_patch_tool_swap(
+    names: tuple[str, ...],
+    config: Gate5BFullToolHostConfig,
+) -> tuple[str, ...]:
+    """Offer apply_patch to GPT-5-class models, de-emphasizing edit/write.
+
+    When apply_patch is enabled AND the selected model is GPT-5-class, the
+    Codex-style ``PatchApply`` envelope tool is the primary mutation surface so
+    ``FileWrite``/``FileEdit`` are excluded from the exposed set. All other
+    models keep edit/write (and PatchApply only does whole-file content
+    replace, matching prior behavior). When the flag is OFF, exposure is
+    unchanged (zero regression).
+    """
+
+    if not config.apply_patch_enabled:
+        return names
+    if not _is_gpt5_class_model(config.apply_patch_model_id):
+        return names
+    swapped = tuple(name for name in names if name not in _EDIT_WRITE_TOOLS)
+    if "PatchApply" not in swapped and "PatchApply" in GATE5B_FULL_TOOLHOST_TOOL_NAMES:
+        swapped = (*swapped, "PatchApply")
+        # Preserve canonical ordering.
+        swapped = tuple(
+            name for name in GATE5B_FULL_TOOLHOST_TOOL_NAMES if name in set(swapped)
+        )
+    return swapped
 
 
 def _build_adk_tool(host: Gate5BFullToolHost, name: str) -> FunctionTool:
