@@ -435,3 +435,142 @@ def test_crlf_file_current_behavior_documented():
     # The matched/replaced line is emitted WITHOUT "\r" (patch-supplied),
     # while untouched alpha/gamma keep their original "\r" -> mixed endings.
     assert result == "alpha\r\nBETA\ngamma\r\n"
+
+
+# ---------------------------------------------------------------------------
+# Intra-patch virtual content: move-then-update-dest (MEDIUM fix)
+# ---------------------------------------------------------------------------
+
+
+def test_move_then_update_dest_uses_moved_content():
+    # Move a.py -> b.py (editing content in the move hunk), then Update b.py
+    # (editing the moved content further).  The update must see the content
+    # produced by the move, NOT the stale on-disk b.py (which doesn't exist).
+    fs = FakeFs({"a.py": "alpha\nbeta\ngamma\n"})
+    patch = (
+        "*** Begin Patch\n"
+        "*** Update File: a.py\n"
+        "*** Move to: b.py\n"
+        "@@\n"
+        "-alpha\n"
+        "+ALPHA\n"
+        " beta\n"
+        " gamma\n"
+        "*** Update File: b.py\n"
+        "@@\n"
+        " ALPHA\n"
+        "-beta\n"
+        "+BETA\n"
+        " gamma\n"
+        "*** End Patch\n"
+    )
+    changes = apply_patch(patch, fs)
+    assert "a.py" not in fs.files
+    # After move: b.py = "ALPHA\nbeta\ngamma\n"
+    # After update b.py: b.py = "ALPHA\nBETA\ngamma\n"
+    assert fs.files["b.py"] == "ALPHA\nBETA\ngamma\n"
+    assert [c.kind for c in changes] == ["move", "update"]
+
+
+def test_update_then_update_same_path_uses_first_update_content():
+    # Two consecutive updates to the same path: the second must see the content
+    # produced by the first (via virtual_content), not the stale on-disk file.
+    # (Parser rejects duplicate source paths, so use plan_patch directly.)
+    from magi_agent.coding.patch_apply import PatchFile, PatchHunk, PatchHunkLine
+
+    fs = FakeFs({"x.py": "line1\nline2\n"})
+    hunk1 = PatchHunk(
+        context_header="",
+        lines=(
+            PatchHunkLine(kind="remove", text="line1"),
+            PatchHunkLine(kind="add", text="LINE1"),
+            PatchHunkLine(kind="context", text="line2"),
+        ),
+    )
+    hunk2 = PatchHunk(
+        context_header="",
+        lines=(
+            PatchHunkLine(kind="context", text="LINE1"),
+            PatchHunkLine(kind="remove", text="line2"),
+            PatchHunkLine(kind="add", text="LINE2"),
+        ),
+    )
+    ops = (
+        PatchFile(kind="update", path="x.py", hunks=(hunk1,)),
+        PatchFile(kind="update", path="x.py", hunks=(hunk2,)),
+    )
+    changes = plan_patch(ops, fs)
+    assert changes[0].new_content == "LINE1\nline2\n"
+    assert changes[1].new_content == "LINE1\nLINE2\n"
+
+
+# ---------------------------------------------------------------------------
+# Leading-insertion double-prepend prevention (LOW 1)
+# ---------------------------------------------------------------------------
+
+
+def test_double_leading_insertion_rejected():
+    # Two consecutive pure-insertion hunks at cursor 0 (no context/EOF anchor).
+    # The first is accepted; the second must be rejected as
+    # ``insertion_without_context`` rather than silently prepending again.
+    original = "body\n"
+    hunks = parse_patch_envelope(
+        "*** Begin Patch\n"
+        "*** Update File: a\n"
+        "@@\n"
+        "+first_prepend\n"
+        "@@\n"
+        "+second_prepend\n"
+        "*** End Patch\n"
+    )[0].hunks
+    with pytest.raises(PatchApplyError) as exc:
+        derive_new_contents(original, hunks)
+    assert exc.value.reason == "insertion_without_context"
+
+
+def test_leading_insertion_then_context_hunk_still_works():
+    # A leading insertion followed by a normal context-anchored hunk must still
+    # work: the flag must not prevent the context hunk from matching.
+    original = "alpha\nbeta\n"
+    hunks = parse_patch_envelope(
+        "*** Begin Patch\n"
+        "*** Update File: a\n"
+        "@@\n"
+        "+header\n"
+        "@@\n"
+        " alpha\n"
+        "-beta\n"
+        "+BETA\n"
+        "*** End Patch\n"
+    )[0].hunks
+    result = derive_new_contents(original, hunks)
+    assert result == "header\nalpha\nBETA\n"
+
+
+# ---------------------------------------------------------------------------
+# plan_patch unit-level reason assertions (LOW 2)
+# ---------------------------------------------------------------------------
+
+
+def test_update_missing_raises_update_target_missing():
+    # Verify that plan_patch raises the precise reason code, not a generic one.
+    fs = FakeFs({})
+    files = parse_patch_envelope(
+        "*** Begin Patch\n*** Update File: missing.py\n@@\n-x\n+y\n*** End Patch\n"
+    )
+    with pytest.raises(PatchApplyError) as exc:
+        plan_patch(files, fs)
+    assert exc.value.reason == "update_target_missing"
+    assert exc.value.path == "missing.py"
+
+
+def test_delete_missing_raises_delete_target_missing():
+    # Verify that plan_patch raises the precise reason code, not a generic one.
+    fs = FakeFs({})
+    files = parse_patch_envelope(
+        "*** Begin Patch\n*** Delete File: missing.py\n*** End Patch\n"
+    )
+    with pytest.raises(PatchApplyError) as exc:
+        plan_patch(files, fs)
+    assert exc.value.reason == "delete_target_missing"
+    assert exc.value.path == "missing.py"

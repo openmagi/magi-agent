@@ -375,6 +375,7 @@ def derive_new_contents(file_text: str, hunks: Sequence[PatchHunk]) -> str:
 
     result: list[str] = []
     cursor = 0
+    _leading_inserted = False
     for hunk in hunks:
         # The "old" view of the hunk = context + remove lines, in order.
         old_lines = [
@@ -398,9 +399,13 @@ def derive_new_contents(file_text: str, hunks: Sequence[PatchHunk]) -> str:
                 cursor = len(file_lines)
                 result.extend(new_lines)
                 continue
-            if cursor == 0:
+            if cursor == 0 and not _leading_inserted:
                 # Leading insertion: unambiguous, prepend at the file head.
+                # Set the flag so a second bare-insertion hunk at the same
+                # position is rejected as ``insertion_without_context`` rather
+                # than silently prepending again at an ambiguous location.
                 result.extend(new_lines)
+                _leading_inserted = True
                 continue
             raise PatchApplyError("insertion_without_context")
 
@@ -451,6 +456,13 @@ def plan_patch(
     # against a live FS where ``b`` is absent and one silently clobbering the
     # other at apply time.
     virtual_exists: dict[str, bool] = {}
+    # Virtual-content model: tracks the new content for paths that were
+    # produced (created, updated, or moved-to) by earlier ops in this same
+    # patch.  When a later op reads a path whose content was changed by an
+    # earlier op, ``read_virtual`` returns the already-computed new content
+    # instead of the stale on-disk version — making intra-patch sequences
+    # such as ``Move a→b`` + ``Update b`` coherent without any extra IO.
+    virtual_content: dict[str, str] = {}
 
     def exists_virtual(path: str) -> bool:
         if path in virtual_exists:
@@ -458,10 +470,12 @@ def plan_patch(
         return filesystem.exists(path)
 
     def read_virtual(path: str) -> str:
-        # Virtual contents only matter when a later op reads a path an earlier
-        # op in THIS patch produced. The parser already rejects duplicate source
-        # paths, so for the supported op set a path is read at most once from
-        # the live FS; fall back to live read.
+        # If an earlier op in this patch produced new content for the path,
+        # return it so that intra-patch dependencies (e.g. ``Move a→b`` then
+        # ``Update b``) use the correct intermediate content rather than the
+        # potentially stale or absent on-disk file.
+        if path in virtual_content:
+            return virtual_content[path]
         return filesystem.read(path)
 
     for file_op in files:
@@ -475,6 +489,7 @@ def plan_patch(
                 FileChange(kind="add", path=file_op.path, new_content=content)
             )
             virtual_exists[file_op.path] = True
+            virtual_content[file_op.path] = content
         elif file_op.kind == "delete":
             if not exists_virtual(file_op.path):
                 raise PatchApplyError("delete_target_missing", path=file_op.path)
@@ -482,6 +497,7 @@ def plan_patch(
                 FileChange(kind="delete", path=file_op.path, removed_path=file_op.path)
             )
             virtual_exists[file_op.path] = False
+            virtual_content.pop(file_op.path, None)
         elif file_op.kind in {"update", "move"}:
             if not exists_virtual(file_op.path):
                 raise PatchApplyError("update_target_missing", path=file_op.path)
@@ -507,7 +523,9 @@ def plan_patch(
                 )
                 if destination != file_op.path:
                     virtual_exists[file_op.path] = False
+                    virtual_content.pop(file_op.path, None)
                 virtual_exists[destination] = True
+                virtual_content[destination] = new_content
             else:
                 changes.append(
                     FileChange(
@@ -515,6 +533,7 @@ def plan_patch(
                     )
                 )
                 virtual_exists[file_op.path] = True
+                virtual_content[file_op.path] = new_content
         else:  # pragma: no cover - exhaustive guard
             raise PatchApplyError("unsupported_op", path=file_op.path)
     return changes

@@ -215,6 +215,15 @@ def test_gpt50_is_not_gpt5_class(tmp_path):
     assert "FileEdit" in exposed
 
 
+def test_gpt512_is_not_gpt5_class(tmp_path):
+    # "gpt-512" must NOT match the gpt-5 family (3-digit lookahead boundary).
+    # If mis-classified, FileWrite/FileEdit would be incorrectly swapped out.
+    bundle = _bundle(tmp_path, apply_patch_enabled=True, model_id="openai:gpt-512")
+    exposed = set(bundle.exposed_tool_names)
+    assert "FileWrite" in exposed
+    assert "FileEdit" in exposed
+
+
 @pytest.mark.asyncio
 async def test_update_missing_surfaces_update_target_missing(tmp_path):
     # Updating a MISSING (but path-safe) file must surface plan_patch's precise
