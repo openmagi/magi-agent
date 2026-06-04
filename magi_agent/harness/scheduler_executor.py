@@ -18,6 +18,8 @@ fire (never double-fires).
 Forbidden imports: urllib, socket, subprocess, http, requests — none of these
 appear in this module or its local import graph.
 """
+# NOTE: _ONCE_EXHAUSTED_NEXT_RUN is a module-level sentinel placed near the top
+# so it is defined before any function that references it.
 from __future__ import annotations
 
 import hashlib
@@ -49,6 +51,13 @@ _MODEL_CONFIG = ConfigDict(
 )
 
 _LOCK_FILENAME = ".tick.lock"
+
+# Sentinel next_run value used for 'once' jobs after they have fired.
+# Placing the datetime in the far future (year 9999) means the job will never
+# be returned by due_jobs() for any realistic 'now', effectively exhausting it
+# without requiring a delete.  UTC-aware so comparisons with tz-aware datetimes
+# never raise a TypeError.
+_ONCE_EXHAUSTED_NEXT_RUN: datetime = datetime(9999, 12, 31, tzinfo=UTC)
 
 # Default lock dir under ~/.magi/scheduler/
 def _default_lock_dir() -> Path:
@@ -210,7 +219,11 @@ class ScheduledJobSource(Protocol):
     """
 
     def due_jobs(self, now: datetime) -> Sequence[ScheduledJobRecord]:
-        """Return all jobs whose next_run <= now."""
+        """Return all jobs whose next_run <= now (contract: only due jobs returned)."""
+        ...
+
+    def list_all(self) -> Sequence[ScheduledJobRecord]:
+        """Return every known job regardless of next_run (for skipped_job_ids accounting)."""
         ...
 
     def record_advance(self, job_id: str, next_run: datetime) -> None:
@@ -231,6 +244,9 @@ class InMemoryJobSource:
 
     def due_jobs(self, now: datetime) -> list[ScheduledJobRecord]:
         return [r for r in self._records.values() if r.next_run <= now]
+
+    def list_all(self) -> list[ScheduledJobRecord]:
+        return list(self._records.values())
 
     def record_advance(self, job_id: str, next_run: datetime) -> None:
         existing = self._records.get(job_id)
@@ -321,8 +337,8 @@ def tick(
     source: ScheduledJobSource,
     lease: SchedulerLease | None,
     lock_dir: Path | None = None,
-    owner_digest: str = "owner:test-abc",
-    on_receipt: Callable[[str, dict[str, object]], None] | None = None,
+    owner_digest: str,
+    _on_receipt: Callable[[str, dict[str, object]], None] | None = None,
 ) -> SchedulerTickResult:
     """Execute one scheduler tick with at-most-once semantics.
 
@@ -336,9 +352,15 @@ def tick(
 
     No agents are spawned.  All authority flags are False.
 
-    ``on_receipt`` is an optional test-seam callback invoked immediately after each
+    Partial-failure note: if ``source.record_advance`` raises mid-batch, all jobs
+    processed before the failure have already been advanced (their next_run updated)
+    while jobs later in the batch have not.  The exception propagates and the file
+    lock is still released normally.  At-most-once is guaranteed per individual job,
+    not across the whole batch atomically.
+
+    ``_on_receipt`` is an internal test-seam callback invoked immediately after each
     local_fake receipt is built (after record_advance, before the result is returned).
-    It receives ``(job_id, receipt_dict)`` and is ignored in production (defaults None).
+    It receives ``(job_id, receipt_dict)`` and is not part of the public API.
     """
     try:
         with acquire_tick_lock(lock_dir=lock_dir):
@@ -347,7 +369,7 @@ def tick(
                 source=source,
                 lease=lease,
                 owner_digest=owner_digest,
-                on_receipt=on_receipt,
+                _on_receipt=_on_receipt,
             )
     except _LockHeld:
         evidence = _build_evidence_digest(
@@ -373,7 +395,7 @@ def _tick_inside_lock(
     source: ScheduledJobSource,
     lease: SchedulerLease | None,
     owner_digest: str,
-    on_receipt: Callable[[str, dict[str, object]], None] | None = None,
+    _on_receipt: Callable[[str, dict[str, object]], None] | None = None,
 ) -> SchedulerTickResult:
     """Core tick logic, called while the file lock is held."""
     now_ms = int(now.astimezone(UTC).timestamp() * 1000)
@@ -398,23 +420,15 @@ def _tick_inside_lock(
             authorityFlags=SchedulerExecutorAuthorityFlags(),
         )
 
-    # Find all jobs
-    all_jobs = list(source.due_jobs(now))
-    due = [j for j in all_jobs if j.next_run <= now]
+    # due_jobs() contract: returns only jobs with next_run <= now (no re-filter needed)
+    due = list(source.due_jobs(now))
 
-    # Also find all jobs that are NOT due (to populate skipped_job_ids)
-    # Re-query: get the full job list by calling due_jobs with far-future now
-    # We track skipped as those NOT in the due set from source
-    # Build a comprehensive list: any job that source knows about that's not due
-    # We only know about jobs from due_jobs; skipped = jobs returned by a "list-all"
-    # call. Since the Protocol only exposes due_jobs, we'll track skipped
-    # as jobs that WERE known but not fired.
-    # For InMemoryJobSource, the non-due jobs are those not returned by due_jobs(now).
-    # We compute them by calling due_jobs with a far-future time to get ALL jobs.
-    far_future = datetime(9999, 12, 31, tzinfo=UTC)
-    all_known_jobs = list(source.due_jobs(far_future))
+    # Compute skipped_job_ids: all known jobs that were not due this tick.
+    # Use list_all() from the Protocol (not the far-future due_jobs hack) to avoid
+    # Protocol violations and ensure non-due jobs are correctly enumerated.
+    fired_id_set = {j.job_id for j in due}
     skipped_ids = tuple(
-        j.job_id for j in all_known_jobs if j.job_id not in {d.job_id for d in due}
+        j.job_id for j in source.list_all() if j.job_id not in fired_id_set
     )
 
     fired_ids: list[str] = []
@@ -424,8 +438,8 @@ def _tick_inside_lock(
         # 1. Compute new next_run
         new_next_run = job.compute_next_run(now=now)
         if new_next_run is None:
-            # 'once' schedule has no future run — advance past far future to not re-fire
-            new_next_run = far_future
+            # 'once' schedule has no future run — use exhausted sentinel to prevent re-fire
+            new_next_run = _ONCE_EXHAUSTED_NEXT_RUN
 
         # 2. Advance BEFORE recording receipt (at-most-once guarantee)
         source.record_advance(job.job_id, new_next_run)
@@ -441,8 +455,8 @@ def _tick_inside_lock(
             "agentSpawned": False,
             "localFake": True,
         }
-        if on_receipt is not None:
-            on_receipt(job.job_id, receipt)
+        if _on_receipt is not None:
+            _on_receipt(job.job_id, receipt)
         local_fake_receipts.append(receipt)
         fired_ids.append(job.job_id)
 
@@ -475,9 +489,10 @@ __all__ = [
     "ScheduledJobRecord",
     "ScheduledJobSource",
     "SchedulerExecutorAuthorityFlags",
-    "SchedulerLease",
     "SchedulerTickResult",
     "TickStatus",
     "acquire_tick_lock",
     "tick",
 ]
+# SchedulerLease is imported for internal use (validate_scheduler_lease) and
+# re-exported from scheduler_runtime; it is intentionally absent from __all__ here.

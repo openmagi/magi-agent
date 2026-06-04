@@ -125,7 +125,7 @@ def test_due_job_fires_when_next_run_lte_now(tmp_path: Any) -> None:
         }
     ])
 
-    result = tick(now=now, source=source, lease=lease, lock_dir=tmp_path)
+    result = tick(now=now, source=source, lease=lease, lock_dir=tmp_path, owner_digest="owner:test-abc")
     assert result.status == "tick_completed"
     assert "job:due-001" in result.fired_job_ids
 
@@ -146,7 +146,7 @@ def test_future_job_does_not_fire(tmp_path: Any) -> None:
         }
     ])
 
-    result = tick(now=now, source=source, lease=lease, lock_dir=tmp_path)
+    result = tick(now=now, source=source, lease=lease, lock_dir=tmp_path, owner_digest="owner:test-abc")
     assert result.status == "tick_completed"
     assert "job:future-001" not in result.fired_job_ids
     assert "job:future-001" in result.skipped_job_ids
@@ -159,7 +159,7 @@ def test_no_jobs_returns_tick_completed_with_empty_fired(tmp_path: Any) -> None:
     lease = _make_lease()
     source = _make_source([])
 
-    result = tick(now=now, source=source, lease=lease, lock_dir=tmp_path)
+    result = tick(now=now, source=source, lease=lease, lock_dir=tmp_path, owner_digest="owner:test-abc")
     assert result.status == "tick_completed"
     assert result.fired_job_ids == ()
     assert result.skipped_job_ids == ()
@@ -204,7 +204,7 @@ def test_advance_called_before_receipt(tmp_path: Any) -> None:
     )
     source = TrackingJobSource([record])
 
-    result = tick(now=now, source=source, lease=lease, lock_dir=tmp_path, on_receipt=on_receipt)
+    result = tick(now=now, source=source, lease=lease, lock_dir=tmp_path, owner_digest="owner:test-abc", _on_receipt=on_receipt)
     assert result.status == "tick_completed"
     assert "job:track-001" in result.fired_job_ids
 
@@ -247,11 +247,11 @@ def test_retick_same_window_does_not_refire(tmp_path: Any) -> None:
     source = InMemoryJobSource([record])
 
     # First tick — should fire once
-    result1 = tick(now=now, source=source, lease=lease, lock_dir=tmp_path, on_receipt=on_receipt)
+    result1 = tick(now=now, source=source, lease=lease, lock_dir=tmp_path, owner_digest="owner:test-abc", _on_receipt=on_receipt)
     assert "job:retick-001" in result1.fired_job_ids
 
     # Second tick at SAME now — next_run is already advanced; must not fire again
-    result2 = tick(now=now, source=source, lease=lease, lock_dir=tmp_path, on_receipt=on_receipt)
+    result2 = tick(now=now, source=source, lease=lease, lock_dir=tmp_path, owner_digest="owner:test-abc", _on_receipt=on_receipt)
     assert "job:retick-001" not in result2.fired_job_ids
 
     # on_receipt called exactly once (from the first tick only)
@@ -276,7 +276,7 @@ def test_record_advance_updates_next_run(tmp_path: Any) -> None:
         }
     ])
 
-    result = tick(now=now, source=source, lease=lease, lock_dir=tmp_path)
+    result = tick(now=now, source=source, lease=lease, lock_dir=tmp_path, owner_digest="owner:test-abc")
     assert result.status == "tick_completed"
     assert "job:advance-001" in result.fired_job_ids
 
@@ -307,11 +307,11 @@ def test_idempotent_retick_within_same_window(tmp_path: Any) -> None:
     ])
 
     # First tick — should fire
-    result1 = tick(now=now, source=source, lease=lease, lock_dir=tmp_path)
+    result1 = tick(now=now, source=source, lease=lease, lock_dir=tmp_path, owner_digest="owner:test-abc")
     assert "job:idem-001" in result1.fired_job_ids
 
     # Second tick at SAME now — should NOT fire (next_run already advanced)
-    result2 = tick(now=now, source=source, lease=lease, lock_dir=tmp_path)
+    result2 = tick(now=now, source=source, lease=lease, lock_dir=tmp_path, owner_digest="owner:test-abc")
     assert "job:idem-001" not in result2.fired_job_ids
 
 
@@ -327,7 +327,7 @@ def test_tick_without_lease_is_blocked(tmp_path: Any) -> None:
         {"job_id": "job:blocked-001", "schedule_expr": "every 10m", "next_run_ms": 0}
     ])
 
-    result = tick(now=now, source=source, lease=None, lock_dir=tmp_path)
+    result = tick(now=now, source=source, lease=None, lock_dir=tmp_path, owner_digest="owner:test-abc")
     assert result.status == "tick_blocked_lease"
     assert result.lease_state == "missing"
     assert result.fired_job_ids == ()
@@ -394,7 +394,7 @@ def test_blocked_tick_does_not_fire_any_job(tmp_path: Any) -> None:
         {"job_id": "job:no-lease-002", "schedule_expr": "every 5m", "next_run_ms": 0},
     ])
 
-    result = tick(now=now, source=source, lease=None, lock_dir=tmp_path)
+    result = tick(now=now, source=source, lease=None, lock_dir=tmp_path, owner_digest="owner:test-abc")
     assert result.fired_job_ids == ()
     # No advances should have happened
     due_jobs = source.due_jobs(now)
@@ -436,7 +436,7 @@ def test_concurrent_tick_skipped_when_lock_held(tmp_path: Any) -> None:
     def second_tick() -> None:
         barrier.wait()
         # Try to tick while lock is held — should be skipped
-        result = tick(now=now, source=source, lease=lease, lock_dir=tmp_path)
+        result = tick(now=now, source=source, lease=lease, lock_dir=tmp_path, owner_digest="owner:test-abc")
         results.append(result)
         release_event.set()
 
@@ -465,7 +465,7 @@ def test_tick_result_has_evidence_digest(tmp_path: Any) -> None:
     lease = _make_lease()
     source = _make_source([])
 
-    result = tick(now=now, source=source, lease=lease, lock_dir=tmp_path)
+    result = tick(now=now, source=source, lease=lease, lock_dir=tmp_path, owner_digest="owner:test-abc")
     assert result.evidence_digest.startswith("sha256:"), (
         f"evidence_digest must be a sha256: prefixed string, got: {result.evidence_digest!r}"
     )
@@ -485,7 +485,7 @@ def test_tick_result_authority_flags_all_false(tmp_path: Any) -> None:
         {"job_id": "job:auth-001", "schedule_expr": "every 10m", "next_run_ms": now_ms - 500}
     ])
 
-    result = tick(now=now, source=source, lease=lease, lock_dir=tmp_path)
+    result = tick(now=now, source=source, lease=lease, lock_dir=tmp_path, owner_digest="owner:test-abc")
     values = result.authority_flags.model_dump(by_alias=True).values()
     assert all(v is False for v in values), "All authority flags on tick result must be False"
 
@@ -608,7 +608,88 @@ def test_multiple_due_jobs_all_fired(tmp_path: Any) -> None:
         {"job_id": "job:multi-003", "schedule_expr": "every 15m", "next_run_ms": now_ms + 1000},  # not due
     ])
 
-    result = tick(now=now, source=source, lease=lease, lock_dir=tmp_path)
+    result = tick(now=now, source=source, lease=lease, lock_dir=tmp_path, owner_digest="owner:test-abc")
     assert result.status == "tick_completed"
     assert set(result.fired_job_ids) == {"job:multi-001", "job:multi-002"}
     assert "job:multi-003" in result.skipped_job_ids
+
+
+# ---------------------------------------------------------------------------
+# list_all() Protocol method: enumerates all jobs regardless of next_run
+# ---------------------------------------------------------------------------
+
+def test_in_memory_job_source_list_all_returns_all_jobs() -> None:
+    """InMemoryJobSource.list_all() must return every job, due or not."""
+    from magi_agent.harness.scheduler_executor import InMemoryJobSource, ScheduledJobSource
+
+    source = _make_source([
+        {"job_id": "job:all-001", "schedule_expr": "every 5m", "next_run_ms": 0},         # past
+        {"job_id": "job:all-002", "schedule_expr": "every 10m", "next_run_ms": 9_000_000_000_000},  # far future
+    ])
+
+    all_jobs = source.list_all()
+    all_ids = {j.job_id for j in all_jobs}
+    assert "job:all-001" in all_ids
+    assert "job:all-002" in all_ids
+    assert len(all_ids) == 2
+
+    # list_all must not filter by next_run — due_jobs(far_past) returns only past jobs
+    past_due = source.due_jobs(datetime.fromtimestamp(1, tz=UTC))
+    assert len(past_due) == 1  # only job:all-001 is due at t=1s
+    assert len(all_jobs) == 2  # list_all still returns both
+
+
+def test_in_memory_job_source_satisfies_protocol() -> None:
+    """InMemoryJobSource must satisfy ScheduledJobSource (runtime_checkable Protocol)."""
+    from magi_agent.harness.scheduler_executor import InMemoryJobSource, ScheduledJobSource
+
+    source = InMemoryJobSource()
+    assert isinstance(source, ScheduledJobSource), (
+        "InMemoryJobSource does not satisfy the ScheduledJobSource Protocol "
+        "(missing list_all or another required method)"
+    )
+
+
+def test_skipped_ids_use_list_all_not_due_jobs_far_future(tmp_path: Any) -> None:
+    """skipped_job_ids must be computed via list_all(), not by calling due_jobs(far_future).
+
+    Proof: a custom source that raises if due_jobs() is called with a year-9999
+    argument must still produce correct skipped_job_ids via list_all().
+    """
+    from magi_agent.harness.scheduler_executor import (
+        InMemoryJobSource,
+        ScheduledJobRecord,
+        tick,
+    )
+    from datetime import UTC, datetime
+
+    class StrictJobSource(InMemoryJobSource):
+        def due_jobs(self, now: datetime) -> list[ScheduledJobRecord]:
+            if now.year >= 9999:
+                raise AssertionError(
+                    "due_jobs must not be called with a far-future sentinel; use list_all() instead"
+                )
+            return super().due_jobs(now)
+
+    now_ms = 1_000_000
+    now = _now_dt(now_ms)
+    lease = _make_lease(now_ms=now_ms)
+
+    record_due = ScheduledJobRecord(
+        jobId="job:strict-due",
+        scheduleExpr="every 10m",
+        lastFire=None,
+        nextRun=datetime.fromtimestamp((now_ms - 500) / 1000, tz=UTC),
+    )
+    record_future = ScheduledJobRecord(
+        jobId="job:strict-future",
+        scheduleExpr="every 10m",
+        lastFire=None,
+        nextRun=datetime.fromtimestamp((now_ms + 60_000) / 1000, tz=UTC),
+    )
+    source = StrictJobSource([record_due, record_future])
+
+    result = tick(now=now, source=source, lease=lease, lock_dir=tmp_path, owner_digest="owner:test-abc")
+    assert result.status == "tick_completed"
+    assert "job:strict-due" in result.fired_job_ids
+    assert "job:strict-future" in result.skipped_job_ids
