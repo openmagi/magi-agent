@@ -4,6 +4,7 @@ import os
 from dataclasses import dataclass
 from collections.abc import Mapping
 import hashlib
+import os
 from pathlib import Path
 from typing import TYPE_CHECKING
 from types import SimpleNamespace
@@ -1234,6 +1235,20 @@ def parse_gate3a_recorded_replay_env(env: Mapping[str, str]) -> Gate3ARecordedRe
         allow_model_calls=allow_model_calls,
         max_bundles=max_bundles,
     )
+
+
+READ_QUALITY_FLAG = "MAGI_READ_QUALITY_ENABLED"
+
+
+def is_read_quality_enabled(env: Mapping[str, str] | None = None) -> bool:
+    """PR6 read-tool quality flag (default OFF). Single source of truth.
+
+    When ON, FileRead output gets 1-indexed line numbers, line/byte caps with an
+    'offset=N to continue' footer, binary-file detection, and 'Did you mean?'
+    filename suggestions on miss.
+    """
+    source = os.environ if env is None else env
+    return _is_true(source.get(READ_QUALITY_FLAG))
 
 
 def _is_true(value: str | None) -> bool:
