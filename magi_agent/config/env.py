@@ -1157,6 +1157,17 @@ def _csv_values(value: str) -> tuple[str, ...]:
     return tuple(item.strip() for item in value.split(",") if item.strip())
 
 
+def is_read_ledger_enabled(env: Mapping[str, str]) -> bool:
+    """Single source of truth for the read-before-edit ledger activation flag.
+
+    Default off. When ``MAGI_READ_LEDGER_ENABLED`` is truthy, the Gate 5B full
+    toolhost records full reads and blocks edits/overwrites of existing files
+    that were not freshly read first (read-before-edit enforcement).
+    """
+
+    return _is_true(env.get("MAGI_READ_LEDGER_ENABLED"))
+
+
 def parse_gate3a_recorded_replay_env(env: Mapping[str, str]) -> Gate3ARecordedReplayEnv:
     enabled = _is_true(env.get("CORE_AGENT_PYTHON_GATE3A_RECORDED_REPLAY"))
     if not enabled:
