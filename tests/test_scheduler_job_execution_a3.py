@@ -471,3 +471,74 @@ if loaded:
         check=False,
     )
     assert completed.returncode == 0, completed.stderr
+
+
+# ---------------------------------------------------------------------------
+# Module-enforced timeout — the module aborts a hung runner via asyncio.wait_for
+# ---------------------------------------------------------------------------
+
+def test_module_enforces_inactivity_timeout_not_runner(tmp_path: Any) -> None:
+    """Prove that THIS module enforces the timeout — not the fake runner.
+
+    The fake runner sleeps far longer than the configured timeout (1s vs 0.05s).
+    If the module did NOT enforce the timeout the test would hang for 1 second and
+    the result status would come from whatever the runner returns (which here would
+    never return in time).  Instead the module must abort the coroutine via
+    asyncio.wait_for and return status="timed_out" quickly.
+    """
+    import asyncio
+
+    from magi_agent.harness.scheduler_job_execution import (
+        CronTurnResult,
+        JobExecutionConfig,
+        execute_due_jobs,
+    )
+
+    class _HungRunner:
+        """Runner that sleeps longer than the configured timeout (simulates hung turn)."""
+
+        def __init__(self) -> None:
+            self.started = False
+
+        async def run_turn(self, plan: Any) -> CronTurnResult:
+            self.started = True
+            # Sleep 1 second — much longer than the 0.05s timeout below.
+            await asyncio.sleep(1.0)
+            # This line must never be reached; the module must abort the coroutine.
+            return CronTurnResult(status="completed", jobId=plan.job_id, runnerInvoked=True)
+
+    now_ms = 1_000_000
+    now = _now_dt(now_ms)
+    lease = _make_lease(now_ms=now_ms)
+    hung_runner = _HungRunner()
+
+    # Small timeout (50 ms) so the test stays fast.
+    config = JobExecutionConfig(executor_enabled=True, shadow=False, timeout_seconds=0.05)
+    source = _make_source(
+        [{"job_id": "job:hung-001", "schedule_expr": "every 10m", "next_run_ms": now_ms - 500}]
+    )
+
+    result = execute_due_jobs(
+        now=now, source=source, lease=lease, lock_dir=tmp_path,
+        owner_digest="owner:test-abc", runner=hung_runner, config=config,
+    )
+
+    # The runner was started (the coroutine was entered).
+    assert hung_runner.started, "runner coroutine was never entered"
+
+    # The module must have aborted it — exactly one execution recorded.
+    assert len(result.executions) == 1
+    ex = result.executions[0]
+
+    # Status must be timed_out — the runner never completed so the only way to get
+    # this is if the MODULE enforced the timeout (not the runner echoing back).
+    assert ex.status == "timed_out", (
+        f"expected timed_out but got {ex.status!r}; module may not be enforcing timeout"
+    )
+    assert ex.runner_invoked is True
+
+    # Evidence must reflect the failure.
+    assert ex.evidence is not None
+    assert ex.evidence.status in {"failed", "unknown"}, (
+        f"evidence status should be failed/unknown for a timed-out turn, got {ex.evidence.status!r}"
+    )

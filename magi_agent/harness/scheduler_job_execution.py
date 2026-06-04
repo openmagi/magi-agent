@@ -47,7 +47,6 @@ google.adk — none appear in this module or its local import graph.
 from __future__ import annotations
 
 import os
-from collections.abc import Sequence
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Literal, Protocol, runtime_checkable
@@ -491,17 +490,34 @@ def execute_due_jobs(
 
 
 def _run_turn_sync(runner: CronTurnRunner, plan: CronTurnPlan) -> CronTurnResult:
-    """Drive the async runner.run_turn to completion from sync code.
+    """Drive the async runner.run_turn to completion from sync code, enforcing timeout.
 
     ``execute_due_jobs`` is a sync entrypoint mirroring A2's ``tick`` (the scheduler
     loop drives it off the event loop), so ``asyncio.run`` is correct here.  A
     caller that already owns a running loop should await the runner directly; A4
     (delivery wiring) can add an async entrypoint if needed.  asyncio is imported
     lazily so the module top-level stays minimal and import-clean.
+
+    The inactivity timeout is enforced HERE via ``asyncio.wait_for`` — a runner that
+    never returns is aborted by this module (not by the runner itself).  On timeout
+    a ``CronTurnResult`` with status ``"timed_out"`` is returned so the caller can
+    record evidence and continue to the next job without hanging.
     """
     import asyncio
 
-    return asyncio.run(runner.run_turn(plan))
+    async def _run_with_timeout() -> CronTurnResult:
+        try:
+            return await asyncio.wait_for(
+                runner.run_turn(plan), timeout=plan.timeout_seconds
+            )
+        except asyncio.TimeoutError:
+            return CronTurnResult(
+                status="timed_out",
+                jobId=plan.job_id,
+                runnerInvoked=True,
+            )
+
+    return asyncio.run(_run_with_timeout())
 
 
 __all__ = [
