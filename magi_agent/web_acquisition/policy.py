@@ -82,7 +82,7 @@ _RAW_PRIVATE_LINE_RE = re.compile(
     re.IGNORECASE,
 )
 _RECENCY_INTENT_RE = re.compile(
-    r"\b(?:latest|recent|current|today|this\s+year|newest|up\s+to\s+date)\b",
+    r"\b(?:latest|recent|today|this\s+year|newest|up\s+to\s+date)\b",
     re.IGNORECASE,
 )
 _EXISTING_YEAR_RE = re.compile(r"\b(?:19|20)\d{2}\b")

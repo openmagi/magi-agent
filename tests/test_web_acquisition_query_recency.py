@@ -43,7 +43,6 @@ def test_recency_flag_off_no_year_appended_for_recency_queries() -> None:
 @pytest.mark.parametrize("query", [
     "latest AI models",
     "recent breakthroughs in quantum computing",
-    "current best practices for Python",
     "today's stock prices",
     "this year best smartphones",
     "newest JavaScript frameworks",
@@ -150,8 +149,8 @@ def test_year_appended_when_it_fits_exactly() -> None:
 
 def test_year_appended_when_max_chars_is_large() -> None:
     """With generous max_chars, recency year is always appended."""
-    result = normalize_query("current events", inject_recency_year=True, now=_NOW_2026, max_chars=512)
-    assert result == "current events 2026"
+    result = normalize_query("latest events", inject_recency_year=True, now=_NOW_2026, max_chars=512)
+    assert result == "latest events 2026"
 
 
 # ---------------------------------------------------------------------------
@@ -181,30 +180,46 @@ def test_normalize_query_still_raises_on_empty_with_flag_on() -> None:
 # ---------------------------------------------------------------------------
 
 @pytest.mark.parametrize("query", [
-    "BBC News latest",
-    "Hacker News top posts",
+    "BBC News homepage",
     "Google News feed",
-    "CNN News coverage",
+    "Hacker News digest",
 ])
 def test_named_entity_news_does_not_trigger_year_injection(query: str) -> None:
     """'News' as part of a named entity should NOT cause year injection.
 
     The word 'news' was removed from _RECENCY_INTENT_RE to avoid false-positives
-    on named entities like 'BBC News' or 'Hacker News'.  Any recency intent in
-    these queries comes from other keywords (e.g. 'latest'), not bare 'news'.
+    on named entities like 'BBC News' or 'Hacker News'.  All queries here contain
+    only bare 'news' with no other recency keyword, so the no-injection path is
+    exercised for every parametrized case.
     """
-    # Queries containing only "news" (no other recency keyword) must be unchanged.
-    # Filter to those that have no other recency keyword so the assertion is clean.
-    has_other_recency = re.search(
-        r"\b(?:latest|recent|current|today|this\s+year|newest|up\s+to\s+date)\b",
-        query,
-        re.IGNORECASE,
-    )
-    if has_other_recency:
-        pytest.skip("query has another recency keyword — skip this specific check")
     result = normalize_query(query, inject_recency_year=True, now=_NOW_2026)
     assert not result.endswith(" 2026"), (
         f"'news' as named entity should not trigger year injection: {result!r}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Regression: accounting-term "current" must NOT trigger year injection
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("query", [
+    "current account balance",
+    "current ratio analysis",
+    "current liabilities total",
+])
+def test_accounting_current_does_not_trigger_year_injection(query: str) -> None:
+    """'current' is a core accounting term and must NOT trigger year injection.
+
+    Bare 'current' was removed from _RECENCY_INTENT_RE because accounting queries
+    like 'current account balance', 'current ratio', and 'current liabilities'
+    would have had a spurious year appended, changing search semantics.
+    """
+    result = normalize_query(query, inject_recency_year=True, now=_NOW_2026)
+    assert result == normalize_query(query, inject_recency_year=False), (
+        f"Accounting 'current' query should not have year appended: {result!r}"
+    )
+    assert not re.search(r"\b20\d{2}\b", result), (
+        f"No year should appear in accounting 'current' query: {result!r}"
     )
 
 
