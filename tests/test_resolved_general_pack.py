@@ -32,6 +32,8 @@ _EXPECTED_GENERAL_TOOLS = frozenset(
         "SpreadsheetPreview",
         # browser tier (automation.browser-inspect / browser-act — gated)
         "BrowserAction",
+        # PR7: blocking clarifying-question tool (gated — declaration only)
+        "GeneralAutomationQuestion",
     }
 )
 

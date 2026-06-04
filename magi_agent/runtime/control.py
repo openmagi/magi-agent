@@ -295,6 +295,63 @@ class ControlRequestStore:
         self.ledger.append(event)
         return ControlRequestStoreResult(record=record, events=(event,))
 
+    def create_user_question_request(
+        self,
+        *,
+        session_key: str,
+        turn_id: str | None,
+        channel_name: str | None,
+        source: ControlRequestSource,
+        prompt: str,
+        proposed_input: object | None,
+        idempotency_key: str,
+        now: int | float,
+        timeout_ms: int | float,
+    ) -> ControlRequestStoreResult:
+        """Create a ``user_question`` control request (clarifying question).
+
+        Mirrors :meth:`create_tool_permission_request` exactly but stamps the
+        record ``kind`` as ``user_question`` so the existing resume flow
+        (:meth:`resolve_request` with ``decision="answered"`` + ``answer``)
+        applies unchanged. No new resume mechanism is introduced — this only
+        widens the kind of request the existing store can open.
+        """
+        if not idempotency_key.strip():
+            raise ValueError("idempotency_key must be non-empty")
+        duplicate = self._record_for_idempotency(idempotency_key)
+        if duplicate is not None:
+            return ControlRequestStoreResult(record=duplicate, duplicate=True)
+
+        request_id = _stable_request_id(idempotency_key)
+        record = ControlRequestRecord(
+            requestId=request_id,
+            kind="user_question",
+            state="pending",
+            sessionKey=session_key,
+            turnId=turn_id,
+            channelName=channel_name,
+            source=source,
+            prompt=_sanitize_prompt_text(prompt),
+            proposedInput=_sanitize_public_value(proposed_input),
+            createdAt=now,
+            expiresAt=now + timeout_ms,
+            idempotencyKey=idempotency_key,
+        )
+        self._pending_by_id[record.request_id] = record
+        self._idempotency_to_request_id[idempotency_key] = record.request_id
+        event = ControlRequestCreatedEvent(
+            **self._event_base(
+                "created",
+                session_key=session_key,
+                turn_id=turn_id,
+                idempotency_key=idempotency_key,
+                ts=now,
+            ),
+            request=record,
+        )
+        self.ledger.append(event)
+        return ControlRequestStoreResult(record=record, events=(event,))
+
     def resolve_request(
         self,
         request_id: str,

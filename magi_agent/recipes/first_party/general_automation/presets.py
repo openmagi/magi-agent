@@ -125,7 +125,7 @@ _PRESETS: tuple[GeneralAutomationPreset, ...] = (
     _preset(
         "automation.plan",
         "Plan",
-        tool_categories=("reasoning", "workspace_read", "metadata"),
+        tool_categories=("reasoning", "workspace_read", "metadata", "user_question"),
         allowed_permissions=("read", "meta"),
     ),
     _preset(
