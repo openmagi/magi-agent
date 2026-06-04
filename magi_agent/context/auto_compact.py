@@ -102,10 +102,17 @@ class AutoCompactionEngine:
             "role": "user",
             "content": f"[Previous conversation summary]\n\n{summary}",
         }
-        tokens_after = self._estimate_tokens(summary_msg)
+        tokens_after = self._estimate_tokens(summary_msg) + sum(
+            self._estimate_tokens(m) for m in protected_messages
+        )
 
         turns_summarized = self._count_turns(old_messages)
 
+        # NOTE: re-attached protected messages (role=tool) no longer follow their
+        # original assistant+tool_use pairing in the message list.  Before the
+        # runner is wired to actually emit LoadGaPlaybook, the message-list
+        # assembly must ensure protocol validity (e.g. wrap or re-pair the
+        # tool result so the conversation remains well-formed for the LLM).
         return [summary_msg] + protected_messages + recent_messages, AutoCompactResult(
             activated=True,
             turns_summarized=turns_summarized,

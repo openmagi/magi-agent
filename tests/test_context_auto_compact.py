@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import asyncio
+import subprocess
+import sys
 
 import pytest
 
@@ -250,3 +252,109 @@ def test_custom_keep_recent_turns() -> None:
     assert len(recent_user_msgs) == 1
     # Must be the very last user message
     assert recent_user_msgs[0]["content"] == "User message 3"
+
+
+# ---------------------------------------------------------------------------
+# PR8 fix: tokens_after includes protected messages (item 2)
+# ---------------------------------------------------------------------------
+
+def test_tokens_after_includes_protected_messages() -> None:
+    """tokens_after must account for re-attached protected messages, not just the summary."""
+    from magi_agent.harness.general_automation.constants import LOAD_GA_RECIPE_TOOL_NAME
+
+    protected_body = "p" * 10_000
+    protected_msg = {
+        "role": "tool",
+        "name": LOAD_GA_RECIPE_TOOL_NAME,
+        "tool_use_id": "t-protected",
+        "content": protected_body,
+    }
+    # Build 6 turns; protected result is in old region (turn 1)
+    messages: list[dict] = []
+    for i in range(6):
+        messages.append({"role": "user", "content": f"user message {i}"})
+        if i == 1:
+            messages.append(protected_msg)
+        messages.append({"role": "assistant", "content": f"assistant reply {i}"})
+
+    engine = AutoCompactionEngine(mock_classifier, keep_recent_turns=2)
+    _out, result = _run(engine.apply(messages, WarningLevel.CRITICAL))
+
+    assert result.activated is True
+    # tokens_after must be strictly greater than just the summary message alone
+    # because the large protected body is re-attached verbatim.
+    summary_msg_only = {"role": "user", "content": "[Previous conversation summary]\n\nSummary of conversation"}
+    tokens_summary_only = len(__import__("json").dumps(summary_msg_only, default=str)) // 4
+    assert result.tokens_after > tokens_summary_only, (
+        f"tokens_after ({result.tokens_after}) should include protected body "
+        f"(summary-only estimate: {tokens_summary_only})"
+    )
+    # Also verify it includes the protected body tokens
+    tokens_protected = len(__import__("json").dumps(protected_msg, default=str)) // 4
+    assert result.tokens_after >= tokens_summary_only + tokens_protected
+
+
+# ---------------------------------------------------------------------------
+# PR8 import boundary: microcompact + protected_tools must NOT load
+# magi_agent.transport or magi_agent.recipes.* at module import time (item 1)
+# ---------------------------------------------------------------------------
+
+def _run_import_check(script: str) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        [sys.executable, "-c", script],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+
+def test_microcompact_import_does_not_load_transport_or_recipes() -> None:
+    """Importing microcompact must NOT transitively load transport or recipes."""
+    completed = _run_import_check(
+        """
+import importlib
+import sys
+
+importlib.import_module("magi_agent.context.microcompact")
+
+forbidden_prefixes = (
+    "magi_agent.transport",
+    "magi_agent.recipes",
+)
+loaded = [
+    name for name in sys.modules
+    if any(name == p or name.startswith(p + ".") for p in forbidden_prefixes)
+]
+if loaded:
+    raise AssertionError(
+        f"magi_agent.context.microcompact import loaded forbidden modules: {loaded}"
+    )
+"""
+    )
+    assert completed.returncode == 0, completed.stderr
+
+
+def test_protected_tools_import_does_not_load_transport_or_recipes() -> None:
+    """Importing protected_tools must NOT transitively load transport or recipes."""
+    completed = _run_import_check(
+        """
+import importlib
+import sys
+
+importlib.import_module("magi_agent.context.protected_tools")
+
+forbidden_prefixes = (
+    "magi_agent.transport",
+    "magi_agent.recipes",
+)
+loaded = [
+    name for name in sys.modules
+    if any(name == p or name.startswith(p + ".") for p in forbidden_prefixes)
+]
+if loaded:
+    raise AssertionError(
+        f"magi_agent.context.protected_tools import loaded forbidden modules: {loaded}"
+    )
+"""
+    )
+    assert completed.returncode == 0, completed.stderr

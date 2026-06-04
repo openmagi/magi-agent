@@ -16,9 +16,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 
-from magi_agent.harness.general_automation.recipe_disclosure import (
-    LOAD_GA_RECIPE_TOOL_NAME,
-)
+from magi_agent.harness.general_automation.constants import LOAD_GA_RECIPE_TOOL_NAME
 
 
 #: Tool names whose results are preserved across compaction. The on-demand GA

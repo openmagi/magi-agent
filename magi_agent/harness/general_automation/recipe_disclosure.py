@@ -53,6 +53,12 @@ from collections.abc import Mapping
 from typing import TYPE_CHECKING
 
 from magi_agent.config.env import general_automation_live_enabled
+# Import the constant from the import-boundary-safe constants module so that
+# context/protected_tools.py can reference it without transitively loading
+# magi_agent.transport or magi_agent.recipes.* at module load time.
+# Re-exported here for back-compat: any code that imports LOAD_GA_RECIPE_TOOL_NAME
+# from recipe_disclosure continues to work unchanged.
+from magi_agent.harness.general_automation.constants import LOAD_GA_RECIPE_TOOL_NAME
 from magi_agent.recipes.first_party.general_automation.presets import (
     GeneralAutomationPreset,
     general_automation_preset_catalog,
@@ -63,14 +69,6 @@ from magi_agent.tools.result import ToolResult
 
 if TYPE_CHECKING:
     from magi_agent.tools.manifest import ToolManifest
-
-
-#: Name of the on-demand recipe/playbook load tool (a.k.a. ``LoadGaPlaybook``).
-#: Referenced by the resolved ``general`` pack ``tools`` tuple in
-#: ``harness/resolved.py`` and recognized by the compaction-protection sets in
-#: ``context/microcompact.py`` + ``context/auto_compact.py`` (mirroring
-#: OpenCode's ``PRUNE_PROTECTED_TOOLS=["skill"]``).
-LOAD_GA_RECIPE_TOOL_NAME = "LoadGaPlaybook"
 
 _GA_ROLE = "general"
 
@@ -252,7 +250,7 @@ def _when_to_use(preset: GeneralAutomationPreset) -> str:
     perms = ", ".join(
         _PERMISSION_PHRASES.get(perm, perm) for perm in preset.allowed_permissions
     )
-    first_categories = ", ".join(preset.tool_categories[:3])
+    first_categories = ", ".join(preset.tool_categories[:3])  # first 3 categories only — intentionally brief for the cheap up-front listing
     return f"tasks that need to {perms}; covers {first_categories}"
 
 
