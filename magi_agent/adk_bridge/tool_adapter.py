@@ -77,19 +77,15 @@ def build_adk_tool_for_manifest(
 # Per-provider tool-schema repair (PR9)
 #
 # Measurement summary (see tests/adk_bridge/test_provider_repair.py): magi runs
-# on Google ADK with no LiteLLM dependency. ADK 1.33.0 already repairs most
-# provider-specific schema issues for the Gemini path ($ref dereference,
-# additionalProperties removal, snake_case conversion, type/null normalization,
-# format filtering). The remaining demonstrable gap is integer/number/boolean
-# enums: Gemini's ``Schema.enum`` is ``list[str]`` and the API rejects non-string
-# enum values. Such enums can reach the wire unrepaired via a declaration's
-# ``parameters_json_schema`` (a raw-dict passthrough that skips ``Schema``
-# validation), which is the surface used by external / MCP tool projections.
+# on Google ADK with no LiteLLM dependency. ADK 1.33.0 repairs most typed Gemini
+# schema issues, but raw ``parameters_json_schema`` and selected hosted
+# generation envs can still expose provider-specific gaps. The live-observed
+# gaps covered here are non-string enums and additional-properties keywords.
 #
 # This hook is flag-gated (``MAGI_PROVIDER_REPAIR_ENABLED``, default OFF) and
 # keyed on the active model's provider family. When ON for the Gemini family it
 # wraps every ADK FunctionTool built by this adapter so its declaration is
-# repaired at exposure time. For every other family — and when OFF — it is a
+# repaired at exposure time. For every other family - and when OFF - it is a
 # pure identity passthrough (no boundary change).
 # ---------------------------------------------------------------------------
 
@@ -106,16 +102,37 @@ def provider_repair_enabled() -> bool:
 
 
 def active_provider_family() -> "ProviderFamily":
-    """Resolve the provider family for the active model (``CORE_AGENT_MODEL``)."""
+    """Resolve the provider family for the active ADK model.
+
+    Hosted selected-generation runs can intentionally leave ``CORE_AGENT_MODEL``
+    at a disabled sentinel while the actual ADK provider/model is supplied by
+    Gate 5B shadow-generation env. Prefer concrete model labels, then explicit
+    provider labels.
+    """
     from magi_agent.prompt.provider_adapter import (
         ProviderFamily,
         detect_provider_family,
     )
 
-    model = os.environ.get("CORE_AGENT_MODEL")
-    if not model:
+    for key in (
+        "CORE_AGENT_MODEL",
+        "CORE_AGENT_PYTHON_GATE5B_SHADOW_GENERATION_MODEL_LABEL",
+    ):
+        model = os.environ.get(key, "").strip()
+        if not model or model == "shadow-model-disabled":
+            continue
+        family = detect_provider_family(model)
+        if family is not ProviderFamily.DEFAULT:
+            return family
+
+    provider_label = os.environ.get(
+        "CORE_AGENT_PYTHON_GATE5B_SHADOW_GENERATION_PROVIDER_LABEL",
+        "",
+    ).strip().lower()
+    try:
+        return ProviderFamily(provider_label)
+    except ValueError:
         return ProviderFamily.DEFAULT
-    return detect_provider_family(model)
 
 
 def _repair_declaration(declaration: object, family: "ProviderFamily") -> bool:
@@ -149,8 +166,8 @@ def apply_provider_repair(tool: AdkLocalTool) -> AdkLocalTool:
 
     No-op (returns the same object) when the repair flag is OFF or the active
     provider family has no gap to repair. When active for the Gemini family, the
-    tool's ``_get_declaration`` is wrapped to coerce integer/number/boolean enums
-    to string enums (values preserved) on the way to the model.
+    tool's ``_get_declaration`` is wrapped to normalize provider-incompatible
+    schema fields on the way to the model.
 
     Idempotent: if this function has already been applied to *tool* (detected via
     ``_provider_repair_applied`` sentinel), the tool is returned unchanged so that

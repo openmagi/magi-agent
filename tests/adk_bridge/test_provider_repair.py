@@ -141,9 +141,59 @@ class TestGeminiIntegerEnumRepair:
         repaired = repair_tool_schema_for_provider(schema, ProviderFamily.GOOGLE)
         assert repaired["description"] == "a tool"
         assert repaired["required"] == ["priority"]
-        assert repaired["additionalProperties"] is False
+        assert "additionalProperties" not in repaired
         assert repaired["properties"]["name"] == {"type": "string"}
         assert repaired["properties"]["priority"]["description"] == "priority level"
+
+    def test_additional_properties_keywords_are_removed_recursively(self) -> None:
+        schema = {
+            "type": "object",
+            "additionalProperties": False,
+            "properties": {
+                "filters": {
+                    "type": "object",
+                    "additional_properties": False,
+                    "properties": {
+                        "mode": {"type": "string"},
+                    },
+                },
+                "items": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "additionalProperties": {"type": "string"},
+                        "properties": {
+                            "name": {"type": "string"},
+                        },
+                    },
+                },
+                "choice": {
+                    "anyOf": [
+                        {
+                            "type": "object",
+                            "additional_properties": False,
+                            "properties": {"kind": {"type": "string"}},
+                        },
+                        {"type": "null"},
+                    ]
+                },
+            },
+        }
+
+        repaired = repair_tool_schema_for_provider(schema, ProviderFamily.GOOGLE)
+        dumped = repr(repaired)
+
+        assert "additionalProperties" not in dumped
+        assert "additional_properties" not in dumped
+        assert repaired["properties"]["filters"]["properties"]["mode"] == {
+            "type": "string"
+        }
+        assert repaired["properties"]["items"]["items"]["properties"]["name"] == {
+            "type": "string"
+        }
+        assert repaired["properties"]["choice"]["anyOf"][0]["properties"]["kind"] == {
+            "type": "string"
+        }
 
     def test_input_not_mutated(self) -> None:
         schema = {
@@ -191,6 +241,22 @@ class TestNonGeminiIdentity:
         repaired = repair_tool_schema_for_provider(schema, family)
         assert repaired == schema
 
+    def test_additional_properties_keywords_left_unchanged(
+        self, family: ProviderFamily
+    ) -> None:
+        schema = {
+            "type": "object",
+            "additionalProperties": False,
+            "properties": {
+                "value": {
+                    "type": "object",
+                    "additional_properties": False,
+                },
+            },
+        }
+        repaired = repair_tool_schema_for_provider(schema, family)
+        assert repaired is schema
+
 
 # ---------------------------------------------------------------------------
 # Flag + active-provider resolution
@@ -226,7 +292,36 @@ class TestProviderRepairConfig:
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         monkeypatch.delenv("CORE_AGENT_MODEL", raising=False)
+        monkeypatch.delenv(
+            "CORE_AGENT_PYTHON_GATE5B_SHADOW_GENERATION_MODEL_LABEL", raising=False
+        )
+        monkeypatch.delenv(
+            "CORE_AGENT_PYTHON_GATE5B_SHADOW_GENERATION_PROVIDER_LABEL", raising=False
+        )
         assert tool_adapter.active_provider_family() == ProviderFamily.DEFAULT
+
+    def test_active_provider_family_uses_shadow_generation_model_label_when_core_model_is_disabled(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("CORE_AGENT_MODEL", "shadow-model-disabled")
+        monkeypatch.setenv(
+            "CORE_AGENT_PYTHON_GATE5B_SHADOW_GENERATION_MODEL_LABEL",
+            "gemini-3.5-flash",
+        )
+        assert tool_adapter.active_provider_family() == ProviderFamily.GOOGLE
+
+    def test_active_provider_family_uses_shadow_generation_provider_label_when_model_label_missing(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("CORE_AGENT_MODEL", "shadow-model-disabled")
+        monkeypatch.delenv(
+            "CORE_AGENT_PYTHON_GATE5B_SHADOW_GENERATION_MODEL_LABEL", raising=False
+        )
+        monkeypatch.setenv(
+            "CORE_AGENT_PYTHON_GATE5B_SHADOW_GENERATION_PROVIDER_LABEL",
+            "google",
+        )
+        assert tool_adapter.active_provider_family() == ProviderFamily.GOOGLE
 
 
 # ---------------------------------------------------------------------------
