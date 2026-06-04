@@ -19,6 +19,94 @@ StopReasonCase: TypeAlias = Literal[
 DecisionKind: TypeAlias = Literal["finalise", "run_tools", "recover"]
 
 MAX_OUTPUT_TOKENS_RECOVERY_LIMIT = 3
+
+# ---------------------------------------------------------------------------
+# Max-steps wrap-up brake (PR5)
+# ---------------------------------------------------------------------------
+
+#: Wrap-up instruction injected as a synthetic user turn on the final allowed
+#: iteration.  Mirrors OpenCode's ``max-steps.txt`` graceful termination brake.
+#: Content covers: (1) maximum steps reached, (2) no further tool calls,
+#: (3) summary of accomplished work, (4) remaining tasks, (5) recommended
+#: next steps.
+MAX_STEPS_WRAP_UP_MESSAGE: str = (
+    "You have reached the maximum number of allowed steps for this task. "
+    "Do not call any tools. "
+    "Respond with plain text only.\n\n"
+    "Please provide a concise wrap-up with the following three sections:\n\n"
+    "1. **Accomplished** — summarize what was completed and done during this run.\n"
+    "2. **Remaining** — list any outstanding or incomplete tasks that were not finished.\n"
+    "3. **Recommended next steps** — suggest follow-up actions or continuations "
+    "the user should take to move forward."
+)
+
+
+@dataclass(frozen=True)
+class MaxStepsBrakeResult:
+    """Result of :func:`maybe_apply_max_steps_brake`.
+
+    ``brake_applied`` is ``True`` when the final-iteration wrap-up instruction
+    was injected (always True on the final iteration, False otherwise).
+
+    ``tools_disabled`` is ``True`` only when the brake fired **and** there were
+    tools to disable (i.e. ``tools`` was non-empty).  When the brake fires with
+    an empty tool list, ``brake_applied=True`` and ``tools_disabled=False`` —
+    the wrap-up is still injected but there is nothing for the caller to
+    suppress.  The caller should skip tool projection when ``tools_disabled``
+    is ``True``.
+    """
+
+    brake_applied: bool
+    tools_disabled: bool
+
+
+def maybe_apply_max_steps_brake(
+    *,
+    iteration: int,
+    max_iterations: int,
+    messages: MutableSequence[dict[str, Any]],
+    tools: Sequence[dict[str, Any]],
+) -> MaxStepsBrakeResult:
+    """Apply the max-steps wrap-up brake when ``iteration`` is the last allowed step.
+
+    When ``iteration >= max_iterations - 1`` (and ``max_iterations > 0``), a
+    synthetic ``user`` turn carrying :data:`MAX_STEPS_WRAP_UP_MESSAGE` is
+    appended to *messages* in-place and the result indicates that tool
+    projection should be disabled for this final step.  All earlier iterations
+    return immediately without any mutation.
+
+    This is intentionally role-agnostic: graceful wrap-up on budget exhaustion
+    is useful regardless of the agent role.  It does not touch hard-safety,
+    authority flags, or sealed paths.
+
+    Args:
+        iteration: Zero-based current iteration index.
+        max_iterations: Maximum number of iterations allowed (budget).
+        messages: The mutable message history to append the wrap-up turn into.
+        tools: The current tool list (used only to determine whether there are
+            tools to disable; the list itself is **not** mutated here — the
+            caller is responsible for suppressing tool projection based on
+            ``tools_disabled``).
+
+    Returns:
+        :class:`MaxStepsBrakeResult` with ``brake_applied=True`` on the final
+        iteration and ``tools_disabled=True`` only when there were tools to
+        suppress (``bool(tools)``).  Both fields are ``False`` on earlier
+        iterations or when ``max_iterations <= 0``.
+    """
+    # Intentionally-unwired seam: the runner must call this per-iteration and
+    # honor ``tools_disabled`` (suppress tool projection) in a later PR.
+    if max_iterations <= 0:
+        return MaxStepsBrakeResult(brake_applied=False, tools_disabled=False)
+
+    if iteration < max_iterations - 1:
+        return MaxStepsBrakeResult(brake_applied=False, tools_disabled=False)
+
+    # Final (or beyond-final) iteration: inject wrap-up instruction.
+    messages.append({"role": "user", "content": MAX_STEPS_WRAP_UP_MESSAGE})
+    return MaxStepsBrakeResult(brake_applied=True, tools_disabled=bool(tools))
+
+
 _CANONICAL_STOP_REASONS: frozenset[str] = frozenset(
     (
         "end_turn",
@@ -53,6 +141,31 @@ class StopReasonHandlerDeps(Protocol):
 class StopReasonHandlerState:
     recovery_attempt: int = 0
     assistant_text_so_far_len: int = 0
+    completion_repair_attempt: int = 0
+
+
+class CompletionGate(Protocol):
+    """Optional finalise-path gate consulted before ``end_turn`` finalises.
+
+    Implemented by the General-Automation task-completion seam
+    (``harness/general_automation/task_completion``). It is passed in as a plain
+    callable so ``turn_policy`` stays import-pure (no evidence/ledger imports
+    here). Returning ``True`` means the turn should re-enter the loop (recover):
+    the gate is responsible for any synthetic message injection + bounded-attempt
+    bookkeeping, mirroring the output-recovery mechanism below. Returning
+    ``False`` means finalise should proceed unchanged.
+    """
+
+    def __call__(
+        self,
+        deps: StopReasonHandlerDeps,
+        state: StopReasonHandlerState,
+        *,
+        blocks: Sequence[dict[str, Any]],
+        iteration: int,
+        messages: MutableSequence[dict[str, Any]],
+    ) -> bool:
+        ...
 
 
 @dataclass(frozen=True)
@@ -76,10 +189,19 @@ def handle_stop_reason(
     iteration: int,
     turn_id: str,
     messages: MutableSequence[dict[str, Any]],
+    completion_gate: CompletionGate | None = None,
 ) -> StopReasonDecision:
     stop_case = classify_stop_reason(stop_reason_raw)
 
     if stop_case in ("end_turn", "stop_sequence"):
+        if completion_gate is not None and completion_gate(
+            deps,
+            state,
+            blocks=blocks,
+            iteration=iteration,
+            messages=messages,
+        ):
+            return StopReasonDecision(kind="recover")
         return StopReasonDecision(kind="finalise")
 
     if stop_case == "refusal":

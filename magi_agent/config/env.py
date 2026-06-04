@@ -1302,6 +1302,20 @@ def model_aware_prompts_enabled(env: Mapping[str, str]) -> bool:
     return _is_true(env.get("MAGI_MODEL_AWARE_PROMPTS_ENABLED"))
 
 
+def general_automation_live_enabled(env: Mapping[str, str] | None = None) -> bool:
+    """Return True when the GA live harness master flag is explicitly truthy.
+
+    Single source of truth for ``MAGI_GA_LIVE_ENABLED`` (Track 19). Default OFF;
+    truthy tokens are ``{1, true, yes, on}`` (case-insensitive). When *env* is
+    ``None`` the process environment is consulted.
+    """
+    if env is None:
+        import os
+
+        env = os.environ
+    return _is_true(env.get("MAGI_GA_LIVE_ENABLED"))
+
+
 def _is_true(value: str | None) -> bool:
     return (value or "").strip().lower() in _TRUE_VALUES
 

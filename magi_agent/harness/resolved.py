@@ -223,6 +223,7 @@ class ResolvedHarnessPresetState(_ResolvedHarnessModel):
     run_on: RunOn = Field(default="main", alias="runOn")
     agent_role: AgentRole = Field(default="general", alias="agentRole")
     spawn_depth: int = Field(default=0, alias="spawnDepth")
+    general: ResolvedHarnessPack
     coding: ResolvedHarnessPack
     research: ResolvedHarnessPack
     verification: ResolvedHarnessPack
@@ -328,6 +329,27 @@ def build_default_resolved_harness_state(
         run_on=resolved_run_on,
         agent_role=resolved_agent_role,
         spawn_depth=spawn_depth,
+        general=ResolvedHarnessPack(
+            enabled=True,
+            components={
+                "tools": (
+                    "FileRead",
+                    "WebSearch",
+                    "WebFetch",
+                    "GeneralAutomationShellRequest",
+                    "CSVRead",
+                    "SpreadsheetPreview",
+                    "BrowserAction",
+                ),
+                # GA-scoped hooks wired in PR6 (per-turn constraint re-injection)
+                "hooks": (),
+                "childAgent": (),
+                "permissionDefaults": (
+                    "write_requires_approval",
+                    "external_directory_requires_approval",
+                ),
+            },
+        ),
         coding=ResolvedHarnessPack(
             enabled=True,
             components={
@@ -381,10 +403,10 @@ def _validate_resolved_agent_role(agent_role: str) -> AgentRole:
 
 def _default_effective_harness_packs(*, run_on: RunOn, agent_role: AgentRole) -> tuple[str, ...]:
     if run_on == "child":
-        if agent_role in {"coding", "research"}:
+        if agent_role in {"coding", "research", "general"}:
             return (agent_role, "hard-safety")
         return ("hard-safety",)
-    return ("coding", "research", "verification", "hard-safety")
+    return ("general", "coding", "research", "verification", "hard-safety")
 
 
 def resolve_scoped_harness_hooks(
