@@ -19,6 +19,84 @@ StopReasonCase: TypeAlias = Literal[
 DecisionKind: TypeAlias = Literal["finalise", "run_tools", "recover"]
 
 MAX_OUTPUT_TOKENS_RECOVERY_LIMIT = 3
+
+# ---------------------------------------------------------------------------
+# Max-steps wrap-up brake (PR5)
+# ---------------------------------------------------------------------------
+
+#: Wrap-up instruction injected as a synthetic user turn on the final allowed
+#: iteration.  Mirrors OpenCode's ``max-steps.txt`` graceful termination brake.
+#: Content covers: (1) maximum steps reached, (2) no further tool calls,
+#: (3) summary of accomplished work, (4) remaining tasks, (5) recommended
+#: next steps.
+MAX_STEPS_WRAP_UP_MESSAGE: str = (
+    "You have reached the maximum number of allowed steps for this task. "
+    "Do not call any tools and do not make any further tool calls. "
+    "Respond with plain text only.\n\n"
+    "Please provide a concise wrap-up with the following three sections:\n\n"
+    "1. **Accomplished** — summarize what was completed and done during this run.\n"
+    "2. **Remaining** — list any outstanding or incomplete tasks that were not finished.\n"
+    "3. **Recommended next steps** — suggest follow-up actions or continuations "
+    "the user should take to move forward."
+)
+@dataclass(frozen=True)
+class MaxStepsBrakeResult:
+    """Result of :func:`maybe_apply_max_steps_brake`.
+
+    ``brake_applied`` is ``True`` when the final-iteration wrap-up was
+    triggered.  ``tools_disabled`` mirrors ``brake_applied`` and signals to the
+    caller that tool projection must be suppressed for this step so the model
+    cannot call tools.
+    """
+
+    brake_applied: bool
+    tools_disabled: bool
+
+
+def maybe_apply_max_steps_brake(
+    *,
+    iteration: int,
+    max_iterations: int,
+    messages: MutableSequence[dict[str, Any]],
+    tools: Sequence[dict[str, Any]],
+) -> MaxStepsBrakeResult:
+    """Apply the max-steps wrap-up brake when ``iteration`` is the last allowed step.
+
+    When ``iteration >= max_iterations - 1`` (and ``max_iterations > 0``), a
+    synthetic ``user`` turn carrying :data:`MAX_STEPS_WRAP_UP_MESSAGE` is
+    appended to *messages* in-place and the result indicates that tool
+    projection should be disabled for this final step.  All earlier iterations
+    return immediately without any mutation.
+
+    This is intentionally role-agnostic: graceful wrap-up on budget exhaustion
+    is useful regardless of the agent role.  It does not touch hard-safety,
+    authority flags, or sealed paths.
+
+    Args:
+        iteration: Zero-based current iteration index.
+        max_iterations: Maximum number of iterations allowed (budget).
+        messages: The mutable message history to append the wrap-up turn into.
+        tools: The current tool list (used only to determine whether there are
+            tools to disable; the list itself is **not** mutated here — the
+            caller is responsible for suppressing tool projection based on
+            ``tools_disabled``).
+
+    Returns:
+        :class:`MaxStepsBrakeResult` with ``brake_applied`` and
+        ``tools_disabled`` set to ``True`` on the final iteration, ``False``
+        otherwise.
+    """
+    if max_iterations <= 0:
+        return MaxStepsBrakeResult(brake_applied=False, tools_disabled=False)
+
+    if iteration < max_iterations - 1:
+        return MaxStepsBrakeResult(brake_applied=False, tools_disabled=False)
+
+    # Final (or beyond-final) iteration: inject wrap-up instruction.
+    messages.append({"role": "user", "content": MAX_STEPS_WRAP_UP_MESSAGE})
+    return MaxStepsBrakeResult(brake_applied=True, tools_disabled=True)
+
+
 _CANONICAL_STOP_REASONS: frozenset[str] = frozenset(
     (
         "end_turn",
