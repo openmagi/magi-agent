@@ -464,6 +464,24 @@ class TestRoutingSeam:
         assert result is sentinel
         assert captured["model"] == "claude-sonnet-4-6"
 
+    def test_missing_optional_anthropic_dependency_falls_back_to_label(
+        self, monkeypatch
+    ) -> None:
+        import magi_agent.adk_bridge.anthropic_cache_model as cache_model
+
+        def _missing_build(model: str):
+            raise ModuleNotFoundError("No module named 'anthropic'", name="anthropic")
+
+        monkeypatch.setattr(cache_model, "build_cache_aware_claude", _missing_build)
+
+        boundary = importlib.import_module(
+            "magi_agent.shadow.gate5b4c3_live_runner_boundary"
+        )
+        result = boundary._gate1a_correlated_model_or_label(
+            "anthropic", "claude-sonnet-4-6", None, None
+        )
+        assert result == "claude-sonnet-4-6"
+
     def test_gemini_route_unchanged(self) -> None:
         boundary = importlib.import_module(
             "magi_agent.shadow.gate5b4c3_live_runner_boundary"

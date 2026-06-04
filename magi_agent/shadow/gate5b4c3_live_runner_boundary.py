@@ -865,7 +865,12 @@ def _gate1a_correlated_model_or_label(
             build_cache_aware_claude,
         )
 
-        return build_cache_aware_claude(model_label)
+        try:
+            return build_cache_aware_claude(model_label)
+        except ModuleNotFoundError as exc:
+            if exc.name != "anthropic":
+                raise
+            return model_label
 
     if (
         context is None
