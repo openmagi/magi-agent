@@ -111,6 +111,23 @@ def classify_path_access(request: PathAccessRequest) -> PathAccessDecision:
     path_digest = _digest(canonical_path)
 
     if _is_under(canonical_path, workspace_root):
+        # Read and list operations are silent (no approval needed) — mirrors
+        # OpenCode's ``read:"*":"allow"`` posture.
+        # Write, delete, and execute operations require approval:
+        # - write/delete mutate workspace state directly.
+        # - execute is treated as mutation-class: running a workspace file carries
+        #   side-effects of the same magnitude as writing it, and applying the same
+        #   approval posture closes the "write then execute silently" gap.
+        _mutation_class = {"write", "delete", "execute"}
+        if request.operation_class in _mutation_class:
+            return PathAccessDecision(
+                status="workspace_local",
+                operationClass=request.operation_class,
+                canonicalPathPrefix=workspace_root,
+                pathDigest=path_digest,
+                approvalRequired=True,
+                reasonCodes=("workspace_write_requires_approval",),
+            )
         return PathAccessDecision(
             status="workspace_local",
             operationClass=request.operation_class,
