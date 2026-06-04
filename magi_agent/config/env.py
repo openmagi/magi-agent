@@ -1316,6 +1316,22 @@ def general_automation_live_enabled(env: Mapping[str, str] | None = None) -> boo
     return _is_true(env.get("MAGI_GA_LIVE_ENABLED"))
 
 
+def is_message_cache_enabled(env: Mapping[str, str] | None = None) -> bool:
+    """Single source of truth for the message-tail prompt-cache flag.
+
+    Reads ``MAGI_MESSAGE_CACHE_ENABLED`` (default OFF). When enabled, the
+    runtime may mark the last ~2 non-system conversation messages with an
+    Anthropic ``cache_control: {type: ephemeral}`` marker so the growing
+    conversation tail is cached in addition to the system prefix.
+
+    Args:
+        env: Optional environment mapping. Defaults to ``os.environ`` so the
+            flag can be evaluated against the live process environment.
+    """
+    source: Mapping[str, str] = os.environ if env is None else env
+    return _is_true(source.get("MAGI_MESSAGE_CACHE_ENABLED"))
+
+
 def _is_true(value: str | None) -> bool:
     return (value or "").strip().lower() in _TRUE_VALUES
 

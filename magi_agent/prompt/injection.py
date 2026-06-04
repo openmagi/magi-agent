@@ -74,6 +74,11 @@ class CacheControlInjector:
             Ignored when an explicit provider is given.
     """
 
+    # Anthropic accepts at most 4 cache breakpoints per request. The system
+    # prefix already reserves up to 2 (see ``build_system_prompt_blocks``), so
+    # the rolling conversation tail may use at most 2 more.
+    _MESSAGE_TAIL_MAX_BREAKPOINTS = 2
+
     def __init__(self, provider: str = "auto", model: str = "") -> None:
         resolved = provider if provider != "auto" else detect_provider(model)
         self._strategy: ProviderCacheStrategy = get_strategy(resolved)
@@ -105,6 +110,61 @@ class CacheControlInjector:
                 entry = self._strategy.apply_cache_control(entry, block.cache_scope)
             result.append(entry)
         return result
+
+    def mark_message_tail(
+        self,
+        messages: list[dict],
+        *,
+        tail_size: int = 2,
+    ) -> list[dict]:
+        """Mark the last *tail_size* non-system messages with cache markers.
+
+        Mirrors OpenCode's rolling-tail prompt caching: the growing
+        conversation tail is cached (in addition to the system prefix) so that
+        per-turn input cost shrinks as the conversation grows.
+
+        Behaviour by provider:
+
+        - **Anthropic** (``claude``): each of the last *tail_size* non-system
+          messages gets an ``cache_control: {type: ephemeral}`` marker placed
+          on its last content block.
+        - **OpenAI / Google / unknown**: no-op — those providers auto-cache
+          common prefixes, so explicit markers are unnecessary (and Anthropic
+          markers would be invalid on their payloads).
+
+        The number of new breakpoints is capped at
+        :attr:`_MESSAGE_TAIL_MAX_BREAKPOINTS` (2) so that, combined with the
+        up-to-2 breakpoints the system prefix may already carry, the request
+        never exceeds Anthropic's 4-breakpoint limit (rule 3).
+
+        The Anthropic marking itself delegates to the single shared helper
+        :func:`magi_agent.adk_bridge.anthropic_cache_model.inject_message_tail_cache_control`,
+        which is also what the live ADK path uses — so the marker logic has one
+        source of truth. This method adds only the provider gate (Anthropic vs
+        no-op) on top of that helper.
+
+        Args:
+            messages: Ordered conversation messages in Anthropic/Messages shape
+                (``{"role": ..., "content": [...] | str}``). System messages
+                (``role == "system"``) are never marked.
+            tail_size: How many trailing non-system messages to mark. Capped to
+                :attr:`_MESSAGE_TAIL_MAX_BREAKPOINTS`.
+
+        Returns:
+            A new list of messages (shallow-copied for any message that is
+            modified). The input list and its messages are never mutated.
+        """
+        if self._resolved_provider != "anthropic":
+            return [dict(message) for message in messages]
+
+        # Single source of truth for the Anthropic rolling-tail marker. Imported
+        # lazily to avoid a hard dependency from the pure prompt layer onto the
+        # ADK bridge module (which carries the optional ``anthropic`` gating).
+        from magi_agent.adk_bridge.anthropic_cache_model import (
+            inject_message_tail_cache_control,
+        )
+
+        return inject_message_tail_cache_control(messages, tail_size=tail_size)
 
     @property
     def resolved_provider(self) -> str:

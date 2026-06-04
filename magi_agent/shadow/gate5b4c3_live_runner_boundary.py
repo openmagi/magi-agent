@@ -829,12 +829,49 @@ async def run_gate5b4c3_live_runner_boundary_async(
     return await boundary.invoke_async(request, config=config)
 
 
+def _is_anthropic_route(provider_label: str, model_label: str) -> bool:
+    """True when the route resolves to a Claude/Anthropic model via ADK.
+
+    ADK's ``LLMRegistry`` matches Claude on ``claude-3-*`` / ``claude-*-4*``
+    model ids; an explicit ``anthropic`` provider label also selects it. We
+    mirror that here so the cache-aware subclass is chosen for the same routes
+    ADK would route to a Claude/Anthropic model.
+
+    Note: ``startswith("claude-")`` is a deliberate *superset* of ADK's two
+    regexes (``claude-3-.*`` / ``claude-.*-4.*``). This is intentional
+    future-proofing — any new ``claude-<gen>`` id should still take the
+    cache-aware path. A label that starts with ``claude-`` but isn't yet in
+    ADK's registry would simply fail to resolve inside ADK (unchanged from
+    today), so the broader prefix is safe.
+    """
+    label = (model_label or "").lower()
+    if provider_label == "anthropic":
+        return True
+    return label.startswith("claude-") or label.startswith("anthropic/")
+
+
 def _gate1a_correlated_model_or_label(
     provider_label: str,
     model_label: str,
     context: Gate1AEgressCorrelationContext | None,
     proxy_url: str | None,
 ) -> object:
+    if _is_anthropic_route(provider_label, model_label):
+        # Route Claude/anthropic models through magi's cache-aware ADK subclass
+        # so the outgoing Anthropic request carries rolling-tail cache markers
+        # (gated on MAGI_MESSAGE_CACHE_ENABLED). The ``anthropic`` package is
+        # imported lazily inside the builder, matching ADK's own gating.
+        from magi_agent.adk_bridge.anthropic_cache_model import (
+            build_cache_aware_claude,
+        )
+
+        try:
+            return build_cache_aware_claude(model_label)
+        except ModuleNotFoundError as exc:
+            if exc.name != "anthropic":
+                raise
+            return model_label
+
     if (
         context is None
         or not proxy_url
