@@ -39,6 +39,8 @@ MAX_STEPS_WRAP_UP_MESSAGE: str = (
     "3. **Recommended next steps** — suggest follow-up actions or continuations "
     "the user should take to move forward."
 )
+
+
 @dataclass(frozen=True)
 class MaxStepsBrakeResult:
     """Result of :func:`maybe_apply_max_steps_brake`.
