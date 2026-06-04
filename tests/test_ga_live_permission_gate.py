@@ -367,3 +367,61 @@ def test_non_general_dispatch_byte_identical_to_baseline(
         _registry_with_handler("Bash"), "Bash", dict(args), _coding_context()
     )
     assert _normalize(live.model_dump()) == _normalize(baseline.model_dump())
+
+
+# ---------------------------------------------------------------------------
+# 6. Flag-ON + NO execution_contract (None) → gate inactive, pure bypass
+# ---------------------------------------------------------------------------
+
+
+def _no_contract_context() -> ToolContext:
+    """ToolContext with no execution_contract — represents an unknown/unset role."""
+    return ToolContext(
+        botId="test-bot",
+        turnId="turn-1",
+        workspaceRoot=WORKSPACE_ROOT,
+        executionContract=None,
+    )
+
+
+def test_no_execution_contract_gate_inactive(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Flag-ON + no execution_contract: gate is NOT active (unset ≠ general)."""
+    monkeypatch.setenv("MAGI_GA_LIVE_ENABLED", "1")
+    gate = GeneralAutomationLiveGate()
+    assert gate.is_active(_no_contract_context()) is False
+
+
+def test_no_execution_contract_classify_pre_bypass(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Flag-ON + no execution_contract: classify_pre returns inactive bypass outcome."""
+    monkeypatch.setenv("MAGI_GA_LIVE_ENABLED", "1")
+    gate = GeneralAutomationLiveGate()
+    outcome = gate.classify_pre(
+        "Bash",
+        {"command": "rm -rf /workspace/bot/data"},
+        _no_contract_context(),
+        mode="act",
+    )
+    assert outcome.active is False
+    assert outcome.decision == "allow"
+    assert outcome.receipt is None
+    assert outcome.control_projection is None
+
+
+def test_no_execution_contract_dispatch_byte_identical_to_baseline(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Flag-ON + no execution_contract: dispatch is byte-identical to gate-disabled baseline."""
+    monkeypatch.setenv("MAGI_GA_LIVE_ENABLED", "1")
+    args = {"command": "rm -rf /workspace/bot/data"}
+
+    live = asyncio.run(
+        ToolDispatcher(_registry_with_handler("Bash")).dispatch(
+            "Bash", dict(args), _no_contract_context(), mode="act"
+        )
+    )
+    baseline = _baseline_dispatch(
+        _registry_with_handler("Bash"), "Bash", dict(args), _no_contract_context()
+    )
+    assert _normalize(live.model_dump()) == _normalize(baseline.model_dump())

@@ -311,7 +311,10 @@ def _agent_role(context: ToolContext) -> str:
             value = contract.get(key)
             if isinstance(value, str):
                 return value.strip().casefold().replace("-", "_")
-    return "general"
+    # No execution_contract present — unknown role, not "general".
+    # Returning "" ensures is_active() returns False (bypass) rather than
+    # incorrectly treating every uncontracted dispatch as general-role.
+    return ""
 
 
 def _workspace_root(context: ToolContext) -> str:
