@@ -14,7 +14,7 @@ def test_readme_uses_public_open_magi_agent_naming() -> None:
     text = _readme()
 
     assert text.startswith("<div align=\"center\">\n\n# Open Magi Agent\n")
-    assert "**The programmable agent that complies with your rules.**" in text
+    assert "**The programmable AI agent that gets real work done under your rules.**" in text
     assert "Local-first agent runtime and CLI" not in text
     assert "OpenMagi Python ADK runtime" not in text
     assert ("Cla" + "wy") not in text
@@ -28,7 +28,7 @@ def test_readme_documents_live_homebrew_formula() -> None:
     assert "magi-agent serve --help" in text
     assert "brew reinstall openmagi/tap/magi-agent --force-bottle" in text
     assert "Homebrew Tap" not in text
-    assert "install-Homebrew" not in text
+    assert "install-Homebrew" in text
 
 
 def test_readme_documents_local_web_dashboard() -> None:

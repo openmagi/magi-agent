@@ -2,23 +2,25 @@
 
 # Open Magi Agent
 
-**The programmable agent that complies with your rules.**
+**The programmable AI agent that gets real work done under your rules.**
 
 [Website](https://openmagi.ai) ·
 [CLI](docs/cli/magi.md) ·
 [Releases](https://github.com/openmagi/magi-agent/releases)
 
 ![status](https://img.shields.io/badge/status-early%20beta-f97316)
-![latest](https://img.shields.io/badge/latest-v0.1.7-2563eb)
+![install](https://img.shields.io/badge/install-Homebrew-2563eb)
+![cli](https://img.shields.io/badge/CLI-magi-7c3aed)
+![dashboard](https://img.shields.io/badge/dashboard-local-16a34a)
 ![license](https://img.shields.io/badge/license-Apache--2.0-111827)
-![runtime](https://img.shields.io/badge/runtime-Magi%20Agent-7c3aed)
 
 </div>
 
 > **Early beta:** Magi Agent is under active development. Expect rough edges.
 
-> **Local by default:** Run the agent, CLI, and dashboard on your machine.
-> Optional services and external integrations stay explicit and default-off.
+> **Install once, run locally:** Homebrew installs the runtime, the `magi` CLI,
+> and the local web dashboard. Optional external integrations require explicit
+> configuration.
 
 Magi Agent is a programmable AI agent runtime that actually gets things done.
 Instead of relying on prompts and hoping the model follows every instruction,
@@ -89,7 +91,9 @@ open http://localhost:8080/dashboard
 Use the CLI:
 
 ```bash
+magi
 magi --help
+magi -p "Inspect this repository and summarize the runnable surfaces"
 magi --output text "Summarize this repository"
 ```
 
@@ -295,7 +299,9 @@ validation runs, and the transitions that are allowed to continue.
 The `magi` CLI is the local interface for the same runtime contracts.
 
 ```bash
+magi
 magi --help
+magi -p "Inspect this repository and summarize the test surface"
 magi --output text "Inspect this repository and summarize the test surface"
 magi --output stream-json "Inspect this repository and summarize the test surface"
 ```
@@ -329,7 +335,7 @@ and audit checkpoints.
 
 ## Develop From Source
 
-Homebrew is the normal install path. This section is for maintainers and
+Homebrew is the normal install path. This section is only for maintainers and
 contributors working from a source checkout:
 
 ```bash

@@ -27,10 +27,11 @@ def _dashboard_html(runtime: OpenMagiRuntime) -> str:
   <style>
     :root {{
       color-scheme: light;
-      --bg: #f5f6fa;
+      --bg: #f7f8fb;
       --surface: #ffffff;
       --surface-2: #fbfcff;
-      --surface-3: #eef1f6;
+      --surface-3: #eef1f7;
+      --surface-4: #f4f0ff;
       --ink: #222736;
       --muted: #6d7484;
       --soft: #9aa3b5;
@@ -42,6 +43,7 @@ def _dashboard_html(runtime: OpenMagiRuntime) -> str:
       --red: #d9495f;
       --amber: #b7791f;
       --shadow: 0 14px 36px rgba(28, 34, 48, 0.08);
+      --shadow-soft: 0 5px 18px rgba(31, 38, 52, 0.05);
       --radius: 8px;
     }}
     * {{ box-sizing: border-box; }}
@@ -68,7 +70,7 @@ def _dashboard_html(runtime: OpenMagiRuntime) -> str:
       border-right: 1px solid var(--line);
     }}
     .brand {{
-      padding: 22px 18px 18px;
+      padding: 22px 18px 16px;
       border-bottom: 1px solid var(--line);
     }}
     .brand h1 {{
@@ -83,6 +85,12 @@ def _dashboard_html(runtime: OpenMagiRuntime) -> str:
       margin-top: 8px;
       color: var(--muted);
       font-size: 13px;
+    }}
+    .brand-subtitle {{
+      margin: 10px 0 0;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.45;
     }}
     .dot {{
       width: 8px;
@@ -119,6 +127,7 @@ def _dashboard_html(runtime: OpenMagiRuntime) -> str:
       background: transparent;
       color: var(--muted);
       text-align: left;
+      transition: background 150ms ease, color 150ms ease, border-color 150ms ease;
     }}
     .channel:hover {{
       background: var(--surface-3);
@@ -144,6 +153,19 @@ def _dashboard_html(runtime: OpenMagiRuntime) -> str:
       border-top: 1px solid var(--line);
       color: var(--muted);
       font-size: 13px;
+    }}
+    .footer-row {{
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      min-width: 0;
+    }}
+    .footer-row strong {{
+      color: var(--ink);
+      font-weight: 600;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
     }}
     .main {{
       display: grid;
@@ -212,8 +234,46 @@ def _dashboard_html(runtime: OpenMagiRuntime) -> str:
       flex-direction: column;
       gap: 18px;
     }}
+    .run-summary {{
+      max-width: 980px;
+      width: 100%;
+      margin: 0 auto;
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 10px;
+    }}
+    .summary-card {{
+      min-height: 78px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: var(--surface);
+      box-shadow: var(--shadow-soft);
+      padding: 12px;
+    }}
+    .summary-card span {{
+      display: block;
+      color: var(--soft);
+      font-size: 11px;
+      font-weight: 800;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+    }}
+    .summary-card strong {{
+      display: block;
+      margin-top: 7px;
+      color: var(--ink);
+      font-size: 14px;
+      line-height: 1.25;
+    }}
+    .summary-card small {{
+      display: block;
+      margin-top: 5px;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.35;
+    }}
     .empty-state {{
-      max-width: 880px;
+      max-width: 980px;
       width: 100%;
       margin: 0 auto;
       color: var(--muted);
@@ -233,8 +293,8 @@ def _dashboard_html(runtime: OpenMagiRuntime) -> str:
       border: 1px solid var(--line);
       border-radius: var(--radius);
       background: var(--surface);
-      box-shadow: 0 5px 22px rgba(31, 38, 52, 0.05);
-      padding: 16px;
+      box-shadow: var(--shadow-soft);
+      padding: 18px;
     }}
     .trace-grid {{
       display: grid;
@@ -274,13 +334,14 @@ def _dashboard_html(runtime: OpenMagiRuntime) -> str:
       color: var(--ink);
       text-align: left;
       line-height: 1.35;
+      min-height: 58px;
     }}
     .starter:hover {{
       border-color: var(--line-strong);
       box-shadow: 0 5px 16px rgba(31, 38, 52, 0.06);
     }}
     .message {{
-      max-width: 880px;
+      max-width: 980px;
       white-space: pre-wrap;
       line-height: 1.58;
       word-break: break-word;
@@ -341,6 +402,10 @@ def _dashboard_html(runtime: OpenMagiRuntime) -> str:
       color: var(--muted);
       font-size: 13px;
     }}
+    .mode strong {{
+      color: var(--ink);
+      font-weight: 700;
+    }}
     textarea {{
       width: 100%;
       min-height: 104px;
@@ -355,11 +420,20 @@ def _dashboard_html(runtime: OpenMagiRuntime) -> str:
     }}
     .composer-actions {{
       display: grid;
-      grid-template-columns: minmax(180px, 1fr) auto;
+      grid-template-columns: auto minmax(180px, 1fr) auto;
       gap: 12px;
       align-items: center;
       padding: 12px 14px 14px;
       border-top: 1px solid var(--line);
+    }}
+    .select-field {{
+      min-width: 170px;
+      height: 34px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      padding: 0 10px;
+      color: var(--ink);
+      background: var(--surface-2);
     }}
     .token-field {{
       display: flex;
@@ -485,6 +559,14 @@ def _dashboard_html(runtime: OpenMagiRuntime) -> str:
       flex-direction: column;
       gap: 8px;
     }}
+    .panel-heading {{
+      margin: 0 0 10px;
+      color: var(--soft);
+      font-size: 11px;
+      font-weight: 800;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+    }}
     .event {{
       border: 1px solid var(--line);
       border-radius: var(--radius);
@@ -545,6 +627,16 @@ def _dashboard_html(runtime: OpenMagiRuntime) -> str:
       color: var(--muted);
       font-size: 13px;
     }}
+    .settings-note {{
+      margin: 12px 0 0;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: var(--surface);
+      color: var(--muted);
+      padding: 10px;
+      font-size: 12px;
+      line-height: 1.45;
+    }}
     .status-band {{
       display: grid;
       grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -576,6 +668,7 @@ def _dashboard_html(runtime: OpenMagiRuntime) -> str:
     @media (max-width: 1120px) {{
       .app {{ grid-template-columns: 220px minmax(0, 1fr); }}
       .inspector {{ grid-column: 1 / -1; min-height: 420px; border-left: 0; border-top: 1px solid var(--line); }}
+      .run-summary {{ grid-template-columns: repeat(2, minmax(0, 1fr)); }}
     }}
     @media (max-width: 760px) {{
       .app {{ grid-template-columns: 1fr; }}
@@ -586,7 +679,9 @@ def _dashboard_html(runtime: OpenMagiRuntime) -> str:
       .topbar-actions .pill:not(#chat-route-pill) {{ display: none; }}
       .starter-grid {{ grid-template-columns: 1fr; }}
       .trace-grid {{ grid-template-columns: 1fr; }}
+      .run-summary {{ grid-template-columns: 1fr; }}
       .composer-actions {{ grid-template-columns: 1fr; }}
+      .select-field {{ width: 100%; }}
     }}
   </style>
 </head>
@@ -597,6 +692,7 @@ def _dashboard_html(runtime: OpenMagiRuntime) -> str:
       <div class="brand">
         <h1>Open Magi Agent</h1>
         <div class="brand-meta"><span class="dot" id="runtime-dot"></span><span id="runtime-label">Checking runtime</span></div>
+        <p class="brand-subtitle">Local dashboard for chat, work events, knowledge, tools, and evidence receipts.</p>
       </div>
       <nav class="channel-list" aria-label="Local channels">
         <p class="section-label">General</p>
@@ -610,8 +706,8 @@ def _dashboard_html(runtime: OpenMagiRuntime) -> str:
         <button class="channel" type="button"><span>*</span><span>Evidence</span><span></span></button>
       </nav>
       <div class="sidebar-footer">
-        <span id="footer-runtime">magi-agent</span>
-        <span id="footer-version"></span>
+        <div class="footer-row"><span>Runtime</span><strong id="footer-runtime">magi-agent</strong></div>
+        <div class="footer-row"><span>Version</span><strong id="footer-version"></strong></div>
       </div>
     </aside>
 
@@ -629,6 +725,12 @@ def _dashboard_html(runtime: OpenMagiRuntime) -> str:
       </header>
 
       <section class="messages" id="messages" aria-live="polite">
+        <div class="run-summary" aria-label="Runtime status summary">
+          <div class="summary-card"><span>Agent</span><strong>Main session</strong><small>Local operator run</small></div>
+          <div class="summary-card"><span>Memory</span><strong>Local contracts</strong><small>Receipts when enabled</small></div>
+          <div class="summary-card"><span>Tools</span><strong>First-party surfaces</strong><small>Research, coding, docs, automation</small></div>
+          <div class="summary-card"><span>Evidence</span><strong>Runtime ledger</strong><small>Public-safe event stream</small></div>
+        </div>
         <div class="empty-state" id="empty-state">
           <div class="welcome-message">
             <h3>Open Magi Agent is ready.</h3>
@@ -651,14 +753,17 @@ def _dashboard_html(runtime: OpenMagiRuntime) -> str:
       <section class="composer-wrap">
         <form class="composer" id="chat-form">
           <div class="composer-strip">
-            <span class="mode"><span class="dot ready"></span>Live run</span>
-            <span class="mode">Streams ADK events when the runtime emits them</span>
+            <span class="mode"><span class="dot ready"></span><strong>Live run</strong></span>
+            <span class="mode">Streams ADK events, tool progress, and evidence when emitted</span>
           </div>
           <textarea id="prompt" placeholder="Ask the local agent to inspect, write, research, or plan..."></textarea>
           <div class="composer-actions">
+            <select class="select-field" id="model-select" aria-label="Model">
+              <option>local-dev</option>
+            </select>
             <div class="token-field">
               <label for="gateway-token">Gateway token</label>
-              <input id="gateway-token" type="password" autocomplete="current-password" placeholder="local-dev-token unless you set GATEWAY_TOKEN">
+              <input id="gateway-token" type="password" autocomplete="current-password" placeholder="local-dev-token">
             </div>
             <button class="send" id="send-button" type="submit">Send</button>
           </div>
@@ -683,6 +788,7 @@ def _dashboard_html(runtime: OpenMagiRuntime) -> str:
       </div>
       <div class="panel">
         <div id="panel-work" class="timeline">
+          <p class="panel-heading">Agents</p>
           <div class="agent-card">
             <div class="agent-card-head">
               <div>
@@ -693,6 +799,7 @@ def _dashboard_html(runtime: OpenMagiRuntime) -> str:
             </div>
             <small>Public ADK events, tool progress, evidence receipts, and transport state appear here during a run.</small>
           </div>
+          <p class="panel-heading">Main session</p>
           <div class="event pending"><strong>Runtime check</strong><code>Waiting for /healthz</code></div>
         </div>
         <div id="panel-knowledge" class="hidden">
@@ -701,6 +808,7 @@ def _dashboard_html(runtime: OpenMagiRuntime) -> str:
             <div class="knowledge-item"><span>[]</span><span>Workspace files</span></div>
             <div class="knowledge-item"><span>[]</span><span>Memory receipts</span></div>
             <div class="knowledge-item"><span>[]</span><span>Evidence ledger</span></div>
+            <div class="knowledge-item"><span>[]</span><span>Generated artifacts</span></div>
           </div>
         </div>
         <div id="panel-settings" class="hidden">
@@ -710,6 +818,7 @@ def _dashboard_html(runtime: OpenMagiRuntime) -> str:
             <div class="kv-row"><span>Bot</span><strong id="settings-bot">local-bot</strong></div>
             <div class="kv-row"><span>Engine</span><strong id="settings-engine">adk-python</strong></div>
           </div>
+          <p class="settings-note">Set GATEWAY_TOKEN before starting the server to require a custom local bearer token.</p>
         </div>
       </div>
     </aside>
@@ -724,6 +833,7 @@ def _dashboard_html(runtime: OpenMagiRuntime) -> str:
     const promptInput = document.getElementById("prompt");
     const tokenInput = document.getElementById("gateway-token");
     const sendButton = document.getElementById("send-button");
+    const modelSelect = document.getElementById("model-select");
     const runtimeDot = document.getElementById("runtime-dot");
     const runtimeLabel = document.getElementById("runtime-label");
     const runtimeKv = document.getElementById("runtime-kv");
@@ -733,13 +843,14 @@ def _dashboard_html(runtime: OpenMagiRuntime) -> str:
     const agentStatePill = document.getElementById("agent-state-pill");
     const tokenKey = "magi-agent:gateway-token";
 
-    document.getElementById("footer-runtime").textContent = `${{bootstrap.runtime}} / ${{bootstrap.botId}}`;
-    document.getElementById("footer-version").textContent = `version ${{bootstrap.version}}`;
+    document.getElementById("footer-runtime").textContent = bootstrap.runtime;
+    document.getElementById("footer-version").textContent = bootstrap.version;
     document.getElementById("settings-runtime").textContent = bootstrap.runtime;
     document.getElementById("settings-model").textContent = bootstrap.model;
     document.getElementById("settings-bot").textContent = bootstrap.botId;
     document.getElementById("settings-engine").textContent = bootstrap.runtimeEngine || "adk-python";
     tileRuntime.textContent = bootstrap.runtime;
+    modelSelect.innerHTML = `<option>${{escapeText(bootstrap.model)}}</option>`;
     tokenInput.value = localStorage.getItem(tokenKey) || "";
 
     function escapeText(value) {{
@@ -887,10 +998,10 @@ def _dashboard_html(runtime: OpenMagiRuntime) -> str:
         method: "POST",
         headers: {{
           "Content-Type": "application/json",
-          "Authorization": `Bearer ${{token}}`,
+          ...(token ? {{ "Authorization": `Bearer ${{token}}` }} : {{}}),
         }},
         body: JSON.stringify({{
-          model: bootstrap.model,
+          model: modelSelect.value || bootstrap.model,
           messages: [{{ role: "user", content: prompt }}],
           stream: true,
         }}),
