@@ -437,8 +437,11 @@ def _raw_path_arguments(tokens: tuple[str, ...]) -> tuple[str, ...]:
     Mirrors the logic of ``_path_arguments`` but preserves the raw token values
     so they can be passed to ``classify_path_access``.  Redirect targets (after
     ``>``, ``>>`` etc.) are included; the verb itself and flag tokens are skipped.
-    Dynamic substitutions (``$(…)``, ``${…}``) are kept as-is; ``classify_path_access``
-    will canonicalize them and typically mark them ``blocked``, which is safe.
+    Only tokens containing '/' are extracted (same filter as the original path
+    extractor), so command substitutions and globs without '/' (e.g. ``$(cmd)``,
+    ``*.txt``) are never treated as path targets. Tokens with '/' are passed to
+    ``classify_path_access``: relative ones canonicalize to workspace-local, absolute
+    system paths (e.g. ``/etc/...``) are blocked.
     """
     paths: list[str] = []
     skip_next = False
