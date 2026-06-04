@@ -1114,20 +1114,25 @@ class Gate5BFullToolHost:
         except Gate5BFullToolPathPolicyError:
             relative = str(path_text or "").replace("\\", "/").strip().strip("/")
             basename = relative.rsplit("/", 1)[-1] if relative else relative
-            if basename and not (self.workspace_root / relative).exists():
-                suggestions = self._did_you_mean_candidates(
-                    relative, basename, did_you_mean
-                )
-                if suggestions:
-                    return {
-                        "fileNotFound": True,
-                        "path": relative,
-                        "suggestions": suggestions,
-                        "message": (
-                            f"File not found: {relative}. "
-                            f"Did you mean? {', '.join(suggestions)}"
-                        ),
-                    }
+            # SECURITY: if the path is a workspace escape (contains ".." segments,
+            # starts with "/" or "~") do NOT probe the filesystem outside the root
+            # and do NOT build did-you-mean candidates — return an empty-suggestion
+            # fileNotFound without touching anything outside workspace.
+            if basename and not _is_gate5b_workspace_escape(path_text):
+                if not (self.workspace_root / relative).exists():
+                    suggestions = self._did_you_mean_candidates(
+                        relative, basename, did_you_mean
+                    )
+                    if suggestions:
+                        return {
+                            "fileNotFound": True,
+                            "path": relative,
+                            "suggestions": suggestions,
+                            "message": (
+                                f"File not found: {relative}. "
+                                f"Did you mean? {', '.join(suggestions)}"
+                            ),
+                        }
             raise
 
         path_digest = _digest(target.relative_to(self.workspace_root).as_posix())
@@ -1179,6 +1184,17 @@ class Gate5BFullToolHost:
     ) -> list[str]:
         parent_rel = relative.rsplit("/", 1)[0] if "/" in relative else ""
         parent_dir = self.workspace_root / parent_rel if parent_rel else self.workspace_root
+        # Defense-in-depth: resolve parent_dir and verify it is workspace_root or a
+        # strict descendant before calling iterdir().  Any path that resolves outside
+        # the workspace (e.g. via symlinks or residual ".." segments) gets an empty
+        # result — we never traverse outside the workspace boundary.
+        try:
+            resolved_root = self.workspace_root.resolve(strict=False)
+            resolved_parent = parent_dir.resolve(strict=False)
+        except OSError:
+            return []
+        if resolved_root not in (resolved_parent, *resolved_parent.parents):
+            return []
         try:
             entries = [
                 entry.name
@@ -1557,6 +1573,21 @@ def _read_limit(value: object, default: int) -> int:
         parsed = int(value.strip())
         return min(parsed, default) if parsed >= 1 else default
     return default
+
+
+def _is_gate5b_workspace_escape(path_text: str) -> bool:
+    """Return True if *path_text* attempts to escape the workspace.
+
+    Matches paths that start with '/' or '~' (absolute / home-relative) or
+    that contain any '..' segment after slash-normalisation.  Used to gate
+    the did-you-mean branch so we never probe the filesystem outside the
+    workspace root.
+    """
+    text = str(path_text or "").replace("\\", "/").strip()
+    if not text or text.startswith(("/", "~")):
+        return True
+    parts = text.split("/")
+    return any(part == ".." for part in parts)
 
 
 def _safe_child_path(root: Path, path_text: str, *, allow_missing: bool = False) -> Path:

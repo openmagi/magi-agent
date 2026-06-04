@@ -29,6 +29,36 @@ def test_number_lines_trailing_newline_no_phantom_line():
     assert out == "1: only"
 
 
+def test_number_lines_crlf_consistent_with_apply_caps():
+    # apply_caps and number_lines both use split("\n") so their line counts stay
+    # in sync for CRLF and mixed-EOL content.
+    # split("\n") on "alpha\r\nbeta\r\ngamma\r\n" → ["alpha\r", "beta\r", "gamma\r", ""]
+    # apply_caps keeps all 4 tokens (line cap not hit), joins with "\n" → body with
+    # trailing "\n".  number_lines drops the trailing empty token → 3 numbered lines.
+    # The important invariant: the NUMBER of non-empty lines seen by number_lines
+    # equals the line-cap count tracked by apply_caps (both count split("\n") items,
+    # both ignore the trailing empty from a trailing newline).
+    crlf_text = "alpha\r\nbeta\r\ngamma\r\n"
+    capped, truncated, _ = apply_caps(crlf_text, max_lines=10, max_bytes=10000)
+    assert not truncated
+    numbered = number_lines(capped)
+    # 3 real lines → 3 numbered lines.
+    assert numbered.count("\n") == 2  # "1: alpha\r\n2: beta\r\n3: gamma\r"
+    assert numbered.startswith("1: alpha\r")
+    assert "2: beta\r" in numbered
+    assert "3: gamma\r" in numbered
+
+
+def test_apply_caps_crlf_line_cap_consistent():
+    # Verify apply_caps counts CRLF lines (split on "\n") consistently with
+    # number_lines so that the offset footer is accurate when truncation occurs.
+    crlf_text = "line1\r\nline2\r\nline3\r\nline4\r\nline5\r\n"
+    capped, truncated, next_offset = apply_caps(crlf_text, max_lines=3, max_bytes=100000)
+    assert truncated is True
+    assert next_offset == 4
+    assert "use offset=4 to continue" in capped
+
+
 def test_apply_caps_no_truncation():
     text = "a\nb\nc"
     body, truncated, next_offset = apply_caps(text, max_lines=10, max_bytes=1000)
@@ -78,6 +108,38 @@ def test_is_binary_high_nonprintable_true():
 
 def test_is_binary_empty_false():
     assert is_binary(b"") is False
+
+
+def test_is_binary_multibyte_utf8_korean_not_binary():
+    # Multibyte UTF-8 characters must NOT be treated as binary — every byte of
+    # a valid UTF-8 sequence decodes to a printable codepoint.
+    assert is_binary("안녕하세요".encode("utf-8")) is False
+
+
+def test_is_binary_emoji_utf8_not_binary():
+    # 4-byte emoji sequences are valid UTF-8 and must not trigger the heuristic.
+    assert is_binary("hello 😀".encode("utf-8")) is False
+
+
+def test_is_binary_control_char_heavy_is_flagged():
+    # A sample dominated by raw control-character bytes (SOH–US, i.e. 0x01–0x1f
+    # excluding whitespace) IS treated as binary.  The heuristic flags > 30 %
+    # non-printable bytes.  Document the behaviour explicitly so future changes
+    # to the threshold are intentional.
+    # bytes(range(1, 32)) contains 31 control chars; repeated 4× = 124 bytes,
+    # ~84 % non-printable — well above the 0.3 threshold.
+    control_heavy = bytes(range(1, 32)) * 4
+    assert is_binary(control_heavy) is True
+
+
+def test_is_binary_ansi_escape_not_flagged():
+    # NOTE: sparse ANSI sequences (e.g. \x1b[31m — only 1/5 bytes non-printable)
+    # do NOT cross the 0.3 non-printable threshold and are therefore NOT flagged
+    # as binary.  This is intentional: coloured terminal output is valid text.
+    # The threshold is designed to catch densely packed binary data, not log files
+    # with occasional colour codes.
+    sparse_ansi = b"\x1b[31m" * 40  # 20 % non-printable — below threshold
+    assert is_binary(sparse_ansi) is False
 
 
 def test_did_you_mean_finds_similar():

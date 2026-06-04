@@ -43,13 +43,19 @@ def number_lines(text: str, offset: int = 1) -> str:
     ``offset`` is the 1-indexed line number assigned to the first line of
     ``text`` (used when paging so numbering stays continuous). Values < 1 are
     coerced to 1. A trailing newline does not produce a spurious numbered line.
+
+    Uses ``split("\\n")`` (same strategy as :func:`apply_caps`) so line counts
+    stay in sync for CRLF and mixed-EOL content.  A trailing ``\\n`` produces a
+    final empty token that is dropped to avoid a spurious numbered blank line.
     """
     start = offset if offset >= 1 else 1
     if text == "":
         return ""
-    # ``splitlines`` drops the trailing newline; preserve display fidelity by
-    # numbering only real lines.
-    lines = text.splitlines()
+    # split("\n") matches apply_caps; drop a trailing empty token from a
+    # trailing newline so we don't produce a spurious blank numbered line.
+    lines = text.split("\n")
+    if lines and lines[-1] == "":
+        lines = lines[:-1]
     numbered = [f"{start + index}: {line}" for index, line in enumerate(lines)]
     return "\n".join(numbered)
 
@@ -70,6 +76,12 @@ def apply_caps(
 
     ``offset`` is the 1-indexed number of the first line in ``text`` so the
     footer reports an absolute, resumable line number.
+
+    **First-line invariant**: even if the very first line exceeds *max_bytes*
+    on its own, it is always included in the output (``kept`` will contain at
+    least that one line).  This prevents a pathological single-huge-line file
+    from returning an empty body.  Callers should not be surprised by a result
+    whose byte size exceeds *max_bytes* in that edge case.
     """
     start = offset if offset >= 1 else 1
     max_lines = max(max_lines, 1)

@@ -139,3 +139,45 @@ async def test_missing_file_does_not_leak_secret_names(tmp_path):
     outcome = await _read(bundle, "note.txt")
     suggestions = outcome.output_preview.get("suggestions", [])
     assert ".env" not in suggestions
+
+
+@pytest.mark.asyncio
+async def test_workspace_escape_path_no_suggestions_and_no_outside_listing(tmp_path):
+    """Escape paths (../../etc/passwd) must NOT produce suggestions and must NOT
+    list any directory outside the workspace — not even via did-you-mean.
+
+    The gate blocks the request (status='blocked', output_preview=None) — it
+    must not reach the did-you-mean branch at all for escape paths.
+    """
+    # Create a file in the workspace whose name resembles the escape target.
+    (tmp_path / "passwd").write_text("workspace-only\n", encoding="utf-8")
+    bundle = _bundle(tmp_path, read_quality_enabled=True)
+
+    # A classic directory-traversal attempt.
+    outcome = await _read(bundle, "../../etc/passwd")
+    # The gate must block with no output_preview — no suggestions surfaced.
+    assert outcome.status == "blocked", (
+        f"Expected blocked, got {outcome.status!r}"
+    )
+    assert outcome.output_preview is None, (
+        f"Escape path leaked output_preview: {outcome.output_preview}"
+    )
+
+
+@pytest.mark.asyncio
+async def test_within_workspace_dotdot_path_no_outside_listing(tmp_path):
+    """A path like 'subdir/../../etc/passwd' (uses '..' segments) must be
+    blocked with no did-you-mean suggestions leaking outside the workspace."""
+    sub = tmp_path / "subdir"
+    sub.mkdir()
+    (sub / "notes.txt").write_text("hi\n", encoding="utf-8")
+    bundle = _bundle(tmp_path, read_quality_enabled=True)
+
+    outcome = await _read(bundle, "subdir/../../etc/passwd")
+    # Must be blocked — no output_preview, no suggestions.
+    assert outcome.status == "blocked", (
+        f"Expected blocked, got {outcome.status!r}"
+    )
+    assert outcome.output_preview is None, (
+        f"Path with '..' leaked output_preview: {outcome.output_preview}"
+    )
