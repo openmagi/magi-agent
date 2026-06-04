@@ -142,11 +142,14 @@ def build_local_adk_runner(
         token_threshold=compaction_env.token_threshold,
         tail_events=compaction_env.tail_events,
     )
-    runner_plugins = [
-        plugin
-        for plugin in (edit_retry_plugin, resilience_plugin, compaction_plugin)
-        if plugin is not None
-    ]
+    # Compose plugins by APPEND (not reassignment) so that independent branches
+    # each adding their own plugin (e.g. PR12 resilience, PR14) merge as a union
+    # rather than one silently overwriting the other's plugins list.
+    runner_plugins = [edit_retry_plugin] if edit_retry_plugin is not None else []
+    if resilience_plugin is not None:
+        runner_plugins.append(resilience_plugin)
+    if compaction_plugin is not None:
+        runner_plugins.append(compaction_plugin)
     # ADK 1.33 deprecates ``Runner(plugins=...)``; the supported path wraps the
     # agent and plugins in an ``App``. An App with an empty plugins list behaves
     # identically to the old no-plugin runner (no deprecation warning, no plugin
