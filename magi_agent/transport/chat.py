@@ -45,6 +45,7 @@ from magi_agent.gates.gate5b_full_toolhost import (
     Gate5BFullToolHostConfig,
     build_gate5b_full_toolhost_bundle,
 )
+from magi_agent.config.env import is_read_quality_enabled
 from magi_agent.gates.gate2_readiness import gate2_readiness_health_metadata
 from magi_agent.gates.gate8_readiness import gate8_readiness_health_metadata
 from magi_agent.runtime.openmagi_runtime import OpenMagiRuntime
@@ -720,6 +721,11 @@ def build_gate5b_full_toolhost_config_from_env(
             "lspDiagnosticsEnabled": lsp_diagnostics.enabled,
             "lspDiagnosticsCap": lsp_diagnostics.cap,
             "lspDiagnosticsTimeoutMs": lsp_diagnostics.timeout_ms,
+            "readQualityEnabled": is_read_quality_enabled(env),
+            "readMaxLines": _int_env(
+                env.get("MAGI_READ_QUALITY_MAX_LINES"),
+                fallback=2000,
+            ),
         }
     )
 

@@ -277,6 +277,8 @@ class Gate5BFullToolHostConfig(_Gate5BFullModel):
         le=30000,
         alias="lspDiagnosticsTimeoutMs",
     )
+    read_quality_enabled: bool = Field(default=False, alias="readQualityEnabled")
+    read_max_lines: int = Field(default=2000, ge=1, le=100000, alias="readMaxLines")
 
     @field_validator("environment_allowlist", "allowed_tool_names", mode="before")
     @classmethod
@@ -683,10 +685,7 @@ class Gate5BFullToolHost:
         if tool_name == "Calculation":
             return {"value": _evaluate_expression(str(args.get("expression", "0")))}
         if tool_name == "FileRead":
-            target = _safe_child_path(self.workspace_root, str(args.get("path", "")))
-            full_content = target.read_text(encoding="utf-8", errors="replace")
-            self._record_full_read(target, full_content)
-            return {"pathDigest": _digest(target.relative_to(self.workspace_root).as_posix()), "content": full_content[: self.config.max_per_tool_output_bytes]}
+            return self._handle_file_read(args)
         if tool_name == "Glob":
             return {"matches": _safe_glob_files(self.workspace_root, str(args.get("pattern", "*")), limit=100)}
         if tool_name == "Grep":
@@ -1086,6 +1085,114 @@ class Gate5BFullToolHost:
             cap=self.config.lsp_diagnostics_cap,
         )
 
+    def _handle_file_read(self, args: Mapping[str, object]) -> object:
+        path_text = str(args.get("path", ""))
+        if not self.config.read_quality_enabled:
+            target = _safe_child_path(self.workspace_root, path_text)
+            content = target.read_text(encoding="utf-8", errors="replace")
+            self._record_full_read(target, content)
+            return {
+                "pathDigest": _digest(
+                    target.relative_to(self.workspace_root).as_posix()
+                ),
+                "content": content[: self.config.max_per_tool_output_bytes],
+            }
+
+        from magi_agent.coding.read_format import (
+            LINE_NUMBER_GUIDANCE,
+            apply_caps,
+            binary_file_message,
+            did_you_mean,
+            is_binary,
+            number_lines,
+        )
+
+        # Missing-file handling first so we can offer "Did you mean?" suggestions
+        # without leaking sealed/secret names (those raise before reaching here).
+        try:
+            target = _safe_child_path(self.workspace_root, path_text)
+        except Gate5BFullToolPathPolicyError:
+            relative = str(path_text or "").replace("\\", "/").strip().strip("/")
+            basename = relative.rsplit("/", 1)[-1] if relative else relative
+            if basename and not (self.workspace_root / relative).exists():
+                suggestions = self._did_you_mean_candidates(
+                    relative, basename, did_you_mean
+                )
+                if suggestions:
+                    return {
+                        "fileNotFound": True,
+                        "path": relative,
+                        "suggestions": suggestions,
+                        "message": (
+                            f"File not found: {relative}. "
+                            f"Did you mean? {', '.join(suggestions)}"
+                        ),
+                    }
+            raise
+
+        path_digest = _digest(target.relative_to(self.workspace_root).as_posix())
+        raw = target.read_bytes()
+        if is_binary(raw[:8192]):
+            return {
+                "pathDigest": path_digest,
+                "binary": True,
+                "message": binary_file_message(),
+            }
+
+        text = raw.decode("utf-8", errors="replace")
+        self._record_full_read(target, text)
+        # Redaction MUST happen before numbering/caps so secrets never re-appear.
+        redacted = _redact(text)
+        offset = _read_offset(args.get("offset"))
+        limit = _read_limit(args.get("limit"), self.config.read_max_lines)
+        if offset > 1:
+            redacted = "\n".join(redacted.split("\n")[offset - 1 :])
+        capped, truncated, next_offset = apply_caps(
+            redacted,
+            max_lines=limit,
+            max_bytes=self.config.max_per_tool_output_bytes,
+            offset=offset,
+        )
+        footer = ""
+        if truncated and next_offset is not None:
+            marker = f"\n(truncated at line {next_offset}; use offset={next_offset} to continue)"
+            if capped.endswith(marker):
+                capped = capped[: -len(marker)]
+            footer = marker
+        numbered = number_lines(capped, offset=offset) + footer
+        output: dict[str, object] = {
+            "pathDigest": path_digest,
+            "content": numbered,
+            "truncated": truncated,
+            "offset": offset,
+            "lineNumberGuidance": LINE_NUMBER_GUIDANCE,
+        }
+        if next_offset is not None:
+            output["nextOffset"] = next_offset
+        return output
+
+    def _did_you_mean_candidates(
+        self,
+        relative: str,
+        basename: str,
+        did_you_mean_fn: Callable[..., list[str]],
+    ) -> list[str]:
+        parent_rel = relative.rsplit("/", 1)[0] if "/" in relative else ""
+        parent_dir = self.workspace_root / parent_rel if parent_rel else self.workspace_root
+        try:
+            entries = [
+                entry.name
+                for entry in parent_dir.iterdir()
+                if entry.is_file()
+                and not entry.is_symlink()
+                and not _is_sensitive_workspace_path(
+                    Path(f"{parent_rel}/{entry.name}" if parent_rel else entry.name)
+                )
+            ]
+        except OSError:
+            return []
+        return did_you_mean_fn(entries, basename)
+
 
 def _diagnostics_checker_label(path: Path) -> str:
     language_id = language_id_for_path(path)
@@ -1428,6 +1535,28 @@ def _function_tool(name: str, func: Callable[..., object]) -> FunctionTool:
     func.__name__ = name
     func.__doc__ = f"Gate 5B selected full toolhost {name} tool."
     return FunctionTool(func, require_confirmation=False)
+
+
+def _read_offset(value: object) -> int:
+    if isinstance(value, bool):
+        return 1
+    if isinstance(value, int) and value >= 1:
+        return value
+    if isinstance(value, str) and value.strip().isdecimal():
+        parsed = int(value.strip())
+        return parsed if parsed >= 1 else 1
+    return 1
+
+
+def _read_limit(value: object, default: int) -> int:
+    if isinstance(value, bool):
+        return default
+    if isinstance(value, int) and value >= 1:
+        return min(value, default)
+    if isinstance(value, str) and value.strip().isdecimal():
+        parsed = int(value.strip())
+        return min(parsed, default) if parsed >= 1 else default
+    return default
 
 
 def _safe_child_path(root: Path, path_text: str, *, allow_missing: bool = False) -> Path:

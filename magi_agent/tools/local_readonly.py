@@ -117,11 +117,17 @@ class LocalReadOnlyToolHost:
         *,
         agent_role: str = "general",
         diff_fixtures: Mapping[str, str] | None = None,
+        read_quality_enabled: bool | None = None,
     ) -> None:
         self._call_log: list[str] = []
         self._ledgers: dict[tuple[str, str], LocalResearchSourceLedger] = {}
         self._agent_role = _coerce_agent_role(agent_role)
         self._diff_fixtures = dict(diff_fixtures or {})
+        if read_quality_enabled is None:
+            from magi_agent.config.env import is_read_quality_enabled
+
+            read_quality_enabled = is_read_quality_enabled()
+        self._read_quality_enabled = bool(read_quality_enabled)
 
     @property
     def call_log(self) -> tuple[str, ...]:
@@ -169,6 +175,11 @@ class LocalReadOnlyToolHost:
         if path_text is None:
             return _blocked_result("FileRead", "path_required")
 
+        if self._read_quality_enabled:
+            missing = self._file_read_did_you_mean(root, path_text, context, arguments)
+            if missing is not None:
+                return missing
+
         resolved = _resolve_workspace_path(root, path_text, must_exist=True, require_file=True)
         max_bytes = _bounded_int(
             arguments.get("maxBytes"),
@@ -178,6 +189,86 @@ class LocalReadOnlyToolHost:
         )
         raw = _read_bounded_bytes(resolved.path, max_bytes)
         truncated = len(raw) > max_bytes
+
+        if self._read_quality_enabled:
+            from magi_agent.coding.read_format import (
+                LINE_NUMBER_GUIDANCE,
+                apply_caps,
+                binary_file_message,
+                is_binary,
+                number_lines,
+            )
+
+            if is_binary(raw[:max_bytes]):
+                output = {
+                    "path": resolved.relative,
+                    "pathRef": resolved.path_ref,
+                    "binary": True,
+                    "content": binary_file_message(resolved.relative),
+                    "truncated": False,
+                    "digest": _digest(raw),
+                }
+                source_bundle = self._source_bundle(
+                    context, "FileRead", ((resolved, ""),)
+                )
+                output["sourceRef"] = source_bundle.source_refs[0]
+                return self._ok_result(
+                    context,
+                    "FileRead",
+                    arguments,
+                    output,
+                    source_bundle=source_bundle,
+                    redacted=False,
+                    file_refs=source_bundle.source_refs,
+                )
+
+            limited = raw[:max_bytes].decode("utf-8", errors="replace")
+            # Redaction MUST happen before numbering/caps.
+            sanitized, redacted = _sanitize_text(limited)
+            offset = _read_offset(arguments.get("offset"))
+            limit = _read_limit(arguments.get("limit"))
+            if offset > 1:
+                sanitized = "\n".join(sanitized.split("\n")[offset - 1 :])
+            capped, capped_truncated, next_offset = apply_caps(
+                sanitized, max_lines=limit, max_bytes=max_bytes, offset=offset
+            )
+            footer = ""
+            if capped_truncated and next_offset is not None:
+                marker = (
+                    f"\n(truncated at line {next_offset}; "
+                    f"use offset={next_offset} to continue)"
+                )
+                if capped.endswith(marker):
+                    capped = capped[: -len(marker)]
+                footer = marker
+            content = number_lines(capped, offset=offset) + footer
+            truncated = truncated or capped_truncated
+            source_bundle = self._source_bundle(
+                context, "FileRead", ((resolved, content),)
+            )
+            output = {
+                "sourceRef": source_bundle.source_refs[0],
+                "path": resolved.relative,
+                "pathRef": resolved.path_ref,
+                "content": content,
+                "truncated": truncated,
+                "offset": offset,
+                "digest": _digest(raw),
+                "bytesRead": min(len(raw), max_bytes),
+                "lineNumberGuidance": LINE_NUMBER_GUIDANCE,
+            }
+            if next_offset is not None:
+                output["nextOffset"] = next_offset
+            return self._ok_result(
+                context,
+                "FileRead",
+                arguments,
+                output,
+                source_bundle=source_bundle,
+                redacted=redacted,
+                file_refs=source_bundle.source_refs,
+            )
+
         limited = raw[:max_bytes].decode("utf-8", errors="replace")
         content, redacted = _sanitize_text(limited)
         source_bundle = self._source_bundle(
@@ -202,6 +293,59 @@ class LocalReadOnlyToolHost:
             source_bundle=source_bundle,
             redacted=redacted,
             file_refs=source_bundle.source_refs,
+        )
+
+    def _file_read_did_you_mean(
+        self,
+        root: Path,
+        path_text: str,
+        context: ToolContext,
+        arguments: Mapping[str, object],
+    ) -> ToolResult | None:
+        """Return a did-you-mean ToolResult if the path is a clean miss.
+
+        Only fires for paths that pass the workspace/secret policy but simply do
+        not exist. Sealed/secret paths still raise their policy error so they are
+        never suggested or revealed.
+        """
+        from magi_agent.coding.read_format import did_you_mean
+
+        normalized = _normalize_relative(path_text)
+        if not normalized:
+            return None
+        if _is_workspace_escape(path_text) or _is_sensitive_relative_path(normalized):
+            return None
+        candidate = root / normalized
+        if candidate.exists():
+            return None
+        basename = normalized.rsplit("/", 1)[-1]
+        parent_rel = normalized.rsplit("/", 1)[0] if "/" in normalized else ""
+        parent_dir = root / parent_rel if parent_rel else root
+        try:
+            entries = [
+                entry.name
+                for entry in parent_dir.iterdir()
+                if entry.is_file()
+                and not entry.is_symlink()
+                and not _is_sensitive_relative_path(
+                    f"{parent_rel}/{entry.name}" if parent_rel else entry.name
+                )
+            ]
+        except OSError:
+            entries = []
+        suggestions = did_you_mean(entries, basename)
+        message = f"File not found: {normalized}"
+        if suggestions:
+            message = f"{message}. Did you mean? {', '.join(suggestions)}"
+        return ToolResult(
+            status="blocked",
+            errorCode="path_not_found",
+            errorMessage=message,
+            metadata={
+                **_base_metadata("FileRead", reason="path_not_found"),
+                "fileNotFound": True,
+                "suggestions": suggestions,
+            },
         )
 
     def _glob(self, arguments: Mapping[str, object], context: ToolContext) -> ToolResult:
@@ -696,6 +840,28 @@ def _bounded_int(
         return min(max(value, minimum), maximum)
     if isinstance(value, str) and value.isdecimal():
         return min(max(int(value), minimum), maximum)
+    return default
+
+
+def _read_offset(value: object) -> int:
+    if isinstance(value, bool):
+        return 1
+    if isinstance(value, int) and value >= 1:
+        return value
+    if isinstance(value, str) and value.strip().isdecimal():
+        parsed = int(value.strip())
+        return parsed if parsed >= 1 else 1
+    return 1
+
+
+def _read_limit(value: object, default: int = 2000) -> int:
+    if isinstance(value, bool):
+        return default
+    if isinstance(value, int) and value >= 1:
+        return value
+    if isinstance(value, str) and value.strip().isdecimal():
+        parsed = int(value.strip())
+        return parsed if parsed >= 1 else default
     return default
 
 
