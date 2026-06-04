@@ -1,4 +1,5 @@
 import os
+from collections.abc import Mapping, Sequence
 
 import pytest
 
@@ -142,6 +143,51 @@ async def test_selected_scope_exposes_first_party_registry_tools_with_gate5b_rec
     assert document.receipt.tool_name == "DocumentWrite"
     assert (tmp_path / "docs/report.md").read_text(encoding="utf-8") == "hello"
     assert bundle.host.counter.receipt_count == 2
+
+
+def test_selected_full_toolhost_adk_declarations_are_google_schema_compatible(tmp_path):
+    runtime = _runtime()
+    bundle = build_gate5b_full_toolhost_bundle(
+        config=Gate5BFullToolHostConfig.model_validate(
+            {
+                "enabled": True,
+                "killSwitchEnabled": False,
+                "routeAttachmentEnabled": True,
+                "selectedBotDigest": _sha256("bot-test"),
+                "selectedOwnerDigest": _sha256("user-test"),
+                "environment": "production",
+                "environmentAllowlist": ("production",),
+                "allowedToolNames": GATE5B_FULL_TOOLHOST_TOOL_NAMES,
+                "maxToolCallsPerTurn": 8,
+            }
+        ),
+        scope={
+            "selectedBotDigest": _sha256("bot-test"),
+            "selectedOwnerDigest": _sha256("user-test"),
+            "environment": "production",
+        },
+        workspace_root=tmp_path,
+        tool_registry=runtime.tool_registry,
+    )
+
+    assert bundle.status == "ready"
+    assert "AgentMemoryRemember" in bundle.exposed_tool_names
+    for tool in bundle.tools:
+        declaration = tool._get_declaration()
+        assert declaration is not None
+        payload = declaration.model_dump(by_alias=True, exclude_none=True, mode="json")
+        assert not _contains_key(payload, "additional_properties")
+        assert not _contains_key(payload, "additionalProperties")
+        assert not _contains_key(payload, "anyOf")
+        assert not _contains_key(payload, "any_of")
+
+
+def _contains_key(value: object, key: str) -> bool:
+    if isinstance(value, Mapping):
+        return key in value or any(_contains_key(child, key) for child in value.values())
+    if isinstance(value, Sequence) and not isinstance(value, str | bytes | bytearray):
+        return any(_contains_key(child, key) for child in value)
+    return False
 
 
 @pytest.mark.asyncio
