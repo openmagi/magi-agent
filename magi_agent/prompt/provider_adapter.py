@@ -15,6 +15,7 @@ length per provider.
 
 from __future__ import annotations
 
+import copy
 import re
 from dataclasses import dataclass
 from enum import Enum
@@ -199,6 +200,98 @@ def adapt_identity_sections(
     family = detect_provider_family(model)
     adapter = get_adapter(family, config)
     return adapter.adapt_sections(sections), adapter
+
+
+# ---------------------------------------------------------------------------
+# Per-provider tool-schema repair (PR9)
+#
+# magi runs on Google ADK (no LiteLLM dependency). ADK 1.33.0's
+# ``google.adk.tools._gemini_schema_util`` already repairs most provider-specific
+# JSON-schema issues for the Gemini path before tools reach the wire:
+#   * ``$ref`` dereferencing (covers OpenCode's Moonshot ``$ref``-sibling case),
+#   * ``additionalProperties`` removal,
+#   * camelCase -> snake_case field conversion,
+#   * type-list / ``null`` normalization,
+#   * ``format`` field filtering.
+# Those are intentionally NOT duplicated here.
+#
+# The one demonstrable remaining gap: Gemini's ``Schema.enum`` field is typed
+# ``list[str]`` and the Gemini API rejects integer/number/boolean-valued enums.
+# ADK preserves enum *values* verbatim, so an integer-valued enum in a tool input
+# schema reaches serialization unrepaired (pydantic emits a serialization warning
+# and the API rejects the schema). This repair coerces such enum values to their
+# string forms and switches the node type to ``string`` so the schema is accepted
+# while the enum *values* are preserved. All other provider families are an
+# identity passthrough (ADK-native runtime handles their schemas).
+# ---------------------------------------------------------------------------
+
+# JSON-schema keys whose values are themselves a (sub)schema.
+_SCHEMA_VALUE_KEYS: tuple[str, ...] = ("items", "additionalProperties")
+# JSON-schema keys whose values are a list of (sub)schemas.
+_SCHEMA_LIST_KEYS: tuple[str, ...] = ("anyOf", "oneOf", "allOf", "prefixItems")
+# JSON-schema keys whose values map names -> (sub)schema.
+_SCHEMA_DICT_KEYS: tuple[str, ...] = ("properties", "$defs", "definitions", "patternProperties")
+
+
+def _enum_value_to_string(value: object) -> str:
+    """Coerce a single enum value to the string form Gemini accepts.
+
+    Booleans are mapped to JSON-style lowercase ``"true"``/``"false"`` rather
+    than Python's ``"True"``/``"False"`` so the surfaced enum reads naturally.
+    """
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    return str(value)
+
+
+def _repair_gemini_schema(node: object) -> object:
+    """Recursively coerce integer/number/boolean enums to string enums."""
+    if isinstance(node, list):
+        return [_repair_gemini_schema(item) for item in node]
+    if not isinstance(node, dict):
+        return node
+
+    repaired: dict[str, object] = {}
+    for key, value in node.items():
+        if key in _SCHEMA_VALUE_KEYS:
+            repaired[key] = _repair_gemini_schema(value)
+        elif key in _SCHEMA_LIST_KEYS and isinstance(value, list):
+            repaired[key] = [_repair_gemini_schema(item) for item in value]
+        elif key in _SCHEMA_DICT_KEYS and isinstance(value, dict):
+            repaired[key] = {
+                name: _repair_gemini_schema(sub) for name, sub in value.items()
+            }
+        else:
+            repaired[key] = value
+
+    enum = repaired.get("enum")
+    if isinstance(enum, list) and enum:
+        needs_repair = any(not isinstance(item, str) for item in enum)
+        if needs_repair:
+            repaired["enum"] = [_enum_value_to_string(item) for item in enum]
+            repaired["type"] = "string"
+    return repaired
+
+
+def repair_tool_schema_for_provider(
+    schema: dict[str, object],
+    family: ProviderFamily,
+) -> dict[str, object]:
+    """Return a provider-repaired copy of a tool input JSON schema.
+
+    The input is never mutated. Tool *semantics* are preserved: enum values are
+    kept (as their string forms) and no fields are dropped.
+
+    Only ``ProviderFamily.GOOGLE`` triggers a repair today (Gemini integer-enum
+    -> string-enum). Every other family returns an equal deep copy because the
+    ADK-native runtime / underlying provider already accepts those schemas.
+    """
+    if family is ProviderFamily.GOOGLE:
+        result = _repair_gemini_schema(schema)
+        if isinstance(result, dict):
+            return result
+        return dict(schema)
+    return copy.deepcopy(schema)
 
 
 def _strip_xml_tags(text: str) -> str:
