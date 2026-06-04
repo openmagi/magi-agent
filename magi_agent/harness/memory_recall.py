@@ -95,7 +95,51 @@ class MemoryRecallHarness:
         )
 
 
+def build_learning_recall_harness(
+    *,
+    store: object | None = None,
+    tenant_id: str = "local",
+    enabled: bool = False,
+    local_fake_adapter_enabled: bool = False,
+    namespace_ref: str | None = None,
+    k: int = 8,
+) -> MemoryRecallHarness:
+    """Bind a learning-recall adapter into the memory_recall DI seam.
+
+    Returns a ``MemoryRecallHarness`` whose adapter is a
+    ``magi_agent.learning.injection.LearningRecallAdapter`` — a local-fake
+    provider that maps the request scope to ``store.retrieve(active-only)``.
+
+    Default-OFF: ``enabled`` / ``local_fake_adapter_enabled`` default to
+    ``False`` and ``store`` defaults to ``None``, so the harness performs no
+    recall unless it is gated ON *and* a store is injected.  Authority flags on
+    the underlying config stay frozen-False.  Real (live) recall binding is
+    deferred to PR7 — this factory only ever attaches the local fake.
+
+    The import of ``magi_agent.learning.injection`` is lazy so importing this
+    module does not pull the learning store onto the memory_recall import path
+    by default.
+    """
+    from magi_agent.learning.injection import (  # local import: keep seam thin
+        DEFAULT_LEARNING_NAMESPACE_REF,
+        LearningRecallAdapter,
+    )
+
+    adapter = LearningRecallAdapter(
+        store=store,
+        tenant_id=tenant_id,
+        namespace_ref=namespace_ref or DEFAULT_LEARNING_NAMESPACE_REF,
+        k=k,
+    )
+    config = MemoryRecallHarnessConfig(
+        enabled=enabled,
+        localFakeAdapterEnabled=local_fake_adapter_enabled,
+    )
+    return MemoryRecallHarness(config, adapter=adapter)
+
+
 __all__ = [
     "MemoryRecallHarness",
     "MemoryRecallHarnessConfig",
+    "build_learning_recall_harness",
 ]

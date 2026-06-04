@@ -3,6 +3,8 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime, timedelta
 import hashlib
+import logging
+import os
 import re
 from typing import Any, Literal, Self
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -10,7 +12,40 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from pydantic import BaseModel, ConfigDict, Field, field_serializer, field_validator
 
 from magi_agent.channels.contract import ChannelRef
+from magi_agent.harness.learning_executor import (
+    LearningReflectionConfig,
+    LearningReflectionResult,
+    run_reflection,
+)
 from magi_agent.runtime.provider_receipts import provider_digest
+
+
+logger = logging.getLogger(__name__)
+
+
+#: Env gate shared with the reflection executor; OFF → reflection job not
+#: scheduled and ``trigger_now`` returns a disabled no-op (zero work).
+_REFLECTION_ENV_VAR: str = "MAGI_LEARNING_REFLECTION_ENABLED"
+_REFLECTION_INTERVAL_ENV_VAR: str = "MAGI_LEARNING_REFLECTION_INTERVAL"
+_TRUE_STRINGS = frozenset({"1", "true", "yes", "on"})
+
+#: Default reflection interval — 24 hours (in seconds).
+DEFAULT_REFLECTION_INTERVAL_SECONDS: int = 86_400
+
+
+def _reflection_enabled() -> bool:
+    return os.environ.get(_REFLECTION_ENV_VAR, "").lower() in _TRUE_STRINGS
+
+
+def _reflection_interval_seconds() -> int:
+    raw = os.environ.get(_REFLECTION_INTERVAL_ENV_VAR)
+    if raw is None:
+        return DEFAULT_REFLECTION_INTERVAL_SECONDS
+    try:
+        value = int(raw)
+    except (TypeError, ValueError):
+        return DEFAULT_REFLECTION_INTERVAL_SECONDS
+    return value if value > 0 else DEFAULT_REFLECTION_INTERVAL_SECONDS
 
 
 CronRuntimeStatus = Literal["disabled", "blocked", "hydrate_intent", "hydrated_local_fake", "mutated_local_fake"]
@@ -452,7 +487,121 @@ def _short_digest(value: str) -> str:
     return hashlib.sha1(value.encode("utf-8")).hexdigest()[:16]
 
 
+class LearningReflectionCronJob:
+    """Reflection cron job — runs ``run_reflection`` on an interval.
+
+    Architecture (no background loop is started — there is no real scheduler
+    attachment here; scheduling is *intent* only, computed via
+    ``next_fire_at``):
+
+        ``MAGI_LEARNING_REFLECTION_ENABLED`` (env gate)
+                ▼ scheduled?  ── OFF ──▶ not scheduled, ``next_fire_at`` None
+                ▼ ON
+        interval = ``MAGI_LEARNING_REFLECTION_INTERVAL`` or 24h default
+                ▼
+        ``trigger_now()`` ──▶ ``run_reflection(since=watermark, ...)``
+                ▼ watermark-incremental (advances ``self.watermark``)
+
+    The job NEVER attaches an OS/background scheduler, never starts a loop, and
+    performs no work when the env gate is OFF (``trigger_now`` returns the
+    executor's ``status="disabled"`` no-op).  ``run_reflection`` itself is
+    double-gated (env AND ``config.enabled``), so the OFF path stays
+    byte-identical to PR4.
+
+    Watermark-incremental: ``trigger_now`` seeds ``run_reflection`` with the
+    last persisted watermark and advances it on each ``ok`` pass, so a second
+    pass over the same source reads zero new traces.
+    """
+
+    def __init__(
+        self,
+        *,
+        source: object | None = None,
+        store: object | None = None,
+        config: LearningReflectionConfig | None = None,
+        checkset: object | None = None,
+        eval_gate_config: object | None = None,
+        watermark: str | None = None,
+    ) -> None:
+        self._source = source
+        self._store = store
+        self._config = config
+        self._checkset = checkset
+        self._eval_gate_config = eval_gate_config
+        self.watermark = watermark
+
+    @property
+    def scheduled(self) -> bool:
+        """True only when the env gate is ON (the job is registered to run)."""
+        return _reflection_enabled()
+
+    @property
+    def interval_seconds(self) -> int:
+        """Interval between fires in SECONDS — from env, default 24h, positive only.
+
+        Convenience accessor only.  ``next_fire_at`` MUST add ``interval_ms`` (not
+        this value) so the result stays in the ms-since-epoch unit the rest of
+        the cron module uses.
+        """
+        return _reflection_interval_seconds()
+
+    @property
+    def interval_ms(self) -> int:
+        """Interval between fires in MILLISECONDS.
+
+        This is the unit ``next_fire_at`` adds: the surrounding cron module's
+        ``now`` is ms-since-epoch (see ``CronDefinition.next_fire_at`` /
+        ``datetime.fromtimestamp((now+1)/1000, ...)`` / ``timestamp()*1000``), so
+        the reflection interval must be expressed in ms to compose with it.
+        """
+        return _reflection_interval_seconds() * 1000
+
+    def next_fire_at(self, *, now: int) -> int | None:
+        """Next scheduled fire time, or ``None`` when not scheduled (OFF).
+
+        ``now`` is milliseconds since epoch — matching the ms contract used by
+        the rest of this module (``CronDefinition`` / ``CronHydrationRequest``).
+        The interval is therefore added as ``interval_ms``, NOT seconds, so a
+        24h interval advances ~86_400_000 ms rather than ~86 seconds.
+        """
+        if not self.scheduled:
+            return None
+        return now + self.interval_ms  # now: milliseconds since epoch
+
+    async def trigger_now(self) -> LearningReflectionResult:
+        """Run one incremental reflection pass on demand.
+
+        Calls ``run_reflection`` seeded with the current watermark.  Advances
+        ``self.watermark`` when the pass returns ``status="ok"`` with a
+        non-``None`` watermark.  When the env gate is OFF, ``run_reflection``
+        returns the disabled no-op and the watermark is left unchanged.  On
+        ``status="error"`` the watermark is left unchanged and the error is
+        logged at WARNING (forward-compat for PR7's error path).
+
+        NOT re-entrant: it mutates ``self.watermark`` without a lock, so a real
+        scheduler (PR7/PR8) MUST serialize concurrent ``trigger_now`` calls.
+        """
+        result = await run_reflection(
+            source=self._source,
+            since=self.watermark,
+            config=self._config,
+            store=self._store,
+            checkset=self._checkset,
+            eval_gate_config=self._eval_gate_config,
+        )
+        if result.status == "ok" and result.watermark is not None:
+            self.watermark = result.watermark
+        elif result.status == "error":
+            logger.warning(
+                "learning reflection pass returned status=error; "
+                "watermark unchanged (still %r)",
+                self.watermark,
+            )
+        return result
+
+
 __all__ = [
+    "DEFAULT_REFLECTION_INTERVAL_SECONDS",
     "CronAuthorityFlags",
     "CronDefinition",
     "CronDueTurn",
@@ -463,4 +612,5 @@ __all__ = [
     "CronMutationRequest",
     "CronRuntimeBoundary",
     "CronRuntimeConfig",
+    "LearningReflectionCronJob",
 ]

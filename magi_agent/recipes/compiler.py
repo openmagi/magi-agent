@@ -2502,4 +2502,21 @@ def _first_party_packs() -> tuple[RecipePackManifest, ...]:
             validatorSetMetadata=("ValidatorSet:lightweight-scripting:metadata-only",),
             approvalGateMetadata=("ApprovalGate:lightweight-scripting:metadata-only",),
         ),
+        # PR5 learning-usage: default-OFF static-injection pack carrying the
+        # ``instruction:learning:usage`` ref.  Selected only when a task profile
+        # asks for ``learning`` (or ``learning-usage`` / ``self-improvement``);
+        # registering it leaves the OFF compiled snapshot byte-identical.  The
+        # builder + instruction text live in
+        # ``recipes/first_party/learning_usage.py`` (imported lazily to avoid a
+        # circular import, since that module imports ``RecipePackManifest``).
+        _build_learning_usage_pack(),
     )
+
+
+def _build_learning_usage_pack() -> RecipePackManifest:
+    # Lazy import breaks the compiler ↔ learning_usage circular import:
+    # ``learning_usage`` imports ``RecipePackManifest`` from this module, so a
+    # top-level import here would form a cycle at module load.
+    from magi_agent.recipes.first_party.learning_usage import build_learning_usage_pack
+
+    return build_learning_usage_pack()
