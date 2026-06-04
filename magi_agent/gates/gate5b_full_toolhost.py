@@ -3,6 +3,7 @@ from __future__ import annotations
 import fnmatch
 import hashlib
 import json
+import logging
 import os
 import re
 import subprocess
@@ -13,7 +14,14 @@ from typing import Any, Literal, Self
 from magi_agent.config.env import MAGI_EDIT_FUZZY_MATCH_ENABLED as _EDIT_FUZZY_MATCH_ENABLED
 
 from google.adk.tools import FunctionTool
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    ValidationError,
+    field_validator,
+    model_validator,
+)
 
 from magi_agent.evidence.coding_tool_receipts import (
     CodingToolReceiptBoundary,
@@ -24,9 +32,18 @@ from magi_agent.tools.context import ToolContext
 from magi_agent.tools.dispatcher import ToolDispatcher
 from magi_agent.tools.manifest import RuntimeMode, ToolManifest, ToolSource
 from magi_agent.tools.permission import ToolPermissionPolicy
+from magi_agent.tools.read_ledger import (
+    ReadLedger,
+    ReadLedgerConfig,
+    WorkspaceMutationReadCheck,
+    safe_workspace_relative_path,
+    workspace_content_digest,
+)
 from magi_agent.tools.registry import ToolRegistry
 from magi_agent.tools.result import ToolResult
 
+
+logger = logging.getLogger(__name__)
 
 Gate5BFullToolHostStatus = Literal["disabled", "blocked", "ready"]
 Gate5BFullToolOutcomeStatus = Literal["ok", "blocked", "error", "duplicate"]
@@ -159,10 +176,38 @@ class Gate5BFullToolPathPolicyError(ValueError):
     pass
 
 
+class Gate5BFullToolReadLedgerError(Exception):
+    """Raised when read-before-edit enforcement blocks a workspace mutation.
+
+    This is a *policy* signal, not a value error. It deliberately does NOT
+    subclass ``ValueError`` so it cannot be accidentally swallowed by the broad
+    ``except (OSError, ValueError, TypeError)`` fallthrough in ``dispatch`` (it
+    must be caught explicitly to surface its model-actionable ``reason``).
+
+    ``reason`` carries a stable, model-actionable code; the dispatch loop turns
+    it into a ``blocked`` outcome with that reason so the model is told exactly
+    what remediation is required:
+
+    - ``read_ledger_no_prior_read``      -> read the file first before editing it
+    - ``read_ledger_full_read_required`` -> read the whole file first before editing
+    - ``read_ledger_stale_read_digest``  -> file changed since read; re-read it
+    - ``read_ledger_file_disappeared_during_read``
+          -> file vanished mid-mutation (TOCTOU); re-read and retry
+    """
+
+    def __init__(self, reason: str) -> None:
+        super().__init__(reason)
+        self.reason = reason
+
+
 class Gate5BFullToolRegistryBlocked(ValueError):
     def __init__(self, reason: str) -> None:
         super().__init__(reason)
         self.reason = reason
+
+
+_READ_LEDGER_SESSION_ID = "gate5b-read-ledger"
+_READ_LEDGER_TURN_ID = "gate5b-turn"
 
 
 class _Gate5BFullModel(BaseModel):
@@ -390,6 +435,7 @@ class Gate5BFullToolCounter:
         tool_name: str,
         reason: str,
         argument_digest: str | None = None,
+        record: bool = True,
     ) -> Gate5BFullToolOutcome:
         receipt = Gate5BFullToolReceipt(
             requestDigest=request_digest,
@@ -399,9 +445,16 @@ class Gate5BFullToolCounter:
             boundedOutputDigest=_digest({"blocked": reason}),
             outputByteCount=0,
         )
-        key = (request_digest, tool_call_digest)
-        self._records[key] = receipt
-        self._argument_digests[key] = argument_digest or _digest({"blocked": reason})
+        # Most blocks are terminal and recorded so an identical retry is caught
+        # by the dedup path. Ledger blocks are the exception: the model is
+        # expected to read the file and RETRY the same call, so they must not be
+        # recorded (and never counted toward the budget) or the retry would be
+        # rejected as a duplicate/digest conflict and recovery would be
+        # impossible.
+        if record:
+            key = (request_digest, tool_call_digest)
+            self._records[key] = receipt
+            self._argument_digests[key] = argument_digest or _digest({"blocked": reason})
         return Gate5BFullToolOutcome(
             status="blocked",
             reason=reason,
@@ -420,6 +473,7 @@ class Gate5BFullToolHost:
         exposed_tool_names: tuple[str, ...],
         now_ms: Callable[[], int],
         tool_registry: ToolRegistry | None = None,
+        read_ledger_enabled: bool = False,
     ) -> None:
         self.config = config
         self.workspace_root = workspace_root.resolve()
@@ -431,6 +485,21 @@ class Gate5BFullToolHost:
         self.receipt_boundary = CodingToolReceiptBoundary(
             CodingToolReceiptConfig(enabled=True)
         )
+        # One ledger per host. A host lives for the lifetime of a selected
+        # bundle (one per turn/session attach), and ``dispatch`` is called many
+        # times on the same instance, so a full read recorded by one FileRead
+        # call is visible to a later FileWrite/FileEdit/PatchApply call in the
+        # same host. Default off => behaviour identical to before.
+        self.read_ledger = ReadLedger(
+            ReadLedgerConfig(
+                enabled=read_ledger_enabled,
+                localInMemoryEnabled=read_ledger_enabled,
+            )
+        )
+        # Stable, non-private workspace ref derived from the resolved root.
+        self._read_ledger_workspace_ref = "workspace:" + _digest(
+            str(self.workspace_root)
+        )[7:31]
 
     async def dispatch(
         self,
@@ -486,6 +555,17 @@ class Gate5BFullToolHost:
                 tool_name=tool_name,
                 reason=error.reason,
                 argument_digest=argument_digest,
+            )
+        except Gate5BFullToolReadLedgerError as ledger_error:
+            # Ledger blocks are recoverable: read the file, then retry the SAME
+            # call. Do not record the block, so the retry is not flagged as a
+            # duplicate/digest conflict.
+            return self.counter.blocked(
+                request_digest=request_digest,
+                tool_call_digest=tool_call_digest,
+                tool_name=tool_name,
+                reason=ledger_error.reason,
+                record=False,
             )
         except Gate5BFullToolPathPolicyError:
             return self.counter.blocked(
@@ -545,7 +625,9 @@ class Gate5BFullToolHost:
             return {"value": _evaluate_expression(str(args.get("expression", "0")))}
         if tool_name == "FileRead":
             target = _safe_child_path(self.workspace_root, str(args.get("path", "")))
-            return {"pathDigest": _digest(target.relative_to(self.workspace_root).as_posix()), "content": target.read_text(encoding="utf-8", errors="replace")[: self.config.max_per_tool_output_bytes]}
+            full_content = target.read_text(encoding="utf-8", errors="replace")
+            self._record_full_read(target, full_content)
+            return {"pathDigest": _digest(target.relative_to(self.workspace_root).as_posix()), "content": full_content[: self.config.max_per_tool_output_bytes]}
         if tool_name == "Glob":
             return {"matches": _safe_glob_files(self.workspace_root, str(args.get("pattern", "*")), limit=100)}
         if tool_name == "Grep":
@@ -570,12 +652,14 @@ class Gate5BFullToolHost:
                 str(args.get("path", "")),
                 allow_missing=True,
             )
+            self._enforce_read_before_mutation(target)
             target.parent.mkdir(parents=True, exist_ok=True)
             content = str(args.get("content", ""))
             target.write_text(content, encoding="utf-8")
             return {"pathDigest": _digest(target.relative_to(self.workspace_root).as_posix()), "bytesWritten": len(content.encode("utf-8"))}
         if tool_name == "FileEdit":
             target = _safe_child_path(self.workspace_root, str(args.get("path", "")))
+            self._enforce_read_before_mutation(target)
             old_text = str(args.get("oldText", args.get("old_text", "")))
             new_text = str(args.get("newText", args.get("new_text", "")))
             if not old_text:
@@ -605,6 +689,7 @@ class Gate5BFullToolHost:
                 str(args.get("path", "")),
                 allow_missing=True,
             )
+            self._enforce_read_before_mutation(target)
             if "content" in args:
                 content = str(args.get("content", ""))
                 target.parent.mkdir(parents=True, exist_ok=True)
@@ -686,7 +771,15 @@ class Gate5BFullToolHost:
     ) -> None:
         if tool_name not in _GATE5B_LEGACY_FULL_TOOLHOST_TOOL_NAMES:
             return
-        manifest = _legacy_tool_manifest(tool_name)
+        preflight_tool_name = tool_name
+        if (
+            tool_name == "PatchApply"
+            and "content" in args
+            and "patch" not in args
+            and "diff" not in args
+        ):
+            preflight_tool_name = "FileWrite"
+        manifest = _legacy_tool_manifest(preflight_tool_name)
         mode: RuntimeMode = "act" if "act" in manifest.available_in_modes else "plan"
         decision = ToolPermissionPolicy().decide(
             manifest,
@@ -706,6 +799,106 @@ class Gate5BFullToolHost:
             return
         raise Gate5BFullToolRegistryBlocked(_permission_reason_code(decision.metadata))
 
+    def _workspace_relative(self, target: Path) -> str | None:
+        try:
+            return safe_workspace_relative_path(
+                target.relative_to(self.workspace_root).as_posix()
+            )
+        except ValueError:
+            return None
+
+    def _record_full_read(self, target: Path, content: str) -> None:
+        """Record a full read into the session-scoped ledger (no-op when off)."""
+
+        if not self.read_ledger.config.enabled:
+            return
+        relative = self._workspace_relative(target)
+        if relative is None:
+            return
+        try:
+            stat = target.stat()
+            size_bytes = max(stat.st_size, 0)
+            mtime_ns = max(stat.st_mtime_ns, 0)
+        except OSError:
+            size_bytes = len(content.encode("utf-8"))
+            mtime_ns = 0
+        try:
+            self.read_ledger.record_read(
+                session_id=_READ_LEDGER_SESSION_ID,
+                workspace_ref=self._read_ledger_workspace_ref,
+                path=relative,
+                digest=workspace_content_digest(content),
+                size_bytes=size_bytes,
+                mtime_ns=mtime_ns,
+                read_mode="full",
+                turn_id=_READ_LEDGER_TURN_ID,
+                tool_use_id="gate5b-file-read",
+            )
+        except ValidationError:
+            # Unsafe/sealed/private-ref paths fail ledger entry validation and
+            # cannot be recorded; the mutation preflight still independently
+            # blocks them, so skipping the record here is safe.
+            return
+        except ValueError:
+            # Any other ValueError (e.g. an unexpected path normalization edge
+            # from safe_workspace_relative_path) would silently drop the record
+            # and later cause a false ``no_prior_read``. Log so the skip is
+            # observable, then preserve fail-open behaviour.
+            logger.debug(
+                "gate5b read-ledger skipped recording full read for %r",
+                relative,
+                exc_info=True,
+            )
+            return
+
+    def _enforce_read_before_mutation(self, target: Path) -> None:
+        """Block edits/overwrites of existing files lacking a fresh full read.
+
+        Creating a brand-new file (no current on-disk content) is exempt.
+
+        Sensitive/sealed/secret path policy is NOT handled here: it runs earlier
+        in ``_safe_child_path`` (sealed basenames, dot-paths, secret patterns)
+        and in the ledger's own ``is_unsafe_workspace_path`` guard. The ledger
+        only adds the read-before-edit requirement on top of those checks and
+        never weakens them.
+        """
+
+        if not self.read_ledger.config.enabled:
+            return
+        relative = self._workspace_relative(target)
+        if relative is None:
+            # Path policy will reject elsewhere; do not weaken those checks.
+            return
+        if target.is_file():
+            try:
+                current_text = target.read_text(encoding="utf-8", errors="replace")
+            except OSError:
+                # TOCTOU: the file vanished between the is_file() probe and the
+                # read used to compute its current digest. Surface a clear,
+                # model-actionable block (re-read and retry) instead of letting
+                # the OSError fall through to a generic ``tool_error``.
+                raise Gate5BFullToolReadLedgerError(
+                    "read_ledger_file_disappeared_during_read"
+                ) from None
+            current_digest: str | None = workspace_content_digest(current_text)
+            mutation_kind = "edit"
+        else:
+            current_digest = None
+            mutation_kind = "create"
+        decision = self.read_ledger.require_fresh_full_read(
+            WorkspaceMutationReadCheck(
+                sessionId=_READ_LEDGER_SESSION_ID,
+                workspaceRef=self._read_ledger_workspace_ref,
+                path=relative,
+                currentDigest=current_digest,
+                mutationKind=mutation_kind,
+            )
+        )
+        if decision.status == "ok":
+            return
+        primary = decision.reason_codes[0] if decision.reason_codes else "blocked"
+        raise Gate5BFullToolReadLedgerError(f"read_ledger_{primary}")
+
 
 def build_gate5b_full_toolhost_bundle(
     *,
@@ -714,6 +907,7 @@ def build_gate5b_full_toolhost_bundle(
     workspace_root: str | Path,
     now_ms: Callable[[], int] | None = None,
     tool_registry: ToolRegistry | None = None,
+    read_ledger_enabled: bool | None = None,
 ) -> Gate5BFullToolBundle:
     safe_config = Gate5BFullToolHostConfig.model_validate(config or {})
     workspace = Path(workspace_root)
@@ -723,12 +917,15 @@ def build_gate5b_full_toolhost_bundle(
         if selected_scope_error is None
         else ()
     )
+    if read_ledger_enabled is None:
+        read_ledger_enabled = _read_ledger_enabled_from_env()
     host = Gate5BFullToolHost(
         config=safe_config,
         workspace_root=workspace,
         exposed_tool_names=exposed,
         now_ms=now_ms or _now_ms,
         tool_registry=tool_registry,
+        read_ledger_enabled=read_ledger_enabled,
     )
     if selected_scope_error is not None:
         return Gate5BFullToolBundle(
@@ -1193,11 +1390,20 @@ def _now_ms() -> int:
     return int(time.time() * 1000)
 
 
+def _read_ledger_enabled_from_env() -> bool:
+    # Single source of truth lives in config.env; imported lazily here to keep
+    # gate5b import boundaries unchanged.
+    from magi_agent.config.env import is_read_ledger_enabled
+
+    return is_read_ledger_enabled(os.environ)
+
+
 __all__ = [
     "GATE5B_FULL_TOOLHOST_TOOL_NAMES",
     "Gate5BFullToolBundle",
     "Gate5BFullToolHost",
     "Gate5BFullToolHostConfig",
     "Gate5BFullToolOutcome",
+    "Gate5BFullToolReadLedgerError",
     "build_gate5b_full_toolhost_bundle",
 ]
