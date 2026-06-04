@@ -196,7 +196,7 @@ def test_register_core_tool_manifests_keeps_catalog_enabled_and_protected() -> N
         registry.unregister("FileRead")
 
 
-def test_default_enabled_approval_tool_without_handler_requests_approval() -> None:
+def test_default_enabled_shell_catalog_tool_without_handler_returns_missing_handler() -> None:
     registry = ToolRegistry()
     register_core_tool_manifests(registry)
 
@@ -209,10 +209,10 @@ def test_default_enabled_approval_tool_without_handler_requests_approval() -> No
         )
     )
 
-    assert result.status == "needs_approval"
+    assert result.status == "error"
+    assert result.error_code == "tool_handler_missing"
     assert result.metadata["toolName"] == "Bash"
-    assert result.metadata["reason"] == "complex shell requires approval"
-    assert "controlRequest" in result.metadata
+    assert result.metadata["reason"] == "tool handler missing"
 
 
 def test_enabled_catalog_tool_without_handler_returns_structured_missing_handler_error() -> None:
@@ -241,7 +241,7 @@ def test_enabled_catalog_tool_without_handler_returns_structured_missing_handler
     }
 
 
-def test_enabled_approval_required_catalog_tool_without_handler_requests_approval() -> None:
+def test_enabled_shell_catalog_tool_without_handler_returns_missing_handler() -> None:
     registry = ToolRegistry()
     register_core_tool_manifests(registry)
     registry.enable("Bash")
@@ -255,7 +255,7 @@ def test_enabled_approval_required_catalog_tool_without_handler_requests_approva
         )
     )
 
-    assert result.status == "needs_approval"
+    assert result.status == "error"
+    assert result.error_code == "tool_handler_missing"
     assert result.metadata["toolName"] == "Bash"
-    assert result.metadata["reason"] == "complex shell requires approval"
-    assert "controlRequest" in result.metadata
+    assert result.metadata["reason"] == "tool handler missing"

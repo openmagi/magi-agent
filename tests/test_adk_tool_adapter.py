@@ -305,7 +305,7 @@ def test_registry_helper_includes_enabled_long_running_tool_and_excludes_disable
     assert isinstance(tools[0], LongRunningFunctionTool)
 
 
-def test_enabled_approval_tool_without_handler_returns_approval_before_missing_handler() -> None:
+def test_enabled_shell_tool_without_handler_returns_missing_handler() -> None:
     registry = ToolRegistry()
     register_core_tool_manifests(registry)
     registry.enable("Bash")
@@ -324,10 +324,10 @@ def test_enabled_approval_tool_without_handler_returns_approval_before_missing_h
 
     result = run_tool(by_name["Bash"], {"command": "echo should-not-run"})
 
-    assert result["status"] == "needs_approval"
+    assert result["status"] == "error"
+    assert result["errorCode"] == "tool_handler_missing"
     assert result["metadata"]["toolName"] == "Bash"
-    assert result["metadata"]["reason"] == "complex shell requires approval"
-    assert "controlRequest" in result["metadata"]
+    assert result["metadata"]["reason"] == "tool handler missing"
 
 
 def test_adapter_returns_tool_result_alias_keys_for_errors() -> None:

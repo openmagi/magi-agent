@@ -589,8 +589,15 @@ def _patch_apply_decision(
     mode: RuntimeMode,
     scope: dict[str, object],
 ) -> RuntimeSafetyDecision:
-    patch = _first_string(arguments, ("patch", "diff", "content"))
+    patch = _first_string(arguments, ("patch", "diff"))
     if patch is None:
+        if isinstance(arguments.get("content"), str):
+            return _patch_apply_content_replace_decision(
+                manifest,
+                arguments,
+                mode=mode,
+                scope=scope,
+            )
         return _decision(
             "deny",
             manifest,
@@ -704,6 +711,104 @@ def _patch_apply_decision(
             None,
             changed_files=changed_files,
             hunks=patch.count("@@") or 1,
+            read_ledger=read_ledger_preflight,
+        ),
+    )
+
+
+def _patch_apply_content_replace_decision(
+    manifest: ToolManifest,
+    arguments: dict[str, object],
+    *,
+    mode: RuntimeMode,
+    scope: dict[str, object],
+) -> RuntimeSafetyDecision:
+    path = _first_string(arguments, _PATH_ARG_NAMES)
+    if path is None:
+        return _decision(
+            "deny",
+            manifest,
+            mode=mode,
+            reason_code="path_required",
+            scope=scope,
+            preflight=_preflight(False, "path_required"),
+        )
+    path_decision = _classify_path(path, mutating=True, scope=scope)
+    if path_decision.action == "deny":
+        return _decision_for_path(
+            path_decision,
+            manifest,
+            mode=mode,
+            scope=scope,
+            preflight=_preflight(False, path_decision.reason_code),
+        )
+    read_ledger_preflight = _read_ledger_preflight(
+        context_read_ledger=scope.get("readLedger"),
+        context_session_id=scope.get("sessionId"),
+        context_workspace_ref=scope.get("workspaceRef"),
+        path=path_decision.normalized,
+        current_digest=_current_digest_for_path(
+            arguments,
+            path_decision.normalized,
+            single_path=True,
+        ),
+        mutation_kind=_file_write_mutation_kind(arguments),
+    )
+    if read_ledger_preflight is not None and read_ledger_preflight.get("status") != "ok":
+        return _read_ledger_block_decision(
+            read_ledger_preflight,
+            path_decision,
+            manifest,
+            mode=mode,
+            scope=scope,
+            changed_files=(path_decision.normalized,),
+        )
+    if mode == "plan":
+        return _decision_for_path(
+            _PathDecision(
+                "deny",
+                "plan_mode_mutation_blocked",
+                path_decision.normalized,
+                path_decision.public_preview,
+            ),
+            manifest,
+            mode=mode,
+            scope=scope,
+            preflight=_preflight(False, "plan_mode_mutation_blocked"),
+        )
+    if _selected_full_toolhost_scope(scope):
+        return _decision_for_path(
+            _PathDecision(
+                "allow",
+                "selected_full_toolhost_workspace_mutation_preapproved",
+                path_decision.normalized,
+                path_decision.public_preview,
+            ),
+            manifest,
+            mode=mode,
+            scope=scope,
+            preflight=_preflight(
+                True,
+                None,
+                changed_files=(path_decision.normalized,),
+                read_ledger=read_ledger_preflight,
+            ),
+            status_metadata=_selected_full_toolhost_status_metadata(),
+        )
+    return _decision_for_path(
+        _PathDecision(
+            "ask",
+            "workspace_mutation_requires_approval",
+            path_decision.normalized,
+            path_decision.public_preview,
+        ),
+        manifest,
+        mode=mode,
+        scope=scope,
+        preflight=_preflight(
+            True,
+            None,
+            changed_files=(path_decision.normalized,),
             read_ledger=read_ledger_preflight,
         ),
     )

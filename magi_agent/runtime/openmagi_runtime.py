@@ -15,10 +15,12 @@ if TYPE_CHECKING:
 
 def _build_core_tool_registry(plugin_state: ResolvedPluginState | None = None) -> ToolRegistry:
     from magi_agent.tools.catalog import register_core_tool_manifests
+    from magi_agent.tools.core_toolhost import bind_core_toolhost_handlers
     from magi_agent.tools.registry import ToolRegistry
 
     tool_registry = ToolRegistry()
     register_core_tool_manifests(tool_registry)
+    bind_core_toolhost_handlers(tool_registry)
     if plugin_state is not None:
         _register_native_plugin_tool_manifests(tool_registry, plugin_state)
         _bind_native_plugin_tool_handlers(tool_registry, plugin_state)
