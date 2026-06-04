@@ -7,7 +7,7 @@
 > the *existing* default-OFF seals, feeding the *existing* evidence graph.
 > **Method:** layer-by-layer teardown of OpenCode's research harness
 > (`../cc-workspace/opencode`, see `docs/architecture/opencode-architecture.md`
-> in the hosted monorepo) mapped onto Magi's existing Python/ADK runtime.
+> in local architecture notes) mapped onto Magi's existing Python/ADK runtime.
 > **Companion analysis:** OpenCode 7-layer dissection (web search dual-MCP,
 > webfetch CF-bypass, repo_clone, `reference.ts` @alias auto-clone, task
 > delegation, permission isolation, 2-stage truncation).
@@ -46,8 +46,8 @@ standalone `LiveResearchHarness` (under `harness/`). That was eliminated: live
 research is driven through the **existing** tool seam
 `web_acquisition/research_tools.py::LocalWebResearchToolBoundary.execute_tool`
 (the already-present `WebSearch`/`WebFetch` → provider boundary dispatcher),
-behind a default-OFF env gate. The *egress mechanism* (in-runtime SDK vs. hosted
-api-proxy call) is an injected provider detail behind the port — never the public
+behind a default-OFF env gate. The *egress mechanism* (in-runtime SDK vs.
+user-configured proxy call) is an injected provider detail behind the port — never the public
 surface. **Why not the deep-research recipe?** Investigation found the existing
 `build_deep_research_workflow` / executor stack does **not** execute web
 acquisition at all today — `_tasks_from_contract` is a deliberate stub and
@@ -58,7 +58,7 @@ the minimal convergence reuses the existing tool-boundary seam instead.
 **Design rule #2 — seals flip to gates, never to "on".** Every `Literal[False]`
 becomes an env-gated runtime flag following the established
 `research_first_canary` pattern: default-OFF env enable + independent kill-switch
-(`research/research_first_canary.py:23-27`). Production network stays
+(`research/research_first_canary.py:23-27`). Live network access stays
 *unrepresentable* until a gate opens.
 
 **Design rule #3 — real data flows into the existing evidence spine, unchanged.**
@@ -130,10 +130,10 @@ cite-or-omit. We add an engine; we do not weaken the gate.
 - Research-harness code is **settled, not in-flight** (last 40 commits are the
   unrelated `learning/` layer). Low collision risk.
 - No research design doc exists yet — this is the first.
-- The hosted Clawy infra already runs live jina-reader / insane-fetch /
-  firecrawl workers. So a live provider can be either an in-runtime SDK *or* a
-  thin client to those hosted endpoints — **both satisfy the same port**, and
-  this plan keeps that choice behind the port (see PR2).
+- Some deployments may already run reader / fetch / crawl workers. A live
+  provider can therefore be either an in-runtime SDK *or* a thin client to a
+  user-configured proxy endpoint — **both satisfy the same port**, and this plan
+  keeps that choice behind the port (see PR2).
 
 ---
 
@@ -245,7 +245,7 @@ environment; CI uses recorded/mocked transport only.**
   - Concrete `SearchProviderPort` + `FetchProviderPort` implementations
     (`openmagi_live_provider = True`). Recommended egress: **httpx-direct**,
     mirroring OpenCode's MCP-over-HTTP (Exa/Parallel), minimal deps; the port
-    keeps a hosted-proxy variant possible for the hosted deployment. Borrow
+    keeps a proxy-client variant possible for deployments that need one. Borrow
     OpenCode's **dual-provider session-deterministic routing**
     (`checksum(session)%2`, env override) and **Cloudflare `cf-mitigated`
     honest-UA retry** + HTML→Markdown for fetch.
@@ -375,7 +375,7 @@ PR-hygiene (anytime, optional)
 - **Seal-flip blast radius.** Flipping a `Literal[False]` touches frozen Pydantic
   validators. Mitigation: gate-scoped flags, never the sealed default; PR2
   establishes the single seam so later PRs don't each re-derive it.
-- **Egress-location ambiguity (SDK vs hosted-proxy).** Deferred behind the port
+- **Egress-location ambiguity (SDK vs proxy-client).** Deferred behind the port
   in PR2; PR3/PR4 can ship either backend without reopening the harness.
 - **Evidence-gate false negatives on messy live HTML.** Real pages produce noisy
   spans; the cite-or-omit gate may over-omit. Mitigation: tune
@@ -387,8 +387,8 @@ PR-hygiene (anytime, optional)
 
 **Resolved (2026-06-04):**
 1. **Live backend = in-runtime, httpx-direct** (Design rule #1 / option A) — OSS
-   users run their own keys; no dependence on the hosted api-proxy. The port
-   still allows a hosted-proxy provider for the hosted deployment.
+   users run their own keys; no dependence on a managed proxy. The port still
+   allows a proxy-client provider for deployments that need one.
 2. **Convergence = minimal** — drive the live pack through the existing tool
    seam; do NOT add a standalone orchestrator. Full executor convergence
    (un-stub `_tasks_from_contract`) is the separate **PR-recipe**.
