@@ -21,13 +21,13 @@ The `magi_agent/gates/ga_live_readiness.py` readiness gate decides whether GA
 live execution is permitted for a given environment/bot. It is fail-closed:
 any unknown or incomplete configuration resolves to `disabled` or `blocked`.
 
-| Stage | Condition | `executionMode` | `liveExecutionAllowed` |
-| --- | --- | --- | --- |
-| Disabled | `MAGI_GA_LIVE_ENABLED` not set or falsy | `disabled` | `False` |
-| Shadow | flag ON + kill-switch OFF + shadow mode ON + valid scope, but gate \< 5 or promotion not confirmed | `shadow` | `False` |
-| Canary-live | flag ON + selected bot `186bf3d7` + `promotedGate >= 5` + `canaryPromotionConfirmed = True` | `live` | `True` |
-| Fleet | same as canary-live (gate controls both; fleet promotion is an ops scope expansion, not a separate code state) | `live` | `True` |
-| Any blocking reason | kill switch, malformed digest, bot not selected, env not allowlisted, shadow disabled | `blocked` | `False` |
+| Stage | Condition | `executionMode` | `status` | `liveExecutionAllowed` |
+| --- | --- | --- | --- | --- |
+| Disabled | `MAGI_GA_LIVE_ENABLED` not set or falsy | `disabled` | `disabled` | `False` |
+| Shadow | flag ON + kill-switch OFF + shadow mode ON + valid scope, but gate \< 5 or promotion not confirmed | `shadow` | `shadow` | `False` |
+| Canary-live | flag ON + selected bot `186bf3d7` + `promotedGate >= 5` + `canaryPromotionConfirmed = True` | `live` | `live` | `True` |
+| Fleet | same as canary-live (gate controls both; fleet promotion is an ops scope expansion, not a separate code state) | `live` | `live` | `True` |
+| Any blocking reason | kill switch, malformed digest, bot not selected, env not allowlisted, shadow disabled | `disabled` | `blocked` | `False` |
 
 The `liveExecutionAllowed` field in `GaLiveReadinessConfig` is locked to
 `Literal[False]` — it cannot be forged via env or serialisation (same pattern

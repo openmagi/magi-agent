@@ -305,7 +305,6 @@ def _digest_present(value: object) -> bool:
 __all__ = [
     "GaLiveExecutionMode",
     "GaLiveReadinessConfig",
-    "_CANARY_LIVE_GATE",
     "emit_ga_live_telemetry_record",
     "ga_live_readiness_health_metadata",
     "resolve_ga_live_execution_mode",

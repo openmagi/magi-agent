@@ -186,13 +186,17 @@ def test_unknown_default_config_fails_closed() -> None:
 
 
 def test_missing_scope_digest_fails_closed() -> None:
-    """Malformed digest → blocked (fail-closed, not live)."""
+    """Malformed digest → blocked (fail-closed, not live).
+
+    Both selectedBotDigest and selectedOwnerUserIdDigest default to empty string,
+    which fails the digest format check and triggers malformed_selected_scope.
+    """
     config = GaLiveReadinessConfig.model_validate(
         {
             "enabled": True,
             "killSwitchEnabled": False,
             "shadowModeEnabled": True,
-            # selectedBotDigest left as empty string (invalid digest)
+            # selectedBotDigest and selectedOwnerUserIdDigest both default to empty string
             "environment": "production",
             "environmentAllowlist": ("production",),
         }
@@ -239,6 +243,21 @@ def test_non_selected_bot_fails_closed() -> None:
     assert "bot_not_selected" in meta["reasonCodes"]
 
 
+def test_non_selected_owner_fails_closed() -> None:
+    """Owner user_id not in selected scope → blocked."""
+    wrong_owner_digest = "sha256:" + hashlib.sha256("wrong-owner-id".encode()).hexdigest()
+    config = _config(
+        selectedOwnerUserIdDigest=wrong_owner_digest,
+        promotedGate=5,
+        canaryPromotionConfirmed=True,
+    )
+    meta = ga_live_readiness_health_metadata(
+        config, bot_id=_CANARY_BOT_ID, user_id="owner-user-id"
+    )
+    assert meta["liveExecutionAllowed"] is False
+    assert "owner_not_selected" in meta["reasonCodes"]
+
+
 def test_environment_not_allowlisted_fails_closed() -> None:
     """Environment not in allowlist → blocked."""
     config = _config(
@@ -252,6 +271,21 @@ def test_environment_not_allowlisted_fails_closed() -> None:
     )
     assert meta["liveExecutionAllowed"] is False
     assert "environment_not_allowlisted" in meta["reasonCodes"]
+
+
+def test_invalid_environment_fails_closed() -> None:
+    """Unknown environment not in safe-environments allowlist → blocked."""
+    config = _config(
+        environment="unknown-env",
+        environmentAllowlist=("unknown-env",),
+        promotedGate=5,
+        canaryPromotionConfirmed=True,
+    )
+    meta = ga_live_readiness_health_metadata(
+        config, bot_id=_CANARY_BOT_ID, user_id="owner-user-id"
+    )
+    assert meta["liveExecutionAllowed"] is False
+    assert "invalid_environment" in meta["reasonCodes"]
 
 
 # ---------------------------------------------------------------------------
