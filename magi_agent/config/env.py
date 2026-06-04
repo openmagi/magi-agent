@@ -76,6 +76,35 @@ _GATE5B4C3_FIRST_SMOKE_CREDENTIAL_ENV = "GOOGLE_API_KEY"
 
 
 @dataclass(frozen=True)
+class LspDiagnosticsEnv:
+    """Single source for the after-edit LSP diagnostics flag (default OFF).
+
+    Threaded into gate5b via ``build_gate5b_full_toolhost_config_from_env``.
+    When ``enabled`` is False the gate5b contract stays inert and no
+    diagnostics are appended (zero regression).
+    """
+
+    enabled: bool = False
+    cap: int = 20
+    timeout_ms: int = 5000
+
+
+def parse_lsp_diagnostics_env(env: Mapping[str, str]) -> LspDiagnosticsEnv:
+    enabled = _is_true(env.get("MAGI_LSP_DIAGNOSTICS_ENABLED"))
+    if not enabled:
+        return LspDiagnosticsEnv()
+    cap = _int_env(env, "MAGI_LSP_DIAGNOSTICS_CAP", 20)
+    if cap < 1 or cap > 100:
+        raise RuntimeEnvError("MAGI_LSP_DIAGNOSTICS_CAP must be between 1 and 100")
+    timeout_ms = _int_env(env, "MAGI_LSP_DIAGNOSTICS_TIMEOUT_MS", 5000)
+    if timeout_ms < 250 or timeout_ms > 30000:
+        raise RuntimeEnvError(
+            "MAGI_LSP_DIAGNOSTICS_TIMEOUT_MS must be between 250 and 30000"
+        )
+    return LspDiagnosticsEnv(enabled=True, cap=cap, timeout_ms=timeout_ms)
+
+
+@dataclass(frozen=True)
 class Gate3ARecordedReplayEnv:
     enabled: bool = False
     input_dir: Path | None = None

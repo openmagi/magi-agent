@@ -481,6 +481,54 @@ def project_code_intelligence_report(
     return build_code_intelligence_contract(**kwargs)
 
 
+def project_live_diagnostics_report(
+    *,
+    diagnostics_enabled: bool,
+    error_count: int,
+    span: CodeIntelligenceSpan | Mapping[str, object],
+    source_metadata: CodeIntelligenceSourceMetadata | Mapping[str, object],
+    result_digest: str,
+) -> CodeIntelligenceReport:
+    """Flag-gated *live* projection of the ``diagnostics`` operation.
+
+    This is the only live caller wired by PR5. When ``diagnostics_enabled`` is
+    ``False`` the contract stays fully inert: it projects
+    ``provider_unavailable`` (the historical default-off behaviour, identical
+    to ``providerAvailable=False``). When ``True`` it projects a stable
+    ``diagnostics`` observation derived from real LSP-collected diagnostics.
+
+    The returned report's authority flags remain hardcoded ``False`` — this
+    function never grants the contract live authority; it only carries
+    metadata-only diagnostic observations. The actual side-effecting LSP work
+    happens in ``magi_agent.coding.lsp_client`` and gate5b, not here.
+    """
+    if not diagnostics_enabled:
+        return build_code_intelligence_contract(
+            providerAvailable=False,
+            requestedOperations=("diagnostics",),
+        )
+
+    reason_codes: tuple[str, ...] = (
+        "diagnostics_errors_projected" if error_count > 0 else "diagnostics_clean_projected",
+    )
+    observation = CodeIntelligenceObservation.model_validate(
+        {
+            "operation": "diagnostics",
+            "status": "projected",
+            "span": span,
+            "sourceMetadata": source_metadata,
+            "resultDigest": result_digest,
+            "reasonCodes": reason_codes,
+        }
+    )
+    return build_code_intelligence_contract(
+        providerAvailable=True,
+        requestedOperations=("diagnostics",),
+        observations=(observation,),
+        diagnosticsReportDigest=result_digest,
+    )
+
+
 def _safe_digest(value: str) -> str:
     _reject_private_text(value, "digest")
     if _DIGEST_RE.fullmatch(value) is None:
@@ -533,4 +581,5 @@ __all__ = [
     "REQUIRED_CODE_INTELLIGENCE_OPERATIONS",
     "build_code_intelligence_contract",
     "project_code_intelligence_report",
+    "project_live_diagnostics_report",
 ]

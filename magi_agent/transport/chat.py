@@ -650,8 +650,12 @@ def build_gate5b_full_toolhost_config_from_env(
     runtime_config: object,
 ) -> Gate5BFullToolHostConfig:
     del runtime_config
-    from magi_agent.config.env import is_format_on_write_enabled
+    from magi_agent.config.env import (
+        is_format_on_write_enabled,
+        parse_lsp_diagnostics_env,
+    )
 
+    lsp_diagnostics = parse_lsp_diagnostics_env(env)
     return Gate5BFullToolHostConfig.model_validate(
         {
             "enabled": _is_true(
@@ -713,6 +717,9 @@ def build_gate5b_full_toolhost_config_from_env(
                 fallback=5000,
             ),
             "formatOnWriteEnabled": is_format_on_write_enabled(env),
+            "lspDiagnosticsEnabled": lsp_diagnostics.enabled,
+            "lspDiagnosticsCap": lsp_diagnostics.cap,
+            "lspDiagnosticsTimeoutMs": lsp_diagnostics.timeout_ms,
         }
     )
 

@@ -23,6 +23,18 @@ from pydantic import (
     model_validator,
 )
 
+from magi_agent.coding.lsp_client import (
+    Diagnostic,
+    DiagnosticsProvider,
+    LspClient,
+    collect_error_diagnostics,
+    format_diagnostics_block,
+    language_id_for_path,
+)
+from magi_agent.evidence.code_diagnostics_receipts import (
+    CodeDiagnosticsBoundary,
+    CodeDiagnosticsRecord,
+)
 from magi_agent.evidence.coding_tool_receipts import (
     CodingToolReceiptBoundary,
     CodingToolReceiptConfig,
@@ -256,6 +268,14 @@ class Gate5BFullToolHostConfig(_Gate5BFullModel):
     )
     command_timeout_ms: int = Field(default=5000, ge=250, le=30000, alias="commandTimeoutMs")
     format_on_write_enabled: bool = Field(default=False, alias="formatOnWriteEnabled")
+    lsp_diagnostics_enabled: bool = Field(default=False, alias="lspDiagnosticsEnabled")
+    lsp_diagnostics_cap: int = Field(default=20, ge=1, le=100, alias="lspDiagnosticsCap")
+    lsp_diagnostics_timeout_ms: int = Field(
+        default=5000,
+        ge=250,
+        le=30000,
+        alias="lspDiagnosticsTimeoutMs",
+    )
 
     @field_validator("environment_allowlist", "allowed_tool_names", mode="before")
     @classmethod
@@ -333,6 +353,10 @@ class Gate5BFullToolOutcome(_Gate5BFullModel):
         default=None,
         alias="codingMutationReceipt",
     )
+    code_diagnostics_receipt: CodeDiagnosticsRecord | None = Field(
+        default=None,
+        alias="codeDiagnosticsReceipt",
+    )
 
 
 class Gate5BFullToolBundle(_Gate5BFullModel):
@@ -407,6 +431,7 @@ class Gate5BFullToolCounter:
         output_preview: object | None,
         output_byte_count: int,
         coding_mutation_receipt: CodingToolReceiptRecord | None = None,
+        code_diagnostics_receipt: CodeDiagnosticsRecord | None = None,
     ) -> Gate5BFullToolOutcome:
         receipt = Gate5BFullToolReceipt(
             requestDigest=request_digest,
@@ -426,6 +451,7 @@ class Gate5BFullToolCounter:
             outputPreview=output_preview,
             handlerCalled=True,
             codingMutationReceipt=coding_mutation_receipt,
+            codeDiagnosticsReceipt=code_diagnostics_receipt,
         )
 
     def blocked(
@@ -475,6 +501,7 @@ class Gate5BFullToolHost:
         now_ms: Callable[[], int],
         tool_registry: ToolRegistry | None = None,
         read_ledger_enabled: bool = False,
+        diagnostics_provider: DiagnosticsProvider | None = None,
     ) -> None:
         self.config = config
         self.workspace_root = workspace_root.resolve()
@@ -501,6 +528,28 @@ class Gate5BFullToolHost:
         self._read_ledger_workspace_ref = "workspace:" + _digest(
             str(self.workspace_root)
         )[7:31]
+        self.diagnostics_boundary = CodeDiagnosticsBoundary(
+            enabled=config.lsp_diagnostics_enabled
+        )
+        # Lazy-created real LSP client; only built when the flag is on and no
+        # provider was injected (tests inject a fake provider for determinism).
+        self._diagnostics_provider = diagnostics_provider
+        self._owns_lsp_client = False
+
+    def _resolve_diagnostics_provider(self) -> DiagnosticsProvider | None:
+        if not self.config.lsp_diagnostics_enabled:
+            return None
+        if self._diagnostics_provider is None:
+            self._diagnostics_provider = LspClient(
+                self.workspace_root,
+                timeout_s=self.config.lsp_diagnostics_timeout_ms / 1000,
+            )
+            self._owns_lsp_client = True
+        return self._diagnostics_provider
+
+    def shutdown(self) -> None:
+        if self._owns_lsp_client and isinstance(self._diagnostics_provider, LspClient):
+            self._diagnostics_provider.shutdown_all()
 
     async def dispatch(
         self,
@@ -532,6 +581,7 @@ class Gate5BFullToolHost:
         try:
             self._preflight_legacy_tool(tool_name, args, tool_call_id=tool_call_id)
             output = await self._handle(tool_name, args, tool_call_id=tool_call_id)
+            diagnostics_receipt = self._after_write_diagnostics(tool_name, args, output)
             result = ToolResult(status="ok", output=output)
             coding_receipt = self.receipt_boundary.extract_receipt(
                 tool_call_id=tool_call_id,
@@ -548,6 +598,7 @@ class Gate5BFullToolHost:
                 output_preview=_bounded_output(output, self.config.max_per_tool_output_bytes),
                 output_byte_count=_encoded_len(output),
                 coding_mutation_receipt=coding_receipt,
+                code_diagnostics_receipt=diagnostics_receipt,
             )
         except Gate5BFullToolRegistryBlocked as error:
             return self.counter.blocked(
@@ -970,6 +1021,76 @@ class Gate5BFullToolHost:
             return None
         return _digest(content)
 
+    def _after_write_diagnostics(
+        self,
+        tool_name: str,
+        args: Mapping[str, object],
+        output: object,
+    ) -> CodeDiagnosticsRecord | None:
+        """Run LSP diagnostics after a successful workspace mutation.
+
+        Flag-gated and fully fail-open: any error (missing server, timeout,
+        unreadable file, unsupported language) yields ``None`` and appends no
+        diagnostics block, so the write is never failed by diagnostics work.
+
+        On success with ERROR diagnostics it mutates *output* in place to carry
+        an ``lspDiagnostics`` block (``<diagnostics file="...">...``) and
+        returns a ``CodeDiagnosticsRecord`` for evidence emission.
+        """
+        provider = self._resolve_diagnostics_provider()
+        if provider is None:
+            return None
+        if tool_name not in {"FileWrite", "FileEdit", "PatchApply"}:
+            return None
+        if not isinstance(output, dict):
+            return None
+        try:
+            target = _safe_child_path(self.workspace_root, str(args.get("path", "")))
+        except Gate5BFullToolPathPolicyError:
+            return None
+        if language_id_for_path(target) is None:
+            return None
+        try:
+            text = target.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            return None
+        errors: list[Diagnostic] = collect_error_diagnostics(
+            provider,
+            target,
+            text,
+            cap=self.config.lsp_diagnostics_cap,
+        )
+        if not errors:
+            return None
+        relative = target.relative_to(self.workspace_root).as_posix()
+        file_digest = _digest(relative)
+        # File label routed into model-visible output is a digest, never a raw
+        # workspace path, to stay redaction-safe.
+        block = format_diagnostics_block(file_digest, errors)
+        output["lspDiagnostics"] = (
+            "LSP errors detected in this file, please fix:\n\n" + block
+        )
+        return self.diagnostics_boundary.build_record(
+            checker=_diagnostics_checker_label(target),
+            file_digest=file_digest,
+            errors=errors,
+            cap=self.config.lsp_diagnostics_cap,
+        )
+
+
+def _diagnostics_checker_label(path: Path) -> str:
+    language_id = language_id_for_path(path)
+    if language_id in {"python", "pyi"}:
+        return "pyright"
+    if language_id in {
+        "typescript",
+        "typescriptreact",
+        "javascript",
+        "javascriptreact",
+    }:
+        return "typescript-language-server"
+    return "lsp"
+
 
 def build_gate5b_full_toolhost_bundle(
     *,
@@ -979,6 +1100,7 @@ def build_gate5b_full_toolhost_bundle(
     now_ms: Callable[[], int] | None = None,
     tool_registry: ToolRegistry | None = None,
     read_ledger_enabled: bool | None = None,
+    diagnostics_provider: DiagnosticsProvider | None = None,
 ) -> Gate5BFullToolBundle:
     safe_config = Gate5BFullToolHostConfig.model_validate(config or {})
     workspace = Path(workspace_root)
@@ -997,6 +1119,7 @@ def build_gate5b_full_toolhost_bundle(
         now_ms=now_ms or _now_ms,
         tool_registry=tool_registry,
         read_ledger_enabled=read_ledger_enabled,
+        diagnostics_provider=diagnostics_provider,
     )
     if selected_scope_error is not None:
         return Gate5BFullToolBundle(
