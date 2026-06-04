@@ -40,6 +40,39 @@ class UntrustedProvider:
         return {"results": [{"url": "https://docs.example.com/x", "snippet": "x"}]}
 
 
+class StatusProvider:
+    openmagi_live_provider = True
+
+    def __init__(self, status: str) -> None:
+        self.status = status
+        self.calls: list[object] = []
+
+    def search(self, request: object) -> dict[str, object]:
+        self.calls.append(("search", request))
+        return {
+            "status": self.status,
+            "results": [{"url": "https://docs.example.com/status", "snippet": "must not become records"}],
+        }
+
+
+class RaisingProvider:
+    openmagi_live_provider = True
+
+    def search(self, request: object) -> dict[str, object]:
+        raise RuntimeError("raw provider exception must not leak")
+
+
+class AwaitableProvider:
+    openmagi_live_provider = True
+
+    async def search(self, request: object) -> dict[str, object]:
+        return {"results": [{"url": "https://docs.example.com/async", "snippet": "async"}]}
+
+
+class MissingSearchProvider:
+    openmagi_live_provider = True
+
+
 def _live_config(**overrides: object) -> object:
     from magi_agent.web_acquisition.live_provider_pack import (
         LiveWebAcquisitionPackConfig,
@@ -213,6 +246,82 @@ def test_happy_path_fetch_returns_opened_proof() -> None:
     assert result.status == "ok"
     assert provider.calls[0][0] == "fetch"
     assert result.source_records[0].proof_type == "opened"
+
+
+def test_live_provider_denied_status_does_not_build_records() -> None:
+    from magi_agent.web_acquisition.live_provider_pack import (
+        LiveWebAcquisitionProviderPack,
+    )
+
+    provider = StatusProvider("denied")
+    pack = LiveWebAcquisitionProviderPack(_live_config())
+
+    result = pack.run(_request(operation="search", query="current docs"), provider=provider)
+
+    assert result.status == "no_answer"
+    assert result.reason_codes == ("provider_denied",)
+    assert result.source_records == ()
+    assert len(provider.calls) == 1
+
+
+def test_live_provider_timeout_status_requires_repair_without_records() -> None:
+    from magi_agent.web_acquisition.live_provider_pack import (
+        LiveWebAcquisitionProviderPack,
+    )
+
+    provider = StatusProvider("timeout")
+    pack = LiveWebAcquisitionProviderPack(_live_config())
+
+    result = pack.run(_request(operation="search", query="current docs"), provider=provider)
+
+    assert result.status == "repair_required"
+    assert result.reason_codes == ("provider_timeout",)
+    assert result.source_records == ()
+    assert len(provider.calls) == 1
+
+
+def test_live_provider_exception_fails_closed_without_raw_message() -> None:
+    from magi_agent.web_acquisition.live_provider_pack import (
+        LiveWebAcquisitionProviderPack,
+    )
+
+    pack = LiveWebAcquisitionProviderPack(_live_config())
+
+    result = pack.run(_request(operation="search", query="current docs"), provider=RaisingProvider())
+
+    assert result.status == "repair_required"
+    assert result.reason_codes == ("provider_execution_failed",)
+    assert result.source_records == ()
+    rendered = result.public_projection()
+    assert "raw provider exception" not in str(rendered)
+
+
+def test_live_provider_awaitable_output_fails_closed_without_records() -> None:
+    from magi_agent.web_acquisition.live_provider_pack import (
+        LiveWebAcquisitionProviderPack,
+    )
+
+    pack = LiveWebAcquisitionProviderPack(_live_config())
+
+    result = pack.run(_request(operation="search", query="current docs"), provider=AwaitableProvider())
+
+    assert result.status == "repair_required"
+    assert result.reason_codes == ("async_provider_not_supported",)
+    assert result.source_records == ()
+
+
+def test_live_provider_missing_operation_fails_closed_without_records() -> None:
+    from magi_agent.web_acquisition.live_provider_pack import (
+        LiveWebAcquisitionProviderPack,
+    )
+
+    pack = LiveWebAcquisitionProviderPack(_live_config())
+
+    result = pack.run(_request(operation="search", query="current docs"), provider=MissingSearchProvider())
+
+    assert result.status == "repair_required"
+    assert result.reason_codes == ("provider_operation_missing",)
+    assert result.source_records == ()
 
 
 def test_reader_operation_ssrf_blocked_url_does_not_call_provider() -> None:

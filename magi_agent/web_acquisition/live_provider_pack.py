@@ -442,10 +442,25 @@ class LiveWebAcquisitionProviderPack:
             return _result(request, status, digest, (validation_error,), diagnostics)
 
         assert provider is not None  # gate guarantees non-None
-        method = getattr(provider, _OPERATION_TO_PROVIDER_METHOD[request.operation])
-        raw_output = method(request)
+        method = getattr(provider, _OPERATION_TO_PROVIDER_METHOD[request.operation], None)
+        if method is None:
+            return _result(request, "repair_required", digest, ("provider_operation_missing",), diagnostics)
+        try:
+            raw_output = method(request)
+        except Exception:
+            return _result(request, "repair_required", digest, ("provider_execution_failed",), diagnostics)
+        if inspect.isawaitable(raw_output):
+            close = getattr(raw_output, "close", None)
+            if callable(close):
+                close()
+            return _result(request, "repair_required", digest, ("async_provider_not_supported",), diagnostics)
         if not isinstance(raw_output, Mapping):
             raw_output = {"value": repr(raw_output)}
+        provider_status = _provider_status(raw_output)
+        if provider_status == "denied":
+            return _result(request, "no_answer", digest, ("provider_denied",), diagnostics)
+        if provider_status == "timeout":
+            return _result(request, "repair_required", digest, ("provider_timeout",), diagnostics)
 
         records = _records_from_output(
             request,
