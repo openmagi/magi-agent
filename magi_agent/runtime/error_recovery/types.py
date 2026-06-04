@@ -38,6 +38,12 @@ class RecoverableError(BaseModel):
     original_error: str
     http_status: int | None = None
     tokens_over: int | None = None
+    # OpenCode-style Retry-After honoring: when an upstream 429 carries a
+    # Retry-After / retry-after-ms hint, the parsed delay (in seconds, float)
+    # is threaded here so RateLimitStrategy waits the *server-requested* delay
+    # instead of (or capped against) its blind exponential backoff. ``None``
+    # means no hint was present -> fall back to exponential backoff.
+    retry_after_seconds: float | None = None
 
 
 class TerminalError(BaseModel):

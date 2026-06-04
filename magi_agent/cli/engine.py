@@ -45,12 +45,35 @@ a mock). When ``runner is None`` we resolve it from the ``runtime`` arg passed t
 production caller (Stream F) can pass a wired runtime object. If no runner can be
 resolved, the turn terminates with ``Terminal.error`` (``"no_runner"``) rather
 than raising.
+
+Genuine error recovery (PR12 honest retry seam)
+-----------------------------------------------
+This is THE live error-recovery seam. ``Runner.run_async`` owns the multi-step
+model/tool loop; its ADK ``on_model_error_callback`` is a *substitute-the-
+response* seam, NOT a *retry* seam — returning a content-less ``LlmResponse``
+there ends the turn (ADK treats it as the final step) and no re-invocation
+happens. So recovery is implemented HERE, around the run *invocation*: when the
+ADK iteration raises a model error, :class:`MagiEngineDriver` classifies it via
+the existing :class:`ErrorClassifier`, and for a retryable error (e.g. a 429)
+applies backoff through the existing :class:`RecoveryEngine` (honoring
+``Retry-After``) and then RE-INVOKES a fresh ``adapter.run_turn(...)`` — a
+genuine second ``run_async`` (and therefore a real second model call).
+
+Recovery is bounded by ``recovery_max_attempts`` and only fires BEFORE any agent
+event has been streamed for the turn (so a mid-stream failure never replays
+already-delivered output / duplicates tool effects). Terminal errors are not
+retried (they propagate to a ``Terminal.error``); a prompt-too-long /
+context-overflow error is NOT blind-retried here (it would just fail again) —
+it is left to propagate (PR13 compaction territory). The whole wrapper is
+flag-gated: with ``recovery=None`` (the default, and what the OFF env produces)
+the streaming path is byte-for-byte identical to pre-PR12.
 """
 
 from __future__ import annotations
 
 import asyncio
 from collections.abc import AsyncGenerator, AsyncIterator
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from magi_agent.cli.contracts import ControlRequest, EngineResult, Terminal
@@ -58,6 +81,53 @@ from magi_agent.runtime.events import RuntimeEvent
 
 if TYPE_CHECKING:  # pragma: no cover - typing only, never imported at runtime
     from magi_agent.cli.contracts import PermissionGate
+    from magi_agent.runtime.error_recovery import (
+        RecoverableError,
+        RecoveryAttemptState,
+        RecoveryEngine,
+    )
+
+
+@dataclass(frozen=True)
+class EngineRecoveryPolicy:
+    """Live retry policy for the run invocation (PR12 genuine recovery seam).
+
+    Holds the EXISTING :class:`RecoveryEngine` (activation, not reimpl) plus the
+    per-turn attempt budget. Passed to :class:`MagiEngineDriver`; ``None`` (the
+    default) disables the retry wrapper entirely so the OFF path is unchanged.
+    """
+
+    engine: "RecoveryEngine"
+    max_attempts: int = 3
+
+
+def build_engine_recovery_policy(env: object = None) -> "EngineRecoveryPolicy | None":
+    """Build the recovery policy from env, or ``None`` when recovery is OFF.
+
+    Reuses ``MAGI_ERROR_RECOVERY_ENABLED`` / ``MAGI_MAX_RECOVERY_ATTEMPTS`` (the
+    single source of truth in ``config.env``) and the existing default
+    ``RecoveryEngine``. Imports are deferred so ``import cli.engine`` stays
+    cold-clean (no error_recovery import at module top is required, but these
+    are pure-python anyway).
+    """
+
+    import os
+
+    from magi_agent.config.env import parse_error_recovery_env
+    from magi_agent.runtime.error_recovery import ErrorRecoveryConfig, RecoveryEngine
+
+    mapping = env if isinstance(env, dict) else os.environ
+    parsed = parse_error_recovery_env(mapping)
+    if not parsed.enabled:
+        return None
+    config = ErrorRecoveryConfig(
+        recovery_enabled=True,
+        max_recovery_attempts=parsed.max_recovery_attempts,
+    )
+    return EngineRecoveryPolicy(
+        engine=RecoveryEngine(config),
+        max_attempts=parsed.max_recovery_attempts,
+    )
 
 # A sane default cap so a runaway stream can't yield forever. Mirrors the spirit
 # of RunnerSessionBoundaryConfig.max_event_count but headless can tolerate more.
@@ -151,10 +221,16 @@ class MagiEngineDriver:
         runner: object | None = None,
         max_event_count: int = _DEFAULT_MAX_EVENT_COUNT,
         user_id: str = "cli",
+        recovery: "EngineRecoveryPolicy | None" = None,
     ) -> None:
         self._runner = runner
         self._max_event_count = max(1, int(max_event_count))
         self._user_id = user_id
+        # Genuine error-recovery retry policy (PR12). ``None`` -> no retry
+        # wrapper (the OFF path; byte-for-byte identical streaming). When set,
+        # a classified-retryable model error raised by the run invocation is
+        # backed-off and the run is RE-INVOKED (fresh run_async).
+        self._recovery = recovery
         # Shared across all turns of this driver instance: single-flight per
         # session id. Lazily built so construction stays cheap + import-clean.
         self._registry: object | None = None
@@ -356,44 +432,93 @@ class MagiEngineDriver:
             runner=runner, gate=gate, turn_id=turn_id, cancel=cancel
         )
 
-        adk_iter: AsyncIterator[object] = adapter.run_turn(runner_input).__aiter__()  # type: ignore[union-attr]
         cancelled = False
         engine_error: str | None = None
+        # Number of agent RuntimeEvents actually yielded to the consumer across
+        # ALL attempts. Recovery only re-invokes the run while this is 0, so a
+        # mid-stream failure never replays already-delivered output.
+        yielded_events = 0
+        # Per-turn recovery attempt state (the existing RecoveryEngine threads
+        # its per-strategy budget through this).
+        recovery_state: "RecoveryAttemptState | None" = None
+        recovery_attempts = 0
 
         try:
             while True:
-                if cancel.is_set():
-                    cancelled = True
+                # (Re-)invoke the run: a FRESH ``adapter.run_turn`` is a fresh
+                # ``Runner.run_async`` and therefore a real model call. On the
+                # first iteration this is the original invocation; on a recovery
+                # retry it is the genuine second invocation.
+                adk_iter: AsyncIterator[object] = (
+                    adapter.run_turn(runner_input).__aiter__()  # type: ignore[union-attr]
+                )
+                attempt_error: Exception | None = None
+                attempt_yielded = 0
+                try:
+                    while True:
+                        if cancel.is_set():
+                            cancelled = True
+                            break
+
+                        step = await self._next_adk_event(adk_iter, cancel)
+                        if step is _CANCELLED:
+                            cancelled = True
+                            break
+                        if step is _EXHAUSTED:
+                            break
+
+                        adk_event = step
+                        event_count += 1
+                        projection = bridge.project_adk_event(adk_event, turn_id=turn_id)  # type: ignore[union-attr]
+                        for raw_event in projection.agent_events:  # type: ignore[union-attr]
+                            safe = sanitize(dict(raw_event))  # type: ignore[operator]
+                            if safe is None:
+                                continue
+                            self._track_pending_tool(safe, pending_tool_ids)
+                            attempt_yielded += 1
+                            yielded_events += 1
+                            yield RuntimeEvent(
+                                type=_map_event_kind(safe.get("type")),
+                                payload=safe,
+                                turn_id=turn_id,
+                            )
+
+                        if event_count >= self._max_event_count:
+                            break
+                except Exception as exc:  # noqa: BLE001 - surface as terminal error
+                    attempt_error = exc
+                finally:
+                    await self._aclose_iter(adk_iter)
+
+                if cancelled:
+                    break
+                if attempt_error is None:
                     break
 
-                step = await self._next_adk_event(adk_iter, cancel)
-                if step is _CANCELLED:
-                    cancelled = True
-                    break
-                if step is _EXHAUSTED:
-                    break
-
-                adk_event = step
-                event_count += 1
-                projection = bridge.project_adk_event(adk_event, turn_id=turn_id)  # type: ignore[union-attr]
-                for raw_event in projection.agent_events:  # type: ignore[union-attr]
-                    safe = sanitize(dict(raw_event))  # type: ignore[operator]
-                    if safe is None:
-                        continue
-                    self._track_pending_tool(safe, pending_tool_ids)
-                    yield RuntimeEvent(
-                        type=_map_event_kind(safe.get("type")),
-                        payload=safe,
+                # The run invocation raised. Decide whether to GENUINELY retry.
+                # Only safe before any output was streamed (this turn AND this
+                # attempt) so we never double-emit / duplicate tool effects.
+                should_retry = (
+                    self._recovery is not None
+                    and yielded_events == 0
+                    and attempt_yielded == 0
+                    and recovery_attempts < self._recovery.max_attempts
+                )
+                if should_retry:
+                    recovery_state, recovered = await self._attempt_run_recovery(
+                        error=attempt_error,
+                        session_id=session_id,
                         turn_id=turn_id,
+                        state=recovery_state,
                     )
-
-                if event_count >= self._max_event_count:
-                    break
-        except Exception as exc:  # noqa: BLE001 - surface as terminal error
-            engine_error = str(exc) or exc.__class__.__name__
+                    if recovered:
+                        recovery_attempts += 1
+                        continue  # re-invoke run_async (genuine 2nd model call)
+                # Terminal / non-retryable / budget exhausted -> surface.
+                engine_error = str(attempt_error) or attempt_error.__class__.__name__
+                break
         finally:
             self._restore_gate_callback(gate_attach)
-            await self._aclose_iter(adk_iter)
 
         if cancelled:
             for safe in self._synthesize_orphan_tool_results(
@@ -447,6 +572,57 @@ class MagiEngineDriver:
             session_id=session_id,
             turn_id=turn_id,
         )
+
+    async def _attempt_run_recovery(
+        self,
+        *,
+        error: Exception,
+        session_id: str,
+        turn_id: str,
+        state: "RecoveryAttemptState | None",
+    ) -> "tuple[RecoveryAttemptState | None, bool]":
+        """Classify a run-invocation error and apply backoff for a retryable one.
+
+        Returns ``(updated_state, recovered)``. ``recovered=True`` means a
+        strategy succeeded (e.g. RateLimit slept the Retry-After delay) and the
+        caller should RE-INVOKE the run. ``recovered=False`` means the error is
+        terminal, is prompt-too-long / context-overflow (NOT blind-retried —
+        it would just fail again; PR13 compaction territory), or no strategy
+        applied — so the caller surfaces it as a terminal error.
+
+        This activates the EXISTING ``ErrorClassifier`` + ``RecoveryEngine``
+        (not a reimplementation). The substitute-the-response
+        ``on_model_error_callback`` seam in ``resilience_plugin`` is deliberately
+        NOT used for retry (it cannot re-invoke the model); recovery lives here,
+        at the genuine run-invocation boundary.
+        """
+
+        recovery = self._recovery
+        if recovery is None:  # pragma: no cover - guarded by caller
+            return state, False
+
+        from magi_agent.runtime.error_recovery import (  # noqa: PLC0415
+            ErrorClassifier,
+            ErrorKind,
+            RecoverableError,
+        )
+
+        classified = ErrorClassifier.classify(error)
+        if not isinstance(classified, RecoverableError):
+            return state, False  # terminal -> propagate
+        if classified.kind == ErrorKind.PROMPT_TOO_LONG:
+            # Re-issuing the identical (over-long) request would just fail again.
+            # Do NOT blind-retry; leave it to propagate (PR13 compaction seam).
+            return state, False
+
+        result, new_state = await recovery.engine.attempt_recovery(
+            error=classified,
+            messages=[],
+            session_key=session_id,
+            turn_id=turn_id,
+            state=state,
+        )
+        return new_state, bool(result.success)
 
     async def _next_adk_event(
         self,
@@ -702,4 +878,8 @@ class _suppress_cancel:
         )
 
 
-__all__ = ["MagiEngineDriver"]
+__all__ = [
+    "EngineRecoveryPolicy",
+    "MagiEngineDriver",
+    "build_engine_recovery_policy",
+]

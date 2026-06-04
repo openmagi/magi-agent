@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import re
+from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
 
 from magi_agent.runtime.error_recovery.types import (
     ErrorKind,
@@ -68,6 +70,7 @@ class ErrorClassifier:
         error: BaseException | str | dict[str, object],
     ) -> RecoverableError | TerminalError:
         text, http_status = _extract_signal(error)
+        retry_after_seconds = _extract_retry_after_seconds(error, text)
 
         if not text and http_status is None:
             return TerminalError(original_error=str(error))
@@ -84,6 +87,7 @@ class ErrorClassifier:
                 kind=ErrorKind.RATE_LIMIT,
                 original_error=text,
                 http_status=429,
+                retry_after_seconds=retry_after_seconds,
             )
 
         # --- Pattern matching on text ---
@@ -108,6 +112,7 @@ class ErrorClassifier:
                 kind=ErrorKind.RATE_LIMIT,
                 original_error=text,
                 http_status=http_status,
+                retry_after_seconds=retry_after_seconds,
             )
 
         # Check dict-level finish/stop reason for max_output_tokens
@@ -192,6 +197,128 @@ def _safe_int(value: object) -> int | None:
     if isinstance(value, str):
         try:
             return int(value)
+        except ValueError:
+            return None
+    return None
+
+
+# OpenCode parses the ``retry-after-ms`` header first (millisecond precision),
+# then falls back to the standard ``Retry-After`` header which is either an
+# integer number of seconds or an HTTP-date. We mirror that precedence.
+_RETRY_AFTER_MS_RE = re.compile(
+    r"retry[-_ ]?after[-_ ]?ms\s*[:=]\s*[\"']?(\d+)",
+    re.IGNORECASE,
+)
+_RETRY_AFTER_SECONDS_RE = re.compile(
+    r"retry[-_ ]?after\s*[:=]\s*[\"']?(\d+(?:\.\d+)?)\b",
+    re.IGNORECASE,
+)
+_RETRY_AFTER_DATE_RE = re.compile(
+    r"retry[-_ ]?after\s*[:=]\s*[\"']?([A-Za-z]{3},\s*[^\"'\r\n]+GMT)",
+    re.IGNORECASE,
+)
+_RETRY_AFTER_CAP_SECONDS = 60.0
+
+
+def _extract_retry_after_seconds(
+    error: BaseException | str | dict[str, object],
+    text: str,
+) -> float | None:
+    """Parse an OpenCode-style Retry-After hint into seconds (capped at 60s).
+
+    Precedence: ``retry-after-ms`` header > ``Retry-After`` seconds >
+    ``Retry-After`` HTTP-date. Looks at structured dict fields first (header
+    maps), then any free-form error text. Returns ``None`` when no hint is
+    present so the caller can fall back to exponential backoff.
+    """
+    structured = _retry_after_from_structured(error)
+    if structured is not None:
+        return structured
+    return _retry_after_from_text(text)
+
+
+def _retry_after_from_structured(
+    error: BaseException | str | dict[str, object],
+) -> float | None:
+    headers: dict[str, object] = {}
+    if isinstance(error, dict):
+        for key in ("headers", "response_headers", "responseHeaders"):
+            candidate = error.get(key)
+            if isinstance(candidate, dict):
+                headers.update(candidate)
+        # Some SDKs surface the hint as a top-level field.
+        for key in ("retry_after_ms", "retryAfterMs", "retry_after", "retryAfter"):
+            if key in error:
+                headers.setdefault(key, error.get(key))
+    else:
+        response = getattr(error, "response", None)
+        response_headers = getattr(response, "headers", None)
+        if isinstance(response_headers, dict):
+            headers.update(response_headers)
+    if not headers:
+        return None
+    lowered = {str(k).lower(): v for k, v in headers.items()}
+    for key in ("retry-after-ms", "retry_after_ms", "retryafterms"):
+        ms = _safe_float(lowered.get(key))
+        if ms is not None and ms >= 0:
+            return _cap_retry_after(ms / 1000.0)
+    for key in ("retry-after", "retry_after", "retryafter"):
+        value = lowered.get(key)
+        seconds = _safe_float(value)
+        if seconds is not None and seconds >= 0:
+            return _cap_retry_after(seconds)
+        date_seconds = _http_date_delay(value)
+        if date_seconds is not None:
+            return _cap_retry_after(date_seconds)
+    return None
+
+
+def _retry_after_from_text(text: str) -> float | None:
+    if not text:
+        return None
+    ms_match = _RETRY_AFTER_MS_RE.search(text)
+    if ms_match:
+        return _cap_retry_after(int(ms_match.group(1)) / 1000.0)
+    seconds_match = _RETRY_AFTER_SECONDS_RE.search(text)
+    if seconds_match:
+        return _cap_retry_after(float(seconds_match.group(1)))
+    date_match = _RETRY_AFTER_DATE_RE.search(text)
+    if date_match:
+        date_seconds = _http_date_delay(date_match.group(1))
+        if date_seconds is not None:
+            return _cap_retry_after(date_seconds)
+    return None
+
+
+def _http_date_delay(value: object) -> float | None:
+    if not isinstance(value, str) or not value.strip():
+        return None
+    try:
+        parsed = parsedate_to_datetime(value.strip())
+    except (TypeError, ValueError):
+        return None
+    if parsed is None:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    delta = (parsed - datetime.now(timezone.utc)).total_seconds()
+    return delta if delta > 0 else 0.0
+
+
+def _cap_retry_after(seconds: float) -> float:
+    if seconds < 0:
+        return 0.0
+    return min(seconds, _RETRY_AFTER_CAP_SECONDS)
+
+
+def _safe_float(value: object) -> float | None:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        return float(value)
+    if isinstance(value, str):
+        try:
+            return float(value.strip())
         except ValueError:
             return None
     return None
