@@ -178,6 +178,40 @@ def project_plugin_lifecycle_hooks(
     )
 
 
+#: Plugin id under which the Track 19 PR6 constraint-reinjection callback is
+#: declared. The callback re-injects the active GA contract's still-unmet
+#: required-evidence checklist + open approval_required controls each turn
+#: (see ``harness/general_automation/constraint_reinjection``). Declared here as
+#: metadata-only — ``callbackAttached`` stays ``False`` (the live flag gate is
+#: the activation authority; this projection attaches nothing).
+_CONSTRAINT_REINJECTION_PLUGIN_ID = "general-automation-constraint-reinjection"
+_CONSTRAINT_REINJECTION_POLICY_REF = (
+    "policy:general-automation:constraint-reinjection"
+)
+
+
+def project_constraint_reinjection_callback() -> PluginLifecycleHookProjection:
+    """Project the PR6 constraint-reinjection callback as plugin metadata.
+
+    Extends the existing lifecycle-hook projection (it reuses
+    :func:`project_plugin_lifecycle_hooks`) to declare the general-automation
+    constraint-reinjection callback — the ``before_model_callback`` runtime hook
+    that, each turn, re-injects the contract's still-unmet required evidence and
+    open ``approval_required`` controls. The projection is metadata-only:
+    ``callbackAttached`` remains ``False`` (no authority flag is flipped). The
+    live runtime attaches the actual callback only behind the
+    ``MAGI_GA_LIVE_ENABLED`` flag gate.
+    """
+    request = PluginLifecycleHookProjectionRequest(
+        pluginId=_CONSTRAINT_REINJECTION_PLUGIN_ID,
+        lifecycleStage="runtime_hook",
+        callbackNames=("before_model_callback",),
+        policyRef=_CONSTRAINT_REINJECTION_POLICY_REF,
+        metadata={"reinjection": "required_evidence_and_open_approvals"},
+    )
+    return project_plugin_lifecycle_hooks(request)
+
+
 def _plugin_ref(plugin_id: str) -> str:
     return "plugin:general-automation:" + _digest(plugin_id)
 
@@ -218,4 +252,5 @@ __all__ = [
     "PluginLifecycleHookProjectionRequest",
     "PluginLifecycleAuthorityFlags",
     "project_plugin_lifecycle_hooks",
+    "project_constraint_reinjection_callback",
 ]
