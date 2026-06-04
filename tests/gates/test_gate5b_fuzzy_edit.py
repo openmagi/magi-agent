@@ -140,11 +140,60 @@ async def test_fuzzy_edit_flag_on_absent_old_text_returns_not_found(tmp_path, mo
 
     # gate5b maps ValueError to status="error"
     assert outcome.status == "error", f"Expected error, got {outcome.status}"
-    # The error output should reflect old_text_not_found (gate5b returns
-    # generic "tool_error" in the preview, but the ValueError message is
-    # old_text_not_found — we just verify the status is error and the file
-    # is unchanged)
+    # File must be unchanged — confirms the error was a match failure, not a
+    # partial write followed by an error (which would be a worse outcome).
     assert (tmp_path / "data.py").read_text(encoding="utf-8") == "x = 1\ny = 2\n"
+
+
+def test_fuzzy_edit_handle_absent_old_text_raises_old_text_not_found(tmp_path, monkeypatch):
+    """Direct unit test: _handle raises ValueError('old_text_not_found') on NoMatchError.
+
+    This supplements the integration test above by asserting the *specific*
+    error code rather than just a generic status=="error", which any ValueError
+    would produce.  If the wiring were broken (e.g. NoMatchError swallowed
+    silently, or mapped to a different code), this test fails.
+    """
+    import magi_agent.gates.gate5b_full_toolhost as mod
+    monkeypatch.setattr(mod, "_EDIT_FUZZY_MATCH_ENABLED", True)
+
+    bundle = _ready_bundle(tmp_path)
+    _write_file(tmp_path, "data2.py", "x = 1\ny = 2\n")
+
+    with pytest.raises(ValueError, match="old_text_not_found"):
+        bundle.host._handle(
+            "FileEdit",
+            {
+                "path": "data2.py",
+                "oldText": "this_text_does_not_exist_anywhere_in_the_file\n",
+                "newText": "replaced\n",
+            },
+        )
+
+
+def test_fuzzy_edit_handle_ambiguous_raises_old_text_not_unique(tmp_path, monkeypatch):
+    """Direct unit test: _handle raises ValueError('old_text_not_unique') on MultipleMatchesError.
+
+    Complements test (c) — asserts the specific error code, which would fail if
+    MultipleMatchesError were mapped to 'old_text_not_found' or silently ignored.
+    """
+    import magi_agent.gates.gate5b_full_toolhost as mod
+    monkeypatch.setattr(mod, "_EDIT_FUZZY_MATCH_ENABLED", True)
+
+    bundle = _ready_bundle(tmp_path)
+
+    repeated_block = "    def process(self):\n        pass\n"
+    content = repeated_block + "\n" + repeated_block
+    _write_file(tmp_path, "service2.py", content)
+
+    with pytest.raises(ValueError, match="old_text_not_unique"):
+        bundle.host._handle(
+            "FileEdit",
+            {
+                "path": "service2.py",
+                "oldText": "def process(self):\n    pass\n",
+                "newText": "def process(self):\n    return True\n",
+            },
+        )
 
 
 # ---------------------------------------------------------------------------

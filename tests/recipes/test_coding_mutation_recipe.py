@@ -457,6 +457,80 @@ def test_coding_mutation_recipe_materializes_default_off_without_live_attachment
     assert materialization.public_projection()["attachmentFlags"]["liveToolAttached"] is False
 
 
+# ---------------------------------------------------------------------------
+# MAGI_EDIT_FUZZY_MATCH_ENABLED flag-ON paths (Item 4)
+# ---------------------------------------------------------------------------
+
+
+def test_file_edit_fuzzy_flag_on_indentation_mismatch_is_accepted(monkeypatch) -> None:
+    """When fuzzy flag is ON, indentation-mismatched old_string is still accepted."""
+    import magi_agent.config.env as env_mod
+    monkeypatch.setattr(env_mod, "MAGI_EDIT_FUZZY_MATCH_ENABLED", True)
+
+    ledger = _ledger()
+    content = "def foo():\n    return 1\n"
+    digest = _record_read(ledger, content=content)
+
+    # old_string uses 2-space indent, file has 4-space — fuzzy should absorb this
+    decision = _recipe(ledger=ledger).evaluate(
+        _edit_request(
+            current_digest=digest,
+            current_text=content,
+            old_string="def foo():\n  return 1\n",
+            new_string="def foo():\n    return 42\n",
+        ),
+    )
+
+    assert decision.status == "approval_required"
+    assert decision.reason_codes == ("coding_mutation_requires_explicit_approval",)
+
+
+def test_file_edit_fuzzy_flag_on_absent_old_string_returns_no_match(monkeypatch) -> None:
+    """When fuzzy flag is ON, genuinely absent old_string maps to no_match."""
+    import magi_agent.config.env as env_mod
+    monkeypatch.setattr(env_mod, "MAGI_EDIT_FUZZY_MATCH_ENABLED", True)
+
+    ledger = _ledger()
+    content = "x = 1\n"
+    digest = _record_read(ledger, content=content)
+
+    decision = _recipe(ledger=ledger).evaluate(
+        _edit_request(
+            current_digest=digest,
+            current_text=content,
+            old_string="this_string_is_completely_absent\n",
+            new_string="replaced\n",
+        ),
+    )
+
+    assert decision.status == "blocked"
+    assert decision.reason_codes == ("no_match",)
+
+
+def test_file_edit_fuzzy_flag_on_ambiguous_match_returns_multiple_matches(monkeypatch) -> None:
+    """When fuzzy flag is ON, ambiguous match maps to multiple_matches."""
+    import magi_agent.config.env as env_mod
+    monkeypatch.setattr(env_mod, "MAGI_EDIT_FUZZY_MATCH_ENABLED", True)
+
+    ledger = _ledger()
+    repeated = "    def run(self):\n        pass\n"
+    content = repeated + "\n" + repeated
+    digest = _record_read(ledger, content=content)
+
+    # old_string with stripped indentation matches both occurrences
+    decision = _recipe(ledger=ledger).evaluate(
+        _edit_request(
+            current_digest=digest,
+            current_text=content,
+            old_string="def run(self):\n    pass\n",
+            new_string="def run(self):\n    return True\n",
+        ),
+    )
+
+    assert decision.status == "blocked"
+    assert decision.reason_codes == ("multiple_matches",)
+
+
 def test_coding_mutation_recipe_has_no_live_runtime_imports() -> None:
     completed = subprocess.run(
         [

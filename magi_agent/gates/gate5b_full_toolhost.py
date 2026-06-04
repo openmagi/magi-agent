@@ -10,10 +10,7 @@ from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from typing import Any, Literal, Self
 
-_EDIT_FUZZY_MATCH_ENABLED: bool = (
-    os.environ.get("MAGI_EDIT_FUZZY_MATCH_ENABLED", "0").strip().lower()
-    in frozenset({"1", "true", "yes", "on"})
-)
+from magi_agent.config.env import MAGI_EDIT_FUZZY_MATCH_ENABLED as _EDIT_FUZZY_MATCH_ENABLED
 
 from google.adk.tools import FunctionTool
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator

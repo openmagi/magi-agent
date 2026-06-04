@@ -68,7 +68,7 @@ def levenshtein(a: str, b: str) -> int:
 
 
 def detect_line_ending(text: str) -> str:
-    """Return '\\r\\n' if dominant, else '\\n'."""
+    """Return '\\r\\n' if CRLF count >= pure-LF count (and CRLF > 0), else '\\n'."""
     crlf = text.count("\r\n")
     lf = text.count("\n") - crlf  # pure LF only
     return "\r\n" if crlf >= lf and crlf > 0 else "\n"
@@ -168,7 +168,9 @@ def _block_anchor(content: str, find: str):
 
     if len(candidates) == 1:
         i, j = candidates[0]
-        yield "".join(content_lines[i : j + 1])
+        candidate = "".join(content_lines[i : j + 1])
+        if candidate in content:
+            yield candidate
         return
 
     # Multiple candidates: pick the one with best avg middle similarity
@@ -224,13 +226,17 @@ def _whitespace_normalized(content: str, find: str):
             if line in content:
                 yield line
             continue
-        # Try regex match within line
+        # Try regex match within line — only when it spans the COMPLETE line
+        # content (m.start()==0 and m.end()==len(stripped)) to prevent a
+        # short old_text token from matching a partial substring anywhere.
         words = re.split(r"\s+", find.strip())
         if words:
             pattern = r"\s+".join(re.escape(w) for w in words if w)
             m = re.search(pattern, stripped)
-            if m:
-                yield stripped[m.start() : m.end()]
+            if m and m.start() == 0 and m.end() == len(stripped):
+                candidate = stripped[m.start() : m.end()]
+                if candidate in content:
+                    yield candidate
 
 
 def _indentation_flexible(content: str, find: str):
@@ -291,7 +297,9 @@ def _escape_normalized(content: str, find: str):
         yield unescaped_find
         return
 
-    # Try sliding window
+    # Try sliding window: compare raw content window to unescaped find_lines.
+    # We must NOT unescape the content side — files may contain literal
+    # two-character sequences like backslash-n which would be destroyed.
     find_lines = unescaped_find.splitlines(keepends=True)
     if not find_lines:
         return
@@ -299,8 +307,7 @@ def _escape_normalized(content: str, find: str):
     content_lines = content.splitlines(keepends=True)
     for i in range(len(content_lines) - n + 1):
         window = content_lines[i : i + n]
-        window_unescaped = [_unescape(l) for l in window]
-        if window_unescaped == find_lines:
+        if window == find_lines:
             candidate = "".join(window)
             if candidate in content:
                 yield candidate
@@ -370,7 +377,12 @@ def _context_aware(content: str, find: str):
 
 
 def _multi_occurrence(content: str, find: str):
-    """Matcher 9: yield every exact occurrence (for replace_all)."""
+    """Matcher 9: yield every exact occurrence (for replace_all).
+
+    This is the replace_all fallback used when exact substring matching was not
+    sufficient on its own (i.e. it could not establish uniqueness for single
+    replacement but is fine to apply to all occurrences for replace_all=True).
+    """
     if find in content:
         yield find
 
@@ -440,7 +452,7 @@ def replace(content: str, old: str, new: str, replace_all: bool = False) -> str:
             idx = content_body.find(candidate)
             if idx == -1:
                 continue
-            if content_body.find(candidate, idx + 1) != -1:
+            if not _is_unique(content_body, candidate):
                 # Ambiguous — note it, but try other candidates/matchers
                 _found_but_ambiguous = True
                 continue

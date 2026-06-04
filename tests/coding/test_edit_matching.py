@@ -14,6 +14,8 @@ from magi_agent.coding.edit_matching import (
     levenshtein,
     replace,
     detect_line_ending,
+    _escape_normalized,
+    _whitespace_normalized,
 )
 
 
@@ -84,9 +86,10 @@ class TestSimpleMatcher:
             replace("abc", "abc", "abc")
 
     def test_replace_first_only(self):
-        # simple: replace first occurrence only (not ambiguous because replace_all=False
-        # and replace() should raise MultipleMatchesError for ambiguous)
-        pass  # covered under multiple_matches tests
+        # When a single unique occurrence exists, exactly one replacement is made.
+        content = "prefix hello suffix\n"
+        result = replace(content, "hello", "goodbye")
+        assert result == "prefix goodbye suffix\n"
 
     def test_replace_all_flag(self):
         content = "a a a"
@@ -190,12 +193,11 @@ class TestTrimmedBoundaryMatcher:
 
     def test_trimmed_single_line(self):
         content = "  some text  \n"
-        find = "  some text  \n  "  # extra trailing spaces
+        find = "  some text  \n  "  # extra trailing spaces / whitespace surrounding block
         result = replace(content, find, "new line\n")
-        # The result should have replaced — but actual behavior depends
-        # on whether trimmed_boundary or line_trimmed catches it first
-        # We just verify no NoMatchError is raised and replacement happened
-        assert "new line" in result or "some text" not in result
+        # trimmed_boundary strips surrounding whitespace: find.strip() == "some text"
+        # which is present in content, so the replacement should succeed
+        assert result == "new line\n"
 
 
 # ---------------------------------------------------------------------------
@@ -284,8 +286,8 @@ class TestCrlfPreservation:
     def test_lf_file_crlf_find(self):
         content = "line1\nline2\nline3\n"
         find = "line1\r\nline2\r\n"  # CRLF in find, LF in file
-        result = replace(content, find, "replaced\r\n")
-        assert "\r\n" not in result or result.count("\r\n") <= 1
+        result = replace(content, find, "replaced\n")
+        assert "\r\n" not in result
         assert "replaced" in result
 
 
@@ -375,3 +377,72 @@ class TestEdgeCases:
         content = "entire file content\n"
         result = replace(content, "entire file content\n", "new content\n")
         assert result == "new content\n"
+
+
+# ---------------------------------------------------------------------------
+# _escape_normalized: literal backslash-n in file must not be destroyed (Item 2)
+# ---------------------------------------------------------------------------
+
+class TestEscapeNormalizedLiteralBackslashN:
+    def test_file_with_literal_backslash_n_two_char_sequence(self):
+        # The file content contains the two-character sequence backslash + n
+        # (not a real newline). The escape_normalized matcher must NOT unescape
+        # the content side (old bug: unescaping content destroyed literal \n).
+        content = r"msg = 'line1\nline2'" + "\n"  # literal backslash-n in source
+        find = r"msg = 'line1\nline2'" + "\n"     # same literal backslash-n
+        result = replace(content, find, "msg = 'replaced'\n")
+        assert result == "msg = 'replaced'\n"
+
+    def test_escape_normalized_window_comparison_is_raw(self):
+        # _escape_normalized's sliding-window branch must compare the raw
+        # content window to the unescaped find_lines — NOT unescape the
+        # content side.  A file that contains a real newline must NOT be
+        # matched by a find string that has a literal backslash-n at the
+        # corresponding position.
+        #
+        # Setup: file has  x = "a" <newline> y = "b"  (two lines)
+        #        find has  x = "a\ny = "b"           (backslash + n, one line)
+        # After unescaping find → x = "a" + real-newline + y = "b" which looks
+        # like the two-line content.  With the old bug (unescape content side)
+        # this would match.  With the fix it must NOT match via this path
+        # (the simple exact matcher handles the identical case).
+        content_two_lines = 'x = "a"\ny = "b"\n'
+        # find_one_line has the literal backslash-n escape sequence
+        find_one_line = 'x = "a\\ny = "b"\n'
+        # After unescaping: 'x = "a"\ny = "b"\n' which equals content_two_lines.
+        # The sliding-window should NOT yield content_two_lines as a candidate
+        # because the raw window ["x = \"a\"\n", "y = \"b\"\n"] != ["x = \"a\\ny = \"b\"\n"]
+        candidates = list(_escape_normalized(content_two_lines, find_one_line))
+        assert candidates == [], (
+            "_escape_normalized must not unescape the content side; "
+            f"got unexpected candidates: {candidates!r}"
+        )
+
+
+# ---------------------------------------------------------------------------
+# _whitespace_normalized: short token must not cause partial-line replacement (Item 3)
+# ---------------------------------------------------------------------------
+
+class TestWhitespaceNormalizedPartialLineSafety:
+    def test_short_token_regex_does_not_yield_partial_line_match(self):
+        # The regex sub-match branch in _whitespace_normalized must only yield
+        # a candidate when the match spans the COMPLETE line content.
+        # When old_text is "foo" and the line is "the foo baz is here", the
+        # regex matches "foo" at a non-zero start offset — so it must NOT yield.
+        content = "the foo baz is here\n"
+        find = "foo"
+        # Direct matcher: the regex would match at m.start()==4, len("the foo baz is here")==19
+        # → m.end() != len(stripped) → not yielded.
+        candidates = list(_whitespace_normalized(content, find))
+        assert candidates == [], (
+            "_whitespace_normalized must not yield a partial-line regex match; "
+            f"got: {candidates!r}"
+        )
+
+    def test_whitespace_normalized_full_line_still_matches(self):
+        # When the normalised pattern spans the complete line, replacement
+        # should still succeed.
+        content = "return   value  +  1\n"
+        find = "return value + 1"
+        result = replace(content, find, "return value + 2")
+        assert "2" in result
