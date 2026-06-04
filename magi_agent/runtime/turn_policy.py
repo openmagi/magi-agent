@@ -31,7 +31,7 @@ MAX_OUTPUT_TOKENS_RECOVERY_LIMIT = 3
 #: next steps.
 MAX_STEPS_WRAP_UP_MESSAGE: str = (
     "You have reached the maximum number of allowed steps for this task. "
-    "Do not call any tools and do not make any further tool calls. "
+    "Do not call any tools. "
     "Respond with plain text only.\n\n"
     "Please provide a concise wrap-up with the following three sections:\n\n"
     "1. **Accomplished** — summarize what was completed and done during this run.\n"
@@ -45,10 +45,15 @@ MAX_STEPS_WRAP_UP_MESSAGE: str = (
 class MaxStepsBrakeResult:
     """Result of :func:`maybe_apply_max_steps_brake`.
 
-    ``brake_applied`` is ``True`` when the final-iteration wrap-up was
-    triggered.  ``tools_disabled`` mirrors ``brake_applied`` and signals to the
-    caller that tool projection must be suppressed for this step so the model
-    cannot call tools.
+    ``brake_applied`` is ``True`` when the final-iteration wrap-up instruction
+    was injected (always True on the final iteration, False otherwise).
+
+    ``tools_disabled`` is ``True`` only when the brake fired **and** there were
+    tools to disable (i.e. ``tools`` was non-empty).  When the brake fires with
+    an empty tool list, ``brake_applied=True`` and ``tools_disabled=False`` —
+    the wrap-up is still injected but there is nothing for the caller to
+    suppress.  The caller should skip tool projection when ``tools_disabled``
+    is ``True``.
     """
 
     brake_applied: bool
@@ -84,9 +89,10 @@ def maybe_apply_max_steps_brake(
             ``tools_disabled``).
 
     Returns:
-        :class:`MaxStepsBrakeResult` with ``brake_applied`` and
-        ``tools_disabled`` set to ``True`` on the final iteration, ``False``
-        otherwise.
+        :class:`MaxStepsBrakeResult` with ``brake_applied=True`` on the final
+        iteration and ``tools_disabled=True`` only when there were tools to
+        suppress (``bool(tools)``).  Both fields are ``False`` on earlier
+        iterations or when ``max_iterations <= 0``.
     """
     if max_iterations <= 0:
         return MaxStepsBrakeResult(brake_applied=False, tools_disabled=False)
@@ -96,7 +102,7 @@ def maybe_apply_max_steps_brake(
 
     # Final (or beyond-final) iteration: inject wrap-up instruction.
     messages.append({"role": "user", "content": MAX_STEPS_WRAP_UP_MESSAGE})
-    return MaxStepsBrakeResult(brake_applied=True, tools_disabled=True)
+    return MaxStepsBrakeResult(brake_applied=True, tools_disabled=bool(tools))
 
 
 _CANONICAL_STOP_REASONS: frozenset[str] = frozenset(

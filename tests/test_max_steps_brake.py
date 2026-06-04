@@ -150,8 +150,8 @@ def test_final_step_of_2_iteration_budget_fires_at_iteration_one() -> None:
     assert result.brake_applied is True
 
 
-def test_empty_tools_list_still_brakes() -> None:
-    """Even with no tools declared, the brake fires and injects the message."""
+def test_empty_tools_brakes_but_nothing_to_disable() -> None:
+    """Brake fires (wrap-up injected) even with no tools, but tools_disabled is False."""
     msgs = _messages()
     result = maybe_apply_max_steps_brake(
         iteration=4,
@@ -160,8 +160,21 @@ def test_empty_tools_list_still_brakes() -> None:
         tools=[],
     )
     assert result.brake_applied is True
-    assert result.tools_disabled is True
+    assert result.tools_disabled is False
     assert len(msgs) == 1
+
+
+def test_final_iteration_with_tools_disables_tools() -> None:
+    """Final iteration with a non-empty tool list → brake_applied AND tools_disabled."""
+    msgs = _messages()
+    result = maybe_apply_max_steps_brake(
+        iteration=4,
+        max_iterations=5,
+        messages=msgs,
+        tools=_tools(2),
+    )
+    assert result.brake_applied is True
+    assert result.tools_disabled is True
 
 
 # ---------------------------------------------------------------------------
