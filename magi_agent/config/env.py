@@ -231,6 +231,50 @@ def parse_error_recovery_env(env: Mapping[str, str]) -> ErrorRecoveryEnv:
     return ErrorRecoveryEnv(enabled=enabled, max_recovery_attempts=max_attempts)
 
 
+# Single source of truth for the live context-compaction activation flags.
+# PR13: when enabled, an ADK ``before_model_callback`` plugin reduces the
+# outgoing ``llm_request.contents`` to the recent tail (reusing
+# ``ContextLifecycleBoundary.compact_if_needed`` as the threshold/tail decision
+# engine) once the estimated context exceeds budget. Default OFF -> zero
+# regression (the plugin is never attached).
+CONTEXT_COMPACTION_ENABLED_ENV = "MAGI_CONTEXT_COMPACTION_ENABLED"
+COMPACTION_TOKEN_THRESHOLD_ENV = "MAGI_COMPACTION_TOKEN_THRESHOLD"
+COMPACTION_TAIL_EVENTS_ENV = "MAGI_COMPACTION_TAIL_EVENTS"
+_COMPACTION_TOKEN_THRESHOLD_DEFAULT = 24_000
+_COMPACTION_TAIL_EVENTS_DEFAULT = 16
+
+
+@dataclass(frozen=True)
+class ContextCompactionEnv:
+    enabled: bool = False
+    token_threshold: int = _COMPACTION_TOKEN_THRESHOLD_DEFAULT
+    tail_events: int = _COMPACTION_TAIL_EVENTS_DEFAULT
+
+
+def parse_context_compaction_env(env: Mapping[str, str]) -> ContextCompactionEnv:
+    """Single source for the live context-compaction flags (default OFF)."""
+    enabled = _is_true(env.get(CONTEXT_COMPACTION_ENABLED_ENV))
+    token_threshold = _int_env(
+        env,
+        COMPACTION_TOKEN_THRESHOLD_ENV,
+        _COMPACTION_TOKEN_THRESHOLD_DEFAULT,
+    )
+    if token_threshold < 1:
+        raise RuntimeEnvError(f"{COMPACTION_TOKEN_THRESHOLD_ENV} must be >= 1")
+    tail_events = _int_env(
+        env,
+        COMPACTION_TAIL_EVENTS_ENV,
+        _COMPACTION_TAIL_EVENTS_DEFAULT,
+    )
+    if tail_events < 1:
+        raise RuntimeEnvError(f"{COMPACTION_TAIL_EVENTS_ENV} must be >= 1")
+    return ContextCompactionEnv(
+        enabled=enabled,
+        token_threshold=token_threshold,
+        tail_events=tail_events,
+    )
+
+
 def parse_runtime_env(env: Mapping[str, str]) -> RuntimeConfig:
     missing = [name for name in REQUIRED_ENV if not env.get(name)]
     if missing:

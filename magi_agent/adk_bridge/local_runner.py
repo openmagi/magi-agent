@@ -11,6 +11,9 @@ from google.adk.memory import InMemoryMemoryService
 from google.adk.models import BaseLlm, LlmRequest, LlmResponse
 from google.adk.runners import Runner
 
+from magi_agent.adk_bridge.context_compaction import (
+    build_context_compaction_plugin,
+)
 from magi_agent.adk_bridge.edit_retry_reflection import (
     build_edit_retry_reflection_plugin,
 )
@@ -21,6 +24,7 @@ from magi_agent.adk_bridge.local_toolhost import (
 from magi_agent.adk_bridge.resilience_plugin import build_resilience_plugin
 from magi_agent.adk_bridge.session_service import WorkspaceSessionService
 from magi_agent.config.env import (
+    parse_context_compaction_env,
     parse_edit_retry_reflection_env,
     parse_error_recovery_env,
     parse_loop_guard_env,
@@ -128,9 +132,19 @@ def build_local_adk_runner(
         error_recovery_enabled=error_recovery_env.enabled,
         recovery_max_attempts=error_recovery_env.max_recovery_attempts,
     )
+    # Flag-gated live context compaction: when enabled, a before_model_callback
+    # plugin trims the outgoing llm_request.contents to the recent tail once the
+    # estimated context exceeds budget (reusing ContextLifecycleBoundary as the
+    # threshold/tail decision engine). Default OFF -> plugin is None -> no attach.
+    compaction_env = parse_context_compaction_env(os.environ)
+    compaction_plugin = build_context_compaction_plugin(
+        enabled=compaction_env.enabled,
+        token_threshold=compaction_env.token_threshold,
+        tail_events=compaction_env.tail_events,
+    )
     runner_plugins = [
         plugin
-        for plugin in (edit_retry_plugin, resilience_plugin)
+        for plugin in (edit_retry_plugin, resilience_plugin, compaction_plugin)
         if plugin is not None
     ]
     # ADK 1.33 deprecates ``Runner(plugins=...)``; the supported path wraps the
