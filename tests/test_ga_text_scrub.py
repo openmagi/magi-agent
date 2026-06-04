@@ -274,6 +274,21 @@ def test_ordinary_text_is_not_over_redacted(safe_text: str) -> None:
     assert REDACTED not in result
 
 
+@pytest.mark.parametrize("safe_text", [
+    "GET /api/v1/processing HTTP/1.1",
+    "system startup complete",
+    "/etc-tools/build",
+    "/rootdir/data",
+    "processing files in /processing",
+    "system update required",
+])
+def test_new_system_paths_do_not_over_redact_url_words(safe_text: str) -> None:
+    """Verify that /etc/, /proc/, /sys/, /root/ patterns require the trailing /
+    and don't match common URL/log words like '/processing', 'system', '/etc-tools', '/rootdir'."""
+    result = scrub_text(safe_text)
+    assert REDACTED not in result, f"Over-redacted safe text: {safe_text!r}"
+
+
 # ---------------------------------------------------------------------------
 # Integration: mixed sensitive + safe text
 # ---------------------------------------------------------------------------
@@ -292,7 +307,7 @@ def test_mixed_content_redacts_sensitive_parts_preserves_safe_parts() -> None:
     assert "status OK" in result
 
 
-def test_new_path_prefixes_in_mixed_content(  ) -> None:
+def test_new_path_prefixes_in_mixed_content() -> None:
     s = (
         "Reading /etc/passwd for user info and /proc/self/environ for env. "
         "Normal log: all good."

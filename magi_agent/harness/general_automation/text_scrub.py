@@ -51,11 +51,11 @@ _PRIVATE_TEXT_RE = re.compile(
     r"/workspace(?:/[^\s,;}\"']*)?|"
     r"/data/bots(?:/[^\s,;}\"']*)?|"
     r"/var/lib/kubelet(?:/[^\s,;}\"']*)?|"
-    # PR12 additions: system-path prefixes
-    r"/etc(?:/[^\s,;}\"']*)?|"
-    r"/proc(?:/[^\s,;}\"']*)?|"
-    r"/sys(?:/[^\s,;}\"']*)?|"
-    r"/root(?:/[^\s,;}\"']*)?|"
+    # PR12 additions: system-path prefixes (require trailing / to avoid over-matching)
+    r"/etc/[^\s,;}\"']*|"
+    r"/proc/[^\s,;}\"']*|"
+    r"/sys/[^\s,;}\"']*|"
+    r"/root/[^\s,;}\"']*|"
     # ---- Raw content markers ----
     # Covers all sub-types from both shell_policy and output_budget_policy.
     # Pattern: "raw" + optional separator (_, -, space) + subtype keyword.
