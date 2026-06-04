@@ -181,9 +181,12 @@ class TestReadinessHealthMetadata:
         # Should progress beyond env_gate_disabled (shadow_ready given valid config)
         assert "env_gate_disabled" not in meta["reasonCodes"]
 
-    # 2c. kill_switch_enabled
-    def test_kill_switch_blocks_to_disabled(self) -> None:
-        meta = self._make(killSwitchEnabled=True)
+    # 2c. kill_switch_enabled — env-isolated via monkeypatch
+    def test_kill_switch_blocks_to_disabled(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        # Env-isolated: force MAGI_SCHEDULER_EXECUTOR_ENABLED=1 so the env gate
+        # is not a confound; the kill-switch alone should cause the mode to be disabled.
+        monkeypatch.setenv("MAGI_SCHEDULER_EXECUTOR_ENABLED", "1")
+        meta = self._make(monkeypatch, killSwitchEnabled=True)
         assert meta["executionMode"] == "disabled"
         assert "kill_switch_enabled" in meta["reasonCodes"]
 

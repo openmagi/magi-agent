@@ -699,6 +699,51 @@ def test_skipped_ids_use_list_all_not_due_jobs_far_future(tmp_path: Any) -> None
 # G1.4 — Lock-dir confinement (MAGI_SCHEDULER_LOCK_DIR must be under home)
 # ---------------------------------------------------------------------------
 
+def test_once_iso_job_fires_once_then_advances_to_exhausted_sentinel(tmp_path: Any) -> None:
+    """A 'once'-ISO job whose fire-time == now must fire exactly once.
+
+    After firing, record_advance sets next_run to the far-future sentinel
+    (_ONCE_EXHAUSTED_NEXT_RUN = 9999-12-31), so a second tick at the same
+    'now' must NOT fire again.
+    """
+    from magi_agent.harness.scheduler_executor import (
+        InMemoryJobSource,
+        ScheduledJobRecord,
+        tick,
+    )
+    from datetime import UTC, datetime
+
+    # Schedule an ISO-style once job: fire_at is in the past (so it was "due")
+    # represented as a job with next_run == now (already-due once job).
+    now_ms = 1_000_000
+    now = _now_dt(now_ms)
+    lease = _make_lease(now_ms=now_ms)
+
+    record = ScheduledJobRecord(
+        jobId="job:once-iso-001",
+        # ISO timestamp in the past — parsed as once; next_run==now means it fires.
+        scheduleExpr="2026-01-01T00:00:00+00:00",
+        lastFire=None,
+        nextRun=now,  # fire_at == now: the job is due this tick
+    )
+    source = InMemoryJobSource([record])
+
+    # First tick — the once job must fire.
+    result1 = tick(now=now, source=source, lease=lease, lock_dir=tmp_path, owner_digest="owner:test-abc")
+    assert result1.status == "tick_completed"
+    assert "job:once-iso-001" in result1.fired_job_ids, (
+        "once-ISO job whose next_run==now must fire on the first tick"
+    )
+
+    # After firing, the source must have advanced next_run to the exhausted sentinel
+    # (far-future year 9999). A second tick at the same 'now' must NOT re-fire.
+    result2 = tick(now=now, source=source, lease=lease, lock_dir=tmp_path, owner_digest="owner:test-abc")
+    assert result2.status == "tick_completed"
+    assert "job:once-iso-001" not in result2.fired_job_ids, (
+        "once-ISO job must NOT fire a second time after advancing to the exhausted sentinel"
+    )
+
+
 def test_lock_dir_confinement_rejects_etc(monkeypatch: Any, tmp_path: Any) -> None:
     """A MAGI_SCHEDULER_LOCK_DIR pointing outside home (e.g. /etc) must raise ValueError.
 

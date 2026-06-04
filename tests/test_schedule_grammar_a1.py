@@ -456,7 +456,13 @@ class TestNextRunAtIntervalStaleFix:
         assert result == _utc(2026, 6, 3, 12, 0) or result == _utc(2026, 6, 3, 12, 30)
 
     def test_stale_last_fire_exactly_one_interval_ago(self) -> None:
-        """last_fire exactly one interval ago → next fire is now (or next slot)."""
+        """last_fire exactly one interval ago → next fire is now (or next slot).
+
+        Tightened assertion: last_fire=11:30, interval=30m, now=12:00.
+        anchor+1 interval = 11:30 + 30m = 12:00 == now.  The _next_run_interval
+        implementation returns the candidate when candidate >= now_utc, so the
+        result must be EXACTLY 12:00 (not a later slot).
+        """
         from magi_agent.missions.schedule_grammar import next_run_at, parse_schedule
 
         # last_fire=11:30, now=12:00, interval=30m → next = 12:00
@@ -466,8 +472,12 @@ class TestNextRunAtIntervalStaleFix:
         result = next_run_at(spec, now=now, last_fire=last_fire)
 
         assert result is not None
-        # 11:30 + 30m = 12:00 which equals now exactly — should return now (not past)
-        assert result >= now
+        # 11:30 + 30m = 12:00 == now exactly — must return exactly now, not a later slot.
+        expected = _utc(2026, 6, 3, 12, 0)
+        assert result == expected, (
+            f"Expected exact next fire at {expected.isoformat()}, got {result.isoformat()!r}; "
+            "stale-by-exactly-one-interval should return now, not now+interval"
+        )
 
 
 # ---------------------------------------------------------------------------

@@ -131,6 +131,15 @@ def test_is_silent_exact_match() -> None:
     assert is_silent_output("\t[SILENT]\n") is True
 
 
+def test_is_silent_newline_padded() -> None:
+    r"""is_silent_output("\n[SILENT]\n") must return True — newlines are whitespace."""
+    from magi_agent.harness.scheduler_delivery import is_silent_output
+
+    # Newline-padded exact [SILENT] must be suppressed (strip() removes newlines).
+    assert is_silent_output("\n[SILENT]\n") is True
+    assert is_silent_output("\n\n[SILENT]\n\n") is True
+
+
 def test_is_silent_mixed_with_text_is_not_silent() -> None:
     """[SILENT] embedded in real content must NOT suppress."""
     from magi_agent.harness.scheduler_delivery import is_silent_output
