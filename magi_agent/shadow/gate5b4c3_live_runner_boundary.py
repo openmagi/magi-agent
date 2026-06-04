@@ -835,7 +835,14 @@ def _is_anthropic_route(provider_label: str, model_label: str) -> bool:
     ADK's ``LLMRegistry`` matches Claude on ``claude-3-*`` / ``claude-*-4*``
     model ids; an explicit ``anthropic`` provider label also selects it. We
     mirror that here so the cache-aware subclass is chosen for the same routes
-    ADK would route to :class:`google.adk.models.Claude`.
+    ADK would route to a Claude/Anthropic model.
+
+    Note: ``startswith("claude-")`` is a deliberate *superset* of ADK's two
+    regexes (``claude-3-.*`` / ``claude-.*-4.*``). This is intentional
+    future-proofing — any new ``claude-<gen>`` id should still take the
+    cache-aware path. A label that starts with ``claude-`` but isn't yet in
+    ADK's registry would simply fail to resolve inside ADK (unchanged from
+    today), so the broader prefix is safe.
     """
     label = (model_label or "").lower()
     if provider_label == "anthropic":

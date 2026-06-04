@@ -119,6 +119,58 @@ class TestInjectMessageTailCacheControl:
 # ---------------------------------------------------------------------------
 
 
+class _FakeStream:
+    """Minimal async-iterable standing in for the anthropic streaming response.
+
+    ADK's ``_generate_content_streaming`` re-uses the ``messages`` argument it is
+    handed (it does NOT re-derive them from the ``llm_request``), so the
+    injected ``messages`` necessarily reach the streaming ``create`` call —
+    which is exactly what the streaming test asserts via the captured kwargs.
+
+    We yield one ``message_start`` + one text delta so the helper produces a
+    non-empty aggregated response; the event objects are constructed via the
+    ``anthropic`` SDK to stay valid for the pinned version.
+    """
+
+    def __init__(self) -> None:
+        from anthropic import types as anthropic_types
+
+        message = anthropic_types.Message(
+            id="msg_fake",
+            type="message",
+            role="assistant",
+            model="claude-test",
+            content=[],
+            stop_reason="end_turn",
+            stop_sequence=None,
+            usage=anthropic_types.Usage(input_tokens=1, output_tokens=1),
+        )
+        self._events = [
+            anthropic_types.RawMessageStartEvent(
+                type="message_start", message=message
+            ),
+            anthropic_types.RawContentBlockStartEvent(
+                type="content_block_start",
+                index=0,
+                content_block=anthropic_types.TextBlock(
+                    type="text", text="", citations=None
+                ),
+            ),
+            anthropic_types.RawContentBlockDeltaEvent(
+                type="content_block_delta",
+                index=0,
+                delta=anthropic_types.TextDelta(type="text_delta", text="ok"),
+            ),
+        ]
+
+    def __aiter__(self):
+        async def _gen():
+            for event in self._events:
+                yield event
+
+        return _gen()
+
+
 class _FakeMessages:
     def __init__(self, recorder: dict) -> None:
         self._recorder = recorder
@@ -126,6 +178,8 @@ class _FakeMessages:
     async def create(self, **kwargs: Any):
         # Capture exactly what would be sent to the Anthropic Messages API.
         self._recorder["create_kwargs"] = kwargs
+        if kwargs.get("stream"):
+            return _FakeStream()
         # Build a minimal anthropic Message-shaped response.
         from anthropic import types as anthropic_types
 
@@ -142,6 +196,17 @@ class _FakeMessages:
 
 
 class _FakeAnthropicClient:
+    """Stand-in for ``AsyncAnthropic`` / ``AsyncAnthropicVertex``.
+
+    Tests override ``_anthropic_client`` (an ADK ``cached_property``) with this
+    fake so NO real credential path is touched: the direct base would otherwise
+    construct ``AsyncAnthropic()`` (``ANTHROPIC_API_KEY``) and the Vertex base
+    ``AsyncAnthropicVertex`` (``GOOGLE_CLOUD_PROJECT``/``GOOGLE_CLOUD_LOCATION``).
+    By injecting the fake we exercise the message-building/injection logic
+    without network or env credentials. The base-class *selection* (which client
+    WOULD be used) is asserted separately in ``TestBaseClassSelection``.
+    """
+
     def __init__(self, recorder: dict) -> None:
         self.messages = _FakeMessages(recorder)
 
@@ -225,6 +290,139 @@ class TestRequestLevelInjection:
         create_kwargs = _run_generate(model, llm_request)
         expected = [content_to_message_param(c) for c in llm_request.contents]
         assert create_kwargs["messages"] == expected
+
+    def test_real_class_exposes_cache_aware_marker(self, monkeypatch) -> None:
+        """The REAL (non-mocked) cache-aware class carries the public marker."""
+        pytest.importorskip("anthropic")
+        cls = _model_module().get_cache_aware_claude_class("claude-sonnet-4-6")
+        assert cls.magi_message_cache_aware is True
+        # And the constructed instance inherits it.
+        assert cls(model="claude-sonnet-4-6").magi_message_cache_aware is True
+
+
+# ---------------------------------------------------------------------------
+# Streaming path — injection must reach the stream=True branch
+# ---------------------------------------------------------------------------
+
+
+class TestStreamingInjection:
+    def test_stream_on_marks_messages_in_streaming_request(self, monkeypatch) -> None:
+        """stream=True still injects the rolling-tail markers into the request.
+
+        ADK's ``_generate_content_streaming`` receives the ``messages`` list our
+        override built (and injected), so the marker reaches the streaming
+        create call. We drive the full async generator against a fake streaming
+        client and assert on the captured create kwargs.
+        """
+        pytest.importorskip("anthropic")
+        monkeypatch.setenv("MAGI_MESSAGE_CACHE_ENABLED", "1")
+        cls = _model_module().get_cache_aware_claude_class("claude-sonnet-4-6")
+        model = cls(model="claude-sonnet-4-6")
+        llm_request = _build_llm_request(["m0", "m1", "m2", "m3"])
+
+        recorder: dict = {}
+        fake_client = _FakeAnthropicClient(recorder)
+        object.__setattr__(model, "_anthropic_client", fake_client)
+
+        async def _drive() -> None:
+            async for _ in model.generate_content_async(llm_request, stream=True):
+                pass
+
+        asyncio.run(_drive())
+        create_kwargs = recorder["create_kwargs"]
+        assert create_kwargs["stream"] is True
+        messages = create_kwargs["messages"]
+        assert len(messages) == 4
+        assert not _has_cache_control(messages[0])
+        assert not _has_cache_control(messages[1])
+        assert _has_cache_control(messages[2])
+        assert _has_cache_control(messages[3])
+        assert _count_breakpoints(messages) == 2
+
+    def test_stream_off_produces_no_cache_control(self, monkeypatch) -> None:
+        pytest.importorskip("anthropic")
+        monkeypatch.delenv("MAGI_MESSAGE_CACHE_ENABLED", raising=False)
+        cls = _model_module().get_cache_aware_claude_class("claude-sonnet-4-6")
+        model = cls(model="claude-sonnet-4-6")
+        llm_request = _build_llm_request(["m0", "m1", "m2"])
+
+        recorder: dict = {}
+        object.__setattr__(model, "_anthropic_client", _FakeAnthropicClient(recorder))
+
+        async def _drive() -> None:
+            async for _ in model.generate_content_async(llm_request, stream=True):
+                pass
+
+        asyncio.run(_drive())
+        assert recorder["create_kwargs"]["stream"] is True
+        assert _count_breakpoints(recorder["create_kwargs"]["messages"]) == 0
+
+
+# ---------------------------------------------------------------------------
+# Base-class selection — direct Anthropic (default) vs Vertex
+# ---------------------------------------------------------------------------
+
+
+class TestBaseClassSelection:
+    """ADK's LLMRegistry resolves ``claude-*`` to the Vertex ``Claude`` whose
+    ``_anthropic_client`` is ``AsyncAnthropicVertex`` (needs GOOGLE_CLOUD_*).
+    Magi deploys against the DIRECT Anthropic API (``GOOGLE_GENAI_USE_VERTEXAI``
+    is false in the Gate 5B live-smoke config), so the cache-aware factory must
+    default to the direct ``AnthropicLlm`` base unless a Vertex signal is
+    present — otherwise the inherited client is wrong and fails at first call.
+    """
+
+    def test_default_base_is_direct_anthropic(self, monkeypatch) -> None:
+        pytest.importorskip("anthropic")
+        from google.adk.models.anthropic_llm import AnthropicLlm, Claude
+
+        monkeypatch.delenv("GOOGLE_GENAI_USE_VERTEXAI", raising=False)
+        monkeypatch.delenv("GOOGLE_CLOUD_PROJECT", raising=False)
+        monkeypatch.delenv("GOOGLE_CLOUD_LOCATION", raising=False)
+
+        cls = _model_module().get_cache_aware_claude_class("claude-sonnet-4-6")
+        assert issubclass(cls, AnthropicLlm)
+        # Direct base ⇒ NOT the Vertex subclass.
+        assert not issubclass(cls, Claude)
+
+    def test_vertex_base_chosen_for_vertex_resource_model_id(self, monkeypatch) -> None:
+        pytest.importorskip("anthropic")
+        from google.adk.models.anthropic_llm import Claude
+
+        monkeypatch.delenv("GOOGLE_GENAI_USE_VERTEXAI", raising=False)
+        model_id = (
+            "projects/p/locations/us-east5/publishers/anthropic/models/claude-x"
+        )
+        cls = _model_module().get_cache_aware_claude_class(model_id)
+        assert issubclass(cls, Claude)
+
+    def test_vertex_base_chosen_when_use_vertexai_truthy(self, monkeypatch) -> None:
+        pytest.importorskip("anthropic")
+        from google.adk.models.anthropic_llm import Claude
+
+        monkeypatch.setenv("GOOGLE_GENAI_USE_VERTEXAI", "true")
+        cls = _model_module().get_cache_aware_claude_class("claude-sonnet-4-6")
+        assert issubclass(cls, Claude)
+
+    def test_vertex_base_chosen_when_project_and_location_set(self, monkeypatch) -> None:
+        pytest.importorskip("anthropic")
+        from google.adk.models.anthropic_llm import Claude
+
+        monkeypatch.delenv("GOOGLE_GENAI_USE_VERTEXAI", raising=False)
+        monkeypatch.setenv("GOOGLE_CLOUD_PROJECT", "proj")
+        monkeypatch.setenv("GOOGLE_CLOUD_LOCATION", "us-east5")
+        cls = _model_module().get_cache_aware_claude_class("claude-sonnet-4-6")
+        assert issubclass(cls, Claude)
+
+    def test_direct_base_when_only_project_set(self, monkeypatch) -> None:
+        pytest.importorskip("anthropic")
+        from google.adk.models.anthropic_llm import AnthropicLlm, Claude
+
+        monkeypatch.delenv("GOOGLE_GENAI_USE_VERTEXAI", raising=False)
+        monkeypatch.setenv("GOOGLE_CLOUD_PROJECT", "proj")
+        monkeypatch.delenv("GOOGLE_CLOUD_LOCATION", raising=False)
+        cls = _model_module().get_cache_aware_claude_class("claude-sonnet-4-6")
+        assert issubclass(cls, AnthropicLlm) and not issubclass(cls, Claude)
 
 
 # ---------------------------------------------------------------------------

@@ -222,6 +222,16 @@ class TestMessageCacheFlag:
         monkeypatch.delenv("MAGI_MESSAGE_CACHE_ENABLED", raising=False)
         assert is_enabled() is False
 
+    def test_no_arg_no_env_var_defaults_off(self, monkeypatch) -> None:
+        """Fresh-process default: no argument, env var unset ⇒ OFF.
+
+        Guards the production default — a real bot process that never sets
+        ``MAGI_MESSAGE_CACHE_ENABLED`` must not emit cache markers.
+        """
+        is_enabled = _env_module().is_message_cache_enabled
+        monkeypatch.delenv("MAGI_MESSAGE_CACHE_ENABLED", raising=False)
+        assert is_enabled() is False
+
 
 # ---------------------------------------------------------------------------
 # Fingerprint stability — markers must not destabilise the fork fingerprint

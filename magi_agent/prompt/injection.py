@@ -137,6 +137,12 @@ class CacheControlInjector:
         up-to-2 breakpoints the system prefix may already carry, the request
         never exceeds Anthropic's 4-breakpoint limit (rule 3).
 
+        The Anthropic marking itself delegates to the single shared helper
+        :func:`magi_agent.adk_bridge.anthropic_cache_model.inject_message_tail_cache_control`,
+        which is also what the live ADK path uses — so the marker logic has one
+        source of truth. This method adds only the provider gate (Anthropic vs
+        no-op) on top of that helper.
+
         Args:
             messages: Ordered conversation messages in Anthropic/Messages shape
                 (``{"role": ..., "content": [...] | str}``). System messages
@@ -145,46 +151,20 @@ class CacheControlInjector:
                 :attr:`_MESSAGE_TAIL_MAX_BREAKPOINTS`.
 
         Returns:
-            A new list of messages (deep-copied for any message that is
+            A new list of messages (shallow-copied for any message that is
             modified). The input list and its messages are never mutated.
         """
-        result = [dict(message) for message in messages]
         if self._resolved_provider != "anthropic":
-            return result
+            return [dict(message) for message in messages]
 
-        capped = min(max(tail_size, 0), self._MESSAGE_TAIL_MAX_BREAKPOINTS)
-        if capped == 0:
-            return result
+        # Single source of truth for the Anthropic rolling-tail marker. Imported
+        # lazily to avoid a hard dependency from the pure prompt layer onto the
+        # ADK bridge module (which carries the optional ``anthropic`` gating).
+        from magi_agent.adk_bridge.anthropic_cache_model import (
+            inject_message_tail_cache_control,
+        )
 
-        non_system_indices = [
-            index
-            for index, message in enumerate(result)
-            if message.get("role") != "system"
-        ]
-        for index in non_system_indices[-capped:]:
-            result[index] = self._mark_message(result[index])
-        return result
-
-    def _mark_message(self, message: dict) -> dict:
-        marked = dict(message)
-        content = marked.get("content")
-        if isinstance(content, list):
-            blocks = [dict(block) if isinstance(block, dict) else block for block in content]
-            for position in range(len(blocks) - 1, -1, -1):
-                block = blocks[position]
-                if isinstance(block, dict):
-                    blocks[position] = self._strategy.apply_cache_control(block, "global")
-                    break
-            marked["content"] = blocks
-        else:
-            text = "" if content is None else str(content)
-            marked["content"] = [
-                self._strategy.apply_cache_control(
-                    {"type": "text", "text": text},
-                    "global",
-                )
-            ]
-        return marked
+        return inject_message_tail_cache_control(messages, tail_size=tail_size)
 
     @property
     def resolved_provider(self) -> str:
