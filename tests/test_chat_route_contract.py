@@ -12,6 +12,10 @@ from magi_agent.config.models import (
     PythonRuntimeAuthorityConfig,
     RuntimeConfig,
 )
+from magi_agent.config.env import (
+    parse_gate5b4c3_shadow_generation_route_env,
+    parse_runtime_env,
+)
 from magi_agent.evidence.observed_egress import (
     LiveEgressTelemetryEvidenceProvider,
     LocalObservedEgressEvidenceProvider,
@@ -33,6 +37,7 @@ from magi_agent.transport.shadow_generations import (
 from magi_agent.transport import chat as chat_module
 from magi_agent.transport.chat import (
     Gate5BUserVisibleChatRouteConfig,
+    build_gate5b_full_toolhost_config_from_env,
     build_gate5b_user_visible_chat_route_config_from_env,
     build_gate5b_user_visible_canary_runner_request,
     build_public_identity_policy,
@@ -874,6 +879,121 @@ def test_chat_route_selected_scope_attaches_full_toolhost_tools(
     assert "answer ordinary conversation directly without tools" in instruction.lower()
     assert "Only request a tool when the user explicitly asks" in instruction
     assert "For brief replies, do not call tools" in instruction
+
+
+def test_full_toolhost_env_reuses_user_visible_selected_scope_when_unset() -> None:
+    env = {
+        "CORE_AGENT_PYTHON_GATE5B_FULL_TOOLHOST_ENABLED": "1",
+        "CORE_AGENT_PYTHON_GATE5B_FULL_TOOLHOST_KILL_SWITCH": "0",
+        "CORE_AGENT_PYTHON_GATE5B_FULL_TOOLHOST_ROUTE_ATTACHMENT": "1",
+        "CORE_AGENT_PYTHON_GATE5B_USER_VISIBLE_CANARY_SELECTED_BOT_DIGEST": _sha256(
+            "bot-test"
+        ),
+        "CORE_AGENT_PYTHON_GATE5B_USER_VISIBLE_CANARY_TRUSTED_OWNER_USER_ID_DIGEST": _sha256(
+            "user-test"
+        ),
+        "CORE_AGENT_PYTHON_GATE5B_USER_VISIBLE_CANARY_ENVIRONMENT": "production",
+        "CORE_AGENT_PYTHON_GATE5B_USER_VISIBLE_CANARY_ENV_ALLOWLIST": "production",
+    }
+
+    config = build_gate5b_full_toolhost_config_from_env(env, make_runtime().config)
+
+    assert config.enabled is True
+    assert config.kill_switch_enabled is False
+    assert config.route_attachment_enabled is True
+    assert config.selected_bot_digest == _sha256("bot-test")
+    assert config.selected_owner_digest == _sha256("user-test")
+    assert config.environment == "production"
+    assert config.environment_allowlist == ("production",)
+
+
+def test_hosted_like_full_toolhost_env_attaches_selected_bundle(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setenv("CORE_AGENT_PYTHON_CHAT_ROUTE", "on")
+    counter_path = tmp_path / "counter-state"
+    env = {
+        "BOT_ID": "bot-test",
+        "USER_ID": "user-test",
+        "GATEWAY_TOKEN": "gateway-token",
+        "CORE_AGENT_API_PROXY_URL": "http://api-proxy.local",
+        "CORE_AGENT_CHAT_PROXY_URL": "http://chat-proxy.local",
+        "CORE_AGENT_REDIS_URL": "redis://redis.local:6379/0",
+        "CORE_AGENT_MODEL": "gemini-3.5-flash",
+        "CORE_AGENT_PYTHON_CHAT_ROUTE": "on",
+        "CORE_AGENT_PYTHON_OUTPUT_MODE": "user_visible_canary",
+        "CORE_AGENT_PYTHON_USER_VISIBLE_OUTPUT": "1",
+        "CORE_AGENT_PYTHON_CANARY_ROUTING": "1",
+        "CORE_AGENT_PYTHON_GATE5B_USER_VISIBLE_CANARY_ENABLED": "1",
+        "CORE_AGENT_PYTHON_GATE5B_USER_VISIBLE_CANARY_KILL_SWITCH": "0",
+        "CORE_AGENT_PYTHON_GATE5B_USER_VISIBLE_CANARY_SELECTED_BOT_DIGEST": _sha256(
+            "bot-test"
+        ),
+        "CORE_AGENT_PYTHON_GATE5B_USER_VISIBLE_CANARY_TRUSTED_OWNER_USER_ID_DIGEST": _sha256(
+            "user-test"
+        ),
+        "CORE_AGENT_PYTHON_GATE5B_USER_VISIBLE_CANARY_ENVIRONMENT": "production",
+        "CORE_AGENT_PYTHON_GATE5B_USER_VISIBLE_CANARY_ENV_ALLOWLIST": "production",
+        "CORE_AGENT_PYTHON_GATE5B_FULL_TOOLHOST_ENABLED": "1",
+        "CORE_AGENT_PYTHON_GATE5B_FULL_TOOLHOST_KILL_SWITCH": "0",
+        "CORE_AGENT_PYTHON_GATE5B_FULL_TOOLHOST_ROUTE_ATTACHMENT": "1",
+        "CORE_AGENT_PYTHON_GATE5B_FULL_TOOLHOST_WORKSPACE_ROOT": str(tmp_path),
+        "CORE_AGENT_PYTHON_GATE5B_SHADOW_GENERATION_ENABLED": "1",
+        "CORE_AGENT_PYTHON_GATE5B_SHADOW_GENERATION_KILL_SWITCH": "0",
+        "CORE_AGENT_PYTHON_GATE5B_SHADOW_GENERATION_CAP_STATE_INITIALIZED": "1",
+        "CORE_AGENT_PYTHON_GATE5B_SHADOW_GENERATION_PROVIDER_PROJECT_SPEND_CONTROLS_VERIFIED": "1",
+        "CORE_AGENT_PYTHON_GATE5B_SHADOW_GENERATION_COUNTER_STATE_PATH": str(
+            counter_path
+        ),
+        "CORE_AGENT_PYTHON_GATE5B_SHADOW_GENERATION_PROVIDER_LABEL": "google",
+        "CORE_AGENT_PYTHON_GATE5B_SHADOW_GENERATION_MODEL_LABEL": "gemini-3.5-flash",
+        "CORE_AGENT_PYTHON_GATE5B_SHADOW_GENERATION_MAX_DAILY": "5",
+        "CORE_AGENT_PYTHON_GATE5B_SHADOW_GENERATION_MAX_DAILY_COST_USD": "5",
+        "CORE_AGENT_PYTHON_GATE5B_SHADOW_GENERATION_MAX_COST_USD": "0.01",
+        "CORE_AGENT_PYTHON_GATE5B_SHADOW_GENERATION_MAX_CONCURRENT": "2",
+        "CORE_AGENT_PYTHON_GATE5B_SHADOW_GENERATION_MAX_PENDING": "2",
+        "GOOGLE_GENAI_USE_VERTEXAI": "false",
+        "GOOGLE_API_KEY": "test-google-key",
+    }
+    config = parse_runtime_env(env)
+    runtime = OpenMagiRuntime(config=config)
+    runtime.gate5b_user_visible_chat_route_config = (
+        build_gate5b_user_visible_chat_route_config_from_env(env, config)
+    )
+    runtime.gate5b_full_toolhost_config = build_gate5b_full_toolhost_config_from_env(
+        env,
+        config,
+    )
+    runtime.gate5b4c3_shadow_generation_route_config = (
+        parse_gate5b4c3_shadow_generation_route_env(env)
+    )
+    route_config = runtime.gate5b_user_visible_chat_route_config
+    runtime.gate5b_user_visible_chat_route_config = Gate5BUserVisibleChatRouteConfig(
+        enabled=route_config.enabled,
+        killSwitchEnabled=route_config.kill_switch_enabled,
+        selectedBotDigest=route_config.selected_bot_digest,
+        selectedOwnerUserIdDigest=route_config.selected_owner_user_id_digest,
+        environment=route_config.environment,
+        environmentAllowlist=route_config.environment_allowlist,
+        adkPrimitivesLoader=_fake_primitives,
+    )
+
+    response = TestClient(create_app(runtime)).post(
+        "/v1/chat/completions",
+        headers={"authorization": "Bearer gateway-token"},
+        json={"messages": [{"role": "user", "content": "Inspect the workspace."}]},
+    )
+
+    assert response.status_code == 200, response.json()
+    body = response.json()
+    assert body["status"] == "python_ready"
+    assert body["tooling"]["mode"] == "selected_full_toolhost"
+    assert body["authority"]["toolDispatchAllowed"] is True
+    assert body["authority"]["selectedWorkspaceMutationAllowed"] is True
+    assert body["counter"]["status"] == "runner_completed"
+    assert body["counter"]["state"]["pendingGenerationRuns"] == 0
+    assert body["counter"]["state"]["inFlightGenerationRuns"] == 0
 
 
 def test_chat_route_selected_full_toolhost_projects_first_party_harness_admission(

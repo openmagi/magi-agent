@@ -378,6 +378,33 @@ def test_shadow_generation_live_smoke_env_requires_provider_credential_presence(
     assert diagnostic.reason == "provider_credential_binding_missing"
 
 
+def test_shadow_generation_live_smoke_env_reuses_user_visible_scope_and_google_binding() -> None:
+    env = _live_smoke_env(
+        CORE_AGENT_PYTHON_GATE5B_USER_VISIBLE_CANARY_SELECTED_BOT_DIGEST=BOT_DIGEST,
+        CORE_AGENT_PYTHON_GATE5B_USER_VISIBLE_CANARY_TRUSTED_OWNER_USER_ID_DIGEST=OWNER_DIGEST,
+        CORE_AGENT_PYTHON_GATE5B_USER_VISIBLE_CANARY_ENVIRONMENT="production",
+    )
+    del env["CORE_AGENT_PYTHON_GATE5B_SHADOW_GENERATION_SELECTED_BOT_DIGEST"]
+    del env["CORE_AGENT_PYTHON_GATE5B_SHADOW_GENERATION_TRUSTED_OWNER_USER_ID_DIGEST"]
+    del env["CORE_AGENT_PYTHON_GATE5B_SHADOW_GENERATION_ENVIRONMENT"]
+    del env["CORE_AGENT_PYTHON_GATE5B_SHADOW_GENERATION_CREDENTIAL_REF"]
+    del env["CORE_AGENT_PYTHON_GATE5B_SHADOW_GENERATION_CREDENTIAL_ENV"]
+
+    route_config = parse_gate5b4c3_shadow_generation_route_env(env)
+
+    config = route_config.generation_config
+    assert config.selected_bot_digest == BOT_DIGEST
+    assert config.trusted_owner_user_id_digest == OWNER_DIGEST
+    assert config.environment == "production"
+    assert config.allowed_shadow_credential_refs == (GOOGLE_CREDENTIAL_REF,)
+    assert len(config.provider_credential_bindings) == 1
+    binding = config.provider_credential_bindings[0]
+    assert binding.provider_label == GOOGLE_PROVIDER
+    assert binding.credential_ref == GOOGLE_CREDENTIAL_REF
+    assert binding.required_env_vars == (GOOGLE_CREDENTIAL_ENV,)
+    assert binding.present_env_vars == (GOOGLE_CREDENTIAL_ENV,)
+
+
 def test_shadow_generation_live_smoke_env_accepts_full_toolhost_runner_timeout() -> None:
     env = _live_smoke_env(
         CORE_AGENT_PYTHON_GATE5B_SHADOW_GENERATION_RUNNER_TIMEOUT_MS="600000",
