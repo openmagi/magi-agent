@@ -92,9 +92,11 @@ async def test_format_on_write_formats_disk_and_digest_matches_formatted(
     written = (tmp_path / "pkg/module.py").read_text(encoding="utf-8")
     # File on disk is the formatted state.
     assert written == formatted
-    # Returned pathDigest reflects the formatted content (re-read), so the
-    # model's next FileEdit can match the formatted text.
-    assert outcome.output_preview["pathDigest"] == _digest(formatted)
+    # pathDigest is always the path-identity digest (stable, matches FileRead).
+    assert outcome.output_preview["pathDigest"] == _digest("pkg/module.py")
+    # contentDigest carries the formatted-content hash so the model can align
+    # its next FileEdit to the on-disk formatted state.
+    assert outcome.output_preview["contentDigest"] == _digest(formatted)
 
 
 @pytest.mark.asyncio
@@ -114,7 +116,10 @@ async def test_format_on_write_applies_to_file_edit(tmp_path, monkeypatch):
 
     assert outcome.status == "ok"
     assert target.read_text(encoding="utf-8") == formatted
-    assert outcome.output_preview["pathDigest"] == _digest(formatted)
+    # pathDigest is always path-identity (stable).
+    assert outcome.output_preview["pathDigest"] == _digest("edit.py")
+    # contentDigest reflects the on-disk formatted state.
+    assert outcome.output_preview["contentDigest"] == _digest(formatted)
 
 
 @pytest.mark.asyncio
@@ -132,6 +137,10 @@ async def test_format_on_write_applies_to_patch_apply(tmp_path, monkeypatch):
 
     assert outcome.status == "ok"
     assert (tmp_path / "patch.py").read_text(encoding="utf-8") == formatted
+    # pathDigest is always path-identity (stable).
+    assert outcome.output_preview["pathDigest"] == _digest("patch.py")
+    # contentDigest reflects the on-disk formatted state.
+    assert outcome.output_preview["contentDigest"] == _digest(formatted)
 
 
 @pytest.mark.asyncio
@@ -153,8 +162,10 @@ async def test_missing_formatter_write_succeeds_unformatted(tmp_path, monkeypatc
     assert outcome.status == "ok"
     # Write still succeeded, unformatted (fail-open).
     assert (tmp_path / "nofmt.py").read_text(encoding="utf-8") == content
-    # Digest still reflects the (unformatted) on-disk content.
-    assert outcome.output_preview["pathDigest"] == _digest(content)
+    # pathDigest is always path-identity (stable), even on formatter failure.
+    assert outcome.output_preview["pathDigest"] == _digest("nofmt.py")
+    # contentDigest re-reads the on-disk file (unformatted since formatter failed).
+    assert outcome.output_preview["contentDigest"] == _digest(content)
 
 
 @pytest.mark.asyncio
@@ -175,8 +186,10 @@ async def test_flag_off_does_not_format_and_keeps_path_digest(tmp_path, monkeypa
     assert outcome.status == "ok"
     # Not formatted.
     assert (tmp_path / "pkg/off.py").read_text(encoding="utf-8") == content
-    # Legacy path-string digest preserved (zero regression).
+    # pathDigest is path-identity digest (zero regression, matches pre-PR4).
     assert outcome.output_preview["pathDigest"] == _digest("pkg/off.py")
+    # contentDigest must NOT be present when the flag is OFF.
+    assert "contentDigest" not in outcome.output_preview
 
 
 def test_flag_default_off_via_env_threading():

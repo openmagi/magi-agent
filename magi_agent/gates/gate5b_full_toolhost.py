@@ -658,7 +658,14 @@ class Gate5BFullToolHost:
             content = str(args.get("content", ""))
             target.write_text(content, encoding="utf-8")
             self._format_after_write(target)
-            return {"pathDigest": self._content_path_digest(target), "bytesWritten": len(content.encode("utf-8"))}
+            result: dict[str, object] = {
+                "pathDigest": _digest(target.relative_to(self.workspace_root).as_posix()),
+                "bytesWritten": len(content.encode("utf-8")),
+            }
+            content_digest = self._content_digest(target)
+            if content_digest is not None:
+                result["contentDigest"] = content_digest
+            return result
         if tool_name == "FileEdit":
             target = _safe_child_path(self.workspace_root, str(args.get("path", "")))
             self._enforce_read_before_mutation(target)
@@ -685,7 +692,14 @@ class Gate5BFullToolHost:
                     raise ValueError("old_text_not_found")
                 target.write_text(current.replace(old_text, new_text, 1), encoding="utf-8")
             self._format_after_write(target)
-            return {"pathDigest": self._content_path_digest(target), "replacements": 1}
+            edit_result: dict[str, object] = {
+                "pathDigest": _digest(target.relative_to(self.workspace_root).as_posix()),
+                "replacements": 1,
+            }
+            content_digest = self._content_digest(target)
+            if content_digest is not None:
+                edit_result["contentDigest"] = content_digest
+            return edit_result
         if tool_name == "PatchApply":
             target = _safe_child_path(
                 self.workspace_root,
@@ -698,7 +712,15 @@ class Gate5BFullToolHost:
                 target.parent.mkdir(parents=True, exist_ok=True)
                 target.write_text(content, encoding="utf-8")
                 self._format_after_write(target)
-                return {"pathDigest": self._content_path_digest(target), "patchMode": "content_replace", "bytesWritten": len(content.encode("utf-8"))}
+                patch_result: dict[str, object] = {
+                    "pathDigest": _digest(target.relative_to(self.workspace_root).as_posix()),
+                    "patchMode": "content_replace",
+                    "bytesWritten": len(content.encode("utf-8")),
+                }
+                content_digest = self._content_digest(target)
+                if content_digest is not None:
+                    patch_result["contentDigest"] = content_digest
+                return patch_result
             raise ValueError("unsupported_patch_shape")
         if tool_name == "Bash":
             command = str(args.get("command", "")).strip()
@@ -924,20 +946,25 @@ class Gate5BFullToolHost:
         except Exception:  # noqa: BLE001 - format step must never fail the write
             return
 
-    def _content_path_digest(self, target: Path) -> str:
-        """Digest for a written file's ``pathDigest``.
+    def _content_digest(self, target: Path) -> str | None:
+        """Return a content hash of the (possibly formatted) on-disk file.
 
-        When format-on-write is enabled we RE-READ the (possibly formatted)
-        file and digest its content so the returned digest reflects the
-        on-disk formatted state. When disabled, behavior is unchanged: the
-        path-string digest (zero regression).
+        Only called when format-on-write is enabled; callers expose the result
+        as ``contentDigest`` in the tool response (a field separate from
+        ``pathDigest``).  Returns ``None`` when the flag is OFF so callers can
+        omit the field entirely, keeping the response shape identical to
+        pre-PR4 when the feature is disabled.
+
+        ``pathDigest`` is ALWAYS ``_digest(relpath)`` regardless of this flag —
+        it identifies the path, not the content.  This ``contentDigest`` field
+        is the formatted-content hash and is only present when the flag is ON.
         """
         if not self.config.format_on_write_enabled:
-            return _digest(target.relative_to(self.workspace_root).as_posix())
+            return None
         try:
             content = target.read_text(encoding="utf-8", errors="replace")
         except OSError:
-            return _digest(target.relative_to(self.workspace_root).as_posix())
+            return None
         return _digest(content)
 
 
