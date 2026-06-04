@@ -10,6 +10,11 @@ from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from typing import Any, Literal, Self
 
+_EDIT_FUZZY_MATCH_ENABLED: bool = (
+    os.environ.get("MAGI_EDIT_FUZZY_MATCH_ENABLED", "0").strip().lower()
+    in frozenset({"1", "true", "yes", "on"})
+)
+
 from google.adk.tools import FunctionTool
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -472,9 +477,23 @@ class Gate5BFullToolHost:
             if not old_text:
                 raise ValueError("empty_old_text")
             current = target.read_text(encoding="utf-8", errors="replace")
-            if old_text not in current:
-                raise ValueError("old_text_not_found")
-            target.write_text(current.replace(old_text, new_text, 1), encoding="utf-8")
+            if _EDIT_FUZZY_MATCH_ENABLED:
+                from magi_agent.coding.edit_matching import (
+                    MultipleMatchesError as _MultipleMatchesError,
+                    NoMatchError as _NoMatchError,
+                    replace as _fuzzy_replace,
+                )
+                try:
+                    result_text = _fuzzy_replace(current, old_text, new_text)
+                except _NoMatchError:
+                    raise ValueError("old_text_not_found")
+                except _MultipleMatchesError:
+                    raise ValueError("old_text_not_unique")
+                target.write_text(result_text, encoding="utf-8")
+            else:
+                if old_text not in current:
+                    raise ValueError("old_text_not_found")
+                target.write_text(current.replace(old_text, new_text, 1), encoding="utf-8")
             return {"pathDigest": _digest(target.relative_to(self.workspace_root).as_posix()), "replacements": 1}
         if tool_name == "PatchApply":
             target = _safe_child_path(
