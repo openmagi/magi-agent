@@ -50,7 +50,7 @@ def test_control_flow_meta_tools_have_parallel_safety_unsafe() -> None:
 
 def test_workspace_mutating_tools_have_parallel_safety_unsafe() -> None:
     m = manifests_by_name()
-    for name in ["FileWrite", "FileEdit", "Bash", "TestRun"]:
+    for name in ["FileWrite", "FileEdit", "PatchApply", "Bash", "TestRun"]:
         assert m[name].parallel_safety == "unsafe", (
             f"{name} should have parallel_safety='unsafe'"
         )
@@ -91,7 +91,7 @@ def test_meta_control_flow_tools_are_concurrency_safe_by_auto_derivation() -> No
 
 def test_dangerous_and_write_tools_are_not_concurrency_safe() -> None:
     m = manifests_by_name()
-    for name in ["FileWrite", "FileEdit", "Bash", "TestRun", "ArtifactCreate"]:
+    for name in ["FileWrite", "FileEdit", "PatchApply", "Bash", "TestRun", "ArtifactCreate"]:
         assert m[name].is_concurrency_safe is False, (
             f"{name} should have is_concurrency_safe=False"
         )
@@ -197,10 +197,10 @@ def test_all_core_tools_are_present_with_explicit_parallel_safety() -> None:
     """All core tools must exist and have an explicit non-default annotation check."""
     m = manifests_by_name()
     expected = {
-        "FileRead", "FileWrite", "FileEdit", "Glob", "Grep", "Bash", "TestRun",
-        "GitDiff", "AskUserQuestion", "EnterPlanMode", "ExitPlanMode", "ArtifactCreate",
-        "ArtifactRead", "ArtifactList", "Clock", "Calculation", "ToolSearch",
-        "HealthStatus", "TaskList", "TaskGet", "TaskOutput", "CronList",
+        "FileRead", "FileWrite", "FileEdit", "PatchApply", "Glob", "Grep", "Bash",
+        "TestRun", "GitDiff", "AskUserQuestion", "EnterPlanMode", "ExitPlanMode",
+        "ArtifactCreate", "ArtifactRead", "ArtifactList", "Clock", "Calculation",
+        "ToolSearch", "HealthStatus", "TaskList", "TaskGet", "TaskOutput", "CronList",
     }
     assert set(m.keys()) == expected
     # Every tool must have a valid parallel_safety value

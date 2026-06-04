@@ -15,6 +15,7 @@ __all__ = [
     "ToolRegistry",
     "ToolResult",
     "ToolSource",
+    "bind_core_toolhost_handlers",
     "core_tool_manifests",
     "register_core_tool_manifests",
 ]
@@ -37,4 +38,8 @@ def __getattr__(name: str) -> object:
             "register_core_tool_manifests": register_core_tool_manifests,
         }
         return exports[name]
+    if name == "bind_core_toolhost_handlers":
+        from .core_toolhost import bind_core_toolhost_handlers
+
+        return bind_core_toolhost_handlers
     raise AttributeError(name)
