@@ -8,6 +8,18 @@ from dataclasses import dataclass
 from magi_agent.context.protected_tools import is_compaction_protected_tool_result
 from magi_agent.context.types import WarningLevel
 
+
+def _is_tool_result(msg: dict) -> bool:
+    """Return True only for genuine tool-result messages.
+
+    Mirrors MicrocompactEngine._is_tool_result so that the protection filter
+    in AutoCompactionEngine applies the same role-gate: only messages with
+    role='tool' (ADK / OpenAI) or type='tool_result' (Anthropic) can be
+    recognized as protected tool results.  This prevents an arbitrary message
+    that merely carries a matching ``name`` field from being preserved verbatim.
+    """
+    return msg.get("role") == "tool" or msg.get("type") == "tool_result"
+
 KEEP_RECENT_TURNS = 3
 ClassifierCallable = Callable[[str], Awaitable[str]]
 
@@ -75,8 +87,13 @@ class AutoCompactionEngine:
         # Compaction-protected tool results in the OLD region are preserved
         # verbatim instead of being summarized away (mirrors OpenCode
         # PRUNE_PROTECTED_TOOLS). No-op when none are present.
+        # The role-gate (_is_tool_result) ensures that only genuine tool-result
+        # messages (role=tool / type=tool_result) can be recognized as protected,
+        # consistent with MicrocompactEngine and as a defense-in-depth measure
+        # against arbitrary messages that merely carry a matching name field.
         protected_messages = [
-            m for m in old_messages if is_compaction_protected_tool_result(m)
+            m for m in old_messages
+            if _is_tool_result(m) and is_compaction_protected_tool_result(m)
         ]
 
         tokens_before = sum(self._estimate_tokens(m) for m in old_messages)

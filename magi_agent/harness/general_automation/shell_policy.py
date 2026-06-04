@@ -82,6 +82,12 @@ _VERB_OPERATION_CLASS: dict[str, str] = {
     "chmod": "execute",
     "chown": "execute",
     "chgrp": "execute",
+    # Fetch / copy to output path — treat as write so workspace-write/path
+    # approval is triggered (e.g. `wget -O /workspace/x`, `scp src /workspace/x`).
+    "wget": "write",
+    "curl": "write",
+    "scp": "write",
+    "rsync": "write",
     # Read (explicit, also the fallback)
     "cat": "read",
     "less": "read",

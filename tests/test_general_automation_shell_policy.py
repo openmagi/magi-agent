@@ -235,3 +235,35 @@ def test_shell_policy_modules_do_not_import_or_execute_live_process_surfaces() -
     )
     for fragment in forbidden_fragments:
         assert fragment not in source
+
+
+# ---------------------------------------------------------------------------
+# PR13 verb-coverage: wget / curl / scp / rsync mapped to "write" so workspace
+# write paths correctly trigger path_target_requires_approval.
+# ---------------------------------------------------------------------------
+
+def test_shell_path_wget_workspace_write_requires_approval() -> None:
+    """wget -O ./out.bin <url> — output flag targets workspace → approval_required."""
+    decision = classify_shell_policy(
+        _request_ws("wget -O ./out.bin http://example.invalid/file")
+    )
+    assert decision.status == "approval_required"
+    assert "path_target_requires_approval" in decision.reason_codes
+
+
+def test_shell_path_scp_workspace_target_requires_approval() -> None:
+    """scp host:f /srv/project/out — destination is workspace → approval_required."""
+    decision = classify_shell_policy(
+        _request_ws("scp host:/remote/file /srv/project/out", workspace_root="/srv/project")
+    )
+    assert decision.status == "approval_required"
+    assert "path_target_requires_approval" in decision.reason_codes
+
+
+def test_shell_path_scp_system_path_target_denies() -> None:
+    """scp host:f /etc/cron.d/evil — system path destination → denied."""
+    decision = classify_shell_policy(
+        _request_ws("scp host:/remote/file /etc/cron.d/evil")
+    )
+    assert decision.status == "denied"
+    assert "path_target_blocked" in decision.reason_codes

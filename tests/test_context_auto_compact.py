@@ -358,3 +358,65 @@ if loaded:
 """
     )
     assert completed.returncode == 0, completed.stderr
+
+
+# ---------------------------------------------------------------------------
+# PR8 fix: role-gate in auto_compact protected_messages comprehension
+# A non-tool-role message that merely carries a protected tool name must NOT
+# be preserved (should be compacted); only genuine tool-results are protected.
+# ---------------------------------------------------------------------------
+
+def test_non_tool_role_message_with_protected_name_is_not_preserved() -> None:
+    """A user/assistant message with name=LOAD_GA_RECIPE_TOOL_NAME must NOT be protected."""
+    from magi_agent.harness.general_automation.constants import LOAD_GA_RECIPE_TOOL_NAME
+
+    # A non-tool-role message that carries a protected tool name field
+    imposter_msg = {
+        "role": "user",
+        "name": LOAD_GA_RECIPE_TOOL_NAME,
+        "content": "imposter body " * 500,
+    }
+    messages: list[dict] = []
+    for i in range(6):
+        messages.append({"role": "user", "content": f"user message {i}"})
+        if i == 1:
+            messages.append(imposter_msg)
+        messages.append({"role": "assistant", "content": f"assistant reply {i}"})
+
+    engine = AutoCompactionEngine(mock_classifier, keep_recent_turns=2)
+    result_msgs, result = _run(engine.apply(messages, WarningLevel.CRITICAL))
+
+    assert result.activated is True
+    # The imposter message must NOT appear verbatim in the output
+    # (it falls in the old region and must be summarized away, not re-attached)
+    for msg in result_msgs:
+        assert msg is not imposter_msg, (
+            "Non-tool-role message with protected name must not be preserved verbatim"
+        )
+
+
+def test_genuine_tool_result_with_protected_name_is_preserved() -> None:
+    """A genuine tool-result (role=tool) with protected name IS preserved verbatim."""
+    from magi_agent.harness.general_automation.constants import LOAD_GA_RECIPE_TOOL_NAME
+
+    protected_msg = {
+        "role": "tool",
+        "name": LOAD_GA_RECIPE_TOOL_NAME,
+        "tool_use_id": "t-real",
+        "content": "protected playbook body " * 200,
+    }
+    messages: list[dict] = []
+    for i in range(6):
+        messages.append({"role": "user", "content": f"user message {i}"})
+        if i == 1:
+            messages.append(protected_msg)
+        messages.append({"role": "assistant", "content": f"assistant reply {i}"})
+
+    engine = AutoCompactionEngine(mock_classifier, keep_recent_turns=2)
+    result_msgs, result = _run(engine.apply(messages, WarningLevel.CRITICAL))
+
+    assert result.activated is True
+    # The genuine protected tool result MUST appear verbatim in the output
+    assert any(msg is protected_msg for msg in result_msgs), (
+        "Genuine tool-result with protected name must be preserved verbatim"
+    )
