@@ -206,31 +206,28 @@ def adapt_identity_sections(
 # Per-provider tool-schema repair (PR9)
 #
 # magi runs on Google ADK (no LiteLLM dependency). ADK 1.33.0's
-# ``google.adk.tools._gemini_schema_util`` already repairs most provider-specific
-# JSON-schema issues for the Gemini path before tools reach the wire:
+# ``google.adk.tools._gemini_schema_util`` repairs most provider-specific
+# JSON-schema issues for the typed Gemini schema path:
 #   * ``$ref`` dereferencing (covers OpenCode's Moonshot ``$ref``-sibling case),
-#   * ``additionalProperties`` removal,
 #   * camelCase -> snake_case field conversion,
 #   * type-list / ``null`` normalization,
 #   * ``format`` field filtering.
-# Those are intentionally NOT duplicated here.
 #
-# The one demonstrable remaining gap: Gemini's ``Schema.enum`` field is typed
-# ``list[str]`` and the Gemini API rejects integer/number/boolean-valued enums.
-# ADK preserves enum *values* verbatim, so an integer-valued enum in a tool input
-# schema reaches serialization unrepaired (pydantic emits a serialization warning
-# and the API rejects the schema). This repair coerces such enum values to their
-# string forms and switches the node type to ``string`` so the schema is accepted
-# while the enum *values* are preserved. All other provider families are an
-# identity passthrough (ADK-native runtime handles their schemas).
+# The raw ``parameters_json_schema`` passthrough used by FunctionDeclaration can
+# still carry provider-incompatible fields to the wire. This repair covers the
+# live-observed Gemini gaps: non-string enum values and additional-properties
+# keywords. All other provider families are an identity passthrough.
 # ---------------------------------------------------------------------------
 
 # JSON-schema keys whose values are themselves a (sub)schema.
-_SCHEMA_VALUE_KEYS: tuple[str, ...] = ("items", "additionalProperties")
+_SCHEMA_VALUE_KEYS: tuple[str, ...] = ("items",)
 # JSON-schema keys whose values are a list of (sub)schemas.
 _SCHEMA_LIST_KEYS: tuple[str, ...] = ("anyOf", "oneOf", "allOf", "prefixItems")
 # JSON-schema keys whose values map names -> (sub)schema.
 _SCHEMA_DICT_KEYS: tuple[str, ...] = ("properties", "$defs", "definitions", "patternProperties")
+_GEMINI_DROPPED_SCHEMA_KEYS: frozenset[str] = frozenset(
+    ("additionalProperties", "additional_properties")
+)
 
 
 def _enum_value_to_string(value: object) -> str:
@@ -256,6 +253,8 @@ def _repair_gemini_schema(node: object) -> object:
 
     repaired: dict[str, object] = {}
     for key, value in node.items():
+        if key in _GEMINI_DROPPED_SCHEMA_KEYS:
+            continue
         if key in _SCHEMA_VALUE_KEYS:
             repaired[key] = _repair_gemini_schema(value)
         elif key in _SCHEMA_LIST_KEYS and isinstance(value, list):
@@ -283,13 +282,14 @@ def repair_tool_schema_for_provider(
     """Return a provider-repaired copy of a tool input JSON schema.
 
     The input is never mutated on the Gemini path (``_repair_gemini_schema``
-    builds fresh dicts). Tool *semantics* are preserved: enum values are kept
-    (as their string forms) and no fields are dropped.
+    builds fresh dicts). Runtime ToolHost argument validation still runs against
+    the original manifest schema; provider repair only normalizes the schema sent
+    to the model provider.
 
-    Only ``ProviderFamily.GOOGLE`` triggers a repair today (Gemini integer-enum
-    -> string-enum). Every other family returns the *input object as-is*
-    (callers must not mutate the returned value); the ADK-native runtime /
-    underlying provider already accepts those schemas without modification.
+    Only ``ProviderFamily.GOOGLE`` triggers a repair today. Every other family
+    returns the *input object as-is* (callers must not mutate the returned value);
+    the ADK-native runtime / underlying provider already accepts those schemas
+    without modification.
     """
     if family is ProviderFamily.GOOGLE:
         result = _repair_gemini_schema(schema)
