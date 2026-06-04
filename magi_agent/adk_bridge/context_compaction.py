@@ -62,6 +62,7 @@ lands, that shared shim can absorb this plugin's ``before_model_callback``.
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 from google.adk.plugins.base_plugin import BasePlugin
@@ -71,6 +72,8 @@ from magi_agent.runtime.context_lifecycle import (
     ContextLifecycleConfig,
     ContextLifecycleEvent,
 )
+
+logger = logging.getLogger(__name__)
 
 CONTEXT_COMPACTION_PLUGIN_NAME = "magi_context_compaction_plugin"
 
@@ -114,6 +117,13 @@ class MagiContextCompactionPlugin(BasePlugin):
         self.tail_events = tail_events
         self.event_count_threshold = event_count_threshold
         self._boundary = ContextLifecycleBoundary()
+        # Lazily-built, then cached: the boundary only needs a constant local-fake
+        # session_service + session + QueryState for its decision path. Building
+        # them fresh on every over-budget model call (potentially many per turn)
+        # is wasteful, so we cache them on the instance. See ``_decision_inputs``
+        # for how unbounded provenance-event growth on the reused session is
+        # prevented.
+        self._decision_cache: tuple[Any, Any, Any] | None = None
         self._config = ContextLifecycleConfig(
             enabled=True,
             localFakeCompactionEnabled=True,
@@ -149,7 +159,7 @@ class MagiContextCompactionPlugin(BasePlugin):
                 for index, content in enumerate(contents)
             )
 
-            session_service, session, state = await _decision_inputs()
+            session_service, session, state = await self._decision_inputs()
             decision = await self._boundary.compact_if_needed(
                 session_service=session_service,
                 session=session,
@@ -167,6 +177,19 @@ class MagiContextCompactionPlugin(BasePlugin):
             split_index = _adjust_split_to_avoid_orphan_response(contents, split_index)
             if split_index <= 0:
                 return None
+            kept = len(contents) - split_index
+            if kept > 2 * self.tail_events:
+                # Orphan widening re-included far more than ``tail_events`` (the
+                # tail is a long unbroken run of function responses), so this
+                # compaction reduced almost nothing. Functionally safe — purely
+                # an observability signal that the call became a near no-op.
+                logger.debug(
+                    "context compaction near no-op: orphan widening kept %d contents "
+                    "(tail_events=%d) from %d total",
+                    kept,
+                    self.tail_events,
+                    len(contents),
+                )
             llm_request.contents = contents[split_index:]
         except Exception:
             # Fail-open: compaction must never break a live model turn. Leaving
@@ -174,27 +197,44 @@ class MagiContextCompactionPlugin(BasePlugin):
             return None
         return None
 
+    async def _decision_inputs(self) -> tuple[Any, Any, Any]:
+        """Return the cached local-fake session service / session / QueryState the
+        boundary requires for its decision path, building them once on first use.
 
-async def _decision_inputs() -> tuple[Any, Any, Any]:
-    """Build the local-fake session service / session / QueryState the boundary
-    requires for its decision path.
+        Imports are local so this module stays import-light when the feature is
+        off.
 
-    Imports are local so this module stays import-light when the feature is off.
-    """
-    from magi_agent.adk_bridge.session_service import WorkspaceSessionService
-    from magi_agent.runtime.query_state import QueryState
+        Bounding provenance growth: ``compact_if_needed`` appends a
+        ``compacted_state_provenance`` event to the session on every *compacted*
+        decision, and the before-model seam never consumes that event (it reads
+        only ``decision.status`` / ``thresholdBreaches``). Reusing one session
+        across many model calls would therefore let ``session.events`` grow
+        without bound, so we clear it on each call. The decision path does not
+        read prior events (it only re-appends one), so clearing is safe and keeps
+        the reused session's footprint constant.
+        """
+        if self._decision_cache is None:
+            from magi_agent.adk_bridge.session_service import WorkspaceSessionService
+            from magi_agent.runtime.query_state import QueryState
 
-    service = WorkspaceSessionService(app_name="magi-context-compaction")
-    session = await service.create_session(
-        app_name="magi-context-compaction",
-        user_id="magi-context-compaction",
-        session_id="magi-context-compaction",
-    )
-    state = QueryState(
-        currentTurnId="turn-context-compaction",
-        sessionId=session.id,
-    )
-    return service, session, state
+            service = WorkspaceSessionService(app_name="magi-context-compaction")
+            session = await service.create_session(
+                app_name="magi-context-compaction",
+                user_id="magi-context-compaction",
+                session_id="magi-context-compaction",
+            )
+            state = QueryState(
+                currentTurnId="turn-context-compaction",
+                sessionId=session.id,
+            )
+            self._decision_cache = (service, session, state)
+
+        service, session, state = self._decision_cache
+        # Keep the reused session's provenance log bounded (see docstring).
+        events = getattr(session, "events", None)
+        if isinstance(events, list):
+            events.clear()
+        return service, session, state
 
 
 def _content_event_ref(index: int) -> str:
@@ -218,9 +258,16 @@ def _content_token_estimate(content: Any) -> int:
             total += count_text_tokens(text)
             continue
         # Non-text parts (function calls/responses, inline data) — approximate by
-        # their string form so they still contribute to the budget.
+        # their serialised form so they still contribute to the budget. genai
+        # Parts are pydantic models, so prefer ``model_dump_json()``: this aligns
+        # with the JSON basis used by ``estimate_message_tokens`` (json.dumps).
+        # ``str(part)`` is the pydantic *repr* — materially larger than the JSON
+        # form, which would bias the estimate toward over-counting. Fall back to
+        # ``str(part)`` only when no JSON serialiser is available.
         try:
-            total += count_text_tokens(str(part))
+            dump_json = getattr(part, "model_dump_json", None)
+            serialised = dump_json() if callable(dump_json) else str(part)
+            total += count_text_tokens(serialised)
         except Exception:
             total += 1
     role = getattr(content, "role", None)
@@ -243,6 +290,30 @@ def _is_orphan_response(content: Any) -> bool:
 def _adjust_split_to_avoid_orphan_response(contents: list[Any], split_index: int) -> int:
     """Widen the kept tail backwards so it never starts with an orphaned tool
     response (mirrors ADK ``ContextFilterPlugin`` orphan handling).
+
+    Safety invariant — why only ONE direction of orphaning is possible
+    -----------------------------------------------------------------
+    The reduction applied here is **prefix-only**: the caller keeps
+    ``contents[split_index:]``, which removes a contiguous *prefix* and never
+    touches the tail. A ``function_call`` always *precedes* its matching
+    ``function_response`` in ``contents`` (the model emits the call, the response
+    is appended after the tool runs). Therefore:
+
+    * Direction (a) — a kept ``function_response`` whose originating
+      ``function_call`` was trimmed: POSSIBLE. The call sits at a *lower* index,
+      so a prefix cut can drop it while keeping the response. This is the real
+      orphan risk, and the backward ``while`` below handles it by walking the
+      split back across the run of responses until it reaches their originating
+      call(s) (or the head of ``contents``).
+
+    * Direction (b) — a kept ``function_call`` whose matching
+      ``function_response`` was trimmed (a dangling *trailing* call): IMPOSSIBLE.
+      The response sits at a *higher* index than the call, and a prefix cut only
+      removes lower indices, so any kept call necessarily keeps its later
+      response. No handling is needed for this direction.
+
+    Because trimming is prefix-only, widening the split *backwards* is sufficient
+    to guarantee the kept window has no orphaned ``function_response``.
     """
     idx = split_index
     while 0 < idx < len(contents) and _is_orphan_response(contents[idx]):

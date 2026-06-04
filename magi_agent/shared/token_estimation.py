@@ -41,6 +41,11 @@ def _load_tiktoken_encoder() -> Callable[[str], int] | None:
         return None
 
     def _count(text: str) -> int:  # pragma: no cover - tiktoken-only path
+        # ``disallowed_special=()`` is load-bearing: by default ``encode`` RAISES
+        # on text containing ``<|...|>``-style special-token sequences (which can
+        # appear verbatim in tool output / transcripts). Allowing them keeps the
+        # counter total — without this, a raise here would fail-open and silently
+        # disable compaction for any context whose text contains such a sequence.
         return len(encoder.encode(text, disallowed_special=()))
 
     return _count

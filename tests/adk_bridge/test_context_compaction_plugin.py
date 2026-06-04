@@ -31,6 +31,7 @@ from magi_agent.adk_bridge.context_compaction import (
     MagiContextCompactionPlugin,
     build_context_compaction_plugin,
 )
+from magi_agent.shared.token_estimation import count_text_tokens
 
 
 def _content(index: int, text: str) -> types.Content:
@@ -148,6 +149,168 @@ def test_tail_widens_to_avoid_orphaned_function_response() -> None:
     assert first.parts[0].function_call is not None
     # Last content preserved.
     assert req.contents[-1].parts[0].text == "x" * 1600
+
+
+def test_tail_widens_past_parallel_tool_response_run() -> None:
+    # Realistic genai shape for parallel tool calls: one assistant Content emits
+    # BOTH calls (A and B), then each tool produces a SEPARATE function_response
+    # Content. A naive last-N split can land in the MIDDLE of that response run
+    # (keeping response B but not response A and not the originating call); the
+    # widening must walk back across the whole response run to the call Content.
+    plugin = MagiContextCompactionPlugin(token_threshold=2_000, tail_events=2)
+    contents = [_content(i, "x" * 1600) for i in range(15)]
+    contents.append(  # index 15 — single assistant Content with parallel calls
+        types.Content(
+            role="model",
+            parts=[
+                types.Part(
+                    function_call=types.FunctionCall(name="Read", args={"path": "a"})
+                ),
+                types.Part(
+                    function_call=types.FunctionCall(name="Read", args={"path": "b"})
+                ),
+            ],
+        )
+    )
+    contents.append(  # index 16 — response A
+        types.Content(
+            role="user",
+            parts=[
+                types.Part(
+                    function_response=types.FunctionResponse(
+                        name="Read", response={"a": True}
+                    )
+                )
+            ],
+        )
+    )
+    contents.append(  # index 17 — response B (naive split at 18-2=16 lands here-ish)
+        types.Content(
+            role="user",
+            parts=[
+                types.Part(
+                    function_response=types.FunctionResponse(
+                        name="Read", response={"b": True}
+                    )
+                )
+            ],
+        )
+    )
+    contents.append(_content(18, "x" * 1600))  # index 18 — assistant text
+    req = LlmRequest()
+    req.contents = contents  # 19 contents; tail_events=2 -> naive split at 17
+
+    _run(plugin.before_model_callback(callback_context=None, llm_request=req))
+
+    # No kept content may be an orphaned function_response.
+    for content in req.contents:
+        responses = [
+            p for p in (content.parts or [])
+            if getattr(p, "function_response", None) is not None
+        ]
+        if responses:
+            # any kept response must be preceded (in the kept window) by its call
+            assert req.contents[0].parts[0].function_call is not None
+    # Widening walked back across the response run to the originating call Content.
+    first = req.contents[0]
+    assert first.parts[0].function_call is not None
+    # call (15) + respA (16) + respB (17) + text (18) == 4 kept.
+    assert len(req.contents) == 4
+
+
+def test_tail_entirely_function_responses_widens_to_originating_call() -> None:
+    # Edge case: the entire tail window is function_responses. Widening must walk
+    # back past the whole run until it reaches the originating function_call.
+    plugin = MagiContextCompactionPlugin(token_threshold=2_000, tail_events=3)
+    contents = [_content(i, "x" * 1600) for i in range(10)]
+    contents.append(  # index 10 — the call
+        types.Content(
+            role="model",
+            parts=[
+                types.Part(
+                    function_call=types.FunctionCall(name="Grep", args={"q": "x"})
+                )
+            ],
+        )
+    )
+    # indices 11,12,13 — a run of three responses (the whole tail window).
+    for _ in range(3):
+        contents.append(
+            types.Content(
+                role="user",
+                parts=[
+                    types.Part(
+                        function_response=types.FunctionResponse(
+                            name="Grep", response={"ok": True}
+                        )
+                    )
+                ],
+            )
+        )
+    req = LlmRequest()
+    req.contents = contents  # 14 contents; tail_events=3 -> naive split at 11
+
+    _run(plugin.before_model_callback(callback_context=None, llm_request=req))
+
+    # The kept window must START with the function_call, not an orphan response.
+    first = req.contents[0]
+    assert first.parts[0].function_call is not None
+    assert not any(
+        getattr(p, "function_response", None) is not None for p in (first.parts or [])
+    )
+    # call (10) + 3 responses == 4 kept (widened from 3).
+    assert len(req.contents) == 4
+
+
+def test_reused_session_does_not_accumulate_provenance_events() -> None:
+    # Item 4: the plugin caches a single session_service+session across calls.
+    # The boundary appends a provenance event on every "compacted" decision, so
+    # without clearing, session.events would grow unboundedly. Assert the reused
+    # session's event log stays bounded across many over-budget calls.
+    plugin = MagiContextCompactionPlugin(token_threshold=2_000, tail_events=8)
+
+    async def _drive() -> object:
+        for _ in range(25):
+            req = _big_request(40)
+            await plugin.before_model_callback(
+                callback_context=None, llm_request=req
+            )
+            assert len(req.contents) == 8  # each call actually compacted
+        # Inspect the cached session: events must not have grown with call count.
+        _service, session, _state = plugin._decision_cache  # type: ignore[misc]
+        return session
+
+    session = _run(_drive())
+    assert len(session.events) <= 1  # bounded — cleared each call
+
+
+def test_non_text_part_estimate_uses_json_basis() -> None:
+    # Item 3: function_call/response parts are estimated from model_dump_json(),
+    # aligning the non-text basis with the json.dumps basis used by
+    # estimate_message_tokens (rather than the pydantic str(part) repr).
+    from magi_agent.adk_bridge.context_compaction import _content_token_estimate
+
+    content = types.Content(
+        role="model",
+        parts=[
+            types.Part(
+                function_call=types.FunctionCall(
+                    name="Read", args={"path": "some/long/path/to/a/file.py"}
+                )
+            )
+        ],
+    )
+    part = content.parts[0]
+    json_form = part.model_dump_json()
+    repr_form = str(part)
+    # The two serialisations differ — the fix deliberately uses the JSON one.
+    assert json_form != repr_form
+
+    estimate = _content_token_estimate(content)
+    # Estimate is driven by the JSON form (+ the role token), NOT the repr form.
+    expected = count_text_tokens(json_form) + count_text_tokens("model")
+    assert estimate == expected
+    assert estimate != count_text_tokens(repr_form) + count_text_tokens("model")
 
 
 def test_plugin_fails_open_on_unexpected_error() -> None:
