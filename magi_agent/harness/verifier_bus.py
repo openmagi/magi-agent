@@ -705,6 +705,31 @@ def build_default_verifier_bus_metadata() -> VerifierBusMetadata:
                 defaultEnabled=False,
                 disabled=True,
             ),
+            # Track 19 PR3 — General-Automation deliverable-completion check.
+            # Deterministic, default-OFF; the live consumer lives in
+            # ``harness/general_automation/task_completion`` and routes a missing
+            # deliverable to a turn-loop *repair* (not terminal). This metadata
+            # entry stays declaration-only (``actions=("audit","retry")``); the
+            # "repair" routing is a turn-loop concept, not a metadata action.
+            VerifierMetadata(
+                verifierId="ga-task-completion",
+                stage="task_plan_completion",
+                phase="deterministic",
+                priority=51,
+                description="General-Automation deliverable-completion metadata (default-off).",
+                inputDeclarations=(
+                    VerifierInputDeclaration(
+                        artifactRefs=("artifact:declared-output",),
+                    ),
+                ),
+                failureRouting=FailureRoutingMetadata(
+                    actions=("audit", "retry"),
+                    retryable=True,
+                    failOpen=True,
+                ),
+                defaultEnabled=False,
+                disabled=True,
+            ),
             # Placed in task_plan_completion for catalog compatibility only; this
             # is a learning-layer regression check with no task/plan semantics.
             # Move to a dedicated memory/learning stage if one is added.

@@ -53,6 +53,31 @@ class StopReasonHandlerDeps(Protocol):
 class StopReasonHandlerState:
     recovery_attempt: int = 0
     assistant_text_so_far_len: int = 0
+    completion_repair_attempt: int = 0
+
+
+class CompletionGate(Protocol):
+    """Optional finalise-path gate consulted before ``end_turn`` finalises.
+
+    Implemented by the General-Automation task-completion seam
+    (``harness/general_automation/task_completion``). It is passed in as a plain
+    callable so ``turn_policy`` stays import-pure (no evidence/ledger imports
+    here). Returning ``True`` means the turn should re-enter the loop (recover):
+    the gate is responsible for any synthetic message injection + bounded-attempt
+    bookkeeping, mirroring the output-recovery mechanism below. Returning
+    ``False`` means finalise should proceed unchanged.
+    """
+
+    def __call__(
+        self,
+        deps: StopReasonHandlerDeps,
+        state: StopReasonHandlerState,
+        *,
+        blocks: Sequence[dict[str, Any]],
+        iteration: int,
+        messages: MutableSequence[dict[str, Any]],
+    ) -> bool:
+        ...
 
 
 @dataclass(frozen=True)
@@ -76,10 +101,19 @@ def handle_stop_reason(
     iteration: int,
     turn_id: str,
     messages: MutableSequence[dict[str, Any]],
+    completion_gate: CompletionGate | None = None,
 ) -> StopReasonDecision:
     stop_case = classify_stop_reason(stop_reason_raw)
 
     if stop_case in ("end_turn", "stop_sequence"):
+        if completion_gate is not None and completion_gate(
+            deps,
+            state,
+            blocks=blocks,
+            iteration=iteration,
+            messages=messages,
+        ):
+            return StopReasonDecision(kind="recover")
         return StopReasonDecision(kind="finalise")
 
     if stop_case == "refusal":
