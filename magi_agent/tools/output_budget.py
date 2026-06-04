@@ -130,6 +130,7 @@ class BudgetedToolResult(BaseModel):
         *,
         store_receipt: object | None = None,
         validation_decision: object | None = None,
+        delegation_available: bool = False,
     ) -> dict[str, object]:
         receipt_projection = (
             store_receipt.public_projection()
@@ -155,6 +156,14 @@ class BudgetedToolResult(BaseModel):
         }
         if validation_decision is not None and hasattr(validation_decision, "public_projection"):
             projection["validation"] = validation_decision.public_projection()
+        if delegation_available and (
+            self.truncation.llm_preview_truncated or self.truncation.transcript_preview_truncated
+        ):
+            projection["delegationHint"] = (
+                f"Full output stored out of band at {self.result_ref}. "
+                "Do not inline the full payload — delegate to a read-only research child "
+                "(Grep/Read with offset/limit) to inspect it and conserve context."
+            )
         return projection
 
 
