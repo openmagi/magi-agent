@@ -52,7 +52,11 @@ def test_general_role_resolves_general_pack() -> None:
     assert hasattr(state, "general"), "ResolvedHarnessPresetState must have a 'general' field"
     assert isinstance(state.general, ResolvedHarnessPack)
     assert state.general.enabled is True
-    assert state.general.components["hooks"] == ()
+    # PR6 wired the GA-scoped per-turn constraint-reinjection hook (declaration
+    # only — handler is flag-gated and inert by default).
+    assert state.general.components["hooks"] == (
+        "general-automation-constraint-reinjection",
+    )
     assert state.general.components["childAgent"] == ()
     assert state.general.opt_out_allowed == ()
 

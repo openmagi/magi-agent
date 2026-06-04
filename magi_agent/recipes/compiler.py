@@ -17,6 +17,17 @@ from pydantic import (
     model_validator,
 )
 
+# Track 19 PR6: callback ref the first-party GA recipe packs declare so the
+# per-turn constraint-reinjection callback surfaces as pack metadata. Kept as a
+# plain literal (not imported) so this module stays free of the hooks/tools
+# import chain that pulls in transport/socket/subprocess — the recipe
+# materializer's import boundary forbids those. The canonical constant lives in
+# ``magi_agent.harness.general_automation.constraint_reinjection`` and a test
+# asserts the two stay in sync.
+GA_CONSTRAINT_REINJECTION_CALLBACK_REF = (
+    "callback:general-automation:constraint-reinjection"
+)
+
 
 JsonMap = Mapping[str, object]
 DEFAULT_RECIPE_RUNTIME_CONTRACT_VERSION = "recipe-pack.v1"
@@ -2385,7 +2396,10 @@ def _first_party_packs() -> tuple[RecipePackManifest, ...]:
             taskProfileSelectors=("office", "office-automation"),
             instructionRefs=("instruction:office-automation:preview-then-approve",),
             toolRefs=("tool:file.read", "tool:spreadsheet.read", "tool:browser.inspect"),
-            callbackRefs=("callback:office-automation:preview-capture",),
+            callbackRefs=(
+                "callback:office-automation:preview-capture",
+                GA_CONSTRAINT_REINJECTION_CALLBACK_REF,
+            ),
             validatorRefs=("validator:office-automation:preview-before-write",),
             approvalGateRefs=("approval:office-automation:write-or-send",),
             evidenceRefs=("evidence:office-preview",),
@@ -2412,7 +2426,10 @@ def _first_party_packs() -> tuple[RecipePackManifest, ...]:
             dependsOnPackIds=("openmagi.office-automation",),
             instructionRefs=("instruction:artifact-delivery:sanitized-delivery-preview",),
             toolRefs=("tool:artifact.prepare-delivery", "tool:file.delivery-plan"),
-            callbackRefs=("callback:artifact-delivery:delivery-manifest-capture",),
+            callbackRefs=(
+                "callback:artifact-delivery:delivery-manifest-capture",
+                GA_CONSTRAINT_REINJECTION_CALLBACK_REF,
+            ),
             validatorRefs=(
                 "validator:artifact-delivery:no-raw-path-leakage",
                 "validator:artifact-delivery:redacted-preview-only",
@@ -2437,7 +2454,10 @@ def _first_party_packs() -> tuple[RecipePackManifest, ...]:
             taskProfileSelectors=("spreadsheet", "spreadsheet-automation"),
             instructionRefs=("instruction:spreadsheet-automation:preview-then-approve",),
             toolRefs=("tool:spreadsheet.read", "tool:spreadsheet.plan-write"),
-            callbackRefs=("callback:spreadsheet-automation:preview-capture",),
+            callbackRefs=(
+                "callback:spreadsheet-automation:preview-capture",
+                GA_CONSTRAINT_REINJECTION_CALLBACK_REF,
+            ),
             validatorRefs=("validator:spreadsheet-automation:preview-before-write",),
             approvalGateRefs=("approval:spreadsheet-automation:write",),
             evidenceRefs=("evidence:spreadsheet-preview",),
@@ -2455,7 +2475,10 @@ def _first_party_packs() -> tuple[RecipePackManifest, ...]:
             taskProfileSelectors=("browser", "browser-automation"),
             instructionRefs=("instruction:browser-automation:inspect-before-act",),
             toolRefs=("tool:browser.inspect", "tool:browser.plan-action"),
-            callbackRefs=("callback:browser-automation:step-capture",),
+            callbackRefs=(
+                "callback:browser-automation:step-capture",
+                GA_CONSTRAINT_REINJECTION_CALLBACK_REF,
+            ),
             validatorRefs=("validator:browser-automation:action-plan",),
             approvalGateRefs=("approval:browser-automation:external-action",),
             evidenceRefs=("evidence:browser-inspection",),

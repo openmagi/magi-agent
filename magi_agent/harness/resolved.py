@@ -14,6 +14,9 @@ from pydantic import (
 )
 
 from magi_agent.evidence.rollout import EvidenceRolloutMetadata
+from magi_agent.harness.general_automation.constraint_reinjection import (
+    GA_CONSTRAINT_REINJECTION_HOOK_NAME,
+)
 from magi_agent.evidence.types import (
     EvidenceContractScopeMetadata,
     EvidenceEnforcement,
@@ -341,8 +344,10 @@ def build_default_resolved_harness_state(
                     "SpreadsheetPreview",
                     "BrowserAction",
                 ),
-                # GA-scoped hooks wired in PR6 (per-turn constraint re-injection)
-                "hooks": (),
+                # GA-scoped hooks (PR6): per-turn constraint re-injection.
+                # Declaration only — the handler is flag-gated and inert by
+                # default (see harness/general_automation/constraint_reinjection).
+                "hooks": (GA_CONSTRAINT_REINJECTION_HOOK_NAME,),
                 "childAgent": (),
                 "permissionDefaults": (
                     "write_requires_approval",
