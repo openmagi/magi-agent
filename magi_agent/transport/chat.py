@@ -726,6 +726,7 @@ def build_gate5b_full_toolhost_config_from_env(
                 env.get("MAGI_READ_QUALITY_MAX_LINES"),
                 fallback=2000,
             ),
+            "ripgrepEnabled": _is_true(env.get("MAGI_RIPGREP_ENABLED")),
         }
     )
 
