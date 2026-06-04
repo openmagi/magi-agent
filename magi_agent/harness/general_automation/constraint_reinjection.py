@@ -46,9 +46,6 @@ from collections.abc import Mapping, Sequence
 from typing import TYPE_CHECKING
 
 from magi_agent.config.env import general_automation_live_enabled
-from magi_agent.hooks.manifest import HookManifest, HookPoint
-from magi_agent.hooks.scope import HookScope
-from magi_agent.tools.manifest import ToolSource
 
 if TYPE_CHECKING:
     from magi_agent.evidence.ledger import EvidenceLedger
@@ -69,11 +66,6 @@ GA_CONSTRAINT_REINJECTION_HOOK_NAME = "general-automation-constraint-reinjection
 #: metadata.
 GA_CONSTRAINT_REINJECTION_CALLBACK_REF = (
     "callback:general-automation:constraint-reinjection"
-)
-
-_REINJECTION_SOURCE = ToolSource(
-    kind="builtin",
-    package="magi_agent.harness.general_automation",
 )
 
 #: Only this control type represents an *open obligation* the model still owes.
@@ -136,7 +128,7 @@ def ga_constraint_reinjection(
     )
 
 
-def ga_constraint_reinjection_hook_manifest() -> HookManifest:
+def ga_constraint_reinjection_hook_manifest() -> "HookManifest":
     """Manifest for the general-scoped constraint-reinjection hook.
 
     ``general``-scoped, non-security-critical, fail-open, non-blocking, and
@@ -145,6 +137,19 @@ def ga_constraint_reinjection_hook_manifest() -> HookManifest:
     Runs at ``BEFORE_LLM_CALL`` so the reminder is rebuilt and re-injected every
     turn (compaction-proof).
     """
+    # Deferred imports: HookManifest/HookPoint pull magi_agent.hooks.scope and
+    # magi_agent.tools.manifest which in turn pull magi_agent.transport.  Moving
+    # them here keeps constraint_reinjection import-light — resolved.py (which
+    # imports the callback-ref constant) must not pay the transport cost at
+    # module load.
+    from magi_agent.hooks.manifest import HookManifest, HookPoint
+    from magi_agent.hooks.scope import HookScope
+    from magi_agent.tools.manifest import ToolSource
+
+    source = ToolSource(
+        kind="builtin",
+        package="magi_agent.harness.general_automation",
+    )
     return HookManifest(
         name=GA_CONSTRAINT_REINJECTION_HOOK_NAME,
         point=HookPoint.BEFORE_LLM_CALL,
@@ -153,11 +158,12 @@ def ga_constraint_reinjection_hook_manifest() -> HookManifest:
             "checklist and open approval_required controls each turn "
             "(compaction-proof). Digest/label-only; flag-gated, inert by default."
         ),
-        source=_REINJECTION_SOURCE,
+        source=source,
         executionType="handler",
         enabled=False,
         failOpen=True,
         blocking=False,
+        # runs after context hooks (priority 10) so the reminder reflects the latest context
         priority=60,
         optOut=True,
         scope=HookScope(scope="general", agentRoles=("general",)),
@@ -192,13 +198,13 @@ def _missing_required_evidence(
 def _open_approval_refs(
     open_controls: Sequence[GeneralAutomationControlProjection],
 ) -> tuple[str, ...]:
-    refs: list[str] = []
-    for control in open_controls:
-        if control.control_type != _OPEN_OBLIGATION_CONTROL_TYPE:
-            continue
-        if control.control_ref not in refs:
-            refs.append(control.control_ref)
-    return tuple(refs)
+    return tuple(
+        dict.fromkeys(
+            control.control_ref
+            for control in open_controls
+            if control.control_type == _OPEN_OBLIGATION_CONTROL_TYPE
+        )
+    )
 
 
 def _render_reminder(

@@ -317,3 +317,58 @@ def test_constraint_reinjection_projection_is_metadata_only() -> None:
     assert projection.authority_flags.callback_attached is False
     public = projection.public_projection()
     assert public["adkBoundary"]["callbackAttached"] is False
+
+
+# ---------------------------------------------------------------------------
+# Role normalisation: general-automation → general_automation → NOT "general"
+# ---------------------------------------------------------------------------
+
+
+def test_role_general_automation_is_not_treated_as_general() -> None:
+    # "general-automation" normalises to "general_automation" (hyphens →
+    # underscores), which does NOT equal "general", so the hook is inert.
+    decision = ga_constraint_reinjection(
+        contract_required=_required_artifact(),
+        ledger=_ledger(),
+        open_controls=(_approval_control(),),
+        agent_role="general-automation",
+        env={"MAGI_GA_LIVE_ENABLED": "1"},
+    )
+    assert decision is None
+
+
+# ---------------------------------------------------------------------------
+# Import boundary: constraint_reinjection must not load magi_agent.transport
+# at module import time (only when ga_constraint_reinjection_hook_manifest()
+# is called).
+# ---------------------------------------------------------------------------
+
+
+def test_constraint_reinjection_has_no_transport_import_at_module_load() -> None:
+    import subprocess
+    import sys
+
+    completed = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            """
+import importlib
+import sys
+
+importlib.import_module(
+    "magi_agent.harness.general_automation.constraint_reinjection"
+)
+if "magi_agent.transport" in sys.modules:
+    raise AssertionError(
+        "magi_agent.transport was imported at module load — "
+        "hook-manifest imports must stay deferred inside "
+        "ga_constraint_reinjection_hook_manifest()"
+    )
+""",
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert completed.returncode == 0, completed.stderr
