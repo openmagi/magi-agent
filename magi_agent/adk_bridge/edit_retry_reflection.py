@@ -87,6 +87,17 @@ _NOT_UNIQUE_MARKERS = (
     "appears multiple",
 )
 
+# Failure-reason fragments that indicate an explicit no-match / not-found
+# failure. These must win over the lazy-placeholder heuristic: a genuine
+# "old_string was not found" error is a not_found case even if the model's
+# new_string happened to contain a lazy placeholder comment. Mislabeling it as
+# ``lazy_output`` would corrupt telemetry and pick the wrong repair message.
+_NOT_FOUND_MARKERS = (
+    "old_text_not_found",
+    "not_found",
+    "no_match",
+)
+
 
 class MagiEditRetryReflectionPlugin(BasePlugin):
     """ADK plugin that re-injects corrective guidance after an edit failure.
@@ -109,6 +120,15 @@ class MagiEditRetryReflectionPlugin(BasePlugin):
         self.max_attempts = max_attempts
         # attempt counts keyed by (scope_key, tool_name)
         self._attempts: dict[tuple[str, str], int] = {}
+        # One controller for the whole plugin: repair-rule selection is pure (it
+        # depends only on the per-call decision input), and the controller's own
+        # ``exhausted``/``last_error`` state is unused here — the attempt budget
+        # is enforced via the external ``_attempts`` counter we feed in. Caching
+        # avoids allocating rule objects on every failed edit.
+        self._controller = RetryController(
+            max_attempts=self.max_attempts,
+            repair_rules=coding_edit_retry_repair_rules(),
+        )
 
     # -- ADK callbacks ----------------------------------------------------
 
@@ -157,6 +177,19 @@ class MagiEditRetryReflectionPlugin(BasePlugin):
             reason=error_reason,
         )
 
+    async def after_run_callback(self, *, invocation_context: Any) -> None:
+        """Sweep attempt counters for the invocation that just finished.
+
+        The plugin instance lives for the whole process, so without this cleanup
+        ``_attempts`` would grow unbounded: keys only pop on a *successful* edit
+        (``_reset``), never when the budget is exhausted or the turn simply ends
+        without a final success. The invocation id is the scope key, so on run
+        completion we drop every counter belonging to that invocation.
+        """
+        inv = getattr(invocation_context, "invocation_id", None)
+        if isinstance(inv, str) and inv:
+            self._attempts = {k: v for k, v in self._attempts.items() if k[0] != inv}
+
     # -- core -------------------------------------------------------------
 
     def _maybe_reflect(
@@ -177,14 +210,11 @@ class MagiEditRetryReflectionPlugin(BasePlugin):
 
         error_code = _classify_edit_error_code(reason, tool_args)
 
-        # A fresh controller per call keeps repair-rule selection pure; the
-        # attempt budget is enforced via the ``attempt`` value we feed it, so
-        # ``max_attempts`` is fail-closed exactly as the controller defines.
-        controller = RetryController(
-            max_attempts=self.max_attempts,
-            repair_rules=coding_edit_retry_repair_rules(),
-        )
-        decision = controller.next(
+        # Repair-rule selection is pure (it depends only on this call's input),
+        # and the attempt budget is enforced via the ``attempt`` value we feed
+        # in, so ``max_attempts`` is fail-closed exactly as the controller
+        # defines. The cached controller is reused across calls — see __init__.
+        decision = self._controller.next(
             {
                 "kind": "edit_apply_failed",
                 "reason": reason,
@@ -230,8 +260,15 @@ def _scope_key(tool_context: Any) -> str:
 
 def _classify_edit_error_code(reason: str, tool_args: Mapping[str, Any]) -> str:
     lowered = reason.lower()
+    # Uniqueness failures take top priority (PR1 forward-compat).
     if any(marker in lowered for marker in _NOT_UNIQUE_MARKERS):
         return "not_unique"
+    # An explicit no-match/not-found error is authoritative: it must win over the
+    # lazy-placeholder heuristic so a genuine ``old_text_not_found`` is never
+    # mislabeled ``lazy_output`` (which would pick the wrong repair message and
+    # corrupt telemetry).
+    if any(marker in lowered for marker in _NOT_FOUND_MARKERS):
+        return "not_found"
     new_text = _new_text_from_args(tool_args)
     if new_text and _LAZY_PLACEHOLDER_RE.search(new_text):
         return "lazy_output"

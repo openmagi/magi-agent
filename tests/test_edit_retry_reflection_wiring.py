@@ -20,6 +20,7 @@ import asyncio
 from collections.abc import AsyncGenerator
 
 from google.adk.agents import Agent
+from google.adk.apps.app import App
 from google.adk.artifacts import InMemoryArtifactService
 from google.adk.memory import InMemoryMemoryService
 from google.adk.models import BaseLlm, LlmRequest, LlmResponse
@@ -35,6 +36,9 @@ from magi_agent.adk_bridge.edit_retry_reflection import (
 
 
 _APP_NAME = "magi-edit-retry-itest"
+# ``App.name`` must be a valid identifier (no hyphens); ``Runner.app_name``
+# overrides it to preserve the hyphenated visible name.
+_APP_IDENTIFIER = "magi_edit_retry_itest"
 _USER_ID = "user-edit-retry"
 
 
@@ -100,13 +104,18 @@ def _build_runner(plugin: MagiEditRetryReflectionPlugin | None) -> tuple[Runner,
         instruction="edit retry reflection integration test agent",
         tools=[FunctionTool(_file_edit_raises_named())],
     )
+    # ADK 1.33 deprecates ``Runner(plugins=...)``; wrap agent + plugins in App.
+    app = App(
+        name=_APP_IDENTIFIER,
+        root_agent=agent,
+        plugins=[plugin] if plugin is not None else [],
+    )
     runner = Runner(
+        app=app,
         app_name=_APP_NAME,
-        agent=agent,
         session_service=InMemorySessionService(),
         memory_service=InMemoryMemoryService(),
         artifact_service=InMemoryArtifactService(),
-        plugins=[plugin] if plugin is not None else None,
     )
     return runner, llm
 
@@ -244,6 +253,37 @@ def test_lazy_placeholder_new_text_maps_to_lazy_output_rule() -> None:
     class _Ctx:
         invocation_id = "inv-lazy"
 
+    # Use a non-not_found structural failure so the lazy-placeholder heuristic is
+    # the deciding signal (an explicit not_found error now wins — see below).
+    result = asyncio.run(
+        plugin.on_tool_error_callback(
+            tool=_Tool(),
+            tool_args={
+                "path": "a.py",
+                "oldText": "x",
+                "newText": "def f():\n    # ... rest of the code unchanged",
+            },
+            tool_context=_Ctx(),
+            error=ValueError("edit_apply_failed: write rejected"),
+        )
+    )
+    assert result is not None
+    assert result["error_code"] == "lazy_output"
+    assert "placeholder comment" in result["reflection_guidance"]
+
+
+def test_not_found_with_lazy_placeholder_classifies_as_not_found() -> None:
+    # Priority guard: a genuine ``old_text_not_found`` error must classify as
+    # ``not_found`` even when new_string contains a lazy placeholder comment, so
+    # the no-match repair message is chosen and telemetry is not corrupted.
+    plugin = MagiEditRetryReflectionPlugin(max_attempts=2)
+
+    class _Tool:
+        name = "FileEdit"
+
+    class _Ctx:
+        invocation_id = "inv-not-found-lazy"
+
     result = asyncio.run(
         plugin.on_tool_error_callback(
             tool=_Tool(),
@@ -257,8 +297,8 @@ def test_lazy_placeholder_new_text_maps_to_lazy_output_rule() -> None:
         )
     )
     assert result is not None
-    assert result["error_code"] == "lazy_output"
-    assert "placeholder comment" in result["reflection_guidance"]
+    assert result["error_code"] == "not_found"
+    assert "old_string was not found" in result["reflection_guidance"]
 
 
 def test_non_edit_tool_failure_is_ignored() -> None:
@@ -328,3 +368,48 @@ def test_budget_two_injects_once_then_fails_closed() -> None:
     assert len(injected) == 1
     assert injected[0]["retry_attempt"] == 1
     assert raised is True
+
+
+def test_attempt_counters_cleared_after_run_completes() -> None:
+    # The plugin lives for the process lifetime; after_run_callback must sweep
+    # all attempt counters for the ending invocation so _attempts never grows
+    # unbounded across turns. ADK fires after_run_callback only when the run
+    # completes normally (the model gives up and finishes with text after the
+    # corrective injection), which is the realistic end state — drive that path.
+    plugin = MagiEditRetryReflectionPlugin(max_attempts=2)
+    runner, llm = _build_runner(plugin)
+    # One failing edit (budget 2 -> injects once), then the model finishes with
+    # text, so the invocation completes normally and after_run_callback fires.
+    object.__setattr__(llm, "max_edit_attempts", 1)
+
+    asyncio.run(_run_turn(runner))
+
+    # The corrective message was injected (a counter was recorded mid-run) and
+    # then the run completed, so after_run_callback must have swept it.
+    assert plugin._attempts == {}
+
+
+def test_after_run_callback_only_sweeps_matching_invocation() -> None:
+    plugin = MagiEditRetryReflectionPlugin(max_attempts=2)
+    plugin._attempts[("inv-keep", "FileEdit")] = 1
+    plugin._attempts[("inv-drop", "FileEdit")] = 1
+
+    class _InvCtx:
+        invocation_id = "inv-drop"
+
+    asyncio.run(plugin.after_run_callback(invocation_context=_InvCtx()))
+
+    assert ("inv-drop", "FileEdit") not in plugin._attempts
+    assert ("inv-keep", "FileEdit") in plugin._attempts
+
+
+def test_enabled_path_emits_no_plugins_deprecation_warning() -> None:
+    import warnings
+
+    plugin = MagiEditRetryReflectionPlugin(max_attempts=2)
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", DeprecationWarning)
+        # Building the runner via the App pattern must not trigger the
+        # ``Runner(plugins=...)`` DeprecationWarning.
+        runner, _llm = _build_runner(plugin)
+    assert runner is not None
