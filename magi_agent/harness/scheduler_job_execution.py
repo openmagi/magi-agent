@@ -207,7 +207,7 @@ class CronTurnResult(BaseModel):
 
     status: CronTurnStatus
     job_id: str = Field(alias="jobId")
-    runner_invoked: bool = Field(default=True, alias="runnerInvoked")
+    runner_invoked: bool = Field(alias="runnerInvoked")
 
 
 @runtime_checkable
@@ -504,6 +504,16 @@ def _run_turn_sync(runner: CronTurnRunner, plan: CronTurnPlan) -> CronTurnResult
     record evidence and continue to the next job without hanging.
     """
     import asyncio
+
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        pass  # no running loop — safe to use asyncio.run below
+    else:
+        raise RuntimeError(
+            "_run_turn_sync called from within a running event loop; "
+            "an async entrypoint will be added in A4 (delivery wiring)"
+        )
 
     async def _run_with_timeout() -> CronTurnResult:
         try:

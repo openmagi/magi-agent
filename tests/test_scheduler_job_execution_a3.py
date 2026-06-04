@@ -303,8 +303,9 @@ def test_live_timeout_is_recorded_as_aborted(tmp_path: Any) -> None:
     assert ex.status == "timed_out"
     assert ex.runner_invoked is True
     # Evidence captures the failed status for an aborted turn.
+    # timed_out deterministically maps to "failed" in _build_evidence.
     assert ex.evidence is not None
-    assert ex.evidence.status in {"failed", "unknown"}
+    assert ex.evidence.status == "failed"
 
 
 def test_live_auto_approve_decision_is_allowed(tmp_path: Any) -> None:
@@ -538,7 +539,111 @@ def test_module_enforces_inactivity_timeout_not_runner(tmp_path: Any) -> None:
     assert ex.runner_invoked is True
 
     # Evidence must reflect the failure.
+    # timed_out deterministically maps to "failed" in _build_evidence.
     assert ex.evidence is not None
-    assert ex.evidence.status in {"failed", "unknown"}, (
-        f"evidence status should be failed/unknown for a timed-out turn, got {ex.evidence.status!r}"
+    assert ex.evidence.status == "failed", (
+        f"evidence status should be 'failed' for a timed-out turn, got {ex.evidence.status!r}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# asyncio.run running-loop bomb guard
+# ---------------------------------------------------------------------------
+
+def test_execute_due_jobs_from_running_loop_raises_actionable_error(tmp_path: Any) -> None:
+    """execute_due_jobs (live config) called from inside asyncio.run must raise
+    RuntimeError with the actionable A4 message instead of a cryptic one.
+    """
+    import asyncio
+
+    from magi_agent.harness.scheduler_job_execution import (
+        JobExecutionConfig,
+        execute_due_jobs,
+    )
+
+    now_ms = 1_000_000
+    now = _now_dt(now_ms)
+    lease = _make_lease(now_ms=now_ms)
+    runner = _FakeCronTurnRunner(status="completed")
+    config = JobExecutionConfig(executor_enabled=True, shadow=False, timeout_seconds=600.0)
+    source = _make_source(
+        [{"job_id": "job:loop-001", "schedule_expr": "every 10m", "next_run_ms": now_ms - 500}]
+    )
+
+    raised: list[Exception] = []
+
+    async def _inner() -> None:
+        try:
+            execute_due_jobs(
+                now=now,
+                source=source,
+                lease=lease,
+                lock_dir=tmp_path,
+                owner_digest="owner:test-abc",
+                runner=runner,
+                config=config,
+            )
+        except RuntimeError as exc:
+            raised.append(exc)
+
+    asyncio.run(_inner())
+
+    assert len(raised) == 1, "expected exactly one RuntimeError from the running-loop guard"
+    msg = str(raised[0])
+    assert "_run_turn_sync called from within a running event loop" in msg, (
+        f"expected actionable guard message, got: {msg!r}"
+    )
+    assert "A4" in msg, f"expected A4 mention in guard message, got: {msg!r}"
+
+
+# ---------------------------------------------------------------------------
+# Multi-job — two due jobs in one tick, both executed
+# ---------------------------------------------------------------------------
+
+def test_two_due_jobs_both_executed_in_tick_order(tmp_path: Any) -> None:
+    """Two due jobs in one tick (live mode, fake runner): both turns executed
+    and executions match tick's fired order.
+    """
+    from magi_agent.harness.scheduler_job_execution import (
+        JobExecutionConfig,
+        execute_due_jobs,
+    )
+
+    now_ms = 1_000_000
+    now = _now_dt(now_ms)
+    lease = _make_lease(now_ms=now_ms)
+    runner = _FakeCronTurnRunner(status="completed")
+
+    config = JobExecutionConfig(executor_enabled=True, shadow=False, timeout_seconds=600.0)
+    source = _make_source(
+        [
+            {"job_id": "job:multi-001", "schedule_expr": "every 10m", "next_run_ms": now_ms - 1000},
+            {"job_id": "job:multi-002", "schedule_expr": "every 5m", "next_run_ms": now_ms - 500},
+        ]
+    )
+
+    result = execute_due_jobs(
+        now=now, source=source, lease=lease, lock_dir=tmp_path,
+        owner_digest="owner:test-abc", runner=runner, config=config,
+    )
+
+    # Both jobs must have been executed.
+    assert len(result.executions) == 2, (
+        f"expected 2 executions, got {len(result.executions)}"
+    )
+    assert len(runner.calls) == 2, (
+        f"expected runner called twice, got {len(runner.calls)}"
+    )
+
+    # Both executions are live and completed.
+    for ex in result.executions:
+        assert ex.mode == "live"
+        assert ex.status == "completed"
+        assert ex.runner_invoked is True
+
+    # Execution order matches the fired_job_ids order from the tick.
+    fired_ids = list(result.tick_result.fired_job_ids)
+    executed_ids = [ex.job_id for ex in result.executions]
+    assert executed_ids == fired_ids, (
+        f"execution order {executed_ids!r} does not match tick fired order {fired_ids!r}"
     )
