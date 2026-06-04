@@ -8,8 +8,6 @@ These tests validate that:
 """
 from __future__ import annotations
 
-import pytest
-
 from magi_agent.harness.engine import HarnessEngine, HarnessResolutionRequest
 from magi_agent.harness.resolved import (
     ResolvedHarnessPack,
@@ -54,6 +52,9 @@ def test_general_role_resolves_general_pack() -> None:
     assert hasattr(state, "general"), "ResolvedHarnessPresetState must have a 'general' field"
     assert isinstance(state.general, ResolvedHarnessPack)
     assert state.general.enabled is True
+    assert state.general.components["hooks"] == ()
+    assert state.general.components["childAgent"] == ()
+    assert state.general.opt_out_allowed == ()
 
 
 def test_general_pack_contains_expected_tools() -> None:
@@ -98,13 +99,7 @@ def test_general_main_run_effective_packs_are_complete() -> None:
     """Main general run should include general + coding + research + verification + hard-safety."""
     state = build_default_resolved_harness_state(agent_role="general")
 
-    assert set(state.effective_harness_packs) == {
-        "general",
-        "coding",
-        "research",
-        "verification",
-        "hard-safety",
-    }
+    assert state.effective_harness_packs == ("general", "coding", "research", "verification", "hard-safety")
 
 
 # ---------------------------------------------------------------------------

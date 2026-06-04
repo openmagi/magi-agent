@@ -341,6 +341,7 @@ def build_default_resolved_harness_state(
                     "SpreadsheetPreview",
                     "BrowserAction",
                 ),
+                # GA-scoped hooks wired in PR6 (per-turn constraint re-injection)
                 "hooks": (),
                 "childAgent": (),
                 "permissionDefaults": (
