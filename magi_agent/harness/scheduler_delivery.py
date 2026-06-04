@@ -152,8 +152,10 @@ class DeliveryReceipt(BaseModel):
 class LocalLogDeliverySink(BaseModel):
     """Concrete delivery target: local/log sink (no network, no channels).
 
-    Satisfies the DeliveryTarget Protocol.  In tests this is the default
-    sink; in production it writes an in-process audit log entry.
+    Satisfies the DeliveryTarget Protocol.  This is a typed routing tag
+    only — ``deliver()`` performs no logging itself; the returned
+    ``DeliveryReceipt`` is the audit record.  Track-E implementors should
+    NOT expect any log side-effects from this sink.
 
     TRACK-E SEAM: replace or supplement with ChannelDeliverySink when
     live channel delivery is enabled (Track E).
@@ -195,7 +197,7 @@ class SessionAwareDeliveryTarget(BaseModel):
 # ---------------------------------------------------------------------------
 
 def resolve_delivery_target(
-    job: object,
+    _job: object,
     *,
     last_active_session: DeliveryTarget | None = None,
     explicit_target: DeliveryTarget | None = None,
@@ -210,10 +212,9 @@ def resolve_delivery_target(
       3. Else → return the default ``LocalLogDeliverySink``.
 
     This is a PURE function — no side effects, no I/O.
-    ``job`` is accepted for future enrichment (e.g. reading per-job channel
-    hints) but is not used in A4.
+    ``_job`` is accepted for future enrichment (e.g. reading per-job channel
+    hints) but is intentionally unused in A4.
     """
-    _ = job  # reserved for Track-E per-job channel lookup
     if last_active_session is not None:
         return last_active_session
     if explicit_target is not None:
@@ -238,7 +239,15 @@ def _build_delivery_evidence(
 
     Raw output content is NEVER included.  Only length + digest are stored.
     """
-    evidence_status = "ok" if receipt_status in {"delivered", "suppressed_silent"} else "failed"
+    # "delivered" / "suppressed_silent" → ok (intentional outcomes).
+    # "skipped" → "unknown" (intentional no-op, not a delivery failure).
+    # Any future error status → "failed".
+    if receipt_status in {"delivered", "suppressed_silent"}:
+        evidence_status = "ok"
+    elif receipt_status == "skipped":
+        evidence_status = "unknown"
+    else:
+        evidence_status = "failed"
     return EvidenceRecord(
         type="custom:SchedulerCronDelivery",
         status=evidence_status,

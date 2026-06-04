@@ -49,7 +49,7 @@ from __future__ import annotations
 import os
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Literal, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Literal, Protocol, runtime_checkable
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -68,6 +68,9 @@ from magi_agent.permissions.auto_control import (
     AutoPermissionGuardDecision,
     evaluate_auto_permission,
 )
+
+if TYPE_CHECKING:
+    from magi_agent.harness.scheduler_delivery import DeliveryReceipt
 
 # ---------------------------------------------------------------------------
 # Module config
@@ -253,7 +256,23 @@ class JobExecution(BaseModel):
     status: CronTurnStatus
     approval: AutoPermissionDecision | None = Field(default=None, alias="approval")
     evidence: EvidenceRecord | None = Field(default=None, alias="evidence")
-    delivery_receipt: object | None = Field(default=None, alias="deliveryReceipt")
+    delivery_receipt: "DeliveryReceipt | None" = Field(default=None, alias="deliveryReceipt")
+
+
+def _rebuild_job_execution() -> None:
+    """Resolve the DeliveryReceipt forward reference so Pydantic can validate it.
+
+    model_rebuild() is called once at module load time with the resolved type
+    passed in via _types_namespace.  The import is inside the function to
+    preserve boundary isolation — this module's top-level does not import
+    scheduler_delivery.
+    """
+    from magi_agent.harness.scheduler_delivery import DeliveryReceipt
+
+    JobExecution.model_rebuild(_types_namespace={"DeliveryReceipt": DeliveryReceipt})
+
+
+_rebuild_job_execution()
 
 
 class JobExecutionResult(BaseModel):
@@ -512,13 +531,23 @@ def _deliver_turn_result(
 
     # Skip delivery for non-completed turns (timed_out, failed, skipped).
     if turn_result.status not in {"completed"}:
-        # Still emit a skipped receipt so callers can audit.
-        from magi_agent.harness.scheduler_delivery import DeliveryReceipt
+        # Still emit a skipped receipt so callers can audit.  Record the ACTUAL
+        # (redacted) outputLength + outputDigest of whatever partial output exists
+        # — never deliver it, but the audit trail must reflect the true values.
+        import hashlib as _hashlib
+        from magi_agent.harness.scheduler_delivery import DeliveryReceipt, _ZERO_DIGEST
+        _output: str = getattr(turn_result, "output", "") or ""
+        _output_length = len(_output)
+        _output_digest = (
+            "sha256:" + _hashlib.sha256(_output.encode()).hexdigest()
+            if _output
+            else _ZERO_DIGEST
+        )
         return DeliveryReceipt(
             status="skipped",
             jobId=turn_result.job_id,
-            outputLength=0,
-            outputDigest="sha256:" + "0" * 64,
+            outputLength=_output_length,
+            outputDigest=_output_digest,
         )
 
     target = resolve_delivery_target(record)

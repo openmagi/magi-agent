@@ -490,7 +490,70 @@ def test_live_timed_out_turn_has_skipped_receipt(tmp_path: Any) -> None:
 
 
 # ---------------------------------------------------------------------------
-# 10.  Module import purity — scheduler_delivery
+# 10.  Skipped-receipt audit accuracy (Issue 2 — non-empty failed output)
+# ---------------------------------------------------------------------------
+
+def test_failed_turn_with_output_skipped_receipt_records_real_length(tmp_path: Any) -> None:
+    """A failed turn with non-empty output → skipped receipt records the ACTUAL
+    outputLength and outputDigest, never delivers the text, and raw text is
+    absent from the receipt dump.
+    """
+    from magi_agent.harness.scheduler_job_execution import JobExecutionConfig, execute_due_jobs
+
+    partial_error_trace = "Traceback (most recent call last):\n  File 'agent.py', line 42\nValueError: something broke"
+    now_ms = 1_000_000
+    now = _now_dt(now_ms)
+    lease = _make_lease(now_ms=now_ms)
+    runner = _FakeCronTurnRunner(status="failed", output=partial_error_trace)
+
+    config = JobExecutionConfig(executor_enabled=True, shadow=False, timeout_seconds=600.0)
+    source = _make_source(
+        [{"job_id": "job:failed-output-001", "schedule_expr": "every 10m", "next_run_ms": now_ms - 500}]
+    )
+    result = execute_due_jobs(
+        now=now, source=source, lease=lease, lock_dir=tmp_path,
+        owner_digest="owner:test-abc", runner=runner, config=config,
+    )
+
+    ex = result.executions[0]
+    receipt = ex.delivery_receipt
+    assert receipt is not None
+    assert receipt.status == "skipped", "failed turn must produce a skipped (no-deliver) receipt"
+
+    # Audit accuracy: outputLength and outputDigest must reflect the real output, not zeroes.
+    expected_length = len(partial_error_trace)
+    expected_digest = "sha256:" + hashlib.sha256(partial_error_trace.encode()).hexdigest()
+    assert receipt.output_length == expected_length, (
+        f"skipped receipt must record real output length {expected_length}, got {receipt.output_length}"
+    )
+    assert receipt.output_digest == expected_digest, (
+        f"skipped receipt must record real output digest, got {receipt.output_digest}"
+    )
+
+    # Raw text must never appear in the receipt dump.
+    dump = str(receipt.model_dump(by_alias=True))
+    assert partial_error_trace not in dump, "Raw output text must NOT appear in skipped receipt"
+
+
+def test_skipped_receipt_evidence_status_is_unknown() -> None:
+    """A skipped delivery status → evidence status is 'unknown' (intentional no-op,
+    not a failure).
+    """
+    from magi_agent.harness.scheduler_job_execution import CronTurnResult
+    from magi_agent.harness.scheduler_delivery import LocalLogDeliverySink, deliver
+
+    # deliver() produces a "skipped" receipt for empty output.
+    result = CronTurnResult(status="completed", jobId="job:skip-ev-001", runnerInvoked=True, output="")
+    receipt = deliver(result, target=LocalLogDeliverySink())
+    assert receipt.status == "skipped"
+    assert receipt.evidence is not None
+    assert receipt.evidence.status == "unknown", (
+        f"skipped delivery evidence should be 'unknown', got {receipt.evidence.status!r}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# 11.  Module import purity — scheduler_delivery
 # ---------------------------------------------------------------------------
 
 def test_scheduler_delivery_no_live_network_imports() -> None:
