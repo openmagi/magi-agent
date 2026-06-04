@@ -225,7 +225,7 @@ class MagiResiliencePlugin(BasePlugin):
 
         classified = ErrorClassifier.classify(error)
         if not isinstance(classified, RecoverableError):
-            # Terminal error -> propagate (fail-open to TS runtime).
+            # Terminal error -> propagate to the outer runtime boundary.
             return None
 
         # ContextOverflow (prompt_too_long): classified but NOT retried here.

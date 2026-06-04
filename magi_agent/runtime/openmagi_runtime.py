@@ -7,6 +7,17 @@ from magi_agent.adk_bridge.primitives import AdkPrimitiveBoundary
 from magi_agent.config.models import RuntimeConfig
 from magi_agent.harness.profiles import RuntimeProfile, build_default_profile
 
+_SYNTHETIC_NATIVE_TOOL_HANDLERS: dict[tuple[str, str], str] = {
+    (
+        "openmagi.documents",
+        "FileDeliver",
+    ): "magi_agent.plugins.native.documents:file_deliver",
+    (
+        "openmagi.documents",
+        "FileSend",
+    ): "magi_agent.plugins.native.documents:file_send",
+}
+
 if TYPE_CHECKING:
     from magi_agent.plugins.manager import ResolvedPluginState
     from magi_agent.tools.base import ToolHandler
@@ -62,6 +73,17 @@ def _bind_native_plugin_tool_handlers(
             tool_registry.bind_handler(
                 tool_ref.name,
                 _load_tool_handler(tool_ref.entrypoint),
+                enabled_by_registry_policy=True,
+            )
+        for (plugin_id, tool_name), entrypoint in _SYNTHETIC_NATIVE_TOOL_HANDLERS.items():
+            if plugin.plugin_id != plugin_id:
+                continue
+            registration = tool_registry.resolve_registration(tool_name)
+            if registration is None or registration.handler is not None:
+                continue
+            tool_registry.bind_handler(
+                tool_name,
+                _load_tool_handler(entrypoint),
                 enabled_by_registry_policy=True,
             )
 

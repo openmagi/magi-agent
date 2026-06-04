@@ -45,13 +45,11 @@ since the streaming helper receives the already-injected ``messages``).
 
 Status
 ------
-Claude does NOT yet flow through this Python/ADK path in production (the
-TypeScript runtime still owns Claude; that removal is tracked separately). This
-is NOT dormant infra: it is wired into the model class that WILL be used the
-moment a Claude/anthropic model id is routed through ADK
+Claude does NOT yet flow through this ADK model path by default. This is NOT
+dormant infra: it is wired into the model class that WILL be used the moment a
+Claude/anthropic model id is routed through ADK
 (:func:`magi_agent.shadow.gate5b4c3_live_runner_boundary` resolves the model),
-and the request-level injection is proven by tests. The first live smoke is
-Gemini, so the marker only materialises once Claude runs via ADK.
+and the request-level injection is proven by tests.
 
 Design notes
 ------------

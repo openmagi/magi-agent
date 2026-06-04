@@ -1,5 +1,7 @@
 import asyncio
+import json
 from importlib.util import find_spec
+from pathlib import Path
 
 from magi_agent.adk_bridge.primitives import AdkPrimitiveBoundary
 from magi_agent.config.models import BuildInfo, RuntimeConfig
@@ -177,3 +179,75 @@ def test_runtime_binds_default_first_party_native_tool_handlers() -> None:
     assert document_result.status == "ok"
     assert document_result.output is not None
     assert document_result.output["pathRef"] == "docs/report.md"
+
+
+def test_runtime_binds_file_delivery_native_tool_handlers(tmp_path: Path) -> None:
+    runtime = OpenMagiRuntime(config=make_config())
+    context = ToolContext(
+        bot_id="bot-test",
+        session_id="session-test",
+        session_key="agent:main:app:general",
+        turn_id="turn-test",
+        workspace_root=str(tmp_path),
+        channel="general",
+        permission_scope={
+            "mode": "selected_full_toolhost",
+            "source": "selected_full_toolhost",
+        },
+    )
+    dispatcher = ToolDispatcher(runtime.tool_registry)
+
+    document_result = asyncio.run(
+        dispatcher.dispatch(
+            "DocumentWrite",
+            {"path": "reports/brief.md", "content": "public brief"},
+            context,
+            mode="act",
+        )
+    )
+    deliver_result = asyncio.run(
+        dispatcher.dispatch(
+            "FileDeliver",
+            {
+                "target": "chat",
+                "path": "reports/brief.md",
+                "chat": {"channel": "general", "caption": "ready"},
+            },
+            context,
+            mode="act",
+        )
+    )
+    send_result = asyncio.run(
+        dispatcher.dispatch(
+            "FileSend",
+            {"path": "reports/brief.md", "channel": "general", "mode": "document"},
+            context,
+            mode="act",
+        )
+    )
+
+    assert document_result.status == "ok"
+    assert deliver_result.status == "ok"
+    assert send_result.status == "ok"
+    assert deliver_result.output is not None
+    assert send_result.output is not None
+    assert deliver_result.metadata["toolName"] == "FileDeliver"
+    assert send_result.metadata["toolName"] == "FileSend"
+    assert deliver_result.output["status"] == "delivered_local_fake"
+    assert send_result.output["status"] == "delivered_local_fake"
+    assert deliver_result.delivery_receipts
+    assert send_result.delivery_receipts
+    assert deliver_result.artifact_refs
+    assert send_result.artifact_refs
+
+    rendered = json.dumps(
+        {
+            "deliver": deliver_result.model_dump(mode="json", by_alias=True),
+            "send": send_result.model_dump(mode="json", by_alias=True),
+        },
+        sort_keys=True,
+    )
+    assert str(tmp_path) not in rendered
+    assert "public brief" not in rendered
+    assert "reports/brief.md" not in rendered
+    assert "sha256:" in rendered
