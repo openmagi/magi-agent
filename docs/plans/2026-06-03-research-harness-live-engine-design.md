@@ -11,7 +11,9 @@
 > **Companion analysis:** OpenCode 7-layer dissection (web search dual-MCP,
 > webfetch CF-bypass, repo_clone, `reference.ts` @alias auto-clone, task
 > delegation, permission isolation, 2-stage truncation).
-> Date: 2026-06-03. Status: **design (no runtime code yet)**.
+> Date: 2026-06-03 (rev. 2026-06-04). Status: **PR0/PR1/PR3a/PR2 delivered &
+> reviewed (open PRs #94/#95/#99/#96); PR3b+ remaining.** See §4 for status and
+> the 2026-06-04 "minimal convergence" revision (standalone orchestrator removed).
 
 ---
 
@@ -38,11 +40,20 @@ engine** — borrowing OpenCode's *concrete egress mechanics* (dual-provider
 routing, CF retry, shallow-clone blueprint) as the implementation behind Magi's
 ports.
 
-**Design rule #1 — the engine is a first-class harness, not buried egress.**
-Live research is exposed as a `LiveResearchHarness` (under `harness/`), surfaced
-as a saved recipe (`SavedWorkflowRegistry`) and a skill. The *egress mechanism*
-(in-runtime SDK vs. hosted api-proxy call) is an injected provider detail behind
-the port — never the public surface.
+**Design rule #1 — extend the existing seam, do not add a parallel orchestrator.**
+*(Revised 2026-06-04 — "minimal convergence".)* An earlier draft exposed a new
+standalone `LiveResearchHarness` (under `harness/`). That was eliminated: live
+research is driven through the **existing** tool seam
+`web_acquisition/research_tools.py::LocalWebResearchToolBoundary.execute_tool`
+(the already-present `WebSearch`/`WebFetch` → provider boundary dispatcher),
+behind a default-OFF env gate. The *egress mechanism* (in-runtime SDK vs. hosted
+api-proxy call) is an injected provider detail behind the port — never the public
+surface. **Why not the deep-research recipe?** Investigation found the existing
+`build_deep_research_workflow` / executor stack does **not** execute web
+acquisition at all today — `_tasks_from_contract` is a deliberate stub and
+children get only read-only source tools. Un-stubbing that executor to drive live
+acquisition end-to-end is a larger, separate change (see PR-recipe below);
+the minimal convergence reuses the existing tool-boundary seam instead.
 
 **Design rule #2 — seals flip to gates, never to "on".** Every `Literal[False]`
 becomes an env-gated runtime flag following the established
@@ -56,17 +67,19 @@ Every live result is projected into the source ledger → claim graph →
 cite-or-omit. We add an engine; we do not weaken the gate.
 
 ```
-                       ┌───────────────────────────────────────────────────────┐
-                       │  LiveResearchHarness (NEW, first-class, default-OFF)   │
-   research turn ─────▶│  plan ─▶ search ─▶ fetch/read ─▶ synthesize ─▶ verify  │
-                       └────┬──────────┬───────────┬──────────────┬────────────┘
-                            │          │           │              │
-                   acquisition_plan  ProviderPort dispatch   existing evidence spine
-                   (5 phases, exists)  (NEW live impls)       claim_graph / ledger /
-                            │          │                      verifier_bus / final gate
-                            ▼          ▼                              │ (UNCHANGED)
-                   web_search ─ fetch ─ reader_extract ─ jsonld ─ browser_fallback
-                   SearchPort  FetchPort  ReaderPort           BrowserFallbackPort
+   research child       ┌──────────────────────────────────────────────────────┐
+   calls WebSearch/ ───▶│ EXISTING seam: LocalWebResearchToolBoundary.execute_  │
+   WebFetch tool        │ tool  — env gate selects live vs legacy-fixture path  │
+                        └───────────────┬───────────────────┬──────────────────┘
+                          gate OFF / no live pack            gate ON + live pack+provider
+                                 │                                   │
+                          legacy LocalWebAcquisitionRuntime   LiveWebAcquisitionProviderPack.run
+                          (fixture, UNCHANGED — zero drift)    (NEW, gated; SSRF firewall in front)
+                                                                     │
+                                            ProviderPort dispatch (NEW live impls — PR3b)
+                                                                     ▼
+                                            existing evidence spine: source ledger →
+                                            claim_graph → verifier_bus → final gate (UNCHANGED)
 ```
 
 ---
@@ -144,6 +157,14 @@ Each PR is independently mergeable, default-OFF where it adds capability, ships
 with tests, and updates the delta-contract matrix where relevant. Effort is
 rough (S/M/L). "Network" = whether the PR can actually touch a socket.
 
+> **Status (2026-06-04).** ✅ **DELIVERED & reviewed** (spec + quality +
+> adversarial), open PRs awaiting merge: PR0 (#94), PR1 (#95), **PR3a live pack
+> (#99)**, **PR2 convergence (#96)**. ⏳ **REMAINING:** PR3b (real clients, key
+> env), PR-repo, PR-@alias, PR-recipe (full convergence), PR-loop, PR-hygiene.
+> Note the structural change from the original draft: the standalone
+> `LiveResearchHarness` was **eliminated** in favor of driving the live pack
+> through the existing tool seam (Design rule #1, revised).
+
 ### PR0 — This design doc *(no code, Network: no, S)*
 - **Scope:** this file. Establishes the architecture, the seal→gate pattern, the
   PR sequence, acceptance contract.
@@ -170,78 +191,81 @@ Two pure, seal-free wins that need no provider.
 - **Acceptance:** no behavior change when capability absent; hint + enrichment
   unit-covered. **Depends:** PR0.
 
-### PR2 — Live research harness spine + provider seam *(P1, Network: no, M)*
-The first-class engine surface, **still returning fixtures** until a real
-provider is injected. Establishes the seam every later PR plugs into.
-- **Scope:**
-  - New `harness/live_research_harness.py` — a `LiveResearchHarness` that drives
-    `acquisition_plan`'s 5 phases against injected providers behind the existing
-    4 ports, and projects every result into the existing source ledger / claim
-    graph. Default-OFF.
-  - Gate: new env enable + kill-switch pair modeled on
-    `research_first_canary.py:23-27`. With gate OFF → harness returns the
-    current fixture path unchanged (zero behavior drift).
-  - Provider injection contract: the harness accepts a provider satisfying
-    `SearchProviderPort` etc.; **the egress mechanism (SDK vs hosted-proxy
-    client) is the provider's concern, not the harness's.** Ship a
-    `NullLiveProvider` (still fixture) so the seam is testable end-to-end.
-  - Flip the relevant `Literal[False]` on the *gated path only* to a runtime
-    flag; sealed default remains false.
-  - Add delta-contract row: `live_research_harness_gate`.
-- **Files:** `harness/live_research_harness.py` (new),
-  `web_acquisition/live_provider_pack.py` (gated flag),
-  `shadow/opencode_delta_contract.py` (+1 row).
-- **Tests:** gate OFF ⇒ fixture parity; gate ON + injected fixture provider ⇒
-  results flow through ledger→claim graph→`final_projection_gate` and pass.
-- **Acceptance:** end-to-end run with a fixture provider produces a cited answer
-  that survives the final gate; default config unchanged. **Depends:** PR0.
+### PR3a — Gated live execution boundary *(P1, Network: no, M)* — ✅ DELIVERED (#99, base `main`)
+The foundation: a parallel, default-OFF live boundary added to the existing
+`web_acquisition/live_provider_pack.py`, **without touching the sealed fake pack
+or its `Literal[False]` seals**.
+- **Scope (as built):**
+  - `LiveWebAcquisitionProviderPack` — new `openmagi_live_provider` trust marker;
+    gates on `enabled` + `live_network_enabled` (a real `bool`; default-False is
+    the seal) + a **mandatory non-empty `provider_allowlist`** (empty ⇒ deny,
+    fail-safe) + trust marker. **SSRF firewall (`url_policy_error`) runs before
+    every provider call** (all ops incl. `reader`); records built via the reused
+    `_records_from_output` with the same redaction the fake path gets.
+  - `LiveWebAcquisitionPackConfig` (new frozen config) + `StubLiveProvider`
+    (canned, no network). Promotes `OPERATION_TO_PROVIDER_NAME` to public.
+  - **No `Literal[False]` seal flipped**; the gate is the new `bool`
+    `live_network_enabled` defaulting false. `shadow/opencode_delta_contract.py`
+    intentionally **not** touched (delta-row registration deferred — its rows are
+    golden-test exact-match validated).
+- **Carried to PR3b (code comment):** `url_policy_error` is a literal denylist
+  with no DNS resolution — resolve+re-check the IP before real egress.
+- **Depends:** PR0.
 
-### PR3 — Live SearchProvider *(P1, Network: yes, L)*
-The first real egress, behind PR2's gate.
+### PR2 — Minimal convergence: drive the live pack through the existing tool seam *(P1, Network: no, M)* — ✅ DELIVERED (#96, base #99)
+Eliminates the standalone orchestrator (Design rule #1). Drives PR3a's live pack
+through the **existing** `LocalWebResearchToolBoundary.execute_tool` seam.
+- **Scope (as built):**
+  - `web_acquisition/research_tools.py`: optional `live_pack`/`live_provider`/
+    `env` on the boundary. When the env gate
+    (`CORE_AGENT_PYTHON_LIVE_WEB_ACQUISITION_ENABLED` + kill-switch) is active
+    **and** a live pack + provider are injected → map `WebSearch→search` /
+    `WebFetch→fetch`, build a `WebAcquisitionProviderRequest`, run
+    `LiveWebAcquisitionProviderPack.run`, and project the result (+ source-ledger
+    parity) to `ToolResult`. Otherwise → the **unchanged** legacy
+    `runtime.run(...)` fixture path (zero drift).
+  - Narrowed the existing import-boundary test to allow
+    `research_tools`→`live_provider_pack` (now required); every real
+    network/toolhost prefix retained; live-pack import verified to load zero
+    network modules.
+  - Sealed `fixture_only`/`live_authority_allowed` class attrs left unchanged
+    (only the canned `StubLiveProvider` ships here; real network is PR3b).
+- **Carried to PR3b (code comments):** provider-controlled **metadata values**
+  (bare hostnames) aren't scrubbed by `safe_metadata` — add host/URL-aware
+  redaction or a key allowlist; wrap the live `run()` for exceptions.
+- **Tests:** gate OFF / no live pack ⇒ legacy path, live pack never called
+  (spy); gate ON + `StubLiveProvider` ⇒ pack driven, ToolResult ok with records;
+  SSRF-blocked URL → blocked before provider; no raw url/secret leak; same-turn
+  WebSearch≠WebFetch requestIds. **Depends:** PR3a.
+
+### PR3b — Real provider clients + egress hardening *(P1, Network: yes, L)* — ⏳ REMAINING (key env)
+The first real egress, behind the PR3a gate. **Live-verify in a keyed
+environment; CI uses recorded/mocked transport only.**
 - **Scope:**
-  - Implement a concrete `SearchProviderPort`. Borrow OpenCode's
-    **dual-provider, session-deterministic routing** in
-    `opencode_provider_router.py`: two backends, `checksum(session) % 2`
-    selection, env override (OpenCode `websearch.ts:30`). Backends are pluggable
-    — at least one of {Exa/Parallel SDK} *or* {hosted api-proxy client}; the
-    router does not care which.
-  - Every result → `WebAcquisitionSourceRecord` with `proofType="observed"` →
-    source ledger → claim support refs. Reuse the SSRF firewall on any URL the
-    result exposes.
-  - Add provider SDK(s) to `pyproject.toml` only if the SDK path is chosen for a
-    backend; the hosted-proxy backend needs no new dep (uses `httpx`).
-  - Delta-contract: mark the search row covered.
-- **Files:** new provider module under `web_acquisition/`,
-  `opencode_provider_router.py` (real routing),
-  `pyproject.toml` (conditional), delta contract.
+  - Concrete `SearchProviderPort` + `FetchProviderPort` implementations
+    (`openmagi_live_provider = True`). Recommended egress: **httpx-direct**,
+    mirroring OpenCode's MCP-over-HTTP (Exa/Parallel), minimal deps; the port
+    keeps a hosted-proxy variant possible for the hosted deployment. Borrow
+    OpenCode's **dual-provider session-deterministic routing**
+    (`checksum(session)%2`, env override) and **Cloudflare `cf-mitigated`
+    honest-UA retry** + HTML→Markdown for fetch.
+  - **Egress hardening (FIX-FIRST before any real provider ships):**
+    (1) **DNS-rebinding guard** — resolve the host and re-check the resolved IP
+    against the private/metadata classification *before* the socket opens (do NOT
+    put DNS I/O into the pure `url_policy_error`; add an egress-time guard);
+    (2) **provider metadata redaction** — host/URL-aware scrub or a key allowlist
+    on provider-controlled metadata values; (3) **exception wrapping** — wrap the
+    live `run()`/client so network errors return `blocked`/`repair_required`
+    rather than bubbling; (4) revisit `LocalWebResearchToolBoundary` sealed attrs
+    once a real provider can be injected.
+  - Inject the live provider into the tool seam (PR2 wiring already accepts it).
 - **Tests:** recorded-fixture HTTP (no live calls in CI); deterministic routing;
-  evidence projection; firewall rejects SSRF/secret URLs in results.
-- **Acceptance:** with gate ON + keys present, a real query returns cited,
-  gate-passing results; CI uses recorded fixtures only. **Depends:** PR2.
+  DNS-rebinding rejection (mock `getaddrinfo`); CF-retry; SSRF precedence;
+  evidence projection through ledger→claim graph→`final_projection_gate`.
+- **Acceptance:** gate ON + keys → cited, gate-passing live results. **Depends:**
+  PR3a, PR2.
 
-### PR4 — Live FetchProvider + ReaderProvider *(P1, Network: yes, L)*
-- **Scope:**
-  - Concrete `FetchProviderPort`: real HTTP (`httpx`), HTML→Markdown, format
-    negotiation, **Cloudflare `cf-mitigated: challenge` honest-UA retry**
-    (OpenCode `webfetch.ts:79`), size cap (start at OpenCode's 5MB or Magi's
-    `max_content_bytes=32_768` config — make it configurable), timeout.
-  - Concrete `ReaderProviderPort` for the `reader_extract` phase (readability /
-    main-content extraction). Optionally a hosted insane-fetch (curl_cffi
-    WAF-bypass) backend for hard targets.
-  - **Mandatory:** route every fetch URL through `policy.url_policy_error`
-    *before* the socket opens (Magi's SSRF firewall is stronger than OpenCode's
-    — keep it in front). Results → ledger with `proofType="opened"`.
-  - `BrowserFallbackProviderPort` is a stretch sub-item (snapshot fallback);
-    can defer to PR4b if it grows.
-- **Files:** new fetch/reader provider modules, wire into
-  `acquisition_plan` phases via PR2 harness.
-- **Tests:** recorded-fixture fetch; CF-retry path; oversize rejection; SSRF
-  firewall precedence; HTML→MD fidelity.
-- **Acceptance:** gated live fetch produces `opened` source proofs that satisfy
-  `require_opened_source_proof`. **Depends:** PR2 (PR3 recommended for end-to-end
-  search→fetch).
-
-### PR5 — Live repo research *(P2, Network: yes, L)*
+### PR-repo — Live repo research *(P2, Network: yes, L)*
 - **Scope:** real `repo_clone` / `repo_overview` behind the seal. Implement
   OpenCode's blueprint: `git clone --depth 100` (shallow), per-path flock,
   stale-cache wipe on origin mismatch, ecosystem/package-manager/entrypoint
@@ -256,7 +280,7 @@ The first real egress, behind PR2's gate.
 - **Acceptance:** scout-style agent clones + inspects an external repo under
   gate, with open-receipt evidence. **Depends:** PR2.
 
-### PR6 — `@alias` reference materialization *(P2, Network: yes, M)*
+### PR-@alias — reference materialization *(P2, Network: yes, M)*
 - **Scope:** adopt OpenCode's *trigger UX* — a configured `@alias` mention
   resolves a named reference, materializes it (clone/refresh via PR5's cache),
   and routes the agent toward the read-only research child — **but keep Magi's
@@ -270,22 +294,28 @@ The first real egress, behind PR2's gate.
 - **Acceptance:** `@alias` materializes a managed reference with receipts under
   gate. **Depends:** PR5.
 
-### PR7 — First-class research recipe + skill surface *(P2, Network: gated, M)*
-- **Scope:** expose the engine as a **saved recipe + slash-command + skill**, per
-  Design rule #1. Wire `LiveResearchHarness` into the existing
-  `build_deep_research_workflow` (`recipes/workflow_recipe.py`) so a single
-  user-facing surface runs plan → fan-out search/fetch → cross-review → cited
-  synthesis using *live* providers. Register in `SavedWorkflowRegistry`. Add a
-  skill manifest so the capability is discoverable/loadable.
-- **Files:** `recipes/` (research recipe), `SavedWorkflowRegistry` registration,
-  skill manifest (catalog), CLI/slash wiring.
-- **Tests:** recipe materializes with live harness under gate; cross-review still
-  filters claims; cited synthesis only emits surviving claims.
-- **Acceptance:** one invocation (skill or saved command) runs the full live
-  deep-research loop end-to-end, gate-passing. **Depends:** PR2–PR4 (PR5/PR6
-  optional).
+### PR-recipe — Full convergence: deep-research recipe drives live acquisition *(P2, Network: gated, L)*
+*(This is the deferred "full convergence" — the larger executor change the
+minimal PR2 intentionally avoided.)*
+- **Scope:** make `build_deep_research_workflow` actually drive live web
+  acquisition end-to-end. Today its executor doesn't: `_tasks_from_contract`
+  (`harness/workflow_executor.py`) is a deliberate stub and the spawned children
+  get only read-only source tools (`research_child_runner.py`). Un-stub task
+  decomposition, grant `WebSearch`/`WebFetch` to the `explore`/`web_current`
+  children, and route those tool calls through the PR2-extended
+  `LocalWebResearchToolBoundary` (which already drives the live pack). Then a
+  single saved recipe / slash-command / skill (`SavedWorkflowRegistry`) runs plan
+  → fan-out search/fetch → cross-review → cited synthesis on *live* data.
+- **Files:** `harness/workflow_executor.py` (un-stub `_tasks_from_contract`),
+  `recipes/research_child_runner.py` (relax child tool scope under gate),
+  `research_agents.py` / recipe wiring, skill manifest.
+- **Tests:** recipe materializes under gate; children drive the tool seam;
+  cross-review filters claims; cited synthesis only emits surviving claims.
+- **Acceptance:** one gated invocation runs the full live deep-research loop
+  end-to-end, gate-passing. **Depends:** PR2, PR3b. **Note:** changes
+  deliberately-stubbed executor core — design-review gated.
 
-### PR8 — Iterative research loop *(P3, Network: gated, L)*
+### PR-loop — Iterative research loop *(P3, Network: gated, L)*
 - **Scope:** attach the unconnected `goal_loop` scaffold
   (`harness/goal_loop.py`, traffic-free today) — or add a model-driven planner
   over the regex `research_routing` — to drive **iterative** research with
@@ -298,9 +328,9 @@ The first real egress, behind PR2's gate.
 - **Tests:** loop terminates on criteria satisfaction; terminates on budget;
   no unbounded recursion.
 - **Acceptance:** a multi-hop question iterates search→fetch→re-plan until
-  acceptance criteria are satisfied, then stops. **Depends:** PR7.
+  acceptance criteria are satisfied, then stops. **Depends:** PR-recipe.
 
-### PR9 — *(optional, orthogonal)* harness hygiene *(P3, Network: no, M)*
+### PR-hygiene — *(optional, orthogonal)* harness hygiene *(P3, Network: no, M)*
 - **Scope:** de-duplicate the ~8× copied secret/path regex into one shared
   module (drift risk); remove vestigial `trust_tier` gating-that-does-nothing;
   optionally collapse the most ceremonial `Literal[False]` posture boilerplate.
@@ -313,17 +343,19 @@ The first real egress, behind PR2's gate.
 ## 5. Sequencing & dependency graph
 
 ```
-PR0 ─┬─ PR1 (P0, ship immediately)
-     └─ PR2 ─┬─ PR3 ──┐
-             ├─ PR4 ──┼─ PR7 ── PR8
-             └─ PR5 ── PR6 ─────┘
-PR9 (anytime, optional)
+main ─┬─ PR0 #94 (docs)
+      ├─ PR1 #95 (context-economy, independent)
+      └─ PR3a #99 (live pack) ── PR2 #96 (convergence) ── PR3b ──┬─ PR-recipe ── PR-loop
+                                                                  └─ PR-repo ── PR-@alias
+PR-hygiene (anytime, optional)
 ```
 
-- **Critical path to a usable live engine:** PR0 → PR2 → PR3 → PR4 → PR7.
-- **PR1** ships in parallel from day one (no dependencies beyond PR0).
-- **PR5/PR6** (repo + @alias) and **PR8** (iterative loop) are capability
-  extensions, not on the minimum critical path.
+- **Delivered & awaiting merge:** PR0 (#94), PR1 (#95), PR3a (#99), PR2 (#96).
+- **Merge order:** PR0/PR1/PR3a (all base `main`, any order) → PR2 (after PR3a).
+- **Critical path to a usable live engine:** PR3a → PR2 → **PR3b** (key env) →
+  PR-recipe.
+- **PR-repo / PR-@alias** (external code) and **PR-loop** (iterative) are
+  capability extensions, off the minimum critical path.
 
 ## 6. Cross-cutting acceptance contract (every capability PR)
 
@@ -351,10 +383,19 @@ PR9 (anytime, optional)
 - **Over-omission vs over-trust.** Keep `final_projection_gate` strict; do not
   relax it to make live answers look complete.
 
-## 8. Open questions (resolve during PR2)
+## 8. Decisions & open questions
 
-1. Primary live search backend for the first cut — Exa/Parallel SDK, or a hosted
-   api-proxy client to the existing jina/insane-fetch/firecrawl workers?
-2. Fetch size cap — adopt OpenCode's 5MB or keep Magi's 32KB default
+**Resolved (2026-06-04):**
+1. **Live backend = in-runtime, httpx-direct** (Design rule #1 / option A) — OSS
+   users run their own keys; no dependence on the hosted api-proxy. The port
+   still allows a hosted-proxy provider for the hosted deployment.
+2. **Convergence = minimal** — drive the live pack through the existing tool
+   seam; do NOT add a standalone orchestrator. Full executor convergence
+   (un-stub `_tasks_from_contract`) is the separate **PR-recipe**.
+
+**Open (resolve during PR3b):**
+1. Fetch size cap — adopt OpenCode's 5MB or keep Magi's 32KB default
    (configurable either way).
-3. Should `BrowserFallbackProviderPort` ship in PR4 or split to PR4b?
+2. Should `BrowserFallbackProviderPort` ship with PR3b or split out?
+3. DNS-rebinding guard placement — a dedicated egress-time resolver step (keeps
+   `url_policy_error` pure) vs. an egress allowlist pin.
