@@ -26,16 +26,38 @@ fires plugin callbacks on the *live* path:
   result with a model-visible nudge (the tool still ran); on a hard trigger it
   *replaces* the result with a stop directive so the model stops re-issuing the
   identical call.
+
+  PLUGIN ORDERING (intentional pre-emption): the live runner attaches the
+  edit-retry-reflection plugin BEFORE this one
+  (``local_runner.py``: ``[edit_retry_plugin, resilience_plugin]``). ADK's
+  ``PluginManager._run_callbacks`` early-exits on the FIRST plugin whose
+  ``after_tool_callback`` returns non-``None``. So on an edit-tool FAILURE the
+  edit-retry plugin runs first and, while it has retry budget, returns its
+  corrective hidden message — which means THIS loop guard's
+  ``after_tool_callback`` does NOT run for that call, and the detector does not
+  count it. This is deliberate: edit-retry "wins" on edit tools (a failed edit
+  is a recoverable, distinct event, not a doom-loop). Once the edit-retry budget
+  is exhausted it returns ``None`` and the loop guard resumes seeing those tool
+  results, so repeated post-budget identical edits still trip the guard.
 * ``on_model_error_callback`` — fires in ``base_llm_flow.py`` when the model
-  call raises. Returning an ``LlmResponse`` substitutes for the error
-  (recovery); returning ``None`` lets the original error propagate (terminal /
-  fail-open to the TS runtime). The error recovery path uses this: classify via
-  ``ErrorClassifier`` and run ``RecoveryEngine.attempt_recovery``; a successful
-  strategy (e.g. RateLimit honoring Retry-After) yields a recovery
-  ``LlmResponse`` and the run continues; a terminal error yields ``None`` with
-  no retry.
+  call raises. **This is a substitute-the-response seam, NOT a retry seam.**
+  Returning an ``LlmResponse`` here does NOT re-issue the model call: ADK treats
+  a content-less ``LlmResponse`` as the (final) step result, so the turn ENDS
+  with that response — no second model call happens. Genuine recovery therefore
+  CANNOT live here; it lives at the run-invocation boundary
+  (``magi_agent.cli.engine.MagiEngineDriver``), which catches a classified-
+  retryable error, applies backoff, and RE-INVOKES a fresh ``run_async``.
+  This callback is kept ONLY for classification/telemetry: it classifies the
+  error (recording the kind) and otherwise returns ``None`` so the error
+  PROPAGATES to the genuine retry seam. It deliberately does NOT fabricate a
+  recovery ``LlmResponse`` (which would dishonestly end the turn while pretending
+  to have recovered). For prompt_too_long it consults the
+  ``context_overflow_hook`` seam (PR13 compaction territory) if one is wired,
+  else propagates.
 * ``after_run_callback`` — sweeps per-invocation state so detector/recovery
-  state never grows unbounded across turns.
+  state never grows unbounded across turns. The sweep is ALSO size-bounded
+  (LRU-style cap) so detectors cannot leak across many turns whose
+  ``after_run_callback`` never fires (e.g. a turn that raises).
 
 ContextOverflow (prompt_too_long) hook
 ---------------------------------------
@@ -87,9 +109,16 @@ LOOP_GUARD_RESPONSE_TYPE = "MAGI_LOOP_GUARD"
 LOOP_GUARD_HARD_STATUS = "blocked"
 LOOP_GUARD_SOFT_KEY = "magi_loop_guard_nudge"
 
-# Marker on the recovery LlmResponse custom_metadata so callers can see a
-# recovery happened (and which strategy) without exposing internals.
+# Marker on the (legacy) recovery LlmResponse custom_metadata. The genuine
+# recovery seam no longer fabricates this response (see on_model_error_callback);
+# kept for telemetry/back-compat and for callers that build a recovery response
+# themselves.
 RECOVERY_METADATA_KEY = "magi_error_recovery"
+
+# Hard cap on per-turn state dicts. ``after_run_callback`` sweeps on the normal
+# path, but does not fire when a turn raises; this cap is the backstop so
+# detectors/recovery-state cannot leak across many failing turns.
+_MAX_TRACKED_SCOPES = 256
 
 # Hook signature for PR13 context-overflow / compaction wiring. Given the
 # classified overflow error it may return an LlmResponse to substitute, else
@@ -124,9 +153,14 @@ class MagiResiliencePlugin(BasePlugin):
         self._context_overflow_hook = context_overflow_hook
         # One detector per invocation id (the turn scope). Detectors are stateful
         # (consecutive count) so they must not be shared across turns.
+        # dict preserves insertion order, so we evict the OLDEST entry (LRU-ish)
+        # when the cap is hit — the sweep in ``after_run_callback`` is the normal
+        # path, but it does NOT fire if a turn RAISES, so the cap is the
+        # backstop that prevents an unbounded leak across many failing turns.
         self._detectors: dict[str, ToolCallLoopDetector] = {}
-        # Recovery attempt state keyed by invocation id so a turn's per-strategy
-        # budget is enforced and never grows unbounded.
+        # Recovery attempt state keyed by invocation id (telemetry/classification
+        # only — recovery itself lives at the run-invocation seam). Same cap +
+        # sweep discipline so this never grows unbounded across failing turns.
         self._recovery_state: dict[str, RecoveryAttemptState] = {}
 
     # -- loop guard (after_tool) -----------------------------------------
@@ -153,6 +187,7 @@ class MagiResiliencePlugin(BasePlugin):
         if detector is None:
             detector = self._loop_detector_factory()
             self._detectors[scope] = detector
+            self._bound_state_dicts()
 
         check = detector.check(_tool_name(tool), tool_args)
         if check.action == "ok":
@@ -176,46 +211,50 @@ class MagiResiliencePlugin(BasePlugin):
         llm_request: Any,
         error: Exception,
     ) -> LlmResponse | None:
+        # HONESTY NOTE: this is a substitute-the-response seam, not a retry seam.
+        # Returning a content-less LlmResponse here would END the turn (ADK
+        # treats it as the final step) while pretending recovery happened — no
+        # second model call. So this callback NEVER fabricates a recovery
+        # response. Genuine retry (backoff + re-invoke run_async) lives at the
+        # run-invocation boundary in ``cli.engine.MagiEngineDriver``. Here we
+        # only CLASSIFY (telemetry) and, for prompt_too_long, consult the PR13
+        # context-overflow hook. Everything else returns None so the error
+        # propagates to the genuine retry seam.
         if self._recovery_engine is None:
             return None
 
         classified = ErrorClassifier.classify(error)
         if not isinstance(classified, RecoverableError):
-            # Terminal error -> no retry; propagate (fail-open to TS runtime).
+            # Terminal error -> propagate (fail-open to TS runtime).
             return None
 
-        # ContextOverflow (prompt_too_long) is classified but NOT retried here:
-        # rewriting the in-flight request is PR13 (compaction) territory. Expose
-        # a clean hook and otherwise propagate so we never infinite-retry an
-        # over-long prompt at the model-error boundary.
+        # ContextOverflow (prompt_too_long): classified but NOT retried here.
+        # Rewriting the in-flight request is PR13 (compaction) territory; expose
+        # the hook seam and otherwise propagate.
         if classified.kind == ErrorKind.PROMPT_TOO_LONG:
             return await self._handle_context_overflow(classified, callback_context)
 
+        # Retryable (e.g. rate_limit): record the classification for telemetry,
+        # then PROPAGATE (return None). The run-invocation retry wrapper applies
+        # the backoff and re-invokes the model — doing it here would silently end
+        # the turn. We touch _recovery_state only to keep the keyed dict bounded.
         scope = _scope_key(callback_context)
-        state = self._recovery_state.get(scope)
-        if state is not None and state.attempt_number >= self._recovery_max_attempts:
-            # Recovery budget exhausted for this turn -> stop retrying.
-            return None
+        self._note_recovery_classification(scope, classified.kind)
+        return None
 
-        messages = _messages_from_request(llm_request)
-        result, new_state = await self._recovery_engine.attempt_recovery(
-            error=classified,
-            messages=messages,
-            session_key=_invocation_id(callback_context) or scope,
-            turn_id=scope,
-            state=state,
+    def _note_recovery_classification(self, scope: str, kind: ErrorKind) -> None:
+        """Record that ``scope`` saw a retryable model error (telemetry only).
+
+        No recovery is performed here (see ``on_model_error_callback``). We keep
+        a per-scope RecoveryAttemptState so the keyed dict stays bounded (the
+        sweep in ``_sweep_invocation_state`` / the LRU cap evicts it).
+        """
+        state = self._recovery_state.get(scope)
+        new_state = (state or RecoveryAttemptState()).model_copy(
+            update={"attempt_number": (state.attempt_number if state else 0) + 1}
         )
         self._recovery_state[scope] = new_state
-        if not result.success:
-            return None
-
-        # A strategy succeeded (e.g. RateLimit slept the Retry-After delay). Hand
-        # the live flow a recovery LlmResponse so the run continues rather than
-        # raising. We do not surface modified messages here (the ADK error
-        # boundary substitutes a response, it does not rewrite the request); the
-        # strategy's side effect (the backoff sleep) plus the continue signal is
-        # the live behavior.
-        return _recovery_response(result.strategy_name, classified.kind)
+        self._bound_state_dicts()
 
     async def _handle_context_overflow(
         self,
@@ -232,10 +271,27 @@ class MagiResiliencePlugin(BasePlugin):
     # -- cleanup ----------------------------------------------------------
 
     async def after_run_callback(self, *, invocation_context: Any) -> None:
+        # Normal-path sweep. NOTE: this callback does NOT fire if the turn
+        # RAISES (the flow propagates the exception before after_run), so it
+        # cannot be the only defense against state leak — the size cap enforced
+        # by ``_bound_state_dicts`` (called on every insert) is the backstop.
         inv = getattr(invocation_context, "invocation_id", None)
         if isinstance(inv, str) and inv:
             self._detectors.pop(inv, None)
             self._recovery_state.pop(inv, None)
+
+    def _bound_state_dicts(self) -> None:
+        """Evict oldest entries so per-turn state never leaks unbounded.
+
+        ``after_run_callback`` is the normal sweep but it does not fire on a
+        turn that raises; this hard cap (called on every insert) guarantees the
+        dicts stay bounded even across many failing turns. dicts preserve
+        insertion order, so popping the first key is the oldest (LRU-ish).
+        """
+        while len(self._detectors) > _MAX_TRACKED_SCOPES:
+            self._detectors.pop(next(iter(self._detectors)), None)
+        while len(self._recovery_state) > _MAX_TRACKED_SCOPES:
+            self._recovery_state.pop(next(iter(self._recovery_state)), None)
 
 
 # -- helpers --------------------------------------------------------------
@@ -295,31 +351,16 @@ def _soft_nudge_response(
     return merged
 
 
-def _messages_from_request(llm_request: Any) -> list[dict[str, object]]:
-    """Best-effort extraction of message dicts from an ADK ``LlmRequest``.
-
-    Recovery strategies operate on a list of ``{"role", "content"}`` dicts. The
-    live ADK request carries ``contents`` (``google.genai`` ``Content``); we
-    project a minimal text view. Strategies that need richer structure
-    degrade gracefully (e.g. RateLimit ignores the body entirely).
-    """
-    contents = getattr(llm_request, "contents", None)
-    if not contents:
-        return []
-    messages: list[dict[str, object]] = []
-    for content in contents:
-        role = getattr(content, "role", None) or "user"
-        parts = getattr(content, "parts", None) or ()
-        text_chunks: list[str] = []
-        for part in parts:
-            text = getattr(part, "text", None)
-            if isinstance(text, str) and text:
-                text_chunks.append(text)
-        messages.append({"role": role, "content": "".join(text_chunks)})
-    return messages
-
-
 def _recovery_response(strategy_name: str, kind: ErrorKind) -> LlmResponse:
+    """Build a recovery-marked LlmResponse.
+
+    LEGACY / NOT used by the live path: the genuine recovery seam lives at the
+    run invocation (``cli.engine.MagiEngineDriver``), and
+    ``on_model_error_callback`` deliberately no longer fabricates this response
+    (it would dishonestly end the turn). Retained for telemetry/back-compat and
+    for callers (e.g. a future PR13 hook) that explicitly want to substitute a
+    recovery response.
+    """
     return LlmResponse(
         custom_metadata={
             RECOVERY_METADATA_KEY: {
@@ -389,9 +430,15 @@ def _default_recovery_engine(
         recovery_enabled=True,
         max_recovery_attempts=max_attempts,
     )
-    # Mirror engine.DEFAULT_STRATEGIES order but bind to the live config and the
-    # real classifier-tier compaction caller when one is reachable (else the
-    # ReactiveCompact stub is kept).
+    # Mirror engine.DEFAULT_STRATEGIES order but bind to the live config.
+    # HONESTY NOTE: ``compact_llm_caller`` is NOT wired by the live builder
+    # (``build_resilience_plugin`` is called from ``local_runner`` without it),
+    # so ``ReactiveCompactStrategy`` falls back to ``StubLLMCompactCaller`` in
+    # production — i.e. NO real LLM-backed compaction yet. This is acceptable
+    # today because prompt_too_long / context-overflow is NOT routed through the
+    # run-invocation retry wrapper (it is deferred to the PR13 compaction seam),
+    # so ReactiveCompact does not actually run on the live retry path. A real
+    # classifier-tier compaction caller is PR13 work.
     strategies = (
         RateLimitStrategy(config),
         OutputEscalationStrategy(config),

@@ -39,7 +39,10 @@ from magi_agent.cli.commands import (
     install_discovery,
 )
 from magi_agent.cli.contracts import CommandRegistry
-from magi_agent.cli.engine import MagiEngineDriver
+from magi_agent.cli.engine import (
+    MagiEngineDriver,
+    build_engine_recovery_policy,
+)
 from magi_agent.cli.permissions import PermissionMode, RulesPermissionGate
 from magi_agent.cli.session_log import SessionLog
 from magi_agent.composio.config import resolve_composio_config
@@ -151,8 +154,13 @@ def build_headless_runtime(
     )
 
     # (A) Engine — MagiEngineDriver lazy-imports ADK only when a turn is
-    #     iterated; construction is free/cheap.
-    engine = MagiEngineDriver(runner=effective_runner)
+    #     iterated; construction is free/cheap. The genuine error-recovery
+    #     retry wrapper is flag-gated from env (MAGI_ERROR_RECOVERY_ENABLED);
+    #     ``None`` (the default OFF) leaves streaming byte-for-byte identical.
+    engine = MagiEngineDriver(
+        runner=effective_runner,
+        recovery=build_engine_recovery_policy(),
+    )
 
     # (C) Permission gate — RulesPermissionGate with no sinks (headless
     #     ``default`` path will fall back to deny on ask; the HeadlessSink

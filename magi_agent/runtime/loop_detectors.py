@@ -217,9 +217,14 @@ def _strip_excluded_fields(input_value: Any) -> Any:
 
 
 def _stable_json(value: Any) -> str:
+    # sort_keys=True so two semantically-identical calls whose dict args differ
+    # only in key order hash IDENTICALLY (matches the "identical call" intent;
+    # otherwise {"a":1,"b":2} and {"b":2,"a":1} would be treated as distinct
+    # calls and never trip the loop guard).
     return json.dumps(
         value,
         ensure_ascii=False,
         separators=(",", ":"),
+        sort_keys=True,
         default=str,
     )

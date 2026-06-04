@@ -34,7 +34,6 @@ from magi_agent.adk_bridge.resilience_plugin import (
     LOOP_GUARD_HARD_STATUS,
     LOOP_GUARD_RESPONSE_TYPE,
     LOOP_GUARD_SOFT_KEY,
-    RECOVERY_METADATA_KEY,
     MagiResiliencePlugin,
     build_resilience_plugin,
 )
@@ -258,10 +257,13 @@ class _Ctx:
     invocation_id = "inv-recovery"
 
 
-def test_recovery_429_with_retry_after_honored() -> None:
-    # Use a fast config so the test does not actually sleep 1.5s; we assert the
-    # delay is the parsed Retry-After value, not blind backoff. We patch
-    # asyncio.sleep to record the requested delay.
+def test_recovery_callback_does_not_fabricate_recovery_response() -> None:
+    # HONESTY: the on_model_error_callback is a substitute-the-response seam, not
+    # a retry seam. A content-less LlmResponse there would END the turn while
+    # pretending recovery happened. So for a retryable 429 the callback now
+    # CLASSIFIES (telemetry) and returns None -> the error PROPAGATES to the
+    # genuine retry wrapper at the run-invocation boundary (cli.engine). It must
+    # NOT sleep here and must NOT return a recovery LlmResponse.
     import magi_agent.runtime.error_recovery.strategies.rate_limit as rl
 
     config = ErrorRecoveryConfig(recovery_enabled=True, rate_limit_base_delay_seconds=99)
@@ -286,12 +288,12 @@ def test_recovery_429_with_retry_after_honored() -> None:
     finally:
         rl.asyncio.sleep = original  # type: ignore[assignment]
 
-    assert result is not None  # recovered -> LlmResponse substituted
-    meta = result.custom_metadata[RECOVERY_METADATA_KEY]
-    assert meta["recovered"] is True
-    assert meta["strategy"] == "rate_limit"
-    # Retry-After-ms=1500 honored (1.5s), NOT the 99s base backoff.
-    assert slept == [1.5]
+    # Propagated (None), NOT a fabricated recovery response; and no backoff sleep
+    # happened in the callback (backoff lives at the run-invocation seam).
+    assert result is None
+    assert slept == []
+    # Classification was recorded (telemetry) so the per-scope state is bounded.
+    assert "inv-recovery" in plugin._recovery_state
 
 
 def test_recovery_terminal_error_not_retried() -> None:
@@ -345,17 +347,19 @@ def test_recovery_context_overflow_hook_invoked() -> None:
     assert result is sentinel
 
 
-def test_recovery_budget_exhausted_stops_retrying() -> None:
+def test_recovery_callback_classifies_but_never_recovers_in_callback() -> None:
+    # Repeated retryable errors through the callback always propagate (None):
+    # the callback never performs recovery (that is the run-invocation seam's
+    # job — see the live recovery test). It only records classification so the
+    # per-scope telemetry dict stays bounded.
     plugin = _recovery_plugin(max_attempts=1)
 
     async def drive():
-        # 1st 429 -> recovered (attempt_number becomes 1).
         first = await plugin.on_model_error_callback(
             callback_context=_Ctx(),
             llm_request=type("Req", (), {"contents": []})(),
             error=_Error429(),
         )
-        # 2nd 429 -> budget (1) reached -> no further retry.
         second = await plugin.on_model_error_callback(
             callback_context=_Ctx(),
             llm_request=type("Req", (), {"contents": []})(),
@@ -363,19 +367,9 @@ def test_recovery_budget_exhausted_stops_retrying() -> None:
         )
         return first, second
 
-    import magi_agent.runtime.error_recovery.strategies.rate_limit as rl
-
-    original = rl.asyncio.sleep
-
-    async def fast(_d):
-        return None
-
-    rl.asyncio.sleep = fast  # type: ignore[assignment]
-    try:
-        first, second = asyncio.run(drive())
-    finally:
-        rl.asyncio.sleep = original  # type: ignore[assignment]
-    assert first is not None
+    first, second = asyncio.run(drive())
+    # Both propagate (no fabricated recovery) regardless of budget.
+    assert first is None
     assert second is None
 
 

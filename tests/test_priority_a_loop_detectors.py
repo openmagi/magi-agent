@@ -143,7 +143,12 @@ def test_repetition_detector_does_not_false_positive_on_similar_different_senten
     assert result.detected is False
 
 
-def test_tool_call_hash_matches_ts_json_stringify_insertion_order_fixtures() -> None:
+def test_tool_call_hash_is_dict_key_order_independent() -> None:
+    # Item 6: ``_stable_json`` now uses ``sort_keys=True`` so two semantically-
+    # identical calls whose args differ only in dict key order hash IDENTICALLY
+    # (matches the "identical call" intent). Previously these hashed differently
+    # (TS JSON.stringify insertion-order semantics), which let key-reordered
+    # identical calls dodge the loop guard.
     module = _module()
 
     path_first = module.ToolCallLoopDetector.hashCall(
@@ -155,9 +160,9 @@ def test_tool_call_hash_matches_ts_json_stringify_insertion_order_fixtures() -> 
         {"limit": 20, "path": "a.ts"},
     )
 
-    assert path_first == "e0659b70b656331f"
+    assert path_first == "66d052efb0cd19a0"
     assert limit_first == "66d052efb0cd19a0"
-    assert path_first != limit_first
+    assert path_first == limit_first
 
 
 def test_tool_call_hash_changes_for_different_tool_names_and_inputs() -> None:
@@ -195,7 +200,9 @@ def test_tool_call_hash_excludes_ts_progress_metadata_fields() -> None:
                 "metadata": {"raw": "not stable"},
             },
         )
-        == "e0659b70b656331f"
+        # sort_keys=True (item 6): {"limit":20,"path":"a.ts"} after stripping the
+        # excluded progress/metadata fields, hashed key-order-independently.
+        == "66d052efb0cd19a0"
     )
 
 
