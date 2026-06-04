@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 from collections.abc import Callable
+from typing import TYPE_CHECKING
 
 from google.adk.tools import FunctionTool, LongRunningFunctionTool
 
@@ -12,6 +13,9 @@ from magi_agent.tools.deferred import DeferredToolRegistry, InitialToolSet
 from magi_agent.tools.dispatcher import ToolDispatcher
 from magi_agent.tools.manifest import RuntimeMode, ToolManifest
 from magi_agent.tools.registry import ToolRegistry
+
+if TYPE_CHECKING:
+    from magi_agent.prompt.provider_adapter import ProviderFamily
 
 
 ToolContextFactory = Callable[[object], ToolContext]
@@ -61,10 +65,124 @@ def build_adk_tool_for_manifest(
         exposed_tool_names=exposed_tool_names,
     )
     if manifest.adk_tool_type == "FunctionTool":
-        return FunctionTool(invoke_openmagi_tool, require_confirmation=False)
+        return apply_provider_repair(
+            FunctionTool(invoke_openmagi_tool, require_confirmation=False)
+        )
     if manifest.adk_tool_type == "LongRunningFunctionTool":
-        return LongRunningFunctionTool(invoke_openmagi_tool)
+        return apply_provider_repair(LongRunningFunctionTool(invoke_openmagi_tool))
     raise ValueError(f"unsupported ADK tool type: {manifest.adk_tool_type}")
+
+
+# ---------------------------------------------------------------------------
+# Per-provider tool-schema repair (PR9)
+#
+# Measurement summary (see tests/adk_bridge/test_provider_repair.py): magi runs
+# on Google ADK with no LiteLLM dependency. ADK 1.33.0 already repairs most
+# provider-specific schema issues for the Gemini path ($ref dereference,
+# additionalProperties removal, snake_case conversion, type/null normalization,
+# format filtering). The remaining demonstrable gap is integer/number/boolean
+# enums: Gemini's ``Schema.enum`` is ``list[str]`` and the API rejects non-string
+# enum values. Such enums can reach the wire unrepaired via a declaration's
+# ``parameters_json_schema`` (a raw-dict passthrough that skips ``Schema``
+# validation), which is the surface used by external / MCP tool projections.
+#
+# This hook is flag-gated (``MAGI_PROVIDER_REPAIR_ENABLED``, default OFF) and
+# keyed on the active model's provider family. When ON for the Gemini family it
+# wraps every ADK FunctionTool built by this adapter so its declaration is
+# repaired at exposure time. For every other family — and when OFF — it is a
+# pure identity passthrough (no boundary change).
+# ---------------------------------------------------------------------------
+
+
+def provider_repair_enabled() -> bool:
+    """Return whether per-provider tool-schema repair is enabled.
+
+    Reads the single-source flag defined in ``magi_agent.config.env``
+    (``MAGI_PROVIDER_REPAIR_ENABLED``, default OFF).
+    """
+    from magi_agent.config.env import parse_provider_repair_enabled
+
+    return parse_provider_repair_enabled(os.environ)
+
+
+def active_provider_family() -> "ProviderFamily":
+    """Resolve the provider family for the active model (``CORE_AGENT_MODEL``)."""
+    from magi_agent.prompt.provider_adapter import (
+        ProviderFamily,
+        detect_provider_family,
+    )
+
+    model = os.environ.get("CORE_AGENT_MODEL")
+    if not model:
+        return ProviderFamily.DEFAULT
+    return detect_provider_family(model)
+
+
+def _repair_declaration(declaration: object, family: "ProviderFamily") -> bool:
+    """Repair a ``FunctionDeclaration``'s parameter schema in place.
+
+    Returns ``True`` if a repair was applied. Only the raw-dict
+    ``parameters_json_schema`` passthrough can carry non-string enums to the wire
+    (the typed ``Schema`` path already rejects them), so that is the only field
+    repaired here.
+    """
+    from magi_agent.prompt.provider_adapter import repair_tool_schema_for_provider
+
+    raw_schema = getattr(declaration, "parameters_json_schema", None)
+    if not isinstance(raw_schema, dict):
+        return False
+    repaired = repair_tool_schema_for_provider(raw_schema, family)
+    if repaired == raw_schema:
+        return False
+    try:
+        object.__setattr__(declaration, "parameters_json_schema", repaired)
+    except (AttributeError, ValueError):
+        try:
+            declaration.parameters_json_schema = repaired  # type: ignore[attr-defined]
+        except Exception:
+            return False
+    return True
+
+
+def apply_provider_repair(tool: AdkLocalTool) -> AdkLocalTool:
+    """Wrap *tool* so its ADK declaration is repaired for the active provider.
+
+    No-op (returns the same object) when the repair flag is OFF or the active
+    provider family has no gap to repair. When active for the Gemini family, the
+    tool's ``_get_declaration`` is wrapped to coerce integer/number/boolean enums
+    to string enums (values preserved) on the way to the model.
+
+    Idempotent: if this function has already been applied to *tool* (detected via
+    ``_provider_repair_applied`` sentinel), the tool is returned unchanged so that
+    double-materialisation of a deferred tool does not stack closures.
+    """
+    if not provider_repair_enabled():
+        return tool
+
+    from magi_agent.prompt.provider_adapter import ProviderFamily
+
+    family = active_provider_family()
+    if family is not ProviderFamily.GOOGLE:
+        return tool
+
+    # Idempotency guard: return immediately if already wrapped for this instance.
+    if getattr(tool, "_provider_repair_applied", False):
+        return tool
+
+    base_get_declaration = tool._get_declaration  # type: ignore[attr-defined]
+
+    def _repaired_get_declaration() -> object | None:
+        declaration = base_get_declaration()
+        if declaration is None:
+            return None
+        _repair_declaration(declaration, family)
+        return declaration
+
+    # Intentional per-instance dict override: survives only for this object
+    # instance (not copies), valid for the current ADK version.
+    tool._get_declaration = _repaired_get_declaration  # type: ignore[method-assign,attr-defined]
+    tool._provider_repair_applied = True  # type: ignore[attr-defined]
+    return tool
 
 
 def build_adk_function_tool(

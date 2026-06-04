@@ -1280,6 +1280,18 @@ def apply_patch_enabled(env: Mapping[str, str]) -> bool:
     return _is_true(env.get("MAGI_APPLY_PATCH_ENABLED"))
 
 
+def parse_provider_repair_enabled(env: Mapping[str, str]) -> bool:
+    """Whether per-provider tool-schema repair (PR9) is enabled.
+
+    Single source of truth for the ``MAGI_PROVIDER_REPAIR_ENABLED`` flag. Default
+    OFF. When ON, the ADK tool adapter applies provider-family-keyed schema
+    repairs (today: Gemini integer/number/boolean enum -> string enum) to the
+    tool declarations exposed to the active model. See
+    ``magi_agent.adk_bridge.tool_adapter.apply_provider_repair``.
+    """
+    return _is_true(env.get("MAGI_PROVIDER_REPAIR_ENABLED"))
+
+
 def _is_true(value: str | None) -> bool:
     return (value or "").strip().lower() in _TRUE_VALUES
 
