@@ -360,31 +360,78 @@ class CodingMutationRecipe:
                 read_ledger=read_decision,
             )
 
-        occurrences = request.current_text.count(request.old_string)
-        if occurrences == 0:
-            return _decision(
-                request,
-                "blocked",
-                ("no_match",),
-                path_ref,
-                flags,
-                read_ledger=read_decision,
-            )
-        if occurrences > 1 and not request.replace_all:
-            return _decision(
-                request,
-                "blocked",
-                ("multiple_matches",),
-                path_ref,
-                flags,
-                read_ledger=read_decision,
-            )
+        # ---------------------------------------------------------------------------
+        # Matching: route through fuzzy cascade when MAGI_EDIT_FUZZY_MATCH_ENABLED,
+        # otherwise fall back to exact substring counting (existing behaviour).
+        # The flag and edit_matching are imported lazily to preserve the module's
+        # clean import boundary.
+        # ---------------------------------------------------------------------------
+        from magi_agent.config.env import MAGI_EDIT_FUZZY_MATCH_ENABLED as _fuzzy_flag
 
-        resulting_text = request.current_text.replace(
-            request.old_string,
-            request.new_string,
-            -1 if request.replace_all else 1,
-        )
+        if _fuzzy_flag:
+            from magi_agent.coding.edit_matching import (
+                NoMatchError as _NoMatchError,
+                MultipleMatchesError as _MultipleMatchesError,
+                replace as _fuzzy_replace,
+            )
+            try:
+                resulting_text = _fuzzy_replace(
+                    request.current_text,
+                    request.old_string,
+                    request.new_string,
+                    replace_all=request.replace_all,
+                )
+            except _NoMatchError:
+                return _decision(
+                    request,
+                    "blocked",
+                    ("no_match",),
+                    path_ref,
+                    flags,
+                    read_ledger=read_decision,
+                )
+            except _MultipleMatchesError:
+                return _decision(
+                    request,
+                    "blocked",
+                    ("multiple_matches",),
+                    path_ref,
+                    flags,
+                    read_ledger=read_decision,
+                )
+            # Count replacements for the receipt: old_string may have been matched
+            # fuzzily, so we diff the texts to infer the count.
+            replacements = 1 if not request.replace_all else max(
+                resulting_text.count(request.new_string), 1
+            )
+        else:
+            occurrences = request.current_text.count(request.old_string)
+            if occurrences == 0:
+                return _decision(
+                    request,
+                    "blocked",
+                    ("no_match",),
+                    path_ref,
+                    flags,
+                    read_ledger=read_decision,
+                )
+            if occurrences > 1 and not request.replace_all:
+                return _decision(
+                    request,
+                    "blocked",
+                    ("multiple_matches",),
+                    path_ref,
+                    flags,
+                    read_ledger=read_decision,
+                )
+
+            resulting_text = request.current_text.replace(
+                request.old_string,
+                request.new_string,
+                -1 if request.replace_all else 1,
+            )
+            replacements = occurrences if request.replace_all else 1
+
         old_digest = workspace_content_digest(request.current_text)
         new_digest = workspace_content_digest(resulting_text)
         status: CodingMutationStatus = (
@@ -406,7 +453,7 @@ class CodingMutationRecipe:
             read_ledger=read_decision,
             old_digest=old_digest,
             new_digest=new_digest,
-            replacements=occurrences if request.replace_all else 1,
+            replacements=replacements,
         )
 
     def _evaluate_patch_apply(

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 from collections.abc import Mapping
 import hashlib
@@ -50,6 +51,17 @@ REQUIRED_ENV = (
 
 _TRUE_VALUES = frozenset({"1", "true", "yes", "on"})
 _FALSE_VALUES = frozenset({"0", "false", "no", "off", ""})
+
+# ---------------------------------------------------------------------------
+# Coding: edit fuzzy-match flag
+# ---------------------------------------------------------------------------
+# When set to "1" or "true", gate5b FileEdit uses the 9-stage fuzzy-match
+# cascade (magi_agent.coding.edit_matching) instead of exact-only matching.
+# Default: OFF (0) — zero regression on existing behaviour.
+MAGI_EDIT_FUZZY_MATCH_ENABLED: bool = (
+    os.environ.get("MAGI_EDIT_FUZZY_MATCH_ENABLED", "0").strip().lower()
+    in _TRUE_VALUES
+)
 _GATE5B4C3_GOOGLE_CREDENTIAL_ENVS = frozenset(
     {
         "GEMINI_API_KEY",
