@@ -18,8 +18,13 @@ from magi_agent.adk_bridge.local_toolhost import (
     LocalToolHostAdkBundle,
     is_local_fake_receipt_adk_tool,
 )
+from magi_agent.adk_bridge.resilience_plugin import build_resilience_plugin
 from magi_agent.adk_bridge.session_service import WorkspaceSessionService
-from magi_agent.config.env import parse_edit_retry_reflection_env
+from magi_agent.config.env import (
+    parse_edit_retry_reflection_env,
+    parse_error_recovery_env,
+    parse_loop_guard_env,
+)
 
 LOCAL_ADK_RUNNER_FLAG = "CORE_AGENT_PYTHON_LOCAL_ADK_RUNNER"
 LOCAL_INERT_MODEL_NAME = "openmagi-local-inert"
@@ -107,7 +112,27 @@ def build_local_adk_runner(
         enabled=edit_retry_env.enabled,
         max_attempts=edit_retry_env.max_attempts,
     )
-    runner_plugins = [edit_retry_plugin] if edit_retry_plugin is not None else []
+    # PR12: flag-gated loop guard + multi-strategy error recovery. The common
+    # MagiResiliencePlugin shim activates the existing ToolCallLoopDetector
+    # (after_tool) and RecoveryEngine (on_model_error). Returns None when both
+    # MAGI_LOOP_GUARD_ENABLED and MAGI_ERROR_RECOVERY_ENABLED are OFF, so the
+    # disabled path attaches no resilience callbacks (zero regression).
+    loop_guard_env = parse_loop_guard_env(os.environ)
+    error_recovery_env = parse_error_recovery_env(os.environ)
+    resilience_plugin = build_resilience_plugin(
+        loop_guard_enabled=loop_guard_env.enabled,
+        loop_guard_soft_threshold=loop_guard_env.soft_threshold,
+        loop_guard_hard_threshold=loop_guard_env.hard_threshold,
+        loop_guard_frequency_soft_threshold=loop_guard_env.frequency_soft_threshold,
+        loop_guard_frequency_hard_threshold=loop_guard_env.frequency_hard_threshold,
+        error_recovery_enabled=error_recovery_env.enabled,
+        recovery_max_attempts=error_recovery_env.max_recovery_attempts,
+    )
+    runner_plugins = [
+        plugin
+        for plugin in (edit_retry_plugin, resilience_plugin)
+        if plugin is not None
+    ]
     # ADK 1.33 deprecates ``Runner(plugins=...)``; the supported path wraps the
     # agent and plugins in an ``App``. An App with an empty plugins list behaves
     # identically to the old no-plugin runner (no deprecation warning, no plugin

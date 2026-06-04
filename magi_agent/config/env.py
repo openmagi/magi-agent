@@ -145,6 +145,92 @@ def parse_edit_retry_reflection_env(
     return EditRetryReflectionEnv(enabled=enabled, max_attempts=max_attempts)
 
 
+# Single source of truth for the PR12 loop-guard wiring flags.
+# When enabled, the live ADK Runner attaches a MagiResiliencePlugin whose
+# after_tool_callback drives the existing ToolCallLoopDetector: N identical
+# consecutive tool calls -> soft nudge (model warned, tool result preserved);
+# a higher threshold -> hard stop (the tool result is replaced with a stop
+# directive so the model does not keep looping). Default OFF.
+LOOP_GUARD_ENABLED_ENV = "MAGI_LOOP_GUARD_ENABLED"
+LOOP_GUARD_SOFT_THRESHOLD_ENV = "MAGI_LOOP_GUARD_SOFT_THRESHOLD"
+LOOP_GUARD_HARD_THRESHOLD_ENV = "MAGI_LOOP_GUARD_HARD_THRESHOLD"
+LOOP_GUARD_FREQUENCY_SOFT_THRESHOLD_ENV = "MAGI_LOOP_GUARD_FREQUENCY_SOFT_THRESHOLD"
+LOOP_GUARD_FREQUENCY_HARD_THRESHOLD_ENV = "MAGI_LOOP_GUARD_FREQUENCY_HARD_THRESHOLD"
+_LOOP_GUARD_SOFT_DEFAULT = 3
+_LOOP_GUARD_HARD_DEFAULT = 5
+_LOOP_GUARD_FREQ_SOFT_DEFAULT = 15
+_LOOP_GUARD_FREQ_HARD_DEFAULT = 30
+
+
+@dataclass(frozen=True)
+class LoopGuardEnv:
+    enabled: bool = False
+    soft_threshold: int = _LOOP_GUARD_SOFT_DEFAULT
+    hard_threshold: int = _LOOP_GUARD_HARD_DEFAULT
+    frequency_soft_threshold: int = _LOOP_GUARD_FREQ_SOFT_DEFAULT
+    frequency_hard_threshold: int = _LOOP_GUARD_FREQ_HARD_DEFAULT
+
+
+def parse_loop_guard_env(env: Mapping[str, str]) -> LoopGuardEnv:
+    enabled = _is_true(env.get(LOOP_GUARD_ENABLED_ENV))
+    if not enabled:
+        return LoopGuardEnv()
+    soft = _int_env(env, LOOP_GUARD_SOFT_THRESHOLD_ENV, _LOOP_GUARD_SOFT_DEFAULT)
+    hard = _int_env(env, LOOP_GUARD_HARD_THRESHOLD_ENV, _LOOP_GUARD_HARD_DEFAULT)
+    freq_soft = _int_env(
+        env, LOOP_GUARD_FREQUENCY_SOFT_THRESHOLD_ENV, _LOOP_GUARD_FREQ_SOFT_DEFAULT
+    )
+    freq_hard = _int_env(
+        env, LOOP_GUARD_FREQUENCY_HARD_THRESHOLD_ENV, _LOOP_GUARD_FREQ_HARD_DEFAULT
+    )
+    if soft < 1:
+        raise RuntimeEnvError(f"{LOOP_GUARD_SOFT_THRESHOLD_ENV} must be >= 1")
+    if hard < soft:
+        raise RuntimeEnvError(
+            f"{LOOP_GUARD_HARD_THRESHOLD_ENV} must be >= {LOOP_GUARD_SOFT_THRESHOLD_ENV}"
+        )
+    if freq_soft < 1:
+        raise RuntimeEnvError(
+            f"{LOOP_GUARD_FREQUENCY_SOFT_THRESHOLD_ENV} must be >= 1"
+        )
+    if freq_hard < freq_soft:
+        raise RuntimeEnvError(
+            f"{LOOP_GUARD_FREQUENCY_HARD_THRESHOLD_ENV} must be >= "
+            f"{LOOP_GUARD_FREQUENCY_SOFT_THRESHOLD_ENV}"
+        )
+    return LoopGuardEnv(
+        enabled=True,
+        soft_threshold=soft,
+        hard_threshold=hard,
+        frequency_soft_threshold=freq_soft,
+        frequency_hard_threshold=freq_hard,
+    )
+
+
+# Single source of truth for the PR12 error-recovery wiring flags. Reuses the
+# existing ``MAGI_ERROR_RECOVERY_ENABLED`` / ``MAGI_MAX_RECOVERY_ATTEMPTS`` names
+# (also consumed by ErrorRecoveryConfig.from_env). When enabled, the live ADK
+# Runner attaches the MagiResiliencePlugin whose on_model_error_callback runs the
+# existing RecoveryEngine: classify the model error and apply the first
+# applicable strategy (RateLimit honors Retry-After). Default OFF.
+ERROR_RECOVERY_ENABLED_ENV = "MAGI_ERROR_RECOVERY_ENABLED"
+MAX_RECOVERY_ATTEMPTS_ENV = "MAGI_MAX_RECOVERY_ATTEMPTS"
+
+
+@dataclass(frozen=True)
+class ErrorRecoveryEnv:
+    enabled: bool = False
+    max_recovery_attempts: int = 3
+
+
+def parse_error_recovery_env(env: Mapping[str, str]) -> ErrorRecoveryEnv:
+    enabled = _is_true(env.get(ERROR_RECOVERY_ENABLED_ENV))
+    max_attempts = _int_env(env, MAX_RECOVERY_ATTEMPTS_ENV, 3)
+    if max_attempts < 1:
+        raise RuntimeEnvError(f"{MAX_RECOVERY_ATTEMPTS_ENV} must be >= 1")
+    return ErrorRecoveryEnv(enabled=enabled, max_recovery_attempts=max_attempts)
+
+
 def parse_runtime_env(env: Mapping[str, str]) -> RuntimeConfig:
     missing = [name for name in REQUIRED_ENV if not env.get(name)]
     if missing:

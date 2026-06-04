@@ -38,8 +38,18 @@ class RateLimitStrategy:
                 strategy_name=self.name,
             )
 
-        delay = self._config.rate_limit_base_delay_seconds * (2 ** context.attempt)
-        delay = min(delay, 60.0)
+        # OpenCode-style Retry-After honoring: when the upstream 429 carried a
+        # Retry-After / retry-after-ms hint (parsed by ErrorClassifier into
+        # ``error.retry_after_seconds``), wait the server-requested delay
+        # instead of the blind exponential backoff. The classifier already caps
+        # the hint at 60s; we still floor at 0 here. Absent a hint we fall back
+        # to ``base_delay * 2**attempt`` capped at 60s.
+        retry_after = context.error.retry_after_seconds
+        if retry_after is not None:
+            delay = max(0.0, min(retry_after, 60.0))
+        else:
+            delay = self._config.rate_limit_base_delay_seconds * (2 ** context.attempt)
+            delay = min(delay, 60.0)
         await asyncio.sleep(delay)
 
         return RecoveryResult(
