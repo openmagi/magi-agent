@@ -78,10 +78,10 @@ _CORE_TOOL_MANIFESTS: tuple[ToolManifest, ...] = (
     ),
     _manifest(
         "PatchApply",
-        "Apply a patch to workspace files.",
+        "Apply a Codex-style multi-file envelope patch (add/update/delete/move).",
         permission="write",
         modes=("act",),
-        tags=("workspace", "file", "patch", "write"),
+        tags=("workspace", "file", "patch", "edit"),
         mutates_workspace=True,
         parallel_safety="unsafe",
     ),

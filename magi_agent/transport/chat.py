@@ -652,6 +652,7 @@ def build_gate5b_full_toolhost_config_from_env(
 ) -> Gate5BFullToolHostConfig:
     del runtime_config
     from magi_agent.config.env import (
+        apply_patch_enabled,
         is_format_on_write_enabled,
         parse_lsp_diagnostics_env,
     )
@@ -727,6 +728,10 @@ def build_gate5b_full_toolhost_config_from_env(
                 fallback=2000,
             ),
             "ripgrepEnabled": _is_true(env.get("MAGI_RIPGREP_ENABLED")),
+            "applyPatchEnabled": apply_patch_enabled(env),
+            "applyPatchModelId": (
+                env.get("CORE_AGENT_MODEL", "").strip()
+            ),
         }
     )
 
