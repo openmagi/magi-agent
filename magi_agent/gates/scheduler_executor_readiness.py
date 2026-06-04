@@ -165,6 +165,12 @@ def scheduler_executor_readiness_health_metadata(
     elif reason_codes in {("gate_disabled",), ("env_gate_disabled",)}:
         execution_mode = "disabled"
         status = "disabled"
+    elif "env_gate_disabled" in reason_codes:
+        # Env gate is off together with other blocking reasons (e.g. kill switch).
+        # The executor is simply OFF — not in a conflict state — so use "disabled",
+        # not "blocked".
+        execution_mode = "disabled"
+        status = "disabled"
     else:
         # Any blocking reason (non-selected bot, malformed scope, kill switch,
         # bad environment, shadow disabled) fails closed to disabled.

@@ -136,6 +136,31 @@ class TestReadinessHealthMetadata:
         assert meta["liveExecutionAllowed"] is False
         assert "gate_disabled" in meta["reasonCodes"]
 
+    # 2b-extra. env gate off + kill switch on → status "disabled" (not "blocked")
+    def test_env_gate_off_and_kill_switch_on_yields_disabled_not_blocked(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.delenv("MAGI_SCHEDULER_EXECUTOR_ENABLED", raising=False)
+        from magi_agent.gates.scheduler_executor_readiness import (
+            SchedulerExecutorReadinessConfig,
+            scheduler_executor_readiness_health_metadata,
+        )
+        # kill switch explicitly on so _reason_codes returns a tuple with BOTH
+        # env_gate_disabled AND kill_switch_enabled — the old code fell to "blocked".
+        cfg = SchedulerExecutorReadinessConfig(
+            **{**_VALID_CONFIG_KWARGS, "killSwitchEnabled": True}
+        )  # type: ignore[arg-type]
+        meta = scheduler_executor_readiness_health_metadata(
+            cfg, bot_id=_BOT_ID, user_id=_USER_ID
+        )
+        assert meta["status"] == "disabled", (
+            f"expected 'disabled' but got {meta['status']!r}; "
+            f"reason codes: {meta['reasonCodes']}"
+        )
+        assert meta["executionMode"] == "disabled"
+        assert "env_gate_disabled" in meta["reasonCodes"]
+        assert "kill_switch_enabled" in meta["reasonCodes"]
+
     # 2b. env_gate_disabled (MAGI_SCHEDULER_EXECUTOR_ENABLED not set / off)
     def test_env_gate_disabled_when_env_var_not_set(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.delenv("MAGI_SCHEDULER_EXECUTOR_ENABLED", raising=False)
@@ -438,6 +463,29 @@ class TestSchedulerExecutorHealthProjection:
         # (scheduler health uses its own keys)
         assert "executorEnabled" in sched
         assert "schemaVersion" in base
+
+    def test_shadow_garbage_value_matches_harness_config(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """health.py shadow resolution must agree with JobExecutionConfig.from_env()
+        for a garbage MAGI_SCHEDULER_SHADOW value (e.g. 'xyz')."""
+        monkeypatch.setenv("MAGI_SCHEDULER_EXECUTOR_ENABLED", "1")
+        monkeypatch.setenv("MAGI_SCHEDULER_SHADOW", "xyz")
+        from magi_agent.ops.health import scheduler_executor_health_projection
+        from magi_agent.harness.scheduler_job_execution import JobExecutionConfig
+
+        proj = scheduler_executor_health_projection()
+        cfg = JobExecutionConfig.from_env()
+        # Both must agree: "xyz" is not a truthy value → shadow=False.
+        assert proj["shadowEnabled"] == cfg.shadow
+
+    def test_ops_health_module_exports_all(self) -> None:
+        """ops/health.py must declare __all__ with the two public functions."""
+        import magi_agent.ops.health as health_mod
+
+        assert hasattr(health_mod, "__all__")
+        assert "default_runtime_ops_health_metadata" in health_mod.__all__
+        assert "scheduler_executor_health_projection" in health_mod.__all__
 
 
 # ---------------------------------------------------------------------------

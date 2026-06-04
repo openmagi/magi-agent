@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 
 _TRUE_STRINGS = frozenset({"1", "true", "yes", "on"})
+_FALSE_STRINGS = frozenset({"0", "false", "no", "off"})
 
 
 def default_runtime_ops_health_metadata() -> dict[str, object]:
@@ -40,12 +41,18 @@ def scheduler_executor_health_projection(
             skipped (int), timed_out (int), lease_rejected (int).
     """
     executor_enabled = os.environ.get("MAGI_SCHEDULER_EXECUTOR_ENABLED", "").lower() in _TRUE_STRINGS
-    # Shadow default: ON when executor is enabled but shadow env not explicitly off.
-    shadow_raw = os.environ.get("MAGI_SCHEDULER_SHADOW", "")
+    # Shadow: mirrors _env_flag("MAGI_SCHEDULER_SHADOW", default=True) in
+    # scheduler_job_execution.JobExecutionConfig.from_env() exactly.
+    # When the env var is absent → default True (shadow-first).
+    # When present → truthy only if in _TRUE_STRINGS; any other value (incl.
+    # garbage like "xyz") → False (same as _env_flag's raw.strip().lower() check).
+    shadow_raw = os.environ.get("MAGI_SCHEDULER_SHADOW")
     shadow_enabled: bool
     if executor_enabled:
-        # Shadow is on unless explicitly set to "0" / "false" / "no" / "off".
-        shadow_enabled = shadow_raw.lower() not in {"0", "false", "no", "off"}
+        if shadow_raw is None:
+            shadow_enabled = True  # default=True matches _env_flag default
+        else:
+            shadow_enabled = shadow_raw.strip().lower() in _TRUE_STRINGS
     else:
         shadow_enabled = False
 
@@ -71,3 +78,6 @@ def scheduler_executor_health_projection(
                 projection[key] = value
 
     return projection
+
+
+__all__ = ["default_runtime_ops_health_metadata", "scheduler_executor_health_projection"]
