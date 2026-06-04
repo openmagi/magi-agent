@@ -255,6 +255,7 @@ class Gate5BFullToolHostConfig(_Gate5BFullModel):
         alias="maxPerToolOutputBytes",
     )
     command_timeout_ms: int = Field(default=5000, ge=250, le=30000, alias="commandTimeoutMs")
+    format_on_write_enabled: bool = Field(default=False, alias="formatOnWriteEnabled")
 
     @field_validator("environment_allowlist", "allowed_tool_names", mode="before")
     @classmethod
@@ -656,7 +657,8 @@ class Gate5BFullToolHost:
             target.parent.mkdir(parents=True, exist_ok=True)
             content = str(args.get("content", ""))
             target.write_text(content, encoding="utf-8")
-            return {"pathDigest": _digest(target.relative_to(self.workspace_root).as_posix()), "bytesWritten": len(content.encode("utf-8"))}
+            self._format_after_write(target)
+            return {"pathDigest": self._content_path_digest(target), "bytesWritten": len(content.encode("utf-8"))}
         if tool_name == "FileEdit":
             target = _safe_child_path(self.workspace_root, str(args.get("path", "")))
             self._enforce_read_before_mutation(target)
@@ -682,7 +684,8 @@ class Gate5BFullToolHost:
                 if old_text not in current:
                     raise ValueError("old_text_not_found")
                 target.write_text(current.replace(old_text, new_text, 1), encoding="utf-8")
-            return {"pathDigest": _digest(target.relative_to(self.workspace_root).as_posix()), "replacements": 1}
+            self._format_after_write(target)
+            return {"pathDigest": self._content_path_digest(target), "replacements": 1}
         if tool_name == "PatchApply":
             target = _safe_child_path(
                 self.workspace_root,
@@ -694,7 +697,8 @@ class Gate5BFullToolHost:
                 content = str(args.get("content", ""))
                 target.parent.mkdir(parents=True, exist_ok=True)
                 target.write_text(content, encoding="utf-8")
-                return {"pathDigest": _digest(target.relative_to(self.workspace_root).as_posix()), "patchMode": "content_replace", "bytesWritten": len(content.encode("utf-8"))}
+                self._format_after_write(target)
+                return {"pathDigest": self._content_path_digest(target), "patchMode": "content_replace", "bytesWritten": len(content.encode("utf-8"))}
             raise ValueError("unsupported_patch_shape")
         if tool_name == "Bash":
             command = str(args.get("command", "")).strip()
@@ -898,6 +902,43 @@ class Gate5BFullToolHost:
             return
         primary = decision.reason_codes[0] if decision.reason_codes else "blocked"
         raise Gate5BFullToolReadLedgerError(f"read_ledger_{primary}")
+
+    def _format_after_write(self, target: Path) -> None:
+        """Run the matching formatter on a just-written file (flag-gated, fail-open).
+
+        Mirrors OpenCode's format-after-edit: only files under the workspace
+        root are formatted (already guaranteed by ``_safe_child_path``). A
+        missing/failing/timed-out formatter never fails the write. Imported
+        lazily so this new module is never pulled into import-boundary tests.
+        """
+        if not self.config.format_on_write_enabled:
+            return
+        from magi_agent.coding.formatter_runner import run_formatter
+
+        try:
+            run_formatter(
+                target,
+                timeout_seconds=self.config.command_timeout_ms / 1000,
+                cwd=self.workspace_root,
+            )
+        except Exception:  # noqa: BLE001 - format step must never fail the write
+            return
+
+    def _content_path_digest(self, target: Path) -> str:
+        """Digest for a written file's ``pathDigest``.
+
+        When format-on-write is enabled we RE-READ the (possibly formatted)
+        file and digest its content so the returned digest reflects the
+        on-disk formatted state. When disabled, behavior is unchanged: the
+        path-string digest (zero regression).
+        """
+        if not self.config.format_on_write_enabled:
+            return _digest(target.relative_to(self.workspace_root).as_posix())
+        try:
+            content = target.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            return _digest(target.relative_to(self.workspace_root).as_posix())
+        return _digest(content)
 
 
 def build_gate5b_full_toolhost_bundle(
