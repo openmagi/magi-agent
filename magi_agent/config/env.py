@@ -1422,6 +1422,33 @@ def parse_provider_repair_enabled(env: Mapping[str, str]) -> bool:
     return _is_true(env.get("MAGI_PROVIDER_REPAIR_ENABLED"))
 
 
+def tool_concurrency_enabled(env: Mapping[str, str]) -> bool:
+    """Single source of truth for the ``MAGI_TOOL_CONCURRENCY_ENABLED`` flag.
+
+    Default OFF. When ON, readonly tools (``FileRead``/``Glob``/``Grep``/
+    ``GitDiff`` and any manifest whose ``parallel_safety`` is ``"readonly"`` or
+    ``"concurrency_safe"``) are dispatched off the event loop via
+    ``asyncio.to_thread`` so that the parallelism Google ADK already provides
+    (``handle_function_call_list_async`` fans out same-turn function calls with
+    ``asyncio.gather``) yields real I/O overlap instead of being serialised by a
+    blocking synchronous handler. Workspace-mutating and ``unsafe`` tools are
+    never offloaded — they run inline on the event loop thread, preserving the
+    write-barrier guarantee. OFF => current fully-inline behaviour (zero
+    regression).
+    """
+    return _is_true(env.get("MAGI_TOOL_CONCURRENCY_ENABLED"))
+
+
+def max_tool_concurrency(env: Mapping[str, str]) -> int:
+    """Single source of truth for the ``MAGI_MAX_TOOL_CONCURRENCY`` flag.
+
+    Bounds the number of readonly tool handlers that may run off-thread
+    simultaneously when ``MAGI_TOOL_CONCURRENCY_ENABLED`` is ON. Defaults to 8.
+    Values below 1 are clamped to 1.
+    """
+    return max(1, _int_env(env, "MAGI_MAX_TOOL_CONCURRENCY", 8))
+
+
 def model_aware_prompts_enabled(env: Mapping[str, str]) -> bool:
     """Read ``MAGI_MODEL_AWARE_PROMPTS_ENABLED`` (default OFF).
 
