@@ -100,6 +100,9 @@ class ScheduleSpec(BaseModel):
 # parse_schedule
 # ---------------------------------------------------------------------------
 
+_INTERVAL_FLOOR_SECONDS: int = 60  # minimum allowed interval (prevents DoS)
+
+
 def parse_schedule(expr: str) -> ScheduleSpec:
     """Classify and parse a schedule expression into a ScheduleSpec.
 
@@ -110,6 +113,12 @@ def parse_schedule(expr: str) -> ScheduleSpec:
     cron      ::= <field> <field> <field> <field> <field>   (5 fields)
 
     Raises ValueError on invalid/unrecognized input.
+
+    Interval floor
+    --------------
+    ``interval`` schedules below 60 seconds are rejected with a clear
+    ValueError to prevent turn-per-second DoS.  ``once`` relative
+    durations are NOT subject to this floor.
     """
     raw = expr.strip()
     if not raw:
@@ -123,10 +132,17 @@ def parse_schedule(expr: str) -> ScheduleSpec:
                 f"invalid interval schedule '{expr}': missing duration after 'every'"
             )
         td = _parse_duration(rest)  # raises ValueError on bad unit
+        total_seconds = int(td.total_seconds())
+        if total_seconds < _INTERVAL_FLOOR_SECONDS:
+            raise ValueError(
+                f"invalid interval schedule '{expr}': interval must be >= "
+                f"{_INTERVAL_FLOOR_SECONDS}s to prevent DoS "
+                f"(got {total_seconds}s); use a longer interval or a 'once' expression"
+            )
         return ScheduleSpec(
             kind="interval",
             expression=expr,
-            intervalSeconds=int(td.total_seconds()),
+            intervalSeconds=total_seconds,
         )
 
     # --- cron: exactly 5 whitespace-separated fields ---

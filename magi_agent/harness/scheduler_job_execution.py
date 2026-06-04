@@ -406,6 +406,56 @@ def execute_due_jobs(
     """
     resolved_config = config if config is not None else JobExecutionConfig.from_env()
 
+    # 0a. oc-cron transition guard: if BOTH the OSS executor and hosted oc-cron are
+    #     active at the same time we refuse to execute (double-fire risk).
+    #     This guard is only consulted when the executor is enabled — when disabled
+    #     the tick() path below already produces no execution.
+    if resolved_config.executor_enabled:
+        from magi_agent.gates.scheduler_executor_readiness import (
+            check_oc_cron_transition_guard_from_env,
+        )
+        _guard = check_oc_cron_transition_guard_from_env()
+        if _guard.get("conflict"):
+            # Both schedulers active — refuse to execute; return a safe no-op result.
+            # We still run the A2 tick (to advance next_run), but produce no executions.
+            tick_result = tick(
+                now=now,
+                source=source,
+                lease=lease,
+                lock_dir=lock_dir,
+                owner_digest=owner_digest,
+                _on_receipt=None,
+            )
+            return JobExecutionResult(
+                tickResult=tick_result,
+                executions=(),
+            )
+
+    # 0b. Honor A5 env-level blockers (kill-switch).
+    #     Per-bot canary-scope selection is applied by the future loop driver that
+    #     has bot/user identity; at this layer we enforce env-wide kill-switch only.
+    #     The env gate (MAGI_SCHEDULER_EXECUTOR_ENABLED) is already captured in
+    #     resolved_config.executor_enabled (via from_env() or explicit config).
+    #     The kill-switch is a separate emergency stop that forces shadow regardless
+    #     of executor_enabled — reusing the A5 guard so execution and health cannot
+    #     diverge.
+    #
+    #     NOTE: per-bot canary scope (selectedBotDigest, selectedOwnerUserIdDigest,
+    #     environmentAllowlist) is intentionally deferred to the loop driver (Track F
+    #     daemon) which has bot/user identity. Only env-wide kill-switch is enforced here.
+    if resolved_config.executor_enabled:
+        import os as _os
+        _kill_switch = _os.environ.get("MAGI_SCHEDULER_KILL_SWITCH_ENABLED", "").lower() in {
+            "1", "true", "yes", "on"
+        }
+        if _kill_switch:
+            # Kill-switch active: force shadow so the runner is never called.
+            resolved_config = JobExecutionConfig(
+                executorEnabled=resolved_config.executor_enabled,
+                shadow=True,
+                timeoutSeconds=resolved_config.timeout_seconds,
+            )
+
     # 1. A2 tick is the single source of truth for "what fired".  We capture the
     #    fired records so an enabled executor can act on exactly those jobs.
     fired_records: list[ScheduledJobRecord] = []
@@ -524,7 +574,6 @@ def _deliver_turn_result(
     module's top-level (boundary isolation contract).
     """
     from magi_agent.harness.scheduler_delivery import (
-        LocalLogDeliverySink,
         deliver,
         resolve_delivery_target,
     )
@@ -535,13 +584,13 @@ def _deliver_turn_result(
         # (redacted) outputLength + outputDigest of whatever partial output exists
         # — never deliver it, but the audit trail must reflect the true values.
         import hashlib as _hashlib
-        from magi_agent.harness.scheduler_delivery import DeliveryReceipt, _ZERO_DIGEST
+        from magi_agent.harness.scheduler_delivery import DeliveryReceipt
         _output: str = getattr(turn_result, "output", "") or ""
         _output_length = len(_output)
         _output_digest = (
             "sha256:" + _hashlib.sha256(_output.encode()).hexdigest()
             if _output
-            else _ZERO_DIGEST
+            else _ZERO_DIGEST  # module-local constant (not imported from scheduler_delivery)
         )
         return DeliveryReceipt(
             status="skipped",

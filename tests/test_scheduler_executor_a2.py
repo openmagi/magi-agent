@@ -693,3 +693,38 @@ def test_skipped_ids_use_list_all_not_due_jobs_far_future(tmp_path: Any) -> None
     assert result.status == "tick_completed"
     assert "job:strict-due" in result.fired_job_ids
     assert "job:strict-future" in result.skipped_job_ids
+
+
+# ---------------------------------------------------------------------------
+# G1.4 — Lock-dir confinement (MAGI_SCHEDULER_LOCK_DIR must be under home)
+# ---------------------------------------------------------------------------
+
+def test_lock_dir_confinement_rejects_etc(monkeypatch: Any, tmp_path: Any) -> None:
+    """A MAGI_SCHEDULER_LOCK_DIR pointing outside home (e.g. /etc) must raise ValueError.
+
+    This prevents path-injection attacks where the env var is set to a
+    system-critical path.
+    """
+    import os as _os
+    from magi_agent.harness import scheduler_executor
+
+    # Use a path that is guaranteed to be outside the user home.
+    # /etc is a safe choice on both macOS and Linux.
+    monkeypatch.setenv("MAGI_SCHEDULER_LOCK_DIR", "/etc")
+
+    with pytest.raises(ValueError, match=r"outside|allowed|confined|prefix"):
+        scheduler_executor._default_lock_dir()
+
+
+def test_lock_dir_confinement_accepts_home_subdir(monkeypatch: Any, tmp_path: Any) -> None:
+    """A MAGI_SCHEDULER_LOCK_DIR inside the user home must be accepted."""
+    import os as _os
+    from pathlib import Path
+    from magi_agent.harness import scheduler_executor
+
+    home_subdir = str(Path.home() / ".magi" / "test-lock-subdir")
+    monkeypatch.setenv("MAGI_SCHEDULER_LOCK_DIR", home_subdir)
+
+    # Must not raise — returns the resolved path.
+    result = scheduler_executor._default_lock_dir()
+    assert ".magi" in str(result) or str(Path.home()) in str(result)

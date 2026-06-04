@@ -647,3 +647,116 @@ def test_two_due_jobs_both_executed_in_tick_order(tmp_path: Any) -> None:
     assert executed_ids == fired_ids, (
         f"execution order {executed_ids!r} does not match tick fired order {fired_ids!r}"
     )
+
+
+# ---------------------------------------------------------------------------
+# G1.1 — oc-cron transition guard wired into execute_due_jobs
+# ---------------------------------------------------------------------------
+
+def test_both_active_env_no_runner_call(tmp_path: Any, monkeypatch: Any) -> None:
+    """When both OSS executor AND oc-cron are active (conflict), execute_due_jobs
+    must refuse to execute — runner must NOT be called.
+
+    This verifies that check_oc_cron_transition_guard_from_env() is consulted
+    at the start of execute_due_jobs when the executor is enabled, and that a
+    conflict causes a safe no-op (tick advances next_run but no execution occurs).
+    """
+    from magi_agent.harness.scheduler_job_execution import JobExecutionConfig, execute_due_jobs
+
+    # Simulate both OSS executor and legacy oc-cron active.
+    monkeypatch.setenv("MAGI_SCHEDULER_EXECUTOR_ENABLED", "1")
+    monkeypatch.setenv("MAGI_OC_CRON_ACTIVE", "1")
+
+    now_ms = 1_000_000
+    now = _now_dt(now_ms)
+    lease = _make_lease(now_ms=now_ms)
+    runner = _FakeCronTurnRunner(status="completed")
+
+    # config.executor_enabled=True so the guard path is entered.
+    config = JobExecutionConfig(executor_enabled=True, shadow=False, timeout_seconds=600.0)
+    source = _make_source(
+        [{"job_id": "job:oc-cron-conflict", "schedule_expr": "every 10m", "next_run_ms": now_ms - 500}]
+    )
+
+    result = execute_due_jobs(
+        now=now, source=source, lease=lease, lock_dir=tmp_path,
+        owner_digest="owner:test-abc", runner=runner, config=config,
+    )
+
+    # Guard must have refused execution.
+    assert runner.calls == [], (
+        "runner must NOT be called when both OSS executor and oc-cron are active (double-fire risk)"
+    )
+    # No executions in the result.
+    assert result.executions == (), (
+        "executions must be empty when the oc-cron transition guard fires"
+    )
+    # The tick still ran (tick_result is present).
+    assert result.tick_result is not None
+
+
+def test_oss_only_active_no_guard_block(tmp_path: Any, monkeypatch: Any) -> None:
+    """When only the OSS executor is active (oc-cron off), the guard must NOT block.
+
+    The runner must be called normally.
+    """
+    from magi_agent.harness.scheduler_job_execution import JobExecutionConfig, execute_due_jobs
+
+    monkeypatch.setenv("MAGI_SCHEDULER_EXECUTOR_ENABLED", "1")
+    monkeypatch.delenv("MAGI_OC_CRON_ACTIVE", raising=False)
+
+    now_ms = 1_000_000
+    now = _now_dt(now_ms)
+    lease = _make_lease(now_ms=now_ms)
+    runner = _FakeCronTurnRunner(status="completed")
+
+    config = JobExecutionConfig(executor_enabled=True, shadow=False, timeout_seconds=600.0)
+    source = _make_source(
+        [{"job_id": "job:oss-only", "schedule_expr": "every 10m", "next_run_ms": now_ms - 500}]
+    )
+
+    result = execute_due_jobs(
+        now=now, source=source, lease=lease, lock_dir=tmp_path,
+        owner_digest="owner:test-abc", runner=runner, config=config,
+    )
+
+    # With only OSS executor active, the guard must not block.
+    assert len(runner.calls) == 1, "runner must be called when only OSS executor is active"
+
+
+# ---------------------------------------------------------------------------
+# G1.2 — Kill-switch forces shadow (no runner call)
+# ---------------------------------------------------------------------------
+
+def test_kill_switch_on_forces_shadow_no_runner_call(tmp_path: Any, monkeypatch: Any) -> None:
+    """When MAGI_SCHEDULER_KILL_SWITCH_ENABLED=1, execute_due_jobs must force shadow
+    and NOT call the runner even if executor_enabled=True and shadow=False.
+    """
+    from magi_agent.harness.scheduler_job_execution import JobExecutionConfig, execute_due_jobs
+
+    monkeypatch.setenv("MAGI_SCHEDULER_KILL_SWITCH_ENABLED", "1")
+    monkeypatch.delenv("MAGI_OC_CRON_ACTIVE", raising=False)
+
+    now_ms = 1_000_000
+    now = _now_dt(now_ms)
+    lease = _make_lease(now_ms=now_ms)
+    runner = _FakeCronTurnRunner(status="completed")
+
+    config = JobExecutionConfig(executor_enabled=True, shadow=False, timeout_seconds=600.0)
+    source = _make_source(
+        [{"job_id": "job:kill-switch", "schedule_expr": "every 10m", "next_run_ms": now_ms - 500}]
+    )
+
+    result = execute_due_jobs(
+        now=now, source=source, lease=lease, lock_dir=tmp_path,
+        owner_digest="owner:test-abc", runner=runner, config=config,
+    )
+
+    # Kill-switch must force shadow — runner must NOT be called.
+    assert runner.calls == [], (
+        "runner must NOT be called when MAGI_SCHEDULER_KILL_SWITCH_ENABLED=1"
+    )
+    # Executions are present (shadow mode) but runner_invoked must be False.
+    assert len(result.executions) == 1
+    assert result.executions[0].mode == "shadow"
+    assert result.executions[0].runner_invoked is False

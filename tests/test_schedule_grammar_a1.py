@@ -674,3 +674,69 @@ if loaded:
             check=False,
         )
         assert completed.returncode == 0, completed.stderr
+
+
+# ---------------------------------------------------------------------------
+# G1.3 — Minimum interval floor (60s) for 'every <duration>' schedules
+# ---------------------------------------------------------------------------
+
+class TestIntervalFloor:
+    """Interval schedules below 60 seconds must be rejected (DoS prevention).
+
+    'once' relative durations (e.g. '1s', '30s') are NOT subject to this floor.
+    """
+
+    def test_every_1s_raises(self) -> None:
+        from magi_agent.missions.schedule_grammar import parse_schedule
+
+        with pytest.raises(ValueError, match=r"60|floor|DoS|interval"):
+            parse_schedule("every 1s")
+
+    def test_every_30s_raises(self) -> None:
+        from magi_agent.missions.schedule_grammar import parse_schedule
+
+        with pytest.raises(ValueError, match=r"60|floor|DoS|interval"):
+            parse_schedule("every 30s")
+
+    def test_every_59s_raises(self) -> None:
+        from magi_agent.missions.schedule_grammar import parse_schedule
+
+        with pytest.raises(ValueError, match=r"60|floor|DoS|interval"):
+            parse_schedule("every 59s")
+
+    def test_every_60s_is_ok(self) -> None:
+        from magi_agent.missions.schedule_grammar import parse_schedule
+
+        spec = parse_schedule("every 60s")
+        assert spec.kind == "interval"
+        assert spec.interval_seconds == 60
+
+    def test_every_1m_is_ok(self) -> None:
+        from magi_agent.missions.schedule_grammar import parse_schedule
+
+        spec = parse_schedule("every 1m")
+        assert spec.kind == "interval"
+        assert spec.interval_seconds == 60
+
+    def test_every_90s_is_ok(self) -> None:
+        from magi_agent.missions.schedule_grammar import parse_schedule
+
+        spec = parse_schedule("every 90s")
+        assert spec.kind == "interval"
+        assert spec.interval_seconds == 90
+
+    def test_once_1s_is_not_floored(self) -> None:
+        """'once' relative durations are NOT subject to the 60s floor."""
+        from magi_agent.missions.schedule_grammar import parse_schedule
+
+        spec = parse_schedule("1s")
+        assert spec.kind == "once"
+        assert spec.interval_seconds == 1
+
+    def test_once_30s_is_not_floored(self) -> None:
+        """'once' 30s is valid — floor only applies to interval schedules."""
+        from magi_agent.missions.schedule_grammar import parse_schedule
+
+        spec = parse_schedule("30s")
+        assert spec.kind == "once"
+        assert spec.interval_seconds == 30

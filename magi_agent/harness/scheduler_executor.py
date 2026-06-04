@@ -63,8 +63,32 @@ _ONCE_EXHAUSTED_NEXT_RUN: datetime = datetime(9999, 12, 31, tzinfo=UTC)
 def _default_lock_dir() -> Path:
     override = os.environ.get("MAGI_SCHEDULER_LOCK_DIR")
     if override:
-        return Path(override).expanduser()
+        return _validate_lock_dir_confinement(Path(override).expanduser().resolve())
     return Path.home() / ".magi" / "scheduler"
+
+
+def _validate_lock_dir_confinement(resolved: Path) -> Path:
+    """Require the lock dir to be under the user home or the magi state dir.
+
+    Prevents path-injection attacks where ``MAGI_SCHEDULER_LOCK_DIR`` is set to
+    a system path such as ``/etc`` or ``/tmp/../../etc``.
+    """
+    home = Path.home().resolve()
+    magi_state = (home / ".magi").resolve()
+    try:
+        resolved.relative_to(home)
+        return resolved
+    except ValueError:
+        pass
+    try:
+        resolved.relative_to(magi_state)
+        return resolved
+    except ValueError:
+        pass
+    raise ValueError(
+        f"MAGI_SCHEDULER_LOCK_DIR '{resolved}' is outside the allowed prefix "
+        f"(must be under {home} or {magi_state})"
+    )
 
 
 # ---------------------------------------------------------------------------
