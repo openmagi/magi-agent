@@ -170,7 +170,12 @@ def test_no_jobs_returns_tick_completed_with_empty_fired(tmp_path: Any) -> None:
 # ---------------------------------------------------------------------------
 
 def test_advance_called_before_receipt(tmp_path: Any) -> None:
-    """record_advance must be called BEFORE any execution-intent receipt is recorded."""
+    """record_advance must be called BEFORE the execution-intent receipt is emitted.
+
+    Ordering proof: both the record_advance call and the on_receipt callback
+    append a marker to call_order.  The test asserts that for every job the
+    advance marker appears at a strictly lower index than the receipt marker.
+    """
     from magi_agent.harness.scheduler_executor import (
         InMemoryJobSource,
         ScheduledJobRecord,
@@ -184,6 +189,9 @@ def test_advance_called_before_receipt(tmp_path: Any) -> None:
             call_order.append(f"advance:{job_id}")
             super().record_advance(job_id, next_run)
 
+    def on_receipt(job_id: str, receipt: dict[str, object]) -> None:
+        call_order.append(f"receipt:{job_id}")
+
     now_ms = 1_000_000
     now = _now_dt(now_ms)
     lease = _make_lease(now_ms=now_ms)
@@ -196,16 +204,60 @@ def test_advance_called_before_receipt(tmp_path: Any) -> None:
     )
     source = TrackingJobSource([record])
 
-    result = tick(now=now, source=source, lease=lease, lock_dir=tmp_path)
+    result = tick(now=now, source=source, lease=lease, lock_dir=tmp_path, on_receipt=on_receipt)
     assert result.status == "tick_completed"
     assert "job:track-001" in result.fired_job_ids
 
-    # advance must have been called (at-most-once guarantee)
-    assert "advance:job:track-001" in call_order
-    # advance must appear in call_order before the fired receipt
+    # Both markers must be present
+    assert "advance:job:track-001" in call_order, "record_advance was never called"
+    assert "receipt:job:track-001" in call_order, "on_receipt was never called"
+
+    # Ordering proof: advance must appear strictly before receipt
     advance_idx = call_order.index("advance:job:track-001")
-    # We also need to verify record_advance was called (not just that it exists)
-    assert advance_idx >= 0
+    receipt_idx = call_order.index("receipt:job:track-001")
+    assert advance_idx < receipt_idx, (
+        f"advance ({advance_idx}) must come before receipt ({receipt_idx}); "
+        f"full order: {call_order}"
+    )
+
+
+def test_retick_same_window_does_not_refire(tmp_path: Any) -> None:
+    """A second tick at the same now must not re-fire (next_run already advanced)."""
+    from magi_agent.harness.scheduler_executor import (
+        InMemoryJobSource,
+        ScheduledJobRecord,
+        tick,
+    )
+
+    receipt_calls: list[str] = []
+
+    def on_receipt(job_id: str, receipt: dict[str, object]) -> None:
+        receipt_calls.append(job_id)
+
+    now_ms = 1_000_000
+    now = _now_dt(now_ms)
+    lease = _make_lease(now_ms=now_ms)
+
+    record = ScheduledJobRecord(
+        jobId="job:retick-001",
+        scheduleExpr="every 10m",
+        lastFire=None,
+        nextRun=datetime.fromtimestamp((now_ms - 500) / 1000, tz=UTC),
+    )
+    source = InMemoryJobSource([record])
+
+    # First tick — should fire once
+    result1 = tick(now=now, source=source, lease=lease, lock_dir=tmp_path, on_receipt=on_receipt)
+    assert "job:retick-001" in result1.fired_job_ids
+
+    # Second tick at SAME now — next_run is already advanced; must not fire again
+    result2 = tick(now=now, source=source, lease=lease, lock_dir=tmp_path, on_receipt=on_receipt)
+    assert "job:retick-001" not in result2.fired_job_ids
+
+    # on_receipt called exactly once (from the first tick only)
+    assert receipt_calls.count("job:retick-001") == 1, (
+        f"expected exactly 1 receipt for job:retick-001, got {receipt_calls}"
+    )
 
 
 def test_record_advance_updates_next_run(tmp_path: Any) -> None:
@@ -445,15 +497,50 @@ def test_tick_result_authority_flags_all_false(tmp_path: Any) -> None:
 def test_scheduler_executor_no_live_adk_imports() -> None:
     """scheduler_executor must not import ADK runners, network libs, or live infra.
 
-    Note: stdlib transitive imports from pydantic (urllib, socket, subprocess)
-    are pre-existing on all modules in this repo and are excluded from this check
-    (same pre-existing condition affects test_live_scheduler_runtime_boundary.py).
-    This test mirrors the project's actual boundary convention: block live ADK /
-    heavy network / infra imports, not stdlib pydantic transients.
+    LIVE / INFRA forbidden set (must never appear — test fails if any are loaded):
+      google.adk, google.genai, magi_agent.adk_bridge, magi_agent.transport,
+      magi_agent.routing, magi_agent.deploy, magi_agent.chat_proxy,
+      magi_agent.runtime_selector, magi_agent.k8s, kubernetes, telegram, discord,
+      requests, httpx, aiohttp, playwright, selenium.
+
+    DIRECT import check for stdlib dangerous trio (urllib / socket / subprocess):
+      scheduler_executor's own top-level imports must NOT include urllib, socket, or
+      subprocess.  We verify this by inspecting the source text — these modules must
+      not appear as direct imports in this boundary module.
+
+    PRE-EXISTING TRANSITIVE NOTE: importing pydantic (or scheduler_runtime, which
+    imports pydantic) causes urllib, socket, and subprocess to appear in sys.modules
+    as transitive side-effects on all scheduler modules in this repo.  This is a
+    known pre-existing issue tracked by the two already-RED tests on origin/main:
+      - tests/test_live_scheduler_runtime_boundary.py::test_scheduler_runtime_boundary_has_no_live_imports
+      - tests/test_cron_scheduler_modules_have_no_live_runtime_imports (if present)
+    Because those transients are injected by pydantic — not by scheduler_executor
+    itself — we do NOT include them in the sys.modules check below (which would make
+    this test fail for the same pre-existing reason, not a regression we own).
     """
+    import ast
     import subprocess
     import sys
+    from pathlib import Path
 
+    # --- Part 1: Verify scheduler_executor has NO direct imports of the dangerous trio ---
+    src = Path(__file__).parent.parent / "magi_agent" / "harness" / "scheduler_executor.py"
+    tree = ast.parse(src.read_text())
+    direct_imports: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                direct_imports.add(alias.name.split(".")[0])
+        elif isinstance(node, ast.ImportFrom):
+            if node.module:
+                direct_imports.add(node.module.split(".")[0])
+    dangerous_direct = {"urllib", "socket", "subprocess"} & direct_imports
+    assert not dangerous_direct, (
+        f"scheduler_executor directly imports stdlib dangerous modules: {dangerous_direct}. "
+        "These must not appear as direct top-level imports in this boundary module."
+    )
+
+    # --- Part 2: subprocess-isolated sys.modules check for live/infra imports ---
     completed = subprocess.run(
         [
             sys.executable,
@@ -463,6 +550,12 @@ import importlib
 import sys
 
 importlib.import_module("magi_agent.harness.scheduler_executor")
+
+# Genuinely forbidden: ADK runners, live agent infrastructure, heavy network libs.
+# Note: urllib/socket/subprocess are intentionally excluded from this sys.modules
+# check because pydantic's transitive import graph pulls them on ALL scheduler
+# modules (pre-existing, tracked by two already-RED tests on origin/main).
+# scheduler_executor does not directly import them (asserted separately above).
 forbidden_prefixes = (
     "google.adk",
     "google.genai",

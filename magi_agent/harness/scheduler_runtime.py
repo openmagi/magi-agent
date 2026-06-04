@@ -259,11 +259,14 @@ class SchedulerRuntimeBoundary:
             return _tick_decision("disabled", digest, ("scheduler_runtime_disabled",), diagnostics)
         if not self.config.local_fake_scheduler_enabled:
             return _tick_decision("tick_intent", digest, ("local_fake_scheduler_disabled",), diagnostics)
-        if request.lease is None:
+        lease_state = validate_scheduler_lease(
+            request.lease, now_ms=request.now, owner_digest=request.owner_digest
+        )
+        if lease_state == "missing":
             return _tick_decision("blocked", digest, ("scheduler_lease_required",), diagnostics)
-        if request.lease.owner_digest != request.owner_digest:
+        if lease_state == "owner_mismatch":
             return _tick_decision("blocked", digest, ("scheduler_lease_owner_mismatch",), diagnostics)
-        if request.now >= request.lease.expires_at:
+        if lease_state == "stale":
             return _tick_decision("blocked", digest, ("scheduler_lease_stale",), diagnostics)
         seen: set[str] = set()
         turns: list[SchedulerDueTurn] = []
@@ -412,6 +415,26 @@ def _short_digest(value: str) -> str:
     return hashlib.sha1(value.encode("utf-8")).hexdigest()[:16]
 
 
+def validate_scheduler_lease(
+    lease: SchedulerLease | None,
+    *,
+    now_ms: int,
+    owner_digest: str,
+) -> str:
+    """Shared three-branch lease validation used by both SchedulerRuntimeBoundary.tick()
+    and scheduler_executor.tick().
+
+    Returns one of: "valid", "missing", "owner_mismatch", "stale".
+    """
+    if lease is None:
+        return "missing"
+    if lease.owner_digest != owner_digest:
+        return "owner_mismatch"
+    if now_ms >= lease.expires_at:
+        return "stale"
+    return "valid"
+
+
 __all__ = [
     "SchedulerAuthorityFlags",
     "SchedulerDeliveryDecision",
@@ -422,4 +445,5 @@ __all__ = [
     "SchedulerRuntimeConfig",
     "SchedulerTickDecision",
     "SchedulerTickRequest",
+    "validate_scheduler_lease",
 ]

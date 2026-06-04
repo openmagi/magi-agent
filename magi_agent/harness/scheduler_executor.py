@@ -24,7 +24,7 @@ import hashlib
 import json
 import os
 import sys
-from collections.abc import Iterator, Sequence
+from collections.abc import Callable, Iterator, Sequence
 from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
@@ -32,7 +32,7 @@ from typing import Any, Literal, Protocol, runtime_checkable
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from magi_agent.harness.scheduler_runtime import SchedulerLease
+from magi_agent.harness.scheduler_runtime import SchedulerLease, validate_scheduler_lease
 from magi_agent.missions.schedule_grammar import ScheduleSpec, next_run_at, parse_schedule
 
 
@@ -312,27 +312,6 @@ def _build_evidence_digest(
 
 
 # ---------------------------------------------------------------------------
-# Lease validation
-# ---------------------------------------------------------------------------
-
-def _validate_lease(
-    lease: SchedulerLease | None,
-    *,
-    now: datetime,
-    owner_digest: str,
-) -> LeaseState:
-    """Return the lease validation state without raising."""
-    if lease is None:
-        return "missing"
-    now_ms = int(now.astimezone(UTC).timestamp() * 1000)
-    if lease.owner_digest != owner_digest:
-        return "owner_mismatch"
-    if now_ms >= lease.expires_at:
-        return "stale"
-    return "valid"
-
-
-# ---------------------------------------------------------------------------
 # Core tick function
 # ---------------------------------------------------------------------------
 
@@ -343,6 +322,7 @@ def tick(
     lease: SchedulerLease | None,
     lock_dir: Path | None = None,
     owner_digest: str = "owner:test-abc",
+    on_receipt: Callable[[str, dict[str, object]], None] | None = None,
 ) -> SchedulerTickResult:
     """Execute one scheduler tick with at-most-once semantics.
 
@@ -355,6 +335,10 @@ def tick(
     6. Return frozen SchedulerTickResult with evidence digest.
 
     No agents are spawned.  All authority flags are False.
+
+    ``on_receipt`` is an optional test-seam callback invoked immediately after each
+    local_fake receipt is built (after record_advance, before the result is returned).
+    It receives ``(job_id, receipt_dict)`` and is ignored in production (defaults None).
     """
     try:
         with acquire_tick_lock(lock_dir=lock_dir):
@@ -363,6 +347,7 @@ def tick(
                 source=source,
                 lease=lease,
                 owner_digest=owner_digest,
+                on_receipt=on_receipt,
             )
     except _LockHeld:
         evidence = _build_evidence_digest(
@@ -388,9 +373,13 @@ def _tick_inside_lock(
     source: ScheduledJobSource,
     lease: SchedulerLease | None,
     owner_digest: str,
+    on_receipt: Callable[[str, dict[str, object]], None] | None = None,
 ) -> SchedulerTickResult:
     """Core tick logic, called while the file lock is held."""
-    lease_state = _validate_lease(lease, now=now, owner_digest=owner_digest)
+    now_ms = int(now.astimezone(UTC).timestamp() * 1000)
+    lease_state: LeaseState = validate_scheduler_lease(  # type: ignore[assignment]
+        lease, now_ms=now_ms, owner_digest=owner_digest
+    )
 
     if lease_state != "valid":
         evidence = _build_evidence_digest(
@@ -452,6 +441,8 @@ def _tick_inside_lock(
             "agentSpawned": False,
             "localFake": True,
         }
+        if on_receipt is not None:
+            on_receipt(job.job_id, receipt)
         local_fake_receipts.append(receipt)
         fired_ids.append(job.job_id)
 
