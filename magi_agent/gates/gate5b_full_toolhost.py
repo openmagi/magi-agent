@@ -1064,9 +1064,11 @@ class Gate5BFullToolHost:
             return None
         relative = target.relative_to(self.workspace_root).as_posix()
         file_digest = _digest(relative)
-        # File label routed into model-visible output is a digest, never a raw
-        # workspace path, to stay redaction-safe.
-        block = format_diagnostics_block(file_digest, errors)
+        # Model-facing block uses the relative workspace path so the model
+        # knows which file to fix (relative paths are already safe — gate5b's
+        # _redact strips absolute prefixes like /Users, /home, /workspace).
+        # The evidence record still uses the digest for public-safety.
+        block = format_diagnostics_block(relative, errors)
         output["lspDiagnostics"] = (
             "LSP errors detected in this file, please fix:\n\n" + block
         )

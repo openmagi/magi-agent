@@ -83,18 +83,25 @@ async def test_enabled_with_error_appends_block_and_evidence(tmp_path: Path) -> 
     block = preview.get("lspDiagnostics")
     assert isinstance(block, str)
     assert "LSP errors detected in this file, please fix:" in block
-    assert "<diagnostics file=" in block
+    # Model-facing block must use the relative path so the model knows which
+    # file to fix — NOT an opaque sha256 digest.
+    assert 'file="broken.py"' in block, (
+        f"Expected relative path label in diagnostics block, got: {block!r}"
+    )
     assert "ERROR [1:1] boom" in block
     # WARNING severity must be filtered out.
     assert "just a warning" not in block
+    # Digest must NOT appear as the file label in the model-visible block.
+    assert "sha256:" not in block
 
     record = outcome.code_diagnostics_receipt
     assert record is not None
     assert record.type == "CodeDiagnostics"
     assert record.error_count == 1  # only ERROR severity counted
     projection = record.public_projection()
+    # Evidence record still uses digest (public-safety), never the raw path.
     assert projection["fileDigest"].startswith("sha256:")
-    assert "/" not in str(projection["fileDigest"])  # digest, not a raw path
+    assert "broken.py" not in str(projection["fileDigest"])  # digest, not path
 
 
 @pytest.mark.asyncio
