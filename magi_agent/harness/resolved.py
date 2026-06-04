@@ -20,6 +20,9 @@ from magi_agent.harness.general_automation.constraint_reinjection import (
 from magi_agent.harness.general_automation.question_tool import (
     GENERAL_AUTOMATION_QUESTION_TOOL_NAME,
 )
+from magi_agent.harness.general_automation.recipe_disclosure import (
+    LOAD_GA_RECIPE_TOOL_NAME,
+)
 from magi_agent.evidence.types import (
     EvidenceContractScopeMetadata,
     EvidenceEnforcement,
@@ -350,6 +353,11 @@ def build_default_resolved_harness_state(
                     # the handler is flag-gated and inert by default; see
                     # harness/general_automation/question_tool).
                     GENERAL_AUTOMATION_QUESTION_TOOL_NAME,
+                    # PR8: on-demand recipe/playbook load tool (declaration only
+                    # — the handler is flag-gated and inert by default; its
+                    # tool-result is compaction-protected; see
+                    # harness/general_automation/recipe_disclosure).
+                    LOAD_GA_RECIPE_TOOL_NAME,
                 ),
                 # GA-scoped hooks (PR6): per-turn constraint re-injection.
                 # Declaration only — the handler is flag-gated and inert by

@@ -34,6 +34,8 @@ _EXPECTED_GENERAL_TOOLS = frozenset(
         "BrowserAction",
         # PR7: blocking clarifying-question tool (gated — declaration only)
         "GeneralAutomationQuestion",
+        # PR8: on-demand recipe/playbook load tool (gated — declaration only)
+        "LoadGaPlaybook",
     }
 )
 

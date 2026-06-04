@@ -3,6 +3,7 @@ import json
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from magi_agent.context.types import WarningLevel
+from magi_agent.context.protected_tools import is_compaction_protected_tool_result
 
 MIN_RESULT_TOKENS_FOR_COMPACT = 2_000
 SUMMARY_MAX_WORDS = 200
@@ -59,6 +60,13 @@ class MicrocompactEngine:
 
         for msg in messages:
             if not self._is_tool_result(msg):
+                result.append(msg)
+                continue
+
+            # Compaction-protected tool results (e.g. loaded GA playbook bodies)
+            # are preserved verbatim, mirroring OpenCode PRUNE_PROTECTED_TOOLS.
+            # No-op for any non-protected tool result.
+            if is_compaction_protected_tool_result(msg):
                 result.append(msg)
                 continue
 

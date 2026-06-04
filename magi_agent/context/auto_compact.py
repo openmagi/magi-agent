@@ -5,6 +5,7 @@ import uuid
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 
+from magi_agent.context.protected_tools import is_compaction_protected_tool_result
 from magi_agent.context.types import WarningLevel
 
 KEEP_RECENT_TURNS = 3
@@ -71,6 +72,13 @@ class AutoCompactionEngine:
         old_messages = messages[:boundary_idx]
         recent_messages = messages[boundary_idx:]
 
+        # Compaction-protected tool results in the OLD region are preserved
+        # verbatim instead of being summarized away (mirrors OpenCode
+        # PRUNE_PROTECTED_TOOLS). No-op when none are present.
+        protected_messages = [
+            m for m in old_messages if is_compaction_protected_tool_result(m)
+        ]
+
         tokens_before = sum(self._estimate_tokens(m) for m in old_messages)
 
         # Summarize old messages
@@ -98,7 +106,7 @@ class AutoCompactionEngine:
 
         turns_summarized = self._count_turns(old_messages)
 
-        return [summary_msg] + recent_messages, AutoCompactResult(
+        return [summary_msg] + protected_messages + recent_messages, AutoCompactResult(
             activated=True,
             turns_summarized=turns_summarized,
             boundary_id=boundary_id,
