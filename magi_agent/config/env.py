@@ -84,6 +84,37 @@ class Gate3ARecordedReplayEnv:
     max_bundles: int = 1
 
 
+# Single source of truth for the edit-failure reflection/retry wiring flags.
+# PR2: when enabled, a FileEdit tool failure (e.g. ValueError("old_text_not_found"))
+# re-injects an OpenCode-style corrective hidden message into the next model turn
+# via the live ADK Runner plugin boundary, fail-closed at MAX_ATTEMPTS.
+EDIT_RETRY_REFLECTION_ENABLED_ENV = "MAGI_EDIT_RETRY_REFLECTION_ENABLED"
+EDIT_RETRY_MAX_ATTEMPTS_ENV = "MAGI_EDIT_RETRY_MAX_ATTEMPTS"
+_EDIT_RETRY_MAX_ATTEMPTS_DEFAULT = 2
+
+
+@dataclass(frozen=True)
+class EditRetryReflectionEnv:
+    enabled: bool = False
+    max_attempts: int = _EDIT_RETRY_MAX_ATTEMPTS_DEFAULT
+
+
+def parse_edit_retry_reflection_env(
+    env: Mapping[str, str],
+) -> EditRetryReflectionEnv:
+    enabled = _is_true(env.get(EDIT_RETRY_REFLECTION_ENABLED_ENV))
+    max_attempts = _int_env(
+        env,
+        EDIT_RETRY_MAX_ATTEMPTS_ENV,
+        _EDIT_RETRY_MAX_ATTEMPTS_DEFAULT,
+    )
+    if max_attempts < 1:
+        raise RuntimeEnvError(
+            f"{EDIT_RETRY_MAX_ATTEMPTS_ENV} must be >= 1"
+        )
+    return EditRetryReflectionEnv(enabled=enabled, max_attempts=max_attempts)
+
+
 def parse_runtime_env(env: Mapping[str, str]) -> RuntimeConfig:
     missing = [name for name in REQUIRED_ENV if not env.get(name)]
     if missing:

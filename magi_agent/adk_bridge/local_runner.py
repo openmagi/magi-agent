@@ -5,16 +5,21 @@ from dataclasses import dataclass
 from typing import AsyncGenerator
 
 from google.adk.agents import Agent
+from google.adk.apps.app import App
 from google.adk.artifacts import InMemoryArtifactService
 from google.adk.memory import InMemoryMemoryService
 from google.adk.models import BaseLlm, LlmRequest, LlmResponse
 from google.adk.runners import Runner
 
+from magi_agent.adk_bridge.edit_retry_reflection import (
+    build_edit_retry_reflection_plugin,
+)
 from magi_agent.adk_bridge.local_toolhost import (
     LocalToolHostAdkBundle,
     is_local_fake_receipt_adk_tool,
 )
 from magi_agent.adk_bridge.session_service import WorkspaceSessionService
+from magi_agent.config.env import parse_edit_retry_reflection_env
 
 LOCAL_ADK_RUNNER_FLAG = "CORE_AGENT_PYTHON_LOCAL_ADK_RUNNER"
 LOCAL_INERT_MODEL_NAME = "openmagi-local-inert"
@@ -94,9 +99,30 @@ def build_local_adk_runner(
     session_service = WorkspaceSessionService(app_name=app_name)
     memory_service = InMemoryMemoryService()
     artifact_service = InMemoryArtifactService()
+    # Flag-gated edit-failure reflection: when enabled, attach the shared
+    # RetryController-backed plugin so a failed FileEdit re-injects a corrective
+    # hidden message into the next model turn (fail-closed at max_attempts).
+    edit_retry_env = parse_edit_retry_reflection_env(os.environ)
+    edit_retry_plugin = build_edit_retry_reflection_plugin(
+        enabled=edit_retry_env.enabled,
+        max_attempts=edit_retry_env.max_attempts,
+    )
+    runner_plugins = [edit_retry_plugin] if edit_retry_plugin is not None else []
+    # ADK 1.33 deprecates ``Runner(plugins=...)``; the supported path wraps the
+    # agent and plugins in an ``App``. An App with an empty plugins list behaves
+    # identically to the old no-plugin runner (no deprecation warning, no plugin
+    # manager callbacks fire), so both the enabled and disabled paths use App.
+    # ``App.name`` must be a valid identifier, but ``app_name`` here may contain
+    # hyphens; we pass a sanitized identifier to ``App`` and let ``Runner``'s
+    # ``app_name`` override preserve the caller-visible application name.
+    app = App(
+        name=_app_identifier(app_name),
+        root_agent=agent,
+        plugins=runner_plugins,
+    )
     runner = Runner(
+        app=app,
         app_name=app_name,
-        agent=agent,
         session_service=session_service,
         memory_service=memory_service,
         artifact_service=artifact_service,
@@ -108,6 +134,19 @@ def build_local_adk_runner(
         memory_service=memory_service,
         artifact_service=artifact_service,
     )
+
+
+def _app_identifier(app_name: str) -> str:
+    """Coerce ``app_name`` into a valid Python identifier for ``App.name``.
+
+    ``App`` validates ``name.isidentifier()`` (rejecting hyphens etc.), while the
+    runner's ``app_name`` may contain hyphens. We sanitize for ``App.name`` and
+    pass the original ``app_name`` to ``Runner`` to preserve the visible name.
+    """
+    sanitized = "".join(c if c.isalnum() or c == "_" else "_" for c in app_name)
+    if not sanitized or not sanitized[0].isalpha() and sanitized[0] != "_":
+        sanitized = f"_{sanitized}"
+    return sanitized if sanitized.isidentifier() else "magi_agent_local"
 
 
 def _local_toolhost_bundle_tools(
