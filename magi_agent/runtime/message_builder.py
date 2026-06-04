@@ -192,6 +192,54 @@ CODING_DISCIPLINE_BLOCK = "\n".join(
     ]
 )
 
+# Per-family semantic coding hints (PR10). Small, distilled blocks — one per
+# provider family magi routes to — encoding that family's known coding failure
+# mode (the gist of OpenCode's per-model prompt swaps, NOT a full prompt copy).
+# Injected only on the coding-agent path AND only when the model-aware flag is
+# on; live in the STATIC (cacheable) region so prompt caching is preserved.
+def _coding_model_hint_block(family: str, body: str) -> str:
+    return "\n".join(
+        [
+            f'<coding-model-hint family="{family}">',
+            body,
+            "</coding-model-hint>",
+        ]
+    )
+
+
+CODING_MODEL_HINT_BLOCK: dict[str, str] = {
+    "openai": _coding_model_hint_block(
+        "openai",
+        "- Before relying on an API/library existence or its current signature, "
+        "verify by reading the actual code or docs; your training may be stale.",
+    ),
+    "google": _coding_model_hint_block(
+        "google",
+        "- Always use absolute file paths in tool calls; relative paths are "
+        "unreliable here.",
+    ),
+    "fireworks": _coding_model_hint_block(
+        "fireworks",
+        "- Code only takes effect when written to disk via tools. Text in your "
+        "reply is not saved to disk; you must call the write/edit tools.",
+    ),
+    # No "anthropic" entry: claude already follows the structured blocks above,
+    # so .get("anthropic", "") returns "" — a no-op hint would only waste tokens.
+}
+
+
+def _coding_model_hint_for(model: str) -> str:
+    """Return the family-keyed coding hint for *model*, or ``""`` for default.
+
+    Detection reuses :func:`provider_adapter.detect_provider_family` so the
+    family mapping stays single-sourced. The ``default`` family gets no hint.
+    """
+    from magi_agent.prompt.provider_adapter import detect_provider_family
+
+    family = detect_provider_family(model).value
+    return CODING_MODEL_HINT_BLOCK.get(family, "")
+
+
 TOOL_PREFERENCES_BLOCK = "\n".join(
     [
         "<tool-preferences>",
@@ -373,6 +421,13 @@ def _assemble_prompt_sections(
     ])
     if coding_agent:
         static_parts.extend([CODING_DISCIPLINE_BLOCK, TOOL_PREFERENCES_BLOCK])
+        # PR10: semantic per-model coding hint, only when the model-aware flag
+        # is on. Lives in the STATIC region (cacheable) alongside the other
+        # coding blocks; default family contributes nothing (single body).
+        if model_aware_prompts_enabled and model:
+            hint = _coding_model_hint_for(model)
+            if hint:
+                static_parts.append(hint)
 
     dynamic_parts: list[str] = [
         session_header,
@@ -620,6 +675,7 @@ def build_system_prompt_blocks(
     provider: str = "auto",
     cache_enabled: bool = False,
     coding_agent: bool = False,
+    model_aware_prompts_enabled: bool = False,
     hook_bus: "HookBus | None" = None,
     harness_state: "ResolvedHarnessPresetState | None" = None,
     hook_context: "object | None" = None,
@@ -670,6 +726,13 @@ def build_system_prompt_blocks(
     # hit rate; when the flag is OFF the transform short-circuits and the prefix
     # stays byte-identical, so there is no cache regression.
     runtime_now = _coerce_utc(now)
+    # PR10 cache note: when model_aware_prompts_enabled is ON, the per-family
+    # coding hint is added to the STATIC region. This keeps the hint cacheable,
+    # but it SEGMENTS the prompt cache by provider family — one cache prefix per
+    # family (openai / google / fireworks / default) rather than a single shared
+    # prefix. The hint stays in the static region so the rest of the prefix
+    # remains byte-identical and cacheable within each family. When the flag is
+    # OFF, model is ignored and the prefix is model-independent (no segmentation).
     static_parts, dynamic_parts = _assemble_prompt_sections(
         session_key=session_key,
         turn_id=turn_id,
@@ -679,8 +742,8 @@ def build_system_prompt_blocks(
         runtime_now=runtime_now,
         timezone=timezone,
         coding_agent=coding_agent,
-        model="",
-        model_aware_prompts_enabled=False,
+        model=model if model_aware_prompts_enabled else "",
+        model_aware_prompts_enabled=model_aware_prompts_enabled,
     )
     static_parts = _apply_prompt_transform(
         static_parts,

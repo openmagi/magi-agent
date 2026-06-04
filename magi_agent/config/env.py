@@ -1292,6 +1292,16 @@ def parse_provider_repair_enabled(env: Mapping[str, str]) -> bool:
     return _is_true(env.get("MAGI_PROVIDER_REPAIR_ENABLED"))
 
 
+def model_aware_prompts_enabled(env: Mapping[str, str]) -> bool:
+    """Read ``MAGI_MODEL_AWARE_PROMPTS_ENABLED`` (default OFF).
+
+    Single source of truth for the model-aware prompt feature (PR10 per-model
+    coding hints + identity adaptation). Follows the same truthy convention as
+    the other ``MAGI_*`` flags (``"1"``/``"true"``/``"yes"``/``"on"``).
+    """
+    return _is_true(env.get("MAGI_MODEL_AWARE_PROMPTS_ENABLED"))
+
+
 def _is_true(value: str | None) -> bool:
     return (value or "").strip().lower() in _TRUE_VALUES
 
