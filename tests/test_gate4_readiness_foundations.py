@@ -58,7 +58,8 @@ def test_gate4_readiness_disabled_by_default_and_healthz_has_no_authority() -> N
     assert body["userVisibleOutputAllowed"] is False
     assert body["canaryRoutingAllowed"] is False
     assert body["adk"]["invoked"] is False
-    assert body["activeTools"] == []
+    assert "FileRead" in body["activeTools"]
+    assert "AgentMemorySearch" in body["activeTools"]
 
 
 def test_gate4_readiness_accepts_selected_local_shadow_adk_attachment_only() -> None:

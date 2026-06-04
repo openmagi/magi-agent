@@ -90,6 +90,16 @@ class ToolPermissionPolicy:
                 metadata=safety_decision.metadata,
             )
 
+        if selected_full_toolhost_preapproved(manifest, context, safety_decision.metadata):
+            metadata = dict(safety_decision.metadata)
+            metadata["selectedFullToolhostPreapproved"] = True
+            metadata["reason"] = "selected full toolhost preapproved"
+            return ToolPermissionDecision(
+                action="allow",
+                reason="selected full toolhost preapproved",
+                metadata=metadata,
+            )
+
         approval_reason = approval_required_reason(manifest)
         if approval_reason is not None:
             metadata = base_tool_metadata(manifest, mode=mode, reason=approval_reason)
@@ -122,6 +132,37 @@ def approval_required_reason(manifest: ToolManifest) -> str | None:
     if APPROVAL_TAGS.intersection(manifest.tags):
         return "tool explicitly requires approval"
     return None
+
+
+def selected_full_toolhost_preapproved(
+    manifest: ToolManifest,
+    context: ToolContext,
+    safety_metadata: dict[str, object],
+) -> bool:
+    raw_scope = context.permission_scope
+    if not isinstance(raw_scope, dict):
+        return False
+    mode = _scope_token(raw_scope.get("mode") or raw_scope.get("permissionMode"))
+    source = _scope_token(raw_scope.get("source"))
+    if mode != "selected_full_toolhost" or source != "selected_full_toolhost":
+        return False
+    if safety_metadata.get("securityPrecheck") != "passed":
+        return False
+    if APPROVAL_TAGS.intersection(manifest.tags):
+        return False
+    if manifest.source.kind not in {"builtin", "native-plugin", "runtime", "skill"}:
+        return False
+    return (
+        manifest.permission in APPROVAL_PERMISSION_CLASSES
+        or manifest.dangerous
+        or manifest.mutates_workspace
+    )
+
+
+def _scope_token(value: object) -> str:
+    if not isinstance(value, str):
+        return ""
+    return value.strip().lower().replace("-", "_")
 
 
 def make_control_request(

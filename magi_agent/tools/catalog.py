@@ -36,7 +36,7 @@ def _manifest(
         parallel_safety=parallel_safety,
         available_in_modes=modes,
         tags=tags,
-        enabled_by_default=False,
+        enabled_by_default=True,
         opt_out=True,
     )
 

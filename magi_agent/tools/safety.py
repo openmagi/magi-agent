@@ -106,6 +106,19 @@ _UNSAFE_GIT_SUBCOMMANDS = {
     "tag",
 }
 _NETWORK_EXECUTABLES = {"curl", "ftp", "nc", "rsync", "scp", "sftp", "ssh", "wget"}
+_SHELL_INLINE_CODE_FLAGS = {"-c"}
+_INLINE_CODE_FLAGS_BY_EXECUTABLE = {
+    "bash": _SHELL_INLINE_CODE_FLAGS,
+    "bun": {"-e"},
+    "fish": _SHELL_INLINE_CODE_FLAGS,
+    "node": {"-e", "--eval", "-p", "--print"},
+    "osascript": {"-e"},
+    "perl": {"-e"},
+    "php": {"-r", "-B", "-R", "-E"},
+    "ruby": {"-e"},
+    "sh": _SHELL_INLINE_CODE_FLAGS,
+    "zsh": _SHELL_INLINE_CODE_FLAGS,
+}
 _NETWORK_UPLOAD_FLAGS = {
     "--data",
     "--data-ascii",
@@ -257,6 +270,7 @@ _READONLY_FLAGS_BY_EXECUTABLE = {
     "wc": {"--bytes", "--chars", "--lines", "--words", "-c", "-l", "-m", "-w"},
 }
 _SHELL_COMPLEX_TOKENS = ("|", ">", "<", ";", "&&", "||", "`", "$(")
+_SHELL_BACKGROUND_OPERATOR_RE = re.compile(r"(?<!&)&(?!&)")
 _SHELL_VARIABLE_EXPANSION_RE = re.compile(
     r"(?<!\\)\$(?:\{[A-Za-z_][A-Za-z0-9_]*\}|[A-Za-z_][A-Za-z0-9_]*)"
 )
@@ -413,6 +427,26 @@ def _file_path_decision(
                 scope=scope,
                 changed_files=(path_decision.normalized,),
             )
+        if _selected_full_toolhost_scope(scope):
+            return _decision_for_path(
+                _PathDecision(
+                    "allow",
+                    "selected_full_toolhost_workspace_mutation_preapproved",
+                    path_decision.normalized,
+                    path_decision.public_preview,
+                    path_decision.path_policy_recorded,
+                ),
+                manifest,
+                mode=mode,
+                scope=scope,
+                preflight=_preflight(
+                    True,
+                    None,
+                    changed_files=(path_decision.normalized,),
+                    read_ledger=read_ledger_preflight,
+                ),
+                status_metadata=_selected_full_toolhost_status_metadata(),
+            )
         return _decision_for_path(
             _PathDecision(
                 "ask",
@@ -509,6 +543,25 @@ def _file_edit_decision(
             mode=mode,
             scope=scope,
             preflight=_preflight(False, "plan_mode_mutation_blocked"),
+        )
+    if _selected_full_toolhost_scope(scope):
+        return _decision_for_path(
+            _PathDecision(
+                "allow",
+                "selected_full_toolhost_workspace_mutation_preapproved",
+                path_decision.normalized,
+                path_decision.public_preview,
+            ),
+            manifest,
+            mode=mode,
+            scope=scope,
+            preflight=_preflight(
+                True,
+                None,
+                changed_files=(path_decision.normalized,),
+                read_ledger=read_ledger_preflight,
+            ),
+            status_metadata=_selected_full_toolhost_status_metadata(),
         )
     return _decision_for_path(
         _PathDecision(
@@ -622,6 +675,23 @@ def _patch_apply_decision(
                 read_ledger=read_ledger_preflight,
             ),
         )
+    if _selected_full_toolhost_scope(scope):
+        return _decision(
+            "allow",
+            manifest,
+            mode=mode,
+            reason_code="selected_full_toolhost_workspace_mutation_preapproved",
+            scope=scope,
+            public_preview=f"patch path={changed_files[0]}",
+            preflight=_preflight(
+                True,
+                None,
+                changed_files=changed_files,
+                hunks=patch.count("@@") or 1,
+                read_ledger=read_ledger_preflight,
+            ),
+            status_metadata=_selected_full_toolhost_status_metadata(),
+        )
     return _decision(
         "ask",
         manifest,
@@ -650,7 +720,7 @@ def _shell_decision(
     lowered = command.lower()
     if _is_destructive_shell(lowered):
         reason = "system_shell_denied" if _touches_system_boundary(lowered) else "destructive_shell"
-        if _scope_mode(scope) == "bypass":
+        if _scope_mode(scope) in {"bypass", "selected_full_toolhost"}:
             reason = "bypass_denied_hard_safety"
         return _decision(
             "deny",
@@ -680,6 +750,24 @@ def _shell_decision(
             manifest,
             mode=mode,
             reason_code="network_exfiltration_denied",
+            scope=scope,
+            public_preview=_preview_command(command),
+        )
+    if _has_inline_interpreter_code(command):
+        return _decision(
+            "deny",
+            manifest,
+            mode=mode,
+            reason_code="interpreter_inline_code_denied",
+            scope=scope,
+            public_preview=_preview_command(command),
+        )
+    if _selected_full_toolhost_scope(scope) and _has_complex_shell_operator(command):
+        return _decision(
+            "deny",
+            manifest,
+            mode=mode,
+            reason_code="complex_shell_requires_approval",
             scope=scope,
             public_preview=_preview_command(command),
         )
@@ -721,6 +809,16 @@ def _shell_decision(
             reason_code="network_command_requires_approval",
             scope=scope,
             public_preview=_preview_command(command),
+        )
+    if _selected_full_toolhost_scope(scope):
+        return _decision(
+            "allow",
+            manifest,
+            mode=mode,
+            reason_code="selected_full_toolhost_shell_preapproved",
+            scope=scope,
+            public_preview=_preview_command(command),
+            status_metadata=_selected_full_toolhost_status_metadata(),
         )
     if _is_simple_readonly_shell(command):
         reason = (
@@ -849,6 +947,7 @@ def _decision_for_path(
     mode: RuntimeMode,
     scope: dict[str, object],
     preflight: dict[str, object] | None = None,
+    status_metadata: dict[str, object] | None = None,
 ) -> RuntimeSafetyDecision:
     redacted_secret_path = (
         path_decision.path_policy_recorded or path_decision.reason_code == "secret_path_denied"
@@ -868,6 +967,7 @@ def _decision_for_path(
         public_preview=path_decision.public_preview,
         path_policy_recorded=path_decision.path_policy_recorded,
         preflight=preflight,
+        status_metadata=status_metadata,
     )
 
 
@@ -908,6 +1008,8 @@ def _decision(
         metadata["preflight"] = preflight
     if status_metadata is not None:
         metadata["statusMetadata"] = status_metadata
+    if _selected_full_toolhost_scope(scope) and action == "allow":
+        metadata["selectedFullToolhostPreapproved"] = True
     return RuntimeSafetyDecision(action=action, reason=str(metadata["reason"]), metadata=metadata)
 
 
@@ -937,20 +1039,51 @@ def _resolve_scope(context: ToolContext, *, runtime_mode: RuntimeMode) -> dict[s
 
 def _normalize_scope_token(value: str) -> str:
     normalized = value.strip().lower().replace("-", "_")
-    if normalized in {"auto", "default", "bypass", "workspace_bypass", "plan"}:
+    if normalized in {
+        "auto",
+        "default",
+        "bypass",
+        "workspace_bypass",
+        "plan",
+        "selected_full_toolhost",
+    }:
         return normalized
     return "default"
 
 
 def _normalize_source_token(value: str) -> str:
     normalized = value.strip().lower().replace("-", "_")
-    if normalized in {"builtin", "mcp", "shell", "workspace", "child_agent"}:
+    if normalized in {
+        "builtin",
+        "mcp",
+        "shell",
+        "workspace",
+        "child_agent",
+        "selected_full_toolhost",
+        "runtime",
+    }:
         return normalized
     return "builtin"
 
 
 def _scope_mode(scope: dict[str, object]) -> str:
     return str(scope.get("mode", "default"))
+
+
+def _selected_full_toolhost_scope(scope: dict[str, object]) -> bool:
+    return (
+        _scope_mode(scope) == "selected_full_toolhost"
+        and str(scope.get("source", "builtin")) == "selected_full_toolhost"
+    )
+
+
+def _selected_full_toolhost_status_metadata() -> dict[str, object]:
+    return {
+        "status": "ready",
+        "selectedFullToolhostPreapproved": True,
+        "hardSafetyStillEnforced": True,
+        "metadataOnly": True,
+    }
 
 
 def _first_string(arguments: dict[str, object], names: tuple[str, ...]) -> str | None:
@@ -1058,6 +1191,87 @@ def _is_curl_pipe_exec(lowered_command: str) -> bool:
     return bool(
         re.search(r"\b(?:curl|wget)\b.+\|\s*(?:sudo\s+)?(?:ba)?sh\b", lowered_command)
     )
+
+
+def _has_inline_interpreter_code(command: str) -> bool:
+    for parts in _parsed_command_segments(command):
+        if not parts:
+            continue
+        exe, args = _unwrap_command_executable(parts)
+        flags = _inline_code_flags_for_executable(exe)
+        if not flags:
+            continue
+        for arg in args:
+            if arg in flags or any(
+                arg.startswith(f"{flag}=") or _attached_short_flag(arg, flag)
+                for flag in flags
+            ):
+                return True
+        if exe in {"deno"} and args and args[0] == "eval":
+            return True
+    return False
+
+
+def _unwrap_command_executable(parts: tuple[str, ...]) -> tuple[str, tuple[str, ...]]:
+    exe = _command_basename(parts[0])
+    args = parts[1:]
+    if exe == "env":
+        index = 0
+        while index < len(args):
+            arg = args[index]
+            if "=" in arg and not arg.startswith("-"):
+                index += 1
+                continue
+            if arg in {"-i", "-0", "--ignore-environment", "--null"}:
+                index += 1
+                continue
+            if arg in {"-u", "--unset"} and index + 1 < len(args):
+                index += 2
+                continue
+            if arg.startswith("--unset="):
+                index += 1
+                continue
+            if arg in {"-S", "--split-string"} and index + 1 < len(args):
+                try:
+                    split_args = tuple(shlex.split(args[index + 1]))
+                except ValueError:
+                    return exe, ()
+                combined_args = split_args + args[index + 2 :]
+                if not combined_args:
+                    return exe, ()
+                return _command_basename(combined_args[0]), combined_args[1:]
+            if arg.startswith("-S") and arg != "-S":
+                try:
+                    split_args = tuple(shlex.split(arg[2:]))
+                except ValueError:
+                    return exe, ()
+                combined_args = split_args + args[index + 1 :]
+                if not combined_args:
+                    return exe, ()
+                return _command_basename(combined_args[0]), combined_args[1:]
+            if arg.startswith("--split-string="):
+                try:
+                    split_args = tuple(shlex.split(arg.split("=", 1)[1]))
+                except ValueError:
+                    return exe, ()
+                combined_args = split_args + args[index + 1 :]
+                if not combined_args:
+                    return exe, ()
+                return _command_basename(combined_args[0]), combined_args[1:]
+            exe = _command_basename(arg)
+            return exe, args[index + 1 :]
+        return exe, ()
+    return exe, args
+
+
+def _inline_code_flags_for_executable(exe: str) -> set[str]:
+    if re.fullmatch(r"python(?:\d+(?:\.\d+)?)?", exe):
+        return {"-c"}
+    return _INLINE_CODE_FLAGS_BY_EXECUTABLE.get(exe, set())
+
+
+def _attached_short_flag(arg: str, flag: str) -> bool:
+    return len(flag) == 2 and flag.startswith("-") and arg.startswith(flag) and arg != flag
 
 
 def _is_unsafe_git_shell(command: str) -> bool:
@@ -1232,7 +1446,12 @@ def _command_basename(command_token: str) -> str:
 
 
 def _has_complex_shell_operator(command: str) -> bool:
-    return any(token in command for token in _SHELL_COMPLEX_TOKENS)
+    return (
+        "\n" in command
+        or "\r" in command
+        or _SHELL_BACKGROUND_OPERATOR_RE.search(command) is not None
+        or any(token in command for token in _SHELL_COMPLEX_TOKENS)
+    )
 
 
 def _has_shell_path_expansion(value: str) -> bool:

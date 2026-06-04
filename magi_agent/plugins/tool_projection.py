@@ -75,6 +75,24 @@ _FILE_SEND_INPUT_SCHEMA: dict[str, object] = {
     "required": ("path",),
 }
 _SPECIAL_TOOL_METADATA: dict[tuple[str, str], dict[str, object]] = {
+    ("openmagi.agentmemory", "AgentMemoryRemember"): {
+        "permission": "write",
+    },
+    ("openmagi.artifacts", "ArtifactUpdate"): {
+        "permission": "write",
+    },
+    ("openmagi.artifacts", "ArtifactDelete"): {
+        "permission": "write",
+    },
+    ("openmagi.coding", "CommitCheckpoint"): {
+        "permission": "write",
+    },
+    ("openmagi.documents", "DocumentWrite"): {
+        "permission": "write",
+    },
+    ("openmagi.documents", "SpreadsheetWrite"): {
+        "permission": "write",
+    },
     ("openmagi.documents", "FileDeliver"): {
         "description": (
             "Metadata-only native plugin projection for openmagi.documents FileDeliver. "
@@ -102,6 +120,18 @@ _SPECIAL_TOOL_METADATA: dict[tuple[str, str], dict[str, object]] = {
         "capability_tags": ("file-send", "channel-delivery", "metadata-only"),
         "preconditions": _DELIVERY_PRECONDITIONS,
         "tags": ("native-plugin", "openmagi.documents", "metadata-only", "delivery"),
+    },
+    ("openmagi.knowledge", "KnowledgeWrite"): {
+        "permission": "write",
+    },
+    ("openmagi.knowledge", "knowledge-write"): {
+        "permission": "write",
+    },
+    ("openmagi.source-ledger", "ExternalSourceCache"): {
+        "permission": "write",
+    },
+    ("openmagi.taskboard", "TaskBoard"): {
+        "permission": "write",
     },
 }
 _SYNTHETIC_PLUGIN_TOOLS: dict[str, tuple[str, ...]] = {
@@ -183,13 +213,13 @@ def _build_tool_manifest(
                 "description",
                 (
                     f"Metadata-only native plugin tool projection for {plugin_id}. "
-                    "Executable attachment is reserved for future ADK FunctionTool integration."
+                    "Local first-party execution is attached through the runtime registry."
                 ),
             )
         ),
         kind="native",
         source=ToolSource(kind="native-plugin", package=plugin_id),
-        permission=permission,
+        permission=cast(PermissionClass, metadata.get("permission", permission)),
         input_schema=copy.deepcopy(metadata.get("input_schema", _GENERIC_INPUT_SCHEMA)),
         timeout_ms=0,
         tags=cast(tuple[str, ...], metadata.get("tags", ("native-plugin", plugin_id, "metadata-only"))),
@@ -200,7 +230,7 @@ def _build_tool_manifest(
         adk_tool_type=cast(str, metadata.get("adk_tool_type", "FunctionTool")),
         preconditions=cast(tuple[str, ...], metadata.get("preconditions", ())),
         plugin_id=plugin_id,
-        enabled_by_default=False,
+        enabled_by_default=True,
         opt_out=opt_out,
     )
 

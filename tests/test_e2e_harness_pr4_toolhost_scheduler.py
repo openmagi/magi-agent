@@ -84,7 +84,7 @@ def _manifest(
     )
 
 
-def test_protected_core_handler_binding_preserves_metadata_and_default_off_state() -> None:
+def test_protected_core_handler_binding_preserves_metadata_and_default_enabled_state() -> None:
     registry = ToolRegistry()
     register_core_tool_manifests(registry)
     original = registry.resolve("FileRead")
@@ -100,8 +100,8 @@ def test_protected_core_handler_binding_preserves_metadata_and_default_off_state
     assert registration.manifest == original
     assert registration.handler is handler
     assert registration.protected is True
-    assert registration.enabled is False
-    assert registry.list_available(mode="act") == []
+    assert registration.enabled is True
+    assert "FileRead" in {manifest.name for manifest in registry.list_available(mode="act")}
 
 
 def test_protected_handler_binding_can_only_enable_through_explicit_policy_flag() -> None:
@@ -153,7 +153,7 @@ def test_protected_handler_binding_rejects_metadata_replacement_bypass() -> None
 
     assert registry.resolve("Bash") == original
     assert registry.resolve_registration("Bash").handler is None  # type: ignore[union-attr]
-    assert registry.is_enabled("Bash") is False
+    assert registry.is_enabled("Bash") is True
 
 
 def test_protected_handler_binding_is_one_way_without_audited_policy_path() -> None:

@@ -55,6 +55,24 @@ def test_native_state_projection_returns_expected_native_tool_names_in_resolved_
     projected = project_native_plugin_tool_manifests(state)
 
     assert tuple(manifest.name for manifest in projected) == (
+        "AgentMemorySearch",
+        "AgentMemoryRemember",
+        "ArtifactUpdate",
+        "ArtifactDelete",
+        "Browser",
+        "SocialBrowser",
+        "CodeDiagnostics",
+        "CodeIntelligence",
+        "CodeSymbolSearch",
+        "CodeWorkspace",
+        "CodingBenchmark",
+        "CommitCheckpoint",
+        "PackageDependencyResolve",
+        "ProjectVerificationPlanner",
+        "RepoMap",
+        "RepositoryMap",
+        "RepoTaskState",
+        "SafeCommand",
         "DocumentWrite",
         "SpreadsheetWrite",
         "FileDeliver",
@@ -63,6 +81,33 @@ def test_native_state_projection_returns_expected_native_tool_names_in_resolved_
         "knowledge-search",
         "KnowledgeWrite",
         "knowledge-write",
+        "MissionLedger",
+        "CronCreate",
+        "CronList",
+        "CronUpdate",
+        "CronDelete",
+        "TaskWait",
+        "TaskGet",
+        "TaskList",
+        "TaskOutput",
+        "TaskStop",
+        "SkillLoader",
+        "SkillRuntimeHooks",
+        "ExternalToolLoader",
+        "BatchRead",
+        "DateRange",
+        "ExternalSourceCache",
+        "ExternalSourceRead",
+        "SpawnAgent",
+        "SpawnWorktreeApply",
+        "TaskBoard",
+        "MemoryRedact",
+        "NotifyUser",
+        "SwitchToActMode",
+        "WebSearch",
+        "web-search",
+        "web_search",
+        "WebFetch",
     )
     assert tuple(manifest.name for manifest in projected if manifest.plugin_id == "openmagi.knowledge") == (
         "KnowledgeSearch",
@@ -70,58 +115,67 @@ def test_native_state_projection_returns_expected_native_tool_names_in_resolved_
         "KnowledgeWrite",
         "knowledge-write",
     )
-    assert tuple(manifest.name for manifest in projected if manifest.plugin_id == "openmagi.web") == ()
-    assert tuple(manifest.name for manifest in projected if manifest.plugin_id == "openmagi.browser") == ()
+    assert tuple(manifest.name for manifest in projected if manifest.plugin_id == "openmagi.web") == (
+        "WebSearch",
+        "web-search",
+        "web_search",
+        "WebFetch",
+    )
+    assert tuple(manifest.name for manifest in projected if manifest.plugin_id == "openmagi.browser") == (
+        "Browser",
+        "SocialBrowser",
+    )
     assert tuple(
         manifest.name
         for manifest in projected
         if manifest.plugin_id == "openmagi.web-acquisition"
     ) == ()
-    assert tuple(manifest.name for manifest in projected if manifest.plugin_id == "openmagi.missions") == ()
+    assert tuple(manifest.name for manifest in projected if manifest.plugin_id == "openmagi.missions") == (
+        "MissionLedger",
+    )
 
 
-def test_default_disabled_web_browser_and_web_acquisition_emit_no_projected_tools() -> None:
+def test_default_enabled_web_browser_and_web_acquisition_emit_projected_tools() -> None:
     state = resolve_plugin_state(native_plugin_manifests())
 
     projected = project_native_plugin_tool_manifests(state)
 
     names = {manifest.name for manifest in projected}
-    assert "WebSearch" not in state.active_tools
-    assert "web-search" not in state.active_tools
-    assert "web_search" not in state.active_tools
-    assert "WebFetch" not in state.active_tools
-    assert "Browser" not in state.active_tools
-    assert "SocialBrowser" not in state.active_tools
-    assert "web_acquisition_provider_boundary" not in state.active_harness_rules
-    assert "WebSearch" not in names
-    assert "web-search" not in names
-    assert "web_search" not in names
-    assert "WebFetch" not in names
-    assert "Browser" not in names
-    assert "SocialBrowser" not in names
-    assert all(manifest.plugin_id != "openmagi.web" for manifest in projected)
-    assert all(manifest.plugin_id != "openmagi.browser" for manifest in projected)
-    assert all(manifest.plugin_id != "openmagi.web-acquisition" for manifest in projected)
+    assert "WebSearch" in state.active_tools
+    assert "web-search" in state.active_tools
+    assert "web_search" in state.active_tools
+    assert "WebFetch" in state.active_tools
+    assert "Browser" in state.active_tools
+    assert "SocialBrowser" in state.active_tools
+    assert "web_acquisition_provider_boundary" in state.active_harness_rules
+    assert "WebSearch" in names
+    assert "web-search" in names
+    assert "web_search" in names
+    assert "WebFetch" in names
+    assert "Browser" in names
+    assert "SocialBrowser" in names
+    assert any(manifest.plugin_id == "openmagi.web" for manifest in projected)
+    assert any(manifest.plugin_id == "openmagi.browser" for manifest in projected)
 
 
-def test_default_disabled_scheduled_work_emits_no_projected_toolhost_entries() -> None:
+def test_default_enabled_scheduled_work_emits_projected_toolhost_entries() -> None:
     state = resolve_plugin_state(native_plugin_manifests())
 
     projected = project_native_plugin_tool_manifests(state)
 
     names = {manifest.name for manifest in projected}
-    assert "CronCreate" not in state.active_tools
-    assert "CronList" not in state.active_tools
-    assert "CronUpdate" not in state.active_tools
-    assert "CronDelete" not in state.active_tools
-    assert "TaskWait" not in state.active_tools
-    assert "scheduled_work_recipe_policy" not in state.active_harness_rules
-    assert "CronCreate" not in names
-    assert "CronList" not in names
-    assert "CronUpdate" not in names
-    assert "CronDelete" not in names
-    assert "TaskWait" not in names
-    assert all(manifest.plugin_id != "openmagi.scheduled-work" for manifest in projected)
+    assert "CronCreate" in state.active_tools
+    assert "CronList" in state.active_tools
+    assert "CronUpdate" in state.active_tools
+    assert "CronDelete" in state.active_tools
+    assert "TaskWait" in state.active_tools
+    assert "scheduled_work_recipe_policy" in state.active_harness_rules
+    assert "CronCreate" in names
+    assert "CronList" in names
+    assert "CronUpdate" in names
+    assert "CronDelete" in names
+    assert "TaskWait" in names
+    assert any(manifest.plugin_id == "openmagi.scheduled-work" for manifest in projected)
 
 
 def test_projected_tool_manifests_are_metadata_only_and_execution_free() -> None:
@@ -136,14 +190,24 @@ def test_projected_tool_manifests_are_metadata_only_and_execution_free() -> None
     assert knowledge_search.source.package == "openmagi.knowledge"
     assert knowledge_search.plugin_id == "openmagi.knowledge"
     assert knowledge_search.permission == "net"
-    assert knowledge_search.enabled_by_default is False
+    assert knowledge_search.enabled_by_default is True
     assert knowledge_search.opt_out is True
     assert knowledge_search.input_schema == {"type": "object", "additionalProperties": True}
     assert knowledge_search.timeout_ms == 0
     assert "openmagi.knowledge" in knowledge_search.description
     assert knowledge_search.tags == ("native-plugin", "openmagi.knowledge", "metadata-only")
+    assert by_name["AgentMemoryRemember"].permission == "write"
+    assert by_name["ArtifactUpdate"].permission == "write"
+    assert by_name["ArtifactDelete"].permission == "write"
+    assert by_name["CommitCheckpoint"].permission == "write"
+    assert by_name["KnowledgeWrite"].permission == "write"
+    assert by_name["knowledge-write"].permission == "write"
+    assert by_name["DocumentWrite"].permission == "write"
+    assert by_name["SpreadsheetWrite"].permission == "write"
+    assert by_name["ExternalSourceCache"].permission == "write"
+    assert by_name["TaskBoard"].permission == "write"
 
-    assert "MissionLedger" not in by_name
+    assert "MissionLedger" in by_name
 
     dumped = "\n".join(
         repr(manifest.model_dump(by_alias=True))
@@ -156,7 +220,7 @@ def test_projected_tool_manifests_are_metadata_only_and_execution_free() -> None
     assert "magi_agent.plugins.native" not in dumped
 
 
-def test_file_delivery_projection_is_disabled_metadata_only_and_channel_traffic_free() -> None:
+def test_file_delivery_projection_is_default_enabled_metadata_only_and_channel_traffic_free() -> None:
     state = resolve_plugin_state(native_plugin_manifests())
 
     projected = project_native_plugin_tool_manifests(state)
@@ -165,7 +229,7 @@ def test_file_delivery_projection_is_disabled_metadata_only_and_channel_traffic_
     file_deliver = by_name["FileDeliver"]
     assert file_deliver.plugin_id == "openmagi.documents"
     assert file_deliver.permission == "net"
-    assert file_deliver.enabled_by_default is False
+    assert file_deliver.enabled_by_default is True
     assert file_deliver.opt_out is True
     assert file_deliver.should_defer is True
     assert file_deliver.side_effect_class == "external"
@@ -180,7 +244,7 @@ def test_file_delivery_projection_is_disabled_metadata_only_and_channel_traffic_
     file_send = by_name["FileSend"]
     assert file_send.plugin_id == "openmagi.documents"
     assert file_send.permission == "net"
-    assert file_send.enabled_by_default is False
+    assert file_send.enabled_by_default is True
     assert file_send.should_defer is True
     assert file_send.side_effect_class == "external"
     assert file_send.latency_class == "background"

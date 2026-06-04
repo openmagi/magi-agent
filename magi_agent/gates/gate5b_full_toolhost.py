@@ -18,13 +18,18 @@ from magi_agent.evidence.coding_tool_receipts import (
     CodingToolReceiptConfig,
     CodingToolReceiptRecord,
 )
+from magi_agent.tools.context import ToolContext
+from magi_agent.tools.dispatcher import ToolDispatcher
+from magi_agent.tools.manifest import RuntimeMode, ToolManifest, ToolSource
+from magi_agent.tools.permission import ToolPermissionPolicy
+from magi_agent.tools.registry import ToolRegistry
 from magi_agent.tools.result import ToolResult
 
 
 Gate5BFullToolHostStatus = Literal["disabled", "blocked", "ready"]
 Gate5BFullToolOutcomeStatus = Literal["ok", "blocked", "error", "duplicate"]
 
-GATE5B_FULL_TOOLHOST_TOOL_NAMES = (
+_GATE5B_LEGACY_FULL_TOOLHOST_TOOL_NAMES = (
     "Clock",
     "Calculation",
     "FileRead",
@@ -35,6 +40,77 @@ GATE5B_FULL_TOOLHOST_TOOL_NAMES = (
     "PatchApply",
     "Bash",
 )
+
+_GATE5B_FIRST_PARTY_REGISTRY_TOOL_NAMES = (
+    "AgentMemoryRemember",
+    "AgentMemorySearch",
+    "ArtifactCreate",
+    "ArtifactDelete",
+    "ArtifactList",
+    "ArtifactRead",
+    "ArtifactUpdate",
+    "AskUserQuestion",
+    "BatchRead",
+    "Browser",
+    "CodeDiagnostics",
+    "CodeIntelligence",
+    "CodeSymbolSearch",
+    "CodeWorkspace",
+    "CodingBenchmark",
+    "CommitCheckpoint",
+    "CronCreate",
+    "CronDelete",
+    "CronList",
+    "CronUpdate",
+    "DateRange",
+    "DocumentWrite",
+    "EnterPlanMode",
+    "ExitPlanMode",
+    "ExternalSourceCache",
+    "ExternalSourceRead",
+    "ExternalToolLoader",
+    "GitDiff",
+    "HealthStatus",
+    "KnowledgeSearch",
+    "KnowledgeWrite",
+    "MemoryRedact",
+    "MissionLedger",
+    "NotifyUser",
+    "PackageDependencyResolve",
+    "ProjectVerificationPlanner",
+    "RepoMap",
+    "RepoTaskState",
+    "RepositoryMap",
+    "SafeCommand",
+    "SkillLoader",
+    "SkillRuntimeHooks",
+    "SocialBrowser",
+    "SpawnAgent",
+    "SpawnWorktreeApply",
+    "SpreadsheetWrite",
+    "SwitchToActMode",
+    "TaskBoard",
+    "TaskGet",
+    "TaskList",
+    "TaskOutput",
+    "TaskStop",
+    "TaskWait",
+    "TestRun",
+    "ToolSearch",
+    "WebFetch",
+    "WebSearch",
+)
+
+GATE5B_FULL_TOOLHOST_TOOL_NAMES = (
+    *_GATE5B_LEGACY_FULL_TOOLHOST_TOOL_NAMES,
+    *_GATE5B_FIRST_PARTY_REGISTRY_TOOL_NAMES,
+)
+
+_LEGACY_TOOL_SOURCE = ToolSource(kind="builtin", package="openmagi.gate5b")
+_LEGACY_TOOL_INPUT_SCHEMA: dict[str, object] = {
+    "type": "object",
+    "additionalProperties": True,
+}
 
 _SAFE_ENVIRONMENTS = frozenset({"local", "development", "staging", "production"})
 _DIGEST_RE = re.compile(r"^sha256:[a-f0-9]{64}$")
@@ -79,6 +155,12 @@ _MODEL_CONFIG = ConfigDict(
 
 class Gate5BFullToolPathPolicyError(ValueError):
     pass
+
+
+class Gate5BFullToolRegistryBlocked(ValueError):
+    def __init__(self, reason: str) -> None:
+        super().__init__(reason)
+        self.reason = reason
 
 
 class _Gate5BFullModel(BaseModel):
@@ -249,11 +331,12 @@ class Gate5BFullToolCounter:
                     outputPreview=None,
                     handlerCalled=False,
                 )
-            return self.blocked(
-                request_digest=request_digest,
-                tool_call_digest=tool_call_digest,
-                tool_name=tool_name,
+            return Gate5BFullToolOutcome(
+                status="blocked",
                 reason="tool_call_digest_conflict",
+                receipt=existing,
+                outputPreview=None,
+                handlerCalled=False,
             )
         if self._tool_calls >= self._config.max_tool_calls_per_turn:
             return self.blocked(
@@ -261,6 +344,7 @@ class Gate5BFullToolCounter:
                 tool_call_digest=tool_call_digest,
                 tool_name=tool_name,
                 reason="max_tool_calls_exhausted",
+                argument_digest=argument_digest,
             )
         return None
 
@@ -303,6 +387,7 @@ class Gate5BFullToolCounter:
         tool_call_digest: str,
         tool_name: str,
         reason: str,
+        argument_digest: str | None = None,
     ) -> Gate5BFullToolOutcome:
         receipt = Gate5BFullToolReceipt(
             requestDigest=request_digest,
@@ -312,7 +397,9 @@ class Gate5BFullToolCounter:
             boundedOutputDigest=_digest({"blocked": reason}),
             outputByteCount=0,
         )
-        self._records[(request_digest, tool_call_digest)] = receipt
+        key = (request_digest, tool_call_digest)
+        self._records[key] = receipt
+        self._argument_digests[key] = argument_digest or _digest({"blocked": reason})
         return Gate5BFullToolOutcome(
             status="blocked",
             reason=reason,
@@ -330,12 +417,15 @@ class Gate5BFullToolHost:
         workspace_root: Path,
         exposed_tool_names: tuple[str, ...],
         now_ms: Callable[[], int],
+        tool_registry: ToolRegistry | None = None,
     ) -> None:
         self.config = config
         self.workspace_root = workspace_root.resolve()
         self.exposed_tool_names = exposed_tool_names
         self.now_ms = now_ms
         self.counter = Gate5BFullToolCounter(config)
+        self._tool_registry = tool_registry
+        self._tool_dispatcher = ToolDispatcher(tool_registry) if tool_registry is not None else None
         self.receipt_boundary = CodingToolReceiptBoundary(
             CodingToolReceiptConfig(enabled=True)
         )
@@ -365,9 +455,11 @@ class Gate5BFullToolHost:
                 tool_call_digest=tool_call_digest,
                 tool_name=tool_name,
                 reason="tool_not_allowlisted",
+                argument_digest=argument_digest,
             )
         try:
-            output = self._handle(tool_name, args)
+            self._preflight_legacy_tool(tool_name, args, tool_call_id=tool_call_id)
+            output = await self._handle(tool_name, args, tool_call_id=tool_call_id)
             result = ToolResult(status="ok", output=output)
             coding_receipt = self.receipt_boundary.extract_receipt(
                 tool_call_id=tool_call_id,
@@ -385,12 +477,21 @@ class Gate5BFullToolHost:
                 output_byte_count=_encoded_len(output),
                 coding_mutation_receipt=coding_receipt,
             )
+        except Gate5BFullToolRegistryBlocked as error:
+            return self.counter.blocked(
+                request_digest=request_digest,
+                tool_call_digest=tool_call_digest,
+                tool_name=tool_name,
+                reason=error.reason,
+                argument_digest=argument_digest,
+            )
         except Gate5BFullToolPathPolicyError:
             return self.counter.blocked(
                 request_digest=request_digest,
                 tool_call_digest=tool_call_digest,
                 tool_name=tool_name,
                 reason="path_policy_denied",
+                argument_digest=argument_digest,
             )
         except subprocess.TimeoutExpired:
             result = ToolResult(status="error", errorMessage="command_timeout")
@@ -429,7 +530,13 @@ class Gate5BFullToolHost:
                 coding_mutation_receipt=coding_receipt,
             )
 
-    def _handle(self, tool_name: str, args: Mapping[str, object]) -> object:
+    async def _handle(
+        self,
+        tool_name: str,
+        args: Mapping[str, object],
+        *,
+        tool_call_id: str,
+    ) -> object:
         if tool_name == "Clock":
             return {"nowMs": self.now_ms()}
         if tool_name == "Calculation":
@@ -511,7 +618,77 @@ class Gate5BFullToolHost:
                 "stdoutDigest": _digest(completed.stdout),
                 "stderrDigest": _digest(completed.stderr),
             }
-        raise ValueError("unsupported_tool")
+        return await self._dispatch_registry_tool(tool_name, args, tool_call_id=tool_call_id)
+
+    async def _dispatch_registry_tool(
+        self,
+        tool_name: str,
+        args: Mapping[str, object],
+        *,
+        tool_call_id: str,
+    ) -> object:
+        if self._tool_registry is None or self._tool_dispatcher is None:
+            raise ValueError("unsupported_tool")
+        manifest = self._tool_registry.resolve_enabled(tool_name)
+        if manifest is None or manifest.adk_tool_type != "FunctionTool":
+            raise ValueError("unsupported_tool")
+        mode: Literal["plan", "act"] = (
+            "act" if "act" in manifest.available_in_modes else "plan"
+        )
+        result = await self._tool_dispatcher.dispatch(
+            tool_name,
+            dict(args),
+            ToolContext(
+                botId="gate5b-selected-full-toolhost",
+                turnId=f"gate5b-full-toolhost:{tool_call_id}",
+                workspaceRoot=str(self.workspace_root),
+                permissionScope={
+                    "mode": "selected_full_toolhost",
+                    "source": "selected_full_toolhost",
+                },
+            ),
+            mode=mode,
+            exposed_tool_names=self.exposed_tool_names,
+        )
+        if result.status == "ok":
+            return result.model_dump(by_alias=True, mode="json", warnings=False)
+        if result.status in {"blocked", "needs_approval"}:
+            raise Gate5BFullToolRegistryBlocked(
+                _safe_reason_label(
+                    result.error_code
+                    or str(result.metadata.get("reason") or result.status)
+                )
+            )
+        raise ValueError(_safe_reason_label(result.error_code or "tool_error"))
+
+    def _preflight_legacy_tool(
+        self,
+        tool_name: str,
+        args: Mapping[str, object],
+        *,
+        tool_call_id: str,
+    ) -> None:
+        if tool_name not in _GATE5B_LEGACY_FULL_TOOLHOST_TOOL_NAMES:
+            return
+        manifest = _legacy_tool_manifest(tool_name)
+        mode: RuntimeMode = "act" if "act" in manifest.available_in_modes else "plan"
+        decision = ToolPermissionPolicy().decide(
+            manifest,
+            dict(args),
+            ToolContext(
+                botId="gate5b-selected-full-toolhost",
+                turnId=f"gate5b-full-toolhost:{tool_call_id}",
+                workspaceRoot=str(self.workspace_root),
+                permissionScope={
+                    "mode": "selected_full_toolhost",
+                    "source": "selected_full_toolhost",
+                },
+            ),
+            mode=mode,
+        )
+        if decision.action == "allow":
+            return
+        raise Gate5BFullToolRegistryBlocked(_permission_reason_code(decision.metadata))
 
 
 def build_gate5b_full_toolhost_bundle(
@@ -520,6 +697,7 @@ def build_gate5b_full_toolhost_bundle(
     scope: Mapping[str, object] | None = None,
     workspace_root: str | Path,
     now_ms: Callable[[], int] | None = None,
+    tool_registry: ToolRegistry | None = None,
 ) -> Gate5BFullToolBundle:
     safe_config = Gate5BFullToolHostConfig.model_validate(config or {})
     workspace = Path(workspace_root)
@@ -534,6 +712,7 @@ def build_gate5b_full_toolhost_bundle(
         workspace_root=workspace,
         exposed_tool_names=exposed,
         now_ms=now_ms or _now_ms,
+        tool_registry=tool_registry,
     )
     if selected_scope_error is not None:
         return Gate5BFullToolBundle(
@@ -596,6 +775,84 @@ def _selected_scope_error(
 def _selected_tool_names(names: Sequence[str]) -> tuple[str, ...]:
     allowed = set(names)
     return tuple(name for name in GATE5B_FULL_TOOLHOST_TOOL_NAMES if name in allowed)
+
+
+def _legacy_tool_manifest(tool_name: str) -> ToolManifest:
+    if tool_name in {"Clock", "Calculation"}:
+        return _legacy_manifest(
+            tool_name,
+            permission="meta",
+            modes=("plan", "act"),
+            tags=("utility", "meta"),
+            parallel_safe=True,
+        )
+    if tool_name in {"FileRead", "Glob", "Grep"}:
+        return _legacy_manifest(
+            tool_name,
+            permission="read",
+            modes=("plan", "act"),
+            tags=("workspace", "read"),
+            parallel_safe=True,
+        )
+    if tool_name in {"FileWrite", "FileEdit", "PatchApply"}:
+        return _legacy_manifest(
+            tool_name,
+            permission="write",
+            modes=("act",),
+            tags=("workspace", "write"),
+            mutates_workspace=True,
+        )
+    if tool_name == "Bash":
+        return _legacy_manifest(
+            tool_name,
+            permission="execute",
+            modes=("act",),
+            tags=("workspace", "command", "execute", "requires-approval"),
+            dangerous=True,
+            mutates_workspace=True,
+        )
+    raise ValueError("unsupported_legacy_tool")
+
+
+def _legacy_manifest(
+    name: str,
+    *,
+    permission: str,
+    modes: tuple[RuntimeMode, ...],
+    tags: tuple[str, ...],
+    dangerous: bool = False,
+    mutates_workspace: bool = False,
+    parallel_safe: bool = False,
+) -> ToolManifest:
+    return ToolManifest(
+        name=name,
+        description=f"Gate 5B selected full toolhost {name} tool.",
+        kind="core",
+        source=_LEGACY_TOOL_SOURCE,
+        permission=permission,  # type: ignore[arg-type]
+        inputSchema=_LEGACY_TOOL_INPUT_SCHEMA,
+        timeoutMs=120_000,
+        availableInModes=modes,
+        tags=tags,
+        dangerous=dangerous,
+        mutatesWorkspace=mutates_workspace,
+        isConcurrencySafe=parallel_safe,
+        parallelSafety="readonly" if parallel_safe else "unsafe",
+        enabled_by_default=True,
+        opt_out=True,
+    )
+
+
+def _permission_reason_code(metadata: Mapping[str, object]) -> str:
+    reason_codes = metadata.get("reasonCodes")
+    if isinstance(reason_codes, Sequence) and not isinstance(reason_codes, str | bytes):
+        for item in reason_codes:
+            if isinstance(item, str) and item.strip():
+                return _safe_reason_label(item)
+    reason = metadata.get("reason")
+    if isinstance(reason, str) and reason.strip():
+        return _safe_reason_label(reason)
+    return "tool_permission_blocked"
 
 
 def _build_adk_tool(host: Gate5BFullToolHost, name: str) -> FunctionTool:
@@ -688,7 +945,13 @@ def _build_adk_tool(host: Gate5BFullToolHost, name: str) -> FunctionTool:
 
         return _function_tool(name, invoke_bash)
 
-    raise ValueError("unsupported Gate 5B full tool")
+    async def invoke_registry_tool(
+        arguments: dict[str, object] | None = None,
+        tool_context: object | None = None,
+    ) -> dict[str, object]:
+        return await _dispatch_adk_tool(host, name, arguments or {}, tool_context)
+
+    return _function_tool(name, invoke_registry_tool)
 
 
 async def _dispatch_adk_tool(
@@ -727,11 +990,21 @@ def _safe_child_path(root: Path, path_text: str, *, allow_missing: bool = False)
     candidate = (root / relative).resolve(strict=False)
     if root not in (candidate, *candidate.parents):
         raise Gate5BFullToolPathPolicyError("path escaped workspace")
+    resolved_relative = Path() if candidate == root else candidate.relative_to(root)
+    if ".git" in resolved_relative.parts:
+        raise Gate5BFullToolRegistryBlocked("protected_git_path")
+    if _is_sensitive_workspace_path(resolved_relative):
+        raise Gate5BFullToolPathPolicyError("protected path")
     if not allow_missing and not candidate.is_file():
         raise Gate5BFullToolPathPolicyError("path is not readable file")
     parent = candidate.parent.resolve(strict=False)
     if root not in (parent, *parent.parents):
         raise Gate5BFullToolPathPolicyError("path escaped workspace")
+    resolved_parent_relative = Path() if parent == root else parent.relative_to(root)
+    if ".git" in resolved_parent_relative.parts:
+        raise Gate5BFullToolRegistryBlocked("protected_git_path")
+    if _is_sensitive_workspace_path(resolved_parent_relative):
+        raise Gate5BFullToolPathPolicyError("protected path")
     return candidate
 
 
@@ -854,6 +1127,11 @@ def _encoded_len(value: object) -> int:
 def _digest(value: object) -> str:
     material = json.dumps(value, sort_keys=True, default=repr, separators=(",", ":"))
     return "sha256:" + hashlib.sha256(material.encode("utf-8")).hexdigest()
+
+
+def _safe_reason_label(value: str) -> str:
+    normalized = re.sub(r"[^a-z0-9_]+", "_", value.strip().lower())
+    return normalized[:80] or "tool_error"
 
 
 def _now_ms() -> int:

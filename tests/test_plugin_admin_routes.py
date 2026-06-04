@@ -17,25 +17,23 @@ from magi_agent.runtime.openmagi_runtime import OpenMagiRuntime
 
 EXPECTED_NATIVE_PLUGIN_IDS = (
     "openmagi.agentmemory",
+    "openmagi.artifacts",
     "openmagi.browser",
+    "openmagi.coding",
     "openmagi.documents",
     "openmagi.knowledge",
     "openmagi.missions",
     "openmagi.scheduled-work",
     "openmagi.security-posture",
+    "openmagi.skills",
+    "openmagi.source-ledger",
+    "openmagi.subagents",
+    "openmagi.taskboard",
     "openmagi.web",
     "openmagi.web-acquisition",
 )
 
-DEFAULT_DISABLED_PLUGIN_IDS = {
-    "openmagi.agentmemory",
-    "openmagi.browser",
-    "openmagi.missions",
-    "openmagi.scheduled-work",
-    "openmagi.security-posture",
-    "openmagi.web",
-    "openmagi.web-acquisition",
-}
+DEFAULT_DISABLED_PLUGIN_IDS: set[str] = set()
 
 EXPECTED_PUBLIC_PLUGIN_FIELDS = {
     "pluginId",
@@ -136,14 +134,14 @@ def test_default_runtime_exposes_exact_native_plugin_ids_enabled() -> None:
     assert tuple(plugin["pluginId"] for plugin in plugins) == EXPECTED_NATIVE_PLUGIN_IDS
     agentmemory = plugin_by_id(plugins, "openmagi.agentmemory")
     assert agentmemory["installed"] is True
-    assert agentmemory["enabled"] is False
-    assert agentmemory["defaultEnabled"] is False
-    assert agentmemory["statusReason"] == "default_disabled"
+    assert agentmemory["enabled"] is True
+    assert agentmemory["defaultEnabled"] is True
+    assert agentmemory["statusReason"] == "enabled"
     scheduled_work = plugin_by_id(plugins, "openmagi.scheduled-work")
     assert scheduled_work["installed"] is True
-    assert scheduled_work["enabled"] is False
-    assert scheduled_work["defaultEnabled"] is False
-    assert scheduled_work["statusReason"] == "default_disabled"
+    assert scheduled_work["enabled"] is True
+    assert scheduled_work["defaultEnabled"] is True
+    assert scheduled_work["statusReason"] == "enabled"
     assert scheduled_work["tools"] == [
         "CronCreate",
         "CronList",
@@ -160,36 +158,36 @@ def test_default_runtime_exposes_exact_native_plugin_ids_enabled() -> None:
     assert scheduled_work["services"] == []
     assert scheduled_work["secrets"] == []
     missions = plugin_by_id(plugins, "openmagi.missions")
-    assert missions["enabled"] is False
-    assert missions["defaultEnabled"] is False
-    assert missions["statusReason"] == "default_disabled"
+    assert missions["enabled"] is True
+    assert missions["defaultEnabled"] is True
+    assert missions["statusReason"] == "enabled"
     assert missions["permissions"] == ["read", "meta"]
     assert missions["services"] == ["mission-ledger"]
     assert missions["trafficAttached"] is False
     assert missions["executionAttached"] is False
     web = plugin_by_id(plugins, "openmagi.web")
-    assert web["enabled"] is False
-    assert web["defaultEnabled"] is False
-    assert web["statusReason"] == "default_disabled"
+    assert web["enabled"] is True
+    assert web["defaultEnabled"] is True
+    assert web["statusReason"] == "enabled"
     browser = plugin_by_id(plugins, "openmagi.browser")
-    assert browser["enabled"] is False
-    assert browser["defaultEnabled"] is False
-    assert browser["statusReason"] == "default_disabled"
+    assert browser["enabled"] is True
+    assert browser["defaultEnabled"] is True
+    assert browser["statusReason"] == "enabled"
     web_acquisition = plugin_by_id(plugins, "openmagi.web-acquisition")
-    assert web_acquisition["enabled"] is False
-    assert web_acquisition["defaultEnabled"] is False
-    assert web_acquisition["statusReason"] == "default_disabled"
+    assert web_acquisition["enabled"] is True
+    assert web_acquisition["defaultEnabled"] is True
+    assert web_acquisition["statusReason"] == "enabled"
     assert web_acquisition["tools"] == []
     assert web_acquisition["harnessRules"] == [
         "web_acquisition_provider_boundary",
         "web_acquisition_source_ledger_boundary",
     ]
     security_posture = plugin_by_id(plugins, "openmagi.security-posture")
-    assert security_posture["enabled"] is False
-    assert security_posture["defaultEnabled"] is False
+    assert security_posture["enabled"] is True
+    assert security_posture["defaultEnabled"] is True
     assert security_posture["optOutAllowed"] is False
     assert security_posture["securityCritical"] is True
-    assert security_posture["statusReason"] == "default_disabled"
+    assert security_posture["statusReason"] == "enabled"
     assert security_posture["tools"] == []
     assert security_posture["hooks"] == []
     assert security_posture["permissions"] == []
@@ -221,7 +219,7 @@ def test_default_runtime_exposes_exact_native_plugin_ids_enabled() -> None:
     assert_no_executable_metadata(body)
 
 
-def test_plugin_detail_returns_security_posture_metadata_only_default_disabled() -> None:
+def test_plugin_detail_returns_security_posture_metadata_only_default_enabled() -> None:
     client = make_client()
 
     response = client.get("/v1/admin/plugins/openmagi.security-posture", headers=admin_headers())
@@ -234,11 +232,11 @@ def test_plugin_detail_returns_security_posture_metadata_only_default_disabled()
     assert plugin["pluginId"] == "openmagi.security-posture"
     assert plugin["kind"] == "native"
     assert plugin["installed"] is True
-    assert plugin["enabled"] is False
-    assert plugin["defaultEnabled"] is False
+    assert plugin["enabled"] is True
+    assert plugin["defaultEnabled"] is True
     assert plugin["optOutAllowed"] is False
     assert plugin["securityCritical"] is True
-    assert plugin["statusReason"] == "default_disabled"
+    assert plugin["statusReason"] == "enabled"
     assert plugin["tools"] == []
     assert plugin["hooks"] == []
     assert plugin["permissions"] == []
@@ -269,9 +267,9 @@ def test_plugin_detail_returns_web_metadata_aliases_and_redacted_secrets() -> No
     assert EXPECTED_PUBLIC_PLUGIN_FIELDS.issubset(plugin)
     assert plugin["pluginId"] == "openmagi.web"
     assert plugin["kind"] == "native"
-    assert plugin["enabled"] is False
-    assert plugin["defaultEnabled"] is False
-    assert plugin["statusReason"] == "default_disabled"
+    assert plugin["enabled"] is True
+    assert plugin["defaultEnabled"] is True
+    assert plugin["statusReason"] == "enabled"
     assert plugin["tools"] == ["WebSearch", "web-search", "web_search", "WebFetch"]
     assert plugin["hooks"] == []
     assert plugin["harnessRules"] == ["web_source_citation"]
@@ -286,7 +284,7 @@ def test_plugin_detail_returns_web_metadata_aliases_and_redacted_secrets() -> No
     assert_no_executable_metadata(body)
 
 
-def test_plugin_detail_returns_scheduled_work_disabled_metadata_without_runtime_attachment() -> None:
+def test_plugin_detail_returns_scheduled_work_enabled_metadata_without_runtime_attachment() -> None:
     client = make_client()
 
     response = client.get("/v1/admin/plugins/openmagi.scheduled-work", headers=admin_headers())
@@ -299,9 +297,9 @@ def test_plugin_detail_returns_scheduled_work_disabled_metadata_without_runtime_
     assert plugin["pluginId"] == "openmagi.scheduled-work"
     assert plugin["kind"] == "native"
     assert plugin["installed"] is True
-    assert plugin["enabled"] is False
-    assert plugin["defaultEnabled"] is False
-    assert plugin["statusReason"] == "default_disabled"
+    assert plugin["enabled"] is True
+    assert plugin["defaultEnabled"] is True
+    assert plugin["statusReason"] == "enabled"
     assert plugin["tools"] == [
         "CronCreate",
         "CronList",
@@ -337,9 +335,7 @@ def test_audit_route_returns_snapshot_summary_with_forced_attachment_flags() -> 
     assert snapshot["trafficAttached"] is False
     assert snapshot["executionAttached"] is False
     assert snapshot["summary"]["pluginCount"] == len(EXPECTED_NATIVE_PLUGIN_IDS)
-    assert snapshot["summary"]["enabledPluginCount"] == (
-        len(EXPECTED_NATIVE_PLUGIN_IDS) - len(DEFAULT_DISABLED_PLUGIN_IDS)
-    )
+    assert snapshot["summary"]["enabledPluginCount"] == len(EXPECTED_NATIVE_PLUGIN_IDS)
     assert snapshot["summary"]["optedOutPluginCount"] == 0
     assert snapshot["summary"]["declaredSecretNames"] == [
         "FIRECRAWL_API_KEY",
@@ -352,20 +348,20 @@ def test_audit_route_returns_snapshot_summary_with_forced_attachment_flags() -> 
         {"name": "GATEWAY_TOKEN", "source": "platform"},
         {"name": "FIRECRAWL_API_KEY", "source": "platform"},
     ]
-    assert web["enabled"] is False
-    assert web["statusReason"] == "default_disabled"
+    assert web["enabled"] is True
+    assert web["statusReason"] == "enabled"
     assert web["trafficAttached"] is False
     assert web["executionAttached"] is False
     web_acquisition = plugin_by_id(snapshot["entries"], "openmagi.web-acquisition")
-    assert web_acquisition["enabled"] is False
-    assert web_acquisition["statusReason"] == "default_disabled"
+    assert web_acquisition["enabled"] is True
+    assert web_acquisition["statusReason"] == "enabled"
     assert web_acquisition["tools"] == []
     assert web_acquisition["declaredSecrets"] == []
     assert web_acquisition["trafficAttached"] is False
     assert web_acquisition["executionAttached"] is False
     scheduled_work = plugin_by_id(snapshot["entries"], "openmagi.scheduled-work")
-    assert scheduled_work["enabled"] is False
-    assert scheduled_work["statusReason"] == "default_disabled"
+    assert scheduled_work["enabled"] is True
+    assert scheduled_work["statusReason"] == "enabled"
     assert scheduled_work["tools"] == [
         "CronCreate",
         "CronList",
@@ -425,9 +421,7 @@ def test_injected_opt_out_state_disables_plugin_routes_and_preserves_audit_metad
         {"name": "GATEWAY_TOKEN", "source": "platform"},
         {"name": "FIRECRAWL_API_KEY", "source": "platform"},
     ]
-    assert snapshot["summary"]["enabledPluginCount"] == (
-        len(EXPECTED_NATIVE_PLUGIN_IDS) - len(DEFAULT_DISABLED_PLUGIN_IDS)
-    )
+    assert snapshot["summary"]["enabledPluginCount"] == len(EXPECTED_NATIVE_PLUGIN_IDS) - 1
     assert snapshot["summary"]["optedOutPluginCount"] == 1
 
 

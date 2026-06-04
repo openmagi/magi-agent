@@ -280,6 +280,66 @@ def decide(
             "deny",
             "destructive_shell",
         ),
+        (
+            "selected_full_toolhost_file_write_preapproved",
+            "FileWrite",
+            {"path": "src/app.py", "content": "x"},
+            "act",
+            {"mode": "selected-full-toolhost", "source": "selected-full-toolhost"},
+            "write",
+            False,
+            True,
+            "allow",
+            "selected_full_toolhost_workspace_mutation_preapproved",
+        ),
+        (
+            "selected_full_toolhost_script_shell_preapproved",
+            "Bash",
+            {"command": "python scripts/diagnose.py --workspace ."},
+            "act",
+            {"mode": "selected_full_toolhost", "source": "selected_full_toolhost"},
+            "execute",
+            True,
+            True,
+            "allow",
+            "selected_full_toolhost_shell_preapproved",
+        ),
+        (
+            "selected_full_toolhost_pipeline_shell_still_denied",
+            "Bash",
+            {"command": "cat .env.local | head -n 1"},
+            "act",
+            {"mode": "selected_full_toolhost", "source": "selected_full_toolhost"},
+            "execute",
+            True,
+            True,
+            "deny",
+            "complex_shell_requires_approval",
+        ),
+        (
+            "selected_full_toolhost_secret_path_still_denied",
+            "FileWrite",
+            {"path": ".env.local", "content": "x"},
+            "act",
+            {"mode": "selected_full_toolhost", "source": "selected_full_toolhost"},
+            "write",
+            False,
+            True,
+            "deny",
+            "secret_path_denied",
+        ),
+        (
+            "selected_full_toolhost_destructive_shell_still_denied",
+            "Bash",
+            {"command": "rm -rf /"},
+            "act",
+            {"mode": "selected_full_toolhost", "source": "selected_full_toolhost"},
+            "execute",
+            True,
+            True,
+            "deny",
+            "bypass_denied_hard_safety",
+        ),
     ),
 )
 def test_runtime_permission_matrix_enforced_before_approval_escalation(
@@ -590,3 +650,27 @@ def test_runtime_permission_arbiter_is_pure_import_boundary() -> None:
         make_context(),
         mode="act",
     ).action == "allow"
+
+
+def test_selected_full_toolhost_scope_preapproves_generic_first_party_write_net_after_safety() -> None:
+    context = make_context(
+        {
+            "mode": "selected_full_toolhost",
+            "source": "selected_full_toolhost",
+        }
+    )
+
+    for manifest in (
+        make_manifest("DocumentWrite", permission="write"),
+        make_manifest("WebSearch", permission="net"),
+    ):
+        decision = ToolPermissionPolicy().decide(
+            manifest,
+            {"path": "docs/report.md", "query": "Open Magi"},
+            context,
+            mode="act",
+        )
+
+        assert decision.action == "allow"
+        assert decision.reason == "selected full toolhost preapproved"
+        assert decision.metadata["selectedFullToolhostPreapproved"] is True

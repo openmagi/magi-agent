@@ -32,6 +32,60 @@ EXPECTED_CORE_TOOL_NAMES = {
     "CronList",
 }
 
+EXPECTED_NATIVE_TOOL_NAMES = {
+    "AgentMemorySearch",
+    "AgentMemoryRemember",
+    "ArtifactDelete",
+    "ArtifactUpdate",
+    "BatchRead",
+    "Browser",
+    "CodeDiagnostics",
+    "CodeIntelligence",
+    "CodeSymbolSearch",
+    "CodeWorkspace",
+    "CodingBenchmark",
+    "CommitCheckpoint",
+    "DateRange",
+    "SocialBrowser",
+    "DocumentWrite",
+    "SpreadsheetWrite",
+    "ExternalSourceCache",
+    "ExternalSourceRead",
+    "ExternalToolLoader",
+    "FileDeliver",
+    "FileSend",
+    "KnowledgeSearch",
+    "knowledge-search",
+    "KnowledgeWrite",
+    "knowledge-write",
+    "MemoryRedact",
+    "MissionLedger",
+    "NotifyUser",
+    "PackageDependencyResolve",
+    "ProjectVerificationPlanner",
+    "RepoMap",
+    "RepoTaskState",
+    "RepositoryMap",
+    "SafeCommand",
+    "SkillLoader",
+    "SkillRuntimeHooks",
+    "CronCreate",
+    "CronUpdate",
+    "CronDelete",
+    "SpawnAgent",
+    "SpawnWorktreeApply",
+    "SwitchToActMode",
+    "TaskBoard",
+    "TaskWait",
+    "TaskStop",
+    "WebSearch",
+    "web-search",
+    "web_search",
+    "WebFetch",
+}
+
+EXPECTED_DEFAULT_TOOL_NAMES = EXPECTED_CORE_TOOL_NAMES | EXPECTED_NATIVE_TOOL_NAMES
+
 EXPECTED_PUBLIC_TOOL_FIELDS = {
     "name",
     "description",
@@ -103,7 +157,7 @@ def test_admin_tool_routes_require_gateway_token() -> None:
         assert wrong.json() == {"error": "unauthorized"}
 
 
-def test_list_tools_returns_disabled_core_catalog_metadata() -> None:
+def test_list_tools_returns_enabled_first_party_catalog_metadata() -> None:
     client = make_client()
 
     response = client.get("/v1/admin/tools", headers=admin_headers())
@@ -112,11 +166,11 @@ def test_list_tools_returns_disabled_core_catalog_metadata() -> None:
     body = response.json()
     assert set(body) == {"tools"}
     tools = body["tools"]
-    assert {tool["name"] for tool in tools} == EXPECTED_CORE_TOOL_NAMES
+    assert {tool["name"] for tool in tools} == EXPECTED_DEFAULT_TOOL_NAMES
 
     file_read = tool_by_name(tools, "FileRead")
     assert EXPECTED_PUBLIC_TOOL_FIELDS.issubset(file_read)
-    assert file_read["enabled"] is False
+    assert file_read["enabled"] is True
     assert file_read["kind"] == "core"
     assert file_read["source"] == "builtin"
     assert file_read["permission"] == "read"
@@ -131,7 +185,7 @@ def test_list_tools_returns_disabled_core_catalog_metadata() -> None:
     assert "handler" not in file_read
 
     bash = tool_by_name(tools, "Bash")
-    assert bash["enabled"] is False
+    assert bash["enabled"] is True
     assert bash["dangerous"] is True
     assert bash["mutatesWorkspace"] is True
     assert bash["permission"] == "execute"
@@ -144,7 +198,7 @@ def test_list_tools_returns_disabled_core_catalog_metadata() -> None:
         "CronList",
     ):
         manifest = tool_by_name(tools, readonly_name)
-        assert manifest["enabled"] is False
+        assert manifest["enabled"] is True
         assert manifest["dangerous"] is False
         assert manifest["mutatesWorkspace"] is False
         assert manifest["permission"] == "meta"
@@ -174,7 +228,7 @@ def test_tool_detail_returns_known_tool_metadata() -> None:
     tool = response.json()["tool"]
     assert EXPECTED_PUBLIC_TOOL_FIELDS.issubset(tool)
     assert tool["name"] == "FileRead"
-    assert tool["enabled"] is False
+    assert tool["enabled"] is True
     assert "handler" not in tool
 
 
@@ -197,7 +251,7 @@ def test_tool_stats_returns_zero_stub_stats_for_registered_tools() -> None:
 
     assert response.status_code == 200
     stats = response.json()["stats"]
-    assert set(stats) == EXPECTED_CORE_TOOL_NAMES
+    assert set(stats) == EXPECTED_DEFAULT_TOOL_NAMES
     assert stats["FileRead"] == {
         "calls": 0,
         "errors": 0,

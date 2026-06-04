@@ -89,7 +89,7 @@ def run_tool(
     )
 
 
-def test_registry_helper_returns_no_function_tools_for_default_disabled_core_catalog() -> None:
+def test_registry_helper_returns_function_tools_for_default_enabled_core_catalog() -> None:
     registry = ToolRegistry()
     register_core_tool_manifests(registry)
     dispatcher = ToolDispatcher(registry)
@@ -102,7 +102,10 @@ def test_registry_helper_returns_no_function_tools_for_default_disabled_core_cat
         attach_enabled=True,
     )
 
-    assert tools == []
+    expected_names = {manifest.name for manifest in registry.list_available(mode="act")}
+    assert {tool.name for tool in tools} == expected_names
+    assert "FileRead" in expected_names
+    assert "Bash" in expected_names
 
 
 def test_enabled_safe_tool_wraps_official_function_tool_and_dispatches_with_openmagi_context() -> None:
@@ -302,7 +305,7 @@ def test_registry_helper_includes_enabled_long_running_tool_and_excludes_disable
     assert isinstance(tools[0], LongRunningFunctionTool)
 
 
-def test_enabled_catalog_tool_without_handler_returns_missing_handler_not_approval() -> None:
+def test_enabled_approval_tool_without_handler_returns_approval_before_missing_handler() -> None:
     registry = ToolRegistry()
     register_core_tool_manifests(registry)
     registry.enable("Bash")
@@ -316,16 +319,15 @@ def test_enabled_catalog_tool_without_handler_returns_missing_handler_not_approv
         attach_enabled=True,
     )
 
-    assert [tool.name for tool in tools] == ["Bash"]
+    by_name = {tool.name: tool for tool in tools}
+    assert "Bash" in by_name
 
-    result = run_tool(tools[0], {"command": "echo should-not-run"})
+    result = run_tool(by_name["Bash"], {"command": "echo should-not-run"})
 
-    assert result["status"] == "error"
-    assert result["errorCode"] == "tool_handler_missing"
-    assert result["errorMessage"] == "tool handler missing"
+    assert result["status"] == "needs_approval"
     assert result["metadata"]["toolName"] == "Bash"
-    assert result["metadata"]["reason"] == "tool handler missing"
-    assert "controlRequest" not in result["metadata"]
+    assert result["metadata"]["reason"] == "complex shell requires approval"
+    assert "controlRequest" in result["metadata"]
 
 
 def test_adapter_returns_tool_result_alias_keys_for_errors() -> None:

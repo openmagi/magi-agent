@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import importlib
 import subprocess
 import sys
 
@@ -14,14 +15,61 @@ from magi_agent.plugins.native_catalog import (
 
 EXPECTED_NATIVE_PLUGIN_IDS = (
     "openmagi.agentmemory",
+    "openmagi.artifacts",
     "openmagi.browser",
+    "openmagi.coding",
     "openmagi.documents",
     "openmagi.knowledge",
     "openmagi.missions",
     "openmagi.scheduled-work",
     "openmagi.security-posture",
+    "openmagi.skills",
+    "openmagi.source-ledger",
+    "openmagi.subagents",
+    "openmagi.taskboard",
     "openmagi.web",
     "openmagi.web-acquisition",
+)
+
+TS_FIRST_PARTY_PARITY_TOOL_NAMES = frozenset(
+    {
+        "ArtifactDelete",
+        "ArtifactUpdate",
+        "BatchRead",
+        "Browser",
+        "CodeDiagnostics",
+        "CodeIntelligence",
+        "CodeSymbolSearch",
+        "CodeWorkspace",
+        "CodingBenchmark",
+        "CommitCheckpoint",
+        "DateRange",
+        "DocumentWrite",
+        "ExternalSourceCache",
+        "ExternalSourceRead",
+        "ExternalToolLoader",
+        "KnowledgeSearch",
+        "KnowledgeWrite",
+        "MemoryRedact",
+        "MissionLedger",
+        "NotifyUser",
+        "PackageDependencyResolve",
+        "ProjectVerificationPlanner",
+        "RepoMap",
+        "RepoTaskState",
+        "RepositoryMap",
+        "SafeCommand",
+        "SkillLoader",
+        "SkillRuntimeHooks",
+        "SocialBrowser",
+        "SpawnAgent",
+        "SpawnWorktreeApply",
+        "SpreadsheetWrite",
+        "SwitchToActMode",
+        "TaskBoard",
+        "WebFetch",
+        "WebSearch",
+    }
 )
 
 
@@ -60,18 +108,7 @@ def test_every_native_manifest_has_default_enabled_opt_out_audit_policy() -> Non
         assert manifest.kind is PluginKind.NATIVE
         assert manifest.publisher == "openmagi"
         assert manifest.default_installed is True
-        assert manifest.default_enabled is (
-            manifest.plugin_id
-            not in {
-                "openmagi.agentmemory",
-                "openmagi.browser",
-                "openmagi.missions",
-                "openmagi.scheduled-work",
-                "openmagi.security-posture",
-                "openmagi.web",
-                "openmagi.web-acquisition",
-            }
-        )
+        assert manifest.default_enabled is True
         if manifest.plugin_id == "openmagi.security-posture":
             assert manifest.opt_out_allowed is False
             assert manifest.security_critical is True
@@ -79,6 +116,15 @@ def test_every_native_manifest_has_default_enabled_opt_out_audit_policy() -> Non
             assert manifest.opt_out_allowed is True
             assert manifest.security_critical is False
         assert manifest.audit_required is True
+
+
+def test_native_tool_and_hook_entrypoints_are_importable_callables() -> None:
+    for manifest in native_plugin_manifests():
+        for ref in (*manifest.tools, *manifest.hooks):
+            module_name, function_name = ref.entrypoint.split(":", 1)
+            module = importlib.import_module(module_name)
+            value = getattr(module, function_name)
+            assert callable(value), ref.entrypoint
 
 
 def test_knowledge_manifest_matches_prd_metadata_shape() -> None:
@@ -110,7 +156,7 @@ def test_web_browser_documents_and_missions_expose_expected_native_metadata() ->
     expected_web_tools = ("WebSearch", "web-search", "web_search", "WebFetch")
     assert _tool_names(web) == expected_web_tools
     assert _tool_capability_names(web) == expected_web_tools
-    assert web.default_enabled is False
+    assert web.default_enabled is True
     assert web.services == ("api-proxy", "firecrawl")
     assert _secret_sources(web) == {
         "GATEWAY_TOKEN": "platform",
@@ -120,7 +166,7 @@ def test_web_browser_documents_and_missions_expose_expected_native_metadata() ->
 
     browser = manifests["openmagi.browser"]
     assert _tool_names(browser) == ("Browser", "SocialBrowser")
-    assert browser.default_enabled is False
+    assert browser.default_enabled is True
     assert browser.services == ("browser-worker", "chat-proxy")
     assert _secret_sources(browser)["GATEWAY_TOKEN"] == "platform"
     assert browser.config_schema["properties"]["socialBrowserEnabled"]["default"] is False  # type: ignore[index]
@@ -142,20 +188,30 @@ def test_web_browser_documents_and_missions_expose_expected_native_metadata() ->
     expected_mission_tools = ("MissionLedger",)
     assert _tool_names(missions) == expected_mission_tools
     assert _tool_capability_names(missions) == expected_mission_tools
-    assert missions.default_enabled is False
+    assert missions.default_enabled is True
     assert missions.permissions == ("read", "meta")
     assert missions.services == ("mission-ledger",)
     assert _secret_sources(missions)["GATEWAY_TOKEN"] == "platform"
     assert "mission_coordination_scope" in missions.harness_rules
 
 
-def test_web_acquisition_manifest_is_default_off_provider_interface_metadata_only() -> None:
+def test_ts_first_party_tool_surfaces_are_available_in_native_catalog() -> None:
+    tool_names = {
+        tool.name
+        for manifest in native_plugin_manifests()
+        for tool in manifest.tools
+    }
+
+    assert TS_FIRST_PARTY_PARITY_TOOL_NAMES.issubset(tool_names)
+
+
+def test_web_acquisition_manifest_is_default_enabled_provider_interface_metadata_only() -> None:
     web_acquisition = _by_id()["openmagi.web-acquisition"]
     provider_interfaces = web_acquisition.config_schema["properties"]["providerInterfaces"]["default"]  # type: ignore[index]
 
     assert web_acquisition.name == "OpenMagi Web Acquisition"
     assert web_acquisition.default_installed is True
-    assert web_acquisition.default_enabled is False
+    assert web_acquisition.default_enabled is True
     assert web_acquisition.opt_out_allowed is True
     assert web_acquisition.security_critical is False
     assert web_acquisition.audit_required is True
@@ -196,12 +252,12 @@ def test_web_acquisition_manifest_is_default_off_provider_interface_metadata_onl
     assert "route" not in repr(dumped).lower()
 
 
-def test_security_posture_manifest_is_metadata_only_default_disabled() -> None:
+def test_security_posture_manifest_is_metadata_only_default_enabled() -> None:
     security = _by_id()["openmagi.security-posture"]
 
     assert security.name == "OpenMagi Security Posture"
     assert security.default_installed is True
-    assert security.default_enabled is False
+    assert security.default_enabled is True
     assert security.opt_out_allowed is False
     assert security.security_critical is True
     assert security.audit_required is True
@@ -228,12 +284,12 @@ def test_security_posture_manifest_is_metadata_only_default_disabled() -> None:
     assert security.config_schema["properties"]["supplyChainStartupBannerAttached"]["default"] is False  # type: ignore[index]
 
 
-def test_agentmemory_manifest_is_metadata_only_default_disabled_provider_candidate() -> None:
+def test_agentmemory_manifest_is_metadata_only_default_enabled_provider_candidate() -> None:
     agentmemory = _by_id()["openmagi.agentmemory"]
 
     assert agentmemory.name == "OpenMagi AgentMemory"
     assert agentmemory.default_installed is True
-    assert agentmemory.default_enabled is False
+    assert agentmemory.default_enabled is True
     assert agentmemory.opt_out_allowed is True
     assert agentmemory.security_critical is False
     assert agentmemory.audit_required is True
@@ -262,7 +318,7 @@ def test_agentmemory_manifest_is_metadata_only_default_disabled_provider_candida
     assert _secret_sources(agentmemory) == {}
 
 
-def test_scheduled_work_manifest_is_metadata_only_default_disabled_policy_surface() -> None:
+def test_scheduled_work_manifest_is_metadata_only_default_enabled_policy_surface() -> None:
     scheduled_work = _by_id()["openmagi.scheduled-work"]
 
     expected_tools = (
@@ -278,7 +334,7 @@ def test_scheduled_work_manifest_is_metadata_only_default_disabled_policy_surfac
     )
     assert scheduled_work.name == "OpenMagi Scheduled Work"
     assert scheduled_work.default_installed is True
-    assert scheduled_work.default_enabled is False
+    assert scheduled_work.default_enabled is True
     assert scheduled_work.opt_out_allowed is True
     assert scheduled_work.security_critical is False
     assert scheduled_work.audit_required is True
@@ -349,65 +405,83 @@ def test_native_catalog_resolves_to_enabled_metadata_only_state_and_opt_out_remo
     web_acquisition_status = next(
         status for status in state.plugins if status.plugin_id == "openmagi.web-acquisition"
     )
-    assert agentmemory_status.enabled is False
-    assert agentmemory_status.status_reason == "default_disabled"
+    assert agentmemory_status.enabled is True
+    assert agentmemory_status.status_reason == "enabled"
     assert scheduled_work_status.installed is True
-    assert scheduled_work_status.enabled is False
-    assert scheduled_work_status.default_enabled is False
-    assert scheduled_work_status.status_reason == "default_disabled"
-    assert web_status.enabled is False
-    assert web_status.status_reason == "default_disabled"
-    assert browser_status.enabled is False
-    assert browser_status.status_reason == "default_disabled"
-    assert web_acquisition_status.enabled is False
-    assert web_acquisition_status.status_reason == "default_disabled"
-    assert all(
-        status.enabled
-        for status in state.plugins
-        if status.plugin_id
-            not in {
-                "openmagi.agentmemory",
-                "openmagi.browser",
-                "openmagi.missions",
-                "openmagi.scheduled-work",
-                "openmagi.security-posture",
-                "openmagi.web",
-                "openmagi.web-acquisition",
-            }
-    )
+    assert scheduled_work_status.enabled is True
+    assert scheduled_work_status.default_enabled is True
+    assert scheduled_work_status.status_reason == "enabled"
+    assert web_status.enabled is True
+    assert web_status.status_reason == "enabled"
+    assert browser_status.enabled is True
+    assert browser_status.status_reason == "enabled"
+    assert web_acquisition_status.enabled is True
+    assert web_acquisition_status.status_reason == "enabled"
+    assert all(status.enabled for status in state.plugins)
     assert state.active_tools == (
+        "AgentMemoryRemember",
+        "AgentMemorySearch",
+        "ArtifactDelete",
+        "ArtifactUpdate",
+        "BatchRead",
+        "Browser",
+        "CodeDiagnostics",
+        "CodeIntelligence",
+        "CodeSymbolSearch",
+        "CodeWorkspace",
+        "CodingBenchmark",
+        "CommitCheckpoint",
+        "CronCreate",
+        "CronDelete",
+        "CronList",
+        "CronUpdate",
+        "DateRange",
         "DocumentWrite",
+        "ExternalSourceCache",
+        "ExternalSourceRead",
+        "ExternalToolLoader",
         "KnowledgeSearch",
         "KnowledgeWrite",
+        "MemoryRedact",
+        "MissionLedger",
+        "NotifyUser",
+        "PackageDependencyResolve",
+        "ProjectVerificationPlanner",
+        "RepoMap",
+        "RepoTaskState",
+        "RepositoryMap",
+        "SafeCommand",
+        "SkillLoader",
+        "SkillRuntimeHooks",
+        "SocialBrowser",
+        "SpawnAgent",
+        "SpawnWorktreeApply",
         "SpreadsheetWrite",
+        "SwitchToActMode",
+        "TaskBoard",
+        "TaskGet",
+        "TaskList",
+        "TaskOutput",
+        "TaskStop",
+        "TaskWait",
+        "WebFetch",
+        "WebSearch",
         "knowledge-search",
         "knowledge-write",
+        "web-search",
+        "web_search",
     )
-    assert "AgentMemorySearch" not in state.active_tools
-    assert "AgentMemoryRemember" not in state.active_tools
-    assert "agentmemory.recall" not in state.active_hooks
-    assert "agentmemory.observe" not in state.active_hooks
-    assert "CronCreate" not in state.active_tools
-    assert "CronList" not in state.active_tools
-    assert "CronUpdate" not in state.active_tools
-    assert "CronDelete" not in state.active_tools
-    assert "MissionLedger" not in state.active_tools
-    assert "mission_coordination_scope" not in state.active_harness_rules
-    assert "security_posture_matrix" not in state.active_harness_rules
-    assert "external_surface_fail_closed" not in state.active_harness_rules
-    assert "sandbox_preflight" not in state.active_harness_rules
-    assert "credential_pass_through_policy" not in state.active_harness_rules
-    assert "context_file_injection_guard" not in state.active_harness_rules
-    assert "supply_chain_advisory" not in state.active_harness_rules
-    assert "TaskWait" not in state.active_tools
-    assert "TaskGet" not in state.active_tools
-    assert "TaskList" not in state.active_tools
-    assert "WebSearch" not in state.active_tools
-    assert "WebFetch" not in state.active_tools
-    assert "Browser" not in state.active_tools
-    assert "SocialBrowser" not in state.active_tools
-    assert "scheduled_work_recipe_policy" not in state.active_harness_rules
-    assert "web_acquisition_provider_boundary" not in state.active_harness_rules
+    assert "agentmemory.recall" in state.active_hooks
+    assert "agentmemory.observe" in state.active_hooks
+    assert "mission_coordination_scope" in state.active_harness_rules
+    assert "security_posture_matrix" in state.active_harness_rules
+    assert "external_surface_fail_closed" in state.active_harness_rules
+    assert "sandbox_preflight" in state.active_harness_rules
+    assert "credential_pass_through_policy" in state.active_harness_rules
+    assert "context_file_injection_guard" in state.active_harness_rules
+    assert "supply_chain_advisory" in state.active_harness_rules
+    assert "scheduled_work_recipe_policy" in state.active_harness_rules
+    assert "web_acquisition_provider_boundary" in state.active_harness_rules
     assert "DocumentRead" not in state.active_tools
     assert "MissionExport" not in state.active_tools
     assert state.traffic_attached is False

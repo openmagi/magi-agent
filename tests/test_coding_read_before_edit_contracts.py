@@ -313,7 +313,7 @@ def test_file_write_create_and_replace_are_receipt_only_and_read_checked_when_re
         assert decision.public_projection()["authorityFlags"]["filesystemWriteAttempted"] is False
 
 
-def test_mutation_materialization_is_default_off_and_exposes_file_tool_metadata_only() -> None:
+def test_mutation_materialization_keeps_authority_off_and_exposes_default_enabled_file_tools() -> None:
     materialization = materialize_coding_mutation_recipe()
     manifests = {manifest.name: manifest for manifest in core_tool_manifests()}
 
@@ -330,7 +330,7 @@ def test_mutation_materialization_is_default_off_and_exposes_file_tool_metadata_
         manifest = manifests[name]
         assert manifest.kind == "core"
         assert manifest.adk_tool_type == "FunctionTool"
-        assert manifest.enabled_by_default is False
+        assert manifest.enabled_by_default is True
         assert manifest.input_schema == {"type": "object", "additionalProperties": True}
     assert manifests["FileRead"].mutates_workspace is False
     assert manifests["FileEdit"].mutates_workspace is True

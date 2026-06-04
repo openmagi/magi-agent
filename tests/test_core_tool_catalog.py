@@ -61,7 +61,7 @@ def test_core_tool_catalog_seed_set_is_immutable_builtin_core_metadata() -> None
         assert manifest.kind == "core"
         assert manifest.source.kind == "builtin"
         assert manifest.source.package == "openmagi.core"
-        assert manifest.enabled_by_default is False
+        assert manifest.enabled_by_default is True
         assert manifest.opt_out is True
         assert manifest.input_schema == {"type": "object", "additionalProperties": True}
 
@@ -163,21 +163,25 @@ def test_core_tool_catalog_uses_conservative_permission_and_mode_metadata() -> N
         assert "gate1a" not in manifests[name].tags
 
 
-def test_register_core_tool_manifests_keeps_catalog_disabled_and_protected() -> None:
+def test_register_core_tool_manifests_keeps_catalog_enabled_and_protected() -> None:
     registry = ToolRegistry()
     manifests = register_core_tool_manifests(registry)
 
     assert tuple(manifest.name for manifest in manifests) == EXPECTED_CORE_TOOL_NAMES
     assert [tool.name for tool in registry.list_all()] == sorted(EXPECTED_CORE_TOOL_NAMES)
-    assert registry.list_available(mode="plan") == []
-    assert registry.list_available(mode="act") == []
-    assert all(registry.is_enabled(name) is False for name in EXPECTED_CORE_TOOL_NAMES)
+    assert {tool.name for tool in registry.list_available(mode="plan")} == {
+        name
+        for name in EXPECTED_CORE_TOOL_NAMES
+        if name not in {"FileWrite", "FileEdit", "Bash", "TestRun", "ExitPlanMode", "ArtifactCreate"}
+    }
+    assert {tool.name for tool in registry.list_available(mode="act")} == set(EXPECTED_CORE_TOOL_NAMES)
+    assert all(registry.is_enabled(name) is True for name in EXPECTED_CORE_TOOL_NAMES)
 
     with pytest.raises(ValueError, match="core/builtin"):
         registry.unregister("FileRead")
 
 
-def test_disabled_catalog_tools_do_not_dispatch_or_request_approval() -> None:
+def test_default_enabled_approval_tool_without_handler_requests_approval() -> None:
     registry = ToolRegistry()
     register_core_tool_manifests(registry)
 
@@ -190,21 +194,15 @@ def test_disabled_catalog_tools_do_not_dispatch_or_request_approval() -> None:
         )
     )
 
-    assert result.status == "blocked"
-    assert result.metadata == {
-        "toolName": "Bash",
-        "permissionClass": "execute",
-        "mode": "act",
-        "dangerous": True,
-        "mutatesWorkspace": True,
-        "reason": "tool disabled",
-    }
+    assert result.status == "needs_approval"
+    assert result.metadata["toolName"] == "Bash"
+    assert result.metadata["reason"] == "complex shell requires approval"
+    assert "controlRequest" in result.metadata
 
 
 def test_enabled_catalog_tool_without_handler_returns_structured_missing_handler_error() -> None:
     registry = ToolRegistry()
     register_core_tool_manifests(registry)
-    registry.enable("FileRead")
 
     result = asyncio.run(
         ToolDispatcher(registry).dispatch(
@@ -228,7 +226,7 @@ def test_enabled_catalog_tool_without_handler_returns_structured_missing_handler
     }
 
 
-def test_enabled_approval_required_catalog_tool_without_handler_does_not_request_approval() -> None:
+def test_enabled_approval_required_catalog_tool_without_handler_requests_approval() -> None:
     registry = ToolRegistry()
     register_core_tool_manifests(registry)
     registry.enable("Bash")
@@ -242,15 +240,7 @@ def test_enabled_approval_required_catalog_tool_without_handler_does_not_request
         )
     )
 
-    assert result.status == "error"
-    assert result.error_code == "tool_handler_missing"
-    assert result.error_message == "tool handler missing"
-    assert result.metadata == {
-        "toolName": "Bash",
-        "permissionClass": "execute",
-        "mode": "act",
-        "dangerous": True,
-        "mutatesWorkspace": True,
-        "reason": "tool handler missing",
-    }
-    assert "controlRequest" not in result.metadata
+    assert result.status == "needs_approval"
+    assert result.metadata["toolName"] == "Bash"
+    assert result.metadata["reason"] == "complex shell requires approval"
+    assert "controlRequest" in result.metadata

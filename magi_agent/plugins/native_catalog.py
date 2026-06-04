@@ -17,7 +17,7 @@ _NATIVE_PLUGIN_DATA: tuple[Mapping[str, object], ...] = (
         ),
         "publisher": "openmagi",
         "defaultInstalled": True,
-        "defaultEnabled": False,
+        "defaultEnabled": True,
         "optOutAllowed": True,
         "securityCritical": False,
         "audit_required": True,
@@ -66,6 +66,46 @@ _NATIVE_PLUGIN_DATA: tuple[Mapping[str, object], ...] = (
         ),
     },
     {
+        "id": "openmagi.artifacts",
+        "name": "OpenMagi Artifacts",
+        "kind": "native",
+        "version": "0.1.0-adk-scaffold",
+        "description": "First-party artifact update and delete surfaces for local artifact bookkeeping.",
+        "publisher": "openmagi",
+        "defaultInstalled": True,
+        "defaultEnabled": True,
+        "optOutAllowed": True,
+        "securityCritical": False,
+        "audit_required": True,
+        "runtime": {
+            "minCoreVersion": "0.1.0-adk-scaffold",
+            "adkCompatibility": "ADK ArtifactService-compatible local artifact policy surface.",
+        },
+        "permissions": ("write",),
+        "services": (),
+        "tools": (
+            {
+                "name": "ArtifactUpdate",
+                "entrypoint": "magi_agent.plugins.native.artifacts:artifact_update",
+            },
+            {
+                "name": "ArtifactDelete",
+                "entrypoint": "magi_agent.plugins.native.artifacts:artifact_delete",
+            },
+        ),
+        "harnessRules": ("artifact_bookkeeping_policy",),
+        "configSchema": {
+            "type": "object",
+            "additionalProperties": False,
+            "properties": {},
+        },
+        "capabilities": (
+            {"type": "tool", "name": "ArtifactUpdate"},
+            {"type": "tool", "name": "ArtifactDelete"},
+            {"type": "harness", "name": "artifact_bookkeeping_policy"},
+        ),
+    },
+    {
         "id": "openmagi.browser",
         "name": "OpenMagi Browser",
         "kind": "native",
@@ -73,15 +113,15 @@ _NATIVE_PLUGIN_DATA: tuple[Mapping[str, object], ...] = (
         "description": "Metadata for OpenMagi browser automation and social browsing surfaces.",
         "publisher": "openmagi",
         "defaultInstalled": True,
-        "defaultEnabled": False,
+        "defaultEnabled": True,
         "optOutAllowed": True,
         "securityCritical": False,
         "audit_required": True,
         "runtime": {
             "minCoreVersion": "0.1.0-adk-scaffold",
             "adkCompatibility": (
-                "default-disabled browser provider surface; future ADK FunctionTool "
-                "attachment must route through ToolHost policy"
+                "browser provider surface; ADK FunctionTool attachment routes "
+                "through ToolHost policy"
             ),
         },
         "permissions": ("read", "write", "net"),
@@ -125,6 +165,100 @@ _NATIVE_PLUGIN_DATA: tuple[Mapping[str, object], ...] = (
         ),
     },
     {
+        "id": "openmagi.coding",
+        "name": "OpenMagi Coding",
+        "kind": "native",
+        "version": "0.1.0-adk-scaffold",
+        "description": (
+            "First-party coding, repository inspection, verification planning, "
+            "and safe command metadata surfaces."
+        ),
+        "publisher": "openmagi",
+        "defaultInstalled": True,
+        "defaultEnabled": True,
+        "optOutAllowed": True,
+        "securityCritical": False,
+        "audit_required": True,
+        "runtime": {
+            "minCoreVersion": "0.1.0-adk-scaffold",
+            "adkCompatibility": "ADK FunctionTool-compatible local coding harness surface.",
+        },
+        "permissions": ("read",),
+        "services": (),
+        "tools": (
+            {
+                "name": "CodeDiagnostics",
+                "entrypoint": "magi_agent.plugins.native.coding:code_diagnostics",
+            },
+            {
+                "name": "CodeIntelligence",
+                "entrypoint": "magi_agent.plugins.native.coding:code_intelligence",
+            },
+            {
+                "name": "CodeSymbolSearch",
+                "entrypoint": "magi_agent.plugins.native.coding:code_symbol_search",
+            },
+            {
+                "name": "CodeWorkspace",
+                "entrypoint": "magi_agent.plugins.native.coding:code_workspace",
+            },
+            {
+                "name": "CodingBenchmark",
+                "entrypoint": "magi_agent.plugins.native.coding:coding_benchmark",
+            },
+            {
+                "name": "CommitCheckpoint",
+                "entrypoint": "magi_agent.plugins.native.coding:commit_checkpoint",
+            },
+            {
+                "name": "PackageDependencyResolve",
+                "entrypoint": "magi_agent.plugins.native.coding:package_dependency_resolve",
+            },
+            {
+                "name": "ProjectVerificationPlanner",
+                "entrypoint": "magi_agent.plugins.native.coding:project_verification_planner",
+            },
+            {
+                "name": "RepoMap",
+                "entrypoint": "magi_agent.plugins.native.coding:repo_map",
+            },
+            {
+                "name": "RepositoryMap",
+                "entrypoint": "magi_agent.plugins.native.coding:repository_map",
+            },
+            {
+                "name": "RepoTaskState",
+                "entrypoint": "magi_agent.plugins.native.coding:repo_task_state",
+            },
+            {
+                "name": "SafeCommand",
+                "entrypoint": "magi_agent.plugins.native.coding:safe_command",
+            },
+        ),
+        "harnessRules": ("coding_verification_policy", "repo_intelligence_policy"),
+        "configSchema": {
+            "type": "object",
+            "additionalProperties": False,
+            "properties": {},
+        },
+        "capabilities": (
+            {"type": "tool", "name": "CodeDiagnostics"},
+            {"type": "tool", "name": "CodeIntelligence"},
+            {"type": "tool", "name": "CodeSymbolSearch"},
+            {"type": "tool", "name": "CodeWorkspace"},
+            {"type": "tool", "name": "CodingBenchmark"},
+            {"type": "tool", "name": "CommitCheckpoint"},
+            {"type": "tool", "name": "PackageDependencyResolve"},
+            {"type": "tool", "name": "ProjectVerificationPlanner"},
+            {"type": "tool", "name": "RepoMap"},
+            {"type": "tool", "name": "RepositoryMap"},
+            {"type": "tool", "name": "RepoTaskState"},
+            {"type": "tool", "name": "SafeCommand"},
+            {"type": "harness", "name": "coding_verification_policy"},
+            {"type": "harness", "name": "repo_intelligence_policy"},
+        ),
+    },
+    {
         "id": "openmagi.documents",
         "name": "OpenMagi Documents",
         "kind": "native",
@@ -138,7 +272,7 @@ _NATIVE_PLUGIN_DATA: tuple[Mapping[str, object], ...] = (
         "audit_required": True,
         "runtime": {
             "minCoreVersion": "0.1.0-adk-scaffold",
-            "adkCompatibility": "future ADK tool/plugin attachment point only",
+            "adkCompatibility": "ADK tool/plugin attachment point",
         },
         "permissions": ("read", "write", "net"),
         "services": ("document-worker", "document-converter-worker", "chat-proxy"),
@@ -199,7 +333,7 @@ _NATIVE_PLUGIN_DATA: tuple[Mapping[str, object], ...] = (
         "audit_required": True,
         "runtime": {
             "minCoreVersion": "0.1.0-adk-scaffold",
-            "adkCompatibility": "future ADK tool/plugin attachment point only",
+            "adkCompatibility": "ADK tool/plugin attachment point",
         },
         "permissions": ("read", "write", "net"),
         "services": ("knowledge-worker", "chat-proxy"),
@@ -263,13 +397,13 @@ _NATIVE_PLUGIN_DATA: tuple[Mapping[str, object], ...] = (
         "description": "Metadata for mission ledger coordination and export helpers.",
         "publisher": "openmagi",
         "defaultInstalled": True,
-        "defaultEnabled": False,
+        "defaultEnabled": True,
         "optOutAllowed": True,
         "securityCritical": False,
         "audit_required": True,
         "runtime": {
             "minCoreVersion": "0.1.0-adk-scaffold",
-            "adkCompatibility": "future ADK tool/plugin attachment point only",
+            "adkCompatibility": "ADK tool/plugin attachment point",
         },
         "permissions": ("read", "meta"),
         "services": ("mission-ledger",),
@@ -318,7 +452,7 @@ _NATIVE_PLUGIN_DATA: tuple[Mapping[str, object], ...] = (
         ),
         "publisher": "openmagi",
         "defaultInstalled": True,
-        "defaultEnabled": False,
+        "defaultEnabled": True,
         "optOutAllowed": True,
         "securityCritical": False,
         "audit_required": True,
@@ -396,6 +530,191 @@ _NATIVE_PLUGIN_DATA: tuple[Mapping[str, object], ...] = (
         ),
     },
     {
+        "id": "openmagi.skills",
+        "name": "OpenMagi Skills",
+        "kind": "native",
+        "version": "0.1.0-adk-scaffold",
+        "description": "First-party skill loading, runtime hook, and external tool metadata surfaces.",
+        "publisher": "openmagi",
+        "defaultInstalled": True,
+        "defaultEnabled": True,
+        "optOutAllowed": True,
+        "securityCritical": False,
+        "audit_required": True,
+        "runtime": {
+            "minCoreVersion": "0.1.0-adk-scaffold",
+            "adkCompatibility": "ADK plugin and callback metadata surface.",
+        },
+        "permissions": ("meta",),
+        "services": (),
+        "tools": (
+            {
+                "name": "SkillLoader",
+                "entrypoint": "magi_agent.plugins.native.skills:skill_loader",
+            },
+            {
+                "name": "SkillRuntimeHooks",
+                "entrypoint": "magi_agent.plugins.native.skills:skill_runtime_hooks",
+            },
+            {
+                "name": "ExternalToolLoader",
+                "entrypoint": "magi_agent.plugins.native.skills:external_tool_loader",
+            },
+        ),
+        "harnessRules": ("skill_runtime_policy",),
+        "configSchema": {
+            "type": "object",
+            "additionalProperties": False,
+            "properties": {},
+        },
+        "capabilities": (
+            {"type": "tool", "name": "SkillLoader"},
+            {"type": "tool", "name": "SkillRuntimeHooks"},
+            {"type": "tool", "name": "ExternalToolLoader"},
+            {"type": "harness", "name": "skill_runtime_policy"},
+        ),
+    },
+    {
+        "id": "openmagi.source-ledger",
+        "name": "OpenMagi Source Ledger",
+        "kind": "native",
+        "version": "0.1.0-adk-scaffold",
+        "description": "First-party batch read, date-range, and external source ledger tools.",
+        "publisher": "openmagi",
+        "defaultInstalled": True,
+        "defaultEnabled": True,
+        "optOutAllowed": True,
+        "securityCritical": False,
+        "audit_required": True,
+        "runtime": {
+            "minCoreVersion": "0.1.0-adk-scaffold",
+            "adkCompatibility": "ADK FunctionTool-compatible source evidence surface.",
+        },
+        "permissions": ("read",),
+        "services": (),
+        "tools": (
+            {
+                "name": "BatchRead",
+                "entrypoint": "magi_agent.plugins.native.source_ledger:batch_read",
+            },
+            {
+                "name": "DateRange",
+                "entrypoint": "magi_agent.plugins.native.source_ledger:date_range",
+            },
+            {
+                "name": "ExternalSourceCache",
+                "entrypoint": "magi_agent.plugins.native.source_ledger:external_source_cache",
+            },
+            {
+                "name": "ExternalSourceRead",
+                "entrypoint": "magi_agent.plugins.native.source_ledger:external_source_read",
+            },
+        ),
+        "harnessRules": ("source_ledger_policy",),
+        "configSchema": {
+            "type": "object",
+            "additionalProperties": False,
+            "properties": {},
+        },
+        "capabilities": (
+            {"type": "tool", "name": "BatchRead"},
+            {"type": "tool", "name": "DateRange"},
+            {"type": "tool", "name": "ExternalSourceCache"},
+            {"type": "tool", "name": "ExternalSourceRead"},
+            {"type": "harness", "name": "source_ledger_policy"},
+        ),
+    },
+    {
+        "id": "openmagi.subagents",
+        "name": "OpenMagi Subagents",
+        "kind": "native",
+        "version": "0.1.0-adk-scaffold",
+        "description": "First-party subagent and worktree apply surfaces for delegated workflow metadata.",
+        "publisher": "openmagi",
+        "defaultInstalled": True,
+        "defaultEnabled": True,
+        "optOutAllowed": True,
+        "securityCritical": False,
+        "audit_required": True,
+        "runtime": {
+            "minCoreVersion": "0.1.0-adk-scaffold",
+            "adkCompatibility": "ADK multi-agent orchestration metadata surface.",
+        },
+        "permissions": ("execute",),
+        "services": (),
+        "tools": (
+            {
+                "name": "SpawnAgent",
+                "entrypoint": "magi_agent.plugins.native.subagents:spawn_agent",
+            },
+            {
+                "name": "SpawnWorktreeApply",
+                "entrypoint": "magi_agent.plugins.native.subagents:spawn_worktree_apply",
+            },
+        ),
+        "harnessRules": ("subagent_delegation_policy",),
+        "configSchema": {
+            "type": "object",
+            "additionalProperties": False,
+            "properties": {},
+        },
+        "capabilities": (
+            {"type": "tool", "name": "SpawnAgent"},
+            {"type": "tool", "name": "SpawnWorktreeApply"},
+            {"type": "harness", "name": "subagent_delegation_policy"},
+        ),
+    },
+    {
+        "id": "openmagi.taskboard",
+        "name": "OpenMagi Taskboard",
+        "kind": "native",
+        "version": "0.1.0-adk-scaffold",
+        "description": "First-party task board, mode switch, notification, and memory redaction surfaces.",
+        "publisher": "openmagi",
+        "defaultInstalled": True,
+        "defaultEnabled": True,
+        "optOutAllowed": True,
+        "securityCritical": False,
+        "audit_required": True,
+        "runtime": {
+            "minCoreVersion": "0.1.0-adk-scaffold",
+            "adkCompatibility": "ADK FunctionTool-compatible task coordination surface.",
+        },
+        "permissions": ("meta",),
+        "services": (),
+        "tools": (
+            {
+                "name": "TaskBoard",
+                "entrypoint": "magi_agent.plugins.native.taskboard:task_board",
+            },
+            {
+                "name": "MemoryRedact",
+                "entrypoint": "magi_agent.plugins.native.taskboard:memory_redact",
+            },
+            {
+                "name": "NotifyUser",
+                "entrypoint": "magi_agent.plugins.native.taskboard:notify_user",
+            },
+            {
+                "name": "SwitchToActMode",
+                "entrypoint": "magi_agent.plugins.native.taskboard:switch_to_act_mode",
+            },
+        ),
+        "harnessRules": ("taskboard_coordination_policy",),
+        "configSchema": {
+            "type": "object",
+            "additionalProperties": False,
+            "properties": {},
+        },
+        "capabilities": (
+            {"type": "tool", "name": "TaskBoard"},
+            {"type": "tool", "name": "MemoryRedact"},
+            {"type": "tool", "name": "NotifyUser"},
+            {"type": "tool", "name": "SwitchToActMode"},
+            {"type": "harness", "name": "taskboard_coordination_policy"},
+        ),
+    },
+    {
         "id": "openmagi.security-posture",
         "name": "OpenMagi Security Posture",
         "kind": "native",
@@ -408,15 +727,15 @@ _NATIVE_PLUGIN_DATA: tuple[Mapping[str, object], ...] = (
         ),
         "publisher": "openmagi",
         "defaultInstalled": True,
-        "defaultEnabled": False,
+        "defaultEnabled": True,
         "optOutAllowed": False,
         "securityCritical": True,
         "audit_required": True,
         "runtime": {
             "minCoreVersion": "0.1.0-adk-scaffold",
             "adkCompatibility": (
-                "default-disabled ADK callback/plugin policy surface; no live "
-                "tool, route, sandbox, credential, or provider attachment"
+                "ADK callback/plugin policy surface; no live tool, route, "
+                "sandbox, credential, or provider attachment"
             ),
         },
         "permissions": (),
@@ -467,13 +786,13 @@ _NATIVE_PLUGIN_DATA: tuple[Mapping[str, object], ...] = (
         "kind": "native",
         "version": "0.1.0-adk-scaffold",
         "description": (
-            "Default-off provider-interface metadata for replaceable web "
+            "Provider-interface metadata for replaceable web "
             "acquisition, source ledger input, reader extraction, and browser "
             "worker provider surfaces."
         ),
         "publisher": "openmagi",
         "defaultInstalled": True,
-        "defaultEnabled": False,
+        "defaultEnabled": True,
         "optOutAllowed": True,
         "securityCritical": False,
         "audit_required": True,
@@ -557,21 +876,21 @@ _NATIVE_PLUGIN_DATA: tuple[Mapping[str, object], ...] = (
         "kind": "native",
         "version": "0.1.0-adk-scaffold",
         "description": (
-            "Default-disabled metadata for legacy web search and fetch surfaces; "
+            "Metadata for web search and fetch surfaces, including legacy aliases; "
             "source/browser acquisition provider selection is represented by "
             "openmagi.web-acquisition."
         ),
         "publisher": "openmagi",
         "defaultInstalled": True,
-        "defaultEnabled": False,
+        "defaultEnabled": True,
         "optOutAllowed": True,
         "securityCritical": False,
         "audit_required": True,
         "runtime": {
             "minCoreVersion": "0.1.0-adk-scaffold",
             "adkCompatibility": (
-                "default-disabled source provider surface; future ADK FunctionTool "
-                "attachment must route through ToolHost policy"
+                "source provider surface; ADK FunctionTool attachment routes "
+                "through ToolHost policy"
             ),
         },
         "permissions": ("read", "net"),

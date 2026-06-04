@@ -261,7 +261,8 @@ def test_gate8_readiness_is_disabled_by_default_and_exposes_no_authority() -> No
     assert body["userVisibleOutputAllowed"] is False
     assert body["canaryRoutingAllowed"] is False
     assert body["adk"]["invoked"] is False
-    assert body["activeTools"] == []
+    assert "FileRead" in body["activeTools"]
+    assert "AgentMemorySearch" in body["activeTools"]
 
 
 def test_gate8_readiness_requires_selected_scope_and_verified_continuity_evidence(

@@ -2201,6 +2201,7 @@ def _gate5b_full_toolhost_bundle(
             "environment": route_config.environment or "local",
         },
         workspace_root=_gate5b_full_toolhost_workspace_root(),
+        tool_registry=runtime.tool_registry,
     )
 
 
