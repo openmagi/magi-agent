@@ -2,7 +2,7 @@
 
 # Open Magi Agent
 
-**Personal AI agents with memory, tools, and verifiable work.**
+**The programmable agent that complies with your rules.**
 
 [Website](https://openmagi.ai) ·
 [CLI](docs/cli/magi.md) ·
@@ -17,9 +17,8 @@
 
 > **Early beta:** Magi Agent is under active development. Expect rough edges.
 
-> **Local-first, explicit authority:** Magi keeps memory, workspace state,
-> configuration, and audit evidence close to the agent. Optional services and
-> external integrations stay explicit and default-off.
+> **Local by default:** Run the agent, CLI, and dashboard on your machine.
+> Optional services and external integrations stay explicit and default-off.
 
 Magi Agent is a programmable AI agent runtime that actually gets things done.
 Instead of relying on prompts and hoping the model follows every instruction,
@@ -98,6 +97,7 @@ Both commands are installed by the same formula:
 
 ```bash
 magi-agent --help
+magi-agent serve --help
 ```
 
 The dashboard is served by the same local agent. It does not need a separate
