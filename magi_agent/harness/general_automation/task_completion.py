@@ -23,13 +23,14 @@ finalise with an audit event.
 """
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Mapping, MutableSequence, Sequence
 from copy import deepcopy
 from dataclasses import dataclass
 from typing import Any, Literal, Protocol
 
 from magi_agent.config.env import general_automation_live_enabled
 from magi_agent.evidence.ledger import EvidenceLedger
+from magi_agent.runtime.turn_policy import StopReasonHandlerState
 
 
 #: Bounded number of completion-repair re-entries before forcing a finalise.
@@ -42,11 +43,22 @@ _ARTIFACT_REF_LABEL = "artifactRef"
 _SNAPSHOT_REF_LABEL = "snapshotRef"
 
 #: Ledger payload / metadata keys that satisfy the artifact requirement.
+#: Written by the live flow via metadata["localArtifactReceipt"]["artifactRef"]
+#: in the spreadsheet.write tool handler.
 _ARTIFACT_KEYS: frozenset[str] = frozenset({"artifactId", "artifactRef"})
 #: Ledger payload / metadata keys that satisfy the snapshot requirement.
+#: Expected to be written by SpreadsheetWriteEvidence.sourceSnapshotRef once
+#: a production path is wired (no non-test caller exists yet — see
+#: ENFORCE_SNAPSHOT_REQUIREMENT below).
 _SNAPSHOT_KEYS: frozenset[str] = frozenset(
     {"snapshotRef", "sourceSnapshotRef", "snapshotId"}
 )
+
+#: Flip to True once a production path writes a snapshot ref to the
+#: EvidenceLedger (later PR). Until then, requiring it would force every real
+#: write task into repair-exhaustion because SpreadsheetWriteEvidence.sourceSnapshotRef
+#: has no non-test caller.
+ENFORCE_SNAPSHOT_REQUIREMENT = False
 
 
 @dataclass(frozen=True)
@@ -81,6 +93,18 @@ class TaskCompletionVerdict:
     missing: tuple[str, ...] = ()
     action: Literal["pass", "repair"] = "pass"
     repair_message: str | None = None
+
+    def __post_init__(self) -> None:
+        if self.status == "fail" and self.action == "pass":
+            raise ValueError(
+                "TaskCompletionVerdict invariant violated: "
+                "status='fail' must not have action='pass'"
+            )
+        if self.status == "pass" and self.action == "repair":
+            raise ValueError(
+                "TaskCompletionVerdict invariant violated: "
+                "status='pass' must not have action='repair'"
+            )
 
 
 class _ContractWithRequiredEvidence(Protocol):
@@ -126,7 +150,11 @@ class TaskCompletionVerifier:
         missing: list[str] = []
         if required.requires_artifact_ref and not (present & _ARTIFACT_KEYS):
             missing.append(_ARTIFACT_REF_LABEL)
-        if required.requires_snapshot_ref and not (present & _SNAPSHOT_KEYS):
+        if (
+            ENFORCE_SNAPSHOT_REQUIREMENT
+            and required.requires_snapshot_ref
+            and not (present & _SNAPSHOT_KEYS)
+        ):
             missing.append(_SNAPSHOT_REF_LABEL)
 
         if not missing:
@@ -170,16 +198,16 @@ class _CompletionGate:
     def __call__(
         self,
         deps: _CompletionGateDeps,
-        state: Any,
+        state: StopReasonHandlerState,
         *,
         blocks: Sequence[dict[str, Any]],
         iteration: int,
-        messages: list[dict[str, Any]],
+        messages: MutableSequence[dict[str, Any]],
     ) -> bool:
         if self.verdict.status == "pass":
             return False
 
-        attempt = getattr(state, "completion_repair_attempt", 0)
+        attempt = state.completion_repair_attempt
         if attempt >= COMPLETION_REPAIR_LIMIT:
             deps.stage_audit_event(
                 "ga_completion_repair_exhausted",
@@ -202,8 +230,7 @@ class _CompletionGate:
             {"role": "user", "content": self.verdict.repair_message or ""}
         )
 
-        if hasattr(state, "completion_repair_attempt"):
-            state.completion_repair_attempt = attempt + 1
+        state.completion_repair_attempt = attempt + 1
         deps.stage_audit_event(
             "ga_completion_repair",
             {
@@ -259,13 +286,17 @@ def _present_deliverable_keys(ledger: EvidenceLedger) -> frozenset[str]:
     return frozenset(present)
 
 
-def _collect_keys(mapping: Mapping[str, object], present: set[str]) -> None:
+def _collect_keys(
+    mapping: Mapping[str, object], present: set[str], depth: int = 0
+) -> None:
+    if depth > 6:
+        return
     for key, value in mapping.items():
         if key in _ARTIFACT_KEYS or key in _SNAPSHOT_KEYS:
             if isinstance(value, str) and value.strip():
                 present.add(key)
-        if isinstance(value, Mapping):
-            _collect_keys(value, present)
+        elif isinstance(value, Mapping):
+            _collect_keys(value, present, depth + 1)
 
 
 def _build_repair_message(missing: tuple[str, ...]) -> str:
@@ -279,6 +310,7 @@ def _build_repair_message(missing: tuple[str, ...]) -> str:
 
 __all__ = [
     "COMPLETION_REPAIR_LIMIT",
+    "ENFORCE_SNAPSHOT_REQUIREMENT",
     "RequiredDeliverableEvidence",
     "TaskCompletionVerdict",
     "TaskCompletionVerifier",

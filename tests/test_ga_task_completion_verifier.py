@@ -15,7 +15,9 @@ from typing import Any
 
 from magi_agent.evidence.ledger import EvidenceLedger
 from magi_agent.harness.general_automation.task_completion import (
+    ENFORCE_SNAPSHOT_REQUIREMENT,
     RequiredDeliverableEvidence,
+    TaskCompletionVerdict,
     TaskCompletionVerifier,
     completion_repair_decision,
     required_deliverable_evidence_for_contract,
@@ -117,17 +119,25 @@ def test_verifier_fails_with_repair_naming_missing_items() -> None:
     assert verdict.status == "fail"
     assert verdict.action == "repair"
     assert "artifactRef" in verdict.missing
-    assert "snapshotRef" in verdict.missing
+    # snapshotRef is only in missing when ENFORCE_SNAPSHOT_REQUIREMENT is True
+    if ENFORCE_SNAPSHOT_REQUIREMENT:
+        assert "snapshotRef" in verdict.missing
+        assert verdict.repair_message is not None
+        assert "snapshotRef" in verdict.repair_message
     assert verdict.repair_message is not None
     assert "artifactRef" in verdict.repair_message
-    assert "snapshotRef" in verdict.repair_message
 
 
 def test_verifier_fails_when_only_snapshot_missing() -> None:
     ledger = _ledger().append_artifact_ref("artifact:spreadsheet:out")
     verdict = TaskCompletionVerifier().evaluate(ledger, _required_both())
-    assert verdict.status == "fail"
-    assert verdict.missing == ("snapshotRef",)
+    if ENFORCE_SNAPSHOT_REQUIREMENT:
+        assert verdict.status == "fail"
+        assert verdict.missing == ("snapshotRef",)
+    else:
+        # artifact is present and snapshot is not enforced → pass
+        assert verdict.status == "pass"
+        assert verdict.missing == ()
 
 
 def test_verifier_inert_when_no_required_evidence() -> None:
@@ -397,3 +407,133 @@ def test_completion_verifier_does_not_disturb_hard_safety_ordering() -> None:
     assert hard_safety.priority == 60
     assert hard_safety.hard_safety is True
     assert hard_safety.disabled is False
+
+
+# ---------------------------------------------------------------------------
+# I3 — realistic EvidenceLedger population (artifact via nested metadata)
+# ---------------------------------------------------------------------------
+
+
+def test_verifier_passes_with_real_runtime_ledger_entry() -> None:
+    """The live spreadsheet.write flow writes artifactRef inside
+    metadata["localArtifactReceipt"]["artifactRef"]; no snapshotRef is
+    produced yet (ENFORCE_SNAPSHOT_REQUIREMENT=False). The verifier must PASS
+    because _collect_keys recurses into nested metadata and finds artifactRef,
+    and snapshot enforcement is deferred.
+    """
+    assert ENFORCE_SNAPSHOT_REQUIREMENT is False, (
+        "This test documents the current behaviour with snapshot enforcement OFF. "
+        "Update it when flipping ENFORCE_SNAPSHOT_REQUIREMENT to True."
+    )
+    ledger = _ledger()
+    # Populate ledger the way the real runtime does for a spreadsheet.write:
+    # artifactRef is nested under localArtifactReceipt in metadata.
+    ledger = ledger.append_artifact_ref(
+        "artifact:spreadsheet:out",
+        metadata={"localArtifactReceipt": {"artifactRef": "artifact:spreadsheet:out"}},
+    )
+    # _required_both() includes requires_snapshot_ref=True but with enforcement
+    # OFF the verifier should not demand it.
+    verdict = TaskCompletionVerifier().evaluate(ledger, _required_both())
+    assert verdict.status == "pass", (
+        f"Expected pass with real runtime ledger entry; missing={verdict.missing}"
+    )
+    assert verdict.missing == ()
+
+
+def test_gate_passes_with_real_runtime_ledger_no_snapshot() -> None:
+    """End-to-end: with flag ON and a ledger populated as the real runtime
+    does (artifact ref via nested metadata, no snapshotRef), the gate returns
+    None (pass) so handle_stop_reason finalises normally.
+    """
+    assert ENFORCE_SNAPSHOT_REQUIREMENT is False
+    ledger = _ledger()
+    ledger = ledger.append_artifact_ref(
+        "artifact:spreadsheet:out",
+        metadata={"localArtifactReceipt": {"artifactRef": "artifact:spreadsheet:out"}},
+    )
+    gate = completion_repair_decision(
+        ledger=ledger,
+        required=_required_both(),
+        agent_role="general",
+        env={"MAGI_GA_LIVE_ENABLED": "1"},
+    )
+    # Gate must be None (pass) because the artifact requirement is satisfied
+    # and snapshot enforcement is OFF.
+    assert gate is None
+
+
+# ---------------------------------------------------------------------------
+# M1 — TaskCompletionVerdict invariant
+# ---------------------------------------------------------------------------
+
+
+def test_verdict_invariant_fail_action_pass_raises() -> None:
+    """status='fail' with action='pass' violates the invariant."""
+    import pytest
+
+    with pytest.raises(ValueError, match="invariant"):
+        TaskCompletionVerdict(status="fail", action="pass")
+
+
+def test_verdict_invariant_pass_action_repair_raises() -> None:
+    """status='pass' with action='repair' violates the invariant."""
+    import pytest
+
+    with pytest.raises(ValueError, match="invariant"):
+        TaskCompletionVerdict(status="pass", action="repair")
+
+
+def test_verdict_invariant_valid_combinations() -> None:
+    """Both valid combinations (pass/pass and fail/repair) must construct OK."""
+    v1 = TaskCompletionVerdict(status="pass")
+    assert v1.status == "pass" and v1.action == "pass"
+
+    v2 = TaskCompletionVerdict(
+        status="fail",
+        missing=("artifactRef",),
+        action="repair",
+        repair_message="owe artifactRef",
+    )
+    assert v2.status == "fail" and v2.action == "repair"
+
+
+# ---------------------------------------------------------------------------
+# M5 — stop_sequence triggers the completion gate (not only end_turn)
+# ---------------------------------------------------------------------------
+
+
+def test_completion_gate_fires_on_stop_sequence_missing_artifact() -> None:
+    """The gate should recover on stop_reason='stop_sequence' when the
+    artifact is missing — the same as end_turn.
+    """
+    ledger = _ledger()
+    deps = RecordingDeps()
+    state = StopReasonHandlerState()
+    messages: list[dict[str, Any]] = []
+
+    gate = completion_repair_decision(
+        ledger=ledger,
+        required=RequiredDeliverableEvidence(requires_artifact_ref=True),
+        agent_role="general",
+        env={"MAGI_GA_LIVE_ENABLED": "1"},
+    )
+    assert gate is not None, "Gate must be active when artifact is missing"
+
+    decision = handle_stop_reason(
+        deps,
+        state,
+        stop_reason_raw="stop_sequence",
+        blocks=[{"type": "text", "text": "model stopped on sequence"}],
+        iteration=1,
+        turn_id="turn-1",
+        messages=messages,
+        completion_gate=gate,
+    )
+
+    assert decision.kind == "recover"
+    assert messages[-1]["role"] == "user"
+    assert "still owe" in messages[-1]["content"]
+    assert "artifactRef" in messages[-1]["content"]
+    assert state.completion_repair_attempt == 1
+    assert any(audit["event"] == "ga_completion_repair" for audit in deps.audits)
