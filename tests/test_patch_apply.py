@@ -292,3 +292,146 @@ def test_plan_returns_filechange_objects():
     assert isinstance(changes[0], FileChange)
     # plan must not mutate the fs.
     assert "new.py" not in fs.files
+
+
+# ---------------------------------------------------------------------------
+# Virtual-existence coherence (intra-patch op interaction)
+# ---------------------------------------------------------------------------
+
+
+def test_move_dest_collides_with_add():
+    # Move a.py -> b.py AND Add b.py. Both target b.py; the move claims it
+    # first virtually so the add must conflict (NOT silently clobber).
+    fs = FakeFs({"a.py": "old\nkeep\n"})
+    patch = (
+        "*** Begin Patch\n"
+        "*** Update File: a.py\n"
+        "*** Move to: b.py\n"
+        "@@\n"
+        "-old\n"
+        "+new\n"
+        " keep\n"
+        "*** Add File: b.py\n"
+        "+collide\n"
+        "*** End Patch\n"
+    )
+    with pytest.raises(PatchApplyError) as exc:
+        apply_patch(patch, fs)
+    assert exc.value.reason == "add_target_exists"
+    assert exc.value.path == "b.py"
+    # Atomic: nothing applied.
+    assert fs.files == {"a.py": "old\nkeep\n"}
+
+
+# NOTE: same-path interactions (delete-then-add, add-then-delete, add-then-add)
+# are rejected by the parser's ``duplicate_file_op`` guard before they reach
+# plan_patch, so they're exercised here at the plan_patch level with hand-built
+# ops to verify the virtual-existence model is coherent for the supported set.
+
+
+def test_delete_then_add_same_path_is_coherent():
+    # Delete a.py then Add a.py: the delete frees the path virtually so the
+    # add is allowed and produces the new content.
+    from magi_agent.coding.patch_apply import PatchFile
+
+    fs = FakeFs({"a.py": "old\n"})
+    ops = (
+        PatchFile(kind="delete", path="a.py"),
+        PatchFile(kind="add", path="a.py", add_lines=("fresh",)),
+    )
+    changes = plan_patch(ops, fs)
+    assert [c.kind for c in changes] == ["delete", "add"]
+    assert changes[1].new_content == "fresh\n"
+
+
+def test_add_then_delete_same_path_is_coherent():
+    # Add new.py then Delete new.py: add creates it virtually so the delete
+    # is allowed (does not surface delete_target_missing against live FS).
+    from magi_agent.coding.patch_apply import PatchFile
+
+    fs = FakeFs({})
+    ops = (
+        PatchFile(kind="add", path="new.py", add_lines=("temp",)),
+        PatchFile(kind="delete", path="new.py"),
+    )
+    changes = plan_patch(ops, fs)
+    assert [c.kind for c in changes] == ["add", "delete"]
+
+
+def test_add_then_add_same_path_conflicts():
+    # Two adds of the same path: first claims it virtually, second conflicts.
+    from magi_agent.coding.patch_apply import PatchFile
+
+    fs = FakeFs({})
+    dup = (
+        PatchFile(kind="add", path="x.py", add_lines=("a",)),
+        PatchFile(kind="add", path="x.py", add_lines=("b",)),
+    )
+    with pytest.raises(PatchApplyError) as exc:
+        plan_patch(dup, fs)
+    assert exc.value.reason == "add_target_exists"
+
+
+# ---------------------------------------------------------------------------
+# Unanchored insertion handling
+# ---------------------------------------------------------------------------
+
+
+def test_leading_pure_insertion_accepted():
+    # A context-free insertion at the very start of the file is unambiguous.
+    original = "first\nsecond\n"
+    (hunk,) = parse_patch_envelope(
+        "*** Begin Patch\n*** Update File: a\n@@\n+header\n*** End Patch\n"
+    )[0].hunks
+    assert derive_new_contents(original, [hunk]) == "header\nfirst\nsecond\n"
+
+
+def test_eof_pure_insertion_accepted():
+    # A context-free insertion anchored to EOF is unambiguous.
+    original = "first\nsecond\n"
+    (hunk,) = parse_patch_envelope(
+        "*** Begin Patch\n*** Update File: a\n@@\n+footer\n*** End of File\n*** End Patch\n"
+    )[0].hunks
+    assert derive_new_contents(original, [hunk]) == "first\nsecond\nfooter\n"
+
+
+def test_midfile_pure_insertion_rejected():
+    # A pure-insertion hunk that lands after an earlier anchored hunk (cursor
+    # advanced past 0) and is not EOF-anchored has no anchor -> reject.
+    original = "alpha\nbeta\ngamma\n"
+    hunks = parse_patch_envelope(
+        "*** Begin Patch\n"
+        "*** Update File: a\n"
+        "@@\n"
+        " alpha\n"
+        "+x\n"  # anchored hunk advances cursor past start
+        "@@\n"
+        "+orphan\n"  # bare insertion, mid-file, no EOF marker -> ambiguous
+        "*** End Patch\n"
+    )[0].hunks
+    with pytest.raises(PatchApplyError) as exc:
+        derive_new_contents(original, hunks)
+    assert exc.value.reason == "insertion_without_context"
+
+
+# ---------------------------------------------------------------------------
+# CRLF line endings (documents current behavior)
+# ---------------------------------------------------------------------------
+
+
+def test_crlf_file_current_behavior_documented():
+    # derive_new_contents splits on "\n" only, so a CRLF file keeps the "\r"
+    # as a suffix on each line. The matcher's exact pass therefore won't match
+    # a patch context line lacking the "\r"; the rstrip/full-trim passes do.
+    # This test documents that current behavior: a context line written
+    # without "\r" still matches via the trim passes, and the surrounding
+    # unmodified lines RETAIN their original "\r" (no rewrite of untouched
+    # lines).
+    original = "alpha\r\nbeta\r\ngamma\r\n"
+    (hunk,) = parse_patch_envelope(
+        "*** Begin Patch\n*** Update File: a\n@@\n-beta\n+BETA\n*** End Patch\n"
+    )[0].hunks
+    result = derive_new_contents(original, [hunk])
+    # The matched/replaced line is emitted WITHOUT "\r" (patch-supplied),
+    # while untouched alpha/gamma keep their original "\r" -> mixed endings.
+    assert result == "alpha\r\nBETA\ngamma\r\n"

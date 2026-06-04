@@ -8,8 +8,11 @@ This module is intentionally self-contained and PURE where possible:
   using a 4-pass seek (exact -> rstrip/trim-end -> full trim -> unicode
   normalize) with context-anchor and EOF-anchor handling.
 * ``plan_patch`` / ``apply_patch`` separate verify-then-apply so that
-  multi-file patches are atomic: every operation is verified against a read
-  snapshot first, and only if all verify does any IO occur.
+  multi-file patches are atomic: every operation is verified against an
+  evolving virtual-existence model (live FS overlaid with the effect of the
+  preceding ops in the same patch) first, and only if all verify does any IO
+  occur. This keeps intra-patch ops coherent (e.g. ``move a -> b`` + ``add b``
+  correctly conflicts instead of one silently clobbering the other).
 
 The only impure surface is ``apply_patch`` (it reads + writes the workspace via
 an injected ``Filesystem`` protocol). Parsing and matching never touch IO, so
@@ -74,6 +77,10 @@ _SMART_QUOTE_MAP = {
 
 
 def _normalize_unicode(text: str) -> str:
+    # NFKC + smart-quote folding is COMPARISON-ONLY: applied to the needle and
+    # the file window during 4th-pass matching, never to text that gets written
+    # back out. Do not pipe this result into emitted/output content or it will
+    # silently rewrite the user's original characters.
     out = text
     for source, target in _SMART_QUOTE_MAP.items():
         if source in out:
@@ -381,12 +388,21 @@ def derive_new_contents(file_text: str, hunks: Sequence[PatchHunk]) -> str:
             if line.kind in {"context", "add"}
         ]
         if not old_lines:
-            # Pure-insertion hunk: anchor to EOF or current cursor.
+            # Pure-insertion hunk (no context/remove lines). The only
+            # unambiguous placements are: EOF (explicit ``*** End of File``
+            # anchor) or the very start of the file (leading insertion at
+            # cursor 0). Anywhere else the insertion has no anchor and would
+            # silently misplace content, so reject it.
             if hunk.is_end_of_file:
                 result.extend(file_lines[cursor:])
                 cursor = len(file_lines)
-            result.extend(new_lines)
-            continue
+                result.extend(new_lines)
+                continue
+            if cursor == 0:
+                # Leading insertion: unambiguous, prepend at the file head.
+                result.extend(new_lines)
+                continue
+            raise PatchApplyError("insertion_without_context")
 
         match_index = _seek_context(
             file_lines,
@@ -427,10 +443,30 @@ def plan_patch(
     """
 
     changes: list[FileChange] = []
-    # Track virtual existence so multi-file ops within one patch stay coherent.
+    # Virtual-existence model: each op is verified against the EVOLVING state
+    # produced by the preceding ops in this same patch, not just the raw live
+    # FS. ``virtual_exists`` maps a path to its existence after the plan so far,
+    # so e.g. a move ``a -> b`` followed by an add ``b`` correctly conflicts
+    # (the move has already claimed ``b`` virtually), instead of both verifying
+    # against a live FS where ``b`` is absent and one silently clobbering the
+    # other at apply time.
+    virtual_exists: dict[str, bool] = {}
+
+    def exists_virtual(path: str) -> bool:
+        if path in virtual_exists:
+            return virtual_exists[path]
+        return filesystem.exists(path)
+
+    def read_virtual(path: str) -> str:
+        # Virtual contents only matter when a later op reads a path an earlier
+        # op in THIS patch produced. The parser already rejects duplicate source
+        # paths, so for the supported op set a path is read at most once from
+        # the live FS; fall back to live read.
+        return filesystem.read(path)
+
     for file_op in files:
         if file_op.kind == "add":
-            if filesystem.exists(file_op.path):
+            if exists_virtual(file_op.path):
                 raise PatchApplyError("add_target_exists", path=file_op.path)
             content = "\n".join(file_op.add_lines)
             if file_op.add_lines:
@@ -438,16 +474,18 @@ def plan_patch(
             changes.append(
                 FileChange(kind="add", path=file_op.path, new_content=content)
             )
+            virtual_exists[file_op.path] = True
         elif file_op.kind == "delete":
-            if not filesystem.exists(file_op.path):
+            if not exists_virtual(file_op.path):
                 raise PatchApplyError("delete_target_missing", path=file_op.path)
             changes.append(
                 FileChange(kind="delete", path=file_op.path, removed_path=file_op.path)
             )
+            virtual_exists[file_op.path] = False
         elif file_op.kind in {"update", "move"}:
-            if not filesystem.exists(file_op.path):
+            if not exists_virtual(file_op.path):
                 raise PatchApplyError("update_target_missing", path=file_op.path)
-            current = filesystem.read(file_op.path)
+            current = read_virtual(file_op.path)
             try:
                 new_content = derive_new_contents(current, file_op.hunks)
             except PatchApplyError as exc:
@@ -456,7 +494,7 @@ def plan_patch(
                 destination = file_op.move_to or ""
                 if not destination:
                     raise PatchApplyError("move_missing_destination", path=file_op.path)
-                if filesystem.exists(destination) and destination != file_op.path:
+                if destination != file_op.path and exists_virtual(destination):
                     raise PatchApplyError("move_target_exists", path=destination)
                 changes.append(
                     FileChange(
@@ -467,12 +505,16 @@ def plan_patch(
                         removed_path=file_op.path,
                     )
                 )
+                if destination != file_op.path:
+                    virtual_exists[file_op.path] = False
+                virtual_exists[destination] = True
             else:
                 changes.append(
                     FileChange(
                         kind="update", path=file_op.path, new_content=new_content
                     )
                 )
+                virtual_exists[file_op.path] = True
         else:  # pragma: no cover - exhaustive guard
             raise PatchApplyError("unsupported_op", path=file_op.path)
     return changes

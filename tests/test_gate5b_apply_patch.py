@@ -204,3 +204,54 @@ def test_flag_off_keeps_edit_write_for_gpt5(tmp_path):
     exposed = set(bundle.exposed_tool_names)
     assert "FileWrite" in exposed
     assert "FileEdit" in exposed
+
+
+def test_gpt50_is_not_gpt5_class(tmp_path):
+    # "gpt-50" must NOT match the gpt-5 family (trailing digit boundary). If it
+    # were mis-classified, FileWrite/FileEdit would be swapped out.
+    bundle = _bundle(tmp_path, apply_patch_enabled=True, model_id="openai:gpt-50")
+    exposed = set(bundle.exposed_tool_names)
+    assert "FileWrite" in exposed
+    assert "FileEdit" in exposed
+
+
+@pytest.mark.asyncio
+async def test_update_missing_surfaces_update_target_missing(tmp_path):
+    # Updating a MISSING (but path-safe) file must surface plan_patch's precise
+    # reason via the gate, not be masked as path_policy_denied by the preflight.
+    bundle = _bundle(tmp_path, apply_patch_enabled=True)
+    patch = (
+        "*** Begin Patch\n"
+        "*** Update File: missing.py\n"
+        "@@\n"
+        "-x\n"
+        "+y\n"
+        "*** End Patch\n"
+    )
+    outcome = await bundle.host.dispatch(
+        "PatchApply",
+        {"patch": patch},
+        request_digest=_sha256("req-update-missing"),
+        tool_call_id="call-update-missing",
+    )
+    # plan_patch existence failure -> patch_apply_error (ValueError path),
+    # surfaced as an "error" outcome, NOT a "blocked" path_policy_denied.
+    assert outcome.status == "error"
+    assert not (tmp_path / "missing.py").exists()
+
+
+@pytest.mark.asyncio
+async def test_delete_missing_surfaces_delete_target_missing(tmp_path):
+    bundle = _bundle(tmp_path, apply_patch_enabled=True)
+    patch = (
+        "*** Begin Patch\n"
+        "*** Delete File: missing.py\n"
+        "*** End Patch\n"
+    )
+    outcome = await bundle.host.dispatch(
+        "PatchApply",
+        {"patch": patch},
+        request_digest=_sha256("req-delete-missing"),
+        tool_call_id="call-delete-missing",
+    )
+    assert outcome.status == "error"

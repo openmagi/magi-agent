@@ -1046,13 +1046,20 @@ class Gate5BFullToolHost:
         except PatchParseError as exc:
             raise ValueError(f"patch_parse_error:{exc.args[0]}") from exc
 
-        # Preflight every source and move target before any IO so the patch is
-        # atomic with respect to workspace path policy.
+        # Path policy preflight on EVERY target before any IO: add/update/delete
+        # source path AND move destination must be safe workspace children.
+        #
+        # This is purely a path-SHAPE / sealed-path / escape check; it must NOT
+        # assert existence. ``allow_missing=True`` for ALL kinds so that
+        # ``plan_patch`` owns existence semantics and its precise reason codes
+        # (``update_target_missing`` / ``delete_target_missing``) reach
+        # operators instead of being masked as ``path_policy_denied`` here.
+        # Sealed/escape rejection is unaffected (independent of existence).
         for file_op in files:
             _safe_child_path(
                 self.workspace_root,
                 file_op.path,
-                allow_missing=file_op.kind == "add",
+                allow_missing=True,
             )
             if file_op.move_to:
                 _safe_child_path(
@@ -1527,7 +1534,11 @@ def _permission_reason_code(metadata: Mapping[str, object]) -> str:
     return "tool_permission_blocked"
 
 
-_GPT5_CLASS_RE = re.compile(r"(?:^|[/:-])gpt-?5", re.IGNORECASE)
+# Match genuine gpt-5 family ids only. The trailing ``(?![0-9])`` boundary
+# rejects ``gpt-50`` / ``gpt-512`` etc. while still allowing ``gpt-5``,
+# ``gpt5.5``, ``openai:gpt-5``. (A literal ``.`` after the 5 still counts as a
+# minor version, e.g. ``gpt-5.5``.)
+_GPT5_CLASS_RE = re.compile(r"(?:^|[/:-])gpt-?5(?![0-9])", re.IGNORECASE)
 _NON_GPT5_RE = re.compile(r"gpt-?4|gpt-?3|oss", re.IGNORECASE)
 _EDIT_WRITE_TOOLS = frozenset({"FileWrite", "FileEdit"})
 
