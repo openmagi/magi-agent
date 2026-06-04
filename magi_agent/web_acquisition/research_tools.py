@@ -134,6 +134,13 @@ class LocalWebResearchToolBoundary:
     ) -> ToolResult:
         assert self._live_pack is not None  # caller guarantees gate + wiring
         provider_request = _live_request_from_tool(tool_name, arguments, context)
+        # PR3b guard: live_pack.run() is not exception-wrapped here (symmetric
+        # with the legacy runtime.run path). The PR3a StubLiveProvider is canned
+        # and never raises. When PR3b wires real network providers, provider
+        # errors (connection errors, timeouts, etc.) CAN propagate out of run()
+        # and bubble up through execute_tool. PR3b MUST wrap this call to catch
+        # provider exceptions and return a blocked/repair_required ToolResult
+        # rather than letting them propagate to the agent loop.
         result = self._live_pack.run(provider_request, provider=self._live_provider)
         self.last_live_result = result
         if result.status != "ok":
@@ -270,11 +277,25 @@ def _live_request_from_tool(
     arguments: Mapping[str, object],
     context: object | None,
 ) -> WebAcquisitionProviderRequest:
+    # NOTE: _live_request_from_tool is intentionally separate from _request_from_tool.
+    # The legacy and live operation namespaces differ ("web.search" vs "search") and
+    # their request/record types differ, so the two helper families are deliberate
+    # duplicates rather than a shared abstraction.
     operation = _TOOL_LIVE_OPERATIONS[tool_name]
     turn_id = _context_text(context, "turn_id", "turnId") or "turn-local"
+    # requestId must be per-call-distinct, not just per-turn. A single turn may
+    # issue both WebSearch and WebFetch (and in future, multiple fetches), which
+    # would collide if we based requestId on turn_id alone. Include the tool name
+    # and tool_use_id (when present) as discriminators so each call gets a unique
+    # correlation handle through the safe-ref / digest path.
+    tool_use_id = _context_text(context, "tool_use_id", "toolUseId")
+    if tool_use_id is not None:
+        raw_request_id = f"{turn_id}:{tool_name}:{tool_use_id}"
+    else:
+        raw_request_id = f"{turn_id}:{tool_name}"
     base: dict[str, object] = {
         "operation": operation,
-        "requestId": _live_safe_ref(turn_id, fallback="req-local"),
+        "requestId": _live_safe_ref(raw_request_id, fallback=f"req-{tool_name.lower()}-local"),
         "providerName": OPERATION_TO_PROVIDER_NAME[operation],
         "botIdDigest": _live_digest_ref(context, ("bot_id", "botId"), fallback="bot-local"),
         "ownerIdDigest": _live_digest_ref(context, ("user_id", "userId"), fallback="owner-local"),
@@ -304,6 +325,9 @@ def _tool_result_from_non_ok_live(
     else:
         status = "blocked"
     error_code = result.reason_codes[0] if result.reason_codes else None
+    # Intentional: errorMessage is omitted here. WebAcquisitionProviderResult
+    # exposes no free-text error message (only reason_codes), so we cannot
+    # surface a redacted string; the caller receives only the errorCode.
     return ToolResult(
         status=status,
         errorCode=error_code,
@@ -443,6 +467,13 @@ def _tool_output_live(
 
 
 def _source_output_live(record: WebAcquisitionLiveSourceRecord) -> dict[str, object]:
+    # PR3b guard: safe_metadata() is a key-denylist + URL/secret-regex redactor.
+    # It does NOT scrub bare hostnames inside metadata VALUES (e.g. a provider
+    # may embed "https://internal.corp/..." in a "snippet" or custom key).
+    # Today this is safe because only the canned StubLiveProvider feeds metadata.
+    # Before any real httpx provider ships (PR3b), provider-controlled metadata
+    # values must go through a host/URL-aware redactor, or the metadata surface
+    # must be switched to an allowlist of known-safe keys.
     return {
         "sourceRef": record.source_ref,
         "evidenceRef": record.evidence_ref,
@@ -459,6 +490,9 @@ def _safe_tool_metadata_live(
     tool_name: str,
     result: WebAcquisitionProviderResult,
 ) -> dict[str, object]:
+    # PR3b guard: public_projection() calls safe_metadata() on diagnosticMetadata
+    # (provider-controlled). Same hostname-in-values caveat as _source_output_live
+    # applies; see that function's PR3b comment for the full mitigation note.
     projection = result.public_projection()
     return {
         "toolName": tool_name,

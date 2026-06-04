@@ -12,12 +12,14 @@ from magi_agent.web_acquisition.live_provider_pack import (
     LiveWebAcquisitionPackConfig,
     LiveWebAcquisitionProviderPack,
     StubLiveProvider,
+    WebAcquisitionProviderRequest,
     WebAcquisitionProviderResult,
 )
 from magi_agent.web_acquisition.research_tools import (
     LIVE_WEB_ACQUISITION_ENABLED_ENV,
     LIVE_WEB_ACQUISITION_KILL_SWITCH_ENV,
     LocalWebResearchToolBoundary,
+    _live_request_from_tool,
     live_web_acquisition_active,
     project_live_web_acquisition_result_to_source_ledger,
 )
@@ -101,10 +103,11 @@ def test_default_boundary_uses_legacy_runtime_and_never_takes_live_path() -> Non
 
     # Default construction: no live pack/provider, no env -> legacy runtime.
     # The legacy result is not a WebAcquisitionResult, so anything beyond the
-    # runtime.run call would raise; we only assert the runtime was hit.
+    # runtime.run call would raise an AttributeError when the code tries to
+    # access .status on the plain object(); we only assert the runtime was hit.
     try:
         asyncio.run(boundary.execute_tool("WebSearch", {"query": "x"}, _context()))
-    except Exception:
+    except AttributeError:
         pass
 
     assert len(runtime.calls) == 1
@@ -121,9 +124,11 @@ def test_gate_off_with_live_pack_injected_still_uses_legacy_runtime() -> None:
         env={},  # gate OFF
     )
 
+    # Gate is off, so falls through to legacy runtime whose result is a plain
+    # object() that lacks .status — expect AttributeError when code checks it.
     try:
         asyncio.run(boundary.execute_tool("WebSearch", {"query": "x"}, _context()))
-    except Exception:
+    except AttributeError:
         pass
 
     assert len(runtime.calls) == 1
@@ -186,6 +191,25 @@ def test_gate_on_webfetch_blocked_ssrf_url_returns_non_ok_and_pack_enforced() ->
     assert result.output is None
     assert boundary.last_live_result is not None
     assert boundary.last_live_result.status != "ok"
+
+
+def test_websearch_and_webfetch_in_same_turn_produce_distinct_request_ids() -> None:
+    """WebSearch and WebFetch with the same turn_id must build distinct requestIds.
+
+    A turn that issues both a search and a fetch would formerly collide because
+    requestId was derived from turn_id alone. The fix includes tool_name (and
+    tool_use_id when present) as discriminators.
+    """
+    context = _context()  # turn_id="turn-1", toolUseId="toolu-web-1"
+
+    search_req = _live_request_from_tool("WebSearch", {"query": "collision test"}, context)
+    fetch_req = _live_request_from_tool("WebFetch", {"url": "https://docs.example.com/stub-fetch"}, context)
+
+    assert isinstance(search_req, WebAcquisitionProviderRequest)
+    assert isinstance(fetch_req, WebAcquisitionProviderRequest)
+    assert search_req.request_id != fetch_req.request_id, (
+        f"requestId collision: both WebSearch and WebFetch produced '{search_req.request_id}'"
+    )
 
 
 def test_projected_live_tool_result_leaks_no_raw_url_or_secret() -> None:
