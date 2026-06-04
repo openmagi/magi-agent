@@ -13,6 +13,7 @@ from magi_agent.harness.general_automation.followup_refs import (
     FollowupToolContract,
     followup_tool_contracts,
 )
+from magi_agent.harness.general_automation.text_scrub import scrub_text as _scrub_text
 
 
 OutputReferenceStatus = Literal["referenced"]
@@ -23,31 +24,6 @@ _MODEL_CONFIG = ConfigDict(
     extra="forbid",
     validate_default=True,
     hide_input_in_errors=True,
-)
-_PRIVATE_TEXT_RE = re.compile(
-    r"(?:"
-    r"authorization\s*:\s*bearer\s+[A-Za-z0-9._~+/=-]+|"
-    r"\bbearer\s+[A-Za-z0-9._~+/=-]+|"
-    r"\bcookie\s*:\s*[^\n\r]+|"
-    r"\bsid=[A-Za-z0-9._-]+|"
-    r"\bsk-[A-Za-z0-9._-]+|"
-    r"gh[opusr]_[A-Za-z0-9_]+|"
-    r"github_pat_[A-Za-z0-9_]+|"
-    r"xox[a-z]-[A-Za-z0-9._-]+|"
-    r"AKIA[0-9A-Z]{8,}|"
-    r"AIza[A-Za-z0-9_-]+|"
-    r"/workspace(?:/[^\s,;}\"']*)?|"
-    r"/data/bots(?:/[^\s,;}\"']*)?|"
-    r"/Users(?:/[^\s,;}\"']*)?|"
-    r"/home(?:/[^\s,;}\"']*)?|"
-    r"/var/lib/kubelet(?:/[^\s,;}\"']*)?|"
-    r"s3://[^\s,;}\"']+|"
-    r"gs://[^\s,;}\"']+|"
-    r"supabase://[^\s,;}\"']+|"
-    r"raw[_ -]?(?:tool|child|prompt|transcript|output|result|log|args|browser|dom)|"
-    r"hidden[_ -]?reasoning|chain[_ -]?of[_ -]?thought"
-    r")",
-    re.IGNORECASE,
 )
 _DIGEST_RE = re.compile(r"^sha256:[a-f0-9]{64}$")
 
@@ -205,7 +181,7 @@ def apply_output_budget_policy(
 
 
 def _safe_text(value: str) -> str:
-    return _PRIVATE_TEXT_RE.sub("[redacted-private]", value).strip()
+    return _scrub_text(value).strip()
 
 
 __all__ = [

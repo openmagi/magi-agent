@@ -142,6 +142,74 @@ def test_shell_policy_projects_disabled_function_tool_metadata() -> None:
     assert metadata["inputSchema"]["required"] == ["command", "workspaceRoot"]
 
 
+def _request_ws(command: str, *, workspace_root: str = "/srv/project") -> ShellPolicyRequest:
+    return ShellPolicyRequest(
+        command=command,
+        workspaceRoot=workspace_root,
+        env={"SAFE_FLAG": "1"},
+        timeoutMs=45_000,
+        outputBudget={"outputChars": 6000, "transcriptChars": 3000},
+    )
+
+
+def test_shell_path_blocked_path_target_denies_command() -> None:
+    # (a) cat /etc/passwd — path_policy marks /etc/passwd as blocked → shell denied
+    decision = classify_shell_policy(_request_ws("cat /etc/passwd"))
+
+    assert decision.status == "denied"
+    assert "path_target_blocked" in decision.reason_codes
+
+
+def test_shell_path_workspace_read_leaves_decision_unchanged() -> None:
+    # (b) cat ./notes.txt — workspace read → shell unchanged (allowed)
+    decision = classify_shell_policy(_request_ws("cat ./notes.txt"))
+
+    assert decision.status == "allowed"
+    assert "path_target_blocked" not in decision.reason_codes
+    assert "path_target_requires_approval" not in decision.reason_codes
+
+
+def test_shell_path_external_dir_delete_requires_approval() -> None:
+    # (c) rm /tmp/x — external dir delete → at least approval_required
+    decision = classify_shell_policy(_request_ws("rm /tmp/x"))
+
+    assert decision.status == "approval_required"
+    assert "path_target_requires_approval" in decision.reason_codes
+
+
+def test_shell_path_workspace_write_requires_approval() -> None:
+    # (d) tee /srv/project/out.txt — workspace write → approval_required (PR11 write gating)
+    decision = classify_shell_policy(_request_ws("tee /srv/project/out.txt"))
+
+    assert decision.status == "approval_required"
+    assert "path_target_requires_approval" in decision.reason_codes
+
+
+def test_shell_path_already_denied_stays_denied() -> None:
+    # (e) rm -rf (already denied by destructive rule) — stays denied; path gate must not lower
+    decision = classify_shell_policy(_request_ws("rm -rf /tmp/build"))
+
+    assert decision.status == "denied"
+    assert "destructive_filesystem_operation_denied" in decision.reason_codes
+
+
+def test_shell_path_no_path_token_unchanged() -> None:
+    # (f) echo hello — no path tokens → unchanged
+    decision = classify_shell_policy(_request_ws("echo hello"))
+
+    assert decision.status == "allowed"
+    assert "path_target_blocked" not in decision.reason_codes
+    assert "path_target_requires_approval" not in decision.reason_codes
+
+
+def test_shell_path_multiple_targets_most_restrictive_wins() -> None:
+    # (g) cat ./notes.txt /etc/passwd — mixed: workspace read (ok) + blocked → denied
+    decision = classify_shell_policy(_request_ws("cat ./notes.txt /etc/passwd"))
+
+    assert decision.status == "denied"
+    assert "path_target_blocked" in decision.reason_codes
+
+
 def test_shell_policy_modules_do_not_import_or_execute_live_process_surfaces() -> None:
     source = "\n".join(
         path.read_text(encoding="utf-8")
@@ -167,3 +235,35 @@ def test_shell_policy_modules_do_not_import_or_execute_live_process_surfaces() -
     )
     for fragment in forbidden_fragments:
         assert fragment not in source
+
+
+# ---------------------------------------------------------------------------
+# PR13 verb-coverage: wget / curl / scp / rsync mapped to "write" so workspace
+# write paths correctly trigger path_target_requires_approval.
+# ---------------------------------------------------------------------------
+
+def test_shell_path_wget_workspace_write_requires_approval() -> None:
+    """wget -O ./out.bin <url> — output flag targets workspace → approval_required."""
+    decision = classify_shell_policy(
+        _request_ws("wget -O ./out.bin http://example.invalid/file")
+    )
+    assert decision.status == "approval_required"
+    assert "path_target_requires_approval" in decision.reason_codes
+
+
+def test_shell_path_scp_workspace_target_requires_approval() -> None:
+    """scp host:f /srv/project/out — destination is workspace → approval_required."""
+    decision = classify_shell_policy(
+        _request_ws("scp host:/remote/file /srv/project/out", workspace_root="/srv/project")
+    )
+    assert decision.status == "approval_required"
+    assert "path_target_requires_approval" in decision.reason_codes
+
+
+def test_shell_path_scp_system_path_target_denies() -> None:
+    """scp host:f /etc/cron.d/evil — system path destination → denied."""
+    decision = classify_shell_policy(
+        _request_ws("scp host:/remote/file /etc/cron.d/evil")
+    )
+    assert decision.status == "denied"
+    assert "path_target_blocked" in decision.reason_codes

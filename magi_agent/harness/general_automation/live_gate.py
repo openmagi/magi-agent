@@ -26,7 +26,9 @@ Mapping (active path):
   ``HookPermissionBoundary``) + a
   ``build_general_automation_control_projection(controlType="approval_required")``
 * ``allowed`` /
-  ``workspace_local``        → ``allow`` (proceed unchanged)
+  ``workspace_local``
+  read/list                  → ``allow`` (proceed unchanged)
+  write/delete/execute       → ``ask`` (approval required)
 
 No authority flag, hard-safety verifier, or sealed core path is modified here.
 """
@@ -244,7 +246,34 @@ class GeneralAutomationLiveGate:
         decision = classify_path_access(request)
 
         if decision.status == "workspace_local":
-            return GeneralAutomationGateOutcome(active=True, decision="allow")
+            # Read / list → silent allow (workspace_local_access, approvalRequired=False).
+            # Write / delete / execute → approvalRequired=True per path_policy; surface
+            # as "ask" so the caller must obtain approval before the tool runs.
+            if not decision.approval_required:
+                return GeneralAutomationGateOutcome(active=True, decision="allow")
+            # Workspace mutation: issue a control projection (ask) so the
+            # dispatcher surfaces status=needs_approval.  No ExternalDirectory
+            # receipt is produced here — workspace writes are distinct from
+            # external-directory access and do not share that receipt chain.
+            projection = _control_projection(
+                subject_ref=decision.path_digest,
+                policy_ref="policy:general-automation:path-policy",
+                payload_digest=decision.path_digest,
+                reason_codes=decision.reason_codes,
+                approval_ref=_workspace_write_approval_ref(decision),
+            )
+            return GeneralAutomationGateOutcome(
+                active=True,
+                decision="ask",
+                permission_boundary=HookPermissionBoundary(
+                    source_hook=_SOURCE_HOOK,
+                    decision="ask",
+                    requires_control_request=True,
+                    reason="general_automation_workspace_write_requires_approval",
+                ),
+                control_projection=projection,
+                reason="general_automation_workspace_write_requires_approval",
+            )
 
         if decision.status == "external_directory":
             receipt = build_external_directory_approval_receipt(
@@ -311,6 +340,10 @@ def _control_projection(
 
 def _approval_ref(decision: PathAccessDecision) -> str:
     return f"approval:external-directory:{decision.path_digest}"
+
+
+def _workspace_write_approval_ref(decision: PathAccessDecision) -> str:
+    return f"approval:workspace-write:{decision.path_digest}"
 
 
 def _agent_role(context: ToolContext) -> str:
