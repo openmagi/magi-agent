@@ -189,24 +189,36 @@ def _mean(scores: tuple[float, ...]) -> float:
     return sum(scores) / len(scores) if scores else 0.0
 
 
-def _candidate_item_id(candidate: LearningCandidate) -> str:
+def _candidate_item_id(candidate: LearningCandidate, *, tenant_id: str = "local") -> str:
     """Derive a stable, collision-free store id for *candidate*.
 
-    The id is a content hash of the (opaque) source signal ref, so re-running
-    reflection over the same trace produces the same id (idempotent propose)
-    while two genuinely-different refs — even ones differing only by a trailing
-    ``:v<n>`` — get distinct ids.  A hex digest can never end in the store's
+    The id is a content hash of ``tenant_id`` + the (opaque) source signal ref,
+    so re-running reflection over the same trace produces the same id
+    (idempotent propose) while two genuinely-different refs — even ones
+    differing only by a trailing ``:v<n>`` — get distinct ids.  Mixing the
+    tenant id into the digest makes the id tenant-unique: two different tenants
+    proposing content with the same ``source_signal_ref`` derive DISTINCT ids,
+    so cross-tenant clobber is impossible even before the store's tenant-scoped
+    guards run (defense in depth).  A hex digest can never end in the store's
     reserved ``:v<digits>`` version suffix, so there is no fragile strip logic
     and no collision with ``store.edit()``'s version chain.
     """
-    digest = hashlib.sha1(candidate.source_signal_ref.encode()).hexdigest()[:16]
+    digest = hashlib.sha1(
+        f"{tenant_id}\x00{candidate.source_signal_ref}".encode()
+    ).hexdigest()[:16]
     return f"learning:{candidate.kind}:{digest}"
 
 
-def _to_item(candidate: LearningCandidate) -> LearningItem:
-    """Promote a ``LearningCandidate`` to a proposed ``LearningItem``."""
+def _to_item(candidate: LearningCandidate, *, tenant_id: str = "local") -> LearningItem:
+    """Promote a ``LearningCandidate`` to a proposed ``LearningItem``.
+
+    The proposed item is stamped with *tenant_id* so the whole eval-gate flow
+    (propose → get → record_eval_observation → auto_activate) stays inside one
+    tenant.  Defaults to ``"local"`` so the OSS single-tenant path is unchanged.
+    """
     return LearningItem(
-        id=_candidate_item_id(candidate),
+        id=_candidate_item_id(candidate, tenant_id=tenant_id),
+        tenantId=tenant_id,
         kind=candidate.kind,
         status="proposed",
         scope=candidate.scope,
@@ -227,6 +239,7 @@ def run_eval_gate(
     store: LearningStore,
     checkset: CheckSet,
     config: EvalGateConfig | None = None,
+    tenant_id: str = "local",
 ) -> tuple[EvalGateDecision, ...]:
     """Run each candidate through propose → A/B eval → policy-gated activation.
 
@@ -249,13 +262,14 @@ def run_eval_gate(
 
     decisions: list[EvalGateDecision] = []
     for candidate in candidates:
-        proposed_item = _to_item(candidate)
+        proposed_item = _to_item(candidate, tenant_id=tenant_id)
 
         # Idempotency guard: store.propose() raises if the item already exists
         # in a non-``proposed`` status.  On a re-run over overlapping sessions
         # an already-active/archived candidate must be SKIPPED gracefully —
         # never re-proposed, never re-activated, and never aborting the batch.
-        existing = store.get(proposed_item.id)
+        # Tenant-scoped read so the guard only sees this tenant's items.
+        existing = store.get(proposed_item.id, tenant_id=tenant_id)
         if existing is not None and existing.status != "proposed":
             decisions.append(
                 EvalGateDecision(
@@ -274,7 +288,31 @@ def run_eval_gate(
 
         # Re-proposing a still-``proposed`` item is idempotent (ON CONFLICT
         # upsert in the store), so this is safe.
-        item = store.propose(proposed_item)
+        #
+        # TOCTOU guard: the ``store.get`` skip-check above and this ``propose``
+        # are not atomic.  If a concurrent activation flips the item to active in
+        # that window, ``propose`` raises ``ValueError`` (re-proposing a
+        # non-proposed item is forbidden).  Treat that exactly like the
+        # already-active skip case — mark the candidate skipped and continue so
+        # the rest of the batch is never aborted by a single racing item.
+        try:
+            item = store.propose(proposed_item)
+        except ValueError:
+            decisions.append(
+                EvalGateDecision(
+                    itemId=proposed_item.id,
+                    kind=proposed_item.kind,
+                    passed=False,
+                    activated=False,
+                    skipped=True,
+                    reason=(
+                        "item flipped to a non-proposed status concurrently "
+                        "between the skip-check and propose; skipped (not "
+                        "re-proposed / not re-activated)"
+                    ),
+                )
+            )
+            continue
 
         before, after = checkset.run(candidate)
         # Guard: a mismatched evaluator that returns different-length before/after
@@ -301,6 +339,7 @@ def run_eval_gate(
             after={"mean": _mean(after), "n": len(after)},
             sample_n=sample_n,
             passed=passed,
+            tenant_id=tenant_id,
         )
 
         activated = False
@@ -310,7 +349,9 @@ def run_eval_gate(
             # store's auto_activate (defense in depth) — call it here too so the
             # gate is unambiguously the policy-enforcement point.
             assert_activation_allowed(item, eval_observation_ref=eval_ref)
-            store.auto_activate(item.id, eval_observation_ref=eval_ref)
+            store.auto_activate(
+                item.id, eval_observation_ref=eval_ref, tenant_id=tenant_id
+            )
             activated = True
         # rule  → leave proposed (no-direct-mutation: human approval in PR6).
         # eval  → register as holdout (proposed); not activated as behavior.

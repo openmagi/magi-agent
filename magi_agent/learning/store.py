@@ -96,6 +96,65 @@ _MIGRATIONS: list[tuple[int, str]] = [
             ON learning_items (tenant_id, scope_task_kind);
         """,
     ),
+    (
+        5,
+        # Rebuild learning_items with a COMPOSITE primary key (id, tenant_id) for
+        # true cross-tenant isolation.  With the old single-column PK on `id`,
+        # propose()'s ``ON CONFLICT(id) DO UPDATE`` could clobber another
+        # tenant's row when two tenants proposed a colliding id.  The composite
+        # PK makes a same-id different-tenant propose a SEPARATE row.
+        #
+        # SQLite cannot ALTER a primary key in place, so we create a new table
+        # with the composite PK + identical columns/indexes, copy the rows over,
+        # drop the old table, and rename.  Every statement is guarded so the
+        # whole migration is idempotent and safe to re-run after a crash:
+        #   * the new table is only created/copied when the live `learning_items`
+        #     PK is still single-column (see the skip guard below);
+        #   * a stale `learning_items_new` from a crashed prior run is dropped
+        #     first so the CREATE never collides.
+        """
+        DROP TABLE IF EXISTS learning_items_new;
+        CREATE TABLE learning_items_new (
+            id          TEXT NOT NULL,
+            tenant_id   TEXT NOT NULL DEFAULT 'local',
+            kind        TEXT NOT NULL,
+            status      TEXT NOT NULL DEFAULT 'proposed',
+            scope_json  TEXT NOT NULL DEFAULT '{}',
+            content_json TEXT NOT NULL DEFAULT '{}',
+            rationale   TEXT NOT NULL DEFAULT '',
+            provenance_json TEXT NOT NULL DEFAULT '{}',
+            version     INTEGER NOT NULL DEFAULT 1,
+            supersedes  TEXT,
+            embedding_ref TEXT,
+            stats_json  TEXT NOT NULL DEFAULT '{}',
+            eval_observation_ref TEXT,
+            approval_ref TEXT,
+            created_at  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+            updated_at  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+            scope_task_kind TEXT
+                GENERATED ALWAYS AS (json_extract(scope_json, '$.taskKind')) VIRTUAL,
+            PRIMARY KEY (id, tenant_id)
+        );
+        INSERT INTO learning_items_new (
+            id, tenant_id, kind, status, scope_json, content_json,
+            rationale, provenance_json, version, supersedes, embedding_ref,
+            stats_json, eval_observation_ref, approval_ref, created_at, updated_at
+        )
+        SELECT
+            id, tenant_id, kind, status, scope_json, content_json,
+            rationale, provenance_json, version, supersedes, embedding_ref,
+            stats_json, eval_observation_ref, approval_ref, created_at, updated_at
+        FROM learning_items;
+        DROP TABLE learning_items;
+        ALTER TABLE learning_items_new RENAME TO learning_items;
+        CREATE INDEX IF NOT EXISTS idx_learning_items_tenant_kind_status
+            ON learning_items (tenant_id, kind, status);
+        CREATE INDEX IF NOT EXISTS idx_learning_items_tenant_status
+            ON learning_items (tenant_id, status);
+        CREATE INDEX IF NOT EXISTS idx_learning_items_scope_task_kind
+            ON learning_items (tenant_id, scope_task_kind);
+        """,
+    ),
 ]
 
 # Statements inside these migrations require special idempotency handling
@@ -105,11 +164,36 @@ _MIGRATIONS: list[tuple[int, str]] = [
 #
 # Note: PRAGMA table_info omits VIRTUAL generated columns; use table_xinfo
 # (available since SQLite 3.26.0) which includes all column types.
+def _has_composite_pk(conn: sqlite3.Connection) -> bool:
+    """True when ``learning_items`` already has a composite (id, tenant_id) PK.
+
+    ``PRAGMA table_xinfo`` exposes a ``pk`` ordinal (>0) for primary-key
+    columns; a composite PK shows >1 such column.  Used to skip the migration-5
+    table-rebuild statements when they have already been applied (idempotent /
+    crash-safe re-run).
+    """
+    pk_cols = [
+        row[1]  # column name
+        for row in conn.execute("PRAGMA table_xinfo(learning_items)").fetchall()
+        if row[5]  # pk ordinal (0 == not part of the PK)
+    ]
+    return "id" in pk_cols and "tenant_id" in pk_cols
+
+
 _MIGRATION_SKIP_GUARDS: dict[tuple[int, str], object] = {
     (4, "ALTER TABLE learning_items"): lambda conn: any(
         row[1] == "scope_task_kind"
         for row in conn.execute("PRAGMA table_xinfo(learning_items)").fetchall()
     ),
+    # Migration 5 rebuilds the table for a composite PK.  Skip the CREATE/INSERT/
+    # DROP/RENAME statements when the live table already has the composite PK so
+    # a re-run (e.g. after a crash between the rename and the version insert) is a
+    # no-op.  The leading ``DROP TABLE IF EXISTS learning_items_new`` is always
+    # safe to run.
+    (5, "CREATE TABLE learning_items_new"): _has_composite_pk,
+    (5, "INSERT INTO learning_items_new"): _has_composite_pk,
+    (5, "DROP TABLE learning_items"): _has_composite_pk,
+    (5, "ALTER TABLE learning_items_new RENAME TO learning_items"): _has_composite_pk,
 }
 
 
@@ -172,7 +256,7 @@ class LearningStore(Protocol):
     """Protocol for learning KB stores."""
 
     def propose(self, item: LearningItem) -> LearningItem: ...
-    def get(self, item_id: str) -> LearningItem | None: ...
+    def get(self, item_id: str, *, tenant_id: str = "local") -> LearningItem | None: ...
     def list(
         self,
         *,
@@ -199,6 +283,7 @@ class LearningStore(Protocol):
         after: dict[str, object],
         sample_n: int,
         passed: bool,
+        tenant_id: str = "local",
     ) -> str: ...
     def approve(
         self,
@@ -206,12 +291,14 @@ class LearningStore(Protocol):
         *,
         approver: str,
         eval_observation_ref: str | None,
+        tenant_id: str = "local",
     ) -> LearningItem: ...
     def auto_activate(
         self,
         item_id: str,
         *,
         eval_observation_ref: str | None,
+        tenant_id: str = "local",
     ) -> LearningItem: ...
     def edit(
         self,
@@ -219,8 +306,11 @@ class LearningStore(Protocol):
         *,
         patch: dict[str, object],
         editor: str,
+        tenant_id: str = "local",
     ) -> LearningItem: ...
-    def archive(self, item_id: str, *, actor: str) -> LearningItem: ...
+    def archive(
+        self, item_id: str, *, actor: str, tenant_id: str = "local"
+    ) -> LearningItem: ...
 
 
 def _now_iso() -> str:
@@ -342,7 +432,8 @@ class SqliteLearningStore:
         # Guard: reject propose() if the item already exists in a
         # non-proposed state (active or archived).
         existing_row = conn.execute(
-            "SELECT status FROM learning_items WHERE id = ?", (item.id,)
+            "SELECT status FROM learning_items WHERE id = ? AND tenant_id = ?",
+            (item.id, item.tenant_id),
         ).fetchone()
         if existing_row is not None and existing_row["status"] != "proposed":
             raise ValueError(
@@ -374,8 +465,7 @@ class SqliteLearningStore:
                 :rationale, :provenance_json, :version, :supersedes, :embedding_ref,
                 :stats_json, :eval_observation_ref, :approval_ref, :updated_at
             )
-            ON CONFLICT(id) DO UPDATE SET
-                tenant_id = excluded.tenant_id,
+            ON CONFLICT(id, tenant_id) DO UPDATE SET
                 kind       = excluded.kind,
                 status     = excluded.status,
                 scope_json = excluded.scope_json,
@@ -395,10 +485,14 @@ class SqliteLearningStore:
         conn.commit()
         return safe
 
-    def get(self, item_id: str) -> LearningItem | None:
+    def get(self, item_id: str, *, tenant_id: str = "local") -> LearningItem | None:
+        # Tenant-scoped by-id read: the ``AND tenant_id = ?`` clause makes a
+        # cross-tenant id read as "not found" at the query level — another
+        # tenant's row is never returned.
         conn = self._get_conn()
         row = conn.execute(
-            "SELECT * FROM learning_items WHERE id = ?", (item_id,)
+            "SELECT * FROM learning_items WHERE id = ? AND tenant_id = ?",
+            (item_id, tenant_id),
         ).fetchone()
         if row is None:
             return None
@@ -498,9 +592,17 @@ class SqliteLearningStore:
         after: dict[str, object],
         sample_n: int,
         passed: bool,
+        tenant_id: str = "local",
     ) -> str:
-        """Persist an eval observation and return its ref string."""
+        """Persist an eval observation and return its ref string.
+
+        Tenant-scoped: the target item must exist under *tenant_id* or a
+        ``KeyError`` is raised — an observation can never be recorded against
+        another tenant's item by id.
+        """
         conn = self._get_conn()
+        # Tenant guard at the query level — never touch another tenant's row.
+        self._require_item(conn, item_id, tenant_id=tenant_id)
         ref = f"eval-obs:{uuid.uuid4().hex}"
         conn.execute(
             """
@@ -526,25 +628,36 @@ class SqliteLearningStore:
         *,
         approver: str,
         eval_observation_ref: str | None,
+        tenant_id: str = "local",
     ) -> LearningItem:
         """Activate a proposed rule item after human approval.
 
         Enforces both policy invariants:
         - eval_observation_ref must be present
         - approval_ref is generated from the approver record
+
+        Tenant-scoped: the item must exist under *tenant_id* (``_require_item``
+        raises ``KeyError`` otherwise) and the activating UPDATE carries
+        ``AND tenant_id = ?`` so another tenant's row is never mutated.
         """
         if not approver or not approver.strip():
             raise ValueError("approver must be a non-empty, non-blank string")
 
         conn = self._get_conn()
 
-        item = self._require_item(conn, item_id)
+        item = self._require_item(conn, item_id, tenant_id=tenant_id)
 
         if item.status != "proposed":
             raise ValueError(
                 f"Cannot approve learning item {item_id!r}: "
                 f"expected status='proposed', got status={item.status!r}."
             )
+
+        # Store-level governance guard: an activation may only reference a
+        # PASSING eval observation.  The api.py service already enforces this,
+        # but enforcing it here too makes the invariant hold for ANY caller
+        # (a non-service caller cannot activate on a failing observation's ref).
+        self._require_passing_eval_observation(conn, eval_observation_ref)
 
         # Generate an approval_ref to satisfy assert_activation_allowed
         approval_ref = f"approval:{uuid.uuid4().hex}"
@@ -571,33 +684,42 @@ class SqliteLearningStore:
                 eval_observation_ref = ?,
                 approval_ref = ?,
                 updated_at = ?
-            WHERE id = ?
+            WHERE id = ? AND tenant_id = ?
             """,
-            (eval_observation_ref, approval_ref, _now_iso(), item_id),
+            (eval_observation_ref, approval_ref, _now_iso(), item_id, tenant_id),
         )
         conn.commit()
 
-        return self._require_item(conn, item_id)
+        return self._require_item(conn, item_id, tenant_id=tenant_id)
 
     def auto_activate(
         self,
         item_id: str,
         *,
         eval_observation_ref: str | None,
+        tenant_id: str = "local",
     ) -> LearningItem:
         """Activate a proposed non-rule item automatically via eval gate.
 
         Enforces policy:self-improvement.eval-observation-required@1.
         For rule items, also enforces no-direct-mutation (raises PolicyViolation).
+
+        Tenant-scoped: ``_require_item`` + the activating UPDATE carry
+        ``AND tenant_id = ?`` so another tenant's item can never be activated
+        by id.
         """
         conn = self._get_conn()
-        item = self._require_item(conn, item_id)
+        item = self._require_item(conn, item_id, tenant_id=tenant_id)
 
         if item.status != "proposed":
             raise ValueError(
                 f"Cannot auto_activate learning item {item_id!r}: "
                 f"expected status='proposed', got status={item.status!r}."
             )
+
+        # Store-level governance guard (see approve()): refuse activation on a
+        # failing eval observation regardless of caller.
+        self._require_passing_eval_observation(conn, eval_observation_ref)
 
         # For rules, auto_activate has no approval_ref -> policy violation
         assert_activation_allowed(
@@ -612,13 +734,13 @@ class SqliteLearningStore:
             SET status = 'active',
                 eval_observation_ref = ?,
                 updated_at = ?
-            WHERE id = ?
+            WHERE id = ? AND tenant_id = ?
             """,
-            (eval_observation_ref, _now_iso(), item_id),
+            (eval_observation_ref, _now_iso(), item_id, tenant_id),
         )
         conn.commit()
 
-        return self._require_item(conn, item_id)
+        return self._require_item(conn, item_id, tenant_id=tenant_id)
 
     def edit(
         self,
@@ -626,14 +748,20 @@ class SqliteLearningStore:
         *,
         patch: dict[str, object],
         editor: str,
+        tenant_id: str = "local",
     ) -> LearningItem:
         """Create a new version with *patch* applied.
 
         The original item is preserved; the new version has
         version+1 and supersedes pointing to the original id.
+
+        Tenant-scoped: the source item must exist under *tenant_id*
+        (``_require_item`` raises ``KeyError`` otherwise), so another tenant's
+        item can never be edited/forked by id.  The new version inherits the
+        source item's tenant_id.
         """
         conn = self._get_conn()
-        original = self._require_item(conn, item_id)
+        original = self._require_item(conn, item_id, tenant_id=tenant_id)
 
         # Derive the new id from the ROOT id, not the current node id.
         # Strip any trailing `:v{n}` suffix so that chains stay flat:
@@ -671,32 +799,76 @@ class SqliteLearningStore:
         conn.commit()
         return new_item
 
-    def archive(self, item_id: str, *, actor: str) -> LearningItem:
+    def archive(
+        self, item_id: str, *, actor: str, tenant_id: str = "local"
+    ) -> LearningItem:
+        # Tenant-scoped: ``AND tenant_id = ?`` makes a cross-tenant archive a
+        # no-op (rowcount 0 → KeyError); another tenant's row is never touched.
         conn = self._get_conn()
         cur = conn.execute(
             """
             UPDATE learning_items
             SET status = 'archived', updated_at = ?
-            WHERE id = ?
+            WHERE id = ? AND tenant_id = ?
             """,
-            (_now_iso(), item_id),
+            (_now_iso(), item_id, tenant_id),
         )
         if cur.rowcount == 0:
             raise KeyError(f"LearningItem not found: {item_id!r}")
         conn.commit()
-        return self._require_item(conn, item_id)
+        return self._require_item(conn, item_id, tenant_id=tenant_id)
 
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
 
-    def _require_item(self, conn: sqlite3.Connection, item_id: str) -> LearningItem:
+    def _require_item(
+        self,
+        conn: sqlite3.Connection,
+        item_id: str,
+        *,
+        tenant_id: str = "local",
+    ) -> LearningItem:
+        # Tenant-scoped by-id read for every mutation path — the ``AND
+        # tenant_id = ?`` clause is the single chokepoint that makes a
+        # cross-tenant by-id mutation impossible (it reads as not-found).
         row = conn.execute(
-            "SELECT * FROM learning_items WHERE id = ?", (item_id,)
+            "SELECT * FROM learning_items WHERE id = ? AND tenant_id = ?",
+            (item_id, tenant_id),
         ).fetchone()
         if row is None:
             raise KeyError(f"LearningItem not found: {item_id!r}")
         return _row_to_item(row)
+
+    @staticmethod
+    def _require_passing_eval_observation(
+        conn: sqlite3.Connection, eval_observation_ref: str | None
+    ) -> None:
+        """Reject activation unless *eval_observation_ref* names a PASSING obs.
+
+        ``policy.assert_activation_allowed`` only checks the ref is non-empty;
+        this store-level guard additionally looks up the observation row and
+        refuses activation when its ``passed`` column is falsy.  This makes the
+        passing-eval governance invariant hold for ANY caller, not just the
+        api.py service.  A ``None``/empty ref is left to
+        ``assert_activation_allowed`` (eval-observation-required).
+        """
+        if not eval_observation_ref:
+            return
+        row = conn.execute(
+            "SELECT passed FROM learning_eval_observations WHERE ref = ?",
+            (eval_observation_ref,),
+        ).fetchone()
+        if row is None:
+            raise ValueError(
+                f"unknown eval observation ref {eval_observation_ref!r}: "
+                "cannot activate against a non-existent observation."
+            )
+        if not row["passed"]:
+            raise ValueError(
+                f"eval observation {eval_observation_ref!r} did not pass "
+                "(passed=False): activation requires a passing eval observation."
+            )
 
 
 __all__ = [

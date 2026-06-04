@@ -40,6 +40,18 @@ from magi_agent.learning.policy import PolicyViolation
 from magi_agent.learning.store import Page, SqliteLearningStore, _row_to_item
 
 
+def _format_actor(actor: str, role: str | None) -> str:
+    """Fold an approver identity + authorized role into one audit string.
+
+    The store persists a single ``approver`` column; embedding the role keeps
+    the audit row self-describing (``"alice (role=approver)"``) without a schema
+    change.  When no role is supplied the bare identity is recorded.
+    """
+    if role:
+        return f"{actor} (role={role})"
+    return actor
+
+
 class LearningApiError(Exception):
     """Base class for governance-service errors carrying an HTTP-ish code."""
 
@@ -154,13 +166,14 @@ class LearningGovernanceService:
         )
 
     def get_item(self, item_id: str) -> LearningItem:
-        item = self._store.get(item_id)
+        # ``store.get`` is now tenant-scoped at the query level (PR8): an item
+        # belonging to another tenant reads as ``None`` here, so a cross-tenant
+        # id is a clean 404 (never 200/500).  The redundant tenant_id check
+        # below is kept as defense-in-depth.
+        item = self._store.get(item_id, tenant_id=self._tenant_id)
         if item is None:
             raise LearningNotFoundError(f"learning item not found: {item_id!r}")
-        # Tenant guard: ``store.get`` is NOT tenant-scoped, so an item belonging
-        # to another tenant must read as "not found" to avoid a cross-tenant
-        # information leak (404, never 200/500).
-        if item.tenant_id != self._tenant_id:
+        if item.tenant_id != self._tenant_id:  # pragma: no cover - defense in depth
             raise LearningNotFoundError(f"learning item not found: {item_id!r}")
         return item
 
@@ -185,6 +198,7 @@ class LearningGovernanceService:
         item_id: str,
         *,
         approver: str,
+        role: str | None = None,
         force: bool = False,
     ) -> LearningItem:
         """Human-approve a proposed *rule* (or other proposed item) → active.
@@ -192,6 +206,9 @@ class LearningGovernanceService:
         Enforces the eval-observation + approval-ref invariants through
         ``store.approve`` → ``policy.assert_activation_allowed``.  A contradicting
         active rule blocks approval unless *force* is set.
+
+        *role* records the approver's authorized role in the approval audit (the
+        transport layer resolves + verifies the role before calling this).
         """
         item = self.get_item(item_id)
         if item.status != "proposed":
@@ -223,8 +240,9 @@ class LearningGovernanceService:
         try:
             return self._store.approve(
                 item_id,
-                approver=approver,
+                approver=_format_actor(approver, role),
                 eval_observation_ref=eval_ref,
+                tenant_id=self._tenant_id,
             )
         except PolicyViolation as exc:
             raise LearningPolicyError(str(exc)) from exc
@@ -258,7 +276,9 @@ class LearningGovernanceService:
                 )
 
         try:
-            return self._store.edit(item_id, patch=patch, editor=editor)
+            return self._store.edit(
+                item_id, patch=patch, editor=editor, tenant_id=self._tenant_id
+            )
         except ValueError as exc:
             raise LearningApiError(str(exc)) from exc
 
@@ -270,7 +290,9 @@ class LearningGovernanceService:
         """
         self.get_item(item_id)  # 404 + tenant guard before mutating
         try:
-            return self._store.archive(item_id, actor=actor)
+            return self._store.archive(
+                item_id, actor=actor, tenant_id=self._tenant_id
+            )
         except KeyError as exc:
             raise LearningNotFoundError(
                 f"learning item not found: {item_id!r}"
@@ -283,7 +305,14 @@ class LearningGovernanceService:
     async def run_reflection(self) -> ReflectionRunSummary:
         """Trigger one reflection pass via the cron job (or a default job)."""
         job = self._reflection_job or LearningReflectionCronJob(store=self._store)
-        result = await job.trigger_now()
+        # Thread the service's tenant into the reflection run so a non-local
+        # tenant writes under its OWN tenant.  The single-tenant ("local") path
+        # omits the kwarg entirely, keeping the call byte-identical to PR6 (and
+        # compatible with any zero-arg ``trigger_now`` test double).
+        if self._tenant_id == "local":
+            result = await job.trigger_now()
+        else:
+            result = await job.trigger_now(tenant_id=self._tenant_id)
         counters = result.counters or {}
         return ReflectionRunSummary(
             status=result.status,

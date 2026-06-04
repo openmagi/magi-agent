@@ -233,6 +233,7 @@ async def run_reflection(
     checkset: CheckSet | None = None,
     eval_gate_config: EvalGateConfig | None = None,
     labeler: Labeler | None = None,
+    tenant_id: str = "local",
 ) -> LearningReflectionResult:
     """Run a reflection pass over session transcripts.
 
@@ -269,6 +270,10 @@ async def run_reflection(
             PR1–PR6.  PR7's gated live layer injects the real
             ``LlmBackedLabeler`` here (behind ``MAGI_LEARNING_LIVE_ENABLED`` +
             readiness); the frozen authority flags stay ``Literal[False]``.
+        tenant_id: Tenant the proposed/activated items are written under.
+            Threaded into ``run_eval_gate`` so a non-``"local"`` tenant's
+            reflection run writes inside its own tenant.  Defaults to ``"local"``
+            so the single-tenant path stays byte-identical.
 
     Returns:
         ``LearningReflectionResult`` with ``status``, ``candidates``,
@@ -293,21 +298,14 @@ async def run_reflection(
             },
         )
 
-    # --- Step 2: read traces (local-fake only in PR2) ---
-    # ``local_fake_enabled`` gates whether the default source is the local-fake
-    # stub or the real transcript source (deferred to PR7).  Until PR7 lands,
-    # the real source is unavailable, so when ``local_fake_enabled`` is False
-    # we still fall back to an empty local-fake so the executor remains safe;
-    # PR7 will replace this branch with a real source attachment.
+    # --- Step 2: read traces ---
+    # When no *source* is injected, the executor falls back to an empty
+    # local-fake source.  The real transcript source (``RealTranscriptSource``,
+    # PR7) is selected by the gated live layer and passed in via *source*; the
+    # ``local_fake_enabled`` config flag no longer branches the default here
+    # (both arms were identical), so it is left to the live layer's selection.
     if source is None:
-        # Both branches are intentionally identical until PR7 wires the real
-        # transcript source; until then we always fall back to an empty
-        # local-fake so the executor stays safe regardless of the flag.
-        if config.local_fake_enabled:
-            source = LocalFakeTranscriptSource(traces=())
-        else:
-            # TODO(PR7): attach real transcript source when local_fake_enabled=False.
-            source = LocalFakeTranscriptSource(traces=())
+        source = LocalFakeTranscriptSource(traces=())
 
     traces = await source.read_since(since)
     traces_read = len(traces)
@@ -358,6 +356,7 @@ async def run_reflection(
             store=store,
             checkset=gate_checkset,
             config=eval_gate_config,
+            tenant_id=tenant_id,
         )
 
     # --- Step 4: advance watermark ---

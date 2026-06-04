@@ -173,8 +173,10 @@ class LearningRecallAdapter:
     public-safe ``MemoryRecord`` rows.  When no store is injected (default) it
     returns ``recallAllowed=False`` with zero records.
 
-    TODO(PR7): bind the real (live) learning recall source here; until then this
-    stays a pure local fake — no network, no model, no ADK runner/memory service.
+    Live promotion shipped in PR7 (``learning/live.py``): a hosted deployment
+    binds a real transcript-backed store behind the ``MAGI_LEARNING_LIVE_ENABLED``
+    gate + readiness stage.  Unbound, this adapter stays a pure local fake — no
+    network, no model, no ADK runner/memory service.
     """
 
     #: Marker the memory_recall harness checks before consulting an adapter.

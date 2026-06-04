@@ -19,7 +19,7 @@ no-direct-mutation) surface as clean ``4xx`` responses, never ``500``.
 from __future__ import annotations
 
 import os
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from secrets import compare_digest
 from typing import TYPE_CHECKING, Any
 
@@ -34,6 +34,26 @@ from magi_agent.learning.api import (
 )
 from magi_agent.learning.models import LearningItem, LearningScope
 from magi_agent.learning.store import SqliteLearningStore
+
+#: Header carrying the request's tenant; absent → the OSS single-tenant default.
+_TENANT_HEADER = "x-tenant"
+_DEFAULT_TENANT = "local"
+
+#: Role recorded in the approval audit for an authorized approver.  Kept generic
+#: (OSS) — the hosted multi-tenant deployment can map richer roles via its own
+#: ``is_approver`` resolver; here a passing resolver attests this single role.
+_APPROVER_ROLE = "approver"
+
+#: Approver-role resolver seam.  ``is_approver(tenant_id, approver) -> bool``
+#: answers "does *approver* hold an approver role for *tenant_id*?".  The default
+#: single-tenant implementation treats ANY non-empty approver identity as
+#: authorized (byte-identical to PR6's header-presence check); a hosted
+#: multi-tenant deployment injects a real role-store-backed resolver.
+ApproverRoleResolver = Callable[[str, str], bool]
+
+
+def _default_is_approver(_tenant_id: str, approver: str) -> bool:
+    return bool(approver and approver.strip())
 
 if TYPE_CHECKING:
     from magi_agent.runtime.openmagi_runtime import OpenMagiRuntime
@@ -182,10 +202,29 @@ class EditLearningRequest(BaseModel):
 
 
 def build_learning_dashboard_router(
-    service: LearningGovernanceService,
+    service: LearningGovernanceService | None = None,
     *,
     gateway_token: str,
+    store: SqliteLearningStore | None = None,
+    is_approver: ApproverRoleResolver | None = None,
+    reflection_job: Any | None = None,
 ) -> APIRouter:
+    """Build the learning governance router.
+
+    Two construction modes, ONE code path:
+
+    * **Legacy single-tenant** — pass a pre-built ``service`` (OSS / PR6).  The
+      service's fixed ``tenant_id`` is used; the ``x-tenant`` header is ignored.
+    * **Multi-tenant (PR8)** — pass a ``store`` (and optionally an
+      ``is_approver`` role resolver).  A per-request service is built scoped to
+      the request's ``x-tenant`` header (default ``"local"``), so the SAME store
+      serves many tenants with query-level isolation.
+
+    In BOTH modes mutations require (a) the gateway token, (b) a present approver
+    identity (else 401), and (c) that the approver holds the approver ROLE for
+    the tenant (else 403).  The default resolver authorizes any present approver
+    — byte-identical to PR6 — so OSS single-tenant behavior is preserved.
+    """
     # I1: refuse to build an unauthenticated dashboard.  An empty/None token
     # would let a blank ``x-gateway-token: `` header authenticate via
     # ``compare_digest("", "")`` — a silent auth bypass.  Fail loud at build.
@@ -194,7 +233,48 @@ def build_learning_dashboard_router(
             "build_learning_dashboard_router requires a non-empty gateway_token; "
             "refusing to mount an unauthenticated learning dashboard"
         )
+    if service is None and store is None:
+        raise ValueError(
+            "build_learning_dashboard_router requires either a service "
+            "(single-tenant) or a store (multi-tenant)"
+        )
+
+    resolver: ApproverRoleResolver = is_approver or _default_is_approver
+    # Record the explicit approver ROLE in the audit ONLY when a real role
+    # resolver was injected (hosted multi-tenant).  In the default single-tenant
+    # mode the bare identity is recorded — byte-identical to PR6's audit row.
+    approval_role: str | None = _APPROVER_ROLE if is_approver is not None else None
+    # I-2: a store/multi-tenant mount WITHOUT an injected approver-role resolver
+    # has no way to authorize an approver per-tenant — the default resolver would
+    # authorize ANY approver for ANY tenant, so honoring a caller-chosen
+    # ``x-tenant`` would be name-only isolation.  In that case PIN the tenant to
+    # the single-tenant default ("local") and refuse to honor a non-local
+    # ``x-tenant``.  A hosted deployment that injects a real resolver keeps full
+    # multi-tenant behavior; single-tenant OSS is byte-identical.
+    _multi_tenant_authz = is_approver is not None
     router = APIRouter(prefix="/v1/learning", tags=["learning"])
+
+    def _tenant(request: Request) -> str:
+        # Legacy single-tenant mode pins the tenant to the injected service and
+        # ignores the header.
+        if service is not None:
+            return service._tenant_id  # noqa: SLF001 — sibling read
+        # Store mode WITHOUT a real role resolver: pin to "local" (ignore the
+        # caller-chosen header) so a request cannot reach another tenant's data.
+        if not _multi_tenant_authz:
+            return _DEFAULT_TENANT
+        raw = request.headers.get(_TENANT_HEADER)
+        if raw is None or not raw.strip():
+            return _DEFAULT_TENANT
+        return raw.strip()
+
+    def _service_for(request: Request) -> LearningGovernanceService:
+        if service is not None:
+            return service
+        assert store is not None  # narrowed by the build-time guard above
+        return LearningGovernanceService(
+            store, tenant_id=_tenant(request), reflection_job=reflection_job
+        )
 
     def _authorized(request: Request) -> bool:
         token = request.headers.get("x-gateway-token")
@@ -208,6 +288,35 @@ def build_learning_dashboard_router(
         if approver is None or not approver.strip():
             return None
         return approver.strip()
+
+    def _authorized_approver(request: Request) -> tuple[str | None, JSONResponse | None]:
+        """Resolve the approver + verify the approver ROLE for the tenant.
+
+        Returns ``(approver, None)`` when authorized, else ``(None, response)``
+        with a 401 (anonymous) or 403 (present but not an approver-role
+        identity) — anonymous and unauthorized are deliberately distinct.
+        """
+        approver = _approver(request)
+        if approver is None:
+            return None, JSONResponse(
+                status_code=401, content={"error": "approver_required"}
+            )
+        # A hosted role resolver may reach an external role store; if that lookup
+        # raises, surface a clean 503 (role check unavailable) rather than
+        # letting the exception bubble into an opaque 500.
+        try:
+            is_approver_role = resolver(_tenant(request), approver)
+        except Exception:
+            return None, JSONResponse(
+                status_code=503,
+                content={"error": "role_check_unavailable"},
+            )
+        if not is_approver_role:
+            return None, JSONResponse(
+                status_code=403,
+                content={"error": "approver_role_required"},
+            )
+        return approver, None
 
     def _error_response(exc: LearningApiError) -> JSONResponse:
         return JSONResponse(
@@ -230,7 +339,7 @@ def build_learning_dashboard_router(
         # I3: clamp caller-supplied limit to a sane window so a hostile/buggy
         # client cannot request an unbounded page.
         limit = min(max(limit, 1), 200)
-        page = service.list_items(
+        page = _service_for(request).list_items(
             kind=kind,  # type: ignore[arg-type]
             status=status,  # type: ignore[arg-type]
             scope=scope,
@@ -248,7 +357,7 @@ def build_learning_dashboard_router(
         if not _authorized(request):
             return _unauthorized()
         try:
-            item, eval_ref, conflict = service.detail(item_id)
+            item, eval_ref, conflict = _service_for(request).detail(item_id)
         except LearningApiError as exc:
             return _error_response(exc)
         detail = LearningItemDetail.from_item(
@@ -264,15 +373,15 @@ def build_learning_dashboard_router(
     ) -> JSONResponse:
         if not _authorized(request):
             return _unauthorized()
-        approver = _approver(request)
-        if approver is None:
-            return JSONResponse(
-                status_code=401,
-                content={"error": "approver_required"},
-            )
+        approver, denied = _authorized_approver(request)
+        if denied is not None:
+            return denied
+        assert approver is not None
         force = bool(body.force) if body is not None else False
         try:
-            item = service.approve(item_id, approver=approver, force=force)
+            item = _service_for(request).approve(
+                item_id, approver=approver, role=approval_role, force=force
+            )
         except LearningApiError as exc:
             return _error_response(exc)
         return JSONResponse(content=LearningItemSummary.from_item(item).model_dump(by_alias=True))
@@ -285,14 +394,12 @@ def build_learning_dashboard_router(
     ) -> JSONResponse:
         if not _authorized(request):
             return _unauthorized()
-        editor = _approver(request)
-        if editor is None:
-            return JSONResponse(
-                status_code=401,
-                content={"error": "approver_required"},
-            )
+        editor, denied = _authorized_approver(request)
+        if denied is not None:
+            return denied
+        assert editor is not None
         try:
-            item = service.edit(
+            item = _service_for(request).edit(
                 item_id,
                 patch=dict(body.patch),
                 editor=editor,
@@ -306,14 +413,12 @@ def build_learning_dashboard_router(
     async def delete_learning(item_id: str, request: Request) -> JSONResponse:
         if not _authorized(request):
             return _unauthorized()
-        actor = _approver(request)
-        if actor is None:
-            return JSONResponse(
-                status_code=401,
-                content={"error": "approver_required"},
-            )
+        actor, denied = _authorized_approver(request)
+        if denied is not None:
+            return denied
+        assert actor is not None
         try:
-            item = service.delete(item_id, actor=actor)
+            item = _service_for(request).delete(item_id, actor=actor)
         except LearningApiError as exc:
             return _error_response(exc)
         return JSONResponse(content=LearningItemSummary.from_item(item).model_dump(by_alias=True))
@@ -325,12 +430,10 @@ def build_learning_dashboard_router(
         # mutates the proposed queue and must carry an accountable actor.
         if not _authorized(request):
             return _unauthorized()
-        if _approver(request) is None:
-            return JSONResponse(
-                status_code=401,
-                content={"error": "approver_required"},
-            )
-        summary = await service.run_reflection()
+        _approver_id, denied = _authorized_approver(request)
+        if denied is not None:
+            return denied
+        summary = await _service_for(request).run_reflection()
         payload = ReflectionRunResponse(
             status=summary.status,
             candidatesProduced=summary.candidates_produced,
@@ -355,10 +458,16 @@ def register_learning_dashboard_routes(app: FastAPI, runtime: OpenMagiRuntime) -
     # The store resolves its db path relative to the process cwd when no
     # workspace root is supplied — matching the reflection executor / cron job,
     # which construct ``SqliteLearningStore`` the same way.
+    #
+    # Built in store mode (PR8).  No ``is_approver`` role resolver is injected
+    # here, so per the I-2 hardening the tenant is PINNED to ``"local"`` (a
+    # caller-chosen ``x-tenant`` is ignored) — the default-mount therefore gives
+    # real single-tenant isolation, never name-only isolation.  A hosted
+    # deployment that injects a real role-store-backed resolver gets full
+    # multi-tenant behavior with per-tenant ``x-tenant`` scoping.
     store = SqliteLearningStore()
-    service = LearningGovernanceService(store)
     router = build_learning_dashboard_router(
-        service, gateway_token=runtime.config.gateway_token
+        store=store, gateway_token=runtime.config.gateway_token
     )
     app.include_router(router)
 

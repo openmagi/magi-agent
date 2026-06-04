@@ -299,8 +299,12 @@ class TestDedup:
         t1 = _trace("s1", draft_output="the cat sat", final_output="the cat ran")
         t2 = _trace("s2", draft_output="the cat sat", final_output="the cat ran")
         cands = build_candidates((t1, t2), labeler=LocalFakeLabeler())
+        # Two duplicate traces must first PRODUCE more than one candidate so the
+        # collapse is real and not vacuously satisfied by an empty/singleton set.
+        assert len(cands) > 1
         deduped = dedup_candidates(cands)
-        assert len(deduped) < len(cands) or len(cands) <= 1
+        # Then dedup must STRICTLY reduce the count (no escape hatch).
+        assert len(deduped) < len(cands)
 
     def test_dedup_is_stable(self) -> None:
         t1 = _trace("s1", draft_output="x", final_output="y")
