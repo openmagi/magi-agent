@@ -7,7 +7,7 @@
 
 ## Why
 
-`harness/general_automation/` + `recipes/first_party/general_automation/` are a complete *declaration/classification/evidence* tier with **no live consumer** (grep: `classify_shell_policy`/`classify_path_access`/`apply_output_budget_policy`/`project_general_automation_preset` have zero production callers outside the GA dir/tests/shadow). The only live tool host is read-only (`tools/local_readonly.py`). This Track wires the verification brain to an execution body for the `general` agent role, and ports OpenCode's completion-driving ergonomics — **without weakening any existing evidence/gate/hard-safety invariant**. Analysis: `clawy:docs/plans/2026-06-03-magi-general-automation-harness-improvements.md`.
+`harness/general_automation/` + `recipes/first_party/general_automation/` are a complete *declaration/classification/evidence* tier with **no live consumer** (grep: `classify_shell_policy`/`classify_path_access`/`apply_output_budget_policy`/`project_general_automation_preset` have zero production callers outside the GA dir/tests/shadow). The only live tool host is read-only (`tools/local_readonly.py`). This Track wires the verification brain to an execution body for the `general` agent role, and ports OpenCode's completion-driving ergonomics — **without weakening any existing evidence/gate/hard-safety invariant**. Analysis: `docs/plans/2026-06-03-magi-general-automation-harness-improvements.md`.
 
 ## Invariants every PR MUST preserve (repo discipline)
 
