@@ -306,11 +306,17 @@ def test_web_research_tools_import_boundary_has_no_live_or_network_imports() -> 
         elif isinstance(node, ast.ImportFrom) and node.module:
             imported_modules.add(node.module)
 
+    # NOTE (PR3a): research_tools now deliberately imports the gated
+    # ``live_provider_pack`` to drive the LIVE acquisition boundary through the
+    # existing tool seam. That module is network-free (only StubLiveProvider
+    # ships; no httpx/socket/toolhost, verified transitively below), so the real
+    # security intent — no live NETWORK or TOOLHOST capability at import time —
+    # is preserved. The stale ``live_provider_pack`` entry was therefore removed
+    # from this denylist; every network/toolhost prefix stays.
     forbidden_prefixes = (
         "magi_agent.adk_bridge",
         "magi_agent.browser",
         "magi_agent.transport",
-        "magi_agent.web_acquisition.live_provider_pack",
         "socket",
         "subprocess",
         "httpx",
@@ -340,7 +346,6 @@ assert hasattr(module, "LocalWebResearchToolBoundary")
 
 forbidden_loaded = (
     "magi_agent.adk_bridge.local_toolhost",
-    "magi_agent.web_acquisition.live_provider_pack",
 )
 loaded = [name for name in forbidden_loaded if name in sys.modules]
 if loaded:
