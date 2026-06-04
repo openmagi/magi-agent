@@ -66,6 +66,15 @@ class ToolDispatcher:
         # Semaphore is created lazily and keyed on the running event loop so it
         # binds to the correct loop (and survives loop teardown across separate
         # ``asyncio.run`` invocations, e.g. in tests).
+        #
+        # CONCURRENCY MODEL: this loop-keyed cache makes a single dispatcher safe
+        # to reuse *sequentially* across distinct ``asyncio.run()`` calls on ONE
+        # thread (each run rebinds the semaphore to its live loop). It is NOT
+        # safe for true multi-loop concurrent use from multiple threads at once:
+        # the single ``_offload_semaphore`` / ``_offload_semaphore_loop`` pair is
+        # not atomically swapped, so two loops running on two threads could race
+        # the rebind. The live ADK Runner path uses one loop per dispatcher, so
+        # this is sufficient; do not share one dispatcher across concurrent loops.
         self._offload_semaphore: asyncio.Semaphore | None = None
         self._offload_semaphore_loop: asyncio.AbstractEventLoop | None = None
 
@@ -192,7 +201,7 @@ class ToolDispatcher:
 
         _t0 = time.monotonic_ns()
         handler = registration.handler
-        if self._should_offload(manifest):
+        if self._should_offload(manifest, handler):
             # Readonly / concurrency_safe synchronous handler: run off the event
             # loop so ADK's same-turn gather actually overlaps the blocking I/O.
             # Bounded by a shared semaphore so the fan-out stays within
@@ -215,15 +224,19 @@ class ToolDispatcher:
         result = self._attach_coding_receipt(name, arguments, result)
         return result
 
-    def _should_offload(self, manifest: ToolManifest) -> bool:
-        """Whether *manifest*'s synchronous handler should run off the event loop.
+    def _should_offload(self, manifest: ToolManifest, handler: object) -> bool:
+        """Whether *manifest*'s synchronous *handler* should run off the event loop.
 
-        Only genuinely-readonly tools are offloaded. The manifest model already
-        validates that a ``readonly`` tool cannot be ``dangerous`` or
-        ``mutates_workspace`` (see ``ToolManifest`` validation), so offloading
-        here can never push a write/exec to a worker thread — the write-barrier
-        is structural. Async handlers are excluded because they already yield to
-        the loop (``to_thread`` would not await the returned coroutine).
+        Only ``readonly`` / ``concurrency_safe`` tools are offloaded. The
+        manifest model validates that *both* of these parallel-safety classes
+        cannot be ``dangerous`` or ``mutates_workspace`` (see ``ToolManifest``
+        validation), so offloading here can never push a write/exec to a worker
+        thread — the write-barrier is structural for every offloadable class.
+        Async handlers are excluded because they already yield to the loop
+        (``to_thread`` would not await the returned coroutine).
+
+        *handler* is passed in by ``dispatch`` (which already resolved the
+        registration) so this does not re-query the registry.
         """
         if not self._readonly_offload_enabled:
             return False
@@ -231,8 +244,6 @@ class ToolDispatcher:
             return False
         if manifest.mutates_workspace or manifest.dangerous:
             return False
-        registration = self.registry.resolve_registration(manifest.name)
-        handler = registration.handler if registration is not None else None
         if handler is None or asyncio.iscoroutinefunction(handler):
             return False
         return True

@@ -4,6 +4,7 @@ from collections.abc import Mapping
 from datetime import UTC, datetime
 import hashlib
 import re
+import threading
 from pathlib import PurePosixPath
 from typing import Any, Literal, Self
 
@@ -263,6 +264,13 @@ class ReadLedger:
     def __init__(self, config: ReadLedgerConfig | None = None) -> None:
         self.config = config or ReadLedgerConfig()
         self._entries: list[ReadLedgerEntry] = []
+        # PR14 — when MAGI_TOOL_CONCURRENCY_ENABLED=1, readonly handlers (which
+        # may record reads into a shared ledger) run concurrently in threadpool
+        # threads. Guard the entries list so an append cannot be lost and a
+        # latest-read scan always sees a consistent snapshot. The lock is held
+        # only around the in-memory append / scan, never across I/O. This makes
+        # MAGI_TOOL_CONCURRENCY_ENABLED + MAGI_READ_LEDGER_ENABLED safe together.
+        self._entries_lock = threading.Lock()
 
     def record_read(
         self,
@@ -295,7 +303,8 @@ class ReadLedger:
             entryRef=read_entry_ref(session_id, workspace_ref, safe_path, digest),
             pathRef=workspace_path_ref(workspace_ref, safe_path),
         )
-        self._entries.append(entry)
+        with self._entries_lock:
+            self._entries.append(entry)
         return entry
 
     def get_latest_read(
@@ -306,7 +315,11 @@ class ReadLedger:
         path: str,
     ) -> ReadLedgerEntry | None:
         safe_path = safe_workspace_relative_path(path)
-        for entry in reversed(self._entries):
+        # Snapshot under the lock so a concurrent append cannot mutate the list
+        # mid-iteration; iterate the snapshot outside the lock.
+        with self._entries_lock:
+            snapshot = tuple(self._entries)
+        for entry in reversed(snapshot):
             if (
                 entry.session_id == session_id
                 and entry.workspace_ref == workspace_ref
