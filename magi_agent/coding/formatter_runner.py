@@ -13,15 +13,24 @@ data-driven mapping plus a small subprocess runner that:
 The mapping is intentionally a small data structure so it is easy to extend,
 and it can be overridden via the ``MAGI_FORMATTER_OVERRIDES`` env var
 (``ext=cmd`` CSV, e.g. ``.py=ruff format $FILE,.js=prettier --write $FILE``).
+
+.. note:: ``MAGI_FORMATTER_OVERRIDES`` uses ``','`` as the entry delimiter.
+   A file-extension path or command that itself contains a literal comma will
+   break parsing.  Use a wrapper script when the formatter command requires
+   comma-containing arguments.
 """
 from __future__ import annotations
 
+import logging
 import os
 import shlex
 import shutil
 import subprocess
 from collections.abc import Mapping
 from dataclasses import dataclass
+from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 # The ``$FILE`` placeholder is replaced with the resolved absolute path as a
 # single argv element (never shell-interpolated).
@@ -78,6 +87,10 @@ def parse_formatter_overrides(raw: str | None) -> dict[str, str]:
 
     Invalid entries (missing ``=`` or empty parts) are skipped. Extensions are
     normalized to lower-case and given a leading dot.
+
+    .. warning:: Entries are split on ``','``.  A formatter command or
+       extension that contains a literal comma will break parsing.  Use a
+       wrapper script if the formatter requires comma-containing arguments.
     """
     overrides: dict[str, str] = {}
     if not raw:
@@ -119,14 +132,22 @@ def select_formatter(
     """
     resolver = which if which is not None else shutil.which
     path_str = os.fspath(file_path)
-    ext = _extension(path_str)
+    ext = Path(path_str).suffix.lower()
     if not ext:
         return None
     table = build_formatter_table(env)
     template = table.get(ext)
     if not template:
         return None
-    tokens = shlex.split(template)
+    try:
+        tokens = shlex.split(template)
+    except ValueError:
+        logger.warning(
+            "MAGI_FORMATTER_OVERRIDES: malformed shell quoting in template for %r"
+            " — skipping formatter (no formatter selected)",
+            ext,
+        )
+        return None
     if not tokens:
         return None
     program = tokens[0]
@@ -199,14 +220,6 @@ def run_formatter(
         exit_code=0,
         reason="ok",
     )
-
-
-def _extension(path_str: str) -> str:
-    base = path_str.replace("\\", "/").rsplit("/", 1)[-1]
-    dot = base.rfind(".")
-    if dot <= 0:  # no dot, or leading-dot dotfile with no further extension
-        return ""
-    return base[dot:].lower()
 
 
 __all__ = [

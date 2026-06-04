@@ -136,6 +136,68 @@ def test_run_formatter_nonzero_exit_is_fail_open(tmp_path) -> None:
     assert target.read_text(encoding="utf-8") == "x=1\n"
 
 
+def test_select_formatter_malformed_override_returns_none(monkeypatch) -> None:
+    """Unmatched shell quote in MAGI_FORMATTER_OVERRIDES → None (no formatter)."""
+    # Inject a broken template (unmatched single quote) directly into the table
+    # by using the env dict path so we don't rely on a real shell quoting error
+    # leaking through parse_formatter_overrides (which doesn't shlex-split).
+    # We override the table entry directly by injecting via env.
+    malformed_env = {"MAGI_FORMATTER_OVERRIDES": ".py=myfmt 'unclosed $FILE"}
+    result = select_formatter("module.py", env=malformed_env, which=_which_all)
+    # shlex.split raises ValueError on the unmatched quote → select_formatter
+    # must catch it and return None instead of propagating.
+    assert result is None
+
+
+def test_run_formatter_malformed_override_write_succeeds(tmp_path, monkeypatch) -> None:
+    """Malformed override → no formatter → write is still fail-open (no exception)."""
+    target = tmp_path / "module.py"
+    target.write_text("x=1\n", encoding="utf-8")
+    result = run_formatter(
+        target,
+        timeout_seconds=2.0,
+        env={"MAGI_FORMATTER_OVERRIDES": ".py=myfmt 'unclosed $FILE"},
+        which=_which_all,
+    )
+    assert result.attempted is False
+    assert result.formatted is False
+    assert result.reason == "no_formatter"
+    # File is untouched — write-side is unaffected.
+    assert target.read_text(encoding="utf-8") == "x=1\n"
+
+
+def test_select_formatter_env_none_uses_os_environ(monkeypatch) -> None:
+    """env=None falls back to os.environ; MAGI_FORMATTER_OVERRIDES is honoured."""
+    monkeypatch.setenv("MAGI_FORMATTER_OVERRIDES", ".py=myfmt --quiet $FILE")
+    # env=None (default) → build_formatter_table reads os.environ.
+    result = select_formatter("module.py", which=_which_all)
+    assert result is not None
+    assert result.program == "myfmt"
+    assert result.argv == ("myfmt", "--quiet", "module.py")
+
+
+def test_run_formatter_env_none_uses_os_environ(tmp_path, monkeypatch) -> None:
+    """run_formatter with env=None picks up MAGI_FORMATTER_OVERRIDES from os.environ."""
+    import sys
+
+    script = tmp_path / "fakefmt.py"
+    script.write_text(
+        "import sys\n"
+        "p = sys.argv[1]\n"
+        "open(p, 'w', encoding='utf-8').write('FROM_OS_ENV\\n')\n",
+        encoding="utf-8",
+    )
+    target = tmp_path / "module.py"
+    target.write_text("x=1\n", encoding="utf-8")
+    overrides = f".py={sys.executable} {script} $FILE"
+    monkeypatch.setenv("MAGI_FORMATTER_OVERRIDES", overrides)
+    # env=None → os.environ → formatter override is found.
+    result = run_formatter(target, timeout_seconds=10.0)
+    assert result.attempted is True
+    assert result.formatted is True
+    assert target.read_text(encoding="utf-8") == "FROM_OS_ENV\n"
+
+
 def test_run_formatter_timeout_is_fail_open(tmp_path) -> None:
     script = tmp_path / "slowfmt.py"
     script.write_text("import time\ntime.sleep(5)\n", encoding="utf-8")

@@ -662,9 +662,10 @@ class Gate5BFullToolHost:
                 "pathDigest": _digest(target.relative_to(self.workspace_root).as_posix()),
                 "bytesWritten": len(content.encode("utf-8")),
             }
-            content_digest = self._content_digest(target)
-            if content_digest is not None:
-                result["contentDigest"] = content_digest
+            if self.config.format_on_write_enabled:
+                content_digest = self._content_digest(target)
+                if content_digest is not None:
+                    result["contentDigest"] = content_digest
             return result
         if tool_name == "FileEdit":
             target = _safe_child_path(self.workspace_root, str(args.get("path", "")))
@@ -696,9 +697,10 @@ class Gate5BFullToolHost:
                 "pathDigest": _digest(target.relative_to(self.workspace_root).as_posix()),
                 "replacements": 1,
             }
-            content_digest = self._content_digest(target)
-            if content_digest is not None:
-                edit_result["contentDigest"] = content_digest
+            if self.config.format_on_write_enabled:
+                content_digest = self._content_digest(target)
+                if content_digest is not None:
+                    edit_result["contentDigest"] = content_digest
             return edit_result
         if tool_name == "PatchApply":
             target = _safe_child_path(
@@ -717,9 +719,10 @@ class Gate5BFullToolHost:
                     "patchMode": "content_replace",
                     "bytesWritten": len(content.encode("utf-8")),
                 }
-                content_digest = self._content_digest(target)
-                if content_digest is not None:
-                    patch_result["contentDigest"] = content_digest
+                if self.config.format_on_write_enabled:
+                    content_digest = self._content_digest(target)
+                    if content_digest is not None:
+                        patch_result["contentDigest"] = content_digest
                 return patch_result
             raise ValueError("unsupported_patch_shape")
         if tool_name == "Bash":
@@ -949,18 +952,18 @@ class Gate5BFullToolHost:
     def _content_digest(self, target: Path) -> str | None:
         """Return a content hash of the (possibly formatted) on-disk file.
 
-        Only called when format-on-write is enabled; callers expose the result
-        as ``contentDigest`` in the tool response (a field separate from
-        ``pathDigest``).  Returns ``None`` when the flag is OFF so callers can
-        omit the field entirely, keeping the response shape identical to
-        pre-PR4 when the feature is disabled.
+        Only called from call sites that are already gated on
+        ``self.config.format_on_write_enabled``.  Callers expose the result as
+        ``contentDigest`` in the tool response (a field separate from
+        ``pathDigest``), which is only present when the flag is ON.
+
+        Returns ``None`` on an ``OSError`` reading the file (e.g. the formatter
+        deleted it — extremely unlikely but fail-open).
 
         ``pathDigest`` is ALWAYS ``_digest(relpath)`` regardless of this flag —
         it identifies the path, not the content.  This ``contentDigest`` field
         is the formatted-content hash and is only present when the flag is ON.
         """
-        if not self.config.format_on_write_enabled:
-            return None
         try:
             content = target.read_text(encoding="utf-8", errors="replace")
         except OSError:

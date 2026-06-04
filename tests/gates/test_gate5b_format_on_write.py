@@ -147,7 +147,6 @@ async def test_format_on_write_applies_to_patch_apply(tmp_path, monkeypatch):
 async def test_missing_formatter_write_succeeds_unformatted(tmp_path, monkeypatch):
     # No override; force the selected formatter to look uninstalled so the test
     # is independent of whether ruff is actually present on the runner.
-    monkeypatch.delenv("MAGI_FORMATTER_OVERRIDES", raising=False)
     monkeypatch.setenv("MAGI_FORMATTER_OVERRIDES", ".py=definitely-not-installed $FILE")
     bundle = _bundle(tmp_path, format_on_write=True)
 
