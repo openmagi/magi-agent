@@ -549,6 +549,11 @@ def test_live_boundary_default_disabled_does_not_load_adk_and_keeps_typescript_a
 
 
 def test_live_boundary_invokes_runner_with_allowlisted_kwargs_and_disabled_tools() -> None:
+    # PR11: this request routes a Claude model, which now resolves through
+    # magi's cache-aware ADK subclass (CacheAwareClaude). Building it imports
+    # ADK's Anthropic integration, which requires the optional `anthropic`
+    # package — skip cleanly when it is not installed.
+    pytest.importorskip("anthropic")
     result = Gate5B4C3LiveRunnerBoundary(_fake_primitives).invoke(
         _request(),
         config=_enabled_config(),
@@ -577,7 +582,13 @@ def test_live_boundary_invokes_runner_with_allowlisted_kwargs_and_disabled_tools
     )
     assert result.run_async_kwargs_keys == ("new_message", "session_id", "user_id")
     assert set(_FakeAgent.created_kwargs) == set(result.agent_kwargs_keys)
-    assert _FakeAgent.created_kwargs["model"] == "claude-3-5-sonnet-latest"
+    # PR11: a Claude/anthropic model id now resolves to magi's cache-aware ADK
+    # subclass (CacheAwareClaude) so the outgoing Anthropic request can carry
+    # rolling-tail cache markers when MAGI_MESSAGE_CACHE_ENABLED is set. The
+    # underlying model name is preserved on the resolved instance.
+    resolved_model = _FakeAgent.created_kwargs["model"]
+    assert getattr(resolved_model, "magi_message_cache_aware", False) is True
+    assert getattr(resolved_model, "model", None) == "claude-3-5-sonnet-latest"
     assert _FakeAgent.created_kwargs["tools"] == []
     assert _FakeGenerateContentConfig.created_kwargs == {"maxOutputTokens": 512}
     assert set(_FakeRunner.created_kwargs) == set(result.runner_kwargs_keys)

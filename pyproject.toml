@@ -29,6 +29,13 @@ cli = [
 composio = [
   "composio==0.13.1",
 ]
+# Optional: required only when a Claude/Anthropic model is run through ADK
+# (google.adk.models.Claude / magi_agent.adk_bridge.anthropic_cache_model).
+# Imported lazily so environments without it are unaffected. ADK itself
+# requires anthropic>=0.43 ("Claude models require the anthropic package").
+anthropic = [
+  "anthropic==0.105.2",
+]
 
 [project.scripts]
 magi-agent = "magi_agent.main:main"
