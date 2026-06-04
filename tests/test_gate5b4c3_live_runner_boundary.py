@@ -347,6 +347,42 @@ class _MappingContentPartsRunner(_FakeRunner):
         yield {"content": {"parts": ({"text": "live ADK text from mapping parts"},)}}
 
 
+class _CandidateContentPartsRunner(_FakeRunner):
+    async def run_async(self, **kwargs: object) -> object:
+        type(self).run_kwargs = kwargs
+        yield {
+            "candidates": (
+                {
+                    "content": {
+                        "parts": (
+                            {"text": "live ADK text from candidate parts"},
+                        )
+                    }
+                },
+            )
+        }
+
+
+class _ModelDumpCandidateContentRunner(_FakeRunner):
+    class _Event:
+        def model_dump(self, **_kwargs: object) -> dict[str, object]:
+            return {
+                "candidates": (
+                    {
+                        "content": {
+                            "parts": (
+                                {"text": "live ADK text from model dump"},
+                            )
+                        }
+                    },
+                )
+            }
+
+    async def run_async(self, **kwargs: object) -> object:
+        type(self).run_kwargs = kwargs
+        yield self._Event()
+
+
 class _ProviderSetupFailRunner(_FakeRunner):
     async def run_async(self, **kwargs: object) -> object:
         type(self).run_kwargs = kwargs
@@ -448,6 +484,36 @@ def _mapping_content_parts_primitives() -> Gate5B4C3LiveAdkPrimitives:
     return Gate5B4C3LiveAdkPrimitives(
         Agent=_FakeAgent,
         Runner=_MappingContentPartsRunner,
+        InMemorySessionService=_FakeSessionService,
+        Content=_FakeContent,
+        Part=_FakePart,
+        GenerateContentConfig=_FakeGenerateContentConfig,
+    )
+
+
+def _candidate_content_parts_primitives() -> Gate5B4C3LiveAdkPrimitives:
+    _FakeAgent.created_kwargs = {}
+    _CandidateContentPartsRunner.created_kwargs = {}
+    _CandidateContentPartsRunner.run_kwargs = {}
+    _FakeGenerateContentConfig.created_kwargs = {}
+    return Gate5B4C3LiveAdkPrimitives(
+        Agent=_FakeAgent,
+        Runner=_CandidateContentPartsRunner,
+        InMemorySessionService=_FakeSessionService,
+        Content=_FakeContent,
+        Part=_FakePart,
+        GenerateContentConfig=_FakeGenerateContentConfig,
+    )
+
+
+def _model_dump_candidate_content_primitives() -> Gate5B4C3LiveAdkPrimitives:
+    _FakeAgent.created_kwargs = {}
+    _ModelDumpCandidateContentRunner.created_kwargs = {}
+    _ModelDumpCandidateContentRunner.run_kwargs = {}
+    _FakeGenerateContentConfig.created_kwargs = {}
+    return Gate5B4C3LiveAdkPrimitives(
+        Agent=_FakeAgent,
+        Runner=_ModelDumpCandidateContentRunner,
         InMemorySessionService=_FakeSessionService,
         Content=_FakeContent,
         Part=_FakePart,
@@ -606,6 +672,34 @@ def test_live_boundary_extracts_mapping_content_parts_text_output() -> None:
     assert result.reason == "runner_completed"
     assert result.event_count == 1
     assert result.output_text_internal == "live ADK text from mapping parts"
+    assert result.runner_error_diagnostic is None
+
+
+def test_live_boundary_extracts_candidate_content_parts_text_output() -> None:
+    result = Gate5B4C3LiveRunnerBoundary(_candidate_content_parts_primitives).invoke(
+        _request(),
+        config=_enabled_config(),
+    )
+
+    assert result.status == "completed"
+    assert result.reason == "runner_completed"
+    assert result.event_count == 1
+    assert result.output_text_internal == "live ADK text from candidate parts"
+    assert result.runner_error_diagnostic is None
+
+
+def test_live_boundary_extracts_model_dump_candidate_text_output() -> None:
+    result = Gate5B4C3LiveRunnerBoundary(
+        _model_dump_candidate_content_primitives
+    ).invoke(
+        _request(),
+        config=_enabled_config(),
+    )
+
+    assert result.status == "completed"
+    assert result.reason == "runner_completed"
+    assert result.event_count == 1
+    assert result.output_text_internal == "live ADK text from model dump"
     assert result.runner_error_diagnostic is None
 
 
