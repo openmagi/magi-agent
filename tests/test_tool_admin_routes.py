@@ -12,6 +12,7 @@ EXPECTED_CORE_TOOL_NAMES = {
     "FileRead",
     "FileWrite",
     "FileEdit",
+    "PatchApply",
     "Glob",
     "Grep",
     "Bash",
@@ -189,6 +190,13 @@ def test_list_tools_returns_enabled_first_party_catalog_metadata() -> None:
     assert bash["dangerous"] is True
     assert bash["mutatesWorkspace"] is True
     assert bash["permission"] == "execute"
+
+    patch_apply = tool_by_name(tools, "PatchApply")
+    assert patch_apply["enabled"] is True
+    assert patch_apply["dangerous"] is False
+    assert patch_apply["mutatesWorkspace"] is True
+    assert patch_apply["permission"] == "write"
+    assert patch_apply["availableInModes"] == ["act"]
 
     for readonly_name in (
         "HealthStatus",

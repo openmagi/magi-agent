@@ -24,7 +24,7 @@ def test_readme_uses_public_open_magi_agent_naming() -> None:
 def test_readme_documents_live_homebrew_formula() -> None:
     text = _readme()
 
-    assert "brew install openmagi/tap/magi-agent" in text
+    assert "brew install --force-bottle openmagi/tap/magi-agent" in text
     assert "magi-agent serve --help" in text
     assert "brew reinstall openmagi/tap/magi-agent --force-bottle" in text
     assert "Homebrew Tap" not in text
@@ -37,7 +37,7 @@ def test_readme_documents_local_web_dashboard() -> None:
     assert "Local web dashboard" in text
     assert "http://localhost:8080/dashboard" in text
     assert "magi-agent serve --port 8080" in text
-    assert text.index("brew install openmagi/tap/magi-agent") < text.index("uv sync")
+    assert text.index("brew install --force-bottle openmagi/tap/magi-agent") < text.index("uv sync")
     assert "npm run web:dev" not in text
     assert "http://localhost:3001" not in text
 

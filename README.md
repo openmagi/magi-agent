@@ -76,7 +76,7 @@ Install with Homebrew:
 
 ```bash
 brew update
-brew install openmagi/tap/magi-agent
+brew install --force-bottle openmagi/tap/magi-agent
 ```
 
 Start the local API and web dashboard:
@@ -103,8 +103,9 @@ magi-agent serve --help
 The dashboard is served by the same local agent. It does not need a separate
 Node or Next.js process.
 
-If Homebrew tries to build the formula from source on macOS instead of using the
-bottle, update the tap metadata and force the bottled install:
+`--force-bottle` keeps the install on the prebuilt Homebrew package path. If
+Homebrew still tries to build the formula from source on macOS, update the tap
+metadata and reinstall the bottle:
 
 ```bash
 brew update
