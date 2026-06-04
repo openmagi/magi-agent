@@ -162,7 +162,7 @@ class BudgetedToolResult(BaseModel):
             projection["delegationHint"] = (
                 f"Full output stored out of band at {self.result_ref}. "
                 "Do not inline the full payload — delegate to a read-only research child "
-                "(Grep/Read with offset/limit) to inspect it and conserve context."
+                "(Grep/FileRead with offset/limit) to inspect it and conserve context."
             )
         return projection
 

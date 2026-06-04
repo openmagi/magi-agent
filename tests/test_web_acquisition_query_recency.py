@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from datetime import datetime, timezone
 
 import pytest
@@ -44,7 +45,6 @@ def test_recency_flag_off_no_year_appended_for_recency_queries() -> None:
     "recent breakthroughs in quantum computing",
     "current best practices for Python",
     "today's stock prices",
-    "news about climate change",
     "this year best smartphones",
     "newest JavaScript frameworks",
     "up to date kubernetes documentation",
@@ -94,7 +94,6 @@ def test_no_year_appended_when_query_already_contains_year(query: str, baseline:
         f"Year was appended despite existing year in query. Got: {result_flag_on!r}"
     )
     # The existing year should still be present (not removed)
-    import re
     assert re.search(r"\b(?:19|20)\d{2}\b", result_flag_on), "Existing year should be preserved"
 
 
@@ -113,7 +112,6 @@ def test_no_year_appended_when_no_recency_intent(query: str) -> None:
     """Without a recency-intent keyword, no year is appended."""
     result = normalize_query(query, inject_recency_year=True, now=_NOW_2026)
     assert result == normalize_query(query, inject_recency_year=False)
-    import re
     assert not re.search(r"\b20\d{2}\b", result), (
         f"No year should be appended for non-recency query: {result!r}"
     )
@@ -176,3 +174,48 @@ def test_normalize_query_still_raises_on_empty_with_flag_on() -> None:
     """normalize_query still raises ValueError for empty queries even with flag on."""
     with pytest.raises(ValueError, match="query is required"):
         normalize_query("", inject_recency_year=True, now=_NOW_2026)
+
+
+# ---------------------------------------------------------------------------
+# Named-entity "News" queries must NOT get year injected (fix: news removed)
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("query", [
+    "BBC News latest",
+    "Hacker News top posts",
+    "Google News feed",
+    "CNN News coverage",
+])
+def test_named_entity_news_does_not_trigger_year_injection(query: str) -> None:
+    """'News' as part of a named entity should NOT cause year injection.
+
+    The word 'news' was removed from _RECENCY_INTENT_RE to avoid false-positives
+    on named entities like 'BBC News' or 'Hacker News'.  Any recency intent in
+    these queries comes from other keywords (e.g. 'latest'), not bare 'news'.
+    """
+    # Queries containing only "news" (no other recency keyword) must be unchanged.
+    # Filter to those that have no other recency keyword so the assertion is clean.
+    has_other_recency = re.search(
+        r"\b(?:latest|recent|current|today|this\s+year|newest|up\s+to\s+date)\b",
+        query,
+        re.IGNORECASE,
+    )
+    if has_other_recency:
+        pytest.skip("query has another recency keyword — skip this specific check")
+    result = normalize_query(query, inject_recency_year=True, now=_NOW_2026)
+    assert not result.endswith(" 2026"), (
+        f"'news' as named entity should not trigger year injection: {result!r}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Live-clock test: no now= argument uses real UTC clock
+# ---------------------------------------------------------------------------
+
+def test_live_clock_appends_current_year() -> None:
+    """normalize_query with no now= uses the real UTC clock and appends the current year."""
+    current_year = str(datetime.now(timezone.utc).year)
+    result = normalize_query("latest update", inject_recency_year=True)
+    assert result.endswith(f" {current_year}"), (
+        f"Expected result to end with ' {current_year}', got: {result!r}"
+    )
