@@ -6,6 +6,10 @@ from inspect import isawaitable
 from magi_agent.evidence.coding_tool_receipts import (
     CodingToolReceiptBoundary,
 )
+from magi_agent.harness.general_automation.live_gate import (
+    GeneralAutomationGateOutcome,
+    GeneralAutomationLiveGate,
+)
 from magi_agent.telemetry.trace_context import get_trace
 
 from .context import ToolContext
@@ -23,10 +27,14 @@ class ToolDispatcher:
         *,
         permission_policy: ToolPermissionPolicy | None = None,
         coding_receipt_boundary: CodingToolReceiptBoundary | None = None,
+        general_automation_live_gate: GeneralAutomationLiveGate | None = None,
     ) -> None:
         self.registry = registry
         self.permission_policy = permission_policy or ToolPermissionPolicy()
         self._coding_receipt_boundary = coding_receipt_boundary or CodingToolReceiptBoundary()
+        self._general_automation_live_gate = (
+            general_automation_live_gate or GeneralAutomationLiveGate()
+        )
 
     async def dispatch(
         self,
@@ -112,14 +120,6 @@ class ToolDispatcher:
                 },
             )
 
-        decision = self.permission_policy.decide(manifest, arguments, context, mode=mode)
-        if trace is not None:
-            trace.record("tool", "ToolDispatcher", "permission_check", f"name={name}, decision={decision.action}")
-        if decision.action == "deny":
-            return ToolResult(status="blocked", metadata=decision.metadata)
-        if decision.action == "ask":
-            return ToolResult(status="needs_approval", metadata=decision.metadata)
-
         if registration.handler is None:
             return ToolResult(
                 status="error",
@@ -134,6 +134,28 @@ class ToolDispatcher:
                     "reason": "tool handler missing",
                 },
             )
+
+        ga_outcome = self._general_automation_live_gate.classify_pre(
+            name, arguments, context, mode=mode
+        )
+        if ga_outcome.active and ga_outcome.decision != "allow":
+            ga_result = _general_automation_gate_result(manifest, mode, ga_outcome)
+            if trace is not None:
+                trace.record(
+                    "tool",
+                    "ToolDispatcher",
+                    "ga_live_gate",
+                    f"name={name}, decision={ga_outcome.decision}",
+                )
+            return ga_result
+
+        decision = self.permission_policy.decide(manifest, arguments, context, mode=mode)
+        if trace is not None:
+            trace.record("tool", "ToolDispatcher", "permission_check", f"name={name}, decision={decision.action}")
+        if decision.action == "deny":
+            return ToolResult(status="blocked", metadata=decision.metadata)
+        if decision.action == "ask":
+            return ToolResult(status="needs_approval", metadata=decision.metadata)
 
         _t0 = time.monotonic_ns()
         result = registration.handler(arguments, context)
@@ -178,6 +200,38 @@ class ToolDispatcher:
             metadata=result.metadata,
             codingMutationReceipt=receipt.public_projection(),
         )
+
+
+def _general_automation_gate_result(
+    manifest: object,
+    mode: RuntimeMode,
+    outcome: GeneralAutomationGateOutcome,
+) -> ToolResult:
+    """Project a GA live-gate deny/ask outcome onto a ToolResult.
+
+    ``deny`` reuses the existing permission-denied path (``status="blocked"``);
+    ``ask`` reuses the ``pending_control_request`` path (``status="needs_approval"``)
+    and surfaces the control projection + the gated receipt as result metadata so
+    downstream consumers can record the evidence. The classifiers are never
+    bypassed — this only *projects* their decision onto the existing control flow.
+    """
+    tool_name = getattr(manifest, "name", "unknown")
+    metadata: dict[str, object] = {
+        "toolName": tool_name,
+        "mode": mode,
+        "reason": outcome.reason or f"general_automation_{outcome.decision}",
+        "generalAutomationLiveGate": True,
+    }
+    if outcome.permission_boundary is not None:
+        metadata["permissionBoundary"] = outcome.permission_boundary.model_dump()
+    if outcome.control_projection is not None:
+        metadata["controlProjection"] = outcome.control_projection.public_projection()
+    if outcome.receipt is not None:
+        metadata["generalAutomationReceipt"] = outcome.receipt.public_projection()
+
+    if outcome.decision == "deny":
+        return ToolResult(status="blocked", metadata=metadata)
+    return ToolResult(status="needs_approval", metadata=metadata)
 
 
 def _available_tool_names(
