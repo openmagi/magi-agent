@@ -1144,28 +1144,30 @@ def _redacted_preview(value: str, *, max_chars: int = 256) -> str:
 
 
 def _event_text(event: object) -> str | None:
-    if isinstance(event, Mapping):
-        value = event.get("text")
-        if isinstance(value, str):
-            return value
-        content = event.get("content")
-    else:
-        content = getattr(event, "content", None)
-    value = getattr(event, "text", None)
-    if isinstance(value, str):
+    value = _mapping_or_attr(event, "text")
+    if isinstance(value, str) and value:
         return value
-    if isinstance(content, Mapping):
-        parts = content.get("parts")
-    else:
-        parts = getattr(content, "parts", None)
-    if isinstance(parts, (list, tuple)):
-        chunks = []
-        for part in parts:
-            text = part.get("text") if isinstance(part, Mapping) else getattr(part, "text", None)
-            if isinstance(text, str):
-                chunks.append(text)
-        return "".join(chunks) or None
+    chunks = _text_chunks_from_parts(_event_parts(event))
+    if chunks:
+        return "".join(chunks)
+    dumped = _safe_model_dump_mapping(event)
+    if dumped is not None:
+        value = _mapping_or_attr(dumped, "text")
+        if isinstance(value, str) and value:
+            return value
+        chunks = _text_chunks_from_parts(_event_parts(dumped))
+        if chunks:
+            return "".join(chunks)
     return None
+
+
+def _text_chunks_from_parts(parts: Sequence[object]) -> list[str]:
+    chunks: list[str] = []
+    for part in parts:
+        text = _mapping_or_attr(part, "text")
+        if isinstance(text, str) and text:
+            chunks.append(text)
+    return chunks
 
 
 def _event_function_calls(event: object) -> list[Mapping[str, object]]:
@@ -1279,6 +1281,26 @@ def _mapping_or_attr(value: object, name: str) -> object:
         return getattr(value, name, None)
     except Exception:
         return None
+
+
+def _safe_model_dump_mapping(value: object) -> Mapping[str, object] | None:
+    model_dump = getattr(value, "model_dump", None)
+    if not callable(model_dump):
+        return None
+    for kwargs in (
+        {"by_alias": True, "mode": "python", "warnings": False},
+        {"by_alias": True},
+        {},
+    ):
+        try:
+            dumped = model_dump(**kwargs)
+        except TypeError:
+            continue
+        except Exception:
+            return None
+        if isinstance(dumped, Mapping):
+            return dumped
+    return None
 
 
 def _normalize_function_call(function_call: object) -> Mapping[str, object] | None:
