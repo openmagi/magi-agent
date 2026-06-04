@@ -8,6 +8,8 @@ from typing import Any, Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, field_serializer, field_validator
 
+from magi_agent.harness.general_automation.text_scrub import scrub_text as _scrub_text
+
 
 ShellPolicyStatus = Literal["allowed", "approval_required", "denied"]
 ShellReasonCode = str
@@ -53,22 +55,6 @@ _PACKAGE_INSTALL_COMMANDS = {
     ("go", "get"),
 }
 _REDIRECTION_TOKENS = {">", ">>", "<", "2>", "2>>", "&>", "1>"}
-_PRIVATE_TEXT_RE = re.compile(
-    r"(?:"
-    r"/Users(?:/[^\s,;}\"']*)?|"
-    r"/home(?:/[^\s,;}\"']*)?|"
-    r"/workspace(?:/[^\s,;}\"']*)?|"
-    r"/data/bots(?:/[^\s,;}\"']*)?|"
-    r"authorization\s*:\s*bearer\s+[A-Za-z0-9._~+/=-]+|"
-    r"\bbearer\s+[A-Za-z0-9._~+/=-]+|"
-    r"\bcookie\s*:\s*[^\n\r]+|"
-    r"\bsk[-_][A-Za-z0-9._-]+|"
-    r"gh[opusr]_[A-Za-z0-9_]+|"
-    r"github_pat_[A-Za-z0-9_]+|"
-    r"raw[_ -]?(?:tool|prompt|output|result|log|args)"
-    r")",
-    re.IGNORECASE,
-)
 _REASON_CODE_RE = re.compile(r"^[a-z][a-z0-9_:-]{0,96}$")
 
 
@@ -394,7 +380,7 @@ def _is_env_assignment(token: str) -> bool:
 
 
 def _safe_text(value: str) -> str:
-    return _PRIVATE_TEXT_RE.sub("[redacted-private]", value)
+    return _scrub_text(value)
 
 
 def _digest(value: str) -> str:
