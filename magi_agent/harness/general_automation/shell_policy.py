@@ -8,6 +8,10 @@ from typing import Any, Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, field_serializer, field_validator
 
+from magi_agent.harness.general_automation.path_policy import (
+    PathAccessRequest as _PathAccessRequest,
+    classify_path_access as _classify_path_access,
+)
 from magi_agent.harness.general_automation.text_scrub import scrub_text as _scrub_text
 
 
@@ -56,6 +60,45 @@ _PACKAGE_INSTALL_COMMANDS = {
 }
 _REDIRECTION_TOKENS = {">", ">>", "<", "2>", "2>>", "&>", "1>"}
 _REASON_CODE_RE = re.compile(r"^[a-z][a-z0-9_:-]{0,96}$")
+
+# Verb → operation_class for path policy cross-check.
+# Commands not listed default to "read" (least-restrictive; policy still raises
+# for blocked/external paths; only workspace reads stay silent).
+_VERB_OPERATION_CLASS: dict[str, str] = {
+    # Delete
+    "rm": "delete",
+    "rmdir": "delete",
+    "unlink": "delete",
+    # Write / create
+    "cp": "write",
+    "mv": "write",
+    "touch": "write",
+    "tee": "write",
+    "install": "write",
+    "ln": "write",
+    "truncate": "write",
+    "dd": "write",
+    # Execute / permission-class mutations
+    "chmod": "execute",
+    "chown": "execute",
+    "chgrp": "execute",
+    # Read (explicit, also the fallback)
+    "cat": "read",
+    "less": "read",
+    "more": "read",
+    "head": "read",
+    "tail": "read",
+    "grep": "read",
+    "diff": "read",
+    "file": "read",
+    "stat": "read",
+    "wc": "read",
+    # List
+    "ls": "list",
+    "find": "list",
+    "du": "list",
+    "tree": "list",
+}
 
 
 class ShellOutputBudgetMetadata(BaseModel):
@@ -209,6 +252,17 @@ def classify_shell_policy(request: ShellPolicyRequest) -> ShellPolicyDecision:
         destructive_commands=destructive_commands,
         credential_env_assignments=credential_env_assignments,
     )
+
+    # Cross-check extracted path targets against path_policy (PR13).
+    # Only raises restriction — never lowers an existing decision.
+    path_extra_codes = _path_policy_extra_reason_codes(
+        tokens,
+        analysis_tokens=analysis_tokens,
+        workspace_root=request.workspace_root,
+    )
+    if path_extra_codes:
+        reason_codes = tuple(dict.fromkeys((*reason_codes, *path_extra_codes)))
+
     status = _status_for(reason_codes)
 
     return ShellPolicyDecision(
@@ -350,6 +404,9 @@ def _status_for(reason_codes: tuple[str, ...]) -> ShellPolicyStatus:
         if "package_install_requires_approval" in reason_codes and len(reason_codes) == 1:
             return "approval_required"
         return "denied"
+    # path_target_blocked is a hard denial from the path gate (not _denied suffix).
+    if "path_target_blocked" in reason_codes:
+        return "denied"
     if any(reason.endswith("_requires_approval") for reason in reason_codes):
         return "approval_required"
     return "allowed"
@@ -372,6 +429,94 @@ def _env_projection(env: Mapping[str, str]) -> dict[str, str]:
     for key, value in env.items():
         projected[key] = "[redacted]" if _CREDENTIAL_KEY_RE.search(key) else _safe_text(str(value))
     return projected
+
+
+def _raw_path_arguments(tokens: tuple[str, ...]) -> tuple[str, ...]:
+    """Extract path-looking tokens without scrubbing — for path policy cross-check only.
+
+    Mirrors the logic of ``_path_arguments`` but preserves the raw token values
+    so they can be passed to ``classify_path_access``.  Redirect targets (after
+    ``>``, ``>>`` etc.) are included; the verb itself and flag tokens are skipped.
+    Dynamic substitutions (``$(…)``, ``${…}``) are kept as-is; ``classify_path_access``
+    will canonicalize them and typically mark them ``blocked``, which is safe.
+    """
+    paths: list[str] = []
+    skip_next = False
+    for token in tokens:
+        if skip_next:
+            if "/" in token and not _URL_RE.search(token) and not _is_env_assignment(token):
+                paths.append(token)
+            skip_next = False
+            continue
+        if token in _REDIRECTION_TOKENS:
+            skip_next = True
+            continue
+        if "/" in token and not _URL_RE.search(token) and not _is_env_assignment(token):
+            paths.append(token)
+    return tuple(paths)
+
+
+def _infer_operation_class(analysis_tokens: tuple[str, ...]) -> str:
+    """Infer path operation_class from the primary command verb."""
+    if not analysis_tokens:
+        return "read"
+    verb = analysis_tokens[0].split("/", 1)[-1]
+    return _VERB_OPERATION_CLASS.get(verb, "read")
+
+
+def _path_policy_extra_reason_codes(
+    tokens: tuple[str, ...],
+    *,
+    analysis_tokens: tuple[str, ...],
+    workspace_root: str,
+) -> tuple[str, ...]:
+    """Cross-check extracted path targets against ``path_policy``.
+
+    Returns additional reason codes to fold into the shell decision.  The logic
+    is strictly additive — only raises restriction, never lowers it:
+
+    - any path ``blocked``             → ``path_target_blocked``  (→ denied)
+    - any ``external_directory`` or
+      workspace-write needs approval   → ``path_target_requires_approval`` (→ approval_required)
+    - workspace reads / lists         → no extra code (unchanged)
+
+    Robust to tokens containing dynamic substitutions or globs: they are passed
+    through to ``classify_path_access`` unchanged; the canonicalizer will resolve
+    them to a non-workspace path and mark them accordingly.
+    """
+    raw_paths = _raw_path_arguments(tokens)
+    if not raw_paths:
+        return ()
+
+    operation_class = _infer_operation_class(analysis_tokens)
+
+    has_blocked = False
+    has_approval = False
+
+    for raw_path in raw_paths:
+        try:
+            path_request = _PathAccessRequest(
+                workspaceRoot=workspace_root,
+                path=raw_path,
+                operationClass=operation_class,  # type: ignore[arg-type]
+            )
+            path_decision = _classify_path_access(path_request)
+        except Exception:  # noqa: BLE001
+            # If we can't parse the path (e.g. malformed token), treat conservatively.
+            has_blocked = True
+            continue
+
+        if path_decision.status == "blocked":
+            has_blocked = True
+        elif path_decision.approval_required:
+            has_approval = True
+
+    extra: list[str] = []
+    if has_blocked:
+        extra.append("path_target_blocked")
+    elif has_approval:
+        extra.append("path_target_requires_approval")
+    return tuple(extra)
 
 
 def _is_env_assignment(token: str) -> bool:
