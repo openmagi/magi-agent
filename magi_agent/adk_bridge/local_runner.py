@@ -10,11 +10,15 @@ from google.adk.memory import InMemoryMemoryService
 from google.adk.models import BaseLlm, LlmRequest, LlmResponse
 from google.adk.runners import Runner
 
+from magi_agent.adk_bridge.edit_retry_reflection import (
+    build_edit_retry_reflection_plugin,
+)
 from magi_agent.adk_bridge.local_toolhost import (
     LocalToolHostAdkBundle,
     is_local_fake_receipt_adk_tool,
 )
 from magi_agent.adk_bridge.session_service import WorkspaceSessionService
+from magi_agent.config.env import parse_edit_retry_reflection_env
 
 LOCAL_ADK_RUNNER_FLAG = "CORE_AGENT_PYTHON_LOCAL_ADK_RUNNER"
 LOCAL_INERT_MODEL_NAME = "openmagi-local-inert"
@@ -94,12 +98,22 @@ def build_local_adk_runner(
     session_service = WorkspaceSessionService(app_name=app_name)
     memory_service = InMemoryMemoryService()
     artifact_service = InMemoryArtifactService()
+    # Flag-gated edit-failure reflection: when enabled, attach the shared
+    # RetryController-backed plugin so a failed FileEdit re-injects a corrective
+    # hidden message into the next model turn (fail-closed at max_attempts).
+    edit_retry_env = parse_edit_retry_reflection_env(os.environ)
+    edit_retry_plugin = build_edit_retry_reflection_plugin(
+        enabled=edit_retry_env.enabled,
+        max_attempts=edit_retry_env.max_attempts,
+    )
+    runner_plugins = [edit_retry_plugin] if edit_retry_plugin is not None else None
     runner = Runner(
         app_name=app_name,
         agent=agent,
         session_service=session_service,
         memory_service=memory_service,
         artifact_service=artifact_service,
+        plugins=runner_plugins,
     )
     return LocalAdkRunnerBundle(
         agent=agent,
