@@ -33,11 +33,13 @@ from magi_agent.harness.general_automation.delegation import (
     GeneralAutomationDelegationOutcome,
     GeneralAutomationDelegationRequest,
     build_general_automation_delegation,
+    project_delegated_child_envelope,
 )
 from magi_agent.harness.goal_loop import DEFAULT_GOAL_LOOP_MAX_SPAWN_DEPTH
 from magi_agent.meta_orchestration.child_acceptance import (
     ChildAcceptancePolicy,
     ChildAcceptanceVerdict,
+    accept_real_child_envelope,
 )
 from magi_agent.tools.context import ToolContext
 from runtime_issuance_support import issue_test_runtime_authority
@@ -235,6 +237,7 @@ def test_general_flag_on_returns_receipt_backed_child_verdict() -> None:
         receipt_ref="receipt:ga-child-envelope-1",
         policy=_policy(),
         context=_general_context(),
+        accept_envelope=accept_real_child_envelope,
         env=_on_env(),
     )
 
@@ -266,6 +269,7 @@ def test_depth_above_cap_is_denied() -> None:
         receipt_ref="receipt:ga-child-envelope-1",
         policy=_policy(),
         context=_general_context(),
+        accept_envelope=accept_real_child_envelope,
         env=_on_env(),
     )
 
@@ -281,6 +285,7 @@ def test_depth_at_cap_is_allowed() -> None:
         receipt_ref="receipt:ga-child-envelope-1",
         policy=_policy(),
         context=_general_context(),
+        accept_envelope=accept_real_child_envelope,
         env=_on_env(),
     )
 
@@ -300,6 +305,7 @@ def test_flag_off_is_inert() -> None:
         receipt_ref="receipt:ga-child-envelope-1",
         policy=_policy(),
         context=_general_context(),
+        accept_envelope=accept_real_child_envelope,
         env=_off_env(),
     )
 
@@ -315,6 +321,7 @@ def test_non_general_role_is_inert() -> None:
         receipt_ref="receipt:ga-child-envelope-1",
         policy=_policy(),
         context=_coding_context(),
+        accept_envelope=accept_real_child_envelope,
         env=_on_env(),
     )
 
@@ -343,6 +350,7 @@ def test_authority_flags_remain_false() -> None:
         receipt_ref="receipt:ga-child-envelope-1",
         policy=_policy(),
         context=_general_context(),
+        accept_envelope=accept_real_child_envelope,
         env=_on_env(),
     )
     # The delegation must NOT surface any "execution enabled" signal.
@@ -361,6 +369,7 @@ def test_public_projection_has_no_raw_transcript_or_secret() -> None:
         receipt_ref="receipt:ga-child-envelope-1",
         policy=_policy(),
         context=_general_context(),
+        accept_envelope=accept_real_child_envelope,
         env=_on_env(),
     )
     dumped = json.dumps(outcome.public_projection(), sort_keys=True)
@@ -380,3 +389,30 @@ def test_env_flag_helper_default_off() -> None:
     # Master flag is the existing single-source helper; default OFF.
     assert general_automation_live_enabled({}) is False
     assert general_automation_live_enabled(_on_env()) is True
+
+
+# ---------------------------------------------------------------------------
+# (f) project_delegated_child_envelope — public fields present, private absent
+# ---------------------------------------------------------------------------
+
+
+def test_project_delegated_child_envelope_has_public_fields_and_no_private() -> None:
+    envelope = _runtime_envelope(spawn_depth=1)
+    projection = project_delegated_child_envelope(envelope)
+
+    # Public fields that must appear.
+    assert projection["issuer"] == "openmagi_runtime_boundary"
+    assert projection["mode"] == "return"
+    assert projection["spawnDepth"] == 1
+
+    dumped = json.dumps(projection, sort_keys=True)
+    # Private metadata / raw transcript / secrets must not be present.
+    for unsafe in (
+        "rawTranscriptRef",
+        "privateMetadata",
+        "raw child transcript",
+        "sk-child-secret",
+        "Bearer unsafe-token",
+        "/workspace/private",
+    ):
+        assert unsafe not in dumped

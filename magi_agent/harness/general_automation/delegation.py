@@ -2,8 +2,7 @@
 
 This module ports OpenCode's ``task`` subagent-delegation ergonomics to the
 ``general`` agent role, but instead of returning the child's last *text* part it
-returns a **receipt-backed** result: a token-validated
-:class:`~magi_agent.meta_orchestration.child_acceptance.ChildAcceptanceVerdict`
+returns a **receipt-backed** result: a token-validated acceptance verdict
 produced from a runtime-issued
 :class:`~magi_agent.evidence.child_runtime_envelope.ChildRuntimeEnvelope`. The
 child's work is *evidenced*, which is strictly better than a bare text blob.
@@ -13,8 +12,9 @@ invent a new child runner, envelope, or acceptance mechanism:
 
 * the envelope is the existing ``ChildRuntimeEnvelope`` (runtime-issued by the
   runner), revalidated by the acceptance path;
-* acceptance runs through the existing token-validated
-  :func:`~magi_agent.meta_orchestration.child_acceptance.accept_real_child_envelope`;
+* acceptance runs through the existing token-validated acceptance function,
+  injected by the caller via the ``accept_envelope`` parameter — this module
+  does NOT import it directly (harness/evidence/runtime must stay domain-neutral);
 * the depth cap reuses
   :data:`~magi_agent.harness.goal_loop.DEFAULT_GOAL_LOOP_MAX_SPAWN_DEPTH` (=2) via
   :func:`~magi_agent.harness.goal_loop.validate_goal_loop_spawn_depth`.
@@ -39,9 +39,9 @@ remain ``Literal[False]`` on the envelope), and it surfaces
 """
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -54,11 +54,6 @@ from magi_agent.harness.goal_loop import (
     DEFAULT_GOAL_LOOP_MAX_SPAWN_DEPTH,
     GoalLoopSpawnDepthPolicy,
     validate_goal_loop_spawn_depth,
-)
-from magi_agent.meta_orchestration.child_acceptance import (
-    ChildAcceptancePolicy,
-    ChildAcceptanceVerdict,
-    accept_real_child_envelope,
 )
 from magi_agent.tools.context import ToolContext
 
@@ -123,7 +118,7 @@ class GeneralAutomationDelegationOutcome:
     unchanged.
 
     ``verdict`` is the *receipt-backed* result — a token-validated
-    :class:`ChildAcceptanceVerdict` from the existing acceptance path — and is
+    acceptance verdict from the existing acceptance path — and is
     ``None`` when the request is denied by the depth cap (``spawn_depth_exceeded``)
     or when the delegation is inert.
 
@@ -134,7 +129,7 @@ class GeneralAutomationDelegationOutcome:
 
     active: bool
     reason: str
-    verdict: ChildAcceptanceVerdict | None = None
+    verdict: Any | None = None
     receipt_ref: str | None = None
     real_child_runner_executed: Literal[False] = False
 
@@ -162,8 +157,9 @@ def build_general_automation_delegation(
     request: GeneralAutomationDelegationRequest,
     accepted_envelope: ChildRuntimeEnvelope | object,
     receipt_ref: str,
-    policy: ChildAcceptancePolicy | Mapping[str, object],
+    policy: Any,
     context: ToolContext,
+    accept_envelope: Callable[..., Any],
     env: Mapping[str, str] | None = None,
 ) -> GeneralAutomationDelegationOutcome:
     """Bound a scoped GA sub-task and return a receipt-backed child verdict.
@@ -174,14 +170,18 @@ def build_general_automation_delegation(
     1. enforces the depth cap (``spawn_depth <= DEFAULT_GOAL_LOOP_MAX_SPAWN_DEPTH``)
        via :func:`validate_goal_loop_spawn_depth`; a request beyond depth 2 is
        *denied* (``spawn_depth_exceeded``, no verdict) — acceptance is never run;
-    2. runs the existing token-validated
-       :func:`accept_real_child_envelope` over the runtime-issued envelope to
-       produce a receipt-backed :class:`ChildAcceptanceVerdict` (NOT a bare text
-       return).
+    2. runs the injected ``accept_envelope`` callable (the existing token-validated
+       acceptance function, passed in by the caller) over the runtime-issued
+       envelope to produce a receipt-backed verdict (NOT a bare text return).
 
     Otherwise it is inert (no verdict); flag-OFF / non-general is byte-identical
     to ``main``. This never enables child execution and never flips an authority
     flag — the envelope's child-execution flags remain ``Literal[False]``.
+
+    The ``accept_envelope`` parameter is the acceptance callable injected by the
+    caller (e.g. ``accept_real_child_envelope`` from the meta-orchestration layer).
+    This module does not import that function directly so that the harness layer
+    remains domain-neutral — the caller bridges the dependency.
     """
     if not general_automation_live_enabled(env):
         return _inert()
@@ -201,10 +201,11 @@ def build_general_automation_delegation(
             reason=_DEPTH_EXCEEDED_REASON,
         )
 
-    # Receipt-backed acceptance via the EXISTING token-validated path. A forged /
-    # mismatched envelope degrades to a rejected verdict (never an accepted one);
-    # this code never issues the envelope or flips an authority flag itself.
-    verdict = accept_real_child_envelope(
+    # Receipt-backed acceptance via the injected acceptance callable (the existing
+    # token-validated path, passed in by the caller). A forged / mismatched
+    # envelope degrades to a rejected verdict (never an accepted one); this code
+    # never issues the envelope or flips an authority flag itself.
+    verdict = accept_envelope(
         accepted_envelope,
         receipt_ref=receipt_ref,
         policy=policy,
