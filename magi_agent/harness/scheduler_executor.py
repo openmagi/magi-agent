@@ -17,6 +17,10 @@ fire (never double-fires).
 
 Forbidden imports: urllib, socket, subprocess, http, requests — none of these
 appear in this module or its local import graph.
+
+Deferred: A persistent loop driver + ``CronTurnRunnerAdapter`` are deferred to the
+Track-F daemon follow-on PR — see ``harness/scheduler_job_execution.py`` module
+docstring for the full obligation list.
 """
 # NOTE: _ONCE_EXHAUSTED_NEXT_RUN is a module-level sentinel placed near the top
 # so it is defined before any function that references it.

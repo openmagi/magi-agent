@@ -41,6 +41,37 @@ Every execution (shadow plan OR live run) records an ``EvidenceRecord`` (reused
 from ``magi_agent.evidence``).  Shadow records the *intended* {prompt,
 disabledToolsets, timeout} without running.
 
+Deferred follow-on work (Track F daemon)
+-----------------------------------------
+The following items are intentionally deferred to the Track-F daemon follow-on PR:
+
+(a) **Periodic loop driver**: This module provides ``execute_due_jobs`` as a
+    callable, but there is NO production loop driver that calls it periodically.
+    A persistent daemon loop (e.g. asyncio task, thread, or process) that invokes
+    ``execute_due_jobs`` on a configurable tick interval must be built by the
+    Track-F daemon PR.
+
+(b) **Persistent ScheduledJobSource**: Only ``InMemoryJobSource`` (in-memory, lost
+    on restart) is provided here.  A durable source backed by a database, Redis, or
+    the job_queue store must be implemented by Track F so scheduled jobs survive
+    process restarts.
+
+(c) **CronTurnRunnerAdapter**: The ``CronTurnRunner`` Protocol does NOT match the
+    real ``magi_agent.adk_bridge.runner_adapter.OpenMagiRunnerAdapter`` signature
+    (which takes ``RunnerTurnInput``, not ``CronTurnPlan``).  A
+    ``CronTurnRunnerAdapter`` bridging ``OpenMagiRunnerAdapter.run_turn(RunnerTurnInput)``
+    to ``CronTurnRunner.run_turn(CronTurnPlan)`` must be built by Track F before
+    live use.
+
+The gate stays default-OFF (``MAGI_SCHEDULER_EXECUTOR_ENABLED`` unset) until (a),
+(b), and (c) are complete and the Track-F daemon has been deployed.
+
+(d) **Per-bot canary-scope selection**: ``execute_due_jobs`` enforces env-wide
+    blockers (oc-cron guard, kill-switch) but does NOT enforce per-bot canary scope
+    (``selectedBotDigest``, ``selectedOwnerUserIdDigest``, ``environmentAllowlist``).
+    The Track-F loop driver, which has bot/user identity, must apply the A5 readiness
+    gate per-bot before calling ``execute_due_jobs``.
+
 Forbidden imports: urllib, socket, subprocess, http, requests, magi_agent.adk_bridge,
 google.adk — none appear in this module or its local import graph.
 """
@@ -226,7 +257,20 @@ class CronTurnRunner(Protocol):
     """
 
     async def run_turn(self, plan: CronTurnPlan) -> CronTurnResult:
-        """Run one turn for *plan* and return its terminal status."""
+        """Run one turn for *plan* and return its terminal status.
+
+        Obligations for implementors (Track-F CronTurnRunnerAdapter):
+        1. The runner MUST honor ``plan.disabled_toolsets`` — these tools must be
+           stripped from the agent's available toolset before the turn starts.
+           Failing to enforce the strip allows cron turns to fan out (CronCreate),
+           send unauthorized channel messages (TelegramSend), or block on
+           interactive prompts (AskUserQuestion).
+        2. The runner MUST enforce ``plan.timeout_seconds`` via asyncio.wait_for
+           (or equivalent) so that hung turns are aborted and ``"timed_out"`` is
+           returned rather than blocking the scheduler loop indefinitely.
+        3. ``runner_invoked`` must be True iff the underlying ADK runner was
+           actually called (False for pre-flight rejections).
+        """
         ...
 
 
