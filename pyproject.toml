@@ -37,6 +37,16 @@ magi = "magi_agent.cli.__main__:main"
 [tool.setuptools.packages.find]
 include = ["magi_agent*"]
 
+[tool.setuptools.package-data]
+magi_agent = [
+  "skills/bundled/superpowers/*/SKILL.md",
+  "skills/bundled/superpowers/*/*.md",
+  "skills/bundled/superpowers/*/references/*.md",
+  "skills/bundled/superpowers/*/scripts/*",
+  "skills/bundled/superpowers/*/examples/*",
+  "skills/bundled/superpowers/*/*.dot",
+]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q"

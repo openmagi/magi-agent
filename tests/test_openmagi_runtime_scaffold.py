@@ -159,7 +159,12 @@ def test_runtime_binds_default_first_party_native_tool_handlers() -> None:
     assert diagnostics_result.output["checker"] == "local_static_inventory"
     assert skill_result.status == "ok"
     assert skill_result.output is not None
-    assert skill_result.output["skillCount"] >= 0
+    assert skill_result.output["skillCount"] >= 14
+    bundled_skills = set(skill_result.output["skills"])
+    assert "bundled/superpowers/using-superpowers/SKILL.md" in bundled_skills
+    assert "bundled/superpowers/systematic-debugging/SKILL.md" in bundled_skills
+    assert "bundled/superpowers/test-driven-development/SKILL.md" in bundled_skills
+    assert "bundled/superpowers/verification-before-completion/SKILL.md" in bundled_skills
     assert taskboard_result.status == "ok"
     assert taskboard_result.output is not None
     assert taskboard_result.output["pathRef"] == ".magi/taskboard.jsonl"

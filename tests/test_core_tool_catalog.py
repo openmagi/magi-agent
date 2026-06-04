@@ -18,6 +18,7 @@ EXPECTED_CORE_TOOL_NAMES = (
     "FileRead",
     "FileWrite",
     "FileEdit",
+    "PatchApply",
     "Glob",
     "Grep",
     "Bash",
@@ -125,6 +126,11 @@ def test_core_tool_catalog_uses_conservative_permission_and_mode_metadata() -> N
     assert manifests["FileWrite"].available_in_modes == ("act",)
     assert manifests["FileWrite"].mutates_workspace is True
 
+    assert manifests["PatchApply"].permission == "write"
+    assert manifests["PatchApply"].available_in_modes == ("act",)
+    assert manifests["PatchApply"].mutates_workspace is True
+    assert manifests["PatchApply"].dangerous is False
+
     assert manifests["Bash"].permission == "execute"
     assert manifests["Bash"].available_in_modes == ("act",)
     assert manifests["Bash"].mutates_workspace is True
@@ -172,7 +178,16 @@ def test_register_core_tool_manifests_keeps_catalog_enabled_and_protected() -> N
     assert {tool.name for tool in registry.list_available(mode="plan")} == {
         name
         for name in EXPECTED_CORE_TOOL_NAMES
-        if name not in {"FileWrite", "FileEdit", "Bash", "TestRun", "ExitPlanMode", "ArtifactCreate"}
+        if name
+        not in {
+            "FileWrite",
+            "FileEdit",
+            "PatchApply",
+            "Bash",
+            "TestRun",
+            "ExitPlanMode",
+            "ArtifactCreate",
+        }
     }
     assert {tool.name for tool in registry.list_available(mode="act")} == set(EXPECTED_CORE_TOOL_NAMES)
     assert all(registry.is_enabled(name) is True for name in EXPECTED_CORE_TOOL_NAMES)
