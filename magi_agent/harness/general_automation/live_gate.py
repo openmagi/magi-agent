@@ -151,6 +151,9 @@ class GeneralAutomationLiveGate:
         carry their approval-ref. The receipt's ``public_projection`` is stored as
         ledger entry metadata (already secret-scrubbed by the receipt model).
         """
+        # Intentionally-unwired seam: the dispatch path must call this to persist
+        # the receipt to the EvidenceLedger in a later PR (without it, the
+        # completion verifier's artifact check can't see receipts).
         if isinstance(receipt, ShellPolicyReceipt):
             return ledger.append_control_ref(
                 receipt.command_digest,
@@ -170,6 +173,11 @@ class GeneralAutomationLiveGate:
         command: str,
         context: ToolContext,
     ) -> GeneralAutomationGateOutcome:
+        # NOTE: The GA shell classifier is regex/token based and does NOT catch
+        # subshell/eval/backtick/`| xargs sh`/`base64|bash` indirection.  This
+        # is acceptable because no live shell-EXECUTION tool is wired in the
+        # general pack yet; a future PR adding live shell execution must extend
+        # the classifier to handle these indirect forms before enabling it.
         request = ShellPolicyRequest(
             command=command,
             workspaceRoot=_workspace_root(context),
@@ -308,13 +316,15 @@ def _approval_ref(decision: PathAccessDecision) -> str:
 def _agent_role(context: ToolContext) -> str:
     contract = context.execution_contract
     if isinstance(contract, Mapping):
-        for key in ("agentRole", "agent_role", "sourceAgentRole", "source_agent_role"):
+        for key in ("agentRole", "agent_role"):
             value = contract.get(key)
             if isinstance(value, str):
                 return value.strip().casefold().replace("-", "_")
     # No execution_contract present — unknown role, not "general".
     # Returning "" ensures is_active() returns False (bypass) rather than
     # incorrectly treating every uncontracted dispatch as general-role.
+    # NOTE: sourceAgentRole / source_agent_role are intentionally excluded —
+    # they are not populated by the runtime and would create a spoof surface.
     return ""
 
 

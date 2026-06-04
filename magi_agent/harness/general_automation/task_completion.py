@@ -256,6 +256,8 @@ def completion_repair_decision(
     evidence. Otherwise returns a gate that ``handle_stop_reason`` consults at
     its finalise branch.
     """
+    # Intentionally-unwired seam: must be passed as ``completion_gate`` to
+    # ``runtime.turn_policy.handle_stop_reason`` by the runner in a later PR.
     if not general_automation_live_enabled(env):
         return None
     if _normalize_role(agent_role) != "general":

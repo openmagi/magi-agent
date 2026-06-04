@@ -216,6 +216,8 @@ def emit_ga_live_telemetry_record(
             ``"shadow"``, or ``"live"``).
         detail: Optional extra detail (e.g. reason code, missing receipt ref).
     """
+    # Intentionally-unwired seam: call sites (live_gate / completion path) are
+    # wired in a later PR.
     fields: dict[str, object] = {
         "event": event,
         "decision": decision,
@@ -240,6 +242,11 @@ def _reason_codes(
 ) -> tuple[str, ...]:
     if not config.enabled:
         return ("gate_disabled",)
+    # Fail-closed: an empty/whitespace bot_id or user_id can never resolve to a
+    # scope match because sha256("") would trivially match a misconfigured
+    # selectedBotDigest=sha256("").
+    if not bot_id.strip() or not user_id.strip():
+        return ("malformed_caller_identity",)
     reasons: list[str] = []
     if config.kill_switch_enabled:
         reasons.append("kill_switch_enabled")
@@ -280,6 +287,8 @@ def _selected_scope_matched(
     user_id: str,
 ) -> bool:
     if not config.enabled:
+        return False
+    if not bot_id.strip() or not user_id.strip():
         return False
     if not _digest_present(config.selected_bot_digest) or not _digest_present(
         config.selected_owner_user_id_digest

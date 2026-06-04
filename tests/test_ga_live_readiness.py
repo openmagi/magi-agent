@@ -209,6 +209,34 @@ def test_missing_scope_digest_fails_closed() -> None:
     assert "malformed_selected_scope" in meta["reasonCodes"]
 
 
+def test_empty_bot_id_fails_closed() -> None:
+    """Empty/whitespace bot_id → not live (fail-closed, malformed_caller_identity)."""
+    config = _config(promotedGate=5, canaryPromotionConfirmed=True)
+    for bad_bot_id in ("", "   ", "\t"):
+        meta = ga_live_readiness_health_metadata(
+            config, bot_id=bad_bot_id, user_id="owner-user-id"
+        )
+        assert meta["liveExecutionAllowed"] is False, (
+            f"Expected liveExecutionAllowed=False for bot_id={bad_bot_id!r}"
+        )
+        assert meta["executionMode"] in {"disabled", "blocked"}, (
+            f"Expected disabled/blocked for bot_id={bad_bot_id!r}"
+        )
+        assert "malformed_caller_identity" in meta["reasonCodes"], (
+            f"Expected malformed_caller_identity reason for bot_id={bad_bot_id!r}"
+        )
+
+
+def test_empty_user_id_fails_closed() -> None:
+    """Empty/whitespace user_id → not live (fail-closed, malformed_caller_identity)."""
+    config = _config(promotedGate=5, canaryPromotionConfirmed=True)
+    meta = ga_live_readiness_health_metadata(
+        config, bot_id=_CANARY_BOT_ID, user_id=""
+    )
+    assert meta["liveExecutionAllowed"] is False
+    assert "malformed_caller_identity" in meta["reasonCodes"]
+
+
 def test_kill_switch_fails_closed() -> None:
     """Kill switch active → blocked."""
     config = _config(killSwitchEnabled=True, promotedGate=5, canaryPromotionConfirmed=True)

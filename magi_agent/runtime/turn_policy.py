@@ -94,6 +94,8 @@ def maybe_apply_max_steps_brake(
         suppress (``bool(tools)``).  Both fields are ``False`` on earlier
         iterations or when ``max_iterations <= 0``.
     """
+    # Intentionally-unwired seam: the runner must call this per-iteration and
+    # honor ``tools_disabled`` (suppress tool projection) in a later PR.
     if max_iterations <= 0:
         return MaxStepsBrakeResult(brake_applied=False, tools_disabled=False)
 
