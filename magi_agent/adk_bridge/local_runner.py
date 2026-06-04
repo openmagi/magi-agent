@@ -11,6 +11,9 @@ from google.adk.memory import InMemoryMemoryService
 from google.adk.models import BaseLlm, LlmRequest, LlmResponse
 from google.adk.runners import Runner
 
+from magi_agent.adk_bridge.context_compaction import (
+    build_context_compaction_plugin,
+)
 from magi_agent.adk_bridge.edit_retry_reflection import (
     build_edit_retry_reflection_plugin,
 )
@@ -21,6 +24,7 @@ from magi_agent.adk_bridge.local_toolhost import (
 from magi_agent.adk_bridge.resilience_plugin import build_resilience_plugin
 from magi_agent.adk_bridge.session_service import WorkspaceSessionService
 from magi_agent.config.env import (
+    parse_context_compaction_env,
     parse_edit_retry_reflection_env,
     parse_error_recovery_env,
     parse_loop_guard_env,
@@ -128,11 +132,24 @@ def build_local_adk_runner(
         error_recovery_enabled=error_recovery_env.enabled,
         recovery_max_attempts=error_recovery_env.max_recovery_attempts,
     )
-    runner_plugins = [
-        plugin
-        for plugin in (edit_retry_plugin, resilience_plugin)
-        if plugin is not None
-    ]
+    # Flag-gated live context compaction: when enabled, a before_model_callback
+    # plugin trims the outgoing llm_request.contents to the recent tail once the
+    # estimated context exceeds budget (reusing ContextLifecycleBoundary as the
+    # threshold/tail decision engine). Default OFF -> plugin is None -> no attach.
+    compaction_env = parse_context_compaction_env(os.environ)
+    compaction_plugin = build_context_compaction_plugin(
+        enabled=compaction_env.enabled,
+        token_threshold=compaction_env.token_threshold,
+        tail_events=compaction_env.tail_events,
+    )
+    # Compose plugins by APPEND (not reassignment) so that independent branches
+    # each adding their own plugin (e.g. PR12 resilience, PR14) merge as a union
+    # rather than one silently overwriting the other's plugins list.
+    runner_plugins = [edit_retry_plugin] if edit_retry_plugin is not None else []
+    if resilience_plugin is not None:
+        runner_plugins.append(resilience_plugin)
+    if compaction_plugin is not None:
+        runner_plugins.append(compaction_plugin)
     # ADK 1.33 deprecates ``Runner(plugins=...)``; the supported path wraps the
     # agent and plugins in an ``App``. An App with an empty plugins list behaves
     # identically to the old no-plugin runner (no deprecation warning, no plugin
