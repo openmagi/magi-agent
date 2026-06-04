@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import fnmatch
 import hashlib
 import json
@@ -581,7 +582,13 @@ class Gate5BFullToolHost:
         try:
             self._preflight_legacy_tool(tool_name, args, tool_call_id=tool_call_id)
             output = await self._handle(tool_name, args, tool_call_id=tool_call_id)
-            diagnostics_receipt = self._after_write_diagnostics(tool_name, args, output)
+            # The diagnostics collection does blocking stdio reads against the
+            # language server. Run it off the event loop so a slow/hung server
+            # can't stall concurrent requests (mirrors the to_thread pattern in
+            # hooks/bus.py and storage/session_store.py). Fail-open downstream.
+            diagnostics_receipt = await asyncio.to_thread(
+                self._after_write_diagnostics, tool_name, args, output
+            )
             result = ToolResult(status="ok", output=output)
             coding_receipt = self.receipt_boundary.extract_receipt(
                 tool_call_id=tool_call_id,
@@ -1082,7 +1089,7 @@ class Gate5BFullToolHost:
 
 def _diagnostics_checker_label(path: Path) -> str:
     language_id = language_id_for_path(path)
-    if language_id in {"python", "pyi"}:
+    if language_id == "python":
         return "pyright"
     if language_id in {
         "typescript",

@@ -45,6 +45,12 @@ DEFAULT_DIAGNOSTIC_CAP = 20
 # Bound how long we wait for a language server to publish diagnostics.
 DEFAULT_DIAGNOSTICS_TIMEOUT_S = 5.0
 
+# After the first publishDiagnostics arrives for a URI, how long to wait for a
+# follow-up (populated) publish before returning. Keeps clean-file writes from
+# burning the whole timeout while still catching pyright's empty-then-populated
+# sequence. Always clamped to the overall timeout.
+DEFAULT_DIAGNOSTICS_GRACE_S = 1.5
+
 _LANGUAGE_BY_SUFFIX: dict[str, str] = {
     ".py": "python",
     ".pyi": "python",
@@ -57,6 +63,10 @@ _LANGUAGE_BY_SUFFIX: dict[str, str] = {
 }
 
 # Language-server commands keyed by language family. Detected via shutil.which.
+# NOTE: the spec's MAGI_LSP_SERVERS (ext->cmd) override is intentionally NOT
+# implemented — an env-driven command map is an arbitrary-process-spawn
+# injection surface in a multi-tenant fleet. The hardcoded table below is the
+# allowlist; add languages here in code, not via env.
 _SERVER_COMMANDS: dict[str, tuple[str, ...]] = {
     "python": ("pyright-langserver", "--stdio"),
     "typescript": ("typescript-language-server", "--stdio"),
@@ -71,6 +81,9 @@ _LANGUAGE_FAMILY: dict[str, str] = {
 }
 
 # Redaction for diagnostic message text before it can flow toward evidence.
+# Token shapes (sk-, gh[opusr]_, github_pat_, xox*, AKIA, AIza) are kept in
+# sync with the evidence-layer regex in gate5b_full_toolhost._SENSITIVE_RE so
+# the model-facing redaction is no weaker than the evidence layer's.
 _PRIVATE_TEXT_RE = re.compile(
     r"(?:"
     r"/Users(?:/[^\s,;}\"']*)?"
@@ -81,6 +94,12 @@ _PRIVATE_TEXT_RE = re.compile(
     r"|/private/var(?:/[^\s,;}\"']*)?"
     r"|\bbearer\s+\S+"
     r"|authorization\s*:"
+    r"|\bsk-[A-Za-z0-9._-]+"
+    r"|gh[opusr]_[A-Za-z0-9_]+"
+    r"|github_pat_[A-Za-z0-9_]+"
+    r"|xox[a-z]-[A-Za-z0-9._-]+"
+    r"|AKIA[0-9A-Z]{8,}"
+    r"|AIza[A-Za-z0-9_-]+"
     r"|\bcookie\b"
     r"|\btoken\b"
     r"|\bsecret\b"
@@ -226,10 +245,12 @@ class _ServerProcess:
         workspace_root: Path,
         *,
         timeout_s: float,
+        grace_s: float = DEFAULT_DIAGNOSTICS_GRACE_S,
     ) -> None:
         self._command = tuple(command)
         self._workspace_root = workspace_root.resolve()
         self._timeout_s = timeout_s
+        self._grace_s = grace_s
         self._proc: subprocess.Popen[bytes] | None = None
         self._request_id = 0
         self._initialized = False
@@ -290,8 +311,21 @@ class _ServerProcess:
                     return None
         if content_length is None:
             return None
-        body = stream.read(content_length)
-        if body is None or len(body) < content_length:
+        # Read the body in a loop so the whole read honours the deadline. A
+        # single ``stream.read(content_length)`` can block forever if the
+        # server sends a header then stalls mid-body.
+        chunks: list[bytes] = []
+        remaining = content_length
+        while remaining > 0:
+            if time.monotonic() > deadline:
+                return None
+            chunk = stream.read(remaining)
+            if not chunk:
+                return None  # EOF mid-body
+            chunks.append(chunk)
+            remaining -= len(chunk)
+        body = b"".join(chunks)
+        if len(body) < content_length:
             return None
         try:
             decoded = json.loads(body.decode("utf-8"))
@@ -370,9 +404,27 @@ class _ServerProcess:
             self.shutdown()
             return []
 
+        # Drain publishDiagnostics for this URI. Pyright (and others) emit an
+        # initial EMPTY publishDiagnostics right after didOpen, then a populated
+        # one once analysis completes — so we must NOT break on the first match
+        # or we'd return [] and silently miss real errors. diagnostics are a
+        # full replacement per publish, so we keep the LAST matching payload.
+        #
+        # Clean-file tradeoff: a file with no errors only ever produces empty
+        # publishes, so we can't distinguish "clean" from "still analysing"
+        # purely from content. To avoid hanging the full timeout on every clean
+        # write, after the first matching publish arrives we wait only a short
+        # grace window for a follow-up populated publish; if none arrives we
+        # return what we have ([] for clean files). A populated publish returns
+        # immediately. The hard deadline still bounds the worst case.
+        grace_s = min(self._grace_s, self._timeout_s)
         diagnostics: list[Diagnostic] = []
+        saw_publish = False
         while True:
-            message = self._read_message(deadline)
+            effective_deadline = deadline
+            if saw_publish:
+                effective_deadline = min(deadline, time.monotonic() + grace_s)
+            message = self._read_message(effective_deadline)
             if message is None:
                 break
             if (
@@ -382,7 +434,10 @@ class _ServerProcess:
                 params = message["params"]
                 if params.get("uri") == uri:
                     diagnostics = _parse_publish_diagnostics(params)
-                    break
+                    saw_publish = True
+                    if diagnostics:
+                        # A populated payload is what we want; return promptly.
+                        break
         # Close the document so the next open is clean.
         self._send(
             {
@@ -413,6 +468,14 @@ class _ServerProcess:
                 proc.wait(timeout=2)
             except (subprocess.TimeoutExpired, OSError, ValueError):
                 pass
+
+    def __del__(self) -> None:
+        # Defense-in-depth: if an owner forgets to call shutdown(), reap the
+        # subprocess on GC so we don't leak it for the worker lifetime.
+        try:
+            self.shutdown()
+        except Exception:  # noqa: BLE001 — never raise from a finalizer
+            pass
 
 
 def _parse_publish_diagnostics(params: dict[str, object]) -> list[Diagnostic]:
@@ -504,6 +567,14 @@ class LspClient:
 
     def __exit__(self, *exc: object) -> None:
         self.shutdown_all()
+
+    def __del__(self) -> None:
+        # Defense-in-depth backstop: reap any spawned servers on GC if the
+        # owner forgot to call shutdown_all()/__exit__.
+        try:
+            self.shutdown_all()
+        except Exception:  # noqa: BLE001 — never raise from a finalizer
+            pass
 
 
 __all__ = [

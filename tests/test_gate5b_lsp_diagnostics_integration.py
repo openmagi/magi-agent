@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 
+import magi_agent.gates.gate5b_full_toolhost as gate5b_module
 from magi_agent.coding.lsp_client import SEVERITY_ERROR, Diagnostic
 from magi_agent.gates.gate5b_full_toolhost import (
     GATE5B_FULL_TOOLHOST_TOOL_NAMES,
@@ -149,6 +150,78 @@ async def test_disabled_flag_is_fully_inert(tmp_path: Path) -> None:
     assert isinstance(preview, dict)
     assert "lspDiagnostics" not in preview
     assert outcome.code_diagnostics_receipt is None
+
+
+@pytest.mark.asyncio
+async def test_host_shutdown_tears_down_owned_lsp_client(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """When the host lazily owns a real LspClient (no injected provider),
+    host.shutdown() must call shutdown_all() so per-request servers are reaped.
+    """
+
+    class _FakeLspClient:
+        instances: list[_FakeLspClient] = []
+
+        def __init__(self, workspace_root: Path, *, timeout_s: float) -> None:
+            self.shutdown_calls = 0
+            self.diagnostics_calls = 0
+            _FakeLspClient.instances.append(self)
+
+        def diagnostics(self, path: Path, text: str) -> list[Diagnostic]:
+            self.diagnostics_calls += 1
+            return [
+                Diagnostic(line=1, column=1, severity=SEVERITY_ERROR, message="boom")
+            ]
+
+        def shutdown_all(self) -> None:
+            self.shutdown_calls += 1
+
+    monkeypatch.setattr(gate5b_module, "LspClient", _FakeLspClient)
+
+    bundle = build_gate5b_full_toolhost_bundle(
+        config=_config(lsp_enabled=True),
+        scope=_scope(),
+        workspace_root=tmp_path,
+        diagnostics_provider=None,  # force the host to build a real LspClient
+    )
+    outcome = await bundle.host.dispatch(
+        "FileWrite",
+        {"path": "broken.py", "content": "x = y\n"},
+        request_digest=_sha256("req-shutdown"),
+        tool_call_id="call-shutdown",
+    )
+    assert outcome.status == "ok"
+    assert len(_FakeLspClient.instances) == 1
+    owned = _FakeLspClient.instances[0]
+    assert owned.diagnostics_calls == 1
+    assert owned.shutdown_calls == 0
+
+    bundle.host.shutdown()
+    assert owned.shutdown_calls == 1
+
+
+@pytest.mark.asyncio
+async def test_host_shutdown_does_not_touch_injected_provider(
+    tmp_path: Path,
+) -> None:
+    """An injected (test) provider is NOT owned by the host, so shutdown() must
+    not attempt to tear it down (it has no shutdown_all)."""
+    provider = _FakeProvider()
+    bundle = build_gate5b_full_toolhost_bundle(
+        config=_config(lsp_enabled=True),
+        scope=_scope(),
+        workspace_root=tmp_path,
+        diagnostics_provider=provider,
+    )
+    await bundle.host.dispatch(
+        "FileWrite",
+        {"path": "broken.py", "content": "raise_error = undefined_name\n"},
+        request_digest=_sha256("req-inj"),
+        tool_call_id="call-inj",
+    )
+    # Must not raise even though _FakeProvider has no shutdown_all.
+    bundle.host.shutdown()
 
 
 @pytest.mark.asyncio
