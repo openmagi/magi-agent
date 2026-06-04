@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from importlib import resources
 from pathlib import Path
 
 from magi_agent.plugins.native._common import digest, ok_result, workspace_root
@@ -31,6 +32,7 @@ def external_tool_loader(arguments: dict[str, object], context: ToolContext) -> 
 
 def _skill_candidates(root: Path) -> list[str]:
     skills: list[str] = []
+    skills.extend(_bundled_skill_candidates())
     for base in (root / "skills", root / ".magi" / "skills", root / "docs" / "superpowers"):
         if not base.exists():
             continue
@@ -40,3 +42,17 @@ def _skill_candidates(root: Path) -> list[str]:
             except ValueError:
                 skills.append(skill.name)
     return skills
+
+
+def _bundled_skill_candidates() -> list[str]:
+    try:
+        skills_root = resources.files("magi_agent").joinpath("skills")
+    except (FileNotFoundError, ModuleNotFoundError):
+        return []
+    bundled_root = skills_root.joinpath("bundled")
+    if not bundled_root.is_dir():
+        return []
+    return sorted(
+        skill.relative_to(skills_root).as_posix()
+        for skill in bundled_root.rglob("SKILL.md")
+    )[:50]

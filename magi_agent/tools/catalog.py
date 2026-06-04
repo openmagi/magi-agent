@@ -77,6 +77,15 @@ _CORE_TOOL_MANIFESTS: tuple[ToolManifest, ...] = (
         parallel_safety="unsafe",
     ),
     _manifest(
+        "PatchApply",
+        "Apply a patch to workspace files.",
+        permission="write",
+        modes=("act",),
+        tags=("workspace", "file", "patch", "write"),
+        mutates_workspace=True,
+        parallel_safety="unsafe",
+    ),
+    _manifest(
         "Glob",
         "List workspace paths matching a glob pattern.",
         permission="read",

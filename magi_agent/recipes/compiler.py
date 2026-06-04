@@ -2092,8 +2092,8 @@ def _first_party_packs() -> tuple[RecipePackManifest, ...]:
             packId="openmagi.superpowers-compat",
             displayName="Superpowers Compatibility",
             description=(
-                "Default-off compatibility/import metadata for the TypeScript "
-                "bundled Superpowers skill namespace without live slash execution."
+                "Compatibility/import metadata for the bundled Superpowers "
+                "skill namespace without live slash execution."
             ),
             taskProfileSelectors=("superpowers", "superpowers-compat"),
             dependsOnPackIds=("openmagi.agent-methodology",),
