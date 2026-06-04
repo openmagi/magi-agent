@@ -1,9 +1,12 @@
+import asyncio
 from importlib.util import find_spec
 
 from magi_agent.adk_bridge.primitives import AdkPrimitiveBoundary
 from magi_agent.config.models import BuildInfo, RuntimeConfig
 from magi_agent.harness.profiles import DEFAULT_PROFILE_NAME
 from magi_agent.runtime.openmagi_runtime import OpenMagiRuntime
+from magi_agent.tools import ToolDispatcher
+from magi_agent.tools.context import ToolContext
 
 
 def make_config() -> RuntimeConfig:
@@ -49,8 +52,123 @@ def test_adk_primitive_boundary_names_official_future_attachment_points() -> Non
     assert boundary.plugin_base == "google.adk.plugins.base_plugin.BasePlugin"
 
 
-def test_runtime_owns_profile_and_does_not_register_executable_tools_yet() -> None:
+def test_runtime_owns_profile_and_exposes_first_party_tools_by_default() -> None:
     runtime = OpenMagiRuntime(config=make_config())
 
     assert runtime.profile.name == DEFAULT_PROFILE_NAME
-    assert runtime.list_active_tools() == []
+    active_tools = set(runtime.list_active_tools())
+    assert "FileRead" in active_tools
+    assert "FileWrite" in active_tools
+    assert "KnowledgeSearch" in active_tools
+    assert "DocumentWrite" in active_tools
+    assert "WebSearch" in active_tools
+    assert "Browser" in active_tools
+    assert "MissionLedger" in active_tools
+    assert "CodeDiagnostics" in active_tools
+    assert "SkillLoader" in active_tools
+    assert "TaskBoard" in active_tools
+
+
+def test_runtime_binds_default_first_party_native_tool_handlers() -> None:
+    runtime = OpenMagiRuntime(config=make_config())
+    context = ToolContext(
+        bot_id="bot-test",
+        turn_id="turn-test",
+        workspace_root="/tmp/magi-agent-test-workspace",
+        permission_scope={
+            "mode": "selected_full_toolhost",
+            "source": "selected_full_toolhost",
+        },
+    )
+
+    remember_result = asyncio.run(
+        ToolDispatcher(runtime.tool_registry).dispatch(
+            "AgentMemoryRemember",
+            {"content": "Prefer concise status updates."},
+            context,
+            mode="act",
+        )
+    )
+    search_result = asyncio.run(
+        ToolDispatcher(runtime.tool_registry).dispatch(
+            "AgentMemorySearch",
+            {"query": "status updates"},
+            context,
+            mode="plan",
+        )
+    )
+    diagnostics_result = asyncio.run(
+        ToolDispatcher(runtime.tool_registry).dispatch(
+            "CodeDiagnostics",
+            {},
+            context,
+            mode="plan",
+        )
+    )
+    skill_result = asyncio.run(
+        ToolDispatcher(runtime.tool_registry).dispatch(
+            "SkillLoader",
+            {},
+            context,
+            mode="plan",
+        )
+    )
+    taskboard_result = asyncio.run(
+        ToolDispatcher(runtime.tool_registry).dispatch(
+            "TaskBoard",
+            {"action": "list"},
+            context,
+            mode="plan",
+        )
+    )
+    web_result = asyncio.run(
+        ToolDispatcher(runtime.tool_registry).dispatch(
+            "WebSearch",
+            {"query": "Open Magi"},
+            context,
+            mode="act",
+        )
+    )
+    browser_result = asyncio.run(
+        ToolDispatcher(runtime.tool_registry).dispatch(
+            "Browser",
+            {"url": "https://example.com"},
+            context,
+            mode="act",
+        )
+    )
+    document_result = asyncio.run(
+        ToolDispatcher(runtime.tool_registry).dispatch(
+            "DocumentWrite",
+            {"path": "docs/report.md", "content": "hello"},
+            context,
+            mode="act",
+        )
+    )
+
+    assert remember_result.status == "ok"
+    assert remember_result.output is not None
+    assert remember_result.metadata["toolName"] == "AgentMemoryRemember"
+    assert remember_result.output["pathRef"] == ".magi/agentmemory.jsonl"
+    assert search_result.status == "ok"
+    assert search_result.output is not None
+    assert search_result.metadata["toolName"] == "AgentMemorySearch"
+    assert search_result.output["query"] == "status updates"
+    assert diagnostics_result.status == "ok"
+    assert diagnostics_result.output is not None
+    assert diagnostics_result.output["checker"] == "local_static_inventory"
+    assert skill_result.status == "ok"
+    assert skill_result.output is not None
+    assert skill_result.output["skillCount"] >= 0
+    assert taskboard_result.status == "ok"
+    assert taskboard_result.output is not None
+    assert taskboard_result.output["pathRef"] == ".magi/taskboard.jsonl"
+    assert web_result.status == "ok"
+    assert web_result.output is not None
+    assert web_result.output["query"] == "Open Magi"
+    assert browser_result.status == "ok"
+    assert browser_result.output is not None
+    assert browser_result.metadata["toolName"] == "Browser"
+    assert document_result.status == "ok"
+    assert document_result.output is not None
+    assert document_result.output["pathRef"] == "docs/report.md"

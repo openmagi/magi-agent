@@ -73,7 +73,7 @@ def _execute(
     )
 
 
-def test_pr5_local_readonly_tools_remain_default_off_until_registry_and_kernel_enable(
+def test_pr5_local_readonly_tools_execute_when_registry_and_kernel_are_enabled(
     tmp_path: Path,
 ) -> None:
     from magi_agent.tools.local_readonly import LocalReadOnlyToolHost
@@ -101,10 +101,9 @@ def test_pr5_local_readonly_tools_remain_default_off_until_registry_and_kernel_e
         )
     )
 
-    assert outcome.status == "blocked"
-    assert outcome.reason_code == "tool_disabled"
-    assert outcome.handler_called is False
-    assert host.call_log == ()
+    assert outcome.status == "ok"
+    assert outcome.handler_called is True
+    assert host.call_log == ("FileRead",)
 
 
 def test_pr5_toolhost_allowlist_blocks_hidden_enabled_tool_before_local_read(

@@ -18,25 +18,23 @@ from magi_agent.plugins.native_catalog import native_plugin_manifests
 
 EXPECTED_NATIVE_PLUGIN_IDS = (
     "openmagi.agentmemory",
+    "openmagi.artifacts",
     "openmagi.browser",
+    "openmagi.coding",
     "openmagi.documents",
     "openmagi.knowledge",
     "openmagi.missions",
     "openmagi.scheduled-work",
     "openmagi.security-posture",
+    "openmagi.skills",
+    "openmagi.source-ledger",
+    "openmagi.subagents",
+    "openmagi.taskboard",
     "openmagi.web",
     "openmagi.web-acquisition",
 )
 
-DEFAULT_DISABLED_PLUGIN_IDS = {
-    "openmagi.agentmemory",
-    "openmagi.browser",
-    "openmagi.missions",
-    "openmagi.scheduled-work",
-    "openmagi.security-posture",
-    "openmagi.web",
-    "openmagi.web-acquisition",
-}
+DEFAULT_DISABLED_PLUGIN_IDS: set[str] = set()
 
 
 def _audit_module() -> ModuleType:
@@ -74,15 +72,15 @@ def test_native_catalog_audit_snapshot_exposes_permissions_and_declared_secret_m
         len(EXPECTED_NATIVE_PLUGIN_IDS) - len(DEFAULT_DISABLED_PLUGIN_IDS)
     )
     assert snapshot.summary.opted_out_plugin_count == 0
-    assert snapshot.summary.permission_classes == ("meta", "net", "read", "write")
+    assert snapshot.summary.permission_classes == ("execute", "meta", "net", "read", "write")
     assert snapshot.summary.declared_secret_names == ("FIRECRAWL_API_KEY", "GATEWAY_TOKEN")
     assert snapshot.summary.declared_secret_sources == ("platform",)
     assert snapshot.traffic_attached is False
     assert snapshot.execution_attached is False
 
     web = _entry_by_id(snapshot, "openmagi.web")
-    assert web.enabled is False
-    assert web.status_reason == "default_disabled"
+    assert web.enabled is True
+    assert web.status_reason == "enabled"
     assert web.permissions == ("read", "net")
     assert web.services == ("api-proxy", "firecrawl")
     assert tuple(secret.name for secret in web.declared_secrets) == (
@@ -92,8 +90,8 @@ def test_native_catalog_audit_snapshot_exposes_permissions_and_declared_secret_m
     assert tuple(secret.source for secret in web.declared_secrets) == ("platform", "platform")
 
     security_posture = _entry_by_id(snapshot, "openmagi.security-posture")
-    assert security_posture.enabled is False
-    assert security_posture.status_reason == "default_disabled"
+    assert security_posture.enabled is True
+    assert security_posture.status_reason == "enabled"
     assert security_posture.permissions == ()
     assert security_posture.services == ()
     assert security_posture.tools == ()
@@ -116,8 +114,8 @@ def test_audit_entries_include_status_security_audit_and_opt_out_metadata() -> N
     snapshot = audit.build_plugin_audit_snapshot(resolve_plugin_state(native_plugin_manifests()))
 
     agentmemory = _entry_by_id(snapshot, "openmagi.agentmemory")
-    assert agentmemory.enabled is False
-    assert agentmemory.status_reason == "default_disabled"
+    assert agentmemory.enabled is True
+    assert agentmemory.status_reason == "enabled"
     assert agentmemory.audit_required is True
     assert agentmemory.security_critical is False
     assert agentmemory.opt_out_allowed is True
@@ -129,8 +127,8 @@ def test_audit_entries_include_status_security_audit_and_opt_out_metadata() -> N
     assert agentmemory.execution_attached is False
 
     scheduled_work = _entry_by_id(snapshot, "openmagi.scheduled-work")
-    assert scheduled_work.enabled is False
-    assert scheduled_work.status_reason == "default_disabled"
+    assert scheduled_work.enabled is True
+    assert scheduled_work.status_reason == "enabled"
     assert scheduled_work.audit_required is True
     assert scheduled_work.security_critical is False
     assert scheduled_work.opt_out_allowed is True
@@ -155,13 +153,13 @@ def test_audit_entries_include_status_security_audit_and_opt_out_metadata() -> N
     assert scheduled_work.execution_attached is False
 
     browser = _entry_by_id(snapshot, "openmagi.browser")
-    assert browser.enabled is False
-    assert browser.status_reason == "default_disabled"
+    assert browser.enabled is True
+    assert browser.status_reason == "enabled"
     assert browser.tools == ("Browser", "SocialBrowser")
 
     web_acquisition = _entry_by_id(snapshot, "openmagi.web-acquisition")
-    assert web_acquisition.enabled is False
-    assert web_acquisition.status_reason == "default_disabled"
+    assert web_acquisition.enabled is True
+    assert web_acquisition.status_reason == "enabled"
     assert web_acquisition.permissions == ()
     assert web_acquisition.services == ()
     assert web_acquisition.tools == ()
@@ -171,8 +169,8 @@ def test_audit_entries_include_status_security_audit_and_opt_out_metadata() -> N
     )
 
     security_posture = _entry_by_id(snapshot, "openmagi.security-posture")
-    assert security_posture.enabled is False
-    assert security_posture.status_reason == "default_disabled"
+    assert security_posture.enabled is True
+    assert security_posture.status_reason == "enabled"
     assert security_posture.audit_required is True
     assert security_posture.security_critical is True
     assert security_posture.opt_out_allowed is False
@@ -274,11 +272,9 @@ def test_opted_out_plugin_retains_declared_audit_metadata_while_manager_removes_
         "GATEWAY_TOKEN",
         "FIRECRAWL_API_KEY",
     )
-    assert snapshot.summary.enabled_plugin_count == (
-        len(EXPECTED_NATIVE_PLUGIN_IDS) - len(DEFAULT_DISABLED_PLUGIN_IDS)
-    )
+    assert snapshot.summary.enabled_plugin_count == len(EXPECTED_NATIVE_PLUGIN_IDS) - 1
     assert snapshot.summary.opted_out_plugin_count == 1
-    assert snapshot.summary.permission_classes == ("meta", "net", "read", "write")
+    assert snapshot.summary.permission_classes == ("execute", "meta", "net", "read", "write")
     assert snapshot.summary.declared_secret_names == ("FIRECRAWL_API_KEY", "GATEWAY_TOKEN")
     assert snapshot.summary.declared_secret_sources == ("platform",)
 

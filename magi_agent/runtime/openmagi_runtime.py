@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from importlib import import_module
+from typing import TYPE_CHECKING, cast
 
 from magi_agent.adk_bridge.primitives import AdkPrimitiveBoundary
 from magi_agent.config.models import RuntimeConfig
@@ -8,15 +9,19 @@ from magi_agent.harness.profiles import RuntimeProfile, build_default_profile
 
 if TYPE_CHECKING:
     from magi_agent.plugins.manager import ResolvedPluginState
+    from magi_agent.tools.base import ToolHandler
     from magi_agent.tools.registry import ToolRegistry
 
 
-def _build_core_tool_registry() -> ToolRegistry:
+def _build_core_tool_registry(plugin_state: ResolvedPluginState | None = None) -> ToolRegistry:
     from magi_agent.tools.catalog import register_core_tool_manifests
     from magi_agent.tools.registry import ToolRegistry
 
     tool_registry = ToolRegistry()
     register_core_tool_manifests(tool_registry)
+    if plugin_state is not None:
+        _register_native_plugin_tool_manifests(tool_registry, plugin_state)
+        _bind_native_plugin_tool_handlers(tool_registry, plugin_state)
     return tool_registry
 
 
@@ -25,6 +30,49 @@ def _build_default_plugin_state() -> ResolvedPluginState:
     from magi_agent.plugins.native_catalog import native_plugin_manifests
 
     return resolve_plugin_state(native_plugin_manifests())
+
+
+def _register_native_plugin_tool_manifests(
+    tool_registry: ToolRegistry,
+    plugin_state: ResolvedPluginState,
+) -> None:
+    from magi_agent.plugins.tool_projection import project_native_plugin_tool_manifests
+
+    for manifest in project_native_plugin_tool_manifests(plugin_state):
+        # Core/builtin names retain ownership when a native plugin declares the
+        # same historical surface, e.g. CronList or TaskGet.
+        if tool_registry.resolve(manifest.name) is not None:
+            continue
+        tool_registry.register(manifest)
+
+
+def _bind_native_plugin_tool_handlers(
+    tool_registry: ToolRegistry,
+    plugin_state: ResolvedPluginState,
+) -> None:
+    for plugin in plugin_state.plugins:
+        if not plugin.enabled:
+            continue
+        for tool_ref in plugin.tools:
+            registration = tool_registry.resolve_registration(tool_ref.name)
+            if registration is None or registration.handler is not None:
+                continue
+            tool_registry.bind_handler(
+                tool_ref.name,
+                _load_tool_handler(tool_ref.entrypoint),
+                enabled_by_registry_policy=True,
+            )
+
+
+def _load_tool_handler(entrypoint: str) -> ToolHandler:
+    module_name, _, attr_name = entrypoint.partition(":")
+    if not module_name or not attr_name:
+        raise ValueError(f"invalid native tool entrypoint: {entrypoint}")
+    module = import_module(module_name)
+    value = getattr(module, attr_name)
+    if not callable(value):
+        raise TypeError(f"native tool entrypoint is not callable: {entrypoint}")
+    return cast("ToolHandler", value)
 
 
 class OpenMagiRuntime:
@@ -43,12 +91,12 @@ class OpenMagiRuntime:
         self.profile = profile or build_default_profile()
         self.adk_boundary = adk_boundary or AdkPrimitiveBoundary.declared()
         self.adk_invocation_enabled = False
-        if tool_registry is None:
-            tool_registry = _build_core_tool_registry()
-        self.tool_registry = tool_registry
         self.plugin_state = (
             plugin_state if plugin_state is not None else _build_default_plugin_state()
         )
+        if tool_registry is None:
+            tool_registry = _build_core_tool_registry(self.plugin_state)
+        self.tool_registry = tool_registry
 
     def list_active_tools(self) -> list[str]:
         return [tool.name for tool in self.tool_registry.list_available(mode="act")]

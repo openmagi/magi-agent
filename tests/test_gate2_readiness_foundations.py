@@ -124,7 +124,8 @@ def test_gate2_readiness_disabled_by_default_and_healthz_has_no_authority() -> N
     assert body["userVisibleOutputAllowed"] is False
     assert body["canaryRoutingAllowed"] is False
     assert body["adk"]["invoked"] is False
-    assert body["activeTools"] == []
+    assert "FileRead" in body["activeTools"]
+    assert "AgentMemorySearch" in body["activeTools"]
 
 
 def test_gate2_readiness_requires_selected_bot_owner_env_and_sandbox_harness() -> None:

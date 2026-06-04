@@ -535,7 +535,7 @@ def test_model_route_allowlist_rejects_ambiguous_colon_components() -> None:
         )
 
 
-def test_budget_limits_cannot_be_raised_by_request_payload() -> None:
+def test_hard_budget_limits_cannot_be_raised_by_request_payload() -> None:
     for key, value in (
         ("pythonRunnerTimeoutMs", 600_001),
         ("maxSanitizedInputBytes", 1_000_001),
@@ -544,11 +544,6 @@ def test_budget_limits_cannot_be_raised_by_request_payload() -> None:
         ("maxTotalEstimatedTokens", 1_004_097),
         ("maxDiagnosticOutputPreviewBytes", 2049),
         ("maxDiagnosticArtifactBytes", 16_385),
-        ("maxConcurrentGenerationRuns", 2),
-        ("maxPendingGenerationRuns", 2),
-        ("maxDailyGenerationRuns", 101),
-        ("maxCostUsd", 5.01),
-        ("maxDailyGenerationCostUsd", 50.01),
     ):
         budget = {
             **_payload()["budgets"],
@@ -556,6 +551,27 @@ def test_budget_limits_cannot_be_raised_by_request_payload() -> None:
         }
         with pytest.raises(ValueError):
             Gate5B4C3ShadowGenerationRequest.model_validate(_payload(budgets=budget))
+
+
+def test_request_count_and_cost_budgets_are_soft_runtime_controls() -> None:
+    request = Gate5B4C3ShadowGenerationRequest.model_validate(
+        _payload(
+            budgets={
+                **_payload()["budgets"],
+                "maxConcurrentGenerationRuns": 2,
+                "maxPendingGenerationRuns": 2,
+                "maxDailyGenerationRuns": 1_000,
+                "maxCostUsd": 500,
+                "maxDailyGenerationCostUsd": 5_000,
+            }
+        )
+    )
+
+    assert request.budgets.max_concurrent_generation_runs == 2
+    assert request.budgets.max_pending_generation_runs == 2
+    assert request.budgets.max_daily_generation_runs == 1_000
+    assert request.budgets.max_cost_usd == pytest.approx(500)
+    assert request.budgets.max_daily_generation_cost_usd == pytest.approx(5_000)
 
 
 def test_budget_limits_accept_selected_user_visible_large_context_caps() -> None:

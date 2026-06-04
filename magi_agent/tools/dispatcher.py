@@ -112,6 +112,14 @@ class ToolDispatcher:
                 },
             )
 
+        decision = self.permission_policy.decide(manifest, arguments, context, mode=mode)
+        if trace is not None:
+            trace.record("tool", "ToolDispatcher", "permission_check", f"name={name}, decision={decision.action}")
+        if decision.action == "deny":
+            return ToolResult(status="blocked", metadata=decision.metadata)
+        if decision.action == "ask":
+            return ToolResult(status="needs_approval", metadata=decision.metadata)
+
         if registration.handler is None:
             return ToolResult(
                 status="error",
@@ -126,14 +134,6 @@ class ToolDispatcher:
                     "reason": "tool handler missing",
                 },
             )
-
-        decision = self.permission_policy.decide(manifest, arguments, context, mode=mode)
-        if trace is not None:
-            trace.record("tool", "ToolDispatcher", "permission_check", f"name={name}, decision={decision.action}")
-        if decision.action == "deny":
-            return ToolResult(status="blocked", metadata=decision.metadata)
-        if decision.action == "ask":
-            return ToolResult(status="needs_approval", metadata=decision.metadata)
 
         _t0 = time.monotonic_ns()
         result = registration.handler(arguments, context)
