@@ -51,12 +51,14 @@ _OPERATION_TO_PROVIDER_METHOD: Mapping[WebAcquisitionProviderOperation, str] = {
     "reader": "reader",
     "browser_fallback": "browser_fallback",
 }
-_OPERATION_TO_PROVIDER_NAME: Mapping[WebAcquisitionProviderOperation, str] = {
+OPERATION_TO_PROVIDER_NAME: Mapping[WebAcquisitionProviderOperation, str] = {
     "search": "web.search",
     "fetch": "web.fetch",
     "reader": "reader.extract",
     "browser_fallback": "browser.snapshot_fallback",
 }
+# Keep the private alias so internal references below don't need to change.
+_OPERATION_TO_PROVIDER_NAME = OPERATION_TO_PROVIDER_NAME
 
 
 class SearchProviderPort(Protocol):
@@ -114,6 +116,50 @@ class WebAcquisitionProviderPackConfig(BaseModel):
         data["production_network_enabled"] = False
         data["production_writes_enabled"] = False
         data["route_attached"] = False
+        _ = deep
+        return type(self).model_validate(data)
+
+    @field_validator("provider_allowlist", mode="before")
+    @classmethod
+    def _coerce_allowlist(cls, value: object) -> tuple[str, ...]:
+        if value is None:
+            return ()
+        if isinstance(value, str):
+            return (value,)
+        if isinstance(value, Sequence) and not isinstance(value, bytes | bytearray | str):
+            return tuple(str(item) for item in value)
+        return ()
+
+
+class LiveWebAcquisitionPackConfig(BaseModel):
+    """Parallel, separately-gated config for the live execution boundary.
+
+    Unlike the sealed ``WebAcquisitionProviderPackConfig`` (which hard-seals
+    ``production_network_enabled`` to ``Literal[False]``), this config exposes a
+    REAL gated ``live_network_enabled`` flag whose default-False IS the seal.
+    PR3a ships no real provider and no network; the flag stays off until PR3b
+    wires real httpx clients.
+    """
+
+    model_config = _MODEL_CONFIG
+
+    enabled: bool = False
+    live_network_enabled: bool = Field(default=False, alias="liveNetworkEnabled")
+    provider_allowlist: tuple[str, ...] = Field(default=(), alias="providerAllowlist")
+    max_results: int = Field(default=5, alias="maxResults", ge=1, le=20)
+    max_content_bytes: int = Field(default=32_768, alias="maxContentBytes", ge=1)
+    timeout_ms: int = Field(default=30_000, alias="timeoutMs", ge=1)
+    browser_fallback_enabled: bool = Field(default=False, alias="browserFallbackEnabled")
+
+    def model_copy(self, *, update: Mapping[str, Any] | None = None, deep: bool = False) -> Self:
+        data = self.model_dump(mode="python", by_alias=False, warnings=False)
+        if update:
+            alias_to_name = {
+                field.alias: name
+                for name, field in self.__class__.model_fields.items()
+                if field.alias is not None
+            }
+            data.update({alias_to_name.get(str(key), str(key)): value for key, value in update.items()})
         _ = deep
         return type(self).model_validate(data)
 
@@ -359,6 +405,140 @@ class WebAcquisitionProviderPack:
         return None
 
 
+class LiveWebAcquisitionProviderPack:
+    """Default-off LIVE execution boundary, separately gated from the fake pack.
+
+    Mirrors ``WebAcquisitionProviderPack`` but for real (live) providers. It does
+    NOT route through ``_OperationProvider`` / ``ProviderExecutionBoundary``
+    (those assert the fake trust marker); instead it calls the provider's
+    operation method directly after the SSRF firewall + live gate pass. PR3a
+    ships only the boundary plus ``StubLiveProvider`` (canned, no network).
+    """
+
+    def __init__(self, config: LiveWebAcquisitionPackConfig) -> None:
+        self.config = config
+
+    def run(
+        self,
+        request: WebAcquisitionProviderRequest,
+        *,
+        provider: object | None = None,
+    ) -> WebAcquisitionProviderResult:
+        diagnostics = _live_diagnostics(self.config, request)
+        digest = provider_digest(_request_payload(request))
+        if not self.config.enabled:
+            return _result(request, "disabled", digest, ("live_web_acquisition_pack_disabled",), diagnostics)
+        gate_error = self._live_gate_error(request, provider)
+        if gate_error is not None:
+            return _result(request, "blocked", digest, (gate_error,), diagnostics)
+        # SSRF firewall MUST be in front of any provider call.
+        validation_error = _validate_live_request(self.config, request)
+        if validation_error is not None:
+            status: WebAcquisitionProviderStatus = (
+                "approval_required"
+                if validation_error == "browser_fallback_requires_approval"
+                else "blocked"
+            )
+            return _result(request, status, digest, (validation_error,), diagnostics)
+
+        assert provider is not None  # gate guarantees non-None
+        method = getattr(provider, _OPERATION_TO_PROVIDER_METHOD[request.operation], None)
+        if method is None:
+            return _result(request, "repair_required", digest, ("provider_operation_missing",), diagnostics)
+        try:
+            raw_output = method(request)
+        except Exception:
+            return _result(request, "repair_required", digest, ("provider_execution_failed",), diagnostics)
+        if inspect.isawaitable(raw_output):
+            close = getattr(raw_output, "close", None)
+            if callable(close):
+                close()
+            return _result(request, "repair_required", digest, ("async_provider_not_supported",), diagnostics)
+        if not isinstance(raw_output, Mapping):
+            raw_output = {"value": repr(raw_output)}
+        provider_status = _provider_status(raw_output)
+        if provider_status == "denied":
+            return _result(request, "no_answer", digest, ("provider_denied",), diagnostics)
+        if provider_status == "timeout":
+            return _result(request, "repair_required", digest, ("provider_timeout",), diagnostics)
+
+        records = _records_from_output(
+            request,
+            raw_output,
+            provider_name=request.provider_name,
+            max_results=self.config.max_results,
+            max_content_bytes=self.config.max_content_bytes,
+        )
+        return _result(
+            request,
+            "ok",
+            digest,
+            ("live_web_acquisition_records_built",),
+            diagnostics,
+            records=records,
+            public_preview=_public_preview(raw_output),
+        )
+
+    def _live_gate_error(self, request: WebAcquisitionProviderRequest, provider: object | None) -> str | None:
+        if provider is None:
+            return "provider_missing"
+        if getattr(provider, "openmagi_live_provider", False) is not True:
+            return "live_provider_untrusted"
+        if not self.config.live_network_enabled:
+            return "live_network_disabled"
+        # Security: an empty allowlist on the live network boundary is DENY, not allow-all.
+        # An operator who enables live_network_enabled but omits provider_allowlist gets
+        # "provider_allowlist_required" rather than an accidental open-door. This preserves
+        # fail-safe defaults for the live execution boundary.
+        if not self.config.provider_allowlist:
+            return "provider_allowlist_required"
+        if request.provider_name not in self.config.provider_allowlist:
+            return "provider_not_allowlisted"
+        return None
+
+
+class StubLiveProvider:
+    """Canned live provider for PR3a — trusted marker, zero network, no httpx.
+
+    Produces outputs in the exact shape ``_records_from_output`` consumes. The
+    real Exa/Parallel httpx-backed providers land in PR3b.
+    """
+
+    openmagi_live_provider = True
+
+    def search(self, request: WebAcquisitionProviderRequest) -> Mapping[str, object]:
+        return {
+            "results": [
+                {
+                    "url": "https://docs.example.com/stub-result",
+                    "title": "Stub live search result",
+                    "snippet": "Canned live search snippet for the PR3a stub.",
+                }
+            ]
+        }
+
+    def fetch(self, request: WebAcquisitionProviderRequest) -> Mapping[str, object]:
+        return {
+            "url": request.url or "https://docs.example.com/stub-fetch",
+            "title": "Stub live fetch document",
+            "content": "Canned live fetch content for the PR3a stub.",
+        }
+
+    def reader(self, request: WebAcquisitionProviderRequest) -> Mapping[str, object]:
+        return {
+            "url": request.url or "https://docs.example.com/stub-reader",
+            "title": "Stub live reader document",
+            "content": "Canned live reader content for the PR3a stub.",
+        }
+
+    def browser_fallback(self, request: WebAcquisitionProviderRequest) -> Mapping[str, object]:
+        return {
+            "url": request.url or "https://docs.example.com/stub-browser",
+            "title": "Stub live browser snapshot",
+            "content": "Canned live browser-observed content for the PR3a stub.",
+        }
+
+
 class _OperationProvider:
     openmagi_local_fake_provider = True
     _outputs: dict[str, object] = {}
@@ -430,7 +610,16 @@ def _result(
     )
 
 
-def _validate_request(config: WebAcquisitionProviderPackConfig, request: WebAcquisitionProviderRequest) -> str | None:
+def _validate_request_common(
+    *,
+    browser_fallback_enabled: bool,
+    request: WebAcquisitionProviderRequest,
+) -> str | None:
+    """Shared query/URL validation core used by both fake and live paths.
+
+    Accepts the boolean flag directly so neither config type is threaded across
+    the boundary.
+    """
     if request.operation == "search":
         try:
             normalize_query(request.query or "")
@@ -438,13 +627,45 @@ def _validate_request(config: WebAcquisitionProviderPackConfig, request: WebAcqu
             return "query_required"
         return None
     if request.operation == "browser_fallback":
-        if not config.browser_fallback_enabled:
+        if not browser_fallback_enabled:
             return "browser_fallback_disabled"
         if not request.approval_granted:
             return "browser_fallback_requires_approval"
     if not request.url:
         return "url_required"
     return url_policy_error(request.url)
+
+
+def _validate_request(config: WebAcquisitionProviderPackConfig, request: WebAcquisitionProviderRequest) -> str | None:
+    return _validate_request_common(
+        browser_fallback_enabled=config.browser_fallback_enabled,
+        request=request,
+    )
+
+
+def _validate_live_request(
+    config: LiveWebAcquisitionPackConfig,
+    request: WebAcquisitionProviderRequest,
+) -> str | None:
+    """SSRF firewall + query/url policy for the live path.
+
+    Delegates to ``_validate_request_common`` so the sealed fake config is never
+    threaded through the live boundary.
+
+    WARNING — DNS-rebinding / internal-hostname SSRF: ``url_policy_error``
+    operates on the *literal* URL string with an IP/hostname denylist only.
+    It does NOT perform DNS resolution, so hostnames that resolve to private or
+    link-local addresses (e.g. ``http://evil.internal/x``,
+    ``http://metadata.example.com/x``, ``http://169.254.169.254.nip.io/x``)
+    pass the current check undetected. This is safe in PR3a because StubLiveProvider
+    makes zero network calls. Before any REAL network egress lands (PR3b), the
+    resolved IP MUST be re-checked after DNS lookup (or the egress must be
+    pinned to an explicit allowlist) to prevent SSRF via DNS rebinding.
+    """
+    return _validate_request_common(
+        browser_fallback_enabled=config.browser_fallback_enabled,
+        request=request,
+    )
 
 
 def _records_from_output(
@@ -573,6 +794,20 @@ def _diagnostics(
     }
 
 
+def _live_diagnostics(
+    config: LiveWebAcquisitionPackConfig,
+    request: WebAcquisitionProviderRequest,
+) -> dict[str, object]:
+    return {
+        "enabled": config.enabled,
+        "operation": request.operation,
+        "liveNetworkEnabled": config.live_network_enabled,
+        "browserFallbackEnabled": config.browser_fallback_enabled,
+        "timeoutMs": config.timeout_ms,
+        **dict(request.metadata),
+    }
+
+
 def _run_provider_execution(value: Any) -> Any:
     try:
         value.send(None)
@@ -602,8 +837,12 @@ __all__ = [
     "BrowserFallbackProviderPort",
     "CitationProofDecision",
     "FetchProviderPort",
+    "LiveWebAcquisitionPackConfig",
+    "LiveWebAcquisitionProviderPack",
+    "OPERATION_TO_PROVIDER_NAME",
     "ReaderProviderPort",
     "SearchProviderPort",
+    "StubLiveProvider",
     "WebAcquisitionLiveSourceRecord",
     "WebAcquisitionProviderAuthorityFlags",
     "WebAcquisitionProviderOperation",
