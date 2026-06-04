@@ -945,13 +945,50 @@ def _build_adk_tool(host: Gate5BFullToolHost, name: str) -> FunctionTool:
 
         return _function_tool(name, invoke_bash)
 
+    tool_name = name
+
     async def invoke_registry_tool(
-        arguments: dict[str, object] | None = None,
+        query: str = "",
+        path: str = "",
+        content: str = "",
+        text: str = "",
+        url: str = "",
+        title: str = "",
+        target: str = "",
+        mode: str = "",
+        command: str = "",
+        pattern: str = "",
+        glob: str = "",
+        expression: str = "",
+        id: str = "",
         tool_context: object | None = None,
     ) -> dict[str, object]:
-        return await _dispatch_adk_tool(host, name, arguments or {}, tool_context)
+        arguments = _registry_adk_arguments(
+            query=query,
+            path=path,
+            content=content,
+            text=text,
+            url=url,
+            title=title,
+            target=target,
+            mode=mode,
+            command=command,
+            pattern=pattern,
+            glob=glob,
+            expression=expression,
+            id=id,
+        )
+        return await _dispatch_adk_tool(host, tool_name, arguments, tool_context)
 
     return _function_tool(name, invoke_registry_tool)
+
+
+def _registry_adk_arguments(**values: str) -> dict[str, object]:
+    return {
+        key: value
+        for key, value in values.items()
+        if isinstance(value, str) and value.strip()
+    }
 
 
 async def _dispatch_adk_tool(
