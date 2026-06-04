@@ -131,7 +131,7 @@ _PRESETS: tuple[GeneralAutomationPreset, ...] = (
     _preset(
         "automation.research",
         "Research",
-        tool_categories=("web_search", "web_fetch_metadata", "source_ledger"),
+        tool_categories=("web_search", "web_fetch_metadata", "source_ledger", "user_question"),
         allowed_permissions=("read", "net", "meta"),
     ),
     _preset(
@@ -180,7 +180,7 @@ _PRESETS: tuple[GeneralAutomationPreset, ...] = (
     _preset(
         "automation.scout",
         "Scout",
-        tool_categories=("external_docs", "repo_read", "web_read"),
+        tool_categories=("external_docs", "repo_read", "web_read", "user_question"),
         allowed_permissions=("read", "net", "meta"),
     ),
 )

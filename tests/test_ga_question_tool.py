@@ -317,3 +317,48 @@ def test_preset_files_role_exposes_question_category() -> None:
 
     preset = get_general_automation_preset("automation.plan")
     assert "user_question" in preset.tool_categories
+
+
+def test_preset_research_and_scout_expose_question_category() -> None:
+    from magi_agent.recipes.first_party.general_automation.presets import (
+        get_general_automation_preset,
+    )
+
+    for role_id in ("automation.research", "automation.scout"):
+        preset = get_general_automation_preset(role_id)
+        assert "user_question" in preset.tool_categories, (
+            f"{role_id} must include 'user_question' in tool_categories"
+        )
+
+
+# ---------------------------------------------------------------------------
+# options omitted vs None — both default to empty, question stays valid
+# ---------------------------------------------------------------------------
+
+
+def test_question_from_arguments_options_omitted_defaults_to_empty() -> None:
+    """_question_from_arguments with no 'options' key must produce an empty tuple."""
+    from magi_agent.harness.general_automation.question_tool import _question_from_arguments
+
+    args: dict[str, object] = {
+        "header": "What should I do?",
+        "question": "Choose a direction.",
+        # 'options' key intentionally absent
+    }
+    question = _question_from_arguments(args)
+    assert question.options == ()
+    assert question.free_text_allowed is True
+
+
+def test_question_from_arguments_options_none_defaults_to_empty() -> None:
+    """_question_from_arguments with options=None must produce an empty tuple."""
+    from magi_agent.harness.general_automation.question_tool import _question_from_arguments
+
+    args: dict[str, object] = {
+        "header": "What should I do?",
+        "question": "Choose a direction.",
+        "options": None,
+    }
+    question = _question_from_arguments(args)
+    assert question.options == ()
+    assert question.free_text_allowed is True

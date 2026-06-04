@@ -298,6 +298,16 @@ def resume_general_automation_question(
     if outcome.control_projection is None or outcome.resume_ref is None:
         raise ValueError("outcome is not a blocking question outcome")
 
+    # TODO(sanitized-answer): The ``answer`` returned from
+    # ``store.resolve_request(...)`` (assigned to ``resolved.answer`` below) is
+    # ALREADY sanitized by the control store — a 240-char cap is applied and
+    # filesystem paths / secret tokens are redacted store-wide before the record
+    # is committed.  This means a user answer that contains a filesystem path
+    # (e.g. ``/home/user/.ssh/id_rsa``) or a bearer token will arrive here in
+    # redacted form.  Callers that consume ``GeneralAutomationQuestionResume.answer``
+    # must account for this: if full-fidelity answer text is required (e.g. for
+    # a path the user intentionally provided), carry it over a dedicated
+    # out-of-band channel rather than relying on the sanitized store record.
     idempotency_key = outcome.idempotency_key or outcome.control_projection.control_ref
     created = store.create_user_question_request(
         session_key=session_key,
@@ -462,6 +472,7 @@ def _question_input_schema() -> dict[str, object]:
             "question": {"type": "string", "maxLength": 2000},
             "options": {
                 "type": "array",
+                "minItems": 0,
                 "maxItems": _MAX_OPTIONS,
                 "items": {
                     "type": "object",
