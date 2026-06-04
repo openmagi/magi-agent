@@ -208,6 +208,7 @@ class CronTurnResult(BaseModel):
     status: CronTurnStatus
     job_id: str = Field(alias="jobId")
     runner_invoked: bool = Field(alias="runnerInvoked")
+    output: str = Field(default="", alias="output")
 
 
 @runtime_checkable
@@ -252,6 +253,7 @@ class JobExecution(BaseModel):
     status: CronTurnStatus
     approval: AutoPermissionDecision | None = Field(default=None, alias="approval")
     evidence: EvidenceRecord | None = Field(default=None, alias="evidence")
+    delivery_receipt: object | None = Field(default=None, alias="deliveryReceipt")
 
 
 class JobExecutionResult(BaseModel):
@@ -474,6 +476,7 @@ def execute_due_jobs(
             runner_invoked=turn_result.runner_invoked,
             now=now,
         )
+        delivery_receipt = _deliver_turn_result(turn_result, record=record, now=now)
         executions.append(
             JobExecution(
                 jobId=record.job_id,
@@ -483,10 +486,43 @@ def execute_due_jobs(
                 status=turn_result.status,
                 approval=approval,
                 evidence=evidence,
+                deliveryReceipt=delivery_receipt,
             )
         )
 
     return JobExecutionResult(tickResult=tick_result, executions=tuple(executions))
+
+
+def _deliver_turn_result(
+    turn_result: CronTurnResult,
+    *,
+    record: "ScheduledJobRecord",  # noqa: F821 — imported lazily below
+    now: datetime,
+) -> object:
+    """Call delivery boundary for a completed live turn.
+
+    Imported lazily so scheduler_delivery's import graph does not taint this
+    module's top-level (boundary isolation contract).
+    """
+    from magi_agent.harness.scheduler_delivery import (
+        LocalLogDeliverySink,
+        deliver,
+        resolve_delivery_target,
+    )
+
+    # Skip delivery for non-completed turns (timed_out, failed, skipped).
+    if turn_result.status not in {"completed"}:
+        # Still emit a skipped receipt so callers can audit.
+        from magi_agent.harness.scheduler_delivery import DeliveryReceipt
+        return DeliveryReceipt(
+            status="skipped",
+            jobId=turn_result.job_id,
+            outputLength=0,
+            outputDigest="sha256:" + "0" * 64,
+        )
+
+    target = resolve_delivery_target(record)
+    return deliver(turn_result, target=target)
 
 
 def _run_turn_sync(runner: CronTurnRunner, plan: CronTurnPlan) -> CronTurnResult:
@@ -541,4 +577,5 @@ __all__ = [
     "JobExecutionConfig",
     "JobExecutionResult",
     "execute_due_jobs",
+    "ScheduledJobRecord",
 ]
