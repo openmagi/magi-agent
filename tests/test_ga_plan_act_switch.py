@@ -8,10 +8,11 @@ digest/ref-safe synthetic "execute the plan" message. Mirrors OpenCode's
 
 The seam EXTENDS the existing structures (no new pack / no new posture system):
 
-* the approved plan-exit control is a
-  :class:`~magi_agent.runtime.control.ControlRequestRecord` with
-  ``kind="plan_approval"`` resolved ``decision="approved"`` through the existing
-  :class:`~magi_agent.runtime.control.ControlRequestStore`;
+* the approved plan-exit control is an approved/resolved
+  :class:`~magi_agent.runtime.control.ControlRequestRecord` through the existing
+  :class:`~magi_agent.runtime.control.ControlRequestStore`. The seam accepts any
+  kind (e.g., ``plan_approval`` or ``tool_permission``) as long as it resolved
+  with an approved decision — the seam intentionally does not check ``kind``;
 * the posture transition is expressed as a re-resolution of the GA preset
   projection from ``automation.plan`` →  an execution preset via the existing
   :func:`~magi_agent.recipes.first_party.general_automation.preset_projection.project_general_automation_preset`;
@@ -334,3 +335,48 @@ def test_session_key_mismatch_is_inert() -> None:
     assert outcome.active is False
     assert outcome.transition is None
     assert outcome.reason == "plan_exit_session_mismatch"
+
+
+# ---------------------------------------------------------------------------
+# (f) plan_approval kind control (seam accepts any resolved kind)
+# ---------------------------------------------------------------------------
+
+
+def test_plan_approval_kind_control_fires_transition() -> None:
+    """Seam accepts any resolved/approved control kind, including plan_approval."""
+    from magi_agent.runtime.control import ControlRequestRecord
+
+    snapshot = _plan_snapshot()
+
+    # Build a plan_approval control directly (no create_plan_approval method exists).
+    # Use the same field names and pattern as the store's create methods.
+    plan_approval_control = ControlRequestRecord(
+        requestId="ctrl_req_plan_approval_pr9",
+        sessionKey="bot:session:pr9",
+        turnId="turn_pr9",
+        kind="plan_approval",
+        state="approved",
+        decision="approved",
+        channelName=None,
+        source="plan",
+        prompt="approve plan execution?",
+        proposedInput=None,
+        createdAt=1_000,
+        expiresAt=2_600_000,  # createdAt + timeout_ms
+        resolvedAt=2_000,
+    )
+
+    outcome = resolve_general_automation_plan_act_switch(
+        snapshot=snapshot,
+        approved_control=plan_approval_control,
+        context=_context(),
+        env=_FLAG_ON,
+    )
+
+    assert outcome.active is True
+    assert outcome.transition is not None
+    assert outcome.transition.from_preset.role_id == PLAN_ACT_PLAN_PRESET
+    assert outcome.transition.to_preset.role_id == PLAN_ACT_EXECUTION_PRESET
+    assert outcome.synthetic_message is not None
+    assert "approved" in outcome.synthetic_message.text.lower()
+    assert "execute" in outcome.synthetic_message.text.lower()

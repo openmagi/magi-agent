@@ -157,6 +157,7 @@ def resolve_general_automation_plan_act_switch(
         return _inert()
 
     # Only an APPROVED control on the existing resolve path may flip the posture.
+    # state mirrors decision after resolve_request; both checked to defend against records built outside the store.
     if (
         approved_control.state not in {"approved", "answered"}
         or approved_control.decision not in _APPROVED_DECISIONS
