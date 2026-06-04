@@ -173,6 +173,12 @@ def parse_gate5b4c3_shadow_generation_route_env(
             "CORE_AGENT_PYTHON_GATE5B_SHADOW_GENERATION_CREDENTIAL_ENV must be "
             f"{_GATE5B4C3_FIRST_SMOKE_CREDENTIAL_ENV} for the first live smoke"
         )
+    if (
+        provider_label == _GATE5B4C3_FIRST_SMOKE_PROVIDER
+        and model_label == _GATE5B4C3_FIRST_SMOKE_MODEL
+    ):
+        credential_ref = credential_ref or _GATE5B4C3_FIRST_SMOKE_CREDENTIAL_REF
+        credential_env = credential_env or _GATE5B4C3_FIRST_SMOKE_CREDENTIAL_ENV
     google_genai_use_vertexai = _trimmed(env.get("GOOGLE_GENAI_USE_VERTEXAI"))
     if provider_label == _GATE5B4C3_FIRST_SMOKE_PROVIDER and (
         google_genai_use_vertexai is None
@@ -280,15 +286,25 @@ def parse_gate5b4c3_shadow_generation_route_env(
                 0,
             ),
             selectedBotDigest=_trimmed(
-                env.get("CORE_AGENT_PYTHON_GATE5B_SHADOW_GENERATION_SELECTED_BOT_DIGEST")
+                _first_non_empty(
+                    env,
+                    "CORE_AGENT_PYTHON_GATE5B_SHADOW_GENERATION_SELECTED_BOT_DIGEST",
+                    "CORE_AGENT_PYTHON_GATE5B_USER_VISIBLE_CANARY_SELECTED_BOT_DIGEST",
+                )
             ),
             trustedOwnerUserIdDigest=_trimmed(
-                env.get(
-                    "CORE_AGENT_PYTHON_GATE5B_SHADOW_GENERATION_TRUSTED_OWNER_USER_ID_DIGEST"
+                _first_non_empty(
+                    env,
+                    "CORE_AGENT_PYTHON_GATE5B_SHADOW_GENERATION_TRUSTED_OWNER_USER_ID_DIGEST",
+                    "CORE_AGENT_PYTHON_GATE5B_USER_VISIBLE_CANARY_TRUSTED_OWNER_USER_ID_DIGEST",
                 )
             ),
             environment=_trimmed(
-                env.get("CORE_AGENT_PYTHON_GATE5B_SHADOW_GENERATION_ENVIRONMENT")
+                _first_non_empty(
+                    env,
+                    "CORE_AGENT_PYTHON_GATE5B_SHADOW_GENERATION_ENVIRONMENT",
+                    "CORE_AGENT_PYTHON_GATE5B_USER_VISIBLE_CANARY_ENVIRONMENT",
+                )
             ),
             allowedProviderLabels=(provider_label,) if provider_label else (),
             allowedModelLabels=(model_label,) if model_label else (),

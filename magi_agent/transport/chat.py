@@ -663,19 +663,34 @@ def build_gate5b_full_toolhost_config_from_env(
             ),
             "selectedBotDigest": env.get(
                 "CORE_AGENT_PYTHON_GATE5B_FULL_TOOLHOST_SELECTED_BOT_DIGEST",
-                "",
+                env.get(
+                    "CORE_AGENT_PYTHON_GATE5B_USER_VISIBLE_CANARY_SELECTED_BOT_DIGEST",
+                    "",
+                ),
             ).strip(),
             "selectedOwnerDigest": env.get(
                 "CORE_AGENT_PYTHON_GATE5B_FULL_TOOLHOST_TRUSTED_OWNER_USER_ID_DIGEST",
-                "",
+                env.get(
+                    "CORE_AGENT_PYTHON_GATE5B_USER_VISIBLE_CANARY_TRUSTED_OWNER_USER_ID_DIGEST",
+                    "",
+                ),
             ).strip(),
             "environment": env.get(
                 "CORE_AGENT_PYTHON_GATE5B_FULL_TOOLHOST_ENVIRONMENT",
-                "local",
+                env.get(
+                    "CORE_AGENT_PYTHON_GATE5B_USER_VISIBLE_CANARY_ENVIRONMENT",
+                    "local",
+                ),
             ).strip()
             or "local",
             "environmentAllowlist": _csv_values(
-                env.get("CORE_AGENT_PYTHON_GATE5B_FULL_TOOLHOST_ENV_ALLOWLIST", "")
+                env.get(
+                    "CORE_AGENT_PYTHON_GATE5B_FULL_TOOLHOST_ENV_ALLOWLIST",
+                    env.get(
+                        "CORE_AGENT_PYTHON_GATE5B_USER_VISIBLE_CANARY_ENV_ALLOWLIST",
+                        "",
+                    ),
+                )
             ),
             "allowedToolNames": _csv_values(
                 env.get(
