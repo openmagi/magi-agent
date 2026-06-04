@@ -14,7 +14,10 @@ from magi_agent.evidence.observed_egress import (
     get_observed_egress_evidence_provider,
     observed_egress_diagnostics,
 )
-from magi_agent.ops import default_runtime_ops_health_metadata
+from magi_agent.ops import (
+    default_runtime_ops_health_metadata,
+    scheduler_executor_health_projection,
+)
 from magi_agent.gates.gate2_readiness import gate2_readiness_health_metadata
 from magi_agent.gates.gate3_readiness import gate3_readiness_health_metadata
 from magi_agent.gates.gate4_readiness import gate4_readiness_health_metadata
@@ -121,7 +124,10 @@ def healthz_payload(runtime: OpenMagiRuntime) -> dict[str, object]:
             by_alias=True,
             mode="json",
         ),
-        "runtimeOperations": default_runtime_ops_health_metadata(),
+        "runtimeOperations": {
+            **default_runtime_ops_health_metadata(),
+            "schedulerExecutor": scheduler_executor_health_projection(),
+        },
         "composio": composio_health_metadata(composio_config),
         "profile": {
             "name": runtime.profile.name,
