@@ -717,3 +717,72 @@ class TestSchedulerExecutorReadinessImportPurity:
                 assert not module.startswith(("urllib", "socket", "http", "requests")), (
                     f"Forbidden import from: {module}"
                 )
+
+
+# ---------------------------------------------------------------------------
+# G2.6 — Health uses JobExecutionConfig.from_env() (single source of truth)
+# ---------------------------------------------------------------------------
+
+class TestHealthUsesFromEnv:
+    """Verify health.py delegates to JobExecutionConfig.from_env() so that the
+    health surface and the execution config cannot diverge on shadow resolution.
+    """
+
+    def test_health_agrees_with_from_env_shadow_on(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("MAGI_SCHEDULER_EXECUTOR_ENABLED", "1")
+        monkeypatch.setenv("MAGI_SCHEDULER_SHADOW", "1")
+        from magi_agent.ops.health import scheduler_executor_health_projection
+        from magi_agent.harness.scheduler_job_execution import JobExecutionConfig
+
+        proj = scheduler_executor_health_projection()
+        cfg = JobExecutionConfig.from_env()
+        assert proj["executorEnabled"] == cfg.executor_enabled
+        assert proj["shadowEnabled"] == (cfg.shadow if cfg.executor_enabled else False)
+        assert proj["status"] == "shadow"
+
+    def test_health_agrees_with_from_env_shadow_off(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("MAGI_SCHEDULER_EXECUTOR_ENABLED", "1")
+        monkeypatch.setenv("MAGI_SCHEDULER_SHADOW", "0")
+        from magi_agent.ops.health import scheduler_executor_health_projection
+        from magi_agent.harness.scheduler_job_execution import JobExecutionConfig
+
+        proj = scheduler_executor_health_projection()
+        cfg = JobExecutionConfig.from_env()
+        assert proj["executorEnabled"] == cfg.executor_enabled
+        assert proj["shadowEnabled"] == (cfg.shadow if cfg.executor_enabled else False)
+        assert proj["status"] == "live"
+
+    def test_health_agrees_with_from_env_garbage_shadow(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """health.py shadow resolution must agree with JobExecutionConfig.from_env()
+        for a garbage MAGI_SCHEDULER_SHADOW value — both must resolve to False.
+        """
+        monkeypatch.setenv("MAGI_SCHEDULER_EXECUTOR_ENABLED", "1")
+        monkeypatch.setenv("MAGI_SCHEDULER_SHADOW", "xyz")
+        from magi_agent.ops.health import scheduler_executor_health_projection
+        from magi_agent.harness.scheduler_job_execution import JobExecutionConfig
+
+        proj = scheduler_executor_health_projection()
+        cfg = JobExecutionConfig.from_env()
+        # Both must agree: "xyz" is not a truthy value → shadow=False.
+        assert proj["shadowEnabled"] == cfg.shadow
+
+    def test_kill_switch_blocks_to_disabled(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """test_kill_switch_blocks_to_disabled must be env-isolated via monkeypatch
+        so it does not depend on ambient MAGI_SCHEDULER_EXECUTOR_ENABLED.
+        """
+        monkeypatch.delenv("MAGI_SCHEDULER_EXECUTOR_ENABLED", raising=False)
+        from magi_agent.gates.scheduler_executor_readiness import (
+            SchedulerExecutorReadinessConfig,
+            scheduler_executor_readiness_health_metadata,
+        )
+        # kill switch explicitly on with env gate off → disabled (not blocked)
+        cfg = SchedulerExecutorReadinessConfig(
+            **{**_VALID_CONFIG_KWARGS, "killSwitchEnabled": True}
+        )  # type: ignore[arg-type]
+        meta = scheduler_executor_readiness_health_metadata(
+            cfg, bot_id=_BOT_ID, user_id=_USER_ID
+        )
+        assert meta["executionMode"] == "disabled"
+        assert "kill_switch_enabled" in meta["reasonCodes"]

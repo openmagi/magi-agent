@@ -626,3 +626,87 @@ if loaded:
         check=False,
     )
     assert completed.returncode == 0, completed.stderr
+
+
+# ---------------------------------------------------------------------------
+# G2.7 — Delivery session-context seam: last_active_session threads through
+# ---------------------------------------------------------------------------
+
+def test_session_context_routes_to_session_aware_target(tmp_path: Any) -> None:
+    """When last_active_session is provided to execute_due_jobs, the delivery
+    target chosen by resolve_delivery_target must be the session-aware target
+    (A4 recency-win rule), not the default local log sink.
+
+    Verifies that execute_due_jobs → _deliver_turn_result → resolve_delivery_target
+    correctly threads the session context.
+    """
+    from magi_agent.harness.scheduler_job_execution import JobExecutionConfig, execute_due_jobs
+    from magi_agent.harness.scheduler_delivery import (
+        DeliveryReceipt,
+        SessionAwareDeliveryTarget,
+    )
+
+    now_ms = 1_000_000
+    now = _now_dt(now_ms)
+    lease = _make_lease(now_ms=now_ms)
+    runner = _FakeCronTurnRunner(output="Daily summary produced.")
+
+    config = JobExecutionConfig(executor_enabled=True, shadow=False, timeout_seconds=600.0)
+    source = _make_source(
+        [{"job_id": "job:session-ctx-001", "schedule_expr": "every 10m", "next_run_ms": now_ms - 500}]
+    )
+
+    # Provide a session-aware delivery target as the last_active_session.
+    session_target = SessionAwareDeliveryTarget(session_id="session:recency-win-abc")
+
+    result = execute_due_jobs(
+        now=now, source=source, lease=lease, lock_dir=tmp_path,
+        owner_digest="owner:test-abc", runner=runner, config=config,
+        last_active_session=session_target,
+    )
+
+    assert len(result.executions) == 1
+    ex = result.executions[0]
+    assert ex.runner_invoked is True
+    # Delivery receipt must be present (live turn completed).
+    receipt = ex.delivery_receipt
+    assert receipt is not None
+    assert isinstance(receipt, DeliveryReceipt)
+    assert receipt.status == "delivered"
+    # The receipt evidence sinkId must reflect the session-aware target.
+    assert receipt.evidence is not None
+    ev_fields = dict(receipt.evidence.fields)
+    assert ev_fields.get("sinkId") == session_target.sink_id, (
+        f"Expected sinkId={session_target.sink_id!r}, got {ev_fields.get('sinkId')!r}; "
+        "session context was not threaded to resolve_delivery_target"
+    )
+
+
+def test_no_session_context_uses_local_default(tmp_path: Any) -> None:
+    """When last_active_session is None (default), delivery uses the local log sink."""
+    from magi_agent.harness.scheduler_job_execution import JobExecutionConfig, execute_due_jobs
+    from magi_agent.harness.scheduler_delivery import LocalLogDeliverySink
+
+    now_ms = 1_000_000
+    now = _now_dt(now_ms)
+    lease = _make_lease(now_ms=now_ms)
+    runner = _FakeCronTurnRunner(output="Some output.")
+
+    config = JobExecutionConfig(executor_enabled=True, shadow=False, timeout_seconds=600.0)
+    source = _make_source(
+        [{"job_id": "job:no-session-001", "schedule_expr": "every 10m", "next_run_ms": now_ms - 500}]
+    )
+
+    result = execute_due_jobs(
+        now=now, source=source, lease=lease, lock_dir=tmp_path,
+        owner_digest="owner:test-abc", runner=runner, config=config,
+        # last_active_session not provided (default None)
+    )
+
+    ex = result.executions[0]
+    receipt = ex.delivery_receipt
+    assert receipt is not None
+    # Evidence sinkId must be the default local log sink.
+    assert receipt.evidence is not None
+    ev_fields = dict(receipt.evidence.fields)
+    assert ev_fields.get("sinkId") == LocalLogDeliverySink().sink_id

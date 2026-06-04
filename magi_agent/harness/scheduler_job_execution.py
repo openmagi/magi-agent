@@ -387,6 +387,7 @@ def execute_due_jobs(
     runner: CronTurnRunner,
     config: JobExecutionConfig | None = None,
     lock_dir: Path | None = None,
+    last_active_session: "object | None" = None,
 ) -> JobExecutionResult:
     """Run one scheduler tick, then (if gated on) execute each fired due job.
 
@@ -403,6 +404,13 @@ def execute_due_jobs(
     The frozen authority flags on the tick result are never mutated; the gate is a
     runtime env branch only.  Lease/lock failures from A2 still short-circuit (no
     execution without a valid lease).
+
+    ``last_active_session``: Optional session-context object (a ``DeliveryTarget``
+    from ``scheduler_delivery``) passed through to ``resolve_delivery_target``.
+    When provided, A4's recency-win rule routes delivery to the active session
+    rather than the default local log sink.  When absent (default), delivery falls
+    back to the local default sink — preserving existing behavior.
+    The future Track-F loop driver will supply this from its session-tracking state.
     """
     resolved_config = config if config is not None else JobExecutionConfig.from_env()
 
@@ -545,7 +553,9 @@ def execute_due_jobs(
             runner_invoked=turn_result.runner_invoked,
             now=now,
         )
-        delivery_receipt = _deliver_turn_result(turn_result, record=record, now=now)
+        delivery_receipt = _deliver_turn_result(
+            turn_result, record=record, now=now, last_active_session=last_active_session
+        )
         executions.append(
             JobExecution(
                 jobId=record.job_id,
@@ -567,11 +577,18 @@ def _deliver_turn_result(
     *,
     record: "ScheduledJobRecord",  # noqa: F821 — imported lazily below
     now: datetime,
+    last_active_session: "object | None" = None,
 ) -> object:
     """Call delivery boundary for a completed live turn.
 
     Imported lazily so scheduler_delivery's import graph does not taint this
     module's top-level (boundary isolation contract).
+
+    ``last_active_session``: optional ``DeliveryTarget`` from scheduler_delivery
+    representing the most recent active session.  When provided, A4's recency-win
+    rule routes delivery to that session instead of the default local log sink.
+    Default is None (local sink) — preserving existing behavior when no session
+    context is available (e.g. the future loop driver has not yet wired the seam).
     """
     from magi_agent.harness.scheduler_delivery import (
         deliver,
@@ -599,7 +616,8 @@ def _deliver_turn_result(
             outputDigest=_output_digest,
         )
 
-    target = resolve_delivery_target(record)
+    # Resolve target with optional session context (A4 recency-win rule).
+    target = resolve_delivery_target(record, last_active_session=last_active_session)
     return deliver(turn_result, target=target)
 
 

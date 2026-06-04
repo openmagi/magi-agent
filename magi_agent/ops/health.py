@@ -1,10 +1,5 @@
 from __future__ import annotations
 
-import os
-
-_TRUE_STRINGS = frozenset({"1", "true", "yes", "on"})
-_FALSE_STRINGS = frozenset({"0", "false", "no", "off"})
-
 
 def default_runtime_ops_health_metadata() -> dict[str, object]:
     return {
@@ -25,10 +20,9 @@ def scheduler_executor_health_projection(
     """Return a health projection for the OSS scheduler executor.
 
     Reports state WITHOUT enabling anything — a pure projection layer.  All
-    values are derived from environment variables (same source as
-    ``JobExecutionConfig.from_env()`` in scheduler_job_execution.py) so that
-    the health surface reflects the actual runtime configuration without
-    importing the harness (boundary isolation).
+    values are derived from ``JobExecutionConfig.from_env()`` (lazy import) so
+    that the health surface and the execution config can NEVER diverge — a single
+    source of truth for executor-enabled and shadow-enabled resolution.
 
     When ``tick_summary`` is provided the last-tick counts (fired, suppressed,
     skipped, etc.) are merged into the projection.  When absent those fields
@@ -40,21 +34,14 @@ def scheduler_executor_health_projection(
             lastTickUtcIso (str), fired (int), suppressed_silent (int),
             skipped (int), timed_out (int), lease_rejected (int).
     """
-    executor_enabled = os.environ.get("MAGI_SCHEDULER_EXECUTOR_ENABLED", "").lower() in _TRUE_STRINGS
-    # Shadow: mirrors _env_flag("MAGI_SCHEDULER_SHADOW", default=True) in
-    # scheduler_job_execution.JobExecutionConfig.from_env() exactly.
-    # When the env var is absent → default True (shadow-first).
-    # When present → truthy only if in _TRUE_STRINGS; any other value (incl.
-    # garbage like "xyz") → False (same as _env_flag's raw.strip().lower() check).
-    shadow_raw = os.environ.get("MAGI_SCHEDULER_SHADOW")
-    shadow_enabled: bool
-    if executor_enabled:
-        if shadow_raw is None:
-            shadow_enabled = True  # default=True matches _env_flag default
-        else:
-            shadow_enabled = shadow_raw.strip().lower() in _TRUE_STRINGS
-    else:
-        shadow_enabled = False
+    # Lazy import: preserves boundary isolation at top-level while guaranteeing
+    # that health and config use the exact same env-resolution logic.
+    from magi_agent.harness.scheduler_job_execution import JobExecutionConfig
+
+    cfg = JobExecutionConfig.from_env()
+    executor_enabled: bool = cfg.executor_enabled
+    # shadow_enabled: only meaningful (and True) when executor is enabled.
+    shadow_enabled: bool = cfg.shadow if executor_enabled else False
 
     if not executor_enabled:
         status = "disabled"
