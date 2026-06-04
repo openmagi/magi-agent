@@ -705,6 +705,24 @@ def build_default_verifier_bus_metadata() -> VerifierBusMetadata:
                 defaultEnabled=False,
                 disabled=True,
             ),
+            # Placed in task_plan_completion for catalog compatibility only; this
+            # is a learning-layer regression check with no task/plan semantics.
+            # Move to a dedicated memory/learning stage if one is added.
+            VerifierMetadata(
+                verifierId="learning-eval",
+                stage="task_plan_completion",
+                phase="deterministic",
+                priority=55,
+                description="Learning-layer eval-gate regression metadata (default-off).",
+                inputDeclarations=(
+                    VerifierInputDeclaration(
+                        transcriptRefs=("transcript:learning-reflection",),
+                    ),
+                ),
+                failureRouting=FailureRoutingMetadata(actions=("audit",), failOpen=True),
+                defaultEnabled=False,
+                disabled=True,
+            ),
             VerifierMetadata(
                 verifierId="security-policy-hard-safety",
                 stage="security_policy",
