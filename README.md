@@ -172,6 +172,12 @@ You can enable these surfaces explicitly for the workflows you want to run.
 Local development can run the contracts and fixture suites without granting live
 tool authority.
 
+The package taxonomy and bundled defaults are documented in
+`magi_agent/ARCHITECTURE.md`. In short: not every top-level `magi_agent/`
+package is a harness, and bundled plugin state separates `defaultInstalled`
+from `defaultEnabled` so installed metadata does not automatically imply live
+authority.
+
 ## Local web dashboard
 
 `magi-agent serve` includes a browser dashboard for local work:

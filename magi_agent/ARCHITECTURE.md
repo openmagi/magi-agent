@@ -1,5 +1,99 @@
 # Module Purpose Map (auto-generated)
 
+## Human Package Taxonomy
+
+Not every top-level package is a harness. This repository uses one Python import
+root, `magi_agent`, with multiple subpackages for runtime infrastructure,
+domain features, integration boundaries, rollout gates, and tests. That is a
+normal Python package layout for a runtime of this size; the important contract
+is that each package has a clear boundary.
+
+- `magi_agent/harness/` contains reusable enforcement, evidence, checkpoint,
+  and safety-profile logic. This is the harness layer.
+- `magi_agent/recipes/` compiles policy packs and profile layers. Recipes
+  select policy; they are not the whole runtime.
+- `magi_agent/workflows/` owns workflow contracts, dry-run behavior, and
+  workflow registry surfaces.
+- `magi_agent/tools/` owns tool manifests, the core tool catalog, tool
+  registry, and dispatch boundary.
+- `magi_agent/plugins/` owns native and custom plugin manifests, bundled plugin
+  defaults, opt-out state, and active tool/hook/harness projections.
+- `magi_agent/hooks/` owns lifecycle hook manifests, the hook registry, the hook
+  bus, hook scope filtering, and external hook config.
+- `magi_agent/runtime`, `magi_agent/adk_bridge`, `magi_agent/transport`,
+  `magi_agent/config`, `magi_agent/storage`, `magi_agent/telemetry`, and
+  `magi_agent/ops` are runtime and infrastructure packages.
+- `magi_agent/cli`, `magi_agent/context`, `magi_agent/evidence`,
+  `magi_agent/permissions`, `magi_agent/prompt`, `magi_agent/routing`,
+  `magi_agent/rules`, `magi_agent/shared`, `magi_agent/tenancy`, and
+  `magi_agent/workspace` are command, context, policy, evidence, and workspace
+  support packages.
+- Domain packages include research, coding, memory, knowledge, browser,
+  channels, missions, artifacts, web_acquisition, authoring, learning,
+  composio, connectors, billing, meta_orchestration, and self_improvement.
+- Rollout, validation, and containment packages include shadow, gates, evals,
+  benchmarks, testing, security, and sandbox.
+
+## Bundled Defaults
+
+Magi Agent ships first-party tools, plugins, hooks, recipes, harness profiles,
+and integration surfaces. Bundled means the manifest or boundary code is present
+in the package. It does not mean every surface is active for every run.
+
+Core tools are included but disabled by default in `magi_agent/tools/catalog.py`.
+The core catalog includes ToolSearch, FileRead, FileWrite, FileEdit, Glob, Grep,
+Bash, TestRun, GitDiff, AskUserQuestion, EnterPlanMode, ExitPlanMode,
+ArtifactCreate, ArtifactRead, ArtifactList, Clock, Calculation, HealthStatus,
+TaskList, TaskGet, TaskOutput, and CronList.
+
+Native plugins are resolved from `magi_agent/plugins/native_catalog.py` with
+separate `defaultInstalled` and `defaultEnabled` flags:
+
+- `openmagi.documents`: defaultInstalled true, defaultEnabled true. Tools:
+  DocumentWrite and SpreadsheetWrite; capability metadata also names
+  FileDeliver and FileSend.
+- `openmagi.knowledge`: defaultInstalled true, defaultEnabled true. Tools:
+  KnowledgeSearch, knowledge-search, KnowledgeWrite, and knowledge-write.
+- `openmagi.agentmemory`: defaultInstalled true, defaultEnabled false. Tools:
+  AgentMemorySearch and AgentMemoryRemember; hooks: agentmemory.recall and
+  agentmemory.observe.
+- `openmagi.browser`: defaultInstalled true, defaultEnabled false. Tools:
+  Browser and SocialBrowser.
+- `openmagi.missions`: defaultInstalled true, defaultEnabled false. Tool:
+  MissionLedger.
+- `openmagi.scheduled-work`: defaultInstalled true, defaultEnabled false.
+  Tools: CronCreate, CronList, CronUpdate, CronDelete, TaskWait, TaskGet,
+  TaskList, TaskOutput, and TaskStop.
+- `openmagi.web-acquisition`: defaultInstalled true, defaultEnabled false.
+  Provider and source-ledger metadata only; no live tools by default.
+- `openmagi.web`: defaultInstalled true, defaultEnabled false. Tools:
+  WebSearch, web-search, web_search, and WebFetch.
+- `openmagi.security-posture`: defaultInstalled true, defaultEnabled false,
+  securityCritical true. It cannot be opted out, and it does not attach live
+  traffic or execution by itself.
+
+Enabled plugin state can populate active tool, hook, and harness names. Live
+attachment is still separate: plugin status keeps `trafficAttached` and
+`executionAttached` false unless a runtime boundary explicitly wires that
+surface.
+
+The default harness profile is `openmagi-opinionated` in
+`magi_agent/harness/profiles.py`. Hard safety gates are default-on and not
+opt-out: permission-arbiter, path-safety, secret-safety, sealed-file-policy, and
+git-safety. The coding, research, verification, local-tools, and cloud feature
+packs are default-on and opt-out. `real-child-execution` is default-off and can
+only be reached by explicit opt-in plus the workflow-executor environment gate.
+
+Built-in hooks are lifecycle surfaces. External command, HTTP, and LLM hooks are
+loaded from `agent.hooks.yaml` only when `MAGI_EXTERNAL_HOOKS_ENABLED=true`.
+LLM hooks should also be explicitly gated with `MAGI_LLM_HOOKS_ENABLED=true`.
+Hook config variable substitution only expands `MAGI_HOOK_*` variables.
+
+Optional integrations do not grant authority merely because a dependency or API
+key exists. For example, Composio support is installed in a source checkout with
+`uv sync --extra composio`, then still needs an explicit workflow, plugin,
+credential, and approval path before external action is exposed.
+
 ## Dependency Graph
 
 ```mermaid
