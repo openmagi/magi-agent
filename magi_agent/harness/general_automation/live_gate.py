@@ -26,7 +26,9 @@ Mapping (active path):
   ``HookPermissionBoundary``) + a
   ``build_general_automation_control_projection(controlType="approval_required")``
 * ``allowed`` /
-  ``workspace_local``        → ``allow`` (proceed unchanged)
+  ``workspace_local``
+  read/list                  → ``allow`` (proceed unchanged)
+  write/delete/execute       → ``ask`` (approval required)
 
 No authority flag, hard-safety verifier, or sealed core path is modified here.
 """
@@ -258,6 +260,7 @@ class GeneralAutomationLiveGate:
                 policy_ref="policy:general-automation:path-policy",
                 payload_digest=decision.path_digest,
                 reason_codes=decision.reason_codes,
+                approval_ref=_workspace_write_approval_ref(decision),
             )
             return GeneralAutomationGateOutcome(
                 active=True,

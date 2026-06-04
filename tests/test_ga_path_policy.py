@@ -11,14 +11,13 @@ Tests pin the new contract:
 * blocked paths → unchanged (approvalRequired=False)
 
 Through the live_gate consumer (PR2 / live_gate.py):
-* workspace write  → classify_pre returns decision="ask" + ExternalDirectoryApprovalReceipt-equivalent
-  Actually: workspace write → decision="ask" + ExternalDirectoryApprovalReceipt
-  (the live_gate re-uses the same approval path as external_directory when approvalRequired is True)
+* workspace write  → classify_pre returns decision="ask" + control_projection (NO receipt)
 * workspace read   → classify_pre returns decision="allow"
 """
 from __future__ import annotations
 
 import asyncio
+import json
 
 import pytest
 
@@ -187,7 +186,6 @@ def test_workspace_local_public_projection_never_contains_raw_path(
     raw = "secret/credentials.json"
     decision = classify_path_access(_req(raw, operation=operation))
     public = decision.public_projection()
-    import json
     serialized = json.dumps(public)
     assert raw not in serialized
     assert WORKSPACE_ROOT not in serialized
@@ -226,6 +224,8 @@ def test_live_gate_workspace_write_yields_ask(
     assert outcome.permission_boundary.decision == "ask"
     assert outcome.control_projection is not None
     assert outcome.control_projection.control_type == "approval_required"
+    # Workspace writes produce NO ExternalDirectoryApprovalReceipt
+    assert outcome.receipt is None
 
 
 def test_live_gate_workspace_write_via_dispatcher_needs_approval(
