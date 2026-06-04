@@ -223,11 +223,8 @@ CODING_MODEL_HINT_BLOCK: dict[str, str] = {
         "- Code only takes effect when written to disk via tools. Text in your "
         "reply is not saved to disk; you must call the write/edit tools.",
     ),
-    "anthropic": _coding_model_hint_block(
-        "anthropic",
-        "- Follow the structured instruction blocks above directly; no extra "
-        "model-specific compensation is needed.",
-    ),
+    # No "anthropic" entry: claude already follows the structured blocks above,
+    # so .get("anthropic", "") returns "" — a no-op hint would only waste tokens.
 }
 
 
@@ -678,6 +675,7 @@ def build_system_prompt_blocks(
     provider: str = "auto",
     cache_enabled: bool = False,
     coding_agent: bool = False,
+    model_aware_prompts_enabled: bool = False,
     hook_bus: "HookBus | None" = None,
     harness_state: "ResolvedHarnessPresetState | None" = None,
     hook_context: "object | None" = None,
@@ -728,6 +726,13 @@ def build_system_prompt_blocks(
     # hit rate; when the flag is OFF the transform short-circuits and the prefix
     # stays byte-identical, so there is no cache regression.
     runtime_now = _coerce_utc(now)
+    # PR10 cache note: when model_aware_prompts_enabled is ON, the per-family
+    # coding hint is added to the STATIC region. This keeps the hint cacheable,
+    # but it SEGMENTS the prompt cache by provider family — one cache prefix per
+    # family (openai / google / fireworks / default) rather than a single shared
+    # prefix. The hint stays in the static region so the rest of the prefix
+    # remains byte-identical and cacheable within each family. When the flag is
+    # OFF, model is ignored and the prefix is model-independent (no segmentation).
     static_parts, dynamic_parts = _assemble_prompt_sections(
         session_key=session_key,
         turn_id=turn_id,
@@ -737,8 +742,8 @@ def build_system_prompt_blocks(
         runtime_now=runtime_now,
         timezone=timezone,
         coding_agent=coding_agent,
-        model="",
-        model_aware_prompts_enabled=False,
+        model=model if model_aware_prompts_enabled else "",
+        model_aware_prompts_enabled=model_aware_prompts_enabled,
     )
     static_parts = _apply_prompt_transform(
         static_parts,

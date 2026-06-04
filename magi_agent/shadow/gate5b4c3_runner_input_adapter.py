@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+import os
 import re
 from typing import Any, Literal, Self, TypeAlias
 
@@ -225,6 +226,8 @@ class Gate5B4C3RunnerInputAdapterResult(_Gate5B4C3RunnerInputModel):
 
 def build_gate5b4c3_runner_input(
     request: Gate5B4C3ShadowGenerationRequest,
+    *,
+    env: Mapping[str, str] | None = None,
 ) -> Gate5B4C3RunnerInputAdapterResult:
     sanitized_input = request.turn.sanitized_current_turn_text
     input_bytes = len(sanitized_input.encode("utf-8"))
@@ -271,8 +274,13 @@ def build_gate5b4c3_runner_input(
     ):
         return _result("dropped", "unsafe_policy")
 
+    from magi_agent.config.env import model_aware_prompts_enabled
+
     runner_input = Gate5B4C3RunnerInput(
-        systemInstruction=_build_system_instruction(request),
+        systemInstruction=_build_system_instruction(
+            request,
+            model_aware=model_aware_prompts_enabled(os.environ if env is None else env),
+        ),
         sanitizedUserInput=sanitized_input,
         sanitizedInputTextDigest=request.turn.sanitized_input_text_digest,
         providerLabel=request.model_routing.provider_label,
@@ -325,9 +333,13 @@ def _estimate_tokens(value: str) -> int:
     return len(value.encode("utf-8"))
 
 
-def _build_system_instruction(request: Gate5B4C3ShadowGenerationRequest) -> str:
+def _build_system_instruction(
+    request: Gate5B4C3ShadowGenerationRequest,
+    *,
+    model_aware: bool = False,
+) -> str:
     if request.recipe_profile.tools_policy == "selected_full_toolhost":
-        return (
+        base = (
             "You are running an OpenMagi Gate 5B selected full toolhost route with "
             "first-party recipe harness metadata. You may request only the approved "
             "tools exposed for this selected turn. Use coding, research, general "
@@ -346,6 +358,18 @@ def _build_system_instruction(request: Gate5B4C3ShadowGenerationRequest) -> str:
             "selected first-party authority surface is attached for that turn. "
             f"Routing source: {request.model_routing.routing_source}."
         )
+        # PR10: the selected full toolhost route IS the coding-capable agent
+        # path. When the model-aware flag is on, append the family-keyed coding
+        # hint for the active model so it reaches the model on the LIVE request
+        # path (chat.py -> gate5b4c3 live runner -> Agent.instruction). Default
+        # family (incl. claude) contributes nothing, so the prefix is unchanged.
+        if model_aware:
+            from magi_agent.runtime.message_builder import _coding_model_hint_for
+
+            hint = _coding_model_hint_for(request.model_routing.model_label)
+            if hint:
+                return f"{base}\n\n{hint}"
+        return base
     if request.recipe_profile.tools_policy == "shadow_readonly":
         return (
             "You are running an OpenMagi Gate 1A read-only tools canary. "
