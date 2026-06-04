@@ -236,9 +236,12 @@ _SCHEMA_DICT_KEYS: tuple[str, ...] = ("properties", "$defs", "definitions", "pat
 def _enum_value_to_string(value: object) -> str:
     """Coerce a single enum value to the string form Gemini accepts.
 
+    ``None`` maps to JSON ``"null"`` (not Python's ``"None"``).
     Booleans are mapped to JSON-style lowercase ``"true"``/``"false"`` rather
     than Python's ``"True"``/``"False"`` so the surfaced enum reads naturally.
     """
+    if value is None:
+        return "null"
     if isinstance(value, bool):
         return "true" if value else "false"
     return str(value)
@@ -279,19 +282,21 @@ def repair_tool_schema_for_provider(
 ) -> dict[str, object]:
     """Return a provider-repaired copy of a tool input JSON schema.
 
-    The input is never mutated. Tool *semantics* are preserved: enum values are
-    kept (as their string forms) and no fields are dropped.
+    The input is never mutated on the Gemini path (``_repair_gemini_schema``
+    builds fresh dicts). Tool *semantics* are preserved: enum values are kept
+    (as their string forms) and no fields are dropped.
 
     Only ``ProviderFamily.GOOGLE`` triggers a repair today (Gemini integer-enum
-    -> string-enum). Every other family returns an equal deep copy because the
-    ADK-native runtime / underlying provider already accepts those schemas.
+    -> string-enum). Every other family returns the *input object as-is*
+    (callers must not mutate the returned value); the ADK-native runtime /
+    underlying provider already accepts those schemas without modification.
     """
     if family is ProviderFamily.GOOGLE:
         result = _repair_gemini_schema(schema)
         if isinstance(result, dict):
             return result
         return dict(schema)
-    return copy.deepcopy(schema)
+    return schema
 
 
 def _strip_xml_tags(text: str) -> str:

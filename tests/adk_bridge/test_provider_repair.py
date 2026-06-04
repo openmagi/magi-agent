@@ -301,3 +301,65 @@ class TestFunctionToolDeclarationRepairWiring:
         prop = wrapped._get_declaration().parameters_json_schema["properties"]["priority"]
         assert prop["type"] == "integer"
         assert prop["enum"] == [1, 2, 3]
+
+    def test_double_apply_does_not_stack_closures(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Applying apply_provider_repair twice must not double-wrap _get_declaration."""
+        monkeypatch.setenv("MAGI_PROVIDER_REPAIR_ENABLED", "1")
+        monkeypatch.setenv("CORE_AGENT_MODEL", "gemini-3.5-flash")
+        tool = _int_enum_tool()
+        _force_int_enum_declaration(tool)
+
+        wrapped_once = tool_adapter.apply_provider_repair(tool)
+        wrapped_twice = tool_adapter.apply_provider_repair(wrapped_once)
+
+        # Both calls must return the same object.
+        assert wrapped_once is tool
+        assert wrapped_twice is tool
+
+        # _get_declaration must be the same callable after both applications —
+        # closures must not be stacked.
+        assert wrapped_once._get_declaration is wrapped_twice._get_declaration
+
+        # Behaviour: enum still correctly repaired (not double-wrapped or broken).
+        prop = wrapped_twice._get_declaration().parameters_json_schema["properties"]["priority"]
+        assert prop["type"] == "string"
+        assert prop["enum"] == ["1", "2", "3"]
+
+
+# ---------------------------------------------------------------------------
+# None enum value -> JSON "null" (not Python "None")
+# ---------------------------------------------------------------------------
+
+
+class TestNoneEnumValue:
+    def test_none_in_enum_becomes_json_null_string(self) -> None:
+        schema = {
+            "type": "object",
+            "properties": {
+                "count": {"enum": [1, None, 3]},
+            },
+        }
+        repaired = repair_tool_schema_for_provider(schema, ProviderFamily.GOOGLE)
+        prop = repaired["properties"]["count"]
+        assert prop["enum"] == ["1", "null", "3"]
+        assert prop["type"] == "string"
+
+    def test_none_only_enum(self) -> None:
+        schema = {"enum": [None]}
+        repaired = repair_tool_schema_for_provider(schema, ProviderFamily.GOOGLE)
+        assert repaired["enum"] == ["null"]
+        assert repaired["type"] == "string"
+
+    def test_none_enum_non_gemini_left_unchanged(self) -> None:
+        """Non-Gemini families must leave None-valued enums untouched."""
+        schema = {"enum": [1, None, 3]}
+        for family in (
+            ProviderFamily.ANTHROPIC,
+            ProviderFamily.OPENAI,
+            ProviderFamily.FIREWORKS,
+            ProviderFamily.DEFAULT,
+        ):
+            repaired = repair_tool_schema_for_provider(schema, family)
+            assert repaired is schema, f"expected same object for {family}"

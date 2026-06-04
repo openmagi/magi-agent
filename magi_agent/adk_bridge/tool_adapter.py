@@ -151,6 +151,10 @@ def apply_provider_repair(tool: AdkLocalTool) -> AdkLocalTool:
     provider family has no gap to repair. When active for the Gemini family, the
     tool's ``_get_declaration`` is wrapped to coerce integer/number/boolean enums
     to string enums (values preserved) on the way to the model.
+
+    Idempotent: if this function has already been applied to *tool* (detected via
+    ``_provider_repair_applied`` sentinel), the tool is returned unchanged so that
+    double-materialisation of a deferred tool does not stack closures.
     """
     if not provider_repair_enabled():
         return tool
@@ -159,6 +163,10 @@ def apply_provider_repair(tool: AdkLocalTool) -> AdkLocalTool:
 
     family = active_provider_family()
     if family is not ProviderFamily.GOOGLE:
+        return tool
+
+    # Idempotency guard: return immediately if already wrapped for this instance.
+    if getattr(tool, "_provider_repair_applied", False):
         return tool
 
     base_get_declaration = tool._get_declaration  # type: ignore[attr-defined]
@@ -170,7 +178,10 @@ def apply_provider_repair(tool: AdkLocalTool) -> AdkLocalTool:
         _repair_declaration(declaration, family)
         return declaration
 
+    # Intentional per-instance dict override: survives only for this object
+    # instance (not copies), valid for the current ADK version.
     tool._get_declaration = _repaired_get_declaration  # type: ignore[method-assign,attr-defined]
+    tool._provider_repair_applied = True  # type: ignore[attr-defined]
     return tool
 
 
