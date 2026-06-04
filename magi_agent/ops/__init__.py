@@ -15,6 +15,7 @@ __all__ = [
     "build_runtime_trace_snapshot",
     "default_runtime_ops_health_metadata",
     "project_runtime_operation_event",
+    "scheduler_executor_health_projection",
     "safe_metadata",
 ]
 
@@ -31,6 +32,7 @@ _LAZY_EXPORTS = {
     "build_runtime_trace_snapshot": (".traces", "build_runtime_trace_snapshot"),
     "default_runtime_ops_health_metadata": (".health", "default_runtime_ops_health_metadata"),
     "project_runtime_operation_event": (".runtime_events", "project_runtime_operation_event"),
+    "scheduler_executor_health_projection": (".health", "scheduler_executor_health_projection"),
     "safe_metadata": (".safety", "safe_metadata"),
 }
 
