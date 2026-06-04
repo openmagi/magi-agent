@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import time
 from inspect import isawaitable
 
@@ -28,6 +29,8 @@ class ToolDispatcher:
         permission_policy: ToolPermissionPolicy | None = None,
         coding_receipt_boundary: CodingToolReceiptBoundary | None = None,
         general_automation_live_gate: GeneralAutomationLiveGate | None = None,
+        readonly_offload_enabled: bool | None = None,
+        max_offload_concurrency: int | None = None,
     ) -> None:
         self.registry = registry
         self.permission_policy = permission_policy or ToolPermissionPolicy()
@@ -35,6 +38,45 @@ class ToolDispatcher:
         self._general_automation_live_gate = (
             general_automation_live_gate or GeneralAutomationLiveGate()
         )
+        # PR14 — readonly offload. Google ADK already fans out same-turn function
+        # calls concurrently (asyncio.gather over create_task), but magi's
+        # readonly handlers are synchronous and block the event loop, so there is
+        # no real I/O overlap. When enabled, *readonly / concurrency_safe*
+        # synchronous handlers are run via asyncio.to_thread (bounded by a shared
+        # semaphore) so that ADK's existing gather produces genuine overlap.
+        # Workspace-mutating / unsafe / async handlers always run inline,
+        # preserving the write-barrier. Default is read from
+        # ``MAGI_TOOL_CONCURRENCY_ENABLED`` (single source of truth in
+        # ``magi_agent.config.env``); an explicit value overrides the env (for
+        # tests / embedding callers).
+        if readonly_offload_enabled is None or max_offload_concurrency is None:
+            from magi_agent.config.env import (
+                max_tool_concurrency,
+                tool_concurrency_enabled,
+            )
+
+            import os as _os
+
+            if readonly_offload_enabled is None:
+                readonly_offload_enabled = tool_concurrency_enabled(_os.environ)
+            if max_offload_concurrency is None:
+                max_offload_concurrency = max_tool_concurrency(_os.environ)
+        self._readonly_offload_enabled = bool(readonly_offload_enabled)
+        self._max_offload_concurrency = max(1, int(max_offload_concurrency))
+        # Semaphore is created lazily and keyed on the running event loop so it
+        # binds to the correct loop (and survives loop teardown across separate
+        # ``asyncio.run`` invocations, e.g. in tests).
+        #
+        # CONCURRENCY MODEL: this loop-keyed cache makes a single dispatcher safe
+        # to reuse *sequentially* across distinct ``asyncio.run()`` calls on ONE
+        # thread (each run rebinds the semaphore to its live loop). It is NOT
+        # safe for true multi-loop concurrent use from multiple threads at once:
+        # the single ``_offload_semaphore`` / ``_offload_semaphore_loop`` pair is
+        # not atomically swapped, so two loops running on two threads could race
+        # the rebind. The live ADK Runner path uses one loop per dispatcher, so
+        # this is sufficient; do not share one dispatcher across concurrent loops.
+        self._offload_semaphore: asyncio.Semaphore | None = None
+        self._offload_semaphore_loop: asyncio.AbstractEventLoop | None = None
 
     async def dispatch(
         self,
@@ -158,14 +200,67 @@ class ToolDispatcher:
             return ToolResult(status="needs_approval", metadata=decision.metadata)
 
         _t0 = time.monotonic_ns()
-        result = registration.handler(arguments, context)
-        if isawaitable(result):
-            result = await result
+        handler = registration.handler
+        if self._should_offload(manifest, handler):
+            # Readonly / concurrency_safe synchronous handler: run off the event
+            # loop so ADK's same-turn gather actually overlaps the blocking I/O.
+            # Bounded by a shared semaphore so the fan-out stays within
+            # MAGI_MAX_TOOL_CONCURRENCY. The same permission/path checks above
+            # have already run on this call path before we get here.
+            semaphore = self._get_offload_semaphore()
+            async with semaphore:
+                result = await asyncio.to_thread(handler, arguments, context)
+            # Defensive: a sync handler that returns an awaitable (rare) must
+            # still be awaited — but on the event loop, not in the worker thread.
+            if isawaitable(result):
+                result = await result
+        else:
+            result = handler(arguments, context)
+            if isawaitable(result):
+                result = await result
         if trace is not None:
             _dur = (time.monotonic_ns() - _t0) // 1_000_000
             trace.record("tool", "ToolDispatcher", "execute", f"name={name}, status={result.status}", duration_ms=_dur)
         result = self._attach_coding_receipt(name, arguments, result)
         return result
+
+    def _should_offload(self, manifest: ToolManifest, handler: object) -> bool:
+        """Whether *manifest*'s synchronous *handler* should run off the event loop.
+
+        Only ``readonly`` / ``concurrency_safe`` tools are offloaded. The
+        manifest model validates that *both* of these parallel-safety classes
+        cannot be ``dangerous`` or ``mutates_workspace`` (see ``ToolManifest``
+        validation), so offloading here can never push a write/exec to a worker
+        thread — the write-barrier is structural for every offloadable class.
+        Async handlers are excluded because they already yield to the loop
+        (``to_thread`` would not await the returned coroutine).
+
+        *handler* is passed in by ``dispatch`` (which already resolved the
+        registration) so this does not re-query the registry.
+        """
+        if not self._readonly_offload_enabled:
+            return False
+        if manifest.parallel_safety not in ("readonly", "concurrency_safe"):
+            return False
+        if manifest.mutates_workspace or manifest.dangerous:
+            return False
+        if handler is None or asyncio.iscoroutinefunction(handler):
+            return False
+        return True
+
+    def _get_offload_semaphore(self) -> asyncio.Semaphore:
+        """Lazily create the per-dispatcher offload semaphore for the live loop.
+
+        Bound to the running loop so a dispatcher built outside an event loop
+        does not eagerly bind a semaphore to the wrong loop. If the running loop
+        differs from the one a cached semaphore was bound to (e.g. a fresh
+        ``asyncio.run``), a new semaphore is created.
+        """
+        loop = asyncio.get_running_loop()
+        if self._offload_semaphore is None or self._offload_semaphore_loop is not loop:
+            self._offload_semaphore = asyncio.Semaphore(self._max_offload_concurrency)
+            self._offload_semaphore_loop = loop
+        return self._offload_semaphore
 
     def _attach_coding_receipt(
         self,

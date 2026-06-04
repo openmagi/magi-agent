@@ -6,6 +6,7 @@ import json
 import os
 import posixpath
 import re
+import threading
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -121,6 +122,14 @@ class LocalReadOnlyToolHost:
     ) -> None:
         self._call_log: list[str] = []
         self._ledgers: dict[tuple[str, str], LocalResearchSourceLedger] = {}
+        # PR14 — readonly handlers (FileRead/Glob/Grep/GitDiff) are offloaded to
+        # threadpool threads via asyncio.to_thread when
+        # MAGI_TOOL_CONCURRENCY_ENABLED=1, so a single host instance can run
+        # concurrent reads. Guard the shared mutable state (the call log and the
+        # per-(session,turn) ledger map) so concurrent reads cannot lose a call
+        # record or double-create a ledger (get-then-set race). The lock is held
+        # only around the in-memory mutation, never across file I/O.
+        self._state_lock = threading.Lock()
         self._agent_role = _coerce_agent_role(agent_role)
         self._diff_fixtures = dict(diff_fixtures or {})
         if read_quality_enabled is None:
@@ -131,7 +140,8 @@ class LocalReadOnlyToolHost:
 
     @property
     def call_log(self) -> tuple[str, ...]:
-        return tuple(self._call_log)
+        with self._state_lock:
+            return tuple(self._call_log)
 
     def execute_tool(
         self,
@@ -140,7 +150,8 @@ class LocalReadOnlyToolHost:
         arguments: dict[str, object],
         context: ToolContext,
     ) -> ToolResult:
-        self._call_log.append(tool_name)
+        with self._state_lock:
+            self._call_log.append(tool_name)
         if tool_name not in _SOURCE_INSPECTION_TOOL_NAMES:
             return _blocked_result(tool_name, "local_readonly_tool_not_supported")
 
@@ -533,41 +544,50 @@ class LocalReadOnlyToolHost:
         ledger = self._ledger(context)
         source_refs: list[str] = []
         receipts: list[dict[str, object]] = []
-        for resolved, snippet in sources:
-            record = ledger.record_source(
-                {
-                    "turnId": context.turn_id or "unknown-turn",
-                    "toolName": tool_name,
-                    "toolUseId": context.tool_use_id or f"{tool_name}:local",
-                    "evidenceType": "SourceInspection",
-                    "kind": "file",
-                    "uri": f"workspace://{resolved.path_ref}",
-                    "inspected": True,
-                    "contentHash": _digest(resolved.path_ref + snippet),
-                    "contentType": "text/plain",
-                    "snippets": (snippet,) if snippet else (),
-                    "metadata": {
-                        "pathRef": resolved.path_ref,
-                        "relativePathDigest": _digest(resolved.relative),
-                    },
-                }
+        # ``LocalResearchSourceLedger.record_source`` reads len(_records) then
+        # appends (non-atomic), and the projection below iterates _records. When
+        # readonly handlers are offloaded concurrently and share one (session,
+        # turn) ledger, hold the host lock across the record + projection so
+        # appends are not interleaved (no lost/duplicate source IDs) and the
+        # projection reflects a consistent snapshot. This is all in-memory work —
+        # the file I/O for these sources already completed before this point, so
+        # the lock is never held across I/O.
+        with self._state_lock:
+            for resolved, snippet in sources:
+                record = ledger.record_source(
+                    {
+                        "turnId": context.turn_id or "unknown-turn",
+                        "toolName": tool_name,
+                        "toolUseId": context.tool_use_id or f"{tool_name}:local",
+                        "evidenceType": "SourceInspection",
+                        "kind": "file",
+                        "uri": f"workspace://{resolved.path_ref}",
+                        "inspected": True,
+                        "contentHash": _digest(resolved.path_ref + snippet),
+                        "contentType": "text/plain",
+                        "snippets": (snippet,) if snippet else (),
+                        "metadata": {
+                            "pathRef": resolved.path_ref,
+                            "relativePathDigest": _digest(resolved.relative),
+                        },
+                    }
+                )
+                source_refs.append(record.source_id)
+                receipts.append(
+                    SourceEvidenceReceipt(
+                        sourceRef=record.source_id,
+                        openedAt=_timestamp(),
+                        contentDigest=record.content_hash or _digest(resolved.path_ref),
+                        snapshotRef=f"snapshot:{_short_digest(resolved.path_ref)}",
+                        spanRef=f"span:{record.source_id}",
+                        quoteDigest=_digest(snippet or resolved.path_ref),
+                    ).public_projection()
+                )
+            projection = public_source_ledger_report(ledger).model_dump(
+                by_alias=True,
+                mode="json",
+                warnings=False,
             )
-            source_refs.append(record.source_id)
-            receipts.append(
-                SourceEvidenceReceipt(
-                    sourceRef=record.source_id,
-                    openedAt=_timestamp(),
-                    contentDigest=record.content_hash or _digest(resolved.path_ref),
-                    snapshotRef=f"snapshot:{_short_digest(resolved.path_ref)}",
-                    spanRef=f"span:{record.source_id}",
-                    quoteDigest=_digest(snippet or resolved.path_ref),
-                ).public_projection()
-            )
-        projection = public_source_ledger_report(ledger).model_dump(
-            by_alias=True,
-            mode="json",
-            warnings=False,
-        )
         return _SourceBundle(
             source_refs=tuple(source_refs),
             projection=projection,
@@ -579,15 +599,20 @@ class LocalReadOnlyToolHost:
             _public_context_ref(context.session_id, prefix="session"),
             _public_context_ref(context.turn_id, prefix="turn"),
         )
-        ledger = self._ledgers.get(key)
-        if ledger is None:
-            ledger = LocalResearchSourceLedger(
-                ledgerId=f"ledger:{_short_digest(':'.join(key))}",
-                sessionId=key[0],
-                turnId=key[1],
-                agentRole=_agent_role(context, self._agent_role),
-            )
-            self._ledgers[key] = ledger
+        # Atomic check-and-create under the lock: concurrent offloaded reads
+        # sharing the same (session, turn) key must observe a single ledger
+        # instance, otherwise a get-then-set race would create two ledgers and
+        # silently drop one's recorded source records.
+        with self._state_lock:
+            ledger = self._ledgers.get(key)
+            if ledger is None:
+                ledger = LocalResearchSourceLedger(
+                    ledgerId=f"ledger:{_short_digest(':'.join(key))}",
+                    sessionId=key[0],
+                    turnId=key[1],
+                    agentRole=_agent_role(context, self._agent_role),
+                )
+                self._ledgers[key] = ledger
         return ledger
 
     def _ok_result(

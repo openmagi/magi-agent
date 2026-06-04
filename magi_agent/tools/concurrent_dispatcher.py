@@ -268,6 +268,13 @@ class ConcurrentToolDispatcher:
         mode: RuntimeMode,
         exposed_tool_names: tuple[str, ...] | None,
     ) -> tuple[ToolResult, ...]:
+        # TODO(pr14): this semaphore is BATCH-scoped — a fresh
+        # asyncio.Semaphore(max_concurrency) is created per concurrent batch, so
+        # the cap bounds concurrency *within* one batch, not across overlapping
+        # batches. This path is dormant on the live ADK Runner (ADK owns dispatch
+        # and never calls dispatch_batch), so there is no live impact today. If
+        # dispatch_batch ever becomes reachable, decide whether the cap should be
+        # dispatcher-scoped (one shared semaphore on the instance) instead.
         semaphore = asyncio.Semaphore(self._config.max_concurrency)
 
         async def run_one(call: ToolCall) -> ToolResult:

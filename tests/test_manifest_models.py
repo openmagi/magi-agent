@@ -230,6 +230,14 @@ def test_tool_manifest_accepts_local_and_external_workspace_mutation_metadata() 
             "readonly parallel-safety",
         ),
         (
+            {"parallelSafety": "concurrency_safe", "dangerous": True},
+            "concurrency_safe parallel-safety",
+        ),
+        (
+            {"parallelSafety": "concurrency_safe", "mutatesWorkspace": True},
+            "concurrency_safe parallel-safety",
+        ),
+        (
             {"canSatisfyDeterministicRequirement": True, "emitsEvidenceTypes": ("Clock",)},
             "deterministic-capable tools",
         ),

@@ -135,8 +135,13 @@ class ToolManifest(BaseModel):
                 "mutatesWorkspace=True"
             )
 
-        if self.parallel_safety == "readonly" and (self.dangerous or self.mutates_workspace):
-            raise ValueError("readonly parallel-safety cannot be dangerous or mutate workspace")
+        if self.parallel_safety in ("readonly", "concurrency_safe") and (
+            self.dangerous or self.mutates_workspace
+        ):
+            raise ValueError(
+                f"{self.parallel_safety} parallel-safety cannot be dangerous or "
+                "mutate workspace"
+            )
 
         if self.can_satisfy_deterministic_requirement:
             if not self.deterministic_requirement_types or not self.emits_evidence_types:

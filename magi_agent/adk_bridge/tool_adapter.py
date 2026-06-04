@@ -403,10 +403,19 @@ def build_concurrency_config() -> ConcurrencyConfig:
     -------
     ConcurrencyConfig
         Frozen configuration instance derived from the current environment.
+
+    Notes
+    -----
+    The flags are parsed via the single-source helpers in
+    ``magi_agent.config.env`` (``tool_concurrency_enabled`` /
+    ``max_tool_concurrency``) so that the live ``ToolDispatcher`` readonly
+    offload and this config agree on the same truthy convention and default.
     """
+    from magi_agent.config.env import max_tool_concurrency, tool_concurrency_enabled
+
     return ConcurrencyConfig(
-        enabled=os.environ.get("MAGI_TOOL_CONCURRENCY_ENABLED", "0") == "1",
-        max_concurrency=int(os.environ.get("MAGI_MAX_TOOL_CONCURRENCY", "8")),
+        enabled=tool_concurrency_enabled(os.environ),
+        max_concurrency=max_tool_concurrency(os.environ),
     )
 
 
@@ -424,17 +433,27 @@ def build_concurrent_dispatcher(
     ``RunnerSessionBoundary``) that want to fan-out concurrent-safe tool calls
     in parallel.
 
-    ADK native parallel tool execution
-    -----------------------------------
-    Google ADK (as of the version bundled in this project) does **not** expose
-    a parallel tool execution API at the ``FunctionTool`` layer.  The ADK
-    ``Runner`` calls ``FunctionTool.run_async()`` one tool at a time during a
-    single agent turn.  Our adapter-level ``ConcurrentToolDispatcher`` fills
-    this gap: code that sits between the Runner and our tools can accumulate a
-    batch of tool calls (from a single model response that emits multiple
-    ``function_call`` parts) and submit them via ``dispatch_batch()`` to fan
-    them out concurrently, while the individual ADK ``FunctionTool`` wrappers
-    continue to work unchanged for single-call invocations.
+    ADK native parallel tool execution (measured, ADK 1.33.0)
+    ---------------------------------------------------------
+    Google ADK 1.33.0 **already** runs multiple same-turn function calls
+    concurrently: ``flows/llm_flows/functions.handle_function_call_list_async``
+    builds one ``asyncio.create_task`` per ``function_call`` part of a single
+    model response and ``await``s ``asyncio.gather`` over them. ADK owns dispatch
+    — it invokes each tool's ``FunctionTool.run_async()`` as an independent task
+    and never hands magi a *batch*. Consequently ``dispatch_batch()`` is **not
+    reachable on the live ADK ``Runner`` path**; it remains available only for
+    non-ADK callers that explicitly accumulate a batch themselves.
+
+    Because magi's readonly tool handlers are *synchronous* and do blocking I/O,
+    ADK's gather alone yields no real overlap (a blocking sync handler holds the
+    event loop until it returns). The genuinely-live seam is therefore in
+    ``ToolDispatcher`` itself: when ``MAGI_TOOL_CONCURRENCY_ENABLED`` is ON it
+    offloads readonly / concurrency_safe synchronous handlers via
+    ``asyncio.to_thread`` (bounded by ``MAGI_MAX_TOOL_CONCURRENCY``), so ADK's
+    existing gather produces real I/O overlap. Workspace-mutating / unsafe tools
+    are never offloaded (write-barrier), and every concurrent call still passes
+    its own permission / path-policy checks. See
+    ``ToolDispatcher._should_offload``.
 
     Parameters
     ----------
