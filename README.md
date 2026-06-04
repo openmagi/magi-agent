@@ -2,8 +2,7 @@
 
 # Open Magi Agent
 
-**Your personal AI agent: local memory, real tools, evidence gates, simple and
-powerful.**
+**Personal AI agents with memory, tools, and verifiable work.**
 
 [Website](https://openmagi.ai) ·
 [CLI](docs/cli/magi.md) ·
@@ -18,7 +17,7 @@ powerful.**
 
 > **Early beta:** Magi Agent is under active development. Expect rough edges.
 
-> **Local-first, explicit when managed:** Magi keeps memory, workspace state,
+> **Local-first, explicit authority:** Magi keeps memory, workspace state,
 > configuration, and audit evidence close to the agent. Optional services and
 > external integrations stay explicit and default-off.
 
@@ -77,6 +76,7 @@ inspection harness without rewriting the agent core for every workflow.
 Install with Homebrew:
 
 ```bash
+brew update
 brew install openmagi/tap/magi-agent
 ```
 
@@ -102,6 +102,14 @@ magi-agent --help
 
 The dashboard is served by the same local agent. It does not need a separate
 Node or Next.js process.
+
+If Homebrew tries to build the formula from source on macOS instead of using the
+bottle, update the tap metadata and force the bottled install:
+
+```bash
+brew update
+brew reinstall openmagi/tap/magi-agent --force-bottle
+```
 
 ## Architecture
 
@@ -303,11 +311,8 @@ API key must not grant live tool authority by itself. Enabling integrations
 should require explicit toolkit scope, credential scope, user approval, and
 leak-safe evidence before an external action is enabled.
 
-Install optional Composio dependencies only when you are working on that surface:
-
-```bash
-uv sync --extra composio
-```
+Install optional Composio dependencies only when you are developing that surface
+from a source checkout.
 
 ## Safety Model
 
@@ -321,10 +326,10 @@ only. Acceptance for governed workflows comes from durable records: delivery
 receipts, source ledgers, mutation receipts, rollback receipts, verifier events,
 and audit checkpoints.
 
-## Source Development
+## Develop From Source
 
-Homebrew is the normal install path. Use `uv` only when developing Magi Agent
-from a source checkout:
+Homebrew is the normal install path. This section is for maintainers and
+contributors working from a source checkout:
 
 ```bash
 git clone https://github.com/openmagi/magi-agent.git

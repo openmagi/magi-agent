@@ -48,5 +48,5 @@ magi_agent = [
 ]
 
 [tool.pytest.ini_options]
-testpaths = ["tests"]
+testpaths = ["tests", "magi_agent/cli/tests"]
 addopts = "-q"
