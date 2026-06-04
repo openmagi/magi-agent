@@ -26,7 +26,9 @@ import json
 import os
 import shutil
 import subprocess
+from collections.abc import Callable
 from dataclasses import dataclass
+from typing import TypeVar
 
 _DEFAULT_RG_BIN = "rg"
 _RIPGREP_BIN_ENV = "MAGI_RIPGREP_BIN"
@@ -47,11 +49,17 @@ class RgMatch:
 
 
 def _resolve_bin(bin_path: str | None) -> str | None:
-    """Resolve the ripgrep binary, honoring MAGI_RIPGREP_BIN then PATH."""
+    """Resolve the ripgrep binary, honoring MAGI_RIPGREP_BIN then PATH.
+
+    Resolution order: ``bin_path`` argument → ``MAGI_RIPGREP_BIN`` env var →
+    plain ``rg`` name looked up via PATH.  An explicit path (from the argument
+    or the env var) that ``shutil.which`` cannot locate is treated as
+    unavailable — there is NO fallback to a plain ``rg`` PATH search in that
+    case.  Only when *neither* source provides an explicit path is the default
+    ``rg`` name resolved through PATH.
+    """
 
     candidate = bin_path or os.environ.get(_RIPGREP_BIN_ENV) or _DEFAULT_RG_BIN
-    # If an explicit absolute/relative path was given, accept it only when it is
-    # an executable file; otherwise fall through to PATH lookup by name.
     resolved = shutil.which(candidate)
     return resolved
 
@@ -92,6 +100,35 @@ def _run(
     if completed.returncode not in (0, 1):
         return None
     return completed.stdout
+
+
+_T = TypeVar("_T")
+
+
+def mtime_sort(
+    items: list[_T],
+    *,
+    stat_path: Callable[[_T], str],
+    limit: int,
+) -> list[_T]:
+    """Sort *items* by mtime descending and return up to *limit* entries.
+
+    ``stat_path`` maps each item to the filesystem path that should be
+    ``os.stat``-ed.  Items whose path raises ``OSError`` are silently skipped
+    (treated as oldest / not present), matching the behavior of both callers
+    that previously implemented this logic independently.  Ties are broken by
+    the string representation returned by ``stat_path`` for determinism.
+    """
+    stamped: list[tuple[float, str, _T]] = []
+    for item in items:
+        path_str = stat_path(item)
+        try:
+            mtime = os.stat(path_str).st_mtime
+        except OSError:
+            continue
+        stamped.append((mtime, path_str, item))
+    stamped.sort(key=lambda entry: (-entry[0], entry[1]))
+    return [item for _, _, item in stamped[:limit]]
 
 
 def _normalize_path(raw: str) -> str:
@@ -166,8 +203,8 @@ def rg_search(
         return []
     ceiling = max(limit * _OVERFETCH_MULTIPLIER, _OVERFETCH_FLOOR)
     matches: list[RgMatch] = []
-    for line in stdout.splitlines():
-        line = line.strip()
+    for raw_line in stdout.splitlines():
+        line = raw_line.strip()
         if not line:
             continue
         try:

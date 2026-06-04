@@ -675,6 +675,11 @@ class Gate5BFullToolHost:
             )
 
     def _ripgrep_active(self) -> bool:
+        # NOTE: reads self.config.ripgrep_enabled — frozen at construction time.
+        # Contrast with local_readonly._ripgrep_active() which reads live
+        # os.environ via ripgrep_enabled() on every call.  The two are
+        # intentionally different: gate5b is config-driven; local_readonly is
+        # env-driven.
         if not self.config.ripgrep_enabled:
             return False
         from magi_agent.coding.ripgrep import rg_available
@@ -707,6 +712,11 @@ class Gate5BFullToolHost:
                     return {"matches": rg_matches}
             return {"matches": _safe_glob_files(self.workspace_root, pattern, limit=100)}
         if tool_name == "Grep":
+            # SEMANTICS NOTE: when ripgrep is active (flag on + rg binary found)
+            # the pattern is interpreted as a REGEX by rg.  When the flag is off
+            # or rg is absent, the Python fallback treats the pattern as a plain
+            # SUBSTRING search (``pattern in text``).  Callers should be aware
+            # that regex metacharacters behave differently across the two paths.
             pattern = str(args.get("pattern", ""))
             matches: list[dict[str, object]] = []
             if not pattern:
@@ -722,6 +732,8 @@ class Gate5BFullToolHost:
                 )
                 if rg_matches is not None:
                     return {"matches": rg_matches}
+            # Python fallback: over-fetch up to 200 files, stat+sort, trim to 50.
+            # Stattable paths are bounded by the 200-file ceiling — acceptable overhead.
             for relative in _safe_glob_files(self.workspace_root, glob, limit=200):
                 path = self.workspace_root / relative
                 try:
@@ -1721,17 +1733,20 @@ def _ripgrep_safe_relative(root: Path, raw: str) -> Path | None:
 
 
 def _mtime_sort_desc(root: Path, relatives: list[str], *, limit: int) -> list[str]:
-    """Stat each path and return up to ``limit`` sorted by mtime descending."""
+    """Stat each path and return up to ``limit`` sorted by mtime descending.
 
-    stamped: list[tuple[float, str]] = []
-    for relative in relatives:
-        try:
-            mtime = (root / relative).stat().st_mtime
-        except OSError:
-            continue
-        stamped.append((mtime, relative))
-    stamped.sort(key=lambda item: (-item[0], item[1]))
-    return [relative for _, relative in stamped[:limit]]
+    Delegates to :func:`magi_agent.coding.ripgrep.mtime_sort` so the
+    stat/OSError-swallow/tiebreak logic is not duplicated across callers.
+    """
+    from magi_agent.coding.ripgrep import mtime_sort
+
+    # Over-fetch ceiling (up to ~200 paths) is already applied by the rg layer;
+    # we stat at most that many entries before trimming to the final cap.
+    return mtime_sort(
+        relatives,
+        stat_path=lambda rel: str(root / rel),
+        limit=limit,
+    )
 
 
 def _ripgrep_glob(
@@ -1740,6 +1755,9 @@ def _ripgrep_glob(
     from magi_agent.coding.ripgrep import rg_files
 
     glob = _ripgrep_glob_arg(pattern)
+    # rg_files over-fetches up to max(limit*4, 200) paths so we can stat-sort
+    # and still return a full window of the most-recently-modified results.
+    # We stat at most ~200 entries before trimming to limit — acceptable overhead.
     raw = rg_files(str(root), glob, limit=limit, timeout_s=timeout_s)
     safe: list[str] = []
     for item in raw:

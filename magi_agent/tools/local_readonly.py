@@ -730,6 +730,11 @@ def _safe_glob_files(root: Path, pattern: str, *, max_files: int) -> tuple[_Reso
 
 
 def _ripgrep_active() -> bool:
+    # NOTE: reads live os.environ via ripgrep_enabled() on every call — no
+    # frozen config.  Contrast with Gate5BFullToolHost._ripgrep_active() which
+    # reads self.config.ripgrep_enabled baked at construction time.  The two
+    # are intentionally different: local_readonly is env-driven; gate5b is
+    # config-driven.
     from magi_agent.config.env import ripgrep_enabled
     from magi_agent.coding.ripgrep import rg_available
 
@@ -762,15 +767,22 @@ def _ripgrep_resolve(root: Path, raw: str) -> _ResolvedPath | None:
 def _ripgrep_mtime_order(
     resolved: list[_ResolvedPath], *, max_files: int
 ) -> tuple[_ResolvedPath, ...]:
-    stamped: list[tuple[float, str, _ResolvedPath]] = []
-    for item in resolved:
-        try:
-            mtime = item.path.stat().st_mtime
-        except OSError:
-            continue
-        stamped.append((mtime, item.relative, item))
-    stamped.sort(key=lambda entry: (-entry[0], entry[1]))
-    return tuple(entry[2] for entry in stamped[:max_files])
+    """Stat each resolved path and return up to *max_files* sorted by mtime desc.
+
+    Delegates to :func:`magi_agent.coding.ripgrep.mtime_sort` so the
+    stat/OSError-swallow/tiebreak logic is shared with gate5b.
+    rg over-fetches up to ~200 paths before this trims to max_files —
+    acceptable overhead at current caps.
+    """
+    from magi_agent.coding.ripgrep import mtime_sort
+
+    return tuple(
+        mtime_sort(
+            resolved,
+            stat_path=lambda item: str(item.path),
+            limit=max_files,
+        )
+    )
 
 
 def _ripgrep_glob(

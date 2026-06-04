@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+import time
 from pathlib import Path
 
 import pytest
@@ -209,6 +210,98 @@ def test_rg_search_returncode_1_no_matches_is_ok(monkeypatch):
     monkeypatch.setattr(ripgrep, "_resolve_bin", lambda b=None: "/usr/bin/rg")
     _capture_run(monkeypatch, stdout="", returncode=1)
     assert ripgrep.rg_search("/work", "foo") == []
+
+
+# --- real-rg smoke (skipped when rg absent) -----------------------------------
+
+
+# --- _ripgrep_glob_arg sentinel cases (None = no --glob filter) ---------------
+
+
+def test_ripgrep_glob_arg_double_star_returns_none():
+    """'**/*' means all files — rg should be called without a --glob filter."""
+    from magi_agent.gates.gate5b_full_toolhost import _ripgrep_glob_arg
+
+    assert _ripgrep_glob_arg("**/*") is None
+
+
+def test_ripgrep_glob_arg_single_star_returns_none():
+    """'*' means all files — rg should be called without a --glob filter."""
+    from magi_agent.gates.gate5b_full_toolhost import _ripgrep_glob_arg
+
+    assert _ripgrep_glob_arg("*") is None
+
+
+# --- mtime_sort shared helper -------------------------------------------------
+
+
+def test_mtime_sort_basic_descending(tmp_path: Path):
+    """Items are returned sorted newest-first."""
+    now = time.time()
+    a = tmp_path / "a.txt"
+    b = tmp_path / "b.txt"
+    c = tmp_path / "c.txt"
+    a.write_text("a")
+    b.write_text("b")
+    c.write_text("c")
+    os.utime(a, (now - 100, now - 100))
+    os.utime(b, (now, now))
+    os.utime(c, (now - 50, now - 50))
+    result = ripgrep.mtime_sort(
+        [str(a), str(b), str(c)],
+        stat_path=lambda p: p,
+        limit=10,
+    )
+    assert result == [str(b), str(c), str(a)]
+
+
+def test_mtime_sort_limit(tmp_path: Path):
+    """limit trims the result list."""
+    now = time.time()
+    files = []
+    for i in range(5):
+        f = tmp_path / f"{i}.txt"
+        f.write_text(str(i))
+        os.utime(f, (now - i, now - i))
+        files.append(str(f))
+    result = ripgrep.mtime_sort(files, stat_path=lambda p: p, limit=3)
+    assert len(result) == 3
+    # newest-first order — file 0 was touched last (now-0)
+    assert result[0] == str(tmp_path / "0.txt")
+
+
+def test_mtime_sort_stat_failure_skips_item(tmp_path: Path):
+    """Items whose path raises OSError are silently dropped."""
+    now = time.time()
+    real = tmp_path / "real.txt"
+    real.write_text("x")
+    os.utime(real, (now, now))
+    missing = str(tmp_path / "nonexistent.txt")
+    result = ripgrep.mtime_sort(
+        [missing, str(real)],
+        stat_path=lambda p: p,
+        limit=10,
+    )
+    assert result == [str(real)]
+
+
+def test_mtime_sort_tiebreak_by_path(tmp_path: Path):
+    """Equal-mtime items are broken deterministically by path string."""
+    fixed_time = 1_700_000_000.0
+    a = tmp_path / "aaa.txt"
+    b = tmp_path / "bbb.txt"
+    a.write_text("a")
+    b.write_text("b")
+    os.utime(a, (fixed_time, fixed_time))
+    os.utime(b, (fixed_time, fixed_time))
+    result = ripgrep.mtime_sort(
+        [str(b), str(a)],
+        stat_path=lambda p: p,
+        limit=10,
+    )
+    # lexicographically smaller path wins (sorted ascending as tiebreak)
+    assert result[0] == str(a)
+    assert result[1] == str(b)
 
 
 # --- real-rg smoke (skipped when rg absent) -----------------------------------
