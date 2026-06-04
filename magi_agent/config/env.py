@@ -1168,6 +1168,17 @@ def is_read_ledger_enabled(env: Mapping[str, str]) -> bool:
     return _is_true(env.get("MAGI_READ_LEDGER_ENABLED"))
 
 
+def is_format_on_write_enabled(env: Mapping[str, str]) -> bool:
+    """Single source for the format-after-edit flag (default OFF).
+
+    When ON, Gate 5B FileWrite/FileEdit/PatchApply run the matching formatter
+    on the written file and re-read it so the returned digest reflects the
+    formatted content (keeps the model's next edit aligned). Fail-open: a
+    missing/failing/timed-out formatter never fails the write.
+    """
+    return _is_true(env.get("MAGI_EDIT_FORMAT_ON_WRITE_ENABLED"))
+
+
 def parse_gate3a_recorded_replay_env(env: Mapping[str, str]) -> Gate3ARecordedReplayEnv:
     enabled = _is_true(env.get("CORE_AGENT_PYTHON_GATE3A_RECORDED_REPLAY"))
     if not enabled:

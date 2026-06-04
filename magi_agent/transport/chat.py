@@ -650,6 +650,8 @@ def build_gate5b_full_toolhost_config_from_env(
     runtime_config: object,
 ) -> Gate5BFullToolHostConfig:
     del runtime_config
+    from magi_agent.config.env import is_format_on_write_enabled
+
     return Gate5BFullToolHostConfig.model_validate(
         {
             "enabled": _is_true(
@@ -710,6 +712,7 @@ def build_gate5b_full_toolhost_config_from_env(
                 env.get("CORE_AGENT_PYTHON_GATE5B_FULL_TOOLHOST_COMMAND_TIMEOUT_MS"),
                 fallback=5000,
             ),
+            "formatOnWriteEnabled": is_format_on_write_enabled(env),
         }
     )
 

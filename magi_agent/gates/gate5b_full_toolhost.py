@@ -255,6 +255,7 @@ class Gate5BFullToolHostConfig(_Gate5BFullModel):
         alias="maxPerToolOutputBytes",
     )
     command_timeout_ms: int = Field(default=5000, ge=250, le=30000, alias="commandTimeoutMs")
+    format_on_write_enabled: bool = Field(default=False, alias="formatOnWriteEnabled")
 
     @field_validator("environment_allowlist", "allowed_tool_names", mode="before")
     @classmethod
@@ -656,7 +657,16 @@ class Gate5BFullToolHost:
             target.parent.mkdir(parents=True, exist_ok=True)
             content = str(args.get("content", ""))
             target.write_text(content, encoding="utf-8")
-            return {"pathDigest": _digest(target.relative_to(self.workspace_root).as_posix()), "bytesWritten": len(content.encode("utf-8"))}
+            self._format_after_write(target)
+            result: dict[str, object] = {
+                "pathDigest": _digest(target.relative_to(self.workspace_root).as_posix()),
+                "bytesWritten": len(content.encode("utf-8")),
+            }
+            if self.config.format_on_write_enabled:
+                content_digest = self._content_digest(target)
+                if content_digest is not None:
+                    result["contentDigest"] = content_digest
+            return result
         if tool_name == "FileEdit":
             target = _safe_child_path(self.workspace_root, str(args.get("path", "")))
             self._enforce_read_before_mutation(target)
@@ -682,7 +692,16 @@ class Gate5BFullToolHost:
                 if old_text not in current:
                     raise ValueError("old_text_not_found")
                 target.write_text(current.replace(old_text, new_text, 1), encoding="utf-8")
-            return {"pathDigest": _digest(target.relative_to(self.workspace_root).as_posix()), "replacements": 1}
+            self._format_after_write(target)
+            edit_result: dict[str, object] = {
+                "pathDigest": _digest(target.relative_to(self.workspace_root).as_posix()),
+                "replacements": 1,
+            }
+            if self.config.format_on_write_enabled:
+                content_digest = self._content_digest(target)
+                if content_digest is not None:
+                    edit_result["contentDigest"] = content_digest
+            return edit_result
         if tool_name == "PatchApply":
             target = _safe_child_path(
                 self.workspace_root,
@@ -694,7 +713,17 @@ class Gate5BFullToolHost:
                 content = str(args.get("content", ""))
                 target.parent.mkdir(parents=True, exist_ok=True)
                 target.write_text(content, encoding="utf-8")
-                return {"pathDigest": _digest(target.relative_to(self.workspace_root).as_posix()), "patchMode": "content_replace", "bytesWritten": len(content.encode("utf-8"))}
+                self._format_after_write(target)
+                patch_result: dict[str, object] = {
+                    "pathDigest": _digest(target.relative_to(self.workspace_root).as_posix()),
+                    "patchMode": "content_replace",
+                    "bytesWritten": len(content.encode("utf-8")),
+                }
+                if self.config.format_on_write_enabled:
+                    content_digest = self._content_digest(target)
+                    if content_digest is not None:
+                        patch_result["contentDigest"] = content_digest
+                return patch_result
             raise ValueError("unsupported_patch_shape")
         if tool_name == "Bash":
             command = str(args.get("command", "")).strip()
@@ -898,6 +927,48 @@ class Gate5BFullToolHost:
             return
         primary = decision.reason_codes[0] if decision.reason_codes else "blocked"
         raise Gate5BFullToolReadLedgerError(f"read_ledger_{primary}")
+
+    def _format_after_write(self, target: Path) -> None:
+        """Run the matching formatter on a just-written file (flag-gated, fail-open).
+
+        Mirrors OpenCode's format-after-edit: only files under the workspace
+        root are formatted (already guaranteed by ``_safe_child_path``). A
+        missing/failing/timed-out formatter never fails the write. Imported
+        lazily so this new module is never pulled into import-boundary tests.
+        """
+        if not self.config.format_on_write_enabled:
+            return
+        from magi_agent.coding.formatter_runner import run_formatter
+
+        try:
+            run_formatter(
+                target,
+                timeout_seconds=self.config.command_timeout_ms / 1000,
+                cwd=self.workspace_root,
+            )
+        except Exception:  # noqa: BLE001 - format step must never fail the write
+            return
+
+    def _content_digest(self, target: Path) -> str | None:
+        """Return a content hash of the (possibly formatted) on-disk file.
+
+        Only called from call sites that are already gated on
+        ``self.config.format_on_write_enabled``.  Callers expose the result as
+        ``contentDigest`` in the tool response (a field separate from
+        ``pathDigest``), which is only present when the flag is ON.
+
+        Returns ``None`` on an ``OSError`` reading the file (e.g. the formatter
+        deleted it — extremely unlikely but fail-open).
+
+        ``pathDigest`` is ALWAYS ``_digest(relpath)`` regardless of this flag —
+        it identifies the path, not the content.  This ``contentDigest`` field
+        is the formatted-content hash and is only present when the flag is ON.
+        """
+        try:
+            content = target.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            return None
+        return _digest(content)
 
 
 def build_gate5b_full_toolhost_bundle(
