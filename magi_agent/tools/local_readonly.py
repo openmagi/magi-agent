@@ -357,7 +357,11 @@ class LocalReadOnlyToolHost:
             minimum=1,
             maximum=_MAX_MATCH_LIMIT,
         )
-        files = _safe_glob_files(root, pattern, max_files=max_matches + 1)
+        rg_files = _ripgrep_glob(root, pattern, max_files=max_matches + 1)
+        if rg_files is not None:
+            files = rg_files
+        else:
+            files = list(_safe_glob_files(root, pattern, max_files=max_matches + 1))
         selected = files[:max_matches]
         source_bundle = self._source_bundle(
             context,
@@ -408,7 +412,13 @@ class LocalReadOnlyToolHost:
             minimum=1,
             maximum=_MAX_READ_BYTES_LIMIT,
         )
-        files = _safe_glob_files(root, glob_pattern, max_files=max_files + 1)
+        rg_resolved = _ripgrep_grep_files(
+            root, pattern_text, glob_pattern, max_files=max_files + 1
+        )
+        if rg_resolved is not None:
+            files: tuple[_ResolvedPath, ...] = rg_resolved
+        else:
+            files = _safe_glob_files(root, glob_pattern, max_files=max_files + 1)
         selected_files = files[:max_files]
         matches: list[dict[str, object]] = []
         source_inputs: list[tuple[_ResolvedPath, str]] = []
@@ -717,6 +727,86 @@ def _safe_glob_files(root: Path, pattern: str, *, max_files: int) -> tuple[_Reso
             if len(matches) >= max_files:
                 return tuple(matches)
     return tuple(matches)
+
+
+def _ripgrep_active() -> bool:
+    from magi_agent.config.env import ripgrep_enabled
+    from magi_agent.coding.ripgrep import rg_available
+
+    return ripgrep_enabled() and rg_available()
+
+
+def _ripgrep_glob_arg(pattern: str) -> str | None:
+    normalized = _normalize_glob_pattern(pattern)
+    if normalized is None or normalized in {"*", "**", "**/*"}:
+        return None
+    return normalized
+
+
+def _ripgrep_resolve(root: Path, raw: str) -> _ResolvedPath | None:
+    """Validate an rg-reported path through the existing workspace policy."""
+
+    normalized = _normalize_relative(raw)
+    if not normalized or _is_workspace_escape(normalized):
+        return None
+    if _is_sensitive_relative_path(normalized):
+        return None
+    try:
+        return _resolve_workspace_path(
+            root, normalized, must_exist=True, require_file=True
+        )
+    except _PathPolicyError:
+        return None
+
+
+def _ripgrep_mtime_order(
+    resolved: list[_ResolvedPath], *, max_files: int
+) -> tuple[_ResolvedPath, ...]:
+    stamped: list[tuple[float, str, _ResolvedPath]] = []
+    for item in resolved:
+        try:
+            mtime = item.path.stat().st_mtime
+        except OSError:
+            continue
+        stamped.append((mtime, item.relative, item))
+    stamped.sort(key=lambda entry: (-entry[0], entry[1]))
+    return tuple(entry[2] for entry in stamped[:max_files])
+
+
+def _ripgrep_glob(
+    root: Path, pattern: str, *, max_files: int
+) -> tuple[_ResolvedPath, ...] | None:
+    if not _ripgrep_active():
+        return None
+    from magi_agent.coding.ripgrep import rg_files
+
+    glob = _ripgrep_glob_arg(pattern)
+    raw = rg_files(str(root), glob, limit=max_files)
+    seen: dict[str, _ResolvedPath] = {}
+    for item in raw:
+        resolved = _ripgrep_resolve(root, item)
+        if resolved is not None and resolved.relative not in seen:
+            seen[resolved.relative] = resolved
+    return _ripgrep_mtime_order(list(seen.values()), max_files=max_files)
+
+
+def _ripgrep_grep_files(
+    root: Path, pattern: str, glob: str, *, max_files: int
+) -> tuple[_ResolvedPath, ...] | None:
+    if not _ripgrep_active():
+        return None
+    from magi_agent.coding.ripgrep import rg_search
+
+    glob_arg = _ripgrep_glob_arg(glob)
+    raw = rg_search(str(root), pattern, glob_arg, limit=max_files)
+    seen: dict[str, _ResolvedPath] = {}
+    for match in raw:
+        if match.path in seen:
+            continue
+        resolved = _ripgrep_resolve(root, match.path)
+        if resolved is not None:
+            seen[match.path] = resolved
+    return _ripgrep_mtime_order(list(seen.values()), max_files=max_files)
 
 
 def _reject_symlink_components(root: Path, normalized: str) -> None:

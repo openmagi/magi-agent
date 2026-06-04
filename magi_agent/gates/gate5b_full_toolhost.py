@@ -279,6 +279,7 @@ class Gate5BFullToolHostConfig(_Gate5BFullModel):
     )
     read_quality_enabled: bool = Field(default=False, alias="readQualityEnabled")
     read_max_lines: int = Field(default=2000, ge=1, le=100000, alias="readMaxLines")
+    ripgrep_enabled: bool = Field(default=False, alias="ripgrepEnabled")
 
     @field_validator("environment_allowlist", "allowed_tool_names", mode="before")
     @classmethod
@@ -673,6 +674,13 @@ class Gate5BFullToolHost:
                 coding_mutation_receipt=coding_receipt,
             )
 
+    def _ripgrep_active(self) -> bool:
+        if not self.config.ripgrep_enabled:
+            return False
+        from magi_agent.coding.ripgrep import rg_available
+
+        return rg_available()
+
     async def _handle(
         self,
         tool_name: str,
@@ -687,13 +695,34 @@ class Gate5BFullToolHost:
         if tool_name == "FileRead":
             return self._handle_file_read(args)
         if tool_name == "Glob":
-            return {"matches": _safe_glob_files(self.workspace_root, str(args.get("pattern", "*")), limit=100)}
+            pattern = str(args.get("pattern", "*"))
+            if self._ripgrep_active():
+                rg_matches = _ripgrep_glob(
+                    self.workspace_root,
+                    pattern,
+                    limit=100,
+                    timeout_s=self.config.command_timeout_ms / 1000,
+                )
+                if rg_matches is not None:
+                    return {"matches": rg_matches}
+            return {"matches": _safe_glob_files(self.workspace_root, pattern, limit=100)}
         if tool_name == "Grep":
             pattern = str(args.get("pattern", ""))
             matches: list[dict[str, object]] = []
             if not pattern:
                 return {"matches": matches}
-            for relative in _safe_glob_files(self.workspace_root, str(args.get("glob", "**/*")), limit=200):
+            glob = str(args.get("glob", "**/*"))
+            if self._ripgrep_active():
+                rg_matches = _ripgrep_grep(
+                    self.workspace_root,
+                    pattern,
+                    glob,
+                    limit=100,
+                    timeout_s=self.config.command_timeout_ms / 1000,
+                )
+                if rg_matches is not None:
+                    return {"matches": rg_matches}
+            for relative in _safe_glob_files(self.workspace_root, glob, limit=200):
                 path = self.workspace_root / relative
                 try:
                     text = path.read_text(encoding="utf-8", errors="replace")
@@ -1663,6 +1692,98 @@ def _safe_glob_files(root: Path, pattern: str, *, limit: int) -> list[str]:
                 if len(matches) >= limit:
                     return matches
     return matches
+
+
+def _ripgrep_safe_relative(root: Path, raw: str) -> Path | None:
+    """Validate an rg-reported relative path against workspace policy.
+
+    Mirrors the guards in ``_safe_glob_files`` / ``_safe_child_path``: rejects
+    escapes, symlinked components, and sealed/secret paths. ``rg`` can surface
+    hidden files this policy still blocks, so every rg result passes through
+    here before it is returned.
+    """
+
+    normalized = str(raw or "").replace("\\", "/").strip()
+    if not normalized or normalized.startswith(("/", "~")):
+        return None
+    parts = [part for part in normalized.split("/") if part not in {"", "."}]
+    if any(part == ".." for part in parts):
+        return None
+    relative_path = Path(*parts)
+    if _is_sensitive_workspace_path(relative_path):
+        return None
+    candidate = (root / relative_path).resolve(strict=False)
+    if root not in (candidate, *candidate.parents):
+        return None
+    if not candidate.is_file() or candidate.is_symlink():
+        return None
+    return candidate
+
+
+def _mtime_sort_desc(root: Path, relatives: list[str], *, limit: int) -> list[str]:
+    """Stat each path and return up to ``limit`` sorted by mtime descending."""
+
+    stamped: list[tuple[float, str]] = []
+    for relative in relatives:
+        try:
+            mtime = (root / relative).stat().st_mtime
+        except OSError:
+            continue
+        stamped.append((mtime, relative))
+    stamped.sort(key=lambda item: (-item[0], item[1]))
+    return [relative for _, relative in stamped[:limit]]
+
+
+def _ripgrep_glob(
+    root: Path, pattern: str, *, limit: int, timeout_s: float
+) -> list[str] | None:
+    from magi_agent.coding.ripgrep import rg_files
+
+    glob = _ripgrep_glob_arg(pattern)
+    raw = rg_files(str(root), glob, limit=limit, timeout_s=timeout_s)
+    safe: list[str] = []
+    for item in raw:
+        candidate = _ripgrep_safe_relative(root, item)
+        if candidate is None:
+            continue
+        safe.append(candidate.relative_to(root).as_posix())
+    return _mtime_sort_desc(root, safe, limit=limit)
+
+
+def _ripgrep_grep(
+    root: Path, pattern: str, glob: str, *, limit: int, timeout_s: float
+) -> list[dict[str, object]] | None:
+    from magi_agent.coding.ripgrep import rg_search
+
+    glob_arg = _ripgrep_glob_arg(glob)
+    raw = rg_search(str(root), pattern, glob_arg, limit=limit, timeout_s=timeout_s)
+    seen: dict[str, Path] = {}
+    for match in raw:
+        if match.path in seen:
+            continue
+        candidate = _ripgrep_safe_relative(root, match.path)
+        if candidate is None:
+            continue
+        seen[match.path] = candidate
+    ordered = _mtime_sort_desc(root, list(seen.keys()), limit=limit)
+    results: list[dict[str, object]] = []
+    for relative in ordered:
+        candidate = seen[relative]
+        try:
+            text = candidate.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        results.append({"path": relative, "digest": _digest(text)})
+    return results
+
+
+def _ripgrep_glob_arg(pattern: str) -> str | None:
+    """Map the toolhost glob arg to an rg ``--glob`` value (None == all files)."""
+
+    normalized = str(pattern or "").replace("\\", "/").strip()
+    if not normalized or normalized in {"*", "**", "**/*"}:
+        return None
+    return normalized
 
 
 def _evaluate_expression(expression: str) -> int | float:

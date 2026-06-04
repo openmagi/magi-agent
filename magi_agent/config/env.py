@@ -1251,6 +1251,23 @@ def is_read_quality_enabled(env: Mapping[str, str] | None = None) -> bool:
     return _is_true(source.get(READ_QUALITY_FLAG))
 
 
+_RIPGREP_ENABLED_ENV = "MAGI_RIPGREP_ENABLED"
+
+
+def ripgrep_enabled(env: Mapping[str, str] | None = None) -> bool:
+    """Single source of truth for the ``MAGI_RIPGREP_ENABLED`` flag.
+
+    Default OFF. When ON, coding-mode Glob/Grep (gate5b full toolhost and the
+    local read-only toolhost) prefer the ripgrep backend, falling back to the
+    existing Python implementation whenever ``rg`` is unavailable.
+    """
+
+    import os as _os
+
+    source = env if env is not None else _os.environ
+    return _is_true(source.get(_RIPGREP_ENABLED_ENV))
+
+
 def _is_true(value: str | None) -> bool:
     return (value or "").strip().lower() in _TRUE_VALUES
 
