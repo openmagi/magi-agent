@@ -1,5 +1,13 @@
 # Magi CLI — Claude Code / OpenCode Parity Implementation Plan
 
+> **Status update, 2026-06-05:** this plan was written while the real CLI runner
+> stack was still in flight. The foundational pieces have since landed on
+> `main`: PR #140 added the real multi-provider runner, PR #143 attached the real
+> first-party tools and system prompt, and PR #146 added headless approval
+> regression coverage. Treat PR A and PR B below as completed historical plan
+> entries; the remaining work is TUI rendering, identity/plan-mode steering, and
+> safety/result-budget parity.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development to implement each PR task-by-task. Each PR below is executed in its own worktree as an independent unit; within a PR, steps use checkbox (`- [ ]`) syntax for tracking. Before executing a PR, write that PR's detailed bite-sized task plan (just-in-time) by re-reading the current code at the cited seams.
 
 **Goal:** Make the local `magi` CLI behave like Claude Code / OpenCode — a real agentic loop where the model uses real tools (read/write/edit/bash/grep/glob) under interactive permission gating, with tool calls/results streamed to the terminal.
@@ -22,19 +30,21 @@ The CLI engine (`cli/engine.py:243-250`) is handed a `runner` and only drives it
 
 ## Base dependency
 
-**PR #140** (`feat/cli-real-multiprovider-runner`, open) adds `cli/providers.py` (provider/key resolution for openai/anthropic/gemini/fireworks) and `cli/real_runner.py::build_cli_model_runner` building `Agent(model=LiteLlm(...), instruction=DEFAULT_INSTRUCTION, tools=[])`. **All parity PRs assume #140 is merged** (PR A extends `build_cli_model_runner`; it is the foundation). Land #140 first.
+**PR #140** (`feat(cli): run a real model provider instead of the stub runner`) added `cli/providers.py` (provider/key resolution for openai/anthropic/gemini/fireworks) and `cli/real_runner.py::build_cli_model_runner`. It is already merged on `main`.
 
 ## PR dependency graph (designed to minimize stacked-merge hazard)
 
 ```
-#140 (model runner)  ──►  PR A (real tools + real prompt)  ──►  ┌─ PR B (headless approval)
-                                                                 ├─ PR C (TUI tool rendering)
-                                                                 ├─ PR D (identity + plan-mode steering)
-                                                                 └─ PR E (safety + budget parity)
+#140 (model runner, merged)
+  └─ #143 / PR A (real tools + real prompt, merged)
+       ├─ #146 / PR B (headless approval regression, merged)
+       ├─ PR C (TUI tool rendering)
+       ├─ PR D (identity + plan-mode steering)
+       └─ PR E (safety + budget parity)
 ```
 
-- **PR A depends on #140.** It is the core parity jump; everything else builds on it.
-- **PR B, C, D, E each branch off PR A and are mutually independent siblings** — they can merge in any order after A. File-overlap notes are called out per PR so a reviewer can confirm no collision.
+- **PR A depended on #140 and is merged as PR #143.** It is the core parity jump.
+- **PR B is merged as PR #146.** PR C, D, and E remain independent siblings off current `main`.
 - This avoids a deep linear stack. Per project rule (stacked-PR merge-order hazard): before merging any sibling, confirm its base is A (or main once A merged) and `git grep` the landed content in `origin/main` after each merge — never trust GitHub "merged" status.
 
 ---

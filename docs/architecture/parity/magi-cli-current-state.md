@@ -1,5 +1,12 @@
 # Magi CLI — Current-State + Reuse Inventory (CLI Parity Audit)
 
+> **Historical snapshot, 2026-06-05:** this audit was captured before the real
+> CLI runner work landed. Current `main` now includes the real multi-provider
+> runner (PR #140), first-party tool/system-prompt wiring (PR #143), and
+> headless approval regression coverage (PR #146). Keep the reuse inventory and
+> architecture notes below, but do not treat the old "missing runner" findings as
+> current blockers.
+
 Audit target: `/Users/kevin/Desktop/claude_code/magi-agent-oss-worktrees/cli-parity-plan`
 (package root `magi_agent/`, branch `feat/cli-parity-plan`, HEAD `e49a695`).
 
