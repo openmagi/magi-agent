@@ -485,6 +485,8 @@ def build_tui_app(
         renderers=renderers,
         runtime=runtime,
         session_id=session_id,
+        model=model,
+        cwd=str(cwd) if cwd is not None else None,
     )
 
     # FIX 2 (global review): attach the app's TextualSink to the gate so the
