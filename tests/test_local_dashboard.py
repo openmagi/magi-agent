@@ -53,10 +53,11 @@ def test_local_dashboard_route_serves_adk_local_app_shell() -> None:
     assert 'class="sidebar"' in html
     assert 'class="inspector"' in html
     assert 'id="panel-work"' in html
-    assert 'id="panel-knowledge"' in html
+    assert html.count('id="panel-knowledge"') == 1
     assert 'id="panel-settings"' in html
     assert "Work Stream" in html
     assert "Magi Agent is ready." in html
+    assert "Local workspace ready" in html
     assert "Runtime surfaces" in html
     assert "First-party surfaces" in html
     assert "ADK Python" in html
