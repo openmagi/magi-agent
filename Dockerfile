@@ -11,7 +11,7 @@ COPY pyproject.toml README.md ./
 COPY magi_agent/ ./magi_agent/
 
 RUN python -m pip install --no-cache-dir --upgrade pip \
-  && python -m pip install --no-cache-dir ".[cli]"
+  && python -m pip install --no-cache-dir ".[cli,composio]"
 
 ENV CORE_AGENT_PORT=8080 \
     CORE_AGENT_RUNTIME_ENGINE=adk-python \
