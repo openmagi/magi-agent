@@ -9,6 +9,7 @@ from magi_agent.tools.manifest import ToolManifest
 
 EXPECTED_CORE_TOOL_NAMES = {
     "ToolSearch",
+    "TodoWrite",
     "FileRead",
     "FileWrite",
     "FileEdit",

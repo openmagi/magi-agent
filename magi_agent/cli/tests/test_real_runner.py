@@ -226,6 +226,37 @@ def test_first_party_cli_tools_run_mutations_with_per_invocation_scope(
     assert first_receipt["requestDigest"] != second_receipt["requestDigest"]
 
 
+def test_first_party_cli_tools_include_callable_todowrite(tmp_path) -> None:
+    tools = _build_first_party_adk_tools(cwd=tmp_path, session_id="sid-todo")
+
+    assert "TodoWrite" in {getattr(tool, "name", None) for tool in tools}
+
+    todo_write = _tool_by_name(tools, "TodoWrite")
+    first = _run_adk_tool(
+        todo_write,
+        {"todos": [{"content": "Plan", "status": "in_progress"}]},
+        invocation_id="turn-1",
+        call_id="call-1",
+    )
+    second = _run_adk_tool(
+        todo_write,
+        {
+            "todos": [
+                {"content": "Plan", "status": "completed"},
+                {"content": "Build", "status": "in_progress"},
+            ]
+        },
+        invocation_id="turn-2",
+        call_id="call-2",
+    )
+
+    assert first["status"] == "ok"
+    assert first["output"]["todos"] == [{"content": "Plan", "status": "in_progress"}]
+    # Second call replaces the list within the same CLI session.
+    assert second["status"] == "ok"
+    assert second["output"]["todos"][1] == {"content": "Build", "status": "in_progress"}
+
+
 def test_default_runner_can_disable_first_party_tools(
     monkeypatch,
     tmp_path,

@@ -200,7 +200,8 @@ def test_all_core_tools_are_present_with_explicit_parallel_safety() -> None:
         "FileRead", "FileWrite", "FileEdit", "PatchApply", "Glob", "Grep", "Bash",
         "TestRun", "GitDiff", "AskUserQuestion", "EnterPlanMode", "ExitPlanMode",
         "ArtifactCreate", "ArtifactRead", "ArtifactList", "Clock", "Calculation",
-        "ToolSearch", "HealthStatus", "TaskList", "TaskGet", "TaskOutput", "CronList",
+        "ToolSearch", "TodoWrite", "HealthStatus", "TaskList", "TaskGet", "TaskOutput",
+        "CronList",
     }
     assert set(m.keys()) == expected
     # Every tool must have a valid parallel_safety value
