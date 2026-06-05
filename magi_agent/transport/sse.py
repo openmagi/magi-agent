@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import os
 import re
 import time
 from collections.abc import Mapping
@@ -511,7 +512,19 @@ def _sanitize_agent_event(event: dict[str, object]) -> dict[str, object] | None:
         event = {**event, "type": aliased_event_type}
         event_type = aliased_event_type
     if event_type == "thinking_delta":
-        return None
+        if os.environ.get("MAGI_STREAM_THINKING", "").lower() not in {"1", "true", "yes", "on"}:
+            return None
+        value = _get_public_string_value(event, "delta")
+        if value is None:
+            value = _get_public_string_value(event, "text")
+        if value is None:
+            return {"type": "thinking_delta"}
+        redacted = (
+            "[redacted-private]"
+            if _has_private_text_marker(value)
+            else _redact_unbounded_public_text(value)
+        )
+        return {"type": "thinking_delta", "delta": redacted}
     if event_type == "browser_frame":
         return _sanitize_browser_frame_event(event)
     if event_type == "source_inspected":
