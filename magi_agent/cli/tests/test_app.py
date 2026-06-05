@@ -64,6 +64,29 @@ class TestBuildHeadlessRuntime:
         # Just shouldn't raise.
         assert rt.engine is not None
 
+    def test_bypass_permission_mode_resolves_gate_asks(self) -> None:
+        import asyncio
+
+        from magi_agent.cli.contracts import ControlRequest
+
+        rt = build_headless_runtime(
+            cwd="/tmp", session_id="sid-bypass", permission_mode="bypassPermissions"
+        )
+
+        decision = asyncio.run(
+            rt.gate.check(
+                ControlRequest(
+                    request_id="req-1",
+                    turn_id="turn-1",
+                    tool_name="FileWrite",
+                    arguments={"path": "out.txt", "content": "ok"},
+                    reason="workspace mutation requires approval",
+                )
+            )
+        )
+
+        assert decision.kind == "allow"
+
     def test_accepts_runner_injection(self) -> None:
         """Accepting an explicit runner passes it through to MagiEngineDriver."""
         mock_runner = MagicMock()
