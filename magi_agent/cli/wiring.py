@@ -193,7 +193,8 @@ def build_headless_runtime(
         if permission_mode == "bypassPermissions"
         else []
     )
-    if prompt_sink is not None:
+    # prompt_sink drives gate prompting in non-bypass modes; bypass keeps its own no-frame sink.
+    if prompt_sink is not None and permission_mode != "bypassPermissions":
         gate_sinks = [prompt_sink]
     gate = RulesPermissionGate(sinks=gate_sinks)
 

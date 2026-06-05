@@ -100,3 +100,29 @@ def test_control_request_private_reason_redacted():
     # If the reason key is present, it must not contain the private phrase verbatim
     if "reason" in result:
         assert "raw tool arguments" not in result["reason"]
+
+
+# ---------------------------------------------------------------------------
+# Test 6: secret path in arguments is redacted (not present verbatim)
+# ---------------------------------------------------------------------------
+
+def test_control_request_secret_path_in_arguments_redacted():
+    """arguments containing a secret filesystem path must have the path redacted."""
+    event = _control_request_event(
+        tool_name="Bash",
+        arguments={"cmd": "cat /home/ocuser/.openclaw/secret.key"},
+    )
+    result = sse._sanitize_agent_event(event)
+    assert result is not None
+    # arguments must be present and be a string
+    assert "arguments" in result
+    assert isinstance(result["arguments"], str), (
+        "arguments must always be a string after sanitization"
+    )
+    # The literal secret path must not appear in the sanitized arguments string
+    assert "/home/ocuser/.openclaw/secret.key" not in result["arguments"], (
+        "secret filesystem path must be replaced with [redacted-path]"
+    )
+    assert "[redacted-path]" in result["arguments"], (
+        "sanitized arguments must contain the [redacted-path] marker"
+    )

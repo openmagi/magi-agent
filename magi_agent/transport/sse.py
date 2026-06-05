@@ -2081,24 +2081,27 @@ def _sanitize_control_request_event(event: Mapping[str, object]) -> dict[str, ob
 
     This event type carries a tool-permission approval request that the browser
     must render as a modal dialog.  The ``request_id`` and ``tool_name`` fields
-    must survive verbatim (they are needed for correlation and rendering).
+    must survive sanitization (they are needed for correlation and rendering).
     ``arguments`` is redacted via the same :func:`~magi_agent.transport.tool_preview.sanitize_tool_preview`
     path used for ``tool_start`` events; ``reason`` passes through
-    :func:`_sanitize_public_text`.
+    :func:`_sanitize_public_text` — a reason containing a private-text-marker
+    is included as ``"[redacted-private]"``; ``None``/empty reason is omitted.
     """
     sanitized: dict[str, object] = {"type": "control_request"}
 
-    # request_id: passthrough — needed for correlation.
+    # request_id: sanitized for safety but must normally survive for correlation.
     request_id = event.get("request_id")
-    if isinstance(request_id, str):
-        sanitized["request_id"] = request_id
+    safe_request_id = _sanitize_optional_public_string(request_id, limit=120)
+    if safe_request_id is not None:
+        sanitized["request_id"] = safe_request_id
 
     # tool_name: sanitized public text — needed to render the modal title.
     tool_name = event.get("tool_name")
     if isinstance(tool_name, str) and tool_name.strip():
         sanitized["tool_name"] = _sanitize_public_text(tool_name)
 
-    # reason: sanitize; omit entirely if it triggers a private-text marker.
+    # reason: sanitize; a private-text-marker reason becomes "[redacted-private]"
+    # (included); None/empty reason is omitted entirely.
     reason = event.get("reason")
     if isinstance(reason, str) and reason.strip():
         safe_reason = _sanitize_optional_public_string(reason)
@@ -2108,21 +2111,24 @@ def _sanitize_control_request_event(event: Mapping[str, object]) -> dict[str, ob
     # arguments: redact using the tool-preview sanitizer (credentials / tokens)
     # plus the production-path redactor (filesystem paths).  This matches the
     # combined redaction applied to tool_start/tool_end visible text.
+    # arguments is always emitted as a string (or absent), never a dict.
     arguments = event.get("arguments")
     if isinstance(arguments, Mapping):
-        import json as _json  # noqa: PLC0415 — local import to avoid module-level overhead
-        raw_preview = _json.dumps(
-            {str(k): v for k, v in arguments.items()},
-            separators=(",", ":"),
-            ensure_ascii=False,
-            allow_nan=False,
-            default=str,
-        )
+        try:
+            raw_preview = json.dumps(
+                {str(k): v for k, v in arguments.items()},
+                separators=(",", ":"),
+                ensure_ascii=False,
+                allow_nan=False,
+                default=str,
+            )
+        except (ValueError, TypeError):
+            raw_preview = "[redacted-args]"
         redacted_preview = _tool_preview.sanitize_tool_preview(raw_preview)
         redacted_preview = _PRODUCTION_PATH_RE.sub("[redacted-path]", redacted_preview)
         sanitized["arguments"] = redacted_preview
     elif arguments is not None:
-        sanitized["arguments"] = {}
+        sanitized["arguments"] = "{}"
 
     return sanitized
 

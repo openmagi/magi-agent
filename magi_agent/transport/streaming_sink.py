@@ -73,7 +73,7 @@ class QueueFrameWriter:
 
     async def write(self, frame: object) -> None:
         """Translate *frame* into a ``control`` RuntimeEvent and enqueue it."""
-        request = getattr(frame, "request", {}) or {}
+        request = getattr(frame, "request", None) or {}
         payload: dict[str, object] = {
             "type": "control_request",
             "request_id": getattr(frame, "request_id", None),

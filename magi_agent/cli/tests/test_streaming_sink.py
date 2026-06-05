@@ -33,11 +33,11 @@ def _make_req(
     turn_id: str = "turn-1",
 ) -> ControlRequest:
     return ControlRequest(
-        requestId=request_id,
-        toolName=tool_name,
+        request_id=request_id,
+        tool_name=tool_name,
         arguments=arguments or {"cmd": "ls -la"},
         reason=reason,
-        turnId=turn_id,
+        turn_id=turn_id,
     )
 
 
@@ -135,3 +135,26 @@ def test_bypass_permissions_no_frame():
         assert queue.empty(), "bypassPermissions should not enqueue any frame"
 
     asyncio.run(scenario())
+
+
+# ---------------------------------------------------------------------------
+# Test 5: bypassPermissions mode ignores prompt_sink for sink selection
+# ---------------------------------------------------------------------------
+
+def test_bypass_mode_ignores_prompt_sink_for_sink_selection():
+    """build_headless_runtime with bypassPermissions must NOT use prompt_sink as gate sink.
+
+    The bypass NullFrameWriter sink must remain in gate.sinks; the provided
+    prompt_sink must NOT be the gate's selected sink when bypassPermissions is
+    active.
+    """
+    q: asyncio.Queue[RuntimeEvent] = asyncio.Queue()
+    prompt_sink = build_streaming_prompt_sink(q)
+    rt = build_headless_runtime(
+        permission_mode="bypassPermissions",
+        prompt_sink=prompt_sink,
+    )
+    # The prompt_sink must NOT appear in gate.sinks when bypass is active.
+    assert prompt_sink not in rt.gate.sinks, (
+        "prompt_sink must not override the bypass no-frame sink in bypassPermissions mode"
+    )
