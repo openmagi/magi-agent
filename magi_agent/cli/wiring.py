@@ -42,7 +42,7 @@ from magi_agent.cli.commands import (
     build_registry,
     install_discovery,
 )
-from magi_agent.cli.contracts import CommandRegistry
+from magi_agent.cli.contracts import CommandRegistry, PromptSink
 from magi_agent.cli.engine import (
     MagiEngineDriver,
     build_engine_recovery_policy,
@@ -116,6 +116,7 @@ def build_headless_runtime(
     runner: object | None = None,
     model: str | None = None,
     mode: "RuntimeMode" = "act",
+    prompt_sink: "PromptSink | None" = None,
 ) -> HeadlessRuntime:
     """Construct the complete headless dependency set.
 
@@ -185,11 +186,15 @@ def build_headless_runtime(
     # (C) Permission gate — default stays sink-less and therefore fail-safe on
     #     asks. The explicit bypass mode gets a no-op sink that resolves asks to
     #     allow; dispatcher/toolhost hard-safety still runs after the ADK gate.
+    # When an external prompt_sink is supplied (e.g. the SSE streaming seam),
+    # include it in the sinks list so the gate races it for "ask" verdicts.
     gate_sinks = (
         [HeadlessSink(_NullFrameWriter(), permission_mode=permission_mode)]
         if permission_mode == "bypassPermissions"
         else []
     )
+    if prompt_sink is not None:
+        gate_sinks = [prompt_sink]
     gate = RulesPermissionGate(sinks=gate_sinks)
 
     # (D) Command registry — install discovery once (idempotent), then build
