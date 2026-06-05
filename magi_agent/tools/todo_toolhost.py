@@ -26,6 +26,10 @@ def _normalize_todos(raw: object) -> list[dict[str, object]]:
         if not isinstance(item, dict):
             continue
         content = item.get("content")
+        if not isinstance(content, str):
+            # The live path is schema-gated to a string; coerce on the direct
+            # path so a stray non-string never reaches the stored list / UI.
+            content = "" if content is None else str(content)
         status = item.get("status")
         if status not in _VALID_TODO_STATUSES:
             status = "pending"
