@@ -13,9 +13,38 @@ from unittest.mock import patch
 from typer.testing import CliRunner
 
 from magi_agent.cli.tool_runtime import build_cli_adk_tools
-from magi_agent.cli.wiring import _build_first_party_adk_tools
+from magi_agent.cli.wiring import build_headless_runtime, _build_first_party_adk_tools
 
 _MUTATING = {"FileWrite", "FileEdit", "PatchApply", "Bash"}
+_FORBIDDEN_PLAN_TOOLHOST_TOOLS = {
+    "AgentMemoryRemember",
+    "ArtifactDelete",
+    "ArtifactUpdate",
+    "Browser",
+    "CommitCheckpoint",
+    "CronCreate",
+    "CronDelete",
+    "CronUpdate",
+    "DocumentWrite",
+    "ExternalSourceCache",
+    "FileDeliver",
+    "FileSend",
+    "KnowledgeSearch",
+    "KnowledgeWrite",
+    "SocialBrowser",
+    "SpawnAgent",
+    "SpawnWorktreeApply",
+    "SpreadsheetWrite",
+    "TaskBoard",
+    "TaskStop",
+    "TaskWait",
+    "WebFetch",
+    "WebSearch",
+    "knowledge-search",
+    "knowledge-write",
+    "web-search",
+    "web_search",
+}
 
 
 def _names(tools: list[object]) -> set[str]:
@@ -50,11 +79,36 @@ def test_first_party_plan_mode_excludes_mutating_tools(tmp_path) -> None:
     assert "FileRead" in names
 
 
+def test_first_party_plan_mode_excludes_toolhost_side_effects(tmp_path) -> None:
+    names = _names(
+        _build_first_party_adk_tools(cwd=str(tmp_path), session_id="s", mode="plan")
+    )
+    leaked = names & _FORBIDDEN_PLAN_TOOLHOST_TOOLS
+    assert not leaked, f"plan mode exposed side-effect/external tools: {sorted(leaked)}"
+
+
 def test_first_party_act_mode_includes_mutating_tools(tmp_path) -> None:
     names = _names(
         _build_first_party_adk_tools(cwd=str(tmp_path), session_id="s", mode="act")
     )
     assert _MUTATING.issubset(names), f"act mode missing mutating tools: {_MUTATING - names}"
+
+
+def test_headless_plan_mode_does_not_attach_composio(monkeypatch, tmp_path) -> None:
+    def fail_build(_config):  # type: ignore[no-untyped-def]
+        raise AssertionError("plan mode must not build Composio MCP toolsets")
+
+    def fail_attach(_runner, _bundle):  # type: ignore[no-untyped-def]
+        raise AssertionError("plan mode must not attach Composio MCP toolsets")
+
+    monkeypatch.setattr("magi_agent.cli.wiring.build_composio_toolset_bundle", fail_build)
+    monkeypatch.setattr("magi_agent.cli.wiring.attach_composio_toolsets_to_runner", fail_attach)
+
+    runtime = build_headless_runtime(cwd=str(tmp_path), runner=object(), mode="plan")
+
+    assert runtime.composio.active is False
+    assert runtime.composio.reason == "plan_mode"
+    assert runtime.mcp_servers == ()
 
 
 # ---------------------------------------------------------------------------

@@ -31,7 +31,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from magi_agent.tools.manifest import RuntimeMode
+    from magi_agent.tools.manifest import RuntimeMode, ToolManifest
 
 # ---------------------------------------------------------------------------
 # Light, import-clean imports only at module top.
@@ -163,11 +163,9 @@ def build_headless_runtime(
             mode=mode,
         )
     )
-    composio_config = resolve_composio_config(os.environ)
-    composio_bundle = build_composio_toolset_bundle(composio_config)
-    composio_attached = attach_composio_toolsets_to_runner(
+    composio_bundle, composio_attached = _build_composio_bundle_for_mode(
         effective_runner,
-        composio_bundle,
+        mode=mode,
     )
     mcp_servers = (
         (composio_bundle.mcp_server_label,)
@@ -294,7 +292,11 @@ def _build_first_party_adk_tools(
             registry.resolve_registration(manifest.name)
             for manifest in registry.list_available(mode=mode)
         )
-        if registration is not None and registration.handler is not None
+        if (
+            registration is not None
+            and registration.handler is not None
+            and _cli_tool_allowed_for_mode(registration.manifest, mode=mode)
+        )
     )
 
     def tool_context_factory(adk_tool_context: object) -> ToolContext:
@@ -339,6 +341,54 @@ def _context_lookup(value: object, key: str) -> object | None:
     if isinstance(value, dict):
         return value.get(key)
     return getattr(value, key, None)
+
+
+def _build_composio_bundle_for_mode(
+    runner: object,
+    *,
+    mode: "RuntimeMode",
+) -> tuple[ComposioToolsetBundle, bool]:
+    if mode == "plan":
+        return (
+            ComposioToolsetBundle(
+                active=False,
+                status="inactive",
+                reason="plan_mode",
+            ),
+            False,
+        )
+
+    composio_config = resolve_composio_config(os.environ)
+    composio_bundle = build_composio_toolset_bundle(composio_config)
+    composio_attached = attach_composio_toolsets_to_runner(
+        runner,
+        composio_bundle,
+    )
+    return composio_bundle, composio_attached
+
+
+def _cli_tool_allowed_for_mode(
+    manifest: "ToolManifest",
+    *,
+    mode: "RuntimeMode",
+) -> bool:
+    if mode == "act":
+        return True
+
+    if manifest.permission not in {"read", "meta"}:
+        return False
+    if manifest.dangerous or manifest.mutates_workspace:
+        return False
+    if manifest.side_effect_class != "none":
+        return False
+
+    # Some legacy native meta tools are mode-tagged as plan-compatible but
+    # actually reserve or mutate runtime state. Treat only readonly meta tools
+    # as plan-safe until their manifests grow precise side-effect metadata.
+    if manifest.permission == "meta" and manifest.parallel_safety != "readonly":
+        return False
+
+    return True
 
 
 def _tool_context_turn_id(
