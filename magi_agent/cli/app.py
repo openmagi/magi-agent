@@ -122,6 +122,11 @@ class PermMode(str, Enum):
     bypass = "bypassPermissions"
 
 
+class AgentMode(str, Enum):
+    plan = "plan"
+    act = "act"
+
+
 def _composio_status_line(prefix: str) -> str:
     from magi_agent.composio.config import resolve_composio_config
     from magi_agent.composio.health import composio_health_metadata
@@ -180,6 +185,11 @@ def agent(
         "--model",
         help="Model to use (reserved; not yet fully wired).",
     ),
+    mode: AgentMode = typer.Option(
+        AgentMode.act,
+        "--mode",
+        help="Agent mode: plan (read-only tools) | act (full tools).",
+    ),
 ) -> None:
     """Run the Magi agent (default command).
 
@@ -214,6 +224,7 @@ def agent(
             permission_mode=permission_mode.value,  # type: ignore[arg-type]
             session_id=resume or "cli-session",
             model=model,
+            mode=mode.value,  # type: ignore[arg-type]
         )
 
         # Resolve prompt: explicit arg, else read from stdin (which then can't
@@ -257,6 +268,7 @@ def agent(
             permission_mode=permission_mode.value,  # type: ignore[arg-type]
             session_id=resume or "cli-session",
             model=model,
+            mode=mode.value,  # type: ignore[arg-type]
         )
         tui.run()
 
