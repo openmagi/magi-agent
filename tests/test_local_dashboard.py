@@ -25,6 +25,22 @@ def _client() -> TestClient:
     return TestClient(create_app(runtime))
 
 
+def _client_with_gateway_token(gateway_token: str) -> TestClient:
+    runtime = OpenMagiRuntime(
+        config=RuntimeConfig(
+            bot_id="local-bot",
+            user_id="local-user",
+            gateway_token=gateway_token,
+            api_proxy_url="http://api-proxy.local",
+            chat_proxy_url="http://chat-proxy.local",
+            redis_url="redis://redis.local:6379/0",
+            model="gpt-5.2",
+            build=BuildInfo(version="0.1.0", build_sha="sha-test"),
+        )
+    )
+    return TestClient(create_app(runtime))
+
+
 def test_local_dashboard_route_serves_adk_local_app_shell() -> None:
     response = _client().get("/dashboard")
 
@@ -40,7 +56,7 @@ def test_local_dashboard_route_serves_adk_local_app_shell() -> None:
     assert 'id="panel-knowledge"' in html
     assert 'id="panel-settings"' in html
     assert "Work Stream" in html
-    assert "Run local agent work from one dashboard." in html
+    assert "Magi Agent is ready." in html
     assert "Runtime surfaces" in html
     assert "First-party surfaces" in html
     assert "ADK Python" in html
@@ -64,6 +80,25 @@ def test_local_dashboard_renders_workbench_not_empty_mockup() -> None:
     assert "Ready to run" in html
     assert "No active run" in html
     assert "Attach local context" in html
+    assert "Work in progress" in html
+    assert "Main session" in html
+    assert "Run local agent work from one dashboard." not in html
+
+
+def test_local_dashboard_prefills_default_local_gateway_token() -> None:
+    response = _client_with_gateway_token("local-dev-token").get("/dashboard")
+    html = response.text
+
+    assert '"gatewayToken":"local-dev-token"' in html
+    assert 'localStorage.getItem(tokenKey) || bootstrap.gatewayToken || ""' in html
+
+
+def test_local_dashboard_does_not_expose_custom_gateway_token() -> None:
+    response = _client_with_gateway_token("custom-secret-token").get("/dashboard")
+    html = response.text
+
+    assert "custom-secret-token" not in html
+    assert '"gatewayToken":""' in html
 
 
 def test_local_dashboard_exposes_runtime_surface_panels() -> None:
@@ -144,6 +179,7 @@ def test_local_dashboard_exposes_digest_safe_runtime_bootstrap() -> None:
         "runtime": "magi-agent",
         "runtimeEngine": "adk-python",
         "version": "0.1.0",
+        "gatewayToken": "",
     }
 
 
