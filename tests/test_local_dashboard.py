@@ -52,6 +52,34 @@ def test_local_dashboard_route_serves_adk_local_app_shell() -> None:
     assert "ADK runtime" in html
 
 
+def test_local_dashboard_renders_workbench_not_empty_mockup() -> None:
+    response = _client().get("/dashboard")
+    html = response.text
+
+    assert 'id="thread-list"' in html
+    assert 'id="quick-actions"' in html
+    assert 'id="composer-status"' in html
+    assert 'id="work-stream-events"' in html
+    assert "Current run" in html
+    assert "Ready to run" in html
+    assert "No active run" in html
+    assert "Attach local context" in html
+
+
+def test_local_dashboard_exposes_runtime_surface_panels() -> None:
+    response = _client().get("/dashboard")
+    html = response.text
+
+    assert 'id="tool-count"' in html
+    assert 'id="tool-list"' in html
+    assert 'id="harness-list"' in html
+    assert 'id="evidence-list"' in html
+    assert "Active tools" in html
+    assert "Harness packs" in html
+    assert "Evidence gates" in html
+    assert "renderSurfaceStatus" in html
+
+
 def test_local_dashboard_deep_links_serve_same_app_shell() -> None:
     for path in (
         "/dashboard/local/chat",

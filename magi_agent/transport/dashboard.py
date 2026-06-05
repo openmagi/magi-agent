@@ -299,6 +299,88 @@ def _dashboard_html(runtime: OpenMagiRuntime) -> str:
       box-shadow: var(--shadow-soft);
       padding: 18px;
     }}
+    .thread-list {{
+      max-width: 980px;
+      width: 100%;
+      margin: 0 auto;
+      display: grid;
+      gap: 12px;
+    }}
+    .thread-meta {{
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      min-height: 32px;
+      color: var(--muted);
+      font-size: 13px;
+    }}
+    .thread-meta span {{
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+    }}
+    .thread-meta strong {{
+      color: var(--ink);
+      font-weight: 700;
+    }}
+    .run-state {{
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 8px;
+      margin-top: 14px;
+    }}
+    .run-state-card {{
+      min-height: 64px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: var(--surface-2);
+      padding: 10px;
+    }}
+    .run-state-card span {{
+      display: block;
+      color: var(--soft);
+      font-size: 11px;
+      font-weight: 800;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+    }}
+    .run-state-card strong {{
+      display: block;
+      margin-top: 6px;
+      color: var(--ink);
+      font-size: 13px;
+    }}
+    .surface-grid {{
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 8px;
+      margin-top: 14px;
+    }}
+    .surface-card {{
+      min-height: 82px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: var(--surface);
+      padding: 12px;
+    }}
+    .surface-card strong {{
+      display: block;
+      color: var(--ink);
+      font-size: 13px;
+      margin-bottom: 5px;
+    }}
+    .surface-card span {{
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.4;
+    }}
+    .quick-actions {{
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 8px;
+      margin-top: 14px;
+    }}
     .health-rail {{
       display: grid;
       grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -620,6 +702,45 @@ def _dashboard_html(runtime: OpenMagiRuntime) -> str:
       font-size: 11px;
       line-height: 1.45;
     }}
+    .surface-status {{
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: var(--surface);
+      padding: 11px;
+      margin-bottom: 10px;
+    }}
+    .surface-status h3 {{
+      display: flex;
+      justify-content: space-between;
+      gap: 10px;
+      margin: 0 0 8px;
+      color: var(--ink);
+      font-size: 13px;
+    }}
+    .surface-status h3 span {{
+      color: var(--muted);
+      font-weight: 600;
+    }}
+    .tag-list {{
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+    }}
+    .tag {{
+      max-width: 100%;
+      min-height: 24px;
+      display: inline-flex;
+      align-items: center;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: var(--surface-2);
+      color: var(--muted);
+      padding: 0 8px;
+      font-size: 11px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }}
     .kv {{
       display: grid;
       gap: 8px;
@@ -716,6 +837,9 @@ def _dashboard_html(runtime: OpenMagiRuntime) -> str:
       .topbar {{ padding: 0 16px; }}
       .topbar-actions .pill:not(#chat-route-pill) {{ display: none; }}
       .starter-grid {{ grid-template-columns: 1fr; }}
+      .quick-actions {{ grid-template-columns: 1fr; }}
+      .surface-grid {{ grid-template-columns: 1fr; }}
+      .run-state {{ grid-template-columns: 1fr; }}
       .trace-grid {{ grid-template-columns: 1fr; }}
       .health-rail {{ grid-template-columns: 1fr; }}
       .run-summary {{ grid-template-columns: 1fr; }}
@@ -764,33 +888,33 @@ def _dashboard_html(runtime: OpenMagiRuntime) -> str:
       </header>
 
       <section class="messages" id="messages" aria-live="polite">
-        <div class="run-summary" aria-label="Runtime status summary">
-          <div class="summary-card"><span>Agent</span><strong>Main session</strong><small>Local ADK run loop</small></div>
-          <div class="summary-card"><span>Memory</span><strong>Local contracts</strong><small>Receipts and recall surfaces</small></div>
-          <div class="summary-card"><span>Tools</span><strong>First-party tools</strong><small>Research, coding, docs, browser, automation</small></div>
-          <div class="summary-card"><span>Evidence</span><strong>Runtime ledger</strong><small>Public-safe receipts and events</small></div>
-        </div>
+        <div class="thread-list" id="thread-list">
         <div class="empty-state" id="empty-state">
           <div class="welcome-message">
+            <div class="thread-meta">
+              <span><span class="dot ready"></span><span>Current run</span></span>
+              <strong id="composer-status">Ready to run</strong>
+            </div>
             <h3>Run local agent work from one dashboard.</h3>
             <p>Ask for research, coding, document review, planning, and automation. Public runtime events and tool progress appear in the work stream while the answer streams here.</p>
-            <div class="health-rail" aria-label="Local runtime readiness">
-              <div class="health-chip"><span class="dot ready"></span><span>Runtime <strong>ready</strong></span></div>
-              <div class="health-chip"><span class="dot ready"></span><span>Engine <strong>ADK Python</strong></span></div>
-              <div class="health-chip"><span class="dot ready"></span><span>Mode <strong>local</strong></span></div>
+            <div class="run-state" aria-label="Local runtime readiness">
+              <div class="run-state-card"><span>Status</span><strong>No active run</strong></div>
+              <div class="run-state-card"><span>Runtime</span><strong>ADK Python</strong></div>
+              <div class="run-state-card"><span>Context</span><strong>Attach local context</strong></div>
             </div>
-            <div class="trace-grid" aria-label="Runtime surfaces">
-              <div class="trace-item"><strong>Work stream</strong><span>Tool progress, runtime events, receipts, and transport state.</span></div>
-              <div class="trace-item"><strong>Knowledge</strong><span>Workspace files, memory receipts, and evidence records.</span></div>
-              <div class="trace-item"><strong>Policy</strong><span>Harness gates keep high-authority work explicit.</span></div>
+            <div class="surface-grid" aria-label="Runtime surfaces">
+              <div class="surface-card"><strong>Runtime surfaces</strong><span>Chat, work events, SSE transport, and public ADK progress in one shell.</span></div>
+              <div class="surface-card"><strong>First-party surfaces</strong><span>Research, coding, documents, browser, memory, scheduler, and skills.</span></div>
+              <div class="surface-card"><strong>Evidence gates</strong><span>Receipts and policy status stay visible while local work runs.</span></div>
             </div>
-          </div>
-          <div class="starter-grid">
+            <div class="quick-actions" id="quick-actions">
             <button class="starter" type="button" data-prompt="Inspect this repository and summarize the runnable local surfaces.">Inspect this repository</button>
             <button class="starter" type="button" data-prompt="Draft a short research plan and list the evidence gates you would use.">Plan a research task</button>
             <button class="starter" type="button" data-prompt="Create a coding checklist for fixing a failing test, including rollback evidence.">Plan a coding fix</button>
             <button class="starter" type="button" data-prompt="Show the runtime health, active tools, and current policy boundaries.">Check runtime health</button>
+            </div>
           </div>
+        </div>
         </div>
       </section>
 
@@ -843,13 +967,34 @@ def _dashboard_html(runtime: OpenMagiRuntime) -> str:
             </div>
             <small>Public ADK events, tool progress, evidence receipts, and transport state appear here during a run.</small>
           </div>
+          <p class="panel-heading">Current run</p>
+          <div class="event pending"><strong>No active run</strong><code>Submit a prompt to start a local ADK turn</code></div>
           <p class="panel-heading">Main session</p>
-          <div class="event pending"><strong>Runtime check</strong><code>Waiting for /healthz</code></div>
-          <div class="event"><strong>First-party surfaces</strong><code>Research, coding, documents, browser, scheduler, memory, skills</code></div>
-          <div class="event"><strong>Transport</strong><code>SSE frames and public ADK events render here during a run</code></div>
+          <div class="timeline" id="work-stream-events">
+            <div class="event pending"><strong>Runtime check</strong><code>Waiting for /healthz</code></div>
+            <div class="event"><strong>First-party surfaces</strong><code>Research, coding, documents, browser, scheduler, memory, skills</code></div>
+            <div class="event"><strong>Transport</strong><code>SSE frames and public ADK events render here during a run</code></div>
+          </div>
         </div>
         <div id="panel-knowledge" class="hidden">
           <p class="brand-meta">Local knowledge and artifacts are exposed by runtime contracts when enabled.</p>
+          <div class="surface-status">
+            <h3>Active tools <span id="tool-count">checking</span></h3>
+            <div class="tag-list" id="tool-list"><span class="tag">Waiting for /healthz</span></div>
+          </div>
+          <div class="surface-status">
+            <h3>Harness packs <span>profile</span></h3>
+            <div class="tag-list" id="harness-list"><span class="tag">Waiting for /healthz</span></div>
+          </div>
+          <div class="surface-status">
+            <h3>Evidence gates <span>public-safe</span></h3>
+            <div class="tag-list" id="evidence-list">
+              <span class="tag">source ledger</span>
+              <span class="tag">citation audit</span>
+              <span class="tag">tool receipts</span>
+              <span class="tag">final projection</span>
+            </div>
+          </div>
           <div class="knowledge-list">
             <div class="knowledge-item"><span class="glyph">F</span><span>Workspace files</span></div>
             <div class="knowledge-item"><span class="glyph">M</span><span>Memory receipts</span></div>
@@ -874,12 +1019,13 @@ def _dashboard_html(runtime: OpenMagiRuntime) -> str:
     const bootstrap = JSON.parse(document.getElementById("runtime-bootstrap").textContent);
     const messages = document.getElementById("messages");
     const emptyState = document.getElementById("empty-state");
-    const workPanel = document.getElementById("panel-work");
+    const workStreamEvents = document.getElementById("work-stream-events");
     const form = document.getElementById("chat-form");
     const promptInput = document.getElementById("prompt");
     const tokenInput = document.getElementById("gateway-token");
     const sendButton = document.getElementById("send-button");
     const modelSelect = document.getElementById("model-select");
+    const composerStatus = document.getElementById("composer-status");
     const runtimeDot = document.getElementById("runtime-dot");
     const runtimeLabel = document.getElementById("runtime-label");
     const runtimeKv = document.getElementById("runtime-kv");
@@ -887,6 +1033,10 @@ def _dashboard_html(runtime: OpenMagiRuntime) -> str:
     const tileRuntime = document.getElementById("tile-runtime");
     const tileState = document.getElementById("tile-state");
     const agentStatePill = document.getElementById("agent-state-pill");
+    const toolCount = document.getElementById("tool-count");
+    const toolList = document.getElementById("tool-list");
+    const harnessList = document.getElementById("harness-list");
+    const evidenceList = document.getElementById("evidence-list");
     const tokenKey = "magi-agent:gateway-token";
 
     document.getElementById("footer-runtime").textContent = bootstrap.runtime;
@@ -924,8 +1074,8 @@ def _dashboard_html(runtime: OpenMagiRuntime) -> str:
       node.innerHTML = `<strong>${{escapeText(title)}}</strong>${{safeDetail}}`;
       if (tone === "error") node.style.borderColor = "#f2bfca";
       if (tone === "ok") node.style.borderColor = "#b7e7cf";
-      workPanel.appendChild(node);
-      workPanel.scrollTop = workPanel.scrollHeight;
+      workStreamEvents.appendChild(node);
+      workStreamEvents.scrollTop = workStreamEvents.scrollHeight;
       return node;
     }}
 
@@ -965,18 +1115,51 @@ def _dashboard_html(runtime: OpenMagiRuntime) -> str:
       agentStatePill.textContent = ok ? "ready" : "blocked";
     }}
 
+    function renderTagList(container, values, fallback) {{
+      const items = Array.isArray(values) ? values.filter(Boolean).slice(0, 18) : [];
+      const visible = items.length ? items : [fallback];
+      container.innerHTML = "";
+      for (const value of visible) {{
+        const tag = document.createElement("span");
+        tag.className = "tag";
+        tag.textContent = value;
+        container.appendChild(tag);
+      }}
+    }}
+
+    function renderSurfaceStatus(body) {{
+      const activeTools = Array.isArray(body && body.activeTools) ? body.activeTools : [];
+      toolCount.textContent = activeTools.length ? `${{activeTools.length}} active` : "none reported";
+      renderTagList(toolList, activeTools, "No active tools reported");
+      const profile = body && body.profile;
+      const packs = profile && Array.isArray(profile.harnessPacks)
+        ? profile.harnessPacks.map((pack) => `${{pack.name || "pack"}}:${{pack.enabledByDefault ? "on" : "off"}}`)
+        : [];
+      renderTagList(harnessList, packs, "No harness profile reported");
+      const gates = [
+        "source ledger",
+        "citation audit",
+        "tool receipts",
+        "rollback receipts",
+        "final projection",
+      ];
+      renderTagList(evidenceList, gates, "Evidence gates unavailable");
+    }}
+
     async function checkHealth() {{
       try {{
         const response = await fetch("/healthz");
         const body = await response.json();
         setHealth(response.ok, response.ok ? "active" : "blocked");
         renderHealth(body, response.ok);
+        renderSurfaceStatus(body);
         addEvent("Runtime health", compactJson({{ ok: response.ok, status: body.status || "ready" }}), response.ok ? "ok" : "error");
       }} catch (error) {{
         setHealth(false, "unavailable");
         chatRoutePill.textContent = "runtime unavailable";
         tileState.textContent = "unavailable";
         agentStatePill.textContent = "unavailable";
+        renderSurfaceStatus({{}});
         addEvent("Runtime unavailable", "Could not reach /healthz", "error");
       }}
     }}
@@ -1039,6 +1222,8 @@ def _dashboard_html(runtime: OpenMagiRuntime) -> str:
       const token = tokenInput.value.trim();
       localStorage.setItem(tokenKey, token);
       const assistant = addMessage("assistant", "");
+      composerStatus.textContent = "Running";
+      agentStatePill.textContent = "running";
       addEvent("Request", "POST /v1/chat/completions", "pending");
       const response = await fetch("/v1/chat/completions", {{
         method: "POST",
@@ -1057,6 +1242,8 @@ def _dashboard_html(runtime: OpenMagiRuntime) -> str:
         assistant.className = "message assistant error";
         assistant.textContent = text || `Request failed: ${{response.status}}`;
         addEvent("Request failed", assistant.textContent, "error");
+        composerStatus.textContent = "Blocked";
+        agentStatePill.textContent = "blocked";
         return;
       }}
       const reader = response.body.getReader();
@@ -1074,6 +1261,8 @@ def _dashboard_html(runtime: OpenMagiRuntime) -> str:
       if (!assistant.textContent.trim()) {{
         assistant.textContent = "The runtime completed without user-visible text. Check the work stream for events and receipts.";
       }}
+      composerStatus.textContent = "Ready to run";
+      agentStatePill.textContent = "ready";
     }}
 
     form.addEventListener("submit", async (event) => {{
