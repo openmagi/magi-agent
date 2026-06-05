@@ -16,7 +16,7 @@ from magi_agent.cli.real_runner import (
     CliProviderDependencyError,
     build_cli_model_runner,
 )
-from magi_agent.cli.wiring import _build_default_runner
+from magi_agent.cli.wiring import _build_default_runner, _build_first_party_adk_tools
 
 _PROVIDER_ENV = (
     "ANTHROPIC_API_KEY",
@@ -41,6 +41,18 @@ class _FakeEchoLlm(BaseLlm):
                 parts=[types.Part(text="ECHO: hi")],
             )
         )
+
+
+class _FakeFunctionCall:
+    def __init__(self, *, name: str, call_id: str) -> None:
+        self.name = name
+        self.id = call_id
+
+
+class _FakeAdkToolContext:
+    def __init__(self, *, invocation_id: str, tool_name: str, call_id: str) -> None:
+        self.invocation_id = invocation_id
+        self.function_call = _FakeFunctionCall(name=tool_name, call_id=call_id)
 
 
 def _config() -> ProviderConfig:
@@ -71,6 +83,32 @@ def _collect_text(events: list[object]) -> list[str]:
             if isinstance(text, str) and text:
                 texts.append(text)
     return texts
+
+
+def _tool_by_name(tools: list[object], name: str) -> object:
+    for tool in tools:
+        if getattr(tool, "name", None) == name:
+            return tool
+    raise AssertionError(f"{name} not attached")
+
+
+def _run_adk_tool(
+    tool: object,
+    arguments: dict[str, object],
+    *,
+    invocation_id: str,
+    call_id: str,
+) -> dict[str, object]:
+    return asyncio.run(
+        tool.run_async(
+            args={"arguments": arguments},
+            tool_context=_FakeAdkToolContext(
+                invocation_id=invocation_id,
+                tool_name=getattr(tool, "name", "tool"),
+                call_id=call_id,
+            ),
+        )
+    )
 
 
 def test_build_returns_cli_model_runner_exposing_agent() -> None:
@@ -116,6 +154,71 @@ def test_default_runner_is_real_when_provider_configured(monkeypatch) -> None:
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-x")
     runner = _build_default_runner()
     assert isinstance(runner, CliModelRunner)
+
+
+def test_default_runner_attaches_first_party_tools_when_provider_configured(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    monkeypatch.setattr(real_runner, "_build_litellm_model", _fake_model_factory)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-x")
+
+    runner = _build_default_runner(cwd=tmp_path, session_id="sid-tools")
+
+    assert isinstance(runner, CliModelRunner)
+    tool_names = {tool.name for tool in runner.agent.tools}
+    assert {
+        "FileRead",
+        "Grep",
+        "Bash",
+        "Browser",
+        "DocumentWrite",
+        "AgentMemorySearch",
+        "SkillLoader",
+    }.issubset(tool_names)
+    assert "ToolSearch" not in tool_names
+
+
+def test_first_party_cli_tools_run_mutations_with_per_invocation_scope(
+    tmp_path,
+) -> None:
+    tools = _build_first_party_adk_tools(cwd=tmp_path, session_id="sid-tools")
+    file_write = _tool_by_name(tools, "FileWrite")
+
+    first = _run_adk_tool(
+        file_write,
+        {"path": "notes/one.txt", "content": "one\n"},
+        invocation_id="turn-1",
+        call_id="call-1",
+    )
+    second = _run_adk_tool(
+        file_write,
+        {"path": "notes/two.txt", "content": "two\n"},
+        invocation_id="turn-2",
+        call_id="call-2",
+    )
+
+    assert first["status"] == "ok"
+    assert second["status"] == "ok"
+    assert (tmp_path / "notes" / "one.txt").read_text(encoding="utf-8") == "one\n"
+    assert (tmp_path / "notes" / "two.txt").read_text(encoding="utf-8") == "two\n"
+    first_receipt = first["metadata"]["gate5bFullToolhostReceipt"]
+    second_receipt = second["metadata"]["gate5bFullToolhostReceipt"]
+    assert first_receipt["requestDigest"] != second_receipt["requestDigest"]
+
+
+def test_default_runner_can_disable_first_party_tools(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    monkeypatch.setattr(real_runner, "_build_litellm_model", _fake_model_factory)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-x")
+    monkeypatch.setenv("MAGI_FIRST_PARTY_TOOLS_ENABLED", "0")
+
+    runner = _build_default_runner(cwd=tmp_path, session_id="sid-tools-disabled")
+
+    assert isinstance(runner, CliModelRunner)
+    assert runner.agent.tools == []
 
 
 def test_default_runner_falls_back_with_notice_when_dependency_missing(

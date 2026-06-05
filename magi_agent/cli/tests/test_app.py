@@ -590,6 +590,92 @@ def test_build_headless_runtime_attaches_composio_to_default_local_runner(
     assert getattr(rt.engine._runner, "agent").tools == ["composio-toolset"]
 
 
+def test_build_headless_runtime_default_runner_attaches_first_party_tools(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    import magi_agent.cli.real_runner as real_runner
+    from google.adk.models import BaseLlm, LlmResponse
+    from google.genai import types
+
+    class FakeLlm(BaseLlm):
+        async def generate_content_async(self, llm_request, stream: bool = False):
+            yield LlmResponse(
+                content=types.Content(
+                    role="model",
+                    parts=[types.Part(text="ok")],
+                )
+            )
+
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-x")
+    monkeypatch.setenv("MAGI_CONFIG", str(tmp_path / "absent.toml"))
+    monkeypatch.setattr(
+        real_runner,
+        "_build_litellm_model",
+        lambda _config: FakeLlm(model="fake"),
+    )
+
+    rt = build_headless_runtime(cwd=tmp_path, session_id="sid-first-party")
+
+    tool_names = {tool.name for tool in getattr(rt.engine._runner, "agent").tools}
+    assert {
+        "FileRead",
+        "Grep",
+        "Bash",
+        "Browser",
+        "DocumentWrite",
+        "AgentMemorySearch",
+        "SkillLoader",
+    }.issubset(tool_names)
+
+
+def test_build_headless_runtime_composio_appends_to_first_party_tools(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    import magi_agent.cli.real_runner as real_runner
+    from google.adk.models import BaseLlm, LlmResponse
+    from google.genai import types
+
+    class FakeLlm(BaseLlm):
+        async def generate_content_async(self, llm_request, stream: bool = False):
+            yield LlmResponse(
+                content=types.Content(
+                    role="model",
+                    parts=[types.Part(text="ok")],
+                )
+            )
+
+    class FakeBundle:
+        active = True
+        status = "ready"
+        toolsets = ("composio-toolset",)
+        mcp_server_label = "composio"
+
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-x")
+    monkeypatch.setenv("MAGI_CONFIG", str(tmp_path / "absent.toml"))
+    monkeypatch.setenv("COMPOSIO_API_KEY", "cp_test_secret")
+    monkeypatch.setenv("MAGI_COMPOSIO_ENABLED", "on")
+    monkeypatch.setattr(
+        real_runner,
+        "_build_litellm_model",
+        lambda _config: FakeLlm(model="fake"),
+    )
+
+    with patch(
+        "magi_agent.cli.wiring.build_composio_toolset_bundle",
+        return_value=FakeBundle(),
+    ):
+        rt = build_headless_runtime(cwd=tmp_path, session_id="sid-composio-first-party")
+
+    tools = getattr(rt.engine._runner, "agent").tools
+    tool_names = {tool.name for tool in tools if hasattr(tool, "name")}
+    assert "FileRead" in tool_names
+    assert "Browser" in tool_names
+    assert "composio-toolset" in tools
+    assert rt.mcp_servers == ("composio",)
+
+
 def test_build_headless_runtime_does_not_report_mcp_when_runner_has_no_agent(
     monkeypatch,
     tmp_path,

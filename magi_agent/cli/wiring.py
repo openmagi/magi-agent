@@ -140,7 +140,15 @@ def build_headless_runtime(
     _ = model  # reserved seam, not yet wired
 
     effective_cwd = str(cwd) if cwd is not None else os.getcwd()
-    effective_runner = runner if runner is not None else _build_default_runner(model=model)
+    effective_runner = (
+        runner
+        if runner is not None
+        else _build_default_runner(
+            cwd=effective_cwd,
+            session_id=session_id,
+            model=model,
+        )
+    )
     composio_config = resolve_composio_config(os.environ)
     composio_bundle = build_composio_toolset_bundle(composio_config)
     composio_attached = attach_composio_toolsets_to_runner(
@@ -186,7 +194,12 @@ def build_headless_runtime(
     )
 
 
-def _build_default_runner(*, model: str | None = None) -> object:
+def _build_default_runner(
+    *,
+    cwd: str | os.PathLike[str] | None = None,
+    session_id: str = "cli-session",
+    model: str | None = None,
+) -> object:
     """Build the CLI's default runner.
 
     When a model provider is configured (``~/.magi/config.toml`` or a provider
@@ -208,11 +221,121 @@ def _build_default_runner(*, model: str | None = None) -> object:
     )
 
     try:
-        return build_cli_model_runner(config)
+        return build_cli_model_runner(
+            config,
+            tools=_build_first_party_adk_tools(cwd=cwd, session_id=session_id),
+        )
     except CliProviderDependencyError as exc:
         # Key configured but the provider dependency is missing: keep the CLI
         # usable and surface the actionable install hint as the turn response.
         return build_local_cli_runner(model=model, notice=str(exc))
+
+
+def _build_first_party_adk_tools(
+    *,
+    cwd: str | os.PathLike[str] | None,
+    session_id: str,
+) -> list[object]:
+    """Build default first-party local ADK tools for the CLI real runner.
+
+    The OSS CLI should expose Magi's first-party local tools once a real model
+    runner is configured. Keep this lazy so importing ``cli.wiring`` stays
+    lightweight, and only expose tools with concrete handlers so metadata-only
+    surfaces do not appear as broken callable tools.
+    """
+
+    if not _first_party_tools_enabled():
+        return []
+
+    from magi_agent.adk_bridge.tool_adapter import (  # noqa: PLC0415
+        build_adk_function_tools_for_registry,
+    )
+    from magi_agent.runtime.openmagi_runtime import (  # noqa: PLC0415
+        _build_core_tool_registry,
+        _build_default_plugin_state,
+    )
+    from magi_agent.tools.context import ToolContext  # noqa: PLC0415
+    from magi_agent.tools.dispatcher import ToolDispatcher  # noqa: PLC0415
+
+    workspace_root = str(cwd) if cwd is not None else os.getcwd()
+    registry = _build_core_tool_registry(_build_default_plugin_state())
+    dispatcher = ToolDispatcher(registry)
+    exposed_tool_names = tuple(
+        registration.manifest.name
+        for registration in (
+            registry.resolve_registration(manifest.name)
+            for manifest in registry.list_available(mode="act")
+        )
+        if registration is not None and registration.handler is not None
+    )
+
+    def tool_context_factory(adk_tool_context: object) -> ToolContext:
+        function_call = _context_lookup(adk_tool_context, "function_call")
+        tool_name = _context_lookup(function_call, "name")
+        tool_use_id = _context_lookup(function_call, "id")
+        turn_id = _tool_context_turn_id(
+            adk_tool_context,
+            session_id=session_id,
+            tool_use_id=tool_use_id if isinstance(tool_use_id, str) else None,
+        )
+        return ToolContext(
+            bot_id="local-cli",
+            user_id="cli",
+            session_id=session_id,
+            session_key=session_id,
+            turn_id=turn_id,
+            workspace_root=workspace_root,
+            workspace_ref="local-cli-workspace",
+            channel="cli",
+            permission_scope={
+                "mode": "selected_full_toolhost",
+                "source": "selected_full_toolhost",
+            },
+            adk_tool_context=adk_tool_context,
+            adk_context=adk_tool_context,
+            tool_use_id=tool_use_id if isinstance(tool_use_id, str) else None,
+            plugin_id=tool_name if isinstance(tool_name, str) else None,
+        )
+
+    return build_adk_function_tools_for_registry(
+        registry,
+        dispatcher,
+        mode="act",
+        tool_context_factory=tool_context_factory,
+        attach_enabled=True,
+        exposed_tool_names=exposed_tool_names,
+    )
+
+
+def _context_lookup(value: object, key: str) -> object | None:
+    if isinstance(value, dict):
+        return value.get(key)
+    return getattr(value, key, None)
+
+
+def _tool_context_turn_id(
+    adk_tool_context: object,
+    *,
+    session_id: str,
+    tool_use_id: str | None,
+) -> str:
+    for value in (
+        _context_lookup(adk_tool_context, "invocation_id"),
+        _context_lookup(_context_lookup(adk_tool_context, "invocation_context"), "invocation_id"),
+        _context_lookup(_context_lookup(adk_tool_context, "event"), "invocation_id"),
+    ):
+        if isinstance(value, str) and value.strip():
+            return f"{session_id}:{value.strip()}"
+    if tool_use_id:
+        return f"{session_id}:tool:{tool_use_id}"
+    return f"{session_id}:local-turn"
+
+
+def _first_party_tools_enabled() -> bool:
+    raw = os.environ.get("MAGI_FIRST_PARTY_TOOLS_ENABLED")
+    if raw is None:
+        return True
+    return raw.strip().lower() not in {"0", "false", "no", "off"}
 
 
 def build_tui_app(
