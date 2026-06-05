@@ -43,7 +43,7 @@ from magi_agent.cli.engine import (
     MagiEngineDriver,
     build_engine_recovery_policy,
 )
-from magi_agent.cli.permissions import PermissionMode, RulesPermissionGate
+from magi_agent.cli.permissions import HeadlessSink, PermissionMode, RulesPermissionGate
 from magi_agent.cli.session_log import SessionLog
 from magi_agent.composio.config import resolve_composio_config
 from magi_agent.composio.mcp import (
@@ -97,6 +97,11 @@ class HeadlessRuntime:
     session_log: SessionLog
     composio: ComposioToolsetBundle
     mcp_servers: tuple[str, ...] = ()
+
+
+class _NullFrameWriter:
+    async def write(self, frame: object) -> None:
+        del frame
 
 
 def build_headless_runtime(
@@ -170,10 +175,15 @@ def build_headless_runtime(
         recovery=build_engine_recovery_policy(),
     )
 
-    # (C) Permission gate — RulesPermissionGate with no sinks (headless
-    #     ``default`` path will fall back to deny on ask; the HeadlessSink
-    #     wiring is a later PR).
-    gate = RulesPermissionGate()
+    # (C) Permission gate — default stays sink-less and therefore fail-safe on
+    #     asks. The explicit bypass mode gets a no-op sink that resolves asks to
+    #     allow; dispatcher/toolhost hard-safety still runs after the ADK gate.
+    gate_sinks = (
+        [HeadlessSink(_NullFrameWriter(), permission_mode=permission_mode)]
+        if permission_mode == "bypassPermissions"
+        else []
+    )
+    gate = RulesPermissionGate(sinks=gate_sinks)
 
     # (D) Command registry — install discovery once (idempotent), then build
     #     the per-cwd registry.

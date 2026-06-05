@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Awaitable, Callable, Iterator, Mapping, Sequence
+from collections.abc import AsyncIterator, Awaitable, Callable, Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timezone
 import hashlib
@@ -18,7 +18,6 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
-from magi_agent.cli.local_runner import build_local_response
 from magi_agent.evidence.gate2_durable_evidence import (
     Gate2DurableEvidenceStore,
 )
@@ -793,15 +792,22 @@ def _local_adk_chat_response(
     payload: object,
 ) -> StreamingResponse:
     prompt = _local_chat_prompt_text(payload)
-    content = build_local_response(prompt, model=runtime.config.model)
     return StreamingResponse(
-        _local_adk_chat_sse(content),
+        _local_adk_chat_sse(runtime, payload, prompt),
         media_type="text/event-stream",
     )
 
 
-def _local_adk_chat_sse(content: str) -> Iterator[str]:
-    turn_id = "turn-local-dashboard"
+async def _local_adk_chat_sse(
+    runtime: OpenMagiRuntime,
+    payload: object,
+    prompt: str,
+) -> AsyncIterator[str]:
+    from magi_agent.cli.contracts import EngineResult
+    from magi_agent.cli.wiring import build_headless_runtime
+
+    session_id = _local_chat_string(payload, "sessionId", "local-dashboard")
+    turn_id = _local_chat_string(payload, "turnId", f"{session_id}:turn")
     yield _sse_data({"choices": [{"index": 0, "delta": {"role": "assistant"}}]})
     yield _sse_event(
         "agent",
@@ -818,20 +824,62 @@ def _local_adk_chat_sse(content: str) -> Iterator[str]:
             "turnId": turn_id,
             "stage": "started",
             "label": "Running local ADK",
-            "detail": "Model-free local runner active",
+            "detail": "Local headless engine active",
         },
     )
-    yield _sse_event(
-        "agent",
+
+    headless = build_headless_runtime(
+        cwd=os.environ.get("MAGI_AGENT_WORKSPACE") or os.getcwd(),
+        permission_mode="bypassPermissions",
+        session_id=session_id,
+        model=runtime.config.model,
+    )
+    cancel = asyncio.Event()
+    stream = headless.engine.run_turn_stream(
+        None,
         {
-            "type": "turn_phase",
-            "turnId": turn_id,
-            "phase": "committed",
+            "prompt": prompt,
+            "session_id": session_id,
+            "turn_id": turn_id,
         },
+        cancel=cancel,
+        gate=headless.gate,
     )
-    yield _sse_data({"choices": [{"index": 0, "delta": {"content": content}}]})
+    async for item in stream:
+        if isinstance(item, EngineResult):
+            if item.error:
+                yield _sse_event(
+                    "agent",
+                    {
+                        "type": "error",
+                        "turnId": turn_id,
+                        "reason": item.error,
+                    },
+                )
+            break
+        event_payload = dict(item.payload)
+        yield _sse_event("agent", event_payload)
+        delta = _local_runtime_event_delta(event_payload)
+        if delta:
+            yield _sse_data({"choices": [{"index": 0, "delta": {"content": delta}}]})
     yield _sse_data({"choices": [{"index": 0, "finish_reason": "stop"}]})
     yield "data: [DONE]\n\n"
+
+
+def _local_runtime_event_delta(payload: Mapping[str, object]) -> str:
+    for key in ("delta", "text", "content"):
+        value = payload.get(key)
+        if isinstance(value, str):
+            return value
+    return ""
+
+
+def _local_chat_string(payload: object, key: str, default: str) -> str:
+    if isinstance(payload, Mapping):
+        value = payload.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return default
 
 
 def _sse_data(payload: Mapping[str, object]) -> str:
