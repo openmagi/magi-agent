@@ -16,10 +16,10 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 def test_release_version_and_local_health_version_are_aligned() -> None:
     pyproject = tomllib.loads((REPO_ROOT / "pyproject.toml").read_text())
 
-    assert pyproject["project"]["version"] == "0.1.8"
-    assert magi_agent.__version__ == "0.1.8"
+    assert pyproject["project"]["version"] == "0.1.9"
+    assert magi_agent.__version__ == "0.1.9"
     config = main_module._parse_runtime_config({})  # noqa: SLF001
-    assert config.build.version == "0.1.8-local"
+    assert config.build.version == "0.1.9-local"
 
 
 def test_resolve_server_port_uses_core_agent_port_when_no_args() -> None:
