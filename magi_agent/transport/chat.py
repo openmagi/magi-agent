@@ -922,7 +922,10 @@ def register_chat_routes(app: FastAPI, runtime: OpenMagiRuntime) -> None:
                 status_code=401,
                 content={"error": "unauthorized"},
             )
-        if _local_chat_route_enabled():
+        if (
+            _local_chat_route_enabled()
+            and os.environ.get("CORE_AGENT_PYTHON_CHAT_ROUTE", "off").lower() != "on"
+        ):
             try:
                 payload = await request.json()
             except (JSONDecodeError, ValueError):
