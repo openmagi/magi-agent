@@ -13,11 +13,12 @@ Audit target: `/Users/kevin/Desktop/claude_code/magi-agent-oss-worktrees/cli-par
 Goal: give the local `magi` CLI agent the REAL tool-execution loop + REAL system
 prompt (Claude Code / OpenCode parity), reusing existing parts.
 
-> NOTE on the brief's premise. The brief describes `magi_agent/cli/real_runner.py`
-> with `build_cli_model_runner` building `Agent(model=LiteLlm(...),
-> instruction=DEFAULT_INSTRUCTION, tools=[])`. **That file/symbol does not exist on
-> this branch** (`grep -rn build_cli_model_runner magi_agent/` → no matches; HEAD is
-> at PR #139, the described work is PR #140 / downstream). The *actual* default CLI
+> NOTE on the brief's premise at the time of this snapshot. The brief described
+> `magi_agent/cli/real_runner.py` with `build_cli_model_runner` building
+> `Agent(model=LiteLlm(...), instruction=DEFAULT_INSTRUCTION, tools=[])`. **That
+> file/symbol did not exist on this audited branch** (`grep -rn
+> build_cli_model_runner magi_agent/` → no matches; HEAD was at PR #139, and the
+> described work was PR #140 / downstream). The *actual* default CLI
 > runner today is `magi_agent/cli/local_runner.py::build_local_cli_runner` →
 > `LocalCliRunner`, which is **even more inert**: it is model-free, emits one canned
 > text event, and attaches **no tools and no real instruction**
