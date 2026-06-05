@@ -207,11 +207,34 @@ _TERMINAL_REQUEST_STATUSES = frozenset(
         "client_aborted",
         "fallback_served",
         "error",
+        "blocked",
         "dropped",
         "skipped",
         "stale_released",
     }
 )
+_DELIVERY_STATUS_RESERVED_RELEASE_STATUSES = frozenset(
+    {
+        "served_to_client",
+        "fallback_served",
+        "client_aborted",
+        "completed_after_client_timeout",
+        "python_error",
+        "timeout",
+        "blocked",
+        "harness_failed",
+    }
+)
+_DELIVERY_STATUS_TO_TERMINAL_REQUEST_STATUS = {
+    "served_to_client": "served_to_client",
+    "fallback_served": "fallback_served",
+    "client_aborted": "client_aborted",
+    "completed_after_client_timeout": "completed_after_client_timeout",
+    "python_error": "error",
+    "timeout": "error",
+    "blocked": "blocked",
+    "harness_failed": "error",
+}
 _RETRYABLE_TERMINAL_ERROR_REASONS = frozenset(
     {
         "runner_error",
@@ -1212,10 +1235,40 @@ class Gate5B4C3ShadowCounterStore:
                 )
 
         scope = target_scope
+        state = scope.get("state")
+        if not isinstance(state, dict):
+            state = _initial_state(
+                selected_bot_digest=selected_bot_digest,
+                trusted_owner_user_id_digest=trusted_owner_user_id_digest,
+                environment=environment,
+                now_ms=now,
+                max_daily_generation_runs=0,
+                max_daily_generation_cost_usd=0,
+                max_concurrent_generation_runs=0,
+                max_pending_generation_runs=0,
+            )
+            scope["state"] = state
         requests = scope.setdefault("requests", {})
         record = requests[request_digest]
         if "attemptEvidenceSource" not in record:
             record["attemptEvidenceSource"] = "python_counter_record"
+        if (
+            record.get("status") == "reserved"
+            and delivery_status in _DELIVERY_STATUS_RESERVED_RELEASE_STATUSES
+        ):
+            if int(state.get("inFlightGenerationRuns") or 0) > 0:
+                state["inFlightGenerationRuns"] = int(state["inFlightGenerationRuns"]) - 1
+            if int(state.get("pendingGenerationRuns") or 0) > 0:
+                state["pendingGenerationRuns"] = int(state["pendingGenerationRuns"]) - 1
+            state.pop("reservedCostUsd", None)
+            terminal_status = _DELIVERY_STATUS_TO_TERMINAL_REQUEST_STATUS[delivery_status]
+            if (
+                delivery_status == "blocked"
+                and _safe_reason(reason) in _RETRYABLE_TERMINAL_ERROR_REASONS
+            ):
+                terminal_status = "error"
+            record["status"] = terminal_status
+            record["reason"] = _safe_reason(reason)
         existing_delivery_status = record.get("deliveryStatus")
         receipt_count = int(record.get("deliveryReceiptCount") or 0) + 1
         duplicate_count = int(record.get("deliveryDuplicateCount") or 0)

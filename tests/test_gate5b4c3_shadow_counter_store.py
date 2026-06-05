@@ -549,6 +549,78 @@ def test_counter_store_records_delivery_receipt_without_double_counting(tmp_path
     assert scope["state"]["dailyGenerationCostUsdUsed"] == 0.05
 
 
+def test_counter_store_blocked_delivery_receipt_releases_reserved_full_toolhost_record(
+    tmp_path,
+) -> None:
+    path = tmp_path / "gate5b-shadow-counters.json"
+    store = Gate5B4C3ShadowCounterStore(path)
+    reservation = store.reserve(
+        request_digest=REQUEST_DIGEST,
+        shadow_generation_id="shadow_gen_full_toolhost_001",
+        selected_bot_digest=BOT_DIGEST,
+        trusted_owner_user_id_digest=OWNER_DIGEST,
+        environment="production",
+        max_daily_generation_runs=10,
+        max_daily_generation_cost_usd=0.50,
+        max_concurrent_generation_runs=1,
+        max_pending_generation_runs=1,
+        cost_cap_usd=0.05,
+        now_ms=1_779_200_000_000,
+    )
+
+    receipt = store.record_delivery_receipt(
+        request_digest=REQUEST_DIGEST,
+        selected_bot_digest=BOT_DIGEST,
+        trusted_owner_user_id_digest=OWNER_DIGEST,
+        environment="production",
+        delivery_status="blocked",
+        reason="runner_error",
+        body_digest="sha256:" + "1" * 64,
+        route_decision="python_selected_boundary_blocked",
+        response_authority="typescript",
+        gate="gate5b_selected_full_toolhost",
+        completed_at="2026-06-05T16:18:50.000Z",
+        fallback_reason="runner_error",
+        python_attempted=True,
+        python_counter_record_present=True,
+        now_ms=1_779_200_003_000,
+    )
+
+    raw = json.loads(path.read_text(encoding="utf-8"))
+    scope = next(iter(raw["scopes"].values()))
+    state = scope["state"]
+    record = scope["requests"][REQUEST_DIGEST]
+    assert reservation.status == "reserved"
+    assert receipt.status == "recorded"
+    assert record["status"] == "error"
+    assert record["deliveryStatus"] == "blocked"
+    assert record["deliveryReason"] == "runner_error"
+    assert record["responseAuthority"] == "typescript"
+    assert record["routeDecision"] == "python_selected_boundary_blocked"
+    assert record["gate"] == "gate5b_selected_full_toolhost"
+    assert record["attemptEvidenceSource"] == "python_counter_record"
+    assert state["pendingGenerationRuns"] == 0
+    assert state["inFlightGenerationRuns"] == 0
+    assert "reservedCostUsd" not in state
+
+    retry = Gate5B4C3ShadowCounterStore(path).reserve(
+        request_digest=REQUEST_DIGEST,
+        shadow_generation_id="shadow_gen_full_toolhost_retry",
+        selected_bot_digest=BOT_DIGEST,
+        trusted_owner_user_id_digest=OWNER_DIGEST,
+        environment="production",
+        max_daily_generation_runs=10,
+        max_daily_generation_cost_usd=0.50,
+        max_concurrent_generation_runs=1,
+        max_pending_generation_runs=1,
+        cost_cap_usd=0.05,
+        now_ms=1_779_200_004_000,
+    )
+
+    assert retry.status == "reserved"
+    assert retry.should_invoke_runner is True
+
+
 def test_counter_store_records_duplicate_delivery_receipt_without_budget_increment(
     tmp_path,
 ) -> None:
