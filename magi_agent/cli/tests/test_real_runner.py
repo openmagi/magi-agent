@@ -80,6 +80,25 @@ def test_build_returns_cli_model_runner_exposing_agent() -> None:
     assert runner.agent is not None
 
 
+def _tool_names(agent: object) -> set[str]:
+    return {getattr(tool, "name", None) for tool in getattr(agent, "tools", [])}
+
+
+def test_build_cli_model_runner_attaches_real_tools(tmp_path) -> None:
+    runner = build_cli_model_runner(
+        _config(),
+        model_factory=_fake_model_factory,
+        workspace_root=str(tmp_path),
+    )
+    names = _tool_names(runner.agent)
+    assert names  # non-empty
+    assert "FileRead" in names
+    # The instruction is the real system prompt, not the removed hand-written stub.
+    instruction = getattr(runner.agent, "instruction", "")
+    assert "<output-rules>" in instruction
+    assert "<tool-preferences>" in instruction
+
+
 def test_run_async_drives_real_adk_runner_and_autocreates_session() -> None:
     runner = build_cli_model_runner(_config(), model_factory=_fake_model_factory)
 
