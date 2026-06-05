@@ -36,6 +36,12 @@ composio = [
 anthropic = [
   "anthropic==0.105.2",
 ]
+# Optional: required only when the local CLI runs a real model provider
+# (openai / anthropic / gemini / fireworks) via ADK's LiteLlm. Imported lazily
+# (magi_agent.cli.real_runner) so installs without it keep the model-free stub.
+providers = [
+  "litellm>=1.74.0",
+]
 
 [project.scripts]
 magi-agent = "magi_agent.main:main"

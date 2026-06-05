@@ -374,6 +374,19 @@ class TestAgentDefaultCommand:
         """Regression: the shipped CLI must run a turn without injected mocks."""
         monkeypatch.setenv("MAGI_CLI_ENABLED", "1")
         monkeypatch.setenv("MAGI_CLI_SESSION_DIR", str(tmp_path))
+        # Pin the no-provider path: clear provider keys and point config
+        # resolution at a non-existent file so the stub runner is selected
+        # deterministically regardless of the developer's environment.
+        for _env in (
+            "ANTHROPIC_API_KEY",
+            "OPENAI_API_KEY",
+            "GEMINI_API_KEY",
+            "GOOGLE_API_KEY",
+            "FIREWORKS_API_KEY",
+            "MAGI_PROVIDER",
+        ):
+            monkeypatch.delenv(_env, raising=False)
+        monkeypatch.setenv("MAGI_CONFIG", str(tmp_path / "absent.toml"))
 
         runner = CliRunner()
         result = runner.invoke(
