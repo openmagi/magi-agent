@@ -677,6 +677,86 @@ def test_chat_route_live_canary_uses_adk_boundary_and_counter_store(
     assert canary_request_digest in request_records
 
 
+def test_chat_route_live_runner_blocks_incomplete_progress_projection(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setenv("CORE_AGENT_PYTHON_CHAT_ROUTE", "on")
+    original_event_text = _FakeRunner.event_text
+    _FakeRunner.event_text = (
+        "선정된 종목 분석을 병렬 처리 방식으로 실행하겠습니다. "
+        "완료되면 통합 결과를 전달드리겠습니다. 잠시만 기다려 주세요."
+    )
+    runtime = make_runtime(
+        authority=PythonRuntimeAuthorityConfig(
+            userVisibleOutputAllowed=True,
+            canaryRoutingAllowed=True,
+        )
+    )
+    runtime.gate5b_user_visible_chat_route_config = Gate5BUserVisibleChatRouteConfig(
+        enabled=True,
+        killSwitchEnabled=False,
+        selectedBotDigest=_sha256("bot-test"),
+        selectedOwnerUserIdDigest=_sha256("user-test"),
+        environment="production",
+        environmentAllowlist=("production",),
+        adkPrimitivesLoader=_fake_primitives,
+    )
+    runtime.gate5b4c3_shadow_generation_route_config = Gate5B4C3ShadowGenerationRouteConfig(
+        liveRunnerBoundaryEnabled=True,
+        counterStore=Gate5B4C3ShadowCounterStore(tmp_path / "counters.json"),
+        generationConfig=Gate5B4C3ShadowGenerationConfig(
+            enabled=True,
+            killSwitchActive=False,
+            capStateInitialized=True,
+            providerProjectSpendControlsVerified=True,
+            selectedBotDigest=_sha256("bot-test"),
+            trustedOwnerUserIdDigest=_sha256("user-test"),
+            environment="production",
+            allowedProviderLabels=("google",),
+            allowedModelLabels=("gemini-3.5-flash",),
+            allowedModelRoutes=("google:gemini-3.5-flash",),
+            allowedShadowCredentialRefs=("gate5b-google-api-key-smoke-v1",),
+            providerCredentialBindingRequired=False,
+            approvedBudgets={
+                "maxDailyGenerationRuns": 1,
+                "maxDailyGenerationCostUsd": 0.05,
+                "maxCostUsd": 0.05,
+            },
+        ),
+    )
+
+    try:
+        response = TestClient(create_app(runtime)).post(
+            "/v1/chat/completions",
+            headers={"authorization": "Bearer gateway-token"},
+            json={
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": "선정 종목 분석을 계속 진행해줘.",
+                    }
+                ]
+            },
+        )
+    finally:
+        _FakeRunner.event_text = original_event_text
+
+    assert response.status_code == 502
+    body = response.json()
+    assert body["status"] == "python_error"
+    assert body["reason"] == "runner_incomplete_output"
+    assert body["fallbackStatus"] == "fallback_to_typescript"
+    assert body["responseAuthority"] == "typescript"
+    assert body["counter"]["status"] == "error"
+    assert "choices" not in body
+    raw_counter_store = json.loads((tmp_path / "counters.json").read_text(encoding="utf-8"))
+    request_records = next(iter(raw_counter_store["scopes"].values()))["requests"]
+    record = next(iter(request_records.values()))
+    assert record["status"] == "error"
+    assert record["reason"] == "runner_incomplete_output"
+
+
 def test_chat_route_gate1a_selected_scope_attaches_readonly_tools_only(
     monkeypatch,
     tmp_path: Path,

@@ -101,6 +101,28 @@ _RUNNER_DIAGNOSTIC_PREVIEW_FORBIDDEN_RE = re.compile(
     r")",
     re.IGNORECASE,
 )
+_INCOMPLETE_RUNNER_OUTPUT_RE = re.compile(
+    r"(?:"
+    r"잠시만\s*기다|"
+    r"기다려\s*주|"
+    r"조금만\s*더\s*기다|"
+    r"완료되면|"
+    r"전달(?:드리|해)\s*겠|"
+    r"진행\s*중|"
+    r"처리\s*중|"
+    r"실행\s*중|"
+    r"작업\s*중|"
+    r"please\s+wait|"
+    r"still\s+working|"
+    r"in\s+progress|"
+    r"once\s+(?:it\s+is\s+)?complete|"
+    r"when\s+(?:it\s+is\s+)?complete|"
+    r"i(?:'|’)ll\s+(?:continue|update)|"
+    r"i\s+will\s+(?:continue|update)|"
+    r"will\s+(?:continue|update|send|share)\b"
+    r")",
+    re.IGNORECASE,
+)
 _CONTEXT_REASON_CODE_FORBIDDEN_RE = re.compile(
     r"(?:"
     r"Authorization|Bearer|Cookie|Set-Cookie|"
@@ -2576,13 +2598,24 @@ async def _run_live_chat_runner(
         boundary_result.status == "completed"
         and not boundary_result.output_text_internal
     )
+    runner_incomplete_reason = (
+        None
+        if runner_output_missing
+        else _runner_incomplete_output_reason(boundary_result.output_text_internal)
+    )
     counter_status = (
         "runner_completed"
-        if boundary_result.status == "completed" and not runner_output_missing
+        if (
+            boundary_result.status == "completed"
+            and not runner_output_missing
+            and runner_incomplete_reason is None
+        )
         else "error"
     )
     counter_reason = (
-        "runner_output_missing" if runner_output_missing else boundary_result.reason
+        "runner_output_missing"
+        if runner_output_missing
+        else runner_incomplete_reason or boundary_result.reason
     )
     counter_state = shadow_config.counter_store.finish(
         reservation,
@@ -2591,7 +2624,11 @@ async def _run_live_chat_runner(
         report_digest=report_digest,
         runner_error_diagnostic=runner_error_diagnostic,
     )
-    if boundary_result.status != "completed" or runner_output_missing:
+    if (
+        boundary_result.status != "completed"
+        or runner_output_missing
+        or runner_incomplete_reason is not None
+    ):
         return _fallback_response(
             status_code=502,
             status="python_error",
@@ -3395,6 +3432,15 @@ def _single_config_value(values: tuple[str, ...]) -> str:
 
 def _bounded_public_text(value: str, *, max_chars: int = 8192) -> str:
     return value[:max_chars]
+
+
+def _runner_incomplete_output_reason(value: object) -> str | None:
+    text = _bounded_public_text(str(value or ""), max_chars=4096).strip()
+    if not text:
+        return None
+    if _INCOMPLETE_RUNNER_OUTPUT_RE.search(text):
+        return "runner_incomplete_output"
+    return None
 
 
 def build_public_identity_policy() -> dict[str, str]:
