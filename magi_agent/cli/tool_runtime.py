@@ -15,7 +15,7 @@ enables them via registry policy (no feature flag flip required).
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Callable
 
 if TYPE_CHECKING:
     from magi_agent.tools.context import ToolContext
@@ -32,7 +32,7 @@ class CliToolRuntime:
 
     registry: "ToolRegistry"
     dispatcher: "ToolDispatcher"
-    tool_context_factory: object  # Callable[[object], ToolContext]
+    tool_context_factory: "Callable[[object], ToolContext]"
 
 
 def build_cli_tool_runtime(
@@ -42,8 +42,9 @@ def build_cli_tool_runtime(
 ) -> CliToolRuntime:
     """Assemble the registry, dispatcher, and tool-context factory.
 
-    The factory ignores the ADK tool context and stamps the CLI ``workspace_root``
-    (its cwd) plus session/turn identity onto every dispatched
+    The factory does not derive identity from the ADK tool context; it forwards
+    that context but stamps the CLI ``workspace_root`` (its cwd) plus session/turn
+    identity onto every dispatched
     :class:`~magi_agent.tools.context.ToolContext`.
     """
 

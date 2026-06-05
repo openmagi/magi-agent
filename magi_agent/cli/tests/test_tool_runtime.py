@@ -54,6 +54,19 @@ def test_tool_context_factory_carries_workspace_root(tmp_path) -> None:
     assert result["output"]["content"] == "probe\n"
 
 
+def test_tool_error_is_structured_not_raised(tmp_path) -> None:
+    # A failing tool call (missing file) must return a structured non-ok result
+    # through the ADK adapter, not raise — so the model sees an actionable error
+    # rather than the turn crashing.
+    tools = build_cli_adk_tools(workspace_root=str(tmp_path))
+    file_read = _find_tool(tools, "FileRead")
+
+    result = asyncio.run(file_read.func({"path": "does-not-exist.txt"}, object()))
+
+    assert isinstance(result, dict)
+    assert result["status"] != "ok"
+
+
 def test_tool_context_factory_returns_workspace_root_directly(tmp_path) -> None:
     from magi_agent.cli.tool_runtime import build_cli_tool_runtime
 
