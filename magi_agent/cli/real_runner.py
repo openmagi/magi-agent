@@ -20,15 +20,10 @@ needs the optional ``litellm`` dependency; if it is missing we raise
 
 from __future__ import annotations
 
+import os
 from typing import AsyncGenerator, Callable
 
 from magi_agent.cli.providers import ProviderConfig
-
-DEFAULT_INSTRUCTION = (
-    "You are Magi, an autonomous AI agent running locally through the magi CLI. "
-    "Help the user with their request directly and concisely. When you do not "
-    "have a tool for something, explain what you would do."
-)
 
 # Type of the model-construction hook (injectable for tests).
 ModelFactory = Callable[[ProviderConfig], object]
@@ -84,12 +79,21 @@ def build_cli_model_runner(
     *,
     app_name: str = "magi-cli",
     agent_name: str = "magi_cli_agent",
-    instruction: str = DEFAULT_INSTRUCTION,
+    instruction: str | None = None,
     tools: list[object] | None = None,
     model_factory: ModelFactory | None = None,
     user_id: str = "cli-user",
+    session_id: str = "cli-session",
+    workspace_root: str | None = None,
 ) -> CliModelRunner:
-    """Build a real, model-backed CLI runner from a resolved provider config."""
+    """Build a real, model-backed CLI runner from a resolved provider config.
+
+    By default the agent is wired with the genuine core tools (FileRead/Write/
+    Edit, PatchApply, Glob, Grep, Bash, ...) rooted at ``workspace_root`` (the CLI
+    cwd) and the real system prompt. ``tools`` / ``instruction`` may be supplied
+    to override these (tests pre-build a fake LLM; production callers rely on the
+    defaults).
+    """
 
     from google.adk.agents import Agent  # noqa: PLC0415
     from google.adk.apps.app import App  # noqa: PLC0415
@@ -100,15 +104,34 @@ def build_cli_model_runner(
     from magi_agent.adk_bridge.session_service import (  # noqa: PLC0415
         WorkspaceSessionService,
     )
+    from magi_agent.cli.tool_runtime import (  # noqa: PLC0415
+        build_cli_adk_tools,
+        build_cli_instruction,
+    )
 
     build_model = model_factory or _build_litellm_model
     model = build_model(config)
 
+    effective_workspace_root = workspace_root if workspace_root is not None else os.getcwd()
+    effective_tools = (
+        tools
+        if tools is not None
+        else build_cli_adk_tools(
+            workspace_root=effective_workspace_root,
+            session_id=session_id,
+        )
+    )
+    effective_instruction = (
+        instruction
+        if instruction is not None
+        else build_cli_instruction(session_id=session_id, model=config.litellm_model)
+    )
+
     agent = Agent(
         name=agent_name,
         model=model,
-        instruction=instruction,
-        tools=list(tools or []),
+        instruction=effective_instruction,
+        tools=list(effective_tools),
     )
     session_service = WorkspaceSessionService(app_name=app_name)
     app = App(name=_app_identifier(app_name), root_agent=agent, plugins=[])
@@ -125,6 +148,7 @@ def build_cli_model_runner(
         session_service=session_service,
         app_name=app_name,
         user_id=user_id,
+        session_id=session_id,
     )
 
 
@@ -160,6 +184,5 @@ def _as_str(value: object, default: str) -> str:
 __all__ = [
     "CliModelRunner",
     "CliProviderDependencyError",
-    "DEFAULT_INSTRUCTION",
     "build_cli_model_runner",
 ]
