@@ -638,6 +638,75 @@ def _function_tool_schema_typeerror_primitives() -> Gate5B4C3LiveAdkPrimitives:
     )
 
 
+def test_chat_route_selected_runner_input_preserves_followup_context(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setenv("CORE_AGENT_PYTHON_CHAT_ROUTE", "on")
+    runtime = make_runtime(
+        authority=PythonRuntimeAuthorityConfig(
+            userVisibleOutputAllowed=True,
+            canaryRoutingAllowed=True,
+        )
+    )
+    runtime.gate5b_user_visible_chat_route_config = Gate5BUserVisibleChatRouteConfig(
+        enabled=True,
+        killSwitchEnabled=False,
+        selectedBotDigest=_sha256("bot-test"),
+        selectedOwnerUserIdDigest=_sha256("user-test"),
+        environment="production",
+        environmentAllowlist=("production",),
+        adkPrimitivesLoader=_fake_primitives,
+    )
+    runtime.gate5b4c3_shadow_generation_route_config = Gate5B4C3ShadowGenerationRouteConfig(
+        liveRunnerBoundaryEnabled=True,
+        counterStore=Gate5B4C3ShadowCounterStore(tmp_path / "counters.json"),
+        generationConfig=Gate5B4C3ShadowGenerationConfig(
+            enabled=True,
+            killSwitchActive=False,
+            capStateInitialized=True,
+            providerProjectSpendControlsVerified=True,
+            selectedBotDigest=_sha256("bot-test"),
+            trustedOwnerUserIdDigest=_sha256("user-test"),
+            environment="production",
+            allowedProviderLabels=("google",),
+            allowedModelLabels=("gemini-3.5-flash",),
+            allowedModelRoutes=("google:gemini-3.5-flash",),
+            allowedShadowCredentialRefs=("gate5b-google-api-key-smoke-v1",),
+            providerCredentialBindingRequired=False,
+            approvedBudgets={
+                "maxDailyGenerationRuns": 1,
+                "maxDailyGenerationCostUsd": 0.05,
+                "maxCostUsd": 0.05,
+            },
+        ),
+    )
+
+    response = TestClient(create_app(runtime)).post(
+        "/v1/chat/completions",
+        headers={"authorization": "Bearer gateway-token"},
+        json={
+            "messages": [
+                {
+                    "role": "assistant",
+                    "content": (
+                        "선정된 종목들에 대해 /multibagger-full-report 분석을 "
+                        "병렬 처리 방식으로 즉시 재실행하겠습니다."
+                    ),
+                },
+                {"role": "user", "content": "어캐돼가"},
+            ]
+        },
+    )
+
+    assert response.status_code == 200
+    runner_input_text = _FakeRunner.run_kwargs["new_message"].parts[0].text
+    assert "Recent visible conversation:" in runner_input_text
+    assert "assistant:" in runner_input_text
+    assert "/multibagger-full-report" in runner_input_text
+    assert "user: 어캐돼가" in runner_input_text
+
+
 def test_chat_route_live_canary_uses_adk_boundary_and_counter_store(
     monkeypatch,
     tmp_path: Path,

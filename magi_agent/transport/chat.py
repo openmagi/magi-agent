@@ -3261,7 +3261,10 @@ def _build_user_visible_generation_request(
     user_text = _extract_last_user_text(payload)
     if not user_text:
         raise ValueError("chat payload must contain a user message")
-    sanitized_text = _build_gate5b_model_visible_current_turn_text(user_text)
+    sanitized_text = _build_gate5b_model_visible_current_turn_text(
+        user_text,
+        payload=payload,
+    )
     input_digest = _sha256_digest(sanitized_text)
     request_seed = "|".join(
         (
@@ -3474,12 +3477,41 @@ def _latest_model_visible_messages(
     return tuple([*selected_system, *conversation_messages[-remaining:]])
 
 
-def _build_gate5b_model_visible_current_turn_text(user_text: str) -> str:
+def _build_gate5b_model_visible_current_turn_text(
+    user_text: str,
+    *,
+    payload: Mapping[str, object] | None = None,
+) -> str:
     identity = _PUBLIC_IDENTITY_POLICY["modelVisibleSystemContext"]
     sanitized_user_text = sanitize_gate5b_model_visible_identity_text(
         _bounded_public_text(user_text, max_chars=_MODEL_VISIBLE_CONTEXT_MAX_CHARS)
     )
-    text = f"{identity}\n\nUser message:\n{sanitized_user_text}"
+    projected_messages: list[dict[str, str]] = []
+    source_messages = payload.get("messages") if isinstance(payload, Mapping) else None
+    if isinstance(source_messages, list):
+        for item in source_messages:
+            if not isinstance(item, Mapping):
+                continue
+            content = sanitize_gate5b_model_visible_identity_text(
+                _message_content_to_text(item.get("content"))
+            )
+            bounded = content[:_MODEL_VISIBLE_CONTEXT_MAX_CHARS].strip()
+            if bounded:
+                projected_messages.append(
+                    {"role": _safe_chat_role(item.get("role")), "content": bounded}
+                )
+    visible_messages = _latest_model_visible_messages(projected_messages)
+    if visible_messages:
+        conversation = "\n".join(
+            f"{item['role']}: {item['content']}" for item in visible_messages
+        )
+        text = (
+            f"{identity}\n\n"
+            f"Recent visible conversation:\n{conversation}\n\n"
+            f"Current user message:\n{sanitized_user_text}"
+        )
+    else:
+        text = f"{identity}\n\nUser message:\n{sanitized_user_text}"
     return _bounded_public_text(text, max_chars=_MODEL_VISIBLE_CONTEXT_MAX_CHARS)
 
 
