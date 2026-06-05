@@ -1210,20 +1210,23 @@ def _text_chunks_from_parts(parts: Sequence[object]) -> list[str]:
 def _event_function_calls(event: object) -> list[Mapping[str, object]]:
     calls: list[Mapping[str, object]] = []
     seen: set[str] = set()
-    for part in _event_parts(event):
-        for normalized in _part_function_calls(part):
+    for candidate in (event, _safe_model_dump_mapping(event)):
+        if candidate is None:
+            continue
+        for part in _event_parts(candidate):
+            for normalized in _part_function_calls(part):
+                key = _json_dumps(normalized)
+                if key not in seen:
+                    seen.add(key)
+                    calls.append(normalized)
+        for function_call in _event_direct_function_calls(candidate):
+            normalized = _normalize_function_call(function_call)
+            if normalized is None:
+                continue
             key = _json_dumps(normalized)
             if key not in seen:
                 seen.add(key)
                 calls.append(normalized)
-    for function_call in _event_direct_function_calls(event):
-        normalized = _normalize_function_call(function_call)
-        if normalized is None:
-            continue
-        key = _json_dumps(normalized)
-        if key not in seen:
-            seen.add(key)
-            calls.append(normalized)
     return calls
 
 
