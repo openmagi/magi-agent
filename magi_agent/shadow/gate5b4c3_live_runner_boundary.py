@@ -80,8 +80,9 @@ _ALLOWED_AGENT_KWARGS = (
     "tools",
 )
 _ALLOWED_RUNNER_KWARGS = ("agent", "app_name", "auto_create_session", "session_service")
-_ALLOWED_RUN_ASYNC_KWARGS = ("new_message", "session_id", "user_id")
+_ALLOWED_RUN_ASYNC_KWARGS = ("new_message", "run_config", "session_id", "user_id")
 _MAX_MANUAL_TOOL_CONTINUATIONS = 4
+_MAX_SELECTED_FULL_TOOLHOST_LLM_CALLS = 8
 _MAX_MANUAL_TOOL_RESULTS_BYTES = 8192
 _ERROR_REDACTION_RE = re.compile(
     r"(?:"
@@ -601,20 +602,28 @@ class Gate5B4C3LiveRunnerBoundary:
                 gate1a_egress_correlation_context=self._gate1a_egress_correlation_context,
                 gate1a_egress_proxy_url=self._gate1a_egress_proxy_url,
             )
+        selected_full_toolhost = (
+            request.recipe_profile.tools_policy == "selected_full_toolhost"
+        )
         run_kwargs = {
             "user_id": "gate5b4c3-shadow-user",
             "session_id": _shadow_session_id(request),
             "new_message": message,
         }
+        run_config = _selected_full_toolhost_run_config(selected_full_toolhost)
+        if run_config is not None:
+            run_kwargs["run_config"] = run_config
 
         event_count = 0
         output_chunks: list[str] = []
         manual_continuations = 0
+        tool_only_events_seen = False
         try:
             async with asyncio.timeout(request.budgets.python_runner_timeout_ms / 1000):
                 next_message: object = message
                 while True:
                     function_calls: list[Mapping[str, object]] = []
+                    function_responses_seen = False
                     current_run_kwargs = {**run_kwargs, "new_message": next_message}
                     async for event in runner.run_async(
                         **_allowlist_kwargs(
@@ -626,15 +635,19 @@ class Gate5B4C3LiveRunnerBoundary:
                         chunk = _event_text(event)
                         if chunk:
                             output_chunks.append(chunk)
-                        function_calls.extend(_event_function_calls(event))
+                        event_function_calls = _event_function_calls(event)
+                        function_calls.extend(event_function_calls)
+                        event_function_responses = _event_function_responses(event)
+                        if event_function_calls or event_function_responses:
+                            tool_only_events_seen = True
+                        if event_function_responses:
+                            function_responses_seen = True
                         if event_count >= 64:
                             break
-                    selected_full_toolhost = (
-                        request.recipe_profile.tools_policy == "selected_full_toolhost"
-                    )
                     if (
                         output_chunks
                         or not function_calls
+                        or function_responses_seen
                         or not self._adk_tools
                         or not selected_full_toolhost
                     ):
@@ -692,6 +705,34 @@ class Gate5B4C3LiveRunnerBoundary:
                 output_text=_joined_output(output_chunks),
             )
         except Exception as exc:
+            if selected_full_toolhost and tool_only_events_seen:
+                finalizer_output, finalizer_events = await _run_no_tool_finalizer(
+                    primitives=primitives,
+                    session_service=session_service,
+                    request=request,
+                    runner_input=runner_input,
+                    run_kwargs=run_kwargs,
+                    agent_kwargs=agent_kwargs,
+                    runner_kwargs=runner_kwargs,
+                )
+                event_count += finalizer_events
+                if finalizer_output:
+                    output_chunks.append(finalizer_output)
+                    return _result(
+                        request,
+                        diagnostic,
+                        status="completed",
+                        reason="runner_completed",
+                        started=started,
+                        adk_invoked=True,
+                        runner_attempted=True,
+                        model_attempted=True,
+                        event_count=event_count,
+                        agent_kwargs_keys=tuple(sorted(agent_kwargs)),
+                        runner_kwargs_keys=tuple(sorted(runner_kwargs)),
+                        run_async_kwargs_keys=tuple(sorted(run_kwargs)),
+                        output_text=_joined_output(output_chunks),
+                    )
             stage, reason_code, exception_category = _classify_runner_exception(exc)
             model_attempted = not (
                 event_count == 0
@@ -731,6 +772,18 @@ class Gate5B4C3LiveRunnerBoundary:
             )
 
         output_text = _joined_output(output_chunks)
+        if output_text is None and selected_full_toolhost and tool_only_events_seen:
+            finalizer_output, finalizer_events = await _run_no_tool_finalizer(
+                primitives=primitives,
+                session_service=session_service,
+                request=request,
+                runner_input=runner_input,
+                run_kwargs=run_kwargs,
+                agent_kwargs=agent_kwargs,
+                runner_kwargs=runner_kwargs,
+            )
+            event_count += finalizer_events
+            output_text = finalizer_output
         if output_text is None:
             return _result(
                 request,
@@ -1230,6 +1283,21 @@ def _event_function_calls(event: object) -> list[Mapping[str, object]]:
     return calls
 
 
+def _event_function_responses(event: object) -> tuple[object, ...]:
+    responses: list[object] = []
+    for candidate in (event, _safe_model_dump_mapping(event)):
+        if candidate is None:
+            continue
+        for part in _event_parts(candidate):
+            response = (
+                _mapping_or_attr(part, "function_response")
+                or _mapping_or_attr(part, "functionResponse")
+            )
+            if response is not None:
+                responses.append(response)
+    return tuple(responses)
+
+
 def _event_parts(
     event: object,
     *,
@@ -1434,6 +1502,66 @@ async def _invoke_manual_tool(tool: object, args: Mapping[str, object]) -> objec
     raise TypeError("manual tool is not invocable")
 
 
+async def _run_no_tool_finalizer(
+    *,
+    primitives: Gate5B4C3LiveAdkPrimitives,
+    session_service: object,
+    request: Gate5B4C3ShadowGenerationRequest,
+    runner_input: object,
+    run_kwargs: Mapping[str, object],
+    agent_kwargs: Mapping[str, object],
+    runner_kwargs: Mapping[str, object],
+) -> tuple[str | None, int]:
+    try:
+        finalizer_agent_kwargs = {
+            **dict(agent_kwargs),
+            "instruction": _no_tool_finalizer_instruction(request),
+            "tools": (),
+        }
+        finalizer_agent = primitives.Agent(
+            **_allowlist_kwargs(finalizer_agent_kwargs, _ALLOWED_AGENT_KWARGS)
+        )
+        finalizer_runner_kwargs = {
+            **dict(runner_kwargs),
+            "agent": finalizer_agent,
+            "session_service": session_service,
+        }
+        finalizer_runner = primitives.Runner(
+            **_allowlist_kwargs(finalizer_runner_kwargs, _ALLOWED_RUNNER_KWARGS)
+        )
+        finalizer_message = primitives.Content(
+            parts=[
+                primitives.Part.from_text(
+                    text=_no_tool_finalizer_message(runner_input),
+                )
+            ],
+            role="user",
+        )
+    except Exception:
+        return None, 0
+
+    finalizer_chunks: list[str] = []
+    finalizer_events = 0
+    finalizer_run_kwargs = {
+        **dict(run_kwargs),
+        "new_message": finalizer_message,
+        "run_config": _no_tool_finalizer_run_config(),
+    }
+    try:
+        async for event in finalizer_runner.run_async(
+            **_allowlist_kwargs(finalizer_run_kwargs, _ALLOWED_RUN_ASYNC_KWARGS)
+        ):
+            finalizer_events += 1
+            chunk = _event_text(event)
+            if chunk:
+                finalizer_chunks.append(chunk)
+            if finalizer_events >= 8:
+                break
+    except Exception:
+        return None, finalizer_events
+    return _joined_output(finalizer_chunks), finalizer_events
+
+
 def _manual_tool_status(result: object) -> str:
     if isinstance(result, Mapping):
         status = result.get("status")
@@ -1454,6 +1582,51 @@ def _manual_tool_followup_text(results: Sequence[Mapping[str, object]]) -> str:
         "Do not mention hidden chain-of-thought or private policy. "
         f"Results: {_json_dumps(payload)}"
     )
+
+
+def _no_tool_finalizer_instruction(request: Gate5B4C3ShadowGenerationRequest) -> str:
+    return (
+        "You are completing an OpenMagi selected full-toolhost turn after the "
+        "runtime already executed the available tool/function calls. Do not request "
+        "or call any tools in this finalizer pass. Use only the conversation and "
+        "tool/function response events already present in the current ADK session. "
+        "Return a normal user-visible text answer. If the gathered evidence is "
+        "insufficient, say what is missing in plain text instead of calling tools. "
+        f"Routing source: {request.model_routing.routing_source}."
+    )
+
+
+def _no_tool_finalizer_message(runner_input: object) -> str:
+    del runner_input
+    return (
+        "The selected toolhost pass has ended with tool/function events but no "
+        "text answer. Produce the final answer now using the existing session "
+        "evidence. Do not call tools."
+    )
+
+
+def _selected_full_toolhost_run_config(enabled: bool) -> object | None:
+    if not enabled:
+        return None
+    return _run_config(max_llm_calls=_MAX_SELECTED_FULL_TOOLHOST_LLM_CALLS)
+
+
+def _no_tool_finalizer_run_config() -> object | None:
+    return _run_config(max_llm_calls=2)
+
+
+def _run_config(*, max_llm_calls: int) -> object | None:
+    try:
+        from google.adk.agents import RunConfig
+    except Exception:
+        try:
+            from google.adk.agents.run_config import RunConfig  # type: ignore[no-redef]
+        except Exception:
+            return None
+    try:
+        return RunConfig(max_llm_calls=max_llm_calls)
+    except Exception:
+        return None
 
 
 def _bounded_json_value(value: object, *, max_bytes: int) -> object:

@@ -321,6 +321,48 @@ class _FunctionCallThenFinalRunner(_FakeRunner):
         yield _FakeEvent("final answer after manual tool execution")
 
 
+class _FunctionResponseOnlyPart:
+    function_response = {"name": "Calculation", "response": {"status": "ok"}}
+
+
+class _FunctionResponseOnlyEvent:
+    class _Content:
+        parts = [_FunctionResponseOnlyPart()]
+
+    content = _Content()
+
+
+class _AutoToolLoopAgent:
+    created_kwargs: list[dict[str, object]] = []
+
+    def __init__(self, **kwargs: object) -> None:
+        self.tools = tuple(kwargs.get("tools", ()))
+        type(self).created_kwargs.append(kwargs)
+
+
+class _AutoToolLoopRunner(_FakeRunner):
+    calls: list[dict[str, object]] = []
+
+    def __init__(self, **kwargs: object) -> None:
+        self.agent = kwargs["agent"]
+        type(self).created_kwargs = kwargs
+
+    async def run_async(self, **kwargs: object) -> object:
+        type(self).run_kwargs = kwargs
+        type(self).calls.append(
+            {
+                "toolsAttached": bool(getattr(self.agent, "tools", ())),
+                "newMessage": kwargs.get("new_message"),
+                "runConfigPresent": kwargs.get("run_config") is not None,
+            }
+        )
+        if getattr(self.agent, "tools", ()):
+            yield _FunctionCallOnlyEvent()
+            yield _FunctionResponseOnlyEvent()
+            return
+        yield _FakeEvent("final answer after no-tool finalizer")
+
+
 class _ManualCalculationTool:
     name = "Calculation"
     calls: list[dict[str, object]] = []
@@ -511,6 +553,23 @@ def _function_call_then_final_primitives() -> Gate5B4C3LiveAdkPrimitives:
     return Gate5B4C3LiveAdkPrimitives(
         Agent=_FakeAgent,
         Runner=_FunctionCallThenFinalRunner,
+        InMemorySessionService=_FakeSessionService,
+        Content=_FakeContent,
+        Part=_FakePart,
+        GenerateContentConfig=_FakeGenerateContentConfig,
+    )
+
+
+def _auto_tool_loop_primitives() -> Gate5B4C3LiveAdkPrimitives:
+    _AutoToolLoopAgent.created_kwargs = []
+    _AutoToolLoopRunner.created_kwargs = {}
+    _AutoToolLoopRunner.run_kwargs = {}
+    _AutoToolLoopRunner.calls = []
+    _ManualCalculationTool.calls = []
+    _FakeGenerateContentConfig.created_kwargs = {}
+    return Gate5B4C3LiveAdkPrimitives(
+        Agent=_AutoToolLoopAgent,
+        Runner=_AutoToolLoopRunner,
         InMemorySessionService=_FakeSessionService,
         Content=_FakeContent,
         Part=_FakePart,
@@ -745,6 +804,32 @@ def test_live_boundary_runs_manual_full_toolhost_continuation_for_part_model_dum
     assert result.output_text_internal == "final answer after manual tool execution"
     assert _ManualCalculationTool.calls == [{"expression": "7 + 8"}]
     assert len(_FunctionCallThenFinalRunner.calls) == 2
+
+
+def test_live_boundary_runs_no_tool_finalizer_after_adk_tool_only_events() -> None:
+    primitives = _auto_tool_loop_primitives()
+
+    result = Gate5B4C3LiveRunnerBoundary(
+        lambda: primitives,
+        adk_tools=(_ManualCalculationTool,),
+    ).invoke(_selected_full_toolhost_request(), config=_enabled_config())
+
+    assert result.status == "completed"
+    assert result.reason == "runner_completed"
+    assert result.output_text_internal == "final answer after no-tool finalizer"
+    assert result.event_count == 3
+    assert [call["toolsAttached"] for call in _AutoToolLoopRunner.calls] == [
+        True,
+        False,
+    ]
+    assert [call["runConfigPresent"] for call in _AutoToolLoopRunner.calls] == [
+        True,
+        True,
+    ]
+    assert [bool(kwargs["tools"]) for kwargs in _AutoToolLoopAgent.created_kwargs] == [
+        True,
+        False,
+    ]
 
 
 def test_live_boundary_extracts_mapping_content_parts_text_output() -> None:
