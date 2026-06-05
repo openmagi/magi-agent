@@ -28,6 +28,10 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from magi_agent.tools.manifest import RuntimeMode
 
 # ---------------------------------------------------------------------------
 # Light, import-clean imports only at module top.
@@ -111,6 +115,7 @@ def build_headless_runtime(
     session_id: str = "cli-session",
     runner: object | None = None,
     model: str | None = None,
+    mode: "RuntimeMode" = "act",
 ) -> HeadlessRuntime:
     """Construct the complete headless dependency set.
 
@@ -130,6 +135,9 @@ def build_headless_runtime(
     model:
         Reserved for future model-selection wiring; accepted but not yet
         forwarded (no Stream F model plumbing yet).
+    mode:
+        ``"act"`` (default) exposes the full tool set; ``"plan"`` exposes only
+        read-only tools (mutating tools are excluded) for plan-mode turns.
 
     Returns
     -------
@@ -152,6 +160,7 @@ def build_headless_runtime(
             cwd=effective_cwd,
             session_id=session_id,
             model=model,
+            mode=mode,
         )
     )
     composio_config = resolve_composio_config(os.environ)
@@ -209,6 +218,7 @@ def _build_default_runner(
     cwd: str | os.PathLike[str] | None = None,
     session_id: str = "cli-session",
     model: str | None = None,
+    mode: "RuntimeMode" = "act",
 ) -> object:
     """Build the CLI's default runner.
 
@@ -216,6 +226,10 @@ def _build_default_runner(
     env key for openai/anthropic/gemini/fireworks), build a real model-backed
     ADK runner. Otherwise fall back to the model-free stub so ``magi`` still
     launches with no configuration.
+
+    ``mode`` selects which tools the agent exposes: ``"plan"`` exposes only
+    read-only tools (the act-only mutating tools — FileWrite/FileEdit/PatchApply/
+    Bash — are excluded), ``"act"`` exposes the full set.
     """
 
     from magi_agent.cli.local_runner import build_local_cli_runner  # noqa: PLC0415
@@ -230,10 +244,13 @@ def _build_default_runner(
         build_cli_model_runner,
     )
 
+    # Identity is loaded from the SAME cwd used to root the tools.
+    workspace_root = str(cwd) if cwd is not None else os.getcwd()
     try:
         return build_cli_model_runner(
             config,
-            tools=_build_first_party_adk_tools(cwd=cwd, session_id=session_id),
+            tools=_build_first_party_adk_tools(cwd=cwd, session_id=session_id, mode=mode),
+            workspace_root=workspace_root,
         )
     except CliProviderDependencyError as exc:
         # Key configured but the provider dependency is missing: keep the CLI
@@ -245,6 +262,7 @@ def _build_first_party_adk_tools(
     *,
     cwd: str | os.PathLike[str] | None,
     session_id: str,
+    mode: "RuntimeMode" = "act",
 ) -> list[object]:
     """Build default first-party local ADK tools for the CLI real runner.
 
@@ -274,7 +292,7 @@ def _build_first_party_adk_tools(
         registration.manifest.name
         for registration in (
             registry.resolve_registration(manifest.name)
-            for manifest in registry.list_available(mode="act")
+            for manifest in registry.list_available(mode=mode)
         )
         if registration is not None and registration.handler is not None
     )
@@ -310,7 +328,7 @@ def _build_first_party_adk_tools(
     return build_adk_function_tools_for_registry(
         registry,
         dispatcher,
-        mode="act",
+        mode=mode,
         tool_context_factory=tool_context_factory,
         attach_enabled=True,
         exposed_tool_names=exposed_tool_names,
@@ -356,6 +374,7 @@ def build_tui_app(
     runner: object | None = None,
     model: str | None = None,
     runtime: object | None = None,
+    mode: "RuntimeMode" = "act",
 ) -> object:
     """Construct and return a fully-wired :class:`MagiTuiApp`.
 
@@ -378,6 +397,9 @@ def build_tui_app(
     runtime:
         Optional runtime object forwarded to ``MagiTuiApp`` (for tests /
         production callers that pre-build a runtime).
+    mode:
+        ``"act"`` (default) exposes the full tool set; ``"plan"`` exposes only
+        read-only tools (mutating tools are excluded) for plan-mode turns.
 
     Returns
     -------
@@ -401,6 +423,7 @@ def build_tui_app(
         session_id=session_id,
         runner=effective_runner,
         model=model,
+        mode=mode,
     )
 
     renderers = build_tool_renderers()

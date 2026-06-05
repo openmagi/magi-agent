@@ -124,7 +124,11 @@ def build_cli_model_runner(
     effective_instruction = (
         instruction
         if instruction is not None
-        else build_cli_instruction(session_id=session_id, model=config.litellm_model)
+        else build_cli_instruction(
+            session_id=session_id,
+            model=config.litellm_model,
+            workspace_root=effective_workspace_root,
+        )
     )
 
     agent = Agent(

@@ -103,14 +103,32 @@ def build_cli_adk_tools(
     )
 
 
-def build_cli_instruction(*, session_id: str, model: str = "") -> str:
-    """Build the real system prompt for the CLI agent (coding-agent path)."""
+def build_cli_instruction(
+    *,
+    session_id: str,
+    model: str = "",
+    workspace_root: str | None = None,
+) -> str:
+    """Build the real system prompt for the CLI agent (coding-agent path).
+
+    When ``workspace_root`` is supplied, optional project instruction files
+    (``AGENTS.md`` / ``SOUL.md`` / ``TOOLS.md`` / ``CLAUDE.md``) found in that cwd
+    (and its ``.magi/`` subdir) are loaded and rendered into the system prompt so
+    the CLI agent picks up repo conventions, matching Claude Code / OpenCode.
+    """
 
     from magi_agent.runtime.message_builder import build_system_prompt  # noqa: PLC0415
+
+    identity = None
+    if workspace_root is not None:
+        from magi_agent.cli.identity import load_identity  # noqa: PLC0415
+
+        identity = load_identity(workspace_root)
 
     return build_system_prompt(
         session_key=session_id,
         turn_id="cli",
+        identity=identity,
         coding_agent=True,
         model=model,
     )
