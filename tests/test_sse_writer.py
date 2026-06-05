@@ -114,12 +114,27 @@ def test_sse_writer_live_compatible_agent_text_keeps_utf8_and_legacy_done_only()
     }
 
 
-def test_sse_writer_drops_hidden_thinking_delta_events() -> None:
+def test_sse_writer_drops_hidden_thinking_delta_events(monkeypatch) -> None:
+    monkeypatch.delenv("MAGI_STREAM_THINKING", raising=False)
     writer = InMemorySseWriter()
 
     writer.agent({"type": "thinking_delta", "delta": "private reasoning"})
 
     assert writer.body == ""
+
+
+def test_sse_writer_emits_thinking_delta_when_flag_on(monkeypatch) -> None:
+    monkeypatch.setenv("MAGI_STREAM_THINKING", "1")
+    writer = InMemorySseWriter()
+
+    writer.agent({"type": "thinking_delta", "delta": "the model is thinking"})
+
+    assert writer.body != ""
+    payloads = _data_payloads(writer.body)
+    assert len(payloads) == 1
+    assert payloads[0]["type"] == "thinking_delta"
+    assert "delta" in payloads[0]
+    assert payloads[0]["delta"] == "the model is thinking"
 
 
 def test_sse_writer_drops_unknown_private_agent_events() -> None:

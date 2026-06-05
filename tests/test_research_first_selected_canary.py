@@ -295,6 +295,47 @@ def test_research_first_selected_endpoint_returns_no_write_authority_or_live_mod
     assert delivery_evidence.status == "passed"
 
 
+def test_research_first_selected_endpoint_ignores_local_dashboard_route_env(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    telemetry_path = tmp_path / "egress.jsonl"
+    telemetry_path.write_text("", encoding="utf-8")
+    counter_path = tmp_path / "gate8-research-first-counters.json"
+    request_digest = _digest("research-first-request-with-local-route-env")
+    env = _base_env(
+        CORE_AGENT_PYTHON_GATE8_RESEARCH_FIRST_CANARY_ENABLED="1",
+        CORE_AGENT_PYTHON_GATE8_RESEARCH_FIRST_CANARY_KILL_SWITCH="0",
+        CORE_AGENT_PYTHON_GATE5B_SHADOW_GENERATION_ENABLED="1",
+        CORE_AGENT_PYTHON_GATE5B_SHADOW_GENERATION_COUNTER_STATE_PATH=str(counter_path),
+        CORE_AGENT_PYTHON_GATE1A_EGRESS_EVIDENCE_SOURCE="egress_proxy_telemetry",
+        CORE_AGENT_PYTHON_GATE1A_EGRESS_TELEMETRY_PATH=str(telemetry_path),
+        CORE_AGENT_PYTHON_GATE1A_EGRESS_CORRELATION_MODE="proxy_connect_headers",
+        CORE_AGENT_PYTHON_GATE1A_EGRESS_PROXY_URL=(
+            "http://gate5b-gemini-egress-proxy.magi-system.svc.cluster.local:8080"
+        ),
+    )
+    monkeypatch.setenv("MAGI_AGENT_LOCAL_CHAT_ROUTE", "on")
+    monkeypatch.setenv("CORE_AGENT_PYTHON_CHAT_ROUTE", "on")
+    monkeypatch.setenv("CORE_AGENT_PYTHON_GATE8_RESEARCH_FIRST_CANARY_ENABLED", "1")
+    monkeypatch.setenv("CORE_AGENT_PYTHON_GATE8_RESEARCH_FIRST_CANARY_KILL_SWITCH", "0")
+
+    response = TestClient(create_app(_runtime(env))).post(
+        "/v1/chat/completions",
+        headers={
+            "Authorization": "Bearer gateway-token",
+            "X-Gate5B-Canary-Request-Digest": request_digest,
+        },
+        json=_research_payload(),
+    )
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("application/json")
+    body = response.json()
+    assert body["status"] == "python_ready"
+    assert body["researchFirst"]["requestDigest"] == request_digest
+
+
 def test_research_first_delivery_receipt_requires_durable_evidence_categories(
     monkeypatch,
     tmp_path,

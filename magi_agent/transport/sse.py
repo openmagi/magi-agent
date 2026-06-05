@@ -3,12 +3,14 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import os
 import re
 import time
 from collections.abc import Mapping
 from urllib.parse import SplitResult, urlsplit
 
 from magi_agent.composio.redaction import redact_composio_text
+from magi_agent.ops.health import _truthy_env
 from magi_agent.runtime.public_events import rule_check_event_has_authority
 from magi_agent.transport import tool_preview as _tool_preview
 
@@ -511,7 +513,22 @@ def _sanitize_agent_event(event: dict[str, object]) -> dict[str, object] | None:
         event = {**event, "type": aliased_event_type}
         event_type = aliased_event_type
     if event_type == "thinking_delta":
-        return None
+        if not _truthy_env("MAGI_STREAM_THINKING"):
+            return None
+        value = _get_public_string_value(event, "delta")
+        if value is None:
+            value = _get_public_string_value(event, "text")
+        if value is None:
+            return {"type": "thinking_delta"}
+        # _has_private_text_marker is applied first as belt-and-suspenders for
+        # structured data; _redact_unbounded_public_text is prose-oriented and
+        # handles token-level secrets in free-form thinking content.
+        redacted = (
+            "[redacted-private]"
+            if _has_private_text_marker(value)
+            else _redact_unbounded_public_text(value)
+        )
+        return {"type": "thinking_delta", "delta": redacted}
     if event_type == "browser_frame":
         return _sanitize_browser_frame_event(event)
     if event_type == "source_inspected":
@@ -536,6 +553,8 @@ def _sanitize_agent_event(event: dict[str, object]) -> dict[str, object] | None:
         return _sanitize_child_event(event)
     if event_type == "control_event":
         return _sanitize_control_event(event)
+    if event_type == "control_request":
+        return _sanitize_control_request_event(event)
     if event_type in _RUNTIME_STATUS_EVENT_TYPES:
         return _sanitize_runtime_status_event(event_type, event)
     if event_type == "runtime_trace":
@@ -2054,6 +2073,63 @@ def _sanitize_control_event(event: Mapping[str, object]) -> dict[str, object]:
         sanitized["event"] = safe_payload
     if "event" not in sanitized:
         return None
+    return sanitized
+
+
+def _sanitize_control_request_event(event: Mapping[str, object]) -> dict[str, object]:
+    """Sanitize a ``control_request`` event for public SSE emission.
+
+    This event type carries a tool-permission approval request that the browser
+    must render as a modal dialog.  The ``request_id`` and ``tool_name`` fields
+    must survive sanitization (they are needed for correlation and rendering).
+    ``arguments`` is redacted via the same :func:`~magi_agent.transport.tool_preview.sanitize_tool_preview`
+    path used for ``tool_start`` events; ``reason`` passes through
+    :func:`_sanitize_public_text` — a reason containing a private-text-marker
+    is included as ``"[redacted-private]"``; ``None``/empty reason is omitted.
+    """
+    sanitized: dict[str, object] = {"type": "control_request"}
+
+    # request_id: sanitized for safety but must normally survive for correlation.
+    request_id = event.get("request_id")
+    safe_request_id = _sanitize_optional_public_string(request_id, limit=120)
+    if safe_request_id is not None:
+        sanitized["request_id"] = safe_request_id
+
+    # tool_name: sanitized public text — needed to render the modal title.
+    tool_name = event.get("tool_name")
+    if isinstance(tool_name, str) and tool_name.strip():
+        sanitized["tool_name"] = _sanitize_public_text(tool_name)
+
+    # reason: sanitize; a private-text-marker reason becomes "[redacted-private]"
+    # (included); None/empty reason is omitted entirely.
+    reason = event.get("reason")
+    if isinstance(reason, str) and reason.strip():
+        safe_reason = _sanitize_optional_public_string(reason)
+        if safe_reason is not None:
+            sanitized["reason"] = safe_reason
+
+    # arguments: redact using the tool-preview sanitizer (credentials / tokens)
+    # plus the production-path redactor (filesystem paths).  This matches the
+    # combined redaction applied to tool_start/tool_end visible text.
+    # arguments is always emitted as a string (or absent), never a dict.
+    arguments = event.get("arguments")
+    if isinstance(arguments, Mapping):
+        try:
+            raw_preview = json.dumps(
+                {str(k): v for k, v in arguments.items()},
+                separators=(",", ":"),
+                ensure_ascii=False,
+                allow_nan=False,
+                default=str,
+            )
+        except (ValueError, TypeError):
+            raw_preview = "[redacted-args]"
+        redacted_preview = _tool_preview.sanitize_tool_preview(raw_preview)
+        redacted_preview = _PRODUCTION_PATH_RE.sub("[redacted-path]", redacted_preview)
+        sanitized["arguments"] = redacted_preview
+    elif arguments is not None:
+        sanitized["arguments"] = "{}"
+
     return sanitized
 
 
