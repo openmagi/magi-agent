@@ -24,7 +24,7 @@ def test_sse_frames_for_events_and_terminal():
     text = b"".join(frames).decode()
     assert "event: agent\n" in text
     assert "text_delta" in text
-    assert "\"turn_id\": \"t1\"" in text or "\"turn_id\":\"t1\"" in text
+    assert '"turn_id":"t1"' in text
     assert "turn_result" in text
     assert text.rstrip().endswith("data: [DONE]")
 
@@ -91,3 +91,47 @@ def test_aborted_terminal_with_error_serialized():
 
     # Must still end with [DONE]
     assert text.rstrip().endswith("data: [DONE]")
+
+
+# ---------------------------------------------------------------------------
+# Additional focused test (c): empty event stream yields only terminal + DONE
+# ---------------------------------------------------------------------------
+
+def test_no_events_yields_only_terminal_and_done():
+    """An empty event stream must produce exactly one agent frame (turn_result) + [DONE]."""
+    events: list[RuntimeEvent] = []
+    terminal = EngineResult(terminal=Terminal.completed)
+    frames = list(sse_frames_for(iter(events), terminal))
+    text = b"".join(frames).decode()
+
+    assert text.count("event: agent") == 1
+    assert '"type":"turn_result"' in text
+    assert text.rstrip().endswith("data: [DONE]")
+
+
+# ---------------------------------------------------------------------------
+# Additional focused test (d): non-finite floats in terminal do not crash
+# ---------------------------------------------------------------------------
+
+def test_non_finite_usage_and_cost_do_not_crash():
+    """Non-finite cost_usd/usage floats must be sanitized, not raise ValueError."""
+    terminal = EngineResult(
+        terminal=Terminal.completed,
+        usage={"input_tokens": float("inf"), "output_tokens": 5},
+        cost_usd=float("nan"),
+    )
+    frames = list(sse_frames_for(iter([]), terminal))
+    text = b"".join(frames).decode()
+
+    assert text.rstrip().endswith("data: [DONE]")
+
+    turn_result_line = next(
+        (line for line in text.splitlines() if "turn_result" in line and line.startswith("data:")),
+        None,
+    )
+    assert turn_result_line is not None, "No turn_result data line found"
+
+    payload = json.loads(turn_result_line[len("data:"):].strip())
+    assert payload["cost_usd"] == 0.0
+    assert payload["usage"]["input_tokens"] is None
+    assert payload["usage"]["output_tokens"] == 5

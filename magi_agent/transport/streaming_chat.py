@@ -27,26 +27,26 @@ existing SSE writer uses.
 
 from __future__ import annotations
 
-import json
-from collections.abc import Generator, Iterator
+import math
+from collections.abc import Iterator
 
 from magi_agent.cli.contracts import EngineResult
 from magi_agent.runtime.events import RuntimeEvent
-from magi_agent.transport.sse import _sanitize_agent_event
+# streaming_chat intentionally reuses sse's internal helpers (_json, _sanitize_agent_event) to stay lock-step with the SSE wire format.
+from magi_agent.transport.sse import _json, _sanitize_agent_event
 
 __all__ = ["sse_frames_for"]
 
 
 def _frame(payload_dict: dict[str, object]) -> bytes:
     """Encode one ``event: agent`` SSE frame as UTF-8 bytes."""
-    data = json.dumps(payload_dict, separators=(",", ":"), ensure_ascii=False, allow_nan=False)
-    return f"event: agent\ndata: {data}\n\n".encode()
+    return f"event: agent\ndata: {_json(payload_dict)}\n\n".encode()
 
 
 def sse_frames_for(
     events_iter: Iterator[RuntimeEvent],
     terminal: EngineResult,
-) -> Generator[bytes, None, None]:
+) -> Iterator[bytes]:
     """Yield SSE byte frames for every event then a terminal turn_result frame.
 
     Args:
@@ -81,11 +81,19 @@ def sse_frames_for(
         yield _frame(safe)
 
     # Terminal frame — always emitted, never sanitized.
+    # Guard non-finite floats so _json (allow_nan=False) never raises mid-stream.
+    safe_cost = terminal.cost_usd if (terminal.cost_usd is None or math.isfinite(terminal.cost_usd)) else 0.0
+    safe_usage: dict[str, object] | None = None
+    if terminal.usage is not None:
+        safe_usage = {
+            k: (None if isinstance(v, float) and not math.isfinite(v) else v)
+            for k, v in terminal.usage.items()
+        }
     turn_result: dict[str, object] = {
         "type": "turn_result",
         "terminal": terminal.terminal.value,
-        "usage": terminal.usage,
-        "cost_usd": terminal.cost_usd,
+        "usage": safe_usage,
+        "cost_usd": safe_cost,
         "error": terminal.error,
         "session_id": terminal.session_id,
         "turn_id": terminal.turn_id,
