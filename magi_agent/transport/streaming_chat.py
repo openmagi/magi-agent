@@ -32,8 +32,16 @@ from collections.abc import Iterator
 
 from magi_agent.cli.contracts import EngineResult
 from magi_agent.runtime.events import RuntimeEvent
-# streaming_chat intentionally reuses sse's internal helpers (_json, _sanitize_agent_event) to stay lock-step with the SSE wire format.
-from magi_agent.transport.sse import _json, _sanitize_agent_event
+# streaming_chat intentionally reuses sse's internal helpers (_json, _sanitize_agent_event)
+# to stay lock-step with the SSE wire format. The redaction helpers
+# (_has_private_text_marker / _redact_unbounded_public_text) are reused so the
+# terminal turn_result.error is scrubbed the SAME way visible text / error events are.
+from magi_agent.transport.sse import (
+    _has_private_text_marker,
+    _json,
+    _redact_unbounded_public_text,
+    _sanitize_agent_event,
+)
 
 __all__ = ["sse_frames_for", "frame_for_event", "frame_for_terminal"]
 
@@ -82,19 +90,29 @@ def frame_for_terminal(terminal: EngineResult) -> Iterator[bytes]:
     mid-stream.
     """
     # Guard non-finite floats so _json (allow_nan=False) never raises mid-stream.
-    safe_cost = terminal.cost_usd if (terminal.cost_usd is None or math.isfinite(terminal.cost_usd)) else 0.0
-    safe_usage: dict[str, object] | None = None
-    if terminal.usage is not None:
-        safe_usage = {
-            k: (None if isinstance(v, float) and not math.isfinite(v) else v)
-            for k, v in terminal.usage.items()
-        }
+    # EngineResult.cost_usd is always a float and .usage always a dict (non-Optional
+    # per contracts.py), so no `is None` guard is needed — only the non-finite scrub.
+    safe_cost = terminal.cost_usd if math.isfinite(terminal.cost_usd) else 0.0
+    safe_usage: dict[str, object] = {
+        k: (None if isinstance(v, float) and not math.isfinite(v) else v)
+        for k, v in terminal.usage.items()
+    }
+    # Redact the terminal error the SAME way visible text / error events are: an
+    # engine exception's str(exc) can leak filesystem paths/secrets. Mirror
+    # _sanitize_error_event's message handling; keep None as None.
+    safe_error = terminal.error
+    if isinstance(safe_error, str) and safe_error:
+        safe_error = (
+            "[redacted-private]"
+            if _has_private_text_marker(safe_error)
+            else _redact_unbounded_public_text(safe_error)
+        )
     turn_result: dict[str, object] = {
         "type": "turn_result",
         "terminal": terminal.terminal.value,
         "usage": safe_usage,
         "cost_usd": safe_cost,
-        "error": terminal.error,
+        "error": safe_error,
         "session_id": terminal.session_id,
         "turn_id": terminal.turn_id,
     }

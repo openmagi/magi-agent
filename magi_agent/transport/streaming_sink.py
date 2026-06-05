@@ -24,13 +24,9 @@ Usage (SSE route)::
 from __future__ import annotations
 
 import asyncio
-from typing import TYPE_CHECKING
 
 from magi_agent.cli.permissions import HeadlessSink, PermissionMode
 from magi_agent.runtime.events import RuntimeEvent
-
-if TYPE_CHECKING:
-    pass  # nothing extra needed at runtime
 
 __all__ = [
     "QueueFrameWriter",

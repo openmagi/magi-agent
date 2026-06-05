@@ -135,3 +135,56 @@ def test_non_finite_usage_and_cost_do_not_crash():
     assert payload["cost_usd"] == 0.0
     assert payload["usage"]["input_tokens"] is None
     assert payload["usage"]["output_tokens"] == 5
+
+
+# ---------------------------------------------------------------------------
+# Additional focused test (e): terminal error is redacted before the wire
+# ---------------------------------------------------------------------------
+
+def test_terminal_error_is_redacted():
+    """A terminal error carrying a filesystem path must be scrubbed, not leaked.
+
+    An engine exception's ``str(exc)`` can embed secrets / filesystem paths; the
+    terminal ``turn_result.error`` must be redacted the same way visible text and
+    error events are.
+    """
+    secret_path = "/home/ocuser/.openclaw/secret.key"
+    terminal = EngineResult(
+        terminal=Terminal.error,
+        error=f"boom at {secret_path}",
+        session_id="s-err",
+        turn_id="t-err",
+    )
+    frames = list(sse_frames_for(iter([]), terminal))
+    text = b"".join(frames).decode()
+
+    # The literal secret path must NOT appear anywhere in the serialized stream.
+    assert secret_path not in text
+
+    turn_result_line = next(
+        (line for line in text.splitlines() if "turn_result" in line and line.startswith("data:")),
+        None,
+    )
+    assert turn_result_line is not None, "No turn_result data line found"
+
+    payload = json.loads(turn_result_line[len("data:"):].strip())
+    assert payload["type"] == "turn_result"
+    # The error is redacted to a path/private marker, never the raw path.
+    assert payload["error"] is not None
+    assert secret_path not in payload["error"]
+    assert "[redacted-path]" in payload["error"] or "[redacted-private]" in payload["error"]
+
+
+def test_terminal_error_none_stays_none():
+    """A None terminal error must remain None (no spurious redaction)."""
+    terminal = EngineResult(terminal=Terminal.completed, error=None)
+    frames = list(sse_frames_for(iter([]), terminal))
+    text = b"".join(frames).decode()
+
+    turn_result_line = next(
+        (line for line in text.splitlines() if "turn_result" in line and line.startswith("data:")),
+        None,
+    )
+    assert turn_result_line is not None
+    payload = json.loads(turn_result_line[len("data:"):].strip())
+    assert payload["error"] is None

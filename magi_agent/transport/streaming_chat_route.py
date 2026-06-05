@@ -131,6 +131,14 @@ def register_streaming_chat_routes(
     """
 
     def _default_engine_builder(session_id: str, sink: object) -> tuple[object, object]:
+        # NOTE: build_headless_runtime(prompt_sink=...) wires a RulesPermissionGate
+        # backed by an EMPTY RulesEngine, so the engine's `updated_input`
+        # re-validation (which would re-check a rewritten tool's args against deny
+        # rules) is a no-op for this streaming surface — a control-response
+        # `updated_input` is applied verbatim. This is acceptable because the
+        # control-response comes from the gateway-token holder (full bot access).
+        # If multi-user / shared-token control-responses are ever introduced here,
+        # seed baseline deny rules so rewritten args are re-validated.
         from magi_agent.cli.wiring import build_headless_runtime  # lazy to avoid cold-start cost
 
         model = getattr(getattr(runtime, "config", None), "model", None)
@@ -183,7 +191,14 @@ def register_streaming_chat_routes(
 
         queue: asyncio.Queue[object] = asyncio.Queue()
         sink = build_streaming_prompt_sink(queue, turn_id=turn_id)
-        engine, gate = builder(session_id, sink)
+        # The engine build runs synchronously BEFORE the StreamingResponse is
+        # created, so a build-time failure must not escape as a bare 500 mid-
+        # contract. No SSE bytes have been sent yet, so returning a JSON 500
+        # here is safe (the client has not started consuming an event stream).
+        try:
+            engine, gate = builder(session_id, sink)
+        except Exception:
+            return JSONResponse(status_code=500, content={"error": "engine_build_failed"})
         cancel = asyncio.Event()
 
         return StreamingResponse(

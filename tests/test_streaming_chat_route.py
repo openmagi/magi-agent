@@ -621,3 +621,33 @@ def test_cancel_disabled_503(monkeypatch) -> None:
     )
     assert response.status_code == 503
     assert response.json()["error"] == "streaming_chat_disabled"
+
+
+# ---------------------------------------------------------------------------
+# Test 17 — engine build-time failure → 500 engine_build_failed (overall review)
+# ---------------------------------------------------------------------------
+def test_stream_engine_build_failure_returns_500(monkeypatch) -> None:
+    """A build-time exception must surface as a clean JSON 500, not a bare 500.
+
+    The engine_builder runs synchronously before the StreamingResponse begins, so
+    no SSE bytes have been sent yet — returning a JSON 500 is the correct contract.
+    """
+    monkeypatch.setenv("MAGI_STREAMING_CHAT", "1")
+
+    def boom_builder(session_id: str, sink: object) -> tuple[object, object]:
+        raise RuntimeError("engine wiring blew up at /home/ocuser/.openclaw/secret")
+
+    client = TestClient(_make_app(engine_builder=boom_builder))
+
+    response = client.post(
+        "/v1/chat/stream",
+        headers=_auth_headers(),
+        json={
+            "sessionId": "s-build-fail",
+            "turnId": "t-build-fail",
+            "messages": [{"role": "user", "content": "hi"}],
+        },
+    )
+
+    assert response.status_code == 500
+    assert response.json() == {"error": "engine_build_failed"}
