@@ -46,6 +46,11 @@ REQUIRED_PRESET_KEYS = {
     "git-safety",
     "sealed-files",
     "arity-permission",
+    "autopilot-phase-router",
+    "autopilot-interview-gate",
+    "autopilot-consensus-gate",
+    "autopilot-review-gate",
+    "autopilot-qa-gate",
 }
 
 

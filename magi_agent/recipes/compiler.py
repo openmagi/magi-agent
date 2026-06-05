@@ -2263,6 +2263,65 @@ def _first_party_packs() -> tuple[RecipePackManifest, ...]:
             approvalGateMetadata=("ApprovalGate:dev-coding:metadata-only",),
         ),
         RecipePackManifest(
+            packId="openmagi.autopilot",
+            displayName="Autopilot",
+            description=(
+                "Default-off strict autonomous FSM workflow metadata: interview -> "
+                "consensus-plan -> execute -> review -> adversarial-QA with "
+                "gate-failure return-to-plan."
+            ),
+            taskProfileSelectors=(
+                "autopilot",
+                "autonomous",
+                "full-auto",
+                "build-me",
+            ),
+            dependsOnPackIds=(
+                "openmagi.agent-methodology",
+                "openmagi.dev-coding",
+            ),
+            instructionRefs=("instruction:autopilot:strict-loop-contract",),
+            callbackRefs=("callback:autopilot:phase-router",),
+            validatorRefs=(
+                "validator:autopilot:interview-ambiguity-cleared",
+                "validator:autopilot:consensus-architect-then-critic",
+                "validator:autopilot:review-clean",
+                # Wraps verifier-bus "adversarial-qa" plus the
+                # qaSkipAllowedForNonruntime path.
+                "validator:autopilot:qa-passed-or-skipped",
+                "validator:autopilot:max-review-cycle-bounded",
+            ),
+            approvalGateRefs=(
+                "approval:autopilot:execution-lane",
+                "approval:autopilot:live-behavior",
+            ),
+            checkpointRefs=(
+                "checkpoint:autopilot:interview",
+                "checkpoint:autopilot:consensus-plan",
+                "checkpoint:autopilot:execute",
+                "checkpoint:autopilot:review",
+                "checkpoint:autopilot:qa",
+                "checkpoint:autopilot:return-to-plan",
+            ),
+            evidenceRefs=(
+                "evidence:autopilot:clarified-spec",
+                "evidence:autopilot:consensus-record",
+                "evidence:autopilot:phase-transition",
+            ),
+            auditRefs=("audit:autopilot:fsm-lifecycle",),
+            adkPrimitiveOwnership=common_adk_owners,
+            openmagiBoundaryOwnership=common_openmagi_owners
+            + (
+                "OpenMagi autopilot owns recipe-selected FSM transition metadata; "
+                "live phase driving attaches through ADK callbacks/plugins later",
+                "OpenMagi autopilot does not own ADK Runner, Agent, Event, "
+                "FunctionTool, SessionService, MemoryService, or ArtifactService",
+            ),
+            callbackSetMetadata=("CallbackSet:autopilot:phase-router-metadata-only",),
+            validatorSetMetadata=("ValidatorSet:autopilot:fsm-gates-metadata-only",),
+            approvalGateMetadata=("ApprovalGate:autopilot:metadata-only",),
+        ),
+        RecipePackManifest(
             packId="openmagi.missions",
             displayName="Missions",
             description="Metadata-only mission lifecycle recipe boundary.",

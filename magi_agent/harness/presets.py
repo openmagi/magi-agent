@@ -263,6 +263,56 @@ _BUILTIN_PRESETS: tuple[BuiltinHarnessPreset, ...] = tuple(
             _preset("task-contract", PresetCategory.TASK, hook_points=("beforeTurnStart", "onTaskCheckpoint"), verifier_gates=("task-contract",)),
             _preset("goal-progress", PresetCategory.TASK, hook_points=("onTaskCheckpoint",), verifier_gates=("goal-progress",)),
             _preset("task-board-completion", PresetCategory.TASK, hook_points=("onTaskCheckpoint", "afterTurnEnd"), verifier_gates=("task-board-completion",)),
+            # Autopilot FSM presets (default-off, env-gated by MAGI_AUTOPILOT). The
+            # execute phase has no standalone verifier-gate preset: execution-phase
+            # advancement is driven by the existing coding-verification/goal-progress
+            # presets plus the autopilot-phase-router callback, not a new verifier hook.
+            # blocking=None on the metadata-only gate presets is a deliberate placeholder
+            # pending PR5 live attachment.
+            _preset(
+                "autopilot-phase-router",
+                PresetCategory.TASK,
+                default_on=False,
+                hook_points=("beforeTurnStart",),
+                blocking=True,
+                fail_open=True,
+                env_gates=("MAGI_AUTOPILOT",),
+                scope_hints=("autopilot",),
+            ),
+            _preset(
+                "autopilot-interview-gate",
+                PresetCategory.TASK,
+                default_on=False,
+                hook_points=("beforeLLMCall",),
+                blocking=True,
+                fail_open=True,
+                env_gates=("MAGI_AUTOPILOT",),
+                verifier_gates=("interview-ambiguity-cleared",),
+            ),
+            _preset(
+                "autopilot-consensus-gate",
+                PresetCategory.TASK,
+                default_on=False,
+                hook_points=("onTaskCheckpoint",),
+                env_gates=("MAGI_AUTOPILOT",),
+                verifier_gates=("consensus-architect-then-critic",),
+            ),
+            _preset(
+                "autopilot-review-gate",
+                PresetCategory.TASK,
+                default_on=False,
+                hook_points=("afterCommit",),
+                env_gates=("MAGI_AUTOPILOT",),
+                verifier_gates=("review-clean", "coding-child-review"),
+            ),
+            _preset(
+                "autopilot-qa-gate",
+                PresetCategory.TASK,
+                default_on=False,
+                hook_points=("afterTurnEnd",),
+                env_gates=("MAGI_AUTOPILOT",),
+                verifier_gates=("adversarial-qa",),
+            ),
             _preset("output-delivery", PresetCategory.OUTPUT, hook_points=("afterLLMCall",), verifier_gates=("output-delivery",)),
             _preset("artifact-delivery", PresetCategory.OUTPUT, hook_points=("onArtifactCreated", "afterTurnEnd"), verifier_gates=("artifact-delivery",)),
             _preset("response-language", PresetCategory.OUTPUT, hook_points=("afterLLMCall",), config_gates=("response-language-policy",), scope_hints=("configured-policy",)),

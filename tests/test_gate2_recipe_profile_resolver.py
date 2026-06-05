@@ -290,6 +290,7 @@ def test_pack_registry_catalog_is_metadata_only_and_has_expected_first_party_pac
         "openmagi.research",
         "openmagi.research-scout",
         "openmagi.dev-coding",
+        "openmagi.autopilot",
         "openmagi.missions",
         "openmagi.scheduled-work",
         "openmagi.memory-agentmemory",
