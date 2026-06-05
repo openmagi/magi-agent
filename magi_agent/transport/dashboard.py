@@ -16,6 +16,7 @@ def _dashboard_html(runtime: OpenMagiRuntime) -> str:
         "runtime": "magi-agent",
         "runtimeEngine": runtime.config.runtime_engine,
         "version": runtime.config.build.version,
+        "gatewayToken": "local-dev-token" if runtime.config.gateway_token == "local-dev-token" else "",
     }
     bootstrap_json = escape(json.dumps(bootstrap, separators=(",", ":")), quote=False)
     return f"""<!doctype html>
@@ -890,13 +891,13 @@ def _dashboard_html(runtime: OpenMagiRuntime) -> str:
       <section class="messages" id="messages" aria-live="polite">
         <div class="thread-list" id="thread-list">
         <div class="empty-state" id="empty-state">
-          <div class="welcome-message">
+          <div class="welcome-message message assistant">
             <div class="thread-meta">
               <span><span class="dot ready"></span><span>Current run</span></span>
               <strong id="composer-status">Ready to run</strong>
             </div>
-            <h3>Run local agent work from one dashboard.</h3>
-            <p>Ask for research, coding, document review, planning, and automation. Public runtime events and tool progress appear in the work stream while the answer streams here.</p>
+            <h3>Magi Agent is ready.</h3>
+            <p>Use this local workspace for research, coding, document review, planning, and automation. Public runtime events and tool progress appear in the work stream while the answer streams here.</p>
             <div class="run-state" aria-label="Local runtime readiness">
               <div class="run-state-card"><span>Status</span><strong>No active run</strong></div>
               <div class="run-state-card"><span>Runtime</span><strong>ADK Python</strong></div>
@@ -967,7 +968,7 @@ def _dashboard_html(runtime: OpenMagiRuntime) -> str:
             </div>
             <small>Public ADK events, tool progress, evidence receipts, and transport state appear here during a run.</small>
           </div>
-          <p class="panel-heading">Current run</p>
+          <p class="panel-heading">Work in progress</p>
           <div class="event pending"><strong>No active run</strong><code>Submit a prompt to start a local ADK turn</code></div>
           <p class="panel-heading">Main session</p>
           <div class="timeline" id="work-stream-events">
@@ -1047,7 +1048,7 @@ def _dashboard_html(runtime: OpenMagiRuntime) -> str:
     document.getElementById("settings-engine").textContent = bootstrap.runtimeEngine || "adk-python";
     tileRuntime.textContent = bootstrap.runtime;
     modelSelect.innerHTML = `<option>${{escapeText(bootstrap.model)}}</option>`;
-    tokenInput.value = localStorage.getItem(tokenKey) || "";
+    tokenInput.value = localStorage.getItem(tokenKey) || bootstrap.gatewayToken || "";
 
     function escapeText(value) {{
       return String(value ?? "").replace(/[&<>"']/g, (char) => ({{
