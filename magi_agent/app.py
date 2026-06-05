@@ -5,6 +5,7 @@ from fastapi.responses import JSONResponse
 
 from .runtime.openmagi_runtime import OpenMagiRuntime
 from .transport.chat import register_chat_routes
+from .transport.streaming_chat_route import register_streaming_chat_routes
 from .transport.dashboard import register_dashboard_routes
 from .transport.health import health_payload, healthz_payload
 from .transport.shadow_generations import register_shadow_generation_routes
@@ -28,6 +29,7 @@ def create_app(runtime: OpenMagiRuntime) -> FastAPI:
         return JSONResponse(content=payload, status_code=200 if payload.get("ok") else 503)
 
     register_chat_routes(app, runtime)
+    register_streaming_chat_routes(app, runtime)
     register_shadow_invocation_routes(app, runtime)
     register_shadow_generation_routes(app, runtime)
     register_tool_admin_routes(app, runtime)
