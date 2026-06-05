@@ -1,10 +1,25 @@
 from __future__ import annotations
 
+import tomllib
+from pathlib import Path
+
 import pytest
 
+import magi_agent
 from magi_agent import main as main_module
 from magi_agent.config.env import RuntimeEnvError
 from magi_agent.main import resolve_server_port
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+
+
+def test_release_version_and_local_health_version_are_aligned() -> None:
+    pyproject = tomllib.loads((REPO_ROOT / "pyproject.toml").read_text())
+
+    assert pyproject["project"]["version"] == "0.1.8"
+    assert magi_agent.__version__ == "0.1.8"
+    config = main_module._parse_runtime_config({})  # noqa: SLF001
+    assert config.build.version == "0.1.8-local"
 
 
 def test_resolve_server_port_uses_core_agent_port_when_no_args() -> None:
