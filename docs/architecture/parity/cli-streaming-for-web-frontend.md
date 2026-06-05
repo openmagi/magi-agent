@@ -1,9 +1,16 @@
-# CLI Streaming for a Web Chat GUI
+# CLI Streaming for the Local Web Chat GUI
 
-A reference for a team building a **web chat GUI** that must stream model and
-tool output the way the `magi` CLI already does: incremental assistant tokens,
-tool-call / tool-result rendering, permission approval prompts, and
-cancellation.
+A reference for the OSS/local **Magi Agent web chat GUI** that must stream
+model and tool output the way the `magi` CLI already does: incremental
+assistant tokens, tool-call / tool-result rendering, permission approval
+prompts, and cancellation.
+
+This document is scoped to the local Magi Agent runtime and dashboard served by
+`magi-agent serve`. It is not a hosted OpenMagi dashboard contract. Hosted
+deployments already have a separate chat-proxy/OpenAI-SSE adapter with product
+auth, interrupt/inject handling, selected-route receipts, and `event: agent`
+frames; applying this design there requires an explicit adapter layer rather
+than copying the local transport literally.
 
 The CLI is built as **one engine, two surfaces**. A single async generator —
 `EngineDriver.run_turn_stream(...)` — is the source of truth for a turn. Two
@@ -11,8 +18,8 @@ surfaces consume the *identical* event stream: the headless NDJSON projection
 (`magi_agent/cli/headless.py`) and the Textual TUI
 (`magi_agent/cli/tui/app.py`). A third consumer already exists: the **local
 dashboard** chat endpoint (PR #145, commit `68c0399`) drives the same engine and
-ships its events to a browser over **SSE**. The web chat GUI should be a fourth
-consumer of the same contract.
+ships its events to a browser over **SSE**. A richer local web chat GUI should
+extend that local dashboard consumer, not create a second engine.
 
 > Citations are `path:line` against the worktree at
 > `magi-agent-oss-worktrees/docs-streaming` (branch `docs/cli-streaming-web-frontend`).
@@ -80,13 +87,19 @@ derives `EventKind` from that inner `payload["type"]` via `_map_event_kind`
 |-------------|-------------------------------|
 | `token` | `text_delta` |
 | `tool` | `tool_start`, `tool_progress`, `tool_end` |
-| `control` | `control_event`, `control_request`, `control_replay_complete` |
+| `control` | `control_event`, `control_replay_complete`; `control_request` only when a prompt sink projects it into the outbound transport |
 | `artifact` | `source_inspected`, `document_draft`, `research_artifact_delta`, `patch_preview` |
 | `error` | `error` |
 | `status` | everything else (e.g. `turn_phase`, `turn_end`, `heartbeat`) |
 
 So **always branch on BOTH** `event.type` (coarse) and `payload["type"]`
 (inner). The TUI and headless both do exactly this.
+
+Important distinction: `control_request` approval prompts are produced by a
+`PromptSink` such as `HeadlessSink`, not by the model runner itself. A web
+transport that wants permission modals must multiplex both producers into the
+browser stream: `run_turn_stream(...)` for runtime events and the sink's
+outbound control frames while the engine is blocked in `gate.check(...)`.
 
 ### 2.2 Payload schemas per inner type
 
@@ -238,9 +251,12 @@ echo of the `RuntimeEvent` (token text replaced with `[redacted]`)
 (`magi_agent/cli/headless.py:172-177`); `is_error` is true for any non-completed
 terminal or any non-null `error` (`magi_agent/cli/headless.py:180-185`).
 
-**`control_request`** — emitted by the permission gate's `HeadlessSink` to ask
-the client to approve a tool (`magi_agent/cli/protocol.py:82-86`,
-`magi_agent/cli/permissions.py:533-540`):
+**`control_request`** — emitted by the permission gate's `HeadlessSink`, not by
+`run_turn_stream(...)`, to ask the client to approve a tool
+(`magi_agent/cli/protocol.py:82-86`,
+`magi_agent/cli/permissions.py:533-540`). If the local web transport consumes
+only the engine generator and does not also drain the sink/frame writer, the UI
+will never see this prompt while the engine waits:
 
 ```json
 {"type":"control_request","uuid":"...","session_id":"<sid>",
@@ -436,39 +452,42 @@ data: {"type":"tool_start","id":"call_1","name":"Bash","input":{...}}
 data: {"choices":[{"index":0,"delta":{"content":"Hello"}}]}
 ```
 
-**What the web chat GUI can reuse vs. must add:**
+**What the local web chat GUI can reuse vs. must add:**
 
 | Reuse as-is | Must add for a richer GUI |
 |-------------|---------------------------|
 | `build_headless_runtime` + `run_turn_stream` (same engine) | A non-bypass permission mode (`default`) so users approve tools |
-| SSE `event: agent` carrying raw `RuntimeEvent.payload` | An **inbound** channel for `control_response` / cancel (SSE is one-way; the dashboard sends none) |
+| SSE `event: agent` carrying raw `RuntimeEvent.payload` | An outbound prompt-sink stream for `control_request` frames plus an **inbound** channel for `control_response` / cancel (SSE is one-way; the dashboard sends none) |
 | OpenAI-style `delta` chunks for token streaming | Tool-call/result **cards** (the dashboard only forwards text deltas) |
 | Per-turn `cancel` event seam | A way to reach that `cancel` from the browser (cancel endpoint / WS message) |
 
 The dashboard is intentionally minimal (bypass perms, no inbound, text-only
-deltas). A real chat GUI needs the additions in the right column.
+deltas). A richer local web chat GUI needs the additions in the right column.
 
 ---
 
-## 7. Blueprint for the web chat GUI
+## 7. Blueprint for the local web chat GUI
 
 ### 7.1 Transport
 
 Two viable options; both consume the *same* `run_turn_stream` generator.
 
-- **SSE + a side channel (recommended for a quick build).** Mirror PR #145:
-  one `event: agent` SSE message per `RuntimeEvent` (ship the whole `payload`,
-  not just text). Because SSE is server→client only, add a small **inbound POST
-  endpoint** for the two inbound frames — `control_response` and
-  `control_cancel_request` — that the server marshals into the gate's
-  `sink.deliver(...)` / `cancel.set()`. This reuses the dashboard pattern and the
-  existing FastAPI route.
+- **SSE + a side channel (recommended for a quick build).** Mirror PR #145 for
+  runtime events, but add a second outbound producer for prompt-sink frames.
+  The server should push both `RuntimeEvent` payloads and `HeadlessSink`
+  `control_request` frames into one ordered queue before writing SSE. Because
+  SSE is server→client only, add a small **inbound POST endpoint** for the two
+  inbound frames — `control_response` and `control_cancel_request` — that the
+  server marshals into `sink.deliver(...)` / `cancel.set()`. This reuses the
+  dashboard pattern and prevents the engine from waiting forever in
+  `gate.check(...)` while the browser never receives the approval prompt.
 - **WebSocket (recommended if you want one duplex socket).** Send outbound
-  `RuntimeEvent` payloads + the terminal, and receive `control_response` /
-  `control_cancel_request` on the same socket. Wire the inbound messages exactly
-  like `_route_inbound_line` (`magi_agent/cli/headless.py:406-443`):
-  `control_response` → `sink.deliver(ControlResponse(**msg))`,
-  `control_cancel_request` → `cancel.set()`.
+  `RuntimeEvent` payloads, prompt-sink `control_request` frames, and the
+  terminal; receive `control_response` / `control_cancel_request` on the same
+  socket. Wire the inbound messages exactly like `_route_inbound_line`
+  (`magi_agent/cli/headless.py:406-443`): `control_response` →
+  `sink.deliver(ControlResponse(**msg))`, `control_cancel_request` →
+  `cancel.set()`.
 
 Run with `permission_mode="default"` (not `bypassPermissions`) so tools prompt,
 and attach a `HeadlessSink` (or a custom `PromptSink`) to the gate's `sinks`
@@ -503,6 +522,19 @@ function onRuntimeEvent(ev) {            // ev = RuntimeEvent.payload, with ev.t
 // on EngineResult / result frame: render terminal (usage, cost, error), unlock input.
 ```
 
+Handle prompt-sink frames separately:
+
+```ts
+function onControlRequest(frame) {
+  openApprovalModal({
+    requestId: frame.request_id,
+    toolName: frame.request.tool_name,
+    arguments: frame.request.arguments,
+    reason: frame.request.reason,
+  });
+}
+```
+
 Component mapping:
 
 | Event | Component |
@@ -514,7 +546,7 @@ Component mapping:
 | `tool_end` (blocked/error/interrupted) | ToolCallCard **rejected** state — mirror `_is_rejected_end`, statuses `{rejected,blocked,denied,deny,error}` or `interrupted` (`magi_agent/cli/tui/app.py:150-158`) |
 | `turn_phase` / `heartbeat` | subtle **StatusChip** / activity line |
 | `artifact` (`patch_preview`, `source_inspected`) | **DiffCard** / **CitationCard** |
-| `control_request` | **ApprovalModal** (see 7.4) |
+| prompt-sink `control_request` | **ApprovalModal** (see 7.4) |
 | `EngineResult` / `result` | terminal: usage/cost, error banner if `is_error`, unlock composer |
 
 ### 7.3 Streaming token rendering
