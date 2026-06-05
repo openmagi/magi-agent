@@ -35,6 +35,7 @@ Gate5B4C3LiveRunnerReason: TypeAlias = Literal[
     "input_adapter_drop",
     "adk_primitives_error",
     "runner_completed",
+    "runner_incomplete",
     "runner_output_missing",
     "runner_timeout",
     "runner_error",
@@ -142,6 +143,26 @@ _PROVIDER_REQUEST_SERIALIZATION_RE = re.compile(
     r"\b(?:generatecontentparameters|functiondeclaration|"
     r"function_declaration|convert_to_dict|encode_unserializable|"
     r"request\s+serialization)\b",
+    re.IGNORECASE,
+)
+_INCOMPLETE_WAIT_OUTPUT_RE = re.compile(
+    r"(?:잠시만|기다려\s*주세요|기다려\s*주시면|please\s+wait|still\s+working|"
+    r"one\s+moment)",
+    re.IGNORECASE,
+)
+_INCOMPLETE_PROMISE_OUTPUT_RE = re.compile(
+    r"(?:하겠습니다|진행하겠습니다|실행하겠습니다|준비하겠습니다|"
+    r"\bI\s+will\b|\bI'll\b|\bI\s+am\s+going\s+to\b|\bI'm\s+going\s+to\b|"
+    r"\bwill\s+(?:run|execute|start|prepare|analy[sz]e|work)\b)",
+    re.IGNORECASE,
+)
+_INCOMPLETE_WORK_REF_RE = re.compile(
+    r"(?:/[A-Za-z0-9_.:-]+|분석|리포트|보고서|작업|병렬|실행|"
+    r"\breport\b|\banalys[ie]s\b|\bqueue\b|\bparallel\b|\btask\b)",
+    re.IGNORECASE,
+)
+_COMPLETION_EVIDENCE_RE = re.compile(
+    r"(?:완료|끝났|마쳤|결과|final\s+answer|completed|done)",
     re.IGNORECASE,
 )
 _PRE_PROVIDER_EXCEPTION_CATEGORIES = frozenset(
@@ -813,6 +834,39 @@ class Gate5B4C3LiveRunnerBoundary:
                     gate1a_egress_proxy_url=self._gate1a_egress_proxy_url,
                 ),
             )
+        if (
+            selected_full_toolhost
+            and _looks_like_incomplete_full_toolhost_output(output_text)
+        ):
+            return _result(
+                request,
+                diagnostic,
+                status="error",
+                reason="runner_incomplete",
+                started=started,
+                adk_invoked=True,
+                runner_attempted=True,
+                model_attempted=True,
+                event_count=event_count,
+                agent_kwargs_keys=tuple(sorted(agent_kwargs)),
+                runner_kwargs_keys=tuple(sorted(runner_kwargs)),
+                run_async_kwargs_keys=tuple(sorted(run_kwargs)),
+                runner_error_diagnostic=_runner_error_diagnostic(
+                    request,
+                    stage="runner_output_projection",
+                    reason_code="runner_incomplete",
+                    exception_category="runner_output_projection_failure",
+                    adk_invoked=True,
+                    runner_attempted=True,
+                    model_attempted=True,
+                    active_tools=self._adk_tools,
+                    gate1a_egress_correlation_context=(
+                        self._gate1a_egress_correlation_context
+                    ),
+                    gate1a_egress_proxy_url=self._gate1a_egress_proxy_url,
+                ),
+                output_text=output_text,
+            )
 
         return _result(
             request,
@@ -994,6 +1048,20 @@ def _setup_error_result(
             gate1a_egress_correlation_context=gate1a_egress_correlation_context,
             gate1a_egress_proxy_url=gate1a_egress_proxy_url,
         ),
+    )
+
+
+def _looks_like_incomplete_full_toolhost_output(output_text: str) -> bool:
+    normalized = " ".join(output_text.split())
+    if not normalized:
+        return False
+    if _COMPLETION_EVIDENCE_RE.search(normalized):
+        return False
+    if _INCOMPLETE_WAIT_OUTPUT_RE.search(normalized):
+        return True
+    return bool(
+        _INCOMPLETE_PROMISE_OUTPUT_RE.search(normalized)
+        and _INCOMPLETE_WORK_REF_RE.search(normalized)
     )
 
 

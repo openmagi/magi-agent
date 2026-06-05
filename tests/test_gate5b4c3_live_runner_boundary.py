@@ -363,6 +363,15 @@ class _AutoToolLoopRunner(_FakeRunner):
         yield _FakeEvent("final answer after no-tool finalizer")
 
 
+class _PromiseOnlyRunner(_FakeRunner):
+    async def run_async(self, **kwargs: object) -> object:
+        type(self).run_kwargs = kwargs
+        yield _FakeEvent(
+            "선정된 종목들에 대해 /multibagger-full-report 분석을 병렬로 실행하겠습니다. "
+            "잠시만 기다려 주세요."
+        )
+
+
 class _ManualCalculationTool:
     name = "Calculation"
     calls: list[dict[str, object]] = []
@@ -570,6 +579,21 @@ def _auto_tool_loop_primitives() -> Gate5B4C3LiveAdkPrimitives:
     return Gate5B4C3LiveAdkPrimitives(
         Agent=_AutoToolLoopAgent,
         Runner=_AutoToolLoopRunner,
+        InMemorySessionService=_FakeSessionService,
+        Content=_FakeContent,
+        Part=_FakePart,
+        GenerateContentConfig=_FakeGenerateContentConfig,
+    )
+
+
+def _promise_only_primitives() -> Gate5B4C3LiveAdkPrimitives:
+    _FakeAgent.created_kwargs = {}
+    _PromiseOnlyRunner.created_kwargs = {}
+    _PromiseOnlyRunner.run_kwargs = {}
+    _FakeGenerateContentConfig.created_kwargs = {}
+    return Gate5B4C3LiveAdkPrimitives(
+        Agent=_FakeAgent,
+        Runner=_PromiseOnlyRunner,
         InMemorySessionService=_FakeSessionService,
         Content=_FakeContent,
         Part=_FakePart,
@@ -830,6 +854,21 @@ def test_live_boundary_runs_no_tool_finalizer_after_adk_tool_only_events() -> No
         True,
         False,
     ]
+
+
+def test_live_boundary_rejects_promise_only_full_toolhost_output() -> None:
+    result = Gate5B4C3LiveRunnerBoundary(
+        _promise_only_primitives,
+        adk_tools=(_ManualCalculationTool,),
+    ).invoke(_selected_full_toolhost_request(), config=_enabled_config())
+
+    assert result.status == "error"
+    assert result.reason == "runner_incomplete"
+    assert result.runner_error_diagnostic is not None
+    assert result.runner_error_diagnostic.stage == "runner_output_projection"
+    assert result.runner_error_diagnostic.reason_code == "runner_incomplete"
+    assert result.output_text_internal is not None
+    assert result.user_visible_output is None
 
 
 def test_live_boundary_extracts_mapping_content_parts_text_output() -> None:

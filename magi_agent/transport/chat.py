@@ -3413,7 +3413,8 @@ def build_gate5b_user_visible_canary_runner_request(
 
     source_messages = payload.get("messages") if isinstance(payload, Mapping) else None
     if isinstance(source_messages, list):
-        for item in source_messages[:16]:
+        projected_messages: list[dict[str, str]] = []
+        for item in source_messages:
             if not isinstance(item, Mapping):
                 continue
             role = _safe_chat_role(item.get("role"))
@@ -3423,7 +3424,8 @@ def build_gate5b_user_visible_canary_runner_request(
             _extend_unique(signals, content_signals)
             bounded = content[:_MODEL_VISIBLE_CONTEXT_MAX_CHARS].strip()
             if bounded:
-                messages.append({"role": role, "content": bounded})
+                projected_messages.append({"role": role, "content": bounded})
+        messages.extend(_latest_model_visible_messages(projected_messages))
 
     workspace_identity_context: list[str] = []
     for key in (
@@ -3454,6 +3456,22 @@ def build_gate5b_user_visible_canary_runner_request(
     if safe_continuity is not None:
         request["contextContinuity"] = safe_continuity
     return request
+
+
+def _latest_model_visible_messages(
+    messages: Sequence[Mapping[str, str]],
+    *,
+    limit: int = 16,
+) -> tuple[dict[str, str], ...]:
+    if len(messages) <= limit:
+        return tuple(dict(item) for item in messages)
+    system_messages = [dict(item) for item in messages if item.get("role") == "system"]
+    conversation_messages = [
+        dict(item) for item in messages if item.get("role") != "system"
+    ]
+    selected_system = system_messages[: min(len(system_messages), 2)]
+    remaining = max(1, limit - len(selected_system))
+    return tuple([*selected_system, *conversation_messages[-remaining:]])
 
 
 def _build_gate5b_model_visible_current_turn_text(user_text: str) -> str:

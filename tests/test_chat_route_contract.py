@@ -248,6 +248,44 @@ def test_user_visible_runner_request_normalizes_legacy_workspace_identity_fixtur
     )
 
 
+def test_user_visible_runner_request_preserves_latest_visible_chat_context() -> None:
+    messages: list[dict[str, str]] = [
+        {"role": "system", "content": "Public runtime policy."},
+    ]
+    for index in range(18):
+        messages.append(
+            {
+                "role": "assistant" if index % 2 else "user",
+                "content": f"old visible turn {index}",
+            }
+        )
+    messages.append(
+        {
+            "role": "assistant",
+            "content": "I started the multibagger report but did not finish it.",
+        }
+    )
+    messages.append(
+        {
+            "role": "user",
+            "content": "어캐돼가",
+        }
+    )
+
+    request = build_gate5b_user_visible_canary_runner_request({"messages": messages})
+    model_messages = request["messages"]
+
+    assert isinstance(model_messages, tuple)
+    assert model_messages[-2:] == (
+        {
+            "role": "assistant",
+            "content": "I started the multibagger report but did not finish it.",
+        },
+        {"role": "user", "content": "어캐돼가"},
+    )
+    assert {"role": "user", "content": "old visible turn 0"} not in model_messages
+
+
 def test_chat_route_passes_canonical_identity_context_to_mocked_runner(monkeypatch) -> None:
     monkeypatch.setenv("CORE_AGENT_PYTHON_CHAT_ROUTE", "on")
     captured: dict[str, object] = {}
