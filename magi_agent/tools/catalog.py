@@ -7,6 +7,36 @@ from .registry import ToolRegistry
 CORE_TOOL_SOURCE = ToolSource(kind="builtin", package="openmagi.core")
 CORE_TOOL_INPUT_SCHEMA: dict[str, object] = {"type": "object", "additionalProperties": True}
 
+# Structured schema for TodoWrite so the model knows the exact payload shape:
+# a full task list, each item carrying free-text ``content`` and a lifecycle
+# ``status`` of pending | in_progress | completed.
+TODO_WRITE_INPUT_SCHEMA: dict[str, object] = {
+    "type": "object",
+    "additionalProperties": False,
+    "required": ["todos"],
+    "properties": {
+        "todos": {
+            "type": "array",
+            "description": "The full task list, replacing any previous list.",
+            "items": {
+                "type": "object",
+                "additionalProperties": False,
+                "required": ["content", "status"],
+                "properties": {
+                    "content": {
+                        "type": "string",
+                        "description": "Short description of the task.",
+                    },
+                    "status": {
+                        "type": "string",
+                        "enum": ["pending", "in_progress", "completed"],
+                    },
+                },
+            },
+        }
+    },
+}
+
 
 def _manifest(
     name: str,
@@ -20,6 +50,7 @@ def _manifest(
     timeout_ms: int = 30_000,
     budget: Budget | None = None,
     parallel_safety: ParallelSafety = "unsafe",
+    input_schema: dict[str, object] | None = None,
 ) -> ToolManifest:
     return ToolManifest(
         name=name,
@@ -27,7 +58,7 @@ def _manifest(
         kind="core",
         source=CORE_TOOL_SOURCE,
         permission=permission,
-        input_schema=CORE_TOOL_INPUT_SCHEMA,
+        input_schema=input_schema if input_schema is not None else CORE_TOOL_INPUT_SCHEMA,
         timeout_ms=timeout_ms,
         budget=budget or Budget(max_calls_per_turn=10, max_parallel=1),
         dangerous=dangerous,
@@ -49,6 +80,15 @@ _CORE_TOOL_MANIFESTS: tuple[ToolManifest, ...] = (
         modes=("plan", "act"),
         tags=("tool", "search", "meta"),
         parallel_safety="readonly",
+    ),
+    _manifest(
+        "TodoWrite",
+        "Record and update the agent's task list for multi-step work.",
+        permission="meta",
+        modes=("plan", "act"),
+        tags=("task", "planning", "meta"),
+        parallel_safety="readonly",
+        input_schema=TODO_WRITE_INPUT_SCHEMA,
     ),
     _manifest(
         "FileRead",

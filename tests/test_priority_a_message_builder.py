@@ -872,6 +872,33 @@ def test_tool_preferences_block_absent_for_non_coding_agent() -> None:
     assert "<tool-preferences>" not in out
 
 
+def test_todo_usage_block_present_for_coding_agent() -> None:
+    builder = _builder()
+    out = builder.build_system_prompt(
+        session_key="s1",
+        turn_id="t1",
+        identity={},
+        now=_utc("2026-05-28T00:00:00Z"),
+        coding_agent=True,
+    )
+    assert "<todo-usage>" in out
+    assert "Use the TodoWrite tool to plan and track multi-step work" in out
+    assert "exactly one item in_progress" in out
+    assert "</todo-usage>" in out
+
+
+def test_todo_usage_block_absent_for_non_coding_agent() -> None:
+    builder = _builder()
+    out = builder.build_system_prompt(
+        session_key="s1",
+        turn_id="t1",
+        identity={},
+        now=_utc("2026-05-28T00:00:00Z"),
+        coding_agent=False,
+    )
+    assert "<todo-usage>" not in out
+
+
 def test_output_efficiency_block_always_present() -> None:
     builder = _builder()
     out = builder.build_system_prompt(

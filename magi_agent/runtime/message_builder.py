@@ -255,6 +255,20 @@ TOOL_PREFERENCES_BLOCK = "\n".join(
     ]
 )
 
+TODO_USAGE_BLOCK = "\n".join(
+    [
+        "<todo-usage>",
+        "Use the TodoWrite tool to plan and track multi-step work:",
+        "- Call TodoWrite at the start of any task with 3+ steps to lay out the plan.",
+        "- Send the FULL task list every call — each call replaces the previous list.",
+        "- Each item has a content string and a status: pending, in_progress, or completed.",
+        "- Keep exactly one item in_progress at a time; mark it completed before starting the next.",
+        "- Update the list as you finish steps so progress stays accurate.",
+        "- Skip TodoWrite for trivial single-step tasks.",
+        "</todo-usage>",
+    ]
+)
+
 OUTPUT_EFFICIENCY_BLOCK = "\n".join(
     [
         "<output-efficiency>",
@@ -420,7 +434,7 @@ def _assemble_prompt_sections(
         ACTION_SAFETY_BLOCK,
     ])
     if coding_agent:
-        static_parts.extend([CODING_DISCIPLINE_BLOCK, TOOL_PREFERENCES_BLOCK])
+        static_parts.extend([CODING_DISCIPLINE_BLOCK, TOOL_PREFERENCES_BLOCK, TODO_USAGE_BLOCK])
         # PR10: semantic per-model coding hint, only when the model-aware flag
         # is on. Lives in the STATIC region (cacheable) alongside the other
         # coding blocks; default family contributes nothing (single body).

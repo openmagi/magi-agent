@@ -15,6 +15,7 @@ from magi_agent.tools.manifest import ToolManifest
 
 EXPECTED_CORE_TOOL_NAMES = (
     "ToolSearch",
+    "TodoWrite",
     "FileRead",
     "FileWrite",
     "FileEdit",
@@ -64,7 +65,13 @@ def test_core_tool_catalog_seed_set_is_immutable_builtin_core_metadata() -> None
         assert manifest.source.package == "openmagi.core"
         assert manifest.enabled_by_default is True
         assert manifest.opt_out is True
-        assert manifest.input_schema == {"type": "object", "additionalProperties": True}
+        if manifest.name == "TodoWrite":
+            # TodoWrite carries a structured payload schema, not the loose
+            # additionalProperties default shared by the other core tools.
+            assert manifest.input_schema["type"] == "object"
+            assert "todos" in manifest.input_schema["properties"]  # type: ignore[index]
+        else:
+            assert manifest.input_schema == {"type": "object", "additionalProperties": True}
 
 
 def test_core_tool_manifests_returns_defensive_manifest_and_schema_copies() -> None:

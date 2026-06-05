@@ -28,10 +28,15 @@ def _build_core_tool_registry(plugin_state: ResolvedPluginState | None = None) -
     from magi_agent.tools.catalog import register_core_tool_manifests
     from magi_agent.tools.core_toolhost import bind_core_toolhost_handlers
     from magi_agent.tools.registry import ToolRegistry
+    from magi_agent.tools.todo_toolhost import bind_todo_write_handler
 
     tool_registry = ToolRegistry()
     register_core_tool_manifests(tool_registry)
     bind_core_toolhost_handlers(tool_registry)
+    # TodoWrite is not part of the core toolhost's direct tool set, so bind its
+    # per-session handler explicitly. The handler set lives for the life of this
+    # registry (one per CLI session), keeping each session's todo list in memory.
+    bind_todo_write_handler(tool_registry)
     if plugin_state is not None:
         _register_native_plugin_tool_manifests(tool_registry, plugin_state)
         _bind_native_plugin_tool_handlers(tool_registry, plugin_state)
