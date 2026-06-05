@@ -26,6 +26,7 @@ def test_thinking_redaction_matches_text_delta(monkeypatch):
     sample = "reasoning about /home/ocuser/.openclaw/secret and the plan"
     thinking = sse._sanitize_agent_event({"type": "thinking_delta", "delta": sample})
     text = sse._sanitize_agent_event({"type": "text_delta", "delta": sample})
+    assert thinking is not None
     assert thinking["delta"] == text["delta"]  # identical redaction to visible text
 
 
@@ -40,20 +41,29 @@ def test_thinking_private_marker_redacted(monkeypatch):
 
 def test_thinking_flag_case_insensitive_true(monkeypatch):
     monkeypatch.setenv("MAGI_STREAM_THINKING", "True")
-    out = sse._sanitize_agent_event({"type": "thinking_delta", "delta": "some thought"})
+    sensitive = "reasoning about /home/ocuser/.openclaw/secret"
+    out = sse._sanitize_agent_event({"type": "thinking_delta", "delta": sensitive})
     assert out is not None and out["type"] == "thinking_delta"
+    assert "delta" in out
+    assert out["delta"] != sensitive
 
 
 def test_thinking_flag_yes(monkeypatch):
     monkeypatch.setenv("MAGI_STREAM_THINKING", "yes")
-    out = sse._sanitize_agent_event({"type": "thinking_delta", "delta": "some thought"})
+    sensitive = "reasoning about /home/ocuser/.openclaw/secret"
+    out = sse._sanitize_agent_event({"type": "thinking_delta", "delta": sensitive})
     assert out is not None and out["type"] == "thinking_delta"
+    assert "delta" in out
+    assert out["delta"] != sensitive
 
 
 def test_thinking_flag_on(monkeypatch):
     monkeypatch.setenv("MAGI_STREAM_THINKING", "on")
-    out = sse._sanitize_agent_event({"type": "thinking_delta", "delta": "some thought"})
+    sensitive = "reasoning about /home/ocuser/.openclaw/secret"
+    out = sse._sanitize_agent_event({"type": "thinking_delta", "delta": sensitive})
     assert out is not None and out["type"] == "thinking_delta"
+    assert "delta" in out
+    assert out["delta"] != sensitive
 
 
 def test_thinking_flag_empty_string_strips(monkeypatch):
@@ -81,3 +91,12 @@ def test_thinking_falls_back_to_text_key(monkeypatch):
     out = sse._sanitize_agent_event({"type": "thinking_delta", "text": "fallback content"})
     assert out is not None
     assert "delta" in out
+
+
+def test_thinking_non_string_delta_returns_type_only(monkeypatch):
+    """Non-string delta (e.g. int) is not a valid string value; return type-only dict."""
+    monkeypatch.setenv("MAGI_STREAM_THINKING", "1")
+    out = sse._sanitize_agent_event({"type": "thinking_delta", "delta": 42})
+    assert out is not None
+    assert out["type"] == "thinking_delta"
+    assert "delta" not in out

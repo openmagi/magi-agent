@@ -10,6 +10,7 @@ from collections.abc import Mapping
 from urllib.parse import SplitResult, urlsplit
 
 from magi_agent.composio.redaction import redact_composio_text
+from magi_agent.ops.health import _truthy_env
 from magi_agent.runtime.public_events import rule_check_event_has_authority
 from magi_agent.transport import tool_preview as _tool_preview
 
@@ -512,13 +513,16 @@ def _sanitize_agent_event(event: dict[str, object]) -> dict[str, object] | None:
         event = {**event, "type": aliased_event_type}
         event_type = aliased_event_type
     if event_type == "thinking_delta":
-        if os.environ.get("MAGI_STREAM_THINKING", "").lower() not in {"1", "true", "yes", "on"}:
+        if not _truthy_env("MAGI_STREAM_THINKING"):
             return None
         value = _get_public_string_value(event, "delta")
         if value is None:
             value = _get_public_string_value(event, "text")
         if value is None:
             return {"type": "thinking_delta"}
+        # _has_private_text_marker is applied first as belt-and-suspenders for
+        # structured data; _redact_unbounded_public_text is prose-oriented and
+        # handles token-level secrets in free-form thinking content.
         redacted = (
             "[redacted-private]"
             if _has_private_text_marker(value)
