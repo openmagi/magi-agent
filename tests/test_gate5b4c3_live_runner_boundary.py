@@ -383,6 +383,23 @@ class _ModelDumpCandidateContentRunner(_FakeRunner):
         yield self._Event()
 
 
+class _ModelDumpFunctionCallOnlyEvent:
+    @property
+    def text(self) -> str:
+        return ""
+
+    def model_dump(self, **_kwargs: object) -> dict[str, object]:
+        return {
+            "functionCalls": [
+                {
+                    "name": "Calculation",
+                    "args": {"expression": "5 + 6"},
+                    "id": "dump_call",
+                }
+            ]
+        }
+
+
 class _ProviderSetupFailRunner(_FakeRunner):
     async def run_async(self, **kwargs: object) -> object:
         type(self).run_kwargs = kwargs
@@ -670,6 +687,22 @@ def test_live_boundary_runs_manual_full_toolhost_continuation_for_method_functio
     assert result.reason == "runner_completed"
     assert result.output_text_internal == "final answer after manual tool execution"
     assert _ManualCalculationTool.calls == [{"expression": "3 + 4"}]
+    assert len(_FunctionCallThenFinalRunner.calls) == 2
+
+
+def test_live_boundary_runs_manual_full_toolhost_continuation_for_model_dump_function_calls() -> None:
+    primitives = _function_call_then_final_primitives()
+    _FunctionCallThenFinalRunner.event_factory = _ModelDumpFunctionCallOnlyEvent
+
+    result = Gate5B4C3LiveRunnerBoundary(
+        lambda: primitives,
+        adk_tools=(_ManualCalculationTool,),
+    ).invoke(_selected_full_toolhost_request(), config=_enabled_config())
+
+    assert result.status == "completed"
+    assert result.reason == "runner_completed"
+    assert result.output_text_internal == "final answer after manual tool execution"
+    assert _ManualCalculationTool.calls == [{"expression": "5 + 6"}]
     assert len(_FunctionCallThenFinalRunner.calls) == 2
 
 
