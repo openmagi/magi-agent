@@ -194,6 +194,7 @@ def test_stream_returns_event_stream_and_done(monkeypatch) -> None:
 # Test 4 — control-response delivers to an active turn's sink
 # ---------------------------------------------------------------------------
 def test_control_response_delivers_to_active_turn(monkeypatch) -> None:
+    monkeypatch.setenv("MAGI_STREAMING_CHAT", "1")
     session_id = "s-ctrl-test"
     turn_id = "t-ctrl-test"
 
@@ -258,7 +259,8 @@ def test_control_response_delivers_to_active_turn(monkeypatch) -> None:
 # ---------------------------------------------------------------------------
 # Test 5 — control-response with unknown session → 404
 # ---------------------------------------------------------------------------
-def test_control_response_no_active_turn_404() -> None:
+def test_control_response_no_active_turn_404(monkeypatch) -> None:
+    monkeypatch.setenv("MAGI_STREAMING_CHAT", "1")
     client = TestClient(_make_app())
 
     response = client.post(
@@ -278,7 +280,8 @@ def test_control_response_no_active_turn_404() -> None:
 # ---------------------------------------------------------------------------
 # Test 6a — cancel sets the cancel event on the active turn
 # ---------------------------------------------------------------------------
-def test_cancel_sets_event() -> None:
+def test_cancel_sets_event(monkeypatch) -> None:
+    monkeypatch.setenv("MAGI_STREAMING_CHAT", "1")
     session_id = "s-cancel-test"
     turn_id = "t-cancel-test"
 
@@ -317,7 +320,8 @@ def test_cancel_sets_event() -> None:
 # ---------------------------------------------------------------------------
 # Test 6b — cancel with handoffRequested=True
 # ---------------------------------------------------------------------------
-def test_cancel_handoff_requested() -> None:
+def test_cancel_handoff_requested(monkeypatch) -> None:
+    monkeypatch.setenv("MAGI_STREAMING_CHAT", "1")
     session_id = "s-cancel-handoff"
     turn_id = "t-cancel-handoff"
 
@@ -352,7 +356,8 @@ def test_cancel_handoff_requested() -> None:
 # ---------------------------------------------------------------------------
 # Test 6c — cancel unknown session → 409
 # ---------------------------------------------------------------------------
-def test_cancel_unknown_session_409() -> None:
+def test_cancel_unknown_session_409(monkeypatch) -> None:
+    monkeypatch.setenv("MAGI_STREAMING_CHAT", "1")
     client = TestClient(_make_app())
 
     response = client.post(
@@ -438,7 +443,8 @@ def test_stream_malformed_json_returns_400(monkeypatch) -> None:
     assert response.json()["error"] == "malformed_json"
 
 
-def test_control_response_malformed_json_returns_400() -> None:
+def test_control_response_malformed_json_returns_400(monkeypatch) -> None:
+    monkeypatch.setenv("MAGI_STREAMING_CHAT", "1")
     client = TestClient(_make_app())
 
     response = client.post(
@@ -451,7 +457,8 @@ def test_control_response_malformed_json_returns_400() -> None:
     assert response.json()["error"] == "malformed_json"
 
 
-def test_cancel_malformed_json_returns_400() -> None:
+def test_cancel_malformed_json_returns_400(monkeypatch) -> None:
+    monkeypatch.setenv("MAGI_STREAMING_CHAT", "1")
     client = TestClient(_make_app())
 
     response = client.post(
@@ -499,3 +506,118 @@ def test_stream_session_id_from_header(monkeypatch) -> None:
 
     assert response.status_code == 200
     assert captured_ids.get("session_id") == "header-session-id"
+
+
+# ---------------------------------------------------------------------------
+# Test 11 — blank gateway token always → 401 (fix 1)
+# ---------------------------------------------------------------------------
+def test_blank_gateway_token_rejected(monkeypatch) -> None:
+    """A runtime configured with an empty gateway_token must reject all requests."""
+    monkeypatch.setenv("MAGI_STREAMING_CHAT", "1")
+    # Build app with empty gateway_token
+    rt = _make_runtime(gateway_token="")
+    client = TestClient(_make_app(runtime=rt))
+
+    # Even sending "Bearer " (the exact match that the old buggy code would accept)
+    response = client.post(
+        "/v1/chat/stream",
+        headers={"authorization": "Bearer "},
+        json={"messages": [{"role": "user", "content": "hi"}]},
+    )
+    assert response.status_code == 401
+    assert response.json()["error"] == "unauthorized"
+
+    # Also reject empty auth header
+    response2 = client.post(
+        "/v1/chat/stream",
+        json={"messages": [{"role": "user", "content": "hi"}]},
+    )
+    assert response2.status_code == 401
+
+
+# ---------------------------------------------------------------------------
+# Test 12 — missing sessionId → 400 for control-response (fix 2)
+# ---------------------------------------------------------------------------
+def test_control_response_missing_session_returns_400(monkeypatch) -> None:
+    monkeypatch.setenv("MAGI_STREAMING_CHAT", "1")
+    client = TestClient(_make_app())
+
+    # No sessionId in body, no x-openclaw-session-key header
+    response = client.post(
+        "/v1/chat/control-response",
+        headers=_auth_headers(),
+        json={"request_id": "req-1", "response": {"decision": "allow"}},
+    )
+    assert response.status_code == 400
+    assert response.json()["error"] == "missing_session_id"
+
+
+# ---------------------------------------------------------------------------
+# Test 13 — missing sessionId → 400 for cancel (fix 2)
+# ---------------------------------------------------------------------------
+def test_cancel_missing_session_returns_400(monkeypatch) -> None:
+    monkeypatch.setenv("MAGI_STREAMING_CHAT", "1")
+    client = TestClient(_make_app())
+
+    # No sessionId in body, no x-openclaw-session-key header
+    response = client.post(
+        "/v1/chat/cancel",
+        headers=_auth_headers(),
+        json={"handoffRequested": False},
+    )
+    assert response.status_code == 400
+    assert response.json()["error"] == "missing_session_id"
+
+
+# ---------------------------------------------------------------------------
+# Test 14 — oversized control-response body → 400 (fix 4)
+# ---------------------------------------------------------------------------
+def test_control_response_oversize_returns_400(monkeypatch) -> None:
+    monkeypatch.setenv("MAGI_STREAMING_CHAT", "1")
+    client = TestClient(_make_app())
+
+    # Build a response dict whose JSON serialisation exceeds 8192 bytes
+    oversized_value = "x" * 9000
+    response = client.post(
+        "/v1/chat/control-response",
+        headers=_auth_headers(),
+        json={
+            "sessionId": "some-session",
+            "request_id": "req-big",
+            "response": {"data": oversized_value},
+        },
+    )
+    assert response.status_code == 400
+    assert response.json()["error"] == "response_too_large"
+
+
+# ---------------------------------------------------------------------------
+# Test 15 — control-response disabled → 503 (fix 3)
+# ---------------------------------------------------------------------------
+def test_control_response_disabled_503(monkeypatch) -> None:
+    monkeypatch.delenv("MAGI_STREAMING_CHAT", raising=False)
+    client = TestClient(_make_app())
+
+    response = client.post(
+        "/v1/chat/control-response",
+        headers=_auth_headers(),
+        json={"sessionId": "s-1", "request_id": "r-1", "response": {}},
+    )
+    assert response.status_code == 503
+    assert response.json()["error"] == "streaming_chat_disabled"
+
+
+# ---------------------------------------------------------------------------
+# Test 16 — cancel disabled → 503 (fix 3)
+# ---------------------------------------------------------------------------
+def test_cancel_disabled_503(monkeypatch) -> None:
+    monkeypatch.delenv("MAGI_STREAMING_CHAT", raising=False)
+    client = TestClient(_make_app())
+
+    response = client.post(
+        "/v1/chat/cancel",
+        headers=_auth_headers(),
+        json={"sessionId": "s-1"},
+    )
+    assert response.status_code == 503
+    assert response.json()["error"] == "streaming_chat_disabled"

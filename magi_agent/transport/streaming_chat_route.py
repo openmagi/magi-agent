@@ -21,20 +21,21 @@ module does NOT import or modify ``magi_agent.transport.chat``.
 Feature gate
 ------------
 ``MAGI_STREAMING_CHAT`` must be truthy (``1`` / ``true`` / ``yes`` / ``on``)
-for the ``/v1/chat/stream`` route to execute.  The control-response and cancel
-routes are always registered (they are no-ops when no active turn exists) and
-are gated only by the gateway-token auth check.
+for all three routes to execute.  When the flag is off the routes return 503.
+Auth is checked first (before the feature gate) on all three routes.
 """
 
 from __future__ import annotations
 
 import asyncio
+import json
 import os
+import uuid
 from collections.abc import Mapping, Sequence
 from typing import Callable
 
 from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import JSONResponse, Response, StreamingResponse
 
 from magi_agent.cli.protocol import ControlResponse
 from magi_agent.ops.health import _truthy_env
@@ -47,6 +48,10 @@ __all__ = [
     "_streaming_chat_enabled",
     "_extract_prompt_text",
 ]
+
+# Maximum allowed size (bytes) of the JSON-serialised ``response`` dict in
+# a control-response request.  Protects against oversized payloads.
+_MAX_CONTROL_RESPONSE_BYTES = 8192
 
 
 # ---------------------------------------------------------------------------
@@ -142,15 +147,16 @@ def register_streaming_chat_routes(
     builder = engine_builder if engine_builder is not None else _default_engine_builder
 
     def _auth_ok(request: Request) -> bool:
-        token = getattr(getattr(runtime, "config", None), "gateway_token", None) or ""
-        expected = f"Bearer {token}"
-        return request.headers.get("authorization", "") == expected
+        token = getattr(getattr(runtime, "config", None), "gateway_token", None)
+        if not token:  # None or empty string → refuse all requests
+            return False
+        return request.headers.get("authorization", "") == f"Bearer {token}"
 
     # ------------------------------------------------------------------
     # Route 1 — POST /v1/chat/stream
     # ------------------------------------------------------------------
-    @app.post("/v1/chat/stream")
-    async def streaming_chat_stream(request: Request):  # type: ignore[return]
+    @app.post("/v1/chat/stream", response_model=None)
+    async def streaming_chat_stream(request: Request) -> Response:
         if not _auth_ok(request):
             return JSONResponse(status_code=401, content={"error": "unauthorized"})
 
@@ -168,8 +174,10 @@ def register_streaming_chat_routes(
         session_id = _body_string(
             body,
             "sessionId",
-            request.headers.get("x-openclaw-session-key", "stream-session"),
+            request.headers.get("x-openclaw-session-key", ""),
         )
+        if not session_id:
+            session_id = uuid.uuid4().hex
         turn_id = _body_string(body, "turnId", f"{session_id}:turn")
         prompt = _extract_prompt_text(body)
 
@@ -196,10 +204,16 @@ def register_streaming_chat_routes(
     # ------------------------------------------------------------------
     # Route 2 — POST /v1/chat/control-response
     # ------------------------------------------------------------------
-    @app.post("/v1/chat/control-response")
-    async def streaming_chat_control_response(request: Request):  # type: ignore[return]
+    @app.post("/v1/chat/control-response", response_model=None)
+    async def streaming_chat_control_response(request: Request) -> JSONResponse:
         if not _auth_ok(request):
             return JSONResponse(status_code=401, content={"error": "unauthorized"})
+
+        if not _streaming_chat_enabled():
+            return JSONResponse(
+                status_code=503,
+                content={"error": "streaming_chat_disabled"},
+            )
 
         try:
             body = await request.json()
@@ -207,10 +221,18 @@ def register_streaming_chat_routes(
             return JSONResponse(status_code=400, content={"error": "malformed_json"})
 
         session_id = _body_string(body, "sessionId", "")
+        if not session_id:
+            session_id = request.headers.get("x-openclaw-session-key", "")
+        if not session_id:
+            return JSONResponse(status_code=400, content={"error": "missing_session_id"})
+
         request_id = _body_string(body, "request_id", "")
         response_dict = body.get("response") if isinstance(body, Mapping) else None
         if not isinstance(response_dict, Mapping):
             response_dict = {}
+
+        if len(json.dumps(response_dict)) > _MAX_CONTROL_RESPONSE_BYTES:
+            return JSONResponse(status_code=400, content={"error": "response_too_large"})
 
         turn = ACTIVE_TURNS.get(session_id)
         if turn is None:
@@ -230,10 +252,16 @@ def register_streaming_chat_routes(
     # ------------------------------------------------------------------
     # Route 3 — POST /v1/chat/cancel
     # ------------------------------------------------------------------
-    @app.post("/v1/chat/cancel")
-    async def streaming_chat_cancel(request: Request):  # type: ignore[return]
+    @app.post("/v1/chat/cancel", response_model=None)
+    async def streaming_chat_cancel(request: Request) -> JSONResponse:
         if not _auth_ok(request):
             return JSONResponse(status_code=401, content={"error": "unauthorized"})
+
+        if not _streaming_chat_enabled():
+            return JSONResponse(
+                status_code=503,
+                content={"error": "streaming_chat_disabled"},
+            )
 
         try:
             body = await request.json()
@@ -245,6 +273,9 @@ def register_streaming_chat_routes(
             "sessionId",
             request.headers.get("x-openclaw-session-key", ""),
         )
+        if not session_id:
+            return JSONResponse(status_code=400, content={"error": "missing_session_id"})
+
         handoff = bool(body.get("handoffRequested")) if isinstance(body, Mapping) else False
 
         turn = ACTIVE_TURNS.get(session_id)
