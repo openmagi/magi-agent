@@ -233,6 +233,9 @@ def _dashboard_html(runtime: OpenMagiRuntime) -> str:
       display: flex;
       flex-direction: column;
       gap: 18px;
+      background:
+        linear-gradient(180deg, rgba(255,255,255,0.6), rgba(247,248,251,0) 230px),
+        var(--bg);
     }}
     .run-summary {{
       max-width: 980px;
@@ -295,6 +298,29 @@ def _dashboard_html(runtime: OpenMagiRuntime) -> str:
       background: var(--surface);
       box-shadow: var(--shadow-soft);
       padding: 18px;
+    }}
+    .health-rail {{
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 8px;
+      margin-top: 14px;
+    }}
+    .health-chip {{
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      min-height: 38px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: var(--surface-2);
+      color: var(--muted);
+      padding: 0 10px;
+      font-size: 12px;
+      font-weight: 700;
+    }}
+    .health-chip strong {{
+      color: var(--ink);
+      font-weight: 700;
     }}
     .trace-grid {{
       display: grid;
@@ -627,6 +653,18 @@ def _dashboard_html(runtime: OpenMagiRuntime) -> str:
       color: var(--muted);
       font-size: 13px;
     }}
+    .knowledge-item .glyph {{
+      display: inline-grid;
+      place-items: center;
+      width: 18px;
+      height: 18px;
+      border: 1px solid var(--line-strong);
+      border-radius: 4px;
+      color: var(--accent);
+      background: var(--surface-2);
+      font-size: 10px;
+      font-weight: 800;
+    }}
     .settings-note {{
       margin: 12px 0 0;
       border: 1px solid var(--line);
@@ -679,6 +717,7 @@ def _dashboard_html(runtime: OpenMagiRuntime) -> str:
       .topbar-actions .pill:not(#chat-route-pill) {{ display: none; }}
       .starter-grid {{ grid-template-columns: 1fr; }}
       .trace-grid {{ grid-template-columns: 1fr; }}
+      .health-rail {{ grid-template-columns: 1fr; }}
       .run-summary {{ grid-template-columns: 1fr; }}
       .composer-actions {{ grid-template-columns: 1fr; }}
       .select-field {{ width: 100%; }}
@@ -690,9 +729,9 @@ def _dashboard_html(runtime: OpenMagiRuntime) -> str:
   <div class="app">
     <aside class="sidebar">
       <div class="brand">
-        <h1>Open Magi Agent</h1>
+        <h1>Magi Agent</h1>
         <div class="brand-meta"><span class="dot" id="runtime-dot"></span><span id="runtime-label">Checking runtime</span></div>
-        <p class="brand-subtitle">Local dashboard for chat, work events, knowledge, tools, and evidence receipts.</p>
+        <p class="brand-subtitle">Local dashboard for chat, work events, knowledge, first-party tools, and evidence receipts.</p>
       </div>
       <nav class="channel-list" aria-label="Local channels">
         <p class="section-label">General</p>
@@ -726,15 +765,20 @@ def _dashboard_html(runtime: OpenMagiRuntime) -> str:
 
       <section class="messages" id="messages" aria-live="polite">
         <div class="run-summary" aria-label="Runtime status summary">
-          <div class="summary-card"><span>Agent</span><strong>Main session</strong><small>Local operator run</small></div>
-          <div class="summary-card"><span>Memory</span><strong>Local contracts</strong><small>Receipts when enabled</small></div>
-          <div class="summary-card"><span>Tools</span><strong>First-party surfaces</strong><small>Research, coding, docs, automation</small></div>
-          <div class="summary-card"><span>Evidence</span><strong>Runtime ledger</strong><small>Public-safe event stream</small></div>
+          <div class="summary-card"><span>Agent</span><strong>Main session</strong><small>Local ADK run loop</small></div>
+          <div class="summary-card"><span>Memory</span><strong>Local contracts</strong><small>Receipts and recall surfaces</small></div>
+          <div class="summary-card"><span>Tools</span><strong>First-party tools</strong><small>Research, coding, docs, browser, automation</small></div>
+          <div class="summary-card"><span>Evidence</span><strong>Runtime ledger</strong><small>Public-safe receipts and events</small></div>
         </div>
         <div class="empty-state" id="empty-state">
           <div class="welcome-message">
-            <h3>Open Magi Agent is ready.</h3>
-            <p>Run research, coding, document review, planning, and automation from this local workspace.</p>
+            <h3>Run local agent work from one dashboard.</h3>
+            <p>Ask for research, coding, document review, planning, and automation. Public runtime events and tool progress appear in the work stream while the answer streams here.</p>
+            <div class="health-rail" aria-label="Local runtime readiness">
+              <div class="health-chip"><span class="dot ready"></span><span>Runtime <strong>ready</strong></span></div>
+              <div class="health-chip"><span class="dot ready"></span><span>Engine <strong>ADK Python</strong></span></div>
+              <div class="health-chip"><span class="dot ready"></span><span>Mode <strong>local</strong></span></div>
+            </div>
             <div class="trace-grid" aria-label="Runtime surfaces">
               <div class="trace-item"><strong>Work stream</strong><span>Tool progress, runtime events, receipts, and transport state.</span></div>
               <div class="trace-item"><strong>Knowledge</strong><span>Workspace files, memory receipts, and evidence records.</span></div>
@@ -801,14 +845,16 @@ def _dashboard_html(runtime: OpenMagiRuntime) -> str:
           </div>
           <p class="panel-heading">Main session</p>
           <div class="event pending"><strong>Runtime check</strong><code>Waiting for /healthz</code></div>
+          <div class="event"><strong>First-party surfaces</strong><code>Research, coding, documents, browser, scheduler, memory, skills</code></div>
+          <div class="event"><strong>Transport</strong><code>SSE frames and public ADK events render here during a run</code></div>
         </div>
         <div id="panel-knowledge" class="hidden">
           <p class="brand-meta">Local knowledge and artifacts are exposed by runtime contracts when enabled.</p>
           <div class="knowledge-list">
-            <div class="knowledge-item"><span>[]</span><span>Workspace files</span></div>
-            <div class="knowledge-item"><span>[]</span><span>Memory receipts</span></div>
-            <div class="knowledge-item"><span>[]</span><span>Evidence ledger</span></div>
-            <div class="knowledge-item"><span>[]</span><span>Generated artifacts</span></div>
+            <div class="knowledge-item"><span class="glyph">F</span><span>Workspace files</span></div>
+            <div class="knowledge-item"><span class="glyph">M</span><span>Memory receipts</span></div>
+            <div class="knowledge-item"><span class="glyph">E</span><span>Evidence ledger</span></div>
+            <div class="knowledge-item"><span class="glyph">A</span><span>Generated artifacts</span></div>
           </div>
         </div>
         <div id="panel-settings" class="hidden">

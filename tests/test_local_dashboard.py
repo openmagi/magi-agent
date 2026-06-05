@@ -40,8 +40,10 @@ def test_local_dashboard_route_serves_adk_local_app_shell() -> None:
     assert 'id="panel-knowledge"' in html
     assert 'id="panel-settings"' in html
     assert "Work Stream" in html
-    assert "Open Magi Agent is ready." in html
+    assert "Run local agent work from one dashboard." in html
     assert "Runtime surfaces" in html
+    assert "First-party surfaces" in html
+    assert "ADK Python" in html
     assert "current local session" in html
     assert 'id="agent-state-pill"' in html
     assert "class=\"status-band\"" in html
