@@ -1264,21 +1264,34 @@ def _content_parts(content: object) -> list[object]:
 
 
 def _part_function_calls(part: object) -> list[Mapping[str, object]]:
-    function_calls = (
-        _sequence_from(_mapping_or_attr(part, "function_calls"))
-        or _sequence_from(_mapping_or_attr(part, "functionCalls"))
-    )
-    direct = (
-        _mapping_or_attr(part, "function_call")
-        or _mapping_or_attr(part, "functionCall")
-    )
-    if direct is not None:
-        function_calls = (*function_calls, direct)
     normalized_calls: list[Mapping[str, object]] = []
-    for function_call in function_calls:
-        normalized = _normalize_function_call(function_call)
+    seen: set[str] = set()
+    for candidate in (part, _safe_model_dump_mapping(part)):
+        if candidate is None:
+            continue
+        function_calls = (
+            _sequence_from(_mapping_or_attr(candidate, "function_calls"))
+            or _sequence_from(_mapping_or_attr(candidate, "functionCalls"))
+        )
+        direct = (
+            _mapping_or_attr(candidate, "function_call")
+            or _mapping_or_attr(candidate, "functionCall")
+        )
+        if direct is not None:
+            function_calls = (*function_calls, direct)
+        for function_call in function_calls:
+            normalized = _normalize_function_call(function_call)
+            if normalized is not None:
+                key = _json_dumps(normalized)
+                if key not in seen:
+                    seen.add(key)
+                    normalized_calls.append(normalized)
+        normalized = _normalize_function_call(candidate)
         if normalized is not None:
-            normalized_calls.append(normalized)
+            key = _json_dumps(normalized)
+            if key not in seen:
+                seen.add(key)
+                normalized_calls.append(normalized)
     if normalized_calls:
         return normalized_calls
     normalized = _normalize_function_call(part)
