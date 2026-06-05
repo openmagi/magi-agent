@@ -137,10 +137,8 @@ def test_tui_mount_renders_welcome_state() -> None:
             await pilot.pause()
         blocks = app.controller.committed_blocks_snapshot()
         joined = "\n".join(blocks)
-        assert "Open Magi Agent" in joined
-        assert "Local ADK runtime ready" in joined
+        assert "Welcome to Magi" in joined
         assert "/compact" in joined
-        assert "magi --help" in joined
         assert app.last_terminal is None
 
     asyncio.run(_run())

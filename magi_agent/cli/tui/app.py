@@ -347,33 +347,56 @@ class TextualSink(PromptSink):
 class MagiTuiApp(App[None]):
     """Interactive REPL driving turns through the injected engine driver."""
 
-    TITLE = "Open Magi Agent"
-    SUB_TITLE = "Local runtime"
+    TITLE = "Magi"
+    SUB_TITLE = "Local agent"
+
+    # Terminal-native + Textual text selection (drag to select). Default is on;
+    # set explicitly so the transcript is always selectable/copyable.
+    ALLOW_SELECT = True
 
     CSS = """
-    #transcript { height: 1fr; }
-    #live { height: auto; }
-    #prompt { dock: bottom; }
+    #topbar {
+        dock: top;
+        height: 1;
+        padding: 0 1;
+        background: $primary-darken-2;
+        color: $text;
+    }
+    #transcript { height: 1fr; padding: 0 1; background: $background; }
+    #live { height: auto; padding: 0 1; background: $background; }
+    #prompt {
+        dock: bottom;
+        margin: 1 1;
+        padding: 0 1;
+        border: round $primary;
+        background: $surface;
+        height: auto;
+    }
+    #prompt:focus { border: round $accent; }
     #completions {
         dock: bottom;
         height: auto;
         max-height: 10;
+        margin: 0 1;
         display: none;
     }
     #completions.visible { display: block; }
     #tool-confirm {
-        width: 60;
+        width: 64;
         height: auto;
         padding: 1 2;
         background: $panel;
-        border: thick $primary;
+        border: thick $accent;
     }
     .confirm-subview { height: auto; }
     #edit-area { height: 6; }
     #edit-error { color: $error; }
     """
 
-    BINDINGS = [("ctrl+c", "cancel_turn", "Cancel turn")]
+    BINDINGS = [
+        ("ctrl+c", "cancel_turn", "Cancel"),
+        ("ctrl+y", "copy_selection", "Copy"),
+    ]
 
     def __init__(
         self,
@@ -384,6 +407,9 @@ class MagiTuiApp(App[None]):
         renderers: ToolRendererRegistry,
         runtime: object | None = None,
         session_id: str = "cli-session",
+        model: str | None = None,
+        mode: str = "act",
+        cwd: str | None = None,
         file_provider: CompletionProvider | Callable[[str], Iterable[str]] | None = None,
         channel_provider: (
             CompletionProvider | Callable[[str], Iterable[str]] | None
@@ -397,6 +423,11 @@ class MagiTuiApp(App[None]):
         self._renderers = renderers
         self._runtime = runtime
         self._session_id = session_id
+        self._model = model
+        self._mode = mode
+        import os as _os  # noqa: PLC0415
+
+        self._cwd = cwd if cwd is not None else _os.getcwd()
         # Coalescing cadence for the live-block flush timer (see on_mount).
         self._flush_interval = max(0.0, float(flush_interval))
         # Per-turn cancellation event; recreated each turn.
@@ -415,6 +446,7 @@ class MagiTuiApp(App[None]):
             channel_provider=channel_provider,
         )
         # Wired in compose/on_mount.
+        self._topbar: Static | None = None
         self._log: RichLog | None = None
         self._live: Static | None = None
         self._input: PromptInput | None = None
@@ -425,17 +457,39 @@ class MagiTuiApp(App[None]):
 
     # -- composition --------------------------------------------------------
     def compose(self) -> ComposeResult:
-        self._log = RichLog(wrap=True, markup=False, id="transcript")
+        self._topbar = Static(self._topbar_text(), id="topbar")
+        self._log = RichLog(wrap=True, markup=False, auto_scroll=True, id="transcript")
+        self._log.can_focus = False
         self._live = Static("", id="live")
         self._completions = OptionList(id="completions")
         self._input = PromptInput(commands=self._commands, id="prompt")
+        yield self._topbar
         yield self._log
         yield self._live
         yield self._completions
         yield self._input
 
+    def _topbar_text(self) -> str:
+        """The top status bar: app · model · cwd · mode."""
+
+        import os as _os  # noqa: PLC0415
+
+        home = _os.path.expanduser("~")
+        cwd = self._cwd
+        if cwd.startswith(home):
+            cwd = "~" + cwd[len(home) :]
+        if len(cwd) > 48:
+            cwd = "…" + cwd[-47:]
+        model = self._model or "no model"
+        mode = (self._mode or "act").lower()
+        return f"● Magi   {model}   {cwd}   [{mode}]"
+
     def on_mount(self) -> None:
         assert self._log is not None and self._live is not None
+        try:
+            self.theme = "tokyo-night"
+        except Exception:  # pragma: no cover - theme always present in textual 8.x
+            pass
         self._controller = TranscriptController(log=self._log, live=self._live)
         self._render_welcome()
         # Coalescing flush timer: repaint buffered token deltas on a fixed
@@ -461,20 +515,23 @@ class MagiTuiApp(App[None]):
         ]
         commands = ", ".join(f"/{name}" for name in command_names[:5] if name)
         command_line = (
-            f"Commands: {commands}"
-            if commands
-            else "Commands: type / for local commands"
+            commands if commands else "type / for local commands"
         )
-        self._controller.commit_block(
-            "\n".join(
-                (
-                    "Open Magi Agent",
-                    "Local ADK runtime ready. Type a task below and press Enter.",
-                    "Use Ctrl+C to cancel an active turn.",
-                    command_line,
-                    "Headless examples: magi --help | magi --output text \"Summarize this repository\"",
-                )
-            )
+        from rich.text import Text  # noqa: PLC0415
+
+        welcome = Text()
+        welcome.append("● ", style="bold #7aa2f7")
+        welcome.append("Welcome to Magi", style="bold")
+        welcome.append("  ·  your local AI agent\n", style="dim")
+        welcome.append("Type a task and press ", style="dim")
+        welcome.append("Enter", style="#7aa2f7")
+        welcome.append(".  ", style="dim")
+        welcome.append("Ctrl+C", style="#7aa2f7")
+        welcome.append(" cancels a turn.\n", style="dim")
+        welcome.append("Commands: ", style="dim")
+        welcome.append(command_line, style="#9ece6a")
+        self._controller.commit_rich(
+            welcome, text=f"Welcome to Magi  Commands: {command_line}"
         )
 
     @property
@@ -523,7 +580,38 @@ class MagiTuiApp(App[None]):
         self._turn_seq += 1
         self._cancel = asyncio.Event()
         turn_id = f"{self._session_id}-turn-{self._turn_seq}"
+        self._echo_user(prompt)
         self._run_turn(prompt, turn_id)
+
+    def _echo_user(self, prompt: str) -> None:
+        """Echo the user's message into the transcript (CC/OpenCode style)."""
+
+        if self._controller is None:
+            return
+        from rich.text import Text  # noqa: PLC0415
+
+        block = Text()
+        block.append("› ", style="bold #7aa2f7")
+        block.append(prompt, style="bold")
+        self._controller.commit_rich(block, text=f"› {prompt}")
+
+    def action_copy_selection(self) -> None:
+        """Copy the currently selected transcript text to the clipboard."""
+
+        text = ""
+        try:
+            text = self.screen.get_selected_text() or ""  # type: ignore[attr-defined]
+        except Exception:
+            try:
+                text = self.selected_text or ""  # type: ignore[attr-defined]
+            except Exception:
+                text = ""
+        if text:
+            try:
+                self.copy_to_clipboard(text)
+                self.notify("Copied selection", timeout=2)
+            except Exception:
+                pass
 
     @work(exclusive=True, group="turn")
     async def _run_turn(self, prompt: str, turn_id: str) -> None:
