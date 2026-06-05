@@ -35,7 +35,7 @@ from magi_agent.runtime.events import RuntimeEvent
 # streaming_chat intentionally reuses sse's internal helpers (_json, _sanitize_agent_event) to stay lock-step with the SSE wire format.
 from magi_agent.transport.sse import _json, _sanitize_agent_event
 
-__all__ = ["sse_frames_for"]
+__all__ = ["sse_frames_for", "frame_for_event", "frame_for_terminal"]
 
 
 def _frame(payload_dict: dict[str, object]) -> bytes:
@@ -43,44 +43,44 @@ def _frame(payload_dict: dict[str, object]) -> bytes:
     return f"event: agent\ndata: {_json(payload_dict)}\n\n".encode()
 
 
-def sse_frames_for(
-    events_iter: Iterator[RuntimeEvent],
-    terminal: EngineResult,
-) -> Iterator[bytes]:
-    """Yield SSE byte frames for every event then a terminal turn_result frame.
+def frame_for_event(event: RuntimeEvent) -> bytes | None:
+    """Encode a single :class:`RuntimeEvent` into one SSE ``event: agent`` frame.
 
-    Args:
-        events_iter: Iterator of :class:`~magi_agent.runtime.events.RuntimeEvent`
-            objects emitted by the engine during a single turn.
-        terminal: The :class:`~magi_agent.cli.contracts.EngineResult` that
-            describes how the turn finished.
+    Merges ``turn_id`` into a copy of ``event.payload``, runs the shared
+    :func:`_sanitize_agent_event` sanitizer, and returns the encoded frame bytes
+    — or ``None`` if the sanitizer dropped the event (e.g. ``thinking_delta``).
 
-    Yields:
-        UTF-8 encoded SSE frame bytes.  One chunk per logical frame:
-        - zero or more ``event: agent`` frames (one per non-dropped event),
-        - one ``event: agent`` turn_result frame,
-        - one ``data: [DONE]`` frame.
+    This is the per-event half of :func:`sse_frames_for`, extracted so the async
+    streaming driver can frame events one-at-a-time as they arrive on its queue
+    (including in-stream ``control_request`` events from the prompt sink) without
+    re-implementing the wire format.
     """
-    for event in events_iter:
-        # Start from the raw payload dict and run it through the sanitizer.
-        payload: dict[str, object] = dict(event.payload)
+    # Start from the raw payload dict and run it through the sanitizer.
+    payload: dict[str, object] = dict(event.payload)
 
-        # Merge turn_id into the payload if not already present.
-        if event.turn_id is not None and "turn_id" not in payload:
-            payload["turn_id"] = event.turn_id
+    # Merge turn_id into the payload if not already present.
+    if event.turn_id is not None and "turn_id" not in payload:
+        payload["turn_id"] = event.turn_id
 
-        safe = _sanitize_agent_event(payload)
-        if safe is None:
-            # Sanitizer decided this event should be dropped (e.g. thinking_delta).
-            continue
+    safe = _sanitize_agent_event(payload)
+    if safe is None:
+        # Sanitizer decided this event should be dropped (e.g. thinking_delta).
+        return None
 
-        # Ensure turn_id survives sanitization (sanitizer may strip unknown keys).
-        if event.turn_id is not None and "turn_id" not in safe:
-            safe = {**safe, "turn_id": event.turn_id}
+    # Ensure turn_id survives sanitization (sanitizer may strip unknown keys).
+    if event.turn_id is not None and "turn_id" not in safe:
+        safe = {**safe, "turn_id": event.turn_id}
 
-        yield _frame(safe)
+    return _frame(safe)
 
-    # Terminal frame — always emitted, never sanitized.
+
+def frame_for_terminal(terminal: EngineResult) -> Iterator[bytes]:
+    """Yield the terminal ``turn_result`` frame followed by the ``[DONE]`` sentinel.
+
+    The ``turn_result`` frame is always emitted (never sanitized away) and guards
+    non-finite floats so :func:`_json` (``allow_nan=False``) never raises
+    mid-stream.
+    """
     # Guard non-finite floats so _json (allow_nan=False) never raises mid-stream.
     safe_cost = terminal.cost_usd if (terminal.cost_usd is None or math.isfinite(terminal.cost_usd)) else 0.0
     safe_usage: dict[str, object] | None = None
@@ -102,3 +102,29 @@ def sse_frames_for(
 
     # SSE sentinel frame.
     yield b"data: [DONE]\n\n"
+
+
+def sse_frames_for(
+    events_iter: Iterator[RuntimeEvent],
+    terminal: EngineResult,
+) -> Iterator[bytes]:
+    """Yield SSE byte frames for every event then a terminal turn_result frame.
+
+    Args:
+        events_iter: Iterator of :class:`~magi_agent.runtime.events.RuntimeEvent`
+            objects emitted by the engine during a single turn.
+        terminal: The :class:`~magi_agent.cli.contracts.EngineResult` that
+            describes how the turn finished.
+
+    Yields:
+        UTF-8 encoded SSE frame bytes.  One chunk per logical frame:
+        - zero or more ``event: agent`` frames (one per non-dropped event),
+        - one ``event: agent`` turn_result frame,
+        - one ``data: [DONE]`` frame.
+    """
+    for event in events_iter:
+        frame = frame_for_event(event)
+        if frame is not None:
+            yield frame
+
+    yield from frame_for_terminal(terminal)
