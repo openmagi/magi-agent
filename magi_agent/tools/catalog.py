@@ -87,7 +87,7 @@ _CORE_TOOL_MANIFESTS: tuple[ToolManifest, ...] = (
         permission="meta",
         modes=("plan", "act"),
         tags=("task", "planning", "meta"),
-        parallel_safety="readonly",
+        parallel_safety="unsafe",
         input_schema=TODO_WRITE_INPUT_SCHEMA,
     ),
     _manifest(

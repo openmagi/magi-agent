@@ -3,7 +3,9 @@ from __future__ import annotations
 import asyncio
 
 from magi_agent.tools import ToolRegistry, register_core_tool_manifests
+from magi_agent.tools.concurrency import ToolCall, partition_tool_calls
 from magi_agent.tools.context import ToolContext
+from magi_agent.tools.dispatcher import ToolDispatcher
 from magi_agent.tools.todo_toolhost import (
     TODO_WRITE_TOOL_NAME,
     TodoWriteHandlerSet,
@@ -29,6 +31,7 @@ def test_todowrite_manifest_registered_and_active() -> None:
     assert registration is not None
     assert registration.handler is not None
     assert registry.is_enabled(TODO_WRITE_TOOL_NAME) is True
+    assert registration.manifest.parallel_safety == "unsafe"
 
     act_names = {manifest.name for manifest in registry.list_available(mode="act")}
     plan_names = {manifest.name for manifest in registry.list_available(mode="plan")}
@@ -72,8 +75,6 @@ def test_todowrite_per_session_isolation() -> None:
 
 
 def test_todowrite_dispatches_through_registry_as_meta_tool() -> None:
-    from magi_agent.tools import ToolDispatcher
-
     registry, _ = _registry_with_todo()
     todos = [{"content": "Step 1", "status": "pending"}]
 
@@ -88,6 +89,30 @@ def test_todowrite_dispatches_through_registry_as_meta_tool() -> None:
 
     assert result.status == "ok"
     assert result.output == {"todos": todos}
+
+
+def test_todowrite_runs_exclusively_and_is_not_readonly_offloaded() -> None:
+    registry, _ = _registry_with_todo()
+
+    batches = partition_tool_calls(
+        (
+            ToolCall(name="ToolSearch", arguments={}, tool_use_id="read-1"),
+            ToolCall(name=TODO_WRITE_TOOL_NAME, arguments={"todos": []}, tool_use_id="todo-1"),
+            ToolCall(name="ToolSearch", arguments={}, tool_use_id="read-2"),
+        ),
+        registry,
+    )
+
+    assert [(batch.is_concurrent, [call.name for call in batch.calls]) for batch in batches] == [
+        (True, ["ToolSearch"]),
+        (False, [TODO_WRITE_TOOL_NAME]),
+        (True, ["ToolSearch"]),
+    ]
+
+    registration = registry.resolve_registration(TODO_WRITE_TOOL_NAME)
+    assert registration is not None
+    dispatcher = ToolDispatcher(registry, readonly_offload_enabled=True)
+    assert dispatcher._should_offload(registration.manifest, registration.handler) is False
 
 
 def test_todowrite_normalizes_missing_and_invalid_status() -> None:
