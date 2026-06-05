@@ -48,7 +48,7 @@ def _dashboard_html(runtime: OpenMagiRuntime) -> str:
       --radius: 8px;
     }}
     * {{ box-sizing: border-box; }}
-    html, body {{ height: 100%; }}
+    html, body {{ height: 100%; overflow: hidden; }}
     body {{
       margin: 0;
       background: var(--bg);
@@ -60,18 +60,19 @@ def _dashboard_html(runtime: OpenMagiRuntime) -> str:
     button {{ cursor: pointer; }}
     .app {{
       display: grid;
-      grid-template-columns: 280px minmax(0, 1fr) 372px;
-      min-height: 100vh;
+      grid-template-columns: 292px minmax(0, 1fr) 392px;
+      height: 100vh;
+      min-height: 720px;
     }}
     .sidebar {{
       display: grid;
       grid-template-rows: auto 1fr auto;
-      min-height: 100vh;
+      min-height: 0;
       background: var(--surface);
       border-right: 1px solid var(--line);
     }}
     .brand {{
-      padding: 22px 18px 16px;
+      padding: 22px 18px 18px;
       border-bottom: 1px solid var(--line);
     }}
     .brand h1 {{
@@ -172,7 +173,7 @@ def _dashboard_html(runtime: OpenMagiRuntime) -> str:
       display: grid;
       grid-template-rows: auto 1fr auto;
       min-width: 0;
-      min-height: 100vh;
+      min-height: 0;
       background: var(--bg);
     }}
     .topbar {{
@@ -230,7 +231,8 @@ def _dashboard_html(runtime: OpenMagiRuntime) -> str:
     }}
     .messages {{
       overflow: auto;
-      padding: 24px min(7vw, 78px);
+      min-height: 0;
+      padding: 28px min(7vw, 78px);
       display: flex;
       flex-direction: column;
       gap: 18px;
@@ -279,7 +281,7 @@ def _dashboard_html(runtime: OpenMagiRuntime) -> str:
     .empty-state {{
       max-width: 980px;
       width: 100%;
-      margin: 0 auto;
+      margin: auto;
       color: var(--muted);
       text-align: left;
     }}
@@ -298,7 +300,21 @@ def _dashboard_html(runtime: OpenMagiRuntime) -> str:
       border-radius: var(--radius);
       background: var(--surface);
       box-shadow: var(--shadow-soft);
-      padding: 18px;
+      padding: 20px;
+    }}
+    .welcome-kicker {{
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      min-height: 28px;
+      padding: 0 10px;
+      margin-bottom: 12px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: var(--surface-2);
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 700;
     }}
     .thread-list {{
       max-width: 980px;
@@ -581,7 +597,7 @@ def _dashboard_html(runtime: OpenMagiRuntime) -> str:
     .inspector {{
       display: grid;
       grid-template-rows: auto auto 1fr;
-      min-height: 100vh;
+      min-height: 0;
       background: var(--surface-2);
       border-left: 1px solid var(--line);
     }}
@@ -669,6 +685,10 @@ def _dashboard_html(runtime: OpenMagiRuntime) -> str:
       gap: 8px;
     }}
     .panel-heading {{
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
       margin: 0 0 10px;
       color: var(--soft);
       font-size: 11px;
@@ -680,7 +700,7 @@ def _dashboard_html(runtime: OpenMagiRuntime) -> str:
       border: 1px solid var(--line);
       border-radius: var(--radius);
       background: var(--surface);
-      padding: 10px 11px;
+      padding: 11px 12px;
       font-size: 12px;
       color: var(--muted);
     }}
@@ -827,6 +847,8 @@ def _dashboard_html(runtime: OpenMagiRuntime) -> str:
     .hidden {{ display: none !important; }}
     @media (max-width: 1120px) {{
       .app {{ grid-template-columns: 220px minmax(0, 1fr); }}
+      html, body {{ overflow: auto; }}
+      .app {{ height: auto; min-height: 100vh; }}
       .inspector {{ grid-column: 1 / -1; min-height: 420px; border-left: 0; border-top: 1px solid var(--line); }}
       .run-summary {{ grid-template-columns: repeat(2, minmax(0, 1fr)); }}
     }}
@@ -856,14 +878,14 @@ def _dashboard_html(runtime: OpenMagiRuntime) -> str:
       <div class="brand">
         <h1>Magi Agent</h1>
         <div class="brand-meta"><span class="dot" id="runtime-dot"></span><span id="runtime-label">Checking runtime</span></div>
-        <p class="brand-subtitle">Local dashboard for chat, work events, knowledge, first-party tools, and evidence receipts.</p>
+        <p class="brand-subtitle">Local workspace for chat, work events, knowledge, first-party tools, and evidence receipts.</p>
       </div>
       <nav class="channel-list" aria-label="Local channels">
         <p class="section-label">General</p>
         <button class="channel active" type="button"><span>#</span><span>general</span><span class="badge"></span></button>
-        <button class="channel" type="button"><span>#</span><span>research</span><span class="badge"></span></button>
-        <button class="channel" type="button"><span>#</span><span>coding</span><span class="badge"></span></button>
-        <button class="channel" type="button"><span>#</span><span>automation</span><span class="badge"></span></button>
+        <button class="channel" type="button"><span>#</span><span>research</span><span></span></button>
+        <button class="channel" type="button"><span>#</span><span>coding</span><span></span></button>
+        <button class="channel" type="button"><span>#</span><span>automation</span><span></span></button>
         <p class="section-label" style="margin-top:18px">Runtime</p>
         <button class="channel" type="button"><span>*</span><span>Memory</span><span></span></button>
         <button class="channel" type="button"><span>*</span><span>Tools</span><span></span></button>
@@ -892,6 +914,7 @@ def _dashboard_html(runtime: OpenMagiRuntime) -> str:
         <div class="thread-list" id="thread-list">
         <div class="empty-state" id="empty-state">
           <div class="welcome-message message assistant">
+            <div class="welcome-kicker"><span class="dot ready"></span><span>Local workspace ready</span></div>
             <div class="thread-meta">
               <span><span class="dot ready"></span><span>Current run</span></span>
               <strong id="composer-status">Ready to run</strong>
@@ -957,7 +980,7 @@ def _dashboard_html(runtime: OpenMagiRuntime) -> str:
       </div>
       <div class="panel">
         <div id="panel-work" class="timeline">
-          <p class="panel-heading">Agents</p>
+          <p class="panel-heading"><span>Agents</span><span class="mini-pill">1 agent</span></p>
           <div class="agent-card">
             <div class="agent-card-head">
               <div>
@@ -968,7 +991,7 @@ def _dashboard_html(runtime: OpenMagiRuntime) -> str:
             </div>
             <small>Public ADK events, tool progress, evidence receipts, and transport state appear here during a run.</small>
           </div>
-          <p class="panel-heading">Work in progress</p>
+          <p class="panel-heading"><span>Work in progress</span></p>
           <div class="event pending"><strong>No active run</strong><code>Submit a prompt to start a local ADK turn</code></div>
           <p class="panel-heading">Main session</p>
           <div class="timeline" id="work-stream-events">
