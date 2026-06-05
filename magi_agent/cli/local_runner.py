@@ -16,8 +16,9 @@ class LocalCliRunner:
     the same adapter/projection path used by real runners.
     """
 
-    def __init__(self, *, model: str | None = None) -> None:
+    def __init__(self, *, model: str | None = None, notice: str | None = None) -> None:
         self.model = model or "local"
+        self.notice = notice
         self.agent = _LocalAgent()
 
     async def run_async(self, **kwargs: object):
@@ -25,7 +26,7 @@ class LocalCliRunner:
         from google.genai import types  # noqa: PLC0415
 
         prompt = _message_text(kwargs.get("new_message"))
-        text = build_local_response(prompt, model=self.model)
+        text = build_local_response(prompt, model=self.model, notice=self.notice)
         yield Event(
             author="model",
             partial=True,
@@ -36,8 +37,10 @@ class LocalCliRunner:
         )
 
 
-def build_local_cli_runner(*, model: str | None = None) -> LocalCliRunner:
-    return LocalCliRunner(model=model)
+def build_local_cli_runner(
+    *, model: str | None = None, notice: str | None = None
+) -> LocalCliRunner:
+    return LocalCliRunner(model=model, notice=notice)
 
 
 def _message_text(value: object) -> str:
@@ -52,7 +55,9 @@ def _message_text(value: object) -> str:
     return "".join(text_parts).strip()
 
 
-def build_local_response(prompt: str, *, model: str) -> str:
+def build_local_response(prompt: str, *, model: str, notice: str | None = None) -> str:
+    if notice:
+        return notice
     if prompt:
         return (
             "Local ADK runtime ready. I received your request, but no live model "

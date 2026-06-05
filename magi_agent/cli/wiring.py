@@ -187,9 +187,32 @@ def build_headless_runtime(
 
 
 def _build_default_runner(*, model: str | None = None) -> object:
-    from magi_agent.cli.local_runner import build_local_cli_runner  # noqa: PLC0415
+    """Build the CLI's default runner.
 
-    return build_local_cli_runner(model=model)
+    When a model provider is configured (``~/.magi/config.toml`` or a provider
+    env key for openai/anthropic/gemini/fireworks), build a real model-backed
+    ADK runner. Otherwise fall back to the model-free stub so ``magi`` still
+    launches with no configuration.
+    """
+
+    from magi_agent.cli.local_runner import build_local_cli_runner  # noqa: PLC0415
+    from magi_agent.cli.providers import resolve_provider_config  # noqa: PLC0415
+
+    config = resolve_provider_config(model_override=model)
+    if config is None:
+        return build_local_cli_runner(model=model)
+
+    from magi_agent.cli.real_runner import (  # noqa: PLC0415
+        CliProviderDependencyError,
+        build_cli_model_runner,
+    )
+
+    try:
+        return build_cli_model_runner(config)
+    except CliProviderDependencyError as exc:
+        # Key configured but the provider dependency is missing: keep the CLI
+        # usable and surface the actionable install hint as the turn response.
+        return build_local_cli_runner(model=model, notice=str(exc))
 
 
 def build_tui_app(
