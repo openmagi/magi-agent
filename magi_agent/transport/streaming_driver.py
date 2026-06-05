@@ -28,6 +28,7 @@ and the consumer always emits the terminal frames after seeing it.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 from collections.abc import AsyncIterator
 from typing import TYPE_CHECKING
 
@@ -37,7 +38,26 @@ from magi_agent.transport.active_turn import ActiveTurn, ActiveTurnTable
 from magi_agent.transport.streaming_chat import frame_for_event, frame_for_terminal
 
 if TYPE_CHECKING:
+    from typing import Protocol
+
     from magi_agent.cli.permissions import HeadlessSink
+
+    class _StreamEngine(Protocol):
+        """Structural type for the engine the driver runs.
+
+        Only the attribute the driver touches is declared. Kept under
+        ``TYPE_CHECKING`` so there is no runtime import of the engine module
+        (import-cycle-free).
+        """
+
+        def run_turn_stream(
+            self,
+            runtime: object,
+            turn_input: dict,
+            *,
+            cancel: asyncio.Event,
+            gate: object | None = None,
+        ) -> AsyncIterator[object]: ...
 
 __all__ = ["drive_streaming_chat"]
 
@@ -46,9 +66,14 @@ __all__ = ["drive_streaming_chat"]
 # A unique object() so it can never collide with a real RuntimeEvent.
 _END = object()
 
+# Upper bound (seconds) for awaiting the producer task during teardown. A
+# non-cooperative / slow engine that ignores cancel is DETACHED after this so
+# teardown never blocks the event loop indefinitely.
+_PRODUCER_TEARDOWN_TIMEOUT_S = 5.0
+
 
 async def drive_streaming_chat(
-    engine: object,
+    engine: "_StreamEngine",
     gate: object,
     turn_input: dict,
     *,
@@ -72,6 +97,10 @@ async def drive_streaming_chat(
         Turn input dict (``{"prompt", "session_id", "turn_id", ...}``).
     cancel:
         Cooperative-cancel event shared with the engine and the interrupt route.
+        MUST be a FRESH per-turn :class:`asyncio.Event` — the driver leaves it
+        ``set()`` on exit (teardown signals the producer to stop), so a route
+        author must never share one ``cancel`` across turns or a later turn
+        would start pre-cancelled.
     queue:
         The shared queue. The engine's events flow here via the producer task;
         in-stream ``control_request`` events flow here via the prompt sink's
@@ -106,7 +135,7 @@ async def drive_streaming_chat(
 
     async def _produce() -> None:
         try:
-            async for item in engine.run_turn_stream(  # type: ignore[attr-defined]
+            async for item in engine.run_turn_stream(
                 None,
                 turn_input,
                 cancel=cancel,
@@ -142,9 +171,13 @@ async def drive_streaming_chat(
             item = await queue.get()
             if item is _END:
                 break
-            # Every non-sentinel item is a RuntimeEvent (engine event or a
-            # control_request from the sink).
-            assert isinstance(item, RuntimeEvent)
+            # Every non-sentinel item is expected to be a RuntimeEvent (engine
+            # event or a control_request from the sink). Guard rather than
+            # ``assert`` (asserts are stripped under ``python -O``, and an assert
+            # failure here would bypass the terminal-frame + ``[DONE]`` emission
+            # mid-stream): skip anything unexpected and keep draining.
+            if not isinstance(item, RuntimeEvent):
+                continue
             frame = frame_for_event(item)
             if frame is not None:
                 yield frame
@@ -162,11 +195,27 @@ async def drive_streaming_chat(
             yield chunk
     finally:
         # If the CLIENT disconnected / the generator was closed early, request a
-        # cooperative cancel so the producer stops promptly, then await it.
+        # cooperative cancel so the producer stops promptly, then tear down.
         cancel.set()
-        producer.cancel()
+        with contextlib.suppress(Exception):
+            # Honor the sink's documented teardown contract: fail-close any
+            # pending tool-permission asks (deny) so a parked gate never hangs.
+            sink.close()
+        if not producer.done():
+            producer.cancel()
         try:
-            await producer
-        except asyncio.CancelledError:
+            # shield so OUR cancellation doesn't abandon the producer mid-flight;
+            # wait_for bounds a non-cooperative engine that ignores cancel.
+            await asyncio.wait_for(
+                asyncio.shield(producer), timeout=_PRODUCER_TEARDOWN_TIMEOUT_S
+            )
+        except (asyncio.TimeoutError, asyncio.CancelledError):
+            # TimeoutError: engine not honoring cancel promptly — detach rather
+            # than block teardown.
+            # CancelledError: expected (we cancelled the producer). Edge case: if
+            # OUR task was cancelled this masks it; acceptable to guarantee
+            # cleanup.
             pass
-        registry.unregister(session_id, turn_id)
+        finally:
+            # ALWAYS runs even if the await above raises an unexpected error.
+            registry.unregister(session_id, turn_id)

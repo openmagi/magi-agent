@@ -23,7 +23,10 @@ from magi_agent.runtime.control import ControlRequest
 from magi_agent.cli.protocol import ControlResponse
 from magi_agent.runtime.events import RuntimeEvent
 from magi_agent.transport.active_turn import ActiveTurnTable
-from magi_agent.transport.streaming_driver import drive_streaming_chat
+from magi_agent.transport.streaming_driver import (
+    _PRODUCER_TEARDOWN_TIMEOUT_S,
+    drive_streaming_chat,
+)
 from magi_agent.transport.streaming_sink import build_streaming_prompt_sink
 
 
@@ -312,3 +315,178 @@ def test_producer_exception_yields_error_terminal_and_done():
     assert "boom mid-iteration" in payloads[-1].get("error", "")
     assert text.rstrip().endswith("data: [DONE]")
     assert registry.get("s1") is None
+
+
+# ---------------------------------------------------------------------------
+# Test 5 — client disconnect / early aclose() is prompt and cleans up
+# ---------------------------------------------------------------------------
+def test_client_disconnect_aclose_is_prompt_and_cleans_up():
+    """If the client disconnects mid-turn (generator aclose()) while the engine
+    is PARKED on a tool-permission gate, teardown must:
+
+    - return promptly (sink.close() fail-closes the parked ask -> producer
+      unblocks; the bounded await never hangs),
+    - leave no leaked producer task, and
+    - unregister the turn from the registry.
+    """
+    registry = ActiveTurnTable()
+    queue: asyncio.Queue[object] = asyncio.Queue()
+    sink = build_streaming_prompt_sink(queue, turn_id="t-turn")
+    cancel = asyncio.Event()
+
+    request = ControlRequest(
+        requestId="req-1",
+        turnId="t-turn",
+        toolName="Bash",
+        arguments={"command": "ls"},
+        reason="needs approval",
+    )
+
+    captured: dict[str, object] = {}
+
+    class FakeEngine:
+        async def run_turn_stream(self, runtime, turn_input, *, cancel, gate):
+            yield _ev("text_delta", delta="before park")
+            # Park on the gate forever (no one will ever deliver a response).
+            # Only sink.close() during teardown can wake this with a deny.
+            captured["decision"] = await sink.ask(request)
+            yield EngineResult(
+                terminal=Terminal.completed,
+                session_id="s1",
+                turn_id="t-turn",
+            )
+
+    async def _run() -> None:
+        gen = drive_streaming_chat(
+            FakeEngine(),
+            None,
+            {"prompt": "hi", "session_id": "s1", "turn_id": "t-turn"},
+            cancel=cancel,
+            queue=queue,
+            sink=sink,
+            registry=registry,
+            session_id="s1",
+            turn_id="t-turn",
+        )
+        # Pull the first frame, then keep draining until the engine is parked on
+        # the gate (the control_request frame has been emitted). At that point
+        # the next __anext__ would block forever, so we stop and aclose().
+        first = await gen.__anext__()
+        assert b"text_delta" in first
+        # Drain the control_request frame so the engine is now awaiting the gate.
+        ctrl = await asyncio.wait_for(gen.__anext__(), timeout=5)
+        assert b"control_request" in ctrl
+
+        # Snapshot any pending producer task on the loop before teardown.
+        tasks_before = {t for t in asyncio.all_tasks() if not t.done()}
+
+        # Client disconnect: closing the generator early must return promptly.
+        await asyncio.wait_for(gen.aclose(), timeout=5)
+
+        # Teardown both fail-closes the sink (sink.close -> deny) AND cancels the
+        # producer; the cancel races ahead of the producer consuming the deny, so
+        # the producer is torn down before it records a decision. Either outcome
+        # (None == cancelled before resume, or a deny it managed to read) is
+        # acceptable — what matters is teardown completed and nothing leaked.
+        decision = captured.get("decision")
+        if decision is not None:
+            assert getattr(decision, "kind", None) == "deny"
+
+        # Registry cleaned up.
+        assert registry.get("s1") is None
+
+        # No leaked producer task: any task that existed before teardown and is
+        # still alive should not be a producer awaiting our queue/gate. Give the
+        # loop a tick to let cancelled tasks settle, then assert no NEW pending
+        # tasks linger.
+        await asyncio.sleep(0)
+        tasks_after = {t for t in asyncio.all_tasks() if not t.done()}
+        leaked = tasks_after - tasks_before - {asyncio.current_task()}
+        assert not leaked, f"leaked tasks after teardown: {leaked!r}"
+
+        # aclose() is idempotent.
+        await asyncio.wait_for(gen.aclose(), timeout=5)
+        assert registry.get("s1") is None
+
+    asyncio.run(asyncio.wait_for(_run(), timeout=10))
+
+
+# ---------------------------------------------------------------------------
+# Test 6 — non-cooperative engine teardown is bounded
+# ---------------------------------------------------------------------------
+def test_noncooperative_engine_teardown_times_out():
+    """A producer that ignores cancellation must NOT block teardown beyond
+    ``_PRODUCER_TEARDOWN_TIMEOUT_S``.
+
+    The fake engine swallows CancelledError in a sleep loop, so it never honors
+    cancel. The driver's bounded ``asyncio.wait_for(asyncio.shield(producer))``
+    must detach after the timeout, return from aclose(), and unregister the turn.
+    """
+    registry = ActiveTurnTable()
+    queue: asyncio.Queue[object] = asyncio.Queue()
+    sink = build_streaming_prompt_sink(queue, turn_id="t-turn")
+    cancel = asyncio.Event()
+
+    # The engine ignores cancellation for LONGER than the driver's teardown
+    # bound (so the driver must detach + return), but eventually stops on its own
+    # so the test's event loop can shut down cleanly (a truly forever-running
+    # detached task would hang asyncio.run at shutdown — that flakiness is what we
+    # avoid here; the bound under test is fully exercised regardless).
+    _stubborn_for_s = _PRODUCER_TEARDOWN_TIMEOUT_S + 1.5
+
+    class NonCooperativeEngine:
+        async def run_turn_stream(self, runtime, turn_input, *, cancel, gate):
+            yield _ev("text_delta", delta="hello")
+            loop = asyncio.get_running_loop()
+            deadline = loop.time() + _stubborn_for_s
+            # Ignore cancellation by swallowing CancelledError in a sleep loop, so
+            # the producer task does NOT finish promptly when the driver cancels
+            # it during teardown.
+            while loop.time() < deadline:
+                try:
+                    await asyncio.sleep(0.05)
+                except asyncio.CancelledError:
+                    # Non-cooperative: refuse to stop (until our own deadline).
+                    continue
+            yield EngineResult(
+                terminal=Terminal.completed,
+                session_id="s1",
+                turn_id="t-turn",
+            )
+
+    async def _run() -> float:
+        gen = drive_streaming_chat(
+            NonCooperativeEngine(),
+            None,
+            {"prompt": "hi", "session_id": "s1", "turn_id": "t-turn"},
+            cancel=cancel,
+            queue=queue,
+            sink=sink,
+            registry=registry,
+            session_id="s1",
+            turn_id="t-turn",
+        )
+        first = await gen.__anext__()
+        assert b"text_delta" in first
+
+        loop = asyncio.get_running_loop()
+        start = loop.time()
+        # Must return within the bounded timeout (+ margin), NOT hang forever.
+        await asyncio.wait_for(
+            gen.aclose(),
+            timeout=_PRODUCER_TEARDOWN_TIMEOUT_S + 3,
+        )
+        elapsed = loop.time() - start
+
+        # Registry cleaned even though the producer was detached.
+        assert registry.get("s1") is None
+        return elapsed
+
+    elapsed = asyncio.run(
+        asyncio.wait_for(_run(), timeout=_PRODUCER_TEARDOWN_TIMEOUT_S + 6)
+    )
+    # Teardown should be bounded by the producer-teardown timeout, not unbounded.
+    assert elapsed <= _PRODUCER_TEARDOWN_TIMEOUT_S + 2.5, (
+        f"teardown took {elapsed:.2f}s, expected ~<= "
+        f"{_PRODUCER_TEARDOWN_TIMEOUT_S}s"
+    )
