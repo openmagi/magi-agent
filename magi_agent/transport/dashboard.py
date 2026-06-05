@@ -148,6 +148,23 @@ def _dashboard_html(runtime: OpenMagiRuntime) -> str:
       opacity: 0;
     }}
     .channel.active .badge {{ opacity: 1; }}
+    .channel-count {{
+      min-width: 22px;
+      height: 20px;
+      display: inline-grid;
+      place-items: center;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: var(--surface);
+      color: var(--soft);
+      font-size: 11px;
+      font-weight: 800;
+    }}
+    .channel.active .channel-count {{
+      border-color: #d8ccff;
+      color: var(--accent);
+      background: #fbf9ff;
+    }}
     .sidebar-footer {{
       display: grid;
       gap: 8px;
@@ -301,6 +318,74 @@ def _dashboard_html(runtime: OpenMagiRuntime) -> str:
       background: var(--surface);
       box-shadow: var(--shadow-soft);
       padding: 20px;
+    }}
+    .workspace-board {{
+      display: grid;
+      grid-template-columns: minmax(0, 1.2fr) minmax(260px, 0.8fr);
+      gap: 12px;
+      margin-top: 14px;
+    }}
+    .board-panel {{
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: var(--surface-2);
+      padding: 12px;
+      min-width: 0;
+    }}
+    .board-panel h4 {{
+      margin: 0 0 10px;
+      color: var(--soft);
+      font-size: 11px;
+      font-weight: 800;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+    }}
+    .run-row {{
+      display: grid;
+      grid-template-columns: 18px minmax(0, 1fr) auto;
+      gap: 8px;
+      align-items: center;
+      min-height: 34px;
+      border-top: 1px solid var(--line);
+      color: var(--muted);
+      font-size: 13px;
+    }}
+    .run-row:first-of-type {{ border-top: 0; }}
+    .run-row strong {{
+      color: var(--ink);
+      font-weight: 700;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }}
+    .run-row code {{
+      color: var(--soft);
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 11px;
+    }}
+    .receipt-list {{
+      display: grid;
+      gap: 8px;
+    }}
+    .receipt {{
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 10px;
+      align-items: center;
+      min-height: 34px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: var(--surface);
+      padding: 0 10px;
+      color: var(--muted);
+      font-size: 12px;
+    }}
+    .receipt strong {{
+      color: var(--ink);
+      font-weight: 700;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
     }}
     .welcome-kicker {{
       display: inline-flex;
@@ -723,6 +808,33 @@ def _dashboard_html(runtime: OpenMagiRuntime) -> str:
       font-size: 11px;
       line-height: 1.45;
     }}
+    .event-grid {{
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 8px;
+      margin-bottom: 12px;
+    }}
+    .event-metric {{
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: var(--surface);
+      min-height: 58px;
+      padding: 10px;
+    }}
+    .event-metric span {{
+      display: block;
+      color: var(--soft);
+      font-size: 11px;
+      font-weight: 800;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+    }}
+    .event-metric strong {{
+      display: block;
+      margin-top: 5px;
+      color: var(--ink);
+      font-size: 13px;
+    }}
     .surface-status {{
       border: 1px solid var(--line);
       border-radius: var(--radius);
@@ -853,21 +965,40 @@ def _dashboard_html(runtime: OpenMagiRuntime) -> str:
       .run-summary {{ grid-template-columns: repeat(2, minmax(0, 1fr)); }}
     }}
     @media (max-width: 760px) {{
+      html, body {{ width: 100%; overflow-x: hidden; }}
+      .app {{ width: 100%; overflow-x: hidden; }}
       .app {{ grid-template-columns: 1fr; }}
-      .sidebar {{ min-height: auto; }}
+      .sidebar {{ min-height: auto; border-right: 0; border-bottom: 1px solid var(--line); }}
+      .brand {{ padding: 18px 16px; }}
+      .brand-subtitle {{ max-width: 32ch; }}
       .channel-list {{ display: none; }}
+      .sidebar-footer {{ display: none; }}
+      .main, .messages, .empty-state, .welcome-message, .inspector, .composer {{ min-width: 0; max-width: 100%; }}
       .messages, .composer-wrap {{ padding-left: 16px; padding-right: 16px; }}
-      .topbar {{ padding: 0 16px; }}
+      .topbar {{ min-height: auto; padding: 12px 16px; align-items: stretch; flex-direction: column; gap: 10px; }}
+      .topbar-title, .topbar-actions {{ width: 100%; }}
+      .topbar-title p {{ white-space: normal; }}
+      .topbar-actions {{ max-width: 100%; flex-wrap: wrap; justify-content: flex-start; gap: 8px; }}
       .topbar-actions .pill:not(#chat-route-pill) {{ display: none; }}
+      .pill {{ min-width: 0; max-width: 100%; }}
+      .message {{ max-width: 100%; }}
+      .welcome-message {{ padding: 16px; }}
       .starter-grid {{ grid-template-columns: 1fr; }}
       .quick-actions {{ grid-template-columns: 1fr; }}
       .surface-grid {{ grid-template-columns: 1fr; }}
+      .workspace-board {{ grid-template-columns: 1fr; }}
+      .run-row {{ grid-template-columns: 18px minmax(0, 1fr); align-items: start; padding: 6px 0; }}
+      .run-row code {{ grid-column: 2; }}
       .run-state {{ grid-template-columns: 1fr; }}
       .trace-grid {{ grid-template-columns: 1fr; }}
       .health-rail {{ grid-template-columns: 1fr; }}
       .run-summary {{ grid-template-columns: 1fr; }}
+      .event-grid {{ grid-template-columns: 1fr; }}
+      .composer-strip {{ align-items: flex-start; flex-direction: column; padding: 12px 14px; }}
       .composer-actions {{ grid-template-columns: 1fr; }}
       .select-field {{ width: 100%; }}
+      .token-field {{ align-items: stretch; flex-direction: column; gap: 6px; }}
+      .send {{ width: 100%; }}
     }}
   </style>
 </head>
@@ -882,14 +1013,14 @@ def _dashboard_html(runtime: OpenMagiRuntime) -> str:
       </div>
       <nav class="channel-list" aria-label="Local channels">
         <p class="section-label">General</p>
-        <button class="channel active" type="button"><span>#</span><span>general</span><span class="badge"></span></button>
-        <button class="channel" type="button"><span>#</span><span>research</span><span></span></button>
-        <button class="channel" type="button"><span>#</span><span>coding</span><span></span></button>
-        <button class="channel" type="button"><span>#</span><span>automation</span><span></span></button>
+        <button class="channel active" type="button"><span>#</span><span>general</span><span class="channel-count">1</span></button>
+        <button class="channel" type="button"><span>#</span><span>research</span><span class="channel-count">0</span></button>
+        <button class="channel" type="button"><span>#</span><span>coding</span><span class="channel-count">0</span></button>
+        <button class="channel" type="button"><span>#</span><span>automation</span><span class="channel-count">0</span></button>
         <p class="section-label" style="margin-top:18px">Runtime</p>
-        <button class="channel" type="button"><span>*</span><span>Memory</span><span></span></button>
-        <button class="channel" type="button"><span>*</span><span>Tools</span><span></span></button>
-        <button class="channel" type="button"><span>*</span><span>Evidence</span><span></span></button>
+        <button class="channel" type="button"><span>*</span><span>Memory</span><span class="channel-count">on</span></button>
+        <button class="channel" type="button"><span>*</span><span>Tools</span><span class="channel-count">72</span></button>
+        <button class="channel" type="button"><span>*</span><span>Evidence</span><span class="channel-count">5</span></button>
       </nav>
       <div class="sidebar-footer">
         <div class="footer-row"><span>Runtime</span><strong id="footer-runtime">magi-agent</strong></div>
@@ -920,7 +1051,6 @@ def _dashboard_html(runtime: OpenMagiRuntime) -> str:
               <strong id="composer-status">Ready to run</strong>
             </div>
             <h3>Magi Agent is ready.</h3>
-            <p>Use this local workspace for research, coding, document review, planning, and automation. Public runtime events and tool progress appear in the work stream while the answer streams here.</p>
             <div class="run-state" aria-label="Local runtime readiness">
               <div class="run-state-card"><span>Status</span><strong>No active run</strong></div>
               <div class="run-state-card"><span>Runtime</span><strong>ADK Python</strong></div>
@@ -930,6 +1060,23 @@ def _dashboard_html(runtime: OpenMagiRuntime) -> str:
               <div class="surface-card"><strong>Runtime surfaces</strong><span>Chat, work events, SSE transport, and public ADK progress in one shell.</span></div>
               <div class="surface-card"><strong>First-party surfaces</strong><span>Research, coding, documents, browser, memory, scheduler, and skills.</span></div>
               <div class="surface-card"><strong>Evidence gates</strong><span>Receipts and policy status stay visible while local work runs.</span></div>
+            </div>
+            <div class="workspace-board" id="workspace-board">
+              <div class="board-panel">
+                <h4>Workload</h4>
+                <div class="run-row"><span class="dot ready"></span><strong>General agent turn</strong><code id="board-turn-state">idle</code></div>
+                <div class="run-row"><span class="dot"></span><strong>Tool progress stream</strong><code id="board-tool-state">waiting</code></div>
+                <div class="run-row"><span class="dot"></span><strong>Evidence receipt stream</strong><code id="board-evidence-state">waiting</code></div>
+                <div class="run-row"><span class="dot"></span><strong>Transport channel</strong><code id="board-transport-state">ready</code></div>
+              </div>
+              <div class="board-panel">
+                <h4>Receipts</h4>
+                <div class="receipt-list" id="receipt-list">
+                  <div class="receipt"><strong>request</strong><span>pending</span></div>
+                  <div class="receipt"><strong>delivery</strong><span>pending</span></div>
+                  <div class="receipt"><strong>tool</strong><span>pending</span></div>
+                </div>
+              </div>
             </div>
             <div class="quick-actions" id="quick-actions">
             <button class="starter" type="button" data-prompt="Inspect this repository and summarize the runnable local surfaces.">Inspect this repository</button>
@@ -992,6 +1139,12 @@ def _dashboard_html(runtime: OpenMagiRuntime) -> str:
             <small>Public ADK events, tool progress, evidence receipts, and transport state appear here during a run.</small>
           </div>
           <p class="panel-heading"><span>Work in progress</span></p>
+          <div class="event-grid" aria-label="Run metrics">
+            <div class="event-metric"><span>SSE</span><strong id="metric-sse">0 frames</strong></div>
+            <div class="event-metric"><span>Events</span><strong id="metric-events">0 agent events</strong></div>
+            <div class="event-metric"><span>Tools</span><strong id="metric-tools">idle</strong></div>
+            <div class="event-metric"><span>Receipts</span><strong id="metric-receipts">pending</strong></div>
+          </div>
           <div class="event pending"><strong>No active run</strong><code>Submit a prompt to start a local ADK turn</code></div>
           <p class="panel-heading">Main session</p>
           <div class="timeline" id="work-stream-events">
@@ -1061,7 +1214,18 @@ def _dashboard_html(runtime: OpenMagiRuntime) -> str:
     const toolList = document.getElementById("tool-list");
     const harnessList = document.getElementById("harness-list");
     const evidenceList = document.getElementById("evidence-list");
+    const metricSse = document.getElementById("metric-sse");
+    const metricEvents = document.getElementById("metric-events");
+    const metricTools = document.getElementById("metric-tools");
+    const metricReceipts = document.getElementById("metric-receipts");
+    const boardTurnState = document.getElementById("board-turn-state");
+    const boardToolState = document.getElementById("board-tool-state");
+    const boardEvidenceState = document.getElementById("board-evidence-state");
+    const boardTransportState = document.getElementById("board-transport-state");
+    const receiptList = document.getElementById("receipt-list");
     const tokenKey = "magi-agent:gateway-token";
+    let sseFrameCount = 0;
+    let agentEventCount = 0;
 
     document.getElementById("footer-runtime").textContent = bootstrap.runtime;
     document.getElementById("footer-version").textContent = bootstrap.version;
@@ -1101,6 +1265,27 @@ def _dashboard_html(runtime: OpenMagiRuntime) -> str:
       workStreamEvents.appendChild(node);
       workStreamEvents.scrollTop = workStreamEvents.scrollHeight;
       return node;
+    }}
+
+    function setRunBoard(state) {{
+      const isRunning = state === "running";
+      const isBlocked = state === "blocked";
+      boardTurnState.textContent = isRunning ? "running" : isBlocked ? "blocked" : "idle";
+      boardToolState.textContent = isRunning ? "streaming" : isBlocked ? "blocked" : "waiting";
+      boardEvidenceState.textContent = isRunning ? "collecting" : isBlocked ? "blocked" : "ready";
+      boardTransportState.textContent = isRunning ? "open" : isBlocked ? "closed" : "ready";
+      metricTools.textContent = isRunning ? "watching" : isBlocked ? "blocked" : "idle";
+      metricReceipts.textContent = isRunning ? "collecting" : isBlocked ? "blocked" : "ready";
+    }}
+
+    function renderReceiptList(receipts) {{
+      receiptList.innerHTML = "";
+      for (const [name, status] of receipts) {{
+        const node = document.createElement("div");
+        node.className = "receipt";
+        node.innerHTML = `<strong>${{escapeText(name)}}</strong><span>${{escapeText(status)}}</span>`;
+        receiptList.appendChild(node);
+      }}
     }}
 
     function addMessage(role, text, tone) {{
@@ -1216,6 +1401,8 @@ def _dashboard_html(runtime: OpenMagiRuntime) -> str:
     }}
 
     function renderSseBlock(target, block) {{
+      sseFrameCount += 1;
+      metricSse.textContent = `${{sseFrameCount}} frame${{sseFrameCount === 1 ? "" : "s"}}`;
       let eventName = "message";
       const data = [];
       for (const line of block.split(/\\r?\\n/)) {{
@@ -1226,14 +1413,20 @@ def _dashboard_html(runtime: OpenMagiRuntime) -> str:
       if (!rawData) return false;
       if (rawData === "[DONE]") {{
         addEvent("Completed", "SSE stream finished", "ok");
+        renderReceiptList([["request", "sent"], ["delivery", "served"], ["transport", "done"]]);
         return true;
       }}
       try {{
         const parsed = JSON.parse(rawData);
         appendDelta(target, parsed);
         if (eventName === "agent") {{
+          agentEventCount += 1;
+          metricEvents.textContent = `${{agentEventCount}} agent event${{agentEventCount === 1 ? "" : "s"}}`;
+          if (parsed && String(parsed.type || "").includes("tool")) metricTools.textContent = summarizeAgentEvent(parsed);
           addEvent(summarizeAgentEvent(parsed), compactJson(parsed));
         }} else if (eventName !== "message" || parsed.type || parsed.event || parsed.status) {{
+          agentEventCount += 1;
+          metricEvents.textContent = `${{agentEventCount}} agent event${{agentEventCount === 1 ? "" : "s"}}`;
           addEvent(`event: ${{eventName}}`, compactJson(parsed));
         }}
       }} catch (error) {{
@@ -1246,8 +1439,14 @@ def _dashboard_html(runtime: OpenMagiRuntime) -> str:
       const token = tokenInput.value.trim();
       localStorage.setItem(tokenKey, token);
       const assistant = addMessage("assistant", "");
+      sseFrameCount = 0;
+      agentEventCount = 0;
+      metricSse.textContent = "0 frames";
+      metricEvents.textContent = "0 agent events";
       composerStatus.textContent = "Running";
       agentStatePill.textContent = "running";
+      setRunBoard("running");
+      renderReceiptList([["request", "sending"], ["delivery", "pending"], ["transport", "opening"]]);
       addEvent("Request", "POST /v1/chat/completions", "pending");
       const response = await fetch("/v1/chat/completions", {{
         method: "POST",
@@ -1268,6 +1467,8 @@ def _dashboard_html(runtime: OpenMagiRuntime) -> str:
         addEvent("Request failed", assistant.textContent, "error");
         composerStatus.textContent = "Blocked";
         agentStatePill.textContent = "blocked";
+        setRunBoard("blocked");
+        renderReceiptList([["request", "failed"], ["delivery", "blocked"], ["transport", String(response.status)]]);
         return;
       }}
       const reader = response.body.getReader();
@@ -1287,6 +1488,7 @@ def _dashboard_html(runtime: OpenMagiRuntime) -> str:
       }}
       composerStatus.textContent = "Ready to run";
       agentStatePill.textContent = "ready";
+      setRunBoard("ready");
     }}
 
     form.addEventListener("submit", async (event) => {{

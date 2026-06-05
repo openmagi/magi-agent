@@ -83,7 +83,29 @@ def test_local_dashboard_renders_workbench_not_empty_mockup() -> None:
     assert "Attach local context" in html
     assert "Work in progress" in html
     assert "Main session" in html
+    assert 'id="workspace-board"' in html
+    assert "Workload" in html
+    assert "Receipts" in html
+    assert 'id="metric-sse"' in html
+    assert 'id="metric-events"' in html
+    assert 'id="receipt-list"' in html
     assert "Run local agent work from one dashboard." not in html
+
+
+def test_local_dashboard_has_operational_work_stream_metrics() -> None:
+    response = _client().get("/dashboard")
+    html = response.text
+
+    assert "SSE" in html
+    assert "Events" in html
+    assert "Tools" in html
+    assert "Receipts" in html
+    assert 'id="board-turn-state"' in html
+    assert 'id="board-tool-state"' in html
+    assert 'id="board-evidence-state"' in html
+    assert 'id="board-transport-state"' in html
+    assert "setRunBoard" in html
+    assert "renderReceiptList" in html
 
 
 def test_local_dashboard_prefills_default_local_gateway_token() -> None:
