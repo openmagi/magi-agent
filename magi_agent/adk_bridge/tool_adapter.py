@@ -49,6 +49,76 @@ def _build_openmagi_tool_callable(
     return invoke_openmagi_tool
 
 
+_JSON_TYPE_TO_GENAI = {
+    "string": "STRING",
+    "object": "OBJECT",
+    "integer": "INTEGER",
+    "boolean": "BOOLEAN",
+    "number": "NUMBER",
+    "array": "ARRAY",
+}
+
+
+def _json_schema_to_genai_schema(schema: dict[str, object]):
+    """Convert a small JSON-schema dict into a ``genai_types.Schema``.
+
+    Supports the subset used by core tool manifests: typed properties with
+    descriptions, ``required``, nested ``properties``, and ``items``.
+    """
+    from google.genai import types as genai_types  # noqa: PLC0415
+
+    type_name = str(schema.get("type", "object"))
+    kwargs: dict[str, object] = {
+        "type": getattr(genai_types.Type, _JSON_TYPE_TO_GENAI.get(type_name, "OBJECT"))
+    }
+    description = schema.get("description")
+    if isinstance(description, str) and description:
+        kwargs["description"] = description
+    properties = schema.get("properties")
+    if isinstance(properties, dict):
+        kwargs["properties"] = {
+            key: _json_schema_to_genai_schema(value)
+            for key, value in properties.items()
+            if isinstance(value, dict)
+        }
+    required = schema.get("required")
+    if isinstance(required, (list, tuple)):
+        kwargs["required"] = [str(item) for item in required]
+    items = schema.get("items")
+    if isinstance(items, dict):
+        kwargs["items"] = _json_schema_to_genai_schema(items)
+    return genai_types.Schema(**kwargs)
+
+
+def _enrich_arguments_schema(tool: AdkLocalTool, manifest: ToolManifest) -> AdkLocalTool:
+    """Surface the manifest's ``input_schema`` as the ``arguments`` object schema.
+
+    First-party tools are exposed through a generic ``invoke_openmagi_tool(arguments)``
+    callable, so ADK builds a declaration whose single ``arguments`` object has no
+    inner properties — the model can't see the real parameter names and guesses
+    (the root cause of the SWE-bench edit failures). When the manifest declares an
+    informative ``input_schema`` (has ``properties``), wrap ``_get_declaration`` to
+    set the ``arguments`` object's properties/required from it.
+    """
+    schema = manifest.input_schema
+    if not isinstance(schema, dict) or "properties" not in schema:
+        return tool
+    base_get_declaration = tool._get_declaration  # type: ignore[attr-defined]
+
+    def _enriched_get_declaration() -> object | None:
+        declaration = base_get_declaration()
+        if declaration is None:
+            return None
+        params = getattr(declaration, "parameters", None)
+        props = getattr(params, "properties", None) if params is not None else None
+        if isinstance(props, dict) and "arguments" in props:
+            props["arguments"] = _json_schema_to_genai_schema(schema)
+        return declaration
+
+    tool._get_declaration = _enriched_get_declaration  # type: ignore[method-assign,attr-defined]
+    return tool
+
+
 def build_adk_tool_for_manifest(
     manifest: ToolManifest,
     dispatcher: ToolDispatcher,
@@ -65,11 +135,15 @@ def build_adk_tool_for_manifest(
         exposed_tool_names=exposed_tool_names,
     )
     if manifest.adk_tool_type == "FunctionTool":
-        return apply_provider_repair(
-            FunctionTool(invoke_openmagi_tool, require_confirmation=False)
+        tool = _enrich_arguments_schema(
+            FunctionTool(invoke_openmagi_tool, require_confirmation=False), manifest
         )
+        return apply_provider_repair(tool)
     if manifest.adk_tool_type == "LongRunningFunctionTool":
-        return apply_provider_repair(LongRunningFunctionTool(invoke_openmagi_tool))
+        tool = _enrich_arguments_schema(
+            LongRunningFunctionTool(invoke_openmagi_tool), manifest
+        )
+        return apply_provider_repair(tool)
     raise ValueError(f"unsupported ADK tool type: {manifest.adk_tool_type}")
 
 
