@@ -1,0 +1,84 @@
+# Frequently Asked Questions
+
+Answers to common questions about Magi Agent: recipes vs harnesses, default-off boundaries, local testing, repair decisions, model compatibility, and custom evidence types.
+
+Answers to the most common questions about Magi Agent architecture, recipe and harness differences, testing, and extensibility.
+
+## What models does Magi Agent support?
+
+Magi Agent is model-agnostic. Configure any supported provider and model via CORE_AGENT_MODEL in your environment. The runtime's evidence and boundary system works regardless of which model generates proposals.
+
+## Does it cost money?
+
+Magi Agent is open source and free to run. You pay only for the model API calls to your chosen provider (Anthropic, OpenAI, Google, etc.). Open Magi Cloud is optional managed hosting for teams that do not want to self-host.
+
+## How is this different from ChatGPT or Claude?
+
+ChatGPT and Claude are chat interfaces. Magi Agent is a runtime that wraps any model with deterministic evidence, boundary checks, and governed output. The model proposes actions; the runtime verifies them before they become results. You get the model's intelligence plus structural guarantees that prompt-only tools cannot provide.
+
+## What is the difference between a recipe and a harness?
+
+A recipe is a metadata-only policy compilation unit. RecipePackManifest declares what a recipe references (instructions, tools, callbacks, validators, evidence, approvals) and how packs compose. The recipe compiler merges profile layers and selects packs but does not execute anything.
+
+A harness is the evidence contract resolution and enforcement engine. HarnessEngine takes evidence contracts and hooks, resolves them against agent role, spawn depth, and run context, and produces ResolvedHarnessPresetState. The harness determines which evidence contracts are active, which hooks fire, and what enforcement level applies.
+
+In short: recipes compile policy, harnesses enforce it.
+
+- [Recipes overview](/docs/recipes)
+- [Harnesses overview](/docs/harnesses)
+
+## Why are boundaries default-off?
+
+Structural safety via Literal[False] authority flags. PythonRuntimeAuthorityConfig has eight fields typed as Literal[False]: transcript_write_allowed, sse_write_allowed, channel_write_allowed, db_write_allowed, workspace_mutation_allowed, child_execution_allowed, mission_runtime_allowed, and evidence_block_mode_allowed. Pydantic validates that these fields can only hold the value False. No configuration input, environment variable, or model proposal can set them to True.
+
+This means the Python runtime structurally cannot perform write operations, deliver to channels, execute child agents, or block on evidence. The boundary is not a policy decision that can be overridden; it is a type-level invariant enforced by the _FalseOnlyModel base class.
+
+- [Default-off gates](/docs/default-off-gates)
+- [Config reference](/docs/config-reference)
+
+## How do I test a recipe locally?
+
+Use fixture evidence and local_fake_evaluation_enabled. Set EvidenceEnforcementConfig.enabled to True and EvidenceEnforcementConfig.local_fake_evaluation_enabled to True. This enables the EvidenceEnforcementBoundary to evaluate evidence contracts against local fixture evidence records without requiring live tool execution.
+
+The boundary produces EvidenceEnforcementDecision with status values like "pass", "audit_missing", "repair_required", or "block_ready_local_fake". The "block_ready_local_fake" status indicates that evidence blocking would fire in production, but since evidence_block_enabled is Literal[False], the decision is recorded as a block intent without actually blocking.
+
+- [Evidence contracts](/docs/evidence-contracts)
+
+## Why is there no RepairDecision type?
+
+Repair is implicit in enforcement decisions. When an evidence contract evaluation fails and repair_allowed is True in the EvidenceEnforcementRequest, the EvidenceEnforcementBoundary returns an EvidenceEnforcementDecision with status "repair_required" and action "repair". RepairDecision and RepairPlan exist in harness/repair_policy.py for single-contract repair steps (max 5 attempts per plan). Cross-boundary repair orchestration across multiple contracts is not yet integrated.
+
+The repair flow is: evidence missing or failed -> boundary checks repair_allowed -> if True, returns repair action -> caller retries the operation -> boundary re-evaluates with new evidence.
+
+- [Repair and fallback](/docs/repair-fallback)
+
+## Can I use recipes with any LLM provider?
+
+Yes. Recipes are model-agnostic metadata. RecipePackManifest contains no provider-specific fields. The recipe compiler operates on profile layers (user_profile, workspace_policy, task_profile, recipe_pack_config, runtime_context) that are provider-independent. The model field in RuntimeConfig is a plain string; the recipe system does not inspect or branch on it.
+
+The ADK bridge layer handles provider-specific callback mapping (e.g. before_model_callback -> BEFORE_LLM_CALL), but this is transparent to the recipe and harness layers.
+
+## Why doesn't recipe execution work yet?
+
+RecipePackManifest is metadata-only today. The live_tool_refs, live_callback_refs, and runner_route_refs fields are validated empty and serialize to empty tuples. The validator explicitly rejects non-empty values with "recipe pack manifests must remain metadata-only".
+
+The execution engine is the planned boundary that will wire manifest refs (instruction_refs, tool_refs, callback_refs, validator_refs, evidence_refs) to runtime primitives. Until that boundary is implemented, recipes declare policy intent without executing it.
+
+- [Recipe schema](/docs/recipe-schema)
+
+## How do I add a custom evidence type?
+
+Use the custom:PascalCaseName naming convention. Create an EvidenceRecord with type set to a string like "custom:DeploymentVerification" or "custom:SecurityScan.Result". The name must be at most 80 characters and match ^custom:[A-Z][A-Za-z0-9]*(?:[._-][A-Za-z0-9]+)*$.
+
+Custom evidence types work with the same EvidenceRequirement and EvidenceFieldMatcher system as built-in types. You can create evidence contracts that require custom evidence types and use field matchers (equals, oneOf, matches, exists) to validate their fields.
+
+- [Evidence types reference](/docs/evidence-types-reference)
+
+## What happens when evidence is missing?
+
+The behavior depends on the on_missing field of the EvidenceContract. When set to "audit", missing evidence is logged to the audit ledger but does not block the run. When set to "block_final_answer", missing evidence prevents the final answer from being projected to the user.
+
+However, because final_answer_blocking_enabled is Literal[False] in EvidenceEnforcementConfig, the block_final_answer enforcement is currently recorded as a "block_ready_local_fake" intent without actually blocking output. This structural safety ensures that evidence contracts can be developed and tested without risk of silently blocking production output.
+
+- [Evidence contracts](/docs/evidence-contracts)
+- [Default-off gates](/docs/default-off-gates)

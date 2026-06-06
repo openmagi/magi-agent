@@ -1,66 +1,17 @@
 # Deployment
 
-Deploy Magi Agent as a Python runtime with explicit configuration, secrets, and
-storage.
+Deploy Magi Agent with default-off authority and explicit rollout gates.
 
-## Deployment Modes
+Deployment docs should emphasize local/source inspection, self-host operation, optional managed hosting, and the fact that live authority must be enabled through explicit rollout gates.
 
-Start local, then widen authority deliberately:
+## Self-host operation
 
-1. Homebrew local server for personal use.
-2. Source checkout for development and contribution.
-3. Container or service deployment for a controlled self-hosted environment.
+Self-host deployments should make provider credentials, tool credentials, storage, runtime routes, and public projections explicit. Keep mutation surfaces least-privilege and require approval gates for external side effects.
 
-For OSS operators, the important contract is the same in every mode: explicit
-config, scoped secrets, durable state, health checks, and rollback.
+Open Magi Cloud remains optional managed hosting for teams that do not want to operate the runtime themselves.
 
-## Deployment checklist
+## Default-off rollout posture
 
-- Pin the runtime image or package version.
-- Set provider credentials through a secret manager.
-- Mount workspace and durable state where required.
-- Keep external tool authority explicit.
-- Expose only the endpoints needed by your surface.
-- Monitor health, event output, and evidence records.
-- Verify rollback before broadening authority.
+New runtime authority should start default-off. Enable it only after contract tests, replay, shadow/canary evidence, security review, and rollback plans are in place.
 
-## Local first
-
-Run the local dashboard and focused tests before deploying. A deployment should
-not be considered ready until the exact enabled tools, model path, and evidence
-requirements have been verified.
-
-```bash
-magi-agent serve --port 8080
-open http://localhost:8080/dashboard
-curl http://localhost:8080/healthz
-```
-
-## Container Notes
-
-The repository includes a `Dockerfile` for container builds. A containerized
-deployment should provide:
-
-- runtime environment variables;
-- provider and integration secrets;
-- a workspace volume when local files or artifacts must persist;
-- network policy for the dashboard/API;
-- logs and health probes.
-
-Do not bake secrets into images.
-
-## Network Exposure
-
-If the dashboard or API is reachable outside localhost:
-
-- set a strong `GATEWAY_TOKEN`;
-- terminate TLS at a trusted proxy or platform layer;
-- restrict who can reach operator endpoints;
-- keep admin/tool routes behind auth;
-- verify redaction before sending events to shared logs.
-
-## Rollback
-
-Keep a rollback path before enabling high-authority tools. A useful rollback
-plan names the previous package or image version, the state that must persist,
-and any feature flags that can be disabled without redeploying.
+The Python ADK migration follows this posture: documentation can describe the contract while live authority remains gated where the implementation status says default-off.

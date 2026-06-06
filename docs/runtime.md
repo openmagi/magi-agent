@@ -1,111 +1,68 @@
 # Runtime
 
-Magi controls the loop around the model. The model proposes work; runtime policy
-decides which state transitions are allowed.
+How Magi Agent turns model proposals into governed state transitions via the Python ADK runtime.
 
-```text
-user request
-  -> context projection
-  -> model proposal
-  -> tool / evidence / policy boundary
-  -> repair, retry, ask, block, or continue
-  -> public projection
+The runtime is the engine that governs every agent action. The runtime loop separates model-visible context from runtime-only evidence and claim state. The actual turn loop flows through RunnerSessionBoundary to model routing, message building, event streaming, projection validation, and error classification. ADK invocation is scaffolded but disabled by default.
+
+## Runtime loop
+
+The Python ADK runtime entry point is __main__.py, which calls main.py (parse_runtime_env() reads required env vars) and then app.py (create_app() registers FastAPI routes: /health, /healthz, /v1/chat/completions with Gate5B canary checks, and shadow diagnostic routes).
+
+OpenMagiRuntime.__init__() creates: RuntimeConfig, RuntimeProfile, AdkPrimitiveBoundary, ToolRegistry, and ResolvedPluginState. The real turn loop is: user message enters RunnerSessionBoundary.run_turn(), which takes a policy snapshot plus harness resolution, then routes through model_routing.py for model selection, message_builder.py for context packet assembly, the ADK Runner (currently DISABLED), event streaming, projection_write_boundary.py for output validation, and error_taxonomy.py for error classification.
+
+### Two-plane architecture
+
+```
+MODEL-VISIBLE LOOP                  RUNTIME-ONLY CONTROL PLANE
+
+User request
+    |
+    v
+Allowed context packet   <--------- Policy snapshot
+    |                               tools, approvals, evidence rules,
+    v                               repair rules, projection rules
+ADK model proposal
+    |  action / claim / draft
+    v
+Boundary checks          ---------> ToolHost / activity boundary
+    |                               source, file, delivery, child,
+    |                               memory, artifact, workspace
+    v
+Model can continue       <--------- Receipts + evidence ledger
+                                    source spans, approval receipts,
+                                    file/test/calculation/delivery proof
+
+Final answer/artifact     <-------- Validators + repair/fallback policy
+                                    unsupported claim -> repair, downgrade,
+                                    abstain, block, or ask approval
+
+User-visible projection   <-------- Output projector + audit checkpoint
 ```
 
-## Work Loop
+## TurnInput and session boundary
 
-A run normally moves through these stages:
+Each turn is modeled as a TurnInput (from runtime/turn_controller.py) with fields: user_id, session_id, turn_id, message_text, and harness_state. The RunnerSessionBoundary (runtime/runner_session_boundary.py) manages session concurrency and error classification for each turn.
 
-1. Build model-visible context from the user request, session state, allowed
-   memory, and workspace references.
-2. Call the model or runner boundary.
-3. Route proposed tool calls through permission, workspace, and approval policy.
-4. Record public-safe receipts for reads, writes, calculations, deliveries, and
-   external actions.
-5. Run validators and repair policy.
-6. Project only supported, public-safe output to the user.
+The runtime uses two layers: runtime/openmagi_runtime.py is the core container (ADK invocation DISABLED by default), and the adk_bridge/ directory (10 files) provides import-only detection of Google ADK availability via primitives.py without instantiating ADK classes.
 
-The model can write text, but the runtime decides whether that text becomes
-state, memory, artifact content, an external side effect, or final output.
+## Boundary validation
 
-## Public events
+Validators run before more than the final answer. They also run before intermediate boundaries: child result import, next-step summary, memory write, Slack draft, artifact publication, delivery, and final output.
 
-The runtime may emit public events such as:
+This keeps unsupported claims from becoming future context, durable memory, or external messages even if the final answer gate would catch them later.
 
-- `turn_start`
-- `turn_phase`
-- `text_delta`
-- `llm_progress`
-- `tool_start`
-- `tool_progress`
-- `tool_end`
-- `recipe_selection`
-- `control_request`
-- `source_inspected`
-- `citation_gate`
-- `turn_result`
+- before context projection
+- before tool execution
+- after ToolHost receipt creation
+- before child result import
+- before next-step summary
+- before memory write
+- before Slack draft
+- before artifact publication
+- before final output
 
-Private paths, secrets, raw provider payloads, and hidden reasoning should not
-be projected as public events.
+## Repair, approval, fallback, or abstention
 
-See [Streaming events](streaming-events.md) for the public event classes, SSE
-wire shape, and sanitization rules.
+When evidence is missing, Magi Agent should not silently project the unsupported claim. The policy decides whether to gather more evidence, weaken the wording, ask approval, use a fallback, abstain, or block.
 
-## Dashboard Stream
-
-`magi-agent serve` includes the dashboard at `/dashboard`. The dashboard can
-show:
-
-- runtime health and build metadata;
-- chat/session events;
-- tool progress and public receipts;
-- control requests for human approval;
-- evidence and completion status when emitted by the runtime.
-
-Public event projection is intentionally narrower than internal logs. If a
-private payload is needed for debugging, inspect it locally with the appropriate
-redaction discipline instead of sending it through user-visible events.
-
-## Completion
-
-A turn should not finish by promising future background work unless a real
-background job, receipt, or blocker is recorded. If the work cannot be completed
-now, the runtime should say what is blocked and why.
-
-Completion claims should be backed by evidence appropriate to the task:
-
-- source-sensitive answers need source evidence;
-- coding work needs read, mutation, diff, and verification evidence;
-- file delivery needs a created artifact and delivery receipt;
-- external sends need channel or API delivery receipts;
-- delegated work needs accepted child output or a clear blocker.
-
-## Repair and Fallback
-
-When evidence is missing or a validator blocks completion, the runtime can:
-
-- ask for approval or clarification;
-- inspect another allowed source;
-- retry a tool call;
-- weaken or remove an unsupported claim;
-- report a concrete blocker;
-- abstain from claiming success.
-
-Silent success is the wrong fallback for governed work.
-
-## Recipes and Harnesses
-
-Recipes choose the work contract. Harnesses enforce it. For example, a research
-recipe can select source-proof and final-projection harnesses, while a coding
-recipe can select read-before-edit, mutation, diff, test, and final-projection
-gates.
-
-The runtime core stays generic: it supplies runner, tool, session, memory,
-artifact, callback, event, and projection primitives. Work-class behavior lives
-in public recipe and harness contracts.
-
-Further reading:
-
-- [Recipes](recipes.md)
-- [Harnesses](harnesses.md)
-- [First-party packs](first-party-packs.md)
+Repair is bounded and auditable. The append-only audit ledger should show the failed validation, attempted repair, final projection, and any remaining caveat.

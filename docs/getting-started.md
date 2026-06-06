@@ -1,116 +1,72 @@
 # Getting Started
 
-Install Magi Agent locally, start the runtime, and open the dashboard.
+Install Magi Agent locally, open the dashboard, or fall back to a source checkout for development.
 
-## Prerequisites
+Install with Homebrew, run `magi-agent serve --port 8080`, and open the local dashboard. Source checkout remains available for development.
 
-- macOS or Linux with a normal shell environment.
-- Homebrew for the recommended install path.
-- A model provider key if you want live model calls.
-- Git and `uv` only when developing from source.
+## User install target
 
-Do not paste provider keys into prompts, docs, committed files, or terminal
-transcripts you plan to share.
+Magi Agent is available as a local CLI and HTTP dashboard install through Homebrew.
 
-## Install with Homebrew
+The intended Magi Agent user is a local-agent user, not a repo contributor. Install the runtime, start the local HTTP API, then finish first-run setup in the browser.
 
-```bash
-brew update
+Use the source checkout only when developing the runtime itself.
+
+- First-run setup belongs in the local web UI where possible: provider/model selection, API key entry into local secret storage, workspace path selection, default recipe/harness selection, and first agent/chat creation.
+- The installed commands are `magi` for CLI work and `magi-agent` for serving the local HTTP API/dashboard.
+- Open Magi Cloud remains optional managed hosting, not required for the local app flow.
+
+### Homebrew install
+
+```
 brew install --force-bottle openmagi/tap/magi-agent
-```
-
-If Homebrew tries to build from source on macOS, update the tap metadata and
-reinstall the prebuilt bottle:
-
-```bash
-brew update
-brew reinstall openmagi/tap/magi-agent --force-bottle
-```
-
-## Start the local runtime and dashboard
-
-```bash
 magi-agent serve --port 8080
 open http://localhost:8080/dashboard
 ```
 
-The dashboard is served by the same Python runtime. It does not require a
-separate Node or Next.js process.
+## Current source fallback
 
-The default local path can start without production environment variables. Set
-explicit runtime environment only when you want to connect real models,
-channels, external tools, or a self-hosted network surface.
+Clone the canonical source repository at https://github.com/openmagi/magi-agent.
 
-## Use the CLI
+For source checkout development, use `npm run magi -- ...` as a development fallback only.
 
-```bash
-magi
-magi --help
-magi -p "Inspect this repository and summarize the runnable surfaces"
-magi --output text "Summarize this repository"
-magi-agent --help
-magi-agent serve --help
+Use this fallback to create starter files, verify the checkout, and start the local docs/development server before changing runtime behavior.
+
+- `init` creates `magi-agent.yaml`, `.magi-agent/env.local`, and `.magi-agent/workspace/` with placeholders only.
+- `doctor` checks local files without contacting OpenMagi Cloud, providers, Kubernetes, databases, auth, or billing.
+- `start` runs the local docs/development server from the checkout; it does not activate cloud hosting, deploy infrastructure, or live runtime authority.
+- Keep provider keys and service credentials outside source control.
+
+### Source fallback
+
 ```
-
-`magi` is the terminal work interface. `magi-agent` starts and manages the local
-HTTP server and dashboard.
-
-## Configure a model
-
-Magi Agent can run against provider-specific or OpenAI-compatible model paths
-when configured. Keep credentials in environment variables:
-
-```bash
-export OPENAI_API_KEY=...
-export ANTHROPIC_API_KEY=...
-export GOOGLE_API_KEY=...
-export CORE_AGENT_MODEL=...
-```
-
-For local development without production wiring, the server falls back to a
-local diagnostic configuration. For strict self-hosted startup checks, set:
-
-```bash
-export MAGI_AGENT_REQUIRE_ENV=1
-```
-
-## Run from source
-
-Use source mode when changing the runtime itself:
-
-```bash
 git clone https://github.com/openmagi/magi-agent.git
 cd magi-agent
-uv sync --extra dev --extra cli
-uv run --extra cli magi --help
-uv run magi-agent serve --port 8080
+npm install
+npm run magi -- init
+npm run magi -- doctor
+npm run magi -- start
 ```
 
-Source mode is for contributors. Normal users should prefer the Homebrew
-formula so the installed `magi` and `magi-agent` commands match the released
-package.
+## Packaging follow-up
 
-## First checks
+Homebrew installation exists. The remaining packaging work is improving the local dashboard onboarding, workspace volume management, local secret storage, and upgrade/rollback behavior.
 
-- `magi-agent serve --port 8080` starts without missing configuration errors.
-- `http://localhost:8080/dashboard` shows runtime health.
-- `magi --help` and `magi-agent --help` print command help.
-- A simple prompt streams a response or a clear local configuration error.
-- `curl http://localhost:8080/healthz` returns an `ok` health payload or a
-  specific blocker.
+Follow-up plan: `docs/superpowers/plans/2026-05-28-magi-agent-homebrew-local-app-install.md`.
 
-## Agent Handoff Prompt
+- The standalone CLI package has tested `magi` and `magi-agent` entrypoints.
+- Docker image/compose bundle publishing for multi-service local stacks remains separate from the Homebrew single-runtime path.
+- Local dashboard onboarding, local secret storage, workspace volume management, and upgrade/rollback behavior remain follow-up work.
 
-Paste this into an AI coding agent when you want it to set up a clean local
-checkout:
+## Python ADK runtime status
 
-```text
-Clone https://github.com/openmagi/magi-agent.git into ./magi-agent.
-Read README.md and docs/ before editing.
-Use Homebrew for a normal user install, or `uv sync --extra dev --extra cli`
-only when changing source.
-Start the local server with `magi-agent serve --port 8080`.
-Open http://localhost:8080/dashboard and report what loads.
-Do not expose secrets. Ask before changing API contracts, auth, billing,
-database schema, or production deployment behavior.
-```
+The Python ADK runtime is the forward substrate for Magi Agent runtime contracts, but current live authority is still gated. Public docs should describe ADK as the substrate and Magi Agent as the governing runtime contract without implying production traffic has moved to ADK by default.
+
+Use ADK docs here to understand the architecture: policy snapshot, context projection, ToolHost, source ledger, validators, repair policy, governed output projection, and audit.
+
+- Live model, tool, provider, MCP, browser, workspace, and production routing authority remain default-off until explicit rollout gates pass.
+- Docs may describe the contract and migration direction, but must not imply ungated runtime activation.
+
+## Managed-hosting CLI boundary
+
+`packages/openmagi` is currently an optional managed-hosting CLI with `openmagi cloud <login|run|chat>`. It does not install or start the local OSS runtime, so local docs should keep it separate from Magi Agent source setup.

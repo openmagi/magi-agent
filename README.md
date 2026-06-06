@@ -5,8 +5,7 @@
 **The programmable AI agent that gets real work done under your rules.**
 
 [Website](https://openmagi.ai) ·
-[Docs](docs/README.md) ·
-[CLI](docs/cli.md) ·
+[CLI](docs/cli/magi.md) ·
 [Releases](https://github.com/openmagi/magi-agent/releases)
 
 ![status](https://img.shields.io/badge/status-early%20beta-f97316)
@@ -108,7 +107,8 @@ magi-agent serve --help
 The dashboard is served by the same local agent. It does not need a separate
 Node or Next.js process.
 
-If Homebrew tries to build the formula from source on macOS, update the tap
+`--force-bottle` keeps the install on the prebuilt Homebrew package path. If
+Homebrew still tries to build the formula from source on macOS, update the tap
 metadata and reinstall the bottle:
 
 ```bash
@@ -118,9 +118,9 @@ brew reinstall openmagi/tap/magi-agent --force-bottle
 
 ## Architecture
 
-Magi controls the loop around the model runner. The model sees a bounded context
-packet and proposes work. Runtime-only policy, evidence, validation, and
-projection state decide which proposals can continue.
+Magi controls the loop around ADK. The model sees a bounded context packet and
+proposes work. Runtime-only policy, evidence, validation, and projection state
+decide which proposals can continue.
 
 ```text
 MODEL-VISIBLE LOOP                  RUNTIME-ONLY CONTROL PLANE
@@ -131,7 +131,7 @@ User request
 Allowed context packet   <--------- Policy snapshot
     |                               tools, approvals, evidence rules,
     v                               repair rules, projection rules
-Model runner proposal
+ADK model proposal
     |  action / claim / draft
     v
 Boundary checks          ---------> ToolHost / activity boundary
@@ -154,7 +154,7 @@ User-visible projection   <-------- Output projector + audit checkpoint
 | Harness | Adds reusable enforcement behavior to runtime stages |
 | Policy snapshot | Freezes the effective rules for the current run |
 | Context projector | Decides what the model is allowed to see |
-| Runner boundary | Lets the model propose text, actions, and tool calls |
+| ADK Runner boundary | Lets the model propose text, actions, and tool calls |
 | ToolHost | Owns tool execution, permission checks, and approvals |
 | Evidence ledger | Records source, file, calculation, test, approval, and delivery receipts |
 | Validators | Check whether claims and actions satisfy the policy |
@@ -381,14 +381,9 @@ Build-system pins:
 
 ## More Docs
 
-- Docs index: `docs/README.md`
-- CLI reference: `docs/cli.md`
-- Getting started: `docs/getting-started.md`
-- Quickstart: `docs/quickstart.md`
-- Recipes: `docs/recipes.md`
-- Harnesses: `docs/harnesses.md`
-- First-party packs: `docs/first-party-packs.md`
-- Streaming events: `docs/streaming-events.md`
+- CLI reference: `docs/cli/magi.md`
+- CLI handoff: `docs/notes/2026-05-31-magi-cli-track18-handoff-for-adk-migration.md`
+- CLI design: `docs/plans/2026-05-30-magi-cli-design.md`
 - Runtime architecture: `magi_agent/ARCHITECTURE.md`
 
 ## License

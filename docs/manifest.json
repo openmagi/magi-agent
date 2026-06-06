@@ -6,7 +6,7 @@
   "pages": [
     {
       "slug": "overview",
-      "title": "Open Magi Agent Docs",
+      "title": "OpenMagi Docs",
       "path": "docs/README.md",
       "group": "Start"
     },
@@ -26,13 +26,13 @@
       "slug": "cli",
       "title": "CLI",
       "path": "docs/cli.md",
-      "group": "Start"
+      "group": "Reference"
     },
     {
       "slug": "configuration",
       "title": "Configuration",
       "path": "docs/configuration.md",
-      "group": "Configure"
+      "group": "User Guide"
     },
     {
       "slug": "customization",
@@ -44,37 +44,19 @@
       "slug": "runtime",
       "title": "Runtime",
       "path": "docs/runtime.md",
-      "group": "Configure"
+      "group": "Core Concepts"
     },
     {
       "slug": "tools",
       "title": "Tools",
       "path": "docs/tools.md",
-      "group": "Configure"
-    },
-    {
-      "slug": "recipes",
-      "title": "Recipes",
-      "path": "docs/recipes.md",
-      "group": "Configure"
-    },
-    {
-      "slug": "harnesses",
-      "title": "Harnesses",
-      "path": "docs/harnesses.md",
-      "group": "Configure"
-    },
-    {
-      "slug": "first-party-packs",
-      "title": "First-party Packs",
-      "path": "docs/first-party-packs.md",
-      "group": "Configure"
+      "group": "User Guide"
     },
     {
       "slug": "contracts",
       "title": "Contracts",
       "path": "docs/contracts.md",
-      "group": "Configure"
+      "group": "Operate"
     },
     {
       "slug": "hooks",
@@ -86,13 +68,13 @@
       "slug": "memory",
       "title": "Memory",
       "path": "docs/memory.md",
-      "group": "Operate"
+      "group": "User Guide"
     },
     {
       "slug": "skills",
       "title": "Skills",
       "path": "docs/skills.md",
-      "group": "Operate"
+      "group": "Configure"
     },
     {
       "slug": "automation",
@@ -101,22 +83,16 @@
       "group": "Operate"
     },
     {
-      "slug": "streaming-events",
-      "title": "Streaming Events",
-      "path": "docs/streaming-events.md",
-      "group": "Operate"
-    },
-    {
       "slug": "integrations",
       "title": "Integrations",
       "path": "docs/integrations.md",
-      "group": "Operate"
+      "group": "Configure"
     },
     {
       "slug": "api",
       "title": "API",
       "path": "docs/api.md",
-      "group": "Operate"
+      "group": "Reference"
     },
     {
       "slug": "deployment",
@@ -128,13 +104,13 @@
       "slug": "security",
       "title": "Security",
       "path": "docs/security.md",
-      "group": "Reference"
+      "group": "User Guide"
     },
     {
       "slug": "architecture",
       "title": "Architecture",
       "path": "docs/architecture.md",
-      "group": "Reference"
+      "group": "Core Concepts"
     },
     {
       "slug": "reference",
@@ -146,6 +122,204 @@
       "slug": "troubleshooting",
       "title": "Troubleshooting",
       "path": "docs/troubleshooting.md",
+      "group": "Reference"
+    },
+    {
+      "slug": "learning-path",
+      "title": "Learning Path",
+      "path": "docs/learning-path.md",
+      "group": "Start"
+    },
+    {
+      "slug": "sessions",
+      "title": "Sessions",
+      "path": "docs/sessions.md",
+      "group": "User Guide"
+    },
+    {
+      "slug": "checkpoints",
+      "title": "Checkpoints",
+      "path": "docs/checkpoints.md",
+      "group": "User Guide"
+    },
+    {
+      "slug": "work-console",
+      "title": "Work Console",
+      "path": "docs/work-console.md",
+      "group": "User Guide"
+    },
+    {
+      "slug": "boundaries",
+      "title": "Boundaries",
+      "path": "docs/boundaries.md",
+      "group": "Core Concepts"
+    },
+    {
+      "slug": "evidence",
+      "title": "Evidence",
+      "path": "docs/evidence.md",
+      "group": "Core Concepts"
+    },
+    {
+      "slug": "projection",
+      "title": "Projection",
+      "path": "docs/projection.md",
+      "group": "Core Concepts"
+    },
+    {
+      "slug": "repair-fallback",
+      "title": "Repair and Fallback",
+      "path": "docs/repair-fallback.md",
+      "group": "Core Concepts"
+    },
+    {
+      "slug": "recipes",
+      "title": "Recipes",
+      "path": "docs/recipes.md",
+      "group": "Recipes"
+    },
+    {
+      "slug": "harnesses",
+      "title": "Harnesses",
+      "path": "docs/harnesses.md",
+      "group": "Recipes"
+    },
+    {
+      "slug": "build-a-recipe",
+      "title": "Build a Recipe",
+      "path": "docs/build-a-recipe.md",
+      "group": "Recipes"
+    },
+    {
+      "slug": "build-a-harness",
+      "title": "Build a Harness",
+      "path": "docs/build-a-harness.md",
+      "group": "Recipes"
+    },
+    {
+      "slug": "source-verified-research",
+      "title": "Source-Verified Research",
+      "path": "docs/source-verified-research.md",
+      "group": "Recipes"
+    },
+    {
+      "slug": "coding-verification",
+      "title": "Coding Verification",
+      "path": "docs/coding-verification.md",
+      "group": "Recipes"
+    },
+    {
+      "slug": "general-automation",
+      "title": "General Automation",
+      "path": "docs/general-automation.md",
+      "group": "Recipes"
+    },
+    {
+      "slug": "multi-recipe-composition",
+      "title": "Multi-Recipe Composition",
+      "path": "docs/multi-recipe-composition.md",
+      "group": "Recipes"
+    },
+    {
+      "slug": "developer-overview",
+      "title": "Developer Overview",
+      "path": "docs/developer-overview.md",
+      "group": "Developer"
+    },
+    {
+      "slug": "runtime-interfaces",
+      "title": "Runtime Interfaces",
+      "path": "docs/runtime-interfaces.md",
+      "group": "Developer"
+    },
+    {
+      "slug": "hook-points",
+      "title": "Hook Points",
+      "path": "docs/hook-points.md",
+      "group": "Developer"
+    },
+    {
+      "slug": "toolhost",
+      "title": "ToolHost",
+      "path": "docs/toolhost.md",
+      "group": "Developer"
+    },
+    {
+      "slug": "evidence-contracts",
+      "title": "Evidence Contracts",
+      "path": "docs/evidence-contracts.md",
+      "group": "Developer"
+    },
+    {
+      "slug": "plugin-manifest",
+      "title": "Plugin Manifest",
+      "path": "docs/plugin-manifest.md",
+      "group": "Developer"
+    },
+    {
+      "slug": "testing-recipes",
+      "title": "Testing Recipes",
+      "path": "docs/testing-recipes.md",
+      "group": "Developer"
+    },
+    {
+      "slug": "default-off-gates",
+      "title": "Default-Off Gates",
+      "path": "docs/default-off-gates.md",
+      "group": "Developer"
+    },
+    {
+      "slug": "config-reference",
+      "title": "Config Reference",
+      "path": "docs/config-reference.md",
+      "group": "Reference"
+    },
+    {
+      "slug": "env-reference",
+      "title": "Environment Variable Reference",
+      "path": "docs/env-reference.md",
+      "group": "Reference"
+    },
+    {
+      "slug": "recipe-schema",
+      "title": "Recipe Schema Reference",
+      "path": "docs/recipe-schema.md",
+      "group": "Reference"
+    },
+    {
+      "slug": "harness-schema",
+      "title": "Harness Schema Reference",
+      "path": "docs/harness-schema.md",
+      "group": "Reference"
+    },
+    {
+      "slug": "hook-points-reference",
+      "title": "Hook Points Reference",
+      "path": "docs/hook-points-reference.md",
+      "group": "Reference"
+    },
+    {
+      "slug": "evidence-types-reference",
+      "title": "Evidence Types Reference",
+      "path": "docs/evidence-types-reference.md",
+      "group": "Reference"
+    },
+    {
+      "slug": "toolhost-api",
+      "title": "ToolHost API Reference",
+      "path": "docs/toolhost-api.md",
+      "group": "Reference"
+    },
+    {
+      "slug": "runtime-events",
+      "title": "Runtime Events Reference",
+      "path": "docs/runtime-events.md",
+      "group": "Reference"
+    },
+    {
+      "slug": "faq",
+      "title": "Frequently Asked Questions",
+      "path": "docs/faq.md",
       "group": "Reference"
     }
   ]

@@ -1,151 +1,59 @@
 # Harnesses
 
-Harnesses are reusable runtime contracts that make a workflow checkable. A
-harness does not replace the model. It defines boundaries around the model:
-which actions are allowed, which evidence is required, when repair is possible,
-and what can become public output.
+Runtime policy extensions that own state, boundaries, evidence, and projection rules.
 
-## Harness lifecycle
+Harnesses are the active enforcement layer. They resolve which evidence contracts apply to each agent turn based on the agent's role, task depth, and run context, then attach scoped hooks to enforce them.
 
-A governed run normally passes through these harness stages:
+## What harnesses are
 
-1. **Admission.** Select a recipe, validate dependencies, freeze policy, and
-   reject incompatible authority.
-2. **Context projection.** Build the model-visible packet from allowed request,
-   session, memory, source, and workspace refs.
-3. **Tool boundary.** Route tool proposals through permission, workspace,
-   approval, and provider policy.
-4. **Evidence capture.** Record source, file, calculation, test, approval,
-   browser, delivery, artifact, or child-result receipts.
-5. **Intermediate validation.** Check child output, summaries, memory writes,
-   and artifact drafts before they become next-step context.
-6. **Repair.** Retry, ask, inspect another allowed source, downgrade wording,
-   or block the run when evidence is missing.
-7. **Final projection.** Render only public-safe, supported output and the
-   relevant receipt refs or blockers.
+A harness is a runtime policy extension that owns evidence contracts, hook scoping, and preset state. Unlike recipes (which compile metadata snapshots), harnesses actively resolve and enforce evidence requirements during runs.
 
-## Harness matrix
+HarnessEngine is fully implemented. It takes hook manifests, evidence contract scopes, and a rollout mode, then resolves a HarnessResolutionRequest into scoped hooks and a ResolvedHarnessPresetState.
 
-- Research determinism: blocks unsupported research claims. Typical evidence:
-  opened source proof, snapshot digest, span refs, claim graph, acceptance
-  criteria, verifier result.
-- Coding: blocks false coding completion claims and unsafe mutations. Typical
-  evidence: read ledger, stale-read check, patch receipt, diff summary, test
-  run, rollback proof, diagnostics.
-- General automation: keeps broad automation observable, approved, and
-  reversible. Typical evidence: control request, approval receipt, path/shell
-  decision, browser artifact, spreadsheet evidence, delivery receipt.
-- Scheduler: models due-work checks without hidden background authority. Typical
-  evidence: schedule ref, lease digest, tick decision, due turn ref, delivery
-  decision.
-- Background task: represents long-running work without promising invisible
-  execution. Typical evidence: task ref, checkpoint ref, resume approval,
-  completion projection.
-- Memory: scopes recall and write behavior to source authority. Typical
-  evidence: namespace ref, source refs, write boundary, compaction digest.
-- Meta-orchestration: accepts or rejects delegated child work. Typical evidence:
-  child envelope, role, evidence refs, inspection verdict, final assembly plan.
-- Browser: separates inspection from side-effectful browser actions. Typical
-  evidence: page artifact ref, screenshot digest, action decision, approval
-  receipt.
-- Office automation: makes generated documents and spreadsheets auditable.
-  Typical evidence: schema check, formula presence, reconciliation totals, write
-  evidence, delivery ref.
+## HarnessEngine resolution
 
-## Research harness
+HarnessEngine.resolve() takes a HarnessResolutionRequest (agent_role, spawn_depth, run_on, opted_out_evidence_contract_ids) and returns a tuple of (selected hooks, resolved harness state). The engine delegates to build_default_resolved_harness_state for evidence contract resolution and resolve_scoped_harness_hooks for hook filtering.
 
-Research harnesses treat source-sensitive claims as evidence-bearing objects.
-Reliable research needs more than a URL in the final answer.
+### HarnessEngine (Python, implemented and active)
 
-The public contract expects:
+```
+class HarnessEngine:
+    def __init__(self, *,
+        hooks: tuple[HookManifest, ...] = (),
+        evidence_contracts: tuple[EvidenceContractScope, ...] = (),
+        evidence_rollout_mode: EvidenceRolloutMode = 'audit',
+    ) -> None: ...
 
-- action proof for research verbs such as searched, read, reviewed, compared,
-  confirmed, analyzed, and summarized;
-- opened-source proof with snapshot, digest, timestamp, and citeable span refs;
-- rejection of URL-only citations and unopened sources;
-- freshness checks when the claim depends on current information;
-- claim graph support mapping;
-- weak-claim downgrade;
-- unsupported-claim blocking;
-- acceptance criteria extraction;
-- child evidence envelope acceptance before parent synthesis;
-- final projection that omits raw source bodies and private tool payloads.
+    def resolve(
+        self, request: HarnessResolutionRequest,
+    ) -> tuple[tuple[HookManifest, ...], ResolvedHarnessPresetState]: ...
 
-Repair actions can inspect another allowed source, request clarification,
-downgrade a claim, remove the claim, or report the missing work.
+class HarnessResolutionRequest(BaseModel):
+    agent_role: AgentRole = 'general'  # 'general' | 'coding' | 'research'
+    spawn_depth: int = 0
+    run_on: RunOn | None = None  # 'main' | 'child'
+    opted_out_evidence_contract_ids: tuple[str, ...] = ()
+```
 
-## Coding harness
+## Evidence contract scoping
 
-Coding harnesses model code work as an evidence-producing transaction. The
-runtime should not project "fixed", "tested", or "complete" unless the required
-evidence exists.
+EvidenceContractScope defines when an evidence contract applies based on agent_roles (general, coding, research), run_on (main, child), and spawn_depth range (minDepth, maxDepth). The scope resolution produces an EvidenceScopeDecision with applies, effective_enforcement, opt_out_applied, and hard_safety flags.
 
-The public contract expects:
+Contracts with hard_safety=true cannot be opted out. Contracts with enforcement=block_final_answer require audit_before_block=true. Third-party evidence scope defaults enforce traffic-free operation (trafficAttached=false, executionAttached=false).
 
-- read-before-edit and stale-read rejection;
-- patch, file change, and mutation receipts;
-- diff evidence before a completion claim;
-- test or diagnostic evidence for verification claims;
-- safe shell/test-run policy;
-- bounded repair loops;
-- coding subagent roles for inspection, review, and implementation;
-- code intelligence reports using public refs and redacted diagnostics;
-- final projection that can downgrade unsupported success claims.
+- AgentRole: 'general' | 'coding' | 'research' -- determines which contracts apply
+- RunOn: 'main' | 'child' -- main runs use spawnDepth=0, child runs use spawnDepth>0
+- SpawnDepthRange: minDepth (default 0), maxDepth (optional) -- filters by nesting level
+- EvidenceEnforcement: 'off' | 'audit' | 'block_final_answer' -- what happens on missing evidence
 
-## General automation harness
+## ResolvedHarnessPresetState and RuntimeProfile
 
-General automation is intentionally broader than coding or research, so it
-needs explicit boundaries. The harness owns:
+The resolved state (harness/resolved.py, build_default_resolved_harness_state()) includes three built-in harness packs (coding, research, verification), hard safety gates, effective hooks and packs lists, evidence contract snapshots, and verdict readiness metadata. The default profile is RuntimeProfile('openmagi-opinionated') from harness/profiles.py.
 
-- plan/act transitions;
-- question and approval tools;
-- path and external-directory policy;
-- shell policy and shell receipts;
-- browser evidence and side-effect decisions;
-- spreadsheet read, validation, write, and delivery evidence;
-- output-budget references for large artifacts;
-- background task projection;
-- public control and event projection;
-- package manifests and tool projection for automation packs.
+RuntimeProfile defines a HardSafetyPolicy with 5 gates (permission-arbiter, path-safety, secret-safety, sealed-file-policy, git-safety) and 5 FeaturePacks (coding, research, verification, local-tools, cloud). The coding pack includes tools (FileRead, FileEdit, PatchApply), hooks (coding-verification, completion-evidence), and child agent review. The research pack includes tools (WebSearch, WebFetch, KnowledgeSearch), hooks (source-authority, claim-citation, fact-grounding), and citation-required delivery.
 
-The harness should return a concrete artifact, receipt, control request, or
-blocker. A generated promise that work will happen later is not automation.
+## How harnesses differ from prompts, hooks, and skills
 
-## Scheduler harness
+Prompts ask the model to cooperate. Hooks observe lifecycle events and can block them. Skills teach procedures. Harnesses own state: they define evidence contracts with triggers and requirements, resolve them against the run context, and produce enforcement verdicts.
 
-Scheduler contracts keep periodic work explicit. A schedule tick should produce
-a public-safe decision describing whether due work was found and whether
-execution or delivery was allowed.
-
-Useful public fields include:
-
-- schedule or source ref;
-- request digest;
-- owner/session-safe digests;
-- lease ref or lease decision;
-- due turn refs;
-- reason codes;
-- delivery status;
-- authority flags.
-
-Scheduler docs should describe local and self-hosted contracts only. Keep
-deployment-specific rollout internals out of public OSS docs.
-
-## Verification
-
-Harness changes should be covered with fixture tests that prove:
-
-- private text, private paths, credentials, and raw provider payloads are not
-  projected;
-- default-off authority stays default-off until explicitly enabled;
-- public projections use refs, digests, statuses, and reason codes;
-- rejected cases fail closed;
-- supported cases produce the expected evidence or event payload.
-
-## Related docs
-
-- [Recipes](recipes.md)
-- [First-party packs](first-party-packs.md)
-- [Streaming events](streaming-events.md)
-- [Contracts](contracts.md)
-- [Security](security.md)
+A hook can inspect a payload and block a boundary. A harness defines what evidence must exist before that boundary, what happens when evidence is missing (audit or block), and which contracts can be opted out. This is why harnesses compose determinism while hooks compose observation.

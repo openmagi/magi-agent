@@ -1,105 +1,32 @@
 # Troubleshooting
 
-## Homebrew tries to build from source
+Debug Magi Agent by locating the failed runtime boundary.
 
-Use the bottle path:
+Most failures belong to a boundary: missing evidence, blocked approval, unsupported claim, stale context, tool denial, projection rejection, or install documentation drift.
 
-```bash
-brew update
-brew reinstall openmagi/tap/magi-agent --force-bottle
-```
+## Common boundary failures
 
-If Homebrew still attempts a source build, the tap may need refreshed bottle
-metadata for your macOS/architecture combination.
+If output is blocked, identify the boundary that rejected it. A source-verified answer may be missing a source receipt. A Slack draft may lack approval. A memory write may contain unsupported claims. A tool call may be denied by policy.
 
-## Command not found
+Treat the failure as a runtime state problem first, not a prompt wording problem.
 
-Verify Homebrew installed the package and that Homebrew's bin directory is on
-your `PATH`:
+- Missing evidence: inspect source receipts and claim links.
+- Blocked approval: confirm the action digest matches the approval receipt.
+- Unsupported claim: repair, downgrade, abstain, or block.
+- Stale context: rebuild model-visible context from committed state.
+- Tool denial: inspect policy snapshot and ToolHost boundary logs.
+- Projection rejection: remove private paths, raw output, secrets, and unsupported claims.
 
-```bash
-brew list openmagi/tap/magi-agent
-which magi
-which magi-agent
-```
+## Install docs look too simple
 
-## Dashboard says unauthorized
+If docs claim a package-manager, Homebrew, shell-pipe, create-app, or one-command runtime path is currently available, verify it against package entrypoints and tests first. Today, the normal user path is Homebrew plus `magi-agent serve --port 8080`; the source checkout path remains source clone, npm install, npm run magi -- init, npm run magi -- doctor, and npm run magi -- start for development.
 
-Set a gateway token or use the local token shown by your runtime configuration:
+Keep source checkout, local Homebrew, and optional managed hosting language separate so users know which environment they are operating.
 
-```bash
-export GATEWAY_TOKEN="$(openssl rand -hex 24)"
-magi-agent serve --port 8080
-```
+## Agent will not start
 
-Then provide the same token to the local dashboard if prompted.
+Check that all required environment variables are set: BOT_ID, USER_ID, GATEWAY_TOKEN, CORE_AGENT_MODEL, and the three service URLs. Run npm run magi -- doctor to diagnose missing configuration. If using the source checkout, ensure npm install completed without errors.
 
-## Port 8080 is already in use
+## Agent gives wrong or unsupported answers
 
-Start on another port:
-
-```bash
-magi-agent serve --port 8090
-open http://localhost:8090/dashboard
-```
-
-## Healthz is not ok
-
-Check the health payload before debugging model behavior:
-
-```bash
-curl http://localhost:8080/healthz
-```
-
-Common causes:
-
-- required environment variables are missing because `MAGI_AGENT_REQUIRE_ENV=1`
-  is set;
-- a provider key or model setting is invalid;
-- an optional feature flag enables a surface without its dependency;
-- the workspace path is not accessible.
-
-## The agent says work is still running, then stops
-
-That is not a valid completion. The runtime should either finish the requested
-work, show a real background job/receipt, or state the concrete blocker.
-
-## A tool is unavailable
-
-Check:
-
-- the feature flag or configuration that enables the tool;
-- required credentials;
-- workspace path permissions;
-- approval policy;
-- runtime health;
-- whether the tool is intentionally read-only in the current mode.
-
-## Composio is inactive
-
-Run:
-
-```bash
-magi doctor
-magi auth composio status
-```
-
-Then verify:
-
-- `COMPOSIO_API_KEY` is set;
-- `MAGI_COMPOSIO_ENABLED` is `auto` or `on`;
-- `MAGI_COMPOSIO_TOOLKITS` includes the toolkit you intend to use.
-
-## Stream-json output is too noisy
-
-Use text output for normal terminal work:
-
-```bash
-magi --output text "Summarize this repository"
-```
-
-Use `stream-json` when an API client needs incremental events:
-
-```bash
-magi --output stream-json --include-partial-messages "Run a visible task"
-```
+Verify that evidence contracts are active for your task type. Research tasks should have SourceInspection requirements; coding tasks should have TestRun and GitDiff requirements. Check the evidence ledger for missing or failed evidence records. If enforcement is set to audit, the agent logs issues but does not block — switch to block_final_answer for stricter enforcement.

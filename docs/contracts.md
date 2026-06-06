@@ -1,72 +1,44 @@
 # Contracts
 
-Contracts define what must be true before a run can claim success.
+Contracts define the runtime obligations for a governed agent run.
 
-## Why Contracts Matter
+A contract turns user intent into route selection, policy snapshot inputs, required evidence, approval obligations, repair behavior, projection rules, and audit checkpoints.
 
-Prompt text can ask a model to be careful, but a contract gives the runtime a
-checkable work order. The contract records the goal, constraints, required
-artifacts, allowed resources, evidence requirements, and completion criteria.
+## Execution contract shape
 
-Use contracts for work products and hard requirements. Tone preferences belong
-in instructions; source, delivery, approval, and verification requirements
-belong in a contract.
+A useful contract states what the agent is trying to do, what evidence is required, which tools may execute, which approvals are needed, and what output projection is allowed.
 
-## Common contract checks
+Contracts are how Magi Agent makes composable determinism inspectable instead of burying requirements inside prompt prose.
 
-- A source-sensitive claim needs source evidence.
-- A coding success claim needs read, mutation, diff, and verification evidence.
-- A delivery claim needs a delivery receipt.
-- A memory write needs a public-safe memory receipt.
-- A delegated result needs an accepted child envelope.
-- A final answer should not leak private paths, auth material, raw prompts, or
-  hidden provider data.
+- route and workflow selection
+- effective policy snapshot inputs
+- required source, file, test, calculation, and delivery evidence
+- approval and idempotency requirements
+- repair, fallback, abstention, and block rules
+- governed output projection and audit checkpoint requirements
 
-## Contract Shape
+## Verify Source Before Claim
 
-A useful task contract usually includes:
+The source-verification contract requires inspected-source evidence before factual claims can become child results, summaries, memory, Slack drafts, artifacts, or final answer text.
 
-- `goal`: the user-visible objective;
-- `constraints`: boundaries that must survive across turns;
-- `acceptance_criteria`: exact outcomes that can pass, fail, or be waived;
-- `resource_bindings`: allowed files, source URLs, artifact ids, or handles;
-- `required_evidence`: source, file, calculation, test, approval, or delivery
-  proof;
-- `verification_mode`: none, sample, or full, depending on risk;
-- `blockers`: concrete reasons the work cannot finish yet.
+The claim state linked to source spans is runtime-only until the projector emits supported public claims and citation refs.
 
-Example prompt block:
+### Receipt and claim state
 
-```xml
-<task_contract>
-  <verification_mode>full</verification_mode>
-  <constraints>
-    <item>Use only files under workspace/reports.</item>
-    <item>Do not claim delivery until a file delivery receipt exists.</item>
-  </constraints>
-  <acceptance_criteria>
-    <item id="c1">Create the requested report.</item>
-    <item id="c2">Verify totals with calculation or test evidence.</item>
-    <item id="c3">Deliver the output file.</item>
-  </acceptance_criteria>
-</task_contract>
 ```
+sourceReceipt:
+  sourceId: src_product_spec_2026_05
+  snapshotDigest: sha256:8f4c2b7a9d13
+  contentDigest: sha256:5d96aa2f44b1
+  retrievedAt: 2026-05-27T20:11:42Z
+  citeableSpans:
+    - spanId: pricing_table.rows.competitor_a.seat_price
+      text: Competitor A charges $99 per seat
 
-## Resource Binding
-
-Bind resources when the task must stay inside a known set of files, URLs, or
-handles. A source-grounded answer should not silently switch to an arbitrary web
-result. A coding task should not edit a file that was never read or approved.
-
-## Failure behavior
-
-When evidence is missing, the runtime should repair, ask, downgrade, abstain, or
-block. Silent success is worse than a clear blocker.
-
-Examples:
-
-- Missing source span: inspect another allowed source or remove the claim.
-- Missing test evidence: run the configured verification or report why it
-  cannot run.
-- Missing delivery receipt: deliver the artifact or say delivery is blocked.
-- Unsafe external action: ask for approval or keep the action as a draft.
+claimState:
+  claimId: claim_competitor_a_seat_price
+  text: Competitor A charges $99 per seat
+  linkedSourceSpans:
+    - sourceId: src_product_spec_2026_05
+      spanId: pricing_table.rows.competitor_a.seat_price
+```
