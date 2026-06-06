@@ -105,6 +105,40 @@ def _request(**overrides: object) -> Gate5B4C3ShadowGenerationRequest:
     return Gate5B4C3ShadowGenerationRequest.model_validate(_payload(**overrides))
 
 
+def _selected_full_toolhost_history_request() -> Gate5B4C3ShadowGenerationRequest:
+    payload = _payload()
+    payload["turn"] = {
+        **payload["turn"],
+        "sanitizedRecentHistory": (
+            {
+                "role": "user",
+                "sanitizedText": "What did you find in the prior report?",
+                "sanitizedTextDigest": "sha256:" + "7" * 64,
+            },
+            {
+                "role": "assistant",
+                "sanitizedText": "The prior report found a redacted billing anomaly.",
+                "sanitizedTextDigest": "sha256:" + "8" * 64,
+            },
+        ),
+    }
+    payload["recipeProfile"] = {
+        **payload["recipeProfile"],
+        "toolsPolicy": "selected_full_toolhost",
+        "sourceAuthority": "bounded_sanitized_recent_history",
+    }
+    payload["policy"] = {
+        **payload["policy"],
+        "toolsDisabled": False,
+        "toolHostDispatchAllowed": True,
+    }
+    payload["budgets"] = {
+        **payload["budgets"],
+        "maxSanitizedHistoryMessages": 2,
+    }
+    return Gate5B4C3ShadowGenerationRequest.model_validate(payload)
+
+
 def _assert_no_forbidden_keys(value: object) -> None:
     forbidden = {
         "authorization",
@@ -151,6 +185,28 @@ def test_runner_input_adapter_preserves_turn_scoped_model_routing_and_false_auth
     assert result.runner_input.estimated_input_tokens <= 2048
     assert result.runner_input.estimated_total_tokens <= 2560
     assert result.runner_input.tools_enabled is False
+    assert result.runner_input.memory_enabled is False
+    assert result.runner_input.response_authority == "typescript"
+    assert result.authority.user_visible_output_allowed is False
+    assert result.authority.tool_dispatch_allowed is False
+    assert result.authority.memory_write_allowed is False
+    _assert_no_forbidden_keys(result.model_dump(by_alias=True, mode="json"))
+
+
+def test_runner_input_adapter_preserves_selected_sanitized_history_for_model_context() -> None:
+    result = build_gate5b4c3_runner_input(_selected_full_toolhost_history_request())
+
+    assert result.status == "accepted"
+    assert result.runner_input is not None
+    assert result.runner_input.source_authority == "bounded_sanitized_recent_history"
+    assert [
+        item["role"] for item in result.runner_input.sanitized_recent_history
+    ] == ["user", "assistant"]
+    assert result.runner_input.sanitized_recent_history[1]["content"] == (
+        "The prior report found a redacted billing anomaly."
+    )
+    assert result.runner_input.tools_enabled is True
+    assert result.runner_input.tool_host_dispatch_allowed is True
     assert result.runner_input.memory_enabled is False
     assert result.runner_input.response_authority == "typescript"
     assert result.authority.user_visible_output_allowed is False

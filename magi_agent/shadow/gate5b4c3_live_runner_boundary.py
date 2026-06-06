@@ -603,7 +603,7 @@ class Gate5B4C3LiveRunnerBoundary:
             message = primitives.Content(
                 parts=[
                     primitives.Part.from_text(
-                        text=runner_input.sanitized_user_input,
+                        text=_runner_message_text(runner_input),
                     )
                 ],
                 role="user",
@@ -897,6 +897,29 @@ def load_gate5b4c3_live_adk_primitives() -> Gate5B4C3LiveAdkPrimitives:
         Content=adk_runners.types.Content,
         Part=adk_runners.types.Part,
         GenerateContentConfig=adk_runners.types.GenerateContentConfig,
+    )
+
+
+def _runner_message_text(runner_input: object) -> str:
+    current = str(getattr(runner_input, "sanitized_user_input", "") or "")
+    history = getattr(runner_input, "sanitized_recent_history", ())
+    if not history:
+        return current
+    lines: list[str] = []
+    for item in history:
+        if not isinstance(item, Mapping):
+            continue
+        role = str(item.get("role") or "").strip()
+        content = str(item.get("content") or "").strip()
+        if role in {"user", "assistant"} and content:
+            lines.append(f"{role}: {content}")
+    if not lines:
+        return current
+    return (
+        "Recent sanitized conversation:\n"
+        + "\n".join(lines)
+        + "\n\nCurrent user message:\n"
+        + current
     )
 
 

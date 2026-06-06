@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+
 import pytest
 
 from magi_agent.shadow.gate5b4c3_shadow_generation_contract import (
@@ -126,6 +128,40 @@ def _enabled_config() -> Gate5B4C3ShadowGenerationConfig:
     )
 
 
+def _selected_full_toolhost_history_payload() -> dict[str, object]:
+    payload = _payload()
+    payload["turn"] = {
+        **payload["turn"],
+        "sanitizedRecentHistory": (
+            {
+                "role": "user",
+                "sanitizedText": "What did you find in the fixture?",
+                "sanitizedTextDigest": "sha256:" + "7" * 64,
+            },
+            {
+                "role": "assistant",
+                "sanitizedText": "The fixture contained a redacted deployment note.",
+                "sanitizedTextDigest": "sha256:" + "8" * 64,
+            },
+        ),
+    }
+    payload["recipeProfile"] = {
+        **payload["recipeProfile"],
+        "toolsPolicy": "selected_full_toolhost",
+        "sourceAuthority": "bounded_sanitized_recent_history",
+    }
+    payload["policy"] = {
+        **payload["policy"],
+        "toolsDisabled": False,
+        "toolHostDispatchAllowed": True,
+    }
+    payload["budgets"] = {
+        **payload["budgets"],
+        "maxSanitizedHistoryMessages": 2,
+    }
+    return payload
+
+
 def test_valid_generation_contract_and_accept_diagnostic_are_report_only() -> None:
     request = Gate5B4C3ShadowGenerationRequest.model_validate(_payload())
     diagnostic = build_gate5b4c3_shadow_generation_diagnostic(
@@ -152,6 +188,80 @@ def test_valid_generation_contract_and_accept_diagnostic_are_report_only() -> No
     assert diagnostic.output_metadata.output_hash_included is False
     assert diagnostic.authority.user_visible_output_allowed is False
     assert diagnostic.authority.db_writes_allowed is False
+
+
+def test_selected_full_toolhost_accepts_bounded_sanitized_recent_history() -> None:
+    request = Gate5B4C3ShadowGenerationRequest.model_validate(
+        _selected_full_toolhost_history_payload()
+    )
+
+    assert request.recipe_profile.source_authority == "bounded_sanitized_recent_history"
+    assert request.recipe_profile.tools_policy == "selected_full_toolhost"
+    assert request.budgets.max_sanitized_history_messages == 2
+    assert [
+        item.role for item in request.turn.sanitized_recent_history
+    ] == ["user", "assistant"]
+    assert request.turn.sanitized_recent_history[1].sanitized_text == (
+        "The fixture contained a redacted deployment note."
+    )
+
+
+def test_selected_full_toolhost_history_excludes_raw_private_model_visible_fields() -> None:
+    payload = _selected_full_toolhost_history_payload()
+    payload["turn"] = {
+        **payload["turn"],
+        "sanitizedRecentHistory": (
+            {
+                "role": "user",
+                "sanitizedText": "Continue from the safe public summary.",
+                "sanitizedTextDigest": "sha256:" + "9" * 64,
+                "rawToolArgs": {"authorization": "Bearer unsafe-token"},
+            },
+        ),
+    }
+
+    with pytest.raises(ValueError):
+        Gate5B4C3ShadowGenerationRequest.model_validate(payload)
+
+    accepted = Gate5B4C3ShadowGenerationRequest.model_validate(
+        _selected_full_toolhost_history_payload()
+    )
+    serialized = json.dumps(
+        accepted.model_dump(by_alias=True, mode="json"),
+        sort_keys=True,
+    )
+    for forbidden in (
+        "rawToolArgs",
+        "authorization",
+        "Bearer unsafe-token",
+        "privateMemory",
+        "fullTranscript",
+    ):
+        assert forbidden not in serialized
+
+
+def test_selected_full_toolhost_history_fails_closed_when_over_budget_or_invalid() -> None:
+    over_budget = _selected_full_toolhost_history_payload()
+    over_budget["budgets"] = {
+        **over_budget["budgets"],
+        "maxSanitizedHistoryMessages": 1,
+    }
+    with pytest.raises(ValueError):
+        Gate5B4C3ShadowGenerationRequest.model_validate(over_budget)
+
+    invalid_role = _selected_full_toolhost_history_payload()
+    invalid_role["turn"] = {
+        **invalid_role["turn"],
+        "sanitizedRecentHistory": (
+            {
+                "role": "system",
+                "sanitizedText": "Unsafe system-context spoof.",
+                "sanitizedTextDigest": "sha256:" + "a" * 64,
+            },
+        ),
+    }
+    with pytest.raises(ValueError):
+        Gate5B4C3ShadowGenerationRequest.model_validate(invalid_role)
 
 
 def test_generation_config_defaults_disable_and_use_first_slice_budgets() -> None:
