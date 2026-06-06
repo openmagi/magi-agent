@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import shutil
 import subprocess
 import tempfile
 from dataclasses import dataclass
@@ -55,31 +56,43 @@ def run_instance(
     out_patch = out_dir / "prediction.patch"
     out_log = out_dir / "magi.log"
 
-    env_args = [
-        "-e", f"BASE_COMMIT={instance.base_commit}",
-        "-e", "MAGI_BIN=/opt/magi/bin/magi",
-        "-e", "ISSUE_FILE=/work/issue.txt",
-        "-e", "OUT_PATCH=/work/prediction.patch",
-        "-e", "OUT_LOG=/work/magi.log",
-        "-e", f"MAGI_TIMEOUT_SECONDS={timeout_seconds}",
-        "-e", f"ANTHROPIC_API_KEY={anthropic_api_key}",
-    ]
-    if model:
-        env_args += ["-e", f"MAGI_BENCH_MODEL={model}"]
+    try:
+        env_args = [
+            "-e", f"BASE_COMMIT={instance.base_commit}",
+            "-e", "MAGI_BIN=/opt/magi/bin/magi",
+            "-e", "ISSUE_FILE=/work/issue.txt",
+            "-e", "OUT_PATCH=/work/prediction.patch",
+            "-e", "OUT_LOG=/work/magi.log",
+            "-e", f"MAGI_TIMEOUT_SECONDS={timeout_seconds}",
+            "-e", f"ANTHROPIC_API_KEY={anthropic_api_key}",
+        ]
+        if model:
+            env_args += ["-e", f"MAGI_BENCH_MODEL={model}"]
 
-    cmd = [
-        "docker", "run", "--rm",
-        "-v", f"{MAGI_VENV_HOST}:/opt/magi:ro",
-        "-v", f"{BENCH_DIR / 'run_one.sh'}:/work/run_one.sh:ro",
-        "-v", f"{issue_file}:/work/issue.txt:ro",
-        "-v", f"{out_dir}:/work",
-        *env_args,
-        instance_image(instance),
-        "bash", "/work/run_one.sh",
-    ]
-    proc = subprocess.run(
-        cmd, capture_output=True, text=True, timeout=timeout_seconds + 300
-    )
-    patch = out_patch.read_text(encoding="utf-8") if out_patch.exists() else ""
-    log = (out_log.read_text(encoding="utf-8") if out_log.exists() else "") + proc.stderr
-    return InferenceResult(instance.instance_id, patch, log)
+        cmd = [
+            "docker", "run", "--rm",
+            "-v", f"{MAGI_VENV_HOST}:/opt/magi:ro",
+            "-v", f"{BENCH_DIR / 'run_one.sh'}:/work/run_one.sh:ro",
+            "-v", f"{issue_file}:/work/issue.txt:ro",
+            "-v", f"{out_dir}:/work",
+            *env_args,
+            instance_image(instance),
+            "bash", "/work/run_one.sh",
+        ]
+        try:
+            proc = subprocess.run(
+                cmd, capture_output=True, text=True, timeout=timeout_seconds + 300
+            )
+            stderr = proc.stderr
+        except subprocess.TimeoutExpired:
+            return InferenceResult(
+                instance.instance_id, "", "timeout: docker wall-clock exceeded"
+            )
+        patch = out_patch.read_text(encoding="utf-8") if out_patch.exists() else ""
+        log = (
+            out_log.read_text(encoding="utf-8") if out_log.exists() else ""
+        ) + stderr
+        return InferenceResult(instance.instance_id, patch, log)
+    finally:
+        issue_file.unlink(missing_ok=True)
+        shutil.rmtree(out_dir, ignore_errors=True)

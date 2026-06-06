@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import re
 from pathlib import Path
 
 from benchmarks.swebench.container import ensure_magi_venv, run_instance
@@ -28,6 +29,9 @@ def main() -> int:
     ap.add_argument("--out-dir", default="benchmarks/swebench/results")
     ap.add_argument("--inference-only", action="store_true")
     args = ap.parse_args()
+
+    if not re.fullmatch(r"[A-Za-z0-9._-]+", args.run_id):
+        raise SystemExit("--run-id must match [A-Za-z0-9._-]+")
 
     api_key = os.environ["ANTHROPIC_API_KEY"]
     out_dir = Path(args.out_dir) / args.run_id
@@ -63,9 +67,10 @@ def main() -> int:
     outcome = run_evaluation(
         preds_path, run_id=args.run_id, max_workers=args.max_workers
     )
+    attempted_ids = load_completed_ids(preds_path)
     summary = summarize(
         resolved_ids=outcome.resolved_ids,
-        attempted_ids={i.instance_id for i in instances},
+        attempted_ids=attempted_ids,
     )
     print(
         f"[result] resolved {summary.resolved}/{summary.attempted} "

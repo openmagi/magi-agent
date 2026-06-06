@@ -21,6 +21,8 @@ def run_evaluation(
     run_id: str,
     max_workers: int = 4,
 ) -> EvalOutcome:
+    predictions_path = predictions_path.resolve()
+    report_dir = predictions_path.parent
     cmd = [
         "python", "-m", "swebench.harness.run_evaluation",
         "--dataset_name", DATASET_NAME,
@@ -28,8 +30,8 @@ def run_evaluation(
         "--max_workers", str(max_workers),
         "--run_id", run_id,
     ]
-    subprocess.run(cmd, check=True)
-    report = _find_report(run_id)
+    subprocess.run(cmd, check=True, cwd=report_dir)
+    report = _find_report(run_id, report_dir)
     data = json.loads(report.read_text(encoding="utf-8"))
     return EvalOutcome(
         resolved_ids=set(data.get("resolved_ids", [])),
@@ -38,9 +40,9 @@ def run_evaluation(
     )
 
 
-def _find_report(run_id: str) -> Path:
-    # swebench writes <model>.<run_id>.json in CWD.
-    matches = sorted(Path.cwd().glob(f"*.{run_id}.json"))
+def _find_report(run_id: str, report_dir: Path) -> Path:
+    # swebench writes <model>.<run_id>.json relative to its CWD (= report_dir).
+    matches = sorted(report_dir.glob(f"*.{run_id}.json"))
     if not matches:
         raise FileNotFoundError(f"no swebench report for run_id={run_id}")
     return matches[-1]
