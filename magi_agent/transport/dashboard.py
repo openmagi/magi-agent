@@ -1004,8 +1004,8 @@ def _dashboard_html(runtime: OpenMagiRuntime) -> str:
 </head>
 <body>
   <script type="application/json" id="runtime-bootstrap">{bootstrap_json}</script>
-  <div class="app">
-    <aside class="sidebar">
+  <div class="app" data-dashboard-shell="local-chat">
+    <aside class="sidebar" data-shell-region="channels">
       <div class="brand">
         <h1>Magi Agent</h1>
         <div class="brand-meta"><span class="dot" id="runtime-dot"></span><span id="runtime-label">Checking runtime</span></div>
@@ -1028,7 +1028,7 @@ def _dashboard_html(runtime: OpenMagiRuntime) -> str:
       </div>
     </aside>
 
-    <main class="main">
+    <main class="main" data-shell-region="transcript">
       <header class="topbar">
         <div class="topbar-title">
           <h2># general</h2>
@@ -1041,7 +1041,7 @@ def _dashboard_html(runtime: OpenMagiRuntime) -> str:
         </div>
       </header>
 
-      <section class="messages" id="messages" aria-live="polite">
+      <section class="messages" id="messages" aria-label="Chat transcript" aria-live="polite">
         <div class="thread-list" id="thread-list">
         <div class="empty-state" id="empty-state">
           <div class="welcome-message message assistant">
@@ -1089,8 +1089,8 @@ def _dashboard_html(runtime: OpenMagiRuntime) -> str:
         </div>
       </section>
 
-      <section class="composer-wrap">
-        <form class="composer" id="chat-form">
+      <section class="composer-wrap" data-shell-region="composer">
+        <form class="composer" id="chat-form" aria-label="Prompt composer">
           <div class="composer-strip">
             <span class="mode"><span class="dot ready"></span><strong>Live run</strong></span>
             <span class="mode">Streams ADK events, tool progress, and evidence when emitted</span>
@@ -1110,7 +1110,7 @@ def _dashboard_html(runtime: OpenMagiRuntime) -> str:
       </section>
     </main>
 
-    <aside class="inspector">
+    <aside class="inspector" data-shell-region="workbench">
       <div class="inspector-head">
         <h2>Work Stream</h2>
         <div class="brand-meta">Runtime events, tool progress, evidence, and SSE state.</div>
@@ -1120,13 +1120,13 @@ def _dashboard_html(runtime: OpenMagiRuntime) -> str:
         </div>
         <div class="kv" id="runtime-kv"></div>
       </div>
-      <div class="tabs" role="tablist">
-        <button class="tab active" type="button" data-panel="work">Work</button>
-        <button class="tab" type="button" data-panel="knowledge">Knowledge</button>
-        <button class="tab" type="button" data-panel="settings">Settings</button>
+      <div class="tabs" role="tablist" aria-label="Workspace tabs">
+        <button class="tab active" type="button" role="tab" aria-selected="true" aria-controls="panel-work" data-panel="work">Work</button>
+        <button class="tab" type="button" role="tab" aria-selected="false" aria-controls="panel-knowledge" data-panel="knowledge">Knowledge</button>
+        <button class="tab" type="button" role="tab" aria-selected="false" aria-controls="panel-settings" data-panel="settings">Settings</button>
       </div>
       <div class="panel">
-        <div id="panel-work" class="timeline">
+        <div role="tabpanel" id="panel-work" class="timeline">
           <p class="panel-heading"><span>Agents</span><span class="mini-pill">1 agent</span></p>
           <div class="agent-card">
             <div class="agent-card-head">
@@ -1153,7 +1153,7 @@ def _dashboard_html(runtime: OpenMagiRuntime) -> str:
             <div class="event"><strong>Transport</strong><code>SSE frames and public ADK events render here during a run</code></div>
           </div>
         </div>
-        <div id="panel-knowledge" class="hidden">
+        <div role="tabpanel" id="panel-knowledge" class="hidden">
           <p class="brand-meta">Local knowledge and artifacts are exposed by runtime contracts when enabled.</p>
           <div class="surface-status">
             <h3>Active tools <span id="tool-count">checking</span></h3>
@@ -1179,7 +1179,7 @@ def _dashboard_html(runtime: OpenMagiRuntime) -> str:
             <div class="knowledge-item"><span class="glyph">A</span><span>Generated artifacts</span></div>
           </div>
         </div>
-        <div id="panel-settings" class="hidden">
+        <div role="tabpanel" id="panel-settings" class="hidden">
           <div class="kv">
             <div class="kv-row"><span>Runtime</span><strong id="settings-runtime">magi-agent</strong></div>
             <div class="kv-row"><span>Model</span><strong id="settings-model">local-dev</strong></div>
@@ -1521,8 +1521,12 @@ def _dashboard_html(runtime: OpenMagiRuntime) -> str:
 
     for (const tab of document.querySelectorAll(".tab")) {{
       tab.addEventListener("click", () => {{
-        for (const current of document.querySelectorAll(".tab")) current.classList.remove("active");
+        for (const current of document.querySelectorAll(".tab")) {{
+          current.classList.remove("active");
+          current.setAttribute("aria-selected", "false");
+        }}
         tab.classList.add("active");
+        tab.setAttribute("aria-selected", "true");
         for (const id of ["work", "knowledge", "settings"]) {{
           document.getElementById(`panel-${{id}}`).classList.toggle("hidden", id !== tab.dataset.panel);
         }}
