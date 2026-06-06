@@ -170,6 +170,15 @@ def _build_litellm_model(config: ProviderConfig) -> object:
             "dependency is not installed. Reinstall magi-agent so its default "
             "runtime dependencies are present."
         ) from exc
+    # litellm otherwise prints its own "Give Feedback / Get Help" banner and
+    # debug info to stdout on errors, which corrupts ``--output text``. Errors
+    # are already surfaced through the engine's terminal result.
+    try:
+        import litellm  # noqa: PLC0415
+
+        litellm.suppress_debug_info = True
+    except Exception:  # pragma: no cover - litellm always present alongside LiteLlm
+        pass
     return LiteLlm(model=config.litellm_model, api_key=config.api_key)
 
 

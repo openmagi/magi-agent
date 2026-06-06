@@ -10,6 +10,7 @@ import uvicorn
 from . import __version__
 from .app import create_app
 from .config.env import (
+    LOCAL_DEV_MODEL_SENTINEL,
     RuntimeEnvError,
     parse_gate5b4c3_shadow_generation_route_env,
     parse_runtime_env,
@@ -47,10 +48,14 @@ def resolve_server_port(
 
 
 def main(argv: Sequence[str] | None = None) -> None:
+    from .ops.otel_noise import silence_otel_detach_noise
+
+    silence_otel_detach_noise()
     port = resolve_server_port(argv)
     config = _parse_runtime_config(os.environ)
     if _local_runtime_defaults_active(config):
         os.environ.setdefault("MAGI_AGENT_LOCAL_CHAT_ROUTE", "on")
+        _print_local_startup_notice(port)
     runtime = OpenMagiRuntime(config=config)
     runtime.gate5b4c3_shadow_generation_route_config = (
         parse_gate5b4c3_shadow_generation_route_env(os.environ)
@@ -86,7 +91,7 @@ def _parse_runtime_config(environ: Mapping[str, str]):
             "CORE_AGENT_API_PROXY_URL": "http://127.0.0.1:0",
             "CORE_AGENT_CHAT_PROXY_URL": "http://127.0.0.1:0",
             "CORE_AGENT_REDIS_URL": "redis://127.0.0.1:0/0",
-            "CORE_AGENT_MODEL": "local-dev",
+            "CORE_AGENT_MODEL": LOCAL_DEV_MODEL_SENTINEL,
             "CORE_AGENT_VERSION": f"{__version__}-local",
             **dict(environ),
         }
@@ -103,3 +108,41 @@ def _local_runtime_defaults_active(config: RuntimeConfig) -> bool:
         and config.user_id == "local-user"
         and config.gateway_token == "local-dev-token"
     )
+
+
+def _print_local_startup_notice(port: int) -> None:
+    """Print an onboarding notice when ``serve`` runs with no hosted env.
+
+    Shows the dashboard URL and whether a model provider is configured, so a
+    fresh ``brew install`` + ``magi-agent serve`` user knows whether the chat
+    will produce live replies or needs an API key first.
+    """
+
+    try:
+        from .cli.providers import resolve_provider_config
+
+        provider = resolve_provider_config()
+    except Exception:
+        provider = None
+
+    lines = [
+        "",
+        "Open Magi Agent — local runtime",
+        f"  Dashboard: http://localhost:{port}/dashboard",
+    ]
+    if provider is not None:
+        lines.append(
+            f"  Model provider: {provider.provider} ({provider.model}) — chat is ready."
+        )
+    else:
+        lines.append(
+            "  Model provider: none configured — the dashboard loads but chat "
+            "replies need an API key."
+        )
+        lines.append(
+            "  Set one of ANTHROPIC_API_KEY / OPENAI_API_KEY / "
+            "GEMINI_API_KEY (or GOOGLE_API_KEY) / FIREWORKS_API_KEY (or add a "
+            "[model] section to ~/.magi/config.toml), then restart serve."
+        )
+    lines.append("")
+    print("\n".join(lines), file=sys.stderr, flush=True)

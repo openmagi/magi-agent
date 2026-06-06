@@ -337,4 +337,7 @@ app.add_typer(auth_app, name="auth")
 
 def main() -> None:
     """Console-script entry point (registered in pyproject.toml later)."""
+    from magi_agent.ops.otel_noise import silence_otel_detach_noise
+
+    silence_otel_detach_noise()
     app()
