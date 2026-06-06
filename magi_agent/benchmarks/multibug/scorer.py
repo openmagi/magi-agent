@@ -32,9 +32,28 @@ from magi_agent.discovery.models import DiscoveryPrediction
 
 _MODEL_CONFIG = ConfigDict(frozen=True, extra="forbid")
 
-#: ``(gold_problems, predictions) -> float in [0, 1]`` — an injectable LLM judge
-#: for identification / resolution. Default is ``None`` (component omitted).
-Judge = Callable[[Sequence[GoldProblem], Sequence[DiscoveryPrediction]], float]
+
+class JudgeScore(BaseModel):
+    """The two DISTINCT judged components for one instance (TIDE §3.3).
+
+    The TIDE paper scores *identification* (did the system name the right
+    problem?) and *resolution* (is the proposed action a correct fix?) as
+    SEPARATE components, so the injectable judge returns both rather than a
+    single value aliased into two fields.
+    """
+
+    model_config = _MODEL_CONFIG
+
+    identification: float
+    resolution: float
+
+
+#: ``(gold_problems, predictions) -> JudgeScore`` — an injectable LLM judge that
+#: scores identification and resolution independently. Default is ``None`` (both
+#: components omitted).
+Judge = Callable[
+    [Sequence[GoldProblem], Sequence[DiscoveryPrediction]], JudgeScore
+]
 
 
 class InstanceResult(BaseModel):
@@ -144,8 +163,9 @@ def _score_instance(result: InstanceResult, *, judge: Judge | None) -> InstanceS
     identification: float | None = None
     resolution: float | None = None
     if judge is not None:
-        identification = float(judge(golds, preds))
-        resolution = identification
+        judged = judge(golds, preds)
+        identification = float(judged.identification)
+        resolution = float(judged.resolution)
 
     return InstanceScore(
         instance_id=result.instance_id,
@@ -213,6 +233,7 @@ __all__ = [
     "InstanceResult",
     "InstanceScore",
     "Judge",
+    "JudgeScore",
     "MultiBugLift",
     "MultiBugReport",
     "lift",

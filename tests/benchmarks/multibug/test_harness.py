@@ -130,6 +130,79 @@ def test_multi_agent_mode_does_n_passes() -> None:
     assert {tuple(p.evidence_ids) for p in preds} == {("c1",), ("c2",), ("d1",)}
 
 
+def test_multi_agent_passes_are_not_cumulatively_conditioned() -> None:
+    pytest.importorskip("google.adk")
+    # Each pass emits a DISTINCT prediction whose description is unique. If the
+    # baseline were (wrongly) using the tide path, a later round's prompt would
+    # contain an earlier round's emitted description (cumulative-state
+    # conditioning). For multi_agent each pass is an INDEPENDENT rounds_T=1 run
+    # that starts with prior=() -> no earlier description may ever appear.
+    descriptions = ["UNIQUE_PASS_A", "UNIQUE_PASS_B", "UNIQUE_PASS_C"]
+    payloads = [
+        _payload((descriptions[0], ["c1"], "A")),
+        _payload((descriptions[1], ["c2"], "B")),
+        _payload((descriptions[2], ["d1"], "C")),
+    ]
+    seq = {"i": 0}
+    prompts: list[str] = []
+
+    def runner_factory(prompt: str, *, model_factory=None, model: str = "x") -> str:
+        prompts.append(prompt)
+        idx = min(seq["i"], len(payloads) - 1)
+        seq["i"] += 1
+        return payloads[idx]
+
+    preds = run_multiproblem(
+        _instance(),
+        mode="multi_agent",
+        runner_factory=runner_factory,
+        config=DiscoveryConfig(rounds_T=3, batch_k=2),
+    )
+
+    # 3 independent passes, each rounds_T=1 -> exactly one prompt per pass.
+    assert len(prompts) == 3
+    # No pass's prompt may contain a description emitted by an EARLIER pass:
+    # each pass starts fresh (prior empty). This is what distinguishes
+    # multi_agent from the cumulatively-conditioned tide path.
+    for pass_idx, prompt in enumerate(prompts):
+        for earlier_idx in range(pass_idx):
+            assert descriptions[earlier_idx] not in prompt, (
+                f"pass {pass_idx} prompt leaked pass {earlier_idx}'s prediction "
+                "-> baseline was cumulatively conditioned (tide contamination)"
+            )
+    # Sanity: all three distinct predictions survive the final union.
+    assert {tuple(p.evidence_ids) for p in preds} == {("c1",), ("c2",), ("d1",)}
+
+
+def test_multi_agent_final_dedup_unions_duplicate_predictions() -> None:
+    pytest.importorskip("google.adk")
+    # Two passes emit the SAME (problem_class, evidence_ids) prediction. The
+    # final union must dedup them to ONE (dedup key = class + evidence set),
+    # even though descriptions differ.
+    payloads = [
+        _payload(("same bug worded one way", ["c1"], "Logic Error")),
+        _payload(("same bug worded another way", ["c1"], "Logic Error")),
+    ]
+    seq = {"i": 0}
+
+    def runner_factory(prompt: str, *, model_factory=None, model: str = "x") -> str:
+        idx = min(seq["i"], len(payloads) - 1)
+        seq["i"] += 1
+        return payloads[idx]
+
+    preds = run_multiproblem(
+        _instance(),
+        mode="multi_agent",
+        runner_factory=runner_factory,
+        config=DiscoveryConfig(rounds_T=2, batch_k=2),
+    )
+    # 2 passes ran, but the duplicate (Logic Error, {c1}) collapses to one.
+    assert seq["i"] == 2
+    assert len(preds) == 1
+    assert preds[0].evidence_ids == ("c1",)
+    assert preds[0].problem_class == "Logic Error"
+
+
 def test_unknown_mode_raises() -> None:
     with pytest.raises(ValueError):
         run_multiproblem(

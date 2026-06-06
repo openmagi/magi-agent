@@ -3,6 +3,7 @@ from __future__ import annotations
 from magi_agent.benchmarks.multibug.dataset import GoldProblem
 from magi_agent.benchmarks.multibug.scorer import (
     InstanceResult,
+    JudgeScore,
     MultiBugReport,
     lift,
     score,
@@ -94,19 +95,26 @@ def test_duplicate_predictions_do_not_inflate_precision() -> None:
     assert abs(report.precision - 0.5) < 1e-9
 
 
-def test_fake_judge_feeds_identification_resolution() -> None:
+def test_fake_judge_feeds_identification_resolution_independently() -> None:
+    # identification and resolution are DISTINCT components (TIDE §3.3): the
+    # judge returns both and each must flow through unaliased. Distinct values
+    # would be impossible to distinguish if resolution were a copy of
+    # identification.
     result = InstanceResult(
         instance_id="i",
         gold_problems=(_gold("a", ["c1"]), _gold("b", ["c2"])),
         predictions=(_pred(["c1"]),),
     )
 
-    def fake_judge(golds, preds) -> float:
-        return 0.75
+    def fake_judge(golds, preds) -> JudgeScore:
+        return JudgeScore(identification=0.75, resolution=0.25)
 
     report = score([result], judge=fake_judge)
     assert report.identification == 0.75
-    assert report.resolution == 0.75
+    assert report.resolution == 0.25
+    # per-instance must carry the distinct values too.
+    assert report.per_instance[0].identification == 0.75
+    assert report.per_instance[0].resolution == 0.25
 
 
 def test_macro_average_across_instances() -> None:
@@ -144,7 +152,9 @@ def test_lift_computes_deltas() -> None:
     assert abs(delta.coverage - 0.3) < 1e-9
     assert abs(delta.precision - 0.3) < 1e-9
     assert abs(delta.f1 - 0.3) < 1e-9
+    # identification and resolution deltas are independent (0.6-0.3 vs 0.5-0.2).
     assert abs((delta.identification or 0.0) - 0.3) < 1e-9
+    assert abs((delta.resolution or 0.0) - 0.3) < 1e-9
 
 
 def test_lift_none_when_judge_components_absent() -> None:
