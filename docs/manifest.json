@@ -221,12 +221,6 @@
       "group": "Recipes"
     },
     {
-      "slug": "developer-overview",
-      "title": "Developer Overview",
-      "path": "docs/developer-overview.md",
-      "group": "Developer"
-    },
-    {
       "slug": "runtime-interfaces",
       "title": "Runtime Interfaces",
       "path": "docs/runtime-interfaces.md",
