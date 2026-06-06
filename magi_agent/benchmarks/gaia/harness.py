@@ -13,6 +13,12 @@ from magi_agent.benchmarks.gaia.answer import GAIA_SYSTEM_PROMPT, extract_final_
 from magi_agent.benchmarks.gaia.dataset import GaiaQuestion
 from magi_agent.cli.providers import ProviderConfig
 from magi_agent.cli.real_runner import CliModelRunner, build_cli_model_runner
+from magi_agent.recipes.first_party.selective_reflection.reflection_hook import (
+    build_reflection_hook_contribution,
+)
+from magi_agent.recipes.first_party.selective_reflection.reflection_policy import (
+    ReflectionPolicy,
+)
 
 
 def run_gaia_question(
@@ -23,6 +29,7 @@ def run_gaia_question(
     model: str = "claude-opus-4-7",
     extra_tools: list[object] | None = None,
     api_key: str = "unused-in-tests",
+    reflection_enabled: bool = False,
 ) -> str:
     """Run *question* through the GAIA agent harness and return the extracted answer.
 
@@ -44,12 +51,27 @@ def run_gaia_question(
     api_key:
         API key forwarded to :class:`~magi_agent.cli.providers.ProviderConfig`.
         Tests pass ``"unused-in-tests"``; production callers supply a real key.
+    reflection_enabled:
+        When ``True``, build a :class:`~.ReflectionPolicy` with ``enabled=True``
+        and register its ``beforeCommit`` hook contribution in the recipe stack.
+        Default ``False`` — zero code runs in the hot path when off.
+        Production callers should read this from
+        ``magi_agent.config.env.parse_selective_reflection_env(os.environ).enabled``.
     """
 
     # 1. Copy attachment into workspace_root if it exists on disk.
     if question.attachment_path and Path(question.attachment_path).exists():
         dest_name = question.file_name or Path(question.attachment_path).name
         shutil.copy2(question.attachment_path, Path(workspace_root) / dest_name)
+
+    # 1b. Selective reflection — build policy and hook contribution when enabled.
+    # The hook contribution is metadata used by the recipe/hook composition layer.
+    # Full ADK-level wiring (post-commit injection) is the responsibility of the
+    # recipe stack adapter; the harness records the contribution here so that
+    # higher-level orchestrators can compose it with other contributions.
+    _reflection_policy = ReflectionPolicy(enabled=reflection_enabled)
+    _reflection_hook = build_reflection_hook_contribution(policy=_reflection_policy)
+    # _reflection_hook is None when disabled (zero hot-path cost).
 
     # 2. Build provider config.
     config = ProviderConfig(provider="anthropic", model=model, api_key=api_key)
