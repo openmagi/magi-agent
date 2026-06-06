@@ -11,6 +11,7 @@ from magi_agent.shadow.gate5b4c3_shadow_generation_contract import (
     Gate5B4C3ModelRoutingSource,
     Gate5B4C3ShadowGenerationAuthorityFlags,
     Gate5B4C3ShadowGenerationRequest,
+    Gate5B4C3SourceAuthority,
 )
 
 _UNSAFE_INPUT_RE = re.compile(
@@ -104,6 +105,11 @@ class Gate5B4C3RunnerInput(_Gate5B4C3RunnerInputModel):
     system_instruction: str = Field(alias="systemInstruction")
     sanitized_user_input: str = Field(alias="sanitizedUserInput")
     sanitized_input_text_digest: str = Field(alias="sanitizedInputTextDigest")
+    sanitized_recent_history: tuple[dict[str, str], ...] = Field(
+        default=(),
+        alias="sanitizedRecentHistory",
+    )
+    source_authority: Gate5B4C3SourceAuthority = Field(alias="sourceAuthority")
     provider_label: str = Field(alias="providerLabel")
     model_label: str = Field(alias="modelLabel")
     routing_source: Gate5B4C3ModelRoutingSource = Field(alias="routingSource")
@@ -235,8 +241,14 @@ def build_gate5b4c3_runner_input(
         return _result("dropped", "sanitized_input_too_large")
     if _UNSAFE_INPUT_RE.search(sanitized_input):
         return _result("dropped", "unsafe_input")
+    sanitized_history = _sanitized_history_for_runner(request)
+    for item in sanitized_history:
+        if _UNSAFE_INPUT_RE.search(item["content"]):
+            return _result("dropped", "unsafe_input")
 
-    estimated_input_tokens = _estimate_tokens(sanitized_input)
+    estimated_input_tokens = _estimate_tokens(sanitized_input) + sum(
+        _estimate_tokens(item["content"]) for item in sanitized_history
+    )
     if estimated_input_tokens > request.budgets.max_estimated_input_tokens:
         return _result("dropped", "input_token_budget_exceeded")
 
@@ -283,6 +295,8 @@ def build_gate5b4c3_runner_input(
         ),
         sanitizedUserInput=sanitized_input,
         sanitizedInputTextDigest=request.turn.sanitized_input_text_digest,
+        sanitizedRecentHistory=sanitized_history,
+        sourceAuthority=request.recipe_profile.source_authority,
         providerLabel=request.model_routing.provider_label,
         modelLabel=request.model_routing.model_label,
         routingSource=request.model_routing.routing_source,
@@ -325,6 +339,20 @@ def _resolved_max_output_tokens(request: Gate5B4C3ShadowGenerationRequest) -> in
     if request.model_routing.max_output_tokens is None:
         return request.budgets.max_output_tokens
     return min(request.model_routing.max_output_tokens, request.budgets.max_output_tokens)
+
+
+def _sanitized_history_for_runner(
+    request: Gate5B4C3ShadowGenerationRequest,
+) -> tuple[dict[str, str], ...]:
+    if request.recipe_profile.source_authority != "bounded_sanitized_recent_history":
+        return ()
+    return tuple(
+        {
+            "role": item.role,
+            "content": item.sanitized_text,
+        }
+        for item in request.turn.sanitized_recent_history
+    )
 
 
 def _estimate_tokens(value: str) -> int:

@@ -29,6 +29,10 @@ Gate5B4C3ModelRoutingSource: TypeAlias = Literal[
     "default_fallback",
     "invalid_or_missing",
 ]
+Gate5B4C3SourceAuthority: TypeAlias = Literal[
+    "current_turn_only",
+    "bounded_sanitized_recent_history",
+]
 
 
 _MODEL_CONFIG = ConfigDict(
@@ -264,6 +268,27 @@ class Gate5B4C3ShadowGenerationAttachmentMetadata(_Gate5B4C3Model):
         return self
 
 
+class Gate5B4C3ShadowGenerationHistoryMessage(_Gate5B4C3Model):
+    role: Literal["user", "assistant"]
+    sanitized_text: str = Field(alias="sanitizedText")
+    sanitized_text_digest: str = Field(alias="sanitizedTextDigest")
+
+    @model_validator(mode="after")
+    def _validate_history_message(self) -> Self:
+        if not self.sanitized_text.strip():
+            raise ValueError("sanitized history messages must be non-empty")
+        if (
+            len(self.sanitized_text.encode("utf-8"))
+            > MAX_USER_VISIBLE_SANITIZED_INPUT_BYTES
+        ):
+            raise ValueError("sanitized history message exceeds selected user-visible limit")
+        _validate_digest(
+            self.sanitized_text_digest,
+            "sanitized history text digest must be a sha256 digest",
+        )
+        return self
+
+
 class Gate5B4C3ShadowGenerationTurn(_Gate5B4C3Model):
     turn_id: str = Field(alias="turnId")
     turn_digest: str = Field(alias="turnDigest")
@@ -275,6 +300,10 @@ class Gate5B4C3ShadowGenerationTurn(_Gate5B4C3Model):
     attachment_metadata: tuple[Gate5B4C3ShadowGenerationAttachmentMetadata, ...] = Field(
         default=(),
         alias="attachmentMetadata",
+    )
+    sanitized_recent_history: tuple[Gate5B4C3ShadowGenerationHistoryMessage, ...] = Field(
+        default=(),
+        alias="sanitizedRecentHistory",
     )
     ts_response_correlation_id: str | None = Field(
         default=None,
@@ -394,7 +423,7 @@ class Gate5B4C3ShadowGenerationRecipeProfile(_Gate5B4C3Model):
         "selected_full_toolhost",
     ] = Field(alias="toolsPolicy")
     memory_mode: Literal["disabled"] = Field(alias="memoryMode")
-    source_authority: Literal["current_turn_only"] = Field(alias="sourceAuthority")
+    source_authority: Gate5B4C3SourceAuthority = Field(alias="sourceAuthority")
 
     @model_validator(mode="after")
     def _validate_recipe_labels(self) -> Self:
@@ -446,6 +475,7 @@ MAX_USER_VISIBLE_SANITIZED_INPUT_BYTES = 1_000_000
 MAX_USER_VISIBLE_ESTIMATED_INPUT_TOKENS = 1_000_000
 MAX_USER_VISIBLE_OUTPUT_TOKENS = 4096
 MAX_USER_VISIBLE_TOTAL_ESTIMATED_TOKENS = 1_004_096
+MAX_USER_VISIBLE_SANITIZED_HISTORY_MESSAGES = 16
 MAX_USER_VISIBLE_CONCURRENT_GENERATION_RUNS = 4
 MAX_USER_VISIBLE_PENDING_GENERATION_RUNS = 16
 MAX_USER_VISIBLE_DAILY_GENERATION_RUNS = 1000
@@ -511,8 +541,11 @@ class Gate5B4C3ShadowGenerationBudgets(_Gate5B4C3Model):
             raise ValueError("sanitized input budget exceeds selected user-visible limit")
         if self.max_estimated_input_tokens > MAX_USER_VISIBLE_ESTIMATED_INPUT_TOKENS:
             raise ValueError("input token budget exceeds selected user-visible limit")
-        if self.max_sanitized_history_messages != 0:
-            raise ValueError("first generation slice cannot include history")
+        if (
+            self.max_sanitized_history_messages
+            > MAX_USER_VISIBLE_SANITIZED_HISTORY_MESSAGES
+        ):
+            raise ValueError("sanitized history message budget exceeds selected limit")
         if self.max_output_tokens > MAX_USER_VISIBLE_OUTPUT_TOKENS:
             raise ValueError("output token budget exceeds selected user-visible limit")
         if self.max_total_estimated_tokens > MAX_USER_VISIBLE_TOTAL_ESTIMATED_TOKENS:
@@ -632,6 +665,26 @@ class Gate5B4C3ShadowGenerationRequest(_Gate5B4C3Model):
             > self.budgets.max_sanitized_input_bytes
         ):
             raise ValueError("sanitized input exceeds configured generation budget")
+        history_count = len(self.turn.sanitized_recent_history)
+        if history_count > self.budgets.max_sanitized_history_messages:
+            raise ValueError("sanitized history exceeds configured generation budget")
+        if history_count:
+            if self.recipe_profile.source_authority != "bounded_sanitized_recent_history":
+                raise ValueError("sanitized history requires bounded history source authority")
+            if self.recipe_profile.tools_policy != "selected_full_toolhost":
+                raise ValueError("sanitized history is limited to selected full toolhost")
+        if self.recipe_profile.source_authority == "bounded_sanitized_recent_history":
+            if self.recipe_profile.tools_policy != "selected_full_toolhost":
+                raise ValueError("bounded history source authority requires selected full toolhost")
+            if self.budgets.max_sanitized_history_messages <= 0:
+                raise ValueError("bounded history source authority requires a history budget")
+        total_sanitized_bytes = len(self.turn.sanitized_current_turn_text.encode("utf-8"))
+        total_sanitized_bytes += sum(
+            len(item.sanitized_text.encode("utf-8"))
+            for item in self.turn.sanitized_recent_history
+        )
+        if total_sanitized_bytes > self.budgets.max_sanitized_input_bytes:
+            raise ValueError("sanitized history plus current input exceeds configured budget")
         return self
 
     @field_serializer("authority")

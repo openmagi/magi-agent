@@ -144,6 +144,47 @@ def _selected_full_toolhost_request() -> Gate5B4C3ShadowGenerationRequest:
     )
 
 
+def _selected_full_toolhost_history_request() -> Gate5B4C3ShadowGenerationRequest:
+    return Gate5B4C3ShadowGenerationRequest.model_validate(
+        _payload(
+            turn={
+                **_payload()["turn"],  # type: ignore[arg-type]
+                "sanitizedRecentHistory": (
+                    {
+                        "role": "user",
+                        "sanitizedText": "What did you find last turn?",
+                        "sanitizedTextDigest": "sha256:" + "7" * 64,
+                    },
+                    {
+                        "role": "assistant",
+                        "sanitizedText": "I found a redacted fixture anomaly.",
+                        "sanitizedTextDigest": "sha256:" + "8" * 64,
+                    },
+                ),
+            },
+            modelRouting={
+                **_payload()["modelRouting"],  # type: ignore[arg-type]
+                "providerLabel": "google",
+                "modelLabel": "gemini-3.5-flash",
+                "shadowCredentialRef": "gate5b-google-api-key-smoke-v1",
+            },
+            recipeProfile={
+                **_payload()["recipeProfile"],  # type: ignore[arg-type]
+                "toolsPolicy": "selected_full_toolhost",
+                "sourceAuthority": "bounded_sanitized_recent_history",
+            },
+            policy={
+                **_payload()["policy"],  # type: ignore[arg-type]
+                "toolsDisabled": False,
+                "toolHostDispatchAllowed": True,
+            },
+            budgets={
+                "maxSanitizedHistoryMessages": 2,
+            },
+        )
+    )
+
+
 def _gate1a_google_request() -> Gate5B4C3ShadowGenerationRequest:
     return Gate5B4C3ShadowGenerationRequest.model_validate(
         _payload(
@@ -726,6 +767,26 @@ def test_live_boundary_invokes_runner_with_allowlisted_kwargs_and_disabled_tools
     assert result.user_visible_output is None
     assert result.authority.db_writes_allowed is False
     assert result.authority.workspace_mutation_allowed is False
+
+
+def test_live_boundary_selected_full_toolhost_runner_receives_prior_sanitized_turns() -> None:
+    result = Gate5B4C3LiveRunnerBoundary(
+        _fake_primitives,
+        adk_tools=(_ManualCalculationTool,),
+    ).invoke(
+        _selected_full_toolhost_history_request(),
+        config=_gate1a_google_config(),
+    )
+
+    assert result.status == "completed"
+    message = _FakeRunner.run_kwargs["new_message"]
+    assert isinstance(message, _FakeContent)
+    text = message.parts[0].text
+    assert "Recent sanitized conversation:" in text
+    assert "user: What did you find last turn?" in text
+    assert "assistant: I found a redacted fixture anomaly." in text
+    assert "Current user message:" in text
+    assert "Please summarize the approved redacted note." in text
 
 
 def test_live_boundary_rejects_completed_runner_without_text_output() -> None:

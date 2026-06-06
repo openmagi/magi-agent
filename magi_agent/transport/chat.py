@@ -3301,9 +3301,19 @@ def _build_user_visible_generation_request(
     user_text = _extract_last_user_text(payload)
     if not user_text:
         raise ValueError("chat payload must contain a user message")
+    tool_bundle_ready = _route_tool_bundle_ready(gate1a_bundle)
+    full_toolhost_ready = _route_tool_bundle_full(gate1a_bundle)
+    history_messages = _build_gate5b_sanitized_recent_history(
+        payload,
+        max_messages=(
+            generation_config.approved_budgets.max_sanitized_history_messages
+            if full_toolhost_ready
+            else 0
+        ),
+    )
     sanitized_text = _build_gate5b_model_visible_current_turn_text(
         user_text,
-        payload=payload,
+        payload=None if history_messages else payload,
     )
     input_digest = _sha256_digest(sanitized_text)
     request_seed = "|".join(
@@ -3325,14 +3335,31 @@ def _build_user_visible_generation_request(
     credential_ref = _single_config_value(generation_config.allowed_shadow_credential_refs)
     router_digest = _sha256_digest(f"{provider_label}:{model_label}:{request_digest}")
     profile_digest = _sha256_digest("gate5b-user-visible-canary-profile-v1")
-    tool_bundle_ready = _route_tool_bundle_ready(gate1a_bundle)
-    full_toolhost_ready = _route_tool_bundle_full(gate1a_bundle)
     tools_policy = (
         "selected_full_toolhost"
         if full_toolhost_ready
         else "shadow_readonly" if tool_bundle_ready else "disabled"
     )
+    source_authority = (
+        "bounded_sanitized_recent_history"
+        if history_messages
+        else "current_turn_only"
+    )
     now_ms = int(time.time() * 1000)
+    turn_payload: dict[str, object] = {
+        "turnId": f"turn_{input_digest.removeprefix('sha256:')[:16]}",
+        "turnDigest": _sha256_digest(request_seed + ":turn"),
+        "sanitizedCurrentTurnText": sanitized_text,
+        "sanitizedInputTextDigest": input_digest,
+        "channelName": "app_channel",
+        "tsResponseCorrelationId": f"ts_{request_digest.removeprefix('sha256:')[:16]}",
+    }
+    if history_messages:
+        turn_payload["sanitizedRecentHistory"] = history_messages
+    redacted_byte_count = len(sanitized_text.encode("utf-8")) + sum(
+        len(str(item["sanitizedText"]).encode("utf-8"))
+        for item in history_messages
+    )
     return Gate5B4C3ShadowGenerationRequest.model_validate(
         {
             "schemaVersion": "gate5b4c3.chatProxyShadowGeneration.v1",
@@ -3348,14 +3375,7 @@ def _build_user_visible_generation_request(
                 "environment": route_config.environment,
                 "selectedTarget": "gate5b_selected_bot",
             },
-            "turn": {
-                "turnId": f"turn_{input_digest.removeprefix('sha256:')[:16]}",
-                "turnDigest": _sha256_digest(request_seed + ":turn"),
-                "sanitizedCurrentTurnText": sanitized_text,
-                "sanitizedInputTextDigest": input_digest,
-                "channelName": "app_channel",
-                "tsResponseCorrelationId": f"ts_{request_digest.removeprefix('sha256:')[:16]}",
-            },
+            "turn": turn_payload,
             "modelRouting": {
                 "routingSource": "per_turn_injected",
                 "providerLabel": provider_label,
@@ -3374,7 +3394,7 @@ def _build_user_visible_generation_request(
                 "runtimeEngine": "adk-python",
                 "toolsPolicy": tools_policy,
                 "memoryMode": "disabled",
-                "sourceAuthority": "current_turn_only",
+                "sourceAuthority": source_authority,
             },
             "policy": {
                 "typeScriptResponseAuthority": True,
@@ -3397,10 +3417,14 @@ def _build_user_visible_generation_request(
             "redaction": {
                 "sanitizerId": "gate5b-user-visible-canary",
                 "sanitizerVersion": "v1",
-                "policyId": "current-turn-only",
+                "policyId": (
+                    "bounded-sanitized-recent-history"
+                    if history_messages
+                    else "current-turn-only"
+                ),
                 "status": "passed",
                 "redactedAt": now_ms,
-                "redactedByteCount": len(sanitized_text.encode("utf-8")),
+                "redactedByteCount": redacted_byte_count,
                 "forbiddenFieldScan": "passed",
                 "sanitizedPayloadDigest": input_digest,
             },
@@ -3431,6 +3455,45 @@ def _single_config_value(values: tuple[str, ...]) -> str:
     if len(values) != 1:
         raise ValueError("Gate 5B user-visible canary requires one configured value")
     return values[0]
+
+
+def _build_gate5b_sanitized_recent_history(
+    payload: Mapping[str, object],
+    *,
+    max_messages: int,
+) -> tuple[dict[str, str], ...]:
+    if max_messages <= 0:
+        return ()
+    source_messages = payload.get("messages") if isinstance(payload, Mapping) else None
+    if not isinstance(source_messages, list):
+        return ()
+    last_user_index: int | None = None
+    for index, item in enumerate(source_messages):
+        if isinstance(item, Mapping) and item.get("role") == "user":
+            last_user_index = index
+    if last_user_index is None:
+        return ()
+    projected: list[dict[str, str]] = []
+    for item in source_messages[:last_user_index]:
+        if not isinstance(item, Mapping):
+            continue
+        role = str(item.get("role") or "").strip().lower()
+        if role not in {"user", "assistant"}:
+            continue
+        content = sanitize_gate5b_model_visible_identity_text(
+            _message_content_to_text(item.get("content"))
+        )
+        bounded = content[:_MODEL_VISIBLE_CONTEXT_MAX_CHARS].strip()
+        if not bounded:
+            continue
+        projected.append(
+            {
+                "role": role,
+                "sanitizedText": bounded,
+                "sanitizedTextDigest": _sha256_digest(bounded),
+            }
+        )
+    return tuple(projected[-max_messages:])
 
 
 def _bounded_public_text(value: str, *, max_chars: int = 8192) -> str:
