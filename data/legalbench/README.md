@@ -60,6 +60,27 @@ International (CC BY 4.0)** license.  Individual tasks may carry additional
 licensing restrictions from their upstream sources; check the task-level
 `README.md` in the HazyResearch/legalbench repository before use.
 
+## Per-checkpoint marginal lift (ablation)
+
+Per-checkpoint marginal-lift measurement is available via the `--ablation` flag:
+
+```bash
+MAGI_LEGAL_HARNESS_ENABLED=1 magi legalbench --ablation
+```
+
+This runs the full harness plus one additional sweep per checkpoint (with that
+checkpoint disabled), so cost is roughly `(1 + N_checkpoints) × total_instances`.
+The JSON output includes an `"ablation"` key mapping each checkpoint name
+(`few_shot`, `rule_inject`, `prompt_variant`, `constrained_parse`) to its
+marginal lift over running without that checkpoint.
+
+## RULE_STATEMENTS coverage note
+
+`RULE_STATEMENTS` currently covers only a subset of manifest tasks.  Tasks
+without a rule entry simply skip rule injection (no error is raised), and the
+`rule_inject` checkpoint has no effect for those tasks.  More rules will be
+added as they are verified against authoritative legal sources.
+
 ## What is NOT committed
 
 Per-task data directories (`data/legalbench/*/`) are excluded by `.gitignore`.

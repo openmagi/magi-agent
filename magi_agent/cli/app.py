@@ -420,12 +420,23 @@ def legalbench(
         "--model",
         help="Model override (e.g. claude-sonnet-4-5). Defaults to provider default.",
     ),
+    ablation: bool = typer.Option(
+        False,
+        "--ablation/--no-ablation",
+        help=(
+            "Also run per-checkpoint ablation (marginal lift per checkpoint). "
+            "Cost is roughly (1 + N_checkpoints) * total_instances. Off by default."
+        ),
+    ),
 ) -> None:
     """Run the LegalBench harness evaluation (requires MAGI_LEGAL_HARNESS_ENABLED=1).
 
     Evaluates the harness (all checkpoints enabled) and a baseline (all off)
     against the curated manifest subset, then prints harness, baseline, and lift
     as JSON to stdout.
+
+    With --ablation: also runs per-checkpoint marginal-lift measurement and
+    includes an "ablation" key in the JSON output (keyed by checkpoint name).
 
     Requires MAGI_LEGAL_HARNESS_ENABLED=1 to run. Without a configured provider
     (ANTHROPIC_API_KEY / OPENAI_API_KEY / etc.) the command exits with an error.
@@ -436,6 +447,7 @@ def legalbench(
     from magi_agent.benchmarks.legalbench.cli import (  # noqa: PLC0415
         GateDisabledError,
         ensure_enabled,
+        run_checkpoint_ablation,
         run_eval,
     )
     from magi_agent.cli.providers import resolve_provider_config  # noqa: PLC0415
@@ -496,16 +508,20 @@ def legalbench(
         max_tasks=max_tasks,
     )
     lift_report = _lift(harness=harness_report, baseline=baseline_report)
-    typer.echo(
-        _json.dumps(
-            {
-                "harness": harness_report.model_dump(),
-                "baseline": baseline_report.model_dump(),
-                "lift": lift_report.model_dump(),
-            },
-            indent=2,
+    output_dict: dict = {
+        "harness": harness_report.model_dump(),
+        "baseline": baseline_report.model_dump(),
+        "lift": lift_report.model_dump(),
+    }
+    if ablation:
+        ablation_result = run_checkpoint_ablation(
+            data_root=data_root,
+            manifest_path=manifest,
+            complete=_real_complete,
+            max_tasks=max_tasks,
         )
-    )
+        output_dict["ablation"] = {k: v.model_dump() for k, v in ablation_result.items()}
+    typer.echo(_json.dumps(output_dict, indent=2))
 
 
 # ---------------------------------------------------------------------------

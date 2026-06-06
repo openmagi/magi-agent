@@ -67,7 +67,7 @@ def score(records: list[AnswerRecord]) -> LegalReport:
 
     by_task = {tid: _balanced_accuracy(pairs) for tid, pairs in by_task_pairs.items()}
 
-    rt_scores: dict[str, list[float]] = defaultdict(list)
+    rt_scores: dict[ReasoningType, list[float]] = defaultdict(list)
     for tid, acc in by_task.items():
         rt_scores[task_reasoning[tid]].append(acc)
     by_reasoning_type = {rt: sum(v) / len(v) for rt, v in rt_scores.items()}

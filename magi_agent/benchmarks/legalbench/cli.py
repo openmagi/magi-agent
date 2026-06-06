@@ -3,10 +3,11 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-from magi_agent.benchmarks.legal_eval import LegalReport, score
+from magi_agent.benchmarks.legal_eval import LegalLift, LegalReport, lift, score
 from magi_agent.benchmarks.legalbench.manifest import load_subset
 from magi_agent.benchmarks.legalbench.runner import (
     Complete,
+    ablation_configs,
     baseline_checkpoints,
     run_subset,
 )
@@ -29,6 +30,31 @@ def ensure_enabled() -> None:
         raise GateDisabledError(
             f"Legal harness is gated off. Set {_GATE_ENV}=1 to run."
         )
+
+
+def run_checkpoint_ablation(
+    *,
+    data_root: Path,
+    manifest_path: Path,
+    complete: Complete,
+    max_tasks: int | None = None,
+) -> dict[str, LegalLift]:
+    """Per-checkpoint marginal lift = full-harness minus harness-with-that-checkpoint-disabled.
+
+    Runs the full harness plus one sweep per disabled checkpoint, so cost is
+    roughly (1 + number_of_checkpoints) * (total test instances). Gated.
+    """
+    ensure_enabled()
+    tasks = load_subset(data_root=data_root, manifest_path=manifest_path)
+    if max_tasks is not None:
+        tasks = tasks[:max_tasks]
+    full = LegalCheckpoints()
+    full_report = score(run_subset(tasks, complete=complete, checkpoints=full))
+    result: dict[str, LegalLift] = {}
+    for cell in ablation_configs(full):
+        ablated_report = score(run_subset(tasks, complete=complete, checkpoints=cell.checkpoints))
+        result[cell.disabled] = lift(harness=full_report, baseline=ablated_report)
+    return result
 
 
 def run_eval(

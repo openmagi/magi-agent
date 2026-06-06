@@ -4,6 +4,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 from magi_agent.benchmarks.legalbench.manifest import load_subset
 
 
@@ -32,3 +34,13 @@ def test_load_subset_returns_tasks_in_manifest_order(tmp_path: Path) -> None:
     tasks = load_subset(data_root=data, manifest_path=manifest)
     assert [t.task_id for t in tasks] == ["abercrombie", "hearsay"]
     assert tasks[1].reasoning_type == "rule-application"
+
+
+def test_load_subset_rejects_path_traversal_task_id(tmp_path: Path) -> None:
+    """A manifest entry with task_id containing path-traversal sequences must raise ValueError."""
+    manifest = tmp_path / "evil.json"
+    manifest.write_text(
+        json.dumps([{"task_id": "../evil", "reasoning_type": "rule-conclusion"}])
+    )
+    with pytest.raises(ValueError, match="invalid task_id"):
+        load_subset(data_root=tmp_path / "data", manifest_path=manifest)
