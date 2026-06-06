@@ -435,13 +435,13 @@ def legalbench(
     from magi_agent.benchmarks.legal_eval import lift as _lift  # noqa: PLC0415
     from magi_agent.benchmarks.legalbench.cli import (  # noqa: PLC0415
         GateDisabledError,
+        ensure_enabled,
         run_eval,
     )
     from magi_agent.cli.providers import resolve_provider_config  # noqa: PLC0415
 
-    # Gate check first — clean error message before any expensive work.
+    # Pre-check so the gate error surfaces before provider-resolution I/O; run_eval also enforces this.
     try:
-        from magi_agent.benchmarks.legalbench.cli import ensure_enabled  # noqa: PLC0415
         ensure_enabled()
     except GateDisabledError as exc:
         typer.echo(str(exc), err=True)
@@ -455,6 +455,11 @@ def legalbench(
             "GEMINI_API_KEY) to run the live harness.",
             err=True,
         )
+        raise typer.Exit(code=1)
+
+    import importlib.util  # noqa: PLC0415
+    if importlib.util.find_spec("litellm") is None:
+        typer.echo("litellm is required: pip install 'magi-agent[providers]'", err=True)
         raise typer.Exit(code=1)
 
     def _real_complete(prompt: str) -> str:

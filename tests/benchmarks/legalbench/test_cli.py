@@ -5,7 +5,17 @@ from pathlib import Path
 
 import pytest
 
-from magi_agent.benchmarks.legalbench.cli import GateDisabledError, ensure_enabled
+from magi_agent.benchmarks.legalbench.cli import GateDisabledError, ensure_enabled, run_eval
+
+
+def test_run_eval_raises_when_gate_off(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("MAGI_LEGAL_HARNESS_ENABLED", raising=False)
+    with pytest.raises(GateDisabledError):
+        run_eval(
+            data_root=tmp_path,
+            manifest_path=tmp_path / "m.json",
+            complete=lambda prompt: "Yes",
+        )
 
 
 def test_gate_blocks_when_env_unset(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -40,6 +40,10 @@ def run_eval(
 ) -> tuple[LegalReport, LegalReport]:
     """Run the harness + baseline evaluation and return both reports.
 
+    Performs TWO full sweeps (harness pass + baseline pass), so the total
+    number of model calls is roughly ``2 * (total test instances)`` — cost on
+    a paid provider is approximately double a single pass.
+
     Args:
         data_root: Path to the directory containing per-task subdirectories
             (each with train.tsv, test.tsv, base_prompt.txt).
