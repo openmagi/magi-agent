@@ -601,6 +601,17 @@ def test_build_headless_runtime_attaches_composio_to_default_local_runner(
 
     monkeypatch.setenv("COMPOSIO_API_KEY", "cp_test_secret")
     monkeypatch.setenv("MAGI_COMPOSIO_ENABLED", "on")
+    monkeypatch.setenv("MAGI_CONFIG", str(tmp_path / "absent.toml"))
+    for key in (
+        "ANTHROPIC_API_KEY",
+        "OPENAI_API_KEY",
+        "GEMINI_API_KEY",
+        "GOOGLE_API_KEY",
+        "FIREWORKS_API_KEY",
+        "MAGI_PROVIDER",
+        "MAGI_MODEL",
+    ):
+        monkeypatch.delenv(key, raising=False)
 
     with patch(
         "magi_agent.cli.wiring.build_composio_toolset_bundle",

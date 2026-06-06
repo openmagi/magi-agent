@@ -21,8 +21,10 @@ needs the optional ``litellm`` dependency; if it is missing we raise
 from __future__ import annotations
 
 import os
+from collections.abc import Mapping
 from typing import AsyncGenerator, Callable
 
+from magi_agent.cli.engine import RunnerPolicyAssembly
 from magi_agent.cli.providers import ProviderConfig
 
 # Type of the model-construction hook (injectable for tests).
@@ -45,6 +47,9 @@ class CliModelRunner:
         app_name: str,
         user_id: str = "cli-user",
         session_id: str = "cli-session",
+        model_provider: str | None = None,
+        model_label: str | None = None,
+        runner_policy_assembly: RunnerPolicyAssembly | None = None,
     ) -> None:
         self._runner = runner
         self._agent = agent
@@ -52,10 +57,25 @@ class CliModelRunner:
         self._app_name = app_name
         self._default_user_id = user_id
         self._default_session_id = session_id
+        self._model_provider = model_provider
+        self._model_label = model_label
+        self._runner_policy_assembly = runner_policy_assembly
 
     @property
     def agent(self) -> object:
         return self._agent
+
+    @property
+    def model_provider(self) -> str | None:
+        return self._model_provider
+
+    @property
+    def model_label(self) -> str | None:
+        return self._model_label
+
+    @property
+    def runner_policy_assembly(self) -> RunnerPolicyAssembly | None:
+        return self._runner_policy_assembly
 
     async def run_async(self, **kwargs: object) -> AsyncGenerator[object, None]:
         user_id = _as_str(kwargs.get("user_id"), self._default_user_id)
@@ -138,6 +158,12 @@ def build_cli_model_runner(
         instruction=effective_instruction,
         tools=list(effective_tools),
     )
+    runner_policy_assembly = _build_default_runner_policy_assembly(
+        model_provider=config.provider,
+        model_label=config.litellm_model,
+        live_policy_callback_attached=True,
+    )
+    _attach_first_party_policy_callback(agent, runner_policy_assembly)
     session_service = WorkspaceSessionService(app_name=app_name)
     # Build the control plane via the shared helper (same as local_runner) so
     # both runners cannot drift.  All flags default OFF; the plane_plugin is
@@ -158,6 +184,9 @@ def build_cli_model_runner(
         app_name=app_name,
         user_id=user_id,
         session_id=session_id,
+        model_provider=config.provider,
+        model_label=config.litellm_model,
+        runner_policy_assembly=runner_policy_assembly,
     )
 
 
@@ -197,6 +226,127 @@ def _app_identifier(app_name: str) -> str:
 
 def _as_str(value: object, default: str) -> str:
     return value if isinstance(value, str) and value else default
+
+
+def _build_default_runner_policy_assembly(
+    *,
+    model_provider: str,
+    model_label: str,
+    live_policy_callback_attached: bool,
+) -> RunnerPolicyAssembly | None:
+    try:
+        from magi_agent.recipes.compiler import (  # noqa: PLC0415
+            AgentRecipeCompiler,
+            PackRegistry,
+            ProfileResolutionRequest,
+        )
+        from magi_agent.recipes.materializer import RecipeMaterializer  # noqa: PLC0415
+    except Exception:
+        return None
+
+    materializer_provider, materializer_model = _materializer_model(
+        provider=model_provider,
+        model_label=model_label,
+    )
+    try:
+        snapshot = AgentRecipeCompiler(PackRegistry.with_first_party_packs()).compile(
+            ProfileResolutionRequest(
+                taskProfile={"taskTypes": ["coding"]},
+                runtimeContext={"channel": "cli"},
+                recipePackConfig={},
+            )
+        )
+        plan = RecipeMaterializer.with_reliability_defaults().materialize(
+            snapshot,
+            modelProvider=materializer_provider,
+            modelLabel=materializer_model,
+        )
+    except Exception:
+        return None
+
+    required_validators = list(plan.final_gate_policy.required_validators)
+    if "openmagi.dev-coding" in plan.selected_pack_ids:
+        required_validators.append("verifier:dev-coding:test-evidence")
+    missing_action = plan.final_gate_policy.missing_evidence_action
+    attachment_flags = dict(plan.attachment_flags)
+    attachment_flags["livePolicyCallbackAttached"] = live_policy_callback_attached
+    return RunnerPolicyAssembly(
+        modelProvider=model_provider,
+        modelLabel=model_label,
+        selectedPackIds=plan.selected_pack_ids,
+        evidenceRequirements=plan.final_gate_policy.required_evidence,
+        requiredValidators=tuple(dict.fromkeys(required_validators)),
+        missingEvidenceAction=missing_action,
+        repairPolicy={
+            "action": missing_action,
+            "source": "recipe-materializer",
+            "retryable": missing_action == "repair_required",
+        },
+        attachmentFlags=attachment_flags,
+    )
+
+
+def _attach_first_party_policy_callback(
+    agent: object,
+    assembly: RunnerPolicyAssembly | None,
+) -> None:
+    if assembly is None:
+        return
+    original = getattr(agent, "before_tool_callback", None)
+    original_as_list = (
+        []
+        if original is None
+        else list(original)
+        if isinstance(original, list)
+        else [original]
+    )
+
+    async def magi_first_party_policy_before_tool(*, tool, args, tool_context=None):
+        del tool_context
+        tool_name = getattr(tool, "name", "tool")
+        if _contains_forbidden_production_authority(args):
+            return {
+                "status": "blocked",
+                "error": "production_authority_denied",
+                "tool": tool_name,
+                "feedback": "Local OSS first-party policy cannot grant production mutation authority.",
+                "runnerPolicyAssembly": assembly.to_public_payload(),
+            }
+        return None
+
+    agent.before_tool_callback = [
+        magi_first_party_policy_before_tool,
+        *original_as_list,
+    ]
+
+
+def _contains_forbidden_production_authority(value: object) -> bool:
+    if isinstance(value, Mapping):
+        for key, nested in value.items():
+            key_text = str(key)
+            if key_text in {
+                "productionWriteAllowed",
+                "productionBlockEnabled",
+                "productionAuthority",
+            } and nested is True:
+                return True
+            if _contains_forbidden_production_authority(nested):
+                return True
+        return False
+    if isinstance(value, list | tuple):
+        return any(_contains_forbidden_production_authority(item) for item in value)
+    return False
+
+
+def _materializer_model(*, provider: str, model_label: str) -> tuple[str, str]:
+    normalized_model = model_label.rsplit("/", 1)[-1]
+    if provider == "anthropic":
+        return "anthropic", "haiku"
+    if provider == "openai":
+        return "openai", "gpt-5.5"
+    if provider == "fireworks":
+        return "fireworks", "kimi-k2p6"
+    return "google", "gemini-3.5-flash"
 
 
 __all__ = [

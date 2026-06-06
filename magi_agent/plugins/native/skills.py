@@ -7,11 +7,23 @@ from magi_agent.plugins.native._common import digest, ok_result, workspace_root
 from magi_agent.tools.context import ToolContext
 from magi_agent.tools.result import ToolResult
 
+_MAX_LOADED_BUNDLED_SKILLS = 20
+_MAX_SKILL_BODY_CHARS = 64_000
+
 
 def skill_loader(arguments: dict[str, object], context: ToolContext) -> ToolResult:
     root = workspace_root(context)
     candidates = _skill_candidates(root)
-    return ok_result("SkillLoader", {"skills": candidates, "skillCount": len(candidates)})
+    loaded_skills = _load_bundled_skill_bodies(candidates)
+    return ok_result(
+        "SkillLoader",
+        {
+            "skills": candidates,
+            "skillCount": len(candidates),
+            "loadedSkills": loaded_skills,
+            "loadedSkillCount": len(loaded_skills),
+        },
+    )
 
 
 def skill_runtime_hooks(arguments: dict[str, object], context: ToolContext) -> ToolResult:
@@ -56,3 +68,35 @@ def _bundled_skill_candidates() -> list[str]:
         skill.relative_to(skills_root).as_posix()
         for skill in bundled_root.rglob("SKILL.md")
     )[:50]
+
+
+def _load_bundled_skill_bodies(candidates: list[str]) -> list[dict[str, object]]:
+    try:
+        skills_root = resources.files("magi_agent").joinpath("skills")
+    except (FileNotFoundError, ModuleNotFoundError):
+        return []
+
+    loaded: list[dict[str, object]] = []
+    for relative in candidates:
+        if not relative.startswith("bundled/") or not relative.endswith("/SKILL.md"):
+            continue
+        try:
+            resource = skills_root.joinpath(*relative.split("/"))
+            if not resource.is_file():
+                continue
+            body = resource.read_text(encoding="utf-8")
+        except (FileNotFoundError, UnicodeDecodeError, OSError):
+            continue
+        if len(body) > _MAX_SKILL_BODY_CHARS:
+            body = body[:_MAX_SKILL_BODY_CHARS]
+        loaded.append(
+            {
+                "path": relative,
+                "source": "bundled",
+                "body": body,
+                "bodyDigest": digest(body),
+            }
+        )
+        if len(loaded) >= _MAX_LOADED_BUNDLED_SKILLS:
+            break
+    return loaded
