@@ -71,6 +71,21 @@ MAGI_EDIT_FUZZY_MATCH_ENABLED: bool = (
     os.environ.get("MAGI_EDIT_FUZZY_MATCH_ENABLED", "0").strip().lower()
     in _TRUE_VALUES
 )
+
+# ---------------------------------------------------------------------------
+# Coding: edit-match evidence enforcement flag (PR1)
+# ---------------------------------------------------------------------------
+# Controls whether low-confidence fuzzy edits block the final answer.
+# Valid values (EvidenceEnforcement): "off", "audit", "block_final_answer".
+# Default: "off" — receipts are built and emitted but nothing blocks.
+# Zero behaviour change vs today (exact same code paths) when set to "off".
+MAGI_EDIT_MATCH_EVIDENCE_ENFORCEMENT: str = (
+    os.environ.get("MAGI_EDIT_MATCH_EVIDENCE_ENFORCEMENT", "off").strip().lower()
+)
+# Normalise to one of the three valid values; fall back to "off" for unknowns.
+if MAGI_EDIT_MATCH_EVIDENCE_ENFORCEMENT not in {"off", "audit", "block_final_answer"}:
+    MAGI_EDIT_MATCH_EVIDENCE_ENFORCEMENT = "off"
+
 _GATE5B4C3_GOOGLE_CREDENTIAL_ENVS = frozenset(
     {
         "GEMINI_API_KEY",

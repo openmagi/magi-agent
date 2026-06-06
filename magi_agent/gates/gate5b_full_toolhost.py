@@ -41,6 +41,10 @@ from magi_agent.evidence.coding_tool_receipts import (
     CodingToolReceiptConfig,
     CodingToolReceiptRecord,
 )
+from magi_agent.evidence.edit_match_receipts import (
+    EditMatchReceiptBoundary,
+    EditMatchReceiptRecord,
+)
 from magi_agent.tools.context import ToolContext
 from magi_agent.tools.dispatcher import ToolDispatcher
 from magi_agent.tools.manifest import RuntimeMode, ToolManifest, ToolSource
@@ -363,6 +367,10 @@ class Gate5BFullToolOutcome(_Gate5BFullModel):
         default=None,
         alias="codeDiagnosticsReceipt",
     )
+    edit_match_receipt: EditMatchReceiptRecord | None = Field(
+        default=None,
+        alias="editMatchReceipt",
+    )
 
 
 class Gate5BFullToolBundle(_Gate5BFullModel):
@@ -438,6 +446,7 @@ class Gate5BFullToolCounter:
         output_byte_count: int,
         coding_mutation_receipt: CodingToolReceiptRecord | None = None,
         code_diagnostics_receipt: CodeDiagnosticsRecord | None = None,
+        edit_match_receipt: EditMatchReceiptRecord | None = None,
     ) -> Gate5BFullToolOutcome:
         receipt = Gate5BFullToolReceipt(
             requestDigest=request_digest,
@@ -458,6 +467,7 @@ class Gate5BFullToolCounter:
             handlerCalled=True,
             codingMutationReceipt=coding_mutation_receipt,
             codeDiagnosticsReceipt=code_diagnostics_receipt,
+            editMatchReceipt=edit_match_receipt,
         )
 
     def blocked(
@@ -537,6 +547,11 @@ class Gate5BFullToolHost:
         self.diagnostics_boundary = CodeDiagnosticsBoundary(
             enabled=config.lsp_diagnostics_enabled
         )
+        self.edit_match_receipt_boundary = EditMatchReceiptBoundary()
+        # Stores the EditMatchResult from the most recent FileEdit call so that
+        # dispatch() can build an EditMatchReceiptRecord after _handle() returns.
+        # Cleared at the start of each dispatch so stale results never leak.
+        self._last_edit_match_result: object = None
         # Lazy-created real LSP client; only built when the flag is on and no
         # provider was injected (tests inject a fake provider for determinism).
         self._diagnostics_provider = diagnostics_provider
@@ -585,6 +600,9 @@ class Gate5BFullToolHost:
                 argument_digest=argument_digest,
             )
         try:
+            # Clear any stale edit-match result from a previous call before
+            # invoking the handler so dispatch never reads stale state.
+            self._last_edit_match_result = None
             self._preflight_legacy_tool(tool_name, args, tool_call_id=tool_call_id)
             output = await self._handle(tool_name, args, tool_call_id=tool_call_id)
             # The diagnostics collection does blocking stdio reads against the
@@ -594,6 +612,9 @@ class Gate5BFullToolHost:
             diagnostics_receipt = await asyncio.to_thread(
                 self._after_write_diagnostics, tool_name, args, output
             )
+            # Build an EditMatch evidence receipt when the fuzzy cascade was used
+            # (i.e. when _handle stored an EditMatchResult in _last_edit_match_result).
+            edit_match_receipt = self._build_edit_match_receipt(output)
             result = ToolResult(status="ok", output=output)
             coding_receipt = self.receipt_boundary.extract_receipt(
                 tool_call_id=tool_call_id,
@@ -611,6 +632,7 @@ class Gate5BFullToolHost:
                 output_byte_count=_encoded_len(output),
                 coding_mutation_receipt=coding_receipt,
                 code_diagnostics_receipt=diagnostics_receipt,
+                edit_match_receipt=edit_match_receipt,
             )
         except Gate5BFullToolRegistryBlocked as error:
             return self.counter.blocked(
@@ -785,12 +807,15 @@ class Gate5BFullToolHost:
                     replace as _fuzzy_replace,
                 )
                 try:
-                    result_text = _fuzzy_replace(current, old_text, new_text)
+                    _match = _fuzzy_replace(current, old_text, new_text)
                 except _NoMatchError:
                     raise ValueError("old_text_not_found")
                 except _MultipleMatchesError:
                     raise ValueError("old_text_not_unique")
-                target.write_text(result_text, encoding="utf-8")
+                # Store the structured match result so dispatch() can build the
+                # EditMatch evidence receipt after _handle() returns.
+                self._last_edit_match_result = _match
+                target.write_text(_match.result, encoding="utf-8")
             else:
                 if old_text not in current:
                     raise ValueError("old_text_not_found")
@@ -800,6 +825,11 @@ class Gate5BFullToolHost:
                 "pathDigest": _digest(target.relative_to(self.workspace_root).as_posix()),
                 "replacements": 1,
             }
+            if _EDIT_FUZZY_MATCH_ENABLED and self._last_edit_match_result is not None:
+                from magi_agent.coding.edit_matching import EditMatchResult as _EditMatchResult
+                if isinstance(self._last_edit_match_result, _EditMatchResult):
+                    edit_result["matchTier"] = self._last_edit_match_result.tier
+                    edit_result["matchConfidence"] = self._last_edit_match_result.confidence
             if self.config.format_on_write_enabled:
                 content_digest = self._content_digest(target)
                 if content_digest is not None:
@@ -1136,6 +1166,29 @@ class Gate5BFullToolHost:
         except OSError:
             return None
         return _digest(content)
+
+    def _build_edit_match_receipt(self, output: object) -> EditMatchReceiptRecord | None:
+        """Build an EditMatch evidence receipt from the last fuzzy-edit result.
+
+        Returns ``None`` when the fuzzy cascade was not used (flag off) or when
+        ``_last_edit_match_result`` is not set (non-FileEdit call, or a call that
+        errored before a match was recorded).  Fail-open: any exception yields
+        ``None`` so the receipt never blocks a successful write.
+        """
+        from magi_agent.coding.edit_matching import EditMatchResult as _EditMatchResult
+
+        match = self._last_edit_match_result
+        if not isinstance(match, _EditMatchResult):
+            return None
+        try:
+            # Use the *new* file content (the match result) for the file digest.
+            file_content = match.result
+            return self.edit_match_receipt_boundary.build_record(
+                match=match,
+                file_content=file_content,
+            )
+        except Exception:  # noqa: BLE001 — receipt build must never fail the write
+            return None
 
     def _after_write_diagnostics(
         self,

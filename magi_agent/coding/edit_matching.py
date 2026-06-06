@@ -6,10 +6,17 @@ gemini-cli).  No ADK, Pydantic, or I/O dependencies.  Pure functions only.
 
 Public API
 ----------
-replace(content, old, new, replace_all=False) -> str
+replace(content, old, new, replace_all=False) -> EditMatchResult
     Tries the 9 matchers in order, stops at the first that yields a usable
-    (unique, when replace_all=False) match.  Raises NoMatchError or
+    (unique, when replace_all=False) match.  Returns an EditMatchResult with
+    structured tier/confidence/span metadata.  Raises NoMatchError or
     MultipleMatchesError as appropriate.
+
+    ``str(result)`` returns ``result.result`` for backward compatibility.
+    Use ``replace_text(...)`` when only the plain string result is needed.
+
+replace_text(content, old, new, replace_all=False) -> str
+    Convenience wrapper that returns ``replace(...).result`` directly.
 
 NoMatchError    — raised when no matcher can locate `old` in `content`.
 MultipleMatchesError — raised when a match was found but it appears more than
@@ -24,6 +31,7 @@ detect_line_ending(text) -> "\\r\\n" | "\\n"
 from __future__ import annotations
 
 import re
+from dataclasses import dataclass
 
 
 # ---------------------------------------------------------------------------
@@ -37,6 +45,60 @@ class NoMatchError(Exception):
 
 class MultipleMatchesError(Exception):
     """old_text was found in multiple locations; provide more context."""
+
+
+# ---------------------------------------------------------------------------
+# Structured match result
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class EditMatchResult:
+    """Structured result from replace() carrying the matched tier and confidence.
+
+    ``str(result)`` returns ``result.result`` so callers using string
+    interpolation or ``target.write_text(str(res), ...)`` keep working without
+    change.
+    """
+
+    result: str                    # new file content (formerly the bare return value)
+    tier: str                      # e.g. "simple", "context_aware"
+    tier_index: int                # 0-based position in _MATCHERS
+    confidence: float              # 0.0..1.0
+    matched_span: tuple[int, int]  # (start, end) byte offsets into the PRE-EDIT content
+    matched_text: str              # the actual pre-edit substring that was replaced
+    ambiguous: bool                # a unique match was forced despite other candidates
+
+    def __str__(self) -> str:      # backward compatibility: str(res) == res.result
+        return self.result
+
+
+# Tier names aligned index-to-index with _MATCHERS defined later.
+_TIER_NAMES: tuple[str, ...] = (
+    "simple",
+    "line_trimmed",
+    "block_anchor",
+    "whitespace_normalized",
+    "indentation_flexible",
+    "escape_normalized",
+    "trimmed_boundary",
+    "context_aware",
+    "multi_occurrence",
+)
+
+# Nominal confidence for tiers whose score is not dynamic.
+# block_anchor (idx=2) and context_aware (idx=7) compute confidence at runtime.
+_TIER_NOMINAL_CONFIDENCE: tuple[float, ...] = (
+    1.00,   # 0 simple
+    0.95,   # 1 line_trimmed
+    -1.0,   # 2 block_anchor — dynamic: 0.3 + 0.7 * score
+    0.90,   # 3 whitespace_normalized
+    0.85,   # 4 indentation_flexible
+    0.80,   # 5 escape_normalized
+    0.85,   # 6 trimmed_boundary
+    -1.0,   # 7 context_aware — dynamic: matches / total
+    0.70,   # 8 multi_occurrence
+)
 
 
 # ---------------------------------------------------------------------------
@@ -166,14 +228,7 @@ def _block_anchor(content: str, find: str):
     if not candidates:
         return
 
-    if len(candidates) == 1:
-        i, j = candidates[0]
-        candidate = "".join(content_lines[i : j + 1])
-        if candidate in content:
-            yield candidate
-        return
-
-    # Multiple candidates: pick the one with best avg middle similarity
+    # Helper to compute middle similarity for any (i, j) pair.
     def _middle_similarity(i: int, j: int) -> float:
         content_mid = [content_lines[k].rstrip("\r\n").strip() for k in range(i + 1, j)]
         if not content_mid or not find_middle:
@@ -185,6 +240,14 @@ def _block_anchor(content: str, find: str):
             scores.append(1.0 - levenshtein(c_l, f_l) / max_len)
         return sum(scores) / len(scores)
 
+    if len(candidates) == 1:
+        i, j = candidates[0]
+        candidate = "".join(content_lines[i : j + 1])
+        if candidate in content:
+            score = _middle_similarity(i, j)
+            yield (candidate, score)
+        return
+
     best_score = -1.0
     best = None
     for i, j in candidates:
@@ -195,7 +258,7 @@ def _block_anchor(content: str, find: str):
 
     if best is not None and best_score >= 0.3:
         i, j = best
-        yield "".join(content_lines[i : j + 1])
+        yield ("".join(content_lines[i : j + 1]), best_score)
 
 
 def _whitespace_normalized(content: str, find: str):
@@ -369,10 +432,11 @@ def _context_aware(content: str, find: str):
             1 for cl, fl in zip(content_mid_nonempty, find_middle_nonempty) if cl == fl
         )
         total = max(len(content_mid_nonempty), len(find_middle_nonempty))
-        if total == 0 or matches / total >= 0.5:
+        score = matches / total if total > 0 else 1.0
+        if total == 0 or score >= 0.5:
             candidate = "".join(content_lines[i : i + n])
             if candidate in content:
-                yield candidate
+                yield (candidate, score)
                 return  # first occurrence only
 
 
@@ -405,13 +469,17 @@ _MATCHERS = [
 
 
 # ---------------------------------------------------------------------------
-# Public: replace()
+# Public: replace() and replace_text()
 # ---------------------------------------------------------------------------
 
 
-def replace(content: str, old: str, new: str, replace_all: bool = False) -> str:
+def replace(content: str, old: str, new: str, replace_all: bool = False) -> EditMatchResult:
     """
     Replace *old* with *new* in *content* using the 9-matcher cascade.
+
+    Returns an ``EditMatchResult`` with structured tier/confidence/span
+    metadata.  ``str(result)`` returns ``result.result`` for backward
+    compatibility with callers that treat the return value as a string.
 
     Raises
     ------
@@ -439,15 +507,39 @@ def replace(content: str, old: str, new: str, replace_all: bool = False) -> str:
 
     _found_but_ambiguous = False
 
-    for matcher in _MATCHERS:
-        for candidate in matcher(content_body, old_norm):
+    for tier_index, matcher in enumerate(_MATCHERS):
+        for raw_yield in matcher(content_body, old_norm):
+            # Matchers that surface a real confidence score yield (candidate, score)
+            # 2-tuples (_block_anchor, _context_aware).  All others yield bare strings.
+            if isinstance(raw_yield, tuple):
+                candidate, raw_score = raw_yield
+                if tier_index == 2:  # block_anchor
+                    confidence = 0.3 + 0.7 * float(raw_score)
+                else:  # context_aware (idx 7)
+                    confidence = float(raw_score)
+            else:
+                candidate = raw_yield
+                confidence = _TIER_NOMINAL_CONFIDENCE[tier_index]
+
             if not candidate:
                 continue
+
             if replace_all:
                 # replace_all: replace every occurrence
                 result_body = content_body.replace(candidate, new_norm)
-                result = (_BOM if had_bom else "") + result_body
-                return result
+                result_full = (_BOM if had_bom else "") + result_body
+                idx = content_body.find(candidate)
+                span_start = (1 if had_bom else 0) + (idx if idx != -1 else 0)
+                span_end = span_start + len(candidate)
+                return EditMatchResult(
+                    result=result_full,
+                    tier=_TIER_NAMES[tier_index],
+                    tier_index=tier_index,
+                    confidence=confidence,
+                    matched_span=(span_start, span_end),
+                    matched_text=candidate,
+                    ambiguous=False,
+                )
             # Single replacement: verify uniqueness
             idx = content_body.find(candidate)
             if idx == -1:
@@ -458,8 +550,19 @@ def replace(content: str, old: str, new: str, replace_all: bool = False) -> str:
                 continue
             # Unique match — perform replacement
             result_body = content_body[:idx] + new_norm + content_body[idx + len(candidate):]
-            result = (_BOM if had_bom else "") + result_body
-            return result
+            result_full = (_BOM if had_bom else "") + result_body
+            bom_offset = 1 if had_bom else 0
+            span_start = bom_offset + idx
+            span_end = span_start + len(candidate)
+            return EditMatchResult(
+                result=result_full,
+                tier=_TIER_NAMES[tier_index],
+                tier_index=tier_index,
+                confidence=confidence,
+                matched_span=(span_start, span_end),
+                matched_text=candidate,
+                ambiguous=False,
+            )
 
     if _found_but_ambiguous:
         raise MultipleMatchesError(
@@ -470,3 +573,12 @@ def replace(content: str, old: str, new: str, replace_all: bool = False) -> str:
         "old_text not found in file content. "
         "The text may have changed or the match is too imprecise."
     )
+
+
+def replace_text(content: str, old: str, new: str, replace_all: bool = False) -> str:
+    """Convenience wrapper returning ``replace(...).result`` as a plain string.
+
+    Use this when the caller only needs the resulting file content and has no
+    use for the tier/confidence metadata.
+    """
+    return replace(content, old, new, replace_all=replace_all).result
