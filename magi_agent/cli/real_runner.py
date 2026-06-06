@@ -215,6 +215,32 @@ def build_cli_model_runner(
     )
 
 
+# Transient provider failures (5xx, connection drops, "Server disconnected",
+# overloaded) otherwise abort a whole run. litellm retries retryable errors when
+# ``num_retries`` is set; ``timeout`` bounds a single hung request.
+_DEFAULT_NUM_RETRIES = 4
+_DEFAULT_TIMEOUT_S = 600
+
+
+def _model_retry_kwargs(env: Mapping[str, str] | None = None) -> dict[str, int]:
+    source = os.environ if env is None else env
+
+    def _positive_int(name: str, default: int) -> int:
+        raw = source.get(name)
+        if raw is None or not str(raw).strip():
+            return default
+        try:
+            value = int(str(raw).strip())
+        except ValueError:
+            return default
+        return value if value >= 1 else default
+
+    return {
+        "num_retries": _positive_int("MAGI_MODEL_NUM_RETRIES", _DEFAULT_NUM_RETRIES),
+        "timeout": _positive_int("MAGI_MODEL_TIMEOUT_S", _DEFAULT_TIMEOUT_S),
+    }
+
+
 def _build_litellm_model(config: ProviderConfig) -> object:
     try:
         from google.adk.models.lite_llm import LiteLlm  # noqa: PLC0415
@@ -233,7 +259,11 @@ def _build_litellm_model(config: ProviderConfig) -> object:
         litellm.suppress_debug_info = True
     except Exception:  # pragma: no cover - litellm always present alongside LiteLlm
         pass
-    return LiteLlm(model=config.litellm_model, api_key=config.api_key)
+    return LiteLlm(
+        model=config.litellm_model,
+        api_key=config.api_key,
+        **_model_retry_kwargs(),
+    )
 
 
 def _app_identifier(app_name: str) -> str:
