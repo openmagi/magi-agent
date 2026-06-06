@@ -57,8 +57,23 @@ _CANARY_LIVE_GATE: int = 5
 
 
 def _live_env_enabled() -> bool:
-    """Return True only when the env gate is explicitly set to a truthy value."""
-    return os.environ.get(_LIVE_ENV_VAR, "").lower() in _TRUE_STRINGS
+    """Return whether the LIVE/authority tier is enabled (default OFF, opt-in).
+
+    PR9a layered opt-out leaves the authority tier **default-OFF** — only the
+    SAFE tier flips to default-ON.  Resolution now flows through
+    :func:`resolve_learning_config` so that:
+
+    * ``MAGI_LEARNING_LIVE_ENABLED`` is still the explicit opt-in (default OFF);
+    * the master switch ``MAGI_LEARNING_ENABLED`` being explicitly falsy ALSO
+      forces live off (``live_effective = enabled AND live_enabled``).
+
+    No ``Literal[False]`` authority flag is consulted or flipped here; live
+    binding still flows through the canary/readiness ladder + audit path below.
+    """
+    # Imported lazily to avoid a gates↔learning import cycle at module load.
+    from magi_agent.learning.config import resolve_learning_config
+
+    return resolve_learning_config().live_effective
 
 
 class LearningLiveReadinessConfig(BaseModel):

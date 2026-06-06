@@ -34,6 +34,7 @@ import os
 from collections.abc import Callable, Mapping
 from typing import TYPE_CHECKING
 
+from magi_agent.learning.config import resolve_learning_config
 from magi_agent.telemetry.deterministic_events import DeterministicRuntimeEvent
 from magi_agent.telemetry.logging import log_record
 
@@ -59,8 +60,17 @@ EventSink = Callable[[DeterministicRuntimeEvent], None]
 
 
 def learning_telemetry_enabled() -> bool:
-    """True only when the learning telemetry env gate is explicitly truthy."""
-    return os.environ.get(_TELEMETRY_ENV_VAR, "").lower() in _TRUE_STRINGS
+    """True when learning telemetry emission is enabled.
+
+    PR9a layered opt-out: telemetry is now ON **by default** (safe tier) — it
+    only constructs PII-free, deterministic events and hands them to a sink, so
+    it incurs no model cost and changes no behaviour.  It is OFF only when the
+    master switch ``MAGI_LEARNING_ENABLED`` is explicitly falsy or
+    ``MAGI_LEARNING_TELEMETRY_ENABLED`` is explicitly falsy.  Resolution flows
+    through :func:`resolve_learning_config`; master-off restores the byte-quiet
+    PR1–PR8 no-emission state.
+    """
+    return resolve_learning_config().telemetry_effective
 
 
 def _sha256_text_digest(value: str) -> str:

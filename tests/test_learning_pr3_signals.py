@@ -40,6 +40,9 @@ from magi_agent.harness.learning_executor import (
     _REFLECTION_ENV_VAR,
     run_reflection,
 )
+from magi_agent.learning.config import ENV_MASTER as _MASTER_ENV_VAR
+
+# PR9a: safe tier default-ON; OFF is asserted via the master switch.
 
 
 # ---------------------------------------------------------------------------
@@ -414,7 +417,7 @@ class TestChronologicalSplit:
 
 class TestExecutorEndToEnd:
     def test_off_disabled_zero_work(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.delenv(_REFLECTION_ENV_VAR, raising=False)
+        monkeypatch.setenv(_MASTER_ENV_VAR, "false")
         source = LocalFakeTranscriptSource(
             traces=(_trace("s1", draft_output="a", final_output="b"),)
         )
@@ -574,7 +577,7 @@ class TestExecutorEndToEnd:
     ) -> None:
         # m3: disabled path counters must carry the same keys as the ok path so
         # callers never KeyError on signals_extracted.
-        monkeypatch.delenv(_REFLECTION_ENV_VAR, raising=False)
+        monkeypatch.setenv(_MASTER_ENV_VAR, "false")
         result = asyncio.run(run_reflection())
         assert result.status == "disabled"
         assert result.counters["signals_extracted"] == 0

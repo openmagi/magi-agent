@@ -304,7 +304,10 @@ def test_anonymous_mutation_still_401(tmp_path) -> None:
 
 
 def test_telemetry_default_off_no_emission(monkeypatch) -> None:
+    # PR9a: telemetry is ON by default (safe tier); the byte-quiet no-emission
+    # state is reached via the master switch ``MAGI_LEARNING_ENABLED=false``.
     monkeypatch.delenv("MAGI_LEARNING_TELEMETRY_ENABLED", raising=False)
+    monkeypatch.setenv("MAGI_LEARNING_ENABLED", "false")
     from magi_agent.learning import telemetry as tel
 
     sink: list = []

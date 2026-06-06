@@ -573,8 +573,11 @@ def test_manual_trigger_error_leaves_watermark_unchanged_and_warns(
 
 def test_manual_trigger_off_is_disabled_noop(monkeypatch, tmp_path) -> None:
     from magi_agent.harness.cron_runtime import LearningReflectionCronJob
+    from magi_agent.learning.config import ENV_MASTER
 
+    # PR9a: the executor's reflection gate is default-ON; OFF is via master off.
     monkeypatch.delenv(_REFLECTION_ENV_VAR, raising=False)
+    monkeypatch.setenv(ENV_MASTER, "false")
     job = LearningReflectionCronJob(config=LearningReflectionConfig(enabled=True))
     result = asyncio.run(job.trigger_now())
     assert result.status == "disabled"

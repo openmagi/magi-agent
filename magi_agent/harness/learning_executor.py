@@ -35,6 +35,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, field_serializer
 
+from magi_agent.learning.config import resolve_learning_config
 from magi_agent.learning.candidates import (
     LearningCandidate,
     LocalFakeTranscriptSource,
@@ -88,8 +89,21 @@ _DEFAULT_GATE_CHECKSET: StaticCheckSet = StaticCheckSet(
 
 
 def _reflection_enabled() -> bool:
-    """Return True only when the env gate is explicitly set to a truthy value."""
-    return os.environ.get(_REFLECTION_ENV_VAR, "").lower() in _TRUE_STRINGS
+    """Return the effective reflection gate under PR9a layered opt-out.
+
+    The safe tier is now **default-ON**: with no ``MAGI_LEARNING_*`` env vars
+    set this resolves to ``True``.  Resolution flows through
+    :func:`resolve_learning_config`, so:
+
+    * ``MAGI_LEARNING_ENABLED`` falsy (master off) ⇒ ``False`` (whole layer
+      inert — byte-identical to the PR1–PR8 all-OFF state).
+    * ``MAGI_LEARNING_REFLECTION_ENABLED`` explicitly set ⇒ overrides (can force
+      off even with the safe tier otherwise on).
+    * neither set ⇒ ``True`` (opt-out default).
+
+    No ``Literal[False]`` authority flag is consulted or flipped here.
+    """
+    return resolve_learning_config().reflection_effective
 
 
 # ---------------------------------------------------------------------------
@@ -280,10 +294,16 @@ async def run_reflection(
         ``watermark``, and ``counters``.
     """
     if config is None:
-        config = LearningReflectionConfig()
+        # PR9a layered opt-out: when no explicit config is supplied, the default
+        # ``enabled`` now follows the resolved safe-tier gate (default-ON) rather
+        # than the legacy hard-OFF.  An explicit ``config`` still wins — its
+        # ``enabled`` param keeps its original caller-control semantics.
+        config = LearningReflectionConfig(enabled=_reflection_enabled())
 
     # --- Step 1: double gate — env AND config.enabled must both be true ---
     # Either condition being false results in an immediate disabled no-op.
+    # ``_reflection_enabled()`` now resolves to ON by default (PR9a) and OFF only
+    # when the master switch / reflection gate is explicitly disabled.
     if not _reflection_enabled() or not config.enabled:
         return LearningReflectionResult(
             status="disabled",
