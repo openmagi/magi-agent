@@ -62,6 +62,7 @@ include = ["magi_agent*"]
 
 [tool.setuptools.package-data]
 magi_agent = [
+  "discovery/templates/*.json",
   "skills/bundled/superpowers/*/SKILL.md",
   "skills/bundled/superpowers/*/*.md",
   "skills/bundled/superpowers/*/references/*.md",

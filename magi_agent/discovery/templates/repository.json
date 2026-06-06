@@ -1,0 +1,32 @@
+[
+  {
+    "name": "Mirrored Index Assignment",
+    "pattern": "The same off-by-one or transposed-index bug appears in several parallel code paths that were copied from a common template.",
+    "evidence_flow": "One code location shows an indexing/bounds mistake; sibling locations sharing the same structure repeat the identical mistake."
+  },
+  {
+    "name": "Conflicting Source-of-Truth",
+    "pattern": "Two modules each maintain their own copy of the same state or constant and can drift out of sync because neither defers to the other.",
+    "evidence_flow": "One file defines a value; a second file redefines the same value independently, with no import or sync linking them."
+  },
+  {
+    "name": "Unhandled Error Path",
+    "pattern": "A recurring failure mode (null, timeout, empty result) is handled in some call sites but silently ignored in structurally similar ones.",
+    "evidence_flow": "One call site guards a failure case; a sibling call site invokes the same fallible operation without the guard."
+  },
+  {
+    "name": "Stale Cache Invalidation",
+    "pattern": "Cached or memoized data is read after the underlying source changes, because an invalidation/refresh step is missing on one of the write paths.",
+    "evidence_flow": "One write path invalidates the cache; another write path mutating the same source omits the invalidation."
+  },
+  {
+    "name": "Inconsistent Validation",
+    "pattern": "The same input constraint is enforced at one boundary but skipped at another that accepts equivalent input, allowing invalid data through.",
+    "evidence_flow": "One entry point validates an input shape; a parallel entry point accepting the same input shape performs no validation."
+  },
+  {
+    "name": "Resource Leak Pattern",
+    "pattern": "A resource (file, connection, lock) is acquired and released correctly in some paths but leaked on an early-return or error branch that repeats across functions.",
+    "evidence_flow": "One function releases an acquired resource on all paths; a structurally similar function leaks it on an early-return or exception path."
+  }
+]
