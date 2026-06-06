@@ -1,27 +1,1765 @@
-# Open Magi Agent Documentation Index
+# Open Magi Agent Documentation
 
-This repository contains the public source docs for Magi Agent.
+This file is generated from the public Markdown docs in openmagi/magi-agent.
+Use it when an agent needs the complete public documentation context.
 
-Read in this order:
 
-1. docs/README.md
-2. docs/getting-started.md
-3. docs/quickstart.md
-4. docs/cli.md
-5. docs/configuration.md
-6. docs/customization.md
-7. docs/runtime.md
-8. docs/tools.md
-9. docs/contracts.md
-10. docs/hooks.md
-11. docs/memory.md
-12. docs/skills.md
-13. docs/automation.md
-14. docs/integrations.md
-15. docs/api.md
-16. docs/deployment.md
-17. docs/security.md
-18. docs/architecture.md
-19. docs/reference.md
-20. docs/troubleshooting.md
+---
 
+# Open Magi Agent Docs
+
+Source: docs/README.md
+
+# Open Magi Agent Docs
+
+Open Magi Agent, usually shortened to Magi Agent, is the programmable AI agent
+that gets real work done under your rules. These docs are the public source of
+truth for installing, configuring, extending, and self-hosting the OSS runtime.
+
+The web docs at `https://openmagi.ai/docs` are expected to render these public
+docs instead of carrying a separate product-docs copy.
+
+## Quick Install
+
+```bash
+brew install openmagi/tap/magi-agent
+magi-agent serve --port 8080
+open http://localhost:8080/dashboard
+```
+
+The same package installs the terminal interface:
+
+```bash
+magi --help
+magi-agent --help
+```
+
+## What Magi Agent Is
+
+Magi Agent is a local work-agent runtime with a terminal CLI, HTTP API, and web
+dashboard. It wraps model calls with runtime policy: bounded context, tool
+permissions, receipts, evidence, repair behavior, and public-safe projection.
+
+Use these docs to answer four questions:
+
+- How do I install and run the agent locally?
+- How do I configure models, credentials, tools, and workspace boundaries?
+- How do runtime contracts, hooks, skills, memory, and automation make work
+  checkable?
+- How do I operate the local server safely in development or self-hosted
+  environments?
+
+## Start
+
+- [Getting Started](getting-started.md)
+- [Quickstart](quickstart.md)
+- [CLI](cli.md)
+
+## Configure
+
+- [Configuration](configuration.md)
+- [Customization](customization.md)
+- [Runtime](runtime.md)
+- [Tools](tools.md)
+- [Contracts](contracts.md)
+- [Hooks](hooks.md)
+
+## Operate
+
+- [Memory](memory.md)
+- [Skills](skills.md)
+- [Automation](automation.md)
+- [Integrations](integrations.md)
+- [API](api.md)
+- [Deployment](deployment.md)
+
+## Reference
+
+- [Security](security.md)
+- [Architecture](architecture.md)
+- [Reference](reference.md)
+- [Troubleshooting](troubleshooting.md)
+
+## Machine-readable docs
+
+- [llms.txt](llms.txt)
+- [llms-full.txt](llms-full.txt)
+
+
+---
+
+# Getting Started
+
+Source: docs/getting-started.md
+
+# Getting Started
+
+Install Magi Agent locally, start the runtime, and open the dashboard.
+
+## Prerequisites
+
+- macOS or Linux with a normal shell environment.
+- Homebrew for the recommended install path.
+- A model provider key if you want live model calls.
+- Git and `uv` only when developing from source.
+
+Do not paste provider keys into prompts, docs, committed files, or terminal
+transcripts you plan to share.
+
+## Install with Homebrew
+
+```bash
+brew update
+brew install openmagi/tap/magi-agent
+```
+
+If Homebrew tries to build from source on macOS, update the tap metadata and
+reinstall the prebuilt bottle:
+
+```bash
+brew update
+brew reinstall openmagi/tap/magi-agent --force-bottle
+```
+
+## Start the local runtime and dashboard
+
+```bash
+magi-agent serve --port 8080
+open http://localhost:8080/dashboard
+```
+
+The dashboard is served by the same Python runtime. It does not require a
+separate Node or Next.js process.
+
+The default local path can start without production environment variables. Set
+explicit runtime environment only when you want to connect real models,
+channels, external tools, or a self-hosted network surface.
+
+## Use the CLI
+
+```bash
+magi
+magi --help
+magi -p "Inspect this repository and summarize the runnable surfaces"
+magi --output text "Summarize this repository"
+magi-agent --help
+magi-agent serve --help
+```
+
+`magi` is the terminal work interface. `magi-agent` starts and manages the local
+HTTP server and dashboard.
+
+## Configure a model
+
+Magi Agent can run against provider-specific or OpenAI-compatible model paths
+when configured. Keep credentials in environment variables:
+
+```bash
+export OPENAI_API_KEY=...
+export ANTHROPIC_API_KEY=...
+export GOOGLE_API_KEY=...
+export CORE_AGENT_MODEL=...
+```
+
+For local development without production wiring, the server falls back to a
+local diagnostic configuration. For strict self-hosted startup checks, set:
+
+```bash
+export MAGI_AGENT_REQUIRE_ENV=1
+```
+
+## Run from source
+
+Use source mode when changing the runtime itself:
+
+```bash
+git clone https://github.com/openmagi/magi-agent.git
+cd magi-agent
+uv sync --extra dev --extra cli
+uv run --extra cli magi --help
+uv run magi-agent serve --port 8080
+```
+
+Source mode is for contributors. Normal users should prefer the Homebrew
+formula so the installed `magi` and `magi-agent` commands match the released
+package.
+
+## First checks
+
+- `magi-agent serve --port 8080` starts without missing configuration errors.
+- `http://localhost:8080/dashboard` shows runtime health.
+- `magi --help` and `magi-agent --help` print command help.
+- A simple prompt streams a response or a clear local configuration error.
+- `curl http://localhost:8080/healthz` returns an `ok` health payload or a
+  specific blocker.
+
+## Agent Handoff Prompt
+
+Paste this into an AI coding agent when you want it to set up a clean local
+checkout:
+
+```text
+Clone https://github.com/openmagi/magi-agent.git into ./magi-agent.
+Read README.md and docs/ before editing.
+Use Homebrew for a normal user install, or `uv sync --extra dev --extra cli`
+only when changing source.
+Start the local server with `magi-agent serve --port 8080`.
+Open http://localhost:8080/dashboard and report what loads.
+Do not expose secrets. Ask before changing API contracts, auth, billing,
+database schema, or production deployment behavior.
+```
+
+
+---
+
+# Quickstart
+
+Source: docs/quickstart.md
+
+# Quickstart
+
+This walkthrough proves the runtime and dashboard work together.
+
+## 1. Install and start the server
+
+```bash
+brew install openmagi/tap/magi-agent
+magi-agent serve --port 8080
+```
+
+Leave the server terminal running.
+
+## 2. Open the dashboard
+
+```bash
+open http://localhost:8080/dashboard
+```
+
+The dashboard is served by the same local process as the API. If the page does
+not load, verify that no other process already owns port `8080` and restart with
+a different port:
+
+```bash
+magi-agent serve --port 8090
+open http://localhost:8090/dashboard
+```
+
+## 3. Check server health
+
+From another terminal:
+
+```bash
+curl http://localhost:8080/health
+curl http://localhost:8080/healthz
+```
+
+Use health output to separate server startup issues from model or tool
+configuration issues.
+
+## 4. Send a local task
+
+From another terminal:
+
+```bash
+magi --output text "Check runtime health and summarize the available first-party surfaces."
+```
+
+Or use the dashboard prompt:
+
+```text
+Inspect this workspace and tell me what you can safely do.
+```
+
+For automation, use JSON or streaming JSON output:
+
+```bash
+magi --output json "Summarize the current directory"
+magi --output stream-json "Summarize the current directory"
+```
+
+## 5. Inspect evidence
+
+The dashboard work stream shows public runtime events such as turn phases, tool
+progress, evidence receipts, and SSE transport state when the runtime emits
+them. A run is not considered useful just because text was generated; it should
+also make clear what tools, evidence, or blockers were involved.
+
+## 6. Try plan mode
+
+Plan mode exposes a read-oriented tool surface for review before mutation:
+
+```bash
+magi --mode plan "Inspect these docs and propose the smallest safe improvement."
+```
+
+Use act mode only when writes and tool execution are intended:
+
+```bash
+magi --mode act "Apply the approved docs improvement and run a focused check."
+```
+
+## 7. Next steps
+
+- Configure model/provider settings in [Configuration](configuration.md).
+- Review tool behavior in [Tools](tools.md).
+- Read completion rules in [Contracts](contracts.md).
+- Add workflow-specific instructions through [Skills](skills.md) and
+  [Hooks](hooks.md).
+
+
+---
+
+# CLI
+
+Source: docs/cli.md
+
+# CLI
+
+Magi Agent installs two commands:
+
+```bash
+magi
+magi-agent
+```
+
+`magi` is the terminal work interface. `magi-agent` starts the local runtime
+server and dashboard.
+
+## First commands
+
+```bash
+magi --help
+magi --version
+magi -p "Plan a coding fix"
+magi --output text "Summarize this repository"
+magi --output json "Summarize this repository"
+magi --output stream-json "Summarize this repository"
+magi --mode plan "Review the docs and propose edits"
+magi --mode act "Apply the approved edits"
+```
+
+```bash
+magi-agent --help
+magi-agent serve --port 8080
+```
+
+## Interactive use
+
+Run:
+
+```bash
+magi
+```
+
+The interactive interface keeps a local session and streams public runtime
+events when available.
+
+## One-shot use
+
+```bash
+magi -p "Inspect this repository and list the runnable surfaces"
+cat notes.md | magi --output text "Extract decisions and open questions"
+```
+
+Use one-shot mode for scripts, checks, and quick operator tasks.
+
+The CLI enters non-interactive mode when any of these is true:
+
+- a prompt argument is provided;
+- `--print` or `-p` is provided;
+- stdin is piped or redirected.
+
+## Output modes
+
+Use `--output text` for human-readable terminal output, `--output json` when a
+script needs one structured result, and `--output stream-json` when a caller
+wants incremental runtime events.
+
+```bash
+magi --output text "List the docs pages"
+magi --output json "Return a short status object"
+magi --output stream-json --include-partial-messages "Stream progress"
+```
+
+## Plan and act modes
+
+Use plan mode when you want the agent to inspect and propose before writing:
+
+```bash
+magi --mode plan "Find the likely cause of this failing test"
+```
+
+Use act mode only when writes and tool execution are intended:
+
+```bash
+magi --mode act "Implement the approved fix and run focused tests"
+```
+
+Plan mode is read-oriented. Act mode exposes the fuller local tool surface.
+
+## Permission modes
+
+Permission mode controls how write and execution requests are handled by the
+local CLI runtime:
+
+```bash
+magi --permission-mode default "Inspect this repository"
+magi --permission-mode acceptEdits "Apply the approved patch"
+magi --permission-mode bypassPermissions "Run the approved local smoke"
+```
+
+Use bypass mode only in a trusted workspace where unattended tool execution is
+intended.
+
+## Sessions
+
+Use `--resume` to continue a named local CLI session:
+
+```bash
+magi --resume docs-session "Continue the docs review"
+```
+
+The session log defaults to `~/.magi` and can be relocated with:
+
+```bash
+export MAGI_CLI_SESSION_DIR=/path/to/session-log-root
+```
+
+## Diagnostics
+
+```bash
+magi doctor
+magi auth composio status
+```
+
+These commands report local optional integration state without granting tool
+authority by themselves.
+
+## Server command
+
+```bash
+magi-agent serve --port 8080
+open http://localhost:8080/dashboard
+```
+
+`magi-agent` accepts `serve` as an explicit command and also supports the same
+port flag at the top level:
+
+```bash
+magi-agent --port 8080
+```
+
+Use `magi-agent serve --help` to inspect the current server arguments.
+
+
+---
+
+# Configuration
+
+Source: docs/configuration.md
+
+# Configuration
+
+Configuration makes model, workspace, memory, tools, and evidence behavior
+explicit.
+
+## Configuration model
+
+The Homebrew install can start in a local diagnostic mode. Real work normally
+adds three kinds of configuration:
+
+- model/provider settings for live model calls;
+- workspace and tool boundaries for local files and integrations;
+- server/auth settings when the HTTP API is exposed beyond trusted localhost.
+
+Prefer environment variables or a local secret manager. Do not store credentials
+in prompts or source-controlled Markdown.
+
+## Provider Settings
+
+Magi Agent can run with OpenAI-compatible endpoints and provider-specific
+adapters when configured. Keep provider credentials in environment variables or
+your local secret manager.
+
+```bash
+export OPENAI_API_KEY=...
+export ANTHROPIC_API_KEY=...
+export GOOGLE_API_KEY=...
+export CORE_AGENT_MODEL=...
+```
+
+Do not paste provider keys into prompts, docs, or workspace files.
+
+## Runtime Environment
+
+When `MAGI_AGENT_REQUIRE_ENV=1` is enabled, the server requires explicit runtime
+environment. The core variables are:
+
+```bash
+export BOT_ID=local-bot
+export USER_ID=local-user
+export GATEWAY_TOKEN="$(openssl rand -hex 24)"
+export CORE_AGENT_API_PROXY_URL=http://127.0.0.1:0
+export CORE_AGENT_CHAT_PROXY_URL=http://127.0.0.1:0
+export CORE_AGENT_REDIS_URL=redis://127.0.0.1:0/0
+export CORE_AGENT_MODEL=local-dev
+export MAGI_AGENT_REQUIRE_ENV=1
+```
+
+For a local-only dashboard, the default fallback values are enough to inspect
+the UI and runtime health. For self-hosted access, set a real `GATEWAY_TOKEN`
+and avoid exposing the server without authentication.
+
+## Local Server Token
+
+The HTTP dashboard and API use the runtime gateway token. Set it before binding
+the service to a network reachable by other users:
+
+```bash
+export GATEWAY_TOKEN="$(openssl rand -hex 24)"
+magi-agent serve --port 8080
+```
+
+Do not reuse a model provider key as a runtime token.
+
+## Workspace
+
+The workspace contains local files, knowledge, memory, artifacts, skills, and
+harness rules. Path-sensitive tools stay inside the configured workspace root.
+
+Set `MAGI_AGENT_WORKSPACE` when the HTTP streaming route should run from a
+specific working directory:
+
+```bash
+export MAGI_AGENT_WORKSPACE=/path/to/workspace
+```
+
+## Feature Flags
+
+Experimental surfaces should be explicit. Defaults should avoid surprising
+external side effects. Prefer enabling one capability, verifying it, then
+opening the next.
+
+Common flags:
+
+```bash
+MAGI_STREAMING_CHAT=1
+MAGI_FIRST_PARTY_TOOLS_ENABLED=1
+MAGI_COMPOSIO_ENABLED=auto
+MAGI_RIPGREP_ENABLED=1
+MAGI_APPLY_PATCH_ENABLED=1
+MAGI_ERROR_RECOVERY_ENABLED=1
+MAGI_CONTEXT_COMPACTION_ENABLED=1
+```
+
+Treat feature flags as authority grants. Turn on only the surface you intend to
+test, then verify health, logs, and evidence before widening access.
+
+## Optional Integrations
+
+Optional connectors such as Composio require their own credentials and explicit
+toolkit scope:
+
+```bash
+export COMPOSIO_API_KEY=...
+export MAGI_COMPOSIO_ENABLED=auto
+export MAGI_COMPOSIO_TOOLKITS=github,slack
+```
+
+Setting a credential should not be treated as permission to perform external
+actions. Pair integration config with approval policy and receipt requirements.
+
+
+---
+
+# Customization
+
+Source: docs/customization.md
+
+# Customization
+
+Customize Magi Agent with skills, hooks, model profiles, and workflow policy.
+
+## Customization Map
+
+Use customization when the agent needs to follow durable rules, not just one-off
+prompt style. Good customization is explicit, testable, and easy to disable.
+
+- Skills package repeatable instructions and optional workflow knowledge.
+- Hooks observe or gate runtime lifecycle stages.
+- Tool policy controls what the model may ask the runtime to do.
+- Contracts describe what evidence must exist before a run can claim success.
+- Model profiles describe model capability rather than brand preference.
+
+## Skills
+
+Skills are local instruction packages, usually stored as `SKILL.md` files. A
+skill should explain when it applies, what inputs it expects, what tools it can
+use, and what evidence counts as completion.
+
+Recommended shape:
+
+```markdown
+---
+name: source-grounded-research
+description: Use when answers must be backed by inspected source material.
+---
+
+1. Inspect allowed sources before making factual claims.
+2. Record source spans or file paths for every material claim.
+3. Downgrade or abstain when sources do not support the answer.
+4. Final output must separate supported facts from open questions.
+```
+
+## Hooks
+
+Runtime hooks can inspect or modify specific stages such as context projection,
+tool calls, evidence extraction, final projection, or repair. Hooks should be
+small, testable, and explicit about what they are allowed to change.
+
+Prefer hooks for rules that must run at a specific boundary:
+
+- before a model request is built;
+- before a tool call is approved;
+- after a tool result is normalized;
+- before a memory write is accepted;
+- before the final answer is projected.
+
+## Workflow rules
+
+Write workflow-specific rules in source-controlled Markdown or config files
+when possible. Good rules say:
+
+- what triggers the rule;
+- which tools or evidence are required;
+- whether the runtime should ask, repair, downgrade, block, or continue;
+- what is safe to show to the user.
+
+## Model profiles
+
+Model profiles describe capability, context length, latency, cost, and tool
+behavior. Route by capability rather than brand.
+
+Useful profile fields:
+
+- reasoning strength;
+- context window and output limit;
+- tool-call reliability;
+- latency and cost;
+- structured-output behavior;
+- provider-specific safety or rate-limit constraints.
+
+## Safe Rollout
+
+Start rules in observe/audit mode when possible, review the evidence they would
+require, then make them blocking only when the rule is specific enough. Avoid
+workspace-wide rules that match every task unless the behavior is truly
+universal.
+
+
+---
+
+# Runtime
+
+Source: docs/runtime.md
+
+# Runtime
+
+Magi controls the loop around the model. The model proposes work; runtime policy
+decides which state transitions are allowed.
+
+```text
+user request
+  -> context projection
+  -> model proposal
+  -> tool / evidence / policy boundary
+  -> repair, retry, ask, block, or continue
+  -> public projection
+```
+
+## Work Loop
+
+A run normally moves through these stages:
+
+1. Build model-visible context from the user request, session state, allowed
+   memory, and workspace references.
+2. Call the model or runner boundary.
+3. Route proposed tool calls through permission, workspace, and approval policy.
+4. Record public-safe receipts for reads, writes, calculations, deliveries, and
+   external actions.
+5. Run validators and repair policy.
+6. Project only supported, public-safe output to the user.
+
+The model can write text, but the runtime decides whether that text becomes
+state, memory, artifact content, an external side effect, or final output.
+
+## Public events
+
+The runtime may emit public events such as:
+
+- `turn_phase`
+- `llm_progress`
+- `tool_start`
+- `tool_progress`
+- `tool_end`
+- `control_request`
+- `turn_result`
+
+Private paths, secrets, raw provider payloads, and hidden reasoning should not
+be projected as public events.
+
+## Dashboard Stream
+
+`magi-agent serve` includes the dashboard at `/dashboard`. The dashboard can
+show:
+
+- runtime health and build metadata;
+- chat/session events;
+- tool progress and public receipts;
+- control requests for human approval;
+- evidence and completion status when emitted by the runtime.
+
+Public event projection is intentionally narrower than internal logs. If a
+private payload is needed for debugging, inspect it locally with the appropriate
+redaction discipline instead of sending it through user-visible events.
+
+## Completion
+
+A turn should not finish by promising future background work unless a real
+background job, receipt, or blocker is recorded. If the work cannot be completed
+now, the runtime should say what is blocked and why.
+
+Completion claims should be backed by evidence appropriate to the task:
+
+- source-sensitive answers need source evidence;
+- coding work needs read, mutation, diff, and verification evidence;
+- file delivery needs a created artifact and delivery receipt;
+- external sends need channel or API delivery receipts;
+- delegated work needs accepted child output or a clear blocker.
+
+## Repair and Fallback
+
+When evidence is missing or a validator blocks completion, the runtime can:
+
+- ask for approval or clarification;
+- inspect another allowed source;
+- retry a tool call;
+- weaken or remove an unsupported claim;
+- report a concrete blocker;
+- abstain from claiming success.
+
+Silent success is the wrong fallback for governed work.
+
+
+---
+
+# Tools
+
+Source: docs/tools.md
+
+# Tools
+
+Tools are part of the runtime contract, not just model suggestions.
+
+## Tool Model
+
+The model proposes tool calls. The runtime owns execution, permission checks,
+workspace isolation, receipts, and projection. A tool result should not become a
+trusted claim until the relevant contract or hook accepts the evidence.
+
+## First-party surfaces
+
+Magi Agent includes first-party surfaces for these work classes. Availability
+depends on install extras, feature flags, credentials, and runtime mode.
+
+- file read/write/edit/patch workflows;
+- grep, glob, repository map, diagnostics, and verification;
+- web search/fetch and source inspection;
+- browser-oriented research;
+- document and spreadsheet authoring;
+- memory and knowledge search/write;
+- scheduling and mission/task tracking;
+- artifact delivery;
+- child/delegated work boundaries;
+- runtime health and evidence reporting.
+
+## Common Tool Patterns
+
+Reliable runs usually chain tools:
+
+1. Discover sources with search, grep, glob, or repository map.
+2. Read the source before summarizing, citing, or editing it.
+3. Write or mutate only inside the configured workspace boundary.
+4. Verify deterministic claims with tests, calculations, health checks, or
+   source spans.
+5. Deliver artifacts before claiming they are attached or ready.
+6. Project a final answer that references public-safe evidence.
+
+## Receipts
+
+Tool calls that affect state should write receipts. A receipt should be
+public-safe and include enough digest-level evidence to verify what happened
+without exposing secrets or raw private payloads.
+
+Useful receipt fields include:
+
+- tool name and safe input summary;
+- workspace-relative path, source URL, artifact id, or external handle;
+- content digest or output digest when full output is private;
+- start and finish timestamps;
+- success, failure, or blocked status;
+- user approval id when approval was required.
+
+## Approvals
+
+Use approval gates for tools that mutate files, call external services, spend
+money, write channels, or operate credentials.
+
+## Tool Safety Checklist
+
+- Scope file tools to the intended workspace root.
+- Prefer read-only mode for planning and review.
+- Keep external credentials in environment variables or a secret manager.
+- Require approval for channel sends, purchases, destructive edits, or broad
+  API writes.
+- Redact secrets and private paths from public events.
+- Keep logs useful enough for audit without exposing raw private payloads.
+
+
+---
+
+# Contracts
+
+Source: docs/contracts.md
+
+# Contracts
+
+Contracts define what must be true before a run can claim success.
+
+## Why Contracts Matter
+
+Prompt text can ask a model to be careful, but a contract gives the runtime a
+checkable work order. The contract records the goal, constraints, required
+artifacts, allowed resources, evidence requirements, and completion criteria.
+
+Use contracts for work products and hard requirements. Tone preferences belong
+in instructions; source, delivery, approval, and verification requirements
+belong in a contract.
+
+## Common contract checks
+
+- A source-sensitive claim needs source evidence.
+- A coding success claim needs read, mutation, diff, and verification evidence.
+- A delivery claim needs a delivery receipt.
+- A memory write needs a public-safe memory receipt.
+- A delegated result needs an accepted child envelope.
+- A final answer should not leak private paths, auth material, raw prompts, or
+  hidden provider data.
+
+## Contract Shape
+
+A useful task contract usually includes:
+
+- `goal`: the user-visible objective;
+- `constraints`: boundaries that must survive across turns;
+- `acceptance_criteria`: exact outcomes that can pass, fail, or be waived;
+- `resource_bindings`: allowed files, source URLs, artifact ids, or handles;
+- `required_evidence`: source, file, calculation, test, approval, or delivery
+  proof;
+- `verification_mode`: none, sample, or full, depending on risk;
+- `blockers`: concrete reasons the work cannot finish yet.
+
+Example prompt block:
+
+```xml
+<task_contract>
+  <verification_mode>full</verification_mode>
+  <constraints>
+    <item>Use only files under workspace/reports.</item>
+    <item>Do not claim delivery until a file delivery receipt exists.</item>
+  </constraints>
+  <acceptance_criteria>
+    <item id="c1">Create the requested report.</item>
+    <item id="c2">Verify totals with calculation or test evidence.</item>
+    <item id="c3">Deliver the output file.</item>
+  </acceptance_criteria>
+</task_contract>
+```
+
+## Resource Binding
+
+Bind resources when the task must stay inside a known set of files, URLs, or
+handles. A source-grounded answer should not silently switch to an arbitrary web
+result. A coding task should not edit a file that was never read or approved.
+
+## Failure behavior
+
+When evidence is missing, the runtime should repair, ask, downgrade, abstain, or
+block. Silent success is worse than a clear blocker.
+
+Examples:
+
+- Missing source span: inspect another allowed source or remove the claim.
+- Missing test evidence: run the configured verification or report why it
+  cannot run.
+- Missing delivery receipt: deliver the artifact or say delivery is blocked.
+- Unsafe external action: ask for approval or keep the action as a draft.
+
+
+---
+
+# Hooks
+
+Source: docs/hooks.md
+
+# Hooks
+
+Hooks let projects attach policy and evidence behavior without rewriting the
+agent core.
+
+## Hook Lifecycle
+
+Hooks run around runtime stages. A hook can observe, add evidence, replace a
+safe phase input, block a phase, or ask for a permission decision depending on
+the hook point and configuration.
+
+Useful hook points include:
+
+- context building;
+- model request preparation;
+- tool call validation;
+- tool result normalization;
+- evidence extraction;
+- completion classification;
+- final projection;
+- audit reporting.
+
+## Common Hook Points
+
+| Hook point | Typical use |
+| --- | --- |
+| `beforeTurnStart` | Normalize the incoming user request and initialize run state |
+| `beforeLLMCall` | Add allowed contract, memory, or source context |
+| `afterLLMCall` | Inspect model output and stop reason |
+| `beforeToolUse` | Approve, deny, ask, replace, or block a proposed tool call |
+| `afterToolUse` | Normalize tool output and record evidence |
+| `beforeCommit` | Verify final answer, artifacts, delivery, and acceptance criteria |
+| `afterCommit` | Observe committed assistant output |
+| `onAbort` | Record why the run stopped |
+| `onError` | Capture public-safe error metadata |
+| `beforeCompaction` | Preserve required context before transcript compaction |
+| `afterCompaction` | Verify compacted context is safe and sufficient |
+
+## Hook Results
+
+Typical results:
+
+```text
+continue              allow the phase to proceed
+replace               replace a safe phase input with a validated value
+block                 stop the phase with a user-visible reason
+skip                  skip a phase when that is explicitly allowed
+permission_decision   approve, deny, or ask for a tool permission
+```
+
+Use blocking hooks sparingly. A blocking hook should explain the specific
+missing evidence or unsafe action so the user or runtime can repair it.
+
+## Hook rules
+
+- Keep hooks narrow and testable.
+- Do not hide external side effects inside prompt text.
+- Prefer digest-safe public evidence over raw private payloads.
+- Make disabled/default behavior explicit.
+- Keep timeouts bounded.
+- Do not project secrets, raw provider payloads, private filesystem paths, or
+  hidden reasoning.
+- Pair hooks with focused fixtures for pass and block cases.
+
+## Example: Before-Commit Artifact Gate
+
+Use `beforeCommit` when a rule decides whether final output is allowed. A file
+creation task can require artifact evidence before the assistant says the file
+is ready:
+
+```text
+Rule: if the user asked for a file, final output must reference an artifact path
+or delivery receipt. If neither exists, block with "Required artifact evidence
+is missing."
+```
+
+That rule is more reliable than asking the model to remember "do not forget to
+attach the file" in a prompt.
+
+
+---
+
+# Memory
+
+Source: docs/memory.md
+
+# Memory
+
+Memory gives the runtime durable context beyond one turn.
+
+## Memory vs Context
+
+Context is what the model sees during a run. Memory is durable state that can be
+recalled later. Keep them separate. A transcript line can be useful context
+without becoming permanent memory.
+
+## Good memory
+
+Useful memory captures stable facts, preferences, decisions, project
+constraints, and reusable context. It should be inspectable and correctable.
+
+Examples:
+
+- user preferences that remain valid across sessions;
+- durable project constraints;
+- decisions with dates and owners;
+- reusable source references;
+- known environment setup notes.
+
+## Bad memory
+
+Do not save every transcript line as durable memory. Avoid storing secrets,
+temporary guesses, unsupported claims, or raw private payloads.
+
+Also avoid storing:
+
+- provider keys or auth tokens;
+- unverified facts that should remain tied to source evidence;
+- short-lived operational state;
+- raw logs with private paths or customer data;
+- hidden reasoning or provider payloads.
+
+## Knowledge
+
+Knowledge files and source material should remain distinguishable from memory.
+When a factual answer depends on a source, keep the answer tied to source
+evidence rather than a vague memory.
+
+## Memory Receipts
+
+A memory write should record public-safe evidence:
+
+- what kind of memory was written;
+- why it is durable;
+- where it is stored;
+- whether the user or policy allowed it;
+- how it can be corrected or removed.
+
+## Compaction
+
+Transcript compaction should preserve task contracts, unresolved blockers,
+artifact references, source evidence, and user-visible decisions. It should drop
+noise, duplicates, hidden chain-of-thought style material, and private payloads
+that are not needed for future work.
+
+
+---
+
+# Skills
+
+Source: docs/skills.md
+
+# Skills
+
+Skills package repeatable expertise for the runtime.
+
+## What Skills Do
+
+A skill is a local instruction package that tells the agent when specialized
+knowledge or a workflow applies. Skills are useful for recurring work such as
+source-grounded research, code review, document drafting, spreadsheet checks, or
+domain-specific triage.
+
+## Skill shape
+
+A useful skill explains:
+
+- when to use it;
+- required inputs;
+- allowed tools;
+- expected output;
+- verification steps;
+- safety constraints.
+
+Recommended frontmatter:
+
+```yaml
+name: concise-skill-name
+description: Use when the task clearly matches this workflow.
+```
+
+Recommended body:
+
+- trigger conditions;
+- step-by-step process;
+- required artifacts or evidence;
+- allowed and disallowed tools;
+- output format;
+- failure or escalation behavior.
+
+## Local skills
+
+Local skills can live in a workspace or repository. Keep skill text specific
+enough that the runtime can choose it, but not so broad that it fires on every
+task.
+
+Good skill descriptions are concrete:
+
+```text
+Use when reviewing a pull request for correctness, regressions, and missing
+tests.
+```
+
+Weak skill descriptions are vague:
+
+```text
+Use for any software work.
+```
+
+## Runtime hooks
+
+Some skills include runtime hooks. Hooks should be explicit, public-safe, and
+covered by focused tests.
+
+## Verification
+
+When a skill changes completion criteria, it should name the verification
+evidence. Examples:
+
+- code review: file and line references plus severity;
+- research: source spans and unsupported-claim handling;
+- spreadsheets: formula checks and recalculation evidence;
+- documents: rendered or exported artifact verification;
+- automation: delivery receipt or concrete blocker.
+
+
+---
+
+# Automation
+
+Source: docs/automation.md
+
+# Automation
+
+Automation covers scheduled work, background tasks, delegated work, and
+operator-visible delivery.
+
+## Automation Principle
+
+An automated run should be observable and reversible enough for the operator to
+trust it. Do not treat a generated promise as automation. There must be a real
+job, receipt, artifact, delivery, or blocker.
+
+## Scheduled work
+
+Schedules should have:
+
+- a clear trigger;
+- at-most-once execution behavior;
+- a timeout;
+- a delivery target;
+- an audit record.
+
+Recommended fields:
+
+- schedule id;
+- trigger expression or event source;
+- workspace and model profile;
+- allowed tools;
+- approval requirements;
+- retry and idempotency behavior;
+- max runtime;
+- public delivery target;
+- evidence requirements.
+
+## Delegation
+
+Delegated work should return an accepted result envelope with public-safe
+evidence. Do not treat child text as trusted just because it was generated.
+
+Use delegation when a subtask has a bounded goal and a concrete output. Avoid
+delegation for vague "keep working" loops without acceptance criteria.
+
+## Delivery
+
+External delivery needs receipts. If a channel send fails, the runtime should
+report the blocker instead of claiming the work was delivered.
+
+Delivery receipts should identify the target type, target digest or safe label,
+artifact id or body digest, delivery status, and timestamp. Raw channel tokens,
+private URLs, and secret-bearing payloads should not be projected to the user.
+
+## Human Approval
+
+Automation that mutates external systems, spends money, sends messages, changes
+files, or uses high-authority credentials should require explicit approval
+unless the workspace has deliberately allowed unattended execution.
+
+
+---
+
+# Integrations
+
+Source: docs/integrations.md
+
+# Integrations
+
+Integrations connect Magi Agent to external systems. They should be explicit,
+scoped, and reversible.
+
+## Integration Rules
+
+- Install optional dependencies only for integrations you intend to use.
+- Keep credentials in environment variables or a secret manager.
+- Scope toolkits and accounts narrowly.
+- Require approval for external mutation unless unattended execution is
+  explicitly allowed.
+- Record delivery or action receipts.
+- Redact credential material from logs, events, and final answers.
+
+## Composio
+
+Composio can be used as an optional connector layer. Open-source users should
+create their own Composio account and provide their own credentials when they
+want to connect external apps.
+
+Do not enable an external integration just because a credential exists. Require
+an explicit integration setting, toolkit scope, and user approval for
+credentialed actions.
+
+Example:
+
+```bash
+export COMPOSIO_API_KEY=...
+export MAGI_COMPOSIO_ENABLED=auto
+export MAGI_COMPOSIO_TOOLKITS=github,slack
+magi doctor
+magi auth composio status
+```
+
+The status commands report integration readiness. They do not grant approval for
+tool calls by themselves.
+
+## Local and custom tools
+
+Custom tools should declare:
+
+- required credentials;
+- allowed operations;
+- mutation behavior;
+- approval requirements;
+- receipt fields;
+- public projection rules.
+
+## Channels
+
+Channel adapters such as chat, push, Telegram, Discord, or other delivery
+surfaces should be configured as external authority. A channel send is not
+complete until the runtime records a delivery status or reports a blocker.
+
+## MCP and Tool Servers
+
+When connecting MCP or other tool servers, document:
+
+- server label and URL;
+- credential source;
+- allowed tools;
+- timeout and retry behavior;
+- whether calls are read-only or mutating;
+- what evidence is recorded.
+
+
+---
+
+# API
+
+Source: docs/api.md
+
+# API
+
+`magi-agent serve` exposes the local runtime API and dashboard.
+
+## Local dashboard
+
+```bash
+magi-agent serve --port 8080
+open http://localhost:8080/dashboard
+```
+
+The dashboard is a local operator surface. It uses the same runtime process as
+the API and should be protected before network exposure.
+
+## Chat
+
+The local dashboard uses the same runtime process. Depending on configuration,
+chat endpoints can stream public events and answer deltas.
+
+Streaming chat routes are feature-gated:
+
+```bash
+export MAGI_STREAMING_CHAT=1
+```
+
+Primary streaming routes:
+
+```text
+POST /v1/chat/stream
+POST /v1/chat/control-response
+POST /v1/chat/cancel
+```
+
+Use bearer auth with the runtime gateway token when the route requires
+authorization:
+
+```bash
+curl -N http://localhost:8080/v1/chat/stream \
+  -H "Authorization: Bearer $GATEWAY_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"sessionId":"local","messages":[{"role":"user","content":"Check runtime health."}]}'
+```
+
+## Health
+
+Use health endpoints to confirm runtime status before debugging model behavior.
+
+```bash
+curl http://localhost:8080/health
+curl http://localhost:8080/healthz
+```
+
+`/healthz` returns HTTP `503` when the runtime reports a non-ok readiness state.
+
+## Tool Admin
+
+Tool admin routes expose local tool metadata and stats for the dashboard:
+
+```text
+GET /v1/admin/tools
+GET /v1/admin/tools/stats
+GET /v1/admin/tools/{name}
+```
+
+Treat these as operator endpoints. Do not expose them publicly without auth,
+network controls, and redaction review.
+
+## Auth and Exposure
+
+If you bind the server outside trusted localhost access, protect it with
+`GATEWAY_TOKEN` and a trusted network boundary. Do not reuse model provider keys
+as server tokens.
+
+
+---
+
+# Deployment
+
+Source: docs/deployment.md
+
+# Deployment
+
+Deploy Magi Agent as a Python runtime with explicit configuration, secrets, and
+storage.
+
+## Deployment Modes
+
+Start local, then widen authority deliberately:
+
+1. Homebrew local server for personal use.
+2. Source checkout for development and contribution.
+3. Container or service deployment for a controlled self-hosted environment.
+
+For OSS operators, the important contract is the same in every mode: explicit
+config, scoped secrets, durable state, health checks, and rollback.
+
+## Deployment checklist
+
+- Pin the runtime image or package version.
+- Set provider credentials through a secret manager.
+- Mount workspace and durable state where required.
+- Keep external tool authority explicit.
+- Expose only the endpoints needed by your surface.
+- Monitor health, event output, and evidence records.
+- Verify rollback before broadening authority.
+
+## Local first
+
+Run the local dashboard and focused tests before deploying. A deployment should
+not be considered ready until the exact enabled tools, model path, and evidence
+requirements have been verified.
+
+```bash
+magi-agent serve --port 8080
+open http://localhost:8080/dashboard
+curl http://localhost:8080/healthz
+```
+
+## Container Notes
+
+The repository includes a `Dockerfile` for container builds. A containerized
+deployment should provide:
+
+- runtime environment variables;
+- provider and integration secrets;
+- a workspace volume when local files or artifacts must persist;
+- network policy for the dashboard/API;
+- logs and health probes.
+
+Do not bake secrets into images.
+
+## Network Exposure
+
+If the dashboard or API is reachable outside localhost:
+
+- set a strong `GATEWAY_TOKEN`;
+- terminate TLS at a trusted proxy or platform layer;
+- restrict who can reach operator endpoints;
+- keep admin/tool routes behind auth;
+- verify redaction before sending events to shared logs.
+
+## Rollback
+
+Keep a rollback path before enabling high-authority tools. A useful rollback
+plan names the previous package or image version, the state that must persist,
+and any feature flags that can be disabled without redeploying.
+
+
+---
+
+# Security
+
+Source: docs/security.md
+
+# Security
+
+Magi Agent treats permissions and evidence as runtime concerns.
+
+## Secrets
+
+- Keep provider and integration keys out of prompts.
+- Do not commit `.env` files.
+- Do not project raw auth material to users or logs.
+- Use digest-safe evidence when a secret-bearing action must be audited.
+
+Common secret sources:
+
+- model provider keys;
+- integration API keys;
+- channel tokens;
+- server gateway tokens;
+- local files that contain credentials;
+- external connector session material.
+
+## Workspace safety
+
+Path-sensitive tools should stay inside the configured workspace root. File
+mutation tools should record receipts and support rollback or repair where
+appropriate.
+
+Use plan mode for inspection-only work:
+
+```bash
+magi --mode plan "Review this repository and propose a fix"
+```
+
+Use act mode only when mutations are intended:
+
+```bash
+magi --mode act "Apply the approved fix"
+```
+
+## External authority
+
+External systems should require explicit integration settings and scoped
+credentials. Avoid broad credentials when a narrower token or toolkit scope is
+available.
+
+High-authority actions include:
+
+- writing files;
+- running shell commands;
+- sending channel messages;
+- calling external APIs with credentials;
+- spending money or consuming quota;
+- updating memory or durable knowledge;
+- scheduling background work.
+
+## Public Projection
+
+Public events and final answers should avoid:
+
+- raw provider request or response bodies;
+- hidden reasoning;
+- private filesystem paths;
+- auth headers and cookies;
+- secret-bearing URLs;
+- customer or workspace payloads that were not meant for display.
+
+Prefer digest-safe receipts and short public summaries.
+
+## Local Server Safety
+
+`magi-agent serve` is convenient for local work. Before exposing it beyond
+trusted localhost, set `GATEWAY_TOKEN`, review enabled feature flags, and put the
+server behind an authenticated network boundary.
+
+
+---
+
+# Architecture
+
+Source: docs/architecture.md
+
+# Architecture
+
+Magi Agent is a local agent runtime wrapped with policy, tools, evidence, and
+projection. It uses model-runner primitives while keeping the user-facing
+contract centered on work: context, tools, receipts, validation, repair, and
+safe output.
+
+## Core layers
+
+| Layer | Role |
+| --- | --- |
+| Context projector | Builds model-visible context |
+| Runner boundary | Calls the model/runtime runner |
+| ToolHost | Owns tool execution and approvals |
+| Evidence ledger | Records public-safe receipts |
+| Validators | Check claims, actions, and completion |
+| Repair policy | Decides retry, ask, downgrade, block, or abstain |
+| Output projector | Renders user-visible output |
+
+## Design rule
+
+The model can propose. The runtime decides what becomes state, memory, file
+content, external side effect, or user-visible output.
+
+## Data Flow
+
+```text
+user request
+  -> context projector
+  -> model runner
+  -> tool and permission boundary
+  -> evidence ledger
+  -> validators and repair policy
+  -> output projector
+  -> dashboard, CLI, API, or channel surface
+```
+
+## Runtime-only State
+
+The model should not receive everything the runtime knows. Runtime-only state
+can include private logs, raw tool output, credential-bearing payloads, hidden
+provider details, and audit data. The context projector decides which bounded
+context is safe and useful for the next model step.
+
+## Public Surface
+
+The public OSS package exposes:
+
+- `magi` for terminal work;
+- `magi-agent serve` for the HTTP API and dashboard;
+- `/dashboard` for local operator visibility;
+- `/health` and `/healthz` for readiness;
+- optional streaming and tool-admin routes when enabled.
+
+## Extension Surface
+
+Skills, hooks, contracts, tool policy, memory policy, and integration settings
+extend the runtime without requiring a second agent implementation.
+
+
+---
+
+# Reference
+
+Source: docs/reference.md
+
+# Reference
+
+## Commands
+
+```bash
+magi
+magi --help
+magi --version
+magi --output text "Summarize this repository"
+magi --mode plan "Inspect and propose"
+magi --mode act "Apply the approved change"
+magi-agent --help
+magi-agent serve --port 8080
+```
+
+## Common environment variables
+
+```bash
+GATEWAY_TOKEN=...
+MAGI_AGENT_REQUIRE_ENV=1
+MAGI_AGENT_WORKSPACE=...
+MAGI_STREAMING_CHAT=1
+MAGI_FIRST_PARTY_TOOLS_ENABLED=1
+OPENAI_API_KEY=...
+ANTHROPIC_API_KEY=...
+GOOGLE_API_KEY=...
+CORE_AGENT_MODEL=...
+COMPOSIO_API_KEY=...
+MAGI_COMPOSIO_ENABLED=auto
+```
+
+## Package names
+
+- Product/runtime name: `Magi Agent`
+- Python package/import name: `magi_agent`
+- CLI commands: `magi`, `magi-agent`
+- Repository: `openmagi/magi-agent`
+
+Avoid legacy or internal names in public docs and new code.
+
+## Local URLs
+
+```text
+http://localhost:8080/dashboard
+http://localhost:8080/health
+http://localhost:8080/healthz
+```
+
+## Output Formats
+
+```text
+text
+json
+stream-json
+```
+
+## Runtime Modes
+
+```text
+plan
+act
+```
+
+## Permission Modes
+
+```text
+default
+acceptEdits
+bypassPermissions
+```
+
+
+---
+
+# Troubleshooting
+
+Source: docs/troubleshooting.md
+
+# Troubleshooting
+
+## Homebrew tries to build from source
+
+Use the bottle path:
+
+```bash
+brew update
+brew reinstall openmagi/tap/magi-agent --force-bottle
+```
+
+If Homebrew still attempts a source build, the tap may need refreshed bottle
+metadata for your macOS/architecture combination.
+
+## Command not found
+
+Verify Homebrew installed the package and that Homebrew's bin directory is on
+your `PATH`:
+
+```bash
+brew list openmagi/tap/magi-agent
+which magi
+which magi-agent
+```
+
+## Dashboard says unauthorized
+
+Set a gateway token or use the local token shown by your runtime configuration:
+
+```bash
+export GATEWAY_TOKEN="$(openssl rand -hex 24)"
+magi-agent serve --port 8080
+```
+
+Then provide the same token to the local dashboard if prompted.
+
+## Port 8080 is already in use
+
+Start on another port:
+
+```bash
+magi-agent serve --port 8090
+open http://localhost:8090/dashboard
+```
+
+## Healthz is not ok
+
+Check the health payload before debugging model behavior:
+
+```bash
+curl http://localhost:8080/healthz
+```
+
+Common causes:
+
+- required environment variables are missing because `MAGI_AGENT_REQUIRE_ENV=1`
+  is set;
+- a provider key or model setting is invalid;
+- an optional feature flag enables a surface without its dependency;
+- the workspace path is not accessible.
+
+## The agent says work is still running, then stops
+
+That is not a valid completion. The runtime should either finish the requested
+work, show a real background job/receipt, or state the concrete blocker.
+
+## A tool is unavailable
+
+Check:
+
+- the feature flag or configuration that enables the tool;
+- required credentials;
+- workspace path permissions;
+- approval policy;
+- runtime health;
+- whether the tool is intentionally read-only in the current mode.
+
+## Composio is inactive
+
+Run:
+
+```bash
+magi doctor
+magi auth composio status
+```
+
+Then verify:
+
+- `COMPOSIO_API_KEY` is set;
+- `MAGI_COMPOSIO_ENABLED` is `auto` or `on`;
+- `MAGI_COMPOSIO_TOOLKITS` includes the toolkit you intend to use.
+
+## Stream-json output is too noisy
+
+Use text output for normal terminal work:
+
+```bash
+magi --output text "Summarize this repository"
+```
+
+Use `stream-json` when an API client needs incremental events:
+
+```bash
+magi --output stream-json --include-partial-messages "Run a visible task"
+```
