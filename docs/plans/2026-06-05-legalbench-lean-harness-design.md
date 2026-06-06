@@ -207,3 +207,46 @@ LegalBench task data ─▶ loader (curated subset + train/test split + answer k
   + train-split freezing + variance reporting.
 - **Comparison fairness.** Harness-vs-base is the defensible claim;
   harness-vs-published-LLM requires same-split/same-metric care.
+
+---
+
+## Methodology / frozen decisions (pending data)
+
+These decisions will be frozen after a train-split sweep.  They are currently
+at defaults because no dataset files have been downloaded yet.
+
+### Few-shot indices
+
+`CURATED_INDICES` in `magi_agent/recipes/first_party/legal/fewshot.py` (via
+`LegalCheckpoints`) is currently unset per task, so `select_fewshot` uses a
+seeded random sample (`seed=0`, `k=4`).  Freezing per-task indices requires:
+
+1. Download `train.tsv` for each task in `manifest.v1.json`.
+2. For each task, sweep over candidate exemplar sets (e.g. top-10 by diversity
+   or correctness on held-out train fold).
+3. Pick the set with highest balanced accuracy on the train split.
+4. Record the chosen indices in `LegalCheckpoints.curated_indices` defaults or
+   a per-task registry — then commit.
+
+Until this sweep runs, `k=4` seeded-random is a neutral, reproducible
+placeholder.
+
+### Prompt variant selection
+
+`PROMPT_VARIANTS` in `magi_agent/recipes/first_party/legal/prompt_variants.py`
+is empty in v1.  All tasks default to `"plain"`.  Freezing requires:
+
+1. For each task, run `phrase_instruction(..., variant="plain")` and
+   `phrase_instruction(..., variant="technical")` on the train split.
+2. Pick the variant with higher balanced accuracy.
+3. Record in `PROMPT_VARIANTS` — then commit.
+
+**Do not add entries without empirical train-split validation.**
+
+### Rule statements
+
+`RULE_STATEMENTS` in `magi_agent/recipes/first_party/legal/rule_inject.py`
+contains confident entries for four tasks (`abercrombie`, `hearsay`,
+`contract_nli_explicit_identification`, `contract_nli_notice_on_compelled_disclosure`).
+Additional entries should only be added when the rule is well-established and
+can be stated accurately without risk of hallucination.

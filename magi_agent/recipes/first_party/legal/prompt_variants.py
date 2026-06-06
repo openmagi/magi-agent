@@ -6,6 +6,14 @@ from typing import Literal
 Variant = Literal["plain", "technical"]
 
 # Per-task variant chosen on the TRAIN split and frozen here. Do not tune on test.
+#
+# NOTE: PROMPT_VARIANTS is intentionally empty in v1.  Per-task variant selection
+# (plain vs. technical) requires a train-split sweep: for each task, run both
+# variants on the train set and pick the variant with higher balanced accuracy.
+# This sweep is PENDING — no dataset files are downloaded yet.  Until the sweep
+# runs, all tasks default to "plain" via select_variant().  Do not add entries
+# here based on intuition; only freeze a variant after empirical train-split
+# validation.
 PROMPT_VARIANTS: dict[str, Variant] = {}
 
 

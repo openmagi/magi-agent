@@ -4,3 +4,7 @@ __pycache__/
 *.py[cod]
 .venv/
 benchmarks/swebench/results/
+
+# LegalBench per-task dataset files are NOT committed (CC BY 4.0; large files).
+# manifest.v1.json and README.md in data/legalbench/ are tracked.
+data/legalbench/*/

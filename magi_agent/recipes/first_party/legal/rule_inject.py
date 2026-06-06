@@ -17,6 +17,19 @@ RULE_STATEMENTS: dict[str, str] = {
         "of the matter asserted. A statement offered for a non-truth purpose "
         "(e.g., effect on the listener, notice, or a verbal act) is not hearsay."
     ),
+    "contract_nli_explicit_identification": (
+        "Rule: A contract party is explicitly identified when the agreement names "
+        "it by its legal entity name, trade name, or a defined term that "
+        "unambiguously designates it. Implicit identification or functional "
+        "descriptions alone do not satisfy explicit identification."
+    ),
+    "contract_nli_notice_on_compelled_disclosure": (
+        "Rule: A notice-on-compelled-disclosure clause requires a party who is "
+        "legally compelled to disclose confidential information (e.g., by court "
+        "order or regulatory demand) to first give the other party prompt written "
+        "notice, to the extent legally permitted, so that party may seek a "
+        "protective order or other relief."
+    ),
 }
 
 
