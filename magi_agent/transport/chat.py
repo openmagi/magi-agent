@@ -142,6 +142,7 @@ _FALLBACK_RECEIPT_SCOPE_GATES = frozenset(
         "gate7_5_context_continuity",
     }
 )
+_APP_CHANNEL_HISTORY_SCHEMA = "openmagi.app_channel_history.v1"
 _FIRST_PARTY_HARNESS_RECIPE_PACK_IDS = (
     "openmagi.context-safety",
     "openmagi.evidence",
@@ -3464,36 +3465,94 @@ def _build_gate5b_sanitized_recent_history(
 ) -> tuple[dict[str, str], ...]:
     if max_messages <= 0:
         return ()
+    projected: list[dict[str, str]] = list(_app_channel_history_messages(payload))
     source_messages = payload.get("messages") if isinstance(payload, Mapping) else None
     if not isinstance(source_messages, list):
-        return ()
+        return _dedupe_latest_history(projected, max_messages=max_messages)
     last_user_index: int | None = None
     for index, item in enumerate(source_messages):
         if isinstance(item, Mapping) and item.get("role") == "user":
             last_user_index = index
-    if last_user_index is None:
+    if last_user_index is not None:
+        for item in source_messages[:last_user_index]:
+            if not isinstance(item, Mapping):
+                continue
+            message = _sanitized_history_message(
+                role=item.get("role"),
+                content=item.get("content"),
+            )
+            if message is not None:
+                projected.append(message)
+    return _dedupe_latest_history(projected, max_messages=max_messages)
+
+
+def _app_channel_history_messages(
+    payload: Mapping[str, object],
+) -> tuple[dict[str, str], ...]:
+    channel_history = payload.get("channelHistory")
+    if not isinstance(channel_history, Mapping):
+        return ()
+    if channel_history.get("schema") != _APP_CHANNEL_HISTORY_SCHEMA:
+        return ()
+    raw_messages = channel_history.get("messages")
+    if not isinstance(raw_messages, list):
         return ()
     projected: list[dict[str, str]] = []
-    for item in source_messages[:last_user_index]:
+    for item in raw_messages:
         if not isinstance(item, Mapping):
             continue
-        role = str(item.get("role") or "").strip().lower()
-        if role not in {"user", "assistant"}:
-            continue
-        content = sanitize_gate5b_model_visible_identity_text(
-            _message_content_to_text(item.get("content"))
+        message = _sanitized_history_message(
+            role=item.get("role"),
+            content=item.get("content"),
         )
-        bounded = content[:_MODEL_VISIBLE_CONTEXT_MAX_CHARS].strip()
-        if not bounded:
+        if message is not None:
+            projected.append(message)
+    return tuple(projected)
+
+
+def _sanitized_history_message(
+    *,
+    role: object,
+    content: object,
+) -> dict[str, str] | None:
+    role_text = str(role or "").strip().lower()
+    if role_text == "system":
+        role_text = "assistant"
+    if role_text not in {"user", "assistant"}:
+        return None
+    text = _message_content_to_text(content)
+    text = _RUNNER_DIAGNOSTIC_PREVIEW_FORBIDDEN_RE.sub("[redacted]", text)
+    text = sanitize_gate5b_model_visible_identity_text(text)
+    bounded = text[:_MODEL_VISIBLE_CONTEXT_MAX_CHARS].strip()
+    if not bounded:
+        return None
+    return {
+        "role": role_text,
+        "sanitizedText": bounded,
+        "sanitizedTextDigest": _sha256_digest(bounded),
+    }
+
+
+def _dedupe_latest_history(
+    messages: Sequence[Mapping[str, str]],
+    *,
+    max_messages: int,
+) -> tuple[dict[str, str], ...]:
+    if max_messages <= 0:
+        return ()
+    seen: set[tuple[str, str]] = set()
+    selected_reversed: list[dict[str, str]] = []
+    for item in reversed(messages):
+        role = str(item.get("role") or "")
+        digest = str(item.get("sanitizedTextDigest") or "")
+        key = (role, digest)
+        if key in seen:
             continue
-        projected.append(
-            {
-                "role": role,
-                "sanitizedText": bounded,
-                "sanitizedTextDigest": _sha256_digest(bounded),
-            }
-        )
-    return tuple(projected[-max_messages:])
+        seen.add(key)
+        selected_reversed.append(dict(item))
+        if len(selected_reversed) >= max_messages:
+            break
+    return tuple(reversed(selected_reversed))
 
 
 def _bounded_public_text(value: str, *, max_chars: int = 8192) -> str:
@@ -3527,8 +3586,12 @@ def build_gate5b_user_visible_canary_runner_request(
     signals: list[str] = []
 
     source_messages = payload.get("messages") if isinstance(payload, Mapping) else None
+    projected_messages: list[dict[str, str]] = []
+    for item in _app_channel_history_messages(payload):
+        projected_messages.append(
+            {"role": item["role"], "content": item["sanitizedText"]}
+        )
     if isinstance(source_messages, list):
-        projected_messages: list[dict[str, str]] = []
         for item in source_messages:
             if not isinstance(item, Mapping):
                 continue
