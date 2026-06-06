@@ -27,6 +27,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Mapping
 
+from magi_agent.config.env import LOCAL_DEV_MODEL_SENTINEL
+
 # Auto-detect order. Anthropic first (magi's primary deployment posture), then
 # the rest. Also the set of accepted ``provider`` values.
 SUPPORTED_PROVIDERS: tuple[str, ...] = ("anthropic", "openai", "gemini", "fireworks")
@@ -100,6 +102,13 @@ def _clean(value: object) -> str | None:
     return value.strip() if isinstance(value, str) and value.strip() else None
 
 
+def _clean_model(value: object) -> str | None:
+    cleaned = _clean(value)
+    if cleaned is None or cleaned == LOCAL_DEV_MODEL_SENTINEL:
+        return None
+    return cleaned
+
+
 def _section(config: Mapping[str, object], name: str) -> dict[str, object]:
     section = config.get(name)
     return section if isinstance(section, dict) else {}
@@ -137,9 +146,9 @@ def resolve_provider_config(
 
     def model_for(provider: str) -> str:
         return (
-            _clean(model_override)
-            or _clean(env.get("MAGI_MODEL"))
-            or _clean(model_section.get("model"))
+            _clean_model(model_override)
+            or _clean_model(env.get("MAGI_MODEL"))
+            or _clean_model(model_section.get("model"))
             or _DEFAULT_MODEL[provider]
         )
 
