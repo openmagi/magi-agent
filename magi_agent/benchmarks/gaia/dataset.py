@@ -37,7 +37,8 @@ def load_gaia_questions(
         if wanted is not None and level not in wanted:
             continue
         file_name = str(data.get("file_name", [""] * n)[i] or "")
-        attachment = os.path.join(attachments_dir, file_name) if file_name else None
+        safe_name = os.path.basename(file_name)
+        attachment = os.path.join(attachments_dir, safe_name) if safe_name else None
         out.append(
             GaiaQuestion(
                 task_id=str(data["task_id"][i]),

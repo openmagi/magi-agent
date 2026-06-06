@@ -22,7 +22,8 @@ def extract_final_answer(text: str) -> str:
     if not matches:
         return ""
     tail = text[matches[-1].end():]
-    answer = tail.splitlines()[0] if tail.splitlines() else ""
+    lines = tail.splitlines()
+    answer = lines[0] if lines else ""
     return answer.strip().rstrip(".").strip()
 
 

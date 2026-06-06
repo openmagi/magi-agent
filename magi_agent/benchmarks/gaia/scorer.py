@@ -9,9 +9,9 @@ import re
 import string
 
 
-def _is_float(element: object) -> bool:
+def _is_float(element: str | float | int) -> bool:
     try:
-        float(element)  # type: ignore[arg-type]
+        float(element)
         return True
     except (ValueError, TypeError):
         return False

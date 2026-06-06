@@ -79,7 +79,7 @@ def download_gaia_validation(
     for file_name in file_names:
         if not file_name:
             continue
-        dest_file = attachments_dir / file_name
+        dest_file = attachments_dir / os.path.basename(file_name)
         if dest_file.exists():
             continue
         url = f"{_HF_RESOLVE}/{file_name}"

@@ -16,7 +16,6 @@ from __future__ import annotations
 
 import os
 from collections.abc import Mapping
-from typing import Any
 
 from magi_agent.composio.config import resolve_composio_config
 from magi_agent.composio.mcp import build_composio_toolset_bundle
@@ -25,7 +24,7 @@ from magi_agent.composio.mcp import build_composio_toolset_bundle
 _resolve_composio_config = resolve_composio_config
 
 
-def build_web_tools(env: Mapping[str, str] | None = None) -> list[Any]:
+def build_web_tools(env: Mapping[str, str] | None = None) -> list[object]:
     """Return a list of live Composio toolset objects for the GAIA harness.
 
     Parameters
