@@ -729,6 +729,153 @@ def test_mcp_list_prompts_auth_error_is_auth_required() -> None:
     assert "unsafe-token" not in rendered
 
 
+# ---------------------------------------------------------------------------
+# Prompt resolution (P2 security) — mirrors call_tool gating + redaction
+# ---------------------------------------------------------------------------
+
+
+def test_mcp_resolve_prompt_default_off_does_not_call_provider() -> None:
+    from magi_agent.plugins.mcp_adapter import McpAdapter, McpAdapterConfig
+
+    provider = FakeMcpProvider()
+    decision = McpAdapter(McpAdapterConfig()).resolve_prompt(
+        "mcp:notes", "summarize_note", {}, provider=provider
+    )
+
+    assert decision.status == "disabled"
+    assert decision.reason_codes == ("mcp_adapter_disabled",)
+    assert decision.text == ""
+    assert provider.get_prompt_calls == 0
+    assert set(decision.authority_flags.model_dump(by_alias=True).values()) == {False}
+
+
+def test_mcp_resolve_prompt_requires_manifest_before_provider() -> None:
+    from magi_agent.plugins.mcp_adapter import McpAdapter, McpAdapterConfig
+
+    provider = FakeMcpProvider()
+    decision = McpAdapter(
+        McpAdapterConfig(enabled=True, localFakeProviderEnabled=True),
+    ).resolve_prompt("mcp:notes", "summarize_note", {}, provider=provider)
+
+    assert decision.status == "blocked"
+    assert decision.reason_codes == ("mcp_security_manifest_required",)
+    assert decision.text == ""
+    assert provider.get_prompt_calls == 0
+
+
+def test_mcp_resolve_prompt_blocks_when_no_provider() -> None:
+    from magi_agent.plugins.mcp_adapter import McpAdapter, McpAdapterConfig
+
+    decision = McpAdapter(
+        McpAdapterConfig(enabled=True, localFakeProviderEnabled=True),
+    ).resolve_prompt(
+        "mcp:notes", "summarize_note", {}, provider=None, security_manifest=_security_manifest()
+    )
+
+    assert decision.status == "blocked"
+    assert decision.reason_codes == ("local_fake_mcp_provider_required",)
+    assert decision.text == ""
+
+
+def test_mcp_resolve_prompt_blocks_untrusted_fake_provider() -> None:
+    from magi_agent.plugins.mcp_adapter import McpAdapter, McpAdapterConfig
+
+    provider = UntrustedMcpProvider()
+    decision = McpAdapter(
+        McpAdapterConfig(enabled=True, localFakeProviderEnabled=True),
+    ).resolve_prompt(
+        "mcp:notes", "summarize_note", {}, provider=provider, security_manifest=_security_manifest()
+    )
+
+    assert decision.status == "blocked"
+    assert decision.reason_codes == ("local_fake_mcp_provider_untrusted",)
+    assert decision.text == ""
+    assert provider.get_prompt_calls == 0
+
+
+def test_mcp_resolve_prompt_redacts_secret_body_at_the_seam() -> None:
+    from magi_agent.plugins.mcp_adapter import McpAdapter, McpAdapterConfig
+
+    provider = FakeMcpProvider()
+    decision = McpAdapter(
+        McpAdapterConfig(enabled=True, localFakeProviderEnabled=True),
+    ).resolve_prompt(
+        "mcp:notes", "summarize_note", {}, provider=provider, security_manifest=_security_manifest()
+    )
+
+    rendered = str({"text": decision.text, "projection": decision.public_projection()})
+    assert decision.status == "ok"
+    assert provider.get_prompt_calls == 1
+    assert "public prompt body" in decision.text
+    assert "/Users/kevin" not in rendered
+    assert "/private/var" not in rendered
+    assert "PRIVATE KEY" not in rendered
+    assert "SUPERSECRETKEYBODY" not in rendered
+    # public_projection emits only a digest of the body, never the raw text.
+    assert decision.public_projection()["textDigest"].startswith("prompt:")
+    assert set(decision.public_projection()["authorityFlags"].values()) == {False}
+
+
+def test_mcp_resolve_prompt_provider_error_returns_safe_digest() -> None:
+    from magi_agent.plugins.mcp_adapter import McpAdapter, McpAdapterConfig
+
+    class BoomProvider(FakeMcpProvider):
+        def get_prompt(self, server_ref: str, prompt_name: str, arguments: object) -> dict[str, object]:
+            self.get_prompt_calls += 1
+            raise RuntimeError("boom /Users/kevin/private Authorization: Bearer unsafe-token")
+
+    decision = McpAdapter(
+        McpAdapterConfig(enabled=True, localFakeProviderEnabled=True),
+    ).resolve_prompt(
+        "mcp:notes", "summarize_note", {}, provider=BoomProvider(), security_manifest=_security_manifest()
+    )
+
+    rendered = str({"text": decision.text, "projection": decision.public_projection()})
+    assert decision.status == "blocked"
+    assert decision.reason_codes == ("mcp_provider_get_prompt_failed",)
+    assert decision.text == ""
+    assert "/Users/kevin" not in rendered
+    assert "unsafe-token" not in rendered
+    assert "boom" not in rendered
+
+
+def test_mcp_resolve_prompt_auth_error_is_auth_required() -> None:
+    from magi_agent.plugins.mcp_adapter import McpAdapter, McpAdapterConfig
+
+    class AuthProvider(FakeMcpProvider):
+        def get_prompt(self, server_ref: str, prompt_name: str, arguments: object) -> dict[str, object]:
+            self.get_prompt_calls += 1
+            from magi_agent.plugins.mcp_adapter import McpAuthError
+
+            raise McpAuthError("Authorization: Bearer unsafe-token")
+
+    decision = McpAdapter(
+        McpAdapterConfig(enabled=True, localFakeProviderEnabled=True),
+    ).resolve_prompt(
+        "mcp:notes", "summarize_note", {}, provider=AuthProvider(), security_manifest=_security_manifest()
+    )
+
+    rendered = str(decision.public_projection())
+    assert decision.status == "auth_required"
+    assert decision.reason_codes == ("mcp_auth_required",)
+    assert decision.text == ""
+    assert "Authorization" not in rendered
+    assert "unsafe-token" not in rendered
+
+
+def test_mcp_prompt_resolve_decision_ignores_forged_authority_flags() -> None:
+    from magi_agent.plugins.mcp_adapter import McpPromptResolveDecision
+
+    forged = McpPromptResolveDecision.model_construct(
+        status="ok",
+        text="",
+        reasonCodes=(),
+        authorityFlags={"mcpServerAttached": True, "liveToolExecutionEnabled": True},
+    )
+
+    assert set(forged.public_projection()["authorityFlags"].values()) == {False}
+
+
 def test_mcp_prompt_list_decision_ignores_forged_authority_flags() -> None:
     from magi_agent.plugins.mcp_adapter import McpPromptListDecision
 

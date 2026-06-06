@@ -9,8 +9,12 @@ explicitly injects an MCP provider — there is NO live MCP connection by defaul
 
 This module is the discovery-side mirror of ``magi_agent.plugins.mcp_adapter``'s
 prompt projection path. The adapter remains the single security boundary: it
-gates (disabled → manifest → local-fake-required → untrusted) and redacts; this
-module merely turns its ``McpPromptListDecision`` (status == "ok") into commands.
+gates (disabled → manifest → local-fake-required → untrusted) and redacts both
+``prompts/list`` descriptors AND the ``prompts/get`` body. This module merely
+turns its ``McpPromptListDecision`` (status == "ok") into commands whose
+resolvers route ``prompts/get`` through ``McpAdapter.resolve_prompt`` — so the
+model-facing prompt text is REDACTED at the same seam the tool path uses, never
+read raw from the provider here.
 
 Sync + default-off invariants
 -----------------------------
@@ -114,68 +118,48 @@ def _hints_for_count(count: int) -> list[str]:
     return [f"${n}" for n in range(1, count + 1)]
 
 
-def _extract_prompt_text(result: Mapping[str, object]) -> str:
-    """Flatten an MCP ``prompts/get`` result Mapping into plain text.
-
-    Mirrors how opencode flattens prompt messages → text, and how the adapter's
-    ``_extract_public_mcp_output`` walks ``content`` blocks. A ``prompts/get``
-    result is shaped ``{"messages": [{"role": .., "content": {"type": "text",
-    "text": ..}}, ..]}`` — we concatenate the text of each text content block.
-    Defensive: tolerates ``content`` being a single block or a list of blocks,
-    and ignores non-text/non-mapping entries. The adapter has already redacted
-    the upstream descriptor; this extractor reads only ``type == "text"`` text.
-    """
-    messages = result.get("messages")
-    texts: list[str] = []
-    if isinstance(messages, Sequence) and not isinstance(messages, str | bytes | bytearray):
-        for message in messages:
-            if not isinstance(message, Mapping):
-                continue
-            texts.extend(_text_blocks(message.get("content")))
-    if texts:
-        return "\n".join(texts)
-    # Fall back to a top-level content field (some servers return it flat).
-    return "\n".join(_text_blocks(result.get("content")))
-
-
-def _text_blocks(content: object) -> list[str]:
-    """Extract text from a content value (single block or a list of blocks)."""
-    if isinstance(content, Mapping):
-        blocks: Sequence[object] = (content,)
-    elif isinstance(content, Sequence) and not isinstance(content, str | bytes | bytearray):
-        blocks = content
-    else:
-        return []
-    out: list[str] = []
-    for block in blocks:
-        if not isinstance(block, Mapping):
-            continue
-        if block.get("type") == "text" and isinstance(block.get("text"), str):
-            out.append(str(block["text"]))
-    return out
-
-
 def _make_resolver(
+    adapter: McpAdapter,
     provider: McpProviderPort,
     server_ref: str,
     descriptor: McpPromptDescriptor,
+    security_manifest: McpServerSecurityManifest | Mapping[str, object] | None,
 ) -> PromptResolver:
-    """Build a sync resolver closing over ``provider.get_prompt`` for one prompt.
+    """Build a sync resolver routing through the gated, REDACTING adapter seam.
 
     The closure derives the un-namespaced prompt name from the projected
-    descriptor (the namespaced form is CLI-facing only) and asks the local-fake
-    provider for the prompt result, then flattens it to text.
+    descriptor (the namespaced form is CLI-facing only) and asks the
+    ``McpAdapter`` — NOT the raw provider — to resolve the prompt. The adapter
+    re-applies the same gates (disabled → manifest → local-fake-required →
+    untrusted → provider-error) and routes the prompt body through ``_safe_text``
+    redaction (mirroring the tool path) before handing back text. A
+    blocked/error/disabled decision yields an empty/safe string here; this
+    resolver never returns raw provider text and never raises.
     """
     # Recover the leaf prompt segment from the namespaced descriptor name
     # ("mcp.<server>.<prompt>" → "<prompt>"). The provider keys prompts by their
     # own (already projected/safe) leaf name.
+    #
+    # WARNING (live wiring): ``descriptor.name`` is the PROJECTED-SAFE name —
+    # ``_safe_tool_segment`` lowercases it and digests any private text, so this
+    # recovered leaf is scrubbed/lowercased, not the server's original prompt
+    # key. A real (live) MCP client must key ``prompts/get`` by the
+    # projected-safe leaf (or carry the original name out-of-band on the
+    # descriptor); using a private/case-sensitive original name here would
+    # re-introduce the very leak the projection closes.
     prompt_name = descriptor.name.rsplit(".", 1)[-1]
 
     def _resolve(arguments: Mapping[str, str]) -> str:
-        raw_result = provider.get_prompt(server_ref, prompt_name, dict(arguments))
-        if not isinstance(raw_result, Mapping):
+        decision = adapter.resolve_prompt(
+            server_ref,
+            prompt_name,
+            dict(arguments),
+            provider=provider,
+            security_manifest=security_manifest,
+        )
+        if decision.status != "ok":
             return ""
-        return _extract_prompt_text(raw_result)
+        return decision.text
 
     return _resolve
 
@@ -202,10 +186,11 @@ def mcp_prompt_commands(
     manifests = security_manifests or {}
     commands: list[Command] = []
     for server_ref in server_refs:
+        security_manifest = manifests.get(server_ref)
         decision = adapter.list_prompts(
             server_ref,
             provider=provider,
-            security_manifest=manifests.get(server_ref),
+            security_manifest=security_manifest,
         )
         if decision.status != "ok":
             continue
@@ -216,7 +201,9 @@ def mcp_prompt_commands(
                     surface=MCP_SURFACE,
                     description=descriptor.description or "",
                     argument_names=descriptor.arguments,
-                    resolver=_make_resolver(provider, server_ref, descriptor),
+                    resolver=_make_resolver(
+                        adapter, provider, server_ref, descriptor, security_manifest
+                    ),
                     source="mcp",
                     hints=_hints_for_count(len(descriptor.arguments)),
                 )
