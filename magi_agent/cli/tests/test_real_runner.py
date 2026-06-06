@@ -159,7 +159,7 @@ def test_missing_litellm_raises_actionable_error(monkeypatch) -> None:
     with pytest.raises(CliProviderDependencyError) as excinfo:
         real_runner._build_litellm_model(_config())
     assert "litellm" in str(excinfo.value)
-    assert "magi-agent[providers]" in str(excinfo.value)
+    assert "default runtime dependencies" in str(excinfo.value)
 
 
 def test_default_runner_is_stub_without_provider() -> None:
@@ -277,7 +277,8 @@ def test_default_runner_falls_back_with_notice_when_dependency_missing(
     def _boom(config: ProviderConfig) -> BaseLlm:
         raise CliProviderDependencyError(
             "Provider 'anthropic' is configured but the 'litellm' dependency is "
-            "not installed. Install it with: pip install 'magi-agent[providers]'"
+            "not installed. Reinstall magi-agent so its default runtime "
+            "dependencies are present."
         )
 
     monkeypatch.setattr(real_runner, "_build_litellm_model", _boom)

@@ -11,6 +11,7 @@ requires-python = ">=3.11"
 dependencies = [
   "fastapi==0.136.1",
   "google-adk==1.33.0",
+  "litellm>=1.74.0",
   "pydantic==2.13.4",
   "uvicorn==0.47.0",
 ]
@@ -36,12 +37,9 @@ composio = [
 anthropic = [
   "anthropic==0.105.2",
 ]
-# Optional: required only when the local CLI runs a real model provider
-# (openai / anthropic / gemini / fireworks) via ADK's LiteLlm. Imported lazily
-# (magi_agent.cli.real_runner) so installs without it keep the model-free stub.
-providers = [
-  "litellm>=1.74.0",
-]
+# Compatibility extra. Provider-capable installs are now the default because
+# the runtime uses ADK LiteLlm as the common model path.
+providers = []
 
 [project.scripts]
 magi-agent = "magi_agent.main:main"
