@@ -35,6 +35,14 @@ from magi_agent.plugins.mcp_adapter import McpAdapter, McpAdapterConfig
 
 BOTH = CommandSurface(tui=True, headless=True)
 
+PRIVATE_KEY_BLOCK = "\n".join(
+    (
+        "-----BEGIN OPENSSH " + "PRIVATE KEY-----",
+        "SUPERSECRETKEYBODY",
+        "-----END OPENSSH " + "PRIVATE KEY-----",
+    )
+)
+
 
 def _ctx(cwd: str = "/tmp/test-cwd") -> CommandContext:
     return CommandContext(cwd=cwd)
@@ -98,6 +106,32 @@ class FakePromptProvider:
 
 class UntrustedPromptProvider(FakePromptProvider):
     openmagi_local_fake_provider = False
+
+
+class LeakyPromptProvider(FakePromptProvider):
+    """Local-fake provider whose ``prompts/get`` body carries secrets/paths.
+
+    Mirrors the tool-output leak fixture: a future/live MCP server could inject a
+    private key / absolute path / token into the prompt body. The adapter seam
+    must scrub it before it becomes model-facing content.
+    """
+
+    def get_prompt(self, server_ref: str, prompt_name: str, arguments) -> dict[str, object]:
+        self.get_prompt_calls.append((server_ref, prompt_name, dict(arguments)))
+        return {
+            "messages": [
+                {
+                    "role": "user",
+                    "content": {
+                        "type": "text",
+                        "text": (
+                            "public prompt body /private/var/folders/token "
+                            f"/Users/kevin/private sk-test-unsafe0000 {PRIVATE_KEY_BLOCK}"
+                        ),
+                    },
+                }
+            ],
+        }
 
 
 # ===========================================================================
@@ -264,6 +298,84 @@ class TestMcpPromptCommands:
         for cmd in result:
             assert cmd.surface.tui is True
             assert cmd.surface.headless is True
+
+
+# ===========================================================================
+# Resolver redaction (P2 security) — symmetric to the tool-output leak test
+# ===========================================================================
+
+
+class TestMcpPromptResolverRedaction:
+    def _cmd(self, provider) -> McpPromptCommand:
+        adapter = McpAdapter(McpAdapterConfig(enabled=True, localFakeProviderEnabled=True))
+        result = mcp_prompt_commands(
+            adapter,
+            provider,
+            ["mcp:notes"],
+            {"mcp:notes": _security_manifest()},
+        )
+        return next(c for c in result if c.name == "mcp.notes.summarize_note")
+
+    def test_resolved_prompt_body_is_scrubbed_end_to_end(self) -> None:
+        """A secret/path/key in the ``prompts/get`` body must NOT survive into the
+        model-facing ContentBlock — exactly the redaction the tool path guarantees.
+        """
+        provider = LeakyPromptProvider()
+        cmd = self._cmd(provider)
+        blocks = asyncio.run(cmd.build_prompt("alpha beta", _ctx()))
+
+        assert len(blocks) == 1
+        rendered = blocks[0].text
+        # The benign prose survives; every secret/path/key is scrubbed.
+        assert "public prompt body" in rendered
+        assert "/Users/kevin" not in rendered
+        assert "/private/var" not in rendered
+        assert "sk-test-unsafe" not in rendered
+        assert "PRIVATE KEY" not in rendered
+        assert "SUPERSECRETKEYBODY" not in rendered
+
+    def test_resolver_routes_through_adapter_not_raw_provider(self) -> None:
+        """The resolver invokes the provider via the adapter seam (still one
+        call), and the returned text is the redacted adapter projection."""
+        provider = LeakyPromptProvider()
+        cmd = self._cmd(provider)
+        asyncio.run(cmd.build_prompt("alpha beta", _ctx()))
+        # Exactly one get_prompt call, made through the adapter.
+        assert len(provider.get_prompt_calls) == 1
+        server_ref, name, _args = provider.get_prompt_calls[0]
+        assert server_ref == "mcp:notes"
+        assert name == "summarize_note"
+
+
+class TestMcpPromptResolverGating:
+    """A resolver must yield empty/safe text — never raw — when the adapter
+    re-gate fails (disabled / no-provider / untrusted)."""
+
+    def _resolver(self, adapter, provider):
+        from magi_agent.cli.commands.mcp_commands import _make_resolver
+        from magi_agent.plugins.mcp_adapter import McpPromptDescriptor
+
+        return _make_resolver(
+            adapter,
+            provider,
+            "mcp:notes",
+            McpPromptDescriptor(name="mcp.notes.summarize_note"),
+            _security_manifest(),
+        )
+
+    def test_disabled_adapter_yields_empty_text(self) -> None:
+        provider = LeakyPromptProvider()
+        resolver = self._resolver(McpAdapter(McpAdapterConfig()), provider)
+        assert resolver({"notename": "x"}) == ""
+        # Disabled gate trips before the provider is ever asked.
+        assert provider.get_prompt_calls == []
+
+    def test_untrusted_provider_yields_empty_text(self) -> None:
+        adapter = McpAdapter(McpAdapterConfig(enabled=True, localFakeProviderEnabled=True))
+        provider = UntrustedPromptProvider()
+        resolver = self._resolver(adapter, provider)
+        assert resolver({"notename": "x"}) == ""
+        assert provider.get_prompt_calls == []
 
 
 # ===========================================================================
