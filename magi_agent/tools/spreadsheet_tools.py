@@ -654,4 +654,122 @@ def _short_digest(value: object) -> str:
     return _digest(value).removeprefix("sha256:")[:_DIGEST_PREFIX_LENGTH]
 
 
-__all__ = ["csv_read", "csv_write", "spreadsheet_preview"]
+def xlsx_read(arguments: Mapping[str, object], context: ToolContext) -> ToolResult:
+    """Read an XLSX workbook from the workspace, returning structured rows.
+
+    Requires the ``openpyxl`` package (``uv sync --extra files``).  When the
+    package is not installed the handler returns ``status="blocked"`` so the
+    manifest can safely exist in all environments.
+    """
+    tool_name = "xlsx_read"
+    path_text = _string_arg(arguments, "path")
+    if path_text is None:
+        return _blocked_result(tool_name, "path_required")
+
+    try:
+        root = _workspace_root(context)
+        resolved = _resolve_workspace_path(root, path_text, must_exist=True)
+    except _SpreadsheetPolicyError as error:
+        return _blocked_result(tool_name, error.reason_code)
+    except OSError:
+        return _error_result(tool_name, "xlsx_read_failed")
+
+    if Path(resolved.relative).suffix.casefold() != ".xlsx":
+        return _blocked_result(tool_name, "xlsx_extension_required")
+
+    try:
+        raw_size = resolved.path.stat().st_size
+    except OSError:
+        return _error_result(tool_name, "xlsx_read_failed")
+    if raw_size > _MAX_BYTES:
+        return _error_result(tool_name, "xlsx_input_too_large")
+
+    try:
+        import openpyxl  # noqa: PLC0415
+    except ImportError:
+        return _blocked_result(tool_name, "xlsx_dependency_not_installed")
+
+    try:
+        wb = openpyxl.load_workbook(resolved.path, read_only=True, data_only=True)
+    except Exception:  # noqa: BLE001
+        return _error_result(tool_name, "xlsx_read_failed")
+
+    sheet_name = _string_arg(arguments, "sheetName")
+    try:
+        if sheet_name is not None:
+            if sheet_name not in wb.sheetnames:
+                return _blocked_result(tool_name, "xlsx_sheet_not_found")
+            ws = wb[sheet_name]
+        else:
+            ws = wb.active
+    except Exception:  # noqa: BLE001
+        return _error_result(tool_name, "xlsx_read_failed")
+
+    max_rows = _bounded_int(arguments.get("maxRows"), default=_DEFAULT_MAX_ROWS, maximum=_MAX_ROWS)
+    max_cols = _bounded_int(arguments.get("maxCols"), default=_DEFAULT_MAX_COLS, maximum=_MAX_COLS)
+
+    raw_rows: list[list[str]] = []
+    source_row_count = 0
+    cell_count = 0
+    try:
+        for row in ws.iter_rows(values_only=True):
+            source_row_count += 1
+            if source_row_count > max_rows:
+                continue
+            selected = list(row)[:max_cols]
+            coerced: list[str] = []
+            for cell_value in selected:
+                if cell_value is None:
+                    coerced.append("")
+                elif isinstance(cell_value, bool):
+                    coerced.append(str(cell_value))
+                elif isinstance(cell_value, int | float):
+                    coerced.append(str(cell_value))
+                else:
+                    coerced.append(str(cell_value))
+            cell_count += len(coerced)
+            if cell_count > _MAX_CELLS:
+                break
+            raw_rows.append(coerced)
+    except Exception:  # noqa: BLE001
+        return _error_result(tool_name, "xlsx_read_failed")
+    finally:
+        wb.close()
+
+    rows, redacted = _sanitize_table_rows(raw_rows)
+    truncated = source_row_count > max_rows or any(
+        len(list(row)) > max_cols for row in rows
+    )
+    content_digest = _digest(resolved.path.read_bytes() if raw_size <= _MAX_BYTES else b"")
+
+    output: dict[str, object] = {
+        "rows": rows,
+        "rowCount": len(rows),
+        "columnCount": max((len(row) for row in rows), default=0),
+        "truncated": truncated,
+        "contentDigest": content_digest,
+        "byteCount": raw_size,
+    }
+    return ToolResult(
+        status="ok",
+        output=output,
+        llmOutput=output,
+        transcriptOutput={
+            "toolName": tool_name,
+            "rowCount": output["rowCount"],
+            "columnCount": output["columnCount"],
+            "contentDigest": output["contentDigest"],
+        },
+        metadata={
+            **_base_metadata(tool_name, permission_class="read", mutates_workspace=False),
+            "contentDigest": output["contentDigest"],
+            "byteCount": raw_size,
+            "rowCount": output["rowCount"],
+            "columnCount": output["columnCount"],
+            "pathRef": resolved.path_ref,
+            "redactionStatus": "redacted" if redacted else "no_redaction_needed",
+        },
+    )
+
+
+__all__ = ["csv_read", "csv_write", "spreadsheet_preview", "xlsx_read"]
