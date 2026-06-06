@@ -1224,6 +1224,10 @@ def _dashboard_html(runtime: OpenMagiRuntime) -> str:
     const boardTransportState = document.getElementById("board-transport-state");
     const receiptList = document.getElementById("receipt-list");
     const tokenKey = "magi-agent:gateway-token";
+    const streamChatEndpoint = "/v1/chat/stream";
+    const legacyChatEndpoint = "/v1/chat/completions";
+    const controlResponseEndpoint = "/v1/chat/control-response";
+    const cancelEndpoint = "/v1/chat/cancel";
     let sseFrameCount = 0;
     let agentEventCount = 0;
 
@@ -1435,6 +1439,23 @@ def _dashboard_html(runtime: OpenMagiRuntime) -> str:
       return false;
     }}
 
+    async function postChatStream(endpoint, token, prompt) {{
+      return fetch(endpoint, {{
+        method: "POST",
+        headers: {{
+          "Content-Type": "application/json",
+          ...(token ? {{ "Authorization": `Bearer ${{token}}` }} : {{}}),
+        }},
+        body: JSON.stringify({{
+          model: modelSelect.value || bootstrap.model,
+          messages: [{{ role: "user", content: prompt }}],
+          sessionId: `${{bootstrap.botId}}:local-dashboard:general`,
+          turnId: `${{Date.now()}}:${{Math.random().toString(16).slice(2)}}`,
+          stream: true,
+        }}),
+      }});
+    }}
+
     async function sendPrompt(prompt) {{
       const token = tokenInput.value.trim();
       localStorage.setItem(tokenKey, token);
@@ -1447,19 +1468,15 @@ def _dashboard_html(runtime: OpenMagiRuntime) -> str:
       agentStatePill.textContent = "running";
       setRunBoard("running");
       renderReceiptList([["request", "sending"], ["delivery", "pending"], ["transport", "opening"]]);
-      addEvent("Request", "POST /v1/chat/completions", "pending");
-      const response = await fetch("/v1/chat/completions", {{
-        method: "POST",
-        headers: {{
-          "Content-Type": "application/json",
-          ...(token ? {{ "Authorization": `Bearer ${{token}}` }} : {{}}),
-        }},
-        body: JSON.stringify({{
-          model: modelSelect.value || bootstrap.model,
-          messages: [{{ role: "user", content: prompt }}],
-          stream: true,
-        }}),
-      }});
+      addEvent("Request", "POST /v1/chat/stream", "pending");
+      let response = await postChatStream(streamChatEndpoint, token, prompt);
+      if (!response.ok && response.status === 503) {{
+        const preview = await response.clone().text();
+        if (preview.includes("streaming_chat_disabled")) {{
+          addEvent("Streaming route disabled", "Falling back to POST /v1/chat/completions", "pending");
+          response = await postChatStream(legacyChatEndpoint, token, prompt);
+        }}
+      }}
       if (!response.ok) {{
         const text = await response.text();
         assistant.className = "message assistant error";
