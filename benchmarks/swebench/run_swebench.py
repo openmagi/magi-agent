@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import argparse
-import os
 import re
 from pathlib import Path
 
@@ -33,7 +32,20 @@ def main() -> int:
     if not re.fullmatch(r"[A-Za-z0-9._-]+", args.run_id):
         raise SystemExit("--run-id must match [A-Za-z0-9._-]+")
 
-    api_key = os.environ["ANTHROPIC_API_KEY"]
+    # Provider-agnostic: resolve whatever the user configured (anthropic / openai
+    # / gemini / fireworks) via ~/.magi/config.toml or a provider env key. The
+    # magi runtime supports all four through ADK's LiteLlm.
+    from magi_agent.cli.providers import resolve_provider_config  # noqa: PLC0415
+
+    cfg = resolve_provider_config(model_override=args.model)
+    if cfg is None:
+        raise SystemExit(
+            "No model provider configured. Set ~/.magi/config.toml or a provider "
+            "env key (ANTHROPIC_API_KEY / OPENAI_API_KEY / GEMINI_API_KEY / "
+            "FIREWORKS_API_KEY)."
+        )
+    print(f"[provider] {cfg.provider} / {cfg.model}")
+
     out_dir = Path(args.out_dir) / args.run_id
     preds_path = out_dir / "predictions.jsonl"
 
@@ -48,8 +60,9 @@ def main() -> int:
             continue
         result = run_instance(
             inst,
-            anthropic_api_key=api_key,
-            model=args.model,
+            provider=cfg.provider,
+            model=cfg.model,
+            api_key=cfg.api_key,
             timeout_seconds=args.timeout_seconds,
         )
         (out_dir / "logs").mkdir(parents=True, exist_ok=True)

@@ -10,9 +10,20 @@ from pathlib import Path
 from benchmarks.swebench.dataset import Instance
 
 # Host path to a python-3.11 venv with magi-agent[cli,providers,anthropic]
-# installed, built once. Mounted read-only into each container.
+# installed, built once. Mounted read-only into each container. `providers`
+# (litellm) covers all four providers; `anthropic` adds the SDK ADK needs for
+# Claude specifically. Other providers route through litellm directly.
 MAGI_VENV_HOST = Path.home() / ".cache" / "magi-bench" / "venv"
 BENCH_DIR = Path(__file__).resolve().parent
+
+# Env var carrying the API key per provider (mirrors
+# magi_agent.cli.providers._PROVIDER_ENV_KEYS first entry).
+_PROVIDER_ENV_KEY = {
+    "anthropic": "ANTHROPIC_API_KEY",
+    "openai": "OPENAI_API_KEY",
+    "gemini": "GEMINI_API_KEY",
+    "fireworks": "FIREWORKS_API_KEY",
+}
 
 
 @dataclass(frozen=True)
@@ -44,8 +55,9 @@ def instance_image(instance: Instance) -> str:
 def run_instance(
     instance: Instance,
     *,
-    anthropic_api_key: str,
-    model: str | None,
+    provider: str,
+    model: str,
+    api_key: str,
     timeout_seconds: int,
 ) -> InferenceResult:
     issue_fd, issue_path = tempfile.mkstemp(suffix=".txt")
@@ -56,6 +68,7 @@ def run_instance(
     out_patch = out_dir / "prediction.patch"
     out_log = out_dir / "magi.log"
 
+    env_key = _PROVIDER_ENV_KEY.get(provider, "ANTHROPIC_API_KEY")
     try:
         env_args = [
             "-e", f"BASE_COMMIT={instance.base_commit}",
@@ -64,10 +77,10 @@ def run_instance(
             "-e", "OUT_PATCH=/work/prediction.patch",
             "-e", "OUT_LOG=/work/magi.log",
             "-e", f"MAGI_TIMEOUT_SECONDS={timeout_seconds}",
-            "-e", f"ANTHROPIC_API_KEY={anthropic_api_key}",
+            "-e", f"MAGI_PROVIDER={provider}",
+            "-e", f"MAGI_MODEL={model}",
+            "-e", f"{env_key}={api_key}",
         ]
-        if model:
-            env_args += ["-e", f"MAGI_BENCH_MODEL={model}"]
 
         cmd = [
             "docker", "run", "--rm",

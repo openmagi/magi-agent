@@ -4,9 +4,19 @@ from pathlib import Path
 
 import pytest
 
+
+def _provider_configured() -> bool:
+    try:
+        from magi_agent.cli.providers import resolve_provider_config
+    except Exception:
+        return False
+    return resolve_provider_config() is not None
+
+
 pytestmark = pytest.mark.skipif(
-    not os.environ.get("ANTHROPIC_API_KEY"),
-    reason="needs ANTHROPIC_API_KEY (operator-gated, costs a real API call)",
+    not _provider_configured(),
+    reason="needs a configured model provider (~/.magi/config.toml or a "
+    "provider env key) — operator-gated, costs a real API call",
 )
 
 
@@ -23,11 +33,9 @@ def test_magi_edits_a_file_via_real_runner(tmp_path: Path):
         check=True,
     )
 
-    env = {
-        **os.environ,
-        "MAGI_PROVIDER": "anthropic",
-        "MAGI_MODEL": os.environ.get("MAGI_MODEL", "claude-sonnet-4-6"),
-    }
+    # Provider/model come from whatever the operator configured (config.toml or
+    # env) — do NOT force a provider here.
+    env = {**os.environ}
     proc = subprocess.run(
         [
             "magi",

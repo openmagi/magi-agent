@@ -3,9 +3,13 @@
 Measures the magi-agent runtime on SWE-bench Verified (500).
 
 ## Prerequisites
-- `ANTHROPIC_API_KEY` exported.
-- Docker running (x86_64 recommended).
+- A model provider configured the same way the `magi` CLI reads it:
+  `~/.magi/config.toml` (`[model] provider = "..."`, `api_key = "..."`) or a
+  provider env key. Any of the four magi providers works:
+  `anthropic` / `openai` / `gemini` / `fireworks`.
+- Docker running (x86_64 instance images; emulated on arm64).
 - `uv pip install -e ".[bench,cli,providers,anthropic]"`
+  (`providers` = litellm for all four; `anthropic` = SDK ADK needs for Claude).
 
 ## Quick start
     # 10-instance smoke (plumbing check)
@@ -19,10 +23,11 @@ Results land in `benchmarks/swebench/results/<run-id>/`.
 
 ## How it works
 1. Inference runs INSIDE each official SWE-bench instance image. An isolated
-   py3.11 magi venv is mounted read-only at `/opt/magi`; `run_one.sh` resets
-   `/testbed` to the base commit, sets `MAGI_PROVIDER`/`MAGI_MODEL`/
-   `ANTHROPIC_API_KEY`, runs `magi -p ... --permission-mode bypassPermissions`,
-   and captures `git diff` as the prediction.
+   py3.11 magi venv is mounted read-only at `/opt/magi`; the orchestrator
+   resolves your configured provider and passes `MAGI_PROVIDER`/`MAGI_MODEL`/
+   `<PROVIDER>_API_KEY` into the container; `run_one.sh` resets `/testbed` to the
+   base commit, runs `magi -p ... --permission-mode bypassPermissions`, and
+   captures `git diff` as the prediction. Override the model with `--model`.
 2. Evaluation hands `predictions.jsonl` to the official
    `swebench.harness.run_evaluation`.
 3. `report.summarize` reports resolved % and (optionally) delta vs a baseline.
