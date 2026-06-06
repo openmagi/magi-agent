@@ -13,6 +13,7 @@ from magi_agent.shadow.gate5b4c3_live_runner_boundary import (
     Gate5B4C3LiveRunnerBoundaryResult,
 )
 from magi_agent.shadow.gate5b4c3_shadow_generation_contract import (
+    Gate5B4C3ShadowGenerationBudgets,
     Gate5B4C3ShadowGenerationConfig,
     Gate5B4C3ShadowGenerationRequest,
 )
@@ -236,6 +237,18 @@ def _gate1a_google_config() -> Gate5B4C3ShadowGenerationConfig:
         allowedModelLabels=("gemini-3.5-flash",),
         allowedModelRoutes=("google:gemini-3.5-flash",),
         allowedShadowCredentialRefs=("gate5b-google-api-key-smoke-v1",),
+    )
+
+
+def _gate1a_google_config_with_adk_llm_calls(
+    max_adk_llm_calls: int,
+) -> Gate5B4C3ShadowGenerationConfig:
+    return _gate1a_google_config().model_copy(
+        update={
+            "approved_budgets": Gate5B4C3ShadowGenerationBudgets(
+                maxAdkLlmCalls=max_adk_llm_calls,
+            )
+        }
     )
 
 
@@ -787,6 +800,41 @@ def test_live_boundary_selected_full_toolhost_runner_receives_prior_sanitized_tu
     assert "assistant: I found a redacted fixture anomaly." in text
     assert "Current user message:" in text
     assert "Please summarize the approved redacted note." in text
+
+
+def test_live_boundary_selected_full_toolhost_uses_request_adk_llm_call_budget() -> None:
+    request = Gate5B4C3ShadowGenerationRequest.model_validate(
+        _payload(
+            modelRouting={
+                **_payload()["modelRouting"],  # type: ignore[arg-type]
+                "providerLabel": "google",
+                "modelLabel": "gemini-3.5-flash",
+                "shadowCredentialRef": "gate5b-google-api-key-smoke-v1",
+            },
+            recipeProfile={
+                **_payload()["recipeProfile"],  # type: ignore[arg-type]
+                "toolsPolicy": "selected_full_toolhost",
+            },
+            policy={
+                **_payload()["policy"],  # type: ignore[arg-type]
+                "toolsDisabled": False,
+                "toolHostDispatchAllowed": True,
+            },
+            budgets={"maxAdkLlmCalls": 32},
+        )
+    )
+
+    result = Gate5B4C3LiveRunnerBoundary(
+        _fake_primitives,
+        adk_tools=(_ManualCalculationTool,),
+    ).invoke(
+        request,
+        config=_gate1a_google_config_with_adk_llm_calls(32),
+    )
+
+    assert result.status == "completed"
+    run_config = _FakeRunner.run_kwargs["run_config"]
+    assert getattr(run_config, "max_llm_calls") == 32
 
 
 def test_live_boundary_rejects_completed_runner_without_text_output() -> None:

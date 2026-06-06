@@ -415,6 +415,16 @@ def test_shadow_generation_live_smoke_env_accepts_full_toolhost_runner_timeout()
     assert route_config.generation_config.approved_budgets.python_runner_timeout_ms == 600_000
 
 
+def test_shadow_generation_live_smoke_env_accepts_selected_adk_llm_call_budget() -> None:
+    env = _live_smoke_env(
+        CORE_AGENT_PYTHON_GATE5B_SHADOW_GENERATION_MAX_ADK_LLM_CALLS="32",
+    )
+
+    route_config = parse_gate5b4c3_shadow_generation_route_env(env)
+
+    assert route_config.generation_config.approved_budgets.max_adk_llm_calls == 32
+
+
 def test_shadow_generation_live_smoke_env_accepts_selected_production_caps() -> None:
     route_config = parse_gate5b4c3_shadow_generation_route_env(
         _live_smoke_env(

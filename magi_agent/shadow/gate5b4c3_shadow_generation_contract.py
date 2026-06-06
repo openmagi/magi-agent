@@ -481,6 +481,7 @@ MAX_USER_VISIBLE_PENDING_GENERATION_RUNS = 16
 MAX_USER_VISIBLE_DAILY_GENERATION_RUNS = 1000
 MAX_USER_VISIBLE_COST_USD = 1000.0
 MAX_USER_VISIBLE_DAILY_COST_USD = 100_000.0
+MAX_USER_VISIBLE_ADK_LLM_CALLS = 64
 
 
 class Gate5B4C3ShadowGenerationBudgets(_Gate5B4C3Model):
@@ -502,6 +503,7 @@ class Gate5B4C3ShadowGenerationBudgets(_Gate5B4C3Model):
         default=16_384,
         alias="maxDiagnosticArtifactBytes",
     )
+    max_adk_llm_calls: int = Field(default=8, alias="maxAdkLlmCalls")
     max_concurrent_generation_runs: int = Field(
         default=1,
         alias="maxConcurrentGenerationRuns",
@@ -527,6 +529,7 @@ class Gate5B4C3ShadowGenerationBudgets(_Gate5B4C3Model):
             self.max_total_estimated_tokens,
             self.max_diagnostic_output_preview_bytes,
             self.max_diagnostic_artifact_bytes,
+            self.max_adk_llm_calls,
             self.max_concurrent_generation_runs,
             self.max_pending_generation_runs,
             self.max_daily_generation_runs,
@@ -554,6 +557,8 @@ class Gate5B4C3ShadowGenerationBudgets(_Gate5B4C3Model):
             raise ValueError("diagnostic preview budget exceeds first-slice limit")
         if self.max_diagnostic_artifact_bytes > 16_384:
             raise ValueError("diagnostic artifact budget exceeds first-slice limit")
+        if self.max_adk_llm_calls > MAX_USER_VISIBLE_ADK_LLM_CALLS:
+            raise ValueError("ADK LLM call budget exceeds selected user-visible limit")
         if self.max_concurrent_generation_runs > MAX_USER_VISIBLE_CONCURRENT_GENERATION_RUNS:
             raise ValueError("concurrency cap exceeds selected user-visible limit")
         if self.max_pending_generation_runs > MAX_USER_VISIBLE_PENDING_GENERATION_RUNS:
@@ -1047,6 +1052,7 @@ def _request_exceeds_approved_budgets(
         or requested.max_diagnostic_output_preview_bytes
         > approved.max_diagnostic_output_preview_bytes
         or requested.max_diagnostic_artifact_bytes > approved.max_diagnostic_artifact_bytes
+        or requested.max_adk_llm_calls > approved.max_adk_llm_calls
         or requested.max_concurrent_generation_runs > approved.max_concurrent_generation_runs
         or requested.max_pending_generation_runs > approved.max_pending_generation_runs
         or requested.max_daily_generation_runs > approved.max_daily_generation_runs

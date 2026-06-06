@@ -83,7 +83,6 @@ _ALLOWED_AGENT_KWARGS = (
 _ALLOWED_RUNNER_KWARGS = ("agent", "app_name", "auto_create_session", "session_service")
 _ALLOWED_RUN_ASYNC_KWARGS = ("new_message", "run_config", "session_id", "user_id")
 _MAX_MANUAL_TOOL_CONTINUATIONS = 4
-_MAX_SELECTED_FULL_TOOLHOST_LLM_CALLS = 8
 _MAX_MANUAL_TOOL_RESULTS_BYTES = 8192
 _ERROR_REDACTION_RE = re.compile(
     r"(?:"
@@ -631,7 +630,10 @@ class Gate5B4C3LiveRunnerBoundary:
             "session_id": _shadow_session_id(request),
             "new_message": message,
         }
-        run_config = _selected_full_toolhost_run_config(selected_full_toolhost)
+        run_config = _selected_full_toolhost_run_config(
+            selected_full_toolhost,
+            max_llm_calls=request.budgets.max_adk_llm_calls,
+        )
         if run_config is not None:
             run_kwargs["run_config"] = run_config
 
@@ -1696,10 +1698,14 @@ def _no_tool_finalizer_message(runner_input: object) -> str:
     )
 
 
-def _selected_full_toolhost_run_config(enabled: bool) -> object | None:
+def _selected_full_toolhost_run_config(
+    enabled: bool,
+    *,
+    max_llm_calls: int,
+) -> object | None:
     if not enabled:
         return None
-    return _run_config(max_llm_calls=_MAX_SELECTED_FULL_TOOLHOST_LLM_CALLS)
+    return _run_config(max_llm_calls=max_llm_calls)
 
 
 def _no_tool_finalizer_run_config() -> object | None:
