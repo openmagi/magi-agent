@@ -22,6 +22,6 @@ append-only audit ledger: the durable record of policy snapshots, receipts, vali
 
 Document Homebrew install as the normal user path and source checkout as the development fallback.
 
-Current docs may show git clone, npm install, npm run magi -- init, npm run magi -- doctor, and npm run magi -- start only as source fallback, provided `start` is described as the local docs/development server rather than live runtime activation.
+Current docs should present Homebrew as the normal install path. Source checkout instructions are for contributors and should use `uv` plus the Python entrypoints, not the old JavaScript runtime command names.
 
 Do not say the current cloud CLI installs or starts a local runtime.

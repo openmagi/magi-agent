@@ -1,14 +1,14 @@
 # ToolHost
 
-Tool catalog, ToolManifest schema, ToolRegistry, and tool dispatch (currently BLOCKED).
+Tool catalog, ToolManifest schema, ToolRegistry, and governed tool dispatch.
 
-The tool system is built on ToolManifest (tools/manifest.py) with comprehensive metadata (permission, budget, dangerous, parallel_safety, side_effect_class), ToolRegistry (tools/registry.py) for registration, and dispatcher.py for execution. All tool dispatch is currently BLOCKED (toolDispatchAllowed=False). Tool policy is enforced via hooks and harness rules.
+The tool system is built on ToolManifest (tools/manifest.py) with comprehensive metadata (permission, budget, dangerous, parallel_safety, side_effect_class), ToolRegistry (tools/registry.py) for registration, dispatcher.py for execution, and the ADK tool adapter for model-facing attachment. Local first-party tools run through this governed path once a provider key is configured. Tool policy is enforced via permission mode, hooks, evidence receipts, and harness rules.
 
 ## Tool catalog and ToolManifest
 
-The tool catalog (tools/catalog.py) defines core tools, ALL default-off: FileRead, FileWrite, FileEdit, Glob, Grep, Bash (dangerous, requires-approval), TestRun (dangerous, timeout 300s), GitDiff, AskUserQuestion, EnterPlanMode, ExitPlanMode, ArtifactCreate, ArtifactRead, plus 18 more. Each tool is declared via a ToolManifest (tools/manifest.py) with comprehensive metadata.
+The tool catalog (tools/catalog.py) defines core tools such as FileRead, FileWrite, FileEdit, PatchApply, Glob, Grep, Bash (dangerous, requires approval), TestRun (dangerous, timeout 300s), GitDiff, TodoWrite, AskUserQuestion, EnterPlanMode, ExitPlanMode, ArtifactCreate, and ArtifactRead. Each tool is declared via a ToolManifest (tools/manifest.py) with comprehensive metadata.
 
-ToolRegistry (tools/registry.py) manages ToolRegistration records with register/enable/disable/list_available operations. The dispatcher (tools/dispatcher.py) performs permission + budget checking but is currently BLOCKED (toolDispatchAllowed=False). Tool policy enforcement happens through the hook system: beforeToolUse fires before each call and can deny it, afterToolUse fires after execution and records evidence.
+ToolRegistry (tools/registry.py) manages ToolRegistration records with register/enable/disable/list_available operations. The dispatcher (tools/dispatcher.py) performs permission and budget checking, then either executes the registered handler or returns a governed denial. Tool policy enforcement happens through the hook system: beforeToolUse fires before each call and can deny it, afterToolUse fires after execution and records evidence.
 
 The full ToolManifest has 30 fields. Key fields shown above; see tools/manifest.py for the complete schema including output_schema, cost_class (free | metered | premium), latency_class (inline | background), adk_tool_type, preconditions, postconditions, transient_failure_classes, capability_tags, and the nested Budget model (max_calls_per_turn, max_parallel, output_chars, transcript_chars).
 
@@ -46,7 +46,7 @@ Tools can be denied at the beforeToolUse hook point based on policy. The tool ev
 
 ## HarnessRule actions for tools
 
-HarnessRule (TypeScript) defines typed actions that the runtime evaluates at beforeCommit or afterToolUse trigger points. Several action types directly govern tool behavior.
+Evidence contracts and harness policies define typed actions that the runtime evaluates at beforeCommit or afterToolUse trigger points. Several action types directly govern tool behavior.
 
 - require_tool: the turn must include a call to the named tool before committing. Fields: type, toolName.
 - require_tool_input_match: a specific tool must be called with input matching a pattern. Fields: type, toolName, inputPath, pattern.
