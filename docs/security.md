@@ -1,72 +1,28 @@
 # Security
 
-Magi Agent treats permissions and evidence as runtime concerns.
+Security starts with runtime boundaries, default-off authority, and projection control.
 
-## Secrets
+Keep secrets out of model-visible context, make tools least-privilege, require approvals for side effects, and audit every governed transition.
 
-- Keep provider and integration keys out of prompts.
-- Do not commit `.env` files.
-- Do not project raw auth material to users or logs.
-- Use digest-safe evidence when a secret-bearing action must be audited.
+## Secret hygiene
 
-Common secret sources:
+Secrets should live in environment variables or a deployment secret manager, not prompts, docs examples, model-visible context, memory writes, or output projections.
 
-- model provider keys;
-- integration API keys;
-- channel tokens;
-- server gateway tokens;
-- local files that contain credentials;
-- external connector session material.
+Governed output projection must exclude raw tool output, hidden reasoning, private paths, secrets, and unsupported claims.
 
-## Workspace safety
+## Least privilege and default-off authority
 
-Path-sensitive tools should stay inside the configured workspace root. File
-mutation tools should record receipts and support rollback or repair where
-appropriate.
+Expose only the tools and integration scopes required by the workflow. Use default-off settings for new live authority, especially model providers, tool execution, MCP, browser control, workspace mutation, and external delivery.
 
-Use plan mode for inspection-only work:
+Runtime-enforced control should be auditable through receipts and append-only audit ledger entries.
 
-```bash
-magi --mode plan "Review this repository and propose a fix"
-```
+## Security checklist
 
-Use act mode only when mutations are intended:
+Before enabling any production authority, review this checklist.
 
-```bash
-magi --mode act "Apply the approved fix"
-```
-
-## External authority
-
-External systems should require explicit integration settings and scoped
-credentials. Avoid broad credentials when a narrower token or toolkit scope is
-available.
-
-High-authority actions include:
-
-- writing files;
-- running shell commands;
-- sending channel messages;
-- calling external APIs with credentials;
-- spending money or consuming quota;
-- updating memory or durable knowledge;
-- scheduling background work.
-
-## Public Projection
-
-Public events and final answers should avoid:
-
-- raw provider request or response bodies;
-- hidden reasoning;
-- private filesystem paths;
-- auth headers and cookies;
-- secret-bearing URLs;
-- customer or workspace payloads that were not meant for display.
-
-Prefer digest-safe receipts and short public summaries.
-
-## Local Server Safety
-
-`magi-agent serve` is convenient for local work. Before exposing it beyond
-trusted localhost, set `GATEWAY_TOKEN`, review enabled feature flags, and put the
-server behind an authenticated network boundary.
+- API keys are stored in .magi-agent/env.local or environment variables, never committed to git.
+- Default-off boundaries remain disabled unless you have explicitly reviewed and enabled them.
+- Dangerous tools (Bash, TestRun) require approval before execution.
+- Authority flags in RuntimeConfig are all Literal[False] — production authority is a separate rollout step.
+- Evidence enforcement is set to audit mode by default. Switch to block_final_answer only after testing.
+- Memory writes are blocked. Read-only memory adapters are the only supported mode.

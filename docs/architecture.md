@@ -1,58 +1,52 @@
 # Architecture
 
-Magi Agent is a local agent runtime wrapped with policy, tools, evidence, and
-projection. It uses model-runner primitives while keeping the user-facing
-contract centered on work: context, tools, receipts, validation, repair, and
-safe output.
+The two-plane architecture behind Magi Agent composable determinism.
 
-## Core layers
+Magi Agent separates the model-visible loop from the runtime-only control plane so policy, evidence, repair, projection, and audit can govern every state transition.
 
-| Layer | Role |
-| --- | --- |
-| Context projector | Builds model-visible context |
-| Runner boundary | Calls the model/runtime runner |
-| ToolHost | Owns tool execution and approvals |
-| Evidence ledger | Records public-safe receipts |
-| Validators | Check claims, actions, and completion |
-| Repair policy | Decides retry, ask, downgrade, block, or abstain |
-| Output projector | Renders user-visible output |
+## Two-plane architecture
 
-## Design rule
+The primary architecture is not a tall pipeline. It is a two-plane loop: model-visible proposals on one side, runtime-only control state on the other.
 
-The model can propose. The runtime decides what becomes state, memory, file
-content, external side effect, or user-visible output.
+The model proposes actions, claims, and drafts. The runtime decides when those proposals become state, evidence, output, memory, artifacts, or external side effects.
 
-## Data Flow
+### Two-plane architecture
 
-```text
-user request
-  -> context projector
-  -> model runner
-  -> tool and permission boundary
-  -> evidence ledger
-  -> validators and repair policy
-  -> output projector
-  -> dashboard, CLI, API, or channel surface
+```
+MODEL-VISIBLE LOOP                  RUNTIME-ONLY CONTROL PLANE
+
+User request
+    |
+    v
+Allowed context packet   <--------- Policy snapshot
+    |                               tools, approvals, evidence rules,
+    v                               repair rules, projection rules
+ADK model proposal
+    |  action / claim / draft
+    v
+Boundary checks          ---------> ToolHost / activity boundary
+    |                               source, file, delivery, child,
+    |                               memory, artifact, workspace
+    v
+Model can continue       <--------- Receipts + evidence ledger
+                                    source spans, approval receipts,
+                                    file/test/calculation/delivery proof
+
+Final answer/artifact     <-------- Validators + repair/fallback policy
+                                    unsupported claim -> repair, downgrade,
+                                    abstain, block, or ask approval
+
+User-visible projection   <-------- Output projector + audit checkpoint
 ```
 
-## Runtime-only State
+## Google ADK substrate, Magi Agent contract
 
-The model should not receive everything the runtime knows. Runtime-only state
-can include private logs, raw tool output, credential-bearing payloads, hidden
-provider details, and audit data. The context projector decides which bounded
-context is safe and useful for the next model step.
+Google ADK provides model/tool orchestration primitives. Magi Agent defines the higher-level runtime contract: policy snapshot, context projection, ToolHost, source ledger, claim graph, validators, repair/fallback policy, output projector, and append-only audit ledger.
 
-## Public Surface
+Where ADK-backed surfaces are marked default-off, docs should describe architecture and contracts without implying live production authority is enabled.
 
-The public OSS package exposes:
+## Why hooks alone are not enough
 
-- `magi` for terminal work;
-- `magi-agent serve` for the HTTP API and dashboard;
-- `/dashboard` for local operator visibility;
-- `/health` and `/healthz` for readiness;
-- optional streaming and tool-admin routes when enabled.
+A hook can inspect a lifecycle payload. It usually cannot define first-class source ledgers, claim graphs, context projection state, repair state, or output projection state.
 
-## Extension Surface
-
-Skills, hooks, contracts, tool policy, memory policy, and integration settings
-extend the runtime without requiring a second agent implementation.
+Magi Agent exposes first-party level of control as composable runtime surfaces so a harness can define state, evidence, boundaries, repair, and projection directly.

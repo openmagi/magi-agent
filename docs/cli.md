@@ -1,137 +1,52 @@
 # CLI
 
-Magi Agent installs two commands:
+Document the installed Magi Agent CLI, local dashboard command, and source checkout fallback.
 
-```bash
-magi
-magi-agent
+Use `magi` for CLI work and `magi-agent serve --port 8080` for the local HTTP API and dashboard.
+
+## Installed CLI commands
+
+Homebrew installs both `magi` and `magi-agent`.
+
+`magi` is the headless and interactive CLI. `magi-agent serve --port 8080` starts the local HTTP API and dashboard.
+
+First-run provider/model/API-key/workspace/recipe/agent setup should happen in the local web UI where possible.
+
+### CLI command surface
+
 ```
-
-`magi` is the terminal work interface. `magi-agent` starts the local runtime
-server and dashboard.
-
-## First commands
-
-```bash
+brew install --force-bottle openmagi/tap/magi-agent
 magi --help
-magi --version
-magi -p "Plan a coding fix"
-magi --output text "Summarize this repository"
-magi --output json "Summarize this repository"
-magi --output stream-json "Summarize this repository"
-magi --mode plan "Review the docs and propose edits"
-magi --mode act "Apply the approved edits"
-```
-
-```bash
 magi-agent --help
-magi-agent serve --port 8080
-```
-
-## Interactive use
-
-Run:
-
-```bash
-magi
-```
-
-The interactive interface keeps a local session and streams public runtime
-events when available.
-
-## One-shot use
-
-```bash
-magi -p "Inspect this repository and list the runnable surfaces"
-cat notes.md | magi --output text "Extract decisions and open questions"
-```
-
-Use one-shot mode for scripts, checks, and quick operator tasks.
-
-The CLI enters non-interactive mode when any of these is true:
-
-- a prompt argument is provided;
-- `--print` or `-p` is provided;
-- stdin is piped or redirected.
-
-## Output modes
-
-Use `--output text` for human-readable terminal output, `--output json` when a
-script needs one structured result, and `--output stream-json` when a caller
-wants incremental runtime events.
-
-```bash
-magi --output text "List the docs pages"
-magi --output json "Return a short status object"
-magi --output stream-json --include-partial-messages "Stream progress"
-```
-
-## Plan and act modes
-
-Use plan mode when you want the agent to inspect and propose before writing:
-
-```bash
-magi --mode plan "Find the likely cause of this failing test"
-```
-
-Use act mode only when writes and tool execution are intended:
-
-```bash
-magi --mode act "Implement the approved fix and run focused tests"
-```
-
-Plan mode is read-oriented. Act mode exposes the fuller local tool surface.
-
-## Permission modes
-
-Permission mode controls how write and execution requests are handled by the
-local CLI runtime:
-
-```bash
-magi --permission-mode default "Inspect this repository"
-magi --permission-mode acceptEdits "Apply the approved patch"
-magi --permission-mode bypassPermissions "Run the approved local smoke"
-```
-
-Use bypass mode only in a trusted workspace where unattended tool execution is
-intended.
-
-## Sessions
-
-Use `--resume` to continue a named local CLI session:
-
-```bash
-magi --resume docs-session "Continue the docs review"
-```
-
-The session log defaults to `~/.magi` and can be relocated with:
-
-```bash
-export MAGI_CLI_SESSION_DIR=/path/to/session-log-root
-```
-
-## Diagnostics
-
-```bash
-magi doctor
-magi auth composio status
-```
-
-These commands report local optional integration state without granting tool
-authority by themselves.
-
-## Server command
-
-```bash
 magi-agent serve --port 8080
 open http://localhost:8080/dashboard
 ```
 
-`magi-agent` accepts `serve` as an explicit command and also supports the same
-port flag at the top level:
+## Current source fallback
 
-```bash
-magi-agent --port 8080
+Magi Agent source fallback is currently a source-checkout script exposed through `npm run magi -- ...`.
+
+Use source checkout commands only when developing the runtime itself.
+
+Do not present the source docs/development server as cloud hosting or production authority.
+
+- Use source-checkout commands only as the current fallback.
+- Do not present the managed-hosting CLI as the local OSS runtime installer.
+- Do not use private tokens in docs examples.
+
+## Local source commands
+
+`init` creates starter files, `doctor` checks the checkout, and `start` runs the local docs/development server. These are source fallback only.
+
+`start` does not contact OpenMagi Cloud, providers, Kubernetes, databases, auth, or billing, and it does not enable production runtime authority.
+
+### Source commands
+
 ```
-
-Use `magi-agent serve --help` to inspect the current server arguments.
+npm run magi -- init
+npm run magi -- init --force
+npm run magi -- doctor
+npm run magi -- start
+npm run magi -- start --port 3010
+npm run magi -- --help
+```

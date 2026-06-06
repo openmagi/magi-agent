@@ -1,131 +1,66 @@
 # Recipes
 
-Recipes are the public way to describe reusable agent workflows. A recipe names
-the work class, selects the policy and harness surfaces that apply, declares the
-allowed tools, and records which evidence must exist before output can be
-trusted.
+Composable workflow definitions that declare policy, evidence rules, and projection for a task type.
 
-Think of a recipe as "plan-as-data": it is not a prompt snippet that asks the
-model to behave. It is a governed contract that the runtime can compile,
-validate, materialize, and project through public-safe events.
+Recipes compile metadata snapshots that declare what packs, evidence, tools, validators, and projection rules apply to a run. The recipe system is implemented and active for metadata compilation; runtime execution of recipe policy is planned.
 
-## Recipe model
+## What recipes are
 
-A useful recipe defines:
+A recipe is a preset for how the agent handles a specific type of task. For example, the coding recipe requires the agent to run tests before claiming it fixed a bug. The research recipe requires source inspection before making factual claims. You can combine multiple recipes, and the runtime enforces all of them automatically.
 
-- a stable recipe id and version;
-- the work role, such as research, coding, office automation, or browser
-  inspection;
-- the tool categories the model may request;
-- permission ceilings and approval requirements;
-- evidence requirements for claims, mutations, calculations, deliveries, and
-  child results;
-- validators and repair policy;
-- projection policy for user-visible output;
-- safe metadata for UI, audit, and saved workflow reuse.
+Recipes compile into metadata that configures the harness engine. The recipe execution engine (which would apply recipes as live runtime policy) is planned but not yet implemented — current enforcement happens through the harness and evidence contract system.
 
-Runtime-private inputs, raw tool output, hidden prompts, credentials, private
-paths, and provider payloads do not belong in recipe metadata. Public recipe
-projection should use identifiers, digests, reason codes, and short safe labels.
+Implementation: the recipe metadata compilation pipeline (RecipePackManifest, ProfileResolutionRequest, ResolvedRecipeProfile, RecipeSnapshot) is implemented and active. Recipe packs compile into snapshots with resolved profiles, selected pack IDs, composition policy, and merged refs. However, no runtime execution engine consumes these snapshots to enforce policy during live runs. Enforcement today comes from harnesses and evidence contracts, not from recipe snapshots.
 
-## Selection flow
+## RecipeSnapshot compilation
 
-Recipe selection usually follows this flow:
+RecipeSnapshot is the compiled output of recipe resolution. It captures the resolved profile, selected and opted-out pack IDs, merged instruction/tool/callback/validator/evidence/audit refs, composition policy metadata, and attachment flags.
 
-1. The user request, CLI mode, route, or explicit recipe reference proposes one
-   or more candidate recipes.
-2. The recipe compiler checks ids, versions, digests, dependencies, runtime
-   contract compatibility, and hard invariants.
-3. The runtime builds an effective policy snapshot from the admitted recipes.
-4. Tool, evidence, approval, repair, and projection behavior is derived from the
-   snapshot.
-5. A public `recipe_selection` event may show requested, applied, or omitted
-   recipes with reason codes.
+The snapshot is metadata-only: it records what policy would apply, but does not itself execute or enforce that policy at runtime. All attachment flags (trafficAttached, executionAttached, routeAttached, runnerAttached, liveToolsAttached, liveCallbacksAttached) are locked to false.
 
-If an explicitly requested recipe is malformed, disabled, unauthorized,
-incompatible, or missing a dependency, it should be omitted with a public reason
-code instead of silently widening authority.
+### RecipeSnapshot fields (Python, implemented)
 
-## Composition rules
+```
+class RecipeSnapshot(BaseModel):
+    snapshot_id: str
+    resolved_profile: Mapping[str, object]
+    selected_pack_ids: tuple[str, ...]
+    opted_out_pack_ids: tuple[str, ...]
+    non_opt_out_pack_ids: tuple[str, ...]
+    composition_policy_metadata: CompositionPolicyMetadata
+    recipe_selection: RecipeSelectionMetadata
+    instruction_refs: tuple[str, ...]
+    tool_refs: tuple[str, ...]
+    callback_refs: tuple[str, ...]
+    validator_refs: tuple[str, ...]
+    approval_gate_refs: tuple[str, ...]
+    evidence_refs: tuple[str, ...]
+    audit_refs: tuple[str, ...]
+    attachment_flags: RecipeAttachmentFlags  # all false
+```
 
-Multiple recipes can be composed when their contracts are compatible. Composition
-should narrow authority or add evidence; it should not smuggle in broader tool
-access.
+## RecipePackManifest and first-party packs
 
-Good composition patterns:
+Each recipe pack is declared as a RecipePackManifest (recipes/compiler.py) with a pack_id, display name, description, task profile selectors, depends_on_pack_ids, and refs to instructions, tools, callbacks, validators, approval gates, evidence, and audit. Packs enforce a metadata-only invariant: live_tool_refs, live_callback_refs, and runner_route_refs must be empty. All attachment_flags are False.
 
-- adding a source-proof harness to a research workflow;
-- adding a delivery-receipt requirement to an office automation workflow;
-- adding a human approval gate to a file mutation workflow;
-- adding a coding evidence gate before completion claims;
-- adding output-budget references for long automation results.
+The runtime defines 16 first-party packs: openmagi.context-safety (hard safety), openmagi.evidence (hard safety), openmagi.agent-methodology (superpowers-compatible), openmagi.superpowers-compat, openmagi.web-acquisition, openmagi.research, openmagi.dev-coding, openmagi.missions (metadata-only), openmagi.memory-agentmemory, openmagi.office-automation, openmagi.spreadsheet-automation, openmagi.browser-automation, openmagi.document-review, openmagi.lightweight-scripting, plus 2 framework packs.
 
-Blocked composition patterns:
+- pack_id: unique identifier (dotted safe ID format, e.g. openmagi.dev-coding)
+- hard_safety: if true, opt_out_allowed and customizable must be false (openmagi.context-safety, openmagi.evidence)
+- opt_out_allowed: whether users can disable this pack (default true for non-hard-safety)
+- task_profile_selectors: task types this pack applies to
+- depends_on_pack_ids: pack dependencies resolved before compilation
+- tool_refs, evidence_refs, validator_refs: metadata refs to pack components
+- attachment_flags: all False (trafficAttached, executionAttached, routeAttached, runnerAttached, liveToolsAttached, liveCallbacksAttached)
 
-- raw private config projected as recipe metadata;
-- duplicated non-idempotent hooks;
-- grant and deny collisions;
-- unbounded retry loops;
-- evidence weakening;
-- implicit recipe fallback when an explicit required recipe was rejected.
+## Profile resolution
 
-## Saved workflows
+ProfileResolutionRequest provides five configuration layers: userProfile, workspacePolicy, taskProfile, recipePackConfig, and runtimeContext. These layers are deep-merged (with sensitive key sanitization) to produce a ResolvedRecipeProfile.
 
-A saved workflow can be represented as a recipe-backed command. The saved entry
-should keep:
+The resolved profile records selected_pack_ids, opted_out_pack_ids, and a CompositionPolicyMetadata that captures merge semantics (validatorMerge: all_of, evidenceMerge: union), budget caps, memory mode, side-effect posture, and provider/tool conflict detection.
 
-- workflow id and version;
-- owner-safe reference;
-- source digest;
-- compatible runtime contract version;
-- promotion history;
-- selected recipe refs;
-- policy snapshot digest.
+## What recipes do not do today
 
-Invoking the saved workflow should re-materialize and re-validate the recipe
-instead of trusting stale compiled state.
+Recipes do not execute policy. There is no recipe execution engine that reads a RecipeSnapshot and enforces tool permissions, evidence requirements, or projection rules during a live run. That enforcement comes from harnesses (HarnessEngine) and evidence contracts (EvidenceContract), which are fully implemented and active.
 
-## First-party recipes
-
-Magi Agent includes first-party recipes and recipe contracts for these public
-work classes:
-
-- Research: `openmagi.research` style selection, research agents, and research
-  child runner recipes. Governs source proof, claim graph, synthesis,
-  cross-review, and final projection.
-- Coding: coding mutation, coding evidence gate, coding subagents, and coding
-  ownership manifest. Governs read-before-edit, stale rejection, patch/diff/test
-  evidence, role-scoped child work, and false-success blocking.
-- General automation: `automation.*` presets and package boundaries. Governs
-  planning, research, files, office, browser inspection/action, scout work,
-  approvals, and receipts.
-- Memory: memory recall and memory write recipes. Governs recall authority,
-  write boundaries, compaction, and source authority.
-- Self-improvement: review and promotion recipes. Governs eval capture, review
-  gates, rollback, and drift watch.
-- Learning usage: learning usage recipes. Governs local evaluation and safe
-  usage contracts.
-
-First-party recipes are public docs and contract examples, not hosted deployment
-instructions. They should remain usable for local, source, and self-hosted
-runtime operators.
-
-## Authoring checklist
-
-- Use a public recipe id such as `vendor.workflow-name`.
-- Keep versions explicit.
-- Prefer tool categories over raw implementation details.
-- Declare the evidence that must exist before a claim can be projected.
-- Require approval for mutation, delivery, spend, high-authority credentials,
-  browser actions, and external side effects.
-- Use public reason codes for blocked or omitted behavior.
-- Keep recipe output digest-safe.
-- Test composition with both allowed and rejected cases.
-
-## Related docs
-
-- [Harnesses](harnesses.md)
-- [First-party packs](first-party-packs.md)
-- [Runtime](runtime.md)
-- [Tools](tools.md)
-- [Contracts](contracts.md)
+The conceptual interfaces ToolHostRequest, ToolHostReceipt, RepairDecision, ProjectionResult, and ValidationResult are not implemented. The real enforcement boundaries are the 15 hook points (HookPoint enum) and the dedicated boundary modules (evidence/tool_boundary.py, evidence/enforcement_boundary.py, memory/write_boundary.py, runtime/commit_boundary.py, artifacts/delivery_boundary.py, runtime/child_runner_boundary.py, runtime/projection_write_boundary.py).
