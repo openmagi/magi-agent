@@ -436,28 +436,7 @@ class _EditRetryLoopControl(BaseLoopControl):
 
 
 class _ResilienceLoopControl(BaseLoopControl):
-    """Thin LoopControl adapter delegating to MagiResiliencePlugin.
-
-    Wires ``after_tool_callback`` and ``on_model_error_callback`` from the
-    existing plugin. ``on_model_error_callback`` is not a LoopControl hook
-    (it is a plugin-level concern), so only ``after_tool`` is forwarded here.
-    The resilience plugin's ``on_model_error_callback`` and ``after_run_callback``
-    are preserved by keeping the plugin itself registered ONLY via the adapter
-    which delegates the compatible hooks, while the plugin-level-only hooks
-    (on_model_error_callback, after_run_callback) must remain accessible.
-
-    Implementation note: we keep the resilience plugin as a pure LoopControl
-    adapter for the ``after_tool`` hook; the model-error and after-run callbacks
-    are not part of the LoopControl protocol. To preserve them, the adapter
-    exposes a ``plugin`` attribute so the ControlPlanePlugin's base class can
-    invoke them as needed — but those hooks live outside the plane's fan-out.
-
-    Simplified approach: retain the resilience plugin's full callback surface
-    by also forwarding on_model_error via a side-channel on the ControlPlanePlugin.
-    Since the ControlPlanePlugin IS a BasePlugin, it can implement
-    on_model_error_callback and after_run_callback itself, delegating to any
-    resilience control that exposes them.
-    """
+    """Thin LoopControl adapter delegating ``after_tool_callback`` to MagiResiliencePlugin."""
 
     def __init__(self, plugin: Any) -> None:
         self._plugin = plugin
@@ -526,9 +505,9 @@ class _ExtendedControlPlanePlugin(ControlPlanePlugin):
       plugins so nothing grows unbounded across turns.
     """
 
-    def __init__(self, plane: ControlPlane, resilience_plugin: Any | None) -> None:
+    def __init__(self, plane: ControlPlane, resilience_plugin: Any | None = None) -> None:
         super().__init__(plane)
-        self._resilience = resilience_plugin
+        # resilience_plugin param kept for call-site compatibility; no longer stored.
 
     async def on_tool_error_callback(
         self,
@@ -568,13 +547,28 @@ class _ExtendedControlPlanePlugin(ControlPlanePlugin):
         llm_request: Any,
         error: Exception,
     ) -> Any:
-        if self._resilience is None:
-            return None
-        return await self._resilience.on_model_error_callback(
-            callback_context=callback_context,
-            llm_request=llm_request,
-            error=error,
-        )
+        """Forward to the first registered adapter whose plugin implements on_model_error_callback.
+
+        Fan-out policy: first non-None return wins (consistent with on_tool_error_callback
+        and ADK PluginManager behaviour). ADK 1.33 verified signature:
+            async def on_model_error_callback(self, *, callback_context, llm_request, error)
+            -> Optional[LlmResponse]
+        """
+        for ctrl in self._p._controls:
+            plugin = getattr(ctrl, "_plugin", None)
+            if plugin is None:
+                continue
+            handler = getattr(plugin, "on_model_error_callback", None)
+            if not callable(handler):
+                continue
+            result = await handler(
+                callback_context=callback_context,
+                llm_request=llm_request,
+                error=error,
+            )
+            if result is not None:
+                return result
+        return None
 
     async def after_run_callback(
         self,
@@ -680,27 +674,13 @@ def build_default_plugin(
 ) -> _ExtendedControlPlanePlugin:
     """Build the single ControlPlanePlugin for runner construction.
 
-    Returns an ``_ExtendedControlPlanePlugin`` that also forwards
-    resilience-plugin-level callbacks (on_model_error_callback, after_run_callback)
-    so those subsystems keep working after the migration to the plane.
+    Returns an ``_ExtendedControlPlanePlugin`` that forwards all three
+    extended callbacks (on_tool_error_callback, on_model_error_callback,
+    after_run_callback) via generic fan-out over the plane's registered controls.
     """
     env = os_environ if os_environ is not None else dict(os.environ)
-
-    # Build the plane.
     plane = build_default_plane(os_environ=env)
-
-    # Extract the resilience plugin (if any) from the resilience adapter so we
-    # can pass it to the extended plugin for forwarding model-error callbacks.
-    resilience_plugin = None
-    for ctrl in plane._controls:
-        plugin = getattr(ctrl, "_plugin", None)
-        if plugin is not None:
-            from magi_agent.adk_bridge.resilience_plugin import MagiResiliencePlugin
-            if isinstance(plugin, MagiResiliencePlugin):
-                resilience_plugin = plugin
-                break
-
-    return _ExtendedControlPlanePlugin(plane, resilience_plugin)
+    return _ExtendedControlPlanePlugin(plane)
 
 
 def _is_true(value: str) -> bool:
