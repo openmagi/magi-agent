@@ -33,13 +33,16 @@ The harness includes a repair policy module (harness/repair_policy.py) that defi
 - RepairDecision: action, attempt_index, reason_codes, plan_id.
 - When attempt_index exceeds max_attempts or the actions list, the action falls back to block with reason_codes (repair_attempt_limit_exceeded).
 
-## HarnessRule enforcement
+## Harness policy enforcement
 
-HarnessRule (TypeScript, policyTypes.ts) defines per-rule enforcement as either audit or block_on_fail. When enforcement is audit, the rule violation is logged but does not block the turn. When enforcement is block_on_fail, a failing rule triggers the commit boundary block plan with a retryable flag.
+Harness policies define per-rule enforcement as either audit or block-on-fail.
+When enforcement is audit, the violation is recorded without stopping the turn.
+When enforcement is block-on-fail, a failing rule produces a commit-boundary
+block plan with a retryable flag.
 
-- HarnessRuleEnforcement: audit (log only) or block_on_fail (block the turn).
-- HarnessRuleAction types: require_tool (must call a specific tool), require_tool_input_match (tool input must match a pattern), llm_verifier (LLM judges the output), block (unconditional block with reason), builtin_preset (activate a named preset).
-- BuiltinPresetId: fact-grounding, answer-quality, self-claim, response-language, deterministic-evidence.
+- Harness enforcement: audit for log-only checks, or block-on-fail for turn-blocking checks.
+- Harness action types: require a specific tool, require tool input to match a pattern, run a verifier, block with a reason, or activate a builtin preset.
+- Builtin preset examples: fact grounding, answer quality, self-claim checks, response-language checks, and deterministic evidence.
 
 ## Current behavior vs future repair framework
 

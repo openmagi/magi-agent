@@ -1,8 +1,8 @@
 # ToolHost API Reference
 
-Reference for ToolManifest full schema (tools/manifest.py), ToolRegistry (tools/registry.py), tool execution flow, ToolEvidenceRecord, and dispatch status (currently BLOCKED).
+Reference for ToolManifest full schema (tools/manifest.py), ToolRegistry (tools/registry.py), tool execution flow, ToolEvidenceRecord, and governed dispatch status.
 
-ToolManifest full schema with permission, budget, dangerous, mutates_workspace, parallel_safety (unsafe/readonly/concurrency_safe), side_effect_class, emits_evidence_types, and tags. ToolRegistry manages ToolRegistration records. Dispatcher is BLOCKED (toolDispatchAllowed=False).
+ToolManifest full schema with permission, budget, dangerous, mutates_workspace, parallel_safety (unsafe/readonly/concurrency_safe), side_effect_class, emits_evidence_types, and tags. ToolRegistry manages ToolRegistration records. The dispatcher performs permission and budget checks before executing registered local handlers or returning governed denial receipts.
 
 ## Tool Execution Flow
 

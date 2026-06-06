@@ -1,6 +1,6 @@
 # Runtime Interfaces
 
-TypeScript and Python interfaces exposed by the Magi Agent runtime for extension.
+Python interfaces exposed by the Magi Agent runtime for extension.
 
 The runtime exposes typed interfaces for turn control, evidence, boundaries, hooks, tools, recipes, and policy. This page catalogs every public interface with its implementation status and actual module path.
 
@@ -68,13 +68,13 @@ HookManifest defines how hooks are registered and configured. It is a Pydantic m
 - http_headers: additional HTTP headers for http-type hooks.
 - http_method: HTTP method for http-type hooks (default POST).
 
-## RuntimePolicy interface (TypeScript)
+## Runtime policy and harness interfaces
 
-RuntimePolicy and RuntimePolicySnapshot are TypeScript interfaces defined in policyTypes.ts. They capture the full policy configuration for a run including approval, verification, delivery, async, retry, response mode, citations, and harness rules.
+Runtime policy and harness state are represented in Python models across runtime, harness, evidence, recipes, and hooks modules. They capture the policy configuration for a run including approval, verification, delivery, retry, response mode, citations, and harness rules.
 
-- RuntimePolicy: approval (ApprovalPolicy), verification (VerificationPolicy), delivery (DeliveryPolicy), async (AsyncPolicy), retry (RetryPolicy), responseMode (ResponseModePolicy), citations (CitationsPolicy), harnessRules (HarnessRule[]). Implemented and active.
-- RuntimePolicySnapshot: policy (RuntimePolicy) + status (RuntimePolicyStatus with executableDirectives, userDirectives, harnessDirectives, advisoryDirectives, warnings). Implemented and active.
-- HarnessRule: id, sourceText, enabled, trigger, condition, action, enforcement, timeoutMs, priority. Implemented and active.
+- Policy snapshot: approval, verification, delivery, retry, response mode, citations, and harness directives for the current turn.
+- Runtime status: executable directives, user directives, harness directives, advisory directives, and warnings.
+- Harness rules: id, source text, enabled flag, trigger, condition, action, enforcement, timeout, and priority.
 
 ## Conceptual interfaces (not implemented)
 

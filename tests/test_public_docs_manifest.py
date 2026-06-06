@@ -20,6 +20,20 @@ PLANNING_ONLY_MARKERS = (
     "stacked PR retarget",
     "worktree:",
 )
+STALE_RUNTIME_MARKERS = (
+    "ADK invocation is scaffolded but disabled",
+    "ADK invocation DISABLED",
+    "ADK Runner (currently DISABLED)",
+    "All tool dispatch is currently BLOCKED",
+    "Dispatcher is BLOCKED",
+    "currently BLOCKED",
+    "toolDispatchAllowed=False",
+    "HarnessRule (TypeScript",
+    "RuntimePolicy interface (TypeScript",
+    "TypeScript and Python interfaces exposed",
+    "policyTypes.ts",
+    "npm run magi",
+)
 
 
 def _manifest_pages() -> list[dict[str, str]]:
@@ -63,3 +77,13 @@ def test_machine_readable_docs_do_not_include_planning_only_markers() -> None:
         text = path.read_text(encoding="utf-8")
         for marker in PLANNING_ONLY_MARKERS:
             assert marker not in text
+
+
+def test_public_docs_do_not_describe_stale_disabled_or_typescript_runtime_state() -> None:
+    public_docs = [ROOT / page["path"] for page in _manifest_pages()]
+    public_docs.extend((DOCS / "llms.txt", DOCS / "llms-full.txt"))
+
+    for path in public_docs:
+        text = path.read_text(encoding="utf-8")
+        for marker in STALE_RUNTIME_MARKERS:
+            assert marker not in text, f"{marker!r} leaked into {path.relative_to(ROOT)}"

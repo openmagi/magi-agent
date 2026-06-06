@@ -38,7 +38,7 @@ The runtime exposes typed hook points (hooks/manifest.py, 15 HookPoint values), 
 - Boundary modules: See [Boundaries](/docs/boundaries) for the seven implemented boundary modules and the Intent-to-Receipt pattern.
 - Hook points: See [Hook Points](/docs/hook-points) for the 15 HookPoint enum values, HookRegistry registration, and HookBus dispatch.
 - Runtime interfaces: See [Runtime Interfaces](/docs/runtime-interfaces) for TurnInput, HookBusRunResult, EvidenceLedgerEntry, ToolRegistration, RecipeSnapshot, and all typed Python interfaces.
-- ToolHost: See [ToolHost](/docs/toolhost) for ToolManifest schema, ToolRegistry, tool catalog (all default-off), and dispatch (currently BLOCKED).
+- ToolHost: See [ToolHost](/docs/toolhost) for ToolManifest schema, ToolRegistry, first-party tool catalog, and governed dispatch.
 
 ## I want to self-host
 
