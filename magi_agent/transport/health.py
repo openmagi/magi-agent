@@ -2,9 +2,15 @@ from __future__ import annotations
 
 import hashlib
 import os
+from pathlib import Path
 
 from magi_agent.composio.config import resolve_composio_config
 from magi_agent.composio.health import composio_health_metadata
+from magi_agent.gates.gate5b_full_toolhost import (
+    Gate5BFullToolBundle,
+    Gate5BFullToolHostConfig,
+    build_gate5b_full_toolhost_bundle,
+)
 from magi_agent.runtime.openmagi_runtime import OpenMagiRuntime
 from magi_agent.transport.chat import (
     build_gate2_sandbox_workspace_canary_config_from_env,
@@ -148,12 +154,15 @@ def healthz_payload(runtime: OpenMagiRuntime) -> dict[str, object]:
         },
     }
     if user_visible_output_allowed and canary_routing_allowed:
-        body.update(_user_visible_canary_ready_envelope())
+        body.update(_user_visible_canary_ready_envelope(runtime))
     return body
 
 
-def _user_visible_canary_ready_envelope() -> dict[str, object]:
-    return {
+def _user_visible_canary_ready_envelope(
+    runtime: OpenMagiRuntime,
+) -> dict[str, object]:
+    bundle = _healthz_gate5b_full_toolhost_bundle(runtime)
+    envelope: dict[str, object] = {
         "status": "python_ready",
         "fallbackStatus": "none",
         "responseAuthority": "python",
@@ -186,6 +195,85 @@ def _user_visible_canary_ready_envelope() -> dict[str, object]:
             "productionDbWritesAllowed": False,
         },
     }
+    if bundle is not None and bundle.status == "ready":
+        allowed_tool_names = list(bundle.exposed_tool_names)
+        envelope["authority"].update(
+            {
+                "toolDispatchAllowed": True,
+                "selectedWorkspaceMutationAllowed": True,
+                "productionWorkspaceMutationAllowed": False,
+                "bashCommandAllowed": "Bash" in allowed_tool_names,
+            }
+        )
+        envelope["safety"].update(
+            {
+                "toolsActive": True,
+                "readOnlyToolsActive": False,
+                "toolHostMode": "selected_full_toolhost",
+                "allowedToolNames": allowed_tool_names,
+                "selectedWorkspaceMutationAllowed": True,
+                "productionWorkspaceMutationAllowed": False,
+                "writeMutationAllowed": True,
+                "bashCommandAllowed": "Bash" in allowed_tool_names,
+            }
+        )
+        attachment_flags = bundle.attachment_flags.model_dump(
+            by_alias=True,
+            mode="json",
+        )
+        forbidden = sorted(
+            name
+            for name in allowed_tool_names
+            if name not in set(bundle.host.config.allowed_tool_names)
+        )
+        envelope["tooling"] = {
+            "schemaVersion": "gate5b.selectedFullToolhost.v1",
+            "mode": "selected_full_toolhost",
+            "toolsPolicy": "selected_full_toolhost",
+            "allowedToolNames": allowed_tool_names,
+            "forbiddenToolsExposed": forbidden,
+            "receiptCount": bundle.host.counter.receipt_count,
+            "routeAttached": attachment_flags["routeAttached"],
+            "productionAttached": attachment_flags["productionAttached"],
+            "workspaceRootDigest": bundle.workspace_root_digest,
+            "attachmentFlags": attachment_flags,
+            "receiptLimits": {
+                "maxToolCallsPerTurn": bundle.host.config.max_tool_calls_per_turn,
+                "maxPerToolOutputBytes": bundle.host.config.max_per_tool_output_bytes,
+                "commandTimeoutMs": bundle.host.config.command_timeout_ms,
+            },
+        }
+    return envelope
+
+
+def _healthz_gate5b_full_toolhost_bundle(
+    runtime: OpenMagiRuntime,
+) -> Gate5BFullToolBundle | None:
+    config = getattr(runtime, "gate5b_full_toolhost_config", None)
+    if not isinstance(config, Gate5BFullToolHostConfig):
+        return None
+    return build_gate5b_full_toolhost_bundle(
+        config=config,
+        scope={
+            "selectedBotDigest": _sha256_text_digest(runtime.config.bot_id),
+            "selectedOwnerDigest": _sha256_text_digest(runtime.config.user_id),
+            "environment": getattr(
+                getattr(runtime, "gate5b_user_visible_chat_route_config", None),
+                "environment",
+                "local",
+            )
+            or "local",
+        },
+        workspace_root=_gate5b_full_toolhost_workspace_root(),
+        tool_registry=runtime.tool_registry,
+    )
+
+
+def _gate5b_full_toolhost_workspace_root() -> Path:
+    configured = os.environ.get("CORE_AGENT_PYTHON_GATE5B_FULL_TOOLHOST_WORKSPACE_ROOT")
+    if configured:
+        return Path(configured)
+    return Path.cwd()
 
 
 def _gate2_sandbox_root_readiness(
