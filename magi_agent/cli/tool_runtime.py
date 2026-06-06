@@ -60,6 +60,21 @@ def build_cli_tool_runtime(
     register_core_tool_manifests(registry)
     bind_core_toolhost_handlers(registry)
 
+    # Optional file & multimodal tools (MAGI_FILE_TOOLS_ENABLED=true).
+    # Guarded here so the gate is evaluated at build time, not import time.
+    from magi_agent.config.env import file_tools_enabled  # noqa: PLC0415
+
+    if file_tools_enabled():
+        from magi_agent.tools.file_tool_manifests import (  # noqa: PLC0415
+            register_file_tool_manifests,
+        )
+        from magi_agent.tools.file_toolhost import (  # noqa: PLC0415
+            bind_file_toolhost_handlers,
+        )
+
+        register_file_tool_manifests(registry)
+        bind_file_toolhost_handlers(registry)
+
     dispatcher = ToolDispatcher(registry)
 
     def tool_context_factory(adk_tool_context: object) -> ToolContext:
