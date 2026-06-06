@@ -53,6 +53,24 @@
       "group": "Configure"
     },
     {
+      "slug": "recipes",
+      "title": "Recipes",
+      "path": "docs/recipes.md",
+      "group": "Configure"
+    },
+    {
+      "slug": "harnesses",
+      "title": "Harnesses",
+      "path": "docs/harnesses.md",
+      "group": "Configure"
+    },
+    {
+      "slug": "first-party-packs",
+      "title": "First-party Packs",
+      "path": "docs/first-party-packs.md",
+      "group": "Configure"
+    },
+    {
       "slug": "contracts",
       "title": "Contracts",
       "path": "docs/contracts.md",
@@ -80,6 +98,12 @@
       "slug": "automation",
       "title": "Automation",
       "path": "docs/automation.md",
+      "group": "Operate"
+    },
+    {
+      "slug": "streaming-events",
+      "title": "Streaming Events",
+      "path": "docs/streaming-events.md",
       "group": "Operate"
     },
     {

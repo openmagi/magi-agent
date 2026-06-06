@@ -5,7 +5,7 @@ This walkthrough proves the runtime and dashboard work together.
 ## 1. Install and start the server
 
 ```bash
-brew install openmagi/tap/magi-agent
+brew install --force-bottle openmagi/tap/magi-agent
 magi-agent serve --port 8080
 ```
 

@@ -54,6 +54,9 @@ json
 stream-json
 ```
 
+`stream-json` is the CLI-friendly streaming format. HTTP clients should use the
+SSE routes documented in [API](api.md) and [Streaming events](streaming-events.md).
+
 ## Runtime Modes
 
 ```text
@@ -68,3 +71,10 @@ default
 acceptEdits
 bypassPermissions
 ```
+
+## First-party documentation
+
+- [Recipes](recipes.md)
+- [Harnesses](harnesses.md)
+- [First-party packs](first-party-packs.md)
+- [Streaming events](streaming-events.md)

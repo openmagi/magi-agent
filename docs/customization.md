@@ -57,6 +57,10 @@ when possible. Good rules say:
 - whether the runtime should ask, repair, downgrade, block, or continue;
 - what is safe to show to the user.
 
+For reusable governed workflows, prefer a recipe. Recipes can declare selected
+harnesses, tool categories, approvals, evidence requirements, repair policy, and
+projection behavior. See [Recipes](recipes.md).
+
 ## Model profiles
 
 Model profiles describe capability, context length, latency, cost, and tool
@@ -77,3 +81,7 @@ Start rules in observe/audit mode when possible, review the evidence they would
 require, then make them blocking only when the rule is specific enough. Avoid
 workspace-wide rules that match every task unless the behavior is truly
 universal.
+
+Harnesses are the safety layer for custom workflows. They should fail closed,
+record public-safe receipts, and reject unsupported claims or side effects. See
+[Harnesses](harnesses.md).

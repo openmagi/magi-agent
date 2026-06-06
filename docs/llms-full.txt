@@ -22,7 +22,7 @@ docs instead of carrying a separate product-docs copy.
 ## Quick Install
 
 ```bash
-brew install openmagi/tap/magi-agent
+brew install --force-bottle openmagi/tap/magi-agent
 magi-agent serve --port 8080
 open http://localhost:8080/dashboard
 ```
@@ -61,6 +61,9 @@ Use these docs to answer four questions:
 - [Customization](customization.md)
 - [Runtime](runtime.md)
 - [Tools](tools.md)
+- [Recipes](recipes.md)
+- [Harnesses](harnesses.md)
+- [First-party packs](first-party-packs.md)
 - [Contracts](contracts.md)
 - [Hooks](hooks.md)
 
@@ -69,6 +72,7 @@ Use these docs to answer four questions:
 - [Memory](memory.md)
 - [Skills](skills.md)
 - [Automation](automation.md)
+- [Streaming events](streaming-events.md)
 - [Integrations](integrations.md)
 - [API](api.md)
 - [Deployment](deployment.md)
@@ -110,7 +114,7 @@ transcripts you plan to share.
 
 ```bash
 brew update
-brew install openmagi/tap/magi-agent
+brew install --force-bottle openmagi/tap/magi-agent
 ```
 
 If Homebrew tries to build from source on macOS, update the tap metadata and
@@ -223,7 +227,7 @@ This walkthrough proves the runtime and dashboard work together.
 ## 1. Install and start the server
 
 ```bash
-brew install openmagi/tap/magi-agent
+brew install --force-bottle openmagi/tap/magi-agent
 magi-agent serve --port 8080
 ```
 
@@ -635,6 +639,10 @@ when possible. Good rules say:
 - whether the runtime should ask, repair, downgrade, block, or continue;
 - what is safe to show to the user.
 
+For reusable governed workflows, prefer a recipe. Recipes can declare selected
+harnesses, tool categories, approvals, evidence requirements, repair policy, and
+projection behavior. See [Recipes](recipes.md).
+
 ## Model profiles
 
 Model profiles describe capability, context length, latency, cost, and tool
@@ -655,6 +663,10 @@ Start rules in observe/audit mode when possible, review the evidence they would
 require, then make them blocking only when the rule is specific enough. Avoid
 workspace-wide rules that match every task unless the behavior is truly
 universal.
+
+Harnesses are the safety layer for custom workflows. They should fail closed,
+record public-safe receipts, and reject unsupported claims or side effects. See
+[Harnesses](harnesses.md).
 
 
 ---
@@ -697,16 +709,24 @@ state, memory, artifact content, an external side effect, or final output.
 
 The runtime may emit public events such as:
 
+- `turn_start`
 - `turn_phase`
+- `text_delta`
 - `llm_progress`
 - `tool_start`
 - `tool_progress`
 - `tool_end`
+- `recipe_selection`
 - `control_request`
+- `source_inspected`
+- `citation_gate`
 - `turn_result`
 
 Private paths, secrets, raw provider payloads, and hidden reasoning should not
 be projected as public events.
+
+See [Streaming events](streaming-events.md) for the public event classes, SSE
+wire shape, and sanitization rules.
 
 ## Dashboard Stream
 
@@ -750,6 +770,23 @@ When evidence is missing or a validator blocks completion, the runtime can:
 
 Silent success is the wrong fallback for governed work.
 
+## Recipes and Harnesses
+
+Recipes choose the work contract. Harnesses enforce it. For example, a research
+recipe can select source-proof and final-projection harnesses, while a coding
+recipe can select read-before-edit, mutation, diff, test, and final-projection
+gates.
+
+The runtime core stays generic: it supplies runner, tool, session, memory,
+artifact, callback, event, and projection primitives. Work-class behavior lives
+in public recipe and harness contracts.
+
+Further reading:
+
+- [Recipes](recipes.md)
+- [Harnesses](harnesses.md)
+- [First-party packs](first-party-packs.md)
+
 
 ---
 
@@ -782,6 +819,29 @@ depends on install extras, feature flags, credentials, and runtime mode.
 - artifact delivery;
 - child/delegated work boundaries;
 - runtime health and evidence reporting.
+
+See [First-party packs](first-party-packs.md) for the public pack map and
+[Harnesses](harnesses.md) for the evidence contracts behind these surfaces.
+
+## Native Plugin Categories
+
+Native plugin surfaces group built-in tools by work class:
+
+- artifacts;
+- browser;
+- coding;
+- documents;
+- knowledge;
+- missions;
+- scheduled work;
+- skills;
+- source ledger;
+- subagents;
+- taskboard;
+- web.
+
+These categories are capability groups, not automatic authority grants. A
+recipe or runtime mode still decides which categories can be used for a run.
 
 ## Common Tool Patterns
 
@@ -824,6 +884,474 @@ money, write channels, or operate credentials.
   API writes.
 - Redact secrets and private paths from public events.
 - Keep logs useful enough for audit without exposing raw private payloads.
+
+
+---
+
+# Recipes
+
+Source: docs/recipes.md
+
+# Recipes
+
+Recipes are the public way to describe reusable agent workflows. A recipe names
+the work class, selects the policy and harness surfaces that apply, declares the
+allowed tools, and records which evidence must exist before output can be
+trusted.
+
+Think of a recipe as "plan-as-data": it is not a prompt snippet that asks the
+model to behave. It is a governed contract that the runtime can compile,
+validate, materialize, and project through public-safe events.
+
+## Recipe model
+
+A useful recipe defines:
+
+- a stable recipe id and version;
+- the work role, such as research, coding, office automation, or browser
+  inspection;
+- the tool categories the model may request;
+- permission ceilings and approval requirements;
+- evidence requirements for claims, mutations, calculations, deliveries, and
+  child results;
+- validators and repair policy;
+- projection policy for user-visible output;
+- safe metadata for UI, audit, and saved workflow reuse.
+
+Runtime-private inputs, raw tool output, hidden prompts, credentials, private
+paths, and provider payloads do not belong in recipe metadata. Public recipe
+projection should use identifiers, digests, reason codes, and short safe labels.
+
+## Selection flow
+
+Recipe selection usually follows this flow:
+
+1. The user request, CLI mode, route, or explicit recipe reference proposes one
+   or more candidate recipes.
+2. The recipe compiler checks ids, versions, digests, dependencies, runtime
+   contract compatibility, and hard invariants.
+3. The runtime builds an effective policy snapshot from the admitted recipes.
+4. Tool, evidence, approval, repair, and projection behavior is derived from the
+   snapshot.
+5. A public `recipe_selection` event may show requested, applied, or omitted
+   recipes with reason codes.
+
+If an explicitly requested recipe is malformed, disabled, unauthorized,
+incompatible, or missing a dependency, it should be omitted with a public reason
+code instead of silently widening authority.
+
+## Composition rules
+
+Multiple recipes can be composed when their contracts are compatible. Composition
+should narrow authority or add evidence; it should not smuggle in broader tool
+access.
+
+Good composition patterns:
+
+- adding a source-proof harness to a research workflow;
+- adding a delivery-receipt requirement to an office automation workflow;
+- adding a human approval gate to a file mutation workflow;
+- adding a coding evidence gate before completion claims;
+- adding output-budget references for long automation results.
+
+Blocked composition patterns:
+
+- raw private config projected as recipe metadata;
+- duplicated non-idempotent hooks;
+- grant and deny collisions;
+- unbounded retry loops;
+- evidence weakening;
+- implicit recipe fallback when an explicit required recipe was rejected.
+
+## Saved workflows
+
+A saved workflow can be represented as a recipe-backed command. The saved entry
+should keep:
+
+- workflow id and version;
+- owner-safe reference;
+- source digest;
+- compatible runtime contract version;
+- promotion history;
+- selected recipe refs;
+- policy snapshot digest.
+
+Invoking the saved workflow should re-materialize and re-validate the recipe
+instead of trusting stale compiled state.
+
+## First-party recipes
+
+Magi Agent includes first-party recipes and recipe contracts for these public
+work classes:
+
+- Research: `openmagi.research` style selection, research agents, and research
+  child runner recipes. Governs source proof, claim graph, synthesis,
+  cross-review, and final projection.
+- Coding: coding mutation, coding evidence gate, coding subagents, and coding
+  ownership manifest. Governs read-before-edit, stale rejection, patch/diff/test
+  evidence, role-scoped child work, and false-success blocking.
+- General automation: `automation.*` presets and package boundaries. Governs
+  planning, research, files, office, browser inspection/action, scout work,
+  approvals, and receipts.
+- Memory: memory recall and memory write recipes. Governs recall authority,
+  write boundaries, compaction, and source authority.
+- Self-improvement: review and promotion recipes. Governs eval capture, review
+  gates, rollback, and drift watch.
+- Learning usage: learning usage recipes. Governs local evaluation and safe
+  usage contracts.
+
+First-party recipes are public docs and contract examples, not hosted deployment
+instructions. They should remain usable for local, source, and self-hosted
+runtime operators.
+
+## Authoring checklist
+
+- Use a public recipe id such as `vendor.workflow-name`.
+- Keep versions explicit.
+- Prefer tool categories over raw implementation details.
+- Declare the evidence that must exist before a claim can be projected.
+- Require approval for mutation, delivery, spend, high-authority credentials,
+  browser actions, and external side effects.
+- Use public reason codes for blocked or omitted behavior.
+- Keep recipe output digest-safe.
+- Test composition with both allowed and rejected cases.
+
+## Related docs
+
+- [Harnesses](harnesses.md)
+- [First-party packs](first-party-packs.md)
+- [Runtime](runtime.md)
+- [Tools](tools.md)
+- [Contracts](contracts.md)
+
+
+---
+
+# Harnesses
+
+Source: docs/harnesses.md
+
+# Harnesses
+
+Harnesses are reusable runtime contracts that make a workflow checkable. A
+harness does not replace the model. It defines boundaries around the model:
+which actions are allowed, which evidence is required, when repair is possible,
+and what can become public output.
+
+## Harness lifecycle
+
+A governed run normally passes through these harness stages:
+
+1. **Admission.** Select a recipe, validate dependencies, freeze policy, and
+   reject incompatible authority.
+2. **Context projection.** Build the model-visible packet from allowed request,
+   session, memory, source, and workspace refs.
+3. **Tool boundary.** Route tool proposals through permission, workspace,
+   approval, and provider policy.
+4. **Evidence capture.** Record source, file, calculation, test, approval,
+   browser, delivery, artifact, or child-result receipts.
+5. **Intermediate validation.** Check child output, summaries, memory writes,
+   and artifact drafts before they become next-step context.
+6. **Repair.** Retry, ask, inspect another allowed source, downgrade wording,
+   or block the run when evidence is missing.
+7. **Final projection.** Render only public-safe, supported output and the
+   relevant receipt refs or blockers.
+
+## Harness matrix
+
+- Research determinism: blocks unsupported research claims. Typical evidence:
+  opened source proof, snapshot digest, span refs, claim graph, acceptance
+  criteria, verifier result.
+- Coding: blocks false coding completion claims and unsafe mutations. Typical
+  evidence: read ledger, stale-read check, patch receipt, diff summary, test
+  run, rollback proof, diagnostics.
+- General automation: keeps broad automation observable, approved, and
+  reversible. Typical evidence: control request, approval receipt, path/shell
+  decision, browser artifact, spreadsheet evidence, delivery receipt.
+- Scheduler: models due-work checks without hidden background authority. Typical
+  evidence: schedule ref, lease digest, tick decision, due turn ref, delivery
+  decision.
+- Background task: represents long-running work without promising invisible
+  execution. Typical evidence: task ref, checkpoint ref, resume approval,
+  completion projection.
+- Memory: scopes recall and write behavior to source authority. Typical
+  evidence: namespace ref, source refs, write boundary, compaction digest.
+- Meta-orchestration: accepts or rejects delegated child work. Typical evidence:
+  child envelope, role, evidence refs, inspection verdict, final assembly plan.
+- Browser: separates inspection from side-effectful browser actions. Typical
+  evidence: page artifact ref, screenshot digest, action decision, approval
+  receipt.
+- Office automation: makes generated documents and spreadsheets auditable.
+  Typical evidence: schema check, formula presence, reconciliation totals, write
+  evidence, delivery ref.
+
+## Research harness
+
+Research harnesses treat source-sensitive claims as evidence-bearing objects.
+Reliable research needs more than a URL in the final answer.
+
+The public contract expects:
+
+- action proof for research verbs such as searched, read, reviewed, compared,
+  confirmed, analyzed, and summarized;
+- opened-source proof with snapshot, digest, timestamp, and citeable span refs;
+- rejection of URL-only citations and unopened sources;
+- freshness checks when the claim depends on current information;
+- claim graph support mapping;
+- weak-claim downgrade;
+- unsupported-claim blocking;
+- acceptance criteria extraction;
+- child evidence envelope acceptance before parent synthesis;
+- final projection that omits raw source bodies and private tool payloads.
+
+Repair actions can inspect another allowed source, request clarification,
+downgrade a claim, remove the claim, or report the missing work.
+
+## Coding harness
+
+Coding harnesses model code work as an evidence-producing transaction. The
+runtime should not project "fixed", "tested", or "complete" unless the required
+evidence exists.
+
+The public contract expects:
+
+- read-before-edit and stale-read rejection;
+- patch, file change, and mutation receipts;
+- diff evidence before a completion claim;
+- test or diagnostic evidence for verification claims;
+- safe shell/test-run policy;
+- bounded repair loops;
+- coding subagent roles for inspection, review, and implementation;
+- code intelligence reports using public refs and redacted diagnostics;
+- final projection that can downgrade unsupported success claims.
+
+## General automation harness
+
+General automation is intentionally broader than coding or research, so it
+needs explicit boundaries. The harness owns:
+
+- plan/act transitions;
+- question and approval tools;
+- path and external-directory policy;
+- shell policy and shell receipts;
+- browser evidence and side-effect decisions;
+- spreadsheet read, validation, write, and delivery evidence;
+- output-budget references for large artifacts;
+- background task projection;
+- public control and event projection;
+- package manifests and tool projection for automation packs.
+
+The harness should return a concrete artifact, receipt, control request, or
+blocker. A generated promise that work will happen later is not automation.
+
+## Scheduler harness
+
+Scheduler contracts keep periodic work explicit. A schedule tick should produce
+a public-safe decision describing whether due work was found and whether
+execution or delivery was allowed.
+
+Useful public fields include:
+
+- schedule or source ref;
+- request digest;
+- owner/session-safe digests;
+- lease ref or lease decision;
+- due turn refs;
+- reason codes;
+- delivery status;
+- authority flags.
+
+Scheduler docs should describe local and self-hosted contracts only. Keep
+deployment-specific rollout internals out of public OSS docs.
+
+## Verification
+
+Harness changes should be covered with fixture tests that prove:
+
+- private text, private paths, credentials, and raw provider payloads are not
+  projected;
+- default-off authority stays default-off until explicitly enabled;
+- public projections use refs, digests, statuses, and reason codes;
+- rejected cases fail closed;
+- supported cases produce the expected evidence or event payload.
+
+## Related docs
+
+- [Recipes](recipes.md)
+- [First-party packs](first-party-packs.md)
+- [Streaming events](streaming-events.md)
+- [Contracts](contracts.md)
+- [Security](security.md)
+
+
+---
+
+# First-party Packs
+
+Source: docs/first-party-packs.md
+
+# First-party Packs
+
+First-party packs are Magi-owned recipe, harness, plugin, and tool surfaces for
+common work classes. They make useful agent behavior available without moving
+workflow-specific policy into the generic runtime core.
+
+## Pack rules
+
+First-party packs should:
+
+- stay public and self-hostable;
+- declare authority through recipes, harnesses, and tool metadata;
+- start default-off when they need live providers, external writes, browser
+  side effects, delivery, or long-running execution;
+- expose digest-safe public projections;
+- use approval gates for high-authority work;
+- avoid raw secrets, private paths, hidden prompts, raw provider payloads, and
+  deployment-specific rollout details.
+
+The core runtime provides common primitives. The pack owns the work-class
+semantics.
+
+## General automation presets
+
+The general automation pack exposes these recipe-owned presets:
+
+- `automation.plan`: planning, decomposition, and user questions. Permission
+  ceiling: `read`, `meta`. No mutation tools.
+- `automation.research`: web and source research for automation tasks.
+  Permission ceiling: `read`, `net`, `meta`.
+- `automation.files`: workspace file work. Permission ceiling: `read`, `write`,
+  `meta`. Workspace writes and external directories require approval.
+- `automation.office`: document and spreadsheet work. Permission ceiling:
+  `read`, `write`, `meta`. Artifact evidence and delivery receipts apply.
+- `automation.browser-inspect`: open, snapshot, and scrape browser pages.
+  Permission ceiling: `read`, `net`, `meta`. Inspection only.
+- `automation.browser-act`: click, fill, download, and submit browser actions.
+  Permission ceiling: `read`, `write`, `net`, `meta`. Side-effectful actions
+  require approval.
+- `automation.scout`: broad scouting with constrained tools. Permission
+  ceiling: `read`, `net`, `meta`. No mutation tools.
+
+Alias metadata cannot escalate non-mutating presets into mutating browser
+actions. Public preset projection shows ignored escalation attempts with reason
+codes.
+
+## Automation tools
+
+The general automation harness and plugins define public contracts for:
+
+- user questions and resumable answers;
+- plan-to-act transitions after approval;
+- path access checks;
+- external-directory approval receipts;
+- shell policy and shell policy receipts;
+- browser evidence and side-effect decisions;
+- spreadsheet evidence;
+- web source receipts;
+- background task completion projection;
+- output references for large generated results;
+- package manifests and package tool projection.
+
+These surfaces are designed so a run can show what happened without exposing
+raw tool input, raw browser state, private filesystem paths, or credentials.
+
+## Web acquisition pack
+
+The web acquisition pack separates search, fetch, reader, and browser fallback
+operations from provider implementation details.
+
+Public expectations:
+
+- disabled config returns a disabled decision without provider calls;
+- untrusted providers are blocked;
+- live network access must be explicitly enabled;
+- provider names must be allowlisted;
+- SSRF-sensitive URLs are blocked before provider calls;
+- redirects and blocked markers produce public reason codes;
+- source records use safe refs and digests, not raw page bodies.
+
+Use web acquisition for source discovery and source opening. Use the research
+harness to decide whether the resulting source proof supports a claim.
+
+## Browser pack
+
+Browser pack actions are split into inspection and action surfaces.
+
+Inspection actions include opening pages, snapshots, scraping, and screenshots.
+Action surfaces include click, fill, scroll, download, and submit behavior.
+Side-effectful actions should require an approval receipt tied to the request
+digest.
+
+Public browser output should include safe URL/title text, artifact refs, content
+digests, and reason codes. Raw browser protocol payloads, form values, cookies,
+auth headers, and screenshots containing private material must not be projected
+as public text.
+
+## Office pack
+
+Office automation uses evidence, not promises. Spreadsheet and document work
+should record:
+
+- read evidence for inputs;
+- schema checks for expected columns or sections;
+- formula presence checks when formulas matter;
+- reconciliation totals for numeric claims;
+- validation evidence;
+- write evidence for generated files;
+- delivery claim decisions before claiming a file was sent or attached.
+
+The same pattern applies to other generated artifacts: create the artifact,
+record the ref, verify the claim, then project the result.
+
+## Coding pack
+
+The coding pack owns coding-specific reliability behavior:
+
+- read ledger and stale-read rejection;
+- mutation intent and patch application;
+- diff and test evidence;
+- formatter and diagnostics helpers;
+- code intelligence projection;
+- coding subagent roles;
+- repair loops;
+- final projection that blocks or downgrades unsupported success claims.
+
+It should not grant mutation authority just because the model asks for it. File
+changes, shell commands, and verification claims must pass their contracts.
+
+## Research pack
+
+The research pack owns source-sensitive reasoning:
+
+- local, web, and source-ledger research tool grants;
+- scout research profiles;
+- research child runner envelopes;
+- claim graph construction;
+- source proof verification;
+- repair planning;
+- final projection gates;
+- meta-orchestration roles for multi-child synthesis.
+
+Research output should cite opened source refs and span evidence. Discovery,
+link text, or model memory alone is not enough for source-backed claims.
+
+## Native plugin catalog
+
+Native plugin surfaces group built-in tools by work class. Public categories
+include artifacts, browser, coding, documents, knowledge, missions, scheduled
+work, skills, source ledger, subagents, taskboard, and web.
+
+Native plugins should be described as local runtime capabilities. Availability
+can depend on install extras, feature flags, credentials, provider trust, and
+runtime mode.
+
+## Related docs
+
+- [Recipes](recipes.md)
+- [Harnesses](harnesses.md)
+- [Automation](automation.md)
+- [Tools](tools.md)
+- [Integrations](integrations.md)
 
 
 ---
@@ -1177,6 +1705,10 @@ Recommended fields:
 - public delivery target;
 - evidence requirements.
 
+Scheduler harnesses should project schedule refs, lease or tick decisions, due
+turn refs, delivery status, and reason codes. They should not imply hidden
+background execution when no job, receipt, or blocker exists.
+
 ## Delegation
 
 Delegated work should return an accepted result envelope with public-safe
@@ -1199,6 +1731,150 @@ private URLs, and secret-bearing payloads should not be projected to the user.
 Automation that mutates external systems, spends money, sends messages, changes
 files, or uses high-authority credentials should require explicit approval
 unless the workspace has deliberately allowed unattended execution.
+
+## General automation packs
+
+The first-party general automation pack provides public presets for planning,
+research, file work, office work, browser inspection, browser actions, and scout
+tasks. Each preset has a permission ceiling and tool categories; mutating file,
+browser, delivery, and external-directory work requires approval or an explicit
+runtime policy that allows it.
+
+See [First-party packs](first-party-packs.md) for the preset matrix and
+[Harnesses](harnesses.md) for the automation evidence contracts.
+
+
+---
+
+# Streaming Events
+
+Source: docs/streaming-events.md
+
+# Streaming Events
+
+Magi Agent streams public runtime progress through Server-Sent Events and CLI
+`stream-json` output. Streaming is a projection surface: it should show useful
+operator-visible progress without leaking hidden reasoning, credentials, raw
+provider payloads, private paths, or unredacted tool data.
+
+## Wire formats
+
+HTTP streaming uses SSE frames:
+
+```text
+event: agent
+data: {"type":"text_delta","delta":"Visible text"}
+
+event: agent
+data: {"type":"turn_result","terminal":"completed","usage":{"input_tokens":5}}
+
+data: [DONE]
+```
+
+The CLI can emit line-delimited stream records:
+
+```bash
+magi --output stream-json --include-partial-messages "Stream progress"
+```
+
+API clients can use:
+
+```bash
+curl -N http://localhost:8080/v1/chat/stream \
+  -H "Authorization: Bearer $GATEWAY_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"messages":[{"role":"user","content":"Run a visible task"}]}'
+```
+
+## Event classes
+
+Common public event classes include:
+
+| Class | Examples | Public purpose |
+| --- | --- | --- |
+| Turn lifecycle | `turn_start`, `turn_phase`, `turn_end`, `turn_result`, `heartbeat` | Show where the run is and how it ended |
+| Text | `text_delta`, `response_clear`, `llm_progress` | Stream visible answer progress |
+| Tools | `tool_start`, `tool_progress`, `tool_end`, `patch_preview` | Show tool progress and safe summaries |
+| Evidence | `source_inspected`, `rule_check`, `citation_gate`, `runtime_trace` | Show proof, validation, and audit progress |
+| Recipes | `recipe_selection` | Show requested, applied, omitted, or blocked recipe refs |
+| Control | `control_event`, `control_request`, `ask_user`, `plan_ready` | Ask for approval or clarification |
+| Delegation | `spawn_started`, `spawn_result`, `child_started`, `child_progress`, `child_completed` | Show child-agent lifecycle |
+| Automation | `task_board`, `mission_event`, `cron_run`, `background_task` | Show scheduled and mission progress |
+| Artifacts | `document_draft`, `browser_frame` | Show safe artifact previews and browser observations |
+
+Some internal event shapes may be intentionally unsupported, projected as an
+alias, or blocked until their public contract is safe. The public stream should
+fail closed when an event is unclassified.
+
+## Sanitization
+
+Public stream projection should:
+
+- drop hidden reasoning and private provider events;
+- remove raw tool arguments and raw tool results;
+- redact private paths and credential-shaped text;
+- keep only public refs, digests, statuses, reason codes, safe labels, and safe
+  previews;
+- scrub terminal errors before sending `turn_result`;
+- emit `[DONE]` after the terminal frame.
+
+For example, a `recipe_selection` event can expose recipe ids, versions,
+digests, selection source, omission reason codes, and policy snapshot digest.
+It should not expose raw policy snapshots or hidden prompt material.
+
+## Control events
+
+Approval and question events should include enough information for the operator
+to decide, but not enough to leak secrets. Good control payloads use:
+
+- control type;
+- public subject ref;
+- action summary;
+- reason codes;
+- approval or resume refs;
+- request digest;
+- allowed options.
+
+The actual mutation, delivery, or side effect should wait for the approval path
+defined by the harness.
+
+## Completion events
+
+The terminal `turn_result` frame should describe:
+
+- terminal state;
+- usage;
+- cost if known;
+- session id;
+- turn id;
+- redacted error when the run failed.
+
+Completion text should not claim that background work, delivery, tests, or
+external actions occurred unless the corresponding receipt exists.
+
+## Dashboard use
+
+The local dashboard consumes the same public event stream as API clients. Use it
+to inspect:
+
+- phase changes;
+- visible answer deltas;
+- tool progress;
+- control requests;
+- evidence and validation events;
+- terminal state.
+
+If a debugging workflow needs raw private payloads, inspect them locally with
+the appropriate redaction discipline. Do not send them through public streaming
+events.
+
+## Related docs
+
+- [Runtime](runtime.md)
+- [API](api.md)
+- [Harnesses](harnesses.md)
+- [Tools](tools.md)
+- [Security](security.md)
 
 
 ---
@@ -1322,6 +1998,10 @@ curl -N http://localhost:8080/v1/chat/stream \
   -H "Content-Type: application/json" \
   -d '{"sessionId":"local","messages":[{"role":"user","content":"Check runtime health."}]}'
 ```
+
+The stream emits `event: agent` SSE frames and ends with `data: [DONE]`.
+See [Streaming events](streaming-events.md) for public event classes and
+sanitization rules.
 
 ## Health
 
@@ -1636,6 +2316,9 @@ json
 stream-json
 ```
 
+`stream-json` is the CLI-friendly streaming format. HTTP clients should use the
+SSE routes documented in [API](api.md) and [Streaming events](streaming-events.md).
+
 ## Runtime Modes
 
 ```text
@@ -1650,6 +2333,13 @@ default
 acceptEdits
 bypassPermissions
 ```
+
+## First-party documentation
+
+- [Recipes](recipes.md)
+- [Harnesses](harnesses.md)
+- [First-party packs](first-party-packs.md)
+- [Streaming events](streaming-events.md)
 
 
 ---

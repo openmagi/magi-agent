@@ -10,7 +10,7 @@ docs instead of carrying a separate product-docs copy.
 ## Quick Install
 
 ```bash
-brew install openmagi/tap/magi-agent
+brew install --force-bottle openmagi/tap/magi-agent
 magi-agent serve --port 8080
 open http://localhost:8080/dashboard
 ```
@@ -49,6 +49,9 @@ Use these docs to answer four questions:
 - [Customization](customization.md)
 - [Runtime](runtime.md)
 - [Tools](tools.md)
+- [Recipes](recipes.md)
+- [Harnesses](harnesses.md)
+- [First-party packs](first-party-packs.md)
 - [Contracts](contracts.md)
 - [Hooks](hooks.md)
 
@@ -57,6 +60,7 @@ Use these docs to answer four questions:
 - [Memory](memory.md)
 - [Skills](skills.md)
 - [Automation](automation.md)
+- [Streaming events](streaming-events.md)
 - [Integrations](integrations.md)
 - [API](api.md)
 - [Deployment](deployment.md)

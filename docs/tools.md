@@ -24,6 +24,29 @@ depends on install extras, feature flags, credentials, and runtime mode.
 - child/delegated work boundaries;
 - runtime health and evidence reporting.
 
+See [First-party packs](first-party-packs.md) for the public pack map and
+[Harnesses](harnesses.md) for the evidence contracts behind these surfaces.
+
+## Native Plugin Categories
+
+Native plugin surfaces group built-in tools by work class:
+
+- artifacts;
+- browser;
+- coding;
+- documents;
+- knowledge;
+- missions;
+- scheduled work;
+- skills;
+- source ledger;
+- subagents;
+- taskboard;
+- web.
+
+These categories are capability groups, not automatic authority grants. A
+recipe or runtime mode still decides which categories can be used for a run.
+
 ## Common Tool Patterns
 
 Reliable runs usually chain tools:
