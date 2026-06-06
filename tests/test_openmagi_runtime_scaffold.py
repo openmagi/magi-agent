@@ -167,6 +167,14 @@ def test_runtime_binds_default_first_party_native_tool_handlers() -> None:
     assert "bundled/superpowers/systematic-debugging/SKILL.md" in bundled_skills
     assert "bundled/superpowers/test-driven-development/SKILL.md" in bundled_skills
     assert "bundled/superpowers/verification-before-completion/SKILL.md" in bundled_skills
+    loaded_skills = {
+        skill["path"]: skill for skill in skill_result.output["loadedSkills"]
+    }
+    using_superpowers = loaded_skills["bundled/superpowers/using-superpowers/SKILL.md"]
+    assert using_superpowers["source"] == "bundled"
+    assert using_superpowers["bodyDigest"].startswith("sha256:")
+    assert "Using Skills" in using_superpowers["body"]
+    assert "/Users/" not in using_superpowers["body"]
     assert taskboard_result.status == "ok"
     assert taskboard_result.output is not None
     assert taskboard_result.output["pathRef"] == ".magi/taskboard.jsonl"

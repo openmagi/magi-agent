@@ -72,7 +72,7 @@ the streaming path is byte-for-byte identical to pre-PR12.
 from __future__ import annotations
 
 import asyncio
-from collections.abc import AsyncGenerator, AsyncIterator
+from collections.abc import AsyncGenerator, AsyncIterator, Mapping
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -99,6 +99,98 @@ class EngineRecoveryPolicy:
 
     engine: "RecoveryEngine"
     max_attempts: int = 3
+
+
+@dataclass(frozen=True, init=False)
+class RunnerPolicyAssembly:
+    """Local OSS runner policy assembled from first-party recipes.
+
+    This object is intentionally public-metadata shaped. It can be threaded into
+    harness state and emitted as a runtime event, but it cannot grant production
+    write authority.
+    """
+
+    model_provider: str
+    model_label: str
+    selected_pack_ids: tuple[str, ...]
+    evidence_requirements: tuple[str, ...]
+    required_validators: tuple[str, ...]
+    missing_evidence_action: str
+    repair_policy: Mapping[str, object]
+    attachment_flags: Mapping[str, bool]
+
+    def __init__(
+        self,
+        *,
+        modelProvider: str | None = None,
+        model_provider: str | None = None,
+        modelLabel: str | None = None,
+        model_label: str | None = None,
+        selectedPackIds: tuple[str, ...] | list[str] = (),
+        selected_pack_ids: tuple[str, ...] | list[str] = (),
+        evidenceRequirements: tuple[str, ...] | list[str] = (),
+        evidence_requirements: tuple[str, ...] | list[str] = (),
+        requiredValidators: tuple[str, ...] | list[str] = (),
+        required_validators: tuple[str, ...] | list[str] = (),
+        missingEvidenceAction: str | None = None,
+        missing_evidence_action: str | None = None,
+        repairPolicy: Mapping[str, object] | None = None,
+        repair_policy: Mapping[str, object] | None = None,
+        attachmentFlags: Mapping[str, bool] | None = None,
+        attachment_flags: Mapping[str, bool] | None = None,
+    ) -> None:
+        object.__setattr__(
+            self,
+            "model_provider",
+            _non_empty_str(model_provider or modelProvider, "local"),
+        )
+        object.__setattr__(
+            self,
+            "model_label",
+            _non_empty_str(model_label or modelLabel, "local-stub"),
+        )
+        object.__setattr__(
+            self,
+            "selected_pack_ids",
+            _str_tuple(selected_pack_ids or selectedPackIds),
+        )
+        object.__setattr__(
+            self,
+            "evidence_requirements",
+            _str_tuple(evidence_requirements or evidenceRequirements),
+        )
+        object.__setattr__(
+            self,
+            "required_validators",
+            _str_tuple(required_validators or requiredValidators),
+        )
+        object.__setattr__(
+            self,
+            "missing_evidence_action",
+            _non_empty_str(missing_evidence_action or missingEvidenceAction, "audit"),
+        )
+        object.__setattr__(
+            self,
+            "repair_policy",
+            dict(repair_policy or repairPolicy or {}),
+        )
+        object.__setattr__(
+            self,
+            "attachment_flags",
+            _authority_safe_attachment_flags(attachment_flags or attachmentFlags or {}),
+        )
+
+    def to_public_payload(self) -> dict[str, object]:
+        return {
+            "modelProvider": self.model_provider,
+            "modelLabel": self.model_label,
+            "selectedPackIds": list(self.selected_pack_ids),
+            "evidenceRequirements": list(self.evidence_requirements),
+            "requiredValidators": list(self.required_validators),
+            "missingEvidenceAction": self.missing_evidence_action,
+            "repairPolicy": dict(self.repair_policy),
+            "attachmentFlags": dict(self.attachment_flags),
+        }
 
 
 def build_engine_recovery_policy(env: object = None) -> "EngineRecoveryPolicy | None":
@@ -158,6 +250,121 @@ def _map_event_kind(event_type: object) -> str:
     if event_type in _ERROR_EVENT_TYPES:
         return "error"
     return "status"
+
+
+_CODING_TASK_TYPES = frozenset(
+    {
+        "coding",
+        "code",
+        "dev-coding",
+        "developer",
+        "software",
+        "workspace",
+        "file-edit",
+        "patch",
+    }
+)
+_NON_CODING_TASK_TYPES = frozenset(
+    {
+        "chat",
+        "general",
+        "conversation",
+        "research",
+        "readonly",
+        "read-only",
+        "planning",
+        "plan",
+    }
+)
+_CODING_PROMPT_MARKERS = frozenset(
+    {
+        "apply_patch",
+        "bash",
+        "bug",
+        "build",
+        "code",
+        "commit",
+        "compile",
+        "debug",
+        "diff",
+        "edit",
+        "file",
+        "fix",
+        "grep",
+        "implement",
+        "lint",
+        "patch",
+        "pytest",
+        "refactor",
+        "repo",
+        "script",
+        "test",
+        "typescript",
+        "코드",
+        "파일",
+        "테스트",
+        "수정",
+        "고쳐",
+        "구현",
+        "패치",
+        "버그",
+        "리팩터",
+        "커밋",
+    }
+)
+
+
+def _pre_final_gate_applies(
+    *,
+    assembly: RunnerPolicyAssembly,
+    prompt: str,
+    harness_state: object | None,
+) -> bool:
+    """Return whether the assembled policy should enforce the final gate.
+
+    The local runner may assemble the dev-coding pack as an available first-party
+    policy, but availability is not the same thing as routing every turn through
+    a coding verification gate.  Explicit task profiles win; otherwise a small
+    conservative prompt classifier avoids blocking ordinary chat while still
+    enforcing evidence on obvious coding/workspace turns.
+    """
+
+    selected = set(assembly.selected_pack_ids)
+    if "openmagi.dev-coding" not in selected:
+        return True
+
+    task_types = _extract_task_types(harness_state)
+    if task_types:
+        normalized = {_normalize_task_type(item) for item in task_types}
+        if normalized & _CODING_TASK_TYPES:
+            return True
+        if normalized & _NON_CODING_TASK_TYPES:
+            return False
+
+    normalized_prompt = prompt.lower()
+    return any(marker in normalized_prompt for marker in _CODING_PROMPT_MARKERS)
+
+
+def _extract_task_types(harness_state: object | None) -> tuple[str, ...]:
+    if not isinstance(harness_state, Mapping):
+        return ()
+    profile = harness_state.get("taskProfile") or harness_state.get("task_profile")
+    if not isinstance(profile, Mapping):
+        return ()
+    direct = profile.get("taskType") or profile.get("task_type")
+    multi = profile.get("taskTypes") or profile.get("task_types")
+    values: list[str] = []
+    if isinstance(direct, str):
+        values.append(direct)
+    if isinstance(multi, str):
+        values.append(multi)
+    elif isinstance(multi, list | tuple):
+        values.extend(item for item in multi if isinstance(item, str))
+    return tuple(values)
+
+
+def _normalize_task_type(value: str) -> str:
+    return value.strip().lower().replace("_", "-")
 
 
 def _lazy_engine_deps() -> dict[str, object]:
@@ -222,6 +429,7 @@ class MagiEngineDriver:
         max_event_count: int = _DEFAULT_MAX_EVENT_COUNT,
         user_id: str = "cli",
         recovery: "EngineRecoveryPolicy | None" = None,
+        runner_policy_assembly: RunnerPolicyAssembly | None = None,
     ) -> None:
         self._runner = runner
         self._max_event_count = max(1, int(max_event_count))
@@ -231,9 +439,18 @@ class MagiEngineDriver:
         # a classified-retryable model error raised by the run invocation is
         # backed-off and the run is RE-INVOKED (fresh run_async).
         self._recovery = recovery
+        self._runner_policy_assembly = runner_policy_assembly
         # Shared across all turns of this driver instance: single-flight per
         # session id. Lazily built so construction stays cheap + import-clean.
         self._registry: object | None = None
+
+    @property
+    def runner(self) -> object | None:
+        return self._runner
+
+    @property
+    def runner_policy_assembly(self) -> RunnerPolicyAssembly | None:
+        return self._runner_policy_assembly
 
     def _get_registry(self) -> object:
         if self._registry is None:
@@ -399,6 +616,7 @@ class MagiEngineDriver:
         bridge = deps["OpenMagiEventBridge"](live_compatible=True)  # type: ignore[operator]
         sanitize = deps["sanitize_agent_event"]
         runner_turn_input_cls = deps["RunnerTurnInput"]
+        effective_harness_state = self._with_runner_policy_harness_state(harness_state)
 
         runner_input = runner_turn_input_cls(
             userId=self._user_id,
@@ -411,7 +629,7 @@ class MagiEngineDriver:
             ),
             # Threaded from the turn_input (TurnInput.harness_state / dict key).
             # A plain dict without the key leaves this None — identical to today.
-            harnessState=harness_state,
+            harnessState=effective_harness_state,
         )
 
         # Tracks tool_use ids we emitted (tool_start) but have not yet seen a
@@ -419,6 +637,19 @@ class MagiEngineDriver:
         pending_tool_ids: dict[str, str] = {}
         event_count = 0
         usage: dict[str, object] = {}
+        observed_public_refs: set[str] = set()
+
+        policy_payload = self._runner_policy_payload()
+        if policy_payload is not None:
+            yield RuntimeEvent(
+                type="status",
+                payload={
+                    "type": "runner_policy_assembly",
+                    "turnId": turn_id,
+                    **policy_payload,
+                },
+                turn_id=turn_id,
+            )
 
         # Permission interception (Stream F): attach a before_tool_callback to
         # the runner's agent so the gate intercepts every tool BEFORE it runs.
@@ -474,6 +705,7 @@ class MagiEngineDriver:
                             safe = sanitize(dict(raw_event))  # type: ignore[operator]
                             if safe is None:
                                 continue
+                            self._collect_public_refs(safe, observed_public_refs)
                             self._track_pending_tool(safe, pending_tool_ids)
                             attempt_yielded += 1
                             yielded_events += 1
@@ -563,6 +795,25 @@ class MagiEngineDriver:
                 turn_id=turn_id,
             )
             return
+
+        pre_final_gate = self._pre_final_gate_payload(
+            turn_id=turn_id,
+            prompt=prompt,
+            harness_state=effective_harness_state,
+            observed_public_refs=observed_public_refs,
+        )
+        if pre_final_gate is not None:
+            yield RuntimeEvent(type="status", payload=pre_final_gate, turn_id=turn_id)
+            if pre_final_gate["decision"] == "block":
+                yield EngineResult(  # type: ignore[misc]
+                    terminal=Terminal.error,
+                    usage=usage,
+                    cost_usd=0.0,
+                    error="pre_final_evidence_gate_blocked",
+                    session_id=session_id,
+                    turn_id=turn_id,
+                )
+                return
 
         yield EngineResult(  # type: ignore[misc]
             terminal=Terminal.completed,
@@ -718,6 +969,76 @@ class MagiEngineDriver:
         pending_tool_ids.clear()
         return results
 
+    def _runner_policy_payload(self) -> dict[str, object] | None:
+        if self._runner_policy_assembly is None:
+            return None
+        return self._runner_policy_assembly.to_public_payload()
+
+    def _with_runner_policy_harness_state(self, harness_state: object | None) -> object | None:
+        policy_payload = self._runner_policy_payload()
+        if policy_payload is None:
+            return harness_state
+        if harness_state is None:
+            return {"runnerPolicyAssembly": policy_payload}
+        if isinstance(harness_state, Mapping):
+            merged = dict(harness_state)
+            merged.setdefault("runnerPolicyAssembly", policy_payload)
+            return merged
+        return {
+            "resolvedHarnessStateType": harness_state.__class__.__name__,
+            "runnerPolicyAssembly": policy_payload,
+        }
+
+    def _pre_final_gate_payload(
+        self,
+        *,
+        turn_id: str,
+        prompt: str,
+        harness_state: object | None,
+        observed_public_refs: set[str],
+    ) -> dict[str, object] | None:
+        assembly = self._runner_policy_assembly
+        if assembly is None:
+            return None
+        if not _pre_final_gate_applies(
+            assembly=assembly,
+            prompt=prompt,
+            harness_state=harness_state,
+        ):
+            return None
+        missing_evidence = [
+            ref for ref in assembly.evidence_requirements if ref not in observed_public_refs
+        ]
+        missing_validators = [
+            ref for ref in assembly.required_validators if ref not in observed_public_refs
+        ]
+        decision = "block" if missing_evidence or missing_validators else "pass"
+        return {
+            "type": "pre_final_evidence_gate",
+            "turnId": turn_id,
+            "decision": decision,
+            "matchedRefs": sorted(observed_public_refs),
+            "missingEvidence": missing_evidence,
+            "missingValidators": missing_validators,
+            "missingEvidenceAction": assembly.missing_evidence_action,
+            "repairPolicy": dict(assembly.repair_policy),
+            "attachmentFlags": dict(assembly.attachment_flags),
+        }
+
+    @staticmethod
+    def _collect_public_refs(value: object, refs: set[str]) -> None:
+        if isinstance(value, str):
+            if value.startswith(("evidence:", "verifier:", "receipt:sha256:", "sha256:")):
+                refs.add(value)
+            return
+        if isinstance(value, Mapping):
+            for nested in value.values():
+                MagiEngineDriver._collect_public_refs(nested, refs)
+            return
+        if isinstance(value, list | tuple):
+            for nested in value:
+                MagiEngineDriver._collect_public_refs(nested, refs)
+
     # -- Permission gate wiring (Stream F) ----------------------------------
     def _attach_gate_callback(
         self,
@@ -866,6 +1187,25 @@ _EXHAUSTED = _Sentinel("adk_stream_exhausted")
 _CANCELLED = _Sentinel("adk_stream_cancelled")
 
 
+def _non_empty_str(value: object, default: str) -> str:
+    return value.strip() if isinstance(value, str) and value.strip() else default
+
+
+def _str_tuple(values: object) -> tuple[str, ...]:
+    if isinstance(values, str):
+        return (values,) if values else ()
+    if not isinstance(values, list | tuple):
+        return ()
+    return tuple(str(value) for value in values if str(value))
+
+
+def _authority_safe_attachment_flags(flags: Mapping[str, bool]) -> dict[str, bool]:
+    safe = {str(key): bool(value) for key, value in flags.items()}
+    safe["productionWriteAllowed"] = False
+    safe["userVisibleOutputAllowed"] = False
+    return safe
+
+
 class _suppress_cancel:
     """Context manager swallowing ``asyncio.CancelledError`` (and others)."""
 
@@ -881,5 +1221,6 @@ class _suppress_cancel:
 __all__ = [
     "EngineRecoveryPolicy",
     "MagiEngineDriver",
+    "RunnerPolicyAssembly",
     "build_engine_recovery_policy",
 ]

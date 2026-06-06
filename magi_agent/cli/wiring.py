@@ -45,6 +45,7 @@ from magi_agent.cli.commands import (
 from magi_agent.cli.contracts import CommandRegistry, PromptSink
 from magi_agent.cli.engine import (
     MagiEngineDriver,
+    RunnerPolicyAssembly,
     build_engine_recovery_policy,
 )
 from magi_agent.cli.permissions import HeadlessSink, PermissionMode, RulesPermissionGate
@@ -151,8 +152,6 @@ def build_headless_runtime(
     ``cli.render``. All those are TUI-only; the headless path is cold-clean.
     """
 
-    _ = model  # reserved seam, not yet wired
-
     effective_cwd = str(cwd) if cwd is not None else os.getcwd()
     effective_runner = (
         runner
@@ -181,6 +180,11 @@ def build_headless_runtime(
     engine = MagiEngineDriver(
         runner=effective_runner,
         recovery=build_engine_recovery_policy(),
+        runner_policy_assembly=_build_runner_policy_assembly(
+            runner=effective_runner,
+            model=model,
+            mode=mode,
+        ),
     )
 
     # (C) Permission gate — default stays sink-less and therefore fail-safe on
@@ -214,6 +218,38 @@ def build_headless_runtime(
         session_log=session_log,
         composio=composio_bundle,
         mcp_servers=mcp_servers,
+    )
+
+
+def _build_runner_policy_assembly(
+    *,
+    runner: object,
+    model: str | None,
+    mode: "RuntimeMode",
+) -> RunnerPolicyAssembly | None:
+    assembly = getattr(runner, "runner_policy_assembly", None)
+    if isinstance(assembly, RunnerPolicyAssembly):
+        return assembly
+    if mode == "plan":
+        return None
+    provider = getattr(runner, "model_provider", None)
+    label = getattr(runner, "model_label", None)
+    if not isinstance(provider, str) or not provider.strip():
+        provider = "local"
+    if provider == "local":
+        return None
+    if not isinstance(label, str) or not label.strip():
+        label = model.strip() if isinstance(model, str) and model.strip() else "local-stub"
+    try:
+        from magi_agent.cli.real_runner import (  # noqa: PLC0415
+            _build_default_runner_policy_assembly,
+        )
+    except Exception:
+        return None
+    return _build_default_runner_policy_assembly(
+        model_provider=provider,
+        model_label=label,
+        live_policy_callback_attached=False,
     )
 
 
