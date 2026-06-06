@@ -51,6 +51,7 @@ Model resolution
 
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 from collections.abc import Callable
@@ -70,6 +71,14 @@ SMART_APPROVE_EVIDENCE_TYPE: str = "custom:SmartApproveClassification"
 
 # Model env override — allows a faster/cheaper model for classification.
 _ENV_MODEL_OVERRIDE = "MAGI_SMART_APPROVE_MODEL"
+
+# Timeout env override for the LLM call (seconds). Default: 10.
+_ENV_TIMEOUT_OVERRIDE = "MAGI_SMART_APPROVE_TIMEOUT"
+_DEFAULT_LLM_TIMEOUT_SECS: float = 10.0
+
+# Maximum characters to keep from the LLM reason string (untrusted tool description
+# can be arbitrarily long; cap before putting it in evidence).
+_MAX_REASON_CHARS: int = 500
 
 _READ_ONLY_PROMPT_TEMPLATE = """\
 You are a tool-safety classifier. Decide whether the tool below is STRICTLY
@@ -202,7 +211,18 @@ class ReadOnlyClassifier:
     # ------------------------------------------------------------------
 
     async def _llm_classify(self, req: "ControlRequest") -> bool:
-        """Invoke the LLM classifier. Returns False on ANY failure (fail closed)."""
+        """Invoke the LLM classifier. Returns False on ANY failure (fail closed).
+
+        Uses the correct ADK contract:
+          - Builds an ``LlmRequest`` carrying the classification prompt as a
+            user content part plus a system instruction with the read-only rubric.
+          - Calls ``model.generate_content_async(llm_request, stream=False)``
+            which is an **async generator** that yields ``LlmResponse`` objects.
+          - Extracts text from ``LlmResponse.content.parts[i].text``.
+          - The entire call is wrapped in ``asyncio.wait_for`` with a
+            configurable timeout (``MAGI_SMART_APPROVE_TIMEOUT`` env, default 10s).
+            A ``TimeoutError`` is treated as a classifier error → fail closed.
+        """
         tool_name = req.tool_name
         model_name: str | None = None
         try:
@@ -227,18 +247,32 @@ class ReadOnlyClassifier:
                 input_schema=input_schema_str,
             )
 
-            response = await model.generate_content_async(prompt)  # type: ignore[attr-defined]
-            raw_text = getattr(response, "text", None) or ""
+            raw_text = await asyncio.wait_for(
+                self._invoke_llm(model, prompt),
+                timeout=_resolve_timeout(),
+            )
+
             parsed = self._parse_llm_response(raw_text)
             if parsed is None:
                 raise ValueError(f"LLM returned non-parseable response: {raw_text!r}")
 
             verdict = bool(parsed["read_only"])
-            reason = str(parsed.get("reason", ""))
+            reason = str(parsed.get("reason", ""))[:_MAX_REASON_CHARS]
             # Cache the result
             self._cache[tool_name] = verdict
             self._emit(tool_name, verdict=verdict, reason=reason, source="llm", model=model_name)
             return verdict
+
+        except asyncio.TimeoutError:
+            reason = "classifier timeout"
+            self._emit(
+                tool_name,
+                verdict=False,
+                reason=reason,
+                source="classifier_error",
+                model=model_name,
+            )
+            return False
 
         except Exception as exc:  # noqa: BLE001 — fail closed
             reason = f"{type(exc).__name__}: {exc}"
@@ -250,6 +284,61 @@ class ReadOnlyClassifier:
                 model=model_name,
             )
             return False
+
+    @staticmethod
+    async def _invoke_llm(model: object, prompt: str) -> str:
+        """Invoke the model using the correct ADK async-generator contract.
+
+        Builds an ``LlmRequest`` with the classification prompt as a user
+        content part, then consumes the async generator returned by
+        ``model.generate_content_async(llm_request, stream=False)``,
+        collecting all text parts from ``LlmResponse.content.parts``.
+
+        Falls back to the legacy ``(prompt) → awaitable .text`` interface
+        when the model does not expose an ADK-shaped ``generate_content_async``
+        (e.g., a minimal stub injected in unit tests that has not yet been
+        updated).  The fallback path exists only for backward compatibility
+        with old test fakes and will be removed once all fakes are updated.
+        """
+        # Try the real ADK contract: build LlmRequest, consume AsyncGenerator.
+        try:
+            from google.adk.models.llm_request import LlmRequest  # noqa: PLC0415
+            from google.genai import types  # noqa: PLC0415
+
+            llm_request = LlmRequest(
+                config=types.GenerateContentConfig(
+                    system_instruction=(
+                        "You are a tool-safety classifier. "
+                        "Reply with ONLY a JSON object: "
+                        '{"read_only": <bool>, "reason": "<one-sentence reason>"}'
+                    ),
+                ),
+                contents=[
+                    types.Content(
+                        role="user",
+                        parts=[types.Part.from_text(text=prompt)],
+                    )
+                ],
+            )
+
+            collected: list[str] = []
+            async for resp in model.generate_content_async(llm_request, stream=False):  # type: ignore[union-attr]
+                if resp.content and resp.content.parts:
+                    for part in resp.content.parts:
+                        if part.text:
+                            collected.append(part.text)
+            return "".join(collected)
+
+        except (ImportError, TypeError):
+            # ImportError: ADK not installed (shouldn't happen in production).
+            # TypeError: model.generate_content_async is not an async generator
+            # (legacy fake that takes a plain string and returns an awaitable).
+            # Fall through to legacy path.
+            pass
+
+        # Legacy path: fake model that returns an awaitable with .text.
+        response = await model.generate_content_async(prompt)  # type: ignore[union-attr]
+        return getattr(response, "text", None) or ""
 
     def _resolve_model(self) -> object | None:
         """Return a model object or None (fail closed — no exception raised)."""
@@ -318,6 +407,25 @@ class ReadOnlyClassifier:
             )
         except Exception:  # noqa: BLE001 — evidence sink errors never break the gate
             pass
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+def _resolve_timeout() -> float:
+    """Return the LLM call timeout in seconds.
+
+    Reads ``MAGI_SMART_APPROVE_TIMEOUT`` env var; falls back to
+    ``_DEFAULT_LLM_TIMEOUT_SECS`` (10 s) on parse failure or absence.
+    """
+    raw = os.environ.get(_ENV_TIMEOUT_OVERRIDE, "").strip()
+    if raw:
+        try:
+            return float(raw)
+        except ValueError:
+            pass
+    return _DEFAULT_LLM_TIMEOUT_SECS
 
 
 # ---------------------------------------------------------------------------

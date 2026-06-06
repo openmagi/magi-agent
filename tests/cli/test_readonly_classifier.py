@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from collections.abc import AsyncGenerator
 from collections.abc import Callable
 from typing import Any
 
@@ -195,10 +196,15 @@ async def test_classify_caches_llm_result_and_short_circuits_second_call() -> No
 
     def _fake_model_factory():
         class _FakeLlm:
-            async def generate_content_async(self, *args, **kwargs):
+            model = "fake-model"
+
+            async def generate_content_async(
+                self, llm_request: Any, stream: bool = False
+            ) -> AsyncGenerator:
                 nonlocal call_count
                 call_count += 1
-                return _FakeResponse('{"read_only": true, "reason": "test"}')
+                yield _FakeLlmResponse('{"read_only": true, "reason": "test"}')
+
         return _FakeLlm()
 
     cls = ReadOnlyClassifier(
@@ -224,10 +230,15 @@ async def test_classify_manifest_known_tool_skips_llm() -> None:
 
     def _fake_model_factory():
         class _FakeLlm:
-            async def generate_content_async(self, *args, **kwargs):
+            model = "fake-model"
+
+            async def generate_content_async(
+                self, llm_request: Any, stream: bool = False
+            ) -> AsyncGenerator:
                 nonlocal call_count
                 call_count += 1
-                return _FakeResponse('{"read_only": true, "reason": "test"}')
+                yield _FakeLlmResponse('{"read_only": true, "reason": "test"}')
+
         return _FakeLlm()
 
     registry = _make_registry(
@@ -251,15 +262,9 @@ async def test_classify_returns_false_on_llm_exception() -> None:
 
     evidence: list[dict] = []
 
-    def _fake_model_factory():
-        class _ErrorLlm:
-            async def generate_content_async(self, *args, **kwargs):
-                raise RuntimeError("network error")
-        return _ErrorLlm()
-
     cls = ReadOnlyClassifier(
         registry=None,
-        model_factory=_fake_model_factory,
+        model_factory=lambda: _make_error_llm(),
         evidence_sink=evidence.append,
     )
     result = await cls.classify(_req("BrokenTool"))
@@ -279,15 +284,9 @@ async def test_classify_returns_false_on_invalid_json_response() -> None:
 
     evidence: list[dict] = []
 
-    def _fake_model_factory():
-        class _BadJsonLlm:
-            async def generate_content_async(self, *args, **kwargs):
-                return _FakeResponse("not valid json at all")
-        return _BadJsonLlm()
-
     cls = ReadOnlyClassifier(
         registry=None,
-        model_factory=_fake_model_factory,
+        model_factory=lambda: _make_fake_llm("not valid json at all"),
         evidence_sink=evidence.append,
     )
     result = await cls.classify(_req("BadJsonTool"))
@@ -327,15 +326,9 @@ async def test_classify_llm_success_caches_and_emits_llm_evidence() -> None:
 
     evidence: list[dict] = []
 
-    def _fake_model_factory():
-        class _GoodLlm:
-            async def generate_content_async(self, *args, **kwargs):
-                return _FakeResponse('{"read_only": true, "reason": "SELECT query"}')
-        return _GoodLlm()
-
     cls = ReadOnlyClassifier(
         registry=None,
-        model_factory=_fake_model_factory,
+        model_factory=lambda: _make_fake_llm('{"read_only": true, "reason": "SELECT query"}'),
         evidence_sink=evidence.append,
     )
     req = _req("SelectTool")
@@ -363,15 +356,9 @@ async def test_classify_llm_returns_false_and_emits_evidence() -> None:
 
     evidence: list[dict] = []
 
-    def _fake_model_factory():
-        class _WriteLlm:
-            async def generate_content_async(self, *args, **kwargs):
-                return _FakeResponse('{"read_only": false, "reason": "INSERT mutation"}')
-        return _WriteLlm()
-
     cls = ReadOnlyClassifier(
         registry=None,
-        model_factory=_fake_model_factory,
+        model_factory=lambda: _make_fake_llm('{"read_only": false, "reason": "INSERT mutation"}'),
         evidence_sink=evidence.append,
     )
     result = await cls.classify(_req("InsertTool"))
@@ -379,6 +366,106 @@ async def test_classify_llm_returns_false_and_emits_evidence() -> None:
     assert result is False
     assert evidence[0]["source"] == "llm"
     assert evidence[0]["verdict"] is False
+
+
+# ---------------------------------------------------------------------------
+# Real ADK async-generator contract verification
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_llm_async_generator_contract_produces_correct_verdict() -> None:
+    """Verify the classifier correctly consumes an async-generator LlmResponse.
+
+    This test encodes the PRODUCTION contract: generate_content_async is an
+    async generator that yields objects with .content.parts[i].text, NOT an
+    awaitable with .text.  Any regression that breaks this contract will fail
+    here.
+    """
+    from magi_agent.cli.readonly_classifier import ReadOnlyClassifier
+
+    evidence: list[dict] = []
+
+    # Fake that matches the REAL ADK shape exactly.
+    class _RealShapeLlm:
+        model = "fake/real-shape-model"
+
+        async def generate_content_async(
+            self, llm_request: Any, stream: bool = False
+        ) -> AsyncGenerator:
+            # Yield a response whose text lives in content.parts[0].text —
+            # exactly where LiteLlm places it in production.
+            yield _FakeLlmResponse('{"read_only": true, "reason": "pure SELECT"}')
+
+    cls = ReadOnlyClassifier(
+        registry=None,
+        model_factory=_RealShapeLlm,
+        evidence_sink=evidence.append,
+    )
+    result = await cls.classify(_req("RealShapeTool"))
+
+    assert result is True
+    assert len(evidence) == 1
+    ev = evidence[0]
+    assert ev["source"] == "llm"
+    assert ev["verdict"] is True
+    assert ev["reason"] == "pure SELECT"
+    assert ev["model"] == "fake/real-shape-model"
+
+
+@pytest.mark.asyncio
+async def test_classify_returns_false_on_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
+    """LLM call exceeds timeout -> fail closed with classifier_error evidence."""
+    import os
+    from magi_agent.cli.readonly_classifier import ReadOnlyClassifier
+
+    # Set a very short timeout so the sleeping fake triggers it.
+    monkeypatch.setenv("MAGI_SMART_APPROVE_TIMEOUT", "0.05")
+
+    evidence: list[dict] = []
+
+    class _SlowLlm:
+        model = "fake-slow-model"
+
+        async def generate_content_async(
+            self, llm_request: Any, stream: bool = False
+        ) -> AsyncGenerator:
+            await asyncio.sleep(10)  # way longer than the 50 ms timeout
+            yield _FakeLlmResponse('{"read_only": true, "reason": "never reached"}')
+
+    cls = ReadOnlyClassifier(
+        registry=None,
+        model_factory=_SlowLlm,
+        evidence_sink=evidence.append,
+    )
+    result = await cls.classify(_req("SlowTool"))
+
+    assert result is False
+    assert len(evidence) == 1
+    ev = evidence[0]
+    assert ev["source"] == "classifier_error"
+    assert ev["verdict"] is False
+    assert "timeout" in ev["reason"].lower()
+
+
+@pytest.mark.asyncio
+async def test_reason_is_capped_at_max_chars() -> None:
+    """LLM reason longer than _MAX_REASON_CHARS is truncated in evidence."""
+    from magi_agent.cli.readonly_classifier import ReadOnlyClassifier, _MAX_REASON_CHARS
+
+    long_reason = "x" * (_MAX_REASON_CHARS + 200)
+    payload = json.dumps({"read_only": True, "reason": long_reason})
+
+    evidence: list[dict] = []
+
+    cls = ReadOnlyClassifier(
+        registry=None,
+        model_factory=lambda: _make_fake_llm(payload),
+        evidence_sink=evidence.append,
+    )
+    await cls.classify(_req("LongReasonTool"))
+
+    assert len(evidence) == 1
+    assert len(evidence[0]["reason"]) <= _MAX_REASON_CHARS
 
 
 # ---------------------------------------------------------------------------
@@ -453,15 +540,65 @@ async def test_classify_evidence_uses_registered_type_name() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Fake LLM response helper
+# Fake LLM helpers matching the REAL ADK async-generator contract.
+#
+# The real LiteLlm.generate_content_async(llm_request, stream=False) is an
+# async generator that yields LlmResponse objects, each of which has:
+#   .content -> types.Content
+#   .content.parts -> list[types.Part]
+#   .content.parts[i].text -> str
+#
+# The fakes below implement exactly this contract so tests encode production
+# behaviour and any regression will be caught here.
 # ---------------------------------------------------------------------------
 
-class _FakeResponse:
-    """Mimics the minimal surface of a LiteLlm / genai response."""
+class _FakePart:
+    """Minimal stand-in for google.genai.types.Part."""
 
     def __init__(self, text: str) -> None:
-        self._text = text
+        self.text = text
 
-    @property
-    def text(self) -> str:
-        return self._text
+
+class _FakeContent:
+    """Minimal stand-in for google.genai.types.Content."""
+
+    def __init__(self, text: str) -> None:
+        self.parts = [_FakePart(text)]
+
+
+class _FakeLlmResponse:
+    """Minimal stand-in for google.adk.models.llm_response.LlmResponse."""
+
+    def __init__(self, text: str) -> None:
+        self.content = _FakeContent(text)
+
+
+def _make_fake_llm(json_text: str) -> object:
+    """Return a fake LLM that yields one *LlmResponse-shaped* object from
+    generate_content_async, matching the real ADK async-generator contract."""
+
+    class _FakeLlm:
+        model = "fake-model"
+
+        async def generate_content_async(  # noqa: D401
+            self, llm_request: Any, stream: bool = False
+        ) -> AsyncGenerator:
+            yield _FakeLlmResponse(json_text)
+
+    return _FakeLlm()
+
+
+def _make_error_llm() -> object:
+    """Return a fake LLM whose generate_content_async raises immediately."""
+
+    class _ErrorLlm:
+        model = "fake-model"
+
+        async def generate_content_async(
+            self, llm_request: Any, stream: bool = False
+        ) -> AsyncGenerator:
+            raise RuntimeError("network error")
+            # needed so Python treats this as an async generator
+            yield  # type: ignore[misc]  # pragma: no cover
+
+    return _ErrorLlm()
