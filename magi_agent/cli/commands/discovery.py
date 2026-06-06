@@ -323,7 +323,10 @@ def markdown_commands(cwd: str) -> list[Command]:
 
 
 def discover_commands(
-    cwd: str, *, sources: DiscoverySources | None = None
+    cwd: str,
+    *,
+    sources: DiscoverySources | None = None,
+    mcp_commands: Sequence[Command] | None = None,
 ) -> list[Command]:
     """Discover all commands for ``cwd`` as a deduped, precedence-ordered list.
 
@@ -336,6 +339,17 @@ def discover_commands(
     caller injects is merged at its tier — but markdown discovery, bundled
     commands, skill commands, and builtins are filled in if those tiers are
     left empty.
+
+    MCP prompt commands (P2): pass ``mcp_commands`` to inject MCP-projected
+    slash-commands into the **``plugin`` tier (tier 5)**. This is OPT-IN and
+    default-off — discovery never fetches MCP prompts itself (no live MCP
+    connection, no event loop, no socket). The caller produces the list via
+    ``magi_agent.cli.commands.mcp_commands.mcp_prompt_commands`` (which goes
+    through the gated, redaction-only ``McpAdapter``) and threads it here.
+    Because they land at tier 5, a project ``.claude/commands/<name>.md``
+    (skill_dir tier 3) shadows a same-named MCP command per precedence. If the
+    caller ALSO populated ``sources.plugin``, the injected ``mcp_commands`` are
+    appended after it within the same tier (first-seen still wins).
     """
     # Lazy imports inside the function body to keep module import cheap and
     # side-effect-free; these modules are only needed when discovery actually
@@ -355,12 +369,17 @@ def discover_commands(
         list(src.plugin_skills) if src.plugin_skills else list(skill_commands(cwd))
     )
     builtins_list = list(src.builtins) if src.builtins else list(builtin_commands())
+    # Tier-5 (plugin): caller-injected MCP prompt commands are appended after any
+    # explicitly-supplied plugin commands. Never mutate the caller's ``sources``.
+    plugin_list = list(src.plugin)
+    if mcp_commands:
+        plugin_list.extend(mcp_commands)
     ordered = [
         bundled_list,
         src.builtin_plugin,
         skill,
         src.workflow,
-        src.plugin,
+        plugin_list,
         plugin_skills_list,
         builtins_list,
     ]
