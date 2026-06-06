@@ -1,8 +1,12 @@
 # Boundaries
 
+Status: 🚧 Default-off — boundary enforcement ships in shadow/observe-only mode; production authority is attached separately.
+
 Runtime boundaries that govern when model proposals become state, output, or side effects.
 
 Boundaries are control points that prevent the agent from taking action without verification. Seven boundary modules follow the Intent-to-Receipt pattern where every side effect is validated before execution.
+
+> **Boundary enforcement is default-off (shadow) — the agent still executes work.** These boundaries are the governance layer; today they observe and record without blocking or gating. That is independent of the agent's ability to run: with a provider key, the local `magi` CLI executes a real model and first-party tools today (see [What works today](/docs/what-works-today)). "Default-off" / `Literal[False]` here scopes whether enforcement is attached to live decisions, not whether tasks can execute.
 
 ## The Intent-to-Receipt pattern
 

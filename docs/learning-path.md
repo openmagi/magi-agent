@@ -1,5 +1,7 @@
 # Learning Path
 
+Status: ✅ Active — Homebrew ships now; the user track installs and runs a real task today.
+
 Guided learning paths for users, recipe authors, runtime extenders, and self-hosters.
 
 Choose your path through the Magi Agent documentation based on your role and goals.
@@ -8,11 +10,13 @@ Choose your path through the Magi Agent documentation based on your role and goa
 
 Start with the install and first-run instructions, then learn how tools, memory, and security interact during a governed agent run.
 
-- Install and first run: See [Getting Started](/docs/getting-started) for source checkout and the planned Homebrew installer.
-- First task walkthrough: See [Quickstart](/docs/quickstart) for a step-by-step example with evidence and boundary decisions.
-- Configuration: See [Configuration](/docs/configuration) for magi-agent.yaml fields and how runtime enforcement is configured.
+- Install and first run: See [Getting Started](/docs/getting-started) for the Homebrew install and provider-key setup.
+- First task walkthrough: See [Quickstart](/docs/quickstart) for the Homebrew + provider-key + `magi -p` happy path.
+- What works today: See [What Works Today](/docs/what-works-today) for the local capabilities you can run now.
+- Configuration: Set one provider env key or create `~/.magi/config.toml`; see [Getting Started](/docs/getting-started) for details.
 - Tools and evidence: See [Tools](/docs/tools) for how tool calls produce ToolEvidenceRecord entries in the evidence ledger.
 - Memory and continuity: See [Memory](/docs/memory) for session memory, compaction, and workspace state.
+- CLI reference: See [CLI](/docs/cli/magi) for `magi` flags, output modes, and permission modes.
 - Security model: See [Security](/docs/security) for default-off boundaries, authority flags, and the trust model.
 
 ## I want to build recipes
@@ -38,10 +42,10 @@ The runtime exposes typed hook points (hooks/manifest.py, 15 HookPoint values), 
 
 ## I want to self-host
 
-Magi Agent runs locally from source today. A packaged local app installer is planned but not yet shipped. Self-hosting starts with the source checkout and configuration.
+Magi Agent installs via Homebrew today; contributors can also run from a source checkout with uv. Self-hosting starts with install and configuration.
 
-- Source install: See [Getting Started](/docs/getting-started) for git clone, npm install, and the npm run magi commands.
+- Install: See [Getting Started](/docs/getting-started) for the Homebrew install and the contributor-only `uv sync` / `uv run --extra cli magi` source path.
 - Deployment options: See [Deployment](/docs/deployment) for local-first operation and optional managed hosting.
-- Configuration: See [Configuration](/docs/configuration) for magi-agent.yaml, environment variables, and runtime enforcement.
+- Configuration: Set one provider env key or create `~/.magi/config.toml`; see [Getting Started](/docs/getting-started) for details.
 - Security hardening: See [Security](/docs/security) for the default-off model and how to enable boundaries for production.
 - Activation gates: See [Default-Off Gates](/docs/default-off-gates) for the staged rollout pattern from disabled to production authority.

@@ -1,5 +1,7 @@
 # Tools
 
+Status: ✅ Active — first-party tools are registered and on by default; file/search/edit/patch/Bash run live once a provider key is set (`magi_agent/tools/catalog.py`, `core_toolhost.py`).
+
 Tools are the controlled activity surface, not direct model authority.
 
 ToolHost / activity boundary checks decide whether source, file, delivery, child, memory, artifact, workspace, and integration operations can execute and what receipts they produce.
@@ -10,12 +12,60 @@ A tool call is a proposal until it crosses the ToolHost / activity boundary. The
 
 Successful activity produces receipts. Source/file/test/calculation/delivery operations can create evidence used by validators and guardrails.
 
-The runtime includes 21 core tools. Two (Bash, TestRun) are marked dangerous and require approval.
+## First-party tool catalog
 
-- Read: FileRead, FileEdit (inspection), Glob, Grep, GitDiff, ArtifactRead, ArtifactList.
-- Write: FileWrite, FileEdit (mutation), ArtifactCreate.
-- Execute: Bash (dangerous, requires approval), TestRun (dangerous, 5 minute timeout).
-- Meta: AskUserQuestion, EnterPlanMode, ExitPlanMode, Clock, Calculation, HealthStatus, TaskList, TaskGet, TaskOutput, CronList.
+The core registry (`magi_agent/tools/catalog.py`) declares 24 first-party tools,
+all `enabled_by_default=True`. Two (`Bash`, `TestRun`) are marked `dangerous` and
+require approval. The handlers for the file / search / execute tools are bound by
+the core toolhost (`core_toolhost.py`).
+
+| Tool | Purpose | Permission |
+|---|---|---|
+| `FileRead` | Read workspace file contents. | read (read-only) |
+| `Glob` | List workspace paths matching a glob. | read (read-only) |
+| `Grep` | Search workspace text by pattern. | read (read-only) |
+| `GitDiff` | Inspect workspace git diff metadata. | read (read-only) |
+| `ArtifactRead` | Read artifact metadata / content. | read (read-only) |
+| `ArtifactList` | List artifact records for the turn. | read (read-only) |
+| `FileWrite` | Write workspace file contents. | write (edit/act) |
+| `FileEdit` | Edit existing workspace file contents. | write (edit/act) |
+| `PatchApply` | Apply a Codex-style multi-file envelope patch. | write (edit/act) |
+| `ArtifactCreate` | Create an artifact record for delivery. | write (edit/act) |
+| `Bash` | Run a shell command (dangerous, requires approval). | execute (act) |
+| `TestRun` | Run a project verification command (dangerous, 5-min timeout). | execute (act) |
+| `ToolSearch` | Search deferred tool metadata. | meta |
+| `TodoWrite` | Record / update the agent's task list. | meta |
+| `AskUserQuestion` | Request user input through the control surface. | meta |
+| `EnterPlanMode` | Enter read-only planning mode. | meta |
+| `ExitPlanMode` | Exit planning and continue in act mode. | meta |
+| `Clock` | Read current time metadata. | meta (read-only) |
+| `Calculation` | Evaluate deterministic calculation metadata. | meta (read-only) |
+| `HealthStatus` | Read local runtime health metadata. | meta (read-only) |
+| `TaskList` | List local background task metadata. | meta (read-only) |
+| `TaskGet` | Read local background task metadata. | meta (read-only) |
+| `TaskOutput` | Read local background task output metadata. | meta (read-only) |
+| `CronList` | List local cron schedule metadata. | meta (read-only) |
+
+Read / meta-read tools are concurrency-safe and available in both `plan` and
+`act` modes. Write and execute tools are `act`-only and mutate the workspace.
+
+### Example: invocation and approval
+
+Under the `default` permission mode the dangerous `Bash` tool is a proposal until
+the user approves it:
+
+```text
+magi -p "run the test suite and report failures"
+# the agent proposes:  Bash  →  pytest -q
+# you are prompted to approve; on approval the command runs and a receipt is recorded
+```
+
+Choosing `--permission-mode acceptEdits` auto-allows file edits
+(`FileWrite` / `FileEdit` / `PatchApply`) without a prompt, while `Bash` and
+`TestRun` still require approval. See [cli/magi.md](cli/magi.md) for the
+permission modes and [common-tasks.md](common-tasks.md) for task-to-command
+mappings.
+
 - Source reads produce source receipts and citeable spans.
 - File reads and writes produce path, digest, and workspace-scope receipts.
 - Tests and calculations produce executable evidence and result digests.

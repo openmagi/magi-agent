@@ -1,5 +1,13 @@
 # Recipes
 
+Status: 🚧 Default-off — recipe packs compile to metadata/policy snapshots only; there is no runtime execution engine that consumes a snapshot to enforce policy during a live run yet (`magi_agent/recipes/`).
+
+> **There is no `--recipe` flag.** Recipes are not something you "run" from the
+> CLI today. `docs/cli/magi.md` exposes no recipe flag, and nothing reads a
+> `RecipeSnapshot` to apply tool permissions, evidence rules, or projection at
+> runtime. Recipes describe *what policy would apply*; enforcement comes from
+> harnesses and evidence contracts (see [harnesses.md](harnesses.md)).
+
 Composable workflow definitions that declare policy, evidence rules, and projection for a task type.
 
 Recipes compile metadata snapshots that declare what packs, evidence, tools, validators, and projection rules apply to a run. The recipe system is implemented and active for metadata compilation; runtime execution of recipe policy is planned.
@@ -64,3 +72,20 @@ The resolved profile records selected_pack_ids, opted_out_pack_ids, and a Compos
 Recipes do not execute policy. There is no recipe execution engine that reads a RecipeSnapshot and enforces tool permissions, evidence requirements, or projection rules during a live run. That enforcement comes from harnesses (HarnessEngine) and evidence contracts (EvidenceContract), which are fully implemented and active.
 
 The conceptual interfaces ToolHostRequest, ToolHostReceipt, RepairDecision, ProjectionResult, and ValidationResult are not implemented. The real enforcement boundaries are the 15 hook points (HookPoint enum) and the dedicated boundary modules (evidence/tool_boundary.py, evidence/enforcement_boundary.py, memory/write_boundary.py, runtime/commit_boundary.py, artifacts/delivery_boundary.py, runtime/child_runner_boundary.py, runtime/projection_write_boundary.py).
+
+## How recipes relate to harnesses
+
+Recipes and harnesses sit on two sides of the same gap:
+
+- A **recipe** is the *declaration* — a compiled `RecipeSnapshot` that says which
+  packs, tools, validators, evidence, and projection rules *should* apply to a
+  task type. It is metadata, with every attachment flag locked to `False`.
+- A **harness** is the *enforcer* — `HarnessEngine` plus the evidence-contract
+  and boundary modules actually gate tool calls, evidence, and projection during
+  a run.
+
+Today the bridge between them is missing: no execution engine reads a recipe
+snapshot and configures a harness from it. So you author and inspect recipe
+metadata via the compilation pipeline, but you get enforcement by configuring a
+harness directly. See [harnesses.md](harnesses.md) and
+[build-a-harness.md](build-a-harness.md).

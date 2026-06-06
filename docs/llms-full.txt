@@ -21,24 +21,21 @@ magi-agent serve --port 8080
 open http://localhost:8080/dashboard
 ```
 
-First-run setup should happen in the local web UI where possible: provider/model selection, API key entry into local secret storage, workspace path selection, default recipe/harness selection, and first agent/chat creation.
+Configure a provider with one API key (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY`/`GOOGLE_API_KEY`, or `FIREWORKS_API_KEY`) or `~/.magi/config.toml`. With a provider key the local `magi` CLI runs a real model plus first-party tools (file read/write/edit, patch, Bash) behind permission prompts. Run `magi doctor` to verify setup. See https://openmagi.ai/docs/what-works-today for what is live today versus default-off.
 
-## Current Source Fallback
+## Source Checkout (contributors)
 
 ```bash
 git clone https://github.com/openmagi/magi-agent.git
 cd magi-agent
-npm install
-npm run magi -- init
-npm run magi -- doctor
-npm run magi -- start
+uv sync --extra dev --extra cli
+uv run --extra cli magi --help
+uv run --extra dev pytest -q
 ```
 
-`npm run magi -- ...` is documented as source fallback only. `npm run magi -- start` starts the local docs/development server for the source checkout. It does not activate cloud hosting, deploy infrastructure, or live runtime authority.
+The source checkout is for contributors developing the runtime. Normal users install via Homebrew.
 
 ## Packaging Follow-Up
-
-Follow-up plan: docs/superpowers/plans/2026-05-28-magi-agent-homebrew-local-app-install.md.
 
 The Homebrew install provides the local CLI and HTTP dashboard. Docker Compose/local stack publishing, dashboard onboarding, local secret storage, workspace volume management, and upgrade/rollback behavior remain packaging follow-up work.
 
@@ -302,7 +299,6 @@ npm run magi -- start
 
 Homebrew installation exists. The remaining packaging work is improving the local dashboard onboarding, workspace volume management, local secret storage, and upgrade/rollback behavior.
 
-Follow-up plan: `docs/superpowers/plans/2026-05-28-magi-agent-homebrew-local-app-install.md`.
 
 - The standalone CLI package has tested `magi` and `magi-agent` entrypoints.
 - Docker image/compose bundle publishing for multi-service local stacks remains separate from the Homebrew single-runtime path.
@@ -938,7 +934,7 @@ append-only audit ledger: the durable record of policy snapshots, receipts, vali
 
 Document Homebrew install as the normal user path and source checkout as the development fallback.
 
-Current docs may show git clone, npm install, npm run magi -- init, npm run magi -- doctor, and npm run magi -- start only as source fallback, provided `start` is described as the local docs/development server rather than live runtime activation.
+The contributor source path is git clone, `uv sync --extra dev --extra cli`, then `uv run --extra cli magi ...`. Normal users install via Homebrew.
 
 Do not say the current cloud CLI installs or starts a local runtime.
 
@@ -963,13 +959,13 @@ Treat the failure as a runtime state problem first, not a prompt wording problem
 
 ## Install docs look too simple
 
-If docs claim a package-manager, Homebrew, shell-pipe, create-app, or one-command runtime path is currently available, verify it against package entrypoints and tests first. Today, the normal user path is Homebrew plus `magi-agent serve --port 8080`; the source checkout path remains source clone, npm install, npm run magi -- init, npm run magi -- doctor, and npm run magi -- start for development.
+If docs claim a package-manager, Homebrew, shell-pipe, create-app, or one-command runtime path is currently available, verify it against package entrypoints and tests first. Today, the normal user path is Homebrew (`magi` CLI plus `magi-agent serve --port 8080`); the source checkout path is `git clone`, `uv sync --extra dev --extra cli`, then `uv run --extra cli magi ...` for development.
 
 Keep source checkout, local Homebrew, and optional managed hosting language separate so users know which environment they are operating.
 
 ## Agent will not start
 
-Check that all required environment variables are set: BOT_ID, USER_ID, GATEWAY_TOKEN, CORE_AGENT_MODEL, and the three service URLs. Run npm run magi -- doctor to diagnose missing configuration. If using the source checkout, ensure npm install completed without errors.
+For the local CLI, the only required configuration is one provider API key (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY`/`GOOGLE_API_KEY`, or `FIREWORKS_API_KEY`) or `~/.magi/config.toml`. Run `magi doctor` to diagnose missing provider config, the `litellm` dependency, config-file readability, and workspace writability. The BOT_ID/USER_ID/GATEWAY_TOKEN/CORE_AGENT_* and service-URL variables are for the hosted runtime only and are not needed locally.
 
 ## Agent gives wrong or unsupported answers
 
@@ -1017,7 +1013,7 @@ The runtime exposes typed hook points (hooks/manifest.py, 15 HookPoint values), 
 
 Magi Agent runs locally from source today. A packaged local app installer is planned but not yet shipped. Self-hosting starts with the source checkout and configuration.
 
-- Source install: See [Getting Started](/docs/getting-started) for git clone, npm install, and the npm run magi commands.
+- Source install: See [Getting Started](/docs/getting-started) for git clone, `uv sync --extra dev --extra cli`, and the `uv run --extra cli magi ...` commands.
 - Deployment options: See [Deployment](/docs/deployment) for local-first operation and optional managed hosting.
 - Configuration: See [Configuration](/docs/configuration) for magi-agent.yaml, environment variables, and runtime enforcement.
 - Security hardening: See [Security](/docs/security) for the default-off model and how to enable boundaries for production.

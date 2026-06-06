@@ -1,5 +1,8 @@
 # Configuration
 
+Status: ✅ Active — the local CLI is configured with a single provider key or a
+`~/.magi/config.toml`; runtime-enforced control/authority is hosted-only.
+
 Configure runtime-enforced control over context, tools, evidence, approvals, repair, projection, and audit.
 
 Magi Agent configuration should describe what the runtime may show the model, what tools may do, what evidence is required, and how unsupported work is repaired or blocked.
@@ -15,20 +18,54 @@ A stable policy snapshot makes runtime-enforced control reviewable: later valida
 - Approval and idempotency obligations for side effects.
 - Projection rules for model-visible context and user-visible output.
 
-### Example .magi-agent/env.local
+## Local minimal config
+
+The local `magi` CLI needs exactly ONE provider key (or a `~/.magi/config.toml`).
+There are no required service URLs or identity variables for local use.
+
+Option A — a single provider key in your environment:
+
+```sh
+# Pick ONE of these (auto-detected in this order):
+export ANTHROPIC_API_KEY=<your-key>     # default model claude-sonnet-4-5
+# export OPENAI_API_KEY=<your-key>      # default model gpt-4o
+# export GEMINI_API_KEY=<your-key>      # default model gemini-2.0-flash
+#   (GOOGLE_API_KEY is accepted as an alias for the gemini provider)
+# export FIREWORKS_API_KEY=<your-key>   # default model accounts/fireworks/models/llama-v3p1-70b-instruct
+```
+
+Option B — a `~/.magi/config.toml` (override the path with `MAGI_CONFIG`):
+
+```toml
+[model]
+provider = "anthropic"   # anthropic | openai | gemini | fireworks
+# model  = "claude-sonnet-4-5"   # optional; overrides the provider default
+api_key = "<your-key>"
+
+# Or keep keys per-provider:
+# [providers.anthropic]
+# api_key = "<your-key>"
+```
+
+With neither set, `magi` still launches but uses a model-free stub runner.
+
+### Hosted/managed only
+
+> The variables below are read by the hosted/managed deployment, **not** by the
+> local CLI. Do not set them for local use.
 
 ```
-# Provider and model
+# Hosted runtime profile (managed deployment only)
 CORE_AGENT_MODEL=<model-id>
-
-# Required service URLs (set by your local runtime profile)
 CORE_AGENT_API_PROXY_URL=http://localhost:8081
 CORE_AGENT_CHAT_PROXY_URL=http://localhost:8082
 CORE_AGENT_REDIS_URL=redis://localhost:6379
-
-# Your API key (never committed to git)
-ANTHROPIC_API_KEY=<your-provider-api-key>
+BOT_ID=<bot-id>
+USER_ID=<user-id>
+GATEWAY_TOKEN=<gateway-token>
 ```
+
+See the [environment variable reference](/docs/env-reference) for the full hosted list.
 
 ## Model-visible context
 

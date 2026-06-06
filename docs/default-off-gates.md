@@ -1,5 +1,10 @@
 # Default-Off Gates
 
+Status: 🚧 Default-off — this document describes the enforcement-boundary rollout, which ships in shadow/observe-only mode by design.
+
+> **Note — this is about ENFORCEMENT, not whether the agent runs.**
+> This document describes the rollout state of the **enforcement boundary modules** — the governance layer that can block, modify, or gate agent behavior. It does **not** describe whether the agent can run. With a provider key, the local `magi` CLI executes real model + tool work today (see [What works today](/docs/what-works-today)). "Stage 3 / `execution_attached`" means turning on live **enforcement** authority, not turning on task execution.
+
 How to use default-off rollout gates to safely activate new runtime authority.
 
 New runtime authority starts default-off and is enabled only after contract tests, replay, and security review pass.
@@ -18,7 +23,7 @@ This pattern ensures that even if someone misconfigures the runtime, authority c
 
 ## Configuration hierarchy: disabled to production
 
-Boundaries move through a planned three-stage activation hierarchy. Stage 1 (disabled): the boundary exists in code but is not active. Evidence is collected but no decisions are enforced. Stage 2 (local fake): the boundary is enabled with local_fake_evaluation_enabled, producing real decision types but without live authority. This is the testing and development stage. Stage 3 (production authority): traffic_attached and execution_attached are changed from Literal[False] to True in the boundary module source code, enabling live enforcement.
+Boundaries move through a planned three-stage activation hierarchy. Stage 1 (disabled): the boundary exists in code but is not active. Evidence is collected but no decisions are enforced. Stage 2 (local fake): the boundary is enabled with local_fake_evaluation_enabled, producing real decision types but without live authority. This is the testing and development stage. Stage 3 (production authority): traffic_attached and execution_attached are changed from Literal[False] to True in the boundary module source code, attaching the enforcement boundary to live traffic and decisions. Note that `execution_attached` here means the governance layer is allowed to gate/block live execution — it does not gate whether the agent can execute tasks at all (that already works locally; see [What works today](/docs/what-works-today)).
 
 Currently all boundaries are at Stage 1 or Stage 2. Production authority attachment (Stage 3) is cloud-managed and requires the code-level change described above.
 

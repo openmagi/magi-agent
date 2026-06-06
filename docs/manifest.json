@@ -321,6 +321,60 @@
       "title": "Frequently Asked Questions",
       "path": "docs/faq.md",
       "group": "Reference"
+    },
+    {
+      "slug": "what-works-today",
+      "title": "What Works Today",
+      "path": "docs/what-works-today.md",
+      "group": "Start"
+    },
+    {
+      "slug": "common-tasks",
+      "title": "Common Tasks",
+      "path": "docs/common-tasks.md",
+      "group": "Start"
+    },
+    {
+      "slug": "channels",
+      "title": "Channels (Telegram, Discord)",
+      "path": "docs/channels.md",
+      "group": "Configure"
+    },
+    {
+      "slug": "cli-reference",
+      "title": "CLI Reference",
+      "path": "docs/cli/magi.md",
+      "group": "Reference"
+    },
+    {
+      "slug": "changelog",
+      "title": "Changelog",
+      "path": "docs/changelog.md",
+      "group": "Reference"
+    },
+    {
+      "slug": "upgrading",
+      "title": "Upgrading",
+      "path": "docs/upgrading.md",
+      "group": "Reference"
+    },
+    {
+      "slug": "glossary",
+      "title": "Glossary",
+      "path": "docs/glossary.md",
+      "group": "Reference"
+    },
+    {
+      "slug": "cli-streaming-parity",
+      "title": "CLI Streaming Parity",
+      "path": "docs/architecture/parity/cli-streaming-for-web-frontend.md",
+      "group": "Developer"
+    },
+    {
+      "slug": "contributing",
+      "title": "Contributing",
+      "path": "CONTRIBUTING.md",
+      "group": "Developer"
     }
   ]
 }

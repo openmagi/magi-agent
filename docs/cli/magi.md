@@ -1,5 +1,9 @@
 # magi CLI
 
+Type: Reference — the full flag, output-mode, exit-code, keybinding, and
+sub-command reference. For the concise overview and happy-path guide, see
+[CLI](/docs/cli).
+
 Magi is the headless and interactive CLI for Magi Agent. It uses the same
 `magi_agent` package as the local HTTP API, dashboard, and ADK session layer.
 
@@ -295,13 +299,32 @@ version and exits 0.
 rehydration (replaying prior turn history into the engine) is a v1.1 follow-up —
 engine rehydration is not yet implemented.
 
+## `magi doctor`
+
+`magi doctor` runs local environment diagnostics so a first-time user can see
+what is and is not configured before running a turn. It checks:
+
+- **Provider config resolvable** — whether a provider key (`ANTHROPIC_API_KEY` /
+  `OPENAI_API_KEY` / `GEMINI_API_KEY` / `GOOGLE_API_KEY` / `FIREWORKS_API_KEY`)
+  or a `~/.magi/config.toml` (path overridable via `MAGI_CONFIG`) selects a real
+  model. If nothing is configured, the CLI falls back to a model-free stub.
+- **`litellm` importable** — whether the optional provider runtime dependency is
+  installed (a configured provider needs it; if missing, turns return an install
+  hint instead of a model answer).
+- **Config path readable** — whether the resolved config file path can be read.
+- **Working directory writable** — whether the current working directory can be
+  written to.
+
+```sh
+magi doctor
+```
+
 ## Stub sub-commands
 
 The following sub-commands resolve but are not yet implemented:
 
 ```sh
 magi config   # manage configuration (stub)
-magi doctor   # environment diagnostics (stub)
 magi mcp      # manage MCP connections (stub)
 magi auth     # manage authentication (stub)
 ```

@@ -21,24 +21,21 @@ magi-agent serve --port 8080
 open http://localhost:8080/dashboard
 ```
 
-First-run setup should happen in the local web UI where possible: provider/model selection, API key entry into local secret storage, workspace path selection, default recipe/harness selection, and first agent/chat creation.
+Configure a provider with one API key (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY`/`GOOGLE_API_KEY`, or `FIREWORKS_API_KEY`) or `~/.magi/config.toml`. With a provider key the local `magi` CLI runs a real model plus first-party tools (file read/write/edit, patch, Bash) behind permission prompts. Run `magi doctor` to verify setup. See https://openmagi.ai/docs/what-works-today for what is live today versus default-off.
 
-## Current Source Fallback
+## Source Checkout (contributors)
 
 ```bash
 git clone https://github.com/openmagi/magi-agent.git
 cd magi-agent
-npm install
-npm run magi -- init
-npm run magi -- doctor
-npm run magi -- start
+uv sync --extra dev --extra cli
+uv run --extra cli magi --help
+uv run --extra dev pytest -q
 ```
 
-`npm run magi -- ...` is documented as source fallback only. `npm run magi -- start` starts the local docs/development server for the source checkout. It does not activate cloud hosting, deploy infrastructure, or live runtime authority.
+The source checkout is for contributors developing the runtime. Normal users install via Homebrew.
 
 ## Packaging Follow-Up
-
-Follow-up plan: docs/superpowers/plans/2026-05-28-magi-agent-homebrew-local-app-install.md.
 
 The Homebrew install provides the local CLI and HTTP dashboard. Docker Compose/local stack publishing, dashboard onboarding, local secret storage, workspace volume management, and upgrade/rollback behavior remain packaging follow-up work.
 
@@ -106,3 +103,10 @@ The Homebrew install provides the local CLI and HTTP dashboard. Docker Compose/l
 - ToolHost API Reference: https://openmagi.ai/docs/toolhost-api - ToolManifest full schema with permission, budget, dangerous, mutates_workspace, parallel_safety (unsafe/readonly/concurrency_safe), side_effect_class, emits_evidence_types, and tags. ToolRegistry manages ToolRegistration records. Dispatcher is BLOCKED (toolDispatchAllowed=False).
 - Runtime Events Reference: https://openmagi.ai/docs/runtime-events - Every runtime event kind (status, token, tool, control, artifact, error), how events carry turn_id, and how they connect to SSE streaming, boundary checks, and the evidence ledger.
 - Frequently Asked Questions: https://openmagi.ai/docs/faq - Answers to the most common questions about Magi Agent architecture, recipe and harness differences, testing, and extensibility.
+- What Works Today: https://openmagi.ai/docs/what-works-today - What the local CLI does today (real model + first-party tools behind permission prompts) versus what is default-off/shadow (enforcement boundaries, external delivery/integrations).
+- Common Tasks: https://openmagi.ai/docs/common-tasks - Task-oriented index mapping goals to the exact `magi` command or doc.
+- Channels (Telegram, Discord): https://openmagi.ai/docs/channels - Channel architecture and setup; live send/receive is currently shadow/local-fake (default-off).
+- Changelog: https://openmagi.ai/docs/changelog - Notable user-facing changes between releases.
+- Upgrading: https://openmagi.ai/docs/upgrading - Upgrade the Homebrew install or a source checkout; configuration carries over.
+- Glossary: https://openmagi.ai/docs/glossary - Short definitions of the core Magi Agent terms.
+- CLI Reference: https://openmagi.ai/docs/cli-reference - Full `magi` flag, exit-code, output-mode, and permission-mode reference.
