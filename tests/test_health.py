@@ -17,6 +17,10 @@ from magi_agent.evidence.observed_egress import (
 )
 from magi_agent.runtime.openmagi_runtime import OpenMagiRuntime
 from magi_agent.transport.chat import Gate5BUserVisibleChatRouteConfig
+from magi_agent.gates.gate5b_full_toolhost import (
+    GATE5B_FULL_TOOLHOST_TOOL_NAMES,
+    Gate5BFullToolHostConfig,
+)
 
 
 def make_runtime() -> OpenMagiRuntime:
@@ -181,6 +185,68 @@ def test_healthz_reports_user_visible_authority_only_with_active_chat_gate() -> 
         "productionSseWritesAllowed": False,
         "productionDbWritesAllowed": False,
     }
+
+
+def test_healthz_projects_selected_full_toolhost_readiness_for_active_chat_gate() -> None:
+    config = RuntimeConfig(
+        bot_id="bot-test",
+        user_id="user-test",
+        gateway_token="gateway-token",
+        api_proxy_url="http://api-proxy.local",
+        chat_proxy_url="http://chat-proxy.local",
+        redis_url="redis://redis.local:6379/0",
+        model="gpt-5.2",
+        build=BuildInfo(version="0.1.0-adk-scaffold", build_sha="sha-test"),
+        authority=PythonRuntimeAuthorityConfig(
+            userVisibleOutputAllowed=True,
+            canaryRoutingAllowed=True,
+        ),
+    )
+    runtime = OpenMagiRuntime(config=config)
+    runtime.gate5b_user_visible_chat_route_config = Gate5BUserVisibleChatRouteConfig(
+        enabled=True,
+        killSwitchEnabled=False,
+        selectedBotDigest="sha256:82e4e56db648bc081311887c362e565c68f74411ce44855aba61af697e57bd86",
+        selectedOwnerUserIdDigest="sha256:d59c3eb10fe2b0cacea2b080885863e3286d9a6d352269b822fd5ebef3d22e15",
+        environment="production",
+        environmentAllowlist=("production",),
+    )
+    runtime.gate5b_full_toolhost_config = Gate5BFullToolHostConfig.model_validate(
+        {
+            "enabled": True,
+            "killSwitchEnabled": False,
+            "routeAttachmentEnabled": True,
+            "selectedBotDigest": "sha256:82e4e56db648bc081311887c362e565c68f74411ce44855aba61af697e57bd86",
+            "selectedOwnerDigest": "sha256:d59c3eb10fe2b0cacea2b080885863e3286d9a6d352269b822fd5ebef3d22e15",
+            "environment": "production",
+            "environmentAllowlist": ("production",),
+            "allowedToolNames": GATE5B_FULL_TOOLHOST_TOOL_NAMES,
+            "maxToolCallsPerTurn": 8,
+        }
+    )
+
+    response = TestClient(create_app(runtime)).get("/healthz")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "python_ready"
+    assert body["responseAuthority"] == "python"
+    assert body["authority"]["toolDispatchAllowed"] is True
+    assert body["authority"]["selectedWorkspaceMutationAllowed"] is True
+    assert body["authority"]["productionWorkspaceMutationAllowed"] is False
+    assert body["authority"]["workspaceMutationAllowed"] is False
+    assert body["authority"]["memoryWriteAllowed"] is False
+    assert body["safety"]["toolsActive"] is True
+    assert body["safety"]["toolHostMode"] == "selected_full_toolhost"
+    assert body["safety"]["selectedWorkspaceMutationAllowed"] is True
+    assert body["safety"]["productionWorkspaceMutationAllowed"] is False
+    assert body["safety"]["workspaceMutationAllowed"] is False
+    assert {"FileWrite", "FileEdit", "PatchApply", "Bash"}.issubset(
+        set(body["safety"]["allowedToolNames"])
+    )
+    assert body["tooling"]["mode"] == "selected_full_toolhost"
+    assert body["tooling"]["productionAttached"] is False
+    assert body["tooling"]["forbiddenToolsExposed"] == []
 
 
 def test_healthz_keeps_authority_false_when_chat_gate_identity_mismatches() -> None:
