@@ -150,6 +150,37 @@ def test_healthz_reports_user_visible_authority_only_with_active_chat_gate() -> 
     body = response.json()
     assert body["userVisibleOutputAllowed"] is True
     assert body["canaryRoutingAllowed"] is True
+    assert body["status"] == "python_ready"
+    assert body["fallbackStatus"] == "none"
+    assert body["responseAuthority"] == "python"
+    assert body["authority"] == {
+        "userVisibleOutputAllowed": True,
+        "canaryRoutingAllowed": True,
+        "memoryWriteAllowed": False,
+        "toolDispatchAllowed": False,
+        "transcriptWritesAllowed": False,
+        "sseWritesAllowed": False,
+        "channelWritesAllowed": False,
+        "dbWritesAllowed": False,
+        "workspaceMutationAllowed": False,
+        "childExecutionAllowed": False,
+        "missionRuntimeAllowed": False,
+        "evidenceBlockModeAllowed": False,
+    }
+    assert body["safety"] == {
+        "toolsActive": False,
+        "memoryProviderActive": False,
+        "browserActive": False,
+        "workspaceMutationAllowed": False,
+        "childExecutionAllowed": False,
+        "missionRuntimeAllowed": False,
+        "telegramDeliveryAllowed": False,
+        "artifactChannelDeliveryAllowed": False,
+        "evidenceBlockModeAllowed": False,
+        "productionTranscriptWritesAllowed": False,
+        "productionSseWritesAllowed": False,
+        "productionDbWritesAllowed": False,
+    }
 
 
 def test_healthz_keeps_authority_false_when_chat_gate_identity_mismatches() -> None:

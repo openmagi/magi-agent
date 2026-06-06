@@ -71,7 +71,7 @@ def healthz_payload(runtime: OpenMagiRuntime) -> dict[str, object]:
             "BOT_ID": runtime.config.bot_id,
         }
     )
-    return {
+    body: dict[str, object] = {
         **status,
         "userVisibleOutputAllowed": user_visible_output_allowed,
         "canaryRoutingAllowed": canary_routing_allowed,
@@ -145,6 +145,45 @@ def healthz_payload(runtime: OpenMagiRuntime) -> dict[str, object]:
                 }
                 for pack in runtime.profile.harness_packs
             ],
+        },
+    }
+    if user_visible_output_allowed and canary_routing_allowed:
+        body.update(_user_visible_canary_ready_envelope())
+    return body
+
+
+def _user_visible_canary_ready_envelope() -> dict[str, object]:
+    return {
+        "status": "python_ready",
+        "fallbackStatus": "none",
+        "responseAuthority": "python",
+        "authority": {
+            "userVisibleOutputAllowed": True,
+            "canaryRoutingAllowed": True,
+            "memoryWriteAllowed": False,
+            "toolDispatchAllowed": False,
+            "transcriptWritesAllowed": False,
+            "sseWritesAllowed": False,
+            "channelWritesAllowed": False,
+            "dbWritesAllowed": False,
+            "workspaceMutationAllowed": False,
+            "childExecutionAllowed": False,
+            "missionRuntimeAllowed": False,
+            "evidenceBlockModeAllowed": False,
+        },
+        "safety": {
+            "toolsActive": False,
+            "memoryProviderActive": False,
+            "browserActive": False,
+            "workspaceMutationAllowed": False,
+            "childExecutionAllowed": False,
+            "missionRuntimeAllowed": False,
+            "telegramDeliveryAllowed": False,
+            "artifactChannelDeliveryAllowed": False,
+            "evidenceBlockModeAllowed": False,
+            "productionTranscriptWritesAllowed": False,
+            "productionSseWritesAllowed": False,
+            "productionDbWritesAllowed": False,
         },
     }
 
