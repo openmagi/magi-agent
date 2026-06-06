@@ -9,7 +9,6 @@ from magi_agent.web_acquisition.live_fetch_provider import (
     HONEST_UA,
     LiveFetchProvider,
     redact_metadata_values,
-    resolve_and_check_host,
     resolve_validated_ip,
 )
 from magi_agent.web_acquisition.live_provider_pack import (
@@ -121,26 +120,31 @@ def test_dns_rebinding_blocks_before_socket(monkeypatch: pytest.MonkeyPatch) -> 
     assert result.status == "no_answer"
 
 
-def test_resolve_and_check_host_classification(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_resolve_validated_ip_classification(monkeypatch: pytest.MonkeyPatch) -> None:
     def _resolves_to(ip: str):  # type: ignore[no-untyped-def]
         def _fake(host, *args, **kwargs):  # type: ignore[no-untyped-def]
             return [(2, 1, 6, "", (ip, 0))]
 
         return _fake
 
-    # Public IP allowed.
+    # Public IP allowed: reason is None and ip is returned.
     monkeypatch.setattr(
         "magi_agent.web_acquisition.live_fetch_provider.socket.getaddrinfo",
         _resolves_to("93.184.216.34"),
     )
-    assert resolve_and_check_host("docs.example.com") is None
+    reason, ip = resolve_validated_ip("docs.example.com")
+    assert reason is None
+    assert ip == "93.184.216.34"
 
+    # Private/metadata/CGNAT/reserved/loopback IPs are all blocked.
     for blocked_ip in ("10.0.0.5", "192.168.1.1", "169.254.169.254", "100.64.0.1", "127.0.0.1", "240.0.0.1"):
         monkeypatch.setattr(
             "magi_agent.web_acquisition.live_fetch_provider.socket.getaddrinfo",
             _resolves_to(blocked_ip),
         )
-        assert resolve_and_check_host("public.example.com") is not None, blocked_ip
+        reason, ip = resolve_validated_ip("public.example.com")
+        assert reason is not None, blocked_ip
+        assert ip is None, blocked_ip
 
 
 def test_cloudflare_challenge_retries_with_honest_ua(monkeypatch: pytest.MonkeyPatch) -> None:

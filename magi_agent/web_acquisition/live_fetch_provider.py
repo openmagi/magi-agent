@@ -11,7 +11,7 @@ Security posture beyond the pack's literal-URL firewall:
 
 * DNS-rebinding egress guard — every resolved IP is re-checked against the same
   private/metadata/reserved/CGNAT classification as ``url_policy_error`` BEFORE
-  any socket is opened (``resolve_and_check_host`` / ``resolve_validated_ip``).
+  any socket is opened (``resolve_validated_ip``).
   The classification lives in ``policy.is_blocked_ip`` so the two paths cannot
   drift.
 * No auto-redirects — the client is created with ``follow_redirects=False`` and
@@ -135,18 +135,6 @@ def resolve_validated_ip(host: str) -> tuple[str | None, str | None]:
             return "dns_rebind_blocked_ip", None
     return None, resolved[0]
 
-
-def resolve_and_check_host(host: str) -> str | None:
-    """Resolve ``host`` and verify EVERY resolved IP is an allowed egress target.
-
-    Returns a reason code string when the host is blocked (DNS failure or any
-    resolved address classified private/metadata/reserved/CGNAT/loopback), or
-    ``None`` when all resolved addresses are public. This is the DNS-rebinding
-    egress guard and MUST be called before opening any socket. Thin wrapper over
-    ``resolve_validated_ip`` kept for callers that only need the boolean verdict.
-    """
-    reason, _ip = resolve_validated_ip(host)
-    return reason
 
 
 def redact_metadata_values(meta: Mapping[str, object]) -> dict[str, object]:
@@ -476,5 +464,5 @@ __all__ = [
     "HONEST_UA",
     "LiveFetchProvider",
     "redact_metadata_values",
-    "resolve_and_check_host",
+    "resolve_validated_ip",
 ]
