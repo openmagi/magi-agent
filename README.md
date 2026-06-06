@@ -144,6 +144,51 @@ brew update
 brew reinstall openmagi/tap/magi-agent --force-bottle
 ```
 
+## Quickstart (your first task)
+
+The canonical path is Homebrew plus one provider key. Source checkout is for
+contributors only.
+
+```bash
+# 1. Install
+brew install --force-bottle openmagi/tap/magi-agent
+
+# 2. Set ONE provider key (any of these works)
+export ANTHROPIC_API_KEY=...   # or OPENAI_API_KEY / GEMINI_API_KEY / GOOGLE_API_KEY / FIREWORKS_API_KEY
+
+# 3. Ask a no-tools question — the real model answers
+magi -p "What is 2+2?"
+```
+
+Setting one provider key builds a real model-backed runner. With no key (and no
+`~/.magi/config.toml`), the CLI falls back to a model-free stub. The default
+model per provider is `claude-sonnet-4-5` (anthropic), `gpt-4o` (openai),
+`gemini-2.0-flash` (gemini), and the Fireworks Llama 3.1 70B instruct model.
+
+For a task that uses tools (file read/write/edit, patch, Bash), tool execution
+is gated by Claude-Code-style permission modes. Headless `-p` runs use the
+`default` mode, which asks per tool and cannot auto-resolve those asks without an
+input stream, so use `acceptEdits` (or run the interactive TUI and approve):
+
+```bash
+# Interactive: approve tool use when prompted
+magi
+
+# Headless: auto-allow edit-class tools
+magi -p --permission-mode acceptEdits "Read README.md and summarize the install steps"
+```
+
+Expect the model to answer pure questions directly; for tool-using tasks you
+will see permission prompts unless you pass `--permission-mode acceptEdits` (or
+`bypassPermissions`).
+
+## Front door / where to start
+
+- Getting started: [docs/getting-started.md](docs/getting-started.md)
+- Learning path: [docs/learning-path.md](docs/learning-path.md)
+- What works today: [docs/what-works-today.md](docs/what-works-today.md)
+- CLI reference: [docs/cli/magi.md](docs/cli/magi.md)
+
 ## Architecture
 
 Magi controls the loop around ADK. The model sees a bounded context packet and
@@ -346,6 +391,11 @@ API key must not grant live tool authority by itself. Enabling integrations
 should require explicit toolkit scope, credential scope, user approval, and
 leak-safe evidence before an external action is enabled.
 
+A provider key does enable the real local model plus first-party local tools
+(file read/write/edit, patch, Bash, behind permission prompts); what stays
+default-off is external delivery/integrations and the hosted production
+enforcement authority.
+
 Install optional Composio dependencies only when you are developing that surface
 from a source checkout.
 
@@ -355,6 +405,11 @@ High-authority behavior such as live model calls, tool execution, memory writes,
 workspace mutation, browser or channel delivery, scheduled work, database
 writes, billing mutation, and external integrations should stay behind explicit
 configuration, preflight checks, approvals, and durable evidence.
+
+For local CLI use, a provider key plus the permission-mode prompts already give
+you a real model and first-party local tools. The default-off authority above
+refers to external delivery/integrations and the hosted production enforcement
+boundary, not to whether the local agent can run a task.
 
 Operators should treat HTTP success and SSE completion as transport evidence
 only. Acceptance for governed workflows comes from durable records: delivery
@@ -410,8 +465,9 @@ Build-system pins:
 ## More Docs
 
 - CLI reference: `docs/cli/magi.md`
-- CLI handoff: `docs/notes/2026-05-31-magi-cli-track18-handoff-for-adk-migration.md`
-- CLI design: `docs/plans/2026-05-30-magi-cli-design.md`
+- Getting started: `docs/getting-started.md`
+- Learning path: `docs/learning-path.md`
+- What works today: `docs/what-works-today.md`
 - Runtime architecture: `magi_agent/ARCHITECTURE.md`
 
 ## License

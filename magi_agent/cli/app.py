@@ -289,8 +289,66 @@ def config(
 def doctor(
     ctx: typer.Context,
 ) -> None:
-    """Run environment diagnostics."""
+    """Run environment diagnostics.
+
+    Reports the four things a local ``magi`` run needs: a resolvable provider
+    config, the ``litellm`` dependency, a readable config file (if present), and
+    a writable working directory, followed by optional-integration status. This
+    command is informational and always exits 0; read the lines for problems.
+    """
     _ = ctx
+    from magi_agent.cli import providers as _providers  # noqa: PLC0415
+
+    # 1. Provider configuration (env key or ~/.magi/config.toml).
+    config = _providers.resolve_provider_config()
+    if config is None:
+        hints = sorted(
+            {name for keys in _providers._PROVIDER_ENV_KEYS.values() for name in keys}
+        )
+        typer.echo(
+            "provider: NONE — set one of "
+            + ", ".join(hints)
+            + f", or create {_providers._config_path()}",
+            err=False,
+        )
+    else:
+        typer.echo(
+            f"provider: OK ({config.provider}, model={config.model})", err=False
+        )
+
+    # 2. litellm dependency (required to build the real model runner).
+    try:
+        import litellm  # noqa: F401, PLC0415
+
+        typer.echo("litellm: OK", err=False)
+    except Exception:  # noqa: BLE001 — any import failure means it is unusable
+        typer.echo(
+            "litellm: MISSING — install the cli extra "
+            "(`uv sync --extra cli` from source, or `pip install litellm`)",
+            err=False,
+        )
+
+    # 3. Config file readability (flagged only if it exists but cannot be read).
+    cfg_path = _providers._config_path()
+    if cfg_path.exists():
+        if os.access(cfg_path, os.R_OK):
+            typer.echo(f"config file: OK ({cfg_path})", err=False)
+        else:
+            typer.echo(f"config file: UNREADABLE ({cfg_path})", err=False)
+    else:
+        typer.echo(
+            f"config file: none ({cfg_path}) — using environment variables",
+            err=False,
+        )
+
+    # 4. Working directory writability.
+    cwd = os.getcwd()
+    if os.access(cwd, os.W_OK):
+        typer.echo(f"workspace: OK (writable: {cwd})", err=False)
+    else:
+        typer.echo(f"workspace: NOT WRITABLE ({cwd})", err=False)
+
+    # Optional integration status.
     typer.echo(_composio_status_line("Composio"), err=False)
 
 

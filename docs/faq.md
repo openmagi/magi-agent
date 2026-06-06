@@ -4,6 +4,15 @@ Answers to common questions about Magi Agent: recipes vs harnesses, default-off 
 
 Answers to the most common questions about Magi Agent architecture, recipe and harness differences, testing, and extensibility.
 
+## Can Magi actually run tasks locally today?
+
+Yes. With a provider key (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY` / `GOOGLE_API_KEY`, or `FIREWORKS_API_KEY`) or a `~/.magi/config.toml`, the local `magi` CLI runs a real model (via LiteLlm) and first-party local tools — file read/write/edit, patch apply, and Bash — behind permission prompts (`default` / `acceptEdits` / `bypassPermissions`). With no key it still launches against a model-free stub.
+
+What's default-off is the **enforcement/governance layer** (the boundary modules that can block or gate behavior) plus **external delivery and integrations** (Telegram/Discord live send, Composio) — not the agent's ability to do work. See [What works today](/docs/what-works-today).
+
+- [What works today](/docs/what-works-today)
+- [Default-off gates](/docs/default-off-gates)
+
 ## What models does Magi Agent support?
 
 Magi Agent is model-agnostic. Configure any supported provider and model via CORE_AGENT_MODEL in your environment. The runtime's evidence and boundary system works regardless of which model generates proposals.
@@ -63,6 +72,8 @@ The ADK bridge layer handles provider-specific callback mapping (e.g. before_mod
 RecipePackManifest is metadata-only today. The live_tool_refs, live_callback_refs, and runner_route_refs fields are validated empty and serialize to empty tuples. The validator explicitly rejects non-empty values with "recipe pack manifests must remain metadata-only".
 
 The execution engine is the planned boundary that will wire manifest refs (instruction_refs, tool_refs, callback_refs, validator_refs, evidence_refs) to runtime primitives. Until that boundary is implemented, recipes declare policy intent without executing it.
+
+This is specific to the recipe-pack compilation layer — it does not mean the agent can't act. The local CLI already runs a real model and first-party tools today (see [What works today](/docs/what-works-today)); what's pending is the metadata-driven recipe execution engine.
 
 - [Recipe schema](/docs/recipe-schema)
 

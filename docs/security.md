@@ -1,8 +1,29 @@
 # Security
 
+Status: ✅ Active — boundaries, default-off authority, and projection control are the security model.
+
 Security starts with runtime boundaries, default-off authority, and projection control.
 
 Keep secrets out of model-visible context, make tools least-privilege, require approvals for side effects, and audit every governed transition.
+
+## Threat model
+
+Treat these as the primary adversarial surfaces when running the agent:
+
+- **Prompt injection.** Untrusted content (web pages, files, tool output) can try
+  to steer the model into unintended tool calls or data exfiltration. Mitigations:
+  permission prompts on tool use, least-privilege tool scope, and governed
+  projection that withholds secrets/private paths from output.
+- **Tool side effects.** First-party tools include destructive capabilities
+  (`Bash`, file writes/patches). Run in `default` permission mode (approve each
+  tool) for untrusted tasks; reserve `acceptEdits`/`bypassPermissions` for trusted
+  contexts.
+- **Hooks that execute.** Hook manifests can declare `command` and `http` handler
+  types that run external processes or make network calls. Only install hooks/
+  plugins you trust; review their manifests. See [plugin manifest](/docs/plugin-manifest).
+- **Secret exfiltration.** Channel adapters and the evidence ledger redact common
+  secret patterns and private paths, but do not place secrets in prompts, memory,
+  or doc examples in the first place.
 
 ## Secret hygiene
 
@@ -20,7 +41,7 @@ Runtime-enforced control should be auditable through receipts and append-only au
 
 Before enabling any production authority, review this checklist.
 
-- API keys are stored in .magi-agent/env.local or environment variables, never committed to git.
+- API keys are stored in environment variables or `~/.magi/config.toml` (kept out of source control), never committed to git.
 - Default-off boundaries remain disabled unless you have explicitly reviewed and enabled them.
 - Dangerous tools (Bash, TestRun) require approval before execution.
 - Authority flags in RuntimeConfig are all Literal[False] — production authority is a separate rollout step.

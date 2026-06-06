@@ -1,48 +1,52 @@
 # Quickstart
 
-A truthful first pass through the current source tree and runtime architecture.
+Status: ✅ Active — Homebrew install plus one provider key runs a real model-backed task today.
 
-Use Homebrew for local runs, or inspect the source checkout when developing the runtime.
+The fastest happy path from install to your first answered task.
 
-## Know the target UX first
+## Happy path
 
-This walkthrough shows the architecture and concepts you will encounter when running Magi Agent.
-
-For normal users, the intended flow is `brew install --force-bottle openmagi/tap/magi-agent` followed by `magi-agent serve --port 8080`, then browser-based local onboarding.
-
-### Local runtime
+The canonical flow is Homebrew, one provider key, then `magi -p`:
 
 ```
+# 1. Install
 brew install --force-bottle openmagi/tap/magi-agent
+
+# 2. Set ONE provider key
+export ANTHROPIC_API_KEY=...   # or OPENAI_API_KEY / GEMINI_API_KEY / GOOGLE_API_KEY / FIREWORKS_API_KEY
+
+# 3. Ask a no-tools question — the real model answers
+magi -p "What is 2+2?"
+```
+
+Setting one provider key (or creating `~/.magi/config.toml`) builds a real
+model-backed runner. With neither, the CLI falls back to a model-free stub.
+
+For a tool-using task, run the interactive `magi` TUI and approve the tool, or
+pass `--permission-mode acceptEdits` headlessly. In `default` mode, headless `-p`
+asks per tool and cannot auto-resolve those asks without an input stream:
+
+```
+magi   # interactive: approve tool use when prompted
+magi -p --permission-mode acceptEdits "Read README.md and summarize the install steps"
+```
+
+## Local dashboard
+
+To run the local HTTP API and browser dashboard:
+
+```
 magi-agent serve --port 8080
 open http://localhost:8080/dashboard
 ```
 
-## Read the runtime map from source
+## Status: enforcement is audit-only today
 
-Start by initializing the checkout and opening the docs locally. The architecture, runtime, contracts, tools, and hooks pages explain how composable determinism works before you edit runtime code. The local `start` command is source fallback only: a docs/development server, not live runtime activation.
-
-### Terminal
-
-```
-npm install
-npm run magi -- init
-npm run magi -- doctor
-npm run magi -- start
-# Visit http://localhost:3000/docs in a browser
-```
-
-## Inspect the current install contract
-
-Before adding install instructions, verify the package entrypoints that exist. The root `magi` npm script is the current local source-checkout CLI, while `packages/openmagi` remains cloud-only.
-
-### Terminal
-
-```
-npm run magi -- --help
-npm run magi -- doctor
-cat packages/openmagi/package.json
-```
+The worked example below shows the runtime contract. The example enforcement
+behaviors it describes (evidence contracts, `block_final_answer`, source-before-claim
+blocking) are audit-only / default-off today, so do not expect them to fire and
+block a local run by default. Read them as the contract the runtime is built to
+enforce when the boundary layer is enabled.
 
 ## Verify Source Before Claim
 
@@ -75,7 +79,7 @@ The resolved evidence contract looks like this:
 ```
 EvidenceContract(
     id='research.source_inspection',
-    triggers=('after_tool_use', 'before_commit'),
+    triggers=('afterToolUse', 'beforeCommit'),
     requirements=(
         EvidenceRequirement(
             type='SourceInspection',
