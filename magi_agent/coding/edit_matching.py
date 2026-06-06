@@ -65,7 +65,8 @@ class EditMatchResult:
     tier: str                      # e.g. "simple", "context_aware"
     tier_index: int                # 0-based position in _MATCHERS
     confidence: float              # 0.0..1.0
-    matched_span: tuple[int, int]  # (start, end) byte offsets into content_body
+    matched_span: tuple[int, int]  # (start, end) byte offsets into the PRE-EDIT content
+    matched_text: str              # the actual pre-edit substring that was replaced
     ambiguous: bool                # a unique match was forced despite other candidates
 
     def __str__(self) -> str:      # backward compatibility: str(res) == res.result
@@ -536,6 +537,7 @@ def replace(content: str, old: str, new: str, replace_all: bool = False) -> Edit
                     tier_index=tier_index,
                     confidence=confidence,
                     matched_span=(span_start, span_end),
+                    matched_text=candidate,
                     ambiguous=False,
                 )
             # Single replacement: verify uniqueness
@@ -558,6 +560,7 @@ def replace(content: str, old: str, new: str, replace_all: bool = False) -> Edit
                 tier_index=tier_index,
                 confidence=confidence,
                 matched_span=(span_start, span_end),
+                matched_text=candidate,
                 ambiguous=False,
             )
 

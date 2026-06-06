@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -37,7 +38,7 @@ _MODEL_CONFIG = ConfigDict(
     hide_input_in_errors=True,
 )
 
-_DIGEST_RE = __import__("re").compile(r"^sha256:[a-f0-9]{64}$")
+_DIGEST_RE = re.compile(r"^sha256:[a-f0-9]{64}$")
 
 
 class EditMatchReceiptRecord(BaseModel):
@@ -101,19 +102,26 @@ class EditMatchReceiptBoundary:
         Parameters
         ----------
         match:
-            The ``EditMatchResult`` returned by ``replace()``.
+            The ``EditMatchResult`` returned by ``replace()``.  The
+            ``matched_text`` field carries the exact pre-edit substring that
+            the cascade matched and replaced; it is used to compute
+            ``spanDigest``.
         file_content:
             The *new* file content (post-edit), used to compute the
             ``fileDigest`` for the evidence record.  Never stored raw.
+
+        Notes
+        -----
+        ``spanDigest`` is the sha256 of ``match.matched_text`` — the actual
+        pre-edit substring from the original content body.  It is NOT derived
+        from the post-edit content; slicing ``file_content`` with
+        ``matched_span`` offsets would yield post-edit text, which is
+        meaningless for the receipt.
         """
         file_digest = _compute_digest(file_content)
-        # Extract the matched span text from the *original* content (pre-edit).
-        # The span is recorded only as a digest so no raw text leaks.
-        start, end = match.matched_span
-        # matched_span indices are into the full content string (post-BOM-strip
-        # adjustment); clamp to valid range for safety.
-        span_text = file_content[start:end] if start < len(file_content) else ""
-        span_digest = _compute_digest(span_text)
+        # spanDigest: digest the actual pre-edit matched text stored on the result.
+        # Never slice post-edit content with pre-edit offsets.
+        span_digest = _compute_digest(match.matched_text)
         return EditMatchReceiptRecord(
             tier=match.tier,
             tier_index=match.tier_index,

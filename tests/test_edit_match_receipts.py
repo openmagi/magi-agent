@@ -228,3 +228,59 @@ class TestEditMatchReceiptRecordValidation:
         )
         assert record.tier == "context_aware"
         assert record.confidence == 0.75
+
+
+# ---------------------------------------------------------------------------
+# Regression: spanDigest must hash the pre-edit matched text, not post-edit
+# ---------------------------------------------------------------------------
+
+
+class TestSpanDigestMatchesPreEditText:
+    """Regression guard for the spanDigest semantics bug.
+
+    Before the fix, build_record sliced post-edit content with pre-edit offsets,
+    which yielded a fragment of the new text (e.g. "goodb" instead of "hello").
+    These tests assert that spanDigest is the sha256 of the ACTUAL matched
+    (pre-edit) candidate text, accessible as match.matched_text.
+    """
+
+    def test_matched_span_indexes_original_content(self):
+        """matched_span offsets must index the pre-edit original content body."""
+        original = "hello world\n"
+        match = replace(original, "hello", "goodbye-much-longer")
+        start, end = match.matched_span
+        # Strip BOM offset (none here) — body starts at index 0.
+        bom_offset = 1 if original.startswith("﻿") else 0
+        body = original[bom_offset:]
+        assert body[start - bom_offset : end - bom_offset] == match.matched_text
+
+    def test_matched_text_equals_candidate(self):
+        """matched_text must be the exact pre-edit substring that was replaced."""
+        original = "hello world\n"
+        match = replace(original, "hello", "goodbye-much-longer")
+        assert match.matched_text == "hello"
+
+    def test_span_digest_equals_sha256_of_matched_text(self):
+        """spanDigest must be sha256 of matched_text, not of any post-edit fragment."""
+        original = "hello world\n"
+        match = replace(original, "hello", "goodbye-much-longer")
+        boundary = _make_boundary()
+        record = boundary.build_record(match=match, file_content=match.result)
+        expected_span_digest = _sha256_hex(match.matched_text)
+        assert record.span_digest == expected_span_digest
+
+    def test_span_digest_is_not_sha256_of_post_edit_fragment(self):
+        """Confirm the old bug is absent: digest of post-edit slice must differ."""
+        original = "hello world\n"
+        match = replace(original, "hello", "goodbye-much-longer")
+        boundary = _make_boundary()
+        record = boundary.build_record(match=match, file_content=match.result)
+        # The old (buggy) behaviour sliced match.result with matched_span offsets.
+        start, end = match.matched_span
+        post_edit_fragment = match.result[start:end] if start < len(match.result) else ""
+        # post_edit_fragment is "goodb" (first 5 chars of "goodbye-much-longer")
+        buggy_digest = _sha256_hex(post_edit_fragment)
+        assert record.span_digest != buggy_digest, (
+            "spanDigest should NOT equal sha256 of the post-edit fragment "
+            f"'{post_edit_fragment}'; it must equal sha256 of pre-edit text '{match.matched_text}'"
+        )
