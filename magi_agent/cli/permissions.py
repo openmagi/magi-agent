@@ -89,7 +89,7 @@ import asyncio
 import fnmatch
 import time
 from collections import OrderedDict
-from typing import Literal, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Literal, Protocol, runtime_checkable
 
 from magi_agent.cli.contracts import (
     ControlRequest,
@@ -101,6 +101,9 @@ from magi_agent.cli.contracts import (
 )
 from magi_agent.cli.protocol import ControlRequestFrame, ControlResponse
 from magi_agent.runtime.control import ControlRequestStore
+
+if TYPE_CHECKING:  # pragma: no cover - typing only
+    from magi_agent.cli.readonly_classifier import ReadOnlyClassifier
 
 __all__ = [
     "canonical_request_key",
@@ -228,6 +231,7 @@ class RulesPermissionGate(PermissionGate):
         rules: RulesEngine | None = None,
         sinks: list[PromptSink] | None = None,
         store: ControlRequestStore | None = None,
+        smart_approve: "ReadOnlyClassifier | None" = None,
     ) -> None:
         self.rules: RulesEngine = rules if rules is not None else RulesEngine()
         self.sinks: list[PromptSink] = list(sinks) if sinks is not None else []
@@ -236,15 +240,33 @@ class RulesPermissionGate(PermissionGate):
         self.store: ControlRequestStore = (
             store if store is not None else ControlRequestStore()
         )
+        # SmartApprove classifier (PR3). ``None`` means disabled (DEFAULT).
+        # When set, a rule-miss ``ask`` is offered to the classifier BEFORE the
+        # sink race — it can recover a read-only call as ``allow``.
+        # NEVER consulted on an explicit ``deny`` (the ``deny`` early-return
+        # happens first, so the classifier is structurally unreachable for deny).
+        self._smart_approve: "ReadOnlyClassifier | None" = smart_approve
 
     async def check(self, req: ControlRequest) -> PermissionDecision:
         verdict = self.rules.evaluate(req)
         if verdict == "allow":
             return PermissionDecision(kind="allow")
         if verdict == "deny":
+            # Explicit deny is NEVER auto-recovered — classifier not consulted.
             return PermissionDecision(kind="deny")
 
-        # verdict == "ask"
+        # verdict == "ask" (rule miss)
+        # SmartApprove: if a classifier is wired, ask it BEFORE the sink race.
+        # A True return means the tool is read-only → allow without prompting.
+        # A False return (or no classifier) falls through to the normal race.
+        if self._smart_approve is not None:
+            try:
+                is_readonly = await self._smart_approve.classify(req)
+            except Exception:  # noqa: BLE001 — fail closed
+                is_readonly = False
+            if is_readonly:
+                return PermissionDecision(kind="allow")
+
         decision = await self._race(req)
 
         # Persist any remembered rules so the NEXT identical check short-circuits.
