@@ -406,9 +406,13 @@ class MaxStepsBrakeControl(BaseLoopControl):
 class _EditRetryLoopControl(BaseLoopControl):
     """Thin LoopControl adapter delegating to MagiEditRetryReflectionPlugin.
 
-    Wires ``on_tool_error_callback`` and ``after_tool_callback`` from the
-    existing plugin into the ControlPlane's ``on_before_tool`` (not applicable)
-    and ``on_after_tool`` hook.
+    Wires only ``after_tool_callback`` (error-dict path) from the existing plugin
+    into the ControlPlane's ``on_after_tool`` hook.
+
+    The plugin's ``on_tool_error_callback`` (raise path — the live primary path
+    for gate5b FileEdit ``ValueError``) is NOT a LoopControl hook; it is
+    forwarded at the plugin level by ``_ExtendedControlPlanePlugin``, which calls
+    it directly so ADK's ``run_on_tool_error_callback`` path is preserved.
     """
 
     def __init__(self, plugin: Any) -> None:
@@ -503,18 +507,59 @@ class _CompactionLoopControl(BaseLoopControl):
 
 
 class _ExtendedControlPlanePlugin(ControlPlanePlugin):
-    """ControlPlanePlugin that also forwards resilience plugin-level callbacks.
+    """ControlPlanePlugin that also forwards plugin-level callbacks with no LoopControl equivalent.
 
-    The resilience plugin exposes ``on_model_error_callback`` and
-    ``after_run_callback`` — hooks that have no ``LoopControl`` equivalent
-    (they are run-level, not tool/model-level in the plane sense). We forward
-    them directly so those subsystems keep working through the plane's single
-    plugin registration.
+    Covers three plugin-level hooks that operate outside the LoopControl protocol:
+
+    * ``on_tool_error_callback`` — fires when a tool *raises* an exception (as
+      opposed to returning an error-shaped dict, which goes through
+      ``after_tool_callback``). The edit-retry plugin's raise-path
+      (gate5b ``FileEdit`` ``ValueError``) lives here. We fan out to every
+      registered adapter whose underlying ``_plugin`` implements this callback,
+      preserving the same "first non-None wins" short-circuit that ADK's own
+      ``PluginManager`` uses.
+
+    * ``on_model_error_callback`` — resilience plugin classification/telemetry
+      on model-call errors.
+
+    * ``after_run_callback`` — sweeps per-invocation state for all wrapped
+      plugins so nothing grows unbounded across turns.
     """
 
     def __init__(self, plane: ControlPlane, resilience_plugin: Any | None) -> None:
         super().__init__(plane)
         self._resilience = resilience_plugin
+
+    async def on_tool_error_callback(
+        self,
+        *,
+        tool: Any,
+        tool_args: dict[str, Any],
+        tool_context: Any,
+        error: Exception,
+    ) -> dict[str, Any] | None:
+        """Forward to any registered adapter whose plugin implements on_tool_error_callback.
+
+        Fan-out policy: first non-None return wins (mirrors ADK PluginManager
+        behaviour and is consistent with the after_tool_callback override
+        semantics already established for the edit-retry plugin).
+        """
+        for ctrl in self._p._controls:
+            plugin = getattr(ctrl, "_plugin", None)
+            if plugin is None:
+                continue
+            handler = getattr(plugin, "on_tool_error_callback", None)
+            if not callable(handler):
+                continue
+            result = await handler(
+                tool=tool,
+                tool_args=tool_args,
+                tool_context=tool_context,
+                error=error,
+            )
+            if result is not None:
+                return result
+        return None
 
     async def on_model_error_callback(
         self,
