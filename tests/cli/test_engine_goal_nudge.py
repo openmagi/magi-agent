@@ -240,7 +240,7 @@ def _run_drive(driver: MagiEngineDriver, *, prompt: str = "do the thing") -> lis
             items.append(item)
         return items
 
-    return asyncio.get_event_loop().run_until_complete(_collect())
+    return asyncio.run(_collect())
 
 
 # ---------------------------------------------------------------------------
@@ -459,36 +459,70 @@ class TestToolResetsLatch:
 
 class TestGoalMetNoNudge:
     def test_no_nudge_when_evidence_present(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """When goal_is_met returns True, no nudge is fired."""
-        # We test this by using required_evidence=("source_ledger",) and
-        # monkeypatching goal_is_met to return True.
-        import magi_agent.cli.engine as engine_mod
+        """When real evidence satisfies required_evidence, no nudge is fired (goal mode).
+
+        Drives the full real path: evidence_collector → _collect_evidence →
+        _goal_is_met → real FinalOutputGate evaluation → goal met → no nudge.
+        No monkeypatching of _goal_is_met.
+        """
+        satisfying_records = [
+            {
+                "type": "SourceInspection",
+                "sourceRef": "web:example.com",
+                "evidenceRef": "ev:0001:evidence_record",
+            }
+        ]
+
+        def fake_collector(turn_id: str) -> list[object]:
+            return satisfying_records  # type: ignore[return-value]
 
         runner = FakeRunner(events_per_call=[[]])
         _patch_lazy_deps(monkeypatch, runner)
         nudge = GoalNudge(goal="research complete", mode="goal", max_nudges=3,
                           required_evidence=("source_ledger",))
-        driver, _ = _make_driver(runner, goal_nudge=nudge)
-
-        # Patch goal_is_met to always return True
-        monkeypatch.setattr(engine_mod, "_goal_is_met", lambda *a, **kw: True)
-
+        driver = MagiEngineDriver(
+            runner=runner,
+            max_event_count=4096,
+            user_id="cli",
+            goal_nudge=nudge,
+            evidence_collector=fake_collector,
+        )
         _run_drive(driver)
-        # Only initial run — no nudge
+        # Evidence satisfied via real FinalOutputGate → goal_is_met True → no nudge
         assert len(runner.calls) == 1
 
     def test_no_nudge_when_goal_met_grind_mode(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """Even grind mode stops nudging when goal is met."""
-        import magi_agent.cli.engine as engine_mod
+        """Even grind mode stops nudging when real evidence satisfies the goal.
+
+        Drives the full real path: evidence_collector → _collect_evidence →
+        _goal_is_met → real FinalOutputGate evaluation → goal met → no nudge.
+        No monkeypatching of _goal_is_met. Grind mode would otherwise nudge to
+        max_nudges (5), so a single call proves the real gate suppressed it.
+        """
+        satisfying_records = [
+            {
+                "type": "SourceInspection",
+                "sourceRef": "web:example.com",
+                "evidenceRef": "ev:0001:evidence_record",
+            }
+        ]
+
+        def fake_collector(turn_id: str) -> list[object]:
+            return satisfying_records  # type: ignore[return-value]
 
         runner = FakeRunner(events_per_call=[[]])
         _patch_lazy_deps(monkeypatch, runner)
         nudge = GoalNudge(goal="x", mode="grind", max_nudges=5,
                           required_evidence=("source_ledger",))
-        driver, _ = _make_driver(runner, goal_nudge=nudge)
-
-        monkeypatch.setattr(engine_mod, "_goal_is_met", lambda *a, **kw: True)
+        driver = MagiEngineDriver(
+            runner=runner,
+            max_event_count=4096,
+            user_id="cli",
+            goal_nudge=nudge,
+            evidence_collector=fake_collector,
+        )
         _run_drive(driver)
+        # Evidence satisfied via real FinalOutputGate → goal_is_met True → no nudge
         assert len(runner.calls) == 1
 
 
