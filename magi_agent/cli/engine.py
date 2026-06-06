@@ -260,6 +260,18 @@ def _goal_is_met(nudge: "GoalNudge", *, evidence_records: object) -> bool:
 
     return goal_is_met(nudge, evidence_records=evidence_records)  # type: ignore[arg-type]
 
+
+def _build_nudge_message(nudge: "GoalNudge") -> str:
+    """Thin wrapper around :func:`~magi_agent.runtime.goal_nudge.build_nudge_message`.
+
+    Extracted as a module-level function mirroring the ``_goal_is_met`` pattern
+    so that the import is deferred (cold-clean at ``import cli.engine`` time) and
+    test suites can monkeypatch it without stubbing the full goal_nudge module.
+    """
+    from magi_agent.runtime.goal_nudge import build_nudge_message  # noqa: PLC0415
+
+    return build_nudge_message(nudge)
+
 # Map a projected public-event dict's "type" -> RuntimeEvent EventKind. Anything
 # not listed defaults to "status".
 _TOKEN_EVENT_TYPES = frozenset({"text_delta"})
@@ -889,8 +901,7 @@ class MagiEngineDriver:
                             # Build a fresh runner_input with the nudge as the
                             # new message, reusing the SAME re-invocation
                             # machinery the recovery path uses (build + continue).
-                            from magi_agent.runtime.goal_nudge import build_nudge_message  # noqa: PLC0415
-                            nudge_text = build_nudge_message(goal_nudge)
+                            nudge_text = _build_nudge_message(goal_nudge)
                             runner_input = runner_turn_input_cls(
                                 userId=self._user_id,
                                 sessionId=session_id,

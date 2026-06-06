@@ -677,3 +677,112 @@ class TestEvidenceCollectorDISeam:
         # The turn_id passed was the one from the turn input ("test-turn" is the
         # default in _run_drive's turn_input dict)
         assert all(tid == "test-turn" for tid in collected_turn_ids)
+
+
+# ---------------------------------------------------------------------------
+# Tests: error during nudge re-invocation
+# ---------------------------------------------------------------------------
+
+
+class FakeRunnerWithError:
+    """Runner whose N-th run_async call raises instead of yielding events.
+
+    The first ``clean_calls`` calls yield ``events_for_clean_calls`` (one list
+    per call); subsequent calls raise ``error``.
+    """
+
+    def __init__(
+        self,
+        *,
+        events_for_clean_calls: list[list[dict[str, Any]]],
+        error: Exception,
+    ) -> None:
+        self.calls: list[FakeRunnerCall] = []
+        self._events_for_clean = events_for_clean_calls
+        self._error = error
+        self._call_index = 0
+        self.agent = None
+
+    def run_async(self, *, user_id: str, session_id: str, invocation_id: str, new_message: Any) -> AsyncIterator[Any]:
+        parts = getattr(new_message, "parts", None) or []
+        text = ""
+        for p in parts:
+            t = getattr(p, "text", None)
+            if t:
+                text = t
+                break
+        self.calls.append(FakeRunnerCall(invocation_id=invocation_id, new_message_text=text))
+        idx = self._call_index
+        self._call_index += 1
+        if idx < len(self._events_for_clean):
+            return FakeRunner._make_aiter(self._events_for_clean[idx])
+        # Beyond clean calls → raise
+        return _FakeErrorStream(self._error)
+
+
+class _FakeErrorStream:
+    """Async iterator that raises on first __anext__ call."""
+
+    def __init__(self, error: Exception) -> None:
+        self._error = error
+
+    def __aiter__(self) -> "_FakeErrorStream":
+        return self
+
+    async def __anext__(self) -> Any:
+        raise self._error
+
+    async def aclose(self) -> None:
+        pass
+
+
+class TestNudgeRunError:
+    def test_nudge_run_error_after_prior_output_is_terminal(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """When the FIRST run yields output (triggering a nudge) and the NUDGE
+        re-invocation RAISES, the result must be Terminal.error — NOT retried.
+
+        Correctness rationale
+        ---------------------
+        The recovery guard in ``_drive`` is:
+
+            should_retry = (
+                self._recovery is not None
+                and yielded_events == 0        # <-- ALL events across all invocations
+                and attempt_yielded == 0
+                and recovery_attempts < self._recovery.max_attempts
+            )
+
+        After the first clean run emitted at least one event, ``yielded_events > 0``.
+        Therefore ``should_retry`` is ``False`` even when ``self._recovery`` is set —
+        the engine cannot safely re-run without risking double-emission of already-
+        delivered output.  The error surfaces immediately as ``Terminal.error``.
+
+        This test locks in that boundary: a nudge that errors after prior output
+        produced is terminal, not silently swallowed and not retried.
+        """
+        # First call: yields one text event (prior output = 1 event) + clean stop.
+        # Second call (nudge): raises immediately.
+        runner = FakeRunnerWithError(
+            events_for_clean_calls=[[{"type": "text_delta", "text": "partial output"}]],
+            error=RuntimeError("nudge invocation exploded"),
+        )
+        _patch_lazy_deps(monkeypatch, runner)
+        nudge = GoalNudge(goal="finish the job", mode="goal", max_nudges=3, required_evidence=())
+        driver, _ = _make_driver(runner, goal_nudge=nudge)
+        items = _run_drive(driver)
+
+        # Two run_async calls: the initial (clean) + one nudge attempt (error).
+        assert len(runner.calls) == 2, (
+            f"Expected 2 run_async calls (initial + 1 nudge), got {len(runner.calls)}"
+        )
+
+        # The nudge re-invocation raised → engine_error is set → Terminal.error.
+        terminal = items[-1]
+        assert terminal.terminal == Terminal.error, (
+            f"Expected Terminal.error after nudge-run exception, got {terminal.terminal!r}"
+        )
+        assert terminal.error is not None and "exploded" in terminal.error, (
+            f"Expected error message to contain 'exploded', got {terminal.error!r}"
+        )

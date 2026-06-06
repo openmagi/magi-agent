@@ -74,6 +74,13 @@ class GoalNudge:
     required_evidence: tuple[str, ...] = ()
     domain: str = "general"
 
+    def __post_init__(self) -> None:
+        if self.max_nudges < 0:
+            raise ValueError(
+                f"GoalNudge.max_nudges must be >= 0 (got {self.max_nudges!r}). "
+                "Use 0 to disable nudges."
+            )
+
 
 def build_nudge_message(nudge: GoalNudge) -> str:
     """Build the synthetic user message injected as the nudge re-invocation.
