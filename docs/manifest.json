@@ -1,12 +1,12 @@
 {
   "version": 1,
-  "title": "Open Magi Docs",
-  "description": "Public documentation for Magi Agent.",
+  "title": "Open Magi Agent Docs",
+  "description": "Public documentation for Open Magi Agent.",
   "source": "openmagi/magi-agent",
   "pages": [
     {
       "slug": "overview",
-      "title": "Open Magi Docs",
+      "title": "Open Magi Agent Docs",
       "path": "docs/README.md",
       "group": "Start"
     },

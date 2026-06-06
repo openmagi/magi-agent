@@ -79,7 +79,7 @@ Install with Homebrew:
 
 ```bash
 brew update
-brew install --force-bottle openmagi/tap/magi-agent
+brew install openmagi/tap/magi-agent
 ```
 
 Start the local API and web dashboard:
@@ -108,8 +108,7 @@ magi-agent serve --help
 The dashboard is served by the same local agent. It does not need a separate
 Node or Next.js process.
 
-`--force-bottle` keeps the install on the prebuilt Homebrew package path. If
-Homebrew still tries to build the formula from source on macOS, update the tap
+If Homebrew tries to build the formula from source on macOS, update the tap
 metadata and reinstall the bottle:
 
 ```bash
@@ -119,9 +118,9 @@ brew reinstall openmagi/tap/magi-agent --force-bottle
 
 ## Architecture
 
-Magi controls the loop around ADK. The model sees a bounded context packet and
-proposes work. Runtime-only policy, evidence, validation, and projection state
-decide which proposals can continue.
+Magi controls the loop around the model runner. The model sees a bounded context
+packet and proposes work. Runtime-only policy, evidence, validation, and
+projection state decide which proposals can continue.
 
 ```text
 MODEL-VISIBLE LOOP                  RUNTIME-ONLY CONTROL PLANE
@@ -132,7 +131,7 @@ User request
 Allowed context packet   <--------- Policy snapshot
     |                               tools, approvals, evidence rules,
     v                               repair rules, projection rules
-ADK model proposal
+Model runner proposal
     |  action / claim / draft
     v
 Boundary checks          ---------> ToolHost / activity boundary
@@ -155,7 +154,7 @@ User-visible projection   <-------- Output projector + audit checkpoint
 | Harness | Adds reusable enforcement behavior to runtime stages |
 | Policy snapshot | Freezes the effective rules for the current run |
 | Context projector | Decides what the model is allowed to see |
-| ADK Runner boundary | Lets the model propose text, actions, and tool calls |
+| Runner boundary | Lets the model propose text, actions, and tool calls |
 | ToolHost | Owns tool execution, permission checks, and approvals |
 | Evidence ledger | Records source, file, calculation, test, approval, and delivery receipts |
 | Validators | Check whether claims and actions satisfy the policy |

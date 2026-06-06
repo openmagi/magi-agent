@@ -3,7 +3,12 @@
 ## Commands
 
 ```bash
+magi
 magi --help
+magi --version
+magi --output text "Summarize this repository"
+magi --mode plan "Inspect and propose"
+magi --mode act "Apply the approved change"
 magi-agent --help
 magi-agent serve --port 8080
 ```
@@ -11,10 +16,17 @@ magi-agent serve --port 8080
 ## Common environment variables
 
 ```bash
-MAGI_AGENT_SERVER_TOKEN=...
+GATEWAY_TOKEN=...
+MAGI_AGENT_REQUIRE_ENV=1
+MAGI_AGENT_WORKSPACE=...
+MAGI_STREAMING_CHAT=1
+MAGI_FIRST_PARTY_TOOLS_ENABLED=1
 OPENAI_API_KEY=...
 ANTHROPIC_API_KEY=...
-GOOGLE_GENERATIVE_AI_API_KEY=...
+GOOGLE_API_KEY=...
+CORE_AGENT_MODEL=...
+COMPOSIO_API_KEY=...
+MAGI_COMPOSIO_ENABLED=auto
 ```
 
 ## Package names
@@ -24,3 +36,35 @@ GOOGLE_GENERATIVE_AI_API_KEY=...
 - CLI commands: `magi`, `magi-agent`
 - Repository: `openmagi/magi-agent`
 
+Avoid legacy or internal names in public docs and new code.
+
+## Local URLs
+
+```text
+http://localhost:8080/dashboard
+http://localhost:8080/health
+http://localhost:8080/healthz
+```
+
+## Output Formats
+
+```text
+text
+json
+stream-json
+```
+
+## Runtime Modes
+
+```text
+plan
+act
+```
+
+## Permission Modes
+
+```text
+default
+acceptEdits
+bypassPermissions
+```

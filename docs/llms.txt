@@ -1,19 +1,36 @@
-# Open Magi Docs
+# Open Magi Agent Docs
 
-Magi Agent is the programmable AI agent that gets real work done under your
-rules.
+Magi Agent is the programmable AI agent runtime for local work under user-controlled rules.
 
-Start here:
+Quick install:
 
-- docs/README.md
-- docs/getting-started.md
-- docs/quickstart.md
-- docs/cli.md
-- docs/configuration.md
-- docs/runtime.md
-- docs/tools.md
-- docs/contracts.md
-- docs/integrations.md
-- docs/security.md
-- docs/troubleshooting.md
+```bash
+brew install openmagi/tap/magi-agent
+magi-agent serve --port 8080
+open http://localhost:8080/dashboard
+magi --help
+magi-agent --help
+```
 
+Read these public docs in order:
+
+1. docs/README.md - Open Magi Agent Docs
+2. docs/getting-started.md - Getting Started
+3. docs/quickstart.md - Quickstart
+4. docs/cli.md - CLI
+5. docs/configuration.md - Configuration
+6. docs/customization.md - Customization
+7. docs/runtime.md - Runtime
+8. docs/tools.md - Tools
+9. docs/contracts.md - Contracts
+10. docs/hooks.md - Hooks
+11. docs/memory.md - Memory
+12. docs/skills.md - Skills
+13. docs/automation.md - Automation
+14. docs/integrations.md - Integrations
+15. docs/api.md - API
+16. docs/deployment.md - Deployment
+17. docs/security.md - Security
+18. docs/architecture.md - Architecture
+19. docs/reference.md - Reference
+20. docs/troubleshooting.md - Troubleshooting
