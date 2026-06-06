@@ -302,6 +302,7 @@ def test_pack_registry_catalog_is_metadata_only_and_has_expected_first_party_pac
         "openmagi.document-review",
         "openmagi.lightweight-scripting",
         "openmagi.learning-usage",
+        "openmagi.discovery",
     )
 
     for pack_id in registry.pack_ids:
