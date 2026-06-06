@@ -279,3 +279,34 @@ Lessons (drove fixes on this branch):
 3. **Base model dominates** — zero-shot Sonnet 4.5 is already ~0.63 here.
 4. Caveat: two tasks only (~95 items each); indicative, not a full LegalBench
    number.
+
+### Corrected measurement (proper scorer, max_tokens=512)
+
+A third defect surfaced when validating the above: the `parse_answer`
+last-label-wins heuristic grabbed labels out of trailing reasoning, systematically
+penalizing verbose (zero-shot) outputs. The table above is therefore diagnostic,
+not final. After fixing the scorer (first-label extraction; `parse_rate` added as
+a first-class metric) and running with an adequate token budget:
+
+| Config | abercrombie | hearsay | overall | parse_rate |
+| --- | --- | --- | --- | --- |
+| harness (few-shot + rule) | 0.789 | 0.777 | **0.783** | 1.00 |
+| zero-shot baseline | 0.632 | 0.714 | **0.673** | 0.97 |
+| lift | +0.158 | +0.062 | **+0.110** | — |
+
+Conclusion: **the harness is sound; the earlier alarming results were measurement
+bugs, now fixed** (degenerate baseline, the variant prefix, and the last-label
+parser). The harness's few-shot+rule config is essentially the *standard*
+LegalBench few-shot protocol, and its absolute balanced accuracy (~0.78) sits in
+the expected frontier-model range for these tasks. The honest harness lift over a
+fairly-parsed zero-shot is **~+0.11**, with `parse_rate` now exposed (1.00 vs
+0.97) so format effects are not hidden.
+
+**How to measure LegalBench properly** (the methodology this exposed): (1)
+induce label-only output (few-shot or an answer-only instruction), applied
+uniformly to every config compared; (2) extract the answer faithfully
+(first label / normalized exact match) and track `parse_rate` rather than
+silently scoring unparseable outputs as misses; (3) report absolute balanced
+accuracy per task vs published LegalBench numbers — "lift vs bare zero-shot" is
+non-standard because LegalBench is itself a few-shot benchmark; (4) use the
+same-format ablation to attribute contribution to each checkpoint.
