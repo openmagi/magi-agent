@@ -102,6 +102,9 @@ _FRONTMATTER_RE = re.compile(r"^---\r?\n(.*?)\n---\r?\n?", re.DOTALL)
 _POSITIONAL_RE = re.compile(r"\$([1-9][0-9]*)")
 _ARGUMENTS_TOKEN = "$ARGUMENTS"
 
+# Single-pass substitution regex: matches $ARGUMENTS or $N (N >= 1).
+_TOKEN_RE = re.compile(r"\$ARGUMENTS|\$([1-9][0-9]*)")
+
 
 def _parse_frontmatter(text: str) -> tuple[dict[str, object], str]:
     """Parse an optional YAML frontmatter block from ``text``.
@@ -170,21 +173,21 @@ def _substitute_args(text: str, args: object) -> str:
     - ``$ARGUMENTS`` → full raw argument string.
     - ``$1`` → first whitespace-split token (empty string if absent).
     - ``$N`` → Nth token (empty string if absent).
+
+    A single left-to-right pass is used (via ``_TOKEN_RE``) so that
+    substituted output is never re-scanned. This means ``$1``-like text
+    inside the user's argument string is not mistakenly re-substituted.
     """
     arg_str = "" if args is None else str(args)
     tokens = arg_str.split()
 
-    # Replace $ARGUMENTS first (must be before positional pass to avoid
-    # double-substitution if $ARGUMENTS itself contains $N patterns).
-    result = text.replace(_ARGUMENTS_TOKEN, arg_str)
-
-    # Replace positional placeholders ($1, $2, ...).
     def _repl(m: re.Match) -> str:  # type: ignore[type-arg]
+        if m.group(1) is None:  # matched $ARGUMENTS
+            return arg_str
         idx = int(m.group(1)) - 1  # 1-indexed -> 0-indexed
         return tokens[idx] if idx < len(tokens) else ""
 
-    result = _POSITIONAL_RE.sub(_repl, result)
-    return result
+    return _TOKEN_RE.sub(_repl, text)
 
 
 @dataclass

@@ -325,6 +325,29 @@ class TestMarkdownArgSubstitution:
         blocks = asyncio.run(cmd.build_prompt("alpha beta", _ctx()))
         assert blocks[0].text == "Process alpha using alpha beta"
 
+    def test_dollar_sign_in_user_args_not_re_substituted(self) -> None:
+        """Regression: $1-like text inside the user's argument string must NOT
+        be re-substituted (single-pass fix, FIX 1)."""
+        cmd = MarkdownPromptCommand(
+            name="test",
+            surface=CommandSurface(tui=True, headless=True),
+            text="$ARGUMENTS",
+        )
+        blocks = asyncio.run(cmd.build_prompt("hello $1 world", _ctx()))
+        # The $1 inside user args must pass through verbatim.
+        assert blocks[0].text == "hello $1 world"
+
+    def test_mixed_template_single_pass(self) -> None:
+        """Regression: template with both $1 and $ARGUMENTS, args='a b'; the
+        $ARGUMENTS expansion must NOT have its embedded tokens re-expanded."""
+        cmd = MarkdownPromptCommand(
+            name="test",
+            surface=CommandSurface(tui=True, headless=True),
+            text="$1 and $ARGUMENTS",
+        )
+        blocks = asyncio.run(cmd.build_prompt("a b", _ctx()))
+        assert blocks[0].text == "a and a b"
+
 
 class TestMarkdownHints:
     def _make_cmd(self, tmp_path: Path, body: str) -> MarkdownPromptCommand:

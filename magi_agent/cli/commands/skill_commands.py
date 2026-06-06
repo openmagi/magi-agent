@@ -35,7 +35,7 @@ Design notes
 from __future__ import annotations
 
 import importlib.resources as _resources
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 
 from magi_agent.cli.contracts import (
@@ -74,7 +74,6 @@ class SkillPromptCommand(PromptCommand):
     model: str = ""
     subtask: bool = False
     body: str = ""
-    hints: list[str] = field(default_factory=list)
 
     async def build_prompt(  # type: ignore[override]
         self, args: object, ctx: CommandContext
