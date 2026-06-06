@@ -33,6 +33,7 @@ import asyncio
 import os
 import sys
 from enum import Enum
+from pathlib import Path
 from typing import Optional
 
 import typer
@@ -391,6 +392,115 @@ def auth_composio(
 
 
 app.add_typer(auth_app, name="auth")
+
+
+# ---------------------------------------------------------------------------
+# LegalBench evaluation subcommand
+# ---------------------------------------------------------------------------
+
+@app.command()
+def legalbench(
+    data_root: Path = typer.Option(
+        Path("data/legalbench"),
+        "--data-root",
+        help="Root directory containing per-task subdirs (train.tsv/test.tsv/base_prompt.txt).",
+    ),
+    manifest: Path = typer.Option(
+        Path("data/legalbench/manifest.v1.json"),
+        "--manifest",
+        help="Path to the JSON manifest listing {task_id, reasoning_type} entries.",
+    ),
+    max_tasks: Optional[int] = typer.Option(
+        None,
+        "--max-tasks",
+        help="Evaluate only the first N tasks from the manifest.",
+    ),
+    model: Optional[str] = typer.Option(
+        None,
+        "--model",
+        help="Model override (e.g. claude-sonnet-4-5). Defaults to provider default.",
+    ),
+) -> None:
+    """Run the LegalBench harness evaluation (requires MAGI_LEGAL_HARNESS_ENABLED=1).
+
+    Evaluates the harness (all checkpoints enabled) and a baseline (all off)
+    against the curated manifest subset, then prints harness, baseline, and lift
+    as JSON to stdout.
+
+    Requires MAGI_LEGAL_HARNESS_ENABLED=1 to run. Without a configured provider
+    (ANTHROPIC_API_KEY / OPENAI_API_KEY / etc.) the command exits with an error.
+    """
+    import json as _json  # noqa: PLC0415 - deferred (cold-start discipline)
+
+    from magi_agent.benchmarks.legal_eval import lift as _lift  # noqa: PLC0415
+    from magi_agent.benchmarks.legalbench.cli import (  # noqa: PLC0415
+        GateDisabledError,
+        run_eval,
+    )
+    from magi_agent.cli.providers import resolve_provider_config  # noqa: PLC0415
+
+    # Gate check first — clean error message before any expensive work.
+    try:
+        from magi_agent.benchmarks.legalbench.cli import ensure_enabled  # noqa: PLC0415
+        ensure_enabled()
+    except GateDisabledError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=1)
+
+    # Resolve provider config (respects MAGI_PROVIDER / ANTHROPIC_API_KEY / etc.)
+    provider_cfg = resolve_provider_config(model_override=model)
+    if provider_cfg is None:
+        typer.echo(
+            "No provider configured. Set ANTHROPIC_API_KEY (or OPENAI_API_KEY / "
+            "GEMINI_API_KEY) to run the live harness.",
+            err=True,
+        )
+        raise typer.Exit(code=1)
+
+    def _real_complete(prompt: str) -> str:
+        """Single-turn completion via litellm.completion (no tools).
+
+        Wire: litellm.completion(model=provider_cfg.litellm_model,
+        api_key=provider_cfg.api_key, messages=[{role:user, content:prompt}])
+        -> response.choices[0].message.content
+
+        provider_cfg.litellm_model is built by ProviderConfig.litellm_model
+        (magi_agent/cli/providers.py:75) as "<litellm_prefix>/<model>".
+        The same litellm dependency is already used by
+        magi_agent/cli/real_runner.py:_build_litellm_model().
+        """
+        try:
+            import litellm  # noqa: PLC0415
+        except ImportError as exc:
+            raise NotImplementedError(
+                "Wire to: litellm.completion(model=provider_cfg.litellm_model, "
+                "api_key=provider_cfg.api_key, messages=[...]). "
+                "Install with: pip install 'magi-agent[providers]'"
+            ) from exc
+        response = litellm.completion(
+            model=provider_cfg.litellm_model,
+            api_key=provider_cfg.api_key,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        return response.choices[0].message.content or ""
+
+    harness_report, baseline_report = run_eval(
+        data_root=data_root,
+        manifest_path=manifest,
+        complete=_real_complete,
+        max_tasks=max_tasks,
+    )
+    lift_report = _lift(harness=harness_report, baseline=baseline_report)
+    typer.echo(
+        _json.dumps(
+            {
+                "harness": harness_report.model_dump(),
+                "baseline": baseline_report.model_dump(),
+                "lift": lift_report.model_dump(),
+            },
+            indent=2,
+        )
+    )
 
 
 # ---------------------------------------------------------------------------
