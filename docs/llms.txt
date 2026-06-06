@@ -1,0 +1,19 @@
+# Open Magi Docs
+
+Magi Agent is the programmable AI agent that gets real work done under your
+rules.
+
+Start here:
+
+- docs/README.md
+- docs/getting-started.md
+- docs/quickstart.md
+- docs/cli.md
+- docs/configuration.md
+- docs/runtime.md
+- docs/tools.md
+- docs/contracts.md
+- docs/integrations.md
+- docs/security.md
+- docs/troubleshooting.md
+

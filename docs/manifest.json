@@ -1,0 +1,128 @@
+{
+  "version": 1,
+  "title": "Open Magi Docs",
+  "description": "Public documentation for Magi Agent.",
+  "source": "openmagi/magi-agent",
+  "pages": [
+    {
+      "slug": "overview",
+      "title": "Open Magi Docs",
+      "path": "docs/README.md",
+      "group": "Start"
+    },
+    {
+      "slug": "getting-started",
+      "title": "Getting Started",
+      "path": "docs/getting-started.md",
+      "group": "Start"
+    },
+    {
+      "slug": "quickstart",
+      "title": "Quickstart",
+      "path": "docs/quickstart.md",
+      "group": "Start"
+    },
+    {
+      "slug": "cli",
+      "title": "CLI",
+      "path": "docs/cli.md",
+      "group": "Start"
+    },
+    {
+      "slug": "configuration",
+      "title": "Configuration",
+      "path": "docs/configuration.md",
+      "group": "Configure"
+    },
+    {
+      "slug": "customization",
+      "title": "Customization",
+      "path": "docs/customization.md",
+      "group": "Configure"
+    },
+    {
+      "slug": "runtime",
+      "title": "Runtime",
+      "path": "docs/runtime.md",
+      "group": "Configure"
+    },
+    {
+      "slug": "tools",
+      "title": "Tools",
+      "path": "docs/tools.md",
+      "group": "Configure"
+    },
+    {
+      "slug": "contracts",
+      "title": "Contracts",
+      "path": "docs/contracts.md",
+      "group": "Configure"
+    },
+    {
+      "slug": "hooks",
+      "title": "Hooks",
+      "path": "docs/hooks.md",
+      "group": "Configure"
+    },
+    {
+      "slug": "memory",
+      "title": "Memory",
+      "path": "docs/memory.md",
+      "group": "Operate"
+    },
+    {
+      "slug": "skills",
+      "title": "Skills",
+      "path": "docs/skills.md",
+      "group": "Operate"
+    },
+    {
+      "slug": "automation",
+      "title": "Automation",
+      "path": "docs/automation.md",
+      "group": "Operate"
+    },
+    {
+      "slug": "integrations",
+      "title": "Integrations",
+      "path": "docs/integrations.md",
+      "group": "Operate"
+    },
+    {
+      "slug": "api",
+      "title": "API",
+      "path": "docs/api.md",
+      "group": "Operate"
+    },
+    {
+      "slug": "deployment",
+      "title": "Deployment",
+      "path": "docs/deployment.md",
+      "group": "Operate"
+    },
+    {
+      "slug": "security",
+      "title": "Security",
+      "path": "docs/security.md",
+      "group": "Reference"
+    },
+    {
+      "slug": "architecture",
+      "title": "Architecture",
+      "path": "docs/architecture.md",
+      "group": "Reference"
+    },
+    {
+      "slug": "reference",
+      "title": "Reference",
+      "path": "docs/reference.md",
+      "group": "Reference"
+    },
+    {
+      "slug": "troubleshooting",
+      "title": "Troubleshooting",
+      "path": "docs/troubleshooting.md",
+      "group": "Reference"
+    }
+  ]
+}

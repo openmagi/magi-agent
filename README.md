@@ -5,7 +5,8 @@
 **The programmable AI agent that gets real work done under your rules.**
 
 [Website](https://openmagi.ai) ·
-[CLI](docs/cli/magi.md) ·
+[Docs](docs/README.md) ·
+[CLI](docs/cli.md) ·
 [Releases](https://github.com/openmagi/magi-agent/releases)
 
 ![status](https://img.shields.io/badge/status-early%20beta-f97316)
@@ -381,9 +382,10 @@ Build-system pins:
 
 ## More Docs
 
-- CLI reference: `docs/cli/magi.md`
-- CLI handoff: `docs/notes/2026-05-31-magi-cli-track18-handoff-for-adk-migration.md`
-- CLI design: `docs/plans/2026-05-30-magi-cli-design.md`
+- Docs index: `docs/README.md`
+- CLI reference: `docs/cli.md`
+- Getting started: `docs/getting-started.md`
+- Quickstart: `docs/quickstart.md`
 - Runtime architecture: `magi_agent/ARCHITECTURE.md`
 
 ## License

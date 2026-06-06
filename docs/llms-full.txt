@@ -1,0 +1,27 @@
+# Open Magi Agent Documentation Index
+
+This repository contains the public source docs for Magi Agent.
+
+Read in this order:
+
+1. docs/README.md
+2. docs/getting-started.md
+3. docs/quickstart.md
+4. docs/cli.md
+5. docs/configuration.md
+6. docs/customization.md
+7. docs/runtime.md
+8. docs/tools.md
+9. docs/contracts.md
+10. docs/hooks.md
+11. docs/memory.md
+12. docs/skills.md
+13. docs/automation.md
+14. docs/integrations.md
+15. docs/api.md
+16. docs/deployment.md
+17. docs/security.md
+18. docs/architecture.md
+19. docs/reference.md
+20. docs/troubleshooting.md
+
