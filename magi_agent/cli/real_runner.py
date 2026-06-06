@@ -101,6 +101,7 @@ def build_cli_model_runner(
     from google.adk.memory import InMemoryMemoryService  # noqa: PLC0415
     from google.adk.runners import Runner  # noqa: PLC0415
 
+    from magi_agent.adk_bridge.control_plane import build_default_plugin  # noqa: PLC0415
     from magi_agent.adk_bridge.session_service import (  # noqa: PLC0415
         WorkspaceSessionService,
     )
@@ -138,7 +139,11 @@ def build_cli_model_runner(
         tools=list(effective_tools),
     )
     session_service = WorkspaceSessionService(app_name=app_name)
-    app = App(name=_app_identifier(app_name), root_agent=agent, plugins=[])
+    # Build the control plane via the shared helper (same as local_runner) so
+    # both runners cannot drift.  All flags default OFF; the plane_plugin is
+    # always present (empty plane == zero overhead, no behavior change).
+    plane_plugin = build_default_plugin()
+    app = App(name=_app_identifier(app_name), root_agent=agent, plugins=[plane_plugin])
     runner = Runner(
         app=app,
         app_name=app_name,
