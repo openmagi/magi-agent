@@ -463,41 +463,40 @@ def test_env_flags_reject_invalid() -> None:
 
 
 def test_live_runner_builder_attaches_resilience_plugin(monkeypatch) -> None:
-    # Prove the LIVE runner builder wires the plugin when the flag is on.
+    # Prove the LIVE runner builder wires the resilience control when the flag is on.
+    # After PR2 (control-plane), the resilience plugin is wrapped in a
+    # _ResilienceLoopControl adapter registered in the ControlPlane, NOT as a
+    # top-level plugin. The plane is wrapped in a single ControlPlanePlugin.
     from magi_agent.adk_bridge import local_runner as lr
-    from magi_agent.adk_bridge.resilience_plugin import MagiResiliencePlugin as RP
+    from magi_agent.adk_bridge.control_plane import (
+        CONTROL_PLANE_PLUGIN_NAME,
+        _ResilienceLoopControl,
+    )
 
     monkeypatch.setenv(lr.LOCAL_ADK_RUNNER_FLAG, "1")
     monkeypatch.setenv("MAGI_LOOP_GUARD_ENABLED", "1")
-    captured: dict[str, object] = {}
-
-    real_app = lr.App
-
-    def spy_app(*args, **kwargs):
-        captured["plugins"] = list(kwargs.get("plugins", []))
-        return real_app(*args, **kwargs)
-
-    monkeypatch.setattr(lr, "App", spy_app)
-    lr.build_local_adk_runner()
-    plugins = captured["plugins"]
-    assert any(isinstance(p, RP) for p in plugins), plugins
+    bundle = lr.build_local_adk_runner()
+    plane_plugin = next(
+        p for p in bundle.runner.plugin_manager.plugins if p.name == CONTROL_PLANE_PLUGIN_NAME
+    )
+    controls = plane_plugin._p._controls
+    assert any(isinstance(c, _ResilienceLoopControl) for c in controls), controls
 
 
 def test_live_runner_builder_no_plugin_when_off(monkeypatch) -> None:
+    # After PR2: with flags off, the plane has no resilience control.
     from magi_agent.adk_bridge import local_runner as lr
-    from magi_agent.adk_bridge.resilience_plugin import MagiResiliencePlugin as RP
+    from magi_agent.adk_bridge.control_plane import (
+        CONTROL_PLANE_PLUGIN_NAME,
+        _ResilienceLoopControl,
+    )
 
     monkeypatch.setenv(lr.LOCAL_ADK_RUNNER_FLAG, "1")
     monkeypatch.delenv("MAGI_LOOP_GUARD_ENABLED", raising=False)
     monkeypatch.delenv("MAGI_ERROR_RECOVERY_ENABLED", raising=False)
-    captured: dict[str, object] = {}
-    real_app = lr.App
-
-    def spy_app(*args, **kwargs):
-        captured["plugins"] = list(kwargs.get("plugins", []))
-        return real_app(*args, **kwargs)
-
-    monkeypatch.setattr(lr, "App", spy_app)
-    lr.build_local_adk_runner()
-    plugins = captured["plugins"]
-    assert not any(isinstance(p, RP) for p in plugins), plugins
+    bundle = lr.build_local_adk_runner()
+    plane_plugin = next(
+        p for p in bundle.runner.plugin_manager.plugins if p.name == CONTROL_PLANE_PLUGIN_NAME
+    )
+    controls = plane_plugin._p._controls
+    assert not any(isinstance(c, _ResilienceLoopControl) for c in controls), controls

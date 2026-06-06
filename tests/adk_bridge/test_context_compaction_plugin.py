@@ -357,7 +357,19 @@ def test_runner_attaches_plugin_and_compacts_via_real_plugin_manager(
 
     bundle = local_runner.build_local_adk_runner()
     pm = bundle.runner.plugin_manager
-    assert CONTEXT_COMPACTION_PLUGIN_NAME in {p.name for p in pm.plugins}
+
+    # After PR2 (control-plane), the compaction plugin is wrapped inside the
+    # ControlPlanePlugin as a _CompactionLoopControl adapter. The top-level plugin
+    # name is CONTROL_PLANE_PLUGIN_NAME; the compaction logic is still reachable
+    # via the plane's before_model fan-out.
+    from magi_agent.adk_bridge.control_plane import (
+        CONTROL_PLANE_PLUGIN_NAME,
+        _CompactionLoopControl,
+    )
+    plane_plugin = next(p for p in pm.plugins if p.name == CONTROL_PLANE_PLUGIN_NAME)
+    assert any(
+        isinstance(c, _CompactionLoopControl) for c in plane_plugin._p._controls
+    ), "compaction control not found in plane"
 
     async def _drive() -> LlmRequest:
         cc = await _callback_context(bundle)
@@ -379,7 +391,16 @@ def test_runner_flag_off_attaches_no_compaction_plugin_and_leaves_contents(
 
     bundle = local_runner.build_local_adk_runner()
     pm = bundle.runner.plugin_manager
-    assert CONTEXT_COMPACTION_PLUGIN_NAME not in {p.name for p in pm.plugins}
+
+    # After PR2: the compaction LoopControl is not registered when flag is OFF.
+    from magi_agent.adk_bridge.control_plane import (
+        CONTROL_PLANE_PLUGIN_NAME,
+        _CompactionLoopControl,
+    )
+    plane_plugin = next(p for p in pm.plugins if p.name == CONTROL_PLANE_PLUGIN_NAME)
+    assert not any(
+        isinstance(c, _CompactionLoopControl) for c in plane_plugin._p._controls
+    ), "compaction control should not be in plane when flag is off"
 
     async def _drive() -> LlmRequest:
         cc = await _callback_context(bundle)

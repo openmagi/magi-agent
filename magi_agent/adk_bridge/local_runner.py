@@ -11,24 +11,12 @@ from google.adk.memory import InMemoryMemoryService
 from google.adk.models import BaseLlm, LlmRequest, LlmResponse
 from google.adk.runners import Runner
 
-from magi_agent.adk_bridge.context_compaction import (
-    build_context_compaction_plugin,
-)
-from magi_agent.adk_bridge.edit_retry_reflection import (
-    build_edit_retry_reflection_plugin,
-)
+from magi_agent.adk_bridge.control_plane import build_default_plugin
 from magi_agent.adk_bridge.local_toolhost import (
     LocalToolHostAdkBundle,
     is_local_fake_receipt_adk_tool,
 )
-from magi_agent.adk_bridge.resilience_plugin import build_resilience_plugin
 from magi_agent.adk_bridge.session_service import WorkspaceSessionService
-from magi_agent.config.env import (
-    parse_context_compaction_env,
-    parse_edit_retry_reflection_env,
-    parse_error_recovery_env,
-    parse_loop_guard_env,
-)
 
 LOCAL_ADK_RUNNER_FLAG = "CORE_AGENT_PYTHON_LOCAL_ADK_RUNNER"
 LOCAL_INERT_MODEL_NAME = "openmagi-local-inert"
@@ -108,48 +96,11 @@ def build_local_adk_runner(
     session_service = WorkspaceSessionService(app_name=app_name)
     memory_service = InMemoryMemoryService()
     artifact_service = InMemoryArtifactService()
-    # Flag-gated edit-failure reflection: when enabled, attach the shared
-    # RetryController-backed plugin so a failed FileEdit re-injects a corrective
-    # hidden message into the next model turn (fail-closed at max_attempts).
-    edit_retry_env = parse_edit_retry_reflection_env(os.environ)
-    edit_retry_plugin = build_edit_retry_reflection_plugin(
-        enabled=edit_retry_env.enabled,
-        max_attempts=edit_retry_env.max_attempts,
-    )
-    # PR12: flag-gated loop guard + multi-strategy error recovery. The common
-    # MagiResiliencePlugin shim activates the existing ToolCallLoopDetector
-    # (after_tool) and RecoveryEngine (on_model_error). Returns None when both
-    # MAGI_LOOP_GUARD_ENABLED and MAGI_ERROR_RECOVERY_ENABLED are OFF, so the
-    # disabled path attaches no resilience callbacks (zero regression).
-    loop_guard_env = parse_loop_guard_env(os.environ)
-    error_recovery_env = parse_error_recovery_env(os.environ)
-    resilience_plugin = build_resilience_plugin(
-        loop_guard_enabled=loop_guard_env.enabled,
-        loop_guard_soft_threshold=loop_guard_env.soft_threshold,
-        loop_guard_hard_threshold=loop_guard_env.hard_threshold,
-        loop_guard_frequency_soft_threshold=loop_guard_env.frequency_soft_threshold,
-        loop_guard_frequency_hard_threshold=loop_guard_env.frequency_hard_threshold,
-        error_recovery_enabled=error_recovery_env.enabled,
-        recovery_max_attempts=error_recovery_env.max_recovery_attempts,
-    )
-    # Flag-gated live context compaction: when enabled, a before_model_callback
-    # plugin trims the outgoing llm_request.contents to the recent tail once the
-    # estimated context exceeds budget (reusing ContextLifecycleBoundary as the
-    # threshold/tail decision engine). Default OFF -> plugin is None -> no attach.
-    compaction_env = parse_context_compaction_env(os.environ)
-    compaction_plugin = build_context_compaction_plugin(
-        enabled=compaction_env.enabled,
-        token_threshold=compaction_env.token_threshold,
-        tail_events=compaction_env.tail_events,
-    )
-    # Compose plugins by APPEND (not reassignment) so that independent branches
-    # each adding their own plugin (e.g. PR12 resilience, PR14) merge as a union
-    # rather than one silently overwriting the other's plugins list.
-    runner_plugins = [edit_retry_plugin] if edit_retry_plugin is not None else []
-    if resilience_plugin is not None:
-        runner_plugins.append(resilience_plugin)
-    if compaction_plugin is not None:
-        runner_plugins.append(compaction_plugin)
+    # Build the control plane from the same env flags as before, but via the
+    # shared helper so real_runner and local_runner cannot drift.  All existing
+    # flags keep their default-OFF values; the plane returns a ControlPlanePlugin
+    # regardless (empty plane == zero-overhead no-op, identical to plugins=[]).
+    plane_plugin = build_default_plugin()
     # ADK 1.33 deprecates ``Runner(plugins=...)``; the supported path wraps the
     # agent and plugins in an ``App``. An App with an empty plugins list behaves
     # identically to the old no-plugin runner (no deprecation warning, no plugin
@@ -160,7 +111,7 @@ def build_local_adk_runner(
     app = App(
         name=_app_identifier(app_name),
         root_agent=agent,
-        plugins=runner_plugins,
+        plugins=[plane_plugin],
     )
     runner = Runner(
         app=app,
