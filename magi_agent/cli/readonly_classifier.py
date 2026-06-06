@@ -287,58 +287,43 @@ class ReadOnlyClassifier:
 
     @staticmethod
     async def _invoke_llm(model: object, prompt: str) -> str:
-        """Invoke the model using the correct ADK async-generator contract.
+        """Invoke the model using the ADK async-generator contract.
 
         Builds an ``LlmRequest`` with the classification prompt as a user
         content part, then consumes the async generator returned by
         ``model.generate_content_async(llm_request, stream=False)``,
         collecting all text parts from ``LlmResponse.content.parts``.
 
-        Falls back to the legacy ``(prompt) → awaitable .text`` interface
-        when the model does not expose an ADK-shaped ``generate_content_async``
-        (e.g., a minimal stub injected in unit tests that has not yet been
-        updated).  The fallback path exists only for backward compatibility
-        with old test fakes and will be removed once all fakes are updated.
+        Any exception propagates to the caller, which funnels it into the
+        outer ``except Exception → classifier_error → return False`` path
+        (fail-closed).
         """
-        # Try the real ADK contract: build LlmRequest, consume AsyncGenerator.
-        try:
-            from google.adk.models.llm_request import LlmRequest  # noqa: PLC0415
-            from google.genai import types  # noqa: PLC0415
+        from google.adk.models.llm_request import LlmRequest  # noqa: PLC0415
+        from google.genai import types  # noqa: PLC0415
 
-            llm_request = LlmRequest(
-                config=types.GenerateContentConfig(
-                    system_instruction=(
-                        "You are a tool-safety classifier. "
-                        "Reply with ONLY a JSON object: "
-                        '{"read_only": <bool>, "reason": "<one-sentence reason>"}'
-                    ),
+        llm_request = LlmRequest(
+            config=types.GenerateContentConfig(
+                system_instruction=(
+                    "You are a tool-safety classifier. "
+                    "Reply with ONLY a JSON object: "
+                    '{"read_only": <bool>, "reason": "<one-sentence reason>"}'
                 ),
-                contents=[
-                    types.Content(
-                        role="user",
-                        parts=[types.Part.from_text(text=prompt)],
-                    )
-                ],
-            )
+            ),
+            contents=[
+                types.Content(
+                    role="user",
+                    parts=[types.Part.from_text(text=prompt)],
+                )
+            ],
+        )
 
-            collected: list[str] = []
-            async for resp in model.generate_content_async(llm_request, stream=False):  # type: ignore[union-attr]
-                if resp.content and resp.content.parts:
-                    for part in resp.content.parts:
-                        if part.text:
-                            collected.append(part.text)
-            return "".join(collected)
-
-        except (ImportError, TypeError):
-            # ImportError: ADK not installed (shouldn't happen in production).
-            # TypeError: model.generate_content_async is not an async generator
-            # (legacy fake that takes a plain string and returns an awaitable).
-            # Fall through to legacy path.
-            pass
-
-        # Legacy path: fake model that returns an awaitable with .text.
-        response = await model.generate_content_async(prompt)  # type: ignore[union-attr]
-        return getattr(response, "text", None) or ""
+        collected: list[str] = []
+        async for resp in model.generate_content_async(llm_request, stream=False):  # type: ignore[union-attr]
+            if resp.content and resp.content.parts:
+                for part in resp.content.parts:
+                    if part.text:
+                        collected.append(part.text)
+        return "".join(collected)
 
     def _resolve_model(self) -> object | None:
         """Return a model object or None (fail closed — no exception raised)."""
