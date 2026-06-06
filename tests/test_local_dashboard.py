@@ -64,6 +64,9 @@ def test_local_dashboard_route_serves_adk_local_app_shell() -> None:
     assert "current local session" in html
     assert 'id="agent-state-pill"' in html
     assert "class=\"status-band\"" in html
+    assert "/v1/chat/stream" in html
+    assert "/v1/chat/control-response" in html
+    assert "/v1/chat/cancel" in html
     assert "/v1/chat/completions" in html
     assert "/healthz" in html
     assert "ADK runtime" in html
@@ -127,6 +130,20 @@ def test_local_dashboard_has_operational_work_stream_metrics() -> None:
     assert 'id="board-transport-state"' in html
     assert "setRunBoard" in html
     assert "renderReceiptList" in html
+
+
+def test_local_dashboard_prefers_streaming_chat_route_with_legacy_fallback() -> None:
+    response = _client().get("/dashboard")
+    html = response.text
+
+    assert 'const streamChatEndpoint = "/v1/chat/stream";' in html
+    assert 'const legacyChatEndpoint = "/v1/chat/completions";' in html
+    assert 'const controlResponseEndpoint = "/v1/chat/control-response";' in html
+    assert 'const cancelEndpoint = "/v1/chat/cancel";' in html
+    assert 'streaming_chat_disabled' in html
+    assert "postChatStream(streamChatEndpoint" in html
+    assert "postChatStream(legacyChatEndpoint" in html
+    assert "POST /v1/chat/stream" in html
 
 
 def test_local_dashboard_prefills_default_local_gateway_token() -> None:
