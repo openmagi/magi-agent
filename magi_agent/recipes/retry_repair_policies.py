@@ -78,12 +78,34 @@ def automation_retry_repair_rules() -> tuple[RetryRepairRule, ...]:
     )
 
 
+def reflection_retry_repair_rules() -> tuple[RetryRepairRule, ...]:
+    """Repair rules for the selective reflection gate.
+
+    The ``reflection_issues_found`` kind is produced when a reflection pass
+    identifies concrete errors in the draft answer.  The repair action is a
+    plain resample with the corrective hidden message already embedded in the
+    ``reason`` field (set by the reflection hook at injection time).
+    """
+    return (
+        RetryRepairRule(
+            kind="reflection_issues_found",
+            build_decision=lambda reason, _error_code: RetryDecision(
+                action="resample",
+                taxonomy="retry",
+                tool_policy="text_only",
+                hidden_user_message=reason,
+            ),
+        ),
+    )
+
+
 def default_recipe_retry_repair_rules() -> tuple[RetryRepairRule, ...]:
     return (
         *research_retry_repair_rules(),
         *methodology_retry_repair_rules(),
         *automation_retry_repair_rules(),
         *coding_edit_retry_repair_rules(),
+        *reflection_retry_repair_rules(),
     )
 
 
@@ -171,5 +193,6 @@ __all__ = [
     "coding_edit_retry_repair_rules",
     "default_recipe_retry_repair_rules",
     "methodology_retry_repair_rules",
+    "reflection_retry_repair_rules",
     "research_retry_repair_rules",
 ]

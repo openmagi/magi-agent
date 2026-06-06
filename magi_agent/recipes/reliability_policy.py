@@ -192,6 +192,16 @@ class RecipeReliabilityPolicyRegistry:
                     "requiredCheckpoints": ("workspace_mutation_approval",),
                     "finalAnswerWithoutEvidence": "repair_required",
                 },
+                "openmagi.selective-reflection": {
+                    # Best-effort quality pass: no mandatory evidence required.
+                    # The reflection step is additive — it runs only when the
+                    # complexity gate activates and produces a hidden correction
+                    # message.  Failure is non-blocking (fail_open).
+                    "requiredEvidence": (),
+                    "requiredValidators": (),
+                    "requiredCheckpoints": (),
+                    "finalAnswerWithoutEvidence": "repair_required",
+                },
             }
         )
 
