@@ -10,9 +10,9 @@ def parse_answer(raw: str, *, labels: tuple[str, ...]) -> str | None:
     best: tuple[int, str] | None = None
     for label in labels:
         for match in re.finditer(
-            rf"(?<![\w]){re.escape(label)}(?![\w])", text, flags=re.IGNORECASE
+            rf"(?<!\w){re.escape(label)}(?!\w)", text, flags=re.IGNORECASE
         ):
             pos = match.start()
-            if best is None or pos > best[0]:
+            if best is None or pos > best[0] or (pos == best[0] and len(label) > len(best[1])):
                 best = (pos, label)
     return best[1] if best else None

@@ -23,20 +23,26 @@ class LegalCheckpoints(BaseModel):
     seed: int = 0
 
 
-def _render(base_prompt: str, example: Example) -> str:
-    return base_prompt.format(**example.fields)
+def _render(base_prompt: str, example: Example, *, task_id: str) -> str:
+    try:
+        return base_prompt.format(**example.fields)
+    except KeyError as exc:
+        raise KeyError(
+            f"base_prompt references field {exc} not in example.fields "
+            f"(task={task_id!r}, available={sorted(example.fields)})"
+        ) from exc
 
 
 def _fewshot_block(task: LegalTask, checkpoints: LegalCheckpoints) -> str:
     shots = select_fewshot(task, k=checkpoints.k, seed=checkpoints.seed)
-    rendered = [f"{_render(task.base_prompt, ex)} {ex.answer}" for ex in shots]
+    rendered = [f"{_render(task.base_prompt, ex, task_id=task.task_id)} {ex.answer}" for ex in shots]
     return "\n\n".join(rendered)
 
 
 def build_prompt(
     task: LegalTask, example: Example, *, checkpoints: LegalCheckpoints
 ) -> str:
-    body = _render(task.base_prompt, example)
+    body = _render(task.base_prompt, example, task_id=task.task_id)
     if checkpoints.prompt_variant:
         variant = select_variant(task.task_id)
         body = phrase_instruction(body, variant=variant)

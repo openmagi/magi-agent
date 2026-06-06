@@ -8,8 +8,8 @@ from magi_agent.recipes.first_party.legal.prompt_variants import (
 )
 
 
-def test_frozen_choice_is_returned_for_known_task() -> None:
-    PROMPT_VARIANTS["abercrombie"] = "technical"
+def test_frozen_choice_is_returned_for_known_task(monkeypatch) -> None:
+    monkeypatch.setitem(PROMPT_VARIANTS, "abercrombie", "technical")
     assert select_variant("abercrombie") == "technical"
 
 
