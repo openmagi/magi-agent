@@ -5,6 +5,11 @@ Four cases (per spec):
   (b) Genuinely absent old_text → old_text_not_found.
   (c) Ambiguous duplicate region → old_text_not_unique.
   (d) Flag OFF preserves exact-only behaviour (indentation mismatch fails).
+
+PR1 extensions:
+  (e) FileEdit attaches an EditMatch receipt with the right tier.
+  (f) Low-tier edit under block_final_answer enforcement triggers requirement.
+  (g) Under flag "off" enforcement a low-tier edit does NOT block.
 """
 from __future__ import annotations
 
@@ -301,3 +306,202 @@ async def test_fuzzy_edit_flag_off_exact_match_still_works(tmp_path, monkeypatch
 
     assert outcome.status == "ok", f"Exact match should succeed, got {outcome.status}"
     assert "earth" in (tmp_path / "hello2.py").read_text(encoding="utf-8")
+
+
+# ---------------------------------------------------------------------------
+# (e) PR1: FileEdit with fuzzy match attaches EditMatch receipt
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_fuzzy_edit_attaches_edit_match_receipt(tmp_path, monkeypatch):
+    """PR1: A successful fuzzy FileEdit attaches an EditMatchReceiptRecord."""
+    import magi_agent.gates.gate5b_full_toolhost as mod
+    monkeypatch.setattr(mod, "_EDIT_FUZZY_MATCH_ENABLED", True)
+
+    bundle = _ready_bundle(tmp_path)
+    content = (
+        "def greet(name):\n"
+        "    message = 'Hello, ' + name\n"
+        "    return message\n"
+    )
+    _write_file(tmp_path, "greet2.py", content)
+
+    old_text_wrong_indent = (
+        "def greet(name):\n"
+        "  message = 'Hello, ' + name\n"
+        "  return message\n"
+    )
+    new_text = (
+        "def greet(name):\n"
+        "    message = 'Hi, ' + name\n"
+        "    return message\n"
+    )
+
+    outcome = await bundle.host.dispatch(
+        "FileEdit",
+        {"path": "greet2.py", "oldText": old_text_wrong_indent, "newText": new_text},
+        request_digest=_sha256("req-e-1"),
+        tool_call_id="call-e-1",
+    )
+
+    assert outcome.status == "ok", f"Expected ok, got {outcome.status}: {outcome.reason}"
+    assert outcome.edit_match_receipt is not None, "EditMatch receipt should be attached"
+    receipt = outcome.edit_match_receipt
+    assert receipt.type == "EditMatch"
+    # line_trimmed fires before indentation_flexible for pure indentation diffs
+    assert receipt.tier in ("line_trimmed", "indentation_flexible")
+    assert receipt.file_digest.startswith("sha256:")
+    assert receipt.span_digest.startswith("sha256:")
+
+
+@pytest.mark.asyncio
+async def test_exact_fuzzy_edit_attaches_receipt_with_simple_tier(tmp_path, monkeypatch):
+    """PR1: Exact match via simple tier also produces a receipt (tier=simple)."""
+    import magi_agent.gates.gate5b_full_toolhost as mod
+    monkeypatch.setattr(mod, "_EDIT_FUZZY_MATCH_ENABLED", True)
+
+    bundle = _ready_bundle(tmp_path)
+    _write_file(tmp_path, "simple.py", "x = 1\ny = 2\n")
+
+    outcome = await bundle.host.dispatch(
+        "FileEdit",
+        {"path": "simple.py", "oldText": "x = 1", "newText": "x = 10"},
+        request_digest=_sha256("req-e-2"),
+        tool_call_id="call-e-2",
+    )
+
+    assert outcome.status == "ok"
+    assert outcome.edit_match_receipt is not None
+    assert outcome.edit_match_receipt.tier == "simple"
+    assert outcome.edit_match_receipt.confidence == 1.0
+
+
+@pytest.mark.asyncio
+async def test_flag_off_no_edit_match_receipt(tmp_path, monkeypatch):
+    """PR1: With flag OFF the edit_match_receipt is None (exact-only path)."""
+    import magi_agent.gates.gate5b_full_toolhost as mod
+    monkeypatch.setattr(mod, "_EDIT_FUZZY_MATCH_ENABLED", False)
+
+    bundle = _ready_bundle(tmp_path)
+    _write_file(tmp_path, "exact.py", "a = 1\n")
+
+    outcome = await bundle.host.dispatch(
+        "FileEdit",
+        {"path": "exact.py", "oldText": "a = 1", "newText": "a = 2"},
+        request_digest=_sha256("req-e-3"),
+        tool_call_id="call-e-3",
+    )
+
+    assert outcome.status == "ok"
+    assert outcome.edit_match_receipt is None, (
+        "Flag OFF must not produce an EditMatch receipt"
+    )
+
+
+# ---------------------------------------------------------------------------
+# (f/g) PR1: build_edit_confidence_contract enforcement tests
+# ---------------------------------------------------------------------------
+
+
+class TestBuildEditConfidenceContract:
+    """Tests for build_edit_confidence_contract() in coding_verification.py."""
+
+    def _make_low_tier_match(self):
+        """Return an EditMatchResult from a context_aware match (low-confidence tier)."""
+        # Build a context_aware match
+        content = (
+            "class Foo:\n"
+            "    def bar(self):\n"
+            "        x = 1\n"
+            "        y = 2\n"
+            "        return x\n"
+        )
+        find = (
+            "class Foo:\n"
+            "    def baz(self):\n"
+            "        x = 1\n"
+            "        y = 2\n"
+            "        return x\n"
+        )
+        new = (
+            "class Foo:\n"
+            "    def bar(self):\n"
+            "        x = 10\n"
+            "        y = 20\n"
+            "        return x\n"
+        )
+        from magi_agent.coding.edit_matching import replace
+        return replace(content, find, new)
+
+    def _make_high_tier_match(self):
+        """Return an EditMatchResult from a simple (high-confidence) match."""
+        from magi_agent.coding.edit_matching import replace
+        return replace("hello world\n", "hello", "goodbye")
+
+    def test_high_confidence_tier_uses_audit(self):
+        from magi_agent.evidence.coding_verification import build_edit_confidence_contract
+        match = self._make_high_tier_match()
+        contract = build_edit_confidence_contract(
+            match,
+            last_code_mutation_at=1000.0,
+            enforcement="block_final_answer",
+        )
+        # High-confidence tier (simple) must NOT block even with block_final_answer
+        assert contract.on_missing == "audit"
+
+    def test_low_confidence_tier_block_mode_uses_block_final_answer(self):
+        from magi_agent.evidence.coding_verification import build_edit_confidence_contract
+        match = self._make_low_tier_match()
+        # block_anchor fires before context_aware for this content; both are
+        # low-confidence tiers that trigger block_final_answer when enforcement is on.
+        assert match.tier in ("context_aware", "block_anchor"), (
+            f"Expected a low-confidence tier, got {match.tier}"
+        )
+        contract = build_edit_confidence_contract(
+            match,
+            last_code_mutation_at=1000.0,
+            enforcement="block_final_answer",
+        )
+        assert contract.on_missing == "block_final_answer"
+
+    def test_low_confidence_tier_off_mode_uses_audit(self):
+        from magi_agent.evidence.coding_verification import build_edit_confidence_contract
+        match = self._make_low_tier_match()
+        contract = build_edit_confidence_contract(
+            match,
+            last_code_mutation_at=1000.0,
+            enforcement="off",
+        )
+        # With enforcement="off" nothing should block
+        assert contract.on_missing == "audit"
+
+    def test_contract_includes_edit_match_requirement(self):
+        from magi_agent.evidence.coding_verification import build_edit_confidence_contract
+        match = self._make_high_tier_match()
+        contract = build_edit_confidence_contract(
+            match,
+            last_code_mutation_at=1000.0,
+        )
+        req_types = {req.type for req in contract.requirements}
+        assert "EditMatch" in req_types
+
+    def test_contract_includes_git_diff_and_test_run(self):
+        from magi_agent.evidence.coding_verification import build_edit_confidence_contract
+        match = self._make_low_tier_match()
+        contract = build_edit_confidence_contract(
+            match,
+            last_code_mutation_at=1000.0,
+            enforcement="block_final_answer",
+        )
+        req_types = {req.type for req in contract.requirements}
+        assert "GitDiff" in req_types
+        assert "TestRun" in req_types
+
+    def test_default_enforcement_is_off(self):
+        """Default enforcement="off" means audit only, never block."""
+        from magi_agent.evidence.coding_verification import build_edit_confidence_contract
+        match = self._make_low_tier_match()
+        # No enforcement kwarg — defaults to "off"
+        contract = build_edit_confidence_contract(match, last_code_mutation_at=1000.0)
+        assert contract.on_missing == "audit"

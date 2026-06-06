@@ -375,7 +375,7 @@ class CodingMutationRecipe:
                 replace as _fuzzy_replace,
             )
             try:
-                resulting_text = _fuzzy_replace(
+                _match_result = _fuzzy_replace(
                     request.current_text,
                     request.old_string,
                     request.new_string,
@@ -399,11 +399,15 @@ class CodingMutationRecipe:
                     flags,
                     read_ledger=read_decision,
                 )
+            resulting_text = _match_result.result
             # Count replacements for the receipt: old_string may have been matched
             # fuzzily, so we diff the texts to infer the count.
             replacements = 1 if not request.replace_all else max(
                 resulting_text.count(request.new_string), 1
             )
+            _fuzzy_match_tier = _match_result.tier
+            _fuzzy_match_confidence = _match_result.confidence
+            _fuzzy_match_ambiguous = _match_result.ambiguous
         else:
             occurrences = request.current_text.count(request.old_string)
             if occurrences == 0:
@@ -431,6 +435,9 @@ class CodingMutationRecipe:
                 -1 if request.replace_all else 1,
             )
             replacements = occurrences if request.replace_all else 1
+            _fuzzy_match_tier = None
+            _fuzzy_match_confidence = None
+            _fuzzy_match_ambiguous = None
 
         old_digest = workspace_content_digest(request.current_text)
         new_digest = workspace_content_digest(resulting_text)
@@ -454,6 +461,9 @@ class CodingMutationRecipe:
             old_digest=old_digest,
             new_digest=new_digest,
             replacements=replacements,
+            fuzzy_tier=_fuzzy_match_tier,
+            fuzzy_confidence=_fuzzy_match_confidence,
+            fuzzy_ambiguous=_fuzzy_match_ambiguous,
         )
 
     def _evaluate_patch_apply(
@@ -594,6 +604,9 @@ def _decision(
     new_digest: str | None = None,
     replacements: int = 0,
     created_files: int = 0,
+    fuzzy_tier: str | None = None,
+    fuzzy_confidence: float | None = None,
+    fuzzy_ambiguous: bool | None = None,
 ) -> CodingMutationDecision:
     old_digest_ref = digest_ref(old_digest) if old_digest is not None else None
     new_digest_ref = digest_ref(new_digest) if new_digest is not None else None
@@ -616,6 +629,9 @@ def _decision(
                 replacements=replacements,
                 old_digest_ref=old_digest_ref,
                 new_digest_ref=new_digest_ref,
+                fuzzy_tier=fuzzy_tier,
+                fuzzy_confidence=fuzzy_confidence,
+                fuzzy_ambiguous=fuzzy_ambiguous,
             )
             if replacements or created_files
             else {}
@@ -630,6 +646,9 @@ def _diff_summary(
     replacements: int,
     old_digest_ref: str | None,
     new_digest_ref: str | None,
+    fuzzy_tier: str | None = None,
+    fuzzy_confidence: float | None = None,
+    fuzzy_ambiguous: bool | None = None,
 ) -> dict[str, object]:
     summary: dict[str, object] = {
         "changedFiles": 1,
@@ -641,6 +660,13 @@ def _diff_summary(
         summary["oldDigestRef"] = old_digest_ref
     if new_digest_ref is not None:
         summary["newDigestRef"] = new_digest_ref
+    # Thread fuzzy-match metadata through when available (fuzzy flag was on).
+    if fuzzy_tier is not None:
+        summary["matchTier"] = fuzzy_tier
+    if fuzzy_confidence is not None:
+        summary["matchConfidence"] = fuzzy_confidence
+    if fuzzy_ambiguous is not None:
+        summary["matchAmbiguous"] = fuzzy_ambiguous
     return summary
 
 
@@ -705,7 +731,16 @@ def _coerce_authority_flags(value: object) -> CodingMutationAuthorityFlags:
 
 def _safe_diff_summary(summary: Mapping[str, object]) -> dict[str, object]:
     safe: dict[str, object] = {}
-    for key in ("changedFiles", "createdFiles", "replacements", "oldDigestRef", "newDigestRef"):
+    for key in (
+        "changedFiles",
+        "createdFiles",
+        "replacements",
+        "oldDigestRef",
+        "newDigestRef",
+        "matchTier",
+        "matchConfidence",
+        "matchAmbiguous",
+    ):
         value = summary.get(key)
         if isinstance(value, bool | int | float) or value is None:
             safe[key] = value

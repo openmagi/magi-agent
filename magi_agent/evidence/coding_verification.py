@@ -5,6 +5,7 @@ from typing import Any, Literal, Self
 
 from pydantic import Field, field_serializer, field_validator
 
+from magi_agent.coding.edit_matching import EditMatchResult
 from magi_agent.evidence.contracts import evaluate_evidence_contract
 from magi_agent.evidence.reports import (
     PublicEvidenceRecordReport,
@@ -15,6 +16,7 @@ from magi_agent.evidence.reports import (
 from magi_agent.evidence.types import (
     EvidenceContract,
     EvidenceContractVerdict,
+    EvidenceEnforcement,
     EvidenceFieldMatcher,
     EvidenceMetadataModel,
     EvidenceRecord,
@@ -23,6 +25,12 @@ from magi_agent.evidence.types import (
     _validate_observed_at,
 )
 from magi_agent.harness.verifier_bus import VerifierResultMetadata
+
+# ---------------------------------------------------------------------------
+# Low-confidence tier names (require post-edit verification when gating is on)
+# ---------------------------------------------------------------------------
+_LOW_CONFIDENCE_TIERS = frozenset({"block_anchor", "context_aware"})
+_HIGH_CONFIDENCE_FLOOR = 0.80
 
 
 CODING_VERIFICATION_AUDIT_VERIFIER_ID = "dev-coding-verification-audit"
@@ -391,6 +399,79 @@ def _verifier_summary(verdict: EvidenceContractVerdict) -> str:
     return "; ".join(parts)
 
 
+def build_edit_confidence_contract(
+    match: EditMatchResult,
+    *,
+    last_code_mutation_at: int | float,
+    enforcement: EvidenceEnforcement = "off",
+    contract_id: str = "dev-edit-confidence",
+) -> EvidenceContract:
+    """Build an evidence contract for a fuzzy-edit match result.
+
+    - HIGH-confidence tiers (conf >= 0.80, and not ambiguous, and not a
+      low-confidence tier name): ``onMissing="audit"`` — never blocks.
+    - LOW tiers (``block_anchor`` or ``context_aware``) or ``ambiguous=True``
+      tiers: ``onMissing="block_final_answer"`` when ``enforcement`` is
+      ``block_final_answer``; ``onMissing="audit"`` otherwise.
+
+    When ``enforcement="off"`` (the default), the returned contract always
+    uses ``onMissing="audit"`` regardless of tier — receipts are emitted but
+    nothing blocks.
+    """
+    is_low = match.tier in _LOW_CONFIDENCE_TIERS or match.ambiguous
+    if is_low and enforcement == "block_final_answer":
+        on_missing = "block_final_answer"
+        description = (
+            f"Low-confidence fuzzy edit (tier={match.tier!r}, "
+            f"confidence={match.confidence:.2f}) requires post-edit "
+            "GitDiff and TestRun(exit_code=0) before final answer."
+        )
+        retry_msg = (
+            f"Low-confidence edit (tier={match.tier!r}). "
+            "Run GitDiff and TestRun(exit_code=0) after the edit before claiming completion."
+        )
+    else:
+        on_missing = "audit"
+        description = (
+            f"EditMatch evidence audit (tier={match.tier!r}, "
+            f"confidence={match.confidence:.2f})."
+        )
+        retry_msg = (
+            "Record post-edit GitDiff and TestRun evidence before claiming completion."
+        )
+
+    requirements: list[EvidenceRequirement] = [
+        EvidenceRequirement(
+            type="EditMatch",
+            after="last_code_mutation",
+            fields={
+                "tier": EvidenceFieldMatcher(equals=match.tier),
+            },
+        ),
+        EvidenceRequirement(
+            type="GitDiff",
+            after="last_code_mutation",
+            fields={"changedFiles": EvidenceFieldMatcher(exists=True)},
+        ),
+        EvidenceRequirement(
+            type="TestRun",
+            after="last_code_mutation",
+            exitCode=0,
+            fields={"command": EvidenceFieldMatcher(exists=True)},
+        ),
+    ]
+
+    return EvidenceContract(
+        id=contract_id,
+        description=description,
+        triggers=("beforeCommit",),
+        when={"lastCodeMutation": last_code_mutation_at},
+        requirements=tuple(requirements),
+        onMissing=on_missing,
+        retryMessage=retry_msg,
+    )
+
+
 def _audit_evidence(
     request: CodingVerificationAuditRequest,
     verdict: EvidenceContractVerdict,
@@ -439,6 +520,7 @@ __all__ = [
     "CodingVerificationAuditResult",
     "build_coding_verification_audit_contract",
     "build_coding_verification_hard_gate_contract",
+    "build_edit_confidence_contract",
     "evaluate_coding_verification_audit",
     "evaluate_coding_verification_hard_gate",
 ]
