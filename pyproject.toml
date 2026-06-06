@@ -27,6 +27,11 @@ cli = [
   "rapidfuzz==3.14.5",
   "typer==0.26.4",
 ]
+bench = [
+    "swebench>=3.0.0",
+    "datasets>=2.19.0",
+    "docker>=7.1.0",
+]
 composio = [
   "composio==0.13.1",
 ]
