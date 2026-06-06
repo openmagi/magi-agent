@@ -22,6 +22,10 @@ def select_variant(task_id: str) -> Variant:
 
 
 def phrase_instruction(instruction: str, *, variant: Variant) -> str:
+    # "plain" is a no-op: it must NOT prepend text. An empirical train-split run
+    # (abercrombie+hearsay, Sonnet 4.5) showed a leading prefix here breaks the
+    # few-shot Q:/A: format and collapses combined accuracy (0.78 -> 0.50). Only
+    # the opt-in "technical" variant reframes; plain leaves the prompt untouched.
     if variant == "technical":
         return f"As a legal expert applying the controlling rule: {instruction}"
-    return f"Read carefully and answer. {instruction}"
+    return instruction

@@ -22,3 +22,9 @@ def test_phrase_instruction_differs_by_variant() -> None:
     technical = phrase_instruction("Decide the answer.", variant="technical")
     assert plain != technical
     assert "Decide the answer." in plain
+
+
+def test_phrase_instruction_plain_is_noop() -> None:
+    # plain must leave the prompt untouched (no prefix) so it cannot break the
+    # few-shot Q:/A: format when composed with the few_shot checkpoint.
+    assert phrase_instruction("Q: x\nA:", variant="plain") == "Q: x\nA:"

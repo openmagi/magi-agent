@@ -40,9 +40,11 @@ def test_run_subset_produces_one_record_per_test_instance() -> None:
     assert records[1].gold == "No"
 
 
-def test_baseline_disables_all_checkpoints() -> None:
+def test_baseline_disables_reasoning_levers_but_keeps_parsing() -> None:
     cp = baseline_checkpoints()
-    assert not (cp.few_shot or cp.rule_inject or cp.prompt_variant or cp.constrained_parse)
+    assert not (cp.few_shot or cp.rule_inject or cp.prompt_variant)
+    # Label extraction must stay on so the baseline is fairly scoreable.
+    assert cp.constrained_parse is True
 
 
 def test_ablation_yields_one_config_per_checkpoint() -> None:

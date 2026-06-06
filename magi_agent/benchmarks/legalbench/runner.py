@@ -40,11 +40,18 @@ def run_subset(
 
 
 def baseline_checkpoints() -> LegalCheckpoints:
+    """Fair lift baseline: reasoning levers OFF, but label extraction kept ON.
+
+    constrained_parse is a scoring necessity, not a reasoning aid. With it off,
+    the scorer compares the model's raw prose to exact gold labels, which almost
+    never matches and yields a degenerate ~0.0 baseline that inflates lift. So
+    the baseline disables only few_shot/rule_inject/prompt_variant.
+    """
     return LegalCheckpoints(
         few_shot=False,
         rule_inject=False,
         prompt_variant=False,
-        constrained_parse=False,
+        constrained_parse=True,
     )
 
 

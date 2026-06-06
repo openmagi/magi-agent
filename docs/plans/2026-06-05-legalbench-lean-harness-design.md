@@ -250,3 +250,32 @@ contains confident entries for four tasks (`abercrombie`, `hearsay`,
 `contract_nli_explicit_identification`, `contract_nli_notice_on_compelled_disclosure`).
 Additional entries should only be added when the rule is well-established and
 can be stated accurately without risk of hallucination.
+
+## Empirical findings — first run (2026-06-05)
+
+First real run: `abercrombie` (95 test) + `hearsay` (94 test), `claude-sonnet-4-5`,
+temp 0, parse-on, balanced accuracy.
+
+| Config | abercrombie | hearsay | overall |
+| --- | --- | --- | --- |
+| zero-shot | 0.589 | 0.665 | 0.627 |
+| + rule only | 0.726 | 0.716 | 0.721 |
+| + few-shot only (k=5) | 0.779 | 0.615 | 0.697 |
+| rule + few-shot (variant off, k=5) | 0.789 | 0.777 | **0.783** |
+| variant only | 0.589 | 0.709 | 0.649 |
+| full incl. prompt_variant prefix | 0.389 | 0.606 | 0.498 |
+
+Lessons (drove fixes on this branch):
+1. **Two defects the run exposed.** (A) The original `baseline_checkpoints()`
+   turned `constrained_parse` OFF, so the scorer compared raw prose to exact gold
+   labels → degenerate 0.0 baseline → hugely inflated lift. Fixed: baseline keeps
+   parsing on. (B) The `prompt_variant` "plain" branch prepended
+   `"Read carefully and answer. "`, which broke the few-shot `Q:/A:` format and
+   collapsed the combined config (0.783 → 0.498). Fixed: "plain" is now a no-op.
+2. **Best simple config = rule + few-shot** (≈0.78), a **+0.16** lift over a
+   well-prompted zero-shot baseline (0.627). Rule injection is the most reliable
+   single lever; few-shot helps `abercrombie` but slightly hurts `hearsay`
+   (task-dependent, as the research predicted).
+3. **Base model dominates** — zero-shot Sonnet 4.5 is already ~0.63 here.
+4. Caveat: two tasks only (~95 items each); indicative, not a full LegalBench
+   number.

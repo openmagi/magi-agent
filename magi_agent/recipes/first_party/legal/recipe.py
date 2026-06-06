@@ -19,7 +19,7 @@ class LegalCheckpoints(BaseModel):
     rule_inject: bool = True
     prompt_variant: bool = True
     constrained_parse: bool = True
-    k: int = 4
+    k: int = 5
     seed: int = 0
 
 
