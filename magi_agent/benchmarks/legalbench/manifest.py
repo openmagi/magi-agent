@@ -1,4 +1,4 @@
-# magi_agent/benchmarks/legalbench/manifest.py
+"""Loads a curated subset of LegalBench tasks from a JSON manifest file."""
 from __future__ import annotations
 
 import json

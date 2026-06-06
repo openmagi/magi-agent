@@ -1,7 +1,6 @@
-# magi_agent/benchmarks/legalbench/models.py
+"""Pydantic models for the LegalBench lean harness data layer."""
 from __future__ import annotations
 
-from collections.abc import Mapping
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict
@@ -15,17 +14,20 @@ ReasoningType = Literal[
     "rhetorical",
 ]
 
-_FROZEN = ConfigDict(frozen=True)
+_MODEL_CONFIG = ConfigDict(
+    frozen=True,
+    extra="forbid",
+)
 
 
 class Example(BaseModel):
-    model_config = _FROZEN
-    fields: Mapping[str, str]
+    model_config = _MODEL_CONFIG
+    fields: dict[str, str]
     answer: str
 
 
 class LegalTask(BaseModel):
-    model_config = _FROZEN
+    model_config = _MODEL_CONFIG
     task_id: str
     reasoning_type: ReasoningType
     base_prompt: str
