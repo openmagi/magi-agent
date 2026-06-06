@@ -212,6 +212,7 @@ def test_runner_input_adapter_full_toolhost_instructs_direct_answers_before_tool
     assert "For brief replies, do not call tools" in instruction
     assert "Every turn must end with a normal text answer" in instruction
     assert "non-text runner events alone are not a valid completion" in instruction
+    assert "Do not finish by promising future or background work" in instruction
     assert "selected full toolhost" in normalized_instruction
 
 
