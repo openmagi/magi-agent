@@ -79,7 +79,7 @@ Install with Homebrew:
 
 ```bash
 brew update
-brew install openmagi/tap/magi-agent
+brew install --force-bottle openmagi/tap/magi-agent
 ```
 
 Start the local API and web dashboard:
@@ -385,6 +385,10 @@ Build-system pins:
 - CLI reference: `docs/cli.md`
 - Getting started: `docs/getting-started.md`
 - Quickstart: `docs/quickstart.md`
+- Recipes: `docs/recipes.md`
+- Harnesses: `docs/harnesses.md`
+- First-party packs: `docs/first-party-packs.md`
+- Streaming events: `docs/streaming-events.md`
 - Runtime architecture: `magi_agent/ARCHITECTURE.md`
 
 ## License

@@ -41,6 +41,10 @@ curl -N http://localhost:8080/v1/chat/stream \
   -d '{"sessionId":"local","messages":[{"role":"user","content":"Check runtime health."}]}'
 ```
 
+The stream emits `event: agent` SSE frames and ends with `data: [DONE]`.
+See [Streaming events](streaming-events.md) for public event classes and
+sanitization rules.
+
 ## Health
 
 Use health endpoints to confirm runtime status before debugging model behavior.

@@ -32,16 +32,24 @@ state, memory, artifact content, an external side effect, or final output.
 
 The runtime may emit public events such as:
 
+- `turn_start`
 - `turn_phase`
+- `text_delta`
 - `llm_progress`
 - `tool_start`
 - `tool_progress`
 - `tool_end`
+- `recipe_selection`
 - `control_request`
+- `source_inspected`
+- `citation_gate`
 - `turn_result`
 
 Private paths, secrets, raw provider payloads, and hidden reasoning should not
 be projected as public events.
+
+See [Streaming events](streaming-events.md) for the public event classes, SSE
+wire shape, and sanitization rules.
 
 ## Dashboard Stream
 
@@ -84,3 +92,20 @@ When evidence is missing or a validator blocks completion, the runtime can:
 - abstain from claiming success.
 
 Silent success is the wrong fallback for governed work.
+
+## Recipes and Harnesses
+
+Recipes choose the work contract. Harnesses enforce it. For example, a research
+recipe can select source-proof and final-projection harnesses, while a coding
+recipe can select read-before-edit, mutation, diff, test, and final-projection
+gates.
+
+The runtime core stays generic: it supplies runner, tool, session, memory,
+artifact, callback, event, and projection primitives. Work-class behavior lives
+in public recipe and harness contracts.
+
+Further reading:
+
+- [Recipes](recipes.md)
+- [Harnesses](harnesses.md)
+- [First-party packs](first-party-packs.md)

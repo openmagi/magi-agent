@@ -16,7 +16,7 @@ transcripts you plan to share.
 
 ```bash
 brew update
-brew install openmagi/tap/magi-agent
+brew install --force-bottle openmagi/tap/magi-agent
 ```
 
 If Homebrew tries to build from source on macOS, update the tap metadata and

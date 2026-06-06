@@ -31,6 +31,10 @@ Recommended fields:
 - public delivery target;
 - evidence requirements.
 
+Scheduler harnesses should project schedule refs, lease or tick decisions, due
+turn refs, delivery status, and reason codes. They should not imply hidden
+background execution when no job, receipt, or blocker exists.
+
 ## Delegation
 
 Delegated work should return an accepted result envelope with public-safe
@@ -53,3 +57,14 @@ private URLs, and secret-bearing payloads should not be projected to the user.
 Automation that mutates external systems, spends money, sends messages, changes
 files, or uses high-authority credentials should require explicit approval
 unless the workspace has deliberately allowed unattended execution.
+
+## General automation packs
+
+The first-party general automation pack provides public presets for planning,
+research, file work, office work, browser inspection, browser actions, and scout
+tasks. Each preset has a permission ceiling and tool categories; mutating file,
+browser, delivery, and external-directory work requires approval or an explicit
+runtime policy that allows it.
+
+See [First-party packs](first-party-packs.md) for the preset matrix and
+[Harnesses](harnesses.md) for the automation evidence contracts.
