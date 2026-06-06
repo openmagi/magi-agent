@@ -57,9 +57,9 @@ class AblationCell:
 def ablation_configs(full: LegalCheckpoints) -> list[AblationCell]:
     cells: list[AblationCell] = []
     for field in ("few_shot", "rule_inject", "prompt_variant", "constrained_parse"):
-        cells.append(AblationCell(disabled=field, checkpoints=replace_flag(full, field)))
+        cells.append(AblationCell(disabled=field, checkpoints=_replace_flag(full, field)))
     return cells
 
 
-def replace_flag(checkpoints: LegalCheckpoints, field: str) -> LegalCheckpoints:
+def _replace_flag(checkpoints: LegalCheckpoints, field: str) -> LegalCheckpoints:
     return checkpoints.model_copy(update={field: False})

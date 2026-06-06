@@ -11,7 +11,7 @@ from magi_agent.benchmarks.legalbench.models import ReasoningType
 
 LEGAL_BENCHMARK_SCHEMA_VERSION = "legalBenchTasks.v1"
 
-_FROZEN = ConfigDict(frozen=True)
+_FROZEN = ConfigDict(frozen=True, extra="forbid")
 
 
 class AnswerRecord(BaseModel):
@@ -27,14 +27,14 @@ class LegalReport(BaseModel):
     model_config = _FROZEN
     schema_version: str = LEGAL_BENCHMARK_SCHEMA_VERSION
     overall_balanced_accuracy: float
-    by_reasoning_type: dict[str, float]
+    by_reasoning_type: dict[ReasoningType, float]
     by_task: dict[str, float]
 
 
 class LegalLift(BaseModel):
     model_config = _FROZEN
     overall: float
-    by_reasoning_type: dict[str, float]
+    by_reasoning_type: dict[ReasoningType, float]
 
 
 def _balanced_accuracy(pairs: list[tuple[str | None, str]]) -> float:
@@ -51,6 +51,14 @@ def _balanced_accuracy(pairs: list[tuple[str | None, str]]) -> float:
 
 
 def score(records: list[AnswerRecord]) -> LegalReport:
+    """Compute a two-level macro-averaged balanced accuracy over *records*.
+
+    Assumes each ``task_id`` maps to exactly one ``reasoning_type`` (tasks are
+    single-reasoning-type by construction — mixing is not supported).  Scoring
+    proceeds as: (1) per-task balanced accuracy (mean of per-gold-class recall);
+    (2) mean over tasks within each reasoning type; (3) mean over reasoning types
+    for ``overall_balanced_accuracy``.
+    """
     by_task_pairs: dict[str, list[tuple[str | None, str]]] = defaultdict(list)
     task_reasoning: dict[str, ReasoningType] = {}
     for rec in records:

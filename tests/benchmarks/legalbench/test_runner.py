@@ -36,6 +36,8 @@ def test_run_subset_produces_one_record_per_test_instance() -> None:
     assert records[0].gold == "Yes"
     assert records[1].predicted == "No"
     assert records[0].reasoning_type == "rule-conclusion"
+    assert records[1].index == 1
+    assert records[1].gold == "No"
 
 
 def test_baseline_disables_all_checkpoints() -> None:
