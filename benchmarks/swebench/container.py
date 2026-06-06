@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import subprocess
 import tempfile
 from dataclasses import dataclass
@@ -46,7 +47,9 @@ def run_instance(
     model: str | None,
     timeout_seconds: int,
 ) -> InferenceResult:
-    issue_file = Path(tempfile.mkstemp(suffix=".txt")[1])
+    issue_fd, issue_path = tempfile.mkstemp(suffix=".txt")
+    os.close(issue_fd)
+    issue_file = Path(issue_path)
     issue_file.write_text(instance.problem_statement, encoding="utf-8")
     out_dir = Path(tempfile.mkdtemp())
     out_patch = out_dir / "prediction.patch"

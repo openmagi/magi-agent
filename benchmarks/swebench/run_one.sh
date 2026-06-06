@@ -6,8 +6,13 @@ set -uo pipefail
 
 cd /testbed || { echo "no /testbed" >&2; exit 3; }
 
-# Clean any image-baked test edits; pin to base commit.
-git reset --hard "${BASE_COMMIT}" >/dev/null 2>&1
+# Clean any image-baked test edits; pin to base commit. A failure here must not
+# silently run the agent on the wrong tree — log and skip (batch-safe exit 0).
+if ! git reset --hard "${BASE_COMMIT}" >/dev/null 2>&1; then
+  echo "git reset --hard ${BASE_COMMIT} failed; skipping instance" >&2
+  : > "${OUT_PATCH}"
+  exit 0
+fi
 git clean -fdq >/dev/null 2>&1
 
 # Provider config for the EXISTING real runner (cli/providers.py). The runner is
