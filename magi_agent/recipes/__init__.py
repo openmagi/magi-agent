@@ -61,9 +61,19 @@ _RESEARCH_CHILD_RUNNER_EXPORTS = {
     "ResearchParentSynthesisInput",
     "ResearchSynthesisRequest",
 }
+_BEST_OF_N_EXPORTS = {
+    "BestOfNConfig",
+    "BestOfNResult",
+    "ConsensusMode",
+    "run_best_of_n",
+}
 
 __all__ = (
     "AgentRecipeCompiler",
+    "BestOfNConfig",
+    "BestOfNResult",
+    "ConsensusMode",
+    "run_best_of_n",
     "CodingEvidenceGate",
     "CodingEvidenceGateAuthorityFlags",
     "CodingEvidenceGateConfig",
@@ -131,4 +141,8 @@ def __getattr__(name: str) -> object:
         from magi_agent.recipes import research_child_runner
 
         return getattr(research_child_runner, name)
+    if name in _BEST_OF_N_EXPORTS:
+        from magi_agent.recipes import best_of_n
+
+        return getattr(best_of_n, name)
     raise AttributeError(name)
