@@ -40,6 +40,18 @@ anthropic = [
 # Compatibility extra. Provider-capable installs are now the default because
 # the runtime uses ADK LiteLlm as the common model path.
 providers = []
+# Optional file & multimodal attachment tools (MAGI_FILE_TOOLS_ENABLED=true).
+# Install with: uv sync --extra files
+files = [
+  "openpyxl>=3.1",
+  "pypdf>=4.0",
+  "python-docx>=1.1",
+]
+# Optional audio transcription provider (MAGI_ASR_PROVIDER=openai_whisper).
+# Install with: uv sync --extra audio
+audio = [
+  "openai>=1.0",
+]
 
 [project.scripts]
 magi-agent = "magi_agent.main:main"

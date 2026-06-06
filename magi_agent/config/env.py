@@ -1489,6 +1489,23 @@ def is_message_cache_enabled(env: Mapping[str, str] | None = None) -> bool:
     return _is_true(source.get("MAGI_MESSAGE_CACHE_ENABLED"))
 
 
+def file_tools_enabled(env: Mapping[str, str] | None = None) -> bool:
+    """Single source of truth for the ``MAGI_FILE_TOOLS_ENABLED`` flag.
+
+    Default OFF. When ON, the four file/multimodal tools (XLSXRead,
+    DocumentRead, ImageUnderstand, AudioTranscribe) are registered in the tool
+    registry and exposed via ``build_cli_adk_tools``. Requires the ``files``
+    (and optionally ``audio``) optional extras to be installed; handlers
+    degrade gracefully with ``status="blocked"`` when their optional dependency
+    is missing rather than crashing.
+    """
+    if env is None:
+        import os as _os
+
+        env = _os.environ
+    return _is_true(env.get("MAGI_FILE_TOOLS_ENABLED"))
+
+
 def _is_true(value: str | None) -> bool:
     return (value or "").strip().lower() in _TRUE_VALUES
 
