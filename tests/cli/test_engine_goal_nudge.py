@@ -520,3 +520,160 @@ class TestNudgeMessageThreaded:
 
         expected = build_nudge_message(nudge)
         assert runner.calls[1].new_message_text == expected
+
+
+# ---------------------------------------------------------------------------
+# Tests: evidence_collector DI seam — end-to-end coverage
+# ---------------------------------------------------------------------------
+
+
+class TestEvidenceCollectorDISeam:
+    """Verify the evidence_collector constructor param wires through correctly.
+
+    These tests exercise the full end-to-end path:
+      evidence_collector callable → _collect_evidence → goal_is_met → nudge decision
+
+    without monkeypatching _goal_is_met, so the real FinalOutputGate is exercised.
+    """
+
+    def test_collector_providing_satisfying_evidence_suppresses_nudge(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """When evidence_collector returns records satisfying required_evidence,
+        goal_is_met returns True and no nudge is fired.
+
+        Uses a SourceInspection record (satisfies 'source_ledger') so the real
+        FinalOutputGate evaluates to done (no missing_required_evidence reason code).
+        """
+        # A SourceInspection record satisfies the "source_ledger" check.
+        satisfying_records = [
+            {
+                "type": "SourceInspection",
+                "sourceRef": "web:example.com",
+                "evidenceRef": "ev:0001:evidence_record",
+            }
+        ]
+
+        def fake_collector(turn_id: str) -> list[object]:
+            return satisfying_records  # type: ignore[return-value]
+
+        runner = FakeRunner(events_per_call=[[]])  # single clean stop
+        _patch_lazy_deps(monkeypatch, runner)
+        nudge = GoalNudge(
+            goal="research done",
+            mode="goal",
+            max_nudges=3,
+            required_evidence=("source_ledger",),
+        )
+        driver = MagiEngineDriver(
+            runner=runner,
+            max_event_count=4096,
+            user_id="cli",
+            goal_nudge=nudge,
+            evidence_collector=fake_collector,
+        )
+        _run_drive(driver)
+
+        # Evidence satisfied → goal_is_met True → no nudge → only the initial run
+        assert len(runner.calls) == 1
+
+    def test_collector_returning_empty_nudges_to_cap(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """When evidence_collector is provided but returns no records, required_evidence
+        is declared but absent → goal_is_met False → nudges proceed to max_nudges cap.
+        """
+        def empty_collector(turn_id: str) -> list[object]:
+            return []
+
+        max_n = 2
+        runner = FakeRunner(events_per_call=[[] for _ in range(max_n + 2)])
+        _patch_lazy_deps(monkeypatch, runner)
+        nudge = GoalNudge(
+            goal="research done",
+            mode="grind",
+            max_nudges=max_n,
+            required_evidence=("source_ledger",),
+        )
+        driver = MagiEngineDriver(
+            runner=runner,
+            max_event_count=4096,
+            user_id="cli",
+            goal_nudge=nudge,
+            evidence_collector=empty_collector,
+        )
+        _run_drive(driver)
+
+        # Evidence absent → goal never met → grind to cap: initial + max_n nudges
+        assert len(runner.calls) == max_n + 1
+
+    def test_collector_none_with_required_evidence_nudges_to_cap(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Default (evidence_collector=None) + required_evidence non-empty →
+        _collect_evidence returns () → goal_is_met False → nudges to cap.
+
+        This confirms the default (collector=None) path is byte-identical to
+        pre-seam behaviour.
+        """
+        max_n = 2
+        runner = FakeRunner(events_per_call=[[] for _ in range(max_n + 2)])
+        _patch_lazy_deps(monkeypatch, runner)
+        nudge = GoalNudge(
+            goal="task done",
+            mode="grind",
+            max_nudges=max_n,
+            required_evidence=("source_ledger",),
+        )
+        # No evidence_collector provided — uses the default None path
+        driver = MagiEngineDriver(
+            runner=runner,
+            max_event_count=4096,
+            user_id="cli",
+            goal_nudge=nudge,
+        )
+        _run_drive(driver)
+
+        # No collector → () → goal never met → grind to cap
+        assert len(runner.calls) == max_n + 1
+
+    def test_collector_called_with_correct_turn_id(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The evidence_collector receives the turn_id from the current turn."""
+        collected_turn_ids: list[str] = []
+
+        satisfying_records = [
+            {
+                "type": "SourceInspection",
+                "sourceRef": "web:example.com",
+                "evidenceRef": "ev:0001:evidence_record",
+            }
+        ]
+
+        def recording_collector(turn_id: str) -> list[object]:
+            collected_turn_ids.append(turn_id)
+            return satisfying_records  # type: ignore[return-value]
+
+        runner = FakeRunner(events_per_call=[[]])
+        _patch_lazy_deps(monkeypatch, runner)
+        nudge = GoalNudge(
+            goal="check done",
+            mode="goal",
+            max_nudges=3,
+            required_evidence=("source_ledger",),
+        )
+        driver = MagiEngineDriver(
+            runner=runner,
+            max_event_count=4096,
+            user_id="cli",
+            goal_nudge=nudge,
+            evidence_collector=recording_collector,
+        )
+        _run_drive(driver, prompt="do work")
+
+        # Collector was called at least once (at the stop-check)
+        assert len(collected_turn_ids) >= 1
+        # The turn_id passed was the one from the turn input ("test-turn" is the
+        # default in _run_drive's turn_input dict)
+        assert all(tid == "test-turn" for tid in collected_turn_ids)

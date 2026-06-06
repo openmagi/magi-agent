@@ -106,7 +106,12 @@ def goal_is_met(
     When ``nudge.required_evidence`` is non-empty, delegates to
     :class:`~magi_agent.evidence.final_output_gate.FinalOutputGate` with
     ``enabled=True`` and ``localEvaluationEnabled=True``.  Returns ``True``
-    iff the decision status is ``"passed"``.
+    when the gate decision is NOT a hard failure (``status`` not in
+    ``{"blocked", "fail"}``) AND none of the decision's ``reason_codes``
+    starts with ``"missing_required_evidence:"`` — because the gate returns
+    ``"repair_required"`` for BOTH present and absent evidence, distinguished
+    only via reason codes, so the status field alone is insufficient to
+    determine done-ness.
     """
     if not nudge.required_evidence:
         return False

@@ -73,7 +73,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from collections.abc import AsyncGenerator, AsyncIterator, Mapping
+from collections.abc import AsyncGenerator, AsyncIterator, Callable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -537,6 +537,7 @@ class MagiEngineDriver:
         runner_policy_assembly: RunnerPolicyAssembly | None = None,
         event_sink: object | None = None,
         goal_nudge: "GoalNudge | None" = None,
+        evidence_collector: Callable[[str], Sequence[object]] | None = None,
     ) -> None:
         self._runner = runner
         self._max_event_count = max(1, int(max_event_count))
@@ -553,6 +554,15 @@ class MagiEngineDriver:
         # PR4 goal-nudge continuation. ``None`` (default) -> no nudge logic;
         # ``_drive`` behaves byte-identically to pre-PR4.
         self._goal_nudge: "GoalNudge | None" = goal_nudge
+        # Optional evidence-collector DI seam (PR4 follow-up). When set,
+        # _collect_evidence delegates to this callable instead of returning ().
+        # The engine driver does NOT own a ledger; the harness layer above wires
+        # one here when it wants evidence-backed GoalNudge goals to be checkable.
+        # When None (the default), _collect_evidence returns () — byte-identical
+        # to pre-seam behaviour.
+        self._evidence_collector: Callable[[str], Sequence[object]] | None = (
+            evidence_collector
+        )
         # Shared across all turns of this driver instance: single-flight per
         # session id. Lazily built so construction stays cheap + import-clean.
         self._registry: object | None = None
@@ -1005,16 +1015,21 @@ class MagiEngineDriver:
     def _collect_evidence(self, turn_id: str) -> tuple[object, ...]:
         """Return evidence records for the given turn.
 
-        The engine driver does not maintain its own evidence ledger (that lives
-        at the recipe/harness layer above the engine).  This stub always returns
-        an empty tuple so that :func:`_goal_is_met` falls through to the
-        ``required_evidence``-empty path (rely on the synthetic self-check turn)
-        for callers that do not wire an evidence ledger into the driver.
+        The engine driver does not own an evidence ledger (that lives at the
+        recipe/harness layer above).  When no ``evidence_collector`` was
+        provided at construction time, returns an empty tuple — ``_goal_is_met``
+        then falls through to the ``required_evidence``-empty path (relying on
+        the synthetic self-check turn), which is byte-identical to pre-seam
+        behaviour.
 
-        A future PR can override this via a subclass or dependency injection when
-        the harness passes an evidence ledger handle to the driver.
+        When the driver was constructed with an ``evidence_collector`` callable
+        (the DI seam), delegates to it: ``evidence_collector(turn_id)`` → a
+        sequence of evidence records → returned as a tuple.  The harness layer
+        above the engine uses this seam to make evidence-backed :class:`GoalNudge`
+        goals functional without coupling the engine to a concrete ledger type.
         """
-        _ = turn_id
+        if self._evidence_collector is not None:
+            return tuple(self._evidence_collector(turn_id))
         return ()
 
     async def _attempt_run_recovery(
