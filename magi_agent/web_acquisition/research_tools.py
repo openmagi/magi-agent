@@ -4,7 +4,7 @@ import hashlib
 import os
 import re
 from collections.abc import Mapping
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 
 from magi_agent.evidence.source_ledger import (
     LocalResearchSourceLedger,
@@ -13,6 +13,7 @@ from magi_agent.evidence.source_ledger import (
 from magi_agent.tools.result import ToolResult
 from magi_agent.web_acquisition.live_provider_pack import (
     OPERATION_TO_PROVIDER_NAME,
+    LiveWebAcquisitionPackConfig,
     LiveWebAcquisitionProviderPack,
     WebAcquisitionLiveSourceRecord,
     WebAcquisitionProviderRequest,
@@ -31,8 +32,14 @@ from magi_agent.web_acquisition.provider_boundary import (
     WebAcquisitionSourceRecord,
 )
 
+if TYPE_CHECKING:
+    from magi_agent.web_acquisition.provider_router import (
+        ProviderRouterConfig,
+        WebAcquisitionProviderRouter,
+    )
 
-ResearchToolName = Literal["WebSearch", "WebFetch"]
+
+ResearchToolName = Literal["WebSearch", "WebFetch", "WebReader"]
 _TOOL_OPERATIONS: Mapping[str, str] = {
     "WebSearch": "web.search",
     "WebFetch": "web.fetch",
@@ -41,6 +48,7 @@ _TOOL_OPERATIONS: Mapping[str, str] = {
 _TOOL_LIVE_OPERATIONS: Mapping[str, str] = {
     "WebSearch": "search",
     "WebFetch": "fetch",
+    "WebReader": "reader",
 }
 
 LIVE_WEB_ACQUISITION_ENABLED_ENV = "CORE_AGENT_PYTHON_LIVE_WEB_ACQUISITION_ENABLED"
@@ -79,12 +87,14 @@ class LocalWebResearchToolBoundary:
         runtime: LocalWebAcquisitionRuntime | None = None,
         live_pack: LiveWebAcquisitionProviderPack | None = None,
         live_provider: object | None = None,
+        provider_router: "WebAcquisitionProviderRouter | None" = None,
         env: Mapping[str, str] | None = None,
     ) -> None:
         self.runtime = runtime or LocalWebAcquisitionRuntime(WebAcquisitionConfig())
         self.last_result: WebAcquisitionResult | None = None
         self._live_pack = live_pack
         self._live_provider = live_provider
+        self._provider_router = provider_router
         self._env = env
         self.last_live_result: WebAcquisitionProviderResult | None = None
 
@@ -94,19 +104,31 @@ class LocalWebResearchToolBoundary:
         arguments: Mapping[str, object],
         context: object | None = None,
     ) -> ToolResult:
-        if tool_name not in _TOOL_OPERATIONS:
+        # WebReader is a live-only tool (no local-runtime equivalent).
+        is_live_only = tool_name not in _TOOL_OPERATIONS
+
+        if tool_name not in _TOOL_LIVE_OPERATIONS:
             return _blocked_tool_result(
                 tool_name,
                 "web_research_tool_not_supported",
                 boundary_status="blocked",
             )
 
-        if (
-            live_web_acquisition_active(env=self._env)
-            and self._live_pack is not None
-            and self._live_provider is not None
-        ):
-            return self._execute_tool_live(tool_name, arguments, context)
+        if live_web_acquisition_active(env=self._env):
+            # Router path: when a provider router is wired and enabled, prefer it.
+            if self._provider_router is not None and self._provider_router.config.enabled:
+                return self._execute_tool_via_router(tool_name, arguments, context)
+            # Direct live-pack path: legacy wiring without router.
+            if not is_live_only and self._live_pack is not None and self._live_provider is not None:
+                return self._execute_tool_live(tool_name, arguments, context)
+
+        if is_live_only:
+            # WebReader has no local-runtime fallback.
+            return _blocked_tool_result(
+                tool_name,
+                "web_research_live_required_for_reader",
+                boundary_status="blocked",
+            )
 
         request = _request_from_tool(tool_name, arguments, context)
         result = await self.runtime.run(request)
@@ -139,6 +161,32 @@ class LocalWebResearchToolBoundary:
         # async-provider output, and provider status values contained there so this
         # tool seam can project a blocked/repair_required ToolResult.
         result = self._live_pack.run(provider_request, provider=self._live_provider)
+        self.last_live_result = result
+        if result.status != "ok":
+            return _tool_result_from_non_ok_live(tool_name, result)
+
+        output = _tool_output_live(tool_name, provider_request, result)
+        return ToolResult(
+            status="ok",
+            output=output,
+            llmOutput=output,
+            transcriptOutput={
+                "toolName": tool_name,
+                "resultRefs": [record.source_ref for record in result.source_records],
+            },
+            metadata=_safe_tool_metadata_live(tool_name, result),
+        )
+
+    def _execute_tool_via_router(
+        self,
+        tool_name: str,
+        arguments: Mapping[str, object],
+        context: object | None,
+    ) -> ToolResult:
+        """Dispatch through the ``WebAcquisitionProviderRouter`` (PR-A / PR-C path)."""
+        assert self._provider_router is not None  # caller guarantees gate
+        provider_request = _live_request_from_tool(tool_name, arguments, context)
+        result = self._provider_router.run(provider_request)
         self.last_live_result = result
         if result.status != "ok":
             return _tool_result_from_non_ok_live(tool_name, result)
@@ -304,7 +352,7 @@ def _live_request_from_tool(
         query = _string_arg(arguments, "query", "q")
         if query is not None:
             base["query"] = query
-    elif tool_name == "WebFetch":
+    elif tool_name in {"WebFetch", "WebReader"}:
         url = _string_arg(arguments, "url")
         if url is not None:
             base["url"] = url
@@ -634,11 +682,122 @@ def _short_digest(value: str) -> str:
     return hashlib.sha1(value.encode("utf-8")).hexdigest()[:16]
 
 
+# ---------------------------------------------------------------------------
+# build_live_research_boundary — PR-C factory
+# ---------------------------------------------------------------------------
+
+MAGI_PLATFORM_BASE_URL_ENV = "MAGI_PLATFORM_BASE_URL"
+MAGI_PLATFORM_API_KEY_ENV = "MAGI_PLATFORM_API_KEY"
+PROVIDER_ROUTER_ENABLED_ENV = "CORE_AGENT_PYTHON_WEB_PROVIDER_ROUTER_ENABLED"
+
+# Names used in the provider allowlist and router providers dict.
+PLATFORM_SEARCH_PROVIDER_NAME = "platform.search"
+PLATFORM_FETCH_PROVIDER_NAME = "platform.fetch"
+
+
+def build_live_research_boundary(
+    env: Mapping[str, str] | None = None,
+    *,
+    pack_config: "LiveWebAcquisitionPackConfig | None" = None,
+    router_config: "ProviderRouterConfig | None" = None,
+) -> "LocalWebResearchToolBoundary":
+    """Assemble a ``LocalWebResearchToolBoundary`` from environment variables.
+
+    Three levels must all be True to reach real network calls:
+
+    1. ``CORE_AGENT_PYTHON_LIVE_WEB_ACQUISITION_ENABLED=1`` (and kill-switch unset)
+       — checked by ``live_web_acquisition_active()``.
+    2. ``pack_config`` with ``live_network_enabled=True`` and a non-empty
+       ``provider_allowlist`` — or auto-built from env when ``pack_config`` is None.
+    3. ``router_config`` with ``enabled=True`` and a non-empty ``providers`` tuple
+       — or auto-built from env when ``router_config`` is None.
+
+    When ``MAGI_PLATFORM_BASE_URL`` and ``MAGI_PLATFORM_API_KEY`` are present in
+    the environment, a ``PlatformEndpointProvider`` is constructed and wired as
+    the primary provider.  If neither env var is set, the router's provider list
+    is empty and no live network calls are made.
+
+    Parameters
+    ----------
+    env:
+        Environment mapping (defaults to ``os.environ``).
+    pack_config:
+        Override the automatically-derived ``LiveWebAcquisitionPackConfig``.
+    router_config:
+        Override the automatically-derived ``ProviderRouterConfig``.
+
+    Returns
+    -------
+    LocalWebResearchToolBoundary
+        A fully-wired boundary.  When the env gate is off or no providers are
+        configured, the boundary silently falls back to the local-fixture path
+        — identical to current behaviour.
+    """
+    from magi_agent.web_acquisition.provider_router import (
+        ProviderRouterConfig,
+        WebAcquisitionProviderRouter,
+        build_provider_router,
+    )
+
+    resolved_env: Mapping[str, str] = os.environ if env is None else env
+
+    base_url = resolved_env.get(MAGI_PLATFORM_BASE_URL_ENV, "").strip()
+    api_key = resolved_env.get(MAGI_PLATFORM_API_KEY_ENV, "").strip()
+    router_enabled = _is_true(resolved_env.get(PROVIDER_ROUTER_ENABLED_ENV, ""))
+
+    # Build providers dict.
+    providers: dict[str, object] = {}
+    provider_names: list[str] = []
+    if base_url and api_key:
+        from magi_agent.web_acquisition.providers.platform_endpoint import (
+            PlatformEndpointProvider,
+        )
+
+        platform_provider = PlatformEndpointProvider(
+            base_url=base_url,
+            api_key=api_key,
+        )
+        providers[PLATFORM_SEARCH_PROVIDER_NAME] = platform_provider
+        providers[PLATFORM_FETCH_PROVIDER_NAME] = platform_provider
+        provider_names.extend([PLATFORM_SEARCH_PROVIDER_NAME, PLATFORM_FETCH_PROVIDER_NAME])
+
+    # Auto-derive configs when not supplied.
+    if pack_config is None:
+        pack_config = LiveWebAcquisitionPackConfig(
+            enabled=bool(provider_names),
+            liveNetworkEnabled=bool(provider_names),
+            providerAllowlist=tuple(set(provider_names)),
+        )
+
+    if router_config is None:
+        router_config = ProviderRouterConfig(
+            enabled=router_enabled and bool(provider_names),
+            providers=tuple(provider_names),
+        )
+
+    live_pack = LiveWebAcquisitionProviderPack(pack_config)
+    router: WebAcquisitionProviderRouter | None = build_provider_router(
+        router_config, live_pack, providers
+    )
+
+    return LocalWebResearchToolBoundary(
+        live_pack=live_pack,
+        provider_router=router,
+        env=env,
+    )
+
+
 __all__ = [
     "LIVE_WEB_ACQUISITION_ENABLED_ENV",
     "LIVE_WEB_ACQUISITION_KILL_SWITCH_ENV",
+    "MAGI_PLATFORM_API_KEY_ENV",
+    "MAGI_PLATFORM_BASE_URL_ENV",
+    "PLATFORM_FETCH_PROVIDER_NAME",
+    "PLATFORM_SEARCH_PROVIDER_NAME",
+    "PROVIDER_ROUTER_ENABLED_ENV",
     "LocalWebResearchToolBoundary",
     "ResearchToolName",
+    "build_live_research_boundary",
     "live_web_acquisition_active",
     "project_live_web_acquisition_result_to_source_ledger",
     "project_web_acquisition_result_to_source_ledger",
