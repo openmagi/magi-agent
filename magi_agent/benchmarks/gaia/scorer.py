@@ -27,11 +27,8 @@ def normalize_number_str(number_str: str) -> float:
 
 
 def split_string(s: str, char_list: tuple[str, ...] = (",", ";")) -> list[str]:
-    # Prioritize semicolon as the list separator (commas may appear within numbers)
-    if ";" in s:
-        return [x.strip() for x in re.split(r";", s)]
-    else:
-        return [x.strip() for x in re.split(r",", s)]
+    pattern = f"[{''.join(char_list)}]"
+    return re.split(pattern, s)
 
 
 def normalize_str(input_str: str, *, remove_punct: bool = True) -> str:

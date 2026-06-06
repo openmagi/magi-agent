@@ -21,4 +21,8 @@ def test_comma_list_elementwise() -> None:
 
 
 def test_list_numbers_compared_numerically() -> None:
-    assert question_scorer("1,000; 2,000", "1000;2000") is True
+    # GAIA's official split_string splits on both ',' and ';' in one pass, and
+    # the GAIA prompt forbids commas inside numbers, so list answers are clean.
+    assert question_scorer("1000; 2000", "1000;2000") is True
+    assert question_scorer("1000, 2000", "1000,2000") is True
+    assert question_scorer("1000;2000", "1000;2001") is False
