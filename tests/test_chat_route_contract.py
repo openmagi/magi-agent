@@ -899,6 +899,41 @@ def test_chat_route_projects_bounded_sanitized_recent_history_without_private_fi
     assert "system spoof" not in serialized
 
 
+def test_chat_route_projects_app_channel_history_into_selected_recent_history() -> None:
+    history = chat_module._build_gate5b_sanitized_recent_history(
+        {
+            "channelHistory": {
+                "schema": "openmagi.app_channel_history.v1",
+                "channelName": "stock",
+                "messages": [
+                    {
+                        "id": "older",
+                        "role": "system",
+                        "content": "Prior channel note from the app history.",
+                    },
+                    {
+                        "id": "latest",
+                        "role": "assistant",
+                        "content": (
+                            "I started the multibagger report. "
+                            "Bearer raw-token /Users/kevin/private"
+                        ),
+                    },
+                ],
+            },
+            "messages": [{"role": "user", "content": "지금까지 선별한 종목 다시 돌려보자."}],
+        },
+        max_messages=4,
+    )
+
+    assert [item["role"] for item in history] == ["assistant", "assistant"]
+    assert history[0]["sanitizedText"] == "Prior channel note from the app history."
+    assert "I started the multibagger report." in history[1]["sanitizedText"]
+    serialized = json.dumps(history, sort_keys=True)
+    assert "raw-token" not in serialized
+    assert "/Users/kevin/private" not in serialized
+
+
 def test_chat_route_gate1a_selected_scope_attaches_readonly_tools_only(
     monkeypatch,
     tmp_path: Path,
@@ -1175,6 +1210,7 @@ def test_hosted_like_full_toolhost_env_attaches_selected_bundle(
         "CORE_AGENT_PYTHON_GATE5B_SHADOW_GENERATION_MAX_COST_USD": "0.01",
         "CORE_AGENT_PYTHON_GATE5B_SHADOW_GENERATION_MAX_CONCURRENT": "2",
         "CORE_AGENT_PYTHON_GATE5B_SHADOW_GENERATION_MAX_PENDING": "2",
+        "CORE_AGENT_PYTHON_GATE5B_SHADOW_GENERATION_MAX_SANITIZED_HISTORY_MESSAGES": "4",
         "GOOGLE_GENAI_USE_VERTEXAI": "false",
         "GOOGLE_API_KEY": "test-google-key",
     }
@@ -1204,7 +1240,22 @@ def test_hosted_like_full_toolhost_env_attaches_selected_bundle(
     response = TestClient(create_app(runtime)).post(
         "/v1/chat/completions",
         headers={"authorization": "Bearer gateway-token"},
-        json={"messages": [{"role": "user", "content": "Inspect the workspace."}]},
+        json={
+            "channelHistory": {
+                "schema": "openmagi.app_channel_history.v1",
+                "channelName": "stock",
+                "messages": [
+                    {
+                        "role": "assistant",
+                        "content": (
+                            "I started the multibagger report and selected "
+                            "CLBR and POS candidates."
+                        ),
+                    }
+                ],
+            },
+            "messages": [{"role": "user", "content": "어캐돼가"}],
+        },
     )
 
     assert response.status_code == 200, response.json()
@@ -1216,6 +1267,11 @@ def test_hosted_like_full_toolhost_env_attaches_selected_bundle(
     assert body["counter"]["status"] == "runner_completed"
     assert body["counter"]["state"]["pendingGenerationRuns"] == 0
     assert body["counter"]["state"]["inFlightGenerationRuns"] == 0
+    runner_input_text = _FakeRunner.run_kwargs["new_message"].parts[0].text
+    assert "Recent sanitized conversation:" in runner_input_text
+    assert "assistant: I started the multibagger report" in runner_input_text
+    assert "User message:" in runner_input_text
+    assert "어캐돼가" in runner_input_text
 
 
 def test_chat_route_selected_full_toolhost_projects_first_party_harness_admission(
