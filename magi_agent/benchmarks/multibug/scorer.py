@@ -109,7 +109,7 @@ def _score_instance(result: InstanceResult, *, judge: Judge | None) -> InstanceS
     preds = result.predictions
 
     # Coverage: best-matching prediction per gold, averaged over gold.
-    if preds:
+    if preds and golds:
         coverage = sum(
             max(_jaccard(g.evidence_ids, p.evidence_ids) for p in preds)
             for g in golds

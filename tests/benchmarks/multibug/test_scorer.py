@@ -67,6 +67,19 @@ def test_empty_predictions_zero_coverage() -> None:
     assert report.f1 == 0.0
 
 
+def test_empty_gold_with_predictions_does_not_crash() -> None:
+    # Scorer is a PURE function and must not ZeroDivisionError on empty gold,
+    # even though the normal data path enforces >=2 gold problems.
+    result = InstanceResult(
+        instance_id="i",
+        gold_problems=(),
+        predictions=(_pred(["c1"]),),
+    )
+    report = score([result])
+    assert report.coverage == 0.0
+    assert report.f1 == 0.0
+
+
 def test_duplicate_predictions_do_not_inflate_precision() -> None:
     # Two predictions both hit the same single gold -> only one credited.
     result = InstanceResult(
