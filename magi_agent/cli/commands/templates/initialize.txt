@@ -1,0 +1,19 @@
+Create or update AGENTS.md for the project at ${path}.
+
+## Goal
+
+Produce a concise, accurate `AGENTS.md` that orients any AI agent working in this project. The file should cover:
+
+1. **Project overview** — what this project does in 1-3 sentences.
+2. **Repository layout** — top-level directories and their roles.
+3. **How to run** — the commands needed to build, test, and lint the project.
+4. **Key conventions** — coding style, naming conventions, and patterns used in this codebase.
+5. **Important constraints** — anything an agent must NOT do (e.g. do not modify generated files, do not change the DB schema without approval).
+
+## Instructions
+
+- Explore the project at `${path}` first: read existing docs, pyproject.toml / package.json, Makefile, README, and a sample of source files.
+- If an `AGENTS.md` already exists, update it to reflect the current state rather than replacing it wholesale.
+- Keep the file concise — prefer bullet points over prose. Aim for under 200 lines.
+- Do not include secrets, credentials, or personal information.
+- Commit the result with a clear message such as `docs: add/update AGENTS.md`.

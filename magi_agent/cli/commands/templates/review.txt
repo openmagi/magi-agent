@@ -1,0 +1,22 @@
+Review the changes in the project at ${path}.
+
+## Scope
+
+By default, review all uncommitted changes (staged and unstaged). If a specific scope was given — a commit hash, a branch name, or "pr" — review that instead.
+
+## Review checklist
+
+For each changed file, evaluate:
+
+1. **Correctness** — does the logic do what it claims? Are there off-by-one errors, missing edge cases, or wrong conditions?
+2. **Tests** — are the changes covered by tests? Are the tests meaningful (not just happy-path)?
+3. **Code quality** — is the code readable, well-named, and consistent with the surrounding style?
+4. **Security** — are there any obvious security issues (injection, credential exposure, unsafe deserialization)?
+5. **Breaking changes** — do any changes alter a public API, DB schema, or external contract without a clear migration path?
+
+## Output format
+
+- Start with a one-paragraph summary of what the changes do.
+- For each concern, cite the file and line (or function name) and explain the issue clearly.
+- End with an overall verdict: **Approve**, **Approve with suggestions**, or **Request changes**.
+- Be concise — flag real issues, not style nits unless they cross a readability threshold.
