@@ -124,6 +124,14 @@ class ChildRunnerConfig(BaseModel):
         default=False,
         alias="productionWritesEnabled",
     )
+    #: Provider/model a spawned child turn runs on. Callers should set these to
+    #: the parent's configured provider/model so children inherit it instead of
+    #: being pinned to a single hardcoded model. A per-task override on
+    #: ``ChildTaskRequest`` takes precedence. The model must be a route known to
+    #: the local ``ModelTierRegistry`` (the model-tier is resolved from it); the
+    #: defaults preserve the historical child route.
+    child_provider: str = Field(default="google", alias="childProvider")
+    child_model: str = Field(default="gemini-3.5-flash", alias="childModel")
 
 
 class ChildRunnerAuthorityFlags(BaseModel):
@@ -201,6 +209,13 @@ class ChildTaskRequest(BaseModel):
     budget_tokens: int = Field(default=0, alias="budgetTokens", ge=0)
     budget_ms: int = Field(default=0, alias="budgetMs", ge=0)
     metadata: Mapping[str, object] = Field(default_factory=dict)
+    #: Optional per-subagent model override. When set, this child turn runs on
+    #: the given provider/model instead of the boundary's configured child route
+    #: — e.g. a main session on Opus can explicitly delegate a subtask to Sonnet
+    #: or Gemini. The model must be a route known to the local
+    #: ``ModelTierRegistry``. ``None`` inherits the ``ChildRunnerConfig`` route.
+    provider: str | None = None
+    model: str | None = None
 
     @field_validator("parent_execution_id", "turn_id", "task_id", "objective")
     @classmethod
@@ -469,6 +484,20 @@ class LocalChildRunnerBoundary:
         from magi_agent.runtime.adk_turn_runner import (
             AdkTurnRunner as _AdkTurnRunnerCls,
         )
+        from magi_agent.runtime.model_tiers import ModelTierRegistry
+
+        # Resolve the child's model route: a per-task override wins, else the
+        # boundary's configured child route.  The model-tier is derived from the
+        # registry so the runner config is self-consistent; an unknown route is
+        # rejected by ``AdkTurnRunnerConfig`` (caught below) rather than silently
+        # falling back to a single hardcoded model.
+        child_provider = request.provider or self.config.child_provider
+        child_model = request.model or self.config.child_model
+        child_tier = (
+            ModelTierRegistry.with_defaults()
+            .resolve(provider=child_provider, model=child_model)
+            .tier
+        )
 
         # Drive the REAL adk turn-runner surface for the child turn.  Any
         # failure on the real surface degrades to a blocked/error result rather
@@ -491,7 +520,12 @@ class LocalChildRunnerBoundary:
             turn_result = await turn_runner.run_turn(
                 turn_request,
                 runner=self.adk_turn_boundary,
-                config=AdkTurnRunnerConfig(enabled=True),
+                config=AdkTurnRunnerConfig(
+                    enabled=True,
+                    provider=child_provider,
+                    model=child_model,
+                    modelTier=child_tier,
+                ),
             )
         except Exception as exc:
             diagnostics["realChildRunnerExecuted"] = False

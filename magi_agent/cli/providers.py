@@ -43,10 +43,10 @@ _PROVIDER_ENV_KEYS: dict[str, tuple[str, ...]] = {
 # ``MAGI_MODEL`` env var. Model ids drift over time; treat these as a best-effort
 # starting point and override when a provider retires a name.
 _DEFAULT_MODEL: dict[str, str] = {
-    "anthropic": "claude-sonnet-4-5",
-    "openai": "gpt-4o",
-    "gemini": "gemini-2.0-flash",
-    "fireworks": "accounts/fireworks/models/llama-v3p1-70b-instruct",
+    "anthropic": "claude-sonnet-4-6",
+    "openai": "gpt-5.5",
+    "gemini": "gemini-3.5-flash",
+    "fireworks": "accounts/fireworks/models/kimi-k2-instruct",
 }
 
 # litellm provider prefix per provider (``<prefix>/<model>``).

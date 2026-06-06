@@ -50,6 +50,14 @@ REQUIRED_ENV = (
     "CORE_AGENT_MODEL",
 )
 
+# Placeholder model id used by the no-env local fallback (see
+# ``magi_agent.main._parse_runtime_config``). ``CORE_AGENT_MODEL`` is required and
+# must be non-empty, so the local fallback injects this sentinel rather than a real
+# model id. Surfaces that pick a provider-specific default (the CLI/dashboard
+# headless runner) must treat this value as "unset" so the per-provider default
+# model applies instead of being clobbered by the placeholder.
+LOCAL_DEV_MODEL_SENTINEL = "local-dev"
+
 _TRUE_VALUES = frozenset({"1", "true", "yes", "on"})
 _FALSE_VALUES = frozenset({"0", "false", "no", "off", ""})
 

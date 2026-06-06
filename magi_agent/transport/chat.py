@@ -827,6 +827,7 @@ async def _local_adk_chat_sse(
 ) -> AsyncIterator[str]:
     from magi_agent.cli.contracts import EngineResult
     from magi_agent.cli.wiring import build_headless_runtime
+    from magi_agent.config.env import LOCAL_DEV_MODEL_SENTINEL
 
     session_id = _local_chat_string(payload, "sessionId", "local-dashboard")
     turn_id = _local_chat_string(payload, "turnId", f"{session_id}:turn")
@@ -850,11 +851,19 @@ async def _local_adk_chat_sse(
         },
     )
 
+    # The no-env local fallback injects ``LOCAL_DEV_MODEL_SENTINEL`` as the
+    # required ``CORE_AGENT_MODEL``; treat it as "unset" so the headless runner
+    # uses the per-provider default model instead of trying to call a
+    # nonexistent ``<provider>/local-dev`` model.
+    configured_model = runtime.config.model
+    model_override = (
+        None if configured_model == LOCAL_DEV_MODEL_SENTINEL else configured_model
+    )
     headless = build_headless_runtime(
         cwd=os.environ.get("MAGI_AGENT_WORKSPACE") or os.getcwd(),
         permission_mode="bypassPermissions",
         session_id=session_id,
-        model=runtime.config.model,
+        model=model_override,
     )
     cancel = asyncio.Event()
     stream = headless.engine.run_turn_stream(

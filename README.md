@@ -81,12 +81,40 @@ brew update
 brew install --force-bottle openmagi/tap/magi-agent
 ```
 
+Configure a model provider. Set one provider API key — the runtime auto-detects
+which provider you configured:
+
+```bash
+export ANTHROPIC_API_KEY=sk-ant-...      # or
+export OPENAI_API_KEY=sk-...             # or
+export GEMINI_API_KEY=...                # GOOGLE_API_KEY also works, or
+export FIREWORKS_API_KEY=...
+```
+
+Or persist it in `~/.magi/config.toml`:
+
+```toml
+[model]
+provider = "anthropic"
+api_key  = "sk-ant-..."
+# model  = "claude-sonnet-4-6"   # optional; a per-provider default is used otherwise
+```
+
+Resolution order: an explicit provider (`[model].provider` or `MAGI_PROVIDER`)
+wins; otherwise the first provider with a key is auto-detected, in the order
+anthropic → openai → gemini → fireworks. Override the model per run with
+`MAGI_MODEL` or `magi --model <id>`.
+
 Start the local API and web dashboard:
 
 ```bash
 magi-agent serve --port 8080
 open http://localhost:8080/dashboard
 ```
+
+On startup `serve` prints the dashboard URL and whether a provider is configured.
+Without a provider key the dashboard still loads and the CLI still launches, but
+model replies are stubbed until a key is set.
 
 Use the CLI:
 

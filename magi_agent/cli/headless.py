@@ -701,7 +701,7 @@ async def run_headless(
             session_id=sid, assistant_text=assistant_text, terminal=terminal
         )
         if output == "text":
-            out.write((result_frame.result or "") + "\n")
+            out.write(_text_mode_body(result_frame) + "\n")
         else:
             out.write(ndjson_dumps(result_frame) + "\n")
         out.flush()
@@ -782,6 +782,31 @@ async def run_headless(
         await writer.aclose()
 
     return 1 if result_frame.is_error else 0
+
+
+def _text_mode_body(result_frame: ResultFrame) -> str:
+    """Body for ``--output text``.
+
+    On success this is the assistant text. On an error turn with no assistant
+    text (e.g. a failed model call: bad key, retired model id, network), text
+    mode would otherwise print a bare empty line and leave the user with no
+    explanation. Surface the error plus an actionable configuration hint so the
+    failure is visible on stdout instead of only stderr.
+    """
+
+    if result_frame.result:
+        return result_frame.result
+    if result_frame.is_error:
+        detail = next((e for e in (result_frame.errors or []) if e), "unknown error")
+        return (
+            f"Error: {detail}\n"
+            "The model call did not return a reply. Check that your provider API "
+            "key is valid and that the model id exists. Configure a provider via "
+            "~/.magi/config.toml or environment variables (e.g. ANTHROPIC_API_KEY, "
+            "OPENAI_API_KEY, GEMINI_API_KEY/GOOGLE_API_KEY, FIREWORKS_API_KEY), and "
+            "optionally MAGI_PROVIDER / MAGI_MODEL to override the defaults."
+        )
+    return ""
 
 
 def _build_result_frame(
