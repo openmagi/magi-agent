@@ -750,7 +750,7 @@ class Gate5BFullToolHost:
         if tool_name == "FileWrite":
             target = _safe_child_path(
                 self.workspace_root,
-                str(args.get("path", "")),
+                str(args.get("path") or args.get("filePath") or ""),
                 allow_missing=True,
             )
             self._enforce_read_before_mutation(target)
@@ -768,7 +768,10 @@ class Gate5BFullToolHost:
                     result["contentDigest"] = content_digest
             return result
         if tool_name == "FileEdit":
-            target = _safe_child_path(self.workspace_root, str(args.get("path", "")))
+            target = _safe_child_path(
+                self.workspace_root,
+                str(args.get("path") or args.get("filePath") or ""),
+            )
             self._enforce_read_before_mutation(target)
             old_text = str(args.get("oldText", args.get("old_text", "")))
             new_text = str(args.get("newText", args.get("new_text", "")))
@@ -1193,7 +1196,7 @@ class Gate5BFullToolHost:
         )
 
     def _handle_file_read(self, args: Mapping[str, object]) -> object:
-        path_text = str(args.get("path", ""))
+        path_text = str(args.get("path") or args.get("filePath") or "")
         if not self.config.read_quality_enabled:
             target = _safe_child_path(self.workspace_root, path_text)
             content = target.read_text(encoding="utf-8", errors="replace")

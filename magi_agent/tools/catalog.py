@@ -97,6 +97,16 @@ _CORE_TOOL_MANIFESTS: tuple[ToolManifest, ...] = (
         modes=("plan", "act"),
         tags=("workspace", "file", "read"),
         parallel_safety="readonly",
+        input_schema={
+            "type": "object",
+            "properties": {
+                "path": {
+                    "type": "string",
+                    "description": "Workspace-relative path to the file to read.",
+                },
+            },
+            "required": ["path"],
+        },
     ),
     _manifest(
         "FileWrite",
@@ -106,15 +116,47 @@ _CORE_TOOL_MANIFESTS: tuple[ToolManifest, ...] = (
         tags=("workspace", "file", "write"),
         mutates_workspace=True,
         parallel_safety="unsafe",
+        input_schema={
+            "type": "object",
+            "properties": {
+                "path": {
+                    "type": "string",
+                    "description": "Workspace-relative path to the file to write (created if missing, overwritten if present).",
+                },
+                "content": {
+                    "type": "string",
+                    "description": "Full new contents of the file.",
+                },
+            },
+            "required": ["path", "content"],
+        },
     ),
     _manifest(
         "FileEdit",
-        "Edit existing workspace file contents.",
+        "Edit an existing workspace file by replacing an exact snippet of text.",
         permission="write",
         modes=("act",),
         tags=("workspace", "file", "edit"),
         mutates_workspace=True,
         parallel_safety="unsafe",
+        input_schema={
+            "type": "object",
+            "properties": {
+                "path": {
+                    "type": "string",
+                    "description": "Workspace-relative path to the file to edit.",
+                },
+                "old_text": {
+                    "type": "string",
+                    "description": "Exact existing text to replace. Must appear in the file; include enough surrounding context to match uniquely.",
+                },
+                "new_text": {
+                    "type": "string",
+                    "description": "Replacement text for old_text.",
+                },
+            },
+            "required": ["path", "old_text", "new_text"],
+        },
     ),
     _manifest(
         "PatchApply",
