@@ -162,8 +162,8 @@ def _build_litellm_model(config: ProviderConfig) -> object:
     except Exception as exc:  # ImportError or downstream litellm import errors.
         raise CliProviderDependencyError(
             f"Provider '{config.provider}' is configured but the 'litellm' "
-            "dependency is not installed. Install it with: "
-            "pip install 'magi-agent[providers]'"
+            "dependency is not installed. Reinstall magi-agent so its default "
+            "runtime dependencies are present."
         ) from exc
     return LiteLlm(model=config.litellm_model, api_key=config.api_key)
 
