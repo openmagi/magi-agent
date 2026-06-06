@@ -1,7 +1,13 @@
 """Seed *local* builtin slash-commands for the Magi CLI (Stream D, PR-D2).
 
 These are the always-present, model-free commands every surface (TUI + headless)
-exposes: ``status``, ``reset``, ``compact`` and ``help``.
+exposes. The original seed group is ``status``, ``reset``, ``compact`` and
+``help``; the *magi-native* group ``plan``, ``goal``, ``onboarding`` and
+``superpowers`` was added on top. The magi-native commands project their
+``recipePackRef`` / ``checkpointRef`` intent through the boundary and only
+*acknowledge* it (intent-only, exactly like ``reset`` — no recipe pack is
+loaded, no methodology activated, no checkpoint written here; that is gated
+runtime authority for a later phase).
 
 Design rationale
 ----------------
@@ -31,7 +37,7 @@ Design rationale
   recognized set (``compact/reset/status/...``), so it does not call
   ``project()``; it simply returns a ``Text`` listing the builtin names.
 
-All four builtins carry ``surface=CommandSurface(tui=True, headless=True)`` —
+All eight builtins carry ``surface=CommandSurface(tui=True, headless=True)`` —
 they are useful in both surfaces and perform no model round-trip.
 """
 
@@ -112,6 +118,22 @@ def _project(name: str, args: object, ctx: CommandContext) -> SlashControlDecisi
     text = f"/{name} {argument}".rstrip()
     request = SlashControlRequest(text=text, sessionKey=ctx.cwd or "cli")
     return _make_boundary().project(request)
+
+
+def _intent_refs(proj: dict[str, object]) -> tuple[str, str]:
+    """Return ``(recipePackRef, checkpointRef)`` from a public projection.
+
+    The magi-native methodology builtins all read these two refs the same way:
+    ``public_projection()`` nests them under the ``"intent"`` key. Centralized
+    here so the four commands stay thin and a projection-shape change is a
+    single edit. Missing/non-dict intents fold to empty strings (redaction-safe;
+    only ``public_projection()`` output is ever read).
+    """
+
+    intent = proj.get("intent") or {}
+    if not isinstance(intent, dict):
+        return "", ""
+    return str(intent.get("recipePackRef") or ""), str(intent.get("checkpointRef") or "")
 
 
 @dataclass
@@ -201,9 +223,7 @@ class PlanCommand(LocalCommand):
     async def call(self, args: object, ctx: CommandContext) -> LocalResult:  # type: ignore[override]
         decision = _project("plan", args, ctx)
         proj = decision.public_projection()
-        intent = proj.get("intent") or {}
-        recipe = (intent.get("recipePackRef") or "") if isinstance(intent, dict) else ""
-        checkpoint = (intent.get("checkpointRef") or "") if isinstance(intent, dict) else ""
+        recipe, checkpoint = _intent_refs(proj)
         return Text(
             text=f"plan: {proj.get('status')} | recipe: {recipe} | checkpoint: {checkpoint}"
         )
@@ -221,9 +241,7 @@ class GoalCommand(LocalCommand):
     async def call(self, args: object, ctx: CommandContext) -> LocalResult:  # type: ignore[override]
         decision = _project("goal", args, ctx)
         proj = decision.public_projection()
-        intent = proj.get("intent") or {}
-        recipe = (intent.get("recipePackRef") or "") if isinstance(intent, dict) else ""
-        checkpoint = (intent.get("checkpointRef") or "") if isinstance(intent, dict) else ""
+        recipe, checkpoint = _intent_refs(proj)
         return Text(
             text=f"goal: {proj.get('status')} | recipe: {recipe} | checkpoint: {checkpoint}"
         )
@@ -241,9 +259,7 @@ class OnboardingCommand(LocalCommand):
     async def call(self, args: object, ctx: CommandContext) -> LocalResult:  # type: ignore[override]
         decision = _project("onboarding", args, ctx)
         proj = decision.public_projection()
-        intent = proj.get("intent") or {}
-        recipe = (intent.get("recipePackRef") or "") if isinstance(intent, dict) else ""
-        checkpoint = (intent.get("checkpointRef") or "") if isinstance(intent, dict) else ""
+        recipe, checkpoint = _intent_refs(proj)
         return Text(
             text=f"onboarding: {proj.get('status')} | recipe: {recipe} | checkpoint: {checkpoint}"
         )
@@ -274,9 +290,7 @@ class SuperpowersCommand(LocalCommand):
         sub = str(args).strip() if args else "invoke"
         decision = _project(f"superpowers:{sub}", None, ctx)
         proj = decision.public_projection()
-        intent = proj.get("intent") or {}
-        recipe = (intent.get("recipePackRef") or "") if isinstance(intent, dict) else ""
-        checkpoint = (intent.get("checkpointRef") or "") if isinstance(intent, dict) else ""
+        recipe, checkpoint = _intent_refs(proj)
         return Text(
             text=f"superpowers: {proj.get('status')} | recipe: {recipe} | checkpoint: {checkpoint}"
         )
