@@ -53,6 +53,15 @@ class McpProviderPort(Protocol):
         arguments: Mapping[str, object],
     ) -> Mapping[str, object]: ...
 
+    def list_prompts(self, server_ref: str) -> Sequence[Mapping[str, object]]: ...
+
+    def get_prompt(
+        self,
+        server_ref: str,
+        prompt_name: str,
+        arguments: Mapping[str, object],
+    ) -> Mapping[str, object]: ...
+
 
 class McpAdapterConfig(BaseModel):
     model_config = _MODEL_CONFIG
@@ -60,6 +69,7 @@ class McpAdapterConfig(BaseModel):
     enabled: bool = False
     local_fake_provider_enabled: bool = Field(default=False, alias="localFakeProviderEnabled")
     max_tools: int = Field(default=32, alias="maxTools", ge=1, le=128)
+    max_prompts: int = Field(default=32, alias="maxPrompts", ge=1, le=128)
     route_attached: Literal[False] = Field(default=False, alias="routeAttached")
     live_provider_attached: Literal[False] = Field(default=False, alias="liveProviderAttached")
 
@@ -157,6 +167,54 @@ class McpListDecision(BaseModel):
         }
 
 
+class McpPromptDescriptor(BaseModel):
+    """Redaction-safe projection of an MCP ``prompts/list`` descriptor.
+
+    Carries ONLY scrubbed, namespaced data: a safe ``name`` (namespaced via
+    ``_server_namespace``/``_safe_tool_segment`` exactly like a tool manifest
+    name), an optional ``_safe_text``-scrubbed ``description``, and the prompt
+    argument NAMES (each ``_safe_*``-scrubbed). No raw text, paths, secrets, or
+    argument values are retained.
+    """
+
+    model_config = _MODEL_CONFIG
+
+    name: str
+    description: str | None = None
+    arguments: tuple[str, ...] = ()
+
+
+class McpPromptListDecision(BaseModel):
+    """Mirror of ``McpListDecision`` for the prompts projection path.
+
+    Authority flags are forced all-``False`` and the ``public_projection`` emits
+    only safe refs (``promptRefs`` as digests, mirroring ``manifestRefs``).
+    """
+
+    model_config = _MODEL_CONFIG
+
+    status: McpListStatus
+    descriptors: tuple[McpPromptDescriptor, ...] = ()
+    reason_codes: tuple[str, ...] = Field(default=(), alias="reasonCodes")
+    diagnostic_metadata: Mapping[str, object] = Field(default_factory=dict, alias="diagnosticMetadata")
+    authority_flags: McpAuthorityFlags = Field(default_factory=McpAuthorityFlags, alias="authorityFlags")
+
+    @classmethod
+    def model_construct(cls, _fields_set: set[str] | None = None, **values: Any) -> Self:
+        _ = _fields_set
+        values["authorityFlags"] = McpAuthorityFlags()
+        return cls(**values)
+
+    def public_projection(self) -> dict[str, object]:
+        return {
+            "status": self.status,
+            "promptRefs": [f"prompt:{_digest(descriptor.name)[:16]}" for descriptor in self.descriptors],
+            "reasonCodes": list(self.reason_codes),
+            "diagnosticMetadata": _safe_metadata(self.diagnostic_metadata),
+            "authorityFlags": McpAuthorityFlags().model_dump(by_alias=True),
+        }
+
+
 class McpCallDecision(BaseModel):
     model_config = _MODEL_CONFIG
 
@@ -188,9 +246,16 @@ class McpAdapter:
     """Default-off MCP adapter for fake/local descriptor projection.
 
     This boundary converts MCP ``tools/list`` descriptors into deferred
-    ``ToolManifest`` records. It does not import MCP clients, start servers,
-    open sockets, call external MCP tools, attach ToolHost handlers, or enable
-    user-visible output.
+    ``ToolManifest`` records, and MCP ``prompts/list`` descriptors into
+    redaction-safe ``McpPromptDescriptor`` projections. It does not import MCP
+    clients, start servers, open sockets, call external MCP tools, attach
+    ToolHost handlers, or enable user-visible output.
+
+    Live wiring (a real MCP client that opens sockets / performs network egress
+    to satisfy ``prompts/list`` + ``prompts/get``) is a DOCUMENTED FUTURE SEAM:
+    the ``McpProviderPort`` Protocol stays sync and is only ever satisfied by a
+    local-fake provider in this default-off boundary. Nothing here flips an
+    authority/``live_*`` flag.
     """
 
     def __init__(self, config: McpAdapterConfig) -> None:
@@ -251,6 +316,59 @@ class McpAdapter:
                 )
             manifests.append(tool_manifest)
         return _list_decision("ok", (), diagnostics, manifests=tuple(manifests))
+
+    def list_prompts(
+        self,
+        server_ref: str,
+        *,
+        provider: McpProviderPort | None = None,
+        security_manifest: McpServerSecurityManifest | Mapping[str, object] | None = None,
+    ) -> McpPromptListDecision:
+        """Project a local-fake MCP ``prompts/list`` into redacted descriptors.
+
+        Mirrors the EXACT gating sequence of :meth:`list_tools`
+        (disabled → manifest coerce/blocked → local-fake-required → untrusted →
+        provider error handling → iterate+redact). Prompts do not execute tools,
+        so there is no per-descriptor permission check, but every other gate and
+        the all-``False`` authority flags are identical.
+        """
+        safe_server_ref = _safe_public_ref(server_ref, prefix="mcp")
+        diagnostics = {
+            "enabled": self.config.enabled,
+            "localFakeProviderEnabled": self.config.local_fake_provider_enabled,
+            "serverRef": safe_server_ref,
+        }
+        if not self.config.enabled:
+            return _prompt_list_decision("disabled", ("mcp_adapter_disabled",), diagnostics)
+        _manifest, manifest_reasons = _coerce_security_manifest(safe_server_ref, security_manifest)
+        if manifest_reasons:
+            return _prompt_list_decision("blocked", manifest_reasons, diagnostics)
+        if not self.config.local_fake_provider_enabled or provider is None:
+            return _prompt_list_decision("blocked", ("local_fake_mcp_provider_required",), diagnostics)
+        if getattr(provider, "openmagi_local_fake_provider", False) is not True:
+            return _prompt_list_decision("blocked", ("local_fake_mcp_provider_untrusted",), diagnostics)
+
+        try:
+            raw_prompts = provider.list_prompts(safe_server_ref)
+        except McpAuthError as exc:
+            return _prompt_list_decision(
+                "auth_required",
+                ("mcp_auth_required",),
+                {**diagnostics, "providerErrorDigest": _digest(_safe_text(str(exc)))[:16]},
+            )
+        except Exception as exc:
+            return _prompt_list_decision(
+                "blocked",
+                ("mcp_provider_list_failed",),
+                {**diagnostics, "providerErrorDigest": _digest(_safe_text(str(exc)))[:16]},
+            )
+
+        descriptors: list[McpPromptDescriptor] = []
+        for raw_prompt in raw_prompts[: self.config.max_prompts]:
+            if not isinstance(raw_prompt, Mapping):
+                continue
+            descriptors.append(_prompt_descriptor_from_mcp(safe_server_ref, raw_prompt))
+        return _prompt_list_decision("ok", (), diagnostics, descriptors=tuple(descriptors))
 
     def call_tool(
         self,
@@ -368,6 +486,22 @@ def _list_decision(
     )
 
 
+def _prompt_list_decision(
+    status: McpListStatus,
+    reason_codes: tuple[str, ...],
+    diagnostic_metadata: Mapping[str, object],
+    *,
+    descriptors: tuple[McpPromptDescriptor, ...] = (),
+) -> McpPromptListDecision:
+    return McpPromptListDecision(
+        status=status,
+        descriptors=descriptors,
+        reasonCodes=reason_codes,
+        diagnosticMetadata=_safe_metadata(diagnostic_metadata),
+        authorityFlags=McpAuthorityFlags(),
+    )
+
+
 def _call_decision(
     status: McpCallStatus,
     reason_codes: tuple[str, ...],
@@ -462,6 +596,42 @@ def _tool_manifest_from_mcp(server_ref: str, raw_tool: Mapping[str, object]) -> 
         plugin_id=f"mcp.{_safe_tool_segment(server_ref.removeprefix('mcp:'))}",
         enabled_by_default=False,
         opt_out=True,
+    )
+
+
+def _prompt_descriptor_from_mcp(server_ref: str, raw_prompt: Mapping[str, object]) -> McpPromptDescriptor:
+    """Convert a raw MCP prompt descriptor into a redaction-safe projection.
+
+    The ``name`` is namespaced exactly like a tool manifest name; the optional
+    ``description`` is ``_safe_text``-scrubbed; argument NAMES only are kept,
+    each scrubbed via ``_safe_tool_segment``. No raw text/paths/secrets and no
+    argument values survive.
+    """
+    raw_name = raw_prompt.get("name")
+    if not isinstance(raw_name, str) or not raw_name.strip():
+        raw_name = "unnamed"
+
+    raw_description = raw_prompt.get("description")
+    description: str | None = None
+    if isinstance(raw_description, str) and raw_description.strip():
+        cleaned = _safe_text(raw_description)
+        description = cleaned if cleaned else None
+
+    argument_names: list[str] = []
+    raw_arguments = raw_prompt.get("arguments")
+    if isinstance(raw_arguments, Sequence) and not isinstance(raw_arguments, str | bytes | bytearray):
+        for raw_argument in raw_arguments:
+            if not isinstance(raw_argument, Mapping):
+                continue
+            arg_name = raw_argument.get("name")
+            if not isinstance(arg_name, str) or not arg_name.strip():
+                continue
+            argument_names.append(_safe_tool_segment(arg_name))
+
+    return McpPromptDescriptor(
+        name=f"{_server_namespace(server_ref)}.{_safe_tool_segment(raw_name)}",
+        description=description,
+        arguments=tuple(argument_names),
     )
 
 
@@ -584,6 +754,8 @@ __all__ = [
     "McpAuthorityFlags",
     "McpCallDecision",
     "McpListDecision",
+    "McpPromptDescriptor",
+    "McpPromptListDecision",
     "McpProviderPort",
     "McpServerSecurityManifest",
 ]
