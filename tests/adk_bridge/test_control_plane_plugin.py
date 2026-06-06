@@ -26,6 +26,14 @@ from magi_agent.adk_bridge.control_plane import (
 )
 
 
+def _make_plane(*controls) -> ControlPlane:
+    """Build a ControlPlane bypassing the register() guard for internal dispatch tests."""
+    plane = ControlPlane()
+    for ctrl in controls:
+        plane._controls.append(ctrl)
+    return plane
+
+
 def _run(coro):
     return asyncio.run(coro)
 
@@ -116,7 +124,7 @@ def test_before_model_callback_signature_matches_adk() -> None:
 
 
 def test_before_tool_deny_returns_deny_result() -> None:
-    plane = ControlPlane().register(_DenyAll())
+    plane = _make_plane(_DenyAll())
     plugin = ControlPlanePlugin(plane)
 
     result = _run(
@@ -144,7 +152,7 @@ def test_before_tool_rewrite_mutates_tool_args_and_returns_none() -> None:
         async def on_before_tool(self, *, tool, args, tool_context) -> ToolDecision | None:
             return ToolDecision(action="rewrite", updated_args={"rewritten": True})
 
-    plane = ControlPlane().register(_Rewrite())
+    plane = _make_plane(_Rewrite())
     plugin = ControlPlanePlugin(plane)
     tool_args = {"original": True}
 

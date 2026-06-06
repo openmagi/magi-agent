@@ -40,12 +40,28 @@ runner build; ADK's ``PluginManager`` fans it out to every tool/model event.
 
 Ordering with the permission gate
 -----------------------------------
-``engine.py:_attach_gate_callback`` prepends the permission gate to
-``agent.before_tool_callback`` (agent-level) per-turn. ADK runs *agent-level*
-``before_tool_callback`` **before** *plugin-level* ``before_tool_callback``, so
-the permission gate always fires first and a deny short-circuits before the
-plane ever sees the call. The gate is intentionally kept as-is (agent-level,
-per-turn wiring) — wrapping it as a LoopControl is out of scope for this PR.
+**ADK's real callback ordering** (verified against ADK 1.33
+``google/adk/flows/llm_flows/functions.py``):
+
+1. **Plugin-level** ``before_tool_callback`` runs FIRST (``plugin_manager.run_before_tool_callback``).
+   If it returns a non-None dict the tool call is short-circuited immediately.
+2. **Agent-level** ``before_tool_callback`` runs ONLY IF the plugin step returned None.
+
+``engine.py:_attach_gate_callback`` attaches the permission gate **agent-level**
+(Step 2). ``ControlPlanePlugin`` is a plugin-level callback (Step 1). This means:
+
+* **Today (safe):** none of the registered ``LoopControl`` implementations override
+  ``on_before_tool``, so ``ControlPlanePlugin.before_tool_callback`` always returns
+  ``None``, and the agent-level permission gate (Step 2) always runs.
+* **Future footgun:** a ``LoopControl`` that overrides ``on_before_tool`` and returns
+  a deny or rewrite ``ToolDecision`` would execute at the plugin level (Step 1),
+  SHORT-CIRCUITING the agent-level permission gate — the gate would NEVER run.
+  A rewrite would additionally mutate tool args before the gate sees them.
+
+To prevent this, ``ControlPlane.register`` raises ``ValueError`` if the control
+overrides ``on_before_tool``. Such controls are forbidden until the permission gate
+is moved to the plugin level (or re-checked after the plane). This fails loud at
+registration rather than silently bypassing security at runtime.
 
 Known ADK limitations (do NOT try to force into the plane)
 -----------------------------------------------------------
@@ -191,7 +207,30 @@ class ControlPlane:
         self._controls: list[LoopControl] = []
 
     def register(self, control: LoopControl) -> "ControlPlane":
-        """Register a control and return self for chainable building."""
+        """Register a control and return self for chainable building.
+
+        Raises:
+            ValueError: If ``control`` overrides ``on_before_tool`` with a
+                non-default implementation. Such controls are forbidden under the
+                current architecture because ``ControlPlanePlugin`` runs at the
+                ADK **plugin level** (Step 1), while the permission gate is wired
+                **agent-level** (Step 2, engine.py ``_attach_gate_callback``). A
+                plugin-level ``on_before_tool`` that returns deny/rewrite would
+                short-circuit Step 2 and bypass the permission gate entirely.
+                Move the gate to the plugin level (or re-check it after the plane)
+                before introducing deny/rewrite-capable ``on_before_tool`` controls.
+        """
+        if type(control).on_before_tool is not BaseLoopControl.on_before_tool:
+            raise ValueError(
+                f"LoopControl '{getattr(control, 'name', type(control).__name__)}' "
+                f"overrides on_before_tool, which is forbidden under the current "
+                f"agent-level permission-gate ordering. "
+                f"ControlPlanePlugin runs at ADK plugin level (before the agent-level "
+                f"permission gate), so a deny or rewrite returned from on_before_tool "
+                f"would bypass the gate entirely. "
+                f"Move the permission gate to plugin level before registering "
+                f"deny/rewrite-capable on_before_tool controls."
+            )
         self._controls.append(control)
         return self
 
