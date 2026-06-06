@@ -889,6 +889,33 @@ def _dashboard_html(runtime: OpenMagiRuntime) -> str:
       font-size: 13px;
     }}
     .kv-row strong {{ color: var(--ink); font-weight: 600; }}
+    .source-list,
+    .control-request-list {{
+      display: grid;
+      gap: 8px;
+      margin-top: 10px;
+    }}
+    .source-item,
+    .control-request {{
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: var(--surface);
+      padding: 10px;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.4;
+    }}
+    .source-item strong,
+    .control-request strong {{
+      display: block;
+      margin-bottom: 4px;
+      color: var(--ink);
+      font-size: 13px;
+    }}
+    .control-request {{
+      border-color: #d8ccff;
+      background: #fbf9ff;
+    }}
     .knowledge-list {{
       display: grid;
       gap: 8px;
@@ -1011,16 +1038,16 @@ def _dashboard_html(runtime: OpenMagiRuntime) -> str:
         <div class="brand-meta"><span class="dot" id="runtime-dot"></span><span id="runtime-label">Checking runtime</span></div>
         <p class="brand-subtitle">Local workspace for chat, work events, knowledge, first-party tools, and evidence receipts.</p>
       </div>
-      <nav class="channel-list" aria-label="Local channels">
+      <nav class="channel-list" id="channel-nav" aria-label="Local channels">
         <p class="section-label">General</p>
-        <button class="channel active" type="button"><span>#</span><span>general</span><span class="channel-count">1</span></button>
-        <button class="channel" type="button"><span>#</span><span>research</span><span class="channel-count">0</span></button>
-        <button class="channel" type="button"><span>#</span><span>coding</span><span class="channel-count">0</span></button>
-        <button class="channel" type="button"><span>#</span><span>automation</span><span class="channel-count">0</span></button>
+        <button class="channel active" type="button" data-channel="general" data-summary="Local Magi Agent workspace"><span>#</span><span>general</span><span class="channel-count">1</span></button>
+        <button class="channel" type="button" data-channel="research" data-summary="Research plans, sources, and evidence gates"><span>#</span><span>research</span><span class="channel-count">0</span></button>
+        <button class="channel" type="button" data-channel="coding" data-summary="Coding tasks, tool receipts, patches, and verification"><span>#</span><span>coding</span><span class="channel-count">0</span></button>
+        <button class="channel" type="button" data-channel="automation" data-summary="Local workflows, schedules, and background work"><span>#</span><span>automation</span><span class="channel-count">0</span></button>
         <p class="section-label" style="margin-top:18px">Runtime</p>
-        <button class="channel" type="button"><span>*</span><span>Memory</span><span class="channel-count">on</span></button>
-        <button class="channel" type="button"><span>*</span><span>Tools</span><span class="channel-count">72</span></button>
-        <button class="channel" type="button"><span>*</span><span>Evidence</span><span class="channel-count">5</span></button>
+        <button class="channel" type="button" data-channel="memory" data-summary="Memory status and recall receipts"><span>*</span><span>Memory</span><span class="channel-count">on</span></button>
+        <button class="channel" type="button" data-channel="tools" data-summary="First-party local tools and harness packs"><span>*</span><span>Tools</span><span class="channel-count">72</span></button>
+        <button class="channel" type="button" data-channel="evidence" data-summary="Evidence, receipts, and final projection gates"><span>*</span><span>Evidence</span><span class="channel-count">5</span></button>
       </nav>
       <div class="sidebar-footer">
         <div class="footer-row"><span>Runtime</span><strong id="footer-runtime">magi-agent</strong></div>
@@ -1031,8 +1058,8 @@ def _dashboard_html(runtime: OpenMagiRuntime) -> str:
     <main class="main" data-shell-region="transcript">
       <header class="topbar">
         <div class="topbar-title">
-          <h2># general</h2>
-          <p id="route-summary">Local Magi Agent workspace</p>
+          <h2 id="selected-channel-title"># general</h2>
+          <p id="selected-channel-summary">Local Magi Agent workspace</p>
         </div>
         <div class="topbar-actions">
           <button class="icon-button" type="button" title="Refresh runtime health" id="refresh-health">&#8635;</button>
@@ -1152,6 +1179,10 @@ def _dashboard_html(runtime: OpenMagiRuntime) -> str:
             <div class="event"><strong>First-party surfaces</strong><code>Research, coding, documents, browser, scheduler, memory, skills</code></div>
             <div class="event"><strong>Transport</strong><code>SSE frames and public ADK events render here during a run</code></div>
           </div>
+          <p class="panel-heading">Control requests</p>
+          <div class="control-request-list" id="control-request-list">
+            <div class="control-request"><strong>No pending control</strong><span>Approval and interrupt requests appear here.</span></div>
+          </div>
         </div>
         <div role="tabpanel" id="panel-knowledge" class="hidden">
           <p class="brand-meta">Local knowledge and artifacts are exposed by runtime contracts when enabled.</p>
@@ -1170,6 +1201,12 @@ def _dashboard_html(runtime: OpenMagiRuntime) -> str:
               <span class="tag">citation audit</span>
               <span class="tag">tool receipts</span>
               <span class="tag">final projection</span>
+            </div>
+          </div>
+          <div class="surface-status">
+            <h3>Inspected sources <span id="source-count">0</span></h3>
+            <div class="source-list" id="source-list">
+              <div class="source-item"><strong>No sources yet</strong><span>Source inspection events appear during research turns.</span></div>
             </div>
           </div>
           <div class="knowledge-list">
@@ -1223,6 +1260,11 @@ def _dashboard_html(runtime: OpenMagiRuntime) -> str:
     const boardEvidenceState = document.getElementById("board-evidence-state");
     const boardTransportState = document.getElementById("board-transport-state");
     const receiptList = document.getElementById("receipt-list");
+    const selectedChannelTitle = document.getElementById("selected-channel-title");
+    const selectedChannelSummary = document.getElementById("selected-channel-summary");
+    const sourceList = document.getElementById("source-list");
+    const sourceCount = document.getElementById("source-count");
+    const controlRequestList = document.getElementById("control-request-list");
     const tokenKey = "magi-agent:gateway-token";
     const streamChatEndpoint = "/v1/chat/stream";
     const legacyChatEndpoint = "/v1/chat/completions";
@@ -1230,6 +1272,7 @@ def _dashboard_html(runtime: OpenMagiRuntime) -> str:
     const cancelEndpoint = "/v1/chat/cancel";
     let sseFrameCount = 0;
     let agentEventCount = 0;
+    let inspectedSources = [];
 
     document.getElementById("footer-runtime").textContent = bootstrap.runtime;
     document.getElementById("footer-version").textContent = bootstrap.version;
@@ -1290,6 +1333,37 @@ def _dashboard_html(runtime: OpenMagiRuntime) -> str:
         node.innerHTML = `<strong>${{escapeText(name)}}</strong><span>${{escapeText(status)}}</span>`;
         receiptList.appendChild(node);
       }}
+    }}
+
+    function renderSourceList(sources) {{
+      inspectedSources = Array.isArray(sources) ? sources.slice(-12) : inspectedSources;
+      sourceCount.textContent = String(inspectedSources.length);
+      sourceList.innerHTML = "";
+      if (!inspectedSources.length) {{
+        const node = document.createElement("div");
+        node.className = "source-item";
+        node.innerHTML = "<strong>No sources yet</strong><span>Source inspection events appear during research turns.</span>";
+        sourceList.appendChild(node);
+        return;
+      }}
+      for (const source of inspectedSources) {{
+        const title = source.title || source.url || source.sourceId || "Source";
+        const detail = source.url || source.domain || source.status || "inspected";
+        const node = document.createElement("div");
+        node.className = "source-item";
+        node.innerHTML = `<strong>${{escapeText(title)}}</strong><span>${{escapeText(detail)}}</span>`;
+        sourceList.appendChild(node);
+      }}
+    }}
+
+    function renderControlRequest(payload) {{
+      controlRequestList.innerHTML = "";
+      const node = document.createElement("div");
+      node.className = "control-request";
+      const action = payload.action || payload.requestedAction || payload.type || "Control request";
+      const reason = payload.reason || payload.message || payload.summary || "Runtime is waiting for local operator input.";
+      node.innerHTML = `<strong>${{escapeText(action)}}</strong><span>${{escapeText(reason)}}</span>`;
+      controlRequestList.appendChild(node);
     }}
 
     function addMessage(role, text, tone) {{
@@ -1384,14 +1458,17 @@ def _dashboard_html(runtime: OpenMagiRuntime) -> str:
       if (content) target.textContent += content;
     }}
 
-    function summarizeAgentEvent(payload) {{
+    function classifyAgentEvent(payload) {{
       const type = payload && (payload.type || payload.eventType || payload.status || "agent");
       const titleByType = {{
         turn_start: "Turn started",
         turn_end: "Turn ended",
+        turn_phase: "Turn phase",
         tool_start: "Tool started",
         tool_end: "Tool completed",
         tool_error: "Tool failed",
+        evidence_receipt: "Evidence receipt",
+        control_request: "Control request",
         source_inspected: "Source inspected",
         rule_check: "Rule check",
         llm_progress: "Model progress",
@@ -1401,7 +1478,35 @@ def _dashboard_html(runtime: OpenMagiRuntime) -> str:
         runtime_trace: "Runtime trace",
         error: "Runtime error",
       }};
-      return titleByType[type] || String(type).replace(/_/g, " ");
+      const title = titleByType[type] || String(type).replace(/_/g, " ");
+      const tone = type === "error" || type === "tool_error" ? "error" : type === "control_request" ? "pending" : "ok";
+      return {{ type, title, tone }};
+    }}
+
+    function renderAgentEvent(payload, eventName) {{
+      const data = payload && typeof payload === "object" ? payload : {{ value: payload }};
+      const event = classifyAgentEvent(data);
+      agentEventCount += 1;
+      metricEvents.textContent = `${{agentEventCount}} agent event${{agentEventCount === 1 ? "" : "s"}}`;
+      if (event.type === "tool_start" || event.type === "tool_end" || event.type === "tool_error") {{
+        metricTools.textContent = event.title;
+      }}
+      if (event.type === "evidence_receipt" || Array.isArray(data.receiptRefs)) {{
+        metricReceipts.textContent = "received";
+        const receiptRefs = Array.isArray(data.receiptRefs) ? data.receiptRefs : [data.receiptRef || "evidence"];
+        renderReceiptList(receiptRefs.filter(Boolean).map((ref) => [String(ref).split(":")[0], "received"]));
+      }}
+      if (event.type === "source_inspected" || data.source || data.url) {{
+        const source = data.source && typeof data.source === "object" ? data.source : data;
+        const sourceId = source.sourceId || source.url || `${{Date.now()}}`;
+        inspectedSources = inspectedSources.filter((item) => item.sourceId !== sourceId && item.url !== source.url);
+        inspectedSources.push({{ ...source, sourceId }});
+        renderSourceList(inspectedSources);
+      }}
+      if (event.type === "control_request") {{
+        renderControlRequest(data);
+      }}
+      addEvent(event.title || `event: ${{eventName}}`, compactJson(data), event.tone);
     }}
 
     function renderSseBlock(target, block) {{
@@ -1424,14 +1529,9 @@ def _dashboard_html(runtime: OpenMagiRuntime) -> str:
         const parsed = JSON.parse(rawData);
         appendDelta(target, parsed);
         if (eventName === "agent") {{
-          agentEventCount += 1;
-          metricEvents.textContent = `${{agentEventCount}} agent event${{agentEventCount === 1 ? "" : "s"}}`;
-          if (parsed && String(parsed.type || "").includes("tool")) metricTools.textContent = summarizeAgentEvent(parsed);
-          addEvent(summarizeAgentEvent(parsed), compactJson(parsed));
+          renderAgentEvent(parsed, eventName);
         }} else if (eventName !== "message" || parsed.type || parsed.event || parsed.status) {{
-          agentEventCount += 1;
-          metricEvents.textContent = `${{agentEventCount}} agent event${{agentEventCount === 1 ? "" : "s"}}`;
-          addEvent(`event: ${{eventName}}`, compactJson(parsed));
+          renderAgentEvent(parsed, eventName);
         }}
       }} catch (error) {{
         addEvent(`event: ${{eventName}}`, rawData);
@@ -1534,6 +1634,24 @@ def _dashboard_html(runtime: OpenMagiRuntime) -> str:
         promptInput.value = starter.dataset.prompt || "";
         promptInput.focus();
       }});
+    }}
+
+    function activateChannel(channelName) {{
+      for (const channel of document.querySelectorAll("[data-channel]")) {{
+        const active = channel.dataset.channel === channelName;
+        channel.classList.toggle("active", active);
+        if (active) {{
+          selectedChannelTitle.textContent = channelName === "general" ? "# general" : channelName;
+          selectedChannelSummary.textContent = channel.dataset.summary || "Local Magi Agent workspace";
+        }}
+      }}
+      if (channelName === "tools" || channelName === "memory" || channelName === "evidence") {{
+        document.querySelector('[data-panel="knowledge"]').click();
+      }}
+    }}
+
+    for (const channel of document.querySelectorAll("[data-channel]")) {{
+      channel.addEventListener("click", () => activateChannel(channel.dataset.channel || "general"));
     }}
 
     for (const tab of document.querySelectorAll(".tab")) {{

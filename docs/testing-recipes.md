@@ -30,6 +30,6 @@ The failure codes are EVIDENCE_CONTRACT_MISSING (no evidence of required type), 
 
 ## Running tests with pytest and shadow gates
 
-Run pytest from the infra/docker/clawy-core-agent-python/ directory. The test suite includes 186 test files across tests/runtime/, tests/recipes/, and tests/fixtures/ (30+ fixture suites). Tests use standard pytest fixtures and assertions without external service dependencies.
+Run pytest from the `openmagi/magi-agent` checkout. The test suite includes runtime, recipe, fixture, CLI, dashboard, and transport coverage. Tests use standard pytest fixtures and assertions without external service dependencies.
 
 The shadow/ directory (52 files) provides staged diagnostic testing infrastructure: gate1 (basic healthcheck, simple assistant text), gate2 (fixture infrastructure), gate3a (recorded replay with input bundles and output reports), gate3b (real-time simulation), gate4 (dry-run shadows + comparison reports), gate5a (memory-free canary testing), gate5b (user-visible routing canary with mocked runner). A packaged third-party test harness for external recipe authors is planned but not yet available.

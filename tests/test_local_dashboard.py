@@ -132,6 +132,62 @@ def test_local_dashboard_has_operational_work_stream_metrics() -> None:
     assert "renderReceiptList" in html
 
 
+def test_local_dashboard_has_polished_channel_shell_navigation() -> None:
+    response = _client().get("/dashboard")
+    html = response.text
+
+    assert 'id="channel-nav"' in html
+    assert 'data-channel="general"' in html
+    assert 'data-channel="research"' in html
+    assert 'data-channel="coding"' in html
+    assert 'data-channel="automation"' in html
+    assert "function activateChannel(channelName)" in html
+    assert 'id="selected-channel-title"' in html
+    assert 'id="selected-channel-summary"' in html
+    assert "Research plans, sources, and evidence gates" in html
+    assert "First-party local tools and harness packs" in html
+
+
+def test_local_dashboard_renders_source_and_control_request_panels() -> None:
+    response = _client().get("/dashboard")
+    html = response.text
+
+    assert 'id="source-list"' in html
+    assert 'id="source-count"' in html
+    assert 'class="source-list"' in html
+    assert "Source inspection events appear during research turns." in html
+    assert 'id="control-request-list"' in html
+    assert 'class="control-request-list"' in html
+    assert "Approval and interrupt requests appear here." in html
+    assert "function renderSourceList(sources)" in html
+    assert "function renderControlRequest(payload)" in html
+
+
+def test_local_dashboard_renders_richer_agent_event_types() -> None:
+    response = _client().get("/dashboard")
+    html = response.text
+
+    assert "function classifyAgentEvent(payload)" in html
+    assert "function renderAgentEvent(payload, eventName)" in html
+    assert "tool_start" in html
+    assert "tool_end" in html
+    assert "evidence_receipt" in html
+    assert "control_request" in html
+    assert "source_inspected" in html
+    assert "research_final_projection" in html
+    assert "metricReceipts.textContent = \"received\"" in html
+
+
+def test_local_dashboard_sends_stable_local_session_metadata() -> None:
+    response = _client().get("/dashboard")
+    html = response.text
+
+    assert 'sessionId: `${bootstrap.botId}:local-dashboard:general`' in html
+    assert "turnId:" in html
+    assert "Date.now()" in html
+    assert "Math.random().toString(16)" in html
+
+
 def test_local_dashboard_prefers_streaming_chat_route_with_legacy_fallback() -> None:
     response = _client().get("/dashboard")
     html = response.text
