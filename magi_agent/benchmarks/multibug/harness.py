@@ -23,6 +23,7 @@ this harness forwards an env that enables it for the duration of the measured ru
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping
+from typing import Literal
 
 from magi_agent.benchmarks.multibug.dataset import MultiProblemInstance
 from magi_agent.discovery.gate import DISCOVERY_ENABLED_ENV
@@ -31,7 +32,7 @@ from magi_agent.discovery.models import DiscoveryConfig, DiscoveryPrediction
 from magi_agent.discovery.orchestrator import dedup_against, run_discovery
 from magi_agent.discovery.templates import load_template_pack, static_template_provider
 
-Mode = str  # one of: "tide", "single_agent", "multi_agent"
+Mode = Literal["tide", "single_agent", "multi_agent"]
 
 #: Env that enables the discovery orchestrator for the measured run. The harness
 #: has its own opt-in gate (``cli.ensure_enabled``); once past it, the inner

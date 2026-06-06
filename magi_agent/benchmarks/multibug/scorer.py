@@ -24,7 +24,6 @@ Instance scores are then MACRO-averaged across instances.
 from __future__ import annotations
 
 from collections.abc import Callable, Sequence
-from typing import Optional
 
 from pydantic import BaseModel, ConfigDict
 
@@ -57,8 +56,8 @@ class InstanceScore(BaseModel):
     coverage: float
     precision: float
     f1: float
-    identification: Optional[float] = None
-    resolution: Optional[float] = None
+    identification: float | None = None
+    resolution: float | None = None
 
 
 class MultiBugReport(BaseModel):
@@ -69,8 +68,8 @@ class MultiBugReport(BaseModel):
     coverage: float
     precision: float
     f1: float
-    identification: Optional[float] = None
-    resolution: Optional[float] = None
+    identification: float | None = None
+    resolution: float | None = None
     instance_count: int
     per_instance: tuple[InstanceScore, ...] = ()
 
@@ -83,8 +82,8 @@ class MultiBugLift(BaseModel):
     coverage: float
     precision: float
     f1: float
-    identification: Optional[float] = None
-    resolution: Optional[float] = None
+    identification: float | None = None
+    resolution: float | None = None
 
 
 def _jaccard(a: Sequence[str], b: Sequence[str]) -> float:

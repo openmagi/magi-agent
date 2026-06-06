@@ -7,8 +7,10 @@ uncover. Models are frozen pydantic to match the repo style (see
 ``magi_agent/benchmarks/gaia/dataset.py`` and ``magi_agent/discovery/models.py``).
 
 ``load_instances`` reads a local JSON/JSONL file and is what tests use.
-``build_instances_from_swebench`` is a thin, network-gated grouping utility
-(mirrors ``gaia/download.py``) and is NOT covered by unit tests.
+``build_instances_from_swebench`` is a thin grouping utility (mirrors
+``gaia/download.py``): its pure grouping/filtering logic IS unit-tested; only the
+upstream HuggingFace/SWE-bench fetch that produces its input is live-only
+(network-gated) and therefore exercised outside the unit tests.
 """
 from __future__ import annotations
 
@@ -132,11 +134,12 @@ def build_instances_from_swebench(
          "evidence_ids": [str, ...], "gold_patch": str, "candidates": {id: src},
          "functions": [str, ...]}
 
-    This function depends only on already-grouped issue records; the upstream
-    HuggingFace/``datasets`` fetch that produces them is a separate, live-only
-    concern (mirrors ``gaia/download.py``) and is deliberately NOT performed here
-    so tests never require network. It is documented thin and intentionally not
-    unit-tested against a live dataset.
+    This function depends only on already-grouped issue records, so its pure
+    grouping/filtering logic IS unit-tested (see
+    ``tests/benchmarks/multibug/test_dataset.py``). The upstream
+    HuggingFace/``datasets`` fetch that produces those records is a separate,
+    live-only concern (mirrors ``gaia/download.py``) and is deliberately NOT
+    performed here so tests never require network.
     """
     grouped: dict[tuple[str, str], list[Mapping[str, object]]] = {}
     for issue in issues:
