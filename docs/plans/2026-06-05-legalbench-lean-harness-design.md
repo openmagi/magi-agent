@@ -1,0 +1,209 @@
+# LegalBench Lean Harness — Design
+
+Date: 2026-06-05
+Branch: `feat/legalbench-lean-harness`
+Status: design (pending implementation plan)
+
+## Goal
+
+Build a first-party **legal harness + recipe pack** for `magi-agent` that
+measurably raises a Claude baseline's score on **LegalBench** (Stanford/Guha et
+al., US legal-reasoning benchmark — 162 tasks, 6 reasoning types), and exposes
+that lift as a property of Magi's composable determinism.
+
+Primary purpose is external credibility (marketing) for the OSS runtime. The
+harness must move the number for real, not merely add scaffolding.
+
+## Scope decisions (locked)
+
+- **Lean, evidence-backed recipe pack** — only the levers research ties to
+  actual LegalBench score gains. No full agentic stack.
+- **Core subset v1** — a curated ~20–40 task subset representative of all 6
+  reasoning types. Full 162-task run is a later expansion.
+- **No external RAG** — LegalBench tasks are largely closed-book (context is in
+  the prompt). Reuse existing grounding machinery only where applicable.
+- **Claude-centric + published-baseline comparison** — measure base-vs-harness
+  lift on Claude, present alongside the published LegalBench numbers (with
+  split/metric footnotes). No multi-provider matrix in v1.
+
+## Research findings that constrain the design (honest framing)
+
+These shaped the lean scope and must be reflected in any external claim:
+
+1. **No harness leaderboard exists for LegalBench.** The official repo
+   (`HazyResearch/legalbench`) ships datasets + prompts + `evaluation.py`, no
+   ranking/submission server. The only live ranking (vals.ai) is a *frontier-
+   model bake-off*, not a harness comparison; top models cluster ~85–87%.
+2. **The base model dominates the score; harness lift is second-order.** The
+   LegalBench paper explicitly calls its own numbers a *lower bound*. Realistic
+   harness-driven ceiling is **low-to-mid single digits** of overall
+   balanced-accuracy lift over a well-prompted Claude baseline — meaningful on
+   weak reasoning types, but it will not leapfrog a model generation.
+3. **No OSS harness to fork.** We build, not fork. The most credible *technique*
+   reference is Chain of Logic (rule decomposition) for rule-application tasks.
+4. **Evidence-ranked score movers** (corrects the naive prior that favored
+   self-consistency / IRAC / citation-verification):
+   - **Curated few-shot from the train split** — strongest and cheapest, but
+     demonstration choice causes up to ~20-pt balanced-accuracy swings. Curate;
+     never random.
+   - **Explicit rule-statement injection** — highest *reliable*, low-variance
+     lever for rule-conclusion / rule-application tasks (rules are rare in
+     pretraining).
+   - **Per-task prompt selection (plain vs. legalese)** — moderate,
+     model-dependent; decide per task on the train split, do not apply globally.
+   - **Constrained output parsing (forced label tokens)** — recovers
+     verbalizer-mismatch losses the paper repeatedly flags.
+   - Weak / dropped for v1 score purposes: default CoT (can hurt classification),
+     self-consistency, IRAC-as-prompt, citation-verification, RAG, debate.
+
+## Core principle: every lever is a measurable deterministic checkpoint
+
+Magi's value framing is *composable determinism* (README §"The Solution"): the
+model stays creative; the **state transitions around it are deterministic**
+(policy snapshot → context projector → evidence ledger → validators → repair
+policy → output projector → audit). Each score lever is implemented as an
+independently toggleable checkpoint, and the eval reports each checkpoint's
+**marginal lift**. This is both the scientific control and the marketing asset:
+"our composable determinism lets you measure which deterministic step earned the
+score."
+
+| Lever (evidence-backed) | Determinism stage |
+| --- | --- |
+| Curated train-split few-shot | context-projector policy (seed-fixed, curated) |
+| Explicit rule-statement injection | prompt/context policy |
+| Per-task prompt selection (plain/legalese) | policy selection (chosen on train split) |
+| Constrained output parsing / forced labels | output projector + validator |
+
+## Architecture
+
+```text
+LegalBench task data ─▶ loader (curated subset + train/test split + answer key)
+                          │
+                          ▼
+                  few-shot selector (curated, deterministic)
+                          │
+                          ▼
+                  prompt builder ── rule-statement injection
+                          │       └─ plain/legalese variant (train-chosen)
+                          ▼
+            recipe(first_party/legal) compiled via existing compiler stack
+                          │
+                          ▼
+                  model run (Claude) ─▶ constrained output parser
+                          │
+                          ▼
+                  legal_eval scorer ─▶ report:
+                     per reasoning-type + overall balanced accuracy
+                     + base-vs-harness lift
+                     + per-checkpoint ablation
+                     + published-baseline comparison column
+```
+
+## Components
+
+### New
+
+| File | Purpose |
+| --- | --- |
+| `benchmarks/legalbench/loader.py` | Load curated subset + train/test splits + answer keys (HF `nguha/legalbench` format). Includes the curated task manifest covering 6 reasoning types. |
+| `benchmarks/legalbench/fewshot.py` | Curated, deterministic (seed-fixed) exemplar selection from the train split. No random sampling. |
+| `recipes/first_party/legal/rule_inject.py` | Per-task library of explicit rule statements (e.g. abercrombie, diversity jurisdiction, UCC, hearsay) injected into the prompt. |
+| `recipes/first_party/legal/prompt_variants.py` | Plain vs. technical prompt variants + per-task selection decided on the train split. |
+| `recipes/first_party/legal/output_parser.py` | Constrained output parsing / forced-label mapping (verbalizer). |
+| `recipes/first_party/legal/recipe.py` | Composes the above as deterministic checkpoints through the existing recipe compiler (thin glue). |
+| `benchmarks/legal_eval.py` | Pure, post-hoc scorer cloned from `benchmarks/coding_eval.py`: balanced accuracy per reasoning type + overall, scoring categories (pass/fail/partial/abstain/infra-unavailable), base-vs-harness lift, per-checkpoint ablation, published-baseline comparison. |
+| `benchmarks/legalbench/runner.py` | Orchestrates live run + `baseline` mode + `ablation` mode (toggle each checkpoint to measure marginal lift). Behind a default-OFF gate. |
+
+### Reused (do not rebuild)
+
+- Recipe compilation: `recipes/compiler.py`, `composition.py`,
+  `effective_contract.py`, `materializer.py`; `recipes/first_party/<domain>/`
+  package pattern.
+- Scoring template: `benchmarks/coding_eval.py` (schema-versioned task classes,
+  scoring categories, evidence-completeness, violation detection).
+- Optional abstain branch: `harness/repair_policy.py`,
+  `recipes/retry_repair_policies.py`.
+- Light determinism record: evidence ledger / audit surfaces for the
+  composable-determinism narrative.
+
+## Data flow
+
+1. Loader yields curated tasks with train/test splits and answer keys.
+2. Few-shot selector picks a fixed, curated exemplar set per task (seed-fixed).
+3. Prompt builder assembles: instruction + (optional) explicit rule statement +
+   selected variant + curated exemplars + the test instance.
+4. Recipe runs the model; constrained parser maps the raw output to a canonical
+   label.
+5. Scorer compares to the answer key and aggregates per reasoning-type / overall
+   balanced accuracy, plus lift and ablation tables.
+
+## Defensible methodology (number credibility)
+
+- Few-shot exemplar selection and plain/legalese choice are decided **on the
+  train split only, then frozen**, before any test-set scoring. No test-set
+  overfitting.
+- Report few-shot variance (seed / exemplar set) — never claim a number from a
+  single lucky seed.
+- Marketing claim is scoped to **"+X over a well-prompted Claude baseline,
+  decomposed per deterministic checkpoint,"** concentrated on weak reasoning
+  types (rule-recall, long-doc interpretation). Do **not** claim "tops
+  LegalBench." Any comparison to published numbers carries split/metric
+  footnotes.
+
+## Gating, cost, safety
+
+- Default-OFF env gate (e.g. `MAGI_LEGAL_HARNESS_ENABLED`) following existing
+  harness conventions.
+- Cost guards: `--max-tasks`, token/cost ceiling → stop and emit a partial
+  report when exceeded.
+- No external network in v1 (no RAG) → minimal SSRF surface.
+
+## Error handling
+
+- Task load failure → `infra-unavailable` (not counted as fail), per
+  `coding_eval` semantics.
+- Provider/model error → retry via `retry_repair_policies`, then
+  `infra-unavailable`.
+- Output parse failure → `partial` or `fail` per policy.
+- Budget exceeded → stop, emit partial report.
+
+## Testing
+
+- Repo convention: fixture-based unit tests.
+- Scorer, parser, few-shot selector, rule-injector, and variant selector are
+  **pure functions** → tested with fixtures and known answer keys, no live model
+  calls (mirrors `coding_eval`'s "no provider calls" property).
+- Runner's live path is exercised behind the gate via fixture-record replay.
+- Coverage targets: reasoning-type mapping, scoring categories, lift math,
+  per-checkpoint ablation math, few-shot determinism, prompt assembly,
+  verbalizer mapping.
+
+## Out of scope (v1) / v2 candidates
+
+- Full 162-task run.
+- External statute/case-law RAG (only if a corpus-grounded subset proves it
+  helps).
+- Multi-provider comparison matrix.
+- Self-consistency, IRAC-as-prompt, citation-verification, multi-agent debate,
+  Chain-of-Logic structured decomposition (revisit Chain-of-Logic for
+  rule-application if v1 rule-injection underperforms there).
+
+## Success criteria
+
+1. `legal_eval` produces a reproducible report: per reasoning-type + overall
+   balanced accuracy, base-vs-harness lift, and per-checkpoint ablation.
+2. Harness shows a positive, reproducible lift over the Claude baseline on the
+   curated subset (target: meaningful gain on weak reasoning types; overall lift
+   honestly reported even if low single digits).
+3. All new pure components covered by fixture tests; suite green.
+4. Default-OFF; no behavior change when the gate is off.
+
+## Risks / caveats
+
+- **Low ceiling.** Harness lift is second-order to the model. The deliverable's
+  durable value is the *measurement framework* (per-checkpoint determinism lift)
+  as much as the absolute number.
+- **Few-shot variance.** ±20-pt swings on exemplar choice; mitigated by curation
+  + train-split freezing + variance reporting.
+- **Comparison fairness.** Harness-vs-base is the defensible claim;
+  harness-vs-published-LLM requires same-split/same-metric care.
