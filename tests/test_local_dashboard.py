@@ -227,8 +227,22 @@ def test_local_dashboard_exposes_digest_safe_runtime_bootstrap() -> None:
     }
 
 
-def test_local_dashboard_chat_route_streams_local_adk_events(monkeypatch) -> None:
+def test_local_dashboard_chat_route_streams_local_adk_events(
+    monkeypatch,
+    tmp_path,
+) -> None:
     monkeypatch.setenv("MAGI_AGENT_LOCAL_CHAT_ROUTE", "on")
+    for name in (
+        "ANTHROPIC_API_KEY",
+        "OPENAI_API_KEY",
+        "GEMINI_API_KEY",
+        "GOOGLE_API_KEY",
+        "FIREWORKS_API_KEY",
+        "MAGI_PROVIDER",
+        "MAGI_MODEL",
+    ):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("MAGI_CONFIG", str(tmp_path / "missing-config.toml"))
     client = _client()
 
     response = client.post(

@@ -112,6 +112,26 @@ def test_config_model_overrides_default() -> None:
     assert cfg.model == "m3"
 
 
+def test_local_dev_model_in_config_falls_back_to_provider_default() -> None:
+    cfg = resolve_provider_config(
+        env={"ANTHROPIC_API_KEY": "a"},
+        config={"model": {"model": "local-dev"}},
+    )
+    assert cfg is not None
+    assert cfg.model == "claude-sonnet-4-6"
+    assert cfg.litellm_model == "anthropic/claude-sonnet-4-6"
+
+
+def test_local_dev_model_in_env_falls_back_to_provider_default() -> None:
+    cfg = resolve_provider_config(
+        env={"ANTHROPIC_API_KEY": "a", "MAGI_MODEL": "local-dev"},
+        config={},
+    )
+    assert cfg is not None
+    assert cfg.model == "claude-sonnet-4-6"
+    assert cfg.litellm_model == "anthropic/claude-sonnet-4-6"
+
+
 def test_loads_config_file_from_magi_config_env(tmp_path, monkeypatch) -> None:
     path = tmp_path / "config.toml"
     path.write_text('[model]\nprovider = "openai"\napi_key = "zz"\n')
