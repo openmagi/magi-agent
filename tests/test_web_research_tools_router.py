@@ -104,7 +104,7 @@ def _build_boundary_with_router(
 
 
 def _run(coro: object) -> object:
-    return asyncio.get_event_loop().run_until_complete(coro)  # type: ignore[arg-type]
+    return asyncio.run(coro)  # type: ignore[arg-type]
 
 
 # ---------------------------------------------------------------------------
