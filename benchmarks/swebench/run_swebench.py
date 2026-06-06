@@ -4,7 +4,7 @@ import argparse
 import re
 from pathlib import Path
 
-from benchmarks.swebench.container import ensure_magi_venv, run_instance
+from benchmarks.swebench.container import ensure_magi_runtime, run_instance
 from benchmarks.swebench.dataset import load_verified, select_subset
 from benchmarks.swebench.evaluate import run_evaluation
 from benchmarks.swebench.predictions import (
@@ -52,7 +52,7 @@ def main() -> int:
     instances = select_subset(
         load_verified(), limit=args.limit, only_ids=args.only_ids
     )
-    ensure_magi_venv(REPO_ROOT)
+    ensure_magi_runtime(REPO_ROOT)
 
     done = load_completed_ids(preds_path)
     for inst in instances:
