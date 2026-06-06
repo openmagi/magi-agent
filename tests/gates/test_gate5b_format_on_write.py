@@ -55,6 +55,7 @@ def _bundle(tmp_path, *, format_on_write: bool):
         config=_config(format_on_write=format_on_write),
         scope=_scope(),
         workspace_root=tmp_path,
+        read_ledger_enabled=False,
     )
 
 
@@ -191,12 +192,13 @@ async def test_flag_off_does_not_format_and_keeps_path_digest(tmp_path, monkeypa
     assert "contentDigest" not in outcome.output_preview
 
 
-def test_flag_default_off_via_env_threading():
+def test_flag_defaults_on_in_full_profile_via_env_threading():
     from magi_agent.config.env import is_format_on_write_enabled
 
-    assert is_format_on_write_enabled({}) is False
+    assert is_format_on_write_enabled({}) is True
     assert is_format_on_write_enabled({"MAGI_EDIT_FORMAT_ON_WRITE_ENABLED": "1"}) is True
     assert (
         is_format_on_write_enabled({"MAGI_EDIT_FORMAT_ON_WRITE_ENABLED": "false"})
         is False
     )
+    assert is_format_on_write_enabled({"MAGI_RUNTIME_PROFILE": "safe"}) is False

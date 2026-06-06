@@ -169,10 +169,11 @@ def test_env_flag_parsers_single_source() -> None:
     """The PR14 flags resolve through the single-source ``config.env`` helpers."""
     from magi_agent.config.env import max_tool_concurrency, tool_concurrency_enabled
 
-    assert tool_concurrency_enabled({}) is False
+    assert tool_concurrency_enabled({}) is True
     assert tool_concurrency_enabled({"MAGI_TOOL_CONCURRENCY_ENABLED": "1"}) is True
     assert tool_concurrency_enabled({"MAGI_TOOL_CONCURRENCY_ENABLED": "true"}) is True
     assert tool_concurrency_enabled({"MAGI_TOOL_CONCURRENCY_ENABLED": "0"}) is False
+    assert tool_concurrency_enabled({"MAGI_RUNTIME_PROFILE": "safe"}) is False
 
     assert max_tool_concurrency({}) == 8
     assert max_tool_concurrency({"MAGI_MAX_TOOL_CONCURRENCY": "4"}) == 4
@@ -182,12 +183,18 @@ def test_env_flag_parsers_single_source() -> None:
 
 def test_dispatcher_defaults_to_env_when_no_explicit_flag(monkeypatch) -> None:
     """When constructed without an explicit flag, the dispatcher reads the env
-    single source (default OFF)."""
+    single source (ON in the local full profile)."""
     monkeypatch.delenv("MAGI_TOOL_CONCURRENCY_ENABLED", raising=False)
+    monkeypatch.delenv("MAGI_RUNTIME_PROFILE", raising=False)
     registry = ToolRegistry()
     dispatcher = ToolDispatcher(registry)
-    assert dispatcher._readonly_offload_enabled is False
+    assert dispatcher._readonly_offload_enabled is True
 
+    monkeypatch.setenv("MAGI_RUNTIME_PROFILE", "safe")
+    dispatcher_safe = ToolDispatcher(ToolRegistry())
+    assert dispatcher_safe._readonly_offload_enabled is False
+
+    monkeypatch.delenv("MAGI_RUNTIME_PROFILE", raising=False)
     monkeypatch.setenv("MAGI_TOOL_CONCURRENCY_ENABLED", "1")
     monkeypatch.setenv("MAGI_MAX_TOOL_CONCURRENCY", "3")
     dispatcher_on = ToolDispatcher(ToolRegistry())

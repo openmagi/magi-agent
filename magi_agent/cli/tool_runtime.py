@@ -140,12 +140,21 @@ def build_cli_instruction(
 
         identity = load_identity(workspace_root)
 
-    return build_system_prompt(
+    prompt = build_system_prompt(
         session_key=session_id,
         turn_id="cli",
         identity=identity,
         coding_agent=True,
         model=model,
+    )
+    return (
+        f"{prompt}\n\n"
+        "<skills>\n"
+        "Bundled first-party skills, including superpowers-style workflows, are "
+        "available through the SkillLoader tool. Before specialized work such "
+        "as debugging, planning, code review, research, writing, or UI work, "
+        "load the relevant skill and follow its instructions.\n"
+        "</skills>"
     )
 
 

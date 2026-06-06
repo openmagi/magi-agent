@@ -121,13 +121,14 @@ class TestFileToolManifests:
 
 
 class TestFileToolsGating:
-    def test_file_tools_disabled_flag_off(self) -> None:
-        """When MAGI_FILE_TOOLS_ENABLED is falsy, file_tools_enabled returns False."""
+    def test_file_tools_full_profile_default_on_and_explicit_off(self) -> None:
+        """Full local profile registers file tools unless explicitly disabled."""
         from magi_agent.config.env import file_tools_enabled
 
         assert not file_tools_enabled({"MAGI_FILE_TOOLS_ENABLED": "0"})
         assert not file_tools_enabled({"MAGI_FILE_TOOLS_ENABLED": "false"})
-        assert not file_tools_enabled({})
+        assert not file_tools_enabled({"MAGI_RUNTIME_PROFILE": "safe"})
+        assert file_tools_enabled({})
 
     def test_file_tools_enabled_flag_on(self) -> None:
         from magi_agent.config.env import file_tools_enabled

@@ -59,6 +59,7 @@ def _ready_bundle(tmp_path, *, extra_config: dict | None = None):
         config=config,
         scope=scope,
         workspace_root=tmp_path,
+        read_ledger_enabled=False,
     )
 
 

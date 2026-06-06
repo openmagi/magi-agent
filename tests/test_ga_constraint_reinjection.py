@@ -180,7 +180,7 @@ def test_inert_when_flag_absent() -> None:
         ledger=_ledger(),
         open_controls=(_approval_control(),),
         agent_role="general",
-        env={},
+        env={"MAGI_GA_LIVE_ENABLED": "0"},
     )
     assert decision is None
 

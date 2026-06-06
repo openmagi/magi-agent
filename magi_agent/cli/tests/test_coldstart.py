@@ -27,6 +27,18 @@ def _run_snippet(snippet: str, *, env_extra: dict | None = None) -> subprocess.C
     """Run a Python snippet in a subprocess, returning stdout + stderr."""
     import os
     env = os.environ.copy()
+    for key in (
+        "ANTHROPIC_API_KEY",
+        "OPENAI_API_KEY",
+        "GEMINI_API_KEY",
+        "GOOGLE_API_KEY",
+        "FIREWORKS_API_KEY",
+        "MAGI_PROVIDER",
+        "MAGI_MODEL",
+        "MAGI_CONFIG",
+    ):
+        env.pop(key, None)
+    env["MAGI_CONFIG"] = "/tmp/magi-cli-coldstart-config-does-not-exist.toml"
     if env_extra:
         env.update(env_extra)
     return subprocess.run(

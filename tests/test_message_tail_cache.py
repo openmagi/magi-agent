@@ -11,7 +11,7 @@ new pack:
   messages (default 2) for Anthropic only; OpenAI/Google auto-cache prefixes
   so it is a no-op there.
 - ``config.env.is_message_cache_enabled`` reads ``MAGI_MESSAGE_CACHE_ENABLED``
-  (default OFF) as the single source of truth.
+  and the runtime profile as the single source of truth.
 - ``runtime.prompt_snapshot.message_tail_fingerprint`` produces a stable
   fingerprint that EXCLUDES ``cache_control`` markers so the fork-snapshot
   fingerprint is not destabilised by rolling-tail markers.
@@ -202,9 +202,13 @@ class TestNonAnthropicNoOp:
 
 
 class TestMessageCacheFlag:
-    def test_default_off(self) -> None:
+    def test_default_on_in_full_profile(self) -> None:
         is_enabled = _env_module().is_message_cache_enabled
-        assert is_enabled({}) is False
+        assert is_enabled({}) is True
+
+    def test_safe_profile_off(self) -> None:
+        is_enabled = _env_module().is_message_cache_enabled
+        assert is_enabled({"MAGI_RUNTIME_PROFILE": "safe"}) is False
 
     def test_explicit_off(self) -> None:
         is_enabled = _env_module().is_message_cache_enabled
@@ -219,18 +223,15 @@ class TestMessageCacheFlag:
         is_enabled = _env_module().is_message_cache_enabled
         monkeypatch.setenv("MAGI_MESSAGE_CACHE_ENABLED", "1")
         assert is_enabled() is True
-        monkeypatch.delenv("MAGI_MESSAGE_CACHE_ENABLED", raising=False)
+        monkeypatch.setenv("MAGI_MESSAGE_CACHE_ENABLED", "0")
         assert is_enabled() is False
 
-    def test_no_arg_no_env_var_defaults_off(self, monkeypatch) -> None:
-        """Fresh-process default: no argument, env var unset ⇒ OFF.
-
-        Guards the production default — a real bot process that never sets
-        ``MAGI_MESSAGE_CACHE_ENABLED`` must not emit cache markers.
-        """
+    def test_no_arg_no_env_var_defaults_on_in_full_profile(self, monkeypatch) -> None:
+        """Fresh-process default: no argument, env var unset ⇒ ON in full profile."""
         is_enabled = _env_module().is_message_cache_enabled
         monkeypatch.delenv("MAGI_MESSAGE_CACHE_ENABLED", raising=False)
-        assert is_enabled() is False
+        monkeypatch.delenv("MAGI_RUNTIME_PROFILE", raising=False)
+        assert is_enabled() is True
 
 
 # ---------------------------------------------------------------------------

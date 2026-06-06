@@ -269,7 +269,7 @@ class TestRequestLevelInjection:
 
     def test_flag_off_produces_no_cache_control(self, monkeypatch) -> None:
         pytest.importorskip("anthropic")
-        monkeypatch.delenv("MAGI_MESSAGE_CACHE_ENABLED", raising=False)
+        monkeypatch.setenv("MAGI_MESSAGE_CACHE_ENABLED", "0")
         cls = _model_module().get_cache_aware_claude_class()
         model = cls(model="claude-sonnet-4-6")
         llm_request = _build_llm_request(["m0", "m1", "m2"])
@@ -280,7 +280,7 @@ class TestRequestLevelInjection:
     def test_flag_off_matches_default_adk_messages(self, monkeypatch) -> None:
         """OFF ⇒ request messages identical to the parent Claude conversion."""
         pytest.importorskip("anthropic")
-        monkeypatch.delenv("MAGI_MESSAGE_CACHE_ENABLED", raising=False)
+        monkeypatch.setenv("MAGI_MESSAGE_CACHE_ENABLED", "0")
         from google.adk.models.anthropic_llm import content_to_message_param
 
         cls = _model_module().get_cache_aware_claude_class()
@@ -341,7 +341,7 @@ class TestStreamingInjection:
 
     def test_stream_off_produces_no_cache_control(self, monkeypatch) -> None:
         pytest.importorskip("anthropic")
-        monkeypatch.delenv("MAGI_MESSAGE_CACHE_ENABLED", raising=False)
+        monkeypatch.setenv("MAGI_MESSAGE_CACHE_ENABLED", "0")
         cls = _model_module().get_cache_aware_claude_class("claude-sonnet-4-6")
         model = cls(model="claude-sonnet-4-6")
         llm_request = _build_llm_request(["m0", "m1", "m2"])

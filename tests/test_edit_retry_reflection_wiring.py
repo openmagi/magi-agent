@@ -321,12 +321,15 @@ def test_non_edit_tool_failure_is_ignored() -> None:
     assert result is None
 
 
-def test_env_flag_defaults_off_and_parses_budget() -> None:
+def test_env_flag_defaults_on_and_parses_budget() -> None:
     from magi_agent.config.env import parse_edit_retry_reflection_env
 
-    off = parse_edit_retry_reflection_env({})
+    default = parse_edit_retry_reflection_env({})
+    assert default.enabled is True
+    assert default.max_attempts == 2
+
+    off = parse_edit_retry_reflection_env({"MAGI_EDIT_RETRY_REFLECTION_ENABLED": "0"})
     assert off.enabled is False
-    assert off.max_attempts == 2
 
     on = parse_edit_retry_reflection_env(
         {

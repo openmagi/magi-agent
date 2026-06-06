@@ -152,10 +152,10 @@ def test_both_runners_register_same_controls_when_edit_retry_on(
     assert any("edit_retry" in name for name in real_control_names)
 
 
-def test_both_runners_empty_plane_when_all_flags_off(
+def test_both_runners_register_same_default_controls(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """With all flags off, both planes have zero controls (default unchanged behavior)."""
+    """With the local full profile, both runners register the same default controls."""
     monkeypatch.setenv("CORE_AGENT_PYTHON_LOCAL_ADK_RUNNER", "1")
     for k in [
         "MAGI_EDIT_RETRY_REFLECTION_ENABLED",
@@ -163,8 +163,43 @@ def test_both_runners_empty_plane_when_all_flags_off(
         "MAGI_ERROR_RECOVERY_ENABLED",
         "MAGI_CONTEXT_COMPACTION_ENABLED",
         "MAGI_MAX_STEPS_BRAKE_ENABLED",
+        "MAGI_RUNTIME_PROFILE",
     ]:
         monkeypatch.delenv(k, raising=False)
+
+    from magi_agent.adk_bridge import local_runner
+    from magi_agent.cli.providers import ProviderConfig
+    from magi_agent.cli.real_runner import build_cli_model_runner
+
+    bundle = local_runner.build_local_adk_runner()
+    local_plane_plugin = next(
+        p for p in bundle.runner.plugin_manager.plugins if p.name == CONTROL_PLANE_PLUGIN_NAME
+    )
+
+    cli_runner = build_cli_model_runner(
+        ProviderConfig(provider="openai", model="gpt-4o", api_key="x"),
+        model_factory=_inert_model_factory,
+        tools=[],
+        instruction="test",
+    )
+    real_plane_plugin = next(
+        p for p in cli_runner._runner.plugin_manager.plugins if p.name == CONTROL_PLANE_PLUGIN_NAME
+    )
+
+    local_control_names = {c.name for c in local_plane_plugin._p._controls}
+    real_control_names = {c.name for c in real_plane_plugin._p._controls}
+    assert local_control_names == real_control_names
+    assert any("edit_retry" in name for name in real_control_names)
+    assert any("resilience" in name for name in real_control_names)
+    assert any("compaction" in name for name in real_control_names)
+
+
+def test_both_runners_empty_plane_in_safe_profile(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The conservative profile still leaves both planes empty."""
+    monkeypatch.setenv("CORE_AGENT_PYTHON_LOCAL_ADK_RUNNER", "1")
+    monkeypatch.setenv("MAGI_RUNTIME_PROFILE", "safe")
 
     from magi_agent.adk_bridge import local_runner
     from magi_agent.cli.providers import ProviderConfig

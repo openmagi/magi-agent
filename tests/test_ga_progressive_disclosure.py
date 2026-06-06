@@ -42,7 +42,7 @@ from magi_agent.tools.context import ToolContext
 # ---------------------------------------------------------------------------
 
 _ON = {"MAGI_GA_LIVE_ENABLED": "1"}
-_OFF: dict[str, str] = {}
+_OFF = {"MAGI_GA_LIVE_ENABLED": "0"}
 
 
 def _ctx(*, agent_role: str = "general") -> ToolContext:
@@ -282,6 +282,7 @@ async def test_auto_compact_protection_noop_for_non_ga() -> None:
 # sanity: flag helper unchanged
 # ---------------------------------------------------------------------------
 
-def test_flag_helper_default_off() -> None:
+def test_flag_helper_full_profile_default_on_and_explicit_off() -> None:
+    assert general_automation_live_enabled({}) is True
     assert general_automation_live_enabled(_OFF) is False
     assert general_automation_live_enabled(_ON) is True

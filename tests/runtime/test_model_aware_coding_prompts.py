@@ -331,7 +331,7 @@ def _live_system_instruction(
     request = Gate5B4C3ShadowGenerationRequest.model_validate(
         _runner_payload(model_label, tools_policy)
     )
-    env = {"MAGI_MODEL_AWARE_PROMPTS_ENABLED": "1"} if flag else {}
+    env = {"MAGI_MODEL_AWARE_PROMPTS_ENABLED": "1" if flag else "0"}
     result = build_gate5b4c3_runner_input(request, env=env)
     assert result.status == "accepted", result.reason
     assert result.runner_input is not None

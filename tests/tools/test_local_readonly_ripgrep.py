@@ -63,8 +63,8 @@ def host() -> LocalReadOnlyToolHost:
     return LocalReadOnlyToolHost()
 
 
-def test_flag_off_uses_python_regex_grep(host, tmp_path, monkeypatch):
-    monkeypatch.delenv("MAGI_RIPGREP_ENABLED", raising=False)
+def test_explicit_flag_off_uses_python_regex_grep(host, tmp_path, monkeypatch):
+    monkeypatch.setenv("MAGI_RIPGREP_ENABLED", "0")
     _seed(tmp_path)
     result = _grep(host, tmp_path, r"def (alpha|beta)")
     paths = {m["path"] for m in result.output["matches"]}

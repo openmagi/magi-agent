@@ -385,9 +385,12 @@ def test_public_projection_has_no_raw_transcript_or_secret() -> None:
         assert unsafe not in dumped
 
 
-def test_env_flag_helper_default_off() -> None:
-    # Master flag is the existing single-source helper; default OFF.
-    assert general_automation_live_enabled({}) is False
+def test_env_flag_helper_default_on_in_full_profile() -> None:
+    # Master flag is the existing single-source helper; default ON in the local
+    # full runtime profile and still explicitly disableable.
+    assert general_automation_live_enabled({}) is True
+    assert general_automation_live_enabled({"MAGI_RUNTIME_PROFILE": "safe"}) is False
+    assert general_automation_live_enabled({"MAGI_GA_LIVE_ENABLED": "0"}) is False
     assert general_automation_live_enabled(_on_env()) is True
 
 

@@ -106,8 +106,15 @@ def _registry_with_handler(name: str, *, permission: str = "execute") -> ToolReg
 # ---------------------------------------------------------------------------
 
 
-def test_flag_default_off(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_flag_default_on_in_full_profile(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("MAGI_GA_LIVE_ENABLED", raising=False)
+    monkeypatch.delenv("MAGI_RUNTIME_PROFILE", raising=False)
+    assert general_automation_live_gate_enabled() is True
+
+
+def test_safe_profile_off(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("MAGI_GA_LIVE_ENABLED", raising=False)
+    monkeypatch.setenv("MAGI_RUNTIME_PROFILE", "safe")
     assert general_automation_live_gate_enabled() is False
 
 
@@ -124,7 +131,7 @@ def test_flag_falsy_tokens(monkeypatch: pytest.MonkeyPatch, token: str) -> None:
 
 
 def test_gate_inactive_when_flag_off(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.delenv("MAGI_GA_LIVE_ENABLED", raising=False)
+    monkeypatch.setenv("MAGI_GA_LIVE_ENABLED", "0")
     gate = GeneralAutomationLiveGate()
     assert gate.is_active(_general_context()) is False
 
@@ -166,7 +173,7 @@ def test_flag_off_dispatch_byte_identical_to_baseline(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Flag-OFF: dispatch result is byte-identical to a gate-disabled baseline."""
-    monkeypatch.delenv("MAGI_GA_LIVE_ENABLED", raising=False)
+    monkeypatch.setenv("MAGI_GA_LIVE_ENABLED", "0")
     args = {"command": "rm -rf /workspace/bot/data"}
 
     live = asyncio.run(
@@ -182,7 +189,7 @@ def test_flag_off_dispatch_byte_identical_to_baseline(
 
 def test_flag_off_gate_never_classifies(monkeypatch: pytest.MonkeyPatch) -> None:
     """Flag-OFF: classify_pre returns an inactive outcome with no receipt."""
-    monkeypatch.delenv("MAGI_GA_LIVE_ENABLED", raising=False)
+    monkeypatch.setenv("MAGI_GA_LIVE_ENABLED", "0")
     gate = GeneralAutomationLiveGate()
     outcome = gate.classify_pre(
         "Bash",

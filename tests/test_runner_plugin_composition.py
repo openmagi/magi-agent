@@ -6,10 +6,10 @@ After PR2 (goose-parity control-plane), the 3 existing plugin-backed controls
 registered as LoopControl adapters inside a single ControlPlanePlugin. Composition
 is guaranteed by the ControlPlane registry rather than the runner's plugin list.
 
-These tests mirror the original intent:
-- All flags ON → all three controls registered in the plane.
-- Each flag individually → exactly that control registered.
-- All flags OFF → empty plane (zero controls, same as zero regression).
+These tests mirror the current local OSS runtime intent:
+- Empty local env → all three first-party controls registered in the plane.
+- Each control can still be explicitly isolated or disabled.
+- Safe/minimal profile → empty plane for conservative runs.
 """
 
 from __future__ import annotations
@@ -57,24 +57,56 @@ def test_all_flags_on_registers_all_three_controls(monkeypatch: pytest.MonkeyPat
 
 
 def test_only_compaction_on_registers_only_compaction(monkeypatch: pytest.MonkeyPatch) -> None:
-    controls = _controls(monkeypatch, MAGI_CONTEXT_COMPACTION_ENABLED="1")
+    controls = _controls(
+        monkeypatch,
+        MAGI_EDIT_RETRY_REFLECTION_ENABLED="0",
+        MAGI_LOOP_GUARD_ENABLED="0",
+        MAGI_ERROR_RECOVERY_ENABLED="0",
+        MAGI_CONTEXT_COMPACTION_ENABLED="1",
+    )
     assert _control_types(controls) == {_CompactionLoopControl}
 
 
 def test_only_loop_guard_on_registers_only_resilience(monkeypatch: pytest.MonkeyPatch) -> None:
-    controls = _controls(monkeypatch, MAGI_LOOP_GUARD_ENABLED="1")
+    controls = _controls(
+        monkeypatch,
+        MAGI_EDIT_RETRY_REFLECTION_ENABLED="0",
+        MAGI_LOOP_GUARD_ENABLED="1",
+        MAGI_CONTEXT_COMPACTION_ENABLED="0",
+    )
     assert _control_types(controls) == {_ResilienceLoopControl}
 
 
-def test_all_flags_off_empty_plane(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_empty_local_env_registers_all_default_controls(monkeypatch: pytest.MonkeyPatch) -> None:
     for flag in (
         "MAGI_EDIT_RETRY_REFLECTION_ENABLED",
         "MAGI_LOOP_GUARD_ENABLED",
         "MAGI_ERROR_RECOVERY_ENABLED",
         "MAGI_CONTEXT_COMPACTION_ENABLED",
+        "MAGI_RUNTIME_PROFILE",
     ):
         monkeypatch.delenv(flag, raising=False)
     controls = _controls(monkeypatch)
+    types = _control_types(controls)
+    assert _EditRetryLoopControl in types
+    assert _ResilienceLoopControl in types
+    assert _CompactionLoopControl in types
+    assert len(controls) == 3
+
+
+def test_safe_profile_empty_plane(monkeypatch: pytest.MonkeyPatch) -> None:
+    controls = _controls(monkeypatch, MAGI_RUNTIME_PROFILE="safe")
+    assert controls == []
+
+
+def test_explicit_flags_off_empty_plane(monkeypatch: pytest.MonkeyPatch) -> None:
+    controls = _controls(
+        monkeypatch,
+        MAGI_EDIT_RETRY_REFLECTION_ENABLED="0",
+        MAGI_LOOP_GUARD_ENABLED="0",
+        MAGI_ERROR_RECOVERY_ENABLED="0",
+        MAGI_CONTEXT_COMPACTION_ENABLED="0",
+    )
     assert controls == []
 
 
