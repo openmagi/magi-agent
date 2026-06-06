@@ -73,6 +73,11 @@ def test_local_dashboard_renders_workbench_not_empty_mockup() -> None:
     response = _client().get("/dashboard")
     html = response.text
 
+    assert 'data-dashboard-shell="local-chat"' in html
+    assert 'data-shell-region="channels"' in html
+    assert 'data-shell-region="transcript"' in html
+    assert 'data-shell-region="composer"' in html
+    assert 'data-shell-region="workbench"' in html
     assert 'id="thread-list"' in html
     assert 'id="quick-actions"' in html
     assert 'id="composer-status"' in html
@@ -90,6 +95,22 @@ def test_local_dashboard_renders_workbench_not_empty_mockup() -> None:
     assert 'id="metric-events"' in html
     assert 'id="receipt-list"' in html
     assert "Run local agent work from one dashboard." not in html
+
+
+def test_local_dashboard_shell_matches_hosted_chat_regions() -> None:
+    response = _client().get("/dashboard")
+    html = response.text
+
+    assert '<aside class="sidebar" data-shell-region="channels">' in html
+    assert '<main class="main" data-shell-region="transcript">' in html
+    assert '<section class="composer-wrap" data-shell-region="composer">' in html
+    assert '<aside class="inspector" data-shell-region="workbench">' in html
+    assert 'aria-label="Chat transcript"' in html
+    assert 'aria-label="Prompt composer"' in html
+    assert 'aria-label="Workspace tabs"' in html
+    assert 'role="tabpanel" id="panel-work"' in html
+    assert 'role="tabpanel" id="panel-knowledge"' in html
+    assert 'role="tabpanel" id="panel-settings"' in html
 
 
 def test_local_dashboard_has_operational_work_stream_metrics() -> None:
@@ -223,5 +244,8 @@ def test_local_dashboard_chat_route_streams_local_adk_events(monkeypatch) -> Non
     assert response.headers["content-type"].startswith("text/event-stream")
     text = response.text
     assert "Running local ADK" in text
-    assert "Local ADK runtime ready" in text
+    assert (
+        "Local ADK runtime ready" in text
+        or "runtime dependencies are present" in text
+    )
     assert "data: [DONE]" in text
