@@ -7,11 +7,9 @@ in keeping with ``RecipePackManifest`` invariants — the iterative-discovery
 *execution* lives in :mod:`magi_agent.discovery` and is invoked separately
 behind its own default-OFF env gate.
 
-NOTE (registration): this pack is intentionally NOT wired into
-``recipes/compiler.py:_first_party_packs`` — doing so would edit a shared
-registry file. The builder follows the sibling-pack convention so a one-line
-registration (``_build_discovery_pack()``) can be added there later without
-changing this module.
+Registered in ``recipes/compiler.py:_first_party_packs`` via
+``_build_discovery_pack()``, mirroring the ``learning_usage`` sibling, so it is
+selected whenever a task profile asks for ``discovery``.
 """
 from __future__ import annotations
 
