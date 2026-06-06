@@ -383,11 +383,11 @@ def test_runner_attaches_plugin_and_compacts_via_real_plugin_manager(
     assert len(req.contents) == 16  # compacted before the model call
 
 
-def test_runner_flag_off_attaches_no_compaction_plugin_and_leaves_contents(
+def test_runner_explicit_flag_off_attaches_no_compaction_plugin_and_leaves_contents(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv("CORE_AGENT_PYTHON_LOCAL_ADK_RUNNER", "1")
-    monkeypatch.delenv("MAGI_CONTEXT_COMPACTION_ENABLED", raising=False)
+    monkeypatch.setenv("MAGI_CONTEXT_COMPACTION_ENABLED", "0")
 
     bundle = local_runner.build_local_adk_runner()
     pm = bundle.runner.plugin_manager

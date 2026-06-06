@@ -432,9 +432,17 @@ def test_canary_live_gate_is_5() -> None:
 # 12. general_automation_live_enabled reuse (flag source of truth)
 # ---------------------------------------------------------------------------
 
-def test_ga_live_enabled_flag_default_off(monkeypatch: pytest.MonkeyPatch) -> None:
-    """MAGI_GA_LIVE_ENABLED absent → False (default OFF)."""
+def test_ga_live_enabled_flag_default_on_in_full_profile(monkeypatch: pytest.MonkeyPatch) -> None:
+    """MAGI_GA_LIVE_ENABLED absent → True in the local full runtime profile."""
     monkeypatch.delenv("MAGI_GA_LIVE_ENABLED", raising=False)
+    monkeypatch.delenv("MAGI_RUNTIME_PROFILE", raising=False)
+    from magi_agent.config.env import general_automation_live_enabled
+    assert general_automation_live_enabled() is True
+
+
+def test_ga_live_enabled_flag_safe_profile_off(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("MAGI_GA_LIVE_ENABLED", raising=False)
+    monkeypatch.setenv("MAGI_RUNTIME_PROFILE", "safe")
     from magi_agent.config.env import general_automation_live_enabled
     assert general_automation_live_enabled() is False
 

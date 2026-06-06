@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import os
 from dataclasses import dataclass
 from collections.abc import Mapping
 import hashlib
@@ -60,15 +59,30 @@ LOCAL_DEV_MODEL_SENTINEL = "local-dev"
 
 _TRUE_VALUES = frozenset({"1", "true", "yes", "on"})
 _FALSE_VALUES = frozenset({"0", "false", "no", "off", ""})
+RUNTIME_PROFILE_ENV = "MAGI_RUNTIME_PROFILE"
+_SAFE_RUNTIME_PROFILES = frozenset({"safe", "off", "minimal", "conservative"})
 
 # ---------------------------------------------------------------------------
 # Coding: edit fuzzy-match flag
 # ---------------------------------------------------------------------------
 # When set to "1" or "true", gate5b FileEdit uses the 9-stage fuzzy-match
 # cascade (magi_agent.coding.edit_matching) instead of exact-only matching.
-# Default: OFF (0) — zero regression on existing behaviour.
+# Default: ON in the local full runtime profile; set
+# MAGI_EDIT_FUZZY_MATCH_ENABLED=0 or MAGI_RUNTIME_PROFILE=safe for conservative
+# runs.
 MAGI_EDIT_FUZZY_MATCH_ENABLED: bool = (
-    os.environ.get("MAGI_EDIT_FUZZY_MATCH_ENABLED", "0").strip().lower()
+    (
+        os.environ.get("MAGI_EDIT_FUZZY_MATCH_ENABLED")
+        if os.environ.get("MAGI_EDIT_FUZZY_MATCH_ENABLED") is not None
+        else (
+            "0"
+            if (os.environ.get(RUNTIME_PROFILE_ENV) or "").strip().lower()
+            in _SAFE_RUNTIME_PROFILES
+            else "1"
+        )
+    )
+    .strip()
+    .lower()
     in _TRUE_VALUES
 )
 
@@ -101,11 +115,12 @@ _GATE5B4C3_FIRST_SMOKE_CREDENTIAL_ENV = "GOOGLE_API_KEY"
 
 @dataclass(frozen=True)
 class LspDiagnosticsEnv:
-    """Single source for the after-edit LSP diagnostics flag (default OFF).
+    """Single source for the after-edit LSP diagnostics flag.
 
     Threaded into gate5b via ``build_gate5b_full_toolhost_config_from_env``.
-    When ``enabled`` is False the gate5b contract stays inert and no
-    diagnostics are appended (zero regression).
+    The local full runtime profile enables diagnostics by default; explicit
+    ``MAGI_LSP_DIAGNOSTICS_ENABLED=0`` or ``MAGI_RUNTIME_PROFILE=safe`` keeps
+    the gate5b contract inert.
     """
 
     enabled: bool = False
@@ -114,7 +129,7 @@ class LspDiagnosticsEnv:
 
 
 def parse_lsp_diagnostics_env(env: Mapping[str, str]) -> LspDiagnosticsEnv:
-    enabled = _is_true(env.get("MAGI_LSP_DIAGNOSTICS_ENABLED"))
+    enabled = _runtime_feature_enabled(env, "MAGI_LSP_DIAGNOSTICS_ENABLED")
     if not enabled:
         return LspDiagnosticsEnv()
     cap = _int_env(env, "MAGI_LSP_DIAGNOSTICS_CAP", 20)
@@ -155,7 +170,10 @@ class EditRetryReflectionEnv:
 def parse_edit_retry_reflection_env(
     env: Mapping[str, str],
 ) -> EditRetryReflectionEnv:
-    enabled = _is_true(env.get(EDIT_RETRY_REFLECTION_ENABLED_ENV))
+    enabled = _runtime_feature_enabled(
+        env,
+        EDIT_RETRY_REFLECTION_ENABLED_ENV,
+    )
     max_attempts = _int_env(
         env,
         EDIT_RETRY_MAX_ATTEMPTS_ENV,
@@ -173,7 +191,9 @@ def parse_edit_retry_reflection_env(
 # after_tool_callback drives the existing ToolCallLoopDetector: N identical
 # consecutive tool calls -> soft nudge (model warned, tool result preserved);
 # a higher threshold -> hard stop (the tool result is replaced with a stop
-# directive so the model does not keep looping). Default OFF.
+# directive so the model does not keep looping). Enabled by default in the local
+# full runtime profile; set MAGI_LOOP_GUARD_ENABLED=0 or MAGI_RUNTIME_PROFILE=safe
+# for conservative runs.
 LOOP_GUARD_ENABLED_ENV = "MAGI_LOOP_GUARD_ENABLED"
 LOOP_GUARD_SOFT_THRESHOLD_ENV = "MAGI_LOOP_GUARD_SOFT_THRESHOLD"
 LOOP_GUARD_HARD_THRESHOLD_ENV = "MAGI_LOOP_GUARD_HARD_THRESHOLD"
@@ -195,7 +215,7 @@ class LoopGuardEnv:
 
 
 def parse_loop_guard_env(env: Mapping[str, str]) -> LoopGuardEnv:
-    enabled = _is_true(env.get(LOOP_GUARD_ENABLED_ENV))
+    enabled = _runtime_feature_enabled(env, LOOP_GUARD_ENABLED_ENV)
     if not enabled:
         return LoopGuardEnv()
     soft = _int_env(env, LOOP_GUARD_SOFT_THRESHOLD_ENV, _LOOP_GUARD_SOFT_DEFAULT)
@@ -235,7 +255,9 @@ def parse_loop_guard_env(env: Mapping[str, str]) -> LoopGuardEnv:
 # (also consumed by ErrorRecoveryConfig.from_env). When enabled, the live ADK
 # Runner attaches the MagiResiliencePlugin whose on_model_error_callback runs the
 # existing RecoveryEngine: classify the model error and apply the first
-# applicable strategy (RateLimit honors Retry-After). Default OFF.
+# applicable strategy (RateLimit honors Retry-After). Enabled by default in the
+# local full runtime profile; set MAGI_ERROR_RECOVERY_ENABLED=0 or
+# MAGI_RUNTIME_PROFILE=safe for conservative runs.
 ERROR_RECOVERY_ENABLED_ENV = "MAGI_ERROR_RECOVERY_ENABLED"
 MAX_RECOVERY_ATTEMPTS_ENV = "MAGI_MAX_RECOVERY_ATTEMPTS"
 
@@ -247,7 +269,7 @@ class ErrorRecoveryEnv:
 
 
 def parse_error_recovery_env(env: Mapping[str, str]) -> ErrorRecoveryEnv:
-    enabled = _is_true(env.get(ERROR_RECOVERY_ENABLED_ENV))
+    enabled = _runtime_feature_enabled(env, ERROR_RECOVERY_ENABLED_ENV)
     max_attempts = _int_env(env, MAX_RECOVERY_ATTEMPTS_ENV, 3)
     if max_attempts < 1:
         raise RuntimeEnvError(f"{MAX_RECOVERY_ATTEMPTS_ENV} must be >= 1")
@@ -258,8 +280,9 @@ def parse_error_recovery_env(env: Mapping[str, str]) -> ErrorRecoveryEnv:
 # PR13: when enabled, an ADK ``before_model_callback`` plugin reduces the
 # outgoing ``llm_request.contents`` to the recent tail (reusing
 # ``ContextLifecycleBoundary.compact_if_needed`` as the threshold/tail decision
-# engine) once the estimated context exceeds budget. Default OFF -> zero
-# regression (the plugin is never attached).
+# engine) once the estimated context exceeds budget. Enabled by default in the
+# local full runtime profile; set MAGI_CONTEXT_COMPACTION_ENABLED=0 or
+# MAGI_RUNTIME_PROFILE=safe for conservative runs.
 CONTEXT_COMPACTION_ENABLED_ENV = "MAGI_CONTEXT_COMPACTION_ENABLED"
 COMPACTION_TOKEN_THRESHOLD_ENV = "MAGI_COMPACTION_TOKEN_THRESHOLD"
 COMPACTION_TAIL_EVENTS_ENV = "MAGI_COMPACTION_TAIL_EVENTS"
@@ -275,8 +298,8 @@ class ContextCompactionEnv:
 
 
 def parse_context_compaction_env(env: Mapping[str, str]) -> ContextCompactionEnv:
-    """Single source for the live context-compaction flags (default OFF)."""
-    enabled = _is_true(env.get(CONTEXT_COMPACTION_ENABLED_ENV))
+    """Single source for the live context-compaction flags."""
+    enabled = _runtime_feature_enabled(env, CONTEXT_COMPACTION_ENABLED_ENV)
     token_threshold = _int_env(
         env,
         COMPACTION_TOKEN_THRESHOLD_ENV,
@@ -1345,23 +1368,23 @@ def _csv_values(value: str) -> tuple[str, ...]:
 def is_read_ledger_enabled(env: Mapping[str, str]) -> bool:
     """Single source of truth for the read-before-edit ledger activation flag.
 
-    Default off. When ``MAGI_READ_LEDGER_ENABLED`` is truthy, the Gate 5B full
+    Default ON in the local full runtime profile. When enabled, the Gate 5B full
     toolhost records full reads and blocks edits/overwrites of existing files
     that were not freshly read first (read-before-edit enforcement).
     """
 
-    return _is_true(env.get("MAGI_READ_LEDGER_ENABLED"))
+    return _runtime_feature_enabled(env, "MAGI_READ_LEDGER_ENABLED")
 
 
 def is_format_on_write_enabled(env: Mapping[str, str]) -> bool:
-    """Single source for the format-after-edit flag (default OFF).
+    """Single source for the format-after-edit flag.
 
     When ON, Gate 5B FileWrite/FileEdit/PatchApply run the matching formatter
     on the written file and re-read it so the returned digest reflects the
     formatted content (keeps the model's next edit aligned). Fail-open: a
     missing/failing/timed-out formatter never fails the write.
     """
-    return _is_true(env.get("MAGI_EDIT_FORMAT_ON_WRITE_ENABLED"))
+    return _runtime_feature_enabled(env, "MAGI_EDIT_FORMAT_ON_WRITE_ENABLED")
 
 
 def parse_gate3a_recorded_replay_env(env: Mapping[str, str]) -> Gate3ARecordedReplayEnv:
@@ -1396,14 +1419,14 @@ READ_QUALITY_FLAG = "MAGI_READ_QUALITY_ENABLED"
 
 
 def is_read_quality_enabled(env: Mapping[str, str] | None = None) -> bool:
-    """PR6 read-tool quality flag (default OFF). Single source of truth.
+    """PR6 read-tool quality flag. Single source of truth.
 
     When ON, FileRead output gets 1-indexed line numbers, line/byte caps with an
     'offset=N to continue' footer, binary-file detection, and 'Did you mean?'
     filename suggestions on miss.
     """
     source = os.environ if env is None else env
-    return _is_true(source.get(READ_QUALITY_FLAG))
+    return _runtime_feature_enabled(source, READ_QUALITY_FLAG)
 
 
 _RIPGREP_ENABLED_ENV = "MAGI_RIPGREP_ENABLED"
@@ -1412,7 +1435,7 @@ _RIPGREP_ENABLED_ENV = "MAGI_RIPGREP_ENABLED"
 def ripgrep_enabled(env: Mapping[str, str] | None = None) -> bool:
     """Single source of truth for the ``MAGI_RIPGREP_ENABLED`` flag.
 
-    Default OFF. When ON, coding-mode Glob/Grep (gate5b full toolhost and the
+    Default ON in the local full runtime profile. When ON, coding-mode Glob/Grep (gate5b full toolhost and the
     local read-only toolhost) prefer the ripgrep backend, falling back to the
     existing Python implementation whenever ``rg`` is unavailable.
     """
@@ -1420,37 +1443,37 @@ def ripgrep_enabled(env: Mapping[str, str] | None = None) -> bool:
     import os as _os
 
     source = env if env is not None else _os.environ
-    return _is_true(source.get(_RIPGREP_ENABLED_ENV))
+    return _runtime_feature_enabled(source, _RIPGREP_ENABLED_ENV)
 
 
 def apply_patch_enabled(env: Mapping[str, str]) -> bool:
     """Single source of truth for the ``MAGI_APPLY_PATCH_ENABLED`` flag.
 
-    Default OFF. When ON, gate5b ``PatchApply`` accepts Codex-style envelope
+    Default ON in the local full runtime profile. When ON, gate5b ``PatchApply`` accepts Codex-style envelope
     patches (add/update/delete/move) via the 4-pass matcher in
     ``magi_agent.coding.patch_apply`` and GPT-5-class models are offered
     apply_patch in place of edit/write.
     """
 
-    return _is_true(env.get("MAGI_APPLY_PATCH_ENABLED"))
+    return _runtime_feature_enabled(env, "MAGI_APPLY_PATCH_ENABLED")
 
 
 def parse_provider_repair_enabled(env: Mapping[str, str]) -> bool:
     """Whether per-provider tool-schema repair (PR9) is enabled.
 
     Single source of truth for the ``MAGI_PROVIDER_REPAIR_ENABLED`` flag. Default
-    OFF. When ON, the ADK tool adapter applies provider-family-keyed schema
+    ON in the local full runtime profile. When ON, the ADK tool adapter applies provider-family-keyed schema
     repairs (today: Gemini integer/number/boolean enum -> string enum) to the
     tool declarations exposed to the active model. See
     ``magi_agent.adk_bridge.tool_adapter.apply_provider_repair``.
     """
-    return _is_true(env.get("MAGI_PROVIDER_REPAIR_ENABLED"))
+    return _runtime_feature_enabled(env, "MAGI_PROVIDER_REPAIR_ENABLED")
 
 
 def tool_concurrency_enabled(env: Mapping[str, str]) -> bool:
     """Single source of truth for the ``MAGI_TOOL_CONCURRENCY_ENABLED`` flag.
 
-    Default OFF. When ON, readonly tools (``FileRead``/``Glob``/``Grep``/
+    Default ON in the local full runtime profile. When ON, readonly tools (``FileRead``/``Glob``/``Grep``/
     ``GitDiff`` and any manifest whose ``parallel_safety`` is ``"readonly"`` or
     ``"concurrency_safe"``) are dispatched off the event loop via
     ``asyncio.to_thread`` so that the parallelism Google ADK already provides
@@ -1461,7 +1484,7 @@ def tool_concurrency_enabled(env: Mapping[str, str]) -> bool:
     write-barrier guarantee. OFF => current fully-inline behaviour (zero
     regression).
     """
-    return _is_true(env.get("MAGI_TOOL_CONCURRENCY_ENABLED"))
+    return _runtime_feature_enabled(env, "MAGI_TOOL_CONCURRENCY_ENABLED")
 
 
 def max_tool_concurrency(env: Mapping[str, str]) -> int:
@@ -1475,33 +1498,33 @@ def max_tool_concurrency(env: Mapping[str, str]) -> int:
 
 
 def model_aware_prompts_enabled(env: Mapping[str, str]) -> bool:
-    """Read ``MAGI_MODEL_AWARE_PROMPTS_ENABLED`` (default OFF).
+    """Read ``MAGI_MODEL_AWARE_PROMPTS_ENABLED``.
 
     Single source of truth for the model-aware prompt feature (PR10 per-model
     coding hints + identity adaptation). Follows the same truthy convention as
     the other ``MAGI_*`` flags (``"1"``/``"true"``/``"yes"``/``"on"``).
     """
-    return _is_true(env.get("MAGI_MODEL_AWARE_PROMPTS_ENABLED"))
+    return _runtime_feature_enabled(env, "MAGI_MODEL_AWARE_PROMPTS_ENABLED")
 
 
 def general_automation_live_enabled(env: Mapping[str, str] | None = None) -> bool:
-    """Return True when the GA live harness master flag is explicitly truthy.
+    """Return True when the GA live harness master flag is enabled.
 
-    Single source of truth for ``MAGI_GA_LIVE_ENABLED`` (Track 19). Default OFF;
-    truthy tokens are ``{1, true, yes, on}`` (case-insensitive). When *env* is
-    ``None`` the process environment is consulted.
+    Single source of truth for ``MAGI_GA_LIVE_ENABLED`` (Track 19). Defaults ON
+    in the local full runtime profile. When *env* is ``None`` the process
+    environment is consulted.
     """
     if env is None:
         import os
 
         env = os.environ
-    return _is_true(env.get("MAGI_GA_LIVE_ENABLED"))
+    return _runtime_feature_enabled(env, "MAGI_GA_LIVE_ENABLED")
 
 
 def is_message_cache_enabled(env: Mapping[str, str] | None = None) -> bool:
     """Single source of truth for the message-tail prompt-cache flag.
 
-    Reads ``MAGI_MESSAGE_CACHE_ENABLED`` (default OFF). When enabled, the
+    Reads ``MAGI_MESSAGE_CACHE_ENABLED``. When enabled, the
     runtime may mark the last ~2 non-system conversation messages with an
     Anthropic ``cache_control: {type: ephemeral}`` marker so the growing
     conversation tail is cached in addition to the system prefix.
@@ -1511,13 +1534,13 @@ def is_message_cache_enabled(env: Mapping[str, str] | None = None) -> bool:
             flag can be evaluated against the live process environment.
     """
     source: Mapping[str, str] = os.environ if env is None else env
-    return _is_true(source.get("MAGI_MESSAGE_CACHE_ENABLED"))
+    return _runtime_feature_enabled(source, "MAGI_MESSAGE_CACHE_ENABLED")
 
 
 def file_tools_enabled(env: Mapping[str, str] | None = None) -> bool:
     """Single source of truth for the ``MAGI_FILE_TOOLS_ENABLED`` flag.
 
-    Default OFF. When ON, the four file/multimodal tools (XLSXRead,
+    Default ON in the local full runtime profile. When ON, the four file/multimodal tools (XLSXRead,
     DocumentRead, ImageUnderstand, AudioTranscribe) are registered in the tool
     registry and exposed via ``build_cli_adk_tools``. Requires the ``files``
     (and optionally ``audio``) optional extras to be installed; handlers
@@ -1528,11 +1551,28 @@ def file_tools_enabled(env: Mapping[str, str] | None = None) -> bool:
         import os as _os
 
         env = _os.environ
-    return _is_true(env.get("MAGI_FILE_TOOLS_ENABLED"))
+    return _runtime_feature_enabled(env, "MAGI_FILE_TOOLS_ENABLED")
 
 
 def _is_true(value: str | None) -> bool:
     return (value or "").strip().lower() in _TRUE_VALUES
+
+
+def _runtime_profile_default_enabled(env: Mapping[str, str]) -> bool:
+    profile = (env.get(RUNTIME_PROFILE_ENV) or "").strip().lower()
+    return profile not in _SAFE_RUNTIME_PROFILES
+
+
+def _runtime_feature_enabled(env: Mapping[str, str], name: str) -> bool:
+    value = env.get(name)
+    if value is None:
+        return _runtime_profile_default_enabled(env)
+    normalized = value.strip().lower()
+    if normalized in _FALSE_VALUES:
+        return False
+    if normalized in _TRUE_VALUES:
+        return True
+    return _runtime_profile_default_enabled(env)
 
 
 def _env_bool_default_true(value: str | None) -> bool:

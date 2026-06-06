@@ -118,6 +118,8 @@ class RunnerPolicyAssembly:
     missing_evidence_action: str
     repair_policy: Mapping[str, object]
     attachment_flags: Mapping[str, bool]
+    task_profile: Mapping[str, object]
+    phase_routing: Mapping[str, object]
 
     def __init__(
         self,
@@ -138,6 +140,10 @@ class RunnerPolicyAssembly:
         repair_policy: Mapping[str, object] | None = None,
         attachmentFlags: Mapping[str, bool] | None = None,
         attachment_flags: Mapping[str, bool] | None = None,
+        taskProfile: Mapping[str, object] | None = None,
+        task_profile: Mapping[str, object] | None = None,
+        phaseRouting: Mapping[str, object] | None = None,
+        phase_routing: Mapping[str, object] | None = None,
     ) -> None:
         object.__setattr__(
             self,
@@ -179,6 +185,16 @@ class RunnerPolicyAssembly:
             "attachment_flags",
             _authority_safe_attachment_flags(attachment_flags or attachmentFlags or {}),
         )
+        object.__setattr__(
+            self,
+            "task_profile",
+            dict(task_profile or taskProfile or {}),
+        )
+        object.__setattr__(
+            self,
+            "phase_routing",
+            dict(phase_routing or phaseRouting or {}),
+        )
 
     def to_public_payload(self) -> dict[str, object]:
         return {
@@ -190,6 +206,8 @@ class RunnerPolicyAssembly:
             "missingEvidenceAction": self.missing_evidence_action,
             "repairPolicy": dict(self.repair_policy),
             "attachmentFlags": dict(self.attachment_flags),
+            "taskProfile": dict(self.task_profile),
+            "phaseRouting": dict(self.phase_routing),
         }
 
 
@@ -343,6 +361,76 @@ def _pre_final_gate_applies(
 
     normalized_prompt = prompt.lower()
     return any(marker in normalized_prompt for marker in _CODING_PROMPT_MARKERS)
+
+
+def _build_coding_repair_decision_payload(
+    repair_policy: Mapping[str, object],
+) -> dict[str, object]:
+    from magi_agent.coding.repair_loop import (
+        CodingRepairLoopConfig,
+        CodingRepairLoopState,
+        evaluate_repair_decision,
+        project_repair_decision_event,
+    )
+
+    raw_max_attempts = repair_policy.get("maxAttempts") or repair_policy.get(
+        "max_attempts"
+    )
+    max_attempts = 3
+    if isinstance(raw_max_attempts, int):
+        max_attempts = raw_max_attempts
+    decision = evaluate_repair_decision(
+        config=CodingRepairLoopConfig(enabled=True, maxAttempts=max_attempts),
+        state=CodingRepairLoopState(attemptCount=0),
+        latest_test_evidence=None,
+    )
+    return project_repair_decision_event(decision)
+
+
+def _build_pre_final_verifier_bus_payload(
+    *,
+    decision: str,
+    missing_evidence: list[str],
+    missing_validators: list[str],
+) -> dict[str, object]:
+    """Project the live pre-final gate into public verifier-bus metadata."""
+
+    from magi_agent.harness.verifier_bus import VerifierResultMetadata
+
+    results: list[dict[str, object]] = []
+    if missing_evidence:
+        results.append(
+            VerifierResultMetadata(
+                verifierId="tool-evidence-contract",
+                status="missing",
+                publicSummary="missing required deterministic evidence",
+                retryMessage="collect required evidence before final answer",
+            ).model_dump(by_alias=True, mode="json", warnings=False)
+        )
+    if missing_validators:
+        results.append(
+            VerifierResultMetadata(
+                verifierId="dev-coding-verification-audit",
+                status="missing",
+                publicSummary="missing required validator evidence",
+                retryMessage="run required validation before final answer",
+            ).model_dump(by_alias=True, mode="json", warnings=False)
+        )
+    if not results:
+        results.append(
+            VerifierResultMetadata(
+                verifierId="pre-final-evidence-gate",
+                status="pass" if decision == "pass" else "audit",
+                publicSummary="pre-final evidence gate passed",
+            ).model_dump(by_alias=True, mode="json", warnings=False)
+        )
+    return {
+        "metadataOnly": True,
+        "decision": decision,
+        "results": results,
+        "trafficAttached": False,
+        "executionAttached": False,
+    }
 
 
 def _extract_task_types(harness_state: object | None) -> tuple[str, ...]:
@@ -1013,7 +1101,7 @@ class MagiEngineDriver:
             ref for ref in assembly.required_validators if ref not in observed_public_refs
         ]
         decision = "block" if missing_evidence or missing_validators else "pass"
-        return {
+        payload: dict[str, object] = {
             "type": "pre_final_evidence_gate",
             "turnId": turn_id,
             "decision": decision,
@@ -1024,6 +1112,16 @@ class MagiEngineDriver:
             "repairPolicy": dict(assembly.repair_policy),
             "attachmentFlags": dict(assembly.attachment_flags),
         }
+        payload["verifierBus"] = _build_pre_final_verifier_bus_payload(
+            decision=decision,
+            missing_evidence=missing_evidence,
+            missing_validators=missing_validators,
+        )
+        if decision == "block" and assembly.missing_evidence_action == "repair_required":
+            payload["repairDecision"] = _build_coding_repair_decision_payload(
+                assembly.repair_policy
+            )
+        return payload
 
     @staticmethod
     def _collect_public_refs(value: object, refs: set[str]) -> None:

@@ -139,10 +139,36 @@ def test_cli_model_runner_attaches_first_party_policy_callback_by_default(
     assembly = runner.runner_policy_assembly
     assert assembly is not None
     assert "openmagi.dev-coding" in assembly.selected_pack_ids
+    assert "openmagi.research" in assembly.selected_pack_ids
+    assert "openmagi.superpowers-compat" in assembly.selected_pack_ids
     assert "evidence:git-diff" in assembly.evidence_requirements
     assert "verifier:dev-coding:test-evidence" in assembly.required_validators
     assert assembly.attachment_flags["productionWriteAllowed"] is False
     assert assembly.attachment_flags["livePolicyCallbackAttached"] is True
+    payload = assembly.to_public_payload()
+    assert "source_acquisition" in payload["phaseRouting"]["phaseRoutes"]
+    assert "test_interpretation" in payload["phaseRouting"]["phaseRoutes"]
+
+
+def test_cli_model_runner_materializes_task_profile_phase_routing(tmp_path) -> None:
+    runner = build_cli_model_runner(
+        _config(),
+        model_factory=_fake_model_factory,
+        workspace_root=str(tmp_path),
+        task_profile={"taskType": "research"},
+    )
+
+    assembly = runner.runner_policy_assembly
+    assert assembly is not None
+    assert "openmagi.research" in assembly.selected_pack_ids
+    assert "openmagi.dev-coding" not in assembly.selected_pack_ids
+
+    payload = assembly.to_public_payload()
+    assert payload["taskProfile"] == {"taskType": "research"}
+    phase_routes = payload["phaseRouting"]["phaseRoutes"]
+    assert "source_acquisition" in phase_routes
+    assert "source_extraction" in phase_routes
+    assert phase_routes["source_acquisition"]["provider"] == "anthropic"
 
 
 def test_headless_runtime_threads_default_policy_to_engine(monkeypatch, tmp_path) -> None:
@@ -206,6 +232,21 @@ def test_engine_blocks_completed_turn_when_policy_evidence_is_missing(
     assert gate_event["missingEvidence"] == ["evidence:git-diff"]
     assert gate_event["missingValidators"] == ["verifier:dev-coding:test-evidence"]
     assert gate_event["repairPolicy"]["action"] == "repair_required"
+    assert gate_event["repairDecision"]["type"] == "coding_repair_decision"
+    assert gate_event["repairDecision"]["action"] == "continue_repair"
+    assert gate_event["repairDecision"]["attemptCount"] == 1
+    assert "missing_evidence" in gate_event["repairDecision"]["reasonCodes"]
+    assert gate_event["verifierBus"]["metadataOnly"] is True
+    assert gate_event["verifierBus"]["decision"] == "block"
+    assert gate_event["verifierBus"]["trafficAttached"] is False
+    assert gate_event["verifierBus"]["executionAttached"] is False
+    verifier_results = gate_event["verifierBus"]["results"]
+    assert {
+        result["verifierId"]: result["status"] for result in verifier_results
+    } == {
+        "tool-evidence-contract": "missing",
+        "dev-coding-verification-audit": "missing",
+    }
     assert gate_event["attachmentFlags"]["productionWriteAllowed"] is False
 
 

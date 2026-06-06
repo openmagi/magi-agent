@@ -411,17 +411,22 @@ def test_after_run_callback_sweeps_invocation_state() -> None:
     assert "inv-keep" in plugin._detectors
 
 
-def test_env_flags_default_off() -> None:
+def test_env_flags_default_on_with_explicit_off() -> None:
     from magi_agent.config.env import parse_error_recovery_env, parse_loop_guard_env
 
     lg = parse_loop_guard_env({})
-    assert lg.enabled is False
+    assert lg.enabled is True
     assert lg.soft_threshold == 3
     assert lg.hard_threshold == 5
 
     er = parse_error_recovery_env({})
-    assert er.enabled is False
+    assert er.enabled is True
     assert er.max_recovery_attempts == 3
+
+    lg_off = parse_loop_guard_env({"MAGI_LOOP_GUARD_ENABLED": "0"})
+    er_off = parse_error_recovery_env({"MAGI_ERROR_RECOVERY_ENABLED": "off"})
+    assert lg_off.enabled is False
+    assert er_off.enabled is False
 
 
 def test_env_flags_parse_on() -> None:
@@ -483,8 +488,8 @@ def test_live_runner_builder_attaches_resilience_plugin(monkeypatch) -> None:
     assert any(isinstance(c, _ResilienceLoopControl) for c in controls), controls
 
 
-def test_live_runner_builder_no_plugin_when_off(monkeypatch) -> None:
-    # After PR2: with flags off, the plane has no resilience control.
+def test_live_runner_builder_no_plugin_when_explicitly_off(monkeypatch) -> None:
+    # After default-on local wiring, explicit OFF still removes resilience.
     from magi_agent.adk_bridge import local_runner as lr
     from magi_agent.adk_bridge.control_plane import (
         CONTROL_PLANE_PLUGIN_NAME,
@@ -492,8 +497,8 @@ def test_live_runner_builder_no_plugin_when_off(monkeypatch) -> None:
     )
 
     monkeypatch.setenv(lr.LOCAL_ADK_RUNNER_FLAG, "1")
-    monkeypatch.delenv("MAGI_LOOP_GUARD_ENABLED", raising=False)
-    monkeypatch.delenv("MAGI_ERROR_RECOVERY_ENABLED", raising=False)
+    monkeypatch.setenv("MAGI_LOOP_GUARD_ENABLED", "0")
+    monkeypatch.setenv("MAGI_ERROR_RECOVERY_ENABLED", "0")
     bundle = lr.build_local_adk_runner()
     plane_plugin = next(
         p for p in bundle.runner.plugin_manager.plugins if p.name == CONTROL_PLANE_PLUGIN_NAME

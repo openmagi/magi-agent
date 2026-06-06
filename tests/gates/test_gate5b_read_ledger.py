@@ -48,10 +48,11 @@ def _ready_bundle(tmp_path, *, read_ledger_enabled: bool):
 # ---- flag plumbing ----------------------------------------------------------
 
 
-def test_flag_is_default_off() -> None:
-    assert is_read_ledger_enabled({}) is False
+def test_flag_defaults_on_in_full_profile_and_can_be_disabled() -> None:
+    assert is_read_ledger_enabled({}) is True
     assert is_read_ledger_enabled({"MAGI_READ_LEDGER_ENABLED": "0"}) is False
     assert is_read_ledger_enabled({"MAGI_READ_LEDGER_ENABLED": ""}) is False
+    assert is_read_ledger_enabled({"MAGI_RUNTIME_PROFILE": "safe"}) is False
 
 
 def test_flag_parses_truthy_values() -> None:
@@ -446,7 +447,7 @@ async def test_flag_off_overwrite_without_read_is_unchecked(tmp_path) -> None:
 @pytest.mark.asyncio
 async def test_large_file_full_read_records_full_digest(tmp_path) -> None:
     # content larger than the configured max_per_tool_output_bytes preview cap.
-    big = "x" * (8192 * 2) + "\n"
+    big = "needle\n" + ("x" * (8192 * 2)) + "\n"
     (tmp_path / "big.txt").write_text(big, encoding="utf-8")
     bundle = _ready_bundle(tmp_path, read_ledger_enabled=True)
 
@@ -460,7 +461,7 @@ async def test_large_file_full_read_records_full_digest(tmp_path) -> None:
 
     edit = await bundle.host.dispatch(
         "FileEdit",
-        {"path": "big.txt", "oldText": "x", "newText": "y"},
+        {"path": "big.txt", "oldText": "needle", "newText": "marker"},
         request_digest=_sha256("req-edit-big"),
         tool_call_id="call-edit-big",
     )

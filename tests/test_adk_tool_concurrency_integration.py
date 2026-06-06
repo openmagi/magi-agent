@@ -116,7 +116,7 @@ def test_build_concurrency_config_defaults_when_env_absent() -> None:
     with patch.dict(os.environ, env_without_keys, clear=True):
         config = build_concurrency_config()
 
-    assert config.enabled is False
+    assert config.enabled is True
     assert config.max_concurrency == 8
 
 

@@ -11,11 +11,16 @@ from magi_agent.config.env import (
 )
 
 
-def test_default_off() -> None:
+def test_default_local_profile_on() -> None:
     cfg = parse_context_compaction_env({})
     assert cfg == ContextCompactionEnv(
-        enabled=False, token_threshold=24_000, tail_events=16
+        enabled=True, token_threshold=24_000, tail_events=16
     )
+
+
+def test_safe_profile_disables_default() -> None:
+    cfg = parse_context_compaction_env({"MAGI_RUNTIME_PROFILE": "safe"})
+    assert cfg.enabled is False
 
 
 @pytest.mark.parametrize("value", ["1", "true", "yes", "on", "TRUE", "On"])

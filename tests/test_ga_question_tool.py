@@ -234,7 +234,7 @@ def test_classify_flag_off_is_inert() -> None:
     outcome = classify_general_automation_question(
         GeneralAutomationQuestion(header="h", question="q"),
         _general_context(),
-        env={},
+        env={_FLAG: "0"},
     )
     assert outcome.active is False
     assert outcome.decision == "allow"
@@ -254,7 +254,7 @@ def test_classify_non_general_is_inert(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_handler_flag_off_does_not_block(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.delenv(_FLAG, raising=False)
+    monkeypatch.setenv(_FLAG, "0")
     result = general_automation_question_handler(_question_args(), _general_context())
     # Inert: no pending control request is produced; the tool is effectively a
     # no-op / blocked passthrough so flag-OFF behaves like main.

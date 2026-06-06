@@ -19,8 +19,8 @@ def test_autodetect_from_env_anthropic() -> None:
     assert isinstance(cfg, ProviderConfig)
     assert cfg.provider == "anthropic"
     assert cfg.api_key == "sk-a"
-    assert cfg.model == "claude-sonnet-4-5"
-    assert cfg.litellm_model == "anthropic/claude-sonnet-4-5"
+    assert cfg.model == "claude-sonnet-4-6"
+    assert cfg.litellm_model == "anthropic/claude-sonnet-4-6"
 
 
 def test_autodetect_follows_supported_order() -> None:
@@ -39,7 +39,7 @@ def test_gemini_accepts_google_api_key_alias() -> None:
     assert cfg is not None
     assert cfg.provider == "gemini"
     assert cfg.api_key == "g"
-    assert cfg.litellm_model == "gemini/gemini-2.0-flash"
+    assert cfg.litellm_model == "gemini/gemini-3.5-flash"
 
 
 def test_fireworks_uses_fireworks_ai_litellm_prefix() -> None:

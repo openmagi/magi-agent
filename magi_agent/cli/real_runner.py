@@ -31,6 +31,28 @@ from magi_agent.cli.providers import ProviderConfig
 ModelFactory = Callable[[ProviderConfig], object]
 
 
+_DEFAULT_FIRST_PARTY_TASK_PROFILE: dict[str, object] = {
+    "taskTypes": [
+        "coding",
+        "research",
+        "web-acquisition",
+        "browser-automation",
+        "document",
+        "office",
+        "spreadsheet",
+        "mission",
+        "scheduled-work",
+        "artifact-delivery",
+        "telegram",
+        "learning",
+        "self-improvement",
+        "superpowers",
+        "workflow",
+        "automation",
+    ],
+}
+
+
 class CliProviderDependencyError(RuntimeError):
     """A provider is configured but its runtime dependency is not installed."""
 
@@ -105,6 +127,7 @@ def build_cli_model_runner(
     user_id: str = "cli-user",
     session_id: str = "cli-session",
     workspace_root: str | None = None,
+    task_profile: Mapping[str, object] | None = None,
 ) -> CliModelRunner:
     """Build a real, model-backed CLI runner from a resolved provider config.
 
@@ -162,12 +185,14 @@ def build_cli_model_runner(
         model_provider=config.provider,
         model_label=config.litellm_model,
         live_policy_callback_attached=True,
+        task_profile=task_profile,
     )
     _attach_first_party_policy_callback(agent, runner_policy_assembly)
     session_service = WorkspaceSessionService(app_name=app_name)
     # Build the control plane via the shared helper (same as local_runner) so
-    # both runners cannot drift.  All flags default OFF; the plane_plugin is
-    # always present (empty plane == zero overhead, no behavior change).
+    # both runners cannot drift. The full runtime profile enables first-party
+    # controls by default; safe/minimal profiles or explicit false env values
+    # leave the plane present but behaviorally empty.
     plane_plugin = build_default_plugin()
     app = App(name=_app_identifier(app_name), root_agent=agent, plugins=[plane_plugin])
     runner = Runner(
@@ -233,6 +258,7 @@ def _build_default_runner_policy_assembly(
     model_provider: str,
     model_label: str,
     live_policy_callback_attached: bool,
+    task_profile: Mapping[str, object] | None = None,
 ) -> RunnerPolicyAssembly | None:
     try:
         from magi_agent.recipes.compiler import (  # noqa: PLC0415
@@ -248,10 +274,11 @@ def _build_default_runner_policy_assembly(
         provider=model_provider,
         model_label=model_label,
     )
+    effective_task_profile = dict(task_profile or _DEFAULT_FIRST_PARTY_TASK_PROFILE)
     try:
         snapshot = AgentRecipeCompiler(PackRegistry.with_first_party_packs()).compile(
             ProfileResolutionRequest(
-                taskProfile={"taskTypes": ["coding"]},
+                taskProfile=effective_task_profile,
                 runtimeContext={"channel": "cli"},
                 recipePackConfig={},
             )
@@ -283,6 +310,12 @@ def _build_default_runner_policy_assembly(
             "retryable": missing_action == "repair_required",
         },
         attachmentFlags=attachment_flags,
+        taskProfile=effective_task_profile,
+        phaseRouting=plan.phase_routing.model_dump(
+            by_alias=True,
+            mode="json",
+            warnings=False,
+        ),
     )
 
 

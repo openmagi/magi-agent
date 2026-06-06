@@ -81,3 +81,6 @@ def test_build_cli_instruction_is_real_system_prompt(tmp_path) -> None:
     # Stable markers emitted by build_system_prompt.
     assert "<output-rules>" in instruction
     assert "<tool-preferences>" in instruction
+    assert "<skills>" in instruction
+    assert "SkillLoader" in instruction
+    assert "superpowers-style workflows" in instruction

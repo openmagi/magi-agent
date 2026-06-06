@@ -264,8 +264,14 @@ class TestNonGeminiIdentity:
 
 
 class TestProviderRepairConfig:
-    def test_default_off(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_default_on_in_full_profile(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.delenv("MAGI_PROVIDER_REPAIR_ENABLED", raising=False)
+        monkeypatch.delenv("MAGI_RUNTIME_PROFILE", raising=False)
+        assert tool_adapter.provider_repair_enabled() is True
+
+    def test_safe_profile_off(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.delenv("MAGI_PROVIDER_REPAIR_ENABLED", raising=False)
+        monkeypatch.setenv("MAGI_RUNTIME_PROFILE", "safe")
         assert tool_adapter.provider_repair_enabled() is False
 
     def test_flag_on(self, monkeypatch: pytest.MonkeyPatch) -> None:
