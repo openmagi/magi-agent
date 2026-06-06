@@ -12,9 +12,14 @@ def test_case_insensitive_match() -> None:
     assert parse_answer("no", labels=("Yes", "No")) == "No"
 
 
-def test_prefers_first_label_token_when_both_present() -> None:
-    # Model echoes options then concludes — take the last standalone label.
-    assert parse_answer("Yes or No? No", labels=("Yes", "No")) == "No"
+def test_takes_first_label_for_answer_first_output() -> None:
+    # Label-first output (few-shot / answer-only format): conclusion comes first,
+    # reasoning follows. The first standalone label is the model's answer.
+    assert (
+        parse_answer("No\n\nExplanation: this statement is not offered for truth.",
+                     labels=("Yes", "No"))
+        == "No"
+    )
 
 
 def test_no_label_returns_none() -> None:

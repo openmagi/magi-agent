@@ -29,6 +29,11 @@ class LegalReport(BaseModel):
     overall_balanced_accuracy: float
     by_reasoning_type: dict[ReasoningType, float]
     by_task: dict[str, float]
+    # Fraction of records whose answer was extractable (predicted is not None).
+    # A low parse_rate means accuracy is dominated by output-format/parsing, not
+    # reasoning — interpret balanced accuracy alongside this.
+    parse_rate: float
+    parse_rate_by_task: dict[str, float]
 
 
 class LegalLift(BaseModel):
@@ -67,6 +72,16 @@ def score(records: list[AnswerRecord]) -> LegalReport:
 
     by_task = {tid: _balanced_accuracy(pairs) for tid, pairs in by_task_pairs.items()}
 
+    parse_rate_by_task = {
+        tid: sum(1 for pred, _ in pairs if pred is not None) / len(pairs)
+        for tid, pairs in by_task_pairs.items()
+    }
+    total = sum(len(p) for p in by_task_pairs.values())
+    parsed = sum(
+        1 for pairs in by_task_pairs.values() for pred, _ in pairs if pred is not None
+    )
+    parse_rate = parsed / total if total else 0.0
+
     rt_scores: dict[ReasoningType, list[float]] = defaultdict(list)
     for tid, acc in by_task.items():
         rt_scores[task_reasoning[tid]].append(acc)
@@ -81,6 +96,8 @@ def score(records: list[AnswerRecord]) -> LegalReport:
         overall_balanced_accuracy=overall,
         by_reasoning_type=by_reasoning_type,
         by_task=by_task,
+        parse_rate=parse_rate,
+        parse_rate_by_task=parse_rate_by_task,
     )
 
 

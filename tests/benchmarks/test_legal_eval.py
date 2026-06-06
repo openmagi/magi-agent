@@ -102,17 +102,33 @@ def test_overall_is_macro_over_reasoning_types() -> None:
     assert report.overall_balanced_accuracy == pytest.approx(0.75)
 
 
+def test_parse_rate_reflects_unparseable_predictions() -> None:
+    recs = [
+        AnswerRecord(task_id="t", reasoning_type="rule-conclusion", index=0,
+                     predicted="Yes", gold="Yes"),
+        AnswerRecord(task_id="t", reasoning_type="rule-conclusion", index=1,
+                     predicted=None, gold="No"),
+    ]
+    report = score(recs)
+    assert report.parse_rate == 0.5
+    assert report.parse_rate_by_task["t"] == 0.5
+
+
 def test_lift_only_reports_harness_keys() -> None:
     # Harness covers only type A; baseline covers A and B.
     harness_report = LegalReport(
         overall_balanced_accuracy=0.8,
         by_reasoning_type={"rule-conclusion": 0.8},
         by_task={"t1": 0.8},
+        parse_rate=1.0,
+        parse_rate_by_task={"t1": 1.0},
     )
     baseline_report = LegalReport(
         overall_balanced_accuracy=0.6,
         by_reasoning_type={"rule-conclusion": 0.6, "rule-recall": 0.7},
         by_task={"t1": 0.6, "t2": 0.7},
+        parse_rate=1.0,
+        parse_rate_by_task={"t1": 1.0, "t2": 1.0},
     )
     result = lift(harness=harness_report, baseline=baseline_report)
     assert set(result.by_reasoning_type.keys()) == {"rule-conclusion"}
