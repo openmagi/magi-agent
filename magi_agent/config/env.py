@@ -1560,3 +1560,41 @@ def _first_non_empty(env: Mapping[str, str], *names: str) -> str | None:
         if value and value.strip():
             return value.strip()
     return None
+
+
+# ---------------------------------------------------------------------------
+# Selective reflection — default OFF
+# ---------------------------------------------------------------------------
+# When MAGI_REFLECTION_ENABLED=true the GAIA harness (and any other harness
+# that opts in) runs a complexity-gated self-critique pass before committing
+# each draft answer.  Band thresholds are also configurable so domain-specific
+# deployments can tune them without a code change.
+REFLECTION_ENABLED_ENV = "MAGI_REFLECTION_ENABLED"
+REFLECTION_MAX_DEPTH_ENV = "MAGI_REFLECTION_MAX_DEPTH"
+_REFLECTION_MAX_DEPTH_DEFAULT = 1
+
+
+@dataclass(frozen=True)
+class SelectiveReflectionEnv:
+    enabled: bool = False
+    max_depth: int = _REFLECTION_MAX_DEPTH_DEFAULT
+
+
+def parse_selective_reflection_env(
+    env: Mapping[str, str],
+) -> SelectiveReflectionEnv:
+    """Parse selective-reflection env vars (default OFF).
+
+    Parameters
+    ----------
+    env:
+        A mapping of environment variable names to values.  Typically
+        ``os.environ`` in production; pass a dict in tests.
+    """
+    enabled = _is_true(env.get(REFLECTION_ENABLED_ENV))
+    if not enabled:
+        return SelectiveReflectionEnv()
+    max_depth = _int_env(env, REFLECTION_MAX_DEPTH_ENV, _REFLECTION_MAX_DEPTH_DEFAULT)
+    if max_depth < 1:
+        raise RuntimeEnvError(f"{REFLECTION_MAX_DEPTH_ENV} must be >= 1")
+    return SelectiveReflectionEnv(enabled=True, max_depth=max_depth)
