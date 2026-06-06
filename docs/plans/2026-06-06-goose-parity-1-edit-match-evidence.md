@@ -138,10 +138,18 @@ side-effect free.
 1. `replace()` returns `EditMatchResult`; all existing tests pass (via `__str__`/`replace_text`).
 2. Both production callers thread tier/confidence; gate5b emits an `EditMatch` receipt.
 3. New flag default `off` → zero behavior change vs today except receipts are now present.
-4. With flag `block_final_answer`, a `_context_aware`/`_block_anchor` edit requires post-edit
-   GitDiff+TestRun before final answer; high-confidence edits never block.
+4. The enforcement **contract** (`build_edit_confidence_contract`) and the
+   `MAGI_EDIT_MATCH_EVIDENCE_ENFORCEMENT` flag (default `off`) ship and are unit-tested:
+   LOW tiers → `block_final_answer`, high tiers → `audit`, `off` → never blocks.
+   **Follow-up (not in this PR):** the contract is not yet *consumed* by gate5b's
+   final-answer projection — i.e. no production path currently enforces the block. This PR
+   delivers auditable receipts + the contract builder as a wired-but-not-yet-consumed seam;
+   hooking it into the final-answer gate is a separate PR. Because the flag defaults `off`,
+   no behavior ships either way.
 5. `uv run --extra dev pytest -q` green for touched test modules.
 
 ## Out of scope
 - Changing matcher acceptance thresholds. Auto-correcting wrong matches. Wiring the
   enforcement flag default to anything other than `off`.
+- **Consuming the enforcement contract in gate5b's final-answer projection** (separate
+  follow-up PR). This PR ships the receipts + contract builder + flag only.
